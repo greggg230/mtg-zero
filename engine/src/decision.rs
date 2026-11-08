@@ -255,6 +255,9 @@ pub enum Choice {
     /// Priority: the companion special action (CR 116.2g): pay {3} and put
     /// the decider's companion into their hand (`act::COMPANION`).
     Companion,
+    /// A paged choice's "next page" ([`Game::ask_paged`], ENGINE.md 100.1):
+    /// the page the asking task asks next.
+    Page(Page),
 }
 
 /// `Choice::Faces` bits: the front face is cast / played, the other face
@@ -277,6 +280,185 @@ pub struct Decision {
     pub player: PlayerId,
     pub kind: DecisionKind,
     pub options: Vec<Opt>,
+    /// Where the decision stands in a choice made in several decisions (a
+    /// page, a digit; ENGINE.md 100.1): the context block's 246-250.
+    pub stage: Stage,
+}
+
+// ---- paged choices and big numbers (ENGINE.md 100.1) -----------------------
+//
+// Every legal option stays reachable inside the fixed action ranges (CR
+// 601.2c: any legal target; 601.2b, 107.3: any X): a choice among more items
+// than a range has ids is made in pages, and a number beyond `NUMBER`'s 32
+// ids in base-32 digits. Each item or value is reached by exactly one
+// sequence of decisions, and the page or the digits chosen live in the
+// asking task, so a refresh after `determinize` asks the same decision again
+// (ENGINE.md 10, 99.8).
+
+/// Which page of a paged choice a decision shows ([`Game::ask_paged`]),
+/// kept in the asking task. `window` 0: the first page (every range's first
+/// window, the ranges that fit whole, the other options); `window` w >= 1:
+/// the items of range `range` in window w alone (positions w (n - 1) ..= w
+/// (n - 1) + n - 2).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Page {
+    pub range: u8,
+    pub window: u32,
+}
+
+impl Page {
+    /// A paged choice's first decision.
+    pub const FIRST: Page = Page { range: 0, window: 0 };
+}
+
+/// One action range of a paged choice: the ids `base .. base + n`, and its
+/// items by their position in the range's canonical order (strictly
+/// increasing; an item that fits has the id `base + position`, as a choice
+/// that is not paged gives it: positions may skip, the stack's spells among
+/// its abilities).
+#[derive(Clone, Copy, Debug)]
+pub struct PagedRange<'a> {
+    pub base: u16,
+    pub n: u16,
+    pub items: &'a [(u32, Choice)],
+}
+
+impl PagedRange<'_> {
+    /// An item lies past the range's last id: the range is paged.
+    fn paged(&self) -> bool {
+        self.items.last().is_some_and(|&(pos, _)| pos >= self.n as u32)
+    }
+
+    /// The window of a position: `n - 1` positions each (the last id is
+    /// "next page").
+    fn window(&self, pos: u32) -> u32 {
+        pos / (self.n as u32 - 1)
+    }
+
+    /// The first window after `w` that holds an item (windows with none are
+    /// skipped: no page offers only "next").
+    fn next_window(&self, w: u32) -> Option<u32> {
+        self.items.iter().map(|&(pos, _)| self.window(pos)).find(|&x| x > w)
+    }
+
+    fn holds(&self, action: u16) -> bool {
+        (self.base..self.base + self.n).contains(&action)
+    }
+}
+
+/// Where a big-number choice stands ([`Game::ask_number`]), kept in the
+/// asking task: `left` 0 for its first decision; else the base-32 digits
+/// still to choose (this one included), most significant first, and
+/// `prefix` the digits chosen so far (as a number).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct NumberStep {
+    pub left: u8,
+    pub prefix: u64,
+}
+
+/// What an answer to [`Game::ask_number`]'s decision means: the value
+/// chosen, or the step whose decision comes next (the asking task pushes
+/// itself with it).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum NumberAnswer {
+    Value(u64),
+    Next(NumberStep),
+}
+
+/// The largest number of base-32 digits a `u64` range needs (32^13 > 2^64).
+const MAX_DIGITS: u8 = 13;
+
+impl NumberStep {
+    /// A number's first decision.
+    pub const FIRST: NumberStep = NumberStep { left: 0, prefix: 0 };
+
+    /// The digits of the rest `d = v - lo - 31` of a range wider than
+    /// `NUMBER` (`hi - lo >= 32`): enough for its largest, `hi - lo - 31`
+    /// (at least one; 7 for any `u32` range).
+    fn digits(lo: u64, hi: u64) -> u8 {
+        let d = hi - lo - 31;
+        let mut n = 1;
+        while n < MAX_DIGITS && d >> (5 * n as u32) > 0 {
+            n += 1;
+        }
+        n
+    }
+
+    /// `d >> (5 r)`: the rest's digits above the last `r` (0 when `r`
+    /// covers them all).
+    fn above(d: u64, r: u8) -> u64 {
+        d.checked_shr(5 * r as u32).unwrap_or(0)
+    }
+
+    /// The step as the range allows it: the first decision when the range
+    /// fits `NUMBER`, or when the digits chosen have no legal completion
+    /// left (another player's decision refreshed after `determinize` in a
+    /// world where the range differs, ENGINE.md 10; never the decider's,
+    /// whose range is public to them).
+    fn normalized(self, lo: u64, hi: u64) -> NumberStep {
+        if self.left == 0 {
+            return self;
+        }
+        if hi - lo <= 31 {
+            return NumberStep::FIRST;
+        }
+        let d = hi - lo - 31;
+        if self.left > Self::digits(lo, hi) || self.prefix > Self::above(d, self.left) {
+            return NumberStep::FIRST;
+        }
+        self
+    }
+
+    /// The largest digit this digit decision offers (prefix feasibility:
+    /// the prefix with the digit and zeros after it is still at most the
+    /// rest's largest, so a legal completion exists; at least 0).
+    fn max_digit(self, lo: u64, hi: u64) -> u64 {
+        let d = hi - lo - 31;
+        (Self::above(d, self.left - 1) - self.prefix * 32).min(31)
+    }
+
+    /// What answer `NUMBER + k` to this step's decision for a number in
+    /// `lo..=hi` means (the same range the decision was asked with).
+    pub fn answer(self, lo: u64, hi: u64, k: u8) -> NumberAnswer {
+        assert!(lo <= hi, "a number in {lo}..={hi}");
+        let s = self.normalized(lo, hi);
+        let k64 = k as u64;
+        if s.left == 0 {
+            if hi - lo <= 31 {
+                assert!(k64 <= hi - lo, "NUMBER + {k} for a number in {lo}..={hi}");
+                return NumberAnswer::Value(lo + k64);
+            }
+            if k < 31 {
+                return NumberAnswer::Value(lo + k64);
+            }
+            assert_eq!(k, 31, "NUMBER + {k} for a number in {lo}..={hi}");
+            return NumberAnswer::Next(NumberStep { left: Self::digits(lo, hi), prefix: 0 });
+        }
+        assert!(k64 <= s.max_digit(lo, hi), "digit {k} after {s:?} for a number in {lo}..={hi}");
+        let prefix = s.prefix * 32 + k64;
+        if s.left == 1 {
+            NumberAnswer::Value(lo + 31 + prefix)
+        } else {
+            NumberAnswer::Next(NumberStep { left: s.left - 1, prefix })
+        }
+    }
+}
+
+/// Where a decision stands in a choice made in several decisions (ENGINE.md
+/// 100.1), for the network (the context block's 246-250).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum Stage {
+    /// A choice made in one decision.
+    #[default]
+    One,
+    /// A page of a paged choice ([`Game::ask_paged`]: a paged range's last
+    /// id is "next page", its other ids name the items of window `window`),
+    /// or a big number's first decision (`NUMBER` + 31 = "31 or more",
+    /// window 0).
+    Paged { window: u32 },
+    /// A digit of a big number ([`Game::ask_number`]): `left` digits to
+    /// choose (this one included), `prefix` the digits chosen.
+    Digit { left: u8, prefix: u64 },
 }
 
 impl Decision {
@@ -294,6 +476,7 @@ impl Decision {
 
 // ---- the slot codec (ENGINE.md 11) -----------------------------------------
 
+use crate::flow::Task;
 use crate::game::{Game, StackKind};
 use crate::ids::Zone;
 use crate::svec::SVec;
@@ -505,6 +688,151 @@ impl Game {
         );
     }
 
+    // ---- paged choices and big numbers (ENGINE.md 100.1) -------------------
+
+    /// Ask `player` to choose among `items` in the range `base .. base + n`
+    /// (positions in the range's canonical order), or one of `extra` (ids
+    /// outside the range: `PASS`, other ranges): `ask_paged_ranges` with
+    /// one range ([`Self::ask_paged_ranges`]).
+    // (No caller yet: workstream A applies the helpers; the unit tests below
+    // drive them. ENGINE.md 100.1.)
+    #[allow(dead_code, clippy::too_many_arguments)]
+    pub(crate) fn ask_paged(
+        &mut self,
+        task: Task,
+        page: Page,
+        player: PlayerId,
+        kind: DecisionKind,
+        base: u16,
+        n: u16,
+        items: &[(u32, Choice)],
+        extra: Vec<Opt>,
+    ) {
+        self.ask_paged_ranges(task, page, player, kind, &[PagedRange { base, n, items }], extra);
+    }
+
+    /// Ask `player` a choice whose items may outnumber their action ranges
+    /// (ENGINE.md 100.1; the faithfulness audit's F1), showing page `page`
+    /// (kept in `task`, which the decision's answer comes back to, as for
+    /// [`ask`](Self::ask)):
+    ///
+    /// * A range whose items' positions are all below its `n` ids is offered
+    ///   whole at `base + position`, as an unpaged choice offers it: with no
+    ///   paged range, the decision is exactly the one `ask` makes.
+    /// * A paged range (an item at position `n` or beyond) has windows of
+    ///   `n - 1` positions. The first page offers its window-0 items at
+    ///   `base + position` and `base + n - 1` = "next page"
+    ///   (`Choice::Page`), with the whole ranges and `extra`; a range page
+    ///   (`page.window` >= 1) offers the range's items of that window alone,
+    ///   at `base + position - window (n - 1)`, and "next page" if a later
+    ///   window holds one. "Next page" goes to the next window that holds an
+    ///   item; the last page has none.
+    ///
+    /// Each item lies in one window and the pages are visited in increasing
+    /// order, and `extra` and the whole ranges are on the first page only,
+    /// so every option is reached by exactly one sequence of decisions. The
+    /// asking task answers `Choice::Page(p)` by pushing itself with page `p`
+    /// (it re-asks), and any other choice as its own. It recomputes `items`
+    /// from the game each time it runs (re-entrant), so a refresh asks the
+    /// same page again; a range page that holds no item any more (another
+    /// player's decision refreshed in a world where the items differ,
+    /// ENGINE.md 10) shows the first page.
+    ///
+    /// `ask` renames graveyard and exile cards of `Target`, `NewTarget` and
+    /// `ChooseGraveyardCard` options (ENGINE.md 65.10, 99.14) after this:
+    /// a paged range of such cards takes its positions from that naming
+    /// (workstream A).
+    #[allow(dead_code)]
+    pub(crate) fn ask_paged_ranges(
+        &mut self,
+        task: Task,
+        page: Page,
+        player: PlayerId,
+        kind: DecisionKind,
+        ranges: &[PagedRange],
+        extra: Vec<Opt>,
+    ) {
+        for (k, r) in ranges.iter().enumerate() {
+            assert!(r.n >= 2 && (r.base + r.n) as usize <= NUM_ACTIONS, "{kind:?}: paged range {k} at {} of {} ids", r.base, r.n);
+            assert!(r.items.windows(2).all(|w| w[0].0 < w[1].0), "{kind:?}: paged range {k}'s positions are not increasing");
+            assert!(ranges[..k].iter().all(|q| q.base + q.n <= r.base || r.base + r.n <= q.base), "{kind:?}: paged ranges overlap");
+            assert!(!extra.iter().any(|o| r.holds(o.action)), "{kind:?}: an extra option in paged range {k}");
+        }
+        let shown = match ranges.get(page.range as usize) {
+            Some(r) if page.window > 0 && r.paged() && r.items.iter().any(|&(pos, _)| r.window(pos) == page.window) => page,
+            _ => Page::FIRST,
+        };
+        let mut opts = Vec::new();
+        if shown.window == 0 {
+            opts = extra;
+            for (k, r) in ranges.iter().enumerate() {
+                if !r.paged() {
+                    opts.extend(r.items.iter().map(|&(pos, c)| Opt { action: r.base + pos as u16, choice: c }));
+                    continue;
+                }
+                for &(pos, c) in r.items.iter().take_while(|&&(pos, _)| r.window(pos) == 0) {
+                    opts.push(Opt { action: r.base + pos as u16, choice: c });
+                }
+                let next = r.next_window(0).expect("a paged range holds an item past its first window");
+                opts.push(Opt { action: r.base + r.n - 1, choice: Choice::Page(Page { range: k as u8, window: next }) });
+            }
+        } else {
+            let r = &ranges[shown.range as usize];
+            let first = shown.window * (r.n as u32 - 1);
+            for &(pos, c) in r.items.iter().filter(|&&(pos, _)| r.window(pos) == shown.window) {
+                opts.push(Opt { action: r.base + (pos - first) as u16, choice: c });
+            }
+            if let Some(next) = r.next_window(shown.window) {
+                opts.push(Opt { action: r.base + r.n - 1, choice: Choice::Page(Page { range: shown.range, window: next }) });
+            }
+        }
+        let paged = ranges.iter().any(|r| r.paged());
+        self.ask(task, player, kind, opts);
+        if paged {
+            if let Some(d) = &mut self.pending {
+                d.stage = Stage::Paged { window: shown.window };
+            }
+        }
+    }
+
+    /// Ask `player` for a number in `lo..=hi` (ENGINE.md 100.1; the
+    /// faithfulness audit's F2), at step `step` (kept in `task`, as for
+    /// [`ask`](Self::ask)):
+    ///
+    /// * `hi - lo <= 31`: `NUMBER + k` = `lo + k`, every value in one
+    ///   decision, exactly as an unpaged number is asked.
+    /// * Wider: the first decision offers `NUMBER + k` = `lo + k` for `k` <=
+    ///   30 and `NUMBER + 31` = "`lo + 31` or more". The rest `v - lo - 31`
+    ///   is then chosen in base-32 digits, most significant first, as many
+    ///   as its largest value needs (7 for any `u32` range, 13 for `u64`);
+    ///   each digit decision offers exactly the digits that leave a legal
+    ///   completion (prefix feasibility).
+    ///
+    /// Every value is reached by exactly one sequence of decisions (a value
+    /// below `lo + 31` has its own id; the others have one fixed-length
+    /// digit string). The asking task gives its answer `NUMBER + k` to
+    /// [`NumberStep::answer`] with the same range: a value, or the next step
+    /// (it pushes itself with it and re-asks). It recomputes `lo` and `hi`
+    /// from the game each time it runs, so a refresh asks the same digit
+    /// again; digits with no legal completion left (another player's
+    /// decision refreshed in a world where the range differs) restart at the
+    /// first decision.
+    #[allow(dead_code)]
+    pub(crate) fn ask_number(&mut self, task: Task, step: NumberStep, player: PlayerId, kind: DecisionKind, lo: u64, hi: u64) {
+        assert!(lo <= hi, "{kind:?}: a number in {lo}..={hi}");
+        let step = step.normalized(lo, hi);
+        let (top, stage) = match step.left {
+            0 if hi - lo <= 31 => (hi - lo, Stage::One),
+            0 => (31, Stage::Paged { window: 0 }),
+            left => (step.max_digit(lo, hi), Stage::Digit { left, prefix: step.prefix }),
+        };
+        let opts = (0..=top).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
+        self.ask(task, player, kind, opts);
+        if let Some(d) = &mut self.pending {
+            d.stage = stage;
+        }
+    }
+
     /// Human-readable description of an option (tests, logs).
     pub fn describe_choice(&self, c: Choice) -> String {
         match c {
@@ -522,6 +850,650 @@ impl Game {
             Choice::PlayFace(i) => format!("play the other face of {}#{}", self.name(i), i.0),
             Choice::Faces(i, m) => format!("{}#{} (choose a face, {m:#b})", self.name(i), i.0),
             Choice::Companion => "put the companion into hand".into(),
+            Choice::Page(p) => format!("more (range {}, window {})", p.range, p.window),
         }
+    }
+}
+
+/// The paged-choice and big-number helpers (ENGINE.md 100.1), driven by a
+/// test-only task (`Task::Probe`) that asks through them and logs what was
+/// chosen: every item or value is reached by exactly one sequence of
+/// decisions, a choice that fits its range is asked as before, a page or a
+/// digit is asked again identically after `determinize`, and the context
+/// floats.
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::az::encode::{ctx, squash, NUM_FEATURES, O_CONTEXT};
+    use crate::db::CardDb;
+    use crate::game::Step;
+    use crate::rng::Rng;
+    use crate::testkit::Scenario;
+
+    /// A test's choice, asked as `Game::run_probe` says.
+    #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+    pub(crate) enum Probe {
+        /// `ask_paged_ranges` over `ranges` (base, n, the items' positions;
+        /// item `pos` of range `r` is [`item`]`(r, pos)`) and `extra`.
+        Paged { p: PlayerId, kind: DecisionKind, ranges: Vec<(u16, u16, Vec<u32>)>, extra: Vec<Opt>, page: Page },
+        /// `ask_number` for a number in `lo..=hi`.
+        Number { p: PlayerId, kind: DecisionKind, lo: u64, hi: u64, step: NumberStep },
+    }
+
+    /// The choice naming item `pos` of range `r` (a definition no card has:
+    /// the probe only logs it).
+    fn item(r: usize, pos: u32) -> Choice {
+        assert!(r < 16 && pos < 4096);
+        Choice::Def(((r as u16) << 12) | pos as u16)
+    }
+
+    impl Game {
+        /// Ask-or-consume (ENGINE.md 4), as an engine task using the
+        /// helpers does: a page answer or a digit pushes the task with its
+        /// new page or step; an item or a value is logged ("probe: ...").
+        pub(crate) fn run_probe(&mut self, probe: Probe) {
+            match probe {
+                Probe::Paged { p, kind, ranges, extra, page } => match self.answer.take() {
+                    Some(Choice::Page(next)) => {
+                        self.agenda.push(Task::Probe(Box::new(Probe::Paged { p, kind, ranges, extra, page: next })))
+                    }
+                    Some(c) => self.probe_log(format!("{c:?}")),
+                    None => {
+                        let items: Vec<Vec<(u32, Choice)>> =
+                            ranges.iter().enumerate().map(|(r, (_, _, ps))| ps.iter().map(|&pos| (pos, item(r, pos))).collect()).collect();
+                        let rs: Vec<PagedRange> = ranges.iter().zip(&items).map(|(&(base, n, _), items)| PagedRange { base, n, items }).collect();
+                        let task = Task::Probe(Box::new(Probe::Paged { p, kind, ranges: ranges.clone(), extra: extra.clone(), page }));
+                        self.ask_paged_ranges(task, page, p, kind, &rs, extra);
+                    }
+                },
+                Probe::Number { p, kind, lo, hi, step } => match self.answer.take() {
+                    Some(Choice::Number(k)) => match step.answer(lo, hi, k) {
+                        NumberAnswer::Next(s) => self.agenda.push(Task::Probe(Box::new(Probe::Number { p, kind, lo, hi, step: s }))),
+                        NumberAnswer::Value(v) => self.probe_log(format!("value {v}")),
+                    },
+                    Some(c) => unreachable!("number answer {c:?}"),
+                    None => self.ask_number(Task::Probe(Box::new(Probe::Number { p, kind, lo, hi, step })), step, p, kind, lo, hi),
+                },
+            }
+        }
+
+        fn probe_log(&mut self, s: String) {
+            self.log.as_mut().expect("a test game logs").push(format!("probe: {s}"));
+        }
+    }
+
+    /// P0's first main phase with cards hidden in both libraries and hands
+    /// (`determinize` deals them); a single option is asked unless `auto`.
+    fn game(auto: bool) -> Game {
+        Scenario::new(CardDb::cube())
+            .spec(|s| s.auto_single = auto)
+            .library(0, &["Island", "Mountain", "Lightning Bolt", "Counterspell", "Island"])
+            .library(1, &["Mountain", "Island", "Llanowar Elves", "Brainstorm", "Mountain"])
+            .hand(0, &["Brainstorm", "Mountain"])
+            .hand(1, &["Lightning Bolt", "Counterspell", "Island"])
+            .at(Step::Main1, 0)
+            .start()
+    }
+
+    /// `g` with `probe` asked in place of P0's priority (which is asked again
+    /// once the probe has its answer).
+    fn start(mut g: Game, probe: Probe) -> Game {
+        assert_eq!(g.kind(), Some(DecisionKind::Priority));
+        g.pending = None;
+        g.agenda.push(Task::Probe(Box::new(probe)));
+        g.advance();
+        g.keys.clear();
+        g
+    }
+
+    fn paged(kind: DecisionKind, ranges: &[(u16, u16, Vec<u32>)], extra: &[Opt]) -> Probe {
+        Probe::Paged { p: 0, kind, ranges: ranges.to_vec(), extra: extra.to_vec(), page: Page::FIRST }
+    }
+
+    fn number(lo: u64, hi: u64) -> Probe {
+        Probe::Number { p: 0, kind: DecisionKind::ChooseMode, lo, hi, step: NumberStep::FIRST }
+    }
+
+    fn last_probe(g: &Game) -> String {
+        g.log.as_ref().unwrap().iter().rev().find_map(|l| l.strip_prefix("probe: ")).expect("the probe has answered").to_string()
+    }
+
+    fn actions(g: &Game) -> Vec<u16> {
+        g.pending.as_ref().expect("a decision").options.iter().map(|o| o.action).collect()
+    }
+
+    fn pick(g: &mut Game, action: u16) {
+        g.apply(action, &mut Vec::new()).unwrap_or_else(|e| panic!("{e}: {:?}", actions(g)));
+    }
+
+    /// Every sequence of decisions from `g` until the probe has its answer:
+    /// (the answer, the actions taken). Each decision is the probe's, for P0.
+    fn sequences(g: &Game) -> Vec<(String, Vec<u16>)> {
+        fn walk(g: &Game, path: &mut Vec<u16>, out: &mut Vec<(String, Vec<u16>)>) {
+            if g.kind() == Some(DecisionKind::Priority) {
+                out.push((last_probe(g), path.clone()));
+                return;
+            }
+            let d = g.pending.as_ref().expect("a decision");
+            assert!(matches!(g.agenda.last(), Some(Task::Probe(_))) && d.player == 0, "{d:?}");
+            for o in &d.options {
+                let mut c = g.clone();
+                pick(&mut c, o.action);
+                path.push(o.action);
+                walk(&c, path, out);
+                path.pop();
+            }
+        }
+        let mut out = Vec::new();
+        walk(g, &mut Vec::new(), &mut out);
+        out
+    }
+
+    /// The answers a paged probe can give: each item and each extra option,
+    /// once.
+    fn every_option(ranges: &[(u16, u16, Vec<u32>)], extra: &[Opt]) -> Vec<String> {
+        let mut v: Vec<String> = extra.iter().map(|o| format!("{:?}", o.choice)).collect();
+        for (r, (_, _, ps)) in ranges.iter().enumerate() {
+            v.extend(ps.iter().map(|&pos| format!("{:?}", item(r, pos))));
+        }
+        v.sort();
+        v
+    }
+
+    fn reached(seqs: &[(String, Vec<u16>)]) -> Vec<String> {
+        let mut v: Vec<String> = seqs.iter().map(|(a, _)| a.clone()).collect();
+        v.sort();
+        v
+    }
+
+    fn pass() -> Opt {
+        Opt { action: act::PASS, choice: Choice::Pass }
+    }
+
+    /// Every range of the action layout whose slots a choice may outnumber,
+    /// with its width (ENGINE.md 11, 58.4).
+    const RANGES: [(u16, u16); 7] = [
+        (act::NUMBER, act::NUMBER_N),
+        (act::MY_PERM, act::PERM_N),
+        (act::STACK, act::STACK_N),
+        (act::TRIGGER, act::TRIGGER_N),
+        (act::LIBRARY, act::LIBRARY_N),
+        (act::EXILE, act::EXILE_N),
+        (act::GY_ABILITY, act::GY_ABILITY_N),
+    ];
+
+    /// CR 601.2c (any legal target; the same for every choice): a range whose
+    /// items all fit its ids is asked in one decision, each item at `base +
+    /// position` with the other options, exactly the decision `ask` makes,
+    /// and the context floats stay 0 (`Stage::One`): no behaviour or digest
+    /// changes where nothing pages.
+    #[test]
+    fn cr_601_2c_a_choice_that_fits_its_range_is_asked_as_before() {
+        for (base, n) in RANGES {
+            let n32 = n as u32;
+            for positions in [vec![0], (0..n32).collect(), vec![1, 3, n32 - 1], (0..n32).step_by(2).collect::<Vec<_>>()] {
+                for extra in [vec![], vec![pass()]] {
+                    let ranges = vec![(base, n, positions.clone())];
+                    let g = start(game(false), paged(DecisionKind::Target, &ranges, &extra));
+                    let d = g.pending.as_ref().unwrap();
+                    let mut want: Vec<Opt> = extra.clone();
+                    want.extend(positions.iter().map(|&p| Opt { action: base + p as u16, choice: item(0, p) }));
+                    assert_eq!(d.options, want, "range {base}+{n}");
+                    assert_eq!(d.stage, Stage::One);
+                    let mut plain = game(false);
+                    plain.pending = None;
+                    plain.ask(Task::PriorityAsk, 0, DecisionKind::Target, want.clone());
+                    assert_eq!(plain.pending.as_ref(), Some(d), "the same decision as ask's");
+                    let seqs = sequences(&g);
+                    assert!(seqs.iter().all(|(_, path)| path.len() == 1), "one decision each");
+                    assert_eq!(reached(&seqs), every_option(&ranges, &extra));
+                }
+            }
+        }
+    }
+
+    /// CR 601.2c: at the boundaries (n - 1, n, n + 1 items, two and three
+    /// pages' worth, one more and one less) every item and every other
+    /// option is reached by exactly one sequence of decisions, in every
+    /// range; a page offers at most `n - 1` items and the last id only as
+    /// "next page".
+    #[test]
+    fn cr_601_2c_every_item_is_reached_exactly_once_at_the_page_boundaries() {
+        for (base, n) in RANGES {
+            let w = n as u32 - 1;
+            for count in [n as u32 - 1, n as u32, n as u32 + 1, 2 * w, 2 * w + 1, 2 * w + 2, 3 * w, 3 * w + 1] {
+                for extra in [vec![], vec![pass(), Opt { action: act::YES, choice: Choice::Yes }]] {
+                    if extra.iter().any(|o| (base..base + n).contains(&o.action)) {
+                        continue;
+                    }
+                    let ranges = vec![(base, n, (0..count).collect::<Vec<u32>>())];
+                    let g = start(game(false), paged(DecisionKind::ChooseMode, &ranges, &extra));
+                    let seqs = sequences(&g);
+                    assert_eq!(reached(&seqs), every_option(&ranges, &extra), "range {base}+{n}, {count} items");
+                    let pages = if count <= n as u32 { 1 } else { count.div_ceil(w) };
+                    for (answer, path) in &seqs {
+                        assert!(path.len() as u32 <= pages, "{answer}: {path:?}");
+                        // Each "next page" is the range's last id.
+                        assert!(path[..path.len() - 1].iter().all(|&a| a == base + n - 1), "{answer}: {path:?}");
+                    }
+                    if count > n as u32 {
+                        assert_eq!(g.pending.as_ref().unwrap().stage, Stage::Paged { window: 0 });
+                    }
+                }
+            }
+        }
+    }
+
+    /// CR 601.2c: pages of `n - 1`: the first page holds items 0..=n-2 at
+    /// `base + 0 ..= base + n - 2` and "next page" at `base + n - 1`; page w
+    /// holds items w (n - 1) .. at `base + 0 ..`, the last page no "next".
+    /// The page lives in the task.
+    #[test]
+    fn cr_601_2c_pages_of_n_minus_1_items_then_next_page() {
+        let (base, n) = (act::STACK, act::STACK_N);
+        let ranges = vec![(base, n, (0..70).collect::<Vec<u32>>())];
+        let mut g = start(game(false), paged(DecisionKind::Target, &ranges, &[pass()]));
+        let d = g.pending.clone().unwrap();
+        let mut want = vec![pass()];
+        want.extend((0..31).map(|p| Opt { action: base + p as u16, choice: item(0, p) }));
+        want.push(Opt { action: base + 31, choice: Choice::Page(Page { range: 0, window: 1 }) });
+        assert_eq!(d.options, want);
+        pick(&mut g, base + 31);
+        let d = g.pending.clone().unwrap();
+        let mut want: Vec<Opt> = (31..62).map(|p| Opt { action: base + p as u16 - 31, choice: item(0, p) }).collect();
+        want.push(Opt { action: base + 31, choice: Choice::Page(Page { range: 0, window: 2 }) });
+        assert_eq!(d.options, want, "page 1: items 31..=61, no PASS");
+        assert_eq!(d.stage, Stage::Paged { window: 1 });
+        assert!(matches!(g.agenda.last(), Some(Task::Probe(p)) if matches!(**p, Probe::Paged { page: Page { range: 0, window: 1 }, .. })));
+        pick(&mut g, base + 31);
+        let d = g.pending.clone().unwrap();
+        let want: Vec<Opt> = (62..70).map(|p| Opt { action: base + p as u16 - 62, choice: item(0, p) }).collect();
+        assert_eq!(d.options, want, "the last page: items 62..=69, no next");
+        pick(&mut g, base + 7);
+        assert_eq!(last_probe(&g), format!("{:?}", item(0, 69)));
+        assert_eq!(g.kind(), Some(DecisionKind::Priority));
+    }
+
+    /// CR 601.2c: positions that skip (the stack's spells among its
+    /// abilities, the permanents a filter matches) keep `base + position`
+    /// on the first page; a window with no item is skipped, so no page
+    /// offers only "next page"; a first window with none offers "next page"
+    /// with the other options.
+    #[test]
+    fn cr_601_2c_windows_without_an_item_are_skipped() {
+        let (base, n) = (act::STACK, act::STACK_N);
+        let ranges = vec![(base, n, vec![3, 200, 201, 400])];
+        let mut g = start(game(false), paged(DecisionKind::Target, &ranges, &[]));
+        assert_eq!(
+            g.pending.as_ref().unwrap().options,
+            vec![Opt { action: base + 3, choice: item(0, 3) }, Opt { action: base + 31, choice: Choice::Page(Page { range: 0, window: 6 }) }]
+        );
+        pick(&mut g, base + 31);
+        assert_eq!(
+            g.pending.as_ref().unwrap().options,
+            vec![
+                Opt { action: base + 14, choice: item(0, 200) },
+                Opt { action: base + 15, choice: item(0, 201) },
+                Opt { action: base + 31, choice: Choice::Page(Page { range: 0, window: 12 }) },
+            ]
+        );
+        pick(&mut g, base + 31);
+        assert_eq!(g.pending.as_ref().unwrap().options, vec![Opt { action: base + 28, choice: item(0, 400) }]);
+        assert_eq!(g.pending.as_ref().unwrap().stage, Stage::Paged { window: 12 });
+        // Only items past the first window, with another option.
+        let ranges = vec![(base, n, vec![40, 41])];
+        let g = start(game(false), paged(DecisionKind::Target, &ranges, &[pass()]));
+        assert_eq!(g.pending.as_ref().unwrap().options, vec![pass(), Opt { action: base + 31, choice: Choice::Page(Page { range: 0, window: 1 }) }]);
+        assert_eq!(reached(&sequences(&g)), every_option(&ranges, &[pass()]));
+        // Sparse positions in every range: exactly once.
+        for (base, n) in RANGES {
+            for positions in [vec![0, 5 * n as u32], vec![n as u32 - 1, n as u32], (0..400).filter(|p| p % 7 == 3 || p % 13 == 0).collect()] {
+                let ranges = vec![(base, n, positions)];
+                let g = start(game(false), paged(DecisionKind::ChooseMode, &ranges, &[pass()]));
+                assert_eq!(reached(&sequences(&g)), every_option(&ranges, &[pass()]), "range {base}+{n}");
+            }
+        }
+    }
+
+    /// CR 601.2c with several ranges at once (a target that is a permanent of
+    /// either player or a spell, "or a player"): each paged range has its own
+    /// pages, entered from the first page, which holds the ranges that fit
+    /// and the other options; every option exactly once.
+    #[test]
+    fn cr_601_2c_several_paged_ranges_and_other_options_in_one_decision() {
+        let ranges = vec![
+            (act::MY_PERM, act::PERM_N, (0..100).collect::<Vec<u32>>()),
+            (act::OPP_PERM, act::PERM_N, (0..197).filter(|p| p % 2 == 0).collect()),
+            (act::STACK, act::STACK_N, (1..41).collect()),
+            (act::EXILE, act::EXILE_N, (0..32).collect()),
+        ];
+        let extra = vec![
+            pass(),
+            Opt { action: act::PLAYER, choice: Choice::Target(Target::Player(0)) },
+            Opt { action: act::PLAYER + 1, choice: Choice::Target(Target::Player(1)) },
+        ];
+        let g = start(game(false), paged(DecisionKind::ChooseMode, &ranges, &extra));
+        let d = g.pending.as_ref().unwrap();
+        let nexts: Vec<u16> = d.options.iter().filter(|o| matches!(o.choice, Choice::Page(_))).map(|o| o.action).collect();
+        assert_eq!(nexts, vec![act::MY_PERM + 95, act::OPP_PERM + 95, act::STACK + 31], "the exile range fits: no page");
+        assert_eq!(d.options.len(), 3 + 95 + 3 + 48 + 30 + 32);
+        let seqs = sequences(&g);
+        assert_eq!(reached(&seqs), every_option(&ranges, &extra));
+        // A range page offers that range's items alone.
+        for (answer, path) in &seqs {
+            if path.len() > 1 {
+                let &(base, n, _) = ranges.iter().find(|&&(b, n, _)| path[0] == b + n - 1).unwrap();
+                assert!(path[1..].iter().all(|&a| (base..base + n).contains(&a)), "{answer}: {path:?}");
+            }
+        }
+    }
+
+    /// ENGINE.md 10, 99.8 (fuzz seed 624's lesson): the page is the task's,
+    /// so a refresh (re-running the asker) and `determinize` for either
+    /// player ask the same page again, and the same answer chooses the same
+    /// item.
+    #[test]
+    fn paged_choice_is_asked_again_identically_after_determinize() {
+        let ranges = vec![(act::MY_PERM, act::PERM_N, (0..250).collect::<Vec<u32>>()), (act::STACK, act::STACK_N, (0..5).collect())];
+        let mut g = start(game(false), paged(DecisionKind::ChoosePermanent, &ranges, &[pass()]));
+        pick(&mut g, act::MY_PERM + 95);
+        pick(&mut g, act::MY_PERM + 95);
+        assert_eq!(g.pending.as_ref().unwrap().stage, Stage::Paged { window: 2 });
+        let mut rng = Rng::new(7);
+        for viewer in [0, 1] {
+            for k in 0..4 {
+                let mut c = g.clone();
+                if k == 0 {
+                    c.refresh_pending();
+                } else {
+                    c.determinize(viewer, &mut rng);
+                }
+                assert_eq!(c.pending, g.pending, "viewer {viewer}, world {k}");
+                assert_eq!(c.agenda.last(), g.agenda.last());
+                pick(&mut c, act::MY_PERM + 10);
+                assert_eq!(last_probe(&c), format!("{:?}", item(0, 200)));
+            }
+        }
+    }
+
+    /// A range page that holds no item (another player's decision refreshed
+    /// in a world where its items differ) shows the first page; so does a
+    /// page of a range that fits.
+    #[test]
+    fn a_stale_range_page_shows_the_first_page() {
+        let ranges = vec![(act::STACK, act::STACK_N, (0..40).collect::<Vec<u32>>())];
+        let first = start(game(false), paged(DecisionKind::Target, &ranges, &[pass()])).pending;
+        for page in [Page { range: 0, window: 9 }, Page { range: 3, window: 1 }] {
+            let probe = Probe::Paged { p: 0, kind: DecisionKind::Target, ranges: ranges.clone(), extra: vec![pass()], page };
+            assert_eq!(start(game(false), probe).pending, first, "{page:?}");
+        }
+        let fits = vec![(act::STACK, act::STACK_N, (0..20).collect::<Vec<u32>>())];
+        let probe = Probe::Paged { p: 0, kind: DecisionKind::Target, ranges: fits.clone(), extra: vec![], page: Page { range: 0, window: 1 } };
+        assert_eq!(start(game(false), probe).pending, start(game(false), paged(DecisionKind::Target, &fits, &[])).pending);
+    }
+
+    /// CR 107.3 (X), 601.2b: a number whose range fits `NUMBER` (`hi - lo`
+    /// <= 31) is one decision, `NUMBER + k` = `lo + k`, as before.
+    #[test]
+    fn cr_107_3_a_number_that_fits_number_is_one_decision() {
+        for (lo, hi) in [(0, 0), (0, 1), (0, 30), (0, 31), (5, 36), (u32::MAX as u64 - 31, u32::MAX as u64), (u32::MAX as u64, u32::MAX as u64), (u64::MAX - 31, u64::MAX)] {
+            let g = start(game(false), number(lo, hi));
+            let d = g.pending.as_ref().unwrap();
+            assert_eq!(actions(&g), (0..=(hi - lo) as u16).map(|k| act::NUMBER + k).collect::<Vec<_>>(), "{lo}..={hi}");
+            assert_eq!(d.stage, Stage::One);
+            let seqs = sequences(&g);
+            assert!(seqs.iter().all(|(_, p)| p.len() == 1));
+            for (answer, path) in &seqs {
+                assert_eq!(*answer, format!("value {}", lo + (path[0] - act::NUMBER) as u64));
+            }
+        }
+    }
+
+    /// The digits a range of rests `0..=d` needs: the least `L` with `d <
+    /// 32^L` (independently of `NumberStep::digits`).
+    fn digits_of(d: u64) -> u32 {
+        (1..=13).find(|&l| (d as u128) < 32u128.pow(l)).unwrap()
+    }
+
+    /// CR 107.3, 601.2b: every value of a range wider than `NUMBER` is
+    /// reached by exactly one sequence of decisions: `lo + k` (k <= 30) in
+    /// one, the others in `NUMBER + 31` and then exactly as many digits as
+    /// the range's largest rest needs; at the digit boundaries (rests up to
+    /// 31, 32, 1023, 1024, 32767, 32768) and at `u32::MAX` and `u64::MAX`.
+    #[test]
+    fn cr_107_3_every_value_of_a_wide_range_is_reached_exactly_once() {
+        let spans: [u64; 12] = [32, 33, 62, 63, 64, 95, 1054, 1055, 1056, 1100, 32798, 32799];
+        for &span in &spans {
+            let los: Vec<u64> =
+                if span > 2000 { vec![0] } else { vec![0, 3, u32::MAX as u64 - span, u64::MAX - span] };
+            for lo in los {
+                let hi = lo + span;
+                let g = start(game(false), number(lo, hi));
+                assert_eq!(g.pending.as_ref().unwrap().stage, Stage::Paged { window: 0 }, "{lo}..={hi}");
+                let seqs = sequences(&g);
+                let mut values: Vec<u64> = seqs.iter().map(|(a, _)| a.strip_prefix("value ").unwrap().parse().unwrap()).collect();
+                values.sort();
+                assert!(values.iter().copied().eq(lo..=hi), "{lo}..={hi}: each value once");
+                let l = digits_of(span - 31) as usize;
+                for (answer, path) in &seqs {
+                    let v: u64 = answer.strip_prefix("value ").unwrap().parse().unwrap();
+                    assert_eq!(path.len(), if v - lo <= 30 { 1 } else { 1 + l }, "{lo}..={hi}: {v} by {path:?}");
+                }
+            }
+        }
+    }
+
+    /// CR 107.3, 601.2b: on the way to any value of a range (`u32` and `u64`
+    /// extremes among them), the first decision of a wide range offers
+    /// `NUMBER + 0 ..= 31` and each digit decision exactly the digits with a
+    /// legal completion (computed here independently, in `u128`), the
+    /// completions of the offered digits partition the decision's (so no
+    /// value is reached twice or missed), and a `u32` range needs at most 7
+    /// digits.
+    #[test]
+    fn cr_107_3_each_digit_offers_exactly_the_digits_with_a_legal_completion() {
+        let m32 = u32::MAX as u64;
+        let ranges: [(u64, u64); 9] = [
+            (0, m32),
+            (1, m32),
+            (m32 - 40, m32),
+            (0, u64::MAX),
+            (u64::MAX - 100, u64::MAX),
+            (12_345, 12_345 + 31 + 32u64.pow(4)),
+            (12_345, 12_345 + 31 + 32u64.pow(4) - 1),
+            (7, 7 + 31 + 32u64.pow(6) * 3),
+            (0, m32 + 1),
+        ];
+        let mut rng = Rng::new(11);
+        for (lo, hi) in ranges {
+            let d = hi - lo - 31;
+            let l = digits_of(d);
+            if hi <= m32 + 1 {
+                assert!(l <= 7, "{lo}..={hi}");
+            }
+            let mut targets = vec![lo, lo + 1, lo + 30, lo + 31, lo + 32, lo + 62, lo + 63, lo + (hi - lo) / 2, hi - 1, hi];
+            targets.extend((0..20).map(|_| {
+                let r = rng.next_u64();
+                lo + (hi - lo).checked_add(1).map_or(r, |m| r % m)
+            }));
+            targets.retain(|&v| v <= hi);
+            for v in targets {
+                let mut g = start(game(false), number(lo, hi));
+                assert_eq!(actions(&g), (0..32).map(|k| act::NUMBER + k).collect::<Vec<_>>());
+                if v - lo <= 30 {
+                    pick(&mut g, act::NUMBER + (v - lo) as u16);
+                } else {
+                    pick(&mut g, act::NUMBER + 31);
+                    let rest = (v - lo - 31) as u128;
+                    let (lo128, hi128) = (lo as u128, hi as u128);
+                    let mut prefix: u128 = 0;
+                    for i in 0..l {
+                        let r = l - 1 - i; // digits after this one
+                        let place = 32u128.pow(r);
+                        // Digit q has a legal completion iff the least value
+                        // with the prefix and q is at most hi.
+                        let feasible: Vec<u128> = (0..32).filter(|&q| lo128 + 31 + (prefix * 32 + q) * place <= hi128).collect();
+                        assert_eq!(actions(&g), feasible.iter().map(|&q| act::NUMBER + q as u16).collect::<Vec<_>>(), "{lo}..={hi} -> {v}, digit {i}");
+                        assert_eq!(g.pending.as_ref().unwrap().stage, Stage::Digit { left: (r + 1) as u8, prefix: prefix as u64 });
+                        // The completions under each offered digit partition
+                        // those under the prefix.
+                        let span = |p: u128, r: u32| -> u128 {
+                            let a = lo128 + 31 + p * 32u128.pow(r);
+                            let b = (lo128 + 31 + (p + 1) * 32u128.pow(r) - 1).min(hi128);
+                            if a > hi128 { 0 } else { b - a + 1 }
+                        };
+                        assert_eq!(feasible.iter().map(|&q| span(prefix * 32 + q, r)).sum::<u128>(), span(prefix, r + 1));
+                        let q = (rest / place) % 32;
+                        pick(&mut g, act::NUMBER + q as u16);
+                        prefix = prefix * 32 + q;
+                    }
+                }
+                assert_eq!(last_probe(&g), format!("value {v}"), "{lo}..={hi}");
+                assert_eq!(g.kind(), Some(DecisionKind::Priority));
+            }
+        }
+    }
+
+    /// CR 107.3: the `u32` extremes: 0 and `u32::MAX` in `0..=u32::MAX` (one
+    /// decision; eight), a range ending at `u32::MAX` one wider than
+    /// `NUMBER` (one digit of two), `lo = hi = u32::MAX` (one option).
+    #[test]
+    fn cr_107_3_the_u32_extremes() {
+        let m32 = u32::MAX as u64;
+        let mut g = start(game(false), number(0, m32));
+        pick(&mut g, act::NUMBER);
+        assert_eq!(last_probe(&g), "value 0");
+        let mut g = start(game(false), number(0, m32));
+        pick(&mut g, act::NUMBER + 31);
+        let mut n = 1;
+        while g.kind() != Some(DecisionKind::Priority) && n < 20 {
+            let top = *actions(&g).last().unwrap();
+            pick(&mut g, top);
+            n += 1;
+        }
+        assert_eq!((last_probe(&g), n), (format!("value {m32}"), 8), "the largest digit each time");
+        let g = start(game(false), number(m32 - 32, m32));
+        let seqs = sequences(&g);
+        assert_eq!(seqs.len(), 33);
+        assert!(seqs.iter().any(|(a, p)| *a == format!("value {m32}") && *p == vec![act::NUMBER + 31, act::NUMBER + 1]));
+        let g = start(game(false), number(m32, m32));
+        assert_eq!(actions(&g), vec![act::NUMBER]);
+        assert_eq!(sequences(&g), vec![(format!("value {m32}"), vec![act::NUMBER])]);
+    }
+
+    /// ENGINE.md 10, 99.8: the digits are the task's, so a refresh and
+    /// `determinize` for either player ask the same digit again, and the same
+    /// answers give the same value.
+    #[test]
+    fn number_digits_are_asked_again_identically_after_determinize() {
+        let mut g = start(game(false), number(0, u32::MAX as u64));
+        pick(&mut g, act::NUMBER + 31);
+        pick(&mut g, act::NUMBER + 2);
+        pick(&mut g, act::NUMBER + 5);
+        assert_eq!(g.pending.as_ref().unwrap().stage, Stage::Digit { left: 5, prefix: 2 * 32 + 5 });
+        let mut rng = Rng::new(3);
+        for viewer in [0, 1] {
+            for k in 0..4 {
+                let mut c = g.clone();
+                if k == 0 {
+                    c.refresh_pending();
+                } else {
+                    c.determinize(viewer, &mut rng);
+                }
+                assert_eq!(c.pending, g.pending, "viewer {viewer}, world {k}");
+                assert_eq!(c.agenda.last(), g.agenda.last());
+                for q in [1, 0, 0, 9, 31] {
+                    pick(&mut c, act::NUMBER + q);
+                }
+                let rest = ((((((2u64 * 32 + 5) * 32 + 1) * 32) * 32) * 32 + 9) * 32) + 31;
+                assert_eq!(last_probe(&c), format!("value {}", 31 + rest));
+            }
+        }
+    }
+
+    /// Digits with no legal completion left (another player's decision
+    /// refreshed in a world where the range differs) restart at the first
+    /// decision; feasible ones go on.
+    #[test]
+    fn a_stale_number_step_restarts_at_the_first_decision() {
+        let first = start(game(false), number(0, 100)).pending;
+        for step in [NumberStep { left: 9, prefix: 0 }, NumberStep { left: 2, prefix: 5 }, NumberStep { left: 1, prefix: 3 }] {
+            let probe = Probe::Number { p: 0, kind: DecisionKind::ChooseMode, lo: 0, hi: 100, step };
+            assert_eq!(start(game(false), probe).pending, first, "{step:?}");
+        }
+        let probe = Probe::Number { p: 0, kind: DecisionKind::ChooseMode, lo: 0, hi: 100, step: NumberStep { left: 1, prefix: 2 } };
+        let g = start(game(false), probe);
+        assert_eq!(actions(&g), (0..=5).map(|k| act::NUMBER + k).collect::<Vec<_>>(), "rests 64..=69");
+        let probe = Probe::Number { p: 0, kind: DecisionKind::ChooseMode, lo: 0, hi: 20, step: NumberStep { left: 1, prefix: 0 } };
+        assert_eq!(start(game(false), probe).pending, start(game(false), number(0, 20)).pending, "the range fits now");
+    }
+
+    /// With single options answered by the engine (`auto_single`, the
+    /// search's setting): a forced digit is answered and keyed (`KEY_AUTO`,
+    /// ENGINE.md 10), a last page of one item too, and every value and item
+    /// is still reached exactly once.
+    #[test]
+    fn forced_digits_and_one_item_pages_are_answered_by_the_engine() {
+        let mut g = start(game(true), number(0, 63));
+        pick(&mut g, act::NUMBER + 31);
+        let mut keys = Vec::new();
+        g.apply(act::NUMBER + 1, &mut keys).unwrap();
+        assert_eq!(last_probe(&g), "value 63", "digit 1 then the only digit, 0");
+        assert!(keys.iter().any(|&k| crate::hidden::key_kind(k) == crate::hidden::KEY_AUTO), "{keys:?}");
+        let g = start(game(true), number(0, 63));
+        let mut values: Vec<u64> = sequences(&g).iter().map(|(a, _)| a.strip_prefix("value ").unwrap().parse().unwrap()).collect();
+        values.sort();
+        assert!(values.iter().copied().eq(0..=63), "{values:?}");
+        let ranges = vec![(act::STACK, act::STACK_N, (0..63).collect::<Vec<u32>>())];
+        let g = start(game(true), paged(DecisionKind::Target, &ranges, &[]));
+        assert_eq!(reached(&sequences(&g)), every_option(&ranges, &[]));
+    }
+
+    fn context(g: &Game, viewer: PlayerId) -> Vec<f32> {
+        let mut x = vec![0.0; NUM_FEATURES];
+        g.encode_features(viewer, &mut x);
+        x[O_CONTEXT + ctx::PAGED..O_CONTEXT + 256].to_vec()
+    }
+
+    /// The context floats (layout v5's spare 246-250, ENGINE.md 100.1):
+    /// for the decider only, 246 = 1 on a page of a paged choice and on a
+    /// big number's first decision, 247 = the window / 4, 249 = the digits
+    /// left / 8, 250 = the digits chosen / 32 (squashed); everything 0 for a
+    /// choice made in one decision, for the other player, and in 248 and
+    /// 251-255 always.
+    #[test]
+    fn paged_and_digit_context_floats_are_the_deciders_only() {
+        let zero = vec![0.0; 256 - ctx::PAGED];
+        let with = |vals: &[(usize, f32)]| {
+            let mut v = zero.clone();
+            for &(i, x) in vals {
+                v[i - ctx::PAGED] = x;
+            }
+            v
+        };
+        let check = |g: &Game, want: Vec<f32>, what: &str| {
+            assert_eq!(context(g, 0), want, "{what}: the decider");
+            assert_eq!(context(g, 1), zero, "{what}: the other player");
+        };
+        let fits = vec![(act::STACK, act::STACK_N, (0..32).collect::<Vec<u32>>())];
+        check(&start(game(false), paged(DecisionKind::Target, &fits, &[])), zero.clone(), "a range that fits");
+        check(&start(game(false), number(0, 31)), zero.clone(), "a number that fits");
+        let ranges = vec![(act::STACK, act::STACK_N, vec![0, 200, 400])];
+        let mut g = start(game(false), paged(DecisionKind::Target, &ranges, &[]));
+        check(&g, with(&[(ctx::PAGED, 1.0)]), "the first page");
+        pick(&mut g, act::STACK + 31);
+        check(&g, with(&[(ctx::PAGED, 1.0), (ctx::PAGE, 1.5)]), "window 6");
+        let mut g = start(game(false), number(0, u32::MAX as u64));
+        check(&g, with(&[(ctx::PAGED, 1.0)]), "a wide number's first decision");
+        pick(&mut g, act::NUMBER + 31);
+        check(&g, with(&[(ctx::DIGIT, 7.0 / 8.0)]), "the first digit");
+        pick(&mut g, act::NUMBER + 3);
+        check(&g, with(&[(ctx::DIGIT, 6.0 / 8.0), (ctx::PREFIX, squash(3.0 / 32.0))]), "the second digit");
+        for _ in 0..5 {
+            pick(&mut g, act::NUMBER + 31);
+        }
+        check(&g, with(&[(ctx::DIGIT, 1.0 / 8.0), (ctx::PREFIX, squash(((3u64 << 25) | ((1 << 25) - 1)) as f32 / 32.0))]), "the last digit");
+        pick(&mut g, act::NUMBER);
+        check(&g, zero.clone(), "priority again");
     }
 }
