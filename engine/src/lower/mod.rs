@@ -349,6 +349,12 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     ("Dawnsire, Sunstar Dreadnought", "ir_defect(planeswalker target dropped, docs/ir_defects.md 81)"),
     // "They lose 3 life" (the discarding player) written as a target (82).
     ("Entropic Battlecruiser", "ir_defect(the event's player written as a target, docs/ir_defects.md 82)"),
+
+    // Cross-lane pass (ENGINE.md 99.8; docs/ir_defects.md 100-119).
+    // "Mill three cards, then return a creature or Spacecraft card from your
+    // graveyard to your hand": the card chosen as the ability resolves
+    // (after the mill) written as a target chosen as it triggers (100).
+    ("Fell Gravship", "ir_defect(a card chosen on resolution written as a target, docs/ir_defects.md 100)"),
 ];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.

@@ -90,6 +90,7 @@ permission) and a consumer can go wrong with it.
 | 80 | Syr Vondam, Sunstar Exemplar (Edge of Eternities, lane D, ENGINE.md 99.5) | event widened, trigger condition moved | both triggers on `leaves_battlefield` for "dies or is put into exile"; "while its power is 4 or greater" as `ConditionalIfSourcePowerAtLeast` around the effect (read as the ability resolves) | a trigger on dying or being exiled only (not bounced, not put into a library); the power condition part of the trigger event, as the creature left (CR 603.10a, 603.6c) | `cards/parser/triggers.py` (the "dies or is put into exile" phrase-table entries, ~line 718; `_INTERVENING_WHILE_EFFECT_WRAPPERS`, ~line 1645) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 81 | Dawnsire, Sunstar Dreadnought (lane D) | target narrowed | `DealDamageToTargetCreature` with a creature-only target for "up to one target creature or planeswalker" | a creature or planeswalker target | `cards/parser/effects.py` (`_DEAL_DAMAGE_UP_TO_ONE_TARGET_CREATURE`, ~line 390: "or planeswalker" accepted and dropped) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 82 | Entropic Battlecruiser (lane D) | target invented | the 1+ trigger "Whenever an opponent discards a card, they lose 3 life" as `TargetPlayerLosesLife` (a targeted effect) | the discarding player, not targeted (the event's player: `BindEventPlayer`, as the cube's "that player loses" triggers) | `cards/parser/effects.py` (`_THEY_LOSE_N_LIFE`, ~line 1718; the Python engine pre-wires the player as a target) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 100 | Fell Gravship (Edge of Eternities, cross-lane pass, ENGINE.md 99.8) | target invented | "mill three cards, then return a creature or Spacecraft card from your graveyard to your hand" as `Sequence [SelfMill 3, ReturnCreatureFromYourGraveyardToHand { creature, or_spacecraft }]`, a targeted class (its target chosen as the ability triggers, before the mill) | the card chosen as the ability resolves, after the mill, not targeted (a milled card may be returned; the mill happens with no such card in the graveyard) | `cards/parser/effects.py` (`_RETURN_CREATURE_OR_SPACECRAFT_GRAVEYARD_TO_HAND`, ~line 1911) | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -905,6 +906,32 @@ life."
   discarding player as `targets[0]` (`fire_opponent_discards_triggers`).
 * Fix: emit the `BindEventPlayer` wrapper for "they lose N life" on an event with a player subject.
 * Engine: blocked, `ir_defect(the event's player written as a target, docs/ir_defects.md 82)`.
+
+### P. Edge of Eternities, the cross-lane pass (ENGINE.md 99.8)
+
+**100. Fell Gravship.** Oracle: "When this Spacecraft enters, mill three cards, then return a creature
+or Spacecraft card from your graveyard to your hand."
+
+* IR (mtg-bot main 2cb79f77): the enter trigger's effect is `Sequence [SelfMill { amount: 3 },
+  ReturnCreatureFromYourGraveyardToHand { creature: true, or_spacecraft: true }]`. The class is a
+  targeted one (`requires_target` unless `untargeted_all`, `min_n` = `max_n` = 1): the same node as
+  "return target creature card from your graveyard to your hand" (Interceptor Mechan), with nothing
+  that tells the two apart (`target_kind` is the Python target tuple's tag).
+* Should be: "a creature or Spacecraft card" is not a target (CR 115.1d: only "target ..." is): the
+  card is chosen as the ability resolves, after the three cards are milled. Read as a target, the
+  card is chosen as the ability is put on the stack (CR 603.3d), so a card the mill puts into the
+  graveyard can't be returned, and with no creature or Spacecraft card in the graveyard then, the
+  ability has no legal target and is removed from the stack (CR 603.3d), so the three cards aren't
+  milled either.
+* Source: `cards/parser/effects.py`, `_RETURN_CREATURE_OR_SPACECRAFT_GRAVEYARD_TO_HAND` (~line 1911):
+  its comment notes the article "a" ("Scryfall prints the choice as a non-target selection") and
+  keeps the targeted class, relying on the Python engine's resolve-time choice.
+* Fix: a non-targeted form of the class (for example a `chosen_on_resolution` flag, or the
+  `ReturnFromGraveyard` node with a choice instead of targets), as "return a ... card" is elsewhere.
+* Engine: blocked, `ir_defect(a card chosen on resolution written as a target, docs/ir_defects.md
+  100)` (`lower::IR_DEFECTS`). Without the entry the card lowers (lanes A and C give it everything
+  else) with the return targeted. Found by the cross-lane pass reading the card for its tests; it
+  was in `SUPPORTED_EOE_CROSS` since lane A's merge (ENGINE.md 99.7) and is taken off.
 
 ## Suspected defects (representational)
 

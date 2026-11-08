@@ -825,11 +825,10 @@ const SUPPORTED_EOE_D: &[&str] = &[
 ];
 
 /// Cards that need features of two or more lanes, finished after the
-/// lanes merged (ENGINE.md 99.6; tests in `tests/cards_eoe_cross.rs`).
+/// lanes merged (ENGINE.md 99.6, 99.8; tests in `tests/cards_eoe_cross*.rs`).
 const SUPPORTED_EOE_CROSS: &[&str] = &[
     "Broodguard Elite",
     "Embrace Oblivion",
-    "Fell Gravship",
     "Hardlight Containment",
     "Hylderblade",
     "Mental Modulation",
