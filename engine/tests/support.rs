@@ -839,6 +839,7 @@ const SUPPORTED_EOE_CROSS: &[&str] = &[
     "Mental Modulation",
     "Pinnacle Kill-Ship",
     "Reroute Systems",
+    "Roving Actuator",
     "Seedship Impact",
     "Sledge-Class Seedship",
     "Sliver Overlord",
@@ -848,6 +849,7 @@ const SUPPORTED_EOE_CROSS: &[&str] = &[
     "Terrapact Intimidator",
     "Thaumaton Torpedo",
     "The Seriema",
+    "Vote Out",
 ];
 
 /// Cards the mtg-bot IR-fix batch unblocks (ENGINE.md 99.9; their card
@@ -1016,10 +1018,12 @@ fn a_new_ir_field_value_is_a_blocker() {
     let mut cards = engine::db::load_cube_document().cards;
     let bolt = cards.iter_mut().find(|c| c.name == "Lightning Bolt").unwrap();
     let card_ir::cats::CardPrinting::CardPrinting(p) = &mut bolt.printing;
-    p.has_convoke = true;
+    // (Convoke was this test's flag until the EoE cross-lane pass built it,
+    // ENGINE.md 99.8.)
+    p.grants_toughness_as_damage_for_creatures_you_control = true;
     let db = CardDb::from_cards(&cards);
     let err = db.expect_id("Lightning Bolt").unwrap_err();
-    assert!(err.contains("CardPrinting.has_convoke"), "{err}");
+    assert!(err.contains("CardPrinting.grants_toughness_as_damage_for_creatures_you_control"), "{err}");
 }
 
 #[test]

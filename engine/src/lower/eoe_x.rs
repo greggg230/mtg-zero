@@ -134,6 +134,16 @@ pub(crate) fn lower_effect_eoe_x(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             b.op(Op::Ext(Ext::CreateTokensN { token, n: Amount::MulticoloredPermanents, tapped: *tapped, attacking: false }));
             b.op(Op::Ext(Ext::TokensCreated));
         }
+        // "Exile up to one target instant or sorcery card with mana value 2
+        // or less from your graveyard. Copy it. You may cast the copy without
+        // paying its mana cost" (Roving Actuator's void trigger; CR 707.12).
+        E::RovingActuatorETBEffect(nodes::RovingActuatorETBEffect { max_mv }) => {
+            let n = l.int("RovingActuatorETBEffect.max_mv", *max_mv, 0, 30) as u8;
+            let spell = Filter::Or(vec![Filter::Type(types::INSTANT), Filter::Type(types::SORCERY)]);
+            let f = and(and(spell, Filter::ManaValueAtMost(n)), Filter::Owner(true));
+            let tgt = b.target(Filter::InGraveyard(Box::new(f)), 0, 1);
+            eoe(b, EoeX::ExileTargetCastCopyFree { tgt });
+        }
         _ => return false,
     }
     true

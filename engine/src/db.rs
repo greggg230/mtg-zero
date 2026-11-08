@@ -1698,6 +1698,10 @@ pub struct CastingRules {
     /// "You may cast this card from your graveyard using its warp ability"
     /// (CR 702.185a: warp's alternative cost from a graveyard).
     pub warp_from_graveyard: bool,
+    /// Its own convoke (CR 702.51a): while it is a spell, its controller's
+    /// untapped creatures may each pay for {1} or one mana of that
+    /// creature's colour (`PayMana::convoke`; ENGINE.md 99.8).
+    pub convoke: bool,
 }
 
 /// "If this card is in your opening hand [and you're not the starting

@@ -85,6 +85,9 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         // "Cross Bolt deals 10 damage to target creature."
         card("Cross Bolt", "{R}", &["Instant"], &[], json!({"spell_effect": {"$t": "DealDamageToTargetCreature", "amount": 10,
             "targets": [{"$t": "TargetSpec", "filter": {"$t": "IsCreature"}}]}})),
+        // "Cross Blast deals 3 damage to target creature." (Mana value 3.)
+        card("Cross Blast", "{2}{R}", &["Instant"], &[], json!({"spell_effect": {"$t": "DealDamageToTargetCreature", "amount": 3,
+            "targets": [{"$t": "TargetSpec", "filter": {"$t": "IsCreature"}}]}})),
         // "Target creature gets +3/+3 until end of turn."
         card("Cross Growth", "{G}", &["Instant"], &[], json!({"spell_effect": {"$t": "PumpTargetCreatureUntilEOT",
             "power_bonus": 3, "toughness_bonus": 3}})),

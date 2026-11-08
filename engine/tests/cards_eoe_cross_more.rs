@@ -591,3 +591,172 @@ fn infinite_guideline_station_attacks_and_draws_per_multicolored_permanent_cr722
     assert_eq!(g.player(0).hand.len(), hand + 2, "{}", log(&g));
     assert_eq!(g.life(1), 13);
 }
+
+// ---- Roving Actuator -----------------------------------------------------------------------
+
+/// Kill P1's Bear with Cross Bolt (void: a nonland permanent left the
+/// battlefield), then cast Roving Actuator; stop at its trigger's target.
+fn actuator_with_void(extra_gy: &[&str]) -> Game {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Mountain", "Mountain", "Mountain"])
+        .battlefield(1, &["Cross Bear", "Cross Giant"])
+        .hand(0, &["Cross Bolt", "Roving Actuator"])
+        .graveyard(0, extra_gy)
+        .graveyard(1, &["Cross Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = bf(&g, 1, "Cross Bear");
+    let t = g.tgt(bear);
+    cast(&mut g, 0, "Cross Bolt", &[t]);
+    settle(&mut g);
+    assert!(g.void_active());
+    cast(&mut g, 0, "Roving Actuator", &[]);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g
+}
+
+/// Roving Actuator: "Void — When this creature enters, if a nonland
+/// permanent left the battlefield this turn or a spell was warped this turn,
+/// exile up to one target instant or sorcery card with mana value 2 or less
+/// from your graveyard. Copy it. You may cast the copy without paying its
+/// mana cost" (CR 707.12, 118.9): the copy is cast (its own target chosen),
+/// the card stays exiled.
+#[test]
+fn roving_actuator_exiles_and_casts_a_copy_free_cr707_12() {
+    let mut g = actuator_with_void(&[]);
+    let bolt = g.card(0, "Cross Bolt", Zone::Graveyard);
+    g.choose(g.tgt(bolt));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+    assert_eq!(g.obj(bolt).zone, Zone::Exile, "exiled as it resolves\n{}", log(&g));
+    assert!(g.has_option(Choice::Yes), "{:?}", g.options_desc());
+    let lands = untapped(&g, 0);
+    g.choose(Choice::Yes);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let giant = bf(&g, 1, "Cross Giant");
+    g.choose(g.tgt(giant));
+    settle(&mut g);
+    assert_eq!(g.obj(giant).zone, Zone::Graveyard, "the copy resolved\n{}", log(&g));
+    assert_eq!(untapped(&g, 0), lands, "without paying its mana cost");
+    assert_eq!(g.obj(bolt).zone, Zone::Exile, "the card stays exiled");
+    assert_eq!(g.count_in(0, "Cross Bolt", Zone::Exile), 1, "the copy ceased to exist (CR 707.10a)");
+    assert_eq!(g.count_in(0, "Cross Bolt", Zone::Graveyard), 0);
+}
+
+/// "Up to one target instant or sorcery card with mana value 2 or less from
+/// your graveyard": not a mana value 3 card, a creature card or an
+/// opponent's card; no target is allowed.
+#[test]
+fn roving_actuator_targets_a_small_instant_or_sorcery_in_your_graveyard_cr115_1() {
+    let mut g = actuator_with_void(&["Cross Blast", "Cross Bear"]);
+    let (blast, bear, theirs) = (g.card(0, "Cross Blast", Zone::Graveyard), g.card(0, "Cross Bear", Zone::Graveyard), g.card(1, "Cross Bolt", Zone::Graveyard));
+    let mine = g.card(0, "Cross Bolt", Zone::Graveyard);
+    assert!(g.has_option(g.tgt(mine)), "{:?}", g.options_desc());
+    assert!(!g.has_option(g.tgt(blast)), "mana value 3");
+    assert!(!g.has_option(g.tgt(bear)), "a creature card");
+    assert!(!g.has_option(g.tgt(theirs)), "your graveyard");
+    assert!(g.has_option(Choice::Pass), "up to one");
+}
+
+/// Declined, the copy ceases to exist (CR 704.5e); the card stays exiled.
+#[test]
+fn roving_actuator_declined_copy_ceases_to_exist_cr704_5e() {
+    let mut g = actuator_with_void(&[]);
+    let bolt = g.card(0, "Cross Bolt", Zone::Graveyard);
+    g.choose(g.tgt(bolt));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+    g.choose(Choice::Pass);
+    settle(&mut g);
+    assert_eq!(g.obj(bolt).zone, Zone::Exile);
+    assert_eq!(g.count_in(0, "Cross Bolt", Zone::Exile), 1, "{}", log(&g));
+    assert_eq!(g.count_in(1, "Cross Giant", Zone::Battlefield), 1);
+}
+
+/// Without void it doesn't trigger (CR 603.4).
+#[test]
+fn roving_actuator_without_void_doesnt_trigger_cr603_4() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Mountain", "Mountain"])
+        .hand(0, &["Roving Actuator"])
+        .graveyard(0, &["Cross Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, 0, "Roving Actuator", &[]);
+    settle(&mut g);
+    assert_eq!(g.count_in(0, "Cross Bolt", Zone::Graveyard), 1, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Roving Actuator", Zone::Battlefield), 1);
+}
+
+// ---- Vote Out (convoke) --------------------------------------------------------------------
+
+/// Vote Out ({3}{B}): "Convoke ... Destroy target creature" (CR 702.51a,
+/// 701.8a): a Swamp pays {B}, three green creatures pay {3} (each a {1}),
+/// summoning sickness doesn't matter (convoke isn't {T}: CR 302.6).
+#[test]
+fn vote_out_convokes_with_creatures_cr702_51a() {
+    let mut g = scen()
+        .battlefield(0, &["Forest", "Forest", "Swamp", "Cross Giant", "Cross Sliver"])
+        .battlefield(1, &["Cross Giant"])
+        .hand(0, &["Vote Out", "Cross Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = cast(&mut g, 0, "Cross Bear", &[]);
+    settle(&mut g);
+    assert!(g.is_sick(bear));
+    let c = g.card(0, "Vote Out", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(c)), "{{3}}{{B}}: a Swamp and three creatures: {:?}", g.options_desc());
+    let theirs = bf(&g, 1, "Cross Giant");
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(theirs));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(theirs).zone, Zone::Graveyard, "{}", log(&g));
+    for n in ["Swamp", "Cross Bear", "Cross Giant", "Cross Sliver"] {
+        assert!(g.obj(bf(&g, 0, n)).tapped, "{n} tapped to pay\n{}", log(&g));
+    }
+    assert!(log(&g).contains("for convoke"), "{}", log(&g));
+}
+
+/// A black creature pays the {B} (a creature of that colour, CR 702.51a);
+/// green creatures can't, nor a colourless one.
+#[test]
+fn vote_out_a_creature_pays_a_pip_of_its_colour_cr702_51a() {
+    let g = scen()
+        .battlefield(0, &["Cross Bear", "Cross Giant", "Cross Sliver", "Cross Robot"])
+        .hand(0, &["Vote Out"])
+        .battlefield(1, &["Cross Giant"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Vote Out", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(c)), "no black source for {{B}}");
+    let mut g = scen()
+        .battlefield(0, &["Alpharael, Dreaming Acolyte", "Cross Giant", "Cross Sliver", "Cross Robot"])
+        .hand(0, &["Vote Out"])
+        .battlefield(1, &["Cross Giant"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Vote Out", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(c)), "Alpharael is black: {:?}", g.options_desc());
+    let theirs = bf(&g, 1, "Cross Giant");
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(theirs));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(theirs).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.permanents_of(0).filter(|&x| g.obj(x).tapped).count(), 4, "all four convoked");
+}
+
+/// Convoke is the spell's own: a spell without it can't be paid with
+/// creatures (Embrace Oblivion's {B} with only creatures).
+#[test]
+fn convoke_only_on_a_spell_with_convoke_cr702_51a() {
+    let g = scen()
+        .battlefield(0, &["Alpharael, Dreaming Acolyte", "Cross Trinket"])
+        .battlefield(1, &["Cross Giant"])
+        .hand(0, &["Embrace Oblivion"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Embrace Oblivion", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(c)), "{:?}", g.options_desc());
+}

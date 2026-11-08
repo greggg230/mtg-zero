@@ -324,7 +324,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.combat_damage_cant_be_prevented", combat_damage_cant_be_prevented);
         l.deny("CardPrinting.grants_toughness_as_damage_for_creatures_you_control", grants_toughness_as_damage_for_creatures_you_control);
         l.deny("CardPrinting.grants_toughness_as_station_power_for_creatures_you_control", grants_toughness_as_station_power_for_creatures_you_control);
-        l.deny("CardPrinting.has_convoke", has_convoke);
         let _ = flashback_cost_str; // display form of `flashback_cost`
         let _ = buyback_cost_str; // display form of `buyback_cost`
         l.deny_ne("CardPrinting.alt_cost_exile_from_hand_count", alt_cost_exile_from_hand_count, &generated::defaults::d_CardPrinting_alt_cost_exile_from_hand_count());
@@ -1139,6 +1138,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if *has_improvise && ty & types::LAND != 0 {
         l.unsupported("CardPrinting.has_improvise(a land)");
     }
+    // Convoke (CR 702.51a): on a spell; with improvise too, an artifact
+    // creature would be two sources of one tap (no card has both).
+    if *has_convoke && (ty & types::LAND != 0 || *has_improvise) {
+        l.unsupported("CardPrinting.has_convoke(a land, or with improvise)");
+    }
     // Static abilities (CR 604), before the triggered abilities: a granted
     // ward's trigger is this card's (ENGINE.md 27.3).
     let mut statics = Vec::new();
@@ -1634,6 +1638,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         one_noncreature_spell: *restricts_noncreature_spells_to_one_per_turn,
         first_spell_free: *grants_first_spell_each_turn_free,
         warp_from_graveyard: *warp_castable_from_graveyard,
+        convoke: *has_convoke,
         ..Default::default()
     };
     for r in external_cost_reductions {
