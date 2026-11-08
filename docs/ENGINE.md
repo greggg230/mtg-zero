@@ -18986,3 +18986,127 @@ No branch changes the action layout or the encoding: a card that can only be don
 change is left blocked and reported (the maintainer decides). New public state goes in the
 public-state gate's limits as before (a perturbation draws nothing from the shared stream).
 Builds use `CARGO_PROFILE_RELEASE_DEBUG=false` (E: is nearly full; no behaviour change).
+
+#### 99.13 W3: combat and abilities (branch `eoe-w3-combat`, from `eoe-base` 3a8dfb6)
+
+**Result.** All 14 of the workstream's cards supported (`SUPPORTED_EOE_COMBAT`): Astelli
+Reclaimer, Dyadrine, Synthesis Amalgam, Frenzied Baloth, Pain for All, Possibility Technician,
+Raging Ravine, Ragost, Deft Gastronaut, Requiem Monolith, Robe of Stars, Rust Harvester, Secluded
+Starforge, Sunstar Chaplain, Swarmyard, Terminal Velocity. EoE support on this branch alone 258 ->
+272 / 320. No IR defect found (docs/ir_defects.md 170-179 stay free): each card's IR read against
+its Oracle text. No layout or encoding change; cube support 546 / 546 and the behaviour digests
+unchanged (`f6543eb2b1b8752f`). Tests: `engine/tests/cards_eoe_w3.rs` (42), card table
+`tests/eoe_w3_kit` (the EoE table plus custom IR cards named "W3 ...", never in the fuzz or
+digest pools).
+
+**How.** New instructions `Ext::EoeW3(W3)` (`engine/src/eoe_w3.rs`, with the workstream's game
+state `Game::w3: W3State` and printing facts `CardDef::w3: W3Def`, one field each in the shared
+structs), the lowering `engine/src/lower/eoe_w3.rs` (a link in `lower_effect`'s chain; the cost
+atoms; the printing flags; an intervening-if hoist). Ops are named after rules actions:
+
+* **Granted triggered abilities, generalised** (CR 613.1f). Lane D's `Mark::DiesTriggerThisTurn`
+  (99.5) becomes `Mark::Granted { def, slot, this_turn }`: any triggered ability an effect gives a
+  permanent, until end of turn (the cleanup step ends it, 514.2) or for as long as it is that
+  object (400.7). It is the permanent's own ability (its source and controller, 113.7-113.8),
+  seen by `Game::event` like a printed one (`Game::granted_observers`: a permanent on the
+  battlefield that hasn't lost its abilities, or, for a leave-the-battlefield event, one that
+  left earlier in the same move, 603.10a). `lower::eoe_w3::grant_triggered_ability` lowers the
+  ability as a printed one into the card's delayed triggers (`W3::GrantTrigger`); Perigee
+  Beckoner's grant goes through it (its "dies" event's object is the creature as it last
+  existed, so `EoeD::ReturnEventCardTapped` now also finds the card it became one move later, as
+  `Ext::ReturnEventCardAs` does). Requiem Monolith (`GrantTriggeredAbilityUEOT`; "you draw that
+  many cards and lose that much life", the event's amount; "that creature's controller may have
+  this artifact deal 1 damage to it": `Op::May` asked of the target's controller, 608.2d),
+  Raging Ravine (`BecomeLandCreatureUEOT.granted_triggered_abilities`), Terminal Velocity (two
+  abilities for good on the permanent put from the hand, plus haste; "it deals damage equal to
+  its mana value to each creature" as it leaves: `W3::DamageEachSourceMv`, the permanent as it
+  last existed, its last-known damage source kept via `SEEN_LKI_DAMAGE`).
+* **Regeneration** (CR 701.19; Swarmyard). `W3::Regenerate` puts a shield on the object
+  (`Mark::RegenShield`, one per shield, ended by the cleanup step); `Game::destroy` (destroy
+  effects and the 704.5g/h state-based destruction alike) uses one up instead: damage removed,
+  tapped by its controller, removed from combat (701.19a, 506.4). "It can't be regenerated"
+  (701.19c; the cube's Damn, Snuff Out and Wrath of God, where nothing regenerates: no change
+  there) sets `W3State::no_regen` around the destruction (`W3::CantBeRegenerated`).
+* **Phasing** (CR 702.26; Robe of Stars). `Zone::PhasedOut`: a phased-out permanent leaves the
+  battlefield list without changing zones (702.26d: the same object, inc unchanged, its counters
+  and effects kept, no enter or leave triggers), so every "each permanent" loop and every
+  battlefield check treats it as though it doesn't exist (702.26b) with nothing to gate: no cube
+  card phases and no loop changed. What is attached to it phases out with it (indirectly,
+  702.26e; `W3State::indirect`); a creature leaves combat (506.4); damage on it is removed in the
+  cleanup step (514.2); the static fast paths' counts follow it. In its controller's untap step,
+  before untapping (502.1), it phases in with what phased out with it, attached again (702.26h),
+  in timestamp order. `W3::PhaseOut` ("equipped creature phases out": `On::Each(Filter::
+  HostOfSource)`).
+* **The mana spent to cast a spell** (CR 601.2h; Astelli Reclaimer, Dyadrine). The payment of a
+  spell whose card reads it records it (`Mark::ManaSpent`: the payment's units, none for a
+  creature tapped for convoke or an artifact for improvise), and the permanent the spell becomes
+  keeps it. `Filter::MvAtMostManaSpent` (Astelli's target: X = 5 cast normally, 3 warped, 0 put
+  onto the battlefield by Terminal Velocity); `W3Def::counters_mana_spent` (Dyadrine enters with
+  that many +1/+1 counters, 122.6, 614.1c); `W3::RemoveCounterFromEachMay` (Dyadrine's attack
+  trigger: two different creatures as a set, `PASS` first; no question when impossible; the
+  removal only after both are chosen, so a determinize refresh re-asks, 99.8).
+* **Costs.** "Exile an artifact card from your graveyard" (`Cost::exile_graveyard_types`, the
+  printed types, 400.7; Rust Harvester), "remove a +1/+1 counter from a creature you control"
+  (`Cost::remove_counter_from`, a `ChoosePermanent`; the mana payment reserves one such creature
+  as it does a sacrifice's, `Keep::sac`, since a mana ability that sacrifices it comes first,
+  601.2g-h: fuzz seed 2219, an Eldrazi Scion with the only counter sacrificed for the {2};
+  Sunstar Chaplain), "tap X untapped artifacts you control" (`Cost::tap_x`; Secluded Starforge:
+  X announced, 107.3a / 601.2b, at most what can be tapped with the mana still payable,
+  `Game::tap_x_most`; the taps paid before the mana, each leaving the rest and the mana payable,
+  `Game::tap_x_ok`, as teamwork's, docs/shortcuts.md 99.13.2), "sacrifice a Food".
+  `PumpTargetCreatureUntilEOT.power_bonus_from_x` (+X/+0, `Ext::ApplyPtX`).
+* **"Combat damage can't be prevented"** (CR 615.12, `W3Def::combat_unpreventable_all`, read
+  where combat damage would be prevented) and **"creature spells you control can't be
+  countered"** (CR 101.2, `W3Def::creature_spells_uncounterable`): Frenzied Baloth.
+* **Pain for All.** "Enchanted creature deals damage equal to its power to any other target"
+  (`W3::HostDamagesPower`: the creature the Aura is attached to, or was as it last existed,
+  `W3State::lki_host` kept with `SEEN_W3_HOST`, 608.2h; `Filter::HostOfSource` for "other") and
+  "whenever enchanted creature is dealt damage, it deals that much damage to each opponent"
+  (`W3::EventObjDamagesEachOpponent`, the creature as it last existed if it died).
+* **Possibility Technician.** `PermKind::Play`'s condition generalised: `only_if: PlayIf {
+  Always, AttackedWith(subtype) (lane C's attacked_subtype), ControlSubtype(subtype) }`, read in
+  `Game::permission_ok` as the card would be played (601.2a, 305.1); the 19 construction sites
+  take `PlayIf::Always`.
+* **Ragost.** "Artifacts you control are Foods in addition to their other types"
+  (`W3Def::grants_subtype`, read by `Game::has_subtype`; layer 4 from the card's definition,
+  613.6; docs/shortcuts.md 99.13.3) "and have '{2}, {T}, Sacrifice this artifact: You gain 3
+  life'" (the Food ability, 111.10b): a latent ability of the card (`W3Def::grants_activated`)
+  that each matching permanent has (`Game::granted_activated`, 613.1f), offered in the
+  `ACTIVATE` slots after its own (docs/shortcuts.md 99.13.1) and activated as the granting
+  definition's (`Game::activated_ref`). "At the beginning of each end step, if you gained life
+  this turn, untap Ragost": an intervening if (603.4,
+  `lower::eoe_w3::hoist_intervening_if_w3`, around `UntapSelf`).
+
+**The public-state gate** (ENGINE.md 58). `W3State.phased` and `.indirect` are Public (in
+`testkit::view_of`), the rest Derived. Four perturbations, none drawing from the gate's random
+stream (the first object in the encoded slots): a regeneration shield, the mana spent to cast a
+permanent, a phased-out permanent, one phased out indirectly. Each is a `NextLayout` limit:
+layout v5 encodes none of them (the battlefield alone, no per-permanent shield count or mana
+spent). The gate: 135 perturbations encoded, 5 deliberate limits, 7 gaps (was 3;
+`tests/az.rs::public_state_reaches_the_encoding` lists them). Granted triggered abilities have no
+perturbation of their own (as lane D's granted "dies" trigger): they are marks in the view, and
+the next layout should encode them too.
+
+**Shared files touched (small, additive):** `db.rs` (three `Cost` fields and `merge_costs`,
+`CardDef::w3`, `Filter::{HostOfSource, MvAtMostManaSpent}`, `seen_bits` for the LKI damage
+source), `game.rs` (`Mark::{Granted, RegenShield, ManaSpent}` replacing `DiesTriggerThisTurn`,
+`PlayIf`, `Game::w3`, the hooks in `add_card`, `move_card` and `put_onto_battlefield`,
+`combat_unpreventable`, `zone_list`), `ids.rs` (`Zone::PhasedOut`), `activate.rs` (the costs,
+the reservation, granted activated abilities, the tap-X order), `cast.rs` (filters,
+`permission_ok`, `choose_x`), `pay.rs` (the mana spent), `resolve.rs` (`destroy`, the entering
+mana spent, `spell_uncounterable`), `triggers.rs` (granted observers), `layers.rs`
+(`end_turn_effects`, `has_subtype`), `flow.rs` (phasing in the untap step, the LKI reset),
+`sba.rs` (a phased-out token is no stray token), `resolve_eoe_d.rs`, `program.rs` (`Ext::EoeW3`;
+lane D's grant op gone), `resolve_ext.rs`, `public_state.rs`, `testkit.rs`, `az/encode.rs` (one
+match arm), `lower/{mod, activated, effect, effect_ext, effect_eoe_d, printing, statics,
+trigger}.rs`, and the `PermKind::Play` construction sites; `tests/{support, az}.rs`.
+
+**Verification** (code at e503d54, the normal release profile). The full engine suite (`cargo
+test --release -p engine`): 1,895 passed, 0 failed, 15 ignored (1,853 at the base; the 42 more
+are this branch's card tests). Behaviour digests unchanged (combined `f6543eb2b1b8752f`). EoE
+support 272 / 320, cube 546 / 546. `FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games (wins 9,251 /
+9,105, 1,644 draws, mean 38.6 turns, 475.9 decisions), all four fuzz tests passed (1,011 s). The
+default `FUZZ_GAMES=20000`: 20,000 games (9,967 / 9,994, 39 draws, as before) and 1,000 matches,
+passed (430 s). Faults found on the way, both fixed with a test: fuzz seed 2219 (the mana
+payment sacrificing the only creature a counter could be removed from), seeds 56 and 1004 (the
+static fast paths' counts while a permanent is phased out).
