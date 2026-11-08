@@ -438,10 +438,8 @@ pub(crate) fn lower_state_pred(l: &mut Lowerer, p: &cats::StatePredicate) -> Opt
         S::LandsPlayedThisTurnAtLeast(nodes::LandsPlayedThisTurnAtLeast { n }) => {
             (Cond::LandsPlayedAtLeast(l.int("LandsPlayedThisTurnAtLeast.n", *n, 1, 99) as u8), true)
         }
-        other => {
-            l.unsupported(format!("StatePredicate:{}", other.tag()));
-            return None;
-        }
+        // (Edge of Eternities lane B's predicates, ENGINE.md 99.3.)
+        other => return super::eoe_b::lower_state_pred_eoe_b(l, other),
     })
 }
 

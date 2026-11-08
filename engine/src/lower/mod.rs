@@ -19,6 +19,7 @@ pub mod effect_tail2;
 pub mod effect_tail3;
 pub mod effect_walkers;
 pub mod effect_m7d;
+pub mod eoe_b;
 pub mod filter;
 pub mod printing;
 pub mod statics;
@@ -279,6 +280,11 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     ("Power Depot", "ir_defect(modular dropped, spend restriction narrowed, docs/ir_defects.md 47)"),
     ("Starfield Shepherd", "ir_defect(one search made modal, docs/ir_defects.md 48)"),
     ("Sunken Citadel", "ir_defect(chosen colour dropped, docs/ir_defects.md 50)"),
+    // A token's colour dropped (docs/ir_defects.md 51; entry 12 again).
+    ("Cosmogrand Zenith", "ir_defect(Human Soldier token's white dropped, docs/ir_defects.md 51)"),
+    ("Honored Knight-Captain", "ir_defect(Human Soldier token's white dropped, docs/ir_defects.md 51)"),
+    ("Knight Luminary", "ir_defect(Human Soldier token's white dropped, docs/ir_defects.md 51)"),
+    ("Rayblade Trooper", "ir_defect(Human Soldier token's white dropped, docs/ir_defects.md 51)"),
 
     // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79).
 

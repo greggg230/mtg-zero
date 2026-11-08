@@ -593,7 +593,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             0,
             ActivatedDef {
                 cost: Cost { tap: true, life, ..Cost::default() },
-                effect: ActEffect::Mana(ManaAbility { prod: ManaProd::One(intrinsic), damage_to_you: 0, sac_if_no: None, only: 0, uncounterable: false, haste: false }),
+                effect: ActEffect::Mana(ManaAbility { prod: ManaProd::One(intrinsic), damage_to_you: 0, sac_if_no: None, only: 0, uncounterable: false, haste: false, opp_life: 0 }),
                 sorcery: false,
                 instant_only: false,
                 exhaust: false,
@@ -621,7 +621,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             0,
             ActivatedDef {
                 cost: Cost { tap: true, ..Cost::default() },
-                effect: ActEffect::Mana(ManaAbility { prod: ManaProd::Chosen, damage_to_you: 0, sac_if_no: None, only: 0, uncounterable: false, haste: false }),
+                effect: ActEffect::Mana(ManaAbility { prod: ManaProd::Chosen, damage_to_you: 0, sac_if_no: None, only: 0, uncounterable: false, haste: false, opp_life: 0 }),
                 sorcery: false,
                 instant_only: false,
                 exhaust: false,
@@ -1975,7 +1975,8 @@ pub(crate) fn lower_discounts(l: &mut Lowerer, cost_reductions: &[cats::CostRedu
                     discounts.push(crate::db::Discount::PerControlled(f, n));
                 }
             }
-            other => l.unsupported(format!("CostReduction.condition({})", other.tag())),
+            // (Edge of Eternities lane B's conditions, ENGINE.md 99.3.)
+            other => discounts.extend(super::eoe_b::lower_discount_eoe_b(l, n, other)),
         }
     }
     discounts

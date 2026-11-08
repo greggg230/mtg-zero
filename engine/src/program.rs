@@ -98,6 +98,34 @@ pub enum Amount {
     CountTypesTimes(u16, u8),
 }
 
+/// The instructions Edge of Eternities lane B added (ENGINE.md 99.3), inside
+/// `Ext::EoeB`. Same rules as `Op`: named after rules actions, never cards.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum EoeB {
+    /// Count this resolution of the ability (of this source object, as
+    /// `CounterOrDoubleOnSecond`); unless it is the second time it resolved
+    /// this turn, continue at `to` ("if this is the second time this ability
+    /// has resolved this turn").
+    JumpUnlessSecondResolution { to: u16 },
+    /// The source deals `amount` damage to the first legal target of `tgt`
+    /// (a creature); unless excess damage was dealt (CR 120.10: damage
+    /// beyond lethal damage, 120.6 / 702.2c), continue at `to`.
+    DamageJumpUnlessExcess { amount: Amount, tgt: u8, to: u16 },
+    /// The controller exiles cards from the top of their library until they
+    /// exile a nonland card (CR 701.20a: each revealed); they may cast that
+    /// card this turn.
+    ExileUntilNonlandMayCastThisTurn,
+}
+
+impl EoeB {
+    fn jump_target(&mut self) -> Option<&mut u16> {
+        match self {
+            EoeB::JumpUnlessSecondResolution { to } | EoeB::DamageJumpUnlessExcess { to, .. } => Some(to),
+            EoeB::ExileUntilNonlandMayCastThisTurn => None,
+        }
+    }
+}
+
 /// The instructions M7d added (ENGINE.md 31), inside `Ext::M7d`. Same rules
 /// as `Op`: named after rules actions, never cards.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -853,6 +881,8 @@ pub enum Ext {
     /// The creature the source reanimated (`Mark::Reanimated`, as the source
     /// last existed) is sacrificed by its controller.
     SacrificeReanimated,
+    /// The Edge of Eternities lane B instructions (ENGINE.md 99.3).
+    EoeB(EoeB),
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -1124,6 +1154,7 @@ impl Op {
             Op::Ext(Ext::JumpUnlessEventObj { to, .. }) => Some(to),
             Op::Ext(Ext::OnceMay { skip }) => Some(skip),
             Op::Ext(Ext::OfferPayOther { if_paid, .. }) => Some(if_paid),
+            Op::Ext(Ext::EoeB(x)) => x.jump_target(),
             _ => None,
         }
     }

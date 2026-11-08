@@ -317,6 +317,7 @@ impl Game {
                                 source_def: def,
                                 slot: self.db.def(def).delayed_base + k,
                                 ev: crate::triggers::EvCtx { obj: Some(entered), ..Default::default() },
+                                turn: self.turn.number,
                             });
                         }
                         if let Some((def, slot)) = grant {

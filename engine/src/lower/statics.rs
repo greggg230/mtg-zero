@@ -464,9 +464,6 @@ pub(crate) fn lower_pt_formula(l: &mut Lowerer, f: &cats::PTFormula) -> Option<P
         }
         // A formula no supported card uses yet (the EoE port adds them): the
         // card stays blocked, named by the formula's class.
-        other => {
-            l.unsupported(format!("PTFormula:{}", other.tag()));
-            return None;
-        }
+        other => return super::eoe_b::lower_pt_formula_eoe_b(l, other),
     })
 }

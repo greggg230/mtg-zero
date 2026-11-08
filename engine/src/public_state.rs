@@ -692,6 +692,7 @@ pub fn perturbations() -> Vec<Perturbation> {
                 source_def: a.g.objs[c.i()].def,
                 slot: 0,
                 ev: crate::triggers::EvCtx { obj: Some(a.g.obj_ref(c)), ..Default::default() },
+                turn: a.g.turn.number,
             };
             a.g.delayed.push(d);
             Some(format!("at the next end step, about {}", a.g.name(c)))

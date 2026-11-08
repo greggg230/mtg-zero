@@ -451,6 +451,9 @@ pub struct Delayed {
     pub slot: u8,
     /// "That card", "that much".
     pub ev: crate::triggers::EvCtx,
+    /// The turn it was created in (`Turn::number`; read by
+    /// `DelayedWhen::YourNextTurnEndStep`).
+    pub turn: u32,
 }
 
 /// Where a moving card goes after the replacement effects of its
@@ -1471,6 +1474,7 @@ impl Game {
                 source_def: def,
                 slot: self.db.def(def).delayed_base + k,
                 ev: crate::triggers::EvCtx { obj: Some(r), ..Default::default() },
+                turn: self.turn.number,
             });
         }
         if copy_choice {

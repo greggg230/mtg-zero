@@ -67,6 +67,7 @@ permission) and a consumer can go wrong with it.
 | 48 | Starfield Shepherd (ENGINE.md 99.3) | choice reshaped | `ModalChooseOne [search basic Plains, search creature MV <= 1]` | one search for "a basic Plains card or a creature card with mana value 1 or less" | the library-search phrase parser | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 49 | Pull Through the Weft (ENGINE.md 99.3) | clause dropped | `ReturnUpToNNonlandPermanentCardsFromGraveyardToHand` only | "... then return up to two target land cards from your graveyard to the battlefield tapped" | `effects/generic/bounce.py` (its docstring: "the second ... clause is dropped at parse time") | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 50 | Sunken Citadel (ENGINE.md 99.3) | choice dropped | two mana abilities making `any` colour; no "as it enters, choose a color" | one mana / two mana "of the chosen color" | the land builder | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 51 | Knight Luminary, Cosmogrand Zenith, Honored Knight-Captain, Rayblade Trooper (ENGINE.md 99.3) | colour dropped | the Human Soldier token printing with no `color_indicator` (colourless) | `color_indicator: [W]` ("a 1/1 white Human Soldier creature token") | the token-phrase parser (`_token_printing`), as entry 12 | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -524,6 +525,20 @@ activate abilities of land sources."
   chosen as it enters: any colour on every activation.
 * Should be: the entering choice and mana of that colour.
 * Engine: blocked (`lower::IR_DEFECTS`).
+
+**51. The Human Soldier token's white dropped.** Oracle (Knight Luminary): "When this creature
+enters, create a 1/1 white Human Soldier creature token." Cosmogrand Zenith ("create two 1/1 white
+Human Soldier creature tokens"), Honored Knight-Captain and Rayblade Trooper make the same token.
+
+* IR: the `CreateToken` printing `{ name: "Human Soldier", card_types: [Creature], subtypes: [Human,
+  Soldier], power: 1, toughness: 1 }` with no `color_indicator`: a colourless token.
+* Should be: `color_indicator: ["W"]` (as entry 12's fix gives Boo; the set's other tokens, Robot,
+  Drone, Sliver, Munitions, Eldrazi Scion, are colourless in the Oracle text too, and right).
+* Source: the token-phrase parser (`_token_printing`), on the path these four cards take.
+* Engine: blocked (`lower::IR_DEFECTS`). Knight Luminary and Cosmogrand Zenith were supported at
+  the import and are removed from `SUPPORTED_EOE_BASE`; found by a card test
+  (`tests/cards_eoe_b_base.rs`) asserting the token's colour, then a scan of every token printing
+  of the EoE IR against its Oracle text.
 
 ## Suspected defects (representational)
 

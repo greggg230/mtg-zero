@@ -767,7 +767,27 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 b.op(Op::LoseLife { who: Who::You, n: Amount::LkiManaValue });
             }
         }
-        E::ReturnCreatureFromYourGraveyardToBattlefield(nodes::ReturnCreatureFromYourGraveyardToBattlefield {
+        // "Return target land card from your graveyard to your hand"
+        // (Petrified Field; ENGINE.md 99.3): the same node as the others.
+        E::ReturnTargetLandFromGraveyardToHand(nodes::ReturnTargetLandFromGraveyardToHand {
+            creature,
+            artifact,
+            land,
+            nonland_permanent,
+            or_enchantment,
+            or_spacecraft,
+            or_artifact,
+            max_mv,
+            min_n,
+            max_n,
+            max_total_mv,
+            destination,
+            plus_one_counter,
+            log_suffix,
+            untargeted_all,
+            target_kind,
+        })
+        | E::ReturnCreatureFromYourGraveyardToBattlefield(nodes::ReturnCreatureFromYourGraveyardToBattlefield {
             creature,
             artifact,
             land,

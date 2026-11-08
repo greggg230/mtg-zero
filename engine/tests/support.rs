@@ -624,7 +624,6 @@ const SUPPORTED_EOE_BASE: &[&str] = &[
     "Celestial Colonnade",
     "Cloudsculpt Technician",
     "Consult the Star Charts",
-    "Cosmogrand Zenith",
     "Creeping Tar Pit",
     "Cryogen Relic",
     "Dual-Sun Adepts",
@@ -650,7 +649,6 @@ const SUPPORTED_EOE_BASE: &[&str] = &[
     "Intrepid Tenderfoot",
     "Island",
     "Kavaron Turbodrone",
-    "Knight Luminary",
     "Lightless Evangel",
     "Lumbering Falls",
     "Mana Confluence",
@@ -704,6 +702,18 @@ const SUPPORTED_EOE_A: &[&str] = &[
 ];
 /// Lane B: lands, mana abilities, Lander tokens (and the base list's audit).
 const SUPPORTED_EOE_B: &[&str] = &[
+    "Emergency Eject",
+    "Fungal Colossus",
+    "Grove of the Burnwillows",
+    "Harmonious Grovestrider",
+    "Kav Landseeker",
+    "Lotus Field",
+    "Meteor Crater",
+    "Orbital Plunge",
+    "Petrified Field",
+    "Reflecting Pool",
+    "Tannuk, Memorial Ensign",
+    "Territorial Bruntar",
 ];
 /// Lane C: void, warp, spells cast this turn, cost reductions, graveyard,
 /// exile, library and hand effects.

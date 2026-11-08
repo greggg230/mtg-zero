@@ -134,6 +134,7 @@ impl Game {
             crate::db::Discount::PerControlled(f, n) => {
                 (self.permanents_of(p).filter(|&c| self.card_matches(f, c, &ctx)).count() as u8).saturating_mul(*n)
             }
+            crate::db::Discount::PerDifferentlyNamedLand(n) => self.differently_named_lands(p).saturating_mul(*n),
         }
     }
 

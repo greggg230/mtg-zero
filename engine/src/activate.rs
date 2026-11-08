@@ -44,6 +44,10 @@ impl Game {
             Cond::SourceCountersIn(..) => false,
             Cond::GainedLifeThisTurn => pl.gained_life,
             Cond::OpponentHasMoreCards => self.players[crate::ids::opp(p) as usize].hand.len() > pl.hand.len(),
+            Cond::OpponentControlsMoreLands => {
+                let lands = |q: PlayerId| self.permanents_of(q).filter(|&x| self.is_type(x, crate::db::types::LAND)).count();
+                lands(crate::ids::opp(p)) > lands(p)
+            }
             Cond::SpellsCastThisTurn { n, noncreature } => {
                 (if *noncreature { pl.noncreature_cast } else { pl.spells_cast }) == *n
             }

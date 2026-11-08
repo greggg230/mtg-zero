@@ -544,6 +544,7 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
     let mut sac_if_no = None;
     let (mut only, mut uncounterable) = (0u8, false);
     let mut haste = false;
+    let mut opp_life = 0u8;
     let main = match e {
         E::Sequence(nodes::Sequence { effects }) => {
             let [first, rest @ ..] = &effects[..] else {
@@ -560,6 +561,11 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
                     // ability, CR 605.3b).
                     E::SacrificeSelfIfNoNamedCounters(nodes::SacrificeSelfIfNoNamedCounters { kind }) => {
                         sac_if_no = Some(super::effect_ext::counter_by_name(l, kind));
+                    }
+                    // "Each opponent gains 1 life" (Grove of the Burnwillows;
+                    // part of the mana ability, CR 605.3b; ENGINE.md 99.3).
+                    E::GrantLifeToEachOpponent(nodes::GrantLifeToEachOpponent { amount }) => {
+                        opp_life += l.int("GrantLifeToEachOpponent.amount", *amount, 1, 20) as u8;
                     }
                     other => l.unsupported(format!("ManaAbility:{}", other.tag())),
                 }
@@ -777,12 +783,10 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             let els = fixed(l, else_effect)?;
             ManaProd::IfElse { cond, then, els }
         }
-        other => {
-            l.unsupported(format!("ManaAbility:{}", other.tag()));
-            return None;
-        }
+        // (Edge of Eternities lane B's productions, ENGINE.md 99.3.)
+        other => super::eoe_b::lower_mana_prod_eoe_b(l, other)?,
     };
-    Some(ManaAbility { prod, damage_to_you, sac_if_no, only, uncounterable, haste })
+    Some(ManaAbility { prod, damage_to_you, sac_if_no, only, uncounterable, haste, opp_life })
 }
 
 /// The types a production can make (which `produces` colours it covers).
@@ -796,6 +800,6 @@ pub(crate) fn prod_mask(p: &ManaProd) -> ManaMask {
         ManaProd::OneOf(v) => v.iter().flat_map(|f| (0..6).filter(move |&i| f[i] > 0)).fold(0, |m, i| m | (1 << i)),
         ManaProd::Linked | ManaProd::Chosen => COLORS,
         ManaProd::IfCounter { then, els, .. } => then | els,
-        ManaProd::SacrificedLand => 0b11_1111,
+        ManaProd::SacrificedLand | ManaProd::LandsCouldProduce => 0b11_1111,
     }
 }

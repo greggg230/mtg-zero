@@ -273,6 +273,8 @@ pub enum PtCda {
     /// Level up (CR 711): base power and toughness by the number of
     /// counters of this kind, per range (lo, hi or none, p, t).
     Leveler { counter: Counter, ranges: Vec<(u8, Option<u8>, i32, i32)> },
+    /// Power and toughness = the lands you control (ENGINE.md 99.3).
+    LandsYouControl,
 }
 
 /// A predicate over targets (players and objects). At top level the type
@@ -624,6 +626,10 @@ pub enum DelayedWhen {
     NextUpkeep,
     /// At the beginning of its controller's next main phase.
     YourNextMainPhase,
+    /// At the beginning of the end step of its controller's next turn (not
+    /// the turn it was created in: Kav Landseeker's "on your next turn",
+    /// ENGINE.md 99.3).
+    YourNextTurnEndStep,
 }
 
 impl EventKind {
@@ -892,6 +898,8 @@ pub enum Cond {
     /// You played at least n lands this turn (Fastbond: "if it wasn't the
     /// first land you played this turn").
     LandsPlayedAtLeast(u8),
+    /// An opponent controls more lands than you (ENGINE.md 99.3).
+    OpponentControlsMoreLands,
 }
 
 impl Cond {
@@ -925,7 +933,8 @@ impl Cond {
             | Cond::HasInitiative
             | Cond::CompletedDungeon
             | Cond::CityBlessing
-            | Cond::LandsPlayedAtLeast(_) => false,
+            | Cond::LandsPlayedAtLeast(_)
+            | Cond::OpponentControlsMoreLands => false,
         }
     }
 }
@@ -970,6 +979,11 @@ pub enum ManaProd {
     /// kind, else in `els` (Gemstone Caverns: "add {C}. If it has a luck
     /// counter on it, instead add one mana of any color").
     IfCounter { counter: Counter, then: ManaMask, els: ManaMask },
+    /// One mana of any type a land you control could produce (CR 106.7;
+    /// Reflecting Pool, ENGINE.md 99.3): the types the mana abilities of
+    /// those lands make, other abilities of this kind making none of their
+    /// own.
+    LandsCouldProduce,
 }
 
 /// A mana ability's effect: the mana, plus damage its source deals to its
@@ -989,6 +1003,9 @@ pub struct ManaAbility {
     /// "If any of that mana is spent on a creature spell, it gains haste
     /// until end of turn" (Arena of Glory; the pool's `haste` mana).
     pub haste: bool,
+    /// "Each opponent gains n life" (Grove of the Burnwillows; ENGINE.md
+    /// 99.3), as the mana is added.
+    pub opp_life: u8,
 }
 
 /// `ManaAbility::only`: the mana may be spent only to cast an artifact
@@ -1638,6 +1655,8 @@ pub enum Discount {
     PerBasicLandType(u8),
     /// n less per permanent you control matching the filter (affinity).
     PerControlled(Filter, u8),
+    /// n less per differently named land you control (ENGINE.md 99.3).
+    PerDifferentlyNamedLand(u8),
 }
 
 impl CardDef {

@@ -400,6 +400,10 @@ pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<Ca
         }
         // (Read from the sacrificed land as the ability is activated.)
         ManaProd::SacrificedLand => Vec::new(),
+        ManaProd::LandsCouldProduce => {
+            let m = g.lands_could_produce(p);
+            (0..6).filter(|&t| m & (1 << t) != 0).map(|t| one(t, 1)).collect()
+        }
         ManaProd::ColorAmong(f) => {
             let m = g.colors_among(p, f);
             (0..5).filter(|&t| m & (1 << t) != 0).map(|t| one(t, 1)).collect()
@@ -901,6 +905,10 @@ impl Game {
                 let m = self.colors_among(p, f) & COLORS;
                 (m != 0).then_some(Yield::One(Unit { life, ..Unit::free(m) }))
             }
+            ManaProd::LandsCouldProduce => {
+                let m = self.lands_could_produce(p);
+                (m != 0).then_some(Yield::One(Unit { life, ..Unit::free(m) }))
+            }
             _ => {
                 debug_assert!(life == 0, "lowering keeps life costs to one-mana abilities");
                 let prods = productions(self, p, prod, src);
@@ -1275,6 +1283,10 @@ impl Game {
         }
         if dmg > 0 {
             self.deal_damage(DamageSource { controller: p, ..dsrc }, Target::Player(p), dmg as i32);
+        }
+        // "Each opponent gains 1 life" (ENGINE.md 99.3).
+        if let Some(n) = ad.mana().map(|m| m.opp_life).filter(|&n| n > 0) {
+            self.gain_life(crate::ids::opp(p), n as i32);
         }
         // "If there are no <kind> counters on this, sacrifice it" (the
         // ability's effect, after its mana).

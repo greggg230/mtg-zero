@@ -297,6 +297,12 @@ impl Game {
         self.cond_holds(c, p)
     }
 
+    /// Tap or untap permanent `c` directly: a test's setup, not a game
+    /// action (no event; ENGINE.md 99.3).
+    pub fn set_tapped(&mut self, c: CardIdx, tapped: bool) {
+        self.objs[c.i()].tapped = tapped;
+    }
+
     pub fn kind(&self) -> Option<DecisionKind> {
         self.pending.as_ref().map(|d| d.kind)
     }
@@ -608,6 +614,10 @@ impl Game {
         for d in &self.delayed {
             v.extend([d.when as u64, d.controller as u64, d.source_def as u64, d.slot as u64, d.ev.amount as u64]);
             v.push(d.ev.obj.map_or(u64::MAX, live_place));
+            // (The turn matters only to "your next turn", ENGINE.md 99.3.)
+            if d.when == crate::db::DelayedWhen::YourNextTurnEndStep {
+                v.push(d.turn as u64);
+            }
         }
         v.push(u64::MAX);
         // Who chose who takes the first turn (CR 103.1); sideboards (ENGINE.md

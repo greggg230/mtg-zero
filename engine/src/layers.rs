@@ -586,6 +586,11 @@ impl Game {
                 let n = self.basic_land_types(self.objs[c.i()].controller) as i32;
                 (n, n)
             }
+            PtCda::LandsYouControl => {
+                let ctl = self.objs[c.i()].controller;
+                let n = self.permanents_of(ctl).filter(|&x| self.is_type(x, crate::db::types::LAND)).count() as i32;
+                (n, n)
+            }
         }
     }
 
