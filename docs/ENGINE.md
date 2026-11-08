@@ -18985,4 +18985,6 @@ mechanism has exactly one owner:
 No branch changes the action layout or the encoding: a card that can only be done with a layout
 change is left blocked and reported (the maintainer decides). New public state goes in the
 public-state gate's limits as before (a perturbation draws nothing from the shared stream).
-Builds use `CARGO_PROFILE_RELEASE_DEBUG=false` (E: is nearly full; no behaviour change).
+Builds use the normal release profile (debug info on): the agents started without debug info to
+save space on E:, and the user preferred freeing space to any shortcut, so 39 stale cargo target
+dirs of merged or deleted branches (47 GB) were removed instead and the agents switched back.
