@@ -18106,3 +18106,154 @@ Each lane appends its own subsection here (99.2 lane A, 99.3 lane B, 99.4 lane C
 Merge order B, A, C, D (B's base audit first). Then the cross-lane cards, the IR defects the lanes
 list (one mtg-bot batch and one re-export, so the schema changes once), and the 20k fuzz over the
 EoE table.
+
+### 99.3 Lane B: lands, mana abilities, Lander tokens; the audit of the base cards (branch `eoe-b-lands`)
+
+**Why.** Lane B's 33 features (docs/eoe_lanes.md) and the audit of `SUPPORTED_EOE_BASE`: the 93
+cards the import supported had never been read against their Oracle text, and the import had
+already found one silent drop (docs/ir_defects.md 20).
+
+**The audit of the base cards.** A script compared each card's IR (`data/cards/eoe.ir.json`) with
+its Scryfall object field by field: mana cost, card types, subtypes, supertypes, power and
+toughness, loyalty, the evergreen keywords, and for lands the colours of every "Add" against
+`produces` and the mana abilities. Every type, cost and body matched; the keyword differences were
+all mechanics the IR states elsewhere (warp as `warp_cost`, surveil and mill as effects, ward as
+`ward_*`, affinity as a cost reduction, landfall as an enters trigger). Then each card's IR was read
+next to its Oracle text, ability by ability, and the 59 cards new to mtg-zero got card tests
+(`tests/cards_eoe_b_base.rs`, `cards_eoe_b_base2.rs`: bodies and keywords, warp costs, every
+trigger, activated ability, static ability and spell), which found one more defect. Removed from
+`SUPPORTED_EOE_BASE` (93 -> 84) and blocked through `lower::IR_DEFECTS`, each an entry of
+docs/ir_defects.md:
+
+| Card | What the IR drops or reshapes | Entry |
+|---|---|---|
+| Blinkmoth Nexus | its animation isn't an artifact ("a 1/1 Blinkmoth artifact creature"): the schema can't say it | 41 |
+| Divert Disaster | a hard counter: "unless its controller pays {2}. If they do, you create a Lander token" dropped | 43 |
+| Unravel | "If the amount of mana spent ... was less than its mana value, you draw a card" dropped | 44 |
+| Xu-Ifit, Osteoharmonist | "It's a Skeleton in addition to its other types and has no abilities" dropped | 45 |
+| High Market | "Sacrifice a creature" widened to "another creature or artifact" | 46 |
+| Power Depot | "{T}: Add {C}" and Modular 1 dropped; the spend restriction loses "activate abilities of artifacts" | 40, 47 |
+| Starfield Shepherd | one search for "a basic Plains card or a creature card with mana value 1 or less" made modal | 48 |
+| Knight Luminary, Cosmogrand Zenith | the white Human Soldier token left colourless (found by the card test) | 51 |
+
+Read and kept, with notes: Mm'menon's and Weapons Manufacturing's "an artifact you control enters"
+carry an extra `Not(IsSelf)`, and Munitions an invented "Munitions" subtype; neither can be
+observed in this table (neither card can be an artifact entering; nothing reads an artifact
+subtype). Lightless Evangel's "whenever you sacrifice" is the `is_sacrificed` event of your
+permanents, the same thing (CR 701.21a). The cube's own tests cover the 20 nonbasic cards the set
+shares with it: `cards_eoe_b_base.rs::the_cards_the_set_shares_with_the_cube_lower_the_same`
+confirms the 25 shared cards (basics included) have the same IR printing in both exports, lower to
+the same `CardDef` (lowering reads only the printing), and are supported in both tables with the
+same characteristics and ability counts.
+
+**`mana_only_from_produces(land without a mana ability)` (18 cards) is an IR defect.** Every one of
+them has "{T}: Add {C}." in its Oracle text; 16 have no mana ability in the IR at all and rely on
+the Python engine's "any land pays one generic" fallback (mtg-bot's own comment: "pre-existing
+printings rely on it for their dropped `{T}: Add {C}.` lines"). Reading the absence as "{T}: Add
+{C}" would invent data, and the fallback isn't that ability anyway (no {C} pip, not a mana
+ability): docs/ir_defects.md 40 (19 lands, the three with another mana ability included). The other
+two (Meteor Crater, Reflecting Pool) had a mana ability the engine didn't lower: done below.
+
+**The Lander.** CR 111.10's predefined token, "{2}, {T}, Sacrifice this token: Search your library
+for a basic land card, put it onto the battlefield tapped, then shuffle." The 13 `CreateToken`
+printings of it in the IR drop the {T} (docs/ir_defects.md 42: observable when a Lander is tapped
+by another cost or effect, or made a creature); those cards are blocked. The engine has the rules'
+Lander (`lower/eoe_b.rs::LANDER_TOKEN`, lowered like any printing) for the effect classes that make
+one without a printing; a custom card with the IR's printing plus {T} lowers to the same token
+definition (`the_fixed_ir_lander_printing_is_the_rules_lander`), so the 8 lane-B-only cards among
+the 13 are supported once the IR is fixed.
+
+**Features** (`lower/eoe_b.rs`, `resolve_eoe_b.rs`, `Ext::EoeB`; hooks in the catch-alls of the
+shared lowerings):
+
+* `SearchLibraryForBasicLandTapped` -> `Op::Search` (basic land, battlefield tapped, may fail: CR
+  701.23).
+* `CreateLanderAndScheduleSacrifice` (Kav Landseeker: "At the beginning of the end step on your next
+  turn, sacrifice that token"): a delayed ability about the token with a new
+  `DelayedWhen::YourNextTurnEndStep`; `Delayed` gains `turn` (the turn it was created in; the end
+  step of the controller's turn whose number differs). Hashed in the state vector only for this
+  timing, so digests are unchanged.
+* `DestroyTargetNonlandPermanentWithLanderForController` (Emergency Eject): `Remember`, `Destroy`,
+  the Lander for the remembered controller (CR 608.2h), whether or not it was destroyed.
+* `DealDamageToTargetCreatureWithExcessLanderRider` (Orbital Plunge): `EoeB::DamageJumpUnlessExcess`,
+  excess damage = dealt beyond lethal damage (CR 120.10; 120.6 toughness less damage marked, 702.2c
+  deathtouch).
+* `SacrificeNLandsYouControl` (Lotus Field) -> `Ext::SacrificeN` (itself allowed, CR 701.21a).
+* `TannukEnsignLandfallEffect`: 1 damage to each opponent, then `EoeB::JumpUnlessSecondResolution`
+  (the `Game::resolved` count per source object, as `Ext::CounterOrDoubleOnSecond`): the
+  draw on the second resolution only.
+* `TerritorialBruntarLandfallEffect`: `EoeB::ExileUntilNonlandMayCastThisTurn` (CR 701.20a, each
+  card revealed, a cast permission for this turn).
+* `ReturnTargetLandFromGraveyardToHand` (Petrified Field): the `ReturnFromGraveyard` node's lowering.
+* Mana: `AddOneManaOfChosenPermanentColor` (Meteor Crater) -> `ManaProd::ColorAmong(permanent)`;
+  `AddOneManaFromControlledLandsProductions` (Reflecting Pool) -> new
+  `ManaProd::LandsCouldProduce` (CR 106.7: the types the lands' mana abilities would make, costs
+  ignored, abilities of the same kind adding none: two Pools alone make nothing);
+  `GrantLifeToEachOpponent` inside a mana ability (Grove of the Burnwillows) -> `ManaAbility.opp_life`,
+  applied in `activate_mana_costs`.
+* `LandsYouControlPT` -> `PtCda::LandsYouControl` (CR 604.3); `PerDifferentlyNamedLand` ->
+  `Discount::PerDifferentlyNamedLand` (`Game::differently_named_lands`, nameless permanents not
+  counted); `OpponentControlsMoreLandsThanYou` -> `Cond::OpponentControlsMoreLands` (an
+  intervening "if").
+* `BecomeLandCreatureUEOT.granted_activated_abilities` (Lavaclaw Reaches, Wandering Fumarole):
+  latent activated abilities the land has until end of turn (`Mod::GainLatent`, as Urza's Saga);
+  `PumpSelfXPowerUEOT` -> `Ext::ApplyPtX` on the source with the ability's X (the "{X} not used"
+  guard accepts an effect that reads X); `SwitchSourcePowerToughnessUEOT` -> new `Mod::SwitchPt`,
+  layer 7d after counters (CR 613.4d; two switches cancel).
+* For IR-blocked or cross-lane cards, on custom IR cards (`tests/eoe_b/mod.rs`): `UntapTargetLand`
+  (Deserted Temple), `PutBasicLandFromHandOntoBattlefieldTapped` (Terrain Generator),
+  `DestroyTargetNonlandPermanent` (Thaumaton Torpedo), and the Lander printing with {T}.
+* `testkit::Game::set_tapped` (test setup only).
+
+**Cards** (`SUPPORTED_EOE_B`, 14): Emergency Eject, Fungal Colossus, Grove of the Burnwillows,
+Harmonious Grovestrider, Kav Landseeker, Lavaclaw Reaches, Lotus Field, Meteor Crater, Orbital
+Plunge, Petrified Field, Reflecting Pool, Tannuk, Memorial Ensign, Territorial Bruntar, Wandering
+Fumarole; each read against its Oracle text and tested (`tests/cards_eoe_b.rs`). EoE support 93 ->
+98 (84 base + 14).
+
+**Supported once the IR is fixed** (their only blockers are entries 40 and 42; the features are in):
+Beamsaw Prospector, Biomechan Engineer, Dauntless Scrapbot, Galactic Wayfarer, Glacier Godmaw,
+Sami's Curiosity, Seedship Agrarian, Sunstar Expansionist (Landers); Bonders' Enclave, Cathedral of
+War, Deserted Temple, Terrain Generator ({C} lands).
+
+**Not done, and why:**
+
+* Raging Ravine (`granted_triggered_abilities`): the engine has latent activated abilities but no
+  latent triggered ones; a delayed trigger "whenever it attacks this turn" (`TriggerThisTurnFor`)
+  is not the creature's own ability (its controller, losing abilities), so it would approximate.
+* Eldrazi Temple, Sunken Citadel, Plaza of Heroes (`spend_restriction` ColorlessEldrazi,
+  LandActivation, LegendaryPermanentAbility): the pool's restricted mana is built around
+  artifact-only {C} (`pay.rs`); new kinds belong with lane A's `ArtifactActivation` after the merge.
+* Gene Pollinator (a mana ability costing {T} and tapping another permanent): payment treats a
+  card's mana abilities as tapping or sacrificing their source, and "tap an untapped permanent" is
+  only a whole cost (`pay::TAP_FOR`); combining both is new payment work.
+* Magus of the Moon (`nonbasic_lands_are_mountains`, CR 305.7: layer 4 land types replacing the
+  lands' abilities with "{T}: Add {R}"): not started.
+* `ManaAbility.cost.mana(more than one mana)`, `BecomesCopyOfTargetLand`,
+  `optional_copy_land_from_graveyard`: only IR-blocked cards use them (Cascading Cataracts, Crystal
+  Quarry, Thespian's Stage, Echoing Deeps).
+* Cross-lane features of lane B not done: `CardPrinting.devour_land_multiplier` (Famished
+  Worldsire), `CardPrinting.has_convoke` (Vote Out), `OptionalSacLandOrLanderForBasicLandRamp`
+  (Larval Scoutlander), `ReturnTargetCreatureToOwnersHand.allow_nonland_permanent` (Desculpting
+  Blast: the node lane D also extends).
+
+**Cross-lane cards** (99.6) needing lane B's part, now in: Thaumaton Torpedo (lane C's
+`AttackedWithThisTurn` reduction left), Survey Mechan (lane D's effect left; the discount is in),
+the Lander cards Bioengineered Future, Biotech Specialist, Edge Rover, Lithobraking, Scrounge for
+Eternity (entry 42, then lanes A, C, D); the {C} lands Blast Zone, Contested War Zone, Endless
+Sands, Inventors' Fair, Mirrorpool, Mystifying Maze, Nesting Grounds, Swarmyard (entry 40, then
+their other lane's effect).
+
+**Shared files touched** (additive): `db.rs` (variants `ManaProd::LandsCouldProduce`,
+`PtCda::LandsYouControl`, `Discount::PerDifferentlyNamedLand`, `Cond::OpponentControlsMoreLands`,
+`DelayedWhen::YourNextTurnEndStep`, `Mod::SwitchPt`, field `ManaAbility::opp_life`), `game.rs`
+(`Delayed::turn`), `program.rs` (`EoeB`), the lowerings' catch-alls, `pay.rs`, `layers.rs`,
+`cast.rs`, `activate.rs`, `triggers.rs`, `az/decks.rs` (the deck summary's match), `testkit.rs`;
+`lower::IR_DEFECTS` now records every entry of a card (`filter`, was `find`).
+
+**Tests.** `cards_eoe_b.rs` (21: Landers, Kav's delayed sacrifice, Emergency Eject, Orbital
+Plunge's excess, the lands and mana, landfall, the custom cards), `cards_eoe_b_base.rs` and
+`cards_eoe_b_base2.rs` (37: the base cards). On 686320b: the full engine suite (`cargo test --release -p engine`) 1,579 passed, 0 failed; support: EoE 98 / 320, cube 546 / 546; `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed (915 s, the 98 cards); the default `FUZZ_GAMES=20000` passed (802 s).
+
+**Digests:** unchanged (cube behaviour untouched; `DelayedWhen::YourNextTurnEndStep`'s turn enters
+the state vector only for that timing).
