@@ -75,7 +75,7 @@ impl Game {
             return true;
         }
         for (i, &c) in self.battlefield.iter().enumerate() {
-            if (self.objs[c.i()].attached.is_some() || self.def_of(c).bestowed || self.def_of(c).reanimates) && self.bad_attachment(c) {
+            if (self.objs[c.i()].attached.is_some() || self.def_of(c).bestowed || self.def_of(c).reanimates || self.def_of(c).aura_spell) && self.bad_attachment(c) {
                 return true;
             }
             let ty = self.types_of(c);
@@ -139,6 +139,10 @@ impl Game {
     fn bad_attachment(&self, c: CardIdx) -> bool {
         if self.def_of(c).reanimates {
             return self.bad_reanimating_aura(c);
+        }
+        // An Aura that enchants a permanent (704.5m; ENGINE.md 99.2).
+        if self.def_of(c).aura_spell && !self.def_of(c).bestowed {
+            return self.bad_aura(c);
         }
         let illegal = |h: crate::ids::ObjRef| {
             !self.live(h)
@@ -311,7 +315,8 @@ impl Game {
         }
         let unattach = self.bad_attachments();
         // 704.5m: an illegal reanimating Aura goes to its owner's graveyard.
-        let (dead_auras, unattach): (Vec<CardIdx>, Vec<CardIdx>) = unattach.into_iter().partition(|&c| self.def_of(c).reanimates);
+        let (dead_auras, unattach): (Vec<CardIdx>, Vec<CardIdx>) =
+            unattach.into_iter().partition(|&c| self.def_of(c).reanimates || (self.def_of(c).aura_spell && !self.def_of(c).bestowed));
         for &c in &unattach {
             self.objs[c.i()].attached = None;
             // CR 702.103f: an unattached bestowed Aura ceases to be bestowed:

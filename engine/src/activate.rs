@@ -40,8 +40,14 @@ impl Game {
             Cond::DevotionCoversLibrary(color) => self.devotion(p, *color) as usize >= pl.library.len(),
             Cond::FirstSpellThisGame => pl.spells_game == 0,
             Cond::IsMonarch => self.monarch == Some(p),
-            // (Only a static ability's own condition; read in layers.rs.)
-            Cond::SourceCountersIn(..) => false,
+            // A static ability's own condition is read in layers.rs; with a
+            // source (an activated or triggered ability's "N+ |", CR 722.2a:
+            // the permanent has it while it has N or more charge counters),
+            // the source on the battlefield now.
+            Cond::SourceCountersIn(kind, lo, hi) => source.is_some_and(|s| {
+                let n = if self.live(s) && self.objs[s.idx.i()].zone == Zone::Battlefield { self.counters_on(s.idx, *kind) } else { 0 };
+                n >= *lo as crate::num::Count && hi.is_none_or(|h| n <= h as crate::num::Count)
+            }),
             Cond::GainedLifeThisTurn => pl.gained_life,
             Cond::OpponentHasMoreCards => self.players[crate::ids::opp(p) as usize].hand.len() > pl.hand.len(),
             Cond::OpponentControlsMoreLands => {
@@ -311,7 +317,9 @@ impl Game {
         } else {
             classes
         };
-        if !self.cost_payable(p, card, &ad.cost, &self.act_mana(p, card, ad), classes, Self::mana_exclude(card, ad)) {
+        // (A non-mana ability: with no mana to pay, a permanent with a mana
+        // ability may be tapped for a "tap an untapped <permanent>" cost.)
+        if !self.cost_payable_with(p, card, &ad.cost, &self.act_mana(p, card, ad), classes, Self::mana_exclude(card, ad), true) {
             return false;
         }
         let ActEffect::Stack(ab) = &ad.effect else { unreachable!() };
@@ -459,6 +467,26 @@ impl Game {
         classes: &[Class],
         exclude: Option<CardIdx>,
     ) -> bool {
+        self.cost_payable_with(p, card, cost, mana, classes, exclude, false)
+    }
+
+    /// [`cost_payable`](Self::cost_payable); with `zero_mana_taps`, a cost
+    /// with no mana may tap a permanent with a mana ability for its "tap an
+    /// untapped <permanent>" part (no payment competes with it: station's
+    /// "tap another untapped creature you control", CR 702.184a, by a mana
+    /// creature). Without it such a permanent counts only for a cost of
+    /// mana-ability shape (Urza's, whose payment path is its own).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cost_payable_with(
+        &self,
+        p: PlayerId,
+        card: CardIdx,
+        cost: &Cost,
+        mana: &crate::mana::ManaCost,
+        classes: &[Class],
+        exclude: Option<CardIdx>,
+        zero_mana_taps: bool,
+    ) -> bool {
         let pl = &self.players[p as usize];
         if (cost.life as i32) > pl.life {
             return false; // CR 119.4
@@ -509,7 +537,12 @@ impl Game {
         // (Not counting permanents that could be tapped for mana first: the
         // mana is paid before, 601.2g-h.)
         if let Some(t) = &cost.tap_untapped {
-            if self.tap_candidates(p, card, t).filter(|&c| !self.has_mana_ability(c)).count() < t.n as usize {
+            let n = if zero_mana_taps && mana.is_zero() {
+                self.tap_candidates(p, card, t).count()
+            } else {
+                self.tap_candidates(p, card, t).filter(|&c| !self.has_mana_ability(c)).count()
+            };
+            if n < t.n as usize {
                 return false;
             }
         }
@@ -998,6 +1031,17 @@ impl Game {
         // (The taps of a "tap untapped permanents" cost, then crew's.)
         for &c in &picked[n_gy..] {
             self.tap(c);
+        }
+        // "The tapped creature" of an activated ability's "tap an untapped
+        // creature you control" cost (station, CR 702.184a): the stack item
+        // notes it (`Amount::TappedPower`).
+        if n_tap > n_gy {
+            if let Some(pos) = self.item_index(id) {
+                if matches!(self.stack[pos].kind, StackKind::Ability { .. }) {
+                    let tapped: Vec<crate::ids::ObjRef> = picked[n_gy..n_tap].iter().map(|&c| self.obj_ref(c)).collect();
+                    self.stack[pos].noted = tapped;
+                }
+            }
         }
         for &c in &picked[n_bounce..n_gy] {
             self.move_card(c, Zone::Exile, Pos::Top);

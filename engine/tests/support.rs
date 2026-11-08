@@ -699,6 +699,38 @@ const SUPPORTED_EOE_BASE: &[&str] = &[
 ];
 /// Lane A: Station, spacecraft, counters, artifacts, Equipment and Auras.
 const SUPPORTED_EOE_A: &[&str] = &[
+    "Atmospheric Greenhouse",
+    "Beyond the Quiet",
+    "Cerebral Download",
+    "Cryoshatter",
+    "Debris Field Crusher",
+    "Drill Too Deep",
+    "Drix Fatemaker",
+    "Dual-Sun Technique",
+    "Emissary Escort",
+    "Extinguisher Battleship",
+    "Galvanizing Sawship",
+    "Illvoi Light Jammer",
+    "Invasive Maneuvers",
+    "Lost in Space",
+    "Lumen-Class Frigate",
+    "Meltstrider Eulogist",
+    "Meltstrider's Gear",
+    "Pulsar Squadron Ace",
+    "Radiant Strike",
+    "Rescue Skiff",
+    "Ruinous Rampage",
+    "Scour for Scrap",
+    "Selfcraft Mechan",
+    "Shattered Wings",
+    "Squire's Lightblade",
+    "Susurian Dirgecraft",
+    "Synthesizer Labship",
+    "Uthros Scanship",
+    "Virulent Silencer",
+    "Warmaker Gunship",
+    "Wedgelight Rammer",
+    "Wurmwall Sweeper",
 ];
 /// Lane B: lands, mana abilities, Lander tokens (and the base list's audit).
 const SUPPORTED_EOE_B: &[&str] = &[
@@ -759,6 +791,11 @@ const SUPPORTED_EOE_D: &[&str] = &[
 /// Cards that need features of two or more lanes, finished after the
 /// lanes merged (ENGINE.md 99.6; tests in `tests/cards_eoe_cross.rs`).
 const SUPPORTED_EOE_CROSS: &[&str] = &[
+    "Broodguard Elite",
+    "Fell Gravship",
+    "Hardlight Containment",
+    "Hylderblade",
+    "Mental Modulation",
     "Thaumaton Torpedo",
 ];
 

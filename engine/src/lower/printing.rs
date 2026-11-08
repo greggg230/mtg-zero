@@ -268,10 +268,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.impending_cost_str", impending_cost_str);
         l.deny("CardPrinting.impending_count", impending_count);
         l.deny("CardPrinting.devour_land_multiplier", devour_land_multiplier);
-        l.deny("CardPrinting.station_threshold", station_threshold);
-        l.deny("CardPrinting.stationed_keywords", stationed_keywords);
-        l.deny("CardPrinting.attached_grants_ward_cost", attached_grants_ward_cost);
-        l.deny("CardPrinting.attached_grants_ward_str", attached_grants_ward_str);
         l.deny("CardPrinting.attached_prevents_untap", attached_prevents_untap);
         l.deny("CardPrinting.attached_grants_control", attached_grants_control);
         l.deny("CardPrinting.attached_sets_base_pt", attached_sets_base_pt);
@@ -297,7 +293,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         });
         l.deny("CardPrinting.enters_tapped_unless_any_player_life_at_most", enters_tapped_unless_any_player_life_at_most);
         l.deny("CardPrinting.optional_copy_land_from_graveyard", optional_copy_land_from_graveyard);
-        l.deny("CardPrinting.additional_cost_sacrifice_creature_or_artifact", additional_cost_sacrifice_creature_or_artifact);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_enchantment", additional_cost_sacrifice_creature_or_enchantment);
         l.deny("CardPrinting.additional_cost_choose_your_creature", additional_cost_choose_your_creature);
         let enters_x_counters = match enters_with_counters_from_x {
@@ -312,12 +307,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.enters_with_plus_one_counter_if_creature_died_this_turn", enters_with_plus_one_counter_if_creature_died_this_turn);
         l.deny("CardPrinting.enters_with_minus_one_counters_from_hand_cast", enters_with_minus_one_counters_from_hand_cast);
         // "Enchant creature card in a graveyard" (Animate Dead): an Aura
-        // spell's target; other enchant types are not built.
+        // spell's target; an Aura's other enchant types (on the battlefield)
+        // below, with the card types (ENGINE.md 99.2).
         let aura_gy = *aura_enchant_type == enums::EnchantKind::CreatureCardInGraveyard;
-        if !aura_gy {
-            l.deny_ne("CardPrinting.aura_enchant_type", aura_enchant_type, &generated::defaults::d_CardPrinting_aura_enchant_type());
-        }
-        l.deny("CardPrinting.aura_yours_only", aura_yours_only);
         l.deny("CardPrinting.nonbasic_lands_are_mountains", nonbasic_lands_are_mountains);
         l.deny("CardPrinting.grants_all_basic_land_types_to_lands_you_control", grants_all_basic_land_types_to_lands_you_control);
         l.deny("CardPrinting.grants_basic_land_type_to_all_lands", grants_basic_land_type_to_all_lands);
@@ -434,6 +426,17 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         (_, None) => {}
     }
     let subs: Vec<u16> = subtypes.iter().map(|s| l.subtype(s)).collect();
+    // An Aura that enchants a permanent (CR 303.4a, 702.5a): its enchant
+    // ability is its spell's target and what it may stay attached to.
+    let aura_bf = super::eoe_a::aura_enchant(
+        l,
+        ty,
+        subtypes.iter().any(|s| s == "Aura"),
+        aura_enchant_type,
+        *aura_yours_only,
+        aura_gy,
+        spell_effect.is_some(),
+    );
     // {X} in the card's own mana cost (CR 107.3): announced on casting.
     let x_pips = {
         let cats::ManaCost::ManaCost(m) = &**mana_cost;
@@ -460,6 +463,17 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if is_creature && pw.is_none() {
         l.unsupported("CardPrinting.power(creature without P/T)");
     }
+    // Station (CR 702.184, 722; ENGINE.md 99.2): the station ability, and the
+    // static ability of the striation with the stationed keywords and the
+    // power/toughness box, which alone gives the card its P/T (722.2c).
+    let station = match station_threshold {
+        Some(n) => Some(super::eoe_a::station(l, ty, *n, stationed_keywords, pw.zip(tg))),
+        None => {
+            l.deny("CardPrinting.stationed_keywords(without station_threshold)", stationed_keywords);
+            None
+        }
+    };
+    let (pw, tg) = if station.is_some() { (None, None) } else { (pw, tg) };
 
     let mut kws = KwSet::default();
     let mut protection = Prot::default();
@@ -557,10 +571,15 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     );
     let mut activated: Vec<ActivatedDef> = Vec::new();
     for a in activated_abilities {
-        if let Some(ad) = lower_activated(l, a, From::Battlefield, walker) {
+        if let Some(ad) = super::eoe_a::lower_activated_tiered(l, a, walker) {
             activated.push(ad);
         }
     }
+    let (station_ability, station_static) = match station {
+        Some(st) => (Some(st.ability), st.statik),
+        None => (None, None),
+    };
+    activated.extend(station_ability);
     // Reconfigure (CR 702.151; Lion Sash): its two abilities are in the
     // IR's list; the cost agrees with them.
     let reconfigure = match reconfigure_cost.as_deref() {
@@ -726,6 +745,15 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             additional.push(Cost { sacrifice: Some(SacCost { filter, n: 1, another: false }), ..Cost::default() });
         }
     }
+    // "As an additional cost to cast this spell, sacrifice an artifact or
+    // creature" (CR 601.2b, 118.8; ENGINE.md 99.2).
+    if *additional_cost_sacrifice_creature_or_artifact {
+        if !additional.is_empty() {
+            l.unsupported("CardPrinting.additional_cost_sacrifice_creature_or_artifact(with other additional costs)");
+        }
+        let filter = Filter::Type(types::CREATURE | types::ARTIFACT);
+        additional.push(Cost { sacrifice: Some(SacCost { filter, n: 1, another: false }), ..Cost::default() });
+    }
     // "As an additional cost to cast this spell, exile n cards from your
     // graveyard" (Abhorrent Oculus; CR 601.2b, 118.8).
     if *additional_cost_exile_from_graveyard != 0 {
@@ -865,6 +893,10 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // An Aura spell targets what it will enchant (CR 303.4a).
         None if aura_gy => {
             let f = Filter::InGraveyard(Box::new(Filter::Type(types::CREATURE)));
+            Some(crate::db::AbilityDef { targets: vec![crate::db::TargetReq { filter: f, min: 1, max: 1, distinct: 0, pair: 0 }], ..Default::default() })
+        }
+        None if aura_bf.is_some() => {
+            let f = aura_bf.clone().unwrap();
             Some(crate::db::AbilityDef { targets: vec![crate::db::TargetReq { filter: f, min: 1, max: 1, distinct: 0, pair: 0 }], ..Default::default() })
         }
         _ if kicker.is_some() => kicker.clone(),
@@ -1081,6 +1113,14 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if let Some(w) = ward {
         keyword_triggers.push(super::effect_stack::ward_trigger(w, false));
     }
+    // "Enchanted permanent has ward {n}" (ENGINE.md 99.2).
+    match attached_grants_ward_cost.as_deref() {
+        Some(m) => {
+            let cost = super::effect_copies::checked_cost(l, "CardPrinting.attached_grants_ward_cost", m, attached_grants_ward_str);
+            keyword_triggers.push(super::eoe_a::attached_ward(l, *aura_yours_only && aura_bf.is_some(), cost));
+        }
+        None => l.deny("CardPrinting.attached_grants_ward_str", attached_grants_ward_str),
+    }
     // Abilities activated from the graveyard (CR 602.2: "exile this card
     // from your graveyard", eternalize; ENGINE.md 27.5).
     let mut gy_abilities: Vec<ActivatedDef> = Vec::new();
@@ -1104,10 +1144,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     let mut statics = Vec::new();
     let mut repl = super::statics::Repl::default();
     for s in static_abilities {
-        if let Some(st) = super::statics::lower_static(l, s, &mut repl) {
+        if let Some(st) = super::eoe_a::lower_static_tiered(l, s, &mut repl) {
             statics.push(st);
         }
     }
+    statics.extend(station_static);
     if let Some(w) = repl.grants_ward {
         keyword_triggers.push(super::effect_stack::ward_trigger(w, true));
     }
@@ -1136,7 +1177,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.unsupported("CardPrinting.watches_library_graveyard_exile(without its trigger)");
     }
     for t in triggered_abilities {
-        if let Some(td) = super::trigger::lower_trigger(l, t, ty) {
+        if let Some(td) = super::eoe_a::lower_trigger_tiered(l, t, ty) {
             triggers.push(td);
         }
     }
@@ -1304,7 +1345,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // (An Aura's "enchanted creature gets ...": the IR reuses the
         // Equipment field, docs/ir_defects.md 7; the Aura's attachment is
         // the same `attached`.)
-        if !subs.contains(&l.subtype("Equipment")) && !(subs.contains(&l.subtype("Aura")) && aura_gy) {
+        if !subs.contains(&l.subtype("Equipment")) && !(subs.contains(&l.subtype("Aura")) && (aura_gy || aura_bf.is_some())) {
             l.unsupported("CardPrinting.equipment_bonuses(not an Equipment)");
         }
         let mut mods = Vec::new();
@@ -1327,7 +1368,18 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
     let pt_cda = match dynamic_pt_formula.as_deref() {
         None => None,
-        Some(f) => super::statics::lower_pt_formula(l, f),
+        // "Gets +X/+0" (a static ability, ENGINE.md 99.2).
+        Some(f) => match super::eoe_a::pt_formula_static(f) {
+            Some(st) if is_creature => {
+                statics.push(st);
+                None
+            }
+            Some(_) => {
+                l.unsupported("CardPrinting.dynamic_pt_formula(not a creature)");
+                None
+            }
+            None => super::statics::lower_pt_formula(l, f),
+        },
     };
     if pt_cda.is_some() && !is_creature {
         l.unsupported("CardPrinting.dynamic_pt_formula(not a creature)");
@@ -1837,7 +1889,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         x_life: *additional_cost_pay_x_life,
         sunburst: sunburst_counter,
         enters_times_counters: *enters_with_counter_per_kick,
-        aura_spell: aura_gy,
+        aura_spell: aura_gy || aura_bf.is_some(),
         reanimates: l.reanimates,
         cleanup_sac,
         flash_permission,

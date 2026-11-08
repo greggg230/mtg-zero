@@ -216,6 +216,11 @@ pub enum Mod {
     /// controller's opponent, 2 players: never one of their planeswalkers;
     /// Ursine Monstrosity).
     MustAttackPlayer,
+    /// Layer 7c: +X/+0, X the greatest mana value among the other
+    /// permanents of these card types the static ability's controller
+    /// controls (a static ability of the permanent itself; Emissary Escort,
+    /// ENGINE.md 99.2).
+    PowerPlusGreatestMv { types: u16 },
 }
 
 /// Which objects a static ability affects (CR 611.3a: re-evaluated

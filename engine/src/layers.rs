@@ -136,9 +136,16 @@ impl Game {
         let active = self.n_static > 0 && self.objs[c.i()].zone == Zone::Battlefield;
         let d: &'static crate::db::CardDef = if active { self.abilities(c) } else { crate::game::blank_def() };
         let ctl = self.objs[c.i()].controller;
+        // (Only a static that changes types has its condition read: another
+        // one's may count permanents by type, this one among them, which
+        // asks for its types again; ENGINE.md 99.2.)
         d.statics
             .iter()
-            .filter(move |st| st.scope == Scope::This && st.cond.as_ref().is_none_or(|k| self.static_cond(c, k, ctl)))
+            .filter(move |st| {
+                st.scope == Scope::This
+                    && st.mods.iter().any(|m| matches!(m, Mod::Types { .. }))
+                    && st.cond.as_ref().is_none_or(|k| self.static_cond(c, k, ctl))
+            })
             .flat_map(|st| st.mods.iter())
             .filter(|m| matches!(m, Mod::Types { .. }))
     }
@@ -178,6 +185,8 @@ impl Game {
             Filter::Controller(y) => (self.objs[c.i()].controller == you) == *y,
             Filter::Token => self.is_token(c),
             Filter::Attacking => self.objs[c.i()].attacking,
+            // (Counters are no characteristic: nothing recurses.)
+            Filter::HasCounter(k) => self.counters_on(c, *k) > 0,
             Filter::And(a, b) => self.scope_matches(a, c, you) && self.scope_matches(b, c, you),
             Filter::Or(v) => v.iter().any(|x| self.scope_matches(x, c, you)),
             Filter::Not(x) => !self.scope_matches(x, c, you),
@@ -524,6 +533,16 @@ impl Game {
                         let n = self.counters_on(s, *counter) as i64;
                         dp += *a as i64 * n;
                         dt += *b as i64 * n;
+                    }
+                    Mod::PowerPlusGreatestMv { types } => {
+                        let ctl = self.objs[s.i()].controller;
+                        dp += self
+                            .battlefield
+                            .iter()
+                            .filter(|&&x| x != s && self.objs[x.i()].controller == ctl && self.types_of(x) & types != 0)
+                            .map(|&x| self.mana_value_of(x) as i64)
+                            .max()
+                            .unwrap_or(0);
                     }
                     _ => {}
                 }

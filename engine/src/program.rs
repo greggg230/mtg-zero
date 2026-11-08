@@ -102,6 +102,13 @@ pub enum Amount {
     MulticoloredPermanents,
     /// The differently named lands the controller controls (CR 201.2).
     DifferentlyNamedLands,
+    /// The power of the creature tapped to pay the activated ability's cost
+    /// (the stack item's first noted object): station's "a number of charge
+    /// counters equal to the tapped creature's power" (CR 702.184a), read as
+    /// the ability resolves, or as the creature last existed on the
+    /// battlefield if it left (608.2h; station's ruling). Its toughness
+    /// instead where a static ability says so (702.184c).
+    TappedPower,
 }
 
 /// The instructions Edge of Eternities lane B added (ENGINE.md 99.3), inside
@@ -891,6 +898,8 @@ pub enum Ext {
     SacrificeReanimated,
     /// The Edge of Eternities lane B instructions (ENGINE.md 99.3).
     EoeB(EoeB),
+    /// Lane A of the Edge of Eternities port (ENGINE.md 99.2).
+    EoeA(EoeA),
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -1129,6 +1138,7 @@ impl Op {
             Op::Ext(Ext::OfferPayOther { who: w, .. }) => who(w),
             Op::Ext(Ext::ExileTopWithPermission { who: w, .. }) => who(w),
             Op::Ext(Ext::Poison { who: w, n }) => who(w) || amt(n),
+            Op::Ext(Ext::EoeA(EoeA::DestroyEventObj)) => true,
             Op::Ext(Ext::ApplyPtPerCount { on, .. })
             | Op::Ext(Ext::TapOrUntap { on })
             | Op::Ext(Ext::CounterOrDoubleOnSecond { on }) => matches!(on, On::EventObj),
@@ -1240,4 +1250,30 @@ impl Builder {
     pub fn finish(self) -> AbilityDef {
         AbilityDef { targets: self.targets, program: self.program, modes: None, divide: self.divide }
     }
+}
+
+/// The instructions of lane A of the Edge of Eternities port (ENGINE.md
+/// 99.2), inside `Ext::EoeA` (`resolve_eoe_a.rs`). Same rules as `Op`: named
+/// after rules actions, never cards.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum EoeA {
+    /// The owner of the first legal target of requirement `tgt` (a
+    /// permanent) puts it on top of or on the bottom of their library, their
+    /// choice. Choice (the owner's): yes/no (`YES` = top).
+    OwnerPutsTopOrBottom { tgt: u8 },
+    /// "Destroy it": destroy the object of the triggered ability's event, if
+    /// it is still that permanent (CR 701.8a; "when enchanted creature
+    /// becomes tapped or is dealt damage, destroy it").
+    DestroyEventObj,
+    /// Remember how many cards the looked-at pile holds (`Frame::x`), for
+    /// `CounterOnSourceUnlessPileShrank`.
+    MarkPile,
+    /// "If you didn't put a card into your hand this way, put a <counter>
+    /// on this": unless the pile holds fewer cards than `MarkPile` saw, put
+    /// a counter of this kind on the source (if it is still that permanent).
+    CounterOnSourceUnlessPileShrank { counter: Counter },
+    /// "Put its counters on target creature you control": the source's
+    /// counters (now, or as it last existed on the battlefield, CR 608.2h),
+    /// every kind and number, on the first legal target of `tgt` (CR 122.6).
+    PutSourceCountersOnTarget { tgt: u8 },
 }

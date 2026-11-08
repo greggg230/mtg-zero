@@ -16,7 +16,8 @@ fn scope_filter_ok(f: &Filter) -> bool {
         | Filter::Supertype(_)
         | Filter::Color(_)
         | Filter::Controller(_)
-        | Filter::Token => true,
+        | Filter::Token
+        | Filter::HasCounter(_) => true,
         Filter::And(a, b) => scope_filter_ok(a) && scope_filter_ok(b),
         Filter::Or(v) => v.iter().all(scope_filter_ok),
         Filter::Not(a) => scope_filter_ok(a),
@@ -400,6 +401,12 @@ fn lower_scope(l: &mut Lowerer, s: &cats::StaticScope) -> Option<Scope> {
         }
         K::CreaturesYouControl => (you(Filter::Type(types::CREATURE)), *other),
         K::OtherCreaturesYouControl => (you(Filter::Type(types::CREATURE)), true),
+        // "Each creature you control with a +1/+1 counter on it" (ENGINE.md
+        // 99.2; the scope's own counter kind).
+        K::CreaturesYouControlWithCounter => (
+            Filter::And(Box::new(you(Filter::Type(types::CREATURE))), Box::new(Filter::HasCounter(crate::db::Counter::P1P1))),
+            *other,
+        ),
         K::SubtypeYouControl if !subtype.is_empty() => (you(Filter::Subtype(l.subtype(subtype))), *other),
         K::CardTypeYouControl => match types::from_name(card_type) {
             Some(t) => (you(Filter::Type(t)), *other),
