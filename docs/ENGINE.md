@@ -19131,12 +19131,20 @@ lane D's grant op gone), `resolve_ext.rs`, `public_state.rs`, `testkit.rs`, `az/
 match arm), `lower/{mod, activated, effect, effect_ext, effect_eoe_d, printing, statics,
 trigger}.rs`, and the `PermKind::Play` construction sites; `tests/{support, az}.rs`.
 
-**Verification** (code at e503d54, the normal release profile). The full engine suite (`cargo
-test --release -p engine`): 1,895 passed, 0 failed, 15 ignored (1,853 at the base; the 42 more
+**Review (the coordinator, then the user: "no approximations").** The first version's four
+documented shortcuts are gone: Ragost's Food type was applied before every other layer-4
+effect (now by timestamp, with the dependency, 613.7, 613.8a); a permanent that had lost all its
+abilities got no granted ones (now by timestamp, 613.7, and Ragost's grant survives Ragost's
+loss, 613.6); Starforge's taps were paid before its mana (now the rules' order, 601.2g-h, the
+payment reserving the artifacts); a fifth activated ability wasn't offered (now the page).
+docs/shortcuts.md has no W3 entry. Seven tests show each (each fails on the first version).
+
+**Verification** (code at 706ad43, the normal release profile). The full engine suite (`cargo
+test --release -p engine`): 1,903 passed, 0 failed, 15 ignored (1,853 at the base; the 50 more
 are this branch's card tests). Behaviour digests unchanged (combined `f6543eb2b1b8752f`). EoE
-support 272 / 320, cube 546 / 546. `FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games (wins 9,251 /
-9,105, 1,644 draws, mean 38.6 turns, 475.9 decisions), all four fuzz tests passed (1,011 s). The
+support 272 / 320, cube 546 / 546. `FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games (wins 9,244 /
+9,107, 1,649 draws, mean 38.6 turns, 476.0 decisions), all four fuzz tests passed (1,309 s). The
 default `FUZZ_GAMES=20000`: 20,000 games (9,967 / 9,994, 39 draws, as before) and 1,000 matches,
-passed (430 s). Faults found on the way, both fixed with a test: fuzz seed 2219 (the mana
+passed (793 s). Faults found on the way, both fixed with a test: fuzz seed 2219 (the mana
 payment sacrificing the only creature a counter could be removed from), seeds 56 and 1004 (the
 static fast paths' counts while a permanent is phased out).
