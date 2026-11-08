@@ -270,8 +270,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.impending_cost_str", impending_cost_str);
         l.deny("CardPrinting.impending_count", impending_count);
         l.deny("CardPrinting.devour_land_multiplier", devour_land_multiplier);
-        l.deny("CardPrinting.attached_grants_ward_cost", attached_grants_ward_cost);
-        l.deny("CardPrinting.attached_grants_ward_str", attached_grants_ward_str);
         l.deny("CardPrinting.attached_prevents_untap", attached_prevents_untap);
         l.deny("CardPrinting.attached_grants_control", attached_grants_control);
         l.deny("CardPrinting.attached_sets_base_pt", attached_sets_base_pt);
@@ -1103,6 +1101,14 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
     if let Some(w) = ward {
         keyword_triggers.push(super::effect_stack::ward_trigger(w, false));
+    }
+    // "Enchanted permanent has ward {n}" (ENGINE.md 99.2).
+    match attached_grants_ward_cost.as_deref() {
+        Some(m) => {
+            let cost = super::effect_copies::checked_cost(l, "CardPrinting.attached_grants_ward_cost", m, attached_grants_ward_str);
+            keyword_triggers.push(super::eoe_a::attached_ward(l, *aura_yours_only && aura_bf.is_some(), cost));
+        }
+        None => l.deny("CardPrinting.attached_grants_ward_str", attached_grants_ward_str),
     }
     // Abilities activated from the graveyard (CR 602.2: "exile this card
     // from your graveyard", eternalize; ENGINE.md 27.5).

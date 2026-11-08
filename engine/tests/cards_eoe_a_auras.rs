@@ -174,3 +174,38 @@ fn an_aura_spell_with_an_illegal_target_fizzles_cr608_3a() {
     assert_eq!(g.count_in(1, "Lane A Giant", Zone::Graveyard), 1);
     assert_eq!(g.count_in(0, "Cryoshatter", Zone::Graveyard), 1);
 }
+
+/// "Enchant artifact you control / Enchanted permanent has ward {1}"
+/// (Hardlight Containment's, on a custom card; CR 702.21a): an opponent's
+/// spell targeting the enchanted artifact is countered unless they pay {1};
+/// the Aura can't target an opponent's artifact.
+#[test]
+fn an_aura_grants_ward_to_the_enchanted_permanent_cr702_21a() {
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Lane A Trinket"])
+        .battlefield(1, &["Lane A Trinket", "Island"])
+        .hand(0, &["Lane A Ward Aura"])
+        .hand(1, &["Lane A Tap"])
+        .at(Step::Main1, 0)
+        .start();
+    let aura = g.card(0, "Lane A Ward Aura", Zone::Hand);
+    let mine = bf(&g, 0, "Lane A Trinket");
+    g.choose(Choice::Cast(aura));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert!(!g.has_option(g.tgt(bf(&g, 1, "Lane A Trinket"))), "an artifact you control");
+    g.choose(g.tgt(mine));
+    pay(&mut g);
+    settle(&mut g);
+    // P1, in P0's turn: Tap targets the warded Trinket; P1 can't pay {1}
+    // (their Island paid for the spell).
+    g.pass();
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 1);
+    let tap = g.card(1, "Lane A Tap", Zone::Hand);
+    g.choose(Choice::Cast(tap));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(mine));
+    pay(&mut g);
+    settle(&mut g);
+    assert!(!g.obj(mine).tapped, "countered by ward\n{}", log(&g));
+    assert_eq!(g.count_in(1, "Lane A Tap", Zone::Graveyard), 1);
+}

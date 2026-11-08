@@ -101,6 +101,10 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         // target creature you control."
         creature("Lane A Donor", "{1}{G}", 1, 1, json!({"triggered_abilities": [{"$t": "TriggeredAbility", "event": "leaves_battlefield",
             "predicate": {"$t": "IsSelf"}, "effect": {"$t": "MoveSelfCountersToTargetCreatureYouControl"}}]})),
+        // "Enchant artifact you control / Enchanted permanent has ward {1}."
+        // (Hardlight Containment's ward; CR 702.21a.)
+        card("Lane A Ward Aura", "{W}", &["Enchantment"], &["Aura"], json!({"aura_enchant_type": "artifact", "aura_yours_only": true,
+            "attached_grants_ward_cost": cost("{1}"), "attached_grants_ward_str": "{1}"})),
         // "{1}, Sacrifice this creature: Search your library for an
         // Equipment card, put it onto the battlefield, then shuffle."
         creature(

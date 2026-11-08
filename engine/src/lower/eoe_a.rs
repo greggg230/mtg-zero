@@ -466,3 +466,24 @@ pub(crate) fn aura_enchant(
     };
     Some(if yours { and(base, Filter::Controller(true)) } else { base })
 }
+
+/// "Enchanted permanent has ward {cost}" (CR 702.21a; a granted ability, the
+/// Aura's triggered ability here as for "other creatures you control have
+/// ward", ENGINE.md 27.3): whenever the enchanted permanent becomes the
+/// target of a spell or ability an opponent controls, counter it unless
+/// that player pays. Only an Aura that enchants a permanent you control
+/// (`yours`): its controller is then the enchanted permanent's, who controls
+/// the granted ability (303.4e).
+pub(crate) fn attached_ward(l: &mut Lowerer, yours: bool, cost: crate::mana::ManaCost) -> TriggerDef {
+    use crate::db::{EventKind, Slot};
+    if !yours {
+        l.unsupported("CardPrinting.attached_grants_ward_cost(not an Aura enchanting a permanent you control)");
+    }
+    let mut b = Builder::default();
+    let at = b.op(Op::OfferPay { who: Who::EventPlayer, cost, if_paid: 0 });
+    b.op(Op::Ext(Ext::CounterEventItem));
+    b.patch(at);
+    let host = TrigPred::And(Box::new(TrigPred::IsHost(Slot::Target)), Box::new(TrigPred::Granted(Slot::Target)));
+    let pred = TrigPred::And(Box::new(host), Box::new(TrigPred::Controlled(Slot::Controller, false)));
+    TriggerDef { event: EventKind::BecomesTarget, pred, ability: b.finish(), uses_event: true }
+}
