@@ -689,3 +689,40 @@ network code), its runs under `runs/delver1`, apart from the cube's work.
 | D1 | The deck, the two maindeck cards (full oracle fidelity, rulings as tests), constructed best-of-one (CR 100.2a), the preset and its measurements, gates, docs | done (branch delver-d1, mtg-bot feature/legacy-delver-ir; ENGINE.md 54) |
 | D2 | The run `runs/delver1` | the user's go-ahead |
 | D3 | Best-of-three with constructed sideboarding; the five sideboard cards | |
+
+## 9. Sealed deckbuilding: Edge of Eternities first (user, 2026-11-07)
+
+**Goal (user):** a tool that builds the best deck from a sealed pool you give it, and that might
+help "solve" new sealed formats faster. Practise first on an older set with human data as the
+yardstick: **Edge of Eternities** (cube sealed is not a real format). **Pure self-play still
+holds** (section 0): 17lands data measures, never trains. **Best-of-one first**, best-of-three with
+sideboarding later. Star Trek (released 2026-11-13; it shares Station and a differently-named-lands
+count with EoE) is the likely second set: decks and card ratings made before its human data exists,
+scored as the data arrives.
+
+**Method (agreed 2026-11-07): AlphaZero plays; deckbuilding is not a search tree.** Building is one
+decision with no opponent reply and one noisy match result per game; as a sequence of card picks
+inside AlphaZero it collapsed twice (team draft, ENGINE.md 45.10, 47). The play network stays
+AlphaZero; deckbuilding is optimisation of a learned deck evaluator:
+
+1. **A play network for any EoE limited deck**: self-play over decks from generated sealed pools
+   (EoE play-booster collation), built by a randomised builder (colours, splash, land count,
+   curve) so it plays good and mediocre decks.
+2. **Credit per card**: drawn vs not drawn within a deck is a free randomised experiment; the play
+   network's value just before and after a draw is a low-variance version of it.
+3. **A deck evaluator**: a set network over card embeddings predicting deck A vs deck B, trained on
+   every self-play game (it pools the evidence of all pools). The play network's value before the
+   opening hand already sees both decklists (open decklists): a crude evaluator for free.
+4. **Search, then verify**: every colour pair and splash, local card swaps on the evaluator, the
+   best few raced in paired games (same opponents, same shuffles), losers dropped early.
+5. **The loop**: the field is our own builder's decks from other pools; better play, relabel,
+   repeat. Optionally a fast pool -> deck network distilled from the search.
+
+**Yardsticks (never training):** the same play network piloting our build and the human build of
+the same 17lands pool; the bot's card ratings against 17lands' drawn-card win rates; the heuristic
+builder.
+
+**Milestones** (a stop for the user after each): S1 the set's cards in the engine (ENGINE.md 99:
+four parallel lanes, then the cross-lane cards and one IR-fix batch); S2 sealed pools (collation),
+a heuristic builder, a best-of-one sealed preset, the 17lands yardstick pools; S3 the play
+network; S4 the deck evaluator and the builder; S5 the comparison with human builds.

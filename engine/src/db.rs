@@ -1965,6 +1965,22 @@ impl CardDb {
         })
     }
 
+    /// The card table of Edge of Eternities sealed (ENGINE.md 99): the cards
+    /// an EoE play booster can hold (Edge of Eternities, Stellar Sights, the
+    /// EoE Special Guests) and the five basic lands, from
+    /// `data/cards/eoe.ir.json`, then their tokens and faces. A separate
+    /// table, like [`constructed`](Self::constructed): nothing of the cube
+    /// (its deck generators, pools, team draft, fuzz pool, digests) ever sees
+    /// it, and it holds no cube definition (the cards the set shares with the
+    /// cube are lowered from the set's own export of the same parser).
+    /// Unsupported cards are allowed while the port is under way: they stay
+    /// out of `by_name`, and the support report (`tests/support.rs`) lists
+    /// their blockers.
+    pub fn eoe() -> &'static CardDb {
+        static EOE: OnceLock<&'static CardDb> = OnceLock::new();
+        EOE.get_or_init(|| CardDb::from_document(&load_eoe_document()).leak())
+    }
+
     pub fn id(&self, name: &str) -> Option<DefId> {
         self.by_name.get(name).copied()
     }
@@ -2105,6 +2121,16 @@ pub const LEGACY_IR: &str = include_str!("../../data/cards/legacy.ir.json");
 
 pub fn load_legacy_document() -> card_ir::Document {
     card_ir::load_document(LEGACY_IR).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// The checked-in Edge of Eternities IR (ENGINE.md 99; the set's cards and
+/// the basic lands), compiled in; encoded with the cube's schema (mtg-bot
+/// `cards export-ir --pool cube legacy eoe`, then
+/// `tools/codegen/filter_eoe_ir.py` drops the pool's Duskmourn cards).
+pub const EOE_IR: &str = include_str!("../../data/cards/eoe.ir.json");
+
+pub fn load_eoe_document() -> card_ir::Document {
+    card_ir::load_document(EOE_IR).unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// A face-down permanent's characteristics (CR 708.2a): a 2/2 creature, no

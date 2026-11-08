@@ -29,12 +29,18 @@
   ],
   "Condition": [
    "AlternativeCostWasPaid",
+   "AnotherSpellCastThisTurn",
+   "AtLeastNSpellsCastThisTurn",
+   "AttackedWithThisTurn",
    "CardTypesAmongExiledWithSourceAtLeast",
    "CardsInYourGraveyardAtLeast",
    "ControlOtherPermanentOfColor",
    "ControlPermanent",
+   "ControlledArtifactEnteredThisTurn",
+   "ControlsAnotherCreatureWithPowerAtMost",
    "ControlsAtMost",
    "DeliriumActive",
+   "DuringYourTurn",
    "FirstSpellYouCastThisGame",
    "FormulaCoversLibrary",
    "HandSizeAtMost",
@@ -42,15 +48,21 @@
    "LevelCountersInRange",
    "LifeAtMostHalfStartingLife",
    "NameStickerGate",
+   "NthSpellThisTurn",
+   "OpponentsControlAtLeast",
    "OptionalAdditionalCostPaid",
    "PerBasicLandTypeAmongLandsYouControl",
    "PerControlled",
+   "PerDifferentlyNamedLand",
    "PermanentLeftYourControlThisTurn",
    "SourceHasCounter",
    "SpellCastFromGraveyard",
    "SpellCastFromOutsideHand",
    "SpellWasKicked",
    "StateCondition",
+   "TargetMatches",
+   "UnlockedDoorsAmongRoomsAtLeast",
+   "VoidActiveCondition",
    "YourLibraryHasNoCards",
    "YourTurnOfGameAtMost"
   ],
@@ -76,10 +88,13 @@
   ],
   "Effect": [
    "Adapt",
+   "AddChargeCounterManaOfChosenColor",
    "AddManaInAnyCombination",
    "AddManaOfColorPerCount",
    "AddManaToPool",
    "AddNManaOfChosenColor",
+   "AddOneManaFromControlledLandsProductions",
+   "AddOneManaOfChosenPermanentColor",
    "AddOneManaOfColorAmongControlled",
    "AddOneManaOfImprintedColors",
    "AddOneManaSacrificedLandCouldProduce",
@@ -87,27 +102,46 @@
    "AdditionalCombatPhaseAfterThisPhase",
    "AdjustSourceLoyalty",
    "Airbend",
+   "AlpharaelDreamingAcolyteDiscardEffect",
    "Amass",
    "AnOpponentDrawsCards",
+   "AnticausalVestigeLeavesEffect",
    "ApplyEffect",
+   "ArabellaAttackEffect",
+   "AstelliReclaimerETBEffect",
    "AtBeginningOfNextEndStep",
+   "AtomicMicrosizerAttackEffect",
+   "AttachToTargetCreatureYouControl",
    "Backup",
    "BalanceEffect",
    "BecomeLandCreatureUEOT",
    "BecomeMonarch",
    "BecomeSaddled",
    "BecomeType",
+   "BecomesCopyOfTargetLand",
    "BindEventPlayer",
+   "BiosynthicBurstEffect",
+   "BoilerbilgesRipperETBEffect",
    "Bounce",
    "Cascade",
+   "ChangeControllerToCombatDamageSource",
    "ChooseModes",
    "ChooseNameExileThenRevealUntilNamed",
    "ChooseNameRevealTopPutNamedIntoHand",
    "ChooseNoMode",
    "ChooseOpponentsExiledCardWithCounterMayPlayFree",
+   "CloseEncounterEffect",
    "ConditionalIfCastFromHand",
+   "ConditionalIfSourcePowerAtLeast",
+   "ConditionalIfVoid",
+   "ConditionalIfYouControlAtLeast",
+   "ConditionalIfYouControlSubtype",
+   "ConditionalIfYouGainedLifeAtLeast",
+   "ConditionalOnTappedCreatures",
+   "CoordinatedClobberingEffect",
    "CopyEachTokenYouControlEnteredThisTurn",
    "CopyTargetInstantOrSorcerySpellYouControl",
+   "CopyTargetInstantOrSorceryYouControl",
    "CopyThisSpell",
    "CounterSpell",
    "CounterTargetSpell",
@@ -117,59 +151,99 @@
    "CreateAttackingTokenForEachOpponent",
    "CreateEmblemWithAbilities",
    "CreateEmblemWithStatics",
+   "CreateLanderAndScheduleSacrifice",
+   "CreateNTokensFromLastExileRecall",
    "CreateThenTheyGainKeywordsUEOT",
    "CreateThisTurnTriggeredAbility",
    "CreateToken",
    "CreateTokenAndAttachSelf",
    "CreateTokenCopiesOfSelf",
    "CreateTokenCopyOfSource",
+   "CreateTokenCopyOfTargetCreatureYouControl",
    "CreateTokenCopyOfTargetPermanent",
    "CreateTokenCopyOfTargetTokenYouControl",
    "CreateTokenCopyOfTargetWithKeywordsSacAtEndStep",
    "CreateTokenPerFormula",
+   "CreateTokenPerMulticoloredPermanent",
    "CreateTokenThenMayAttachSelf",
    "CreateTokensEqualToSourcePower",
    "CreateTokensScaledByX",
    "CreateTriggersUntilYourNextTurn",
+   "CreateXTokensOfTargetPermanentWithHasteEndStepSac",
    "CreaturesCantBlockThisTurn",
+   "CutPropulsionEffect",
    "DealCombatDamageAmountToTarget",
    "DealDamage",
    "DealDamageAnyTarget",
    "DealDamageByFormula",
    "DealDamageDividedAmongTargets",
    "DealDamageEachOpponent",
+   "DealDamageEqualToSourcePowerAnyTarget",
    "DealDamageExileIfDiesThisTurn",
    "DealDamageFromEvent",
    "DealDamagePaidInEnergy",
    "DealDamageThenChainCopy",
    "DealDamageToControllerAndAddMana",
    "DealDamageToEachTarget",
+   "DealDamageToOpponentCreature",
+   "DealDamageToOpponentCreatureByArtifactCount",
+   "DealDamageToOpponentCreatureByCardsInHand",
    "DealDamageToTargetCreature",
+   "DealDamageToTargetCreatureSpacecraftBoosted",
+   "DealDamageToTargetCreatureWithExcessLanderRider",
+   "DealDamageToTargetOpponent",
+   "DealDamageToTargetTappedCreature",
    "DealNDamageToEachCreature",
    "DealPowerDamageToEachOfUpToKickedTargets",
    "DealXDamage",
+   "DefendingPlayerLosesHalfLifeRoundedUp",
    "DefendingPlayerSacrificesPermanents",
+   "DepressurizeEffect",
    "Destroy",
+   "DestroyAllCreatures",
+   "DestroyEachNonlandPermanentWithMVEqualToSourceChargeCounters",
+   "DestroyEnchantedPermanent",
    "DestroyTargetArtifact",
+   "DestroyTargetArtifactEnchantmentOrFlyingCreature",
+   "DestroyTargetArtifactOrTappedCreature",
+   "DestroyTargetCreature",
    "DestroyTargetLand",
    "DestroyTargetNoncreaturePermanent",
+   "DestroyTargetNonlandPermanent",
+   "DestroyTargetNonlandPermanentWithLanderForController",
+   "DestroyUpToOneTargetNonlandPermanent",
+   "DiplomaticRelationsEffect",
+   "DiscardHandThenDrawN",
    "DiscardSelf",
    "DiscardThenDrawTokensPerNonland",
    "DiscardUpToNThenDrawThatMany",
    "DiscardYourHand",
    "DoThenReflexive",
    "DoublePlusOneCountersOnEach",
+   "DoubleTargetCreaturesPowerUEOT",
+   "DrawCardPerMulticoloredPermanent",
    "DrawCards",
+   "DrawCardsAndLoseLifeEqualToResolvingDamage",
+   "DrawCardsByConditionMultiplier",
+   "DrawCardsEqualToResolvingCombatDamage",
+   "DrawCardsEqualToResolvingCounterAmount",
    "DrawCardsPerCounterOnSource",
    "DrawDiscardThenTokensPerDiscardedType",
    "DrawHalfLibraryRoundedUp",
    "DrawPerOpponentWhoLostLifeThisTurn",
+   "DyadrineAttackEffect",
    "EachChoosesOneOfEachTypeSacrificesRest",
    "EachOpponentChoiceDestroyOneAtRandom",
+   "EachOpponentDiscards",
+   "EachOpponentDiscardsOrLosesLife",
+   "EachOpponentExilesCardFromHandWithCastPermission",
+   "EachOpponentExilesOwnCreature",
    "EachOpponentLosesLife",
+   "EachOpponentMillsCards",
    "EachOpponentSacrificesCreature",
    "EachOpponentSacrificesMatching",
    "EachOpponentSacrificesN",
+   "EachOpponentSacsOrDiscardsOrTakesSourcePowerDamage",
    "EachPlayerDiscardsHand",
    "EachPlayerDraws",
    "EachPlayerExilesHandDrawsNReturnsLater",
@@ -178,12 +252,17 @@
    "EachPlayerReturnsCardsExiledWithSource",
    "EachPlayerShufflesZonesIntoLibrary",
    "Earthbend",
+   "EnchantedCreatureFightsTargetEffect",
    "EnduringDiesReturnAsEnchantmentEffect",
    "EquipToTargetCreatureYouControl",
    "EventSubjectGetsUEOT",
    "ExchangeControlOfTargets",
    "Exile",
+   "ExileAllArtifactsWithManaValueAtMost",
+   "ExileAllCreaturesAndSpacecraft",
    "ExileAllCreaturesThenIncubate",
+   "ExileAllGraveyards",
+   "ExileAllMatchingUntilSourceLeaves",
    "ExileEachOpponentsGraveyard",
    "ExileGraveyardCardCounterIfPermanent",
    "ExileInsteadOfGraveyardThisTurn",
@@ -191,7 +270,11 @@
    "ExileOpponentsNonlandPermanentUntilLeaves",
    "ExileRandomGraveyardCardWithPlayPermission",
    "ExileSourceThenReturnTransformed",
+   "ExileTargetAttackingCreatureUntilEndStep",
    "ExileTargetCardFromGraveyard",
+   "ExileTargetCreature",
+   "ExileTargetCreatureUntilSourceLeaves",
+   "ExileTargetCreatureWithPowerOrToughnessAtMost",
    "ExileTargetGraveyardCardWithPlayPermission",
    "ExileTargetPlayersLibraryThenShuffleHandIn",
    "ExileTargetReturnAtNextEndStep",
@@ -200,17 +283,23 @@
    "ExileThisSpell",
    "ExileTopCardMayCastOtherwise",
    "ExileTopCardsWithPlayPermission",
+   "ExileTopOfLibraryMayPlayThisTurn",
+   "ExileTopXOfLibraryMayPlayThisTurn",
    "ExileUntilNonlandThenCounterOrMayCastIt",
    "ExileUntilOpponentBecomesMonarch",
    "ExileUpToOneTargetCardFromGraveyard",
    "ExileUpToOneTargetGraveyardCardWithSource",
    "ExiledCardOwnerCreatesManaValueToken",
    "Explore",
+   "FamishedWorldsireETBEffect",
+   "FanaticOfTheHarrowingETBEffect",
    "FlickerUpToOneOtherTargetNonlandPermanentYouControl",
    "FlipCoinIfLost",
    "FlipCoinStealOrCounterTargetSpell",
+   "FocusFireEffect",
    "GainClassLevel",
    "GainControlOfTargetPermanently",
+   "GainControlOfTargetSliverPermanently",
    "GainControlOfTargetThenAttachIfEquipment",
    "GainControlOfTriggeringSpellTargets",
    "GainLife",
@@ -223,17 +312,23 @@
    "GrantFlashbackToTargetCardUEOT",
    "GrantKeywordsUEOTAndPutCounters",
    "GrantKeywordsUEOTThenExplores",
+   "GrantLifeToEachOpponent",
    "GrantProtectionOfChoiceUEOT",
+   "GrantTriggeredAbilityUEOT",
    "GrantUnblockableUEOT",
    "HarnessSelf",
    "HideawayLookExileOneFaceDown",
+   "HouseCartographerSurvivalEffect",
    "IfCondition",
    "IfConditionElse",
+   "IfGainedLifeThisTurnUntapSelf",
+   "IfNot",
    "IfSourceHasNoCounters",
    "IfYouDo",
    "ImprintCardFromHand",
    "LinkExiledCardsToSource",
    "LinkedCreatureControllerSacrifices",
+   "LockOrUnlockDoorOfTargetRoomYouControl",
    "LookAtHandExileNonlandOwnerMayPlayTaxed",
    "LookAtHandMayExileNonlandUntilSourceLeaves",
    "LookAtRandomCardInTargetPlayersHand",
@@ -242,14 +337,18 @@
    "LookAtTopCardOfTargetPlayersLibraryMayBottom",
    "LookAtTopCardsDistribute",
    "LookAtTopCardsPutIntoHand",
+   "LookAtTopNRevealOrCounter",
    "LookAtTopRepeatPayLifeThenStackTop",
    "LookTopNKeepUpToOneOnTopRestBottom",
    "LookTopNMayRevealMatchingToHandRestBottomRandom",
+   "LookTopNPutOneInHandRestToGraveyard",
    "LootThenMayCastDiscardedFreeIfCounters",
    "LoseLife",
    "LoseLifeEqualToEventAmount",
    "LoseLifePerCounterOnSource",
    "ManifestDread",
+   "ManifestDreadThenAttachSelf",
+   "ManifestDreadThenPutPlusOneCountersOnIt",
    "MayCastSorceriesAsThoughFlashUntilYourNextTurn",
    "MayCastSpellFromGraveyardNow",
    "MayCastTargetGraveyardCardThisTurn",
@@ -257,6 +356,7 @@
    "MayDo",
    "MayDoThenReflexive",
    "MayExileThatCardFromYourGraveyard",
+   "MayHaveSourceDealDamageToTarget",
    "MayMillDamageThenMayTakeCreature",
    "MayPlayFromGraveyardThisTurn",
    "MayTapOrUntapTarget",
@@ -268,27 +368,53 @@
    "ModalChooseOne",
    "ModalChooseOneNotYetChosen",
    "Monstrosity",
+   "MoveEachExiledWithSourceToOwnersGraveyard",
+   "MovePlusOneCounterBetweenPermanentsYouControl",
+   "MoveSelfCountersToTargetCreatureYouControl",
+   "MutinousMassacreEffect",
    "OathRevealUntilCreature",
    "OpponentGainsControlOfSource",
    "OptionalManaCostThenEffect",
+   "OptionalPutCreatureFromHandOntoBattlefield",
    "OptionalPutLandFromHandOntoBattlefield",
+   "OptionalSacAnotherForEffect",
+   "OptionalSacAnotherForPumpSelfUEOT",
+   "OptionalSacArtifactForEffect",
+   "OptionalSacLandOrLanderForBasicLandRamp",
+   "OwnerPutsTargetArtifactOrCreatureOnTopOrBottomOfLibrary",
    "OwnerPutsTargetSecondFromTopOrBottom",
    "OwnerPutsTargetSpellOnTopOrBottom",
+   "OwnerPutsTargetWarpedExileCardOnBottomOfLibrary",
    "OwnerShufflesGraveyardIntoLibrary",
+   "PainForAllDamageEchoEffect",
+   "PainForAllETBEffect",
+   "PairedTargetPumpDebuffUEOT",
    "PayEnergy",
    "PayToCopyEnchantedCreatureElseToken",
+   "PeekTopMayBattlefieldIfLandElseHand",
+   "PerigeeBeckonerDiesReturnTappedEffect",
+   "PhaseOutEquippedCreature",
    "PlayExiledCardFreeIfAnyLibraryAtMost",
    "PoisonCountersEqualToDamage",
+   "PossibilityTechnicianETBEffect",
+   "PreventAllCombatDamageThisTurn",
    "PumpAllCreaturesUEOT",
+   "PumpCreaturesOpponentsControlUntilEOT",
    "PumpCreaturesYouControlUntilEOT",
    "PumpSelfUntilEOT",
+   "PumpSelfXPowerUEOT",
+   "PumpTargetArtifactOrCreatureUntilEOT",
    "PumpTargetCreatureByFormulaUEOT",
    "PumpTargetCreatureUntilEOT",
+   "PumpTargetOtherCreatureByXOverXWhereXIsSourcePower",
    "PumpTargetUntilYourNextTurn",
+   "PutBasicLandFromHandOntoBattlefieldTapped",
+   "PutCardFromGraveyardOnBottomOfLibrary",
    "PutCardFromHandOntoBattlefield",
    "PutCardYouOwnWithCounterFromExileIntoHand",
    "PutCardsFromHandOnTopOfLibrary",
    "PutChargeCountersOnSelf",
+   "PutChargeCountersOnTargetSpacecraftOrPlanetYouControl",
    "PutCounterDoublingOnSecondResolution",
    "PutCountersOnTargetAndAddSubtype",
    "PutCountersUntapItBecomesCreature",
@@ -305,8 +431,11 @@
    "PutPlusOneCounterOnOpponentsCreature",
    "PutPlusOneCounterOnSelf",
    "PutPlusOneCounterOnTargetCreature",
+   "PutPlusOneCountersAndGrantKeywordsUEOTOnTargetCreatureYouControl",
    "PutPlusOneCountersOnEachCreatureYouControlEqualToSourcePower",
+   "PutPlusOneCountersOnSelfPerOtherCreatureOrArtifact",
    "PutPlusOneCountersOnTargetThenGrantKeywordsUEOT",
+   "PutPoisonCountersOnTargetPlayer",
    "PutSourceOnTopOfOwnersLibrary",
    "PutSourceOntoBattlefieldTappedAndAttacking",
    "PutStunCounterOnTappedCreature",
@@ -314,16 +443,20 @@
    "PutTargetPermanentIntoOwnersLibrary",
    "ReanimateAndAttachSource",
    "ReanimateExiledWithSourceFinalityHasteSacrifice",
+   "ReanimateOneExiledWithSourceWithCounters",
    "ReanimateTargetCreatureCardFromAGraveyard",
+   "ReanimateTargetCreatureCardFromDefendersGraveyard",
    "ReconfigureAttach",
    "ReconfigureUnattach",
    "ReflexiveWhenYouDo",
+   "RegenerateTargetCreature",
    "RemoveACounterFromSelf",
    "RemoveAllCountersAddManaPerCounter",
    "RemoveAllMatching",
    "RemoveNamedCounterFromSelfOrSacrifice",
    "RemoveTargetPermanents",
    "ReorderTopCards",
+   "ReturnAllCreaturesFromYourGraveyardToBattlefield",
    "ReturnAllPermanentsToOwnersHands",
    "ReturnCardFromGraveyardToBattlefield",
    "ReturnCardsExiledWithSourceToOwnersHand",
@@ -332,13 +465,20 @@
    "ReturnCreatureFromYourGraveyardToHand",
    "ReturnExiledWithSourceToGraveyardThenToken",
    "ReturnFromGraveyard",
+   "ReturnTargetArtifactCardFromYourGraveyardToHand",
    "ReturnTargetCardFromYourGraveyardToHand",
    "ReturnTargetCreatureToOwnersHand",
    "ReturnTargetGraveyardCardToHand",
+   "ReturnTargetLandFromGraveyardToHand",
+   "ReturnTargetPermanentYouControlToOwnersHand",
    "ReturnTargetSpellOrNonlandPermanentToHand",
    "ReturnTargetSpellToOwnersHand",
    "ReturnThisCardFromGraveyardThenAttachToThatCreature",
    "ReturnThisCardFromGraveyardToBattlefield",
+   "ReturnUpToNCreaturesFromYourGraveyardToHand",
+   "ReturnUpToNNonlandPermanentCardsFromGraveyardToHand",
+   "ReturnUpToNSmallCreaturesFromGraveyardWithCounters",
+   "ReturnUpToNTargetCreaturesToOwnersHands",
    "RevealHandMayExileCardOrChosenCreatureUntilSourceLeaves",
    "RevealTopCardToHandLoseLifeEqualMV",
    "RevealTopLandToBattlefieldElseHand",
@@ -346,28 +486,42 @@
    "RevealTopNOpponentChoosesOneRestExiledWithCounter",
    "RevealUntilCreatureOntoBattlefieldAttacking",
    "RollDieTable",
+   "RovingActuatorETBEffect",
    "SacrificeAPermanent",
    "SacrificeArtifactTutorArtifactPayDifference",
    "SacrificeCreatureThenDamageEqualToItsPower",
+   "SacrificeNLandsYouControl",
    "SacrificeSelf",
    "SacrificeSelfIfEvoked",
    "SacrificeSelfIfNoNamedCounters",
+   "SacrificeSelfPreservingExileLink",
    "SacrificeSelfUnlessEscaped",
+   "SacrificeSelfUnlessTapPermanent",
+   "SacrificeSelfUnlessVoidActive",
+   "SawAttacksOptionalSacDrawEffect",
    "ScheduleDelayedEffect",
+   "ScheduleSelfSacAtNextEndStep",
    "Scry",
    "SearchAnyNumberExileCastFreeThisTurn",
    "SearchAnyNumberOntoBattlefield",
    "SearchLibrary",
+   "SearchLibraryForBasicLandTapped",
    "SearchLibraryForCard",
+   "SearchLibraryForEquipmentToBattlefield",
    "SearchLibraryForGreenCreatureWithMVAtMostX",
    "SearchLibraryForLandCardToBattlefield",
+   "SeedshipImpactEffect",
    "SelfMill",
    "Sequence",
+   "SetBasePTConditionalUntilEOT",
    "SetBasePTUntilEOT",
+   "SetLifeToHalfStartingRoundedUp",
    "ShuffleSourceIntoOwnersLibrary",
    "ShuffleThenExileTopMayPlayFree",
    "ShuffleThisSpellIntoOwnersLibrary",
    "ShuffleYourLibrary",
+   "ShuffleZonesIntoLibrary",
+   "SingularityRuptureEffect",
    "SourceBecomesCopyOfTargetGraveyardCardUEOT",
    "SourceBecomesIfSubtype",
    "SourceBecomesPrepared",
@@ -377,13 +531,23 @@
    "SourceDealsLoyaltyDamageToChosen",
    "SourceFightsTarget",
    "Surveil",
+   "SurveyMechanActivationEffect",
    "SwapArtifactWithGraveyardArtifact",
+   "SwitchSourcePowerToughnessUEOT",
+   "SystemsOverrideEffect",
    "TakeExtraTurnAfterThisOne",
    "TakeInitiative",
+   "TannukEnsignLandfallEffect",
    "Tap",
+   "TapAndStunUpToOneTargetCreature",
+   "TapAnotherTargetCreature",
+   "TapEnchantedPermanent",
    "TapSelf",
+   "TapTargetArtifactOrCreature",
+   "TapTargetOpponentPermanentAndStunIt",
    "TapTargetPutStunCounters",
    "TapUpToOneTargetCreature",
+   "TargetArtifactBecomesCreatureUEOT",
    "TargetBecomesCopyOfAnotherTargetUEOT",
    "TargetBecomesCreatureIndefinitely",
    "TargetConnives",
@@ -391,9 +555,11 @@
    "TargetOpponentCreatesToken",
    "TargetOpponentDiscardsCasterChoice",
    "TargetOpponentExilesThreeMayCastOneFree",
+   "TargetOpponentLookHandMayDiscard",
    "TargetOpponentLosesLife",
    "TargetOpponentMayLetYouDrawElseMill",
    "TargetOpponentMills",
+   "TargetOpponentSacrificesCreatureOtherThanEnchanted",
    "TargetPlayerDiscards",
    "TargetPlayerDiscardsAtRandom",
    "TargetPlayerDraws",
@@ -405,18 +571,23 @@
    "TargetPlayerPutsGraveyardOnBottomRandom",
    "TargetPlayerRevealsHandYouChooseDiscard",
    "TargetPlayerTakesExtraTurn",
+   "TerminalVelocityEffect",
+   "TerrapactIntimidatorETBEffect",
+   "TerritorialBruntarLandfallEffect",
    "TezzeretEmblemBeginCombat",
    "ThatPlayerDrawsAndGainsControlOfSource",
    "ThenItsControllerDraws",
    "ThenTargetBecomesCreatureIfNot",
    "ThenTargetControllerResolves",
    "ThenTargetLosesAbilitiesWhileSourceRemains",
+   "ThreatenTargetCreatureUEOT",
    "TransformSource",
    "Untap",
    "UntapAllMatching",
    "UntapChosenPermanents",
    "UntapSelf",
    "UntapTargetArtifactOrCreatureConditionalCounter",
+   "UntapTargetLand",
    "UntapTargetOtherPermanent",
    "UntapUpToNLands",
    "UntapUpToNPermanents",
@@ -424,12 +595,14 @@
    "VoteExileNonlandPermanent",
    "WinTheGame",
    "YouAndTargetOpponentEachDraw",
-   "YourPermanentsBecomeCreaturesUEOT"
+   "YourPermanentsBecomeCreaturesUEOT",
+   "ZeroPointBalladEffect"
   ],
   "EventPattern": [
    "EventPattern"
   ],
   "EventTransform": [
+   "AddInstances",
    "AddToCount",
    "InsteadForSourceController",
    "MultiplyCount",
@@ -452,13 +625,23 @@
    "ResolvingX",
    "Scaled"
   ],
+  "GraveyardExileInstead": [
+   "GraveyardExileInstead"
+  ],
+  "HandAbilityGrant": [
+   "HandAbilityGrant"
+  ],
+  "HandCardFilter": [
+   "HandCardFilter"
+  ],
   "Keyword": [
    "Keyword"
   ],
   "LayerPayload": [
    "CantBeBlocked",
    "GrantKeyword",
-   "PowerToughnessBonus"
+   "PowerToughnessBonus",
+   "RemoveKeyword"
   ],
   "ManaCost": [
    "ManaCost"
@@ -469,6 +652,7 @@
    "DrawIsFirstInOwnDrawStep",
    "HasActivatedAbility",
    "HasColor",
+   "HasCounter",
    "HasDrawnNCardsThisTurn",
    "HasKeyword",
    "HasManaValueAtMostColorsSpent",
@@ -483,6 +667,7 @@
    "IsAttacking",
    "IsBasic",
    "IsBattle",
+   "IsBlocking",
    "IsCreature",
    "IsEnchantment",
    "IsHarnessed",
@@ -513,9 +698,12 @@
   ],
   "PTFormula": [
    "CardTypesInAllGraveyardsPT",
+   "CardsYouOwnInExilePT",
    "DomainPT",
+   "LandsYouControlPT",
    "LevelerPT",
-   "PowerEqualsCount"
+   "PowerEqualsCount",
+   "PowerPlusGreatestManaValueOfOtherArtifactsPT"
   ],
   "RemovalRider": [
    "ControllerCreatesTokens",
@@ -527,7 +715,11 @@
   "ReplacementEffect": [
    "ReplacementEffect"
   ],
+  "RoomHalf": [
+   "RoomHalf"
+  ],
   "StatePredicate": [
+   "AnyPlayerControlsNoCreatures",
    "CardsInGraveyardAtLeast",
    "CompletedADungeon",
    "Delirium",
@@ -536,9 +728,12 @@
    "HasInitiative",
    "IsMonarch",
    "LandsPlayedThisTurnAtLeast",
+   "LoneAttackerForYou",
    "NoncreatureSpellsCastThisTurn",
+   "OpponentControlsMoreLandsThanYou",
    "OpponentHasMoreCardsInHand",
    "SpellsCastThisTurn",
+   "VoidActive",
    "YouControlAtLeast"
   ],
   "StaticAbility": [
@@ -566,6 +761,7 @@
    "FirstAttackThisTurn",
    "HostAttacksWithAnother",
    "IsFormerHost",
+   "IsHost",
    "IsSelf",
    "IsThisSpell",
    "Not",
@@ -1206,6 +1402,30 @@
    "module": "mtg_bot.effects.generic.cube_creatures_ub",
    "qualname": "Adapt"
   },
+  "AddChargeCounterManaOfChosenColor": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.mana",
+   "qualname": "AddChargeCounterManaOfChosenColor"
+  },
+  "AddInstances": {
+   "category": "EventTransform",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "delta",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.modifiers",
+   "qualname": "AddInstances"
+  },
   "AddManaInAnyCombination": {
    "category": "Effect",
    "fields": [
@@ -1379,6 +1599,20 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.mana",
    "qualname": "AddNManaOfChosenColor"
+  },
+  "AddOneManaFromControlledLandsProductions": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.mana",
+   "qualname": "AddOneManaFromControlledLandsProductions"
+  },
+  "AddOneManaOfChosenPermanentColor": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.mana",
+   "qualname": "AddOneManaOfChosenPermanentColor"
   },
   "AddOneManaOfColorAmongControlled": {
    "category": "Effect",
@@ -1579,6 +1813,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.layout_face_effects",
    "qualname": "Airbend"
+  },
+  "AlpharaelDreamingAcolyteDiscardEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "AlpharaelDreamingAcolyteDiscardEffect"
   },
   "AlternativeCost": {
    "category": "AlternativeCost",
@@ -1816,6 +2057,27 @@
    "module": "mtg_bot.effects.predicates",
    "qualname": "And"
   },
+  "AnotherSpellCastThisTurn": {
+   "category": "Condition",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.conditions",
+   "qualname": "AnotherSpellCastThisTurn"
+  },
+  "AnticausalVestigeLeavesEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "AnticausalVestigeLeavesEffect"
+  },
+  "AnyPlayerControlsNoCreatures": {
+   "category": "StatePredicate",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.state_predicates",
+   "qualname": "AnyPlayerControlsNoCreatures"
+  },
   "ApplyEffect": {
    "category": "Effect",
    "fields": [
@@ -1851,6 +2113,20 @@
    "module": "mtg_bot.effects.combinators",
    "qualname": "ApplyEffect"
   },
+  "ArabellaAttackEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "ArabellaAttackEffect"
+  },
+  "AstelliReclaimerETBEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "AstelliReclaimerETBEffect"
+  },
   "AtBeginningOfNextEndStep": {
    "category": "Effect",
    "fields": [
@@ -1870,6 +2146,71 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_walkers",
    "qualname": "AtBeginningOfNextEndStep"
+  },
+  "AtLeastNSpellsCastThisTurn": {
+   "category": "Condition",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "n",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.conditions",
+   "qualname": "AtLeastNSpellsCastThisTurn"
+  },
+  "AtomicMicrosizerAttackEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "AtomicMicrosizerAttackEffect"
+  },
+  "AttachToTargetCreatureYouControl": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "frozenset[KeywordSpelling]",
+     "default": [],
+     "name": "granted_keywords_ueot",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "keyword"
+      },
+      "t": "set"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.attach",
+   "qualname": "AttachToTargetCreatureYouControl"
+  },
+  "AttackedWithThisTurn": {
+   "category": "Condition",
+   "fields": [
+    {
+     "annotation": "ObjectPredicate",
+     "name": "filter",
+     "required": true,
+     "type": {
+      "categories": [
+       "ObjectPredicate"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.conditions",
+   "qualname": "AttackedWithThisTurn"
   },
   "Backup": {
    "category": "Effect",
@@ -1991,7 +2332,10 @@
      "required": false,
      "type": {
       "of": {
-       "t": "never"
+       "categories": [
+        "ActivatedAbility"
+       ],
+       "t": "ref"
       },
       "t": "list"
      },
@@ -2004,7 +2348,10 @@
      "required": false,
      "type": {
       "of": {
-       "t": "never"
+       "categories": [
+        "TriggeredAbility"
+       ],
+       "t": "ref"
       },
       "t": "list"
      },
@@ -2098,6 +2445,13 @@
    "module": "mtg_bot.effects.generic.become_type",
    "qualname": "BecomeType"
   },
+  "BecomesCopyOfTargetLand": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.become_type",
+   "qualname": "BecomesCopyOfTargetLand"
+  },
   "BeginGameOnBattlefield": {
    "category": "BeginGameOnBattlefield",
    "fields": [
@@ -2177,6 +2531,20 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_ub",
    "qualname": "BindEventPlayer"
+  },
+  "BiosynthicBurstEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "BiosynthicBurstEffect"
+  },
+  "BoilerbilgesRipperETBEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "BoilerbilgesRipperETBEffect"
   },
   "Bounce": {
    "category": "Effect",
@@ -2780,7 +3148,7 @@
      "required": false,
      "type": {
       "of": {
-       "t": "never"
+       "t": "str"
       },
       "t": "list"
      },
@@ -2896,7 +3264,10 @@
      "required": false,
      "type": {
       "of": {
-       "t": "never"
+       "categories": [
+        "HandAbilityGrant"
+       ],
+       "t": "ref"
       },
       "t": "list"
      },
@@ -4686,7 +5057,10 @@
      "required": false,
      "type": {
       "of": {
-       "t": "never"
+       "categories": [
+        "GraveyardExileInstead"
+       ],
+       "t": "ref"
       },
       "t": "list"
      },
@@ -4945,7 +5319,10 @@
      "required": false,
      "type": {
       "of": {
-       "t": "never"
+       "categories": [
+        "RoomHalf"
+       ],
+       "t": "ref"
       },
       "t": "list"
      },
@@ -5406,6 +5783,24 @@
    "module": "mtg_bot.effects.generic.layout_face_effects",
    "qualname": "CardsInYourGraveyardAtLeast"
   },
+  "CardsYouOwnInExilePT": {
+   "category": "PTFormula",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "toughness_plus",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.pt_formulas",
+   "qualname": "CardsYouOwnInExilePT"
+  },
   "Cascade": {
    "category": "Effect",
    "fields": [],
@@ -5426,6 +5821,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "CastOrCopy"
+  },
+  "ChangeControllerToCombatDamageSource": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.control",
+   "qualname": "ChangeControllerToCombatDamageSource"
   },
   "ChapterReached": {
    "category": "TriggerPredicate",
@@ -5618,6 +6020,13 @@
    "module": "mtg_bot.effects.predicates",
    "qualname": "ClassLevelReached"
   },
+  "CloseEncounterEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "CloseEncounterEffect"
+  },
   "Companion": {
    "category": "Companion",
    "fields": [
@@ -5664,6 +6073,215 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.combinators",
    "qualname": "ConditionalIfCastFromHand"
+  },
+  "ConditionalIfSourcePowerAtLeast": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "Effect",
+     "name": "effect",
+     "required": true,
+     "type": {
+      "categories": [
+       "Effect"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 4,
+     "name": "threshold",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "ConditionalIfSourcePowerAtLeast"
+  },
+  "ConditionalIfVoid": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "Effect",
+     "name": "then_effect",
+     "required": true,
+     "type": {
+      "categories": [
+       "Effect"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "Effect | None",
+     "default": null,
+     "name": "else_effect",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "Effect"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "ConditionalIfVoid"
+  },
+  "ConditionalIfYouControlAtLeast": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "threshold",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "CardTypeWord",
+     "name": "predicate",
+     "required": true,
+     "type": {
+      "enum": "CardTypeWord",
+      "t": "enum"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "Effect",
+     "name": "inner",
+     "required": true,
+     "type": {
+      "categories": [
+       "Effect"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "ConditionalIfYouControlAtLeast"
+  },
+  "ConditionalIfYouControlSubtype": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "str",
+     "name": "subtype",
+     "required": true,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "Effect",
+     "name": "then_effect",
+     "required": true,
+     "type": {
+      "categories": [
+       "Effect"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "'Effect | None'",
+     "default": null,
+     "name": "else_effect",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "Effect"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "ConditionalIfYouControlSubtype"
+  },
+  "ConditionalIfYouGainedLifeAtLeast": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "threshold",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "Effect",
+     "name": "inner",
+     "required": true,
+     "type": {
+      "categories": [
+       "Effect"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "ConditionalIfYouGainedLifeAtLeast"
+  },
+  "ConditionalOnTappedCreatures": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "Effect",
+     "name": "effect",
+     "required": true,
+     "type": {
+      "categories": [
+       "Effect"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 2,
+     "name": "min_count",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "ConditionalOnTappedCreatures"
   },
   "ContinuousModifier": {
    "category": "ContinuousModifier",
@@ -5781,6 +6399,13 @@
    "module": "mtg_bot.effects.predicates",
    "qualname": "Controlled"
   },
+  "ControlledArtifactEnteredThisTurn": {
+   "category": "Condition",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.conditions",
+   "qualname": "ControlledArtifactEnteredThisTurn"
+  },
   "ControlledByOpponent": {
    "category": "ObjectPredicate",
    "fields": [],
@@ -5847,6 +6472,23 @@
    "module": "mtg_bot.effects.generic.targeted_removal",
    "qualname": "ControllerSearchesForBasicLand"
   },
+  "ControlsAnotherCreatureWithPowerAtMost": {
+   "category": "Condition",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "threshold",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.conditions",
+   "qualname": "ControlsAnotherCreatureWithPowerAtMost"
+  },
   "ControlsAtMost": {
    "category": "Condition",
    "fields": [
@@ -5904,6 +6546,13 @@
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "ControlsAtMostNamed"
   },
+  "CoordinatedClobberingEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "CoordinatedClobberingEffect"
+  },
   "CopyEachTokenYouControlEnteredThisTurn": {
    "category": "Effect",
    "fields": [],
@@ -5917,6 +6566,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "CopyTargetInstantOrSorcerySpellYouControl"
+  },
+  "CopyTargetInstantOrSorceryYouControl": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.stack_control",
+   "qualname": "CopyTargetInstantOrSorceryYouControl"
   },
   "CopyThisSpell": {
    "category": "Effect",
@@ -6338,6 +6994,30 @@
    "module": "mtg_bot.effects.generic.layout_face_effects",
    "qualname": "CreateEmblemWithStatics"
   },
+  "CreateLanderAndScheduleSacrifice": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.tokens",
+   "qualname": "CreateLanderAndScheduleSacrifice"
+  },
+  "CreateNTokensFromLastExileRecall": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "str",
+     "name": "token_name",
+     "required": true,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "CreateNTokensFromLastExileRecall"
+  },
   "CreateThenTheyGainKeywordsUEOT": {
    "category": "Effect",
    "fields": [
@@ -6559,6 +7239,27 @@
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "CreateTokenCopyOfSource"
   },
+  "CreateTokenCopyOfTargetCreatureYouControl": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "'str | None'",
+     "default": null,
+     "name": "additional_subtype",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.tokens",
+   "qualname": "CreateTokenCopyOfTargetCreatureYouControl"
+  },
   "CreateTokenCopyOfTargetPermanent": {
    "category": "Effect",
    "fields": [
@@ -6689,6 +7390,36 @@
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "CreateTokenPerFormula"
   },
+  "CreateTokenPerMulticoloredPermanent": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "'CardPrinting'",
+     "name": "token_printing",
+     "required": true,
+     "type": {
+      "categories": [
+       "CardPrinting"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": true,
+     "name": "tapped",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.tokens",
+   "qualname": "CreateTokenPerMulticoloredPermanent"
+  },
   "CreateTokenThenMayAttachSelf": {
    "category": "Effect",
    "fields": [
@@ -6787,6 +7518,13 @@
    "module": "mtg_bot.effects.generic.layout_face_effects",
    "qualname": "CreateTriggersUntilYourNextTurn"
   },
+  "CreateXTokensOfTargetPermanentWithHasteEndStepSac": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.tokens",
+   "qualname": "CreateXTokensOfTargetPermanentWithHasteEndStepSac"
+  },
   "CreaturesCantBlockThisTurn": {
    "category": "Effect",
    "fields": [
@@ -6804,6 +7542,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "CreaturesCantBlockThisTurn"
+  },
+  "CutPropulsionEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "CutPropulsionEffect"
   },
   "DealCombatDamageAmountToTarget": {
    "category": "Effect",
@@ -7026,6 +7771,30 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.damage",
    "qualname": "DealDamageEachOpponent"
+  },
+  "DealDamageEqualToSourcePowerAnyTarget": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.damage",
+   "qualname": "DealDamageEqualToSourcePowerAnyTarget"
   },
   "DealDamageExileIfDiesThisTurn": {
    "category": "Effect",
@@ -7301,6 +8070,88 @@
    "module": "mtg_bot.effects.generic.roto_board",
    "qualname": "DealDamageToEachTarget"
   },
+  "DealDamageToOpponentCreature": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.damage",
+   "qualname": "DealDamageToOpponentCreature"
+  },
+  "DealDamageToOpponentCreatureByArtifactCount": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.damage",
+   "qualname": "DealDamageToOpponentCreatureByArtifactCount"
+  },
+  "DealDamageToOpponentCreatureByCardsInHand": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.damage",
+   "qualname": "DealDamageToOpponentCreatureByCardsInHand"
+  },
   "DealDamageToTargetCreature": {
    "category": "Effect",
    "fields": [
@@ -7344,6 +8195,152 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.damage",
    "qualname": "DealDamageToTargetCreature"
+  },
+  "DealDamageToTargetCreatureSpacecraftBoosted": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 3,
+     "name": "base",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 5,
+     "name": "boosted",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.damage",
+   "qualname": "DealDamageToTargetCreatureSpacecraftBoosted"
+  },
+  "DealDamageToTargetCreatureWithExcessLanderRider": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 6,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.damage",
+   "qualname": "DealDamageToTargetCreatureWithExcessLanderRider"
+  },
+  "DealDamageToTargetOpponent": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.damage",
+   "qualname": "DealDamageToTargetOpponent"
+  },
+  "DealDamageToTargetTappedCreature": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.damage",
+   "qualname": "DealDamageToTargetTappedCreature"
   },
   "DealNDamageToEachCreature": {
    "category": "Effect",
@@ -7420,6 +8417,13 @@
    "module": "mtg_bot.effects.generic.spell_damage",
    "qualname": "DealXDamage"
   },
+  "DefendingPlayerLosesHalfLifeRoundedUp": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.life",
+   "qualname": "DefendingPlayerLosesHalfLifeRoundedUp"
+  },
   "DefendingPlayerSacrificesPermanents": {
    "category": "Effect",
    "fields": [
@@ -7474,6 +8478,24 @@
    "module": "mtg_bot.effects.conditions",
    "qualname": "DeliriumActive"
   },
+  "DepressurizeEffect": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 3,
+     "name": "power_penalty",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "DepressurizeEffect"
+  },
   "Destroy": {
    "category": "Effect",
    "fields": [
@@ -7498,6 +8520,58 @@
    "module": "mtg_bot.effects.generic.destroy",
    "qualname": "Destroy"
   },
+  "DestroyAllCreatures": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "tapped_only",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "untapped_only",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "min_power",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.destroy",
+   "qualname": "DestroyAllCreatures"
+  },
+  "DestroyEachNonlandPermanentWithMVEqualToSourceChargeCounters": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.destroy",
+   "qualname": "DestroyEachNonlandPermanentWithMVEqualToSourceChargeCounters"
+  },
+  "DestroyEnchantedPermanent": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.destroy",
+   "qualname": "DestroyEnchantedPermanent"
+  },
   "DestroyTargetArtifact": {
    "category": "Effect",
    "fields": [
@@ -7521,6 +8595,128 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.destroy",
    "qualname": "DestroyTargetArtifact"
+  },
+  "DestroyTargetArtifactEnchantmentOrFlyingCreature": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.destroy",
+   "qualname": "DestroyTargetArtifactEnchantmentOrFlyingCreature"
+  },
+  "DestroyTargetArtifactOrTappedCreature": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.destroy",
+   "qualname": "DestroyTargetArtifactOrTappedCreature"
+  },
+  "DestroyTargetCreature": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "draw_if_undamaged_amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_spacecraft",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_enchantment",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "optional",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "exclude_self",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.destroy",
+   "qualname": "DestroyTargetCreature"
   },
   "DestroyTargetLand": {
    "category": "Effect",
@@ -7580,6 +8776,61 @@
    "module": "mtg_bot.effects.generic.destroy",
    "qualname": "DestroyTargetNoncreaturePermanent"
   },
+  "DestroyTargetNonlandPermanent": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.destroy",
+   "qualname": "DestroyTargetNonlandPermanent"
+  },
+  "DestroyTargetNonlandPermanentWithLanderForController": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.destroy",
+   "qualname": "DestroyTargetNonlandPermanentWithLanderForController"
+  },
+  "DestroyUpToOneTargetNonlandPermanent": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.destroy",
+   "qualname": "DestroyUpToOneTargetNonlandPermanent"
+  },
   "DevotionTo": {
    "category": "Formula",
    "fields": [
@@ -7596,6 +8847,31 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_ub",
    "qualname": "DevotionTo"
+  },
+  "DiplomaticRelationsEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "DiplomaticRelationsEffect"
+  },
+  "DiscardHandThenDrawN": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 2,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.discard",
+   "qualname": "DiscardHandThenDrawN"
   },
   "DiscardSelf": {
    "category": "Effect",
@@ -7755,6 +9031,20 @@
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "DoublePlusOneCountersOnEach"
   },
+  "DoubleTargetCreaturesPowerUEOT": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.pump",
+   "qualname": "DoubleTargetCreaturesPowerUEOT"
+  },
+  "DrawCardPerMulticoloredPermanent": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.draw_mill",
+   "qualname": "DrawCardPerMulticoloredPermanent"
+  },
   "DrawCards": {
    "category": "Effect",
    "fields": [
@@ -7771,6 +9061,57 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.draw_mill",
    "qualname": "DrawCards"
+  },
+  "DrawCardsAndLoseLifeEqualToResolvingDamage": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.damage",
+   "qualname": "DrawCardsAndLoseLifeEqualToResolvingDamage"
+  },
+  "DrawCardsByConditionMultiplier": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "'Condition'",
+     "name": "condition",
+     "required": true,
+     "type": {
+      "categories": [
+       "Condition"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "where X is determined at resolution",
+     "name": "description_fragment",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.draw_mill",
+   "qualname": "DrawCardsByConditionMultiplier"
+  },
+  "DrawCardsEqualToResolvingCombatDamage": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.draw_mill",
+   "qualname": "DrawCardsEqualToResolvingCombatDamage"
+  },
+  "DrawCardsEqualToResolvingCounterAmount": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.draw_mill",
+   "qualname": "DrawCardsEqualToResolvingCounterAmount"
   },
   "DrawCardsPerCounterOnSource": {
    "category": "Effect",
@@ -7854,6 +9195,20 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_glue",
    "qualname": "DrawPerOpponentWhoLostLifeThisTurn"
+  },
+  "DuringYourTurn": {
+   "category": "Condition",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.conditions",
+   "qualname": "DuringYourTurn"
+  },
+  "DyadrineAttackEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "DyadrineAttackEffect"
   },
   "EachCardInStartingDeck": {
    "category": "DeckCondition",
@@ -7940,6 +9295,67 @@
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "EachOpponentChoiceDestroyOneAtRandom"
   },
+  "EachOpponentDiscards": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "count",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.discard",
+   "qualname": "EachOpponentDiscards"
+  },
+  "EachOpponentDiscardsOrLosesLife": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 3,
+     "name": "life_if_cant",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.life",
+   "qualname": "EachOpponentDiscardsOrLosesLife"
+  },
+  "EachOpponentExilesCardFromHandWithCastPermission": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.discard",
+   "qualname": "EachOpponentExilesCardFromHandWithCastPermission"
+  },
+  "EachOpponentExilesOwnCreature": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "link_to_source",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.opponent_punishers",
+   "qualname": "EachOpponentExilesOwnCreature"
+  },
   "EachOpponentLosesLife": {
    "category": "Effect",
    "fields": [
@@ -7956,6 +9372,24 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.life",
    "qualname": "EachOpponentLosesLife"
+  },
+  "EachOpponentMillsCards": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.draw_mill",
+   "qualname": "EachOpponentMillsCards"
   },
   "EachOpponentSacrificesCreature": {
    "category": "Effect",
@@ -8020,6 +9454,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.artifact_mechanics",
    "qualname": "EachOpponentSacrificesN"
+  },
+  "EachOpponentSacsOrDiscardsOrTakesSourcePowerDamage": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.opponent_punishers",
+   "qualname": "EachOpponentSacsOrDiscardsOrTakesSourcePowerDamage"
   },
   "EachPlayerDiscardsHand": {
    "category": "Effect",
@@ -8145,6 +9586,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "Earthbend"
+  },
+  "EnchantedCreatureFightsTargetEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "EnchantedCreatureFightsTargetEffect"
   },
   "EndOfTurn": {
    "category": "Duration",
@@ -8363,12 +9811,82 @@
    "module": "mtg_bot.effects.generic.exile",
    "qualname": "Exile"
   },
+  "ExileAllArtifactsWithManaValueAtMost": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 3,
+     "name": "max_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "ExileAllArtifactsWithManaValueAtMost"
+  },
+  "ExileAllCreaturesAndSpacecraft": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "ExileAllCreaturesAndSpacecraft"
+  },
   "ExileAllCreaturesThenIncubate": {
    "category": "Effect",
    "fields": [],
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.incubate",
    "qualname": "ExileAllCreaturesThenIncubate"
+  },
+  "ExileAllGraveyards": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "ExileAllGraveyards"
+  },
+  "ExileAllMatchingUntilSourceLeaves": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "match_artifact",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "match_creature",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "max_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "ExileAllMatchingUntilSourceLeaves"
   },
   "ExileEachOpponentsGraveyard": {
    "category": "Effect",
@@ -8477,12 +9995,118 @@
    "module": "mtg_bot.effects.generic.layout_effects",
    "qualname": "ExileSourceThenReturnTransformed"
   },
+  "ExileTargetAttackingCreatureUntilEndStep": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "ExileTargetAttackingCreatureUntilEndStep"
+  },
   "ExileTargetCardFromGraveyard": {
    "category": "Effect",
    "fields": [],
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.exile",
    "qualname": "ExileTargetCardFromGraveyard"
+  },
+  "ExileTargetCreature": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "ExileTargetCreature"
+  },
+  "ExileTargetCreatureUntilSourceLeaves": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "frozenset[str]",
+     "default": [],
+     "name": "excluded_subtypes",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "set"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "opponents_only",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "yours_only",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "ExileTargetCreatureUntilSourceLeaves"
+  },
+  "ExileTargetCreatureWithPowerOrToughnessAtMost": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "max_value",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "ExileTargetCreatureWithPowerOrToughnessAtMost"
   },
   "ExileTargetGraveyardCardWithPlayPermission": {
    "category": "Effect",
@@ -8728,6 +10352,48 @@
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "ExileTopCardsWithPlayPermission"
   },
+  "ExileTopOfLibraryMayPlayThisTurn": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "ExileTopOfLibraryMayPlayThisTurn"
+  },
+  "ExileTopXOfLibraryMayPlayThisTurn": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "'Formula | None'",
+     "default": null,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "Formula"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "ExileTopXOfLibraryMayPlayThisTurn"
+  },
   "ExileUntilNonlandThenCounterOrMayCastIt": {
    "category": "Effect",
    "fields": [],
@@ -8855,6 +10521,20 @@
    "module": "mtg_bot.cards.base",
    "qualname": "ExternalCostReduction"
   },
+  "FamishedWorldsireETBEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "FamishedWorldsireETBEffect"
+  },
+  "FanaticOfTheHarrowingETBEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "FanaticOfTheHarrowingETBEffect"
+  },
   "FirstAttackThisTurn": {
    "category": "TriggerPredicate",
    "fields": [],
@@ -8913,6 +10593,40 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.spell_copies",
    "qualname": "FlipCoinStealOrCounterTargetSpell"
+  },
+  "FocusFireEffect": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 2,
+     "name": "base",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "FocusFireEffect"
   },
   "FormulaCoversLibrary": {
    "category": "Condition",
@@ -8975,6 +10689,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_walkers",
    "qualname": "GainControlOfTargetPermanently"
+  },
+  "GainControlOfTargetSliverPermanently": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.control",
+   "qualname": "GainControlOfTargetSliverPermanently"
   },
   "GainControlOfTargetThenAttachIfEquipment": {
    "category": "Effect",
@@ -9301,6 +11022,24 @@
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "GrantKeywordsUEOTThenExplores"
   },
+  "GrantLifeToEachOpponent": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.life",
+   "qualname": "GrantLifeToEachOpponent"
+  },
   "GrantProtectionOfChoiceUEOT": {
    "category": "Effect",
    "fields": [
@@ -9338,6 +11077,50 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.keyword_actions",
    "qualname": "GrantProtectionOfChoiceUEOT"
+  },
+  "GrantTriggeredAbilityUEOT": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "'TriggeredAbility | None'",
+     "default": null,
+     "name": "ability",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TriggeredAbility"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "you_control_only",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "opponents_only",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.grant_keywords",
+   "qualname": "GrantTriggeredAbilityUEOT"
   },
   "GrantUnblockableUEOT": {
    "category": "Effect",
@@ -9395,6 +11178,125 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.grant_keywords",
    "qualname": "GrantUnblockableUEOT"
+  },
+  "GraveyardExileInstead": {
+   "category": "GraveyardExileInstead",
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "opponents_only",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "tokens",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "frozenset",
+     "default": [],
+     "name": "colors",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "never"
+      },
+      "t": "set"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_zones",
+   "qualname": "GraveyardExileInstead"
+  },
+  "HandAbilityGrant": {
+   "category": "HandAbilityGrant",
+   "fields": [
+    {
+     "annotation": "HandCardFilter",
+     "name": "card_filter",
+     "required": true,
+     "type": {
+      "categories": [
+       "HandCardFilter"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "'ManaCost | None'",
+     "default": null,
+     "name": "granted_warp_cost",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "ManaCost"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "",
+     "name": "granted_warp_cost_str",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.cards.base",
+   "qualname": "HandAbilityGrant"
+  },
+  "HandCardFilter": {
+   "category": "HandCardFilter",
+   "fields": [
+    {
+     "annotation": "tuple[tuple[str, 'str | None'], ...]",
+     "default": [],
+     "name": "predicates",
+     "required": false,
+     "type": {
+      "of": {
+       "items": [
+        {
+         "t": "str"
+        },
+        {
+         "of": {
+          "t": "str"
+         },
+         "t": "opt"
+        }
+       ],
+       "t": "tuple"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.cards.base",
+   "qualname": "HandCardFilter"
   },
   "HandSizeAtMost": {
    "category": "Condition",
@@ -9467,6 +11369,23 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.value_predicates",
    "qualname": "HasColor"
+  },
+  "HasCounter": {
+   "category": "ObjectPredicate",
+   "fields": [
+    {
+     "annotation": "str",
+     "name": "kind",
+     "required": true,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.object_predicates",
+   "qualname": "HasCounter"
   },
   "HasDrawnNCardsThisTurn": {
    "category": "ObjectPredicate",
@@ -9669,6 +11588,13 @@
    "module": "mtg_bot.effects.predicates",
    "qualname": "HostAttacksWithAnother"
   },
+  "HouseCartographerSurvivalEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "HouseCartographerSurvivalEffect"
+  },
   "IfCondition": {
    "category": "Effect",
    "fields": [
@@ -9749,6 +11675,45 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.combinators",
    "qualname": "IfConditionElse"
+  },
+  "IfGainedLifeThisTurnUntapSelf": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.tap",
+   "qualname": "IfGainedLifeThisTurnUntapSelf"
+  },
+  "IfNot": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "Condition",
+     "name": "condition",
+     "required": true,
+     "type": {
+      "categories": [
+       "Condition"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "Effect",
+     "name": "then",
+     "required": true,
+     "type": {
+      "categories": [
+       "Effect"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "IfNot"
   },
   "IfSourceHasNoCounters": {
    "category": "Effect",
@@ -9911,6 +11876,13 @@
    "module": "mtg_bot.effects.object_predicates",
    "qualname": "IsBattle"
   },
+  "IsBlocking": {
+   "category": "ObjectPredicate",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.object_predicates",
+   "qualname": "IsBlocking"
+  },
   "IsCreature": {
    "category": "ObjectPredicate",
    "fields": [],
@@ -9953,6 +11925,28 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.object_predicates",
    "qualname": "IsHarnessed"
+  },
+  "IsHost": {
+   "category": "TriggerPredicate",
+   "fields": [
+    {
+     "annotation": "EventSubject | None",
+     "default": null,
+     "name": "subject",
+     "required": false,
+     "type": {
+      "of": {
+       "enum": "EventSubject",
+       "t": "enum"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.predicates",
+   "qualname": "IsHost"
   },
   "IsLand": {
    "category": "ObjectPredicate",
@@ -10106,6 +12100,13 @@
    "module": "mtg_bot.effects.state_predicates",
    "qualname": "LandsPlayedThisTurnAtLeast"
   },
+  "LandsYouControlPT": {
+   "category": "PTFormula",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.pt_formulas",
+   "qualname": "LandsYouControlPT"
+  },
   "LevelCountersInRange": {
    "category": "Condition",
    "fields": [
@@ -10197,6 +12198,20 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.enchantment_mechanics",
    "qualname": "LinkedCreatureControllerSacrifices"
+  },
+  "LockOrUnlockDoorOfTargetRoomYouControl": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.misc",
+   "qualname": "LockOrUnlockDoorOfTargetRoomYouControl"
+  },
+  "LoneAttackerForYou": {
+   "category": "StatePredicate",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.state_predicates",
+   "qualname": "LoneAttackerForYou"
   },
   "LookAtHandExileNonlandOwnerMayPlayTaxed": {
    "category": "Effect",
@@ -10392,6 +12407,55 @@
    "module": "mtg_bot.effects.generic.card_flow",
    "qualname": "LookAtTopCardsPutIntoHand"
   },
+  "LookAtTopNRevealOrCounter": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 5,
+     "name": "n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "LibraryCardFilter",
+     "default": "spacecraft",
+     "name": "filter_name",
+     "required": false,
+     "type": {
+      "enum": "LibraryCardFilter",
+      "t": "enum"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "max_power",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": true,
+     "name": "counter_on_miss",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.library_lookat",
+   "qualname": "LookAtTopNRevealOrCounter"
+  },
   "LookAtTopRepeatPayLifeThenStackTop": {
    "category": "Effect",
    "fields": [
@@ -10482,6 +12546,34 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_walkers",
    "qualname": "LookTopNMayRevealMatchingToHandRestBottomRandom"
+  },
+  "LookTopNPutOneInHandRestToGraveyard": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 4,
+     "name": "n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": true,
+     "name": "reveal_chosen",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.library_lookat",
+   "qualname": "LookTopNPutOneInHandRestToGraveyard"
   },
   "LootThenMayCastDiscardedFreeIfCounters": {
    "category": "Effect",
@@ -10681,6 +12773,31 @@
    "module": "mtg_bot.effects.generic.library_lookat",
    "qualname": "ManifestDread"
   },
+  "ManifestDreadThenAttachSelf": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.library_lookat",
+   "qualname": "ManifestDreadThenAttachSelf"
+  },
+  "ManifestDreadThenPutPlusOneCountersOnIt": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "counter_amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.library_lookat",
+   "qualname": "ManifestDreadThenPutPlusOneCountersOnIt"
+  },
   "MayCastSorceriesAsThoughFlashUntilYourNextTurn": {
    "category": "Effect",
    "fields": [],
@@ -10856,6 +12973,24 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.artifact_mechanics",
    "qualname": "MayExileThatCardFromYourGraveyard"
+  },
+  "MayHaveSourceDealDamageToTarget": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.damage",
+   "qualname": "MayHaveSourceDealDamageToTarget"
   },
   "MayMillDamageThenMayTakeCreature": {
    "category": "Effect",
@@ -11072,6 +13207,27 @@
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "Monstrosity"
   },
+  "MoveEachExiledWithSourceToOwnersGraveyard": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "MoveEachExiledWithSourceToOwnersGraveyard"
+  },
+  "MovePlusOneCounterBetweenPermanentsYouControl": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.counters",
+   "qualname": "MovePlusOneCounterBetweenPermanentsYouControl"
+  },
+  "MoveSelfCountersToTargetCreatureYouControl": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.counters",
+   "qualname": "MoveSelfCountersToTargetCreatureYouControl"
+  },
   "MultiplyCount": {
    "category": "EventTransform",
    "fields": [
@@ -11088,6 +13244,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.modifiers",
    "qualname": "MultiplyCount"
+  },
+  "MutinousMassacreEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "MutinousMassacreEffect"
   },
   "NameStickerGate": {
    "category": "Condition",
@@ -11171,6 +13334,23 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.layout_face_effects",
    "qualname": "NthCardDrawnThisTurn"
+  },
+  "NthSpellThisTurn": {
+   "category": "Condition",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "n",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.conditions",
+   "qualname": "NthSpellThisTurn"
   },
   "OathRevealUntilCreature": {
    "category": "Effect",
@@ -11315,6 +13495,13 @@
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "OneOrMoreBatch"
   },
+  "OpponentControlsMoreLandsThanYou": {
+   "category": "StatePredicate",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.state_predicates",
+   "qualname": "OpponentControlsMoreLandsThanYou"
+  },
   "OpponentGainsControlOfSource": {
    "category": "Effect",
    "fields": [],
@@ -11328,6 +13515,35 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "OpponentHasMoreCardsInHand"
+  },
+  "OpponentsControlAtLeast": {
+   "category": "Condition",
+   "fields": [
+    {
+     "annotation": "ObjectPredicate",
+     "name": "filter",
+     "required": true,
+     "type": {
+      "categories": [
+       "ObjectPredicate"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "name": "n",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.conditions",
+   "qualname": "OpponentsControlAtLeast"
   },
   "OptionalAdditionalCostPaid": {
    "category": "Condition",
@@ -11365,12 +13581,118 @@
    "module": "mtg_bot.effects.combinators",
    "qualname": "OptionalManaCostThenEffect"
   },
+  "OptionalPutCreatureFromHandOntoBattlefield": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "OptionalPutCreatureFromHandOntoBattlefield"
+  },
   "OptionalPutLandFromHandOntoBattlefield": {
    "category": "Effect",
    "fields": [],
    "kind": "dataclass",
    "module": "mtg_bot.effects.combinators",
    "qualname": "OptionalPutLandFromHandOntoBattlefield"
+  },
+  "OptionalSacAnotherForEffect": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "Effect",
+     "name": "inner_effect",
+     "required": true,
+     "type": {
+      "categories": [
+       "Effect"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "OptionalSacAnotherForEffect"
+  },
+  "OptionalSacAnotherForPumpSelfUEOT": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "power_bonus",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "toughness_bonus",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "frozenset[str]",
+     "default": [],
+     "name": "granted_keywords",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "set"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "OptionalSacAnotherForPumpSelfUEOT"
+  },
+  "OptionalSacArtifactForEffect": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "Effect",
+     "name": "inner_effect",
+     "required": true,
+     "type": {
+      "categories": [
+       "Effect"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "OptionalSacArtifactForEffect"
+  },
+  "OptionalSacLandOrLanderForBasicLandRamp": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 2,
+     "name": "land_count",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "OptionalSacLandOrLanderForBasicLandRamp"
   },
   "Or": {
    "category": "TriggerPredicate",
@@ -11410,6 +13732,24 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.targeted_removal",
    "qualname": "OtherPlayersCreateTokenCopy"
+  },
+  "OwnerPutsTargetArtifactOrCreatureOnTopOrBottomOfLibrary": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "nonland_permanent",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.zone_moves",
+   "qualname": "OwnerPutsTargetArtifactOrCreatureOnTopOrBottomOfLibrary"
   },
   "OwnerPutsTargetSecondFromTopOrBottom": {
    "category": "Effect",
@@ -11451,12 +13791,117 @@
    "module": "mtg_bot.effects.generic.cube_creatures_ub",
    "qualname": "OwnerPutsTargetSpellOnTopOrBottom"
   },
+  "OwnerPutsTargetWarpedExileCardOnBottomOfLibrary": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.zone_moves",
+   "qualname": "OwnerPutsTargetWarpedExileCardOnBottomOfLibrary"
+  },
   "OwnerShufflesGraveyardIntoLibrary": {
    "category": "Effect",
    "fields": [],
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "OwnerShufflesGraveyardIntoLibrary"
+  },
+  "PainForAllDamageEchoEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "PainForAllDamageEchoEffect"
+  },
+  "PainForAllETBEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "PainForAllETBEffect"
+  },
+  "PairedTargetPumpDebuffUEOT": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "'Formula | None'",
+     "default": null,
+     "name": "formula",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "Formula"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "positive_power",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "positive_toughness",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "negative_power",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": -1,
+     "name": "negative_toughness",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "my_creature",
+     "name": "positive_kind",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "creature",
+     "name": "negative_kind",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.pump",
+   "qualname": "PairedTargetPumpDebuffUEOT"
   },
   "PayEnergy": {
    "category": "Effect",
@@ -11526,6 +13971,13 @@
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "PayToCopyEnchantedCreatureElseToken"
   },
+  "PeekTopMayBattlefieldIfLandElseHand": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.library_lookat",
+   "qualname": "PeekTopMayBattlefieldIfLandElseHand"
+  },
   "PerBasicLandTypeAmongLandsYouControl": {
    "category": "Condition",
    "fields": [],
@@ -11553,6 +14005,20 @@
    "module": "mtg_bot.effects.conditions",
    "qualname": "PerControlled"
   },
+  "PerDifferentlyNamedLand": {
+   "category": "Condition",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.conditions",
+   "qualname": "PerDifferentlyNamedLand"
+  },
+  "PerigeeBeckonerDiesReturnTappedEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "PerigeeBeckonerDiesReturnTappedEffect"
+  },
   "Permanent": {
    "category": "Duration",
    "fields": [],
@@ -11566,6 +14032,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cast_conditionals",
    "qualname": "PermanentLeftYourControlThisTurn"
+  },
+  "PhaseOutEquippedCreature": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.tap",
+   "qualname": "PhaseOutEquippedCreature"
   },
   "PlayExiledCardFreeIfAnyLibraryAtMost": {
    "category": "Effect",
@@ -11592,6 +14065,13 @@
    "module": "mtg_bot.effects.generic.layout_face_effects",
    "qualname": "PoisonCountersEqualToDamage"
   },
+  "PossibilityTechnicianETBEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "PossibilityTechnicianETBEffect"
+  },
   "PowerEqualsCount": {
    "category": "PTFormula",
    "fields": [
@@ -11615,6 +14095,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "PowerEqualsCount"
+  },
+  "PowerPlusGreatestManaValueOfOtherArtifactsPT": {
+   "category": "PTFormula",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.pt_formulas",
+   "qualname": "PowerPlusGreatestManaValueOfOtherArtifactsPT"
   },
   "PowerToughnessBonus": {
    "category": "LayerPayload",
@@ -11643,6 +14130,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.modifiers",
    "qualname": "PowerToughnessBonus"
+  },
+  "PreventAllCombatDamageThisTurn": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.stack_control",
+   "qualname": "PreventAllCombatDamageThisTurn"
   },
   "PumpAllCreaturesUEOT": {
    "category": "Effect",
@@ -11701,6 +14195,57 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.mass_effects",
    "qualname": "PumpAllCreaturesUEOT"
+  },
+  "PumpCreaturesOpponentsControlUntilEOT": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "power_bonus",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "toughness_bonus",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "frozenset[str]",
+     "default": [],
+     "name": "granted_keywords",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "set"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "until_caster_next_turn",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.pump",
+   "qualname": "PumpCreaturesOpponentsControlUntilEOT"
   },
   "PumpCreaturesYouControlUntilEOT": {
    "category": "Effect",
@@ -11823,6 +14368,70 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.pump",
    "qualname": "PumpSelfUntilEOT"
+  },
+  "PumpSelfXPowerUEOT": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.pump",
+   "qualname": "PumpSelfXPowerUEOT"
+  },
+  "PumpTargetArtifactOrCreatureUntilEOT": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "power_bonus",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "toughness_bonus",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "frozenset[KeywordSpelling]",
+     "default": [],
+     "name": "granted_keywords",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "keyword"
+      },
+      "t": "set"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.pump",
+   "qualname": "PumpTargetArtifactOrCreatureUntilEOT"
   },
   "PumpTargetCreatureByFormulaUEOT": {
    "category": "Effect",
@@ -12047,6 +14656,13 @@
    "module": "mtg_bot.effects.generic.pump",
    "qualname": "PumpTargetCreatureUntilEOT"
   },
+  "PumpTargetOtherCreatureByXOverXWhereXIsSourcePower": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.pump",
+   "qualname": "PumpTargetOtherCreatureByXOverXWhereXIsSourcePower"
+  },
   "PumpTargetUntilYourNextTurn": {
    "category": "Effect",
    "fields": [
@@ -12090,6 +14706,20 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.layout_face_effects",
    "qualname": "PumpTargetUntilYourNextTurn"
+  },
+  "PutBasicLandFromHandOntoBattlefieldTapped": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.zone_moves",
+   "qualname": "PutBasicLandFromHandOntoBattlefieldTapped"
+  },
+  "PutCardFromGraveyardOnBottomOfLibrary": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.graveyard",
+   "qualname": "PutCardFromGraveyardOnBottomOfLibrary"
   },
   "PutCardFromHandOntoBattlefield": {
    "category": "Effect",
@@ -12198,6 +14828,24 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.counters",
    "qualname": "PutChargeCountersOnSelf"
+  },
+  "PutChargeCountersOnTargetSpacecraftOrPlanetYouControl": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 5,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.counters",
+   "qualname": "PutChargeCountersOnTargetSpacecraftOrPlanetYouControl"
   },
   "PutCounterDoublingOnSecondResolution": {
    "category": "Effect",
@@ -12724,12 +15372,60 @@
    "module": "mtg_bot.effects.generic.counters",
    "qualname": "PutPlusOneCounterOnTargetCreature"
   },
+  "PutPlusOneCountersAndGrantKeywordsUEOTOnTargetCreatureYouControl": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 2,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "frozenset[KeywordSpelling]",
+     "default": [],
+     "name": "granted_keywords",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "keyword"
+      },
+      "t": "set"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": true,
+     "name": "you_control_only",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.counters",
+   "qualname": "PutPlusOneCountersAndGrantKeywordsUEOTOnTargetCreatureYouControl"
+  },
   "PutPlusOneCountersOnEachCreatureYouControlEqualToSourcePower": {
    "category": "Effect",
    "fields": [],
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.counters",
    "qualname": "PutPlusOneCountersOnEachCreatureYouControlEqualToSourcePower"
+  },
+  "PutPlusOneCountersOnSelfPerOtherCreatureOrArtifact": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.counters",
+   "qualname": "PutPlusOneCountersOnSelfPerOtherCreatureOrArtifact"
   },
   "PutPlusOneCountersOnTargetThenGrantKeywordsUEOT": {
    "category": "Effect",
@@ -12777,6 +15473,24 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_walkers",
    "qualname": "PutPlusOneCountersOnTargetThenGrantKeywordsUEOT"
+  },
+  "PutPoisonCountersOnTargetPlayer": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.counters",
+   "qualname": "PutPoisonCountersOnTargetPlayer"
   },
   "PutSourceOnTopOfOwnersLibrary": {
    "category": "Effect",
@@ -12905,6 +15619,24 @@
    "module": "mtg_bot.effects.generic.cube_creatures_ub",
    "qualname": "ReanimateExiledWithSourceFinalityHasteSacrifice"
   },
+  "ReanimateOneExiledWithSourceWithCounters": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "counter_amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "ReanimateOneExiledWithSourceWithCounters"
+  },
   "ReanimateTargetCreatureCardFromAGraveyard": {
    "category": "Effect",
    "fields": [
@@ -12922,6 +15654,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.artifact_mechanics",
    "qualname": "ReanimateTargetCreatureCardFromAGraveyard"
+  },
+  "ReanimateTargetCreatureCardFromDefendersGraveyard": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.graveyard",
+   "qualname": "ReanimateTargetCreatureCardFromDefendersGraveyard"
   },
   "ReconfigureAttach": {
    "category": "Effect",
@@ -12986,6 +15725,27 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "ReflexiveWhenYouDo"
+  },
+  "RegenerateTargetCreature": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "frozenset[str]",
+     "default": [],
+     "name": "allowed_subtypes",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "set"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.destroy",
+   "qualname": "RegenerateTargetCreature"
   },
   "RemoveACounterFromSelf": {
    "category": "Effect",
@@ -13106,6 +15866,23 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "RemoveCountersFromSelfCost"
+  },
+  "RemoveKeyword": {
+   "category": "LayerPayload",
+   "fields": [
+    {
+     "annotation": "KeywordSpelling",
+     "name": "keyword",
+     "required": true,
+     "type": {
+      "t": "keyword"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.modifiers",
+   "qualname": "RemoveKeyword"
   },
   "RemoveNamedCounterFromSelfOrSacrifice": {
    "category": "Effect",
@@ -13350,6 +16127,175 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.formulas",
    "qualname": "ResolvingX"
+  },
+  "ReturnAllCreaturesFromYourGraveyardToBattlefield": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "creature",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "artifact",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "land",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "nonland_permanent",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_enchantment",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_spacecraft",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_artifact",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "max_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "min_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "max_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "max_total_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "GraveyardReturnDestination",
+     "default": "hand",
+     "name": "destination",
+     "required": false,
+     "type": {
+      "enum": "GraveyardReturnDestination",
+      "t": "enum"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "plus_one_counter",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "",
+     "name": "log_suffix",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "untargeted_all",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "graveyard_creature",
+     "name": "target_kind",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.graveyard",
+   "qualname": "ReturnAllCreaturesFromYourGraveyardToBattlefield"
   },
   "ReturnAllPermanentsToOwnersHands": {
    "category": "Effect",
@@ -14032,6 +16978,175 @@
    "module": "mtg_bot.effects.generic.graveyard",
    "qualname": "ReturnFromGraveyard"
   },
+  "ReturnTargetArtifactCardFromYourGraveyardToHand": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "creature",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "artifact",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "land",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "nonland_permanent",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_enchantment",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_spacecraft",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_artifact",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "max_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "min_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "max_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "max_total_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "GraveyardReturnDestination",
+     "default": "hand",
+     "name": "destination",
+     "required": false,
+     "type": {
+      "enum": "GraveyardReturnDestination",
+      "t": "enum"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "plus_one_counter",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "",
+     "name": "log_suffix",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "untargeted_all",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "graveyard_creature",
+     "name": "target_kind",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.bounce",
+   "qualname": "ReturnTargetArtifactCardFromYourGraveyardToHand"
+  },
   "ReturnTargetCardFromYourGraveyardToHand": {
    "category": "Effect",
    "fields": [
@@ -14172,6 +17287,219 @@
    "module": "mtg_bot.effects.generic.cube_glue",
    "qualname": "ReturnTargetGraveyardCardToHand"
   },
+  "ReturnTargetLandFromGraveyardToHand": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "creature",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "artifact",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "land",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "nonland_permanent",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_enchantment",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_spacecraft",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_artifact",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "max_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "min_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "max_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "max_total_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "GraveyardReturnDestination",
+     "default": "hand",
+     "name": "destination",
+     "required": false,
+     "type": {
+      "enum": "GraveyardReturnDestination",
+      "t": "enum"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "plus_one_counter",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "",
+     "name": "log_suffix",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "untargeted_all",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "graveyard_creature",
+     "name": "target_kind",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.bounce",
+   "qualname": "ReturnTargetLandFromGraveyardToHand"
+  },
+  "ReturnTargetPermanentYouControlToOwnersHand": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "optional",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "exclude_self",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.bounce",
+   "qualname": "ReturnTargetPermanentYouControlToOwnersHand"
+  },
   "ReturnTargetSpellOrNonlandPermanentToHand": {
    "category": "Effect",
    "fields": [
@@ -14221,6 +17549,541 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "ReturnThisCardFromGraveyardToBattlefield"
+  },
+  "ReturnUpToNCreaturesFromYourGraveyardToHand": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "creature",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "artifact",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "land",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "nonland_permanent",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_enchantment",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_spacecraft",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_artifact",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "max_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "min_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 2,
+     "name": "max_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "max_total_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "GraveyardReturnDestination",
+     "default": "hand",
+     "name": "destination",
+     "required": false,
+     "type": {
+      "enum": "GraveyardReturnDestination",
+      "t": "enum"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "plus_one_counter",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "",
+     "name": "log_suffix",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "untargeted_all",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "graveyard_creature",
+     "name": "target_kind",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.bounce",
+   "qualname": "ReturnUpToNCreaturesFromYourGraveyardToHand"
+  },
+  "ReturnUpToNNonlandPermanentCardsFromGraveyardToHand": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "creature",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "artifact",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "land",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "nonland_permanent",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_enchantment",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_spacecraft",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_artifact",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "max_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "min_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 2,
+     "name": "max_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "max_total_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "GraveyardReturnDestination",
+     "default": "hand",
+     "name": "destination",
+     "required": false,
+     "type": {
+      "enum": "GraveyardReturnDestination",
+      "t": "enum"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "plus_one_counter",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "",
+     "name": "log_suffix",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "untargeted_all",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "graveyard_creature",
+     "name": "target_kind",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.bounce",
+   "qualname": "ReturnUpToNNonlandPermanentCardsFromGraveyardToHand"
+  },
+  "ReturnUpToNSmallCreaturesFromGraveyardWithCounters": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "creature",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "artifact",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "land",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "nonland_permanent",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_enchantment",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_spacecraft",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "or_artifact",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "max_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "min_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 3,
+     "name": "max_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 3,
+     "name": "max_total_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "GraveyardReturnDestination",
+     "default": "hand",
+     "name": "destination",
+     "required": false,
+     "type": {
+      "enum": "GraveyardReturnDestination",
+      "t": "enum"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "plus_one_counter",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "",
+     "name": "log_suffix",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "untargeted_all",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "graveyard_creature",
+     "name": "target_kind",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.bounce",
+   "qualname": "ReturnUpToNSmallCreaturesFromGraveyardWithCounters"
+  },
+  "ReturnUpToNTargetCreaturesToOwnersHands": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 2,
+     "name": "max_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "exclude_spacecraft",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.bounce",
+   "qualname": "ReturnUpToNTargetCreaturesToOwnersHands"
   },
   "RevealHandMayExileCardOrChosenCreatureUntilSourceLeaves": {
    "category": "Effect",
@@ -14385,6 +18248,110 @@
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "RollDieTable"
   },
+  "RoomHalf": {
+   "category": "RoomHalf",
+   "fields": [
+    {
+     "annotation": "str",
+     "name": "name",
+     "required": true,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "name": "mana_cost_str",
+     "required": true,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "ManaCost",
+     "name": "mana_cost",
+     "required": true,
+     "type": {
+      "categories": [
+       "ManaCost"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple['TriggeredAbility', ...]",
+     "default": [],
+     "name": "triggered_abilities",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TriggeredAbility"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple['StaticAbility', ...]",
+     "default": [],
+     "name": "static_abilities",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "StaticAbility"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple['ActivatedAbility', ...]",
+     "default": [],
+     "name": "activated_abilities",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "ActivatedAbility"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.cards.base",
+   "qualname": "RoomHalf"
+  },
+  "RovingActuatorETBEffect": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 2,
+     "name": "max_mv",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "RovingActuatorETBEffect"
+  },
   "SacrificeAPermanent": {
    "category": "Effect",
    "fields": [
@@ -14453,6 +18420,24 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_walkers",
    "qualname": "SacrificeCreatureThenDamageEqualToItsPower"
+  },
+  "SacrificeNLandsYouControl": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 2,
+     "name": "count",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.zone_moves",
+   "qualname": "SacrificeNLandsYouControl"
   },
   "SacrificePermanentsCost": {
    "category": "CostAtom",
@@ -14535,12 +18520,40 @@
    "module": "mtg_bot.effects.generic.exile",
    "qualname": "SacrificeSelfIfNoNamedCounters"
   },
+  "SacrificeSelfPreservingExileLink": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.exile",
+   "qualname": "SacrificeSelfPreservingExileLink"
+  },
   "SacrificeSelfUnlessEscaped": {
    "category": "Effect",
    "fields": [],
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "SacrificeSelfUnlessEscaped"
+  },
+  "SacrificeSelfUnlessTapPermanent": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "SacrificeSelfUnlessTapPermanent"
+  },
+  "SacrificeSelfUnlessVoidActive": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.combinators",
+   "qualname": "SacrificeSelfUnlessVoidActive"
+  },
+  "SawAttacksOptionalSacDrawEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "SawAttacksOptionalSacDrawEffect"
   },
   "Scaled": {
    "category": "Formula",
@@ -14602,6 +18615,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.artifact_mechanics",
    "qualname": "ScheduleDelayedEffect"
+  },
+  "ScheduleSelfSacAtNextEndStep": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.delayed_actions",
+   "qualname": "ScheduleSelfSacAtNextEndStep"
   },
   "Scry": {
    "category": "Effect",
@@ -14754,6 +18774,24 @@
    "module": "mtg_bot.effects.generic.card_flow",
    "qualname": "SearchLibrary"
   },
+  "SearchLibraryForBasicLandTapped": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "count",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.search",
+   "qualname": "SearchLibraryForBasicLandTapped"
+  },
   "SearchLibraryForCard": {
    "category": "Effect",
    "fields": [
@@ -14805,6 +18843,13 @@
    "module": "mtg_bot.effects.generic.search",
    "qualname": "SearchLibraryForCard"
   },
+  "SearchLibraryForEquipmentToBattlefield": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.search",
+   "qualname": "SearchLibraryForEquipmentToBattlefield"
+  },
   "SearchLibraryForGreenCreatureWithMVAtMostX": {
    "category": "Effect",
    "fields": [],
@@ -14853,6 +18898,13 @@
    "module": "mtg_bot.effects.generic.search",
    "qualname": "SearchLibraryForLandCardToBattlefield"
   },
+  "SeedshipImpactEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "SeedshipImpactEffect"
+  },
   "SelfMill": {
    "category": "Effect",
    "fields": [
@@ -14893,6 +18945,59 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.combinators",
    "qualname": "Sequence"
+  },
+  "SetBasePTConditionalUntilEOT": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "default_power",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "name": "default_toughness",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "name": "land_threshold",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "name": "upgrade_power",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "name": "upgrade_toughness",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.pump",
+   "qualname": "SetBasePTConditionalUntilEOT"
   },
   "SetBasePTUntilEOT": {
    "category": "Effect",
@@ -14940,6 +19045,13 @@
    "module": "mtg_bot.effects.generic.pump",
    "qualname": "SetBasePTUntilEOT"
   },
+  "SetLifeToHalfStartingRoundedUp": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.life",
+   "qualname": "SetLifeToHalfStartingRoundedUp"
+  },
   "ShuffleSourceIntoOwnersLibrary": {
    "category": "Effect",
    "fields": [],
@@ -14978,6 +19090,35 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.card_flow",
    "qualname": "ShuffleYourLibrary"
+  },
+  "ShuffleZonesIntoLibrary": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple[ZoneName, ...]",
+     "default": [],
+     "name": "zones",
+     "required": false,
+     "type": {
+      "of": {
+       "enum": "ZoneName",
+       "t": "enum"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.zone_moves",
+   "qualname": "ShuffleZonesIntoLibrary"
+  },
+  "SingularityRuptureEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "SingularityRuptureEffect"
   },
   "Source": {
    "category": "TriggerPredicate",
@@ -15696,12 +19837,33 @@
    "module": "mtg_bot.effects.generic.library_lookat",
    "qualname": "Surveil"
   },
+  "SurveyMechanActivationEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "SurveyMechanActivationEffect"
+  },
   "SwapArtifactWithGraveyardArtifact": {
    "category": "Effect",
    "fields": [],
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "SwapArtifactWithGraveyardArtifact"
+  },
+  "SwitchSourcePowerToughnessUEOT": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.pump",
+   "qualname": "SwitchSourcePowerToughnessUEOT"
+  },
+  "SystemsOverrideEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "SystemsOverrideEffect"
   },
   "TakeExtraTurnAfterThisOne": {
    "category": "Effect",
@@ -15716,6 +19878,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.keyword_actions",
    "qualname": "TakeInitiative"
+  },
+  "TannukEnsignLandfallEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "TannukEnsignLandfallEffect"
   },
   "Tap": {
    "category": "Effect",
@@ -15741,12 +19910,92 @@
    "module": "mtg_bot.effects.generic.tap",
    "qualname": "Tap"
   },
+  "TapAndStunUpToOneTargetCreature": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 2,
+     "name": "stun_amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.tap",
+   "qualname": "TapAndStunUpToOneTargetCreature"
+  },
+  "TapAnotherTargetCreature": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.tap",
+   "qualname": "TapAnotherTargetCreature"
+  },
+  "TapEnchantedPermanent": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.tap",
+   "qualname": "TapEnchantedPermanent"
+  },
   "TapSelf": {
    "category": "Effect",
    "fields": [],
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_ub",
    "qualname": "TapSelf"
+  },
+  "TapTargetArtifactOrCreature": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.tap",
+   "qualname": "TapTargetArtifactOrCreature"
+  },
+  "TapTargetOpponentPermanentAndStunIt": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.tap",
+   "qualname": "TapTargetOpponentPermanentAndStunIt"
   },
   "TapTargetPutStunCounters": {
    "category": "Effect",
@@ -15845,6 +20094,47 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.tap",
    "qualname": "TapUpToOneTargetCreature"
+  },
+  "TargetArtifactBecomesCreatureUEOT": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "power",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 0,
+     "name": "toughness",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "frozenset[KeywordSpelling]",
+     "default": [],
+     "name": "granted_keywords",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "keyword"
+      },
+      "t": "set"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.become_type",
+   "qualname": "TargetArtifactBecomesCreatureUEOT"
   },
   "TargetBecomesCopyOfAnotherTargetUEOT": {
    "category": "Effect",
@@ -16043,6 +20333,26 @@
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "TargetCreatureCantBlockThisTurn"
   },
+  "TargetMatches": {
+   "category": "Condition",
+   "fields": [
+    {
+     "annotation": "ObjectPredicate",
+     "name": "filter",
+     "required": true,
+     "type": {
+      "categories": [
+       "ObjectPredicate"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.conditions",
+   "qualname": "TargetMatches"
+  },
   "TargetOpponentCreatesToken": {
    "category": "Effect",
    "fields": [
@@ -16080,6 +20390,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_ub",
    "qualname": "TargetOpponentExilesThreeMayCastOneFree"
+  },
+  "TargetOpponentLookHandMayDiscard": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.discard",
+   "qualname": "TargetOpponentLookHandMayDiscard"
   },
   "TargetOpponentLosesLife": {
    "category": "Effect",
@@ -16134,6 +20451,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.layout_face_effects",
    "qualname": "TargetOpponentMills"
+  },
+  "TargetOpponentSacrificesCreatureOtherThanEnchanted": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.opponent_punishers",
+   "qualname": "TargetOpponentSacrificesCreatureOtherThanEnchanted"
   },
   "TargetPlayerDiscards": {
    "category": "Effect",
@@ -16507,6 +20831,27 @@
    "module": "mtg_bot.effects.targets",
    "qualname": "TargetSpec"
   },
+  "TerminalVelocityEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "TerminalVelocityEffect"
+  },
+  "TerrapactIntimidatorETBEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "TerrapactIntimidatorETBEffect"
+  },
+  "TerritorialBruntarLandfallEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "TerritorialBruntarLandfallEffect"
+  },
   "TezzeretEmblemBeginCombat": {
    "category": "Effect",
    "fields": [
@@ -16686,6 +21031,13 @@
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "ThisSpellWasKicked"
   },
+  "ThreatenTargetCreatureUEOT": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.pump",
+   "qualname": "ThreatenTargetCreatureUEOT"
+  },
   "TransformSource": {
    "category": "Effect",
    "fields": [],
@@ -16800,6 +21152,23 @@
    "module": "mtg_bot.effects.base",
    "qualname": "TriggeredAbility"
   },
+  "UnlockedDoorsAmongRoomsAtLeast": {
+   "category": "Condition",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "n",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.conditions",
+   "qualname": "UnlockedDoorsAmongRoomsAtLeast"
+  },
   "Untap": {
    "category": "Effect",
    "fields": [
@@ -16896,6 +21265,13 @@
    "module": "mtg_bot.effects.generic.tap",
    "qualname": "UntapTargetArtifactOrCreatureConditionalCounter"
   },
+  "UntapTargetLand": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.tap",
+   "qualname": "UntapTargetLand"
+  },
   "UntapTargetOtherPermanent": {
    "category": "Effect",
    "fields": [],
@@ -16988,6 +21364,20 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.artifact_mechanics",
    "qualname": "UntapXTargets"
+  },
+  "VoidActive": {
+   "category": "StatePredicate",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.state_predicates",
+   "qualname": "VoidActive"
+  },
+  "VoidActiveCondition": {
+   "category": "Condition",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.conditions",
+   "qualname": "VoidActiveCondition"
   },
   "VoteExileNonlandPermanent": {
    "category": "Effect",
@@ -17124,6 +21514,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.conditions",
    "qualname": "YourTurnOfGameAtMost"
+  },
+  "ZeroPointBalladEffect": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.bespoke",
+   "qualname": "ZeroPointBalladEffect"
   },
   "cube_walkers.HasManaValueAtLeast": {
    "category": "ObjectPredicate",

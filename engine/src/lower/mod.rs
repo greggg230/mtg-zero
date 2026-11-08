@@ -209,9 +209,21 @@ impl Lowerer<'_> {
 
 /// IR defects found by reading cards' IR against their Oracle text (ENGINE.md
 /// 20, 24.8): what the IR lost cannot be lowered from it, so the card stays
-/// blocked, with this blocker, until the IR is fixed in mtg-bot. Empty since
-/// the IR of mtg-bot feature/ir-fixes-mtgzero 8ea9fcca (docs/ir_defects.md).
-const IR_DEFECTS: &[(&str, &str)] = &[];
+/// blocked, with this blocker, until the IR is fixed in mtg-bot. The cube's
+/// list is empty since the IR of mtg-bot feature/ir-fixes-mtgzero 8ea9fcca
+/// (docs/ir_defects.md); the entries below are Edge of Eternities cards
+/// (ENGINE.md 99, docs/ir_defects.md 20).
+const IR_DEFECTS: &[(&str, &str)] = &[
+    // The IR drops the Station keyword ability and its threshold abilities:
+    // the planets are a land with "{T}: Add" only, The Eternity Elevator has
+    // no station at all (docs/ir_defects.md 20).
+    ("Adagia, Windswept Bastion", "ir_defect(station dropped, docs/ir_defects.md 20)"),
+    ("Evendo, Waking Haven", "ir_defect(station dropped, docs/ir_defects.md 20)"),
+    ("Kavaron, Memorial World", "ir_defect(station dropped, docs/ir_defects.md 20)"),
+    ("Susur Secundi, Void Altar", "ir_defect(station dropped, docs/ir_defects.md 20)"),
+    ("The Eternity Elevator", "ir_defect(station dropped, docs/ir_defects.md 20)"),
+    ("Uthros, Titanic Godcore", "ir_defect(station dropped, docs/ir_defects.md 20)"),
+];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.
 pub fn lower_card(

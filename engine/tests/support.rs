@@ -603,6 +603,164 @@ fn cube_support_report() {
     assert!(r.blocked.iter().all(|(_, b)| !b.is_empty()));
 }
 
+/// The Edge of Eternities sealed card table's supported set (ENGINE.md 99),
+/// one list per workstream so parallel branches never edit the same lines:
+/// `SUPPORTED_EOE_BASE` = the cards supported when the set was imported
+/// (lane B audits them against the Oracle text and may remove some), then
+/// one list per lane of the port (ENGINE.md 99.2-99.5), each sorted. The
+/// test compares their sorted union with the report. Changing them is
+/// deliberate (`SUPPORT_LIST=path` with `eoe_support_report` writes the
+/// whole supported set).
+const SUPPORTED_EOE_BASE: &[&str] = &[
+    "Ancient Tomb",
+    "Annul",
+    "Auxiliary Boosters",
+    "Banishing Light",
+    "Blinkmoth Nexus",
+    "Blooming Stinger",
+    "Bombard",
+    "Breeding Pool",
+    "Burgeoning",
+    "Bygone Colossus",
+    "Celestial Colonnade",
+    "Cloudsculpt Technician",
+    "Consult the Star Charts",
+    "Cosmogrand Zenith",
+    "Creeping Tar Pit",
+    "Cryogen Relic",
+    "Divert Disaster",
+    "Dual-Sun Adepts",
+    "Dubious Delicacy",
+    "Dust Bowl",
+    "Eumidian Terrabotanist",
+    "Eusocial Engineering",
+    "Exalted Sunborn",
+    "Forest",
+    "Gemstone Caverns",
+    "Germinating Wurm",
+    "Godless Shrine",
+    "Gravblade Heavy",
+    "Gravpack Monoist",
+    "Green Sun's Zenith",
+    "High Market",
+    "Hissing Quagmire",
+    "Honor",
+    "Hullcarver",
+    "Icecave Crasher",
+    "Icetill Explorer",
+    "Illvoi Galeblade",
+    "Illvoi Operative",
+    "Intrepid Tenderfoot",
+    "Island",
+    "Kavaron Turbodrone",
+    "Knight Luminary",
+    "Lightless Evangel",
+    "Lumbering Falls",
+    "Mana Confluence",
+    "Mechan Assembler",
+    "Mechan Navigator",
+    "Melded Moxite",
+    "Mm'menon, Uthros Exile",
+    "Molecular Modifier",
+    "Monoist Sentry",
+    "Mountain",
+    "Nanoform Sentinel",
+    "Nebula Dragon",
+    "Needle Spires",
+    "Nutrient Block",
+    "Oreplate Pangolin",
+    "Ouroboroid",
+    "Pinnacle Emissary",
+    "Plains",
+    "Power Depot",
+    "Quantum Riddler",
+    "Red Tiger Mechan",
+    "Remnant Elemental",
+    "Rig for War",
+    "Sacred Foundry",
+    "Seam Rip",
+    "Shambling Vent",
+    "Sinister Cryologist",
+    "Slagdrill Scrapper",
+    "Starbreach Whale",
+    "Starfield Shepherd",
+    "Starfighter Pilot",
+    "Station Monitor",
+    "Stirring Wildwood",
+    "Stomping Ground",
+    "Strip Mine",
+    "Sunset Saboteur",
+    "Sunstar Lightsmith",
+    "Susurian Voidborn",
+    "Swamp",
+    "Syr Vondam, the Lucent",
+    "Tezzeret, Cruel Captain",
+    "Thawbringer",
+    "Thrumming Hivepool",
+    "Umbral Collar Zealot",
+    "Unravel",
+    "Watery Grave",
+    "Weapons Manufacturing",
+    "Weftblade Enhancer",
+    "Weftstalker Ardent",
+    "Xu-Ifit, Osteoharmonist",
+    "Zookeeper Mechan",
+];
+/// Lane A: Station, spacecraft, counters, artifacts, Equipment and Auras.
+const SUPPORTED_EOE_A: &[&str] = &[
+];
+/// Lane B: lands, mana abilities, Lander tokens (and the base list's audit).
+const SUPPORTED_EOE_B: &[&str] = &[
+];
+/// Lane C: void, warp, spells cast this turn, cost reductions, graveyard,
+/// exile, library and hand effects.
+const SUPPORTED_EOE_C: &[&str] = &[
+];
+/// Lane D: creatures, combat, removal, damage, life, tokens and pumps.
+const SUPPORTED_EOE_D: &[&str] = &[
+];
+
+fn supported_eoe() -> Vec<String> {
+    let lists = [SUPPORTED_EOE_BASE, SUPPORTED_EOE_A, SUPPORTED_EOE_B, SUPPORTED_EOE_C, SUPPORTED_EOE_D];
+    let mut v: Vec<String> = lists.concat().into_iter().map(String::from).collect();
+    let n = v.len();
+    v.sort();
+    v.dedup();
+    assert_eq!(v.len(), n, "a card is in two SUPPORTED_EOE lists");
+    v
+}
+
+/// The support report over the Edge of Eternities sealed card table
+/// (ENGINE.md 99): the set's 315 cards with IR (all but Paradox Haze, which
+/// mtg-bot's parser leaves out) and the five basic lands.
+/// `cargo test -p engine --test support eoe -- --nocapture` prints it;
+/// `SUPPORT_DUMP` and `SUPPORT_LIST` as for the cube.
+#[test]
+fn eoe_support_report() {
+    let db = CardDb::eoe();
+    let r = SupportReport::from_db(db);
+    if let Ok(path) = std::env::var("SUPPORT_LIST") {
+        std::fs::write(&path, r.supported.join("
+")).unwrap();
+    }
+    if let Ok(path) = std::env::var("SUPPORT_DUMP") {
+        let mut s = String::new();
+        for (name, b) in &r.blocked {
+            s.push_str(&format!("{name}	{}
+", b.join(" | ")));
+        }
+        std::fs::write(&path, s).unwrap();
+    }
+    println!("{}", r.render(60));
+    println!("greedy staging (feature, cards it completes, cumulative):");
+    for (f, n, total) in r.greedy(60) {
+        println!("  {f:<60} {n:>4} {total:>5}");
+    }
+    assert_eq!(r.total(), 320);
+    assert_eq!(r.supported, supported_eoe());
+    assert!(r.blocked.iter().all(|(_, b)| !b.is_empty()));
+}
+
 /// The threat view (ENGINE.md 16): which blocking features stand between
 /// the engine and the cube's creatures and other ways to win (planeswalkers
 /// not counted), and a greedy staging order over threats only.

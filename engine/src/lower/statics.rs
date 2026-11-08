@@ -462,5 +462,11 @@ pub(crate) fn lower_pt_formula(l: &mut Lowerer, f: &cats::PTFormula) -> Option<P
             }
             PtCda::PowerCount(f)
         }
+        // A formula no supported card uses yet (the EoE port adds them): the
+        // card stays blocked, named by the formula's class.
+        other => {
+            l.unsupported(format!("PTFormula:{}", other.tag()));
+            return None;
+        }
     })
 }

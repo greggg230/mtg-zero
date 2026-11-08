@@ -18043,3 +18043,63 @@ training, a generation takes about max(2,000 games / the workers' rate, training
 ~20-25 s with 4 (vs ~95 s on one box), at about the same cost per generation. Data-parallel training across boxes is
 not worth it (a step's gradients ~7 MB x ~600 steps = ~4 GB a generation at ~8 MB/s); inside one 2-GPU box it would
 save ~5 s of ~12.
+
+## 99. Edge of Eternities sealed: the set's cards in the engine (branch `eoe-base`, 2026-11-07)
+
+**Why.** The user's next project (DESIGN.md 9): a network that builds the best 40-card deck from a
+sealed pool, practised on Edge of Eternities (EoE), whose 17lands sealed data (9,765 best-of-one
+pools, 56,256 games; 903 best-of-three pools) is the yardstick, never a training signal. The first
+step is every card an EoE play booster can hold, in the Rust engine.
+
+### 99.1 The import
+
+* **The IR.** mtg-bot main 2cb79f77, `cards export-ir --pool cube legacy eoe --out data/cards`:
+  one schema over the three pools (`70c85fff4b77...`, was `181ba4b8a1e7...`: 188 more classes,
+  most used by EoE cards only). `powerlsv.ir.json` and `legacy.ir.json` are the previous files
+  card for card (identical apart from `schema_sha256`). mtg-bot's `eoe` pool is four Scryfall dumps
+  (Edge of Eternities, Stellar Sights, the EoE Special Guests, Duskmourn);
+  `tools/codegen/filter_eoe_ir.py` keeps the first three and the basic lands: `data/cards/eoe.ir.json`
+  holds 320 cards, the set's 316 nonbasic cards (the 17lands sealed card list, the same 316) but
+  Paradox Haze (no IR: mtg-bot's parser leaves it out), and the five basics.
+  `card_ir/src/generated.rs` regenerated.
+* **One match was exhaustive** over an IR enum (`lower/statics.rs::lower_pt_formula`, `PTFormula`):
+  it gained the catch-all every other lowering has (`unsupported("PTFormula:<class>")`).
+* **`CardDb::eoe()`**: the set's own card table (the set's cards, then their tokens and faces), as
+  `constructed()` is the Delver mirror's. Nothing of the cube sees it, and it holds no cube
+  definition: the 20 cards the set shares with the cube are lowered from the set's export (the same
+  parser, the same IR). Unlike `constructed()`, unsupported cards are allowed while the port is
+  under way.
+* **The support report** (`engine/tests/support.rs::eoe_support_report`;
+  `cargo test --release -p engine --test support eoe -- --nocapture`; `SUPPORT_DUMP` /
+  `SUPPORT_LIST` as for the cube): **93 of 320 supported** (88 nonbasic cards and the basics); 227
+  blocked, 141 of them by one feature alone; 232 distinct blocking features.
+  `SUPPORTED_EOE_BASE` holds the 93; one list per lane (99.2-99.5) keeps the four branches off each
+  other's lines.
+* **IR defect 20** (docs/ir_defects.md): the parser drops Station from the five planets and The
+  Eternity Elevator. The planets then lowered as plain taplands, "supported": they are blocked
+  through `lower::IR_DEFECTS` (98 -> 93). Lane B audits the other base cards.
+* **Unchanged:** the cube's IR, support (546 / 546) and behaviour digests; no layout, encoding,
+  zero-core or Python change.
+
+### 99.2-99.5 The four lanes (parallel branches from `eoe-base`)
+
+Every blocking feature belongs to exactly one lane (the feature -> lane table is
+`docs/eoe_lanes.md`). A lane implements only its own features, ports the cards whose blockers are
+all its own, and tests a feature whose cards also need another lane's feature with custom IR test
+cards (`tests/common`). The 53 cards that need features of two or more lanes are finished after the
+merge (99.6).
+
+| Lane | Branch | Features | Cards within the lane | Theme |
+|---|---|---|---|---|
+| A (99.2) | `eoe-a-station` | 66 | 47 | Station, Spacecraft, counters, artifacts, Equipment, Auras |
+| B (99.3) | `eoe-b-lands` | 33 | 38 | lands, mana abilities, Lander tokens; audit of the 93 base cards |
+| C (99.4) | `eoe-c-void` | 57 | 40 | void, warp, spells cast this turn, cost reductions, graveyard / exile / library / hand |
+| D (99.5) | `eoe-d-combat` | 76 | 44 | creatures, combat, removal, damage, life, tokens, pumps |
+
+Each lane appends its own subsection here (99.2 lane A, 99.3 lane B, 99.4 lane C, 99.5 lane D).
+
+### 99.6 After the lanes (maintainer)
+
+Merge order B, A, C, D (B's base audit first). Then the cross-lane cards, the IR defects the lanes
+list (one mtg-bot batch and one re-export, so the schema changes once), and the 20k fuzz over the
+EoE table.

@@ -55,6 +55,7 @@ permission) and a consumer can go wrong with it.
 | 17 | Green Sun's Zenith | instruction as a replacement | "Shuffle Green Sun's Zenith into its owner's library" as a self static `ReplacementEffect(would_go_to_graveyard, Replace(library))` (from anywhere) | the last instruction of the spell's effect (only as it resolves) | `cards/parser/spell_builder.py` (`_SELF_SHUFFLE_GSZ_RE`, `_detect_shuffle_self_statics`, ~line 430) | fixed (8ea9fcca), supported | confirmed |
 | 18 | Wizard's Rockets | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (as entry 15) | `cards/parser/triggers.py` (the same phrase-table entry as entry 15) | fixed (8ea9fcca), supported | confirmed |
 | 19 | Gut, True Soul Zealot | qualifier widened | `SacrificeAPermanent { another: true, permanent_filter: ObjectOr(IsCreature, IsArtifact) }` for "sacrifice another creature or an artifact" | "another" on the creature only (an artifact may be Gut itself) | the "sacrifice another ..." phrase parser (`IfYouDo` / `MayDo`) | worked around (the label read) | confirmed |
+| 20 | Adagia, Windswept Bastion; Evendo, Waking Haven; Kavaron, Memorial World; Susur Secundi, Void Altar; Uthros, Titanic Godcore; The Eternity Elevator (Edge of Eternities, ENGINE.md 99) | ability dropped | the planets: a land with `enters_tapped` and `produces` only; The Eternity Elevator: no `station_threshold` / `stationed_*` | Station (CR 702.184) and each threshold ability ("12+ ..."), as the set's Spacecraft carry them | `cards/parser/land_builder.py` (planets) and the Spacecraft builder (`cards/parser/spacecraft_builder.py`) | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -356,6 +357,30 @@ attacking."
   `another` and a label "... or a ..." / "... or an ...", only the first part of the `Or` excludes
   the source (M8d part 4; `tests/rulings_other.rs::gut_made_an_artifact_may_sacrifice_itself_to_its_own_ability_cr_701_21a`,
   a Phyrexian Metamorph copying Gut). Gut is the only cube card with this shape.
+
+
+### K. Station dropped (Edge of Eternities, ENGINE.md 99)
+
+**20. The five planets and The Eternity Elevator.** Oracle (Evendo, Waking Haven): "This land
+enters tapped. / {T}: Add {G}. / Station (Tap another creature you control: Put charge counters
+equal to its power on this Planet. Station only as a sorcery.) / 12+ | {G}, {T}: Add {G} for each
+creature you control." Adagia, Kavaron, Susur Secundi and Uthros have the same shape; The Eternity
+Elevator is a Spacecraft with Station.
+
+* IR (mtg-bot main 2cb79f77, `cards export-ir --pool cube legacy eoe`): each planet is
+  `CardPrinting { card_types: [Land], enters_tapped: true, produces: [<colour>] }`, nothing else;
+  The Eternity Elevator has no `station_threshold` or `stationed_*` field. The set's other 21
+  Spacecraft carry `station_threshold` and `stationed_keywords`.
+* Should be: the Station keyword ability and each "N+ | ..." ability gated on the charge
+  counters, as the Spacecraft builder writes them.
+* Source: the planets go through the land builder, which keeps only the enters-tapped and mana
+  lines; The Eternity Elevator's builder misses its station lines.
+* Fix: build the planets' and The Eternity Elevator's Station and threshold abilities like the
+  Spacecraft's.
+* Engine: blocked, `ir_defect(station dropped, docs/ir_defects.md 20)` (`lower::IR_DEFECTS`).
+  Without the entry the five planets lowered as plain taplands and the support report counted them
+  supported (98 cards instead of 93): a silent drop the report could not see. Found by checking
+  every EoE card whose Oracle text has Station for a `station_threshold` in its IR.
 
 ## Suspected defects (representational)
 
