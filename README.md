@@ -165,6 +165,7 @@ py/ ── binding crate ──▶ mtgz._engine ──▶ mtgz.az.* (= zero-core
 | what is tested against which official ruling | `docs/rulings.md`, `docs/interactions.md` |
 | rules simplifications that were removed, and the few left | `docs/shortcuts.md` |
 | the human draft data (yardsticks only) | `docs/data_m1.md`, `docs/research/` |
+| EoE sealed: the 17lands yardstick pools and the Play Booster generator (`mtgz/sealed/`) | `docs/sealed_data.md` |
 | the training loop and every run setting | zero-core's `docs/az.md` (in `third_party/zero-core/docs/`) |
 
 `docs/ENGINE.md` is about 16,000 lines, written as a lab notebook: one numbered, dated section
