@@ -322,8 +322,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.sets_all_creature_pt_to_1_1", sets_all_creature_pt_to_1_1);
         l.deny("CardPrinting.must_be_blocked_if_able", must_be_blocked_if_able);
         l.deny("CardPrinting.combat_damage_cant_be_prevented", combat_damage_cant_be_prevented);
-        l.deny("CardPrinting.grants_toughness_as_damage_for_creatures_you_control", grants_toughness_as_damage_for_creatures_you_control);
-        l.deny("CardPrinting.grants_toughness_as_station_power_for_creatures_you_control", grants_toughness_as_station_power_for_creatures_you_control);
         let _ = flashback_cost_str; // display form of `flashback_cost`
         let _ = buyback_cost_str; // display form of `buyback_cost`
         l.deny_ne("CardPrinting.alt_cost_exile_from_hand_count", alt_cost_exile_from_hand_count, &generated::defaults::d_CardPrinting_alt_cost_exile_from_hand_count());
@@ -1890,6 +1888,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         ascend: cascade_kw_ascend,
         outside_hand_discount,
         casting,
+        toughness_assigns_damage: *grants_toughness_as_damage_for_creatures_you_control,
+        toughness_stations: *grants_toughness_as_station_power_for_creatures_you_control,
         chooses_land_type,
         x_life: *additional_cost_pay_x_life,
         sunburst: sunburst_counter,

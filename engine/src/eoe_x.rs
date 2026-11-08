@@ -52,6 +52,61 @@ impl EoeX {
 }
 
 impl Game {
+    /// Does `p` control a permanent (its abilities as they are now) for
+    /// which `has` holds?
+    fn controls_with(&self, p: PlayerId, has: impl Fn(&crate::db::CardDef) -> bool) -> bool {
+        self.permanents_of(p).any(|x| has(self.abilities(x)))
+    }
+
+    /// The combat damage creature `c` assigns (CR 510.1a, 510.1c-d): its
+    /// power; its toughness instead if that is greater and its controller
+    /// controls a permanent saying "each creature you control with toughness
+    /// greater than its power assigns combat damage equal to its toughness
+    /// rather than its power" (Tapestry Warden).
+    pub(crate) fn combat_damage_amount(&self, c: CardIdx) -> i32 {
+        let p = self.power(c);
+        if !self.db.watch_toughness {
+            return p;
+        }
+        let t = self.toughness(c);
+        if t > p && self.controls_with(self.objs[c.i()].controller, |d| d.toughness_assigns_damage) {
+            t
+        } else {
+            p
+        }
+    }
+
+    /// The number a station ability reads from creature `c`, on the
+    /// battlefield as the ability resolves (CR 702.184a: its power; 702.184c:
+    /// its toughness if that is greater and its controller controls a
+    /// permanent saying "each creature you control with toughness greater
+    /// than its power stations permanents using its toughness").
+    pub(crate) fn station_amount(&self, c: CardIdx) -> i32 {
+        let p = self.power(c);
+        if !self.db.watch_toughness {
+            return p;
+        }
+        let t = self.toughness(c);
+        if t > p && self.controls_with(self.objs[c.i()].controller, |d| d.toughness_stations) {
+            t
+        } else {
+            p
+        }
+    }
+
+    /// [`station_amount`](Self::station_amount) of a creature that left the
+    /// battlefield: `power` and its toughness and controller as it last
+    /// existed (CR 608.2h; `Game::lki_toughness`).
+    pub(crate) fn station_amount_lki(&self, r: crate::ids::ObjRef, power: i32) -> i32 {
+        if !self.db.watch_toughness {
+            return power;
+        }
+        match self.lki_toughness.iter().rev().find(|x| x.0 == r) {
+            Some(&(_, t, ctl)) if t > power && self.controls_with(ctl, |d| d.toughness_stations) => t,
+            _ => power,
+        }
+    }
+
     /// The end of `EoeX::SearchUpToOntoBattlefield`: the found cards enter,
     /// then the library is shuffled (`finish_search_any`).
     fn finish_search_up_to(&mut self, f: &mut Frame, tapped: bool) -> Flow {

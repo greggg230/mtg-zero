@@ -67,6 +67,7 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         creature("Cross Bear", "{1}{G}", 2, 2, &["Bear"], none.clone()),
         creature("Cross Giant", "{4}{G}", 5, 5, &["Giant"], none.clone()),
         creature("Cross Sliver", "{1}{G}", 1, 1, &["Sliver"], none.clone()),
+        creature("Cross Wall", "{1}{W}", 1, 4, &["Wall"], none.clone()),
         card("Cross Trinket", "{1}", &["Artifact"], &[], none.clone()),
         card("Cross Totem", "{1}", &["Enchantment"], &[], none.clone()),
         {

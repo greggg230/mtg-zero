@@ -1678,6 +1678,13 @@ pub struct CardDef {
     /// Rules about casting spells this card adds (Edge of Eternities lane
     /// C, ENGINE.md 99.4).
     pub casting: CastingRules,
+    /// "Each creature you control with toughness greater than its power
+    /// assigns combat damage equal to its toughness rather than its power"
+    /// (CR 510.1a; ENGINE.md 99.8).
+    pub toughness_assigns_damage: bool,
+    /// "... stations permanents using its toughness rather than its power"
+    /// (CR 702.184c; ENGINE.md 99.8).
+    pub toughness_stations: bool,
 }
 
 /// Rules about casting spells a card adds while it is on the battlefield
@@ -1829,6 +1836,11 @@ pub struct CardDb {
     /// (`Filter::DealtDamageThisTurn`): the game records it
     /// (`Mark::DealtDamage`; EoE lane D, ENGINE.md 99.5).
     pub(crate) watch_damage: bool,
+    /// A card of the table has `toughness_assigns_damage` or
+    /// `toughness_stations`: combat damage and station look for it, and the
+    /// game keeps permanents' last-known toughness (`Game::lki_toughness`;
+    /// ENGINE.md 99.8).
+    pub(crate) watch_toughness: bool,
 }
 
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
@@ -2007,6 +2019,7 @@ impl CardDb {
         }
         db.merged = merged;
         db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
+        db.watch_toughness = db.defs.iter().any(|d| d.toughness_assigns_damage || d.toughness_stations);
         db
     }
 

@@ -675,6 +675,10 @@ pub struct Game {
     /// they last existed there (CR 608.2h, 113.7a; kept when
     /// `SEEN_LKI_DAMAGE`).
     pub(crate) lki_damage: Vec<(ObjRef, DamageSource)>,
+    /// Permanents that left the battlefield this turn, their toughness and
+    /// controller as they last existed (CR 608.2h; kept when
+    /// `CardDb::watch_toughness`: stationing by toughness, ENGINE.md 99.8).
+    pub(crate) lki_toughness: Vec<(ObjRef, i32, PlayerId)>,
     /// Spells that left the stack while a triggered ability about them
     /// waited: their definition and item (CR 608.2h: "copy it").
     pub(crate) spell_lki: Vec<(ObjRef, DefId, StackItem)>,
@@ -1060,6 +1064,7 @@ impl Game {
             copy_objs: Vec::new(),
             lki_copy: Vec::new(),
             lki_damage: Vec::new(),
+            lki_toughness: Vec::new(),
             spell_lki: Vec::new(),
             entering_copy: None,
             entering_times: 0,
@@ -1861,6 +1866,10 @@ impl Game {
             if self.seen & SEEN_LKI_DAMAGE != 0 {
                 let d = self.damage_source_of(idx);
                 self.lki_damage.push((old, d));
+            }
+            if self.db.watch_toughness {
+                let t = self.toughness(idx);
+                self.lki_toughness.push((old, t, self.objs[idx.i()].controller));
             }
         }
         // CR 707.10a, 704.5e: a copy of a spell (or of a card) leaving the

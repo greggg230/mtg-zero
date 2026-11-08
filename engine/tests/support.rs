@@ -846,6 +846,7 @@ const SUPPORTED_EOE_CROSS: &[&str] = &[
     "Specimen Freighter",
     "Starport Security",
     "Survey Mechan",
+    "Tapestry Warden",
     "Terrapact Intimidator",
     "Thaumaton Torpedo",
     "The Seriema",
@@ -1020,10 +1021,10 @@ fn a_new_ir_field_value_is_a_blocker() {
     let card_ir::cats::CardPrinting::CardPrinting(p) = &mut bolt.printing;
     // (Convoke was this test's flag until the EoE cross-lane pass built it,
     // ENGINE.md 99.8.)
-    p.grants_toughness_as_damage_for_creatures_you_control = true;
+    p.nonbasic_lands_are_mountains = true;
     let db = CardDb::from_cards(&cards);
     let err = db.expect_id("Lightning Bolt").unwrap_err();
-    assert!(err.contains("CardPrinting.grants_toughness_as_damage_for_creatures_you_control"), "{err}");
+    assert!(err.contains("CardPrinting.nonbasic_lands_are_mountains"), "{err}");
 }
 
 #[test]

@@ -154,6 +154,7 @@ pub fn fields() -> Vec<Field> {
         copy_objs: Derived "which slots are copies (the copy flags of permanents and spells)",
         lki_copy: Derived "last known information (CR 608.2h)",
         lki_damage: Derived "last known information (CR 608.2h)",
+        lki_toughness: Derived "last known information (CR 608.2h)",
         spell_lki: Derived "last known information (CR 608.2h)",
         entering_copy: Derived "transient: set and cleared around one move",
         entering_times: Derived "transient: set and cleared around one move",

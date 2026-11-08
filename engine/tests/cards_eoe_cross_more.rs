@@ -760,3 +760,109 @@ fn convoke_only_on_a_spell_with_convoke_cr702_51a() {
     let c = g.card(0, "Embrace Oblivion", Zone::Hand);
     assert!(!g.has_option(Choice::Cast(c)), "{:?}", g.options_desc());
 }
+
+// ---- Tapestry Warden -----------------------------------------------------------------------
+
+/// Tapestry Warden [3/4]: "Vigilance / Each creature you control with
+/// toughness greater than its power assigns combat damage equal to its
+/// toughness rather than its power" (CR 510.1a): the Warden deals 4, the
+/// 1/4 Wall 4, the 2/2 Bear 2; it doesn't tap to attack (702.20b).
+#[test]
+fn tapestry_warden_creatures_assign_combat_damage_by_toughness_cr510_1a() {
+    let mut g = scen().battlefield(0, &["Tapestry Warden", "Cross Wall", "Cross Bear"]).at(Step::Main1, 0).start();
+    let w = bf(&g, 0, "Tapestry Warden");
+    assert_eq!((g.power(w), g.toughness(w)), (3, 4));
+    assert!(g.has_kw(w, Kw::Vigilance));
+    attack_with(&mut g, 0, &["Tapestry Warden", "Cross Wall", "Cross Bear"]);
+    assert!(!g.obj(w).tapped, "vigilance");
+    quiet_until(&mut g, |g| g.turn().step == Step::Main2 && at_priority(g));
+    assert_eq!(g.life(1), 20 - 4 - 4 - 2, "{}", log(&g));
+}
+
+/// Only its controller's creatures: the opponent's blocking Wall deals 1
+/// (its power); P0's blocking Wall deals 4 (CR 510.1c-d).
+#[test]
+fn tapestry_warden_only_your_creatures_and_blockers_too_cr510_1d() {
+    let mut g = scen()
+        .battlefield(0, &["Tapestry Warden", "Cross Giant"])
+        .battlefield(1, &["Cross Wall"])
+        .at(Step::Main1, 0)
+        .start();
+    let giant = bf(&g, 0, "Cross Giant");
+    let theirs = bf(&g, 1, "Cross Wall");
+    attack_with(&mut g, 0, &["Cross Giant"]);
+    for _ in 0..20 {
+        g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareBlockers) || g.turn().step == Step::Main2);
+        if g.kind() != Some(DecisionKind::DeclareBlockers) {
+            break;
+        }
+        let c = if g.obj(theirs).blocking.is_none() && g.has_option(Choice::Card(giant)) { Choice::Card(giant) } else { Choice::Pass };
+        g.choose(c);
+    }
+    quiet_until(&mut g, |g| g.turn().step == Step::Main2 && at_priority(g));
+    assert_eq!(g.objs()[giant.i()].damage, 1, "the opponent's Wall: its power\n{}", log(&g));
+    // P0's Wall blocks P1's Giant: 4 damage to it.
+    let mut g = scen()
+        .battlefield(0, &["Tapestry Warden", "Cross Wall"])
+        .battlefield(1, &["Cross Giant"])
+        .at(Step::Main1, 1)
+        .start();
+    let (wall, giant) = (bf(&g, 0, "Cross Wall"), bf(&g, 1, "Cross Giant"));
+    // (The Warden tapped: the Wall is the one blocker.)
+    let w = bf(&g, 0, "Tapestry Warden");
+    g.set_tapped(w, true);
+    attack_with(&mut g, 1, &["Cross Giant"]);
+    for _ in 0..20 {
+        g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareBlockers) || g.turn().step == Step::Main2);
+        if g.kind() != Some(DecisionKind::DeclareBlockers) {
+            break;
+        }
+        let c = if g.obj(wall).blocking.is_none() && g.pending_decision().unwrap().player == 0 && g.has_option(Choice::Card(giant)) {
+            Choice::Card(giant)
+        } else {
+            Choice::Pass
+        };
+        g.choose(c);
+    }
+    quiet_until(&mut g, |g| g.turn().step == Step::Main2 && at_priority(g));
+    assert_eq!(g.objs()[giant.i()].damage, 4, "P0's Wall: its toughness\n{}", log(&g));
+}
+
+/// "Each creature you control with toughness greater than its power stations
+/// permanents using its toughness rather than its power" (CR 702.184c): the
+/// 1/4 Wall puts 4 charge counters; without the Warden, 1.
+#[test]
+fn tapestry_warden_creatures_station_by_toughness_cr702_184c() {
+    for (warden, n) in [(true, 4), (false, 1)] {
+        let mut bfv = vec!["Pinnacle Kill-Ship", "Cross Wall"];
+        if warden {
+            bfv.push("Tapestry Warden");
+        }
+        let mut g = scen().battlefield(0, &bfv).at(Step::Main1, 0).start();
+        let (ship, wall) = (bf(&g, 0, "Pinnacle Kill-Ship"), bf(&g, 0, "Cross Wall"));
+        station(&mut g, ship, wall);
+        assert_eq!(g.counters_on(ship, charge()), n, "warden {warden}\n{}", log(&g));
+    }
+}
+
+/// The tapped creature gone before the station ability resolves: its
+/// toughness and power as it last existed (CR 608.2h, 702.184c).
+#[test]
+fn tapestry_warden_station_reads_last_known_toughness_cr608_2h() {
+    let mut g = scen()
+        .battlefield(0, &["Pinnacle Kill-Ship", "Cross Wall", "Tapestry Warden", "Mountain"])
+        .hand(0, &["Cross Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let (ship, wall) = (bf(&g, 0, "Pinnacle Kill-Ship"), bf(&g, 0, "Cross Wall"));
+    let s = station_slot(&g, ship);
+    g.choose(act(ship, s));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChoosePermanent));
+    g.choose(Choice::Card(wall));
+    g.drive_until(|g| at_priority(g));
+    let t = g.tgt(wall);
+    cast(&mut g, 0, "Cross Bolt", &[t]);
+    settle(&mut g);
+    assert_eq!(g.obj(wall).zone, Zone::Graveyard);
+    assert_eq!(g.counters_on(ship, charge()), 4, "{}", log(&g));
+}
