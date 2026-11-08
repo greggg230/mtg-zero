@@ -563,6 +563,13 @@ impl Game {
             v.extend([live_place(r), what]);
         }
         v.push(u64::MAX);
+        // Phased-out permanents (public, CR 702.26; EoE W3): what they are,
+        // and whether each phased out with what it is attached to.
+        for &c in &self.w3.phased {
+            obj(&mut v, c);
+            v.push(self.w3.indirect.contains(&c) as u64);
+        }
+        v.push(u64::MAX);
         v.push(self.monarch.map_or(9, |p| p as u64));
         // The initiative and the dungeons (public, CR 725, 309).
         v.push(self.initiative.map_or(9, |p| p as u64));
@@ -574,6 +581,9 @@ impl Game {
         v.push(self.day.map_or(9, |d| d as u64));
         // Void (public; ENGINE.md 99.4).
         v.push(self.void_active() as u64);
+        // Controlling another player (public, CR 722; ENGINE.md 99.14).
+        v.extend(self.next_turn_controller.iter().map(|q| q.map_or(9, |q| q as u64)));
+        v.push(self.turn_controller.map_or(9, |q| q as u64));
         for &(r, k) in &self.done_once {
             v.extend([live_place(r), k as u64]);
         }
@@ -659,6 +669,7 @@ impl Game {
             v.extend([pl.left_battlefield as u64, pl.drawn as u64, pl.spells_cast as u64, pl.noncreature_cast as u64]);
             v.extend([pl.gained_life as u64, pl.draw_step_draws as u64, pl.spells_game as u64, pl.energy as u64]);
             v.push(pl.life_gained as u64);
+            v.push(pl.artifact_entered as u64);
             v.extend([pl.gy_play_turn as u64, pl.gy_exile_turn as u64, pl.city_blessing as u64, pl.prot_until as u64]);
             // The revealed companion: still outside the game or not (its
             // slot's zone once in the game is not observable: a twin in a
@@ -785,6 +796,7 @@ impl Game {
         self.activations.hash(&mut h);
         self.miracle_check.hash(&mut h);
         self.marks.hash(&mut h);
+        self.w3.hash(&mut h);
         self.face_down.hash(&mut h);
         self.face_down_ids.hash(&mut h);
         h.finish()
@@ -831,6 +843,9 @@ impl Game {
         for &c in &self.command {
             mark(c, Zone::Command, None)?;
         }
+        for &c in &self.w3.phased {
+            mark(c, Zone::PhasedOut, None)?;
+        }
         for s in &self.stack {
             if let crate::game::StackKind::Spell { card } = s.kind {
                 mark(card, Zone::Stack, None)?;
@@ -860,7 +875,7 @@ impl Game {
             // (A copy of a prepare spell in exile has its characteristics,
             // CR 722.3c.)
             if self.db.is_face(self.objs[i].def)
-                && !matches!(self.objs[i].zone, Zone::Battlefield | Zone::Stack)
+                && !matches!(self.objs[i].zone, Zone::Battlefield | Zone::Stack | Zone::PhasedOut)
                 && !(self.objs[i].zone == Zone::Exile && self.is_copy_obj(CardIdx(i as u16)))
             {
                 return Err(format!("card {i} ({}) has a face up in {:?}", self.name(CardIdx(i as u16)), self.objs[i].zone));

@@ -40,6 +40,8 @@ pub(crate) struct Repl {
     pub no_max_hand: bool,
     /// "Spells you control can't be countered."
     pub spells_uncounterable: bool,
+    /// "Creature spells you control can't be countered" (EoE W3).
+    pub creature_spells_uncounterable: bool,
     /// "Other creatures you control have ward—<cost>" (CR 702.21).
     pub grants_ward: Option<crate::db::WardCost>,
     /// "Once during each of your turns, you may cast a permanent spell with
@@ -163,7 +165,6 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
     }) = s;
     l.deny("StaticAbility.tier_threshold", tier_threshold);
     l.deny("StaticAbility.room_half", room_half);
-    l.deny("StaticAbility.grants_creature_spells_uncounterable", grants_creature_spells_uncounterable);
     l.deny("StaticAbility.skips_your_draw_step", skips_your_draw_step);
 
     let scope = lower_scope(l, scope)?;
@@ -244,6 +245,15 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
             || *grants_no_max_hand_size
             || (cond && condition.is_some())
     };
+    // "Creature spells you control can't be countered" (a rule for its
+    // controller's creature spells, CR 101.2; EoE W3).
+    if *grants_creature_spells_uncounterable {
+        if !matches!(scope, Scope::This) || mods_besides(true) || *grants_ward_life_cost != 0 || *grants_spells_uncounterable {
+            l.unsupported("StaticAbility.grants_creature_spells_uncounterable(with more)");
+        }
+        repl.creature_spells_uncounterable = true;
+        return None;
+    }
     // "Spells you control can't be countered" (a rule for its controller's
     // spells, CR 101.2).
     if *grants_spells_uncounterable {
@@ -355,6 +365,9 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
         use cats::LayerPayload as P;
         match (&**payload, layer) {
             (P::CantBeBlocked(nodes::CantBeBlocked {}), 6) => mods.push(Mod::CantBeBlocked),
+            // "This creature can attack as though it didn't have defender"
+            // (CR 702.3b; Mechan Shieldmate, ENGINE.md 99.11).
+            (P::CanAttackAsThoughNoDefender(nodes::CanAttackAsThoughNoDefender {}), 6) => mods.push(Mod::AttackDespiteDefender),
             (P::GrantKeyword(nodes::GrantKeyword { keyword }), 6) => {
                 mods.extend(super::effect_ext::keyword_mods(l, std::slice::from_ref(&**keyword)))
             }

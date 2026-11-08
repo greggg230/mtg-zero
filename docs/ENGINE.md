@@ -18985,7 +18985,581 @@ mechanism has exactly one owner:
 No branch changes the action layout or the encoding: a card that can only be done with a layout
 change is left blocked and reported (the maintainer decides). New public state goes in the
 public-state gate's limits as before (a perturbation draws nothing from the shared stream).
-Builds use `CARGO_PROFILE_RELEASE_DEBUG=false` (E: is nearly full; no behaviour change).
+Builds use the normal release profile (debug info on): the agents started without debug info to
+save space on E:, and the user preferred freeing space to any shortcut, so 39 stale cargo target
+dirs of merged or deleted branches (47 GB) were removed instead and the agents switched back.
+
+#### 99.13 W3: combat and abilities (branch `eoe-w3-combat`, from `eoe-base` 3a8dfb6)
+
+**Result.** All 14 of the workstream's cards supported (`SUPPORTED_EOE_COMBAT`): Astelli
+Reclaimer, Dyadrine, Synthesis Amalgam, Frenzied Baloth, Pain for All, Possibility Technician,
+Raging Ravine, Ragost, Deft Gastronaut, Requiem Monolith, Robe of Stars, Rust Harvester, Secluded
+Starforge, Sunstar Chaplain, Swarmyard, Terminal Velocity. EoE support on this branch alone 258 ->
+272 / 320. No IR defect found (docs/ir_defects.md 170-179 stay free): each card's IR read against
+its Oracle text. No layout or encoding change; cube support 546 / 546 and the behaviour digests
+unchanged (`f6543eb2b1b8752f`). Tests: `engine/tests/cards_eoe_w3.rs` (50), card table
+`tests/eoe_w3_kit` (the EoE table plus custom IR cards named "W3 ...", never in the fuzz or
+digest pools).
+
+**How.** New instructions `Ext::EoeW3(W3)` (`engine/src/eoe_w3.rs`, with the workstream's game
+state `Game::w3: W3State` and printing facts `CardDef::w3: W3Def`, one field each in the shared
+structs), the lowering `engine/src/lower/eoe_w3.rs` (a link in `lower_effect`'s chain; the cost
+atoms; the printing flags; an intervening-if hoist). Ops are named after rules actions:
+
+* **Granted triggered abilities, generalised** (CR 613.1f). Lane D's `Mark::DiesTriggerThisTurn`
+  (99.5) becomes `Mark::Granted { def, slot, this_turn, ts }`: any triggered ability an effect
+  gives a permanent, until end of turn (the cleanup step ends it, 514.2) or for as long as it is
+  that object (400.7). It is the permanent's own ability (its source and controller,
+  113.7-113.8), seen by `Game::event` like a printed one (`Game::granted_observers`: a permanent
+  on the battlefield, or, for a leave-the-battlefield event, one that left earlier in the same
+  move, 603.10a). The grant is a layer-6 effect with its own timestamp (613.1f, 613.7a): a "loses
+  all abilities" effect with a later timestamp removes it, one with an earlier timestamp doesn't
+  (613.7; the look-back of a leave trigger reads the loss as the permanent left,
+  `W3State::lki_loss`). `lower::eoe_w3::grant_triggered_ability` lowers the
+  ability as a printed one into the card's delayed triggers (`W3::GrantTrigger`); Perigee
+  Beckoner's grant goes through it (its "dies" event's object is the creature as it last
+  existed, so `EoeD::ReturnEventCardTapped` now also finds the card it became one move later, as
+  `Ext::ReturnEventCardAs` does). Requiem Monolith (`GrantTriggeredAbilityUEOT`; "you draw that
+  many cards and lose that much life", the event's amount; "that creature's controller may have
+  this artifact deal 1 damage to it": `Op::May` asked of the target's controller, 608.2d),
+  Raging Ravine (`BecomeLandCreatureUEOT.granted_triggered_abilities`), Terminal Velocity (two
+  abilities for good on the permanent put from the hand, plus haste; "it deals damage equal to
+  its mana value to each creature" as it leaves: `W3::DamageEachSourceMv`, the permanent as it
+  last existed, its last-known damage source kept via `SEEN_LKI_DAMAGE`).
+* **Regeneration** (CR 701.19; Swarmyard). `W3::Regenerate` puts a shield on the object
+  (`Mark::RegenShield`, one per shield, ended by the cleanup step); `Game::destroy` (destroy
+  effects and the 704.5g/h state-based destruction alike) uses one up instead: damage removed,
+  tapped by its controller, removed from combat (701.19a, 506.4). "It can't be regenerated"
+  (701.19c; the cube's Damn, Snuff Out and Wrath of God, where nothing regenerates: no change
+  there) sets `W3State::no_regen` around the destruction (`W3::CantBeRegenerated`).
+* **Phasing** (CR 702.26; Robe of Stars). `Zone::PhasedOut`: a phased-out permanent leaves the
+  battlefield list without changing zones (702.26d: the same object, inc unchanged, its counters
+  and effects kept, no enter or leave triggers), so every "each permanent" loop and every
+  battlefield check treats it as though it doesn't exist (702.26b) with nothing to gate: no cube
+  card phases and no loop changed. What is attached to it phases out with it (indirectly,
+  702.26e; `W3State::indirect`); a creature leaves combat (506.4); damage on it is removed in the
+  cleanup step (514.2); the static fast paths' counts follow it. In its controller's untap step,
+  before untapping (502.1), it phases in with what phased out with it, attached again (702.26h),
+  in timestamp order. `W3::PhaseOut` ("equipped creature phases out": `On::Each(Filter::
+  HostOfSource)`).
+* **The mana spent to cast a spell** (CR 601.2h; Astelli Reclaimer, Dyadrine). The payment of a
+  spell whose card reads it records it (`Mark::ManaSpent`: the payment's units, none for a
+  creature tapped for convoke or an artifact for improvise), and the permanent the spell becomes
+  keeps it. `Filter::MvAtMostManaSpent` (Astelli's target: X = 5 cast normally, 3 warped, 0 put
+  onto the battlefield by Terminal Velocity); `W3Def::counters_mana_spent` (Dyadrine enters with
+  that many +1/+1 counters, 122.6, 614.1c); `W3::RemoveCounterFromEachMay` (Dyadrine's attack
+  trigger: two different creatures as a set, `PASS` first; no question when impossible; the
+  removal only after both are chosen, so a determinize refresh re-asks, 99.8).
+* **Costs.** "Exile an artifact card from your graveyard" (`Cost::exile_graveyard_types`, the
+  printed types, 400.7; Rust Harvester), "remove a +1/+1 counter from a creature you control"
+  (`Cost::remove_counter_from`, a `ChoosePermanent`; the mana payment reserves one such creature
+  as it does a sacrifice's, `Keep::sac`, since a mana ability that sacrifices it comes first,
+  601.2g-h: fuzz seed 2219, an Eldrazi Scion with the only counter sacrificed for the {2};
+  Sunstar Chaplain), "tap X untapped artifacts you control" (`Cost::tap_x`; Secluded Starforge:
+  X announced, 107.3a / 601.2b; paid as the rules order it, the mana abilities first, 601.2g,
+  then the taps, 601.2h, chosen among the untapped artifacts left; the order of 601.2h's parts
+  among themselves changes nothing, nothing happening between them, and the player makes every
+  choice the rules give, which sources make the mana and which artifacts are tapped: the mana payment reserves X
+  of them, `Game::tap_x_reserve`, `Keep::sac` with `Keep::sac_taps`, so a source whose
+  activation taps or sacrifices one, its own {T} or sacrifice, another's "tap an untapped
+  artifact" or "sacrifice an artifact", uses it up while one that doesn't, Pentad Prism's
+  counters, stays free; X at most what the payment can leave, `Game::tap_x_most`), "sacrifice
+  a Food".
+  `PumpTargetCreatureUntilEOT.power_bonus_from_x` (+X/+0, `Ext::ApplyPtX`).
+* **"Combat damage can't be prevented"** (CR 615.12, `W3Def::combat_unpreventable_all`, read
+  where combat damage would be prevented) and **"creature spells you control can't be
+  countered"** (CR 101.2, `W3Def::creature_spells_uncounterable`): Frenzied Baloth.
+* **Pain for All.** "Enchanted creature deals damage equal to its power to any other target"
+  (`W3::HostDamagesPower`: the creature the Aura is attached to, or was as it last existed,
+  `W3State::lki_host` kept with `SEEN_W3_HOST`, 608.2h; `Filter::HostOfSource` for "other") and
+  "whenever enchanted creature is dealt damage, it deals that much damage to each opponent"
+  (`W3::EventObjDamagesEachOpponent`, the creature as it last existed if it died).
+* **Possibility Technician.** `PermKind::Play`'s condition generalised: `only_if: PlayIf {
+  Always, AttackedWith(subtype) (lane C's attacked_subtype), ControlSubtype(subtype) }`, read in
+  `Game::permission_ok` as the card would be played (601.2a, 305.1); the 19 construction sites
+  take `PlayIf::Always`.
+* **Ragost.** "Artifacts you control are Foods in addition to their other types"
+  (`W3Def::grants_subtype`, read by `Game::has_subtype`): a layer-4 effect with Ragost's
+  timestamp (613.7a), applied among the permanent's other type-changing effects in timestamp
+  order (613.7, `Game::subtype_with_grants`: an effect that sets its subtypes later removes Food,
+  an earlier one doesn't); whether it applies reads the permanent's card types after layer 4,
+  since it depends on any effect that makes the permanent stop or start being an artifact
+  (613.8a), which then applies first. "... and have '{2}, {T}, Sacrifice this artifact: You
+  gain 3 life'" (the Food ability, 111.10b): a latent ability of the card
+  (`W3Def::grants_activated`) that each matching permanent has (`Game::granted_activated`,
+  613.1f) unless a "loses all abilities" effect on it is later than Ragost's timestamp (613.7),
+  in the places after its card's own abilities and activated as the granting definition's
+  (`Game::activated_home`). Every activated ability stays reachable (602.2, 117.1b): a permanent
+  has four `ACTIVATE` slots, and one with more abilities (its own and granted) keeps the first
+  three in theirs while the fourth slot opens a choice among the fourth and later ones
+  (`Task::ChooseAbility`, a `ChooseMode` decision: `NUMBER` + place - 3, `NUMBER` + 31 for a
+  further page), inside the existing action ranges (`Game::permanent_activations` lists what
+  may be activated, `Game::paged_slot` tells the page). Both parts are one ability:
+  having applied in layer 4, it goes on applying in layer 6 even if Ragost loses its abilities
+  (613.6), so both read Ragost's definition. "At the beginning of each end step, if you gained life
+  this turn, untap Ragost": an intervening if (603.4,
+  `lower::eoe_w3::hoist_intervening_if_w3`, around `UntapSelf`).
+
+**For the next layout** (the coordinator's additive version after the merges), besides the four
+gaps below: the page of abilities past a permanent's fourth slot works inside layout v5, but its
+`ChooseMode` options name places the network doesn't see (which ability `NUMBER` + k is, and a
+permanent's granted abilities, are not encoded); more `ACTIVATE` slots per permanent, or a range
+for granted abilities, plus the granted abilities in a permanent's encoding, would let the
+network read them. In the EoE table no permanent needs the page (one that can be an artifact has
+at most three abilities of its own, Blinkmoth Nexus, and the one grant is Ragost's, a legendary
+creature).
+
+**The public-state gate** (ENGINE.md 58). `W3State.phased` and `.indirect` are Public (in
+`testkit::view_of`), the rest Derived. Four perturbations, none drawing from the gate's random
+stream (the first object in the encoded slots): a regeneration shield, the mana spent to cast a
+permanent, a phased-out permanent, one phased out indirectly. Each is a `NextLayout` limit:
+layout v5 encodes none of them (the battlefield alone, no per-permanent shield count or mana
+spent). The gate: 135 perturbations encoded, 5 deliberate limits, 7 gaps (was 3;
+`tests/az.rs::public_state_reaches_the_encoding` lists them). Granted triggered abilities have no
+perturbation of their own (as lane D's granted "dies" trigger): they are marks in the view, and
+the next layout should encode them too.
+
+**Shared files touched (small, additive):** `db.rs` (three `Cost` fields and `merge_costs`,
+`CardDef::w3`, `Filter::{HostOfSource, MvAtMostManaSpent}`, `seen_bits` for the LKI damage
+source), `game.rs` (`Mark::{Granted, RegenShield, ManaSpent}` replacing `DiesTriggerThisTurn`,
+`PlayIf`, `Game::w3`, the hooks in `add_card`, `move_card` and `put_onto_battlefield`,
+`combat_unpreventable`, `zone_list`), `ids.rs` (`Zone::PhasedOut`), `activate.rs` (the costs,
+the reservation, granted activated abilities, the tap-X order), `cast.rs` (filters,
+`permission_ok`, `choose_x`), `pay.rs` (the mana spent), `resolve.rs` (`destroy`, the entering
+mana spent, `spell_uncounterable`), `triggers.rs` (granted observers), `layers.rs`
+(`end_turn_effects`, `has_subtype`), `flow.rs` (phasing in the untap step, the LKI reset),
+`sba.rs` (a phased-out token is no stray token), `resolve_eoe_d.rs`, `program.rs` (`Ext::EoeW3`;
+lane D's grant op gone), `resolve_ext.rs`, `public_state.rs`, `testkit.rs`, `az/encode.rs` (one
+match arm), `lower/{mod, activated, effect, effect_ext, effect_eoe_d, printing, statics,
+trigger}.rs`, and the `PermKind::Play` construction sites; `tests/{support, az}.rs`.
+
+**Review (the coordinator, then the user: "no approximations").** The first version's four
+documented shortcuts are gone: Ragost's Food type was applied before every other layer-4
+effect (now by timestamp, with the dependency, 613.7, 613.8a); a permanent that had lost all its
+abilities got no granted ones (now by timestamp, 613.7, and Ragost's grant survives Ragost's
+loss, 613.6); Starforge's taps were paid before its mana (now the rules' order, 601.2g-h, the
+payment reserving the artifacts); a fifth activated ability wasn't offered (now the page).
+docs/shortcuts.md has no W3 entry. Eight tests show them (each fails on the first version).
+
+**Verification** (code at 706ad43, the normal release profile). The full engine suite (`cargo
+test --release -p engine`): 1,903 passed, 0 failed, 15 ignored (1,853 at the base; the 50 more
+are this branch's card tests). Behaviour digests unchanged (combined `f6543eb2b1b8752f`). EoE
+support 272 / 320, cube 546 / 546. `FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games (wins 9,244 /
+9,107, 1,649 draws, mean 38.6 turns, 476.0 decisions), all four fuzz tests passed (1,309 s). The
+default `FUZZ_GAMES=20000`: 20,000 games (9,967 / 9,994, 39 draws, as before) and 1,000 matches,
+passed (793 s). Faults found on the way, both fixed with a test: fuzz seed 2219 (the mana
+payment sacrificing the only creature a counter could be removed from), seeds 56 and 1004 (the
+static fast paths' counts while a permanent is phased out).
+
+**The merges of `eoe-base` (W4 at 3154b0a and W1 at 7cc45b2, then W5 at 8983031) into this branch.** Conflicts additive
+(module lists, the effect dispatch chain, `Ext` variants and their arms, `Filter` variants, the
+public-state perturbations and limits, this file) but one: W4's activated abilities an attached
+Equipment grants (CR 301.5, ENGINE.md 99.14: `Game::granted_activated`, `Game::activated_home`,
+ids past the permanent's own, none past the fourth: docs/shortcuts.md 99.14.3) and this
+section's static grants are one mechanism now. `Game::granted_activated` lists both kinds in
+battlefield (timestamp) order (`eoe_w3::Grant`: the definition, its ability, the Equipment if an
+Equipment grants it, for "exile <the Equipment>"); `Game::activated_home` maps a place to it; the
+page reaches every one; W4's rules kept: the face holding an Equipment's abilities, no grant from
+an Equipment that lost its abilities (its static ability is gone, 613.8a), the special action of
+turning face up. One rule made exact: W4 gave a permanent that had lost all its abilities no
+granted ability; a grant now goes against the loss by timestamp (613.7; an Equipment's timestamp
+is renewed as it becomes attached, 613.7e). W4's tests pass, The Dominion Bracelet's four ignored
+ones too with the card's blocker lifted locally (left ignored: the card waits on the encoding).
+The public-state gate after the merges: 14 gaps for the next layout (`tests/az.rs`: W3's four, then
+W4's five, W5's one and W1's one). EoE support 295 / 320 (281 on eoe-base and this branch's 14),
+cube 546 / 546; W5's merge conflicted only on additive lines (a `Mark` each, the entering hooks).
+Verification of the combination (69083f9, the normal release profile): the full engine suite 1,962
+passed, 0 failed, 20 ignored (W4's four and W3's one Dominion Bracelet tests among them);
+behaviour digests unchanged (`f6543eb2b1b8752f`); `FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games
+(wins 8,928 / 9,031, 2,041 draws, mean 40.1 turns, 500.4 decisions), all four fuzz tests passed
+(1,015 s); the default `FUZZ_GAMES=20000`: 20,000 games (9,967 / 9,994, 39 draws) and 1,000
+matches, passed (420 s).
+
+#### 99.14 W4: exile, graveyard, copies and control (branch `eoe-w4-exile`)
+
+**Cards.** EoE support 258 -> 265 with W4's seven (`SUPPORTED_EOE_EXILE`): Adagia, Windswept
+Bastion; Alpharael, Stonechosen; Blade of the Swarm; Chorale of the Void; Close Encounter; Scout for
+Survivors; Susur Secundi, Void Altar. Left: The Dominion Bracelet (its rules are built; blocked on
+the encoding, below), Sothera, the Supervoid (IR defect 180) and Tannuk, Steadfast Second (an
+alternative cost granted by another permanent: not built). Tests: `tests/cards_eoe_w4.rs` (19, and
+the Bracelet's 4, ignored while it is blocked; they passed at 84932a5 with the card supported; the
+card table `tests/eoe_w4_kit`, the EoE table plus `W4 ...` IR test cards, never in the fuzz or
+digest pools). New Rust in `eoe_w4.rs` (`Ext::EoeW4`)
+and `lower/eoe_w4.rs` (a link in `lower_effect`'s chain); shared files small and additive.
+
+**Controlling another player (CR 722; The Dominion Bracelet).** "You control target opponent during
+their next turn" (`EoeW4::ControlNextTurn`) sets `Game::next_turn_controller[q]` (the last effect
+wins, 722.1a); as q's next turn starts (a skipped turn isn't taken, 722.1b) it becomes
+`Game::turn_controller`, for the whole turn (722.1). Then:
+
+* *Who decides.* A decision keeps its player (the controlled player: its action ids are that
+  player's, their hand, their permanents, their mana, 722.4a); `Game::decider_of` names who makes it
+  (722.4: the controller for the active player during the controlled turn; their own decisions stay
+  theirs, 722.7), and `Game::to_move` (zero-core's) is the decider. `determinize`'s "the viewer's
+  own decision" is the decider's.
+* *What the controller sees* (722.3). At the end of every transition of the controlled turn
+  (`advance`, before the next decision is shown) `sync_controller_view` lets the controller learn,
+  keyed (`KEY_LOOK`, private to it, in definition order), every hidden card the controlled player
+  can see: their hand (so the cards they draw), the face-down permanents they control (708.5), the
+  face-down exiled cards they know, and the hidden cards their pending decision names (a looked-at
+  pile). What they only remember (a library card scried on an earlier turn) is not visible and not
+  shared. So the decider knows everything the controlled player's options depend on: its worlds
+  never resample them (the decider's actions and view are unchanged by `determinize`, which the
+  fuzz checks), and no card the controller can't see is shared. Afterwards the controller still
+  knows the cards it saw, until they are rearranged privately (as after a hand reveal). Limits:
+  docs/shortcuts.md 99.14.2.
+* *The encoding: why the card stays blocked.* The decider's encoding is its own seat's (its hand,
+  its permanents as `MY_PERM`, the controlled player's hand only as the known cards it is), but a
+  controlled decision's action ids are the controlled player's: `HAND` + k is a slot of *their*
+  hand, `MY_PERM` their permanents, `LIBRARY` + k a slot of *their* list (a searched library, a
+  pile). Layout v5's input gives those ids no tokens for the decider: `encode` builds the list block
+  and the legal-action flags only for the viewer's own decision (`d.player == me`), and has no hand
+  slots for the other player's hand. The EoE fuzz found it at 20,000 games (seed 12441, step 164:
+  "PutInHand option 340 points at list slot 0 ... not its card's token", `check_list_options`, in a
+  controlled turn). Making it work is an encoding change (the brief forbids one; the maintainer's
+  decision). What it needs: (1) a controlled decision encoded in the controlled player's frame (the
+  seat its ids are relative to: its hand slots with the legal flags, its permanents as `MY_PERM`,
+  its list block, its triggers) with the decider's knowledge (the decider's own hand then appears as
+  the other player's hand known exactly); (2) a global "this decision is made for the other seat"
+  (the value is the decider's, `to_move`'s, while the frame is the controlled player's); (3) the two
+  facts below. No action id changes. The card is blocked in the lowering
+  (`grants_control_opponent_ability_when_equipped(...encoding...)`); removing that line and adding
+  it to `SUPPORTED_EOE_EXILE` restores it once the encoding presents its decisions. Layout v5 also
+  has no float for a controlled turn or a pending one: two next-layout gaps in the public-state gate
+  ("a player will control the other's next turn", "the active player is controlled this turn";
+  perturbations draw nothing from the shared stream; they apply in any position, as the fields
+  exist without the card).
+
+**Activated abilities an Equipment grants** (CR 301.5, 613.1f). `CardDef::grants_equipped`: a face
+of the Equipment holding the granted abilities (the IR's
+`grants_control_opponent_ability_when_equipped`, the Bracelet's whole Oracle text, lowered by
+`lower/eoe_w4.rs::grant_control_ability`). The equipped permanent has them while the Equipment is
+attached and keeps its abilities (`Game::granted_activated`): offered at priority after its own
+(`ACTIVATE` ids past its own; past the fourth slot, the page of ENGINE.md 99.13 since the merge
+of W3: docs/shortcuts.md 99.14.3 fixed), activated from the face with
+the creature as the source (`Game::activated_home`; its stack item names the face, so the cost,
+targets and program are the face's; `Game::activated_of` for the bots). "Exile The Dominion
+Bracelet" (`CardDef::exiles_granter`): the Equipment, noted as the ability is activated, is exiled
+after the mana (CR 601.2h), so "{X} less, where X is this creature's power" (`Discount::SourcePower`)
+reads the power with the Bracelet's +1/+1 as the cost is determined (601.2f).
+
+**Targets in exile** (Blade of the Swarm: "put target exiled card with warp on the bottom of its
+owner's library"). 99.4 and 99.8 left it for a layout change; none is needed. `Filter::InExile`,
+`Filter::HasWarp` (a card with warp, CR 702.185a, whoever owns it and however it was exiled; face-up
+exile only, no copies of cards); exiled cards are target candidates when a filter names exile
+(`target_candidates`, `has_candidates`, `filter_ok`'s `exile_ok`); a target's option is `EXILE` +
+its place among the decision's offered exiled cards in exile order (`Game::name_exile_targets`, run
+by `ask` beside 65.10's graveyard renaming). That is the existing meaning of the `EXILE` range for
+a choice of exiled cards (`ChooseExiled`: "the k-th offered card"): the ids, their count and every
+existing decision's ids are unchanged, so it is no layout change. Naming by definition (the brief's
+suggestion) is not rules-equivalent here: two exiled cards of one definition and owner differ (one
+warped, castable from exile later; another with counters or linked to a permanent), and exile is
+public, so the card itself is named, as a graveyard target is (65.10). The encoding has no field for
+a target in exile (a stack item's target block names players, permanents and stack items): a rare
+next-layout gap, "a stack item targets another exiled card".
+
+**Total mana value of targets** (Scout for Survivors: "up to three target creature cards with total
+mana value 3 or less"). `TargetReq::total_mv`; the targets are chosen one at a time and only a
+candidate keeping the chosen total within the limit is offered (`Game::retain_within_total_mv`; a
+copy's new targets too). This equals CR 601.2c's check of the announced set: every set so built is
+within the total, and every set within it is built by some order (mana values are never negative,
+so each prefix of a legal set is within the total). The targets are graveyard cards, whose mana
+values nothing changes there, so the total still holds as the spell resolves (608.2b checks each
+target alone). `EoeW4::GraveyardTargetsOntoBattlefield` puts them onto the battlefield together,
+then a +1/+1 counter on each (CR 122.1: after they enter, not "enters with").
+
+**Close Encounter** ("As an additional cost to cast this spell, choose a creature you control or a
+warped creature card you own in exile"). `CastingRules::choose_creature_or_warped`: castable only
+with something to choose (`cast_timing_ok`, which every castability check passes through: a cost
+that can't be paid, 601.2h); `Task::ChooseForCost`, before the mana: one choice in two decisions, an
+exiled card first (`ChooseExiled`, `EXILE` + k; `PASS` = a creature instead, offered when there is
+one), then a creature (`ChoosePermanent`); each candidate is reached by exactly one sequence. The
+choice is noted on the spell (not a target: no ward, 702.21a). `Game::is_warped`: in exile by warp's
+delayed ability (its permission from a later turn, for the mana cost). `Amount::ChosenPower`: the
+creature's power now, or as it last existed if it left (608.2h); an exiled card's own power. Which
+object a stack item noted is encoded as a count only: a rare next-layout gap, "a stack item noted
+another object".
+
+**The other cards.** Adagia: copy exceptions gain supertypes (`Except::supers`, CR 707.9b: "except
+it's legendary"); `Game::supertypes_of` reads them for the legend rule (704.5j), static scopes,
+filters and spending restrictions; the descriptor's legendary float is the copiable definition's (a
+next-layout gap, "a copy is legendary by its exception"). Susur Secundi: `Amount::CostPower`, the
+sacrificed creature's power as it last existed (608.2h; the activated item's event object, recorded
+as the cost is paid). Alpharael, Stonechosen: `WardCost::DiscardRandom`,
+`EoeW4::OfferDiscardRandom` (702.21a, 701.9b; a yes/no, asked with an empty hand too, as ward's life
+payment is; the encoding's ward-discard float). Chorale of the Void: the defending player's
+graveyard (the trigger controller's opponent: the Aura enchants a creature its controller
+controls), onto the battlefield under your control tapped and attacking (508.4: during combat,
+never declared as an attacker; `Task::AttackTarget` if there is a planeswalker to attack).
+
+**IR defect** (docs/ir_defects.md 180, `lower::IR_DEFECTS` under W4): Sothera's end-step ability
+returns the creature card before Sothera is sacrificed (the Oracle text sacrifices first); the
+order is observable (the returned creature's enters "if"s and leave triggers). Its classes are not
+lowered yet either (`EachOpponentExilesOwnCreature`, `ReanimateOneExiledWithSourceWithCounters`,
+`SacrificeSelfPreservingExileLink`, `AnyPlayerControlsNoCreatures`).
+
+**Not done: Tannuk, Steadfast Second** ("Artifact cards and red creature cards in your hand have
+warp {2}{R}"). No layout change is needed, but an engine subsystem is: an alternative cost a card
+has from another permanent. `StackItem::alt` indexes the card's own `alt_costs`, and warp's
+consequences read the card's own alternative cost: castability and the `ChooseAltCost` options
+(`alt_payable`, `alt_allowed`), the total cost, void and `Mark::WarpCast` (`cast_done`,
+`put_onto_battlefield_attached`), and the end-step exile, which is the card's own delayed ability
+(`AltCost::dash`). It needs granted alternative costs (an index past the card's own, resolved to
+the granting permanent's face, as 99.14's granted activated abilities are) and a warp delayed
+ability held by that face.
+
+**Public-state gate.** Five new next-layout gaps (eight in all; `tests/az.rs` expects them): a copy
+legendary by its exception, a target in exile, which object a stack item noted, a pending
+player-controlling effect, a controlled turn. Two new public fields (`Game::next_turn_controller`,
+`Game::turn_controller`), in `Game::view_of`.
+
+**Results** (normal release profile). At 60910bf (the Bracelet supported, EoE support 266): the full
+engine suite 1,876 passed, 0 failed, 15 ignored; behaviour digests unchanged (combined
+`f6543eb2b1b8752f`); the default `FUZZ_GAMES=20000` passed (20,000 games, wins 9,967 / 9,994, 39
+draws, as before the branch; 1,000 matches); `FUZZ_POOL=eoe FUZZ_GAMES=20000` failed at seed 12441
+(the encoding, above). At 2ac16df (the Bracelet blocked, EoE support 265; cube 546 / 546):
+`support`, `cards_eoe_w4` (19 passed, 4 ignored), `--test az` (41) pass, digests unchanged
+(`f6543eb2b1b8752f`), and `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed (20,000 games, wins 9,100 /
+9,009, 1,891 draws, mean 39.6 turns, 515.6 decisions; all four fuzz tests, 1,022 s). The
+public-state gate: 135 perturbations encoded, 5 deliberate limits, 8 next-layout gaps.
+
+#### 99.11 W1: the cards blocked by card-IR defects (branch `eoe-w1-ir`, mtg-bot `feature/eoe-ir-fixes` 20bea9f4)
+
+**Why.** 23 of the 62 blocked cards had an `ir_defect(...)` blocker: mtg-bot's parser exported a
+printing that contradicts the Oracle text (docs/ir_defects.md 21-101). W1 owns the parser, the
+re-export, `generated.rs`, `lower::IR_DEFECTS` and `SUPPORTED_EOE_IRFIX`, and those cards' other
+engine features (but mana spend restrictions, W2's).
+
+**The parser fixes** (mtg-bot `feature/eoe-ir-fixes` 20bea9f4, the second batch, on 7af12b20; 9c6e8795
+adds its unit tests and one Python-engine fix): 20 of the 23 printings follow their Oracle text
+now; each fixed entry's last bullet in docs/ir_defects.md says what the IR holds:
+Divert Disaster and Unravel (`CounterSpell.if_paid`, `if_mana_spent_below_mv`; both counterspells
+left mtg-bot's lossy parity pin, as did Archenemy's Charm), Archenemy's Charm and Pull Through the
+Weft (`ReturnTargetCardsFromYourGraveyard`: target groups), Fell Gravship (a card chosen as it
+resolves, not a target), Xu-Ifit, Endless Sands, Desculpting Blast (the Drone token inline),
+Luxknight Breacher (`enters_with_plus_one_counters_per`), Syr Vondam (`LeftBattlefieldTo`, the power
+gate a trigger predicate), Mutavault (`all_creature_types`), Mechan Shieldmate
+(`CanAttackAsThoughNoDefender`), Mirrorpool ({C} pips), Pinnacle Starcage (the Robot inline), Power
+Depot (modular 1, its restriction), Sunken Citadel (the chosen colour), Tractor Beam and Moonlit
+Meditation (two `EnchantKind`s), Meltstrider's Resolve (no more menace), Loading Zone (the
+recipients). Not fixed: Nesting Grounds (27), Terrasymbiosis (31), Starfield Vocalist (66): each
+needs an engine feature W1 didn't build (a choice of counter kind; who put counters and how many;
+a trigger-doubling replacement), so their IR fixes were left for the batch that builds them (they
+stay in `lower::IR_DEFECTS`). No new IR defect was found (140-159 unused).
+
+mtg-bot's checks: `cards roundtrip --pool cube legacy eoe` passes; the cube's and the legacy IR are
+the previous files card for card (`schema_sha256` aside, checked card by card); the full suite
+(`pytest -n 8 --no-cov`) has 48 failures, all among the 51 of the baseline (three now pass); 108
+tests that pinned the lossy printings follow the new ones (42) or are strict xfails (66: the
+cross-engine parity probes and bridge admit sets, whose compiled Rust engine models the old
+printings; mtg-bot docs/SEARCH_LIMITATIONS.md, "EoE fidelity shapes (feature/eoe-ir-fixes,
+second batch)"); `tests/test_eoe_fidelity.py` (51 tests) covers the new classes.
+
+**The import** (docs/card_ir.md, "Current numbers"): schema `663b44095dbe...` (was
+`675cfc50fc4e...`), 708 classes (6 new, 5 unused now); 20 of `eoe.ir.json`'s 320 cards changed
+(exactly those). `card_ir` and `python -m pytest tools/codegen` pass. `lower::IR_DEFECTS` lost the
+20 cards' lines (it keeps 3).
+
+**The engine** (new code in `eoe_w1.rs` and `lower/eoe_w1.rs`; small additive edits elsewhere):
+* Graveyard returns with target groups (`Ext::FromGraveyard` per group, CR 601.2c); Xu-Ifit's
+  return through `FromGraveyardAs`, whose effects apply as the permanent enters: when they include
+  "has no abilities", the card's own entering abilities (enters tapped, with counters, as a copy,
+  "as it enters" choices) don't apply (`Game::entering_own`, `enters_tapped_own`; CR 614.12,
+  Xu-Ifit's ruling of 2025-07-25). Gated on that effect only: nothing else changes.
+* `EoeW1::LinkedToBattlefieldOwnersMatching` (Endless Sands' "each creature card exiled with
+  this", CR 607.2a), `ExileEachUntilSourceLeaves` (610.3, 610.3c), `LinkedToGraveyardsCounted`
+  (Pinnacle Starcage, then `CreateTokensN` of `Amount::Remembered`), `HostFights` (an Aura's
+  "enchanted creature fights", 701.14).
+* `CounterSpell.if_paid` (after `OfferPay`), Desculpting Blast's "if it was attacking" (read just
+  before the bounce, 608.2h), Mirrorpool's copy and token copy (707.10, 707.2), the {C} pips
+  (`pips[C]`, 107.4b).
+* `TrigPred::LeftTo` ("dies or is put into exile"): the zone the permanent goes to, in the
+  transient `Game::leaving_to` set around its `LeavesBattlefield` event (a first try put it in the
+  event's amount, which reaches the stack item's event context: 44 of the 2,500 digest games
+  differed; the transient field leaves them unchanged).
+* `CardDef::enters_counters_per` (Luxknight Breacher: the permanents already there, not those
+  entering at the same time, `group_ts`; its ruling), `attached_max_one_blocker` (Meltstrider's
+  Resolve, CR 509.1b; with menace too, it can't be blocked at all), `Mod::AttackDespiteDefender`
+  with `Cond::ArtifactEnteredThisTurn` (Mechan Shieldmate, 702.3b), `Mod::AllCreatureTypes`
+  (Mutavault, 205.3m: the creature types of the rule's list, `eoe_w1::CREATURE_TYPES`, from
+  Scryfall's creature-type catalog; counted with the layer-4 subtype effects of the encoding's
+  effect counts), the enchant kinds "creature or Spacecraft" and "artifact or creature" (lane A's
+  `aura_enchant`).
+* New public state: `Player::artifact_entered` ("an artifact entered the battlefield under your
+  control this turn"), a public-state gate field with a perturbation (player 0 always: nothing from
+  the gate's random stream) and a next-layout limit (`tests/az.rs`: four gaps now).
+
+**Cards.** EoE support 258 -> 272 of 320: 14 cards in `SUPPORTED_EOE_IRFIX`, each checked against
+its Oracle text and the official rulings: Archenemy's Charm, Desculpting Blast, Divert Disaster,
+Endless Sands, Fell Gravship, Luxknight Breacher, Mechan Shieldmate, Meltstrider's Resolve,
+Mirrorpool, Mutavault, Pinnacle Starcage, Pull Through the Weft, Syr Vondam, Sunstar Exemplar,
+Xu-Ifit, Osteoharmonist. Still blocked (their IR fixed): Loading Zone (no counter-multiplying
+replacement), Unravel (the mana spent to cast a spell isn't recorded), Tractor Beam (an Aura's
+control, "doesn't untap", tapping the enchanted permanent), Moonlit Meditation (its token
+replacement), Power Depot and Sunken Citadel (W2's spend restrictions, and modular / mana of the
+chosen colour). Their IR not fixed: Nesting Grounds, Terrasymbiosis, Starfield Vocalist (above).
+No card needed an action-layout or encoding change.
+
+**Tests.** `tests/cards_eoe_w1.rs` (27 tests): every ability of each card's Oracle text and the
+rulings' edge cases (Divert Disaster paid, declined, unpayable; Archenemy's Charm's planeswalker
+targets and "one or two"; Pull Through the Weft's two requirements and no targets; Fell Gravship
+returning a milled Spacecraft card and milling with nothing to return; Desculpting Blast's Drone
+only for an attacker; Endless Sands' link to the land that exiled; Xu-Ifit's Skeleton without
+abilities, its enters trigger and "enters with" counter lost; Syr Vondam dying, exiled, bounced,
+at power 3 and 4; Luxknight Breacher counting an artifact creature once; Mechan Shieldmate after
+an artifact entered and left, and the next turn; Mutavault's creature types and not Spacecraft;
+Mirrorpool's {C} costs, copy with a new target and token copy without counters; Pinnacle Starcage
+both players' small permanents and the Robots; Meltstrider's Resolve's fight, +0/+2 and one
+blocker).
+
+Full engine suite (normal release profile): 1,880 passed, 0 failed, 15 ignored. `support` 8 passed
+(cube 546 / 546, EoE 272 / 320); behaviour digests unchanged (combined `f6543eb2b1b8752f`);
+`FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games (wins 8,984 / 8,901, 2,115 draws, mean 39.8 turns,
+510.6 decisions), the default `FUZZ_GAMES=20000`: 20,000 games (9,967 / 9,994, 39 draws, as before)
+and 1,000 matches, all four fuzz tests passed; `cargo test -p card_ir` and `python -m pytest
+tools/codegen` pass.
+
+**Sothera, the Supervoid** (added to W1 by the coordinator: W4's docs/ir_defects.md entry 180 on
+`eoe-w4-exile`, the end-step ability returning the creature before sacrificing Sothera). mtg-bot
+`feature/eoe-ir-fixes` 7c02e5c9 puts the sacrifice first (`Sequence [SacrificeSelfPreservingExileLink,
+ReanimateOneExiledWithSourceWithCounters]`; schema unchanged, the cube's and the legacy IR card for
+card unchanged, only Sothera's printing in `eoe.ir.json`). The engine: `EoeW1::ChooseOwnExileLinked`
+("each opponent chooses a creature they control and exiles it", the card exiled with Sothera, CR
+607.2a), `LinkedCreatureToBattlefieldWith` (a linked creature card enters under your control with
+two +1/+1 counters, 614.1c), `Cond::APlayerControlsNoCreatures` (an intervening "if", 603.4), the
+sacrifice as `SacrificeSource` (the link survives it). Supported: EoE 272 -> 273; two card tests.
+
+**No approximations** (the user's rule, given during the work): every choice W1 added keeps every
+legal option reachable: the linked-creature choice pages through the 32 exile slots (31 cards and
+`PASS` for the next page) instead of truncating; Meltstrider's Resolve's "enchanted creature" is the
+Aura's last known attachment if the Aura left before its trigger resolved (CR 608.2h,
+`Game::lki_attached`); "an artifact entered the battlefield under your control" is noted as the
+permanent's `Enters` event happens (what it entered as, a copy of an artifact too, CR 707.5). One
+divergence is left, reported here rather than claimed equivalent: when a dying or exiled
+permanent's destination is chosen among replacement effects (`Dest::Choose`: the library or exile),
+its `LeavesBattlefield` event is matched while it is "exiled for now", so `TrigPred::LeftTo` reads
+exile even if the library is chosen next (Syr Vondam would trigger for a permanent shuffled into a
+library). No card of the EoE table puts a permanent into a library instead of a graveyard, so no
+EoE game reaches it; making the match wait for the choice needs the leave event re-timed for every
+card (left for the maintainer). No docs/shortcuts.md entry was added by W1.
+
+Checks of the final branch (with Sothera and the fixes above): full engine suite 1,882 passed, 0 failed,
+15 ignored; `support` (cube 546 / 546, EoE 273 / 320); behaviour digests unchanged (combined
+`f6543eb2b1b8752f`); `tests/az.rs` passes; `FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games (wins 8,916 /
+8,874, 2,210 draws, mean 40.1 turns, 513.4 decisions) and the default `FUZZ_GAMES=20000`: 20,000 games
+(9,967 / 9,994, 39 draws) and 1,000 matches, all four fuzz tests passed. mtg-bot at 7c02e5c9: 50
+failures, 49 of the baseline's and `tests/search/test_shm_nn_eval_server.py::test_concurrent_workers_get_batched_into_one_dispatch`,
+a timing test that passes alone (the machine was running four agents' builds).
+#### 99.15 W5: Tannuk (branch `eoe-w5-tannuk`)
+
+**The card.** Tannuk, Steadfast Second: "Other creatures you control have haste. / Artifact cards and
+red creature cards in your hand have warp {2}{R}." Its haste was supported; its blocker was
+`CardPrinting.hand_ability_grants`: an alternative cost another permanent's static ability gives
+cards in hand (CR 118.9, 604.1, 611.3a, 702.185a). EoE support 265 -> 266 (`SUPPORTED_EOE_W5`).
+New Rust in `eoe_w5.rs` and `lower/eoe_w5.rs`; shared files small and additive.
+
+**The rules, as built.**
+
+* *Which cards* (CR 611.3a, 109.5). A grant (`CastingRules::hand_alt_grants`: a filter and an
+  `AltCost`) applies to each card in the hand of its permanent's controller that matches the filter
+  now (`Game::granted_alts`: the owner's permanents in battlefield order, their grants in order;
+  `abilities()`, so a permanent that lost its abilities grants nothing). The IR's
+  `HandCardFilter` is a disjunction of (card type, optional colour): `Or(Type(artifact),
+  And(Type(creature), Color(R)))`; a multicoloured red card is red (CR 105.2).
+* *Faces* (CR 601.3e). Whether a face can be cast with it is decided by the face's
+  characteristics: the hand's offer copies the game with the face up (`face_castable`), and the
+  cast asks with the face on the stack. A modal double-faced card whose back face is a red
+  creature can be cast as that face for {2}{R}; an adventurer red creature card's Adventure (a
+  sorcery) has no warp (the creature does). This is Henzie "Toolbox" Torre's ruling for granted
+  blitz (a modal back face) and Lier's ruling of 2025-10-02 (alternative characteristics are what
+  is legal to cast).
+* *From hand only* (CR 702.185a: "cast this card from your hand"). `alt_payable` refuses a granted
+  index for any other route (exile, graveyard, miracle: `CastFrom::Hand` only).
+* *One alternative cost* (CR 118.9a, 601.2b). Granted costs join `ChooseAltCost` beside the mana
+  cost (`NUMBER` 0), the card's own (`NUMBER` 1 + k) and Weftwalking's free cast (`NUMBER` 31); the
+  card's own warp and Tannuk's are two choices (Memorial Team Leader: four options). A spell cast
+  for a granted cost isn't overloaded (CR 702.96a: overload is an alternative cost of its own), so
+  the option needs the spell's own targets, as its mana cost does.
+* *Naming a granted cost.* `ChooseAltCost` names a granted cost by its permanent: `Choice::Card(g)`
+  with the permanent's `MY_PERM` id (`perm_action`), so any number of granters stays reachable
+  within the existing ranges (the legend rule keeps one Tannuk a player in this table, but that is
+  a property of the pool, not a rule this code relies on). A printing has at most one grant (the
+  lowering denies more, `hand_ability_grants(more than one ...)`), so the permanent names it. The
+  encoder needs nothing new: a legal `MY_PERM` id sets that permanent token's `OPTION` float, as
+  for any choice of a permanent. Chosen, `StackItem::alt` is one past the card's own alternative
+  costs (encoded as `stack::ALT` / `ALT_INDEX`, public) and the spell carries
+  `Mark::AltGranted { granter, def, grant }`.
+* *The cost* (CR 118.9d, 601.2f). The granted mana with the spell's increases and reductions
+  (`alt_mana_of`, shared with the card's own alternative costs): "noncreature spells cost {1}
+  more" makes an artifact's warp {3}{R}; Uthros Psionicist's "the second spell ... costs {2} less"
+  makes it {R}. Once chosen, everything reads the noted cost (`Game::item_alt`): the total cost is
+  locked in (601.2f) even if the granter is sacrificed for mana while it is paid.
+* *X* (CR 107.3b). A granted cost has no {X} (the lowering denies one), so a spell with {X} in its
+  mana cost cast with it has X = 0: `choose_x` offers 0 only (`cast_for_granted_alt`).
+* *Keeping the ability* (CR 400.7g, 611.3a-b). The spell keeps the granted warp while the granting
+  effect would still apply to it: the same object (`ObjRef`) on the battlefield, controlled by the
+  card's owner ("your hand"), not having lost its abilities, the same definition, the spell
+  matching the filter (`Game::alt_grant_applies`). Only the grant it was cast with continues
+  (400.7g speaks of the ability used; blitz's 702.152b links each instance to its own payment).
+  400.7g carries the effect across the move from the hand, nothing else: the effect applies at
+  each moment to what its text says (611.3a), and "your hand" is its permanent's controller's
+  (109.5), so a granter that changed controllers no longer gives the spell (cast from its owner's
+  hand) the ability, and one that left or lost the ability gives nothing (611.3b).
+* *Warp's exile* (CR 608.3g, 702.185a). The delayed "exile the permanent ... at the beginning of
+  the next end step" is created as the permanent enters, by the spell's warp ability: only if the
+  spell still has it then. `finish_resolve` passes the delayed ability with its home
+  (`Game::entering_dash: Option<(u8, Option<DefId>)>`: the card's own definition, or the granting
+  definition, whose delayed ability `lower/eoe_w5.rs` builds as a card's own warp's,
+  `Ext::WarpExile`). Its source is still the permanent (603.7d); the log and the stack item name
+  the definition holding the program ("trigger of Tannuk"). Tannuk dying in response: the permanent
+  stays. Then "its owner may cast this card after the current turn has ended" (the permission
+  `Ext::WarpExile` gives), for its mana cost: in exile it has no warp.
+* *Cast for its warp cost* (CR 702.185c, 400.7d). Void and `Mark::WarpCast` (Full Bore's "if that
+  creature was cast for its warp cost") hold whenever it was cast for a warp cost, own or granted,
+  whether or not the spell still had the ability as it resolved.
+* *Warped / with warp* (CR 702.185b). A card exiled by a granted warp's delayed ability is a warped
+  card (`is_warped` reads the permission: Close Encounter may choose it); it has no warp in exile
+  (`Filter::HasWarp` adds a granted warp only in hand, or on a spell still having it: Blade of the
+  Swarm can't target it).
+* *Copies* (CR 707.10, 707.2). A copy of a spell cast for a granted cost copies the choice
+  (`alt`) but not the ability (not a copiable value, not a card cast from a hand): `item_alt` finds
+  no `Mark::AltGranted` on the copy, so no exile and no "cast for its warp cost". No IR class
+  copies a creature or artifact spell today, so no test drives it. For the same reason (a copy of
+  a spell isn't cast) `put_onto_battlefield` now sets `Mark::WarpCast` only when the permanent's
+  spell was cast and not a copy (the `Enters` note's "cast" bit's condition); before, a copy of a
+  spell cast for its own warp cost was marked.
+
+**Hidden information.** The granted offer is part of its controller's own options (the encoding's
+legal flags are the decider's only); `tests/cards_eoe_w5.rs` checks that P1's encoding is the same
+whether P0's hand card has Tannuk's warp or not. A spell being cast is public; `ChooseAltCost` is
+asked with the cast in progress (the caster's hand pinned as for any payment).
+
+**Encoding.** No layout or action-id change. `az/encode.rs`'s `Task::Delve` context computed the
+cost floats only for an alternative cost index within the card's own; it now asks `item_alt`, the
+same value for every state reachable before, and the noted granted cost for a delve spell cast for
+one. The public-state gate gains one rare next-layout gap (nine in all; `tests/az.rs`): "a spell's
+granted alternative cost came from another permanent" (which permanent is not encoded; the next
+layout encodes it as a noted object's). `az/view.rs` words the option ("The alternative cost
+Tannuk, Steadfast Second gives").
+
+**Tests.** `tests/cards_eoe_w5.rs` (11; the card table `tests/eoe_w5_kit`, the EoE table plus
+`W5 ...` IR test cards, never in the fuzz or digest pools): which cards have it (611.3a), the
+controller's hand only (109.5), the cast, void, haste, the exile and the later cast (702.185a),
+Tannuk dying in response (608.3g, 400.7g; Full Bore after), the grant ending (611.3b), one
+alternative cost (118.9a), increases and reductions (118.9d), X = 0 (107.3b), faces (601.3e),
+warped without warp (702.185b), and the hidden hand.
+
+**Limits.** None added (no docs/shortcuts.md entry). A printing with more than one hand grant is
+not supported (the lowering says so); no card has one.
+
+**Results** (normal release profile, at 18e9da9; EoE support 266, cube 546 / 546). The full engine
+suite 1,883 passed, 0 failed, 19 ignored; behaviour digests unchanged (combined
+`f6543eb2b1b8752f`); `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed (20,000 games, wins 9,037 / 9,041,
+1,922 draws, mean 39.6 turns, 515.0 decisions; 1,483 s); the default `FUZZ_GAMES=20000` passed
+(20,000 games, wins 9,967 / 9,994, 39 draws, as before the branch; 1,000 matches; 455 s). Random
+play reaches the mechanism: 300 random-action games of a Tannuk deck (four Tannuks, red creatures,
+Mountains) cast 301 spells for Tannuk's warp and exiled 273 permanents with it. The public-state
+gate: 135 perturbations encoded, 5 deliberate limits, 9 next-layout gaps.
 
 #### 99.12 W2: mana and lands (branch `eoe-w2-mana`, from `eoe-base` 3a8dfb6)
 
@@ -19123,9 +19697,9 @@ next-layout limit drawing nothing from the shared stream), `testkit.rs` (`view_o
   its restriction is `SPEND_LAND_ABILITY` (tested on a fixed-colour copy, "Test Citadel": the
   pool keeps what a land's ability doesn't spend). Power Depot needs W1's IR (entries 40, 47: the
   "{T}: Add {C}" ability, modular 1, and the restriction "artifact spells or abilities of
-  artifacts"): the schema's `SpendRestriction` has no such value; with one, its lowering is
-  `SPEND_ARTIFACT | SPEND_ARTIFACT_ABILITY` (one line in `lower/activated.rs`; two-purpose mana is
-  tested with Eldrazi Temple's).
+  artifacts"): W1's schema has the value since (`artifact_spell_or_activation`), lowered at
+  the merge (below) as `SPEND_ARTIFACT | SPEND_ARTIFACT_ABILITY` (two-purpose mana is tested with
+  Eldrazi Temple's); modular is left.
 
 **Tests.** `tests/cards_eoe_w2.rs` (7: the restrictions), `tests/cards_eoe_w2_lands.rs` (23: the
 lands and the other cards), custom cards in `tests/eoe_w2/mod.rs` (Test Citadel, Test Workshop,
@@ -19140,3 +19714,19 @@ spend) and seeds 6224 and 3118 (castability's convoke sources and the Pollinator
 
 **Digests:** unchanged (`f6543eb2b1b8752f`): every new path is gated by the table or the game
 (`CardDb::spend_kinds`, `Game::moon_game`, `CardDb::watch_lands_entered`).
+
+**Merge of `eoe-base` 9cdda51 (W1, W3, W4, W5) into `eoe-w2-mana`.** Conflicts, all kept on both
+sides: the module lists, the effect dispatch chain, the `Ext` variants and their arms, the `Mark`
+variants, `CardDef` / `CardDb` fields, the public-state perturbations and limits (the next-layout
+gaps in `tests/az.rs` in the merged order: W2's two before W1's artifacts entered this turn, 16
+applied); `entering`, now `entering_own` with W1's `own` (an effect putting it onto the
+battlefield with no abilities): the Mountain test joins `own` there and in `enters_tapped_own` and
+the copy choice, Bioengineered Future's count stays before it, devour is among the as-enters
+choices; `act_mana_x` with W3's `tap_x` and `x_times`; W3's granted activated abilities: their places
+start after `Game::own_ability_slots` (the card's own, or a Mountain's abilities if more), and
+`activated_home` names the Mountain's definition for a nonbasic land under the Magus; W3's static
+subtype grants join the Mountain's land types by timestamp; `spend_allow_from` reads
+`supertypes_of`. W1's new `SpendRestriction::ArtifactSpellOrActivation` (Power Depot) lowered. On
+the merge: EoE support 306 / 320 (base 295 and W2's 11); Power Depot is blocked by modular,
+Sunken Citadel by its chosen colour's production (W1's IR: `produces: chosen`,
+`enters_choosing_color`), both outside W2's restrictions.

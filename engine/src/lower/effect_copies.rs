@@ -15,7 +15,7 @@ fn and(a: Filter, b: Filter) -> Filter {
 }
 
 /// Plain keywords as a copy's "except it has ..." (CR 707.9a).
-fn except_kws(l: &mut Lowerer, kws: &[cats::Keyword], what: &str) -> Except {
+pub(crate) fn except_kws(l: &mut Lowerer, kws: &[cats::Keyword], what: &str) -> Except {
     let mut exc = Except::default();
     for k in kws {
         match super::printing::lower_keyword_full(l, k) {

@@ -163,7 +163,6 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             legendary_only,
             power_bonus_from_x,
         }) => {
-            l.deny("PumpTargetCreatureUntilEOT.power_bonus_from_x", power_bonus_from_x);
             let mut f = creature();
             if *you_control_only {
                 f = and(f, Filter::Controller(true));
@@ -183,9 +182,20 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             if *legendary_only {
                 f = and(f, Filter::Supertype(crate::db::supertypes::LEGENDARY));
             }
-            let mods = pump_mods(l, *power_bonus, *toughness_bonus, granted_keywords);
+            // "Target creature gets +X/+0" (the X of the ability or spell, CR
+            // 107.3; EoE W3): nothing else may be all it does.
+            let x_only = *power_bonus_from_x && *power_bonus == 0 && *toughness_bonus == 0 && granted_keywords.is_empty();
+            let mods = if x_only { Vec::new() } else { pump_mods(l, *power_bonus, *toughness_bonus, granted_keywords) };
             let t = b.target(f, if *optional { 0 } else { 1 }, 1);
-            apply(b, On::Target(t), mods, Until::EndOfTurn);
+            if !mods.is_empty() {
+                apply(b, On::Target(t), mods, Until::EndOfTurn);
+            }
+            if *power_bonus_from_x {
+                if !(l.act_x || l.spell_x) {
+                    l.unsupported("PumpTargetCreatureUntilEOT.power_bonus_from_x(no X)");
+                }
+                b.op(Op::Ext(Ext::ApplyPtX { on: On::Target(t), p: 1, t: 0 }));
+            }
             if let Some(ta) = granted_triggered_ability.as_deref() {
                 // "... and gains '<triggered ability>'" (EoE lane D,
                 // ENGINE.md 99.5).
@@ -453,11 +463,11 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             granted_activated_abilities,
             granted_triggered_abilities,
             set_colors,
+            all_creature_types,
         }) => {
             // "Until end of turn, this land becomes a p/t [colours]
             // [subtype] creature with [keywords]. It's still a land." (CR
             // 205.1b: it keeps its land types.)
-            l.deny("BecomeLandCreatureUEOT.granted_triggered_abilities", granted_triggered_abilities);
             if set_colors.is_empty() && l.land_colors != 0 {
                 // A land that makes coloured mana animates into a coloured
                 // creature in the cube; the IR lost the colours and the
@@ -482,6 +492,11 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 }
             }
             let mut mods = vec![Mod::Types { add, subtypes, replace: false }];
+            // "A 2/2 creature with all creature types" (Mutavault; CR 205.3m,
+            // ENGINE.md 99.11).
+            if *all_creature_types {
+                mods.push(Mod::AllCreatureTypes);
+            }
             if !set_colors.is_empty() {
                 let mut m = 0;
                 for c in set_colors {
@@ -510,6 +525,12 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 }
             }
             apply(b, On::Source, mods, Until::EndOfTurn);
+            // '... creature with "whenever this creature attacks, ..."'
+            // (Raging Ravine): granted triggered abilities until end of turn
+            // (EoE W3, ENGINE.md 99.13).
+            for ta in granted_triggered_abilities {
+                super::eoe_w3::grant_triggered_ability(l, b, On::Source, ta, true, types::CREATURE);
+            }
         }
         E::SourceBecomesIfSubtype(nodes::SourceBecomesIfSubtype { subtypes, base_pt, keywords, requires_subtype }) => {
             // "[If this creature is a <requires>,] it becomes a <subtypes>
@@ -1375,21 +1396,24 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 enums::ImpulseLibraryOwner::ThatPlayer => Who::EventPlayer,
                 enums::ImpulseLibraryOwner::DefendingPlayer => Who::Opponent,
             };
-            let attacked_subtype =
-                (!requires_attacked_with_subtype.is_empty()).then(|| l.subtype(requires_attacked_with_subtype));
+            let only_if = if requires_attacked_with_subtype.is_empty() {
+                crate::game::PlayIf::Always
+            } else {
+                crate::game::PlayIf::AttackedWith(l.subtype(requires_attacked_with_subtype))
+            };
             // "During any turn you attacked with a Rogue": while it stays
             // exiled (`while_exiled`), not this turn only.
             let this_turn = match duration {
                 enums::ExilePlayDuration::ThisTurn => {
-                    if attacked_subtype.is_some() {
+                    if only_if != crate::game::PlayIf::Always {
                         l.unsupported("ExileTopCardsWithPlayPermission.duration(this_turn with requires_attacked_with_subtype)");
                     }
                     true
                 }
                 enums::ExilePlayDuration::WhileExiled => false,
                 // "You may play that card until your next end step" (Inti).
-                enums::ExilePlayDuration::UntilYourNextEndStep if free_if.is_none() && attacked_subtype.is_none() => {
-                    let kind = crate::game::PermKind::Play { free: *free, cast_only: *cast_only, any_mana: *any_color_mana, attacked_subtype };
+                enums::ExilePlayDuration::UntilYourNextEndStep if free_if.is_none() && only_if == crate::game::PlayIf::Always => {
+                    let kind = crate::game::PermKind::Play { free: *free, cast_only: *cast_only, any_mana: *any_color_mana, only_if };
                     b.op(Op::Ext(Ext::ExileTopUntilEndStep { who, n, kind }));
                     return true;
                 }
@@ -1398,14 +1422,14 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                     true
                 }
             };
-            let kind = crate::game::PermKind::Play { free: *free, cast_only: *cast_only, any_mana: *any_color_mana, attacked_subtype };
+            let kind = crate::game::PermKind::Play { free: *free, cast_only: *cast_only, any_mana: *any_color_mana, only_if };
             match free_if {
                 None => {
                     b.op(Op::Ext(Ext::ExileTopWithPermission { who, n, kind, this_turn }));
                 }
                 Some(cond) => {
                     let j = b.op(Op::JumpUnless { cond, to: 0 });
-                    let free_kind = crate::game::PermKind::Play { free: true, cast_only: *cast_only, any_mana: *any_color_mana, attacked_subtype };
+                    let free_kind = crate::game::PermKind::Play { free: true, cast_only: *cast_only, any_mana: *any_color_mana, only_if };
                     b.op(Op::Ext(Ext::ExileTopWithPermission { who, n, kind: free_kind, this_turn }));
                     let end = b.op(Op::Jump { to: 0 });
                     b.patch(j);

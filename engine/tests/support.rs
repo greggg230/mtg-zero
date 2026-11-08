@@ -857,6 +857,7 @@ const SUPPORTED_EOE_CROSS: &[&str] = &[
 /// tests in `tests/cards_eoe_irfix*.rs`).
 const SUPPORTED_EOE_IRFIX: &[&str] = &[
     "All-Fates Stalker",
+    "Archenemy's Charm",
     "Beamsaw Prospector",
     "Biomechan Engineer",
     "Biotech Specialist",
@@ -866,12 +867,16 @@ const SUPPORTED_EOE_IRFIX: &[&str] = &[
     "Cosmogrand Zenith",
     "Dauntless Scrapbot",
     "Dawnsire, Sunstar Dreadnought",
+    "Desculpting Blast",
     "Deserted Temple",
+    "Divert Disaster",
     "Dockworker Drone",
     "Edge Rover",
     "Elegy Acolyte",
+    "Endless Sands",
     "Entropic Battlecruiser",
     "Evendo, Waking Haven",
+    "Fell Gravship",
     "Galactic Wayfarer",
     "Glacier Godmaw",
     "Gravkill",
@@ -883,16 +888,26 @@ const SUPPORTED_EOE_IRFIX: &[&str] = &[
     "Kavaron, Memorial World",
     "Knight Luminary",
     "Lithobraking",
+    "Luxknight Breacher",
+    "Mechan Shieldmate",
+    "Meltstrider's Resolve",
+    "Mirrorpool",
+    "Mutavault",
     "Mystifying Maze",
     "Nexus of Fate",
+    "Pinnacle Starcage",
+    "Pull Through the Weft",
     "Rayblade Trooper",
     "Sami's Curiosity",
     "Scrounge for Eternity",
     "Seedship Agrarian",
+    "Sothera, the Supervoid",
     "Starfield Shepherd",
     "Sunstar Expansionist",
+    "Syr Vondam, Sunstar Exemplar",
     "Terrain Generator",
     "Uthros, Titanic Godcore",
+    "Xu-Ifit, Osteoharmonist",
 ];
 
 /// The last four workstreams (ENGINE.md 99.11-99.14): W1 adds to
@@ -911,12 +926,37 @@ const SUPPORTED_EOE_MANA: &[&str] = &[
     "The Eternity Elevator",
 ];
 const SUPPORTED_EOE_COMBAT: &[&str] = &[
+    "Astelli Reclaimer",
+    "Dyadrine, Synthesis Amalgam",
+    "Frenzied Baloth",
+    "Pain for All",
+    "Possibility Technician",
+    "Raging Ravine",
+    "Ragost, Deft Gastronaut",
+    "Requiem Monolith",
+    "Robe of Stars",
+    "Rust Harvester",
+    "Secluded Starforge",
+    "Sunstar Chaplain",
+    "Swarmyard",
+    "Terminal Velocity",
 ];
 const SUPPORTED_EOE_EXILE: &[&str] = &[
+    "Adagia, Windswept Bastion",
+    "Alpharael, Stonechosen",
+    "Blade of the Swarm",
+    "Chorale of the Void",
+    "Close Encounter",
+    "Scout for Survivors",
+    "Susur Secundi, Void Altar",
+];
+/// W5 (ENGINE.md 99.15): alternative costs other permanents grant.
+const SUPPORTED_EOE_W5: &[&str] = &[
+    "Tannuk, Steadfast Second",
 ];
 
 fn supported_eoe() -> Vec<String> {
-    let lists = [SUPPORTED_EOE_BASE, SUPPORTED_EOE_A, SUPPORTED_EOE_B, SUPPORTED_EOE_C, SUPPORTED_EOE_D, SUPPORTED_EOE_CROSS, SUPPORTED_EOE_IRFIX, SUPPORTED_EOE_MANA, SUPPORTED_EOE_COMBAT, SUPPORTED_EOE_EXILE];
+    let lists = [SUPPORTED_EOE_BASE, SUPPORTED_EOE_A, SUPPORTED_EOE_B, SUPPORTED_EOE_C, SUPPORTED_EOE_D, SUPPORTED_EOE_CROSS, SUPPORTED_EOE_IRFIX, SUPPORTED_EOE_MANA, SUPPORTED_EOE_COMBAT, SUPPORTED_EOE_EXILE, SUPPORTED_EOE_W5];
     let mut v: Vec<String> = lists.concat().into_iter().map(String::from).collect();
     let n = v.len();
     v.sort();

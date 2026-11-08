@@ -37,7 +37,7 @@ impl Game {
                         card: r,
                         player: p,
                         turn: Some(crate::resolve_tail2::PERM_LATER | self.turn.number),
-                        kind: crate::game::PermKind::Play { free: true, cast_only: true, any_mana: false, attacked_subtype: None },
+                        kind: crate::game::PermKind::Play { free: true, cast_only: true, any_mana: false, only_if: crate::game::PlayIf::Always },
                     });
                 }
             }
@@ -304,7 +304,7 @@ impl Game {
                                 card: r,
                                 player: p,
                                 turn: Some(self.turn.number),
-                                kind: crate::game::PermKind::Play { free: true, cast_only: false, any_mana: false, attacked_subtype: None },
+                                kind: crate::game::PermKind::Play { free: true, cast_only: false, any_mana: false, only_if: crate::game::PlayIf::Always },
                             });
                         }
                         Flow::Next
@@ -406,7 +406,7 @@ impl Game {
                             card: r,
                             player: p,
                             turn: Some(self.turn.number),
-                            kind: crate::game::PermKind::Play { free: true, cast_only: false, any_mana: false, attacked_subtype: None },
+                            kind: crate::game::PermKind::Play { free: true, cast_only: false, any_mana: false, only_if: crate::game::PlayIf::Always },
                         });
                     }
                 }

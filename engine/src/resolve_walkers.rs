@@ -505,7 +505,7 @@ impl Game {
                     card,
                     player: p,
                     turn: Some(self.turn.number),
-                    kind: crate::game::PermKind::Play { free: true, cast_only: true, any_mana: false, attacked_subtype: None },
+                    kind: crate::game::PermKind::Play { free: true, cast_only: true, any_mana: false, only_if: crate::game::PlayIf::Always },
                 });
             } else {
                 self.put_onto_battlefield(c, p);
@@ -537,7 +537,7 @@ impl Game {
             card: r,
             player: p,
             turn: Some(self.turn.number),
-            kind: crate::game::PermKind::Play { free: true, cast_only: true, any_mana: false, attacked_subtype: None },
+            kind: crate::game::PermKind::Play { free: true, cast_only: true, any_mana: false, only_if: crate::game::PlayIf::Always },
         });
         self.begin_cast_either_face(p, card, true);
     }
@@ -550,7 +550,7 @@ impl Game {
             card: r,
             player: p,
             turn: Some(self.turn.number),
-            kind: crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, attacked_subtype: None },
+            kind: crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, only_if: crate::game::PlayIf::Always },
         });
         self.begin_cast_either_face(p, card, false);
     }

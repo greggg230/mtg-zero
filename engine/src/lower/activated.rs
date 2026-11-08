@@ -135,6 +135,8 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
             || cost.exile_graveyard > 0
             || cost.bounce.is_some()
             || cost.exile_from_hand.is_some()
+            || cost.remove_counter_from.is_some()
+            || cost.tap_x.is_some()
         {
             l.unsupported("ManaAbility.cost(counters, crew, exile or bounce)");
         }
@@ -268,12 +270,8 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     }) = c;
     let _ = mana_str; // display form of `mana`
     l.deny("ActivationCost.pay_energy", pay_energy);
-    l.deny("ActivationCost.exile_artifact_from_graveyard", exile_artifact_from_graveyard);
-    l.deny("ActivationCost.remove_plus_one_counter_from_your_creature", remove_plus_one_counter_from_your_creature);
-    l.deny("ActivationCost.sacrifice_food", sacrifice_food);
     l.deny("ActivationCost.exile_granting_equipment", exile_granting_equipment);
     l.deny("ActivationCost.mana_reduced_by_source_power", mana_reduced_by_source_power);
-    l.deny("ActivationCost.tap_x_untapped_artifacts_you_control", tap_x_untapped_artifacts_you_control);
     // Saddle n (CR 702.171a): crew's cost (other untapped creatures with
     // total power n or more), as a sorcery (the IR's `sorcery_speed`).
     let saddle_n = l.int("ActivationCost.saddle", *saddle, 0, 20) as u8;
@@ -325,7 +323,19 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         waterbend: *waterbend,
         // "Exert this" (CR 701.39; a mana ability's cost, Arena of Glory).
         exert: *exert_self,
+        exile_graveyard_types: 0,
+        remove_counter_from: None,
+        tap_x: None,
     };
+    super::eoe_w3::lower_cost_w3(
+        l,
+        &mut cost,
+        super::eoe_w3::CostW3 {
+            exile_artifact_from_graveyard: *exile_artifact_from_graveyard,
+            remove_plus_one_counter_from_your_creature: *remove_plus_one_counter_from_your_creature,
+            tap_x_untapped_artifacts_you_control: *tap_x_untapped_artifacts_you_control,
+        },
+    );
     if *waterbend && (cost.mana.generic == 0 || from != From::Battlefield) {
         l.unsupported("ActivationCost.waterbend(no generic mana)");
     }
@@ -391,6 +401,10 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     }
     if *sacrifice_a_desert {
         sacs.push(SacCost { filter: Filter::Subtype(l.subtype("Desert")), n: 1, another: false });
+    }
+    // "Sacrifice a Food" (CR 205.3g: an artifact type; EoE W3).
+    if *sacrifice_food {
+        sacs.push(SacCost { filter: Filter::Subtype(l.subtype("Food")), n: 1, another: false });
     }
     if !sacrifice_subtype.is_empty() {
         sacs.push(SacCost { filter: Filter::Subtype(l.subtype(sacrifice_subtype)), n: 1, another: false });
@@ -511,6 +525,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         let fs: Vec<Filter> = requires_control_of_subtype.iter().map(|s| Filter::Subtype(l.subtype(s))).collect();
         only_if.push(Cond::ControlAtLeast(Filter::Or(fs), 1));
     }
+    super::eoe_w3::check_cost_w3(l, &cost);
     cost
 }
 
@@ -623,6 +638,9 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
                 Some(enums::SpendRestriction::LegendarySpell) => crate::db::SPEND_LEGENDARY,
                 // "... only to activate abilities of artifact sources."
                 Some(enums::SpendRestriction::ArtifactActivation) => crate::db::SPEND_ARTIFACT_ABILITY,
+                // "... only to cast artifact spells or activate abilities of
+                // artifacts" (Power Depot): either purpose.
+                Some(enums::SpendRestriction::ArtifactSpellOrActivation) => crate::db::SPEND_ARTIFACT | crate::db::SPEND_ARTIFACT_ABILITY,
                 // "... only to cast colorless Eldrazi spells or activate
                 // abilities of colorless Eldrazi."
                 Some(enums::SpendRestriction::ColorlessEldrazi) => crate::db::SPEND_ELDRAZI_SPELL | crate::db::SPEND_ELDRAZI_ABILITY,

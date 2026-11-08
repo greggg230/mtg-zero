@@ -176,7 +176,23 @@ pub(crate) fn lower_effect_walkers(l: &mut Lowerer, b: &mut Builder, e: &cats::E
         E::ReturnChosenGraveyardCardToHand(nodes::ReturnChosenGraveyardCardToHand { card_filter }) => {
             // "Return a card <...> from your graveyard to your hand" (not
             // targeted: chosen as it resolves).
-            let Some(filter) = opt_card_filter(l, card_filter) else { return true };
+            // (A card of either kind: "a creature or Spacecraft card", Fell
+            // Gravship; ENGINE.md 99.11.)
+            let filter = match card_filter.as_deref() {
+                None => Some(Filter::Any),
+                Some(cats::CardFilterOrCardFilterAnyOf::CardFilter(n)) => super::filter::lower_card_filter_node(l, n),
+                Some(cats::CardFilterOrCardFilterAnyOf::CardFilterAnyOf(nodes::CardFilterAnyOf { filters })) => {
+                    let mut any = Vec::new();
+                    for f in filters {
+                        match super::filter::lower_card_filter(l, f) {
+                            Some(x) => any.push(x),
+                            None => return true,
+                        }
+                    }
+                    Some(Filter::Or(any))
+                }
+            };
+            let Some(filter) = filter else { return true };
             b.op(Op::Ext(Ext::ChooseFromGraveyardToHand { filter }));
         }
         E::SourceDealsLoyaltyDamageToChosen(nodes::SourceDealsLoyaltyDamageToChosen {}) => {

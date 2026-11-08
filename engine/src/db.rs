@@ -196,6 +196,12 @@ pub enum Mod {
     GainSacMana(ManaMask),
     /// Layer 6: it loses all abilities (CR 613.1f).
     LoseAllAbilities,
+    /// "Can attack as though it didn't have defender" (CR 702.3b: it keeps
+    /// defender; Mechan Shieldmate, ENGINE.md 99.11).
+    AttackDespiteDefender,
+    /// It has all creature types (CR 205.3m; layer 4: Mutavault's "a 2/2
+    /// creature with all creature types", ENGINE.md 99.11).
+    AllCreatureTypes,
     /// Layer 4: its card types become exactly `types` and its creature
     /// types exactly `subtypes` (CR 205.1a: "becomes a [subtype] creature";
     /// supertypes are kept).
@@ -414,6 +420,18 @@ pub enum Filter {
     /// A permanent that entered as a spell cast for its warp cost (CR
     /// 702.185a; `Mark::WarpCast`; ENGINE.md 99.8).
     CastForWarp,
+    /// The permanent the context's source is attached to (an Aura's
+    /// enchanted creature, CR 303.4e: "any other target" of Pain for All's
+    /// enchanted creature is `Not(HostOfSource)`; EoE W3).
+    HostOfSource,
+    /// Mana value at most the amount of mana spent to cast the context's
+    /// source (CR 601.2h; `Mark::ManaSpent`; EoE W3).
+    MvAtMostManaSpent,
+    /// A card in exile (face up; not a copy of a card) matching the inner
+    /// filter ("target exiled card", CR 115.1, 406; ENGINE.md 99.14).
+    InExile(Box<Filter>),
+    /// A card with warp (CR 702.185a: the keyword among its abilities).
+    HasWarp,
     /// Mana value equal to the number of counters of this kind on the
     /// context's source (as it last existed if it left, CR 608.2h; Blast
     /// Zone, ENGINE.md 99.12).
@@ -472,6 +490,10 @@ pub struct TargetReq {
     /// requirement k ("target artifact card in that player's graveyard",
     /// Goblin Welder); 0 = no such link.
     pub pair: u8,
+    /// The targets of this requirement together have mana value at most
+    /// this ("up to three target creature cards with total mana value 3 or
+    /// less", CR 601.2c: a restriction on the set; ENGINE.md 99.14).
+    pub total_mv: Option<u8>,
 }
 
 /// A spell or ability's effect: its target requirements and program; or,
@@ -828,6 +850,33 @@ pub enum TrigPred {
     /// The attacker attacks the monarch (the player, not a planeswalker;
     /// CR 724, 508.1b).
     AttacksMonarch,
+    /// A `LeavesBattlefield` event of an object that went to one of these
+    /// zones (`left_to` bits; "dies or is put into exile", CR 700.4:
+    /// `Game::leaving_to` as the event's triggers are matched; ENGINE.md
+    /// 99.11).
+    LeftTo(u8),
+}
+
+/// The zone a permanent left the battlefield for (`Game::leaving_to`,
+/// `TrigPred::LeftTo`).
+pub mod left_to {
+    use crate::ids::Zone;
+    pub const GRAVEYARD: u8 = 1;
+    pub const EXILE: u8 = 2;
+    pub const HAND: u8 = 4;
+    pub const LIBRARY: u8 = 8;
+    /// Anywhere else (a token or a copy ceasing to exist, CR 111.7).
+    pub const OTHER: u8 = 16;
+
+    pub fn bit(z: Zone) -> u8 {
+        match z {
+            Zone::Graveyard => GRAVEYARD,
+            Zone::Exile => EXILE,
+            Zone::Hand => HAND,
+            Zone::Library => LIBRARY,
+            _ => OTHER,
+        }
+    }
 }
 
 impl TrigPred {
@@ -905,6 +954,13 @@ pub enum Cond {
     SourceCountersIn(Counter, u8, Option<u8>),
     /// You gained life this turn.
     GainedLifeThisTurn,
+    /// An artifact entered the battlefield under your control this turn
+    /// (Mechan Shieldmate; whether it stayed doesn't matter, its ruling of
+    /// 2025-07-25; ENGINE.md 99.11).
+    ArtifactEnteredThisTurn,
+    /// A player controls no creatures (Sothera, the Supervoid; ENGINE.md
+    /// 99.11).
+    APlayerControlsNoCreatures,
     /// You gained n or more life this turn (EoE lane D).
     GainedLifeAtLeast(u16),
     /// An opponent has more cards in hand than you.
@@ -976,6 +1032,8 @@ impl Cond {
             | Cond::IsMonarch
             | Cond::SourceCountersIn(..)
             | Cond::GainedLifeThisTurn
+            | Cond::ArtifactEnteredThisTurn
+            | Cond::APlayerControlsNoCreatures
             | Cond::GainedLifeAtLeast(_)
             | Cond::SpellsCastThisTurn { .. }
             | Cond::YourTurn
@@ -1144,6 +1202,17 @@ pub struct Cost {
     /// Exert this permanent (CR 701.39: it won't untap during its
     /// controller's next untap step; `Mark::Exerted`).
     pub exert: bool,
+    /// The card types (any of them) the cards `exile_graveyard` takes must
+    /// have, printed (0: any card): "exile an artifact card from your
+    /// graveyard" (EoE W3, ENGINE.md 99.13).
+    pub exile_graveyard_types: u16,
+    /// "Remove a <counter> counter from a <filter> you control" (CR 118.3,
+    /// 602.2b: one permanent, chosen as the cost is paid; EoE W3).
+    pub remove_counter_from: Option<(Filter, Counter)>,
+    /// "Tap X untapped <filter> you control" (CR 107.3a, 601.2b: X announced
+    /// as the ability is activated, the activation's X; not {T}: summoning
+    /// sickness doesn't matter, 302.6; EoE W3).
+    pub tap_x: Option<Filter>,
 }
 
 /// An alternative cost (CR 118.9): paid instead of the mana cost.
@@ -1296,7 +1365,19 @@ impl CardDef {
             } else {
                 0
             })
-            | (if self.triggers.iter().any(|t| t.ability.program.iter().any(|op| matches!(op, Op::Ext(crate::program::Ext::DamageFrom { event_obj: true, .. })))) {
+            | (if self.triggers.iter().any(|t| {
+                t.ability.program.iter().any(|op| {
+                    matches!(
+                        op,
+                        Op::Ext(crate::program::Ext::DamageFrom { event_obj: true, .. })
+                            | Op::Ext(crate::program::Ext::EoeW3(
+                                crate::eoe_w3::W3::DamageEachSourceMv { .. }
+                                    | crate::eoe_w3::W3::HostDamagesPower { .. }
+                                    | crate::eoe_w3::W3::EventObjDamagesEachOpponent { .. }
+                            ))
+                    )
+                })
+            }) {
                 crate::game::SEEN_LKI_DAMAGE
             } else {
                 0
@@ -1379,6 +1460,9 @@ pub struct CardDef {
     /// "Can't be blocked except by n or more creatures" (CR 509.1b; 0 = no
     /// such ability; menace is the keyword).
     pub min_blockers: u8,
+    /// An Aura's "enchanted creature can't be blocked by more than one
+    /// creature" (CR 509.1b; Meltstrider's Resolve, ENGINE.md 99.11).
+    pub attached_max_one_blocker: bool,
     /// "Can block only creatures with flying."
     pub blocks_only_flyers: bool,
     /// "Can't be blocked by" creatures matching this filter.
@@ -1443,6 +1527,12 @@ pub struct CardDef {
     /// 607.2q; `Mark::ExiledToPay`), as they are in exile (a card's own
     /// characteristics, `CardDb::def_matches`); 614.1c.
     pub counters_per_exiled: Option<Filter>,
+    /// "This creature enters with a +1/+1 counter on it for each other
+    /// creature and/or artifact you control" (Luxknight Breacher; CR
+    /// 614.1c, 122.6): the permanents its controller controls that match,
+    /// counted as it enters, not those entering at the same time (the card's
+    /// ruling of 2025-07-25; ENGINE.md 99.11).
+    pub enters_counters_per: Option<Filter>,
     /// "You may play n additional lands on each of your turns" (`ANY_LANDS`:
     /// any number).
     pub extra_lands: u8,
@@ -1559,6 +1649,15 @@ pub struct CardDef {
     /// A preparation card's prepare spell (CR 722.2a): a face (an instant or
     /// sorcery) that copies of the card in exile have (722.3c).
     pub prepare: Option<DefId>,
+    /// An Equipment's "equipped creature has '<activated ability>'" (CR
+    /// 301.5, 613.1f: layer 6): a face holding the granted abilities
+    /// (`activated`), which the creature has while this is attached to it
+    /// (`Game::granted_activated`; ENGINE.md 99.14).
+    pub grants_equipped: Option<DefId>,
+    /// On such a face: each granted ability's cost includes "Exile <the
+    /// Equipment granting it>" (The Dominion Bracelet; paid after the mana,
+    /// CR 601.2h, the total cost determined first, 601.2f).
+    pub exiles_granter: bool,
     /// "This creature enters prepared" (CR 722.3a).
     pub enters_prepared: bool,
     // ---- M7b part 3b: the stack, ward, the initiative, graveyard
@@ -1711,6 +1810,8 @@ pub struct CardDef {
     /// "... stations permanents using its toughness rather than its power"
     /// (CR 702.184c; ENGINE.md 99.8).
     pub toughness_stations: bool,
+    /// The printing facts EoE workstream W3 adds (ENGINE.md 99.13).
+    pub w3: crate::eoe_w3::W3Def,
     /// "Nonbasic lands are Mountains" (CR 305.7, 613.1d: Magus of the Moon;
     /// `Game::moon_on`, ENGINE.md 99.12).
     pub nonbasic_lands_are_mountains: bool,
@@ -1746,6 +1847,28 @@ pub struct CastingRules {
     /// untapped creatures may each pay for {1} or one mana of that
     /// creature's colour (`PayMana::convoke`; ENGINE.md 99.8).
     pub convoke: bool,
+    /// Its own "As an additional cost to cast this spell, choose a creature
+    /// you control or a warped creature card you own in exile" (CR 601.2b,
+    /// 601.2h; the choice is noted on the spell, `StackItem::noted`;
+    /// ENGINE.md 99.14).
+    pub choose_creature_or_warped: bool,
+    /// Alternative costs it gives cards in its controller's hand (CR 604.1,
+    /// 611.3a, 118.9): "Artifact cards and red creature cards in your hand
+    /// have warp {2}{R}" (ENGINE.md 99.15).
+    pub hand_alt_grants: Vec<HandAltGrant>,
+}
+
+/// An alternative cost a permanent's static ability gives each card in its
+/// controller's hand matching `filter` (CR 604.1, 611.3a, 118.9; ENGINE.md
+/// 99.15). The card has it while the ability applies to it, and the spell
+/// cast with it keeps it while the ability would still apply to it (CR
+/// 400.7g). `alt.dash` indexes the granting definition's delayed abilities
+/// (warp's exile, CR 702.185a: created as the permanent enters only if the
+/// spell still has the ability, 608.3g).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct HandAltGrant {
+    pub filter: Filter,
+    pub alt: AltCost,
 }
 
 /// "If this card is in your opening hand [and you're not the starting
@@ -1767,6 +1890,8 @@ pub enum WardCost {
     Mana(ManaCost),
     Life(u8),
     Discard,
+    /// "Ward—Discard a card at random" (CR 701.9b; Alpharael, Stonechosen).
+    DiscardRandom,
 }
 
 /// A cost reduction of a spell or an activated ability (CR 601.2f, 602.2b),
@@ -1787,6 +1912,10 @@ pub enum Discount {
     /// the targets are chosen before the cost is determined, CR 601.2c,
     /// 601.2f). A spell's own reduction only.
     IfTargets(Filter, u8),
+    /// "This ability costs {X} less to activate, where X is this creature's
+    /// power" (the source's power as the cost is determined, CR 601.2f;
+    /// ENGINE.md 99.14). An activated ability's only.
+    SourcePower,
 }
 
 impl CardDef {
@@ -1878,6 +2007,10 @@ pub struct CardDb {
     /// game keeps permanents' last-known toughness (`Game::lki_toughness`;
     /// ENGINE.md 99.8).
     pub(crate) watch_toughness: bool,
+    /// A card of the table gives cards in hand an alternative cost
+    /// (`CastingRules::hand_alt_grants`): castability looks for granters
+    /// (ENGINE.md 99.15).
+    pub(crate) hand_alt_grants: bool,
     /// The spending restrictions' purposes the table's mana can have
     /// (`SPEND_*`: the union of its mana abilities' `only`, granted ones
     /// included); payments work out only these (ENGINE.md 99.12).
@@ -1956,6 +2089,12 @@ pub(crate) fn merge_costs(a: &Cost, b: &Cost) -> Option<Cost> {
         tap_untapped: one(&a.tap_untapped, &b.tap_untapped)?,
         waterbend: a.waterbend || b.waterbend,
         exert: a.exert || b.exert,
+        exile_graveyard_types: match (a.exile_graveyard_types, b.exile_graveyard_types) {
+            (0, t) | (t, 0) => t,
+            _ => return None,
+        },
+        remove_counter_from: one(&a.remove_counter_from, &b.remove_counter_from)?,
+        tap_x: one(&a.tap_x, &b.tap_x)?,
     };
     let reservations = [c.sacrifice.is_some() || c.bounce.is_some(), c.discard > 0, c.exile_from_hand.is_some()];
     if reservations.iter().filter(|&&x| x).count() > 1 || c.sacrifice.is_some() && c.bounce.is_some() {
@@ -2029,6 +2168,7 @@ impl CardDb {
             card.adventure = adventure;
             card.bestow = card.bestow.map(|k| base + k);
             card.prepare = card.prepare.map(|k| base + k);
+            card.grants_equipped = card.grants_equipped.map(|k| base + k);
             card.halves = card.halves.map(|(a, b)| (base + a, base + b));
             for k in card.levels.iter_mut() {
                 *k += base;
@@ -2089,6 +2229,7 @@ impl CardDb {
         db.merged = merged;
         db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
         db.watch_toughness = db.defs.iter().any(|d| d.toughness_assigns_damage || d.toughness_stations);
+        db.hand_alt_grants = db.defs.iter().any(|d| !d.casting.hand_alt_grants.is_empty());
         db.spend_kinds = crate::eoe_w2::spend_kinds(&db.defs);
         db.eldrazi = db.subtype_id("Eldrazi");
         db.moon = db.defs.iter().any(|d| d.nonbasic_lands_are_mountains);

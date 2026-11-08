@@ -1000,7 +1000,8 @@ impl Game {
                             st[perm::WARD_MANA] = st[perm::WARD_MANA].max(m.total() as f32 / 4.0)
                         }
                         WardCost::Life(n) => st[perm::WARD_LIFE] = st[perm::WARD_LIFE].max(n as f32 / 4.0),
-                        WardCost::Discard => st[perm::WARD_DISCARD] = 1.0,
+                        // (A random discard: the same float, ENGINE.md 99.14.)
+                        WardCost::Discard | WardCost::DiscardRandom => st[perm::WARD_DISCARD] = 1.0,
                     }
                 }
                 st[perm::LOST_ABILITIES] = self.lost_abilities(c) as u8 as f32;
@@ -1144,7 +1145,7 @@ impl Game {
                 Zone::Graveyard => Some(0),
                 Zone::Exile | Zone::FaceDown => Some(1),
                 Zone::Library => Some(2),
-                Zone::Battlefield | Zone::Stack | Zone::Command => Some(3),
+                Zone::Battlefield | Zone::Stack | Zone::Command | Zone::PhasedOut => Some(3),
             };
             if let Some(k) = origin {
                 st[stack::ORIGIN + k] = 1.0;
@@ -1719,8 +1720,10 @@ impl Game {
                     let item = &self.stack[i];
                     // (An alternative cost the card has: always while casting;
                     // not in a state the public-state gate perturbed by hand.)
+                    // (Or one another permanent granted it, noted on the
+                    // spell: ENGINE.md 99.15.)
                     if let StackKind::Spell { card: c } = item.kind {
-                        if item.alt as usize <= self.def_of(c).alt_costs.len() {
+                        if item.alt == 0 || self.item_alt(c, item).is_some() {
                             cost_floats(x, &self.total_mana(c, item).less_generic(item.delved));
                         }
                     }
@@ -1747,6 +1750,9 @@ impl Game {
             }
             Task::DeclareAttackers { next } => x[ctx::NEXT_ATTACKER] = *next as f32 / 32.0,
             Task::AttackTarget { card: c } => card = Some((self.objs[c.i()].def, None, None)),
+            // The permanent whose abilities past its slots are offered (EoE
+            // W3).
+            Task::ChooseAbility { card: c, .. } => card = Some((self.objs[c.i()].def, None, None)),
             // The card entering as a copy (by what it is), the copy whose
             // targets may change (its target position).
             Task::EnterAsCopy { card: c, .. } => card = Some((self.own_def(*c), None, None)),

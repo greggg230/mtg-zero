@@ -228,7 +228,7 @@ impl Game {
                 }
             }
         }
-        if obs.is_empty() && self.temp_triggers.is_empty() {
+        if obs.is_empty() && self.temp_triggers.is_empty() && !self.w3.granted {
             return;
         }
         // ("That player" of an event with a spell or ability is its
@@ -308,6 +308,22 @@ impl Game {
                             self.note_granted_trigger(r, o.def, i as u8, o.r);
                         }
                     }
+                }
+            }
+        }
+        // Triggered abilities effects gave permanents ("<it> gains
+        // '<triggered ability>'"; EoE W3, ENGINE.md 99.13): the permanent's
+        // own (CR 113.7).
+        if self.w3.granted {
+            for (r, def, slot, controller) in self.granted_observers(&ev) {
+                let t = &self.db.def(def).triggers[slot as usize];
+                let o = Observer { r, def, controller, spell: false, gy: false };
+                if t.event == ev.kind
+                    && (!copied || has_or_copy(&t.pred))
+                    && self.pred_matches(&t.pred, &ev, o)
+                    && (!has_batch(&t.pred) || self.batch_once(r, slot))
+                {
+                    self.waiting.push(PendingTrigger { controller, source: r, source_def: def, slot, ev: ctx });
                 }
             }
         }
@@ -410,6 +426,7 @@ impl Game {
             },
             TrigPred::OrCopy => true,
             TrigPred::Once => true,
+            TrigPred::LeftTo(mask) => ev.kind == EventKind::LeavesBattlefield && self.leaving_to & mask != 0,
             // CR 724, 508.1b: it attacks the player who is the monarch.
             TrigPred::AttacksMonarch => match ev.a {
                 Subj::Obj(r) => {

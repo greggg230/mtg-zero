@@ -76,7 +76,7 @@ impl Game {
         if self.is_type(card, types::ARTIFACT) {
             a |= SPEND_ARTIFACT;
         }
-        if self.def_of(card).supertypes & crate::db::supertypes::LEGENDARY != 0 {
+        if self.supertypes_of(card) & crate::db::supertypes::LEGENDARY != 0 {
             a |= crate::db::SPEND_LEGENDARY;
         }
         let kinds = self.db.spend_kinds;
@@ -361,6 +361,18 @@ impl Game {
             .map(|&x| self.objs[x.i()].timestamp)
             .max()
             .unwrap_or(0)
+    }
+
+    /// The places of permanent `c`'s own activated abilities, before those
+    /// other permanents grant it (`Game::granted_activated`): its card's, or
+    /// a Mountain's abilities if more (`moon_def`).
+    pub(crate) fn own_ability_slots(&self, c: CardIdx) -> usize {
+        let n = self.db.def(self.objs[c.i()].def).activated.len();
+        if self.moon_game && self.moon_on(c) {
+            n.max(self.db.def(self.moon_def(c)).activated.len())
+        } else {
+            n
+        }
     }
 
     /// [`moon_entering`](Self::moon_entering) for a permanent on the

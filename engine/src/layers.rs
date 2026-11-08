@@ -74,6 +74,8 @@ pub struct Flags {
     pub exile_if_leaves: bool,
     /// Combat damage it would deal is prevented (EoE lane D).
     pub prevent_combat_damage: bool,
+    /// It can attack as though it didn't have defender (CR 702.3b).
+    pub attack_despite_defender: bool,
 }
 
 impl Game {
@@ -134,7 +136,7 @@ impl Game {
     /// The type-changing mods of `c`'s own "this permanent" static
     /// abilities whose condition holds ("during your turn, he's a 3/4
     /// Ninja creature"): layer 4 without scopes, so nothing recurses.
-    fn own_type_mods(&self, c: CardIdx) -> impl Iterator<Item = &'static Mod> + '_ {
+    pub(crate) fn own_type_mods(&self, c: CardIdx) -> impl Iterator<Item = &'static Mod> + '_ {
         let active = self.n_static > 0 && self.objs[c.i()].zone == Zone::Battlefield;
         let d: &'static crate::db::CardDef = if active { self.abilities(c) } else { crate::game::blank_def() };
         let ctl = self.objs[c.i()].controller;
@@ -182,7 +184,7 @@ impl Game {
             Filter::Any => true,
             Filter::Type(bits) => self.types_of(c) & bits != 0,
             Filter::Subtype(s) => self.has_subtype(c, *s),
-            Filter::Supertype(bits) => self.def_of(c).supertypes & bits != 0,
+            Filter::Supertype(bits) => self.supertypes_of(c) & bits != 0,
             Filter::Color(m) => self.colors_of(c) & m != 0,
             Filter::Controller(y) => (self.objs[c.i()].controller == you) == *y,
             Filter::Token => self.is_token(c),
@@ -270,8 +272,18 @@ impl Game {
             // (Then the land-type effects with later timestamps, CR 613.7.)
             let (r, ts) = (self.obj_ref(c), self.moon_ts());
             let mut has = Some(s) == self.db.mountain;
-            for e in self.effects.iter().filter(|e| e.on == Affected::Obj(r) && e.ts > ts) {
-                match &e.m {
+            // (Static abilities that give it the type, EoE W3, by timestamp
+            // among the effects.)
+            let grants = if self.w3.seen & crate::eoe_w3::SEEN_W3_SUBTYPE != 0 { self.granted_subtype_ts(c, s) } else { Vec::new() };
+            let mut later: Vec<(u32, Option<&Mod>)> = grants.into_iter().filter(|&g| g > ts).map(|g| (g, None)).collect();
+            later.extend(self.effects.iter().filter(|e| e.on == Affected::Obj(r) && e.ts > ts).map(|e| (e.ts, Some(&e.m))));
+            later.sort_by_key(|x| x.0);
+            for (_, m) in later {
+                let Some(m) = m else {
+                    has = true;
+                    continue;
+                };
+                match m {
                     Mod::Types { subtypes, replace, .. } => {
                         if *replace {
                             has = subtypes.contains(&s);
@@ -292,6 +304,15 @@ impl Game {
         // one reconfigure card, Lion Sash (Equipment Cat), keeps Equipment.
         if printed && d.reconfigure && self.objs[c.i()].attached.is_some() {
             printed = self.db.equipment_subtype() == Some(s);
+        }
+        // "Artifacts you control are Foods in addition to their other types"
+        // (EoE W3): in layer 4 with the other type-changing effects, by
+        // timestamp (`Game::subtype_with_grants`).
+        if self.w3.seen & crate::eoe_w3::SEEN_W3_SUBTYPE != 0 && self.objs[c.i()].zone == Zone::Battlefield {
+            let grants = self.granted_subtype_ts(c, s);
+            if !grants.is_empty() {
+                return self.subtype_with_grants(c, s, printed, &grants);
+            }
         }
         if self.n_self_types > 0 && self.objs[c.i()].zone == Zone::Battlefield {
             for m in self.own_type_mods(c) {
@@ -319,6 +340,12 @@ impl Game {
                 // CR 205.1a: a creature with only these creature types (its
                 // other card types, and their subtypes, are gone).
                 Mod::BecomeTypes { subtypes, .. } => has = subtypes.contains(&s),
+                // CR 205.3m: every creature type (ENGINE.md 99.11).
+                Mod::AllCreatureTypes => {
+                    if self.db.subtype_names().get(s as usize).is_some_and(|n| crate::eoe_w1::is_creature_type(n)) {
+                        has = true;
+                    }
+                }
                 _ => {}
             }
         }
@@ -461,6 +488,7 @@ impl Game {
                 Mod::MustAttack | Mod::MustAttackPlayer => n.0 += 1,
                 Mod::ExileIfDies => n.1 += 1,
                 Mod::Types { subtypes, replace, .. } if *replace || !subtypes.is_empty() => n.2 += 1,
+                Mod::AllCreatureTypes => n.2 += 1,
                 Mod::BecomeTypes { .. } => n.2 += 1,
                 _ => {}
             }
@@ -482,6 +510,7 @@ impl Game {
                 Mod::ExileIfDies => f.exile_if_dies = true,
                 Mod::ExileIfLeaves => f.exile_if_leaves = true,
                 Mod::PreventCombatDamage => f.prevent_combat_damage = true,
+                Mod::AttackDespiteDefender => f.attack_despite_defender = true,
                 _ => {}
             }
         }
@@ -806,8 +835,10 @@ impl Game {
         let control = self.control_ending_this_turn();
         self.effects.retain(|e| e.until != Until::EndOfTurn);
         self.return_control(control);
-        if !self.marks.is_empty() {
-            self.marks.retain(|(_, m)| !matches!(m, crate::game::Mark::DiesTriggerThisTurn { .. }));
+        // (Granted triggered abilities until end of turn, regeneration
+        // shields, phased-out permanents' damage: EoE W3.)
+        if !self.marks.is_empty() || !self.w3.phased.is_empty() {
+            self.end_turn_w3();
         }
         self.effects_changed();
         if !self.copies.is_empty() {

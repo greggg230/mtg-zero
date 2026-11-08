@@ -95,12 +95,22 @@ pub(crate) enum Task {
     ChooseX { id: u32 },
     /// Discard for escalate (CR 702.120a).
     Escalate { id: u32 },
+    /// "As an additional cost, choose a creature you control or a warped
+    /// creature card you own in exile" (CR 601.2h; ENGINE.md 99.14): an
+    /// exiled card (`ChooseExiled`, `PASS` = a creature instead), then, with
+    /// `perm`, a creature (`ChoosePermanent`).
+    ChooseForCost { id: u32, perm: bool },
     /// Which player or planeswalker an attacking creature attacks (CR
     /// 508.1b, 508.4).
     AttackTarget { card: CardIdx },
     /// Which face of a card to cast or play (CR 712.11b, 712.12, 715.3;
     /// `mask`: `decision::FACE_*` bits).
     ChooseFace { p: PlayerId, card: CardIdx, mask: u8 },
+    /// Which activated ability of permanent `card` `p` activates, among its
+    /// abilities from place `from` on (CR 602.2: one with more abilities
+    /// than its `ACTIVATE` slots; EoE W3). Choice: `ChooseMode`, `NUMBER` +
+    /// place - `from`; `NUMBER` + 31: the ones after (a further page).
+    ChooseAbility { p: PlayerId, card: CardIdx, from: u8 },
     /// CR 601.2a-b: which permission casts graveyard card `card` (face
     /// `face`; `cast::route`).
     ChooseRoute { p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId> },
@@ -139,7 +149,9 @@ impl Game {
 
     /// The player to decide; `None` iff the game is over.
     pub fn to_move(&self) -> Option<PlayerId> {
-        self.pending.as_ref().map(|d| d.player)
+        // (Who decides: the controlling player during a controlled turn,
+        // CR 722.4; the decision's ids stay the controlled player's.)
+        self.pending.as_ref().map(|d| self.decider_of(d.player))
     }
 
     /// Legal action ids, ascending, no duplicates; empty iff the game is over.
@@ -211,6 +223,9 @@ impl Game {
             c.refresh_pending();
             assert_eq!(c.pending, self.pending, "a forced look at a top card changed the pending decision");
         }
+        if self.turn_controller.is_some() {
+            self.sync_controller_view(); // CR 722.3 (ENGINE.md 99.14)
+        }
         self.canon_hand_knowledge();
     }
 
@@ -221,6 +236,7 @@ impl Game {
         // A graveyard card's option outside Priority: its slot in the
         // decision's graveyard list (ENGINE.md 65.10).
         self.name_graveyard_options(player, kind, &mut options);
+        self.name_exile_targets(kind, &mut options);
         options.sort_by_key(|o| o.action);
         assert!(
             options.windows(2).all(|w| w[0].action < w[1].action),
@@ -294,8 +310,10 @@ impl Game {
             Task::ChooseReplacement { card, from, results, void, chooser } => self.choose_replacement(card, from, results, void, chooser),
             Task::ChooseX { id } => self.choose_x(id),
             Task::Escalate { id } => self.escalate(id),
+            Task::ChooseForCost { id, perm } => self.choose_for_cost(id, perm),
             Task::AttackTarget { card } => self.choose_attack_target(card),
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
+            Task::ChooseAbility { p, card, from } => self.choose_ability(p, card, from),
             Task::ChooseRoute { p, card, face } => self.choose_route(p, card, face),
             Task::EnterAsCopy { card, note, since } => self.enter_as_copy(card, note, since),
             Task::CopyTargets { id, k, copy } => self.copy_targets(id, k, copy),
@@ -436,6 +454,9 @@ impl Game {
         let prev_spells = (self.turn.number > 0).then(|| self.players[self.turn.active as usize].spells_cast);
         self.turn.number += 1;
         self.turn.active = next;
+        // CR 722.1: a player-controlling effect applies to the next turn the
+        // player takes, all of it, until the next turn begins.
+        self.turn_controller = self.next_turn_controller[next as usize].take().filter(|&q| q != next);
         self.turn.extra_combats = 0;
         self.turn.step = Step::Untap;
         let n = self.turn.number;
@@ -447,6 +468,7 @@ impl Game {
             pl.spells_cast = 0;
             pl.noncreature_cast = 0;
             pl.gained_life = false;
+            pl.artifact_entered = false;
             pl.life_gained = 0;
             pl.lost_life = false;
         }
@@ -467,8 +489,11 @@ impl Game {
         self.discarded.clear();
         self.lki_counters.clear();
         self.lki_copy.clear();
+        self.lki_attached.clear();
         self.lki_damage.clear();
         self.lki_toughness.clear();
+        self.w3.lki_host.clear();
+        self.w3.lki_loss.clear();
         self.spell_lki.clear();
         self.may_copies = 0;
         self.activations.clear();
@@ -511,6 +536,10 @@ impl Game {
         match self.turn.step {
             Step::Setup => unreachable!("setup is not a step"),
             Step::Untap => {
+                // CR 502.1: first, phasing (EoE W3).
+                if !self.w3.phased.is_empty() {
+                    self.phase_in_untap(ap);
+                }
                 // CR 502.3; no player gets priority (502.4). "Doesn't untap
                 // during your untap step"; a stun counter is removed instead
                 // of untapping (122.1d).
@@ -734,7 +763,13 @@ impl Game {
                 // ability leaves priority where it is).
                 self.turn.passes = 0;
                 self.agenda.push(Task::Priority);
-                self.begin_activate(p, c, slot);
+                // (The fourth slot of a permanent with more abilities than
+                // slots: which of the fourth and later ones, EoE W3.)
+                if self.paged_slot(c, slot) {
+                    self.agenda.push(Task::ChooseAbility { p, card: c, from: (crate::activate::ACTIVATE_SLOTS - 1) as u8 });
+                } else {
+                    self.begin_activate(p, c, slot);
+                }
             }
             Some(Choice::Companion) => {
                 // A special action (CR 116.2g); the player keeps priority

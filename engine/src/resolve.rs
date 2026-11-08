@@ -263,14 +263,24 @@ impl Game {
                         self.move_card(card, Zone::Graveyard, Pos::Top);
                     } else if self.def_of(card).is_permanent_card() {
                         self.entering_cast = true;
-                        let alt = (item.alt > 0).then(|| &self.def_of(card).alt_costs[item.alt as usize - 1]);
-                        self.entering_evoked = alt.is_some_and(|a| a.evoke);
-                        self.entering_dash = alt.and_then(|a| a.dash);
-                        self.entering_warp = alt.is_some_and(|a| a.warp);
+                        // Its own alternative cost, or one another
+                        // permanent granted it: the delayed ability (dash,
+                        // warp) only if the spell still has that ability
+                        // as it resolves (CR 608.3g, 400.7g; ENGINE.md
+                        // 99.15); "cast for its warp cost" either way.
+                        let alt = self.item_alt(card, &item);
+                        let has = alt.is_some_and(|(_, home)| home.is_none() || self.alt_grant_applies(card));
+                        self.entering_evoked = has && alt.is_some_and(|(a, _)| a.evoke);
+                        self.entering_dash = alt.filter(|_| has).and_then(|(a, home)| a.dash.map(|k| (k, home)));
+                        self.entering_warp = alt.is_some_and(|(a, _)| a.warp);
                         self.entering_escaped = item.from == crate::game::CastFrom::Escape;
                         self.entering_x = item.x;
                         if self.def_of(card).sunburst.is_some() {
                             self.entering_sunburst = self.converge_of(Some(self.obj_ref(card)));
+                        }
+                        // (The mana spent to cast it: EoE W3.)
+                        if self.def_of(card).w3.mana_spent {
+                            self.w3.entering_spent = Some(self.mana_spent_of(self.obj_ref(card)));
                         }
                         // "A +1/+1 counter for each instant and sorcery card
                         // exiled with it" (CR 607.2q; ENGINE.md 54).
@@ -504,6 +514,14 @@ impl Game {
             Amount::Attacking => self.battlefield.iter().filter(|&&c| self.objs[c.i()].attacking).count() as i32,
             Amount::Experience => crate::num::count_amount(self.players[f.controller as usize].experience),
             Amount::CostMvPlus(n) => crate::num::amount(n as i64 + f.ev.amount as i64),
+            Amount::ChosenPower => self.chosen_power(f),
+            Amount::CostPower => match f.ev.obj {
+                Some(r) => match self.objs[r.idx.i()].lki_power {
+                    Some((inc, p)) if inc == r.inc => p,
+                    _ => 0,
+                },
+                None => 0,
+            },
             Amount::TappedPower => self.tapped_power(f),
             Amount::EventSpellMv => match f.ev.obj {
                 Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Stack => self.mana_value_of(r.idx) as i32,
@@ -1267,7 +1285,12 @@ impl Game {
             }
         }
         let p = self.objs[card.i()].controller;
-        self.permanents_of(p).any(|c| self.abilities(c).spells_uncounterable)
+        // ("Creature spells you control can't be countered": EoE W3.)
+        let creature = self.is_creature(card);
+        self.permanents_of(p).any(|c| {
+            let d = self.abilities(c);
+            d.spells_uncounterable || creature && d.w3.creature_spells_uncounterable
+        })
     }
 
     /// Destroy a permanent (CR 701.7): to its owner's graveyard
@@ -1275,6 +1298,9 @@ impl Game {
     pub(crate) fn destroy(&mut self, c: crate::ids::CardIdx) {
         if self.indestructible(c) {
             return; // CR 702.12b
+        }
+        if !self.marks.is_empty() && self.regenerated(c) {
+            return; // CR 701.19a
         }
         self.move_card(c, Zone::Graveyard, Pos::Top);
     }

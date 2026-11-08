@@ -53,6 +53,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             attached_grants_control,
             attached_sets_base_pt,
             attached_grants_lose_all_abilities,
+            attached_cant_be_blocked_by_more_than_one,
             attached_grants_subtype,
             attached_grants_card_types,
             attached_prevents_turning_face_up,
@@ -93,6 +94,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             enters_choosing_basic_land_type,
             is_chosen_basic_land_type,
             enters_with_named_counters,
+            enters_with_plus_one_counters_per,
             additional_cost_sacrifice_creature_or_artifact,
             additional_cost_sacrifice_creature_or_enchantment,
             additional_cost_choose_your_creature,
@@ -278,13 +280,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.enters_as_copy_of_creature", enters_as_copy_of_creature);
         l.deny("CardPrinting.replaces_first_tokens_with_copies", replaces_first_tokens_with_copies);
         l.deny("CardPrinting.grants_cast_artifact_from_top_of_library", grants_cast_artifact_from_top_of_library);
-        l.deny("CardPrinting.grants_food_to_your_artifacts", grants_food_to_your_artifacts);
-        l.deny("CardPrinting.grants_food_ability_to_your_artifacts", grants_food_ability_to_your_artifacts);
         l.deny("CardPrinting.grants_blue_mana_ability_to_your_artifacts", grants_blue_mana_ability_to_your_artifacts);
-        l.deny("CardPrinting.hand_ability_grants", hand_ability_grants);
-        l.deny("CardPrinting.grants_control_opponent_ability_when_equipped", grants_control_opponent_ability_when_equipped);
-        l.deny("CardPrinting.ward_discard_random", ward_discard_random);
-        // Sunburst (CR 702.44a): counters by the colours of mana spent to
+            // Sunburst (CR 702.44a): counters by the colours of mana spent to
         // cast it (the payment records them, as for converge).
         let sunburst_counter = sunburst.then(|| {
             l.converge = true;
@@ -292,16 +289,19 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         });
         l.deny("CardPrinting.enters_tapped_unless_any_player_life_at_most", enters_tapped_unless_any_player_life_at_most);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_enchantment", additional_cost_sacrifice_creature_or_enchantment);
-        l.deny("CardPrinting.additional_cost_choose_your_creature", additional_cost_choose_your_creature);
         let enters_x_counters = match enters_with_counters_from_x {
             None => false,
             Some(enums::XCounterMode::X) => true,
+            // "... equal to the amount of mana spent to cast it" (EoE W3:
+            // `W3Def::counters_mana_spent`).
+            Some(enums::XCounterMode::ManaSpent) => false,
             Some(other) => {
                 l.unsupported(format!("CardPrinting.enters_with_counters_from_x({other:?})"));
                 false
             }
         };
         l.deny("CardPrinting.enters_with_plus_one_counter_if_creature_died_this_turn", enters_with_plus_one_counter_if_creature_died_this_turn);
+        // ENGINE.md 99.11 (W1).
         l.deny("CardPrinting.enters_with_minus_one_counters_from_hand_cast", enters_with_minus_one_counters_from_hand_cast);
         // "Enchant creature card in a graveyard" (Animate Dead): an Aura
         // spell's target; an Aura's other enchant types (on the battlefield)
@@ -317,7 +317,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.wipes_all_creature_abilities", wipes_all_creature_abilities);
         l.deny("CardPrinting.sets_all_creature_pt_to_1_1", sets_all_creature_pt_to_1_1);
         l.deny("CardPrinting.must_be_blocked_if_able", must_be_blocked_if_able);
-        l.deny("CardPrinting.combat_damage_cant_be_prevented", combat_damage_cant_be_prevented);
         let _ = flashback_cost_str; // display form of `flashback_cost`
         let _ = buyback_cost_str; // display form of `buyback_cost`
         l.deny_ne("CardPrinting.alt_cost_exile_from_hand_count", alt_cost_exile_from_hand_count, &generated::defaults::d_CardPrinting_alt_cost_exile_from_hand_count());
@@ -886,11 +885,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // An Aura spell targets what it will enchant (CR 303.4a).
         None if aura_gy => {
             let f = Filter::InGraveyard(Box::new(Filter::Type(types::CREATURE)));
-            Some(crate::db::AbilityDef { targets: vec![crate::db::TargetReq { filter: f, min: 1, max: 1, distinct: 0, pair: 0 }], ..Default::default() })
+            Some(crate::db::AbilityDef { targets: vec![crate::db::TargetReq { filter: f, min: 1, max: 1, distinct: 0, pair: 0, total_mv: None }], ..Default::default() })
         }
         None if aura_bf.is_some() => {
             let f = aura_bf.clone().unwrap();
-            Some(crate::db::AbilityDef { targets: vec![crate::db::TargetReq { filter: f, min: 1, max: 1, distinct: 0, pair: 0 }], ..Default::default() })
+            Some(crate::db::AbilityDef { targets: vec![crate::db::TargetReq { filter: f, min: 1, max: 1, distinct: 0, pair: 0, total_mv: None }], ..Default::default() })
         }
         _ if kicker.is_some() => kicker.clone(),
         _ if overloaded.is_some() => overloaded.clone(),
@@ -944,6 +943,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if warp.is_some() && ty & types::PERMANENT == 0 {
         l.unsupported("CardPrinting.warp_cost(not a permanent card)");
     }
+    // "<Cards> in your hand have warp <cost>": each grant's warp exile is a
+    // delayed ability of this definition (ENGINE.md 99.15).
+    let hand_alt_grants = super::eoe_w5::hand_alt_grants(l, hand_ability_grants);
     // Miracle (CR 702.94): "when you reveal this card this way, you may cast
     // it by paying [cost] rather than its mana cost".
     let miracle = miracle_cost.as_ref().map(|m| {
@@ -1108,6 +1110,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
     if *ward_discard_chosen {
         wards.push(crate::db::WardCost::Discard);
+    }
+    if *ward_discard_random {
+        wards.push(crate::db::WardCost::DiscardRandom);
     }
     if wards.len() > 1 {
         l.unsupported("CardPrinting.ward(more than one cost)");
@@ -1646,6 +1651,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         first_spell_free: *grants_first_spell_each_turn_free,
         warp_from_graveyard: *warp_castable_from_graveyard,
         convoke: *has_convoke,
+        choose_creature_or_warped: *additional_cost_choose_your_creature,
+        hand_alt_grants,
         ..Default::default()
     };
     for r in external_cost_reductions {
@@ -1784,11 +1791,29 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             }
         }
     };
+    // "Enters with a +1/+1 counter on it for each <filter> you control"
+    // (Luxknight Breacher; ENGINE.md 99.11).
+    let enters_counters_per = match enters_with_plus_one_counters_per.as_deref() {
+        None => None,
+        Some(x) => {
+            if ty & types::PERMANENT == 0 {
+                l.unsupported("CardPrinting.enters_with_plus_one_counters_per(not a permanent)");
+            }
+            super::filter::lower_pred(l, x)
+        }
+    };
+    // "Enchanted creature can't be blocked by more than one creature"
+    // (Meltstrider's Resolve; ENGINE.md 99.11): an Aura's.
+    if *attached_cant_be_blocked_by_more_than_one && !subtypes.iter().any(|s| s == "Aura") {
+        l.unsupported("CardPrinting.attached_cant_be_blocked_by_more_than_one(not an Aura)");
+    }
     let mut def = CardDef {
         nonbasic_lands_are_mountains: *nonbasic_lands_are_mountains && ty & types::PERMANENT != 0,
         etb_counter_per_land_entered: *grants_etb_counter_per_land_entered_this_turn && ty & types::PERMANENT != 0,
         devour_land,
         counters_per_exiled,
+        enters_counters_per,
+        attached_max_one_blocker: *attached_cant_be_blocked_by_more_than_one,
         companion,
         look_top: *grants_look_at_top_of_library,
         play_top_life: *grants_play_from_top_paying_life,
@@ -1898,6 +1923,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         bestow: None,
         bestowed: false,
         prepare,
+        grants_equipped: None,
+        exiles_granter: false,
         enters_prepared: *enters_prepared,
         spells_uncounterable: repl.spells_uncounterable,
         ward,
@@ -1933,7 +1960,20 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         blocks_only_subtype: (!blocks_only_with_subtype.is_empty()).then(|| l.subtype(blocks_only_with_subtype)),
         splice,
         miracle,
+        w3: crate::eoe_w3::W3Def {
+            // "Combat damage can't be prevented" (CR 615.12; Frenzied Baloth).
+            combat_unpreventable_all: *combat_damage_cant_be_prevented,
+            creature_spells_uncounterable: repl.creature_spells_uncounterable,
+            seen: 0,
+            mana_spent: false,
+            counters_mana_spent: *enters_with_counters_from_x == Some(enums::XCounterMode::ManaSpent),
+            grants_activated: Vec::new(),
+            grants_subtype: Vec::new(),
+        },
     };
+    super::eoe_w3::printing_w3(l, &mut def, *grants_food_to_your_artifacts, *grants_food_ability_to_your_artifacts);
+    def.w3.seen = crate::eoe_w3::seen_of(&def);
+    def.w3.mana_spent = def.w3.counters_mana_spent || crate::eoe_w3::reads_mana_spent(&def);
     if *additional_cost_pay_x_life && (x_pips > 0 || !is_spell_card) {
         l.unsupported("CardPrinting.additional_cost_pay_x_life(with {X} or on a permanent)");
     }
@@ -1956,11 +1996,14 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         f.toughness = None;
         f.pt_cda = None;
         f.statics.push(StaticDef { scope: Scope::Equipped, cond: None, mods: vec![Mod::Pt(p, t)] });
-        let req = crate::db::TargetReq { filter: Filter::Type(types::CREATURE), min: 1, max: 1, distinct: 0, pair: 0 };
+        let req = crate::db::TargetReq { filter: Filter::Type(types::CREATURE), min: 1, max: 1, distinct: 0, pair: 0, total_mv: None };
         f.spell = Some(crate::db::AbilityDef { targets: vec![req], ..Default::default() });
         f.bestowed = true;
         l.faces.push(f);
         def.bestow = Some((l.faces.len() - 1) as u16);
+    }
+    if *grants_control_opponent_ability_when_equipped {
+        super::eoe_w4::grant_control_ability(l, &mut def);
     }
     def
 }

@@ -174,8 +174,12 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             let tgt = spell_target(b, inner);
             b.op(Op::Counter { tgt, dest: SpellDest::Graveyard });
         }
-        E::CounterSpell(nodes::CounterSpell { spell_filter, unless_pays, only_if, destination, label }) => {
+        E::CounterSpell(nodes::CounterSpell { spell_filter, unless_pays, only_if, destination, label, if_paid, if_mana_spent_below_mv }) => {
             let _ = label; // display text ("noncreature spell")
+            l.deny("CounterSpell.if_mana_spent_below_mv", if_mana_spent_below_mv);
+            if if_paid.is_some() && unless_pays.is_empty() {
+                l.unsupported("CounterSpell.if_paid(without unless_pays)");
+            }
             let inner = match spell_filter {
                 Some(p) => lower_pred(l, p).unwrap_or(Filter::Any),
                 None => Filter::Any,
@@ -203,7 +207,19 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                     Some(cost) => {
                         let at = b.op(Op::OfferPay { who: Who::ControllerOfTarget(tgt), cost, if_paid: 0 });
                         b.op(Op::Counter { tgt, dest });
-                        b.patch(at);
+                        match if_paid {
+                            None => b.patch(at),
+                            // "If they do, <effect>" (Divert Disaster: "you
+                            // create a Lander token"): the counterspell's
+                            // controller's effect when the tax was paid
+                            // (ENGINE.md 99.11).
+                            Some(e) => {
+                                let end = b.op(Op::Jump { to: 0 });
+                                b.patch(at);
+                                lower_effect(l, b, e);
+                                b.patch(end);
+                            }
+                        }
                     }
                     None => l.unsupported(format!("CounterSpell.unless_pays({unless_pays})")),
                 }
@@ -306,10 +322,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 }
                 Some(cats::RemovalRider::OtherPlayersCreateTokenCopy(nodes::OtherPlayersCreateTokenCopy {})) => Some(Rider::OthersCopy),
             };
-            // No card in the cube regenerates (no regeneration shield
-            // exists), so "can't be regenerated" changes nothing (CR
-            // 701.15).
-            let _ = can_be_regenerated;
+            // "It can't be regenerated" (CR 701.19c): around the
+            // destruction (EoE W3, ENGINE.md 99.13).
+            let no_regen = !*can_be_regenerated;
             // The IR repeats the target filter; the two must agree.
             let tf = lower_pred(l, target_filter);
             let tgt = if *count_from_x {
@@ -358,7 +373,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             }
             match action {
                 enums::RemovalAction::Destroy => {
-                    b.op(Op::Destroy { tgt });
+                    super::eoe_w3::cant_be_regenerated(b, no_regen, Op::Destroy { tgt });
                 }
                 enums::RemovalAction::Exile => {
                     b.op(Op::Exile { tgt });
@@ -432,10 +447,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             label,
         }) => {
             let _ = label; // display text
-            // No card in the cube regenerates (no regeneration shield
-            // exists), so "can['t] be regenerated" changes nothing (CR
-            // 701.15).
-            let _ = can_be_regenerated;
+            // "They can't be regenerated" (CR 701.19c): around the
+            // destruction (EoE W3, ENGINE.md 99.13).
+            let no_regen = !*can_be_regenerated;
             let Some(mut filter) = lower_pred(l, permanent_filter) else { return };
             // "With mana value X or less" (the spell's X: Vicious Rivalry's
             // X is the life paid, CR 107.3).
@@ -460,7 +474,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             };
             match (action, basics) {
                 (enums::RemovalAction::Destroy, None) => {
-                    b.op(Op::DestroyAll { filter });
+                    super::eoe_w3::cant_be_regenerated(b, no_regen, Op::DestroyAll { filter });
                 }
                 (enums::RemovalAction::Exile, basics) => {
                     b.op(Op::Ext(crate::program::Ext::ExileAll { filter, basics }));
@@ -484,14 +498,32 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
         E::ReturnTargetCreatureToOwnersHand(nodes::ReturnTargetCreatureToOwnersHand {
             targets,
             allow_nonland_permanent,
-            create_drone_if_was_attacking,
+            if_was_attacking,
             optional,
         }) => {
-            l.deny("ReturnTargetCreatureToOwnersHand.allow_nonland_permanent", allow_nonland_permanent);
-            l.deny("ReturnTargetCreatureToOwnersHand.create_drone_if_was_attacking", create_drone_if_was_attacking);
+            // "Return target nonland permanent" (Desculpting Blast): the
+            // flag restates the target specification, which the lowering
+            // reads (ENGINE.md 99.11).
+            let _ = allow_nonland_permanent;
             l.deny("ReturnTargetCreatureToOwnersHand.optional", optional);
             if let Some(tgt) = lower_targets(l, b, targets, "ReturnTargetCreatureToOwnersHand") {
-                b.op(Op::ReturnToHand { tgt });
+                match if_was_attacking {
+                    None => {
+                        b.op(Op::ReturnToHand { tgt });
+                    }
+                    // "If it was attacking, <effect>": whether it was an
+                    // attacking creature as it left (CR 608.2h; 506.4: it
+                    // stops attacking as it leaves), read just before.
+                    Some(e) => {
+                        let at = b.op(Op::JumpUnlessTarget { tgt, filter: Filter::Attacking, to: 0 });
+                        b.op(Op::ReturnToHand { tgt });
+                        lower_effect(l, b, e);
+                        let end = b.op(Op::Jump { to: 0 });
+                        b.patch(at);
+                        b.op(Op::ReturnToHand { tgt });
+                        b.patch(end);
+                    }
+                }
             }
         }
         E::ReturnTargetSpellToOwnersHand(nodes::ReturnTargetSpellToOwnersHand {}) => {
@@ -949,6 +981,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 && !super::eoe_a::lower_effect_eoe_a(l, b, other)
                 && !super::effect_eoe_d::lower_effect_eoe_d(l, b, other)
                 && !super::eoe_x::lower_effect_eoe_x(l, b, other)
+                && !super::eoe_w3::lower_effect_w3(l, b, other)
+                && !super::eoe_w4::lower_effect_eoe_w4(l, b, other)
+                && !super::eoe_w1::lower_effect_eoe_w1(l, b, other)
                 && !super::eoe_w2::lower_effect_eoe_w2(l, b, other)
             {
                 l.unsupported(format!("Effect:{}", other.tag()))

@@ -1240,21 +1240,39 @@ fn public_state_reaches_the_encoding() {
     // delve choices). Anything else is a deliberate limit.
     let gaps: Vec<&str> = lim.iter().filter(|l| l.kind == LimitKind::NextLayout).map(|l| l.name).collect();
     // Edge of Eternities' void (ENGINE.md 99.4) is the second, and whether a creature was cast
-    // for its warp cost (ENGINE.md 99.8) the third, a pool's restricted mana other than the
-    // Workshop's and the lands that entered this turn (ENGINE.md 99.12) the fourth and fifth:
-    // state the port added after layout v5 froze, for the next layout.
+    // for its warp cost (ENGINE.md 99.8) the third: state the port added after layout v5 froze,
+    // for the next layout. Workstream W3 (ENGINE.md 99.13) adds four: regeneration shields, the
+    // mana spent to cast a permanent, phased-out permanents and which phased out indirectly. W4's
+    // legendary copy exception (ENGINE.md 99.14) and a target in exile (rare: no gate position has
+    // one), which object a stack item noted (Close Encounter's choice; emerge's and station's
+    // too), controlling another player (CR 722: a pending effect, a controlled turn), W5's granter
+    // of a spell's alternative cost (ENGINE.md 99.15; rare: no gate position has one), and whether
+    // an artifact entered under a player's control this turn (ENGINE.md 99.11) follow.
+    // W2's restricted pool mana and the lands that entered this turn (ENGINE.md 99.12) come
+    // before W1's artifacts.
     assert_eq!(
         gaps,
         [
             "two graveyard cards swap places",
             "void holds (a nonland permanent left the battlefield this turn)",
             "a creature was cast for its warp cost",
+            "a creature has a regeneration shield",
+            "the mana spent to cast a permanent",
+            "a permanent is phased out",
+            "a phased-out permanent phased out indirectly",
+            "a copy is legendary by its exception",
+            "a stack item targets another exiled card",
+            "a stack item noted another object",
+            "a player will control the other's next turn",
+            "the active player is controlled this turn",
+            "a spell's granted alternative cost came from another permanent",
             "mana in a pool is restricted to activating abilities of lands",
-            "a land entered the battlefield this turn"
+            "a land entered the battlefield this turn",
+            "an artifact entered under a player's control this turn"
         ],
         "the gaps on the allowlist"
     );
-    assert_eq!(next, 5);
+    assert_eq!(next, 16);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.
