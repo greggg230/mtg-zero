@@ -649,6 +649,7 @@ fn bracelet_on_wurm(p1_hand: &[&str]) -> (Game, CardIdx, CardIdx) {
 /// {15} less its power as the cost is determined (7: {8}, CR 601.2f), and
 /// the Bracelet is exiled as part of the cost (601.2h).
 #[test]
+#[ignore = "The Dominion Bracelet is blocked on the encoding (ENGINE.md 99.14); passed at 84932a5: run with --ignored once unblocked"]
 fn cr_601_2f_the_dominion_bracelet_grants_the_ability_costing_15_less_power() {
     let (mut g, br, wurm) = bracelet_on_wurm(&[]);
     assert_eq!(g.pt(wurm), (7, 7), "+1/+1");
@@ -671,6 +672,7 @@ fn cr_601_2f_the_dominion_bracelet_grants_the_ability_costing_15_less_power() {
 /// Not with less than the reduced cost, not on another creature, and only
 /// as a sorcery (CR 602.5d).
 #[test]
+#[ignore = "The Dominion Bracelet is blocked on the encoding (ENGINE.md 99.14); passed at 84932a5: run with --ignored once unblocked"]
 fn cr_602_5d_the_dominion_bracelet_ability_only_as_a_sorcery() {
     let (mut g, _br, wurm) = bracelet_on_wurm(&[]);
     to_opponent_priority(&mut g);
@@ -686,6 +688,7 @@ fn cr_602_5d_the_dominion_bracelet_ability_only_as_a_sorcery() {
 /// P0 sees what they see (722.3): their hand, and the card they draw. The
 /// turn after, each player decides for themselves again (722.1).
 #[test]
+#[ignore = "The Dominion Bracelet is blocked on the encoding (ENGINE.md 99.14); passed at 84932a5: run with --ignored once unblocked"]
 fn cr_722_4_the_controller_makes_the_controlled_players_decisions() {
     let (mut g, _br, wurm) = bracelet_on_wurm(&["W4 Bolt", "W4 Giant"]);
     let p1_hand: Vec<CardIdx> = g.player(1).hand.clone();
@@ -729,6 +732,7 @@ fn cr_722_4_the_controller_makes_the_controlled_players_decisions() {
 /// (P0) keeps its view and its actions (P1's hand is known to it, CR 722.3,
 /// so never resampled); for P1 too. P1's library stays hidden from P0.
 #[test]
+#[ignore = "The Dominion Bracelet is blocked on the encoding (ENGINE.md 99.14); passed at 84932a5: run with --ignored once unblocked"]
 fn cr_722_3_a_controlled_turn_survives_determinize() {
     let (mut g, _br, wurm) = bracelet_on_wurm(&["W4 Bolt", "W4 Giant", "W4 Elf"]);
     g.choose(act(wurm, 0));

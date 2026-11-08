@@ -51,6 +51,12 @@ pub(crate) fn grant_control_ability(l: &mut Lowerer, def: &mut crate::db::CardDe
     let face = crate::db::CardDef { name: def.name.clone(), activated: vec![ability], exiles_granter: true, ..Default::default() };
     l.faces.push(face);
     def.grants_equipped = Some((l.faces.len() - 1) as u16);
+    // The rules are built (ENGINE.md 99.14), but layout v5 can't present a
+    // controlled turn's decisions to their decider: its action ids are the
+    // controlled player's (their hand slots, their list), the decider's
+    // encoding is its own seat's (no list block, no legal flags for those
+    // ids; fuzz seed 12441). An encoding change, the maintainer's decision.
+    l.unsupported("CardPrinting.grants_control_opponent_ability_when_equipped(a controlled turn's decisions need the decision's seat in the encoding, ENGINE.md 99.14)");
 }
 
 /// Lower an effect class of W4; `false` if the class is not one of these.

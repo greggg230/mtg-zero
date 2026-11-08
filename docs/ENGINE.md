@@ -18989,12 +18989,14 @@ Builds use `CARGO_PROFILE_RELEASE_DEBUG=false` (E: is nearly full; no behaviour 
 
 #### 99.14 W4: exile, graveyard, copies and control (branch `eoe-w4-exile`)
 
-**Cards.** EoE support 258 -> 266 with W4's eight (`SUPPORTED_EOE_EXILE`): Adagia, Windswept
+**Cards.** EoE support 258 -> 265 with W4's seven (`SUPPORTED_EOE_EXILE`): Adagia, Windswept
 Bastion; Alpharael, Stonechosen; Blade of the Swarm; Chorale of the Void; Close Encounter; Scout for
-Survivors; Susur Secundi, Void Altar; The Dominion Bracelet. Left: Sothera, the Supervoid (IR
-defect 180) and Tannuk, Steadfast Second (an alternative cost granted by another permanent: not
-built). Tests: `tests/cards_eoe_w4.rs` (23; the card table `tests/eoe_w4_kit`, the EoE table plus
-`W4 ...` IR test cards, never in the fuzz or digest pools). New Rust in `eoe_w4.rs` (`Ext::EoeW4`)
+Survivors; Susur Secundi, Void Altar. Left: The Dominion Bracelet (its rules are built; blocked on
+the encoding, below), Sothera, the Supervoid (IR defect 180) and Tannuk, Steadfast Second (an
+alternative cost granted by another permanent: not built). Tests: `tests/cards_eoe_w4.rs` (19, and
+the Bracelet's 4, ignored while it is blocked; they passed at 84932a5 with the card supported; the
+card table `tests/eoe_w4_kit`, the EoE table plus `W4 ...` IR test cards, never in the fuzz or
+digest pools). New Rust in `eoe_w4.rs` (`Ext::EoeW4`)
 and `lower/eoe_w4.rs` (a link in `lower_effect`'s chain); shared files small and additive.
 
 **Controlling another player (CR 722; The Dominion Bracelet).** "You control target opponent during
@@ -19018,12 +19020,27 @@ wins, 722.1a); as q's next turn starts (a skipped turn isn't taken, 722.1b) it b
   fuzz checks), and no card the controller can't see is shared. Afterwards the controller still
   knows the cards it saw, until they are rearranged privately (as after a hand reveal). Limits:
   docs/shortcuts.md 99.14.2.
-* *The encoding* is the decider's own seat's (its hand; the controlled player's hand as the known
-  cards it is); the action ids are the controlled player's. Layout v5 has no float for a controlled
-  turn or a pending one: two next-layout gaps in the public-state gate ("a player will control the
-  other's next turn", "the active player is controlled this turn"; perturbations draw nothing from
-  the shared stream). The next layout should encode both and the decision's seat, so a network can
-  read whose resources its ids name.
+* *The encoding: why the card stays blocked.* The decider's encoding is its own seat's (its hand,
+  its permanents as `MY_PERM`, the controlled player's hand only as the known cards it is), but a
+  controlled decision's action ids are the controlled player's: `HAND` + k is a slot of *their*
+  hand, `MY_PERM` their permanents, `LIBRARY` + k a slot of *their* list (a searched library, a
+  pile). Layout v5's input gives those ids no tokens for the decider: `encode` builds the list block
+  and the legal-action flags only for the viewer's own decision (`d.player == me`), and has no hand
+  slots for the other player's hand. The EoE fuzz found it at 20,000 games (seed 12441, step 164:
+  "PutInHand option 340 points at list slot 0 ... not its card's token", `check_list_options`, in a
+  controlled turn). Making it work is an encoding change (the brief forbids one; the maintainer's
+  decision). What it needs: (1) a controlled decision encoded in the controlled player's frame (the
+  seat its ids are relative to: its hand slots with the legal flags, its permanents as `MY_PERM`,
+  its list block, its triggers) with the decider's knowledge (the decider's own hand then appears as
+  the other player's hand known exactly); (2) a global "this decision is made for the other seat"
+  (the value is the decider's, `to_move`'s, while the frame is the controlled player's); (3) the two
+  facts below. No action id changes. The card is blocked in the lowering
+  (`grants_control_opponent_ability_when_equipped(...encoding...)`); removing that line and adding
+  it to `SUPPORTED_EOE_EXILE` restores it once the encoding presents its decisions. Layout v5 also
+  has no float for a controlled turn or a pending one: two next-layout gaps in the public-state gate
+  ("a player will control the other's next turn", "the active player is controlled this turn";
+  perturbations draw nothing from the shared stream; they apply in any position, as the fields
+  exist without the card).
 
 **Activated abilities an Equipment grants** (CR 301.5, 613.1f). `CardDef::grants_equipped`: a face
 of the Equipment holding the granted abilities (the IR's
@@ -19107,5 +19124,9 @@ legendary by its exception, a target in exile, which object a stack item noted, 
 player-controlling effect, a controlled turn. Two new public fields (`Game::next_turn_controller`,
 `Game::turn_controller`), in `Game::view_of`.
 
-**Results** (normal release profile, from this subsection's commit): see the commit message of the
-branch's last commit.
+**Results** (normal release profile). At 60910bf (the Bracelet supported, EoE support 266): the full
+engine suite 1,876 passed, 0 failed, 15 ignored; behaviour digests unchanged (combined
+`f6543eb2b1b8752f`); the default `FUZZ_GAMES=20000` passed (20,000 games, wins 9,967 / 9,994, 39
+draws, as before the branch; 1,000 matches); `FUZZ_POOL=eoe FUZZ_GAMES=20000` failed at seed 12441
+(the encoding, above). With the Bracelet blocked: see the branch's last commit message. The
+public-state gate: 135 perturbations encoded, 5 deliberate limits, 8 next-layout gaps.
