@@ -298,7 +298,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         });
         l.deny("CardPrinting.enters_tapped_unless_any_player_life_at_most", enters_tapped_unless_any_player_life_at_most);
         l.deny("CardPrinting.optional_copy_land_from_graveyard", optional_copy_land_from_graveyard);
-        l.deny("CardPrinting.additional_cost_sacrifice_creature_or_artifact", additional_cost_sacrifice_creature_or_artifact);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_enchantment", additional_cost_sacrifice_creature_or_enchantment);
         l.deny("CardPrinting.additional_cost_choose_your_creature", additional_cost_choose_your_creature);
         let enters_x_counters = match enters_with_counters_from_x {
@@ -743,6 +742,15 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         if let Some(filter) = lower_card_filter(l, f) {
             additional.push(Cost { sacrifice: Some(SacCost { filter, n: 1, another: false }), ..Cost::default() });
         }
+    }
+    // "As an additional cost to cast this spell, sacrifice an artifact or
+    // creature" (CR 601.2b, 118.8; ENGINE.md 99.2).
+    if *additional_cost_sacrifice_creature_or_artifact {
+        if !additional.is_empty() {
+            l.unsupported("CardPrinting.additional_cost_sacrifice_creature_or_artifact(with other additional costs)");
+        }
+        let filter = Filter::Type(types::CREATURE | types::ARTIFACT);
+        additional.push(Cost { sacrifice: Some(SacCost { filter, n: 1, another: false }), ..Cost::default() });
     }
     // "As an additional cost to cast this spell, exile n cards from your
     // graveyard" (Abhorrent Oculus; CR 601.2b, 118.8).
@@ -1331,7 +1339,18 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
     let pt_cda = match dynamic_pt_formula.as_deref() {
         None => None,
-        Some(f) => super::statics::lower_pt_formula(l, f),
+        // "Gets +X/+0" (a static ability, ENGINE.md 99.2).
+        Some(f) => match super::eoe_a::pt_formula_static(f) {
+            Some(st) if is_creature => {
+                statics.push(st);
+                None
+            }
+            Some(_) => {
+                l.unsupported("CardPrinting.dynamic_pt_formula(not a creature)");
+                None
+            }
+            None => super::statics::lower_pt_formula(l, f),
+        },
     };
     if pt_cda.is_some() && !is_creature {
         l.unsupported("CardPrinting.dynamic_pt_formula(not a creature)");

@@ -62,6 +62,8 @@ permission) and a consumer can go wrong with it.
 | 24 | Mechan Shieldmate (ENGINE.md 99.2) | permission as a characteristic | "this creature can attack as though it didn't have defender" as a static `RemoveKeyword(defender)` | a rule that lets it attack while it keeps defender (CR 702.3b) | `cards/parser/creature_builder.py` (~line 672), `cards/parser/printing_keywords.py` (~line 473) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 25 | Loading Zone (ENGINE.md 99.2) | scope dropped | "if one or more counters would be put on a creature, Spacecraft, or Planet you control, twice that many ... instead" as a `scope: self` `ReplacementEffect(would_place_counter, MultiplyCount(2))` with no recipient filter | the recipients: creatures, Spacecraft and Planets you control, every kind of counter | `cards/parser/enchantment_builder.py` (`_COUNTER_DOUBLER_LINE`, ~line 651; the Python engine hard-codes creatures and Spacecraft, +1/+1 counters only) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 26 | The Eternity Elevator (ENGINE.md 99.2) | value made up | `power: 0, toughness: 0` for a card with no power/toughness box | no power or toughness (CR 722.1, 722.2c) | `cards/parser/spacecraft_builder.py` (the missing-P/T fallback, ~line 334) | blocked by entry 20 | confirmed |
+| 27 | Nesting Grounds (ENGINE.md 99.2) | effect narrowed | "Move a counter from target permanent you control onto a second target permanent" as `MovePlusOneCounterBetweenPermanentsYouControl {}` (the class moves a +1/+1 counter between two permanents you control) | any kind of counter (the player's choice), and a second target permanent anyone controls | `effects/generic/counters.py::MovePlusOneCounterBetweenPermanentsYouControl` (its docstring: "Simplification") | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 28 | Meltstrider's Resolve (ENGINE.md 99.2) | keyword substituted | "Enchanted creature ... can't be blocked by more than one creature" as `equipment_bonuses: [0, 2, ["menace"]]` | a "can't be blocked by more than one creature" rule (menace is the opposite: by two or more only, CR 702.111b) | the Aura builder's bonus line (`cards/base.py::make_aura`, as entry 7) | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -481,6 +483,35 @@ Elevator.").
 * Engine: blocked by entry 20 (`lower::IR_DEFECTS` names a card once). Once entry 20 is fixed this
   one matters: the engine reads a station card's power/toughness as the box of its
   `station_threshold` striation (ENGINE.md 99.2), so a 0/0 would make it a 0/0 creature at 20+.
+
+**27. Nesting Grounds.** Oracle: "{T}: Add {C}. / {1}, {T}: Move a counter from target permanent you
+control onto a second target permanent. Activate only as a sorcery."
+
+* IR: the second ability's effect is `MovePlusOneCounterBetweenPermanentsYouControl {}`: the class
+  (mtg-bot `effects/generic/counters.py`) moves exactly one +1/+1 counter, both targets permanents its
+  controller controls ("Simplification: oracle says 'a counter' (any type ...). This implementation
+  moves exactly one +1/+1 counter").
+* Should be: a counter of any kind on the first target (its controller's choice of kind), onto a
+  second target permanent anyone controls (CR 122.8-like "move": removed from one, put on the
+  other).
+* Source: the class and its parser entry.
+* Fix: a "move a counter" effect with the kind chosen as it resolves and the second target's filter
+  as printed.
+* Engine: blocked, `ir_defect(move a counter narrowed, docs/ir_defects.md 27)` (a cross-lane card,
+  lanes A and B).
+
+**28. Meltstrider's Resolve.** Oracle: "Enchant creature you control / When this Aura enters,
+enchanted creature fights up to one target creature an opponent controls. / Enchanted creature gets
++0/+2 and can't be blocked by more than one creature."
+
+* IR: `equipment_bonuses: [0, 2, ["menace"]]`.
+* Should be: +0/+2 and the rule "can't be blocked by more than one creature" (CR 509.1b: a blocking
+  restriction). Menace (702.111b) says the opposite: "can't be blocked except by two or more
+  creatures".
+* Source: the Aura builder's bonus line (the misnamed field of entry 7; the phrase mapped to a
+  keyword).
+* Fix: export the restriction (a "max blockers 1" field, as `min_blockers` exists).
+* Engine: blocked, `ir_defect(menace for "by more than one", docs/ir_defects.md 28)`.
 
 ## Suspected defects (representational)
 

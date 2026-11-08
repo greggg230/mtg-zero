@@ -48,6 +48,37 @@ impl Game {
                 }
                 Flow::Next
             }
+            EoeA::MarkPile => {
+                f.x = f.pile.len() as i32;
+                Flow::Next
+            }
+            EoeA::CounterOnSourceUnlessPileShrank { counter } => {
+                if f.pile.len() as i32 >= f.x {
+                    for c in self.objs_on(f, &On::Source) {
+                        self.add_counters(c, *counter, 1);
+                    }
+                }
+                Flow::Next
+            }
+            EoeA::PutSourceCountersOnTarget { tgt } => {
+                // The source's counters: on it now, or as it last existed on
+                // the battlefield (its last-known counters, CR 608.2h).
+                let src = f.source;
+                let counters: Vec<(crate::db::Counter, crate::num::Count)> =
+                    if self.live(src) && self.objs[src.idx.i()].zone == Zone::Battlefield {
+                        self.counters_of(src.idx)
+                    } else {
+                        let mut v: Vec<(crate::db::Counter, crate::num::Count)> =
+                            self.lki_counters.iter().filter(|x| x.0 == src && x.2 > 0).map(|x| (x.1, x.2)).collect();
+                        v.sort();
+                        v
+                    };
+                let Some(&c) = self.objs_on(f, &On::Target(*tgt)).first() else { return Flow::Next };
+                for (k, n) in counters {
+                    self.add_counters(c, k, n);
+                }
+                Flow::Next
+            }
         }
     }
 }

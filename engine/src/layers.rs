@@ -532,6 +532,16 @@ impl Game {
                         dp += *a as i64 * n;
                         dt += *b as i64 * n;
                     }
+                    Mod::PowerPlusGreatestMv { types } => {
+                        let ctl = self.objs[s.i()].controller;
+                        dp += self
+                            .battlefield
+                            .iter()
+                            .filter(|&&x| x != s && self.objs[x.i()].controller == ctl && self.types_of(x) & types != 0)
+                            .map(|&x| self.mana_value_of(x) as i64)
+                            .max()
+                            .unwrap_or(0);
+                    }
                     _ => {}
                 }
             }

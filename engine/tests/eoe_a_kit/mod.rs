@@ -81,6 +81,26 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         card("Lane A Totem", "{1}", &["Enchantment"], &[], none.clone()),
         card("Lane A Trinket", "{1}", &["Artifact"], &[], none.clone()),
         creature("Lane A Robot", "{2}", 2, 2, json!({"card_types": ["Artifact", "Creature"], "subtypes": ["Robot"]})),
+        // Lane A's effects that cross-lane cards use (ENGINE.md 99.2), each
+        // on a card of its own: "Tap target artifact or creature."
+        card("Lane A Tap", "{U}", &["Instant"], &[], json!({"spell_effect": {"$t": "TapTargetArtifactOrCreature",
+            "targets": [{"$t": "TargetSpec", "filter": {"$t": "ObjectOr", "left": {"$t": "IsArtifact"}, "right": {"$t": "IsCreature"}}}]}})),
+        // "Target artifact or creature gains indestructible until end of turn."
+        card("Lane A Shield", "{W}", &["Instant"], &[], json!({"spell_effect": {"$t": "PumpTargetArtifactOrCreatureUntilEOT",
+            "granted_keywords": [kw("indestructible")],
+            "targets": [{"$t": "TargetSpec", "filter": {"$t": "ObjectOr", "left": {"$t": "IsArtifact"}, "right": {"$t": "IsCreature"}}}]}})),
+        // "Put two +1/+1 counters on target creature you control. It gains
+        // lifelink until end of turn."
+        card("Lane A Charm", "{B}", &["Instant"], &[], json!({"spell_effect": {"$t": "PutPlusOneCountersAndGrantKeywordsUEOTOnTargetCreatureYouControl",
+            "granted_keywords": [kw("lifelink")]}})),
+        // "As an additional cost to cast this spell, sacrifice an artifact or
+        // creature. / Draw two cards."
+        card("Lane A Offering", "{B}", &["Sorcery"], &[], json!({"additional_cost_sacrifice_creature_or_artifact": true,
+            "spell_effect": {"$t": "DrawCards", "amount": 2}})),
+        // "When this creature leaves the battlefield, put its counters on
+        // target creature you control."
+        creature("Lane A Donor", "{1}{G}", 1, 1, json!({"triggered_abilities": [{"$t": "TriggeredAbility", "event": "leaves_battlefield",
+            "predicate": {"$t": "IsSelf"}, "effect": {"$t": "MoveSelfCountersToTargetCreatureYouControl"}}]})),
         // "{1}, Sacrifice this creature: Search your library for an
         // Equipment card, put it onto the battlefield, then shuffle."
         creature(

@@ -239,6 +239,11 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     ("Mechan Shieldmate", "ir_defect(attack permission as losing defender, docs/ir_defects.md 24)"),
     // The counter doubler's recipients dropped (25).
     ("Loading Zone", "ir_defect(counter doubler without its recipients, docs/ir_defects.md 25)"),
+    // "Move a counter" narrowed to a +1/+1 counter between your permanents
+    // (27).
+    ("Nesting Grounds", "ir_defect(move a counter narrowed, docs/ir_defects.md 27)"),
+    // Menace for "can't be blocked by more than one creature" (28).
+    ("Meltstrider's Resolve", "ir_defect(menace for \"by more than one\", docs/ir_defects.md 28)"),
 
     // Lane B (ENGINE.md 99.3; docs/ir_defects.md 40-59).
 

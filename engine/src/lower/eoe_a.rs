@@ -319,7 +319,107 @@ pub(crate) fn lower_effect_eoe_a(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
                 b.op(Op::Ext(Ext::Apply { on: On::Target(t), mods, until: Until::EndOfTurn }));
             }
         }
+        // "You may sacrifice an artifact. When you do, <effect>": a
+        // reflexive triggered ability (CR 603.12), its targets chosen as it
+        // triggers.
+        E::OptionalSacArtifactForEffect(nodes::OptionalSacArtifactForEffect { inner_effect }) => {
+            let ab = super::effect::lower_ability(l, inner_effect);
+            let k = l.delayed_ability(ab);
+            let at = b.op(Op::May { who: Who::You, skip: 0 });
+            b.op(Op::Ext(Ext::SacrificeThenReflexive { filter: Filter::Type(types::ARTIFACT), k }));
+            b.patch(at);
+        }
+        // "Tap target artifact or creature."
+        E::TapTargetArtifactOrCreature(nodes::TapTargetArtifactOrCreature { targets }) => {
+            let Some(t) = lower_targets(l, b, targets, "TapTargetArtifactOrCreature") else { return true };
+            b.op(Op::Ext(Ext::Tap { on: On::Target(t) }));
+        }
+        // "Target artifact or creature gets +p/+t and gains <keywords> until
+        // end of turn."
+        E::PumpTargetArtifactOrCreatureUntilEOT(nodes::PumpTargetArtifactOrCreatureUntilEOT { power_bonus, toughness_bonus, granted_keywords, targets }) => {
+            let Some(t) = lower_targets(l, b, targets, "PumpTargetArtifactOrCreatureUntilEOT") else { return true };
+            let mut mods = Vec::new();
+            if *power_bonus != 0 || *toughness_bonus != 0 {
+                mods.push(Mod::Pt(
+                    l.int("PumpTargetArtifactOrCreatureUntilEOT.power_bonus", *power_bonus, -99, 99),
+                    l.int("PumpTargetArtifactOrCreatureUntilEOT.toughness_bonus", *toughness_bonus, -99, 99),
+                ));
+            }
+            mods.extend(super::effect_ext::keyword_mods(l, granted_keywords));
+            if mods.is_empty() {
+                l.unsupported("PumpTargetArtifactOrCreatureUntilEOT(nothing)");
+            }
+            b.op(Op::Ext(Ext::Apply { on: On::Target(t), mods, until: Until::EndOfTurn }));
+        }
+        // "Put n +1/+1 counters on target creature [you control]. It gains
+        // <keywords> until end of turn."
+        E::PutPlusOneCountersAndGrantKeywordsUEOTOnTargetCreatureYouControl(nodes::PutPlusOneCountersAndGrantKeywordsUEOTOnTargetCreatureYouControl {
+            amount,
+            granted_keywords,
+            you_control_only,
+        }) => {
+            let mut f = Filter::Type(types::CREATURE);
+            if *you_control_only {
+                f = and(f, Filter::Controller(true));
+            }
+            let t = b.target(f, 1, 1);
+            let n = l.int("PutPlusOneCountersAndGrantKeywordsUEOTOnTargetCreatureYouControl.amount", *amount, 1, 20);
+            b.op(Op::Ext(Ext::PutCounters { on: On::Target(t), counter: Counter::P1P1, n: Amount::Fixed(n) }));
+            let mods = super::effect_ext::keyword_mods(l, granted_keywords);
+            if !mods.is_empty() {
+                b.op(Op::Ext(Ext::Apply { on: On::Target(t), mods, until: Until::EndOfTurn }));
+            }
+        }
+        // "Put its counters on target creature you control" (a leaves- or
+        // dies-trigger: its counters as it last existed).
+        E::MoveSelfCountersToTargetCreatureYouControl(nodes::MoveSelfCountersToTargetCreatureYouControl {}) => {
+            let t = b.target(and(Filter::Type(types::CREATURE), Filter::Controller(true)), 1, 1);
+            b.op(Op::Ext(Ext::EoeA(EoeA::PutSourceCountersOnTarget { tgt: t })));
+        }
+        // "Look at the top n cards of your library. You may reveal a <kind>
+        // card from among them and put it into your hand. Put the rest on the
+        // bottom of your library in a random order. If you didn't put a card
+        // into your hand this way, put a +1/+1 counter on this creature."
+        E::LookAtTopNRevealOrCounter(nodes::LookAtTopNRevealOrCounter { n, filter_name, max_power, counter_on_miss }) => {
+            let n = l.int("LookAtTopNRevealOrCounter.n", *n, 1, 20) as u8;
+            let mut filter = match filter_name {
+                card_ir::enums::LibraryCardFilter::Spacecraft => Filter::Subtype(l.subtype("Spacecraft")),
+                card_ir::enums::LibraryCardFilter::Creature => Filter::Type(types::CREATURE),
+                other => {
+                    l.unsupported(format!("LookAtTopNRevealOrCounter.filter_name({other:?})"));
+                    return true;
+                }
+            };
+            if *max_power != 0 {
+                if *filter_name != card_ir::enums::LibraryCardFilter::Creature {
+                    l.unsupported("LookAtTopNRevealOrCounter.max_power(not a creature filter)");
+                }
+                filter = and(filter, Filter::PowerAtMost(l.int("LookAtTopNRevealOrCounter.max_power", *max_power, 0, 99)));
+            }
+            b.op(Op::LookTop { who: Who::You, n, reveal: false });
+            if *counter_on_miss {
+                b.op(Op::Ext(Ext::EoeA(EoeA::MarkPile)));
+            }
+            b.op(Op::PileTo { who: Who::You, dest: crate::program::PileDest::Hand, filter, min: 0, max: 1, rest: false, reveal: true });
+            if *counter_on_miss {
+                b.op(Op::Ext(Ext::EoeA(EoeA::CounterOnSourceUnlessPileShrank { counter: Counter::P1P1 })));
+            }
+            b.op(Op::Ext(Ext::PileRestBottomRandom));
+        }
         _ => return false,
     }
     true
+}
+
+/// A P/T formula that is a static ability rather than a
+/// characteristic-defining one (CR 604.3 vs 613.4c): "this creature gets
+/// +X/+0, where X is the greatest mana value among other artifacts you
+/// control" (layer 7c). None: not one of these (`lower_pt_formula`).
+pub(crate) fn pt_formula_static(f: &cats::PTFormula) -> Option<StaticDef> {
+    match f {
+        cats::PTFormula::PowerPlusGreatestManaValueOfOtherArtifactsPT(nodes::PowerPlusGreatestManaValueOfOtherArtifactsPT {}) => {
+            Some(StaticDef { scope: Scope::This, cond: None, mods: vec![Mod::PowerPlusGreatestMv { types: types::ARTIFACT }] })
+        }
+        _ => None,
+    }
 }

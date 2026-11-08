@@ -1220,4 +1220,15 @@ pub enum EoeA {
     /// permanent) puts it on top of or on the bottom of their library, their
     /// choice. Choice (the owner's): yes/no (`YES` = top).
     OwnerPutsTopOrBottom { tgt: u8 },
+    /// Remember how many cards the looked-at pile holds (`Frame::x`), for
+    /// `CounterOnSourceUnlessPileShrank`.
+    MarkPile,
+    /// "If you didn't put a card into your hand this way, put a <counter>
+    /// on this": unless the pile holds fewer cards than `MarkPile` saw, put
+    /// a counter of this kind on the source (if it is still that permanent).
+    CounterOnSourceUnlessPileShrank { counter: Counter },
+    /// "Put its counters on target creature you control": the source's
+    /// counters (now, or as it last existed on the battlefield, CR 608.2h),
+    /// every kind and number, on the first legal target of `tgt` (CR 122.6).
+    PutSourceCountersOnTarget { tgt: u8 },
 }
