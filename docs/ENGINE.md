@@ -19106,3 +19106,11 @@ exile even if the library is chosen next (Syr Vondam would trigger for a permane
 library). No card of the EoE table puts a permanent into a library instead of a graveyard, so no
 EoE game reaches it; making the match wait for the choice needs the leave event re-timed for every
 card (left for the maintainer). No docs/shortcuts.md entry was added by W1.
+
+Checks of the final branch (with Sothera and the fixes above): full engine suite 1,882 passed, 0 failed,
+15 ignored; `support` (cube 546 / 546, EoE 273 / 320); behaviour digests unchanged (combined
+`f6543eb2b1b8752f`); `tests/az.rs` passes; `FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games (wins 8,916 /
+8,874, 2,210 draws, mean 40.1 turns, 513.4 decisions) and the default `FUZZ_GAMES=20000`: 20,000 games
+(9,967 / 9,994, 39 draws) and 1,000 matches, all four fuzz tests passed. mtg-bot at 7c02e5c9: 50
+failures, 49 of the baseline's and `tests/search/test_shm_nn_eval_server.py::test_concurrent_workers_get_batched_into_one_dispatch`,
+a timing test that passes alone (the machine was running four agents' builds).
