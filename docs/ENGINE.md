@@ -19127,9 +19127,17 @@ next-layout limit drawing nothing from the shared stream), `testkit.rs` (`view_o
   `SPEND_ARTIFACT | SPEND_ARTIFACT_ABILITY` (one line in `lower/activated.rs`; two-purpose mana is
   tested with Eldrazi Temple's).
 
-**Tests.** `tests/cards_eoe_w2.rs` (7: the restrictions), `tests/cards_eoe_w2_lands.rs` (20: the
+**Tests.** `tests/cards_eoe_w2.rs` (7: the restrictions), `tests/cards_eoe_w2_lands.rs` (23: the
 lands and the other cards), custom cards in `tests/eoe_w2/mod.rs` (Test Citadel, Test Workshop,
-Test War Zone, Test Plaza, ...). TESTS_PLACEHOLDER
+Test War Zone, Test Plaza, ...). Cards supported (`SUPPORTED_EOE_MANA`, 12): Bioengineered Future,
+Blast Zone, Cascading Cataracts, Crystal Quarry, Echoing Deeps, Eldrazi Temple, Famished Worldsire,
+Gene Pollinator, Magus of the Moon, Steelswarm Operator, The Eternity Elevator, plus the restrictions
+Sunken Citadel and Power Depot will use. EoE support 258 -> 269 / 320 (W2 alone); cube 546 / 546. On
+9a1b43f: the full engine suite (`cargo test --release -p engine`) 1,883 passed, 0 failed;
+`FUZZ_POOL=eoe FUZZ_GAMES=20000` passed (seeds 0-19,999 as four runs of 5,000 in parallel, 2,937 to
+6,941 s each on a machine four agents shared); the default `FUZZ_GAMES=20000` passed (800 s). The
+fuzz found two faults, both fixed with tests: EoE seed 44 (the rest's needs in the virtual pool's
+spend) and seeds 6224 and 3118 (castability's convoke sources and the Pollinators).
 
 **Digests:** unchanged (`f6543eb2b1b8752f`): every new path is gated by the table or the game
 (`CardDb::spend_kinds`, `Game::moon_game`, `CardDb::watch_lands_entered`).
