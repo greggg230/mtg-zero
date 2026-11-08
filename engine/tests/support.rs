@@ -906,6 +906,7 @@ const SUPPORTED_EOE_COMBAT: &[&str] = &[
     "Pain for All",
     "Possibility Technician",
     "Raging Ravine",
+    "Ragost, Deft Gastronaut",
     "Requiem Monolith",
     "Robe of Stars",
     "Rust Harvester",

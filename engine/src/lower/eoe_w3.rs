@@ -47,6 +47,63 @@ pub(crate) fn lower_cost_w3(l: &mut Lowerer, cost: &mut Cost, c: CostW3) {
     }
 }
 
+/// The printing flags of workstream W3 that change a definition: "Artifacts
+/// you control are Foods in addition to their other types and have '{2},
+/// {T}, Sacrifice this artifact: You gain 3 life.'" (Ragost; CR 205.3g,
+/// 613.1d, 613.1f; the Food ability of CR 111.10b).
+pub(crate) fn printing_w3(l: &mut Lowerer, def: &mut crate::db::CardDef, food_type: bool, food_ability: bool) {
+    let yours = Filter::And(Box::new(Filter::Type(types::ARTIFACT)), Box::new(Filter::Controller(true)));
+    if food_type {
+        let food = l.subtype("Food");
+        def.w3.grants_subtype.push((yours.clone(), food));
+    }
+    if food_ability {
+        let mut b = Builder::default();
+        b.op(Op::GainLife { who: Who::You, n: Amount::Fixed(3) });
+        let mana = crate::mana::ManaCost { generic: 2, ..Default::default() };
+        let ability = crate::db::ActivatedDef {
+            cost: Cost { mana, tap: true, sac_self: true, ..Cost::default() },
+            effect: crate::db::ActEffect::Stack(b.finish()),
+            sorcery: false,
+            instant_only: false,
+            exhaust: false,
+            only_if: None,
+            your_turn: false,
+            loyalty: None,
+            discounts: Vec::new(),
+            boast: false,
+            x: false,
+            special: None,
+        };
+        // (A latent ability of the card: the last ones, CardDef::latent.)
+        let k = def.activated.len();
+        if k >= 4 {
+            l.unsupported("CardPrinting.grants_food_ability_to_your_artifacts(no ability slot left)");
+        }
+        def.activated.push(ability);
+        def.latent += 1;
+        def.w3.grants_activated.push((yours, k as u8));
+    }
+}
+
+/// "At the beginning of each end step, if you gained life this turn, untap
+/// <this>" (Ragost): an intervening "if" (CR 603.4), checked as the event
+/// happens and again on resolution, around "untap this".
+pub(crate) fn hoist_intervening_if_w3<'a>(
+    effect: Option<&'a Box<cats::Effect>>,
+    pred: Option<TrigPred>,
+) -> (Option<&'a Box<cats::Effect>>, Option<TrigPred>) {
+    match effect.map(|e| &**e) {
+        Some(cats::Effect::IfGainedLifeThisTurnUntapSelf(nodes::IfGainedLifeThisTurnUntapSelf {})) => {
+            static UNTAP: std::sync::OnceLock<Box<cats::Effect>> = std::sync::OnceLock::new();
+            let untap = UNTAP.get_or_init(|| Box::new(cats::Effect::UntapSelf(nodes::UntapSelf {})));
+            let c = crate::db::Cond::GainedLifeAtLeast(1);
+            (Some(untap), pred.map(|p| TrigPred::And(Box::new(p), Box::new(TrigPred::If(c)))))
+        }
+        _ => (effect, pred),
+    }
+}
+
 /// The combinations the workstream's cost atoms can't be paid in, checked
 /// once the whole cost is lowered.
 pub(crate) fn check_cost_w3(l: &mut Lowerer, cost: &Cost) {

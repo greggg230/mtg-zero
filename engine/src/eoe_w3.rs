@@ -129,11 +129,18 @@ pub(crate) fn reads_mana_spent(d: &crate::db::CardDef) -> bool {
 
 /// `W3State::seen`: a card reads its host as it last existed.
 pub(crate) const SEEN_W3_HOST: u8 = 1;
+/// `W3State::seen`: a card grants activated abilities to other permanents.
+pub(crate) const SEEN_W3_GRANT_ACT: u8 = 2;
+/// `W3State::seen`: a card gives other permanents a subtype.
+pub(crate) const SEEN_W3_SUBTYPE: u8 = 4;
 
 /// The `SEEN_W3_*` bits of a definition (`W3Def::seen`, set as it is
 /// lowered).
 pub(crate) fn seen_of(d: &crate::db::CardDef) -> u8 {
-    let mut bits = 0;
+    let mut bits = if d.w3.grants_activated.is_empty() { 0 } else { SEEN_W3_GRANT_ACT };
+    if !d.w3.grants_subtype.is_empty() {
+        bits |= SEEN_W3_SUBTYPE;
+    }
     for ab in abilities_of(d) {
         for op in &ab.program {
             if let crate::program::Op::Ext(crate::program::Ext::EoeW3(W3::HostDamagesPower { .. })) = op {
@@ -497,6 +504,62 @@ impl Game {
         Some(crate::db::SacCost { filter, n: 1, another: false })
     }
 
+    /// The activated abilities other permanents grant permanent `c` ("artifacts
+    /// you control have '<ability>'", CR 613.1f; none once it lost all its
+    /// abilities): (granting definition, its activated slot), the granters in
+    /// battlefield order. They follow its own abilities' slots.
+    pub(crate) fn granted_activated(&self, c: CardIdx) -> Vec<(crate::ids::DefId, u8)> {
+        let mut out = Vec::new();
+        if self.w3.seen & SEEN_W3_GRANT_ACT == 0 || self.objs[c.i()].zone != crate::ids::Zone::Battlefield || self.lost_abilities(c) {
+            return out;
+        }
+        for &g in &self.battlefield {
+            let d = self.abilities(g);
+            if d.w3.grants_activated.is_empty() {
+                continue;
+            }
+            let ctx = crate::cast::Ctx { controller: self.objs[g.i()].controller, source: Some(self.obj_ref(g)) };
+            for (f, k) in &d.w3.grants_activated {
+                if self.card_matches(f, c, &ctx) {
+                    out.push((self.objs[g.i()].def, *k));
+                }
+            }
+        }
+        out
+    }
+
+    /// Does a permanent on the battlefield give permanent `c` subtype `s`
+    /// ("artifacts you control are Foods in addition to their other types",
+    /// CR 613.1d)? (A layer 4 effect of a static ability applies even if its
+    /// source loses its abilities in layer 6, 613.6: the card's own
+    /// definition.)
+    pub(crate) fn granted_subtype(&self, c: CardIdx, s: u16) -> bool {
+        self.battlefield.iter().any(|&g| {
+            let d = self.db.def(self.objs[g.i()].def);
+            d.w3.grants_subtype.iter().any(|(f, k)| {
+                *k == s && {
+                    let ctx = crate::cast::Ctx { controller: self.objs[g.i()].controller, source: Some(self.obj_ref(g)) };
+                    self.card_matches(f, c, &ctx)
+                }
+            })
+        })
+    }
+
+    /// The definition and slot of activated ability `slot` of `card`: its own,
+    /// or past them one another permanent grants it (`granted_activated`).
+    pub(crate) fn activated_ref(&self, card: CardIdx, slot: crate::db::AbilitySlot) -> (crate::ids::DefId, crate::db::AbilitySlot) {
+        let def = self.objs[card.i()].def;
+        if let crate::db::AbilitySlot::Activated(i) = slot {
+            let own = self.db.def(def).activated.len();
+            if i as usize >= own && self.w3.seen & SEEN_W3_GRANT_ACT != 0 {
+                if let Some(&(g, k)) = self.granted_activated(card).get(i as usize - own) {
+                    return (g, crate::db::AbilitySlot::Activated(k));
+                }
+            }
+        }
+        (def, slot)
+    }
+
     /// The permanents `p` controls from which `card`'s cost "remove a <k>
     /// counter from a <f> you control" may remove one (CR 118.3): those
     /// matching `f` with such a counter (the source itself too).
@@ -580,6 +643,15 @@ pub struct W3Def {
     /// "This enters with a number of +1/+1 counters on it equal to the
     /// amount of mana spent to cast it" (CR 122.6, 614.1c).
     pub counters_mana_spent: bool,
+    /// "<Permanents matching the filter> have '<activated ability k of this
+    /// card>'" (CR 613.1f, layer 6; the filter's "you" is this permanent's
+    /// controller): latent abilities of the card, which it doesn't have
+    /// itself (`CardDef::latent`).
+    pub grants_activated: Vec<(Filter, u8)>,
+    /// "<Permanents matching the filter> are <subtype>s in addition to their
+    /// other types" (CR 205.1b, 613.1d: layer 4; the filter reads card types
+    /// and control only, so nothing recurses).
+    pub grants_subtype: Vec<(Filter, u16)>,
 }
 
 impl Game {

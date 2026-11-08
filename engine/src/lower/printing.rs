@@ -279,8 +279,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.enters_as_copy_of_creature", enters_as_copy_of_creature);
         l.deny("CardPrinting.replaces_first_tokens_with_copies", replaces_first_tokens_with_copies);
         l.deny("CardPrinting.grants_cast_artifact_from_top_of_library", grants_cast_artifact_from_top_of_library);
-        l.deny("CardPrinting.grants_food_to_your_artifacts", grants_food_to_your_artifacts);
-        l.deny("CardPrinting.grants_food_ability_to_your_artifacts", grants_food_ability_to_your_artifacts);
         l.deny("CardPrinting.grants_blue_mana_ability_to_your_artifacts", grants_blue_mana_ability_to_your_artifacts);
         l.deny("CardPrinting.hand_ability_grants", hand_ability_grants);
         l.deny("CardPrinting.grants_control_opponent_ability_when_equipped", grants_control_opponent_ability_when_equipped);
@@ -1913,8 +1911,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             seen: 0,
             mana_spent: false,
             counters_mana_spent: *enters_with_counters_from_x == Some(enums::XCounterMode::ManaSpent),
+            grants_activated: Vec::new(),
+            grants_subtype: Vec::new(),
         },
     };
+    super::eoe_w3::printing_w3(l, &mut def, *grants_food_to_your_artifacts, *grants_food_ability_to_your_artifacts);
     def.w3.seen = crate::eoe_w3::seen_of(&def);
     def.w3.mana_spent = def.w3.counters_mana_spent || crate::eoe_w3::reads_mana_spent(&def);
     if *additional_cost_pay_x_life && (x_pips > 0 || !is_spell_card) {

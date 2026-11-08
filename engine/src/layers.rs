@@ -281,6 +281,11 @@ impl Game {
                 }
             }
         }
+        // "Artifacts you control are Foods in addition to their other types"
+        // (EoE W3; as early as the printed ones).
+        if !printed && self.w3.seen & crate::eoe_w3::SEEN_W3_SUBTYPE != 0 && self.objs[c.i()].zone == Zone::Battlefield {
+            printed = self.granted_subtype(c, s);
+        }
         if self.effects.is_empty() || self.objs[c.i()].zone != Zone::Battlefield {
             return printed;
         }

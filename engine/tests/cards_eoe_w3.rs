@@ -1112,3 +1112,82 @@ fn robe_of_stars_until_end_of_turn_effects_end_while_phased_out_cr702_26d() {
     assert_eq!(g.obj(bear).zone, Zone::Battlefield);
     assert_eq!((g.power(bear), g.toughness(bear)), (2, 5), "the +3/+3 ended; the Robe's +0/+3 applies\n{}", log(&g));
 }
+
+// ---- Ragost, Deft Gastronaut (Foods; a granted activated ability) ------------------
+
+fn food(g: &engine::Game, c: engine::CardIdx) -> bool {
+    let k = db().subtype_id("Food").expect("the Food subtype");
+    g.has_subtype(c, k)
+}
+
+/// Ragost [2/2]: "Artifacts you control are Foods in addition to their other
+/// types and have '{2}, {T}, Sacrifice this artifact: You gain 3 life.'"
+/// (CR 205.3g, 613.1d: layer 4; 613.1f: layer 6; the Food ability, 111.10b.)
+/// The opponent's artifacts aren't; an artifact with an ability of its own
+/// has the granted one in the next slot.
+#[test]
+fn ragost_your_artifacts_are_foods_with_the_food_ability_cr111_10b() {
+    let mut g = scen()
+        .battlefield(0, &["Ragost, Deft Gastronaut", "W3 Trinket", "W3 Mox", "Plains", "Plains"])
+        .battlefield(1, &["W3 Idol"])
+        .at(Step::Main1, 0)
+        .start();
+    let (ragost, trinket, mox, idol) = (bf(&g, 0, "Ragost, Deft Gastronaut"), bf(&g, 0, "W3 Trinket"), bf(&g, 0, "W3 Mox"), bf(&g, 1, "W3 Idol"));
+    assert!(food(&g, trinket) && food(&g, mox), "artifacts you control are Foods");
+    assert!(!food(&g, idol) && !food(&g, ragost));
+    assert!(g.has_option(act(trinket, 0)), "the Food ability: {:?}", g.options_desc());
+    assert!(g.has_option(act(mox, 1)), "after the Mox's own mana ability");
+    g.choose(act(trinket, 0));
+    pay_without(&mut g, mox);
+    settle(&mut g);
+    assert_eq!(g.obj(trinket).zone, Zone::Graveyard, "sacrificed\n{}", log(&g));
+    assert_eq!(g.life(0), 23, "you gain 3 life");
+    assert_eq!(untapped(&g, 0), 0, "{{2}}");
+}
+
+/// "{1}, {T}, Sacrifice a Food: Ragost deals 3 damage to each opponent" (an
+/// artifact made a Food by its first ability counts, CR 205.3g).
+#[test]
+fn ragost_sacrifices_a_food_for_3_damage_to_each_opponent_cr701_21a() {
+    let mut g = scen()
+        .battlefield(0, &["Ragost, Deft Gastronaut", "W3 Trinket", "Plains"])
+        .at(Step::Main1, 0)
+        .turn_number(3)
+        .start();
+    let (ragost, trinket) = (bf(&g, 0, "Ragost, Deft Gastronaut"), bf(&g, 0, "W3 Trinket"));
+    g.choose(act(ragost, 0));
+    pay(&mut g);
+    resolve_with(&mut g, |g| if g.kind() == Some(DecisionKind::Sacrifice) { Some(Choice::Card(trinket)) } else { None });
+    assert_eq!(g.obj(trinket).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.life(1), 17);
+    assert!(g.obj(ragost).tapped);
+}
+
+/// "At the beginning of each end step, if you gained life this turn, untap
+/// Ragost" (CR 603.4: an intervening "if"; each end step, the opponent's
+/// too). Without life gained, it doesn't trigger.
+#[test]
+fn ragost_untaps_at_each_end_step_if_you_gained_life_cr603_4() {
+    for gained in [false, true] {
+        let mut g = scen()
+            .battlefield(0, &["Ragost, Deft Gastronaut", "W3 Trinket", "W3 Monument", "Plains", "Plains", "Plains"])
+            .at(Step::Main1, 0)
+            .turn_number(3)
+            .start();
+        let (ragost, trinket, monument) = (bf(&g, 0, "Ragost, Deft Gastronaut"), bf(&g, 0, "W3 Trinket"), bf(&g, 0, "W3 Monument"));
+        // Tap Ragost: its damage ability, sacrificing the Monument.
+        g.choose(act(ragost, 0));
+        pay(&mut g);
+        resolve_with(&mut g, |g| if g.kind() == Some(DecisionKind::Sacrifice) { Some(Choice::Card(monument)) } else { None });
+        assert!(g.obj(ragost).tapped);
+        if gained {
+            g.choose(act(trinket, 0));
+            pay(&mut g);
+            settle(&mut g);
+            assert_eq!(g.life(0), 23);
+        }
+        to_end_step(&mut g);
+        settle(&mut g);
+        assert_eq!(!g.obj(ragost).tapped, gained, "gained life: {gained}\n{}", log(&g));
+    }
+}

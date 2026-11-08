@@ -140,6 +140,7 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     // An intervening "if" the IR writes around the effect (EoE lane D,
     // ENGINE.md 99.5).
     let (effect, pred) = super::effect_eoe_d::hoist_intervening_if(l, effect, pred);
+    let (effect, pred) = super::eoe_w3::hoist_intervening_if_w3(effect, pred);
     let mut ability = match effect {
         Some(e) => lower_ability(l, e),
         None => {

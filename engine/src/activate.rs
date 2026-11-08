@@ -161,6 +161,25 @@ impl Game {
                     out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
                 }
             }
+            // Activated abilities other permanents grant it ("artifacts you
+            // control have '<ability>'", CR 613.1f; EoE W3): slots after its
+            // own (at most four per permanent in the action layout).
+            if self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 {
+                for (j, (gdef, k)) in self.granted_activated(c).into_iter().enumerate() {
+                    let i = d.activated.len() + j;
+                    if i >= 4 {
+                        break;
+                    }
+                    let ad = self.db.def(gdef).activated_def(AbilitySlot::Activated(k));
+                    if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
+                        continue;
+                    }
+                    let slot = AbilitySlot::Activated(i as u8);
+                    if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+                        out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
+                    }
+                }
+            }
             // A special action isn't an ability (CR 116.2b, 708.7): turning a
             // face-down permanent face up survives "loses all abilities".
             if self.lost_abilities(c) {
@@ -342,12 +361,13 @@ impl Game {
     /// once (605.3); any other ability goes on the stack first (602.2a),
     /// then targets (601.2c), then the cost (601.2f-h).
     pub(crate) fn begin_activate(&mut self, p: PlayerId, card: CardIdx, slot: AbilitySlot) {
-        let def = self.objs[card.i()].def;
+        // (A granted ability is the granting card's definition's: EoE W3.)
+        let (def, aslot) = self.activated_ref(card, slot);
         self.note(|g| format!("P{p} activates {} ({slot:?})", g.name(card)));
         if self.objs[card.i()].zone == Zone::Hand {
             self.reveal(card); // 602.2a: activated from a hidden zone
         }
-        let ad = self.db.def(def).activated_def(slot);
+        let ad = self.db.def(def).activated_def(aslot);
         if ad.exhaust {
             if let AbilitySlot::Activated(i) = slot {
                 let r = self.obj_ref(card);
@@ -392,7 +412,7 @@ impl Game {
             self.note_loyalty_activation(card);
         }
         let id = self.new_stack_id();
-        let ability = AbilityRef { def, slot, mode: None };
+        let ability = AbilityRef { def, slot: aslot, mode: None };
         self.stack.push(StackItem {
             id,
             kind: StackKind::Ability { ability, source: self.obj_ref(card) },
