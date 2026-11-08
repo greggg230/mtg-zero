@@ -842,8 +842,13 @@ const SUPPORTED_EOE_CROSS: &[&str] = &[
     "Thaumaton Torpedo",
 ];
 
+/// Cards the mtg-bot IR-fix batch unblocks (ENGINE.md 99.9; their card
+/// tests in `tests/cards_eoe_irfix*.rs`).
+const SUPPORTED_EOE_IRFIX: &[&str] = &[
+];
+
 fn supported_eoe() -> Vec<String> {
-    let lists = [SUPPORTED_EOE_BASE, SUPPORTED_EOE_A, SUPPORTED_EOE_B, SUPPORTED_EOE_C, SUPPORTED_EOE_D, SUPPORTED_EOE_CROSS];
+    let lists = [SUPPORTED_EOE_BASE, SUPPORTED_EOE_A, SUPPORTED_EOE_B, SUPPORTED_EOE_C, SUPPORTED_EOE_D, SUPPORTED_EOE_CROSS, SUPPORTED_EOE_IRFIX];
     let mut v: Vec<String> = lists.concat().into_iter().map(String::from).collect();
     let n = v.len();
     v.sort();

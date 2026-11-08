@@ -18686,3 +18686,15 @@ FUZZ_GAMES=20000` and the default `FUZZ_GAMES=20000` fuzz: see the branch's last
   Pinnacle Kill-Ship, Reroute Systems, Sledge-Class Seedship, Sliver Overlord, Specimen Freighter,
   Starport Security (`SUPPORTED_EOE_CROSS`, 13 cards; card tests owed for 12). EoE support
   **210 / 320** (base 84, A 32, B 14, C 31, D 36, cross 13).
+
+### 99.8-99.9 The follow-ups (parallel branches from `eoe-base` d476ad1, 2026-11-08)
+
+Verification of d476ad1 (the four lanes merged): full engine suite 1,736 passed, 0 failed, 15
+ignored; behaviour digests unchanged (combined `f6543eb2b1b8752f`); `FUZZ_POOL=eoe` 20,000 games
+and the default 20,000 games pass. Two branches follow, each with its own supported list:
+
+* **99.8, branch `eoe-cross`**: the cross-lane pass. Card tests for the 12 untested cards of
+  `SUPPORTED_EOE_CROSS`, then the lane features no lane started, finishing more cross-lane cards.
+* **99.9, branch `eoe-irfix`**: the mtg-bot IR-fix batch (mtg-bot branch `feature/eoe-ir-fixes`):
+  docs/ir_defects.md 20-82 fixed in the parser, one re-export, `generated.rs` regenerated once,
+  the fixed cards out of `lower::IR_DEFECTS` and into `SUPPORTED_EOE_IRFIX` with card tests.
