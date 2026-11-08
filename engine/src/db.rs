@@ -411,6 +411,9 @@ pub enum Filter {
     /// Mana value at most the number of lands the controller controls (EoE
     /// lane D).
     MvAtMostLandsYouControl,
+    /// A permanent that entered as a spell cast for its warp cost (CR
+    /// 702.185a; `Mark::WarpCast`; ENGINE.md 99.8).
+    CastForWarp,
 }
 
 /// `Filter::Ability` kinds.

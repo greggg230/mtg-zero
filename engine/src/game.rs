@@ -865,6 +865,9 @@ pub enum Mark {
     /// It has "When this creature dies, <trigger `slot` of `def`>" until end
     /// of turn (EoE lane D; removed in the cleanup step, CR 514.2).
     DiesTriggerThisTurn { def: DefId, slot: u8 },
+    /// It entered as a spell cast for its warp cost (CR 702.185a: "if that
+    /// creature was cast for its warp cost"; ENGINE.md 99.8).
+    WarpCast,
 }
 
 /// `Mark::ChosenName` of a name no card of the game has.
@@ -1480,6 +1483,9 @@ impl Game {
             self.add_counters(idx, k, n);
         }
         let warp = std::mem::take(&mut self.entering_warp);
+        if warp && cast {
+            self.marks.push((r, Mark::WarpCast));
+        }
         if let (Some(k), true) = (dash, cast) {
             // CR 702.109a: it gains haste, and returns to its owner's hand
             // at the beginning of the next end step. (Warp, 702.185a: no

@@ -831,8 +831,10 @@ const SUPPORTED_EOE_CROSS: &[&str] = &[
     "Atomic Microsizer",
     "Broodguard Elite",
     "Embrace Oblivion",
+    "Full Bore",
     "Hardlight Containment",
     "Hylderblade",
+    "Infinite Guideline Station",
     "Larval Scoutlander",
     "Mental Modulation",
     "Pinnacle Kill-Ship",
@@ -845,6 +847,7 @@ const SUPPORTED_EOE_CROSS: &[&str] = &[
     "Survey Mechan",
     "Terrapact Intimidator",
     "Thaumaton Torpedo",
+    "The Seriema",
 ];
 
 /// Cards the mtg-bot IR-fix batch unblocks (ENGINE.md 99.9; their card

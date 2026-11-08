@@ -2843,6 +2843,9 @@ impl Game {
             // ENGINE.md 35).
             Filter::HasActivatedAbility => self.abilities(c).has_activated_ability(),
             Filter::DealtDamageThisTurn => self.dealt_damage_this_turn(c),
+            Filter::CastForWarp => {
+                !self.marks.is_empty() && self.marks.contains(&(self.obj_ref(c), crate::game::Mark::WarpCast))
+            }
             Filter::MvAtMostLandsYouControl => {
                 self.mana_value_of(c) as u32 <= self.count_controlled(ctx.controller, &Filter::Type(crate::db::types::LAND))
             }

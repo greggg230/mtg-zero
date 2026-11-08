@@ -91,6 +91,7 @@ permission) and a consumer can go wrong with it.
 | 81 | Dawnsire, Sunstar Dreadnought (lane D) | target narrowed | `DealDamageToTargetCreature` with a creature-only target for "up to one target creature or planeswalker" | a creature or planeswalker target | `cards/parser/effects.py` (`_DEAL_DAMAGE_UP_TO_ONE_TARGET_CREATURE`, ~line 390: "or planeswalker" accepted and dropped) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 82 | Entropic Battlecruiser (lane D) | target invented | the 1+ trigger "Whenever an opponent discards a card, they lose 3 life" as `TargetPlayerLosesLife` (a targeted effect) | the discarding player, not targeted (the event's player: `BindEventPlayer`, as the cube's "that player loses" triggers) | `cards/parser/effects.py` (`_THEY_LOSE_N_LIFE`, ~line 1718; the Python engine pre-wires the player as a target) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 100 | Fell Gravship (Edge of Eternities, cross-lane pass, ENGINE.md 99.8) | target invented | "mill three cards, then return a creature or Spacecraft card from your graveyard to your hand" as `Sequence [SelfMill 3, ReturnCreatureFromYourGraveyardToHand { creature, or_spacecraft }]`, a targeted class (its target chosen as the ability triggers, before the mill) | the card chosen as the ability resolves, after the mill, not targeted (a milled card may be returned; the mill happens with no such card in the graveyard) | `cards/parser/effects.py` (`_RETURN_CREATURE_OR_SPACECRAFT_GRAVEYARD_TO_HAND`, ~line 1911) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 101 | Desculpting Blast (Edge of Eternities, cross-lane pass, ENGINE.md 99.8) | value resolved late | `ReturnTargetCreatureToOwnersHand { allow_nonland_permanent, create_drone_if_was_attacking: true }`: the token by a flag, its printing looked up by name in Python (`TOKEN_PRINTINGS["Drone"]`) | the token's `CardPrinting` inline (a 1/1 colorless Drone artifact creature with flying and "This token can block only creatures with flying"), as the set's other Drone makers carry it (as entries 3, 65) | `cards/parser/effects.py` (the Desculpting Blast literal, ~line 4324), `effects/generic/bounce.py` (~line 177) | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -932,6 +933,26 @@ or Spacecraft card from your graveyard to your hand."
   100)` (`lower::IR_DEFECTS`). Without the entry the card lowers (lanes A and C give it everything
   else) with the return targeted. Found by the cross-lane pass reading the card for its tests; it
   was in `SUPPORTED_EOE_CROSS` since lane A's merge (ENGINE.md 99.7) and is taken off.
+
+**101. Desculpting Blast.** Oracle: "Return target nonland permanent to its owner's hand. If it was
+attacking, create a 1/1 colorless Drone artifact creature token with flying and \"This token can
+block only creatures with flying.\""
+
+* IR: `ReturnTargetCreatureToOwnersHand { allow_nonland_permanent: true, create_drone_if_was_attacking:
+  true, targets: [nonland, not a player] }`: the token is a flag; the Python class creates
+  `TOKEN_PRINTINGS["Drone"]` by name as it resolves.
+* Should be: the token's `CardPrinting` inline (a 1/1 colorless Drone artifact creature token with
+  flying and `can_only_block_creatures_with_flying`), as the set's other Drone makers (Pinnacle
+  Emissary, Station Monitor) carry it in `CreateToken { token_printing }`. A Drone is not one of the
+  rules' predefined tokens (CR 111.10), so the engine has no definition of its own to use (unlike the
+  Lander, ENGINE.md 99.3, or entry 3's Map).
+* Source: `cards/parser/effects.py` (the Desculpting Blast literal, ~line 4324) and
+  `effects/generic/bounce.py::ReturnTargetCreatureToOwnersHand.resolve` (~line 177).
+* Fix: a `token_printing` on the rider (or the rider as its own effect: "if it was attacking,
+  `CreateToken`").
+* Engine: blocked, `ir_defect(token printing by name only, docs/ir_defects.md 101)`. The rest of
+  the card needs only `allow_nonland_permanent` (its target spec already says "nonland, not a
+  player") and an "if it was attacking" check, both left with the card (ENGINE.md 99.8).
 
 ## Suspected defects (representational)
 

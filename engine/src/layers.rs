@@ -189,6 +189,9 @@ impl Game {
             Filter::Attacking => self.objs[c.i()].attacking,
             // (Counters are no characteristic: nothing recurses.)
             Filter::HasCounter(k) => self.counters_on(c, *k) > 0,
+            // (Nor is being tapped: The Seriema's "other tapped legendary
+            // creatures you control", ENGINE.md 99.8.)
+            Filter::Tapped => self.objs[c.i()].tapped,
             Filter::And(a, b) => self.scope_matches(a, c, you) && self.scope_matches(b, c, you),
             Filter::Or(v) => v.iter().any(|x| self.scope_matches(x, c, you)),
             Filter::Not(x) => !self.scope_matches(x, c, you),

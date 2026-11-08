@@ -44,6 +44,16 @@ fn create_landers(l: &mut Lowerer, b: &mut Builder, n: u8) {
     b.op(Op::Ext(Ext::TokensCreated));
 }
 
+/// "If that creature was cast for its warp cost, it also gains <keywords>
+/// until end of turn" (Full Bore; CR 702.185a): checked as the spell
+/// resolves, on the first legal target of requirement `t`.
+pub(crate) fn keywords_if_cast_for_warp(l: &mut Lowerer, b: &mut Builder, t: u8, keywords: &[cats::Keyword]) {
+    let mods = super::effect_ext::keyword_mods(l, keywords);
+    let at = b.op(Op::JumpUnlessTarget { tgt: t, filter: Filter::CastForWarp, to: 0 });
+    b.op(Op::Ext(Ext::Apply { on: On::Target(t), mods, until: Until::EndOfTurn }));
+    b.patch(at);
+}
+
 /// Lower an effect class of the cross-lane pass; `false` if the class is not
 /// one of these.
 pub(crate) fn lower_effect_eoe_x(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) -> bool {
@@ -110,6 +120,19 @@ pub(crate) fn lower_effect_eoe_x(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             let at = eoe(b, EoeX::DiscardMatchingOrContinue { filter: Filter::Type(types::ARTIFACT), to: 0 });
             b.op(Op::Discard { who: Who::You, n: 2 });
             b.patch(at);
+        }
+        // "Create a tapped 2/2 colorless Robot artifact creature token for
+        // each multicolored permanent you control" (Infinite Guideline
+        // Station; CR 105.2a: two or more colors; counted as it resolves).
+        E::CreateTokenPerMulticoloredPermanent(nodes::CreateTokenPerMulticoloredPermanent { token_printing, tapped }) => {
+            let cats::CardPrinting::CardPrinting(tp) = &**token_printing;
+            let def = super::printing::lower_printing(l, tp);
+            if !def.token {
+                l.unsupported("CreateTokenPerMulticoloredPermanent.token_printing(not a token)");
+            }
+            let token = l.token(def);
+            b.op(Op::Ext(Ext::CreateTokensN { token, n: Amount::MulticoloredPermanents, tapped: *tapped, attacking: false }));
+            b.op(Op::Ext(Ext::TokensCreated));
         }
         _ => return false,
     }

@@ -405,3 +405,189 @@ fn alpharael_has_deathtouch_during_your_turn_cr702_2() {
     next_main(&mut g, 1);
     assert!(!g.has_kw(a, Kw::Deathtouch), "the opponent's turn");
 }
+
+// ---- Full Bore -----------------------------------------------------------------------------
+
+/// Full Bore: "Target creature you control gets +3/+2 until end of turn. If
+/// that creature was cast for its warp cost, it also gains trample and haste
+/// until end of turn" (CR 702.185a): a creature cast for its mana cost gets
+/// only the +3/+2; an opponent's creature isn't a legal target.
+#[test]
+fn full_bore_pumps_target_creature_you_control_cr702_185a() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Cross Bear"])
+        .battlefield(1, &["Cross Giant"])
+        .hand(0, &["Full Bore"])
+        .at(Step::Main1, 0)
+        .start();
+    let (bear, giant) = (bf(&g, 0, "Cross Bear"), bf(&g, 1, "Cross Giant"));
+    let c = g.card(0, "Full Bore", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert!(!g.has_option(g.tgt(giant)), "a creature you control");
+    g.choose(g.tgt(bear));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!((g.power(bear), g.toughness(bear)), (5, 4), "{}", log(&g));
+    assert!(!g.has_kw(bear, Kw::Trample) && !g.has_kw(bear, Kw::Haste), "not cast for its warp cost");
+    next_main(&mut g, 1);
+    assert_eq!((g.power(bear), g.toughness(bear)), (2, 2), "until end of turn");
+}
+
+/// A creature cast for its warp cost (Broodguard Elite, "Warp {X}{G}", X =
+/// 1) gets trample and haste too, and can attack the turn it entered (CR
+/// 702.19, 702.10, 302.6).
+#[test]
+fn full_bore_on_a_warped_creature_adds_trample_and_haste_cr702_185a() {
+    let mut g = scen().battlefield(0, &["Forest", "Forest", "Mountain"]).hand(0, &["Broodguard Elite", "Full Bore"]).at(Step::Main1, 0).start();
+    let elite = warp_broodguard(&mut g);
+    assert!(g.is_sick(elite));
+    let target = g.tgt(elite);
+    cast(&mut g, 0, "Full Bore", &[target]);
+    settle(&mut g);
+    assert_eq!((g.power(elite), g.toughness(elite)), (4, 3), "{}", log(&g));
+    assert!(g.has_kw(elite, Kw::Trample) && g.has_kw(elite, Kw::Haste));
+    attack_with(&mut g, 0, &["Broodguard Elite"]);
+    assert!(g.obj(elite).attacking, "haste: attacks the turn it entered");
+}
+
+/// Cast Broodguard Elite from P0's hand for its warp cost with X = 1 and
+/// resolve it.
+fn warp_broodguard(g: &mut Game) -> engine::CardIdx {
+    let c = g.card(0, "Broodguard Elite", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseAltCost));
+    g.choose(Choice::Number(1));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::Priority));
+    g.choose(Choice::Number(1));
+    pay(g);
+    settle(g);
+    assert_eq!(g.obj(c).zone, Zone::Battlefield, "{}", log(g));
+    c
+}
+
+/// Exiled by warp at the end step and cast from exile on a later turn for
+/// its mana cost, it is a new object that wasn't cast for its warp cost (CR
+/// 400.7, 702.185a): Full Bore gives it +3/+2 only.
+#[test]
+fn full_bore_a_warped_card_cast_again_from_exile_isnt_warped_cr400_7() {
+    let mut g = scen()
+        .battlefield(0, &["Forest", "Forest", "Forest", "Mountain"])
+        .hand(0, &["Broodguard Elite", "Full Bore"])
+        .at(Step::Main1, 0)
+        .start();
+    let elite = warp_broodguard(&mut g);
+    next_main(&mut g, 0);
+    assert_eq!(g.obj(elite).zone, Zone::Exile, "{}", log(&g));
+    assert!(g.has_option(Choice::Cast(elite)), "castable from exile: {:?}", g.options_desc());
+    g.choose(Choice::Cast(elite));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::Priority));
+    if g.kind() == Some(DecisionKind::ChooseAltCost) {
+        assert!(!g.has_option(Choice::Number(1)), "warp only from hand: {:?}", g.options_desc());
+        g.choose(Choice::Number(0));
+        g.drive_until(|g| g.kind() != Some(DecisionKind::Priority));
+    }
+    g.choose(Choice::Number(1));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(elite).zone, Zone::Battlefield, "{}", log(&g));
+    let target = g.tgt(elite);
+    cast(&mut g, 0, "Full Bore", &[target]);
+    settle(&mut g);
+    assert_eq!((g.power(elite), g.toughness(elite)), (4, 3), "{}", log(&g));
+    assert!(!g.has_kw(elite, Kw::Trample) && !g.has_kw(elite, Kw::Haste), "cast for its mana cost this time");
+}
+
+// ---- The Seriema ---------------------------------------------------------------------------
+
+/// The Seriema: "When The Seriema enters, search your library for a
+/// legendary creature card, reveal it, put it into your hand, then shuffle"
+/// (CR 701.23a, 205.4d).
+#[test]
+fn the_seriema_searches_for_a_legendary_creature_card_cr701_23a() {
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains"])
+        .hand(0, &["The Seriema"])
+        .library(0, &["Sliver Overlord", "Cross Bear", "The Seriema"])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, 0, "The Seriema", &[]);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::SearchLibrary));
+    let (overlord, bear, seriema) = (db().id("Sliver Overlord").unwrap(), db().id("Cross Bear").unwrap(), db().id("The Seriema").unwrap());
+    assert!(g.has_option(Choice::Def(overlord)), "{:?}", g.options_desc());
+    assert!(!g.has_option(Choice::Def(bear)), "not legendary");
+    assert!(!g.has_option(Choice::Def(seriema)), "legendary, not a creature card");
+    g.choose(Choice::Def(overlord));
+    settle(&mut g);
+    assert_eq!(g.count_in(0, "Sliver Overlord", Zone::Hand), 1, "{}", log(&g));
+}
+
+/// "Other tapped legendary creatures you control have indestructible" (CR
+/// 702.12b, 611.3a): only while tapped, only its controller's, not itself.
+#[test]
+fn the_seriema_gives_other_tapped_legendary_creatures_indestructible_cr702_12b() {
+    let mut g = scen()
+        .battlefield(0, &["The Seriema", "Sliver Overlord", "Cross Bear"])
+        .counters(0, "The Seriema", charge(), 7)
+        .battlefield(1, &["Alpharael, Dreaming Acolyte"])
+        .at(Step::Main1, 0)
+        .start();
+    let (ship, overlord, bear, theirs) =
+        (bf(&g, 0, "The Seriema"), bf(&g, 0, "Sliver Overlord"), bf(&g, 0, "Cross Bear"), bf(&g, 1, "Alpharael, Dreaming Acolyte"));
+    assert!(!g.has_kw(overlord, Kw::Indestructible), "untapped");
+    for c in [overlord, bear, theirs, ship] {
+        g.set_tapped(c, true);
+    }
+    assert!(g.has_kw(overlord, Kw::Indestructible), "tapped, legendary, yours");
+    assert!(!g.has_kw(bear, Kw::Indestructible), "not legendary");
+    assert!(!g.has_kw(theirs, Kw::Indestructible), "an opponent's");
+    assert!(!g.has_kw(ship, Kw::Indestructible), "other");
+    assert!(is_creature(&g, ship) && g.has_kw(ship, Kw::Flying), "7+ | Flying [5/5]");
+    assert_eq!((g.power(ship), g.toughness(ship)), (5, 5));
+}
+
+// ---- Infinite Guideline Station ------------------------------------------------------------
+
+/// Infinite Guideline Station: "When Infinite Guideline Station enters,
+/// create a tapped 2/2 colorless Robot artifact creature token for each
+/// multicolored permanent you control" (CR 105.2a, 111.2): itself (five
+/// colours) and Alpharael (blue and black), not the opponent's.
+#[test]
+fn infinite_guideline_station_makes_a_tapped_robot_per_multicolored_permanent_cr105_2a() {
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Island", "Swamp", "Mountain", "Forest", "Alpharael, Dreaming Acolyte", "Cross Bear"])
+        .battlefield(1, &["Alpharael, Dreaming Acolyte"])
+        .hand(0, &["Infinite Guideline Station"])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, 0, "Infinite Guideline Station", &[]);
+    settle(&mut g);
+    let robots: Vec<engine::CardIdx> = g.permanents_of(0).filter(|&c| g.name(c) == "Robot").collect();
+    assert_eq!(robots.len(), 2, "{}", log(&g));
+    for r in robots {
+        assert!(g.obj(r).tapped, "tapped");
+        assert_eq!((g.power(r), g.toughness(r)), (2, 2));
+        assert_eq!(g.colors_of(r), 0, "colorless");
+        assert!(g.types_of(r) & types::ARTIFACT != 0 && is_creature(&g, r));
+    }
+    assert_eq!(g.permanents_of(1).filter(|&c| g.name(c) == "Robot").count(), 0);
+}
+
+/// "Station. 12+ | Flying" [7/15]; "Whenever Infinite Guideline Station
+/// attacks, draw a card for each multicolored permanent you control."
+#[test]
+fn infinite_guideline_station_attacks_and_draws_per_multicolored_permanent_cr722_2b() {
+    let mut g = scen()
+        .battlefield(0, &["Infinite Guideline Station", "Alpharael, Dreaming Acolyte"])
+        .counters(0, "Infinite Guideline Station", charge(), 12)
+        .at(Step::Main1, 0)
+        .start();
+    let ship = bf(&g, 0, "Infinite Guideline Station");
+    assert!(is_creature(&g, ship) && g.has_kw(ship, Kw::Flying));
+    assert_eq!((g.power(ship), g.toughness(ship)), (7, 15));
+    let hand = g.player(0).hand.len();
+    attack_with(&mut g, 0, &["Infinite Guideline Station"]);
+    quiet_until(&mut g, |g| g.turn().step == Step::Main2 && at_priority(g));
+    assert_eq!(g.player(0).hand.len(), hand + 2, "{}", log(&g));
+    assert_eq!(g.life(1), 13);
+}

@@ -17,7 +17,8 @@ fn scope_filter_ok(f: &Filter) -> bool {
         | Filter::Color(_)
         | Filter::Controller(_)
         | Filter::Token
-        | Filter::HasCounter(_) => true,
+        | Filter::HasCounter(_)
+        | Filter::Tapped => true,
         Filter::And(a, b) => scope_filter_ok(a) && scope_filter_ok(b),
         Filter::Or(v) => v.iter().all(scope_filter_ok),
         Filter::Not(a) => scope_filter_ok(a),
@@ -408,6 +409,16 @@ fn lower_scope(l: &mut Lowerer, s: &cats::StaticScope) -> Option<Scope> {
             *other,
         ),
         K::SubtypeYouControl if !subtype.is_empty() => (you(Filter::Subtype(l.subtype(subtype))), *other),
+        // "Other tapped legendary creatures you control" (The Seriema;
+        // ENGINE.md 99.8): being tapped is no characteristic, nothing
+        // recurses.
+        K::OtherTappedLegendaryCreaturesYouControl => (
+            Filter::And(
+                Box::new(you(Filter::And(Box::new(Filter::Type(types::CREATURE)), Box::new(Filter::Tapped)))),
+                Box::new(Filter::Supertype(crate::db::supertypes::LEGENDARY)),
+            ),
+            true,
+        ),
         K::CardTypeYouControl => match types::from_name(card_type) {
             Some(t) => (you(Filter::Type(t)), *other),
             None => {
