@@ -508,6 +508,9 @@ pub(crate) fn lower_state_pred(l: &mut Lowerer, p: &cats::StatePredicate) -> Opt
         }
         // Void: an intervening "if" (CR 603.4; ENGINE.md 99.4).
         S::VoidActive(nodes::VoidActive {}) => (Cond::Void, true),
+        // "If a player controls no creatures" (Sothera, the Supervoid; an
+        // intervening "if", CR 603.4; ENGINE.md 99.11).
+        S::AnyPlayerControlsNoCreatures(nodes::AnyPlayerControlsNoCreatures {}) => (Cond::APlayerControlsNoCreatures, true),
         // (Edge of Eternities lane B's predicates, ENGINE.md 99.3.)
         other => return super::eoe_b::lower_state_pred_eoe_b(l, other),
     })

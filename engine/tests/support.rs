@@ -901,6 +901,7 @@ const SUPPORTED_EOE_IRFIX: &[&str] = &[
     "Sami's Curiosity",
     "Scrounge for Eternity",
     "Seedship Agrarian",
+    "Sothera, the Supervoid",
     "Starfield Shepherd",
     "Sunstar Expansionist",
     "Syr Vondam, Sunstar Exemplar",

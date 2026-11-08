@@ -50,6 +50,7 @@ impl Game {
             }),
             Cond::GainedLifeThisTurn => pl.gained_life,
             Cond::ArtifactEnteredThisTurn => pl.artifact_entered,
+            Cond::APlayerControlsNoCreatures => (0..2u8).any(|q| self.creatures_of(q).next().is_none()),
             Cond::GainedLifeAtLeast(n) => pl.life_gained >= *n as u32,
             Cond::OpponentHasMoreCards => self.players[crate::ids::opp(p) as usize].hand.len() > pl.hand.len(),
             Cond::OpponentControlsMoreLands => {

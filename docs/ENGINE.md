@@ -19082,3 +19082,27 @@ Full engine suite (normal release profile): 1,880 passed, 0 failed, 15 ignored. 
 510.6 decisions), the default `FUZZ_GAMES=20000`: 20,000 games (9,967 / 9,994, 39 draws, as before)
 and 1,000 matches, all four fuzz tests passed; `cargo test -p card_ir` and `python -m pytest
 tools/codegen` pass.
+
+**Sothera, the Supervoid** (added to W1 by the coordinator: W4's docs/ir_defects.md entry 180 on
+`eoe-w4-exile`, the end-step ability returning the creature before sacrificing Sothera). mtg-bot
+`feature/eoe-ir-fixes` 7c02e5c9 puts the sacrifice first (`Sequence [SacrificeSelfPreservingExileLink,
+ReanimateOneExiledWithSourceWithCounters]`; schema unchanged, the cube's and the legacy IR card for
+card unchanged, only Sothera's printing in `eoe.ir.json`). The engine: `EoeW1::ChooseOwnExileLinked`
+("each opponent chooses a creature they control and exiles it", the card exiled with Sothera, CR
+607.2a), `LinkedCreatureToBattlefieldWith` (a linked creature card enters under your control with
+two +1/+1 counters, 614.1c), `Cond::APlayerControlsNoCreatures` (an intervening "if", 603.4), the
+sacrifice as `SacrificeSource` (the link survives it). Supported: EoE 272 -> 273; two card tests.
+
+**No approximations** (the user's rule, given during the work): every choice W1 added keeps every
+legal option reachable: the linked-creature choice pages through the 32 exile slots (31 cards and
+`PASS` for the next page) instead of truncating; Meltstrider's Resolve's "enchanted creature" is the
+Aura's last known attachment if the Aura left before its trigger resolved (CR 608.2h,
+`Game::lki_attached`); "an artifact entered the battlefield under your control" is noted as the
+permanent's `Enters` event happens (what it entered as, a copy of an artifact too, CR 707.5). One
+divergence is left, reported here rather than claimed equivalent: when a dying or exiled
+permanent's destination is chosen among replacement effects (`Dest::Choose`: the library or exile),
+its `LeavesBattlefield` event is matched while it is "exiled for now", so `TrigPred::LeftTo` reads
+exile even if the library is chosen next (Syr Vondam would trigger for a permanent shuffled into a
+library). No card of the EoE table puts a permanent into a library instead of a graveyard, so no
+EoE game reaches it; making the match wait for the choice needs the leave event re-timed for every
+card (left for the maintainer). No docs/shortcuts.md entry was added by W1.

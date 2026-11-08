@@ -938,6 +938,9 @@ pub enum Cond {
     /// (Mechan Shieldmate; whether it stayed doesn't matter, its ruling of
     /// 2025-07-25; ENGINE.md 99.11).
     ArtifactEnteredThisTurn,
+    /// A player controls no creatures (Sothera, the Supervoid; ENGINE.md
+    /// 99.11).
+    APlayerControlsNoCreatures,
     /// You gained n or more life this turn (EoE lane D).
     GainedLifeAtLeast(u16),
     /// An opponent has more cards in hand than you.
@@ -1010,6 +1013,7 @@ impl Cond {
             | Cond::SourceCountersIn(..)
             | Cond::GainedLifeThisTurn
             | Cond::ArtifactEnteredThisTurn
+            | Cond::APlayerControlsNoCreatures
             | Cond::GainedLifeAtLeast(_)
             | Cond::SpellsCastThisTurn { .. }
             | Cond::YourTurn

@@ -846,3 +846,54 @@ fn cr_509_1b_meltstriders_resolve_allows_only_one_blocker() {
     assert_eq!(g.kind(), Some(DecisionKind::DeclareBlockers), "the second blocker's turn");
     assert!(!g.has_option(Choice::Card(bear)), "a second can't join\n{}", log(&g));
 }
+
+// ---- Sothera, the Supervoid (docs/ir_defects.md 180, W4's entry) -------------
+
+/// Sothera: "Whenever a creature you control dies, each opponent chooses a
+/// creature they control and exiles it. / At the beginning of your end step,
+/// if a player controls no creatures, sacrifice Sothera, then put a creature
+/// card exiled with it onto the battlefield under your control with two
+/// additional +1/+1 counters on it." The opponent chooses (CR 608.2d); the
+/// end-step ability checks its "if" (603.4); Sothera is sacrificed first, the
+/// card still linked to it (607.2a), and the creature enters under its
+/// controller's control with the counters (614.1c).
+#[test]
+fn cr_607_2a_sothera_exiles_then_sacrifices_and_returns_a_creature_with_counters() {
+    let mut g = scen()
+        .battlefield(0, &["Sothera, the Supervoid", "Test Bear", "Mountain", "Mountain", "Mountain"])
+        .battlefield(1, &["Test Flyer", "Test Wall"])
+        .hand(0, &["Bombard"])
+        .at(Step::Main1, 0)
+        .start();
+    let (bear, flyer, wall) = (bf(&g, 0, "Test Bear"), bf(&g, 1, "Test Flyer"), bf(&g, 1, "Test Wall"));
+    let tb = g.tgt(bear);
+    let c = g.card(0, "Bombard", Zone::Hand);
+    start_with(&mut g, Choice::Cast(c), move |g| pick(g, &[tb]));
+    resolve_with(&mut g, |g| {
+        if g.kind() == Some(DecisionKind::ChoosePermanent) {
+            let d = g.pending_decision().unwrap();
+            assert!(d.options.iter().all(|o| matches!(o.choice, Choice::Card(x) if g.obj(x).controller == 1)), "a creature they control");
+            return Some(Choice::Card(flyer));
+        }
+        None
+    });
+    assert_eq!(g.obj(bear).zone, Zone::Graveyard);
+    assert_eq!(g.obj(flyer).zone, Zone::Exile, "the opponent exiled their chosen creature\n{}", log(&g));
+    assert_eq!(g.obj(wall).zone, Zone::Battlefield);
+    // Both players control creatures? P0 none: the end-step ability triggers.
+    quiet_until(&mut g, |g| g.turn().step == Step::Cleanup || g.turn().active == 1);
+    let sothera = g.card(0, "Sothera, the Supervoid", Zone::Graveyard);
+    assert_eq!(g.obj(sothera).zone, Zone::Graveyard, "sacrificed\n{}", log(&g));
+    let f = g.card(1, "Test Flyer", Zone::Battlefield);
+    assert_eq!(g.obj(f).controller, 0, "under Sothera's controller's control");
+    assert_eq!(g.counters_on(f, Counter::P1P1), 2, "two additional +1/+1 counters\n{}", log(&g));
+}
+
+/// "If a player controls no creatures": with creatures on both sides the
+/// end-step ability doesn't trigger (CR 603.4).
+#[test]
+fn cr_603_4_sothera_stays_while_both_players_control_creatures() {
+    let mut g = scen().battlefield(0, &["Sothera, the Supervoid", "Test Bear"]).battlefield(1, &["Test Flyer"]).at(Step::Main1, 0).start();
+    quiet_until(&mut g, |g| g.turn().active == 1);
+    assert!(in_zone(&g, 0, "Sothera, the Supervoid", Zone::Battlefield));
+}

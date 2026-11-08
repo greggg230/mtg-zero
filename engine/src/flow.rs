@@ -462,6 +462,7 @@ impl Game {
         self.discarded.clear();
         self.lki_counters.clear();
         self.lki_copy.clear();
+        self.lki_attached.clear();
         self.lki_damage.clear();
         self.lki_toughness.clear();
         self.spell_lki.clear();

@@ -173,6 +173,23 @@ pub(crate) fn lower_effect_eoe_w1(l: &mut Lowerer, b: &mut Builder, e: &cats::Ef
             let t = b.target(and(Filter::Type(types::CREATURE), Filter::Controller(false)), 0, 1);
             b.op(Op::Ext(Ext::EoeW1(EoeW1::HostFights { tgt: t })));
         }
+        // Sothera, the Supervoid: "each opponent chooses a creature they
+        // control and exiles it" (two players: the opponent), the cards
+        // exiled with Sothera (`link_to_source`, CR 607.2a).
+        E::EachOpponentExilesOwnCreature(nodes::EachOpponentExilesOwnCreature { link_to_source }) => {
+            b.op(Op::Ext(Ext::EoeW1(EoeW1::ChooseOwnExileLinked { who: Who::Opponent, filter: Filter::Type(types::CREATURE), linked: *link_to_source })));
+        }
+        // "Sacrifice Sothera": the source (its exiles stay linked to it, CR
+        // 607.2a: the exile had no duration).
+        E::SacrificeSelfPreservingExileLink(nodes::SacrificeSelfPreservingExileLink {}) => {
+            b.op(Op::Ext(Ext::SacrificeSource));
+        }
+        // "... then put a creature card exiled with it onto the battlefield
+        // under your control with two additional +1/+1 counters on it."
+        E::ReanimateOneExiledWithSourceWithCounters(nodes::ReanimateOneExiledWithSourceWithCounters { counter_amount }) => {
+            let n = l.int("ReanimateOneExiledWithSourceWithCounters.counter_amount", *counter_amount, 0, 20) as u8;
+            b.op(Op::Ext(Ext::EoeW1(EoeW1::LinkedCreatureToBattlefieldWith { counter: crate::db::Counter::P1P1, n })));
+        }
         _ => return false,
     }
     true

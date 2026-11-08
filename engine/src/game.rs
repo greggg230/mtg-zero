@@ -678,6 +678,10 @@ pub struct Game {
     /// Copiable values of permanents that left the battlefield this turn,
     /// as they last existed there (CR 608.2h).
     pub(crate) lki_copy: Vec<(ObjRef, crate::copies::CopyVals)>,
+    /// The permanents that permanents leaving the battlefield this turn were
+    /// attached to, as they last existed there ("enchanted creature" of an
+    /// Aura that left, CR 608.2h; ENGINE.md 99.11).
+    pub(crate) lki_attached: Vec<(ObjRef, ObjRef)>,
     /// Permanents that left the battlefield this turn as damage sources, as
     /// they last existed there (CR 608.2h, 113.7a; kept when
     /// `SEEN_LKI_DAMAGE`).
@@ -1072,6 +1076,7 @@ impl Game {
             copies: Vec::new(),
             copy_objs: Vec::new(),
             lki_copy: Vec::new(),
+            lki_attached: Vec::new(),
             lki_damage: Vec::new(),
             lki_toughness: Vec::new(),
             spell_lki: Vec::new(),
@@ -1551,6 +1556,7 @@ impl Game {
             }
         }
         if self.objs[idx.i()].zone == Zone::Battlefield && self.objs[idx.i()].inc == r.inc {
+            self.note_entered(idx);
             self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(r), b: crate::triggers::Subj::None, amount: note as u32 });
         }
         r
@@ -1917,6 +1923,9 @@ impl Game {
         if from == Zone::Battlefield {
             let v = self.copiable(idx);
             self.lki_copy.push((old, v));
+            if let Some(h) = self.objs[idx.i()].attached {
+                self.lki_attached.push((old, h));
+            }
             if self.seen & SEEN_LKI_DAMAGE != 0 {
                 let d = self.damage_source_of(idx);
                 self.lki_damage.push((old, d));
@@ -2083,17 +2092,12 @@ impl Game {
                 self.add_effect(crate::layers::Affected::Obj(new), m, crate::layers::Until::Forever, ctl);
             }
         }
-        // "An artifact entered the battlefield under your control this turn"
-        // (Mechan Shieldmate; ENGINE.md 99.11).
-        if to == Zone::Battlefield && self.is_type(idx, crate::db::types::ARTIFACT) {
-            let ctl = self.objs[idx.i()].controller;
-            self.players[ctl as usize].artifact_entered = true;
-        }
         if to == Zone::Battlefield {
             // (The note: cast, times paid; an "enter as a copy" choice holds
             // the event back, `copies.rs`.)
             let note = std::mem::take(&mut self.enter_note);
             if !std::mem::take(&mut self.defer_enters) {
+                self.note_entered(new.idx);
                 self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(new), b: crate::triggers::Subj::None, amount: note as u32 });
             }
         }
