@@ -56,6 +56,17 @@ permission) and a consumer can go wrong with it.
 | 18 | Wizard's Rockets | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (as entry 15) | `cards/parser/triggers.py` (the same phrase-table entry as entry 15) | fixed (8ea9fcca), supported | confirmed |
 | 19 | Gut, True Soul Zealot | qualifier widened | `SacrificeAPermanent { another: true, permanent_filter: ObjectOr(IsCreature, IsArtifact) }` for "sacrifice another creature or an artifact" | "another" on the creature only (an artifact may be Gut itself) | the "sacrifice another ..." phrase parser (`IfYouDo` / `MayDo`) | worked around (the label read) | confirmed |
 | 20 | Adagia, Windswept Bastion; Evendo, Waking Haven; Kavaron, Memorial World; Susur Secundi, Void Altar; Uthros, Titanic Godcore; The Eternity Elevator (Edge of Eternities, ENGINE.md 99) | ability dropped | the planets: a land with `enters_tapped` and `produces` only; The Eternity Elevator: no `station_threshold` / `stationed_*` | Station (CR 702.184) and each threshold ability ("12+ ..."), as the set's Spacecraft carry them | `cards/parser/land_builder.py` (planets) and the Spacecraft builder (`cards/parser/spacecraft_builder.py`) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 40 | 19 lands of the EoE table: Bonders' Enclave, Cascading Cataracts, Cathedral of War, Crystal Quarry, Deserted Temple, Echoing Deeps, Inkmoth Nexus, Mutavault, Power Depot, Terrain Generator, Thespian's Stage; Blast Zone, Contested War Zone, Endless Sands, Inventors' Fair, Mirrorpool, Mystifying Maze, Nesting Grounds, Swarmyard (ENGINE.md 99.3) | ability dropped | no `{T}: Add {C}` ability, no `produces`, no `mana_only_from_produces` | `produces: [C]` with `mana_only_from_produces` (as Strip Mine since entry 1's fix) | `cards/parser/land_builder.py` (the builders that match `_DROPPED_TAP_FOR_C_LINE`, ~line 1452 on) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 41 | Blinkmoth Nexus, Inkmoth Nexus, Mutavault (ENGINE.md 99.3) | schema can't say it | `BecomeLandCreatureUEOT` with no card type and (Inkmoth, Mutavault) no creature types | "a 1/1 Blinkmoth **artifact** creature"; "Phyrexian Blinkmoth artifact creature"; "a 2/2 creature with all creature types" | `effects/generic/become_type.py::BecomeLandCreatureUEOT` (no card-type field), `cards/parser/land_builder.py::_try_build_manland` | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 42 | the 13 cards that create a Lander token through `CreateToken` (Beamsaw Prospector, Galactic Wayfarer, ...; ENGINE.md 99.3) | cost dropped | the token's ability costs `{2}`, sacrifice this token | "{2}, {T}, Sacrifice this token" (CR 111.10: the predefined Lander token) | the token-phrase parser's Lander printing (`TOKEN_PRINTINGS["Lander"]`) | blocked (`lower::IR_DEFECTS`); the engine's own Lander (CR 111.10) has the {T} | confirmed |
+| 43 | Divert Disaster (ENGINE.md 99.3) | clause dropped | `CounterTargetSpell {}`: a hard counter | "Counter target spell unless its controller pays {2}. If they do, you create a Lander token." | the counterspell phrase parser | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 44 | Unravel (ENGINE.md 99.3) | clause dropped | `CounterTargetSpell {}` | "... If the amount of mana spent to cast that spell was less than its mana value, you draw a card." | the counterspell phrase parser | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 45 | Xu-Ifit, Osteoharmonist (ENGINE.md 99.3) | clause dropped | `ReturnCreatureFromYourGraveyardToBattlefield` | "... It's a Skeleton in addition to its other types and has no abilities." | the reanimation phrase parser | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 46 | High Market (ENGINE.md 99.3) | cost widened | `sacrifice_another_creature_or_artifact: true` | "Sacrifice a creature" | `cards/parser/land_builder.py::_try_build_tap_sac_utility_land` (its docstring: "widens 'a creature' to 'a creature or artifact'") | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 47 | Power Depot (ENGINE.md 99.3) | ability dropped, restriction narrowed | one mana ability, `spend_restriction: artifact_spell`; no modular | also "{T}: Add {C}" (entry 40) and "Modular 1"; "spend this mana only to cast artifact spells **or activate abilities of artifacts**" | the artifact-land builder | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 48 | Starfield Shepherd (ENGINE.md 99.3) | choice reshaped | `ModalChooseOne [search basic Plains, search creature MV <= 1]` | one search for "a basic Plains card or a creature card with mana value 1 or less" | the library-search phrase parser | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 49 | Pull Through the Weft (ENGINE.md 99.3) | clause dropped | `ReturnUpToNNonlandPermanentCardsFromGraveyardToHand` only | "... then return up to two target land cards from your graveyard to the battlefield tapped" | `effects/generic/bounce.py` (its docstring: "the second ... clause is dropped at parse time") | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 50 | Sunken Citadel (ENGINE.md 99.3) | choice dropped | two mana abilities making `any` colour; no "as it enters, choose a color" | one mana / two mana "of the chosen color" | the land builder | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -381,6 +392,138 @@ Elevator is a Spacecraft with Station.
   Without the entry the five planets lowered as plain taplands and the support report counted them
   supported (98 cards instead of 93): a silent drop the report could not see. Found by checking
   every EoE card whose Oracle text has Station for a `station_threshold` in its IR.
+
+### L. Edge of Eternities, lane B: lands, Landers and the base cards' audit (ENGINE.md 99.3)
+
+Found by reading the IR of every card of `SUPPORTED_EOE_BASE` and of lane B's cards next to its
+Oracle text (`data/cards/eoe.ir.json`, mtg-bot main 2cb79f77), after a scripted check of mana
+costs, types, power and toughness, keywords and the mana each land makes.
+
+**40. "{T}: Add {C}." dropped from 19 lands.** Oracle (Mutavault): "{T}: Add {C}. / {1}: This land
+becomes a 2/2 creature with all creature types until end of turn. It's still a land." Every one of
+the 19 has the line "{T}: Add {C}." (Cascading Cataracts, Crystal Quarry and Power Depot beside
+another mana ability).
+
+* IR: no `{T}: Add {C}` mana ability, `produces: []`, `mana_only_from_produces: false`. The Python
+  engine pays one generic mana with such a land anyway; mtg-bot's own comment on the field says
+  "pre-existing printings rely on it for their dropped `{T}: Add {C}.` lines" (`cards/base.py`).
+* Should be: `produces: ["C"]` with `mana_only_from_produces: true`, as entry 1's fix gives Strip
+  Mine (or an explicit `{T}: AddManaToPool [C, 1]`).
+* Source: `cards/parser/land_builder.py`, the builders that match the "{T}: Add {C}." line and keep
+  only the others (`_DROPPED_TAP_FOR_C_LINE`, ~line 1452: `_try_build_paid_fancy_mana_land`,
+  `_try_build_keyword_colorless_utility_land`, `_try_build_paid_effect_utility_land`, ...).
+* Fix: pass `produces=frozenset({"C"})` and `mana_only_from_produces=True` wherever the line is
+  matched.
+* Engine: blocked, `ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)`. It is not a missing
+  engine feature: the generic fallback is not "{T}: Add {C}" (it can't pay a {C} pip and isn't a
+  mana ability) and lands pay only through their mana abilities here (ENGINE.md 14, 19); reading an
+  absent ability as "{T}: Add {C}" would invent data the IR doesn't hold. The 16 with no other mana
+  ability also carry the engine's own consistency blocker
+  `CardPrinting.mana_only_from_produces(land without a mana ability)`, which is what lane B's
+  feature of that name (18 cards) turned out to be: 16 of the 18 are this defect; the other two,
+  Meteor Crater and Reflecting Pool, have a mana ability the engine didn't lower yet.
+
+**41. An animated land's types dropped.** Oracle: Blinkmoth Nexus "{1}: This land becomes a 1/1
+Blinkmoth artifact creature with flying until end of turn. It's still a land."; Inkmoth Nexus "... a
+1/1 Phyrexian Blinkmoth artifact creature with flying and infect ..."; Mutavault "... a 2/2 creature
+with all creature types ...".
+
+* IR: `BecomeLandCreatureUEOT { power, toughness, granted_keywords, granted_subtype }`: Blinkmoth
+  Nexus's has `granted_subtype: "Blinkmoth"` and no artifact; Inkmoth's and Mutavault's have no
+  subtype either. The class has no field for a card type, and one `granted_subtype` (a string) can't
+  say "Phyrexian Blinkmoth" or "all creature types".
+* Should be: the added card types (`Artifact`) and creature types (a list, or "all creature types",
+  CR 205.3m) of the animation.
+* Source: `effects/generic/become_type.py::BecomeLandCreatureUEOT` (schema) and
+  `cards/parser/land_builder.py::_try_build_manland`.
+* Fix: add `granted_types` and make `granted_subtype` a list (or an "all creature types" flag).
+* Engine: blocked (`lower::IR_DEFECTS`). Blinkmoth Nexus was supported at the import (it lowered as
+  a non-artifact Blinkmoth creature: wrong for every "artifact" rule of the set) and is removed from
+  `SUPPORTED_EOE_BASE`.
+
+**42. The Lander token without {T}.** Oracle (reminder text, CR 111.10's predefined token): "It's
+an artifact with '{2}, {T}, Sacrifice this token: Search your library for a basic land card, put it
+onto the battlefield tapped, then shuffle.'"
+
+* IR: in each of the 13 `CreateToken` Lander printings, the ability's cost is
+  `{ mana: {2}, sacrifice_self: true }`, without `tap_self`.
+* Should be: `tap_self: true`. It matters: a tapped Lander (Secluded Starforge's "tap X untapped
+  artifacts", Mental Modulation's tap) can't be sacrificed for its ability, and a Lander made a
+  creature (Synthesizer Labship, Tezzeret's emblem) can't use it the turn it became one (CR 302.6).
+* Source: the token-phrase parser's Lander printing (`TOKEN_PRINTINGS["Lander"]`, built from the
+  reminder text).
+* Fix: add the `{T}`.
+* Engine: blocked (`lower::IR_DEFECTS`, the 13 cards). The engine has its own Lander token from CR
+  111.10 (`lower/eoe_b.rs`), with the {T}, for the effect classes that create one without a printing
+  (Kav Landseeker, Emergency Eject, Orbital Plunge); the IR's printing is not overridden by it.
+
+**43. Divert Disaster.** Oracle: "Counter target spell unless its controller pays {2}. If they do,
+you create a Lander token."
+
+* IR: `spell_effect: CounterTargetSpell {}`, a hard counter for {1}{U}.
+* Should be: a counter unless its controller pays {2}, then, if they paid, a Lander token for the
+  spell's caster (the controller of Divert Disaster).
+* Engine: blocked (`lower::IR_DEFECTS`); removed from `SUPPORTED_EOE_BASE`.
+
+**44. Unravel.** Oracle: "Counter target spell. If the amount of mana spent to cast that spell was
+less than its mana value, you draw a card."
+
+* IR: `CounterTargetSpell {}`; the draw is dropped (a warp-cast or cost-reduced spell would draw).
+* Engine: blocked (`lower::IR_DEFECTS`); removed from `SUPPORTED_EOE_BASE`.
+
+**45. Xu-Ifit, Osteoharmonist.** Oracle: "{T}: Return target creature card from your graveyard to
+the battlefield. It's a Skeleton in addition to its other types and has no abilities. Activate only
+as a sorcery."
+
+* IR: `ReturnCreatureFromYourGraveyardToBattlefield { creature: true, destination: battlefield }`;
+  the returned creature keeps its abilities and types.
+* Engine: blocked (`lower::IR_DEFECTS`); removed from `SUPPORTED_EOE_BASE`.
+
+**46. High Market.** Oracle: "{T}: Add {C}. / {T}, Sacrifice a creature: You gain 1 life."
+
+* IR: `ActivationCost { tap_self, sacrifice_another_creature_or_artifact: true }`: an artifact (a
+  Lander, a Robot, Munitions) may be sacrificed.
+* Source: `cards/parser/land_builder.py::_try_build_tap_sac_utility_land`, whose docstring says the
+  flag "widens 'a creature' to 'a creature or artifact'".
+* Fix: a "sacrifice a creature" cost.
+* Engine: blocked (`lower::IR_DEFECTS`); removed from `SUPPORTED_EOE_BASE`.
+
+**47. Power Depot.** Oracle: "This land enters tapped. / {T}: Add {C}. / {T}: Add one mana of any
+color. Spend this mana only to cast artifact spells or activate abilities of artifacts. / Modular
+1".
+
+* IR: one mana ability, `AddManaToPool [any, 1]` with `spend_restriction: "artifact_spell"`; no
+  "{T}: Add {C}" (entry 40), no modular (CR 702.43).
+* Should be: the {C} ability, a restriction that also allows artifacts' abilities, and modular 1.
+* Engine: blocked (`lower::IR_DEFECTS`); removed from `SUPPORTED_EOE_BASE`.
+
+**48. Starfield Shepherd.** Oracle: "When this creature enters, search your library for a basic
+Plains card or a creature card with mana value 1 or less, reveal it, put it into your hand, then
+shuffle."
+
+* IR: `ModalChooseOne [SearchLibraryForCard basic_plains, SearchLibraryForCard creature_small
+  (max_mv 1)]`: the player picks the kind of card when the ability is put on the stack (CR 603.3c),
+  publicly and before the search; the card lets them pick any card of either kind during the search
+  (a draw or mill in response changes which modes would find something).
+* Should be: one `SearchLibraryForCard` with an `ObjectOr` filter.
+* Engine: blocked (`lower::IR_DEFECTS`); removed from `SUPPORTED_EOE_BASE`.
+
+**49. Pull Through the Weft.** Oracle: "Return up to two target nonland permanent cards from your
+graveyard to your hand, then return up to two target land cards from your graveyard to the
+battlefield tapped."
+
+* IR: `ReturnUpToNNonlandPermanentCardsFromGraveyardToHand`; its docstring: "the second 'lands to
+  battlefield tapped' clause is dropped at parse time".
+* Engine: blocked (`lower::IR_DEFECTS`).
+
+**50. Sunken Citadel.** Oracle: "This land enters tapped. As it enters, choose a color. / {T}: Add
+one mana of the chosen color. / {T}: Add two mana of the chosen color. Spend this mana only to
+activate abilities of land sources."
+
+* IR: `enters_tapped`, `AddManaToPool [any, 1]` and `AddManaToPool [any, 2]` (restricted); no colour
+  chosen as it enters: any colour on every activation.
+* Should be: the entering choice and mana of that colour.
+* Engine: blocked (`lower::IR_DEFECTS`).
 
 ## Suspected defects (representational)
 

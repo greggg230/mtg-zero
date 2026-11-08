@@ -227,6 +227,58 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // Lane A (ENGINE.md 99.2; docs/ir_defects.md 21-39).
 
     // Lane B (ENGINE.md 99.3; docs/ir_defects.md 40-59).
+    // "{T}: Add {C}." dropped: Python's "any land pays one generic" fallback
+    // stands in for it (docs/ir_defects.md 40).
+    ("Blast Zone", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Bonders' Enclave", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Cascading Cataracts", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Cathedral of War", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Contested War Zone", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Crystal Quarry", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Deserted Temple", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Echoing Deeps", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Endless Sands", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Inkmoth Nexus", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Inventors' Fair", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Mirrorpool", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Mutavault", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Mystifying Maze", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Nesting Grounds", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Power Depot", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Swarmyard", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Terrain Generator", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    ("Thespian's Stage", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
+    // An animated land loses the card type or creature types it becomes
+    // (docs/ir_defects.md 41).
+    ("Blinkmoth Nexus", "ir_defect(animated land's types dropped, docs/ir_defects.md 41)"),
+    ("Inkmoth Nexus", "ir_defect(animated land's types dropped, docs/ir_defects.md 41)"),
+    ("Mutavault", "ir_defect(animated land's types dropped, docs/ir_defects.md 41)"),
+    // The Lander token's "{2}, {T}, Sacrifice this token" without {T}
+    // (docs/ir_defects.md 42).
+    ("Beamsaw Prospector", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
+    ("Bioengineered Future", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
+    ("Biomechan Engineer", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
+    ("Biotech Specialist", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
+    ("Dauntless Scrapbot", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
+    ("Edge Rover", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
+    ("Galactic Wayfarer", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
+    ("Glacier Godmaw", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
+    ("Lithobraking", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
+    ("Sami's Curiosity", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
+    ("Scrounge for Eternity", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
+    ("Seedship Agrarian", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
+    ("Sunstar Expansionist", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
+    // Clauses of an effect dropped (docs/ir_defects.md 43-45, 49).
+    ("Divert Disaster", "ir_defect(unless-pays and Lander dropped, docs/ir_defects.md 43)"),
+    ("Unravel", "ir_defect(draw clause dropped, docs/ir_defects.md 44)"),
+    ("Xu-Ifit, Osteoharmonist", "ir_defect(Skeleton and no abilities dropped, docs/ir_defects.md 45)"),
+    ("Pull Through the Weft", "ir_defect(lands-to-battlefield clause dropped, docs/ir_defects.md 49)"),
+    // A cost, a choice or a restriction reshaped (docs/ir_defects.md 46-48,
+    // 50).
+    ("High Market", "ir_defect(sacrifice a creature widened, docs/ir_defects.md 46)"),
+    ("Power Depot", "ir_defect(modular dropped, spend restriction narrowed, docs/ir_defects.md 47)"),
+    ("Starfield Shepherd", "ir_defect(one search made modal, docs/ir_defects.md 48)"),
+    ("Sunken Citadel", "ir_defect(chosen colour dropped, docs/ir_defects.md 50)"),
 
     // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79).
 
@@ -268,7 +320,7 @@ pub fn lower_card(
     if l.uses_prepare && def.prepare.is_none() {
         l.unsupported("Effect:SourceBecomesPrepared(without a prepare spell)");
     }
-    if let Some(&(_, blocker)) = IR_DEFECTS.iter().find(|(n, _)| *n == card.name) {
+    for &(_, blocker) in IR_DEFECTS.iter().filter(|(n, _)| *n == card.name) {
         l.unsupported(blocker);
     }
     if l.errs.is_empty() {
