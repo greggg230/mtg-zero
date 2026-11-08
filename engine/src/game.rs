@@ -2659,7 +2659,7 @@ impl Game {
     /// "Combat damage that would be dealt by creatures you control can't be
     /// prevented" (Questing Beast) for `p`.
     pub(crate) fn combat_unpreventable(&self, p: PlayerId) -> bool {
-        self.permanents_of(p).any(|c| self.abilities(c).combat_unpreventable)
+        self.permanents_of(p).any(|c| self.abilities(c).combat_unpreventable) || self.all_combat_unpreventable()
     }
 
     /// Does permanent `c` have protection from a source with these

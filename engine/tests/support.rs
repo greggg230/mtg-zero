@@ -900,6 +900,7 @@ const SUPPORTED_EOE_IRFIX: &[&str] = &[
 const SUPPORTED_EOE_MANA: &[&str] = &[
 ];
 const SUPPORTED_EOE_COMBAT: &[&str] = &[
+    "Frenzied Baloth",
     "Rust Harvester",
     "Sunstar Chaplain",
 ];

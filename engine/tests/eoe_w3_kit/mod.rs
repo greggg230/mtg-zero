@@ -93,6 +93,10 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         // "Target creature gets +3/+3 until end of turn."
         card("W3 Growth", "{G}", &["Instant"], &[], json!({"spell_effect": {"$t": "PumpTargetCreatureUntilEOT",
             "power_bonus": 3, "toughness_bonus": 3}})),
+        // "Counter target spell."
+        card("W3 Cancel", "{1}", &["Instant"], &[], json!({"spell_effect": {"$t": "CounterTargetSpell"}})),
+        // "Prevent all combat damage that would be dealt this turn."
+        card("W3 Fog", "{G}", &["Instant"], &[], json!({"spell_effect": {"$t": "PreventAllCombatDamageThisTurn"}})),
     ];
     cards.into_iter().map(|v| serde_json::from_value(v).expect("custom card IR")).collect()
 }

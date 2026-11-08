@@ -1696,6 +1696,8 @@ pub struct CardDef {
     /// "... stations permanents using its toughness rather than its power"
     /// (CR 702.184c; ENGINE.md 99.8).
     pub toughness_stations: bool,
+    /// The printing facts EoE workstream W3 adds (ENGINE.md 99.13).
+    pub w3: crate::eoe_w3::W3Def,
 }
 
 /// Rules about casting spells a card adds while it is on the battlefield

@@ -1262,7 +1262,12 @@ impl Game {
             }
         }
         let p = self.objs[card.i()].controller;
-        self.permanents_of(p).any(|c| self.abilities(c).spells_uncounterable)
+        // ("Creature spells you control can't be countered": EoE W3.)
+        let creature = self.is_creature(card);
+        self.permanents_of(p).any(|c| {
+            let d = self.abilities(c);
+            d.spells_uncounterable || creature && d.w3.creature_spells_uncounterable
+        })
     }
 
     /// Destroy a permanent (CR 701.7): to its owner's graveyard

@@ -321,7 +321,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.wipes_all_creature_abilities", wipes_all_creature_abilities);
         l.deny("CardPrinting.sets_all_creature_pt_to_1_1", sets_all_creature_pt_to_1_1);
         l.deny("CardPrinting.must_be_blocked_if_able", must_be_blocked_if_able);
-        l.deny("CardPrinting.combat_damage_cant_be_prevented", combat_damage_cant_be_prevented);
         let _ = flashback_cost_str; // display form of `flashback_cost`
         let _ = buyback_cost_str; // display form of `buyback_cost`
         l.deny_ne("CardPrinting.alt_cost_exile_from_hand_count", alt_cost_exile_from_hand_count, &generated::defaults::d_CardPrinting_alt_cost_exile_from_hand_count());
@@ -1904,6 +1903,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         blocks_only_subtype: (!blocks_only_with_subtype.is_empty()).then(|| l.subtype(blocks_only_with_subtype)),
         splice,
         miracle,
+        w3: crate::eoe_w3::W3Def {
+            // "Combat damage can't be prevented" (CR 615.12; Frenzied Baloth).
+            combat_unpreventable_all: *combat_damage_cant_be_prevented,
+            creature_spells_uncounterable: repl.creature_spells_uncounterable,
+        },
     };
     if *additional_cost_pay_x_life && (x_pips > 0 || !is_spell_card) {
         l.unsupported("CardPrinting.additional_cost_pay_x_life(with {X} or on a permanent)");

@@ -34,3 +34,20 @@ impl Game {
         self.item_index(id).map_or(0, |pos| self.stack[pos].x as usize)
     }
 }
+
+/// The printing facts of workstream W3 (`CardDef::w3`).
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
+pub struct W3Def {
+    /// "Combat damage can't be prevented" (CR 615.12): no combat damage
+    /// is, while it is on the battlefield (Frenzied Baloth).
+    pub combat_unpreventable_all: bool,
+    /// "Creature spells you control can't be countered" (CR 101.2).
+    pub creature_spells_uncounterable: bool,
+}
+
+impl Game {
+    /// Does a permanent say "combat damage can't be prevented" (CR 615.12)?
+    pub(crate) fn all_combat_unpreventable(&self) -> bool {
+        self.battlefield.iter().any(|&c| self.abilities(c).w3.combat_unpreventable_all)
+    }
+}

@@ -129,3 +129,77 @@ fn sunstar_chaplain_end_step_counter_needs_two_tapped_creatures_cr603_4() {
         }
     }
 }
+
+// ---- Frenzied Baloth ----------------------------------------------------------------
+
+/// Frenzied Baloth [3/2, trample, haste]: "This spell can't be countered"
+/// and "Creature spells you control can't be countered" (CR 101.2: a
+/// counterspell resolves and does nothing to them); a noncreature spell of
+/// its controller still can be.
+#[test]
+fn frenzied_baloth_your_creature_spells_cant_be_countered_cr101_2() {
+    let mut g = scen()
+        .battlefield(0, &["Frenzied Baloth", "Forest", "Forest", "Forest"])
+        .battlefield(1, &["Island", "Island"])
+        .hand(0, &["W3 Bear", "W3 Growth"])
+        .hand(1, &["W3 Cancel", "W3 Cancel"])
+        .at(Step::Main1, 0)
+        .start();
+    let baloth = bf(&g, 0, "Frenzied Baloth");
+    assert!(g.has_kw(baloth, Kw::Trample) && g.has_kw(baloth, Kw::Haste));
+    let bear = cast(&mut g, 0, "W3 Bear", &[]);
+    to_opponent_priority(&mut g);
+    let t = Choice::Target(engine::Target::Obj(g.obj_ref(bear)));
+    cast(&mut g, 1, "W3 Cancel", &[t]);
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Battlefield, "a creature spell: not countered\n{}", log(&g));
+    // A noncreature spell is countered.
+    let tb = g.tgt(baloth);
+    let growth = cast(&mut g, 0, "W3 Growth", &[tb]);
+    to_opponent_priority(&mut g);
+    let t = Choice::Target(engine::Target::Obj(g.obj_ref(growth)));
+    cast(&mut g, 1, "W3 Cancel", &[t]);
+    settle(&mut g);
+    assert_eq!(g.obj(growth).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.power(baloth), 3, "countered: no +3/+3");
+}
+
+/// Frenzied Baloth's own spell can't be countered either (CR 101.2).
+#[test]
+fn frenzied_baloth_this_spell_cant_be_countered_cr101_2() {
+    let mut g = scen()
+        .battlefield(0, &["Forest", "Forest"])
+        .battlefield(1, &["Island"])
+        .hand(0, &["Frenzied Baloth"])
+        .hand(1, &["W3 Cancel"])
+        .at(Step::Main1, 0)
+        .start();
+    let baloth = cast(&mut g, 0, "Frenzied Baloth", &[]);
+    to_opponent_priority(&mut g);
+    let t = Choice::Target(engine::Target::Obj(g.obj_ref(baloth)));
+    cast(&mut g, 1, "W3 Cancel", &[t]);
+    settle(&mut g);
+    assert_eq!(g.obj(baloth).zone, Zone::Battlefield, "{}", log(&g));
+}
+
+/// "Combat damage can't be prevented" (CR 615.12): a "prevent all combat
+/// damage" effect prevents none, of any creature (the Baloth's controller's
+/// and the opponent's alike).
+#[test]
+fn frenzied_baloth_combat_damage_cant_be_prevented_cr615_12() {
+    for with_baloth in [true, false] {
+        let mut bf0 = vec!["W3 Bear"];
+        if with_baloth {
+            bf0.push("Frenzied Baloth");
+        }
+        let mut g = scen().battlefield(0, &bf0).battlefield(1, &["Forest"]).hand(1, &["W3 Fog"]).at(Step::Main1, 0).turn_number(3).start();
+        attack_with(&mut g, 0, &["W3 Bear"]);
+        g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+        to_opponent_priority(&mut g);
+        cast(&mut g, 1, "W3 Fog", &[]);
+        settle(&mut g);
+        quiet_until(&mut g, |g| g.turn().step == Step::Main2);
+        let expect = if with_baloth { 18 } else { 20 };
+        assert_eq!(g.life(1), expect, "with the Baloth: {with_baloth}\n{}", log(&g));
+    }
+}
