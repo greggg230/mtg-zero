@@ -2763,6 +2763,8 @@ impl Game {
             // aren't seen: the one use is a companion's deck condition,
             // ENGINE.md 35).
             Filter::HasActivatedAbility => self.abilities(c).has_activated_ability(),
+            Filter::Blocking => self.objs[c.i()].blocking.is_some(),
+            Filter::DealtDamageThisTurn => self.dealt_damage_this_turn(c),
         }
     }
 }

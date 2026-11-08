@@ -97,6 +97,8 @@ macro_rules! lower_object_predicate {
                 Some(Filter::ManaValueAtLeast($l.int("HasManaValueAtLeast.n", *n, 0, 30) as u8))
             }
             E::IsTapped(nodes::IsTapped {}) => Some(Filter::Tapped),
+            // "Blocking creature" (EoE lane D, ENGINE.md 99.5).
+            E::IsBlocking(nodes::IsBlocking {}) => Some(Filter::Blocking),
             // "Permanent card" (CR 110.4a), and "has an activated ability"
             // (companion conditions, ENGINE.md 35).
             E::IsPermanentCard(nodes::IsPermanentCard {}) => Some(Filter::Type(types::PERMANENT)),

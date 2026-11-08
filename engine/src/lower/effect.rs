@@ -149,9 +149,13 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             }
         }
         E::DealDamageToTargetCreature(nodes::DealDamageToTargetCreature { amount, targets, optional }) => {
-            l.deny("DealDamageToTargetCreature.optional", optional);
             let amount = Amount::Fixed(l.int("DealDamageToTargetCreature.amount", *amount, 0, 99));
             if let Some(to) = lower_targets(l, b, targets, "DealDamageToTargetCreature") {
+                // "Up to one target creature" (EoE lane D, ENGINE.md 99.5):
+                // `optional` restates the target spec's minimum of 0.
+                if *optional != (b.targets[to as usize].min == 0) {
+                    l.unsupported("DealDamageToTargetCreature.optional(disagrees with the targets)");
+                }
                 b.op(Op::DealDamage { amount, to });
             }
         }

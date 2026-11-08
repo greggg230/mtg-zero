@@ -29,6 +29,7 @@ mod resolve_tail;
 mod resolve_tail2;
 mod resolve_tail3;
 mod resolve_m7d;
+mod resolve_eoe_d;
 mod resolve_walkers;
 pub mod rng;
 mod sba;

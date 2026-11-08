@@ -165,7 +165,6 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         }) => {
             l.deny("PumpTargetCreatureUntilEOT.granted_keywords_if_warp_cast", granted_keywords_if_warp_cast);
             l.deny("PumpTargetCreatureUntilEOT.draw_if_target_has_plus_one_counter", draw_if_target_has_plus_one_counter);
-            l.deny("PumpTargetCreatureUntilEOT.granted_triggered_ability", granted_triggered_ability);
             l.deny("PumpTargetCreatureUntilEOT.power_bonus_from_x", power_bonus_from_x);
             let mut f = creature();
             if *you_control_only {
@@ -189,6 +188,11 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let mods = pump_mods(l, *power_bonus, *toughness_bonus, granted_keywords);
             let t = b.target(f, if *optional { 0 } else { 1 }, 1);
             apply(b, On::Target(t), mods, Until::EndOfTurn);
+            if let Some(ta) = granted_triggered_ability.as_deref() {
+                // "... and gains '<triggered ability>'" (EoE lane D,
+                // ENGINE.md 99.5).
+                super::effect_eoe_d::grant_trigger_this_turn(l, b, On::Target(t), ta);
+            }
         }
         E::PumpCreaturesYouControlUntilEOT(nodes::PumpCreaturesYouControlUntilEOT {
             power_bonus,

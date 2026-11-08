@@ -382,6 +382,11 @@ pub enum Filter {
     /// are not abilities). A companion condition (Zirda, the Dawnwaker)
     /// reads it over the cards of a starting deck (`DeckCond`).
     HasActivatedAbility,
+    /// A blocking creature (CR 509.1g; EoE lane D).
+    Blocking,
+    /// A permanent that was dealt damage this turn (`Mark::DealtDamage`; EoE
+    /// lane D).
+    DealtDamageThisTurn,
 }
 
 /// `Filter::Ability` kinds.
@@ -1725,6 +1730,10 @@ pub struct CardDb {
     /// The route is the definition granting escape (Underworld Breach) or
     /// `RETRACE_ROUTE` (granted retrace).
     merged: Vec<(DefId, DefId, u8, Cost)>,
+    /// A card of the table reads "dealt damage this turn"
+    /// (`Filter::DealtDamageThisTurn`): the game records it
+    /// (`Mark::DealtDamage`; EoE lane D, ENGINE.md 99.5).
+    pub(crate) watch_damage: bool,
 }
 
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
@@ -1902,6 +1911,7 @@ impl CardDb {
             }
         }
         db.merged = merged;
+        db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
         db
     }
 

@@ -232,6 +232,13 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79).
 
     // Lane D (ENGINE.md 99.5; docs/ir_defects.md 80-99).
+    // "Dies or is put into exile" widened to "leaves the battlefield", and
+    // "while its power is 4 or greater" moved to resolution (80).
+    ("Syr Vondam, Sunstar Exemplar", "ir_defect(dies-or-exiled widened to leaves the battlefield, docs/ir_defects.md 80)"),
+    // "Target creature or planeswalker": the planeswalker dropped (81).
+    ("Dawnsire, Sunstar Dreadnought", "ir_defect(planeswalker target dropped, docs/ir_defects.md 81)"),
+    // "They lose 3 life" (the discarding player) written as a target (82).
+    ("Entropic Battlecruiser", "ir_defect(the event's player written as a target, docs/ir_defects.md 82)"),
 ];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.

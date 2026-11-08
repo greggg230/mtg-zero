@@ -731,6 +731,9 @@ impl Game {
     /// effects too, `copies.rs`).
     pub(crate) fn end_turn_effects(&mut self) {
         self.effects.retain(|e| e.until != Until::EndOfTurn);
+        if !self.marks.is_empty() {
+            self.marks.retain(|(_, m)| !matches!(m, crate::game::Mark::DiesTriggerThisTurn { .. }));
+        }
         self.effects_changed();
         if !self.copies.is_empty() {
             self.end_copy_effects(Until::EndOfTurn);

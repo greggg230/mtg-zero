@@ -842,6 +842,13 @@ pub enum Mark {
     /// card (in exile, this object) its delve exiled to pay its cost (CR
     /// 607.2q; ENGINE.md 54).
     ExiledToPay(ObjRef),
+    /// It was dealt damage in turn n ("if that creature wasn't dealt damage
+    /// this turn"; kept only when a card of the table reads it,
+    /// `CardDb::watch_damage`; EoE lane D, ENGINE.md 99.5).
+    DealtDamage(u16),
+    /// It has "When this creature dies, <trigger `slot` of `def`>" until end
+    /// of turn (EoE lane D; removed in the cleanup step, CR 514.2).
+    DiesTriggerThisTurn { def: DefId, slot: u8 },
 }
 
 /// `Mark::ChosenName` of a name no card of the game has.
@@ -2011,6 +2018,7 @@ impl Game {
                     Mark::LeaveTrigger { def, slot, exile } if r == old && (to == Zone::Graveyard || exile && to == Zone::Exile) => {
                         Some((def, slot))
                     }
+                    Mark::DiesTriggerThisTurn { def, slot } if r == old && to == Zone::Graveyard => Some((def, slot)),
                     _ => None,
                 })
                 .collect();
@@ -2532,6 +2540,9 @@ impl Game {
                     if src.deathtouch {
                         o.deathtouched = true;
                     }
+                }
+                if self.db.watch_damage {
+                    self.note_dealt_damage(r);
                 }
                 // "Whenever this is dealt damage": combat damage from several
                 // sources at once is one event with the total (Screaming
