@@ -66,7 +66,7 @@ impl Game {
                 back.i = 0;
                 back.floor = 0;
                 self.agenda.push(Task::Run(back));
-                self.agenda.push(Task::CopyTargets { id, k: 0, copy: false });
+                self.agenda.push(Task::CopyTargets { id, k: 0, copy: false, page: crate::decision::Page::FIRST });
                 Flow::Suspend
             }
             Ext::CounterEventItem => {

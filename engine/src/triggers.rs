@@ -587,7 +587,7 @@ impl Game {
             self.agenda.push(Task::Divide { id }); // CR 603.3d, 601.2d
         }
         if ab.has_targets() {
-            self.agenda.push(Task::ChooseTargets { id, req: 0 });
+            self.agenda.push(Task::ChooseTargets { id, req: 0, page: crate::decision::Page::FIRST });
         }
         if ab.modes.is_some() {
             self.agenda.push(Task::ChooseModes { id }); // CR 700.2b, 603.3c

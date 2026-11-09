@@ -459,7 +459,7 @@ impl Game {
                 back.i = f.i + 1;
                 self.agenda.push(Task::Run(back));
                 if *new_targets && !item.targets.is_empty() {
-                    self.agenda.push(Task::CopyTargets { id, k: 0, copy: true });
+                    self.agenda.push(Task::CopyTargets { id, k: 0, copy: true, page: crate::decision::Page::FIRST });
                 } else {
                     // The copy's targets become its targets (CR 707.10c).
                     self.all_became_targets(id);
@@ -548,7 +548,8 @@ impl Game {
     /// its target then. For a spell that is not a copy (`copy` false: "you
     /// may choose new targets for it", 115.7), each new target becomes its
     /// target as it is chosen.
-    pub(crate) fn copy_targets(&mut self, id: u32, k: u8, copy: bool) {
+    /// (`page`: the decision's page, `Game::ask_objects`, ENGINE.md 100.2.)
+    pub(crate) fn copy_targets(&mut self, id: u32, k: u8, copy: bool, page: crate::decision::Page) {
         let Some(pos) = self.item_index(id) else { return };
         if k as usize >= self.stack[pos].targets.len() {
             if copy {
@@ -563,11 +564,15 @@ impl Game {
                 if !copy && !self.stack[pos].targets.iter().enumerate().any(|(j, &(_, x))| j != k as usize && x == t) {
                     self.became_target(id, t);
                 }
-                self.agenda.push(Task::CopyTargets { id, k: k + 1, copy });
+                self.agenda.push(Task::CopyTargets { id, k: k + 1, copy, page: crate::decision::Page::FIRST });
                 return;
             }
             Some(Choice::Pass) => {
-                self.agenda.push(Task::CopyTargets { id, k: k + 1, copy });
+                self.agenda.push(Task::CopyTargets { id, k: k + 1, copy, page: crate::decision::Page::FIRST });
+                return;
+            }
+            Some(Choice::Page(next)) => {
+                self.agenda.push(Task::CopyTargets { id, k, copy, page: next });
                 return;
             }
             Some(other) => unreachable!("new target answer {other:?}"),
@@ -591,30 +596,22 @@ impl Game {
             })
             .map(|(_, &(_, t))| t)
             .collect();
-        let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
-        // (The copy is on the stack: the stack items in reach are counted
-        // from below it, ENGINE.md 58.1; a deeper current target is kept by
-        // `PASS`.)
-        self.targeting = id;
+        // (`PASS` keeps the current target.)
         let mut cands = self.target_candidates(tr, &ctx, &exclude);
-        self.targeting = 0;
         if let Some(n) = tr.total_mv {
             // The new set within the total too (CR 601.2c, 707.10c).
             let others: Vec<Target> =
                 item.targets.iter().enumerate().filter(|&(j, &(r, _))| j != k as usize && r == req).map(|(_, &(_, t))| t).collect();
             self.retain_within_total_mv(n, &others, &mut cands);
         }
-        for t in cands {
-            if t != cur {
-                opts.push(Opt { action: self.target_action(p, t), choice: Choice::Target(t) });
-            }
-        }
-        if opts.len() == 1 {
+        let items: Vec<Choice> = cands.into_iter().filter(|&t| t != cur).map(Choice::Target).collect();
+        if items.is_empty() {
             // Nothing else to choose: the copy keeps it.
-            self.agenda.push(Task::CopyTargets { id, k: k + 1, copy });
+            self.agenda.push(Task::CopyTargets { id, k: k + 1, copy, page: crate::decision::Page::FIRST });
             return;
         }
-        self.ask(Task::CopyTargets { id, k, copy }, p, DecisionKind::NewTarget, opts);
+        let pass = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+        self.ask_objects(Task::CopyTargets { id, k, copy, page }, page, p, DecisionKind::NewTarget, &items, pass);
     }
 
     /// "You may have this enter as a copy of ..." (CR 707.5, 614.1c) for

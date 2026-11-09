@@ -761,11 +761,6 @@ pub struct Game {
     /// While the modes of a stack item are chosen, its id: it can't target
     /// itself (CR 115.5). 0 otherwise (always between tasks).
     pub(crate) choosing_for: u32,
-    /// While the targets (or modes, or X) of a stack item are chosen with it
-    /// on the stack, its id: the stack items a target may be are counted
-    /// from below it (`Game::stack_in_reach`, ENGINE.md 58.1). 0 otherwise
-    /// (always between tasks; a check before the item is put on the stack).
-    pub(crate) targeting: u32,
     // ---- M7c: the single-card tail (ENGINE.md 28) ----
     /// Rare per-object facts, one list (a clone copies one empty vector
     /// in the common case): exhaust abilities activated, colours chosen
@@ -1141,7 +1136,6 @@ impl Game {
             dungeons: [Dungeon::default(); 2],
             rules_srcs: Vec::new(),
             choosing_for: 0,
-            targeting: 0,
             marks: Vec::new(),
             w3: Default::default(),
             known_pools: [None, None],

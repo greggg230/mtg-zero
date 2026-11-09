@@ -1412,7 +1412,7 @@ impl Heuristic {
     fn target(&mut self, g: &Game, d: &Decision, p: PlayerId) -> Option<u16> {
         let q = opp(p);
         let info = match g.agenda.last() {
-            Some(&Task::ChooseTargets { id, req }) => g.item_index(id).and_then(|i| {
+            Some(&Task::ChooseTargets { id, req, .. }) => g.item_index(id).and_then(|i| {
                 let item = &g.stack[i];
                 let ab = g.db.ability(g.item_ability(item)?);
                 let (prog, r) = req_program(ab, &item.modes, req);

@@ -50,7 +50,8 @@ pub(crate) enum Task {
     CleanupDiscard,
     CleanupRest,
     // casting and the stack (CR 601, 608)
-    ChooseTargets { id: u32, req: u8 },
+    /// (`page`: the page of the decision, ENGINE.md 100.2.)
+    ChooseTargets { id: u32, req: u8, page: crate::decision::Page },
     CastPay { id: u32 },
     CastDone { id: u32 },
     PayMana(Box<PayMana>),
@@ -115,7 +116,7 @@ pub(crate) enum Task {
     /// New targets for a copy of a spell (`copy`, CR 707.10c) or a spell
     /// whose controller may choose new targets (115.7), from its target `k`
     /// on.
-    CopyTargets { id: u32, k: u8, copy: bool },
+    CopyTargets { id: u32, k: u8, copy: bool, page: crate::decision::Page },
     /// Announce how many times an additional cost is paid (CR 601.2b:
     /// replicate, squad, offspring).
     ChooseTimes { id: u32 },
@@ -236,7 +237,6 @@ impl Game {
         // A graveyard card's option outside Priority: its slot in the
         // decision's graveyard list (ENGINE.md 65.10).
         self.name_graveyard_options(player, kind, &mut options);
-        self.name_exile_targets(kind, &mut options);
         options.sort_by_key(|o| o.action);
         assert!(
             options.windows(2).all(|w| w[0].action < w[1].action),
@@ -285,7 +285,7 @@ impl Game {
             Task::AssignDamage { att, j, left } => self.assign_damage(att, j, left),
             Task::CleanupDiscard => self.cleanup_discard(),
             Task::CleanupRest => self.cleanup_rest(),
-            Task::ChooseTargets { id, req } => self.choose_targets(id, req),
+            Task::ChooseTargets { id, req, page } => self.choose_targets(id, req, page),
             Task::CastPay { id } => self.cast_pay(id),
             Task::CastDone { id } => self.cast_done(id),
             Task::PayMana(pm) => self.pay_mana(pm),
@@ -315,7 +315,7 @@ impl Game {
             Task::ChooseAbility { p, card, from } => self.choose_ability(p, card, from),
             Task::ChooseRoute { p, card, face } => self.choose_route(p, card, face),
             Task::EnterAsCopy { card, note, since } => self.enter_as_copy(card, note, since),
-            Task::CopyTargets { id, k, copy } => self.copy_targets(id, k, copy),
+            Task::CopyTargets { id, k, copy, page } => self.copy_targets(id, k, copy, page),
             Task::ChooseTimes { id } => self.choose_times(id),
             Task::Splice { id } => self.choose_splice(id),
             Task::Special { p, card, sp } => self.special_action(p, card, sp),

@@ -1249,14 +1249,17 @@ impl Game {
         if let Some(d) = decision.filter(|_| mine_to_decide) {
             // A graveyard list (ENGINE.md 65.10): the graveyards holding a card
             // the decision offers, whole, in order, the viewer's first; an
-            // offered card is `LIBRARY` + its slot (`Game::graveyard_list`).
-            let gy = self.graveyard_list(me, d.kind, &d.options);
+            // offered card is `LIBRARY` + its slot (`Game::graveyard_list`; on a
+            // page of a paged list, the page's cards at their slots:
+            // `Game::decision_graveyard_list`, ENGINE.md 100.2).
+            let gy = self.decision_graveyard_list(me, d);
             if !gy.is_empty() {
                 for (k, &c) in gy.iter().enumerate().take(LIST) {
+                    let Some(c) = c else { continue };
                     let def = self.objs[c.i()].def;
                     let o = O_LIST + k * LIST_W;
                     code(&mut out[o..o + CODE], self.db, ids, def);
-                    let copies = gy.iter().filter(|&&x| self.objs[x.i()].def == def).count();
+                    let copies = gy.iter().flatten().filter(|&&x| self.objs[x.i()].def == def).count();
                     let s = &mut out[o + CODE..o + LIST_W];
                     s[list::PRESENT] = 1.0;
                     s[list::OPTION] = legal(act::LIBRARY + k as u16) as u8 as f32;

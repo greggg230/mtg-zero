@@ -551,47 +551,35 @@ impl Game {
     /// `MY_PERM` / `OPP_PERM` slot of a permanent, relative to `viewer`.
     pub fn perm_action(&self, viewer: PlayerId, idx: CardIdx) -> u16 {
         let ctl = self.objs[idx.i()].controller;
-        let slot = self.permanents_of(ctl).position(|c| c == idx).expect("permanent on the battlefield") as u16;
-        assert!(slot < act::PERM_N, "permanent slot {slot} out of range");
+        let slot = self.perm_slot(idx);
+        assert!(slot < act::PERM_N as u32, "permanent slot {slot} out of range");
         if ctl == viewer {
-            act::MY_PERM + slot
+            act::MY_PERM + slot as u16
         } else {
-            act::OPP_PERM + slot
+            act::OPP_PERM + slot as u16
         }
+    }
+
+    /// A permanent's place among its controller's permanents (timestamp
+    /// order, ENGINE.md 11): its `MY_PERM` / `OPP_PERM` position, which a
+    /// paged choice may put past the 96 slots (ENGINE.md 100.2).
+    pub fn perm_slot(&self, idx: CardIdx) -> u32 {
+        let ctl = self.objs[idx.i()].controller;
+        self.permanents_of(ctl).position(|c| c == idx).expect("permanent on the battlefield") as u32
     }
 
     /// `STACK` slot (0 = top) of the stack item with this id.
     pub fn stack_action(&self, id: u32) -> u16 {
-        let pos = self.stack.iter().position(|s| s.id == id).expect("stack item");
-        let slot = (self.stack.len() - 1 - pos) as u16;
-        assert!(slot < act::STACK_N, "stack slot {slot} out of range");
-        act::STACK + slot
+        let slot = self.stack_slot(id);
+        assert!(slot < act::STACK_N as u32, "stack slot {slot} out of range");
+        act::STACK + slot as u16
     }
 
-    /// The action id of choosing target `t`, relative to `viewer`.
-    pub fn target_action(&self, viewer: PlayerId, t: Target) -> u16 {
-        match t {
-            Target::Player(q) => act::PLAYER + (q != viewer) as u16,
-            Target::Obj(r) => match self.objs[r.idx.i()].zone {
-                Zone::Battlefield => self.perm_action(viewer, r.idx),
-                Zone::Stack => {
-                    let id = self
-                        .stack
-                        .iter()
-                        .find(|s| s.kind == StackKind::Spell { card: r.idx })
-                        .expect("spell on the stack")
-                        .id;
-                    self.stack_action(id)
-                }
-                Zone::Graveyard => self.graveyard_action(viewer, r.idx),
-                // An exiled card: `EXILE` + its place among the decision's
-                // offered exiled cards, given by `ask` (`name_exile_targets`).
-                Zone::Exile => act::EXILE,
-                z => panic!("no target slot for an object in {z:?}"),
-            },
-            // An ability on the stack: its `STACK` slot (ENGINE.md 27.1).
-            Target::Stack(id) => self.stack_action(id),
-        }
+    /// A stack item's place from the top (0 = top): its `STACK` position,
+    /// which a paged choice may put past the 32 slots (ENGINE.md 100.2).
+    pub fn stack_slot(&self, id: u32) -> u32 {
+        let pos = self.stack.iter().position(|s| s.id == id).expect("stack item");
+        (self.stack.len() - 1 - pos) as u32
     }
 
     /// `GRAVEYARD` slot of a card: its position in its owner's graveyard
@@ -640,6 +628,14 @@ impl Game {
             return Vec::new();
         }
         let offered: SVec<CardIdx, 16> = options.iter().filter_map(|o| self.graveyard_choice(o.choice)).collect();
+        self.graveyard_list_of(p, &offered)
+    }
+
+    /// The graveyard list of a decision offering the graveyard cards
+    /// `offered` to `p` ([`graveyard_list`](Self::graveyard_list)): the one
+    /// graveyard holding them whole, in order, or the offered cards of both,
+    /// `p`'s first.
+    fn graveyard_list_of(&self, p: PlayerId, offered: &[CardIdx]) -> Vec<CardIdx> {
         let mine = offered.iter().any(|&c| self.objs[c.i()].owner == p);
         let theirs = offered.iter().any(|&c| self.objs[c.i()].owner != p);
         let gy = |q: PlayerId| &self.players[q as usize].graveyard;
@@ -663,7 +659,10 @@ impl Game {
         if kind == DecisionKind::Priority {
             return;
         }
-        let list = self.graveyard_list(p, kind, options);
+        let gy_id = |a: u16| (act::GRAVEYARD..act::GRAVEYARD + 2 * act::GRAVEYARD_N).contains(&a);
+        // (Options [`ask_objects`](Self::ask_objects) named already carry
+        // their list ids: nothing to rename.)
+        let list = if options.iter().any(|o| gy_id(o.action)) { self.graveyard_list(p, kind, options) } else { Vec::new() };
         if !list.is_empty() {
             assert!(
                 list.len() <= act::LIBRARY_N as usize,
@@ -686,6 +685,96 @@ impl Game {
             !options.iter().any(|o| (act::GRAVEYARD..act::GRAVEYARD + 2 * act::GRAVEYARD_N).contains(&o.action)),
             "{kind:?} offers a GRAVEYARD id: only Priority's casts keep them (ENGINE.md 65.10)"
         );
+    }
+
+    /// The list block's graveyard cards for `p`'s pending decision `d` (the
+    /// network's list, ENGINE.md 65.10, 100.2): slot k holds the card of
+    /// `LIBRARY` + k. Unpaged, the decision's graveyard list
+    /// ([`graveyard_list`](Self::graveyard_list)), every slot filled; on a
+    /// page of a paged list (more graveyard cards offered than the 64 list
+    /// slots, [`ask_objects`](Self::ask_objects)), the page's offered cards
+    /// at their slots and the other slots empty, so every option is still
+    /// scored by its card's token.
+    pub fn decision_graveyard_list(&self, p: PlayerId, d: &Decision) -> Vec<Option<CardIdx>> {
+        use DecisionKind as K;
+        if !matches!(d.kind, K::ChooseGraveyardCard | K::Target | K::NewTarget) {
+            return Vec::new();
+        }
+        let list_id = |a: u16| (act::LIBRARY..act::LIBRARY + act::LIBRARY_N).contains(&a);
+        let named = |o: &Opt| list_id(o.action) && self.graveyard_choice(o.choice).is_some();
+        let paged = d.options.iter().any(|o| o.action == act::LIBRARY + act::LIBRARY_N - 1 && matches!(o.choice, Choice::Page(_)))
+            || matches!(d.stage, Stage::Paged { window } if window > 0) && d.options.iter().any(named);
+        if !paged {
+            return self.graveyard_list(p, d.kind, &d.options).into_iter().map(Some).collect();
+        }
+        let mut v = Vec::new();
+        for o in d.options.iter().filter(|o| named(o)) {
+            let k = (o.action - act::LIBRARY) as usize;
+            v.resize(v.len().max(k + 1), None);
+            v[k] = self.graveyard_choice(o.choice);
+        }
+        v
+    }
+
+    /// Ask `player` to choose one of the objects `items` (each a
+    /// `Choice::Card` or `Choice::Target`: a player, a permanent, a spell or
+    /// an ability on the stack, a card in a graveyard or in exile) or one of
+    /// `extra` (`PASS`, ...), showing page `page` (ENGINE.md 100.2; the
+    /// faithfulness audit's F1). Each object has the id its range gives it
+    /// when the choice is not paged: a player `PLAYER` (+ 1: the
+    /// opponent), a permanent its `MY_PERM` / `OPP_PERM` slot, a stack item
+    /// its `STACK` slot (0 = top), a graveyard card `LIBRARY` + its slot in
+    /// the decision's graveyard list (65.10), an exiled card `EXILE` + its
+    /// place among the exiled cards offered (in `items`' order: exile order,
+    /// 99.14). A range with an object past its last id is paged
+    /// ([`ask_paged_ranges`](Self::ask_paged_ranges); the ranges' order
+    /// below is `Page::range`), so every object is offered (CR 115.1,
+    /// 601.2c: any legal target; a choice "of a card" names any). The
+    /// asking task follows `ask_paged`'s pattern: it answers `Choice::Page`
+    /// by asking again with that page, and recomputes `items` each time.
+    pub(crate) fn ask_objects(&mut self, task: Task, page: Page, player: PlayerId, kind: DecisionKind, items: &[Choice], mut extra: Vec<Opt>) {
+        let gy_cards: SVec<CardIdx, 16> = items.iter().filter_map(|&c| self.graveyard_choice(c)).collect();
+        let list = self.graveyard_list_of(player, &gy_cards);
+        let (mut mine, mut theirs, mut stack, mut gy, mut ex) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for &c in items {
+            let t = match c {
+                Choice::Card(i) => Target::Obj(self.obj_ref(i)),
+                Choice::Target(t) => t,
+                other => panic!("{kind:?}: {other:?} is not an object"),
+            };
+            match t {
+                Target::Player(q) => extra.push(Opt { action: act::PLAYER + (q != player) as u16, choice: c }),
+                Target::Stack(id) => stack.push((self.stack_slot(id), c)),
+                Target::Obj(r) => {
+                    let o = &self.objs[r.idx.i()];
+                    match o.zone {
+                        Zone::Battlefield if o.controller == player => mine.push((self.perm_slot(r.idx), c)),
+                        Zone::Battlefield => theirs.push((self.perm_slot(r.idx), c)),
+                        Zone::Stack => {
+                            let s = self.stack.iter().find(|s| s.kind == StackKind::Spell { card: r.idx }).expect("a spell on the stack");
+                            stack.push((self.stack_slot(s.id), c));
+                        }
+                        Zone::Graveyard => {
+                            let k = list.iter().position(|&x| x == r.idx).expect("an offered card is in its graveyard list");
+                            gy.push((k as u32, c));
+                        }
+                        Zone::Exile => ex.push((ex.len() as u32, c)),
+                        z => panic!("{kind:?}: no range for an object in {z:?}"),
+                    }
+                }
+            }
+        }
+        for v in [&mut mine, &mut theirs, &mut stack, &mut gy] {
+            v.sort_by_key(|&(pos, _)| pos);
+        }
+        let ranges = [
+            PagedRange { base: act::MY_PERM, n: act::PERM_N, items: &mine },
+            PagedRange { base: act::OPP_PERM, n: act::PERM_N, items: &theirs },
+            PagedRange { base: act::STACK, n: act::STACK_N, items: &stack },
+            PagedRange { base: act::LIBRARY, n: act::LIBRARY_N, items: &gy },
+            PagedRange { base: act::EXILE, n: act::EXILE_N, items: &ex },
+        ];
+        self.ask_paged_ranges(task, page, player, kind, &ranges, extra);
     }
 
     // ---- paged choices and big numbers (ENGINE.md 100.1) -------------------

@@ -472,7 +472,7 @@ impl Game {
         self.agenda.push(Task::ActPay { id });
         let ab = self.db.ability(ability);
         if ab.has_targets() {
-            self.agenda.push(Task::ChooseTargets { id, req: 0 });
+            self.agenda.push(Task::ChooseTargets { id, req: 0, page: crate::decision::Page::FIRST });
         }
         if ad.x {
             self.agenda.push(Task::ChooseX { id }); // CR 602.2b, 601.2b

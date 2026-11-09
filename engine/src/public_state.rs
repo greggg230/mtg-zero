@@ -174,7 +174,6 @@ pub fn fields() -> Vec<Field> {
         dungeons: Derived "each player's dungeon: its fields are classified under Dungeon",
         rules_srcs: Derived "objects in no zone naming the initiative's and the monarch's triggers' source",
         choosing_for: Derived "transient: the item whose modes are chosen (0 between tasks)",
-        targeting: Derived "transient: the item whose targets are chosen (0 between tasks; ENGINE.md 58.1)",
         marks: Public "rare per-object facts (exhausted, a chosen colour, exerted, can't be countered, ...)",
         w3: Derived "EoE workstream W3's state: its fields are classified under W3State",
         known_pools: Derived "with hidden decks, the pool names each player knows of the other's: set by the match, fixed for the game",

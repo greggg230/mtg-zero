@@ -172,30 +172,6 @@ impl Game {
         cands.retain(|&t| sum + self.target_mv(t) <= total as u32);
     }
 
-    /// A target in exile (ENGINE.md 99.14): its option is `EXILE` + its
-    /// place among the decision's offered exiled cards, in exile order (as
-    /// `ChooseExiled`'s "k-th offered card"; the exile is public, so the
-    /// list is the same in every world). Beyond the 32 `EXILE` slots the
-    /// first 32 are offered (docs/shortcuts.md 58.4).
-    pub(crate) fn name_exile_targets(&self, kind: DecisionKind, options: &mut Vec<Opt>) {
-        if !matches!(kind, DecisionKind::Target | DecisionKind::NewTarget) {
-            return;
-        }
-        let mut k = 0u16;
-        options.retain_mut(|o| {
-            if let Choice::Target(Target::Obj(r)) = o.choice {
-                if self.objs[r.idx.i()].zone == Zone::Exile {
-                    if k >= act::EXILE_N {
-                        return false;
-                    }
-                    o.action = act::EXILE + k;
-                    k += 1;
-                }
-            }
-            true
-        });
-    }
-
     /// Is `c` a warped card: in exile by warp's delayed ability, which may
     /// be cast from exile on a later turn (CR 702.185a; `Ext::WarpExile`'s
     /// permission: from a later turn, for its mana cost, cast only)?
