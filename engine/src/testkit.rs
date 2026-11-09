@@ -535,6 +535,11 @@ impl Game {
         let place = |c: CardIdx| -> u64 { self.view_place(c) };
         let live_place = |r: crate::ids::ObjRef| -> u64 { self.view_live_place(r) };
         for s in &self.stack {
+            // (The loop hash reads the board: a loop action's own stack
+            // object is no progress, `loops::loop_product`.)
+            if canon.is_some() && crate::loops::loop_product(s) {
+                continue;
+            }
             match s.kind {
                 crate::game::StackKind::Spell { card } => {
                     v.extend([1, self.objs[card.i()].def as u64, self.is_copy_obj(card) as u64, s.times as u64]);
@@ -562,7 +567,7 @@ impl Game {
             v.extend(s.spliced.iter().map(|&d| d as u64));
             v.push(s.attack_as.map_or(u64::MAX, |a| a.map_or(u64::MAX - 1, live_place)));
             v.extend([s.ev.player.map_or(9, |p| p as u64), s.ev.obj.map_or(u64::MAX, live_place), s.ev.obj2.map_or(u64::MAX, live_place)]);
-            v.extend([s.ev.amount as u64, self.stack.iter().position(|x| x.id == s.ev.item).map_or(99, |i| i as u64)]);
+            v.extend([s.ev.amount as u64, self.view_stack_pos(s.ev.item, canon.is_some())]);
             v.extend(s.noted.iter().map(|&r| live_place(r)));
             v.push(u64::MAX - 7);
             for &(r, tg) in &s.targets {
@@ -571,7 +576,7 @@ impl Game {
                     Target::Player(p) => p as u64,
                     Target::Obj(o) => 100 + place(o.idx),
                     // An ability by its stack position (public).
-                    Target::Stack(id) => 9000 + self.stack.iter().position(|x| x.id == id).map_or(99, |i| i as u64),
+                    Target::Stack(id) => 9000 + self.view_stack_pos(id, canon.is_some()),
                 });
             }
             v.extend(s.modes.iter().map(|&m| m as u64));

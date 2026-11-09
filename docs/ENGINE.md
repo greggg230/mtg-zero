@@ -21092,6 +21092,20 @@ transform (701.28c).
   compile error) and the rest of the agenda. Nothing else is dropped: a wrong "equal" would prune
   a legal option, while a missed one only lets a loop run longer. A 64-bit collision within one
   turn has probability ~n^2 / 2^65.
+* **The board** (the user's decision, 2026-11-09). The EoE fuzz's seeds 1016 and 1024 never ended:
+  a player holding priority stacked Wandering Fumarole's "{0}: Switch" and Lavaclaw Reaches' X = 0
+  pump in endless new orders, and each longer stack was a new state. The user: tournament rules
+  require a player who loops without progressing the board state to choose a different action
+  (MTR 4.4), so the loop detection enforces it. The hash reads the state without the stack
+  objects loop actions put there (`loops::loop_product`: activated abilities of permanents). So
+  holding priority and activating again while the first activation waits is no progress, unless
+  the activation changed the board itself (a cost paid: mana, a land tapped, life, a card) or
+  something else did (another player's response, a triggered ability, a resolution). Free
+  activations stop after one of each a board; paid ones go on while resources are spent (Lavaclaw
+  Reaches with X = 1 stacks while lands pay). Digests 3d59118e6fb9e706 (from af00cc85e05ea0c1;
+  DIGEST_ENCODING=0 660b3c387f18be70 -> 9bf41c0836e39125): 21 of the 2,000 random games change and
+  none of the 500 heuristic games, which matches a rule that only removes a repeated activation of
+  the same ability while the board is unchanged.
 * **Cost**: computed only when a loop action is taken and at a decision where the decider has a
   record of that action (once per decision). `determinize` keeps the viewer's own records and
   drops another decider's (hashes of views that hold what the viewer doesn't know).
@@ -21100,9 +21114,10 @@ transform (701.28c).
   proposed shortcut, and the legal range depends on hidden information. The rule above already
   ends every no-progress loop, and manual repetition is exactly what the CR allows.
 
-Tests: engine/tests/rules_loops.rs (8: Basalt Monolith paid by itself loops once, also with an
-unused land; Lavaclaw Reaches X = 0, where holding priority stays offered because the stack is
-longer; Wandering Fumarole, offered after one switch and not after two; Grim Monolith untaps past
+Tests: engine/tests/rules_loops.rs (10: Basalt Monolith paid by itself loops once, also with an
+unused land; Lavaclaw Reaches X = 0, not offered again holding priority (the board is unchanged);
+Lavaclaw Reaches X = 1 stacks while lands pay; Fumarole and Lavaclaw stacked for free stop after
+one of each, and random play from there ends the turn; Wandering Fumarole, offered after one switch and not after two; Grim Monolith untaps past
 31; Time Vault + Voltaic Key to the turn limit; Chain of Smog past 31; the options are the same in
 every determinized world). Also: Chain of Smog forever stops after 2 questions, and Zirda +
 Basalt Monolith goes past 31.
