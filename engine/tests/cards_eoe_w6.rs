@@ -432,3 +432,25 @@ fn cr_707_9b_a_copy_of_the_copy_keeps_the_ability_once() {
     assert_eq!(g.def_of(stages[1]).activated.len(), m.activated.len() + 1, "one instance of the Stage's ability");
     assert!(!g.is_type(stages[1], engine::db::types::CREATURE));
 }
+
+/// The other order (CR 613.7, 514.2): P0 takes P1's creature with Systems
+/// Override until end of turn, then puts Tractor Beam on it; when the
+/// "until end of turn" effect ends, Tractor Beam's later effect still gives
+/// it to P0.
+#[test]
+fn cr_514_2_an_ending_control_effect_leaves_the_auras() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Island", "Island", "Mountain", "Mountain", "Mountain"])
+        .hand(0, &["Systems Override", "Tractor Beam"])
+        .battlefield(1, &["Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = bf(&g, 1, "Test Bear");
+    let so = g.card(0, "Systems Override", Zone::Hand);
+    start_with(&mut g, Choice::Cast(so), |g| pick(g, &[g.tgt(bear)]));
+    settle(&mut g);
+    assert_eq!(g.obj(bear).controller, 0, "{}", log(&g));
+    beam(&mut g, bear);
+    quiet_until(&mut g, main1_of(1));
+    assert_eq!(g.obj(bear).controller, 0, "Tractor Beam's effect remains\n{}", log(&g));
+}

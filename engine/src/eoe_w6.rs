@@ -228,8 +228,9 @@ pub(crate) const SEEN_W6_COUNTERS: u16 = 1;
 /// them.
 pub(crate) const SEEN_W6_PUTTER: u16 = 2;
 /// `W6State::seen`: an Aura's static ability changes control of the
-/// permanent it enchants (`W6Def::aura_control`): every control change of
-/// the game is recorded (`W6State::control`).
+/// permanent it enchants (`W6Def::aura_control`), or an effect changes
+/// control until end of turn: every control change of the game is recorded
+/// (`W6State::control`) and the controllers worked out in timestamp order.
 pub(crate) const SEEN_W6_CONTROL: u16 = 4;
 /// `W6State::seen`: an Aura says the permanent it enchants doesn't untap
 /// (`W6Def::aura_no_untap`).
@@ -272,7 +273,14 @@ pub(crate) fn seen_of(d: &crate::db::CardDef) -> u16 {
     if d.w6.counter_doubler.is_some() {
         bits |= SEEN_W6_COUNTERS;
     }
-    if d.w6.aura_control {
+    // (An "until end of turn" control-changing effect too: its end is then
+    // worked out with every other control effect, CR 613.7, 514.2.)
+    let eot_control = abilities_of(d).any(|ab| {
+        ab.program.iter().chain(ab.modes.iter().flat_map(|m| m.list.iter().flat_map(|x| x.program.iter()))).any(|op| {
+            matches!(op, crate::program::Op::Ext(crate::program::Ext::EoeD(crate::program::EoeD::GainControlUntilEndOfTurn { .. })))
+        })
+    });
+    if d.w6.aura_control || eot_control {
         bits |= SEEN_W6_CONTROL;
     }
     if d.w6.aura_no_untap {
