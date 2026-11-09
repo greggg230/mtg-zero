@@ -61,7 +61,7 @@ fn first_trigger_from(g: &Game, name: &str) -> Option<Choice> {
     let d = g.pending_decision().unwrap();
     let mine: Vec<_> = g.waiting_triggers().iter().filter(|t| t.controller == d.player).collect();
     let k = mine.iter().position(|t| db().def(t.source_def).name == name)?;
-    let c = Choice::Trigger(k as u8);
+    let c = Choice::Trigger(k as u32);
     g.has_option(c).then_some(c)
 }
 
@@ -783,7 +783,7 @@ fn palace_jailers_exile_lasts_until_an_opponent_becomes_monarch_even_if_p0_isnt_
             let mine: Vec<_> = g.waiting_triggers().iter().filter(|w| w.controller == d.player).collect();
             // (Palace Jailer's first ability, "you become the monarch".)
             let k = mine.iter().position(|w| w.slot == 0)?;
-            Some(Choice::Trigger(k as u8))
+            Some(Choice::Trigger(k as u32))
         }
         _ => None,
     });

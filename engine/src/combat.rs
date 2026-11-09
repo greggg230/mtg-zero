@@ -388,7 +388,7 @@ impl Game {
                 self.combat_dmg.push((a, Target::Obj(b), crate::num::unsigned(power)));
             } else {
                 self.agenda.push(Task::CombatDamage { first, att: k as u8 + 1 });
-                self.agenda.push(Task::AssignDamage { att: a, j: 0, left: crate::num::unsigned(power) });
+                self.agenda.push(Task::AssignDamage { att: a, j: 0, left: crate::num::unsigned(power), step: crate::decision::NumberStep::FIRST });
                 return;
             }
         }
@@ -542,29 +542,17 @@ impl Game {
     }
 
     /// The attacking player divides `att`'s damage among its blockers in
-    /// order: `NUMBER` n to blocker `j`. Without trample everything goes to
-    /// blockers; with trample the player gets the rest only if every blocker
-    /// was assigned lethal damage (702.19c).
-    pub(crate) fn assign_damage(&mut self, att: CardIdx, j: u8, left: u32) {
+    /// order (CR 510.1c-d): any amount to blocker `j` that leaves a legal
+    /// division (`ask_amount`: `NUMBER` + n while every amount fits, else the
+    /// amount in digits, ENGINE.md 100.2; `step` where it stands). Without
+    /// trample everything goes to blockers; with trample the player gets the
+    /// rest only if every blocker was assigned lethal damage (702.19c).
+    pub(crate) fn assign_damage(&mut self, att: CardIdx, j: u32, left: u32, step: crate::decision::NumberStep) {
         let blockers = self.blockers_of(att);
         // CR 702.19b: the rest to the player or planeswalker it attacks
         // (with nothing to attack, everything to the blockers, 702.19f).
         let dest = self.attack_dest(att);
         let trample = self.has_kw(att, Kw::Trample) && dest.is_some();
-        if let Some(Choice::Number(k)) = self.answer.take() {
-            // With 32 or more to divide, 30 = lethal and 31 = all the rest.
-            let n = match (left >= act::NUMBER_N as u32, k) {
-                (true, 30) => self.lethal_needed(att, blockers[j as usize]),
-                (true, 31) => left,
-                _ => k as u32,
-            };
-            let b = self.obj_ref(blockers[j as usize]);
-            if n > 0 {
-                self.combat_dmg.push((att, Target::Obj(b), n));
-            }
-            self.agenda.push(Task::AssignDamage { att, j: j + 1, left: left - n });
-            return;
-        }
         if j as usize >= blockers.len() {
             if left > 0 {
                 debug_assert!(trample);
@@ -587,28 +575,25 @@ impl Game {
         } else {
             (lethal, left)
         };
-        let has = |n: u32| (lo..=hi).contains(&n);
-        let number = |n: u32| Opt { action: act::NUMBER + n as u16, choice: Choice::Number(n as u8) };
-        // `NUMBER` n = n damage. With 32 or more to divide, the amounts
-        // offered are 0..=29 exactly, the blocker's lethal damage (n = 30)
-        // and all of the rest (n = 31): the divisions that differ in what
-        // dies and what tramples over (ENGINE.md 13).
-        let opts = if left < act::NUMBER_N as u32 {
-            (lo..=hi).map(number).collect()
-        } else {
-            let mut v: Vec<Opt> = (lo..=hi.min(29)).map(number).collect();
-            if lethal > 29 && has(lethal) {
-                v.push(Opt { action: act::NUMBER + 30, choice: Choice::Number(30) });
+        match self.answer.take() {
+            Some(Choice::Number(k)) => match step.answer_amount(lo as u64, hi as u64, k) {
+                crate::decision::NumberAnswer::Next(s) => self.agenda.push(Task::AssignDamage { att, j, left, step: s }),
+                crate::decision::NumberAnswer::Value(n) => {
+                    let n = n as u32;
+                    let r = self.obj_ref(b);
+                    if n > 0 {
+                        self.combat_dmg.push((att, Target::Obj(r), n));
+                    }
+                    self.agenda.push(Task::AssignDamage { att, j: j + 1, left: left - n, step: crate::decision::NumberStep::FIRST });
+                }
+            },
+            Some(other) => unreachable!("damage answer {other:?}"),
+            None => {
+                let ap = self.turn.active;
+                self.ask_amount(Task::AssignDamage { att, j, left, step }, step, ap, DecisionKind::AssignDamage, lo as u64, hi as u64);
             }
-            if left > 29 && left != lethal && has(left) {
-                v.push(Opt { action: act::NUMBER + 31, choice: Choice::Number(31) });
-            }
-            v
-        };
-        let ap = self.turn.active;
-        self.ask(Task::AssignDamage { att, j, left }, ap, DecisionKind::AssignDamage, opts);
+        }
     }
-
     /// CR 511.3: remove all creatures from combat.
     pub(crate) fn remove_from_combat(&mut self) {
         for &c in &self.battlefield {

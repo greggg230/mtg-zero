@@ -62,8 +62,8 @@ fn bolts(g: &mut Game, n: usize) {
     }
 }
 
-/// Every option of the pending decision that names a stack item is a
-/// `STACK` id in range (the property 58.1 keeps).
+//// Every option of the pending decision that names a stack item is a
+/// `STACK` id in range (a stack item past the 32 ids is on a page).
 fn stack_ids_in_range(g: &Game) {
     for a in actions(g) {
         if (act::STACK..act::TRIGGER).contains(&a) {
@@ -81,10 +81,27 @@ fn spell_at(g: &Game, from_top: usize) -> CardIdx {
     }
 }
 
+/// The pending decision's "next page" option (ENGINE.md 100.1).
+fn next_page(g: &Game) -> Choice {
+    options(g).into_iter().find(|c| matches!(c, Choice::Page(_))).unwrap_or_else(|| panic!("no next page: {:?}", g.options_desc()))
+}
+
+/// A determinized world of the decider asks the same page (ENGINE.md 10,
+/// 100.1: the page lives in the asking task).
+fn same_page_after_determinize(g: &Game) {
+    let p = g.pending_decision().unwrap().player;
+    let mut d = g.clone();
+    d.determinize(p, &mut engine::rng::Rng::new(7));
+    assert_eq!(d.pending_decision(), g.pending_decision(), "determinize changed the page");
+}
+
 #[test]
-fn a_counterspell_targets_only_the_31_spells_below_it() {
-    // 35 Bolts on the stack: Counterspell, on top, may target the 31 below
-    // it (`STACK` + 1 ..= + 31); the 4 oldest can't be targeted.
+fn cr_115_1_a_counterspell_may_target_any_spell_on_a_tall_stack() {
+    // 35 Bolts on the stack, then Counterspell on top (slot 0): its targets
+    // are all 35 (CR 115.1, 601.2c). The first page offers slots 1..=30 at
+    // `STACK` + 1..=30 and "next page" at `STACK` + 31; the second, slots
+    // 31..=35 at `STACK` + 0..=4. (Before ENGINE.md 100.2: the 31 below it
+    // only, 58.1.)
     let mut g = scen()
         .hand(0, &["Lightning Bolt"; 35])
         .pool(0, [0, 0, 0, 35, 0, 0], 0)
@@ -98,16 +115,19 @@ fn a_counterspell_targets_only_the_31_spells_below_it() {
     assert!(g.has_option(Choice::Cast(cs)));
     g.choose(Choice::Cast(cs));
     g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
-    let acts = actions(&g);
-    assert_eq!(acts, (act::STACK + 1..act::STACK + 32).collect::<Vec<_>>(), "{:?}", g.options_desc());
-    stack_ids_in_range(&g);
-    // (The stack: the 35 Bolts, then Counterspell; the 4 oldest out of reach.)
-    let deep: Vec<CardIdx> = (32..36).map(|k| spell_at(&g, k)).collect();
-    for c in &deep {
-        assert!(!options(&g).contains(&g.tgt(*c)), "a Bolt beyond slot 31 is offered");
+    assert_eq!(actions(&g), (act::STACK + 1..act::STACK + 32).collect::<Vec<_>>(), "{:?}", g.options_desc());
+    for k in 1..=30 {
+        assert!(options(&g).contains(&g.tgt(spell_at(&g, k))));
     }
-    // The deepest in reach (slot 31) is countered.
-    let last = spell_at(&g, 31);
+    let deep: Vec<CardIdx> = (31..36).map(|k| spell_at(&g, k)).collect();
+    g.choose(next_page(&g));
+    same_page_after_determinize(&g);
+    assert_eq!(g.kind(), Some(DecisionKind::Target));
+    assert_eq!(actions(&g), (act::STACK..act::STACK + 5).collect::<Vec<_>>(), "{:?}", g.options_desc());
+    assert_eq!(options(&g), deep.iter().map(|&c| g.tgt(c)).collect::<Vec<_>>());
+    stack_ids_in_range(&g);
+    // The deepest (the first Bolt cast) is countered.
+    let last = deep[4];
     g.choose(g.tgt(last));
     finish(&mut g, |_| None);
     g.pass();
@@ -138,24 +158,35 @@ fn scolding(n: usize) -> (Game, CardIdx) {
 }
 
 #[test]
-fn a_spell_whose_only_target_is_beyond_reach_is_not_offered() {
-    // 30 Bolts: the Elves are 31 below Stern Scolding (in reach, `STACK` +
-    // 31), so it may be cast; 31 Bolts: 32 below, not targetable, and Stern
-    // Scolding is not offered (a cast is offered only if it can be completed,
-    // ENGINE.md 6). Before 58.1 the cast was offered and choosing its target
-    // panicked ("stack slot 32 out of range").
+fn cr_601_2c_a_spell_whose_only_target_is_deep_is_offered() {
+    // 30 Bolts: the Elves are 31 below Stern Scolding (`STACK` + 31, one
+    // decision). 31 Bolts: 32 below: Stern Scolding may still be cast (CR
+    // 601.2c: any legal target), its first page offers "next page" alone and
+    // the second the Elves at `STACK` + 1 (slot 32 = 31 + 1). Before ENGINE.md
+    // 100.2 it was not offered (58.1).
     let (mut g, elves) = scolding(30);
     let ss = g.card(1, "Stern Scolding", Zone::Hand);
-    assert!(g.has_option(Choice::Cast(ss)));
     g.choose(Choice::Cast(ss));
     g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
     assert_eq!(options(&g), vec![g.tgt(elves)]);
     assert_eq!(actions(&g), vec![act::STACK + 31]);
 
-    let (g, _) = scolding(31);
+    let (mut g, elves) = scolding(31);
     let ss = g.card(1, "Stern Scolding", Zone::Hand);
     assert!(at_priority(&g) && g.turn().priority == 1);
-    assert!(!g.has_option(Choice::Cast(ss)), "{:?}", g.options_desc());
+    assert!(g.has_option(Choice::Cast(ss)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(ss));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert_eq!(actions(&g), vec![act::STACK + 31]);
+    g.choose(next_page(&g));
+    assert_eq!(options(&g), vec![g.tgt(elves)]);
+    assert_eq!(actions(&g), vec![act::STACK + 1]);
+    g.choose(g.tgt(elves));
+    finish(&mut g, |_| None);
+    g.pass();
+    g.pass();
+    g.drive_until(at_priority);
+    assert_eq!(g.obj(elves).zone, Zone::Graveyard, "countered");
 }
 
 /// P0 activates Mishra's Bauble (an ability on the stack, targeting P1),
@@ -187,23 +218,28 @@ fn tidebinder(n: usize) -> (Game, u32) {
 }
 
 #[test]
-fn a_triggered_ability_targets_an_ability_only_in_reach() {
+fn cr_603_3d_a_triggered_ability_may_target_a_deep_ability() {
     let (g, ping) = tidebinder(30);
     assert_eq!(options(&g), vec![Choice::Pass, Choice::Target(Target::Stack(ping))]);
     assert_eq!(actions(&g), vec![act::PASS, act::STACK + 31]);
-    let (g, _) = tidebinder(31);
-    assert_eq!(options(&g), vec![Choice::Pass], "the ability 32 below can't be targeted");
+    // 32 below: on the second page (CR 603.3d, 115.1).
+    let (mut g, ping) = tidebinder(31);
+    assert_eq!(actions(&g), vec![act::PASS, act::STACK + 31]);
+    g.choose(next_page(&g));
+    same_page_after_determinize(&g);
+    assert_eq!(options(&g), vec![Choice::Target(Target::Stack(ping))]);
+    assert_eq!(actions(&g), vec![act::STACK + 1]);
 }
 
 #[test]
-fn a_copy_keeps_a_deep_target_and_offers_new_ones_in_reach() {
+fn cr_707_10c_a_copy_may_get_any_new_target_on_a_tall_stack() {
     // P0: Llanowar Elves, Counterspell targeting it, 30 Bolts, then Lutri,
     // whose enters trigger copies the Counterspell ("you may choose new
     // targets for the copy"): the copy goes on top while the trigger
     // resolves (still on the stack, CR 608.2), so the Elves are 33 below it.
-    // `PASS` keeps that target; the new targets offered are the spells among
-    // the 31 items below the copy: the 30 Bolts (the trigger is an ability,
-    // the Counterspell 32 below).
+    // `PASS` keeps that target; every other spell may be the new one (CR
+    // 707.10c, 115.1): the 30 Bolts (slots 2..=31) and the Counterspell (32);
+    // the first page has slots 2..=30, the second 31 and 32.
     let mut g = scen()
         .hand(0, &["Llanowar Elves", "Counterspell", "Lutri, the Spellchaser"])
         .hand(0, &["Lightning Bolt"; 30])
@@ -221,26 +257,28 @@ fn a_copy_keeps_a_deep_target_and_offers_new_ones_in_reach() {
     finish(&mut g, |_| None);
     g.pass();
     g.pass(); // Lutri resolves
-    // Its trigger's target: the Counterspell, 31 below it (in reach).
     g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
     assert!(options(&g).contains(&g.tgt(cs)), "{:?}", g.options_desc());
-    stack_ids_in_range(&g);
     g.choose(g.tgt(cs));
     g.drive_until(at_priority);
     g.pass();
     g.pass(); // the trigger resolves: a copy of the Counterspell
     g.drive_until(|g| g.kind() == Some(DecisionKind::NewTarget));
     assert_eq!(g.kind(), Some(DecisionKind::NewTarget), "{:?}", g.options_desc());
-    stack_ids_in_range(&g);
     let n = g.stack().len();
     assert!(matches!(g.stack()[n - 2].kind, engine::game::StackKind::Ability { .. }), "the resolving trigger");
-    let acts = actions(&g);
-    assert_eq!(acts[0], act::PASS);
-    assert_eq!(&acts[1..], &(act::STACK + 2..act::STACK + 32).collect::<Vec<_>>()[..], "{:?}", g.options_desc());
-    assert!(!options(&g).contains(&g.tgt(elves)) && !options(&g).contains(&g.tgt(cs)));
-    g.pass();
+    let mut want = vec![act::PASS];
+    want.extend(act::STACK + 2..act::STACK + 32);
+    assert_eq!(actions(&g), want, "{:?}", g.options_desc());
+    assert!(!options(&g).contains(&g.tgt(elves)));
+    let bolt31 = spell_at(&g, 31);
+    g.choose(next_page(&g));
+    same_page_after_determinize(&g);
+    assert_eq!(options(&g), vec![g.tgt(bolt31), g.tgt(cs)]);
+    assert_eq!(actions(&g), vec![act::STACK, act::STACK + 1]);
+    g.choose(g.tgt(cs));
     let copy = g.stack().last().unwrap();
-    assert_eq!(copy.targets.iter().map(|t| t.1).collect::<Vec<_>>(), vec![Target::Obj(g.obj_ref(elves))]);
+    assert_eq!(copy.targets.iter().map(|t| t.1).collect::<Vec<_>>(), vec![Target::Obj(g.obj_ref(cs))]);
 }
 
 #[test]
@@ -348,17 +386,18 @@ fn a_copy_of_a_permanent_spell_beyond_96_ceases_to_exist_58_2() {
     }
 }
 
-/// ENGINE.md 65.10: a graveyard-card choice or target is `LIBRARY` + the
-/// card's slot in the decision's graveyard list, at most 64 cards. With
-/// offered cards in both graveyards the list holds the offered cards only,
-/// the decider's first; more than 64 fails loudly (an assert naming the
-/// limit, docs/shortcuts.md 65.10), never an id beyond the list or a card left
-/// out. Lion Sash ("{W}: exile target card from a graveyard", any card) with
-/// 32 cards in each graveyard: 64 targets, `LIBRARY` .. `LIBRARY` + 63, the
-/// other player's last card the last slot; with 33 and 32 the activation
-/// panics at its target.
+/// ENGINE.md 65.10, 100.2: a graveyard-card choice or target is `LIBRARY` +
+/// the card's slot in the decision's graveyard list. With offered cards in
+/// both graveyards the list holds the offered cards only, the decider's
+/// first; past the 64 list slots it is paged (before 100.2: a loud failure,
+/// docs/shortcuts.md 65.10). Lion Sash ("{W}: exile target card from a
+/// graveyard", any card) with 32 cards in each graveyard: 64 targets,
+/// `LIBRARY` .. `LIBRARY` + 63, the other player's last card the last slot;
+/// with 33 and 32, the first page holds 63 of them and "next page", the
+/// second the other player's last two, at `LIBRARY` + 0 and + 1, and the list
+/// block shows those two at those slots (the page's cards).
 #[test]
-fn graveyard_targets_fill_the_64_list_slots_then_fail_loudly_65_10() {
+fn cr_115_1_graveyard_targets_past_the_64_list_slots_are_paged_65_10() {
     use engine::Step;
     for (mine, theirs) in [(32usize, 32usize), (33, 32)] {
         let mut g = scen()
@@ -370,27 +409,28 @@ fn graveyard_targets_fill_the_64_list_slots_then_fail_loudly_65_10() {
         let sash = g.card(0, "Lion Sash", Zone::Battlefield);
         let activate = Choice::Ability(sash, AbilitySlot::Activated(0));
         assert!(g.has_option(activate));
+        g.choose(activate);
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+        let want: Vec<u16> = (0..64).map(|k| act::LIBRARY + k).collect();
+        assert_eq!(actions(&g), want, "every card of both graveyards, the decider's first");
+        let last = *g.player(1).graveyard.last().unwrap();
         if mine + theirs <= act::LIBRARY_N as usize {
-            g.choose(activate);
-            g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
-            let want: Vec<u16> = (0..64).map(|k| act::LIBRARY + k).collect();
-            assert_eq!(actions(&g), want, "every card of both graveyards, the decider's first");
-            let last = *g.player(1).graveyard.last().unwrap();
             assert_eq!(g.pending_decision().unwrap().action_of(g.tgt(last)), Some(act::LIBRARY + 63));
-            g.choose(g.tgt(last));
-            finish(&mut g, |_| None);
-            g.pass();
-            g.pass();
-            g.drive_until(at_priority);
-            assert_eq!(g.obj(last).zone, Zone::Exile, "{}", g.log_lines().join("\n"));
         } else {
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                g.choose(activate);
-                g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
-            }));
-            let e = r.expect_err("65 graveyard targets must fail loudly");
-            let msg = e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
-            assert!(msg.contains("65 graveyard cards offered from both graveyards") && msg.contains("64 slots"), "{msg}");
+            assert!(matches!(options(&g)[63], Choice::Page(_)), "{:?}", g.options_desc());
+            let two: Vec<CardIdx> = g.player(1).graveyard[30..].to_vec();
+            g.choose(next_page(&g));
+            same_page_after_determinize(&g);
+            assert_eq!(actions(&g), vec![act::LIBRARY, act::LIBRARY + 1]);
+            assert_eq!(options(&g), two.iter().map(|&c| g.tgt(c)).collect::<Vec<_>>());
+            let d = g.pending_decision().unwrap().clone();
+            assert_eq!(g.decision_graveyard_list(0, &d), two.iter().map(|&c| Some(c)).collect::<Vec<_>>());
         }
+        g.choose(g.tgt(last));
+        finish(&mut g, |_| None);
+        g.pass();
+        g.pass();
+        g.drive_until(at_priority);
+        assert_eq!(g.obj(last).zone, Zone::Exile, "{}", g.log_lines().join("\n"));
     }
 }

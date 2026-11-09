@@ -163,7 +163,7 @@ impl Game {
                     Some(other) => unreachable!("graveyard choice {other:?}"),
                     None => {}
                 }
-                if (f.spell_x) < *n {
+                if f.spell_x < *n as u32 {
                     return Flow::Next;
                 }
                 let opts: Vec<Opt> = f
@@ -178,7 +178,7 @@ impl Game {
                 }
                 let mut opts = opts;
                 opts.sort_by_key(|o| o.action);
-                self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseGraveyardCard, opts);
                 Flow::Suspend
             }
             EoeD::GainControlUntilEndOfTurn { on } => {

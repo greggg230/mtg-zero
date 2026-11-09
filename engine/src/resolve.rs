@@ -21,8 +21,9 @@ pub(crate) struct Frame {
     pub targets: Vec<(u8, Target)>,
     /// Bit i: `targets[i]` was legal when resolution started (608.2b).
     pub legal: u64,
-    /// Per-op loop counter (reset when `pc` moves).
-    pub i: u8,
+    /// Per-op loop counter (reset when `pc` moves; any count, ENGINE.md
+    /// 100.2: docs/shortcuts.md 46.4).
+    pub i: u32,
     /// Last known information remembered by `Op::Remember`: (power,
     /// controller).
     pub lki: Option<(i32, PlayerId)>,
@@ -47,9 +48,9 @@ pub(crate) struct Frame {
     /// The spell was cast for an alternative cost (CR 118.9).
     pub alt: bool,
     /// Divided damage per target of the divided requirement (CR 601.2d).
-    pub division: Vec<u8>,
+    pub division: Vec<u32>,
     /// The spell's X (CR 107.3).
-    pub spell_x: u8,
+    pub spell_x: u32,
     /// Every token the last `CreateToken` made ("they gain haste").
     pub made_all: Vec<CardIdx>,
     /// What a creature put onto the battlefield attacking attacks
@@ -60,6 +61,13 @@ pub(crate) struct Frame {
     /// The source's transformations when the ability was put on the stack
     /// (`StackItem::flips`, CR 701.27f).
     pub flips: u8,
+    /// The page the current op's choice shows (`Game::ask_objects`,
+    /// `Game::ask_paged`; ENGINE.md 100.2): set by a "next page" answer,
+    /// back to the first page by any other answer and when `pc` moves.
+    pub page: crate::decision::Page,
+    /// Where the current op's big number stands (`Game::ask_number`;
+    /// ENGINE.md 100.2), reset when `pc` moves.
+    pub step: crate::decision::NumberStep,
 }
 
 pub(crate) enum Flow {
@@ -181,6 +189,8 @@ impl Game {
             attack_as: item.attack_as,
             noted: item.noted.clone(),
             flips: item.flips,
+            page: crate::decision::Page::FIRST,
+            step: crate::decision::NumberStep::FIRST,
         };
         // The targets of requirements `offset..offset + n`, renumbered from 0,
         // with their legality bits.
@@ -367,6 +377,17 @@ impl Game {
     }
 
     pub(crate) fn run_frame(&mut self, mut f: Frame) {
+        // A paged choice's "next page" (ENGINE.md 100.1-100.2): the op asks
+        // again, showing that page; after any other answer the op's next
+        // choice starts at the first page.
+        match self.answer {
+            Some(Choice::Page(p)) => {
+                f.page = p;
+                self.answer = None;
+            }
+            Some(_) => f.page = crate::decision::Page::FIRST,
+            None => {}
+        }
         let db = self.db;
         let prog = &db.ability(f.ability).program;
         while (f.pc as usize) < prog.len() {
@@ -377,6 +398,8 @@ impl Game {
                     f.pc += 1;
                     f.i = 0;
                     f.floor = 0;
+                    f.page = crate::decision::Page::FIRST;
+                    f.step = crate::decision::NumberStep::FIRST;
                     self.pile_done(&f, prog);
                     self.new_event();
                 }
@@ -384,6 +407,8 @@ impl Game {
                     f.pc = pc;
                     f.i = 0;
                     f.floor = 0;
+                    f.page = crate::decision::Page::FIRST;
+                    f.step = crate::decision::NumberStep::FIRST;
                     self.pile_done(&f, prog);
                     self.new_event();
                 }
@@ -507,7 +532,7 @@ impl Game {
             }
             Amount::Remembered => f.x,
             Amount::HalfLibraryUp => (self.players[f.controller as usize].library.len() as i32 + 1) / 2,
-            Amount::EventTimes => ((f.ev.amount >> 1) & 0xFF) as i32,
+            Amount::EventTimes => crate::num::count_amount(self.entered_counts(f.ev.amount, f.ev.obj).0),
             Amount::EventSpellTimes => self.event_spell_times(f) as i32,
             Amount::Attacking => self.battlefield.iter().filter(|&&c| self.objs[c.i()].attacking).count() as i32,
             Amount::Experience => crate::num::count_amount(self.players[f.controller as usize].experience),
@@ -654,7 +679,7 @@ impl Game {
                     self.move_card(c, Zone::Library, Pos::Top);
                     f.i += 1;
                 }
-                if f.i >= n || self.players[p as usize].hand.is_empty() {
+                if f.i >= n as u32 || self.players[p as usize].hand.is_empty() {
                     return Flow::Next;
                 }
                 let opts = self.hand_options(p);
@@ -734,7 +759,7 @@ impl Game {
                     self.discard(c);
                     f.i += 1;
                 }
-                if f.i >= n || self.players[p as usize].hand.is_empty() {
+                if f.i >= n as u32 || self.players[p as usize].hand.is_empty() {
                     return Flow::Next;
                 }
                 let opts = self.hand_options(p);
@@ -871,7 +896,7 @@ impl Game {
                     Some(other) => unreachable!("pile answer {other:?}"),
                     None => {}
                 }
-                if rest && f.pile.is_empty() || !rest && max != PILE_ANY && f.i >= max {
+                if rest && f.pile.is_empty() || !rest && max != PILE_ANY && f.i >= max as u32 {
                     return Flow::Next;
                 }
                 if rest && set {

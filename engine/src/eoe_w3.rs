@@ -610,6 +610,12 @@ impl Game {
         (def, slot, None)
     }
 
+    /// The definition that has activated ability `slot` of permanent `c`
+    /// (`activated_home`'s first part; tests, the list block's token).
+    pub fn activated_home_pub(&self, c: CardIdx, slot: crate::db::AbilitySlot) -> crate::ids::DefId {
+        self.activated_home(c, slot).0
+    }
+
     /// The timestamps (CR 613.7a: its source's) of the static abilities on
     /// the battlefield that give permanent `c` subtype `s` ("artifacts you
     /// control are Foods in addition to their other types", 613.1d), sorted.
@@ -700,20 +706,21 @@ impl Game {
     }
 
     /// `p` chooses which activated ability of permanent `card` to activate,
-    /// among those it may activate now from place `from` on (CR 602.2,
-    /// 117.1b; `Task::ChooseAbility`): `NUMBER` + place - `from` for the
-    /// next 31, `NUMBER` + 31 for a page of the ones after. Re-entrant: the
-    /// options come from the game as it is.
-    pub(crate) fn choose_ability(&mut self, p: PlayerId, card: CardIdx, from: u8) {
-        use crate::decision::{act, Choice, DecisionKind, Opt};
-        let page = (act::NUMBER_N - 1) as usize;
+    /// among those it may activate now from its fourth on (CR 602.2, 117.1b;
+    /// `Task::ChooseAbility`): `LIBRARY` + place - 3, `Game::ask_paged` past
+    /// the 64 list ids (`page`; ENGINE.md 100.2). The list block holds each
+    /// option's ability: the definition that has it (the card's own, or the
+    /// face granting it, `Game::activated_home`) and its index there.
+    /// Re-entrant: the options come from the game as it is.
+    pub(crate) fn choose_ability(&mut self, p: PlayerId, card: CardIdx, page: crate::decision::Page) {
+        use crate::decision::{act, Choice, DecisionKind};
         match self.answer.take() {
-            Some(Choice::Number(k)) if k as usize == page => {
-                self.agenda.push(crate::flow::Task::ChooseAbility { p, card, from: from + page as u8 });
+            Some(Choice::Page(next)) => {
+                self.agenda.push(crate::flow::Task::ChooseAbility { p, card, page: next });
                 return;
             }
-            Some(Choice::Number(k)) => {
-                self.begin_activate(p, card, crate::db::AbilitySlot::Activated(from + k));
+            Some(Choice::Ability(c, slot)) => {
+                self.begin_activate(p, c, slot);
                 return;
             }
             Some(other) => unreachable!("ability answer {other:?}"),
@@ -723,16 +730,13 @@ impl Game {
         let sorcery_ok = self.turn.active == p && self.turn.step.is_main() && self.stack.is_empty();
         let locks = self.activation_locks();
         let live = self.permanent_activations(p, card, &classes, sorcery_ok, locks);
-        let mut opts: Vec<Opt> = Vec::new();
-        for &i in live.iter().filter(|&&i| i >= from) {
-            let k = (i - from) as usize;
-            if k < page {
-                opts.push(Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) });
-            } else if !opts.iter().any(|o| o.choice == Choice::Number(page as u8)) {
-                opts.push(Opt { action: act::NUMBER + page as u16, choice: Choice::Number(page as u8) });
-            }
-        }
-        self.ask(crate::flow::Task::ChooseAbility { p, card, from }, p, DecisionKind::ChooseMode, opts);
+        let from = (crate::activate::ACTIVATE_SLOTS - 1) as u8;
+        let items: Vec<(u32, Choice)> = live
+            .iter()
+            .filter(|&&i| i >= from)
+            .map(|&i| ((i - from) as u32, Choice::Ability(card, crate::db::AbilitySlot::Activated(i))))
+            .collect();
+        self.ask_paged(crate::flow::Task::ChooseAbility { p, card, page }, page, p, DecisionKind::ChooseMode, act::LIBRARY, act::LIBRARY_N, &items, Vec::new());
     }
 
     /// The permanents `p` controls from which `card`'s cost "remove a <k>

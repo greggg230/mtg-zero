@@ -1,7 +1,7 @@
 //! Events and triggered abilities (CR 603; ENGINE.md 8).
 
 use crate::db::{AbilityRef, AbilitySlot, EventKind, Filter, Slot, TrigPred};
-use crate::decision::{act, Choice, DecisionKind, Opt};
+use crate::decision::{act, Choice, DecisionKind};
 use crate::flow::Task;
 use crate::game::{Game, StackItem, StackKind};
 use crate::ids::{opp, CardIdx, DefId, ObjRef, PlayerId, Target, Zone};
@@ -526,8 +526,8 @@ impl Game {
             TrigPred::Batch => true,
             // The `Enters` event's note (`Game::put_onto_battlefield`).
             TrigPred::EnteredCast => ev.kind == EventKind::Enters && ev.amount & 1 != 0,
-            TrigPred::EnteredPaid => ev.kind == EventKind::Enters && (ev.amount >> 1) & 0xFF != 0,
-            TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && (ev.amount >> 9) & 0x3F >= *n as u32,
+            TrigPred::EnteredPaid => ev.kind == EventKind::Enters && self.entered_counts(ev.amount, match ev.a { Subj::Obj(r) => Some(r), _ => None }).0 != 0,
+            TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && self.entered_counts(ev.amount, match ev.a { Subj::Obj(r) => Some(r), _ => None }).1 >= *n as u32,
             TrigPred::EnteredNotFromGyExile => ev.kind == EventKind::Enters && ev.amount >> 15 == 0,
             TrigPred::InGraveyard => true,
             TrigPred::SpellMvParity => match (ev.a, self.parity_of(src.r)) {
@@ -580,8 +580,10 @@ impl Game {
 
     /// Put waiting triggers on the stack in APNAP order (603.3b): the active
     /// player's first, each player ordering their own; targets are chosen as
-    /// each goes on the stack (603.3d).
-    pub(crate) fn put_triggers(&mut self) {
+    /// each goes on the stack (603.3d). The order decision offers every
+    /// distinct waiting trigger: past the 16 `TRIGGER` ids on a page (`page`,
+    /// `Game::ask_paged`, ENGINE.md 100.2).
+    pub(crate) fn put_triggers(&mut self, page: crate::decision::Page) {
         if self.waiting.is_empty() {
             return;
         }
@@ -603,7 +605,7 @@ impl Game {
         // More waiting triggers than `TRIGGER` slots (a board of tokens
         // dying): the first of each interchangeable group first, the copies
         // after (their order among themselves can't matter), so that the
-        // groups' ids stay in range.
+        // groups' first page holds as many of the groups as it can.
         let mine = if mine.len() > act::TRIGGER_N as usize && self.answer.is_none() {
             let (mut firsts, mut rest) = (Vec::new(), Vec::new());
             for (k, &i) in mine.iter().enumerate() {
@@ -622,6 +624,10 @@ impl Game {
             mine
         };
         let pick = match self.answer.take() {
+            Some(Choice::Page(next)) => {
+                self.agenda.push(Task::PutTriggers { page: next });
+                return;
+            }
             Some(Choice::Trigger(k)) => mine[k as usize],
             Some(other) => unreachable!("trigger answer {other:?}"),
             None => {
@@ -630,27 +636,23 @@ impl Game {
                     mine[0]
                 } else {
                     // Identical triggers are offered once (their order cannot
-                    // matter while their effects ignore the source's state).
-                    let mut opts = Vec::new();
+                    // matter while their effects ignore the source's state);
+                    // every distinct one is (CR 603.3b), the k-th waiting one
+                    // at `TRIGGER` + k, paged past the 16 ids.
+                    let mut items = Vec::new();
                     for (k, &i) in mine.iter().enumerate() {
                         if mine[..k].iter().any(|&j| same(&self.waiting[j], &self.waiting[i])) {
                             continue;
                         }
-                        // (More distinct triggers than `TRIGGER` slots, each
-                        // card a discard made: the first ones are offered; the
-                        // others come next. A limit of the action layout.)
-                        if k as u16 >= act::TRIGGER_N {
-                            break;
-                        }
-                        opts.push(Opt { action: act::TRIGGER + k as u16, choice: Choice::Trigger(k as u8) });
+                        items.push((k as u32, Choice::Trigger(k as u32)));
                     }
-                    self.ask(Task::PutTriggers, p, DecisionKind::OrderTriggers, opts);
+                    self.ask_paged(Task::PutTriggers { page }, page, p, DecisionKind::OrderTriggers, act::TRIGGER, act::TRIGGER_N, &items, Vec::new());
                     return;
                 }
             }
         };
         let t = self.waiting[pick];
-        self.agenda.push(Task::PutTriggers);
+        self.agenda.push(Task::PutTriggers { page: crate::decision::Page::FIRST });
         let ability = AbilityRef { def: t.source_def, slot: AbilitySlot::Trigger(t.slot), mode: None };
         let ab = self.db.ability(ability);
         // (Checked while the trigger still waits: its source's last known
@@ -702,10 +704,10 @@ impl Game {
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));
         if ab.divide.is_some() {
-            self.agenda.push(Task::Divide { id }); // CR 603.3d, 601.2d
+            self.agenda.push(Task::Divide { id, step: crate::decision::NumberStep::FIRST }); // CR 603.3d, 601.2d
         }
         if ab.has_targets() {
-            self.agenda.push(Task::ChooseTargets { id, req: 0 });
+            self.agenda.push(Task::ChooseTargets { id, req: 0, page: crate::decision::Page::FIRST });
         }
         if ab.modes.is_some() {
             self.agenda.push(Task::ChooseModes { id }); // CR 700.2b, 603.3c
