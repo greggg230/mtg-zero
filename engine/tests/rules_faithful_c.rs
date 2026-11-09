@@ -111,6 +111,14 @@ fn c_cards() -> Vec<card_ir::Card> {
             "C Forest Mimic",
             json!({"card_types": ["Land"], "enters_as_copy_types": ["Land"], "enters_as_copy_add_subtypes": ["Forest"]}),
         ),
+        // "Each player puts a permanent card from their graveyard onto the
+        // battlefield." (Exhume's shape, for permanent cards.)
+        card(
+            "C Reunion",
+            json!({"card_types": ["Sorcery"], "mana_cost": mana(1, &[("B", 1)]), "mana_cost_str": "{1}{B}",
+                "spell_effect": {"$t": "EachPlayerPutsCardFromGraveyardOntoBattlefield",
+                    "card_filter": {"$t": "CardFilter", "any_types": ["Creature", "Planeswalker"]}}}),
+        ),
         // A battle (a Siege's shape without its back face): refused until CR
         // 310 is built.
         card(
@@ -797,4 +805,50 @@ fn cr_716_2a_a_copy_of_a_class_starts_at_level_1_and_levels_up() {
 fn cr_305_6_an_effect_giving_a_basic_land_type_is_refused() {
     let why = db().unsupported().get("C Forest Mimic").unwrap_or_else(|| panic!("C Forest Mimic must be unsupported"));
     assert!(why.iter().any(|w| w.contains("basic land type")), "{why:?}");
+}
+
+// ---- N15: the timestamps of objects entering together (CR 613.7m) --------------------------------
+
+/// Kaito, Bane of Nightmares ("during your turn, as long as Kaito has one
+/// or more loyalty counters on him, he's a 3/4 Ninja creature": a static
+/// that sets values) and Dragon's Rage Channeler (a static) put onto the
+/// battlefield at once: the active player orders their timestamps (CR
+/// 613.7m), and the chosen order is theirs.
+#[test]
+fn cr_613_7m_the_active_player_orders_simultaneous_timestamps() {
+    for drc_first in [true, false] {
+        let mut g = scen()
+            .battlefield(0, &["Swamp", "Swamp"])
+            .hand(0, &["C Reunion"])
+            .graveyard(0, &["Kaito, Bane of Nightmares"])
+            .graveyard(1, &["Dragon's Rage Channeler"])
+            .at(Step::Main1, 0)
+            .start();
+        let kaito = g.card(0, "Kaito, Bane of Nightmares", Zone::Graveyard);
+        let drc = g.card(1, "Dragon's Rage Channeler", Zone::Graveyard);
+        let r = g.card(0, "C Reunion", Zone::Hand);
+        g.choose(Choice::Cast(r));
+        finish(&mut g, |_| None);
+        let mut asked = 0;
+        for _ in 0..60 {
+            if g.stack().is_empty() && at_priority(&g) {
+                break;
+            }
+            let c = match g.kind() {
+                Some(DecisionKind::Priority) => Choice::Pass,
+                Some(DecisionKind::ChoosePermanent) if g.has_option(Choice::Card(kaito)) && g.has_option(Choice::Card(drc)) => {
+                    asked += 1;
+                    assert_eq!(g.pending_decision().unwrap().player, 0, "the active player");
+                    Choice::Card(if drc_first { drc } else { kaito })
+                }
+                _ => options(&g)[0],
+            };
+            g.choose(c);
+        }
+        assert_eq!(asked, 1, "{}", log(&g));
+        assert_eq!(g.obj(kaito).zone, Zone::Battlefield);
+        assert_eq!(g.obj(drc).zone, Zone::Battlefield);
+        assert_eq!(g.obj(drc).timestamp < g.obj(kaito).timestamp, drc_first, "{}", log(&g));
+        g.check_invariants().unwrap();
+    }
 }

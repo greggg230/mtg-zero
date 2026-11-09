@@ -138,6 +138,7 @@ pub fn fields() -> Vec<Field> {
         leaving_choice: Derived "transient: set and cleared around one leave event",
         leaving_card: Derived "transient: set and cleared around one leave event",
         resolving_adventure: Derived "transient: set and cleared around one move",
+        ts_group: Derived "event-group bookkeeping (CR 613.7m: which timestamps were given together)",
         held: Derived "the triggered abilities a pending 616.1 choice releases (ChooseReplacement, the decision's context): what its answers would trigger follows from the public event",
         entering_counters: Derived "transient: set and cleared around one move",
         entering_tapped: Derived "transient: set and cleared around one move",

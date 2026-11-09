@@ -48,6 +48,9 @@ pub(crate) enum Task {
     /// own "draw that many plus `plus` instead" on one draw
     /// (`Game::draw_order`).
     DrawOrder { p: PlayerId, plus: u32, ev: u32, step: bool },
+    /// CR 613.7m: the active player orders the timestamps of the objects
+    /// given ones simultaneously since `first` (`Game::order_timestamps`).
+    OrderTimestamps { first: u32, settled: bool, picked: Vec<CardIdx> },
     PriorityAsk,
     // combat (CR 508-510)
     DeclareAttackers { next: u8 },
@@ -287,6 +290,7 @@ impl Game {
             Task::MiracleReveal { p, card } => self.miracle_reveal(p, card),
             Task::DrawRest { p, n, ev, step } => self.draw_rest(p, n, ev, step),
             Task::DrawOrder { p, plus, ev, step } => self.draw_order(p, plus, ev, step),
+            Task::OrderTimestamps { first, settled, picked } => self.order_timestamps(first, settled, picked),
             Task::PutTriggers => self.put_triggers(),
             Task::PriorityAsk => self.priority_ask(),
             Task::DeclareAttackers { next } => self.declare_attackers(next),

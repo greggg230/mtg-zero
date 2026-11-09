@@ -677,6 +677,11 @@ pub struct Game {
     /// The resolving spell, cast as an Adventure, is being put into its
     /// owner's graveyard (CR 715.4's replacement applies: `replaced_dest`).
     pub(crate) resolving_adventure: bool,
+    /// The event group (`ev_seq`) of the latest object given a timestamp
+    /// (entering, becoming attached) and the first timestamp given in it:
+    /// objects given one in the same event got them simultaneously, and the
+    /// active player orders them (CR 613.7m, `Task::OrderTimestamps`).
+    pub(crate) ts_group: (u32, u32),
     /// Triggered abilities that trigger only if a pending 616.1 choice
     /// sends its card to one of their zones (`triggers::Held`), released
     /// with the answer (`release_held`).
@@ -1151,6 +1156,7 @@ impl Game {
             leaving_choice: 0,
             leaving_card: CardIdx(0),
             resolving_adventure: false,
+            ts_group: (0, 0),
             held: Vec::new(),
             entering_counters: Vec::new(),
             entering_tapped: false,
@@ -1898,6 +1904,113 @@ impl Game {
             self.battlefield.remove(i);
             self.battlefield.push(c);
         }
+        self.stamped(self.next_ts);
+    }
+
+    /// An object got timestamp `ts` (entering, becoming attached): with
+    /// another given one in the same event whose order can matter, the
+    /// active player orders them (CR 613.7m; `Task::OrderTimestamps`).
+    pub(crate) fn stamped(&mut self, ts: u32) {
+        if self.ts_group.0 != self.ev_seq || self.ts_group.1 == 0 {
+            self.ts_group = (self.ev_seq, ts);
+            return;
+        }
+        let first = self.ts_group.1;
+        if self.agenda.iter().any(|t| matches!(t, crate::flow::Task::OrderTimestamps { first: f, .. } if *f == first)) {
+            return;
+        }
+        let members = self.ts_members(first, true);
+        if members.len() >= 2 && members.iter().any(|&c| self.order_sensitive(c, true)) {
+            self.agenda.push(crate::flow::Task::OrderTimestamps { first, settled: false, picked: Vec::new() });
+        }
+    }
+
+    /// Does permanent `c` have a static ability whose effect another
+    /// effect's order can change (CR 613.7: one that sets a value, replaces
+    /// types, removes abilities or changes control, not one that only adds,
+    /// whose results commute); `maybe`: or a copy choice still to make?
+    fn order_sensitive(&self, c: CardIdx, maybe: bool) -> bool {
+        use crate::db::Mod;
+        self.abilities(c).statics.iter().any(|st| {
+            st.mods.iter().any(|m| {
+                matches!(
+                    m,
+                    Mod::SetPt(..) | Mod::SwitchPt | Mod::Types { replace: true, .. } | Mod::BecomeTypes { .. } | Mod::LoseAllAbilities | Mod::Colors(_) | Mod::ControlFrom(_)
+                )
+            })
+        }) || maybe && self.def_of(c).enters_as_copy.is_some() && !self.is_copy(c)
+    }
+
+    /// The permanents given a timestamp since `first` whose timestamps
+    /// order effects (a static ability: layers 1-7, an Aura's or an
+    /// Equipment's; a Painter's colour; a granted activated ability), in
+    /// timestamp order; `maybe`: also one whose copy choice is still to be
+    /// made (it may copy one).
+    pub(crate) fn ts_members(&self, first: u32, maybe: bool) -> Vec<CardIdx> {
+        self.battlefield
+            .iter()
+            .copied()
+            .filter(|&c| self.objs[c.i()].timestamp >= first)
+            .filter(|&c| {
+                let d = self.abilities(c);
+                !d.statics.is_empty()
+                    || d.paints
+                    || !d.w3.grants_activated.is_empty()
+                    || d.grants_equipped.is_some()
+                    || maybe && self.def_of(c).enters_as_copy.is_some() && !self.is_copy(c)
+            })
+            .collect()
+    }
+
+    /// CR 613.7m: the active player orders the timestamps of the objects
+    /// given ones simultaneously since `first` (`ts_members`), earliest
+    /// first (`ChoosePermanent`), once their "as this enters" choices are
+    /// made (`settled`: it waits under them). Asked only while the order can
+    /// matter: a member's effect is order-sensitive (`order_sensitive`), and
+    /// the rest aren't all one definition (identical effects give the same
+    /// result in either order); the rest then in their order. The chosen order permutes the members'
+    /// timestamps and battlefield places (the battlefield is in timestamp
+    /// order).
+    pub(crate) fn order_timestamps(&mut self, first: u32, settled: bool, mut picked: Vec<CardIdx>) {
+        use crate::flow::Task;
+        if !settled {
+            // (Below the entering choices of the same event still waiting:
+            // a copy choice decides what the permanent's effects are.)
+            let mut k = self.agenda.len();
+            while k > 0 && matches!(self.agenda[k - 1], Task::AsEnters { .. } | Task::EnterAsCopy { .. } | Task::EnterAura { .. } | Task::EnterByDiscardAny { .. }) {
+                k -= 1;
+            }
+            self.agenda.insert(k, Task::OrderTimestamps { first, settled: true, picked });
+            return;
+        }
+        if let Some(Choice::Card(c)) = self.answer.take() {
+            picked.push(c);
+        }
+        let members = self.ts_members(first, false);
+        picked.retain(|c| members.contains(c));
+        let rest: Vec<CardIdx> = members.iter().copied().filter(|c| !picked.contains(c)).collect();
+        // (Effects that only add commute: their order can't matter.)
+        let interchangeable = rest.iter().all(|&c| self.objs[c.i()].def == self.objs[rest[0].i()].def) || !members.iter().any(|&c| self.order_sensitive(c, false));
+        if rest.len() >= 2 && !interchangeable {
+            let ap = self.turn.active;
+            let opts = rest.iter().map(|&c| crate::decision::Opt { action: self.perm_action(ap, c), choice: Choice::Card(c) }).collect();
+            self.ask(Task::OrderTimestamps { first, settled: true, picked }, ap, crate::decision::DecisionKind::ChoosePermanent, opts);
+            return;
+        }
+        if picked.is_empty() {
+            return;
+        }
+        let order: Vec<CardIdx> = picked.iter().copied().chain(rest).collect();
+        let mut stamps: Vec<u32> = members.iter().map(|&c| self.objs[c.i()].timestamp).collect();
+        stamps.sort_unstable();
+        let mut places: Vec<usize> = members.iter().map(|&c| self.battlefield.iter().position(|&x| x == c).expect("on the battlefield")).collect();
+        places.sort_unstable();
+        for (i, &c) in order.iter().enumerate() {
+            self.objs[c.i()].timestamp = stamps[i];
+            self.battlefield[places[i]] = c;
+        }
+        self.note(|g| format!("timestamps ordered: {}", order.iter().map(|&c| g.name(c)).collect::<Vec<_>>().join(", ")));
+        self.effects_changed();
     }
 
     /// Lose life (CR 119.3; paying life is losing it, 119.4).
@@ -2098,6 +2211,7 @@ impl Game {
         } else {
             0
         };
+        let stamp = ts;
         let turn = self.turn.number;
         let known_before = if from.is_hidden() { self.objs[idx.i()].known } else { 0b11 };
         {
@@ -2186,6 +2300,9 @@ impl Game {
                     list.insert(at, idx);
                 }
             }
+        }
+        if stamp != 0 {
+            self.stamped(stamp);
         }
         // A card leaving a hidden zone for a public one is revealed to all.
         // It is keyed even if everyone knew it: which known card a hidden
