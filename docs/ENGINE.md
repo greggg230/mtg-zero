@@ -19855,4 +19855,9 @@ N15 and the merge of A0 (`eoe-base` c769cc2) change no digest game.
 
 **Results** (normal release profile, `E:/cargo-target/mtg-zero/eoe-c-timing`). The full engine
 suite 1,996 passed, 0 failed, 20 ignored (with A0's merge; `az` 41, `hidden` and
-`rules_faithful_c` 19 among them).
+`rules_faithful_c` 19 among them). The default `FUZZ_GAMES=20000` passed (20,000 games, wins 9,972 / 9,989, 39 draws, mean 27.0 turns, 215.7 decisions; 1,000 matches; 813 s on a loaded machine); `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed (20,000 games, wins 8,918 / 9,040, 2,042 draws, mean 40.1 turns, 500.7 decisions; 1,780 s).
+
+**Left for others.** Seen while reading `faces.rs`, not in this workstream's list: a daybound double-faced permanent put
+onto the battlefield at night is transformed right after it enters (`entering_choices` -> `day_night_check`), with a
+`Transforms` event; CR 702.145b says it enters transformed (no transformation). A basic land type an effect gives (N22) is
+refused, not built: it waits for W2's moon definitions and the payment code.
