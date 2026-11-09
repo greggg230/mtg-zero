@@ -1594,6 +1594,19 @@ pub fn perturbations() -> Vec<Perturbation> {
             let &(_, c) = stack_spells(&a.g).first()?;
             mark(&mut a.g, c, crate::game::Mark::ManaSpent(1))
         }),
+        // A copy effect's "except it has this ability" (Thespian's Stage):
+        // its definition made with the ability (only in a table with one).
+        p!(rare "a copy has an ability by its exception", "Game.copies", |a, _r| {
+            let ss = slots(&a.g);
+            let db = a.g.db;
+            let k = a.g.copies.iter().position(|x| ss.contains(&x.obj.idx) && db.w6.kept.iter().any(|y| y.0 .0 == x.vals.def))?;
+            let d = a.g.copies[k].vals.def;
+            let m = db.w6.kept.iter().find(|y| y.0 .0 == d)?.1;
+            a.g.copies[k].vals.def = m;
+            let c = a.g.copies[k].obj.idx;
+            a.g.objs[c.i()].def = m;
+            Some(db.def(d).name.clone())
+        }),
         // Player 0 created tokens this turn (Moonlit Meditation's "the
         // first time ... each turn").
         p!("a player created tokens this turn", "W6State.tokens_turn", |a, _r| {
@@ -1636,6 +1649,7 @@ pub fn limits() -> Vec<Limit> {
         l("a spell's granted alternative cost came from another permanent", NextLayout, "which permanent's static ability gave the alternative cost a spell was cast for (Mark::AltGranted; Tannuk, Steadfast Second's warp, EoE W5, ENGINE.md 99.15) decides whether the spell still has that ability as it resolves (CR 400.7g, 608.3g: warp's exile); the stack item's alternative cost is encoded (stack::ALT, ALT_INDEX: past the card's own), its granter is not: the next layout encodes it (as a noted object's)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
         l("a control effect ends at the end of the turn", NextLayout, "the control-changing effects behind a permanent's controller (W6State::control: their order and which end at the end of the turn, CR 613.1b, 613.7, 514.2; recorded in games with an Aura that changes control, Tractor Beam, EoE W6, ENGINE.md 99.16) decide who controls it when one ends; layout v5 encodes the controller, not the effects: the next layout encodes them (a permanent's 'controlled until end of turn' and 'by an Aura' flags)"),
+        l("a copy has an ability by its exception", NextLayout, "a copy effect's 'except it has this ability' (CR 707.9b; Thespian's Stage, EoE W6, ENGINE.md 99.16: a definition made with the copied one's abilities and the Stage's) gives the copy an ability its identity (the copied card's) doesn't show; the next layout encodes a permanent's activated abilities beyond its identity's"),
         l("a player created tokens this turn", NextLayout, "whether a player created tokens this turn (W6State::tokens_turn, EoE W6, ENGINE.md 99.16) decides whether Moonlit Meditation's 'the first time you would create one or more tokens each turn' can still apply; layout v5 has no float for it: the next layout encodes it (a per-turn flag beside the turn's facts)"),
         l("the mana spent to cast a spell", NextLayout, "the amount of mana spent to cast a spell on the stack (Mark::ManaSpent, recorded for every spell in a table with Unravel, EoE W6, ENGINE.md 99.16) decides Unravel's 'if the amount of mana spent to cast that spell was less than its mana value'; layout v5's stack item has no float for it: the next layout encodes it (a stack item's number, as W3's permanent's)"),
         l("an artifact entered under a player's control this turn", NextLayout, "whether an artifact entered the battlefield under a player's control this turn (Player::artifact_entered) is game state the EoE port's W1 added after layout v5 froze (ENGINE.md 99.11), read by one card, Mechan Shieldmate (its attack permission); the next layout encodes it (a per-turn flag beside the turn's facts)"),

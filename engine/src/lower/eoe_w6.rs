@@ -105,6 +105,13 @@ pub(crate) fn lower_effect_eoe_w6(l: &mut Lowerer, b: &mut Builder, e: &cats::Ef
             b.op(Op::Draw { who: crate::program::Who::You, n: crate::program::Amount::EventAmount });
             b.patch(at);
         }
+        // "{2}, {T}: This land becomes a copy of target land, except it has
+        // this ability" (Thespian's Stage: the class's meaning; its target,
+        // a land, re-derived as docs/ir_defects.md 11 says).
+        E::BecomesCopyOfTargetLand(nodes::BecomesCopyOfTargetLand {}) => {
+            let tgt = b.target(crate::db::Filter::Type(crate::db::types::LAND), 1, 1);
+            b.op(Op::Ext(Ext::EoeW6(W6::BecomeCopyKeeping { tgt })));
+        }
         // "Move a counter from target permanent you control onto a second
         // target permanent" (Nesting Grounds; CR 122.5): two targets, the
         // second another (115.3).

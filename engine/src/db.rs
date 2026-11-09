@@ -2170,7 +2170,10 @@ impl CardDb {
         db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
         db.watch_toughness = db.defs.iter().any(|d| d.toughness_assigns_damage || d.toughness_stations);
         db.hand_alt_grants = db.defs.iter().any(|d| !d.casting.hand_alt_grants.is_empty());
+        // ("Except it has this ability": EoE W6.)
+        let kept = crate::eoe_w6::add_kept_ability_defs(&mut db.defs);
         db.w6 = crate::eoe_w6::W6Db::of(&db.defs);
+        db.w6.kept = kept;
         db
     }
 

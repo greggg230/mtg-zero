@@ -1265,6 +1265,7 @@ fn public_state_reaches_the_encoding() {
             "the active player is controlled this turn",
             "a spell's granted alternative cost came from another permanent",
             "a control effect ends at the end of the turn",
+            "a copy has an ability by its exception",
             "a player created tokens this turn",
             "the mana spent to cast a spell",
             "an artifact entered under a player's control this turn"
@@ -1272,8 +1273,9 @@ fn public_state_reaches_the_encoding() {
         "the gaps on the allowlist"
     );
     // (EoE W6, ENGINE.md 99.16: the recorded control effects and a spell's
-    // mana spent, a player's tokens this turn: 14 -> 17.)
-    assert_eq!(next, 17);
+    // mana spent, a player's tokens this turn, a copy's kept ability: 14 ->
+    // 18.)
+    assert_eq!(next, 18);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

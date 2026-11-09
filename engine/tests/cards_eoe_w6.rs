@@ -357,3 +357,78 @@ fn cr_614_1a_moonlit_meditation_after_tokens_this_turn_waits() {
     });
     assert_eq!(landers(&g, 0), 2, "{}", log(&g));
 }
+
+// ---- Thespian's Stage ---------------------------------------------------------
+
+/// The place of Thespian's Stage's "{2}, {T}: This land becomes a copy of
+/// target land, except it has this ability" among `c`'s activated
+/// abilities, if `c` has it.
+fn stage_ability(g: &Game, c: engine::CardIdx) -> Option<u8> {
+    let s = db().def(def("Thespian's Stage"));
+    let a = s.activated.iter().find(|a| matches!(a.effect, engine::db::ActEffect::Stack(_)))?;
+    g.def_of(c).activated.iter().position(|x| x == a).map(|i| i as u8)
+}
+
+/// P0 activates `stage`'s copy ability on `target`, paying with the first
+/// sources.
+fn stage_copy(g: &mut Game, stage: engine::CardIdx, target: engine::CardIdx) {
+    let k = stage_ability(g, stage).expect("the Stage's ability");
+    // (Paid with Forests: another Stage stays untapped.)
+    start_with(g, act(stage, k), |g| {
+        pick(g, &[g.tgt(target)]).or_else(|| {
+            g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|c| matches!(c, Choice::Ability(x, _) if g.name(*x) == "Forest"))
+        })
+    });
+    settle(g);
+}
+
+/// Thespian's Stage: "{T}: Add {C}. / {2}, {T}: This land becomes a copy of
+/// target land, except it has this ability." It becomes Mutavault (CR
+/// 707.2: its copiable values), keeps the copy ability (707.9b) and loses
+/// its first one (the ruling); it stays tapped (the ruling). The next turn
+/// it has Mutavault's abilities and the Stage's, and copies another land:
+/// a Forest with the Stage's ability.
+#[test]
+fn cr_707_9b_thespians_stage_becomes_a_copy_and_keeps_this_ability() {
+    let mut g = scen()
+        .battlefield(0, &["Thespian's Stage", "Forest", "Forest", "Forest"])
+        .battlefield(1, &["Mutavault", "Forest"])
+        .at(Step::Main1, 0)
+        .start();
+    let stage = bf(&g, 0, "Thespian's Stage");
+    let muta = bf(&g, 1, "Mutavault");
+    stage_copy(&mut g, stage, muta);
+    assert_eq!(g.name(stage), "Mutavault", "{}", log(&g));
+    assert!(g.obj(stage).tapped, "not untapped by becoming a copy");
+    let m = db().def(def("Mutavault"));
+    assert_eq!(g.def_of(stage).activated.len(), m.activated.len() + 1, "Mutavault's abilities and the Stage's");
+    assert!(stage_ability(&g, stage).is_some());
+    quiet_until(&mut g, main1_of(1));
+    quiet_until(&mut g, main1_of(0));
+    let forest = bf(&g, 1, "Forest");
+    stage_copy(&mut g, stage, forest);
+    assert_eq!(g.name(stage), "Forest", "{}", log(&g));
+    assert!(stage_ability(&g, stage).is_some(), "still has this ability");
+}
+
+/// A copy of a Stage that became a copy has the copy ability too (CR
+/// 707.9b: the exception is part of the copiable values), once: a second
+/// Stage copying the first (Mutavault with the ability) is that Mutavault.
+/// Copiable values only (the ruling): an animated Mutavault is copied as the
+/// land it is printed as, not a creature.
+#[test]
+fn cr_707_9b_a_copy_of_the_copy_keeps_the_ability_once() {
+    let mut g = scen()
+        .battlefield(0, &["Thespian's Stage", "Thespian's Stage", "Forest", "Forest", "Forest", "Forest"])
+        .battlefield(1, &["Mutavault"])
+        .at(Step::Main1, 0)
+        .start();
+    let stages: Vec<_> = g.permanents_of(0).filter(|&c| g.name(c) == "Thespian's Stage").collect();
+    let muta = bf(&g, 1, "Mutavault");
+    stage_copy(&mut g, stages[0], muta);
+    stage_copy(&mut g, stages[1], stages[0]);
+    assert_eq!(g.name(stages[1]), "Mutavault", "{}", log(&g));
+    let m = db().def(def("Mutavault"));
+    assert_eq!(g.def_of(stages[1]).activated.len(), m.activated.len() + 1, "one instance of the Stage's ability");
+    assert!(!g.is_type(stages[1], engine::db::types::CREATURE));
+}

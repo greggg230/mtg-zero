@@ -35,6 +35,12 @@ pub struct W6Def {
     /// turn, you may instead create that many tokens that are copies of
     /// enchanted permanent" (CR 614.1a, 707.2, 111.2).
     pub token_copies: bool,
+    /// A definition made for "becomes a copy of target land, except it has
+    /// this ability" (`W6::BecomeCopyKeeping`): another definition's copiable
+    /// values plus that ability, which is `kept_from` (the definition and
+    /// activated-ability index it came from), at index `kept_index` here.
+    pub kept_from: Option<(crate::ids::DefId, u8)>,
+    pub kept_index: u8,
 }
 
 /// The table facts W6 adds (`CardDb::w6`).
@@ -43,6 +49,61 @@ pub struct W6Db {
     /// A card of the table reads the mana spent to cast any spell: every
     /// payment for a spell is recorded (CR 601.2h).
     pub mana_spent_all: bool,
+    /// The definitions "becomes a copy of ..., except it has this ability"
+    /// makes (`add_kept_ability_defs`): ((copied definition, the ability's
+    /// definition, its index), the definition made), sorted.
+    pub kept: Vec<((crate::ids::DefId, crate::ids::DefId, u8), crate::ids::DefId)>,
+}
+
+/// For a table with "this permanent becomes a copy of target <...>, except
+/// it has this ability" (CR 707.9b: the exception is part of the copiable
+/// values, so a copy of the copy has it too): for every definition of the
+/// table, a definition with its abilities and that one (before its latent
+/// abilities, whose places are relative to them). A definition that already
+/// has an identical ability is used as it is: a second instance of one
+/// activated ability (the same cost, effect and restrictions, of the same
+/// object) offers no option and changes no outcome the first doesn't, so
+/// the copy of a copy keeps one. A table with two such abilities that
+/// differ is refused (loudly). Returns the made definitions' index.
+pub(crate) fn add_kept_ability_defs(defs: &mut Vec<crate::db::CardDef>) -> Vec<((crate::ids::DefId, crate::ids::DefId, u8), crate::ids::DefId)> {
+    let mut keys: Vec<(crate::ids::DefId, u8)> = Vec::new();
+    for (d, def) in defs.iter().enumerate() {
+        for (i, a) in def.activated.iter().enumerate() {
+            if let crate::db::ActEffect::Stack(ab) = &a.effect {
+                if ab.program.iter().any(|op| matches!(op, crate::program::Op::Ext(crate::program::Ext::EoeW6(W6::BecomeCopyKeeping { .. })))) {
+                    keys.push((d as crate::ids::DefId, i as u8));
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let Some(&(kd, ki)) = keys.first() else { return out };
+    let ability = defs[kd as usize].activated[ki as usize].clone();
+    assert!(
+        keys.iter().all(|&(d, i)| defs[d as usize].activated[i as usize] == ability),
+        "two different 'becomes a copy ..., except it has this ability' abilities in one table (EoE W6)"
+    );
+    let n = defs.len();
+    for t in 0..n {
+        let src = &defs[t];
+        if src.activated.contains(&ability) {
+            continue;
+        }
+        let mut m = src.clone();
+        let at = m.activated.len() - (m.latent as usize).min(m.activated.len());
+        m.activated.insert(at, ability.clone());
+        for g in m.w3.grants_activated.iter_mut() {
+            if g.1 as usize >= at {
+                g.1 += 1;
+            }
+        }
+        m.w6.kept_from = Some((kd, ki));
+        m.w6.kept_index = at as u8;
+        out.push(((t as crate::ids::DefId, kd, ki), defs.len() as crate::ids::DefId));
+        defs.push(m);
+    }
+    out.sort();
+    out
 }
 
 /// Does the op create tokens other than as its first thing done, for one
@@ -62,6 +123,21 @@ fn creates_tokens_late(op: &crate::program::Op) -> bool {
     )
 }
 
+impl crate::db::CardDb {
+    /// The definition "a copy of `t`, except it has this ability" gives
+    /// (`add_kept_ability_defs`; `key`: the ability's definition and index).
+    pub(crate) fn w6_kept_def(&self, t: crate::ids::DefId, key: (crate::ids::DefId, u8)) -> crate::ids::DefId {
+        let d = self.def(t);
+        if d.w6.kept_from == Some(key) || d.activated.contains(&self.def(key.0).activated[key.1 as usize]) {
+            return t;
+        }
+        match self.w6.kept.binary_search_by_key(&(t, key.0, key.1), |x| x.0) {
+            Ok(k) => self.w6.kept[k].1,
+            Err(_) => panic!("no 'except it has this ability' definition for {} (EoE W6)", d.name),
+        }
+    }
+}
+
 impl W6Db {
     pub(crate) fn of(defs: &[crate::db::CardDef]) -> W6Db {
         // A table with "the first time you would create one or more tokens
@@ -78,7 +154,7 @@ impl W6Db {
             });
             assert!(late.is_none(), "a card replaces token creation with copies, and {} creates tokens another way (EoE W6)", late.map_or("", |d| d.name.as_str()));
         }
-        W6Db { mana_spent_all: defs.iter().any(|d| d.w6.reads_spells_mana_spent) }
+        W6Db { mana_spent_all: defs.iter().any(|d| d.w6.reads_spells_mana_spent), kept: Vec::new() }
     }
 }
 
@@ -233,6 +309,15 @@ pub enum W6 {
     /// same before and after it leaves. A copy of a spell wasn't cast: no
     /// mana was spent (707.10).
     JumpUnlessSpentBelowMv { tgt: u8, to: u16 },
+    /// "This permanent becomes a copy of target `tgt`, except it has this
+    /// ability" (CR 707.2, 707.9b, 613.2a; Thespian's Stage): the source,
+    /// if still the same permanent, gets the target's copiable values (its
+    /// printed ones and other copy effects', not counters or other effects:
+    /// the ruling) plus this ability, with no duration (until it leaves or
+    /// another copy effect overwrites it, the ruling). It isn't untapped and
+    /// doesn't enter, so nothing "enters" or "as it enters" applies (the
+    /// rulings).
+    BecomeCopyKeeping { tgt: u8 },
     /// "Tap enchanted permanent": the permanent the source (an Aura) is
     /// attached to, or, if the Aura has left, was attached to as it last
     /// existed (CR 608.2h); nothing if that permanent has left.
@@ -253,7 +338,7 @@ impl W6 {
     /// Does the op read its triggered ability's event?
     pub fn uses_event(&self) -> bool {
         match self {
-            W6::JumpUnlessSpentBelowMv { .. } | W6::TapHost | W6::MoveCounter { .. } => false,
+            W6::JumpUnlessSpentBelowMv { .. } | W6::TapHost | W6::MoveCounter { .. } | W6::BecomeCopyKeeping { .. } => false,
         }
     }
 
@@ -261,7 +346,7 @@ impl W6 {
     pub fn jump_target(&mut self) -> Option<&mut u16> {
         match self {
             W6::JumpUnlessSpentBelowMv { to, .. } => Some(to),
-            W6::TapHost | W6::MoveCounter { .. } => None,
+            W6::TapHost | W6::MoveCounter { .. } | W6::BecomeCopyKeeping { .. } => None,
         }
     }
 }
@@ -569,6 +654,21 @@ impl Game {
                         self.tap(h.idx);
                     }
                 }
+                Flow::Next
+            }
+            W6::BecomeCopyKeeping { tgt } => {
+                let Some(&me) = self.objs_on(f, &crate::program::On::Source).first() else { return Flow::Next };
+                let Some(base) = self.copy_source(f, crate::program::CopyOf::Target { i: *tgt, lki: false }) else { return Flow::Next };
+                // "This ability": where it came from (the card's own, or the
+                // one a made definition kept).
+                let crate::db::AbilitySlot::Activated(i) = f.ability.slot else { unreachable!("an activated ability") };
+                let hd = self.db.def(f.ability.def);
+                let key = match hd.w6.kept_from {
+                    Some(k) if hd.w6.kept_index == i => k,
+                    _ => (f.ability.def, i),
+                };
+                let def = self.db.w6_kept_def(base.def, key);
+                self.add_copy_effect(me, crate::copies::CopyVals { def, exc: base.exc }, crate::layers::Until::Forever);
                 Flow::Next
             }
             W6::MoveCounter { from, to } => {
