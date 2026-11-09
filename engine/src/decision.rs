@@ -1023,12 +1023,6 @@ impl Game {
     }
 }
 
-/// The paged-choice and big-number helpers (ENGINE.md 100.1), driven by a
-/// test-only task (`Task::Probe`) that asks through them and logs what was
-/// chosen: every item or value is reached by exactly one sequence of
-/// decisions, a choice that fits its range is asked as before, a page or a
-/// digit is asked again identically after `determinize`, and the context
-/// floats.
 /// The options of page `page` of a paged choice over `ranges` and `extra`
 /// (the decision [`Game::ask_paged_ranges`] asks, before `ask` sorts them),
 /// and the page shown: `page`, or the first page when `page` holds no item.
@@ -1064,6 +1058,12 @@ pub(crate) fn paged_options(page: Page, ranges: &[PagedRange], extra: Vec<Opt>) 
     (opts, shown)
 }
 
+/// The paged-choice and big-number helpers (ENGINE.md 100.1), driven by a
+/// test-only task (`Task::Probe`) that asks through them and logs what was
+/// chosen: every item or value is reached by exactly one sequence of
+/// decisions, a choice that fits its range is asked as before, a page or a
+/// digit is asked again identically after `determinize`, and the context
+/// floats.
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

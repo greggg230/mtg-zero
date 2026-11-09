@@ -2763,13 +2763,6 @@ mod tests {
         }
     }
 
-    /// Layout v6's floats of the facts the public-state gate's random
-    /// positions never have (its rare perturbations, ENGINE.md 100.5), set
-    /// by hand on a spell on the stack and read back for both viewers: an
-    /// exiled card it targets (Blade of the Swarm's kind of target), an
-    /// exiled card it noted (Close Encounter's), the permanent that gave it
-    /// its alternative cost (Tannuk's), a phased-out permanent, an opponent's
-    /// knowledge of a hand card; every other float unchanged.
     /// ENGINE.md 100.5.1, read back for both viewers by hand, every other
     /// float unchanged: the mana spent to cast a spell on the stack (CR
     /// 601.2h; Unravel), the lands that entered under P1's control this turn
@@ -2844,6 +2837,13 @@ mod tests {
         }
     }
 
+    /// Layout v6's floats of the facts the public-state gate's random
+    /// positions never have (its rare perturbations, ENGINE.md 100.5), set
+    /// by hand on a spell on the stack and read back for both viewers: an
+    /// exiled card it targets (Blade of the Swarm's kind of target), an
+    /// exiled card it noted (Close Encounter's), the permanent that gave it
+    /// its alternative cost (Tannuk's), a phased-out permanent, an opponent's
+    /// knowledge of a hand card; every other float unchanged.
     #[test]
     fn v6_rare_facts_are_encoded() {
         let mut g = Scenario::new(CardDb::cube())
