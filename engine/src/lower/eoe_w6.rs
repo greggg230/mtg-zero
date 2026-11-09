@@ -23,6 +23,49 @@ pub(crate) fn counter_then_if_spent_below_mv(l: &mut Lowerer, b: &mut Builder, t
     b.patch(end);
 }
 
+/// "Artifacts you control have '{T}: Add {U}. Spend this mana only to cast
+/// a spell from anywhere other than your hand.'" (Mm'menon, the Right Hand;
+/// CR 613.1f, 605.1a, 106.6): the granted mana ability is a latent ability of
+/// the card (`CardDef::latent`: it never has it itself), given to each
+/// artifact its controller controls by W3's grant (`W3Def::grants_activated`,
+/// `Game::granted_activated`: in layer 6, at the granter's timestamp).
+pub(crate) fn printing_w6_grants(l: &mut Lowerer, def: &mut crate::db::CardDef, blue_to_artifacts: bool) {
+    use crate::db::{ActEffect, ActivatedDef, Cost, Filter, ManaAbility, ManaProd};
+    if !blue_to_artifacts {
+        return;
+    }
+    let ability = ActivatedDef {
+        cost: Cost { tap: true, ..Cost::default() },
+        effect: ActEffect::Mana(ManaAbility {
+            prod: ManaProd::Fixed([0, 1, 0, 0, 0, 0]),
+            damage_to_you: 0,
+            sac_if_no: None,
+            only: crate::db::SPEND_OUTSIDE_HAND,
+            uncounterable: false,
+            haste: false,
+            opp_life: 0,
+        }),
+        sorcery: false,
+        instant_only: false,
+        exhaust: false,
+        only_if: None,
+        your_turn: false,
+        loyalty: None,
+        discounts: Vec::new(),
+        boast: false,
+        x: false,
+        special: None,
+    };
+    let yours = Filter::And(Box::new(Filter::Type(crate::db::types::ARTIFACT)), Box::new(Filter::Controller(true)));
+    let k = def.activated.len();
+    def.activated.push(ability);
+    def.latent += 1;
+    def.w3.grants_activated.push((yours, k as u8));
+    // (A granted mana ability as a payment source and at priority is
+    // workstream B2's payment work: refused until it is in.)
+    l.unsupported("CardPrinting.grants_blue_mana_ability_to_your_artifacts(a granted mana ability as a payment source: workstream B2)");
+}
+
 /// Modular's triggered ability (CR 702.43a): "When this permanent is put
 /// into a graveyard from the battlefield, you may put a +1/+1 counter on
 /// target artifact creature for each +1/+1 counter on this permanent" (the

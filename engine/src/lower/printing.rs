@@ -276,7 +276,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.attached_prevents_turning_face_up", attached_prevents_turning_face_up);
         l.deny("CardPrinting.attached_grants_activated_abilities", attached_grants_activated_abilities);
         l.deny("CardPrinting.enters_as_copy_of_creature", enters_as_copy_of_creature);
-        l.deny("CardPrinting.grants_blue_mana_ability_to_your_artifacts", grants_blue_mana_ability_to_your_artifacts);
             // Sunburst (CR 702.44a): counters by the colours of mana spent to
         // cast it (the payment records them, as for converge).
         let sunburst_counter = sunburst.then(|| {
@@ -2003,6 +2002,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         },
     };
     super::eoe_w3::printing_w3(l, &mut def, *grants_food_to_your_artifacts, *grants_food_ability_to_your_artifacts);
+    super::eoe_w6::printing_w6_grants(l, &mut def, *grants_blue_mana_ability_to_your_artifacts);
     def.w3.seen = crate::eoe_w3::seen_of(&def);
     def.w3.mana_spent = def.w3.counters_mana_spent || crate::eoe_w3::reads_mana_spent(&def);
     crate::eoe_w6::finish_def(&mut def);

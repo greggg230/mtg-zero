@@ -20389,15 +20389,16 @@ spent saturates at 255 (`Mark::ManaSpent(u8)`), as mana values do (`u8`). W2's o
 ability's own cost that its restriction allows) reaches Sunken Citadel: its land-ability mana could
 pay Cascading Cataracts' {5} while a spell is being paid for; workstream B's payment work.
 
-**Left: Mm'menon, the Right Hand** (blocked: `CardPrinting.grants_blue_mana_ability_to_your_artifacts`).
-Its flying, "look at the top card any time", "cast artifact spells from the top of your library"
-(above) and W2's "spend only to cast a spell from anywhere other than your hand" are in; missing is
-the mana ability it gives every artifact you control as a payment source, at priority when floating
-in response (13.12) and before a cost sacrifices or returns the artifact (86.2). Those offer a
-permanent's mana abilities by `ACTIVATE` slot (4 a permanent), and a granted one's place can pass
-the fourth in this table (The Eternity Elevator's three abilities, Ragost's granted Food ability,
-then this one), so it needs W2's one-option-per-permanent scheme (`PayMana::card_slots`) or B's
-reworked payment sources (the audit's 13.12 fix). Not started, so as not to rewrite W2's payment
-code while workstream B is reworking it; the coordinator decides who finishes it.
+**Left: Mm'menon, the Right Hand** (blocked: `CardPrinting.grants_blue_mana_ability_to_your_artifacts(a
+granted mana ability as a payment source: workstream B2)`). Its flying, "look at the top card any
+time", "cast artifact spells from the top of your library" (above) and W2's "spend only to cast a
+spell from anywhere other than your hand" are in, and so is its grant: "artifacts you control have
+'{T}: Add {U}. ...'" is a latent mana ability of the card (`CardDef::latent`, never the card's own)
+that W3's grant gives each artifact its controller controls (`lower::eoe_w6::printing_w6_grants`,
+`W3Def::grants_activated`, `Game::granted_activated`: layer 6, the granter's timestamp; a
+permanent's abilities past its fourth `ACTIVATE` slot are A0's page). Missing is the granted mana
+ability as a payment source (`Game::mana_classes` reads a permanent's own mana abilities only), at
+priority and before a cost sacrifices or returns the artifact: workstream B2's payment work
+(pay.rs, mana.rs), so the card is refused until that is merged.
 
 **Results** (the final head, normal release profile): see the commit that records them.
