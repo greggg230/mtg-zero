@@ -1096,6 +1096,50 @@ fn cr_603_10a_anticausal_vestige_draws_then_puts_a_cheap_permanent_onto_the_batt
     assert!(g.obj(bf(&g, 0, "Test Ogre")).tapped, "tapped");
 }
 
+/// An Aura put onto the battlefield from the hand (Anticausal Vestige's
+/// "put a permanent card ... from your hand onto the battlefield tapped")
+/// asks what it enchants as it enters (CR 303.4f): the card is revealed as
+/// it is put onto the battlefield, so the other player's worlds keep it
+/// (EoE fuzz seed 10071: `determinize` for the opponent dealt that hand slot
+/// another card, and the refreshed question had no legal object). The
+/// Aura's controller chooses among both players' creatures; Tractor Beam
+/// enters attached to the chosen one.
+#[test]
+fn cr_303_4f_an_aura_put_onto_the_battlefield_from_hand_is_revealed_as_it_enters() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Mountain", "Mountain", "Anticausal Vestige", "Test Ogre"])
+        .battlefield(1, &["Test Bear"])
+        .hand(0, &["Cut Propulsion", "Tractor Beam"])
+        .hand(1, &["Plains", "Plains"])
+        .at(Step::Main1, 0)
+        .start();
+    let vestige = bf(&g, 0, "Anticausal Vestige");
+    let beam = g.card(0, "Tractor Beam", Zone::Hand);
+    cast(&mut g, "Cut Propulsion");
+    target(&mut g, vestige);
+    run(&mut g, |g| g.kind() == Some(DecisionKind::ChooseHandCard), |_| None);
+    assert!(!g.knows(1, beam), "a hand card P1 hasn't seen");
+    g.choose(Choice::Card(beam));
+    run(&mut g, |g| g.kind() == Some(DecisionKind::ChoosePermanent), |_| None);
+    assert!(g.knows(1, beam), "revealed as it is put onto the battlefield\n{}", log(&g));
+    let bear = bf(&g, 1, "Test Bear");
+    assert!(options(&g).contains(&Choice::Card(bear)) && options(&g).contains(&Choice::Card(bf(&g, 0, "Test Ogre"))), "{:?}", g.options_desc());
+    // Every world of either player keeps the Aura and the question.
+    let mut rng = engine::rng::Rng::new(10071);
+    for v in 0..2u8 {
+        for _ in 0..16 {
+            let mut w = g.clone();
+            w.determinize(v, &mut rng);
+            assert_eq!(w.obj(beam).def, g.obj(beam).def, "P{v}'s world");
+            assert_eq!(w.pending_decision(), g.pending_decision(), "P{v}'s world");
+        }
+    }
+    g.choose(Choice::Card(bear));
+    settle(&mut g);
+    assert_eq!(g.obj(beam).zone, Zone::Battlefield, "{}", log(&g));
+    assert_eq!(g.obj(bear).controller, 0, "Tractor Beam's control");
+}
+
 // ---- Singularity Rupture ---------------------------------------------------
 
 #[test]
