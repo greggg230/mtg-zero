@@ -21278,3 +21278,112 @@ failed, 15 ignored** (`az` 43, `hidden` 16; 100.3's 1,996 and 20 ignored, plus t
 run again and 5 new). The default `FUZZ_GAMES=20000` passed on 593e271 (20,000 games, wins 9,967 / 9,989, 44 draws, mean 27.0 turns, 215.7 decisions; 1,000 matches; 56,486 graveyard-list decisions checked; 1,013 s). `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed with The Dominion Bracelet in the pool (20,000 games, wins 8,986 / 8,936, 2,078 draws, mean 40.3 turns, 505.9 decisions; **177 controlled decisions**, each checked: the decider's encoding bounded, every `HAND` and `LIBRARY` option on its slot's token, `determinize` keeping the decider's view and actions; 1,711 s). The quick runs on 787f5be: `FUZZ_POOL=eoe FUZZ_GAMES=2000` (99 controlled decisions) and `FUZZ_GAMES=1000` passed.
 
 **The gate** (`python tools/gate.py encoding --expect-digest f647a6bc49199717 --expect-digest0 b0311198fed2ac84 --no-mac --checkpoint <the fork of delver2's iter_0071>`, on 593e271): build, both digests (= expected), `--test az` (43), the checkpoint load (h2h, 8 games, 0 unfinished) passed; pytest **200 passed, 1 failed**: `test_position_lab.py::test_real_replays_rebuild_at_every_tenth_frame`, which replays the newest main-line replays (`runs/r3-2b-beliefsearch/replays`, recorded 11-01): `20261101-152448_004` diverges at action 155, an `OrderTriggers` of two Dragon's Rage Channeler triggers, which workstream C's 13.8 (100.3: triggers of one ability from different sources are ordered) asks and the recorded engine didn't. Traced to `eoe-base` (C's change), not this branch's (its commits change no trigger ordering); the test needs replays recorded after C (the maintainer's). Last line: `GATE FAILED encoding 593e27120ea7 in 849s - pytest: 1 failed, 0 error(s), 200 passed`. A raw v5 checkpoint can't be the gate's `--checkpoint` on this build: the guard refuses it (61), as it should; the fork is the run's checkpoint on the new encoding.
+
+#### 100.5.1 D2: the encoding's final round (branch `eoe-d-encoding`, `eoe-f7-numbers` 33931fc merged)
+
+**Why.** Workstream D's layout v6 (100.5) was held until the other workstreams landed. This round
+merges them, encodes the next-layout gaps they added, makes paged decisions show their page, fixes
+EoE fuzz seed 10071, and makes the public-state gate independent of the order of its perturbations.
+
+**The merge (34ad053).** `eoe-f7-numbers` 33931fc (`eoe-base` 2f065ff = the EoE port and
+faithfulness A0/A/B/B2/C/T/W6/loose ends, with C2 and F7): v6 wins on layout, the base on rules.
+Priority's options are A/F7's paged ranges (`EXILE`, `GY_ABILITY`) with gap #1's one "cast or play
+from the graveyard" option folded in (`priority_options` = `priority_options_split` with the
+graveyard casts as `GRAVEYARD` + 0); the bots judge the first page of the decision as it was
+(`priority_decision_split`, through `decision::paged_options`, factored out of `ask_paged_ranges`
+unchanged). Two base bugs fixed on the way: `tests/rules_faithful_c2.rs` built a `CardIdx` from a
+`u16` (F7 made it a `NonZeroU32`), so the suite didn't compile on 33931fc; and F7's counter-mana
+check in `finish_payment` read a picked source's ability from its own definition, which panics for a
+granted mana ability (Mm'menon, the Right Hand's "{T}: Add {U}" on a Nutrient Block): it reads it
+through `src_ability` as the payment does (fa6c97c; `cards_eoe_w6_granted::cr_613_1f_your_artifacts_
+tap_for_blue_to_cast_from_outside_your_hand` failed on 33931fc). `tests/digest.rs` gained
+`DIGEST_LINES=<file>` (every game's digest in any mode, to count the games a change alters in the
+encoding-free mode).
+
+**The six gaps W2 and W6 added, encoded (f38d6d9).** `public_state_reaches_the_encoding` asserts
+only `Design` limits again (the four of 100.5); `V6_FIXED` 18 -> 24.
+
+| Fact (perturbation) | Where |
+|---|---|
+| mana in a pool restricted beyond the Workshop's (CR 106.6, `Game::pool_restr`) | `g6::POOL_KINDS`: per player, type (W U B R G C) and kind, the amount / 4: 6 x 16 floats. The kind is the restriction as one of the seven a mana ability can have (`lower/activated.rs`: artifact spells, legendary spells, artifact abilities, both, colorless Eldrazi, land abilities, spells cast from outside the hand; any other is refused there, and `encode::pool_kind` panics on one), + 8 with the rider "that spell can't be countered" (8 alone: the rider on unrestricted mana) |
+| lands entered this turn (`Game::lands_entered`, Bioengineered Future) | `g6::LANDS_ENTERED` / 4 per player |
+| a player created tokens this turn (`W6State::tokens_turn`, Moonlit Meditation) | `g6::TOKENS_CREATED` per player (the rules' own test: the turn number) |
+| the mana spent to cast a spell on the stack (Unravel) | `stack::MANA_SPENT` / 8 (148) |
+| a copy has an ability by its exception (CR 707.9b, Thespian's Stage) | `perm::KEPT_ABILITY` = (its place + 1) / 8 (its `ACTIVATE` slot), and `g6::KEPT_FROM`, the 32 digits of the card whose ability it is while a permanent has one (a table has one such ability: `add_kept_ability_defs` refuses two) |
+| a control effect ends at the end of the turn (CR 613.1b, 613.7, 514.2; `W6State::control`) | `perm::CONTROL_EOT`, the player (1 the frame's, -1 the other) of an "until end of turn" effect that decides the controller until the turn ends; `CONTROL_LASTING`, the player that decides it once those end; on an Aura that says "you control enchanted permanent" `AURA_CONTROL`, its place among them (0.5 later than the lasting one, 1 later than an "until end of turn" one too, 0 overridden for good) |
+
+The control floats are exact for the recorded effects (`Game::w6_control_layers`,
+`w6_aura_control_place`): a lasting effect ends only as its permanent leaves, so only the latest
+lasting one can decide again; the "until end of turn" ones end together, so only the latest of them
+can; an Aura's effect can end at any time, so each Aura carries its place. Without recorded effects
+(no card with such an effect in the game), the `Mod::ControlFrom` "until end of turn" effects: the
+latest's player and the player before the earliest (each one's end returns the permanent to the
+player before it while its player controls it, so with two players the earliest decides). The gate's
+control perturbation sets `SEEN_W6_CONTROL`, as a game with such a card has it.
+
+**Layout v6 grows** (not frozen: no run uses it): the v6 globals block is 320 floats (per player
+128: 8 used, 24 spare, the 96 pool kinds; the game's 64: 37 used, 27 spare), so v6 is **44,212
+features** (+256); permanent status 133-143 and stack status 149-151 stay spare. `layout_v6.json`
+regenerated (version 6). Every new float is a v6 float: `DIGEST_ENCODING=v5` and `=0` unchanged.
+"Adding a gap later" (100.5) holds with these spare ranges.
+
+**Paged blocks (4396d38).** Workstream A's gap (100.2): on a range page (window w >= 1) `base` + j
+is the item at position w (n - 1) + j, while the stack, waiting-trigger and graveyard-ability blocks
+showed their first items. The decider's encoding now shows the page's items at their slots there
+(`encode::page_first`), as the list block already did for graveyard cards, names, abilities and F7's
+LookTopN pile; the other player's encoding and every first page are as before. `EXILE` ids have no
+slot block in the token layout (since 99.14 an exiled card is `EXILE` + its place among those
+offered, scored without a token, paged or not): nothing to follow. Tests:
+`limits::cr_115_1_a_page_of_stack_items_is_the_stack_blocks` (Counterspell over 35 Bolts),
+`rules_faithful_a::cr_603_3b_a_page_of_triggers_is_the_trigger_blocks` (18 Ouroboroids),
+`cards_m7b_stack2::cr_602_2_a_page_of_graveyard_abilities_is_the_blocks` (14 Fanatics of Rhonas).
+
+**EoE fuzz seed 10071 (cd412c5).** Anticausal Vestige puts an Aura from the hand onto the
+battlefield; `put_onto_battlefield` leaves it in the hand while `Task::EnterAura` asks what it
+enchants (chosen as it enters, CR 303.4f), and `determinize` for the other player dealt that hand
+slot another card: the refreshed question named a card with nothing to enchant ("ChoosePermanent with
+no options"). The card is being put onto the battlefield, a public zone: it is revealed as the
+question is queued, so no world deals it away. The other entry tasks (`AsEnters`, `EnterAsCopy`, C2's
+`EntersTogether`) run after the card has moved, and `EnterByDiscardAny` moves it out of the hand
+first. Test `cards_eoe_d::cr_303_4f_an_aura_put_onto_the_battlefield_from_hand_is_revealed_as_it_enters`
+(Tractor Beam; failed first with the seed's panic). Seed 10071 itself passes in release on this branch
+and on 33931fc (the games differ by gap #1's decisions); the test pins the mechanism.
+
+**The gate's random streams (af8c555).** Lane D (2026-11-08) saw "a creature can't be blocked" and
+"the other player learns a hand card" as gaps after adding a perturbation that drew from the gate's
+one shared stream (every later perturbation's picks shifted). Not real gaps here: the gate passes on
+40 other shared streams at twice the positions (`GATE_SEED=1..40`, `AZ_SCALE=2`; the second's
+past-the-16th case is bag 22). Each perturbation now draws from its own stream keyed by its name, so
+adding one changes no other's picks; passed with the default and `GATE_SEED=1..30` at `AZ_SCALE=2`.
+`the_v5_facts_encode_no_hidden_information` keys its streams the same way (`AZ_SCALE=3`: 12,185
+perturbed positions, 48,740 worlds).
+
+**The Dominion Bracelet** stays supported: `eoe_support_report` 320 / 320 (Paradox Haze excluded).
+
+**The widen, proved again** on the final layout: the same copy of `runs/delver2/models/iter_0071.pt`
+(sha256 dd5cd5c4..., read only) forked by `tools/fork_run.py` into
+`E:/mtg-zero-scratch/eoe-d2-widen/fork-delver2` (iteration 0: 44,212 features, layout version 6),
+100.5's `widen_proof.py` (`E:/mtg-zero-scratch/eoe-d2-widen/result.json`): 18,932 positions of this
+build (4,324 cube, 11,032 best-of-three, 3,576 Delver mirror; the games are longer since F7's loops),
+13,457 with a v6-only float set (302 of the 6,592 new floats set somewhere). Policy logits max abs
+1.3e-5, value logits 2.5e-6 (762 rows bit for bit), value probabilities 8.9e-7, margin 2.5e-6; the same
+with every v6-only float uniform noise in [-4, 4]; the fork with its v6-only floats zeroed equals it on
+the real encoding bit for bit (all 18,932 rows, all three heads). As in 100.5: the new columns have no
+effect, the residual is float rounding (100.5's: 1.2e-5 / 2.8e-6).
+
+**Digests** (re-recorded on purpose; `RULES_EPOCH` bumped and the Delver canary library stamped, 60
+of 60 spots, with each):
+
+| Commit | Full | `DIGEST_ENCODING=0` | `DIGEST_ENCODING=v5` | Why |
+|---|---|---|---|---|
+| before (33931fc) | af00cc85e05ea0c1 | 660b3c387f18be70 | (layout v5: the full) | |
+| 34ad053 the merge | **095587d1d1938af4** | **4a2a227cb45204cd** | 6fa4fab18b624326 | every encoding is v6's; 449 of the 2,500 games play differently (380 random, 69 heuristic): gap #1's two-step graveyard casts on the new base (counted with `DIGEST_LINES` on both sides) |
+| fa6c97c the payment's granted ability | unchanged | unchanged | unchanged | no digest game has a granted mana ability |
+| f38d6d9 the six gaps | **408ee16a94d0ffec** | unchanged | unchanged | every encoding: the v6 globals block is wider; no game plays differently and no v5 float changes |
+| 4396d38 paged blocks | unchanged | unchanged | unchanged | no digest game pages these ranges |
+| cd412c5 seed 10071 | unchanged | unchanged | unchanged | no digest game puts an Aura from a hidden zone with a choice |
+
+**Not done: 28.8.2k** (the colours spent; docs/shortcuts.md 28.8.2, the audit's F4). It needs a
+decision for the colours a payment's choices spend, inside B4's payment code (`pay.rs`
+`record_converge`, `pick_multi`, the hybrid/Phyrexian upper bound), so it waits for B4 to land in
+`eoe-base`.
