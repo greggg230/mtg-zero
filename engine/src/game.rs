@@ -1717,6 +1717,15 @@ impl Game {
                 if cands.is_empty() {
                     self.note(|g| format!("{} has nothing to enchant and stays where it is", g.name(idx)));
                 } else {
+                    // The card is being put onto the battlefield, a public
+                    // zone, and what it enchants is chosen as it enters: it
+                    // is revealed now, from a hand or a library, so every
+                    // player's worlds keep it while the choice is pending
+                    // (`determinize` deals only cards a viewer doesn't know;
+                    // the question names this card; ENGINE.md 10, 100.5.1:
+                    // EoE fuzz seed 10071, Anticausal Vestige putting Tractor
+                    // Beam from the hand).
+                    self.reveal(idx);
                     self.agenda.push(Task::EnterAura { card: idx, controller, tapped, page: crate::decision::Page::FIRST });
                 }
                 return self.obj_ref(idx);
