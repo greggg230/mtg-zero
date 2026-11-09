@@ -146,30 +146,43 @@ impl crate::db::CardDb {
     }
 }
 
+/// The cards of a table W6 refuses for what else the table holds (each with
+/// its blocker; `CardDb::from_cards` takes them out of the table, so a card
+/// is refused loudly, never played wrongly):
+///
+/// * "The first time you would create one or more tokens each turn, you may
+///   instead ..." asks that question as the tokens are created, then runs
+///   the creating instruction again with the answer
+///   (`Game::w6_token_question`): every instruction of the table that
+///   creates tokens must do so first, for one player. With another one in
+///   the table (an exile first, a loop over players, a draw replaced by a
+///   token outside any instruction), such a card is refused (the EoE
+///   table's token creators are all of the first kind).
+/// * Two ways to cast from the top of a library (life rather than the mana
+///   cost, and artifact spells for their costs) would be the player's choice
+///   of permission (CR 601.2a): the second kind is refused beside the first.
+pub(crate) fn table_refusals(defs: &[crate::db::CardDef]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if defs.iter().any(|d| d.w6.token_copies) {
+        let late = defs.iter().find(|d| {
+            d.opp_draw_token.is_some() || abilities_of(d).any(|ab| ab.program.iter().chain(ab.modes.iter().flat_map(|m| m.list.iter().flat_map(|x| x.program.iter()))).any(creates_tokens_late))
+        });
+        if let Some(l) = late {
+            for d in defs.iter().filter(|d| d.w6.token_copies) {
+                out.push((d.name.clone(), format!("CardPrinting.replaces_first_tokens_with_copies(with {}'s token creation in the table)", l.name)));
+            }
+        }
+    }
+    if defs.iter().any(|d| d.play_top_life) {
+        for d in defs.iter().filter(|d| d.w6.cast_artifacts_from_top) {
+            out.push((d.name.clone(), "CardPrinting.grants_cast_artifact_from_top_of_library(with another permission to cast from the top of a library in the table)".into()));
+        }
+    }
+    out
+}
+
 impl W6Db {
     pub(crate) fn of(defs: &[crate::db::CardDef]) -> W6Db {
-        // A table with "the first time you would create one or more tokens
-        // each turn, you may instead ..." asks that question as the tokens
-        // are created, then runs the creating instruction again with the
-        // answer (`Game::w6_token_question`): every instruction of the table
-        // that creates tokens must do so first, for one player. The others
-        // (and a draw replaced by a token, outside any instruction) are
-        // refused loudly: no such table is built (none is: the EoE table's
-        // token creators are all of the first kind).
-        // Two ways to cast from the top of a library (life rather than the
-        // mana cost, and artifact spells for their costs) would be the
-        // player's choice of permission (CR 601.2a); no table has both, and
-        // one that did is refused here (loudly).
-        assert!(
-            !(defs.iter().any(|d| d.play_top_life) && defs.iter().any(|d| d.w6.cast_artifacts_from_top)),
-            "two permissions to cast from the top of a library in one table (EoE W6)"
-        );
-        if defs.iter().any(|d| d.w6.token_copies) {
-            let late = defs.iter().find(|d| {
-                d.opp_draw_token.is_some() || abilities_of(d).any(|ab| ab.program.iter().chain(ab.modes.iter().flat_map(|m| m.list.iter().flat_map(|x| x.program.iter()))).any(creates_tokens_late))
-            });
-            assert!(late.is_none(), "a card replaces token creation with copies, and {} creates tokens another way (EoE W6)", late.map_or("", |d| d.name.as_str()));
-        }
         W6Db { mana_spent_all: defs.iter().any(|d| d.w6.reads_spells_mana_spent), kept: Vec::new() }
     }
 }

@@ -2259,6 +2259,13 @@ impl CardDb {
         db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
         db.watch_toughness = db.defs.iter().any(|d| d.toughness_assigns_damage || d.toughness_stations);
         db.hand_alt_grants = db.defs.iter().any(|d| !d.casting.hand_alt_grants.is_empty());
+        // (Cards W6 refuses for what else the table holds: out of the table,
+        // listed with their blockers.)
+        for (name, why) in crate::eoe_w6::table_refusals(&db.defs) {
+            if db.by_name.remove(&name).is_some() {
+                db.unsupported.insert(name, vec![why]);
+            }
+        }
         // ("Except it has this ability": EoE W6; before the Mountain variants,
         // which then cover the made definitions too.)
         let kept = crate::eoe_w6::add_kept_ability_defs(&mut db.defs);

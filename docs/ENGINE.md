@@ -20335,8 +20335,9 @@ run, they reflected the earlier batches) are committed (aa323a3b).
   one's copies). The instruction creates nothing, the question is asked as it returns
   (`run_frame`), and the instruction runs again from its frame with the answer: every instruction
   of the table that creates tokens does so first, for one player (the EoE table's seven), and
-  `W6Db::of` refuses (panics on) a table where one doesn't (Amass, a linked loop, an exile first, a
-  draw replaced by a token). The copies are made from the enchanted permanent's copiable values,
+  in a table where one doesn't (Amass, a linked loop, an exile first, a draw replaced by a token:
+  the cube's, in the test tables that hold both) the card is refused, out of the table with its
+  blocker (`eoe_w6::table_refusals`, `CardDb::from_cards`). The copies are made from the enchanted permanent's copiable values,
   that many (the token multipliers apply), and enter as the original tokens would (tapped,
   attacking: "before anything that modifies how those tokens enter", the ruling); any kind of token
   (a Lander too).
@@ -20359,8 +20360,8 @@ run, they reflected the earlier batches) are committed (aa323a3b).
   `CastFrom::LibraryTopMana`, for the spell's costs; whether a face is an artifact spell is the
   face's question (`face_castable` and `begin_cast_face` read the face); lands aren't cast and a
   land face isn't played this way; lowered only with "you may look at the top card of your library
-  any time" on the same permanent (offering the cast then hides nothing). A table with Bolas's
-  Citadel's permission too is refused. Encoded as the Citadel's "from the top of a library".
+  any time" on the same permanent (offering the cast then hides nothing). Beside Bolas's Citadel's
+  permission the card is refused (`table_refusals`: two permissions would be a choice). Encoded as the Citadel's "from the top of a library".
 * *Sunken Citadel*: "as this enters, choose a color" (CR 614.12; `W6Def::chooses_color`, asked with
   the entry's other choices), "one mana of the chosen color" (`ManaProd::Chosen`) and "two mana of
   the chosen color" (`ManaProd::ChosenN`, a per-source several-mana production; none if no colour
