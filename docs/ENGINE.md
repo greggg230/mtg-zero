@@ -20552,3 +20552,21 @@ Maker, "{T}: Add {C}. {1}: this land becomes a Forest in addition to its other t
 turn": then {G} or {C}, one tap; with priority both abilities, {C} or {G}),
 `rules_faithful_c.rs::cr_305_6_an_effect_giving_a_basic_land_type_is_not_refused` (C's refusal
 test, turned: C Forest Mimic's copy exception "except it's a Forest" is no longer refused for it).
+
+##### A restricted unit is no superset (W6's EoE fuzz on 755fe0b)
+
+W6 merged 755fe0b and its EoE 20k stopped in every chunk (seeds 570, 3271, 5207, 6813, 8715, 10940,
+12522, 14559, 16627, 18391): `PayMana` offered Cascading Cataracts' {5}, then "no way to pay".
+Cause: `cands` reduces a card whose ways take no budget to one way when that way's units cover
+every other's (`covers`), and `covers` read a unit's tag as a bitwise superset. A land with "{T}:
+Add {B}" and "{T}: Add {B}{B}. Spend this mana only to activate abilities of lands" (Sunken
+Citadel) had its restricted {B}{B} taken for a superset of the plain {B} (more bits), so the land
+counted as two land-ability {B} only. With 755fe0b's tags this became reachable (before, the
+restricted way of a source the spell couldn't take was left out); `MADE` and `RESTRICTED` had the
+same flaw. Now `unit_covers`: the types hold the other's, and `MADE`, `RESTRICTED` and a
+restriction only narrow (a unit has one only if the other has it, a restriction then allowing at
+least the other's purposes). On W6's merge with the fix the ten seeds pass.
+
+Test: `cr_106_6_restricted_mana_never_stands_for_a_lands_plain_mana` (W2's new Test Sunken Citadel
+with Cascading Cataracts: its plain {B} pays a spell; with five Islands {6}{B} is payable, the
+{B}{B} paying two of the {5}, and {7}{B} is not; it failed on f3345ed).

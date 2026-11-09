@@ -55,6 +55,11 @@ pub fn w2_cards() -> Vec<card_ir::Card> {
         // for legendary spells only).
         card("Test Land Engine", json!({"card_types": ["Land"], "activated_abilities": [tap_mana(json!([["C", 1]]), Some("legendary_spell")), pay_draw(2)]})),
         card("Test Land Spark", json!({"card_types": ["Land"], "activated_abilities": [tap_mana(json!([["C", 1]]), Some("legendary_spell")), pay_draw(1)]})),
+        // Sunken Citadel's two abilities, of a fixed colour: "{T}: Add {B}.
+        // {T}: Add {B}{B}. Spend this mana only to activate abilities of
+        // lands." (B2: EoE fuzz seed 3271 of W6's table.)
+        card("Test Sunken Citadel", json!({"card_types": ["Land"], "activated_abilities": [tap_mana(json!([["B", 1]]), None),
+            tap_mana(json!([["B", 2]]), Some("land_activation"))]})),
         // "{T}: Add {C}. {1}: This land becomes a Forest in addition to its
         // other types until end of turn." (B2: a basic land type given by an
         // effect, CR 305.6; ENGINE.md 100.4.5.)

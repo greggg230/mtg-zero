@@ -494,3 +494,28 @@ fn cr_305_6_a_land_given_forest_taps_for_green() {
         .collect();
     assert_eq!(pools, vec![[0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 1, 0]], "{{C}} or {{G}}");
 }
+
+/// CR 106.6, 601.2g: a land with "{T}: Add {B}" and "{T}: Add {B}{B}. Spend
+/// this mana only to activate abilities of lands" (Sunken Citadel) pays a
+/// spell's {B} with the first, even while Cascading Cataracts' {5} could take
+/// the second's mana (EoE fuzz seed 3271 of W6's table, on 755fe0b: the
+/// feasibility took the restricted {B}{B} for a superset of the plain {B},
+/// its tag having more bits, so the land's plain {B} was lost and a payment
+/// that picked Cataracts' {5} found no way to finish).
+#[test]
+fn cr_106_6_restricted_mana_never_stands_for_a_lands_plain_mana() {
+    let g = eoe_w2::scen().battlefield(0, &["Test Sunken Citadel", "Cascading Cataracts"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{B}")), "the Citadel's plain {{B}}");
+    assert!(g.can_pay(0, &cost("{B}{1}")), "and the Cataracts' {{C}}");
+    assert!(!g.can_pay(0, &cost("{B}{B}")));
+    let g = eoe_w2::scen()
+        .battlefield(0, &["Test Sunken Citadel", "Cascading Cataracts", "Island", "Island", "Island", "Island", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    // The Islands pay the Cataracts' {5}, its five mana and the Citadel's {B}
+    // the spell; or the Citadel's {B}{B} pays two of the {5}, and two Islands
+    // are left for the spell.
+    assert!(g.can_pay(0, &cost("{5}{B}")));
+    assert!(g.can_pay(0, &cost("{6}{B}")));
+    assert!(!g.can_pay(0, &cost("{7}{B}")));
+}

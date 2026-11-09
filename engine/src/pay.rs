@@ -2829,6 +2829,20 @@ fn cands(
     out
 }
 
+/// May a unit tagged `a` be used wherever one tagged `b` may (every need `b`
+/// pays)? Its types hold `b`'s; `MADE`, `RESTRICTED` and a spending
+/// restriction only narrow where a unit goes, so `a` has one only if `b` has
+/// it (a restriction then allowing at least `b`'s purposes). A bitwise
+/// superset is not enough: Sunken Citadel's restricted {B}{B} has more bits
+/// than its plain {B} (EoE fuzz seed 3271 of W6's table, ENGINE.md 100.4.5).
+fn unit_covers(a: Tag, b: Tag) -> bool {
+    let (la, lb) = (crate::mana::low(a), crate::mana::low(b));
+    lb & TYPES & !la == 0
+        && (la & MADE == 0 || lb & MADE != 0)
+        && (la & RESTRICTED == 0 || lb & RESTRICTED != 0)
+        && (purposes(a) == 0 || (purposes(b) != 0 && purposes(b) & !purposes(a) == 0))
+}
+
 /// Can the units `a` make every unit of `b` (each of `b`'s units by its own
 /// unit of `a` whose mask holds it)? A bipartite matching by augmenting
 /// paths: a way may have any number of units (Gaea's Cradle's, one per
@@ -2839,7 +2853,7 @@ fn cands(
 fn covers(a: &[Unit], b: &[Unit]) -> bool {
     fn augment(j: usize, a: &[Unit], b: &[Unit], seen: &mut [bool], owner: &mut [usize]) -> bool {
         for i in 0..a.len() {
-            if !seen[i] && b[j].mask & !a[i].mask == 0 {
+            if !seen[i] && unit_covers(a[i].mask, b[j].mask) {
                 seen[i] = true;
                 if owner[i] == usize::MAX || augment(owner[i], a, b, seen, owner) {
                     owner[i] = j;
