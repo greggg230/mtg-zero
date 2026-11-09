@@ -114,8 +114,30 @@ pub fn spend_ok(unit: Tag, need: Tag) -> bool {
 /// purposes)?
 #[inline]
 pub fn fits(unit: Tag, need: Tag) -> bool {
+    fits_in(unit, need, Chains::Ranked)
+}
+
+/// How a `MADE` unit may pay a `NOT_MADE` need in a matching
+/// (`payable_iter`): never (the order of no edge, a bound), always (every
+/// order at once, its own too: a bound), or by the chain ids' ranks.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Chains {
+    Never,
+    Always,
+    Ranked,
+}
+
+/// [`fits`] under `mode`.
+#[inline]
+fn fits_in(unit: Tag, need: Tag, mode: Chains) -> bool {
     unit & need & TYPES as Tag != 0
-        && (need & NOT_MADE as Tag == 0 || unit & MADE as Tag == 0 || chain(unit) != 0 && chain(unit) < chain(need))
+        && (need & NOT_MADE as Tag == 0
+            || unit & MADE as Tag == 0
+            || match mode {
+                Chains::Never => false,
+                Chains::Always => true,
+                Chains::Ranked => chain(unit) != 0 && chain(unit) < chain(need),
+            })
         && spend_ok(unit, need)
 }
 
@@ -417,7 +439,16 @@ fn payable_iter(
     let made = |u: &Tag| u & MADE as Tag != 0 && chain(*u) != 0;
     let linked = extra.iter().any(|&e| e & NOT_MADE as Tag != 0 && chain(e) != 0 && chosen.iter().copied().chain(available.clone()).any(|u| made(&u) && chain(u) != chain(e) && u & e & TYPES as Tag != 0 && spend_ok(u, e)));
     if !linked {
-        return payable_ordered(cost, allow, extra, chosen, available);
+        return payable_ordered(cost, allow, extra, chosen, available, Chains::Ranked);
+    }
+    // (Two bounds first, each one matching: with no such mana paying such
+    // a cost, a payment every order allows holds; with every such mana free
+    // to pay every such cost, its own too, a payment no order allows fails.)
+    if payable_ordered(cost, allow, extra, chosen, available.clone(), Chains::Never) {
+        return true;
+    }
+    if !payable_ordered(cost, allow, extra, chosen, available.clone(), Chains::Always) {
+        return false;
     }
     // The ids, and each one's needs and units without it (alike when equal).
     let units: Vec<Tag> = chosen.iter().copied().chain(available).collect();
@@ -472,7 +503,7 @@ fn payable_iter(
         let ex: Vec<Tag> = extra.iter().map(|&t| relabel(t, rank)).collect();
         let ch: Vec<Tag> = chosen.iter().map(|&t| relabel(t, rank)).collect();
         let av: Vec<Tag> = units[chosen.len()..].iter().map(|&t| relabel(t, rank)).collect();
-        payable_ordered(cost, allow, &ex, &ch, av.iter().copied())
+        payable_ordered(cost, allow, &ex, &ch, av.iter().copied(), Chains::Ranked)
     };
     let mut rank = vec![0u64; ids.len()];
     let mut placed = vec![false; ids.len()];
@@ -482,13 +513,13 @@ fn payable_iter(
 
 /// [`payable_iter`] with the chained abilities' order given (their chain
 /// ids' ranks).
-fn payable_ordered(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], available: impl Iterator<Item = Tag> + Clone) -> bool {
+fn payable_ordered(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], available: impl Iterator<Item = Tag> + Clone, mode: Chains) -> bool {
     // (A restriction that keeps some unit from some need: the exact
     // matching. Otherwise every unit may pay every need it meets in type.)
     let main = cost_need(0, allow);
     let kept_from = |u: Tag| purposes(u) != 0 && (!spend_ok(u, main) || extra.iter().any(|&e| !spend_ok(u, e)));
     if chosen.iter().any(|&u| kept_from(u)) || available.clone().any(kept_from) {
-        return payable_restricted(cost, main, extra, chosen, available);
+        return payable_restricted(cost, main, extra, chosen, available, mode);
     }
     // (Counted in u32: any number of units of a tag, never saturating.)
     let mut groups: crate::svec::SVec<(Tag, bool, u32), 32> = crate::svec::SVec::new();
@@ -522,9 +553,9 @@ fn payable_ordered(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], av
     debug_assert!(!cost.has_phyrexian());
     let cap = chosen.len() as u32;
     let best = if extra.iter().any(|&m| m & NOT_MADE as Tag != 0) {
-        best_chosen::<true>(&needs, &mut groups, cap)
+        best_chosen::<true>(&needs, &mut groups, cap, mode)
     } else {
-        best_chosen::<false>(&needs, &mut groups, cap)
+        best_chosen::<false>(&needs, &mut groups, cap, mode)
     };
     match best {
         Some(used) => chosen.len() - used as usize <= cost.generic as usize,
@@ -540,7 +571,7 @@ fn payable_ordered(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], av
 /// Mendelsohn-Dulmage theorem one exists when a matching covers the needs
 /// and another covers the chosen units, so two maximum flows decide it (the
 /// sides grouped by tag, capacities their counts).
-fn payable_restricted(cost: &ManaCost, main: Tag, extra: &[Tag], chosen: &[Tag], available: impl Iterator<Item = Tag>) -> bool {
+fn payable_restricted(cost: &ManaCost, main: Tag, extra: &[Tag], chosen: &[Tag], available: impl Iterator<Item = Tag>, mode: Chains) -> bool {
     // Needs by tag: (tag, generic, count).
     let mut needs: Vec<(Tag, bool, u32)> = Vec::new();
     let mut add_need = |t: Tag, generic: bool, k: u32| {
@@ -574,7 +605,7 @@ fn payable_restricted(cost: &ManaCost, main: Tag, extra: &[Tag], chosen: &[Tag],
     for u in available {
         add_unit(u, false);
     }
-    let pays = |u: Tag, n: &(Tag, bool, u32)| if n.1 { spend_ok(u, n.0) } else { fits(u, n.0) };
+    let pays = |u: Tag, n: &(Tag, bool, u32)| if n.1 { spend_ok(u, n.0) } else { fits_in(u, n.0, mode) };
     let edges: Vec<Vec<bool>> = needs.iter().map(|n| units.iter().map(|u| pays(u.0, n)).collect()).collect();
     let need_total: u32 = needs.iter().map(|n| n.2).sum();
     let chosen_total = chosen.len() as u32;
@@ -644,10 +675,10 @@ pub(crate) fn max_flow(left: &[u32], right: &[u32], edges: &[Vec<bool>]) -> u32 
 /// them); `None` if the needs cannot be met.
 /// (`STRICT`: some need is `NOT_MADE`; otherwise any meeting of types fits,
 /// the fast path.)
-fn best_chosen<const STRICT: bool>(needs: &[(Tag, u32)], groups: &mut [(Tag, bool, u32)], cap: u32) -> Option<u32> {
+fn best_chosen<const STRICT: bool>(needs: &[(Tag, u32)], groups: &mut [(Tag, bool, u32)], cap: u32, mode: Chains) -> Option<u32> {
     match needs.split_first() {
         None => Some(0),
-        Some((&(c, k), rest)) => distribute::<STRICT>(c, k, 0, rest, groups, cap),
+        Some((&(c, k), rest)) => distribute::<STRICT>(c, k, 0, rest, groups, cap, mode),
     }
 }
 
@@ -658,21 +689,22 @@ fn distribute<const STRICT: bool>(
     rest: &[(Tag, u32)],
     groups: &mut [(Tag, bool, u32)],
     cap: u32,
+    mode: Chains,
 ) -> Option<u32> {
     if k == 0 {
-        return best_chosen::<STRICT>(rest, groups, cap);
+        return best_chosen::<STRICT>(rest, groups, cap, mode);
     }
     if gi == groups.len() {
         return None;
     }
     let (mask, ch, cnt) = groups[gi];
-    let meets = if STRICT { fits(mask, need) } else { mask & need & TYPES as Tag != 0 };
+    let meets = if STRICT { fits_in(mask, need, mode) } else { mask & need & TYPES as Tag != 0 };
     let most = if meets { k.min(cnt) } else { 0 };
     let mut best: Option<u32> = None;
     for t in (0..=most).rev() {
         let used = if ch { t } else { 0 };
         groups[gi].2 -= t;
-        let r = distribute::<STRICT>(need, k - t, gi + 1, rest, groups, cap.saturating_sub(used));
+        let r = distribute::<STRICT>(need, k - t, gi + 1, rest, groups, cap.saturating_sub(used), mode);
         groups[gi].2 += t;
         if let Some(v) = r {
             let v = v + used;

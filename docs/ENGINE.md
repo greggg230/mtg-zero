@@ -21221,8 +21221,11 @@ activated after it, never its own or an earlier one's: the "pays the cost of" re
   the candidates too (`cands`).
 * **The order** (`payable_iter`): with such needs and such mana that could pay another's, every
   order of the activations is tried, their ids relabelled by rank; activations alike (the same
-  needs and the same mana) keep a fixed order among themselves. A search past `SEARCH_NODES` is a
-  loud failure (ENGINE.md 51). `payable_iter`'s counts are u32 and its groups unbounded (a u8
+  needs and the same mana) keep a fixed order among themselves. Two bounds come first, one
+  matching each (`Chains`): with no such mana paying such a cost (the old rule) a payment every
+  order allows holds; with every such mana free to pay every such cost (its own too) one that fails
+  fails every order. (Without them the EoE fuzz ran seven times slower: 150 games in 281 s against
+  36.) A search past `SEARCH_NODES` is a loud failure (ENGINE.md 51). `payable_iter`'s counts are u32 and its groups unbounded (a u8
   count saturated, 128 tags and 24 needs were fixed arrays).
 * **`UseCap`** (N10) relied on the old rule ("an ability with a mana cost pays only the cost, so it
   is used at most the cost's size times"): such an ability is never cut now.
