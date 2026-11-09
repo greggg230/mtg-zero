@@ -20361,14 +20361,18 @@ run, they reflected the earlier batches) are committed (aa323a3b).
   land face isn't played this way; lowered only with "you may look at the top card of your library
   any time" on the same permanent (offering the cast then hides nothing). A table with Bolas's
   Citadel's permission too is refused. Encoded as the Citadel's "from the top of a library".
-* *Sunken Citadel's "as this enters, choose a color"* (CR 614.12; `W6Def::chooses_color`, with the
-  entry's other choices) and "one mana of the chosen color" (`ManaProd::Chosen`).
+* *Sunken Citadel*: "as this enters, choose a color" (CR 614.12; `W6Def::chooses_color`, asked with
+  the entry's other choices), "one mana of the chosen color" (`ManaProd::Chosen`) and "two mana of
+  the chosen color" (`ManaProd::ChosenN`, a per-source several-mana production; none if no colour
+  was chosen) with W2's land-ability restriction (99.12).
+* *Contested War Zone* and *Power Depot*: their corrected IR (161; 40, 47) with W2's control op and
+  restriction (99.12) and W6's modular.
 * *"Until end of turn" control* (lane D's Systems Override and Mutinous Massacre) sets the same fast
   path: those games record every control effect too, so the effect's end is worked out with the
   others (a later control effect of the same player for good is no longer undone).
 
 **New public state** (each a next-layout gap in the public-state gate, its perturbation drawing
-nothing from the shared stream; `tests/az.rs` 14 -> 18 applied gaps): the recorded control
+nothing from the shared stream; four more applied gaps in `tests/az.rs`, 22 with C's and W2's): the recorded control
 effects (`W6State.control`; also in `testkit::view_of`, in timestamp order without the stamps), a
 spell's mana spent (rare), a player's token creation this turn (`W6State.tokens_turn`), a copy's
 kept ability (rare).
@@ -20378,8 +20382,21 @@ the battlefield one by one and matches each one's `Enters` event at once, so a p
 in the same event doesn't see the earlier entrants' events (CR 603.6a: "all permanents on the
 battlefield (including the newcomers) are checked"); two creatures with "whenever another creature
 enters" returned together trigger once instead of twice. Fixing it changes cube games (the
-digests), so it is left for the maintainer (W6 handles the Vocalist's own ruling above). Lane D's
-"until end of turn" control return (99.5) is exact only in games with a W6 control Aura: elsewhere
-an earlier "until end of turn" effect ending returns a permanent its player got back for good
-later in the turn. W3's mana spent saturates at 255 (`Mark::ManaSpent(u8)`), as mana values do
-(`u8`).
+digests), so it is left for the maintainer (W6 handles the Vocalist's own ruling above). W3's mana
+spent saturates at 255 (`Mark::ManaSpent(u8)`), as mana values do (`u8`). W2's open payment item
+(99.12, "Not exact, open": restricted mana a payment may not spend isn't offered for a mana
+ability's own cost that its restriction allows) reaches Sunken Citadel: its land-ability mana could
+pay Cascading Cataracts' {5} while a spell is being paid for; workstream B's payment work.
+
+**Left: Mm'menon, the Right Hand** (blocked: `CardPrinting.grants_blue_mana_ability_to_your_artifacts`).
+Its flying, "look at the top card any time", "cast artifact spells from the top of your library"
+(above) and W2's "spend only to cast a spell from anywhere other than your hand" are in; missing is
+the mana ability it gives every artifact you control as a payment source, at priority when floating
+in response (13.12) and before a cost sacrifices or returns the artifact (86.2). Those offer a
+permanent's mana abilities by `ACTIVATE` slot (4 a permanent), and a granted one's place can pass
+the fourth in this table (The Eternity Elevator's three abilities, Ragost's granted Food ability,
+then this one), so it needs W2's one-option-per-permanent scheme (`PayMana::card_slots`) or B's
+reworked payment sources (the audit's 13.12 fix). Not started, so as not to rewrite W2's payment
+code while workstream B is reworking it; the coordinator decides who finishes it.
+
+**Results** (the final head, normal release profile): see the commit that records them.
