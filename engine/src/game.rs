@@ -612,6 +612,11 @@ pub struct Game {
     pub(crate) first_token: u16,
     /// A simultaneous move off the battlefield is in progress (`leaving`).
     pub(crate) batching: bool,
+    /// The permanents that left in the simultaneous move in progress whose
+    /// "until this leaves" cards return once it is over (CR 610.3: "a
+    /// second one-shot effect is created immediately after the specified
+    /// event"; `end_batch`).
+    pub(crate) releasing: Vec<ObjRef>,
     /// The current event group (CR 603.2c, 700.1: one instruction of a
     /// resolving spell or ability, one simultaneous move, one cost is one
     /// event however many objects it touches): bumped as an instruction ends,
@@ -620,9 +625,6 @@ pub struct Game {
     /// "Whenever one or more ..." abilities that triggered in event group
     /// `ev_seq`: (source, ability slot, group); one trigger per group.
     pub(crate) batch_fired: Vec<(ObjRef, u8, u32)>,
-    /// (event group, the first timestamp a permanent got in it): the
-    /// permanents that entered at the same time as one (`EnterAsCopy`).
-    pub(crate) group_ts: (u32, u32),
     /// The permanent being put onto the battlefield is a resolving spell
     /// (it was cast).
     pub(crate) entering_cast: bool,
@@ -815,6 +817,10 @@ pub struct Game {
     pub(crate) entering_times: u32,
     pub(crate) enter_note: u32,
     pub(crate) defer_enters: bool,
+    /// The simultaneous entries in progress, innermost last: their
+    /// permanents' `Enters` events wait to be matched together (CR 603.6a;
+    /// `Game::begin_entering`).
+    pub(crate) entries: Vec<crate::triggers::Entry>,
     /// A card of a looked-at pile is being put where the effect says
     /// (`Op::PileTo`); and the players whose library a replacement
     /// ("shuffle it into its owner's library instead": Blightsteel
@@ -1234,6 +1240,7 @@ impl Game {
             entering_times: 0,
             enter_note: 0,
             defer_enters: false,
+            entries: Vec::new(),
             pile_moving: false,
             pile_shuffles: 0,
             prepared: Vec::new(),
@@ -1249,9 +1256,9 @@ impl Game {
             w6: Default::default(),
             known_pools: [None, None],
             batching: false,
+            releasing: Vec::new(),
             ev_seq: 0,
             batch_fired: Vec::new(),
-            group_ts: (0, 0),
             entering_cast: false,
             entering_evoked: false,
             log: if spec.log { Some(Vec::new()) } else { None },
@@ -1488,8 +1495,30 @@ impl Game {
     }
 
     /// [`put_onto_battlefield`](Self::put_onto_battlefield) of an Aura that
-    /// enters attached to `attach` (CR 303.4f, chosen as it enters).
+    /// enters attached to `attach` (CR 303.4f, chosen as it enters). Its
+    /// `Enters` event is matched with the others of its entry: an effect
+    /// putting several permanents onto the battlefield at once begins one
+    /// around them (CR 603.6a; `Game::begin_entering`), else it is an entry
+    /// of its own.
     pub(crate) fn put_onto_battlefield_attached(&mut self, idx: CardIdx, controller: PlayerId, attach: Option<ObjRef>) -> ObjRef {
+        self.begin_entering(false);
+        let r = self.enter_permanent(idx, controller, attach);
+        self.end_entering();
+        r
+    }
+
+    /// [`put_onto_battlefield_attached`](Self::put_onto_battlefield_attached)
+    /// from a task its entry queued as a permanent entered (CR 614.1a, 303.4f:
+    /// what enters instead, or an Aura once it has something to enchant): it
+    /// enters with that entry's permanents.
+    pub(crate) fn put_onto_battlefield_joining(&mut self, idx: CardIdx, controller: PlayerId, attach: Option<ObjRef>) -> ObjRef {
+        self.begin_entering(true);
+        let r = self.enter_permanent(idx, controller, attach);
+        self.end_entering();
+        r
+    }
+
+    fn enter_permanent(&mut self, idx: CardIdx, controller: PlayerId, attach: Option<ObjRef>) -> ObjRef {
         // The engine's 96 permanents a player (`perm_room`; class B, ENGINE.md
         // 58.2): when the player it would enter under has no room, another
         // player's card enters under its owner's control (whose room keeps
@@ -1610,11 +1639,9 @@ impl Game {
             // Only a permanent on the battlefield before this event applies:
             // not one entering at the same time (Exhume returning Containment
             // Priest; CR 614.12a, its ruling), as for `EnterAsCopy`.
-            let group = self.group_ts;
-            let ev = self.ev_seq;
-            let replaced = self.battlefield.iter().any(|&c| {
-                self.abilities(c).exiles_uncast_creatures && !(group.0 == ev && self.objs[c.i()].timestamp >= group.1)
-            });
+            let since = self.entry_since();
+            let replaced =
+                self.battlefield.iter().any(|&c| self.abilities(c).exiles_uncast_creatures && self.objs[c.i()].timestamp < since);
             if replaced && self.def_of(idx).enters_as_copy.is_some() {
                 // "You may have this enter as a copy of ..." is a
                 // replacement effect too: its controller applies it first
@@ -1678,7 +1705,7 @@ impl Game {
             self.marks.push((r, Mark::Entered { times, x }));
         }
         // (Its "enters with" counters: EoE W6, `W6State::entering`.)
-        let entering_before = self.w6.entering.replace((idx, self.group_ts.1));
+        let entering_before = self.w6.entering.replace((idx, self.entry_since()));
         if let Some(h) = attach {
             self.objs[idx.i()].attached = Some(h);
             self.note(|g| format!("{} enters attached to {}", g.name(idx), g.name(h.idx)));
@@ -1737,7 +1764,7 @@ impl Game {
             if priest_after_copy {
                 self.marks.push((r, Mark::PriestPending));
             }
-            self.agenda.push(Task::EnterAsCopy { card: idx, note, since: self.group_ts.1, page: crate::decision::Page::FIRST });
+            self.agenda.push(Task::EnterAsCopy { card: idx, note, since: self.entry_since(), page: crate::decision::Page::FIRST });
             self.w6.entering = entering_before;
             return r;
         }
@@ -1754,9 +1781,7 @@ impl Game {
         }
         self.w6.entering = entering_before;
         if self.objs[idx.i()].zone == Zone::Battlefield && self.objs[idx.i()].inc == r.inc {
-            self.note_entered(idx);
-            self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(r), b: crate::triggers::Subj::None, amount: note as u32 });
-            self.day_night_entered(idx);
+            self.entered_event(r, note);
         }
         r
     }
@@ -1797,7 +1822,7 @@ impl Game {
             Some(Choice::Card(c)) => {
                 self.entering_tapped = tapped;
                 let h = self.obj_ref(c);
-                self.put_onto_battlefield_attached(card, p, Some(h));
+                self.put_onto_battlefield_joining(card, p, Some(h));
             }
             Some(other) => unreachable!("enchant choice {other:?}"),
             None => {
@@ -1882,10 +1907,10 @@ impl Game {
         }
         // "A +1/+1 counter on it for each other <filter> you control" (CR
         // 614.1c): the matching permanents already there, not those entering
-        // at the same time (CR 614.12a; `group_ts`).
+        // at the same time (CR 614.12a; `entry_since`).
         if let Some(f) = self.def_of(idx).enters_counters_per.clone() {
             let p = self.objs[idx.i()].controller;
-            let since = self.group_ts.1;
+            let since = self.entry_since();
             let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(idx)) };
             let n = self.permanents_of(p).filter(|&c| c != idx && self.objs[c.i()].timestamp < since && self.card_matches(&f, c, &ctx)).count();
             if n > 0 {
@@ -1926,7 +1951,8 @@ impl Game {
 
     /// Create `n` tokens (CR 111.2) under `controller`, with the
     /// replacement effects that multiply them ("twice that many of those
-    /// tokens are created instead", CR 614.1a); the first is first.
+    /// tokens are created instead", CR 614.1a); the first is first. They
+    /// enter at the same time (one entry, CR 603.6a).
     pub(crate) fn create_tokens(&mut self, def: DefId, controller: PlayerId, n: u32, tapped: bool) -> Vec<CardIdx> {
         // (A replacement with copies of a permanent: EoE W6.)
         if n > 0 && self.w6.seen & crate::eoe_w6::SEEN_W6_TOKENS != 0 {
@@ -1937,7 +1963,10 @@ impl Game {
             }
         }
         let n = self.token_count(controller, n);
-        (0..n).map(|_| self.create_token(def, controller, tapped)).collect()
+        self.begin_entering(false);
+        let made = (0..n).map(|_| self.create_token(def, controller, tapped)).collect();
+        self.end_entering();
+        made
     }
 
     /// How many tokens `controller` creates instead of n ("twice that many
@@ -2341,10 +2370,12 @@ impl Game {
         let owner = self.objs[idx.i()].owner;
         let ts = if to == Zone::Battlefield {
             self.next_ts += 1;
-            // (The first timestamp of the current event's entries: what
-            // enters at the same time, CR 614.12a.)
-            if self.group_ts.0 != self.ev_seq {
-                self.group_ts = (self.ev_seq, self.next_ts);
+            // (The first timestamp of its entry: what enters at the same
+            // time, CR 614.12a; `entry_since`.)
+            if let Some(e) = self.entries.last_mut() {
+                if e.since == u32::MAX {
+                    e.since = self.next_ts;
+                }
             }
             self.next_ts
         } else {
@@ -2488,12 +2519,16 @@ impl Game {
             // the event back, `copies.rs`.)
             let note = std::mem::take(&mut self.enter_note);
             if !std::mem::take(&mut self.defer_enters) {
-                self.note_entered(new.idx);
-                self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(new), b: crate::triggers::Subj::None, amount: note });
+                self.entered_event(new, note);
             }
         }
         if from == Zone::Battlefield && !self.links.is_empty() {
-            self.release_links(old);
+            // (In a simultaneous move, once it is over: `end_batch`.)
+            if self.batching {
+                self.releasing.push(old);
+            } else {
+                self.release_links(old);
+            }
         }
         // "Whenever one or more cards are put into a library from anywhere".
         if to == Zone::Library && from != Zone::Library && self.seen & SEEN_RARE_EVENTS != 0 {
@@ -2795,10 +2830,13 @@ impl Game {
     /// CR 610.3a: the cards exiled "until" `source` leaves the battlefield
     /// return to their previous zones at once; links whose card left exile
     /// are dropped.
-    fn release_links(&mut self, source: ObjRef) {
+    pub(crate) fn release_links(&mut self, source: ObjRef) {
         let (back, keep): (Vec<Link>, Vec<Link>) =
             self.links.iter().copied().partition(|l| l.until && l.source == source);
         self.links = keep;
+        // (The ones returning to the battlefield enter at once: one entry,
+        // CR 603.6a.)
+        self.begin_entering(false);
         for l in back {
             if !self.live(l.card) || self.objs[l.card.idx.i()].zone != Zone::Exile {
                 continue;
@@ -2814,6 +2852,7 @@ impl Game {
                 }
             }
         }
+        self.end_entering();
         let objs = &self.objs;
         self.links.retain(|l| objs[l.card.idx.i()].inc == l.card.inc && objs[l.card.idx.i()].zone == Zone::Exile);
     }
@@ -3235,12 +3274,15 @@ impl Game {
         let (back, keep): (Vec<Link>, Vec<Link>) =
             self.links.iter().copied().partition(|l| l.until_monarch.is_some_and(|q| q != p));
         self.links = keep;
+        // (At once: one entry, CR 603.6a.)
+        self.begin_entering(false);
         for l in back {
             if self.live(l.card) && self.objs[l.card.idx.i()].zone == Zone::Exile {
                 let owner = self.objs[l.card.idx.i()].owner;
                 self.put_onto_battlefield(l.card.idx, owner);
             }
         }
+        self.end_entering();
     }
 
     /// Player `p` has protection from everything (CR 702.16j).

@@ -1348,7 +1348,7 @@ impl Game {
                 self.discard(c);
                 self.discard_entered = true;
                 self.entering_tapped = tapped;
-                self.put_onto_battlefield(card, p);
+                self.put_onto_battlefield_joining(card, p, None);
             }
             Some(Choice::Pass) => {
                 self.move_card(card, Zone::Graveyard, Pos::Top);

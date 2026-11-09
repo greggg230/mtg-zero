@@ -2,11 +2,11 @@
  "format": "delver-canary-library/1",
  "what": "Delver mirror canary spots with their right answers (tools/delver_blunders.py, docs/blunders.md 6a)",
  "engine": {
-  "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-b2-pay",
-  "commit": "dd175b5962ef5a15af1fb6697ad87cb55597a015",
-  "branch": "eoe-b2-pay",
+  "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-c2-together",
+  "commit": "2f065ffec841427eedf0ec31eac130a9589c721f",
+  "branch": "eoe-c2-together",
   "dirty": true,
-  "engine_sha256": "5d3a871d0a6218ca",
+  "engine_sha256": "dedcdb2522b43ebe",
   "digest": null
  },
  "reference": {
@@ -13582,7 +13582,7 @@
   }
  },
  "live_rule": "spots only in undecided games: the decider's raw value at the spot, by the network that played it, between 0.10 and 0.90",
- "rules_epoch": 1794217413,
+ "rules_epoch": 1794238353,
  "recorded": [
   {
    "engine": {
@@ -13622,6 +13622,19 @@
     "digest": null
    },
    "rules_epoch": 1794217413,
+   "date": "2026-11-09",
+   "how": "tools/delver_rerecord.py check --stamp: every spot reached its position unchanged"
+  },
+  {
+   "engine": {
+    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-c2-together",
+    "commit": "2f065ffec841427eedf0ec31eac130a9589c721f",
+    "branch": "eoe-c2-together",
+    "dirty": true,
+    "engine_sha256": "dedcdb2522b43ebe",
+    "digest": null
+   },
+   "rules_epoch": 1794238353,
    "date": "2026-11-09",
    "how": "tools/delver_rerecord.py check --stamp: every spot reached its position unchanged"
   }

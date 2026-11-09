@@ -394,6 +394,9 @@ impl Game {
             }
             Ext::FromGraveyard { tgt, to_battlefield, yours, tapped, counter } => {
                 f.made = None;
+                // (The targets returned to the battlefield enter at once: one
+                // entry, CR 603.6a.)
+                self.begin_entering(false);
                 for t in self.targets_of(f, *tgt) {
                     let Target::Obj(o) = t else { continue };
                     if self.objs[o.idx.i()].zone != Zone::Graveyard {
@@ -417,6 +420,7 @@ impl Game {
                         self.move_card(o.idx, Zone::Hand, Pos::Top);
                     }
                 }
+                self.end_entering();
                 Flow::Next
             }
             Ext::EachPutFromGraveyard { filter } => {
@@ -447,12 +451,15 @@ impl Game {
                     return Flow::Suspend;
                 }
                 let chosen = std::mem::take(&mut f.picked);
+                // (At once: one entry, CR 603.6a.)
+                self.begin_entering(false);
                 for c in chosen {
                     let owner = self.objs[c.i()].owner;
                     if self.objs[c.i()].zone == Zone::Graveyard {
                         self.put_onto_battlefield(c, owner);
                     }
                 }
+                self.end_entering();
                 Flow::Next
             }
             Ext::ExileGraveyard { who } => {
@@ -990,6 +997,9 @@ impl Game {
                 let cards: Vec<crate::ids::ObjRef> =
                     self.links.iter().filter(|l| l.source == f.source).map(|l| l.card).collect();
                 let def = self.db.token_def(*token);
+                // (The tokens are created at once, each X/X as it is made:
+                // one entry, CR 603.6a.)
+                self.begin_entering(false);
                 for card in cards {
                     let owner = self.objs[card.idx.i()].owner;
                     let x = self.def_of(card.idx).mana_value() as i32;
@@ -1000,6 +1010,7 @@ impl Game {
                         }
                     }
                 }
+                self.end_entering();
                 Flow::Next
             }
             Ext::Monstrosity { n } => {
@@ -1336,6 +1347,9 @@ impl Game {
                     .filter(|r| self.def_of(r.idx).is(crate::db::types::CREATURE))
                     .collect();
                 let p = f.controller;
+                // (At once, each with its counter and as what it becomes: one
+                // entry, CR 603.6a, 614.1c.)
+                self.begin_entering(false);
                 for r in cards {
                     let new = self.put_onto_battlefield(r.idx, p);
                     if self.objs[r.idx.i()].zone != Zone::Battlefield {
@@ -1350,6 +1364,7 @@ impl Game {
                         self.add_effect(Affected::Obj(new), Mod::SetPt(*pw, *tg), crate::layers::Until::Forever, p);
                     }
                 }
+                self.end_entering();
                 Flow::Next
             }
             Ext::LookAtRandomHandCard { who } => {

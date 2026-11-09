@@ -490,6 +490,9 @@ impl Game {
         // Which cards were taken is private until they are revealed: the
         // other player loses track of the library (ENGINE.md 10).
         self.scramble(p, &[], false, true);
+        // (The found cards put onto the battlefield enter at once, tapped as
+        // they enter: one entry, CR 603.6a.)
+        self.begin_entering(false);
         for c in found {
             if self.objs[c.i()].zone != Zone::Library {
                 continue;
@@ -509,6 +512,7 @@ impl Game {
                 }
             }
         }
+        self.end_entering();
         self.shuffle_library(p);
     }
 

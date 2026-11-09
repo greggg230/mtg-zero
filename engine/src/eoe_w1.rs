@@ -154,10 +154,13 @@ impl Game {
                     .collect();
                 let refs: Vec<_> = cards.iter().map(|&c| self.obj_ref(c)).collect();
                 self.links.retain(|l| !(l.source == f.source && refs.contains(&l.card)));
+                // (At once: one entry, CR 603.6a.)
+                self.begin_entering(false);
                 for c in cards {
                     let owner = self.objs[c.i()].owner;
                     self.put_onto_battlefield(c, owner);
                 }
+                self.end_entering();
                 Flow::Next
             }
             EoeW1::ExileEachUntilSourceLeaves { filter } => {
@@ -165,6 +168,11 @@ impl Game {
                     return Flow::Next;
                 }
                 let matching = self.objs_on(f, &On::Each(filter.clone()));
+                // (At once: one simultaneous move, CR 603.10a.)
+                let batch = !self.batching;
+                if batch {
+                    self.begin_batch();
+                }
                 for c in matching {
                     if self.objs[c.i()].zone != Zone::Battlefield {
                         continue;
@@ -173,6 +181,9 @@ impl Game {
                     if self.objs[card.idx.i()].zone == Zone::Exile {
                         self.links.push(crate::game::Link { source: f.source, card, until: true, back: Zone::Battlefield, until_monarch: None });
                     }
+                }
+                if batch {
+                    self.end_batch();
                 }
                 Flow::Next
             }

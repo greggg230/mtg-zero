@@ -384,6 +384,11 @@ suspends the frame below that task.
   one cost, one simultaneous move (a batch: SBAs, "destroy all", a combat damage step) is one
   event however many objects it touches; `Game::ev_seq` names the current group and a "whenever
   one or more ..." ability triggers once per group (section 33).
+* **Entries** (603.6a, 100.9): the permanents one event puts onto the battlefield are one entry
+  (`Game::begin_entering`, `triggers::Entry`); their `Enters` events wait until the last one is there
+  and the choices made as they enter are made, then are matched together against every permanent
+  on the battlefield, newcomers included. What applies as a permanent enters leaves out the others
+  of its entry (614.12a, `Game::entry_since`).
 * `PutTriggers` (run by the `Priority` loop): **APNAP** (603.3b): the active player puts all
   their waiting triggers on the stack in the order they choose (one "which next" decision
   while two or more distinct triggers remain), then the other player; so the non-active
@@ -20897,3 +20902,117 @@ b666765), Gene Pollinator's castability (fixed in e164d69), and an Aura that Ant
 onto the battlefield from the hand staying there while `Task::EnterAura` asks, so `determinize`
 re-deals it and the refreshed question has no option (hidden.rs `refresh_pending`; workstream D's
 final round: the seed now plays another game, the bug is still there).
+
+#### 100.9 C2: permanents entering simultaneously (branch `eoe-c2-together`, from `eoe-base` 2f065ff)
+
+**Why.** W6 found it (99.16, docs/shortcuts.md 99.16.1): the engine put the permanents of one event
+onto the battlefield one by one and matched each one's `Enters` event as it arrived, so a newcomer
+never saw the newcomers before it enter. CR 603.6a: "Each time an event puts one or more permanents
+onto the battlefield, all permanents on the battlefield (including the newcomers) are checked for any
+enters-the-battlefield triggers that match the event." Two creatures with "whenever another creature
+enters" returned together triggered once instead of twice, and which one triggered depended on the
+order the engine moved them. The same order leaked into what applies as a permanent enters (CR
+614.12a: only effects that already exist): an earlier newcomer's "enter tapped", Blood Moon or "other
+lands" counted for a later one.
+
+**Entries** (`triggers::Entry`, `Game::begin_entering` / `end_entering`, `Task::EntersTogether`).
+Every `put_onto_battlefield` is an entry of its own unless it runs inside one; an effect that puts
+several permanents onto the battlefield with one instruction opens one entry around them. Each
+newcomer's `Enters` event (with its note) is held in the entry (`entered_event`). When the entry ends:
+
+* nothing was queued as its permanents entered: the events are matched at once (`enters_together`),
+  in entry order, each against every permanent on the battlefield, the newcomers included; then
+  day and night look at the newcomers (702.145c-g come after the event);
+* its permanents queued choices as they entered ("as this enters", "enter as a copy", devour,
+  Mox Diamond's discard, an Aura's object, the 613.7m timestamp order: CR 614.12, 603.6d, all part
+  of the entering event): `Task::EntersTogether` goes under those tasks and matches the events once
+  they are done. A copy's event already waited for its copy choice (26.3); now the other newcomers'
+  wait with it, so a Clone entering beside Guide of Souls copies first and then sees it enter. A task
+  that puts its permanent onto the battlefield later (EnterAura, EnterByDiscardAny) joins the waiting
+  entry (`put_onto_battlefield_joining`). Any other entry while one waits is an event of its own.
+
+The events are matched in the entry's event group (603.2c: a "whenever one or more" ability
+triggers once for it); `batch_once` keeps later groups' records when an earlier group is matched
+afterwards (an entry's task, a 616.1 choice's `release_held`).
+
+**What applies as a permanent enters** (`Game::entry_since`: the entry's first timestamp; permanents
+with it or a later one are the entry's, not yet on the battlefield for 614.12a): Containment Priest
+(already so, by event group: now by entry), "enter as a copy" choices (26.3, likewise),
+`enters_counters_per` (likewise), an opponent's "enter tapped" (Spider-Woman, Stunning Savior;
+Archon of Emeria) and the permanent's own "enters tapped unless" condition (the fast lands' rulings:
+"it doesn't take those lands into consideration"; read on a copy of the game without the entry's
+permanents, `cond_before_entry`), "nonbasic lands are Mountains" as a land enters (`moon_entering`;
+`moon_on` for permanents already there is unchanged), Bioengineered Future (neither one entering at
+the same time nor the lands of the entry), devour's lands (not one entering at the same time), and
+Loading Zone and the counters' putter (W6, `W6State::entering`). `Game::group_ts` is gone.
+
+**The instructions that put several permanents onto the battlefield** (each one entry): token
+creation (`create_tokens`, `create_token_copies`, W6's Moonlit Meditation copies; the tokens of one
+instruction, doublers included), `FromGraveyard` and `FromGraveyardAs` (several targets), Exhume's
+`EachPutFromGraveyard`, Scout for Survivors and Chorale of the Void (`GraveyardTargetsOntoBattlefield`:
+attacking ones attacking as they enter, 508.4; the +1/+1 counters after, the next sentence), Parallax
+Wave's `LinkedToBattlefieldOwners`, Endless Sands' `LinkedToBattlefieldOwnersMatching`, Ghost
+Vacuum's `LinkedCreaturesToBattlefield` (with its counter and as a Spirit), Skyclave Apparition's
+`LinkedOwnersCreateMvToken` (each token X/X as it is made), Ocelot Pride's copies
+(`CopyTokensEnteredThisTurn`), Nissa's `finish_search_any`, the cards exiled until a permanent leaves
+(`release_links`) and until a player becomes the monarch (`set_monarch`). Famished Worldsire's pile
+(`PileTo` to the battlefield): the lands are chosen first (`Frame::picked`; they stay in the library,
+known to their owner, like the rest of the pile) and put onto the battlefield together when the
+choice ends (`pile_to_battlefield`); before, each entered as it was picked.
+
+Found with a temporary counter of entries per instruction over 3,000 default and 2,000 EoE fuzz
+games (not committed): every instruction left with two or more entries does them in sequence by the
+rules (a draw replaced by a Treasure each time, CR 121.2; an exile whose "until" cards return before
+the "return it" that follows, 610.3).
+
+**Leaving together.** The cards exiled until a permanent leaves return immediately after the event it
+left in (CR 610.3): in a simultaneous move (`begin_batch`) they now wait for its end
+(`Game::releasing`, `end_batch`), then return together, one entry; before, each returned as its
+source moved, while the others were still leaving (a returned creature saw them leave). The
+instructions that destroy, exile or return to hand several targets (`Op::Destroy`, `Op::Exile`,
+`Op::ReturnToHand`) and "exile all ... until this leaves" (`ExileEachUntilSourceLeaves`) are one
+simultaneous move (603.10a: each one's leave abilities see the others leave).
+
+**W6's Vocalist.** `W6State::entry_triggers` (a Vocalist entering later in an entry added instances
+for its controller's triggers that earlier newcomers caused) is gone: the Vocalist is on the
+battlefield as its entry's events are matched, so `w6_entry_triggered` counts it for all of them.
+
+**Left as it was.** A permanent is still moved onto the battlefield before the choices made as it
+enters are asked (26.3's model); its entry's events, and the other newcomers', now wait for them, so
+no trigger sees the permanent before its choices. An entry that begins while another waits for its
+choices is matched first: the one way is a land sacrificed to devour that had exiled cards "until
+this leaves the battlefield" (610.3), and no land of the cube or EoE tables does.
+
+**Tests** (`engine/tests/rules_faithful_c2.rs`, each failing before the fix): two Guide of Souls
+returned by Scout for Survivors each trigger for the other, in either target order; Devastating
+Onslaught's two copies of Weftstalker Ardent each trigger for the other (4 damage, not 3); C2 Mimic
+returned beside Guide of Souls enters as a copy of Weftstalker Ardent and, as an Ardent, sees Guide
+enter (and Guide, entering at the same time, isn't offered to copy); Parallax Wave's two Guides return
+together; Famished Worldsire's three lands (two C2 Cartographers, "whenever another land you control
+enters, you gain 1 life", and an Island) enter together: 4 life, not 1; Exhume returning
+Spider-Woman, Stunning Savior and the opponent's creature together: the creature enters untapped;
+"destroy two target creatures" on two C2 Mourners ("whenever another creature you control dies"):
+each sees the other die; C2 Devourer (devour land 1) returned beside C2 Arbor (a land creature) isn't
+offered the Arbor to sacrifice. The custom cards are card IR in the test file, lowered with the cube
+and the EoE table.
+
+**Digests** (re-recorded on purpose, `tests/data/digests.txt`): combined `02d4bccc94314d6d ->
+f89120ddaaecc3f3`; `DIGEST_ENCODING=0` unchanged, `856218d6b081056c`. No game's play changed (no
+digest game has two permanents entering together with a trigger that sees the other, or a 614.12a
+case); 11 of the 2,500 games (8 random: seeds 280, 693, 1414, 1557, 1613, 1753, 1927, 1998; 3
+heuristic: 73, 270, 321) changed in an encoding only, each at a land's "as this enters" question
+with a landfall permanent on the battlefield (found by replaying them on both engines with each
+decision's waiting triggers): random seed 280, turn 21, P0 plays Watery Grave beside Mole Man,
+Moloid Master and is asked whether to pay 2 life; seed 693, turn 11, P0's Flooded Strand finds Steam
+Vents beside Scythecat Cub, the same question. The old engine had the landfall trigger waiting
+(encoded) during the question; it now triggers once the land has entered, after the choice made as
+it enters (CR 614.12, 603.6d: part of the event that puts it onto the battlefield). The others are the
+same with Icetill Explorer, Bristly Bill, Spine Sower and Multiversal Passage (its basic land type, then its 2 life). The Delver canary
+library still reaches every spot (60 of 60): `RULES_EPOCH` bumped and the library stamped
+(`tools/delver_rerecord.py check --stamp`).
+
+**Results** (normal release profile, `E:/cargo-target/mtg-zero/eoe-c2-together`). The engine suite:
+2,112 passed, 0 failed, 20 ignored (143 test binaries; `rules_faithful_c2` 9, `az` 41, `hidden` 16
+among them). `python -m pytest tests`: 206 passed, 1 skipped. The default `FUZZ_GAMES=20000` passed
+(20,000 games, wins 9,845 / 10,031, 124 draws, mean 31.8 turns, 438.7 decisions; 1,000 matches,
+replays; 1,267 s).

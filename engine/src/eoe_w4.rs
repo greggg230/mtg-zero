@@ -304,6 +304,10 @@ impl Game {
             EoeW4::GraveyardTargetsOntoBattlefield { tgt, counter, tapped, attacking } => {
                 use crate::game::Step;
                 let mut entered: Vec<CardIdx> = Vec::new();
+                // (The targets enter at once, attacking ones attacking as
+                // they enter: one entry, CR 603.6a, 508.4. The counters come
+                // after, the instruction's next sentence.)
+                self.begin_entering(false);
                 for t in self.targets_of(f, *tgt) {
                     let Target::Obj(o) = t else { continue };
                     if self.objs[o.idx.i()].zone != Zone::Graveyard {
@@ -314,11 +318,6 @@ impl Game {
                     self.entering_tapped = false;
                     if self.objs[o.idx.i()].zone == Zone::Battlefield {
                         entered.push(o.idx);
-                    }
-                }
-                if let Some(k) = counter {
-                    for &c in &entered {
-                        self.add_counters(c, *k, 1);
                     }
                 }
                 if *attacking {
@@ -334,6 +333,12 @@ impl Game {
                     // CR 508.4: its controller chooses what each attacks.
                     for &c in asks.iter().rev() {
                         self.agenda.push(Task::AttackTarget { card: c });
+                    }
+                }
+                self.end_entering();
+                if let Some(k) = counter {
+                    for &c in &entered {
+                        self.add_counters(c, *k, 1);
                     }
                 }
                 Flow::Next
