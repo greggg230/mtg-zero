@@ -20216,3 +20216,65 @@ of each type, Coveted Jewel's {6}: 336 pools, each once). The test kit has
 **Digests.** Full `038ee15c3fd29b28` -> `21badc9235bd1cd1`, `DIGEST_ENCODING=0` `69e4452bbf60b46f`
 -> `b1f5b72e8b3ac987`: 16 of the 2,500 games change (the more `PayPool` options, and floated
 Workshop mana). `RULES_EPOCH` bumped.
+
+##### 100.4.3 Mana abilities at any time (F3: 13.2k, 13.4, 13.12, 13.13, 13.14)
+
+**Why.** CR 605.3a and 117.1d let a player activate a mana ability whenever they have priority;
+the engine offered them with priority only for a source about to be lost (86) and a few named
+abilities. Floating mana matters: Balance after tapping every land, a painland's damage at instant
+speed, a Spirit Guide exiled to shrink the hand, a land tapped while the pool's {R} is kept for a
+Lightning Bolt.
+
+* **Priority.** `act::YES` ("activate mana abilities") is offered whenever the player has a mana
+  ability they may activate now (`Game::mana_float_sources`: timing, restrictions, the whole cost,
+  some mana to make; not the abilities 86 and `mana_with_priority` already offer at priority, so
+  each activation is one action). It opens `DecisionKind::ActivateMana` (the 47th kind: the
+  context block's one-hot, no layout change; the task code is the generic one): `MY_PERM` = a
+  permanent with such abilities (which one next, `ChooseMode` `NUMBER` + k, when it has several:
+  its own, those other permanents grant it, Rain of Filth's granted sacrifice), `HAND_ABILITY` = a
+  card's in hand, one per definition (a Spirit Guide's). The first question offers no `PASS`, so
+  `YES` always leads to an activation (it resets the passes like any action); after each
+  activation the question comes again with `PASS` = done. The player keeps priority (605.3b).
+  Each activation is the ability's usual one (`begin_activate` -> `ManaNow`: X, the ability's mana
+  cost paid by `PayMana`, a sacrifice, now also "tap an untapped <permanent>" (Urza, Gene
+  Pollinator: `ChoosePermanent`, one decision each, a set), the production chosen), the mana going
+  to the pool with its restriction and rider (100.4.2). Also new, for every mana ability made with
+  priority (86's floats too): "whenever you tap a <land subtype> for mana" mana (only the creature
+  bonus was added before), and a production with more than 32 options paged (`ManaNowPick`,
+  A0's `ask_paged`, `Choice::Item`: Cascading Cataracts' 126).
+* **Hidden cards.** `ActivateMana` counts as a payment in progress (`Game::payment_in_progress`):
+  the player's mana sources in hand stay pinned in the worlds `determinize` deals for the
+  opponent, as during a payment (ENGINE.md 10), since the options counted on them. A refreshed
+  `ChooseMode` asks for the same permanent again.
+* **Payments (13.13).** When the picks and the virtual pool cover the rest (`PayMana::pool_covers`),
+  the payment no longer ends there: `PASS` = the pool pays the rest, and every source whose pick
+  leaves the payment payable is offered (a single source paying instead of pool mana; a
+  several-mana source when some of its mana is spent: a completing spend takes more of a kind than
+  the virtual pool had without it; a production none of whose mana is spent only floats, as with
+  priority before the payment). After such a pick the pool's spend is read again. `vm` is read
+  from the state whenever a decision is asked (`vm_now`; the value the picks were made with, so the
+  same in the game, and right in a refreshed or test-changed world).
+* **Wizard's Rockets (13.14).** Offered like any source whose pick leaves the payment payable
+  (`convert_ok`'s "only when nothing else pays" removed).
+* **The bots** never choose `YES` (no rule of theirs names it); in a covering payment their first
+  option is `PASS`, the old behaviour.
+
+Tests (`rules_payment_b.rs`, each failing on 86824d5): `cr_605_3a_mana_abilities_at_an_ordinary_priority`,
+`cr_605_3a_a_spirit_guide_with_priority`, `cr_602_2b_gene_pollinator_with_priority_taps_the_chosen_permanent`,
+`cr_106_1a_cascading_cataracts_with_priority_offers_every_production` (126 productions, paged),
+`cr_601_2g_a_land_pays_while_the_pool_keeps_its_mana`, `cr_601_2g_wizards_rockets_pays_while_a_land_could`.
+Tests changed for the new options (each a `PASS` or `YES` the old engine didn't offer):
+`cards_m4b1.rs` (Voltaic Key), `cards_m7b_tests_mana.rs` (Basalt Monolith, Manifold Key),
+`rulings_stack.rs` (Teferi: passing or mana abilities), `hidden.rs` (the auto-answered priority: the
+Islands tapped), `tests/az.rs` (`PayPool` is minor too; the encoding's bound is `FEATURE_BOUND`, as
+the fuzz checks: floated mana reaches large X; the openings' encoding hashes re-recorded; the
+gates' mixed play picks `YES` in one random pick of eight, so the games stay as deep as the gates
+need). `public_state.rs`: "a creature can't be blocked" perturbs only a creature that can be
+blocked now (on Norman Osborn, who can't be, it changed nothing). The spectator view names the new
+options.
+
+**Digests.** Every game changes, as the audit expected (Priority offers `YES` wherever a source is
+ready, so fewer decisions are auto-answered): full `21badc9235bd1cd1` -> `02cb76576f92a66c`,
+`DIGEST_ENCODING=0` `b1f5b72e8b3ac987` -> `d0a7be8d70719c90` (2,500 of 2,500 games). Random play
+(the fuzz) makes about twice the decisions (default 215 -> 440 a game; EoE 495 -> 785).
+`RULES_EPOCH` bumped.

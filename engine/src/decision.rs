@@ -217,6 +217,14 @@ pub enum DecisionKind {
     /// The new count in the deck of the entry just chosen (`NUMBER` + n, n
     /// other than its count now). M8b.
     SideboardCount,
+    /// Activate mana abilities with priority (CR 605.3a, 117.1d), after
+    /// `YES` at priority: `MY_PERM` = a permanent with a mana ability its
+    /// controller may activate now (which of its abilities next,
+    /// `ChooseMode` `NUMBER` + k, when it has several), `HAND_ABILITY` = a
+    /// card's in hand (a Spirit Guide's); `PASS` = done, offered after the
+    /// first activation. The mana goes to the pool with its restrictions,
+    /// and the player keeps priority (605.3b). ENGINE.md 100.4.3.
+    ActivateMana,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }

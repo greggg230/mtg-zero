@@ -224,3 +224,171 @@ fn cr_601_2h_every_pool_left_is_offered() {
     assert_eq!((n, left.len()), (336, 336), "each pool once");
     assert!(left.iter().all(|a| a.iter().map(|&x| x as u32).sum::<u32>() == 12 && a.iter().all(|&x| x <= 3)));
 }
+
+// ---- 100.4.3: mana abilities at any time (F3) ---------------------------------
+
+/// The `ActivateMana` options' choices.
+fn act_mana_options(g: &Game) -> Vec<Choice> {
+    assert_eq!(g.kind(), Some(DecisionKind::ActivateMana), "{:?}\n{}", g.options_desc(), log(g));
+    options(g)
+}
+
+/// CR 605.3a, 117.1d: a player may activate a mana ability whenever they
+/// have priority, and the mana stays in the pool (106.4): `YES` at
+/// priority, then the source; `PASS` (after the first) ends it, and the
+/// player still has priority (605.3b; docs/shortcuts.md 13.12: mana
+/// abilities were offered with priority only for a source about to be lost).
+#[test]
+fn cr_605_3a_mana_abilities_at_an_ordinary_priority() {
+    let mut g = scen().battlefield(0, &["Island", "Mountain"]).at(Step::Main1, 0).start();
+    let island = bf(&g, 0, "Island");
+    let mountain = bf(&g, 0, "Mountain");
+    assert!(g.has_option(Choice::Yes), "{:?}", g.options_desc());
+    g.choose(Choice::Yes);
+    let o = act_mana_options(&g);
+    assert!(o.contains(&Choice::Card(island)) && o.contains(&Choice::Card(mountain)), "{o:?}");
+    assert!(!o.contains(&Choice::Pass), "the first pick is an activation");
+    g.choose(Choice::Card(island));
+    let o = act_mana_options(&g);
+    assert_eq!(o, vec![Choice::Pass, Choice::Card(mountain)], "the Island is tapped");
+    g.choose(Choice::Pass);
+    assert!(at_priority(&g) && g.pending_decision().unwrap().player == 0, "{}", log(&g));
+    assert_eq!(g.player(0).pool.amt, [0, 1, 0, 0, 0, 0]);
+    assert!(g.obj(island).tapped && !g.obj(mountain).tapped);
+    // (The step's mana: it empties at the end of the step, CR 500.4.)
+}
+
+/// CR 605.3a (13.4): a Spirit Guide's mana ability from hand, with
+/// priority: the card is exiled (the hand is smaller now) and {R} floats.
+#[test]
+fn cr_605_3a_a_spirit_guide_with_priority() {
+    let mut g = scen().hand(0, &["Simian Spirit Guide"]).at(Step::Main1, 0).start();
+    let ssg = g.card(0, "Simian Spirit Guide", Zone::Hand);
+    g.choose(Choice::Yes);
+    let o = act_mana_options(&g);
+    assert_eq!(o.len(), 1, "{o:?}");
+    g.choose(o[0]);
+    finish(&mut g, |g| (g.kind() == Some(DecisionKind::ActivateMana)).then_some(Choice::Pass));
+    assert_eq!(g.obj(ssg).zone, Zone::Exile);
+    assert_eq!(g.player(0).pool.amt, [0, 0, 0, 1, 0, 0]);
+    assert_eq!(g.player(0).hand.len(), 0);
+}
+
+/// CR 601.2h by 602.2b: Gene Pollinator's "{T}, Tap an untapped permanent
+/// you control" with priority: the permanent tapped is the player's choice
+/// (one of each, ChoosePermanent), then the colour.
+#[test]
+fn cr_602_2b_gene_pollinator_with_priority_taps_the_chosen_permanent() {
+    let mut g = eoe_w2::scen().battlefield(0, &["Gene Pollinator", "Island", "Swamp"]).at(Step::Main1, 0).start();
+    let pol = bf(&g, 0, "Gene Pollinator");
+    let island = bf(&g, 0, "Island");
+    let swamp = bf(&g, 0, "Swamp");
+    g.choose(Choice::Yes);
+    g.choose(Choice::Card(pol));
+    assert_eq!(g.kind(), Some(DecisionKind::ChoosePermanent), "{:?}", g.options_desc());
+    let o = options(&g);
+    assert!(o.contains(&Choice::Card(island)) && o.contains(&Choice::Card(swamp)) && !o.contains(&Choice::Card(pol)), "{o:?}");
+    g.choose(Choice::Card(swamp));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMana), "{:?}", g.options_desc());
+    let green = options(&g).into_iter().find(|&c| {
+        let mut h = g.clone();
+        h.choose(c);
+        h.player(0).pool.amt[mana::G] == 1
+    });
+    g.choose(green.expect("green among the colours"));
+    g.choose(Choice::Pass);
+    assert!(g.obj(pol).tapped && g.obj(swamp).tapped && !g.obj(island).tapped, "{}", log(&g));
+    assert_eq!(g.player(0).pool.amt, [0, 0, 0, 0, 1, 0]);
+}
+
+/// CR 106.1a, 605.3a: Cascading Cataracts' "{5}, {T}: Add five mana in any
+/// combination of colors" with priority: each of the 126 productions is a
+/// choice (paged past the `NUMBER` ids, A0's helper).
+#[test]
+fn cr_106_1a_cascading_cataracts_with_priority_offers_every_production() {
+    let mut g = eoe_w2::scen().battlefield(0, &["Cascading Cataracts", "Island", "Island", "Island", "Island", "Island"]).at(Step::Main1, 0).start();
+    let cat = bf(&g, 0, "Cascading Cataracts");
+    g.choose(Choice::Yes);
+    g.choose(Choice::Card(cat));
+    // Which ability: {T}: Add {C}, or the five.
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "{:?}", g.options_desc());
+    let five = options(&g).into_iter().find(|&c| {
+        let mut h = g.clone();
+        h.choose(c);
+        h.kind() != Some(DecisionKind::ActivateMana)
+    });
+    g.choose(five.expect("the {5} ability"));
+    // Its {5}: five Islands (the payment's decisions, first options).
+    while matches!(g.kind(), Some(DecisionKind::PayMana | DecisionKind::PayPool)) {
+        g.choose(options(&g)[0]);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMana), "{:?}\n{}", g.options_desc(), log(&g));
+    let pools: Vec<[u8; 6]> = each_item_until(&g, DecisionKind::ChooseMana).iter().map(|h| h.player(0).pool.amt).collect();
+    let mut distinct = pools.clone();
+    distinct.sort();
+    distinct.dedup();
+    assert_eq!((pools.len(), distinct.len()), (126, 126), "each production once");
+}
+
+/// Every item of a (possibly paged) decision of `kind`, applied to a copy:
+/// "next page" options followed, nothing more answered.
+fn each_item_until(g: &Game, kind: DecisionKind) -> Vec<Game> {
+    let mut out = Vec::new();
+    for c in options(g) {
+        let mut h = g.clone();
+        h.choose(c);
+        if matches!(c, Choice::Page(_)) && h.kind() == Some(kind) {
+            out.extend(each_item_until(&h, kind));
+        } else {
+            out.push(h);
+        }
+    }
+    out
+}
+
+/// CR 601.2g-h (13.13): while paying, a source may pay instead of the
+/// pool's mana: {R} in the pool and an Island, Sol Ring ({1}): `PASS` spends
+/// the {R}, or the Island pays and the {R} stays (for a Lightning Bolt
+/// later). The payment spent the pool's mana whenever it could.
+#[test]
+fn cr_601_2g_a_land_pays_while_the_pool_keeps_its_mana() {
+    let mut g = scen().pool(0, [0, 0, 0, 1, 0, 0], 0).battlefield(0, &["Island"]).hand(0, &["Sol Ring"]).at(Step::Main1, 0).start();
+    let island = bf(&g, 0, "Island");
+    let sr = g.card(0, "Sol Ring", Zone::Hand);
+    g.choose(Choice::Cast(sr));
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", log(&g));
+    let o = options(&g);
+    assert!(o.contains(&Choice::Pass) && o.contains(&act(island, 0)), "{o:?}");
+    let mut h = g.clone();
+    h.choose(Choice::Pass);
+    finish(&mut h, |_| None);
+    assert_eq!((h.player(0).pool.amt, h.obj(island).tapped), ([0; 6], false), "the {{R}} paid");
+    g.choose(act(island, 0));
+    finish(&mut g, |_| None);
+    assert_eq!((g.player(0).pool.amt, g.obj(island).tapped), ([0, 0, 0, 1, 0, 0], true), "the Island paid: {}", log(&g));
+}
+
+/// CR 601.2g (13.14): Wizard's Rockets is a source like any other: with a
+/// Mountain that pays Lightning Bolt, the Rockets may pay instead (the
+/// Mountain stays untapped). It was offered only when nothing else paid.
+#[test]
+fn cr_601_2g_wizards_rockets_pays_while_a_land_could() {
+    let mut g = scen().battlefield(0, &["Mountain", "Wizard's Rockets", "Island"]).hand(0, &["Lightning Bolt"]).at(Step::Main1, 0).start();
+    let rockets = bf(&g, 0, "Wizard's Rockets");
+    let mountain = bf(&g, 0, "Mountain");
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    g.choose(Choice::Target(engine::Target::Player(1)));
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", log(&g));
+    let o = options(&g);
+    assert!(o.contains(&act(mountain, 0)), "{o:?}");
+    let pick = *o.iter().find(|c| matches!(c, Choice::Ability(x, _) if *x == rockets)).unwrap_or_else(|| panic!("the Rockets: {o:?}"));
+    g.choose(pick);
+    // The Island pays the Rockets' X (its {U} turned into {R}).
+    let island = bf(&g, 0, "Island");
+    finish(&mut g, |g| g.has_option(act(island, 0)).then(|| act(island, 0)));
+    settle(&mut g);
+    assert_eq!(g.life(1), 17, "{}", log(&g));
+    assert!(!g.obj(mountain).tapped, "the Mountain kept");
+    assert_ne!(g.obj(rockets).zone, Zone::Battlefield, "the Rockets sacrificed");
+}

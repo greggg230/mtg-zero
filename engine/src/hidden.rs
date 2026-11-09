@@ -949,6 +949,10 @@ impl Game {
         use crate::flow::Task;
         self.agenda.iter().rev().find_map(|t| match t {
             Task::PayMana(pm) => Some(pm.payer),
+            // Mana abilities activated with priority (ENGINE.md 100.4.3):
+            // the ones offered counted on the player's mana sources in hand
+            // (a Spirit Guide's, or one that pays another's mana cost).
+            Task::ActivateMana { p, .. } => Some(*p),
             Task::CastPay { id } | Task::ActPay { id } | Task::PayCosts { id, .. } | Task::CastDone { id } | Task::ChooseForCost { id, .. } => {
                 self.item_index(*id).map(|i| self.stack[i].controller)
             }

@@ -417,6 +417,13 @@ impl PayMana {
     fn need_total(&self) -> usize {
         self.cost.total() as usize + self.marked.len()
     }
+
+    /// The picks so far and the virtual pool pay the rest (ENGINE.md
+    /// 100.4.3: then `PASS` = spend from the pool, and the sources whose
+    /// pick leaves the payment payable are offered too; 13.13).
+    fn pool_covers(&self) -> bool {
+        self.vm.is_some_and(|vm| self.chosen.len() + vm as usize == self.need_total())
+    }
 }
 
 fn one(t: usize, n: u8) -> [u8; 6] {
@@ -1245,6 +1252,23 @@ impl Game {
         self.most_spent(pm, groups, marked, &[], &rest, budget)
     }
 
+    /// The most of the virtual pool payment `pm` can spend with its picks
+    /// so far and the single-mana sources from `pm.min_class` on paying the
+    /// rest (`vm` from the state alone: equal to the `vm` the picks were
+    /// made with; a decision refreshed in another world, ENGINE.md 10, or a
+    /// pool changed by a test, reads it again).
+    fn vm_now(&self, pm: &PayMana, classes: &[Class]) -> Option<u8> {
+        if pm.marked.is_empty() && !pm.convert && pm.extra == [0; 6] && self.players[pm.payer as usize].pool.total() == 0 {
+            return Some(0);
+        }
+        let (budget, dmg) = self.budget(pm.payer, &pm.keep, pm.keep.life + pm.phyrexian_life);
+        let budget = self.after_picks(pm, classes, dmg, budget, None)?;
+        let first = classes.iter().position(|cl| matches!(cl.yld, Yield::One(_))).unwrap_or(classes.len());
+        let rest = self.pay_cands(pm, classes, first.max(pm.min_class as usize), None, dmg);
+        let chosen: SVec<ManaMask, 16> = pm.chosen.iter().map(|s| chosen_mask(classes, s)).collect();
+        self.most_spent(pm, &self.vgroups(pm), &pm.marked, &chosen, &rest, budget)
+    }
+
     /// `pm.vm` again (after a several-mana pick).
     fn recount(&self, pm: &mut PayMana, classes: &[Class]) {
         // (An empty virtual pool spends nothing: whether single-mana
@@ -1490,8 +1514,29 @@ impl Game {
                     }
                 }
                 // Useful: the pool pays more, or more several-mana sources
-                // are needed still (and then feasible with them).
+                // are needed still (and then feasible with them). When the
+                // pool covers the rest already, any production that leaves
+                // the payment payable (13.13: the source paying instead of
+                // the pool's mana, ENGINE.md 100.4.3).
                 let floor = pm.vm.map_or(0, |a| a as usize + 1);
+                if pm.pool_covers() {
+                    // (Its mana pays part of the cost: some completing spend
+                    // takes more of a kind than the virtual pool had without
+                    // it. A production none of whose mana is spent only
+                    // floats, as with priority before the payment.)
+                    let rest = self.pay_cands(pm, classes, ci, Some(src), dmg);
+                    let had = |kind: u8| base.iter().find(|g| g.0 == kind).map_or(0, |g| g.1);
+                    let total: usize = groups.iter().map(|g| g.1 as usize).sum();
+                    let top = total.min(pm.cost.total() as usize + marked.len());
+                    (1..=top).rev().any(|k| {
+                        each_subset(&groups, k, &mut SVec::new(), &mut |cnt| {
+                            groups.iter().zip(cnt.iter()).any(|(g, &n)| n > had(g.0)) && {
+                                let ch: SVec<ManaMask, 16> = masks_of(&groups, cnt);
+                                cands_payable_c(&pm.cost, &marked, &ch, &rest, budget, true)
+                            }
+                        })
+                    })
+                } else {
                 match (pm.vm, self.most_spent_from(pm, &groups, &marked, &[], &singles, budget, floor)) {
                     (_, Some(_)) => true,
                     (Some(_), None) if self.most_spent_from(pm, &groups, &marked, &[], &singles, budget, 0).is_some() => false,
@@ -1499,6 +1544,7 @@ impl Game {
                         let rest = self.pay_cands(pm, classes, ci, Some(src), dmg);
                         self.most_spent(pm, &groups, &marked, &[], &rest, budget).is_some()
                     }
+                }
                 }
             };
             if ok {
@@ -1512,19 +1558,13 @@ impl Game {
     }
 
     /// Can Wizard's Rockets (class `ci`, member `src`), picked now, leave the
-    /// payment payable, when it can't be paid without it (ENGINE.md 18:
-    /// using it otherwise only keeps a land of another colour untapped,
-    /// and its card is drawn with priority as well)?
+    /// payment payable? (Offered like any source, 13.14: keeping a land of
+    /// another colour untapped is a choice; ENGINE.md 100.4.3. Before, only
+    /// when nothing else paid.)
     fn convert_ok(&self, pm: &PayMana, classes: &[Class], ci: usize, src: Src) -> bool {
         let (budget, dmg) = self.budget(pm.payer, &pm.keep, pm.keep.life + pm.phyrexian_life);
         let Some(left) = self.after_picks(pm, classes, dmg, budget, Some((ci, src))) else { return false };
         let groups = self.vgroups(pm);
-        let mut without = self.pay_cands(pm, classes, ci, None, dmg);
-        without.convert.clear();
-        let now = self.after_picks(pm, classes, dmg, budget, None).expect("picks within the budget");
-        if self.most_spent(pm, &groups, &pm.marked, &[], &without, now).is_some() {
-            return false;
-        }
         let mut with = self.pay_cands(pm, classes, ci, Some(src), dmg);
         with.converted = true;
         with.convert.clear();
@@ -1720,14 +1760,15 @@ impl Game {
                 }
             }
         }
-        if pm.vm.is_some_and(|vm| pm.chosen.len() + vm as usize == pm.need_total()) {
-            // (Unless Wizard's Rockets must be picked for the colours.)
-            let rems = self.pool_rems(&pm, &classes);
-            if !rems.is_empty() {
-                self.end_payment(pm, rems);
-                return;
-            }
+        // (Read from the state when a decision is asked: ENGINE.md 10.)
+        if self.answer.is_none() && pm.which.is_none() {
+            pm.vm = self.vm_now(&pm, &classes);
         }
+        // The pool covers the rest: `PASS` spends it (unless Wizard's
+        // Rockets must be picked for the colours: no pool left), and the
+        // sources that may pay instead are offered (13.13; ENGINE.md
+        // 100.4.3).
+        let covers = pm.pool_covers() && !self.pool_rems(&pm, &classes).is_empty();
         // (Which source a permanent picked by its own id stands for, asked
         // when it stands for several: ENGINE.md 99.12.)
         let ask_which = |g: &mut Game, pm: Box<PayMana>, card: CardIdx| {
@@ -1755,6 +1796,13 @@ impl Game {
                     let card = pm.which.take().expect("the permanent picked");
                     (card, slot_of(&pm, card, k as usize))
                 }
+                // The pool pays the rest (13.13).
+                Choice::Pass => {
+                    pm.card_slots.clear();
+                    let rems = self.pool_rems(&pm, &classes);
+                    self.end_payment(pm, rems);
+                    return;
+                }
                 other => unreachable!("pay answer {other:?}"),
             };
             pm.card_slots.clear();
@@ -1773,7 +1821,19 @@ impl Game {
                 self.recount(&mut pm, &classes);
             } else {
                 match &classes[ci].yld {
-                    Yield::One(_) => pm.chosen.push(src),
+                    Yield::One(_) => {
+                        // (Paying instead of the pool's mana: the pool's
+                        // spend again, now with this pick, 13.13.)
+                        let covered = pm.pool_covers();
+                        pm.chosen.push(src);
+                        if covered {
+                            let (budget, dmg) = self.budget(payer, &pm.keep, pm.keep.life + pm.phyrexian_life);
+                            let budget = self.after_picks(&pm, &classes, dmg, budget, None).expect("picks within the budget");
+                            let chosen: SVec<ManaMask, 16> = pm.chosen.iter().map(|s| chosen_mask(&classes, s)).collect();
+                            let rest = self.pay_cands(&pm, &classes, pm.min_class as usize, None, dmg);
+                            pm.vm = self.most_spent(&pm, &self.vgroups(&pm), &pm.marked, &chosen, &rest, budget);
+                        }
+                    }
                     Yield::Multi { prods, .. } => {
                         if prods.len() == 1 {
                             let prod = prods[0];
@@ -1835,7 +1895,13 @@ impl Game {
                                 // set (the canonical order), so feasibility is
                                 // checked against those; they all make one mana.
                                 let rest = self.pay_cands(&pm, &classes, ci, Some(rep), dmg);
-                                if groups.is_empty() {
+                                if covers {
+                                    // (Paying instead of some of the pool's
+                                    // mana: any spend of it, 13.13.)
+                                    let mut ch = chosen_masks.clone();
+                                    ch.push(u.mask);
+                                    self.most_spent(&pm, &groups, &pm.marked, &ch, &rest, left).is_some()
+                                } else if groups.is_empty() {
                                     let mut ch = chosen_masks.clone();
                                     ch.push(u.mask);
                                     cands_payable(&pm.cost, &pm.marked, &ch, &rest, left)
@@ -1910,6 +1976,14 @@ impl Game {
             }
         }
         pm.card_slots = card_slots;
+        if covers {
+            if opts.is_empty() {
+                let rems = self.pool_rems(&pm, &classes);
+                self.end_payment(pm, rems);
+                return;
+            }
+            opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+        }
         assert!(
             !opts.is_empty(),
             "PayMana: no way to pay {} for P{payer}: {pm:?} classes {classes:?} pool {:?}\n{}",

@@ -1374,7 +1374,7 @@ impl Game {
             0
         };
         let mana = self.act_mana_x(p, src.card, ad, x);
-        self.agenda.push(Task::ManaNowCosts { src, sac: None, x });
+        self.agenda.push(Task::ManaNowCosts { src, sac: None, x, taps: Vec::new() });
         if !mana.is_zero() {
             let mut pm = PayMana::new(p, mana);
             pm.keep = Self::keep_for(src.card, &ad.cost, Self::mana_exclude(src.card, ad));
@@ -1385,7 +1385,7 @@ impl Game {
 
     /// The rest of a priority mana ability's cost: the permanent to
     /// sacrifice (a decision), then {T}, life, the source's own costs.
-    pub(crate) fn mana_now_costs(&mut self, src: Src, mut sac: Option<CardIdx>, x: u32) {
+    pub(crate) fn mana_now_costs(&mut self, src: Src, mut sac: Option<CardIdx>, x: u32, mut taps: Vec<CardIdx>) {
         let p = self.objs[src.card.i()].controller;
         let ad = self.source_def(src.card).activated_def(src.slot);
         if let Some(s) = &ad.cost.sacrifice {
@@ -1399,10 +1399,34 @@ impl Game {
                             .into_iter()
                             .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                             .collect();
-                        self.ask(Task::ManaNowCosts { src, sac, x }, p, DecisionKind::Sacrifice, opts);
+                        self.ask(Task::ManaNowCosts { src, sac, x, taps }, p, DecisionKind::Sacrifice, opts);
                         return;
                     }
                 }
+            }
+        }
+        // "Tap an untapped <permanent> you control" (Urza; Gene Pollinator's
+        // with {T}): which ones, one decision each (a set: increasing slot
+        // order), as a non-mana ability's (CR 601.2h by 602.2b).
+        if let Some(t) = &ad.cost.tap_untapped {
+            if let Some(Choice::Card(c)) = self.answer {
+                if taps.len() < t.n as usize && !taps.contains(&c) {
+                    self.answer = None;
+                    taps.push(c);
+                }
+            }
+            if taps.len() < t.n as usize {
+                let floor = taps.last().map(|&c| self.perm_action(p, c));
+                let cands: Vec<Opt> = self
+                    .tap_candidates(p, src.card, t)
+                    .filter(|c| !taps.contains(c) && Some(*c) != sac)
+                    .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
+                    .filter(|o| floor.is_none_or(|f| o.action > f))
+                    .collect();
+                let still = t.n as usize - taps.len();
+                let opts: Vec<Opt> = cands.iter().enumerate().filter(|(k, _)| cands.len() - k >= still).map(|(_, o)| *o).collect();
+                self.ask(Task::ManaNowCosts { src, sac, x, taps }, p, DecisionKind::ChoosePermanent, opts);
+                return;
             }
         }
         // What it can make is read before the costs are paid; "any type the
@@ -1415,11 +1439,23 @@ impl Game {
             }
             _ => productions(self, p, prod, Some(src.card)),
         };
-        // "Whenever you tap a creature for mana, add an additional {G}" (a
-        // triggered mana ability, CR 605.1b).
+        // "Whenever you tap a creature for mana, add an additional {G}",
+        // "whenever you tap a <land subtype> for mana, add an additional
+        // <mana>" (triggered mana abilities, CR 605.1b, 605.4a: they resolve
+        // at once, so the mana is added with the ability's; as in a payment,
+        // `Game::mana_classes`).
         let mut prods = prods;
-        if ad.cost.tap && self.is_creature(src.card) {
-            let more = self.creature_mana_bonus(p);
+        if ad.cost.tap {
+            let mut more = if self.is_creature(src.card) { self.creature_mana_bonus(p) } else { [0; 6] };
+            if self.objs[src.card.i()].zone == Zone::Battlefield && self.is_type(src.card, types::LAND) {
+                for x in self.permanents_of(p) {
+                    for &(sub, t) in &self.abilities(x).extra_mana_on_tap {
+                        if self.has_subtype(src.card, sub) {
+                            more[t as usize] += 1;
+                        }
+                    }
+                }
+            }
             if more != [0; 6] {
                 for v in prods.iter_mut() {
                     for t in 0..6 {
@@ -1430,6 +1466,12 @@ impl Game {
         }
         if let Some(c) = sac {
             self.sacrifice(c);
+        }
+        for &c in &taps {
+            // (A cost of the mana ability: not "tapped for mana", CR
+            // 106.12a.)
+            self.note(|g| format!("P{p} taps {} for a mana ability", g.name(c)));
+            self.tap(c);
         }
         self.activate_mana_costs(src);
         // Mana that gives haste to the creature spell it is spent on (Arena
@@ -1447,7 +1489,7 @@ impl Game {
             for _ in 0..picks {
                 // (Its restriction and its rider go with the mana, CR 106.6.)
                 let only = ad.mana().map_or(0, |m| m.only | if m.uncounterable { crate::db::MANA_UNCOUNTERABLE } else { 0 });
-                self.agenda.push(Task::ManaNowPick { p, prods: prods.clone(), only });
+                self.agenda.push(Task::ManaNowPick { p, prods: prods.clone(), only, page: crate::decision::Page::FIRST });
             }
         }
     }
@@ -1467,19 +1509,28 @@ impl Game {
             .fold(0, |m, v| (0..6).filter(|&t| v[t] > 0).fold(m, |m, t| m | (1 << t)))
     }
 
-    pub(crate) fn mana_now_pick(&mut self, p: PlayerId, prods: Vec<[u8; 6]>, only: u8) {
+    pub(crate) fn mana_now_pick(&mut self, p: PlayerId, prods: Vec<[u8; 6]>, only: u8, page: crate::decision::Page) {
         match self.answer.take() {
             Some(Choice::Number(k)) => self.add_restricted_mana(p, &prods[k as usize], only),
+            Some(Choice::Item(k)) => self.add_restricted_mana(p, &prods[k as usize], only),
+            Some(Choice::Page(next)) => self.agenda.push(Task::ManaNowPick { p, prods, only, page: next }),
             Some(other) => unreachable!("mana answer {other:?}"),
             None => {
                 if prods.len() == 1 {
                     self.add_restricted_mana(p, &prods[0], only);
                     return;
                 }
+                if prods.len() > act::NUMBER_N as usize {
+                    // (More productions than `NUMBER` ids, Cascading
+                    // Cataracts' 126: paged, A0's helper.)
+                    let items: Vec<(u32, Choice)> = (0..prods.len() as u32).map(|k| (k, Choice::Item(k))).collect();
+                    self.ask_paged(Task::ManaNowPick { p, prods, only, page }, page, p, DecisionKind::ChooseMana, act::NUMBER, act::NUMBER_N, &items, Vec::new());
+                    return;
+                }
                 let opts = (0..prods.len())
                     .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
                     .collect();
-                self.ask(Task::ManaNowPick { p, prods, only }, p, DecisionKind::ChooseMana, opts);
+                self.ask(Task::ManaNowPick { p, prods, only, page }, p, DecisionKind::ChooseMana, opts);
             }
         }
     }
@@ -1647,5 +1698,160 @@ impl Game {
     /// Lands among `p`'s permanents (tests and logs).
     pub fn lands_of(&self, p: PlayerId) -> impl Iterator<Item = CardIdx> + '_ {
         self.permanents_of(p).filter(move |&c| self.is_type(c, types::LAND))
+    }
+}
+
+impl Game {
+    /// Mana ability `ad` (a permanent's, or a card's in hand) of `card`,
+    /// activated by `p` with priority now (CR 605.3a, 117.1d): its timing,
+    /// its restrictions, its whole cost, and some mana to make (what a
+    /// sacrificed land could make is read as it is sacrificed).
+    fn mana_ability_now(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, classes: &[Class], sorcery_ok: bool, locks: u16) -> bool {
+        if ad.sorcery && !sorcery_ok || !self.activation_ready(p, card, ad, locks) {
+            return false;
+        }
+        // (A "tap an untapped <permanent>" cost may tap one with a mana
+        // ability when the ability has no mana to pay: `zero_mana_taps`.)
+        if !self.cost_payable_with(p, card, &ad.cost, &self.act_mana(p, card, ad), classes, Self::mana_exclude(card, ad), true, self.ability_allow(card)) {
+            return false;
+        }
+        let prod = &ad.mana().expect("a mana ability").prod;
+        matches!(prod, crate::db::ManaProd::SacrificedLand) || !productions(self, p, prod, Some(card)).is_empty()
+    }
+
+    /// The mana abilities `p` may activate now through `ActivateMana` (CR
+    /// 605.3a): for each permanent with some, in canonical order, its
+    /// slots (its own abilities, those other permanents grant it, a granted
+    /// "sacrifice this: add <mana>", `pay::SAC_FOR`); then each card in hand
+    /// with one (a Spirit Guide's), one per definition. Not the ones
+    /// offered at priority directly (`mana_at_priority`: Lion's Eye Diamond,
+    /// a source about to be lost, ENGINE.md 86), so each activation is one
+    /// action.
+    pub(crate) fn mana_float_sources(&self, p: PlayerId, classes: &[Class], sorcery_ok: bool) -> Vec<(CardIdx, Vec<AbilitySlot>)> {
+        let locks = self.activation_locks();
+        let mut out: Vec<(CardIdx, Vec<AbilitySlot>)> = Vec::new();
+        let rain = self.seen & crate::game::SEEN_SAC_MANA != 0 && self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_)));
+        for c in self.permanents_of(p) {
+            let mut slots = Vec::new();
+            let d = self.abilities(c);
+            for (i, ad) in d.activated.iter().enumerate() {
+                if ad.mana().is_none() || self.mana_at_priority(c, ad) {
+                    continue;
+                }
+                if (d.latent > 0 && !self.has_activated(c, i)) || (ad.exhaust && self.exhausted(c, i as u8)) {
+                    continue;
+                }
+                if self.mana_ability_now(p, c, ad, classes, sorcery_ok, locks) {
+                    slots.push(AbilitySlot::Activated(i as u8));
+                }
+            }
+            let own = self.own_ability_slots(c);
+            for (j, g) in self.granted_activated(c).into_iter().enumerate() {
+                let ad = self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot));
+                if ad.mana().is_some() && !self.mana_at_priority(c, ad) && self.mana_ability_now(p, c, ad, classes, sorcery_ok, locks) {
+                    slots.push(AbilitySlot::Activated((own + j) as u8));
+                }
+            }
+            if rain && self.sac_mana_of(c) != 0 && !(locks != 0 && self.types_of(c) & locks != 0) {
+                slots.push(crate::pay::SAC_FOR);
+            }
+            if !slots.is_empty() {
+                out.push((c, slots));
+            }
+        }
+        if self.players[p as usize].hand.iter().any(|&c| self.hand_mana_source(c)) {
+            let mut defs = Vec::new();
+            for c in self.hand_sorted_in(p) {
+                let def = self.objs[c.i()].def;
+                if defs.contains(&def) || !self.hand_mana_source(c) {
+                    continue;
+                }
+                let slots: Vec<AbilitySlot> = self
+                    .def_of(c)
+                    .hand_abilities
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, ad)| ad.mana().is_some() && self.mana_ability_now(p, c, ad, classes, sorcery_ok, locks))
+                    .map(|(i, _)| AbilitySlot::Hand(i as u8))
+                    .collect();
+                if !slots.is_empty() {
+                    defs.push(def);
+                    out.push((c, slots));
+                }
+            }
+        }
+        out
+    }
+
+    /// `ActivateMana` (CR 605.3a, 117.1d; ENGINE.md 100.4.3): `p` activates
+    /// mana abilities with priority, one at a time; after the first, `PASS`
+    /// ends it. A permanent is picked by its own id (`MY_PERM`), and which
+    /// of its abilities next when it has several (`ChooseMode`, `NUMBER` +
+    /// k); a card in hand by its ability's id (`HAND_ABILITY`). The mana goes
+    /// to the pool with its restrictions; the player keeps priority (the
+    /// `Priority` task under this one).
+    pub(crate) fn activate_mana(&mut self, p: PlayerId, card: Option<CardIdx>, again: bool) {
+        let sorcery_ok = self.turn.active == p && self.turn.step.is_main() && self.stack.is_empty();
+        let classes = self.mana_classes(p, None);
+        let sources = self.mana_float_sources(p, &classes, sorcery_ok);
+        if sources.is_empty() {
+            // (Only after an activation: nothing more to activate.)
+            assert!(again, "ActivateMana with no mana ability to activate");
+            self.answer = None;
+            return;
+        }
+        let slots_of = |c: CardIdx| sources.iter().find(|(x, _)| *x == c).map(|(_, v)| v.clone()).unwrap_or_default();
+        let run = |g: &mut Game, c: CardIdx, slot: AbilitySlot| {
+            // (The next activation after this one's choices.)
+            g.agenda.push(Task::ActivateMana { p, card: None, again: true });
+            if slot == crate::pay::SAC_FOR {
+                // A granted "sacrifice this: add <mana>" (Rain of Filth).
+                let mask = g.sac_mana_of(c);
+                g.activate_sac_for(Src { card: c, slot });
+                let prods: Vec<[u8; 6]> = (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect();
+                g.agenda.push(Task::ManaNowPick { p, prods, only: 0, page: crate::decision::Page::FIRST });
+            } else {
+                g.begin_activate(p, c, slot);
+            }
+        };
+        match self.answer.take() {
+            Some(Choice::Pass) => {}
+            Some(Choice::Card(c)) => {
+                let slots = slots_of(c);
+                if slots.len() == 1 {
+                    run(self, c, slots[0]);
+                } else {
+                    let opts = (0..slots.len()).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
+                    self.ask(Task::ActivateMana { p, card: Some(c), again }, p, DecisionKind::ChooseMode, opts);
+                }
+            }
+            Some(Choice::Number(k)) => {
+                let c = card.expect("the permanent picked");
+                let slot = slots_of(c)[k as usize];
+                run(self, c, slot);
+            }
+            Some(Choice::Ability(c, slot)) => run(self, c, slot),
+            Some(other) => unreachable!("ActivateMana answer {other:?}"),
+            // (A refreshed decision, ENGINE.md 10: the permanent's question
+            // again.)
+            None if card.is_some() => {
+                let slots = slots_of(card.expect("the permanent"));
+                let opts = (0..slots.len()).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
+                self.ask(Task::ActivateMana { p, card, again }, p, DecisionKind::ChooseMode, opts);
+            }
+            None => {
+                let mut opts: Vec<Opt> = sources
+                    .iter()
+                    .map(|(c, slots)| match slots[0] {
+                        AbilitySlot::Hand(_) => Opt { action: self.ability_action(p, *c, slots[0]), choice: Choice::Ability(*c, slots[0]) },
+                        _ => Opt { action: self.perm_action(p, *c), choice: Choice::Card(*c) },
+                    })
+                    .collect();
+                if again {
+                    opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                }
+                self.ask(Task::ActivateMana { p, card: None, again }, p, DecisionKind::ActivateMana, opts);
+            }
+        }
     }
 }
