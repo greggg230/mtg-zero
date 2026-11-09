@@ -91,8 +91,9 @@ impl Game {
     pub(crate) fn exec_tail3(&mut self, f: &mut Frame, op: &Ext) -> Flow {
         match op {
             Ext::ApplyPtX { on, p, t } => {
-                let x = f.spell_x as i32;
-                let (dp, dt) = (*p as i32 * x, *t as i32 * x);
+                // (Signs times a u32 X: exact in i64.)
+                let x = f.spell_x as i64;
+                let (dp, dt) = (*p as i64 * x, *t as i64 * x);
                 for c in self.objs_on(f, on) {
                     let r = self.obj_ref(c);
                     self.add_effect(Affected::Obj(r), crate::db::Mod::Pt(dp, dt), crate::layers::Until::EndOfTurn, f.controller);
@@ -102,15 +103,16 @@ impl Game {
             Ext::ExileAll { filter, basics } => {
                 // `f.i`: 0 = exile; 1, 2 = the searches of the active and
                 // the other player. `f.x`: how many permanents each player
-                // controlled (bits 0-7 and 8-15).
+                // controlled (bits 0-31 and 32-63: exact for any count of
+                // objects, a `u32`).
                 if f.i == 0 {
                     let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
                     let all: Vec<_> = self.battlefield.iter().copied().filter(|&c| self.card_matches(filter, c, &ctx)).collect();
-                    let mut n = [0i32; 2];
+                    let mut n = [0i64; 2];
                     for &c in &all {
                         n[self.objs[c.i()].controller as usize] += 1;
                     }
-                    f.x = n[0].min(255) | n[1].min(255) << 8;
+                    f.x = n[0] | n[1] << 32;
                     self.begin_batch();
                     for c in all {
                         self.move_card(c, Zone::Exile, Pos::Top);
@@ -125,7 +127,7 @@ impl Game {
                 }
                 while f.i <= 2 {
                     let q: PlayerId = if f.i == 1 { self.turn.active } else { opp(self.turn.active) };
-                    let n = (f.x >> (8 * q as i32)) & 255;
+                    let n = (f.x >> (32 * q as i64)) & 0xFFFF_FFFF;
                     if n == 0 {
                         f.i += 1;
                         continue;
@@ -134,7 +136,7 @@ impl Game {
                         Some(Choice::Def(d)) => {
                             f.picked_defs.push(d);
                             f.floor = d;
-                            f.picked_defs.len() as i32 >= n
+                            f.picked_defs.len() as i64 >= n
                         }
                         Some(Choice::Pass) => true,
                         Some(other) => unreachable!("search answer {other:?}"),
@@ -253,12 +255,15 @@ impl Game {
             Ext::LinkedToBattlefieldOwners => {
                 let cards = self.linked_cards(f.source);
                 self.links.retain(|l| l.source != f.source);
+                // (At once: one entry, CR 603.6a.)
+                self.begin_entering(false);
                 for c in cards {
                     if self.objs[c.i()].zone == Zone::Exile {
                         let owner = self.objs[c.i()].owner;
                         self.put_onto_battlefield(c, owner);
                     }
                 }
+                self.end_entering();
                 Flow::Next
             }
             Ext::BecomeSaddled => {
@@ -296,13 +301,8 @@ impl Game {
                         if cands.is_empty() {
                             return Flow::Next;
                         }
-                        let opts = cands
-                            .iter()
-                            .take(act::EXILE_N as usize)
-                            .enumerate()
-                            .map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) })
-                            .collect();
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
+                        let cands: Vec<Choice> = cands.iter().copied().map(Choice::Card).collect();
+                        self.ask_objects(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseExiled, &cands, Vec::new());
                         return Flow::Suspend;
                     }
                 };

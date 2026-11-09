@@ -63,7 +63,7 @@ impl Game {
     /// controls a permanent saying "each creature you control with toughness
     /// greater than its power assigns combat damage equal to its toughness
     /// rather than its power" (Tapestry Warden).
-    pub(crate) fn combat_damage_amount(&self, c: CardIdx) -> i32 {
+    pub(crate) fn combat_damage_amount(&self, c: CardIdx) -> crate::num::Wide {
         let p = self.power(c);
         if !self.db.watch_toughness {
             return p;
@@ -81,7 +81,7 @@ impl Game {
     /// its toughness if that is greater and its controller controls a
     /// permanent saying "each creature you control with toughness greater
     /// than its power stations permanents using its toughness").
-    pub(crate) fn station_amount(&self, c: CardIdx) -> i32 {
+    pub(crate) fn station_amount(&self, c: CardIdx) -> crate::num::Wide {
         let p = self.power(c);
         if !self.db.watch_toughness {
             return p;
@@ -97,12 +97,12 @@ impl Game {
     /// [`station_amount`](Self::station_amount) of a creature that left the
     /// battlefield: `power` and its toughness and controller as it last
     /// existed (CR 608.2h; `Game::lki_toughness`).
-    pub(crate) fn station_amount_lki(&self, r: crate::ids::ObjRef, power: i32) -> i32 {
+    pub(crate) fn station_amount_lki(&self, r: crate::ids::ObjRef, power: crate::num::Wide) -> crate::num::Wide {
         if !self.db.watch_toughness {
             return power;
         }
         match self.lki_toughness.iter().rev().find(|x| x.0 == r) {
-            Some(&(_, t, ctl)) if t > power && self.controls_with(ctl, |d| d.toughness_stations) => t,
+            Some(&(_, t, ctl)) if t as crate::num::Wide > power && self.controls_with(ctl, |d| d.toughness_stations) => t as crate::num::Wide,
             _ => power,
         }
     }

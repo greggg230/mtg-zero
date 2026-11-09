@@ -7,24 +7,63 @@ pub type PlayerId = u8;
 pub type DefId = u16;
 
 /// Index of a card slot in `Game.objs`. One slot per physical card for the
-/// whole match; tokens and copies will append slots. Never reused.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
-pub struct CardIdx(pub u16);
+/// whole match; tokens and copies append slots. Never reused. (`u32`: a game
+/// runs out of memory long before 2^32 objects; `Game::add_card` aborts the
+/// game near the bound, ENGINE.md 100.7.)
+///
+/// Stored as the index + 1 in a `NonZeroU32` (the index stays below
+/// `u32::MAX`: `Game::add_card`), so `Option<CardIdx>` and `Option<ObjRef>`
+/// need no tag. Ordered, hashed and printed as the index.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CardIdx(std::num::NonZeroU32);
 
 impl CardIdx {
+    /// Slot `i` (below `u32::MAX`).
+    #[inline]
+    pub const fn new(i: u32) -> CardIdx {
+        match std::num::NonZeroU32::new(i.wrapping_add(1)) {
+            Some(n) => CardIdx(n),
+            None => panic!("a card slot index of u32::MAX"),
+        }
+    }
+    /// The slot index.
+    #[inline]
+    pub const fn get(self) -> u32 {
+        self.0.get() - 1
+    }
     #[inline]
     pub fn i(self) -> usize {
-        self.0 as usize
+        self.get() as usize
+    }
+}
+
+impl Default for CardIdx {
+    fn default() -> CardIdx {
+        CardIdx::new(0)
+    }
+}
+
+impl std::hash::Hash for CardIdx {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.get().hash(state)
+    }
+}
+
+impl std::fmt::Debug for CardIdx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("CardIdx").field(&self.get()).finish()
     }
 }
 
 /// An object (CR 109): a card slot in one incarnation. Every zone change
 /// bumps the slot's incarnation (CR 400.7), so a stale reference is
-/// detected by comparing `inc`.
+/// detected by comparing `inc` (`u32`, counted exactly: a slot's 2^32nd zone
+/// change aborts the game, `Game::move_card`, so an old reference never
+/// aliases a new object).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ObjRef {
     pub idx: CardIdx,
-    pub inc: u16,
+    pub inc: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

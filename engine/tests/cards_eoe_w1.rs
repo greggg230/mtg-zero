@@ -519,8 +519,8 @@ fn cr_700_4_syr_vondam_grows_when_another_creature_you_control_dies_or_is_exiled
         let life = g.player(0).life;
         cast_at(&mut g, spell, victim, None);
         assert_ne!(g.obj(victim).zone, Zone::Battlefield, "{spell}\n{}", log(&g));
-        assert_eq!(g.counters_on(sv, Counter::P1P1), grows as u32, "{spell} on P{whose}'s creature\n{}", log(&g));
-        assert_eq!(g.player(0).life, life + grows as i32, "{spell}");
+        assert_eq!(g.counters_on(sv, Counter::P1P1), grows as u64, "{spell} on P{whose}'s creature\n{}", log(&g));
+        assert_eq!(g.player(0).life, life as i64 + grows as i64, "{spell}");
     }
 }
 
@@ -541,7 +541,7 @@ fn cr_603_10a_syr_vondam_leaves_with_power_four_or_greater() {
             .start();
         let sv = bf(&g, 0, "Syr Vondam, Sunstar Exemplar");
         let (block, forest) = (bf(&g, 1, "Test Flyer"), bf(&g, 1, "Forest"));
-        assert_eq!(g.pt(sv), (2 + counters as i32, 2 + counters as i32));
+        assert_eq!(g.pt(sv), (2 + counters as i128, 2 + counters as i128));
         // (Bombard's 4 damage kills a 4/4 but not a 5/5: the 3/3 and 4/4.)
         cast_at(&mut g, spell, sv, Some(block));
         assert_ne!(g.obj(sv).zone, Zone::Battlefield, "{spell} {counters}\n{}", log(&g));
@@ -692,7 +692,7 @@ fn cr_707_2_mirrorpool_makes_a_token_copy_of_your_creature() {
     let copies: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.name(c) == "Test Bear" && c != bear).collect();
     assert_eq!(copies.len(), 1, "{}", log(&g));
     assert!(g.is_token(copies[0]), "a token");
-    assert_eq!(g.pt(copies[0]), (g.def_of(bear).power.unwrap(), g.def_of(bear).toughness.unwrap()), "no counters copied");
+    assert_eq!(g.pt(copies[0]), (g.def_of(bear).power.unwrap().into(), g.def_of(bear).toughness.unwrap().into()), "no counters copied");
 }
 
 /// "{2}{C}, {T}, Sacrifice this land: Copy target instant or sorcery spell you
@@ -819,7 +819,7 @@ fn cr_701_14a_meltstriders_resolve_fights_and_gives_plus_zero_two() {
     });
     assert_eq!(g.pt(bear), (bear_pt.0, bear_pt.1 + 2), "+0/+2");
     assert_eq!(g.obj(flyer).zone == Zone::Battlefield, bear_pt.0 < flyer_pt.1, "the Bear dealt its power\n{}", log(&g));
-    assert_eq!(g.obj(bear).damage, flyer_pt.0 as u32, "the Flyer dealt its power\n{}", log(&g));
+    assert_eq!(g.obj(bear).damage, flyer_pt.0 as u64, "the Flyer dealt its power\n{}", log(&g));
 }
 
 /// "Can't be blocked by more than one creature" (CR 509.1b; not menace): one

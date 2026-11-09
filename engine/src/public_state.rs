@@ -104,9 +104,9 @@ pub fn fields() -> Vec<Field> {
         tokens: Derived "a fast path: tokens created so far",
         first_token: Derived "a fast path: the first slot made as a token or a copy",
         batching: Derived "transient: a simultaneous move in progress",
+        releasing: Derived "transient: during one simultaneous move",
         ev_seq: Derived "event-group bookkeeping",
         batch_fired: Derived "event-group bookkeeping (\"one or more\" triggers once per group)",
-        group_ts: Derived "event-group bookkeeping (what entered at the same time)",
         entering_cast: Derived "transient: set and cleared around one move",
         entering_evoked: Derived "transient: set and cleared around one move",
         observer: Derived "which world determinize made, for its key masking",
@@ -163,24 +163,29 @@ pub fn fields() -> Vec<Field> {
         lki_attached: Derived "last known information (CR 608.2h)",
         lki_damage: Derived "last known information (CR 608.2h)",
         lki_toughness: Derived "last known information (CR 608.2h)",
+        lki_power: Derived "last known information (CR 608.2h)",
+        loyalty: Public "loyalty abilities activated this turn (CR 606.3)",
+        pool_restr: Public "the part of a pool's mana with a spending restriction other than the Workshop's (CR 106.6; ENGINE.md 99.12)",
+        moon_game: Derived "fast path: a card of the game says nonbasic lands are Mountains",
+        lands_entered: Public "the lands that entered the battlefield under each player's control this turn (Bioengineered Future; ENGINE.md 99.12)",
         spell_lki: Derived "last known information (CR 608.2h)",
         entering_copy: Derived "transient: set and cleared around one move",
         entering_times: Derived "transient: set and cleared around one move",
         enter_note: Derived "transient: set and cleared around one move",
         defer_enters: Derived "transient: an enters event held back for one choice",
+        entries: Derived "the Enters events of a simultaneous entry, held while the choices made as its permanents enter are asked (their decisions' context): what they trigger follows from the public entry",
         pile_moving: Derived "transient: between ops",
         pile_shuffles: Derived "transient: between ops",
         prepared: Public "prepared permanents and their prepare spell copies (CR 722.3)",
-        may_copies: Derived "an engine loop cap's counter (docs/shortcuts.md 26.11.7)",
-        activations: Derived "an engine loop cap's counter (docs/shortcuts.md 29.6.6): no rule reads it",
+        loop_taken: Derived "records of this turn's loop actions (loops.rs; CR 732.2a, MTR 4.4): hashes of views of the state as their takers' deciders saw it, which prune an action only at an identical view of that decider (determinize keeps the viewer's own)",
         seen: Derived "fast paths: rare rules some card of the game has",
         initiative: Public "the initiative (CR 725)",
         dungeons: Derived "each player's dungeon: its fields are classified under Dungeon",
         rules_srcs: Derived "objects in no zone naming the initiative's and the monarch's triggers' source",
         choosing_for: Derived "transient: the item whose modes are chosen (0 between tasks)",
-        targeting: Derived "transient: the item whose targets are chosen (0 between tasks; ENGINE.md 58.1)",
         marks: Public "rare per-object facts (exhausted, a chosen colour, exerted, can't be countered, ...)",
         w3: Derived "EoE workstream W3's state: its fields are classified under W3State",
+        w6: Derived "EoE workstream W6's state: its fields are classified under W6State",
         known_pools: Derived "with hidden decks, the pool names each player knows of the other's: set by the match, fixed for the game",
         log: Derived "the human-readable log (tests and the viewer)",
     });
@@ -195,6 +200,22 @@ pub fn fields() -> Vec<Field> {
             entering_spent: Derived "transient: set and taken around one move",
             phased: Public "phased-out permanents (CR 702.26b): not encoded (a limit)",
             indirect: Public "which phased-out permanents phased out with what they are attached to (CR 702.26e)",
+        });
+    }
+    {
+        use crate::eoe_w6::W6State;
+        classify!(v, W6State {
+            seen: Derived "fast paths: rare rules some card of the game has (as Game.seen)",
+            entering: Derived "transient: set and cleared around one permanent's entry",
+            actor: Derived "transient: set and restored around one op",
+            control: Public "the control-changing effects behind permanents' controllers (CR 613.1b; EoE W6: games with an Aura's control effect): which ends when",
+            syncing: Derived "transient: set while the controllers are worked out",
+            tokens_turn: Public "the turn each player last created tokens (CR 111.2; EoE W6: Moonlit Meditation's 'the first time ... each turn')",
+            token_question: Derived "transient: set by a token creation, taken as its instruction returns",
+            token_asking: Derived "the pending decision is the token replacement's question (Game.pending, public)",
+            token_answer: Derived "transient: set and cleared around one op",
+            token_frame: Derived "transient: set and cleared around one op",
+            deferred_since: Derived "transient: the entering permanents waiting for their devour choice (Game.agenda), with their entries' first timestamps",
         });
     }
     classify!(v, Player {
@@ -254,16 +275,12 @@ pub fn fields() -> Vec<Field> {
         known: Public "which players know a hidden card: who knows is public (a look, a reveal, a put-back, a shuffle are seen; ENGINE.md 72), what it is is not (leak-tested, ENGINE.md 10)",
         attached: Public "what it is attached to (CR 301.5, 303.4)",
         evoked: Public "it entered evoked (CR 702.74a)",
-        lki_power: Derived "last known information (CR 608.2h)",
         flashback: Public "a spell cast with flashback: exiled when it leaves the stack (CR 702.34a)",
         escaped: Public "it entered as a spell cast with escape (CR 702.138c)",
         chosen_player: Public "the player chosen as it entered (CR 614.12)",
         monstrous: Public "CR 701.37b",
         attacks: Public "what it attacks (a planeswalker, CR 506.3)",
         entered: Public "the turn it entered (\"entered this turn\")",
-        pw_turn: Public "loyalty abilities activated this turn (CR 606.3)",
-        pw_used: Public "loyalty abilities activated this turn (CR 606.3)",
-        pw_extra: Derived "how many more loyalty abilities it may activate this turn (Comet): read through pw_used's readiness",
         flips: Derived "a wrapping count of transformations, for CR 701.27f's check",
     });
     classify!(v, Turn {
@@ -435,7 +452,7 @@ fn raw_move(g: &mut Game, c: CardIdx, to: Zone) {
     }
     let o = &mut g.objs[c.i()];
     o.zone = to;
-    o.inc = o.inc.wrapping_add(1);
+    o.inc = o.inc.checked_add(1).expect("an incarnation below u32::MAX");
     o.controller = o.owner;
     o.tapped = false;
     o.damage = 0;
@@ -452,7 +469,7 @@ fn raw_move(g: &mut Game, c: CardIdx, to: Zone) {
 
 /// What continuous effects change of permanent `c` (layers 4-7 and the rules
 /// flags), from the engine's accessors.
-fn characteristics(g: &Game, c: CardIdx) -> (u16, u8, (i32, i32), u32, crate::layers::Flags, crate::db::Prot, bool) {
+fn characteristics(g: &Game, c: CardIdx) -> (u16, u8, (crate::num::Wide, crate::num::Wide), u32, crate::layers::Flags, crate::db::Prot, bool) {
     (g.types_of(c), g.colors_of(c), g.pt(c), g.keywords_of(c).0, g.flags_of(c), g.protection_of(c), g.lost_abilities(c))
 }
 
@@ -649,7 +666,10 @@ pub fn perturbations() -> Vec<Perturbation> {
             effect(&mut a.g, c, Mod::CantBlock)
         }),
         p!("a creature can't be blocked", "Game.effects", |a, r| {
-            let c = pick(&slot_creatures(&a.g), r)?;
+            // (One that can be blocked now: another such effect, or its own
+            // ability, would make this one change nothing.)
+            let cs: Vec<CardIdx> = slot_creatures(&a.g).into_iter().filter(|&c| !a.g.flags_of(c).cant_be_blocked).collect();
+            let c = pick(&cs, r)?;
             effect(&mut a.g, c, Mod::CantBeBlocked)
         }),
         p!("a creature attacks each combat", "Game.effects", |a, r| {
@@ -816,7 +836,7 @@ pub fn perturbations() -> Vec<Perturbation> {
             let c = pick(&ss, r)?;
             let others: Vec<DefId> = ss.iter().map(|&x| a.g.objs[x.i()].def).filter(|&d| d != a.g.objs[c.i()].def).collect();
             let d = pick(&others, r)?;
-            a.g.add_copy_effect(c, crate::copies::CopyVals { def: d, exc: Default::default() }, Until::EndOfTurn);
+            a.g.add_copy_effect(c, crate::copies::CopyVals { def: d, exc: Default::default(), dfc: true }, Until::EndOfTurn);
             Some(format!("{} copies {}", a.g.name(c), a.g.db.def(d).name))
         }),
         p!(rare "a prepared permanent stops being prepared", "Game.prepared", |a, r| {
@@ -843,6 +863,26 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.turn_controller = if a.g.turn_controller.is_some() { None } else { Some(q) };
             a.g.sync_controller_view();
             Some(format!("{:?}", a.g.turn_controller))
+        }),
+        // (Rare: mana in a pool at a sampled decision; draws nothing from
+        // the shared stream: the first player with mana, its first type.)
+        p!(rare "mana in a pool is restricted to activating abilities of lands", "Game.pool_restr", |a, _| {
+            let (p, t) = (0..2u8).find_map(|p| {
+                let pool = &a.g.players[p as usize].pool;
+                let held = |t: usize| a.g.pool_restr.iter().filter(|k| k.0 == p && k.1 as usize == t).map(|k| k.3).sum::<u8>() + if t == 5 { pool.art } else { 0 };
+                (0..6).find(|&t| pool.amt[t] > held(t)).map(|t| (p, t))
+            })?;
+            a.g.pool_restr.push((p, t as u8, crate::db::SPEND_LAND_ABILITY, 1));
+            Some(format!("P{p}: one mana of type {t}"))
+        }),
+        // (Draws nothing from the shared stream: the active player's count.)
+        p!("a land entered the battlefield this turn", "Game.lands_entered", |a, _| {
+            let (t, p) = (a.g.turn.number, a.g.turn.active as usize);
+            if a.g.lands_entered.0 != t {
+                a.g.lands_entered = (t, [0; 2]);
+            }
+            a.g.lands_entered.1[p] += 1;
+            Some(format!("P{p}: {}", a.g.lands_entered.1[p]))
         }),
         p!("void holds (a nonland permanent left the battlefield this turn)", "Game.void_turn", |a, _| {
             let t = a.g.turn.number;
@@ -1381,24 +1421,27 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.objs[c.i()].entered = t;
             Some(a.g.name(c).to_string())
         }),
-        p!("a planeswalker's loyalty ability was activated this turn", "Obj.pw_used", |a, r| {
+        p!("a planeswalker's loyalty ability was activated this turn", "Game.loyalty", |a, r| {
             let t = a.g.turn.number as u16;
             let cs: Vec<CardIdx> = slots(&a.g)
                 .into_iter()
-                .filter(|&c| a.g.is_type(c, types::PLANESWALKER) && !(a.g.objs[c.i()].pw_turn == t && a.g.objs[c.i()].pw_used > 0))
+                .filter(|&c| a.g.is_type(c, types::PLANESWALKER) && !(a.g.loyalty_of(c).turn == t && a.g.loyalty_of(c).used > 0))
                 .collect();
             let c = pick(&cs, r)?;
-            let o = &mut a.g.objs[c.i()];
-            o.pw_turn = t;
-            o.pw_used = 1;
+            let o = a.g.loyalty_mut(c);
+            o.turn = t;
+            o.used = 1;
             Some(a.g.name(c).to_string())
         }),
-        p!("a planeswalker's activations are another turn's", "Obj.pw_turn", |a, r| {
+        p!("a planeswalker's activations are another turn's", "Game.loyalty", |a, r| {
             let t = a.g.turn.number as u16;
-            let cs: Vec<CardIdx> =
-                slots(&a.g).into_iter().filter(|&c| a.g.is_type(c, types::PLANESWALKER) && a.g.objs[c.i()].pw_turn == t && a.g.objs[c.i()].pw_used > 0).collect();
+            let cs: Vec<CardIdx> = slots(&a.g)
+                .into_iter()
+                .filter(|&c| a.g.is_type(c, types::PLANESWALKER) && a.g.loyalty_of(c).turn == t && a.g.loyalty_of(c).used > 0)
+                .collect();
             let c = pick(&cs, r)?;
-            a.g.objs[c.i()].pw_turn = t.wrapping_sub(1);
+            // (Another turn: the previous one, or the next before the first.)
+            a.g.loyalty_mut(c).turn = if t == 0 { 1 } else { t - 1 };
             Some(a.g.name(c).to_string())
         }),
         // ---- StackItem ----
@@ -1600,6 +1643,47 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.m.earlier[p][w] |= b;
             Some(format!("P{p}"))
         }),
+        // EoE W6 (ENGINE.md 99.16): no draw from the gate's random stream.
+        // A recorded control-changing effect ("until end of turn") on the
+        // first permanent in the encoded slots, under the control it has (so
+        // nothing else changes now: what changes is who controls it once the
+        // turn ends).
+        p!("a control effect ends at the end of the turn", "W6State.control", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            let r = a.g.obj_ref(c);
+            let to = a.g.objs[c.i()].controller;
+            a.g.w6.control.push(crate::eoe_w6::ControlFx { obj: r, to, ts: u32::MAX, eot: true });
+            Some(a.g.name(c).to_string())
+        }),
+        // The amount of mana spent to cast a spell on the stack (Unravel's
+        // condition; W3's perturbation covers permanents).
+        p!(rare "the mana spent to cast a spell", "Game.marks", |a, _r| {
+            let &(_, c) = stack_spells(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::ManaSpent(1))
+        }),
+        // A copy effect's "except it has this ability" (Thespian's Stage):
+        // its definition made with the ability (only in a table with one).
+        p!(rare "a copy has an ability by its exception", "Game.copies", |a, _r| {
+            let ss = slots(&a.g);
+            let db = a.g.db;
+            let k = a.g.copies.iter().position(|x| ss.contains(&x.obj.idx) && db.w6.kept.iter().any(|y| y.0 .0 == x.vals.def))?;
+            let d = a.g.copies[k].vals.def;
+            let m = db.w6.kept.iter().find(|y| y.0 .0 == d)?.1;
+            a.g.copies[k].vals.def = m;
+            let c = a.g.copies[k].obj.idx;
+            a.g.objs[c.i()].def = m;
+            Some(db.def(d).name.clone())
+        }),
+        // Player 0 created tokens this turn (Moonlit Meditation's "the
+        // first time ... each turn").
+        p!("a player created tokens this turn", "W6State.tokens_turn", |a, _r| {
+            let t = a.g.turn.number as u16;
+            if a.g.w6.tokens_turn[0] == t {
+                return None;
+            }
+            a.g.w6.tokens_turn[0] = t;
+            Some("P0".to_string())
+        }),
     ]
 }
 
@@ -1621,6 +1705,12 @@ pub fn limits() -> Vec<Limit> {
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
         l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),
+        l("mana in a pool is restricted to activating abilities of lands", NextLayout, "a pool's mana with a spending restriction other than Mishra's Workshop's (g5::POOL_ART) is game state the EoE port added after layout v5 froze (Eldrazi Temple, Steelswarm Operator, Sunken Citadel, ...; ENGINE.md 99.12): the pool's amounts are encoded, the restriction is not; the next layout encodes it (per player, the restricted part of each type)"),
+        l("a land entered the battlefield this turn", NextLayout, "how many lands entered the battlefield under each player's control this turn (Game::lands_entered) is game state the EoE port added after layout v5 froze, read by one card, Bioengineered Future (ENGINE.md 99.12); LANDS_PLAYED counts lands played only: the next layout encodes it (per player, beside the turn's counts)"),
+        l("a control effect ends at the end of the turn", NextLayout, "the control-changing effects behind a permanent's controller (W6State::control: their order and which end at the end of the turn, CR 613.1b, 613.7, 514.2; recorded in games with an Aura that changes control, Tractor Beam, EoE W6, ENGINE.md 99.16) decide who controls it when one ends; layout v5 encodes the controller, not the effects: the next layout encodes them (a permanent's 'controlled until end of turn' and 'by an Aura' flags)"),
+        l("a copy has an ability by its exception", NextLayout, "a copy effect's 'except it has this ability' (CR 707.9b; Thespian's Stage, EoE W6, ENGINE.md 99.16: a definition made with the copied one's abilities and the Stage's) gives the copy an ability its identity (the copied card's) doesn't show; the next layout encodes a permanent's activated abilities beyond its identity's"),
+        l("a player created tokens this turn", NextLayout, "whether a player created tokens this turn (W6State::tokens_turn, EoE W6, ENGINE.md 99.16) decides whether Moonlit Meditation's 'the first time you would create one or more tokens each turn' can still apply; layout v5 has no float for it: the next layout encodes it (a per-turn flag beside the turn's facts)"),
+        l("the mana spent to cast a spell", NextLayout, "the amount of mana spent to cast a spell on the stack (Mark::ManaSpent, recorded for every spell in a table with Unravel, EoE W6, ENGINE.md 99.16) decides Unravel's 'if the amount of mana spent to cast that spell was less than its mana value'; layout v5's stack item has no float for it: the next layout encodes it (a stack item's number, as W3's permanent's)"),
     ]
 }
 

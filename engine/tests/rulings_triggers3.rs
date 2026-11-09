@@ -61,7 +61,7 @@ fn first_trigger_from(g: &Game, name: &str) -> Option<Choice> {
     let d = g.pending_decision().unwrap();
     let mine: Vec<_> = g.waiting_triggers().iter().filter(|t| t.controller == d.player).collect();
     let k = mine.iter().position(|t| db().def(t.source_def).name == name)?;
-    let c = Choice::Trigger(k as u8);
+    let c = Choice::Trigger(k as u32);
     g.has_option(c).then_some(c)
 }
 
@@ -281,7 +281,7 @@ fn delayed_returns_happen_without_their_source_and_a_returned_permanent_misses_t
     cast_at(&mut g, 1, "Lightning Bolt", ph);
     assert_eq!(g.obj(ph).zone, Zone::Graveyard);
     quiet_until(&mut g, |g| g.turn().active == 1);
-    assert_eq!(g.card(1, "Test Wall", Zone::Battlefield).0 > 0 || g.count_in(1, "Test Wall", Zone::Battlefield) == 1, true, "{}", log(&g));
+    assert_eq!(g.card(1, "Test Wall", Zone::Battlefield).get() > 0 || g.count_in(1, "Test Wall", Zone::Battlefield) == 1, true, "{}", log(&g));
     assert_eq!(g.count_in(1, "Test Wall", Zone::Battlefield), 1, "returned without Phelia\n{}", log(&g));
     // Flickerwisp and Ocelot Pride.
     let mut g = scen()
@@ -783,7 +783,7 @@ fn palace_jailers_exile_lasts_until_an_opponent_becomes_monarch_even_if_p0_isnt_
             let mine: Vec<_> = g.waiting_triggers().iter().filter(|w| w.controller == d.player).collect();
             // (Palace Jailer's first ability, "you become the monarch".)
             let k = mine.iter().position(|w| w.slot == 0)?;
-            Some(Choice::Trigger(k as u8))
+            Some(Choice::Trigger(k as u32))
         }
         _ => None,
     });

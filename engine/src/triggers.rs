@@ -1,7 +1,7 @@
 //! Events and triggered abilities (CR 603; ENGINE.md 8).
 
 use crate::db::{AbilityRef, AbilitySlot, EventKind, Filter, Slot, TrigPred};
-use crate::decision::{act, Choice, DecisionKind, Opt};
+use crate::decision::{act, Choice, DecisionKind};
 use crate::flow::Task;
 use crate::game::{Game, StackItem, StackKind};
 use crate::ids::{opp, CardIdx, DefId, ObjRef, PlayerId, Target, Zone};
@@ -19,14 +19,15 @@ pub(crate) enum Subj {
 }
 
 /// Something that happened (603.2), with its subjects (`EventKind`
-/// documents them) and an amount (damage dealt: any amount, ENGINE.md 46;
-/// or a note's bits, `Game::put_onto_battlefield`).
+/// documents them) and an amount (damage dealt: any amount within
+/// `num::AMOUNT_MAX`, ENGINE.md 100.7; or a note's bits,
+/// `Game::put_onto_battlefield`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Event {
     pub kind: EventKind,
     pub a: Subj,
     pub b: Subj,
-    pub amount: u32,
+    pub amount: u64,
 }
 
 impl Event {
@@ -68,7 +69,9 @@ pub struct EvCtx {
     pub obj: Option<ObjRef>,
     /// The second object subject ("that creature" dealt damage).
     pub obj2: Option<ObjRef>,
-    pub amount: u32,
+    /// The event's amount (damage, life, counters: within
+    /// `num::AMOUNT_MAX`) or note (`ENTER_BIG`, chapters).
+    pub amount: u64,
     /// The spell or ability of the event, by stack item id (0 = none):
     /// the one that targets ("counter that spell or ability", ward).
     pub item: u32,
@@ -111,6 +114,36 @@ pub struct Held {
     pub zones: u8,
     pub seq: u32,
     pub f: Fire,
+}
+
+/// A simultaneous entry (CR 603.6a: "each time an event puts one or more
+/// permanents onto the battlefield, all permanents on the battlefield
+/// (including the newcomers) are checked"): the permanents of one event are
+/// put onto the battlefield one by one, and their `Enters` events wait here
+/// until the last of them is there and what applies as they enter is done
+/// (their "as this enters" choices and copy choices, CR 614.12, 603.6d; the
+/// order of their timestamps, 613.7m). Then the events are matched together,
+/// so each newcomer sees the others enter (`Game::begin_entering`).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Entry {
+    /// The permanents that entered, with their `Enters` events' notes, in
+    /// the order they entered.
+    pub held: Vec<(ObjRef, u32)>,
+    /// The event group the entry happened in (CR 603.2c).
+    pub seq: u32,
+    /// The timestamp its first permanent got (`u32::MAX` until one entered):
+    /// the permanents with this one or a later one are entering at the same
+    /// time, not yet on the battlefield as replacement effects apply to
+    /// each of them (CR 614.12a; `Game::entry_since`).
+    pub since: u32,
+    /// The agenda's length as it began: the tasks its permanents queued as
+    /// they entered sit above, and `Task::EntersTogether` under them.
+    pub base: u32,
+    /// How many `begin_entering`s are open.
+    pub open: u8,
+    /// The entry is complete and waits for its choices: its
+    /// `Task::EntersTogether` is queued.
+    pub queued: bool,
 }
 
 /// Does the predicate read where a leaving permanent went (`LeftTo`)?
@@ -219,7 +252,7 @@ impl Game {
         // emblems (their abilities function in the command zone, 114.4).
         for &c in &self.battlefield {
             let o = &self.objs[c.i()];
-            if self.db.def(o.def).trig_mask & bit != 0 && !self.lost_abilities(c) {
+            if self.db.def(o.def).trig_mask & bit != 0 && !self.lost_abilities(c) && !(self.moon_game && self.moon_on(c)) {
                 obs.push(Observer { r: ObjRef { idx: c, inc: o.inc }, def: o.def, controller: o.controller, spell: false, gy: false });
             }
         }
@@ -265,6 +298,10 @@ impl Game {
                 }
             }
         }
+        // ("Triggers an additional time": EoE W6. A permanent entering at the
+        // same time is on the battlefield as its entry's events are matched,
+        // `enters_together`.)
+        let w6_doubling = ev.kind == EventKind::Enters && self.w6.seen & crate::eoe_w6::SEEN_W6_TRIGGERS != 0;
         if obs.is_empty() && self.temp_triggers.is_empty() && !self.w3.granted {
             return;
         }
@@ -340,7 +377,12 @@ impl Game {
                     once: has_once(&t.pred),
                     times,
                 };
+                let before = self.waiting.len();
                 self.fire_or_hold(f, dests);
+                // ("Triggers an additional time": EoE W6.)
+                if w6_doubling && self.waiting.len() > before {
+                    self.w6_entry_triggered();
+                }
             }
         }
         // Triggered abilities effects gave permanents ("<it> gains
@@ -363,7 +405,12 @@ impl Game {
                         once: false,
                         times: None,
                     };
+                    let before = self.waiting.len();
                     self.fire_or_hold(f, dests);
+                    // ("Triggers an additional time": EoE W6.)
+                    if w6_doubling && self.waiting.len() > before {
+                        self.w6_entry_triggered();
+                    }
                 }
             }
         }
@@ -517,8 +564,8 @@ impl Game {
                 let host = self.objs[src.r.idx.i()].attached;
                 host.is_some_and(|h| self.live(h) && self.objs[h.idx.i()].attacking) && self.attackers().len() >= 2
             }
-            TrigPred::Chapter(n) => ev.a == Subj::Obj(src.r) && ev.amount == *n as u32,
-            TrigPred::Level(n) => ev.kind == EventKind::ClassLevel && ev.a == Subj::Obj(src.r) && ev.amount == *n as u32,
+            TrigPred::Chapter(n) => ev.a == Subj::Obj(src.r) && ev.amount == *n as u64,
+            TrigPred::Level(n) => ev.kind == EventKind::ClassLevel && ev.a == Subj::Obj(src.r) && ev.amount == *n as u64,
             TrigPred::TimesPerSubject(s, n) => match ev.subject(*s) {
                 Subj::Obj(r) => self.granted_triggered(r, src.def, src.r) < *n,
                 _ => false,
@@ -526,12 +573,12 @@ impl Game {
             TrigPred::Batch => true,
             // The `Enters` event's note (`Game::put_onto_battlefield`).
             TrigPred::EnteredCast => ev.kind == EventKind::Enters && ev.amount & 1 != 0,
-            TrigPred::EnteredPaid => ev.kind == EventKind::Enters && (ev.amount >> 1) & 0xFF != 0,
-            TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && (ev.amount >> 9) & 0x3F >= *n as u32,
-            TrigPred::EnteredNotFromGyExile => ev.kind == EventKind::Enters && ev.amount >> 15 == 0,
+            TrigPred::EnteredPaid => ev.kind == EventKind::Enters && self.entered_counts(ev.amount, match ev.a { Subj::Obj(r) => Some(r), _ => None }).0 != 0,
+            TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && self.entered_counts(ev.amount, match ev.a { Subj::Obj(r) => Some(r), _ => None }).1 >= *n as u32,
+            TrigPred::EnteredNotFromGyExile => ev.kind == EventKind::Enters && (ev.amount >> 15) & 1 == 0,
             TrigPred::InGraveyard => true,
             TrigPred::SpellMvParity => match (ev.a, self.parity_of(src.r)) {
-                (Subj::Obj(r), Some(k)) => self.mana_value_of(r.idx) % 2 == k,
+                (Subj::Obj(r), Some(k)) => self.mana_value_of(r.idx) % 2 == k as u64,
                 _ => false,
             },
             TrigPred::SpellPaid => match ev.a {
@@ -541,6 +588,12 @@ impl Game {
             TrigPred::OrCopy => true,
             TrigPred::Once => true,
             TrigPred::LeftTo(mask) => ev.kind == EventKind::LeavesBattlefield && self.leaving_to & mask != 0,
+            // (The `CountersAdded` event carries who put the counters in a
+            // game with such a trigger: EoE W6.)
+            TrigPred::CountersPutBy(you) => match ev.b {
+                Subj::Player(p) => ev.kind == EventKind::CountersAdded && (p == src.controller) == *you,
+                _ => false,
+            },
             // CR 724, 508.1b: it attacks the player who is the monarch.
             TrigPred::AttacksMonarch => match ev.a {
                 Subj::Obj(r) => {
@@ -580,8 +633,10 @@ impl Game {
 
     /// Put waiting triggers on the stack in APNAP order (603.3b): the active
     /// player's first, each player ordering their own; targets are chosen as
-    /// each goes on the stack (603.3d).
-    pub(crate) fn put_triggers(&mut self) {
+    /// each goes on the stack (603.3d). The order decision offers every
+    /// distinct waiting trigger: past the 16 `TRIGGER` ids on a page (`page`,
+    /// `Game::ask_paged`, ENGINE.md 100.2).
+    pub(crate) fn put_triggers(&mut self, page: crate::decision::Page) {
         if self.waiting.is_empty() {
             return;
         }
@@ -603,7 +658,7 @@ impl Game {
         // More waiting triggers than `TRIGGER` slots (a board of tokens
         // dying): the first of each interchangeable group first, the copies
         // after (their order among themselves can't matter), so that the
-        // groups' ids stay in range.
+        // groups' first page holds as many of the groups as it can.
         let mine = if mine.len() > act::TRIGGER_N as usize && self.answer.is_none() {
             let (mut firsts, mut rest) = (Vec::new(), Vec::new());
             for (k, &i) in mine.iter().enumerate() {
@@ -622,6 +677,10 @@ impl Game {
             mine
         };
         let pick = match self.answer.take() {
+            Some(Choice::Page(next)) => {
+                self.agenda.push(Task::PutTriggers { page: next });
+                return;
+            }
             Some(Choice::Trigger(k)) => mine[k as usize],
             Some(other) => unreachable!("trigger answer {other:?}"),
             None => {
@@ -630,27 +689,23 @@ impl Game {
                     mine[0]
                 } else {
                     // Identical triggers are offered once (their order cannot
-                    // matter while their effects ignore the source's state).
-                    let mut opts = Vec::new();
+                    // matter while their effects ignore the source's state);
+                    // every distinct one is (CR 603.3b), the k-th waiting one
+                    // at `TRIGGER` + k, paged past the 16 ids.
+                    let mut items = Vec::new();
                     for (k, &i) in mine.iter().enumerate() {
                         if mine[..k].iter().any(|&j| same(&self.waiting[j], &self.waiting[i])) {
                             continue;
                         }
-                        // (More distinct triggers than `TRIGGER` slots, each
-                        // card a discard made: the first ones are offered; the
-                        // others come next. A limit of the action layout.)
-                        if k as u16 >= act::TRIGGER_N {
-                            break;
-                        }
-                        opts.push(Opt { action: act::TRIGGER + k as u16, choice: Choice::Trigger(k as u8) });
+                        items.push((k as u32, Choice::Trigger(k as u32)));
                     }
-                    self.ask(Task::PutTriggers, p, DecisionKind::OrderTriggers, opts);
+                    self.ask_paged(Task::PutTriggers { page }, page, p, DecisionKind::OrderTriggers, act::TRIGGER, act::TRIGGER_N, &items, Vec::new());
                     return;
                 }
             }
         };
         let t = self.waiting[pick];
-        self.agenda.push(Task::PutTriggers);
+        self.agenda.push(Task::PutTriggers { page: crate::decision::Page::FIRST });
         let ability = AbilityRef { def: t.source_def, slot: AbilitySlot::Trigger(t.slot), mode: None };
         let ab = self.db.ability(ability);
         // (Checked while the trigger still waits: its source's last known
@@ -702,10 +757,10 @@ impl Game {
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));
         if ab.divide.is_some() {
-            self.agenda.push(Task::Divide { id }); // CR 603.3d, 601.2d
+            self.agenda.push(Task::Divide { id, step: crate::decision::NumberStep::FIRST }); // CR 603.3d, 601.2d
         }
         if ab.has_targets() {
-            self.agenda.push(Task::ChooseTargets { id, req: 0 });
+            self.agenda.push(Task::ChooseTargets { id, req: 0, page: crate::decision::Page::FIRST });
         }
         if ab.modes.is_some() {
             self.agenda.push(Task::ChooseModes { id }); // CR 700.2b, 603.3c
@@ -792,13 +847,125 @@ impl Game {
         self.leaving.clear();
         self.batching = false;
         self.new_event();
+        // The cards exiled until one of them left return now, after the
+        // event (CR 610.3), together: those returning to the battlefield
+        // are one entry (603.6a).
+        if !self.releasing.is_empty() {
+            let sources = std::mem::take(&mut self.releasing);
+            self.begin_entering(false);
+            for s in sources {
+                self.release_links(s);
+            }
+            self.end_entering();
+        }
+    }
+
+    /// Begin putting permanents onto the battlefield as one event (CR
+    /// 603.6a): their `Enters` events wait until the matching
+    /// [`end_entering`](Self::end_entering) and the choices made as they
+    /// enter (`Entry`). Nests: inside an open entry, it joins it; inside a
+    /// task that a waiting entry's permanent queued as it entered, `join`
+    /// joins that entry (an Aura choosing what it enchants, CR 303.4f; Mox
+    /// Diamond's discard, 614.1a: the permanent enters with the others). Any
+    /// other entry while one waits (a land sacrificed to devour returning a
+    /// card exiled until it leaves, 610.3a) is an event of its own.
+    pub(crate) fn begin_entering(&mut self, join: bool) {
+        if let Some(e) = self.entries.last_mut() {
+            if e.open > 0 || join {
+                e.open += 1;
+                return;
+            }
+        }
+        self.entries.push(Entry { held: Vec::new(), seq: self.ev_seq, since: u32::MAX, base: self.agenda.len() as u32, open: 1, queued: false });
+    }
+
+    /// End [`begin_entering`](Self::begin_entering). Once the entry is
+    /// complete its `Enters` events are matched together now, or, when its
+    /// permanents queued choices as they entered (CR 614.12, 613.7m), after
+    /// them (`Task::EntersTogether`, under those tasks).
+    pub(crate) fn end_entering(&mut self) {
+        let e = self.entries.last_mut().expect("an entry in progress");
+        e.open -= 1;
+        // (A join: its entry waits for its `Task::EntersTogether` already.)
+        if e.open > 0 || e.queued {
+            return;
+        }
+        let base = e.base as usize;
+        if self.agenda.len() > base {
+            e.queued = true;
+            self.agenda.insert(base, Task::EntersTogether);
+        } else {
+            self.enters_together();
+        }
+    }
+
+    /// The first timestamp of the entry in progress (`Entry::since`;
+    /// `u32::MAX` outside one, or before its first permanent entered): what
+    /// applies as a permanent enters is what was there before its entry, not
+    /// a permanent entering at the same time (CR 614.12a: Containment
+    /// Priest's, a fast land's "other lands", Blood Moon's, an "enter as a
+    /// copy" choice; their rulings), so permanents with this timestamp or a
+    /// later one are left out.
+    pub(crate) fn entry_since(&self) -> u32 {
+        self.entries.last().map_or(u32::MAX, |e| e.since)
+    }
+
+    /// The `Enters` event of permanent `r` (its note: cast, times paid, ...;
+    /// `Game::put_onto_battlefield`): held for its entry, or matched now
+    /// outside one.
+    pub(crate) fn entered_event(&mut self, r: ObjRef, note: u32) {
+        match self.entries.last_mut() {
+            Some(e) => e.held.push((r, note)),
+            None => {
+                self.note_entered(r.idx);
+                self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u64 });
+                self.day_night_entered(r.idx);
+            }
+        }
+    }
+
+    /// The last entry is complete (`Task::EntersTogether`, or its end with
+    /// nothing queued): its permanents' `Enters` events are matched in its
+    /// event group, each against every permanent on the battlefield,
+    /// newcomers included (CR 603.6a, 603.10: the game as it is after the
+    /// event); then day and night look at the newcomers (CR 702.145c-g,
+    /// after the event: a double-faced token entered front face up).
+    pub(crate) fn enters_together(&mut self) {
+        let e = self.entries.pop().expect("an entry to match");
+        debug_assert_eq!(e.open, 0, "an entry matched while open");
+        // (Each still the permanent that entered: nothing between its entry
+        // and the end of its entry's choices moves a newcomer: what devour
+        // sacrifices and what a copy copies were there before, CR 614.12a.
+        // Loud, never a silently lost event.)
+        let held = e.held;
+        assert!(
+            held.iter().all(|&(r, _)| self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield),
+            "a permanent left the battlefield before its entry's events were matched"
+        );
+        if held.is_empty() {
+            return;
+        }
+        let saved = self.ev_seq;
+        self.ev_seq = e.seq;
+        for &(r, _) in &held {
+            self.note_entered(r.idx);
+        }
+        for &(r, note) in &held {
+            self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u64 });
+        }
+        self.ev_seq = saved;
+        for &(r, _) in &held {
+            if self.live(r) {
+                self.day_night_entered(r.idx);
+            }
+        }
     }
 
     /// A new event group begins (CR 603.2c: an instruction ended, a
     /// resolution or a simultaneous move began).
     #[inline]
     pub(crate) fn new_event(&mut self) {
-        self.ev_seq = self.ev_seq.wrapping_add(1);
+        self.ev_seq = self.exact_inc(self.ev_seq, "event groups");
     }
 
     /// A "whenever one or more ..." ability of `source` (slot `slot`)
@@ -809,7 +976,10 @@ impl Game {
         if self.batch_fired.iter().any(|&(s, k, g)| s == source && k == slot && g == q) {
             return false;
         }
-        self.batch_fired.retain(|&(_, _, g)| g == q);
+        // (Older groups are done; a later one stays: an entry's events and a
+        // replacement choice's held triggers are matched in their own,
+        // earlier group, `enters_together`, `release_held`.)
+        self.batch_fired.retain(|&(_, _, g)| (g.wrapping_sub(q) as i32) >= 0);
         self.batch_fired.push((source, slot, q));
         true
     }

@@ -15,14 +15,14 @@ impl Game {
     /// now if it is still on the battlefield, else as it last existed there
     /// (CR 702.184a, 608.2h; station's ruling: "use the tapped creature's
     /// power as the station ability resolves"). None noted: 0.
-    pub(crate) fn tapped_power(&self, f: &Frame) -> i32 {
+    pub(crate) fn tapped_power(&self, f: &Frame) -> crate::num::Wide {
         let Some(&r) = f.noted.first() else { return 0 };
         if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield {
             // (Or its toughness: CR 702.184c, ENGINE.md 99.8.)
             return self.station_amount(r.idx);
         }
-        match self.objs[r.idx.i()].lki_power {
-            Some((inc, p)) if inc == r.inc => self.station_amount_lki(r, p),
+        match self.lki_power_of(r) {
+            Some(p) => self.station_amount_lki(r, p as crate::num::Wide),
             _ => 0,
         }
     }
@@ -81,11 +81,11 @@ impl Game {
                 Flow::Next
             }
             EoeA::MarkPile => {
-                f.x = f.pile.len() as i32;
+                f.x = f.pile.len() as i64;
                 Flow::Next
             }
             EoeA::CounterOnSourceUnlessPileShrank { counter } => {
-                if f.pile.len() as i32 >= f.x {
+                if f.pile.len() as i64 >= f.x {
                     for c in self.objs_on(f, &On::Source) {
                         self.add_counters(c, *counter, 1);
                     }

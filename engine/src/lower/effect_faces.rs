@@ -43,7 +43,7 @@ pub(crate) fn lower_effect_faces(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
         E::PumpTargetUntilYourNextTurn(nodes::PumpTargetUntilYourNextTurn { power, toughness, targets }) => {
             let (p, t) = (l.int("PumpTargetUntilYourNextTurn.power", *power, -99, 99), l.int("PumpTargetUntilYourNextTurn.toughness", *toughness, -99, 99));
             if let Some(tgt) = super::effect::lower_targets(l, b, targets, "PumpTargetUntilYourNextTurn") {
-                b.op(Op::Ext(Ext::Apply { on: On::Target(tgt), mods: vec![Mod::Pt(p, t)], until: Until::YourNextTurn }));
+                b.op(Op::Ext(Ext::Apply { on: On::Target(tgt), mods: vec![Mod::pt(p, t)], until: Until::YourNextTurn }));
             }
         }
         // "Target opponent mills n cards" (CR 701.13).
@@ -112,7 +112,7 @@ pub(crate) fn lower_effect_faces(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
         // object, CR 611.2c).
         E::EventSubjectGetsUEOT(nodes::EventSubjectGetsUEOT { power, toughness }) => {
             let (p, t) = (l.int("EventSubjectGetsUEOT.power", *power, -99, 99), l.int("EventSubjectGetsUEOT.toughness", *toughness, -99, 99));
-            b.op(Op::Ext(Ext::Apply { on: On::EventObj, mods: vec![Mod::Pt(p, t)], until: Until::EndOfTurn }));
+            b.op(Op::Ext(Ext::Apply { on: On::EventObj, mods: vec![Mod::pt(p, t)], until: Until::EndOfTurn }));
         }
         // "Draw cards equal to half the number of cards in your library,
         // rounded up."
@@ -194,7 +194,7 @@ pub(crate) fn lower_effect_faces(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             };
             let (p, t) = (l.int("YourPermanentsBecomeCreaturesUEOT.power", *power, 0, 99), l.int("YourPermanentsBecomeCreaturesUEOT.toughness", *toughness, 0, 99));
             let mine = Filter::And(Box::new(Filter::Type(bits)), Box::new(Filter::Controller(true)));
-            let mods = vec![Mod::Types { add: types::CREATURE, subtypes: Vec::new(), replace: false }, Mod::SetPt(p, t)];
+            let mods = vec![Mod::Types { add: types::CREATURE, subtypes: Vec::new(), replace: false }, Mod::set_pt(p, t)];
             b.op(Op::Ext(Ext::Apply { on: On::Each(mine), mods, until: Until::EndOfTurn }));
         }
         _ => return false,

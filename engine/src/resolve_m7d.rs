@@ -119,6 +119,9 @@ impl Game {
         let Some(real) = self.reveal_face_down(c, known) else { return };
         self.set_face(c, real);
         self.note(|g| format!("{} is turned face up", g.name(c)));
+        // Front face up (CR 712.12a): a daybound card at night transforms at
+        // once, and with neither day nor night it becomes day (702.145c-d).
+        self.day_night_any_time();
     }
 
     /// A face-down permanent that just left the battlefield (it left as a
@@ -164,7 +167,7 @@ impl Game {
                 return Flow::Next;
             }
             let mut sorted = pile.clone();
-            sorted.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+            sorted.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
             let mut opts = Vec::new();
             for (k, &c) in sorted.iter().enumerate() {
                 if k > 0 && self.objs[sorted[k - 1].i()].def == self.objs[c.i()].def {
@@ -247,7 +250,7 @@ impl Game {
         // 36.11.)
         let deck = match self.deck_question(p, |d| d.opening.is_some()) {
             Some(known) => known,
-            None => self.objs.iter().enumerate().any(|(i, o)| o.owner == p && self.opening_ok(p, CardIdx(i as u16))),
+            None => self.objs.iter().enumerate().any(|(i, o)| o.owner == p && self.opening_ok(p, CardIdx::new(i as u32))),
         };
         if !deck {
             self.opening_next(p);
@@ -312,18 +315,17 @@ impl Game {
                     Some(other) => unreachable!("exiled-card answer {other:?}"),
                     None => {
                         let q = crate::ids::opp(p);
-                        let cands: Vec<CardIdx> = self
+                        let cands: Vec<Choice> = self
                             .exile
                             .iter()
                             .copied()
                             .filter(|&c| self.objs[c.i()].owner == q && self.counters_on(c, *counter) > 0)
-                            .take(act::EXILE_N as usize)
+                            .map(Choice::Card)
                             .collect();
                         if cands.is_empty() {
                             return Flow::Next;
                         }
-                        let opts = cands.iter().enumerate().map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) }).collect();
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
+                        self.ask_objects(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseExiled, &cands, Vec::new());
                         Flow::Suspend
                     }
                 }
@@ -368,7 +370,7 @@ impl Game {
                                 kind: crate::db::EventKind::ClassLevel,
                                 a: crate::triggers::Subj::Obj(r),
                                 b: crate::triggers::Subj::None,
-                                amount: *level as u32,
+                                amount: *level as u64,
                             };
                             self.event(ev);
                         }
@@ -385,7 +387,7 @@ impl Game {
                     let r = self.obj_ref(c);
                     let ty = crate::db::Mod::Types { add: crate::db::types::CREATURE, subtypes: vec![*subtype], replace: false };
                     self.add_effect(crate::layers::Affected::Obj(r), ty, crate::layers::Until::Forever, ctl);
-                    self.add_effect(crate::layers::Affected::Obj(r), crate::db::Mod::SetPt(*p, *t), crate::layers::Until::Forever, ctl);
+                    self.add_effect(crate::layers::Affected::Obj(r), crate::db::Mod::set_pt(*p, *t), crate::layers::Until::Forever, ctl);
                 }
                 Flow::Next
             }
@@ -477,10 +479,10 @@ impl Game {
                     f.picked.clear();
                     return Flow::Next;
                 }
-                let cands: Vec<CardIdx> = self.exile.iter().copied().filter(|c| f.picked.contains(c) && self.can_cast_free_now(p, *c)).collect();
-                let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
-                opts.extend(cands.iter().take(act::EXILE_N as usize).enumerate().map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) }));
-                self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
+                let cands: Vec<Choice> =
+                    self.exile.iter().copied().filter(|c| f.picked.contains(c) && self.can_cast_free_now(p, *c)).map(Choice::Card).collect();
+                let pass = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+                self.ask_objects(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseExiled, &cands, pass);
                 Flow::Suspend
             }
             M7d::ManifestDread => self.manifest_dread(f),
@@ -592,7 +594,7 @@ impl Game {
     /// names are the same in every world; with hidden decks the names of
     /// their pool the chooser knows, ENGINE.md 36.11), `PASS` = a name of no
     /// card in the game.
-    pub(crate) fn choose_name_as_enters(&mut self, card: CardIdx) {
+    pub(crate) fn choose_name_as_enters(&mut self, card: CardIdx, page: crate::decision::Page) {
         use crate::decision::{act, Choice, DecisionKind, Opt};
         use crate::flow::Task;
         let p = self.objs[card.i()].controller;
@@ -602,10 +604,11 @@ impl Game {
         if !looked {
             self.reveal_hand(q, Some(p));
             self.marks.push((r, crate::game::Mark::LookedHand));
-            self.agenda.push(Task::AsEnters { card });
+            self.agenda.push(Task::AsEnters { card, page: crate::decision::Page::FIRST });
             return;
         }
         match self.answer.take() {
+            Some(Choice::Page(next)) => self.agenda.push(Task::AsEnters { card, page: next }),
             Some(Choice::Def(d)) => {
                 self.marks.push((r, crate::game::Mark::ChosenName(d)));
                 self.note(|g| format!("chosen name: {}", g.db.def(d).name));
@@ -613,15 +616,20 @@ impl Game {
             Some(Choice::Pass) => self.marks.push((r, crate::game::Mark::ChosenName(crate::game::NO_NAME))),
             Some(other) => unreachable!("name answer {other:?}"),
             None => {
-                // With hidden decks (ENGINE.md 36.11) the opponent's deck is
-                // not known: the names are those of their pool the chooser
-                // knows, and of their cards the chooser knows here (the same
-                // in every world of the chooser's).
+                // Any card name (CR 201.3): the names of the cards in the
+                // game, both players' (the second sentence taxes every
+                // source, so naming one's own card is a choice too), and
+                // `PASS` for a name of no card in the game (all alike: no
+                // card can join the game). With hidden decks (ENGINE.md
+                // 36.11) the opponent's deck is not known: their names are
+                // those of their pool the chooser knows, and of their cards
+                // the chooser knows here (the same in every world of the
+                // chooser's); the chooser's own deck is theirs to know.
                 let hidden = self.known_pools[q as usize].is_some();
                 let mut defs: Vec<crate::ids::DefId> = (0..self.objs.len())
-                    .map(|i| CardIdx(i as u16))
-                    .filter(|&c| self.objs[c.i()].owner == q && !self.is_token(c) && !self.is_copy_obj(c) && self.objs[c.i()].zone != Zone::Nowhere)
-                    .filter(|&c| !hidden || self.knows(p, c))
+                    .map(|i| CardIdx::new(i as u32))
+                    .filter(|&c| !self.is_token(c) && !self.is_copy_obj(c) && self.objs[c.i()].zone != Zone::Nowhere)
+                    .filter(|&c| self.objs[c.i()].owner == p || !hidden || self.knows(p, c))
                     .map(|c| self.ident_card(c))
                     .collect();
                 if let Some(known) = &self.known_pools[q as usize] {
@@ -632,14 +640,11 @@ impl Game {
                 }
                 defs.sort_unstable();
                 defs.dedup();
-                let mut opts: Vec<Opt> = defs
-                    .iter()
-                    .take(act::LIBRARY_N as usize)
-                    .enumerate()
-                    .map(|(i, &d)| Opt { action: act::LIBRARY + i as u16, choice: Choice::Def(d) })
-                    .collect();
-                opts.push(Opt { action: act::PASS, choice: Choice::Pass });
-                self.ask(Task::AsEnters { card }, p, DecisionKind::NameCard, opts);
+                // (`LIBRARY` + k: the k-th name, by definition; paged past the
+                // 64 ids, ENGINE.md 100.2.)
+                let items: Vec<(u32, Choice)> = defs.iter().enumerate().map(|(i, &d)| (i as u32, Choice::Def(d))).collect();
+                let pass = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+                self.ask_paged(Task::AsEnters { card, page }, page, p, DecisionKind::NameCard, act::LIBRARY, act::LIBRARY_N, &items, pass);
             }
         }
     }
@@ -703,11 +708,13 @@ impl Game {
         }
         let s = crate::db::SacCost { filter: filter.clone(), n: 1, another: false };
         let mana = self.alt_mana_via(card, p, from, k, &Default::default());
-        let keep = crate::pay::Keep { allow: self.spend_allow(card), ..Self::keep_for(card, rest, None) };
+        let keep = crate::pay::Keep { allow: self.spend_allow_from(card, from), ..Self::keep_for(card, rest, None) };
         self.sacrifice_candidates(p, card, &s)
             .into_iter()
             .filter(|&x| {
-                let m = mana.less_generic(self.mana_value_of(x));
+                // (A reduction past the u8 generic part is a reduction to 0,
+                // CR 601.2f: exact.)
+                let m = mana.less_generic(self.mana_value_of(x).min(u8::MAX as u64) as u8);
                 let without = if self.sacrifices_itself_for_mana(x) { Some(x) } else { Some(card) };
                 m.is_zero() || self.can_pay_without(p, &m, classes, &keep, without)
             })
@@ -802,9 +809,13 @@ impl Game {
     pub(crate) fn top_options(&self, p: PlayerId, classes: &[crate::pay::Class], sorcery_ok: bool, land_ok: bool, opts: &mut Vec<crate::decision::Opt>) {
         use crate::decision::{act, Opt, FACE_CAST, FACE_PLAY};
         let Some(&top) = self.players[p as usize].library.last() else { return };
-        if !self.top_play_ok(p, top) {
+        // (Or "you may cast artifact spells from the top of your library":
+        // casts only, of the faces that are artifact spells; EoE W6.)
+        let citadel = self.top_play_ok(p, top);
+        if !citadel && !self.w6_top_cast_source(p) {
             return;
         }
+        let land_ok = land_ok && citadel;
         let def = self.def_of(top);
         let front = if def.halves.is_some() {
             self.split_left_options(p, top, sorcery_ok, classes)
@@ -814,7 +825,9 @@ impl Game {
             } else {
                 0
             }
-        } else if self.castable_via(p, top, crate::game::CastFrom::LibraryTop, classes, sorcery_ok) {
+        } else if citadel && self.castable_via(p, top, crate::game::CastFrom::LibraryTop, classes, sorcery_ok) {
+            FACE_CAST
+        } else if !citadel && self.w6_top_cast_ok(p, top, None) && self.castable_via(p, top, crate::game::CastFrom::LibraryTopMana, classes, sorcery_ok) {
             FACE_CAST
         } else {
             0
@@ -860,13 +873,15 @@ impl Game {
         use crate::pay::{Class, Src, Yield, LJ_FOR, SAC, SAC_FOR, SQ_FOR};
         let mut out = Vec::new();
         let def = self.objs[c.i()].def;
-        let mut k = self.abilities(c).activated.len();
+        // (Its places: after its own abilities and those granted to it,
+        // `Game::activated_home`'s numbering; past the fourth the payment
+        // offers it by the permanent's own id, docs/shortcuts.md 31.7.2k.)
+        let granted = if self.grants_activated_now() { self.granted_activated(c).len() } else { 0 };
+        let mut k = self.abilities(c).activated.len().max(self.own_ability_slots(c)) + granted;
         let mut add = |out: &mut Vec<Class>, slot, yld, share: u8| {
-            if k < 4 {
-                let cl = Class { sac_self: true, res: SAC, slot_id: k as u8, share, ..Class::of(def, Src { card: c, slot }, yld) };
-                out.push(cl);
-                k += 1;
-            }
+            let cl = Class { sac_self: true, res: SAC, slot_id: k.min(u8::MAX as usize) as u8, share, ..Class::of(def, Src { card: c, slot }, yld) };
+            out.push(cl);
+            k += 1;
         };
         if rain && !self.activation_locks_hit(c, locks) {
             let mask = self.sac_mana_of(c);
@@ -949,7 +964,7 @@ impl Game {
             match by {
                 Some((x, i)) => {
                     self.note(|g| format!("P{p} activates {} sacrificing {} for mana", g.name(x), g.name(c)));
-                    let ad = self.def_of(x).activated_def(crate::db::AbilitySlot::Activated(i));
+                    let ad = self.src_ability(x, crate::db::AbilitySlot::Activated(i));
                     if ad.cost.tap {
                         self.tap(x);
                     }

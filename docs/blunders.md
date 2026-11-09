@@ -384,6 +384,16 @@ each with that answer and the reason:
   id in the output and the sidecar's line (`canary_stale`), never silently skipped; if none replays, the
   scoring fails. The four Play spots replay to the same fingerprint on run-4589760, view-known and the
   float build.
+* **the rules epoch** (docs/ENGINE.md 100.8): a library is recorded for one engine's rules. The file
+  carries `rules_epoch` (tools/position_lab.py's `RULES_EPOCH`), `engine` and `recorded` (every engine it
+  was recorded on), and each spot `pos` (`spot_pos`: the exported state's hash at the spot; a spot must
+  reach it as well as its fingerprint). After a rules change, `tools/delver_rerecord.py rerecord
+  --old-engine <the recording engine's checkout>` rebuilds every spot's path on the new engine to the same
+  position (the old engine replays it; the new one answers only the questions the old one never asked,
+  the old engine's way) or drops it with the reason; `check --stamp` records the new epoch when every spot
+  still reaches its position. `tests/test_canary_library.py` fails until one of them is done. Re-recorded
+  on 2026-11-09 for the faithfulness audit's rules (100.3 and 100.4.3): 60 of 60 spots, none dropped; an
+  engine before that epoch reads the file of b666765.
 * **the reference**: `library-score CKPT --reference` stores the first checkpoint's scores (the run's rule)
   in the file: generation 424, the Play tab's network.
 

@@ -15,7 +15,7 @@ use crate::db::{Cond, types, Counter, Filter, Kw, KwSet, Mod, Prot, PtCda, Scope
 use crate::game::Game;
 use crate::ids::{CardIdx, ObjRef, PlayerId, Zone};
 use crate::mana::ManaMask;
-use crate::num::Count;
+use crate::num::{Count, Wide};
 
 /// How long a continuous effect from a resolved spell or ability lasts
 /// (CR 611.2).
@@ -98,7 +98,7 @@ impl Game {
         let (bf, cmd) = if active { (self.battlefield.len(), self.command.len()) } else { (0, 0) };
         // (Indices over both lists and the loss flag read once: this is the
         // hottest loop of the engine.)
-        let loss = self.any_loss;
+        let loss = self.any_loss || (self.moon_game && self.moon_source());
         (0..bf + cmd)
             .map(move |i| if i < bf { self.battlefield[i] } else { self.command[i - bf] })
             .flat_map(move |s| {
@@ -266,6 +266,37 @@ impl Game {
     /// Does `c` have subtype `s` (layer 4: an effect that sets creature
     /// types replaces the printed ones, CR 205.1b; the latest wins)?
     pub fn has_subtype(&self, c: CardIdx, s: u16) -> bool {
+        // A nonbasic land that is a Mountain: its land type is Mountain only
+        // (CR 305.7; ENGINE.md 99.12).
+        if self.moon_game && self.db.land_subtypes.contains(&s) && self.moon_on(c) {
+            // (Then the land-type effects with later timestamps, CR 613.7.)
+            let (r, ts) = (self.obj_ref(c), self.moon_ts());
+            let mut has = Some(s) == self.db.mountain;
+            // (Static abilities that give it the type, EoE W3, by timestamp
+            // among the effects.)
+            let grants = if self.w3.seen & crate::eoe_w3::SEEN_W3_SUBTYPE != 0 { self.granted_subtype_ts(c, s) } else { Vec::new() };
+            let mut later: Vec<(u32, Option<&Mod>)> = grants.into_iter().filter(|&g| g > ts).map(|g| (g, None)).collect();
+            later.extend(self.effects.iter().filter(|e| e.on == Affected::Obj(r) && e.ts > ts).map(|e| (e.ts, Some(&e.m))));
+            later.sort_by_key(|x| x.0);
+            for (_, m) in later {
+                let Some(m) = m else {
+                    has = true;
+                    continue;
+                };
+                match m {
+                    Mod::Types { subtypes, replace, .. } => {
+                        if *replace {
+                            has = subtypes.contains(&s);
+                        } else if subtypes.contains(&s) {
+                            has = true;
+                        }
+                    }
+                    Mod::BecomeTypes { subtypes, .. } => has = subtypes.contains(&s),
+                    _ => {}
+                }
+            }
+            return has;
+        }
         let d = self.def_of(c);
         let mut printed = d.subtypes.contains(&s) || self.exc(c).is_some_and(|e| e.has_subtype(self.db, s));
         // Reconfigure (CR 702.151b, 205.3d): attached, it isn't a creature,
@@ -399,6 +430,10 @@ impl Game {
         if let Some(e) = self.exc(c) {
             k.0 |= e.kws.0;
         }
+        // (A nonbasic land that is a Mountain has none of its own, CR 305.7.)
+        if self.moon_game && self.moon_on(c) {
+            k = KwSet::default();
+        }
         if self.printed_only(c) {
             return k;
         }
@@ -510,15 +545,19 @@ impl Game {
 
     // ---- layer 7: power and toughness ---------------------------------------
 
-    /// Power and toughness (layer 7a-7c; CR 613.4).
-    pub fn pt(&self, c: CardIdx) -> (i32, i32) {
+    /// Power and toughness (layer 7a-7c; CR 613.4), exact: a derived value
+    /// (`num::Wide`, ENGINE.md 100.7). Its terms are card constants (`i32`),
+    /// effects' amounts (`i64`), counts of counters (at most `i64::MAX` each)
+    /// and counts of objects, at most as many as the game holds: their sum
+    /// can't overflow an `i128` in any game that fits in memory.
+    pub fn pt(&self, c: CardIdx) -> (Wide, Wide) {
         let d = self.def_of(c);
         // Layer 1: a copy's base power and toughness (CR 707.9b); then no
         // characteristic-defining ability sets them (707.9d).
         let exc_pt = self.exc(c).and_then(|e| e.pt);
-        let printed = match exc_pt {
-            Some((p, t)) => (p as i32, t as i32),
-            None => (d.power.unwrap_or(0), d.toughness.unwrap_or(0)),
+        let printed: (Wide, Wide) = match exc_pt {
+            Some((p, t)) => (p as Wide, t as Wide),
+            None => (d.power.unwrap_or(0) as Wide, d.toughness.unwrap_or(0) as Wide),
         };
         // Off the battlefield only a characteristic-defining ability
         // applies: it works in every zone (CR 604.3: Adeline's power on the
@@ -540,11 +579,9 @@ impl Game {
         // `mods_on` order: effects, then statics); 7c summed. The statics
         // are walked once for their sets, modifications and "+1/+1 for each
         // artifact and/or enchantment you control".
-        // (Summed in i64: +1/+1 counters past 2^31 and many effects can't
-        // overflow; the result saturates at +-`num::AMOUNT_MAX`, ENGINE.md
-        // 46.)
-        let mut set: Option<(u32, i32, i32)> = None;
-        let (mut dp, mut dt) = (0i64, 0i64);
+        // (Summed in `Wide`: exact, above.)
+        let mut set: Option<(u32, i64, i64)> = None;
+        let (mut dp, mut dt): (Wide, Wide) = (0, 0);
         let mut switched = false;
         for e in self.effects_on(c) {
             match e.m {
@@ -555,8 +592,8 @@ impl Game {
                     }
                 }
                 Mod::Pt(a, b) => {
-                    dp += a as i64;
-                    dt += b as i64;
+                    dp += a as Wide;
+                    dt += b as Wide;
                 }
                 _ => {}
             }
@@ -571,19 +608,19 @@ impl Game {
                         }
                     }
                     Mod::Pt(a, b) => {
-                        dp += *a as i64;
-                        dt += *b as i64;
+                        dp += *a as Wide;
+                        dt += *b as Wide;
                     }
                     Mod::PtPer { filter, p: a, t: b } => {
                         let ctl = self.objs[s.i()].controller;
-                        let n = self.battlefield.iter().filter(|&&x| self.scope_matches(filter, x, ctl)).count() as i64;
-                        dp += *a as i64 * n;
-                        dt += *b as i64 * n;
+                        let n = self.battlefield.iter().filter(|&&x| self.scope_matches(filter, x, ctl)).count() as Wide;
+                        dp += *a as Wide * n;
+                        dt += *b as Wide * n;
                     }
                     Mod::PtPerSourceCounter { counter, p: a, t: b } => {
-                        let n = self.counters_on(s, *counter) as i64;
-                        dp += *a as i64 * n;
-                        dt += *b as i64 * n;
+                        let n = self.counters_on(s, *counter) as Wide;
+                        dp += *a as Wide * n;
+                        dt += *b as Wide * n;
                     }
                     Mod::PowerPlusGreatestMv { types } => {
                         let ctl = self.objs[s.i()].controller;
@@ -591,7 +628,7 @@ impl Game {
                             .battlefield
                             .iter()
                             .filter(|&&x| x != s && self.objs[x.i()].controller == ctl && self.types_of(x) & types != 0)
-                            .map(|&x| self.mana_value_of(x) as i64)
+                            .map(|&x| self.mana_value_of(x) as Wide)
                             .max()
                             .unwrap_or(0);
                     }
@@ -600,24 +637,24 @@ impl Game {
             }
         }
         if let Some((_, a, b)) = set {
-            (p, t) = (a, b);
+            (p, t) = (a as Wide, b as Wide);
         }
         for &(x, cn, n) in &self.counters {
             if x == c {
                 match cn {
                     Counter::P1P1 => {
-                        dp += n as i64;
-                        dt += n as i64;
+                        dp += n as Wide;
+                        dt += n as Wide;
                     }
                     Counter::M1M1 => {
-                        dp -= n as i64;
-                        dt -= n as i64;
+                        dp -= n as Wide;
+                        dt -= n as Wide;
                     }
                     _ => {}
                 }
             }
         }
-        let (p, t) = (crate::num::amount(p as i64 + dp), crate::num::amount(t as i64 + dt));
+        let (p, t) = (p + dp, t + dt);
         // 7d: switching (CR 613.4d), after the counters and modifications.
         if switched {
             (t, p)
@@ -626,15 +663,15 @@ impl Game {
         }
     }
 
-    pub fn power(&self, c: CardIdx) -> i32 {
+    pub fn power(&self, c: CardIdx) -> Wide {
         self.pt(c).0
     }
 
-    pub fn toughness(&self, c: CardIdx) -> i32 {
+    pub fn toughness(&self, c: CardIdx) -> Wide {
         self.pt(c).1
     }
 
-    fn cda_pt(&self, c: CardIdx, cda: &PtCda, printed: (i32, i32)) -> (i32, i32) {
+    fn cda_pt(&self, c: CardIdx, cda: &PtCda, printed: (Wide, Wide)) -> (Wide, Wide) {
         match cda {
             PtCda::GraveyardTypes { plus } => {
                 // CR 205.2a card types (kindred included) among cards (not
@@ -645,28 +682,28 @@ impl Game {
                         t |= self.def_of(g).types;
                     }
                 }
-                let n = t.count_ones() as i32;
-                (n, n + plus)
+                let n = t.count_ones() as Wide;
+                (n, n + *plus as Wide)
             }
             PtCda::PowerCount(f) => {
                 let ctl = self.objs[c.i()].controller;
                 let n = self.battlefield.iter().filter(|&&x| self.scope_matches(f, x, ctl)).count();
-                (n as i32, printed.1)
+                (n as Wide, printed.1)
             }
             PtCda::Leveler { counter, ranges } => {
                 let n = self.counters_on(c, *counter);
                 ranges
                     .iter()
                     .find(|(lo, hi, _, _)| n >= *lo as Count && hi.is_none_or(|h| n <= h as Count))
-                    .map_or(printed, |&(_, _, p, t)| (p, t))
+                    .map_or(printed, |&(_, _, p, t)| (p as Wide, t as Wide))
             }
             PtCda::Domain => {
-                let n = self.basic_land_types(self.objs[c.i()].controller) as i32;
+                let n = self.basic_land_types(self.objs[c.i()].controller) as Wide;
                 (n, n)
             }
             PtCda::LandsYouControl => {
                 let ctl = self.objs[c.i()].controller;
-                let n = self.permanents_of(ctl).filter(|&x| self.is_type(x, crate::db::types::LAND)).count() as i32;
+                let n = self.permanents_of(ctl).filter(|&x| self.is_type(x, crate::db::types::LAND)).count() as Wide;
                 (n, n)
             }
             PtCda::OwnedInExile { plus } => {
@@ -676,8 +713,8 @@ impl Game {
                     .iter()
                     .chain(self.face_down.iter())
                     .filter(|&&x| self.objs[x.i()].owner == you && !self.is_token(x))
-                    .count() as i32;
-                (n, n + plus)
+                    .count() as Wide;
+                (n, n + *plus as Wide)
             }
         }
     }
@@ -690,13 +727,14 @@ impl Game {
             .filter(|&c| !self.exc(c).is_some_and(|e| e.no_cost))
             .map(|c| {
                 let m = &self.def_of(c).cost;
-                let hy: u8 = crate::mana::PAIRS
+                // (Summed as u32: exact.)
+                let hy: u32 = crate::mana::PAIRS
                     .iter()
                     .zip(m.hybrid.iter())
                     .filter(|((a, b), _)| *a == k || *b == k)
-                    .map(|(_, &n)| n)
+                    .map(|(_, &n)| n as u32)
                     .sum();
-                (m.pips[k] + hy + m.phyrexian[k]) as u32
+                m.pips[k] as u32 + hy + m.phyrexian[k] as u32
             })
             .sum()
     }
@@ -729,26 +767,40 @@ impl Game {
     }
 
     /// Put n counters of kind `k` on a permanent (CR 122.6), or on a card
-    /// in exile ("exile it with a silver counter on it", 122.1). The count
-    /// saturates at `Count::MAX` (CR 122.1 has no maximum; shortcuts.md
-    /// 46.1).
+    /// in exile ("exile it with a silver counter on it", 122.1). The count is
+    /// exact within `num::COUNT_MAX` (CR 122.1 has no maximum); past it the
+    /// game ends aborted (ENGINE.md 100.7).
     pub(crate) fn add_counters(&mut self, c: CardIdx, k: Counter, n: Count) {
         if n == 0 || !matches!(self.objs[c.i()].zone, Zone::Battlefield | Zone::Exile) {
             return;
         }
+        // (Replacement effects that multiply counters: EoE W6.)
+        let n: Wide = if self.w6.seen & crate::eoe_w6::SEEN_W6_COUNTERS != 0 { self.w6_counters_put(c, n) } else { n as Wide };
         let before = self.counters_on(c, k);
+        // (A sum past i128 is past any count either way: `exact_count`
+        // aborts, F7.)
+        let after = self.exact_count((before as Wide).saturating_add(n), "counters of one kind");
+        // (The counters put: exact unless the game just aborted, when
+        // `after` is clamped at or above `before`.)
+        let n: Count = after - before;
         match self.counters.iter_mut().find(|x| x.0 == c && x.1 == k) {
-            Some(x) => x.2 = x.2.saturating_add(n),
-            None => self.counters.push((c, k, n)),
+            Some(x) => x.2 = after,
+            None => self.counters.push((c, k, after)),
         }
         self.note(|g| format!("{n} {k:?} counter(s) on {}", g.name(c)));
         if k == Counter::Lore && self.objs[c.i()].zone == Zone::Battlefield {
-            self.chapters_reached(c, before, before.saturating_add(n));
+            self.chapters_reached(c, before, after);
         }
         // "Whenever one or more +1/+1 counters are put on this" (CR 122.6).
         if k == Counter::P1P1 && self.seen & crate::game::SEEN_RARE_EVENTS != 0 && self.objs[c.i()].zone == Zone::Battlefield {
             let r = self.obj_ref(c);
-            self.event(crate::triggers::Event::obj(crate::db::EventKind::CountersAdded, r));
+            let mut ev = crate::triggers::Event::obj(crate::db::EventKind::CountersAdded, r);
+            // (Who put them and how many, when a trigger reads it: EoE W6.)
+            if self.w6.seen & crate::eoe_w6::SEEN_W6_PUTTER != 0 {
+                ev.b = crate::triggers::Subj::Player(self.w6_putter(c));
+                ev.amount = n;
+            }
+            self.event(ev);
         }
     }
 
@@ -814,7 +866,7 @@ impl Game {
     /// Add a continuous effect (CR 611.2).
     pub(crate) fn add_effect(&mut self, on: Affected, m: Mod, until: Until, controller: PlayerId) {
         debug_assert!(until != Until::WhileSource, "a lowered duration (Game::until_for)");
-        self.next_ts += 1;
+        self.next_ts = self.exact_inc(self.next_ts, "timestamps");
         let ts = self.next_ts;
         self.effects.push(Effect { ts, until, on, m, controller });
         self.effects_changed();
@@ -844,6 +896,9 @@ impl Game {
         if !self.copies.is_empty() {
             self.end_copy_effects(Until::EndOfTurn);
         }
+        // (A permanent whose abilities or copy effect just ended may have
+        // daybound or nightbound again: CR 702.145c-g apply at once.)
+        self.day_night_any_time();
     }
 
     /// CR 514.2: the "this turn" effects kept as turn numbers end in the
@@ -881,6 +936,7 @@ impl Game {
     pub(crate) fn end_until_next_turn(&mut self, p: PlayerId) {
         self.effects.retain(|e| !(e.until == Until::YourNextTurn && e.controller == p));
         self.effects_changed();
+        self.day_night_any_time();
     }
 }
 

@@ -3,7 +3,7 @@
 use crate::db::Counter;
 use crate::decision::{Choice, DecisionKind, Opt};
 use crate::flow::Task;
-use crate::game::{EndReason, Game, Outcome, Pos};
+use crate::game::{EndReason, Game, Pos};
 use crate::ids::{CardIdx, PlayerId, Zone};
 
 impl Game {
@@ -50,7 +50,7 @@ impl Game {
             let o = &self.objs[c.i()];
             if t <= 0 {
                 zero.push(c);
-            } else if (o.damage as i64 >= t as i64 || (o.deathtouched && o.damage > 0)) && !self.indestructible(c) {
+            } else if (o.damage as crate::num::Wide >= t || (o.deathtouched && o.damage > 0)) && !self.indestructible(c) {
                 destroyed.push(c);
             }
         }
@@ -82,7 +82,7 @@ impl Game {
             if ty & crate::db::types::CREATURE != 0 {
                 let o = &self.objs[c.i()];
                 let t = self.toughness(c);
-                if t <= 0 || ((o.damage as i64 >= t as i64 || (o.deathtouched && o.damage > 0)) && !self.indestructible(c)) {
+                if t <= 0 || ((o.damage as crate::num::Wide >= t || (o.deathtouched && o.damage > 0)) && !self.indestructible(c)) {
                     return true;
                 }
             }
@@ -198,7 +198,7 @@ impl Game {
     /// The slots that may be tokens or copies (from the first one made;
     /// cards are never tokens).
     fn token_range(&self) -> impl Iterator<Item = CardIdx> {
-        (self.first_token as usize..self.objs.len()).map(|i| CardIdx(i as u16))
+        (self.first_token as usize..self.objs.len()).map(|i| CardIdx::new(i as u32))
     }
 
     fn stray_token(&self, c: CardIdx) -> bool {
@@ -238,6 +238,10 @@ impl Game {
         // Ascend (CR 702.131b): the city's blessing, for the rest of the
         // game, once a player with an ascend permanent controls ten (a
         // static ability: noted here, before anyone gets priority).
+        // (Control effects worked out: EoE W6.)
+        if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
+            self.w6_sync_control();
+        }
         let ascend = self.seen & crate::game::SEEN_ASCEND != 0 && self.battlefield.iter().any(|&c| self.db.def(self.objs[c.i()].def).ascend);
         for p in 0..2u8 {
             if ascend && !self.players[p as usize].city_blessing && self.ascends(p) {
@@ -248,7 +252,7 @@ impl Game {
         if keep.is_empty() && !self.sba_possible() {
             if !self.waiting.is_empty() {
                 self.agenda.push(Task::SbaCheck { keep });
-                self.agenda.push(Task::PutTriggers);
+                self.agenda.push(Task::PutTriggers { page: crate::decision::Page::FIRST });
             }
             return;
         }
@@ -279,7 +283,7 @@ impl Game {
         }
         if !self.waiting.is_empty() {
             self.agenda.push(Task::SbaCheck { keep: Vec::new() });
-            self.agenda.push(Task::PutTriggers);
+            self.agenda.push(Task::PutTriggers { page: crate::decision::Page::FIRST });
         } else if did {
             self.agenda.push(Task::SbaCheck { keep: Vec::new() });
         }
@@ -303,7 +307,7 @@ impl Game {
                 _ => unreachable!(),
             };
             self.note(|_| format!("game over: winner {winner:?}"));
-            self.outcome = Some(Outcome { winner, reason: EndReason::Sba });
+            self.end_game(winner, EndReason::Sba);
             return true;
         }
         let (zero, destroyed) = self.dying_creatures();

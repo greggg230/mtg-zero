@@ -45,12 +45,12 @@ pub fn land_colors(db: &CardDb, d: &CardDef) -> u8 {
                 m |= match &ma.prod {
                     ManaProd::One(mask) => *mask,
                     ManaProd::Fixed(amt) => (0..6).filter(|&i| amt[i] > 0).fold(0, |m, i| m | 1 << i),
-                    ManaProd::SameType { mask, .. } | ManaProd::Combo { mask, .. } | ManaProd::ComboX { mask } => *mask,
+                    ManaProd::SameType { mask, .. } | ManaProd::SameTypeCounters { mask, .. } | ManaProd::Combo { mask, .. } | ManaProd::ComboX { mask } => *mask,
                     ManaProd::PerPermanent { ty, .. } => 1 << *ty,
                     ManaProd::ColorAmong(_) => COLORS,
                     ManaProd::IfElse { then, els, .. } => (0..6).filter(|&i| then[i] + els[i] > 0).fold(0, |m, i| m | 1 << i),
                     // (A summary for deck building.)
-                    ManaProd::OneOf(_) | ManaProd::Linked | ManaProd::SacrificedLand | ManaProd::Chosen | ManaProd::IfCounter { .. } | ManaProd::LandsCouldProduce => {
+                    ManaProd::OneOf(_) | ManaProd::Linked | ManaProd::SacrificedLand | ManaProd::Chosen | ManaProd::ChosenN(_) | ManaProd::IfCounter { .. } | ManaProd::LandsCouldProduce => {
                         crate::lower::activated::prod_mask(&ma.prod)
                     }
                 }

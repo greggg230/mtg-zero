@@ -269,9 +269,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.impending_cost", impending_cost);
         l.deny("CardPrinting.impending_cost_str", impending_cost_str);
         l.deny("CardPrinting.impending_count", impending_count);
-        l.deny("CardPrinting.devour_land_multiplier", devour_land_multiplier);
-        l.deny("CardPrinting.attached_prevents_untap", attached_prevents_untap);
-        l.deny("CardPrinting.attached_grants_control", attached_grants_control);
         l.deny("CardPrinting.attached_sets_base_pt", attached_sets_base_pt);
         l.deny("CardPrinting.attached_grants_lose_all_abilities", attached_grants_lose_all_abilities);
         l.deny("CardPrinting.attached_grants_subtype", attached_grants_subtype);
@@ -279,9 +276,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.attached_prevents_turning_face_up", attached_prevents_turning_face_up);
         l.deny("CardPrinting.attached_grants_activated_abilities", attached_grants_activated_abilities);
         l.deny("CardPrinting.enters_as_copy_of_creature", enters_as_copy_of_creature);
-        l.deny("CardPrinting.replaces_first_tokens_with_copies", replaces_first_tokens_with_copies);
-        l.deny("CardPrinting.grants_cast_artifact_from_top_of_library", grants_cast_artifact_from_top_of_library);
-        l.deny("CardPrinting.grants_blue_mana_ability_to_your_artifacts", grants_blue_mana_ability_to_your_artifacts);
             // Sunburst (CR 702.44a): counters by the colours of mana spent to
         // cast it (the payment records them, as for converge).
         let sunburst_counter = sunburst.then(|| {
@@ -289,7 +283,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             super::effect_ext::counter_by_name(l, "charge")
         });
         l.deny("CardPrinting.enters_tapped_unless_any_player_life_at_most", enters_tapped_unless_any_player_life_at_most);
-        l.deny("CardPrinting.optional_copy_land_from_graveyard", optional_copy_land_from_graveyard);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_enchantment", additional_cost_sacrifice_creature_or_enchantment);
         let enters_x_counters = match enters_with_counters_from_x {
             None => false,
@@ -302,7 +295,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                 false
             }
         };
-        l.deny("CardPrinting.grants_etb_counter_per_land_entered_this_turn", grants_etb_counter_per_land_entered_this_turn);
         l.deny("CardPrinting.enters_with_plus_one_counter_if_creature_died_this_turn", enters_with_plus_one_counter_if_creature_died_this_turn);
         // ENGINE.md 99.11 (W1).
         l.deny("CardPrinting.enters_with_minus_one_counters_from_hand_cast", enters_with_minus_one_counters_from_hand_cast);
@@ -310,7 +302,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // spell's target; an Aura's other enchant types (on the battlefield)
         // below, with the card types (ENGINE.md 99.2).
         let aura_gy = *aura_enchant_type == enums::EnchantKind::CreatureCardInGraveyard;
-        l.deny("CardPrinting.nonbasic_lands_are_mountains", nonbasic_lands_are_mountains);
         l.deny("CardPrinting.grants_all_basic_land_types_to_lands_you_control", grants_all_basic_land_types_to_lands_you_control);
         l.deny("CardPrinting.grants_basic_land_type_to_all_lands", grants_basic_land_type_to_all_lands);
         l.deny("CardPrinting.all_permanents_gain_card_type", all_permanents_gain_card_type);
@@ -363,7 +354,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.has_no_mana_cost", has_no_mana_cost);
         l.deny("CardPrinting.exile_activated_abilities", exile_activated_abilities);
         l.deny("CardPrinting.aura_enchant_subtype", aura_enchant_subtype);
-        l.deny("CardPrinting.enters_choosing_color", enters_choosing_color);
         l.deny("CardPrinting.enchanted_land_adds_chosen_color", enchanted_land_adds_chosen_color);
         l.deny("CardPrinting.additional_cost_discard_x", additional_cost_discard_x);
         l.deny("CardPrinting.optional_sacrifice_any_number", optional_sacrifice_any_number);
@@ -477,6 +467,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     let mut cascade_kw_ascend = false;
     let mut annihilator: Option<u8> = None;
     let mut devoid = false;
+    let mut modular: u8 = 0;
     for k in keywords {
         match lower_keyword_full(l, k) {
             Some(KwOrProt::Kw(kw)) => kws.insert(kw),
@@ -489,6 +480,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             Some(KwOrProt::Ascend) => cascade_kw_ascend = true,
             Some(KwOrProt::Annihilator(n)) => annihilator = Some(n),
             Some(KwOrProt::Devoid) => devoid = true,
+            Some(KwOrProt::Modular(n)) => {
+                // (Printed amounts, each 1..=20 by the lowering's bound: a
+                // card's total can't pass a u8; loud if a table ever did.)
+                modular = modular.checked_add(n).expect("modular: more than 255 printed counters");
+                keyword_triggers.push(super::eoe_w6::modular_trigger());
+            }
             None => {}
         }
     }
@@ -989,24 +986,45 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         },
         ty,
     );
+    // "You may have this land enter tapped as a copy of any land card in a
+    // graveyard, except it's a Cave in addition to its other types" (the
+    // flag's meaning, Echoing Deeps; CR 707.5, 707.9b; ENGINE.md 99.12).
+    let enters_as_copy = if *optional_copy_land_from_graveyard {
+        if enters_as_copy.is_some() || ty & types::LAND == 0 {
+            l.unsupported("CardPrinting.optional_copy_land_from_graveyard(not a land, or with another copy)");
+        }
+        let mut exc = crate::copies::Except::default();
+        let cave = l.subtype("Cave");
+        if let Some(k) = l.exc_subtype(cave) {
+            exc.add_subtype(k);
+        }
+        Some(Box::new(crate::db::EntersAsCopy { filter: Filter::Type(types::LAND), from_graveyard: true, exc, keep_name: false, exile_k: None, tapped: true }))
+    } else {
+        enters_as_copy
+    };
     // Additional costs paid a number of times (CR 601.2b): squad
     // (702.157a, creatures), offspring (702.175a, once), replicate
     // (702.56a, instants and sorceries: its "when you cast this spell, copy
     // it for each time" trigger is the keyword's own).
     let mut times_cost: Option<crate::db::TimesCost> = None;
-    let mut set_times = |l: &mut Lowerer, what: &str, mana: ManaCost, max: u8, ok: bool| {
+    let mut set_times = |l: &mut Lowerer, what: &str, mana: ManaCost, max: u32, ok: bool| {
         if !ok {
             l.unsupported(format!("CardPrinting.{what}(on this card type)"));
         }
         if times_cost.is_some() {
             l.unsupported(format!("CardPrinting.{what}(with another repeatable cost)"));
         }
+        // "Any number of times" for no mana would let the count be any
+        // number at all (ENGINE.md 100.2; loops are the audit's F7).
+        if max == u32::MAX && mana.is_zero() {
+            l.unsupported(format!("CardPrinting.{what}(any number of times at no cost)"));
+        }
         times_cost = Some(crate::db::TimesCost { mana, max, x: false });
     };
     match squad_cost.as_deref() {
         Some(m) => {
             let mana = super::effect_copies::checked_cost(l, "CardPrinting.squad_cost", m, squad_cost_str);
-            set_times(l, "squad_cost", mana, crate::decision::act::NUMBER_N as u8 - 1, is_creature);
+            set_times(l, "squad_cost", mana, u32::MAX, is_creature);
         }
         None => l.deny("CardPrinting.squad_cost_str", squad_cost_str),
     }
@@ -1020,7 +1038,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if !replicate_cost.is_empty() {
         match ManaCost::parse(replicate_cost) {
             Some(mana) => {
-                set_times(l, "replicate_cost", mana, crate::decision::act::NUMBER_N as u8 - 1, ty & (types::INSTANT | types::SORCERY) != 0);
+                set_times(l, "replicate_cost", mana, u32::MAX, ty & (types::INSTANT | types::SORCERY) != 0);
                 keyword_triggers.push(replicate());
             }
             None => l.unsupported(format!("CardPrinting.replicate_cost({replicate_cost})")),
@@ -1035,7 +1053,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         keyword_triggers.push(storm());
     }
     if let Some((mana, x)) = perm_kicker {
-        let max = if *multikicker { crate::decision::act::NUMBER_N as u8 - 1 } else { 1 };
+        let max = if *multikicker { u32::MAX } else { 1 };
         if x && *multikicker {
             l.unsupported("CardPrinting.multikicker(with {X})");
         }
@@ -1290,14 +1308,14 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         if !walker {
             l.unsupported("CardPrinting.creature_during_your_turn(not a planeswalker)");
         }
-        let subtypes = subs.iter().filter_map(|s| l.given_subtype("CardPrinting.creature_during_your_turn", s)).collect();
+        let subtypes = subs.iter().filter_map(|s| l.set_subtype("CardPrinting.creature_during_your_turn", s)).collect();
         let mut mods = vec![
             // "it's a 3/4 Ninja creature": its card types and subtypes
             // become exactly these (CR 205.1a-b), so it isn't a planeswalker
             // then: damage to it is marked, not loyalty lost (120.3; Kaito's
             // ruling). Its loyalty abilities stay (606.3).
             Mod::Types { add: types::CREATURE, subtypes, replace: true },
-            Mod::SetPt(l.int("creature_during_your_turn.p", *p, 0, 99), l.int("creature_during_your_turn.t", *t, 0, 99)),
+            Mod::set_pt(l.int("creature_during_your_turn.p", *p, 0, 99), l.int("creature_during_your_turn.t", *t, 0, 99)),
         ];
         mods.extend(super::effect_ext::keyword_mods(l, kws));
         let cond = crate::db::Cond::All(vec![
@@ -1356,7 +1374,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
         let mut mods = Vec::new();
         if *p != 0 || *t != 0 {
-            mods.push(Mod::Pt(l.int("equipment_bonuses.power", *p, -99, 99), l.int("equipment_bonuses.toughness", *t, -99, 99)));
+            mods.push(Mod::pt(l.int("equipment_bonuses.power", *p, -99, 99), l.int("equipment_bonuses.toughness", *t, -99, 99)));
         }
         let mut set = KwSet::default();
         for n in names {
@@ -1486,6 +1504,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     for (name, n) in enters_with_named_counters {
         let k = super::effect_ext::counter_by_name(l, name);
         enters_counters.push((k, l.int("CardPrinting.enters_with_named_counters", *n, 1, 99) as u8));
+    }
+    // Modular n: "This permanent enters with n +1/+1 counters on it" (CR
+    // 702.43a; several instances add up, 702.43b).
+    if modular > 0 {
+        enters_counters.push((crate::db::Counter::P1P1, modular));
     }
 
     l.land_colors = saved_land_colors;
@@ -1725,6 +1748,23 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if (named_spell_tax > 0 || named_ability_tax > 0) && !*chooses_card_name_as_enters || *chooses_card_name_as_enters && ty & types::PERMANENT == 0 {
         l.unsupported("CardPrinting.named_spell_cost_increase(without a name chosen as it enters)");
     }
+    // "Nonbasic lands are Mountains": a static ability of a permanent
+    // (ENGINE.md 99.12).
+    if *nonbasic_lands_are_mountains && ty & types::PERMANENT == 0 {
+        l.unsupported("CardPrinting.nonbasic_lands_are_mountains(not a permanent)");
+    }
+    // Devour land n (CR 702.82a): a creature's.
+    let devour_land = if *devour_land_multiplier != 0 {
+        if ty & types::CREATURE == 0 {
+            l.unsupported("CardPrinting.devour_land_multiplier(not a creature)");
+        }
+        l.int("CardPrinting.devour_land_multiplier", *devour_land_multiplier, 1, 9) as u8
+    } else {
+        0
+    };
+    if *grants_etb_counter_per_land_entered_this_turn && ty & types::PERMANENT == 0 {
+        l.unsupported("CardPrinting.grants_etb_counter_per_land_entered_this_turn(not a permanent)");
+    }
     if *grants_play_from_top_paying_life && !*grants_look_at_top_of_library || (*grants_look_at_top_of_library && ty & types::PERMANENT == 0) {
         l.unsupported("CardPrinting.grants_play_from_top_paying_life(without looking at the top card)");
     }
@@ -1781,6 +1821,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.unsupported("CardPrinting.attached_cant_be_blocked_by_more_than_one(not an Aura)");
     }
     let mut def = CardDef {
+        nonbasic_lands_are_mountains: *nonbasic_lands_are_mountains && ty & types::PERMANENT != 0,
+        etb_counter_per_land_entered: *grants_etb_counter_per_land_entered_this_turn && ty & types::PERMANENT != 0,
+        devour_land,
         counters_per_exiled,
         enters_counters_per,
         attached_max_one_blocker: *attached_cant_be_blocked_by_more_than_one,
@@ -1905,6 +1948,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         artifact_ability_discount: l.int("CardPrinting.artifact_ability_cost_reduction", *artifact_ability_cost_reduction, 0, 9) as u8,
         skip_turn_untap: *may_skip_turn_to_untap,
         converge: false,
+        gives_basic_land_type: false,
         paints: *paints_all_objects_chosen_color_at_etb,
         extra_mana_creature,
         gy_play_mv: if repl.gy_cast_mv > 0 { repl.gy_cast_mv } else { gy_play_mv },
@@ -1940,10 +1984,43 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             grants_activated: Vec::new(),
             grants_subtype: Vec::new(),
         },
+        w6: crate::eoe_w6::W6Def {
+            counter_doubler: repl.w6_counter_doubler.clone(),
+            // An Aura's "You control enchanted permanent" and "Enchanted
+            // permanent doesn't untap during its controller's untap step"
+            // (EoE W6; checked to be an Aura's below).
+            aura_control: *attached_grants_control,
+            aura_no_untap: *attached_prevents_untap,
+            trigger_doubler: repl.w6_trigger_doubler,
+            // "The first time you would create one or more tokens each turn,
+            // you may instead create that many tokens that are copies of
+            // enchanted permanent" (EoE W6; an Aura's, checked below).
+            token_copies: *replaces_first_tokens_with_copies,
+            // "You may cast artifact spells from the top of your library"
+            // (EoE W6; with "you may look at the top card ... any time").
+            cast_artifacts_from_top: *grants_cast_artifact_from_top_of_library,
+            // "As this enters, choose a color" (EoE W6).
+            chooses_color: *enters_choosing_color,
+            ..Default::default()
+        },
     };
     super::eoe_w3::printing_w3(l, &mut def, *grants_food_to_your_artifacts, *grants_food_ability_to_your_artifacts);
+    super::eoe_w6::printing_w6_grants(&mut def, *grants_blue_mana_ability_to_your_artifacts);
     def.w3.seen = crate::eoe_w3::seen_of(&def);
     def.w3.mana_spent = def.w3.counters_mana_spent || crate::eoe_w3::reads_mana_spent(&def);
+    crate::eoe_w6::finish_def(&mut def);
+    // "Mana of the chosen color": a colour chosen as it enters (or, for a
+    // land, a basic land type, Multiversal Passage).
+    let makes_chosen = def.activated.iter().any(|a| a.mana().is_some_and(|m| matches!(m.prod, crate::db::ManaProd::Chosen | crate::db::ManaProd::ChosenN(_))));
+    if makes_chosen && !(def.w6.chooses_color || def.chooses_land_type) || def.w6.chooses_color && (def.chooses_land_type || def.paints || !def.is(types::PERMANENT)) {
+        l.unsupported("CardPrinting.enters_choosing_color(with its mana of the chosen color)");
+    }
+    if def.w6.cast_artifacts_from_top && !(def.look_top && def.is(types::PERMANENT)) {
+        l.unsupported("CardPrinting.grants_cast_artifact_from_top_of_library(without looking at the top card, or not a permanent)");
+    }
+    if (def.w6.aura_control || def.w6.aura_no_untap || def.w6.token_copies) && !(def.subtypes.iter().any(|&s| l.subtypes[s as usize] == "Aura") && def.is(types::ENCHANTMENT)) {
+        l.unsupported("CardPrinting.attached_grants_control/attached_prevents_untap(not an Aura)");
+    }
     if *additional_cost_pay_x_life && (x_pips > 0 || !is_spell_card) {
         l.unsupported("CardPrinting.additional_cost_pay_x_life(with {X} or on a permanent)");
     }
@@ -1965,7 +2042,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         f.power = None;
         f.toughness = None;
         f.pt_cda = None;
-        f.statics.push(StaticDef { scope: Scope::Equipped, cond: None, mods: vec![Mod::Pt(p, t)] });
+        f.statics.push(StaticDef { scope: Scope::Equipped, cond: None, mods: vec![Mod::pt(p, t)] });
         let req = crate::db::TargetReq { filter: Filter::Type(types::CREATURE), min: 1, max: 1, distinct: 0, pair: 0, total_mv: None };
         f.spell = Some(crate::db::AbilityDef { targets: vec![req], ..Default::default() });
         f.bestowed = true;
@@ -2057,7 +2134,7 @@ fn lower_enters_as_copy(l: &mut Lowerer, x: EnterCopyFields, card_types: u16) ->
     } else {
         None
     };
-    Some(Box::new(crate::db::EntersAsCopy { filter: Filter::Type(bits), from_graveyard, exc, keep_name: x.keep_name, exile_k }))
+    Some(Box::new(crate::db::EntersAsCopy { filter: Filter::Type(bits), from_graveyard, exc, keep_name: x.keep_name, exile_k, tapped: false }))
 }
 
 /// Replicate's triggered ability (CR 702.56a): "When you cast this spell,
@@ -2303,6 +2380,8 @@ pub(crate) enum KwOrProt {
     Annihilator(u8),
     /// Devoid (CR 702.114a): the card has no colour.
     Devoid,
+    /// Modular n (CR 702.43a; EoE W6).
+    Modular(u8),
 }
 
 /// A card type an object is given (printed, by a type-changing effect, by a
@@ -2392,6 +2471,10 @@ pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<K
         K::Annihilator => {
             l.deny("Keyword.quality", quality);
             return Some(KwOrProt::Annihilator(l.int("Keyword.n", *n, 1, 20) as u8));
+        }
+        K::Modular => {
+            l.deny("Keyword.quality", quality);
+            return Some(KwOrProt::Modular(l.int("Keyword.n", *n, 1, 20) as u8));
         }
         _ => {}
     }

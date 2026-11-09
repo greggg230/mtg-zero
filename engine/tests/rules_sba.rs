@@ -140,8 +140,8 @@ fn cr_704_5j_legend_rule_controller_chooses() {
     assert_eq!(g.kind(), Some(DecisionKind::LegendRule));
     assert_eq!(g.to_move(), Some(0));
     assert_eq!(g.pending_decision().unwrap().options.len(), 2);
-    let new = (0..g.objs().len() as u16)
-        .map(engine::CardIdx)
+    let new = (0..g.objs().len() as u32)
+        .map(engine::CardIdx::new)
         .find(|&c| c != old && g.obj(c).zone == Zone::Battlefield && g.name(c) == "Test Legend")
         .unwrap();
     g.choose(Choice::Card(new));

@@ -369,6 +369,12 @@ impl super::MtgAz {
         }
     }
 
+    /// Did the match (its current game) end aborted (ENGINE.md 100.7)? It has
+    /// no result; self-play drops it.
+    pub fn match_aborted(&self) -> bool {
+        self.g.aborted()
+    }
+
     /// Is the match over?
     pub fn match_over(&self) -> bool {
         match self.m.format {
@@ -404,8 +410,15 @@ impl super::MtgAz {
     /// The current game ended (best-of-three): score it; end the match or
     /// start sideboarding.
     fn end_game(&mut self) {
+        let aborted = self.g.aborted();
         let m = &mut self.m;
         let o = self.g.outcome().expect("the game is over");
+        if aborted {
+            // An aborted game (ENGINE.md 100.7) aborts the match: it has no
+            // result to score, and self-play drops it (`MtgAz::aborted`).
+            m.over = true;
+            return;
+        }
         let i = (m.game_no - 1) as usize;
         let t = self.g.turn();
         m.choosers[i] = t.chooser;
@@ -482,7 +495,13 @@ impl super::MtgAz {
         // The new game shows each deck's and sideboard's size, which the
         // (hidden) sideboarding decided: a public key, so worlds of a viewer
         // that differ there are told apart (ENGINE.md 36.11).
-        let n = |v: &Vec<DefId>| v.len().min(255) as u64;
+        // (Each size in 8 bits: a deck or sideboard of a format is far
+        // smaller, 40 to 60 cards and 15 to 45; F7, ENGINE.md 100.7: loud
+        // past it, never a clamp that would let two sizes share a key.)
+        let n = |v: &Vec<DefId>| {
+            assert!(v.len() <= 255, "a deck or sideboard of {} cards: past the KEY_GAME payload's 8 bits", v.len());
+            v.len() as u64
+        };
         chance.push(key(KEY_GAME, 0, n(&decks[0]) | n(&decks[1]) << 8 | n(&sides[0]) << 16 | n(&sides[1]) << 24));
         Ok(())
     }

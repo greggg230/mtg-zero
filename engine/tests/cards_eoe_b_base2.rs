@@ -307,7 +307,7 @@ fn stellar_sights_manlands_animate_as_their_oracle_text() {
         start_with(&mut g, act(l, i), |_| None);
         settle(&mut g);
         assert!(g.is_creature(l) && g.is_type(l, types::LAND), "{name}: still a land");
-        assert_eq!(g.pt(l), pt, "{name}");
+        assert_eq!(g.pt(l), (pt.0.into(), pt.1.into()), "{name}");
         assert_eq!(g.colors_of(l), colors, "{name}");
         assert!(g.has_kw(l, kw), "{name}");
         assert!(subtype(&g, l, "Elemental"), "{name}");

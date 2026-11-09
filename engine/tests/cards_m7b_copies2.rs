@@ -204,7 +204,7 @@ fn a_cost_reduction_reduces_the_offspring_cost_too_cr_601_2f() {
         .hand(0, &["Faithless Looting"])
         .start();
     let loot = g.card(0, "Faithless Looting", Zone::Hand);
-    let t = g.objs().iter().enumerate().find(|(_, o)| o.zone == Zone::Library && db().def(o.def).name == TRAINER).map(|(i, _)| CardIdx(i as u16)).unwrap();
+    let t = g.objs().iter().enumerate().find(|(_, o)| o.zone == Zone::Library && db().def(o.def).name == TRAINER).map(|(i, _)| CardIdx::new(i as u32)).unwrap();
     g.choose(Choice::Cast(loot));
     resolve_with(&mut g, |g| match g.kind() {
         Some(DecisionKind::Discard) => g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&c| c == Choice::Card(t)),
@@ -315,11 +315,12 @@ fn chain_of_smog_the_target_player_may_copy_it_cr_707_10() {
 }
 
 #[test]
-fn chain_of_smog_copied_forever_stops_at_the_engine_limit_cr_732_3() {
+fn chain_of_smog_copied_forever_stops_when_the_state_repeats_cr_732_2a() {
     // P0 targets itself with an empty hand and always copies, keeping the
-    // target: a loop of optional actions that comes back to the same game
-    // state (CR 732.2a, 732.3). The engine offers 31 copies a turn, then the
-    // loop ends.
+    // target: a loop of optional actions (CR 732.2a). The original's copy
+    // comes back to a state where P0 copied (a copy at P0's empty hand on
+    // the stack, Chain of Smog in the graveyard): the "may" isn't asked
+    // again and the loop ends (MTR 4.4; engine/src/loops.rs).
     let mut g = scen().battlefield(0, &["Swamp", "Swamp"]).hand(0, &["Chain of Smog"]).start();
     let cs = g.card(0, "Chain of Smog", Zone::Hand);
     g.choose(Choice::Cast(cs));
@@ -333,7 +334,7 @@ fn chain_of_smog_copied_forever_stops_at_the_engine_limit_cr_732_3() {
         Some(DecisionKind::NewTarget) => Some(Choice::Pass),
         _ => None,
     });
-    assert_eq!(asked.get(), 31);
+    assert_eq!(asked.get(), 2, "the original's question, then its copy's");
     assert!(g.stack().is_empty());
     assert_eq!(g.obj(cs).zone, Zone::Graveyard);
 }

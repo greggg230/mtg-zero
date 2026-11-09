@@ -307,7 +307,7 @@ fn jacked_rabbit_ravenous_draws_at_x_five_cr702_156a_and_makes_rabbits_equal_to_
         pay(&mut g);
         let hand = g.player(0).hand.len();
         settle(&mut g);
-        assert_eq!(g.power(r), 1 + x as i32);
+        assert_eq!(g.power(r), 1 + x as i128);
         assert_eq!(g.player(0).hand.len(), hand + draws, "X = {x}");
     }
     let mut g = scen()
@@ -1224,19 +1224,27 @@ fn candelabra_of_tawnos_untaps_x_target_lands_cr602_2b() {
 
 /// Zirda with Basalt Monolith ("{T}: Add {C}{C}{C}"; "{3}: Untap", now
 /// {1}) makes unbounded mana: a loop of optional actions (CR 732.2a) the
-/// engine cuts at 31 activations of one permanent's ability a turn.
+/// player repeats as many times as they like. Tapped for {C}{C}{C} with
+/// priority (605.3a) and untapped with {1} of it, each iteration leaves
+/// {C}{C} more in the pool (progress): 40 times, past the former cap of 31
+/// activations, and still offered.
 #[test]
-fn zirda_and_basalt_monolith_loop_is_cut_at_31_activations_cr732_2a() {
+fn zirda_and_basalt_monolith_loop_goes_on_past_31_activations_cr732_2a() {
     // ruling: 1efd0607
     let mut g = scen().battlefield(0, &["Zirda, the Dawnwaker", "Basalt Monolith"]).at(Step::Main1, 0).start();
     let m = bf(&g, 0, "Basalt Monolith");
-    let mut n = 0;
-    while g.has_option(act(m, 1)) {
+    for n in 0..40 {
+        g.choose(Choice::Yes);
+        g.choose(Choice::Card(m));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::ActivateMana) || at_priority(g));
+        if g.kind() == Some(DecisionKind::ActivateMana) {
+            g.choose(Choice::Pass);
+        }
+        assert!(g.has_option(act(m, 1)), "untap {}: {}", n + 1, log(&g));
         g.choose(act(m, 1));
-        pay(&mut g);
         settle(&mut g);
-        n += 1;
-        assert!(n <= 31, "{}", log(&g));
+        assert!(!g.obj(m).tapped);
     }
-    assert_eq!(n, 31);
+    assert!(g.has_option(act(m, 1)));
+    assert_eq!(g.player(0).pool.amt[engine::mana::C], 80, "{{C}}{{C}} more each time");
 }

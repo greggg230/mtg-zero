@@ -44,7 +44,15 @@ fn mixed(g: &MtgAz, h: &mut Heuristic, rng: &mut Rng) -> u16 {
     if rng.below(2) == 0 {
         h.choose(&g.g, &l)
     } else {
-        l[rng.below(l.len() as u32) as usize]
+        // (Mana abilities with priority, `YES` (ENGINE.md 100.4.3), one
+        // random pick in eight: uniform picks would float most of the mana
+        // and keep the games simple, below the states the gates need.)
+        let pick = l[rng.below(l.len() as u32) as usize];
+        if pick == engine::act::YES && g.g.kind() == Some(engine::DecisionKind::Priority) && l.len() > 1 && rng.below(8) != 0 {
+            l[0]
+        } else {
+            pick
+        }
     }
 }
 
@@ -371,7 +379,11 @@ fn encoding_slots_name_the_action_slots() {
     for g in states(scale(16), 6, 7) {
         let me = g.to_move().unwrap();
         let x = enc(&g, me);
-        assert!(x.iter().all(|v| v.is_finite() && v.abs() < 50.0));
+        // (Bounded by the encoding's bound: amounts are squashed, and mana
+        // floated with priority, ENGINE.md 100.4.3, reaches large X and
+        // event amounts in these games.)
+        let bad = x.iter().enumerate().find(|(_, v)| !(v.is_finite() && v.abs() <= encode::FEATURE_BOUND));
+        assert!(bad.is_none(), "{bad:?}");
         let l = legal(&g);
         // hand slots
         let hand = g.g.hand_sorted(me as u8);
@@ -409,6 +421,10 @@ fn encoding_slots_name_the_action_slots() {
                     engine::Choice::Cast(c) | engine::Choice::Play(c) => ident(g.g.obj(c).def),
                     // a graveyard card targeted: its graveyard list's slot (ENGINE.md 65.10)
                     engine::Choice::Target(engine::Target::Obj(r)) => ident(g.g.obj(r.idx).def),
+                    // a paged list's "next page" (ENGINE.md 100.1-100.2): no card
+                    engine::Choice::Page(_) => continue,
+                    // the fourth slot's ability choice: the definition with it (100.2)
+                    engine::Choice::Ability(c, slot) => ident(g.g.activated_home_pub(c, slot)),
                     _ => unreachable!(),
                 };
                 assert_eq!(decode_id(&x[off..off + CODE]), want);
@@ -419,7 +435,11 @@ fn encoding_slots_name_the_action_slots() {
             if (act::GY_ABILITY..act::GY_ABILITY + encode::GYAS as u16).contains(&o.action) {
                 let k = (o.action - act::GY_ABILITY) as usize;
                 let off = encode::O_GYA + k * encode::GYA_W;
-                let engine::Choice::Ability(c, _) = o.choice else { unreachable!() };
+                // (A paged range's "next page", ENGINE.md 100.2: no card.)
+                let engine::Choice::Ability(c, _) = o.choice else {
+                    assert!(matches!(o.choice, engine::Choice::Page(_)), "{:?}", o.choice);
+                    continue;
+                };
                 assert_eq!(decode_id(&x[off..off + CODE]), ident(g.g.obj(c).def));
                 assert_eq!(x[off + CODE + 1], 1.0);
             }
@@ -687,7 +707,8 @@ fn minor_decisions_are_mana_payments() {
     let mut pay = 0;
     for g in states(scale(4), 3, 11) {
         let d = g.g.pending_decision().unwrap();
-        assert_eq!(g.minor_decision(), d.kind == engine::decision::DecisionKind::PayMana);
+        // (Which pool mana pays is minor too, ENGINE.md 34.5.)
+        assert_eq!(g.minor_decision(), matches!(d.kind, engine::decision::DecisionKind::PayMana | engine::decision::DecisionKind::PayPool));
         pay += g.minor_decision() as u32;
     }
     assert!(pay > 0, "no mana payment met");
@@ -876,7 +897,9 @@ fn opening_encodings_but_the_declaration_are_unchanged() {
         assert!(declared > 10 && bottoms > 10, "{name}: {declared} declared, {bottoms} bottoms");
         got.push((name, format!("{:016x}", h.0)));
     }
-    let want = [("cube", "6f267cb231046dd1"), ("bo3", "03550aad88c4a965"), ("delver", "cb3395e062b2fd8f")];
+    // (Re-recorded for mana abilities with priority, ENGINE.md 100.4.3: the
+    // openings' first priority decisions offer `YES`.)
+    let want = [("cube", "fe662b6d88338070"), ("bo3", "96e0eb0155f75cd4"), ("delver", "cb3395e062b2fd8f")];
     let want: Vec<(&str, String)> = want.iter().map(|&(n, h)| (n, h.to_string())).collect();
     assert_eq!(got, want, "the opening's encodings changed beyond the declared-mulligan flag");
 }
@@ -1279,8 +1302,22 @@ fn public_state_reaches_the_encoding() {
     // order is no id's since Priority's casts from a graveyard became one option and a list
     // choice (ENGINE.md 100.5): only deliberate limits are left.
     let gaps: Vec<&str> = lim.iter().filter(|l| l.kind == LimitKind::NextLayout).map(|l| l.name).collect();
-    assert!(gaps.is_empty(), "next-layout gaps: {gaps:?}");
-    assert_eq!(next, 0);
+    // (The gaps W2 (ENGINE.md 99.12: restricted pool mana, the lands that entered this turn) and
+    // W6 (99.16: the recorded control effects, a copy's kept ability, a player's tokens this turn,
+    // a spell's mana spent) added after layout v6 was built: encoded by ENGINE.md 100.5.1.)
+    assert_eq!(
+        gaps,
+        [
+            "mana in a pool is restricted to activating abilities of lands",
+            "a land entered the battlefield this turn",
+            "a control effect ends at the end of the turn",
+            "a copy has an ability by its exception",
+            "a player created tokens this turn",
+            "the mana spent to cast a spell",
+        ],
+        "next-layout gaps"
+    );
+    assert_eq!(next, 6);
     assert_eq!(by_design, 4, "the deliberate limits");
 }
 
@@ -2061,7 +2098,7 @@ fn the_v5_facts_encode_no_hidden_information() {
         g.choose(c);
     }
     let fd: Vec<engine::CardIdx> =
-        g.objs().iter().enumerate().filter(|(_, o)| o.zone == Zone::FaceDown).map(|(i, _)| engine::CardIdx(i as u16)).collect();
+        g.objs().iter().enumerate().filter(|(_, o)| o.zone == Zone::FaceDown).map(|(i, _)| engine::CardIdx::new(i as u32)).collect();
     assert_eq!(fd.len(), 1, "{}", g.log_lines().join("\n"));
     let c = fd[0];
     assert!(g.knows(0, c) && !g.knows(1, c));
@@ -2310,7 +2347,7 @@ fn zbelief(pred: Vec<f32>, tilt: f64, clip: f64) -> zero_search::game::Belief {
 
 /// Every card `owner` has in the game, by identity (sorted).
 fn cards_of(g: &MtgAz, owner: u8) -> Vec<u16> {
-    let mut v: Vec<u16> = g.g.objs().iter().enumerate().filter(|(_, o)| o.owner == owner).map(|(i, _)| g.g.ident(engine::CardIdx(i as u16))).collect();
+    let mut v: Vec<u16> = g.g.objs().iter().enumerate().filter(|(_, o)| o.owner == owner).map(|(i, _)| g.g.ident(engine::CardIdx::new(i as u32))).collect();
     v.sort();
     v
 }
@@ -2342,7 +2379,7 @@ fn belief_deals_keep_every_determinize_invariant() {
                     panic!("{name}: feature {i} of P{viewer} changed in a belief-dealt world ({} -> {})", x0[i], x1[i]);
                 }
                 for (i, o) in g.g.objs().iter().enumerate() {
-                    let c = engine::CardIdx(i as u16);
+                    let c = engine::CardIdx::new(i as u32);
                     if g.g.knows(viewer as u8, c) {
                         assert_eq!((o.def, g.g.ident(c)), (d.g.obj(c).def, d.g.ident(c)), "{name}: a card P{viewer} knows was dealt again");
                     }

@@ -278,6 +278,12 @@ fn behaviour_digests() {
         t.elapsed().as_secs_f64(),
         all.0
     );
+    // `DIGEST_LINES=<file>`: every game's digest written there, in any mode
+    // (to count the games a change alters in a mode the recorded file
+    // doesn't hold: run on both sides and compare).
+    if let Ok(p) = std::env::var("DIGEST_LINES") {
+        std::fs::write(&p, lines.join("\n") + "\n").unwrap();
+    }
     if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0" || v == "v4" || v == "v5") || by_choice() {
         return;
     }

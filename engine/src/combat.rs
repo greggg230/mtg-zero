@@ -364,11 +364,13 @@ impl Game {
             if !self.deals_damage_now(a, first) {
                 continue;
             }
-            // (Its power, or its toughness: ENGINE.md 99.8.)
+            // (Its power, or its toughness: ENGINE.md 99.8. Assigned, it is
+            // a stored amount: past `num::AMOUNT_MAX` the game aborts.)
             let power = self.combat_damage_amount(a);
             if power <= 0 {
                 continue; // CR 510.1a
             }
+            let power = self.exact_count(power, "combat damage");
             let blockers = self.blockers_of(a);
             // CR 510.1b: to what it attacks (nothing once a planeswalker it
             // attacked left combat, 506.4c; 702.19f: never to the player).
@@ -376,19 +378,19 @@ impl Game {
             let trample = self.has_kw(a, Kw::Trample) && dest.is_some();
             if !self.objs[a.i()].blocked {
                 if let Some(t) = dest {
-                    self.combat_dmg.push((a, t, crate::num::unsigned(power)));
+                    self.combat_dmg.push((a, t, power));
                 }
             } else if blockers.is_empty() {
                 // CR 509.1h / 702.19d: blocked, blockers gone: only trample.
                 if let (true, Some(t)) = (trample, dest) {
-                    self.combat_dmg.push((a, t, crate::num::unsigned(power)));
+                    self.combat_dmg.push((a, t, power));
                 }
             } else if blockers.len() == 1 && !trample {
                 let b = self.obj_ref(blockers[0]);
-                self.combat_dmg.push((a, Target::Obj(b), crate::num::unsigned(power)));
+                self.combat_dmg.push((a, Target::Obj(b), power));
             } else {
                 self.agenda.push(Task::CombatDamage { first, att: k as u8 + 1 });
-                self.agenda.push(Task::AssignDamage { att: a, j: 0, left: crate::num::unsigned(power) });
+                self.agenda.push(Task::AssignDamage { att: a, j: 0, left: power, step: crate::decision::NumberStep::FIRST });
                 return;
             }
         }
@@ -400,25 +402,27 @@ impl Game {
             }
             let p = self.combat_damage_amount(c);
             if p > 0 {
+                let p = self.exact_count(p, "combat damage");
                 let ar = self.obj_ref(a);
-                self.combat_dmg.push((c, Target::Obj(ar), crate::num::unsigned(p)));
+                self.combat_dmg.push((c, Target::Obj(ar), p));
             }
         }
         // CR 510.2: all at once. Sources are read before anything changes.
         let list = std::mem::take(&mut self.combat_dmg);
         let sources: Vec<_> = list.iter().map(|&(s, _, _)| self.damage_source_of(s)).collect();
         let refs: Vec<_> = list.iter().map(|&(s, _, _)| self.obj_ref(s)).collect();
-        let mut to_players: Vec<(crate::ids::ObjRef, crate::ids::PlayerId, i32)> = Vec::new();
-        let mut to_creatures: Vec<(crate::ids::ObjRef, crate::ids::ObjRef, i32)> = Vec::new();
-        let mut to_walkers: Vec<(crate::ids::ObjRef, crate::ids::ObjRef, i32)> = Vec::new();
+        let mut to_players: Vec<(crate::ids::ObjRef, crate::ids::PlayerId, i64)> = Vec::new();
+        let mut to_creatures: Vec<(crate::ids::ObjRef, crate::ids::ObjRef, i64)> = Vec::new();
+        let mut to_walkers: Vec<(crate::ids::ObjRef, crate::ids::ObjRef, i64)> = Vec::new();
         self.combat_damage_now = true;
         // Combat damage each source dealt in all (one "deals damage" event
-        // per source: the damage is dealt at once, CR 510.2).
-        let mut by_source: Vec<(crate::ids::ObjRef, i32)> = Vec::new();
+        // per source: the damage is dealt at once, CR 510.2). (Totals in
+        // `Wide`: exact; an event amount past `num::AMOUNT_MAX` aborts.)
+        let mut by_source: Vec<(crate::ids::ObjRef, crate::num::Wide)> = Vec::new();
         // Combat damage each creature or planeswalker was dealt in all (one
         // "is dealt damage" event per recipient: Screaming Nemesis blocked by
         // two creatures triggers once, for the total; ruling 66fc62ef).
-        let mut by_recipient: Vec<(crate::ids::ObjRef, i32)> = Vec::new();
+        let mut by_recipient: Vec<(crate::ids::ObjRef, crate::num::Wide)> = Vec::new();
         for ((&(s, t, n), src), r) in list.iter().zip(sources).zip(refs) {
             if first {
                 self.objs[s.i()].struck_first = true;
@@ -427,18 +431,17 @@ impl Game {
             let to_creature = matches!(t, Target::Obj(o) if self.live(o) && self.is_creature(o.idx));
             let to_walker =
                 matches!(t, Target::Obj(o) if self.live(o) && self.is_type(o.idx, crate::db::types::PLANESWALKER));
-            let dealt = self.deal_damage(src, t, crate::num::signed(n));
-            // (Totals saturate, as every amount: ENGINE.md 46.)
+            let dealt = self.deal_damage(src, t, n);
             if dealt > 0 {
                 match by_source.iter_mut().find(|x| x.0 == r) {
-                    Some(x) => x.1 = x.1.saturating_add(dealt),
-                    None => by_source.push((r, dealt)),
+                    Some(x) => x.1 += dealt as crate::num::Wide,
+                    None => by_source.push((r, dealt as crate::num::Wide)),
                 }
             }
             if let (Target::Obj(o), true) = (t, dealt > 0) {
                 match by_recipient.iter_mut().find(|x| x.0 == o) {
-                    Some(x) => x.1 = x.1.saturating_add(dealt),
-                    None => by_recipient.push((o, dealt)),
+                    Some(x) => x.1 += dealt as crate::num::Wide,
+                    None => by_recipient.push((o, dealt as crate::num::Wide)),
                 }
             }
             if let (Target::Player(p), true) = (t, dealt > 0) {
@@ -454,18 +457,20 @@ impl Game {
         self.combat_damage_now = false;
         for (o, n) in by_recipient {
             let mut ev = Event::obj(EventKind::DealtDamage, o);
-            ev.amount = crate::num::unsigned(n);
+            ev.amount = self.exact_count(n, "combat damage dealt to one recipient");
             self.event(ev);
         }
         for (r, n) in by_source {
-            self.event(Event { kind: EventKind::DealsDamage, a: Subj::Obj(r), b: Subj::None, amount: crate::num::unsigned(n) });
+            let amount = self.exact_count(n, "combat damage dealt by one source");
+            self.event(Event { kind: EventKind::DealsDamage, a: Subj::Obj(r), b: Subj::None, amount });
         }
+        // (Each `n` was dealt: positive, within `num::AMOUNT_MAX`.)
         for (r, o, n) in to_creatures {
             self.event(Event {
                 kind: EventKind::DealsCombatDamageToCreature,
                 a: Subj::Obj(r),
                 b: Subj::Obj(o),
-                amount: crate::num::unsigned(n),
+                amount: n as u64,
             });
         }
         // CR 724.2: "whenever a creature deals combat damage to the monarch,
@@ -510,7 +515,7 @@ impl Game {
                 kind: EventKind::DealsCombatDamage,
                 a: Subj::Obj(r),
                 b: Subj::Player(p),
-                amount: crate::num::unsigned(n),
+                amount: n as u64,
             });
         }
         for (r, o, n) in to_walkers {
@@ -518,7 +523,7 @@ impl Game {
                 kind: EventKind::DealsCombatDamage,
                 a: Subj::Obj(r),
                 b: Subj::Obj(o),
-                amount: crate::num::unsigned(n),
+                amount: n as u64,
             });
         }
         if batch {
@@ -527,44 +532,34 @@ impl Game {
     }
 
     /// Lethal damage for assignment purposes (CR 510.1c-d, 702.2c): what the
-    /// blocker still needs, counting damage already assigned this step.
-    pub(crate) fn lethal_needed(&self, att: CardIdx, b: CardIdx) -> u32 {
-        let assigned: u32 = self
+    /// blocker still needs, counting damage already assigned this step
+    /// (exact, in `Wide`; at least 0).
+    pub(crate) fn lethal_needed(&self, att: CardIdx, b: CardIdx) -> crate::num::Wide {
+        let assigned: crate::num::Wide = self
             .combat_dmg
             .iter()
             .filter(|&&(_, t, _)| t == Target::Obj(self.obj_ref(b)))
-            .fold(0u32, |s, &(_, _, n)| s.saturating_add(n));
-        let have = self.objs[b.i()].damage.saturating_add(assigned);
+            .map(|&(_, _, n)| n as crate::num::Wide)
+            .sum();
+        let have = self.objs[b.i()].damage as crate::num::Wide + assigned;
         if self.has_kw(att, Kw::Deathtouch) {
             return if assigned > 0 { 0 } else { 1 };
         }
-        crate::num::unsigned(self.toughness(b)).saturating_sub(have)
+        (self.toughness(b) - have).max(0)
     }
 
     /// The attacking player divides `att`'s damage among its blockers in
-    /// order: `NUMBER` n to blocker `j`. Without trample everything goes to
-    /// blockers; with trample the player gets the rest only if every blocker
-    /// was assigned lethal damage (702.19c).
-    pub(crate) fn assign_damage(&mut self, att: CardIdx, j: u8, left: u32) {
+    /// order (CR 510.1c-d): any amount to blocker `j` that leaves a legal
+    /// division (`ask_amount`: `NUMBER` + n while every amount fits, else the
+    /// amount in digits, ENGINE.md 100.2; `step` where it stands). Without
+    /// trample everything goes to blockers; with trample the player gets the
+    /// rest only if every blocker was assigned lethal damage (702.19c).
+    pub(crate) fn assign_damage(&mut self, att: CardIdx, j: u32, left: u64, step: crate::decision::NumberStep) {
         let blockers = self.blockers_of(att);
         // CR 702.19b: the rest to the player or planeswalker it attacks
         // (with nothing to attack, everything to the blockers, 702.19f).
         let dest = self.attack_dest(att);
         let trample = self.has_kw(att, Kw::Trample) && dest.is_some();
-        if let Some(Choice::Number(k)) = self.answer.take() {
-            // With 32 or more to divide, 30 = lethal and 31 = all the rest.
-            let n = match (left >= act::NUMBER_N as u32, k) {
-                (true, 30) => self.lethal_needed(att, blockers[j as usize]),
-                (true, 31) => left,
-                _ => k as u32,
-            };
-            let b = self.obj_ref(blockers[j as usize]);
-            if n > 0 {
-                self.combat_dmg.push((att, Target::Obj(b), n));
-            }
-            self.agenda.push(Task::AssignDamage { att, j: j + 1, left: left - n });
-            return;
-        }
         if j as usize >= blockers.len() {
             if left > 0 {
                 debug_assert!(trample);
@@ -582,33 +577,30 @@ impl Game {
         // (a range, not a list: `left` may be any amount, ENGINE.md 46).
         let (lo, hi) = if !last {
             (0, left)
-        } else if !trample || !prev_lethal || left < lethal {
+        } else if !trample || !prev_lethal || (left as crate::num::Wide) < lethal {
             (left, left)
         } else {
-            (lethal, left)
+            // (`lethal <= left` here: a u64.)
+            (lethal as u64, left)
         };
-        let has = |n: u32| (lo..=hi).contains(&n);
-        let number = |n: u32| Opt { action: act::NUMBER + n as u16, choice: Choice::Number(n as u8) };
-        // `NUMBER` n = n damage. With 32 or more to divide, the amounts
-        // offered are 0..=29 exactly, the blocker's lethal damage (n = 30)
-        // and all of the rest (n = 31): the divisions that differ in what
-        // dies and what tramples over (ENGINE.md 13).
-        let opts = if left < act::NUMBER_N as u32 {
-            (lo..=hi).map(number).collect()
-        } else {
-            let mut v: Vec<Opt> = (lo..=hi.min(29)).map(number).collect();
-            if lethal > 29 && has(lethal) {
-                v.push(Opt { action: act::NUMBER + 30, choice: Choice::Number(30) });
+        match self.answer.take() {
+            Some(Choice::Number(k)) => match step.answer_amount(lo, hi, k) {
+                crate::decision::NumberAnswer::Next(s) => self.agenda.push(Task::AssignDamage { att, j, left, step: s }),
+                crate::decision::NumberAnswer::Value(n) => {
+                    let r = self.obj_ref(b);
+                    if n > 0 {
+                        self.combat_dmg.push((att, Target::Obj(r), n));
+                    }
+                    self.agenda.push(Task::AssignDamage { att, j: j + 1, left: left - n, step: crate::decision::NumberStep::FIRST });
+                }
+            },
+            Some(other) => unreachable!("damage answer {other:?}"),
+            None => {
+                let ap = self.turn.active;
+                self.ask_amount(Task::AssignDamage { att, j, left, step }, step, ap, DecisionKind::AssignDamage, lo, hi);
             }
-            if left > 29 && left != lethal && has(left) {
-                v.push(Opt { action: act::NUMBER + 31, choice: Choice::Number(31) });
-            }
-            v
-        };
-        let ap = self.turn.active;
-        self.ask(Task::AssignDamage { att, j, left }, ap, DecisionKind::AssignDamage, opts);
+        }
     }
-
     /// CR 511.3: remove all creatures from combat.
     pub(crate) fn remove_from_combat(&mut self) {
         for &c in &self.battlefield {

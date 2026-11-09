@@ -104,7 +104,7 @@ pub struct W3State {
     pub lki_host: Vec<(crate::ids::ObjRef, crate::ids::ObjRef)>,
     /// The amount of mana spent to cast the spell becoming a permanent:
     /// set and taken around one move.
-    pub entering_spent: Option<u8>,
+    pub entering_spent: Option<u32>,
     /// Last known information: the latest "loses all abilities" timestamp of
     /// each permanent with a granted triggered ability that left the
     /// battlefield this turn (CR 603.10a).
@@ -183,7 +183,7 @@ impl Game {
             W3::GrantTrigger { on, k, this_turn } => {
                 let slot = self.db.def(f.source_def).delayed_base + k;
                 // (One effect, one timestamp, CR 613.7a.)
-                self.next_ts += 1;
+                self.next_ts = self.exact_inc(self.next_ts, "timestamps");
                 let ts = self.next_ts;
                 for c in self.objs_on(f, on) {
                     let r = self.obj_ref(c);
@@ -279,8 +279,8 @@ impl Game {
                         None => crate::game::DamageSource { controller: f.controller, ..self.damage_source_of(r.idx) },
                     };
                     let mv = match self.lki_copy.iter().rev().find(|x| x.0 == r) {
-                        Some((_, v)) => self.db.def(v.def).mana_value(),
-                        None => self.def_of(r.idx).mana_value(),
+                        Some((_, v)) => self.db.def(v.def).mana_value() as u64,
+                        None => self.def_of(r.idx).mana_value() as u64,
                     };
                     (src, mv)
                 };
@@ -288,25 +288,32 @@ impl Game {
                 let all: Vec<CardIdx> = self.battlefield.iter().copied().filter(|&c| self.card_matches(filter, c, &ctx)).collect();
                 for c in all {
                     let t = crate::ids::Target::Obj(self.obj_ref(c));
-                    self.deal_damage(src, t, mv as i32);
+                    self.deal_damage(src, t, mv);
                 }
                 Flow::Next
             }
         }
     }
 
-    /// `n` more mana was spent to cast spell `card` (CR 601.2h).
+    /// `n` more mana was spent to cast spell `card` (CR 601.2h): counted
+    /// exactly (past `u32::MAX` the game aborts, ENGINE.md 100.7).
     pub(crate) fn note_mana_spent(&mut self, card: CardIdx, n: usize) {
         let r = self.obj_ref(card);
-        match self.marks.iter_mut().find(|(o, m)| *o == r && matches!(m, Mark::ManaSpent(_))) {
-            Some((_, Mark::ManaSpent(k))) => *k = (*k as usize + n).min(255) as u8,
-            _ => self.marks.push((r, Mark::ManaSpent(n.min(255) as u8))),
+        let at = self.marks.iter().position(|(o, m)| *o == r && matches!(m, Mark::ManaSpent(_)));
+        let before = match at.map(|i| self.marks[i].1) {
+            Some(Mark::ManaSpent(k)) => k,
+            _ => 0,
+        };
+        let total = self.exact_u32(before as crate::num::Wide + n as crate::num::Wide, "mana spent to cast a spell");
+        match at {
+            Some(i) => self.marks[i].1 = Mark::ManaSpent(total),
+            None => self.marks.push((r, Mark::ManaSpent(total))),
         }
     }
 
     /// The amount of mana spent to cast object `r` (a spell, or the permanent
     /// it became; 0 if it wasn't cast, CR 601.2h).
-    pub(crate) fn mana_spent_of(&self, r: crate::ids::ObjRef) -> u8 {
+    pub(crate) fn mana_spent_of(&self, r: crate::ids::ObjRef) -> u32 {
         self.marks
             .iter()
             .find_map(|&(o, m)| match m {
@@ -319,7 +326,7 @@ impl Game {
     /// Spell `idx` became permanent `r`, `n` mana spent to cast it: the
     /// permanent knows it, and enters with that many +1/+1 counters if it
     /// says so (CR 122.6, 614.1c).
-    pub(crate) fn w3_entered_spent(&mut self, idx: CardIdx, r: crate::ids::ObjRef, n: u8) {
+    pub(crate) fn w3_entered_spent(&mut self, idx: CardIdx, r: crate::ids::ObjRef, n: u32) {
         self.marks.push((r, Mark::ManaSpent(n)));
         if self.def_of(idx).w3.counters_mana_spent && n > 0 {
             self.add_counters(idx, Counter::P1P1, n as crate::num::Count);
@@ -330,7 +337,7 @@ impl Game {
     /// that permanent, else as it last existed on the battlefield (CR
     /// 608.2h, 113.7a; its controller then: `default_controller` if none was
     /// recorded).
-    fn lki_source(&self, r: crate::ids::ObjRef, default_controller: PlayerId) -> (crate::game::DamageSource, i32) {
+    fn lki_source(&self, r: crate::ids::ObjRef, default_controller: PlayerId) -> (crate::game::DamageSource, crate::num::Wide) {
         if self.live(r) && self.objs[r.idx.i()].zone == crate::ids::Zone::Battlefield {
             return (self.damage_source_of(r.idx), self.power(r.idx));
         }
@@ -338,8 +345,8 @@ impl Game {
             Some(&(_, d)) => d,
             None => crate::game::DamageSource { controller: default_controller, ..self.damage_source_of(r.idx) },
         };
-        let power = match self.objs[r.idx.i()].lki_power {
-            Some((inc, p)) if inc == r.inc => p,
+        let power = match self.lki_power_of(r) {
+            Some(p) => p as crate::num::Wide,
             _ => 0,
         };
         (src, power)
@@ -464,6 +471,8 @@ impl Game {
             self.note(|g| format!("{} phases out", g.name(x)));
         }
         self.effects_changed();
+        // (Control effects worked out: EoE W6.)
+        self.w6_sync_control();
     }
 
     /// The static-ability fast paths count permanent `c` (`d` = 1) or not
@@ -511,6 +520,11 @@ impl Game {
             self.note(|g| format!("{} phases in", g.name(x)));
         }
         self.effects_changed();
+        // (Control effects worked out: EoE W6.)
+        self.w6_sync_control();
+        // A daybound permanent that phased out by day exists again at night:
+        // it transforms at once (CR 702.145c; nightbound by day, 702.145f).
+        self.day_night_any_time();
     }
 }
 
@@ -552,10 +566,27 @@ impl Game {
     ///
     /// A "loses all abilities" effect on `c` with a later timestamp than a
     /// grant removes it, one with an earlier timestamp doesn't (613.7).
+    ///
+    /// First, a land's intrinsic mana abilities of the basic land types an
+    /// effect gave it (CR 305.6, the end of 305.7: "{T}: Add <its mana>",
+    /// `CardDb::basic_abilities`): each basic land type it has that its
+    /// abilities' definition doesn't print (a printed type's ability is
+    /// in the card's text; a Mountain by a "nonbasic lands are Mountains"
+    /// effect has its "{T}: Add {R}" in `moon_def`). The type comes in layer
+    /// 4, so any "loses all abilities" (layer 6) removes the ability.
     pub(crate) fn granted_activated(&self, c: CardIdx) -> Vec<Grant> {
         let mut out = Vec::new();
         if self.objs[c.i()].zone != crate::ids::Zone::Battlefield {
             return out;
+        }
+        if !self.db.basic_abilities.is_empty() && self.is_type(c, crate::db::types::LAND) && !self.lost_abilities(c) {
+            let printed = &self.abilities(c).subtypes;
+            let moon = self.moon_game && self.moon_on(c);
+            for &(sub, def) in &self.db.basic_abilities {
+                if self.has_subtype(c, sub) && !printed.contains(&sub) && !(moon && Some(sub) == self.db.mountain) {
+                    out.push(Grant { def, slot: 0, equipment: None });
+                }
+            }
         }
         let r = self.obj_ref(c);
         let loss = self.loss_ts(c);
@@ -595,14 +626,25 @@ impl Game {
     pub(crate) fn activated_home(&self, c: CardIdx, slot: crate::db::AbilitySlot) -> (crate::ids::DefId, crate::db::AbilitySlot, Option<CardIdx>) {
         let def = self.objs[c.i()].def;
         if let crate::db::AbilitySlot::Activated(i) = slot {
-            let own = self.db.def(def).activated.len();
+            let own = self.own_ability_slots(c);
             if i as usize >= own {
                 if let Some(g) = self.granted_activated(c).get(i as usize - own) {
                     return (g.def, crate::db::AbilitySlot::Activated(g.slot), g.equipment);
                 }
             }
         }
+        // (A nonbasic land that is a Mountain: its abilities' definition,
+        // ENGINE.md 99.12.)
+        if self.moon_game && self.moon_on(c) {
+            return (self.moon_def(c), slot, None);
+        }
         (def, slot, None)
+    }
+
+    /// The definition that has activated ability `slot` of permanent `c`
+    /// (`activated_home`'s first part; tests, the list block's token).
+    pub fn activated_home_pub(&self, c: CardIdx, slot: crate::db::AbilitySlot) -> crate::ids::DefId {
+        self.activated_home(c, slot).0
     }
 
     /// The timestamps (CR 613.7a: its source's) of the static abilities on
@@ -682,7 +724,7 @@ impl Game {
     /// The places of permanent `c`'s activated abilities: its card's own,
     /// then those other permanents grant it.
     pub(crate) fn ability_slots_total(&self, c: CardIdx) -> usize {
-        self.db.def(self.objs[c.i()].def).activated.len() + self.granted_activated(c).len()
+        self.own_ability_slots(c) + self.granted_activated(c).len()
     }
 
     /// Is `slot` of permanent `c` the page of its abilities past its slots
@@ -695,20 +737,21 @@ impl Game {
     }
 
     /// `p` chooses which activated ability of permanent `card` to activate,
-    /// among those it may activate now from place `from` on (CR 602.2,
-    /// 117.1b; `Task::ChooseAbility`): `NUMBER` + place - `from` for the
-    /// next 31, `NUMBER` + 31 for a page of the ones after. Re-entrant: the
-    /// options come from the game as it is.
-    pub(crate) fn choose_ability(&mut self, p: PlayerId, card: CardIdx, from: u8) {
-        use crate::decision::{act, Choice, DecisionKind, Opt};
-        let page = (act::NUMBER_N - 1) as usize;
+    /// among those it may activate now from its fourth on (CR 602.2, 117.1b;
+    /// `Task::ChooseAbility`): `LIBRARY` + place - 3, `Game::ask_paged` past
+    /// the 64 list ids (`page`; ENGINE.md 100.2). The list block holds each
+    /// option's ability: the definition that has it (the card's own, or the
+    /// face granting it, `Game::activated_home`) and its index there.
+    /// Re-entrant: the options come from the game as it is.
+    pub(crate) fn choose_ability(&mut self, p: PlayerId, card: CardIdx, page: crate::decision::Page) {
+        use crate::decision::{act, Choice, DecisionKind};
         match self.answer.take() {
-            Some(Choice::Number(k)) if k as usize == page => {
-                self.agenda.push(crate::flow::Task::ChooseAbility { p, card, from: from + page as u8 });
+            Some(Choice::Page(next)) => {
+                self.agenda.push(crate::flow::Task::ChooseAbility { p, card, page: next });
                 return;
             }
-            Some(Choice::Number(k)) => {
-                self.begin_activate(p, card, crate::db::AbilitySlot::Activated(from + k));
+            Some(Choice::Ability(c, slot)) => {
+                self.begin_activate(p, c, slot);
                 return;
             }
             Some(other) => unreachable!("ability answer {other:?}"),
@@ -717,17 +760,14 @@ impl Game {
         let classes = self.mana_classes(p, None);
         let sorcery_ok = self.turn.active == p && self.turn.step.is_main() && self.stack.is_empty();
         let locks = self.activation_locks();
-        let live = self.permanent_activations(p, card, &classes, sorcery_ok, locks);
-        let mut opts: Vec<Opt> = Vec::new();
-        for &i in live.iter().filter(|&&i| i >= from) {
-            let k = (i - from) as usize;
-            if k < page {
-                opts.push(Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) });
-            } else if !opts.iter().any(|o| o.choice == Choice::Number(page as u8)) {
-                opts.push(Opt { action: act::NUMBER + page as u16, choice: Choice::Number(page as u8) });
-            }
-        }
-        self.ask(crate::flow::Task::ChooseAbility { p, card, from }, p, DecisionKind::ChooseMode, opts);
+        let live = self.permanent_activations(p, card, &classes, sorcery_ok, locks, &std::cell::OnceCell::new());
+        let from = (crate::activate::ACTIVATE_SLOTS - 1) as u8;
+        let items: Vec<(u32, Choice)> = live
+            .iter()
+            .filter(|&&i| i >= from)
+            .map(|&i| ((i - from) as u32, Choice::Ability(card, crate::db::AbilitySlot::Activated(i))))
+            .collect();
+        self.ask_paged(crate::flow::Task::ChooseAbility { p, card, page }, page, p, DecisionKind::ChooseMode, act::LIBRARY, act::LIBRARY_N, &items, Vec::new());
     }
 
     /// The permanents `p` controls from which `card`'s cost "remove a <k>

@@ -834,3 +834,37 @@ fn cr_722_3_a_controlled_decision_is_encoded_in_the_controlled_seat() {
         }
     }
 }
+
+/// Blade of the Swarm's exile target among 34 exiled cards with warp (CR
+/// 115.1: any legal target; ENGINE.md 100.2): the first page offers the
+/// first 31 at `EXILE` + 0..=30 and "next page" at `EXILE` + 31, the second
+/// the other 3 at `EXILE` + 0..=2 (before 100.2: the first 32 only,
+/// docs/shortcuts.md 99.14.1). The last one goes to its owner's library.
+#[test]
+fn cr_115_1_blade_of_the_swarm_targets_any_of_34_exiled_cards_with_warp() {
+    use engine::decision::act;
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp", "Swamp", "Swamp"])
+        .exile(1, &["Codecracker Hound"; 34])
+        .hand(0, &["Blade of the Swarm"])
+        .at(Step::Main1, 0)
+        .start();
+    let hounds: Vec<CardIdx> = g.exile_zone().to_vec();
+    assert_eq!(hounds.len(), 34);
+    blade_enters(&mut g);
+    let second = g.pending_decision().unwrap().options[1].choice;
+    g.choose(second);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target) || at_priority(g));
+    let ids = |g: &Game| g.pending_decision().unwrap().options.iter().map(|o| o.action).collect::<Vec<u16>>();
+    let opts = |g: &Game| g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect::<Vec<Choice>>();
+    assert_eq!(ids(&g), (act::EXILE..act::EXILE + 32).collect::<Vec<_>>());
+    assert_eq!(opts(&g)[..31], hounds[..31].iter().map(|&c| g.tgt(c)).collect::<Vec<_>>()[..]);
+    let next = opts(&g)[31];
+    assert!(matches!(next, Choice::Page(_)), "{:?}", g.options_desc());
+    g.choose(next);
+    assert_eq!(ids(&g), vec![act::EXILE, act::EXILE + 1, act::EXILE + 2]);
+    assert_eq!(opts(&g), hounds[31..].iter().map(|&c| g.tgt(c)).collect::<Vec<_>>());
+    g.choose(g.tgt(hounds[33]));
+    settle(&mut g);
+    assert_eq!(g.obj(hounds[33]).zone, Zone::Library, "{}", log(&g));
+}

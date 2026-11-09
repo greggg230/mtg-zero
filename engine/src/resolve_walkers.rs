@@ -19,7 +19,10 @@ impl Game {
                 Flow::Next
             }
             Ext::RemoveCounters { on, counter, n } => {
-                let n = crate::num::count(self.amount(f, *n) as i64);
+                // (A negative number removes none, CR 107.1b; at most those
+                // there are removed: any number past `num::COUNT_MAX` removes
+                // them all, as `COUNT_MAX` does: exact.)
+                let n = self.amount(f, *n).clamp(0, crate::num::COUNT_MAX as crate::num::Wide) as crate::num::Count;
                 for c in self.objs_on(f, on) {
                     self.remove_counters(c, *counter, n);
                 }
@@ -83,13 +86,22 @@ impl Game {
             Ext::ExtraLoyaltyActivations { n } => {
                 if let Some(&c) = self.objs_on(f, &On::Source).first() {
                     let turn = self.turn.number as u16;
-                    let o = &mut self.objs[c.i()];
-                    if o.pw_turn != turn {
-                        o.pw_turn = turn;
-                        o.pw_used = 0;
-                        o.pw_extra = 0;
+                    let o = self.loyalty_mut(c);
+                    if o.turn != turn {
+                        o.turn = turn;
+                        o.used = 0;
+                        o.extra = 0;
                     }
-                    o.pw_extra = o.pw_extra.saturating_add(*n);
+                    // (Counted exactly: past `u32::MAX` the game aborts.)
+                    let extra = o.extra as u64 + *n as u64;
+                    let extra = match u32::try_from(extra) {
+                        Ok(v) => v,
+                        Err(_) => {
+                            self.abort(|| "loyalty activations allowed this turn past u32::MAX".to_string());
+                            u32::MAX
+                        }
+                    };
+                    self.loyalty_mut(c).extra = extra;
                 }
                 Flow::Next
             }
@@ -113,7 +125,7 @@ impl Game {
                         if opts.is_empty() {
                             return Flow::Next;
                         }
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                        self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseGraveyardCard, opts);
                         Flow::Suspend
                     }
                 }
@@ -141,7 +153,7 @@ impl Game {
                                 opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Target(Target::Obj(r)) });
                             }
                         }
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::Target, opts);
+                        self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::Target, opts);
                         Flow::Suspend
                     }
                 }
@@ -281,7 +293,7 @@ impl Game {
                     Some(other) => unreachable!("revealed-card answer {other:?}"),
                     None => {
                         if f.i == 0 {
-                            self.look_top(f, p, *n, true);
+                            self.look_top(f, p, *n as usize, true);
                             f.i = 1;
                         }
                         match f.pile.len() {
@@ -289,7 +301,7 @@ impl Game {
                             1 => Some(f.pile[0]),
                             _ => {
                                 let mut sorted = f.pile.clone();
-                                sorted.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+                                sorted.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
                                 let mut opts = Vec::new();
                                 for (k, &c) in sorted.iter().enumerate() {
                                     if k > 0 && self.objs[sorted[k - 1].i()].def == self.objs[c.i()].def {
@@ -324,22 +336,17 @@ impl Game {
                     }
                     Some(other) => unreachable!("exiled-card answer {other:?}"),
                     None => {
-                        let cands: Vec<CardIdx> = self
+                        let cands: Vec<Choice> = self
                             .exile
                             .iter()
                             .copied()
                             .filter(|&c| self.objs[c.i()].owner == p && self.counters_on(c, *counter) > 0)
-                            .take(act::EXILE_N as usize)
+                            .map(Choice::Card)
                             .collect();
                         if cands.is_empty() {
                             return Flow::Next;
                         }
-                        let opts = cands
-                            .iter()
-                            .enumerate()
-                            .map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) })
-                            .collect();
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
+                        self.ask_objects(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseExiled, &cands, Vec::new());
                         Flow::Suspend
                     }
                 }
@@ -348,8 +355,10 @@ impl Game {
                 let p = f.controller;
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
-                        // Its power as it last existed (CR 608.2h).
+                        // Its power as it last existed (CR 608.2h; "that
+                        // much": a stored amount, ENGINE.md 100.7).
                         let power = self.power(c).max(0);
+                        let power = self.exact_count(power, "a sacrificed creature's power");
                         let r = self.obj_ref(c);
                         self.note(|g| format!("P{p} sacrifices {}", g.name(c)));
                         self.sacrifice(c);
@@ -361,7 +370,7 @@ impl Game {
                             slot: base + k,
                             ev: crate::triggers::EvCtx {
                                 obj: Some(r),
-                                amount: crate::num::unsigned(power),
+                                amount: power,
                                 ..Default::default()
                             },
                         });
@@ -457,7 +466,7 @@ impl Game {
                 };
                 let name = named.map(|d| self.db.def(d).name.clone());
                 self.note(|_| format!("P{p} names {}", name.as_deref().unwrap_or("a card not in their library")));
-                self.look_top(f, p, *n, true);
+                self.look_top(f, p, *n as usize, true);
                 for c in std::mem::take(&mut f.pile) {
                     if name.as_deref() == Some(self.name(c)) {
                         self.move_card(c, Zone::Hand, Pos::Top);
@@ -495,6 +504,9 @@ impl Game {
         // Which cards were taken is private until they are revealed: the
         // other player loses track of the library (ENGINE.md 10).
         self.scramble(p, &[], false, true);
+        // (The found cards put onto the battlefield enter at once, tapped as
+        // they enter: one entry, CR 603.6a.)
+        self.begin_entering(false);
         for c in found {
             if self.objs[c.i()].zone != Zone::Library {
                 continue;
@@ -514,6 +526,7 @@ impl Game {
                 }
             }
         }
+        self.end_entering();
         self.shuffle_library(p);
     }
 

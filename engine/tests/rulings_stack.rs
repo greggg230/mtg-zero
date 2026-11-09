@@ -446,7 +446,10 @@ fn teferi_time_ravelers_restriction_beats_flash_cr_101_2() {
         .start();
     g.pass();
     assert_eq!(g.pending_decision().unwrap().player, 1);
-    assert_eq!(g.pending_decision().unwrap().options.len(), 1, "only passing: {}", opts(&g));
+    // Only passing, or activating mana abilities (CR 605.3a: not casting;
+    // `YES`, ENGINE.md 100.4.3).
+    let o: Vec<u16> = g.pending_decision().unwrap().options.iter().map(|o| o.action).collect();
+    assert_eq!(o, vec![engine::act::PASS, engine::act::YES], "only passing: {}", opts(&g));
 }
 
 #[test]

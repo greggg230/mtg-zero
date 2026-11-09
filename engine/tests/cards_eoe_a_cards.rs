@@ -214,7 +214,7 @@ fn equipment_attach_to_target_creature_you_control_as_they_enter_cr701_3a() {
         settle(&mut g);
         let eq = bf(&g, 0, name);
         assert_eq!(g.obj(eq).attached.map(|r| r.idx), Some(bear), "{name}");
-        assert_eq!((g.power(bear), g.toughness(bear)), pt, "{name}");
+        assert_eq!((g.power(bear), g.toughness(bear)), (pt.0.into(), pt.1.into()), "{name}");
         for &k in kws {
             assert!(g.has_kw(bear, k), "{name} {k:?}");
         }
@@ -261,7 +261,7 @@ fn invasive_maneuvers_deals_five_with_a_spacecraft_cr608_2c() {
         pay(&mut g);
         settle(&mut g);
         if dmg < 5 {
-            assert_eq!(g.obj(giant).damage, dmg as u32);
+            assert_eq!(g.obj(giant).damage, dmg as u64);
         } else {
             assert_eq!(g.count_in(1, "Lane A Giant", Zone::Graveyard), 1);
         }

@@ -66,7 +66,7 @@ impl Game {
 
     /// `p`'s dungeon: (the room of the venture marker if `p` has a dungeon
     /// in the command zone, dungeons completed).
-    pub fn dungeon(&self, p: PlayerId) -> (Option<u8>, u8) {
+    pub fn dungeon(&self, p: PlayerId) -> (Option<u8>, u32) {
         let d = &self.dungeons[p as usize];
         (d.obj.map(|_| d.room), d.completed)
     }
@@ -134,10 +134,10 @@ impl Game {
     /// `p` completes their dungeon: it is removed from the game (CR 309.7,
     /// 704.5t, 701.49c).
     fn complete_dungeon(&mut self, p: PlayerId) {
-        let d = &mut self.dungeons[p as usize];
-        let Some(c) = d.obj.take() else { return };
-        d.completed = d.completed.saturating_add(1);
-        d.room = 0;
+        let Some(c) = self.dungeons[p as usize].obj.take() else { return };
+        let n = self.dungeons[p as usize].completed;
+        self.dungeons[p as usize].completed = self.exact_inc(n, "dungeons completed");
+        self.dungeons[p as usize].room = 0;
         self.note(|_| format!("P{p} completes Undercity"));
         self.move_card(c, Zone::Nowhere, Pos::Top);
     }

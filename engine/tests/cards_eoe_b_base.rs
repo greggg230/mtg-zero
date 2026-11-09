@@ -56,7 +56,7 @@ fn eoe_base_bodies_and_keywords_match_the_oracle_text() {
     for &(name, pt, ty, kws) in rows {
         let g = scen().battlefield(0, &[name]).at(Step::Main1, 0).start();
         let c = bf(&g, 0, name);
-        assert_eq!(g.pt(c), pt, "{name}");
+        assert_eq!(g.pt(c), (pt.0.into(), pt.1.into()), "{name}");
         assert_eq!(g.def_of(c).types & (types::ARTIFACT | types::CREATURE), ty, "{name}");
         for &k in kws {
             assert!(g.has_kw(c, k), "{name}: {k:?}");

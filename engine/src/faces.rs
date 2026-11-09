@@ -115,10 +115,11 @@ impl Game {
             }
             Ext::Poison { who, n } => {
                 if let Some(p) = self.who(f, *who) {
-                    // (Etali: that many, any number: CR 122.1f.)
-                    let n = crate::num::count(self.amount(f, *n) as i64);
-                    let pl = &mut self.players[p as usize];
-                    pl.poison = pl.poison.saturating_add(n);
+                    // (Etali: that many, any number: CR 122.1f; a negative
+                    // number is none, 107.1b.)
+                    let n = self.amount(f, *n).max(0);
+                    let total = self.players[p as usize].poison as crate::num::Wide + n;
+                    self.players[p as usize].poison = self.exact_count(total, "poison counters");
                     self.note(|_| format!("P{p} gets {n} poison counter(s)"));
                 }
                 Flow::Next
@@ -138,7 +139,7 @@ impl Game {
                     Some(other) => unreachable!("discard answer {other:?}"),
                     None => {}
                 }
-                if f.i >= *n || self.players[p as usize].hand.is_empty() {
+                if f.i >= *n as u32 || self.players[p as usize].hand.is_empty() {
                     self.draw_n(p, f.i);
                     return Flow::Next;
                 }
@@ -197,7 +198,10 @@ impl Game {
                 // discarded puts a +1/+1 counter on it if it is still that
                 // permanent. `f.i`: 0 = to draw, then 1 + discards made;
                 // `f.x`: nonland cards discarded.
-                let n = self.amount(f, *n).clamp(0, 255) as u8;
+                // (Any number: 46.4, ENGINE.md 100.2; past `u32::MAX` cards the
+                // game aborts.)
+                let n = self.amount(f, *n).max(0);
+                let n = self.exact_u32(n, "cards to connive");
                 if f.i == 0 {
                     f.x = 0;
                 }
@@ -226,7 +230,7 @@ impl Game {
                 }
                 if f.i > n || self.players[p as usize].hand.is_empty() {
                     if let (Some(c), true) = (it, f.x > 0) {
-                        self.add_counters(c, crate::db::Counter::P1P1, crate::num::count(f.x as i64));
+                        self.add_counters(c, crate::db::Counter::P1P1, f.x as crate::num::Count);
                     }
                     return Flow::Next;
                 }
@@ -238,7 +242,7 @@ impl Game {
         }
     }
 
-    fn draw_n(&mut self, p: PlayerId, n: u8) {
+    fn draw_n(&mut self, p: PlayerId, n: u32) {
         self.draw_cards(p, n as u32);
     }
 
@@ -302,17 +306,12 @@ impl Game {
             f.picked.clear();
             return Flow::Next;
         }
-        // (In exile order: `EXILE` + k = the k-th card offered.)
-        let cands: Vec<CardIdx> = self
-            .exile
-            .iter()
-            .copied()
-            .filter(|c| f.picked.contains(c) && self.can_cast_free_now(p, *c))
-            .take(act::EXILE_N as usize)
-            .collect();
-        let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
-        opts.extend(cands.into_iter().enumerate().map(|(k, c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) }));
-        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
+        // (In exile order: `EXILE` + k = the k-th card offered, every one:
+        // paged past the 32 ids, ENGINE.md 100.2.)
+        let cands: Vec<Choice> =
+            self.exile.iter().copied().filter(|c| f.picked.contains(c) && self.can_cast_free_now(p, *c)).map(Choice::Card).collect();
+        let pass = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+        self.ask_objects(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseExiled, &cands, pass);
         Flow::Suspend
     }
 
@@ -481,6 +480,11 @@ impl Game {
         let routes: Vec<crate::game::CastFrom> = match zone {
             Zone::Hand => Vec::new(),
             Zone::Graveyard => self.gy_routes(p, c, Some(face)).iter().map(|r| self.route_from(c, p, *r)).collect(),
+            // (A permission to cast spells of a kind from the top of a
+            // library asks of the face, CR 601.3e; EoE W6.)
+            Zone::Library if !self.top_play_ok(p, c) => {
+                if self.w6_top_cast_ok(p, c, Some(face)) { vec![crate::game::CastFrom::LibraryTopMana] } else { Vec::new() }
+            }
             _ => self.cast_route(p, c).into_iter().collect(),
         };
         if zone != Zone::Hand && routes.is_empty() {
@@ -537,7 +541,14 @@ impl Game {
     /// another zone with a permission) with face `face` up (an MDFC's land
     /// face, 712.12; `None` = its front).
     pub(crate) fn play_land(&mut self, p: PlayerId, c: CardIdx, face: Option<DefId>) {
-        self.players[p as usize].lands_played = self.players[p as usize].lands_played.saturating_add(1);
+        let n = self.players[p as usize].lands_played;
+        self.players[p as usize].lands_played = match n.checked_add(1) {
+            Some(v) => v,
+            None => {
+                self.abort(|| "more than 255 lands played in a turn".to_string());
+                n
+            }
+        };
         self.entering_face = face;
         // From a graveyard without a "play lands from your graveyard"
         // permanent: Serra Paragon's permission.
@@ -618,6 +629,13 @@ impl Game {
         // double-faced token (CR 707.8a: its copy effect follows the face).
         let created = self.is_copy_obj(c)
             && self.copies.iter().filter(|x| x.obj == r).all(|x| x.until == crate::layers::Until::Forever && x.own == x.vals.def);
+        // A token copy of a permanent that isn't a transforming permanent
+        // (Shifting Woodland as Outland Liberator) has only the face it was
+        // created as: it isn't represented by a double-faced card and can't
+        // transform (707.8a, 701.28c; E2).
+        if created && self.copies.iter().any(|x| x.obj == r && !x.vals.dfc) {
+            return false;
+        }
         let copying = self.is_copy(c) && !created;
         // (The face it has: its own, under a copy effect.)
         let own = if copying { self.own_def(c) } else { o.def };
@@ -652,8 +670,9 @@ impl Game {
         } else {
             self.set_face(c, other);
         }
-        let o = &mut self.objs[c.i()];
-        o.flips = o.flips.wrapping_add(1);
+        // (Counted exactly: a wrapping count would alias, CR 701.27f.)
+        let flips = self.objs[c.i()].flips;
+        self.objs[c.i()].flips = self.exact_inc(flips, "an object's transformations");
         self.note(|g| format!("{} transforms", g.name(c)));
         let r = self.obj_ref(c);
         self.event(Event::obj(EventKind::Transforms, r));
@@ -702,10 +721,39 @@ impl Game {
         }
     }
 
+    /// CR 702.145c-d, f-g for permanent `c`, which just entered, once it is
+    /// on the battlefield: after its `Enters` event, so it is seen entering
+    /// with the face it entered with. A daybound (nightbound) permanent makes
+    /// it day (night) if it is neither; a double-faced token with daybound
+    /// entering front face up at night (it doesn't enter transformed: that
+    /// needs a double-faced card, 702.145b) transforms now.
+    pub(crate) fn day_night_entered(&mut self, c: CardIdx) {
+        let d = self.def_of(c);
+        if (d.daybound || d.nightbound) && self.objs[c.i()].zone == Zone::Battlefield {
+            self.day_night_check();
+        }
+    }
+
+    /// CR 702.145c-d and f-g apply "any time", not only as a permanent
+    /// enters or as day and night change: after something that can give a
+    /// permanent daybound or nightbound (a copy effect starting or ending,
+    /// an effect that took its abilities ending) or turn a face up without
+    /// its entering (turned face up, 712.12a; phasing in, 702.26d). Checked
+    /// when a daybound or nightbound face is on the battlefield
+    /// (`day_night_check` reads the abilities each permanent has now).
+    pub(crate) fn day_night_any_time(&mut self) {
+        if self.battlefield.iter().any(|&c| {
+            let d = self.def_of(c);
+            d.daybound || d.nightbound
+        }) {
+            self.day_night_check();
+        }
+    }
+
     /// CR 731.2: as the untap step's second part, day becomes night if the
     /// previous turn's active player cast no spells that turn, night
     /// becomes day if they cast two or more.
-    pub(crate) fn day_night_turn(&mut self, spells: u8) {
+    pub(crate) fn day_night_turn(&mut self, spells: u32) {
         let next = match self.day {
             Some(true) if spells == 0 => false,
             Some(false) if spells >= 2 => true,
@@ -730,7 +778,9 @@ impl Game {
     pub(crate) fn chapters_reached(&mut self, c: CardIdx, before: crate::num::Count, after: crate::num::Count) {
         let last = self.abilities(c).chapters as crate::num::Count;
         let r = self.obj_ref(c);
-        for n in before.saturating_add(1)..=after.min(last) {
+        // (`before + 1`: a count is at most `num::COUNT_MAX`, below
+        // `u64::MAX`.)
+        for n in before + 1..=after.min(last) {
             self.event(Event { kind: EventKind::Chapter, a: Subj::Obj(r), b: Subj::None, amount: n });
         }
     }

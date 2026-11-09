@@ -67,7 +67,8 @@ impl Game {
                 };
                 let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
                 let k = if twice_if.as_ref().is_some_and(|x| self.card_matches(x, src.idx, &ctx)) { 2 } else { 1 };
-                let n = self.power(src.idx).max(0).saturating_mul(k);
+                // (Twice a power: a derived value, exact in `Wide`.)
+                let n = self.power(src.idx).max(0) * k;
                 let dmg = self.damage_source_of(src.idx);
                 let victims = match to {
                     None => vec![Target::Obj(src)],
@@ -79,13 +80,16 @@ impl Game {
                 Flow::Next
             }
             EoeD::CountControlled { filter, plus } => {
-                f.x = plus.saturating_add(self.count_controlled(f.controller, filter) as i32);
+                // (A card constant plus a count of permanents: exact in i64.)
+                f.x = *plus as i64 + self.count_controlled(f.controller, filter) as i64;
                 Flow::Next
             }
             EoeD::ApplyPtTimes { on, p, t, n, until } => {
                 let n = self.amount(f, *n);
-                let (dp, dt) = (*p as i32 * n, *t as i32 * n);
+                let (dp, dt) = (*p as crate::num::Wide * n, *t as crate::num::Wide * n);
                 if dp != 0 || dt != 0 {
+                    // (An effect's numbers: stored amounts, ENGINE.md 100.7.)
+                    let (dp, dt) = (self.exact(dp, "an effect's power"), self.exact(dt, "an effect's toughness"));
                     let m = crate::db::Mod::Pt(dp, dt);
                     self.exec_ext(f, &Ext::Apply { on: on.clone(), mods: vec![m], until: *until });
                 }
@@ -99,7 +103,7 @@ impl Game {
                     // (the event's object as it last existed), the card it
                     // became in the graveyard (one move later; EoE W3).
                     let here = self.live(r) && matches!(o.zone, Zone::Exile | Zone::Graveyard)
-                        || o.zone == Zone::Graveyard && o.inc == r.inc.wrapping_add(1);
+                        || o.zone == Zone::Graveyard && r.inc.checked_add(1) == Some(o.inc);
                     if here && !self.is_token(r.idx) {
                         let owner = self.objs[r.idx.i()].owner;
                         self.entering_tapped = true;
@@ -112,12 +116,13 @@ impl Game {
             }
             EoeD::LifeBecomesHalfStarting { who } => {
                 if let Some(p) = self.who(f, *who) {
-                    let half = (self.spec.starting_life as i64 + 1).div_euclid(2);
-                    let diff = half - self.players[p as usize].life as i64;
+                    // (In `Wide`: exact.)
+                    let half = (self.spec.starting_life as crate::num::Wide + 1).div_euclid(2);
+                    let diff = half - self.players[p as usize].life as crate::num::Wide;
                     if diff > 0 {
-                        self.gain_life(p, crate::num::amount(diff));
+                        self.gain_life(p, diff);
                     } else if diff < 0 {
-                        self.lose_life(p, crate::num::amount(-diff));
+                        self.lose_life(p, -diff);
                     }
                 }
                 Flow::Next
@@ -133,13 +138,14 @@ impl Game {
             }
             EoeD::LoseHalfLife { who } => {
                 if let Some(p) = self.who(f, *who) {
-                    let life = self.players[p as usize].life.max(0) as i64;
-                    self.lose_life(p, crate::num::amount((life + 1) / 2));
+                    // ("Half, rounded up": in `Wide`, exact.)
+                    let life = self.players[p as usize].life.max(0) as crate::num::Wide;
+                    self.lose_life(p, (life + 1) / 2);
                 }
                 Flow::Next
             }
             EoeD::DestroyCreaturesToughnessAtMostX => {
-                let x = f.spell_x as i32;
+                let x = f.spell_x as crate::num::Wide;
                 let all: Vec<CardIdx> =
                     self.battlefield.iter().copied().filter(|&c| self.is_creature(c) && self.toughness(c) <= x).collect();
                 self.begin_batch();
@@ -163,7 +169,7 @@ impl Game {
                     Some(other) => unreachable!("graveyard choice {other:?}"),
                     None => {}
                 }
-                if (f.spell_x) < *n {
+                if f.spell_x < *n as u32 {
                     return Flow::Next;
                 }
                 let opts: Vec<Opt> = f
@@ -178,7 +184,7 @@ impl Game {
                 }
                 let mut opts = opts;
                 opts.sort_by_key(|o| o.action);
-                self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseGraveyardCard, opts);
                 Flow::Suspend
             }
             EoeD::GainControlUntilEndOfTurn { on } => {
@@ -188,7 +194,14 @@ impl Game {
                     if prev == p {
                         continue;
                     }
-                    self.change_control(c, p);
+                    if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
+                        // (Recorded with its duration: EoE W6.)
+                        if self.objs[c.i()].owner == p || self.perm_room(p) > 0 {
+                            self.w6_control_effect(c, p, true);
+                        }
+                    } else {
+                        self.change_control(c, p);
+                    }
                     if self.objs[c.i()].controller == p {
                         let r = self.obj_ref(c);
                         self.add_effect(Affected::Obj(r), crate::db::Mod::ControlFrom(prev), Until::EndOfTurn, p);
@@ -212,7 +225,7 @@ impl Game {
                     .battlefield
                     .iter()
                     .copied()
-                    .filter(|&c| self.is_creature(c) && self.mana_value_of(c) % 2 == k)
+                    .filter(|&c| self.is_creature(c) && self.mana_value_of(c) % 2 == k as u64)
                     .collect();
                 self.begin_batch();
                 for c in all {
@@ -282,6 +295,12 @@ impl Game {
     /// (the latest effect first: an earlier one then sees what the later one
     /// left, CR 613.7). A later control change by another effect stays.
     pub(crate) fn return_control(&mut self, ended: Vec<(ObjRef, crate::ids::PlayerId, crate::ids::PlayerId)>) {
+        // (With an Aura's control effect in the game, the "until end of
+        // turn" effects are recorded and end together: EoE W6.)
+        if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
+            self.w6_end_eot_control();
+            return;
+        }
         for (r, to, prev) in ended {
             if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield && self.objs[r.idx.i()].controller == to {
                 self.set_control(r.idx, prev);

@@ -41,7 +41,7 @@ fn defs_of(g: &Game, owner: PlayerId) -> Vec<u16> {
         .iter()
         .enumerate()
         .filter(|(_, o)| o.owner == owner)
-        .map(|(i, _)| g.ident(CardIdx(i as u16)))
+        .map(|(i, _)| g.ident(CardIdx::new(i as u32)))
         .collect();
     d.sort();
     d
@@ -425,8 +425,14 @@ fn a_decision_the_engine_answers_itself_is_keyed() {
     };
     let autos = |keys: &[u64]| keys.iter().filter(|&&k| key_kind(k) == KEY_AUTO && key_player(k) == 1).count();
     // P0 passes in main 1: P1 gets priority. With only lands in hand P1's
-    // single option (pass) is answered for it.
+    // single option (pass) is answered for it. (Its Islands tapped: an
+    // untapped one's mana ability is an option, `YES`, ENGINE.md 100.4.3.)
     let mut g = start(&["Forest"]);
+    for c in g.battlefield().to_vec() {
+        if g.obj(c).controller == 1 {
+            g.set_tapped(c, true);
+        }
+    }
     let keys = g.pass();
     assert!(autos(&keys) >= 1, "{keys:?}");
     // With a castable instant P1 decides: no auto key for that decision.

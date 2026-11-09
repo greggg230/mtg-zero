@@ -146,8 +146,11 @@ impl Game {
                 }
             }
             Ext::PutCounters { on, counter, n } => {
-                // (Any number: Ouroboroid's X is its power, CR 122.1.)
-                let n = crate::num::count(self.amount(f, *n) as i64);
+                // (Any number: Ouroboroid's X is its power, CR 122.1; a
+                // negative number puts none, 107.1b. Past `num::COUNT_MAX`
+                // the game aborts.)
+                let n = self.amount(f, *n).max(0);
+                let n = self.exact_count(n, "counters to put");
                 for c in self.objs_on(f, on) {
                     self.add_counters(c, *counter, n);
                 }
@@ -202,7 +205,7 @@ impl Game {
             }
             Ext::Mill { who, n } => {
                 if let Some(p) = self.who(f, *who) {
-                    let n = self.amount(f, *n).max(0) as usize;
+                    let n = crate::num::cards_n(self.amount(f, *n));
                     self.mill(p, n, false);
                 }
                 Flow::Next
@@ -394,12 +397,15 @@ impl Game {
             }
             Ext::FromGraveyard { tgt, to_battlefield, yours, tapped, counter } => {
                 f.made = None;
+                // (The targets returned to the battlefield enter at once: one
+                // entry, CR 603.6a.)
+                self.begin_entering(false);
                 for t in self.targets_of(f, *tgt) {
                     let Target::Obj(o) = t else { continue };
                     if self.objs[o.idx.i()].zone != Zone::Graveyard {
                         continue;
                     }
-                    f.x = self.def_of(o.idx).mana_value() as i32;
+                    f.x = self.def_of(o.idx).mana_value() as i64;
                     if *to_battlefield {
                         let ctl = if *yours { f.controller } else { self.objs[o.idx.i()].owner };
                         // "Tapped", "with a <kind> counter on it": as it
@@ -417,6 +423,7 @@ impl Game {
                         self.move_card(o.idx, Zone::Hand, Pos::Top);
                     }
                 }
+                self.end_entering();
                 Flow::Next
             }
             Ext::EachPutFromGraveyard { filter } => {
@@ -443,16 +450,19 @@ impl Game {
                         f.i += 1;
                         continue;
                     }
-                    self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                    self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseGraveyardCard, opts);
                     return Flow::Suspend;
                 }
                 let chosen = std::mem::take(&mut f.picked);
+                // (At once: one entry, CR 603.6a.)
+                self.begin_entering(false);
                 for c in chosen {
                     let owner = self.objs[c.i()].owner;
                     if self.objs[c.i()].zone == Zone::Graveyard {
                         self.put_onto_battlefield(c, owner);
                     }
                 }
+                self.end_entering();
                 Flow::Next
             }
             Ext::ExileGraveyard { who } => {
@@ -470,7 +480,7 @@ impl Game {
                     if r != *to {
                         continue;
                     }
-                    let share = f.division.get(k).copied().unwrap_or(0) as i32;
+                    let share = f.division.get(k).copied().unwrap_or(0);
                     k += 1;
                     let live = match t {
                         Target::Obj(o) => self.live(o),
@@ -611,7 +621,8 @@ impl Game {
                         ..Default::default()
                     },
                     crate::program::About::Remembered => {
-                        crate::triggers::EvCtx { amount: crate::num::unsigned(f.x), ..Default::default() }
+                        // ("That much": a negative remembered number is none.)
+                        crate::triggers::EvCtx { amount: f.x.max(0) as u64, ..Default::default() }
                     }
                     crate::program::About::EachMade => unreachable!("handled above"),
                 };
@@ -664,9 +675,11 @@ impl Game {
                 Flow::Next
             }
             Ext::AddColorless { n } => {
-                let n = self.amount(f, *n).clamp(0, 255) as u8;
-                self.players[f.controller as usize].pool.amt[5] =
-                    self.players[f.controller as usize].pool.amt[5].saturating_add(n);
+                // (A negative amount adds none, CR 107.1b; the pool keeps a
+                // `u8` a type: past it the game aborts, `ManaPool::add`.)
+                let n = self.amount(f, *n).max(0);
+                let n = self.exact_u8(n, "mana of one type");
+                self.add_mana(f.controller, &[0, 0, 0, 0, 0, n]);
                 Flow::Next
             }
             Ext::RememberSpellMv { tgt } => {
@@ -674,7 +687,7 @@ impl Game {
                 for t in self.targets_of(f, *tgt) {
                     if let Target::Obj(o) = t {
                         if self.objs[o.idx.i()].zone == Zone::Stack {
-                            f.x = self.mana_value_of(o.idx) as i32;
+                            f.x = self.mana_value_of(o.idx) as i64;
                             break;
                         }
                     }
@@ -699,9 +712,10 @@ impl Game {
             }
             Ext::ApplyPtPerCount { on, filter, p, t } => {
                 let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
-                // (p and t are signs, -1..=1: at most the battlefield's size.)
+                // (p and t are signs, -1..=1: at most the battlefield's size,
+                // exact in i64.)
                 let n = self.battlefield.iter().filter(|&&c| self.card_matches(filter, c, &ctx)).count() as i64;
-                let (dp, dt) = (crate::num::amount(*p as i64 * n), crate::num::amount(*t as i64 * n));
+                let (dp, dt) = (*p as i64 * n, *t as i64 * n);
                 for c in self.objs_on(f, on) {
                     let r = self.obj_ref(c);
                     self.add_effect(Affected::Obj(r), Mod::Pt(dp, dt), crate::layers::Until::EndOfTurn, f.controller);
@@ -801,10 +815,11 @@ impl Game {
                 Flow::Next
             }
             Ext::CounterOrDoubleOnSecond { on } => {
-                let n = match self.resolved.iter_mut().find(|x| x.0 == f.source) {
-                    Some(x) => {
-                        x.1 = x.1.saturating_add(1);
-                        x.1
+                let n = match self.resolved.iter().position(|x| x.0 == f.source) {
+                    Some(k) => {
+                        let n = self.exact_inc(self.resolved[k].1, "resolutions this turn");
+                        self.resolved[k].1 = n;
+                        n
                     }
                     None => {
                         self.resolved.push((f.source, 1));
@@ -863,11 +878,12 @@ impl Game {
                         if kinds.is_empty() {
                             return Flow::Jump(*skip);
                         }
-                        let mut opts: Vec<Opt> = (0..kinds.len().min(16))
-                            .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
-                            .collect();
-                        opts.push(Opt { action: act::PASS, choice: Choice::Pass });
-                        self.ask(Task::Run(f.clone()), f.controller, DecisionKind::ChooseMode, opts);
+                        // (Every kind, CR 122.1: `NUMBER` + k, paged past the
+                        // 32 ids; ENGINE.md 100.2.)
+                        let items: Vec<(u32, Choice)> =
+                            (0..kinds.len()).map(|k| (k as u32, Choice::Number(u8::try_from(k).expect("at most 256 counter kinds")))).collect();
+                        let pass = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+                        self.ask_paged(Task::Run(f.clone()), f.page, f.controller, DecisionKind::ChooseMode, act::NUMBER, act::NUMBER_N, &items, pass);
                         Flow::Suspend
                     }
                 }
@@ -976,7 +992,7 @@ impl Game {
                 let Some(r) = f.ev.obj else { return Flow::Next };
                 let o = &self.objs[r.idx.i()];
                 // The card it became in the graveyard (one move later).
-                if o.zone == Zone::Graveyard && o.inc == r.inc.wrapping_add(1) && !self.is_token(r.idx) {
+                if o.zone == Zone::Graveyard && r.inc.checked_add(1) == Some(o.inc) && !self.is_token(r.idx) {
                     let owner = o.owner;
                     // (It enters with the counter, CR 614.1c.)
                     self.entering_counters = vec![(*counter, 1)];
@@ -989,9 +1005,12 @@ impl Game {
                 let cards: Vec<crate::ids::ObjRef> =
                     self.links.iter().filter(|l| l.source == f.source).map(|l| l.card).collect();
                 let def = self.db.token_def(*token);
+                // (The tokens are created at once, each X/X as it is made:
+                // one entry, CR 603.6a.)
+                self.begin_entering(false);
                 for card in cards {
                     let owner = self.objs[card.idx.i()].owner;
-                    let x = self.def_of(card.idx).mana_value() as i32;
+                    let x = self.def_of(card.idx).mana_value() as i64;
                     for t in self.create_tokens(def, owner, 1, false) {
                         if self.objs[t.i()].zone == Zone::Battlefield {
                             let r = self.obj_ref(t);
@@ -999,6 +1018,7 @@ impl Game {
                         }
                     }
                 }
+                self.end_entering();
                 Flow::Next
             }
             Ext::Monstrosity { n } => {
@@ -1027,8 +1047,13 @@ impl Game {
             }
             Ext::LookTopN { who, n } => {
                 if let Some(p) = self.who(f, *who) {
-                    let n = self.amount(f, *n).clamp(0, 60) as u8;
+                    // Exactly the top n (any n: past the library's size, all
+                    // of it; the choice among them pages past the 64 list
+                    // slots, `Op::PileTo`).
+                    let n = self.amount(f, *n);
                     if n > 0 {
+                        let lib = self.players[p as usize].library.len();
+                        let n = if n >= lib as crate::num::Wide { lib } else { n as usize };
                         self.look_top(f, p, n, false);
                     }
                 }
@@ -1039,7 +1064,7 @@ impl Game {
                 let p = f.controller;
                 self.note(|_| format!("P{p} wins the game"));
                 self.players[crate::ids::opp(p) as usize].lost = true;
-                self.outcome = Some(crate::game::Outcome { winner: Some(p), reason: crate::game::EndReason::Effect });
+                self.end_game(Some(p), crate::game::EndReason::Effect);
                 Flow::Next
             }
             Ext::BounceAll => {
@@ -1172,26 +1197,37 @@ impl Game {
                 Flow::Next
             }
             Ext::GetEnergy { n } => {
-                let pl = &mut self.players[f.controller as usize];
-                pl.energy = pl.energy.saturating_add(*n as crate::num::Count);
+                let total = self.players[f.controller as usize].energy as crate::num::Wide + *n as crate::num::Wide;
+                self.players[f.controller as usize].energy = self.exact_count(total, "energy counters");
                 Flow::Next
             }
             Ext::PayEnergyDamage { tgt } => {
+                // "Pay any amount of {E}" (CR 107.14): any amount up to the
+                // energy the player has (`Game::ask_amount`, digits past 31;
+                // ENGINE.md 100.2).
                 let p = f.controller;
+                let most = self.players[p as usize].energy as u64;
                 match self.answer.take() {
-                    Some(Choice::Number(k)) => {
-                        self.players[p as usize].energy -= k as crate::num::Count;
-                        let src = self.frame_damage_source(f);
-                        for t in self.targets_of(f, *tgt) {
-                            self.deal_damage(src, t, k as i32);
+                    Some(Choice::Number(k)) => match f.step.answer_amount(0, most, k) {
+                        crate::decision::NumberAnswer::Next(s) => {
+                            f.step = s;
+                            self.agenda.push(Task::Run(f.clone()));
+                            Flow::Suspend
                         }
-                        Flow::Next
-                    }
+                        crate::decision::NumberAnswer::Value(k) => {
+                            // (At most the energy the player has: a count.)
+                            let k = k as crate::num::Count;
+                            self.players[p as usize].energy -= k;
+                            let src = self.frame_damage_source(f);
+                            for t in self.targets_of(f, *tgt) {
+                                self.deal_damage(src, t, crate::num::count_amount(k));
+                            }
+                            Flow::Next
+                        }
+                    },
                     Some(other) => unreachable!("energy answer {other:?}"),
                     None => {
-                        let most = self.players[p as usize].energy.min((act::NUMBER_N - 1) as crate::num::Count) as u16;
-                        let opts = (0..=most).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseMode, opts);
+                        self.ask_amount(Task::Run(f.clone()), f.step, p, DecisionKind::ChooseMode, 0, most);
                         Flow::Suspend
                     }
                 }
@@ -1248,6 +1284,8 @@ impl Game {
                 Flow::Next
             }
             Ext::PutInLibraryAtX { tgt } => {
+                // (Exactly X cards above it, any X; past the library's
+                // cards, the bottom: CR 401.4.)
                 let depth = f.spell_x;
                 for t in self.targets_of(f, *tgt) {
                     if let Target::Obj(o) = t {
@@ -1272,7 +1310,7 @@ impl Game {
                         // Mill that many (the milled cards put into the
                         // graveyard are the pile: not one a replacement
                         // shuffled into the library instead).
-                        let n = f.ev.amount as usize;
+                        let n = crate::num::cards_n(f.ev.amount as crate::num::Wide);
                         let mut milled = self.mill(p, n, true);
                         milled.retain(|&c| self.objs[c.i()].zone == Zone::Graveyard);
                         f.pile = milled;
@@ -1311,7 +1349,7 @@ impl Game {
                     return Flow::Next;
                 }
                 opts.push(Opt { action: act::PASS, choice: Choice::Pass });
-                self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseGraveyardCard, opts);
                 Flow::Suspend
             }
             Ext::LinkedCreaturesToBattlefield { flying, becomes } => {
@@ -1324,6 +1362,9 @@ impl Game {
                     .filter(|r| self.def_of(r.idx).is(crate::db::types::CREATURE))
                     .collect();
                 let p = f.controller;
+                // (At once, each with its counter and as what it becomes: one
+                // entry, CR 603.6a, 614.1c.)
+                self.begin_entering(false);
                 for r in cards {
                     let new = self.put_onto_battlefield(r.idx, p);
                     if self.objs[r.idx.i()].zone != Zone::Battlefield {
@@ -1335,9 +1376,10 @@ impl Game {
                     if let Some((sub, pw, tg)) = becomes {
                         let m = Mod::Types { add: 0, subtypes: vec![*sub], replace: false };
                         self.add_effect(Affected::Obj(new), m, crate::layers::Until::Forever, p);
-                        self.add_effect(Affected::Obj(new), Mod::SetPt(*pw, *tg), crate::layers::Until::Forever, p);
+                        self.add_effect(Affected::Obj(new), Mod::set_pt(*pw, *tg), crate::layers::Until::Forever, p);
                     }
                 }
+                self.end_entering();
                 Flow::Next
             }
             Ext::LookAtRandomHandCard { who } => {
@@ -1392,7 +1434,7 @@ impl Game {
                     None => {}
                 }
                 if f.i == 0 {
-                    self.look_top(f, p, *n, true);
+                    self.look_top(f, p, *n as usize, true);
                     f.picked.clear();
                     f.i = 1;
                 }
@@ -1402,7 +1444,7 @@ impl Game {
                     let mut seen = Vec::new();
                     let mut opts = Vec::new();
                     let mut sorted = f.pile.clone();
-                    sorted.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+                    sorted.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
                     for (k, &c) in sorted.iter().enumerate() {
                         let d = self.objs[c.i()].def;
                         if seen.contains(&d) {
@@ -1650,6 +1692,8 @@ impl Game {
             Ext::EoeW3(x) => self.exec_eoe_w3(f, x),
             Ext::EoeW4(x) => self.exec_eoe_w4(f, x),
             Ext::EoeW1(x) => self.exec_eoe_w1(f, x),
+            Ext::EoeW6(x) => self.exec_eoe_w6(f, x),
+            Ext::EoeW2(x) => self.exec_eoe_w2(f, x),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }
@@ -1663,7 +1707,7 @@ impl Game {
                     if let Some(&top) = self.players[p as usize].library.last() {
                         self.force_library_card(top, crate::hidden::KEY_REVEAL, p);
                         self.reveal(top);
-                        f.x = self.def_of(top).mana_value() as i32;
+                        f.x = self.def_of(top).mana_value() as i64;
                         self.move_card(top, Zone::Hand, Pos::Top);
                     }
                 }

@@ -39,7 +39,8 @@ pub(crate) fn keyword_mods(l: &mut Lowerer, kws: &[cats::Keyword]) -> Vec<Mod> {
                 | super::printing::KwOrProt::Cascade
                 | super::printing::KwOrProt::Ascend
                 | super::printing::KwOrProt::Annihilator(_)
-                | super::printing::KwOrProt::Devoid,
+                | super::printing::KwOrProt::Devoid
+                | super::printing::KwOrProt::Modular(_),
             ) => {
                 l.unsupported("Keyword(granted trigger)")
             }
@@ -60,7 +61,7 @@ pub(crate) fn keyword_mods(l: &mut Lowerer, kws: &[cats::Keyword]) -> Vec<Mod> {
 fn pump_mods(l: &mut Lowerer, p: i64, t: i64, kws: &[cats::Keyword]) -> Vec<Mod> {
     let mut mods = Vec::new();
     if p != 0 || t != 0 {
-        mods.push(Mod::Pt(l.int("pump.power", p, -99, 99), l.int("pump.toughness", t, -99, 99)));
+        mods.push(Mod::pt(l.int("pump.power", p, -99, 99), l.int("pump.toughness", t, -99, 99)));
     }
     mods.extend(keyword_mods(l, kws));
     if mods.is_empty() {
@@ -220,12 +221,13 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             also_untap_if_not_your_turn,
             tokens_only,
         }) => {
-            let mut f = and(creature(), Filter::Controller(true));
+            // (`attacking_only`: "attacking creatures get ...", whoever controls
+            // them: the class's docstring; Contested War Zone, ENGINE.md
+            // 99.12. Cecil's "other attacking creatures" trigger as Cecil
+            // attacks: the same creatures.)
+            let mut f = if *attacking_only { and(creature(), Filter::Attacking) } else { and(creature(), Filter::Controller(true)) };
             if *exclude_source {
                 f = and(f, not(Filter::Source));
-            }
-            if *attacking_only {
-                f = and(f, Filter::Attacking);
             }
             if *tokens_only {
                 f = and(f, Filter::Token);
@@ -471,7 +473,10 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 // A land that makes coloured mana animates into a coloured
                 // creature in the cube; the IR lost the colours and the
                 // creature type (Celestial Colonnade: "white and blue
-                // Elemental"). An IR defect (ENGINE.md 20).
+                // Elemental"). An IR defect (ENGINE.md 20; docs/ir_defects.md
+                // 2, fixed in the IR): refused, never repaired (a loud guard
+                // that a land animating into a colourless creature would
+                // also meet: a refusal, not a wrong game).
                 l.unsupported("BecomeLandCreatureUEOT.set_colors(missing for a coloured land)");
             }
             // "a 1/1 Phyrexian Blinkmoth artifact creature" (Inkmoth Nexus):
@@ -505,7 +510,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 }
                 mods.push(Mod::Colors(m));
             }
-            mods.push(Mod::SetPt(
+            mods.push(Mod::set_pt(
                 l.int("BecomeLandCreatureUEOT.power", *power, 0, 99),
                 l.int("BecomeLandCreatureUEOT.toughness", *toughness, 0, 99),
             ));
@@ -540,10 +545,10 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 let s = l.subtype(requires_subtype);
                 Some(b.op(Op::Ext(Ext::JumpUnlessSource { filter: Filter::Subtype(s), to: 0 })))
             };
-            let subs = subtypes.iter().filter_map(|s| l.given_subtype("SourceBecomesIfSubtype.subtypes", s)).collect();
+            let subs = subtypes.iter().filter_map(|s| l.set_subtype("SourceBecomesIfSubtype.subtypes", s)).collect();
             let mut mods = vec![Mod::Types { add: 0, subtypes: subs, replace: true }];
             match base_pt[..] {
-                [p, t] => mods.push(Mod::SetPt(
+                [p, t] => mods.push(Mod::set_pt(
                     l.int("SourceBecomesIfSubtype.base_pt", p, 0, 99),
                     l.int("SourceBecomesIfSubtype.base_pt", t, 0, 99),
                 )),
@@ -561,7 +566,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 f = and(f, not(Filter::Source));
             }
             let t = b.target(f, if *optional { 0 } else { 1 }, 1);
-            let m = Mod::SetPt(
+            let m = Mod::set_pt(
                 l.int("SetBasePTUntilEOT.power", *power, 0, 99),
                 l.int("SetBasePTUntilEOT.toughness", *toughness, 0, 99),
             );
@@ -1692,7 +1697,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             nodes::PutEachCreatureCardExiledWithSourceOntoBattlefieldUnderYourControl { grant_flying_counter, grant_subtype_and_pt },
         ) => {
             let becomes = grant_subtype_and_pt.as_ref().map(|(s, p, t)| {
-                (l.given_subtype("grant_subtype_and_pt", s).unwrap_or(0), l.int("grant_subtype_and_pt.p", *p, 0, 99), l.int("grant_subtype_and_pt.t", *t, 0, 99))
+                (l.set_subtype("grant_subtype_and_pt", s).unwrap_or(0), l.int("grant_subtype_and_pt.p", *p, 0, 99), l.int("grant_subtype_and_pt.t", *t, 0, 99))
             });
             b.op(Op::Ext(Ext::LinkedCreaturesToBattlefield { flying: *grant_flying_counter, becomes }));
         }
@@ -1752,7 +1757,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                     let subtypes: Vec<u16> = subtypes_to_add.iter().filter_map(|s| l.given_subtype("BecomeType.subtypes_to_add", s)).collect();
                     let mut mods = vec![Mod::Types { add, subtypes, replace: false }];
                     if let Some((p, t)) = base_pt {
-                        mods.push(Mod::SetPt(l.int("BecomeType.base_pt", *p, 0, 99), l.int("BecomeType.base_pt", *t, 0, 99)));
+                        mods.push(Mod::set_pt(l.int("BecomeType.base_pt", *p, 0, 99), l.int("BecomeType.base_pt", *t, 0, 99)));
                     }
                     apply(b, On::Source, mods, until);
                 }

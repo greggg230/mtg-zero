@@ -38,7 +38,7 @@ fn opts(g: &Game) -> String {
     g.options_desc().join(" | ")
 }
 
-fn p1p1(g: &Game, c: CardIdx) -> u32 {
+fn p1p1(g: &Game, c: CardIdx) -> u64 {
     g.counters_on(c, Counter::P1P1)
 }
 
