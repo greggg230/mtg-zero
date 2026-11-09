@@ -669,7 +669,10 @@ pub fn perturbations() -> Vec<Perturbation> {
             effect(&mut a.g, c, Mod::CantBlock)
         }),
         p!("a creature can't be blocked", "Game.effects", |a, r| {
-            let c = pick(&slot_creatures(&a.g), r)?;
+            // (One that can be blocked now: another such effect, or its own
+            // ability, would make this one change nothing.)
+            let cs: Vec<CardIdx> = slot_creatures(&a.g).into_iter().filter(|&c| !a.g.flags_of(c).cant_be_blocked).collect();
+            let c = pick(&cs, r)?;
             effect(&mut a.g, c, Mod::CantBeBlocked)
         }),
         p!("a creature attacks each combat", "Game.effects", |a, r| {

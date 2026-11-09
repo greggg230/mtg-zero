@@ -283,6 +283,11 @@ impl Game {
             (K::Priority, Choice::PlayFace(i)) => format!("Play {} ({})", self.other_face_name(i), nm(i)),
             (K::Priority, Choice::Faces(i, _)) => format!("Cast or play {}", nm(i)),
             (K::Priority, Choice::Companion) => "Put the companion into hand".into(),
+            // Mana abilities with priority (ENGINE.md 100.4.3).
+            (K::Priority, Choice::Yes) => "Activate mana abilities".into(),
+            (K::ActivateMana, Choice::Card(i)) => format!("Activate a mana ability of {}", nm(i)),
+            (K::ActivateMana, Choice::Pass) => "Done activating mana abilities".into(),
+            (K::PayMana, Choice::Pass) => "Pay the rest from the pool".into(),
             (_, Choice::Ability(i, slot)) => {
                 let d = self.def_of(i);
                 let ad = match slot {
@@ -296,6 +301,7 @@ impl Game {
                 let taps_for_mana = ad.is_some_and(|a| a.mana().is_some() && a.cost.tap);
                 match (kind, loyalty) {
                     (K::PayMana, _) => format!("Tap {} for mana", nm(i)),
+                    (K::ActivateMana, _) => format!("Activate the mana ability of {}", nm(i)),
                     (K::Sacrifice, _) => format!("Tap {} for mana, then sacrifice it", nm(i)),
                     (K::BounceCost, _) => format!("Tap {} for mana, then return it to hand", nm(i)),
                     (K::Priority, _) if taps_for_mana => format!("Tap {} for mana", nm(i)),
@@ -388,7 +394,7 @@ impl Game {
             (K::DivideDamage, Choice::Number(n)) => format!("{n} damage"),
             (K::ChooseFace, Choice::Number(0)) => "Front face".into(),
             (K::ChooseFace, Choice::Number(_)) => "Other face".into(),
-            (K::PayPool, Choice::Number(n)) => format!("Leave mana option {}", n + 1),
+            (K::PayPool, Choice::Item(n)) => format!("Leave mana option {}", n + 1),
             (K::PlayDraw, Choice::Target(Target::Player(p))) => {
                 if Some(p) == self.to_move() { "Play first".into() } else { "Draw first".into() }
             }

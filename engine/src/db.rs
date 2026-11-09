@@ -1163,6 +1163,11 @@ pub const SPEND_ELDRAZI_ABILITY: u8 = 16;
 pub const SPEND_LAND_ABILITY: u8 = 32;
 /// ... only to cast a spell from anywhere other than your hand.
 pub const SPEND_OUTSIDE_HAND: u8 = 64;
+/// Not a purpose: the rider "and that spell can't be countered" (Delighted
+/// Halfling) on mana in a pool (`Game::pool_restr`'s `only`), which stays
+/// with the mana (CR 106.6; docs/shortcuts.md N20, ENGINE.md 100.4).
+/// `eoe_w2::spendable` ignores it.
+pub const MANA_UNCOUNTERABLE: u8 = 128;
 
 /// Sacrifice n permanents you control matching the filter (`another`: not
 /// the ability's source).

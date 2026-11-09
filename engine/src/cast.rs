@@ -265,6 +265,11 @@ impl Game {
         if let Some(o) = self.companion_option(p, sorcery_ok, &classes) {
             opts.push(o);
         }
+        // Activate mana abilities (CR 605.3a, 117.1d: any time the player
+        // has priority; ENGINE.md 100.4.3).
+        if !self.mana_float_sources(p, &classes, sorcery_ok).is_empty() {
+            opts.push(Opt { action: act::YES, choice: Choice::Yes });
+        }
         (opts, exile, gy)
     }
 

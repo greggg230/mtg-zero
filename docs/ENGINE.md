@@ -20149,6 +20149,142 @@ suite: 2,006 passed, 0 failed, 20 ignored (133 binaries). Digests as above; `--t
 commits ran the affected test binaries and the digests; the full suite ran on c5765ef (its first run,
 on 2ec2d28's parent, found `tests/az.rs`'s slot test unaware of "next page" options, fixed in
 2ec2d28).
+
+#### 100.4 B: mana and payment (branch `eoe-b-pay`, from `eoe-base` 9c67a75)
+
+**Why.** The audit's workstream B (`docs/faithfulness_audit.md` 5.3, 5.4, 6): the payment model
+exact, and mana abilities at any time. First W2's mana branch (99.12) and workstream A (100.2) were
+merged in (07c4316, 95c7fe2: on 95c7fe2 the suite passed, the digests equal A's
+`038ee15c3fd29b28` / `69e4452bbf60b46f`, and the EoE fuzz passed but for seeds 10023 and 13398).
+
+##### 100.4.1 The feasibility search with Gene Pollinators (EoE fuzz seeds 10023, 13398)
+
+**Root cause.** A Pollinator's "{T}, Tap an untapped permanent you control" is a source on every
+untapped permanent (`POL_FOR`, 99.12), so a land is a card of two ways (its own ability, or tapped
+for a Pollinator) and `pay::ways_payable` tried each way or none for every such card: 3^n leaves.
+Seed 10023's board had two Pollinators and 13 lands (Cascading Cataracts' "{5}, {T}: add five mana
+in any combination of colors" being paid): about 290,000 nodes a check, and the payment asks it for
+every production of the Cataracts (126) and every spend of the virtual pool, so one decision took
+minutes. With 20 lands one check passed `SEARCH_NODES` (a loud failure).
+
+**Fix: two reductions that change no answer** (`ways_payable`):
+
+* *A dominated "none".* A way that takes no budget (life, a reserved permanent, a shared tap) and
+  adds no need only adds units, and available units are optional in `payable_within_n`, so a card
+  with such a way is never left out: a payment that leaves it out is the same payment with that way,
+  its units unused.
+* *Identical cards.* Cards whose ways are equal are interchangeable (which of them uses which way
+  changes no unit, budget or need): one group, and the search chooses how many of the group use
+  each way (a multiset), not which card does.
+
+A Pollinator's way still takes one of the shared taps, so with k Pollinators the search is
+polynomial in the cards (degree k); the node limit stays as the loud backstop. No decision changes
+(digests unchanged). Seed 10023 now takes 5 s; 13250-13499 (13398 among them) pass.
+
+Tests: `rules_payment_b.rs::cr_601_2g_two_gene_pollinators_and_twenty_lands_are_decided_exactly`
+(two Pollinators and 20 basic lands: exact answers for five costs; it failed on 95c7fe2 with the
+node limit's panic). The node-limit test (`pay::tests`) now uses cards whose ways cost life, so no
+reduction applies.
+
+##### 100.4.2 The pool's mana: restrictions, riders, every pool left (13.1k, N11, N19, N20)
+
+* **N19.** Mana a mana ability makes with priority keeps its spending restriction in every table
+  (`Game::add_restricted_mana`; CR 106.6). W2 had kept the cube's old behaviour (the restriction
+  dropped) to keep the digests.
+* **N20.** Delighted Halfling's rider "and that spell can't be countered" goes with the mana into
+  the pool: a bit of the pool kind's `only` (`db::MANA_UNCOUNTERABLE`; not a purpose, so
+  `eoe_w2::spendable` ignores it). A payment for a spell that spends such pool mana marks the spell
+  `Uncounterable` (`finish_payment`), as a Halfling picked in the payment did already.
+* **13.1k.** `pool_rems` is exact: the virtual pool's units are told apart by type, restriction
+  and rider, haste (Arena of Glory) and `MADE` (a mana ability with a mana cost made it in this
+  payment); every spend of `vm` units that completes the payment is tried, and every distinct pool
+  it leaves (amounts, restricted kinds, haste) is the player's choice. Gone: "artifact-only {C}
+  before other {C}", "haste {R} after other {R} on a noncreature spell" and `kinds_left`'s "narrower
+  purposes first" (the pools differ, and nothing turns plain mana into the restricted kind).
+* **N11.** `PayPool` offers every pool: with more than 32, A0's `ask_paged` pages them in the
+  `NUMBER` range (`PayMana::pool_page`; the options are `Choice::Item(k)`, a new choice for "the
+  k-th of the asking task's list", since a list can pass `Number`'s 256).
+
+Tests (`rules_payment_b.rs`; each failed on 599e4d9): `cr_106_6_floated_workshop_mana_keeps_its_restriction`
+(constructed table: Wasteland at Mishra's Workshop, the {C}{C}{C} floated stays artifact-only),
+`cr_106_6_the_halfling_rider_stays_with_mana_in_the_pool` (a restricted {W} with the rider pays Test
+Legend; Counterspell fails), `cr_601_2h_restricted_or_plain_colorless_for_an_artifact`,
+`cr_601_2h_haste_red_may_pay_a_noncreature_spell`, `cr_601_2h_every_pool_left_is_offered` (three
+of each type, Coveted Jewel's {6}: 336 pools, each once). The test kit has
+`Scenario::pool_restricted`.
+
+**Digests.** Full `038ee15c3fd29b28` -> `21badc9235bd1cd1`, `DIGEST_ENCODING=0` `69e4452bbf60b46f`
+-> `b1f5b72e8b3ac987`: 16 of the 2,500 games change (the more `PayPool` options, and floated
+Workshop mana). `RULES_EPOCH` bumped.
+
+##### 100.4.3 Mana abilities at any time (F3: 13.2k, 13.4, 13.12, 13.13, 13.14)
+
+**Why.** CR 605.3a and 117.1d let a player activate a mana ability whenever they have priority;
+the engine offered them with priority only for a source about to be lost (86) and a few named
+abilities. Floating mana matters: Balance after tapping every land, a painland's damage at instant
+speed, a Spirit Guide exiled to shrink the hand, a land tapped while the pool's {R} is kept for a
+Lightning Bolt.
+
+* **Priority.** `act::YES` ("activate mana abilities") is offered whenever the player has a mana
+  ability they may activate now (`Game::mana_float_sources`: timing, restrictions, the whole cost,
+  some mana to make; not the abilities 86 and `mana_with_priority` already offer at priority, so
+  each activation is one action). It opens `DecisionKind::ActivateMana` (the 47th kind: the
+  context block's one-hot, no layout change; the task code is the generic one): `MY_PERM` = a
+  permanent with such abilities (which one next, `ChooseMode` `NUMBER` + k, when it has several:
+  its own, those other permanents grant it, Rain of Filth's granted sacrifice), `HAND_ABILITY` = a
+  card's in hand, one per definition (a Spirit Guide's). The first question offers no `PASS`, so
+  `YES` always leads to an activation (it resets the passes like any action); after each
+  activation the question comes again with `PASS` = done. The player keeps priority (605.3b).
+  Each activation is the ability's usual one (`begin_activate` -> `ManaNow`: X, the ability's mana
+  cost paid by `PayMana`, a sacrifice, now also "tap an untapped <permanent>" (Urza, Gene
+  Pollinator: `ChoosePermanent`, one decision each, a set), the production chosen), the mana going
+  to the pool with its restriction and rider (100.4.2). Also new, for every mana ability made with
+  priority (86's floats too): "whenever you tap a <land subtype> for mana" mana (only the creature
+  bonus was added before), and a production with more than 32 options paged (`ManaNowPick`,
+  A0's `ask_paged`, `Choice::Item`: Cascading Cataracts' 126).
+* **Hidden cards.** `ActivateMana` counts as a payment in progress (`Game::payment_in_progress`):
+  the player's mana sources in hand stay pinned in the worlds `determinize` deals for the
+  opponent, as during a payment (ENGINE.md 10), since the options counted on them. A refreshed
+  `ChooseMode` asks for the same permanent again.
+* **Payments (13.13).** When the picks and the virtual pool cover the rest (`PayMana::pool_covers`),
+  the payment no longer ends there: `PASS` = the pool pays the rest, and every source whose pick
+  leaves the payment payable is offered (a single source paying instead of pool mana; a
+  several-mana source when some of its mana is spent: a completing spend takes more of a kind than
+  the virtual pool had without it; a production none of whose mana is spent only floats, as with
+  priority before the payment). After such a pick the pool's spend is read again. `vm` is read
+  from the state whenever a decision is asked (`vm_now`; the value the picks were made with, so the
+  same in the game, and right in a refreshed or test-changed world).
+* **Wizard's Rockets (13.14).** Offered like any source whose pick leaves the payment payable
+  (`convert_ok`'s "only when nothing else pays" removed).
+* **The bots** never choose `YES` (no rule of theirs names it); in a covering payment their first
+  option is `PASS`, the old behaviour.
+
+Tests (`rules_payment_b.rs`, each failing on 86824d5): `cr_605_3a_mana_abilities_at_an_ordinary_priority`,
+`cr_605_3a_a_spirit_guide_with_priority`, `cr_602_2b_gene_pollinator_with_priority_taps_the_chosen_permanent`,
+`cr_106_1a_cascading_cataracts_with_priority_offers_every_production` (126 productions, paged),
+`cr_601_2g_a_land_pays_while_the_pool_keeps_its_mana`, `cr_601_2g_wizards_rockets_pays_while_a_land_could`.
+Tests changed for the new options (each a `PASS` or `YES` the old engine didn't offer):
+`cards_m4b1.rs` (Voltaic Key), `cards_m7b_tests_mana.rs` (Basalt Monolith, Manifold Key),
+`rulings_stack.rs` (Teferi: passing or mana abilities), `hidden.rs` (the auto-answered priority: the
+Islands tapped), `tests/az.rs` (`PayPool` is minor too; the encoding's bound is `FEATURE_BOUND`, as
+the fuzz checks: floated mana reaches large X; the openings' encoding hashes re-recorded; the
+gates' mixed play picks `YES` in one random pick of eight, so the games stay as deep as the gates
+need). `public_state.rs`: "a creature can't be blocked" perturbs only a creature that can be
+blocked now (on Norman Osborn, who can't be, it changed nothing). The spectator view names the new
+options.
+
+**Digests.** Every game changes, as the audit expected (Priority offers `YES` wherever a source is
+ready, so fewer decisions are auto-answered): full `21badc9235bd1cd1` -> `02cb76576f92a66c`,
+`DIGEST_ENCODING=0` `b1f5b72e8b3ac987` -> `d0a7be8d70719c90` (2,500 of 2,500 games). Random play
+(the fuzz) makes about twice the decisions (default 215 -> 440 a game; EoE 495 -> 785).
+`RULES_EPOCH` bumped.
+
+**The merge of `eoe-base` 5f0b07e** (the loose ends, 100.6; 01a41a2): the loose ends changed no
+digest game of `eoe-base`, but one of this branch's (F3 games differ): its day and night checked at
+once (CR 702.145c-g) changes the encodings of one game, not its actions. Full `02cb76576f92a66c` ->
+`3667d9433f0f7a00` (1 of 2,500), `DIGEST_ENCODING=0` unchanged (`d0a7be8d70719c90`). `RULES_EPOCH`
+bumped.
+
 #### 100.6 Loose ends (branch `eoe-e-loose`, from `eoe-base` 9b403c1)
 
 The faithfulness audit's small items that no workstream owned: what workstream C found in day and
@@ -20241,6 +20377,147 @@ default `FUZZ_GAMES=20000` passed (20,000 games, wins 9,972 / 9,989, 39 draws, m
 215.7 decisions; 1,000 matches; 451 s on a loaded machine); `FUZZ_POOL=eoe FUZZ_GAMES=20000`
 passed (20,000 games, wins 8,918 / 9,040, 2,042 draws, mean 40.1 turns, 500.7 decisions; 992 s).
 Both are the numbers of 100.3, as the unchanged digests say.
+
+##### 100.4.4 Not done in this session (left for workstream B's next pass)
+
+In the brief's order, what is still open, with what each needs:
+
+* **N21 (W2's item a): restrictions on needs.** A mana ability's own mana cost paid inside a payment
+  (34.2's `NOT_MADE` needs) is matched by `mana::fits`, which reads types and `MADE` only: a need
+  should carry the purposes its ability satisfies (`ability_allow` of its source) and a unit its
+  `only`, matched by `eoe_w2::spendable`; a source the payment itself can't spend should then still
+  be offered for a need it can pay (Sunken Citadel's land-ability mana for Cascading Cataracts'
+  {5}: W6 needs this). `payable_iter`'s grouping by mask has to grow a restriction key, and a
+  restricted unit can't pay generic pips of the main cost; with a restricted unit present an exact
+  general matching (needs on one side, units on the other, every chosen unit matched:
+  Mendelsohn-Dulmage) replaces the fast path.
+* **13.15: chains of mana abilities with mana costs.** `MADE` / `NOT_MADE` forbid every chain (Loot's
+  mana for Arena of Glory's {R}); exact is a matching in which the "pays the cost of" relation
+  between the abilities is acyclic.
+* **N22 (item c): basic land types given by an effect.** C's refusal (`Lowerer::given_subtype`)
+  stands. 305.6 "in addition" needs the intrinsic "{T}: Add" of each such type as a granted mana
+  ability (`granted_activated`; the payment code must then read granted mana abilities, below);
+  305.7 "is a <type>" needs W2's Mountain definitions generalised (one per set of basic types,
+  latent abilities kept). The Magus of the Moon is W2's special case and works (tests in
+  `cards_eoe_w2_lands.rs`).
+* **N23 (item d):** which Pollinator activates in a payment is still the engine's (a loud failure
+  with the creature-mana bonus and mixed Pollinators); so is which Squandered Resources or Orcish
+  Lumberjack sacrifices a land (`activate_sac_for`: the first able one), and which Pollinator taps
+  in `finish_payment` (the first ready ones no pick uses). Each should be a choice when the objects
+  differ.
+* **F4:** 13.3 (exclusion by conflict, per ability), 13.16 (Black Lotus with delve), 13.17
+  (teamwork and the Lumberjack), 27.13.4 and N8 (a "tap n untapped X" cost counts only permanents
+  without mana abilities when mana is owed; crew enumerates 10 creatures), N10 (Pentad Prism's
+  `.min(32)`), 28.8.2k (the colours spent: `ChooseColorsSpent`), 24.7.5k and 40.1 (costs with
+  several classes), 31.7.2k (a permanent's payment sources past its fourth `ACTIVATE` slot).
+* **From the coordinator:** 26.11.6 and 24.7.4 (payment ids for permanents past slot 95), and the
+  payment's u8 storage (X under 255 mana, "pay X life", "tap X artifacts").
+* **Found on the way:** a "whenever you tap a creature for mana" bonus on a restricted source
+  (Delighted Halfling) gets the source's restriction in `pick_multi` (the bonus mana is
+  unrestricted); granted mana abilities (W3's `granted_activated`, Mm'menon's grant to artifacts,
+  which W6 needs) are activated with priority (`ActivateMana` through `begin_activate`) but are not
+  payment sources (`mana_classes` reads `abilities(c).activated` only, and `activate_mana_costs`,
+  `finish_payment` look abilities up by slot in `source_def`, not `activated_home`).
+
+For W6: Power Depot's restriction exists (`SPEND_ARTIFACT | SPEND_ARTIFACT_ABILITY`, two-purpose
+mana tested), floated restricted mana keeps its restriction (100.4.2), and productions of any size
+are offered with priority (100.4.3); Sunken Citadel's land-ability mana for another land ability's
+mana cost needs N21, and Mm'menon's granted mana ability needs the payment sources above.
+
+#### 100.8 Test fixtures after the rules changes (branch `eoe-t-fixtures`, from `eoe-b-pay` b666765)
+
+**Why.** On b666765 the engine gate's pytest step failed three tests. The engine was right (the user's
+rule: no approximations); the fixtures were recorded under the old rules:
+
+* `tests/test_forked_games.py` (`test_the_builder_checks_every_position_and_lists_what_it_skips`,
+  `test_the_delver_driver_branches_and_starts_from_the_archive`): the archive builder (87.3) skipped every
+  canary spot of `data/delver_canary_library.json` ("does not replay on this engine", "its fingerprint
+  differs"). The library's 60 spots were mined, added and reviewed on the float engine 1d67542 (engine
+  sha256 `20c4409e77b13bd5`; the r3-2b float fork's games and five Play-tab reports): each is a seed and
+  the raw actions from the deal. With F3 (100.4.3) a player with a ready mana source gets a priority
+  decision ("Pass priority", "Activate mana abilities") where the old engine passed for them, so the
+  same actions mean other moves; and the options' words at the spot gained "Activate mana abilities",
+  which is in the fingerprint (`spot_sig`) even where the path is the same.
+* `tests/test_measure.py::test_fingerprints_read_a_recorded_replay` asserted `c['decided'] == 6` for six
+  games of a tiny network against the random bot: with F3 one of them reaches the 60-turn limit, a draw.
+
+**The library re-recorded: `tools/delver_rerecord.py`.** A spot can't be rebuilt from its source game
+(the move logs are the old engine's), but it stores its whole path, so the recording engine can replay
+it. `rerecord --old-engine CHECKOUT` replays every spot on the engine that recorded it (a subprocess: two
+builds don't load in one process; its engine sha256 must be the library's), recording each step's
+decider, decision kind, options' words, the action and its words, and the exported state. Then this
+engine walks the same game: each old step is matched by the same decider, the same kind, an option with
+the same words (the same action id first, then any other with those words: two Volcanic Islands, two
+Dazes in a delve) and the whole exported state equal (all but `decision`, `log`, `log_n`, `v`: every zone
+in order with ids, tapped, counters and damage, the stack, pools, life, both libraries' order). A
+question the old engine never asked is answered only the way the old engine behaved: a priority whose
+options are exactly pass and "Activate mana abilities" is passed (the old engine passed: the player had
+nothing else); a payment offering "Pay the rest from the pool" takes it (the old engine ended the payment
+there, 13.13); an `OrderTriggers`, `ChooseReplacement` or `OrderTimestamps` question (100.3) tries each
+option and keeps the one whose later states equal the old engine's. Anything else (another new question,
+a state that differs, the watched option missing at the same position) drops the spot with its reason.
+A spot keeps its id, kind, source, gid, `k` (the recording engine's decision index, the id's), seed,
+spec, watch, answer, why, review and `value`, and gets the new `actions`, `sig`, `pos` and `rerecord`;
+`k_main1` (the Bauble miner's index into the path) is mapped onto the new path. The old engine used here
+was a read-only copy of `run-1d67542`'s `mtgz/` (engine sha256 `20c4409e77b13bd5`, the library's) and
+`third_party/zero-core/python`.
+
+**Result: 60 of 60 spots rebuilt, none dropped.** Every old step matched (6,878 old steps -> 8,948);
+18 paths are unchanged (10 of them with the same fingerprint too). The inserted questions: 2,054
+priority passes, one covering payment (`tamiyo_flip_precombat:...:28:192`), and 15 trigger orders in 9
+spots (two Dragon's Rage Channelers' surveil triggers 12 times, two Monks' prowess triggers twice, two
+Cori-Steel Cutters' once: 100.3's 13.8). 14 of the 15 orders are told apart by the next recorded state
+(the other order fails there). One isn't: `burn_no_kill:r3-2b-float550_0550_s32:74:192`, turn 16's
+upkeep, two Monks' prowess triggers (each gives its own Monk +1/+1) that resolved with nobody acting in
+between in the old game; both orders reach the identical position, so the first offered (the trigger
+order) is taken and the spot lists it (`rerecord.order_unseen` [213]). At the spot, 36 decisions gained
+"Activate mana abilities" and none lost an option. Checks: the new position at every spot hashes equal
+to the recording engine's (`spot_pos` of the old trace's final state, 60 of 60); `delver_archive.py`
+builds 60 canary entries (0 skipped; each start block rebuilt with deal none and actual, the same decider
+and fingerprint), and `--canary half-a --held-out-library` 30 + 30; `delver_blunders.py library-score`
+with `r3-2b-beliefsearch` 424 (4 sims, 2 repeats, CPU) scores every spot (stale 0, the 6 held aside).
+
+**Provenance and loud detection.** The file now has `rules_epoch` (tools/position_lab.py's
+`RULES_EPOCH`, 1794211633), `engine` (this checkout's build) and `recorded` (the float engine, then this
+re-record, with `replaces`: the old file's git ref). Spot `value`s and the `reference` scores are the
+recording engine's (not re-measured). Each spot's `pos` (`delver_blunders.spot_pos`: the exported state's
+hash at the spot, beside `sig`) says the game is the same one. `tests/test_canary_library.py` fails when
+`RULES_EPOCH` moves past the library's epoch, naming the fix: `delver_rerecord.py check --stamp` (no old
+engine needed when every spot still reaches its `pos`), else `rerecord --old-engine <a checkout of the
+library's engine commit>`. It also checks every spot on this engine, and the walk itself with no old
+engine: a spot's trace on this engine minus the decisions its re-record inserted must re-record onto the
+same path, inserted indices, `order_unseen` and spot (four spots: the passes and the payment, three
+orders, the unseen order, `k_main1`); a full trace keeps its path; another state, a missing move or a
+missing watched option fail.
+
+**Readers.** The spot schema is unchanged: `delver_archive.py`, `delver_blunders.py` (library-score,
+the sidecar's `watch`), `delverai_blunders.py` and `delverai_blunder_games.py` read it as before. The ids,
+answers and watched options are unchanged, so `delverai_blunders.library_id` (the Progress tab's cache
+key) and the review page's verdicts (keyed by spot id) stay. A spot with `pos` must now also reach it
+where these tools check the fingerprint (`delver_blunders.same_pos`: library-score's stale ids, `canary`,
+the archive builder's skip "its state differs: pos", delverai_blunder_games' stale ids), so a spot that
+replays to another position with the same fingerprint is stale, not scored. `library_score`'s stale line
+says when the library's rules epoch differs from the engine checkout's (`library_rules_note`), and the
+held-out library `delver_archive.py` writes carries `engine` and `rules_epoch`.
+
+**When the engine moves (the live Delver tooling).** A library is recorded for one engine's rules. The
+publisher's scorers (delverai_blunders, delverai_blunder_games, the sidecar's `watch`) read the library of
+the checkout they run from and replay it on `--engine`'s build. On an engine before this rules epoch (the
+r3 line, the Play tab's float550), the re-recorded file replays only the 10 spots whose path and options
+didn't change (at their own positions; the other 50 stale, listed): keep the old file there (`--library` from `git show
+b666765:data/delver_canary_library.json`) until the engine moves; with the new engine, this file. Scores
+of one spot before and after the move come from different engines (the network sees one more option at
+36 spots). The Play tab doesn't read the library; its recorded games, like the source games, replay only
+on the engine they were played on (the archive builder skips them, listed).
+
+**test_measure.** The test is about the fingerprint tool's counters, and "all six decided" was a
+property of random play. It now checks `decided` and `starter_won` against the six games' own results
+(decided = results not tied; a turn-limit draw is counted in neither; `starter_won <= decided <= games`)
+and rescans one recorded game with fixed results (a draw, the starter's win, the other's) for the exact
+counts, so both counters are exercised whatever the engine's random play does.
+
+**Digests.** Unchanged (no engine change): full `3667d9433f0f7a00`, `DIGEST_ENCODING=0`
+`d0a7be8d70719c90`.
 
 #### 99.16 W6: the remaining cards (branch `eoe-w6-rest`, from `eoe-base` 2e01275)
 
