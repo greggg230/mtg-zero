@@ -282,6 +282,8 @@ impl Game {
         }
         let n = self.token_count(controller, n);
         let mut made = Vec::with_capacity(n as usize);
+        // (They enter at the same time: one entry, CR 603.6a.)
+        self.begin_entering(false);
         for _ in 0..n {
             let idx = self.add_card(vals.def, controller, Zone::Nowhere);
             self.copy_objs.push(idx);
@@ -291,6 +293,7 @@ impl Game {
             self.put_onto_battlefield(idx, controller);
             made.push(idx);
         }
+        self.end_entering();
         made
     }
 
@@ -716,8 +719,8 @@ impl Game {
         let entering_before = self.w6.entering.replace((card, since));
         self.entering(card, tapped, 0);
         self.w6.entering = entering_before;
-        self.note_entered(card);
-        self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u64 });
-        self.day_night_entered(card);
+        // (Matched with the others of its entry, CR 603.6a: this task runs
+        // while its entry waits, `Task::EntersTogether` under it.)
+        self.entered_event(r, note);
     }
 }

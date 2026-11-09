@@ -740,20 +740,40 @@ impl Game {
                 Flow::Next
             }
             Op::Destroy { tgt } => {
-                for t in self.targets_of(f, tgt) {
+                // (Several targets are destroyed at once: one simultaneous
+                // move, each one's leave abilities seeing the others leave,
+                // CR 603.10a.)
+                let ts = self.targets_of(f, tgt);
+                let batch = ts.len() > 1 && !self.batching;
+                if batch {
+                    self.begin_batch();
+                }
+                for t in ts {
                     if let Target::Obj(o) = t {
                         if self.objs[o.idx.i()].zone == Zone::Battlefield {
                             self.destroy(o.idx);
                         }
                     }
                 }
+                if batch {
+                    self.end_batch();
+                }
                 Flow::Next
             }
             Op::Exile { tgt } => {
-                for t in self.targets_of(f, tgt) {
+                // (At once, CR 603.10a.)
+                let ts = self.targets_of(f, tgt);
+                let batch = ts.len() > 1 && !self.batching;
+                if batch {
+                    self.begin_batch();
+                }
+                for t in ts {
                     if let Target::Obj(o) = t {
                         self.move_card(o.idx, Zone::Exile, Pos::Top);
                     }
+                }
+                if batch {
+                    self.end_batch();
                 }
                 Flow::Next
             }
@@ -764,12 +784,21 @@ impl Game {
                 Flow::Next
             }
             Op::ReturnToHand { tgt } => {
-                for t in self.targets_of(f, tgt) {
+                // (At once, CR 603.10a.)
+                let ts = self.targets_of(f, tgt);
+                let batch = ts.len() > 1 && !self.batching;
+                if batch {
+                    self.begin_batch();
+                }
+                for t in ts {
                     if let Target::Obj(o) = t {
                         if matches!(self.objs[o.idx.i()].zone, Zone::Battlefield | Zone::Stack | Zone::Graveyard) {
                             self.move_card(o.idx, Zone::Hand, Pos::Top);
                         }
                     }
+                }
+                if batch {
+                    self.end_batch();
                 }
                 Flow::Next
             }
@@ -909,7 +938,20 @@ impl Game {
             Op::PileTo { who, dest, ref filter, min, max, rest, reveal } => {
                 let Some(p) = self.who(f, who) else { return Flow::Next };
                 let set = matches!(dest, PileDest::Graveyard | PileDest::Hand | PileDest::BattlefieldTapped);
+                // Cards put onto the battlefield are chosen first and put
+                // there together once the choice ends: one entry (CR 603.6a;
+                // `f.picked`, `pile_to_battlefield`).
+                let onto = dest == PileDest::BattlefieldTapped;
+                if onto && f.i == 0 && self.answer.is_none() {
+                    f.picked.clear();
+                }
                 match self.answer.take() {
+                    Some(Choice::Card(c)) if onto => {
+                        f.pile.retain(|&x| x != c);
+                        f.i += 1;
+                        f.floor = self.objs[c.i()].def;
+                        f.picked.push(c);
+                    }
                     Some(Choice::Card(c)) => {
                         f.pile.retain(|&x| x != c);
                         f.i += 1;
@@ -926,17 +968,21 @@ impl Game {
                             self.links.push(crate::game::Link { source: f.source, card, until: false, back: Zone::Library, until_monarch: None });
                         }
                     }
-                    Some(Choice::Pass) => return Flow::Next,
+                    Some(Choice::Pass) => return self.pile_to_battlefield(f, p, onto, reveal),
                     Some(other) => unreachable!("pile answer {other:?}"),
                     None => {}
                 }
                 if rest && f.pile.is_empty() || !rest && max != PILE_ANY && f.i >= max as u32 {
-                    return Flow::Next;
+                    return self.pile_to_battlefield(f, p, onto, reveal);
                 }
                 if rest && set {
                     // "The rest into your graveyard": no choice, canonical order.
                     let mut all = std::mem::take(&mut f.pile);
                     all.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
+                    if onto {
+                        f.picked.extend(all);
+                        return self.pile_to_battlefield(f, p, onto, reveal);
+                    }
                     self.pile_moving = true;
                     for c in all {
                         self.put_from_pile(p, c, dest, reveal);
@@ -976,7 +1022,7 @@ impl Game {
                 let mut extra = Vec::new();
                 if !rest && need == 0 {
                     if f.pile.is_empty() {
-                        return Flow::Next;
+                        return self.pile_to_battlefield(f, p, onto, reveal);
                     }
                     // Even with no card to pick, ask (pass only): whether a
                     // card matches is hidden from the other player, whose
@@ -1210,6 +1256,25 @@ impl Game {
             }
         }
         self.note(|_| format!("P{owner}'s hand is seen by {looker:?}"));
+    }
+
+    /// The end of a pile's choice of the cards put onto the battlefield
+    /// (`onto`): the cards chosen (`f.picked`, in the order chosen) enter
+    /// together, tapped (one entry, CR 603.6a: each sees the others enter).
+    fn pile_to_battlefield(&mut self, f: &mut Frame, p: PlayerId, onto: bool, reveal: bool) -> Flow {
+        if onto {
+            let picked = std::mem::take(&mut f.picked);
+            self.begin_entering(false);
+            self.pile_moving = true;
+            for c in picked {
+                if self.objs[c.i()].zone == Zone::Library {
+                    self.put_from_pile(p, c, PileDest::BattlefieldTapped, reveal);
+                }
+            }
+            self.pile_moving = false;
+            self.end_entering();
+        }
+        Flow::Next
     }
 
     /// Move a card of the pile to `dest` (it is known to its owner).

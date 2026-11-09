@@ -299,6 +299,13 @@ impl Game {
             let o = &self.objs[c.i()];
             v.extend([k.rank(o.timestamp), o.deathtouched as u64]);
         }
+        v.push(u64::MAX - 23);
+        // The Enters events an open entry holds (CR 603.6a; a decision asked
+        // while its permanents enter, `Game::begin_entering`).
+        for e in &self.entries {
+            v.extend([e.held.len() as u64, k.rank(e.since), e.base as u64, e.open as u64]);
+            v.extend(e.held.iter().flat_map(|&(r, note)| [self.view_live_place(r), note as u64]));
+        }
         v.push(u64::MAX - 22);
         // An object's power and toughness switches, by parity (module docs):
         // the objects and durations with an odd number of them.

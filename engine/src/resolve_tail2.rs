@@ -26,6 +26,8 @@ impl Game {
             Ext::SacrificeN { who, filter, n } => self.sacrifice_n(f, *who, filter, *n),
             Ext::FromGraveyardAs { tgt, mods } => {
                 f.made = None;
+                // (At once: one entry, CR 603.6a.)
+                self.begin_entering(false);
                 for t in self.targets_of(f, *tgt) {
                     let Target::Obj(o) = t else { continue };
                     if self.objs[o.idx.i()].zone != Zone::Graveyard {
@@ -38,6 +40,7 @@ impl Game {
                         f.made = Some(r.idx);
                     }
                 }
+                self.end_entering();
                 Flow::Next
             }
             Ext::ReturnEventCardAs { mods } => {
@@ -236,10 +239,14 @@ impl Game {
                 let turn = self.turn.number as u16;
                 let tokens: Vec<CardIdx> = self.permanents_of(p).filter(|&c| self.is_token(c) && self.objs[c.i()].entered == turn).collect();
                 let mut all = Vec::new();
+                // (One instruction: the copies are created at once, one
+                // entry, CR 603.6a.)
+                self.begin_entering(false);
                 for c in tokens {
                     let vals = self.copiable(c);
                     all.extend(self.create_token_copies(vals, p, 1));
                 }
+                self.end_entering();
                 f.made = all.first().copied();
                 f.made_all = all;
                 Flow::Next

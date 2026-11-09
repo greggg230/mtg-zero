@@ -1692,8 +1692,10 @@ impl Game {
     }
 
     /// Would a permanent with this definition enter tapped for `p` (CR
-    /// 614.1c)? Checked before it moves, so "other lands" are the lands
-    /// already there.
+    /// 614.1c)? "Other lands" are the lands already there: not those
+    /// entering at the same time, nor their effects (CR 614.12a; the fast
+    /// lands' rulings: "it doesn't take those lands into consideration";
+    /// `entry_since`).
     pub(crate) fn enters_tapped(&self, card: CardIdx, p: PlayerId) -> bool {
         self.enters_tapped_own(card, p, true)
     }
@@ -1701,15 +1703,18 @@ impl Game {
     /// [`enters_tapped`](Self::enters_tapped); without `own`, its own "enters
     /// tapped" doesn't apply (it enters with no abilities, CR 614.12).
     pub(crate) fn enters_tapped_own(&self, card: CardIdx, p: PlayerId, own: bool) -> bool {
-        // "<Types> / nonbasic lands your opponents control enter tapped."
+        // "<Types> / nonbasic lands your opponents control enter tapped" (a
+        // permanent already there, CR 614.12a).
         let d = self.def_of(card);
         let q = crate::ids::opp(p);
+        let since = self.entry_since();
         let forced = self.permanents_of(q).any(|c| {
             let od = self.abilities(c);
-            od.opp_enter_tapped & d.types != 0
-                || (od.opp_nonbasic_enter_tapped
-                    && d.is(crate::db::types::LAND)
-                    && d.supertypes & crate::db::supertypes::BASIC == 0)
+            self.objs[c.i()].timestamp < since
+                && (od.opp_enter_tapped & d.types != 0
+                    || (od.opp_nonbasic_enter_tapped
+                        && d.is(crate::db::types::LAND)
+                        && d.supertypes & crate::db::supertypes::BASIC == 0))
         });
         if forced {
             return true;
@@ -1722,8 +1727,23 @@ impl Game {
         match &self.def_of(card).enters_tapped {
             crate::db::EntersTapped::No => false,
             crate::db::EntersTapped::Always => true,
-            crate::db::EntersTapped::Unless(c) => !self.cond_holds(c, p),
+            crate::db::EntersTapped::Unless(c) => !self.cond_before_entry(c, p, since),
         }
+    }
+
+    /// Condition `c` for `p` in the game as it was before the entry whose
+    /// first timestamp is `since` (CR 614.12a): the permanents entering at
+    /// the same time (timestamp `since` or later) are not there yet, nor
+    /// their static abilities. Read on a copy of the game without them when
+    /// there are any.
+    fn cond_before_entry(&self, c: &Cond, p: PlayerId, since: u32) -> bool {
+        if !self.battlefield.iter().any(|&x| self.objs[x.i()].timestamp >= since) {
+            return self.cond_holds(c, p);
+        }
+        let mut before = self.clone();
+        before.log = None;
+        before.battlefield.retain(|&x| self.objs[x.i()].timestamp < since);
+        before.cond_holds(c, p)
     }
 
     /// Is this permanent indestructible (CR 702.12)?

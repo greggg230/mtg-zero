@@ -856,7 +856,7 @@ impl Game {
         self.gy_exile.hash(&mut h);
         self.ev_seq.hash(&mut h);
         self.batch_fired.hash(&mut h);
-        self.group_ts.hash(&mut h);
+        self.entries.hash(&mut h);
         self.copies.hash(&mut h);
         self.copy_objs.hash(&mut h);
         self.prepared.hash(&mut h);

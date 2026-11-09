@@ -195,8 +195,8 @@ pub struct W6State {
     pub seen: u16,
     /// The permanent being put onto the battlefield whose "enters with"
     /// counters are being put on it (CR 122.6, 614.1c), with the first
-    /// timestamp of the entries of its event (what entered at the same time:
-    /// `Game::group_ts`): set and cleared around its entry.
+    /// timestamp of its entry (what entered at the same time:
+    /// `Game::entry_since`): set and cleared around its entry.
     pub entering: Option<(crate::ids::CardIdx, u32)>,
     /// The controller of the spell or ability whose instruction is being
     /// carried out (`Game::run_frame`): the player who puts counters its
@@ -210,13 +210,6 @@ pub struct W6State {
     pub control: Vec<ControlFx>,
     /// Set while `w6_sync_control` writes controllers (no recursion).
     pub syncing: bool,
-    /// The triggered abilities of permanents that permanents entering in
-    /// the current simultaneous entry (`Game::group_ts`, the key) caused to
-    /// trigger, with their controllers: a permanent entering later in that
-    /// entry with "... triggers an additional time" adds an instance of each
-    /// of its controller's (CR 603.2d, its ruling: "a permanent entering
-    /// the battlefield at the same time"). Games with such a card only.
-    pub entry_triggers: Vec<((u32, u32), crate::triggers::PendingTrigger)>,
     /// The turn number of each player's last token creation ("the first
     /// time you would create one or more tokens each turn", whether a
     /// replacement applied or not; its rulings), in games with such a card.
@@ -541,26 +534,6 @@ impl Game {
         self.battlefield.iter().filter(|&&c| self.objs[c.i()].controller == p && self.abilities(c).w6.trigger_doubler).count()
     }
 
-    /// A permanent's `Enters` event `ev` is about to be matched (CR 603.6a):
-    /// if the permanent says "... triggers an additional time", the
-    /// abilities of its controller's permanents that permanents entering
-    /// earlier in the same simultaneous entry caused to trigger trigger an
-    /// additional time too (the ruling: "a permanent entering at the same
-    /// time", which the engine puts onto the battlefield one by one).
-    pub(crate) fn w6_entering_doubler(&mut self, ev: &crate::triggers::Event) {
-        let key = self.group_ts;
-        if self.w6.entry_triggers.first().is_some_and(|x| x.0 != key) {
-            self.w6.entry_triggers.clear();
-        }
-        let crate::triggers::Subj::Obj(r) = ev.a else { return };
-        if !(self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield && self.abilities(r.idx).w6.trigger_doubler) {
-            return;
-        }
-        let p = self.objs[r.idx.i()].controller;
-        let more: Vec<crate::triggers::PendingTrigger> = self.w6.entry_triggers.iter().filter(|x| x.1.controller == p).map(|x| x.1).collect();
-        self.waiting.extend(more);
-    }
-
     /// The triggered ability just added to `Game::waiting` was caused by a
     /// permanent entering the battlefield (an `Enters` event, CR 603.6a: the
     /// abilities starting "when" or "whenever ... enters", the permanent's
@@ -569,7 +542,10 @@ impl Game {
     /// additional time for each such static ability its controller's
     /// permanents have (CR 603.2d: the number of times is worked out, then it
     /// triggers that many times; the instances are separate, their targets
-    /// and choices made for each).
+    /// and choices made for each). A permanent with the ability entering at
+    /// the same time counts (its ruling: "including Starfield Vocalist
+    /// itself"): an entry's events are matched once all its permanents are on
+    /// the battlefield (`Game::enters_together`).
     pub(crate) fn w6_entry_triggered(&mut self) {
         let Some(&pt) = self.waiting.last() else { return };
         if !(self.live(pt.source) && self.objs[pt.source.idx.i()].zone == Zone::Battlefield) {
@@ -579,11 +555,6 @@ impl Game {
         for _ in 0..n {
             self.waiting.push(pt);
         }
-        let key = self.group_ts;
-        if self.w6.entry_triggers.first().is_some_and(|x| x.0 != key) {
-            self.w6.entry_triggers.clear();
-        }
-        self.w6.entry_triggers.push((key, pt));
     }
 
     /// The Auras whose "the first time you would create one or more tokens
@@ -661,6 +632,8 @@ impl Game {
     pub(crate) fn w6_create_copies(&mut self, vals: crate::copies::CopyVals, p: crate::ids::PlayerId, n: u32, tapped: bool) -> Vec<crate::ids::CardIdx> {
         let n = self.token_count(p, n);
         let mut made = Vec::with_capacity(n as usize);
+        // (They enter at the same time: one entry, CR 603.6a.)
+        self.begin_entering(false);
         for _ in 0..n {
             let idx = self.add_card(vals.def, p, Zone::Nowhere);
             self.copy_objs.push(idx);
@@ -671,6 +644,7 @@ impl Game {
             self.put_onto_battlefield(idx, p);
             made.push(idx);
         }
+        self.end_entering();
         made
     }
 

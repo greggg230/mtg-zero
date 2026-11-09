@@ -77,7 +77,7 @@ REPLAYS = os.environ.get('MTGZ_LAB_REPLAYS', r'C:/Users/Gregg Keithley/mtg-zero/
 # can't be rebuilt action for action (the decisions differ: e.g. ENGINE.md 100.3 orders triggers of
 # different objects of one card, which the old engine offered once). Bump it with every commit that
 # re-records the behaviour digests; replays recorded since are the ones `check_spot` must rebuild.
-RULES_EPOCH = 1794237662  # 2026-11-09 07:21:02 -0800: F7 loops, no progress is a stop, the loop caps gone (CR 732.2a, MTR 4.4; digests ab7e8aea0f65b8df)
+RULES_EPOCH = 1794241901  # 2026-11-09 08:31:41 -0800: F7 loops merged with C2, simultaneous entry (ENGINE.md 100.7, 100.9; digests af00cc85e05ea0c1)
 PUBLISH_LOG = r'E:/mtg-zero-scratch/delverai-publish.log'
 MODES = ('belief', 'actual', 'pinned', 'uniform')
 

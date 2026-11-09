@@ -255,12 +255,15 @@ impl Game {
             Ext::LinkedToBattlefieldOwners => {
                 let cards = self.linked_cards(f.source);
                 self.links.retain(|l| l.source != f.source);
+                // (At once: one entry, CR 603.6a.)
+                self.begin_entering(false);
                 for c in cards {
                     if self.objs[c.i()].zone == Zone::Exile {
                         let owner = self.objs[c.i()].owner;
                         self.put_onto_battlefield(c, owner);
                     }
                 }
+                self.end_entering();
                 Flow::Next
             }
             Ext::BecomeSaddled => {
