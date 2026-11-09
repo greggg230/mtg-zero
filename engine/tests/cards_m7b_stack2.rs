@@ -547,3 +547,32 @@ fn cr_602_2_every_graveyard_ability_is_offered_past_the_12_ids() {
     finish(&mut g, |_| None);
     assert_eq!(g.obj(fans[13]).zone, Zone::Exile, "the 14th exiled as its cost");
 }
+
+/// The identity a block slot at `o` holds, if present (its card code's three
+/// one-hot digits; present: the status's first float).
+fn slot_identity(x: &[f32], o: usize) -> Option<usize> {
+    use engine::az::encode::CODE;
+    let digit = |a: usize, n: usize| x[o + a..o + a + n].iter().position(|&v| v == 1.0);
+    (x[o + CODE] == 1.0).then(|| digit(0, 16).unwrap() * 64 + digit(16, 8).unwrap() * 8 + digit(24, 8).unwrap())
+}
+
+/// On a page of Priority's graveyard abilities, the graveyard-abilities
+/// block shows the page's cards at their slots (ENGINE.md 100.5.1:
+/// `GY_ABILITY` + j is the card at place 11 + j on the second page):
+/// fourteen Fanatics of Rhonas, the second page holds three, in slots 0..2,
+/// and slot 3 is empty (the first page: four).
+#[test]
+fn cr_602_2_a_page_of_graveyard_abilities_is_the_blocks() {
+    use engine::az::encode::{GYAS, GYA_W, O_GYA};
+    let mut g = scen().battlefield(0, &["Forest"; 4]).graveyard(0, &[FANATIC; 14]).start();
+    let present = |g: &Game| {
+        let mut x = vec![0.0f32; engine::az::NUM_FEATURES];
+        g.encode_features(0, &mut x);
+        (0..GYAS).map(|k| slot_identity(&x, O_GYA + k * GYA_W).is_some()).collect::<Vec<bool>>()
+    };
+    assert_eq!(present(&g), [true; 4]);
+    let next = options(&g).into_iter().find(|c| matches!(c, Choice::Page(_))).unwrap();
+    g.choose(next);
+    assert_eq!(g.pending_decision().unwrap().options.len(), 3);
+    assert_eq!(present(&g), [true, true, true, false], "places 11..13");
+}

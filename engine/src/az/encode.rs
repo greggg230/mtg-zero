@@ -912,6 +912,21 @@ const _: () = assert!(
 );
 
 /// A card code: the identity's digits (16, 8, 8), then types, colours, size.
+/// The first position of the range `base .. base + n` that decision `d`
+/// shows (ENGINE.md 100.1, 100.5.1): on a range page (window w >= 1 of a
+/// paged choice, offering that range's items alone), id `base + j` is the
+/// item at position `w (n - 1) + j`, so the block holding that range's items
+/// (the stack, the waiting triggers, the graveyard abilities) shows them
+/// from there; 0 otherwise.
+fn page_first(d: &crate::decision::Decision, base: u16, n: u16) -> usize {
+    match d.stage {
+        Stage::Paged { window } if window > 0 && d.options.iter().any(|o| (base..base + n).contains(&o.action)) => {
+            window as usize * (n as usize - 1)
+        }
+        _ => 0,
+    }
+}
+
 /// The kind of a pool's restricted mana (`g6::POOL_KINDS`, ENGINE.md
 /// 100.5.1): its purposes `only` (`SPEND_*`, CR 106.6) as one of the
 /// restrictions a mana ability can have (lower/activated.rs refuses every
@@ -1497,9 +1512,11 @@ impl Game {
                 st[7] = other as u8 as f32;
             }
         }
-        // The stack, top first.
+        // The stack, top first (on a page of the viewer's paged choice of
+        // stack items, the page's: `page_first`, ENGINE.md 100.5.1).
         let stack_targets: Vec<Target> = self.stack.iter().flat_map(|s| s.targets.iter().map(|&(_, t)| t)).collect();
-        for (s, item) in self.stack.iter().rev().enumerate().take(STACKS) {
+        let paged_first = |base: u16, n: u16| decision.filter(|_| mine_to_decide).map_or(0, |d| page_first(d, base, n));
+        for (s, item) in self.stack.iter().rev().skip(paged_first(act::STACK, act::STACK_N)).enumerate().take(STACKS) {
             let o = O_STACK + s * STACK_W;
             let (def, kind) = match item.kind {
                 StackKind::Spell { card } => (self.objs[card.i()].def, 1),
@@ -1681,8 +1698,9 @@ impl Game {
                 }
             }
         }
-        // The viewer's waiting triggers (the `TRIGGER` slots when it orders them).
-        for (k, t) in self.waiting.iter().filter(|t| t.controller == me).enumerate().take(TRIGS) {
+        // The viewer's waiting triggers (the `TRIGGER` slots when it orders
+        // them; on a page, the page's).
+        for (k, t) in self.waiting.iter().filter(|t| t.controller == me).skip(paged_first(act::TRIGGER, act::TRIGGER_N)).enumerate().take(TRIGS) {
             let o = O_TRIG + k * TRIG_W;
             code(&mut out[o..o + CODE], self.db, ids, t.source_def);
             out[o + CODE] = 1.0;
@@ -1736,8 +1754,10 @@ impl Game {
             }
         }
         // The cards in the viewer's graveyard with a graveyard ability (the
-        // `GY_ABILITY` ids, graveyard order: `Game::activation_options`).
-        for (k, c) in self.graveyard_cards(me).filter(|&c| !self.def_of(c).gy_abilities.is_empty()).take(GYAS).enumerate() {
+        // `GY_ABILITY` ids, graveyard order: `Game::activation_options`; on a
+        // page, the page's).
+        let gya_first = paged_first(act::GY_ABILITY, act::GY_ABILITY_N);
+        for (k, c) in self.graveyard_cards(me).filter(|&c| !self.def_of(c).gy_abilities.is_empty()).skip(gya_first).take(GYAS).enumerate() {
             let o = O_GYA + k * GYA_W;
             code(&mut out[o..o + CODE], self.db, ids, self.objs[c.i()].def);
             out[o + CODE] = 1.0;

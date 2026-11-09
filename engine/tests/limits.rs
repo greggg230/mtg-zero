@@ -434,3 +434,53 @@ fn cr_115_1_graveyard_targets_past_the_64_list_slots_are_paged_65_10() {
         assert_eq!(g.obj(last).zone, Zone::Exile, "{}", g.log_lines().join("\n"));
     }
 }
+
+/// The identity a block slot at `o` holds, if present (its card code's three
+/// one-hot digits; present: the status's first float).
+fn slot_identity(x: &[f32], o: usize) -> Option<usize> {
+    use engine::az::encode::CODE;
+    let digit = |a: usize, n: usize| x[o + a..o + a + n].iter().position(|&v| v == 1.0);
+    (x[o + CODE] == 1.0).then(|| digit(0, 16).unwrap() * 64 + digit(16, 8).unwrap() * 8 + digit(24, 8).unwrap())
+}
+
+/// On a page of a choice among stack items, the stack block shows the page's
+/// items at their slots (ENGINE.md 100.5.1: `STACK` + j is the item at
+/// position 31 + j on the second page, so its token is that item's): with
+/// Counterspell on top of 35 Bolts, the second page's slot 0 holds the Bolt
+/// 31 below the top, not Counterspell, and slots 5..7 (positions 36..38) are
+/// empty. The first page and the other player's encoding show the top.
+#[test]
+fn cr_115_1_a_page_of_stack_items_is_the_stack_blocks() {
+    use engine::az::encode::{O_STACK, STACKS, STACK_W};
+    let mut g = scen()
+        .hand(0, &["Lightning Bolt"; 35])
+        .pool(0, [0, 0, 0, 35, 0, 0], 0)
+        .hand(1, &["Counterspell"])
+        .pool(1, [0, 2, 0, 0, 0, 0], 0)
+        .start();
+    bolts(&mut g, 35);
+    g.pass();
+    let cs = g.card(1, "Counterspell", Zone::Hand);
+    g.choose(Choice::Cast(cs));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let ids = engine::az::identity::identities(db());
+    let id = |c: CardIdx| ids[g.obj(c).def as usize] as usize;
+    let enc = |g: &Game, v: u8| {
+        let mut x = vec![0.0f32; engine::az::NUM_FEATURES];
+        g.encode_features(v, &mut x);
+        x
+    };
+    let (bolt, counter) = (id(spell_at(&g, 1)), id(cs));
+    let x = enc(&g, 1);
+    assert_eq!(slot_identity(&x, O_STACK), Some(counter), "the first page: the top");
+    g.choose(next_page(&g));
+    for v in 0..2u8 {
+        let x = enc(&g, v);
+        let slots: Vec<Option<usize>> = (0..STACKS).map(|s| slot_identity(&x, O_STACK + s * STACK_W)).collect();
+        if v == 1 {
+            assert_eq!(slots, [Some(bolt); 5].into_iter().chain([None; 3]).collect::<Vec<_>>(), "P1's page: positions 31..35");
+        } else {
+            assert_eq!(slots, [Some(counter)].into_iter().chain([Some(bolt); 7]).collect::<Vec<_>>(), "P0 doesn't decide: the top");
+        }
+    }
+}
