@@ -19861,3 +19861,169 @@ suite 1,996 passed, 0 failed, 20 ignored (with A0's merge; `az` 41, `hidden` and
 onto the battlefield at night is transformed right after it enters (`entering_choices` -> `day_night_check`), with a
 `Transforms` event; CR 702.145b says it enters transformed (no transformation). A basic land type an effect gives (N22) is
 refused, not built: it waits for W2's moon definitions and the payment code.
+
+#### 100.5 D: the encoding and layout v6 (branch `eoe-d-encoding`, from `eoe-base` 9c67a75)
+
+**Why.** The audit's N2, N3 and F8 (`docs/faithfulness_audit.md` 3, 5.8): the network must see
+every public fact the rules use, with no hidden one, and The Dominion Bracelet (CR 722,
+controlling another player's turn) was blocked because a controlled decision's action ids are
+the controlled player's while its decider was encoded in its own seat (ENGINE.md 99.14, EoE fuzz
+seed 12441). Three commits: layout v6 with the gaps and the frame (6049e27), the card
+unblocked (787f5be), the graveyard's order by decomposition (593e271).
+
+**Layout v6** (43,956 floats; `mtgz/az/layout_v6.json`, version 6; v5's and v4's files stay). It
+is layout v5 with additions only, as v5 was v4's (60.1), so a v5 network widens onto it exactly
+and a v4 network too (through v5):
+
+| Block | v5 offset | v5 floats | v6 offset | v6 floats | Added |
+|---|---:|---:|---:|---:|---|
+| globals, context | 0 | 128 + 256 | 0 | 128 + 256 | (context 248: the frame flag) |
+| bags | 384 | 19 x 1024 | 384 | 23 x 1024 | rows 19-22 |
+| tops | 19,840 | 6 x 54 | 23,936 | 6 x 54 | |
+| my / opponent permanents | 20,164 / 25,668 | 32 x 172 each | 24,260 / 30,532 | 32 x 196 each | status 120-143 (9 used, 15 spare) |
+| hand | 31,172 | 16 x 60 | 36,804 | 16 x 60 | |
+| stack | 32,132 | 8 x 124 | 37,764 | 8 x 204 | status 72-151 (76 used, 4 spare) |
+| triggers, list, graveyard abilities, companions, match | 33,124.. | as v5 | 39,396.. | as v5 | |
+| globals v5 | 37,556 | 64 | 43,828 | 64 | |
+| globals v6 | | | 43,892 | 64 | per player 24 (6 used), the game's 16 (5 used) |
+| **total** | | **37,620** | | **43,956** | +6,336 (bags 4,096, permanents 1,536, stack 640, globals 64) |
+
+The same 11 segments, slot counts, present flags, identities and action ids (the token network's
+170 positions); the bags grow at the end; v5's three global blocks are v6's, the fourth is new.
+`encode::v5_projection()` is the v6 index of every v5 feature, `v4_to_v5()` the old v4 map and
+`v4_projection()` their composition. v5's spare floats (permanent 112-119, stack 64-71, the
+globals' 22 + 14) stay unset: everything new is at a v6 position, so the v6 encoding at the
+projection IS the v5 encoding, which `DIGEST_ENCODING=v5` proves on every hashed state (below).
+A sample is ~88 KB in a shard (float16) instead of ~75 KB (+16.8%).
+
+**What v6 encodes** (the gate's gaps, `public_state::V6_FIXED`, 18 perturbations):
+
+| Fact (perturbation) | Where |
+|---|---|
+| a creature was cast for its warp cost; regeneration shields; the mana spent to cast it | `perm::WARP_CAST`, `REGEN` / 2, `MANA_SPENT` / 8 |
+| a copy is legendary by its exception | `perm::LEGENDARY`: legendary as it is (`supertypes_of`); the code's float 47 stays the copiable definition's |
+| granted triggered abilities (no perturbation before: "a permanent gained a triggered ability" added), granted activated abilities | `perm::GRANTED_TRIGGERS` (those a later "loses all abilities" didn't remove, 613.7), `GRANTED_ACTIVATED` (`granted_activated`) |
+| a spell's granted alternative cost came from another permanent | the spell's `stack::ALT_GRANTED`, `ALT_GRANTER_SLOT`, `ALT_GRANTER_OPP`; the granter's `perm::GRANTS_ALT` |
+| a stack item noted another object | its first noted object (`stack::NOTED_PERM` side and `NOTED_SLOT`, or `NOTED_CARD` / `NOTED_THEIRS` / its identity's 32 digits); the permanent's `perm::NOTED` (items noting it) |
+| a stack item targets another exiled card | its first exiled target (`stack::EXILE_TARGET`: present, owner, identity digits), the counts `TARGETS_EXILED`, `NOTED_EXILED`; every exiled target and noted card in bag 19 (`bag::EXILE_REFS`) |
+| a permanent is phased out; phased out indirectly | bags 20-21 (`MY_PHASED`, `OPP_PHASED`, by what they are); `g6::PHASED`, `PHASED_INDIRECT` per controller |
+| the other player learns a hand card past the 16th | bag 22 (`MY_HAND_KNOWN`: the viewer's hand cards the opponent knows, every one) |
+| a player will control the other's next turn; the active player is controlled this turn | `g6::NEXT_TURN_CONTROLLED`, `CONTROLLED` per player, and the frame (below) |
+| an artifact entered under a player's control this turn | `g6::ARTIFACT_ENTERED` |
+| more life gained this turn (was a Design limit: Haliya reads the amount) | `g6::LIFE_GAINED` / 4 |
+| a permanent entered this turn (was a Design limit: two cards read it) | `perm::ENTERED` |
+| void holds | `g6::VOID` (`void_active`) |
+| the turn goes on with another phase after its combat phases | `g6::AFTER_COMBAT` (one-hot: untap, precombat main, end, another step; none for the postcombat main phase) |
+
+The stack item's exiled references follow the target block's own design (its first two
+targets in detail, 22.1): the first exiled target and the first noted object by identity or
+slot, all of them in the bag and the counts.
+
+**The frame (N3).** `Game::encoding_seat(viewer)`: the decision's player when `viewer` makes that
+player's decision (`decider_of`: it controls them this turn), else `viewer`. `encode_features`
+frames everything in that seat ("me": its hand in the hand slots with the legal flags, its
+permanents as `MY_PERM` with their `ACTIVATE` flags, its list block, its triggers, its graveyard
+abilities, its companion; the globals and match block viewer-first from it) and reads every
+piece of knowledge as the viewer's (`knower`: tops, face-down identities, the library bags, the
+opponent's hand and clouds, the exile-play bags). The viewer's own hand is then the frame
+opponent's hand, known exactly (`OPP_HAND_KNOWN`), its library the frame opponent's unknown pool
+(`OPP_HIDDEN`, a multiset it knows); the controlled player's library is `MY_LIBRARY` (open
+decklists: its contents follow from the decklist and the controlled hand the controller sees; with
+hidden decks, the cards it knows exactly, its clouds and the candidates of what it knows of their
+pool: `encode_match`). `ctx::FRAME` (context 248, reserved for this by A0, 100.1) is 1 and
+`DECIDER_IS_VIEWER` is "the viewer makes this decision" (`decider_of(player) == viewer`): the
+value the network estimates is the viewer's (zero-core's `to_move`, the row's player), the frame's
+opposite seat; the network learns that from the flag. The controlled player's own encoding is its
+seat, with no options or list (it decides nothing, 722.4). The belief target is the frame
+opponent's hand (`aux_target`). In every game without a controlled turn the frame is the viewer's
+and nothing changes (the digests).
+
+**What the controller sees (99.14.2 fixed).** `Game::controller_sees(p, c)`: during a turn another
+player controls `p`, each hidden card `p` sees is its controller's at once, keyed (`KEY_LOOK`,
+private): from `learn` (a look, even at a card `p` knew already), a draw, a card of a looked-at
+pile put back where `p` knows it, a found card put into the hand or on top. A later private
+rearrangement makes it a cloud for the controller as for any other player. The end-of-transition
+sync stays and also shares a looked-at pile named by definition and, while `p` searches their
+library (701.19), that library. What `p` merely remembers from before the turn is not shared.
+`docs/shortcuts.md` 99.14.2: fixed.
+
+**The Dominion Bracelet** is supported (`SUPPORTED_EOE_EXILE`; the lowering's block removed). Its
+W4 tests (4) and W3's (1) run again;
+`cr_722_3_a_controlled_decision_is_encoded_in_the_controlled_seat` reads a controlled main phase
+back: both viewers framed in P1's seat, the controller's frame flag and decider flag, every legal
+`HAND` id a present slot of its card with its legal flag, P1's Bear in `MY_PERM`, the non-decider
+without options, and 8 determinized worlds of each viewer encoding identically. The fuzz checks
+every `HAND` option against the decider's hand slot (`check_hand_options`, as `LIBRARY` options
+against the list since 65.10) and counts the controlled decisions.
+
+**Gap #1, the graveyard's order (593e271).** Priority's casts and plays from the graveyard were
+`GRAVEYARD` + the card's position, so an id depended on the order, which the bags don't show. Now
+they are one option, `GRAVEYARD` + 0 (`Choice::FromGraveyard`, "cast or play from the
+graveyard"), and `Task::GraveyardCast` asks a `ChooseGraveyardCard` over the graveyard list
+(65.10's mechanism: `LIBRARY` + the card's slot, the list block holding the graveyard in order
+with each card's token and legal flag) whose options are exactly the casts and plays Priority had
+(`graveyard_cast_options`); the answer is Priority's (`priority_ask`). A choice in two steps with
+nothing between them: rules-equivalent (class 1). The bots judge the expanded options as before
+(`priority_expanded`, `graveyard_cast_priority`). While that choice is pending, another player's worlds keep the caster's hand cards its casts count on (its hand mana sources; an alternative cost's or retrace's hand card), as for a face choice (ENGINE.md 71.4: `payment_in_progress`, `exile_filters_in_progress`): `the_bags_show_what_the_viewer_knows_of_the_pool` (best-of-three) found a world of the other player where no cast was left (`ChooseGraveyardCard with no options`). Tests that read Priority's options for a graveyard card use the testkit's `offered()` (the choices with "cast or play from the graveyard" expanded) and `choose`/`has_option` take the two steps; `cr_702_34a_a_cast_from_the_graveyard_is_one_priority_option_then_the_cards_list_token` checks both graveyard orders. The limit is back to `Design` ("graveyards are
+bags of identities, 22.2"; the order is in the list block whenever a decision is about graveyard
+cards). `public_state_reaches_the_encoding` asserts only `Design` limits: three about what the
+opponent knows of the viewer's cards (the information model) and the graveyard's order.
+
+**Adding a gap later** (W2's restricted pool mana and `lands_entered`, A's and W6's new state):
+
+1. The new field is classified `Public` in `public_state::fields` and gets a perturbation
+   (made by hand; no draw from the gate's random stream when it applies to one fixed object).
+2. If the encoding can't show it yet, a `Limit` with kind `NextLayout` and its reason; the gate
+   test's allowlist (`public_state_reaches_the_encoding`) names it.
+3. To encode it: a v6 spare float (permanent status 129-143, stack 148-151, `g6` per player
+   6-23, the game's 53-63) or, for card identities, the next layout's bag row; never a v5 spare
+   (v5's floats must stay what v5 encoded: `DIGEST_ENCODING=v5`) and never a token or action id.
+   Name the float in `encode.rs` (`perm::*`, `stack::*`, `g6::*`) citing the CR, write it in
+   `encode_features` from the frame's seat and the knower's knowledge, move the perturbation's
+   name from `limits()` to `V6_FIXED`, read it back for both viewers (a rare one by hand, as
+   `v6_rare_facts_are_encoded`), and re-run the gate and `the_v5_facts_encode_no_hidden_information`
+   (which covers `V6_FIXED`).
+4. Digests: the full digest changes where the float is set; `DIGEST_ENCODING=0` and
+   `DIGEST_ENCODING=v5` must not (a v6 spare float is a layout v6 addition, so the layout and
+   `layout_v6.json` are unchanged and every v6 checkpoint loads).
+
+**The widen, proved on a real checkpoint.** A copy of `runs/delver2/models/iter_0071.pt` (layout
+v5, sha256 dd5cd5c4..., read only) forked by `tools/fork_run.py` into
+`E:/mtg-zero-scratch/eoe-d-widen/fork-delver2` (iteration 0: 43,956 features, layout version 6),
+and the source (loaded past the guard) on the v5 encodings vs the fork on the v6 encodings of
+the same positions (`E:/mtg-zero-scratch/eoe-d-widen/widen_proof.py`, `result.json`): 8,082
+positions of this build (uniform random play, both viewers every 5th decision: 1,992 cube, 4,298
+best-of-three, 1,792 Delver mirror), 6,300 of them with a v6-only float set (287 of the 6,336 new
+floats are set somewhere). Policy logits max abs 1.2e-5, value logits 2.8e-6 (435 rows bit for
+bit), value probabilities 1.0e-6, margin 2.2e-6; the same numbers with every v6-only float uniform
+noise in [-4, 4], and the fork on the v6 encoding with its v6-only floats zeroed equals it on the
+real encoding bit for bit (all 8,082 rows, all three heads): the new columns have no effect, the
+residual is float rounding of the input maps' sums over more (zero-weighted) columns (60.2's was
+5.7e-6 / 1.9e-6). The encoding guard (61) refuses the v5 checkpoint on this build ("features
+37620 -> 43956; token layout: segment tops: offset 19840 -> 23936; ..."), and accepts the fork.
+pytest: `test_an_older_token_network_widens_onto_layout_v6_exactly` (v4 and v5 random networks,
+real encodings), `test_the_encoding_guard_refuses_an_older_network_and_takes_a_v6_one` (v4 and
+v5). zero-core needed no change (its widen already adds bag rows, wider slots and a declared global
+block, 60.2).
+
+**Moving a run to v6**: 60.5's procedure (fork into a new run directory; never resume across the
+layout change).
+
+**Digests.**
+
+| Commit | Full | `DIGEST_ENCODING=0` | Why |
+|---|---|---|---|
+| before (`eoe-base` 9c67a75) | e6039cb2cfc4206d | e56bcf4a9f57ecee | |
+| 6049e27 layout v6, the frame | **911f5bd69a1b11e3** (re-recorded) | e56bcf4a9f57ecee (unchanged) | every encoding is wider; no game plays differently (no game has a controlled turn); `DIGEST_ENCODING=v5` gives **e6039cb2cfc4206d**, the full digest before: every v5 float of every hashed encoding is what v5 encoded |
+| 787f5be the card | unchanged | unchanged | no digest game has the card (cube) |
+| 593e271 gap #1 | **f647a6bc49199717** (re-recorded) | **b0311198fed2ac84** | 761 of the 2,500 games (668 random, 93 heuristic): the ones where a graveyard card can be cast or played at a Priority decision (one option, then the list choice: another decision to hash, and a random seat chooses among other options) |
+
+(`DIGEST_ENCODING=v4` on 6049e27: e95b22f9bbcf7778, the v4 projection of the base's games; 58.11's
+317b5ba05dc569fb was recorded before the games changed since.)
+
+**Results** (normal release profile, `E:/cargo-target/mtg-zero/eoe-d-encoding`, on a desktop shared
+with other workstreams' builds and fuzzes). The full engine suite on 593e271: **2,006 passed, 0
+failed, 15 ignored** (`az` 43, `hidden` 16; 100.3's 1,996 and 20 ignored, plus the 5 Bracelet tests
+run again and 5 new). The default `FUZZ_GAMES=20000` passed on 593e271 (20,000 games, wins 9,967 / 9,989, 44 draws, mean 27.0 turns, 215.7 decisions; 1,000 matches; 56,486 graveyard-list decisions checked; 1,013 s). `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed with The Dominion Bracelet in the pool (20,000 games, wins 8,986 / 8,936, 2,078 draws, mean 40.3 turns, 505.9 decisions; **177 controlled decisions**, each checked: the decider's encoding bounded, every `HAND` and `LIBRARY` option on its slot's token, `determinize` keeping the decider's view and actions; 1,711 s). The quick runs on 787f5be: `FUZZ_POOL=eoe FUZZ_GAMES=2000` (99 controlled decisions) and `FUZZ_GAMES=1000` passed.
+
+**The gate** (`python tools/gate.py encoding --expect-digest f647a6bc49199717 --expect-digest0 b0311198fed2ac84 --no-mac --checkpoint <the fork of delver2's iter_0071>`, on 593e271): build, both digests (= expected), `--test az` (43), the checkpoint load (h2h, 8 games, 0 unfinished) passed; pytest **200 passed, 1 failed**: `test_position_lab.py::test_real_replays_rebuild_at_every_tenth_frame`, which replays the newest main-line replays (`runs/r3-2b-beliefsearch/replays`, recorded 11-01): `20261101-152448_004` diverges at action 155, an `OrderTriggers` of two Dragon's Rage Channeler triggers, which workstream C's 13.8 (100.3: triggers of one ability from different sources are ordered) asks and the recorded engine didn't. Traced to `eoe-base` (C's change), not this branch's (its commits change no trigger ordering); the test needs replays recorded after C (the maintainer's). Last line: `GATE FAILED encoding 593e27120ea7 in 849s - pytest: 1 failed, 0 error(s), 200 passed`. A raw v5 checkpoint can't be the gate's `--checkpoint` on this build: the guard refuses it (61), as it should; the fork is the run's checkpoint on the new encoding.
