@@ -437,3 +437,25 @@ fn cr_106_6_land_ability_mana_pays_cataracts_while_a_spell_is_cast() {
     assert_eq!(g.player(0).pool.amt, [0; 6]);
     assert!(g.restricted_mana(0).is_empty(), "{:?}", g.restricted_mana(0));
 }
+
+/// CR 602.2b, 601.2g (ENGINE.md 49: castability and the payment agree): a
+/// Gene Pollinator whose own cost taps it (Ragost's Food ability, "{2}, {T},
+/// Sacrifice this artifact: You gain 3 life", on the artifact Pollinator) can't
+/// activate its mana ability while paying it, so it doesn't count among the
+/// Pollinators that could tap another permanent for mana (EoE fuzz seed 11752 of
+/// W6's table: offered, then "PayMana: no way to pay {2}"). With a second
+/// Pollinator it is payable.
+#[test]
+fn cr_602_2b_a_pollinator_paying_its_own_tap_cost_is_no_activator() {
+    let g = eoe_w2::scen().battlefield(0, &["Ragost, Deft Gastronaut", "Gene Pollinator", "Forest"]).at(Step::Main1, 0).start();
+    let pol = bf(&g, 0, "Gene Pollinator");
+    assert!(!g.has_option(act(pol, 1)), "only the Forest pays: {:?}", g.options_desc());
+    let mut g = eoe_w2::scen().battlefield(0, &["Ragost, Deft Gastronaut", "Gene Pollinator", "Gene Pollinator", "Forest"]).at(Step::Main1, 0).start();
+    let pols: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.name(c) == "Gene Pollinator").collect();
+    assert!(g.has_option(act(pols[0], 1)), "the other Pollinator taps Ragost: {:?}", g.options_desc());
+    g.choose(act(pols[0], 1));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.life(0), 23, "{}", log(&g));
+    assert_ne!(g.obj(pols[0]).zone, Zone::Battlefield);
+}

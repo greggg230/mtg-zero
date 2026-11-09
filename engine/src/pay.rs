@@ -1403,7 +1403,34 @@ impl Game {
         keep: &Keep,
         without: Option<CardIdx>,
     ) -> bool {
-        self.might_pay(p, cost, classes, without) && self.phyrexian_feasible(p, cost, classes, keep, keep.life, without)
+        let classes = self.classes_excluding(p, classes, without);
+        self.might_pay(p, cost, &classes, without) && self.phyrexian_feasible(p, cost, &classes, keep, keep.life, without)
+    }
+
+    /// `classes` (built with nothing excluded) as a payment that excludes
+    /// card `without` (`Keep::exclude`: `mana_classes(p, without)`) has
+    /// them, but for `without`'s own members, which the feasibility leaves
+    /// out itself. The sources another permanent's mana ability makes
+    /// depend on that permanent: a Gene Pollinator excluded can't activate
+    /// for the permanents it would tap (`POL_FOR`), nor an excluded Urza
+    /// for its artifacts (`TAP_FOR`), an excluded Squandered Resources or
+    /// Orcish Lumberjack for the permanents it sacrifices; those classes are
+    /// built again with `without` excluded, so castability and the payment
+    /// agree (ENGINE.md 49; EoE fuzz seed 11752 of W6's table: a Pollinator,
+    /// a Food by Ragost, activating "{2}, {T}, Sacrifice this artifact"
+    /// counted itself among the Pollinators that could activate).
+    pub(crate) fn classes_excluding<'a>(&self, p: PlayerId, classes: &'a [Class], without: Option<CardIdx>) -> std::borrow::Cow<'a, [Class]> {
+        let dependent = |cl: &Class| {
+            let s = cl.members[0].slot;
+            s == POL_FOR || s == TAP_FOR || is_sac_slot(s)
+        };
+        let Some(c) = without else { return std::borrow::Cow::Borrowed(classes) };
+        if self.objs[c.i()].zone != Zone::Battlefield || !classes.iter().any(dependent) {
+            return std::borrow::Cow::Borrowed(classes);
+        }
+        let mut out: Vec<Class> = classes.iter().filter(|cl| !dependent(cl)).cloned().collect();
+        out.extend(self.mana_classes(p, without).into_iter().filter(dependent));
+        std::borrow::Cow::Owned(out)
     }
 
     /// Some split of the Phyrexian pips into life and mana leaves the rest

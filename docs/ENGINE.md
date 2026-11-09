@@ -20493,3 +20493,26 @@ builds it.
 they don't change: the cube's Mishra's Workshop or Delighted Halfling mana no longer pays a mana
 ability's cost), four the several-mana source spent on a later one's cost (with that completion
 not tried they don't change). `RULES_EPOCH` bumped.
+
+##### W6's EoE fuzz seeds 11752 and 4378
+
+Found by W6's `FUZZ_POOL=eoe` 20k fuzz on its branch (`eoe-w6-rest` b230d3c, W6's cards without B's
+work); reproduced on a throwaway merge of that branch and this one.
+
+* **11752: castability and the payment disagreed** (ENGINE.md 49). A Gene Pollinator, a Food by
+  Ragost, offered "{2}, {T}, Sacrifice this artifact: You gain 3 life"; then `PayMana` found no
+  way to pay {2}. Castability checks a cost with the priority decision's classes (built with
+  nothing excluded) and leaves out the excluded card's own members (`without`); the payment builds
+  its classes with the card excluded (`mana_classes(p, exclude)`). The sources another permanent's
+  mana ability makes depend on that permanent: the excluded Pollinator still counted among the
+  Pollinators that could tap another permanent for mana (`POL_FOR`'s share), and so would an
+  excluded Urza for its artifacts (`TAP_FOR`) or an excluded Squandered Resources or Orcish
+  Lumberjack for what it sacrifices. `can_pay_without` now builds those classes again with the
+  card excluded (`Game::classes_excluding`). Test:
+  `cr_602_2b_a_pollinator_paying_its_own_tap_cost_is_no_activator` (one Pollinator and a Forest:
+  not offered; two Pollinators: paid, the other tapping Ragost).
+* **4378: slow, not stuck.** B's 100.4.1 (the dominated "none", identical cards) is what W6's
+  branch lacks: on the merge the whole 60-turn game takes 1.9 s (2,714 decisions). 100.4.1's test
+  covers the mechanism.
+
+Digests unchanged (`02d4bccc94314d6d`, `DIGEST_ENCODING=0` `856218d6b081056c`).
