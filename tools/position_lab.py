@@ -72,7 +72,12 @@ import mtgz.az as A                    # noqa: E402,F401  (puts the pinned zero-
 FETCHES = ('Flooded Strand', 'Misty Rainforest', 'Scalding Tarn', 'Polluted Delta')
 BAUBLE = "Mishra's Bauble"
 PASS = 'Pass priority'
-REPLAYS = r'C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch/replays'
+REPLAYS = os.environ.get('MTGZ_LAB_REPLAYS', r'C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch/replays')
+# The engine's play changed on purpose at this time (epoch seconds): a replay recorded before it
+# can't be rebuilt action for action (the decisions differ: e.g. ENGINE.md 100.3 orders triggers of
+# different objects of one card, which the old engine offered once). Bump it with every commit that
+# re-records the behaviour digests; replays recorded since are the ones `check_spot` must rebuild.
+RULES_EPOCH = 1794185542  # 2026-11-08 16:52:22 -0800: the merge of faithfulness C (9c67a75; digests e6039cb2cfc4206d)
 PUBLISH_LOG = r'E:/mtg-zero-scratch/delverai-publish.log'
 MODES = ('belief', 'actual', 'pinned', 'uniform')
 

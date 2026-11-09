@@ -83,8 +83,15 @@ REAL = sorted(glob.glob(os.path.join(L.REPLAYS, '*.json.gz')))
 
 @pytest.mark.skipif(not REAL, reason='no main-line replays on this machine')
 def test_real_replays_rebuild_at_every_tenth_frame():
-    for path in REAL[-3:]:
-        rep = L.load_replay(path)
+    # Only replays recorded under the current rules (L.RULES_EPOCH): an older replay's decisions are
+    # the old engine's, so rebuilding it action for action would test the rules change, not the lab.
+    # Set MTGZ_LAB_REPLAYS to a newer run's replays to exercise it (named skip otherwise, never a pass).
+    reps = [(p, L.load_replay(p)) for p in REAL[-50:]]
+    current = [(p, r) for p, r in reps if r.get('created', 0) >= L.RULES_EPOCH]
+    if not current:
+        pytest.skip(f'no replay in {L.REPLAYS} recorded since the rules epoch {L.RULES_EPOCH} '
+                    f'(newest: {max(r.get("created", 0) for _, r in reps)}); set MTGZ_LAB_REPLAYS')
+    for path, rep in current[-3:]:
         for k in range(0, len(rep['frames']), 10):
             L.check_spot(L.spot_from_replay(rep, k, path))
 
