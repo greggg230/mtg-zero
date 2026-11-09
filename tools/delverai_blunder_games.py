@@ -125,7 +125,7 @@ def record(ckpt, spots, engine_path=B.ROOT, log=B.say, seed=SEED):
     for sp in spots:
         g = B.spot_game(E, sp)
         st = json.loads(g.export_state())
-        if B.spot_sig(st) != sp['sig']:
+        if B.spot_sig(st) != sp['sig'] or not B.same_pos(st, sp):
             stale.append(sp['id'])
             continue
         ok.append(sp)
