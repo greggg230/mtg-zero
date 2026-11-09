@@ -21397,10 +21397,10 @@ skipped. The default `FUZZ_GAMES=20000` passed on af8c555 (20,000 games, wins 9,
 draws, mean 31.8 turns, 438.1 decisions; 1,000 matches; 1,254 s).
 
 `FUZZ_POOL=eoe FUZZ_GAMES=20000` **did not finish** (stopped after 75 minutes; at 100.5 the whole run
-took 1,711 s). Seed 1024 never ends: in turn 55's upkeep random play activates Lavaclaw Reaches'
+took 1,711 s). Seed 1024 alone runs past 120 s (stopped there): in turn 55's upkeep random play activates Lavaclaw Reaches'
 "{X}: +X/+0" with X = 0 and Wandering Fumarole's "{0}: switch" thousands of times. Each activation
 adds a stack item, so every state is new and F7's loop rule (100.7: an action is withheld only at a
-state where it was taken) never applies; the stack is a random walk that rarely empties. The
+state where it was taken) never applies, and the stack keeps growing. The
 replay test (`same_seed_and_actions_replay_identically`, seeds 1000..1029) plays the same game. Ten
 chunks of 2,000 seeds with seed 1024 skipped (`FUZZ_SKIP=1024`, run side by side) each ran past 40
 minutes, so other seeds do the same. This is F7's (100.7) rule on the base, not this branch's:
