@@ -21016,3 +21016,99 @@ library still reaches every spot (60 of 60): `RULES_EPOCH` bumped and the librar
 among them). `python -m pytest tests`: 206 passed, 1 skipped. The default `FUZZ_GAMES=20000` passed
 (20,000 games, wins 9,845 / 10,031, 124 draws, mean 31.8 turns, 438.7 decisions; 1,000 matches,
 replays; 1,267 s).
+
+#### 100.7 F7: exact numbers, ranges and loops (branch `eoe-f7-numbers`, from `eoe-base` 5f0b07e; `eoe-base` 2f065ff and `eoe-c2-together` merged)
+
+The audit's F7 (docs/faithfulness_audit.md 5.7) and E2 (100.6). Every number the game keeps is
+exact or the game ends **aborted**, and no optional loop is cut by a count.
+
+**The aborted terminal** (2cab11d, 6af45fe). `EndReason::Aborted` via `Game::abort(why)`: the
+game has no result (`Game::aborted`), its running task finishes and `advance` stops. Every outcome
+is set through `Game::end_game`: an aborted game stays aborted, and a game that ended before an
+overflow keeps its exact result. An aborted game aborts a best-of-three match
+(`MtgAz::match_aborted`). zero-core `feat/aborted-games` e4779b2 (opt-in `SearchGame::aborted`):
+the driver ends such a game as not over with no samples, and the search values an aborted terminal
+by the network, like a deferred one. Every other zero-core game is unchanged.
+
+**Numbers** (d94e9ed, e658d58; `engine/src/num.rs`). `num::Count` = u64 within `COUNT_MAX` =
+i64::MAX; stored amounts i64 (life totals, life gained, marked damage, `Mod::Pt` / `SetPt`, LKI
+power and toughness, `Frame::x`, starting life); derived values `num::Wide` = i128 (power and
+toughness in layers.rs, `Game::amount`, every sum). Narrowing goes through `Game::exact` /
+`exact_count` / `exact_u32` / `exact_u8` (abort out of range), and bookkeeping counts through
+`Game::exact_inc` (abort at u32::MAX: timestamps, stack ids, event groups, tokens, spells cast,
+cards drawn). Objects: `CardIdx` and `ObjRef::inc` are u32 (`add_card` aborts at `OBJECT_LIMIT`);
+`CardIdx` is a `NonZeroU32` holding index + 1, so `Option<CardIdx>` / `Option<ObjRef>` carry no
+tag. LKI power and loyalty bookkeeping moved to side lists (`Game::lki_power`, `Game::loyalty`),
+which keeps `Obj` at 64 bytes. Mana keeps B's u8 model: `ManaPool::add` reports overflow and
+`Game::add_mana` / `finish_payment` / `check_counter_mana` abort past 255 of a type (B4 widens the
+cost side, 100.4.7). Fixes found on the way: devour's 65,535 cap, `ExileAll`'s 8-bit per-player
+count, "enters not from a graveyard or exile" reading bit 15 wrong with `ENTER_BIG`, the cascade
+mana value as u8, the encoding's total power, `KEY_GAME`'s 255 clamp (a loud assert now). Perf on
+e658d58 against 5f0b07e: clone 1,279 vs 1,220 ns, determinize 948 vs 830 ns, 7.61 us/decision.
+
+**Ranges** (d301776). `Ext::LookTopN` looks at exactly n cards (it clamped n to 60); the pick
+among the pile pages through `Game::ask_paged` over the LIBRARY range, with the decider's list
+block showing the page (az/encode.rs `decision_list`; unpaged piles encode as before).
+`Pos::FromTop` is u32: "beneath the top X" goes exactly X deep (CR 401.4).
+
+**E2** (2cab11d). A copy effect put on a permanent makes its copiable values single-faced
+(`CopyVals::dfc`, CR 707.8a), so a token copy of Shifting Woodland as Outland Liberator can't
+transform (701.28c).
+
+##### Loops (CR 732.2a, MTR 4.4): no progress is a stop (0a58c14)
+
+`ACTIVATION_CAP` (31 activations a turn of one permanent's non-mana ability) and `MAY_COPY_CAP`
+(31 "may copy this spell" copies a turn) are gone, with `Game::activations` / `may_copies`
+(docs/shortcuts.md 29.6.6, 26.11.7). `engine/src/loops.rs` replaces them:
+
+* **Loop actions**: activating a non-mana activated ability of a permanent on the battlefield
+  (own or granted; what the activation cap counted), and YES to "may copy this spell". These are
+  the engine's only sources of unbounded optional repetition.
+* **The rule**: when player p takes a loop action, `Game::loop_taken` records (until the turn
+  ends) the loop hash of the state as p's decider sees it, with the action (`LoopAct::Activate
+  { place, slot }` / `LoopAct::MayCopy`). The action is not offered to p at a decision whose hash
+  equals a recorded one for the same action. The state is then identical to one where p took it,
+  so everything reachable by taking it now was reachable then; taking it again can only repeat an
+  iteration that made no progress (MTR 4.4). Manual repetition that changes anything is unlimited:
+  Grim Monolith untaps as long as lands pay for it, Chain of Smog copies until both hands are
+  empty, and Time Vault + Voltaic Key take turns until the turn limit.
+* **The loop hash** (`Game::loop_hash`): a fixed hash of the state part of `Game::view_of`
+  (factored out as `view_state`; `view_of` = state part + pending decision, unchanged). Its
+  properties: it is the same in every world `determinize` deals for that viewer (options stay
+  determinize-invariant and reveal nothing hidden), and the public-state gate proves that every
+  public field changes it. Canonicalised so a repeated state hashes equal:
+  - consecutive passes left out (a loop action sets them to 0, CR 117.3c);
+  - every timestamp named by its rank;
+  - continuous effects that change nothing left out (+0/+0, CR 613.4c: Lavaclaw Reaches' "{X}:
+    +X/+0" with X = 0, the EoE fuzz's seed 1004 that never ended);
+  - an object's power and toughness switches read by parity (layer 7d holds only switches and
+    each toggles, CR 613.4d: Wandering Fumarole's free "{0}: Switch" is back at its state after
+    two).
+
+  It adds what the view leaves out but the rules read: the order of timestamps across kinds, group
+  effects' filters, deathtouch damage, waiting/delayed triggers' full events, the LKI of gone
+  objects that stack items and frames name, an open simultaneous entry's held Enters events (C2,
+  100.9), and for a may-copy the suspended frame (destructured exhaustively, so a new field is a
+  compile error) and the rest of the agenda. Nothing else is dropped: a wrong "equal" would prune
+  a legal option, while a missed one only lets a loop run longer. A 64-bit collision within one
+  turn has probability ~n^2 / 2^65.
+* **Cost**: computed only when a loop action is taken and at a decision where the decider has a
+  record of that action (once per decision). `determinize` keeps the viewer's own records and
+  drops another decider's (hashes of views that hold what the viewer doesn't know).
+* **Not built: "repeat it N more times"** (the audit's cycle detection + `ask_number`). Exact
+  repetition needs a replay of every iteration, CR 732.2b lets each other player shorten a
+  proposed shortcut, and the legal range depends on hidden information. The rule above already
+  ends every no-progress loop, and manual repetition is exactly what the CR allows.
+
+Tests: engine/tests/rules_loops.rs (8: Basalt Monolith paid by itself loops once, also with an
+unused land; Lavaclaw Reaches X = 0, where holding priority stays offered because the stack is
+longer; Wandering Fumarole, offered after one switch and not after two; Grim Monolith untaps past
+31; Time Vault + Voltaic Key to the turn limit; Chain of Smog past 31; the options are the same in
+every determinized world). Also: Chain of Smog forever stops after 2 questions, and Zirda +
+Basalt Monolith goes past 31.
+
+Digests: 02d4bccc94314d6d -> ab7e8aea0f65b8df (DIGEST_ENCODING=0 856218d6b081056c ->
+660b3c387f18be70): 73 of 2,500 games, all random play re-taking a no-progress loop action at a
+revisited state (Basalt Monolith's self-paid untap; Lightning Greaves' equip {0} back and forth;
+also inside the heuristic decider's determinized playouts). With C2 merged: full af00cc85e05ea0c1;
+the encoding-free digest stays 660b3c387f18be70 (C2 changes no game's play, 100.9).
