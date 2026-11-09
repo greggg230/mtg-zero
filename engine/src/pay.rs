@@ -338,6 +338,12 @@ pub(crate) struct PayMana {
     /// next (`ChooseMode`, `NUMBER` + k; ENGINE.md 99.12).
     pub card_slots: Vec<(CardIdx, Vec<AbilitySlot>)>,
     pub which: Option<CardIdx>,
+    /// A production chosen one mana at a time (more productions than
+    /// `NUMBER` ids: Cascading Cataracts' five of any colours): the mana
+    /// chosen so far and the least colour the next may be (colours in
+    /// non-decreasing order, each production once; ENGINE.md 99.12).
+    pub now_taken: [u8; 6],
+    pub now_min: u8,
 }
 
 impl PayMana {
@@ -368,6 +374,8 @@ impl PayMana {
             convoke: false,
             card_slots: Vec::new(),
             which: None,
+            now_taken: [0; 6],
+            now_min: 0,
         }
     }
 
@@ -1441,6 +1449,14 @@ impl Game {
     /// no mana is made for nothing) and that leave the rest payable by the
     /// sources of the classes from `ci` on.
     fn feasible_prods(&self, pm: &PayMana, classes: &[Class], ci: usize, src: Src) -> Vec<[u8; 6]> {
+        self.feasible_prods_where(pm, classes, ci, src, &|_| true, false)
+    }
+
+    /// [`feasible_prods`](Self::feasible_prods) among the productions
+    /// `among` keeps; with `only_one`, the first only (is there one?): a class
+    /// of many productions (Cascading Cataracts' 126) is checked lazily
+    /// (ENGINE.md 99.12).
+    fn feasible_prods_where(&self, pm: &PayMana, classes: &[Class], ci: usize, src: Src, among: &dyn Fn(&[u8; 6]) -> bool, only_one: bool) -> Vec<[u8; 6]> {
         let cl = &classes[ci];
         let Yield::Multi { prods, .. } = &cl.yld else { unreachable!() };
         let p = pm.payer;
@@ -1453,10 +1469,10 @@ impl Game {
         if cl.need != 0 {
             marked.extend(std::iter::repeat_n(cl.need, cl.need_n as usize));
         }
-        prods
-            .iter()
-            .copied()
-            .filter(|prod| {
+        let mut out = Vec::new();
+        for prod in prods.iter().copied().filter(|v| among(v)) {
+            let ok = {
+                let prod = &prod;
                 let mut groups = base.clone();
                 for t in 0..6 {
                     if prod[t] > 0 {
@@ -1480,8 +1496,15 @@ impl Game {
                         self.most_spent(pm, &groups, &marked, &[], &rest, budget).is_some()
                     }
                 }
-            })
-            .collect()
+            };
+            if ok {
+                out.push(prod);
+                if only_one {
+                    break;
+                }
+            }
+        }
+        out
     }
 
     /// Can Wizard's Rockets (class `ci`, member `src`), picked now, leave the
@@ -1626,6 +1649,45 @@ impl Game {
             }
         }
         if let Some((src, prods)) = pm.now.take() {
+            // (More productions than `NUMBER` ids: chosen one mana at a
+            // time, `PayMana::now_taken`; the productions all of one total.)
+            let big = prods.len() > act::NUMBER_N as usize || pm.now_taken != [0; 6];
+            let fits = |v: &[u8; 6], taken: &[u8; 6], min: usize| (0..6).all(|t| if t < min { v[t] == taken[t] } else { v[t] >= taken[t] });
+            if big {
+                assert!(prods.iter().all(|v| v.iter().sum::<u8>() == prods[0].iter().sum::<u8>()), "productions of different totals chosen one mana at a time");
+                match self.answer.take() {
+                    Some(Choice::Number(t)) => {
+                        let t = t as usize;
+                        pm.now_taken[t] += 1;
+                        pm.now_min = t as u8;
+                        let taken = pm.now_taken;
+                        let rest: Vec<[u8; 6]> = prods.into_iter().filter(|v| fits(v, &taken, t)).collect();
+                        if rest.len() == 1 && rest[0] == taken {
+                            pm.now_taken = [0; 6];
+                            pm.now_min = 0;
+                            let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("source class");
+                            self.pick_multi(&mut pm, &classes, ci, src, rest[0]);
+                        } else {
+                            pm.now = Some((src, rest));
+                        }
+                        self.agenda.push(Task::PayMana(pm));
+                    }
+                    Some(other) => unreachable!("production answer {other:?}"),
+                    None => {
+                        // (A colour some feasible production goes on with.)
+                        let (taken, min) = (pm.now_taken, pm.now_min as usize);
+                        let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("source class");
+                        let opts: Vec<Opt> = (min..6)
+                            .filter(|&t| prods.iter().any(|v| fits(v, &taken, t) && v[t] > taken[t]))
+                            .filter(|&t| !self.feasible_prods_where(&pm, &classes, ci, src, &|v| fits(v, &taken, t) && v[t] > taken[t], true).is_empty())
+                            .map(|t| Opt { action: act::NUMBER + t as u16, choice: Choice::Number(t as u8) })
+                            .collect();
+                        pm.now = Some((src, prods));
+                        self.ask(Task::PayMana(pm), payer, DecisionKind::ChooseMana, opts);
+                    }
+                }
+                return;
+            }
             match self.answer.take() {
                 Some(Choice::Number(k)) => {
                     let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("source class");
@@ -1706,7 +1768,9 @@ impl Game {
                             let prod = prods[0];
                             self.pick_multi(&mut pm, &classes, ci, src, prod);
                         } else {
-                            pm.now = Some((src, self.feasible_prods(&pm, &classes, ci, src)));
+                            // (Many productions: all of them, each mana
+                            // then chosen among the feasible ones.)
+                            pm.now = Some((src, if prods.len() > act::NUMBER_N as usize { prods.clone() } else { self.feasible_prods(&pm, &classes, ci, src) }));
                         }
                     }
                 }
@@ -1776,7 +1840,7 @@ impl Game {
                         },
                         Yield::Multi { .. } => {
                             debug_assert!(pm.chosen.is_empty(), "several-mana classes come first");
-                            !self.feasible_prods(&pm, &classes, ci, rep).is_empty()
+                            !self.feasible_prods_where(&pm, &classes, ci, rep, &|_| true, true).is_empty()
                         }
                     }
                 }

@@ -19737,3 +19737,13 @@ Pollinator activating for the mana is an artifact tapped too: `Game::reserved_n`
 the reservation (one more for each Pollinator source when the Pollinators that can activate all
 match the cost; when only some do, which one activates would matter: a loud failure, open). Test:
 `cr_601_2h_a_pollinator_activating_isnt_an_artifact_left_to_tap`.
+
+Also found by the merge's EoE fuzz (seed 10023 stalled a run): a several-mana source's production
+was one `ChooseMana` decision with an option per production, and Cascading Cataracts' "five mana in
+any combination of colors" has 126, past the 32 `NUMBER` ids (the ids ran into the next range).
+Now a class with more productions than `NUMBER` ids is chosen one mana at a time, colours in
+non-decreasing order (`PayMana::now_taken`, `now_min`; at most six options, each set once), each
+colour offered only if a feasible production goes on with it, and whether a class has a feasible
+production stops at the first (`feasible_prods_where`). Seed 10023 itself still runs past 15
+minutes in the fuzz (its payments with Cataracts, Crystal Quarry, Gene Pollinator and Reflecting
+Pool under the option-completion check): open, for the payment workstream.
