@@ -20279,6 +20279,12 @@ ready, so fewer decisions are auto-answered): full `21badc9235bd1cd1` -> `02cb76
 (the fuzz) makes about twice the decisions (default 215 -> 440 a game; EoE 495 -> 785).
 `RULES_EPOCH` bumped.
 
+**The merge of `eoe-base` 5f0b07e** (the loose ends, 100.6; 01a41a2): the loose ends changed no
+digest game of `eoe-base`, but one of this branch's (F3 games differ): its day and night checked at
+once (CR 702.145c-g) changes the encodings of one game, not its actions. Full `02cb76576f92a66c` ->
+`3667d9433f0f7a00` (1 of 2,500), `DIGEST_ENCODING=0` unchanged (`d0a7be8d70719c90`). `RULES_EPOCH`
+bumped.
+
 #### 100.6 Loose ends (branch `eoe-e-loose`, from `eoe-base` 9b403c1)
 
 The faithfulness audit's small items that no workstream owned: what workstream C found in day and
