@@ -1248,6 +1248,8 @@ fn public_state_reaches_the_encoding() {
     // too), controlling another player (CR 722: a pending effect, a controlled turn), W5's granter
     // of a spell's alternative cost (ENGINE.md 99.15; rare: no gate position has one), and whether
     // an artifact entered under a player's control this turn (ENGINE.md 99.11) follow.
+    // W2's restricted pool mana and the lands that entered this turn (ENGINE.md 99.12) come
+    // before W1's artifacts.
     assert_eq!(
         gaps,
         [
@@ -1264,6 +1266,8 @@ fn public_state_reaches_the_encoding() {
             "a player will control the other's next turn",
             "the active player is controlled this turn",
             "a spell's granted alternative cost came from another permanent",
+            "mana in a pool is restricted to activating abilities of lands",
+            "a land entered the battlefield this turn",
             "the other player learns a hand card past the 16th",
             "the turn goes on with another phase after its combat phases",
             "an artifact entered under a player's control this turn"
@@ -1272,7 +1276,7 @@ fn public_state_reaches_the_encoding() {
     );
     // (Workstream C's: where the turn goes on after combat phases added to another phase, and
     // the hand cards past the 16 slots, ENGINE.md 100.3.)
-    assert_eq!(next, 16);
+    assert_eq!(next, 18);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

@@ -76,7 +76,12 @@ pub(crate) enum Task {
     Divide { id: u32 },
     ChooseModes { id: u32 },
     ManaNow { src: Src },
-    ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]> },
+    /// (`only`: the mana's spending restriction, kept in the pool, CR
+    /// 106.6; ENGINE.md 99.12.)
+    ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]>, only: u8 },
+    /// Devour land (CR 702.82a): the lands chosen so far, in battlefield
+    /// order (ENGINE.md 99.12).
+    Devour { card: CardIdx, picked: Vec<CardIdx> },
     /// The rest of a priority mana ability's cost (ENGINE.md 28).
     ManaNowCosts { src: Src, sac: Option<CardIdx>, x: u8 },
     // entering the battlefield (CR 614.12)
@@ -313,9 +318,10 @@ impl Game {
             Task::Divide { id } => self.divide(id),
             Task::ChooseModes { id } => self.choose_modes(id),
             Task::ManaNow { src } => self.mana_now(src),
-            Task::ManaNowPick { p, prods } => self.mana_now_pick(p, prods),
+            Task::ManaNowPick { p, prods, only } => self.mana_now_pick(p, prods, only),
             Task::ManaNowCosts { src, sac, x } => self.mana_now_costs(src, sac, x),
             Task::AsEnters { card } => self.as_enters(card),
+            Task::Devour { card, picked } => self.devour(card, picked),
             Task::Delve { id } => self.delve(id),
             Task::EnterByDiscard { id } => self.enter_by_discard(id),
             Task::EnterByDiscardAny { card, controller, tapped } => self.enter_by_discard_any(card, controller, tapped),
@@ -669,6 +675,7 @@ impl Game {
         for p in &mut self.players {
             p.pool.clear();
         }
+        self.pool_restr.clear();
         let next = match self.turn.step {
             Step::Setup => unreachable!(),
             Step::Untap => Step::Upkeep,

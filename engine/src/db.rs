@@ -432,6 +432,10 @@ pub enum Filter {
     InExile(Box<Filter>),
     /// A card with warp (CR 702.185a: the keyword among its abilities).
     HasWarp,
+    /// Mana value equal to the number of counters of this kind on the
+    /// context's source (as it last existed if it left, CR 608.2h; Blast
+    /// Zone, ENGINE.md 99.12).
+    MvIsSourceCounters(Counter),
 }
 
 /// `Filter::Ability` kinds.
@@ -1105,6 +1109,10 @@ pub enum ManaProd {
     /// those lands make, other abilities of this kind making none of their
     /// own.
     LandsCouldProduce,
+    /// X mana of one type chosen from the mask, X the number of counters of
+    /// this kind on the source (The Eternity Elevator; ENGINE.md 99.12):
+    /// none without such counters.
+    SameTypeCounters { mask: ManaMask, counter: Counter },
 }
 
 /// A mana ability's effect: the mana, plus damage its source deals to its
@@ -1117,7 +1125,9 @@ pub struct ManaAbility {
     /// Mine), after the mana.
     pub sac_if_no: Option<Counter>,
     /// "Spend this mana only to cast artifact spells" / "... a legendary
-    /// spell" (`SPEND_*` bits; 0 = no restriction, CR 106.6).
+    /// spell" (`SPEND_*` bits; 0 = no restriction, CR 106.6): the purposes
+    /// it may be spent on, any one of them ("to cast artifact spells or
+    /// activate abilities of artifacts": two bits; ENGINE.md 99.12).
     pub only: u8,
     /// "... and that spell can't be countered" (Delighted Halfling).
     pub uncounterable: bool,
@@ -1134,6 +1144,16 @@ pub struct ManaAbility {
 pub const SPEND_ARTIFACT: u8 = 1;
 /// ... only to cast a legendary spell.
 pub const SPEND_LEGENDARY: u8 = 2;
+/// ... only to activate abilities of artifact sources (ENGINE.md 99.12).
+pub const SPEND_ARTIFACT_ABILITY: u8 = 4;
+/// ... only to cast colorless Eldrazi spells.
+pub const SPEND_ELDRAZI_SPELL: u8 = 8;
+/// ... only to activate abilities of colorless Eldrazi.
+pub const SPEND_ELDRAZI_ABILITY: u8 = 16;
+/// ... only to activate abilities of land sources.
+pub const SPEND_LAND_ABILITY: u8 = 32;
+/// ... only to cast a spell from anywhere other than your hand.
+pub const SPEND_OUTSIDE_HAND: u8 = 64;
 
 /// Sacrifice n permanents you control matching the filter (`another`: not
 /// the ability's source).
@@ -1150,6 +1170,9 @@ pub struct SacCost {
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Cost {
     pub mana: ManaCost,
+    /// An activation cost's {X} counted this many times ("{X}{X}": 2; 0 or
+    /// 1: once; `ActivatedDef::x`; ENGINE.md 99.12).
+    pub x_times: u8,
     /// `{T}` (CR 107.5): the source must be untapped and, if it is a
     /// creature, free of summoning sickness (302.6).
     pub tap: bool,
@@ -1263,6 +1286,9 @@ pub struct EntersAsCopy {
     /// "When you do, exile that card" (603.11, 707.9g): its delayed
     /// ability k (`delayed_base + k`), about the card copied.
     pub exile_k: Option<u8>,
+    /// "You may have this land enter tapped as a copy of ...": copying, it
+    /// enters tapped (Echoing Deeps; ENGINE.md 99.12).
+    pub tapped: bool,
 }
 
 /// What an activated ability does.
@@ -1798,6 +1824,17 @@ pub struct CardDef {
     pub toughness_stations: bool,
     /// The printing facts EoE workstream W3 adds (ENGINE.md 99.13).
     pub w3: crate::eoe_w3::W3Def,
+    /// "Nonbasic lands are Mountains" (CR 305.7, 613.1d: Magus of the Moon;
+    /// `Game::moon_on`, ENGINE.md 99.12).
+    pub nonbasic_lands_are_mountains: bool,
+    /// "Each creature you control enters with an additional +1/+1 counter on
+    /// it for each land that entered the battlefield under your control this
+    /// turn" (CR 614.1c; Bioengineered Future, ENGINE.md 99.12).
+    pub etb_counter_per_land_entered: bool,
+    /// Devour land n (CR 702.82a: "As this creature enters, you may
+    /// sacrifice any number of lands. It enters with n times that many
+    /// +1/+1 counters"; Famished Worldsire, ENGINE.md 99.12): n, 0 = none.
+    pub devour_land: u8,
 }
 
 /// Rules about casting spells a card adds while it is on the battlefield
@@ -1989,6 +2026,37 @@ pub struct CardDb {
     /// (`CastingRules::hand_alt_grants`): castability looks for granters
     /// (ENGINE.md 99.15).
     pub(crate) hand_alt_grants: bool,
+    /// The spending restrictions' purposes the table's mana can have
+    /// (`SPEND_*`: the union of its mana abilities' `only`, granted ones
+    /// included); payments work out only these (ENGINE.md 99.12).
+    pub(crate) spend_kinds: u8,
+    /// The interned "Eldrazi" subtype, if any card has it.
+    pub(crate) eldrazi: Option<u16>,
+    /// A card of the table says "nonbasic lands are Mountains"
+    /// (`CardDef::nonbasic_lands_are_mountains`): the layers look for it.
+    pub(crate) moon: bool,
+    /// With `moon`: the abilities of a nonbasic land that is a Mountain
+    /// (CR 305.7: "{T}: Add {R}"), and for each definition with latent
+    /// activated abilities its own variant (the Mountain's ability, then
+    /// those latent abilities: an effect may have given them, layer 6 after
+    /// layer 4), as definitions (`Game::moon_def`; ENGINE.md 99.12).
+    pub(crate) moon_base: DefId,
+    pub(crate) moon_of: Vec<(DefId, DefId)>,
+    /// The interned land types (CR 205.3i) and "Mountain".
+    pub(crate) land_subtypes: Vec<u16>,
+    pub(crate) mountain: Option<u16>,
+    /// A card of the table counts the lands that entered under a player's
+    /// control this turn (`CardDef::etb_counter_per_land_entered`): the game
+    /// keeps the count (`Game::lands_entered`).
+    pub(crate) watch_lands_entered: bool,
+    /// A card of the table has "{T}, Tap an untapped permanent you control:
+    /// Add <mana>" (Gene Pollinator, `pay::POL_FOR`): improvise and convoke
+    /// sources look for it (`Game::pol_split`).
+    pub(crate) pollinator: bool,
+    /// A card of the table reads a creature's controller as it last existed
+    /// (`EoeW2::EventObjControllerGainsSource`): the game keeps it
+    /// (`Game::lki_toughness`; ENGINE.md 99.12).
+    pub(crate) watch_lki_controller: bool,
 }
 
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
@@ -2017,6 +2085,7 @@ pub(crate) fn merge_costs(a: &Cost, b: &Cost) -> Option<Cost> {
     };
     let c = Cost {
         mana: a.mana.plus(&b.mana),
+        x_times: a.x_times.max(b.x_times),
         tap: a.tap || b.tap,
         life: a.life.checked_add(b.life)?,
         sac_self: a.sac_self || b.sac_self,
@@ -2176,6 +2245,36 @@ impl CardDb {
         db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
         db.watch_toughness = db.defs.iter().any(|d| d.toughness_assigns_damage || d.toughness_stations);
         db.hand_alt_grants = db.defs.iter().any(|d| !d.casting.hand_alt_grants.is_empty());
+        db.spend_kinds = crate::eoe_w2::spend_kinds(&db.defs);
+        db.eldrazi = db.subtype_id("Eldrazi");
+        db.moon = db.defs.iter().any(|d| d.nonbasic_lands_are_mountains);
+        if db.moon {
+            let base = crate::eoe_w2::mountain_def().clone();
+            let n = db.defs.len();
+            db.moon_base = n as DefId;
+            let variants: Vec<(DefId, CardDef)> = db
+                .defs
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| d.latent > 0)
+                .map(|(i, d)| {
+                    let mut v = base.clone();
+                    v.activated.extend(d.activated[d.activated.len() - d.latent as usize..].iter().cloned());
+                    v.latent = d.latent;
+                    (i as DefId, v)
+                })
+                .collect();
+            db.defs.push(base);
+            for (i, v) in variants {
+                db.moon_of.push((i, db.defs.len() as DefId));
+                db.defs.push(v);
+            }
+        }
+        db.land_subtypes = crate::eoe_w2::LAND_TYPES.iter().filter_map(|n| db.subtype_id(n)).collect();
+        db.mountain = db.subtype_id("Mountain");
+        db.watch_lands_entered = db.defs.iter().any(|d| d.etb_counter_per_land_entered);
+        db.watch_lki_controller = db.defs.iter().any(crate::eoe_w2::reads_lki_controller);
+        db.pollinator = db.defs.iter().any(|d| d.activated.iter().any(|a| a.mana().is_some() && a.cost.tap && a.cost.tap_untapped.is_some()));
         db
     }
 

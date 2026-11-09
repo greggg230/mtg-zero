@@ -762,6 +762,19 @@ pub struct Game {
     /// controller as they last existed (CR 608.2h; kept when
     /// `CardDb::watch_toughness`: stationing by toughness, ENGINE.md 99.8).
     pub(crate) lki_toughness: Vec<(ObjRef, i32, PlayerId)>,
+    /// Mana in the pools with a spending restriction other than Mishra's
+    /// Workshop's (`ManaPool::art`): (player, type, purposes, amount), a
+    /// part of that player's `ManaPool::amt` (CR 106.6; ENGINE.md 99.12).
+    /// Empty but in games with such mana; emptied with the pools.
+    pub(crate) pool_restr: Vec<(PlayerId, u8, u8, u8)>,
+    /// The lands that entered the battlefield under each player's control
+    /// during turn `.0` (kept when `CardDb::watch_lands_entered`; ENGINE.md
+    /// 99.12).
+    pub(crate) lands_entered: (u32, [u8; 2]),
+    /// A card of this game says "nonbasic lands are Mountains" (its faces
+    /// included; a copy copies a card of the game): the layers look
+    /// (`Game::moon_on`; ENGINE.md 99.12).
+    pub(crate) moon_game: bool,
     /// Spells that left the stack while a triggered ability about them
     /// waited: their definition and item (CR 608.2h: "copy it").
     pub(crate) spell_lki: Vec<(ObjRef, DefId, StackItem)>,
@@ -978,6 +991,10 @@ pub enum Mark {
     /// which permanent `granter`'s static ability gave it in its owner's hand
     /// (`CastingRules::hand_alt_grants`; CR 118.9, 400.7g; ENGINE.md 99.15).
     AltGranted { granter: ObjRef, def: DefId, grant: u8 },
+    /// A spell cast from its caster's hand without paying its mana cost
+    /// (its `CastFrom` is then `eoe_c::FREE_CAST`): not cast from anywhere
+    /// other than the hand (CR 106.6; ENGINE.md 99.12).
+    FreeFromHand,
 }
 
 /// `Mark::ChosenName` of a name no card of the game has.
@@ -1181,6 +1198,9 @@ impl Game {
             lki_attached: Vec::new(),
             lki_damage: Vec::new(),
             lki_toughness: Vec::new(),
+            pool_restr: Vec::new(),
+            lands_entered: (0, [0; 2]),
+            moon_game: false,
             spell_lki: Vec::new(),
             entering_copy: None,
             entering_times: 0,
@@ -1228,6 +1248,9 @@ impl Game {
         self.w3.seen |= d.w3.seen | d.back.map_or(0, |b| self.db.def(b).w3.seen);
         if d.miracle.is_some() {
             self.seen |= SEEN_MIRACLE_P0 << owner;
+        }
+        if d.nonbasic_lands_are_mountains || d.back.is_some_and(|b| self.db.def(b).nonbasic_lands_are_mountains) {
+            self.moon_game = true;
         }
         self.objs.push(Obj {
             def,
@@ -1582,7 +1605,9 @@ impl Game {
         // its "when this enters" abilities don't trigger (CR 614.12; Xu-Ifit's
         // ruling of 2025-07-25; ENGINE.md 99.11).
         let own = !self.entering_mods.contains(&crate::db::Mod::LoseAllAbilities);
-        let copy_choice = own && self.def_of(idx).enters_as_copy.is_some();
+        // (A nonbasic land entering as a Mountain too: CR 305.7, 614.12;
+        // ENGINE.md 99.12.)
+        let copy_choice = own && self.def_of(idx).enters_as_copy.is_some() && !(self.moon_game && self.moon_entering(idx));
         let fx_tapped = std::mem::take(&mut self.entering_tapped);
         let fx_counters = std::mem::take(&mut self.entering_counters);
         let tapped = !copy_choice && self.enters_tapped_own(idx, controller, own);
@@ -1746,6 +1771,16 @@ impl Game {
         if tapped {
             self.objs[idx.i()].tapped = true;
         }
+        // "Each creature you control enters with an additional +1/+1 counter
+        // on it for each land that entered ... this turn"; this land counted
+        // after (ENGINE.md 99.12).
+        if self.db.watch_lands_entered {
+            self.lands_entering(idx);
+        }
+        // (A nonbasic land entering as a Mountain has none of its own
+        // abilities, these replacement effects among them: CR 305.7, 614.12;
+        // ENGINE.md 99.12.)
+        let own = own && !(self.moon_game && self.moon_entering(idx));
         let sun = std::mem::take(&mut self.entering_sunburst);
         let exiled = std::mem::take(&mut self.entering_exiled);
         if own {
@@ -1806,6 +1841,11 @@ impl Game {
         // (night) if it is neither; at night a daybound one transforms.
         if self.def_of(idx).daybound || self.def_of(idx).nightbound {
             self.day_night_check();
+        }
+        // Devour land n (CR 702.82a): which lands are sacrificed, then its
+        // counters (`Task::Devour`; ENGINE.md 99.12).
+        if self.def_of(idx).devour_land > 0 {
+            self.agenda.push(Task::Devour { card: idx, picked: Vec::new() });
         }
         if self.def_of(idx).shock_life > 0
             || self.def_of(idx).chooses_player
@@ -2085,6 +2125,11 @@ impl Game {
         if self.lost_abilities(c) {
             return blank_def();
         }
+        // A nonbasic land that is a Mountain (CR 305.7: its rules text's
+        // abilities replaced by "{T}: Add {R}"; ENGINE.md 99.12).
+        if self.moon_game && self.moon_on(c) {
+            return self.db.def(self.moon_def(c));
+        }
         self.db.def(self.objs[c.i()].def)
     }
 
@@ -2171,7 +2216,9 @@ impl Game {
                 let d = self.damage_source_of(idx);
                 self.lki_damage.push((old, d));
             }
-            if self.db.watch_toughness {
+            // (Its controller as it last existed too: "that creature's
+            // controller", ENGINE.md 99.12.)
+            if self.db.watch_toughness || self.db.watch_lki_controller {
                 let t = self.toughness(idx);
                 self.lki_toughness.push((old, t, self.objs[idx.i()].controller));
             }

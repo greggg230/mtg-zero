@@ -42,7 +42,12 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
     l.deny("ActivatedAbility.activate_only_once", activate_only_once);
     let mut only_if = Vec::new();
     let mut loyalty_paid = (0i64, false);
-    let cost = lower_cost(l, cost, from, &mut only_if, &mut loyalty_paid);
+    let mut cost = lower_cost(l, cost, from, &mut only_if, &mut loyalty_paid);
+    // ("{X}{X}": more than one {X}, ENGINE.md 99.12.)
+    let x_times = std::mem::take(&mut l.act_x_times);
+    if x_times > 1 {
+        cost.x_times = x_times;
+    }
     let loyalty = if walker && from == From::Battlefield {
         // CR 606.3: loyalty abilities are activated at sorcery speed (the
         // IR marks them so); 605.1a: never mana abilities.
@@ -79,7 +84,9 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
             l.unsupported("ManaAbility.cost.sacrifice(with more)");
         }
         let pips = cost.mana.pips.iter().sum::<u8>() + cost.mana.hybrid.iter().sum::<u8>();
-        if !cost.mana.is_zero() && !(pips + cost.mana.generic == 1 && !cost.mana.has_phyrexian()) {
+        // (One mana, or {n}: n generic needs of the payment, Cascading
+        // Cataracts' {5}; ENGINE.md 99.12.)
+        if !cost.mana.is_zero() && !((pips + cost.mana.generic == 1 || pips == 0) && !cost.mana.has_phyrexian()) {
             l.unsupported("ManaAbility.cost.mana(more than one mana)");
         }
         if (!cost.mana.is_zero() || l.act_x) && (cost.life > 0 || m.damage_to_you > 0 || m.only != 0) {
@@ -113,8 +120,10 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         // "Tap an untapped artifact you control: Add {U}" (Urza): the whole
         // cost, one mana: each such permanent is a source while paying
         // (`pay::TAP_FOR`, ENGINE.md 31).
+        // (With {T} as well: "{T}, Tap an untapped permanent you control"
+        // (Gene Pollinator; `pay::POL_FOR`, ENGINE.md 99.12).)
         let tap_other = cost.tap_untapped.as_ref().is_some_and(|t| t.n == 1)
-            && Cost { tap_untapped: None, ..cost.clone() } == Cost::default()
+            && Cost { tap_untapped: None, tap: false, ..cost.clone() } == Cost::default()
             && matches!(m.prod, ManaProd::One(_))
             && m.damage_to_you == 0
             && m.sac_if_no.is_none();
@@ -159,7 +168,13 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         let ab = lower_ability(l, effect);
         l.sac_cost = false;
         // (Or an effect that reads the X: "+X/+0", ENGINE.md 99.3.)
-        let reads_x = ab.program.iter().any(|op| matches!(op, crate::program::Op::Ext(crate::program::Ext::ApplyPtX { .. })));
+        let reads_x = ab.program.iter().any(|op| {
+            matches!(
+                op,
+                crate::program::Op::Ext(crate::program::Ext::ApplyPtX { .. })
+                    | crate::program::Op::Ext(crate::program::Ext::PutCounters { n: crate::program::Amount::X, .. })
+            )
+        });
         if l.act_x && !reads_x && !ab.targets.iter().any(|t| t.max == crate::db::X_TARGETS) {
             l.unsupported("ActivationCost.mana.x_pips(X not used by the effect)");
         }
@@ -265,8 +280,11 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     // "{X}" (CR 107.3, 602.2b): announced as the ability is activated; the
     // effect must use it (`X_TARGETS`).
     let x_mana = match mana.as_deref() {
-        Some(cats::ManaCost::ManaCost(n)) if n.x_pips == 1 && from == From::Battlefield => {
+        // ("{X}{X}": the X paid twice, `Cost::x_times`; Blast Zone,
+        // ENGINE.md 99.12.)
+        Some(cats::ManaCost::ManaCost(n)) if (1..=3).contains(&n.x_pips) && from == From::Battlefield => {
             l.act_x = true;
+            l.act_x_times = n.x_pips as u8;
             Some(cats::ManaCost::ManaCost(nodes::ManaCost { x_pips: 0, ..n.clone() }))
         }
         _ => None,
@@ -277,6 +295,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
             (None, Some(m)) => lower_mana_cost(l, "ActivationCost.mana", m),
             (None, None) => Default::default(),
         },
+        x_times: 0,
         tap: *tap_self,
         life: l.int("ActivationCost.pay_life", *pay_life, 0, 99) as u8,
         sac_self: *sacrifice_self,
@@ -610,29 +629,52 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             if haste && !matches!(&prod, ManaProd::Fixed(v) if v.iter().enumerate().all(|(i, &n)| (i == crate::mana::R) == (n > 0))) {
                 l.unsupported("AddManaToPool.grants_haste_to_creature_spell(not red mana)");
             }
-            // "Spend this mana only to cast artifact spells" (CR 106.6): what
-            // the pool can hold is colorless artifact-only mana (several
-            // mana, the rest stays), or one mana spent at once.
+            // "Spend this mana only to ..." (CR 106.6): the purposes it may
+            // be spent on (ENGINE.md 28.2, 99.12); what a payment leaves of it
+            // stays in the pool with its restriction (`Game::pool_kinds`).
             only = match spend_restriction {
                 None => 0,
                 Some(enums::SpendRestriction::ArtifactSpell) => crate::db::SPEND_ARTIFACT,
                 Some(enums::SpendRestriction::LegendarySpell) => crate::db::SPEND_LEGENDARY,
+                // "... only to activate abilities of artifact sources."
+                Some(enums::SpendRestriction::ArtifactActivation) => crate::db::SPEND_ARTIFACT_ABILITY,
+                // "... only to cast artifact spells or activate abilities of
+                // artifacts" (Power Depot): either purpose.
+                Some(enums::SpendRestriction::ArtifactSpellOrActivation) => crate::db::SPEND_ARTIFACT | crate::db::SPEND_ARTIFACT_ABILITY,
+                // "... only to cast colorless Eldrazi spells or activate
+                // abilities of colorless Eldrazi."
+                Some(enums::SpendRestriction::ColorlessEldrazi) => crate::db::SPEND_ELDRAZI_SPELL | crate::db::SPEND_ELDRAZI_ABILITY,
+                // "... only to activate abilities of land sources."
+                Some(enums::SpendRestriction::LandActivation) => crate::db::SPEND_LAND_ABILITY,
+                // "... only to cast a spell from anywhere other than your
+                // hand."
+                Some(enums::SpendRestriction::CastFromOutsideHand) => crate::db::SPEND_OUTSIDE_HAND,
                 Some(other) => {
                     l.unsupported(format!("AddManaToPool.spend_restriction({other:?})"));
                     0
                 }
             };
-            match (&prod, only) {
-                (_, 0) => {}
-                (ManaProd::One(_), _) => {}
-                (ManaProd::Fixed(v), crate::db::SPEND_ARTIFACT) if v[..5].iter().all(|&n| n == 0) => {}
-                _ => l.unsupported("AddManaToPool.spend_restriction(several mana the pool can't hold)"),
+            // (X mana turned into colours, Wizard's Rockets: its X is paid by
+            // the mana it converts, never restricted mana; not modelled with
+            // a restriction of its own.)
+            if only != 0 && matches!(prod, ManaProd::ComboX { .. }) {
+                l.unsupported("AddManaToPool.spend_restriction(X mana)");
+            }
+            // (The pool's haste {R} and its restricted kinds are separate
+            // parts: not both on one mana.)
+            if only != 0 && haste {
+                l.unsupported("AddManaToPool.spend_restriction(with haste)");
             }
             uncounterable = *makes_spell_uncounterable;
             if uncounterable && !matches!(prod, ManaProd::One(_)) {
                 l.unsupported("AddManaToPool.makes_spell_uncounterable(several mana)");
             }
             prod
+        }
+        // "Add X mana of any one color, where X is the number of charge
+        // counters on <this>" (The Eternity Elevator; ENGINE.md 99.12).
+        E::AddChargeCounterManaOfChosenColor(nodes::AddChargeCounterManaOfChosenColor {}) => {
+            ManaProd::SameTypeCounters { mask: COLORS, counter: super::eoe_a::charge(l) }
         }
         E::AddNManaOfChosenColor(nodes::AddNManaOfChosenColor { amount, options }) => {
             let n = l.int("AddNManaOfChosenColor.amount", *amount, 1, 20) as u8;
@@ -813,7 +855,11 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
 /// The types a production can make (which `produces` colours it covers).
 pub(crate) fn prod_mask(p: &ManaProd) -> ManaMask {
     match p {
-        ManaProd::One(m) | ManaProd::SameType { mask: m, .. } | ManaProd::Combo { mask: m, .. } | ManaProd::ComboX { mask: m } => *m,
+        ManaProd::One(m)
+        | ManaProd::SameType { mask: m, .. }
+        | ManaProd::SameTypeCounters { mask: m, .. }
+        | ManaProd::Combo { mask: m, .. }
+        | ManaProd::ComboX { mask: m } => *m,
         ManaProd::Fixed(v) => (0..6).filter(|&i| v[i] > 0).fold(0, |m, i| m | (1 << i)),
         ManaProd::PerPermanent { ty, .. } => 1 << ty,
         ManaProd::ColorAmong(_) => COLORS,

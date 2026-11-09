@@ -595,12 +595,17 @@ impl Game {
     pub(crate) fn activated_home(&self, c: CardIdx, slot: crate::db::AbilitySlot) -> (crate::ids::DefId, crate::db::AbilitySlot, Option<CardIdx>) {
         let def = self.objs[c.i()].def;
         if let crate::db::AbilitySlot::Activated(i) = slot {
-            let own = self.db.def(def).activated.len();
+            let own = self.own_ability_slots(c);
             if i as usize >= own {
                 if let Some(g) = self.granted_activated(c).get(i as usize - own) {
                     return (g.def, crate::db::AbilitySlot::Activated(g.slot), g.equipment);
                 }
             }
+        }
+        // (A nonbasic land that is a Mountain: its abilities' definition,
+        // ENGINE.md 99.12.)
+        if self.moon_game && self.moon_on(c) {
+            return (self.moon_def(c), slot, None);
         }
         (def, slot, None)
     }
@@ -682,7 +687,7 @@ impl Game {
     /// The places of permanent `c`'s activated abilities: its card's own,
     /// then those other permanents grant it.
     pub(crate) fn ability_slots_total(&self, c: CardIdx) -> usize {
-        self.db.def(self.objs[c.i()].def).activated.len() + self.granted_activated(c).len()
+        self.own_ability_slots(c) + self.granted_activated(c).len()
     }
 
     /// Is `slot` of permanent `c` the page of its abilities past its slots

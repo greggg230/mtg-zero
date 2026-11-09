@@ -37,8 +37,16 @@ pub(crate) fn lower_effect_tail(l: &mut Lowerer, b: &mut Builder, e: &cats::Effe
         }
         // "Put a charge counter on this artifact."
         E::PutChargeCountersOnSelf(nodes::PutChargeCountersOnSelf { amount, amount_from_x }) => {
-            l.deny("PutChargeCountersOnSelf.amount_from_x", amount_from_x);
-            let n = Amount::Fixed(l.int("PutChargeCountersOnSelf.amount", *amount, 1, 20));
+            // ("Put X charge counters on this land": the ability's X, CR
+            // 107.3; Blast Zone, ENGINE.md 99.12.)
+            let n = if *amount_from_x {
+                if *amount != 1 {
+                    l.unsupported("PutChargeCountersOnSelf.amount(with amount_from_x)");
+                }
+                Amount::X
+            } else {
+                Amount::Fixed(l.int("PutChargeCountersOnSelf.amount", *amount, 1, 20))
+            };
             let counter = super::effect_ext::counter_by_name(l, "charge");
             b.op(Op::Ext(Ext::PutCounters { on: crate::program::On::Source, counter, n }));
         }

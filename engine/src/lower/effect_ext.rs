@@ -220,12 +220,13 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             also_untap_if_not_your_turn,
             tokens_only,
         }) => {
-            let mut f = and(creature(), Filter::Controller(true));
+            // (`attacking_only`: "attacking creatures get ...", whoever controls
+            // them: the class's docstring; Contested War Zone, ENGINE.md
+            // 99.12. Cecil's "other attacking creatures" trigger as Cecil
+            // attacks: the same creatures.)
+            let mut f = if *attacking_only { and(creature(), Filter::Attacking) } else { and(creature(), Filter::Controller(true)) };
             if *exclude_source {
                 f = and(f, not(Filter::Source));
-            }
-            if *attacking_only {
-                f = and(f, Filter::Attacking);
             }
             if *tokens_only {
                 f = and(f, Filter::Token);
