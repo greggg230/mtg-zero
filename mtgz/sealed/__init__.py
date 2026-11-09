@@ -5,7 +5,8 @@
 * `mtgz.sealed.seventeen_lands`: the 17lands EoE sealed pools, builds and games
   (`data/sealed/eoe_17lands_sealed.json.gz`). A YARDSTICK ONLY (DESIGN.md 0): never a training
   target, reward or prior.
-* `mtgz.sealed.collation`: the EoE Play Booster collation and a seeded sealed-pool generator.
+* `mtgz.sealed.collation`: a seeded sealed-pool generator with two EoE Play Booster collations,
+  `paper` (Wizards' published booster) and `arena` (Arena's boosters as 17lands shows them).
 
 Pure Python (no engine module needed).
 """
