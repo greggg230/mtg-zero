@@ -21412,3 +21412,97 @@ build, both digests, `--test az` (43), the checkpoint load (h2h, 8 games, 0 unfi
 (208 passed, 1 skipped) passed: `GATE PASSED encoding 1e052a27ccf3 in 348s` (bccd4f0 too, in
 451 s). `python tools/gate.py engine --tested-sha 1e052a2 ...`: build, both digests, `az` 43,
 `limits` 10, `hidden` 16, pytest, the search smoke: `GATE PASSED engine 1e052a27ccf3 in 778s`.
+
+## 102. Hidden decklists (EoE sealed)
+
+Branch `eoe-hidden-decks` (from `eoe-d-encoding` 45ed2b2, layout v6), 2026-11-09. **Why.** Until now
+`Game::determinize(viewer)` re-dealt the viewer's unknown cards but never changed WHICH cards make up the
+opponent's deck, and the encoding showed the opponent's unseen cards by identity (`bag::OPP_HIDDEN`, their pool
+in `OPP_POOL`): open decklists, right for the Delver mirror. In sealed nobody sees the opponent's pool or deck. The
+network is to predict it - a deck reader (zero-core `feat/deck-reader`, its docs/az.md 36) whose prediction is an
+auxiliary target and an input - and the search is to deal the opponent's deck from a prior tilted by that
+prediction, as section 69 tilts the hand. This section is the engine's side: the information model, the deal and
+its prior, the spec switch, the checks, the `deck` target and the reader's declared inputs. Best-of-three's hidden
+pool (36.11: the pool known but its first picks) is the precedent and stays as it is.
+
+### 102.1 The design
+
+**What an EoE sealed player knows of the opponent's deck.**
+
+| | known to the viewer | hidden from it |
+|---|---|---|
+| before the game | the format: the set (the prior's support: every card a pool of the collation can hold, and the five basic lands); the deck's size (public: the cards they have in the game, 40 for a built sealed deck, CR 100.2b, ENGINE.md 42) | the pool, the deck, the sideboard, and the sideboard's size too (pool size less the deck's pool cards: it tells the number of basic lands) |
+| during the game | every card of theirs in a public zone (battlefield, graveyard, exile, the stack, the command zone); every hidden card of theirs it knows exactly (revealed, looked at, seen going from a public zone to a hidden one, ENGINE.md 10); its clouds (cards it saw and lost track of exactly: "these identities are among those cards"); the public counts (hand, library, graveyard, the lands on the battlefield, mulligans taken, cards drawn); the decisions it saw them make and what they answered | the rest of the deck (their hand, library and face-down cards it does not know), the order, the sideboard |
+
+Mulligans, land drops and passes are public facts and evidence (what the reader learns from), not constraints: no
+rule makes a deck impossible because its owner passed. The **constraints** a world must meet, all exact:
+
+* **K1** the deck has the public size n (their starting deck: `MatchState::decks[o]`'s total);
+* **K2** the deck contains the multiset R of cards the viewer has seen: their deck cards it knows exactly where they
+  are (every public card included) and the identities of its clouds over their cards (`sample::knowledge`'s
+  `required`, 36.11); every card it knows exactly stays where it is; every cloud's identities stay in its domain;
+* **K3** every card is in the format's support; a revealed companion stays in the sideboard and the deck fulfills its
+  condition (CR 702.139a; none in EoE, but the stub is also run on the cube's decks);
+* the pinned cards of a payment in progress stay (ENGINE.md 10), and the viewer's own cards are never touched.
+
+**K2 needs one change: clouds over the hand and the library are kept.** `tidy_clouds` drops a cloud whose domain is
+the owner's whole hand and library: with open decklists it says nothing the decklist does not. With hidden
+decklists it is the only record that a card the viewer saw is still in the deck (two copies revealed, shuffled into
+the library, one drawn: the merged cloud covers hand and library). `GameSpec::hidden_decklists` keeps such clouds
+(`Game::tidy_clouds`), so the cards seen and lost track of are always in some cloud and R counts copies exactly.
+Nothing else in the knowledge rules changes; with the switch off nothing changes at all.
+
+**The deal.** `MtgAz::determinize(viewer)` with hidden decklists, for the opponent o (`az/hidden_decks.rs`,
+`sample_hidden_deck`; best-of-one, in a game):
+
+1. `sample::knowledge` (36.11's, unchanged): o's cards hidden from the viewer (the slots), the pinned ones, the
+   deck cards it knows (`known`), the non-deck cards it lost track of (`extras`) and R;
+2. the prior samples a whole deck D of n cards with R inside it, and its sideboard (`DeckPrior::sample`);
+3. D less `known` (plus the extras) is dealt to the slots, each cloud's identities in its domain, and o's sideboard
+   becomes the sampled one (`Game::redeal`, 36.11's); the match's `pools[o]` and `decks[o]` become the sampled pool
+   and deck, so nothing of the real deck is left in the world;
+4. `Game::determinize` follows as before (the shuffle among the slots, the reseeding, the observer, the refresh).
+
+**The prior** (`hidden_decks::DeckPrior`, a trait; one per seat in `MatchState::deck_priors`, the prior of that
+seat's deck as the other player samples it): `sample(&DeckWant { db, n, shown: R, companion, tilt }, rng) ->
+SampledDeck { deck, sideboard }` - exactly n cards, R inside, every other card in `support()`, the companion's
+condition kept; bounded time and never a failure (no rejection loop: R comes from the real deck, so a deck holding
+it always exists, and the prior must construct one). `support()` is also what the game's questions may name for
+that player (`Game::known_pools`: the name chosen for Anointed Peacekeeper's kind of card, the questions asked
+because a deck has a card, 36.11). `expected_fill` is the tilt's baseline (below).
+
+* **The default, once S2 lands** (`eoe-s2-pools`, ENGINE.md 101.5): (a) a pool from the spec's collation and
+  boosters, its seed drawn from the deal's generator (never the game's `pool_seed`: the real pool would leak);
+  (b) conditioned by construction: each shown nonbasic card the pool lacks replaces a pool card of its rarity that is
+  not itself shown (any card not shown when the rarity runs out), so the pool holds R; (c) S2's builder with a `must`
+  input (R's cards played first, their colours among the deck's) and the exact size n; the sideboard is the rest of
+  the pool. S2 has the collation and the builder; the `must` input and the exact size are what this needs from it.
+* **The stub, until then** (`TablePrior`): FUZZ_POOL=eoe's random deck generator conditioned on R - R first, then
+  lands up to round(17 n / 40) and spells up to n, each drawn uniformly (with replacement, times the tilt) from the
+  table's supported cards (basic lands among the lands), the companion's condition kept; the sideboard is the
+  revealed companion if any. Built for any table, so the cube's decks can run it (the leak tests need the cube's
+  stable identities: every EoE card encodes as identity `UNKNOWN` until an EoE layout exists, 101.5).
+
+**Exact, and modelled.** Exact (rules and knowledge): K1-K3, the pinned cards, the clouds, the viewer's own cards,
+every world a legal state that holds everything the viewer knows; a world depends only on the generator and the
+viewer's information (the prior reads n, R, the companion and the tilt). Modelled (the prior's choice, not a rules
+approximation): the distribution over the rest of the deck. The conditioned construction is not the Bayes posterior
+of "collation, then builder" given R (that needs rejection or a Markov chain; placing R by rarity and making the
+builder play it leans the colours toward R's, the intended direction, but not by the exact posterior weights), the
+stub's fill is uniform, and nothing reads play patterns: that is the reader's job, through the tilt.
+
+**The tilt** (the deck reader's hook, as 69's `determinize_weighted` for the hand): `DeckWant::tilt`, a weight per
+card definition that multiplies the prior's probability of each card it adds beyond R (sequential draws, Wallenius'
+urn as 69.2), never R and never the size. `MtgAz::determinize_deck_tilted(viewer, rng, w)` deals with it;
+`hidden_decks::deck_weights` makes the weights from a prediction p over identities the way 69 does:
+w_k = clip(((N p_k - c_k)^+ / u_k)^t, 1/C, C) (C the clip), N the number of the opponent's unseen cards, c_k the clouds'
+identities already placed, u_k the prior's expected fill of k (`expected_fill`: exact for the stub; the sealed
+prior's by its own samples). Not wired into `determinize_with`: which prediction drives it (the head's `deck`
+columns or the reader's, zero-core az.md 36.5) and with what tilt is the reader's integration.
+
+**The switch** `"hidden_decklists": true` (default false; the `"sealed"` spec of 101 will set it): best-of-one,
+not with constructed, drafted or a lab start. The game is created with `hidden_decks` (36.11's question rules:
+the companion question asked of everyone, the deck questions and names by `known_pools`) and `hidden_decklists`
+(clouds kept; the opponent's sideboard size out of the view). The encoding (layout v6 unchanged: floats left at
+zero): `OPP_HIDDEN` not written (as best-of-three), `OPP_POOL` not written for the knower's opponent, the
+opponent's `glob::SIDEBOARD` 0. Nothing else in an encoding reads the opponent's unseen cards (102.3 checks it).
