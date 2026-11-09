@@ -465,6 +465,9 @@ impl Game {
         match self.objs[card.i()].zone {
             // Bolas's Citadel: the top card of the caster's library.
             Zone::Library if self.top_play_ok(p, card) => Some(CastFrom::LibraryTop),
+            // "You may cast artifact spells from the top of your library"
+            // (EoE W6).
+            Zone::Library if self.w6_top_cast_ok(p, card, None) => Some(CastFrom::LibraryTopMana),
             Zone::Hand if self.miracle_cast == Some(card) => Some(CastFrom::Miracle),
             Zone::Hand => Some(CastFrom::Hand),
             // (The first of its routes; the player chooses among those that
@@ -683,6 +686,7 @@ impl Game {
             CastFrom::Airbent(n) => with(crate::mana::ManaCost { generic: n, ..Default::default() }),
             // Life rather than its mana cost (increases still apply, 601.2f).
             CastFrom::LibraryTop => with(Default::default()),
+            CastFrom::LibraryTopMana => with(def.cost),
         }
     }
 
@@ -2132,6 +2136,12 @@ impl Game {
                     }
                     None => panic!("a castable card"),
                 }
+            }
+            // (From a library: whether a permission allows the face cast is
+            // the face's question, CR 601.3e; EoE W6.)
+            None if self.objs[card.i()].zone == Zone::Library && face.is_some() && !self.top_play_ok(p, card) => {
+                assert!(self.w6_top_cast_ok(p, card, face), "a castable face");
+                (crate::game::CastFrom::LibraryTopMana, None)
             }
             None => (self.cast_route(p, card).expect("a castable card"), None),
         };

@@ -158,6 +158,10 @@ pub enum CastFrom {
     /// its mana value rather than its mana cost (an alternative cost, CR
     /// 118.9; X is 0, 107.3b).
     LibraryTop,
+    /// From the top of its owner's library by a permission to cast spells of
+    /// a kind from there ("you may cast artifact spells from the top of your
+    /// library", CR 601.3; EoE W6): for its costs, as from a hand.
+    LibraryTopMana,
 }
 
 /// A permission to play a card from a zone other than a hand (CR 601.2a,

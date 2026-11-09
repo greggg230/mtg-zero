@@ -41,6 +41,11 @@ pub struct W6Def {
     /// activated-ability index it came from), at index `kept_index` here.
     pub kept_from: Option<(crate::ids::DefId, u8)>,
     pub kept_index: u8,
+    /// "You may cast artifact spells from the top of your library" (CR
+    /// 601.3, 601.3e: the spell's characteristics; for their costs). Only
+    /// on a card that also lets its controller look at that card any time
+    /// (the lowering checks), so offering the cast hides nothing.
+    pub cast_artifacts_from_top: bool,
 }
 
 /// The table facts W6 adds (`CardDb::w6`).
@@ -148,6 +153,14 @@ impl W6Db {
         // (and a draw replaced by a token, outside any instruction) are
         // refused loudly: no such table is built (none is: the EoE table's
         // token creators are all of the first kind).
+        // Two ways to cast from the top of a library (life rather than the
+        // mana cost, and artifact spells for their costs) would be the
+        // player's choice of permission (CR 601.2a); no table has both, and
+        // one that did is refused here (loudly).
+        assert!(
+            !(defs.iter().any(|d| d.play_top_life) && defs.iter().any(|d| d.w6.cast_artifacts_from_top)),
+            "two permissions to cast from the top of a library in one table (EoE W6)"
+        );
         if defs.iter().any(|d| d.w6.token_copies) {
             let late = defs.iter().find(|d| {
                 d.opp_draw_token.is_some() || abilities_of(d).any(|ab| ab.program.iter().chain(ab.modes.iter().flat_map(|m| m.list.iter().flat_map(|x| x.program.iter()))).any(creates_tokens_late))
@@ -635,6 +648,24 @@ impl Game {
             made.push(idx);
         }
         made
+    }
+
+    /// May `p` cast `card` (the top card of their library) as `face` (its
+    /// current face if `None`) by a "you may cast artifact spells from the
+    /// top of your library" permission (CR 601.3, 601.3e: whether it is an
+    /// artifact spell is the face's question)? Lands are played, not cast.
+    pub(crate) fn w6_top_cast_ok(&self, p: crate::ids::PlayerId, card: crate::ids::CardIdx, face: Option<crate::ids::DefId>) -> bool {
+        if self.objs[card.i()].owner != p || self.players[p as usize].library.last() != Some(&card) || !self.w6_top_cast_source(p) {
+            return false;
+        }
+        let d = self.db.def(face.unwrap_or(self.objs[card.i()].def));
+        d.is(crate::db::types::ARTIFACT) && !d.is(crate::db::types::LAND)
+    }
+
+    /// Does `p` control a permanent with "you may cast artifact spells from
+    /// the top of your library"?
+    pub(crate) fn w6_top_cast_source(&self, p: crate::ids::PlayerId) -> bool {
+        self.seen & crate::game::SEEN_TOP != 0 && self.permanents_of(p).any(|c| self.abilities(c).w6.cast_artifacts_from_top)
     }
 
     pub(crate) fn exec_eoe_w6(&mut self, f: &mut Frame, op: &W6) -> Flow {
