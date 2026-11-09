@@ -432,7 +432,7 @@ impl Game {
                 .collect();
             let mut units = vec![crate::mana::Unit::free(mask)];
             for t in 0..6 {
-                units.extend(std::iter::repeat_n(crate::mana::Unit::free(1 << t), creature_bonus[t] as usize));
+                units.extend(std::iter::repeat_n(crate::mana::Unit::free(1u8 << t), creature_bonus[t] as usize));
             }
             Yield::Multi { prods, units: Some(units) }
         } else {

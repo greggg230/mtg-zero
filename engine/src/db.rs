@@ -2433,6 +2433,13 @@ impl CardDb {
         &self.defs[id as usize]
     }
 
+    /// A definition to change, for the engine's unit tests that build a card
+    /// no lowering makes yet (`pay::tests`, ENGINE.md 100.4.5).
+    #[cfg(test)]
+    pub(crate) fn def_mut(&mut self, id: DefId) -> &mut CardDef {
+        &mut self.defs[id as usize]
+    }
+
     pub fn ability(&self, r: AbilityRef) -> &AbilityDef {
         let d = self.def(r.def);
         let ab = match r.slot {
