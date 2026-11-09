@@ -20149,3 +20149,39 @@ suite: 2,006 passed, 0 failed, 20 ignored (133 binaries). Digests as above; `--t
 commits ran the affected test binaries and the digests; the full suite ran on c5765ef (its first run,
 on 2ec2d28's parent, found `tests/az.rs`'s slot test unaware of "next page" options, fixed in
 2ec2d28).
+
+#### 100.4 B: mana and payment (branch `eoe-b-pay`, from `eoe-base` 9c67a75)
+
+**Why.** The audit's workstream B (`docs/faithfulness_audit.md` 5.3, 5.4, 6): the payment model
+exact, and mana abilities at any time. First W2's mana branch (99.12) and workstream A (100.2) were
+merged in (07c4316, 95c7fe2: on 95c7fe2 the suite passed, the digests equal A's
+`038ee15c3fd29b28` / `69e4452bbf60b46f`, and the EoE fuzz passed but for seeds 10023 and 13398).
+
+##### 100.4.1 The feasibility search with Gene Pollinators (EoE fuzz seeds 10023, 13398)
+
+**Root cause.** A Pollinator's "{T}, Tap an untapped permanent you control" is a source on every
+untapped permanent (`POL_FOR`, 99.12), so a land is a card of two ways (its own ability, or tapped
+for a Pollinator) and `pay::ways_payable` tried each way or none for every such card: 3^n leaves.
+Seed 10023's board had two Pollinators and 13 lands (Cascading Cataracts' "{5}, {T}: add five mana
+in any combination of colors" being paid): about 290,000 nodes a check, and the payment asks it for
+every production of the Cataracts (126) and every spend of the virtual pool, so one decision took
+minutes. With 20 lands one check passed `SEARCH_NODES` (a loud failure).
+
+**Fix: two reductions that change no answer** (`ways_payable`):
+
+* *A dominated "none".* A way that takes no budget (life, a reserved permanent, a shared tap) and
+  adds no need only adds units, and available units are optional in `payable_within_n`, so a card
+  with such a way is never left out: a payment that leaves it out is the same payment with that way,
+  its units unused.
+* *Identical cards.* Cards whose ways are equal are interchangeable (which of them uses which way
+  changes no unit, budget or need): one group, and the search chooses how many of the group use
+  each way (a multiset), not which card does.
+
+A Pollinator's way still takes one of the shared taps, so with k Pollinators the search is
+polynomial in the cards (degree k); the node limit stays as the loud backstop. No decision changes
+(digests unchanged). Seed 10023 now takes 5 s; 13250-13499 (13398 among them) pass.
+
+Tests: `rules_payment_b.rs::cr_601_2g_two_gene_pollinators_and_twenty_lands_are_decided_exactly`
+(two Pollinators and 20 basic lands: exact answers for five costs; it failed on 95c7fe2 with the
+node limit's panic). The node-limit test (`pay::tests`) now uses cards whose ways cost life, so no
+reduction applies.

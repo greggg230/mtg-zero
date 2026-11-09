@@ -2362,7 +2362,7 @@ pub(crate) struct Cands {
 /// Candidate units, inline up to 32 (ENGINE.md 17).
 type Units = SVec<Unit, 32>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct Way {
     units: SVec<Unit, 4>,
     life: i32,
@@ -2677,7 +2677,30 @@ fn payable_converted(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], 
     ways_payable(cost, marked, &chosen, &fixed, &alts, budget)
 }
 
+/// [`payable_within_n`] with each card of `alts` using one of its ways or
+/// none. Exact, with two reductions that change no answer (EoE fuzz seed
+/// 10023: two Gene Pollinators and 13 lands, every land a card of three
+/// choices, 3^13 leaves per check, made thousands of times per decision;
+/// ENGINE.md 100.4):
+///
+/// * **A dominated "none".** A way that takes no budget and adds no need
+///   only adds units the payment may leave unused (available units are
+///   optional in `payable_within_n`), so a card with such a way is never left
+///   out: a payment that leaves it out is a payment with that way, its units
+///   unused.
+/// * **Identical cards.** Cards whose ways are equal are interchangeable:
+///   which of them uses which way changes no unit, budget or need. They are
+///   one group, and the search chooses how many of the group use each way
+///   (a multiset), not which card does.
+///
+/// Ways that take a shared budget (a Pollinator's tap) are still tried each,
+/// within the budget: with k Pollinators the search is polynomial in the
+/// cards (degree k).
 fn ways_payable(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], fixed: &Units, alts: &[Vec<Way>], budget: Budget) -> bool {
+    /// A way that takes nothing a payment shares: its units are free.
+    fn free_way(w: &Way) -> bool {
+        w.life <= 0 && w.sac <= 0 && w.tap <= 0 && w.need == 0
+    }
     // (`None`: the search's nodes ran out.)
     #[allow(clippy::too_many_arguments)]
     fn go(
@@ -2685,40 +2708,79 @@ fn ways_payable(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], fixed
         needs: &mut SVec<ManaMask, 8>,
         chosen: &[ManaMask],
         units: &mut Units,
-        alts: &[Vec<Way>],
+        groups: &[(&[Way], usize)],
         b: Budget,
         nodes: &mut u32,
     ) -> Option<bool> {
         *nodes = nodes.checked_sub(1)?;
-        let Some((first, rest)) = alts.split_first() else {
+        let Some((&(ways, m), rest)) = groups.split_first() else {
             return Some(payable_within_n(cost, needs, chosen, units, b));
         };
-        for w in first {
-            let left = Budget { life: b.life - w.life, sac: b.sac - w.sac, tap: b.tap - w.tap };
-            if left.life < 0 || left.sac < 0 || left.tap < 0 {
-                continue;
+        let none_ok = !ways.iter().any(free_way);
+        each_way(cost, needs, chosen, units, ways, 0, m, none_ok, rest, b, nodes)
+    }
+    /// The `left` cards of a group still to place, among `ways[i..]` (and
+    /// none, with `none_ok`): how many use `ways[i]`, the rest after it.
+    #[allow(clippy::too_many_arguments)]
+    fn each_way(
+        cost: &ManaCost,
+        needs: &mut SVec<ManaMask, 8>,
+        chosen: &[ManaMask],
+        units: &mut Units,
+        ways: &[Way],
+        i: usize,
+        left: usize,
+        none_ok: bool,
+        rest: &[(&[Way], usize)],
+        b: Budget,
+        nodes: &mut u32,
+    ) -> Option<bool> {
+        if left == 0 || i == ways.len() {
+            if left > 0 && !none_ok {
+                return Some(false);
             }
-            let (len, nl) = (units.len(), needs.len());
+            return go(cost, needs, chosen, units, rest, b, nodes);
+        }
+        let w = &ways[i];
+        let (len, nl) = (units.len(), needs.len());
+        let mut lb = b;
+        let mut t = 0;
+        let found = loop {
+            if each_way(cost, needs, chosen, units, ways, i + 1, left - t, none_ok, rest, lb, nodes)? {
+                break true;
+            }
+            if t == left {
+                break false;
+            }
+            lb = Budget { life: lb.life - w.life, sac: lb.sac - w.sac, tap: lb.tap - w.tap };
+            if lb.life < 0 || lb.sac < 0 || lb.tap < 0 {
+                break false;
+            }
             units.extend(w.units.iter().copied());
             if w.need != 0 {
                 needs.extend(std::iter::repeat_n(w.need, w.need_n as usize));
             }
-            let ok = go(cost, needs, chosen, units, rest, left, nodes);
-            units.truncate(len);
-            needs.truncate(nl);
-            if ok? {
-                return Some(true);
-            }
-        }
-        go(cost, needs, chosen, units, rest, b, nodes)
+            t += 1;
+        };
+        units.truncate(len);
+        needs.truncate(nl);
+        Some(found)
     }
     if alts.is_empty() {
         return payable_within_n(cost, marked, chosen, fixed, budget);
     }
+    // Identical cards, grouped (in first-appearance order).
+    let mut groups: Vec<(&[Way], usize)> = Vec::new();
+    for ws in alts {
+        match groups.iter_mut().find(|(g, _)| *g == &ws[..]) {
+            Some((_, m)) => *m += 1,
+            None => groups.push((&ws[..], 1)),
+        }
+    }
     let mut units = fixed.clone();
     let mut needs: SVec<ManaMask, 8> = marked.iter().copied().collect();
     let mut nodes = SEARCH_NODES;
-    go(cost, &mut needs, chosen, &mut units, alts, budget, &mut nodes).unwrap_or_else(|| {
+    go(cost, &mut needs, chosen, &mut units, &groups, budget, &mut nodes).unwrap_or_else(|| {
         search_exhausted(format_args!(
             "cost {cost}, needs {marked:?}, chosen {chosen:?}, fixed units {fixed:?}, cards with ways {alts:?}, budget {budget:?}"
         ))
@@ -2759,13 +2821,16 @@ mod tests {
 
     /// A feasibility search past `SEARCH_NODES` is a loud failure that
     /// prints its inputs, never an answer it did not find (ENGINE.md 51):
-    /// 21 cards each of two ways ({C} or {R}), {W} paid by none of them,
-    /// 3^21 paths.
+    /// 21 cards each of two ways ({C} or {R}) that cost life, {W} paid by
+    /// none of them, 3^21 paths.
     #[test]
     #[should_panic(expected = "a feasibility search visited")]
     fn an_exhausted_feasibility_search_panics_with_its_inputs() {
-        let way = |m: ManaMask| Way { units: std::iter::once(Unit::free(m)).collect(), life: 0, sac: 0, need: 0, need_n: 0, tap: 0 };
-        let alts: Vec<Vec<Way>> = (0..21).map(|_| vec![way(1 << 5), way(1 << 3)]).collect();
+        // (Each way costs life, a different amount for each card: no way is
+        // free, so leaving a card out is a choice too, and no two cards are
+        // interchangeable: `ways_payable`'s reductions don't apply.)
+        let way = |m: ManaMask, life: i32| Way { units: std::iter::once(Unit::free(m)).collect(), life, sac: 0, need: 0, need_n: 0, tap: 0 };
+        let alts: Vec<Vec<Way>> = (0..21).map(|i| vec![way(1 << 5, i + 1), way(1 << 3, i + 1)]).collect();
         let cost = ManaCost::parse("{W}").unwrap();
         ways_payable(&cost, &[], &[], &Units::new(), &alts, Budget::FREE);
     }
