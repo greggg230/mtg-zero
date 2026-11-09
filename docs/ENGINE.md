@@ -19747,3 +19747,8 @@ colour offered only if a feasible production goes on with it, and whether a clas
 production stops at the first (`feasible_prods_where`). Seed 10023 itself still runs past 15
 minutes in the fuzz (its payments with Cataracts, Crystal Quarry, Gene Pollinator and Reflecting
 Pool under the option-completion check): open, for the payment workstream.
+
+On the merged branch (5ab782e): EoE support 306 / 320 (cube 546 / 546); the full engine suite 1,993
+passed, 0 failed; digests unchanged (`f6543eb2b1b8752f`); `FUZZ_POOL=eoe` seeds 0-19,999 but
+10023 passed (eight runs of about 2,500, in parallel) and seed 10023 does not finish in 10 minutes
+(above); the default `FUZZ_GAMES=20000` passed (1,636 s).
