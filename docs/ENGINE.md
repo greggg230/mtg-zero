@@ -21506,3 +21506,123 @@ the companion question asked of everyone, the deck questions and names by `known
 (clouds kept; the opponent's sideboard size out of the view). The encoding (layout v6 unchanged: floats left at
 zero): `OPP_HIDDEN` not written (as best-of-three), `OPP_POOL` not written for the knower's opponent, the
 opponent's `glob::SIDEBOARD` 0. Nothing else in an encoding reads the opponent's unseen cards (102.3 checks it).
+
+### 102.2 What was built
+
+* `GameSpec::hidden_decklists` (needs `hidden_decks`, refused otherwise): `Game::tidy_clouds` keeps a cloud over the
+  whole hand and library; `Game::view_of` leaves out the other player's sideboard size; `encode_globals` leaves the
+  other player's `glob::SIDEBOARD` at 0 (from the knower's side: framed in a controlled seat, ENGINE.md 100.5, the
+  controlled player's is the hidden one).
+* `encode_match`: `OPP_POOL` is not written for the knower's opponent (framed in their seat, the frame's opponent
+  is the knower, whose own pool it is). `OPP_HIDDEN` was already left to the match with `hidden_decks` (36.11), and
+  the match writes candidates only for best-of-three.
+* `az/hidden_decks.rs`: `DeckWant`, `SampledDeck`, the `DeckPrior` trait, `TablePrior` (built once per card
+  table), `check_sample` (the contract, checked at every deal: a prior that breaks it panics, never a world outside
+  the viewer's information), `deck_weights`, `MtgAz::sample_hidden_deck` (the deal), `determinize_deck_tilted`
+  (the tilt hook), `hidden_decklists()`. `MatchState::deck_priors` (classified `Derived`: a setting, the same in
+  every world). `MtgAz::from_seats` (factored out of `MtgAz::new`, unchanged for every other spec): a match from
+  seats and per-seat priors, refusing a real deck outside its prior's support. `set_known_pools`: with hidden
+  decklists, each player's `known_pools` is its deck prior's support.
+* `MtgAz::determinize` and `determinize_belief` (69) deal the hidden deck first (as best-of-three's pool), so the
+  hand's belief weights read the dealt world's hidden pool.
+* The spec key `"hidden_decklists"` (`MtgSpec::hidden_decklists`): best-of-one, limited decks of the spec (random,
+  evaluation, lists); refused with best-of-three, constructed, drafted or a lab start. On this branch both seats get
+  the spec table's `TablePrior`; the `"sealed"` spec (101.3) is to set the key and pass S2's prior per seat.
+* `sample::allowed` and `one_per_name` (the companion's conditions) are `pub(crate)` for the stub.
+
+### 102.3 The checks
+
+* **Digests, the switch off** (13c0f9e and every commit after it): full **408ee16a94d0ffec**, `DIGEST_ENCODING=0`
+  **4a2a227cb45204cd**, `DIGEST_ENCODING=v5` **6fa4fab18b624326**, the base's: no game, encoding or v5 float changes.
+* **`tests/hidden.rs`** (6 new): `hidden_decklists_keep_a_cloud_over_the_whole_hand_and_library` (Brainstorm puts
+  the known Test Bear back, Polluted Delta shuffles: open decklists drop the cloud, hidden decklists keep it, and
+  every world of P1's keeps the Bear in P0's hand or library); `hidden_decklist_worlds_hold_what_the_viewer_saw_and_
+  deal_the_rest` (60 cube positions, both viewers, 720 worlds: known cards in place, the deck's size, every card
+  seen inside the sampled deck with its copies, the match's deck the world's, the viewer's own cards, view, the
+  decider's actions and the whole encoding as in the real game; 720 of 720 with another deck);
+  `no_encoding_or_option_tells_an_unseen_decklist` (the `OPP_HIDDEN` and `OPP_POOL` rows and the opponent's sideboard
+  size zero for both viewers, filled by the same games with open decklists; 160 extreme worlds - a tilt of 10^6 on
+  Lightning Bolt or on Forest, so nearly every unseen card is that card - still encode as the real game and keep
+  the decider's actions); `hidden_decklist_worlds_stay_indistinguishable_while_keys_agree` (zero-core's child
+  signature: 481 steps in step over 60 positions, view and encoding equal); `the_table_prior_meets_its_contract`
+  (300 requests on the EoE table, 0 to 40 shown cards, more shown lands than its target: exact size, the shown
+  cards, the land count; a tilt of 1 is the untilted deal draw for draw; a 10^4 tilt concentrates the fill; the
+  expected fill matches the draws; a revealed Lurrus's condition kept); `the_hidden_decklists_switch`.
+* **The public-state gate** (`tests/az.rs`): `gate_positions` gains a fifth kind, the cube's random decks with hidden
+  decklists (last, so the other kinds' positions are as before). `public_state_reaches_the_encoding`: every
+  perturbation still reaches both views and encodings there (156 encoded, the 4 deliberate limits) but the fields
+  hidden decklists hide (`public_state::HIDDEN_BY_DECKLISTS`: "a sideboard card fewer"), which must reach their
+  owner's view and encoding and neither of the other player's (60 applied, 0 leaks).
+  `the_v5_facts_encode_no_hidden_information`: 5,123 perturbed positions, 20,492 worlds (hidden-decklist worlds among
+  them) encode alike. The belief tests run there too (`belief_deals_keep_every_determinize_invariant`: the cards of
+  a hidden-decklist world are the sampled deck's, as best-of-three's; `the_belief_weights_ignore_the_opponents_
+  hidden_cards`: the weights after the hidden deck is sampled with one seed).
+* **The fuzz** `FUZZ_HIDDEN_DECKS=1` (module docs; with the default decks or `FUZZ_POOL=eoe`): the games through
+  `MtgAz` with hidden decklists, every game check, and at each checkpoint `MtgAz::determinize` for both viewers with
+  the whole-encoding comparison against the real game (stricter than the open-decklist fuzz, which compares the
+  view and bounds the encodings), the deck constraints, the information-set check and 30 moves on. Past 500
+  decisions in one turn the random player passes when it may: random play on this base loops on free activations
+  (100.5.1's seed 1024, fixed by `eoe-f7-numbers` 026ebd4's board-reading loop rule, not on this branch).
+
+* **Found and fixed by the hidden fuzz** (567726e): `FUZZ_POOL=eoe` seed 15503, Alpharael, Dreaming Acolyte's "then
+  discard two cards unless you discard an artifact card": `EoeX::DiscardMatchingOrContinue` skipped its question when
+  the hand held no artifact card, so the other player's encoding (the resolving op and pc of the next decision, both
+  `Discard`) told whether the decider's hidden hand held one, and that player's worlds without one refreshed past the
+  question. Open decklists had the same leak (their fuzz compares the other viewer's view, not its encoding). As
+  `resolve.rs`'s hand choices do, the question is asked with pass only (an empty hand is public);
+  `cards_eoe_cross_more::alpharael_without_an_artifact_discard_discards_two_cr701_9a` updated. No digest game has
+  the card.
+
+### 102.4 The deck target and the reader's inputs
+
+**The target** (`MtgAz::AUX` = `[("belief", 1024), ("deck", 1024)]`, `aux_target`): `deck` is the frame opponent's
+cards the decider does not know exactly - their hand, library and face-down cards (`Game::unknown_to`, each by the
+card it is) - as counts per identity: what `determinize` deals, so in every world the target is that world's own.
+Its total is public (the decider knows how many of their cards it knows), so a multinomial ('multinomial', 66.3)
+spends nothing on it. The package declares it (`aux_deck_w`, default 0: nothing recorded). Tests:
+`the_deck_target_is_the_opponents_unseen_cards_and_never_an_input` (the gate's positions, every kind: the target is
+the unseen cards, its total, every world encodes alike while its target is its own; hidden decklists: 60 of 60
+worlds with another unseen deck), `tests/test_deck_reader.py` (the declaration, the run setting, 40 unseen cards
+before any play, worlds that encode alike and deal other decks).
+
+**The reader's declared inputs** (`encode::deck_reader_inputs`, checked in as `mtgz/az/deck_reader_v6.json`;
+`mtgz.az.deck_reader.READERS` is zero-core `feat/deck-reader`'s package entry, `{target: 'deck', inputs, hidden: 256,
+enter: 'trunk'}`): layout v6 ranges, in feature order, bags and global blocks only (zero-core's reader refuses token
+segments; `deck_reader_inputs_are_checked_in_and_read_bags_and_globals_only` checks it against `layout_json`):
+
+| Range | Floats | What |
+|---|---:|---|
+| globals 0-23 | 24 | the game: turn, step, who is active and has priority, passes, the stack's size, ... |
+| globals 64-103 | 40 | the opponent's block: life, hand, library, graveyard and exile sizes, lands played, mana pool, mulligans, the board's summary, sideboard size (0 under hidden decklists), companion |
+| bags 2, 4, 6 | 3 x 1024 | `OPP_BATTLEFIELD`, `OPP_GRAVEYARD`, `OPP_EXILE` |
+| bags 9, 10, 12 | 3 x 1024 | `OPP_HAND_KNOWN`, `OPP_HAND_CLOUD` (with hidden decklists also the clouds over hand and library), `OPP_LIBRARY_KNOWN` |
+| bags 16, 21 | 2 x 1024 | `OPP_REVEALED` (earlier games of a match), `OPP_PHASED` |
+| match 9 | 1 | the opponent's deck size |
+| globals v5 24-47 | 24 | the opponent's v5 block: cards drawn, spells cast this turn and this game, ... |
+
+8,281 floats. The stack (the opponent's spell being cast) is a token segment, out of the reader's reach; the
+opponent's spells reach it once they resolve (battlefield, graveyard, exile).
+
+**What changes for runs with a belief head.** `aux_target` is 2,048 floats and the package declares both targets, so
+a run with `aux_belief_w` > 0 trains a head over both; zero-core refuses a checkpoint whose head has the belief
+columns only ("checkpoint ... has the auxiliary head ..., this run trains ...": `net.strip_aux`, then fork), and
+`determinize_with` takes a prediction of every target (2,048 floats; the hand's deal reads the first 1,024).
+`tests/test_belief.py` and `tools/belief_search.py` read the belief segment and pad a hand-only belief with a
+uniform deck segment. Before a run with a belief head (the Delver line's belief arms) moves onto this code, zero-core
+needs to grow a head by a target (its `add_aux` adds a head to a checkpoint without one), or the run forks with
+`strip_aux` and loses the trained head: a maintainer's decision.
+
+### 102.5 What S2 and S3 need to do to finish
+
+* **S2** (`eoe-s2-pools`): the `"sealed"` spec sets `hidden_decklists` and gives each seat its prior through
+  `MtgAz::from_seats`; `SealedPrior: DeckPrior` from its pieces - the collation with a seed from the deal's
+  generator, the conditioning by rarity (102.1 (b)), and `builder::build` with a `must` input (the shown cards played
+  first, their colours among the deck's) and an exact size n (a given human build's size may not be 40), its weights
+  times `DeckWant::tilt`; `support()` = every card the collation can put in a pool, and the basic lands;
+  `expected_fill` by its own samples (or exactly). A given build or pool of the yardstick is sampled as a generated
+  seat (the viewer does not know the human's pool either). `FUZZ_POOL=sealed` with `FUZZ_HIDDEN_DECKS=1`.
+* **S3** (zero-core `feat/deck-reader`): the package passes `readers=mtgz.az.deck_reader.READERS` once the pin has
+  readers; runs set `aux_deck_w` and `reader_deck`; the tilt is wired (`determinize_with`'s prediction has the deck
+  columns: `deck_weights` and `determinize_deck_tilted`, with a seat key of its own, never a silent default); the
+  EoE layout gives the set's cards identities (until then every EoE card is `UNKNOWN` in the target and in every
+  bag, so the reader learns nothing on EoE), and re-declares the inputs on it (330 identities: 36.8's plan).
