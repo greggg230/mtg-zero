@@ -138,7 +138,7 @@ impl Game {
                     Some(other) => unreachable!("discard answer {other:?}"),
                     None => {}
                 }
-                if f.i >= *n || self.players[p as usize].hand.is_empty() {
+                if f.i >= *n as u32 || self.players[p as usize].hand.is_empty() {
                     self.draw_n(p, f.i);
                     return Flow::Next;
                 }
@@ -197,7 +197,7 @@ impl Game {
                 // discarded puts a +1/+1 counter on it if it is still that
                 // permanent. `f.i`: 0 = to draw, then 1 + discards made;
                 // `f.x`: nonland cards discarded.
-                let n = self.amount(f, *n).clamp(0, 255) as u8;
+                let n = self.amount(f, *n).max(0) as u32; // (any number: 46.4, ENGINE.md 100.2)
                 if f.i == 0 {
                     f.x = 0;
                 }
@@ -238,7 +238,7 @@ impl Game {
         }
     }
 
-    fn draw_n(&mut self, p: PlayerId, n: u8) {
+    fn draw_n(&mut self, p: PlayerId, n: u32) {
         self.draw_cards(p, n as u32);
     }
 
@@ -700,7 +700,7 @@ impl Game {
     /// CR 731.2: as the untap step's second part, day becomes night if the
     /// previous turn's active player cast no spells that turn, night
     /// becomes day if they cast two or more.
-    pub(crate) fn day_night_turn(&mut self, spells: u8) {
+    pub(crate) fn day_night_turn(&mut self, spells: u32) {
         let next = match self.day {
             Some(true) if spells == 0 => false,
             Some(false) if spells >= 2 => true,

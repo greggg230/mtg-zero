@@ -409,6 +409,10 @@ fn encoding_slots_name_the_action_slots() {
                     engine::Choice::Cast(c) | engine::Choice::Play(c) => ident(g.g.obj(c).def),
                     // a graveyard card targeted: its graveyard list's slot (ENGINE.md 65.10)
                     engine::Choice::Target(engine::Target::Obj(r)) => ident(g.g.obj(r.idx).def),
+                    // a paged list's "next page" (ENGINE.md 100.1-100.2): no card
+                    engine::Choice::Page(_) => continue,
+                    // the fourth slot's ability choice: the definition with it (100.2)
+                    engine::Choice::Ability(c, slot) => ident(g.g.activated_home_pub(c, slot)),
                     _ => unreachable!(),
                 };
                 assert_eq!(decode_id(&x[off..off + CODE]), want);
@@ -419,7 +423,11 @@ fn encoding_slots_name_the_action_slots() {
             if (act::GY_ABILITY..act::GY_ABILITY + encode::GYAS as u16).contains(&o.action) {
                 let k = (o.action - act::GY_ABILITY) as usize;
                 let off = encode::O_GYA + k * encode::GYA_W;
-                let engine::Choice::Ability(c, _) = o.choice else { unreachable!() };
+                // (A paged range's "next page", ENGINE.md 100.2: no card.)
+                let engine::Choice::Ability(c, _) = o.choice else {
+                    assert!(matches!(o.choice, engine::Choice::Page(_)), "{:?}", o.choice);
+                    continue;
+                };
                 assert_eq!(decode_id(&x[off..off + CODE]), ident(g.g.obj(c).def));
                 assert_eq!(x[off + CODE + 1], 1.0);
             }

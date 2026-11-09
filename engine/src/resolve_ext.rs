@@ -863,11 +863,12 @@ impl Game {
                         if kinds.is_empty() {
                             return Flow::Jump(*skip);
                         }
-                        let mut opts: Vec<Opt> = (0..kinds.len().min(16))
-                            .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
-                            .collect();
-                        opts.push(Opt { action: act::PASS, choice: Choice::Pass });
-                        self.ask(Task::Run(f.clone()), f.controller, DecisionKind::ChooseMode, opts);
+                        // (Every kind, CR 122.1: `NUMBER` + k, paged past the
+                        // 32 ids; ENGINE.md 100.2.)
+                        let items: Vec<(u32, Choice)> =
+                            (0..kinds.len()).map(|k| (k as u32, Choice::Number(u8::try_from(k).expect("at most 256 counter kinds")))).collect();
+                        let pass = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+                        self.ask_paged(Task::Run(f.clone()), f.page, f.controller, DecisionKind::ChooseMode, act::NUMBER, act::NUMBER_N, &items, pass);
                         Flow::Suspend
                     }
                 }
@@ -1177,21 +1178,31 @@ impl Game {
                 Flow::Next
             }
             Ext::PayEnergyDamage { tgt } => {
+                // "Pay any amount of {E}" (CR 107.14): any amount up to the
+                // energy the player has (`Game::ask_amount`, digits past 31;
+                // ENGINE.md 100.2).
                 let p = f.controller;
+                let most = self.players[p as usize].energy as u64;
                 match self.answer.take() {
-                    Some(Choice::Number(k)) => {
-                        self.players[p as usize].energy -= k as crate::num::Count;
-                        let src = self.frame_damage_source(f);
-                        for t in self.targets_of(f, *tgt) {
-                            self.deal_damage(src, t, k as i32);
+                    Some(Choice::Number(k)) => match f.step.answer_amount(0, most, k) {
+                        crate::decision::NumberAnswer::Next(s) => {
+                            f.step = s;
+                            self.agenda.push(Task::Run(f.clone()));
+                            Flow::Suspend
                         }
-                        Flow::Next
-                    }
+                        crate::decision::NumberAnswer::Value(k) => {
+                            let k = k as crate::num::Count;
+                            self.players[p as usize].energy -= k;
+                            let src = self.frame_damage_source(f);
+                            for t in self.targets_of(f, *tgt) {
+                                self.deal_damage(src, t, crate::num::count_amount(k));
+                            }
+                            Flow::Next
+                        }
+                    },
                     Some(other) => unreachable!("energy answer {other:?}"),
                     None => {
-                        let most = self.players[p as usize].energy.min((act::NUMBER_N - 1) as crate::num::Count) as u16;
-                        let opts = (0..=most).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseMode, opts);
+                        self.ask_amount(Task::Run(f.clone()), f.step, p, DecisionKind::ChooseMode, 0, most);
                         Flow::Suspend
                     }
                 }
@@ -1248,11 +1259,12 @@ impl Game {
                 Flow::Next
             }
             Ext::PutInLibraryAtX { tgt } => {
+                // (X past 255 is past any library, 58.3: the bottom, as 255.)
                 let depth = f.spell_x;
                 for t in self.targets_of(f, *tgt) {
                     if let Target::Obj(o) = t {
                         if self.objs[o.idx.i()].zone == Zone::Battlefield {
-                            self.move_card(o.idx, Zone::Library, Pos::FromTop(depth));
+                            self.move_card(o.idx, Zone::Library, Pos::FromTop(u8::try_from(depth).unwrap_or(u8::MAX)));
                         }
                     }
                 }

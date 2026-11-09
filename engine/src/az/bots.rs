@@ -688,14 +688,14 @@ impl Heuristic {
             // X (CR 107.3): as much as it can pay.
             K::ChooseMode if matches!(g.agenda.last(), Some(Task::ChooseX { .. })) => {
                 let x_life = match g.agenda.last() {
-                    Some(&Task::ChooseX { id }) => g.stack().iter().find_map(|s| match s.kind {
+                    Some(&Task::ChooseX { id, .. }) => g.stack().iter().find_map(|s| match s.kind {
                         StackKind::Spell { card } if s.id == id && g.def_of(card).x_life => Some(card),
                         _ => None,
                     }),
                     _ => None,
                 };
                 let ability = match g.agenda.last() {
-                    Some(&Task::ChooseX { id }) => g.stack().iter().any(|s| s.id == id && matches!(s.kind, StackKind::Ability { .. })),
+                    Some(&Task::ChooseX { id, .. }) => g.stack().iter().any(|s| s.id == id && matches!(s.kind, StackKind::Ability { .. })),
                     _ => false,
                 };
                 if ability {

@@ -163,3 +163,177 @@ fn cr_201_3_peacekeeper_may_name_any_card_in_the_game_even_its_controllers() {
     g.choose(Choice::Def(own));
     assert!(g.log_lines().iter().any(|l| l.contains(&format!("chosen name: {}", db().def(own).name))), "{}", log(&g));
 }
+
+// ---- 13.9, 23.11.3, N5: any number (CR 510.1c-d, 601.2b, 107.3) ---------------------------
+
+/// Answer a big number: `NUMBER` + v below `lo` + 31, else "31 or more" and
+/// the rest's base-32 digits (ENGINE.md 100.1), checking each decision.
+fn choose_number(g: &mut Game, lo: u64, hi: u64, v: u64) {
+    if hi - lo <= 31 || v - lo < 31 {
+        g.choose(Choice::Number((v - if hi <= 31 { 0 } else { lo }) as u8));
+        return;
+    }
+    assert_eq!(actions(g), (act::NUMBER..act::NUMBER + 32).collect::<Vec<_>>(), "the first decision: 0..=30 and 31 or more");
+    g.choose(Choice::Number(31));
+    let rest = v - lo - 31;
+    let top = hi - lo - 31;
+    let mut n = 1;
+    while top >> (5 * n) > 0 {
+        n += 1;
+    }
+    for i in (0..n).rev() {
+        same_after_determinize(g);
+        let d = (rest >> (5 * i)) & 31;
+        g.choose(Choice::Number(d as u8));
+    }
+}
+
+/// A 40/40 attacker blocked by two 51/51s (CR 510.1c-d): the attacking
+/// player may assign the first blocker any amount from 0 to 40, here 37
+/// ("31 or more", then the digit 6), and the last blocker the other 3.
+/// Before ENGINE.md 100.2 the amounts offered were 0..=29, lethal and all
+/// (docs/shortcuts.md 13.9, 23.11.3).
+#[test]
+fn cr_510_1c_any_division_of_32_or_more_combat_damage() {
+    use engine::db::Counter;
+    let mut g = scen()
+        .battlefield(0, &["Llanowar Elves"])
+        .counters(0, "Llanowar Elves", Counter::P1P1, 39)
+        .battlefield(1, &["Ouroboroid", "Tishana's Tidebinder"])
+        .counters(1, "Ouroboroid", Counter::P1P1, 50)
+        .counters(1, "Tishana's Tidebinder", Counter::P1P1, 50)
+        .at(Step::Main1, 0)
+        .start();
+    let elves = g.card(0, "Llanowar Elves", engine::Zone::Battlefield);
+    assert_eq!(g.power(elves), 40);
+    for _ in 0..200 {
+        match g.kind() {
+            Some(DecisionKind::AssignDamage) => break,
+            Some(DecisionKind::DeclareAttackers) => {
+                let c = if g.has_option(Choice::Card(elves)) { Choice::Card(elves) } else { Choice::Pass };
+                g.choose(c);
+            }
+            Some(DecisionKind::DeclareBlockers) => {
+                g.choose(Choice::Card(elves));
+            }
+            Some(DecisionKind::Priority) => {
+                g.pass();
+            }
+            _ => {
+                let c = options(&g)[0];
+                g.choose(c);
+            }
+        }
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::AssignDamage), "{}", log(&g));
+    let blockers = g.blockers_of(elves);
+    assert_eq!(blockers.len(), 2);
+    choose_number(&mut g, 0, 40, 37);
+    assert_eq!(g.kind(), Some(DecisionKind::AssignDamage));
+    assert_eq!(actions(&g), vec![act::NUMBER + 3], "the last blocker gets the rest");
+    g.choose(Choice::Number(3));
+    g.drive_until(at_priority);
+    assert_eq!((g.obj(blockers[0]).damage, g.obj(blockers[1]).damage), (37, 3), "{}", log(&g));
+}
+
+/// Walking Ballista ({X}{X}, "enters with X +1/+1 counters") with 70
+/// colorless mana: X may be anything to 35 (CR 107.3, 601.2b), here 33.
+/// Before ENGINE.md 100.2, at most 31 (the audit's N5).
+#[test]
+fn cr_601_2b_an_x_of_33() {
+    let mut g = scen().hand(0, &["Walking Ballista"]).pool(0, [0, 0, 0, 0, 0, 70], 0).at(Step::Main1, 0).start();
+    let wb = g.card(0, "Walking Ballista", engine::Zone::Hand);
+    g.choose(Choice::Cast(wb));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    choose_number(&mut g, 0, 35, 33);
+    for _ in 0..50 {
+        if at_priority(&g) && g.stack().is_empty() {
+            break;
+        }
+        if at_priority(&g) {
+            g.pass();
+        } else {
+            let c = options(&g)[0];
+            g.choose(c);
+        }
+    }
+    assert_eq!(g.obj(wb).zone, engine::Zone::Battlefield, "{}", log(&g));
+    assert_eq!(g.counters_on(wb, engine::db::Counter::P1P1), 33, "{}", log(&g));
+}
+
+/// Toxic Deluge ("as an additional cost, pay X life; all creatures get
+/// -X/-X") at 50 life: X may be anything to 50 (CR 119.4, 601.2b), here 40.
+/// Before ENGINE.md 100.2, at most 31 (N5).
+#[test]
+fn cr_119_4_pay_40_life() {
+    let mut g = scen().hand(0, &["Toxic Deluge"]).pool(0, [0, 0, 3, 0, 0, 0], 0).life(0, 50).at(Step::Main1, 0).start();
+    let td = g.card(0, "Toxic Deluge", engine::Zone::Hand);
+    g.choose(Choice::Cast(td));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    choose_number(&mut g, 0, 50, 40);
+    g.drive_until(|g| at_priority(g));
+    assert_eq!(g.player(0).life, 10, "{}", log(&g));
+}
+
+// ---- N12: any counter kind (CR 603.12, 122.1) ---------------------------------------------
+
+/// Leatherhead, Swamp Stalker ("whenever this deals combat damage to a
+/// player, you may remove a counter from it; when you do, destroy target
+/// artifact or enchantment") with eighteen kinds of counters: each kind may
+/// be the one removed (CR 122.1), `NUMBER` + 0..=17 (before ENGINE.md 100.2
+/// the first 16 only: the audit's N12; past 32 kinds the choice pages).
+#[test]
+fn cr_122_1_any_of_eighteen_counter_kinds_may_be_removed() {
+    use engine::db::{Counter, Kw};
+    let kinds = [
+        Counter::P1P1,
+        Counter::Kw(Kw::Flying),
+        Counter::Kw(Kw::Reach),
+        Counter::Kw(Kw::FirstStrike),
+        Counter::Kw(Kw::Deathtouch),
+        Counter::Kw(Kw::Lifelink),
+        Counter::Kw(Kw::Vigilance),
+        Counter::Kw(Kw::Haste),
+        Counter::Kw(Kw::Menace),
+        Counter::Kw(Kw::Indestructible),
+        Counter::Kw(Kw::Shadow),
+        Counter::Kw(Kw::Trample),
+        Counter::Kw(Kw::Flash),
+        Counter::Kw(Kw::Shroud),
+        Counter::Kw(Kw::Hexproof),
+        Counter::Lore,
+        Counter::Loyalty,
+        Counter::Stun,
+    ];
+    let mut s = scen().battlefield(0, &["Leatherhead, Swamp Stalker"]).battlefield(1, &["Sol Ring"]).at(Step::Main1, 0);
+    for k in kinds {
+        s = s.counters(0, "Leatherhead, Swamp Stalker", k, 1);
+    }
+    let mut g = s.start();
+    let lh = g.card(0, "Leatherhead, Swamp Stalker", engine::Zone::Battlefield);
+    let all = g.counters_of(lh);
+    assert_eq!(all.len(), 18, "{all:?}");
+    for _ in 0..200 {
+        match g.kind() {
+            Some(DecisionKind::ChooseMode) => break,
+            Some(DecisionKind::DeclareAttackers) => {
+                let c = if g.has_option(Choice::Card(lh)) { Choice::Card(lh) } else { Choice::Pass };
+                g.choose(c);
+            }
+            Some(DecisionKind::Priority) => {
+                g.pass();
+            }
+            _ => {
+                let c = options(&g)[0];
+                g.choose(c);
+            }
+        }
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "{}", log(&g));
+    let mut want = vec![act::PASS];
+    want.extend(act::NUMBER..act::NUMBER + 18);
+    assert_eq!(actions(&g), want);
+    let last = all[17].0;
+    g.choose(Choice::Number(17));
+    assert_eq!(g.counters_on(lh, last), 0, "the 18th kind is removed\n{}", log(&g));
+}

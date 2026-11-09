@@ -994,19 +994,24 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // (702.56a, instants and sorceries: its "when you cast this spell, copy
     // it for each time" trigger is the keyword's own).
     let mut times_cost: Option<crate::db::TimesCost> = None;
-    let mut set_times = |l: &mut Lowerer, what: &str, mana: ManaCost, max: u8, ok: bool| {
+    let mut set_times = |l: &mut Lowerer, what: &str, mana: ManaCost, max: u32, ok: bool| {
         if !ok {
             l.unsupported(format!("CardPrinting.{what}(on this card type)"));
         }
         if times_cost.is_some() {
             l.unsupported(format!("CardPrinting.{what}(with another repeatable cost)"));
         }
+        // "Any number of times" for no mana would let the count be any
+        // number at all (ENGINE.md 100.2; loops are the audit's F7).
+        if max == u32::MAX && mana.is_zero() {
+            l.unsupported(format!("CardPrinting.{what}(any number of times at no cost)"));
+        }
         times_cost = Some(crate::db::TimesCost { mana, max, x: false });
     };
     match squad_cost.as_deref() {
         Some(m) => {
             let mana = super::effect_copies::checked_cost(l, "CardPrinting.squad_cost", m, squad_cost_str);
-            set_times(l, "squad_cost", mana, crate::decision::act::NUMBER_N as u8 - 1, is_creature);
+            set_times(l, "squad_cost", mana, u32::MAX, is_creature);
         }
         None => l.deny("CardPrinting.squad_cost_str", squad_cost_str),
     }
@@ -1020,7 +1025,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if !replicate_cost.is_empty() {
         match ManaCost::parse(replicate_cost) {
             Some(mana) => {
-                set_times(l, "replicate_cost", mana, crate::decision::act::NUMBER_N as u8 - 1, ty & (types::INSTANT | types::SORCERY) != 0);
+                set_times(l, "replicate_cost", mana, u32::MAX, ty & (types::INSTANT | types::SORCERY) != 0);
                 keyword_triggers.push(replicate());
             }
             None => l.unsupported(format!("CardPrinting.replicate_cost({replicate_cost})")),
@@ -1035,7 +1040,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         keyword_triggers.push(storm());
     }
     if let Some((mana, x)) = perm_kicker {
-        let max = if *multikicker { crate::decision::act::NUMBER_N as u8 - 1 } else { 1 };
+        let max = if *multikicker { u32::MAX } else { 1 };
         if x && *multikicker {
             l.unsupported("CardPrinting.multikicker(with {X})");
         }

@@ -163,7 +163,7 @@ impl Game {
                     Some(other) => unreachable!("graveyard choice {other:?}"),
                     None => {}
                 }
-                if (f.spell_x) < *n {
+                if f.spell_x < *n as u32 {
                     return Flow::Next;
                 }
                 let opts: Vec<Opt> = f

@@ -58,7 +58,8 @@ pub(crate) enum Task {
     DeclareAttackers { next: u8 },
     DeclareBlockers { i: u8 },
     CombatDamage { first: bool, att: u8 },
-    AssignDamage { att: CardIdx, j: u8, left: u32 },
+    /// (`step`: where the amount's digits stand, ENGINE.md 100.2.)
+    AssignDamage { att: CardIdx, j: u32, left: u32, step: crate::decision::NumberStep },
     // cleanup (CR 514)
     CleanupDiscard,
     CleanupRest,
@@ -76,12 +77,12 @@ pub(crate) enum Task {
     PayCosts { id: u32, picked: Vec<CardIdx> },
     CastOption { id: u32 },
     CastAlt { id: u32 },
-    Divide { id: u32 },
+    Divide { id: u32, step: crate::decision::NumberStep },
     ChooseModes { id: u32 },
-    ManaNow { src: Src },
+    ManaNow { src: Src, step: crate::decision::NumberStep },
     ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]> },
     /// The rest of a priority mana ability's cost (ENGINE.md 28).
-    ManaNowCosts { src: Src, sac: Option<CardIdx>, x: u8 },
+    ManaNowCosts { src: Src, sac: Option<CardIdx>, x: u32 },
     // entering the battlefield (CR 614.12)
     /// (`page`: the page of a paged choice, ENGINE.md 100.2.)
     AsEnters { card: CardIdx, page: crate::decision::Page },
@@ -102,7 +103,7 @@ pub(crate) enum Task {
     /// from `from` (exiled for now): `results` the reachable results.
     ChooseReplacement { card: crate::ids::ObjRef, from: Zone, results: u8, void: Option<crate::db::Counter>, chooser: PlayerId },
     /// Announce X (CR 601.2b, 107.3).
-    ChooseX { id: u32 },
+    ChooseX { id: u32, step: crate::decision::NumberStep },
     /// Discard for escalate (CR 702.120a).
     Escalate { id: u32 },
     /// "As an additional cost, choose a creature you control or a warped
@@ -117,23 +118,24 @@ pub(crate) enum Task {
     /// `mask`: `decision::FACE_*` bits).
     ChooseFace { p: PlayerId, card: CardIdx, mask: u8 },
     /// Which activated ability of permanent `card` `p` activates, among its
-    /// abilities from place `from` on (CR 602.2: one with more abilities
-    /// than its `ACTIVATE` slots; EoE W3). Choice: `ChooseMode`, `NUMBER` +
-    /// place - `from`; `NUMBER` + 31: the ones after (a further page).
-    ChooseAbility { p: PlayerId, card: CardIdx, from: u8 },
+    /// abilities from the fourth on (CR 602.2: one with more abilities than
+    /// its `ACTIVATE` slots; EoE W3). Choice: `ChooseMode`, `LIBRARY` + place
+    /// - 3 (the list block holds the definition with the ability and its
+    /// index there), paged past 64 (`page`; ENGINE.md 100.2).
+    ChooseAbility { p: PlayerId, card: CardIdx, page: crate::decision::Page },
     /// CR 601.2a-b: which permission casts graveyard card `card` (face
     /// `face`; `cast::route`).
     ChooseRoute { p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId> },
     /// What a permanent that may enter as a copy copies (CR 707.5), then
     /// it enters (`note`: its `Enters` event's).
-    EnterAsCopy { card: CardIdx, note: u16, since: u32, page: crate::decision::Page },
+    EnterAsCopy { card: CardIdx, note: u32, since: u32, page: crate::decision::Page },
     /// New targets for a copy of a spell (`copy`, CR 707.10c) or a spell
     /// whose controller may choose new targets (115.7), from its target `k`
     /// on.
     CopyTargets { id: u32, k: u8, copy: bool, page: crate::decision::Page },
     /// Announce how many times an additional cost is paid (CR 601.2b:
     /// replicate, squad, offspring).
-    ChooseTimes { id: u32 },
+    ChooseTimes { id: u32, step: crate::decision::NumberStep },
     /// Splice cards from hand onto the spell (CR 702.47a, 601.2b): one card
     /// per decision, `PASS` = no more.
     Splice { id: u32 },
@@ -299,7 +301,7 @@ impl Game {
             Task::DeclareAttackers { next } => self.declare_attackers(next),
             Task::DeclareBlockers { i } => self.declare_blockers(i),
             Task::CombatDamage { first, att } => self.combat_damage(first, att),
-            Task::AssignDamage { att, j, left } => self.assign_damage(att, j, left),
+            Task::AssignDamage { att, j, left, step } => self.assign_damage(att, j, left, step),
             Task::CleanupDiscard => self.cleanup_discard(),
             Task::CleanupRest => self.cleanup_rest(),
             Task::ChooseTargets { id, req, page } => self.choose_targets(id, req, page),
@@ -313,9 +315,9 @@ impl Game {
             Task::PayCosts { id, picked } => self.pay_costs(id, picked),
             Task::CastOption { id } => self.cast_option(id),
             Task::CastAlt { id } => self.cast_alt(id),
-            Task::Divide { id } => self.divide(id),
+            Task::Divide { id, step } => self.divide(id, step),
             Task::ChooseModes { id } => self.choose_modes(id),
-            Task::ManaNow { src } => self.mana_now(src),
+            Task::ManaNow { src, step } => self.mana_now(src, step),
             Task::ManaNowPick { p, prods } => self.mana_now_pick(p, prods),
             Task::ManaNowCosts { src, sac, x } => self.mana_now_costs(src, sac, x),
             Task::AsEnters { card, page } => self.as_enters(card, page),
@@ -324,16 +326,16 @@ impl Game {
             Task::EnterByDiscardAny { card, controller, tapped } => self.enter_by_discard_any(card, controller, tapped),
             Task::EnterAura { card, controller, tapped, page } => self.enter_aura(card, controller, tapped, page),
             Task::ChooseReplacement { card, from, results, void, chooser } => self.choose_replacement(card, from, results, void, chooser),
-            Task::ChooseX { id } => self.choose_x(id),
+            Task::ChooseX { id, step } => self.choose_x(id, step),
             Task::Escalate { id } => self.escalate(id),
             Task::ChooseForCost { id, perm, page } => self.choose_for_cost(id, perm, page),
             Task::AttackTarget { card } => self.choose_attack_target(card),
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
-            Task::ChooseAbility { p, card, from } => self.choose_ability(p, card, from),
+            Task::ChooseAbility { p, card, page } => self.choose_ability(p, card, page),
             Task::ChooseRoute { p, card, face } => self.choose_route(p, card, face),
             Task::EnterAsCopy { card, note, since, page } => self.enter_as_copy(card, note, since, page),
             Task::CopyTargets { id, k, copy, page } => self.copy_targets(id, k, copy, page),
-            Task::ChooseTimes { id } => self.choose_times(id),
+            Task::ChooseTimes { id, step } => self.choose_times(id, step),
             Task::Splice { id } => self.choose_splice(id),
             Task::Special { p, card, sp } => self.special_action(p, card, sp),
             Task::Opening { p, exile } => self.opening_actions(p, exile),
@@ -830,7 +832,7 @@ impl Game {
                 // (The fourth slot of a permanent with more abilities than
                 // slots: which of the fourth and later ones, EoE W3.)
                 if self.paged_slot(c, slot) {
-                    self.agenda.push(Task::ChooseAbility { p, card: c, from: (crate::activate::ACTIVATE_SLOTS - 1) as u8 });
+                    self.agenda.push(Task::ChooseAbility { p, card: c, page: crate::decision::Page::FIRST });
                 } else {
                     self.begin_activate(p, c, slot);
                 }

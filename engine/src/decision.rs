@@ -444,6 +444,59 @@ impl NumberStep {
     }
 }
 
+impl NumberStep {
+    /// What answer `NUMBER + k` means for an amount asked by
+    /// [`Game::ask_amount`] in `lo..=hi`: the value `k` itself while every
+    /// value fits `NUMBER`, else as [`answer`](Self::answer).
+    pub fn answer_amount(self, lo: u64, hi: u64, k: u8) -> NumberAnswer {
+        if hi <= 31 {
+            assert!((lo..=hi).contains(&(k as u64)), "NUMBER + {k} for an amount in {lo}..={hi}");
+            NumberAnswer::Value(k as u64)
+        } else {
+            self.answer(lo, hi, k)
+        }
+    }
+}
+
+/// The largest value in `lo..=cap` that `ok` allows, `ok(lo)` being true
+/// (ENGINE.md 100.2): one value at a time through 31 (the values `NUMBER`
+/// names, checked in the order they were before; the first refused one
+/// ends it), then by doubling and bisection, `ok` being monotone there (a
+/// larger X or count costs more).
+pub(crate) fn most_allowed(lo: u64, cap: u64, mut ok: impl FnMut(u64) -> bool) -> u64 {
+    let mut v = lo;
+    while v < cap && v < 31 {
+        if !ok(v + 1) {
+            return v;
+        }
+        v += 1;
+    }
+    if v >= cap {
+        return v;
+    }
+    let (mut good, mut step) = (v, 1u64);
+    let mut bad = loop {
+        let t = good.saturating_add(step).min(cap);
+        if !ok(t) {
+            break t;
+        }
+        good = t;
+        if good == cap {
+            return cap;
+        }
+        step = step.saturating_mul(2);
+    };
+    while bad - good > 1 {
+        let m = good + (bad - good) / 2;
+        if ok(m) {
+            good = m;
+        } else {
+            bad = m;
+        }
+    }
+    good
+}
+
 /// Where a decision stands in a choice made in several decisions (ENGINE.md
 /// 100.1), for the network (the context block's 246-250).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
@@ -930,6 +983,21 @@ impl Game {
         self.ask(task, player, kind, opts);
         if let Some(d) = &mut self.pending {
             d.stage = stage;
+        }
+    }
+
+    /// Ask `player` for an amount in `lo..=hi` (ENGINE.md 100.2): `NUMBER` +
+    /// the amount itself while every value fits `NUMBER` (`hi` <= 31, as
+    /// amounts were asked before), else [`ask_number`](Self::ask_number)
+    /// (`NUMBER` + the amount - `lo`, "31 or more" and digits). The asking
+    /// task decodes the answer with [`NumberStep::answer_amount`].
+    pub(crate) fn ask_amount(&mut self, task: Task, step: NumberStep, player: PlayerId, kind: DecisionKind, lo: u64, hi: u64) {
+        assert!(lo <= hi, "{kind:?}: an amount in {lo}..={hi}");
+        if hi <= 31 {
+            let opts = (lo..=hi).map(|v| Opt { action: act::NUMBER + v as u16, choice: Choice::Number(v as u8) }).collect();
+            self.ask(task, player, kind, opts);
+        } else {
+            self.ask_number(task, step, player, kind, lo, hi);
         }
     }
 
@@ -1640,5 +1708,24 @@ pub(crate) mod tests {
         assert_eq!(r.pending, g.pending, "a refresh asks the same page");
         pick(&mut g, act::EXILE + 2);
         assert_eq!(g.objs[bolts[33].i()].zone, crate::ids::Zone::Stack, "the 34th is cast");
+    }
+
+    /// A permanent entering with an additional cost paid 300 times and an X
+    /// of 70 (CR 702.156a: ravenous reads the X; "if it was kicked" the
+    /// times): its `Enters` note can't hold them (bits 1-8 and 9-14), so it
+    /// carries `ENTER_BIG` and the permanent a `Mark::Entered` with both,
+    /// exactly (ENGINE.md 100.2; before it the X was cut at 63, the audit's
+    /// N9). Small counts keep the note's bits.
+    #[test]
+    fn cr_702_156a_an_entering_x_past_63_and_times_past_255_are_kept_exactly() {
+        let mut g = Scenario::new(CardDb::cube()).hand(0, &["Llanowar Elves"]).at(Step::Main1, 0).start();
+        let c = g.players[0].hand[0];
+        g.entering_x = 70;
+        g.entering_times = 300;
+        g.put_onto_battlefield(c, 0);
+        let r = g.obj_ref(c);
+        assert!(g.marks.contains(&(r, crate::game::Mark::Entered { times: 300, x: 70 })));
+        assert_eq!(g.entered_counts(crate::game::ENTER_BIG, Some(r)), (300, 70));
+        assert_eq!(g.entered_counts((5 << 1) | (9 << 9), None), (5, 9));
     }
 }

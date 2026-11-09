@@ -514,10 +514,10 @@ pub enum DivAmount {
 
 impl DivAmount {
     /// The amount for a spell cast with this X.
-    pub fn of(self, x: u8) -> u8 {
+    pub fn of(self, x: u32) -> u32 {
         match self {
-            DivAmount::Fixed(n) => n,
-            DivAmount::X { double_at } if double_at > 0 && x >= double_at => x.saturating_mul(2),
+            DivAmount::Fixed(n) => n as u32,
+            DivAmount::X { double_at } if double_at > 0 && x >= double_at as u32 => x.saturating_mul(2),
             DivAmount::X { .. } => x,
         }
     }
@@ -1240,8 +1240,9 @@ pub struct AltCost {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct TimesCost {
     pub mana: ManaCost,
-    /// At most this many times (1 for offspring).
-    pub max: u8,
+    /// At most this many times (1 for offspring; `u32::MAX`: any number,
+    /// ENGINE.md 100.2).
+    pub max: u32,
     /// The cost has {X} (kicker {X}: X announced when it is paid, at least
     /// `CardDef::x_min`; the stack item's `x`).
     pub x: bool,

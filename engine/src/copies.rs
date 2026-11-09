@@ -357,7 +357,7 @@ impl Game {
     }
 
     /// The times the additional cost of the event's spell was paid.
-    pub(crate) fn event_spell_times(&self, f: &Frame) -> u8 {
+    pub(crate) fn event_spell_times(&self, f: &Frame) -> u32 {
         f.ev.obj.and_then(|r| self.spell_now_or_lki(r)).map_or(0, |(_, item)| item.times)
     }
 
@@ -442,7 +442,7 @@ impl Game {
                         }
                     }
                 }
-                let n = self.amount(f, *n).clamp(0, 255) as u8;
+                let n = self.amount(f, *n).max(0) as u32; // (any number: 46.4, ENGINE.md 100.2)
                 if f.i >= n {
                     return Flow::Next;
                 }
@@ -614,7 +614,7 @@ impl Game {
     /// tapped", "enters with counters", "as this enters" choices: 707.5,
     /// 707.6) and its `Enters` event (with `note`) happens.
     /// (`page`: the page of the choice, `Game::ask_objects`, ENGINE.md 100.2.)
-    pub(crate) fn enter_as_copy(&mut self, card: CardIdx, note: u16, since: u32, page: crate::decision::Page) {
+    pub(crate) fn enter_as_copy(&mut self, card: CardIdx, note: u32, since: u32, page: crate::decision::Page) {
         if self.objs[card.i()].zone != Zone::Battlefield {
             self.marks.retain(|&(o, m)| !(o.idx == card && m == crate::game::Mark::PriestPending));
             return;

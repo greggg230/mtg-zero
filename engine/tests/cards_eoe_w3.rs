@@ -1390,10 +1390,14 @@ fn secluded_starforge_any_artifact_left_untapped_may_pay_x_cr601_2h() {
 /// A permanent with more activated abilities than its four `ACTIVATE` slots
 /// (four of its own and Ragost's Food ability): every one stays reachable
 /// (CR 602.2, 117.1b). The first three keep their slots; the fourth slot
-/// opens a choice among the fourth and later ones (`ChooseMode`, `NUMBER` +
-/// place - 3).
+/// opens a choice among the fourth and later ones (`ChooseMode`, `LIBRARY` +
+/// place - 3, ENGINE.md 100.2), and the list block names each option by the
+/// definition that has the ability (the Gadget's own fourth, Ragost's Food
+/// ability) and its index there.
 #[test]
 fn every_activated_ability_is_reachable_past_the_fourth_slot_cr602_2() {
+    use engine::az::encode::{self, list, CODE, NUM_FEATURES};
+    use engine::db::AbilitySlot;
     for pick in [0u8, 1] {
         let mut g = scen()
             .battlefield(0, &["Ragost, Deft Gastronaut", "W3 Gadget", "Plains", "Plains"])
@@ -1405,9 +1409,25 @@ fn every_activated_ability_is_reachable_past_the_fourth_slot_cr602_2() {
         }
         g.choose(act(gadget, 3));
         g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
-        let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
-        assert_eq!(opts, vec![Choice::Number(0), Choice::Number(1)], "its fourth ability and the Food ability");
-        g.choose(Choice::Number(pick));
+        let opts: Vec<(u16, Choice)> = g.pending_decision().unwrap().options.iter().map(|o| (o.action, o.choice)).collect();
+        let (fourth, food) = (Choice::Ability(gadget, AbilitySlot::Activated(3)), Choice::Ability(gadget, AbilitySlot::Activated(4)));
+        assert_eq!(opts, vec![(engine::act::LIBRARY, fourth), (engine::act::LIBRARY + 1, food)], "its fourth ability and the Food ability");
+        // The list block: slot 0 the Gadget's ability 3, slot 1 Ragost's
+        // ability (its granted one) by Ragost's definition.
+        let mut x = vec![0.0; NUM_FEATURES];
+        g.encode_features(0, &mut x);
+        let ragost = bf(&g, 0, "Ragost, Deft Gastronaut");
+        assert_eq!(g.activated_home_pub(gadget, AbilitySlot::Activated(4)), g.obj(ragost).def);
+        for (k, idx) in [(0usize, 3.0f32), (1, -1.0)] {
+            let o = encode::O_LIST + k * encode::LIST_W;
+            assert_eq!(x[o + CODE + 1], 1.0, "slot {k} is an option");
+            if idx >= 0.0 {
+                assert_eq!(x[o + CODE + list::ABILITY], (idx + 1.0) / 4.0, "the Gadget's ability 3");
+            } else {
+                assert!(x[o + CODE + list::ABILITY] > 0.0, "the granted ability's index in Ragost's definition");
+            }
+        }
+        g.choose(if pick == 0 { fourth } else { food });
         pay(&mut g);
         settle(&mut g);
         if pick == 0 {
@@ -1429,7 +1449,7 @@ fn every_activated_ability_is_reachable_past_the_fourth_slot_cr602_2() {
 /// An ability an attached Equipment grants goes through the same places as
 /// the others (CR 301.5, 602.2): a creature with four abilities of its own
 /// equipped with The Dominion Bracelet has five, the Bracelet's behind the
-/// fourth slot's choice (ENGINE.md 99.13, 99.14).
+/// fourth slot's choice (ENGINE.md 99.13, 99.14, 100.2).
 #[test]
 #[ignore = "The Dominion Bracelet is blocked on the encoding (ENGINE.md 99.14): run with --ignored once unblocked"]
 fn an_equipments_granted_ability_is_reachable_past_the_fourth_slot_cr301_5() {
@@ -1450,8 +1470,9 @@ fn an_equipments_granted_ability_is_reachable_past_the_fourth_slot_cr301_5() {
     g.choose(act(quad, 3));
     g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
     let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
-    assert_eq!(opts, vec![Choice::Number(0), Choice::Number(1)], "its fourth ability and the Bracelet's");
-    g.choose(Choice::Number(1));
+    let bracelets = Choice::Ability(quad, engine::db::AbilitySlot::Activated(4));
+    assert_eq!(opts, vec![Choice::Ability(quad, engine::db::AbilitySlot::Activated(3)), bracelets], "its fourth ability and the Bracelet's");
+    g.choose(bracelets);
     g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
     assert!(g.has_option(player(1)), "the Bracelet's ability: target opponent");
     g.choose(player(1));

@@ -526,8 +526,8 @@ impl Game {
             TrigPred::Batch => true,
             // The `Enters` event's note (`Game::put_onto_battlefield`).
             TrigPred::EnteredCast => ev.kind == EventKind::Enters && ev.amount & 1 != 0,
-            TrigPred::EnteredPaid => ev.kind == EventKind::Enters && (ev.amount >> 1) & 0xFF != 0,
-            TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && (ev.amount >> 9) & 0x3F >= *n as u32,
+            TrigPred::EnteredPaid => ev.kind == EventKind::Enters && self.entered_counts(ev.amount, match ev.a { Subj::Obj(r) => Some(r), _ => None }).0 != 0,
+            TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && self.entered_counts(ev.amount, match ev.a { Subj::Obj(r) => Some(r), _ => None }).1 >= *n as u32,
             TrigPred::EnteredNotFromGyExile => ev.kind == EventKind::Enters && ev.amount >> 15 == 0,
             TrigPred::InGraveyard => true,
             TrigPred::SpellMvParity => match (ev.a, self.parity_of(src.r)) {
@@ -704,7 +704,7 @@ impl Game {
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));
         if ab.divide.is_some() {
-            self.agenda.push(Task::Divide { id }); // CR 603.3d, 601.2d
+            self.agenda.push(Task::Divide { id, step: crate::decision::NumberStep::FIRST }); // CR 603.3d, 601.2d
         }
         if ab.has_targets() {
             self.agenda.push(Task::ChooseTargets { id, req: 0, page: crate::decision::Page::FIRST });

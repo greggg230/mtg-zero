@@ -62,7 +62,7 @@ impl Game {
                 lands(crate::ids::opp(p)) > lands(p)
             }
             Cond::SpellsCastThisTurn { n, noncreature } => {
-                (if *noncreature { pl.noncreature_cast } else { pl.spells_cast }) == *n
+                (if *noncreature { pl.noncreature_cast } else { pl.spells_cast }) == *n as u32
             }
             Cond::LibraryEmpty => pl.library.is_empty(),
             Cond::YourTurn => self.turn.active == p,
@@ -71,7 +71,7 @@ impl Game {
                 self.permanents_of(p).any(|x| self.colors_of(x) & m != 0 && Some(self.obj_ref(x)) != source)
             }
             Cond::All(v) => v.iter().all(|c| self.cond_holds_from(c, p, source)),
-            Cond::SpellsCastAtLeast(n) => pl.spells_cast >= *n,
+            Cond::SpellsCastAtLeast(n) => pl.spells_cast >= *n as u32,
             Cond::HasInitiative => self.initiative == Some(p),
             Cond::CompletedDungeon => self.dungeons[p as usize].completed > 0,
             Cond::LinkedTypesAtLeast(n) => source.is_some_and(|s| self.linked_types(s).count_ones() >= *n as u32),
@@ -254,11 +254,13 @@ impl Game {
 
     /// [`act_mana`](Self::act_mana) with X announced (CR 601.2f: X is part
     /// of the cost before reductions).
-    pub(crate) fn act_mana_x(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, x: u8) -> crate::mana::ManaCost {
+    pub(crate) fn act_mana_x(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, x: u32) -> crate::mana::ManaCost {
         let mut m = ad.cost.mana;
         // (An X that taps artifacts is no mana: EoE W3.)
         if ad.cost.tap_x.is_none() {
-            m.generic = m.generic.saturating_add(x);
+            // (A mana amount is a u8: docs/shortcuts.md 46.3, the audit's F7;
+            // `Game::x_range` offers no X past it.)
+            m.generic = m.generic.saturating_add(u8::try_from(x).unwrap_or(u8::MAX));
         }
         // "Activated abilities of sources with the chosen name cost {2} more
         // to activate unless they're mana abilities" (Anointed Peacekeeper;
@@ -418,7 +420,7 @@ impl Game {
             }
         }
         if ad.mana().is_some() {
-            self.agenda.push(Task::ManaNow { src: Src { card, slot } });
+            self.agenda.push(Task::ManaNow { src: Src { card, slot }, step: crate::decision::NumberStep::FIRST });
             return;
         }
         // A special action (CR 116.2): its cost, then it happens; no stack.
@@ -474,7 +476,7 @@ impl Game {
             self.agenda.push(Task::ChooseTargets { id, req: 0, page: crate::decision::Page::FIRST });
         }
         if ad.x {
-            self.agenda.push(Task::ChooseX { id }); // CR 602.2b, 601.2b
+            self.agenda.push(Task::ChooseX { id, step: crate::decision::NumberStep::FIRST }); // CR 602.2b, 601.2b
         }
         if ab.modes.is_some() {
             self.agenda.push(Task::ChooseModes { id }); // CR 700.2a, 602.2b
@@ -842,7 +844,7 @@ impl Game {
         let mut pm = PayMana::new(p, mana);
         pm.keep = Self::keep_for(card, &ad.cost, Self::mana_exclude(card, ad));
         // "Tap X untapped artifacts": X of them stay for the cost (EoE W3).
-        if let Some(r) = Self::tap_x_reserve(&ad.cost, x) {
+        if let Some(r) = Self::tap_x_reserve(&ad.cost, u8::try_from(x).unwrap_or(u8::MAX)) {
             pm.keep.sac = Some((r, card));
             pm.keep.sac_taps = true;
         }
@@ -1327,31 +1329,36 @@ impl Game {
     /// instant", Lion's Eye Diamond; one whose cost has a mana part or a
     /// choice, ENGINE.md 28): pay its costs (the mana first, CR 601.2g-h by
     /// 602.2b), then choose the mana (CR 605.3b, 106.1b).
-    pub(crate) fn mana_now(&mut self, src: Src) {
+    pub(crate) fn mana_now(&mut self, src: Src, step: crate::decision::NumberStep) {
         let p = self.objs[src.card.i()].controller;
         let ad = self.def_of(src.card).activated_def(src.slot);
         // "{X}, {T}, ...: Add X mana" (CR 107.3, 602.2b: X is announced as
         // the ability is activated): as much as can be paid, not with the
-        // source's own mana. Choice: `ChooseMode`, `NUMBER` + X.
+        // source's own mana. Choice: `ChooseMode`, `Game::ask_amount` (any
+        // X it can pay, digits past 31; the cost's mana a u8, 46.3: ENGINE.md
+        // 100.2).
         let x = if ad.x {
+            let exclude = Self::mana_exclude(src.card, ad);
+            let classes = self.mana_classes(p, exclude);
+            let keep = Self::keep_for(src.card, &ad.cost, exclude);
+            let most = crate::decision::most_allowed(0, u32::MAX as u64, |x| {
+                let m = self.act_mana_x(p, src.card, ad, x as u32);
+                x < 255 && m.generic < u8::MAX && self.can_pay_without(p, &m, &classes, &keep, exclude)
+            });
             match self.answer.take() {
-                Some(Choice::Number(x)) => {
-                    self.note(|_| format!("X = {x}"));
-                    x
-                }
+                Some(Choice::Number(k)) => match step.answer_amount(0, most, k) {
+                    crate::decision::NumberAnswer::Next(s) => {
+                        self.agenda.push(Task::ManaNow { src, step: s });
+                        return;
+                    }
+                    crate::decision::NumberAnswer::Value(x) => {
+                        self.note(|_| format!("X = {x}"));
+                        x as u32
+                    }
+                },
                 Some(other) => unreachable!("X answer {other:?}"),
                 None => {
-                    let exclude = Self::mana_exclude(src.card, ad);
-                    let classes = self.mana_classes(p, exclude);
-                    let keep = Self::keep_for(src.card, &ad.cost, exclude);
-                    let mut x = 0u8;
-                    while x < (act::NUMBER_N - 1) as u8
-                        && self.can_pay_without(p, &self.act_mana_x(p, src.card, ad, x + 1), &classes, &keep, exclude)
-                    {
-                        x += 1;
-                    }
-                    let opts = (0..=x).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k) }).collect();
-                    self.ask(Task::ManaNow { src }, p, DecisionKind::ChooseMode, opts);
+                    self.ask_amount(Task::ManaNow { src, step }, step, p, DecisionKind::ChooseMode, 0, most);
                     return;
                 }
             }
@@ -1369,7 +1376,7 @@ impl Game {
 
     /// The rest of a priority mana ability's cost: the permanent to
     /// sacrifice (a decision), then {T}, life, the source's own costs.
-    pub(crate) fn mana_now_costs(&mut self, src: Src, mut sac: Option<CardIdx>, x: u8) {
+    pub(crate) fn mana_now_costs(&mut self, src: Src, mut sac: Option<CardIdx>, x: u32) {
         let p = self.objs[src.card.i()].controller;
         let ad = self.def_of(src.card).activated_def(src.slot);
         if let Some(s) = &ad.cost.sacrifice {

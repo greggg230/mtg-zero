@@ -21,8 +21,9 @@ pub(crate) struct Frame {
     pub targets: Vec<(u8, Target)>,
     /// Bit i: `targets[i]` was legal when resolution started (608.2b).
     pub legal: u64,
-    /// Per-op loop counter (reset when `pc` moves).
-    pub i: u8,
+    /// Per-op loop counter (reset when `pc` moves; any count, ENGINE.md
+    /// 100.2: docs/shortcuts.md 46.4).
+    pub i: u32,
     /// Last known information remembered by `Op::Remember`: (power,
     /// controller).
     pub lki: Option<(i32, PlayerId)>,
@@ -47,9 +48,9 @@ pub(crate) struct Frame {
     /// The spell was cast for an alternative cost (CR 118.9).
     pub alt: bool,
     /// Divided damage per target of the divided requirement (CR 601.2d).
-    pub division: Vec<u8>,
+    pub division: Vec<u32>,
     /// The spell's X (CR 107.3).
-    pub spell_x: u8,
+    pub spell_x: u32,
     /// Every token the last `CreateToken` made ("they gain haste").
     pub made_all: Vec<CardIdx>,
     /// What a creature put onto the battlefield attacking attacks
@@ -531,7 +532,7 @@ impl Game {
             }
             Amount::Remembered => f.x,
             Amount::HalfLibraryUp => (self.players[f.controller as usize].library.len() as i32 + 1) / 2,
-            Amount::EventTimes => ((f.ev.amount >> 1) & 0xFF) as i32,
+            Amount::EventTimes => crate::num::count_amount(self.entered_counts(f.ev.amount, f.ev.obj).0),
             Amount::EventSpellTimes => self.event_spell_times(f) as i32,
             Amount::Attacking => self.battlefield.iter().filter(|&&c| self.objs[c.i()].attacking).count() as i32,
             Amount::Experience => crate::num::count_amount(self.players[f.controller as usize].experience),
@@ -678,7 +679,7 @@ impl Game {
                     self.move_card(c, Zone::Library, Pos::Top);
                     f.i += 1;
                 }
-                if f.i >= n || self.players[p as usize].hand.is_empty() {
+                if f.i >= n as u32 || self.players[p as usize].hand.is_empty() {
                     return Flow::Next;
                 }
                 let opts = self.hand_options(p);
@@ -758,7 +759,7 @@ impl Game {
                     self.discard(c);
                     f.i += 1;
                 }
-                if f.i >= n || self.players[p as usize].hand.is_empty() {
+                if f.i >= n as u32 || self.players[p as usize].hand.is_empty() {
                     return Flow::Next;
                 }
                 let opts = self.hand_options(p);
@@ -895,7 +896,7 @@ impl Game {
                     Some(other) => unreachable!("pile answer {other:?}"),
                     None => {}
                 }
-                if rest && f.pile.is_empty() || !rest && max != PILE_ANY && f.i >= max {
+                if rest && f.pile.is_empty() || !rest && max != PILE_ANY && f.i >= max as u32 {
                     return Flow::Next;
                 }
                 if rest && set {

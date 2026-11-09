@@ -242,6 +242,9 @@ pub mod list {
     /// A graveyard list: the card is chosen for a delve in progress
     /// (`Mark::DelveExile`: exiled as the payment ends, ENGINE.md 65.3).
     pub const CHOSEN: usize = 4;
+    /// The fourth slot's ability choice: the option's ability's index in the
+    /// definition that has it, (+ 1) / 4 (ENGINE.md 100.2).
+    pub const ABILITY: usize = 3;
     /// Copies in the deck being built / 4.
     pub const IN_DECK: usize = 3;
     /// Copies in the deck of the last game / 4.
@@ -1276,6 +1279,19 @@ impl Game {
                     out[o + CODE + 1] = legal(act::LIBRARY + k as u16) as u8 as f32;
                     out[o + CODE + 2] = list.iter().filter(|&&x| x == def).count() as f32 / 4.0;
                 }
+                // The fourth slot's ability choice: each option's ability's
+                // index in the definition that has it (+ 1) / 4 (ENGINE.md
+                // 100.2; the audit's gap #16, inside layout v5).
+                if d.kind == crate::decision::DecisionKind::ChooseMode && matches!(self.agenda.last(), Some(Task::ChooseAbility { .. })) {
+                    for o in &d.options {
+                        if let (true, crate::decision::Choice::Ability(c, slot)) = (o.action >= act::LIBRARY, o.choice) {
+                            let k = (o.action - act::LIBRARY) as usize;
+                            if let (crate::db::AbilitySlot::Activated(i), true) = (self.activated_home(c, slot).1, k < LIST) {
+                                out[O_LIST + k * LIST_W + CODE + list::ABILITY] = (i as f32 + 1.0) / 4.0;
+                            }
+                        }
+                    }
+                }
             }
         }
         // The cards in the viewer's graveyard with a graveyard ability (the
@@ -1626,6 +1642,18 @@ impl Game {
                 })
                 .collect();
         }
+        // The fourth slot's ability choice (ENGINE.md 100.2): `LIBRARY` + k is
+        // an ability, by the definition that has it (`Game::activated_home`).
+        if d.kind == K::ChooseMode && matches!(self.agenda.last(), Some(Task::ChooseAbility { .. })) {
+            return d
+                .options
+                .iter()
+                .filter_map(|o| match o.choice {
+                    crate::decision::Choice::Ability(c, slot) if o.action >= act::LIBRARY => Some(self.activated_home(c, slot).0),
+                    _ => None,
+                })
+                .collect();
+        }
         let cards: Vec<CardIdx> = match d.kind {
             K::SearchLibrary | K::NameCard => self.library_sorted(p),
             K::PutOnTop | K::PutOnBottom | K::PutInGraveyard | K::PutInHand | K::PutOntoBattlefield => match self.agenda.last() {
@@ -1718,7 +1746,7 @@ impl Game {
                 | Task::CastPay { id }
                 | Task::ActPay { id }
                 | Task::CopyTargets { id, .. }
-                | Task::ChooseTimes { id }
+                | Task::ChooseTimes { id, .. }
                 | Task::Splice { id }
                 // Delve's picks: the spell being cast (ENGINE.md 65).
                 | Task::Delve { id } => stack_item(*id),
@@ -1800,7 +1828,7 @@ impl Game {
             }
             Task::DeclareBlockers { i } => x[ctx::BLOCKER_INDEX] = *i as f32 / 16.0,
             Task::MulliganBottom { left, .. } => x[ctx::BOTTOMS_LEFT] = *left as f32 / 7.0,
-            Task::ManaNow { src } => card = Some((self.objs[src.card.i()].def, Some(src.slot), None)),
+            Task::ManaNow { src, .. } => card = Some((self.objs[src.card.i()].def, Some(src.slot), None)),
             _ => card = frame_card(task),
         }
         if let Some((def, slot, mode)) = card {
