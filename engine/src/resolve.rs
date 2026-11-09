@@ -1164,6 +1164,7 @@ impl Game {
         let shuffled = dest == PileDest::Graveyard;
         if self.objs[c.i()].zone.is_hidden() && !shuffled {
             self.objs[c.i()].known |= 1 << p;
+            self.controller_sees(p, c); // CR 722.3 (ENGINE.md 100.5)
         }
     }
 
@@ -1203,6 +1204,7 @@ impl Game {
             SearchDest::Hand => {
                 self.move_card(c, Zone::Hand, Pos::Top);
                 self.objs[c.i()].known |= 1 << p;
+                self.controller_sees(p, c); // CR 722.3 (ENGINE.md 100.5)
                 if reveal {
                     self.reveal(c);
                 }
@@ -1213,6 +1215,7 @@ impl Game {
                 self.shuffle_library(p);
                 self.move_card(c, Zone::Library, Pos::Top);
                 self.objs[c.i()].known |= 1 << p;
+                self.controller_sees(p, c); // CR 722.3 (ENGINE.md 100.5)
                 if reveal {
                     self.reveal(c);
                 }

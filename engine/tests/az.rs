@@ -366,7 +366,7 @@ fn ident(def: engine::ids::DefId) -> usize {
 
 #[test]
 fn encoding_slots_name_the_action_slots() {
-    assert_eq!(NUM_FEATURES, 37_620);
+    assert_eq!(NUM_FEATURES, 43_956);
     let mut lists = 0;
     for g in states(scale(16), 6, 7) {
         let me = g.to_move().unwrap();
@@ -432,10 +432,11 @@ fn encoding_slots_name_the_action_slots() {
 
 #[test]
 fn layout_json_is_checked_in() {
-    // mtgz/az/layout_v5.json = encode::layout_json (MTGZ_WRITE_LAYOUT=1 rewrites it; layout_v4.json
-    // stays as it was, for the widen of v4 networks: `layout_v5_widens_layout_v4_exactly`)
+    // mtgz/az/layout_v6.json = encode::layout_json (MTGZ_WRITE_LAYOUT=1 rewrites it; layout_v5.json
+    // and layout_v4.json stay as they were, for the widen of v5 and v4 networks:
+    // `layout_v6_widens_layout_v5_exactly`, `layout_v5_widens_layout_v4_exactly`)
     let want = encode::layout_json(CardDb::cube());
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_v5.json");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_v6.json");
     if std::env::var("MTGZ_WRITE_LAYOUT").is_ok_and(|v| v == "1") {
         std::fs::write(&path, &want).unwrap();
     }
@@ -443,7 +444,7 @@ fn layout_json_is_checked_in() {
     assert!(have == want, "{} differs from encode::layout_json (MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test az layout)", path.display());
     let v: serde_json::Value = serde_json::from_str(&want).unwrap();
     assert_eq!(v["features"], NUM_FEATURES);
-    assert_eq!(v["version"], 5);
+    assert_eq!(v["version"], 6);
     assert_eq!(v["cards"].as_array().unwrap().len(), identity::D);
 }
 
@@ -498,16 +499,12 @@ fn read_layout(file: &str) -> Layout {
     Layout { features, segs, bags, globals }
 }
 
-/// Layout v5 is layout v4 with additions only (ENGINE.md 60.2): the map a widen derives from the
-/// two checked-in descriptions (segments by name with their slots' old floats first, bags by name
-/// with their old rows first, v4's globals as v5's first globals) is `encode::v4_projection`, the
-/// map the v4 digest is reproduced through (tests/digest.rs, `DIGEST_ENCODING=v4`); the tokens are
-/// the same (segments, slot counts, present flags, identities, actions), and layout_v4.json is
-/// layout v4 (33,652 floats, as frozen: ENGINE.md 22.7).
-#[test]
-fn layout_v5_widens_layout_v4_exactly() {
-    let (l4, l5) = (read_layout("layout_v4.json"), read_layout("layout_v5.json"));
-    assert_eq!((l4.features, l5.features), (encode::v4::NUM_FEATURES, NUM_FEATURES));
+/// The map zero-core's `net.widen` derives from two checked-in token layouts (its
+/// `token_feature_map`): segments by name with their slots' old floats first (the same slots,
+/// present flags, identities and actions), bags by name with their old rows first, the globals by
+/// declared block (or, when the old layout declares none, as the new layout's first globals in
+/// feature order).
+fn widen_map(l4: &Layout, l5: &Layout) -> Vec<usize> {
     assert_eq!(l4.segs.iter().map(|s| &s.0).collect::<Vec<_>>(), l5.segs.iter().map(|s| &s.0).collect::<Vec<_>>());
     let mut map = vec![usize::MAX; l4.features];
     for (a, b) in l4.segs.iter().zip(&l5.segs) {
@@ -520,23 +517,65 @@ fn layout_v5_widens_layout_v4_exactly() {
         }
     }
     for a in &l4.bags {
-        let b = l5.bags.iter().find(|b| b.0 == a.0).expect("v4's bags are v5's");
+        let b = l5.bags.iter().find(|b| b.0 == a.0).expect("the old bags are the new layout's");
         assert!(b.3 == a.3 && b.2 >= a.2);
         for i in 0..a.2 * a.3 {
             map[a.1 + i] = b.1 + i;
         }
     }
-    assert!(l4.globals[0].0.is_none(), "layout v4 declares no global blocks");
-    let g5: Vec<usize> = l5.globals.iter().flat_map(|g| g.1.iter().copied()).collect();
-    for (k, &f) in l4.globals[0].1.iter().enumerate() {
-        map[f] = g5[k];
+    match &l4.globals[0].0 {
+        None => {
+            let g5: Vec<usize> = l5.globals.iter().flat_map(|g| g.1.iter().copied()).collect();
+            for (k, &f) in l4.globals[0].1.iter().enumerate() {
+                map[f] = g5[k];
+            }
+        }
+        Some(_) => {
+            for (name, fs) in &l4.globals {
+                let b = l5.globals.iter().find(|g| &g.0 == name).expect("the old global blocks are the new layout's");
+                assert!(b.1.len() >= fs.len(), "global block {name:?} got narrower");
+                for (k, &f) in fs.iter().enumerate() {
+                    map[f] = b.1[k];
+                }
+            }
+        }
     }
-    assert_eq!(l4.globals[0].1.len(), encode::GLOBALS + encode::MATCH);
-    assert_eq!(map, encode::v4_projection(), "the widen's map is the v4 projection");
     let mut seen = map.clone();
     seen.sort_unstable();
     seen.dedup();
     assert_eq!(seen.len(), l4.features, "one to one");
+    assert!(map.iter().all(|&i| i < l5.features));
+    map
+}
+
+/// Layout v6 is layout v5 with additions only (ENGINE.md 100.5), as v5 was v4's: the map a widen
+/// derives from the two checked-in descriptions is `encode::v5_projection`, the map the v5 digest
+/// is reproduced through (tests/digest.rs, `DIGEST_ENCODING=v5`); the tokens are the same, the
+/// global blocks of v5 are v6's (v6's own block after them), and layout_v5.json is layout v5
+/// (37,620 floats, as frozen: ENGINE.md 60).
+#[test]
+fn layout_v6_widens_layout_v5_exactly() {
+    let (l5, l6) = (read_layout("layout_v5.json"), read_layout("layout_v6.json"));
+    assert_eq!((l5.features, l6.features), (encode::v5::NUM_FEATURES, NUM_FEATURES));
+    assert_eq!(l5.globals.iter().map(|g| g.0.clone().unwrap()).collect::<Vec<_>>(), ["globals", "match", "globals_v5"]);
+    assert_eq!(widen_map(&l5, &l6), encode::v5_projection(), "the widen's map is the v5 projection");
+    // (and v4's widen onto v6 is v4 -> v5 -> v6)
+    let l4 = read_layout("layout_v4.json");
+    assert_eq!(widen_map(&l4, &l6), encode::v4_projection(), "v4 widens onto v6 through the v4 projection");
+}
+
+/// Layout v5 is layout v4 with additions only (ENGINE.md 60.2): the map a widen derives from the
+/// two checked-in descriptions (segments by name with their slots' old floats first, bags by name
+/// with their old rows first, v4's globals as v5's first globals) is `encode::v4_to_v5`; the tokens
+/// are the same (segments, slot counts, present flags, identities, actions), and layout_v4.json is
+/// layout v4 (33,652 floats, as frozen: ENGINE.md 22.7).
+#[test]
+fn layout_v5_widens_layout_v4_exactly() {
+    let (l4, l5) = (read_layout("layout_v4.json"), read_layout("layout_v5.json"));
+    assert_eq!((l4.features, l5.features), (encode::v4::NUM_FEATURES, encode::v5::NUM_FEATURES));
+    assert!(l4.globals[0].0.is_none(), "layout v4 declares no global blocks");
+    assert_eq!(l4.globals[0].1.len(), encode::GLOBALS + encode::MATCH);
+    assert_eq!(widen_map(&l4, &l5), encode::v4_to_v5(), "the widen's map is the v4 projection");
 }
 
 #[test]
@@ -1235,44 +1274,13 @@ fn public_state_reaches_the_encoding() {
     }
     println!("{ok} perturbations encoded, {by_design} deliberate limits, {next} gaps for the next layout (ENGINE.md 58.10, 60)");
     assert!(findings.is_empty(), "{} findings:\n{}", findings.len(), findings.join("\n"));
-    // Layout v5 (ENGINE.md 60) encodes layout v4's 42 gaps; one gap is left, the graveyard's
-    // order, which the GRAVEYARD action ids are positions in (ENGINE.md 65: the Delver mirror's
-    // delve choices). Anything else is a deliberate limit.
+    // Layout v5 (ENGINE.md 60) encodes layout v4's 42 gaps, layout v6 (ENGINE.md 100.5) the Edge
+    // of Eternities port's and workstream C's (`public_state::V6_FIXED`); one gap is left, the
+    // graveyard's order, which the GRAVEYARD action ids of Priority's casts from a graveyard are
+    // positions in (ENGINE.md 65). Anything else is a deliberate limit.
     let gaps: Vec<&str> = lim.iter().filter(|l| l.kind == LimitKind::NextLayout).map(|l| l.name).collect();
-    // Edge of Eternities' void (ENGINE.md 99.4) is the second, and whether a creature was cast
-    // for its warp cost (ENGINE.md 99.8) the third: state the port added after layout v5 froze,
-    // for the next layout. Workstream W3 (ENGINE.md 99.13) adds four: regeneration shields, the
-    // mana spent to cast a permanent, phased-out permanents and which phased out indirectly. W4's
-    // legendary copy exception (ENGINE.md 99.14) and a target in exile (rare: no gate position has
-    // one), which object a stack item noted (Close Encounter's choice; emerge's and station's
-    // too), controlling another player (CR 722: a pending effect, a controlled turn), W5's granter
-    // of a spell's alternative cost (ENGINE.md 99.15; rare: no gate position has one), and whether
-    // an artifact entered under a player's control this turn (ENGINE.md 99.11) follow.
-    assert_eq!(
-        gaps,
-        [
-            "two graveyard cards swap places",
-            "void holds (a nonland permanent left the battlefield this turn)",
-            "a creature was cast for its warp cost",
-            "a creature has a regeneration shield",
-            "the mana spent to cast a permanent",
-            "a permanent is phased out",
-            "a phased-out permanent phased out indirectly",
-            "a copy is legendary by its exception",
-            "a stack item targets another exiled card",
-            "a stack item noted another object",
-            "a player will control the other's next turn",
-            "the active player is controlled this turn",
-            "a spell's granted alternative cost came from another permanent",
-            "the other player learns a hand card past the 16th",
-            "the turn goes on with another phase after its combat phases",
-            "an artifact entered under a player's control this turn"
-        ],
-        "the gaps on the allowlist"
-    );
-    // (Workstream C's: where the turn goes on after combat phases added to another phase, and
-    // the hand cards past the 16 slots, ENGINE.md 100.3.)
-    assert_eq!(next, 16);
+    assert_eq!(gaps, ["two graveyard cards swap places"], "the gaps on the allowlist");
+    assert_eq!(next, 1);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.
@@ -1941,12 +1949,13 @@ fn to_choice(g: &mut engine::Game, k: engine::DecisionKind) {
 #[test]
 fn the_v5_facts_encode_no_hidden_information() {
     use encode::{bag, g5, O_BAGS, O_GLOBALS_V5};
-    use engine::public_state::{perturbations, V5_FIXED};
+    use engine::public_state::{perturbations, V5_FIXED, V6_FIXED};
     use engine::testkit::Scenario;
     use engine::{Choice, DecisionKind, Step, Zone};
     let ps = perturbations();
-    let fixed: Vec<_> = ps.iter().filter(|p| V5_FIXED.contains(&p.name)).collect();
-    assert_eq!(fixed.len(), V5_FIXED.len());
+    // (and layout v6's, ENGINE.md 100.5)
+    let fixed: Vec<_> = ps.iter().filter(|p| V5_FIXED.contains(&p.name) || V6_FIXED.contains(&p.name)).collect();
+    assert_eq!(fixed.len(), V5_FIXED.len() + V6_FIXED.len());
     let mut rng = Rng::new(60);
     let mut zr = zero_search::rng::Rng::new(60);
     let (mut worlds, mut applied) = (0, 0);

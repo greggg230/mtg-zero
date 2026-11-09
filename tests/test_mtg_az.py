@@ -25,7 +25,7 @@ def test_engine_module_registers_the_games():
     from mtgz import _engine as E
     assert G.engine() is E and E.game_names() == ['toy', 'mtg', 'team_draft']
     info = G.info('mtg')
-    assert info['num_actions'] == 1024 and info['num_features'] == 37620      # layout v5 (ENGINE.md 60)
+    assert info['num_actions'] == 1024 and info['num_features'] == 43956      # layout v6 (ENGINE.md 100.5)
     assert info['min_players'] == info['max_players'] == 2
     assert info['bots'] == ['random', 'heuristic']
 
@@ -174,7 +174,7 @@ def test_evaluation_drivers_use_the_eval_decks():
 
 
 def test_layout_and_token_network_read_the_encoding():
-    """layout_v5.json (encode::layout_json) through zero-core's token network: the identities the
+    """layout_v6.json (encode::layout_json) through zero-core's token network: the identities the
     network decodes are the engine's cards, the pointer actions of the hand and permanent slots
     are their action ids, and a real leaf batch gets a valid answer."""
     import torch
@@ -183,10 +183,10 @@ def test_layout_and_token_network_read_the_encoding():
     from zero.net import make_net, tokens_layout
     info = G.info('mtg')
     lay = tokens_layout(A.LAYOUT, info['num_features'], info['num_actions'])
-    assert A.LAYOUT['features'] == info['num_features'] and lay['vocab'] == 1024 and A.LAYOUT['version'] == 5
+    assert A.LAYOUT['features'] == info['num_features'] and lay['vocab'] == 1024 and A.LAYOUT['version'] == 6
     segs = {s['name']: s for s in lay['segments']}
-    assert segs['list']['count'] == 64 and [b['count'] for b in lay['bags']] == [19]   # M8b, v5
-    assert [g['name'] for g in lay['globals']] == ['globals', 'match', 'globals_v5']   # v5 (ENGINE.md 60)
+    assert segs['list']['count'] == 64 and [b['count'] for b in lay['bags']] == [23]   # M8b, v6
+    assert [g['name'] for g in lay['globals']] == ['globals', 'match', 'globals_v5', 'globals_v6']   # v6 (100.5)
     names = A.LAYOUT['cards']
     torch.manual_seed(0)
     m = make_net(info, 'mtg', 'tokens', 32, 1, heads=2)
@@ -228,31 +228,33 @@ def test_layout_and_token_network_read_the_encoding():
     protocol.validate_evaluation(lb, pri, val, mar)
 
 
-def test_a_v4_token_network_widens_onto_layout_v5_exactly(tmp_path):
-    """ENGINE.md 60.2: a token network of layout v4 (layout_v4.json, as frozen), widened with
-    zero-core's `net.widen` onto this build's layout v5, computes on any v5 input what it computed
-    on the v4 part of it (`token_feature_map`: the v4 encoding, tests/digest.rs DIGEST_ENCODING=v4);
-    the same tokens. Real encodings of this build (cube and Delver mirror positions), their v5
-    floats then randomised."""
+@pytest.mark.parametrize('old_version, old_features', [(4, 33652), (5, 37620)])
+def test_an_older_token_network_widens_onto_layout_v6_exactly(tmp_path, old_version, old_features):
+    """ENGINE.md 60.2, 100.5: a token network of layout v4 or v5 (layout_v4.json, layout_v5.json, as
+    frozen), widened with zero-core's `net.widen` onto this build's layout v6, computes on any v6
+    input what it computed on the old part of it (`token_feature_map`: the v4 or v5 encoding,
+    tests/digest.rs DIGEST_ENCODING=v4 / v5); the same tokens. Real encodings of this build (cube
+    and Delver mirror positions), their new floats then randomised."""
     import os
     import torch
     import mtgz.az as A
     from mtgz.az import decklists
     from zero.net import TokenNet, token_feature_map, tokens_layout, widen
     info = G.info('mtg')
-    with open(os.path.join(os.path.dirname(A.__file__), 'layout_v4.json'), encoding='utf-8') as f:
-        v4 = json.load(f)
-    assert v4['version'] == 4 and v4['features'] == 33652
+    with open(os.path.join(os.path.dirname(A.__file__), f'layout_v{old_version}.json'), encoding='utf-8') as f:
+        lo = json.load(f)
+    assert lo['version'] == old_version and lo['features'] == old_features
     torch.manual_seed(3)
-    old = TokenNet(33652, info['num_actions'], v4, d=32, layers=2, heads=2, ff=64, game='mtg').eval()
+    old = TokenNet(old_features, info['num_actions'], lo, d=32, layers=2, heads=2, ff=64, game='mtg').eval()
     with torch.no_grad():
         for lin in (old.gen, old.ptr):
             lin.weight.normal_(0, 0.3)
             lin.bias.normal_(0, 0.3)
     new = widen(old, info['num_features'], info['num_actions'], layout=A.LAYOUT)
-    assert new.n_tok == old.n_tok and new.config['layout']['bags'][0]['count'] == 19
-    fmap = token_feature_map(old.config['layout'], 33652, tokens_layout(A.LAYOUT, info['num_features'], info['num_actions']),
-                             info['num_features'])
+    assert new.n_tok == old.n_tok and new.config['layout']['bags'][0]['count'] == 23
+    assert new.config['layout']['version'] == 6
+    fmap = token_feature_map(old.config['layout'], old_features,
+                             tokens_layout(A.LAYOUT, info['num_features'], info['num_actions']), info['num_features'])
     E = G.engine()
     rng = np.random.default_rng(60)
     xs = []
@@ -271,7 +273,7 @@ def test_a_v4_token_network_widens_onto_layout_v5_exactly(tmp_path):
     x4 = x5[:, fmap]
     newcols = torch.ones(x5.shape[1], dtype=torch.bool)
     newcols[fmap] = False
-    assert int(newcols.sum()) == info['num_features'] - 33652 and (x5[:, newcols] != 0).any()   # v5 facts present
+    assert int(newcols.sum()) == info['num_features'] - old_features and (x5[:, newcols] != 0).any()   # new facts present
     n = torch.full((x5.shape[0],), 2)
     with torch.no_grad():
         p, q = old(x4, n), new(x5, n)
@@ -282,12 +284,14 @@ def test_a_v4_token_network_widens_onto_layout_v5_exactly(tmp_path):
         assert torch.allclose(a, b, atol=1e-5) and torch.allclose(a, c, atol=1e-5)
 
 
-def test_the_encoding_guard_refuses_a_v4_network_and_takes_a_v5_one(tmp_path):
-    """ENGINE.md 61: zero-core's encoding guard (`zero.net.check_encoding`, its docs/az.md 10.4) on
-    this build (layout v5): a layout v4 token network is refused wherever it is loaded - net.load,
-    a run's evaluator, the replay recorder - naming both sides (33,652 -> 37,620 features, the
-    segments that moved, layout v5); its fork_run widen is taken and written as a v5 network; a new
-    network records layout version 5, and a v5 network recorded as another version is refused."""
+@pytest.mark.parametrize('old_version, old_features', [(4, 33652), (5, 37620)])
+def test_the_encoding_guard_refuses_an_older_network_and_takes_a_v6_one(tmp_path, old_version, old_features):
+    """ENGINE.md 61, 100.5: zero-core's encoding guard (`zero.net.check_encoding`, its docs/az.md
+    10.4) on this build (layout v6): a layout v4 or v5 token network is refused wherever it is
+    loaded - net.load, a run's evaluator, the replay recorder - naming both sides (33,652 or 37,620
+    -> 43,956 features, the segments that moved, layout v6); its fork_run widen is taken and written
+    as a v6 network; a new network records layout version 6, and a v6 network recorded as another
+    version is refused."""
     import os
     import torch
     import mtgz.az as A
@@ -295,35 +299,35 @@ def test_the_encoding_guard_refuses_a_v4_network_and_takes_a_v5_one(tmp_path):
     from zero.net import (EncodingMismatch, TokenNet, check_checkpoint, check_encoding, encoding_mismatch, load,
                           make_net, save, widen)
     info = G.info('mtg')
-    with open(os.path.join(os.path.dirname(A.__file__), 'layout_v4.json'), encoding='utf-8') as f:
+    with open(os.path.join(os.path.dirname(A.__file__), f'layout_v{old_version}.json'), encoding='utf-8') as f:
         v4 = json.load(f)
     torch.manual_seed(4)
-    old = TokenNet(33652, info['num_actions'], v4, d=16, layers=1, heads=2, ff=32, game='mtg').eval()
-    p4 = str(tmp_path / 'v4.pt')
+    old = TokenNet(old_features, info['num_actions'], v4, d=16, layers=1, heads=2, ff=32, game='mtg').eval()
+    p4 = str(tmp_path / 'old.pt')
     save(old, p4, {'iter': 3})
     with pytest.raises(EncodingMismatch) as e:
         load(p4)
     msg = str(e.value)
-    assert 'features 33652 -> 37620' in msg and 'token layout v4 (11 segments' in msg and 'token layout v5 (11' in msg
-    assert 'tools/fork_run.py' in msg
+    assert f'features {old_features} -> 43956' in msg and f'token layout v{old_version} (11 segments' in msg
+    assert 'token layout v6 (11' in msg and 'tools/fork_run.py' in msg
     R = run.Run(str(tmp_path / 'r'), run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-smoke']), {}))
     with pytest.raises(EncodingMismatch):
         R.evaluator(p4)
     with pytest.raises(EncodingMismatch):
         replays.check_encoding(p4)
-    # fork_run's route: widened, then a network of this build's encoding (recording layout v5)
+    # fork_run's route: widened, then a network of this build's encoding (recording layout v6)
     new = widen(old, info['num_features'], info['num_actions'], layout=A.LAYOUT)
-    assert new.config['layout']['version'] == 5 and encoding_mismatch(new.config) is None
-    p5 = str(tmp_path / 'v5.pt')
+    assert new.config['layout']['version'] == 6 and encoding_mismatch(new.config) is None
+    p5 = str(tmp_path / 'v6.pt')
     save(new, p5)
     check_checkpoint(p5)
     replays.check_encoding(p5)
     load(p5, game='mtg')
     m = make_net(info, 'mtg', 'tokens', 16, 1, heads=2)
-    assert m.config['layout']['version'] == 5 and encoding_mismatch(m.config) is None
-    with pytest.raises(EncodingMismatch, match='token layout version 6 -> 5'):
-        check_encoding(dict(m.config, layout=dict(m.config['layout'], version=6)))
-    # a v5 network from before the version was recorded (delver2's): judged by its structure
+    assert m.config['layout']['version'] == 6 and encoding_mismatch(m.config) is None
+    with pytest.raises(EncodingMismatch, match='token layout version 7 -> 6'):
+        check_encoding(dict(m.config, layout=dict(m.config['layout'], version=7)))
+    # a v6 network without a recorded version: judged by its structure
     assert encoding_mismatch(dict(m.config, layout={k: v for k, v in m.config['layout'].items() if k != 'version'})) is None
     # the draft network: its own game and layout (draft_v2)
     d = make_net(G.info('team_draft'), 'team_draft', 'tokens', 16, 1, heads=2)
@@ -332,10 +336,10 @@ def test_the_encoding_guard_refuses_a_v4_network_and_takes_a_v5_one(tmp_path):
         check_encoding(d.config, 'mtg')
 
 
-def test_a_bigger_network_distilled_on_delver_shards_reads_layout_v5(tmp_path):
+def test_a_bigger_network_distilled_on_delver_shards_reads_layout_v6(tmp_path):
     """ENGINE.md 62: zero-core's distillation (tools/distill.py) on Delver mirror self-play shards of
     this build: a token network of another size trained on a small teacher's answers, held out on
-    another shard; the student is a layout v5 network (version recorded, the encoding guard accepts
+    another shard; the student is a layout v6 network (version recorded, the encoding guard accepts
     it), its record in the checkpoint, and it moved toward its teacher."""
     import os
     import sys
@@ -369,7 +373,7 @@ def test_a_bigger_network_distilled_on_delver_shards_reads_layout_v5(tmp_path):
                          '--steps', '40', '--batch', '64', '--lr', '2e-3', '--warmup', '5', '--eval-every', '0',
                          '--torch-threads', '1', '--normal-priority']) == 0
     s, extra = load(out, game='mtg')
-    assert (s.config['d'], s.config['layers'], s.config['layout']['version']) == (48, 2, 5)
+    assert (s.config['d'], s.config['layers'], s.config['layout']['version']) == (48, 2, 6)
     h = extra['distill']['heldout']
     assert [x['step'] for x in h] == [0, 40] and h[-1]['policy_kl'] < h[0]['policy_kl']
     assert extra['teacher_extra'] == {'iter': 3} and extra['distill']['student_net']['params'] == s.n_params()
@@ -437,7 +441,7 @@ def test_a_belief_teacher_distils_into_a_student_with_its_head_on_delver_view_ro
                          '--torch-threads', '1', '--normal-priority']) == 0
     s, extra = load(out, game='mtg')
     check_belief_head(s, 'mtg')                        # what selfplay_ / eval_belief_tilt ask of a checkpoint
-    assert s.config['aux'] == belief and s.config['layout']['version'] == 5
+    assert s.config['aux'] == belief and s.config['layout']['version'] == 6
     h = extra['distill']['heldout']
     assert h[-1]['aux']['belief']['kl'] < h[0]['aux']['belief']['kl'] and h[-1]['policy_kl'] < h[0]['policy_kl']
     assert h[-1]['view']['rows'] > 0 and h[-1]['decision']['rows'] > 0

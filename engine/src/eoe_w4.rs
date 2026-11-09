@@ -83,16 +83,36 @@ impl Game {
         self.next_turn_controller[p as usize]
     }
 
+    /// CR 722.3: player `p` sees hidden card `c` now (a look, a draw, a
+    /// card put where they know it, `learn`): during a turn another player
+    /// controls `p`, that player sees it too, at once, keyed (`KEY_LOOK`,
+    /// private to it): so what it knows afterwards follows the card as the
+    /// controlled player's look does (a later private rearrangement makes
+    /// it a cloud for it, as for any other player). ENGINE.md 100.5 (99.14.2
+    /// fixed).
+    pub(crate) fn controller_sees(&mut self, p: PlayerId, c: CardIdx) {
+        let Some(q) = self.turn_controller else { return };
+        if p != self.turn.active || q == p || !self.hidden_obj(c) || self.knows(q, c) {
+            return;
+        }
+        self.learn(q, c);
+        let d = self.ident(c);
+        self.emit_private(crate::hidden::KEY_LOOK, q, d as u64);
+    }
+
     /// CR 722.3: information visible to the controlled player is visible to
-    /// the player controlling them. Run at the end of every transition of a
-    /// controlled turn (`advance`), before the next decision is shown: the
-    /// controller learns, keyed (`KEY_LOOK`, private, in definition order),
-    /// every hidden card the controlled player can see now: their hand, the
-    /// face-down permanents they control (708.5), the cards they exiled face
-    /// down and know, and the hidden cards their pending decision names (a
-    /// looked-at pile). What the controlled player merely remembers (a
-    /// library card seen on an earlier turn) is not visible, and is not
-    /// shared (ENGINE.md 99.14).
+    /// the player controlling them. Every look of the controlled player is
+    /// shared as it happens (`controller_sees`); this runs at the end of
+    /// every transition of a controlled turn (`advance`), before the next
+    /// decision is shown, and when a turn becomes controlled: the controller
+    /// learns, keyed (`KEY_LOOK`, private, in definition order), every hidden
+    /// card the controlled player can see now: their hand, the face-down
+    /// permanents they control (708.5), the cards they exiled face down and
+    /// know, the hidden cards their pending decision names (a looked-at
+    /// pile) and, while they search their library (701.19: they look at
+    /// every card of it), that library. What the controlled player merely
+    /// remembers (a library card seen on an earlier turn) is not visible, and
+    /// is not shared (ENGINE.md 99.14, 100.5).
     pub(crate) fn sync_controller_view(&mut self) {
         let Some(q) = self.turn_controller else { return };
         let p = self.turn.active;
@@ -107,6 +127,19 @@ impl Game {
                 Choice::Card(c) if self.hidden_obj(c) && self.knows(p, c) => Some(c),
                 _ => None,
             }));
+            // (A pile they looked at, its options by definition: the cards
+            // they know there.)
+            if let Some(Task::Run(f)) = self.agenda.last() {
+                if matches!(
+                    d.kind,
+                    DecisionKind::PutOnTop | DecisionKind::PutOnBottom | DecisionKind::PutInGraveyard | DecisionKind::PutInHand | DecisionKind::PutOntoBattlefield
+                ) {
+                    seen.extend(f.pile.iter().copied().filter(|&c| self.hidden_obj(c) && self.knows(p, c)));
+                }
+            }
+            if d.kind == DecisionKind::SearchLibrary {
+                seen.extend(self.players[p as usize].library.iter().copied());
+            }
         }
         let mut learned: Vec<crate::ids::DefId> = Vec::new();
         for c in seen {

@@ -358,9 +358,9 @@ pub enum LimitKind {
     /// A deliberate limit of the encoding (ENGINE.md 58.9).
     Design,
     /// A genuine gap the layout has no room for, for its next version (layout
-    /// v4's 42, ENGINE.md 58.10, are encoded by layout v5, 60; one now: the
-    /// graveyard's order, which Priority's `GRAVEYARD` action ids depend on,
-    /// ENGINE.md 65.10).
+    /// v4's 42, ENGINE.md 58.10, are encoded by layout v5, 60; the EoE port's
+    /// and workstream C's by layout v6, 100.5). The procedure for a new one:
+    /// ENGINE.md 100.5.
     NextLayout,
 }
 
@@ -835,9 +835,13 @@ pub fn perturbations() -> Vec<Perturbation> {
             *x = if x.is_some() { None } else { Some(a.g.turn.active) };
             Some(format!("P{q}: {:?}", a.g.next_turn_controller[q as usize]))
         }),
+        // (With what CR 722.3 makes of it at once: the controller sees the
+        // controlled player's hand, `sync_controller_view`, as at the end of
+        // every transition of a controlled turn; ENGINE.md 100.5.)
         p!("the active player is controlled this turn", "Game.turn_controller", |a, _r| {
             let q = opp(a.g.turn.active);
             a.g.turn_controller = if a.g.turn_controller.is_some() { None } else { Some(q) };
+            a.g.sync_controller_view();
             Some(format!("{:?}", a.g.turn_controller))
         }),
         p!("void holds (a nonland permanent left the battlefield this turn)", "Game.void_turn", |a, _| {
@@ -883,6 +887,15 @@ pub fn perturbations() -> Vec<Perturbation> {
         p!("a creature has a regeneration shield", "Game.marks", |a, _r| {
             let c = *slot_creatures(&a.g).first()?;
             mark(&mut a.g, c, crate::game::Mark::RegenShield)
+        }),
+        // ENGINE.md 100.5: a triggered ability an effect gave a permanent
+        // (`Mark::Granted`, CR 613.1f; EoE W3). (The first permanent in the
+        // encoded slots; no draw from the gate's random stream.)
+        p!("a permanent gained a triggered ability", "Game.marks", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            let (def, ts) = (a.g.objs[c.i()].def, a.g.next_ts);
+            a.g.w3.granted = true;
+            mark(&mut a.g, c, crate::game::Mark::Granted { def, slot: 0, this_turn: true, ts })
         }),
         p!("the mana spent to cast a permanent", "Game.marks", |a, _r| {
             let c = *slots(&a.g).first()?;
@@ -1592,10 +1605,13 @@ pub fn perturbations() -> Vec<Perturbation> {
 
 /// The perturbations whose public change the encoding leaves out (ENGINE.md
 /// 58.9: by design), each with its reason. Layout v5 (ENGINE.md 60) encodes
-/// the 42 gaps layout v4 had no room for (58.10); one gap is left, found by
-/// the Delver mirror's delve choices (ENGINE.md 65): the graveyard's order,
-/// which Priority's `GRAVEYARD` ids depend on (the other graveyard choices
-/// moved to the list's ids, ENGINE.md 65.10).
+/// the 42 gaps layout v4 had no room for (58.10), layout v6 (ENGINE.md
+/// 100.5) the gaps the Edge of Eternities port and workstream C added after
+/// v5 froze, and two facts cards read that were limits by design
+/// (`V6_FIXED`). One gap is left, found by the Delver mirror's delve
+/// choices (ENGINE.md 65): the graveyard's order, which Priority's
+/// `GRAVEYARD` ids depend on (the other graveyard choices moved to the
+/// list's ids, ENGINE.md 65.10). How to add a gap later: ENGINE.md 100.5.
 pub fn limits() -> Vec<Limit> {
     use LimitKind::{Design, NextLayout};
     let l = |name, kind, why| Limit { name, kind, why };
@@ -1604,25 +1620,35 @@ pub fn limits() -> Vec<Limit> {
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
         l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),
-        l("void holds (a nonland permanent left the battlefield this turn)", NextLayout, "void (Edge of Eternities' ability word, ENGINE.md 99.4) is game state the EoE port added after layout v5 froze: the next layout encodes it (a per-turn flag beside the turn's facts); until then a network infers it from the public history only through the board"),
-        l("more life gained this turn", Design, "GAINED_LIFE is whether a player gained life this turn (the layout's fact); how much is read by one card, Haliya, Guided by Light ('if you've gained 3 or more life this turn'; EoE lane D, ENGINE.md 99.5)"),
-        l("a creature was cast for its warp cost", NextLayout, "whether a permanent entered as a spell cast for its warp cost (Mark::WarpCast) is game state the EoE cross-lane pass added after layout v5 froze (ENGINE.md 99.8), read by one card, Full Bore; the warp's delayed exile is encoded only as a count per player (g5::DELAYED), not by object: the next layout encodes it (a permanent flag)"),
-        l("a creature has a regeneration shield", NextLayout, "regeneration shields (CR 701.19a, Mark::RegenShield) are game state EoE workstream W3 added after layout v5 froze (ENGINE.md 99.13), made by one card, Swarmyard: the next layout encodes them (a permanent's count)"),
-        l("the mana spent to cast a permanent", NextLayout, "the amount of mana spent to cast a permanent (CR 601.2h, Mark::ManaSpent) is game state EoE workstream W3 added after layout v5 froze (ENGINE.md 99.13), read by Astelli Reclaimer's enters trigger and Dyadrine's counters (on the battlefield already): the next layout encodes it (a permanent's number)"),
-        l("a permanent is phased out", NextLayout, "phased-out permanents (CR 702.26b, Zone::PhasedOut) are treated as though they don't exist, and layout v5 encodes the battlefield only, so a network can't see that one will phase in at its controller's next untap step (EoE workstream W3, ENGINE.md 99.13: Robe of Stars): the next layout encodes them (a bag per player)"),
-        l("a phased-out permanent phased out indirectly", NextLayout, "which phased-out permanents phase in with the one they are attached to (CR 702.26e, h; EoE workstream W3, ENGINE.md 99.13): with the phased-out permanents themselves, the next layout's"),
-        l("a copy is legendary by its exception", NextLayout, "a copy effect's \"except it's legendary\" (CR 707.9b: a copiable supertype; Adagia, Windswept Bastion's token copies, EoE W4, ENGINE.md 99.14) is a value the EoE port added after layout v5 froze: a permanent's legendary float (code 47) is its copiable definition's, as its name is; the next layout encodes a permanent's supertypes as they are"),
-        l("a stack item targets another exiled card", NextLayout, "a target in exile (Blade of the Swarm's 'target exiled card with warp', EoE W4, ENGINE.md 99.14) is a target layout v5's stack target block has no field for (a player, a permanent's slot or a stack position); exile is bags of identities: the next layout encodes it (the target's identity)"),
-        l("a stack item noted another object", NextLayout, "which object a stack item noted (Close Encounter's chosen creature or warped card, EoE W4, ENGINE.md 99.14; emerge's permanent; station's tapped creature) is encoded only as a count (stack::NOTED): the next layout encodes the objects (as a target's)"),
-        l("a player will control the other's next turn", NextLayout, "a pending player-controlling effect (CR 722.1; The Dominion Bracelet, EoE W4, ENGINE.md 99.14) is game state the EoE port added after layout v5 froze: the next layout encodes it (a per-player flag)"),
-        l("the active player is controlled this turn", NextLayout, "who controls the active player this turn (CR 722.1, 722.4; The Dominion Bracelet) is game state layout v5 has no float for: during a controlled turn the controller decides (to_move) the controlled player's decisions, whose action ids stay that player's, while the controller's encoding is its own seat's (its own hand, the controlled player's hand as known cards, CR 722.3); the next layout encodes it (a global, and the decision's seat)"),
-        l("a spell's granted alternative cost came from another permanent", NextLayout, "which permanent's static ability gave the alternative cost a spell was cast for (Mark::AltGranted; Tannuk, Steadfast Second's warp, EoE W5, ENGINE.md 99.15) decides whether the spell still has that ability as it resolves (CR 400.7g, 608.3g: warp's exile); the stack item's alternative cost is encoded (stack::ALT, ALT_INDEX: past the card's own), its granter is not: the next layout encodes it (as a noted object's)"),
-        l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
-        l("the other player learns a hand card past the 16th", NextLayout, "the hand block has 16 `HAND` slots (the viewer's hand sorted by definition, ENGINE.md 58): with more than 16 cards in hand (Tamiyo, Seasoned Scholar's emblem: no maximum hand size), which of the later ones the opponent knows is not encoded (their identities are, in the hand bag); the next layout encodes the known copies per identity (found by workstream C's gate positions, ENGINE.md 100.3)"),
-        l("the turn goes on with another phase after its combat phases", NextLayout, "after combat phases an effect added after the beginning phase, the postcombat main phase or the ending phase (CR 500.8: \"after this phase, there is an additional combat phase\", resolved outside combat; workstream C, ENGINE.md 100.3), the turn goes on with the phase that came next there (Turn::after_combat), not the postcombat main phase; layout v5 encodes the additional combat phases to follow (g5::EXTRA_COMBATS), not where the turn resumes: the next layout encodes it (a global)"),
-        l("an artifact entered under a player's control this turn", NextLayout, "whether an artifact entered the battlefield under a player's control this turn (Player::artifact_entered) is game state the EoE port's W1 added after layout v5 froze (ENGINE.md 99.11), read by one card, Mechan Shieldmate (its attack permission); the next layout encodes it (a per-turn flag beside the turn's facts)"),
     ]
 }
+
+/// The perturbations layout v6 encodes (ENGINE.md 100.5): the next-layout
+/// gaps of the Edge of Eternities port (ENGINE.md 99) and workstream C
+/// (100.3), two facts cards read that were limits by design (the life gained
+/// this turn, a permanent that entered this turn) and the granted triggered
+/// abilities (W3, no perturbation before). Its tests read them back and check
+/// that they hide nothing (`tests/az.rs`).
+pub const V6_FIXED: [&str; 18] = [
+    "void holds (a nonland permanent left the battlefield this turn)",
+    "more life gained this turn",
+    "a creature was cast for its warp cost",
+    "a creature has a regeneration shield",
+    "the mana spent to cast a permanent",
+    "a permanent is phased out",
+    "a phased-out permanent phased out indirectly",
+    "a copy is legendary by its exception",
+    "a stack item targets another exiled card",
+    "a stack item noted another object",
+    "a player will control the other's next turn",
+    "the active player is controlled this turn",
+    "a spell's granted alternative cost came from another permanent",
+    "a permanent entered this turn",
+    "the other player learns a hand card past the 16th",
+    "the turn goes on with another phase after its combat phases",
+    "an artifact entered under a player's control this turn",
+    "a permanent gained a triggered ability",
+];
 
 /// The perturbations of layout v4's 42 gaps (ENGINE.md 58.10), which layout
 /// v5 encodes (ENGINE.md 60.3): its tests read them back and check that they
@@ -1713,9 +1739,9 @@ mod tests {
         for l in limits() {
             assert!(ps.iter().any(|p| p.name == l.name), "limit {} names no perturbation", l.name);
         }
-        for n in V5_FIXED {
-            assert!(ps.iter().any(|p| p.name == n), "V5_FIXED: {n} names no perturbation");
-            assert!(!limits().iter().any(|l| l.name == n), "V5_FIXED: {n} is still a limit");
+        for n in V5_FIXED.iter().chain(V6_FIXED.iter()) {
+            assert!(ps.iter().any(|p| p.name == *n), "V5_FIXED / V6_FIXED: {n} names no perturbation");
+            assert!(!limits().iter().any(|l| l.name == *n), "V5_FIXED / V6_FIXED: {n} is still a limit");
         }
     }
 }

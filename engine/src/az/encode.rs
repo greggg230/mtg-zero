@@ -1,29 +1,42 @@
 //! The network input of the `mtg` game (ENGINE.md 21.2, 22.2, 24): a fixed-width
-//! f32 vector for a viewer, with no hidden information. **Layout v5**
-//! ([`NUM_FEATURES`] = 37,620 floats; ENGINE.md 60) is layout v4 (33,652
-//! floats; frozen at the end of M8b, ENGINE.md 22.7, with the spare floats of
-//! 55 and 58.8) with additions only, so that a v4 token network widens onto it
-//! exactly (zero-core `net.widen` with this layout; every v4 float keeps its
-//! meaning, [`v4_projection`]): wider permanent and stack slots (the new
-//! status floats at the slots' ends), two more bags, and a second block of
-//! globals after the match block. Every block in order (v4's description,
-//! then what v5 added):
+//! f32 vector for a viewer, with no hidden information. **Layout v6**
+//! ([`NUM_FEATURES`] = 43,956 floats; ENGINE.md 100.5) is layout v5 (37,620
+//! floats, ENGINE.md 60) with additions only, as v5 was v4's, so that a v5
+//! token network widens onto it exactly (zero-core `net.widen` with this
+//! layout; every v5 float keeps its meaning, [`v5_projection`]): four more
+//! bags, wider permanent and stack slots (the new status floats at the
+//! slots' ends) and a third block of globals after v5's. v5 (ENGINE.md 60)
+//! was layout v4 (33,652 floats; frozen at the end of M8b, ENGINE.md 22.7,
+//! with the spare floats of 55 and 58.8) with additions only
+//! ([`v4_projection`]). Every block in order (v4's description, then what v5
+//! and v6 added):
 //!
 //! | Block | Floats | What |
 //! |---|---:|---|
 //! | globals | 128 | turn, step, who is active / has priority, per player (viewer first) life, zone sizes, mana pool, board summary, lost life this turn, sorceries as though they had flash; M7b part 2: poison, cards on an adventure, temporary triggered abilities, no maximum hand size; day and night; part 3b: the initiative, the dungeon room, dungeons completed, experience counters |
-//! | context | 256 | the pending decision: kind (64 kinds), decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay (a mana payment's; delve's picks: the spell's mana cost after the cards chosen so far, ENGINE.md 65), damage left, counters of the asking task |
-//! | bags | 19 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards (a card chosen for a delve in progress is in its owner's exile bag, ENGINE.md 65), exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them); M8b: the opponent's pool as the viewer knows it, the cards the opponent revealed in earlier games of the match; **v5**: the exiled cards the viewer may play, those the opponent may play (`bag::MY_EXILE_PLAY`, `OPP_EXILE_PLAY`; a face-down one only where the viewer knows it) |
+//! | context | 256 | the pending decision: kind (64 kinds), decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay (a mana payment's; delve's picks: the spell's mana cost after the cards chosen so far, ENGINE.md 65), damage left, counters of the asking task; ENGINE.md 100.1: a page of a paged choice, a big number's digits; **ENGINE.md 100.5**: the frame flag (248: the decision is made for the other seat, CR 722) |
+//! | bags | 23 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards (a card chosen for a delve in progress is in its owner's exile bag, ENGINE.md 65), exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them); M8b: the opponent's pool as the viewer knows it, the cards the opponent revealed in earlier games of the match; **v5**: the exiled cards the viewer may play, those the opponent may play (`bag::MY_EXILE_PLAY`, `OPP_EXILE_PLAY`; a face-down one only where the viewer knows it); **v6**: the exiled cards a stack item targets or noted, the viewer's and the opponent's phased-out permanents, the viewer's hand cards the opponent knows |
 //! | tops | 2 x 3 x 54 | the top three library positions of each player: present, known to the viewer, the card code |
-//! | permanents | 2 x 32 x 172 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up; M7b part 3: a copy and the identity of what it copies, what it is attached to; part 3b: ward and its cost, lost all abilities, goaded, exiled if it would leave; 58.8: can't block, can't be blocked, other counters, cards exiled with it, protection; **v5** status 96-119: must attack, exiled if it would die, effects on its subtypes, evoked, escaped, the player chosen as it entered, monstrous, exhausted, the colour chosen as it entered, exerted, abilities resolved this turn, once-each-turn actions done; 8 spare) |
+//! | permanents | 2 x 32 x 196 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up; M7b part 3: a copy and the identity of what it copies, what it is attached to; part 3b: ward and its cost, lost all abilities, goaded, exiled if it would leave; 58.8: can't block, can't be blocked, other counters, cards exiled with it, protection; **v5** status 96-119: must attack, exiled if it would die, effects on its subtypes, evoked, escaped, the player chosen as it entered, monstrous, exhausted, the colour chosen as it entered, exerted, abilities resolved this turn, once-each-turn actions done (112-119 spare, never set); **v6** status 120-143: cast for its warp cost, regeneration shields, the mana spent to cast it, legendary as it is, granted triggered and activated abilities, the spells it gave an alternative cost, stack items that noted it, entered this turn (129-143 spare) |
 //! | hand | 16 x 60 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options (which face its `HAND` id casts or plays), known to the opponent |
-//! | stack | 8 x 124 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets (a player, a permanent, a stack item); a copy of a spell, times an additional cost was paid, bestowed; part 3b: targeted by another stack item, can't be countered, the ability's index, a graveyard card's ability; 58.8: X; **v5** status 32-71: the modes chosen, the alternative cost, how and from where it was cast, cards delved, a trigger's event amount, exiled as it leaves, flashback, noted permanents, divided damage, a ninjutsu attack, splices (8 spare) |
+//! | stack | 8 x 204 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets (a player, a permanent, a stack item); a copy of a spell, times an additional cost was paid, bestowed; part 3b: targeted by another stack item, can't be countered, the ability's index, a graveyard card's ability; 58.8: X; **v5** status 32-71: the modes chosen, the alternative cost, how and from where it was cast, cards delved, a trigger's event amount, exiled as it leaves, flashback, noted permanents, divided damage, a ninjutsu attack, splices (64-71 spare, never set); **v6** status 72-151: the exiled cards it targets and noted, its first exiled target and its first noted object (by identity or slot), an alternative cost a permanent granted it (146-151 spare) |
 //! | triggers | 4 x 56 | `TRIGGER` slots 0..3 (the viewer's waiting triggers) |
 //! | list | 64 x 60 | `LIBRARY` slots 0..63 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition; M8b: sideboarding's pool list (`list::*`: copies in the pool, in the deck, in the deck at the start, a first pick, a basic land, already decided); a graveyard-card choice or target (ENGINE.md 65.10): the graveyards holding an offered card, in order, the viewer's first (`list::THEIRS`, `list::CHOSEN`: chosen for a delve in progress) |
 //! | graveyard abilities | 4 x 56 | `GY_ABILITY` slots 0..3 (part 3b): the cards in the viewer's graveyard with an ability that works there, in graveyard order, and whether it may be activated now |
 //! | companions | 2 x 56 | v4 (M8a): the viewer's then the opponent's revealed companion (CR 702.139): card code, revealed, its special action still available (outside the game, not taken), the special action is an option of the viewer's decision now (`act::COMPANION`, the viewer's slot), put into the hand |
 //! | match | 32 | v4 (M8b, ENGINE.md 36.7; globals): the format, the game number, both players' game wins, draws, each game's result and who played first, sideboarding now and its order, deck sizes (`mtch::*`); 58.8: spells cast this turn, energy |
-//! | globals v5 | 64 | **v5** (`g5::*`; globals): per player (viewer first, 24 each) cards drawn this turn and in the draw step, noncreature spells this turn, gained life this turn, can't gain life, creatures that attacked this turn, spells cast this game, Yawgmoth's Will, graveyard exile this turn, the city's blessing, protection from everything, the pool's artifact-only and haste mana, delayed triggers waiting, exiled cards they may play, cards discarded this turn, ENGINE.md 72: which of their library's top three cards they know and which the other player knows (2 spare); the last normal turn's player, additional combat phases (14 spare) |
+//! | globals v5 | 64 | **v5** (`g5::*`; globals): per player (viewer first, 24 each) cards drawn this turn and in the draw step, noncreature spells this turn, gained life this turn, can't gain life, creatures that attacked this turn, spells cast this game, Yawgmoth's Will, graveyard exile this turn, the city's blessing, protection from everything, the pool's artifact-only and haste mana, delayed triggers waiting, exiled cards they may play, cards discarded this turn, ENGINE.md 72: which of their library's top three cards they know and which the other player knows (2 spare); the last normal turn's player, additional combat phases (14 spare, never set) |
+//! | globals v6 | 64 | **v6** (`g6::*`; globals): per player (viewer first, 24 each) an artifact entered under their control this turn, life gained this turn, their phased-out permanents and those phased out indirectly, their next turn controlled by the other player, controlled this turn (18 spare); the game's: void, where the turn goes on after its combat phases (11 spare) |
+//!
+//! **The frame** (ENGINE.md 100.5, CR 722): "me" is the viewer, except
+//! when the viewer decides a decision of the other player (it controls them
+//! this turn: `Game::decider_of`). Then the encoding is framed in the seat
+//! of the decision's player (its hand in the hand slots, its permanents as
+//! `MY_PERM`, its list, its triggers: the seat its action ids are relative
+//! to), with the viewer's knowledge (722.3: everything the controlled player
+//! can see, the viewer sees), and `ctx::FRAME` (248) set: the value the
+//! network estimates is still the viewer's (zero-core's `to_move`), the
+//! opposite seat of the frame ([`Game::encoding_seat`]).
 //!
 //! v4's globals (ENGINE.md 35): `g[124]` the viewer chose who takes the first
 //! turn (CR 103.1; `g[18]`: the viewer is the starting player); per player
@@ -85,22 +98,30 @@ pub const CODE: usize = 52;
 pub const GLOBALS: usize = 128;
 pub const CONTEXT: usize = 256;
 /// Layout v5: v4's 17 bags and the exiled cards each player may play
-/// (`bag::MY_EXILE_PLAY`, `bag::OPP_EXILE_PLAY`).
-pub const BAGS: usize = 19;
+/// (`bag::MY_EXILE_PLAY`, `bag::OPP_EXILE_PLAY`); layout v6 (ENGINE.md
+/// 100.5): the exiled cards stack items reference, the phased-out
+/// permanents of each player, the viewer's hand cards the opponent knows.
+pub const BAGS: usize = 23;
 pub const TOPS: usize = 3;
 pub const TOP_W: usize = CODE + 2;
 pub const PERMS: usize = 32;
 /// Layout v5: the permanent status floats v5 added at the slot's end
 /// (status 96..119, `perm::MUST_ATTACK` ..; 8 spare).
 pub const PERM_V5: usize = 24;
-pub const PERM_W: usize = CODE + 96 + PERM_V5;
+/// Layout v6 (ENGINE.md 100.5): the permanent status floats v6 added at the
+/// slot's end (status 120..143, `perm::WARP_CAST` ..; 15 spare).
+pub const PERM_V6: usize = 24;
+pub const PERM_W: usize = CODE + 96 + PERM_V5 + PERM_V6;
 pub const HANDS: usize = 16;
 pub const HAND_W: usize = CODE + 8;
 pub const STACKS: usize = 8;
 /// Layout v5: the stack status floats v5 added at the slot's end (status
 /// 32..71, `stack::MODES` ..; 8 spare).
 pub const STACK_V5: usize = 40;
-pub const STACK_W: usize = CODE + 32 + STACK_V5;
+/// Layout v6 (ENGINE.md 100.5): the stack status floats v6 added at the
+/// slot's end (status 72..151, `stack::TARGETS_EXILED` ..; 6 spare).
+pub const STACK_V6: usize = 80;
+pub const STACK_W: usize = CODE + 32 + STACK_V5 + STACK_V6;
 pub const TRIGS: usize = 4;
 pub const TRIG_W: usize = CODE + 4;
 /// M8b: 64 slots (every `LIBRARY` id; a sideboarding pool list has up to
@@ -116,6 +137,9 @@ pub const COMP_W: usize = CODE + 4;
 pub const MATCH: usize = 32;
 /// Layout v5: the second block of globals (`g5::*`), after the match block.
 pub const GLOBALS_V5: usize = 64;
+/// Layout v6 (ENGINE.md 100.5): the third block of globals (`g6::*`), after
+/// v5's.
+pub const GLOBALS_V6: usize = 64;
 
 pub const O_GLOBALS: usize = 0;
 pub const O_CONTEXT: usize = O_GLOBALS + GLOBALS;
@@ -131,8 +155,33 @@ pub const O_GYA: usize = O_LIST + LIST * LIST_W;
 pub const O_COMP: usize = O_GYA + GYAS * GYA_W;
 pub const O_MATCH: usize = O_COMP + COMPS * COMP_W;
 pub const O_GLOBALS_V5: usize = O_MATCH + MATCH;
-pub const NUM_FEATURES: usize = O_GLOBALS_V5 + GLOBALS_V5;
-const _: () = assert!(NUM_FEATURES == 37_620);
+pub const O_GLOBALS_V6: usize = O_GLOBALS_V5 + GLOBALS_V5;
+pub const NUM_FEATURES: usize = O_GLOBALS_V6 + GLOBALS_V6;
+const _: () = assert!(NUM_FEATURES == 43_956);
+
+/// Layout v5 (ENGINE.md 60, `mtgz/az/layout_v5.json`), as far as the
+/// widening to v6 needs it: its features, its bags and the widths of the
+/// slots v6 widened, and every block's v5 offset.
+pub mod v5 {
+    use super::*;
+    pub const BAGS: usize = 19;
+    pub const PERM_W: usize = CODE + 96 + PERM_V5;
+    pub const STACK_W: usize = CODE + 32 + STACK_V5;
+    pub const O_BAGS: usize = O_CONTEXT + CONTEXT;
+    pub const O_TOPS: usize = O_BAGS + BAGS * D;
+    pub const O_MY_PERM: usize = O_TOPS + 2 * TOPS * TOP_W;
+    pub const O_OPP_PERM: usize = O_MY_PERM + PERMS * PERM_W;
+    pub const O_HAND: usize = O_OPP_PERM + PERMS * PERM_W;
+    pub const O_STACK: usize = O_HAND + HANDS * HAND_W;
+    pub const O_TRIG: usize = O_STACK + STACKS * STACK_W;
+    pub const O_LIST: usize = O_TRIG + TRIGS * TRIG_W;
+    pub const O_GYA: usize = O_LIST + LIST * LIST_W;
+    pub const O_COMP: usize = O_GYA + GYAS * GYA_W;
+    pub const O_MATCH: usize = O_COMP + COMPS * COMP_W;
+    pub const O_GLOBALS_V5: usize = O_MATCH + MATCH;
+    pub const NUM_FEATURES: usize = O_GLOBALS_V5 + GLOBALS_V5;
+    const _: () = assert!(NUM_FEATURES == 37_620 && O_TOPS == 19_840 && O_MY_PERM == 20_164 && O_STACK == 32_132 && O_MATCH == 37_524);
+}
 
 /// Layout v4 (ENGINE.md 22.7, `mtgz/az/layout_v4.json`), as far as the
 /// widening to v5 needs it: its features, its bags and the widths of the
@@ -157,43 +206,92 @@ pub mod v4 {
     const _: () = assert!(NUM_FEATURES == 33_652 && O_TOPS == 17_792 && O_STACK == 28_548 && O_MATCH == 33_620);
 }
 
-/// Where each layout v4 feature is in layout v5 (ENGINE.md 60.2): `p[i]` is
-/// the v5 index of v4 feature `i`, which means what v4's meant. Every block
-/// keeps its order; a v4 slot's floats are the first ones of the v5 slot
-/// (the permanents' 148 of 172, the stack's 84 of 124), v4's bags the first
-/// 17 of v5's 19, and v4's globals (the 128 and the match block) the first
-/// globals of v5 in feature order (v5's own come after the match block).
-/// So the v5 encoding at these indices IS the v4 encoding (the digests
-/// prove it: `DIGEST_ENCODING=v4` hashes this projection and reproduces
-/// layout v4's recorded digest), and zero-core's `net.widen` with
-/// `layout_v5.json` maps a v4 network's input columns the same way.
-pub fn v4_projection() -> Vec<usize> {
-    // (v4 offset, v5 offset, slots, v4 slot width, v5 slot width)
-    let blocks = [
-        (O_GLOBALS, O_GLOBALS, 1, GLOBALS, GLOBALS),
-        (O_CONTEXT, O_CONTEXT, 1, CONTEXT, CONTEXT),
-        (v4::O_BAGS, O_BAGS, 1, v4::BAGS * D, BAGS * D),
-        (v4::O_TOPS, O_TOPS, 2 * TOPS, TOP_W, TOP_W),
-        (v4::O_MY_PERM, O_MY_PERM, PERMS, v4::PERM_W, PERM_W),
-        (v4::O_OPP_PERM, O_OPP_PERM, PERMS, v4::PERM_W, PERM_W),
-        (v4::O_HAND, O_HAND, HANDS, HAND_W, HAND_W),
-        (v4::O_STACK, O_STACK, STACKS, v4::STACK_W, STACK_W),
-        (v4::O_TRIG, O_TRIG, TRIGS, TRIG_W, TRIG_W),
-        (v4::O_LIST, O_LIST, LIST, LIST_W, LIST_W),
-        (v4::O_GYA, O_GYA, GYAS, GYA_W, GYA_W),
-        (v4::O_COMP, O_COMP, COMPS, COMP_W, COMP_W),
-        (v4::O_MATCH, O_MATCH, 1, MATCH, MATCH),
-    ];
-    let mut p = vec![usize::MAX; v4::NUM_FEATURES];
-    for (o4, o5, n, w4, w5) in blocks {
+/// Map a layout's features block by block onto a wider layout: each block
+/// `(old offset, new offset, slots, old slot width, new slot width)`, an old
+/// slot's floats the first ones of the new slot.
+fn project(old_features: usize, new_features: usize, blocks: &[(usize, usize, usize, usize, usize)]) -> Vec<usize> {
+    let mut p = vec![usize::MAX; old_features];
+    for &(o4, o5, n, w4, w5) in blocks {
+        assert!(w4 <= w5);
         for s in 0..n {
             for j in 0..w4 {
                 p[o4 + s * w4 + j] = o5 + s * w5 + j;
             }
         }
     }
-    assert!(p.iter().all(|&i| i < NUM_FEATURES), "every v4 feature is in a block");
+    assert!(p.iter().all(|&i| i < new_features), "every feature is in a block");
     p
+}
+
+/// Where each layout v4 feature is in layout v5 (ENGINE.md 60.2): `p[i]` is
+/// the v5 index of v4 feature `i`, which means what v4's meant. Every block
+/// keeps its order; a v4 slot's floats are the first ones of the v5 slot
+/// (the permanents' 148 of 172, the stack's 84 of 124), v4's bags the first
+/// 17 of v5's 19, and v4's globals (the 128 and the match block) the first
+/// globals of v5 in feature order (v5's own come after the match block).
+/// So the v5 encoding at these indices IS the v4 encoding, and zero-core's
+/// `net.widen` with `layout_v5.json` maps a v4 network's input columns the
+/// same way.
+pub fn v4_to_v5() -> Vec<usize> {
+    project(
+        v4::NUM_FEATURES,
+        v5::NUM_FEATURES,
+        &[
+            (O_GLOBALS, O_GLOBALS, 1, GLOBALS, GLOBALS),
+            (O_CONTEXT, O_CONTEXT, 1, CONTEXT, CONTEXT),
+            (v4::O_BAGS, v5::O_BAGS, 1, v4::BAGS * D, v5::BAGS * D),
+            (v4::O_TOPS, v5::O_TOPS, 2 * TOPS, TOP_W, TOP_W),
+            (v4::O_MY_PERM, v5::O_MY_PERM, PERMS, v4::PERM_W, v5::PERM_W),
+            (v4::O_OPP_PERM, v5::O_OPP_PERM, PERMS, v4::PERM_W, v5::PERM_W),
+            (v4::O_HAND, v5::O_HAND, HANDS, HAND_W, HAND_W),
+            (v4::O_STACK, v5::O_STACK, STACKS, v4::STACK_W, v5::STACK_W),
+            (v4::O_TRIG, v5::O_TRIG, TRIGS, TRIG_W, TRIG_W),
+            (v4::O_LIST, v5::O_LIST, LIST, LIST_W, LIST_W),
+            (v4::O_GYA, v5::O_GYA, GYAS, GYA_W, GYA_W),
+            (v4::O_COMP, v5::O_COMP, COMPS, COMP_W, COMP_W),
+            (v4::O_MATCH, v5::O_MATCH, 1, MATCH, MATCH),
+        ],
+    )
+}
+
+/// Where each layout v5 feature is in layout v6 (ENGINE.md 100.5), as
+/// [`v4_to_v5`] for v4: every block keeps its order; a v5 slot's floats are
+/// the first ones of the v6 slot (the permanents' 172 of 196, the stack's
+/// 124 of 204), v5's bags the first 19 of v6's 23, and v5's three global
+/// blocks the same blocks of v6 (v6's own block comes after them). So the
+/// v6 encoding at these indices IS the v5 encoding (`DIGEST_ENCODING=v5`
+/// hashes this projection and reproduces layout v5's recorded digest), and
+/// zero-core's `net.widen` with `layout_v6.json` maps a v5 network's input
+/// columns the same way (`layout_v6_widens_layout_v5_exactly`).
+pub fn v5_projection() -> Vec<usize> {
+    project(
+        v5::NUM_FEATURES,
+        NUM_FEATURES,
+        &[
+            (O_GLOBALS, O_GLOBALS, 1, GLOBALS, GLOBALS),
+            (O_CONTEXT, O_CONTEXT, 1, CONTEXT, CONTEXT),
+            (v5::O_BAGS, O_BAGS, 1, v5::BAGS * D, BAGS * D),
+            (v5::O_TOPS, O_TOPS, 2 * TOPS, TOP_W, TOP_W),
+            (v5::O_MY_PERM, O_MY_PERM, PERMS, v5::PERM_W, PERM_W),
+            (v5::O_OPP_PERM, O_OPP_PERM, PERMS, v5::PERM_W, PERM_W),
+            (v5::O_HAND, O_HAND, HANDS, HAND_W, HAND_W),
+            (v5::O_STACK, O_STACK, STACKS, v5::STACK_W, STACK_W),
+            (v5::O_TRIG, O_TRIG, TRIGS, TRIG_W, TRIG_W),
+            (v5::O_LIST, O_LIST, LIST, LIST_W, LIST_W),
+            (v5::O_GYA, O_GYA, GYAS, GYA_W, GYA_W),
+            (v5::O_COMP, O_COMP, COMPS, COMP_W, COMP_W),
+            (v5::O_MATCH, O_MATCH, 1, MATCH, MATCH),
+            (v5::O_GLOBALS_V5, O_GLOBALS_V5, 1, GLOBALS_V5, GLOBALS_V5),
+        ],
+    )
+}
+
+/// Where each layout v4 feature is in layout v6: [`v4_to_v5`] then
+/// [`v5_projection`] (`DIGEST_ENCODING=v4` hashes it: layout v4's recorded
+/// digest while no game plays differently).
+pub fn v4_projection() -> Vec<usize> {
+    let (a, b) = (v4_to_v5(), v5_projection());
+    a.into_iter().map(|i| b[i]).collect()
 }
 
 /// Features are exact within +-`SQUASH_FROM` (ENGINE.md 46): a 1,024-power
@@ -350,8 +448,26 @@ pub mod bag {
     /// (the count of each player's is `g5::EXILE_PLAY`).
     pub const MY_EXILE_PLAY: usize = 17;
     pub const OPP_EXILE_PLAY: usize = 18;
+    /// Layout v6 (ENGINE.md 100.5): the exiled cards a stack item targets or
+    /// noted, both players' items, 0.25 per reference (Blade of the Swarm's
+    /// target, Close Encounter's chosen card: CR 115.1, 607.2a); a face-down
+    /// one only where the viewer knows it. Each item's count and its first
+    /// exiled target and noted object are its stack status
+    /// (`stack::TARGETS_EXILED` ..).
+    pub const EXILE_REFS: usize = 19;
+    /// The phased-out permanents (CR 702.26b: treated as though they don't
+    /// exist; they phase in at their controller's next untap step) the
+    /// viewer controls, those the opponent controls (a face-down one by
+    /// identity only where the viewer knows it); their counts are
+    /// `g6::PHASED`.
+    pub const MY_PHASED: usize = 20;
+    pub const OPP_PHASED: usize = 21;
+    /// The viewer's hand cards the opponent knows (every one, past the 16
+    /// hand slots too, whose `HAND` status 4 says it per slot; workstream
+    /// C's gap, ENGINE.md 100.3).
+    pub const MY_HAND_KNOWN: usize = 22;
 }
-const _: () = assert!(bag::OPP_EXILE_PLAY + 1 == BAGS);
+const _: () = assert!(bag::MY_HAND_KNOWN + 1 == BAGS && bag::OPP_EXILE_PLAY + 1 == v5::BAGS);
 
 /// Offsets inside a permanent's status (after its card code).
 pub mod perm {
@@ -471,10 +587,44 @@ pub mod perm {
     /// actions done this turn / 2.
     pub const RESOLVED: usize = 110;
     pub const DONE_ONCE: usize = 111;
-    /// The first spare status float of layout v5 (112..119 spare).
+    /// The first spare status float of layout v5 (112..119 spare, never set:
+    /// layout v6's floats are at the slot's new end).
     pub const V5_END: usize = 112;
+    /// Layout v6 (ENGINE.md 100.5), status 120-143 (the slot's new end): it
+    /// entered as a spell cast for its warp cost (CR 702.185a,
+    /// `Mark::WarpCast`); its regeneration shields / 2 (701.19a); the mana
+    /// spent to cast it / 8 (601.2h, `Mark::ManaSpent`; squashed).
+    pub const WARP_CAST: usize = 120;
+    pub const REGEN: usize = 121;
+    pub const MANA_SPENT: usize = 122;
+    /// Legendary as it is (CR 205.4: its definition's supertypes and a copy's
+    /// "except it's legendary", 707.9b); the code's float 47 is its copiable
+    /// definition's, as its name is.
+    pub const LEGENDARY: usize = 123;
+    /// Triggered abilities an effect gave it / 2 (`Mark::Granted`, CR
+    /// 613.1f); activated abilities it has from another permanent / 2 (an
+    /// Equipment's, a static ability's: `Game::granted_activated`, 301.5).
+    pub const GRANTED_TRIGGERS: usize = 124;
+    pub const GRANTED_ACTIVATED: usize = 125;
+    /// The spells on the stack cast for an alternative cost its static
+    /// ability gave them / 2 (`Mark::AltGranted`; Tannuk's warp, CR 118.9,
+    /// 400.7g).
+    pub const GRANTS_ALT: usize = 126;
+    /// The stack items that noted it / 2 (Close Encounter's chosen creature,
+    /// emerge's sacrifice, station's tapped creature: CR 607.2a).
+    pub const NOTED: usize = 127;
+    /// It entered the battlefield this turn (`Obj::entered`; `NEW` is
+    /// "under its controller's control since this turn", CR 302.6).
+    pub const ENTERED: usize = 128;
+    /// The first spare status float of layout v6 (129..143 spare).
+    pub const V6_END: usize = 129;
 }
-const _: () = assert!(CODE + perm::PROTECTED + 1 == v4::PERM_W && perm::MUST_ATTACK == 96 && CODE + perm::V5_END <= PERM_W);
+const _: () = assert!(
+    CODE + perm::PROTECTED + 1 == v4::PERM_W
+        && perm::MUST_ATTACK == 96
+        && CODE + perm::WARP_CAST == v5::PERM_W
+        && CODE + perm::V6_END <= PERM_W
+);
 
 /// Offsets inside a stack slot's status (after its card code).
 pub mod stack {
@@ -537,10 +687,46 @@ pub mod stack {
     pub const ATTACK_WALKER: usize = 62;
     /// Cards spliced onto it / 4 (CR 702.47).
     pub const SPLICED: usize = 63;
-    /// The first spare status float of layout v5 (64..71 spare).
+    /// The first spare status float of layout v5 (64..71 spare, never set:
+    /// layout v6's floats are at the slot's new end).
     pub const V5_END: usize = 64;
+    /// Layout v6 (ENGINE.md 100.5), status 72-151 (the slot's new end): its
+    /// targets that are exiled cards / 4 (Blade of the Swarm's "target
+    /// exiled card with warp", CR 115.1), the exiled cards it noted / 4
+    /// (Close Encounter's warped card); all of them are in the bag
+    /// `bag::EXILE_REFS` by identity.
+    pub const TARGETS_EXILED: usize = 72;
+    pub const NOTED_EXILED: usize = 73;
+    /// Its first target that is an exiled card: present, the viewer's
+    /// opponent owns it, its identity (the card code's 32 one-hot digits).
+    pub const EXILE_TARGET: usize = 74;
+    /// Its first noted object (`StackItem::noted`, CR 607.2a): a permanent
+    /// (the viewer's, the opponent's: 2 floats) and its slot ((slot + 1) /
+    /// 32; 0 past the 32 slots), or a card elsewhere (exile, a graveyard, a
+    /// hidden zone where the viewer knows it), its owner the viewer's
+    /// opponent, and its identity (32 digits).
+    pub const NOTED_PERM: usize = 108;
+    pub const NOTED_SLOT: usize = 110;
+    pub const NOTED_CARD: usize = 111;
+    pub const NOTED_THEIRS: usize = 112;
+    pub const NOTED_DIGITS: usize = 113;
+    /// Cast for an alternative cost a permanent's static ability gave it
+    /// (`Mark::AltGranted`, CR 118.9; Tannuk's warp): that permanent's
+    /// slot ((slot + 1) / 32), and the viewer's opponent controls it.
+    pub const ALT_GRANTED: usize = 145;
+    pub const ALT_GRANTER_SLOT: usize = 146;
+    pub const ALT_GRANTER_OPP: usize = 147;
+    /// The first spare status float of layout v6 (148..151 spare).
+    pub const V6_END: usize = 148;
 }
-const _: () = assert!(CODE + stack::X + 1 == v4::STACK_W && stack::MODES == 32 && CODE + stack::V5_END <= STACK_W);
+const _: () = assert!(
+    CODE + stack::X + 1 == v4::STACK_W
+        && stack::MODES == 32
+        && CODE + stack::TARGETS_EXILED == v5::STACK_W
+        && stack::EXILE_TARGET + 34 == stack::NOTED_PERM
+        && stack::NOTED_DIGITS + 32 == stack::ALT_GRANTED
+        && CODE + stack::V6_END <= STACK_W
+);
 
 /// Offsets inside the globals of layout v5 (ENGINE.md 60; the block at
 /// [`O_GLOBALS_V5`], after the match block): per player, viewer first
@@ -600,6 +786,44 @@ pub mod g5 {
     pub const GAME_END: usize = GAME + 2;
 }
 const _: () = assert!(g5::PLAYER_END <= g5::PLAYER && g5::GAME_END <= GLOBALS_V5);
+
+/// Offsets inside the globals of layout v6 (ENGINE.md 100.5; the block at
+/// [`O_GLOBALS_V6`], after v5's): per player, viewer first
+/// (`g6[PLAYER * side + ..]`), then the game's (`g6[GAME + ..]`).
+pub mod g6 {
+    /// Floats per player (6 used, 18 spare).
+    pub const PLAYER: usize = 24;
+    /// An artifact entered the battlefield under their control this turn
+    /// (`Player::artifact_entered`; Mechan Shieldmate).
+    pub const ARTIFACT_ENTERED: usize = 0;
+    /// The life they gained this turn / 4 (squashed; Haliya, Guided by
+    /// Light's "3 or more life this turn"; `g5::GAINED_LIFE` is whether).
+    pub const LIFE_GAINED: usize = 1;
+    /// Their phased-out permanents / 4, and those of them that phased out
+    /// indirectly / 4 (with what they are attached to: they phase in with
+    /// it, CR 702.26e, h); the identities are `bag::*_PHASED` (squashed).
+    pub const PHASED: usize = 2;
+    pub const PHASED_INDIRECT: usize = 3;
+    /// Their next turn will be controlled by the other player (CR 722.1:
+    /// The Dominion Bracelet; `Game::next_turn_controller`).
+    pub const NEXT_TURN_CONTROLLED: usize = 4;
+    /// They are controlled this turn (the active player, CR 722.1, 722.4:
+    /// the other player makes their decisions).
+    pub const CONTROLLED: usize = 5;
+    pub const PLAYER_END: usize = 6;
+    /// The game's: void holds (a nonland permanent left the battlefield
+    /// this turn, Edge of Eternities' ability word); where the turn goes on
+    /// after its combat phases when not the postcombat main phase (CR
+    /// 500.8; `Turn::after_combat`, one-hot: a new turn's untap step, the
+    /// precombat main phase, the ending phase, another step).
+    pub const GAME: usize = 2 * PLAYER;
+    pub const VOID: usize = GAME;
+    pub const AFTER_COMBAT: usize = GAME + 1;
+    pub const AFTER_COMBAT_N: usize = 4;
+    /// The first spare game float (53..63 spare).
+    pub const GAME_END: usize = AFTER_COMBAT + AFTER_COMBAT_N;
+}
+const _: () = assert!(g6::PLAYER_END <= g6::PLAYER && g6::GAME_END <= GLOBALS_V6);
 
 /// Offsets inside the per-player globals (`g[24 + 40 * side..]`, viewer
 /// first) added in M7b part 3b, and the room one-hots.
@@ -838,7 +1062,14 @@ pub mod ctx {
     pub const PAGED: usize = FACES + 4;
     /// The page's window / 4 (0 on the first page).
     pub const PAGE: usize = PAGED + 1;
-    // (248: the Bracelet's frame flag, the faithfulness audit's 5.8.)
+    /// The frame flag (ENGINE.md 100.5, the faithfulness audit's 5.8): the
+    /// viewer decides this decision for the other player (it controls them
+    /// this turn, CR 722.4), so the encoding is framed in that player's seat
+    /// (`Game::encoding_seat`: its hand, permanents, list and triggers are
+    /// "mine", the seat its action ids are relative to) with the viewer's
+    /// knowledge (722.3), and the value is the viewer's: the frame's
+    /// opponent's.
+    pub const FRAME: usize = PAGE + 1;
     /// A big number's digit decision: the digits left, this one included,
     /// / 8 (the digit's place value is 32^(left - 1)).
     pub const DIGIT: usize = PAGE + 2;
@@ -849,24 +1080,44 @@ pub mod ctx {
 const _: () = assert!(ctx::END <= CONTEXT);
 // The faithfulness audit's assignment (5.1, 5.2, 5.8) of v5's spare context
 // floats 246-255.
-const _: () = assert!(ctx::PAGED == 246 && ctx::PAGE == 247 && ctx::DIGIT == 249 && ctx::PREFIX == 250);
+const _: () = assert!(ctx::PAGED == 246 && ctx::PAGE == 247 && ctx::FRAME == 248 && ctx::DIGIT == 249 && ctx::PREFIX == 250);
 
 impl Game {
+    /// The seat the encoding for `viewer` is framed in (ENGINE.md 100.5, CR
+    /// 722): the decision's player when `viewer` makes that player's
+    /// decision (it controls them this turn: `decider_of`), else `viewer`.
+    /// A controlled decision's action ids are its player's (their hand,
+    /// their permanents, their list, CR 722.4a), so its decider sees them
+    /// in that seat, with its own knowledge (722.3), and `ctx::FRAME` set.
+    pub fn encoding_seat(&self, viewer: PlayerId) -> PlayerId {
+        match &self.pending {
+            Some(d) if d.player != viewer && self.decider_of(d.player) == viewer => d.player,
+            _ => viewer,
+        }
+    }
+
     /// The network input for `viewer` (module docs); `out` has
-    /// [`NUM_FEATURES`] floats, zeroed by the caller.
+    /// [`NUM_FEATURES`] floats, zeroed by the caller. Framed in
+    /// [`encoding_seat`](Self::encoding_seat)'s seat ("me" below), with
+    /// `viewer`'s knowledge (`knower`).
     pub fn encode_features(&self, viewer: PlayerId, out: &mut [f32]) {
         assert_eq!(out.len(), NUM_FEATURES);
         let ids = identity::identities(self.db);
-        let me = viewer;
+        let knower = viewer;
+        let me = self.encoding_seat(viewer);
         let op_ = opp(me);
         let decision = self.pending.as_ref();
-        let mine_to_decide = decision.is_some_and(|d| d.player == me);
+        // (The frame's decision is the knower's to make: its options and
+        // list are encoded; a controlled player's own decisions are not
+        // theirs to make, CR 722.4.)
+        let mine_to_decide = decision.is_some_and(|d| d.player == me && self.decider_of(d.player) == knower);
         let legal = |a: u16| -> bool {
             mine_to_decide && decision.is_some_and(|d| d.options.binary_search_by_key(&a, |o| o.action).is_ok())
         };
         self.encode_globals(me, &mut out[O_GLOBALS..O_GLOBALS + GLOBALS]);
         self.encode_globals_v5(me, &mut out[O_GLOBALS_V5..O_GLOBALS_V5 + GLOBALS_V5]);
-        self.encode_bags(me, ids, out);
+        self.encode_globals_v6(me, &mut out[O_GLOBALS_V6..O_GLOBALS_V6 + GLOBALS_V6]);
+        self.encode_bags(me, knower, ids, out);
         // Tops of the libraries.
         for (side, p) in [me, op_].into_iter().enumerate() {
             let lib = &self.players[p as usize].library;
@@ -874,7 +1125,7 @@ impl Game {
                 let c = lib[lib.len() - 1 - k];
                 let o = O_TOPS + (side * TOPS + k) * TOP_W;
                 out[o] = 1.0;
-                if self.knows(me, c) {
+                if self.knows(knower, c) {
                     out[o + 1] = 1.0;
                     code(&mut out[o + 2..o + 2 + CODE], self.db, ids, self.objs[c.i()].def);
                 }
@@ -897,6 +1148,11 @@ impl Game {
         };
         let mine: Vec<CardIdx> = self.permanents_of(me).collect();
         let theirs: Vec<CardIdx> = self.permanents_of(op_).collect();
+        // (Layout v6: the activated abilities granted by an attached
+        // permanent or a static ability; `granted_activated` only where one
+        // can be.)
+        let grants = self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 || self.battlefield.iter().any(|&g| self.objs[g.i()].attached.is_some());
+        let stack_refs = |r: crate::ids::ObjRef| self.stack.iter().filter(|s| s.noted.contains(&r)).count();
         let slot_of = |c: CardIdx| -> Option<usize> {
             let ctl = self.objs[c.i()].controller;
             let list = if ctl == me { &mine } else { &theirs };
@@ -910,7 +1166,7 @@ impl Game {
                 let ob = &self.objs[c.i()];
                 // What it is (its identity) and the copiable values it has
                 // (the descriptor; a copy's copied face, CR 707.2).
-                code_of(&mut out[o..o + CODE], self.db, ids, self.perm_identity(me, c), ob.def);
+                code_of(&mut out[o..o + CODE], self.db, ids, self.perm_identity(knower, c), ob.def);
                 out[o + 46] = self.is_token(c) as u8 as f32;
                 // A copy's exceptions to the copiable values (CR 707.9b:
                 // eternalize's black 4/4 with no mana cost).
@@ -1064,17 +1320,48 @@ impl Game {
                 };
                 if !self.marks.is_empty() {
                     let r = self.obj_ref(c);
-                    let mut exhausted = 0u32;
-                    for (_, m) in self.marks.iter().filter(|x| x.0 == r) {
-                        match *m {
+                    let (mut exhausted, mut regen, mut granted, mut grants_alt) = (0u32, 0u32, 0u32, 0u32);
+                    let loss = self.loss_ts(c);
+                    for &(o, m) in self.marks.iter() {
+                        if o != r {
+                            // (A spell cast for an alternative cost this
+                            // permanent gave it, CR 118.9; ENGINE.md 99.15.)
+                            if let Mark::AltGranted { granter, .. } = m {
+                                if granter == r && self.live(o) && self.objs[o.idx.i()].zone == Zone::Stack {
+                                    grants_alt += 1;
+                                }
+                            }
+                            continue;
+                        }
+                        match m {
                             Mark::Exhausted(_) => exhausted += 1,
                             Mark::ChosenColor(k) if (k as usize) < 5 => st[perm::CHOSEN_COLOR + k as usize] = 1.0,
                             Mark::Exerted => st[perm::EXERTED] = 1.0,
+                            // Layout v6 (ENGINE.md 100.5).
+                            Mark::WarpCast => st[perm::WARP_CAST] = 1.0,
+                            Mark::RegenShield => regen += 1,
+                            Mark::ManaSpent(n) => st[perm::MANA_SPENT] = squash(n as f32 / 8.0),
+                            // (A grant a later "loses all abilities" removed
+                            // doesn't count, CR 613.7: `granted_observers`.)
+                            Mark::Granted { ts, .. } if loss.is_none_or(|l| ts > l) => granted += 1,
                             _ => {}
                         }
                     }
                     st[perm::EXHAUSTED] = squash(exhausted as f32 / 2.0);
+                    st[perm::REGEN] = squash(regen as f32 / 2.0);
+                    st[perm::GRANTED_TRIGGERS] = squash(granted as f32 / 2.0);
+                    st[perm::GRANTS_ALT] = squash(grants_alt as f32 / 2.0);
                 }
+                // Layout v6 (ENGINE.md 100.5): status 120-143 (the marks'
+                // above).
+                st[perm::LEGENDARY] = self.is_legendary(c) as u8 as f32;
+                if grants {
+                    st[perm::GRANTED_ACTIVATED] = squash(self.granted_activated(c).len() as f32 / 2.0);
+                }
+                if !self.stack.is_empty() {
+                    st[perm::NOTED] = squash(stack_refs(self.obj_ref(c)) as f32 / 2.0);
+                }
+                st[perm::ENTERED] = (ob.entered as u32 == self.turn.number) as u8 as f32;
                 if !self.resolved.is_empty() || !self.done_once.is_empty() {
                     let r = self.obj_ref(c);
                     let n: u32 = self.resolved.iter().filter(|x| x.0 == r).map(|x| x.1 as u32).sum();
@@ -1083,9 +1370,11 @@ impl Game {
                 }
             }
         }
-        // The viewer's hand.
+        // The viewer's hand (the frame's: in a controlled turn the
+        // controlled player's, which its controller sees, CR 722.3).
         let hand = self.hand_sorted(me);
         let opp_knows = |c: CardIdx| self.objs[c.i()].known & (1 << op_) != 0;
+        debug_assert!(me == knower || hand.iter().all(|&c| self.knows(knower, c)), "a controlled hand card its controller doesn't see (CR 722.3)");
         for (s, &c) in hand.iter().enumerate().take(HANDS) {
             let o = O_HAND + s * HAND_W;
             let def = self.objs[c.i()].def;
@@ -1177,6 +1466,57 @@ impl Game {
             st[stack::ATTACK_AS] = item.attack_as.is_some() as u8 as f32;
             st[stack::ATTACK_WALKER] = matches!(item.attack_as, Some(Some(_))) as u8 as f32;
             st[stack::SPLICED] = squash(item.spliced.len() as f32 / 4.0);
+            // Layout v6 (ENGINE.md 100.5): status 72-151. The exiled cards
+            // it targets and noted (all of them in `bag::EXILE_REFS`), its
+            // first exiled target and its first noted object.
+            {
+                let exiled = |r: crate::ids::ObjRef| self.live(r) && matches!(self.objs[r.idx.i()].zone, Zone::Exile | Zone::FaceDown);
+                let seen = |c: CardIdx| !self.hidden_obj(c) || self.knows(knower, c);
+                let ex_t: Vec<crate::ids::ObjRef> = item
+                    .targets
+                    .iter()
+                    .filter_map(|&(_, t)| match t {
+                        Target::Obj(r) if exiled(r) => Some(r),
+                        _ => None,
+                    })
+                    .collect();
+                st[stack::TARGETS_EXILED] = squash(ex_t.len() as f32 / 4.0);
+                st[stack::NOTED_EXILED] = squash(item.noted.iter().filter(|&&r| exiled(r)).count() as f32 / 4.0);
+                if let Some(&r) = ex_t.first() {
+                    st[stack::EXILE_TARGET] = 1.0;
+                    st[stack::EXILE_TARGET + 1] = (self.objs[r.idx.i()].owner != me) as u8 as f32;
+                    if seen(r.idx) {
+                        digits(&mut st[stack::EXILE_TARGET + 2..stack::EXILE_TARGET + 34], ids, self.objs[r.idx.i()].def);
+                    }
+                }
+                if let Some(&r) = item.noted.first().filter(|&&r| self.live(r)) {
+                    let ob = &self.objs[r.idx.i()];
+                    if ob.zone == Zone::Battlefield {
+                        st[stack::NOTED_PERM + (ob.controller != me) as usize] = 1.0;
+                        st[stack::NOTED_SLOT] = slot_of(r.idx).map_or(0.0, |x| (x + 1) as f32 / 32.0);
+                    } else if ob.zone != Zone::Nowhere {
+                        st[stack::NOTED_CARD] = 1.0;
+                        st[stack::NOTED_THEIRS] = (ob.owner != me) as u8 as f32;
+                        if seen(r.idx) {
+                            digits(&mut st[stack::NOTED_DIGITS..stack::NOTED_DIGITS + 32], ids, ob.def);
+                        }
+                    }
+                }
+                if let StackKind::Spell { card } = item.kind {
+                    let r = self.obj_ref(card);
+                    let granter = self.marks.iter().find_map(|&(o, m)| match m {
+                        Mark::AltGranted { granter, .. } if o == r => Some(granter),
+                        _ => None,
+                    });
+                    if let Some(g) = granter {
+                        st[stack::ALT_GRANTED] = 1.0;
+                        if self.live(g) && self.objs[g.idx.i()].zone == Zone::Battlefield {
+                            st[stack::ALT_GRANTER_SLOT] = slot_of(g.idx).map_or(0.0, |x| (x + 1) as f32 / 32.0);
+                            st[stack::ALT_GRANTER_OPP] = (self.objs[g.idx.i()].controller != me) as u8 as f32;
+                        }
+                    }
+                }
+            }
             if let StackKind::Spell { card } = item.kind {
                 st[stack::EXILED_AFTER] = self.gy_exile.contains(&card) as u8 as f32;
                 st[stack::FLASHBACK] = self.objs[card.i()].flashback as u8 as f32;
@@ -1297,7 +1637,7 @@ impl Game {
             out[o + CODE + comp::LEGAL] = (p == me && at_priority && legal(act::COMPANION)) as u8 as f32;
             out[o + CODE + comp::IN_GAME] = pl.companion_used as u8 as f32;
         }
-        self.encode_context(me, ids, &mut out[O_CONTEXT..O_CONTEXT + CONTEXT]);
+        self.encode_context(me, knower, ids, &mut out[O_CONTEXT..O_CONTEXT + CONTEXT]);
         // Game facts in the match block's spare floats (ENGINE.md 58.8; the
         // match's own floats are `encode_match`'s).
         for (side, p) in [me, op_].into_iter().enumerate() {
@@ -1329,16 +1669,20 @@ impl Game {
         v
     }
 
-    /// Per-identity counts.
-    fn encode_bags(&self, me: PlayerId, ids: &[u16], out: &mut [f32]) {
+    /// Per-identity counts, in the frame of seat `me` with `knower`'s
+    /// knowledge (ENGINE.md 100.5: `knower` is `me` but while it decides
+    /// for the other seat, CR 722).
+    fn encode_bags(&self, me: PlayerId, knower: PlayerId, ids: &[u16], out: &mut [f32]) {
         let op_ = opp(me);
+        // (In a controlled turn the controller sees the controlled player's
+        // hand, CR 722.3: `encode_features` checks it.)
         for &c in &self.players[me as usize].hand {
             bag_add(out, ids, bag::MY_HAND, self.objs[c.i()].def);
         }
         for &c in &self.battlefield {
             // (By what it is: a copy by its own identity, ENGINE.md 26.)
             let o = &self.objs[c.i()];
-            bag_add(out, ids, if o.controller == me { bag::MY_BATTLEFIELD } else { bag::OPP_BATTLEFIELD }, self.perm_identity(me, c));
+            bag_add(out, ids, if o.controller == me { bag::MY_BATTLEFIELD } else { bag::OPP_BATTLEFIELD }, self.perm_identity(knower, c));
         }
         for p in [me, op_] {
             for &c in &self.players[p as usize].graveyard {
@@ -1365,7 +1709,7 @@ impl Game {
         // opponent's hidden pool below.
         for &c in &self.face_down {
             let o = &self.objs[c.i()];
-            if self.knows(me, c) {
+            if self.knows(knower, c) {
                 bag_add(out, ids, if o.owner == me { bag::MY_EXILE } else { bag::OPP_EXILE }, o.def);
             }
         }
@@ -1377,34 +1721,54 @@ impl Game {
             let o = &self.objs[c.i()];
             bag_add(out, ids, if o.controller == me { bag::MY_EMBLEMS } else { bag::OPP_EMBLEMS }, o.def);
         }
+        // The frame's library: its owner knows its contents (the decklist,
+        // less what is elsewhere). A controller framed in the controlled
+        // seat (ENGINE.md 100.5) knows them with open decklists (its hand
+        // is seen, CR 722.3, and every other card of theirs is public or
+        // known); with hidden decks, the cards it knows exactly and by its
+        // clouds (the rest of what it knows of their pool is the match's,
+        // `encode_match`).
+        let flipped = me != knower;
         for &c in &self.players[me as usize].library {
-            bag_add(out, ids, bag::MY_LIBRARY, self.objs[c.i()].def);
-            if self.knows(me, c) {
+            let known = self.knows(knower, c);
+            if !flipped || !self.spec.hidden_decks || known {
+                bag_add(out, ids, bag::MY_LIBRARY, self.objs[c.i()].def);
+            }
+            if known {
                 bag_add(out, ids, bag::MY_LIBRARY_KNOWN, self.objs[c.i()].def);
             }
         }
+        if flipped && self.spec.hidden_decks {
+            for k in self.clouds.iter().filter(|k| k.viewer == knower && k.owner == me) {
+                for &d in &k.defs {
+                    bag_add(out, ids, bag::MY_LIBRARY, d);
+                }
+            }
+        }
         let opl = &self.players[op_ as usize];
-        let opp_face_down = self.face_down.iter().copied().filter(|&c| self.objs[c.i()].owner == op_ && !self.knows(me, c));
+        let opp_face_down = self.face_down.iter().copied().filter(|&c| self.objs[c.i()].owner == op_ && !self.knows(knower, c));
         // (Their face-down permanents the viewer doesn't know: in the
         // hidden pool; ENGINE.md 31.)
-        let opp_fd_perms = self.face_down_ids.iter().map(|x| x.0).filter(|&c| self.objs[c.i()].owner == op_ && !self.knows(me, c));
+        let opp_fd_perms = self.face_down_ids.iter().map(|x| x.0).filter(|&c| self.objs[c.i()].owner == op_ && !self.knows(knower, c));
         // (With hidden decks the opponent's unknown cards are not read: the
         // match writes `OPP_HIDDEN` from what the viewer knows of their
-        // pool, ENGINE.md 36.11.)
-        let open = !self.spec.hidden_decks;
+        // pool, ENGINE.md 36.11. Framed in the other seat, the frame's
+        // opponent is the knower itself, who knows its own deck and hand.)
+        let open = !self.spec.hidden_decks || flipped;
         for c in opl.hand.iter().copied().chain(opl.library.iter().copied()).chain(opp_face_down).chain(opp_fd_perms) {
             let d = self.ident(c);
-            if !self.knows(me, c) {
+            let zone = self.objs[c.i()].zone;
+            if !(self.knows(knower, c) || (flipped && zone == Zone::Hand)) {
                 if open {
                     bag_add(out, ids, bag::OPP_HIDDEN, d);
                 }
-            } else if self.objs[c.i()].zone == Zone::Hand {
+            } else if zone == Zone::Hand {
                 bag_add(out, ids, bag::OPP_HAND_KNOWN, d);
             } else {
                 bag_add(out, ids, bag::OPP_LIBRARY_KNOWN, d);
             }
         }
-        for k in self.clouds.iter().filter(|k| k.viewer == me && k.owner == op_) {
+        for k in self.clouds.iter().filter(|k| k.viewer == knower && k.owner == op_) {
             let b = if k.hand { bag::OPP_HAND_CLOUD } else { bag::OPP_LIBRARY_KNOWN };
             for &d in &k.defs {
                 bag_add(out, ids, b, d);
@@ -1415,7 +1779,7 @@ impl Game {
         // `g5::EXILE_PLAY`).
         if !self.permissions.is_empty() {
             for &c in self.exile.iter().chain(self.face_down.iter()) {
-                if self.objs[c.i()].zone == Zone::FaceDown && !self.knows(me, c) {
+                if self.objs[c.i()].zone == Zone::FaceDown && !self.knows(knower, c) {
                     continue;
                 }
                 for (b, p) in [(bag::MY_EXILE_PLAY, me), (bag::OPP_EXILE_PLAY, op_)] {
@@ -1424,6 +1788,64 @@ impl Game {
                     }
                 }
             }
+        }
+        // Layout v6 (ENGINE.md 100.5): the exiled cards stack items target
+        // or noted (a face-down one where the knower knows it), the
+        // phased-out permanents by controller (by what they are, as on the
+        // battlefield), the frame's hand cards its opponent knows.
+        for item in &self.stack {
+            let targets = item.targets.iter().filter_map(|&(_, t)| match t {
+                Target::Obj(r) => Some(r),
+                _ => None,
+            });
+            for r in targets.chain(item.noted.iter().copied()) {
+                if !self.live(r) {
+                    continue;
+                }
+                let z = self.objs[r.idx.i()].zone;
+                if z == Zone::Exile || (z == Zone::FaceDown && self.knows(knower, r.idx)) {
+                    bag_add(out, ids, bag::EXILE_REFS, self.objs[r.idx.i()].def);
+                }
+            }
+        }
+        for &c in &self.w3.phased {
+            let o = &self.objs[c.i()];
+            bag_add(out, ids, if o.controller == me { bag::MY_PHASED } else { bag::OPP_PHASED }, self.perm_identity(knower, c));
+        }
+        for &c in &self.players[me as usize].hand {
+            if self.objs[c.i()].known & (1 << op_) != 0 {
+                bag_add(out, ids, bag::MY_HAND_KNOWN, self.objs[c.i()].def);
+            }
+        }
+    }
+
+    /// The globals of layout v6 (ENGINE.md 100.5, `g6::*`).
+    fn encode_globals_v6(&self, me: PlayerId, g: &mut [f32]) {
+        let t = &self.turn;
+        for (side, p) in [me, opp(me)].into_iter().enumerate() {
+            let pl = &self.players[p as usize];
+            let o = &mut g[g6::PLAYER * side..g6::PLAYER * (side + 1)];
+            o[g6::ARTIFACT_ENTERED] = pl.artifact_entered as u8 as f32;
+            o[g6::LIFE_GAINED] = squash(pl.life_gained as f32 / 4.0);
+            if !self.w3.phased.is_empty() {
+                let ctl = |c: &&CardIdx| self.objs[c.i()].controller == p;
+                o[g6::PHASED] = squash(self.w3.phased.iter().filter(ctl).count() as f32 / 4.0);
+                o[g6::PHASED_INDIRECT] = squash(self.w3.indirect.iter().filter(ctl).count() as f32 / 4.0);
+            }
+            o[g6::NEXT_TURN_CONTROLLED] = self.next_turn_controller(p).is_some_and(|q| q != p) as u8 as f32;
+            o[g6::CONTROLLED] = (t.active == p && self.turn_controller().is_some_and(|q| q != p)) as u8 as f32;
+        }
+        g[g6::VOID] = self.void_active() as u8 as f32;
+        use crate::game::Step as S;
+        let k = match t.after_combat {
+            S::Main2 => None,
+            S::Untap => Some(0),
+            S::Main1 => Some(1),
+            S::End => Some(2),
+            _ => Some(3),
+        };
+        if let Some(k) = k {
+            g[g6::AFTER_COMBAT + k] = 1.0;
         }
     }
 
@@ -1671,13 +2093,17 @@ impl Game {
         cards.iter().map(|c| self.objs[c.i()].def).collect()
     }
 
-    fn encode_context(&self, me: PlayerId, ids: &[u16], x: &mut [f32]) {
+    fn encode_context(&self, me: PlayerId, knower: PlayerId, ids: &[u16], x: &mut [f32]) {
         let Some(d) = &self.pending else { return };
         assert!((d.kind as usize) < ctx::KINDS, "decision kind {:?} beyond the context block", d.kind);
         x[ctx::KIND + d.kind as usize] = 1.0;
-        x[ctx::DECIDER_IS_VIEWER] = (d.player == me) as u8 as f32;
+        // (Who makes it, CR 722.4: a controlled player's decision is its
+        // controller's, framed in the controlled seat, ENGINE.md 100.5.)
+        let mine = self.decider_of(d.player) == knower;
+        x[ctx::DECIDER_IS_VIEWER] = mine as u8 as f32;
         x[ctx::PENDING] = 1.0;
-        if d.player == me {
+        x[ctx::FRAME] = (me != knower) as u8 as f32;
+        if mine && d.player == me {
             x[ctx::OPTIONS] = d.options.len() as f32 / 32.0;
             match d.stage {
                 Stage::One => {}
@@ -1826,7 +2252,10 @@ impl Game {
 /// sideboarding's.
 pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
     let m = &a.m;
-    let me = viewer;
+    // (Framed as the game's encoding: `Game::encoding_seat`, ENGINE.md
+    // 100.5; the knowledge is the viewer's.)
+    let knower = viewer;
+    let me = if m.sb.is_some() { viewer } else { a.g.encoding_seat(viewer) };
     let op_ = opp(me);
     let db = a.g.db();
     let ids = identity::identities(db);
@@ -1868,15 +2297,24 @@ pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
     // The opponent's pool as the viewer knows it (best-of-one, open
     // decklists: all of it; best-of-three: but the first picks not revealed
     // in an earlier game, ENGINE.md 36.11) and what they revealed before.
+    // (Framed in the other seat, the frame's opponent is the knower, who
+    // knows its own pool and deck; the controlled player's unknown cards
+    // are the candidates of what the knower knows of their pool, in the
+    // frame's library bag.)
+    let flipped = me != knower;
     let pool = &m.pools[op_ as usize];
     let hidden = m.format == super::Format::Bo3;
     for &(def, n) in &pool.list[..pool.n_cards] {
-        if !hidden || super::sample::known_before(m, op_, ids, def) {
+        if !hidden || flipped || super::sample::known_before(m, op_, ids, def) {
             out[O_BAGS + bag::OPP_POOL * D + ids[def as usize] as usize] += 0.25 * n as f32;
         }
     }
     if hidden && m.sb.is_none() {
-        opp_candidates(a, me, ids, out);
+        if flipped {
+            candidates(a, knower, me, bag::MY_LIBRARY, ids, out);
+        } else {
+            candidates(a, me, op_, bag::OPP_HIDDEN, ids, out);
+        }
     }
     for (w, &bits) in m.earlier[op_ as usize].iter().enumerate() {
         let mut b = bits;
@@ -1892,11 +2330,11 @@ pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
 /// opponent's pool the viewer knows of (`OPP_POOL`), less those of their
 /// cards it knows are in the game (exactly, or by its clouds) and a revealed
 /// companion; basic lands are left out. What the viewer knows only: the same
-/// in every world of its.
-fn opp_candidates(a: &super::MtgAz, me: PlayerId, ids: &[u16], out: &mut [f32]) {
+/// in every world of its. (`me` the viewer, `op_` the owner, into bag `b`:
+/// the controlled player's are in the frame's library bag, ENGINE.md 100.5.)
+fn candidates(a: &super::MtgAz, me: PlayerId, op_: PlayerId, b: usize, ids: &[u16], out: &mut [f32]) {
     let g = &a.g;
     let m = &a.m;
-    let op_ = opp(me);
     let pool = &m.pools[op_ as usize];
     let mut left: Vec<(DefId, i32)> = pool.list[..pool.n_cards]
         .iter()
@@ -1927,7 +2365,7 @@ fn opp_candidates(a: &super::MtgAz, me: PlayerId, ids: &[u16], out: &mut [f32]) 
     }
     for (d, n) in left {
         if n > 0 {
-            out[O_BAGS + bag::OPP_HIDDEN * D + ids[d as usize] as usize] += 0.25 * n as f32;
+            out[O_BAGS + b * D + ids[d as usize] as usize] += 0.25 * n as f32;
         }
     }
 }
@@ -1983,12 +2421,12 @@ pub fn encode_sideboarding(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) 
 /// The object layout of this encoding for zero-core's token network (arch `tokens`, zero-core
 /// `python/zero/net.py` `TokenNet`; ENGINE.md 22, 60): JSON with the identity capacity as the
 /// vocabulary, the object segments (slot offsets and widths, the present flag, the identity as
-/// one-hot digits of 16, 8 and 8, the action ids each slot scores), the bags (19 multisets of
+/// one-hot digits of 16, 8 and 8, the action ids each slot scores), the bags (23 multisets of
 /// 1024 identities) and the global blocks (every other feature: the 128 globals, the match block,
-/// v5's globals; the global token's input).
-/// Checked in as `mtgz/az/layout_v5.json` (a test keeps the two equal; v4's file stays, for the
-/// widen of v4 networks). `cards` (the name behind each identity of `db`, for analysis; null where
-/// none) is not read by the network.
+/// v5's globals, v6's globals; the global token's input).
+/// Checked in as `mtgz/az/layout_v6.json` (a test keeps the two equal; v5's and v4's files stay,
+/// for the widen of v5 and v4 networks, ENGINE.md 60.2, 100.5). `cards` (the name behind each
+/// identity of `db`, for analysis; null where none) is not read by the network.
 pub fn layout_json(db: &'static CardDb) -> String {
     use serde_json::json;
     let id = json!({"at": 0, "radix": [16, 8, 8]});
@@ -2007,7 +2445,7 @@ pub fn layout_json(db: &'static CardDb) -> String {
         }
     }
     let v = json!({
-        "version": 5,
+        "version": 6,
         "features": NUM_FEATURES,
         "vocab": D,
         "segments": [
@@ -2032,10 +2470,12 @@ pub fn layout_json(db: &'static CardDb) -> String {
         "bags": [{"name": "bags", "offset": O_BAGS, "count": BAGS, "width": D}],
         // Layout v5 (ENGINE.md 60): the global blocks, so a widen maps a v5
         // network's globals by name (zero-core `net.tokens_layout`): v4's
-        // globals and its match block, then v5's.
+        // globals and its match block, then v5's; layout v6 (ENGINE.md
+        // 100.5) adds its block after them.
         "globals": [{"name": "globals", "offset": O_GLOBALS, "count": GLOBALS},
                     {"name": "match", "offset": O_MATCH, "count": MATCH},
-                    {"name": "globals_v5", "offset": O_GLOBALS_V5, "count": GLOBALS_V5}],
+                    {"name": "globals_v5", "offset": O_GLOBALS_V5, "count": GLOBALS_V5},
+                    {"name": "globals_v6", "offset": O_GLOBALS_V6, "count": GLOBALS_V6}],
         "cards": cards,
     });
     serde_json::to_string_pretty(&v).unwrap() + "\n"
@@ -2128,6 +2568,11 @@ mod tests {
             let want = [red, top + stack::DIVISION, top + stack::DIVISION + 1, top + stack::NOTED, top + stack::ATTACK_AS,
                         top + stack::ATTACK_WALKER, top + stack::SPLICED, O_GLOBALS_V5 + g5::PLAYER * side + g5::POOL_HASTE];
             let mut want = want.to_vec();
+            // (Layout v6, ENGINE.md 100.5: the noted land, P0's slot 0, is the
+            // stack item's first noted object, and noted by one item.)
+            let land_st = if v == 0 { O_MY_PERM } else { O_OPP_PERM } + CODE;
+            want.extend([top + stack::NOTED_PERM + side, top + stack::NOTED_SLOT, land_st + perm::NOTED]);
+            assert_eq!((x[top + stack::NOTED_SLOT], x[land_st + perm::NOTED]), (1.0 / 32.0, 0.5), "P{v}");
             want.sort_unstable();
             assert_eq!(diff, want, "P{v}");
         }
@@ -2135,6 +2580,137 @@ mod tests {
         for v in 0..2u8 {
             let x = features(&g, v);
             assert_eq!((x[top + stack::ATTACK_AS], x[top + stack::ATTACK_WALKER]), (1.0, 0.0), "P{v}: attacking the player");
+        }
+    }
+
+    /// Layout v6's floats of the facts the public-state gate's random
+    /// positions never have (its rare perturbations, ENGINE.md 100.5), set
+    /// by hand on a spell on the stack and read back for both viewers: an
+    /// exiled card it targets (Blade of the Swarm's kind of target), an
+    /// exiled card it noted (Close Encounter's), the permanent that gave it
+    /// its alternative cost (Tannuk's), a phased-out permanent, an opponent's
+    /// knowledge of a hand card; every other float unchanged.
+    #[test]
+    fn v6_rare_facts_are_encoded() {
+        let mut g = Scenario::new(CardDb::cube())
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Mountain"; 10])
+            .library(1, &["Island"; 10])
+            .battlefield(0, &["Mountain"])
+            .battlefield(1, &["Island"])
+            .hand(0, &["Lightning Bolt", "Counterspell"])
+            .graveyard(1, &["Brainstorm", "Ponder"])
+            .at(Step::Main1, 0)
+            .start();
+        let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+        g.choose(Choice::Cast(bolt));
+        for _ in 0..20 {
+            match g.kind() {
+                Some(DecisionKind::Priority) => break,
+                Some(DecisionKind::Target) => g.choose(Choice::Target(Target::Player(1))),
+                _ => {
+                    let c = g.pending_decision().unwrap().options[0].choice;
+                    g.choose(c)
+                }
+            };
+        }
+        assert_eq!(g.stack.len(), 1);
+        // Two of P1's cards exiled by hand (public, face up).
+        let (bs, po) = (g.card(1, "Brainstorm", Zone::Graveyard), g.card(1, "Ponder", Zone::Graveyard));
+        g.move_card(bs, Zone::Exile, crate::game::Pos::Top);
+        g.move_card(po, Zone::Exile, crate::game::Pos::Top);
+        let base = [features(&g, 0), features(&g, 1)];
+        let top = O_STACK + CODE;
+        let ids = identity::identities(g.db);
+        let island = g.permanents_of(1).next().unwrap();
+        let (rb, rp, ri) = (g.obj_ref(bs), g.obj_ref(po), g.obj_ref(island));
+        let card = match g.stack[0].kind {
+            StackKind::Spell { card } => card,
+            _ => unreachable!(),
+        };
+        let rs = g.obj_ref(card);
+        g.stack[0].targets.push((1, Target::Obj(rb)));
+        g.stack[0].noted.push(rp);
+        g.marks.push((rs, Mark::AltGranted { granter: ri, def: g.objs[card.i()].def, grant: 0 }));
+        let cs = g.card(0, "Counterspell", Zone::Hand);
+        g.objs[cs.i()].known |= 1 << 1;
+        let digit_floats = |def: DefId| {
+            let i = ids[def as usize] as usize;
+            [(i >> 6) & 15, 16 + ((i >> 3) & 7), 24 + (i & 7)]
+        };
+        for v in 0..2u8 {
+            let x = features(&g, v);
+            let side = v as usize;
+            assert_eq!((x[top + stack::TARGETS_EXILED], x[top + stack::NOTED_EXILED]), (0.25, 0.25), "P{v}");
+            assert_eq!((x[top + stack::EXILE_TARGET], x[top + stack::EXILE_TARGET + 1]), (1.0, (v == 0) as u8 as f32), "P{v}: P1 owns it");
+            assert_eq!((x[top + stack::NOTED_CARD], x[top + stack::NOTED_THEIRS]), (1.0, (v == 0) as u8 as f32), "P{v}");
+            assert_eq!(x[top + stack::ALT_GRANTED], 1.0, "P{v}");
+            assert_eq!((x[top + stack::ALT_GRANTER_SLOT], x[top + stack::ALT_GRANTER_OPP]), (1.0 / 32.0, (v == 0) as u8 as f32), "P{v}: P1's Island");
+            let island_st = if v == 1 { O_MY_PERM } else { O_OPP_PERM } + CODE;
+            assert_eq!(x[island_st + perm::GRANTS_ALT], 0.5, "P{v}: the Island gave one spell its cost");
+            let mut want: Vec<usize> = vec![
+                top + stack::TARGETS_EXILED,
+                top + stack::NOTED_EXILED,
+                top + stack::EXILE_TARGET,
+                top + stack::NOTED_CARD,
+                top + stack::ALT_GRANTED,
+                top + stack::ALT_GRANTER_SLOT,
+                island_st + perm::GRANTS_ALT,
+                // (the targets' count, v4's float 7; the noted objects' count, v5's)
+                top + 7,
+                top + stack::NOTED,
+            ];
+            if v == 0 {
+                want.extend([top + stack::EXILE_TARGET + 1, top + stack::NOTED_THEIRS, top + stack::ALT_GRANTER_OPP]);
+                // P0's Counterspell known to P1: the viewer's hand cards the opponent knows
+                let id = ids[g.objs[cs.i()].def as usize] as usize;
+                let k = O_BAGS + bag::MY_HAND_KNOWN * D + id;
+                assert_eq!(x[k], 0.25);
+                want.push(k);
+                // (and its hand slot's "known to the opponent", v4's status 4)
+                let s = g.hand_sorted(0).iter().position(|&c| c == cs).unwrap();
+                want.push(O_HAND + s * HAND_W + CODE + 4);
+            } else {
+                // P1 knows it: in its bag of the opponent's hand known exactly (v4's)
+                let id = ids[g.objs[cs.i()].def as usize] as usize;
+                want.extend([O_BAGS + bag::OPP_HAND_KNOWN * D + id, O_BAGS + bag::OPP_HIDDEN * D + id]);
+            }
+            for (o, d) in [(stack::EXILE_TARGET + 2, g.objs[bs.i()].def), (stack::NOTED_DIGITS, g.objs[po.i()].def)] {
+                for f in digit_floats(d) {
+                    assert_eq!(x[top + o + f], 1.0, "P{v}");
+                    want.push(top + o + f);
+                }
+            }
+            for d in [g.objs[bs.i()].def, g.objs[po.i()].def] {
+                let k = O_BAGS + bag::EXILE_REFS * D + ids[d as usize] as usize;
+                assert_eq!(x[k], 0.25, "P{v}: referenced once");
+                want.push(k);
+            }
+            let _ = side;
+            want.sort_unstable();
+            want.dedup();
+            let diff: Vec<usize> = (0..NUM_FEATURES).filter(|&i| x[i] != base[v as usize][i]).collect();
+            assert_eq!(diff, want, "P{v}");
+        }
+        // A phased-out permanent of P1's (CR 702.26b), phased out with what
+        // it was attached to.
+        let base = [features(&g, 0), features(&g, 1)];
+        let x = g.add_card(g.objs[island.i()].def, 1, Zone::PhasedOut);
+        g.objs[x.i()].zone = Zone::PhasedOut;
+        g.w3.phased.push(x);
+        g.w3.indirect.push(x);
+        for v in 0..2u8 {
+            let f = features(&g, v);
+            let side = (v == 0) as usize;
+            let b = if v == 1 { bag::MY_PHASED } else { bag::OPP_PHASED };
+            let k = O_BAGS + b * D + ids[g.objs[x.i()].def as usize] as usize;
+            let o = O_GLOBALS_V6 + g6::PLAYER * side;
+            let want = vec![k, o + g6::PHASED, o + g6::PHASED_INDIRECT];
+            let mut want = want;
+            want.sort_unstable();
+            let diff: Vec<usize> = (0..NUM_FEATURES).filter(|&i| f[i] != base[v as usize][i]).collect();
+            assert_eq!(diff, want, "P{v}");
+            assert_eq!((f[k], f[o + g6::PHASED], f[o + g6::PHASED_INDIRECT]), (0.25, 0.25, 0.25));
         }
     }
 
@@ -2166,26 +2742,60 @@ mod tests {
     /// status 96-119, the stack's 32-71, the second globals block).
     #[test]
     fn the_v4_projection_leaves_exactly_the_v5_additions() {
-        let p = v4_projection();
+        let p = v4_to_v5();
+        let n = v5::NUM_FEATURES;
+        let mut hit = vec![false; n];
+        for &i in &p {
+            assert!(!hit[i]);
+            hit[i] = true;
+        }
+        let mut new = vec![false; n];
+        new[v5::O_BAGS + v4::BAGS * D..v5::O_BAGS + v5::BAGS * D].iter_mut().for_each(|x| *x = true);
+        for base in [v5::O_MY_PERM, v5::O_OPP_PERM] {
+            for s in 0..PERMS {
+                new[base + s * v5::PERM_W + v4::PERM_W..base + (s + 1) * v5::PERM_W].iter_mut().for_each(|x| *x = true);
+            }
+        }
+        for s in 0..STACKS {
+            new[v5::O_STACK + s * v5::STACK_W + v4::STACK_W..v5::O_STACK + (s + 1) * v5::STACK_W].iter_mut().for_each(|x| *x = true);
+        }
+        new[v5::O_GLOBALS_V5..].iter_mut().for_each(|x| *x = true);
+        for i in 0..n {
+            assert_eq!(hit[i], !new[i], "feature {i}");
+        }
+        assert_eq!(new.iter().filter(|&&x| x).count(), n - v4::NUM_FEATURES);
+        // (and v4 -> v6 is v4 -> v5 -> v6)
+        let (q, r) = (v4_projection(), v5_projection());
+        assert!(p.iter().zip(&q).all(|(&a, &b)| r[a] == b));
+    }
+
+    /// Every layout v5 feature has one v6 index, and the v6 floats nothing
+    /// maps to are exactly v6's additions (ENGINE.md 100.5: the bags 19-22,
+    /// the permanents' status 120-143, the stack's 72-151, the third globals
+    /// block).
+    #[test]
+    fn the_v5_projection_leaves_exactly_the_v6_additions() {
+        let p = v5_projection();
         let mut hit = vec![false; NUM_FEATURES];
         for &i in &p {
             assert!(!hit[i]);
             hit[i] = true;
         }
         let mut new = vec![false; NUM_FEATURES];
-        new[O_BAGS + v4::BAGS * D..O_BAGS + BAGS * D].iter_mut().for_each(|x| *x = true);
+        new[O_BAGS + v5::BAGS * D..O_BAGS + BAGS * D].iter_mut().for_each(|x| *x = true);
         for base in [O_MY_PERM, O_OPP_PERM] {
             for s in 0..PERMS {
-                new[base + s * PERM_W + v4::PERM_W..base + (s + 1) * PERM_W].iter_mut().for_each(|x| *x = true);
+                new[base + s * PERM_W + v5::PERM_W..base + (s + 1) * PERM_W].iter_mut().for_each(|x| *x = true);
             }
         }
         for s in 0..STACKS {
-            new[O_STACK + s * STACK_W + v4::STACK_W..O_STACK + (s + 1) * STACK_W].iter_mut().for_each(|x| *x = true);
+            new[O_STACK + s * STACK_W + v5::STACK_W..O_STACK + (s + 1) * STACK_W].iter_mut().for_each(|x| *x = true);
         }
-        new[O_GLOBALS_V5..].iter_mut().for_each(|x| *x = true);
+        new[O_GLOBALS_V6..].iter_mut().for_each(|x| *x = true);
         for i in 0..NUM_FEATURES {
             assert_eq!(hit[i], !new[i], "feature {i}");
         }
-        assert_eq!(new.iter().filter(|&&x| x).count(), NUM_FEATURES - v4::NUM_FEATURES);
+        assert_eq!(new.iter().filter(|&&x| x).count(), NUM_FEATURES - v5::NUM_FEATURES);
+        assert_eq!(NUM_FEATURES - v5::NUM_FEATURES, 4 * D + 2 * PERMS * PERM_V6 + STACKS * STACK_V6 + GLOBALS_V6);
     }
 }

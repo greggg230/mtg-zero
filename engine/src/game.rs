@@ -2872,6 +2872,9 @@ impl Game {
         self.objs[top.i()].known |= 1 << p;
         let def = self.objs[top.i()].def;
         self.emit_private(KEY_DRAW, p, def as u64);
+        if self.turn_controller.is_some() {
+            self.controller_sees(p, top); // CR 722.3 (ENGINE.md 100.5)
+        }
         let pl = &mut self.players[p as usize];
         pl.drawn = pl.drawn.saturating_add(1);
         // Miracle (CR 702.94a): the first card drawn this turn may be

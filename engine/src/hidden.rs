@@ -343,6 +343,11 @@ impl Game {
     /// hidden zone. A cloud whose domain holds `c` and lists its identity
     /// loses that entry (the listed card may be this one).
     pub(crate) fn learn(&mut self, q: PlayerId, c: CardIdx) {
+        // (A look of a controlled player is its controller's too, CR 722.3:
+        // also a look at a card it knew already; ENGINE.md 100.5.)
+        if self.turn_controller.is_some() {
+            self.controller_sees(q, c);
+        }
         let o = &self.objs[c.i()];
         if o.known & (1 << q) != 0 || !self.hidden_obj(c) {
             return;

@@ -11,7 +11,7 @@
 //! * `result`: 1 / 0, a draw (including the turn cap) 0.5 each (a match:
 //!   by game wins); `margin`: the life difference / 20 in [-1, 1] (a match:
 //!   mostly the game wins, ENGINE.md 36.6).
-//! * `encode`: `encode.rs` (13,532 floats, no hidden information).
+//! * `encode`: `encode.rs` (layout v6, 43,956 floats, no hidden information).
 //! * Decks: `decks.rs` (random two-colour decks per game, or the fixed
 //!   evaluation set, or given lists).
 //! * Bots: `random` (zero-core) and `heuristic` (`bots.rs`).
@@ -631,7 +631,7 @@ impl SearchGame for MtgAz {
     }
 
     /// One auxiliary target (ENGINE.md 66, zero-core docs/az.md 15): `belief`, the decider's
-    /// opponent's hand as counts per card identity (the `identity::D` identities of the
+    /// opponent's hand (the encoding frame's opponent's, ENGINE.md 100.5) as counts per card identity (the `identity::D` identities of the
     /// encoding, ENGINE.md 22.2: the cube's, the legacy cards', the tokens'). The TRUE hand -
     /// a training label that zero-core records with a sample when a run's `aux_belief_w` is on,
     /// never an input: `encode` shows the viewer only what it knows (ENGINE.md 10). Empty
@@ -643,7 +643,10 @@ impl SearchGame for MtgAz {
             return;
         }
         let ids = identity::identities(self.g.db());
-        for &c in &self.g.player(1 - viewer as u8).hand {
+        // (The frame's opponent's hand: the decider's own while it decides
+        // for the player it controls, ENGINE.md 100.5.)
+        let seat = self.g.encoding_seat(viewer as u8);
+        for &c in &self.g.player(1 - seat).hand {
             out[ids[self.g.obj(c).def as usize] as usize] += 1.0;
         }
     }

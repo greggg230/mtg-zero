@@ -26,7 +26,10 @@
 //! encodings). `DIGEST_ENCODING=v4` hashes the layout v4 part of each
 //! encoding (`encode::v4_projection`) and prints the combined digest only:
 //! layout v4's recorded 317b5ba05dc569fb (ENGINE.md 58.11) while every v4
-//! float of layout v5 is v4's (ENGINE.md 60.2).
+//! float of layout v5 is v4's (ENGINE.md 60.2) and no game plays
+//! differently. `DIGEST_ENCODING=v5` hashes the layout v5 part
+//! (`encode::v5_projection`): layout v5's recorded full digest while every
+//! v5 float of layout v6 is v5's (ENGINE.md 100.5).
 //!
 //! `DIGEST_IDS=choices` (ENGINE.md 65.11): an id-agnostic trace of the same
 //! games, to compare across a change that renames action ids and nothing
@@ -182,9 +185,22 @@ fn hash_encoding(h: &mut H, g: &Game, buf: &mut [f32]) {
     // `DIGEST_ENCODING=v4`: hash the layout v4 part of each encoding (the
     // v4 projection, ENGINE.md 60.2): the combined digest is then layout v4's
     // recorded one when every v4 float is what v4 encoded.
-    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "v4") {
-        static PROJ: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
-        for &i in PROJ.get_or_init(engine::az::encode::v4_projection) {
+    // `DIGEST_ENCODING=v5`: the layout v5 part (the v5 projection, ENGINE.md
+    // 100.5): layout v5's recorded digest when every v5 float is what v5
+    // encoded.
+    let proj = match std::env::var("DIGEST_ENCODING").as_deref() {
+        Ok("v4") => {
+            static P4: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+            Some(P4.get_or_init(engine::az::encode::v4_projection))
+        }
+        Ok("v5") => {
+            static P5: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+            Some(P5.get_or_init(engine::az::encode::v5_projection))
+        }
+        _ => None,
+    };
+    if let Some(p) = proj {
+        for &i in p {
             x.u64(buf[i].to_bits() as u64);
         }
     } else {
@@ -262,7 +278,7 @@ fn behaviour_digests() {
         t.elapsed().as_secs_f64(),
         all.0
     );
-    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0" || v == "v4") || by_choice() {
+    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0" || v == "v4" || v == "v5") || by_choice() {
         return;
     }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/digests.txt");
