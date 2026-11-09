@@ -209,3 +209,23 @@ fn cr_106_6_sunken_citadel_makes_the_chosen_colour_and_land_ability_mana() {
     assert_eq!(g.obj(bear).zone, Zone::Exile, "{}", log(&g));
     assert!(g.obj(bf(&g, 0, "Sunken Citadel")).tapped);
 }
+
+/// Sunken Citadel's land-ability mana pays Cascading Cataracts' {5} (a land's
+/// mana ability, CR 605.3b) while a spell is being paid for (106.6, B2's
+/// N21): the Citadel's two green and three Forests make the Cataracts' five
+/// mana, whose blue casts Illvoi Galeblade ({U}); nothing else on the
+/// battlefield makes blue, and without the two green the Cataracts' {5}
+/// can't be paid (the Forests and the Citadel's one green are four; the
+/// Cataracts' own {C} would be its {T}).
+#[test]
+fn cr_106_6_land_ability_mana_pays_cascading_cataracts_while_casting() {
+    let mut g = citadel(&["Forest", "Forest", "Forest", "Cascading Cataracts"], &["Illvoi Galeblade"]);
+    let blade = g.card(0, "Illvoi Galeblade", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(blade)), "{:?}", g.options_desc());
+    start_with(&mut g, Choice::Cast(blade), |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(blade).zone, Zone::Battlefield, "{}", log(&g));
+    for name in ["Sunken Citadel", "Cascading Cataracts"] {
+        assert!(g.obj(bf(&g, 0, name)).tapped, "{name}: {}", log(&g));
+    }
+}

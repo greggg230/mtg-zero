@@ -2002,7 +2002,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         },
     };
     super::eoe_w3::printing_w3(l, &mut def, *grants_food_to_your_artifacts, *grants_food_ability_to_your_artifacts);
-    super::eoe_w6::printing_w6_grants(l, &mut def, *grants_blue_mana_ability_to_your_artifacts);
+    super::eoe_w6::printing_w6_grants(&mut def, *grants_blue_mana_ability_to_your_artifacts);
     def.w3.seen = crate::eoe_w3::seen_of(&def);
     def.w3.mana_spent = def.w3.counters_mana_spent || crate::eoe_w3::reads_mana_spent(&def);
     crate::eoe_w6::finish_def(&mut def);

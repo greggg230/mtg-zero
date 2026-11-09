@@ -28,8 +28,12 @@ pub(crate) fn counter_then_if_spent_below_mv(l: &mut Lowerer, b: &mut Builder, t
 /// CR 613.1f, 605.1a, 106.6): the granted mana ability is a latent ability of
 /// the card (`CardDef::latent`: it never has it itself), given to each
 /// artifact its controller controls by W3's grant (`W3Def::grants_activated`,
-/// `Game::granted_activated`: in layer 6, at the granter's timestamp).
-pub(crate) fn printing_w6_grants(l: &mut Lowerer, def: &mut crate::db::CardDef, blue_to_artifacts: bool) {
+/// `Game::granted_activated`: in layer 6, at the granter's timestamp; a
+/// payment source and a mana ability at priority as the permanent's own are,
+/// B2's `Game::src_ability`, ENGINE.md 100.4.5). The definition's
+/// `W3Def::seen` (W3's `seen_of`, after this) and the table's spending kinds
+/// (`eoe_w2::spend_kinds`, latent abilities included) read it.
+pub(crate) fn printing_w6_grants(def: &mut crate::db::CardDef, blue_to_artifacts: bool) {
     use crate::db::{ActEffect, ActivatedDef, Cost, Filter, ManaAbility, ManaProd};
     if !blue_to_artifacts {
         return;
@@ -61,9 +65,6 @@ pub(crate) fn printing_w6_grants(l: &mut Lowerer, def: &mut crate::db::CardDef, 
     def.activated.push(ability);
     def.latent += 1;
     def.w3.grants_activated.push((yours, k as u8));
-    // (A granted mana ability as a payment source and at priority is
-    // workstream B2's payment work: refused until it is in.)
-    l.unsupported("CardPrinting.grants_blue_mana_ability_to_your_artifacts(a granted mana ability as a payment source: workstream B2)");
 }
 
 /// Modular's triggered ability (CR 702.43a): "When this permanent is put

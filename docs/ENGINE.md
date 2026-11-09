@@ -20709,10 +20709,19 @@ run, they reflected the earlier batches) are committed (aa323a3b).
   land face isn't played this way; lowered only with "you may look at the top card of your library
   any time" on the same permanent (offering the cast then hides nothing). Beside Bolas's Citadel's
   permission the card is refused (`table_refusals`: two permissions would be a choice). Encoded as the Citadel's "from the top of a library".
+* *Mm'menon's grant* ("Artifacts you control have '{T}: Add {U}. Spend this mana only to cast a
+  spell from anywhere other than your hand.'"; CR 613.1f, 605.1a, 106.6): a latent mana ability of
+  the card (`CardDef::latent`, never the card's own) that W3's grant gives each artifact its
+  controller controls (`lower::eoe_w6::printing_w6_grants`, `W3Def::grants_activated`,
+  `Game::granted_activated`: layer 6, the granter's timestamp, gone as Mm'menon leaves); B2's
+  granted payment sources (100.4.5: `Game::src_ability`, a place past the fourth offered by the
+  permanent) make it a source in a payment and a mana ability with priority (its {U} floats with
+  its restriction, W2's `SPEND_OUTSIDE_HAND`).
 * *Sunken Citadel*: "as this enters, choose a color" (CR 614.12; `W6Def::chooses_color`, asked with
   the entry's other choices), "one mana of the chosen color" (`ManaProd::Chosen`) and "two mana of
   the chosen color" (`ManaProd::ChosenN`, a per-source several-mana production; none if no colour
-  was chosen) with W2's land-ability restriction (99.12).
+  was chosen) with W2's land-ability restriction (99.12); the two mana pay a land's mana ability's
+  own cost inside a payment (Cascading Cataracts' {5} while a spell is cast: B2's N21, 100.4.5).
 * *Contested War Zone* and *Power Depot*: their corrected IR (161; 40, 47) with W2's control op and
   restriction (99.12) and W6's modular.
 * *"Until end of turn" control* (lane D's Systems Override and Mutinous Massacre) sets the same fast
@@ -20731,21 +20740,24 @@ in the same event doesn't see the earlier entrants' events (CR 603.6a: "all perm
 battlefield (including the newcomers) are checked"); two creatures with "whenever another creature
 enters" returned together trigger once instead of twice. Fixing it changes cube games (the
 digests), so it is left for the maintainer (W6 handles the Vocalist's own ruling above). W3's mana
-spent saturates at 255 (`Mark::ManaSpent(u8)`), as mana values do (`u8`). W2's open payment item
-(99.12, "Not exact, open": restricted mana a payment may not spend isn't offered for a mana
-ability's own cost that its restriction allows) reaches Sunken Citadel: its land-ability mana could
-pay Cascading Cataracts' {5} while a spell is being paid for; workstream B's payment work.
+spent saturates at 255 (`Mark::ManaSpent(u8)`), as mana values do (`u8`). (W2's open payment item,
+which reached Sunken Citadel, and granted mana abilities as payment sources, which Mm'menon needed,
+are B2's, 100.4.5, merged here.)
 
-**Left: Mm'menon, the Right Hand** (blocked: `CardPrinting.grants_blue_mana_ability_to_your_artifacts(a
-granted mana ability as a payment source: workstream B2)`). Its flying, "look at the top card any
-time", "cast artifact spells from the top of your library" (above) and W2's "spend only to cast a
-spell from anywhere other than your hand" are in, and so is its grant: "artifacts you control have
-'{T}: Add {U}. ...'" is a latent mana ability of the card (`CardDef::latent`, never the card's own)
-that W3's grant gives each artifact its controller controls (`lower::eoe_w6::printing_w6_grants`,
-`W3Def::grants_activated`, `Game::granted_activated`: layer 6, the granter's timestamp; a
-permanent's abilities past its fourth `ACTIVATE` slot are A0's page). Missing is the granted mana
-ability as a payment source (`Game::mana_classes` reads a permanent's own mana abilities only), at
-priority and before a cost sacrifices or returns the artifact: workstream B2's payment work
-(pay.rs, mana.rs), so the card is refused until that is merged.
+**Supported:** all 13 (`SUPPORTED_EOE_W6`): Contested War Zone, Loading Zone, Mm'menon, the Right
+Hand, Moonlit Meditation, Nesting Grounds, Plaza of Heroes, Power Depot, Starfield Vocalist, Sunken
+Citadel, Terrasymbiosis, Thespian's Stage, Tractor Beam, Unravel. EoE support 319 / 320 (The
+Dominion Bracelet: `grants_control_opponent_ability_when_equipped`, 99.14; Paradox Haze has no IR);
+the cube 546 / 546. IR defects 27, 31, 66, 160 and 161 fixed (docs/ir_defects.md, with 25, 29, 30,
+44, 47 and 50 supported); no new one.
+
+**Tests** (each named after its CR rule; the EoE table plus custom IR cards through the same
+lowering, `tests/eoe_w6_kit`): `cards_eoe_w6.rs` 14 (Unravel, Tractor Beam, Starfield Vocalist,
+Plaza of Heroes, Moonlit Meditation, Thespian's Stage), `cards_eoe_w6_counters.rs` 8 (Loading Zone,
+Nesting Grounds, Terrasymbiosis), `cards_eoe_w6_top.rs` 3 (casting from the top, a colour chosen
+as it enters), `cards_eoe_w6_mana.rs` 7 (modular, Power Depot, Contested War Zone, Sunken Citadel
+with Cascading Cataracts), `cards_eoe_w6_granted.rs` 3 (Mm'menon's grant: a payment source for a
+spell from the library and not the hand, only your artifacts and only with Mm'menon, floating with
+priority).
 
 **Results** (the final head, normal release profile): see the commit that records them.

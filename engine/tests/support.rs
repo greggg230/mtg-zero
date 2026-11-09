@@ -959,6 +959,7 @@ const SUPPORTED_EOE_W5: &[&str] = &[
 const SUPPORTED_EOE_W6: &[&str] = &[
     "Contested War Zone",
     "Loading Zone",
+    "Mm'menon, the Right Hand",
     "Moonlit Meditation",
     "Nesting Grounds",
     "Plaza of Heroes",
