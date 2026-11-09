@@ -25,7 +25,7 @@ def test_engine_module_registers_the_games():
     from mtgz import _engine as E
     assert G.engine() is E and E.game_names() == ['toy', 'mtg', 'team_draft']
     info = G.info('mtg')
-    assert info['num_actions'] == 1024 and info['num_features'] == 43956      # layout v6 (ENGINE.md 100.5)
+    assert info['num_actions'] == 1024 and info['num_features'] == 44212      # layout v6 (ENGINE.md 100.5)
     assert info['min_players'] == info['max_players'] == 2
     assert info['bots'] == ['random', 'heuristic']
 
@@ -289,7 +289,7 @@ def test_the_encoding_guard_refuses_an_older_network_and_takes_a_v6_one(tmp_path
     """ENGINE.md 61, 100.5: zero-core's encoding guard (`zero.net.check_encoding`, its docs/az.md
     10.4) on this build (layout v6): a layout v4 or v5 token network is refused wherever it is
     loaded - net.load, a run's evaluator, the replay recorder - naming both sides (33,652 or 37,620
-    -> 43,956 features, the segments that moved, layout v6); its fork_run widen is taken and written
+    -> 44,212 features, the segments that moved, layout v6); its fork_run widen is taken and written
     as a v6 network; a new network records layout version 6, and a v6 network recorded as another
     version is refused."""
     import os
@@ -308,7 +308,7 @@ def test_the_encoding_guard_refuses_an_older_network_and_takes_a_v6_one(tmp_path
     with pytest.raises(EncodingMismatch) as e:
         load(p4)
     msg = str(e.value)
-    assert f'features {old_features} -> 43956' in msg and f'token layout v{old_version} (11 segments' in msg
+    assert f'features {old_features} -> 44212' in msg and f'token layout v{old_version} (11 segments' in msg
     assert 'token layout v6 (11' in msg and 'tools/fork_run.py' in msg
     R = run.Run(str(tmp_path / 'r'), run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-smoke']), {}))
     with pytest.raises(EncodingMismatch):

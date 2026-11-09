@@ -526,6 +526,88 @@ impl Game {
         self.w6.syncing = false;
     }
 
+    /// The control-changing effects behind permanent `c`'s controller (CR
+    /// 613.1b, 613.7; the encoding's `perm::CONTROL_EOT` and
+    /// `CONTROL_LASTING`, ENGINE.md 100.5.1), or `None` when none applies to
+    /// it: the player of an "until end of turn" effect that decides its
+    /// controller until the turn ends (514.2), and the player that decides it
+    /// once they end. With recorded control effects (`SEEN_W6_CONTROL`): the
+    /// latest lasting one (or whoever it entered under, or its owner: a
+    /// lasting effect ends only as the permanent leaves, so an earlier one
+    /// never decides again) and the latest "until end of turn" one, if later
+    /// (they all end together); the Auras' effects are placed among them by
+    /// [`w6_aura_control_place`](Self::w6_aura_control_place). Without them:
+    /// the "until end of turn" effects (`Mod::ControlFrom`), the latest's
+    /// player, and the player before the earliest (each one's end returns the
+    /// permanent to the player before it while its player controls it,
+    /// `return_control`, so with two players the earliest decides).
+    pub(crate) fn w6_control_layers(&self, c: crate::ids::CardIdx) -> Option<(Option<crate::ids::PlayerId>, crate::ids::PlayerId)> {
+        let r = self.obj_ref(c);
+        if self.w6.seen & SEEN_W6_CONTROL == 0 {
+            let mut eot: Vec<(u32, crate::ids::PlayerId, crate::ids::PlayerId)> = self
+                .effects
+                .iter()
+                .filter(|e| e.until == crate::layers::Until::EndOfTurn && e.on == crate::layers::Affected::Obj(r))
+                .filter_map(|e| match e.m {
+                    crate::db::Mod::ControlFrom(prev) => Some((e.ts, e.controller, prev)),
+                    _ => None,
+                })
+                .collect();
+            eot.sort_by_key(|x| x.0);
+            let (first, last) = (eot.first()?, eot.last()?);
+            return Some((Some(last.1), first.2));
+        }
+        let (lasting, eot) = self.w6_control_records(r);
+        let aura = self.battlefield.iter().any(|&a| self.objs[a.i()].attached == Some(r) && self.abilities(a).w6.aura_control);
+        if !aura && !self.w6.control.iter().any(|x| x.obj == r) {
+            return None;
+        }
+        Some((eot.map(|e| e.1), lasting.1))
+    }
+
+    /// The recorded control effects on `r` that can decide its controller
+    /// (`w6_control_layers`): the latest lasting one ((timestamp, player);
+    /// its owner at 0 if none), and the latest "until end of turn" one if it
+    /// is later.
+    fn w6_control_records(&self, r: crate::ids::ObjRef) -> ((u32, crate::ids::PlayerId), Option<(u32, crate::ids::PlayerId)>) {
+        // (As `w6_sync_control`: whoever it entered under, at 0, over its
+        // owner.)
+        let mut lasting = (0u32, self.objs[r.idx.i()].owner);
+        let mut eot: Option<(u32, crate::ids::PlayerId)> = None;
+        for x in self.w6.control.iter().filter(|x| x.obj == r) {
+            if x.eot {
+                if eot.is_none_or(|e| x.ts > e.0) {
+                    eot = Some((x.ts, x.to));
+                }
+            } else if x.ts > lasting.0 || (x.ts == 0 && lasting.0 == 0) {
+                lasting = (x.ts, x.to);
+            }
+        }
+        (lasting, eot.filter(|e| e.0 > lasting.0))
+    }
+
+    /// Aura `a`'s "you control enchanted permanent" among the recorded
+    /// control effects on the permanent it enchants (`perm::AURA_CONTROL`,
+    /// ENGINE.md 100.5.1; CR 613.7e: its timestamp): 0 when a later lasting
+    /// one overrides it for good, 0.5 when it is later than that but an
+    /// "until end of turn" one is later still, 1 when it is later than both;
+    /// `None` for any other permanent.
+    pub(crate) fn w6_aura_control_place(&self, a: crate::ids::CardIdx) -> Option<f32> {
+        let h = self.objs[a.i()].attached?;
+        if !(self.abilities(a).w6.aura_control && self.live(h) && self.objs[h.idx.i()].zone == Zone::Battlefield) {
+            return None;
+        }
+        let ts = self.objs[a.i()].timestamp;
+        let (lasting, eot) = self.w6_control_records(h);
+        Some(if ts < lasting.0 {
+            0.0
+        } else if eot.is_some_and(|e| ts < e.0) {
+            0.5
+        } else {
+            1.0
+        })
+    }
+
     /// The number of permanents `p` controls with "if a permanent entering
     /// the battlefield causes a triggered ability of a permanent you control
     /// to trigger, that ability triggers an additional time" (CR 603.2d):

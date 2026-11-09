@@ -374,7 +374,7 @@ fn ident(def: engine::ids::DefId) -> usize {
 
 #[test]
 fn encoding_slots_name_the_action_slots() {
-    assert_eq!(NUM_FEATURES, 43_956);
+    assert_eq!(NUM_FEATURES, 44_212);
     let mut lists = 0;
     for g in states(scale(16), 6, 7) {
         let me = g.to_move().unwrap();
@@ -1302,22 +1302,9 @@ fn public_state_reaches_the_encoding() {
     // order is no id's since Priority's casts from a graveyard became one option and a list
     // choice (ENGINE.md 100.5): only deliberate limits are left.
     let gaps: Vec<&str> = lim.iter().filter(|l| l.kind == LimitKind::NextLayout).map(|l| l.name).collect();
-    // (The gaps W2 (ENGINE.md 99.12: restricted pool mana, the lands that entered this turn) and
-    // W6 (99.16: the recorded control effects, a copy's kept ability, a player's tokens this turn,
-    // a spell's mana spent) added after layout v6 was built: encoded by ENGINE.md 100.5.1.)
-    assert_eq!(
-        gaps,
-        [
-            "mana in a pool is restricted to activating abilities of lands",
-            "a land entered the battlefield this turn",
-            "a control effect ends at the end of the turn",
-            "a copy has an ability by its exception",
-            "a player created tokens this turn",
-            "the mana spent to cast a spell",
-        ],
-        "next-layout gaps"
-    );
-    assert_eq!(next, 6);
+    // (W2's and W6's six, added after layout v6 was built, too: ENGINE.md 100.5.1.)
+    assert!(gaps.is_empty(), "next-layout gaps: {gaps:?}");
+    assert_eq!(next, 0);
     assert_eq!(by_design, 4, "the deliberate limits");
 }
 

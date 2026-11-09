@@ -11,7 +11,7 @@
 //! * `result`: 1 / 0, a draw (including the turn cap) 0.5 each (a match:
 //!   by game wins); `margin`: the life difference / 20 in [-1, 1] (a match:
 //!   mostly the game wins, ENGINE.md 36.6).
-//! * `encode`: `encode.rs` (layout v6, 43,956 floats, no hidden information).
+//! * `encode`: `encode.rs` (layout v6, 44,212 floats, no hidden information).
 //! * Decks: `decks.rs` (random two-colour decks per game, or the fixed
 //!   evaluation set, or given lists).
 //! * Bots: `random` (zero-core) and `heuristic` (`bots.rs`).

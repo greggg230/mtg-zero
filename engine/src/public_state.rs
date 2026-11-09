@@ -1652,6 +1652,9 @@ pub fn perturbations() -> Vec<Perturbation> {
             let c = *slots(&a.g).first()?;
             let r = a.g.obj_ref(c);
             let to = a.g.objs[c.i()].controller;
+            // (Recorded control effects: a game with such a card, ENGINE.md
+            // 100.5.1.)
+            a.g.w6.seen |= crate::eoe_w6::SEEN_W6_CONTROL;
             a.g.w6.control.push(crate::eoe_w6::ControlFx { obj: r, to, ts: u32::MAX, eot: true });
             Some(a.g.name(c).to_string())
         }),
@@ -1705,12 +1708,6 @@ pub fn limits() -> Vec<Limit> {
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
         l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),
-        l("mana in a pool is restricted to activating abilities of lands", NextLayout, "a pool's mana with a spending restriction other than Mishra's Workshop's (g5::POOL_ART) is game state the EoE port added after layout v5 froze (Eldrazi Temple, Steelswarm Operator, Sunken Citadel, ...; ENGINE.md 99.12): the pool's amounts are encoded, the restriction is not; the next layout encodes it (per player, the restricted part of each type)"),
-        l("a land entered the battlefield this turn", NextLayout, "how many lands entered the battlefield under each player's control this turn (Game::lands_entered) is game state the EoE port added after layout v5 froze, read by one card, Bioengineered Future (ENGINE.md 99.12); LANDS_PLAYED counts lands played only: the next layout encodes it (per player, beside the turn's counts)"),
-        l("a control effect ends at the end of the turn", NextLayout, "the control-changing effects behind a permanent's controller (W6State::control: their order and which end at the end of the turn, CR 613.1b, 613.7, 514.2; recorded in games with an Aura that changes control, Tractor Beam, EoE W6, ENGINE.md 99.16) decide who controls it when one ends; layout v5 encodes the controller, not the effects: the next layout encodes them (a permanent's 'controlled until end of turn' and 'by an Aura' flags)"),
-        l("a copy has an ability by its exception", NextLayout, "a copy effect's 'except it has this ability' (CR 707.9b; Thespian's Stage, EoE W6, ENGINE.md 99.16: a definition made with the copied one's abilities and the Stage's) gives the copy an ability its identity (the copied card's) doesn't show; the next layout encodes a permanent's activated abilities beyond its identity's"),
-        l("a player created tokens this turn", NextLayout, "whether a player created tokens this turn (W6State::tokens_turn, EoE W6, ENGINE.md 99.16) decides whether Moonlit Meditation's 'the first time you would create one or more tokens each turn' can still apply; layout v5 has no float for it: the next layout encodes it (a per-turn flag beside the turn's facts)"),
-        l("the mana spent to cast a spell", NextLayout, "the amount of mana spent to cast a spell on the stack (Mark::ManaSpent, recorded for every spell in a table with Unravel, EoE W6, ENGINE.md 99.16) decides Unravel's 'if the amount of mana spent to cast that spell was less than its mana value'; layout v5's stack item has no float for it: the next layout encodes it (a stack item's number, as W3's permanent's)"),
     ]
 }
 
@@ -1720,7 +1717,7 @@ pub fn limits() -> Vec<Limit> {
 /// this turn, a permanent that entered this turn) and the granted triggered
 /// abilities (W3, no perturbation before). Its tests read them back and check
 /// that they hide nothing (`tests/az.rs`).
-pub const V6_FIXED: [&str; 18] = [
+pub const V6_FIXED: [&str; 24] = [
     "void holds (a nonland permanent left the battlefield this turn)",
     "more life gained this turn",
     "a creature was cast for its warp cost",
@@ -1739,6 +1736,13 @@ pub const V6_FIXED: [&str; 18] = [
     "the turn goes on with another phase after its combat phases",
     "an artifact entered under a player's control this turn",
     "a permanent gained a triggered ability",
+    // ENGINE.md 100.5.1: W2's and W6's.
+    "mana in a pool is restricted to activating abilities of lands",
+    "a land entered the battlefield this turn",
+    "a control effect ends at the end of the turn",
+    "a copy has an ability by its exception",
+    "a player created tokens this turn",
+    "the mana spent to cast a spell",
 ];
 
 /// The perturbations of layout v4's 42 gaps (ENGINE.md 58.10), which layout

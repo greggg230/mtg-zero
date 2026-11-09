@@ -77,7 +77,7 @@ REPLAYS = os.environ.get('MTGZ_LAB_REPLAYS', r'C:/Users/Gregg Keithley/mtg-zero/
 # can't be rebuilt action for action (the decisions differ: e.g. ENGINE.md 100.3 orders triggers of
 # different objects of one card, which the old engine offered once). Bump it with every commit that
 # re-records the behaviour digests; replays recorded since are the ones `check_spot` must rebuild.
-RULES_EPOCH = 1794245194  # 2026-11-09 09:26:34 -0800: D2 merged F7 (eoe-base 33931fc) with layout v6 and gap #1 (ENGINE.md 100.5, 100.5.1; digests 095587d1d1938af4)
+RULES_EPOCH = 1794246090  # 2026-11-09 09:41:30 -0800: D2, the six gaps W2 and W6 added encoded in layout v6 (ENGINE.md 100.5.1; digests 408ee16a94d0ffec)
 PUBLISH_LOG = r'E:/mtg-zero-scratch/delverai-publish.log'
 MODES = ('belief', 'actual', 'pinned', 'uniform')
 

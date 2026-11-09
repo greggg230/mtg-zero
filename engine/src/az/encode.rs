@@ -1,6 +1,6 @@
 //! The network input of the `mtg` game (ENGINE.md 21.2, 22.2, 24): a fixed-width
 //! f32 vector for a viewer, with no hidden information. **Layout v6**
-//! ([`NUM_FEATURES`] = 43,956 floats; ENGINE.md 100.5) is layout v5 (37,620
+//! ([`NUM_FEATURES`] = 44,212 floats; ENGINE.md 100.5, 100.5.1) is layout v5 (37,620
 //! floats, ENGINE.md 60) with additions only, as v5 was v4's, so that a v5
 //! token network widens onto it exactly (zero-core `net.widen` with this
 //! layout; every v5 float keeps its meaning, [`v5_projection`]): four more
@@ -17,16 +17,16 @@
 //! | context | 256 | the pending decision: kind (64 kinds), decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay (a mana payment's; delve's picks: the spell's mana cost after the cards chosen so far, ENGINE.md 65), damage left, counters of the asking task; ENGINE.md 100.1: a page of a paged choice, a big number's digits; **ENGINE.md 100.5**: the frame flag (248: the decision is made for the other seat, CR 722) |
 //! | bags | 23 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards (a card chosen for a delve in progress is in its owner's exile bag, ENGINE.md 65), exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them); M8b: the opponent's pool as the viewer knows it, the cards the opponent revealed in earlier games of the match; **v5**: the exiled cards the viewer may play, those the opponent may play (`bag::MY_EXILE_PLAY`, `OPP_EXILE_PLAY`; a face-down one only where the viewer knows it); **v6**: the exiled cards a stack item targets or noted, the viewer's and the opponent's phased-out permanents, the viewer's hand cards the opponent knows |
 //! | tops | 2 x 3 x 54 | the top three library positions of each player: present, known to the viewer, the card code |
-//! | permanents | 2 x 32 x 196 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up; M7b part 3: a copy and the identity of what it copies, what it is attached to; part 3b: ward and its cost, lost all abilities, goaded, exiled if it would leave; 58.8: can't block, can't be blocked, other counters, cards exiled with it, protection; **v5** status 96-119: must attack, exiled if it would die, effects on its subtypes, evoked, escaped, the player chosen as it entered, monstrous, exhausted, the colour chosen as it entered, exerted, abilities resolved this turn, once-each-turn actions done (112-119 spare, never set); **v6** status 120-143: cast for its warp cost, regeneration shields, the mana spent to cast it, legendary as it is, granted triggered and activated abilities, the spells it gave an alternative cost, stack items that noted it, entered this turn (129-143 spare) |
+//! | permanents | 2 x 32 x 196 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up; M7b part 3: a copy and the identity of what it copies, what it is attached to; part 3b: ward and its cost, lost all abilities, goaded, exiled if it would leave; 58.8: can't block, can't be blocked, other counters, cards exiled with it, protection; **v5** status 96-119: must attack, exiled if it would die, effects on its subtypes, evoked, escaped, the player chosen as it entered, monstrous, exhausted, the colour chosen as it entered, exerted, abilities resolved this turn, once-each-turn actions done (112-119 spare, never set); **v6** status 120-143: cast for its warp cost, regeneration shields, the mana spent to cast it, legendary as it is, granted triggered and activated abilities, the spells it gave an alternative cost, stack items that noted it, entered this turn; **100.5.1**: an ability its copy effect's exception kept, its control effects (until end of turn, lasting) and an Aura's control effect among them (133-143 spare) |
 //! | hand | 16 x 60 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options (which face its `HAND` id casts or plays), known to the opponent |
-//! | stack | 8 x 204 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets (a player, a permanent, a stack item); a copy of a spell, times an additional cost was paid, bestowed; part 3b: targeted by another stack item, can't be countered, the ability's index, a graveyard card's ability; 58.8: X; **v5** status 32-71: the modes chosen, the alternative cost, how and from where it was cast, cards delved, a trigger's event amount, exiled as it leaves, flashback, noted permanents, divided damage, a ninjutsu attack, splices (64-71 spare, never set); **v6** status 72-151: the exiled cards it targets and noted, its first exiled target and its first noted object (by identity or slot), an alternative cost a permanent granted it (146-151 spare) |
+//! | stack | 8 x 204 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets (a player, a permanent, a stack item); a copy of a spell, times an additional cost was paid, bestowed; part 3b: targeted by another stack item, can't be countered, the ability's index, a graveyard card's ability; 58.8: X; **v5** status 32-71: the modes chosen, the alternative cost, how and from where it was cast, cards delved, a trigger's event amount, exiled as it leaves, flashback, noted permanents, divided damage, a ninjutsu attack, splices (64-71 spare, never set); **v6** status 72-151: the exiled cards it targets and noted, its first exiled target and its first noted object (by identity or slot), an alternative cost a permanent granted it; **100.5.1**: the mana spent to cast it (149-151 spare) |
 //! | triggers | 4 x 56 | `TRIGGER` slots 0..3 (the viewer's waiting triggers) |
 //! | list | 64 x 60 | `LIBRARY` slots 0..63 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition; M8b: sideboarding's pool list (`list::*`: copies in the pool, in the deck, in the deck at the start, a first pick, a basic land, already decided); a graveyard-card choice or target (ENGINE.md 65.10): the graveyards holding an offered card, in order, the viewer's first (`list::THEIRS`, `list::CHOSEN`: chosen for a delve in progress) |
 //! | graveyard abilities | 4 x 56 | `GY_ABILITY` slots 0..3 (part 3b): the cards in the viewer's graveyard with an ability that works there, in graveyard order, and whether it may be activated now |
 //! | companions | 2 x 56 | v4 (M8a): the viewer's then the opponent's revealed companion (CR 702.139): card code, revealed, its special action still available (outside the game, not taken), the special action is an option of the viewer's decision now (`act::COMPANION`, the viewer's slot), put into the hand |
 //! | match | 32 | v4 (M8b, ENGINE.md 36.7; globals): the format, the game number, both players' game wins, draws, each game's result and who played first, sideboarding now and its order, deck sizes (`mtch::*`); 58.8: spells cast this turn, energy |
 //! | globals v5 | 64 | **v5** (`g5::*`; globals): per player (viewer first, 24 each) cards drawn this turn and in the draw step, noncreature spells this turn, gained life this turn, can't gain life, creatures that attacked this turn, spells cast this game, Yawgmoth's Will, graveyard exile this turn, the city's blessing, protection from everything, the pool's artifact-only and haste mana, delayed triggers waiting, exiled cards they may play, cards discarded this turn, ENGINE.md 72: which of their library's top three cards they know and which the other player knows (2 spare); the last normal turn's player, additional combat phases (14 spare, never set) |
-//! | globals v6 | 64 | **v6** (`g6::*`; globals): per player (viewer first, 24 each) an artifact entered under their control this turn, life gained this turn, their phased-out permanents and those phased out indirectly, their next turn controlled by the other player, controlled this turn (18 spare); the game's: void, where the turn goes on after its combat phases (11 spare) |
+//! | globals v6 | 320 | **v6** (`g6::*`; globals): per player (viewer first, 128 each) an artifact entered under their control this turn, life gained this turn, their phased-out permanents and those phased out indirectly, their next turn controlled by the other player, controlled this turn; **100.5.1**: lands entered this turn, tokens created this turn (24 spare), their pool's restricted mana by type and kind (96); the game's 64: void, where the turn goes on after its combat phases; **100.5.1**: the card whose ability copies keep (27 spare) |
 //!
 //! **The frame** (ENGINE.md 100.5, CR 722): "me" is the viewer, except
 //! when the viewer decides a decision of the other player (it controls them
@@ -109,7 +109,7 @@ pub const PERMS: usize = 32;
 /// (status 96..119, `perm::MUST_ATTACK` ..; 8 spare).
 pub const PERM_V5: usize = 24;
 /// Layout v6 (ENGINE.md 100.5): the permanent status floats v6 added at the
-/// slot's end (status 120..143, `perm::WARP_CAST` ..; 15 spare).
+/// slot's end (status 120..143, `perm::WARP_CAST` ..; 11 spare).
 pub const PERM_V6: usize = 24;
 pub const PERM_W: usize = CODE + 96 + PERM_V5 + PERM_V6;
 pub const HANDS: usize = 16;
@@ -119,7 +119,7 @@ pub const STACKS: usize = 8;
 /// 32..71, `stack::MODES` ..; 8 spare).
 pub const STACK_V5: usize = 40;
 /// Layout v6 (ENGINE.md 100.5): the stack status floats v6 added at the
-/// slot's end (status 72..151, `stack::TARGETS_EXILED` ..; 6 spare).
+/// slot's end (status 72..151, `stack::TARGETS_EXILED` ..; 3 spare).
 pub const STACK_V6: usize = 80;
 pub const STACK_W: usize = CODE + 32 + STACK_V5 + STACK_V6;
 pub const TRIGS: usize = 4;
@@ -138,8 +138,8 @@ pub const MATCH: usize = 32;
 /// Layout v5: the second block of globals (`g5::*`), after the match block.
 pub const GLOBALS_V5: usize = 64;
 /// Layout v6 (ENGINE.md 100.5): the third block of globals (`g6::*`), after
-/// v5's.
-pub const GLOBALS_V6: usize = 64;
+/// v5's: per player 128, the game's 64.
+pub const GLOBALS_V6: usize = 2 * 128 + 64;
 
 pub const O_GLOBALS: usize = 0;
 pub const O_CONTEXT: usize = O_GLOBALS + GLOBALS;
@@ -157,7 +157,7 @@ pub const O_MATCH: usize = O_COMP + COMPS * COMP_W;
 pub const O_GLOBALS_V5: usize = O_MATCH + MATCH;
 pub const O_GLOBALS_V6: usize = O_GLOBALS_V5 + GLOBALS_V5;
 pub const NUM_FEATURES: usize = O_GLOBALS_V6 + GLOBALS_V6;
-const _: () = assert!(NUM_FEATURES == 43_956);
+const _: () = assert!(NUM_FEATURES == 44_212);
 
 /// Layout v5 (ENGINE.md 60, `mtgz/az/layout_v5.json`), as far as the
 /// widening to v6 needs it: its features, its bags and the widths of the
@@ -619,8 +619,29 @@ pub mod perm {
     /// It entered the battlefield this turn (`Obj::entered`; `NEW` is
     /// "under its controller's control since this turn", CR 302.6).
     pub const ENTERED: usize = 128;
-    /// The first spare status float of layout v6 (129..143 spare).
-    pub const V6_END: usize = 129;
+    /// ENGINE.md 100.5.1: an activated ability its copiable values have by a
+    /// copy effect's exception ("becomes a copy of ..., except it has this
+    /// ability", CR 707.9b; Thespian's Stage), not its identity's: (the
+    /// ability's place in its list + 1) / 8 (its `ACTIVATE` slot); whose
+    /// ability it is is `g6::KEPT_FROM` (one such ability a table,
+    /// `add_kept_ability_defs`).
+    pub const KEPT_ABILITY: usize = 129;
+    /// ENGINE.md 100.5.1: its control-changing effects (CR 613.1b, 613.7)
+    /// beyond the controller they give it now: `CONTROL_EOT`, the player of
+    /// an "until end of turn" one that decides its controller until the turn
+    /// ends (514.2; 1 the viewer, -1 the opponent, 0 none); `CONTROL_LASTING`,
+    /// the player that decides it once those end (its owner, whoever it
+    /// entered under, the latest lasting effect: 1 / -1, 0 when no control
+    /// effect applies to it). On an Aura that says "you control enchanted
+    /// permanent", `AURA_CONTROL` places its effect among those of the
+    /// permanent it enchants: 0.5 later than the lasting one, 1 later than an
+    /// "until end of turn" one too (0: a later lasting effect overrides it
+    /// for good).
+    pub const CONTROL_EOT: usize = 130;
+    pub const CONTROL_LASTING: usize = 131;
+    pub const AURA_CONTROL: usize = 132;
+    /// The first spare status float of layout v6 (133..143 spare).
+    pub const V6_END: usize = 133;
 }
 const _: () = assert!(
     CODE + perm::PROTECTED + 1 == v4::PERM_W
@@ -719,8 +740,11 @@ pub mod stack {
     pub const ALT_GRANTED: usize = 145;
     pub const ALT_GRANTER_SLOT: usize = 146;
     pub const ALT_GRANTER_OPP: usize = 147;
-    /// The first spare status float of layout v6 (148..151 spare).
-    pub const V6_END: usize = 148;
+    /// ENGINE.md 100.5.1: the mana spent to cast it / 8 (a spell; CR 601.2h,
+    /// `Mark::ManaSpent`; squashed: Unravel's "less than its mana value").
+    pub const MANA_SPENT: usize = 148;
+    /// The first spare status float of layout v6 (149..151 spare).
+    pub const V6_END: usize = 149;
 }
 const _: () = assert!(
     CODE + stack::X + 1 == v4::STACK_W
@@ -794,8 +818,8 @@ const _: () = assert!(g5::PLAYER_END <= g5::PLAYER && g5::GAME_END <= GLOBALS_V5
 /// [`O_GLOBALS_V6`], after v5's): per player, viewer first
 /// (`g6[PLAYER * side + ..]`), then the game's (`g6[GAME + ..]`).
 pub mod g6 {
-    /// Floats per player (6 used, 18 spare).
-    pub const PLAYER: usize = 24;
+    /// Floats per player (8 used, 24 spare, then `POOL_KINDS`).
+    pub const PLAYER: usize = 128;
     /// An artifact entered the battlefield under their control this turn
     /// (`Player::artifact_entered`; Mechan Shieldmate).
     pub const ARTIFACT_ENTERED: usize = 0;
@@ -813,7 +837,22 @@ pub mod g6 {
     /// They are controlled this turn (the active player, CR 722.1, 722.4:
     /// the other player makes their decisions).
     pub const CONTROLLED: usize = 5;
-    pub const PLAYER_END: usize = 6;
+    /// ENGINE.md 100.5.1: the lands that entered the battlefield under their
+    /// control this turn / 4 (squashed; `Game::lands_entered`, Bioengineered
+    /// Future); they created tokens this turn (`W6State::tokens_turn`:
+    /// Moonlit Meditation's "the first time ... each turn").
+    pub const LANDS_ENTERED: usize = 6;
+    pub const TOKENS_CREATED: usize = 7;
+    /// ENGINE.md 100.5.1: their pool's mana with a spending restriction
+    /// other than the Workshop's (`g5::POOL_ART`; CR 106.6,
+    /// `Game::pool_restr`): per type t (W U B R G C) and kind k, the amount
+    /// / 4 (squashed) at `POOL_KINDS + 16 t + k`. The kind is the
+    /// restriction (`pool_kind`: the purposes a mana ability's "spend this
+    /// mana only to ..." can give, the lowering's whole list) and, + 8, the
+    /// rider "that spell can't be countered".
+    pub const POOL_KINDS: usize = 32;
+    pub const POOL_KINDS_N: usize = 6 * 16;
+    pub const PLAYER_END: usize = POOL_KINDS + POOL_KINDS_N;
     /// The game's: void holds (a nonland permanent left the battlefield
     /// this turn, Edge of Eternities' ability word); where the turn goes on
     /// after its combat phases when not the postcombat main phase (CR
@@ -823,8 +862,12 @@ pub mod g6 {
     pub const VOID: usize = GAME;
     pub const AFTER_COMBAT: usize = GAME + 1;
     pub const AFTER_COMBAT_N: usize = 4;
-    /// The first spare game float (53..63 spare).
-    pub const GAME_END: usize = AFTER_COMBAT + AFTER_COMBAT_N;
+    /// ENGINE.md 100.5.1: the identity (the card code's 32 digits) of the
+    /// card whose activated ability permanents have by a copy effect's
+    /// exception (`perm::KEPT_ABILITY`), while one does.
+    pub const KEPT_FROM: usize = AFTER_COMBAT + AFTER_COMBAT_N;
+    /// The first spare game float (37 used, 27 spare).
+    pub const GAME_END: usize = KEPT_FROM + 32;
 }
 const _: () = assert!(g6::PLAYER_END <= g6::PLAYER && g6::GAME_END <= GLOBALS_V6);
 
@@ -869,6 +912,34 @@ const _: () = assert!(
 );
 
 /// A card code: the identity's digits (16, 8, 8), then types, colours, size.
+/// The kind of a pool's restricted mana (`g6::POOL_KINDS`, ENGINE.md
+/// 100.5.1): its purposes `only` (`SPEND_*`, CR 106.6) as one of the
+/// restrictions a mana ability can have (lower/activated.rs refuses every
+/// other: a game holds no other), 1..7, plus 8 with the rider "that spell
+/// can't be countered" (`MANA_UNCOUNTERABLE`; 8 alone: the rider on mana of
+/// no restriction).
+fn pool_kind(only: u8) -> usize {
+    use crate::db::{
+        MANA_UNCOUNTERABLE, SPEND_ARTIFACT, SPEND_ARTIFACT_ABILITY, SPEND_ELDRAZI_ABILITY, SPEND_ELDRAZI_SPELL, SPEND_LAND_ABILITY,
+        SPEND_LEGENDARY, SPEND_OUTSIDE_HAND,
+    };
+    let purposes = only & !MANA_UNCOUNTERABLE;
+    let k = match purposes {
+        0 => 0,
+        SPEND_ARTIFACT => 1,
+        SPEND_LEGENDARY => 2,
+        SPEND_ARTIFACT_ABILITY => 3,
+        x if x == SPEND_ARTIFACT | SPEND_ARTIFACT_ABILITY => 4,
+        x if x == SPEND_ELDRAZI_SPELL | SPEND_ELDRAZI_ABILITY => 5,
+        SPEND_LAND_ABILITY => 6,
+        SPEND_OUTSIDE_HAND => 7,
+        other => panic!("pool mana restricted to purposes {other:#x}: no mana ability has them (lower/activated.rs), no encoding kind"),
+    };
+    let k = k + 8 * (only & MANA_UNCOUNTERABLE != 0) as usize;
+    assert!(k != 0, "a pool kind with no restriction and no rider");
+    k
+}
+
 fn code(out: &mut [f32], db: &CardDb, ids: &[u16], def: DefId) {
     code_of(out, db, ids, def, def);
 }
@@ -1123,7 +1194,7 @@ impl Game {
         };
         self.encode_globals(me, &mut out[O_GLOBALS..O_GLOBALS + GLOBALS]);
         self.encode_globals_v5(me, &mut out[O_GLOBALS_V5..O_GLOBALS_V5 + GLOBALS_V5]);
-        self.encode_globals_v6(me, &mut out[O_GLOBALS_V6..O_GLOBALS_V6 + GLOBALS_V6]);
+        self.encode_globals_v6(me, ids, &mut out[O_GLOBALS_V6..O_GLOBALS_V6 + GLOBALS_V6]);
         self.encode_bags(me, knower, ids, out);
         // Tops of the libraries.
         for (side, p) in [me, op_].into_iter().enumerate() {
@@ -1159,6 +1230,11 @@ impl Game {
         // permanent or a static ability; `granted_activated` only where one
         // can be.)
         let grants = self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 || self.battlefield.iter().any(|&g| self.objs[g.i()].attached.is_some());
+        // (Control effects beyond the controller: recorded ones, or "until
+        // end of turn" ones, ENGINE.md 100.5.1.)
+        let control_fx = self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0
+            || self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::ControlFrom(_)));
+        let side_of = |p: PlayerId| if p == me { 1.0 } else { -1.0 };
         let stack_refs = |r: crate::ids::ObjRef| self.stack.iter().filter(|s| s.noted.contains(&r)).count();
         let slot_of = |c: CardIdx| -> Option<usize> {
             let ctl = self.objs[c.i()].controller;
@@ -1369,6 +1445,20 @@ impl Game {
                     st[perm::NOTED] = squash(stack_refs(self.obj_ref(c)) as f32 / 2.0);
                 }
                 st[perm::ENTERED] = (ob.entered as u32 == self.turn.number) as u8 as f32;
+                // ENGINE.md 100.5.1: status 129-132.
+                let w6d = &self.db.def(ob.def).w6;
+                if w6d.kept_from.is_some() {
+                    st[perm::KEPT_ABILITY] = (w6d.kept_index as f32 + 1.0) / 8.0;
+                }
+                if control_fx {
+                    if let Some((eot, lasting)) = self.w6_control_layers(c) {
+                        st[perm::CONTROL_EOT] = eot.map_or(0.0, side_of);
+                        st[perm::CONTROL_LASTING] = side_of(lasting);
+                    }
+                    if let Some(v) = self.w6_aura_control_place(c) {
+                        st[perm::AURA_CONTROL] = v;
+                    }
+                }
                 if !self.resolved.is_empty() || !self.done_once.is_empty() {
                     let r = self.obj_ref(c);
                     let n: u32 = self.resolved.iter().filter(|x| x.0 == r).map(|x| x.1 as u32).sum();
@@ -1515,6 +1605,13 @@ impl Game {
                         Mark::AltGranted { granter, .. } if o == r => Some(granter),
                         _ => None,
                     });
+                    // ENGINE.md 100.5.1: the mana spent to cast it.
+                    if let Some(n) = self.marks.iter().find_map(|&(o, m)| match m {
+                        Mark::ManaSpent(n) if o == r => Some(n),
+                        _ => None,
+                    }) {
+                        st[stack::MANA_SPENT] = squash(n as f32 / 8.0);
+                    }
                     if let Some(g) = granter {
                         st[stack::ALT_GRANTED] = 1.0;
                         if self.live(g) && self.objs[g.idx.i()].zone == Zone::Battlefield {
@@ -1843,7 +1940,7 @@ impl Game {
     }
 
     /// The globals of layout v6 (ENGINE.md 100.5, `g6::*`).
-    fn encode_globals_v6(&self, me: PlayerId, g: &mut [f32]) {
+    fn encode_globals_v6(&self, me: PlayerId, ids: &[u16], g: &mut [f32]) {
         let t = &self.turn;
         for (side, p) in [me, opp(me)].into_iter().enumerate() {
             let pl = &self.players[p as usize];
@@ -1857,6 +1954,24 @@ impl Game {
             }
             o[g6::NEXT_TURN_CONTROLLED] = self.next_turn_controller(p).is_some_and(|q| q != p) as u8 as f32;
             o[g6::CONTROLLED] = (t.active == p && self.turn_controller().is_some_and(|q| q != p)) as u8 as f32;
+            // ENGINE.md 100.5.1.
+            o[g6::LANDS_ENTERED] = squash(self.lands_entered_this_turn(p) as f32 / 4.0);
+            o[g6::TOKENS_CREATED] = (self.w6.tokens_turn[p as usize] == t.number as u16) as u8 as f32;
+            if !self.pool_restr.is_empty() {
+                let mut kinds = [0u32; g6::POOL_KINDS_N];
+                for &(q, ty, only, n) in &self.pool_restr {
+                    if q == p {
+                        kinds[16 * ty as usize + pool_kind(only)] += n as u32;
+                    }
+                }
+                for (k, &n) in kinds.iter().enumerate() {
+                    o[g6::POOL_KINDS + k] = squash(n as f32 / 4.0);
+                }
+            }
+        }
+        // The card whose ability copies keep (ENGINE.md 100.5.1).
+        if let Some((kd, _)) = self.battlefield.iter().find_map(|&c| self.db.def(self.objs[c.i()].def).w6.kept_from) {
+            digits(&mut g[g6::KEPT_FROM..g6::KEPT_FROM + 32], ids, kd);
         }
         g[g6::VOID] = self.void_active() as u8 as f32;
         use crate::game::Step as S;
@@ -2635,6 +2750,80 @@ mod tests {
     /// exiled card it noted (Close Encounter's), the permanent that gave it
     /// its alternative cost (Tannuk's), a phased-out permanent, an opponent's
     /// knowledge of a hand card; every other float unchanged.
+    /// ENGINE.md 100.5.1, read back for both viewers by hand, every other
+    /// float unchanged: the mana spent to cast a spell on the stack (CR
+    /// 601.2h; Unravel), the lands that entered under P1's control this turn
+    /// (Bioengineered Future), P0 created tokens this turn (Moonlit
+    /// Meditation), and P0's pool's restricted mana (CR 106.6): two {R} only
+    /// for land abilities, one {W} only for legendary spells that can't be
+    /// countered (Delighted Halfling), one {C} only for artifact spells or
+    /// abilities (Power Depot).
+    #[test]
+    fn cr_601_2h_cr_106_6_v6_turn_and_pool_facts_are_encoded() {
+        use crate::db::{MANA_UNCOUNTERABLE, SPEND_ARTIFACT, SPEND_ARTIFACT_ABILITY, SPEND_LAND_ABILITY, SPEND_LEGENDARY};
+        let mut g = Scenario::new(CardDb::cube())
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Mountain"; 10])
+            .library(1, &["Island"; 10])
+            .battlefield(0, &["Mountain"])
+            .hand(0, &["Lightning Bolt"])
+            .at(Step::Main1, 0)
+            .start();
+        let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+        g.choose(Choice::Cast(bolt));
+        for _ in 0..20 {
+            match g.kind() {
+                Some(DecisionKind::Priority) => break,
+                Some(DecisionKind::Target) => g.choose(Choice::Target(Target::Player(1))),
+                _ => {
+                    let c = g.pending_decision().unwrap().options[0].choice;
+                    g.choose(c)
+                }
+            };
+        }
+        assert_eq!(g.stack.len(), 1);
+        g.marks.retain(|m| !matches!(m.1, Mark::ManaSpent(_)));
+        let base = [features(&g, 0), features(&g, 1)];
+        let rs = g.obj_ref(bolt);
+        g.marks.push((rs, Mark::ManaSpent(3)));
+        g.lands_entered = (g.turn.number, [0, 2]);
+        g.w6.tokens_turn[0] = g.turn.number as u16;
+        let r = crate::mana::R;
+        g.players[0].pool.amt[r] += 2;
+        g.players[0].pool.amt[crate::mana::W] += 1;
+        g.players[0].pool.amt[crate::mana::C] += 1;
+        g.pool_restr.push((0, r as u8, SPEND_LAND_ABILITY, 2));
+        g.pool_restr.push((0, crate::mana::W as u8, SPEND_LEGENDARY | MANA_UNCOUNTERABLE, 1));
+        g.pool_restr.push((0, crate::mana::C as u8, SPEND_ARTIFACT | SPEND_ARTIFACT_ABILITY, 1));
+        let top = O_STACK + CODE;
+        for v in 0..2u8 {
+            let x = features(&g, v);
+            let (p0, p1) = if v == 0 { (0, 1) } else { (1, 0) };
+            let o0 = O_GLOBALS_V6 + g6::PLAYER * p0;
+            let o1 = O_GLOBALS_V6 + g6::PLAYER * p1;
+            let kind = |t: usize, k: usize| o0 + g6::POOL_KINDS + 16 * t + k;
+            let want_vals = [
+                (top + stack::MANA_SPENT, squash(3.0 / 8.0)),
+                (o1 + g6::LANDS_ENTERED, squash(2.0 / 4.0)),
+                (o0 + g6::TOKENS_CREATED, 1.0),
+                (kind(r, 6), squash(2.0 / 4.0)),
+                (kind(crate::mana::W, 2 + 8), squash(1.0 / 4.0)),
+                (kind(crate::mana::C, 4), squash(1.0 / 4.0)),
+            ];
+            for &(i, val) in &want_vals {
+                assert_eq!(x[i], val, "P{v}: feature {i}");
+            }
+            // (The pool's amounts themselves, layout v4's globals, change too.)
+            let mut want: Vec<usize> = want_vals.iter().map(|w| w.0).collect();
+            want.extend((0..GLOBALS).filter(|&i| x[i] != base[v as usize][i]));
+            want.sort_unstable();
+            want.dedup();
+            let diff: Vec<usize> = (0..NUM_FEATURES).filter(|&i| x[i] != base[v as usize][i]).collect();
+            assert_eq!(diff, want, "P{v}");
+            assert!(diff.iter().filter(|&&i| i < GLOBALS).count() >= 1, "P{v}: the pool's amounts");
+        }
+    }
+
     #[test]
     fn v6_rare_facts_are_encoded() {
         let mut g = Scenario::new(CardDb::cube())

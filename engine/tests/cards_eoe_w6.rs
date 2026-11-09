@@ -454,3 +454,109 @@ fn cr_514_2_an_ending_control_effect_leaves_the_auras() {
     quiet_until(&mut g, main1_of(1));
     assert_eq!(g.obj(bear).controller, 0, "Tractor Beam's effect remains\n{}", log(&g));
 }
+
+
+// ---- the encoding (ENGINE.md 100.5.1) ------------------------------------------
+
+fn features(g: &Game, v: u8) -> Vec<f32> {
+    let mut x = vec![0.0f32; engine::az::NUM_FEATURES];
+    g.encode_features(v, &mut x);
+    x
+}
+
+/// The status floats of permanent `c` in viewer `v`'s encoding (its slot
+/// among its controller's permanents, `MY_PERM` or `OPP_PERM`).
+fn perm_status(g: &Game, x: &[f32], v: u8, c: engine::CardIdx) -> Vec<f32> {
+    use engine::az::encode::{CODE, O_MY_PERM, O_OPP_PERM, PERM_W};
+    let p = g.obj(c).controller;
+    let s = g.permanents_of(p).position(|x| x == c).unwrap();
+    let o = if p == v { O_MY_PERM } else { O_OPP_PERM } + s * PERM_W + CODE;
+    x[o..o + PERM_W - CODE].to_vec()
+}
+
+/// The control-changing effects behind a permanent's controller are in its
+/// encoding (CR 613.1b, 613.7, 514.2), for both viewers: Tractor Beam on
+/// P1's creature (the lasting one is its owner's, the Aura's effect later:
+/// 1); Systems Override's "until end of turn" on it, later still (P1 decides
+/// it until the turn ends, the Aura's effect is now between: 0.5); the turn
+/// over, only the Aura's is later than the owner's again.
+#[test]
+fn cr_613_7_the_control_effects_behind_a_controller_are_encoded() {
+    use engine::az::encode::perm;
+    let mut g = scen()
+        .battlefield(0, &["Island"; 4])
+        .hand(0, &["Tractor Beam"])
+        .battlefield(1, &["Test Bear", "Mountain", "Mountain", "Mountain"])
+        .hand(1, &["Systems Override"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = bf(&g, 1, "Test Bear");
+    // (No control effect yet.)
+    for v in 0..2u8 {
+        let st = perm_status(&g, &features(&g, v), v, bear);
+        assert_eq!((st[perm::CONTROL_EOT], st[perm::CONTROL_LASTING]), (0.0, 0.0), "P{v}");
+    }
+    beam(&mut g, bear);
+    let tb = bf(&g, 0, "Tractor Beam");
+    // Viewer v's sign of player p: 1 itself, -1 the other player.
+    let sign = |v: u8, p: u8| if v == p { 1.0 } else { -1.0 };
+    let check = |g: &Game, eot: Option<u8>, aura: f32, what: &str| {
+        for v in 0..2u8 {
+            let x = features(g, v);
+            let st = perm_status(g, &x, v, bear);
+            assert_eq!(st[perm::CONTROL_EOT], eot.map_or(0.0, |p| sign(v, p)), "P{v}, {what}: the until-end-of-turn effect's player");
+            assert_eq!(st[perm::CONTROL_LASTING], sign(v, 1), "P{v}, {what}: its owner's, once that ends");
+            assert_eq!(perm_status(g, &x, v, tb)[perm::AURA_CONTROL], aura, "P{v}, {what}: Tractor Beam's place");
+            assert_eq!(st[perm::AURA_CONTROL], 0.0);
+        }
+    };
+    assert_eq!(g.obj(bear).controller, 0);
+    check(&g, None, 1.0, "Tractor Beam");
+    quiet_until(&mut g, main1_of(1));
+    let so = g.card(1, "Systems Override", Zone::Hand);
+    start_with(&mut g, Choice::Cast(so), |g| pick(g, &[g.tgt(bear)]));
+    settle(&mut g);
+    assert_eq!(g.obj(bear).controller, 1, "{}", log(&g));
+    check(&g, Some(1), 0.5, "Systems Override");
+    quiet_until(&mut g, main1_of(0));
+    assert_eq!(g.obj(bear).controller, 0);
+    check(&g, None, 1.0, "the turn over");
+}
+
+/// An ability a copy has by its copy effect's exception (CR 707.9b) is in
+/// its encoding: Thespian's Stage as a copy of Mutavault has the Stage's
+/// ability at its place among Mutavault's (`perm::KEPT_ABILITY`, its
+/// `ACTIVATE` slot + 1, / 8), and the game's globals name the card whose
+/// ability it is (`g6::KEPT_FROM`), for both viewers.
+#[test]
+fn cr_707_9b_a_kept_ability_is_encoded() {
+    use engine::az::encode::{g6, perm, O_GLOBALS_V6};
+    let mut g = scen()
+        .battlefield(0, &["Thespian's Stage", "Forest", "Forest", "Forest"])
+        .battlefield(1, &["Mutavault", "Forest"])
+        .at(Step::Main1, 0)
+        .start();
+    let stage = bf(&g, 0, "Thespian's Stage");
+    let muta = bf(&g, 1, "Mutavault");
+    let kept = |g: &Game, v: u8| {
+        let x = features(g, v);
+        (perm_status(g, &x, v, stage)[perm::KEPT_ABILITY], x[O_GLOBALS_V6 + g6::KEPT_FROM..O_GLOBALS_V6 + g6::KEPT_FROM + 32].to_vec())
+    };
+    for v in 0..2u8 {
+        let (k, from) = kept(&g, v);
+        assert_eq!(k, 0.0, "P{v}: its own ability, not a kept one");
+        assert!(from.iter().all(|&f| f == 0.0));
+    }
+    stage_copy(&mut g, stage, muta);
+    let k = stage_ability(&g, stage).unwrap();
+    let id = engine::az::identity::identities(db())[def("Thespian's Stage") as usize] as usize;
+    let mut digits = vec![0.0f32; 32];
+    digits[(id >> 6) & 15] = 1.0;
+    digits[16 + ((id >> 3) & 7)] = 1.0;
+    digits[24 + (id & 7)] = 1.0;
+    for v in 0..2u8 {
+        let (kf, from) = kept(&g, v);
+        assert_eq!(kf, (k as f32 + 1.0) / 8.0, "P{v}: the kept ability's place");
+        assert_eq!(from, digits, "P{v}: Thespian's Stage's ability");
+    }
+}

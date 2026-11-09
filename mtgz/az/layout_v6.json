@@ -1033,7 +1033,7 @@
     null,
     null
   ],
-  "features": 43956,
+  "features": 44212,
   "globals": [
     {
       "count": 128,
@@ -1051,7 +1051,7 @@
       "offset": 43828
     },
     {
-      "count": 64,
+      "count": 320,
       "name": "globals_v6",
       "offset": 43892
     }
