@@ -959,7 +959,8 @@ fn escape_exiles_the_card_discarded_for_its_additional_cost_and_casts_a_split_ha
         .start();
     let ld = g.card(0, "Life // Death", Zone::Graveyard);
     let bear = g.card(0, "Test Bear", Zone::Graveyard);
-    let ch = g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&o| matches!(o, Choice::Cast(x) | Choice::CastFace(x) | Choice::Faces(x, _) if x == ld));
+    // (`offered`: Priority's "cast or play from the graveyard" leads to it, ENGINE.md 100.5.)
+    let ch = g.offered().into_iter().find(|&o| matches!(o, Choice::Cast(x) | Choice::CastFace(x) | Choice::Faces(x, _) if x == ld));
     let ch = ch.unwrap_or_else(|| panic!("escape offered: {}", opts(&g)));
     let tb = g.tgt(bear);
     cast_recording(&mut g, ch, |g| match g.kind() {

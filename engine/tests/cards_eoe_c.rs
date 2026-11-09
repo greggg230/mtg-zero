@@ -904,7 +904,8 @@ fn timeline_culler_warps_from_hand_paying_two_life_cr702_185a() {
 fn timeline_culler_is_cast_from_the_graveyard_for_its_warp_cost_cr702_185a() {
     let mut g = scen().battlefield(0, &["Swamp", "Swamp"]).graveyard(0, &["Timeline Culler"]).at(Step::Main1, 0).start();
     let c = g.card(0, "Timeline Culler", Zone::Graveyard);
-    let opt = g.pending_decision().unwrap().options.iter().find(|o| matches!(o.choice, Choice::Cast(x) if x == c)).map(|o| o.choice);
+    // (`offered`: Priority's "cast or play from the graveyard" leads to it, ENGINE.md 100.5.)
+    let opt = g.offered().into_iter().find(|o| matches!(*o, Choice::Cast(x) if x == c));
     let cast_it = opt.unwrap_or_else(|| panic!("castable from the graveyard: {:?}", g.options_desc()));
     g.choose(cast_it);
     pay(&mut g);

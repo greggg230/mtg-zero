@@ -1275,12 +1275,13 @@ fn public_state_reaches_the_encoding() {
     println!("{ok} perturbations encoded, {by_design} deliberate limits, {next} gaps for the next layout (ENGINE.md 58.10, 60)");
     assert!(findings.is_empty(), "{} findings:\n{}", findings.len(), findings.join("\n"));
     // Layout v5 (ENGINE.md 60) encodes layout v4's 42 gaps, layout v6 (ENGINE.md 100.5) the Edge
-    // of Eternities port's and workstream C's (`public_state::V6_FIXED`); one gap is left, the
-    // graveyard's order, which the GRAVEYARD action ids of Priority's casts from a graveyard are
-    // positions in (ENGINE.md 65). Anything else is a deliberate limit.
+    // of Eternities port's and workstream C's (`public_state::V6_FIXED`), and the graveyard's
+    // order is no id's since Priority's casts from a graveyard became one option and a list
+    // choice (ENGINE.md 100.5): only deliberate limits are left.
     let gaps: Vec<&str> = lim.iter().filter(|l| l.kind == LimitKind::NextLayout).map(|l| l.name).collect();
-    assert_eq!(gaps, ["two graveyard cards swap places"], "the gaps on the allowlist");
-    assert_eq!(next, 1);
+    assert!(gaps.is_empty(), "next-layout gaps: {gaps:?}");
+    assert_eq!(next, 0);
+    assert_eq!(by_design, 4, "the deliberate limits");
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.
@@ -1590,9 +1591,63 @@ fn gy_card(g: &engine::Game, c: engine::Choice) -> Option<engine::CardIdx> {
     let i = match c {
         Choice::Card(i) => i,
         Choice::Target(Target::Obj(r)) => r.idx,
+        // (A cast or play from the graveyard, ENGINE.md 100.5.)
+        Choice::Cast(i) | Choice::Play(i) | Choice::CastFace(i) | Choice::PlayFace(i) | Choice::Faces(i, _) => i,
         _ => return None,
     };
     (g.obj(i).zone == Zone::Graveyard).then_some(i)
+}
+
+/// Gap #1 of the public-state gate (ENGINE.md 100.5): Priority's casts and
+/// plays from the graveyard are one option, `GRAVEYARD` + 0 ("cast or play
+/// from the graveyard"), whatever the graveyard's order; then a
+/// `ChooseGraveyardCard` over the graveyard list asks which, each option
+/// `LIBRARY` + its card's slot with that card's token (`check_graveyard_list`),
+/// exactly the casts Priority had; the cast goes on as Priority's (CR
+/// 702.34a: Lingering Souls's flashback, then exiled).
+#[test]
+fn cr_702_34a_a_cast_from_the_graveyard_is_one_priority_option_then_the_cards_list_token() {
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    for order in [["Lingering Souls", "Island"], ["Island", "Lingering Souls"]] {
+        let mut g = Scenario::new(CardDb::cube())
+            .spec(|s| s.auto_single = false)
+            .battlefield(0, &["Swamp", "Plains"])
+            .graveyard(0, &order)
+            .library(0, &["Island"; 5])
+            .library(1, &["Island"; 5])
+            .at(Step::Main1, 0)
+            .start();
+        let ls = g.card(0, "Lingering Souls", Zone::Graveyard);
+        let d = g.pending_decision().unwrap().clone();
+        assert_eq!(d.kind, DecisionKind::Priority);
+        let gy: Vec<_> = d.options.iter().filter(|o| (act::GRAVEYARD..act::GRAVEYARD + 2 * act::GRAVEYARD_N).contains(&o.action)).collect();
+        assert_eq!(gy.len(), 1, "{order:?}: one graveyard option");
+        assert_eq!((gy[0].action, gy[0].choice), (act::GRAVEYARD, Choice::FromGraveyard), "{order:?}");
+        let mut keys = Vec::new();
+        g.apply(act::GRAVEYARD, &mut keys).unwrap();
+        assert_eq!(g.kind(), Some(DecisionKind::ChooseGraveyardCard));
+        assert_eq!(g.to_move(), Some(0));
+        let list = check_graveyard_list(&g, &format!("{order:?}"));
+        assert_eq!(list, g.player(0).graveyard, "the whole graveyard, in order");
+        let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+        assert_eq!(opts, vec![Choice::Cast(ls)], "exactly Priority's cast");
+        g.choose(Choice::Cast(ls));
+        for _ in 0..30 {
+            if g.kind() == Some(DecisionKind::Priority) && g.stack().is_empty() {
+                break;
+            }
+            let c = match g.kind() {
+                Some(DecisionKind::Priority) => Choice::Pass,
+                _ => g.pending_decision().unwrap().options[0].choice,
+            };
+            g.choose(c);
+        }
+        assert_eq!(g.obj(ls).zone, Zone::Exile, "{order:?}: flashback, then exiled
+{}", g.log_lines().join("
+"));
+        assert_eq!(g.count_in(0, "Spirit", Zone::Battlefield), 2);
+    }
 }
 
 /// The pending decision's graveyard list (ENGINE.md 65.10), checked card by
@@ -2193,7 +2248,9 @@ fn root_view_leaves_encode_alike_whatever_the_deciders_options() {
     let delver = MtgSpec::parse(&mirror).unwrap();
     let mut all = states(scale(14), 16, 68);
     let mut h = Heuristic::new(68);
-    for s in 0..scale(14) {
+    // (24 mirror games: 14 compared 293 positions once Priority's casts from a graveyard became
+    // two decisions, ENGINE.md 100.5, which changed the random games.)
+    for s in 0..scale(24) {
         let mut g = MtgAz::new_game(&delver, 2, 680_000 + s).unwrap();
         let mut keys = Vec::new();
         let mut k = 0;

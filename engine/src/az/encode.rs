@@ -967,6 +967,9 @@ fn task_code(t: &Task) -> usize {
         // M8a (ENGINE.md 35).
         Task::PlayDraw { .. } => 24,
         Task::RevealCompanion { .. } => 25,
+        // ENGINE.md 100.5: which graveyard card Priority's "cast or play
+        // from the graveyard" casts or plays.
+        Task::GraveyardCast { .. } => 27,
         _ => 18,
     }
 }
@@ -974,6 +977,7 @@ fn task_code(t: &Task) -> usize {
 /// The asking-task code of sideboarding (no game task asks it; ENGINE.md
 /// 36.7).
 const TASK_SIDEBOARD: usize = 26;
+const _: () = assert!(TASK_SIDEBOARD + 2 <= ctx::TASKS);
 
 /// The effect op a frame is at (context block); exhaustive, so a new op is
 /// a compile error here.

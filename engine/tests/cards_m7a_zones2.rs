@@ -94,7 +94,9 @@ fn cr_702_34_lingering_souls_flashback_from_the_graveyard_then_exiled() {
     let mut g = scen().battlefield(0, &["Swamp", "Plains"]).graveyard(0, &["Lingering Souls"]).at(Step::Main1, 0).start();
     let ls = g.card(0, "Lingering Souls", Zone::Graveyard);
     assert!(g.has_option(Choice::Cast(ls)));
-    assert_eq!(action_of(&g, Choice::Cast(ls)), act::GRAVEYARD, "its graveyard slot");
+    // (Priority's "cast or play from the graveyard", then the card's slot in
+    // the graveyard list, ENGINE.md 100.5.)
+    assert_eq!(action_of(&g, Choice::FromGraveyard), act::GRAVEYARD, "cast or play from the graveyard");
     cast_card(&mut g, ls, 0);
     resolve_with(&mut g, |_| None);
     assert_eq!(g.count_in(0, "Spirit", Zone::Battlefield), 2);

@@ -86,12 +86,6 @@ fn resolve(g: &mut Game) {
     resolve_with(g, |_| None);
 }
 
-fn legal(g: &Game) -> Vec<u16> {
-    let mut v = Vec::new();
-    g.legal_actions(&mut v);
-    v
-}
-
 /// Pass priority and decline attacks and blocks until P`p`'s next precombat
 /// main phase, with priority and the stack empty.
 fn quiet_until_turn(g: &mut Game, p: PlayerId) {
@@ -267,9 +261,9 @@ fn a_flashback_spell_cast_from_the_graveyard_triggers_it() {
         .start();
     let m = bf(&g, 0, MURKTIDE);
     let fl = g.card(0, "Faithless Looting", Zone::Graveyard);
-    let a = g.graveyard_action(0, fl);
-    assert!(legal(&g).contains(&a), "{}", opts(&g));
-    g.apply(a, &mut Vec::new()).unwrap();
+    // (Priority's "cast or play from the graveyard", then the card: ENGINE.md 100.5.)
+    assert!(g.has_option(Choice::Cast(fl)), "{}", opts(&g));
+    g.choose(Choice::Cast(fl));
     pay_with(&mut g, &[], |g| (g.kind() == Some(DecisionKind::ChooseRoute)).then(|| g.pending_decision().unwrap().options[0].choice));
     resolve(&mut g);
     assert_eq!(g.obj(fl).zone, Zone::Exile, "flashback exiles it");
@@ -365,9 +359,9 @@ fn delve_works_with_an_alternative_cost_cr_702_66b() {
         .start();
     let m = g.card(0, MURKTIDE, Zone::Graveyard);
     let gy0 = gy(&g, 0);
-    let a = g.graveyard_action(0, m);
-    assert!(legal(&g).contains(&a), "{}", opts(&g));
-    g.apply(a, &mut Vec::new()).unwrap();
+    // (Priority's "cast or play from the graveyard", then the card: ENGINE.md 100.5.)
+    assert!(g.has_option(Choice::Cast(m)), "{}", opts(&g));
+    g.choose(Choice::Cast(m));
     // Delve: the first five (two of them instants and sorceries); escape's
     // exile: the three after it.
     let delve: Vec<CardIdx> = gy0[..5].to_vec();
@@ -647,9 +641,9 @@ fn a_card_cast_from_the_graveyard_with_yawgmoths_will_triggers_it() {
     pay_with(&mut g, &[], |_| None);
     resolve(&mut g);
     let bs = g.card(0, "Brainstorm", Zone::Graveyard);
-    let a = g.graveyard_action(0, bs);
-    assert!(legal(&g).contains(&a), "{}", opts(&g));
-    g.apply(a, &mut Vec::new()).unwrap();
+    // (Priority's "cast or play from the graveyard", then the card: ENGINE.md 100.5.)
+    assert!(g.has_option(Choice::Cast(bs)), "{}", opts(&g));
+    g.choose(Choice::Cast(bs));
     pay_with(&mut g, &[], |_| None);
     resolve(&mut g);
     assert_eq!(p1p1(&g, m), 1, "{}", g.log_lines().join("\n"));

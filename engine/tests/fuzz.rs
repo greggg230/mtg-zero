@@ -770,6 +770,8 @@ fn check_graveyard_list(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
         let c = match o.choice {
             Choice::Card(i) => i,
             Choice::Target(Target::Obj(r)) => r.idx,
+            // (A cast or play from the graveyard, ENGINE.md 100.5.)
+            Choice::Cast(i) | Choice::Play(i) | Choice::CastFace(i) | Choice::PlayFace(i) | Choice::Faces(i, _) => i,
             _ => continue,
         };
         if g.obj(c).zone != Zone::Graveyard {

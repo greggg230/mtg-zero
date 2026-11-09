@@ -79,9 +79,10 @@ fn yawgmoths_will_lets_you_play_a_modal_double_faced_card_with_either_face_cr_71
     g.choose(Choice::Cast(w));
     resolve(&mut g);
     let s = g.card(0, SMASHING, Zone::Graveyard);
-    let land = g.has_option(Choice::PlayFace(s)) || g.pending_decision().unwrap().options.iter().any(|o| matches!(o.choice, Choice::Faces(c, _) if c == s));
+    // (`offered`: Priority's "cast or play from the graveyard" leads to it, ENGINE.md 100.5.)
+    let land = g.has_option(Choice::PlayFace(s)) || g.offered().iter().any(|o| matches!(*o, Choice::Faces(c, _) if c == s));
     assert!(land, "the land face: {}", opts(&g));
-    let cast = g.has_option(Choice::Cast(s)) || g.pending_decision().unwrap().options.iter().any(|o| matches!(o.choice, Choice::Faces(c, _) if c == s));
+    let cast = g.has_option(Choice::Cast(s)) || g.offered().iter().any(|o| matches!(*o, Choice::Faces(c, _) if c == s));
     assert!(cast, "the spell face: {}", opts(&g));
 }
 

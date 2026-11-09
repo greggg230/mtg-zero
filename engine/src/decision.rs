@@ -258,6 +258,13 @@ pub enum Choice {
     /// A paged choice's "next page" ([`Game::ask_paged`], ENGINE.md 100.1):
     /// the page the asking task asks next.
     Page(Page),
+    /// Priority: cast or play a card from the decider's graveyard
+    /// (`act::GRAVEYARD` + 0): a `ChooseGraveyardCard` decision follows over
+    /// its graveyard list (`LIBRARY` + its slot: each card's cast or play,
+    /// the choice it was in Priority before). The choice made in two steps,
+    /// nothing happening between them (ENGINE.md 100.5: no id depends on the
+    /// graveyard's order).
+    FromGraveyard,
 }
 
 /// `Choice::Faces` bits: the front face is cast / played, the other face
@@ -595,10 +602,11 @@ impl Game {
     }
 
     /// `GRAVEYARD` slot of a card: its position in its owner's graveyard
-    /// (0 = bottom), the decider's first (ENGINE.md 11). Priority's casts
-    /// and plays from the graveyard keep these ids; every other decision
+    /// (0 = bottom), the decider's first (ENGINE.md 11). Every decision
     /// renames them to the card's slot in its graveyard list
-    /// ([`graveyard_list`](Self::graveyard_list), ENGINE.md 65.10).
+    /// ([`graveyard_list`](Self::graveyard_list), ENGINE.md 65.10);
+    /// Priority's casts and plays from the graveyard are one option,
+    /// `GRAVEYARD` + 0, then a `ChooseGraveyardCard` (ENGINE.md 100.5).
     pub fn graveyard_action(&self, viewer: PlayerId, idx: CardIdx) -> u16 {
         let owner = self.objs[idx.i()].owner;
         let pos = self.players[owner as usize].graveyard.iter().position(|&c| c == idx).expect("card in a graveyard");
@@ -614,6 +622,8 @@ impl Game {
         let idx = match c {
             Choice::Card(i) => i,
             Choice::Target(Target::Obj(r)) => r.idx,
+            // (A cast or play from the graveyard, ENGINE.md 100.5.)
+            Choice::Cast(i) | Choice::Play(i) | Choice::CastFace(i) | Choice::PlayFace(i) | Choice::Faces(i, _) => i,
             _ => return None,
         };
         (self.objs[idx.i()].zone == Zone::Graveyard).then_some(idx)
@@ -661,6 +671,9 @@ impl Game {
     /// `GRAVEYARD` id.
     pub(crate) fn name_graveyard_options(&self, p: PlayerId, kind: DecisionKind, options: &mut [Opt]) {
         if kind == DecisionKind::Priority {
+            // (Its one graveyard option, `GRAVEYARD` + 0: "cast or play from
+            // the graveyard", ENGINE.md 100.5.)
+            debug_assert!(options.iter().all(|o| !(act::GRAVEYARD + 1..act::GRAVEYARD + 2 * act::GRAVEYARD_N).contains(&o.action)));
             return;
         }
         let list = self.graveyard_list(p, kind, options);
@@ -851,6 +864,7 @@ impl Game {
             Choice::Faces(i, m) => format!("{}#{} (choose a face, {m:#b})", self.name(i), i.0),
             Choice::Companion => "put the companion into hand".into(),
             Choice::Page(p) => format!("more (range {}, window {})", p.range, p.window),
+            Choice::FromGraveyard => "cast or play from the graveyard".into(),
         }
     }
 }

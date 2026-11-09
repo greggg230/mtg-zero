@@ -1608,15 +1608,16 @@ pub fn perturbations() -> Vec<Perturbation> {
 /// the 42 gaps layout v4 had no room for (58.10), layout v6 (ENGINE.md
 /// 100.5) the gaps the Edge of Eternities port and workstream C added after
 /// v5 froze, and two facts cards read that were limits by design
-/// (`V6_FIXED`). One gap is left, found by the Delver mirror's delve
-/// choices (ENGINE.md 65): the graveyard's order, which Priority's
-/// `GRAVEYARD` ids depend on (the other graveyard choices moved to the
-/// list's ids, ENGINE.md 65.10). How to add a gap later: ENGINE.md 100.5.
+/// (`V6_FIXED`); the graveyard's order, which Priority's `GRAVEYARD` ids
+/// depended on, no id depends on since its casts became one option and a
+/// list choice (ENGINE.md 100.5). No gap is left. How to add a gap later:
+/// ENGINE.md 100.5.
 pub fn limits() -> Vec<Limit> {
+    #[allow(unused_imports)]
     use LimitKind::{Design, NextLayout};
     let l = |name, kind, why| Limit { name, kind, why };
     vec![
-        l("two graveyard cards swap places", NextLayout, "graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2); a graveyard-card choice or target is a list id whose token is its card, the graveyards in order in the list block while it is pending (ENGINE.md 65.10), but Priority's casts and plays from the graveyard (flashback, escape, retrace, Crucible's lands) keep GRAVEYARD ids, a graveyard position scored from the pooled state with no token: made without seeing which card an id is, and the order is not in the input otherwise (option C of ENGINE.md 65.7, a layout change, closes it)"),
+        l("two graveyard cards swap places", Design, "graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2); no action id depends on the order: a graveyard-card choice or target is a list id whose token is its card, the graveyards in order in the list block while it is pending (ENGINE.md 65.10), and Priority's casts and plays from the graveyard are one option, GRAVEYARD + 0, then that list's choice (ENGINE.md 100.5)"),
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
         l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),

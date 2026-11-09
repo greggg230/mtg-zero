@@ -283,6 +283,12 @@ impl Game {
             (K::Priority, Choice::PlayFace(i)) => format!("Play {} ({})", self.other_face_name(i), nm(i)),
             (K::Priority, Choice::Faces(i, _)) => format!("Cast or play {}", nm(i)),
             (K::Priority, Choice::Companion) => "Put the companion into hand".into(),
+            (K::Priority, Choice::FromGraveyard) => "Cast or play from the graveyard".into(),
+            (K::ChooseGraveyardCard, Choice::Cast(i)) => format!("Cast {}", nm(i)),
+            (K::ChooseGraveyardCard, Choice::Play(i)) => format!("Play {}", nm(i)),
+            (K::ChooseGraveyardCard, Choice::CastFace(i)) => format!("Cast {} ({})", self.other_face_name(i), nm(i)),
+            (K::ChooseGraveyardCard, Choice::PlayFace(i)) => format!("Play {} ({})", self.other_face_name(i), nm(i)),
+            (K::ChooseGraveyardCard, Choice::Faces(i, _)) => format!("Cast or play {}", nm(i)),
             (_, Choice::Ability(i, slot)) => {
                 let d = self.def_of(i);
                 let ad = match slot {

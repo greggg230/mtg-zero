@@ -176,7 +176,8 @@ fn log(g: &Game) -> String {
 }
 
 fn options(g: &Game) -> Vec<Choice> {
-    g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect()
+    // (`offered`: a cast from the graveyard too, ENGINE.md 100.5.)
+    g.offered()
 }
 
 /// Answer decisions (`answer`, else the first option) until priority.

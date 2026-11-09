@@ -962,6 +962,10 @@ impl Game {
             // castable counting the caster's hand (a Spirit Guide's mana), so
             // it pins as a payment does (ENGINE.md 71.4).
             Task::ChooseFace { p, mask, .. } if mask & (crate::decision::FACE_CAST | crate::decision::OTHER_CAST) != 0 => Some(*p),
+            // "Which graveyard card?" after Priority's "cast or play from the
+            // graveyard" (ENGINE.md 100.5): the casts offered were found
+            // castable counting the caster's hand, as a face choice's.
+            Task::GraveyardCast { p } => Some(*p),
             _ => None,
         })
     }
@@ -973,6 +977,33 @@ impl Game {
         use crate::flow::Task;
         let mut out = Vec::new();
         for t in &self.agenda {
+            // "Which graveyard card?" (`payment_in_progress`, ENGINE.md
+            // 100.5): the casts it offers may count on a hand card as a cast's
+            // do (an alternative cost's, retrace's land card).
+            if let Task::GraveyardCast { p } = *t {
+                let offered: Vec<CardIdx> = self.graveyard_cast_options(p).iter().filter_map(|o| match o.choice {
+                    crate::decision::Choice::Cast(c) | crate::decision::Choice::CastFace(c) | crate::decision::Choice::Faces(c, _) => Some(c),
+                    _ => None,
+                }).collect();
+                for c in offered {
+                    let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(c)) };
+                    let def = self.def_of(c);
+                    let faces = [def.halves.map(|h| h.0).unwrap_or(self.objs[c.i()].def), def.halves.map(|h| h.1).unwrap_or(self.objs[c.i()].def)];
+                    for face in faces.into_iter().chain(def.other_face()) {
+                        for a in &self.db.def(face).alt_costs {
+                            if let Some(f) = &a.cost.exile_from_hand {
+                                out.push((f.clone(), ctx));
+                            }
+                        }
+                    }
+                    if self.gy_routes(p, c, None).iter().any(|r| r.code == crate::cast::route::RETRACE) {
+                        if let Some(f) = &crate::cast::retrace_cost().discard_filter {
+                            out.push((f.clone(), ctx));
+                        }
+                    }
+                }
+                continue;
+            }
             // A face choice (`payment_in_progress`): the alternative costs of
             // the faces it offers to cast may count on a hand card too.
             if let Task::ChooseFace { p, card, mask } = *t {

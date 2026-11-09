@@ -176,7 +176,34 @@ impl Game {
 
     // ---- priority options (CR 117.1, 116.2a, 307.1, 602.2) ----------------
 
+    /// Priority's options (ENGINE.md 11). The casts and plays from the
+    /// graveyard are one option, `GRAVEYARD` + 0 (`Choice::FromGraveyard`),
+    /// then a `ChooseGraveyardCard` over the graveyard list asks which
+    /// (`graveyard_cast_options`; ENGINE.md 100.5: no id depends on the
+    /// graveyard's order, which the network sees in the list block).
     pub(crate) fn priority_options(&self, p: PlayerId) -> Vec<Opt> {
+        let mut opts = self.priority_options_split(p);
+        if opts.iter().any(Self::is_graveyard_cast) {
+            opts.retain(|o| !Self::is_graveyard_cast(o));
+            opts.push(Opt { action: act::GRAVEYARD, choice: Choice::FromGraveyard });
+        }
+        opts
+    }
+
+    /// Priority's casts and plays from `p`'s graveyard (with their
+    /// `GRAVEYARD` ids; the `ChooseGraveyardCard` after `Choice::FromGraveyard`
+    /// renames them to the graveyard list's, ENGINE.md 65.10, 100.5).
+    pub(crate) fn graveyard_cast_options(&self, p: PlayerId) -> Vec<Opt> {
+        self.priority_options_split(p).into_iter().filter(Self::is_graveyard_cast).collect()
+    }
+
+    fn is_graveyard_cast(o: &Opt) -> bool {
+        (act::GRAVEYARD..act::GRAVEYARD + 2 * act::GRAVEYARD_N).contains(&o.action)
+    }
+
+    /// Every option of Priority, one per graveyard card (the bots judge
+    /// these, ENGINE.md 100.5).
+    pub(crate) fn priority_options_split(&self, p: PlayerId) -> Vec<Opt> {
         let mut opts = self.priority_options_all(p);
         // "Each player can't cast more than one spell each turn" (Archon of
         // Emeria); "your opponents can't cast spells during your turn"

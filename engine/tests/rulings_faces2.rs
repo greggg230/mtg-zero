@@ -35,7 +35,8 @@ fn log(g: &Game) -> String {
 
 /// The priority option that plays or casts `c`, if any.
 fn option_of(g: &Game, c: CardIdx) -> Option<Choice> {
-    g.pending_decision()?.options.iter().map(|o| o.choice).find(|ch| match *ch {
+    // (`offered`: a cast or play from the graveyard too, ENGINE.md 100.5.)
+    g.offered().into_iter().find(|ch| match *ch {
         Choice::Cast(x) | Choice::Play(x) | Choice::CastFace(x) | Choice::PlayFace(x) | Choice::Faces(x, _) => x == c,
         _ => false,
     })

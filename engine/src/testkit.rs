@@ -1,7 +1,7 @@
 //! Scenario builder and helpers for tests (not used by the engine).
 
 use crate::db::CardDb;
-use crate::decision::{Choice, DecisionKind};
+use crate::decision::{act, Choice, DecisionKind};
 use crate::flow::Task;
 use crate::game::{Game, GameSpec, Step};
 use crate::ids::{CardIdx, PlayerId, Target, Zone};
@@ -307,8 +307,30 @@ impl Game {
         self.pending.as_ref().map(|d| d.kind)
     }
 
+    /// `c` is an option of the pending decision; at Priority, a cast or play
+    /// from the graveyard counts when "cast or play from the graveyard"
+    /// leads to it (ENGINE.md 100.5).
     pub fn has_option(&self, c: Choice) -> bool {
-        self.pending.as_ref().is_some_and(|d| d.action_of(c).is_some())
+        self.pending.as_ref().is_some_and(|d| d.action_of(c).is_some()) || self.graveyard_route(c)
+    }
+
+    /// The choices of the pending decision; at Priority, "cast or play from
+    /// the graveyard" stands for the casts and plays it leads to (ENGINE.md
+    /// 100.5): what each was as a Priority option before.
+    pub fn offered(&self) -> Vec<Choice> {
+        let Some(d) = self.pending.as_ref() else { return Vec::new() };
+        let mut v: Vec<Choice> = d.options.iter().map(|o| o.choice).filter(|&c| c != Choice::FromGraveyard).collect();
+        if d.kind == DecisionKind::Priority && d.action_of(Choice::FromGraveyard).is_some() {
+            v.extend(self.graveyard_cast_options(d.player).iter().map(|o| o.choice));
+        }
+        v
+    }
+
+    /// Priority offers `Choice::FromGraveyard` and `c` is one of the casts
+    /// and plays it leads to (ENGINE.md 100.5).
+    fn graveyard_route(&self, c: Choice) -> bool {
+        self.pending.as_ref().is_some_and(|d| d.kind == DecisionKind::Priority && d.action_of(Choice::FromGraveyard).is_some())
+            && self.graveyard_cast_options(self.pending.as_ref().unwrap().player).iter().any(|o| o.choice == c)
     }
 
     pub fn options_desc(&self) -> Vec<String> {
@@ -321,6 +343,16 @@ impl Game {
     /// Answer the pending decision with `c` (panics if it is not legal).
     /// Returns the chance keys.
     pub fn choose(&mut self, c: Choice) -> Vec<u64> {
+        // (A cast or play from the graveyard: "cast or play from the
+        // graveyard", then that card, ENGINE.md 100.5.)
+        if self.pending.as_ref().is_some_and(|d| d.action_of(c).is_none()) && self.graveyard_route(c) {
+            let mut keys = Vec::new();
+            self.apply(act::GRAVEYARD, &mut keys).unwrap();
+            if self.pending.as_ref().is_some_and(|d| d.action_of(c).is_some()) && matches!(self.agenda.last(), Some(Task::GraveyardCast { .. })) {
+                keys.extend(self.choose(c));
+            }
+            return keys;
+        }
         let d = self.pending.as_ref().unwrap_or_else(|| panic!("no decision; outcome {:?}", self.outcome));
         let a = d.action_of(c).unwrap_or_else(|| {
             panic!(

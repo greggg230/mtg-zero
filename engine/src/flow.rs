@@ -117,6 +117,11 @@ pub(crate) enum Task {
     /// than its `ACTIVATE` slots; EoE W3). Choice: `ChooseMode`, `NUMBER` +
     /// place - `from`; `NUMBER` + 31: the ones after (a further page).
     ChooseAbility { p: PlayerId, card: CardIdx, from: u8 },
+    /// Which card of `p`'s graveyard Priority's `Choice::FromGraveyard`
+    /// casts or plays (ENGINE.md 100.5). Choice: `ChooseGraveyardCard`,
+    /// `LIBRARY` + the card's slot in the graveyard list, its cast or play
+    /// as Priority offered it; answered as Priority's answer.
+    GraveyardCast { p: PlayerId },
     /// CR 601.2a-b: which permission casts graveyard card `card` (face
     /// `face`; `cast::route`).
     ChooseRoute { p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId> },
@@ -327,6 +332,7 @@ impl Game {
             Task::AttackTarget { card } => self.choose_attack_target(card),
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
             Task::ChooseAbility { p, card, from } => self.choose_ability(p, card, from),
+            Task::GraveyardCast { p } => self.graveyard_cast(p),
             Task::ChooseRoute { p, card, face } => self.choose_route(p, card, face),
             Task::EnterAsCopy { card, note, since } => self.enter_as_copy(card, note, since),
             Task::CopyTargets { id, k, copy } => self.copy_targets(id, k, copy),
@@ -832,7 +838,27 @@ impl Game {
                 self.agenda.push(Task::Priority);
                 self.begin_companion(p);
             }
+            // A cast or play from the graveyard: which card is the next
+            // decision (ENGINE.md 100.5), answered as Priority's.
+            Some(Choice::FromGraveyard) => self.graveyard_cast(p),
             Some(other) => unreachable!("priority answer {other:?}"),
+        }
+    }
+
+    /// `Task::GraveyardCast`: ask `p` which graveyard card Priority's
+    /// `Choice::FromGraveyard` casts or plays (the options Priority had for
+    /// them, renamed to the graveyard list's ids: ENGINE.md 65.10, 100.5);
+    /// the answer is Priority's (`priority_ask`).
+    fn graveyard_cast(&mut self, p: PlayerId) {
+        match self.answer.take() {
+            None | Some(Choice::FromGraveyard) => {
+                let opts = self.graveyard_cast_options(p);
+                self.ask(Task::GraveyardCast { p }, p, DecisionKind::ChooseGraveyardCard, opts);
+            }
+            Some(c) => {
+                self.answer = Some(c);
+                self.priority_ask();
+            }
         }
     }
 

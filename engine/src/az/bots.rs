@@ -76,6 +76,39 @@ pub fn sideboard(sb: &super::matches::Sideboarding, legal: &[u16]) -> u16 {
     }
 }
 
+/// ENGINE.md 100.5: Priority's "cast or play from the graveyard"
+/// (`GRAVEYARD` + 0, `Choice::FromGraveyard`) stands for the casts and plays
+/// it leads to; the bots judge those, as when each was a Priority option:
+/// the decision with them in its place (their `GRAVEYARD` ids), if it has
+/// one.
+fn priority_expanded(g: &Game, d: &Decision) -> Option<Decision> {
+    if !d.options.iter().any(|o| o.choice == Choice::FromGraveyard) {
+        return None;
+    }
+    let mut options: Vec<crate::decision::Opt> = d.options.iter().copied().filter(|o| o.choice != Choice::FromGraveyard).collect();
+    options.extend(g.graveyard_cast_options(d.player));
+    options.sort_by_key(|o| o.action);
+    Some(Decision { options, ..d.clone() })
+}
+
+/// A `GRAVEYARD` id (Priority's casts and plays from a graveyard).
+fn is_graveyard_id(a: u16) -> bool {
+    (act::GRAVEYARD..act::GRAVEYARD + 2 * act::GRAVEYARD_N).contains(&a)
+}
+
+/// The Priority decision behind a `Task::GraveyardCast` (ENGINE.md 100.5):
+/// its options with one per graveyard card, as the bot judged them.
+fn graveyard_cast_priority(g: &Game, d: &Decision) -> Decision {
+    Decision { player: d.player, kind: K::Priority, options: g.priority_options_split(d.player), stage: crate::decision::Stage::One }
+}
+
+/// The option of `d` (a `Task::GraveyardCast`) whose cast or play is the
+/// one `pick` (an action of `pd`, `graveyard_cast_priority`) names.
+fn graveyard_pick(d: &Decision, pd: &Decision, pick: Option<u16>) -> Option<u16> {
+    let want = pick.and_then(|a| pd.options.iter().find(|o| o.action == a)).map(|o| o.choice);
+    d.options.iter().find(|o| Some(o.choice) == want).or(d.options.first()).map(|o| o.action)
+}
+
 pub struct Heuristic {
     pub rng: Rng,
     /// Activations at priority this turn: (player, card, ability, times).
@@ -528,7 +561,17 @@ impl Heuristic {
         self.sync(g);
         let p = d.player;
         let pick = match d.kind {
-            K::Priority => self.priority(g, d, p),
+            // (ENGINE.md 100.5: "cast or play from the graveyard" for the
+            // cast or play it judged best, then that card.)
+            K::Priority => {
+                let ex = priority_expanded(g, d);
+                self.priority(g, ex.as_ref().unwrap_or(d), p).map(|a| if is_graveyard_id(a) { act::GRAVEYARD } else { a })
+            }
+            K::ChooseGraveyardCard if matches!(g.agenda.last(), Some(Task::GraveyardCast { .. })) => {
+                let pd = graveyard_cast_priority(g, d);
+                let a = self.priority(g, &pd, p);
+                graveyard_pick(d, &pd, a)
+            }
             // CR 103.1: play first (the tempo of the first land drop is
             // worth more than a card in these decks; ENGINE.md 35).
             K::PlayDraw => Some(act::PLAYER),
@@ -1656,7 +1699,16 @@ pub mod v1 {
             let Some(d) = g.pending_decision() else { return legal[0] };
             let p = d.player;
             let pick = match d.kind {
-                K::Priority => self.priority(g, d, p),
+                // (ENGINE.md 100.5, as `Heuristic`'s.)
+                K::Priority => {
+                    let ex = super::priority_expanded(g, d);
+                    self.priority(g, ex.as_ref().unwrap_or(d), p).map(|a| if super::is_graveyard_id(a) { act::GRAVEYARD } else { a })
+                }
+                K::ChooseGraveyardCard if matches!(g.agenda.last(), Some(crate::flow::Task::GraveyardCast { .. })) => {
+                    let pd = super::graveyard_cast_priority(g, d);
+                    let a = self.priority(g, &pd, p);
+                    super::graveyard_pick(d, &pd, a)
+                }
                 K::Mulligan => {
                     let lands = g.player(p).hand.iter().filter(|&&c| g.def_of(c).is(types::LAND)).count();
                     let n = g.player(p).hand.len();
