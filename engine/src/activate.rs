@@ -1496,15 +1496,20 @@ impl Game {
 
     /// The types of mana permanent `c`'s mana abilities could make now
     /// (CR 106.7): the abilities it has (not a latent one it hasn't gained:
-    /// Urza's Saga before its chapter I; ruling a755e0f5).
+    /// Urza's Saga before its chapter I; ruling a755e0f5), those other
+    /// permanents grant it and the intrinsic ones of basic land types an
+    /// effect gave it (`Game::granted_activated`; ENGINE.md 100.4.5).
     pub(crate) fn could_produce(&self, c: CardIdx) -> crate::mana::ManaMask {
         let p = self.objs[c.i()].controller;
         let d = self.abilities(c);
+        let granted = if self.grants_activated_now() { self.granted_activated(c) } else { Vec::new() };
         d.activated
             .iter()
             .enumerate()
             .filter(|&(i, _)| d.latent == 0 || self.has_activated(c, i))
-            .filter_map(|(_, a)| a.mana())
+            .map(|(_, a)| a)
+            .chain(granted.iter().map(|g| self.db.def(g.def).activated_def(crate::db::AbilitySlot::Activated(g.slot))))
+            .filter_map(|a| a.mana())
             .flat_map(|m| productions(self, p, &m.prod, Some(c)))
             .fold(0, |m, v| (0..6).filter(|&t| v[t] > 0).fold(m, |m, t| m | (1 << t)))
     }

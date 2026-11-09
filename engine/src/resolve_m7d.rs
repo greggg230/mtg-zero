@@ -871,13 +871,15 @@ impl Game {
         use crate::pay::{Class, Src, Yield, LJ_FOR, SAC, SAC_FOR, SQ_FOR};
         let mut out = Vec::new();
         let def = self.objs[c.i()].def;
-        let mut k = self.abilities(c).activated.len();
+        // (Its places: after its own abilities and those granted to it,
+        // `Game::activated_home`'s numbering; past the fourth the payment
+        // offers it by the permanent's own id, docs/shortcuts.md 31.7.2k.)
+        let granted = if self.grants_activated_now() { self.granted_activated(c).len() } else { 0 };
+        let mut k = self.abilities(c).activated.len().max(self.own_ability_slots(c)) + granted;
         let mut add = |out: &mut Vec<Class>, slot, yld, share: u8| {
-            if k < 4 {
-                let cl = Class { sac_self: true, res: SAC, slot_id: k as u8, share, ..Class::of(def, Src { card: c, slot }, yld) };
-                out.push(cl);
-                k += 1;
-            }
+            let cl = Class { sac_self: true, res: SAC, slot_id: k.min(u8::MAX as usize) as u8, share, ..Class::of(def, Src { card: c, slot }, yld) };
+            out.push(cl);
+            k += 1;
         };
         if rain && !self.activation_locks_hit(c, locks) {
             let mask = self.sac_mana_of(c);

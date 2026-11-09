@@ -367,7 +367,8 @@ pub(crate) struct PayMana {
     pub now_taken: [u8; 6],
     pub now_min: u8,
     /// The page of the `PayPool` decision (A0's `ask_paged`: more pools
-    /// than `NUMBER` ids).
+    /// than `NUMBER` ids), or of the question which source a permanent
+    /// picked by its own id stands for (more than `NUMBER` ids).
     pub pool_page: crate::decision::Page,
 }
 
@@ -696,10 +697,12 @@ impl Game {
         self.source_def(c).activated_def(slot)
     }
 
-    /// Can a permanent grant activated abilities now (an attached Equipment
-    /// with `grants_equipped`, a "<permanents> you control have" static)?
-    fn grants_activated_now(&self) -> bool {
+    /// Can a permanent have activated abilities past its own now (an
+    /// attached Equipment with `grants_equipped`, a "<permanents> you
+    /// control have" static, a basic land type given by an effect)?
+    pub(crate) fn grants_activated_now(&self) -> bool {
         self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0
+            || !self.db.basic_abilities.is_empty()
             || self.battlefield.iter().any(|&g| self.objs[g.i()].attached.is_some() && self.abilities(g).grants_equipped.is_some())
     }
 
@@ -1407,7 +1410,34 @@ impl Game {
         keep: &Keep,
         without: Option<CardIdx>,
     ) -> bool {
-        self.might_pay(p, cost, classes, without) && self.phyrexian_feasible(p, cost, classes, keep, keep.life, without)
+        let classes = self.classes_excluding(p, classes, without);
+        self.might_pay(p, cost, &classes, without) && self.phyrexian_feasible(p, cost, &classes, keep, keep.life, without)
+    }
+
+    /// `classes` (built with nothing excluded) as a payment that excludes
+    /// card `without` (`Keep::exclude`: `mana_classes(p, without)`) has
+    /// them, but for `without`'s own members, which the feasibility leaves
+    /// out itself. The sources another permanent's mana ability makes
+    /// depend on that permanent: a Gene Pollinator excluded can't activate
+    /// for the permanents it would tap (`POL_FOR`), nor an excluded Urza
+    /// for its artifacts (`TAP_FOR`), an excluded Squandered Resources or
+    /// Orcish Lumberjack for the permanents it sacrifices; those classes are
+    /// built again with `without` excluded, so castability and the payment
+    /// agree (ENGINE.md 49; EoE fuzz seed 11752 of W6's table: a Pollinator,
+    /// a Food by Ragost, activating "{2}, {T}, Sacrifice this artifact"
+    /// counted itself among the Pollinators that could activate).
+    pub(crate) fn classes_excluding<'a>(&self, p: PlayerId, classes: &'a [Class], without: Option<CardIdx>) -> std::borrow::Cow<'a, [Class]> {
+        let dependent = |cl: &Class| {
+            let s = cl.members[0].slot;
+            s == POL_FOR || s == TAP_FOR || is_sac_slot(s)
+        };
+        let Some(c) = without else { return std::borrow::Cow::Borrowed(classes) };
+        if self.objs[c.i()].zone != Zone::Battlefield || !classes.iter().any(dependent) {
+            return std::borrow::Cow::Borrowed(classes);
+        }
+        let mut out: Vec<Class> = classes.iter().filter(|cl| !dependent(cl)).cloned().collect();
+        out.extend(self.mana_classes(p, without).into_iter().filter(dependent));
+        std::borrow::Cow::Owned(out)
     }
 
     /// Some split of the Phyrexian pips into life and mana leaves the rest
@@ -1858,10 +1888,17 @@ impl Game {
         let covers = pm.pool_covers() && !self.pool_rems(&pm, &classes).is_empty();
         // (Which source a permanent picked by its own id stands for, asked
         // when it stands for several: ENGINE.md 99.12.)
+        // (Paged past the `NUMBER` ids, A0's helper: any number of sources.)
         let ask_which = |g: &mut Game, pm: Box<PayMana>, card: CardIdx| {
             let n = pm.card_slots.iter().find(|(c, _)| *c == card).map_or(0, |(_, v)| v.len());
-            let opts = (0..n).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
-            g.ask(Task::PayMana(pm), payer, DecisionKind::ChooseMode, opts);
+            if n <= act::NUMBER_N as usize {
+                let opts = (0..n).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
+                g.ask(Task::PayMana(pm), payer, DecisionKind::ChooseMode, opts);
+                return;
+            }
+            let items: Vec<(u32, Choice)> = (0..n as u32).map(|k| (k, Choice::Item(k))).collect();
+            let page = pm.pool_page;
+            g.ask_paged(Task::PayMana(pm), page, payer, DecisionKind::ChooseMode, act::NUMBER, act::NUMBER_N, &items, Vec::new());
         };
         if let (Some(card), None) = (pm.which, &self.answer) {
             return ask_which(self, pm, card);
@@ -1882,6 +1919,16 @@ impl Game {
                 Choice::Number(k) if pm.which.is_some() => {
                     let card = pm.which.take().expect("the permanent picked");
                     (card, slot_of(&pm, card, k as usize))
+                }
+                Choice::Item(k) if pm.which.is_some() => {
+                    let card = pm.which.take().expect("the permanent picked");
+                    pm.pool_page = crate::decision::Page::FIRST;
+                    (card, slot_of(&pm, card, k as usize))
+                }
+                Choice::Page(page) if pm.which.is_some() => {
+                    let card = pm.which.expect("the permanent picked");
+                    pm.pool_page = page;
+                    return ask_which(self, pm, card);
                 }
                 // The pool pays the rest (13.13).
                 Choice::Pass => {
@@ -2040,8 +2087,10 @@ impl Game {
             };
             if let Some(rep) = rep {
                 // (One `MY_PERM` option a permanent; the sources it stands
-                // for in `card_slots`.)
-                if by_perm(rep.slot) {
+                // for in `card_slots`. A sacrifice past the permanent's
+                // fourth `ACTIVATE` id too: docs/shortcuts.md 31.7.2k.)
+                let perm_id = by_perm(rep.slot) || (is_sac_slot(rep.slot) && cl.slot_id >= 4);
+                if perm_id {
                     match card_slots.iter_mut().find(|(c, _)| *c == rep.card) {
                         Some((_, v)) => {
                             v.push(rep.slot);
@@ -2050,17 +2099,17 @@ impl Game {
                         None => card_slots.push((rep.card, vec![rep.slot])),
                     }
                 }
-                opts.push(if is_sac_slot(rep.slot) {
+                opts.push(if perm_id {
+                    // Improvise or convoke, a permanent tapped for another's
+                    // mana ability, a source past the permanent's four
+                    // `ACTIVATE` ids: the permanent's own slot (`MY_PERM`).
+                    Opt { action: self.perm_action(payer, rep.card), choice: Choice::Card(rep.card) }
+                } else if is_sac_slot(rep.slot) {
                     // A granted ability or another's sacrificing it: after
-                    // its own (`ACTIVATE` + `slot_id`; `sac_classes` checks
-                    // there is room).
+                    // its own and those granted to it (`ACTIVATE` +
+                    // `slot_id`, `sac_classes`).
                     let k = cl.slot_id as u16;
                     Opt { action: act::ACTIVATE + (self.perm_action(payer, rep.card) - act::MY_PERM) * 4 + k, choice: Choice::Ability(rep.card, rep.slot) }
-                } else if by_perm(rep.slot) {
-                    // Improvise or convoke, or a permanent tapped for
-                    // another's mana ability: the permanent's own slot
-                    // (`MY_PERM`).
-                    Opt { action: self.perm_action(payer, rep.card), choice: Choice::Card(rep.card) }
                 } else {
                     Opt { action: self.ability_action(payer, rep.card, rep.slot), choice: Choice::Ability(rep.card, rep.slot) }
                 });
@@ -2804,6 +2853,20 @@ fn cands(
     out
 }
 
+/// May a unit tagged `a` be used wherever one tagged `b` may (every need `b`
+/// pays)? Its types hold `b`'s; `MADE`, `RESTRICTED` and a spending
+/// restriction only narrow where a unit goes, so `a` has one only if `b` has
+/// it (a restriction then allowing at least `b`'s purposes). A bitwise
+/// superset is not enough: Sunken Citadel's restricted {B}{B} has more bits
+/// than its plain {B} (EoE fuzz seed 3271 of W6's table, ENGINE.md 100.4.5).
+fn unit_covers(a: Tag, b: Tag) -> bool {
+    let (la, lb) = (crate::mana::low(a), crate::mana::low(b));
+    lb & TYPES & !la == 0
+        && (la & MADE == 0 || lb & MADE != 0)
+        && (la & RESTRICTED == 0 || lb & RESTRICTED != 0)
+        && (purposes(a) == 0 || (purposes(b) != 0 && purposes(b) & !purposes(a) == 0))
+}
+
 /// Can the units `a` make every unit of `b` (each of `b`'s units by its own
 /// unit of `a` whose mask holds it)? A bipartite matching by augmenting
 /// paths: a way may have any number of units (Gaea's Cradle's, one per
@@ -2814,7 +2877,7 @@ fn cands(
 fn covers(a: &[Unit], b: &[Unit]) -> bool {
     fn augment(j: usize, a: &[Unit], b: &[Unit], seen: &mut [bool], owner: &mut [usize]) -> bool {
         for i in 0..a.len() {
-            if !seen[i] && b[j].mask & !a[i].mask == 0 {
+            if !seen[i] && unit_covers(a[i].mask, b[j].mask) {
                 seen[i] = true;
                 if owner[i] == usize::MAX || augment(owner[i], a, b, seen, owner) {
                     owner[i] = j;
@@ -3046,6 +3109,67 @@ mod tests {
             db.spend_kinds |= SPEND_OUTSIDE_HAND;
             db.leak()
         })
+    }
+
+    /// The cube and a land with four activated abilities ("{T}: Add {C}" and
+    /// three "{1}: Draw a card."), to reach a payment source past a
+    /// permanent's fourth `ACTIVATE` id (docs/shortcuts.md 31.7.2k).
+    fn four_ability_db() -> &'static crate::db::CardDb {
+        static DB: std::sync::OnceLock<&'static crate::db::CardDb> = std::sync::OnceLock::new();
+        DB.get_or_init(|| {
+            use serde_json::json;
+            let draw = json!({"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "mana": {"$t": "ManaCost", "generic": 1}, "mana_str": "{1}"},
+                "effect": {"$t": "DrawCards", "amount": 1}});
+            let tap_c = json!({"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_self": true},
+                "effect": {"$t": "AddManaToPool", "produces": [["C", 1]]}, "is_mana_ability": true});
+            let printing = json!({"$t": "CardPrinting", "name": "Test Four Ability Land", "card_types": ["Land"], "subtypes": [], "supertypes": [],
+                "mana_cost": {"$t": "ManaCost"}, "mana_cost_str": "", "type_line": "Land", "activated_abilities": [tap_c, draw.clone(), draw.clone(), draw]});
+            let card: card_ir::Card = serde_json::from_value(json!({"name": "Test Four Ability Land", "custom": true, "printing": printing})).expect("a card");
+            let mut cards = crate::db::load_cube_document().cards;
+            cards.push(card);
+            let db = crate::db::CardDb::from_cards(&cards);
+            db.expect_id("Test Four Ability Land").expect("supported");
+            db.leak()
+        })
+    }
+
+    /// CR 601.2g, 106.7: Squandered Resources' "Sacrifice a land: Add one mana
+    /// of any type that land could produce" is a source on a land with four
+    /// abilities of its own, offered by the land's own id (`MY_PERM`, then
+    /// which: `ChooseMode`) since its `ACTIVATE` ids are taken
+    /// (docs/shortcuts.md 31.7.2k: it was not offered). The land taps for
+    /// {C} and is then sacrificed for another {C}: {2}.
+    #[test]
+    fn cr_601_2g_a_source_past_the_fourth_ability_id_is_offered() {
+        use crate::testkit::Scenario;
+        let mut g = Scenario::new(four_ability_db())
+            .spec(|s| {
+                s.auto_single = false;
+                s.log = true;
+            })
+            .library(0, &["Island"; 10])
+            .library(1, &["Island"; 10])
+            .battlefield(0, &["Squandered Resources", "Test Four Ability Land"])
+            .hand(0, &["Sol Ring"])
+            .at(crate::game::Step::Main1, 0)
+            .start();
+        let land = g.permanents_of(0).find(|&c| g.def_of(c).name == "Test Four Ability Land").unwrap();
+        let ring = g.card(0, "Sol Ring", Zone::Hand);
+        assert!(g.can_pay(0, &ManaCost::parse("{2}").unwrap()), "tap it, then sacrifice it");
+        assert!(!g.can_pay(0, &ManaCost::parse("{3}").unwrap()));
+        g.choose(Choice::Cast(ring));
+        // Sol Ring's {1}: the land's {C} or its sacrifice, the latter by the
+        // land's own id and then which source.
+        assert!(g.has_option(Choice::Card(land)), "{:?}", g.options_desc());
+        g.choose(Choice::Card(land));
+        for _ in 0..20 {
+            if g.objs[ring.i()].zone == Zone::Stack {
+                break;
+            }
+            let c = g.pending_decision().unwrap().options[0].choice;
+            g.choose(c);
+        }
+        assert_eq!(g.objs[ring.i()].zone, Zone::Stack, "{}", g.log_lines().join("\\n"));
     }
 
     /// CR 613.1f, 605.3a, 106.6: a mana ability another permanent grants is a

@@ -437,3 +437,85 @@ fn cr_106_6_land_ability_mana_pays_cataracts_while_a_spell_is_cast() {
     assert_eq!(g.player(0).pool.amt, [0; 6]);
     assert!(g.restricted_mana(0).is_empty(), "{:?}", g.restricted_mana(0));
 }
+
+/// CR 602.2b, 601.2g (ENGINE.md 49: castability and the payment agree): a
+/// Gene Pollinator whose own cost taps it (Ragost's Food ability, "{2}, {T},
+/// Sacrifice this artifact: You gain 3 life", on the artifact Pollinator) can't
+/// activate its mana ability while paying it, so it doesn't count among the
+/// Pollinators that could tap another permanent for mana (EoE fuzz seed 11752 of
+/// W6's table: offered, then "PayMana: no way to pay {2}"). With a second
+/// Pollinator it is payable.
+#[test]
+fn cr_602_2b_a_pollinator_paying_its_own_tap_cost_is_no_activator() {
+    let g = eoe_w2::scen().battlefield(0, &["Ragost, Deft Gastronaut", "Gene Pollinator", "Forest"]).at(Step::Main1, 0).start();
+    let pol = bf(&g, 0, "Gene Pollinator");
+    assert!(!g.has_option(act(pol, 1)), "only the Forest pays: {:?}", g.options_desc());
+    let mut g = eoe_w2::scen().battlefield(0, &["Ragost, Deft Gastronaut", "Gene Pollinator", "Gene Pollinator", "Forest"]).at(Step::Main1, 0).start();
+    let pols: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.name(c) == "Gene Pollinator").collect();
+    assert!(g.has_option(act(pols[0], 1)), "the other Pollinator taps Ragost: {:?}", g.options_desc());
+    g.choose(act(pols[0], 1));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.life(0), 23, "{}", log(&g));
+    assert_ne!(g.obj(pols[0]).zone, Zone::Battlefield);
+}
+
+/// CR 305.6, 305.7 (its last sentence): a land given a basic land type in
+/// addition to its others has that type's intrinsic mana ability and keeps
+/// its own (docs/shortcuts.md N22: refused at lowering). W2's Test Forest
+/// Maker becomes a Forest until end of turn: it taps for {G} or {C}, and
+/// with priority it offers both abilities.
+#[test]
+fn cr_305_6_a_land_given_forest_taps_for_green() {
+    let mut g = eoe_w2::scen().battlefield(0, &["Test Forest Maker", "Island"]).at(Step::Main1, 0).start();
+    let fm = bf(&g, 0, "Test Forest Maker");
+    let island = bf(&g, 0, "Island");
+    assert!(!g.can_pay(0, &cost("{G}")));
+    g.choose(act(fm, 1));
+    finish(&mut g, |g| options(g).into_iter().find(|&c| c == act(island, 0)));
+    settle(&mut g);
+    assert!(g.obj(island).tapped && !g.obj(fm).tapped, "{}", log(&g));
+    assert!(g.can_pay(0, &cost("{G}")), "the Forest's {{T}}: Add {{G}}: {}", log(&g));
+    assert!(g.can_pay(0, &cost("{C}")), "its own {{T}}: Add {{C}}");
+    assert!(!g.can_pay(0, &cost("{G}{C}")), "one tap");
+    // With priority: its own ability and the Forest's (at the place after
+    // its own two).
+    g.choose(Choice::Yes);
+    assert!(options(&g).contains(&Choice::Card(fm)), "{:?}", g.options_desc());
+    g.choose(Choice::Card(fm));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "{:?}", g.options_desc());
+    let pools: Vec<[u8; 6]> = options(&g)
+        .into_iter()
+        .map(|c| {
+            let mut h = g.clone();
+            h.choose(c);
+            h.player(0).pool.amt
+        })
+        .collect();
+    assert_eq!(pools, vec![[0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 1, 0]], "{{C}} or {{G}}");
+}
+
+/// CR 106.6, 601.2g: a land with "{T}: Add {B}" and "{T}: Add {B}{B}. Spend
+/// this mana only to activate abilities of lands" (Sunken Citadel) pays a
+/// spell's {B} with the first, even while Cascading Cataracts' {5} could take
+/// the second's mana (EoE fuzz seed 3271 of W6's table, on 755fe0b: the
+/// feasibility took the restricted {B}{B} for a superset of the plain {B},
+/// its tag having more bits, so the land's plain {B} was lost and a payment
+/// that picked Cataracts' {5} found no way to finish).
+#[test]
+fn cr_106_6_restricted_mana_never_stands_for_a_lands_plain_mana() {
+    let g = eoe_w2::scen().battlefield(0, &["Test Sunken Citadel", "Cascading Cataracts"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{B}")), "the Citadel's plain {{B}}");
+    assert!(g.can_pay(0, &cost("{B}{1}")), "and the Cataracts' {{C}}");
+    assert!(!g.can_pay(0, &cost("{B}{B}")));
+    let g = eoe_w2::scen()
+        .battlefield(0, &["Test Sunken Citadel", "Cascading Cataracts", "Island", "Island", "Island", "Island", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    // The Islands pay the Cataracts' {5}, its five mana and the Citadel's {B}
+    // the spell; or the Citadel's {B}{B} pays two of the {5}, and two Islands
+    // are left for the spell.
+    assert!(g.can_pay(0, &cost("{5}{B}")));
+    assert!(g.can_pay(0, &cost("{6}{B}")));
+    assert!(!g.can_pay(0, &cost("{7}{B}")));
+}

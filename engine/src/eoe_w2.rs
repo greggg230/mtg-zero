@@ -239,13 +239,19 @@ pub(crate) const LAND_TYPES: [&str; 18] = [
 /// The abilities of a nonbasic land that is a Mountain (CR 305.7): its rules
 /// text's are gone, and it has "{T}: Add {R}" (305.6).
 pub(crate) fn mountain_def() -> &'static CardDef {
-    use crate::db::{ActEffect, ActivatedDef, Cost, ManaAbility, ManaProd};
     static M: std::sync::OnceLock<CardDef> = std::sync::OnceLock::new();
-    M.get_or_init(|| CardDef {
+    M.get_or_init(|| basic_land_def(crate::mana::R))
+}
+
+/// A definition holding the intrinsic mana ability of a basic land type
+/// that makes mana of type `t`: "{T}: Add <t>" (CR 305.6).
+pub(crate) fn basic_land_def(t: usize) -> CardDef {
+    use crate::db::{ActEffect, ActivatedDef, Cost, ManaAbility, ManaProd};
+    CardDef {
         activated: vec![ActivatedDef {
             cost: Cost { tap: true, ..Cost::default() },
             effect: ActEffect::Mana(ManaAbility {
-                prod: ManaProd::One(1 << crate::mana::R),
+                prod: ManaProd::One(1 << t),
                 damage_to_you: 0,
                 sac_if_no: None,
                 only: 0,
@@ -265,7 +271,7 @@ pub(crate) fn mountain_def() -> &'static CardDef {
             special: None,
         }],
         ..CardDef::default()
-    })
+    }
 }
 
 impl Game {

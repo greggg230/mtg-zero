@@ -545,7 +545,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 let s = l.subtype(requires_subtype);
                 Some(b.op(Op::Ext(Ext::JumpUnlessSource { filter: Filter::Subtype(s), to: 0 })))
             };
-            let subs = subtypes.iter().filter_map(|s| l.given_subtype("SourceBecomesIfSubtype.subtypes", s)).collect();
+            let subs = subtypes.iter().filter_map(|s| l.set_subtype("SourceBecomesIfSubtype.subtypes", s)).collect();
             let mut mods = vec![Mod::Types { add: 0, subtypes: subs, replace: true }];
             match base_pt[..] {
                 [p, t] => mods.push(Mod::SetPt(
@@ -1697,7 +1697,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             nodes::PutEachCreatureCardExiledWithSourceOntoBattlefieldUnderYourControl { grant_flying_counter, grant_subtype_and_pt },
         ) => {
             let becomes = grant_subtype_and_pt.as_ref().map(|(s, p, t)| {
-                (l.given_subtype("grant_subtype_and_pt", s).unwrap_or(0), l.int("grant_subtype_and_pt.p", *p, 0, 99), l.int("grant_subtype_and_pt.t", *t, 0, 99))
+                (l.set_subtype("grant_subtype_and_pt", s).unwrap_or(0), l.int("grant_subtype_and_pt.p", *p, 0, 99), l.int("grant_subtype_and_pt.t", *t, 0, 99))
             });
             b.op(Op::Ext(Ext::LinkedCreaturesToBattlefield { flying: *grant_flying_counter, becomes }));
         }

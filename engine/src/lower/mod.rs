@@ -125,6 +125,9 @@ pub struct Lowerer<'a> {
     /// An effect of the card reanimates and attaches it (a reanimating
     /// Aura).
     pub reanimates: bool,
+    /// An effect of the card gives a basic land type in addition
+    /// (`given_subtype`; `CardDef::gives_basic_land_type`).
+    pub gives_basic: bool,
 }
 
 /// Which face of a card a printing describes (ENGINE.md 25).
@@ -226,9 +229,25 @@ impl Lowerer<'_> {
     /// where it is built (a printed type: `produces`; Multiversal Passage's
     /// chosen type: `ManaProd::Chosen`), so a land given one would lack it
     /// (docs/shortcuts.md N22).
-    pub fn given_subtype(&mut self, field: &str, s: &str) -> Option<u16> {
+    /// A subtype an effect gives in addition to the object's others. A basic
+    /// land type brings its intrinsic mana ability to a land (CR 305.6, the
+    /// end of 305.7: `CardDb::basic_abilities`, `Game::granted_activated`;
+    /// ENGINE.md 100.4.5).
+    pub fn given_subtype(&mut self, _field: &str, s: &str) -> Option<u16> {
         if matches!(s, "Plains" | "Island" | "Swamp" | "Mountain" | "Forest") {
-            self.unsupported(format!("{field}({s}: a basic land type given by an effect, CR 305.6-305.7)"));
+            self.gives_basic = true;
+        }
+        Some(self.subtype(s))
+    }
+
+    /// A subtype an effect sets (the object's subtypes become exactly
+    /// these). A basic land type set on a land removes its rules text's
+    /// abilities as well (CR 305.7), which only the "nonbasic lands are
+    /// Mountains" effects build (`Game::moon_def`): refused (ENGINE.md
+    /// 100.4.5; no card of the tables sets one by these effects).
+    pub fn set_subtype(&mut self, field: &str, s: &str) -> Option<u16> {
+        if matches!(s, "Plains" | "Island" | "Swamp" | "Mountain" | "Forest") {
+            self.unsupported(format!("{field}({s}: a basic land type set by an effect, CR 305.7)"));
             return None;
         }
         Some(self.subtype(s))
@@ -320,9 +339,11 @@ pub(crate) fn lower_card_in(
         act_x_times: 0,
         spell_x: false,
         reanimates: false,
+        gives_basic: false,
     };
     let mut def = printing::lower_printing(&mut l, p);
     def.converge = l.converge;
+    def.gives_basic_land_type = l.gives_basic;
     if l.uses_prepare && def.prepare.is_none() {
         l.unsupported("Effect:SourceBecomesPrepared(without a prepare spell)");
     }

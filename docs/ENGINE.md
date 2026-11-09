@@ -20424,76 +20424,6 @@ mana tested), floated restricted mana keeps its restriction (100.4.2), and produ
 are offered with priority (100.4.3); Sunken Citadel's land-ability mana for another land ability's
 mana cost needs N21, and Mm'menon's granted mana ability needs the payment sources above.
 
-#### 100.4.5 B2: the rest of mana and payment (branch `eoe-b2-pay`, from `eoe-b-pay` b666765)
-
-**Why.** 100.4.4's open list, in the brief's order: first what W6 waits for (N21, granted mana
-abilities as payment sources), then the rest of the audit's F4 (`docs/faithfulness_audit.md`
-5.4). Tests: `engine/tests/rules_payment_b.rs` (section "100.4.5") and the unit tests named below;
-each failed before its fix.
-
-##### N21: spending restrictions on needs
-
-A payment's units and needs carry tags (`mana::Tag`, a `u32`: the old `ManaMask` byte and, in
-bits 8-15, spending purposes). On a unit they are its restriction (CR 106.6: the `SPEND_*`
-purposes of its mana, 0 for none; `mana::FOR_COST` for a creature tapped for convoke, which pays
-the spell's mana only, 702.51a); on a need, what paying it is: the cost's pips carry the payment's
-`Keep::allow` and `FOR_COST`, a mana ability's own cost (`Class::need`) carries
-`Game::ability_allow` of its source. `mana::fits` matches types, `MADE` / `NOT_MADE` and
-`mana::spend_ok` (no restriction, or one of its purposes is the need's).
-
-* **The matching.** When a unit's restriction keeps it from some need of the payment
-  (`payable_iter`'s `kept_from`), the generic pips are needs too (any unit the cost's purposes
-  allow, a typeless improvise unit included) and the answer is exact: needs on one side, units on
-  the other, a matching that covers every need and every chosen unit. By the Mendelsohn-Dulmage
-  theorem one exists when a matching covers the needs and another covers the chosen units, so two
-  maximum flows over the grouped sides decide it (`mana::payable_restricted`, `max_flow`).
-  Otherwise the fast path is unchanged (every unit may pay every need it meets in type).
-* **Sources and pool mana a spell can't take.** A class (`cands`), a source offered in `PayMana`,
-  pool mana (`add_pool`, `vgroups`, `pool_rems`) whose restriction allows neither the cost's
-  purposes nor those of a need the payment has or may add (`pay::needs_allow` of the classes, the
-  picked needs) is left out, as before; otherwise it is in, with its purposes, and the matching
-  decides. `vgroups`' kinds grew the purposes (bits 8-15), and the part of the several-mana
-  sources' restricted mana that a mana ability with a mana cost made is kept apart
-  (`PayMana::extra_made_restr`).
-* **A several-mana source spent on a later one's cost.** `feasible_prods_where` rejected a
-  several-mana source whose mana the single-mana sources' completion couldn't spend while they
-  could pay without it; its mana may still pay the mana cost of a several-mana source picked after
-  it (Sunken Citadel's for Cascading Cataracts' {5}, Test Citadel's class first): that completion
-  is tried too.
-* **Converge** reads the restricted mana spent by kind, with its purposes.
-* **The single-way merge.** Single-mana ways of one card are one unit only when their purposes
-  are equal (a {C} and a land-ability {U} of one land are two ways).
-
-Tests: `cr_106_6_workshop_mana_never_pays_a_mana_abilitys_cost` (cube: Mishra's Workshop and
-Chromatic Star, Cryogen Relic not castable; with an Island it is, the Island paying the Star),
-`cr_106_6_land_ability_mana_pays_cataracts_while_a_spell_is_cast` (W2's Test Citadel, Cascading
-Cataracts and three Islands cast Starbreach Whale, {4}{U}), and `mana::tests::
-restricted_units_pay_only_their_purposes`.
-
-##### Granted mana abilities as payment sources
-
-`mana_classes` reads a permanent's own abilities and then those other permanents grant it
-(`Game::granted_activated`, CR 613.1f; at the places past its own, as `Game::activated_home`
-numbers them), when a permanent can grant one (`grants_activated_now`). Two granted sources are one
-class only when their grant is the same (`activated_home`). Every lookup of a source's ability in
-a payment or a mana ability's activation goes through `Game::src_ability` (its own, a Mountain's,
-or the granted one): `activate_mana_costs`, `finish_payment`, `mana_now`, `mana_now_costs`, the
-sacrifice-for-mana path. A source at a place past the permanent's four `ACTIVATE` ids is offered
-by the permanent's own id (`pay::by_perm`, `MY_PERM`, then which one: `ChooseMode`), as improvise
-and the Pollinators' sources are.
-
-Test: `pay::tests::cr_613_1f_a_granted_mana_ability_pays_a_cost` (a unit test: no supported card
-grants a mana ability yet, so the cube's Snapcaster Mage is given Mm'menon, the Right Hand's grant
-as W3's lowering builds Ragost's; two Crucibles of Worlds and a Mountain cast Faithless Looting by
-flashback, and the granted {U} pays nothing cast from the hand). `CardDb::def_mut` (test-only)
-builds it.
-
-**Digests.** Full `3667d9433f0f7a00` -> `02d4bccc94314d6d`, `DIGEST_ENCODING=0` `d0a7be8d70719c90`
--> `856218d6b081056c`: 6 of the 2,500 games change. Two are N21 (with every restriction ignored
-they don't change: the cube's Mishra's Workshop or Delighted Halfling mana no longer pays a mana
-ability's cost), four the several-mana source spent on a later one's cost (with that completion
-not tried they don't change). `RULES_EPOCH` bumped.
-
 #### 100.8 Test fixtures after the rules changes (branch `eoe-t-fixtures`, from `eoe-b-pay` b666765)
 
 **Why.** On b666765 the engine gate's pytest step failed three tests. The engine was right (the user's
@@ -20588,6 +20518,192 @@ counts, so both counters are exercised whatever the engine's random play does.
 
 **Digests.** Unchanged (no engine change): full `3667d9433f0f7a00`, `DIGEST_ENCODING=0`
 `d0a7be8d70719c90`.
+
+#### 100.4.5 B2: the rest of mana and payment (branch `eoe-b2-pay`, from `eoe-b-pay` b666765)
+
+**Why.** 100.4.4's open list, in the brief's order: first what W6 waits for (N21, granted mana
+abilities as payment sources), then the rest of the audit's F4 (`docs/faithfulness_audit.md`
+5.4). Tests: `engine/tests/rules_payment_b.rs` (section "100.4.5") and the unit tests named below;
+each failed before its fix.
+
+##### N21: spending restrictions on needs
+
+A payment's units and needs carry tags (`mana::Tag`, a `u32`: the old `ManaMask` byte and, in
+bits 8-15, spending purposes). On a unit they are its restriction (CR 106.6: the `SPEND_*`
+purposes of its mana, 0 for none; `mana::FOR_COST` for a creature tapped for convoke, which pays
+the spell's mana only, 702.51a); on a need, what paying it is: the cost's pips carry the payment's
+`Keep::allow` and `FOR_COST`, a mana ability's own cost (`Class::need`) carries
+`Game::ability_allow` of its source. `mana::fits` matches types, `MADE` / `NOT_MADE` and
+`mana::spend_ok` (no restriction, or one of its purposes is the need's).
+
+* **The matching.** When a unit's restriction keeps it from some need of the payment
+  (`payable_iter`'s `kept_from`), the generic pips are needs too (any unit the cost's purposes
+  allow, a typeless improvise unit included) and the answer is exact: needs on one side, units on
+  the other, a matching that covers every need and every chosen unit. By the Mendelsohn-Dulmage
+  theorem one exists when a matching covers the needs and another covers the chosen units, so two
+  maximum flows over the grouped sides decide it (`mana::payable_restricted`, `max_flow`).
+  Otherwise the fast path is unchanged (every unit may pay every need it meets in type).
+* **Sources and pool mana a spell can't take.** A class (`cands`), a source offered in `PayMana`,
+  pool mana (`add_pool`, `vgroups`, `pool_rems`) whose restriction allows neither the cost's
+  purposes nor those of a need the payment has or may add (`pay::needs_allow` of the classes, the
+  picked needs) is left out, as before; otherwise it is in, with its purposes, and the matching
+  decides. `vgroups`' kinds grew the purposes (bits 8-15), and the part of the several-mana
+  sources' restricted mana that a mana ability with a mana cost made is kept apart
+  (`PayMana::extra_made_restr`).
+* **A several-mana source spent on a later one's cost.** `feasible_prods_where` rejected a
+  several-mana source whose mana the single-mana sources' completion couldn't spend while they
+  could pay without it; its mana may still pay the mana cost of a several-mana source picked after
+  it (Sunken Citadel's for Cascading Cataracts' {5}, Test Citadel's class first): that completion
+  is tried too.
+* **Converge** reads the restricted mana spent by kind, with its purposes.
+* **The single-way merge.** Single-mana ways of one card are one unit only when their purposes
+  are equal (a {C} and a land-ability {U} of one land are two ways).
+
+Tests: `cr_106_6_workshop_mana_never_pays_a_mana_abilitys_cost` (cube: Mishra's Workshop and
+Chromatic Star, Cryogen Relic not castable; with an Island it is, the Island paying the Star),
+`cr_106_6_land_ability_mana_pays_cataracts_while_a_spell_is_cast` (W2's Test Citadel, Cascading
+Cataracts and three Islands cast Starbreach Whale, {4}{U}), and `mana::tests::
+restricted_units_pay_only_their_purposes`.
+
+##### Granted mana abilities as payment sources
+
+`mana_classes` reads a permanent's own abilities and then those other permanents grant it
+(`Game::granted_activated`, CR 613.1f; at the places past its own, as `Game::activated_home`
+numbers them), when a permanent can grant one (`grants_activated_now`). Two granted sources are one
+class only when their grant is the same (`activated_home`). Every lookup of a source's ability in
+a payment or a mana ability's activation goes through `Game::src_ability` (its own, a Mountain's,
+or the granted one): `activate_mana_costs`, `finish_payment`, `mana_now`, `mana_now_costs`, the
+sacrifice-for-mana path. A source at a place past the permanent's four `ACTIVATE` ids is offered
+by the permanent's own id (`pay::by_perm`, `MY_PERM`, then which one: `ChooseMode`), as improvise
+and the Pollinators' sources are.
+
+Test: `pay::tests::cr_613_1f_a_granted_mana_ability_pays_a_cost` (a unit test: no supported card
+grants a mana ability yet, so the cube's Snapcaster Mage is given Mm'menon, the Right Hand's grant
+as W3's lowering builds Ragost's; two Crucibles of Worlds and a Mountain cast Faithless Looting by
+flashback, and the granted {U} pays nothing cast from the hand). `CardDb::def_mut` (test-only)
+builds it.
+
+**Digests.** Full `3667d9433f0f7a00` -> `02d4bccc94314d6d`, `DIGEST_ENCODING=0` `d0a7be8d70719c90`
+-> `856218d6b081056c`: 6 of the 2,500 games change. Two are N21 (with every restriction ignored
+they don't change: the cube's Mishra's Workshop or Delighted Halfling mana no longer pays a mana
+ability's cost), four the several-mana source spent on a later one's cost (with that completion
+not tried they don't change). `RULES_EPOCH` bumped.
+
+##### W6's EoE fuzz seeds 11752 and 4378
+
+Found by W6's `FUZZ_POOL=eoe` 20k fuzz on its branch (`eoe-w6-rest` b230d3c, W6's cards without B's
+work); reproduced on a throwaway merge of that branch and this one.
+
+* **11752: castability and the payment disagreed** (ENGINE.md 49). A Gene Pollinator, a Food by
+  Ragost, offered "{2}, {T}, Sacrifice this artifact: You gain 3 life"; then `PayMana` found no
+  way to pay {2}. Castability checks a cost with the priority decision's classes (built with
+  nothing excluded) and leaves out the excluded card's own members (`without`); the payment builds
+  its classes with the card excluded (`mana_classes(p, exclude)`). The sources another permanent's
+  mana ability makes depend on that permanent: the excluded Pollinator still counted among the
+  Pollinators that could tap another permanent for mana (`POL_FOR`'s share), and so would an
+  excluded Urza for its artifacts (`TAP_FOR`) or an excluded Squandered Resources or Orcish
+  Lumberjack for what it sacrifices. `can_pay_without` now builds those classes again with the
+  card excluded (`Game::classes_excluding`). Test:
+  `cr_602_2b_a_pollinator_paying_its_own_tap_cost_is_no_activator` (one Pollinator and a Forest:
+  not offered; two Pollinators: paid, the other tapping Ragost).
+* **4378: slow, not stuck.** B's 100.4.1 (the dominated "none", identical cards) is what W6's
+  branch lacks: on the merge the whole 60-turn game takes 1.9 s (2,714 decisions). 100.4.1's test
+  covers the mechanism.
+
+Digests unchanged (`02d4bccc94314d6d`, `DIGEST_ENCODING=0` `856218d6b081056c`).
+
+##### N22: a basic land type given by an effect (W2's item c)
+
+C refused every effect, copy exception or printed "becomes" that gives a basic land type
+(`Lowerer::given_subtype`, 100.3). CR 305.6: a land with a basic land type has the type's
+intrinsic "{T}: Add <its mana>"; 305.7's last sentence: a land given land types in addition keeps
+its types and rules text and gains the new types' mana abilities.
+
+* **In addition** (`given_subtype`: `BecomeType`, a manland's "becomes a creature", copy exceptions,
+  "it's a <type> in addition", W1's added subtypes): no longer refused. A card with one sets
+  `CardDef::gives_basic_land_type`; the table then holds a definition per basic land type with its
+  intrinsic ability (`CardDb::basic_abilities`, `eoe_w2::basic_land_def`, which W2's Mountain
+  definition now uses too). `Game::granted_activated` lists them first among a land's granted
+  abilities: each basic land type it has (`has_subtype`, layer 4 by timestamp) that its abilities'
+  definition doesn't print (a printed type's ability is in the card's text; a Mountain by a
+  "nonbasic lands are Mountains" effect has its {R} in `moon_def`, so a Forest given after the
+  Moon adds {G} and a Mountain adds nothing), none once it lost all abilities (layer 6 after layer
+  4). So the payment (`mana_classes`, 100.4.5's granted sources), priority's `ActivateMana`
+  (through `activated_home`) and `could_produce` (Squandered Resources' "any type that land could
+  produce") all see it.
+* **Set** (`Lowerer::set_subtype`: "becomes a <subtype>" replacing subtypes, Kaito's "it's a
+  <subtype> creature", "becomes a <subtype> creature" of `TargetBecomesCreatureIndefinitely`,
+  `BecomeCreatureIfNot`, the linked creatures' "becomes"): a basic land type there stays refused,
+  narrowed to these. 305.7 would also remove the land's rules text abilities, which only the
+  "nonbasic lands are Mountains" effects build (`moon_def`, W2); no card of the tables sets a basic
+  land type by these effects (they make creatures), and a loud refusal is class 2 (the audit's
+  section 0).
+* **The Magus of the Moon** (W2's tests in `cards_eoe_w2_lands.rs`): its Mountains tap for {R},
+  their rules text's abilities gone (305.7), unchanged by this; the intrinsic list skips the
+  Mountain its `moon_def` already has.
+
+Tests: `rules_payment_b.rs::cr_305_6_a_land_given_forest_taps_for_green` (W2's new Test Forest
+Maker, "{T}: Add {C}. {1}: this land becomes a Forest in addition to its other types until end of
+turn": then {G} or {C}, one tap; with priority both abilities, {C} or {G}),
+`rules_faithful_c.rs::cr_305_6_an_effect_giving_a_basic_land_type_is_not_refused` (C's refusal
+test, turned: C Forest Mimic's copy exception "except it's a Forest" is no longer refused for it).
+
+##### A restricted unit is no superset (W6's EoE fuzz on 755fe0b)
+
+W6 merged 755fe0b and its EoE 20k stopped in every chunk (seeds 570, 3271, 5207, 6813, 8715, 10940,
+12522, 14559, 16627, 18391): `PayMana` offered Cascading Cataracts' {5}, then "no way to pay".
+Cause: `cands` reduces a card whose ways take no budget to one way when that way's units cover
+every other's (`covers`), and `covers` read a unit's tag as a bitwise superset. A land with "{T}:
+Add {B}" and "{T}: Add {B}{B}. Spend this mana only to activate abilities of lands" (Sunken
+Citadel) had its restricted {B}{B} taken for a superset of the plain {B} (more bits), so the land
+counted as two land-ability {B} only. With 755fe0b's tags this became reachable (before, the
+restricted way of a source the spell couldn't take was left out); `MADE` and `RESTRICTED` had the
+same flaw. Now `unit_covers`: the types hold the other's, and `MADE`, `RESTRICTED` and a
+restriction only narrow (a unit has one only if the other has it, a restriction then allowing at
+least the other's purposes). On W6's merge with the fix the ten seeds pass.
+
+Test: `cr_106_6_restricted_mana_never_stands_for_a_lands_plain_mana` (W2's new Test Sunken Citadel
+with Cascading Cataracts: its plain {B} pays a spell; with five Islands {6}{B} is payable, the
+{B}{B} paying two of the {5}, and {7}{B} is not; it failed on f3345ed).
+
+##### 31.7.2k: payment sources past a permanent's fourth `ACTIVATE` id
+
+A permanent's mana sources had `ACTIVATE` ids (`ACTIVATE` + 4 x permanent + place), so a source at
+place 4 or later had none: `sac_classes` left out the sacrifice sources (Rain of Filth's granted
+one, Squandered Resources', Orcish Lumberjack's) of a permanent with four abilities, and a granted
+mana ability at such a place would have taken the next permanent's id. Now every such source is
+one: the sacrifice sources' places follow the permanent's own and granted abilities (the numbering
+of `activated_home`, so they never share an id with a granted ability), and a source at a place
+past the fourth is offered by the permanent's own id (`pay::by_perm`, `MY_PERM`), as improvise and
+the Pollinators' sources are; when the permanent stands for several sources, which one is
+`ChooseMode`, paged past the `NUMBER` ids with A0's `ask_paged` (`Choice::Item`, its page in
+`PayMana::pool_page`; up to 32 it is the old `NUMBER` question).
+
+Test: `pay::tests::cr_601_2g_a_source_past_the_fourth_ability_id_is_offered` (the cube and a land
+with "{T}: Add {C}" and three "{1}: Draw a card", with Squandered Resources: {2} payable, its tap
+and its sacrifice; Sol Ring's {1} paid by the sacrifice through the land's own id; it failed with
+`sac_classes`' fourth-place limit).
+
+##### Not done in this session (left for the next pass)
+
+In the brief's order, still open (100.4.4 has their designs):
+
+* **N23**: which Gene Pollinator activates (the creature-mana bonus with Pollinators of which only
+  some are creatures, `pol_classes`' assertion; which Pollinators tap in `finish_payment`, "the
+  first ready ones no pick uses"), which Squandered Resources or Orcish Lumberjack sacrifices
+  (`activate_sac_for`), and `reserved_n`'s assertion (Pollinators of which only some a later tap
+  cost needs). Exact needs the actor chosen per pick and a second shared-tap budget per kind
+  (`Budget::tap`, `Class::share`/`taps`, `Way::tap`, `cands`' `tap_limit` and `free_shared`).
+* **13.15** (chains of mana abilities with mana costs: `MADE` / `NOT_MADE` forbid every chain; exact
+  is a matching whose "pays the cost of" relation is acyclic: an order of the abilities with mana
+  costs, identical ones in a fixed order, and per-producer `MADE` units, which the virtual pool's
+  kinds would have to carry), **13.3**, **13.16**, **13.17**, **24.7.5k** / **40.1**, **27.13.4** /
+  **N8**, **28.8.2k**, **N10** (Pentad Prism's `.min(32)`: exact needs the payment's need count in
+  `cands`, since a unit past it is never used), **26.11.6** / **24.7.4** (ids for mana sources past
+  `MY_PERM`'s 96 permanents: A0's paging of `MY_PERM`), and the payment's u8 storage (F7's list:
+  `ManaCost::total`/`plus`, X and tax added into the u8 generic in `activate.rs` and `cast.rs`,
+  `keep.life + phyrexian_life`, `phyrexian_life += 2k`, `later as u8`, "pay X life" and `x_range`
+  below 255).
 
 #### 99.16 W6: the remaining cards (branch `eoe-w6-rest`, from `eoe-base` 2e01275)
 
