@@ -702,6 +702,35 @@ impl Game {
         }
     }
 
+    /// CR 702.145c-d, f-g for permanent `c`, which just entered, once it is
+    /// on the battlefield: after its `Enters` event, so it is seen entering
+    /// with the face it entered with. A daybound (nightbound) permanent makes
+    /// it day (night) if it is neither; a double-faced token with daybound
+    /// entering front face up at night (it doesn't enter transformed: that
+    /// needs a double-faced card, 702.145b) transforms now.
+    pub(crate) fn day_night_entered(&mut self, c: CardIdx) {
+        let d = self.def_of(c);
+        if (d.daybound || d.nightbound) && self.objs[c.i()].zone == Zone::Battlefield {
+            self.day_night_check();
+        }
+    }
+
+    /// CR 702.145c-d and f-g apply "any time", not only as a permanent
+    /// enters or as day and night change: after something that can give a
+    /// permanent daybound or nightbound (a copy effect starting or ending,
+    /// an effect that took its abilities ending) or turn a face up without
+    /// its entering (turned face up, 712.12a; phasing in, 702.26d). Checked
+    /// when a daybound or nightbound face is on the battlefield
+    /// (`day_night_check` reads the abilities each permanent has now).
+    pub(crate) fn day_night_any_time(&mut self) {
+        if self.battlefield.iter().any(|&c| {
+            let d = self.def_of(c);
+            d.daybound || d.nightbound
+        }) {
+            self.day_night_check();
+        }
+    }
+
     /// CR 731.2: as the untap step's second part, day becomes night if the
     /// previous turn's active player cast no spells that turn, night
     /// becomes day if they cast two or more.

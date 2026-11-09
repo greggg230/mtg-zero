@@ -844,6 +844,9 @@ impl Game {
         if !self.copies.is_empty() {
             self.end_copy_effects(Until::EndOfTurn);
         }
+        // (A permanent whose abilities or copy effect just ended may have
+        // daybound or nightbound again: CR 702.145c-g apply at once.)
+        self.day_night_any_time();
     }
 
     /// CR 514.2: the "this turn" effects kept as turn numbers end in the
@@ -881,6 +884,7 @@ impl Game {
     pub(crate) fn end_until_next_turn(&mut self, p: PlayerId) {
         self.effects.retain(|e| !(e.until == Until::YourNextTurn && e.controller == p));
         self.effects_changed();
+        self.day_night_any_time();
     }
 }
 

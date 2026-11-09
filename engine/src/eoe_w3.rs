@@ -511,6 +511,9 @@ impl Game {
             self.note(|g| format!("{} phases in", g.name(x)));
         }
         self.effects_changed();
+        // A daybound permanent that phased out by day exists again at night:
+        // it transforms at once (CR 702.145c; nightbound by day, 702.145f).
+        self.day_night_any_time();
     }
 }
 

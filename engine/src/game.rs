@@ -1506,9 +1506,17 @@ impl Game {
         // transformed", 712.14a; an MDFC's land face, 712.12); a daybound
         // card enters transformed at night (702.145b). Set before it moves,
         // so what applies as it enters sees that face (CR 614.12).
+        // Daybound's "if it is night and this permanent is represented by a
+        // double-faced card, it enters transformed" is the permanent's own
+        // ability, read from it as it would exist on the battlefield
+        // (614.12): not a token (a double-faced token enters front face up
+        // and transforms at once, 702.145c: `day_night_check` after its
+        // `Enters` event), and not one entering with no abilities (Xu-Ifit:
+        // it stays front face up, with no daybound).
+        let has_daybound = !self.entering_mods.contains(&crate::db::Mod::LoseAllAbilities) && self.def_of(idx).daybound;
         if let Some(face) = self.entering_face.take() {
             self.objs[idx.i()].def = face;
-        } else if self.day == Some(false) && self.def_of(idx).daybound {
+        } else if self.day == Some(false) && is_card && has_daybound {
             if let Some(b) = self.def_of(idx).back {
                 self.objs[idx.i()].def = b;
             }
@@ -1673,6 +1681,7 @@ impl Game {
         if self.objs[idx.i()].zone == Zone::Battlefield && self.objs[idx.i()].inc == r.inc {
             self.note_entered(idx);
             self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(r), b: crate::triggers::Subj::None, amount: note as u32 });
+            self.day_night_entered(idx);
         }
         r
     }
@@ -1799,14 +1808,10 @@ impl Game {
         }
     }
 
-    /// The permanent's own "as it enters" abilities (day/night, choices,
-    /// "enters prepared").
+    /// The permanent's own "as it enters" abilities (choices, "enters
+    /// prepared"). (Day and night, CR 702.145c-g, are not "as it enters":
+    /// they apply once it is on the battlefield, `Game::day_night_entered`.)
     fn entering_choices(&mut self, idx: CardIdx) {
-        // CR 702.145d, g: a daybound (nightbound) permanent makes it day
-        // (night) if it is neither; at night a daybound one transforms.
-        if self.def_of(idx).daybound || self.def_of(idx).nightbound {
-            self.day_night_check();
-        }
         if self.def_of(idx).shock_life > 0
             || self.def_of(idx).chooses_player
             || self.def_of(idx).paints
@@ -2155,6 +2160,11 @@ impl Game {
             self.leaving_choice = 0;
         }
         let lki_power = (from == Zone::Battlefield).then(|| (old.inc, self.power(idx)));
+        // (An effect "loses all abilities for as long as" this remains on the
+        // battlefield ends as it leaves, CR 611.2b: `layers_on_move`.)
+        let loss_ended = from == Zone::Battlefield
+            && self.any_loss
+            && self.effects.iter().any(|e| e.m == crate::db::Mod::LoseAllAbilities && e.until == crate::layers::Until::WhileOnBattlefield(old));
         if from == Zone::Battlefield && (self.w3.seen != 0 || self.w3.granted) {
             self.w3_leaves(idx, old);
         }
@@ -2252,7 +2262,9 @@ impl Game {
         // long as it exists, in place before it is seen entering.
         if to == Zone::Battlefield {
             if let Some(v) = self.entering_copy.take() {
-                // (It may have entered with another face up: 702.145b.)
+                // (The face it entered with: a copy of a double-faced
+                // permanent back face up enters back face up, 707.8a; a
+                // token never enters transformed by daybound, 702.145b.)
                 let d = self.objs[idx.i()].def;
                 self.next_ts += 1;
                 let fx = crate::copies::CopyFx {
@@ -2403,6 +2415,12 @@ impl Game {
                     self.waiting.push(t);
                 }
             }
+        }
+        // A permanent that lost its abilities for as long as this one
+        // remained (The Wondrous Wasp, Tishana's Tidebinder) has them again:
+        // daybound and nightbound apply at once (CR 702.145c-g).
+        if loss_ended {
+            self.day_night_any_time();
         }
         new
     }

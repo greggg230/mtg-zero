@@ -119,6 +119,9 @@ impl Game {
         let Some(real) = self.reveal_face_down(c, known) else { return };
         self.set_face(c, real);
         self.note(|g| format!("{} is turned face up", g.name(c)));
+        // Front face up (CR 712.12a): a daybound card at night transforms at
+        // once, and with neither day nor night it becomes day (702.145c-d).
+        self.day_night_any_time();
     }
 
     /// A face-down permanent that just left the battlefield (it left as a

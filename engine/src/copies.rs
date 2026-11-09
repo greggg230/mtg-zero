@@ -424,6 +424,10 @@ impl Game {
                 for c in self.objs_on(f, on) {
                     self.add_copy_effect(c, vals, *until);
                 }
+                // A copy of a daybound face has daybound (Shifting Woodland
+                // copying Outland Liberator): with neither day nor night it
+                // becomes day (CR 702.145c-g apply at once).
+                self.day_night_any_time();
                 Flow::Next
             }
             Ext::CopySpell { of, who, n, may, new_targets } => {
@@ -686,5 +690,6 @@ impl Game {
         self.entering(card, tapped, 0);
         self.note_entered(card);
         self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u32 });
+        self.day_night_entered(card);
     }
 }

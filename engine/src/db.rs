@@ -2176,6 +2176,7 @@ impl CardDb {
         db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
         db.watch_toughness = db.defs.iter().any(|d| d.toughness_assigns_damage || d.toughness_stations);
         db.hand_alt_grants = db.defs.iter().any(|d| !d.casting.hand_alt_grants.is_empty());
+        crate::companion::check_table(&db);
         db
     }
 
