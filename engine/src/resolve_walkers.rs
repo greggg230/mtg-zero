@@ -113,7 +113,7 @@ impl Game {
                         if opts.is_empty() {
                             return Flow::Next;
                         }
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                        self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseGraveyardCard, opts);
                         Flow::Suspend
                     }
                 }
@@ -141,7 +141,7 @@ impl Game {
                                 opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Target(Target::Obj(r)) });
                             }
                         }
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::Target, opts);
+                        self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::Target, opts);
                         Flow::Suspend
                     }
                 }
@@ -324,22 +324,17 @@ impl Game {
                     }
                     Some(other) => unreachable!("exiled-card answer {other:?}"),
                     None => {
-                        let cands: Vec<CardIdx> = self
+                        let cands: Vec<Choice> = self
                             .exile
                             .iter()
                             .copied()
                             .filter(|&c| self.objs[c.i()].owner == p && self.counters_on(c, *counter) > 0)
-                            .take(act::EXILE_N as usize)
+                            .map(Choice::Card)
                             .collect();
                         if cands.is_empty() {
                             return Flow::Next;
                         }
-                        let opts = cands
-                            .iter()
-                            .enumerate()
-                            .map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) })
-                            .collect();
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
+                        self.ask_objects(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseExiled, &cands, Vec::new());
                         Flow::Suspend
                     }
                 }

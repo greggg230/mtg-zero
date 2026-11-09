@@ -672,6 +672,14 @@ impl Game {
             // tagged mana, losses, turns, this turn's counts and permissions,
             // energy, blessings and protection, the companion's card.
             v.extend([pl.pool.art as u64, pl.pool.haste as u64, pl.drew_from_empty as u64, pl.lost as u64, pl.turns as u64]);
+            // (Lands that entered this turn, the pool's other restricted mana:
+            // ENGINE.md 99.12.)
+            v.push(self.lands_entered_this_turn(p) as u64);
+            for &(q, ty, only, n) in &self.pool_restr {
+                if q == p {
+                    v.extend([u64::MAX - 10, ty as u64, only as u64, n as u64]);
+                }
+            }
             v.extend([pl.left_battlefield as u64, pl.drawn as u64, pl.spells_cast as u64, pl.noncreature_cast as u64]);
             v.extend([pl.gained_life as u64, pl.draw_step_draws as u64, pl.spells_game as u64, pl.energy as u64]);
             v.push(pl.life_gained as u64);

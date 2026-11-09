@@ -409,6 +409,10 @@ fn encoding_slots_name_the_action_slots() {
                     engine::Choice::Cast(c) | engine::Choice::Play(c) => ident(g.g.obj(c).def),
                     // a graveyard card targeted: its graveyard list's slot (ENGINE.md 65.10)
                     engine::Choice::Target(engine::Target::Obj(r)) => ident(g.g.obj(r.idx).def),
+                    // a paged list's "next page" (ENGINE.md 100.1-100.2): no card
+                    engine::Choice::Page(_) => continue,
+                    // the fourth slot's ability choice: the definition with it (100.2)
+                    engine::Choice::Ability(c, slot) => ident(g.g.activated_home_pub(c, slot)),
                     _ => unreachable!(),
                 };
                 assert_eq!(decode_id(&x[off..off + CODE]), want);
@@ -419,7 +423,11 @@ fn encoding_slots_name_the_action_slots() {
             if (act::GY_ABILITY..act::GY_ABILITY + encode::GYAS as u16).contains(&o.action) {
                 let k = (o.action - act::GY_ABILITY) as usize;
                 let off = encode::O_GYA + k * encode::GYA_W;
-                let engine::Choice::Ability(c, _) = o.choice else { unreachable!() };
+                // (A paged range's "next page", ENGINE.md 100.2: no card.)
+                let engine::Choice::Ability(c, _) = o.choice else {
+                    assert!(matches!(o.choice, engine::Choice::Page(_)), "{:?}", o.choice);
+                    continue;
+                };
                 assert_eq!(decode_id(&x[off..off + CODE]), ident(g.g.obj(c).def));
                 assert_eq!(x[off + CODE + 1], 1.0);
             }
@@ -1248,6 +1256,8 @@ fn public_state_reaches_the_encoding() {
     // too), controlling another player (CR 722: a pending effect, a controlled turn), W5's granter
     // of a spell's alternative cost (ENGINE.md 99.15; rare: no gate position has one), and whether
     // an artifact entered under a player's control this turn (ENGINE.md 99.11) follow.
+    // W2's restricted pool mana and the lands that entered this turn (ENGINE.md 99.12) come
+    // before W1's artifacts.
     assert_eq!(
         gaps,
         [
@@ -1264,6 +1274,8 @@ fn public_state_reaches_the_encoding() {
             "a player will control the other's next turn",
             "the active player is controlled this turn",
             "a spell's granted alternative cost came from another permanent",
+            "mana in a pool is restricted to activating abilities of lands",
+            "a land entered the battlefield this turn",
             "the other player learns a hand card past the 16th",
             "the turn goes on with another phase after its combat phases",
             "a control effect ends at the end of the turn",
@@ -1275,10 +1287,10 @@ fn public_state_reaches_the_encoding() {
         "the gaps on the allowlist"
     );
     // (Workstream C's: where the turn goes on after combat phases added to another phase, and
-    // the hand cards past the 16 slots, ENGINE.md 100.3; EoE W6, ENGINE.md 99.16: the recorded
-    // control effects, a spell's mana spent, a player's tokens this turn, a copy's kept
-    // ability.)
-    assert_eq!(next, 20);
+    // the hand cards past the 16 slots, ENGINE.md 100.3; W2's two, ENGINE.md 99.12; EoE W6,
+    // ENGINE.md 99.16: the recorded control effects, a spell's mana spent, a player's tokens
+    // this turn, a copy's kept ability.)
+    assert_eq!(next, 22);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

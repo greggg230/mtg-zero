@@ -61,7 +61,7 @@ fn first_trigger_from(g: &Game, name: &str) -> Option<Choice> {
     let d = g.pending_decision().unwrap();
     let mine: Vec<_> = g.waiting_triggers().iter().filter(|t| t.controller == d.player).collect();
     let k = mine.iter().position(|t| db().def(t.source_def).name == name)?;
-    let c = Choice::Trigger(k as u8);
+    let c = Choice::Trigger(k as u32);
     g.has_option(c).then_some(c)
 }
 

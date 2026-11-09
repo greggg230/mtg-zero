@@ -688,14 +688,14 @@ impl Heuristic {
             // X (CR 107.3): as much as it can pay.
             K::ChooseMode if matches!(g.agenda.last(), Some(Task::ChooseX { .. })) => {
                 let x_life = match g.agenda.last() {
-                    Some(&Task::ChooseX { id }) => g.stack().iter().find_map(|s| match s.kind {
+                    Some(&Task::ChooseX { id, .. }) => g.stack().iter().find_map(|s| match s.kind {
                         StackKind::Spell { card } if s.id == id && g.def_of(card).x_life => Some(card),
                         _ => None,
                     }),
                     _ => None,
                 };
                 let ability = match g.agenda.last() {
-                    Some(&Task::ChooseX { id }) => g.stack().iter().any(|s| s.id == id && matches!(s.kind, StackKind::Ability { .. })),
+                    Some(&Task::ChooseX { id, .. }) => g.stack().iter().any(|s| s.id == id && matches!(s.kind, StackKind::Ability { .. })),
                     _ => false,
                 };
                 if ability {
@@ -1412,7 +1412,7 @@ impl Heuristic {
     fn target(&mut self, g: &Game, d: &Decision, p: PlayerId) -> Option<u16> {
         let q = opp(p);
         let info = match g.agenda.last() {
-            Some(&Task::ChooseTargets { id, req }) => g.item_index(id).and_then(|i| {
+            Some(&Task::ChooseTargets { id, req, .. }) => g.item_index(id).and_then(|i| {
                 let item = &g.stack[i];
                 let ab = g.db.ability(g.item_ability(item)?);
                 let (prog, r) = req_program(ab, &item.modes, req);

@@ -913,6 +913,17 @@ const SUPPORTED_EOE_IRFIX: &[&str] = &[
 /// The last four workstreams (ENGINE.md 99.11-99.14): W1 adds to
 /// `SUPPORTED_EOE_IRFIX`; W2, W3, W4 to their own lists.
 const SUPPORTED_EOE_MANA: &[&str] = &[
+    "Bioengineered Future",
+    "Blast Zone",
+    "Cascading Cataracts",
+    "Crystal Quarry",
+    "Echoing Deeps",
+    "Eldrazi Temple",
+    "Famished Worldsire",
+    "Gene Pollinator",
+    "Magus of the Moon",
+    "Steelswarm Operator",
+    "The Eternity Elevator",
 ];
 const SUPPORTED_EOE_COMBAT: &[&str] = &[
     "Astelli Reclaimer",
@@ -946,10 +957,12 @@ const SUPPORTED_EOE_W5: &[&str] = &[
 
 /// EoE W6, the remaining cards (ENGINE.md 99.16).
 const SUPPORTED_EOE_W6: &[&str] = &[
+    "Contested War Zone",
     "Loading Zone",
     "Moonlit Meditation",
     "Nesting Grounds",
     "Plaza of Heroes",
+    "Power Depot",
     "Starfield Vocalist",
     "Terrasymbiosis",
     "Thespian's Stage",

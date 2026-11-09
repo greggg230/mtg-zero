@@ -29,6 +29,7 @@ pub mod eoe_w4;
 pub mod eoe_w1;
 pub mod eoe_w6;
 pub mod eoe_w5;
+pub mod eoe_w2;
 pub mod filter;
 pub mod printing;
 pub mod statics;
@@ -116,6 +117,8 @@ pub struct Lowerer<'a> {
     pub cascade: bool,
     /// The activated ability being lowered has {X} in its mana cost.
     pub act_x: bool,
+    /// How many {X} the activation cost has (`Cost::x_times`).
+    pub act_x_times: u8,
     /// The printing being lowered has an X its spell announces (its mana
     /// cost's {X}, or "pay X life").
     pub spell_x: bool,
@@ -267,7 +270,8 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79): none left (66 fixed
     // by mtg-bot f4f2d663, ENGINE.md 99.16).
 
-    // W2 mana and lands (ENGINE.md 99.12; docs/ir_defects.md 160-169).
+    // W2 mana and lands (ENGINE.md 99.12; docs/ir_defects.md 160-169): none
+    // left (160 and 161 fixed by mtg-bot f4f2d663, ENGINE.md 99.16).
 
     // W3 combat and abilities (ENGINE.md 99.13; docs/ir_defects.md 170-179).
 
@@ -313,6 +317,7 @@ pub(crate) fn lower_card_in(
         watches_exile: false,
         cascade: false,
         act_x: false,
+        act_x_times: 0,
         spell_x: false,
         reanimates: false,
     };

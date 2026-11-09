@@ -712,7 +712,10 @@ fn check_graveyard_list(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
             d.kind
         );
     }
-    let gy = g.graveyard_list(d.player, d.kind, &d.options);
+    // (On a page of a paged list, the page's cards at their slots, the
+    // other slots empty: ENGINE.md 100.2.)
+    let slots = g.decision_graveyard_list(d.player, d);
+    let gy: Vec<engine::CardIdx> = slots.iter().flatten().copied().collect();
     if gy.is_empty() {
         return;
     }
@@ -744,7 +747,7 @@ fn check_graveyard_list(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
         if g.obj(c).zone != Zone::Graveyard {
             continue;
         }
-        let k = gy.iter().position(|&y| y == c).unwrap_or_else(|| panic!("{}: {} not in its graveyard list", what(), g.name(c)));
+        let k = slots.iter().position(|&y| y == Some(c)).unwrap_or_else(|| panic!("{}: {} not in its graveyard list", what(), g.name(c)));
         assert_eq!(o.action, act::LIBRARY + k as u16, "{}: {:?} {} is list slot {k}", what(), d.kind, g.name(c));
         let s = &x[O_LIST + k * LIST_W + CODE..O_LIST + (k + 1) * LIST_W];
         assert_eq!(id_at(k), ids[g.obj(c).def as usize] as usize, "{}: {:?} slot {k}'s token isn't {}", what(), d.kind, g.name(c));
@@ -753,7 +756,7 @@ fn check_graveyard_list(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
         named += 1;
     }
     assert!(named > 0, "{}: a graveyard list without a graveyard option", what());
-    for k in gy.len()..LIST {
+    for k in slots.len()..LIST {
         assert!(x[O_LIST + k * LIST_W..O_LIST + (k + 1) * LIST_W].iter().all(|&v| v == 0.0), "{}: list slot {k} after the list", what());
     }
 }
@@ -775,6 +778,11 @@ fn check_list_options(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
             Choice::Def(d) => d,
             Choice::Card(c) | Choice::Cast(c) | Choice::Play(c) | Choice::CastFace(c) | Choice::PlayFace(c) | Choice::Faces(c, _) => g.obj(c).def,
             Choice::Target(Target::Obj(r)) => g.obj(r.idx).def,
+            // The fourth slot's ability choice (ENGINE.md 100.2): the
+            // definition that has the ability.
+            Choice::Ability(c, slot) => g.activated_home_pub(c, slot),
+            // A paged list's "next page": no card.
+            Choice::Page(_) => continue,
             other => panic!("{}: {:?}'s LIBRARY option {other:?}", what(), d.kind),
         };
         let s = &x[O_LIST + k * LIST_W..O_LIST + (k + 1) * LIST_W];

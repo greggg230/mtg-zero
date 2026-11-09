@@ -172,30 +172,6 @@ impl Game {
         cands.retain(|&t| sum + self.target_mv(t) <= total as u32);
     }
 
-    /// A target in exile (ENGINE.md 99.14): its option is `EXILE` + its
-    /// place among the decision's offered exiled cards, in exile order (as
-    /// `ChooseExiled`'s "k-th offered card"; the exile is public, so the
-    /// list is the same in every world). Beyond the 32 `EXILE` slots the
-    /// first 32 are offered (docs/shortcuts.md 58.4).
-    pub(crate) fn name_exile_targets(&self, kind: DecisionKind, options: &mut Vec<Opt>) {
-        if !matches!(kind, DecisionKind::Target | DecisionKind::NewTarget) {
-            return;
-        }
-        let mut k = 0u16;
-        options.retain_mut(|o| {
-            if let Choice::Target(Target::Obj(r)) = o.choice {
-                if self.objs[r.idx.i()].zone == Zone::Exile {
-                    if k >= act::EXILE_N {
-                        return false;
-                    }
-                    o.action = act::EXILE + k;
-                    k += 1;
-                }
-            }
-            true
-        });
-    }
-
     /// Is `c` a warped card: in exile by warp's delayed ability, which may
     /// be cast from exile on a later turn (CR 702.185a; `Ext::WarpExile`'s
     /// permission: from a later turn, for its mana cost, cast only)?
@@ -231,7 +207,7 @@ impl Game {
     /// when there is one), then a creature (`ChoosePermanent`); a decision
     /// with nothing of its kind is skipped. Each candidate is reached by
     /// exactly one sequence. The choice is noted on the spell.
-    pub(crate) fn choose_for_cost(&mut self, id: u32, perm: bool) {
+    pub(crate) fn choose_for_cost(&mut self, id: u32, perm: bool, page: crate::decision::Page) {
         let Some(pos) = self.item_index(id) else { return };
         let p = self.stack[pos].controller;
         match self.answer.take() {
@@ -242,7 +218,11 @@ impl Game {
                 return;
             }
             Some(Choice::Pass) => {
-                self.agenda.push(Task::ChooseForCost { id, perm: true });
+                self.agenda.push(Task::ChooseForCost { id, perm: true, page: crate::decision::Page::FIRST });
+                return;
+            }
+            Some(Choice::Page(next)) => {
+                self.agenda.push(Task::ChooseForCost { id, perm, page: next });
                 return;
             }
             Some(other) => unreachable!("cost choice {other:?}"),
@@ -252,24 +232,22 @@ impl Game {
         if !perm {
             let cards = self.warped_creature_cards(p);
             if !cards.is_empty() {
-                let mut opts: Vec<Opt> = cards
-                    .iter()
-                    .take(act::EXILE_N as usize)
-                    .enumerate()
-                    .map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) })
-                    .collect();
+                // (Every one: `EXILE` + its place, paged past the 32 ids;
+                // ENGINE.md 100.2.)
+                let items: Vec<Choice> = cards.into_iter().map(Choice::Card).collect();
+                let mut opts = Vec::new();
                 if !creatures.is_empty() {
                     opts.push(Opt { action: act::PASS, choice: Choice::Pass });
                 }
-                self.ask(Task::ChooseForCost { id, perm: false }, p, DecisionKind::ChooseExiled, opts);
+                self.ask_objects(Task::ChooseForCost { id, perm: false, page }, page, p, DecisionKind::ChooseExiled, &items, opts);
                 return;
             }
         }
-        let opts: Vec<Opt> = creatures.iter().map(|&c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) }).collect();
-        if opts.is_empty() {
+        if creatures.is_empty() {
             return; // (Castability requires a candidate.)
         }
-        self.ask(Task::ChooseForCost { id, perm: true }, p, DecisionKind::ChoosePermanent, opts);
+        let items: Vec<Choice> = creatures.into_iter().map(Choice::Card).collect();
+        self.ask_objects(Task::ChooseForCost { id, perm: true, page }, page, p, DecisionKind::ChoosePermanent, &items, Vec::new());
     }
 
     /// `Amount::ChosenPower` (CR 608.2h).

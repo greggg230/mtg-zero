@@ -8,10 +8,9 @@ use crate::ids::{CardIdx, ObjRef, PlayerId, Target, Zone};
 use crate::pay::PayMana;
 use crate::svec::SVec;
 
-/// How many stack items below the item whose targets are chosen a target may
-/// be among (`Game::stack_in_reach`; ENGINE.md 58.1): the `STACK` slots but
-/// the top one, which that item takes.
-pub(crate) const STACK_REACH: usize = act::STACK_N as usize - 1;
+/// `Game::priority_options`: the options that never page, the `EXILE`
+/// range's items and the `GY_ABILITY` range's (by position).
+pub(crate) type PriorityOptions = (Vec<Opt>, Vec<(u32, Choice)>, Vec<(u32, Choice)>);
 
 /// Who is asking whether a filter matches: the spell or ability's
 /// controller ("you") and source ("this", "another").
@@ -176,28 +175,34 @@ impl Game {
 
     // ---- priority options (CR 117.1, 116.2a, 307.1, 602.2) ----------------
 
-    pub(crate) fn priority_options(&self, p: PlayerId) -> Vec<Opt> {
-        let mut opts = self.priority_options_all(p);
+    /// `p`'s priority options (CR 117.1): the options that never page, and
+    /// the `EXILE` and `GY_ABILITY` ranges' items by position (the k-th
+    /// exiled card `p` may play, the k-th graveyard card with a graveyard
+    /// ability: `Game::ask_paged_ranges`, ENGINE.md 100.2).
+    pub(crate) fn priority_options(&self, p: PlayerId) -> PriorityOptions {
+        let (mut opts, mut exile, gy) = self.priority_options_all(p);
         // "Each player can't cast more than one spell each turn" (Archon of
         // Emeria); "your opponents can't cast spells during your turn"
         // (Jennifer Walters): only lands and abilities are left. (Checked
         // only when a spell could be cast.)
-        let casts = |o: &Opt| matches!(o.choice, Choice::Cast(_) | Choice::CastFace(_) | Choice::Faces(..));
-        if opts.iter().any(casts) && !self.may_cast_spells(p) {
+        let casts = |c: Choice| matches!(c, Choice::Cast(_) | Choice::CastFace(_) | Choice::Faces(..));
+        if (opts.iter().any(|o| casts(o.choice)) || exile.iter().any(|&(_, c)| casts(c))) && !self.may_cast_spells(p) {
             use crate::decision::{FACE_PLAY, OTHER_PLAY};
-            opts.retain_mut(|o| match o.choice {
+            let keep = |c: &mut Choice| match *c {
                 Choice::Cast(_) | Choice::CastFace(_) => false,
-                Choice::Faces(c, m) => match crate::faces::face_choice(c, m & (FACE_PLAY | OTHER_PLAY)) {
+                Choice::Faces(card, m) => match crate::faces::face_choice(card, m & (FACE_PLAY | OTHER_PLAY)) {
                     Some(ch) => {
-                        o.choice = ch;
+                        *c = ch;
                         true
                     }
                     None => false,
                 },
                 _ => true,
-            });
+            };
+            opts.retain_mut(|o| keep(&mut o.choice));
+            exile.retain_mut(|(_, c)| keep(c));
         }
-        opts
+        (opts, exile, gy)
     }
 
     /// May `p` cast spells now at all ("each player can't cast more than one
@@ -211,20 +216,13 @@ impl Game {
         !(ap != p && self.permanents_of(ap).any(|c| self.abilities(c).opp_no_spells_your_turn))
     }
 
-    /// The spending restrictions casting `card` satisfies (`SPEND_*`: an
-    /// artifact spell, a legendary spell; CR 106.6).
+    /// The spending restrictions casting `card` from hand satisfies
+    /// (`SPEND_*`; CR 106.6; `spend_allow_from`, ENGINE.md 99.12).
     pub(crate) fn spend_allow(&self, card: CardIdx) -> u8 {
-        let mut a = 0;
-        if self.is_type(card, types::ARTIFACT) {
-            a |= crate::db::SPEND_ARTIFACT;
-        }
-        if self.supertypes_of(card) & crate::db::supertypes::LEGENDARY != 0 {
-            a |= crate::db::SPEND_LEGENDARY;
-        }
-        a
+        self.spend_allow_from(card, crate::game::CastFrom::Hand)
     }
 
-    fn priority_options_all(&self, p: PlayerId) -> Vec<Opt> {
+    fn priority_options_all(&self, p: PlayerId) -> PriorityOptions {
         use crate::decision::{FACE_CAST, FACE_PLAY};
         // (Room for the usual options without growing.)
         let mut opts = Vec::with_capacity(16);
@@ -257,16 +255,17 @@ impl Game {
                 opts.push(Opt { action, choice });
             }
         }
-        self.other_zone_options(p, &classes, sorcery_ok, land_ok, &mut opts);
+        let (mut exile, mut gy) = (Vec::new(), Vec::new());
+        self.other_zone_options(p, &classes, sorcery_ok, land_ok, &mut opts, &mut exile);
         if self.seen & crate::game::SEEN_TOP != 0 {
             self.top_options(p, &classes, sorcery_ok, land_ok, &mut opts);
         }
-        self.activation_options(p, &classes, &slots, sorcery_ok, &mut opts);
+        self.activation_options(p, &classes, &slots, sorcery_ok, &mut opts, &mut gy);
         // The companion special action (CR 116.2g; ENGINE.md 35).
         if let Some(o) = self.companion_option(p, sorcery_ok, &classes) {
             opts.push(o);
         }
-        opts
+        (opts, exile, gy)
     }
 
     /// Can `p` cast card `c` from their hand now (timing, the cost with its
@@ -319,7 +318,7 @@ impl Game {
             // Mana that can only be spent on some spells (Mishra's
             // Workshop, Delighted Halfling): with what this spell allows.
             let allow = self.spend_allow(c);
-            if allow != 0 && (cls.iter().any(|cl| cl.only & allow != 0) || self.players[p as usize].pool.art > 0) {
+            if allow != 0 && (cls.iter().any(|cl| cl.only & allow != 0) || self.pool_restricted(p)) {
                 let keep = crate::pay::Keep { allow, ..Default::default() };
                 return self.can_pay_without(p, &cost, cls, &keep, Some(c));
             }
@@ -864,7 +863,7 @@ impl Game {
                 crate::game::CastFrom::Escape | crate::game::CastFrom::Retrace => {
                     self.cost_payable(p, card, self.route_extra(card, from, 0).expect("an escape or retrace cost"), &mana, classes, None)
                 }
-                _ => self.can_pay_with(p, &mana, classes, &crate::pay::Keep { allow: self.spend_allow(card), life: top_life, ..Default::default() }),
+                _ => self.can_pay_with(p, &mana, classes, &crate::pay::Keep { allow: self.spend_allow_from(card, from), life: top_life, ..Default::default() }),
             }
         };
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
@@ -874,102 +873,99 @@ impl Game {
         }
     }
 
-    /// CR 601.2b: announce X, from 0 to the most the caster can pay (31 at
-    /// most; 0 when cast without paying its mana cost, 107.3b). Choice:
-    /// `NUMBER`.
-    pub(crate) fn choose_x(&mut self, id: u32) {
+    /// CR 601.2b: announce X, from 0 to the most the caster can pay (0 when
+    /// cast without paying its mana cost, 107.3b). Choice: `ChooseMode`,
+    /// `Game::ask_amount` (`NUMBER` + X while every value fits, else digits;
+    /// `step` where they stand, ENGINE.md 100.2).
+    pub(crate) fn choose_x(&mut self, id: u32, step: crate::decision::NumberStep) {
         let Some(pos) = self.item_index(id) else { return };
+        let p = self.stack[pos].controller;
+        let Some((lo, hi)) = self.x_range(pos) else { return };
+        match self.answer.take() {
+            Some(Choice::Number(k)) => match step.answer_amount(lo, hi, k) {
+                crate::decision::NumberAnswer::Next(s) => self.agenda.push(Task::ChooseX { id, step: s }),
+                crate::decision::NumberAnswer::Value(x) => {
+                    let x = x as u32;
+                    self.stack[pos].x = x;
+                    self.note(|_| format!("X = {x}"));
+                }
+            },
+            Some(other) => unreachable!("X answer {other:?}"),
+            None => self.ask_amount(Task::ChooseX { id, step }, step, p, DecisionKind::ChooseMode, lo, hi),
+        }
+    }
+
+    /// The values X may take for stack item `pos` (CR 601.2b, 602.2b,
+    /// 107.3): `None` when no X is announced (an unkicked kicker {X}).
+    /// Mana-paid X stays within the u8 mana amounts of a cost
+    /// (docs/shortcuts.md 46.3, the audit's F7): a cost whose generic part
+    /// would pass 255 is not offered.
+    fn x_range(&self, pos: usize) -> Option<(u64, u64)> {
+        let p = self.stack[pos].controller;
         if let StackKind::Ability { ability, source } = self.stack[pos].kind {
             // An activated ability's {X} (CR 602.2b): as much as can be paid,
             // and no more than its "X targets" can have.
-            let p = self.stack[pos].controller;
-            match self.answer.take() {
-                Some(Choice::Number(x)) => {
-                    self.stack[pos].x = x;
-                    self.note(|_| format!("X = {x}"));
-                    return;
-                }
-                Some(other) => unreachable!("X answer {other:?}"),
-                None => {}
-            }
+            let id = self.stack[pos].id;
             let ad = self.db.def(ability.def).activated_def(ability.slot);
             let ctx = Ctx { controller: p, source: Some(source) };
-            let mut most = (act::NUMBER_N - 1) as u8;
+            let mut cap = u32::MAX as u64;
             if let crate::db::ActEffect::Stack(ab) = &ad.effect {
-                // (On the stack: the items in reach counted from below it,
-                // ENGINE.md 58.1.)
-                self.targeting = id;
                 for tr in ab.targets.iter().filter(|t| t.max == crate::db::X_TARGETS) {
-                    most = most.min(self.target_candidates(tr, &ctx, &[Target::Stack(id)]).len().min(255) as u8);
+                    cap = cap.min(self.target_candidates(tr, &ctx, &[Target::Stack(id)]).len() as u64);
                 }
-                self.targeting = 0;
             }
             // "Tap X untapped artifacts you control" (EoE W3): as many as
             // can be tapped with the mana still payable.
             if ad.cost.tap_x.is_some() {
-                most = most.min(self.tap_x_most(p, source.idx, ad));
+                cap = cap.min(self.tap_x_most(p, source.idx, ad) as u64);
             }
             // (Not with the source's own mana when the cost taps it: an
             // artifact Urza could tap for mana, ENGINE.md 31.)
             let exclude = Self::mana_exclude(source.idx, ad);
             let classes = self.mana_classes(p, exclude);
-            let keep = Self::keep_for(source.idx, &ad.cost, exclude);
-            let mut x = 0u8;
-            while x < most && self.can_pay_without(p, &self.act_mana_x(p, source.idx, ad, x + 1), &classes, &keep, exclude) {
-                x += 1;
-            }
-            let opts = (0..=x).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k) }).collect();
-            self.ask(Task::ChooseX { id }, p, DecisionKind::ChooseMode, opts);
-            return;
+            let keep = crate::pay::Keep { allow: self.ability_allow(source.idx), ..Self::keep_for(source.idx, &ad.cost, exclude) };
+            let most = crate::decision::most_allowed(0, cap, |x| {
+                let m = self.act_mana_x(p, source.idx, ad, x as u32);
+                (ad.cost.tap_x.is_some() || x < 255 && m.generic < u8::MAX) && self.can_pay_without(p, &m, &classes, &keep, exclude)
+            });
+            return Some((0, most));
         }
-        let StackKind::Spell { card } = self.stack[pos].kind else { return };
-        let p = self.stack[pos].controller;
-        match self.answer.take() {
-            Some(Choice::Number(x)) => {
-                self.stack[pos].x = x;
-                self.note(|_| format!("X = {x}"));
-                return;
-            }
-            Some(other) => unreachable!("X answer {other:?}"),
-            None => {}
-        }
+        let StackKind::Spell { card } = self.stack[pos].kind else { return None };
         let item = &self.stack[pos];
         // (Cast for a granted alternative cost, which has no {X}: X is 0 too,
         // CR 107.3b; ENGINE.md 99.15.)
         let free = matches!(item.from, crate::game::CastFrom::Permission { free: true, .. } | crate::game::CastFrom::LibraryTop)
             || self.cast_for_granted_alt(card, item);
+        // A spell's X with its cost: payable, and the cost's generic part
+        // within a u8 (46.3).
+        let pays = |x: u64| {
+            let mut tmp = item.clone();
+            tmp.x = x as u32;
+            let cost = self.total_mana(card, &tmp);
+            x < 255 && cost.generic < u8::MAX && self.can_pay_spell(card, &tmp, &cost)
+        };
         if self.def_of(card).times_cost.as_ref().is_some_and(|t| t.x) {
             // Kicker {X} (CR 601.2b): announced only if kicked, at least
             // `x_min`; as much as can be paid.
             if item.times == 0 {
-                return;
+                return None;
             }
-            let lo = self.def_of(card).x_min;
-            let mut tmp = item.clone();
-            let mut most = lo;
-            while most < (act::NUMBER_N - 1) as u8 {
-                tmp.x = most + 1;
-                if !self.can_pay_spell(card, &tmp, &self.total_mana(card, &tmp)) {
-                    break;
-                }
-                most += 1;
-            }
-            let opts = (lo..=most).map(|x| Opt { action: act::NUMBER + x as u16, choice: Choice::Number(x) }).collect();
-            self.ask(Task::ChooseX { id }, p, DecisionKind::ChooseMode, opts);
-            return;
+            let lo = self.def_of(card).x_min as u64;
+            return Some((lo, crate::decision::most_allowed(lo, u32::MAX as u64, pays)));
         }
-        let mut most = 0u8;
-        if self.def_of(card).x_life {
+        let most = if self.def_of(card).x_life {
             // "Pay X life" (CR 119.4: no more than one's life total; X isn't
             // in the mana cost, so a free cast doesn't fix it, 107.3b).
             // The life the mana payment may need is kept (a painland).
-            let life = self.players[p as usize].life.clamp(0, (act::NUMBER_N - 1) as i32) as u8;
+            // (The payment keeps life as a u8, `pay::Keep::life`: workstream
+            // B's payment model; at most 255 here.)
+            let life = self.players[p as usize].life.clamp(0, u8::MAX as i32) as u64;
             let cost = self.total_mana(card, item);
             let classes = self.mana_classes(p, None);
-            let allow = self.spend_allow(card);
-            while most < life && self.can_pay_with(p, &cost, &classes, &crate::pay::Keep { life: most + 1, allow, ..Default::default() }) {
-                most += 1;
-            }
+            let allow = self.spend_allow_from(card, item.from);
+            crate::decision::most_allowed(0, life, |v| {
+                self.can_pay_with(p, &cost, &classes, &crate::pay::Keep { life: v as u8, allow, ..Default::default() })
+            })
         } else if !free {
             // CR 601.2f: X is part of the mana cost, before reductions. Cast
             // with a permission for a mana value n or less (Lurrus, Serra
@@ -982,21 +978,15 @@ impl Game {
             }) {
                 Some(n) => {
                     let d = self.def_of(card);
-                    (n.saturating_sub(d.mana_value()) / d.x_pips.max(1)).min((act::NUMBER_N - 1) as u8)
+                    (n.saturating_sub(d.mana_value()) / d.x_pips.max(1)) as u64
                 }
-                None => (act::NUMBER_N - 1) as u8,
+                None => u32::MAX as u64,
             };
-            let mut tmp = item.clone();
-            while most < limit {
-                tmp.x = most + 1;
-                if !self.can_pay_spell(card, &tmp, &self.total_mana(card, &tmp)) {
-                    break;
-                }
-                most += 1;
-            }
-        }
-        let opts = (0..=most).map(|x| Opt { action: act::NUMBER + x as u16, choice: Choice::Number(x) }).collect();
-        self.ask(Task::ChooseX { id }, p, DecisionKind::ChooseMode, opts);
+            crate::decision::most_allowed(0, limit, pays)
+        } else {
+            0
+        };
+        Some((0, most))
     }
 
     /// Mana value (CR 202.3), with X on the stack (202.3e).
@@ -1010,7 +1000,7 @@ impl Game {
             return mv;
         }
         let x = self.stack.iter().find(|s| s.kind == StackKind::Spell { card: c }).map_or(0, |s| s.x);
-        mv.saturating_add(x.saturating_mul(self.def_of(c).x_pips))
+        mv.saturating_add(u8::try_from(x as u64 * self.def_of(c).x_pips as u64).unwrap_or(u8::MAX))
     }
 
     /// Can `p` pay one of the spell's additional-cost options (CR 601.2b),
@@ -1256,7 +1246,7 @@ impl Game {
         }
         // The fewest more cards that leave a payable cost (castability
         // made sure some number does).
-        let allow = self.spend_allow(card);
+        let allow = self.spend_allow_from(card, item.from);
         let need = (0..=cost.generic).find(|&d| self.can_pay_for(p, &cost.less_generic(d), allow)).unwrap_or(cost.generic) as usize;
         let floor = item.delve_floor as usize;
         let keep = self.escape_exiles(card, item.from) as usize;
@@ -1439,12 +1429,21 @@ impl Game {
         self.players[p as usize].gy_play_turn == self.turn.number && self.turn.number > 0
     }
 
-    /// Priority options for cards in exile with a permission (`EXILE`
-    /// slots) and in the graveyard (`GRAVEYARD` slots): lands to play,
-    /// spells to cast.
-    fn other_zone_options(&self, p: PlayerId, classes: &[crate::pay::Class], sorcery_ok: bool, land_ok: bool, opts: &mut Vec<Opt>) {
+    /// Priority options for cards in exile with a permission (`exile`: the
+    /// k-th such card's option at position k of the `EXILE` range, every
+    /// one, paged past the 32 ids, ENGINE.md 100.2) and in the graveyard
+    /// (`GRAVEYARD` slots): lands to play, spells to cast.
+    fn other_zone_options(
+        &self,
+        p: PlayerId,
+        classes: &[crate::pay::Class],
+        sorcery_ok: bool,
+        land_ok: bool,
+        opts: &mut Vec<Opt>,
+        exile: &mut Vec<(u32, Choice)>,
+    ) {
         use crate::decision::{FACE_CAST, FACE_PLAY};
-        let mut k = 0u16;
+        let mut k = 0u32;
         // (Cards exiled face down that a permission lets `p` play follow the
         // face-up ones: Headliner Scarlett.)
         for &c in self.exile.iter().chain(self.face_down.iter()) {
@@ -1461,10 +1460,7 @@ impl Game {
                 Some(crate::game::PermKind::Prepared { .. }) => true,
                 _ => continue,
             };
-            if k >= act::EXILE_N {
-                break;
-            }
-            let action = act::EXILE + k;
+            let pos = k;
             k += 1;
             let front = if self.def_of(c).halves.is_some() {
                 self.split_left_options(p, c, sorcery_ok, classes)
@@ -1481,7 +1477,7 @@ impl Game {
             };
             let other = if self.def_of(c).other_face().is_some() { self.other_face_options(p, c, sorcery_ok, land_ok && !cast_only, classes) } else { 0 };
             if let Some(choice) = crate::faces::face_choice(c, front | other) {
-                opts.push(Opt { action, choice });
+                exile.push((pos, choice));
             }
         }
         let mut esc = None;
@@ -1659,13 +1655,10 @@ impl Game {
             self.players[p as usize].hand.len() < chosen || !self.can_pay_with(p, &mana, &self.mana_classes(p, None), &keep)
         };
         let (p, source) = (item.controller, Some(self.item_source(item)));
-        // (Not the ability itself, already on the stack: CR 115.5; the stack
-        // items in reach counted from below it, ENGINE.md 58.1.)
+        // (Not the ability itself, already on the stack: CR 115.5.)
         self.choosing_for = id;
-        self.targeting = id;
         let mut avail: Vec<bool> = m.list.iter().map(|x| self.targets_available(x, p, source)).collect();
         self.choosing_for = 0;
-        self.targeting = 0;
         // Spree (CR 702.172a, 700.2h): a mode whose additional cost can't be
         // paid with the others chosen can't be chosen.
         if !m.costs.is_empty() {
@@ -1757,7 +1750,7 @@ impl Game {
             for _ in 0..item.times {
                 c = c.plus(&tc.mana);
                 if tc.x {
-                    c.generic = c.generic.saturating_add(item.x);
+                    c.generic = c.generic.saturating_add(u8::try_from(item.x).unwrap_or(u8::MAX));
                 }
             }
         }
@@ -1785,7 +1778,7 @@ impl Game {
     /// costs from the Citadel at low life, Mana Confluence's life).
     pub(crate) fn life_later(&self, card: CardIdx, item: &StackItem) -> u8 {
         let x_life = if self.def_of(card).x_life { item.x } else { 0 };
-        x_life.saturating_add(if item.from == crate::game::CastFrom::LibraryTop { self.mana_value_of(card) } else { 0 })
+        u8::try_from(x_life).unwrap_or(u8::MAX).saturating_add(if item.from == crate::game::CastFrom::LibraryTop { self.mana_value_of(card) } else { 0 })
     }
 
     /// Cost `o` with `life` more life to pay after its mana (X life,
@@ -1803,7 +1796,7 @@ impl Game {
     /// restrictions, the life its cost takes later kept)?
     pub(crate) fn can_pay_spell(&self, card: CardIdx, item: &StackItem, cost: &crate::mana::ManaCost) -> bool {
         let p = item.controller;
-        let keep = crate::pay::Keep { allow: self.spend_allow(card), life: self.life_later(card, item), ..Default::default() };
+        let keep = crate::pay::Keep { allow: self.spend_allow_from(card, item.from), life: self.life_later(card, item), ..Default::default() };
         self.can_pay_with(p, cost, &self.mana_classes(p, None), &keep)
     }
 
@@ -1834,7 +1827,7 @@ impl Game {
                 more = more.plus(&c.mana);
             }
         }
-        more.generic = more.generic.saturating_add(item.x.saturating_mul(def.x_pips));
+        more.generic = more.generic.saturating_add(u8::try_from(item.x as u64 * def.x_pips as u64).unwrap_or(u8::MAX));
         self.announced_cost(card, item, &more)
     }
 
@@ -1855,36 +1848,50 @@ impl Game {
 
     /// CR 601.2b: announce how many times an additional cost is paid
     /// (replicate, squad: any number; offspring: once or not), among the
-    /// numbers that leave the cost payable (`NUMBER` = times; at most 31).
-    pub(crate) fn choose_times(&mut self, id: u32) {
+    /// numbers that leave the cost payable (`ChooseMode`, `Game::ask_amount`:
+    /// `NUMBER` + times while every value fits, else digits; ENGINE.md
+    /// 100.2). The cost's mana stays within u8 amounts (46.3, F7).
+    pub(crate) fn choose_times(&mut self, id: u32, step: crate::decision::NumberStep) {
         let Some(pos) = self.item_index(id) else { return };
         let StackKind::Spell { card } = self.stack[pos].kind else { return };
         let p = self.stack[pos].controller;
-        match self.answer.take() {
-            Some(Choice::Number(n)) => {
-                self.stack[pos].times = n;
-                self.note(|_| format!("additional cost paid {n} time(s)"));
-                return;
-            }
-            Some(other) => unreachable!("times answer {other:?}"),
-            None => {}
-        }
         let Some(tc) = self.def_of(card).times_cost.clone() else { return };
-        let mut most = 0u8;
-        let mut more = crate::mana::ManaCost::default();
-        while most < tc.max.min(act::NUMBER_N as u8 - 1) {
-            more = more.plus(&tc.mana);
-            if tc.x {
-                // Kicker {X}: at least the least X.
-                more.generic = more.generic.saturating_add(self.def_of(card).x_min);
+        let x_min = if tc.x { self.def_of(card).x_min as u64 } else { 0 };
+        let pays = |n: u64| {
+            // `n` times the cost (with kicker {X}'s least X each time), every
+            // amount of it a u8.
+            let amt = |a: u8| -> Option<u8> { u8::try_from(a as u64 * n).ok() };
+            let mut more = crate::mana::ManaCost::default();
+            let Some(g) = u8::try_from((tc.mana.generic as u64 + x_min) * n).ok() else { return false };
+            more.generic = g;
+            for i in 0..6 {
+                let Some(v) = amt(tc.mana.pips[i]) else { return false };
+                more.pips[i] = v;
             }
-            if !self.can_pay_spell(card, &self.stack[pos], &self.announced_cost(card, &self.stack[pos], &more)) {
-                break;
+            for i in 0..10 {
+                let Some(v) = amt(tc.mana.hybrid[i]) else { return false };
+                more.hybrid[i] = v;
             }
-            most += 1;
+            for i in 0..5 {
+                let Some(v) = amt(tc.mana.phyrexian[i]) else { return false };
+                more.phyrexian[i] = v;
+            }
+            let cost = self.announced_cost(card, &self.stack[pos], &more);
+            cost.generic < u8::MAX && self.can_pay_spell(card, &self.stack[pos], &cost)
+        };
+        let most = crate::decision::most_allowed(0, tc.max as u64, pays);
+        match self.answer.take() {
+            Some(Choice::Number(k)) => match step.answer_amount(0, most, k) {
+                crate::decision::NumberAnswer::Next(s) => self.agenda.push(Task::ChooseTimes { id, step: s }),
+                crate::decision::NumberAnswer::Value(n) => {
+                    let n = n as u32;
+                    self.stack[pos].times = n;
+                    self.note(|_| format!("additional cost paid {n} time(s)"));
+                }
+            },
+            Some(other) => unreachable!("times answer {other:?}"),
+            None => self.ask_amount(Task::ChooseTimes { id, step }, step, p, DecisionKind::ChooseMode, 0, most),
         }
-        let opts = (0..=most).map(|n| Opt { action: act::NUMBER + n as u16, choice: Choice::Number(n) }).collect();
-        self.ask(Task::ChooseTimes { id }, p, DecisionKind::ChooseMode, opts);
     }
 
     /// At least `n` legal candidates for `tr` (the same order and rules as
@@ -1893,8 +1900,8 @@ impl Game {
         let ok = |t: Target| self.filter_ok(&tr.filter, t, ctx) && self.targetable(t, ctx);
         let players = [ctx.controller, crate::ids::opp(ctx.controller)].into_iter().map(Target::Player);
         let perms = self.battlefield.iter().map(|&c| Target::Obj(self.obj_ref(c)));
-        // Spells and abilities on the stack in reach, top first (an ability
-        // only for a filter that names abilities: a cheap test first).
+        // Spells and abilities on the stack, top first (an ability only for a
+        // filter that names abilities: a cheap test first).
         let abilities = wants_ability(&tr.filter);
         let spells = self.stack_in_reach().filter_map(move |s| match s.kind {
             StackKind::Spell { card } => Some(self.obj_ref(card)).filter(|&r| Some(r) != ctx.source).map(Target::Obj),
@@ -1917,19 +1924,17 @@ impl Game {
 
     /// CR 601.2d: divide the amount among the chosen targets of the divided
     /// requirement, at least 1 each: one decision per target but the last
-    /// (`NUMBER` = its amount), the last gets the rest.
-    pub(crate) fn divide(&mut self, id: u32) {
+    /// (`DivideDamage`, `Game::ask_amount`: `NUMBER` + its amount while every
+    /// amount fits, else digits; any amount that leaves 1 for each later
+    /// target, ENGINE.md 100.2), the last gets the rest.
+    pub(crate) fn divide(&mut self, id: u32, step: crate::decision::NumberStep) {
         let Some(pos) = self.item_index(id) else { return };
         let item = &self.stack[pos];
         let Some(ar) = self.item_ability(item) else { return };
         let Some((req, amount)) = self.db.ability(ar).divide else { return };
         let amount = amount.of(item.x);
         let n = item.targets.iter().filter(|(r, _)| *r == req).count();
-        if let Some(Choice::Number(k)) = self.answer.take() {
-            self.stack[pos].division.push(k);
-        }
-        let item = &self.stack[pos];
-        let given: u8 = item.division.iter().sum();
+        let given: u32 = item.division.iter().sum();
         let k = item.division.len();
         if n == 0 || k >= n {
             return;
@@ -1939,12 +1944,20 @@ impl Game {
             self.stack[pos].division.push(left);
             return;
         }
-        // Leave at least 1 for each target after this one (amounts within
-        // the `NUMBER` range: a larger share goes to a later target).
-        let most = (left - (n - k - 1) as u8).min(act::NUMBER_N as u8 - 1);
-        let opts = (1..=most).map(|a| Opt { action: act::NUMBER + a as u16, choice: Choice::Number(a) }).collect();
+        // Leave at least 1 for each target after this one.
+        let most = (left - (n - k - 1) as u32) as u64;
         let p = item.controller;
-        self.ask(Task::Divide { id }, p, DecisionKind::DivideDamage, opts);
+        match self.answer.take() {
+            Some(Choice::Number(a)) => match step.answer_amount(1, most, a) {
+                crate::decision::NumberAnswer::Next(s) => self.agenda.push(Task::Divide { id, step: s }),
+                crate::decision::NumberAnswer::Value(v) => {
+                    self.stack[pos].division.push(v as u32);
+                    self.agenda.push(Task::Divide { id, step: crate::decision::NumberStep::FIRST });
+                }
+            },
+            Some(other) => unreachable!("division answer {other:?}"),
+            None => self.ask_amount(Task::Divide { id, step }, step, p, DecisionKind::DivideDamage, 1, most),
+        }
     }
 
     /// Can `p` cast `card` for alternative cost `k` now, cast the way
@@ -2066,6 +2079,11 @@ impl Game {
         match self.answer.take() {
             Some(Choice::Number(crate::eoe_c::FREE_FIRST_SPELL)) => {
                 // Without paying its mana cost (CR 118.9; ENGINE.md 99.4).
+                // (Still cast from the hand, for spending restrictions.)
+                if matches!(self.stack[pos].from, crate::game::CastFrom::Hand | crate::game::CastFrom::Miracle) {
+                    let r = self.obj_ref(card);
+                    self.marks.push((r, crate::game::Mark::FreeFromHand));
+                }
                 self.stack[pos].from = crate::eoe_c::FREE_CAST;
                 self.note(|_| "without paying its mana cost".to_string());
             }
@@ -2093,7 +2111,7 @@ impl Game {
                     // with enchant creature, which targets (601.2c).
                     if let Some(face) = self.def_of(card).bestow {
                         self.objs[card.i()].def = face;
-                        self.agenda.push(Task::ChooseTargets { id, req: 0 });
+                        self.agenda.push(Task::ChooseTargets { id, req: 0, page: crate::decision::Page::FIRST });
                     }
                 }
             }
@@ -2249,14 +2267,14 @@ impl Game {
         if self.def_of(card).casting.choose_creature_or_warped {
             // The additional cost's choice, before the mana (CR 601.2h: the
             // costs in any order; ENGINE.md 99.14).
-            self.agenda.push(Task::ChooseForCost { id, perm: false });
+            self.agenda.push(Task::ChooseForCost { id, perm: false, page: crate::decision::Page::FIRST });
         }
         if self.def_of(card).delve {
             self.agenda.push(Task::Delve { id }); // CR 702.66a: while paying
         }
 
         if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.divide.is_some()) {
-            self.agenda.push(Task::Divide { id }); // CR 601.2d
+            self.agenda.push(Task::Divide { id, step: crate::decision::NumberStep::FIRST }); // CR 601.2d
         }
         if self.def_of(card).cleanup_sac.is_some() {
             let sorcery_time = self.turn.active == p && self.turn.step.is_main() && self.stack.len() <= 1;
@@ -2267,7 +2285,7 @@ impl Game {
         }
         let splice = self.splice_possible(p, card);
         if splice || self.def_of(card).spell.as_ref().is_some_and(|ab| ab.has_targets()) {
-            self.agenda.push(Task::ChooseTargets { id, req: 0 });
+            self.agenda.push(Task::ChooseTargets { id, req: 0, page: crate::decision::Page::FIRST });
         }
         if splice {
             self.agenda.push(Task::Splice { id }); // CR 601.2b, 702.47a
@@ -2276,11 +2294,11 @@ impl Game {
             self.agenda.push(Task::CastOption { id });
         }
         if self.def_of(card).x_pips > 0 || self.def_of(card).x_life || self.def_of(card).times_cost.as_ref().is_some_and(|t| t.x) {
-            self.agenda.push(Task::ChooseX { id }); // CR 601.2b
+            self.agenda.push(Task::ChooseX { id, step: crate::decision::NumberStep::FIRST }); // CR 601.2b
         }
         if self.def_of(card).times_cost.is_some() {
             // CR 601.2b: replicate, squad, offspring (before X).
-            self.agenda.push(Task::ChooseTimes { id });
+            self.agenda.push(Task::ChooseTimes { id, step: crate::decision::NumberStep::FIRST });
         }
         if self.def_of(card).overload {
             // Not overloaded unless the alternative cost is chosen.
@@ -2384,8 +2402,9 @@ impl Game {
     }
 
     /// Choose targets for stack item `id`, requirement `req` onwards
-    /// (CR 601.2c / 603.3d; one decision per target).
-    pub(crate) fn choose_targets(&mut self, id: u32, req: u8) {
+    /// (CR 601.2c / 603.3d; one decision per target; `page`: its page,
+    /// `Game::ask_objects`, ENGINE.md 100.2).
+    pub(crate) fn choose_targets(&mut self, id: u32, req: u8, page: crate::decision::Page) {
         let Some(pos) = self.item_index(id) else { return };
         let item = &self.stack[pos];
         let Some(ar) = self.item_ability(item) else { return };
@@ -2401,7 +2420,11 @@ impl Game {
         exclude.push(Target::Stack(id));
         match self.answer.take() {
             Some(Choice::Pass) => {
-                self.agenda.push(Task::ChooseTargets { id, req: req + 1 });
+                self.agenda.push(Task::ChooseTargets { id, req: req + 1, page: crate::decision::Page::FIRST });
+                return;
+            }
+            Some(Choice::Page(next)) => {
+                self.agenda.push(Task::ChooseTargets { id, req, page: next });
                 return;
             }
             Some(Choice::Target(t)) => {
@@ -2411,7 +2434,7 @@ impl Game {
                 if fresh {
                     self.became_target(id, t);
                 }
-                self.agenda.push(Task::ChooseTargets { id, req });
+                self.agenda.push(Task::ChooseTargets { id, req, page: crate::decision::Page::FIRST });
                 return;
             }
             Some(other) => unreachable!("target answer {other:?}"),
@@ -2420,23 +2443,22 @@ impl Game {
         // Divided damage: each target gets at least 1 (CR 601.2d), so no
         // more targets than the amount (an X spell's X is announced first).
         let max = match self.db.ability(ar).divide {
-            Some((r, amount)) if r == req && ar.mode.is_none() => (tr.max).min(amount.of(item.x)),
+            Some((r, amount)) if r == req && ar.mode.is_none() => (tr.max as u32).min(amount.of(item.x)),
             // "X targets": exactly X (CR 601.2c).
             _ if tr.max == crate::db::X_TARGETS => item.x,
             // "Up to X targets".
             _ if tr.max == crate::db::X_UP_TO => item.x,
             // "Up to X targets, X the times it was kicked" (its Enters note).
-            _ if tr.max == crate::db::KICKS_UP_TO => ((item.ev.amount >> 1) & 0xFF) as u8,
-            _ => tr.max,
+            _ if tr.max == crate::db::KICKS_UP_TO => self.entered_counts(item.ev.amount, item.ev.obj).0,
+            _ => tr.max as u32,
         };
-        let min = if tr.max == crate::db::X_TARGETS { item.x } else { tr.min };
+        let min = if tr.max == crate::db::X_TARGETS { item.x } else { tr.min as u32 };
         if already.len() >= max as usize {
-            self.agenda.push(Task::ChooseTargets { id, req: req + 1 });
+            self.agenda.push(Task::ChooseTargets { id, req: req + 1, page: crate::decision::Page::FIRST });
             return;
         }
         // (The item is on the stack: the stack items in reach are counted
         // from below it, ENGINE.md 58.1.)
-        self.targeting = id;
         let mut cands = self.target_candidates(tr, &ctx, &exclude);
         if let Some(n) = tr.total_mv {
             // "With total mana value n or less" (CR 601.2c; ENGINE.md 99.14).
@@ -2460,7 +2482,6 @@ impl Game {
             let chosen = item.targets.clone();
             cands.retain(|&t| self.later_distinct_ok(&reqs, req, t, &chosen, &ctx));
         }
-        self.targeting = 0;
         // "This spell costs {n} less if it targets ...": only targets with
         // which its cost can still be paid (a cast is offered only if it can
         // be completed; ENGINE.md 99.4).
@@ -2475,14 +2496,11 @@ impl Game {
                 });
             }
         }
-        let mut opts: Vec<Opt> = cands
-            .iter()
-            .map(|&t| Opt { action: self.target_action(ctx.controller, t), choice: Choice::Target(t) })
-            .collect();
+        let mut opts: Vec<Opt> = Vec::new();
         if already.len() >= min as usize {
             opts.push(Opt { action: act::PASS, choice: Choice::Pass });
         }
-        if opts.is_empty() {
+        if opts.is_empty() && cands.is_empty() {
             // Only reachable if the offer's check and this choice disagree
             // (a cast is offered only if it can be completed: `as_cast`).
             panic!(
@@ -2495,7 +2513,8 @@ impl Game {
                 self.observer
             );
         }
-        self.ask(Task::ChooseTargets { id, req }, ctx.controller, DecisionKind::Target, opts);
+        let items: Vec<Choice> = cands.into_iter().map(Choice::Target).collect();
+        self.ask_objects(Task::ChooseTargets { id, req, page }, page, ctx.controller, DecisionKind::Target, &items, opts);
     }
 
     /// 601.2f-h: determine the total cost and pay it.
@@ -2531,7 +2550,7 @@ impl Game {
             pm.convoke = def.casting.convoke;
             let rest = self.item_alt_rest(card, item);
             pm.keep = Self::keep_for(card, rest, None);
-            pm.keep.allow = self.spend_allow(card);
+            pm.keep.allow = self.spend_allow_from(card, item.from);
             pm.keep.spell = Some(card);
             if let Some(r) = emerge {
                 pm.keep.exclude = self.sacrifices_itself_for_mana(r.idx).then_some(r.idx);
@@ -2584,7 +2603,7 @@ impl Game {
                 self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
             }
         }
-        pm.keep.allow = self.spend_allow(card);
+        pm.keep.allow = self.spend_allow_from(card, item.from);
         pm.keep.spell = Some(card);
         let escalated = item.modes.len().saturating_sub(1) as u8;
         if escalated > 0 && def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
@@ -2651,27 +2670,13 @@ impl Game {
         }
     }
 
-    /// The stack items a spell or ability may target now, top first (an
-    /// engineering limit of the action layout, class B: ENGINE.md 58.1,
-    /// docs/shortcuts.md 58.1). The `STACK` ids name the top
-    /// [`act::STACK_N`] (32) stack slots, and targets are chosen with their
-    /// spell or ability on top of the stack (CR 601.2a-c, 602.2a-b, 603.3d),
-    /// so a target may be one of the [`STACK_REACH`] (31) items below it: the
-    /// top 31 items not counting the item whose targets are chosen
-    /// (`Game::targeting`, while it is on the stack; a check before it is put
-    /// there counts every item, and the item then goes on top). The deeper
-    /// (older) items of a taller stack can't be targeted. A check and the
-    /// choice after it agree: the same items are in reach.
+    /// The stack items a spell or ability may target, top first: every
+    /// item (CR 115.1, 601.2c: any legal target; ENGINE.md 100.2: a target
+    /// past the 32 `STACK` ids is offered on a page of the decision,
+    /// `Game::ask_objects`; before it, the 31 items below the targeting one,
+    /// 58.1).
     pub(crate) fn stack_in_reach(&self) -> impl Iterator<Item = &StackItem> + '_ {
-        let me = self.targeting;
-        let mut above = 0usize;
-        self.stack.iter().rev().take_while(move |s| {
-            let ok = above < STACK_REACH;
-            if s.id != me {
-                above += 1;
-            }
-            ok
-        })
+        self.stack.iter().rev()
     }
 
     pub(crate) fn target_candidates(&self, tr: &TargetReq, ctx: &Ctx, exclude: &[Target]) -> Vec<Target> {
@@ -2804,7 +2809,7 @@ impl Game {
             Target::Player(p) => match f {
                 Filter::Any | Filter::Player => true,
                 Filter::Opponent => p != ctx.controller,
-                Filter::DrewThisTurn(n) => self.players[p as usize].drawn == *n,
+                Filter::DrewThisTurn(n) => self.players[p as usize].drawn == *n as u32,
                 Filter::OathTarget => {
                     let ap = self.turn.active;
                     p != ap && self.creatures_of(p).count() > self.creatures_of(ap).count()
@@ -2932,11 +2937,11 @@ impl Game {
                         _ => None,
                     })
                 });
-                x.is_some_and(|x| self.mana_value_of(c) <= x)
+                x.is_some_and(|x| self.mana_value_of(c) as u32 <= x)
             }
             Filter::MvAtMostX => {
                 let x = ctx.source.and_then(|s| self.stack.iter().find(|i| i.kind == StackKind::Spell { card: s.idx })).map_or(0, |i| i.x);
-                self.mana_value_of(c) <= x
+                self.mana_value_of(c) as u32 <= x
             }
             Filter::Harnessed => {
                 let r = self.obj_ref(c);
@@ -3008,6 +3013,7 @@ impl Game {
             Filter::MvAtMostLandsYouControl => {
                 self.mana_value_of(c) as u32 <= self.count_controlled(ctx.controller, &Filter::Type(crate::db::types::LAND))
             }
+            Filter::MvIsSourceCounters(k) => ctx.source.is_some_and(|s| self.mana_value_of(c) as i64 == self.source_counters(s, *k)),
         }
     }
 }

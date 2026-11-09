@@ -734,7 +734,8 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             // CR 701.18a: any number on the bottom in any order, the rest on
             // top in any order. (`bottom_choice: false` is a Python shortcut
             // that keeps everything on top; the CR always lets the player
-            // choose, ENGINE.md 14.)
+            // choose, ENGINE.md 14; Palantir of Orthanc's IR has it,
+            // docs/ir_defects.md 190.)
             let _ = bottom_choice;
             let n = l.int("Scry.amount", *amount, 1, 20) as u8;
             b.op(Op::LookTop { who: Who::You, n, reveal: false });
@@ -991,6 +992,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 && !super::eoe_w4::lower_effect_eoe_w4(l, b, other)
                 && !super::eoe_w1::lower_effect_eoe_w1(l, b, other)
                 && !super::eoe_w6::lower_effect_eoe_w6(l, b, other)
+                && !super::eoe_w2::lower_effect_eoe_w2(l, b, other)
             {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }

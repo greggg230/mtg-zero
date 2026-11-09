@@ -98,7 +98,7 @@ impl Game {
         let (bf, cmd) = if active { (self.battlefield.len(), self.command.len()) } else { (0, 0) };
         // (Indices over both lists and the loss flag read once: this is the
         // hottest loop of the engine.)
-        let loss = self.any_loss;
+        let loss = self.any_loss || (self.moon_game && self.moon_source());
         (0..bf + cmd)
             .map(move |i| if i < bf { self.battlefield[i] } else { self.command[i - bf] })
             .flat_map(move |s| {
@@ -266,6 +266,37 @@ impl Game {
     /// Does `c` have subtype `s` (layer 4: an effect that sets creature
     /// types replaces the printed ones, CR 205.1b; the latest wins)?
     pub fn has_subtype(&self, c: CardIdx, s: u16) -> bool {
+        // A nonbasic land that is a Mountain: its land type is Mountain only
+        // (CR 305.7; ENGINE.md 99.12).
+        if self.moon_game && self.db.land_subtypes.contains(&s) && self.moon_on(c) {
+            // (Then the land-type effects with later timestamps, CR 613.7.)
+            let (r, ts) = (self.obj_ref(c), self.moon_ts());
+            let mut has = Some(s) == self.db.mountain;
+            // (Static abilities that give it the type, EoE W3, by timestamp
+            // among the effects.)
+            let grants = if self.w3.seen & crate::eoe_w3::SEEN_W3_SUBTYPE != 0 { self.granted_subtype_ts(c, s) } else { Vec::new() };
+            let mut later: Vec<(u32, Option<&Mod>)> = grants.into_iter().filter(|&g| g > ts).map(|g| (g, None)).collect();
+            later.extend(self.effects.iter().filter(|e| e.on == Affected::Obj(r) && e.ts > ts).map(|e| (e.ts, Some(&e.m))));
+            later.sort_by_key(|x| x.0);
+            for (_, m) in later {
+                let Some(m) = m else {
+                    has = true;
+                    continue;
+                };
+                match m {
+                    Mod::Types { subtypes, replace, .. } => {
+                        if *replace {
+                            has = subtypes.contains(&s);
+                        } else if subtypes.contains(&s) {
+                            has = true;
+                        }
+                    }
+                    Mod::BecomeTypes { subtypes, .. } => has = subtypes.contains(&s),
+                    _ => {}
+                }
+            }
+            return has;
+        }
         let d = self.def_of(c);
         let mut printed = d.subtypes.contains(&s) || self.exc(c).is_some_and(|e| e.has_subtype(self.db, s));
         // Reconfigure (CR 702.151b, 205.3d): attached, it isn't a creature,
@@ -398,6 +429,10 @@ impl Game {
         // Layer 1: a copy's "except it has <keyword>" (CR 707.9a).
         if let Some(e) = self.exc(c) {
             k.0 |= e.kws.0;
+        }
+        // (A nonbasic land that is a Mountain has none of its own, CR 305.7.)
+        if self.moon_game && self.moon_on(c) {
+            k = KwSet::default();
         }
         if self.printed_only(c) {
             return k;
@@ -852,6 +887,9 @@ impl Game {
         if !self.copies.is_empty() {
             self.end_copy_effects(Until::EndOfTurn);
         }
+        // (A permanent whose abilities or copy effect just ended may have
+        // daybound or nightbound again: CR 702.145c-g apply at once.)
+        self.day_night_any_time();
     }
 
     /// CR 514.2: the "this turn" effects kept as turn numbers end in the
@@ -889,6 +927,7 @@ impl Game {
     pub(crate) fn end_until_next_turn(&mut self, p: PlayerId) {
         self.effects.retain(|e| !(e.until == Until::YourNextTurn && e.controller == p));
         self.effects_changed();
+        self.day_night_any_time();
     }
 }
 

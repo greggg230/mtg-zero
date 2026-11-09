@@ -296,13 +296,8 @@ impl Game {
                         if cands.is_empty() {
                             return Flow::Next;
                         }
-                        let opts = cands
-                            .iter()
-                            .take(act::EXILE_N as usize)
-                            .enumerate()
-                            .map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) })
-                            .collect();
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
+                        let cands: Vec<Choice> = cands.iter().copied().map(Choice::Card).collect();
+                        self.ask_objects(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseExiled, &cands, Vec::new());
                         return Flow::Suspend;
                     }
                 };

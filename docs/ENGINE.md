@@ -19561,6 +19561,198 @@ play reaches the mechanism: 300 random-action games of a Tannuk deck (four Tannu
 Mountains) cast 301 spells for Tannuk's warp and exiled 273 permanents with it. The public-state
 gate: 135 perturbations encoded, 5 deliberate limits, 9 next-layout gaps.
 
+#### 99.12 W2: mana and lands (branch `eoe-w2-mana`, from `eoe-base` 3a8dfb6)
+
+**Why.** The W2 share of the set's last 62 cards (99.11-99.14): Blast Zone, Bioengineered Future,
+Cascading Cataracts, Contested War Zone, Crystal Quarry, Echoing Deeps, Eldrazi Temple, Famished
+Worldsire, Gene Pollinator, Magus of the Moon, Mm'menon, the Right Hand, Plaza of Heroes, Steelswarm
+Operator, The Eternity Elevator, Thespian's Stage; and every mana spending restriction (Sunken
+Citadel's and Power Depot's too, whose IR W1 fixes).
+
+**Spending restrictions (CR 106.6; `eoe_w2.rs`).** `ManaAbility::only` is now the set of purposes
+the mana may be spent on, any one of them (`eoe_w2::spendable`: no restriction, or a purpose in
+common with the payment's `Keep::allow`); for the cube's two one-purpose kinds this is the old rule.
+New purposes (`db.rs`): `SPEND_ARTIFACT_ABILITY`, `SPEND_ELDRAZI_SPELL`, `SPEND_ELDRAZI_ABILITY`,
+`SPEND_LAND_ABILITY`, `SPEND_OUTSIDE_HAND`; the IR's `artifact_activation`, `colorless_eldrazi` (two
+purposes), `land_activation` and `cast_from_outside_hand` lower to them (`legendary_permanent_ability`,
+`not_nonartifact_spell`, `colored_only` stay denied: no Oracle text of the table says them, 160).
+What a payment satisfies: casting (`Game::spend_allow_from`: artifact, legendary, colorless Eldrazi
+(CR 105.2c, 205.3j), cast from anywhere but the hand, by the cast's `CastFrom`), activating an ability
+(`Game::ability_allow`: of an artifact, land or colorless Eldrazi source, as the activation begins:
+the activation's payment, its X maximum, `cost_payable`, a mana ability's own cost with priority);
+"unless pays" and special actions none. Only purposes the table's mana has are worked out
+(`CardDb::spend_kinds`): the cube's payments are unchanged.
+
+*Restricted mana in the pool.* What a payment leaves of restricted mana, or a mana ability activated
+with priority adds, keeps its restriction: Mishra's Workshop's artifact-only {C} stays
+`ManaPool::art` (layout v5 encodes it), every other kind is `Game::pool_restr` (player, type,
+purposes, amount; a part of `ManaPool::amt`, emptied with the pools), and the payment model reads
+both as one list of kinds (`Game::pool_kinds`, `set_pool_kinds`): `vgroups` (spendable restricted
+mana is the `+16` kind, the rest held), `add_pool` (castability), `pick_multi` (`PayMana::extra_restr`
+replaces `extra_art`), `pool_rems` (`Rem::restr`: per spend the greatest restricted amounts, then
+`eoe_w2::kinds_left` splits them among the kinds, a kind whose purposes are all another's spent
+first; two kinds neither of which covers the other are the player's choice, `PayPool`) and
+`finish_payment` (converge's restricted units, the pool written back). The lowering no longer limits
+restricted productions to one mana or the Workshop's {C}s (only `{X}` mana and haste mana with a
+restriction are denied).
+
+*Found, left for the maintainer (changes cube games).* Mana a mana ability makes with priority (the
+source about to be lost, 86.1/86.2) went to the pool unrestricted: Mishra's Workshop's {C}{C}{C} or
+Delighted Halfling's mana floated in response could pay anything. Keeping the restriction changes 12
+of the 2,500 digest games, so `add_restricted_mana` keeps it only in tables whose mana has a purpose
+beyond the cube's two (the EoE table); the cube keeps the old behaviour (a known fault). Halfling's
+"can't be countered" rider is lost on floated mana either way (the pool has no such tag).
+
+*Not exact, open.* The mana cost of a mana ability activated within a payment (34.2's needs) is
+matched with the payment's units by `mana::fits`, which reads types and `MADE` only: restricted mana
+the payment may spend also pays such a need whatever the need's source is (Mishra's Workshop's {C}
+pays Chromatic Star's {1} while casting an artifact spell: a cube fault since 34), and restricted mana
+the payment may not spend is not offered for a need its restriction allows (Sunken Citadel's
+land-ability mana for Cascading Cataracts' {5} while casting a spell). Exact needs a restriction per
+unit and an allowance per need in the matching (the masks' eight bits are taken: types, `MADE`,
+`RESTRICTED`/`NOT_MADE`); not done.
+
+**Cards and features.**
+
+* Eldrazi Temple, Steelswarm Operator: the restrictions above (`cards_eoe_w2.rs`).
+* The Eternity Elevator: `ManaProd::SameTypeCounters` (X mana of one colour, X its charge counters;
+  its station tier was lane A's).
+* Cascading Cataracts, Crystal Quarry: a mana ability whose cost is {n} is n needs of the payment
+  (`Class::need_n`, `Way::need_n`; one mana as before). `most_spent_from` counts the needs of the
+  rest's ways in the virtual pool's spend (EoE fuzz seed 44: the pool's {C}{C} had to pay the
+  Cataracts' {5}; a one-mana need was undercounted the same way, never seen in the cube).
+* Blast Zone: "{X}{X}" (`Cost::x_times`), "put X charge counters on this land" (`Amount::X`), and
+  "destroy each nonland permanent with mana value equal to the number of charge counters on this
+  land" (`Filter::MvIsSourceCounters`, last known counters: it was sacrificed, CR 608.2h).
+* Magus of the Moon (CR 305.7, 613.1d): `CardDef::nonbasic_lands_are_mountains`; `Game::moon_on` (a
+  land by its card types, not basic, and a permanent with the ability that hasn't lost its
+  abilities; looked at only in games with such a card, `Game::moon_game`): `abilities()` is a Mountain's ({T}: Add {R}, `eoe_w2::mountain_def`), its keywords and
+  land types (CR 205.3i, `CardDb::land_subtypes`) replaced, no triggers, statics read through
+  `abilities()`; mana-source slots resolve through `Game::source_def`. A nonbasic land entering
+  while it would be a Mountain gets none of its own replacement effects (CR 614.12: enters tapped,
+  counters, as-enters choices, entering as a copy). Its abilities are a definition of the table's
+  (`CardDb::moon_base`, and per definition with latent abilities a variant keeping them,
+  `CardDb::moon_of`: an ability an effect gave it survives, layer 6 after layer 4; Lavaclaw Reaches
+  animated, then the Magus), also the definition its activations name (`begin_activate`); land types
+  set by effects with later timestamps apply after the Magus's (CR 613.7, `Game::moon_ts`). Open,
+  engine-wide (not the Magus's): a basic land type an effect gives a permanent doesn't give it that
+  type's mana ability (CR 305.6); Multiversal Passage's is its own production.
+* Bioengineered Future: `CardDef::etb_counter_per_land_entered`, `Game::lands_entered` (the lands
+  that entered under each player's control this turn, counted after the creature's counters).
+* Gene Pollinator ("{T}, Tap an untapped permanent you control"): a source on each untapped
+  permanent it may tap (`pay::POL_FOR`, picked by the permanent's own `MY_PERM` id; a permanent that
+  stands for several sources, improvise or convoke and a Pollinator's tap, is one option, and which
+  is asked next: `PayMana::card_slots`, `which`, `ChooseMode`), the activating Pollinator tapped too: `Class::share` = the Pollinators that can
+  activate, `Class::taps` the share a use takes (2 for a Pollinator that could activate, tapped for
+  another's; 1 for one tapped for improvise or convoke, `Game::pol_split`, in `improvise_classes` and
+  `convoke_classes` so castability counts it as the payment does: EoE fuzz seeds 6224 and 3118,
+  Vote Out with a Pollinator, four mana counted and three payable, ENGINE.md 49). Single sources with a
+  shared tap stay ways (the Lumberjack's were all several-mana); the sources on permanents with no
+  other way are fixed units as far as the shares go (`Cands::free_shared`), and with as many of them
+  as Pollinators the sources on permanents with another way are left out (never better): without
+  this every land had two ways and the feasibility search branched three ways per land (a 300-game
+  EoE fuzz ran 18 minutes before it was stopped). "Whenever you tap a creature for mana" (CR
+  605.1b) adds its mana to each source when the Pollinators are creatures (a several-mana source
+  then); Pollinators of which only some are creatures, with such a bonus, fail loudly (which one
+  activates would change the mana: open).
+* Famished Worldsire: devour land n (CR 702.82a, `CardDef::devour_land`, `Task::Devour`: a
+  `Sacrifice` decision per land in battlefield order, `PASS` stops; nothing happens until the choice
+  ends, then the lands go together and the counters are put on) and its trigger (look at the top X,
+  `PileDest::BattlefieldTapped` for any number of lands, shuffle).
+* Echoing Deeps: `optional_copy_land_from_graveyard` as an `EntersAsCopy` (any land card in either
+  graveyard, `ChooseGraveyardCard` with `PASS`; "except it's a Cave in addition", the flag's meaning)
+  with `EntersAsCopy::tapped` (copying, it enters tapped; declined, it enters as itself).
+* Contested War Zone (IR defect 161) and Plaza of Heroes (160): everything but the defect is in
+  (`EoeW2::EventObjControllerGainsSource`: the creature's controller now, or as it last existed,
+  `lki_toughness` kept for it, `CardDb::watch_lki_controller`; "attacking creatures get +1/+0" of every attacker, as the
+  class's docstring says, Cecil's trigger unchanged in two-player games), tested on corrected copies.
+
+**Shared files touched (additive).** `db.rs` (the `SPEND_*` purposes, `ManaProd::SameTypeCounters`,
+`Filter::MvIsSourceCounters`, `Cost::x_times`, `EntersAsCopy::tapped`, four `CardDef` fields, five
+`CardDb` fields), `game.rs` (`pool_restr`, `lands_entered`, `abilities()`, `entering()`'s own
+replacements, devour), `pay.rs` (the payment model above), `cast.rs`, `activate.rs`, `flow.rs`
+(`Task::Devour`, `ManaNowPick::only`), `program.rs` (`Ext::EoeW2`, `PileDest::BattlefieldTapped`),
+`resolve.rs`, `resolve_ext.rs`, `resolve_m7d.rs`, `layers.rs`, `triggers.rs`, `copies.rs`,
+`lower/{mod, activated, effect, effect_ext, effect_tail, printing}.rs`, `az/{decks, encode}.rs`
+(`Task::Devour` with the as-enters tasks), `public_state.rs` (two new public fields, each a
+next-layout limit drawing nothing from the shared stream), `testkit.rs` (`view_of`), `tests/az.rs`
+(the limits' allowlist), `tests/support.rs`.
+
+**Not done, and why.**
+
+* Mm'menon, the Right Hand: its restriction ("only to cast a spell from anywhere other than your
+  hand", `SPEND_OUTSIDE_HAND`, `spend_allow_from`) is in; left: the mana ability it grants to
+  artifacts (a source on each untapped artifact, as `POL_FOR`'s, with its own `ACTIVATE` id) and
+  "cast artifact spells from the top of your library" (a second top-of-library route for the mana
+  cost beside Bolas's Citadel's `CastFrom::LibraryTop`). Not started for time. (A spell cast
+  without paying its mana cost by "the first spell each turn" has `from` set to
+  `eoe_c::FREE_CAST` even from the hand, so its additional mana costs would count as cast from
+  outside the hand: to handle with that card.)
+* Thespian's Stage: "becomes a copy of target land, except it has this ability": a copy effect
+  that keeps one of the copying object's abilities; a permanent's abilities are one
+  `&'static CardDef` (`Game::abilities`), so the kept ability needs a merged definition per copied
+  land (none can be made during play). Not started.
+* Plaza of Heroes, Contested War Zone: IR defects 160, 161 (their features are in).
+* Sunken Citadel needs W1's IR (entry 50: "as it enters, choose a color"; two mana of that colour);
+  its restriction is `SPEND_LAND_ABILITY` (tested on a fixed-colour copy, "Test Citadel": the
+  pool keeps what a land's ability doesn't spend). Power Depot needs W1's IR (entries 40, 47: the
+  "{T}: Add {C}" ability, modular 1, and the restriction "artifact spells or abilities of
+  artifacts"): W1's schema has the value since (`artifact_spell_or_activation`), lowered at
+  the merge (below) as `SPEND_ARTIFACT | SPEND_ARTIFACT_ABILITY` (two-purpose mana is tested with
+  Eldrazi Temple's); modular is left.
+
+**Tests.** `tests/cards_eoe_w2.rs` (7: the restrictions), `tests/cards_eoe_w2_lands.rs` (23: the
+lands and the other cards), custom cards in `tests/eoe_w2/mod.rs` (Test Citadel, Test Workshop,
+Test War Zone, Test Plaza, ...). Cards supported (`SUPPORTED_EOE_MANA`, 11): Bioengineered Future,
+Blast Zone, Cascading Cataracts, Crystal Quarry, Echoing Deeps, Eldrazi Temple, Famished Worldsire,
+Gene Pollinator, Magus of the Moon, Steelswarm Operator, The Eternity Elevator. EoE support 258 -> 269 / 320 (W2 alone); cube 546 / 546. On
+9a1b43f: the full engine suite (`cargo test --release -p engine`) 1,883 passed, 0 failed;
+`FUZZ_POOL=eoe FUZZ_GAMES=20000` passed (seeds 0-19,999 as four runs of 5,000 in parallel, 2,937 to
+6,941 s each on a machine four agents shared); the default `FUZZ_GAMES=20000` passed (800 s). The
+fuzz found two faults, both fixed with tests: EoE seed 44 (the rest's needs in the virtual pool's
+spend) and seeds 6224 and 3118 (castability's convoke sources and the Pollinators).
+
+**Digests:** unchanged (`f6543eb2b1b8752f`): every new path is gated by the table or the game
+(`CardDb::spend_kinds`, `Game::moon_game`, `CardDb::watch_lands_entered`).
+
+**Merge of `eoe-base` 9cdda51 (W1, W3, W4, W5) into `eoe-w2-mana`.** Conflicts, all kept on both
+sides: the module lists, the effect dispatch chain, the `Ext` variants and their arms, the `Mark`
+variants, `CardDef` / `CardDb` fields, the public-state perturbations and limits (the next-layout
+gaps in `tests/az.rs` in the merged order: W2's two before W1's artifacts entered this turn, 16
+applied); `entering`, now `entering_own` with W1's `own` (an effect putting it onto the
+battlefield with no abilities): the Mountain test joins `own` there and in `enters_tapped_own` and
+the copy choice, Bioengineered Future's count stays before it, devour is among the as-enters
+choices; `act_mana_x` with W3's `tap_x` and `x_times`; W3's granted activated abilities: their places
+start after `Game::own_ability_slots` (the card's own, or a Mountain's abilities if more), and
+`activated_home` names the Mountain's definition for a nonbasic land under the Magus; W3's static
+subtype grants join the Mountain's land types by timestamp; `spend_allow_from` reads
+`supertypes_of`. W1's new `SpendRestriction::ArtifactSpellOrActivation` (Power Depot) lowered. On
+the merge: EoE support 306 / 320 (base 295 and W2's 11); Power Depot is blocked by modular,
+Sunken Citadel by its chosen colour's production (W1's IR: `produces: chosen`,
+`enters_choosing_color`), both outside W2's restrictions.
+
+The merge's EoE fuzz found one interaction (seeds 538, 5545, 15243): W3's "tap X untapped artifacts"
+cost (Secluded Starforge) reserves the artifacts it will tap (`Keep::sac_taps`), and a Gene
+Pollinator activating for the mana is an artifact tapped too: `Game::reserved_n` counts it against
+the reservation (one more for each Pollinator source when the Pollinators that can activate all
+match the cost; when only some do, which one activates would matter: a loud failure, open). Test:
+`cr_601_2h_a_pollinator_activating_isnt_an_artifact_left_to_tap`.
+
+Also found by the merge's EoE fuzz (seed 10023 stalled a run): a several-mana source's production
+was one `ChooseMana` decision with an option per production, and Cascading Cataracts' "five mana in
+any combination of colors" has 126, past the 32 `NUMBER` ids (the ids ran into the next range).
+Now a class with more productions than `NUMBER` ids is chosen one mana at a time, colours in
+non-decreasing order (`PayMana::now_taken`, `now_min`; at most six options, each set once), each
+colour offered only if a feasible production goes on with it, and whether a class has a feasible
+production stops at the first (`feasible_prods_where`). Seed 10023 itself still runs past 15
+minutes in the fuzz (its payments with Cataracts, Crystal Quarry, Gene Pollinator and Reflecting
+Pool under the option-completion check): open, for the payment workstream.
+
+On the merged branch (5ab782e): EoE support 306 / 320 (cube 546 / 546); the full engine suite 1,993
+passed, 0 failed; digests unchanged (`f6543eb2b1b8752f`); `FUZZ_POOL=eoe` seeds 0-19,999 but
+10023 passed (eight runs of about 2,500, in parallel) and seed 10023 does not finish in 10 minutes
+(above); the default `FUZZ_GAMES=20000` passed (1,636 s).
+
 ### 100. Faithfulness (the audit's fixes)
 
 The user's rule (2026-11-08): **"We can't have any approximations. Need fully faithful
@@ -19861,6 +20053,194 @@ suite 1,996 passed, 0 failed, 20 ignored (with A0's merge; `az` 41, `hidden` and
 onto the battlefield at night is transformed right after it enters (`entering_choices` -> `day_night_check`), with a
 `Transforms` event; CR 702.145b says it enters transformed (no transformation). A basic land type an effect gives (N22) is
 refused, not built: it waits for W2's moon definitions and the payment code.
+
+#### 100.2 A: choice ranges (branch `eoe-a-ranges`, from `eoe-base` f667cdb; `eoe-base` 9c67a75 merged)
+
+**Why.** Workstream A of the audit (5.1 F1, 5.2 F2): apply A0's helpers (100.1) everywhere a
+choice was cut to its action range, so every legal option is reachable by exactly one sequence of
+decisions inside layout v5.
+
+**Object choices: `Game::ask_objects`** (`decision.rs`). A choice among objects (players,
+permanents, spells and abilities on the stack, graveyard and exiled cards) names each object by the
+id it had (`PLAYER`, `MY_PERM` / `OPP_PERM` slot, `STACK` slot, `LIBRARY` + its slot in the
+decision's graveyard list, `EXILE` + its place among the exiled cards offered) and pages a range
+with an object past its last id (`ask_paged_ranges`; ranges in the order permanents, opponent's
+permanents, stack, list, exile). `ask_object_opts` is the same for options built with their unpaged
+ids. Unpaged, the ids are exactly the old ones (`ask`'s graveyard renaming finds nothing to rename;
+eoe_w4's `name_exile_targets` and `target_action` are gone). The page lives in the task
+(`ChooseTargets`, `CopyTargets`, `ChooseForCost`, `EnterAura`, `EnterAsCopy`, `AsEnters`,
+`ChooseAbility`, `PutTriggers`, `PriorityAsk` gain `page`), or in the frame (`Frame::page`, with
+`Frame::step` for numbers: reset when `pc` moves; `run_frame` takes a "next page" answer for the
+current op and resets the page after any other answer).
+
+| Row | Before | Now |
+|---|---|---|
+| 58.1 | targets among the 31 stack items below (`stack_in_reach`, `Game::targeting`) | every stack item; `STACK` + 31 = next page. `Game::targeting` and `STACK_REACH` are gone, so the checks before a cast, an activation or a trigger see every item too |
+| 99.14.1, 58.4 | first 32 exiled targets / playable cards / offered cards | priority's `EXILE` range and every `ChooseExiled` (six frame sites, eoe_w4's cost, W1's linked creature: its `PASS`-paging moved onto the helper) page past 32 |
+| 27.13.5 | first 12 cards with a graveyard ability | priority's `GY_ABILITY` range pages past 12 (`priority_options` returns the two ranges by position) |
+| 65.10 | assert past 64 graveyard cards from both graveyards | every target and effect graveyard choice pages the list; on a page the list block holds the page's cards at their slots (`Game::decision_graveyard_list`, read by `az/encode.rs` and the fuzzer) |
+| 31.7.8 | first 16 distinct waiting triggers | every distinct one, `TRIGGER` + its place, paged past 16 (`Choice::Trigger` is a `u32`). The groups-first reordering stays: it keeps the groups on the first page and only moves interchangeable triggers (C's `same`, 100.3) |
+| 31.7.5, N14 | the opponent's names, cut at 64 | every card name in the game, both players' (CR 201.3; the tax is on every source), paged past 64; `PASS` = a name of no card in the game |
+| 25.10.5 | W3's page: `NUMBER` + place - `from`, its own paging | `ask_paged` over `LIBRARY` + place - 3; the list block holds the definition with each ability (`Game::activated_home`) and its index (`encode::list::ABILITY` = (index + 1) / 4: gap #16 inside v5) |
+| N12 | first 16 counter kinds | every kind, `NUMBER` paged past 32 |
+
+**Numbers: `Game::ask_amount`** (`decision.rs`): `NUMBER` + the amount itself while every value
+fits (`hi` <= 31: the ids of before), else `ask_number(lo, hi)`; `NumberStep::answer_amount`
+decodes it, and `most_allowed(lo, cap, ok)` finds the largest allowed value (one at a time through
+31, the checks of before in their order, then doubling and bisection: a larger X or count costs
+more).
+
+| Row | Before | Now |
+|---|---|---|
+| 13.9, 23.11.3 | 0..=29, 30 = lethal, 31 = all | any amount in `lo..=hi` (`Task::AssignDamage { j: u32, step }`) |
+| N5 | X, kicker X, pay X life, X targets, times, divided damage, energy, a mana ability's X at most 31 | the legal range (`Game::x_range`; `Task::ChooseX`, `ChooseTimes`, `Divide`, `ManaNow` carry their step). `StackItem::x`, `times`, `division` and the frame's `spell_x`, `division` are `u32`; `TimesCost::max` is `u32::MAX` for "any number" (squad, replicate, multikicker); a repeatable cost with no mana is refused at lowering (an unbounded count is the audit's F7) |
+| N9 | the entering X in 6 bits | an `Enters` note whose times (> 255) or X (> 63) don't fit carries `ENTER_BIG` and the permanent a `Mark::Entered` with both (`Game::entered_counts`); smaller ones keep their bits |
+| 46.4 | a frame's `u8` loop counts | `Frame::i` is `u32`; "copy it n times" and connive take any n |
+| 46.5 | spells cast and cards drawn saturate at 255 | `u32` (`spells_cast`, `noncreature_cast`, `drawn`); `Mark::KickerX` is `u32` |
+
+**Bounds that remain, with their owners.** Mana-paid X and times stay within the u8 amounts of a
+`ManaCost` (docs/shortcuts.md 46.3, the audit's F7): `x_range` and `choose_times` offer no value
+whose cost's generic part would pass 255. "Pay X life" stays within the payment's u8 life
+(`pay::Keep::life`, `Cost::life`) and "tap X untapped artifacts" within its u8 reservation
+(`SacCost::n`): workstream B's payment model. A mana value with X is a u8 (F7).
+
+**Not done here.**
+
+* **N11** (`PayPool` cut at 32 pools, `pay.rs`): the choice lives in `PayMana`'s payment flow
+  (B's and W2's code), and B's F4 rewrites the same function (13.1k: every distinct remainder).
+  Paging it needs a page in `PayMana` and an index past 255 (`Choice::Number` is a u8). Left to B.
+* **26.11.6, 24.7.4** (96 permanents a player, 64 tokens a creation): `perm_room` and
+  `token_count`'s 64 stay. `ask_objects` already pages permanents for every decision converted
+  here, but lifting the cap needs every `perm_action` caller paged, attackers and blockers, and the
+  payment's `ACTIVATE` ids for mana sources past slot 95 (`pay.rs`, B's): one change, after B.
+* **31.7.2k**: B's, as assigned.
+* A payment's graveyard picks (delve, "exile n cards from your graveyard": `Task::Delve`,
+  `Task::PayCosts`, B's code) still go through `ask`'s renaming: one graveyard, at most 64 cards
+  by 58.3 (with tokens entering it mid-payment, a loud assert).
+
+**The encoding (layout v5 unchanged).** A0's floats 246-250 mark every paged and digit decision.
+The list block shows the current page's graveyard cards, names or abilities, so each `LIBRARY`
+option keeps its token. The stack, trigger, exile and graveyard-ability blocks still show their
+first slots, so on a range page past them their ids have no token there (the floats give the page):
+a gap for workstream D.
+
+**Tests** (`engine/tests/rules_faithful_a.rs` and the rows' own files): `limits.rs` (a Counterspell
+on any of 35 Bolts, a deep only target, a deep ability, a copy's deep new target, 65 graveyard
+targets paged; the four 58.1 tests rewritten to the rules), `cards_eoe_w4.rs` (34 exiled targets),
+`decision.rs` (34 exiled cards at priority, `ENTER_BIG`), `cards_m7b_stack2.rs` (14 Fanatics of
+Rhonas), `rules_faithful_a.rs` (18 Ouroboroid triggers, Peacekeeper's 72 names and its own card,
+combat 37 + 3 of 40, X = 33, pay 40 life, 18 counter kinds), `cards_eoe_w3.rs` (the ability page's
+`LIBRARY` ids and list block). Pages and digits are checked again after `determinize`
+(`same_after_determinize`). `tests/az.rs` and `tests/fuzz.rs` know "next page" options and ability
+options in the list.
+
+**Digests.** Full `e6039cb2cfc4206d` (`eoe-base` 9c67a75) -> `0b5fb3b15f89a12d` -> `038ee15c3fd29b28`;
+`DIGEST_ENCODING=0` `e56bcf4a9f57ecee` -> `23d22690aa903f77` -> `69e4452bbf60b46f`. 95 of the 2,500
+games change: 94 by Anointed Peacekeeper's names (with the opponent-only names the digest is
+`e6039cb2` again) and 1 (r 1064) by combat damage of 32 or more to divide. The rest of A changes no
+digest game.
+
+**Checks** (the normal release profile, on c5765ef, `eoe-base` 9c67a75 merged). The full engine
+suite: 2,006 passed, 0 failed, 20 ignored (133 binaries). Digests as above; `--test az` 41 passed,
+`--test hidden` 16 passed, `--test limits` 9 passed. The default `FUZZ_GAMES=20000`: 20,000 games
+(wins 9,976 / 9,986, 38 draws) and 1,000 matches, passed (498 s). `FUZZ_POOL=eoe FUZZ_GAMES=20000`:
+20,000 games (wins 8,918 / 9,040, 2,042 draws, mean 40.1 turns, 500.7 decisions), passed (1,012 s).
+`tools/position_lab.py`'s `RULES_EPOCH` is bumped to the re-record (9b403c1's rule). Intermediate
+commits ran the affected test binaries and the digests; the full suite ran on c5765ef (its first run,
+on 2ec2d28's parent, found `tests/az.rs`'s slot test unaware of "next page" options, fixed in
+2ec2d28).
+#### 100.6 Loose ends (branch `eoe-e-loose`, from `eoe-base` 9b403c1)
+
+The faithfulness audit's small items that no workstream owned: what workstream C found in day and
+night (100.3, "Left for others"), the companion bound (the audit's N13), and the follow-ups for
+the docs (the audit's section 7). Tests: `engine/tests/rules_faithful_e.rs` (its own table: the
+cube, the Edge of Eternities cards the cube lacks and the shared test cards), each named after its
+CR rule; the eight marked "failed before" failed before the fix.
+
+**Day and night (CR 702.145, 732).**
+
+* **The report didn't reproduce.** C read that a daybound card put onto the battlefield at night
+  "is transformed right after it enters (`entering_choices` -> `day_night_check`)". It enters
+  transformed: `put_onto_battlefield` has turned the back face up before the move since M7b part 2
+  (fefd853b, 25.1), so "as it enters" effects, the `Enters` event and the log see the nightbound
+  face, and `day_night_check` finds nothing to turn. Two tests pin it with the transformation
+  count (`Obj::flips` 0) and the log: cast (ruling 483aa586: "it won't enter with its daybound
+  face up and then transform") and Reanimate (ruling 9d7e7537).
+* **702.145b's two conditions.** "If it is night and this permanent is represented by a
+  double-faced card, it enters transformed" was applied by the printed definition. Now it needs
+  a card (a token never: a double-faced token, CR 707.8a or 707.10g, enters front face up) and the
+  ability on the permanent as it would exist on the battlefield (614.12): not with
+  `Mod::LoseAllAbilities` among the entering effects (Xu-Ifit's "has no abilities": Outland
+  Liberator enters front face up and stays so, with no daybound). That is the only way the engine
+  can make a permanent enter without its abilities (no effect removes abilities from a class of
+  permanents).
+* **After the `Enters` event.** The day and night check of an entering permanent ran with the "as
+  it enters" choices, before its `Enters` event. 702.145c-d and f-g are not "as it enters": they
+  apply once it is on the battlefield. It runs after the event now (`Game::day_night_entered`),
+  so a double-faced token with daybound entering at night is seen entering front face up and then
+  transforms (a `Transforms` event). Before, it entered as its back face without transforming.
+* **"Any time" (702.145c-d, f-g).** The check ran only as a daybound or nightbound permanent
+  entered and as day and night changed. Now it also runs (`Game::day_night_any_time`, when a
+  daybound or nightbound face is on the battlefield; `day_night_check` reads the abilities each
+  permanent has now) after:
+  * a permanent is turned face up (front face up, 712.12a): Abhorrent Oculus's manifest dread
+    puts Outland Liberator face down; turned face up at night it transforms, and with neither day
+    nor night it becomes day;
+  * permanents phase in (Robe of Stars): phased out by day, it phases in at night and transforms;
+  * a permanent becomes a copy (`Ext::BecomeCopy`): Shifting Woodland copying Outland Liberator
+    (a graveyard card: its front face) has daybound, so with neither it becomes day;
+  * an effect "loses all abilities for as long as" its source remains ends as the source leaves
+    (`move_card_ctl`; The Wondrous Wasp, Tishana's Tidebinder): a Frenzied Trapbreaker silenced at
+    night keeps its back face when it becomes day, and transforms when the Wasp dies;
+  * the cleanup step ends "until end of turn" effects and copy effects, and "until your next turn"
+    effects end. Not reachable with today's cards (day and night change only in the untap step or
+    from neither, and these end before it), checked because the rule is "any time".
+
+  The cube reaches the first, third and fourth with its own cards; phasing and Xu-Ifit need an
+  Edge of Eternities card with the cube's daybound card (the tables are played apart, but "no card
+  pool does it" is not an argument, audit section 0).
+* **Logged, not fixed** (docs/shortcuts.md): E2, a token copy of a single-faced permanent that is
+  copying a double-faced card's face (Shifting Woodland as Outland Liberator, copied by Three
+  Steps Ahead) is treated as a double-faced token and transforms; CR 707.8a makes it single-faced.
+  `CopyVals` doesn't say whether the copied object was double-faced, so the fix is a copies change
+  (C's area). E3, the untap step's day and night check runs as the turn begins, before phasing
+  (502.1-502.2): equivalent now, as a permanent phasing in is checked at once.
+
+**N13: at most 64 companions a table.** The revealed-companion decision offers each candidate (a
+distinct companion definition) on a `LIBRARY` slot and took the first 64 (`take(64)`). The bound is
+now loud: `companion::check_table`, called by `CardDb::from_cards`, panics for a table with more
+than 64 companion definitions (the cube has 3), and the decision offers every candidate. Tests: a
+table of 64 custom companions loads, one of 65 panics.
+
+**Docs (the audit's section 7).**
+
+* docs/shortcuts.md: 31.7.6 marked fixed (71.2: Nadu's limit counts per granting object); rows
+  for the audit's N5, N8-N14, N19-N21 and N23, each naming the workstream that fixes it (A: N5,
+  N9, N11, N12, N14; B: N8, N10, N19-N21, N23; N13 fixed here). C had added N1, N4, N6, N7, N15
+  and N22. Rows E1 (fixed), E2 (open) and E3 (kept, equivalent) for the day and night findings.
+* docs/ir_defects.md: entries 190 (Palantir of Orthanc's `Scry` leaves `bottom_choice` at its
+  default `false`, a Python "keep all on top" shortcut: the audit's N17) and 191 (Chain of Smog's
+  `needs_target_with_cards_in_hand`, 26.11.9), as a new section R, "Python engine switches the IR
+  carries"; both cards are supported and the engine ignores both fields. The audit's N16 (Celestial
+  Colonnade) was already entry 2 (fixed in the IR, 8ea9fcca); the lowering's check is a refusal,
+  not a repair, and stays as a guard: a note on entry 2 and on the code.
+* The two wrong comments were already corrected by C (e969092): `faces.rs::face_castable` cites
+  Lier's ruling (N4), and `layers.rs::colors_of` no longer says "none of those exists" (layer 5 in
+  timestamp order, 28.8.4).
+
+**Digests.** Unchanged: combined `e6039cb2cfc4206d`, `DIGEST_ENCODING=0` `e56bcf4a9f57ecee`. No digest
+game plays differently: the cube's daybound card entering by cast or by being put onto the
+battlefield already had its face, the moved check finds nothing to turn for a card (it entered
+with the face day or night gives it, and with neither day nor night no nightbound permanent
+exists), and the new checks find nothing to do in the digest games (a check that changes nothing
+emits nothing).
+
+**Results** (normal release profile, `E:/cargo-target/mtg-zero/eoe-e-loose`). The full engine
+suite 2,007 passed, 0 failed, 20 ignored (133 test binaries; `rules_faithful_e` 11 of them). The
+default `FUZZ_GAMES=20000` passed (20,000 games, wins 9,972 / 9,989, 39 draws, mean 27.0 turns,
+215.7 decisions; 1,000 matches; 451 s on a loaded machine); `FUZZ_POOL=eoe FUZZ_GAMES=20000`
+passed (20,000 games, wins 8,918 / 9,040, 2,042 draws, mean 40.1 turns, 500.7 decisions; 992 s).
+Both are the numbers of 100.3, as the unchanged digests say.
 
 #### 99.16 W6: the remaining cards (branch `eoe-w6-rest`, from `eoe-base` 2e01275)
 

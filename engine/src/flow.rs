@@ -36,7 +36,8 @@ pub(crate) enum Task {
     /// Before priority: SBAs and triggers until stable (CR 117.5), then ask.
     Priority,
     SbaCheck { keep: Vec<CardIdx> },
-    PutTriggers,
+    /// (`page`: the page of the order decision, ENGINE.md 100.2.)
+    PutTriggers { page: crate::decision::Page },
     /// Miracle (CR 702.94a): may `p` reveal `card`, the first card they drew
     /// this turn? (Asked before the next priority.)
     MiracleReveal { p: PlayerId, card: CardIdx },
@@ -51,17 +52,20 @@ pub(crate) enum Task {
     /// CR 613.7m: the active player orders the timestamps of the objects
     /// given ones simultaneously since `first` (`Game::order_timestamps`).
     OrderTimestamps { first: u32, settled: bool, picked: Vec<CardIdx> },
-    PriorityAsk,
+    /// (`page`: the page of the priority decision, ENGINE.md 100.2.)
+    PriorityAsk { page: crate::decision::Page },
     // combat (CR 508-510)
     DeclareAttackers { next: u8 },
     DeclareBlockers { i: u8 },
     CombatDamage { first: bool, att: u8 },
-    AssignDamage { att: CardIdx, j: u8, left: u32 },
+    /// (`step`: where the amount's digits stand, ENGINE.md 100.2.)
+    AssignDamage { att: CardIdx, j: u32, left: u32, step: crate::decision::NumberStep },
     // cleanup (CR 514)
     CleanupDiscard,
     CleanupRest,
     // casting and the stack (CR 601, 608)
-    ChooseTargets { id: u32, req: u8 },
+    /// (`page`: the page of the decision, ENGINE.md 100.2.)
+    ChooseTargets { id: u32, req: u8, page: crate::decision::Page },
     CastPay { id: u32 },
     CastDone { id: u32 },
     PayMana(Box<PayMana>),
@@ -73,14 +77,20 @@ pub(crate) enum Task {
     PayCosts { id: u32, picked: Vec<CardIdx> },
     CastOption { id: u32 },
     CastAlt { id: u32 },
-    Divide { id: u32 },
+    Divide { id: u32, step: crate::decision::NumberStep },
     ChooseModes { id: u32 },
-    ManaNow { src: Src },
-    ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]> },
+    ManaNow { src: Src, step: crate::decision::NumberStep },
+    /// (`only`: the mana's spending restriction, kept in the pool, CR
+    /// 106.6; ENGINE.md 99.12.)
+    ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]>, only: u8 },
+    /// Devour land (CR 702.82a): the lands chosen so far, in battlefield
+    /// order (ENGINE.md 99.12).
+    Devour { card: CardIdx, picked: Vec<CardIdx> },
     /// The rest of a priority mana ability's cost (ENGINE.md 28).
-    ManaNowCosts { src: Src, sac: Option<CardIdx>, x: u8 },
+    ManaNowCosts { src: Src, sac: Option<CardIdx>, x: u32 },
     // entering the battlefield (CR 614.12)
-    AsEnters { card: CardIdx },
+    /// (`page`: the page of a paged choice, ENGINE.md 100.2.)
+    AsEnters { card: CardIdx, page: crate::decision::Page },
     /// Exile graveyard cards for delve (CR 702.66).
     Delve { id: u32 },
     /// Discard a land for Mox Diamond to enter, or not.
@@ -93,19 +103,19 @@ pub(crate) enum Task {
     /// (Animate Dead returned from exile): `controller` chooses, as it
     /// enters, the creature card in a graveyard it enchants; it waits in its
     /// zone meanwhile.
-    EnterAura { card: CardIdx, controller: PlayerId, tapped: bool },
+    EnterAura { card: CardIdx, controller: PlayerId, tapped: bool, page: crate::decision::Page },
     /// CR 616.1: `chooser` orders the replacement effects of `card`'s move
     /// from `from` (exiled for now): `results` the reachable results.
     ChooseReplacement { card: crate::ids::ObjRef, from: Zone, results: u8, void: Option<crate::db::Counter>, chooser: PlayerId },
     /// Announce X (CR 601.2b, 107.3).
-    ChooseX { id: u32 },
+    ChooseX { id: u32, step: crate::decision::NumberStep },
     /// Discard for escalate (CR 702.120a).
     Escalate { id: u32 },
     /// "As an additional cost, choose a creature you control or a warped
     /// creature card you own in exile" (CR 601.2h; ENGINE.md 99.14): an
     /// exiled card (`ChooseExiled`, `PASS` = a creature instead), then, with
     /// `perm`, a creature (`ChoosePermanent`).
-    ChooseForCost { id: u32, perm: bool },
+    ChooseForCost { id: u32, perm: bool, page: crate::decision::Page },
     /// Which player or planeswalker an attacking creature attacks (CR
     /// 508.1b, 508.4).
     AttackTarget { card: CardIdx },
@@ -113,23 +123,24 @@ pub(crate) enum Task {
     /// `mask`: `decision::FACE_*` bits).
     ChooseFace { p: PlayerId, card: CardIdx, mask: u8 },
     /// Which activated ability of permanent `card` `p` activates, among its
-    /// abilities from place `from` on (CR 602.2: one with more abilities
-    /// than its `ACTIVATE` slots; EoE W3). Choice: `ChooseMode`, `NUMBER` +
-    /// place - `from`; `NUMBER` + 31: the ones after (a further page).
-    ChooseAbility { p: PlayerId, card: CardIdx, from: u8 },
+    /// abilities from the fourth on (CR 602.2: one with more abilities than
+    /// its `ACTIVATE` slots; EoE W3). Choice: `ChooseMode`, `LIBRARY` + place
+    /// - 3 (the list block holds the definition with the ability and its
+    /// index there), paged past 64 (`page`; ENGINE.md 100.2).
+    ChooseAbility { p: PlayerId, card: CardIdx, page: crate::decision::Page },
     /// CR 601.2a-b: which permission casts graveyard card `card` (face
     /// `face`; `cast::route`).
     ChooseRoute { p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId> },
     /// What a permanent that may enter as a copy copies (CR 707.5), then
     /// it enters (`note`: its `Enters` event's).
-    EnterAsCopy { card: CardIdx, note: u16, since: u32 },
+    EnterAsCopy { card: CardIdx, note: u32, since: u32, page: crate::decision::Page },
     /// New targets for a copy of a spell (`copy`, CR 707.10c) or a spell
     /// whose controller may choose new targets (115.7), from its target `k`
     /// on.
-    CopyTargets { id: u32, k: u8, copy: bool },
+    CopyTargets { id: u32, k: u8, copy: bool, page: crate::decision::Page },
     /// Announce how many times an additional cost is paid (CR 601.2b:
     /// replicate, squad, offspring).
-    ChooseTimes { id: u32 },
+    ChooseTimes { id: u32, step: crate::decision::NumberStep },
     /// Splice cards from hand onto the spell (CR 702.47a, 601.2b): one card
     /// per decision, `PASS` = no more.
     Splice { id: u32 },
@@ -247,7 +258,6 @@ impl Game {
         // A graveyard card's option outside Priority: its slot in the
         // decision's graveyard list (ENGINE.md 65.10).
         self.name_graveyard_options(player, kind, &mut options);
-        self.name_exile_targets(kind, &mut options);
         options.sort_by_key(|o| o.action);
         assert!(
             options.windows(2).all(|w| w[0].action < w[1].action),
@@ -283,7 +293,7 @@ impl Game {
             Task::BeginStep => self.begin_step(),
             Task::NextStep => self.next_step(),
             Task::Priority => {
-                self.agenda.push(Task::PriorityAsk);
+                self.agenda.push(Task::PriorityAsk { page: crate::decision::Page::FIRST });
                 self.agenda.push(Task::SbaCheck { keep: Vec::new() });
             }
             Task::SbaCheck { keep } => self.sba_check(keep),
@@ -291,15 +301,15 @@ impl Game {
             Task::DrawRest { p, n, ev, step } => self.draw_rest(p, n, ev, step),
             Task::DrawOrder { p, plus, ev, step } => self.draw_order(p, plus, ev, step),
             Task::OrderTimestamps { first, settled, picked } => self.order_timestamps(first, settled, picked),
-            Task::PutTriggers => self.put_triggers(),
-            Task::PriorityAsk => self.priority_ask(),
+            Task::PutTriggers { page } => self.put_triggers(page),
+            Task::PriorityAsk { page } => self.priority_ask(page),
             Task::DeclareAttackers { next } => self.declare_attackers(next),
             Task::DeclareBlockers { i } => self.declare_blockers(i),
             Task::CombatDamage { first, att } => self.combat_damage(first, att),
-            Task::AssignDamage { att, j, left } => self.assign_damage(att, j, left),
+            Task::AssignDamage { att, j, left, step } => self.assign_damage(att, j, left, step),
             Task::CleanupDiscard => self.cleanup_discard(),
             Task::CleanupRest => self.cleanup_rest(),
-            Task::ChooseTargets { id, req } => self.choose_targets(id, req),
+            Task::ChooseTargets { id, req, page } => self.choose_targets(id, req, page),
             Task::CastPay { id } => self.cast_pay(id),
             Task::CastDone { id } => self.cast_done(id),
             Task::PayMana(pm) => self.pay_mana(pm),
@@ -310,27 +320,28 @@ impl Game {
             Task::PayCosts { id, picked } => self.pay_costs(id, picked),
             Task::CastOption { id } => self.cast_option(id),
             Task::CastAlt { id } => self.cast_alt(id),
-            Task::Divide { id } => self.divide(id),
+            Task::Divide { id, step } => self.divide(id, step),
             Task::ChooseModes { id } => self.choose_modes(id),
-            Task::ManaNow { src } => self.mana_now(src),
-            Task::ManaNowPick { p, prods } => self.mana_now_pick(p, prods),
+            Task::ManaNow { src, step } => self.mana_now(src, step),
+            Task::ManaNowPick { p, prods, only } => self.mana_now_pick(p, prods, only),
             Task::ManaNowCosts { src, sac, x } => self.mana_now_costs(src, sac, x),
-            Task::AsEnters { card } => self.as_enters(card),
+            Task::AsEnters { card, page } => self.as_enters(card, page),
+            Task::Devour { card, picked } => self.devour(card, picked),
             Task::Delve { id } => self.delve(id),
             Task::EnterByDiscard { id } => self.enter_by_discard(id),
             Task::EnterByDiscardAny { card, controller, tapped } => self.enter_by_discard_any(card, controller, tapped),
-            Task::EnterAura { card, controller, tapped } => self.enter_aura(card, controller, tapped),
+            Task::EnterAura { card, controller, tapped, page } => self.enter_aura(card, controller, tapped, page),
             Task::ChooseReplacement { card, from, results, void, chooser } => self.choose_replacement(card, from, results, void, chooser),
-            Task::ChooseX { id } => self.choose_x(id),
+            Task::ChooseX { id, step } => self.choose_x(id, step),
             Task::Escalate { id } => self.escalate(id),
-            Task::ChooseForCost { id, perm } => self.choose_for_cost(id, perm),
+            Task::ChooseForCost { id, perm, page } => self.choose_for_cost(id, perm, page),
             Task::AttackTarget { card } => self.choose_attack_target(card),
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
-            Task::ChooseAbility { p, card, from } => self.choose_ability(p, card, from),
+            Task::ChooseAbility { p, card, page } => self.choose_ability(p, card, page),
             Task::ChooseRoute { p, card, face } => self.choose_route(p, card, face),
-            Task::EnterAsCopy { card, note, since } => self.enter_as_copy(card, note, since),
-            Task::CopyTargets { id, k, copy } => self.copy_targets(id, k, copy),
-            Task::ChooseTimes { id } => self.choose_times(id),
+            Task::EnterAsCopy { card, note, since, page } => self.enter_as_copy(card, note, since, page),
+            Task::CopyTargets { id, k, copy, page } => self.copy_targets(id, k, copy, page),
+            Task::ChooseTimes { id, step } => self.choose_times(id, step),
             Task::Splice { id } => self.choose_splice(id),
             Task::Special { p, card, sp } => self.special_action(p, card, sp),
             Task::Opening { p, exile } => self.opening_actions(p, exile),
@@ -669,6 +680,7 @@ impl Game {
         for p in &mut self.players {
             p.pool.clear();
         }
+        self.pool_restr.clear();
         let next = match self.turn.step {
             Step::Setup => unreachable!(),
             Step::Untap => Step::Upkeep,
@@ -746,7 +758,7 @@ impl Game {
 
     // ---- priority (CR 117) -------------------------------------------------
 
-    fn priority_ask(&mut self) {
+    fn priority_ask(&mut self, page: crate::decision::Page) {
         let p = self.turn.priority;
         match self.answer.take() {
             None => {
@@ -759,9 +771,16 @@ impl Game {
                 if self.seen & crate::game::SEEN_TOP != 0 {
                     let _ = self.look_tops();
                 }
-                let opts = self.priority_options(p);
-                self.ask(Task::PriorityAsk, p, DecisionKind::Priority, opts);
+                // (Exiled cards to play and graveyard abilities: every one,
+                // paged past their ids, ENGINE.md 100.2.)
+                let (opts, exile, gy) = self.priority_options(p);
+                let ranges = [
+                    crate::decision::PagedRange { base: act::EXILE, n: act::EXILE_N, items: &exile },
+                    crate::decision::PagedRange { base: act::GY_ABILITY, n: act::GY_ABILITY_N, items: &gy },
+                ];
+                self.ask_paged_ranges(Task::PriorityAsk { page }, page, p, DecisionKind::Priority, &ranges, opts);
             }
+            Some(Choice::Page(next)) => self.agenda.push(Task::PriorityAsk { page: next }),
             Some(Choice::Pass) => {
                 self.turn.passes += 1;
                 if self.turn.passes >= 2 {
@@ -820,7 +839,7 @@ impl Game {
                 // (The fourth slot of a permanent with more abilities than
                 // slots: which of the fourth and later ones, EoE W3.)
                 if self.paged_slot(c, slot) {
-                    self.agenda.push(Task::ChooseAbility { p, card: c, from: (crate::activate::ACTIVATE_SLOTS - 1) as u8 });
+                    self.agenda.push(Task::ChooseAbility { p, card: c, page: crate::decision::Page::FIRST });
                 } else {
                     self.begin_activate(p, c, slot);
                 }

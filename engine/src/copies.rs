@@ -365,7 +365,7 @@ impl Game {
     }
 
     /// The times the additional cost of the event's spell was paid.
-    pub(crate) fn event_spell_times(&self, f: &Frame) -> u8 {
+    pub(crate) fn event_spell_times(&self, f: &Frame) -> u32 {
         f.ev.obj.and_then(|r| self.spell_now_or_lki(r)).map_or(0, |(_, item)| item.times)
     }
 
@@ -432,6 +432,10 @@ impl Game {
                 for c in self.objs_on(f, on) {
                     self.add_copy_effect(c, vals, *until);
                 }
+                // A copy of a daybound face has daybound (Shifting Woodland
+                // copying Outland Liberator): with neither day nor night it
+                // becomes day (CR 702.145c-g apply at once).
+                self.day_night_any_time();
                 Flow::Next
             }
             Ext::CopySpell { of, who, n, may, new_targets } => {
@@ -450,7 +454,7 @@ impl Game {
                         }
                     }
                 }
-                let n = self.amount(f, *n).clamp(0, 255) as u8;
+                let n = self.amount(f, *n).max(0) as u32; // (any number: 46.4, ENGINE.md 100.2)
                 if f.i >= n {
                     return Flow::Next;
                 }
@@ -459,7 +463,7 @@ impl Game {
                 back.i = f.i + 1;
                 self.agenda.push(Task::Run(back));
                 if *new_targets && !item.targets.is_empty() {
-                    self.agenda.push(Task::CopyTargets { id, k: 0, copy: true });
+                    self.agenda.push(Task::CopyTargets { id, k: 0, copy: true, page: crate::decision::Page::FIRST });
                 } else {
                     // The copy's targets become its targets (CR 707.10c).
                     self.all_became_targets(id);
@@ -548,7 +552,8 @@ impl Game {
     /// its target then. For a spell that is not a copy (`copy` false: "you
     /// may choose new targets for it", 115.7), each new target becomes its
     /// target as it is chosen.
-    pub(crate) fn copy_targets(&mut self, id: u32, k: u8, copy: bool) {
+    /// (`page`: the decision's page, `Game::ask_objects`, ENGINE.md 100.2.)
+    pub(crate) fn copy_targets(&mut self, id: u32, k: u8, copy: bool, page: crate::decision::Page) {
         let Some(pos) = self.item_index(id) else { return };
         if k as usize >= self.stack[pos].targets.len() {
             if copy {
@@ -563,11 +568,15 @@ impl Game {
                 if !copy && !self.stack[pos].targets.iter().enumerate().any(|(j, &(_, x))| j != k as usize && x == t) {
                     self.became_target(id, t);
                 }
-                self.agenda.push(Task::CopyTargets { id, k: k + 1, copy });
+                self.agenda.push(Task::CopyTargets { id, k: k + 1, copy, page: crate::decision::Page::FIRST });
                 return;
             }
             Some(Choice::Pass) => {
-                self.agenda.push(Task::CopyTargets { id, k: k + 1, copy });
+                self.agenda.push(Task::CopyTargets { id, k: k + 1, copy, page: crate::decision::Page::FIRST });
+                return;
+            }
+            Some(Choice::Page(next)) => {
+                self.agenda.push(Task::CopyTargets { id, k, copy, page: next });
                 return;
             }
             Some(other) => unreachable!("new target answer {other:?}"),
@@ -591,30 +600,22 @@ impl Game {
             })
             .map(|(_, &(_, t))| t)
             .collect();
-        let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
-        // (The copy is on the stack: the stack items in reach are counted
-        // from below it, ENGINE.md 58.1; a deeper current target is kept by
-        // `PASS`.)
-        self.targeting = id;
+        // (`PASS` keeps the current target.)
         let mut cands = self.target_candidates(tr, &ctx, &exclude);
-        self.targeting = 0;
         if let Some(n) = tr.total_mv {
             // The new set within the total too (CR 601.2c, 707.10c).
             let others: Vec<Target> =
                 item.targets.iter().enumerate().filter(|&(j, &(r, _))| j != k as usize && r == req).map(|(_, &(_, t))| t).collect();
             self.retain_within_total_mv(n, &others, &mut cands);
         }
-        for t in cands {
-            if t != cur {
-                opts.push(Opt { action: self.target_action(p, t), choice: Choice::Target(t) });
-            }
-        }
-        if opts.len() == 1 {
+        let items: Vec<Choice> = cands.into_iter().filter(|&t| t != cur).map(Choice::Target).collect();
+        if items.is_empty() {
             // Nothing else to choose: the copy keeps it.
-            self.agenda.push(Task::CopyTargets { id, k: k + 1, copy });
+            self.agenda.push(Task::CopyTargets { id, k: k + 1, copy, page: crate::decision::Page::FIRST });
             return;
         }
-        self.ask(Task::CopyTargets { id, k, copy }, p, DecisionKind::NewTarget, opts);
+        let pass = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+        self.ask_objects(Task::CopyTargets { id, k, copy, page }, page, p, DecisionKind::NewTarget, &items, pass);
     }
 
     /// "You may have this enter as a copy of ..." (CR 707.5, 614.1c) for
@@ -624,7 +625,8 @@ impl Game {
     /// what it entered as enters: its replacement effects apply ("enters
     /// tapped", "enters with counters", "as this enters" choices: 707.5,
     /// 707.6) and its `Enters` event (with `note`) happens.
-    pub(crate) fn enter_as_copy(&mut self, card: CardIdx, note: u16, since: u32) {
+    /// (`page`: the page of the choice, `Game::ask_objects`, ENGINE.md 100.2.)
+    pub(crate) fn enter_as_copy(&mut self, card: CardIdx, note: u32, since: u32, page: crate::decision::Page) {
         if self.objs[card.i()].zone != Zone::Battlefield {
             self.marks.retain(|&(o, m)| !(o.idx == card && m == crate::game::Mark::PriestPending));
             return;
@@ -632,8 +634,15 @@ impl Game {
         let own = self.own_def(card);
         let Some(eac) = self.db.def(own).enters_as_copy.as_deref() else { return };
         let p = self.objs[card.i()].controller;
+        // ("Enter tapped as a copy": copying, ENGINE.md 99.12.)
+        let mut copied_tapped = false;
         match self.answer.take() {
+            Some(Choice::Page(next)) => {
+                self.agenda.push(Task::EnterAsCopy { card, note, since, page: next });
+                return;
+            }
             Some(Choice::Card(x)) => {
+                copied_tapped = eac.tapped;
                 let base = if eac.from_graveyard {
                     CopyVals { def: self.objs[x.i()].def, exc: Except::default() }
                 } else {
@@ -685,17 +694,18 @@ impl Game {
                     }
                 }
                 let kind = if eac.from_graveyard { DecisionKind::ChooseGraveyardCard } else { DecisionKind::ChoosePermanent };
-                self.ask(Task::EnterAsCopy { card, note, since }, p, kind, opts);
+                self.ask_object_opts(Task::EnterAsCopy { card, note, since, page }, page, p, kind, opts);
                 return;
             }
         }
         let r = self.obj_ref(card);
-        let tapped = self.enters_tapped(card, p);
+        let tapped = copied_tapped || self.enters_tapped(card, p);
         // (Its "enters with" counters: EoE W6, `W6State::entering`.)
         let entering_before = self.w6.entering.replace((card, since));
         self.entering(card, tapped, 0);
         self.w6.entering = entering_before;
         self.note_entered(card);
         self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u32 });
+        self.day_night_entered(card);
     }
 }

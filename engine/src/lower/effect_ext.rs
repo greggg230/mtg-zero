@@ -221,12 +221,13 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             also_untap_if_not_your_turn,
             tokens_only,
         }) => {
-            let mut f = and(creature(), Filter::Controller(true));
+            // (`attacking_only`: "attacking creatures get ...", whoever controls
+            // them: the class's docstring; Contested War Zone, ENGINE.md
+            // 99.12. Cecil's "other attacking creatures" trigger as Cecil
+            // attacks: the same creatures.)
+            let mut f = if *attacking_only { and(creature(), Filter::Attacking) } else { and(creature(), Filter::Controller(true)) };
             if *exclude_source {
                 f = and(f, not(Filter::Source));
-            }
-            if *attacking_only {
-                f = and(f, Filter::Attacking);
             }
             if *tokens_only {
                 f = and(f, Filter::Token);
@@ -472,7 +473,10 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 // A land that makes coloured mana animates into a coloured
                 // creature in the cube; the IR lost the colours and the
                 // creature type (Celestial Colonnade: "white and blue
-                // Elemental"). An IR defect (ENGINE.md 20).
+                // Elemental"). An IR defect (ENGINE.md 20; docs/ir_defects.md
+                // 2, fixed in the IR): refused, never repaired (a loud guard
+                // that a land animating into a colourless creature would
+                // also meet: a refusal, not a wrong game).
                 l.unsupported("BecomeLandCreatureUEOT.set_colors(missing for a coloured land)");
             }
             // "a 1/1 Phyrexian Blinkmoth artifact creature" (Inkmoth Nexus):

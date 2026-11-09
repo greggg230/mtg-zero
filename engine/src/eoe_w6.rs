@@ -682,12 +682,12 @@ impl Game {
             Some(Choice::Number(k)) => {
                 self.marks.push((r, crate::game::Mark::ChosenColor(k)));
                 self.note(|_| format!("chosen colour: {}", crate::mana::LETTERS[k as usize]));
-                self.agenda.push(crate::flow::Task::AsEnters { card });
+                self.agenda.push(crate::flow::Task::AsEnters { card, page: crate::decision::Page::FIRST });
             }
             Some(other) => unreachable!("colour answer {other:?}"),
             None => {
                 let opts = (0..5u16).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
-                self.ask(crate::flow::Task::AsEnters { card }, p, DecisionKind::ChooseColor, opts);
+                self.ask(crate::flow::Task::AsEnters { card, page: crate::decision::Page::FIRST }, p, DecisionKind::ChooseColor, opts);
             }
         }
     }
@@ -742,7 +742,7 @@ impl Game {
                 let kinds = self.counters_of(a.idx);
                 let k = match self.answer.take() {
                     Some(Choice::Page(p)) => {
-                        f.i = p.window as u8;
+                        f.i = p.window;
                         self.agenda.push(crate::flow::Task::Run(f.clone()));
                         return Flow::Suspend;
                     }

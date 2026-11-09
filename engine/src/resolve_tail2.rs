@@ -120,13 +120,8 @@ impl Game {
                         if cands.is_empty() {
                             return Flow::Next;
                         }
-                        let opts = cands
-                            .iter()
-                            .take(act::EXILE_N as usize)
-                            .enumerate()
-                            .map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) })
-                            .collect();
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
+                        let cands: Vec<Choice> = cands.into_iter().map(Choice::Card).collect();
+                        self.ask_objects(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseExiled, &cands, Vec::new());
                         return Flow::Suspend;
                     }
                 };
@@ -280,7 +275,7 @@ impl Game {
                 }
                 let mut opts: Vec<Opt> = lands.iter().map(|&c| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) }).collect();
                 opts.push(Opt { action: act::PASS, choice: Choice::Pass });
-                self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseGraveyardCard, opts);
                 Flow::Suspend
             }
             Ext::MayCastFromGraveyardNow { filter, exile } => {
@@ -344,7 +339,7 @@ impl Game {
                             .collect();
                         let mut opts: Vec<Opt> = cands.iter().map(|&c| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) }).collect();
                         opts.push(Opt { action: act::PASS, choice: Choice::Pass });
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                        self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseGraveyardCard, opts);
                         Flow::Suspend
                     }
                 }
