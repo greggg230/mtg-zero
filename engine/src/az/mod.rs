@@ -693,13 +693,16 @@ impl SearchGame for MtgAz {
         }
     }
 
-    /// One auxiliary target (ENGINE.md 66, zero-core docs/az.md 15): `belief`, the decider's
-    /// opponent's hand (the encoding frame's opponent's, ENGINE.md 100.5) as counts per card identity (the `identity::D` identities of the
-    /// encoding, ENGINE.md 22.2: the cube's, the legacy cards', the tokens'). The TRUE hand -
-    /// a training label that zero-core records with a sample when a run's `aux_belief_w` is on,
-    /// never an input: `encode` shows the viewer only what it knows (ENGINE.md 10). Empty
-    /// (no target) while sideboarding, between the games of a match.
-    const AUX: &'static [(&'static str, usize)] = &[("belief", identity::D)];
+    /// Two auxiliary targets (ENGINE.md 66, 102.4, zero-core docs/az.md 15), each counts per card
+    /// identity (the `identity::D` identities of the encoding, ENGINE.md 22.2: the cube's, the
+    /// legacy cards', the tokens'): `belief`, the decider's opponent's hand (the encoding frame's
+    /// opponent's, ENGINE.md 100.5); `deck`, that player's unseen cards - their hand, library and
+    /// face-down cards the decider does not know exactly (what `determinize` deals, and with hidden
+    /// decklists the deck reader's target: a multinomial whose total is public). TRUE states -
+    /// training labels that zero-core records with a sample when a run's `aux_belief_w` or
+    /// `aux_deck_w` is on, never inputs: `encode` shows the viewer only what it knows (ENGINE.md
+    /// 10). Empty (no target) while sideboarding, between the games of a match.
+    const AUX: &'static [(&'static str, usize)] = &[("belief", identity::D), ("deck", identity::D)];
 
     fn aux_target(&self, viewer: usize, out: &mut [f32]) {
         if self.m.sb.is_some() {
@@ -711,6 +714,12 @@ impl SearchGame for MtgAz {
         let seat = self.g.encoding_seat(viewer as u8);
         for &c in &self.g.player(1 - seat).hand {
             out[ids[self.g.obj(c).def as usize] as usize] += 1.0;
+        }
+        // `deck` (ENGINE.md 102.4): the frame opponent's cards the decider does not know exactly,
+        // each by the card it is (a face-down permanent's card: `Game::ident`).
+        let deck = &mut out[identity::D..2 * identity::D];
+        for c in self.g.unknown_to(viewer as u8, 1 - seat) {
+            deck[ids[self.g.ident(c) as usize] as usize] += 1.0;
         }
     }
 

@@ -2141,6 +2141,26 @@ fn the_v5_facts_encode_no_hidden_information() {
 fn belief(g: &MtgAz, viewer: usize) -> Vec<f32> {
     let mut t = vec![0.0; MtgAz::aux_width()];
     g.aux_target(viewer, &mut t);
+    t.truncate(identity::D);
+    t
+}
+
+/// The `deck` target (ENGINE.md 102.4): the second segment of `aux_target`.
+fn deck_target(g: &MtgAz, viewer: usize) -> Vec<f32> {
+    let mut t = vec![0.0; MtgAz::aux_width()];
+    g.aux_target(viewer, &mut t);
+    t[identity::D..].to_vec()
+}
+
+/// The frame opponent's cards `viewer` does not know exactly, by identity (what the `deck` target
+/// must be).
+fn unseen_cards(g: &MtgAz, viewer: usize) -> Vec<f32> {
+    let ids = identity::identities(g.g.db());
+    let o = 1 - g.g.encoding_seat(viewer as u8);
+    let mut t = vec![0.0; identity::D];
+    for c in g.g.unknown_to(viewer as u8, o) {
+        t[ids[g.g.ident(c) as usize] as usize] += 1.0;
+    }
     t
 }
 
@@ -2161,7 +2181,7 @@ fn opponent_hand(g: &MtgAz, viewer: usize) -> Vec<f32> {
 /// own hand (never the decider's); between the games of a match there is none.
 #[test]
 fn the_belief_target_is_the_true_opponent_hand_and_never_an_input() {
-    assert_eq!(MtgAz::AUX, &[("belief", identity::D)]);
+    assert_eq!(MtgAz::AUX, &[("belief", identity::D), ("deck", identity::D)]);
     let mut zr = zero_search::rng::Rng::new(66);
     let mut pos: Vec<(&'static str, MtgAz)> = gate_positions(scale(40) as usize, 66);
     for (name, sp) in opening_specs() {
@@ -2242,12 +2262,79 @@ fn selfplay_records_the_belief_target_with_the_samples() {
     assert!(!r1.is_empty());
     for (a, b) in r0.iter().zip(&r1) {
         assert_eq!((&a.x, &a.pi, a.player), (&b.x, &b.pi, b.player));
-        assert!(a.aux.is_empty() && b.aux.len() == identity::D);
-        let n: f32 = b.aux.iter().sum();
+        assert!(a.aux.is_empty() && b.aux.len() == 2 * identity::D);
+        let n: f32 = b.aux[..identity::D].iter().sum();
         assert!((0.0..=12.0).contains(&n) && b.aux.iter().all(|&v| v >= 0.0 && v.fract() == 0.0));
+        // (the deck target: at most the 60 cards of a Delver deck)
+        assert!(b.aux[identity::D..].iter().sum::<f32>() <= 60.0);
     }
-    assert!(r1.iter().filter(|r| r.aux.iter().sum::<f32>() > 0.0).count() > r1.len() / 2);
+    assert!(r1.iter().filter(|r| r.aux[..identity::D].iter().sum::<f32>() > 0.0).count() > r1.len() / 2);
     assert!(engine::az::draft::TeamDraftAz::aux_width() == 0);
+}
+
+/// The auxiliary target `deck` (ENGINE.md 102.4) is the frame opponent's unseen cards - their
+/// hand, library and face-down cards the decider does not know exactly - by identity, its total
+/// public (the decider knows how many cards it knows), and never an input: on the gate's positions
+/// (open decklists, best-of-three, a drafted match, hidden decklists) every world of the decider's
+/// encodes alike while the target is that world's own; with hidden decklists the worlds' targets
+/// differ beyond the order of the cards (their decks differ), which the reader is to predict.
+#[test]
+fn the_deck_target_is_the_opponents_unseen_cards_and_never_an_input() {
+    let mut zr = zero_search::rng::Rng::new(102);
+    let (mut worlds, mut other) = (0, 0);
+    for (name, g) in gate_positions(scale(20) as usize, 1024) {
+        let v = g.to_move().unwrap();
+        let t = deck_target(&g, v);
+        assert_eq!(t, unseen_cards(&g, v), "{name}: the deck target");
+        let o = 1 - g.g.encoding_seat(v as u8);
+        assert_eq!(t.iter().sum::<f32>() as usize, g.g.unknown_to(v as u8, o).len(), "{name}: its total");
+        let x = enc(&g, v);
+        for _ in 0..3 {
+            let mut d = g.clone();
+            d.determinize(v, &mut zr);
+            assert_eq!(enc(&d, v), x, "{name}: the decider's features");
+            let td = deck_target(&d, v);
+            assert_eq!(td, unseen_cards(&d, v), "{name}: a world's target is its own");
+            assert_eq!(td.iter().sum::<f32>(), t.iter().sum::<f32>(), "{name}: the public total");
+            if name == "hidden decklists" {
+                worlds += 1;
+                other += (td != t) as u32;
+            }
+        }
+    }
+    println!("hidden decklists: {worlds} worlds, {other} with another unseen deck");
+    assert!(worlds >= 60 && other * 10 > worlds * 9, "{worlds} {other}");
+}
+
+/// The deck reader's declared inputs (ENGINE.md 102.4) are checked in (`mtgz/az/deck_reader_v6.json`
+/// = `encode::deck_reader_json`; `MTGZ_WRITE_LAYOUT=1` rewrites it) and are what zero-core's reader
+/// accepts (its docs/az.md 36.2): ranges in feature order, disjoint, inside the features, none in a
+/// token segment (the bags and the global blocks only); every viewer-side bag left out.
+#[test]
+fn deck_reader_inputs_are_checked_in_and_read_bags_and_globals_only() {
+    let want = encode::deck_reader_json();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/deck_reader_v6.json");
+    if std::env::var("MTGZ_WRITE_LAYOUT").is_ok_and(|v| v == "1") {
+        std::fs::write(&path, &want).unwrap();
+    }
+    let have = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+    assert!(have == want, "{} differs from encode::deck_reader_json (MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test az deck_reader)", path.display());
+    let ins = encode::deck_reader_inputs();
+    let l: serde_json::Value = serde_json::from_str(&encode::layout_json(CardDb::cube())).unwrap();
+    let mut end = 0;
+    for &(name, o, n) in &ins {
+        assert!(n > 0 && o >= end && o + n <= NUM_FEATURES, "{name}: [{o}, {n}) out of order or outside");
+        end = o + n;
+        for sg in l["segments"].as_array().unwrap() {
+            let (so, sc, sw) = (sg["offset"].as_u64().unwrap() as usize, sg["count"].as_u64().unwrap() as usize, sg["width"].as_u64().unwrap() as usize);
+            assert!(o + n <= so || o >= so + sc * sw, "{name}: inside the token segment {}", sg["name"]);
+        }
+    }
+    let bag_of = |b: usize| encode::O_BAGS + b * encode::D;
+    use encode::bag;
+    for b in [bag::MY_HAND, bag::MY_BATTLEFIELD, bag::MY_GRAVEYARD, bag::MY_EXILE, bag::MY_LIBRARY, bag::OPP_HIDDEN, bag::OPP_POOL, bag::MY_HAND_KNOWN] {
+        assert!(!ins.iter().any(|&(_, o, _)| o == bag_of(b)), "bag {b} is not the opponent's shown cards");
+    }
 }
 
 // ---- A non-deciding viewer's encoding (ENGINE.md 67) ------------------------
