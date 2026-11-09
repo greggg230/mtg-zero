@@ -1293,13 +1293,19 @@ fn public_state_reaches_the_encoding() {
             "a land entered the battlefield this turn",
             "the other player learns a hand card past the 16th",
             "the turn goes on with another phase after its combat phases",
+            "a control effect ends at the end of the turn",
+            "a copy has an ability by its exception",
+            "a player created tokens this turn",
+            "the mana spent to cast a spell",
             "an artifact entered under a player's control this turn"
         ],
         "the gaps on the allowlist"
     );
     // (Workstream C's: where the turn goes on after combat phases added to another phase, and
-    // the hand cards past the 16 slots, ENGINE.md 100.3.)
-    assert_eq!(next, 18);
+    // the hand cards past the 16 slots, ENGINE.md 100.3; W2's two, ENGINE.md 99.12; EoE W6,
+    // ENGINE.md 99.16: the recorded control effects, a spell's mana spent, a player's tokens
+    // this turn, a copy's kept ability.)
+    assert_eq!(next, 22);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

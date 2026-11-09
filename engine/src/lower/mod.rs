@@ -27,6 +27,7 @@ pub mod eoe_x;
 pub mod eoe_w3;
 pub mod eoe_w4;
 pub mod eoe_w1;
+pub mod eoe_w6;
 pub mod eoe_w5;
 pub mod eoe_w2;
 pub mod filter;
@@ -282,26 +283,14 @@ impl Lowerer<'_> {
 /// 28-30, 41, 43-45, 47, 49, 50, 61, 62, 65, 67, 80, 100, 101); what is left
 /// below is still wrong in the IR.
 const IR_DEFECTS: &[(&str, &str)] = &[
-    // Lane A (ENGINE.md 99.2; docs/ir_defects.md 21-39).
-    // "Move a counter" narrowed to a +1/+1 counter between your permanents
-    // (27).
-    ("Nesting Grounds", "ir_defect(move a counter narrowed, docs/ir_defects.md 27)"),
-    // "Whenever you put ... counters" without its "you put" (31).
-    ("Terrasymbiosis", "ir_defect(who puts the counters dropped, docs/ir_defects.md 31)"),
+    // Lane A (ENGINE.md 99.2; docs/ir_defects.md 21-39): none left (27 and
+    // 31 fixed by mtg-bot f4f2d663, ENGINE.md 99.16).
 
-    // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79).
-    // "If a permanent entering the battlefield causes a triggered ability
-    // of a permanent you control to trigger": both restrictions dropped
-    // (docs/ir_defects.md 66).
-    ("Starfield Vocalist", "ir_defect(event subjects dropped, docs/ir_defects.md 66)"),
+    // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79): none left (66 fixed
+    // by mtg-bot f4f2d663, ENGINE.md 99.16).
 
-    // W2 mana and lands (ENGINE.md 99.12; docs/ir_defects.md 160-169).
-    // "{T}: Add one mana of any color among legendary permanents you
-    // control" written as any colour with a spending restriction (160).
-    ("Plaza of Heroes", "ir_defect(a mana ability's colours written as a spending restriction, docs/ir_defects.md 160)"),
-    // "Whenever a creature deals combat damage to you": the damaged
-    // "you" widened to anything you control (161).
-    ("Contested War Zone", "ir_defect(combat damage to you widened to your permanents, docs/ir_defects.md 161)"),
+    // W2 mana and lands (ENGINE.md 99.12; docs/ir_defects.md 160-169): none
+    // left (160 and 161 fixed by mtg-bot f4f2d663, ENGINE.md 99.16).
 
     // W3 combat and abilities (ENGINE.md 99.13; docs/ir_defects.md 170-179).
 

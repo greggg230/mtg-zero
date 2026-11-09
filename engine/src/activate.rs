@@ -1566,6 +1566,11 @@ impl Game {
             return;
         }
         let p = o.controller;
+        // "As this enters, choose a color" (EoE W6).
+        if self.def_of(card).w6.chooses_color && self.chosen_land_color(card) == 0 {
+            self.w6_choose_color_as_enters(card, p);
+            return;
+        }
         if self.def_of(card).chooses_player && self.objs[card.i()].chosen_player.is_none() {
             // "As this enters, choose a player." Choice: `PLAYER` (2 = you,
             // 3 = the opponent).

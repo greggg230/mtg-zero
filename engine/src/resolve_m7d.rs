@@ -807,9 +807,13 @@ impl Game {
     pub(crate) fn top_options(&self, p: PlayerId, classes: &[crate::pay::Class], sorcery_ok: bool, land_ok: bool, opts: &mut Vec<crate::decision::Opt>) {
         use crate::decision::{act, Opt, FACE_CAST, FACE_PLAY};
         let Some(&top) = self.players[p as usize].library.last() else { return };
-        if !self.top_play_ok(p, top) {
+        // (Or "you may cast artifact spells from the top of your library":
+        // casts only, of the faces that are artifact spells; EoE W6.)
+        let citadel = self.top_play_ok(p, top);
+        if !citadel && !self.w6_top_cast_source(p) {
             return;
         }
+        let land_ok = land_ok && citadel;
         let def = self.def_of(top);
         let front = if def.halves.is_some() {
             self.split_left_options(p, top, sorcery_ok, classes)
@@ -819,7 +823,9 @@ impl Game {
             } else {
                 0
             }
-        } else if self.castable_via(p, top, crate::game::CastFrom::LibraryTop, classes, sorcery_ok) {
+        } else if citadel && self.castable_via(p, top, crate::game::CastFrom::LibraryTop, classes, sorcery_ok) {
+            FACE_CAST
+        } else if !citadel && self.w6_top_cast_ok(p, top, None) && self.castable_via(p, top, crate::game::CastFrom::LibraryTopMana, classes, sorcery_ok) {
             FACE_CAST
         } else {
             0

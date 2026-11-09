@@ -183,6 +183,7 @@ pub fn fields() -> Vec<Field> {
         choosing_for: Derived "transient: the item whose modes are chosen (0 between tasks)",
         marks: Public "rare per-object facts (exhausted, a chosen colour, exerted, can't be countered, ...)",
         w3: Derived "EoE workstream W3's state: its fields are classified under W3State",
+        w6: Derived "EoE workstream W6's state: its fields are classified under W6State",
         known_pools: Derived "with hidden decks, the pool names each player knows of the other's: set by the match, fixed for the game",
         log: Derived "the human-readable log (tests and the viewer)",
     });
@@ -197,6 +198,23 @@ pub fn fields() -> Vec<Field> {
             entering_spent: Derived "transient: set and taken around one move",
             phased: Public "phased-out permanents (CR 702.26b): not encoded (a limit)",
             indirect: Public "which phased-out permanents phased out with what they are attached to (CR 702.26e)",
+        });
+    }
+    {
+        use crate::eoe_w6::W6State;
+        classify!(v, W6State {
+            seen: Derived "fast paths: rare rules some card of the game has (as Game.seen)",
+            entering: Derived "transient: set and cleared around one permanent's entry",
+            actor: Derived "transient: set and restored around one op",
+            control: Public "the control-changing effects behind permanents' controllers (CR 613.1b; EoE W6: games with an Aura's control effect): which ends when",
+            syncing: Derived "transient: set while the controllers are worked out",
+            entry_triggers: Derived "the triggers the current simultaneous entry caused (copies of Game.waiting's, which is public)",
+            tokens_turn: Public "the turn each player last created tokens (CR 111.2; EoE W6: Moonlit Meditation's 'the first time ... each turn')",
+            token_question: Derived "transient: set by a token creation, taken as its instruction returns",
+            token_asking: Derived "the pending decision is the token replacement's question (Game.pending, public)",
+            token_answer: Derived "transient: set and cleared around one op",
+            token_frame: Derived "transient: set and cleared around one op",
+            deferred_since: Derived "transient: the entering permanents waiting for their devour choice (Game.agenda), with their entries' first timestamps",
         });
     }
     classify!(v, Player {
@@ -1612,6 +1630,47 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.m.earlier[p][w] |= b;
             Some(format!("P{p}"))
         }),
+        // EoE W6 (ENGINE.md 99.16): no draw from the gate's random stream.
+        // A recorded control-changing effect ("until end of turn") on the
+        // first permanent in the encoded slots, under the control it has (so
+        // nothing else changes now: what changes is who controls it once the
+        // turn ends).
+        p!("a control effect ends at the end of the turn", "W6State.control", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            let r = a.g.obj_ref(c);
+            let to = a.g.objs[c.i()].controller;
+            a.g.w6.control.push(crate::eoe_w6::ControlFx { obj: r, to, ts: u32::MAX, eot: true });
+            Some(a.g.name(c).to_string())
+        }),
+        // The amount of mana spent to cast a spell on the stack (Unravel's
+        // condition; W3's perturbation covers permanents).
+        p!(rare "the mana spent to cast a spell", "Game.marks", |a, _r| {
+            let &(_, c) = stack_spells(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::ManaSpent(1))
+        }),
+        // A copy effect's "except it has this ability" (Thespian's Stage):
+        // its definition made with the ability (only in a table with one).
+        p!(rare "a copy has an ability by its exception", "Game.copies", |a, _r| {
+            let ss = slots(&a.g);
+            let db = a.g.db;
+            let k = a.g.copies.iter().position(|x| ss.contains(&x.obj.idx) && db.w6.kept.iter().any(|y| y.0 .0 == x.vals.def))?;
+            let d = a.g.copies[k].vals.def;
+            let m = db.w6.kept.iter().find(|y| y.0 .0 == d)?.1;
+            a.g.copies[k].vals.def = m;
+            let c = a.g.copies[k].obj.idx;
+            a.g.objs[c.i()].def = m;
+            Some(db.def(d).name.clone())
+        }),
+        // Player 0 created tokens this turn (Moonlit Meditation's "the
+        // first time ... each turn").
+        p!("a player created tokens this turn", "W6State.tokens_turn", |a, _r| {
+            let t = a.g.turn.number as u16;
+            if a.g.w6.tokens_turn[0] == t {
+                return None;
+            }
+            a.g.w6.tokens_turn[0] = t;
+            Some("P0".to_string())
+        }),
     ]
 }
 
@@ -1647,6 +1706,10 @@ pub fn limits() -> Vec<Limit> {
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
         l("the other player learns a hand card past the 16th", NextLayout, "the hand block has 16 `HAND` slots (the viewer's hand sorted by definition, ENGINE.md 58): with more than 16 cards in hand (Tamiyo, Seasoned Scholar's emblem: no maximum hand size), which of the later ones the opponent knows is not encoded (their identities are, in the hand bag); the next layout encodes the known copies per identity (found by workstream C's gate positions, ENGINE.md 100.3)"),
         l("the turn goes on with another phase after its combat phases", NextLayout, "after combat phases an effect added after the beginning phase, the postcombat main phase or the ending phase (CR 500.8: \"after this phase, there is an additional combat phase\", resolved outside combat; workstream C, ENGINE.md 100.3), the turn goes on with the phase that came next there (Turn::after_combat), not the postcombat main phase; layout v5 encodes the additional combat phases to follow (g5::EXTRA_COMBATS), not where the turn resumes: the next layout encodes it (a global)"),
+        l("a control effect ends at the end of the turn", NextLayout, "the control-changing effects behind a permanent's controller (W6State::control: their order and which end at the end of the turn, CR 613.1b, 613.7, 514.2; recorded in games with an Aura that changes control, Tractor Beam, EoE W6, ENGINE.md 99.16) decide who controls it when one ends; layout v5 encodes the controller, not the effects: the next layout encodes them (a permanent's 'controlled until end of turn' and 'by an Aura' flags)"),
+        l("a copy has an ability by its exception", NextLayout, "a copy effect's 'except it has this ability' (CR 707.9b; Thespian's Stage, EoE W6, ENGINE.md 99.16: a definition made with the copied one's abilities and the Stage's) gives the copy an ability its identity (the copied card's) doesn't show; the next layout encodes a permanent's activated abilities beyond its identity's"),
+        l("a player created tokens this turn", NextLayout, "whether a player created tokens this turn (W6State::tokens_turn, EoE W6, ENGINE.md 99.16) decides whether Moonlit Meditation's 'the first time you would create one or more tokens each turn' can still apply; layout v5 has no float for it: the next layout encodes it (a per-turn flag beside the turn's facts)"),
+        l("the mana spent to cast a spell", NextLayout, "the amount of mana spent to cast a spell on the stack (Mark::ManaSpent, recorded for every spell in a table with Unravel, EoE W6, ENGINE.md 99.16) decides Unravel's 'if the amount of mana spent to cast that spell was less than its mana value'; layout v5's stack item has no float for it: the next layout encodes it (a stack item's number, as W3's permanent's)"),
         l("an artifact entered under a player's control this turn", NextLayout, "whether an artifact entered the battlefield under a player's control this turn (Player::artifact_entered) is game state the EoE port's W1 added after layout v5 froze (ENGINE.md 99.11), read by one card, Mechan Shieldmate (its attack permission); the next layout encodes it (a per-turn flag beside the turn's facts)"),
     ]
 }

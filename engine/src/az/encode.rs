@@ -1154,7 +1154,7 @@ impl Game {
                     F::Permission { .. } | F::Taxed(_) | F::Airbent(_) => Some(3),
                     F::Retrace | F::Mayhem | F::Paragon => Some(4),
                     F::Miracle => Some(5),
-                    F::LibraryTop => Some(6),
+                    F::LibraryTop | F::LibraryTopMana => Some(6),
                 };
                 if let Some(k) = from {
                     st[stack::FROM + k] = 1.0;

@@ -20705,6 +20705,199 @@ In the brief's order, still open (100.4.4 has their designs):
   `keep.life + phyrexian_life`, `phyrexian_life += 2k`, `later as u8`, "pay X life" and `x_range`
   below 255).
 
+#### 99.16 W6: the remaining cards (branch `eoe-w6-rest`, from `eoe-base` 2e01275)
+
+**Why.** The cards the other workstreams left (99.11-99.15): W1's (Nesting Grounds, Terrasymbiosis
+and Starfield Vocalist, whose IR wasn't fixed; Loading Zone, Unravel, Tractor Beam and Moonlit
+Meditation, whose engine features were missing) and W2's (Plaza of Heroes and Contested War Zone,
+IR defects 160 and 161; Sunken Citadel, Power Depot, Mm'menon, the Right Hand, Thespian's Stage).
+W6 owns the card IR (mtg-bot's parser) from here on. The user's rule: every card, fully faithful,
+no approximation of any kind (Paradox Haze stays out). New code in `eoe_w6.rs` and
+`lower/eoe_w6.rs`; shared files get small additive hooks.
+
+**The IR** (mtg-bot `feature/eoe-ir-fixes` f4f2d663, the third batch; docs/card_ir.md, "Current
+numbers"): Nesting Grounds `MoveCounterBetweenTargets` (two targets, the second
+`distinct_from` the first, any kind of counter chosen as it resolves), Terrasymbiosis
+`CountersPutBy { by: you }` (who put the counters), Starfield Vocalist's replacement with
+`subject_filters` (`ability_source`: a permanent; `entering_obj`, a new subject of
+`triggered_ability_triggers`: the permanent whose entering caused the trigger), Plaza of Heroes'
+third ability `AddOneManaOfColorAmongControlled { legendary }` (no spending restriction),
+Contested War Zone's trigger with `Subject(IsPlayer, target)`. Schema `1cbe33073b1b...` (was
+`663b44095dbe...`), 709 classes; the cube's and the legacy IR card for card unchanged
+(`schema_sha256` aside, checked card by card), 5 of `eoe.ir.json`'s 320 cards changed (exactly
+those). mtg-bot's checks: `cards roundtrip --pool cube legacy eoe` passes; 29 new tests
+(`tests/test_eoe_fidelity_w6.py`); the full suite (`pytest -n 8 --no-cov`) 49 failures, each also
+failing at aa323a3b (checked by name against a run of that commit's `git archive`); the Nesting
+Grounds and Starfield Vocalist cross-engine parity probes are strict xfails (the compiled Rust
+parity engine models the old printings); the Python engine's simplifications are in mtg-bot
+docs/SEARCH_LIMITATIONS.md ("third batch"). The two regenerated reports W1's last run left
+modified (docs/POOL_PARITY.md, docs/RUST_EFFECT_COVERAGE.md: the test suite rewrites them on each
+run, they reflected the earlier batches) are committed (aa323a3b).
+
+**The rules, as built.**
+
+* *Unravel* ("Counter target spell. If the amount of mana spent to cast that spell was less than
+  its mana value, you draw a card"; CR 601.2h, 202.3). `W6::JumpUnlessSpentBelowMv` reads the
+  spell's mana spent (W3's `Mark::ManaSpent`, now recorded for every spell in a table with such a
+  card, `CardDb::w6.mana_spent_all`) and its mana value (an {X} spell's X counts, 202.3e; an
+  alternative cost doesn't change it: its rulings) just before the counter: the values are the
+  spell's as it last existed on the stack (608.2h), the same either side of the counter. A copy of
+  a spell wasn't cast: no mana spent (707.10).
+* *Loading Zone* (CR 614.1a, 122.6): `W6Def::counter_doubler` (the recipients; "you control" is the
+  replacement's `affects`), applied in `Game::add_counters`: each such effect of a permanent whose
+  controller controls the recipient doubles every kind of counter (two give four times as many: the
+  ruling). The affected object's controller would order counter-modifying replacements (616.1, the
+  ruling), but doublings commute and the lowering refuses every other counter-modifying
+  replacement, so there is no order to choose. Counters a permanent enters with (122.6) get only
+  the effects that already exist (614.12): not a Loading Zone entering at the same time
+  (`W6State::entering`: the entering permanent and its event's first timestamp, set around its
+  entry, in both entry paths).
+* *Who puts counters* (CR 122.6, 122.6a; for Terrasymbiosis): the controller of the spell or
+  ability whose instruction puts them (`W6State::actor`, set around each op in `run_frame`), or,
+  for counters a permanent enters with, its controller (no effect of the table names another
+  player). Every +1/+1 counter on a permanent is put by a resolving instruction or as a permanent
+  enters (the call sites were checked); any other path panics in a game with such a trigger rather
+  than guess.
+* *Terrasymbiosis*: `TrigPred::CountersPutBy`; in a game with such a trigger the `CountersAdded`
+  event carries the player and the count (`SEEN_W6_PUTTER`; "you may draw that many cards" reads
+  it, as Starwinder's combat-damage sibling). "Do this only once each turn" is CR 603.2h (the
+  engine's `OnceMay`, ENGINE.md 29): declined, it still triggers later that turn.
+* *Starfield Vocalist* (CR 603.2d, 603.6a; its rulings): a permanent's triggered ability that a
+  permanent's `Enters` event triggers (its own "when this enters" and others' "whenever ...
+  enters") triggers once more for each permanent its controller controls with the ability (two
+  give three, the ruling), each instance separate (its own targets and choices). Not delayed or
+  reflexive abilities (603.2d), not emblems' or graveyard cards' (not "of a permanent"), not
+  replacement effects or "as it enters" (the rulings). "A permanent entering at the same time as
+  Starfield Vocalist (including Starfield Vocalist itself)": the engine puts a simultaneous entry's
+  permanents onto the battlefield one by one, so a Vocalist entering later in the entry adds an
+  instance of each of its controller's triggers that earlier entrants caused
+  (`W6State::entry_triggers`, keyed by `Game::group_ts`).
+* *Tractor Beam* ("You control enchanted permanent", CR 303.4e, 613.1b): in a game with an Aura
+  that changes control (`SEEN_W6_CONTROL`), a permanent's controller is worked out from every
+  control effect in timestamp order (613.7, `Game::w6_sync_control`): its owner, or whoever it
+  entered under (110.2), then the resolved control-changing effects (`W6State::control`: for good,
+  or until end of turn: lane D's Systems Override and Mutinous Massacre record theirs with the
+  duration, and `return_control` ends them), and each such Aura attached to it (timestamp: the
+  later of its entry and its attachment, 613.7e; "you" is the Aura's controller now; an Aura that
+  left or lost its abilities gives nothing). `set_control` records the effect there
+  (`apply_control` is the old write); the controllers are worked out after every move, op,
+  attachment, phasing and SBA check. A permanent whose controller changes is removed from combat
+  (506.4). "Doesn't untap during its controller's untap step" (502.3) and the enters trigger "tap
+  enchanted permanent" (`W6::TapHost`; the Aura's last known host if it left, 608.2h).
+* *Nesting Grounds* (CR 122.5; its rulings): `W6::MoveCounter`: nothing if either target is
+  illegal or the first has no counter; with several kinds the controller chooses one as it
+  resolves (`ChooseMode`, `NUMBER` + its place in kind order, paged past the range with A0's
+  `ask_paged`, the window in `Frame::i`); the counter is removed and put (Loading Zone doubles it,
+  Terrasymbiosis sees it: the ruling).
+* *Moonlit Meditation* ("The first time you would create one or more tokens each turn, you may
+  instead create that many tokens that are copies of enchanted permanent"; CR 614.1a, 707.2):
+  `create_tokens` and `create_token_copies` ask the creating player, the first time they would
+  create tokens that turn with such an Aura (`W6State::tokens_turn`: whether or not it applied, and
+  an Aura that came later doesn't apply that turn, its rulings), `PASS` or the Aura
+  (`ChoosePermanent`; with several, which applies: applying one after another leaves the last
+  one's copies). The instruction creates nothing, the question is asked as it returns
+  (`run_frame`), and the instruction runs again from its frame with the answer: every instruction
+  of the table that creates tokens does so first, for one player (the EoE table's seven), and
+  in a table where one doesn't (Amass, a linked loop, an exile first, a draw replaced by a token:
+  the cube's, in the test tables that hold both) the card is refused, out of the table with its
+  blocker (`eoe_w6::table_refusals`, `CardDb::from_cards`). The copies are made from the enchanted permanent's copiable values,
+  that many (the token multipliers apply), and enter as the original tokens would (tapped,
+  attacking: "before anything that modifies how those tokens enter", the ruling); any kind of token
+  (a Lander too).
+* *Thespian's Stage* ("This land becomes a copy of target land, except it has this ability"; CR
+  707.9b, 613.2a; its rulings): `W6::BecomeCopyKeeping`, no duration. The ability is part of the
+  copiable values (707.9b), so a copy of the Stage-copy has it too: a table with such an ability
+  gets, for each definition, a twin with its abilities and that one (`add_kept_ability_defs`,
+  inserted before latent abilities, W3's grant indices adjusted; `CardDb::w6_kept_def`). A
+  definition that already has the ability is used as it is: a second identical instance (same
+  cost, effect, restrictions, object) offers no option and changes no outcome the first doesn't,
+  so a copy of a copy keeps one. Two different such abilities in one table are refused (a panic at
+  table construction). The copy keeps its tapped state and doesn't enter (no "enters" abilities,
+  the rulings); copiable values only (an animated Mutavault is copied as the land).
+* *Modular* (CR 702.43; Power Depot): enters with n +1/+1 counters (instances add up, 702.43b) and
+  its trigger: when it is put into a graveyard from the battlefield, you may put a +1/+1 counter
+  on target artifact creature for each +1/+1 counter it had (608.2h, 122.8; whatever its card types
+  then, the ruling).
+* *Plaza of Heroes*: supported by its corrected IR (docs/ir_defects.md 160).
+* *Mm'menon's "you may cast artifact spells from the top of your library"* (CR 601.3, 601.3e):
+  `CastFrom::LibraryTopMana`, for the spell's costs; whether a face is an artifact spell is the
+  face's question (`face_castable` and `begin_cast_face` read the face); lands aren't cast and a
+  land face isn't played this way; lowered only with "you may look at the top card of your library
+  any time" on the same permanent (offering the cast then hides nothing). Beside Bolas's Citadel's
+  permission the card is refused (`table_refusals`: two permissions would be a choice). Encoded as the Citadel's "from the top of a library".
+* *Mm'menon's grant* ("Artifacts you control have '{T}: Add {U}. Spend this mana only to cast a
+  spell from anywhere other than your hand.'"; CR 613.1f, 605.1a, 106.6): a latent mana ability of
+  the card (`CardDef::latent`, never the card's own) that W3's grant gives each artifact its
+  controller controls (`lower::eoe_w6::printing_w6_grants`, `W3Def::grants_activated`,
+  `Game::granted_activated`: layer 6, the granter's timestamp, gone as Mm'menon leaves); B2's
+  granted payment sources (100.4.5: `Game::src_ability`, a place past the fourth offered by the
+  permanent) make it a source in a payment and a mana ability with priority (its {U} floats with
+  its restriction, W2's `SPEND_OUTSIDE_HAND`).
+* *Sunken Citadel*: "as this enters, choose a color" (CR 614.12; `W6Def::chooses_color`, asked with
+  the entry's other choices), "one mana of the chosen color" (`ManaProd::Chosen`) and "two mana of
+  the chosen color" (`ManaProd::ChosenN`, a per-source several-mana production; none if no colour
+  was chosen) with W2's land-ability restriction (99.12); the two mana pay a land's mana ability's
+  own cost inside a payment (Cascading Cataracts' {5} while a spell is cast: B2's N21, 100.4.5).
+* *Contested War Zone* and *Power Depot*: their corrected IR (161; 40, 47) with W2's control op and
+  restriction (99.12) and W6's modular.
+* *"Until end of turn" control* (lane D's Systems Override and Mutinous Massacre) sets the same fast
+  path: those games record every control effect too, so the effect's end is worked out with the
+  others (a later control effect of the same player for good is no longer undone).
+
+**New public state** (each a next-layout gap in the public-state gate, its perturbation drawing
+nothing from the shared stream; four more applied gaps in `tests/az.rs`, 22 with C's and W2's): the recorded control
+effects (`W6State.control`; also in `testkit::view_of`, in timestamp order without the stamps), a
+spell's mana spent (rare), a player's token creation this turn (`W6State.tokens_turn`), a copy's
+kept ability (rare).
+
+**Found, not mine to change (reported):** the engine puts a simultaneous entry's permanents onto
+the battlefield one by one and matches each one's `Enters` event at once, so a permanent entering
+in the same event doesn't see the earlier entrants' events (CR 603.6a: "all permanents on the
+battlefield (including the newcomers) are checked"); two creatures with "whenever another creature
+enters" returned together trigger once instead of twice. Fixing it changes cube games (the
+digests), so it is left for the maintainer (W6 handles the Vocalist's own ruling above). W3's mana
+spent saturates at 255 (`Mark::ManaSpent(u8)`), as mana values do (`u8`). (W2's open payment item,
+which reached Sunken Citadel, and granted mana abilities as payment sources, which Mm'menon needed,
+are B2's, 100.4.5, merged here.)
+
+**Supported:** all 13 (`SUPPORTED_EOE_W6`): Contested War Zone, Loading Zone, Mm'menon, the Right
+Hand, Moonlit Meditation, Nesting Grounds, Plaza of Heroes, Power Depot, Starfield Vocalist, Sunken
+Citadel, Terrasymbiosis, Thespian's Stage, Tractor Beam, Unravel. EoE support 319 / 320 (The
+Dominion Bracelet: `grants_control_opponent_ability_when_equipped`, 99.14; Paradox Haze has no IR);
+the cube 546 / 546. IR defects 27, 31, 66, 160 and 161 fixed (docs/ir_defects.md, with 25, 29, 30,
+44, 47 and 50 supported); no new one.
+
+**Tests** (each named after its CR rule; the EoE table plus custom IR cards through the same
+lowering, `tests/eoe_w6_kit`): `cards_eoe_w6.rs` 14 (Unravel, Tractor Beam, Starfield Vocalist,
+Plaza of Heroes, Moonlit Meditation, Thespian's Stage), `cards_eoe_w6_counters.rs` 8 (Loading Zone,
+Nesting Grounds, Terrasymbiosis), `cards_eoe_w6_top.rs` 3 (casting from the top, a colour chosen
+as it enters), `cards_eoe_w6_mana.rs` 7 (modular, Power Depot, Contested War Zone, Sunken Citadel
+with Cascading Cataracts), `cards_eoe_w6_granted.rs` 3 (Mm'menon's grant: a payment source for a
+spell from the library and not the hand, only your artifacts and only with Mm'menon, floating with
+priority).
+
+**Merges.** `eoe-base` merged as it moved: A0's choice ranges (c769cc2), C (9c67a75), A with the loose
+ends and W2 through B (5f0b07e), B's payment work with T's fixtures (b5e94ff), B2's N21 and granted
+payment sources (`eoe-b2-pay` 755fe0b, before `eoe-base` had it: Mm'menon waited for it), then B2's
+Cascading Cataracts fix, the canary re-stamp and N22 (e164d69). The digests are `eoe-base`'s at each
+step: W6 changes no cube game (its paths are behind `SEEN_W6_*` bits and card flags no cube card has).
+
+**Results** (bc0459a + this section, normal release profile, `E:/cargo-target/mtg-zero/eoe-w6-rest`).
+The engine and `card_ir` suites: 2,108 passed, 0 failed, 20 ignored (145 test binaries; W6's 35 in
+five). Digests unchanged from `eoe-base` e164d69: full `02d4bccc94314d6d`, `DIGEST_ENCODING=0`
+`856218d6b081056c`. Support: EoE 319 / 320, the cube 546 / 546. `FUZZ_POOL=eoe FUZZ_GAMES=20000`
+passed on every seed, none excluded (20,000 games in ten chunks, wins 7,119 / 7,115, 5,766 draws,
+mean 45.7 turns, 787.5 decisions; the matches and replays passed); the default `FUZZ_GAMES=20000`
+passed (20,000 games, wins 9,846 / 10,030, 124 draws, mean 31.8 turns, 438.7 decisions; 1,000
+matches, replays). `python -m pytest tests` 206 passed, 1 skipped; `python -m pytest tools/codegen`
+2 passed. Before the last merges the EoE fuzz found, outside W6 (reported, routed): B2's
+Cascading Cataracts castability against its payment after N21 (ten seeds, fixed in e164d69), B's
+payment search slowing to seconds a decision (Cataracts, Gene Pollinator, six manlands: fixed in
+b666765), Gene Pollinator's castability (fixed in e164d69), and an Aura that Anticausal Vestige puts
+onto the battlefield from the hand staying there while `Task::EnterAura` asks, so `determinize`
+re-deals it and the refreshed question has no option (hidden.rs `refresh_pending`; workstream D's
+final round: the seed now plays another game, the bug is still there).
+
 #### 100.4.6 B3: the last of mana and payment (branch `eoe-b3-pay`, from `eoe-base` e164d69)
 
 **Why.** 100.4.5's open list (the audit's F4, `docs/faithfulness_audit.md` 5.4) and the payment's

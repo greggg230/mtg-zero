@@ -192,6 +192,10 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     if enters && event != EventKind::Enters || cast && event != EventKind::IsCast {
         l.unsupported(format!("TriggerPredicate(how it was cast, on {event:?})"));
     }
+    // Who put counters: a `CountersAdded` event's only (EoE W6).
+    if needs(&pred, &|p| matches!(p, TrigPred::CountersPutBy(_))) && event != EventKind::CountersAdded {
+        l.unsupported(format!("TriggerPredicate.CountersPutBy(on {event:?})"));
+    }
     // The zone a permanent left for: a leave event's amount only.
     if needs(&pred, &|p| matches!(p, TrigPred::LeftTo(_))) && event != EventKind::LeavesBattlefield {
         l.unsupported(format!("TriggerPredicate.LeftBattlefieldTo(on {event:?})"));
@@ -312,7 +316,8 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         | TrigPred::InGraveyard
         | TrigPred::SpellMvParity
         | TrigPred::AttacksMonarch
-        | TrigPred::LeftTo(_) => Vec::new(),
+        | TrigPred::LeftTo(_)
+        | TrigPred::CountersPutBy(_) => Vec::new(),
     }
 }
 
@@ -461,6 +466,9 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
             }
             Some(TrigPred::LeftTo(mask))
         }
+        // "Whenever you put one or more +1/+1 counters on ..." (CR 122.6;
+        // EoE W6): who put them.
+        P::CountersPutBy(nodes::CountersPutBy { by }) => Some(TrigPred::CountersPutBy(*by == enums::Controller::You)),
         other => {
             l.unsupported(format!("TriggerPredicate:{}", other.tag()));
             None

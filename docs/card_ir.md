@@ -13,7 +13,7 @@ specified in mtg-bot's `docs/CARD_IR.md`.
 |---|---|
 | `data/cards/powerlsv.ir.json` | The PowerLSV cube (546 printings), IR v1, exported by mtg-bot `feature/legacy-delver-ir` 140eafa9 with the legacy pool (schema `181ba4b8a1e7...`, ENGINE.md 54; the cards byte for byte those of `feature/companion-ir` 62210e89, schema `7100f8436556...`: companion conditions, M8a; before it `feature/ir-fixes-mtgzero` 8ea9fcca, schema `66ba3e33fe5b...`, the IR defects of docs/ir_defects.md 1, 2, 4, 12, 13, 15-18 fixed) |
 | `data/cards/legacy.ir.json` | The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari Charm; mtg-bot's pool `legacy`), the same export and schema |
-| `data/cards/eoe.ir.json` | The Edge of Eternities sealed cards (ENGINE.md 99.1: mtg-bot's pool `eoe` filtered by `tools/codegen/filter_eoe_ir.py` to the set's 320 cards with IR), the same export and schema; since ENGINE.md 99.11 the export of mtg-bot `feature/eoe-ir-fixes` 7c02e5c9 (20bea9f4 for every card but Sothera, the Supervoid; before it 5362f5ed, ENGINE.md 99.9) |
+| `data/cards/eoe.ir.json` | The Edge of Eternities sealed cards (ENGINE.md 99.1: mtg-bot's pool `eoe` filtered by `tools/codegen/filter_eoe_ir.py` to the set's 320 cards with IR), the same export and schema; since ENGINE.md 99.16 the export of mtg-bot `feature/eoe-ir-fixes` f4f2d663 (before it 7c02e5c9, ENGINE.md 99.11; 5362f5ed, ENGINE.md 99.9) |
 | `data/cards/powerlsv.schema.json` | The schema the three documents were encoded with |
 | `tools/codegen/gen_card_ir.py` | Schema -> Rust generator (stdlib Python) |
 | `card_ir/src/generated.rs` | Generated types (do not edit) |
@@ -86,7 +86,21 @@ When mtg-bot bumps `ir_version` (a change to the encoding rules, not to
 the card vocabulary), `support.rs`, `lib.rs` and the generator may need
 changes too; see mtg-bot `docs/CARD_IR.md`, "Versioning".
 
-## Current numbers (mtg-bot `feature/eoe-ir-fixes` 20bea9f4)
+## Current numbers (mtg-bot `feature/eoe-ir-fixes` f4f2d663)
+
+ENGINE.md 99.16 (W6): exported with `cards export-ir --pool cube legacy eoe` from mtg-bot
+`feature/eoe-ir-fixes` f4f2d663 (the third IR-fix batch, on aa323a3b), then `filter_eoe_ir.py`; schema
+sha256 `1cbe33073b1b4c28528a98b7541fff5faa654c132627d86c15e4eeb403517543` (was `663b44095dbe...`).
+709 classes, one more: the effect `MoveCounterBetweenTargets` (Nesting Grounds) and the trigger
+predicate `CountersPutBy` (Terrasymbiosis) are new, `MovePlusOneCounterBetweenPermanentsYouControl`
+(no card uses it now) is gone; the enum `EventSubject` gains `entering_obj` (Starfield Vocalist's
+subject filter). The fixed defects are docs/ir_defects.md 27, 31, 66, 160 (Plaza of Heroes: the
+third ability is `AddOneManaOfColorAmongControlled`) and 161 (Contested War Zone: combat damage to
+a player). `powerlsv.ir.json` (546 cards, 402,200 bytes) and `legacy.ir.json` (2 cards) are the
+previous files card for card, `schema_sha256` aside (checked card by card); `eoe.ir.json` holds the
+same 320 cards, 5 of them changed (exactly the cards of those entries), 214,200 bytes.
+
+### Before ENGINE.md 99.16 (mtg-bot `feature/eoe-ir-fixes` 20bea9f4)
 
 ENGINE.md 99.11 (W1): exported with `cards export-ir --pool cube legacy eoe` from mtg-bot
 `feature/eoe-ir-fixes` 20bea9f4 (the second IR-fix batch, on 7af12b20), then `filter_eoe_ir.py`;

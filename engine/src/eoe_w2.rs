@@ -538,6 +538,11 @@ impl Game {
     }
 
     fn devour_done(&mut self, card: CardIdx, picked: &[CardIdx]) {
+        // (The counters it enters with, put by its controller: EoE W6.)
+        let since = match self.w6.deferred_since.iter().position(|x| x.0 == card) {
+            Some(k) => self.w6.deferred_since.remove(k),
+            None => (card, self.objs[card.i()].timestamp),
+        };
         if picked.is_empty() {
             return;
         }
@@ -551,7 +556,9 @@ impl Game {
         }
         self.end_batch();
         if self.objs[card.i()].zone == crate::ids::Zone::Battlefield {
+            let before = self.w6.entering.replace(since);
             self.add_counters(card, crate::db::Counter::P1P1, n.min(u16::MAX as usize) as crate::num::Count);
+            self.w6.entering = before;
         }
     }
 }

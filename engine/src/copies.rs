@@ -269,6 +269,14 @@ impl Game {
         if self.db.def(vals.def).is(types::INSTANT | types::SORCERY) {
             return Vec::new();
         }
+        // (A replacement with copies of a permanent: EoE W6.)
+        if n > 0 && self.w6.seen & crate::eoe_w6::SEEN_W6_TOKENS != 0 {
+            match self.w6_token_replacement(controller) {
+                Err(()) => return Vec::new(),
+                Ok(Some(v)) => return self.w6_create_copies(v, controller, n, false),
+                Ok(None) => {}
+            }
+        }
         let n = self.token_count(controller, n);
         let mut made = Vec::with_capacity(n as usize);
         for _ in 0..n {
@@ -692,7 +700,10 @@ impl Game {
         }
         let r = self.obj_ref(card);
         let tapped = copied_tapped || self.enters_tapped(card, p);
+        // (Its "enters with" counters: EoE W6, `W6State::entering`.)
+        let entering_before = self.w6.entering.replace((card, since));
         self.entering(card, tapped, 0);
+        self.w6.entering = entering_before;
         self.note_entered(card);
         self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u32 });
         self.day_night_entered(card);

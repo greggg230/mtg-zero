@@ -464,6 +464,8 @@ impl Game {
             self.note(|g| format!("{} phases out", g.name(x)));
         }
         self.effects_changed();
+        // (Control effects worked out: EoE W6.)
+        self.w6_sync_control();
     }
 
     /// The static-ability fast paths count permanent `c` (`d` = 1) or not
@@ -511,6 +513,8 @@ impl Game {
             self.note(|g| format!("{} phases in", g.name(x)));
         }
         self.effects_changed();
+        // (Control effects worked out: EoE W6.)
+        self.w6_sync_control();
         // A daybound permanent that phased out by day exists again at night:
         // it transforms at once (CR 702.145c; nightbound by day, 702.145f).
         self.day_night_any_time();

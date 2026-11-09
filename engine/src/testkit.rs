@@ -148,7 +148,10 @@ impl Scenario {
         let c = self.g.find_card(p, name, Zone::Battlefield).unwrap_or_else(|| panic!("no {name} of P{p}"));
         let have = self.g.counters_on(c, k);
         self.g.remove_counters(c, k, have);
+        // (Put by its controller: who puts counters, EoE W6.)
+        let actor = self.g.w6.actor.replace(self.g.objs[c.i()].controller);
         self.g.add_counters(c, k, n);
+        self.g.w6.actor = actor;
         self
     }
 
@@ -581,6 +584,17 @@ impl Game {
             v.push(self.w3.indirect.contains(&c) as u64);
         }
         v.push(u64::MAX);
+        // Recorded control-changing effects (public, CR 613.1b; EoE W6): in
+        // timestamp order, each by its permanent's place, its player and
+        // whether it ends with the turn (not the timestamps themselves).
+        // (And the turn each player last created tokens, public.)
+        v.extend(self.w6.tokens_turn.iter().map(|&t| t as u64));
+        let mut ctl = self.w6.control.clone();
+        ctl.sort_by_key(|x| x.ts);
+        for x in ctl {
+            v.extend([live_place(x.obj), x.to as u64, x.eot as u64, (x.ts == 0) as u64]);
+        }
+        v.push(u64::MAX);
         v.push(self.monarch.map_or(9, |p| p as u64));
         // The initiative and the dungeons (public, CR 725, 309).
         v.push(self.initiative.map_or(9, |p| p as u64));
@@ -812,6 +826,7 @@ impl Game {
         self.activations.hash(&mut h);
         self.marks.hash(&mut h);
         self.w3.hash(&mut h);
+        self.w6.hash(&mut h);
         self.face_down.hash(&mut h);
         self.face_down_ids.hash(&mut h);
         h.finish()
