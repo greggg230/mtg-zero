@@ -1712,6 +1712,13 @@ pub fn limits() -> Vec<Limit> {
     ]
 }
 
+/// The perturbations of fields hidden decklists hide from the other player
+/// (ENGINE.md 102: public in every other format): with hidden decklists the
+/// gate requires each to reach its owner's view and encoding and neither of
+/// the other player's (`tests/az.rs`, `public_state_reaches_the_encoding`).
+/// The sideboard's size tells the number of basic lands in the deck.
+pub const HIDDEN_BY_DECKLISTS: [&str; 1] = ["a sideboard card fewer"];
+
 /// The perturbations layout v6 encodes (ENGINE.md 100.5): the next-layout
 /// gaps of the Edge of Eternities port (ENGINE.md 99) and workstream C
 /// (100.3), two facts cards read that were limits by design (the life gained
