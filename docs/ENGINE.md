@@ -19861,3 +19861,89 @@ suite 1,996 passed, 0 failed, 20 ignored (with A0's merge; `az` 41, `hidden` and
 onto the battlefield at night is transformed right after it enters (`entering_choices` -> `day_night_check`), with a
 `Transforms` event; CR 702.145b says it enters transformed (no transformation). A basic land type an effect gives (N22) is
 refused, not built: it waits for W2's moon definitions and the payment code.
+
+#### 100.2 A: choice ranges (branch `eoe-a-ranges`, from `eoe-base` f667cdb; `eoe-base` 9c67a75 merged)
+
+**Why.** Workstream A of the audit (5.1 F1, 5.2 F2): apply A0's helpers (100.1) everywhere a
+choice was cut to its action range, so every legal option is reachable by exactly one sequence of
+decisions inside layout v5.
+
+**Object choices: `Game::ask_objects`** (`decision.rs`). A choice among objects (players,
+permanents, spells and abilities on the stack, graveyard and exiled cards) names each object by the
+id it had (`PLAYER`, `MY_PERM` / `OPP_PERM` slot, `STACK` slot, `LIBRARY` + its slot in the
+decision's graveyard list, `EXILE` + its place among the exiled cards offered) and pages a range
+with an object past its last id (`ask_paged_ranges`; ranges in the order permanents, opponent's
+permanents, stack, list, exile). `ask_object_opts` is the same for options built with their unpaged
+ids. Unpaged, the ids are exactly the old ones (`ask`'s graveyard renaming finds nothing to rename;
+eoe_w4's `name_exile_targets` and `target_action` are gone). The page lives in the task
+(`ChooseTargets`, `CopyTargets`, `ChooseForCost`, `EnterAura`, `EnterAsCopy`, `AsEnters`,
+`ChooseAbility`, `PutTriggers`, `PriorityAsk` gain `page`), or in the frame (`Frame::page`, with
+`Frame::step` for numbers: reset when `pc` moves; `run_frame` takes a "next page" answer for the
+current op and resets the page after any other answer).
+
+| Row | Before | Now |
+|---|---|---|
+| 58.1 | targets among the 31 stack items below (`stack_in_reach`, `Game::targeting`) | every stack item; `STACK` + 31 = next page. `Game::targeting` and `STACK_REACH` are gone, so the checks before a cast, an activation or a trigger see every item too |
+| 99.14.1, 58.4 | first 32 exiled targets / playable cards / offered cards | priority's `EXILE` range and every `ChooseExiled` (six frame sites, eoe_w4's cost, W1's linked creature: its `PASS`-paging moved onto the helper) page past 32 |
+| 27.13.5 | first 12 cards with a graveyard ability | priority's `GY_ABILITY` range pages past 12 (`priority_options` returns the two ranges by position) |
+| 65.10 | assert past 64 graveyard cards from both graveyards | every target and effect graveyard choice pages the list; on a page the list block holds the page's cards at their slots (`Game::decision_graveyard_list`, read by `az/encode.rs` and the fuzzer) |
+| 31.7.8 | first 16 distinct waiting triggers | every distinct one, `TRIGGER` + its place, paged past 16 (`Choice::Trigger` is a `u32`). The groups-first reordering stays: it keeps the groups on the first page and only moves interchangeable triggers (C's `same`, 100.3) |
+| 31.7.5, N14 | the opponent's names, cut at 64 | every card name in the game, both players' (CR 201.3; the tax is on every source), paged past 64; `PASS` = a name of no card in the game |
+| 25.10.5 | W3's page: `NUMBER` + place - `from`, its own paging | `ask_paged` over `LIBRARY` + place - 3; the list block holds the definition with each ability (`Game::activated_home`) and its index (`encode::list::ABILITY` = (index + 1) / 4: gap #16 inside v5) |
+| N12 | first 16 counter kinds | every kind, `NUMBER` paged past 32 |
+
+**Numbers: `Game::ask_amount`** (`decision.rs`): `NUMBER` + the amount itself while every value
+fits (`hi` <= 31: the ids of before), else `ask_number(lo, hi)`; `NumberStep::answer_amount`
+decodes it, and `most_allowed(lo, cap, ok)` finds the largest allowed value (one at a time through
+31, the checks of before in their order, then doubling and bisection: a larger X or count costs
+more).
+
+| Row | Before | Now |
+|---|---|---|
+| 13.9, 23.11.3 | 0..=29, 30 = lethal, 31 = all | any amount in `lo..=hi` (`Task::AssignDamage { j: u32, step }`) |
+| N5 | X, kicker X, pay X life, X targets, times, divided damage, energy, a mana ability's X at most 31 | the legal range (`Game::x_range`; `Task::ChooseX`, `ChooseTimes`, `Divide`, `ManaNow` carry their step). `StackItem::x`, `times`, `division` and the frame's `spell_x`, `division` are `u32`; `TimesCost::max` is `u32::MAX` for "any number" (squad, replicate, multikicker); a repeatable cost with no mana is refused at lowering (an unbounded count is the audit's F7) |
+| N9 | the entering X in 6 bits | an `Enters` note whose times (> 255) or X (> 63) don't fit carries `ENTER_BIG` and the permanent a `Mark::Entered` with both (`Game::entered_counts`); smaller ones keep their bits |
+| 46.4 | a frame's `u8` loop counts | `Frame::i` is `u32`; "copy it n times" and connive take any n |
+| 46.5 | spells cast and cards drawn saturate at 255 | `u32` (`spells_cast`, `noncreature_cast`, `drawn`); `Mark::KickerX` is `u32` |
+
+**Bounds that remain, with their owners.** Mana-paid X and times stay within the u8 amounts of a
+`ManaCost` (docs/shortcuts.md 46.3, the audit's F7): `x_range` and `choose_times` offer no value
+whose cost's generic part would pass 255. "Pay X life" stays within the payment's u8 life
+(`pay::Keep::life`, `Cost::life`) and "tap X untapped artifacts" within its u8 reservation
+(`SacCost::n`): workstream B's payment model. A mana value with X is a u8 (F7).
+
+**Not done here.**
+
+* **N11** (`PayPool` cut at 32 pools, `pay.rs`): the choice lives in `PayMana`'s payment flow
+  (B's and W2's code), and B's F4 rewrites the same function (13.1k: every distinct remainder).
+  Paging it needs a page in `PayMana` and an index past 255 (`Choice::Number` is a u8). Left to B.
+* **26.11.6, 24.7.4** (96 permanents a player, 64 tokens a creation): `perm_room` and
+  `token_count`'s 64 stay. `ask_objects` already pages permanents for every decision converted
+  here, but lifting the cap needs every `perm_action` caller paged, attackers and blockers, and the
+  payment's `ACTIVATE` ids for mana sources past slot 95 (`pay.rs`, B's): one change, after B.
+* **31.7.2k**: B's, as assigned.
+* A payment's graveyard picks (delve, "exile n cards from your graveyard": `Task::Delve`,
+  `Task::PayCosts`, B's code) still go through `ask`'s renaming: one graveyard, at most 64 cards
+  by 58.3 (with tokens entering it mid-payment, a loud assert).
+
+**The encoding (layout v5 unchanged).** A0's floats 246-250 mark every paged and digit decision.
+The list block shows the current page's graveyard cards, names or abilities, so each `LIBRARY`
+option keeps its token. The stack, trigger, exile and graveyard-ability blocks still show their
+first slots, so on a range page past them their ids have no token there (the floats give the page):
+a gap for workstream D.
+
+**Tests** (`engine/tests/rules_faithful_a.rs` and the rows' own files): `limits.rs` (a Counterspell
+on any of 35 Bolts, a deep only target, a deep ability, a copy's deep new target, 65 graveyard
+targets paged; the four 58.1 tests rewritten to the rules), `cards_eoe_w4.rs` (34 exiled targets),
+`decision.rs` (34 exiled cards at priority, `ENTER_BIG`), `cards_m7b_stack2.rs` (14 Fanatics of
+Rhonas), `rules_faithful_a.rs` (18 Ouroboroid triggers, Peacekeeper's 72 names and its own card,
+combat 37 + 3 of 40, X = 33, pay 40 life, 18 counter kinds), `cards_eoe_w3.rs` (the ability page's
+`LIBRARY` ids and list block). Pages and digits are checked again after `determinize`
+(`same_after_determinize`). `tests/az.rs` and `tests/fuzz.rs` know "next page" options and ability
+options in the list.
+
+**Digests.** Full `e6039cb2cfc4206d` (`eoe-base` 9c67a75) -> `0b5fb3b15f89a12d` -> `038ee15c3fd29b28`;
+`DIGEST_ENCODING=0` `e56bcf4a9f57ecee` -> `23d22690aa903f77` -> `69e4452bbf60b46f`. 95 of the 2,500
+games change: 94 by Anointed Peacekeeper's names (with the opponent-only names the digest is
+`e6039cb2` again) and 1 (r 1064) by combat damage of 32 or more to divide. The rest of A changes no
+digest game.
