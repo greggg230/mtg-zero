@@ -1307,7 +1307,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         if !walker {
             l.unsupported("CardPrinting.creature_during_your_turn(not a planeswalker)");
         }
-        let subtypes = subs.iter().filter_map(|s| l.given_subtype("CardPrinting.creature_during_your_turn", s)).collect();
+        let subtypes = subs.iter().filter_map(|s| l.set_subtype("CardPrinting.creature_during_your_turn", s)).collect();
         let mut mods = vec![
             // "it's a 3/4 Ninja creature": its card types and subtypes
             // become exactly these (CR 205.1a-b), so it isn't a planeswalker
@@ -1942,6 +1942,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         artifact_ability_discount: l.int("CardPrinting.artifact_ability_cost_reduction", *artifact_ability_cost_reduction, 0, 9) as u8,
         skip_turn_untap: *may_skip_turn_to_untap,
         converge: false,
+        gives_basic_land_type: false,
         paints: *paints_all_objects_chosen_color_at_etb,
         extra_mana_creature,
         gy_play_mv: if repl.gy_cast_mv > 0 { repl.gy_cast_mv } else { gy_play_mv },

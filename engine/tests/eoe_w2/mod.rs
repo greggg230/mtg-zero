@@ -55,6 +55,12 @@ pub fn w2_cards() -> Vec<card_ir::Card> {
         // for legendary spells only).
         card("Test Land Engine", json!({"card_types": ["Land"], "activated_abilities": [tap_mana(json!([["C", 1]]), Some("legendary_spell")), pay_draw(2)]})),
         card("Test Land Spark", json!({"card_types": ["Land"], "activated_abilities": [tap_mana(json!([["C", 1]]), Some("legendary_spell")), pay_draw(1)]})),
+        // "{T}: Add {C}. {1}: This land becomes a Forest in addition to its
+        // other types until end of turn." (B2: a basic land type given by an
+        // effect, CR 305.6; ENGINE.md 100.4.5.)
+        card("Test Forest Maker", json!({"card_types": ["Land"], "activated_abilities": [tap_mana(json!([["C", 1]]), None),
+            {"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "mana": {"$t": "ManaCost", "generic": 1}, "mana_str": "{1}"},
+                "effect": {"$t": "ApplyEffect", "ends_at": {"$t": "EndOfTurn"}, "inner": {"$t": "BecomeType", "subtypes_to_add": ["Forest"]}}}]})),
         // An artifact with "{1}: Draw a card."
         card("Test Artifact Engine", json!({"card_types": ["Artifact"], "mana_cost": {"$t": "ManaCost", "generic": 3}, "mana_cost_str": "{3}",
             "activated_abilities": [pay_draw(1)]})),

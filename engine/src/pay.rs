@@ -692,10 +692,12 @@ impl Game {
         self.source_def(c).activated_def(slot)
     }
 
-    /// Can a permanent grant activated abilities now (an attached Equipment
-    /// with `grants_equipped`, a "<permanents> you control have" static)?
-    fn grants_activated_now(&self) -> bool {
+    /// Can a permanent have activated abilities past its own now (an
+    /// attached Equipment with `grants_equipped`, a "<permanents> you
+    /// control have" static, a basic land type given by an effect)?
+    pub(crate) fn grants_activated_now(&self) -> bool {
         self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0
+            || !self.db.basic_abilities.is_empty()
             || self.battlefield.iter().any(|&g| self.objs[g.i()].attached.is_some() && self.abilities(g).grants_equipped.is_some())
     }
 

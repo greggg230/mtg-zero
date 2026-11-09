@@ -459,3 +459,38 @@ fn cr_602_2b_a_pollinator_paying_its_own_tap_cost_is_no_activator() {
     assert_eq!(g.life(0), 23, "{}", log(&g));
     assert_ne!(g.obj(pols[0]).zone, Zone::Battlefield);
 }
+
+/// CR 305.6, 305.7 (its last sentence): a land given a basic land type in
+/// addition to its others has that type's intrinsic mana ability and keeps
+/// its own (docs/shortcuts.md N22: refused at lowering). W2's Test Forest
+/// Maker becomes a Forest until end of turn: it taps for {G} or {C}, and
+/// with priority it offers both abilities.
+#[test]
+fn cr_305_6_a_land_given_forest_taps_for_green() {
+    let mut g = eoe_w2::scen().battlefield(0, &["Test Forest Maker", "Island"]).at(Step::Main1, 0).start();
+    let fm = bf(&g, 0, "Test Forest Maker");
+    let island = bf(&g, 0, "Island");
+    assert!(!g.can_pay(0, &cost("{G}")));
+    g.choose(act(fm, 1));
+    finish(&mut g, |g| options(g).into_iter().find(|&c| c == act(island, 0)));
+    settle(&mut g);
+    assert!(g.obj(island).tapped && !g.obj(fm).tapped, "{}", log(&g));
+    assert!(g.can_pay(0, &cost("{G}")), "the Forest's {{T}}: Add {{G}}: {}", log(&g));
+    assert!(g.can_pay(0, &cost("{C}")), "its own {{T}}: Add {{C}}");
+    assert!(!g.can_pay(0, &cost("{G}{C}")), "one tap");
+    // With priority: its own ability and the Forest's (at the place after
+    // its own two).
+    g.choose(Choice::Yes);
+    assert!(options(&g).contains(&Choice::Card(fm)), "{:?}", g.options_desc());
+    g.choose(Choice::Card(fm));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "{:?}", g.options_desc());
+    let pools: Vec<[u8; 6]> = options(&g)
+        .into_iter()
+        .map(|c| {
+            let mut h = g.clone();
+            h.choose(c);
+            h.player(0).pool.amt
+        })
+        .collect();
+    assert_eq!(pools, vec![[0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 1, 0]], "{{C}} or {{G}}");
+}

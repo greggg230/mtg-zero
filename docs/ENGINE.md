@@ -20516,3 +20516,39 @@ work); reproduced on a throwaway merge of that branch and this one.
   covers the mechanism.
 
 Digests unchanged (`02d4bccc94314d6d`, `DIGEST_ENCODING=0` `856218d6b081056c`).
+
+##### N22: a basic land type given by an effect (W2's item c)
+
+C refused every effect, copy exception or printed "becomes" that gives a basic land type
+(`Lowerer::given_subtype`, 100.3). CR 305.6: a land with a basic land type has the type's
+intrinsic "{T}: Add <its mana>"; 305.7's last sentence: a land given land types in addition keeps
+its types and rules text and gains the new types' mana abilities.
+
+* **In addition** (`given_subtype`: `BecomeType`, a manland's "becomes a creature", copy exceptions,
+  "it's a <type> in addition", W1's added subtypes): no longer refused. A card with one sets
+  `CardDef::gives_basic_land_type`; the table then holds a definition per basic land type with its
+  intrinsic ability (`CardDb::basic_abilities`, `eoe_w2::basic_land_def`, which W2's Mountain
+  definition now uses too). `Game::granted_activated` lists them first among a land's granted
+  abilities: each basic land type it has (`has_subtype`, layer 4 by timestamp) that its abilities'
+  definition doesn't print (a printed type's ability is in the card's text; a Mountain by a
+  "nonbasic lands are Mountains" effect has its {R} in `moon_def`, so a Forest given after the
+  Moon adds {G} and a Mountain adds nothing), none once it lost all abilities (layer 6 after layer
+  4). So the payment (`mana_classes`, 100.4.5's granted sources), priority's `ActivateMana`
+  (through `activated_home`) and `could_produce` (Squandered Resources' "any type that land could
+  produce") all see it.
+* **Set** (`Lowerer::set_subtype`: "becomes a <subtype>" replacing subtypes, Kaito's "it's a
+  <subtype> creature", "becomes a <subtype> creature" of `TargetBecomesCreatureIndefinitely`,
+  `BecomeCreatureIfNot`, the linked creatures' "becomes"): a basic land type there stays refused,
+  narrowed to these. 305.7 would also remove the land's rules text abilities, which only the
+  "nonbasic lands are Mountains" effects build (`moon_def`, W2); no card of the tables sets a basic
+  land type by these effects (they make creatures), and a loud refusal is class 2 (the audit's
+  section 0).
+* **The Magus of the Moon** (W2's tests in `cards_eoe_w2_lands.rs`): its Mountains tap for {R},
+  their rules text's abilities gone (305.7), unchanged by this; the intrinsic list skips the
+  Mountain its `moon_def` already has.
+
+Tests: `rules_payment_b.rs::cr_305_6_a_land_given_forest_taps_for_green` (W2's new Test Forest
+Maker, "{T}: Add {C}. {1}: this land becomes a Forest in addition to its other types until end of
+turn": then {G} or {C}, one tap; with priority both abilities, {C} or {G}),
+`rules_faithful_c.rs::cr_305_6_an_effect_giving_a_basic_land_type_is_not_refused` (C's refusal
+test, turned: C Forest Mimic's copy exception "except it's a Forest" is no longer refused for it).

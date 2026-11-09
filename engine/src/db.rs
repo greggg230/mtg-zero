@@ -1709,6 +1709,9 @@ pub struct CardDef {
     /// Its spell reads the colours of mana spent to cast it (converge): the
     /// payment records them (`Mark::Converge`).
     pub converge: bool,
+    /// An effect of the card gives a permanent a basic land type in addition
+    /// to its other types (CR 305.6-305.7: `CardDb::basic_abilities`).
+    pub gives_basic_land_type: bool,
     /// Sunburst (CR 702.44a): it enters with a +1/+1 counter (a creature) or
     /// this counter (charge) for each colour of mana spent to cast it.
     pub sunburst: Option<Counter>,
@@ -2059,6 +2062,11 @@ pub struct CardDb {
     /// Add <mana>" (Gene Pollinator, `pay::POL_FOR`): improvise and convoke
     /// sources look for it (`Game::pol_split`).
     pub(crate) pollinator: bool,
+    /// The intrinsic mana abilities of the basic land types (CR 305.6:
+    /// "{T}: Add <its mana>"), (the subtype, a definition holding the
+    /// ability), when a card of the table gives a basic land type
+    /// (`CardDef::gives_basic_land_type`; `Game::granted_activated`).
+    pub(crate) basic_abilities: Vec<(u16, DefId)>,
     /// A card of the table reads a creature's controller as it last existed
     /// (`EoeW2::EventObjControllerGainsSource`): the game keeps it
     /// (`Game::lki_toughness`; ENGINE.md 99.12).
@@ -2282,6 +2290,14 @@ impl CardDb {
         db.watch_lands_entered = db.defs.iter().any(|d| d.etb_counter_per_land_entered);
         db.watch_lki_controller = db.defs.iter().any(crate::eoe_w2::reads_lki_controller);
         db.pollinator = db.defs.iter().any(|d| d.activated.iter().any(|a| a.mana().is_some() && a.cost.tap && a.cost.tap_untapped.is_some()));
+        if db.defs.iter().any(|d| d.gives_basic_land_type) {
+            for (name, t) in [("Plains", crate::mana::W), ("Island", crate::mana::U), ("Swamp", crate::mana::B), ("Mountain", crate::mana::R), ("Forest", crate::mana::G)] {
+                if let Some(sub) = db.subtype_id(name) {
+                    db.basic_abilities.push((sub, db.defs.len() as DefId));
+                    db.defs.push(crate::eoe_w2::basic_land_def(t));
+                }
+            }
+        }
         db
     }
 
