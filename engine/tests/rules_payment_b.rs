@@ -814,3 +814,156 @@ fn cr_119_4_pay_x_life_past_255() {
     finish(&mut g, |_| None);
     assert_eq!(g.life(0), 0, "X = 400: {}", log(&g));
 }
+
+// ---- 100.4.7: B4, the last of mana and payment ------------------------------
+
+/// The cube, the shared test cards, Gene Pollinator and B4's: Pollinators of
+/// other kinds of permanent (a noncreature artifact, a Forest, a Rebel), each
+/// with Gene Pollinator's "{T}, Tap an untapped permanent you control: Add
+/// one mana of any color".
+fn b4_db() -> &'static CardDb {
+    use serde_json::json;
+    static DB: std::sync::OnceLock<&'static CardDb> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let pol = json!({"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_permanent_you_control": true, "tap_self": true},
+            "effect": {"$t": "AddManaToPool", "produces": [["any", 1]]}, "is_mana_ability": true});
+        let tap_g = json!({"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_self": true},
+            "effect": {"$t": "AddManaToPool", "produces": [["G", 1]]}, "is_mana_ability": true});
+        let custom = vec![
+            eoe_w2::card("Test Pollinator Rock", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [pol.clone()]})),
+            eoe_w2::card("Test Pollinator Grove", json!({"card_types": ["Land"], "subtypes": ["Forest"], "type_line": "Land - Forest",
+                "activated_abilities": [tap_g, pol.clone()]})),
+            eoe_w2::card("Test Rebel Pollinator", json!({"card_types": ["Creature"], "subtypes": ["Rebel"], "power": 1, "toughness": 1,
+                "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["G", 1]]}, "mana_cost_str": "{G}",
+                "activated_abilities": [pol]})),
+        ];
+        let mut cards = engine::db::load_cube_document().cards;
+        cards.extend(common::custom_cards());
+        cards.extend(engine::db::load_eoe_document().cards.into_iter().filter(|c| c.name == "Gene Pollinator"));
+        cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
+        let db = CardDb::from_cards(&cards);
+        for n in ["Gene Pollinator", "Test Pollinator Rock", "Test Pollinator Grove", "Test Rebel Pollinator"] {
+            db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
+        }
+        db.leak()
+    })
+}
+
+fn b4_scen() -> Scenario {
+    Scenario::new(b4_db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.log = true;
+        })
+        .library(0, &["Island"; 12])
+        .library(1, &["Island"; 12])
+}
+
+/// docs/shortcuts.md N23, CR 106.12, 605.1b: Badgermole Cub's "whenever you
+/// tap a creature for mana, add an additional {G}" adds {G} to the mana of a
+/// Pollinator that is a creature (it is the permanent tapped for mana: its
+/// ability has {T}), not to a noncreature one's. Gene Pollinator tapping an
+/// Island makes two mana, the artifact Pollinator tapping the Cub one, the
+/// other Island {U}: {G}{G}{G}{U}, never four {G}. (A loud failure before:
+/// Pollinators of which only some are creatures.)
+#[test]
+fn cr_106_12_the_creature_mana_bonus_follows_the_pollinator_that_taps() {
+    let g = b4_scen()
+        .battlefield(0, &["Badgermole Cub", "Gene Pollinator", "Test Pollinator Rock", "Island", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(g.can_pay(0, &cost("{G}{G}{G}{U}")));
+    assert!(g.can_pay(0, &cost("{G}{G}{U}{U}")), "the Islands for themselves, Gene Pollinator tapping the other Pollinator");
+    assert!(!g.can_pay(0, &cost("{G}{G}{G}{G}")));
+    assert!(!g.can_pay(0, &cost("{5}")));
+}
+
+/// docs/shortcuts.md N23, CR 106.12, 305.6: Nissa, Who Shakes the World's
+/// "whenever you tap a Forest for mana, add an additional {G}" adds {G} to the
+/// mana of a Pollinator that is a Forest (no Pollinator got a land-subtype
+/// bonus). Such a Pollinator tapped for its own "{T}: Add {G}" can't also
+/// activate its Pollinator ability (its other mana ability took no part of
+/// the Pollinators' count: {R}{G}{G} was payable).
+#[test]
+fn cr_106_12_a_forest_pollinator_gets_the_forest_bonus_and_taps_once() {
+    let g = b4_scen().battlefield(0, &["Nissa, Who Shakes the World", "Test Pollinator Grove", "Island"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{R}{G}")), "the Grove tapping the Island: one mana of any color and Nissa's {{G}}");
+    assert!(g.can_pay(0, &cost("{G}{G}{U}")), "the Grove for its own {{G}} and Nissa's, the Island for {{U}}");
+    assert!(!g.can_pay(0, &cost("{R}{G}{G}")), "the Grove taps once");
+}
+
+/// docs/shortcuts.md N23, CR 602.2b, 601.2g: which Gene Pollinator activates
+/// for a permanent picked for a Pollinator's ability is the player's choice
+/// (`ChoosePermanent`); the payment tapped the first ready one.
+#[test]
+fn cr_601_2g_which_pollinator_activates_is_the_players_choice() {
+    let mut g = b4_scen().battlefield(0, &["Gene Pollinator", "Gene Pollinator", "Island"]).hand(0, &["Sol Ring"]).at(Step::Main1, 0).start();
+    let pols: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.name(c) == "Gene Pollinator").collect();
+    let island = bf(&g, 0, "Island");
+    let ring = g.card(0, "Sol Ring", Zone::Hand);
+    g.choose(Choice::Cast(ring));
+    // The Island by its own id: tapped for a Pollinator's ability.
+    assert!(options(&g).contains(&Choice::Card(island)), "{:?}", g.options_desc());
+    g.choose(Choice::Card(island));
+    assert_eq!(g.kind(), Some(DecisionKind::ChoosePermanent), "which Pollinator: {:?}", g.options_desc());
+    let o = options(&g);
+    assert!(o.contains(&Choice::Card(pols[0])) && o.contains(&Choice::Card(pols[1])), "{o:?}");
+    g.choose(Choice::Card(pols[1]));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(ring).zone, Zone::Stack, "{}", log(&g));
+    assert!(g.obj(pols[1]).tapped && !g.obj(pols[0]).tapped && g.obj(island).tapped, "{}", log(&g));
+}
+
+/// docs/shortcuts.md N23, CR 602.2b, 601.2g: which Orcish Lumberjack
+/// sacrifices the Forest (and is tapped) is the player's choice; the first
+/// able one was.
+#[test]
+fn cr_601_2g_which_lumberjack_sacrifices_the_forest_is_the_players_choice() {
+    let mut g = scen().battlefield(0, &["Orcish Lumberjack", "Orcish Lumberjack", "Forest"]).hand(0, &["Sol Ring"]).at(Step::Main1, 0).start();
+    let ljs: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.name(c) == "Orcish Lumberjack").collect();
+    let forest = bf(&g, 0, "Forest");
+    let ring = g.card(0, "Sol Ring", Zone::Hand);
+    g.choose(Choice::Cast(ring));
+    // The Lumberjacks' sacrifice of the Forest: after the Forest's own ability.
+    let sac = options(&g).into_iter().find(|c| matches!(c, Choice::Ability(x, s) if *x == forest && *s != AbilitySlot::Activated(0)));
+    g.choose(sac.unwrap_or_else(|| panic!("the Lumberjacks' source on the Forest: {:?}", g.options_desc())));
+    // (The production, then which Lumberjack.)
+    for _ in 0..4 {
+        if g.kind() == Some(DecisionKind::ChoosePermanent) {
+            break;
+        }
+        let c = options(&g)[0];
+        g.choose(c);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::ChoosePermanent), "which Lumberjack: {:?}", g.options_desc());
+    let o = options(&g);
+    assert!(o.contains(&Choice::Card(ljs[0])) && o.contains(&Choice::Card(ljs[1])), "{o:?}");
+    g.choose(Choice::Card(ljs[1]));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(ring).zone, Zone::Stack, "{}", log(&g));
+    assert!(g.obj(ljs[1]).tapped && !g.obj(ljs[0]).tapped && g.obj(forest).zone == Zone::Graveyard, "{}", log(&g));
+}
+
+/// docs/shortcuts.md N23, CR 601.2g-h: a Pollinator a later tap cost needs is
+/// not the one that activates. Otharri, Suns' Glory's "{2}{R}{W}, Tap an
+/// untapped Rebel you control" with a Pollinator that is the only Rebel and
+/// Gene Pollinator: Gene Pollinator taps the Bear (the payment tapped the
+/// first ready Pollinator, the Rebel, and the cost had no Rebel to tap).
+#[test]
+fn cr_601_2h_the_pollinator_a_tap_cost_needs_doesnt_activate() {
+    let mut g = b4_scen()
+        .battlefield(0, &["Test Rebel Pollinator", "Gene Pollinator", "Test Bear", "Mountain", "Plains", "Island"])
+        .graveyard(0, &["Otharri, Suns' Glory"])
+        .at(Step::Main1, 0)
+        .start();
+    let o = g.card(0, "Otharri, Suns' Glory", Zone::Graveyard);
+    let rebel = bf(&g, 0, "Test Rebel Pollinator");
+    let gene = bf(&g, 0, "Gene Pollinator");
+    let back = options(&g).into_iter().find(|c| matches!(c, Choice::Ability(x, _) if *x == o));
+    g.choose(back.unwrap_or_else(|| panic!("Otharri's ability is offered: {:?}", g.options_desc())));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(o).zone, Zone::Battlefield, "{}", log(&g));
+    assert!(g.obj(rebel).tapped && g.obj(gene).tapped && g.obj(bf(&g, 0, "Test Bear")).tapped, "{}", log(&g));
+}

@@ -21082,3 +21082,79 @@ In the brief's order (100.4.4 and 100.4.5 have the earlier designs):
 * **26.11.6** (96 permanents a player): unchanged; the payment's ids for sources past `MY_PERM`'s 96
   come with the paging of every `perm_action` caller (A's note in 100.2).
 * **The u8 parts of a `ManaCost`** (above).
+
+#### 100.4.7 B4: the last of mana and payment (branch `eoe-b3-pay`, from 7ae9032)
+
+**Why.** 100.4.6's open list, in the brief's order. Tests: `engine/tests/rules_payment_b.rs`
+(section "100.4.7", with a table of its own, `b4_db`: the cube, the shared test cards, Gene
+Pollinator and B4's Pollinators of other kinds: a noncreature artifact, a Forest, a Rebel); each
+failed before its fix.
+
+##### N23: the actors of shared activations
+
+Gene Pollinator's "{T}, Tap an untapped permanent you control: Add one mana of any color" and Orcish
+Lumberjack's "{T}, Sacrifice a Forest: Add three mana" are sources on the permanent tapped or
+sacrificed, and the permanent whose ability it is (the actor) is tapped too. One count of
+Pollinators (`Class::share`, with `Class::taps`) stood for every actor, and the Lumberjacks shared
+the same `Budget::tap`: a "whenever you tap a creature for mana" bonus was a loud failure with
+Pollinators of which only some are creatures (`pol_classes`' assertion), no Pollinator got a
+land-subtype bonus when it was a land, an actor tapped for its own other mana ability (a Pollinator
+given Mm'menon's "{T}: Add {U}", one that is a Forest) or for convoke (a Lumberjack) still
+activated, one Lumberjack and two Pollinators allowed one activation in all, a later "tap X
+artifacts" with Pollinators of which only some are artifacts was a loud failure (`reserved_n`), and
+the Pollinator, Lumberjack or Squandered Resources that activated was the first ready one
+(`finish_payment`, `activate_sac_for`), which could be the one a later tap cost needed.
+
+* **Pools** (`Class::pool`, `Class::actors`). The actors are grouped by what their activation is:
+  for Pollinators the mana and filter and the bonus their own tap adds (CR 106.12: the permanent
+  whose mana ability has {T} is the one tapped for mana, so Badgermole Cub's {G} and Nissa's "Forest"
+  {G} follow the actor; `Game::tap_bonus`), for Lumberjacks the productions with that bonus and the
+  permanents they may sacrifice (`Game::sac_groups`; a Lumberjack that is a Forest may sacrifice
+  itself). Each group of actors that tap is a pool, numbered per `mana_classes` call; its sources
+  carry the pool in their id (`Src::g`), so one permanent is a source of each pool that may tap or
+  sacrifice it (asked which by its own id, `PayMana::which`, when it stands for several; an
+  `LJ_FOR` source with another of its slot on the permanent goes by the permanent's own id too).
+  Squandered Resources' kind taps nothing: one source per land, its `actors` the permanents whose
+  ability may sacrifice it, no pool.
+* **The feasibility** (`pay::PoolCtx`). Each activation of a pool needs one of its actors that
+  nothing else taps. Actors alike in their pools and in whether a later "tap X untapped
+  <permanents>" needs them (a signature) do the same, so the search counts activations per pool and
+  the actors tapped otherwise per signature: a way that taps its card, when the card is an actor
+  (its own mana abilities, tapped for a Pollinator's ability, improvise, convoke, Urza's tap, a later
+  tap cost's `Way::crew`), takes one from its signature (`Way::sig`); a sacrifice doesn't (the actor
+  activates, then is sacrificed: CR 601.2g). A branch with more activations of a pool than actors
+  left is cut; a leaf holds when the activations get distinct actors (`PoolCtx::fit`: per pool when
+  no actor is in two pools, else a matching, `mana::max_flow`), the fewest reserved ones among them
+  coming out of the sacrifice budget (the largest matching into actors not reserved is the most any
+  matching of every activation uses: an augmenting path keeps every actor it had). That replaces
+  `pol_split`, `reserved_n`'s assertion, `tap_limit` and `Budget::tap`.
+* **Its reductions, kept exact.** A Pollinator source on a permanent with another way, or on an
+  actor, is left out when each pool's free targets (whose only ways are Pollinator activations, not
+  actors, not reserved, not a later tap cost's candidates) number at least the activations still
+  possible, the actors left (any such activation moves to an unused free target: the same mana).
+  Free targets of one pool only are committed as fixed units up to the pool's idle actors (not
+  reserved, no other way that taps them) less the activations counted already: those activations
+  take actors nothing else could use (`free_shared` committed up to one count of taps, whatever the
+  actors' other ways).
+* **The actor, a choice** (CR 602.2b). Right after a shared source is picked (`PayMana::actor_for`),
+  the payment asks which of its class's actors activates (`ChoosePermanent`, the actors' own ids):
+  those no pick taps whose choice leaves the payment payable with the picks so far and the sources
+  still to pick (`actor_options`; one is recorded without a question). The choice is recorded
+  (`PayMana::actors`): picks then count the actor as tapped (`used_res`), a reserved one leaves the
+  sacrifice budget one fewer (`after_picks`), and `finish_payment` taps it (`activate_sac_for` with
+  the actor, its own or granted ability that may sacrifice the land).
+
+Tests: `cr_106_12_the_creature_mana_bonus_follows_the_pollinator_that_taps` (Badgermole Cub, Gene
+Pollinator and the artifact Pollinator: {G}{G}{G}{U}, never four {G}; a loud failure before),
+`cr_106_12_a_forest_pollinator_gets_the_forest_bonus_and_taps_once` (Nissa and the Forest Pollinator:
+{R}{G}; {R}{G}{G} was payable), `cr_601_2g_which_pollinator_activates_is_the_players_choice`,
+`cr_601_2g_which_lumberjack_sacrifices_the_forest_is_the_players_choice`,
+`cr_601_2h_the_pollinator_a_tap_cost_needs_doesnt_activate` (Otharri, Suns' Glory's "Tap an untapped
+Rebel" with the Rebel Pollinator and Gene Pollinator: Gene Pollinator taps the Bear; the Rebel
+activated before, and the cost had no Rebel to tap).
+
+**Digests** (N23): full `3f49f29043418114` -> `36a8a84c37356ff8`, `DIGEST_ENCODING=0`
+`27f42bffa609f282` -> `3a6e81f85dc10d59`: 1 of the 2,500 games changes (h 475: two Orcish
+Lumberjacks; the payment for Questing Beast now asks which one sacrifices the Forest). `RULES_EPOCH`
+bumped; the Delver canary library's 60 spots reach their positions (`delver_rerecord.py check
+--stamp`).

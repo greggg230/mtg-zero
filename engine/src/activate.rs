@@ -425,7 +425,7 @@ impl Game {
             }
         }
         if ad.mana().is_some() {
-            self.agenda.push(Task::ManaNow { src: Src { card, slot }, step: crate::decision::NumberStep::FIRST });
+            self.agenda.push(Task::ManaNow { src: Src::of(card, slot), step: crate::decision::NumberStep::FIRST });
             return;
         }
         // A special action (CR 116.2): its cost, then it happens; no stack.
@@ -1841,7 +1841,7 @@ impl Game {
             if slot == crate::pay::SAC_FOR {
                 // A granted "sacrifice this: add <mana>" (Rain of Filth).
                 let mask = g.sac_mana_of(c);
-                g.activate_sac_for(Src { card: c, slot });
+                g.activate_sac_for(Src::of(c, slot), None);
                 let prods: Vec<[u8; 6]> = (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect();
                 g.agenda.push(Task::ManaNowPick { p, prods, only: 0, page: crate::decision::Page::FIRST });
             } else {

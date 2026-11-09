@@ -77,12 +77,23 @@ pub(crate) fn is_sac_slot(slot: AbilitySlot) -> bool {
 pub(crate) struct Src {
     pub card: CardIdx,
     pub slot: AbilitySlot,
+    /// A shared activation's pool (`Class::pool`: Gene Pollinators or Orcish
+    /// Lumberjacks alike, ENGINE.md 100.4.7), 0 otherwise: one permanent is
+    /// a source of each pool that may tap or sacrifice it.
+    pub g: u16,
+}
+
+impl Src {
+    /// Source `slot` of `card`, of no pool.
+    pub(crate) const fn of(card: CardIdx, slot: AbilitySlot) -> Src {
+        Src { card, slot, g: 0 }
+    }
 }
 
 impl Default for Src {
     /// (A filler for inline storage, never a real source.)
     fn default() -> Src {
-        Src { card: CardIdx(0), slot: AbilitySlot::Spell }
+        Src::of(CardIdx(0), AbilitySlot::Spell)
     }
 }
 
@@ -200,14 +211,19 @@ pub(crate) struct Class {
     /// The `ACTIVATE` slot of a sacrifice for another's or a granted
     /// ability (`SAC_FOR`, `SQ_FOR`, `LJ_FOR`): after the card's own.
     pub slot_id: u8,
-    /// Orcish Lumberjack (`LJ_FOR`): how many Lumberjacks can be tapped
-    /// (each activation taps one); 0 otherwise. Gene Pollinator (`POL_FOR`):
-    /// how many Pollinators can activate.
-    pub share: u8,
-    /// How much of `share` one use takes (0: 1): 2 for a Pollinator that
-    /// could activate tapped for another's ability, 1 for one tapped for
-    /// improvise or convoke (it can't activate then; ENGINE.md 99.12).
-    pub taps: u8,
+    /// A shared activation (ENGINE.md 100.4.7, docs/shortcuts.md N23): the
+    /// pool of permanents one of which activates it and is tapped (Orcish
+    /// Lumberjacks for `LJ_FOR`, Gene Pollinators for `POL_FOR`; 1.., one per
+    /// group of actors whose activations are alike: the same mana, with the
+    /// bonus their tap adds, and the same permanents they may tap or
+    /// sacrifice); 0 for none. Every source of the payment that taps one of
+    /// a pool's actors leaves the pool one fewer (`PoolCtx`).
+    pub pool: u16,
+    /// The permanents that may activate it: `pool`'s actors, or the
+    /// Squandered Resources that may sacrifice the land (`SQ_FOR`, no
+    /// pool: it taps nothing). Which one does is the player's choice
+    /// (`PayMana::actors`).
+    pub actors: Vec<CardIdx>,
     /// Its card, sacrificed for this mana, is in the graveyard before a
     /// delve spell's cards are exiled (CR 601.2g before 601.2h) and pays
     /// {1} of it too: a typeless unit with each production
@@ -233,8 +249,8 @@ impl Class {
             haste: false,
             res: TAP | SAC,
             slot_id: 0,
-            share: 0,
-            taps: 0,
+            pool: 0,
+            actors: Vec::new(),
             delve: false,
         }
     }
@@ -425,8 +441,14 @@ pub(crate) struct PayMana {
     /// another's tap: `TAP_FOR`, `POL_FOR`) and the sources each stands for;
     /// a permanent picked that stands for several (`which`) is asked which
     /// next (`ChooseMode`, `NUMBER` + k; ENGINE.md 99.12).
-    pub card_slots: Vec<(CardIdx, Vec<AbilitySlot>)>,
+    pub card_slots: Vec<(CardIdx, Vec<(AbilitySlot, u16)>)>,
     pub which: Option<CardIdx>,
+    /// The permanent that activates each shared source picked (`Class::
+    /// actors`: which Gene Pollinator or Orcish Lumberjack taps, which
+    /// Squandered Resources sacrifices; CR 602.2b, docs/shortcuts.md N23),
+    /// chosen right after the pick (`actor_for`).
+    pub actors: Vec<(Src, CardIdx)>,
+    pub actor_for: Option<Src>,
     /// A production chosen one mana at a time (more productions than
     /// `NUMBER` ids: Cascading Cataracts' five of any colours): the mana
     /// chosen so far and the least colour the next may be (colours in
@@ -468,6 +490,8 @@ impl PayMana {
             convoke: false,
             card_slots: Vec::new(),
             which: None,
+            actors: Vec::new(),
+            actor_for: None,
             now_taken: [0; 6],
             now_min: 0,
             pool_page: crate::decision::Page::FIRST,
@@ -486,13 +510,26 @@ impl PayMana {
         (self.chosen.iter().filter(|x| *x == s).count() + self.multi.iter().filter(|(x, _)| x == s).count()) as crate::num::Count
     }
 
-    /// What the picks so far use of card `c` (`Class::res`).
+    /// What the picks so far use of card `c` (`Class::res`; an actor of a
+    /// shared source picked is tapped).
     fn used_res(&self, classes: &[Class], c: CardIdx) -> u8 {
+        let acts = if self.actors.iter().any(|(s, a)| *a == c && s.slot != SQ_FOR) { TAP } else { 0 };
         self.chosen
             .iter()
             .chain(self.multi.iter().map(|m| &m.0))
             .filter(|s| s.card == c)
-            .fold(0, |m, s| m | classes.iter().find(|cl| cl.members.contains(s)).map_or(TAP | SAC, |cl| cl.res))
+            .fold(acts, |m, s| m | classes.iter().find(|cl| cl.members.contains(s)).map_or(TAP | SAC, |cl| cl.res))
+    }
+
+    /// The picks of shared sources whose actor isn't chosen yet, as their
+    /// pools (`Class::pool`).
+    fn anonymous_acts(&self, classes: &[Class]) -> SVec<u16, 4> {
+        self.chosen
+            .iter()
+            .chain(self.multi.iter().map(|m| &m.0))
+            .filter(|s| s.g > 0 && !self.actors.iter().any(|(x, _)| x == *s))
+            .filter_map(|s| classes.iter().find(|cl| cl.members.contains(s)).map(|cl| cl.pool).filter(|&g| g > 0))
+            .collect()
     }
 
     /// Is member `s` of class `cl` still available?
@@ -617,19 +654,16 @@ fn units_of(v: &[u8; 6]) -> impl Iterator<Item = Unit> + '_ {
 
 impl Game {
     /// `classes` without the sources of the cards in `cards` (permanents a
-    /// cost taps before the mana is paid: teamwork's creatures). A
-    /// Lumberjack's sacrifices (`LJ_FOR`, `Class::share` Lumberjacks to tap)
-    /// lose the Lumberjacks among `cards` and go when none is left; the other
-    /// creatures tapped leave them (ENGINE.md 71.5: every shared class went
-    /// whenever any creature was tapped, so a teamwork pick of a creature
-    /// without a mana ability found the Lumberjack's mana gone that the
-    /// cost's check, tapping no source, had counted).
+    /// cost taps before the mana is paid: teamwork's creatures). A shared
+    /// activation's pool (`Class::pool`) loses the actors among `cards` and
+    /// goes when none is left; the other creatures tapped leave it
+    /// (ENGINE.md 71.5: every shared class went whenever any creature was
+    /// tapped, so a teamwork pick of a creature without a mana ability found
+    /// the Lumberjack's mana gone that the cost's check, tapping no source,
+    /// had counted).
     /// A source that only removes counters (`Class::res` 0) stays: it taps
-    /// and sacrifices nothing (CR 601.2g). A Pollinator among `cards` no
-    /// longer activates (`POL_FOR`'s share and the improvise and convoke
-    /// members it splits, ENGINE.md 99.12), nor a Lumberjack.
+    /// and sacrifices nothing (CR 601.2g).
     pub(crate) fn classes_without(&self, classes: &[Class], cards: &[CardIdx]) -> Vec<Class> {
-        let mut actors: Option<Vec<CardIdx>> = None;
         classes
             .iter()
             .filter_map(|cl| {
@@ -642,22 +676,14 @@ impl Game {
                 if m.is_empty() {
                     return None;
                 }
-                let mut share = cl.share;
-                if share > 0 {
-                    let tapped = if cl.members[0].slot == LJ_FOR {
-                        let land = cl.members[0].card;
-                        cards.iter().filter(|&&c| self.lumberjack_for(c, land)).count()
-                    } else {
-                        let p = self.objs[cl.members[0].card.i()].controller;
-                        let acts = actors.get_or_insert_with(|| self.pol_activators(p));
-                        cards.iter().filter(|c| acts.contains(c)).count()
-                    };
-                    share = share.saturating_sub(tapped.min(u8::MAX as usize) as u8);
-                    if share == 0 {
+                let mut actors = cl.actors.clone();
+                if cl.pool > 0 {
+                    actors.retain(|a| !cards.contains(a));
+                    if actors.is_empty() {
                         return None;
                     }
                 }
-                Some(Class { members: m, share, ..cl.clone() })
+                Some(Class { members: m, actors, ..cl.clone() })
             })
             .collect()
     }
@@ -675,24 +701,28 @@ impl Game {
         }
     }
 
-    /// Is `c` one of the Lumberjacks a `LJ_FOR` class of `land` counts
-    /// (`mana_classes`' `sac_by`, `sac_classes`): a mana ability of it, ready
-    /// to activate, sacrifices a permanent `land` matches and makes mana of
-    /// its own (not Squandered Resources' "any type that land could
-    /// produce")?
-    fn lumberjack_for(&self, c: CardIdx, land: CardIdx) -> bool {
-        let p = self.objs[c.i()].controller;
-        let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(c)) };
-        let locks = self.activation_locks();
-        let d = self.abilities(c);
-        d.activated.iter().enumerate().any(|(i, ad)| {
-            ad.mana().is_some_and(|m| !matches!(m.prod, ManaProd::SacrificedLand))
-                && !ad.instant_only
-                && self.activation_ready(p, c, ad, locks)
-                && !(d.latent > 0 && !self.has_activated(c, i))
-                && !(ad.exhaust && self.exhausted(c, i as u8))
-                && ad.cost.sacrifice.as_ref().is_some_and(|sc| self.card_matches(&sc.filter, land, &ctx))
-        })
+    /// The additional mana tapping permanent `x` for mana adds (CR 106.12,
+    /// 605.1b: triggered mana abilities, resolved at once): `bonus`'s "whenever
+    /// you tap a <land subtype> for mana" for each of its land subtypes, and
+    /// `creature_bonus` (Badgermole Cub's "whenever you tap a creature for
+    /// mana") when it is a creature and the ability has {T} (`tap`). It
+    /// depends on the object: an actor of a shared activation adds its own
+    /// (ENGINE.md 100.4.7).
+    pub(crate) fn tap_bonus(&self, x: CardIdx, tap: bool, bonus: &[(u16, u8)], creature_bonus: &[u8; 6]) -> [u8; 6] {
+        let mut extra = [0u8; 6];
+        if !bonus.is_empty() && self.is_type(x, crate::db::types::LAND) {
+            for &(sub, t) in bonus {
+                if self.has_subtype(x, sub) {
+                    extra[t as usize] += 1;
+                }
+            }
+        }
+        if *creature_bonus != [0; 6] && tap && self.is_creature(x) {
+            for t in 0..6 {
+                extra[t] += creature_bonus[t];
+            }
+        }
+        extra
     }
 
     /// The mana `p`'s permanents add whenever `p` taps a creature for mana
@@ -844,7 +874,7 @@ impl Game {
         // Mana abilities that sacrifice another permanent (Squandered
         // Resources, Orcish Lumberjack): a source on each permanent they
         // may sacrifice, below.
-        let mut sac_by: SVec<(CardIdx, u8), 4> = SVec::new();
+        let mut sac_by: Vec<(CardIdx, &ActivatedDef)> = Vec::new();
         for c in self.permanents_of(p) {
             if Some(c) == exclude {
                 continue;
@@ -866,7 +896,7 @@ impl Game {
                     continue; // CR 702.177a: once
                 }
                 if ad.cost.sacrifice.is_some() {
-                    sac_by.push((c, i as u8));
+                    sac_by.push((c, ad));
                     continue;
                 }
                 if let Some(t) = &ad.cost.tap_untapped {
@@ -897,25 +927,10 @@ impl Game {
                         reuse = Some(have / n as crate::num::Count);
                     }
                 }
-                let src = Src { card: c, slot: AbilitySlot::Activated(i as u8) };
+                let src = Src::of(c, AbilitySlot::Activated(i as u8));
                 // The additional mana tapping this source adds (its land
                 // subtypes; a creature's), which depends on the object.
-                let extra_of = |x: CardIdx| {
-                    let mut extra = [0u8; 6];
-                    if !bonus.is_empty() && self.is_type(x, crate::db::types::LAND) {
-                        for &(sub, t) in &bonus {
-                            if self.has_subtype(x, sub) {
-                                extra[t as usize] += 1;
-                            }
-                        }
-                    }
-                    if creature_bonus != [0; 6] && ad.cost.tap && self.is_creature(x) {
-                        for t in 0..6 {
-                            extra[t] += creature_bonus[t];
-                        }
-                    }
-                    extra
-                };
+                let extra_of = |x: CardIdx| self.tap_bonus(x, ad.cost.tap, &bonus, &creature_bonus);
                 let extra = extra_of(c);
                 let bonuses = !bonus.is_empty() || creature_bonus != [0; 6];
                 // Same definition and ability: the same yield (it depends on
@@ -986,12 +1001,15 @@ impl Game {
         // the permanents another's mana ability sacrifices (Squandered
         // Resources, Orcish Lumberjack): sources on each permanent.
         let rain = self.seen & crate::game::SEEN_SAC_MANA != 0 && self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_)));
+        // (The pools of shared activations, numbered from 1: `Class::pool`.)
+        let mut pools: u16 = 0;
         if rain || !sac_by.is_empty() {
+            let groups = self.sac_groups(p, &sac_by, &bonus, &creature_bonus, &mut pools);
             for c in self.permanents_of(p) {
                 if Some(c) == exclude {
                     continue;
                 }
-                for cl in self.sac_classes(p, c, locks, rain, &sac_by, creature_bonus) {
+                for cl in self.sac_classes(p, c, locks, rain, &groups) {
                     if matches!(cl.yld, Yield::Multi { .. }) {
                         out.insert(n_multi, cl);
                         n_multi += 1;
@@ -1010,7 +1028,7 @@ impl Game {
                     continue;
                 }
                 let def = self.objs[x.i()].def;
-                let src = Src { card: x, slot: TAP_FOR };
+                let src = Src::of(x, TAP_FOR);
                 match out.iter_mut().find(|cl| cl.def == def && cl.members[0].slot == TAP_FOR) {
                     Some(cl) => cl.members.push(src),
                     None => out.push(Class { res: TAP, ..Class::of(def, src, Yield::One(Unit::free(mask))) }),
@@ -1020,7 +1038,7 @@ impl Game {
         // The permanents a Pollinator's ability taps (`POL_FOR`).
         if !pol.is_empty() {
             // (Several-mana ones among the several-mana classes.)
-            let _ = self.pol_classes(p, exclude, &pol, creature_bonus, n_multi, &mut out);
+            let _ = self.pol_classes(p, exclude, &pol, &bonus, &creature_bonus, n_multi, &mut out, &mut pools);
         }
         // Mana abilities of cards in hand (CR 605.3a: activated while
         // paying like any other; a Spirit Guide exiles itself). One mana
@@ -1036,7 +1054,7 @@ impl Game {
                     if ad.instant_only || !self.activation_ready(p, c, ad, locks) {
                         continue;
                     }
-                    let src = Src { card: c, slot: AbilitySlot::Hand(i as u8) };
+                    let src = Src::of(c, AbilitySlot::Hand(i as u8));
                     if let Some(cl) = out.iter_mut().find(|cl| cl.def == def && cl.members[0].slot == src.slot) {
                         cl.members.push(src);
                         continue;
@@ -1060,16 +1078,11 @@ impl Game {
                 continue;
             }
             let def = self.objs[c.i()].def;
-            let src = Src { card: c, slot: IMPROVISE };
+            let src = Src::of(c, IMPROVISE);
             match out.iter_mut().find(|cl| cl.def == def) {
                 Some(cl) => cl.members.push(src),
                 None => out.push(Class { res: TAP, ..Class::of(def, src, Yield::One(Unit::free(0u8))) }),
             }
-        }
-        // (A Pollinator tapped for improvise can't activate: castability and
-        // the payment both, ENGINE.md 99.12.)
-        if self.db.pollinator {
-            self.pol_split(p, &mut out);
         }
         out
     }
@@ -1090,7 +1103,7 @@ impl Game {
                 continue;
             }
             let def = self.objs[c.i()].def;
-            let src = Src { card: c, slot: IMPROVISE };
+            let src = Src::of(c, IMPROVISE);
             // (It pays the spell's cost only, never a mana ability's:
             // `FOR_COST`.)
             let yld = Yield::One(Unit::free(tag((self.colors_of(c) & COLORS) | RESTRICTED, FOR_COST)));
@@ -1098,10 +1111,6 @@ impl Game {
                 Some(cl) => cl.members.push(src),
                 None => out.push(Class { res: TAP, ..Class::of(def, src, yld) }),
             }
-        }
-        // (A Pollinator tapped for convoke can't activate.)
-        if self.db.pollinator {
-            self.pol_split(p, &mut out);
         }
         out
     }
@@ -1243,32 +1252,23 @@ impl Game {
         };
         // (In i64: what is left is within the life total.)
         let life = (pl.life as i64 - later.min(i64::MAX as u64) as i64).max(0) as i32;
-        (Budget { life, sac: sac.max(0), tap: i32::MAX }, later > 0)
+        (Budget { life, sac: sac.max(0) }, later > 0)
+    }
+
+    /// Is `a`, an actor of a shared activation (`Class::actors`), one of the
+    /// permanents a later "tap X untapped <permanents>" needs (`Keep::sac`
+    /// with `sac_taps`)? Activating it taps it (ENGINE.md 99.12: the
+    /// Pollinators of which only some count are told apart, `PoolCtx`).
+    fn actor_reserved(&self, p: PlayerId, keep: &Keep, a: CardIdx) -> bool {
+        keep.sac_taps
+            && keep.sac.as_ref().is_some_and(|(sc, card)| {
+                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)) };
+                !(sc.another && a == *card) && self.card_matches(&sc.filter, a, &ctx)
+            })
     }
 
     /// Mana sources whose use takes a permanent a later sacrifice needs, or
     /// a card in hand a later discard needs.
-    /// How many of the permanents a later cost needs source `s` of class
-    /// `cl` uses: [`reserved`](Self::reserved)'s, and for a Pollinator's
-    /// source (`POL_FOR`) under a later "tap n untapped permanents" the
-    /// Pollinator that activates too (ENGINE.md 99.12).
-    fn reserved_n(&self, p: PlayerId, keep: &Keep, cl: &Class, s: &Src) -> i32 {
-        let mut n = self.reserved(p, keep, cl, s) as i32;
-        if s.slot == POL_FOR && keep.sac_taps {
-            if let Some((sc, card)) = &keep.sac {
-                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)) };
-                let counts = |a: CardIdx| !(sc.another && a == *card) && self.card_matches(&sc.filter, a, &ctx);
-                let acts = self.pol_activators(p);
-                let k = acts.iter().filter(|&&a| counts(a)).count();
-                // (Which Pollinator activates would matter when only some
-                // count: open, a loud failure.)
-                assert!(k == 0 || k == acts.len(), "Pollinators of which only some a later tap cost needs (ENGINE.md 99.12)");
-                n += (k > 0) as i32;
-            }
-        }
-        n
-    }
-
     fn reserved(&self, p: PlayerId, keep: &Keep, cl: &Class, s: &Src) -> bool {
         match &keep.sac {
             Some((sc, card)) if cl.sac_self || keep.sac_taps && cl.res != 0 => {
@@ -1291,26 +1291,19 @@ impl Game {
     /// `UseCap`).
     fn cands(&self, p: PlayerId, keep: &Keep, classes: &[Class], use_src: &dyn Fn(&Src) -> bool, dmg: bool, total: usize) -> Cands {
         let cap = UseCap::of(classes, total, 0);
-        let taps = self.taps_owed(p, keep, classes, &|_| true);
-        cands(classes, use_src, &|_| (0, 0), dmg, &|cl, s| self.reserved_n(p, keep, cl, s), keep.allow, 0, cap, taps.as_ref())
+        let taps = self.taps_owed(keep, &|_| true);
+        let pools = PoolCtx::of(classes, &|_| false, &|a| self.actor_reserved(p, keep, a), &[]);
+        cands(classes, use_src, &|_| (0, 0), dmg, &|cl, s| self.reserved(p, keep, cl, s) as i32, keep.allow, 0, cap, taps.as_ref(), pools)
     }
 
     /// `keep.taps` for the feasibility (`cands`): the need, and each
     /// candidate `free` keeps (not used by a pick) with what it counts for
-    /// and whether tapping it takes one of the shared taps (a Pollinator
-    /// that could activate, a Lumberjack: `Class::share`).
+    /// (tapping one that is an actor of a shared activation leaves its pool
+    /// one fewer: `PoolCtx`).
     #[allow(clippy::type_complexity)]
-    fn taps_owed(&self, p: PlayerId, keep: &Keep, classes: &[Class], free: &dyn Fn(CardIdx) -> bool) -> Option<(i64, Vec<(CardIdx, i64, bool)>)> {
+    fn taps_owed(&self, keep: &Keep, free: &dyn Fn(CardIdx) -> bool) -> Option<(i64, Vec<(CardIdx, i64)>)> {
         let t = keep.taps.as_ref()?;
-        let shared = classes.iter().any(|cl| cl.share > 0);
-        let actors = if shared { self.pol_activators(p) } else { Vec::new() };
-        let lj = |c: CardIdx| classes.iter().any(|cl| cl.members[0].slot == LJ_FOR && self.lumberjack_for(c, cl.members[0].card));
-        let cands = t
-            .cands
-            .iter()
-            .filter(|&&(c, n)| n > 0 && free(c))
-            .map(|&(c, n)| (c, n, shared && (actors.contains(&c) || lj(c))))
-            .collect();
+        let cands = t.cands.iter().filter(|&&(c, n)| n > 0 && free(c)).copied().collect();
         Some((t.need, cands))
     }
 
@@ -1327,8 +1320,19 @@ impl Game {
         let cap = UseCap::of(&classes[from..], pm.cost.total() as usize, pm.marked.len());
         // (A candidate of a later tap cost that a pick taps or sacrifices
         // can't pay it.)
-        let taps = self.taps_owed(pm.payer, &pm.keep, classes, &|c| used(&Src { card: c, slot: AbilitySlot::Spell }).0 & (TAP | SAC) == 0);
-        let mut c = cands(&classes[from..], &|_| true, &used, dmg, &|cl, s| self.reserved_n(pm.payer, &pm.keep, cl, s), pm.keep.allow, marked, cap, taps.as_ref());
+        let taps = self.taps_owed(&pm.keep, &|c| used(&Src::of(c, AbilitySlot::Spell)).0 & (TAP | SAC) == 0);
+        // (The shared activations' actors: those a pick taps are out, a
+        // shared pick whose actor isn't chosen yet, `plus` too, takes one:
+        // `PoolCtx`; read from every class, not only those from `from` on.)
+        let mut anon = pm.anonymous_acts(classes);
+        if let Some(x) = plus {
+            if let Some(cl) = classes.iter().find(|cl| cl.members.contains(&x)).filter(|cl| cl.pool > 0) {
+                anon.push(cl.pool);
+            }
+        }
+        let tapped = |c: CardIdx| used(&Src::of(c, AbilitySlot::Spell)).0 & TAP != 0;
+        let pools = PoolCtx::of(classes, &tapped, &|a| self.actor_reserved(pm.payer, &pm.keep, a), &anon);
+        let mut c = cands(&classes[from..], &|_| true, &used, dmg, &|cl, s| self.reserved(pm.payer, &pm.keep, cl, s) as i32, pm.keep.allow, marked, cap, taps.as_ref(), pools);
         c.converted = pm.convert;
         c
     }
@@ -1560,20 +1564,16 @@ impl Game {
     /// conflict with it. A source that only removes counters keeps the uses
     /// the cost's counters leave (and, when the cost needs the source, not
     /// the one whose last counter sacrifices it); a Pollinator or a
-    /// Lumberjack the cost taps no longer activates (`Class::share`).
+    /// Lumberjack the cost taps no longer activates (`Class::actors`).
     pub(crate) fn classes_for_self_use<'a>(&self, classes: &'a [Class], su: Option<SelfUse>) -> std::borrow::Cow<'a, [Class]> {
         let Some(su) = su else { return std::borrow::Cow::Borrowed(classes) };
-        let actor = su.tap && classes.iter().any(|cl| cl.share > 0 && cl.members[0].slot != LJ_FOR) && {
-            let p = self.objs[su.card.i()].controller;
-            self.pol_activators(p).contains(&su.card)
-        };
-        if !actor && !classes.iter().any(|cl| cl.members.iter().any(|s| s.card == su.card) || cl.share > 0) {
+        let actor = su.tap && classes.iter().any(|cl| cl.pool > 0 && cl.actors.contains(&su.card));
+        if !actor && !classes.iter().any(|cl| cl.members.iter().any(|s| s.card == su.card)) {
             return std::borrow::Cow::Borrowed(classes);
         }
         let conflict = if su.tap { TAP | SAC } else if su.moves { SAC } else { 0 };
         let mut out = Vec::with_capacity(classes.len());
         for cl in classes {
-            let first = cl.members[0];
             let mut cl = cl.clone();
             let mut reuse = cl.reuse;
             cl.members.retain(|s| {
@@ -1602,12 +1602,10 @@ impl Game {
                 uses > 0
             });
             cl.reuse = reuse;
-            let shared = cl.share > 0;
-            if shared && su.tap {
-                let tapped = if first.slot == LJ_FOR { self.lumberjack_for(su.card, first.card) } else { actor };
-                cl.share -= tapped as u8;
+            if cl.pool > 0 && su.tap {
+                cl.actors.retain(|&a| a != su.card);
             }
-            if !cl.members.is_empty() && !(shared && cl.share == 0) && cl.reuse > 0 {
+            if !cl.members.is_empty() && !(cl.pool > 0 && cl.actors.is_empty()) && cl.reuse > 0 {
                 out.push(cl);
             }
         }
@@ -1689,7 +1687,7 @@ impl Game {
             return self.can_pay_with(p, cost, classes, &Keep::default());
         }
         let life = self.players[p as usize].life.max(0);
-        cost.is_zero() || cands_payable(cost, &[], &[], plain, Budget { life, sac: i32::MAX, tap: i32::MAX })
+        cost.is_zero() || cands_payable(cost, &[], &[], plain, Budget { life, sac: i32::MAX })
     }
 
     /// [`can_pay`](Self::can_pay) for a payment that satisfies the spending
@@ -1911,14 +1909,22 @@ impl Game {
             if let Yield::One(u) = cl.yld {
                 life += u.life as i32;
             }
-            let sac = self.reserved_n(pm.payer, &pm.keep, cl, &s);
-            let tap = if cl.share > 0 { b.tap.min(cl.share as i32) - cl.taps.max(1) as i32 } else { b.tap };
-            b = Budget { life: b.life - life, sac: b.sac - sac, tap };
-            if b.life < 0 || b.sac < 0 || b.tap < 0 {
+            let sac = self.reserved(pm.payer, &pm.keep, cl, &s) as i32;
+            b = Budget { life: b.life - life, sac: b.sac - sac };
+            if b.life < 0 || b.sac < 0 {
                 return None;
             }
         }
-        Some(b)
+        // (The actors chosen for shared picks are tapped: one a later "tap X
+        // untapped <permanents>" needs is one fewer left for it. Whether the
+        // pools have actors enough for the picks is the candidates' part,
+        // `PoolCtx`.)
+        for (s, a) in &pm.actors {
+            if s.slot != SQ_FOR && self.actor_reserved(pm.payer, &pm.keep, *a) {
+                b.sac -= 1;
+            }
+        }
+        (b.sac >= 0).then_some(b)
     }
 
     /// The `PayMana` task (ENGINE.md 6, 18).
@@ -1946,6 +1952,35 @@ impl Game {
                         .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k) })
                         .collect();
                     self.ask(Task::PayMana(pm), payer, DecisionKind::PayPhyrexian, opts);
+                }
+            }
+            return;
+        }
+        // Which permanent activates the shared source just picked (CR 602.2b:
+        // which Gene Pollinator or Orcish Lumberjack taps, which Squandered
+        // Resources sacrifices; docs/shortcuts.md N23): its class's actors not
+        // tapped by a pick whose choice leaves the payment payable, by their
+        // own ids (`ChoosePermanent`), asked when there are several.
+        if let Some(src) = pm.actor_for {
+            let classes = self.payment_classes(&pm);
+            match self.answer.take() {
+                Some(Choice::Card(a)) => {
+                    pm.actor_for = None;
+                    pm.actors.push((src, a));
+                    self.agenda.push(Task::PayMana(pm));
+                }
+                Some(other) => unreachable!("actor answer {other:?}"),
+                None => {
+                    let ok = self.actor_options(&pm, &classes, src);
+                    assert!(!ok.is_empty(), "PayMana: no actor for {src:?}: {pm:?} classes {classes:?}\n{}", self.log_lines().join("\n"));
+                    if ok.len() == 1 {
+                        pm.actor_for = None;
+                        pm.actors.push((src, ok[0]));
+                        self.agenda.push(Task::PayMana(pm));
+                        return;
+                    }
+                    let opts = ok.iter().map(|&a| Opt { action: self.perm_action(payer, a), choice: Choice::Card(a) }).collect();
+                    self.ask(Task::PayMana(pm), payer, DecisionKind::ChoosePermanent, opts);
                 }
             }
             return;
@@ -2072,8 +2107,9 @@ impl Game {
                 Some(Choice::Number(k)) => {
                     let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("source class");
                     self.pick_multi(&mut pm, &classes, ci, src, prods[k as usize]);
-                    if !pm.forced.is_empty() {
-                        // (The next of delve's sources first.)
+                    if !pm.forced.is_empty() || pm.actor_for.is_some() {
+                        // (The next of delve's sources first; a shared
+                        // source's actor.)
                         self.agenda.push(Task::PayMana(pm));
                         return;
                     }
@@ -2117,8 +2153,13 @@ impl Game {
         }
         if let Some(ch) = self.answer.take() {
             let slot_of = |pm: &PayMana, card: CardIdx, k: usize| pm.card_slots.iter().find(|(c, _)| *c == card).map(|(_, v)| v[k]).expect("a source the permanent stands for");
-            let (card, slot) = match ch {
-                Choice::Ability(card, slot) => (card, slot),
+            // (A source offered by its `ACTIVATE` id is the only one of its
+            // slot on the permanent: a shared source of one group.)
+            let by_slot = |card: CardIdx, slot: AbilitySlot| {
+                classes.iter().flat_map(|cl| cl.members.iter()).find(|s| s.card == card && s.slot == slot).map_or(0, |s| s.g)
+            };
+            let (card, (slot, g)) = match ch {
+                Choice::Ability(card, slot) => (card, (slot, by_slot(card, slot))),
                 // A permanent tapped for improvise or convoke, or for
                 // another's mana ability.
                 Choice::Card(card) => {
@@ -2152,9 +2193,13 @@ impl Game {
                 other => unreachable!("pay answer {other:?}"),
             };
             pm.card_slots.clear();
-            let src = Src { card, slot };
+            let src = Src { card, slot, g };
             let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("source class");
             pm.min_class = ci as u8;
+            // (A shared source's actor: asked next, `actor_for`.)
+            if !classes[ci].actors.is_empty() && matches!(classes[ci].yld, Yield::One(_)) {
+                pm.actor_for = Some(src);
+            }
             if matches!(slot, AbilitySlot::Hand(_)) {
                 // CR 602.2a / 605.3b: activating it from hand reveals it. Its
                 // identity is public from the pick on, so no determinize
@@ -2224,7 +2269,7 @@ impl Game {
             v
         };
         let mut opts = Vec::new();
-        let mut card_slots: Vec<(CardIdx, Vec<AbilitySlot>)> = Vec::new();
+        let mut card_slots: Vec<(CardIdx, Vec<(AbilitySlot, u16)>)> = Vec::new();
         // (The purposes a need of the payment may have: the cost's, its
         // picked abilities', those the sources still to pick may add;
         // ENGINE.md 100.4.5.)
@@ -2278,9 +2323,12 @@ impl Game {
             // Elves, Saheeli's: also an artifact Urza's ability taps;
             // ENGINE.md 49): the first free member whose pick leaves the
             // payment payable, each kind of member tried once.
-            let kind_of = |s: &Src| -> (bool, Vec<usize>) {
+            // (And the pools it is an actor of: tapping it leaves them one
+            // fewer, ENGINE.md 100.4.7.)
+            let kind_of = |s: &Src| -> (bool, Vec<usize>, Vec<u16>) {
                 let others = classes.iter().enumerate().filter(|&(j, c)| j != ci && c.members.iter().any(|m| m.card == s.card)).map(|(j, _)| j);
-                (self.reserved(payer, &pm.keep, cl, s), others.collect())
+                let pools = classes.iter().filter(|c| c.pool > 0 && c.actors.contains(&s.card)).map(|c| c.pool);
+                (self.reserved(payer, &pm.keep, cl, s), others.collect(), pools.collect())
             };
             let mut free = cl.members.iter().copied().filter(|s| pm.free(&classes, cl, s));
             let Some(first) = free.next() else { continue };
@@ -2301,14 +2349,17 @@ impl Game {
                 // (One `MY_PERM` option a permanent; the sources it stands
                 // for in `card_slots`. A sacrifice past the permanent's
                 // fourth `ACTIVATE` id too: docs/shortcuts.md 31.7.2k.)
-                let perm_id = by_perm(rep.slot) || (is_sac_slot(rep.slot) && cl.slot_id >= 4);
+                // (Or a shared source of a permanent with another of its
+                // slot, of another group: ENGINE.md 100.4.7.)
+                let twin = || classes.iter().filter(|c| c.members.iter().any(|m| m.card == rep.card && m.slot == rep.slot)).count() > 1;
+                let perm_id = by_perm(rep.slot) || (is_sac_slot(rep.slot) && (cl.slot_id >= 4 || twin()));
                 if perm_id {
                     match card_slots.iter_mut().find(|(c, _)| *c == rep.card) {
                         Some((_, v)) => {
-                            v.push(rep.slot);
+                            v.push((rep.slot, rep.g));
                             continue;
                         }
-                        None => card_slots.push((rep.card, vec![rep.slot])),
+                        None => card_slots.push((rep.card, vec![(rep.slot, rep.g)])),
                     }
                 }
                 opts.push(if perm_id {
@@ -2344,6 +2395,36 @@ impl Game {
             self.log_lines().join("\n")
         );
         self.ask(Task::PayMana(pm), payer, DecisionKind::PayMana, opts);
+    }
+
+    /// The actors of shared source `src`, just picked, that may activate it
+    /// (`PayMana::actor_for`): its class's actors that no pick taps (a
+    /// Squandered Resources is tapped by nothing) and whose choice leaves the
+    /// payment payable (with the picks so far and the sources still to pick).
+    fn actor_options(&self, pm: &PayMana, classes: &[Class], src: Src) -> Vec<CardIdx> {
+        let cl = classes.iter().find(|cl| cl.members.contains(&src)).expect("the shared source's class");
+        let tapped = |a: CardIdx| src.slot != SQ_FOR && pm.used_res(classes, a) & TAP != 0;
+        cl.actors
+            .iter()
+            .copied()
+            .filter(|&a| !tapped(a))
+            .filter(|&a| {
+                let mut q = pm.clone();
+                q.actor_for = None;
+                q.actors.push((src, a));
+                self.payable_after_picks(&q, classes)
+            })
+            .collect()
+    }
+
+    /// Can payment `pm` still be completed with its picks (and actors) and
+    /// the sources of the classes from `pm.min_class` on?
+    fn payable_after_picks(&self, pm: &PayMana, classes: &[Class]) -> bool {
+        let (budget, dmg) = self.budget(pm.payer, &pm.keep, pm.later_life());
+        let Some(b) = self.after_picks(pm, classes, dmg, budget, None) else { return false };
+        let rest = self.pay_cands(pm, classes, pm.min_class as usize, None, dmg);
+        let chosen: SVec<Tag, 16> = pm.chosen.iter().map(|s| chosen_mask(classes, s)).collect();
+        self.most_spent(pm, &self.vgroups(pm), &pm.marked, &chosen, &rest, b).is_some()
     }
 
     /// The sources are picked (CR 601.2g): which mana of the virtual pool
@@ -2503,6 +2584,10 @@ impl Game {
         if cl.haste {
             pm.extra_haste = pm.extra_haste.saturating_add(prod[crate::mana::R]);
         }
+        // (A shared source's actor: asked next.)
+        if !cl.actors.is_empty() {
+            pm.actor_for = Some(src);
+        }
         if cl.only != 0 {
             for t in 0..6 {
                 crate::eoe_w2::add_kind(&mut pm.extra_restr, t as u8, cl.only, prod[t]);
@@ -2595,25 +2680,18 @@ impl Game {
             let last = ad.mana().and_then(|m| m.sac_if_no).is_some_and(|k| self.counters_on(s.card, k) <= 1);
             (false, ad.cost.sac_self || last, dmg > 0, ad.cost.life == 0)
         });
-        // The Pollinators that activate for the `POL_FOR` picks: the first
-        // ready ones no pick uses (ENGINE.md 99.12).
-        let mut pol_actors: Vec<CardIdx> = if order.iter().any(|s| s.slot == POL_FOR) {
-            let used: Vec<CardIdx> = order.iter().map(|s| s.card).collect();
-            let mut v: Vec<CardIdx> = self.pol_activators(payer).into_iter().filter(|c| !used.contains(c)).collect();
-            v.reverse();
-            v
-        } else {
-            Vec::new()
-        };
+        // (The permanent each shared source's activation is: the player's
+        // choice, `PayMana::actors`.)
+        let actor_of = |src: &Src| pm.actors.iter().find(|(x, _)| x == src).map(|x| x.1);
         for src in order {
             if src.slot == IMPROVISE {
                 let why = if pm.convoke { "convoke" } else { "improvise" };
                 self.note(|g| format!("P{payer} taps {} for {why}", g.name(src.card)));
                 self.tap(src.card);
             } else if src.slot == POL_FOR {
-                // "{T}, Tap an untapped permanent you control": a
-                // Pollinator (assigned below) and this permanent.
-                let actor = pol_actors.pop().expect("a Pollinator to activate (the budget counts them)");
+                // "{T}, Tap an untapped permanent you control": the
+                // Pollinator chosen and this permanent.
+                let actor = actor_of(&src).expect("the Pollinator chosen (PayMana::actors)");
                 self.note(|g| format!("P{payer} activates a mana ability of {}, tapping {}", g.name(actor), g.name(src.card)));
                 self.tap(actor);
                 self.tap(src.card);
@@ -2623,7 +2701,7 @@ impl Game {
                 self.note(|g| format!("P{payer} taps {} for a mana ability", g.name(src.card)));
                 self.tap(src.card);
             } else if is_sac_slot(src.slot) {
-                self.activate_sac_for(src);
+                self.activate_sac_for(src, actor_of(&src));
             } else {
                 if let AbilitySlot::Activated(i) = src.slot {
                     if self.src_ability(src.card, src.slot).exhaust {
@@ -2822,14 +2900,8 @@ pub(crate) struct Cands {
     converted: bool,
     /// The purposes of the cost being paid (`Keep::allow`).
     allow: u8,
-    /// How many Lumberjacks there are to tap (`Budget::tap`).
-    tap_limit: i32,
-    /// Units of sources that take one of the shared taps and whose cards
-    /// have no other way (Gene Pollinator tapping a permanent without a
-    /// mana ability): as many as the taps left allow are fixed units
-    /// (they are worth as much as any other such source, and cost its card
-    /// nothing: no branching on them; ENGINE.md 99.12).
-    free_shared: Units,
+    /// The actors of the shared activations (`PoolCtx`).
+    pools: PoolCtx,
     /// The uses of a source that only removes counters were cut to what a
     /// cost of the size these were built for can spend (`UseCap`).
     pub(crate) cut: bool,
@@ -2891,16 +2963,169 @@ struct Way {
     /// many such needs (`Class::need_n`).
     need: Tag,
     need_n: u8,
-    /// It taps a Lumberjack (`Budget::tap`).
-    tap: i32,
+    /// The pools of the shared activations it is (`PoolCtx`'s indices,
+    /// `NO_POOL` for none): each needs an actor of its pool (two when it taps
+    /// a permanent for a Pollinator's ability and sacrifices it for a
+    /// Lumberjack's).
+    acts: [u16; 2],
+    /// The signature of the actor it taps otherwise (its card: `PoolCtx`),
+    /// `NO_POOL` for none.
+    sig: u16,
     /// It taps its card for a later tap cost: what the card counts for
     /// there (`TapsOwed`, `Cands::crew`); 0 for a mana way.
     crew: i64,
 }
 
+impl Way {
+    /// It needs or taps no actor of a shared activation.
+    fn unpooled(&self) -> bool {
+        self.acts == [NO_POOL; 2] && self.sig == NO_POOL
+    }
+}
+
+/// No pool or signature (`Way::acts`, `Way::sig`).
+const NO_POOL: u16 = u16::MAX;
+
+/// The actors of a payment's shared activations (ENGINE.md 100.4.7,
+/// docs/shortcuts.md N23). Each activation of a pool (`Class::pool`: a Gene
+/// Pollinator's or an Orcish Lumberjack's ability, alike within the pool)
+/// needs one of the pool's actors that nothing else taps (CR 602.2b: its
+/// {T}). The actors are grouped by signature, the pools they belong to and
+/// whether a later "tap X untapped <permanents>" needs them (`Keep::sac`
+/// with `sac_taps`): any actor of a signature can do what another can, so a
+/// search counts the activations it chooses per pool and the actors it taps
+/// otherwise per signature (their own mana abilities, tapped for another's
+/// ability, for improvise or convoke, or for a later tap cost). A leaf
+/// holds when the activations get distinct actors left (a matching, per
+/// pool when no actor is in two), the fewest reserved ones among them, which
+/// the sacrifice budget pays. (One count of Pollinators, `Class::share`,
+/// shared by the Lumberjacks too, could not tell a creature Pollinator's
+/// mana from another's, nor which actor a later cost needs.)
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PoolCtx {
+    /// Per signature: its pools (`Class::pool` - 1), whether it is
+    /// reserved, how many of its actors are left.
+    sigs: Vec<(SVec<u16, 2>, bool, i32)>,
+    /// Each actor left, with its signature.
+    cards: Vec<(CardIdx, u16)>,
+    /// The activations counted already, per pool: shared picks whose actor
+    /// isn't chosen yet, and those committed as fixed units (`cands`).
+    acts: SVec<i32, 4>,
+}
+
+impl PoolCtx {
+    /// The pools of `classes` (each pool's actors from its classes), without
+    /// the actors `used` taps, with the activations `anon` (their pools)
+    /// counted; `reserved`: an actor a later tap cost needs.
+    fn of(classes: &[Class], used: &dyn Fn(CardIdx) -> bool, reserved: &dyn Fn(CardIdx) -> bool, anon: &[u16]) -> PoolCtx {
+        let np = classes.iter().map(|cl| cl.pool).max().unwrap_or(0) as usize;
+        let mut ctx = PoolCtx::default();
+        if np == 0 {
+            return ctx;
+        }
+        ctx.acts = std::iter::repeat_n(0, np).collect();
+        for &g in anon {
+            ctx.acts[g as usize - 1] += 1;
+        }
+        let mut members: Vec<Option<&[CardIdx]>> = vec![None; np];
+        for cl in classes.iter().filter(|cl| cl.pool > 0) {
+            members[cl.pool as usize - 1].get_or_insert(&cl.actors);
+        }
+        for m in members.iter().flatten() {
+            for &a in m.iter() {
+                if ctx.cards.iter().any(|x| x.0 == a) || used(a) {
+                    continue;
+                }
+                let pools: SVec<u16, 2> = (0..np).filter(|&k| members[k].is_some_and(|m| m.contains(&a))).map(|k| k as u16).collect();
+                let r = reserved(a);
+                let si = match ctx.sigs.iter().position(|s| s.0[..] == pools[..] && s.1 == r) {
+                    Some(i) => i,
+                    None => {
+                        ctx.sigs.push((pools, r, 0));
+                        ctx.sigs.len() - 1
+                    }
+                };
+                ctx.sigs[si].2 += 1;
+                ctx.cards.push((a, si as u16));
+            }
+        }
+        ctx
+    }
+
+    /// The signature of actor `c` (`NO_POOL`: not an actor left).
+    fn sig_of(&self, c: CardIdx) -> u16 {
+        self.cards.iter().find(|x| x.0 == c).map_or(NO_POOL, |x| x.1)
+    }
+
+    /// No actor is in two pools.
+    fn apart(&self) -> bool {
+        self.sigs.iter().all(|s| s.0.len() == 1)
+    }
+
+    /// The actors left in pool `p` with the actors `used` per signature tapped
+    /// otherwise: (not reserved, reserved).
+    fn left_in(&self, p: usize, used: &[i32]) -> (i32, i32) {
+        let (mut free, mut rsv) = (0, 0);
+        for (k, s) in self.sigs.iter().enumerate() {
+            if s.0.contains(&(p as u16)) {
+                let n = s.2 - used.get(k).copied().unwrap_or(0);
+                if s.1 {
+                    rsv += n;
+                } else {
+                    free += n;
+                }
+            }
+        }
+        (free, rsv)
+    }
+
+    /// A necessary condition (to prune a search): no pool has more
+    /// activations than actors left.
+    fn bound_ok(&self, acts: &[i32], used: &[i32]) -> bool {
+        (0..acts.len()).all(|p| {
+            let (f, r) = self.left_in(p, used);
+            acts[p] <= f + r
+        })
+    }
+
+    /// The fewest reserved actors the activations `acts` (per pool) take with
+    /// the actors `used` (per signature) tapped otherwise, or `None` when
+    /// they can't all have an actor. Per pool when the pools are apart; else
+    /// a matching, whose largest part into actors not reserved is the most
+    /// any matching of every activation uses (an augmenting path keeps every
+    /// actor it had).
+    fn fit(&self, acts: &[i32], used: &[i32]) -> Option<i32> {
+        if acts.iter().all(|&a| a == 0) {
+            return Some(0);
+        }
+        if self.apart() {
+            let mut res = 0;
+            for (p, &a) in acts.iter().enumerate() {
+                let (f, r) = self.left_in(p, used);
+                if a > f + r {
+                    return None;
+                }
+                res += (a - f).max(0);
+            }
+            return Some(res);
+        }
+        let left: Vec<u32> = acts.iter().map(|&a| a.max(0) as u32).collect();
+        let right: Vec<u32> = self.sigs.iter().enumerate().map(|(k, s)| (s.2 - used.get(k).copied().unwrap_or(0)).max(0) as u32).collect();
+        let edges: Vec<Vec<bool>> = (0..acts.len()).map(|p| self.sigs.iter().map(|s| s.0.contains(&(p as u16))).collect()).collect();
+        let total: u32 = left.iter().sum();
+        if crate::mana::max_flow(&left, &right, &edges) < total {
+            return None;
+        }
+        let free: Vec<u32> = self.sigs.iter().zip(&right).map(|(s, &n)| if s.1 { 0 } else { n }).collect();
+        Some((total - crate::mana::max_flow(&left, &free, &edges)) as i32)
+    }
+}
+
 /// `used`: what the payment's picks use of a source's card already
 /// (`Class::res`) and how many times it was picked (a source whose card
 /// use is taken, or picked as often as its class allows, is out).
+/// `pools`: the shared activations' actors left (`PoolCtx`).
+#[allow(clippy::too_many_arguments)]
 fn cands(
     classes: &[Class],
     use_src: &dyn Fn(&Src) -> bool,
@@ -2910,7 +3135,8 @@ fn cands(
     allow: u8,
     marked: u8,
     cap: UseCap,
-    taps: Option<&(i64, Vec<(CardIdx, i64, bool)>)>,
+    taps: Option<&(i64, Vec<(CardIdx, i64)>)>,
+    mut pools: PoolCtx,
 ) -> Cands {
     // (Sources whose mana can pay no need of this payment are left out: CR
     // 106.6, its restriction allows neither the cost's purposes, `allow`,
@@ -2957,42 +3183,58 @@ fn cands(
             }
         }
     }
-    // Gene Pollinator's sources (`POL_FOR`): with as many permanents
-    // without another way as Pollinators can activate, a source on a
-    // permanent with another way (or on a Pollinator, two taps) is never
-    // better than one of those: left out, so the permanent stays one unit
-    // (no branching on every land; ENGINE.md 99.12).
+    // (A candidate of a later tap cost is never one unit: tapping it for
+    // that cost is another way of its card, `Way::crew`.)
+    let tapper = |c: CardIdx| taps.is_some_and(|(_, v)| v.iter().any(|x| x.0 == c));
+    // The pool a source's activation needs an actor of (`PoolCtx`'s index),
+    // and the signature of the actor its use taps (its card).
+    let act_of = |cl: &Class| if cl.pool > 0 { cl.pool - 1 } else { NO_POOL };
+    let sig_use = |cl: &Class, s: &Src, pools: &PoolCtx| if cl.res & TAP != 0 { pools.sig_of(s.card) } else { NO_POOL };
+    // Gene Pollinator's sources (`POL_FOR`) tapping a permanent that has
+    // another way, or that is an actor itself: when each pool's free
+    // targets (permanents whose only ways are Pollinator activations, not
+    // actors, not reserved, not a later tap cost's candidates) are at least
+    // the activations that can still be made (one per actor left), any such
+    // activation moves to an unused free target of its pool (the same mana,
+    // nothing else of its card used) and is left out, so the permanent stays
+    // one unit (no branching on every land; ENGINE.md 99.12, 100.4.7).
     if classes.iter().any(|cl| cl.members[0].slot == POL_FOR) {
-        let k = classes.iter().filter(|cl| cl.share > 0).map(|cl| cl.share as usize).min().unwrap_or(0);
-        let mut other: SVec<(CardIdx, u8), 32> = SVec::new();
+        let mut other: SVec<CardIdx, 32> = SVec::new();
         let mut i = 0;
         for cl in classes {
             for s in cl.members.iter() {
-                if lefts[i] > 0 && cl.members[0].slot != POL_FOR {
-                    match other.iter_mut().find(|(c, _)| *c == s.card) {
-                        Some((_, n)) => *n += 1,
-                        None => other.push((s.card, 1)),
-                    }
+                if lefts[i] > 0 && cl.members[0].slot != POL_FOR && !other.contains(&s.card) {
+                    other.push(s.card);
                 }
                 i += 1;
             }
         }
-        let free_member = |cl: &Class, s: &Src| {
-            cl.taps <= 1 && !other.iter().any(|&(c, n)| c == s.card && n > 0) && !taps.is_some_and(|(_, v)| v.iter().any(|x| x.0 == s.card))
-        };
-        let mut free = 0;
-        i = 0;
-        for cl in classes {
-            for s in cl.members.iter() {
-                free += (lefts[i] > 0 && cl.members[0].slot == POL_FOR && free_member(cl, s)) as usize;
-                i += 1;
-            }
-        }
-        if free >= k {
+        let free_target = |cl: &Class, s: &Src| pools.sig_of(s.card) == NO_POOL && !other.contains(&s.card) && !tapper(s.card) && reserved(cl, s) == 0;
+        let more = pools.sigs.iter().map(|s| s.2).sum::<i32>() - pools.acts.iter().sum::<i32>();
+        let np = pools.acts.len();
+        let mut enough = true;
+        for p in 0..np {
+            let mut free: SVec<CardIdx, 32> = SVec::new();
+            let mut any = false;
             i = 0;
             for cl in classes {
                 for s in cl.members.iter() {
-                    if lefts[i] > 0 && cl.members[0].slot == POL_FOR && !free_member(cl, s) {
+                    if cl.members[0].slot == POL_FOR && cl.pool as usize == p + 1 {
+                        any = true;
+                        if lefts[i] > 0 && free_target(cl, s) && !free.contains(&s.card) {
+                            free.push(s.card);
+                        }
+                    }
+                    i += 1;
+                }
+            }
+            enough &= !any || free.len() as i32 >= more;
+        }
+        if enough {
+            i = 0;
+            for cl in classes {
+                for s in cl.members.iter() {
+                    if lefts[i] > 0 && cl.members[0].slot == POL_FOR && !free_target(cl, s) {
                         lefts[i] = 0;
                         if let Some((_, n)) = count.iter_mut().find(|(c, _)| *c == s.card) {
                             *n -= 1;
@@ -3003,19 +3245,76 @@ fn cands(
             }
         }
     }
+    // Free targets whose only way is one pool's activation, committed as
+    // fixed units: as many as the pool's actors left that nothing else may
+    // tap (not reserved, no other way of their card that taps it, not a
+    // later tap cost's candidate) allow. Such an activation takes an actor
+    // nobody else could use and makes the mana any of the pool's makes,
+    // costing its card nothing: no branching on them (ENGINE.md 99.12).
+    let mut committed: SVec<bool, 32> = std::iter::repeat_n(false, lefts.len()).collect();
+    let mut pre_units = Units::new();
+    if pools.apart() && classes.iter().any(|cl| cl.members[0].slot == POL_FOR) {
+        let np = pools.acts.len();
+        // (The actors with another way that taps them.)
+        let mut busy: SVec<CardIdx, 8> = SVec::new();
+        let mut i = 0;
+        for cl in classes {
+            for s in cl.members.iter() {
+                if lefts[i] > 0 && cl.res & TAP != 0 && pools.sig_of(s.card) != NO_POOL && !busy.contains(&s.card) {
+                    busy.push(s.card);
+                }
+                i += 1;
+            }
+        }
+        for &(c, _) in taps.map_or(&[][..], |t| &t.1[..]) {
+            if pools.sig_of(c) != NO_POOL && !busy.contains(&c) {
+                busy.push(c);
+            }
+        }
+        for p in 0..np {
+            let idle = pools.cards.iter().filter(|&&(c, k)| !pools.sigs[k as usize].1 && pools.sigs[k as usize].0[0] as usize == p && !busy.contains(&c)).count() as i32;
+            let mut k = (idle - pools.acts[p]).max(0);
+            i = 0;
+            for cl in classes {
+                for s in cl.members.iter() {
+                    let only = count.iter().any(|&(x, n)| x == s.card && n == 1);
+                    if k > 0
+                        && lefts[i] > 0
+                        && cl.members[0].slot == POL_FOR
+                        && cl.pool as usize == p + 1
+                        && only
+                        && pools.sig_of(s.card) == NO_POOL
+                        && !tapper(s.card)
+                        && reserved(cl, s) == 0
+                        && cl.dmg == 0
+                    {
+                        let restr = if cl.only != 0 { RESTRICTED as Tag | restriction(cl.only) } else { 0 };
+                        match &cl.yld {
+                            Yield::One(u) if u.life == 0 => pre_units.push(Unit::free(u.mask | restr)),
+                            Yield::Multi { units: Some(us), .. } if cl.need == 0 => pre_units.extend(us.iter().map(|u| Unit::free(u.mask | restr))),
+                            _ => {
+                                i += 1;
+                                continue;
+                            }
+                        }
+                        committed[i] = true;
+                        pools.acts[p] += 1;
+                        k -= 1;
+                    }
+                    i += 1;
+                }
+            }
+        }
+    }
     let mut li = 0;
-    // (A candidate of a later tap cost is never one unit: tapping it for
-    // that cost is another way of its card, `Way::crew`.)
-    let tapper = |c: CardIdx| taps.is_some_and(|(_, v)| v.iter().any(|x| x.0 == c));
     let alone = |c: CardIdx| count.iter().any(|&(x, n)| x == c && n == 1) && !tapper(c);
     let mut out = Cands {
-        fixed: Units::new(),
+        fixed: pre_units,
         alts: Vec::new(),
         convert: Vec::new(),
         converted: false,
         allow,
-        tap_limit: i32::MAX,
-        free_shared: Units::new(),
+        pools: PoolCtx::default(),
         cut,
         crew: taps.map_or(0, |t| t.0),
     };
@@ -3030,11 +3329,14 @@ fn cands(
         let restr = if cl.only != 0 { RESTRICTED as Tag | restriction(cl.only) } else { 0 };
         for s in cl.members.iter() {
             let n = lefts[li];
+            let done = committed[li];
             li += 1;
-            if n == 0 {
+            if n == 0 || done {
                 continue;
             }
             let sac = reserved(cl, s);
+            let sig = sig_use(cl, s, &pools);
+            let acts = [act_of(cl), NO_POOL];
             if cl.res == 0 {
                 // Its uses, each one way of its own (identical: the search
                 // counts how many, `ways_payable`), or fixed units when they
@@ -3056,12 +3358,13 @@ fn cands(
                             sac,
                             need: cl.need,
                             need_n: cl.need_n,
-                            tap: 0,
+                            acts: [NO_POOL; 2],
+                            sig: NO_POOL,
                             crew: 0,
                         };
                         out.alts.push(prods.iter().map(way).collect());
                     } else {
-                        out.alts.push(vec![Way { units: units.clone(), life, sac, need: cl.need, need_n: cl.need_n, tap: 0, crew: 0 }]);
+                        out.alts.push(vec![Way { units: units.clone(), life, sac, need: cl.need, need_n: cl.need_n, acts: [NO_POOL; 2], sig: NO_POOL, crew: 0 }]);
                     }
                 }
                 continue;
@@ -3070,30 +3373,19 @@ fn cands(
                 // (Its card's other ways are kept apart, below: activating
                 // it taps and sacrifices the card, so they are out then.)
                 let units = if cl.delve { std::iter::once(Unit::free(0u8)).collect() } else { SVec::new() };
-                out.convert.push((Way { units, life: extra, sac, need: 0, need_n: 0, tap: 0, crew: 0 }, None));
+                out.convert.push((Way { units, life: extra, sac, need: 0, need_n: 0, acts: [NO_POOL; 2], sig, crew: 0 }, None));
                 conv_cards.push(s.card);
                 continue;
             }
-            let tap = if cl.share > 0 { cl.taps.max(1) as i32 } else { 0 };
-            if tap > 0 {
-                out.tap_limit = out.tap_limit.min(cl.share as i32);
-            }
-            if let Yield::One(u) = &cl.yld {
-                if tap == 1 && n == 1 && alone(s.card) && sac == 0 && extra == 0 && u.life == 0 {
-                    out.free_shared.push(Unit::free(u.mask | restr));
-                    continue;
-                }
-            }
+            let pooled = acts[0] != NO_POOL || sig != NO_POOL;
             match &cl.yld {
-                // (A source taking a shared tap, Gene Pollinator's, stays a
-                // way: `tap`.)
-                Yield::One(u) if alone(s.card) && tap == 0 => {
+                Yield::One(u) if alone(s.card) && !pooled => {
                     for _ in 0..n {
                         out.fixed.push(Unit { mask: u.mask | restr, life: (u.life as i32 + extra) as u8, sac: sac > 0 });
                     }
                     continue;
                 }
-                Yield::Multi { units: Some(us), .. } if alone(s.card) && extra == 0 && sac == 0 && cl.need == 0 && tap == 0 => {
+                Yield::Multi { units: Some(us), .. } if alone(s.card) && extra == 0 && sac == 0 && cl.need == 0 && !pooled => {
                     out.fixed.extend(us.iter().map(|u| Unit::free(u.mask | restr)));
                     if cl.delve {
                         out.fixed.push(Unit::free(0u8));
@@ -3108,12 +3400,12 @@ fn cands(
                 if cl.delve {
                     units.push(Unit::free(0u8));
                 }
-                Way { units, life: extra, sac, need: cl.need, need_n: cl.need_n, tap, crew: 0 }
+                Way { units, life: extra, sac, need: cl.need, need_n: cl.need_n, acts, sig, crew: 0 }
             };
             let ways: Vec<Way> = match &cl.yld {
                 Yield::One(u) => {
                     let units = std::iter::repeat_n(Unit::free(u.mask | restr), n as usize).collect();
-                    vec![Way { units, life: u.life as i32 + extra, sac, need: 0, need_n: 0, tap, crew: 0 }]
+                    vec![Way { units, life: u.life as i32 + extra, sac, need: 0, need_n: 0, acts, sig, crew: 0 }]
                 }
                 Yield::Multi { units: Some(us), .. } => {
                     vec![multi(us.iter().map(|u| Unit::free(u.mask | made as Tag | restr)).collect())]
@@ -3132,13 +3424,15 @@ fn cands(
     // A later tap cost's candidates (`TapsOwed`): tapping one for it is
     // another way of its card (none of its other ways then: they tap or
     // sacrifice it, CR 601.2g before 601.2h); one with no other way counts
-    // at once, unless it takes a shared tap (a Pollinator, a Lumberjack).
+    // at once, unless it is an actor of a shared activation (tapping it
+    // leaves its pool one fewer).
     if let Some((_, tv)) = taps {
-        for &(c, n, shared) in tv {
-            let way = Way { units: SVec::new(), life: 0, sac: 0, need: 0, need_n: 0, tap: shared as i32, crew: n };
+        for &(c, n) in tv {
+            let sig = pools.sig_of(c);
+            let way = Way { units: SVec::new(), life: 0, sac: 0, need: 0, need_n: 0, acts: [NO_POOL; 2], sig, crew: n };
             match per_card.iter_mut().find(|(x, _)| *x == c) {
                 Some((_, w)) => w.push((way, TAP | SAC)),
-                None if shared || conv_cards.contains(&c) => per_card.push((c, vec![(way, TAP | SAC)])),
+                None if sig != NO_POOL || conv_cards.contains(&c) => per_card.push((c, vec![(way, TAP | SAC)])),
                 None => out.crew = out.crew.saturating_sub(n),
             }
         }
@@ -3163,7 +3457,8 @@ fn cands(
                     sac: t.sac + s.sac,
                     need: t.need | s.need,
                     need_n: t.need_n.max(s.need_n),
-                    tap: t.tap + s.tap,
+                    acts: [t.acts[0], s.acts[0]],
+                    sig: t.sig,
                     crew: 0,
                 });
             }
@@ -3180,7 +3475,7 @@ fn cands(
         // other's units (a tap-then-sacrifice): that way stands for the card
         // (more units never make a cost unpayable), so the search doesn't
         // branch on it.
-        if ways.len() > 1 && ways.iter().all(|w| w.life == 0 && w.sac == 0 && w.need == 0 && w.tap == 0 && w.crew == 0) {
+        if ways.len() > 1 && ways.iter().all(|w| w.life == 0 && w.sac == 0 && w.need == 0 && w.unpooled() && w.crew == 0) {
             if let Some(k) = (0..ways.len()).find(|&k| ways.iter().all(|w| covers(&ways[k].units, &w.units))) {
                 out.fixed.extend(ways[k].units.iter().map(|u| Unit::free(u.mask)));
                 continue;
@@ -3188,13 +3483,14 @@ fn cands(
         }
         let ways = std::mem::take(&mut ways);
         let same_use = |a: &Way, b: &Way| (a.life, a.sac, a.need, a.need_n) == (b.life, b.sac, b.need, b.need_n);
-        if ways.iter().all(|w| w.units.len() == 1 && w.need == 0 && w.tap == 0 && w.crew == 0 && same_use(w, &ways[0]) && purposes(w.units[0].mask) == purposes(ways[0].units[0].mask)) {
+        if ways.iter().all(|w| w.units.len() == 1 && w.need == 0 && w.unpooled() && w.crew == 0 && same_use(w, &ways[0]) && purposes(w.units[0].mask) == purposes(ways[0].units[0].mask)) {
             let mask = ways.iter().fold(0, |m, w| m | w.units[0].mask);
             out.fixed.push(Unit { mask, ..as_unit(&ways[0]) });
         } else {
             out.alts.push(ways);
         }
     }
+    out.pools = pools;
     out
 }
 
@@ -3252,47 +3548,29 @@ fn cands_payable(cost: &ManaCost, marked: &[Tag], chosen: &[Tag], c: &Cands, bud
 
 /// [`cands_payable`], Wizard's Rockets' colours only with `convert`.
 fn cands_payable_c(cost: &ManaCost, marked: &[Tag], chosen: &[Tag], c: &Cands, budget: Budget, convert: bool) -> bool {
-    let budget = Budget { tap: budget.tap.min(c.tap_limit), ..budget };
-    // (The shared taps' free units first: `Cands::free_shared`.)
-    let with_free;
-    let (c, budget) = if c.free_shared.is_empty() {
-        (c, budget)
-    } else {
-        let k = c.free_shared.len().min(budget.tap.max(0) as usize);
-        let mut fixed = c.fixed.clone();
-        fixed.extend(c.free_shared.iter().take(k).copied());
-        with_free = Cands {
-            fixed,
-            alts: c.alts.clone(),
-            convert: c.convert.clone(),
-            converted: c.converted,
-            allow: c.allow,
-            tap_limit: c.tap_limit,
-            free_shared: Units::new(),
-            cut: c.cut,
-            crew: c.crew,
-        };
-        (&with_free, Budget { tap: budget.tap - k as i32, ..budget })
-    };
     if c.converted {
         return payable_converted(cost, marked, chosen, c, budget, None);
     }
-    if ways_payable(cost, c.allow, marked, chosen, &c.fixed, &c.alts, budget, c.crew) {
+    if ways_payable(cost, c.allow, marked, chosen, &c.fixed, &c.alts, budget, c.crew, &c.pools) {
         return true;
     }
     // Each usable Wizard's Rockets, without its card's other ways.
     convert
         && c.convert.iter().any(|(w, skip)| {
-            let left = Budget { life: budget.life - w.life, sac: budget.sac - w.sac, tap: budget.tap };
+            let left = Budget { life: budget.life - w.life, sac: budget.sac - w.sac };
             if left.life < 0 || left.sac < 0 {
                 return false;
             }
             // (Its own units: delve's {1} of its card, `Class::delve`.)
-            if w.units.is_empty() {
+            if w.units.is_empty() && w.sig == NO_POOL {
                 return payable_converted(cost, marked, chosen, c, left, *skip);
             }
             let mut with = c.clone();
             with.fixed.extend(w.units.iter().copied());
+            // (Its card tapped: an actor of a shared activation, one fewer.)
+            if w.sig != NO_POOL {
+                with.pools.sigs[w.sig as usize].2 -= 1;
+            }
             payable_converted(cost, marked, chosen, &with, left, *skip)
         })
 }
@@ -3309,7 +3587,34 @@ fn payable_converted(cost: &ManaCost, marked: &[Tag], chosen: &[Tag], c: &Cands,
         .filter(|&(k, _)| Some(k) != skip)
         .map(|(_, ws)| ws.iter().map(|w| Way { units: w.units.iter().map(|u| Unit { mask: convert(u.mask), ..*u }).collect(), ..w.clone() }).collect())
         .collect();
-    ways_payable(cost, c.allow, marked, &chosen, &fixed, &alts, budget, c.crew)
+    ways_payable(cost, c.allow, marked, &chosen, &fixed, &alts, budget, c.crew, &c.pools)
+}
+
+/// The counts of a feasibility search's shared activations per pool and of
+/// the actors it taps otherwise per signature (`PoolCtx`, `ways_payable`).
+struct Shared<'a> {
+    pools: &'a PoolCtx,
+    acts: SVec<i32, 4>,
+    used: SVec<i32, 4>,
+}
+
+impl Shared<'_> {
+    /// Count way `w` chosen `k` more times (`k` < 0: fewer).
+    fn add(&mut self, w: &Way, k: i32) {
+        for &a in w.acts.iter().filter(|&&a| a != NO_POOL) {
+            self.acts[a as usize] += k;
+        }
+        if w.sig != NO_POOL {
+            self.used[w.sig as usize] += k;
+        }
+    }
+
+    /// A leaf's budget: `b` less the reserved actors its activations take,
+    /// or `None` when they can't all have an actor.
+    fn leaf(&self, b: Budget) -> Option<Budget> {
+        let r = self.pools.fit(&self.acts, &self.used)?;
+        (r <= b.sac).then_some(Budget { sac: b.sac - r, ..b })
+    }
 }
 
 /// [`payable_within_n`] with each card of `alts` using one of its ways or
@@ -3335,11 +3640,16 @@ fn payable_converted(cost: &ManaCost, marked: &[Tag], chosen: &[Tag], c: &Cands,
 /// A later tap cost (`crew`: what it still needs, `Way::crew`) holds at a
 /// leaf when the ways chosen tap enough for it. Tapping for it uses no
 /// budget and only helps, so a crew way also dominates "none".
+///
+/// The shared activations' actors (`pools`): a leaf holds when the
+/// activations chosen get actors left (`PoolCtx::fit`), the reserved ones
+/// among them out of the sacrifice budget; a branch with more activations of
+/// a pool than its actors left is cut.
 #[allow(clippy::too_many_arguments)]
-fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixed: &Units, alts: &[Vec<Way>], budget: Budget, crew: i64) -> bool {
+fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixed: &Units, alts: &[Vec<Way>], budget: Budget, crew: i64, pools: &PoolCtx) -> bool {
     /// A way that takes nothing a payment shares: its units are free.
     fn free_way(w: &Way) -> bool {
-        w.life <= 0 && w.sac <= 0 && w.tap <= 0 && w.need == 0
+        w.life <= 0 && w.sac <= 0 && w.need == 0 && w.unpooled()
     }
     // (`None`: the search's nodes ran out.)
     #[allow(clippy::too_many_arguments)]
@@ -3352,14 +3662,15 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
         groups: &[(&[Way], usize)],
         b: Budget,
         crew: i64,
+        sh: &mut Shared,
         nodes: &mut u32,
     ) -> Option<bool> {
         *nodes = nodes.checked_sub(1)?;
         let Some((&(ways, m), rest)) = groups.split_first() else {
-            return Some(crew <= 0 && payable_within_n(cost, allow, needs, chosen, units, b));
+            return Some(crew <= 0 && sh.leaf(b).is_some_and(|b| payable_within_n(cost, allow, needs, chosen, units, b)));
         };
         let none_ok = !ways.iter().any(free_way);
-        each_way(cost, allow, needs, chosen, units, ways, 0, m, none_ok, rest, b, crew, nodes)
+        each_way(cost, allow, needs, chosen, units, ways, 0, m, none_ok, rest, b, crew, sh, nodes)
     }
     /// The `left` cards of a group still to place, among `ways[i..]` (and
     /// none, with `none_ok`): how many use `ways[i]`, the rest after it.
@@ -3377,13 +3688,14 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
         rest: &[(&[Way], usize)],
         b: Budget,
         crew: i64,
+        sh: &mut Shared,
         nodes: &mut u32,
     ) -> Option<bool> {
         if left == 0 || i == ways.len() {
             if left > 0 && !none_ok {
                 return Some(false);
             }
-            return go(cost, allow, needs, chosen, units, rest, b, crew, nodes);
+            return go(cost, allow, needs, chosen, units, rest, b, crew, sh, nodes);
         }
         let w = &ways[i];
         let (len, nl) = (units.len(), needs.len());
@@ -3391,29 +3703,36 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
         let mut lc = crew;
         let mut t = 0;
         let found = loop {
-            if each_way(cost, allow, needs, chosen, units, ways, i + 1, left - t, none_ok, rest, lb, lc, nodes)? {
-                break true;
+            match each_way(cost, allow, needs, chosen, units, ways, i + 1, left - t, none_ok, rest, lb, lc, sh, nodes) {
+                Some(false) => {}
+                other => break other,
             }
             if t == left {
-                break false;
+                break Some(false);
             }
-            lb = Budget { life: lb.life - w.life, sac: lb.sac - w.sac, tap: lb.tap - w.tap };
-            if lb.life < 0 || lb.sac < 0 || lb.tap < 0 {
-                break false;
+            lb = Budget { life: lb.life - w.life, sac: lb.sac - w.sac };
+            if lb.life < 0 || lb.sac < 0 {
+                break Some(false);
+            }
+            sh.add(w, 1);
+            t += 1;
+            if !w.unpooled() && !sh.pools.bound_ok(&sh.acts, &sh.used) {
+                break Some(false);
             }
             units.extend(w.units.iter().copied());
             if w.need != 0 {
                 needs.extend(std::iter::repeat_n(w.need, w.need_n as usize));
             }
             lc = lc.saturating_sub(w.crew);
-            t += 1;
         };
+        sh.add(w, -(t as i32));
         units.truncate(len);
         needs.truncate(nl);
-        Some(found)
+        found
     }
+    let mut sh = Shared { pools, acts: pools.acts.clone(), used: std::iter::repeat_n(0, pools.sigs.len()).collect() };
     if alts.is_empty() {
-        return crew <= 0 && payable_within_n(cost, allow, marked, chosen, fixed, budget);
+        return crew <= 0 && sh.leaf(budget).is_some_and(|b| payable_within_n(cost, allow, marked, chosen, fixed, b));
     }
     // Identical cards, grouped (in first-appearance order).
     let mut groups: Vec<(&[Way], usize)> = Vec::new();
@@ -3426,7 +3745,7 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
     let mut units = fixed.clone();
     let mut needs: SVec<Tag, 8> = marked.iter().copied().collect();
     let mut nodes = SEARCH_NODES;
-    go(cost, allow, &mut needs, chosen, &mut units, &groups, budget, crew, &mut nodes).unwrap_or_else(|| {
+    go(cost, allow, &mut needs, chosen, &mut units, &groups, budget, crew, &mut sh, &mut nodes).unwrap_or_else(|| {
         search_exhausted(format_args!(
             "cost {cost}, needs {marked:?}, chosen {chosen:?}, fixed units {fixed:?}, cards with ways {alts:?}, budget {budget:?}, crew {crew}"
         ))
@@ -3638,9 +3957,9 @@ mod tests {
         // (Each way costs life, a different amount for each card: no way is
         // free, so leaving a card out is a choice too, and no two cards are
         // interchangeable: `ways_payable`'s reductions don't apply.)
-        let way = |m: Tag, life: i32| Way { units: std::iter::once(Unit::free(m)).collect(), life, sac: 0, need: 0, need_n: 0, tap: 0, crew: 0 };
+        let way = |m: Tag, life: i32| Way { units: std::iter::once(Unit::free(m)).collect(), life, sac: 0, need: 0, need_n: 0, acts: [NO_POOL; 2], sig: NO_POOL, crew: 0 };
         let alts: Vec<Vec<Way>> = (0..21).map(|i| vec![way(1 << 5, i + 1), way(1 << 3, i + 1)]).collect();
         let cost = ManaCost::parse("{W}").unwrap();
-        ways_payable(&cost, 0, &[], &[], &Units::new(), &alts, Budget::FREE, 0);
+        ways_payable(&cost, 0, &[], &[], &Units::new(), &alts, Budget::FREE, 0, &PoolCtx::default());
     }
 }

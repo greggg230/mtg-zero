@@ -2071,10 +2071,6 @@ pub struct CardDb {
     /// control this turn (`CardDef::etb_counter_per_land_entered`): the game
     /// keeps the count (`Game::lands_entered`).
     pub(crate) watch_lands_entered: bool,
-    /// A card of the table has "{T}, Tap an untapped permanent you control:
-    /// Add <mana>" (Gene Pollinator, `pay::POL_FOR`): improvise and convoke
-    /// sources look for it (`Game::pol_split`).
-    pub(crate) pollinator: bool,
     /// The intrinsic mana abilities of the basic land types (CR 305.6:
     /// "{T}: Add <its mana>"), (the subtype, a definition holding the
     /// ability), when a card of the table gives a basic land type
@@ -2316,7 +2312,6 @@ impl CardDb {
         db.mountain = db.subtype_id("Mountain");
         db.watch_lands_entered = db.defs.iter().any(|d| d.etb_counter_per_land_entered);
         db.watch_lki_controller = db.defs.iter().any(crate::eoe_w2::reads_lki_controller);
-        db.pollinator = db.defs.iter().any(|d| d.activated.iter().any(|a| a.mana().is_some() && a.cost.tap && a.cost.tap_untapped.is_some()));
         if db.defs.iter().any(|d| d.gives_basic_land_type) {
             for (name, t) in [("Plains", crate::mana::W), ("Island", crate::mana::U), ("Swamp", crate::mana::B), ("Mountain", crate::mana::R), ("Forest", crate::mana::G)] {
                 if let Some(sub) = db.subtype_id(name) {

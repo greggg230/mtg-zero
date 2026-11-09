@@ -496,7 +496,7 @@ fn payable_restricted(cost: &ManaCost, main: Tag, extra: &[Tag], chosen: &[Tag],
 /// The maximum flow from the left nodes (capacity `left[i]` each) to the
 /// right nodes (capacity `right[j]`) along the edges (`edges[i][j]`, of any
 /// capacity): a bipartite b-matching, by augmenting paths.
-fn max_flow(left: &[u32], right: &[u32], edges: &[Vec<bool>]) -> u32 {
+pub(crate) fn max_flow(left: &[u32], right: &[u32], edges: &[Vec<bool>]) -> u32 {
     let (nl, nr) = (left.len(), right.len());
     let mut f = vec![vec![0u32; nr]; nl];
     let mut out_l = vec![0u32; nl];
@@ -615,21 +615,20 @@ impl Unit {
 pub struct Budget {
     pub life: i32,
     pub sac: i32,
-    /// Activations of a shared source (Orcish Lumberjack, tapped for each
-    /// Forest it sacrifices).
-    pub tap: i32,
 }
 
 impl Budget {
-    /// No limits that matter.
-    pub const FREE: Budget = Budget { life: i32::MAX, sac: i32::MAX, tap: i32::MAX };
+    /// No limits that matter. (The actors of shared activations, Gene
+    /// Pollinators and Orcish Lumberjacks, are counted per pool by the
+    /// payment's search: `pay::PoolCtx`, ENGINE.md 100.4.7.)
+    pub const FREE: Budget = Budget { life: i32::MAX, sac: i32::MAX };
 
     fn take(&self, u: &Unit, n: i32) -> Option<Budget> {
         // (In i64: exact for any number of units; what is left is within
         // the i32 it was taken from.)
         let life = self.life as i64 - u.life as i64 * n as i64;
         let sac = self.sac as i64 - if u.sac { n as i64 } else { 0 };
-        (life >= 0 && sac >= 0).then_some(Budget { life: life as i32, sac: sac as i32, tap: self.tap })
+        (life >= 0 && sac >= 0).then_some(Budget { life: life as i32, sac: sac as i32 })
     }
 }
 
@@ -767,7 +766,7 @@ mod tests {
     #[test]
     fn budgets_limit_life_and_hand_units() {
         let two = ManaCost::parse("{2}").unwrap();
-        let b = |life, sac| Budget { life, sac, tap: i32::MAX };
+        let b = |life, sac| Budget { life, sac };
         let conf = Unit { life: 1, ..Unit::free(COLORS) };
         assert!(payable_within(&two, 0, &[], &[conf, conf], b(2, 0)));
         assert!(!payable_within(&two, 0, &[], &[conf, conf], b(1, 0)));
