@@ -166,10 +166,11 @@ impl Game {
     /// Mayhem (CR 702.187b): `card`, a nonland card `p` discarded this turn,
     /// in `p`'s graveyard, while `p` controls a permanent that gives the
     /// nonland cards in their graveyard mayhem for their mana cost.
+    /// Mayhem granted to `card` (a nonland card discarded this turn): the
+    /// face being cast is checked for "nonland" (`gy_routes_esc`).
     pub(crate) fn mayhem_ok(&self, p: PlayerId, card: CardIdx) -> bool {
         let r = self.obj_ref(card);
-        !self.def_of(card).is(types::LAND)
-            && self.discarded.contains(&r)
+        self.discarded.contains(&r)
             && self.permanents_of(p).any(|c| self.abilities(c).grants_mayhem)
     }
 
@@ -498,7 +499,12 @@ impl Game {
     /// for its mana cost: Bilbo, Malcolm) is then its only route: the effect
     /// offered it that way (`can_cast_now`; a cheaper or free cast is never
     /// worse). `esc` and `para` remember `p`'s granters for a whole
-    /// graveyard.
+    /// graveyard. A permission granted to "[quality] cards in your
+    /// graveyard" (Wrenn and Six's emblem, Six, Underworld Breach, mayhem)
+    /// is judged by the face being cast: the characteristics of the spell
+    /// decide whether it can be cast that way (Lier, Disciple of the
+    /// Drowned's ruling of 2025-10-02; CR 601.3e). The card's own routes
+    /// are its card's (front's).
     pub(crate) fn gy_routes_esc(
         &self,
         p: PlayerId,
@@ -529,6 +535,12 @@ impl Game {
             out.push(Route { code: route::EFFECT, granter: None });
             return out;
         }
+        // The face that would be cast (a card with another face too: its
+        // front, or `face`), and the card with that face up, for the
+        // granted permissions' filters.
+        let fd_id = face.unwrap_or(self.objs[card.i()].def);
+        let fd = self.db.def(fd_id);
+        let mut alt = None;
         if def.flashback.is_some() || granted {
             out.push(Route { code: route::FLASHBACK, granter: None });
         }
@@ -541,14 +553,17 @@ impl Game {
         // (Granted escape with the card's own additional costs: both paid
         // as one cost, `CardDb::merged_cost`.)
         if def.escape.is_some()
-            || (!def.is(types::LAND) && *esc.get_or_insert_with(|| self.escape_granter(p).is_some()) && self.granted_options_ok(card, None))
+            || (!fd.is(types::LAND) && *esc.get_or_insert_with(|| self.escape_granter(p).is_some()) && self.granted_options_ok(card, fd_id, None))
         {
             out.push(Route { code: route::ESCAPE, granter: None });
         }
-        if self.retrace_granted(p, card) && self.granted_options_ok(card, Some(crate::db::RETRACE_ROUTE)) {
+        if self.retrace_granter_exists(p)
+            && self.face_view(card, fd_id, &mut alt).retrace_granted(p, card)
+            && self.granted_options_ok(card, fd_id, Some(crate::db::RETRACE_ROUTE))
+        {
             out.push(Route { code: route::RETRACE, granter: None });
         }
-        if self.mayhem_ok(p, card) {
+        if !fd.is(types::LAND) && self.mayhem_ok(p, card) {
             out.push(Route { code: route::MAYHEM, granter: None });
         }
         // (With Yawgmoth's Will's permission, that route allows the warp
@@ -556,9 +571,6 @@ impl Game {
         if def.casting.warp_from_graveyard && !out.iter().any(|x| x.code == route::WILL) {
             out.push(Route { code: route::WARP, granter: None });
         }
-        // The face that would be cast (a card with another face too: its
-        // front, or `face`).
-        let fd = face.map_or(def, |f| self.db.def(f));
         if !fd.is(types::LAND) && fd.is_permanent_card() && { let m = *para.get_or_insert_with(|| self.paragon_mv(p)); m > 0 && fd.mana_value() <= m } {
             for g in self.paragons(p, fd.mana_value(), false) {
                 let code = if self.abilities(g).gy_play_k != crate::db::NO_GRANT { route::PARAGON } else { route::LURRUS };
@@ -568,6 +580,20 @@ impl Game {
             }
         }
         out
+    }
+
+    /// The game with graveyard card `card`'s face `fd` up (a clone, kept in
+    /// `slot`, when it isn't the face up): what a filter of a granted
+    /// permission sees of the spell that face would be (CR 601.3e).
+    fn face_view<'a>(&'a self, card: CardIdx, fd: crate::ids::DefId, slot: &'a mut Option<Game>) -> &'a Game {
+        if self.objs[card.i()].def == fd {
+            return self;
+        }
+        slot.get_or_insert_with(|| {
+            let mut g = self.clone();
+            g.objs[card.i()].def = fd;
+            g
+        })
     }
 
     /// [`gy_routes_esc`](Self::gy_routes_esc) without remembering.
@@ -686,6 +712,13 @@ impl Game {
         }
     }
 
+    /// Could anything give `p`'s graveyard cards retrace now (an emblem, or
+    /// a permanent during `p`'s turn)?
+    fn retrace_granter_exists(&self, p: PlayerId) -> bool {
+        self.command.iter().any(|&e| self.objs[e.i()].controller == p && self.def_of(e).grants_retrace.is_some())
+            || self.seen & crate::game::SEEN_RETRACE != 0 && self.turn.active == p
+    }
+
     /// An emblem of `p` gives `card` (in `p`'s graveyard) retrace (Wrenn and
     /// Six: "instant and sorcery cards in your graveyard have retrace").
     pub(crate) fn retrace_granted(&self, p: PlayerId, card: CardIdx) -> bool {
@@ -728,8 +761,8 @@ impl Game {
     /// A granted route (escape from `escape_granter`, or retrace with
     /// `Some(RETRACE_ROUTE)`) for `card` with its own additional costs: can
     /// some option be paid together with it (`CardDb::merged_cost`)?
-    fn granted_options_ok(&self, card: CardIdx, retrace: Option<crate::ids::DefId>) -> bool {
-        let def = self.def_of(card);
+    fn granted_options_ok(&self, card: CardIdx, me: crate::ids::DefId, retrace: Option<crate::ids::DefId>) -> bool {
+        let def = self.db.def(me);
         if def.additional.is_empty() {
             return true;
         }
@@ -740,7 +773,6 @@ impl Game {
                 None => return false,
             },
         };
-        let me = self.objs[card.i()].def;
         (0..def.additional.len()).any(|k| self.db.merged_cost(me, route, k as u8).is_some())
     }
 

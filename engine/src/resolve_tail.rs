@@ -525,8 +525,13 @@ impl Game {
     fn loot_may_cast_free(&mut self, f: &mut Frame, counter: Counter, n: u8) -> Flow {
         let p = f.controller;
         if f.i == 0 {
-            self.draw_cards(p, 1);
             f.i = 1;
+            let queued = self.agenda.len();
+            if self.draw_cards(p, 1) {
+                // (The discard after the miracle question, CR 702.94a.)
+                self.wait_for_draw(queued, f);
+                return Flow::Suspend;
+            }
         }
         if f.i == 1 {
             match self.answer.take() {

@@ -474,6 +474,10 @@ fn bilbo_casts_an_adventure_from_the_graveyard_resolved_it_may_be_cast_later_cou
             Some(DecisionKind::Target) if g.has_option(tr) => Some(tr),
             Some(DecisionKind::Target) => g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&c| c != Choice::Pass),
             Some(DecisionKind::Priority) if g.pending_decision().unwrap().player == 1 && cs.is_some_and(|c| g.has_option(Choice::Cast(c))) => Some(Choice::Cast(cs.unwrap())),
+            // Resolved: Bilbo's "exile it instead" and the Adventure's exile
+            // both apply, and the controller uses the Adventure's (CR 616.1,
+            // 715.4; ENGINE.md 100.3).
+            Some(DecisionKind::ChooseReplacement) => Some(Choice::Number(4)),
             _ => None,
         });
         assert_eq!(g.obj(b).zone, Zone::Exile, "{}", log(&g));

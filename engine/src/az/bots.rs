@@ -56,7 +56,7 @@ fn replacement_choice(g: &Game, d: &Decision) -> u16 {
         Some(&Task::ChooseReplacement { card, chooser, .. }) => g.obj(card.idx).owner == chooser,
         _ => true,
     };
-    let order: [u8; 3] = if own { [1, 2, 3] } else { [3, 2, 1] };
+    let order: [u8; 4] = if own { [4, 1, 2, 3] } else { [3, 2, 1, 4] };
     order
         .iter()
         .find_map(|&k| d.options.iter().find(|o| o.choice == Choice::Number(k)).map(|o| o.action))

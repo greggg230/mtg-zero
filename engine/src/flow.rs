@@ -40,6 +40,17 @@ pub(crate) enum Task {
     /// Miracle (CR 702.94a): may `p` reveal `card`, the first card they drew
     /// this turn? (Asked before the next priority.)
     MiracleReveal { p: PlayerId, card: CardIdx },
+    /// The `n` draws of an instruction left after a miracle question (CR
+    /// 702.94a), in event group `ev`; `step`: then the draw step's
+    /// beginning event (`Game::queue_miracle`).
+    DrawRest { p: PlayerId, n: u32, ev: u32, step: bool },
+    /// CR 616.1: `p` orders an opponent's "create a token instead" and their
+    /// own "draw that many plus `plus` instead" on one draw
+    /// (`Game::draw_order`).
+    DrawOrder { p: PlayerId, plus: u32, ev: u32, step: bool },
+    /// CR 613.7m: the active player orders the timestamps of the objects
+    /// given ones simultaneously since `first` (`Game::order_timestamps`).
+    OrderTimestamps { first: u32, settled: bool, picked: Vec<CardIdx> },
     PriorityAsk,
     // combat (CR 508-510)
     DeclareAttackers { next: u8 },
@@ -277,6 +288,9 @@ impl Game {
             }
             Task::SbaCheck { keep } => self.sba_check(keep),
             Task::MiracleReveal { p, card } => self.miracle_reveal(p, card),
+            Task::DrawRest { p, n, ev, step } => self.draw_rest(p, n, ev, step),
+            Task::DrawOrder { p, plus, ev, step } => self.draw_order(p, plus, ev, step),
+            Task::OrderTimestamps { first, settled, picked } => self.order_timestamps(first, settled, picked),
             Task::PutTriggers => self.put_triggers(),
             Task::PriorityAsk => self.priority_ask(),
             Task::DeclareAttackers { next } => self.declare_attackers(next),
@@ -459,6 +473,7 @@ impl Game {
         // player takes, all of it, until the next turn begins.
         self.turn_controller = self.next_turn_controller[next as usize].take().filter(|&q| q != next);
         self.turn.extra_combats = 0;
+        self.turn.after_combat = Step::Main2;
         self.turn.step = Step::Untap;
         let n = self.turn.number;
         for pl in &mut self.players {
@@ -476,9 +491,10 @@ impl Game {
         // "Until your next turn" ends as that turn begins (CR 611.2b).
         self.players[next as usize].flash_sorceries = false;
         self.end_until_next_turn(next);
-        // ("Whenever ... this turn" ended with the turn, CR 603.7b.)
+        // ("Until your next turn, whenever ..." ends as that turn begins;
+        // "whenever ... this turn" ended in the cleanup step, 514.2.)
         if !self.temp_triggers.is_empty() {
-            self.temp_triggers.retain(|t| t.controller != next && !t.this_turn);
+            self.temp_triggers.retain(|t| t.controller != next);
         }
         self.resolved.clear();
         self.done_once.clear();
@@ -563,11 +579,23 @@ impl Game {
             }
             Step::Draw => {
                 // CR 504.1; the starting player skips their first draw (103.8a).
-                if self.turn.number > 1 {
-                    self.draw_cards(ap, 1);
+                let queued = self.agenda.len();
+                let cut = if self.turn.number > 1 { self.draw_instruction(ap, 1, true) } else { crate::game::Drew::Done };
+                match cut {
+                    // (Interrupted by a miracle question with draws left, a
+                    // replacement's, or by a question about the order of
+                    // replacements: the step's event after them.)
+                    crate::game::Drew::Miracle(card, left) if left > 0 => self.queue_miracle(ap, card, left, true),
+                    crate::game::Drew::Asked => {}
+                    crate::game::Drew::Miracle(card, _) => {
+                        self.event(Event::player(EventKind::BeginningOfDrawStep, ap));
+                        self.queue_miracle(ap, card, 0, false);
+                    }
+                    crate::game::Drew::Done => self.event(Event::player(EventKind::BeginningOfDrawStep, ap)),
                 }
-                self.event(Event::player(EventKind::BeginningOfDrawStep, ap));
+                let tasks = self.agenda.split_off(queued);
                 self.agenda.push(Task::Priority);
+                self.agenda.extend(tasks);
             }
             Step::DeclareAttackers => {
                 self.agenda.push(Task::Priority);
@@ -645,7 +673,17 @@ impl Game {
             Step::Setup => unreachable!(),
             Step::Untap => Step::Upkeep,
             Step::Upkeep => Step::Draw,
+            // CR 500.8: combat phases added after the beginning phase or
+            // the postcombat main phase come directly after it; the turn
+            // goes on with the phase that came next there.
+            Step::Draw if self.turn.extra_combats > 0 => {
+                self.turn.extra_combats -= 1;
+                self.turn.after_combat = Step::Main1;
+                Step::BeginCombat
+            }
             Step::Draw => Step::Main1,
+            // (Combat phases added after the precombat main phase follow
+            // its combat phase: they are combat phases one after another.)
             Step::Main1 => Step::BeginCombat,
             Step::BeginCombat => Step::DeclareAttackers,
             Step::DeclareAttackers => {
@@ -672,14 +710,30 @@ impl Game {
                     self.turn.extra_combats -= 1;
                     Step::BeginCombat
                 } else {
-                    Step::Main2
+                    match std::mem::replace(&mut self.turn.after_combat, Step::Main2) {
+                        Step::Untap => {
+                            self.agenda.push(Task::BeginTurn);
+                            return;
+                        }
+                        s => s,
+                    }
                 }
+            }
+            Step::Main2 if self.turn.extra_combats > 0 => {
+                self.turn.extra_combats -= 1;
+                self.turn.after_combat = Step::End;
+                Step::BeginCombat
             }
             Step::Main2 => Step::End,
             Step::End => Step::Cleanup,
             Step::Cleanup => {
                 if self.turn.cleanup_again {
                     Step::Cleanup
+                } else if self.turn.extra_combats > 0 {
+                    // (After the ending phase: the turn ends after them.)
+                    self.turn.extra_combats -= 1;
+                    self.turn.after_combat = Step::Untap;
+                    Step::BeginCombat
                 } else {
                     self.agenda.push(Task::BeginTurn);
                     return;

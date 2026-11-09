@@ -36,8 +36,10 @@ use crate::triggers::{Event, Subj};
 pub struct Except {
     /// Card types "in addition to its other types".
     pub types: u16,
-    /// Subtypes in addition (interned ids).
-    pub subtypes: [Option<u16>; 4],
+    /// Subtypes in addition: bit k is the table's k-th subtype a copy
+    /// exception names (`CardDb::exc_subtypes`, at most 64: the lowering
+    /// refuses more), so a copy of a copy has every one (707.9b).
+    pub subtypes: u64,
     /// Keyword abilities it has (707.9a: "except it has haste").
     pub kws: KwSet,
     /// Its base power and toughness (707.9b; 707.9d: then no
@@ -60,23 +62,13 @@ impl Except {
         *self == Except::default()
     }
 
-    pub fn has_subtype(&self, s: u16) -> bool {
-        self.subtypes.contains(&Some(s))
+    pub fn has_subtype(&self, db: &crate::db::CardDb, s: u16) -> bool {
+        self.subtypes != 0 && db.exc_subtype_bit(s).is_some_and(|k| self.subtypes >> k & 1 != 0)
     }
 
-    /// Add a subtype; false if there is no room (the lowering checks the
-    /// printed exceptions fit).
-    pub fn add_subtype(&mut self, s: u16) -> bool {
-        if self.has_subtype(s) {
-            return true;
-        }
-        match self.subtypes.iter_mut().find(|x| x.is_none()) {
-            Some(slot) => {
-                *slot = Some(s);
-                true
-            }
-            None => false,
-        }
+    /// Add the subtype of bit `k` (`Lowerer::exc_subtype`).
+    pub fn add_subtype(&mut self, k: u8) {
+        self.subtypes |= 1 << k;
     }
 
     /// These exceptions applied to copiable values that already have
@@ -85,10 +77,7 @@ impl Except {
     pub fn over(&self, base: Except) -> Except {
         let mut e = base;
         e.types |= self.types;
-        for &s in self.subtypes.iter().flatten() {
-            let fits = e.add_subtype(s);
-            debug_assert!(fits, "too many subtypes in a copy's exceptions");
-        }
+        e.subtypes |= self.subtypes;
         e.kws.0 |= self.kws.0;
         if self.pt.is_some() {
             e.pt = self.pt;
@@ -197,15 +186,18 @@ impl Game {
 
     /// `c`'s copiable values now (CR 707.2): the latest copy effect's, else
     /// its face up (a bestowed Aura's card: being bestowed isn't copied,
-    /// 702.103b is not a copy effect).
+    /// 702.103b is not a copy effect). A Class's level isn't copied either:
+    /// a copy is level 1 (CR 716.2: its level is the object's, not a
+    /// copiable value).
     pub fn copiable(&self, c: CardIdx) -> CopyVals {
+        let base = |d: DefId| {
+            let dd = self.db.def(d);
+            if dd.bestowed || dd.class_level > 1 { dd.card_def(d) } else { d }
+        };
         if let Some(x) = self.copy_fx(c) {
-            return x.vals;
+            return CopyVals { def: base(x.vals.def), exc: x.vals.exc };
         }
-        let d = self.objs[c.i()].def;
-        let dd = self.db.def(d);
-        let d = if dd.bestowed { dd.card_def(d) } else { d };
-        CopyVals { def: d, exc: Except::default() }
+        CopyVals { def: base(self.objs[c.i()].def), exc: Except::default() }
     }
 
     /// The copiable values of permanent `r`: now, or as it last existed on

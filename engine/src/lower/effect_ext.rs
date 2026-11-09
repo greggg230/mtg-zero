@@ -476,18 +476,17 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             }
             // "a 1/1 Phyrexian Blinkmoth artifact creature" (Inkmoth Nexus):
             // the card types and creature types it gains beside creature.
-            let mut subtypes: Vec<u16> = granted_subtype.iter().map(|s| l.subtype(s)).collect();
+            let mut subtypes: Vec<u16> = granted_subtype.iter().filter_map(|s| l.given_subtype("BecomeLandCreatureUEOT.granted_subtype", s)).collect();
             for s in granted_subtypes {
-                let k = l.subtype(s);
+                let Some(k) = l.given_subtype("BecomeLandCreatureUEOT.granted_subtypes", s) else { continue };
                 if !subtypes.contains(&k) {
                     subtypes.push(k);
                 }
             }
             let mut add = types::CREATURE;
             for t in granted_card_types {
-                match types::from_name(t) {
-                    Some(b) => add |= b,
-                    None => l.unsupported(format!("BecomeLandCreatureUEOT.granted_card_types({t})")),
+                if let Some(b) = super::printing::given_type(l, "BecomeLandCreatureUEOT.granted_card_types", t) {
+                    add |= b;
                 }
             }
             let mut mods = vec![Mod::Types { add, subtypes, replace: false }];
@@ -541,7 +540,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 let s = l.subtype(requires_subtype);
                 Some(b.op(Op::Ext(Ext::JumpUnlessSource { filter: Filter::Subtype(s), to: 0 })))
             };
-            let subs = subtypes.iter().map(|s| l.subtype(s)).collect();
+            let subs = subtypes.iter().filter_map(|s| l.given_subtype("SourceBecomesIfSubtype.subtypes", s)).collect();
             let mut mods = vec![Mod::Types { add: 0, subtypes: subs, replace: true }];
             match base_pt[..] {
                 [p, t] => mods.push(Mod::SetPt(
@@ -1474,7 +1473,8 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let cats::CardPrinting::CardPrinting(tp) = &p;
             let def = super::printing::lower_printing(l, tp);
             let token = l.token(def);
-            let (army, sub) = (l.subtype("Army"), l.subtype(subtype));
+            let army = l.subtype("Army");
+            let Some(sub) = l.given_subtype("Amass.subtype", subtype) else { return true };
             b.op(Op::Ext(Ext::Amass { token, army, subtype: sub, n }));
         }
         E::DealCombatDamageAmountToTarget(nodes::DealCombatDamageAmountToTarget { targets }) => {
@@ -1563,9 +1563,8 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             // and it's a Zombie in addition to its other types".
             let mut exc = crate::copies::Except::default();
             for t in extra_card_types {
-                match types::from_name(t) {
-                    Some(b) => exc.types |= b,
-                    None => l.unsupported(format!("CreateTokenCopyOfSource.extra_card_types({t})")),
+                if let Some(b) = super::printing::given_type(l, "CreateTokenCopyOfSource.extra_card_types", t) {
+                    exc.types |= b;
                 }
             }
             let of = if *eternalize {
@@ -1573,7 +1572,9 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 exc.pt = Some((4, 4));
                 exc.no_cost = true;
                 let zombie = l.subtype("Zombie");
-                exc.add_subtype(zombie);
+                if let Some(k) = l.exc_subtype(zombie) {
+                    exc.add_subtype(k);
+                }
                 crate::program::CopyOf::SourceCard
             } else {
                 crate::program::CopyOf::Source
@@ -1691,7 +1692,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             nodes::PutEachCreatureCardExiledWithSourceOntoBattlefieldUnderYourControl { grant_flying_counter, grant_subtype_and_pt },
         ) => {
             let becomes = grant_subtype_and_pt.as_ref().map(|(s, p, t)| {
-                (l.subtype(s), l.int("grant_subtype_and_pt.p", *p, 0, 99), l.int("grant_subtype_and_pt.t", *t, 0, 99))
+                (l.given_subtype("grant_subtype_and_pt", s).unwrap_or(0), l.int("grant_subtype_and_pt.p", *p, 0, 99), l.int("grant_subtype_and_pt.t", *t, 0, 99))
             });
             b.op(Op::Ext(Ext::LinkedCreaturesToBattlefield { flying: *grant_flying_counter, becomes }));
         }
@@ -1744,12 +1745,11 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 E::BecomeType(nodes::BecomeType { types_to_add, subtypes_to_add, base_pt }) => {
                     let mut add = 0u16;
                     for t in types_to_add {
-                        match types::from_name(&format!("{t:?}")) {
-                            Some(bits) => add |= bits,
-                            None => l.unsupported(format!("BecomeType.types_to_add({t:?})")),
+                        if let Some(bits) = super::printing::given_type(l, "BecomeType.types_to_add", &format!("{t:?}")) {
+                            add |= bits;
                         }
                     }
-                    let subtypes: Vec<u16> = subtypes_to_add.iter().map(|s| l.subtype(s)).collect();
+                    let subtypes: Vec<u16> = subtypes_to_add.iter().filter_map(|s| l.given_subtype("BecomeType.subtypes_to_add", s)).collect();
                     let mut mods = vec![Mod::Types { add, subtypes, replace: false }];
                     if let Some((p, t)) = base_pt {
                         mods.push(Mod::SetPt(l.int("BecomeType.base_pt", *p, 0, 99), l.int("BecomeType.base_pt", *t, 0, 99)));
@@ -1815,7 +1815,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 let n = l.int("PutCountersOnTargetAndAddSubtype.counters", *n, 1, 20);
                 b.op(Op::Ext(Ext::PutCounters { on: On::Target(t), counter, n: Amount::Fixed(n) }));
             }
-            let s = l.subtype(subtype);
+            let Some(s) = l.given_subtype("PutCountersOnTargetAndAddSubtype.subtype", subtype) else { return true };
             apply(b, On::Target(t), vec![Mod::Types { add: 0, subtypes: vec![s], replace: false }], Until::Forever);
         }
         E::LookAtTopCardsDistribute(nodes::LookAtTopCardsDistribute { count, piles }) => {
