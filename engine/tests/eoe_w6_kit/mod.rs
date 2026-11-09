@@ -39,6 +39,15 @@ pub fn w6_cards() -> Vec<card_ir::Card> {
         card("W6 Chosen Land", json!({"card_types": ["Land"], "enters_choosing_color": true,
             "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_self": true},
                 "effect": {"$t": "AddManaToPool", "produces": [["chosen", 1]]}, "is_mana_ability": true}]})),
+        // "Modular 2" on an artifact creature (CR 702.43a).
+        card("W6 Modular Bot", json!({"card_types": ["Artifact", "Creature"], "subtypes": ["Construct"], "power": 0, "toughness": 0,
+            "mana_cost": {"$t": "ManaCost", "generic": 2}, "mana_cost_str": "{2}",
+            "keywords": [{"$t": "Keyword", "kind": "modular", "n": 2}]})),
+        // "Modular 1" on a noncreature artifact (Power Depot's, a land
+        // aside).
+        card("W6 Modular Relic", json!({"card_types": ["Artifact"],
+            "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}",
+            "keywords": [{"$t": "Keyword", "kind": "modular", "n": 1}]})),
     ];
     v.into_iter().map(|v| serde_json::from_value(v).expect("W6 test card IR")).collect()
 }
