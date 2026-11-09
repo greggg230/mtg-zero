@@ -20377,3 +20377,49 @@ default `FUZZ_GAMES=20000` passed (20,000 games, wins 9,972 / 9,989, 39 draws, m
 215.7 decisions; 1,000 matches; 451 s on a loaded machine); `FUZZ_POOL=eoe FUZZ_GAMES=20000`
 passed (20,000 games, wins 8,918 / 9,040, 2,042 draws, mean 40.1 turns, 500.7 decisions; 992 s).
 Both are the numbers of 100.3, as the unchanged digests say.
+
+##### 100.4.4 Not done in this session (left for workstream B's next pass)
+
+In the brief's order, what is still open, with what each needs:
+
+* **N21 (W2's item a): restrictions on needs.** A mana ability's own mana cost paid inside a payment
+  (34.2's `NOT_MADE` needs) is matched by `mana::fits`, which reads types and `MADE` only: a need
+  should carry the purposes its ability satisfies (`ability_allow` of its source) and a unit its
+  `only`, matched by `eoe_w2::spendable`; a source the payment itself can't spend should then still
+  be offered for a need it can pay (Sunken Citadel's land-ability mana for Cascading Cataracts'
+  {5}: W6 needs this). `payable_iter`'s grouping by mask has to grow a restriction key, and a
+  restricted unit can't pay generic pips of the main cost; with a restricted unit present an exact
+  general matching (needs on one side, units on the other, every chosen unit matched:
+  Mendelsohn-Dulmage) replaces the fast path.
+* **13.15: chains of mana abilities with mana costs.** `MADE` / `NOT_MADE` forbid every chain (Loot's
+  mana for Arena of Glory's {R}); exact is a matching in which the "pays the cost of" relation
+  between the abilities is acyclic.
+* **N22 (item c): basic land types given by an effect.** C's refusal (`Lowerer::given_subtype`)
+  stands. 305.6 "in addition" needs the intrinsic "{T}: Add" of each such type as a granted mana
+  ability (`granted_activated`; the payment code must then read granted mana abilities, below);
+  305.7 "is a <type>" needs W2's Mountain definitions generalised (one per set of basic types,
+  latent abilities kept). The Magus of the Moon is W2's special case and works (tests in
+  `cards_eoe_w2_lands.rs`).
+* **N23 (item d):** which Pollinator activates in a payment is still the engine's (a loud failure
+  with the creature-mana bonus and mixed Pollinators); so is which Squandered Resources or Orcish
+  Lumberjack sacrifices a land (`activate_sac_for`: the first able one), and which Pollinator taps
+  in `finish_payment` (the first ready ones no pick uses). Each should be a choice when the objects
+  differ.
+* **F4:** 13.3 (exclusion by conflict, per ability), 13.16 (Black Lotus with delve), 13.17
+  (teamwork and the Lumberjack), 27.13.4 and N8 (a "tap n untapped X" cost counts only permanents
+  without mana abilities when mana is owed; crew enumerates 10 creatures), N10 (Pentad Prism's
+  `.min(32)`), 28.8.2k (the colours spent: `ChooseColorsSpent`), 24.7.5k and 40.1 (costs with
+  several classes), 31.7.2k (a permanent's payment sources past its fourth `ACTIVATE` slot).
+* **From the coordinator:** 26.11.6 and 24.7.4 (payment ids for permanents past slot 95), and the
+  payment's u8 storage (X under 255 mana, "pay X life", "tap X artifacts").
+* **Found on the way:** a "whenever you tap a creature for mana" bonus on a restricted source
+  (Delighted Halfling) gets the source's restriction in `pick_multi` (the bonus mana is
+  unrestricted); granted mana abilities (W3's `granted_activated`, Mm'menon's grant to artifacts,
+  which W6 needs) are activated with priority (`ActivateMana` through `begin_activate`) but are not
+  payment sources (`mana_classes` reads `abilities(c).activated` only, and `activate_mana_costs`,
+  `finish_payment` look abilities up by slot in `source_def`, not `activated_home`).
+
+For W6: Power Depot's restriction exists (`SPEND_ARTIFACT | SPEND_ARTIFACT_ABILITY`, two-purpose
+mana tested), floated restricted mana keeps its restriction (100.4.2), and productions of any size
+are offered with priority (100.4.3); Sunken Citadel's land-ability mana for another land ability's
+mana cost needs N21, and Mm'menon's granted mana ability needs the payment sources above.
