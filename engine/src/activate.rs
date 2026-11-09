@@ -7,11 +7,8 @@ use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::{Game, Pos, StackItem, StackKind};
 use crate::ids::{Target, CardIdx, PlayerId, Zone};
+use crate::loops::LoopAct;
 use crate::pay::{productions, Class, Keep, PayMana, Src};
-
-/// Activations of one permanent's non-mana ability in a turn the engine offers
-/// (a loop of optional actions, CR 732.2a; as `copies::MAY_COPY_CAP`).
-pub(crate) const ACTIVATION_CAP: u8 = 31;
 
 /// The `ACTIVATE` action slots of one permanent (`decision::act::ACTIVATE`:
 /// slot * 4 + i).
@@ -99,13 +96,6 @@ impl Game {
         self.permanents_of(p).any(|c| self.abilities(c).ascend) && self.permanents_of(p).count() >= 10
     }
 
-    /// A permanent's activated ability `i` was activated `ACTIVATION_CAP`
-    /// times this turn.
-    pub(crate) fn activation_capped(&self, c: CardIdx, i: u8) -> bool {
-        let r = self.obj_ref(c);
-        self.activations.iter().any(|x| x.0 == r && x.1 == i && x.2 >= ACTIVATION_CAP as u32)
-    }
-
     /// The card types among the cards exiled with `source` (CR 607.2a,
     /// 205.2a): linked cards still in exile.
     pub(crate) fn linked_types(&self, source: crate::ids::ObjRef) -> u16 {
@@ -150,10 +140,12 @@ impl Game {
         out: &mut Vec<Opt>,
         gy: &mut Vec<(u32, Choice)>,
     ) {
-        // (The battlefield's activation locks, read once.)
+        // (The battlefield's activation locks, read once; the loop hash of
+        // this decision, computed once if needed, `loops.rs`.)
         let locks = self.activation_locks();
+        let loop_hash = std::cell::OnceCell::new();
         for c in self.permanents_of(p) {
-            let live = self.permanent_activations(p, c, classes, sorcery_ok, locks);
+            let live = self.permanent_activations(p, c, classes, sorcery_ok, locks, &loop_hash);
             // A permanent with more activated abilities than its four
             // `ACTIVATE` slots (its card's own and those other permanents
             // grant it, EoE W3): the fourth slot opens a choice among the
@@ -201,10 +193,23 @@ impl Game {
     /// abilities and then those other permanents grant it (EoE W3; ascending):
     /// mana abilities only where `mana_at_priority` says; a special action
     /// (CR 116.2b, 708.7: turning a face-down permanent face up) survives
-    /// "loses all abilities".
-    pub(crate) fn permanent_activations(&self, p: PlayerId, c: CardIdx, classes: &[Class], sorcery_ok: bool, locks: u16) -> Vec<u8> {
+    /// "loses all abilities". A non-mana ability `p` activated this turn at
+    /// a state with the same loop hash is not offered (a loop of optional
+    /// actions that made no progress, `loops.rs`; `loop_hash` caches the
+    /// decision's hash).
+    pub(crate) fn permanent_activations(
+        &self,
+        p: PlayerId,
+        c: CardIdx,
+        classes: &[Class],
+        sorcery_ok: bool,
+        locks: u16,
+        loop_hash: &std::cell::OnceCell<u64>,
+    ) -> Vec<u8> {
         let mut live = Vec::new();
         let d = self.abilities(c);
+        let place = if self.loop_taken.is_empty() { None } else { self.battlefield.iter().position(|&x| x == c).map(|k| k as u32) };
+        let repeats = |i: usize| place.is_some_and(|place| self.loop_repeats(p, LoopAct::Activate { place, slot: i as u8 }, None, loop_hash));
         for (i, ad) in d.activated.iter().enumerate() {
             if ad.mana().is_some() && !self.mana_at_priority(c, ad) {
                 continue; // paid with while paying a cost (ENGINE.md 18)
@@ -215,8 +220,8 @@ impl Game {
             if ad.exhaust && self.exhausted(c, i as u8) {
                 continue; // CR 702.177a: only once
             }
-            if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
-                continue; // a loop of optional actions (ENGINE.md 29)
+            if repeats(i) {
+                continue; // a loop that made no progress (CR 732.2a, MTR 4.4)
             }
             if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
                 live.push(i as u8);
@@ -237,7 +242,7 @@ impl Game {
         for (j, g) in self.granted_activated(c).into_iter().enumerate() {
             let i = own + j;
             let ad = self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot));
-            if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
+            if repeats(i) {
                 continue;
             }
             if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
@@ -406,6 +411,15 @@ impl Game {
         // face, ENGINE.md 99.14, or a static ability's card, 99.13; `slot`
         // stays the permanent's place for its records.)
         let (def, aslot, granter) = self.activated_home(card, slot);
+        // A loop action (a non-mana ability of a permanent on the
+        // battlefield, `loops.rs`): noted with the state it is taken at,
+        // before anything changes.
+        if let (AbilitySlot::Activated(i), crate::db::ActEffect::Stack(_), Zone::Battlefield) =
+            (slot, &self.db.def(def).activated_def(aslot).effect, self.objs[card.i()].zone)
+        {
+            let place = self.battlefield.iter().position(|&x| x == card).expect("a permanent") as u32;
+            self.note_loop(p, LoopAct::Activate { place, slot: i }, None);
+        }
         self.note(|g| format!("P{p} activates {} ({slot:?})", g.name(card)));
         if self.objs[card.i()].zone == Zone::Hand {
             self.reveal(card); // 602.2a: activated from a hidden zone
@@ -420,13 +434,6 @@ impl Game {
         if ad.boast {
             let r = self.obj_ref(card);
             self.marks.push((r, crate::game::Mark::Boasted(self.turn.number as u16)));
-        }
-        if let (AbilitySlot::Activated(i), crate::db::ActEffect::Stack(_), Zone::Battlefield) = (slot, &ad.effect, self.objs[card.i()].zone) {
-            let r = self.obj_ref(card);
-            match self.activations.iter().position(|x| x.0 == r && x.1 == i) {
-                Some(k) => self.activations[k].2 = self.exact_inc(self.activations[k].2, "activations this turn"),
-                None => self.activations.push((r, i, 1)),
-            }
         }
         if ad.mana().is_some() {
             self.agenda.push(Task::ManaNow { src: Src { card, slot }, step: crate::decision::NumberStep::FIRST });

@@ -863,16 +863,13 @@ pub struct Game {
     /// Prepared permanents (CR 722.3a) and the copy of their prepare spell
     /// in exile (722.3c).
     pub(crate) prepared: Vec<(ObjRef, CardIdx)>,
-    /// Copies made this turn by "may copy this spell" effects (Chain of
-    /// Smog, Chain Lightning): at `copies::MAY_COPY_CAP` no more are offered
-    /// (an engine limit on a loop of optional actions, CR 732.2a, 732.3;
-    /// ENGINE.md 26.11).
-    pub(crate) may_copies: u32,
-    /// Activations this turn of each permanent's non-mana activated ability
-    /// (object, ability, count): at `ACTIVATION_CAP` no more are offered (an
-    /// engine limit on a loop of optional actions, CR 732.2a: Zirda with
-    /// Basalt Monolith makes unbounded mana; ENGINE.md 29).
-    pub(crate) activations: Vec<(ObjRef, u8, u32)>,
+    /// The loop actions taken this turn (`loops.rs`; CR 732.2a, MTR 4.4):
+    /// (player, the loop hash of the state as their decider saw it then,
+    /// the action). The action is not offered to that player again at a
+    /// state with the same hash: everything reachable by taking it there was
+    /// reachable when they took it, so taking it again could only repeat an
+    /// iteration that made no progress. Cleared as a turn begins.
+    pub(crate) loop_taken: Vec<(PlayerId, u64, crate::loops::LoopAct)>,
     /// `SEEN_*` bits: a card of this game has the rare rule (ENGINE.md 29).
     pub(crate) seen: u16,
     // ---- M7b part 3b: the initiative and dungeons (ENGINE.md 27.4) ----
@@ -1276,8 +1273,7 @@ impl Game {
             pile_moving: false,
             pile_shuffles: 0,
             prepared: Vec::new(),
-            may_copies: 0,
-            activations: Vec::new(),
+            loop_taken: Vec::new(),
             seen: 0,
             initiative: None,
             dungeons: [Dungeon::default(); 2],

@@ -531,8 +531,7 @@ impl Game {
         self.w3.lki_host.clear();
         self.w3.lki_loss.clear();
         self.spell_lki.clear();
-        self.may_copies = 0;
-        self.activations.clear();
+        self.loop_taken.clear();
         // Permissions end with their turn, or when the card moves.
         let perms = std::mem::take(&mut self.permissions);
         self.permissions = perms

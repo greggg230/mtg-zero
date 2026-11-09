@@ -8,6 +8,9 @@
 //! worlds `determinize` samples.
 //!
 //! `FUZZ_GAMES=n` sets the number of games (default 300).
+//! `FUZZ_SKIP=s1,s2,...` leaves those seeds out (games and matches); the
+//! games' run prints the longest turn (decisions in one turn: loops of
+//! optional actions have no cap, `engine/src/loops.rs`).
 //!
 //! Matches (M8b, ENGINE.md 36.8): `fuzz_random_matches` plays best-of-three
 //! matches through `MtgAz` with random actions (sideboarding too), checking
@@ -606,6 +609,40 @@ static DELVER_CHARMS: AtomicU64 = AtomicU64::new(0);
 static DELVER_MURK_TRIGGERS: AtomicU64 = AtomicU64::new(0);
 /// The most actions any game took (the fuzzer's cap is 100,000).
 static MAX_GAME_STEPS: AtomicU64 = AtomicU64::new(0);
+/// The most decisions in one turn of a game (loops of optional actions have
+/// no cap, `engine/src/loops.rs`): (decisions, seed, turn).
+static LONGEST_TURN: std::sync::Mutex<(u64, u64, u32)> = std::sync::Mutex::new((0, 0, 0));
+/// Turns with more than `LONG_TURN` decisions.
+static LONG_TURNS: AtomicU64 = AtomicU64::new(0);
+const LONG_TURN: u64 = 1000;
+
+/// A turn of game `seed` took `n` decisions.
+fn record_turn(seed: u64, turn: u32, n: u64) {
+    if n > LONG_TURN {
+        LONG_TURNS.fetch_add(1, Ordering::Relaxed);
+    }
+    let mut l = LONGEST_TURN.lock().unwrap();
+    if n > l.0 {
+        *l = (n, seed, turn);
+    }
+}
+
+fn longest_turn_report() -> String {
+    let l = *LONGEST_TURN.lock().unwrap();
+    format!("longest turn: {} decisions (seed {}, turn {}); turns past {LONG_TURN} decisions: {}", l.0, l.1, l.2, LONG_TURNS.load(Ordering::Relaxed))
+}
+
+/// `FUZZ_SKIP=s1,s2,...`: seeds the game and match loops leave out (a known
+/// failure of another workstream's).
+fn skipped(seed: u64) -> bool {
+    static SKIP: std::sync::OnceLock<Vec<u64>> = std::sync::OnceLock::new();
+    SKIP.get_or_init(|| {
+        std::env::var("FUZZ_SKIP")
+            .map(|s| s.split(',').filter(|x| !x.trim().is_empty()).map(|x| x.trim().parse().unwrap_or_else(|_| panic!("FUZZ_SKIP={s}: seeds"))).collect())
+            .unwrap_or_default()
+    })
+    .contains(&seed)
+}
 
 /// `FUZZ_POOL=delver`: count the Regents and Charms cast and the Regents'
 /// triggers put on the stack (each stack item once, by its id).
@@ -980,6 +1017,7 @@ fn play(seed: u64, checks: bool) -> Played {
     let exp = exponential_mode();
     let mut buf = Vec::new();
     let mut stack_seen: Vec<u32> = Vec::new();
+    let (mut turn, mut turn_steps) = (g.turn().number, 0u64);
     while !g.is_over() {
         g.legal_actions(&mut legal);
         assert!(!legal.is_empty(), "seed {seed}: no legal action in a running game");
@@ -1023,6 +1061,16 @@ fn play(seed: u64, checks: bool) -> Played {
 ")));
         actions.push(a);
         steps += 1;
+        if g.turn().number != turn {
+            record_turn(seed, turn, turn_steps);
+            (turn, turn_steps) = (g.turn().number, 0);
+        }
+        turn_steps += 1;
+        if turn_steps == LONG_TURN && std::env::var("FUZZ_LOG").is_ok() {
+            // (A long turn's log, to tell what it repeats.)
+            let log = g.log_lines();
+            println!("seed {seed} turn {turn}: {LONG_TURN} decisions; its log's last lines:\n{}", log[log.len().saturating_sub(80)..].join("\n"));
+        }
         if delver_mode() && !g.stack().is_empty() {
             count_delver(&g, &mut stack_seen);
         }
@@ -1031,6 +1079,7 @@ fn play(seed: u64, checks: bool) -> Played {
 "));
     }
     MAX_GAME_STEPS.fetch_max(steps as u64, Ordering::Relaxed);
+    record_turn(seed, turn, turn_steps);
     let companions = (0..2).filter(|&p| g.player(p).companion.is_some()).count() as u32;
     let companions_used = (0..2).filter(|&p| g.player(p).companion_used).count() as u32;
     Played { actions, keys, fingerprint: g.fingerprint(), outcome: g.outcome().unwrap(), turns: g.turn().number, companions, companions_used }
@@ -1258,7 +1307,12 @@ fn fuzz_random_games() {
     let first: u64 = std::env::var("FUZZ_FIRST").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
     let (mut wins, mut draws, mut aborted, mut turns, mut decisions) = ([0u32; 2], 0u32, 0u32, 0u64, 0u64);
     let (mut companions, mut companions_used) = (0u32, 0u32);
+    let mut skips = 0u64;
     for seed in first..first + n {
+        if skipped(seed) {
+            skips += 1;
+            continue;
+        }
         let p = std::panic::catch_unwind(|| play(seed, true)).unwrap_or_else(|e| {
             panic!("seed {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1 FUZZ_LOG=1): {e:?}")
         });
@@ -1294,6 +1348,7 @@ fn fuzz_random_games() {
         assert!(MAX_POWER.load(Ordering::Relaxed) > u32::MAX as i64, "no board past u32::MAX power: {}", extremes_report());
     }
     println!("longest game: {} actions (cap 100,000)", MAX_GAME_STEPS.load(Ordering::Relaxed));
+    println!("{}; seeds skipped (FUZZ_SKIP): {skips}", longest_turn_report());
     if let Some(t) = belief_tilt() {
         let (w, d, u) = (BELIEF_WORLDS.load(Ordering::Relaxed), BELIEF_DEALT.load(Ordering::Relaxed), BELIEF_UNIFORM.load(Ordering::Relaxed));
         println!(
@@ -1715,6 +1770,9 @@ fn fuzz_random_matches() {
     let mut aborted = 0u64;
     let mut stats = HiddenStats::default();
     for seed in first..first + n {
+        if skipped(seed) {
+            continue;
+        }
         let p = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| play_match_stats(seed, true, &mut stats)))
             .unwrap_or_else(|e| panic!("match {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_MATCHES=1): {e:?}"));
         games_played += p.games as u64;

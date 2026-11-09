@@ -130,14 +130,6 @@ pub struct CopyFx {
 /// turn (storm), never this.
 pub(crate) const COPIED: u64 = u64::MAX;
 
-/// At most this many copies a turn by "may copy this spell" effects. Chain
-/// of Smog's copies cost nothing, so players who always copy would loop
-/// forever; the CR has a loop of optional actions repeated a chosen number
-/// of times (732.2a) and broken when it comes back to the same game state
-/// (732.3). 31 (the `NUMBER` range) keeps the drain loop of Chain of Smog
-/// and a magecraft creature lethal (ENGINE.md 26.11).
-pub(crate) const MAY_COPY_CAP: u8 = 31;
-
 impl Game {
     /// The copy effect that gives `c` its copiable values now (the latest),
     /// if any.
@@ -453,11 +445,17 @@ impl Game {
                 let Some(p) = self.who(f, *who) else { return Flow::Next };
                 let Some((def, item)) = self.spell_source(f, *of) else { return Flow::Next };
                 // `f.i`: the copies made so far (the "may" is asked first).
+                // YES is a loop action (Chain of Smog's copies cost nothing):
+                // noted with the state, the frame included, and not offered
+                // again at a state with the same loop hash, where the "may"
+                // isn't asked (CR 732.2a, MTR 4.4; `loops.rs`).
                 if *may && f.i == 0 {
                     match self.answer.take() {
-                        Some(Choice::Yes) => self.may_copies = self.exact_inc(self.may_copies, "copies made by \"may copy\""),
+                        Some(Choice::Yes) => self.note_loop(p, crate::loops::LoopAct::MayCopy, Some(&*f)),
                         Some(_) => return Flow::Next,
-                        None if self.may_copies >= MAY_COPY_CAP as u32 => return Flow::Next,
+                        None if self.loop_repeats(p, crate::loops::LoopAct::MayCopy, Some(&*f), &std::cell::OnceCell::new()) => {
+                            return Flow::Next
+                        }
                         None => {
                             let opts = vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
                             self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);

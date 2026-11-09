@@ -760,7 +760,7 @@ impl Game {
         let classes = self.mana_classes(p, None);
         let sorcery_ok = self.turn.active == p && self.turn.step.is_main() && self.stack.is_empty();
         let locks = self.activation_locks();
-        let live = self.permanent_activations(p, card, &classes, sorcery_ok, locks);
+        let live = self.permanent_activations(p, card, &classes, sorcery_ok, locks, &std::cell::OnceCell::new());
         let from = (crate::activate::ACTIVATE_SLOTS - 1) as u8;
         let items: Vec<(u32, Choice)> = live
             .iter()

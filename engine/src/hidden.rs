@@ -633,6 +633,17 @@ impl Game {
     fn after_deal(&mut self, viewer: PlayerId, rng: &mut Rng) {
         self.rng = Rng::new(rng.next_u64());
         self.observer = Some(viewer);
+        // The loop actions the viewer decided keep their records (loop
+        // hashes of the viewer's own views, the same in every world it
+        // deals: its options stay the same). Another decider's were hashes
+        // of views holding what the viewer doesn't know; in a world they
+        // would match only where the deal got those things right, so they
+        // go: that decider's loops may repeat once more here, never fewer
+        // times (`loops.rs`).
+        if !self.loop_taken.is_empty() {
+            let keep = [self.decider_of(0) == viewer, self.decider_of(1) == viewer];
+            self.loop_taken.retain(|x| keep[x.0 as usize]);
+        }
         // The viewer's own options never name a card whose identity was
         // resampled (rule: a choice of a card in a zone hidden from its
         // decider names its definition, not its slot; the decider's hand is
