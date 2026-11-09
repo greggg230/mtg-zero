@@ -20665,3 +20665,42 @@ least the other's purposes). On W6's merge with the fix the ten seeds pass.
 Test: `cr_106_6_restricted_mana_never_stands_for_a_lands_plain_mana` (W2's new Test Sunken Citadel
 with Cascading Cataracts: its plain {B} pays a spell; with five Islands {6}{B} is payable, the
 {B}{B} paying two of the {5}, and {7}{B} is not; it failed on f3345ed).
+
+##### 31.7.2k: payment sources past a permanent's fourth `ACTIVATE` id
+
+A permanent's mana sources had `ACTIVATE` ids (`ACTIVATE` + 4 x permanent + place), so a source at
+place 4 or later had none: `sac_classes` left out the sacrifice sources (Rain of Filth's granted
+one, Squandered Resources', Orcish Lumberjack's) of a permanent with four abilities, and a granted
+mana ability at such a place would have taken the next permanent's id. Now every such source is
+one: the sacrifice sources' places follow the permanent's own and granted abilities (the numbering
+of `activated_home`, so they never share an id with a granted ability), and a source at a place
+past the fourth is offered by the permanent's own id (`pay::by_perm`, `MY_PERM`), as improvise and
+the Pollinators' sources are; when the permanent stands for several sources, which one is
+`ChooseMode`, paged past the `NUMBER` ids with A0's `ask_paged` (`Choice::Item`, its page in
+`PayMana::pool_page`; up to 32 it is the old `NUMBER` question).
+
+Test: `pay::tests::cr_601_2g_a_source_past_the_fourth_ability_id_is_offered` (the cube and a land
+with "{T}: Add {C}" and three "{1}: Draw a card", with Squandered Resources: {2} payable, its tap
+and its sacrifice; Sol Ring's {1} paid by the sacrifice through the land's own id; it failed with
+`sac_classes`' fourth-place limit).
+
+##### Not done in this session (left for the next pass)
+
+In the brief's order, still open (100.4.4 has their designs):
+
+* **N23**: which Gene Pollinator activates (the creature-mana bonus with Pollinators of which only
+  some are creatures, `pol_classes`' assertion; which Pollinators tap in `finish_payment`, "the
+  first ready ones no pick uses"), which Squandered Resources or Orcish Lumberjack sacrifices
+  (`activate_sac_for`), and `reserved_n`'s assertion (Pollinators of which only some a later tap
+  cost needs). Exact needs the actor chosen per pick and a second shared-tap budget per kind
+  (`Budget::tap`, `Class::share`/`taps`, `Way::tap`, `cands`' `tap_limit` and `free_shared`).
+* **13.15** (chains of mana abilities with mana costs: `MADE` / `NOT_MADE` forbid every chain; exact
+  is a matching whose "pays the cost of" relation is acyclic: an order of the abilities with mana
+  costs, identical ones in a fixed order, and per-producer `MADE` units, which the virtual pool's
+  kinds would have to carry), **13.3**, **13.16**, **13.17**, **24.7.5k** / **40.1**, **27.13.4** /
+  **N8**, **28.8.2k**, **N10** (Pentad Prism's `.min(32)`: exact needs the payment's need count in
+  `cands`, since a unit past it is never used), **26.11.6** / **24.7.4** (ids for mana sources past
+  `MY_PERM`'s 96 permanents: A0's paging of `MY_PERM`), and the payment's u8 storage (F7's list:
+  `ManaCost::total`/`plus`, X and tax added into the u8 generic in `activate.rs` and `cast.rs`,
+  `keep.life + phyrexian_life`, `phyrexian_life += 2k`, `later as u8`, "pay X life" and `x_range`
+  below 255).
