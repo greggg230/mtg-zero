@@ -1662,7 +1662,7 @@ impl Game {
             let p = item.controller;
             // Enough other cards, and the mana payable while keeping them.
             let mana = self.route_mana(card, p, item.from);
-            let keep = crate::pay::Keep { discard: Some((chosen as u8, card)), ..Default::default() };
+            let keep = crate::pay::Keep { reserves: vec![(crate::pay::Reserve::Discard(chosen as u8, None), card)], ..Default::default() };
             self.players[p as usize].hand.len() < chosen || !self.can_pay_with(p, &mana, &self.mana_classes(p, None), &keep)
         };
         let (p, source) = (item.controller, Some(self.item_source(item)));
@@ -2622,7 +2622,7 @@ impl Game {
         pm.keep.spell = Some(card);
         let escalated = item.modes.len().saturating_sub(1) as u8;
         if escalated > 0 && def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
-            pm.keep.discard = Some((escalated, card));
+            pm.keep.reserves.push((crate::pay::Reserve::Discard(escalated, None), card));
         }
         let _ = def;
         pm.keep.life = pm.keep.life.checked_add(life_later).expect("a cost's life: at most a life total and 99");

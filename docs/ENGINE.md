@@ -21158,3 +21158,49 @@ activated before, and the cost had no Rebel to tap).
 Lumberjacks; the payment for Questing Beast now asks which one sacrifices the Forest). `RULES_EPOCH`
 bumped; the Delver canary library's 60 spots reach their positions (`delver_rerecord.py check
 --stamp`).
+
+##### 24.7.5k, 40.1: costs with several parts that take cards
+
+`merge_costs` refused two parts that take permanents or cards in hand (retrace's land discard with
+Force of Will's or an evoke Incarnation's "exile a <color> card from your hand", Daze's "return an
+Island", Mine Collapse's "sacrifice a Mountain", Bitter Triumph's or Bone Shards' "discard a card"),
+because `Game::keep_for` kept one reservation (`Keep::sac`, `discard`, `exile`) and the budget one
+count; so retrace wasn't offered with them.
+
+* **`Keep::reserves`** (`pay::Reserve`): every such part, with its card: `Perm` (sacrifice, return,
+  remove a counter from; with `true`, "tap X untapped <permanents>", which taps), `Discard(n,
+  filter)`, `Exile(filter)`. A filtered discard is one now too (retrace's "a land card"; it wasn't
+  kept, by a pool argument: no mana source in hand is a land). One reservation is counted as before
+  (`Budget::sac`, `reserved`); several by `pay::ResCtx`: their candidates grouped by the reservations
+  each is a candidate of, and a payment holds when, for every set of reservations, the candidates
+  of any of them left are at least what they need together (Hall's condition: distinct candidates
+  for each; a card discarded is not exiled, a permanent sacrificed not returned). A mana source
+  that sacrifices a permanent or exiles a card from hand uses one up (`Game::consumes`, `Way::rsig`):
+  the search cuts a branch that breaks the condition and checks it at each leaf; such a source is
+  never a fixed unit then. ("Tap X" is paid alone, the lowering's `check_cost_w3`, which `merge_costs`
+  keeps: a `ResCtx` never holds one.)
+* **Two discards** (`Cost::discard_also`): `merge_costs` adds discards of one filter and keeps two
+  filters apart (the unfiltered one is `discard`); `pay_costs` asks the filtered one first.
+* **The cost's checks** (`cost_payable_with`) see the parts together (`reserves_ok`: with Grief's
+  evoke and one Swamp in hand, retrace isn't offered), and **`pay_costs`** offers only picks that
+  leave the later parts their candidates (`cost_picks_ok`: the parts left, the picks so far and this
+  one out). A permanent picked to be returned isn't one picked to be sacrificed.
+* **A permanent tapped and sacrificed for one cost** (CR 601.2h: the parts in any order): the tap
+  choice of "tap n untapped <permanents>" left out the permanents picked to be sacrificed or
+  returned, which the feasibility counted (`Keep::taps`); the taps come before the sacrifices and
+  returns, so they are offered now. (Not yet when the cost also exiles graveyard cards: its
+  sacrifices are made before those are chosen, so that sacrificed cards may be exiled, ruling
+  bea302d9, and so before the taps: left open, below.)
+
+Tests: `cr_702_81a_retrace_with_a_pitch_evoke` (Six, Grief in the graveyard, a Swamp and Dark Ritual in
+hand: cast for no mana; with the Swamp alone, not), `cr_702_81a_retrace_with_the_cards_own_discard`
+(Wrenn and Six's emblem, Bitter Triumph at 2 life: with a Forest and Simian Spirit Guide, whose mana
+is needed, not castable; with an Island too, the Forest and the Island discarded),
+`cr_702_81a_retrace_with_daze_returning_an_island`, `cr_601_2h_one_permanent_tapped_and_sacrificed_for_one_cost`
+(B4's Test Rebel Altar: "Tap an untapped Rebel you control, Sacrifice a Rebel"; a loud failure
+before, no Rebel to tap).
+
+**Digests** (24.7.5k, 40.1): full `36a8a84c37356ff8` -> `6d25032ffee21839`, `DIGEST_ENCODING=0`
+`3a6e81f85dc10d59` -> `14b9b0e887831eef`: 2 of the 2,500 games change (r 1987: Fury retraced with
+Six for its evoke cost, exiling a red card; h 77: Daze retraced by Wrenn and Six's emblem, returning
+an Island). `RULES_EPOCH` bumped; the Delver canary library's 60 spots reach their positions.

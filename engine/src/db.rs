@@ -1203,6 +1203,10 @@ pub struct Cost {
     /// retrace's "a land card").
     pub discard: u8,
     pub discard_filter: Option<Filter>,
+    /// A second discard of the cost, of n cards matching a filter of its own
+    /// (retrace's "a land card" with a card's own "discard a card": two costs
+    /// paid as one, `merge_costs`, CR 601.2b; docs/shortcuts.md 24.7.5k).
+    pub discard_also: Option<(u8, Filter)>,
     /// Exile a card matching the filter from your hand (not this card).
     pub exile_from_hand: Option<Filter>,
     /// Return n permanents you control matching the filter to their
@@ -2091,8 +2095,11 @@ pub(crate) const ALT_OPTION: u8 = 0x80;
 
 /// Two costs paid as one (a granted escape or retrace with a card's own
 /// additional cost, CR 601.2b): `None` when the engine's single cost can't
-/// say both (two different discards, two sacrifices; at most one of the
-/// reservations `Game::keep_for` makes).
+/// say both (two sacrifices, two returns, two tap costs). Several parts that
+/// take permanents or cards in hand are one cost (`Game::keep_for`'s
+/// reservations, checked together: ENGINE.md 100.4.7; docs/shortcuts.md
+/// 24.7.5k, 40.1): two discards with different filters (retrace's land card
+/// and the card's own discard) are `discard` and `discard_also`.
 pub(crate) fn merge_costs(a: &Cost, b: &Cost) -> Option<Cost> {
     fn one<T: Clone>(x: &Option<T>, y: &Option<T>) -> Option<Option<T>> {
         match (x, y) {
@@ -2100,11 +2107,24 @@ pub(crate) fn merge_costs(a: &Cost, b: &Cost) -> Option<Cost> {
             _ => Some(x.clone().or_else(|| y.clone())),
         }
     }
-    let discard_filter = match (a.discard > 0, b.discard > 0) {
-        (true, true) if a.discard_filter != b.discard_filter => return None,
-        (true, _) => a.discard_filter.clone(),
-        (_, true) => b.discard_filter.clone(),
-        _ => None,
+    // (The discards, by filter: the same filter adds up.)
+    let mut discards: Vec<(u8, Option<Filter>)> = Vec::new();
+    let specs = [(a.discard, a.discard_filter.clone()), (b.discard, b.discard_filter.clone())]
+        .into_iter()
+        .chain(a.discard_also.iter().chain(b.discard_also.iter()).map(|(n, f)| (*n, Some(f.clone()))));
+    for (n, f) in specs.filter(|s| s.0 > 0) {
+        match discards.iter_mut().find(|d| d.1 == f) {
+            Some(d) => d.0 = d.0.checked_add(n)?,
+            None => discards.push((n, f)),
+        }
+    }
+    // (The one without a filter, if any, is the main discard.)
+    discards.sort_by_key(|d| d.1.is_some());
+    let (discard, discard_filter, discard_also) = match &discards[..] {
+        [] => (0, None, None),
+        [(n, f)] => (*n, f.clone(), None),
+        [(n, f), (m, Some(g))] => (*n, f.clone(), Some((*m, g.clone()))),
+        _ => return None,
     };
     let c = Cost {
         mana: a.mana.plus(&b.mana),
@@ -2116,8 +2136,9 @@ pub(crate) fn merge_costs(a: &Cost, b: &Cost) -> Option<Cost> {
         discard_self: a.discard_self || b.discard_self,
         discard_hand: a.discard_hand || b.discard_hand,
         sacrifice: one(&a.sacrifice, &b.sacrifice)?,
-        discard: a.discard + b.discard,
+        discard,
         discard_filter,
+        discard_also,
         exile_from_hand: one(&a.exile_from_hand, &b.exile_from_hand)?,
         bounce: one(&a.bounce, &b.bounce)?,
         exile_graveyard: a.exile_graveyard.checked_add(b.exile_graveyard)?,
@@ -2138,8 +2159,14 @@ pub(crate) fn merge_costs(a: &Cost, b: &Cost) -> Option<Cost> {
     if [c.crew > 0, c.tap_untapped.is_some(), c.tap_x.is_some()].iter().filter(|&&x| x).count() > 1 {
         return None;
     }
-    let reservations = [c.sacrifice.is_some() || c.bounce.is_some(), c.discard > 0, c.exile_from_hand.is_some()];
-    if reservations.iter().filter(|&&x| x).count() > 1 || c.sacrifice.is_some() && c.bounce.is_some() {
+    // ("Tap X untapped <permanents>" is paid alone, with mana and {T}, and
+    // "remove a counter from a <permanent>" without crew: the lowering's
+    // `check_cost_w3`, which a merge keeps.)
+    let reserved = c.crew > 0 || c.sacrifice.is_some() || c.bounce.is_some() || c.discard > 0 || c.exile_from_hand.is_some();
+    if c.tap_x.is_some() && (reserved || c.remove_counter_from.is_some() || c.tap_untapped.is_some() || c.exile_graveyard > 0 || c.life > 0) {
+        return None;
+    }
+    if c.remove_counter_from.is_some() && c.crew > 0 {
         return None;
     }
     Some(c)

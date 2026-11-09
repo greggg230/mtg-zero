@@ -837,13 +837,19 @@ fn b4_db() -> &'static CardDb {
             eoe_w2::card("Test Rebel Pollinator", json!({"card_types": ["Creature"], "subtypes": ["Rebel"], "power": 1, "toughness": 1,
                 "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["G", 1]]}, "mana_cost_str": "{G}",
                 "activated_abilities": [pol]})),
+            // "Tap an untapped Rebel you control, Sacrifice a Rebel: Draw a card."
+            eoe_w2::card("Test Rebel Altar", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "sacrifice_subtype": "Rebel", "extra_costs": [{"$t": "TapUntappedPermanentsCost",
+                        "label": "an untapped Rebel you control", "permanent_filter": {"$t": "HasSubtype", "name": "Rebel"}}]},
+                    "effect": {"$t": "DrawCards", "amount": 1}}]})),
         ];
         let mut cards = engine::db::load_cube_document().cards;
         cards.extend(common::custom_cards());
         cards.extend(engine::db::load_eoe_document().cards.into_iter().filter(|c| c.name == "Gene Pollinator"));
         cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
         let db = CardDb::from_cards(&cards);
-        for n in ["Gene Pollinator", "Test Pollinator Rock", "Test Pollinator Grove", "Test Rebel Pollinator"] {
+        for n in ["Gene Pollinator", "Test Pollinator Rock", "Test Pollinator Grove", "Test Rebel Pollinator", "Test Rebel Altar"] {
             db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
         }
         db.leak()
@@ -966,4 +972,111 @@ fn cr_601_2h_the_pollinator_a_tap_cost_needs_doesnt_activate() {
     settle(&mut g);
     assert_eq!(g.obj(o).zone, Zone::Battlefield, "{}", log(&g));
     assert!(g.obj(rebel).tapped && g.obj(gene).tapped && g.obj(bf(&g, 0, "Test Bear")).tapped, "{}", log(&g));
+}
+
+/// Can `c` (in P0's graveyard) be cast now (any route)?
+fn castable_from_gy(g: &Game, c: CardIdx) -> bool {
+    options(g).iter().any(|o| matches!(o, Choice::Cast(x) if *x == c))
+}
+
+/// docs/shortcuts.md 40.1, CR 702.81a, 118.9, 601.2b: Six's retrace ("a land
+/// card discarded") with Grief's evoke ("exile a black card from your hand")
+/// is one cost with two parts that take hand cards (`merge_costs` kept one
+/// reservation: retrace wasn't offered with evoke). With a Swamp and Dark
+/// Ritual in hand, Grief is cast from the graveyard for no mana: the Swamp
+/// discarded, Dark Ritual exiled.
+#[test]
+fn cr_702_81a_retrace_with_a_pitch_evoke() {
+    let mut g = scen().battlefield(0, &["Six"]).graveyard(0, &["Grief"]).hand(0, &["Swamp", "Dark Ritual"]).at(Step::Main1, 0).start();
+    let grief = g.card(0, "Grief", Zone::Graveyard);
+    assert!(castable_from_gy(&g, grief), "retrace with evoke: {:?}", g.options_desc());
+    g.choose(Choice::Cast(grief));
+    finish(&mut g, |g| match g.kind() {
+        Some(DecisionKind::ChooseAltCost) => options(g).into_iter().find(|c| *c != Choice::Number(0)),
+        _ => None,
+    });
+    assert_eq!(g.obj(grief).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Swamp", Zone::Graveyard), 1, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Dark Ritual", Zone::Exile), 1, "{}", log(&g));
+    // (One card in hand can't be both.)
+    let g = scen().battlefield(0, &["Six"]).graveyard(0, &["Grief"]).hand(0, &["Swamp"]).at(Step::Main1, 0).start();
+    assert!(!castable_from_gy(&g, g.card(0, "Grief", Zone::Graveyard)));
+}
+
+/// docs/shortcuts.md 24.7.5k, CR 702.81a, 601.2b, 601.2g-h: Wrenn and Six's
+/// emblem's retrace ("a land card discarded") with Bitter Triumph's "discard a
+/// card" is one cost of two discards (two discards with different filters
+/// weren't one cost: not offered). P0 has 2 life (3 can't be paid). With a
+/// Forest and Simian Spirit Guide in hand and a Swamp, the Spirit Guide's
+/// mana is needed for {1}{B} and it can't be discarded too: not castable;
+/// with an Island as well, castable (the Forest and the Island discarded).
+#[test]
+fn cr_702_81a_retrace_with_the_cards_own_discard() {
+    let setup = |hand: &[&str]| {
+        scen()
+            .battlefield(0, &["Swamp"])
+            .graveyard(0, &["Bitter Triumph"])
+            .hand(0, hand)
+            .battlefield(1, &["Test Bear"])
+            .emblem(0, "Wrenn and Six")
+            .life(0, 2)
+            .at(Step::Main1, 0)
+            .start()
+    };
+    let g = setup(&["Forest", "Simian Spirit Guide"]);
+    assert!(!castable_from_gy(&g, g.card(0, "Bitter Triumph", Zone::Graveyard)), "{:?}", g.options_desc());
+    let mut g = setup(&["Forest", "Simian Spirit Guide", "Island"]);
+    let bt = g.card(0, "Bitter Triumph", Zone::Graveyard);
+    let bear = bf(&g, 1, "Test Bear");
+    assert!(castable_from_gy(&g, bt), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(bt));
+    finish(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => options(g).into_iter().find(|c| *c == Choice::Target(engine::Target::Obj(g.obj_ref(bear)))),
+        _ => None,
+    });
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Forest", Zone::Graveyard) + g.count_in(0, "Island", Zone::Graveyard), 2, "{}", log(&g));
+    assert_eq!(g.life(0), 2);
+}
+
+/// docs/shortcuts.md 40.1, CR 702.81a, 118.9: Six's retrace with Daze's "return
+/// an Island you control to its owner's hand" (an instant, by Wrenn and Six's
+/// emblem): one cost, an Island returned and a land card discarded.
+#[test]
+fn cr_702_81a_retrace_with_daze_returning_an_island() {
+    let mut g = scen()
+        .battlefield(0, &["Island"])
+        .graveyard(0, &["Daze"])
+        .hand(0, &["Forest"])
+        .emblem(0, "Wrenn and Six")
+        .battlefield(1, &["Mountain"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 1)
+        .start();
+    let b = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(b));
+    g.choose(Choice::Target(engine::Target::Player(0)));
+    finish(&mut g, |_| None);
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+    let daze = g.card(0, "Daze", Zone::Graveyard);
+    assert!(castable_from_gy(&g, daze), "retrace with Daze's return: {:?}", g.options_desc());
+}
+
+/// CR 601.2h: a cost's parts are paid in any order, so one permanent may be
+/// tapped for "tap an untapped Rebel you control" and then sacrificed for
+/// "sacrifice a Rebel" (the feasibility let it, `Keep::taps`; the payment's
+/// tap choice left out a permanent picked to be sacrificed: no Rebel to tap).
+#[test]
+fn cr_601_2h_one_permanent_tapped_and_sacrificed_for_one_cost() {
+    let mut g = b4_scen().battlefield(0, &["Test Rebel Altar", "Test Rebel Pollinator"]).at(Step::Main1, 0).start();
+    let altar = bf(&g, 0, "Test Rebel Altar");
+    let rebel = bf(&g, 0, "Test Rebel Pollinator");
+    assert!(g.has_option(act(altar, 0)), "{:?}", g.options_desc());
+    g.choose(act(altar, 0));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(rebel).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.player(0).hand.len(), 1, "drew a card
+{}", log(&g));
 }

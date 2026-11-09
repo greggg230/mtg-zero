@@ -582,6 +582,11 @@ impl Game {
                 return false;
             }
         }
+        // (Its parts that take permanents or cards in hand, together:
+        // distinct candidates for each, ENGINE.md 100.4.7.)
+        if !self.reserves_ok(p, &Self::keep_for(card, cost, exclude)) {
+            return false;
+        }
         if let Some((k, n)) = cost.remove_counters {
             if self.counters_on(card, k) < n as crate::num::Count {
                 return false;
@@ -682,6 +687,10 @@ impl Game {
     /// (none under "exile it instead", CR 614.1a; not Blightsteel Colossus,
     /// shuffled into its library: ENGINE.md 49).
     pub(crate) fn discards_feed(&self, p: PlayerId, card: CardIdx, cost: &Cost) -> usize {
+        // (A second discard, `discard_also`, is retrace's land card merged
+        // with a card's own discard option, and an option is one kind of
+        // cost: no such cost exiles graveyard cards too, `merge_costs`.)
+        assert!(cost.discard_also.is_none() || cost.exile_graveyard == 0, "a cost of two discards that exiles graveyard cards");
         if cost.discard == 0 {
             return 0;
         }
@@ -813,33 +822,82 @@ impl Game {
             .collect()
     }
 
-    /// What the parts of `cost` paid after its mana need from that payment.
+    /// Do the parts of `card`'s `cost` that take permanents or cards in hand
+    /// still find distinct candidates once `next` is picked for the part
+    /// being paid, the picks so far (`picked`, `pay_costs`' order) left out
+    /// (ENGINE.md 100.4.7: a pick could take the only candidate of a later
+    /// part)?
+    fn cost_picks_ok(&self, p: PlayerId, card: CardIdx, cost: &Cost, picked: &[CardIdx], next: CardIdx) -> bool {
+        use crate::pay::Reserve;
+        let n_sac = cost.sacrifice.as_ref().map_or(0, |s| s.n) as usize;
+        let n_also = n_sac + cost.discard_also.as_ref().map_or(0, |d| d.0) as usize;
+        let n_disc = n_also + cost.discard as usize;
+        let n_exile = n_disc + cost.exile_from_hand.is_some() as usize;
+        let n_bounce = n_exile + cost.bounce.as_ref().map_or(0, |b| b.n) as usize;
+        // (What part [lo, hi) of the picks still needs, `next` picked.)
+        let k = picked.len() + 1;
+        let left = |lo: usize, hi: usize| ((hi - lo) - k.saturating_sub(lo).min(hi - lo)) as u8;
+        let mut rs: Vec<(Reserve, CardIdx)> = Vec::new();
+        let perm = |rs: &mut Vec<(Reserve, CardIdx)>, s: &crate::db::SacCost, n: u8| {
+            if n > 0 {
+                rs.push((Reserve::Perm(crate::db::SacCost { n, ..s.clone() }, false), card));
+            }
+        };
+        if let Some(s) = &cost.sacrifice {
+            perm(&mut rs, s, left(0, n_sac));
+        }
+        if let Some(b) = &cost.bounce {
+            perm(&mut rs, b, left(n_exile, n_bounce));
+        }
+        if let Some(r) = Self::remove_counter_reserve(cost) {
+            perm(&mut rs, &r, r.n);
+        }
+        if let Some((_, f)) = &cost.discard_also {
+            let n = left(n_sac, n_also);
+            if n > 0 {
+                rs.push((Reserve::Discard(n, Some(f.clone())), card));
+            }
+        }
+        let n = left(n_also, n_disc);
+        if n > 0 {
+            rs.push((Reserve::Discard(n, cost.discard_filter.clone()), card));
+        }
+        if let Some(f) = &cost.exile_from_hand {
+            if left(n_disc, n_exile) > 0 {
+                rs.push((Reserve::Exile(f.clone()), card));
+            }
+        }
+        self.reserves_left_ok(p, &rs, &|c| c == next || picked.contains(&c))
+    }
+
+    /// What the parts of `cost` paid after its mana need from that payment:
+    /// each part that takes permanents or cards in hand a reservation
+    /// (`Keep::reserves`, checked together: ENGINE.md 100.4.7).
     pub(crate) fn keep_for(card: CardIdx, cost: &Cost, exclude: Option<CardIdx>) -> Keep {
-        debug_assert!(
-            [cost.sacrifice.is_some() || cost.bounce.is_some(), cost.discard > 0, cost.exile_from_hand.is_some()]
-                .iter()
-                .filter(|&&x| x)
-                .count()
-                <= 1,
-            "one reservation per cost (lowering)"
-        );
-        debug_assert!(!(cost.sacrifice.is_some() && cost.bounce.is_some()), "one reservation per cost (lowering)");
+        use crate::pay::Reserve;
+        let mut reserves: Vec<(Reserve, CardIdx)> = Vec::new();
+        // (A permanent to return to its owner's hand, ninjutsu's unblocked
+        // attacker, is reserved like one to sacrifice: a mana ability that
+        // sacrifices it can't pay the mana first. So is one to remove a
+        // counter from, CR 601.2g; EoE W3.)
+        for s in [cost.sacrifice.clone(), cost.bounce.clone(), Self::remove_counter_reserve(cost)].into_iter().flatten() {
+            reserves.push((Reserve::Perm(s, false), card));
+        }
+        if cost.discard > 0 {
+            reserves.push((Reserve::Discard(cost.discard, cost.discard_filter.clone()), card));
+        }
+        if let Some((n, f)) = &cost.discard_also {
+            reserves.push((Reserve::Discard(*n, Some(f.clone())), card));
+        }
+        if let Some(f) = &cost.exile_from_hand {
+            reserves.push((Reserve::Exile(f.clone()), card));
+        }
         Keep {
             exclude,
             life: cost.life,
-            // (A permanent to return to its owner's hand, ninjutsu's
-            // unblocked attacker, is reserved like one to sacrifice: a mana
-            // ability that sacrifices it can't pay the mana first.)
-            // (So is one to remove a counter from: a mana ability that
-            // sacrifices it can't pay the mana first, CR 601.2g; EoE W3.)
-            sac: cost.sacrifice.clone().or_else(|| cost.bounce.clone()).or_else(|| Self::remove_counter_reserve(cost)).map(|s| (s, card)),
-            // (A land-card discard never competes with a mana source in
-            // hand: those are not lands.)
-            discard: (cost.discard > 0 && cost.discard_filter.is_none()).then_some((cost.discard, card)),
-            exile: cost.exile_from_hand.clone().map(|f| (f, card)),
+            reserves,
             allow: 0,
             spell: None,
-            sac_taps: false,
             taps: None,
             committed: Vec::new(),
             // (Its source's mana abilities that conflict with the cost: out
@@ -865,8 +923,7 @@ impl Game {
         pm.keep.taps = self.taps_for(p, card, &ad.cost);
         // "Tap X untapped artifacts": X of them stay for the cost (EoE W3).
         if let Some(r) = Self::tap_x_reserve(&ad.cost, u8::try_from(x).unwrap_or(u8::MAX)) {
-            pm.keep.sac = Some((r, card));
-            pm.keep.sac_taps = true;
+            pm.keep.reserves.push((crate::pay::Reserve::Perm(r, true), card));
         }
         pm.waterbend = ad.cost.waterbend;
         pm.forced = self.exile_sources(p, card, &ad.cost, Self::mana_exclude(card, ad));
@@ -928,7 +985,10 @@ impl Game {
     pub(crate) fn pay_costs(&mut self, id: u32, mut picked: Vec<CardIdx>) {
         let Some((p, card, cost)) = self.item_cost(id) else { return };
         let n_sac = cost.sacrifice.as_ref().map_or(0, |s| s.n) as usize;
-        let n_disc = n_sac + cost.discard as usize;
+        // (A second discard with a filter of its own first: retrace's land
+        // card with the card's own discard, docs/shortcuts.md 24.7.5k.)
+        let n_also = n_sac + cost.discard_also.as_ref().map_or(0, |d| d.0) as usize;
+        let n_disc = n_also + cost.discard as usize;
         let n_exile = n_disc + cost.exile_from_hand.is_some() as usize;
         let n_bounce = n_exile + cost.bounce.as_ref().map_or(0, |b| b.n) as usize;
         let n_gy = n_bounce + cost.exile_graveyard as usize;
@@ -999,10 +1059,13 @@ impl Game {
                 0
             };
             let only_cards = need > 0 && need >= n_sac - picked.len();
+            // (Each pick leaves the cost's other parts that take permanents or
+            // cards in hand their candidates: ENGINE.md 100.4.7.)
             let cands: Vec<CardIdx> = self
                 .sacrifice_candidates(p, card, s)
                 .into_iter()
                 .filter(|c| !picked.contains(c) && (!only_cards || self.feeds_graveyard(p, *c) && self.gy_cost_card(cost, *c)))
+                .filter(|&c| self.cost_picks_ok(p, card, cost, &picked, c))
                 .collect();
             let opts = self.cost_pick_options(p, &cands, cost.life);
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::Sacrifice, opts);
@@ -1010,10 +1073,12 @@ impl Game {
         }
         if picked.len() < n_disc {
             let mut opts = self.hand_options_except(p, Some(card));
-            if let Some(f) = &cost.discard_filter {
+            let filter = if picked.len() < n_also { cost.discard_also.as_ref().map(|d| &d.1) } else { cost.discard_filter.as_ref() };
+            if let Some(f) = filter {
                 let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
                 opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(f, c, &ctx)));
             }
+            opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.cost_picks_ok(p, card, cost, &picked, c)));
             // A cost that also exiles graveyard cards (escape): while the
             // graveyard (the discards so far in it, the sacrifices chosen to
             // come) would be short by as many cards as discards are left,
@@ -1031,14 +1096,19 @@ impl Game {
         }
         if picked.len() < n_exile {
             let f = cost.exile_from_hand.as_ref().unwrap();
-            let opts = self.exile_candidates(p, card, f);
+            let mut opts = self.exile_candidates(p, card, f);
+            opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.cost_picks_ok(p, card, cost, &picked, c)));
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ExileCost, opts);
             return;
         }
         if picked.len() < n_bounce {
             let b = cost.bounce.as_ref().unwrap();
-            let cands: Vec<CardIdx> =
-                self.sacrifice_candidates(p, card, b).into_iter().filter(|c| !picked[n_exile..].contains(c)).collect();
+            // (Not a permanent picked to be sacrificed: it is returned first.)
+            let cands: Vec<CardIdx> = self
+                .sacrifice_candidates(p, card, b)
+                .into_iter()
+                .filter(|c| !picked.contains(c) && self.cost_picks_ok(p, card, cost, &picked, *c))
+                .collect();
             let opts = self.cost_pick_options(p, &cands, cost.life);
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::BounceCost, opts);
             return;
@@ -1077,9 +1147,12 @@ impl Game {
                 (None, None) => unreachable!("taps owed without a tap cost"),
             };
             let floor = picked[n_gy..].last().map(|&c| self.perm_action(p, c));
+            // (A permanent picked to be sacrificed or returned is still
+            // there, and may be tapped first: CR 601.2h, the parts in any
+            // order; the taps come before the sacrifices and returns.)
             let cands: Vec<Opt> = self
                 .tap_candidates(p, card, t)
-                .filter(|c| !picked.contains(c))
+                .filter(|c| !picked[n_gy..].contains(c))
                 .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                 .filter(|o| floor.is_none_or(|f| o.action > f))
                 .collect();

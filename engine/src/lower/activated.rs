@@ -305,6 +305,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         sacrifice: None,
         discard: *discard_a_card as u8,
         discard_filter: None,
+        discard_also: None,
         exile_from_hand: None,
         bounce: None,
         exile_graveyard: l.int("ActivationCost.exile_cards_from_graveyard", *exile_cards_from_graveyard, 0, 20) as u8,

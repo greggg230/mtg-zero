@@ -531,7 +531,7 @@ impl Game {
     }
 
     /// The reservation a "remove a <k> counter from a <permanent> you
-    /// control" cost makes in its mana payment (`Keep::sac`): one such
+    /// control" cost makes in its mana payment (`Keep::reserves`): one such
     /// permanent stays (a mana ability that sacrifices it is activated before
     /// the cost is paid, CR 601.2g-h).
     pub(crate) fn remove_counter_reserve(cost: &Cost) -> Option<crate::db::SacCost> {
@@ -774,7 +774,7 @@ impl Game {
 
 impl Game {
     /// The reservation "tap X untapped <permanents> you control" makes in
-    /// its ability's mana payment (`Keep::sac` with `Keep::sac_taps`): the
+    /// its ability's mana payment (a `Reserve::Perm` that taps, `Keep::reserves`): the
     /// mana abilities are activated first (CR 601.2g) and the cost paid after
     /// (601.2h), so a source whose activation taps or sacrifices one of those
     /// permanents (its own {T} or sacrifice, another's "tap an untapped
@@ -806,7 +806,8 @@ impl Game {
         while x < cands.min(255) {
             if !mana.is_zero() {
                 let r = Self::tap_x_reserve(&ad.cost, (x + 1) as u8).unwrap();
-                let keep = crate::pay::Keep { sac: Some((r, card)), sac_taps: true, ..Self::keep_for(card, &ad.cost, exclude) };
+                let mut keep = Self::keep_for(card, &ad.cost, exclude);
+                keep.reserves.push((crate::pay::Reserve::Perm(r, true), card));
                 if !self.can_pay_without(p, &mana, &classes, &keep, exclude) {
                     break;
                 }
