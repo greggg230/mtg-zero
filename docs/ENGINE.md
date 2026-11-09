@@ -21024,3 +21024,61 @@ the source's class sits at its first member and the payment's options come in an
 (the same payments), or a source's other uses now pay (Pyrite Spellbomb tapped by Urza for {U},
 then sacrificed for its "{1}, Sacrifice"). `RULES_EPOCH` bumped; the Delver canary library's 60
 spots reach their positions.
+
+##### The payment's numbers (F7's list, part)
+
+* **Life** (`Keep::life`, `PayMana::life_after`, `PayMana::phyrexian_life`, `db::Cost::life`): u32,
+  their sums in u64 (`PayMana::later_life`; `keep.life + phyrexian_life` and `phyrexian_life += 2k`
+  could wrap a u8), `budget` and the Phyrexian split compare in i64, and the life paid goes to
+  `lose_life` through `i32::try_from` (at most the life total: CR 119.4 was checked). "Pay X life"
+  (`x_range`) offers every X up to the life total (255 at most before); `life_later` adds X life
+  and Bolas's Citadel's mana value exactly (one of them is 0, CR 107.3b); `with_life` adds with a
+  checked add.
+* **`ManaCost::total`** is a u32: the u8 sum wrapped, so {250}{R}{R}{R}{R}{R}{R} read as a cost of
+  nothing. `mana_value` (of a printed cost) is a u8 by the lowering's bounds (`try_from`).
+* **The virtual pool's counts** (`vgroups`, `most_spent`, `singles_vm`, `PayMana::vm`,
+  `each_subset`, `masks_of`, `pool_rems`' groups): u32. The pool's and the picks' mana of a type
+  together passed a u8 (clamped at 255), and `most_spent`'s spend was cut to a u8 (`k as u8`).
+* **Not done** (open, with the design): the u8 parts of a `ManaCost`. X and taxes are added into
+  its u8 generic part (`act_mana_x`, `total_mana`, `ManaCost::plus` saturating), and `x_range`,
+  `mana_now`'s X and `choose_times` offer no value whose generic part would pass 255. Exact needs
+  the generic part (and the pips `plus` adds, multikicker's) widened to u64, `less_generic` and the
+  discounts in it, `need_of`'s count from the lowering's bounds, `PermKind::Airbent`'s copy, and
+  the encoding's `ctx::COST` read as before. The pool's u8 amounts and a production's (`ManaPool`,
+  `[u8; 6]`, `PerPermanent`'s and `SameTypeCounters`' `.min(255)`) are F7's (aborted past them).
+
+Tests: `cr_119_4_pay_x_life_past_255` (Toxic Deluge with 400 life: X = 400, 255 before),
+`pay::tests::cr_601_2h_the_payments_amounts_pass_255` (a cost of 256 symbols isn't zero; the
+pool's 200 {R} and a pick's 100 are 300 in the virtual pool). Digests unchanged.
+
+##### Not done in this session (left for the next pass)
+
+In the brief's order (100.4.4 and 100.4.5 have the earlier designs):
+
+* **N23** (Gene Pollinators of which only some are creatures, with a "whenever you tap a creature
+  for mana" bonus: `pol_classes`' assertion; which Pollinator taps in `finish_payment`;
+  `reserved_n`'s assertion). Found on the way: `pol_classes` gives no Pollinator a land-subtype
+  bonus ("whenever you tap a Forest for mana") when it is a land, and with a later tap cost
+  (`Keep::taps`, above) `finish_payment`'s "first ready" Pollinators may tap one the cost needs.
+  Exact: the actors grouped by the extra mana their tap adds (`extra_of`), a `POL_FOR` class per
+  group with its own shared-tap budget (`Budget::tap` per group; a source on an actor of another
+  group takes one of each), the group in the source's id (`Src::slot`; the classes are rebuilt from
+  the same state each step, so the numbering holds), and the actor of each pick a choice among its
+  group's (asked when they differ), recorded in `PayMana` for `finish_payment`. The single
+  `Budget::tap` LJ and POL classes share (`tap_limit`: the least share) is the same flaw.
+* **24.7.5k / 40.1** (retrace with another discard; with an alternative cost whose rest takes a hand
+  card, returns or sacrifices a permanent): `merge_costs` and `Game::keep_for` keep one reservation
+  (`Keep::sac`, `discard`, `exile`), and the budget one `sac` count. Exact: a list of reservations,
+  each a candidate set and a count, checked at a leaf of the search by a matching of the candidates
+  the chosen ways leave (Hall's condition over the reservations), and `pay_costs` asking them in
+  order. The same holds for a cost with a sacrifice and "tap n untapped" (`Keep::taps` lets one
+  permanent be both, the payment's `tap_candidates` excludes a sacrificed one: they agree only
+  without overlap).
+* **28.8.2k** (the colours spent: `ChooseColorsSpent`, `NUMBER` + the WUBRG mask): a new decision
+  kind of the encoding (D's); `record_converge` still counts the most colours.
+* **13.15** (chains of mana abilities with mana costs): `MADE` / `NOT_MADE` still forbid every chain;
+  `UseCap` (N10) relies on that rule (an ability with a mana cost pays only the cost) and must be
+  revisited with it.
+* **26.11.6** (96 permanents a player): unchanged; the payment's ids for sources past `MY_PERM`'s 96
+  come with the paging of every `perm_action` caller (A's note in 100.2).
+* **The u8 parts of a `ManaCost`** (above).

@@ -793,3 +793,24 @@ fn cr_614_1a_doubled_tokens_past_sixty_four() {
     // (96 less the eight permanents, the Forest and the ten library cards.)
     assert_eq!(robots, 96 - 9 - 10, "{}", log(&g));
 }
+
+/// The payment's life, exact (F7's list, ENGINE.md 100.4.6), CR 119.4,
+/// 107.3: Toxic Deluge's "As an additional cost to cast this spell, pay X
+/// life" may take every point of a life total past 255 (the payment kept
+/// life in a u8, so X stopped at 255).
+#[test]
+fn cr_119_4_pay_x_life_past_255() {
+    let mut g = scen().battlefield(0, &["Swamp", "Swamp", "Swamp"]).hand(0, &["Toxic Deluge"]).life(0, 400).at(Step::Main1, 0).start();
+    let d = g.card(0, "Toxic Deluge", Zone::Hand);
+    g.choose(Choice::Cast(d));
+    // (X with A0's digits past 31: the largest each time.)
+    for _ in 0..12 {
+        if g.kind() != Some(DecisionKind::ChooseMode) {
+            break;
+        }
+        let last = *options(&g).last().unwrap();
+        g.choose(last);
+    }
+    finish(&mut g, |_| None);
+    assert_eq!(g.life(0), 0, "X = 400: {}", log(&g));
+}

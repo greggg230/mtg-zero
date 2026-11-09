@@ -130,11 +130,11 @@ pub struct ManaCost {
 }
 
 impl ManaCost {
-    pub fn total(&self) -> u8 {
-        self.generic
-            + self.pips.iter().sum::<u8>()
-            + self.hybrid.iter().sum::<u8>()
-            + self.phyrexian.iter().sum::<u8>()
+    /// Every symbol, counted in u32 (exact: the u8 sum wrapped past 255,
+    /// and a cost of 256 read as none; ENGINE.md 100.4.6).
+    pub fn total(&self) -> u32 {
+        let sum = |v: &[u8]| v.iter().map(|&n| n as u32).sum::<u32>();
+        self.generic as u32 + sum(&self.pips) + sum(&self.hybrid) + sum(&self.phyrexian)
     }
 
     pub fn is_zero(&self) -> bool {
@@ -165,9 +165,9 @@ impl ManaCost {
     }
 
     /// Mana value (CR 202.3): every symbol counts one (hybrid and
-    /// Phyrexian included).
+    /// Phyrexian included). (Of a printed cost: a u8, the lowering's bounds.)
     pub fn mana_value(&self) -> u8 {
-        self.total()
+        u8::try_from(self.total()).expect("a printed cost's mana value: a u8")
     }
 
     pub fn has_phyrexian(&self) -> bool {

@@ -297,7 +297,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         },
         x_times: 0,
         tap: *tap_self,
-        life: l.int("ActivationCost.pay_life", *pay_life, 0, 99) as u8,
+        life: l.int("ActivationCost.pay_life", *pay_life, 0, 99) as u32,
         sac_self: *sacrifice_self,
         exile_self: *exile_self,
         discard_self: *discard_self,

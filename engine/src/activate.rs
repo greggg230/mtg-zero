@@ -287,7 +287,7 @@ impl Game {
             for c in self.permanents_of(p) {
                 let n = self.abilities(c).artifact_ability_discount;
                 if n > 0 {
-                    let floor = m.total().saturating_sub(1);
+                    let floor = u8::try_from(m.total().saturating_sub(1)).unwrap_or(u8::MAX); // (exact: n is a u8)
                     m.generic = m.generic.saturating_sub(n.min(floor));
                 }
             }
@@ -298,7 +298,7 @@ impl Game {
             for c in self.permanents_of(p) {
                 let n = self.abilities(c).ability_discount;
                 if n > 0 {
-                    let floor = m.total().saturating_sub(1);
+                    let floor = u8::try_from(m.total().saturating_sub(1)).unwrap_or(u8::MAX); // (exact: n is a u8)
                     m.generic = m.generic.saturating_sub(n.min(floor));
                 }
             }
@@ -553,7 +553,7 @@ impl Game {
         allow: u8,
     ) -> bool {
         let pl = &self.players[p as usize];
-        if (cost.life as i32) > pl.life {
+        if cost.life as i64 > pl.life as i64 {
             return false; // CR 119.4
         }
         if let Some(s) = &cost.sacrifice {
@@ -910,7 +910,7 @@ impl Game {
     /// mana source also `ACTIVATE` + its slot x 4 + i = "activate its mana
     /// ability i first, then sacrifice or return it" (ENGINE.md 86.2; CR
     /// 601.2g-h; `float_before_cost`, `life_after` = the cost's life).
-    fn cost_pick_options(&self, p: PlayerId, cands: &[CardIdx], life_after: u8) -> Vec<Opt> {
+    fn cost_pick_options(&self, p: PlayerId, cands: &[CardIdx], life_after: u32) -> Vec<Opt> {
         let mut opts = Vec::with_capacity(cands.len());
         for &c in cands {
             opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
@@ -1211,7 +1211,8 @@ impl Game {
             self.sacrifice_picked(p, id, &picked[..n_sac]);
         }
         if cost.life > 0 {
-            self.lose_life(p, cost.life as i32);
+            // (At most the life total, an i32: CR 119.4 was checked.)
+            self.lose_life(p, i32::try_from(cost.life).expect("life within the life total"));
         }
         if cost.discard_hand {
             for h in self.hand_sorted(p) {
@@ -1300,7 +1301,7 @@ impl Game {
     /// changes. A cost that taps the source itself (a fetch land, Wasteland:
     /// the source of the ability) is not one of these: its source isn't
     /// picked.
-    pub(crate) fn float_before_cost(&self, p: PlayerId, c: CardIdx, life_after: u8) -> crate::svec::SVec<u8, 4> {
+    pub(crate) fn float_before_cost(&self, p: PlayerId, c: CardIdx, life_after: u32) -> crate::svec::SVec<u8, 4> {
         let mut out = crate::svec::SVec::new();
         let o = &self.objs[c.i()];
         if o.zone != Zone::Battlefield || o.controller != p || o.tapped {
@@ -1337,8 +1338,9 @@ impl Game {
             }
             // CR 119.4: its life, and the cost's life after it (with a
             // painland's damage first).
-            let spent = k.life as i32 + if life_after > 0 { m.damage_to_you as i32 } else { 0 };
-            if (k.life as i32) > life || (life_after > 0 && life - spent < life_after as i32) {
+            // (In i64: exact.)
+            let (life, spent) = (life as i64, k.life as i64 + if life_after > 0 { m.damage_to_you as i64 } else { 0 });
+            if k.life as i64 > life || (life_after > 0 && life - spent < life_after as i64) {
                 continue;
             }
             if productions(self, p, &m.prod, Some(c)).is_empty() {

@@ -597,7 +597,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         activated.insert(
             0,
             ActivatedDef {
-                cost: Cost { tap: true, life, ..Cost::default() },
+                cost: Cost { tap: true, life: life.into(), ..Cost::default() },
                 effect: ActEffect::Mana(ManaAbility { prod: ManaProd::One(intrinsic), damage_to_you: 0, sac_if_no: None, only: 0, uncounterable: false, haste: false, opp_life: 0 }),
                 sorcery: false,
                 instant_only: false,
@@ -931,7 +931,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         let k = l.delayed_ability(d.finish());
         // "Warp-{B}, Pay 2 life" (CR 119.4; ENGINE.md 99.4).
         let life = l.int("CardPrinting.warp_additional_life_cost", *warp_additional_life_cost, 0, 20) as u8;
-        let cost = crate::db::Cost { life, ..Default::default() };
+        let cost = crate::db::Cost { life: life.into(), ..Default::default() };
         AltCost { mana, cost, dash: Some(k), warp: true, ..AltCost::default() }
     });
     if warp.is_none() {
@@ -2245,7 +2245,7 @@ fn lower_alt_cost(l: &mut Lowerer, a: &cats::AlternativeCost) -> Option<AltCost>
             }
         }
     }
-    out.cost.life = l.int("AlternativeCost.pay_life", *pay_life, 0, 99) as u8;
+    out.cost.life = l.int("AlternativeCost.pay_life", *pay_life, 0, 99) as u32;
     if !exile_card_color.is_empty() {
         match letter_index(exile_card_color) {
             Some(i) if i < 5 => out.cost.exile_from_hand = Some(Filter::Color(1 << i)),
@@ -2290,7 +2290,7 @@ fn lower_additional_option(l: &mut Lowerer, o: &cats::AdditionalCostOption) -> O
     let mut c = Cost::default();
     match kind {
         enums::AdditionalCostKind::Discard => c.discard = n,
-        enums::AdditionalCostKind::PayLife => c.life = n,
+        enums::AdditionalCostKind::PayLife => c.life = n as u32,
         enums::AdditionalCostKind::Sacrifice => {
             let Some(p) = permanent_filter else {
                 l.unsupported("AdditionalCostOption.permanent_filter(missing)");

@@ -1191,7 +1191,7 @@ pub struct Cost {
     /// creature, free of summoning sickness (302.6).
     pub tap: bool,
     /// Pay n life (CR 119.4).
-    pub life: u8,
+    pub life: u32,
     pub sac_self: bool,
     /// Exile this card (a Spirit Guide from hand).
     pub exile_self: bool,
