@@ -344,6 +344,9 @@ pub(crate) struct PayMana {
     /// non-decreasing order, each production once; ENGINE.md 99.12).
     pub now_taken: [u8; 6],
     pub now_min: u8,
+    /// The page of the `PayPool` decision (A0's `ask_paged`: more pools
+    /// than `NUMBER` ids).
+    pub pool_page: crate::decision::Page,
 }
 
 impl PayMana {
@@ -376,6 +379,7 @@ impl PayMana {
             which: None,
             now_taken: [0; 6],
             now_min: 0,
+            pool_page: crate::decision::Page::FIRST,
         }
     }
 
@@ -1595,7 +1599,12 @@ impl Game {
         // CR 601.2h: which of the pool's mana pays, the sources picked.
         if let Some(rems) = pm.spend.take() {
             match self.answer.take() {
-                Some(Choice::Number(k)) => self.finish_payment(&pm, rems[k as usize].clone()),
+                Some(Choice::Item(k)) => self.finish_payment(&pm, rems[k as usize].clone()),
+                Some(Choice::Page(p)) => {
+                    pm.pool_page = p;
+                    pm.spend = Some(rems);
+                    self.agenda.push(Task::PayMana(pm));
+                }
                 Some(other) => unreachable!("pool answer {other:?}"),
                 None => self.end_payment(pm, rems),
             }
@@ -1606,7 +1615,9 @@ impl Game {
         // are still to be activated: a cost of no mana, Psychic Frog's,
         // with two Lotus Petals, ENGINE.md 49.)
         if pm.vm == Some(0) && pm.now.is_none() && pm.forced.is_empty() && pm.chosen.len() == pm.need_total() {
-            let rem = self.pool_rems(&pm, &[]).swap_remove(0);
+            // (The classes only for the several-mana picks' restrictions.)
+            let classes = if pm.multi.is_empty() { Vec::new() } else { self.pay_classes(payer, pm.keep.exclude, pm.improvise_types(), pm.convoke) };
+            let rem = self.pool_rems(&pm, &classes).swap_remove(0);
             self.finish_payment(&pm, rem);
             return;
         }
@@ -1916,10 +1927,12 @@ impl Game {
             self.finish_payment(&pm, rems[0].clone());
             return;
         }
-        let opts = (0..rems.len()).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
-        let payer = pm.payer;
+        // (Any number of pools: paged past the `NUMBER` ids, A0's helper;
+        // docs/shortcuts.md N11.)
+        let items: Vec<(u32, Choice)> = (0..rems.len() as u32).map(|k| (k, Choice::Item(k))).collect();
+        let (payer, page) = (pm.payer, pm.pool_page);
         pm.spend = Some(rems);
-        self.ask(Task::PayMana(pm), payer, DecisionKind::PayPool, opts);
+        self.ask_paged(Task::PayMana(pm), page, payer, DecisionKind::PayPool, act::NUMBER, act::NUMBER_N, &items, Vec::new());
     }
 
     /// The pools payment `pm` can leave, each once (CR 106.4: two mana of
@@ -1934,79 +1947,100 @@ impl Game {
     fn pool_rems(&self, pm: &PayMana, classes: &[Class]) -> Vec<Rem> {
         use crate::mana::R;
         let pool = self.players[pm.payer as usize].pool;
-        let groups = self.vgroups(pm);
-        let mut vamt = pool.amt;
-        for t in 0..6 {
-            vamt[t] = vamt[t].saturating_add(pm.extra[t]);
+        // The virtual pool's mana by what tells two units apart: its type,
+        // its spending restriction and rider (`only`, 0 for none), whether it
+        // gives haste (Arena of Glory), and whether a mana ability with a
+        // mana cost made it in this payment (`MADE`: it can't pay such a
+        // cost). Units alike in all four are the same choice (CR 106.4: the
+        // pool holds amounts of mana, and two such units leave the same
+        // pool). The pool's mana first (made by nothing in this payment).
+        let mut parts: Vec<((u8, u8, bool, bool), u8)> = Vec::new();
+        let mut add = |key: (u8, u8, bool, bool), n: u8| {
+            if n == 0 {
+                return;
+            }
+            match parts.iter_mut().find(|x| x.0 == key) {
+                // (Saturating: at most 255 of a type, shortcuts.md 46.3.)
+                Some(x) => x.1 = x.1.saturating_add(n),
+                None => parts.push((key, n)),
+            }
+        };
+        let kinds = self.pool_kinds(pm.payer);
+        for t in 0..6u8 {
+            let restr: u8 = kinds.iter().filter(|k| k.0 == t).map(|k| k.2).sum();
+            let haste = if t as usize == R { pool.haste } else { 0 };
+            add((t, 0, false, false), pool.amt[t as usize] - restr - haste);
+            add((t, 0, true, false), haste);
         }
-        let vkinds = self.virtual_kinds(pm);
-        let vhaste = pool.haste.saturating_add(pm.extra_haste).min(vamt[R]);
+        for &(t, only, n) in kinds.iter() {
+            add((t, only, false, false), n);
+        }
+        // The several-mana sources picked: each production with its class's
+        // restriction, haste and need.
+        for (src, prod) in &pm.multi {
+            let cl = classes.iter().find(|cl| cl.members.contains(src)).expect("a picked source's class");
+            for t in 0..6u8 {
+                add((t, cl.only, cl.haste && t as usize == R, cl.need != 0), prod[t as usize]);
+            }
+        }
+        let rem_of = |spent: &[u8]| {
+            let mut r = Rem::default();
+            for (i, &((t, only, haste, _), n)) in parts.iter().enumerate() {
+                let left = n - spent.get(i).copied().unwrap_or(0);
+                r.amt[t as usize] = r.amt[t as usize].saturating_add(left);
+                if haste {
+                    r.haste = r.haste.saturating_add(left);
+                }
+                if only != 0 {
+                    crate::eoe_w2::add_kind(&mut r.restr, t, only, left);
+                }
+            }
+            r
+        };
         let vm = pm.vm.expect("the pool's spend is known") as usize;
         if vm == 0 {
-            return vec![Rem { amt: vamt, restr: vkinds, haste: vhaste }];
+            return vec![rem_of(&[])];
         }
-        let creature = pm.keep.spell.is_some_and(|c| self.is_type(c, crate::db::types::CREATURE));
-        let chosen: SVec<ManaMask, 16> = pm.chosen.iter().map(|s| chosen_mask(classes, s)).collect();
-        let conv = |m: ManaMask| if pm.convert { convert(m) } else { m };
-        // The spends that complete the payment: the mana of each type spent,
-        // and the most restricted mana of each type among them (spent before
-        // other mana; its own kind of the virtual pool, which Wizard's
-        // Rockets doesn't turn into colours): the greatest such amounts.
-        let mut spends: Vec<([u8; 6], [u8; 6])> = Vec::new();
-        let covers = |a: &[u8; 6], b: &[u8; 6]| (0..6).all(|t| a[t] >= b[t]);
+        // The units this payment may spend (CR 106.6: restricted mana only
+        // when one of its purposes is this payment's), as groups.
+        let spendable: Vec<usize> = (0..parts.len()).filter(|&i| pm_spendable(pm, parts[i].0 .1)).collect();
+        let groups: SVec<(u8, u8), 12> = spendable.iter().map(|&i| (i as u8, parts[i].1)).collect();
+        let mask_of = |i: usize| {
+            let (t, only, _, made) = parts[i].0;
+            let m = (1u8 << t) | if made { MADE } else { 0 } | if only != 0 { RESTRICTED } else { 0 };
+            if pm.convert {
+                convert(m)
+            } else {
+                m
+            }
+        };
+        let chosen: SVec<ManaMask, 16> = pm.chosen.iter().map(|s| chosen_mask(classes, s)).map(|m| if pm.convert { convert(m) } else { m }).collect();
+        // Every spend of `vm` units that completes the payment, and the pool
+        // each leaves: every distinct one is the player's choice (601.2h).
+        let mut out: Vec<Rem> = Vec::new();
         each_subset(&groups, vm, &mut SVec::new(), &mut |cnt| {
-            let mut ch: SVec<ManaMask, 16> = chosen.iter().map(|&m| conv(m)).collect();
-            ch.extend(masks_of(&groups, cnt).iter().map(|&m| conv(m)));
-            if !payable_n(&pm.cost, &pm.marked, &ch, &[]) {
-                return false;
-            }
-            let (mut spent, mut restr) = ([0u8; 6], [0u8; 6]);
+            let mut ch = chosen.clone();
+            let mut spent = vec![0u8; parts.len()];
             for (g, &n) in groups.iter().zip(cnt.iter()) {
-                spent[(g.0 & 7) as usize] += n;
-                if g.0 & 16 != 0 {
-                    restr[(g.0 & 7) as usize] += n;
+                spent[g.0 as usize] = n;
+                for _ in 0..n {
+                    ch.push(mask_of(g.0 as usize));
                 }
             }
-            if spends.iter().any(|s| s.0 == spent && covers(&s.1, &restr)) {
-                return false;
-            }
-            match spends.iter().position(|s| s.0 == spent && covers(&restr, &s.1)) {
-                Some(i) => {
-                    spends[i].1 = restr;
-                    let mut j = i + 1;
-                    while j < spends.len() {
-                        if spends[j].0 == spent && covers(&restr, &spends[j].1) {
-                            spends.remove(j);
-                        } else {
-                            j += 1;
-                        }
-                    }
+            if payable_n(&pm.cost, &pm.marked, &ch, &[]) {
+                let r = rem_of(&spent);
+                if !out.contains(&r) {
+                    out.push(r);
                 }
-                None => spends.push((spent, restr)),
             }
             false
         });
-        let mut out: Vec<Rem> = Vec::new();
-        for (spent, restr_spent) in spends {
-            let mut amt = vamt;
-            for t in 0..6 {
-                amt[t] -= spent[t];
-            }
-            let lo = spent[R].saturating_sub(vamt[R] - vhaste);
-            let hi = if creature { spent[R].min(vhaste) } else { lo };
-            for restr in crate::eoe_w2::kinds_left(&vkinds, &restr_spent, &|only| pm_spendable(pm, only)) {
-                for h in lo..=hi {
-                    let r = Rem { amt, restr: restr.clone(), haste: vhaste - h };
-                    if !out.contains(&r) {
-                        out.push(r);
-                    }
-                }
-            }
-        }
         // (The first keeps the most types, then the most of the earlier
-        // ones; at most `NUMBER` options.)
-        out.sort_by_key(|r| (std::cmp::Reverse(r.amt.iter().filter(|&&n| n > 0).count()), std::cmp::Reverse(r.amt), std::cmp::Reverse(r.haste)));
-        out.truncate(act::NUMBER_N as usize);
+        // ones: the heuristic bots' answer.)
+        out.sort_by(|x, y| {
+            let key = |r: &Rem| (std::cmp::Reverse(r.amt.iter().filter(|&&n| n > 0).count()), std::cmp::Reverse(r.amt), std::cmp::Reverse(r.haste));
+            key(x).cmp(&key(y)).then_with(|| y.restr.cmp(&x.restr))
+        });
         out
     }
 
@@ -2096,7 +2130,10 @@ impl Game {
                 .iter()
                 .chain(pm.multi.iter().map(|m| &m.0))
                 .any(|s| !special(s) && self.source_def(s.card).activated_def(s.slot).mana().is_some_and(|m| m.uncounterable));
-            if uncounterable {
+            // (Or such mana of the pool: its rider, CR 106.6, kept there.)
+            let rider = |v: &[crate::eoe_w2::RKind]| v.iter().filter(|k| k.1 & crate::db::MANA_UNCOUNTERABLE != 0).map(|k| k.2 as u32).sum::<u32>();
+            let rider_spent = rider(&self.virtual_kinds(pm)) > rider(&rem.restr);
+            if uncounterable || rider_spent {
                 let r = self.obj_ref(card);
                 self.marks.push((r, crate::game::Mark::Uncounterable));
             }

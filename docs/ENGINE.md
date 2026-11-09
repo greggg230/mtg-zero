@@ -20185,3 +20185,34 @@ Tests: `rules_payment_b.rs::cr_601_2g_two_gene_pollinators_and_twenty_lands_are_
 (two Pollinators and 20 basic lands: exact answers for five costs; it failed on 95c7fe2 with the
 node limit's panic). The node-limit test (`pay::tests`) now uses cards whose ways cost life, so no
 reduction applies.
+
+##### 100.4.2 The pool's mana: restrictions, riders, every pool left (13.1k, N11, N19, N20)
+
+* **N19.** Mana a mana ability makes with priority keeps its spending restriction in every table
+  (`Game::add_restricted_mana`; CR 106.6). W2 had kept the cube's old behaviour (the restriction
+  dropped) to keep the digests.
+* **N20.** Delighted Halfling's rider "and that spell can't be countered" goes with the mana into
+  the pool: a bit of the pool kind's `only` (`db::MANA_UNCOUNTERABLE`; not a purpose, so
+  `eoe_w2::spendable` ignores it). A payment for a spell that spends such pool mana marks the spell
+  `Uncounterable` (`finish_payment`), as a Halfling picked in the payment did already.
+* **13.1k.** `pool_rems` is exact: the virtual pool's units are told apart by type, restriction
+  and rider, haste (Arena of Glory) and `MADE` (a mana ability with a mana cost made it in this
+  payment); every spend of `vm` units that completes the payment is tried, and every distinct pool
+  it leaves (amounts, restricted kinds, haste) is the player's choice. Gone: "artifact-only {C}
+  before other {C}", "haste {R} after other {R} on a noncreature spell" and `kinds_left`'s "narrower
+  purposes first" (the pools differ, and nothing turns plain mana into the restricted kind).
+* **N11.** `PayPool` offers every pool: with more than 32, A0's `ask_paged` pages them in the
+  `NUMBER` range (`PayMana::pool_page`; the options are `Choice::Item(k)`, a new choice for "the
+  k-th of the asking task's list", since a list can pass `Number`'s 256).
+
+Tests (`rules_payment_b.rs`; each failed on 599e4d9): `cr_106_6_floated_workshop_mana_keeps_its_restriction`
+(constructed table: Wasteland at Mishra's Workshop, the {C}{C}{C} floated stays artifact-only),
+`cr_106_6_the_halfling_rider_stays_with_mana_in_the_pool` (a restricted {W} with the rider pays Test
+Legend; Counterspell fails), `cr_601_2h_restricted_or_plain_colorless_for_an_artifact`,
+`cr_601_2h_haste_red_may_pay_a_noncreature_spell`, `cr_601_2h_every_pool_left_is_offered` (three
+of each type, Coveted Jewel's {6}: 336 pools, each once). The test kit has
+`Scenario::pool_restricted`.
+
+**Digests.** Full `038ee15c3fd29b28` -> `21badc9235bd1cd1`, `DIGEST_ENCODING=0` `69e4452bbf60b46f`
+-> `b1f5b72e8b3ac987`: 16 of the 2,500 games change (the more `PayPool` options, and floated
+Workshop mana). `RULES_EPOCH` bumped.

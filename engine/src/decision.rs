@@ -258,6 +258,9 @@ pub enum Choice {
     /// A paged choice's "next page" ([`Game::ask_paged`], ENGINE.md 100.1):
     /// the page the asking task asks next.
     Page(Page),
+    /// The k-th of the asking task's list, a paged choice of any length (the
+    /// pools a payment can leave, `PayPool`; ENGINE.md 100.4).
+    Item(u32),
 }
 
 /// `Choice::Faces` bits: the front face is cast / played, the other face
@@ -1012,6 +1015,7 @@ impl Game {
             Choice::Cast(i) => format!("cast {}#{}", self.name(i), i.0),
             Choice::Target(t) => format!("target {}", self.describe_target(t)),
             Choice::Trigger(k) => format!("trigger {k}"),
+            Choice::Item(k) => format!("option {}", k + 1),
             Choice::Ability(i, slot) => format!("activate {}#{} {slot:?}", self.name(i), i.0),
             Choice::Def(d) => format!("a {}", self.db.def(d).name),
             Choice::CastFace(i) => format!("cast the other face of {}#{}", self.name(i), i.0),

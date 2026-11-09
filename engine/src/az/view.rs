@@ -388,7 +388,7 @@ impl Game {
             (K::DivideDamage, Choice::Number(n)) => format!("{n} damage"),
             (K::ChooseFace, Choice::Number(0)) => "Front face".into(),
             (K::ChooseFace, Choice::Number(_)) => "Other face".into(),
-            (K::PayPool, Choice::Number(n)) => format!("Leave mana option {}", n + 1),
+            (K::PayPool, Choice::Item(n)) => format!("Leave mana option {}", n + 1),
             (K::PlayDraw, Choice::Target(Target::Player(p))) => {
                 if Some(p) == self.to_move() { "Play first".into() } else { "Draw first".into() }
             }

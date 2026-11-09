@@ -194,6 +194,17 @@ impl Scenario {
         self
     }
 
+    /// `n` more mana of type `ty` in `p`'s pool with the spending
+    /// restriction (and rider) `only` (`SPEND_*`, `MANA_UNCOUNTERABLE`; CR
+    /// 106.6): Mishra's Workshop's artifact-only {C} is the pool's `art`.
+    pub fn pool_restricted(mut self, p: PlayerId, ty: usize, only: u8, n: u8) -> Self {
+        self.g.players[p as usize].pool.amt[ty] += n;
+        let mut kinds: Vec<crate::eoe_w2::RKind> = self.g.pool_kinds(p).iter().copied().collect();
+        crate::eoe_w2::add_kind(&mut kinds, ty as u8, only, n);
+        self.g.set_pool_kinds(p, &kinds);
+        self
+    }
+
     /// `p`'s sideboard (cards outside the game, ENGINE.md 35).
     pub fn sideboard(mut self, p: PlayerId, names: &[&str]) -> Self {
         let mut sb: Vec<_> = names.iter().map(|n| self.g.db.expect_id(n).unwrap_or_else(|e| panic!("{e}"))).collect();

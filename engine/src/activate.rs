@@ -1445,7 +1445,9 @@ impl Game {
             // X mana in any combination: one mana, one choice, X times.
             let picks = if matches!(prod, crate::db::ManaProd::ComboX { .. }) { x } else { 1 };
             for _ in 0..picks {
-                self.agenda.push(Task::ManaNowPick { p, prods: prods.clone(), only: ad.mana().map_or(0, |m| m.only) });
+                // (Its restriction and its rider go with the mana, CR 106.6.)
+                let only = ad.mana().map_or(0, |m| m.only | if m.uncounterable { crate::db::MANA_UNCOUNTERABLE } else { 0 });
+                self.agenda.push(Task::ManaNowPick { p, prods: prods.clone(), only });
             }
         }
     }
