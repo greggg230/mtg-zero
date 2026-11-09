@@ -20423,3 +20423,98 @@ For W6: Power Depot's restriction exists (`SPEND_ARTIFACT | SPEND_ARTIFACT_ABILI
 mana tested), floated restricted mana keeps its restriction (100.4.2), and productions of any size
 are offered with priority (100.4.3); Sunken Citadel's land-ability mana for another land ability's
 mana cost needs N21, and Mm'menon's granted mana ability needs the payment sources above.
+
+#### 100.8 Test fixtures after the rules changes (branch `eoe-t-fixtures`, from `eoe-b-pay` b666765)
+
+**Why.** On b666765 the engine gate's pytest step failed three tests. The engine was right (the user's
+rule: no approximations); the fixtures were recorded under the old rules:
+
+* `tests/test_forked_games.py` (`test_the_builder_checks_every_position_and_lists_what_it_skips`,
+  `test_the_delver_driver_branches_and_starts_from_the_archive`): the archive builder (87.3) skipped every
+  canary spot of `data/delver_canary_library.json` ("does not replay on this engine", "its fingerprint
+  differs"). The library's 60 spots were mined, added and reviewed on the float engine 1d67542 (engine
+  sha256 `20c4409e77b13bd5`; the r3-2b float fork's games and five Play-tab reports): each is a seed and
+  the raw actions from the deal. With F3 (100.4.3) a player with a ready mana source gets a priority
+  decision ("Pass priority", "Activate mana abilities") where the old engine passed for them, so the
+  same actions mean other moves; and the options' words at the spot gained "Activate mana abilities",
+  which is in the fingerprint (`spot_sig`) even where the path is the same.
+* `tests/test_measure.py::test_fingerprints_read_a_recorded_replay` asserted `c['decided'] == 6` for six
+  games of a tiny network against the random bot: with F3 one of them reaches the 60-turn limit, a draw.
+
+**The library re-recorded: `tools/delver_rerecord.py`.** A spot can't be rebuilt from its source game
+(the move logs are the old engine's), but it stores its whole path, so the recording engine can replay
+it. `rerecord --old-engine CHECKOUT` replays every spot on the engine that recorded it (a subprocess: two
+builds don't load in one process; its engine sha256 must be the library's), recording each step's
+decider, decision kind, options' words, the action and its words, and the exported state. Then this
+engine walks the same game: each old step is matched by the same decider, the same kind, an option with
+the same words (the same action id first, then any other with those words: two Volcanic Islands, two
+Dazes in a delve) and the whole exported state equal (all but `decision`, `log`, `log_n`, `v`: every zone
+in order with ids, tapped, counters and damage, the stack, pools, life, both libraries' order). A
+question the old engine never asked is answered only the way the old engine behaved: a priority whose
+options are exactly pass and "Activate mana abilities" is passed (the old engine passed: the player had
+nothing else); a payment offering "Pay the rest from the pool" takes it (the old engine ended the payment
+there, 13.13); an `OrderTriggers`, `ChooseReplacement` or `OrderTimestamps` question (100.3) tries each
+option and keeps the one whose later states equal the old engine's. Anything else (another new question,
+a state that differs, the watched option missing at the same position) drops the spot with its reason.
+A spot keeps its id, kind, source, gid, `k` (the recording engine's decision index, the id's), seed,
+spec, watch, answer, why, review and `value`, and gets the new `actions`, `sig`, `pos` and `rerecord`;
+`k_main1` (the Bauble miner's index into the path) is mapped onto the new path. The old engine used here
+was a read-only copy of `run-1d67542`'s `mtgz/` (engine sha256 `20c4409e77b13bd5`, the library's) and
+`third_party/zero-core/python`.
+
+**Result: 60 of 60 spots rebuilt, none dropped.** Every old step matched (6,878 old steps -> 8,948);
+18 paths are unchanged (10 of them with the same fingerprint too). The inserted questions: 2,054
+priority passes, one covering payment (`tamiyo_flip_precombat:...:28:192`), and 15 trigger orders in 9
+spots (two Dragon's Rage Channelers' surveil triggers 12 times, two Monks' prowess triggers twice, two
+Cori-Steel Cutters' once: 100.3's 13.8). 14 of the 15 orders are told apart by the next recorded state
+(the other order fails there). One isn't: `burn_no_kill:r3-2b-float550_0550_s32:74:192`, turn 16's
+upkeep, two Monks' prowess triggers (each gives its own Monk +1/+1) that resolved with nobody acting in
+between in the old game; both orders reach the identical position, so the first offered (the trigger
+order) is taken and the spot lists it (`rerecord.order_unseen` [213]). At the spot, 36 decisions gained
+"Activate mana abilities" and none lost an option. Checks: the new position at every spot hashes equal
+to the recording engine's (`spot_pos` of the old trace's final state, 60 of 60); `delver_archive.py`
+builds 60 canary entries (0 skipped; each start block rebuilt with deal none and actual, the same decider
+and fingerprint), and `--canary half-a --held-out-library` 30 + 30; `delver_blunders.py library-score`
+with `r3-2b-beliefsearch` 424 (4 sims, 2 repeats, CPU) scores every spot (stale 0, the 6 held aside).
+
+**Provenance and loud detection.** The file now has `rules_epoch` (tools/position_lab.py's
+`RULES_EPOCH`, 1794211633), `engine` (this checkout's build) and `recorded` (the float engine, then this
+re-record, with `replaces`: the old file's git ref). Spot `value`s and the `reference` scores are the
+recording engine's (not re-measured). Each spot's `pos` (`delver_blunders.spot_pos`: the exported state's
+hash at the spot, beside `sig`) says the game is the same one. `tests/test_canary_library.py` fails when
+`RULES_EPOCH` moves past the library's epoch, naming the fix: `delver_rerecord.py check --stamp` (no old
+engine needed when every spot still reaches its `pos`), else `rerecord --old-engine <a checkout of the
+library's engine commit>`. It also checks every spot on this engine, and the walk itself with no old
+engine: a spot's trace on this engine minus the decisions its re-record inserted must re-record onto the
+same path, inserted indices, `order_unseen` and spot (four spots: the passes and the payment, three
+orders, the unseen order, `k_main1`); a full trace keeps its path; another state, a missing move or a
+missing watched option fail.
+
+**Readers.** The spot schema is unchanged: `delver_archive.py`, `delver_blunders.py` (library-score,
+the sidecar's `watch`), `delverai_blunders.py` and `delverai_blunder_games.py` read it as before. The ids,
+answers and watched options are unchanged, so `delverai_blunders.library_id` (the Progress tab's cache
+key) and the review page's verdicts (keyed by spot id) stay. A spot with `pos` must now also reach it
+where these tools check the fingerprint (`delver_blunders.same_pos`: library-score's stale ids, `canary`,
+the archive builder's skip "its state differs: pos", delverai_blunder_games' stale ids), so a spot that
+replays to another position with the same fingerprint is stale, not scored. `library_score`'s stale line
+says when the library's rules epoch differs from the engine checkout's (`library_rules_note`), and the
+held-out library `delver_archive.py` writes carries `engine` and `rules_epoch`.
+
+**When the engine moves (the live Delver tooling).** A library is recorded for one engine's rules. The
+publisher's scorers (delverai_blunders, delverai_blunder_games, the sidecar's `watch`) read the library of
+the checkout they run from and replay it on `--engine`'s build. On an engine before this rules epoch (the
+r3 line, the Play tab's float550), the re-recorded file replays only the 10 spots whose path and options
+didn't change (at their own positions; the other 50 stale, listed): keep the old file there (`--library` from `git show
+b666765:data/delver_canary_library.json`) until the engine moves; with the new engine, this file. Scores
+of one spot before and after the move come from different engines (the network sees one more option at
+36 spots). The Play tab doesn't read the library; its recorded games, like the source games, replay only
+on the engine they were played on (the archive builder skips them, listed).
+
+**test_measure.** The test is about the fingerprint tool's counters, and "all six decided" was a
+property of random play. It now checks `decided` and `starter_won` against the six games' own results
+(decided = results not tied; a turn-limit draw is counted in neither; `starter_won <= decided <= games`)
+and rescans one recorded game with fixed results (a draw, the starter's win, the other's) for the exact
+counts, so both counters are exercised whatever the engine's random play does.
+
+**Digests.** Unchanged (no engine change): full `3667d9433f0f7a00`, `DIGEST_ENCODING=0`
+`d0a7be8d70719c90`.
