@@ -495,7 +495,13 @@ impl super::MtgAz {
         // The new game shows each deck's and sideboard's size, which the
         // (hidden) sideboarding decided: a public key, so worlds of a viewer
         // that differ there are told apart (ENGINE.md 36.11).
-        let n = |v: &Vec<DefId>| v.len().min(255) as u64;
+        // (Each size in 8 bits: a deck or sideboard of a format is far
+        // smaller, 40 to 60 cards and 15 to 45; F7, ENGINE.md 100.7: loud
+        // past it, never a clamp that would let two sizes share a key.)
+        let n = |v: &Vec<DefId>| {
+            assert!(v.len() <= 255, "a deck or sideboard of {} cards: past the KEY_GAME payload's 8 bits", v.len());
+            v.len() as u64
+        };
         chance.push(key(KEY_GAME, 0, n(&decks[0]) | n(&decks[1]) << 8 | n(&sides[0]) << 16 | n(&sides[1]) << 24));
         Ok(())
     }

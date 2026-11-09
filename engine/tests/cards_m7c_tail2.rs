@@ -307,7 +307,7 @@ fn jacked_rabbit_ravenous_draws_at_x_five_cr702_156a_and_makes_rabbits_equal_to_
         pay(&mut g);
         let hand = g.player(0).hand.len();
         settle(&mut g);
-        assert_eq!(g.power(r), 1 + x as i32);
+        assert_eq!(g.power(r), 1 + x as i128);
         assert_eq!(g.player(0).hand.len(), hand + draws, "X = {x}");
     }
     let mut g = scen()

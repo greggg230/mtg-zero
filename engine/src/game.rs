@@ -13,7 +13,7 @@ use crate::db::EventKind;
 /// Settings of a game (zero-core's `Spec` will wrap this plus the decks).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct GameSpec {
-    pub starting_life: i32,
+    pub starting_life: i64,
     /// Opening hand size (CR 103.5).
     pub hand_size: u8,
     /// Maximum hand size (CR 402.2).
@@ -64,13 +64,15 @@ pub struct Obj {
     pub owner: PlayerId,
     pub controller: PlayerId,
     pub zone: Zone,
-    pub inc: u16,
+    /// The slot's incarnation (`ObjRef::inc`): counted exactly, a 2^32nd
+    /// zone change aborts the game (ENGINE.md 100.7).
+    pub inc: u32,
     /// CR 613.7; refreshed when entering the battlefield.
     pub timestamp: u32,
     pub tapped: bool,
-    /// Marked damage (CR 120.3e; saturating at `u32::MAX`, more than any
-    /// toughness: ENGINE.md 46).
-    pub damage: u32,
+    /// Marked damage (CR 120.3e): exact within `num::AMOUNT_MAX`, past it
+    /// the game aborts (ENGINE.md 100.7).
+    pub damage: u64,
     /// Dealt damage by a deathtouch source since the last SBA check (704.5h).
     pub deathtouched: bool,
     /// Turn number when its controller gained control (CR 302.6).
@@ -90,8 +92,9 @@ pub struct Obj {
     /// It entered as an evoked spell (CR 702.74a).
     pub evoked: bool,
     /// Last known information of its last time on the battlefield (CR
-    /// 608.2h): (its `inc` there, its power as it left).
-    pub lki_power: Option<(u16, i32)>,
+    /// 608.2h): (its `inc` there, its power as it left; an amount, the game
+    /// aborts past `num::AMOUNT_MAX`).
+    pub lki_power: Option<(u32, i64)>,
     /// A spell cast with flashback: exiled whenever it would leave the
     /// stack (CR 702.34a).
     pub flashback: bool,
@@ -109,14 +112,16 @@ pub struct Obj {
     /// u16, which the turn cap keeps far from).
     pub entered: u16,
     /// Loyalty abilities activated this turn (CR 606.3): in turn `pw_turn`,
-    /// `pw_used` of them, `pw_extra` more allowed than one (Comet).
+    /// `pw_used` of them, `pw_extra` more allowed than one (Comet; both
+    /// counted exactly, the game aborts past `u32::MAX`).
     pub pw_turn: u16,
-    pub pw_used: u8,
-    pub pw_extra: u8,
+    pub pw_used: u32,
+    pub pw_extra: u32,
     /// Times this object transformed (CR 701.27f: an ability of a permanent
     /// transforms it only if it hasn't transformed since the ability was
-    /// put on the stack); wraps.
-    pub flips: u8,
+    /// put on the stack): counted exactly, the game aborts past `u32::MAX`
+    /// (a wrapping count would alias).
+    pub flips: u32,
 }
 
 /// How a spell was cast (CR 601.2a-b, 118.9).
@@ -165,13 +170,19 @@ pub enum CastFrom {
 /// `Mark::Entered` holds them (ENGINE.md 100.2).
 pub(crate) const ENTER_BIG: u32 = 1 << 16;
 
+/// The objects of a game (cards, tokens, copies: `CardIdx` is a `u32`) at
+/// which it ends aborted (ENGINE.md 100.7). Memory runs out long before: 2^32
+/// objects of ~90 bytes are ~400 GB. The margin of 1,024 lets the running
+/// task finish below `u32::MAX` (a hard assert, the backstop).
+pub(crate) const OBJECT_LIMIT: usize = u32::MAX as usize - 1024;
+
 impl Game {
     /// The times an additional cost was paid and the X a permanent entered
     /// with, from its `Enters` event's note `amount` (bits 1-8 and 9-14, or
     /// `ENTER_BIG` and the entered object's `Mark::Entered`).
-    pub(crate) fn entered_counts(&self, amount: u32, obj: Option<ObjRef>) -> (u32, u32) {
-        if amount & ENTER_BIG == 0 {
-            return ((amount >> 1) & 0xFF, (amount >> 9) & 0x3F);
+    pub(crate) fn entered_counts(&self, amount: u64, obj: Option<ObjRef>) -> (u32, u32) {
+        if amount & ENTER_BIG as u64 == 0 {
+            return (((amount >> 1) & 0xFF) as u32, ((amount >> 9) & 0x3F) as u32);
         }
         obj.and_then(|r| {
             self.marks.iter().find_map(|&(o, m)| match m {
@@ -240,13 +251,17 @@ pub enum PlayIf {
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Player {
-    pub life: i32,
+    /// The life total (CR 119.1): an amount, exact within
+    /// +-`num::AMOUNT_MAX`; past it the game aborts (ENGINE.md 100.7).
+    pub life: i64,
     /// Index 0 = bottom, last = top.
     pub library: Vec<CardIdx>,
     pub hand: Vec<CardIdx>,
     /// Last = top.
     pub graveyard: Vec<CardIdx>,
     pub pool: ManaPool,
+    /// Lands played this turn (CR 305.2; exact: a 256th land in a turn
+    /// ends the game aborted, ENGINE.md 100.7, the encoding reading it as is).
     pub lands_played: u8,
     /// Attempted to draw from an empty library since the last SBA check (704.5b).
     pub drew_from_empty: bool,
@@ -273,17 +288,17 @@ pub struct Player {
     /// this turn (Mechan Shieldmate; ENGINE.md 99.11).
     pub artifact_entered: bool,
     /// The life gained this turn ("if you've gained 3 or more life this
-    /// turn"; EoE lane D, ENGINE.md 99.5).
-    pub life_gained: u32,
+    /// turn"; EoE lane D, ENGINE.md 99.5): an amount.
+    pub life_gained: i64,
     /// Can't gain life for the rest of the game (Screaming Nemesis).
     pub cant_gain_life: bool,
     /// Creatures declared as attackers this turn ("during any turn you
     /// attacked with a Rogue").
     pub attacked_with: Vec<ObjRef>,
     /// Cards drawn in this player's own draw step this turn.
-    pub draw_step_draws: u8,
+    pub draw_step_draws: u32,
     /// Spells cast this game.
-    pub spells_game: u16,
+    pub spells_game: u32,
     /// Energy counters (CR 122.1).
     pub energy: crate::num::Count,
     /// Lost life this turn (CR 119.3; damage and payments included).
@@ -328,7 +343,9 @@ pub struct Player {
 pub struct Dungeon {
     pub obj: Option<CardIdx>,
     pub room: u8,
-    pub completed: u8,
+    /// Dungeons completed (counted exactly; the game aborts past
+    /// `u32::MAX`).
+    pub completed: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -368,7 +385,7 @@ pub struct StackItem {
     pub x: u32,
     /// Divided damage: the amount for each target of the divided
     /// requirement, in the order chosen (CR 601.2d).
-    pub division: Vec<u32>,
+    pub division: Vec<u64>,
     /// What a creature this ability puts onto the battlefield attacking
     /// attacks (ninjutsu, CR 702.49c): `Some(None)` = the defending
     /// player, `Some(Some(pw))` = that planeswalker.
@@ -382,7 +399,7 @@ pub struct StackItem {
     pub noted: Vec<ObjRef>,
     /// An ability's source's `Obj::flips` as the ability was put on the
     /// stack (CR 701.27f).
-    pub flips: u8,
+    pub flips: u32,
     /// The zone a spell was cast from (`Nowhere` for an ability).
     pub origin: Zone,
     /// The times an additional cost that may be paid repeatedly was paid
@@ -435,7 +452,7 @@ pub struct Turn {
     /// Additional combat phases directly after the current phase (CR
     /// 500.8: "after this phase", whatever phase it is; a combat phase's
     /// own and those after it, one after another).
-    pub extra_combats: u8,
+    pub extra_combats: u32,
     /// Where the turn goes on after a combat phase with no additional one
     /// to follow: the postcombat main phase (`Main2`), or, after combat
     /// phases added to another phase (500.8), the phase that came next
@@ -598,8 +615,9 @@ pub struct Game {
     pub(crate) answer: Option<Choice>,
     pub(crate) waiting: Vec<PendingTrigger>,
     pub(crate) extra_turns: Vec<PlayerId>,
-    /// Combat damage assigned so far in the current damage step.
-    pub(crate) combat_dmg: Vec<(CardIdx, Target, u32)>,
+    /// Combat damage assigned so far in the current damage step (amounts
+    /// within `num::AMOUNT_MAX`).
+    pub(crate) combat_dmg: Vec<(CardIdx, Target, u64)>,
     pub(crate) next_ts: u32,
     pub(crate) next_stack_id: u32,
     pub(crate) outcome: Option<Outcome>,
@@ -607,10 +625,10 @@ pub struct Game {
     pub(crate) clouds: Vec<crate::hidden::Cloud>,
     /// Tokens created so far (a cheap "any token?" for the SBA check).
     pub(crate) tokens: u32,
-    /// The lowest slot made as a token or a copy (`u16::MAX`: none yet).
+    /// The lowest slot made as a token or a copy (`u32::MAX`: none yet).
     /// Slots below it are cards, which are never tokens: the 704.5d check
     /// looks only from here (ENGINE.md 17).
-    pub(crate) first_token: u16,
+    pub(crate) first_token: u32,
     /// A simultaneous move off the battlefield is in progress (`leaving`).
     pub(crate) batching: bool,
     /// The current event group (CR 603.2c, 700.1: one instruction of a
@@ -665,8 +683,9 @@ pub struct Game {
     /// Delayed triggered abilities waiting for their moment (CR 603.7).
     pub(crate) delayed: Vec<Delayed>,
     /// How many times abilities of these objects resolved this turn
-    /// ("if this is the second time this ability has resolved this turn").
-    pub(crate) resolved: Vec<(ObjRef, u8)>,
+    /// ("if this is the second time this ability has resolved this turn";
+    /// counted exactly).
+    pub(crate) resolved: Vec<(ObjRef, u32)>,
     /// Permissions to play cards from other zones (CR 601.2a).
     pub(crate) permissions: Vec<Permission>,
     /// Combat damage is being dealt (CR 510.2).
@@ -789,7 +808,7 @@ pub struct Game {
     /// Permanents that left the battlefield this turn, their toughness and
     /// controller as they last existed (CR 608.2h; kept when
     /// `CardDb::watch_toughness`: stationing by toughness, ENGINE.md 99.8).
-    pub(crate) lki_toughness: Vec<(ObjRef, i32, PlayerId)>,
+    pub(crate) lki_toughness: Vec<(ObjRef, i64, PlayerId)>,
     /// Mana in the pools with a spending restriction other than Mishra's
     /// Workshop's (`ManaPool::art`): (player, type, purposes, amount), a
     /// part of that player's `ManaPool::amt` (CR 106.6; ENGINE.md 99.12).
@@ -798,7 +817,7 @@ pub struct Game {
     /// The lands that entered the battlefield under each player's control
     /// during turn `.0` (kept when `CardDb::watch_lands_entered`; ENGINE.md
     /// 99.12).
-    pub(crate) lands_entered: (u32, [u8; 2]),
+    pub(crate) lands_entered: (u32, [u32; 2]),
     /// A card of this game says "nonbasic lands are Mountains" (its faces
     /// included; a copy copies a card of the game): the layers look
     /// (`Game::moon_on`; ENGINE.md 99.12).
@@ -831,12 +850,12 @@ pub struct Game {
     /// Smog, Chain Lightning): at `copies::MAY_COPY_CAP` no more are offered
     /// (an engine limit on a loop of optional actions, CR 732.2a, 732.3;
     /// ENGINE.md 26.11).
-    pub(crate) may_copies: u8,
+    pub(crate) may_copies: u32,
     /// Activations this turn of each permanent's non-mana activated ability
     /// (object, ability, count): at `ACTIVATION_CAP` no more are offered (an
     /// engine limit on a loop of optional actions, CR 732.2a: Zirda with
     /// Basalt Monolith makes unbounded mana; ENGINE.md 29).
-    pub(crate) activations: Vec<(ObjRef, u8, u8)>,
+    pub(crate) activations: Vec<(ObjRef, u8, u32)>,
     /// `SEEN_*` bits: a card of this game has the rare rule (ENGINE.md 29).
     pub(crate) seen: u16,
     // ---- M7b part 3b: the initiative and dungeons (ENGINE.md 27.4) ----
@@ -1013,7 +1032,7 @@ pub enum Mark {
     /// The amount of mana spent to cast it (CR 601.2h): on a spell as it is
     /// paid, then on the permanent it becomes ("the amount of mana spent to
     /// cast this creature"; EoE W3, kept for cards that read it).
-    ManaSpent(u8),
+    ManaSpent(u32),
     /// This spell was cast for alternative cost `grant` of definition `def`,
     /// which permanent `granter`'s static ability gave it in its owner's hand
     /// (`CastingRules::hand_alt_grants`; CR 118.9, 400.7g; ENGINE.md 99.15).
@@ -1170,7 +1189,7 @@ impl Game {
             outcome: None,
             clouds: Vec::new(),
             tokens: 0,
-            first_token: u16::MAX,
+            first_token: u32::MAX,
             observer: None,
             keys: Vec::new(),
             forced: Vec::new(),
@@ -1258,14 +1277,20 @@ impl Game {
 
     /// Slot `idx` was just made as a token or a copy (CR 111, 707.10).
     pub(crate) fn token_slot_made(&mut self, idx: CardIdx) {
-        self.tokens += 1;
+        self.tokens = self.exact_inc(self.tokens, "tokens made");
         self.first_token = self.first_token.min(idx.0);
     }
 
-    /// Append a card slot (not yet in any zone list).
+    /// Append a card slot (not yet in any zone list). At `OBJECT_LIMIT`
+    /// objects the game ends aborted (ENGINE.md 100.7); the running task
+    /// still finishes, within the margin to `u32::MAX` (the hard assert).
     pub(crate) fn add_card(&mut self, def: DefId, owner: PlayerId, zone: Zone) -> CardIdx {
-        assert!(self.objs.len() < u16::MAX as usize, "too many objects");
-        let idx = CardIdx(self.objs.len() as u16);
+        if self.objs.len() >= OBJECT_LIMIT {
+            let n = self.objs.len();
+            self.abort(|| format!("{n} objects: past the engine's object limit"));
+        }
+        assert!(self.objs.len() < u32::MAX as usize, "too many objects");
+        let idx = CardIdx(self.objs.len() as u32);
         // Rare rules some card of this game has (its faces included; a copy
         // copies a card of the game): the hot paths look only if one does.
         let d = self.db.def(def);
@@ -1361,7 +1386,7 @@ impl Game {
     pub fn player(&self, p: PlayerId) -> &Player {
         &self.players[p as usize]
     }
-    pub fn life(&self, p: PlayerId) -> i32 {
+    pub fn life(&self, p: PlayerId) -> i64 {
         self.players[p as usize].life
     }
     pub fn obj(&self, idx: CardIdx) -> &Obj {
@@ -1762,7 +1787,7 @@ impl Game {
         }
         if self.objs[idx.i()].zone == Zone::Battlefield && self.objs[idx.i()].inc == r.inc {
             self.note_entered(idx);
-            self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(r), b: crate::triggers::Subj::None, amount: note as u32 });
+            self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(r), b: crate::triggers::Subj::None, amount: note as u64 });
             self.day_night_entered(idx);
         }
         r
@@ -1855,7 +1880,8 @@ impl Game {
         }
         // CR 306.5b: a planeswalker enters with its printed loyalty.
         if let (Some(n), true) = (self.def_of(idx).loyalty, self.def_of(idx).is(types::PLANESWALKER)) {
-            self.add_counters(idx, crate::db::Counter::Loyalty, crate::num::count(n as i64));
+            // (A printed number; never negative, else none: CR 107.1b.)
+            self.add_counters(idx, crate::db::Counter::Loyalty, n.max(0) as crate::num::Count);
         }
         // CR 714.3a: a Saga enters with a lore counter on it (its chapter I
         // ability triggers, 714.2b).
@@ -1945,9 +1971,13 @@ impl Game {
             have += 1;
             let f = self.abilities(c).token_factor;
             if f > 1 {
+                // (Exact: the product, then the 64 of docs/shortcuts.md
+                // 24.7.4 (workstream A); a saturated product is past 64
+                // too.)
                 n = n.saturating_mul(f as u32).min(64);
             }
         }
+        // (The room left: at least 0.)
         n.min((crate::decision::act::PERM_N as u32).saturating_sub(have + self.perm_reserve(controller)))
     }
 
@@ -1960,7 +1990,7 @@ impl Game {
             .enumerate()
             .filter(|&(i, o)| {
                 o.owner == p
-                    && (i as u16) < self.first_token
+                    && i < self.first_token as usize
                     && !(o.zone == Zone::Battlefield && o.controller == p)
                     && o.zone != Zone::Nowhere
             })
@@ -2001,7 +2031,7 @@ impl Game {
         if self.objs[c.i()].zone != Zone::Battlefield {
             return;
         }
-        self.next_ts += 1;
+        self.next_ts = self.exact_inc(self.next_ts, "timestamps");
         self.objs[c.i()].timestamp = self.next_ts;
         if let Some(i) = self.battlefield.iter().position(|&x| x == c) {
             self.battlefield.remove(i);
@@ -2117,18 +2147,19 @@ impl Game {
     }
 
     /// Lose life (CR 119.3; paying life is losing it, 119.4).
-    pub(crate) fn lose_life(&mut self, p: PlayerId, n: i32) {
+    pub(crate) fn lose_life(&mut self, p: PlayerId, n: impl Into<crate::num::Wide>) {
+        let n = n.into();
         if n > 0 {
             self.sub_life(p, n);
             self.players[p as usize].lost_life = true;
         }
     }
 
-    /// A life total changes by `-n` (CR 119.3), saturating at
-    /// +-`num::AMOUNT_MAX` (CR 119 has no bound; shortcuts.md 46.2).
-    fn sub_life(&mut self, p: PlayerId, n: i32) {
-        let l = &mut self.players[p as usize].life;
-        *l = crate::num::amount(*l as i64 - n as i64);
+    /// A life total changes by `-n` (CR 119.3; no bound, 119): exact within
+    /// +-`num::AMOUNT_MAX`, past it the game ends aborted (ENGINE.md 100.7).
+    fn sub_life(&mut self, p: PlayerId, n: crate::num::Wide) {
+        let l = self.players[p as usize].life as crate::num::Wide - n;
+        self.players[p as usize].life = self.exact(l, "a life total");
     }
 
     /// `p` gains control of permanent `c` (CR 613.1b; an effect without a
@@ -2262,7 +2293,13 @@ impl Game {
             self.leaving_to = 0;
             self.leaving_choice = 0;
         }
-        let lki_power = (from == Zone::Battlefield).then(|| (old.inc, self.power(idx)));
+        // (Last known power: a stored amount, ENGINE.md 100.7.)
+        let lki_power = if from == Zone::Battlefield {
+            let p = self.power(idx);
+            Some((old.inc, self.exact(p, "a last known power")))
+        } else {
+            None
+        };
         // (An effect "loses all abilities for as long as" this remains on the
         // battlefield ends as it leaves, CR 611.2b: `layers_on_move`.)
         let loss_ended = from == Zone::Battlefield
@@ -2288,6 +2325,7 @@ impl Game {
             // controller", ENGINE.md 99.12.)
             if self.db.watch_toughness || self.db.watch_lki_controller {
                 let t = self.toughness(idx);
+                let t = self.exact(t, "a last known toughness");
                 self.lki_toughness.push((old, t, self.objs[idx.i()].controller));
             }
         }
@@ -2316,7 +2354,7 @@ impl Game {
         }
         let owner = self.objs[idx.i()].owner;
         let ts = if to == Zone::Battlefield {
-            self.next_ts += 1;
+            self.next_ts = self.exact_inc(self.next_ts, "timestamps");
             // (The first timestamp of the current event's entries: what
             // enters at the same time, CR 614.12a.)
             if self.group_ts.0 != self.ev_seq {
@@ -2329,10 +2367,13 @@ impl Game {
         let stamp = ts;
         let turn = self.turn.number;
         let known_before = if from.is_hidden() { self.objs[idx.i()].known } else { 0b11 };
+        // (Counted exactly: a slot's `u32::MAX`th zone change aborts the
+        // game, so no `ObjRef` aliases a newer object.)
+        let inc = self.exact_inc(self.objs[idx.i()].inc, "a card's zone changes");
         {
             let o = &mut self.objs[idx.i()];
             o.zone = to;
-            o.inc = o.inc.wrapping_add(1);
+            o.inc = inc;
             o.controller = match (to, controller) {
                 (Zone::Battlefield, Some(c)) | (Zone::Stack, Some(c)) => c,
                 _ => owner,
@@ -2371,7 +2412,7 @@ impl Game {
                 // permanent back face up enters back face up, 707.8a; a
                 // token never enters transformed by daybound, 702.145b.)
                 let d = self.objs[idx.i()].def;
-                self.next_ts += 1;
+                self.next_ts = self.exact_inc(self.next_ts, "timestamps");
                 let fx = crate::copies::CopyFx {
                     obj: ObjRef { idx, inc: self.objs[idx.i()].inc },
                     ts: self.next_ts,
@@ -2465,7 +2506,7 @@ impl Game {
             let note = std::mem::take(&mut self.enter_note);
             if !std::mem::take(&mut self.defer_enters) {
                 self.note_entered(new.idx);
-                self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(new), b: crate::triggers::Subj::None, amount: note });
+                self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(new), b: crate::triggers::Subj::None, amount: note as u64 });
             }
         }
         if from == Zone::Battlefield && !self.links.is_empty() {
@@ -2836,7 +2877,7 @@ impl Game {
             let plus = self.draw_plus(p);
             if plus > 0 {
                 self.note(|_| format!("P{p} draws {plus} more (a replacement)"));
-                n += plus;
+                n = self.exact_u32(n as crate::num::Wide + plus as crate::num::Wide, "cards to draw");
             }
         }
         self.draw_seq(p, n).map_or(Drew::Done, |(c, left)| Drew::Miracle(c, left))
@@ -2867,7 +2908,8 @@ impl Game {
                     self.draw(p).map(|c| (c, 0))
                 } else {
                     self.note(|_| format!("P{p} draws {plus} more (a replacement)"));
-                    self.draw_seq(p, 1 + plus)
+                    let n = self.exact_u32(1 + plus as crate::num::Wide, "cards to draw");
+                    self.draw_seq(p, n)
                 };
                 match cut {
                     Some((card, left)) => self.queue_miracle(p, card, left, step),
@@ -2980,8 +3022,8 @@ impl Game {
             return None;
         }
         if self.turn.step == Step::Draw && self.turn.active == p {
-            let pl = &mut self.players[p as usize];
-            pl.draw_step_draws = pl.draw_step_draws.saturating_add(1);
+            let n = self.players[p as usize].draw_step_draws;
+            self.players[p as usize].draw_step_draws = self.exact_inc(n, "cards drawn in the draw step");
         }
         if let Some(&top) = self.players[p as usize].library.last() {
             self.force_library_card(top, crate::hidden::KEY_DRAW, p);
@@ -2995,8 +3037,8 @@ impl Game {
         self.objs[top.i()].known |= 1 << p;
         let def = self.objs[top.i()].def;
         self.emit_private(KEY_DRAW, p, def as u64);
-        let pl = &mut self.players[p as usize];
-        pl.drawn = pl.drawn.saturating_add(1);
+        let n = self.players[p as usize].drawn;
+        self.players[p as usize].drawn = self.exact_inc(n, "cards drawn this turn");
         // Miracle (CR 702.94a): the first card drawn this turn may be
         // revealed as it is drawn. Asked of a player whose deck has a
         // miracle card at all (both decklists are known, ENGINE.md 10), on
@@ -3093,20 +3135,24 @@ impl Game {
         self.move_card(idx, Zone::Graveyard, Pos::Top);
     }
 
-    pub(crate) fn gain_life(&mut self, p: PlayerId, n: i32) {
+    pub(crate) fn gain_life(&mut self, p: PlayerId, n: impl Into<crate::num::Wide>) {
+        let n = n.into();
         if n > 0 && !self.players[p as usize].cant_gain_life {
             self.sub_life(p, -n);
             self.players[p as usize].gained_life = true;
-            let pl = &mut self.players[p as usize];
-            pl.life_gained = pl.life_gained.saturating_add(n as u32);
+            let gained = self.players[p as usize].life_gained as crate::num::Wide + n;
+            self.players[p as usize].life_gained = self.exact(gained, "the life gained this turn");
         }
     }
 
     /// Deal damage (CR 120.3): to a player as life loss, to a creature as
     /// marked damage; deathtouch marks 704.5h; lifelink gains life.
     /// Damage to a permanent with protection from the source is prevented
-    /// (702.16e). Returns the damage dealt.
-    pub(crate) fn deal_damage(&mut self, src: DamageSource, t: Target, amount: i32) -> i32 {
+    /// (702.16e). Returns the damage dealt. An amount dealt past
+    /// `num::AMOUNT_MAX` ends the game aborted (ENGINE.md 100.7); 0 or less
+    /// isn't dealt (CR 120.8, a rules floor).
+    pub(crate) fn deal_damage(&mut self, src: DamageSource, t: Target, amount: impl Into<crate::num::Wide>) -> i64 {
+        let amount = amount.into();
         if amount <= 0 {
             return 0;
         }
@@ -3125,8 +3171,8 @@ impl Game {
                 }
                 if src.infect {
                     // CR 702.90b: poison counters instead of life loss.
-                    let pl = &mut self.players[p as usize];
-                    pl.poison = pl.poison.saturating_add(crate::num::count(amount as i64));
+                    let n = self.players[p as usize].poison as crate::num::Wide + amount;
+                    self.players[p as usize].poison = self.exact_count(n, "poison counters");
                 } else {
                     // CR 120.3a: the player loses that much life.
                     self.sub_life(p, amount);
@@ -3146,7 +3192,7 @@ impl Game {
                     self.note(|g| format!("damage to {} prevented (protection)", g.describe_target(t)));
                     return 0;
                 }
-                let amt = crate::num::unsigned(amount);
+                let amt = self.exact_count(amount, "damage");
                 if walker {
                     // CR 120.3c: that many loyalty counters are removed.
                     self.remove_counters(r.idx, crate::db::Counter::Loyalty, amt);
@@ -3161,8 +3207,13 @@ impl Game {
                     // CR 120.3e: damage is marked (both, for a planeswalker
                     // creature).
                     let heals = self.abilities(r.idx).heals_on_damage;
+                    let marked = if heals {
+                        amt
+                    } else {
+                        self.exact_count(self.objs[r.idx.i()].damage as crate::num::Wide + amt as crate::num::Wide, "marked damage")
+                    };
                     let o = &mut self.objs[r.idx.i()];
-                    o.damage = if heals { amt } else { o.damage.saturating_add(amt) };
+                    o.damage = marked;
                     if heals {
                         o.deathtouched = false;
                     }
@@ -3178,7 +3229,7 @@ impl Game {
                 // Nemesis's ruling 66fc62ef, CR 510.2; `combat.rs` emits it).
                 if !self.combat_damage_now {
                     let mut ev = Event::obj(EventKind::DealtDamage, r);
-                    ev.amount = crate::num::unsigned(amount);
+                    ev.amount = amt;
                     self.event(ev);
                 }
             }
@@ -3187,6 +3238,8 @@ impl Game {
             self.gain_life(src.controller, amount);
         }
         self.note(|g| format!("{amount} damage to {}", g.describe_target(t)));
+        // (Dealt: positive, and within `num::AMOUNT_MAX` or the game aborted.)
+        let amount = self.exact(amount, "damage");
         // "Whenever this deals damage" (combat damage: one event per source
         // for the whole step, `combat.rs`).
         if let (false, Some(o)) = (self.combat_damage_now, src.obj) {
@@ -3194,7 +3247,7 @@ impl Game {
                 kind: EventKind::DealsDamage,
                 a: crate::triggers::Subj::Obj(o),
                 b: crate::triggers::Subj::None,
-                amount: crate::num::unsigned(amount),
+                amount: amount as u64,
             });
         }
         amount

@@ -2,7 +2,7 @@
 //! mulligans and cleanup (ENGINE.md 4, 5, 11).
 
 use crate::decision::{act, Choice, Decision, DecisionKind, Opt};
-use crate::game::{EndReason, Game, Outcome, Pos, Step};
+use crate::game::{EndReason, Game, Pos, Step};
 use crate::ids::{opp, CardIdx, PlayerId, Zone};
 use crate::pay::{PayMana, Src};
 use crate::resolve::Frame;
@@ -59,7 +59,7 @@ pub(crate) enum Task {
     DeclareBlockers { i: u8 },
     CombatDamage { first: bool, att: u8 },
     /// (`step`: where the amount's digits stand, ENGINE.md 100.2.)
-    AssignDamage { att: CardIdx, j: u32, left: u32, step: crate::decision::NumberStep },
+    AssignDamage { att: CardIdx, j: u32, left: u64, step: crate::decision::NumberStep },
     // cleanup (CR 514)
     CleanupDiscard,
     CleanupRest,
@@ -216,7 +216,7 @@ impl Game {
         let choice = d.choice_of(action).ok_or_else(|| format!("illegal action {action} for {:?}", d.kind))?;
         self.pending = None;
         self.answer = Some(choice);
-        self.decisions += 1;
+        self.decisions = self.exact_inc(self.decisions, "decisions");
         self.advance();
         chance.append(&mut self.keys);
         Ok(())

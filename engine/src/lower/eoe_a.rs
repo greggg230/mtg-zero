@@ -89,7 +89,7 @@ pub(crate) fn station(l: &mut Lowerer, card_types: u16, threshold: i64, kws: &[c
     let mut mods = Vec::new();
     if let Some((p, t)) = pt {
         mods.push(Mod::Types { add: types::CREATURE, subtypes: Vec::new(), replace: false });
-        mods.push(Mod::SetPt(p, t));
+        mods.push(Mod::set_pt(p, t));
     }
     let kw = super::effect_ext::keyword_mods(l, kws);
     mods.extend(kw);
@@ -300,7 +300,7 @@ pub(crate) fn lower_effect_eoe_a(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             let t = b.target(f, 0, 1);
             let mut mods = vec![
                 Mod::Types { add: types::ARTIFACT | types::CREATURE, subtypes: Vec::new(), replace: false },
-                Mod::SetPt(
+                Mod::set_pt(
                     l.int("TargetArtifactBecomesCreatureUEOT.power", *power, 0, 99),
                     l.int("TargetArtifactBecomesCreatureUEOT.toughness", *toughness, 0, 99),
                 ),
@@ -340,7 +340,7 @@ pub(crate) fn lower_effect_eoe_a(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             let Some(t) = lower_targets(l, b, targets, "PumpTargetArtifactOrCreatureUntilEOT") else { return true };
             let mut mods = Vec::new();
             if *power_bonus != 0 || *toughness_bonus != 0 {
-                mods.push(Mod::Pt(
+                mods.push(Mod::pt(
                     l.int("PumpTargetArtifactOrCreatureUntilEOT.power_bonus", *power_bonus, -99, 99),
                     l.int("PumpTargetArtifactOrCreatureUntilEOT.toughness_bonus", *toughness_bonus, -99, 99),
                 ));

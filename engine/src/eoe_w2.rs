@@ -52,7 +52,10 @@ pub(crate) fn add_kind(v: &mut Vec<RKind>, ty: u8, only: u8, n: u8) {
         return;
     }
     match v.iter_mut().find(|k| k.0 == ty && k.1 == only) {
-        Some(k) => k.2 = k.2.saturating_add(n),
+        // (Exact: the kinds are parts of the pool's mana of type `ty`, a
+        // `u8` that `Game::add_mana` keeps exact; past it only once the game
+        // ended aborted, the running task finishing with 255.)
+        Some(k) => k.2 = k.2.checked_add(n).unwrap_or(u8::MAX),
         None => {
             v.push((ty, only, n));
             v.sort_unstable();
@@ -264,11 +267,11 @@ impl EoeW2 {
 impl Game {
     /// The number of counters of kind `k` on object `s`: now, or as it last
     /// existed on the battlefield if it left (CR 608.2h).
-    pub(crate) fn source_counters(&self, s: crate::ids::ObjRef, k: crate::db::Counter) -> i64 {
+    pub(crate) fn source_counters(&self, s: crate::ids::ObjRef, k: crate::db::Counter) -> crate::num::Wide {
         if self.live(s) && self.objs[s.idx.i()].zone == crate::ids::Zone::Battlefield {
-            self.counters_on(s.idx, k) as i64
+            self.counters_on(s.idx, k) as crate::num::Wide
         } else {
-            self.lki_counters.iter().filter(|x| x.0 == s && x.1 == k).map(|x| x.2 as i64).sum()
+            self.lki_counters.iter().filter(|x| x.0 == s && x.1 == k).map(|x| x.2 as crate::num::Wide).sum()
         }
     }
 
@@ -398,7 +401,7 @@ impl Game {
 impl Game {
     /// The lands that entered the battlefield under `p`'s control this turn
     /// (`Game::lands_entered`).
-    pub(crate) fn lands_entered_this_turn(&self, p: PlayerId) -> u8 {
+    pub(crate) fn lands_entered_this_turn(&self, p: PlayerId) -> u32 {
         if self.lands_entered.0 == self.turn.number {
             self.lands_entered.1[p as usize]
         } else {
@@ -425,8 +428,8 @@ impl Game {
             if self.lands_entered.0 != t {
                 self.lands_entered = (t, [0; 2]);
             }
-            let x = &mut self.lands_entered.1[p as usize];
-            *x = x.saturating_add(1);
+            let n = self.lands_entered.1[p as usize];
+            self.lands_entered.1[p as usize] = self.exact_inc(n, "lands entered this turn");
         }
     }
 }
@@ -606,7 +609,7 @@ impl Game {
         }
         self.end_batch();
         if self.objs[card.i()].zone == crate::ids::Zone::Battlefield {
-            self.add_counters(card, crate::db::Counter::P1P1, n.min(u16::MAX as usize) as crate::num::Count);
+            self.add_counters(card, crate::db::Counter::P1P1, n as crate::num::Count);
         }
     }
 }

@@ -152,7 +152,7 @@ fn tutors_put_the_found_card_on_top() {
         assert_eq!(g.name(top), pick, "{tutor}: on top");
         assert_eq!(g.knows(1, top), revealed, "{tutor}: revealed or not");
         assert!(g.knows(0, top));
-        assert_eq!(g.life(0), life, "{tutor}");
+        assert_eq!(g.life(0), life as i64, "{tutor}");
         assert_eq!(g.obj(t).zone, Zone::Graveyard);
         assert_eq!(g.player(0).library.len(), LIB.len());
     }

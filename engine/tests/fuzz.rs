@@ -87,15 +87,20 @@
 //! Ouroboroid, Bristly Bill, Scythecat Cub, Jacked Rabbit, Elspeth's token
 //! doubling, and the cards that turn a creature's size into damage, life or
 //! poison), 12 Forests and 5 random lands; every life total starts at
-//! 1,000,000,000 and attacks are declared one time in four, so most games
-//! run to the 60-turn cap with growing boards. Every mode prints the largest
-//! power, counter count, marked damage and life reached; with 100 games or
-//! more the exponential mode must have reached a board past 65,535 power.
+//! 10^18 (near the end of an amount's exact range, `i64::MAX`) and attacks
+//! are declared one time in four, so most games run to the 60-turn cap with
+//! growing boards, or end aborted when a number the game keeps passes its
+//! exact range (ENGINE.md 100.7: a legitimate end, with no result). Every
+//! mode prints the largest power, counter count, marked damage and life
+//! reached and the aborted games; with 100 games or more the exponential
+//! mode must have reached a board past `u32::MAX` power (exact: the engine's
+//! numbers were 32-bit before F7).
 
 mod common;
 
 use engine::db::CardDb;
 use engine::rng::Rng;
+use engine::game::EndReason;
 use engine::{Choice, DecisionKind, Game, GameSpec, Outcome, NUM_ACTIONS};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
@@ -237,9 +242,10 @@ const GROWTH: &[&str] = &[
     "Ocelot Pride", "Deep-Cavern Bat", "Passageway Seer", "The One Ring", "Tezzeret, Cruel Captain",
 ];
 
-/// `FUZZ_POOL=exponential`: every player's starting life (near the bound of
-/// an amount, `num::AMOUNT_MAX`: life gained past it saturates).
-const EXP_LIFE: i32 = 1_000_000_000;
+/// `FUZZ_POOL=exponential`: every player's starting life (near the end of an
+/// amount's exact range, `num::AMOUNT_MAX` = `i64::MAX`: life gained past it
+/// ends the game aborted, ENGINE.md 100.7).
+const EXP_LIFE: i64 = 1_000_000_000_000_000_000;
 
 /// `FUZZ_POOL`: unset (the default decks), `interactions`, `exponential` or `drafted`.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -348,7 +354,7 @@ fn check_determinize_weighted(g: &Game, seed: u64, step: usize, tilt: f64) {
     let mover = g.to_move().unwrap();
     let ids = engine::az::identity::identities(g.db());
     let cards = |g: &Game, p: u8| -> Vec<u16> {
-        let mut v: Vec<u16> = g.objs().iter().enumerate().filter(|(_, o)| o.owner == p).map(|(i, _)| g.ident(engine::CardIdx(i as u16))).collect();
+        let mut v: Vec<u16> = g.objs().iter().enumerate().filter(|(_, o)| o.owner == p).map(|(i, _)| g.ident(engine::CardIdx(i as u32))).collect();
         v.sort();
         v
     };
@@ -371,7 +377,7 @@ fn check_determinize_weighted(g: &Game, seed: u64, step: usize, tilt: f64) {
         }
         assert_eq!(g.view_of(viewer), d.view_of(viewer), "{what}: the view changed");
         for (i, o) in g.objs().iter().enumerate() {
-            let c = engine::CardIdx(i as u16);
+            let c = engine::CardIdx(i as u32);
             if g.knows(viewer, c) {
                 assert_eq!((o.def, g.ident(c)), (d.obj(c).def, d.ident(c)), "{what}: a known card was dealt again");
             }
@@ -647,15 +653,19 @@ static ENCODINGS: AtomicU64 = AtomicU64::new(0);
 static SQUASHED: AtomicU64 = AtomicU64::new(0);
 
 fn record_extremes(g: &Game) {
+    // (A power is a derived `i128`: past `i64::MAX` it is recorded as
+    // `i64::MAX`, "at least". Counts, marked damage and life totals are
+    // within it: the engine keeps them exact or aborts.)
+    let big = |v: u128| i64::try_from(v).unwrap_or(i64::MAX);
     for &c in g.battlefield() {
-        MAX_POWER.fetch_max(g.power(c).unsigned_abs() as i64, Ordering::Relaxed);
-        MAX_DAMAGE.fetch_max(g.obj(c).damage as i64, Ordering::Relaxed);
+        MAX_POWER.fetch_max(big(g.power(c).unsigned_abs()), Ordering::Relaxed);
+        MAX_DAMAGE.fetch_max(big(g.obj(c).damage as u128), Ordering::Relaxed);
         for (_, n) in g.counters_of(c) {
-            MAX_COUNTERS.fetch_max(n as i64, Ordering::Relaxed);
+            MAX_COUNTERS.fetch_max(big(n as u128), Ordering::Relaxed);
         }
     }
     for p in 0..2 {
-        MAX_LIFE.fetch_max(g.life(p).unsigned_abs() as i64, Ordering::Relaxed);
+        MAX_LIFE.fetch_max(big(g.life(p).unsigned_abs() as u128), Ordering::Relaxed);
     }
 }
 
@@ -1065,7 +1075,7 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
 ")
         );
         for (i, o) in g.objs().iter().enumerate() {
-            let c = engine::CardIdx(i as u16);
+            let c = engine::CardIdx(i as u32);
             if g.knows(viewer, c) {
                 assert_eq!(o.def, d.obj(c).def, "seed {seed}: a card P{viewer} knows was resampled");
                 assert_eq!(g.ident(c), d.ident(c), "seed {seed}: a face-down card P{viewer} knows was resampled");
@@ -1246,15 +1256,21 @@ fn fuzz_random_games() {
     let n: u64 = std::env::var("FUZZ_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
     // `FUZZ_FIRST=s` starts at seed s (to rerun a failing seed alone).
     let first: u64 = std::env::var("FUZZ_FIRST").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
-    let (mut wins, mut draws, mut turns, mut decisions) = ([0u32; 2], 0u32, 0u64, 0u64);
+    let (mut wins, mut draws, mut aborted, mut turns, mut decisions) = ([0u32; 2], 0u32, 0u32, 0u64, 0u64);
     let (mut companions, mut companions_used) = (0u32, 0u32);
     for seed in first..first + n {
         let p = std::panic::catch_unwind(|| play(seed, true)).unwrap_or_else(|e| {
             panic!("seed {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1 FUZZ_LOG=1): {e:?}")
         });
-        match p.outcome.winner {
-            Some(w) => wins[w as usize] += 1,
-            None => draws += 1,
+        // (An aborted game, ENGINE.md 100.7: a legitimate end, with no
+        // result and no winner; not a draw.)
+        match (p.outcome.reason, p.outcome.winner) {
+            (EndReason::Aborted, w) => {
+                assert_eq!(w, None, "seed {seed}: an aborted game has no winner");
+                aborted += 1;
+            }
+            (_, Some(w)) => wins[w as usize] += 1,
+            (_, None) => draws += 1,
         }
         turns += p.turns as u64;
         decisions += p.actions.len() as u64;
@@ -1262,7 +1278,7 @@ fn fuzz_random_games() {
         companions_used += p.companions_used;
     }
     println!(
-        "{n} games: wins {wins:?}, draws {draws}, mean turns {:.1}, mean decisions {:.1}; {} options completed ({} decisions after them)",
+        "{n} games: wins {wins:?}, draws {draws}, aborted {aborted}, mean turns {:.1}, mean decisions {:.1}; {} options completed ({} decisions after them)",
         turns as f64 / n as f64,
         decisions as f64 / n as f64,
         OPTIONS_TRIED.load(Ordering::Relaxed),
@@ -1275,7 +1291,7 @@ fn fuzz_random_games() {
         assert!(companions_used > 0, "no companion special action in {n} games");
     }
     if n >= 100 && exponential_mode() {
-        assert!(MAX_POWER.load(Ordering::Relaxed) > 65_535, "no board past 65,535 power: {}", extremes_report());
+        assert!(MAX_POWER.load(Ordering::Relaxed) > u32::MAX as i64, "no board past u32::MAX power: {}", extremes_report());
     }
     println!("longest game: {} actions (cap 100,000)", MAX_GAME_STEPS.load(Ordering::Relaxed));
     if let Some(t) = belief_tilt() {
@@ -1369,6 +1385,8 @@ fn match_spec(seed: u64) -> engine::az::MtgSpec {
 }
 
 struct PlayedMatch {
+    /// The match ended aborted (ENGINE.md 100.7).
+    aborted: bool,
     actions: Vec<u16>,
     keys: Vec<u64>,
     fingerprint: u64,
@@ -1452,7 +1470,7 @@ fn check_hidden_pool(g: &engine::az::MtgAz, d: &engine::az::MtgAz, viewer: u8, s
     assert_eq!(g.g.sideboard_size(o), d.g.sideboard_size(o));
     assert_eq!(g.g.view_of(viewer), d.g.view_of(viewer), "match {seed}: determinize changed the view of P{viewer}");
     for (i, x) in g.g.objs().iter().enumerate() {
-        let c = engine::CardIdx(i as u16);
+        let c = engine::CardIdx(i as u32);
         if g.g.knows(viewer, c) {
             assert_eq!((x.def, g.g.ident(c)), (d.g.obj(c).def, d.g.ident(c)), "match {seed}: a card P{viewer} knows was resampled");
         }
@@ -1660,11 +1678,16 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
     }
     let m = &g.m;
     assert!(g.match_over());
-    assert!(m.wins.contains(&2) || m.game_no == 3, "match {seed}: ended early: {:?}", m.results);
-    assert_eq!(m.wins[0] + m.wins[1] + m.draws, m.game_no);
-    let r = g.result();
-    assert!((r[0] + r[1] - 1.0).abs() < 1e-6);
+    // (An aborted game aborts the match, ENGINE.md 100.7: no result.)
+    let aborted = g.match_aborted();
+    if !aborted {
+        assert!(m.wins.contains(&2) || m.game_no == 3, "match {seed}: ended early: {:?}", m.results);
+        assert_eq!(m.wins[0] + m.wins[1] + m.draws, m.game_no);
+        let r = g.result();
+        assert!((r[0] + r[1] - 1.0).abs() < 1e-6);
+    }
     PlayedMatch {
+        aborted,
         actions,
         keys: all_keys,
         fingerprint: g.g.fingerprint(),
@@ -1689,6 +1712,7 @@ fn fuzz_random_matches() {
     let n: u64 = std::env::var("FUZZ_MATCHES").ok().and_then(|s| s.parse().ok()).unwrap_or((games / 20).max(20));
     let first: u64 = std::env::var("FUZZ_FIRST").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
     let (mut games_played, mut draws, mut decisions, mut sb, mut changed, mut three) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let mut aborted = 0u64;
     let mut stats = HiddenStats::default();
     for seed in first..first + n {
         let p = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| play_match_stats(seed, true, &mut stats)))
@@ -1699,9 +1723,10 @@ fn fuzz_random_matches() {
         sb += p.sideboard_decisions as u64;
         changed += p.changed_decks as u64;
         three += (p.games == 3) as u64;
+        aborted += p.aborted as u64;
     }
     println!(
-        "{n} matches: {games_played} games ({three} matches of three, {draws} drawn games), mean decisions {:.1}, \
+        "{n} matches: {games_played} games ({three} matches of three, {draws} drawn games, {aborted} aborted matches), mean decisions {:.1}, \
          sideboarding decisions {sb}, decks changed {changed}; hidden pools: {} worlds, first picks resampled in {}, \
          decks in {}",
         decisions as f64 / n as f64,

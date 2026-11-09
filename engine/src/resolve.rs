@@ -25,8 +25,8 @@ pub(crate) struct Frame {
     /// 100.2: docs/shortcuts.md 46.4).
     pub i: u32,
     /// Last known information remembered by `Op::Remember`: (power,
-    /// controller).
-    pub lki: Option<(i32, PlayerId)>,
+    /// controller; an amount, ENGINE.md 100.7).
+    pub lki: Option<(i64, PlayerId)>,
     /// The cards looked at by `Op::LookTop` not yet placed.
     pub pile: Vec<CardIdx>,
     /// Per-op floor (reset when `pc` moves): the smallest definition the
@@ -35,8 +35,8 @@ pub(crate) struct Frame {
     /// A triggered ability's event ("that player", "that much").
     pub ev: crate::triggers::EvCtx,
     /// A number an op remembered for later ops (a revealed card's mana
-    /// value).
-    pub x: i32,
+    /// value; an amount, ENGINE.md 100.7).
+    pub x: i64,
     /// Permanents chosen so far by the current `Ext::Choose`.
     pub picked: Vec<CardIdx>,
     /// Definitions a search for several cards picked so far (by identity:
@@ -48,7 +48,7 @@ pub(crate) struct Frame {
     /// The spell was cast for an alternative cost (CR 118.9).
     pub alt: bool,
     /// Divided damage per target of the divided requirement (CR 601.2d).
-    pub division: Vec<u32>,
+    pub division: Vec<u64>,
     /// The spell's X (CR 107.3).
     pub spell_x: u32,
     /// Every token the last `CreateToken` made ("they gain haste").
@@ -60,7 +60,7 @@ pub(crate) struct Frame {
     pub noted: Vec<ObjRef>,
     /// The source's transformations when the ability was put on the stack
     /// (`StackItem::flips`, CR 701.27f).
-    pub flips: u8,
+    pub flips: u32,
     /// The page the current op's choice shows (`Game::ask_objects`,
     /// `Game::ask_paged`; ENGINE.md 100.2): set by a "next page" answer,
     /// back to the first page by any other answer and when `pc` moves.
@@ -480,11 +480,16 @@ impl Game {
         }
     }
 
-    pub(crate) fn amount(&self, f: &Frame, a: Amount) -> i32 {
+    pub(crate) fn amount(&self, f: &Frame, a: Amount) -> crate::num::Wide {
+        // A derived value (`num::Wide`, ENGINE.md 100.7): every term below is
+        // a card constant, a stored amount or count (at most `i64::MAX`), a
+        // count of objects or a `u32` X, and a product of two of them fits an
+        // `i128`: exact.
+        type W = crate::num::Wide;
         match a {
-            Amount::Fixed(n) => n,
-            Amount::LkiPower => f.lki.map_or(0, |l| l.0),
-            Amount::EventAmount => crate::num::signed(f.ev.amount),
+            Amount::Fixed(n) => n as W,
+            Amount::LkiPower => f.lki.map_or(0, |l| l.0 as W),
+            Amount::EventAmount => f.ev.amount as W,
             Amount::SourcePower => {
                 if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
                     self.power(f.source.idx)
@@ -493,77 +498,77 @@ impl Game {
                     // (CR 608.2h; Jacked Rabbit, Ouroboroid: rulings
                     // ef3a8866, b3653e3c).
                     match self.objs[f.source.idx.i()].lki_power {
-                        Some((inc, p)) if inc == f.source.inc => p,
-                        _ => self.db.def(f.source_def).power.unwrap_or(0),
+                        Some((inc, p)) if inc == f.source.inc => p as W,
+                        _ => self.db.def(f.source_def).power.unwrap_or(0) as W,
                     }
                 }
             }
-            Amount::LkiManaValue => f.x,
-            Amount::Devotion(color) => self.devotion(f.controller, color) as i32,
-            Amount::X => f.spell_x as i32,
-            Amount::XTimes(k) => f.spell_x as i32 * k as i32,
+            Amount::LkiManaValue => f.x as W,
+            Amount::Devotion(color) => self.devotion(f.controller, color) as W,
+            Amount::X => f.spell_x as W,
+            Amount::XTimes(k) => f.spell_x as W * k as W,
             Amount::CountTypesOpp(bits) => {
                 let q = crate::ids::opp(f.controller);
-                self.permanents_of(q).filter(|&c| self.types_of(c) & bits != 0).count() as i32
+                self.permanents_of(q).filter(|&c| self.types_of(c) & bits != 0).count() as W
             }
             Amount::CountTypes(bits) => {
-                self.permanents_of(f.controller).filter(|&c| self.types_of(c) & bits != 0).count() as i32
+                self.permanents_of(f.controller).filter(|&c| self.types_of(c) & bits != 0).count() as W
             }
             Amount::CountTypesTimes(bits, k) => {
-                k as i32 * self.permanents_of(f.controller).filter(|&c| self.types_of(c) & bits != 0).count() as i32
+                k as W * self.permanents_of(f.controller).filter(|&c| self.types_of(c) & bits != 0).count() as W
             }
             Amount::EventObjPower => match f.ev.obj {
                 Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield => self.power(r.idx),
                 Some(r) => match self.objs[r.idx.i()].lki_power {
-                    Some((inc, p)) if inc == r.inc => p,
+                    Some((inc, p)) if inc == r.inc => p as W,
                     _ => 0,
                 },
                 None => 0,
             },
             Amount::SourceCounters(k) => {
                 if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
-                    crate::num::count_amount(self.counters_on(f.source.idx, k))
+                    self.counters_on(f.source.idx, k) as W
                 } else {
-                    crate::num::amount(self.lki_counters.iter().filter(|x| x.0 == f.source && x.1 == k).map(|x| x.2 as i64).sum())
+                    self.lki_counters.iter().filter(|x| x.0 == f.source && x.1 == k).map(|x| x.2 as W).sum()
                 }
             }
             Amount::OpponentsLostLife => {
-                self.players[crate::ids::opp(f.controller) as usize].lost_life as i32
+                self.players[crate::ids::opp(f.controller) as usize].lost_life as W
             }
-            Amount::Remembered => f.x,
-            Amount::HalfLibraryUp => (self.players[f.controller as usize].library.len() as i32 + 1) / 2,
-            Amount::EventTimes => crate::num::count_amount(self.entered_counts(f.ev.amount, f.ev.obj).0),
-            Amount::EventSpellTimes => self.event_spell_times(f) as i32,
-            Amount::Attacking => self.battlefield.iter().filter(|&&c| self.objs[c.i()].attacking).count() as i32,
-            Amount::Experience => crate::num::count_amount(self.players[f.controller as usize].experience),
-            Amount::CostMvPlus(n) => crate::num::amount(n as i64 + f.ev.amount as i64),
+            Amount::Remembered => f.x as W,
+            Amount::HalfLibraryUp => (self.players[f.controller as usize].library.len() as W + 1) / 2,
+            Amount::EventTimes => self.entered_counts(f.ev.amount, f.ev.obj).0 as W,
+            Amount::EventSpellTimes => self.event_spell_times(f) as W,
+            Amount::Attacking => self.battlefield.iter().filter(|&&c| self.objs[c.i()].attacking).count() as W,
+            Amount::Experience => self.players[f.controller as usize].experience as W,
+            Amount::CostMvPlus(n) => n as W + f.ev.amount as W,
             Amount::ChosenPower => self.chosen_power(f),
             Amount::CostPower => match f.ev.obj {
                 Some(r) => match self.objs[r.idx.i()].lki_power {
-                    Some((inc, p)) if inc == r.inc => p,
+                    Some((inc, p)) if inc == r.inc => p as W,
                     _ => 0,
                 },
                 None => 0,
             },
             Amount::TappedPower => self.tapped_power(f),
             Amount::EventSpellMv => match f.ev.obj {
-                Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Stack => self.mana_value_of(r.idx) as i32,
+                Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Stack => self.mana_value_of(r.idx) as W,
                 Some(r) => self
                     .spell_lki
                     .iter()
                     .find(|x| x.0 == r)
-                    .map_or(0, |x| self.db.def(x.1).mana_value() as i32 + x.2.x as i32 * self.db.def(x.1).x_pips as i32),
+                    .map_or(0, |x| self.db.def(x.1).mana_value() as W + x.2.x as W * self.db.def(x.1).x_pips as W),
                 None => 0,
             },
-            Amount::ControllerLife => self.players[f.controller as usize].life.max(0),
+            Amount::ControllerLife => self.players[f.controller as usize].life.max(0) as W,
             Amount::MulticoloredPermanents => {
-                self.permanents_of(f.controller).filter(|&c| self.colors_of(c).count_ones() >= 2).count() as i32
+                self.permanents_of(f.controller).filter(|&c| self.colors_of(c).count_ones() >= 2).count() as W
             }
             Amount::DifferentlyNamedLands => {
                 let mut names: Vec<&str> = self.lands_of(f.controller).map(|c| self.name(c)).filter(|n| !n.is_empty()).collect();
                 names.sort_unstable();
                 names.dedup();
-                names.len() as i32
+                names.len() as W
             }
         }
     }
@@ -622,7 +627,10 @@ impl Game {
             }
             Op::Draw { who, n } => {
                 if let Some(p) = self.who(f, who) {
-                    let n = self.amount(f, n).max(0) as u32;
+                    // (A negative number draws none, CR 107.1b; past
+                    // `u32::MAX` cards the game aborts.)
+                    let n = self.amount(f, n).max(0);
+                    let n = self.exact_u32(n, "cards to draw");
                     self.draw_cards(p, n);
                 }
                 Flow::Next
@@ -636,7 +644,7 @@ impl Game {
             }
             Op::AddMana { who, mana } => {
                 if let Some(p) = self.who(f, who) {
-                    self.players[p as usize].pool.add(&mana);
+                    self.add_mana(p, &mana);
                 }
                 Flow::Next
             }
@@ -782,13 +790,15 @@ impl Game {
                 Flow::Next
             }
             Op::Remember { tgt } => {
-                f.lki = self.targets_of(f, tgt).into_iter().find_map(|t| match t {
+                let lki = self.targets_of(f, tgt).into_iter().find_map(|t| match t {
                     Target::Obj(o) => Some((self.power(o.idx), self.objs[o.idx.i()].controller)),
                     // An ability: its controller ("its controller draws a
                     // card", after it is countered).
                     Target::Stack(id) => self.stack_item(id).map(|s| (0, s.controller)),
                     Target::Player(_) => None,
                 });
+                // (Remembered: a stored amount, ENGINE.md 100.7.)
+                f.lki = lki.map(|(p, c)| (self.exact(p, "a remembered power"), c));
                 Flow::Next
             }
             Op::DestroyAll { ref filter } => {

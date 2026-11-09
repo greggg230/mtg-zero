@@ -12,10 +12,11 @@ impl Game {
     pub(crate) fn exec_eoe_b(&mut self, f: &mut Frame, op: &EoeB) -> Flow {
         match op {
             EoeB::JumpUnlessSecondResolution { to } => {
-                let n = match self.resolved.iter_mut().find(|x| x.0 == f.source) {
-                    Some(x) => {
-                        x.1 = x.1.saturating_add(1);
-                        x.1
+                let n = match self.resolved.iter().position(|x| x.0 == f.source) {
+                    Some(k) => {
+                        let n = self.exact_inc(self.resolved[k].1, "resolutions this turn");
+                        self.resolved[k].1 = n;
+                        n
                     }
                     None => {
                         self.resolved.push((f.source, 1));
@@ -41,10 +42,10 @@ impl Game {
                     let lethal = if src.deathtouch {
                         1
                     } else {
-                        (self.toughness(c) - self.objs[c.i()].damage as i32).max(0)
+                        (self.toughness(c) - self.objs[c.i()].damage as crate::num::Wide).max(0)
                     };
                     let dealt = self.deal_damage(src, Target::Obj(o), n);
-                    excess = self.is_creature(c) && dealt > lethal;
+                    excess = self.is_creature(c) && dealt as crate::num::Wide > lethal;
                 }
                 if excess {
                     Flow::Next

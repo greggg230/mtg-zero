@@ -7,9 +7,11 @@ pub type PlayerId = u8;
 pub type DefId = u16;
 
 /// Index of a card slot in `Game.objs`. One slot per physical card for the
-/// whole match; tokens and copies will append slots. Never reused.
+/// whole match; tokens and copies append slots. Never reused. (`u32`: a game
+/// runs out of memory long before 2^32 objects; `Game::add_card` aborts the
+/// game near the bound, ENGINE.md 100.7.)
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
-pub struct CardIdx(pub u16);
+pub struct CardIdx(pub u32);
 
 impl CardIdx {
     #[inline]
@@ -20,11 +22,13 @@ impl CardIdx {
 
 /// An object (CR 109): a card slot in one incarnation. Every zone change
 /// bumps the slot's incarnation (CR 400.7), so a stale reference is
-/// detected by comparing `inc`.
+/// detected by comparing `inc` (`u32`, counted exactly: a slot's 2^32nd zone
+/// change aborts the game, `Game::move_card`, so an old reference never
+/// aliases a new object).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ObjRef {
     pub idx: CardIdx,
-    pub inc: u16,
+    pub inc: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

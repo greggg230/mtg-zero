@@ -2009,7 +2009,7 @@ fn the_v5_facts_encode_no_hidden_information() {
         g.choose(c);
     }
     let fd: Vec<engine::CardIdx> =
-        g.objs().iter().enumerate().filter(|(_, o)| o.zone == Zone::FaceDown).map(|(i, _)| engine::CardIdx(i as u16)).collect();
+        g.objs().iter().enumerate().filter(|(_, o)| o.zone == Zone::FaceDown).map(|(i, _)| engine::CardIdx(i as u32)).collect();
     assert_eq!(fd.len(), 1, "{}", g.log_lines().join("\n"));
     let c = fd[0];
     assert!(g.knows(0, c) && !g.knows(1, c));
@@ -2256,7 +2256,7 @@ fn zbelief(pred: Vec<f32>, tilt: f64, clip: f64) -> zero_search::game::Belief {
 
 /// Every card `owner` has in the game, by identity (sorted).
 fn cards_of(g: &MtgAz, owner: u8) -> Vec<u16> {
-    let mut v: Vec<u16> = g.g.objs().iter().enumerate().filter(|(_, o)| o.owner == owner).map(|(i, _)| g.g.ident(engine::CardIdx(i as u16))).collect();
+    let mut v: Vec<u16> = g.g.objs().iter().enumerate().filter(|(_, o)| o.owner == owner).map(|(i, _)| g.g.ident(engine::CardIdx(i as u32))).collect();
     v.sort();
     v
 }
@@ -2288,7 +2288,7 @@ fn belief_deals_keep_every_determinize_invariant() {
                     panic!("{name}: feature {i} of P{viewer} changed in a belief-dealt world ({} -> {})", x0[i], x1[i]);
                 }
                 for (i, o) in g.g.objs().iter().enumerate() {
-                    let c = engine::CardIdx(i as u16);
+                    let c = engine::CardIdx(i as u32);
                     if g.g.knows(viewer as u8, c) {
                         assert_eq!((o.def, g.g.ident(c)), (d.g.obj(c).def, d.g.ident(c)), "{name}: a card P{viewer} knows was dealt again");
                     }

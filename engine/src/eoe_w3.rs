@@ -104,7 +104,7 @@ pub struct W3State {
     pub lki_host: Vec<(crate::ids::ObjRef, crate::ids::ObjRef)>,
     /// The amount of mana spent to cast the spell becoming a permanent:
     /// set and taken around one move.
-    pub entering_spent: Option<u8>,
+    pub entering_spent: Option<u32>,
     /// Last known information: the latest "loses all abilities" timestamp of
     /// each permanent with a granted triggered ability that left the
     /// battlefield this turn (CR 603.10a).
@@ -183,7 +183,7 @@ impl Game {
             W3::GrantTrigger { on, k, this_turn } => {
                 let slot = self.db.def(f.source_def).delayed_base + k;
                 // (One effect, one timestamp, CR 613.7a.)
-                self.next_ts += 1;
+                self.next_ts = self.exact_inc(self.next_ts, "timestamps");
                 let ts = self.next_ts;
                 for c in self.objs_on(f, on) {
                     let r = self.obj_ref(c);
@@ -279,8 +279,8 @@ impl Game {
                         None => crate::game::DamageSource { controller: f.controller, ..self.damage_source_of(r.idx) },
                     };
                     let mv = match self.lki_copy.iter().rev().find(|x| x.0 == r) {
-                        Some((_, v)) => self.db.def(v.def).mana_value(),
-                        None => self.def_of(r.idx).mana_value(),
+                        Some((_, v)) => self.db.def(v.def).mana_value() as u64,
+                        None => self.def_of(r.idx).mana_value() as u64,
                     };
                     (src, mv)
                 };
@@ -288,25 +288,32 @@ impl Game {
                 let all: Vec<CardIdx> = self.battlefield.iter().copied().filter(|&c| self.card_matches(filter, c, &ctx)).collect();
                 for c in all {
                     let t = crate::ids::Target::Obj(self.obj_ref(c));
-                    self.deal_damage(src, t, mv as i32);
+                    self.deal_damage(src, t, mv);
                 }
                 Flow::Next
             }
         }
     }
 
-    /// `n` more mana was spent to cast spell `card` (CR 601.2h).
+    /// `n` more mana was spent to cast spell `card` (CR 601.2h): counted
+    /// exactly (past `u32::MAX` the game aborts, ENGINE.md 100.7).
     pub(crate) fn note_mana_spent(&mut self, card: CardIdx, n: usize) {
         let r = self.obj_ref(card);
-        match self.marks.iter_mut().find(|(o, m)| *o == r && matches!(m, Mark::ManaSpent(_))) {
-            Some((_, Mark::ManaSpent(k))) => *k = (*k as usize + n).min(255) as u8,
-            _ => self.marks.push((r, Mark::ManaSpent(n.min(255) as u8))),
+        let at = self.marks.iter().position(|(o, m)| *o == r && matches!(m, Mark::ManaSpent(_)));
+        let before = match at.map(|i| self.marks[i].1) {
+            Some(Mark::ManaSpent(k)) => k,
+            _ => 0,
+        };
+        let total = self.exact_u32(before as crate::num::Wide + n as crate::num::Wide, "mana spent to cast a spell");
+        match at {
+            Some(i) => self.marks[i].1 = Mark::ManaSpent(total),
+            None => self.marks.push((r, Mark::ManaSpent(total))),
         }
     }
 
     /// The amount of mana spent to cast object `r` (a spell, or the permanent
     /// it became; 0 if it wasn't cast, CR 601.2h).
-    pub(crate) fn mana_spent_of(&self, r: crate::ids::ObjRef) -> u8 {
+    pub(crate) fn mana_spent_of(&self, r: crate::ids::ObjRef) -> u32 {
         self.marks
             .iter()
             .find_map(|&(o, m)| match m {
@@ -319,7 +326,7 @@ impl Game {
     /// Spell `idx` became permanent `r`, `n` mana spent to cast it: the
     /// permanent knows it, and enters with that many +1/+1 counters if it
     /// says so (CR 122.6, 614.1c).
-    pub(crate) fn w3_entered_spent(&mut self, idx: CardIdx, r: crate::ids::ObjRef, n: u8) {
+    pub(crate) fn w3_entered_spent(&mut self, idx: CardIdx, r: crate::ids::ObjRef, n: u32) {
         self.marks.push((r, Mark::ManaSpent(n)));
         if self.def_of(idx).w3.counters_mana_spent && n > 0 {
             self.add_counters(idx, Counter::P1P1, n as crate::num::Count);
@@ -330,7 +337,7 @@ impl Game {
     /// that permanent, else as it last existed on the battlefield (CR
     /// 608.2h, 113.7a; its controller then: `default_controller` if none was
     /// recorded).
-    fn lki_source(&self, r: crate::ids::ObjRef, default_controller: PlayerId) -> (crate::game::DamageSource, i32) {
+    fn lki_source(&self, r: crate::ids::ObjRef, default_controller: PlayerId) -> (crate::game::DamageSource, crate::num::Wide) {
         if self.live(r) && self.objs[r.idx.i()].zone == crate::ids::Zone::Battlefield {
             return (self.damage_source_of(r.idx), self.power(r.idx));
         }
@@ -339,7 +346,7 @@ impl Game {
             None => crate::game::DamageSource { controller: default_controller, ..self.damage_source_of(r.idx) },
         };
         let power = match self.objs[r.idx.i()].lki_power {
-            Some((inc, p)) if inc == r.inc => p,
+            Some((inc, p)) if inc == r.inc => p as crate::num::Wide,
             _ => 0,
         };
         (src, power)

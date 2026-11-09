@@ -476,6 +476,7 @@ pub(crate) fn most_allowed(lo: u64, cap: u64, mut ok: impl FnMut(u64) -> bool) -
     }
     let (mut good, mut step) = (v, 1u64);
     let mut bad = loop {
+        // (Exact: a saturated sum is past `cap` too.)
         let t = good.saturating_add(step).min(cap);
         if !ok(t) {
             break t;
@@ -1725,7 +1726,7 @@ pub(crate) mod tests {
         g.put_onto_battlefield(c, 0);
         let r = g.obj_ref(c);
         assert!(g.marks.contains(&(r, crate::game::Mark::Entered { times: 300, x: 70 })));
-        assert_eq!(g.entered_counts(crate::game::ENTER_BIG, Some(r)), (300, 70));
+        assert_eq!(g.entered_counts(crate::game::ENTER_BIG as u64, Some(r)), (300, 70));
         assert_eq!(g.entered_counts((5 << 1) | (9 << 9), None), (5, 9));
     }
 }

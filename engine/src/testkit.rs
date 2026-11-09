@@ -83,7 +83,7 @@ impl Scenario {
     pub fn battlefield(mut self, p: PlayerId, names: &[&str]) -> Self {
         for n in names {
             let c = self.add(p, n, Zone::Battlefield);
-            self.g.next_ts += 1;
+            self.g.next_ts = self.g.exact_inc(self.g.next_ts, "timestamps");
             self.g.objs[c.i()].timestamp = self.g.next_ts;
             self.g.objs[c.i()].control_since = 0;
             self.g.battlefield.push(c);
@@ -95,7 +95,7 @@ impl Scenario {
             }
             // A planeswalker entered with its printed loyalty (CR 306.5b).
             if let (Some(n), true) = (self.g.def_of(c).loyalty, self.g.def_of(c).is(crate::db::types::PLANESWALKER)) {
-                self.g.add_counters(c, crate::db::Counter::Loyalty, crate::num::count(n as i64));
+                self.g.add_counters(c, crate::db::Counter::Loyalty, n.max(0) as crate::num::Count);
             }
         }
         self
@@ -109,7 +109,7 @@ impl Scenario {
         let back = self.g.def_of(c).back.unwrap_or_else(|| panic!("{name} has no back face"));
         self.g.set_face(c, back);
         if let (Some(n), true) = (self.g.def_of(c).loyalty, self.g.def_of(c).is(crate::db::types::PLANESWALKER)) {
-            self.g.add_counters(c, crate::db::Counter::Loyalty, crate::num::count(n as i64));
+            self.g.add_counters(c, crate::db::Counter::Loyalty, n.max(0) as crate::num::Count);
         }
         self
     }
@@ -175,7 +175,7 @@ impl Scenario {
             self.g.dungeons[p as usize].obj = Some(c);
             self.g.dungeons[p as usize].room = r;
         }
-        self.g.dungeons[p as usize].completed = completed;
+        self.g.dungeons[p as usize].completed = completed as u32;
         self
     }
 
@@ -213,7 +213,7 @@ impl Scenario {
         self
     }
 
-    pub fn life(mut self, p: PlayerId, n: i32) -> Self {
+    pub fn life(mut self, p: PlayerId, n: i64) -> Self {
         self.g.players[p as usize].life = n;
         self
     }
@@ -258,7 +258,7 @@ impl Game {
     /// First card named `name` owned by `owner` in `zone` (canonical order).
     pub fn find_card(&self, owner: PlayerId, name: &str, zone: Zone) -> Option<CardIdx> {
         (0..self.objs.len())
-            .map(|i| CardIdx(i as u16))
+            .map(|i| CardIdx(i as u32))
             .find(|&c| self.objs[c.i()].owner == owner && self.objs[c.i()].zone == zone && self.name(c) == name)
     }
 
@@ -269,7 +269,7 @@ impl Game {
 
     pub fn count_in(&self, owner: PlayerId, name: &str, zone: Zone) -> usize {
         (0..self.objs.len())
-            .map(|i| CardIdx(i as u16))
+            .map(|i| CardIdx(i as u32))
             .filter(|&c| self.objs[c.i()].owner == owner && self.objs[c.i()].zone == zone && self.name(c) == name)
             .count()
     }
@@ -859,7 +859,7 @@ impl Game {
             // A token that ceased to exist is in no zone (CR 704.5d).
             let want = (self.objs[i].zone != Zone::Nowhere) as u8;
             if n != want {
-                return Err(format!("card {i} ({}) appears {n} times", self.name(CardIdx(i as u16))));
+                return Err(format!("card {i} ({}) appears {n} times", self.name(CardIdx(i as u32))));
             }
             // (A completed dungeon and the source of the initiative's
             // abilities are rules objects in no zone, ENGINE.md 27.4.)
@@ -868,11 +868,11 @@ impl Game {
             // replacement effects' order is (616.1, `Task::ChooseReplacement`),
             // nor a revealed companion outside the game, ENGINE.md 35.)
             if self.objs[i].zone == Zone::Nowhere
-                && !self.is_token(CardIdx(i as u16))
-                && !self.def_of(CardIdx(i as u16)).rules
-                && !self.agenda.iter().any(|t| matches!(t, Task::EnterByDiscardAny { card, .. } if card.0 == i as u16))
-                && !self.agenda.iter().any(|t| matches!(t, Task::ChooseReplacement { card, .. } if card.idx.0 == i as u16))
-                && !self.players.iter().any(|p| p.companion == Some(CardIdx(i as u16)))
+                && !self.is_token(CardIdx(i as u32))
+                && !self.def_of(CardIdx(i as u32)).rules
+                && !self.agenda.iter().any(|t| matches!(t, Task::EnterByDiscardAny { card, .. } if card.0 == i as u32))
+                && !self.agenda.iter().any(|t| matches!(t, Task::ChooseReplacement { card, .. } if card.idx.0 == i as u32))
+                && !self.players.iter().any(|p| p.companion == Some(CardIdx(i as u32)))
             {
                 return Err(format!("card {i} is nowhere"));
             }
@@ -882,9 +882,9 @@ impl Game {
             // CR 722.3c.)
             if self.db.is_face(self.objs[i].def)
                 && !matches!(self.objs[i].zone, Zone::Battlefield | Zone::Stack | Zone::PhasedOut)
-                && !(self.objs[i].zone == Zone::Exile && self.is_copy_obj(CardIdx(i as u16)))
+                && !(self.objs[i].zone == Zone::Exile && self.is_copy_obj(CardIdx(i as u32)))
             {
-                return Err(format!("card {i} ({}) has a face up in {:?}", self.name(CardIdx(i as u16)), self.objs[i].zone));
+                return Err(format!("card {i} ({}) has a face up in {:?}", self.name(CardIdx(i as u32)), self.objs[i].zone));
             }
         }
         if self.entering_face.is_some() {
@@ -897,7 +897,7 @@ impl Game {
             return Err(format!("n_static {} but {n_static} permanents and emblems with static abilities", self.n_static));
         }
         // The 704.5d check looks only from the first token slot.
-        if let Some(i) = (0..(self.first_token as usize).min(self.objs.len())).find(|&i| self.is_token(CardIdx(i as u16))) {
+        if let Some(i) = (0..(self.first_token as usize).min(self.objs.len())).find(|&i| self.is_token(CardIdx(i as u32))) {
             return Err(format!("slot {i} is a token below the first token slot {}", self.first_token));
         }
         if !self.keys.is_empty() {

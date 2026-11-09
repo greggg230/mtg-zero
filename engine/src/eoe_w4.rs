@@ -151,9 +151,9 @@ impl Game {
     }
 
     /// The mana value of a target object (0 for a player or an ability).
-    fn target_mv(&self, t: Target) -> u32 {
+    fn target_mv(&self, t: Target) -> u64 {
         match t {
-            Target::Obj(r) => self.mana_value_of(r.idx) as u32,
+            Target::Obj(r) => self.mana_value_of(r.idx),
             Target::Player(_) | Target::Stack(_) => 0,
         }
     }
@@ -168,8 +168,8 @@ impl Game {
     /// there, so the total holds as the spell resolves (608.2b checks each
     /// target on its own).
     pub(crate) fn retain_within_total_mv(&self, total: u8, chosen: &[Target], cands: &mut Vec<Target>) {
-        let sum: u32 = chosen.iter().map(|&t| self.target_mv(t)).sum();
-        cands.retain(|&t| sum + self.target_mv(t) <= total as u32);
+        let sum: u64 = chosen.iter().map(|&t| self.target_mv(t)).sum();
+        cands.retain(|&t| sum + self.target_mv(t) <= total as u64);
     }
 
     /// Is `c` a warped card: in exile by warp's delayed ability, which may
@@ -251,21 +251,21 @@ impl Game {
     }
 
     /// `Amount::ChosenPower` (CR 608.2h).
-    pub(crate) fn chosen_power(&self, f: &Frame) -> i32 {
+    pub(crate) fn chosen_power(&self, f: &Frame) -> crate::num::Wide {
         let Some(&r) = f.noted.first() else { return 0 };
         let o = &self.objs[r.idx.i()];
         if self.live(r) {
             return match o.zone {
                 Zone::Battlefield => self.power(r.idx),
                 // A card in exile: its own power (no effect applies there).
-                _ => self.def_of(r.idx).power.unwrap_or(0),
+                _ => self.def_of(r.idx).power.unwrap_or(0) as crate::num::Wide,
             };
         }
         // Gone: as it last existed where it was (a permanent's last known
         // power; a card that left exile, its card's printed power).
         match o.lki_power {
-            Some((inc, p)) if inc == r.inc => p,
-            _ => self.db.def(o.def).power.unwrap_or(0),
+            Some((inc, p)) if inc == r.inc => p as crate::num::Wide,
+            _ => self.db.def(o.def).power.unwrap_or(0) as crate::num::Wide,
         }
     }
 

@@ -100,7 +100,7 @@ impl Game {
                             // A card of their choice (their own hand: the
                             // options are hand slots, ENGINE.md 10).
                             opts.extend(self.hand_options(p));
-                        } else if self.players[p as usize].life >= *life as i32 {
+                        } else if self.players[p as usize].life >= *life as i64 {
                             opts.push(Opt { action: act::YES, choice: Choice::Yes });
                         }
                         let kind = if *discard { DecisionKind::Discard } else { DecisionKind::YesNo };
@@ -147,11 +147,13 @@ impl Game {
                 Flow::Suspend
             }
             Ext::GetExperience { n } => {
-                let pl = &mut self.players[f.controller as usize];
-                pl.experience = pl.experience.saturating_add(*n as crate::num::Count);
+                let total = self.players[f.controller as usize].experience as crate::num::Wide + *n as crate::num::Wide;
+                self.players[f.controller as usize].experience = self.exact_count(total, "experience counters");
                 Flow::Next
             }
             Ext::CreateTokensN { token, n, tapped, attacking } => {
+                // (At most 64 tokens a creation: docs/shortcuts.md 24.7.4,
+                // workstream A's open cap; a negative number is none.)
                 let n = self.amount(f, *n).clamp(0, 64) as u8;
                 if *attacking {
                     return self.exec_ext(f, &Ext::CreateTokensAttacking { token: *token, n, tapped: *tapped });
@@ -173,7 +175,7 @@ impl Game {
                     Some(Choice::Card(c)) => {
                         let t = self.def_of(c).types;
                         if *by_type {
-                            f.x |= t as i32;
+                            f.x |= t as i64;
                         } else if t & types::LAND == 0 {
                             f.x += 1;
                         }
@@ -183,14 +185,15 @@ impl Game {
                     Some(other) => unreachable!("discard answer {other:?}"),
                     None => {}
                 }
-                let n = self.amount(f, *discard).max(0) as u32;
-                if (f.i as u32) < n && !self.players[p as usize].hand.is_empty() {
+                // (Compared in `Wide`: exact for any number.)
+                let n = self.amount(f, *discard);
+                if (f.i as crate::num::Wide) < n && !self.players[p as usize].hand.is_empty() {
                     let opts = self.hand_options(p);
                     self.ask(Task::Run(f.clone()), p, DecisionKind::Discard, opts);
                     return Flow::Suspend;
                 }
                 if *by_type {
-                    f.x = (f.x as u32).count_ones() as i32;
+                    f.x = (f.x as u32).count_ones() as i64;
                 }
                 self.draw_cards(p, *draw as u32);
                 Flow::Next

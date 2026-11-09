@@ -30,7 +30,7 @@ fn bf(g: &Game, p: PlayerId, name: &str) -> CardIdx {
     g.card(p, name, Zone::Battlefield)
 }
 
-fn loyalty(g: &Game, c: CardIdx) -> u32 {
+fn loyalty(g: &Game, c: CardIdx) -> u64 {
     g.counters_on(c, Counter::Loyalty)
 }
 

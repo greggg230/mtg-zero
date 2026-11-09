@@ -67,7 +67,7 @@ fn quiet_until(g: &mut Game, stop: impl Fn(&Game) -> bool) {
     panic!("quiet_until: no progress");
 }
 
-fn lore(g: &Game, c: CardIdx) -> u32 {
+fn lore(g: &Game, c: CardIdx) -> u64 {
     g.counters_on(c, Counter::Lore)
 }
 

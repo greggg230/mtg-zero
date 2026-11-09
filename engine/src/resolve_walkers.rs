@@ -19,7 +19,10 @@ impl Game {
                 Flow::Next
             }
             Ext::RemoveCounters { on, counter, n } => {
-                let n = crate::num::count(self.amount(f, *n) as i64);
+                // (A negative number removes none, CR 107.1b; at most those
+                // there are removed: any number past `num::COUNT_MAX` removes
+                // them all, as `COUNT_MAX` does: exact.)
+                let n = self.amount(f, *n).clamp(0, crate::num::COUNT_MAX as crate::num::Wide) as crate::num::Count;
                 for c in self.objs_on(f, on) {
                     self.remove_counters(c, *counter, n);
                 }
@@ -89,7 +92,16 @@ impl Game {
                         o.pw_used = 0;
                         o.pw_extra = 0;
                     }
-                    o.pw_extra = o.pw_extra.saturating_add(*n);
+                    // (Counted exactly: past `u32::MAX` the game aborts.)
+                    let extra = o.pw_extra as u64 + *n as u64;
+                    let extra = match u32::try_from(extra) {
+                        Ok(v) => v,
+                        Err(_) => {
+                            self.abort(|| "loyalty activations allowed this turn past u32::MAX".to_string());
+                            u32::MAX
+                        }
+                    };
+                    self.objs[c.i()].pw_extra = extra;
                 }
                 Flow::Next
             }
@@ -343,8 +355,10 @@ impl Game {
                 let p = f.controller;
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
-                        // Its power as it last existed (CR 608.2h).
+                        // Its power as it last existed (CR 608.2h; "that
+                        // much": a stored amount, ENGINE.md 100.7).
                         let power = self.power(c).max(0);
+                        let power = self.exact_count(power, "a sacrificed creature's power");
                         let r = self.obj_ref(c);
                         self.note(|g| format!("P{p} sacrifices {}", g.name(c)));
                         self.sacrifice(c);
@@ -356,7 +370,7 @@ impl Game {
                             slot: base + k,
                             ev: crate::triggers::EvCtx {
                                 obj: Some(r),
-                                amount: crate::num::unsigned(power),
+                                amount: power,
                                 ..Default::default()
                             },
                         });

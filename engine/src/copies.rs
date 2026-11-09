@@ -128,7 +128,7 @@ pub struct CopyFx {
 /// not cast; "whenever you cast or copy" sees it, `TrigPred::OrCopy`). A
 /// cast spell's event amount is the number of spells cast before it this
 /// turn (storm), never this.
-pub(crate) const COPIED: u32 = u32::MAX;
+pub(crate) const COPIED: u64 = u64::MAX;
 
 /// At most this many copies a turn by "may copy this spell" effects. Chain
 /// of Smog's copies cost nothing, so players who always copy would loop
@@ -225,7 +225,7 @@ impl Game {
         // 707.8a, E2.)
         let vals = CopyVals { dfc: false, ..vals };
         let own = self.own_def(c);
-        self.next_ts += 1;
+        self.next_ts = self.exact_inc(self.next_ts, "timestamps");
         let ts = self.next_ts;
         let obj = self.obj_ref(c);
         self.copies.push(CopyFx { obj, ts, until, vals, own });
@@ -423,7 +423,7 @@ impl Game {
                 let Some(p) = self.who(f, *who) else { return Flow::Next };
                 let Some(base) = self.copy_source(f, *of) else { return Flow::Next };
                 let vals = CopyVals { def: base.def, exc: exc.over(base.exc), dfc: base.dfc };
-                let n = self.amount(f, *n).max(0) as u32;
+                let n = crate::num::tokens_n(self.amount(f, *n));
                 let made = self.create_token_copies(vals, p, n);
                 f.made = made.first().copied();
                 f.made_all = made;
@@ -447,9 +447,9 @@ impl Game {
                 // `f.i`: the copies made so far (the "may" is asked first).
                 if *may && f.i == 0 {
                     match self.answer.take() {
-                        Some(Choice::Yes) => self.may_copies = self.may_copies.saturating_add(1),
+                        Some(Choice::Yes) => self.may_copies = self.exact_inc(self.may_copies, "copies made by \"may copy\""),
                         Some(_) => return Flow::Next,
-                        None if self.may_copies >= MAY_COPY_CAP => return Flow::Next,
+                        None if self.may_copies >= MAY_COPY_CAP as u32 => return Flow::Next,
                         None => {
                             let opts = vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
                             self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
@@ -457,7 +457,10 @@ impl Game {
                         }
                     }
                 }
-                let n = self.amount(f, *n).max(0) as u32; // (any number: 46.4, ENGINE.md 100.2)
+                // (Any number: 46.4, ENGINE.md 100.2; a negative number is
+                // none, CR 107.1b; past `u32::MAX` copies the game aborts.)
+                let n = self.amount(f, *n).max(0);
+                let n = self.exact_u32(n, "copies to make");
                 if f.i >= n {
                     return Flow::Next;
                 }
@@ -705,7 +708,7 @@ impl Game {
         let tapped = copied_tapped || self.enters_tapped(card, p);
         self.entering(card, tapped, 0);
         self.note_entered(card);
-        self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u32 });
+        self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u64 });
         self.day_night_entered(card);
     }
 }

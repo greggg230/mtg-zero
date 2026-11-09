@@ -455,7 +455,8 @@ pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<Ca
         ManaProd::Fixed(v) => vec![*v],
         ManaProd::IfElse { cond, then, els } => vec![if g.cond_holds(cond, p) { *then } else { *els }],
         ManaProd::SameType { mask, n } => (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| one(t, *n)).collect(),
-        // (Saturating: at most 255 of a type, shortcuts.md 46.3.)
+        // (At most 255 of a type, the pool's u8: past it the game aborts as
+        // the ability is activated, `Game::check_counter_mana`, F7.)
         ManaProd::SameTypeCounters { mask, counter } => match src.map_or(0, |c| g.counters_on(c, *counter)).min(255) as u8 {
             0 => Vec::new(),
             n => (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| one(t, n)).collect(),
@@ -1054,7 +1055,11 @@ impl Game {
             }
             (None, None, None) => i32::MAX,
         };
-        (Budget { life: pl.life.saturating_sub(later as i32).max(0), sac: sac.max(0), tap: i32::MAX }, later > 0)
+        // (The life a payment may spend: a life total past `i32::MAX` is the
+        // same budget, as a payment spends far less: exact. F7, ENGINE.md
+        // 100.7.)
+        let life = (pl.life as crate::num::Wide - later as crate::num::Wide).clamp(0, i32::MAX as crate::num::Wide) as i32;
+        (Budget { life, sac: sac.max(0), tap: i32::MAX }, later > 0)
     }
 
     /// Mana sources whose use takes a permanent a later sacrifice needs, or
@@ -1325,7 +1330,7 @@ impl Game {
             }
             Some(col) => (0..=cost.phyrexian[col]).any(|k| {
                 let later = later as i32 + 2 * k as i32;
-                later <= life_total
+                later as i64 <= life_total
                     && self.phyrexian_feasible(p, &split_phyrexian(cost, col, k), classes, keep, later as u8, without)
             }),
         }
@@ -1345,7 +1350,8 @@ impl Game {
         if cost.has_phyrexian() {
             return self.can_pay_with(p, cost, classes, &Keep::default());
         }
-        let life = self.players[p as usize].life.max(0);
+        // (A life total past `i32::MAX` is the same budget: exact, above.)
+        let life = self.players[p as usize].life.clamp(0, i32::MAX as i64) as i32;
         cost.is_zero() || cands_payable(cost, &[], &[], plain, Budget { life, sac: i32::MAX, tap: i32::MAX })
     }
 
@@ -1575,7 +1581,7 @@ impl Game {
                     let opts: Vec<Opt> = (0..=pm.cost.phyrexian[col])
                         .filter(|&k| {
                             let later = pm.keep.life as i32 + pm.phyrexian_life as i32 + 2 * k as i32;
-                            later <= life
+                            later as i64 <= life
                                 && self.phyrexian_feasible(
                                     payer,
                                     &split_phyrexian(&pm.cost, col, k),
@@ -2055,6 +2061,23 @@ impl Game {
     fn finish_payment(&mut self, pm: &PayMana, rem: Rem) {
         let payer = pm.payer;
         let pool = self.players[payer as usize].pool;
+        // F7 (ENGINE.md 100.7): the virtual pool (the pool's mana and the
+        // picked several-mana sources', `pm.extra`) keeps a `u8` a type, as
+        // the pool does (workstream B's model); past it the game ends
+        // aborted, counted here exactly from the picks.
+        for t in 0..6 {
+            let total = pool.amt[t] as u32 + pm.multi.iter().map(|m| m.1[t] as u32).sum::<u32>();
+            if total > u8::MAX as u32 {
+                self.abort(|| format!("P{payer}'s pool and payment: {total} mana of one type, past 255"));
+            }
+        }
+        for &(src, _) in &pm.multi {
+            if let AbilitySlot::Activated(_) = src.slot {
+                if let Some(m) = self.source_def(src.card).activated_def(src.slot).mana() {
+                    self.check_counter_mana(src.card, &m.prod);
+                }
+            }
+        }
         let mut spent = [0u8; 6];
         for t in 0..6 {
             spent[t] = pool.amt[t].saturating_add(pm.extra[t]) - rem.amt[t];
@@ -2254,8 +2277,25 @@ impl Game {
             .unwrap_or(0)
     }
 
+    /// Add mana to `p`'s pool (CR 106.4): past 255 of a type (the pool's
+    /// `u8`, workstream B) the game ends aborted (ENGINE.md 100.7).
     pub(crate) fn add_mana(&mut self, p: PlayerId, mana: &[u8; 6]) {
-        self.players[p as usize].pool.add(mana);
+        if !self.players[p as usize].pool.add(mana) {
+            self.abort(|| format!("P{p}'s pool: more than 255 mana of one type"));
+        }
+    }
+
+    /// F7 (ENGINE.md 100.7): a mana ability of `src` that makes mana equal to
+    /// the counters on it (`ManaProd::SameTypeCounters`) makes more than the
+    /// pool's 255 of a type (`productions` reads at most 255: workstream B's
+    /// `u8` model): the game ends aborted.
+    pub(crate) fn check_counter_mana(&mut self, src: CardIdx, prod: &ManaProd) {
+        if let ManaProd::SameTypeCounters { counter, .. } = prod {
+            let n = self.counters_on(src, *counter);
+            if n > u8::MAX as crate::num::Count {
+                self.abort(|| format!("{n} mana of one type from counters: past the pool's 255"));
+            }
+        }
     }
 }
 

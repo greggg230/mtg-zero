@@ -1314,7 +1314,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             // then: damage to it is marked, not loyalty lost (120.3; Kaito's
             // ruling). Its loyalty abilities stay (606.3).
             Mod::Types { add: types::CREATURE, subtypes, replace: true },
-            Mod::SetPt(l.int("creature_during_your_turn.p", *p, 0, 99), l.int("creature_during_your_turn.t", *t, 0, 99)),
+            Mod::set_pt(l.int("creature_during_your_turn.p", *p, 0, 99), l.int("creature_during_your_turn.t", *t, 0, 99)),
         ];
         mods.extend(super::effect_ext::keyword_mods(l, kws));
         let cond = crate::db::Cond::All(vec![
@@ -1373,7 +1373,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
         let mut mods = Vec::new();
         if *p != 0 || *t != 0 {
-            mods.push(Mod::Pt(l.int("equipment_bonuses.power", *p, -99, 99), l.int("equipment_bonuses.toughness", *t, -99, 99)));
+            mods.push(Mod::pt(l.int("equipment_bonuses.power", *p, -99, 99), l.int("equipment_bonuses.toughness", *t, -99, 99)));
         }
         let mut set = KwSet::default();
         for n in names {
@@ -2002,7 +2002,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         f.power = None;
         f.toughness = None;
         f.pt_cda = None;
-        f.statics.push(StaticDef { scope: Scope::Equipped, cond: None, mods: vec![Mod::Pt(p, t)] });
+        f.statics.push(StaticDef { scope: Scope::Equipped, cond: None, mods: vec![Mod::pt(p, t)] });
         let req = crate::db::TargetReq { filter: Filter::Type(types::CREATURE), min: 1, max: 1, distinct: 0, pair: 0, total_mv: None };
         f.spell = Some(crate::db::AbilityDef { targets: vec![req], ..Default::default() });
         f.bestowed = true;

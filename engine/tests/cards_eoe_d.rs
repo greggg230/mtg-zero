@@ -1309,7 +1309,7 @@ fn cr_603_4_haliya_draws_if_three_or_more_life_was_gained_this_turn() {
             .at(Step::Main1, 0)
             .start();
         tap_tappers(&mut g, 0, gains);
-        assert_eq!(g.player(0).life_gained, gains as u32);
+        assert_eq!(g.player(0).life_gained, gains as i64);
         let hand = g.player(0).hand.len();
         run(&mut g, |g| g.turn().step == Step::End && g.stack().is_empty() && at_priority(g), |_| None);
         assert_eq!(g.player(0).hand.len(), hand + draws, "{gains} life gained\n{}", log(&g));

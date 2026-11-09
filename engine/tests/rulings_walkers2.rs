@@ -63,7 +63,7 @@ fn a_planeswalker_entering_in_combat_waits_for_a_main_phase_and_comets_die_cr_60
     // Comet.
     let comet = "Comet, Stellar Pup";
     for (roll, loyalty, life1, gone) in [(4u64, 1u32, 19, true), (3, 3, 20, false)] {
-        let mut g = scen().battlefield(0, &[comet]).counters(0, comet, Counter::Loyalty, loyalty).at(Step::Main1, 0).start();
+        let mut g = scen().battlefield(0, &[comet]).counters(0, comet, Counter::Loyalty, loyalty as u64).at(Step::Main1, 0).start();
         let c = bf(&g, 0, comet);
         g.choose(ab(c, 0));
         g.pass();
@@ -77,7 +77,7 @@ fn a_planeswalker_entering_in_combat_waits_for_a_main_phase_and_comets_die_cr_60
         if gone {
             assert_eq!(g.obj(c).zone, Zone::Graveyard, "its last counter removed");
         } else {
-            assert_eq!(g.counters_on(c, Counter::Loyalty), loyalty - 1, "roll 3, nothing to return: one counter\n{}", log(&g));
+            assert_eq!(g.counters_on(c, Counter::Loyalty), loyalty as u64 - 1, "roll 3, nothing to return: one counter\n{}", log(&g));
         }
     }
 }

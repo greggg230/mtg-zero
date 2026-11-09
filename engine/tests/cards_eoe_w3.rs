@@ -374,9 +374,9 @@ fn requiem_monolith_grants_draw_and_lose_life_on_damage_cr613_1f() {
         let hand = g.player(0).hand.len();
         monolith(&mut g, giant, 0, yes);
         let n = yes as usize;
-        assert_eq!(g.obj(giant).damage, n as u32, "{}", log(&g));
+        assert_eq!(g.obj(giant).damage, n as u64, "{}", log(&g));
         assert_eq!(g.player(0).hand.len(), hand + n, "draws that many\n{}", log(&g));
-        assert_eq!(g.life(0), 20 - n as i32, "loses that much");
+        assert_eq!(g.life(0), 20 - n as i64, "loses that much");
     }
 }
 

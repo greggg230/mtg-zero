@@ -19,14 +19,15 @@ pub(crate) enum Subj {
 }
 
 /// Something that happened (603.2), with its subjects (`EventKind`
-/// documents them) and an amount (damage dealt: any amount, ENGINE.md 46;
-/// or a note's bits, `Game::put_onto_battlefield`).
+/// documents them) and an amount (damage dealt: any amount within
+/// `num::AMOUNT_MAX`, ENGINE.md 100.7; or a note's bits,
+/// `Game::put_onto_battlefield`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Event {
     pub kind: EventKind,
     pub a: Subj,
     pub b: Subj,
-    pub amount: u32,
+    pub amount: u64,
 }
 
 impl Event {
@@ -68,7 +69,9 @@ pub struct EvCtx {
     pub obj: Option<ObjRef>,
     /// The second object subject ("that creature" dealt damage).
     pub obj2: Option<ObjRef>,
-    pub amount: u32,
+    /// The event's amount (damage, life, counters: within
+    /// `num::AMOUNT_MAX`) or note (`ENTER_BIG`, chapters).
+    pub amount: u64,
     /// The spell or ability of the event, by stack item id (0 = none):
     /// the one that targets ("counter that spell or ability", ward).
     pub item: u32,
@@ -517,8 +520,8 @@ impl Game {
                 let host = self.objs[src.r.idx.i()].attached;
                 host.is_some_and(|h| self.live(h) && self.objs[h.idx.i()].attacking) && self.attackers().len() >= 2
             }
-            TrigPred::Chapter(n) => ev.a == Subj::Obj(src.r) && ev.amount == *n as u32,
-            TrigPred::Level(n) => ev.kind == EventKind::ClassLevel && ev.a == Subj::Obj(src.r) && ev.amount == *n as u32,
+            TrigPred::Chapter(n) => ev.a == Subj::Obj(src.r) && ev.amount == *n as u64,
+            TrigPred::Level(n) => ev.kind == EventKind::ClassLevel && ev.a == Subj::Obj(src.r) && ev.amount == *n as u64,
             TrigPred::TimesPerSubject(s, n) => match ev.subject(*s) {
                 Subj::Obj(r) => self.granted_triggered(r, src.def, src.r) < *n,
                 _ => false,
@@ -528,10 +531,10 @@ impl Game {
             TrigPred::EnteredCast => ev.kind == EventKind::Enters && ev.amount & 1 != 0,
             TrigPred::EnteredPaid => ev.kind == EventKind::Enters && self.entered_counts(ev.amount, match ev.a { Subj::Obj(r) => Some(r), _ => None }).0 != 0,
             TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && self.entered_counts(ev.amount, match ev.a { Subj::Obj(r) => Some(r), _ => None }).1 >= *n as u32,
-            TrigPred::EnteredNotFromGyExile => ev.kind == EventKind::Enters && ev.amount >> 15 == 0,
+            TrigPred::EnteredNotFromGyExile => ev.kind == EventKind::Enters && (ev.amount >> 15) & 1 == 0,
             TrigPred::InGraveyard => true,
             TrigPred::SpellMvParity => match (ev.a, self.parity_of(src.r)) {
-                (Subj::Obj(r), Some(k)) => self.mana_value_of(r.idx) % 2 == k,
+                (Subj::Obj(r), Some(k)) => self.mana_value_of(r.idx) % 2 == k as u64,
                 _ => false,
             },
             TrigPred::SpellPaid => match ev.a {
@@ -800,7 +803,7 @@ impl Game {
     /// resolution or a simultaneous move began).
     #[inline]
     pub(crate) fn new_event(&mut self) {
-        self.ev_seq = self.ev_seq.wrapping_add(1);
+        self.ev_seq = self.exact_inc(self.ev_seq, "event groups");
     }
 
     /// A "whenever one or more ..." ability of `source` (slot `slot`)

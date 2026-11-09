@@ -48,7 +48,7 @@ impl Game {
                     // or, for "when this dies", the card it became in the
                     // graveyard (one move later).
                     let here = self.live(r) && matches!(o.zone, Zone::Exile | Zone::Graveyard)
-                        || o.zone == Zone::Graveyard && o.inc == r.inc.wrapping_add(1);
+                        || o.zone == Zone::Graveyard && r.inc.checked_add(1) == Some(o.inc);
                     if here && !self.is_token(r.idx) {
                         let owner = self.objs[r.idx.i()].owner;
                         self.entering_mods = mods.clone();
@@ -149,7 +149,7 @@ impl Game {
                 // CR 500.8: "after this phase, there is an additional combat
                 // phase", directly after the current phase, whichever it is
                 // (`Game::next_step`).
-                self.turn.extra_combats = self.turn.extra_combats.saturating_add(1);
+                self.turn.extra_combats = self.exact_inc(self.turn.extra_combats, "additional combat phases");
                 self.note(|_| "an additional combat phase follows this phase".to_string());
                 Flow::Next
             }
@@ -384,7 +384,7 @@ impl Game {
         let p = f.controller;
         if f.i == 0 {
             // "This spell's mana value" (as it last existed, 608.2h).
-            let mv = self.amount(f, crate::program::Amount::EventSpellMv) as u8;
+            let mv = self.amount(f, crate::program::Amount::EventSpellMv);
             f.picked.clear();
             let mut hit = None;
             while let Some(&top) = self.players[p as usize].library.last() {
@@ -394,7 +394,7 @@ impl Game {
                 self.new_event();
                 self.move_card(top, Zone::Exile, Pos::Top);
                 f.picked.push(top);
-                if !self.def_of(top).is(types::LAND) && self.def_of(top).mana_value() < mv {
+                if !self.def_of(top).is(types::LAND) && (self.def_of(top).mana_value() as crate::num::Wide) < mv {
                     hit = Some(top);
                     break;
                 }

@@ -146,8 +146,11 @@ impl Game {
                 }
             }
             Ext::PutCounters { on, counter, n } => {
-                // (Any number: Ouroboroid's X is its power, CR 122.1.)
-                let n = crate::num::count(self.amount(f, *n) as i64);
+                // (Any number: Ouroboroid's X is its power, CR 122.1; a
+                // negative number puts none, 107.1b. Past `num::COUNT_MAX`
+                // the game aborts.)
+                let n = self.amount(f, *n).max(0);
+                let n = self.exact_count(n, "counters to put");
                 for c in self.objs_on(f, on) {
                     self.add_counters(c, *counter, n);
                 }
@@ -202,7 +205,7 @@ impl Game {
             }
             Ext::Mill { who, n } => {
                 if let Some(p) = self.who(f, *who) {
-                    let n = self.amount(f, *n).max(0) as usize;
+                    let n = crate::num::cards_n(self.amount(f, *n));
                     self.mill(p, n, false);
                 }
                 Flow::Next
@@ -399,7 +402,7 @@ impl Game {
                     if self.objs[o.idx.i()].zone != Zone::Graveyard {
                         continue;
                     }
-                    f.x = self.def_of(o.idx).mana_value() as i32;
+                    f.x = self.def_of(o.idx).mana_value() as i64;
                     if *to_battlefield {
                         let ctl = if *yours { f.controller } else { self.objs[o.idx.i()].owner };
                         // "Tapped", "with a <kind> counter on it": as it
@@ -470,7 +473,7 @@ impl Game {
                     if r != *to {
                         continue;
                     }
-                    let share = f.division.get(k).copied().unwrap_or(0) as i32;
+                    let share = f.division.get(k).copied().unwrap_or(0);
                     k += 1;
                     let live = match t {
                         Target::Obj(o) => self.live(o),
@@ -611,7 +614,8 @@ impl Game {
                         ..Default::default()
                     },
                     crate::program::About::Remembered => {
-                        crate::triggers::EvCtx { amount: crate::num::unsigned(f.x), ..Default::default() }
+                        // ("That much": a negative remembered number is none.)
+                        crate::triggers::EvCtx { amount: f.x.max(0) as u64, ..Default::default() }
                     }
                     crate::program::About::EachMade => unreachable!("handled above"),
                 };
@@ -664,9 +668,11 @@ impl Game {
                 Flow::Next
             }
             Ext::AddColorless { n } => {
-                let n = self.amount(f, *n).clamp(0, 255) as u8;
-                self.players[f.controller as usize].pool.amt[5] =
-                    self.players[f.controller as usize].pool.amt[5].saturating_add(n);
+                // (A negative amount adds none, CR 107.1b; the pool keeps a
+                // `u8` a type: past it the game aborts, `ManaPool::add`.)
+                let n = self.amount(f, *n).max(0);
+                let n = self.exact_u8(n, "mana of one type");
+                self.add_mana(f.controller, &[0, 0, 0, 0, 0, n]);
                 Flow::Next
             }
             Ext::RememberSpellMv { tgt } => {
@@ -674,7 +680,7 @@ impl Game {
                 for t in self.targets_of(f, *tgt) {
                     if let Target::Obj(o) = t {
                         if self.objs[o.idx.i()].zone == Zone::Stack {
-                            f.x = self.mana_value_of(o.idx) as i32;
+                            f.x = self.mana_value_of(o.idx) as i64;
                             break;
                         }
                     }
@@ -699,9 +705,10 @@ impl Game {
             }
             Ext::ApplyPtPerCount { on, filter, p, t } => {
                 let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
-                // (p and t are signs, -1..=1: at most the battlefield's size.)
+                // (p and t are signs, -1..=1: at most the battlefield's size,
+                // exact in i64.)
                 let n = self.battlefield.iter().filter(|&&c| self.card_matches(filter, c, &ctx)).count() as i64;
-                let (dp, dt) = (crate::num::amount(*p as i64 * n), crate::num::amount(*t as i64 * n));
+                let (dp, dt) = (*p as i64 * n, *t as i64 * n);
                 for c in self.objs_on(f, on) {
                     let r = self.obj_ref(c);
                     self.add_effect(Affected::Obj(r), Mod::Pt(dp, dt), crate::layers::Until::EndOfTurn, f.controller);
@@ -801,10 +808,11 @@ impl Game {
                 Flow::Next
             }
             Ext::CounterOrDoubleOnSecond { on } => {
-                let n = match self.resolved.iter_mut().find(|x| x.0 == f.source) {
-                    Some(x) => {
-                        x.1 = x.1.saturating_add(1);
-                        x.1
+                let n = match self.resolved.iter().position(|x| x.0 == f.source) {
+                    Some(k) => {
+                        let n = self.exact_inc(self.resolved[k].1, "resolutions this turn");
+                        self.resolved[k].1 = n;
+                        n
                     }
                     None => {
                         self.resolved.push((f.source, 1));
@@ -977,7 +985,7 @@ impl Game {
                 let Some(r) = f.ev.obj else { return Flow::Next };
                 let o = &self.objs[r.idx.i()];
                 // The card it became in the graveyard (one move later).
-                if o.zone == Zone::Graveyard && o.inc == r.inc.wrapping_add(1) && !self.is_token(r.idx) {
+                if o.zone == Zone::Graveyard && r.inc.checked_add(1) == Some(o.inc) && !self.is_token(r.idx) {
                     let owner = o.owner;
                     // (It enters with the counter, CR 614.1c.)
                     self.entering_counters = vec![(*counter, 1)];
@@ -992,7 +1000,7 @@ impl Game {
                 let def = self.db.token_def(*token);
                 for card in cards {
                     let owner = self.objs[card.idx.i()].owner;
-                    let x = self.def_of(card.idx).mana_value() as i32;
+                    let x = self.def_of(card.idx).mana_value() as i64;
                     for t in self.create_tokens(def, owner, 1, false) {
                         if self.objs[t.i()].zone == Zone::Battlefield {
                             let r = self.obj_ref(t);
@@ -1173,8 +1181,8 @@ impl Game {
                 Flow::Next
             }
             Ext::GetEnergy { n } => {
-                let pl = &mut self.players[f.controller as usize];
-                pl.energy = pl.energy.saturating_add(*n as crate::num::Count);
+                let total = self.players[f.controller as usize].energy as crate::num::Wide + *n as crate::num::Wide;
+                self.players[f.controller as usize].energy = self.exact_count(total, "energy counters");
                 Flow::Next
             }
             Ext::PayEnergyDamage { tgt } => {
@@ -1191,6 +1199,7 @@ impl Game {
                             Flow::Suspend
                         }
                         crate::decision::NumberAnswer::Value(k) => {
+                            // (At most the energy the player has: a count.)
                             let k = k as crate::num::Count;
                             self.players[p as usize].energy -= k;
                             let src = self.frame_damage_source(f);
@@ -1284,7 +1293,7 @@ impl Game {
                         // Mill that many (the milled cards put into the
                         // graveyard are the pile: not one a replacement
                         // shuffled into the library instead).
-                        let n = f.ev.amount as usize;
+                        let n = crate::num::cards_n(f.ev.amount as crate::num::Wide);
                         let mut milled = self.mill(p, n, true);
                         milled.retain(|&c| self.objs[c.i()].zone == Zone::Graveyard);
                         f.pile = milled;
@@ -1347,7 +1356,7 @@ impl Game {
                     if let Some((sub, pw, tg)) = becomes {
                         let m = Mod::Types { add: 0, subtypes: vec![*sub], replace: false };
                         self.add_effect(Affected::Obj(new), m, crate::layers::Until::Forever, p);
-                        self.add_effect(Affected::Obj(new), Mod::SetPt(*pw, *tg), crate::layers::Until::Forever, p);
+                        self.add_effect(Affected::Obj(new), Mod::set_pt(*pw, *tg), crate::layers::Until::Forever, p);
                     }
                 }
                 Flow::Next
@@ -1676,7 +1685,7 @@ impl Game {
                     if let Some(&top) = self.players[p as usize].library.last() {
                         self.force_library_card(top, crate::hidden::KEY_REVEAL, p);
                         self.reveal(top);
-                        f.x = self.def_of(top).mana_value() as i32;
+                        f.x = self.def_of(top).mana_value() as i64;
                         self.move_card(top, Zone::Hand, Pos::Top);
                     }
                 }

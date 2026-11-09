@@ -55,7 +55,7 @@ impl Game {
             Cond::GainedLifeThisTurn => pl.gained_life,
             Cond::ArtifactEnteredThisTurn => pl.artifact_entered,
             Cond::APlayerControlsNoCreatures => (0..2u8).any(|q| self.creatures_of(q).next().is_none()),
-            Cond::GainedLifeAtLeast(n) => pl.life_gained >= *n as u32,
+            Cond::GainedLifeAtLeast(n) => pl.life_gained >= *n as i64,
             Cond::OpponentHasMoreCards => self.players[crate::ids::opp(p) as usize].hand.len() > pl.hand.len(),
             Cond::OpponentControlsMoreLands => {
                 let lands = |q: PlayerId| self.permanents_of(q).filter(|&x| self.is_type(x, crate::db::types::LAND)).count();
@@ -66,7 +66,8 @@ impl Game {
             }
             Cond::LibraryEmpty => pl.library.is_empty(),
             Cond::YourTurn => self.turn.active == p,
-            Cond::LifeAtMostHalfStart => pl.life as i64 * 2 <= self.spec.starting_life as i64,
+            // (In `Wide`: twice a life total is exact.)
+            Cond::LifeAtMostHalfStart => pl.life as crate::num::Wide * 2 <= self.spec.starting_life as crate::num::Wide,
             Cond::ControlOtherOfColor(m) => {
                 self.permanents_of(p).any(|x| self.colors_of(x) & m != 0 && Some(self.obj_ref(x)) != source)
             }
@@ -102,7 +103,7 @@ impl Game {
     /// times this turn.
     pub(crate) fn activation_capped(&self, c: CardIdx, i: u8) -> bool {
         let r = self.obj_ref(c);
-        self.activations.iter().any(|x| x.0 == r && x.1 == i && x.2 >= ACTIVATION_CAP)
+        self.activations.iter().any(|x| x.0 == r && x.1 == i && x.2 >= ACTIVATION_CAP as u32)
     }
 
     /// The card types among the cards exiled with `source` (CR 607.2a,
@@ -118,7 +119,8 @@ impl Game {
     /// turn (or fewer than the extra activations an effect allows).
     pub(crate) fn loyalty_ready(&self, card: CardIdx) -> bool {
         let o = &self.objs[card.i()];
-        o.pw_turn != self.turn.number as u16 || o.pw_used < 1 + o.pw_extra
+        // (`pw_used < 1 + pw_extra`, without overflow.)
+        o.pw_turn != self.turn.number as u16 || o.pw_used <= o.pw_extra
     }
 
     /// A loyalty ability of `card` is being activated (CR 606.3).
@@ -130,7 +132,8 @@ impl Game {
             o.pw_used = 0;
             o.pw_extra = 0;
         }
-        o.pw_used = o.pw_used.saturating_add(1);
+        let used = o.pw_used;
+        self.objs[card.i()].pw_used = self.exact_inc(used, "loyalty activations this turn");
     }
 
     /// The activated abilities `p` may activate with priority now (CR
@@ -277,6 +280,8 @@ impl Game {
         for d in &ad.discounts {
             let n = match d {
                 // "Where X is this creature's power" (ENGINE.md 99.14).
+                // (A reduction past the u8 generic part is a reduction to
+                // 0, CR 601.2f: exact.)
                 crate::db::Discount::SourcePower if self.is_creature(card) => self.power(card).clamp(0, 255) as u8,
                 _ => self.discount(d, p),
             };
@@ -345,7 +350,7 @@ impl Game {
                 if !(sorcery_ok || instant_ok) || !self.loyalty_ready(card) {
                     return false;
                 }
-                if d < 0 && self.counters_on(card, crate::db::Counter::Loyalty) < crate::num::count(-(d as i64)) {
+                if d < 0 && self.counters_on(card, crate::db::Counter::Loyalty) < (-(d as i64)) as crate::num::Count {
                     return false;
                 }
             }
@@ -417,8 +422,8 @@ impl Game {
         }
         if let (AbilitySlot::Activated(i), crate::db::ActEffect::Stack(_), Zone::Battlefield) = (slot, &ad.effect, self.objs[card.i()].zone) {
             let r = self.obj_ref(card);
-            match self.activations.iter_mut().find(|x| x.0 == r && x.1 == i) {
-                Some(x) => x.2 = x.2.saturating_add(1),
+            match self.activations.iter().position(|x| x.0 == r && x.1 == i) {
+                Some(k) => self.activations[k].2 = self.exact_inc(self.activations[k].2, "activations this turn"),
                 None => self.activations.push((r, i, 1)),
             }
         }
@@ -552,7 +557,7 @@ impl Game {
         allow: u8,
     ) -> bool {
         let pl = &self.players[p as usize];
-        if (cost.life as i32) > pl.life {
+        if (cost.life as i64) > pl.life {
             return false; // CR 119.4
         }
         if let Some(s) = &cost.sacrifice {
@@ -596,10 +601,10 @@ impl Game {
                 // Teamwork: the taps (paid first) and the mana compete.
                 let cands = self.crew_eligible(p, card);
                 let keep = Self::keep_for(card, cost, exclude);
-                if !self.crew_mana_ok(p, cost.crew as i64, &[], &cands, mana, classes, &keep) {
+                if !self.crew_mana_ok(p, cost.crew as crate::num::Wide, &[], &cands, mana, classes, &keep) {
                     return false;
                 }
-            } else if self.crew_power(p, card, !cost.saddle) < cost.crew as i64 {
+            } else if self.crew_power(p, card, !cost.saddle) < cost.crew as crate::num::Wide {
                 return false;
             }
         }
@@ -641,7 +646,7 @@ impl Game {
         // 608.2h): an activated ability's item keeps it (`Amount::CostMvPlus`).
         if let (Some(&c), Some(pos)) = (sacs.first(), self.item_index(id)) {
             if matches!(self.stack[pos].kind, StackKind::Ability { .. }) {
-                self.stack[pos].ev.amount = self.mana_value_of(c) as u32;
+                self.stack[pos].ev.amount = self.mana_value_of(c) as u64;
                 // (And the permanent, for its power: `Amount::CostPower`.)
                 if self.stack[pos].ev.obj.is_none() {
                     self.stack[pos].ev.obj = Some(self.obj_ref(c));
@@ -747,16 +752,16 @@ impl Game {
 
     /// The most power `p` can tap to crew `vehicle` (`bonus`: crew itself,
     /// where "crews Vehicles as though its power were greater" applies).
-    /// (Powers are summed in i64: ENGINE.md 46.)
-    pub(crate) fn crew_power(&self, p: PlayerId, vehicle: CardIdx, bonus: bool) -> i64 {
+    /// (Powers are summed in `Wide`: exact, ENGINE.md 46, 100.7.)
+    pub(crate) fn crew_power(&self, p: PlayerId, vehicle: CardIdx, bonus: bool) -> crate::num::Wide {
         self.crew_eligible(p, vehicle).into_iter().map(|c| self.crew_power_of(c, bonus).max(0)).sum()
     }
 
     /// A creature's power for crewing (a Pilot crews as though its power
     /// were greater: crew only, not saddle or teamwork, CR 702.122,
     /// 702.171a).
-    pub(crate) fn crew_power_of(&self, c: CardIdx, bonus: bool) -> i64 {
-        self.power(c) as i64 + if bonus { self.abilities(c).crew_bonus as i64 } else { 0 }
+    pub(crate) fn crew_power_of(&self, c: CardIdx, bonus: bool) -> crate::num::Wide {
+        self.power(c) + if bonus { self.abilities(c).crew_bonus as crate::num::Wide } else { 0 }
     }
 
     /// Teamwork (a spell's "tap any number of untapped creatures you control
@@ -770,19 +775,19 @@ impl Game {
     pub(crate) fn crew_mana_ok(
         &self,
         p: PlayerId,
-        need: i64,
+        need: crate::num::Wide,
         tapped_in: &[CardIdx],
         cands: &[CardIdx],
         mana: &crate::mana::ManaCost,
         classes: &[crate::pay::Class],
         keep: &Keep,
     ) -> bool {
-        let have: i64 = tapped_in.iter().map(|&c| self.crew_power_of(c, false)).sum();
+        let have: crate::num::Wide = tapped_in.iter().map(|&c| self.crew_power_of(c, false)).sum();
         let (with_mana, plain): (Vec<CardIdx>, Vec<CardIdx>) = cands.iter().copied().partition(|&c| self.has_mana_ability(c));
-        let plain_power: i64 = plain.iter().map(|&c| self.crew_power_of(c, false).max(0)).sum();
+        let plain_power: crate::num::Wide = plain.iter().map(|&c| self.crew_power_of(c, false).max(0)).sum();
         let k = with_mana.len().min(10);
         for mask in 0u32..(1 << k) {
-            let extra: i64 = (0..k).filter(|i| mask >> i & 1 != 0).map(|i| self.crew_power_of(with_mana[i], false).max(0)).sum();
+            let extra: crate::num::Wide = (0..k).filter(|i| mask >> i & 1 != 0).map(|i| self.crew_power_of(with_mana[i], false).max(0)).sum();
             if have + plain_power + extra < need {
                 continue;
             }
@@ -944,7 +949,7 @@ impl Game {
                 // CR 702.122a: enough power tapped for crew.
                 Choice::Pass => {
                     crew_done = true;
-                    CardIdx(u16::MAX)
+                    CardIdx(u32::MAX)
                 }
                 other => unreachable!("cost answer {other:?}"),
             };
@@ -1093,10 +1098,10 @@ impl Game {
             // Crew (CR 702.122a): untapped creatures other than the source,
             // one decision each in increasing slot order; PASS once their
             // total power is enough. A pick must leave the total reachable.
-            let need = cost.crew as i64;
+            let need = cost.crew as crate::num::Wide;
             let bonus = !cost.saddle && !self.is_spell_card(card);
             let tapped_in: Vec<CardIdx> = picked[n_rc..].to_vec();
-            let have: i64 = tapped_in.iter().map(|&c| self.crew_power_of(c, bonus)).sum();
+            let have: crate::num::Wide = tapped_in.iter().map(|&c| self.crew_power_of(c, bonus)).sum();
             let floor = tapped_in.last().map(|&c| self.perm_action(p, c));
             let cands: Vec<CardIdx> = self
                 .crew_eligible(p, card)
@@ -1123,7 +1128,7 @@ impl Game {
                         self.crew_mana_ok(p, need, &t, &cands[k + 1..], mana, &classes, keep)
                     }
                     None => {
-                        let rest: i64 = cands[k + 1..].iter().map(|&x| self.crew_power_of(x, bonus).max(0)).sum();
+                        let rest: crate::num::Wide = cands[k + 1..].iter().map(|&x| self.crew_power_of(x, bonus).max(0)).sum();
                         have + self.crew_power_of(c, bonus) + rest >= need
                     }
                 };
@@ -1211,9 +1216,9 @@ impl Game {
         // counters.
         if let Some((_, src, ad)) = self.act_item(id) {
             match ad.loyalty {
-                Some(d) if d > 0 => self.add_counters(src, crate::db::Counter::Loyalty, crate::num::count(d as i64)),
+                Some(d) if d > 0 => self.add_counters(src, crate::db::Counter::Loyalty, d as crate::num::Count),
                 Some(d) if d < 0 => {
-                    self.remove_counters(src, crate::db::Counter::Loyalty, crate::num::count(-(d as i64)));
+                    self.remove_counters(src, crate::db::Counter::Loyalty, (-(d as i64)) as crate::num::Count);
                 }
                 _ => {}
             }
@@ -1315,8 +1320,9 @@ impl Game {
             }
             // CR 119.4: its life, and the cost's life after it (with a
             // painland's damage first).
-            let spent = k.life as i32 + if life_after > 0 { m.damage_to_you as i32 } else { 0 };
-            if (k.life as i32) > life || (life_after > 0 && life - spent < life_after as i32) {
+            // (In `Wide` with the life total: exact.)
+            let (life, spent) = (life as crate::num::Wide, k.life as crate::num::Wide + if life_after > 0 { m.damage_to_you as crate::num::Wide } else { 0 });
+            if (k.life as crate::num::Wide) > life || (life_after > 0 && life - spent < life_after as crate::num::Wide) {
                 continue;
             }
             if productions(self, p, &m.prod, Some(c)).is_empty() {
@@ -1413,7 +1419,11 @@ impl Game {
                 let m = self.could_produce(land);
                 (0..6).filter(|&t| m & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect()
             }
-            _ => productions(self, p, prod, Some(src.card)),
+            _ => {
+                // (F7: mana from counters past the pool's u8 aborts.)
+                self.check_counter_mana(src.card, prod);
+                productions(self, p, prod, Some(src.card))
+            }
         };
         // "Whenever you tap a creature for mana, add an additional {G}" (a
         // triggered mana ability, CR 605.1b).
@@ -1423,7 +1433,14 @@ impl Game {
             if more != [0; 6] {
                 for v in prods.iter_mut() {
                     for t in 0..6 {
-                        v[t] += more[t];
+                        // (F7: past the pool's u8 the game aborts.)
+                        v[t] = match v[t].checked_add(more[t]) {
+                            Some(n) => n,
+                            None => {
+                                self.abort(|| "more than 255 mana of one type from one ability".to_string());
+                                u8::MAX
+                            }
+                        };
                     }
                 }
             }
@@ -1438,7 +1455,8 @@ impl Game {
             let v = prods[0];
             self.add_mana(p, &v);
             let pool = &mut self.players[p as usize].pool;
-            pool.haste = pool.haste.saturating_add(v[crate::mana::R]).min(pool.amt[crate::mana::R]);
+            // (Exact: at most the red mana in the pool, a u8.)
+            pool.haste = (pool.haste as u16 + v[crate::mana::R] as u16).min(pool.amt[crate::mana::R] as u16) as u8;
             return;
         }
         if !prods.is_empty() {
@@ -1574,7 +1592,7 @@ impl Game {
             }
             return;
         }
-        let n = self.def_of(card).shock_life as i32;
+        let n = self.def_of(card).shock_life as i64;
         if n == 0 {
             return;
         }

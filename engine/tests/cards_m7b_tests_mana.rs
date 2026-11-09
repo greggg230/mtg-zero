@@ -175,7 +175,7 @@ fn mana_creatures_make_their_mana_but_not_while_summoning_sick() {
         assert_eq!(colors_of_source(name), colors, "{name}");
         let g = scen().battlefield(0, &[name]).at(Step::Main1, 0).start();
         let c = bf(&g, 0, name);
-        assert_eq!(g.pt(c), pt, "{name}");
+        assert_eq!(g.pt(c), (pt.0.into(), pt.1.into()), "{name}");
         assert!(g.is_creature(c));
         assert_eq!(g.has_kw(c, Kw::Flying), name == "Birds of Paradise", "{name}: flying");
         let land = if cast_with == "G" { "Forest" } else { "Plains" };

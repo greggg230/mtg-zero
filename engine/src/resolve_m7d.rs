@@ -250,7 +250,7 @@ impl Game {
         // 36.11.)
         let deck = match self.deck_question(p, |d| d.opening.is_some()) {
             Some(known) => known,
-            None => self.objs.iter().enumerate().any(|(i, o)| o.owner == p && self.opening_ok(p, CardIdx(i as u16))),
+            None => self.objs.iter().enumerate().any(|(i, o)| o.owner == p && self.opening_ok(p, CardIdx(i as u32))),
         };
         if !deck {
             self.opening_next(p);
@@ -370,7 +370,7 @@ impl Game {
                                 kind: crate::db::EventKind::ClassLevel,
                                 a: crate::triggers::Subj::Obj(r),
                                 b: crate::triggers::Subj::None,
-                                amount: *level as u32,
+                                amount: *level as u64,
                             };
                             self.event(ev);
                         }
@@ -387,7 +387,7 @@ impl Game {
                     let r = self.obj_ref(c);
                     let ty = crate::db::Mod::Types { add: crate::db::types::CREATURE, subtypes: vec![*subtype], replace: false };
                     self.add_effect(crate::layers::Affected::Obj(r), ty, crate::layers::Until::Forever, ctl);
-                    self.add_effect(crate::layers::Affected::Obj(r), crate::db::Mod::SetPt(*p, *t), crate::layers::Until::Forever, ctl);
+                    self.add_effect(crate::layers::Affected::Obj(r), crate::db::Mod::set_pt(*p, *t), crate::layers::Until::Forever, ctl);
                 }
                 Flow::Next
             }
@@ -627,7 +627,7 @@ impl Game {
                 // chooser's); the chooser's own deck is theirs to know.
                 let hidden = self.known_pools[q as usize].is_some();
                 let mut defs: Vec<crate::ids::DefId> = (0..self.objs.len())
-                    .map(|i| CardIdx(i as u16))
+                    .map(|i| CardIdx(i as u32))
                     .filter(|&c| !self.is_token(c) && !self.is_copy_obj(c) && self.objs[c.i()].zone != Zone::Nowhere)
                     .filter(|&c| self.objs[c.i()].owner == p || !hidden || self.knows(p, c))
                     .map(|c| self.ident_card(c))
@@ -712,7 +712,9 @@ impl Game {
         self.sacrifice_candidates(p, card, &s)
             .into_iter()
             .filter(|&x| {
-                let m = mana.less_generic(self.mana_value_of(x));
+                // (A reduction past the u8 generic part is a reduction to 0,
+                // CR 601.2f: exact.)
+                let m = mana.less_generic(self.mana_value_of(x).min(u8::MAX as u64) as u8);
                 let without = if self.sacrifices_itself_for_mana(x) { Some(x) } else { Some(card) };
                 m.is_zero() || self.can_pay_without(p, &m, classes, &keep, without)
             })

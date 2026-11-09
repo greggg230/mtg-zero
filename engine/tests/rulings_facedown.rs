@@ -156,7 +156,7 @@ const SCARLETT: &str = "Headliner Scarlett";
 fn scarlett_exiles(card: &str, lands: &[&str]) -> (Game, CardIdx) {
     let mut g = scen().battlefield(0, &[SCARLETT]).battlefield(0, lands).library(0, &[card; 10]).at(Step::Main2, 1).start();
     quiet_until(&mut g, |g| g.turn().active == 0 && g.turn().step == Step::Main1 && at_priority(g));
-    let fd: Vec<CardIdx> = (0..g.objs().len()).map(|i| CardIdx(i as u16)).filter(|&c| g.obj(c).zone == Zone::FaceDown).collect();
+    let fd: Vec<CardIdx> = (0..g.objs().len()).map(|i| CardIdx(i as u32)).filter(|&c| g.obj(c).zone == Zone::FaceDown).collect();
     assert_eq!(fd.len(), 1);
     (g, fd[0])
 }
@@ -172,7 +172,7 @@ fn headliner_scarlett_gone_the_card_stays_playable_this_turn_cr_611_2a() {
         .at(Step::Main2, 1)
         .start();
     quiet_until(&mut g2, |g| g.turn().active == 0 && g.turn().step == Step::Main1 && at_priority(g));
-    let fd = (0..g2.objs().len()).map(|i| CardIdx(i as u16)).find(|&c| g2.obj(c).zone == Zone::FaceDown).unwrap();
+    let fd = (0..g2.objs().len()).map(|i| CardIdx(i as u32)).find(|&c| g2.obj(c).zone == Zone::FaceDown).unwrap();
     let stp = g2.card(0, "Swords to Plowshares", Zone::Hand);
     let s = bf(&g2, 0, SCARLETT);
     let t = g2.tgt(s);
@@ -202,7 +202,7 @@ fn headliner_scarlett_a_land_is_played_as_the_land_drop_in_a_main_phase_cr_305_2
         .at(Step::Main2, 1)
         .start();
     quiet_until(&mut g, |g| g.turn().active == 0 && g.turn().step == Step::Main1 && at_priority(g));
-    let fd = (0..g.objs().len()).map(|i| CardIdx(i as u16)).find(|&c| g.obj(c).zone == Zone::FaceDown).unwrap();
+    let fd = (0..g.objs().len()).map(|i| CardIdx(i as u32)).find(|&c| g.obj(c).zone == Zone::FaceDown).unwrap();
     let m = g.card(0, "Mountain", Zone::Hand);
     g.choose(Choice::Play(m));
     g.drive_until(at_priority);

@@ -437,7 +437,7 @@ fn raw_move(g: &mut Game, c: CardIdx, to: Zone) {
     }
     let o = &mut g.objs[c.i()];
     o.zone = to;
-    o.inc = o.inc.wrapping_add(1);
+    o.inc = o.inc.checked_add(1).expect("an incarnation below u32::MAX");
     o.controller = o.owner;
     o.tapped = false;
     o.damage = 0;
@@ -454,7 +454,7 @@ fn raw_move(g: &mut Game, c: CardIdx, to: Zone) {
 
 /// What continuous effects change of permanent `c` (layers 4-7 and the rules
 /// flags), from the engine's accessors.
-fn characteristics(g: &Game, c: CardIdx) -> (u16, u8, (i32, i32), u32, crate::layers::Flags, crate::db::Prot, bool) {
+fn characteristics(g: &Game, c: CardIdx) -> (u16, u8, (crate::num::Wide, crate::num::Wide), u32, crate::layers::Flags, crate::db::Prot, bool) {
     (g.types_of(c), g.colors_of(c), g.pt(c), g.keywords_of(c).0, g.flags_of(c), g.protection_of(c), g.lost_abilities(c))
 }
 
@@ -1407,7 +1407,8 @@ pub fn perturbations() -> Vec<Perturbation> {
             let cs: Vec<CardIdx> =
                 slots(&a.g).into_iter().filter(|&c| a.g.is_type(c, types::PLANESWALKER) && a.g.objs[c.i()].pw_turn == t && a.g.objs[c.i()].pw_used > 0).collect();
             let c = pick(&cs, r)?;
-            a.g.objs[c.i()].pw_turn = t.wrapping_sub(1);
+            // (Another turn: the previous one, or the next before the first.)
+            a.g.objs[c.i()].pw_turn = if t == 0 { 1 } else { t - 1 };
             Some(a.g.name(c).to_string())
         }),
         // ---- StackItem ----

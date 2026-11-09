@@ -121,7 +121,9 @@ impl Game {
         }
         if self.is_creature(c) {
             let (p, t) = self.pt(c);
-            v["pt"] = json!([p, t]);
+            // (A derived value past i64, ENGINE.md 100.7: shown as a string.)
+            let num = |x: crate::num::Wide| i64::try_from(x).map_or_else(|_| json!(x.to_string()), |n| json!(n));
+            v["pt"] = json!([num(p), num(t)]);
             if self.is_sick(c) && !self.has_kw(c, Kw::Haste) {
                 v["sick"] = json!(true);
             }
