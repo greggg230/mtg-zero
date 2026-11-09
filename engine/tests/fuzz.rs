@@ -60,6 +60,19 @@
 //! (17 lands, 23 spells; games only, no matches).
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 //!
+//! `FUZZ_HIDDEN_DECKS=1` (ENGINE.md 102): the mode's games (the default decks or `FUZZ_POOL=eoe`'s)
+//! with hidden decklists, played through `MtgAz` (`MtgAz::from_seats`, the table's `TablePrior`
+//! for both decks): every check of a game (the decider's encoding through `MtgAz::encode`) and at
+//! each checkpoint `MtgAz::determinize` for both viewers - the decider's actions, the viewer's
+//! view and whole encoding as in the real game, no known card dealt again, the opponent's sampled
+//! deck of the public size holding every card the viewer saw and equal to the match's, the
+//! viewer's own cards, invariants and clouds, every option completes, the information-set check
+//! (two worlds, the same actions), 30 moves on. Random play on the base loops on free
+//! activations (ENGINE.md 100.5.1, seed 1024: fixed by the board-reading loop rule on
+//! `eoe-f7-numbers`, not on this branch), so past 500 decisions in one turn the random player
+//! passes priority whenever it may (counted). Games only; it prints the worlds and those with
+//! another deck than the real one (with 200 games or more, most must).
+//!
 //! `FUZZ_BELIEF=t` (ENGINE.md 69): at every checkpoint also the belief-weighted deal
 //! (`Game::determinize_weighted`, `MtgAz::determinize_belief`) for both viewers, with random weights
 //! sharpened by the tilt t (clip 1e6): every check of `determinize`'s world (the decider's actions and
@@ -1350,7 +1363,7 @@ fn fuzz_random_games() {
             skips += 1;
             continue;
         }
-        let p = std::panic::catch_unwind(|| play(seed, true)).unwrap_or_else(|e| {
+        let p = std::panic::catch_unwind(|| if hidden_decks_mode() { play_hidden(seed) } else { play(seed, true) }).unwrap_or_else(|e| {
             panic!("seed {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1 FUZZ_LOG=1): {e:?}")
         });
         // (An aborted game, ENGINE.md 100.7: a legitimate end, with no
@@ -1387,6 +1400,14 @@ fn fuzz_random_games() {
     println!("longest game: {} actions (cap 100,000)", MAX_GAME_STEPS.load(Ordering::Relaxed));
     println!("controlled decisions (CR 722.4, encoded in the controlled seat: ENGINE.md 100.5): {}", CONTROLLED.load(Ordering::Relaxed));
     println!("{}; seeds skipped (FUZZ_SKIP): {skips}", longest_turn_report());
+    if hidden_decks_mode() {
+        let (w, x, st, lt) =
+            (HD_WORLDS.load(Ordering::Relaxed), HD_OTHER_DECK.load(Ordering::Relaxed), HD_STEPS.load(Ordering::Relaxed), HD_LONG_TURNS.load(Ordering::Relaxed));
+        println!("FUZZ_HIDDEN_DECKS: {w} hidden-decklist worlds, {x} with another deck than the real one; {st} information-set steps in step; {lt} turns past {HD_LONG_TURN} decisions");
+        if n >= 200 {
+            assert!(w > 0 && x * 10 > w * 9, "FUZZ_HIDDEN_DECKS: {x} of {w} worlds with another deck");
+        }
+    }
     if let Some(t) = belief_tilt() {
         let (w, d, u) = (BELIEF_WORLDS.load(Ordering::Relaxed), BELIEF_DEALT.load(Ordering::Relaxed), BELIEF_UNIFORM.load(Ordering::Relaxed));
         println!(
@@ -1801,6 +1822,10 @@ fn fuzz_random_matches() {
         println!("FUZZ_POOL=eoe: games only (sealed matches come with milestone S2)");
         return;
     }
+    if hidden_decks_mode() {
+        println!("FUZZ_HIDDEN_DECKS: games only (hidden decklists are best-of-one)");
+        return;
+    }
     let games: u64 = std::env::var("FUZZ_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
     let n: u64 = std::env::var("FUZZ_MATCHES").ok().and_then(|s| s.parse().ok()).unwrap_or((games / 20).max(20));
     let first: u64 = std::env::var("FUZZ_FIRST").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -1857,5 +1882,236 @@ fn same_seed_and_actions_replay_matches_identically() {
         assert_eq!((g.g.fingerprint(), g.m.results), (a.fingerprint, a.results), "match {seed}");
         assert_eq!(keys, a.keys, "match {seed}: chance keys differ");
         assert_eq!(play_match(seed, false).fingerprint, a.fingerprint);
+    }
+}
+
+// ---- FUZZ_HIDDEN_DECKS=1: hidden decklists (ENGINE.md 102) ----
+
+/// `FUZZ_HIDDEN_DECKS=1` (module docs): the games are played through `MtgAz` with hidden
+/// decklists.
+fn hidden_decks_mode() -> bool {
+    std::env::var("FUZZ_HIDDEN_DECKS").is_ok_and(|s| s == "1")
+}
+
+/// Hidden-decklist worlds checked, those whose opponent deck is not the real one, steps the
+/// information-set check took in step, turns that reached the long-turn rule.
+static HD_WORLDS: AtomicU64 = AtomicU64::new(0);
+static HD_OTHER_DECK: AtomicU64 = AtomicU64::new(0);
+static HD_STEPS: AtomicU64 = AtomicU64::new(0);
+static HD_LONG_TURNS: AtomicU64 = AtomicU64::new(0);
+/// `FUZZ_HIDDEN_DECKS`: past this many decisions in one turn the random player passes priority
+/// whenever it may (module docs: random play loops on the base's free activations).
+const HD_LONG_TURN: u64 = 500;
+
+fn az_encode(a: &engine::az::MtgAz, viewer: u8, buf: &mut Vec<f32>) {
+    use zero_search::game::SearchGame;
+    buf.clear();
+    buf.resize(engine::az::NUM_FEATURES, 0.0);
+    a.encode(viewer as usize, buf);
+}
+
+fn az_legal(a: &engine::az::MtgAz) -> Vec<u16> {
+    use zero_search::game::SearchGame;
+    let mut l = Vec::new();
+    a.legal_actions(&mut l);
+    l
+}
+
+/// Player `p`'s starting deck's cards (sorted card definitions; the game's objects are the two
+/// decks first, P0's then P1's).
+fn hd_deck(a: &engine::az::MtgAz, p: u8) -> Vec<u16> {
+    let n0: usize = a.m.decks[0].iter().map(|&c| c as usize).sum();
+    let n1: usize = a.m.decks[1].iter().map(|&c| c as usize).sum();
+    let r = if p == 0 { 0..n0 } else { n0..n0 + n1 };
+    let mut v: Vec<u16> = r.map(|i| engine::az::sample::card_of(&a.g, engine::CardIdx::new(i as u32))).collect();
+    v.sort_unstable();
+    v
+}
+
+/// The cards `viewer` has seen of the other player's deck (deck cards it knows exactly, its
+/// clouds' identities), sorted: every world's deck holds them.
+fn hd_shown(a: &engine::az::MtgAz, viewer: u8) -> Vec<u16> {
+    let o = 1 - viewer;
+    let g = &a.g;
+    let n0: usize = a.m.decks[0].iter().map(|&c| c as usize).sum();
+    let n1: usize = a.m.decks[1].iter().map(|&c| c as usize).sum();
+    let r = if o == 0 { 0..n0 } else { n0..n0 + n1 };
+    let mut v: Vec<u16> =
+        r.map(|i| engine::CardIdx::new(i as u32)).filter(|&c| g.knows(viewer, c)).map(|c| engine::az::sample::card_of(g, c)).collect();
+    for k in g.clouds().iter().filter(|k| k.viewer == viewer && k.owner == o) {
+        v.extend(k.defs.iter().map(|&d| g.db().def(d).card_def(d)));
+    }
+    v.sort_unstable();
+    v
+}
+
+/// One game of `FUZZ_HIDDEN_DECKS` (module docs): the mode's decks, played through `MtgAz` with
+/// hidden decklists (the table's `TablePrior` for both decks), with the checks of `play` and, at
+/// each checkpoint, `check_determinize_hidden`.
+fn play_hidden(seed: u64) -> Played {
+    use zero_search::game::SearchGame;
+    let [(d0, s0), (d1, s1)] = decks(seed);
+    let log = std::env::var("FUZZ_LOG").is_ok();
+    let gspec = GameSpec { log, hidden_decks: true, hidden_decklists: true, ..GameSpec::default() };
+    let seat = |deck: Vec<u16>, sideboard: Vec<u16>| engine::az::Seat { deck, sideboard, first_picks: Vec::new(), elsewhere: Vec::new() };
+    let prior: std::sync::Arc<dyn engine::az::hidden_decks::DeckPrior> = engine::az::hidden_decks::TablePrior::of(game_db());
+    let mut a = engine::az::MtgAz::from_seats(game_db(), gspec, engine::az::Format::Bo1, &[seat(d0, s0), seat(d1, s1)], seed, [Some(prior.clone()), Some(prior)])
+        .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+    let mut rng = Rng::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 1);
+    let mut crng = Rng::new(seed ^ 0xC0_4D_1E7E);
+    let (mut actions, mut keys, mut buf) = (Vec::new(), Vec::new(), Vec::new());
+    let mut steps = 0usize;
+    let (mut turn, mut turn_steps) = (a.g.turn().number, 0u64);
+    while !a.g.is_over() {
+        let legal = az_legal(&a);
+        assert!(!legal.is_empty(), "seed {seed}: no legal action in a running game");
+        assert!(legal.windows(2).all(|w| w[0] < w[1]), "seed {seed}: actions not sorted/unique");
+        let act = if turn_steps >= HD_LONG_TURN && legal.contains(&engine::act::PASS) {
+            if turn_steps == HD_LONG_TURN {
+                HD_LONG_TURNS.fetch_add(1, Ordering::Relaxed);
+            }
+            engine::act::PASS
+        } else {
+            legal[rng.below(legal.len() as u32) as usize]
+        };
+        count_kind(a.g.kind());
+        let mover = a.to_move().unwrap() as u8;
+        az_encode(&a, mover, &mut buf);
+        check_bounded(&buf, &|| format!("seed {seed} step {steps} (viewer P{mover})"));
+        check_graveyard_list(&a.g, &buf, &|| format!("seed {seed} step {steps}"));
+        check_list_options(&a.g, &buf, &|| format!("seed {seed} step {steps}"));
+        check_hand_options(&a.g, &buf, &|| format!("seed {seed} step {steps}"));
+        if rng.below(checkpoint_every()) == 0 {
+            check_clone(&a.g, act, seed);
+            check_determinize_hidden(&a, seed, &mut rng);
+        }
+        if complete_now(&a.g, &mut crng) {
+            check_options_complete(&a.g, seed, "the game");
+        }
+        a.step(act, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+        a.g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}"));
+        a.g.check_knowledge().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}"));
+        actions.push(act);
+        steps += 1;
+        if a.g.turn().number != turn {
+            record_turn(seed, turn, turn_steps);
+            (turn, turn_steps) = (a.g.turn().number, 0);
+        }
+        turn_steps += 1;
+        assert!(steps < 100_000, "seed {seed}: game does not end");
+    }
+    MAX_GAME_STEPS.fetch_max(steps as u64, Ordering::Relaxed);
+    record_turn(seed, turn, turn_steps);
+    let g = &a.g;
+    let companions = (0..2).filter(|&p| g.player(p).companion.is_some()).count() as u32;
+    let companions_used = (0..2).filter(|&p| g.player(p).companion_used).count() as u32;
+    Played { actions, keys, fingerprint: g.fingerprint(), outcome: g.outcome().unwrap(), turns: g.turn().number, companions, companions_used }
+}
+
+/// `MtgAz::determinize` with hidden decklists, for the decider and the other player (ENGINE.md
+/// 102.3): the decider's actions (the other player: the decider still to move), the viewer's view
+/// and whole encoding as in the real game, no card it knows dealt again, the opponent's sampled
+/// deck of the public size holding every card the viewer has seen and equal to the match's deck of
+/// theirs, the viewer's own cards untouched, the invariants and the clouds; every option of the
+/// world's decision completes; for the decider, two worlds played with the same actions stay
+/// indistinguishable while their keys, next decider and legal actions agree; then 30 random
+/// actions in the world.
+fn check_determinize_hidden(a: &engine::az::MtgAz, seed: u64, rng: &mut Rng) {
+    use zero_search::game::SearchGame;
+    let mover = a.to_move().unwrap() as u8;
+    let (mut b0, mut b1) = (Vec::new(), Vec::new());
+    for viewer in [mover, 1 - mover] {
+        let o = 1 - viewer;
+        let shown = hd_shown(a, viewer);
+        let (real, mine) = (hd_deck(a, o), hd_deck(a, viewer));
+        let mut d = a.clone();
+        d.determinize(viewer as usize, &mut zero_search::rng::Rng::new(rng.next_u64()));
+        let what = || format!("seed {seed}: a hidden-decklist world for P{viewer} (mover P{mover})");
+        if viewer == mover {
+            assert_eq!(az_legal(&d), az_legal(a), "{}: the decider's actions", what());
+        } else {
+            assert_eq!(d.to_move(), Some(mover as usize), "{}: a refresh ran past the decision", what());
+        }
+        assert_eq!(a.g.view_of(viewer), d.g.view_of(viewer), "{}: the view", what());
+        az_encode(a, viewer, &mut b0);
+        az_encode(&d, viewer, &mut b1);
+        if let Some(i) = (0..b0.len()).find(|&i| b0[i] != b1[i]) {
+            panic!("{}: the viewer's feature {i} differs ({} / {})", what(), b0[i], b1[i]);
+        }
+        for (i, ob) in a.g.objs().iter().enumerate() {
+            let c = engine::CardIdx::new(i as u32);
+            if a.g.knows(viewer, c) {
+                assert_eq!((ob.def, a.g.ident(c)), (d.g.obj(c).def, d.g.ident(c)), "{}: a card the viewer knows was dealt again", what());
+            }
+        }
+        d.g.check_invariants().unwrap_or_else(|e| panic!("{}: {e}", what()));
+        d.g.check_knowledge().unwrap_or_else(|e| panic!("{}: {e}", what()));
+        let world = hd_deck(&d, o);
+        assert_eq!(world.len(), real.len(), "{}: the deck's size", what());
+        let mut left = world.clone();
+        for x in &shown {
+            match left.binary_search(x) {
+                Ok(i) => {
+                    left.remove(i);
+                }
+                Err(_) => panic!("{}: the sampled deck lacks a shown {}", what(), a.g.db().def(*x).name),
+            }
+        }
+        assert_eq!(d.m.deck(o), world, "{}: the match's deck of the opponent", what());
+        assert_eq!(hd_deck(&d, viewer), mine, "{}: the viewer's own cards", what());
+        for v in [0u8, 1] {
+            az_encode(&d, v, &mut b1);
+            check_bounded(&b1, &|| format!("{} (viewer P{v})", what()));
+        }
+        HD_WORLDS.fetch_add(1, Ordering::Relaxed);
+        HD_OTHER_DECK.fetch_add((world != real) as u64, Ordering::Relaxed);
+        check_options_complete(&d.g, seed, &what());
+        if viewer == mover {
+            check_hidden_information_set(a, viewer, seed, rng);
+        }
+        let mut keys = Vec::new();
+        for _ in 0..30 {
+            if d.to_move().is_none() {
+                break;
+            }
+            let l = az_legal(&d);
+            d.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap_or_else(|e| panic!("{}: {e}", what()));
+            d.g.check_invariants().unwrap_or_else(|e| panic!("{} (played on): {e}", what()));
+        }
+    }
+}
+
+/// zero-core's child signature on hidden-decklist worlds (`check_information_set`'s, through
+/// `MtgAz`): equal keys, next decider and legal actions mean an equal view and encoding.
+fn check_hidden_information_set(a: &engine::az::MtgAz, viewer: u8, seed: u64, rng: &mut Rng) {
+    use zero_search::game::SearchGame;
+    let s = rng.next_u64();
+    let mut x = a.clone();
+    x.determinize(viewer as usize, &mut zero_search::rng::Rng::new(s));
+    let mut y = a.clone();
+    y.determinize(viewer as usize, &mut zero_search::rng::Rng::new(s ^ 0x5EED));
+    let (mut bx, mut by) = (Vec::new(), Vec::new());
+    for step in 0..25 {
+        let (lx, ly) = (az_legal(&x), az_legal(&y));
+        if x.to_move() != y.to_move() || lx != ly {
+            let v = Some(viewer as usize);
+            assert!(!(x.to_move() == v && y.to_move() == v), "seed {seed} step {step}: the viewer's options differ between its worlds");
+            return;
+        }
+        assert_eq!(x.g.view_of(viewer), y.g.view_of(viewer), "seed {seed} step {step}: same keys, different views");
+        az_encode(&x, viewer, &mut bx);
+        az_encode(&y, viewer, &mut by);
+        assert!(bx == by, "seed {seed} step {step}: same keys, different encodings");
+        if x.to_move().is_none() {
+            return;
+        }
+        let act = lx[rng.below(lx.len() as u32) as usize];
+        let (mut kx, mut ky) = (Vec::new(), Vec::new());
+        x.step(act, &mut kx).unwrap();
+        y.step(act, &mut ky).unwrap();
+        HD_STEPS.fetch_add(1, Ordering::Relaxed);
+        if kx != ky {
+            return;
+        }
     }
 }
