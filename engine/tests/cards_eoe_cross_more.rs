@@ -381,13 +381,18 @@ fn alpharael_without_an_artifact_discard_discards_two_cr701_9a() {
     g.choose(Choice::Card(bear));
     settle(&mut g);
     assert_eq!(g.player(0).hand.len(), 2, "{}", log(&g));
-    // No artifact card: no choice, two discards.
+    // No artifact card: the question is still asked, pass only (the hand is
+    // hidden from the other player, whose worlds must find it: ENGINE.md 10,
+    // 102.3), then two discards.
     let mut g = scen()
         .battlefield(0, &["Island", "Swamp", "Swamp"])
         .hand(0, &["Alpharael, Dreaming Acolyte", "Cross Bear"])
         .at(Step::Main1, 0)
         .start();
     cast(&mut g, 0, "Alpharael, Dreaming Acolyte", &[]);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Discard));
+    assert_eq!(g.options_desc().len(), 1, "pass only: {:?}", g.options_desc());
+    g.choose(Choice::Pass);
     g.drive_until(|g| g.kind() == Some(DecisionKind::Discard));
     assert!(!g.has_option(Choice::Pass), "must discard: {:?}", g.options_desc());
     settle(&mut g);

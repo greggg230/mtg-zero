@@ -2036,7 +2036,21 @@ fn check_determinize_hidden(a: &engine::az::MtgAz, seed: u64, rng: &mut Rng) {
         az_encode(a, viewer, &mut b0);
         az_encode(&d, viewer, &mut b1);
         if let Some(i) = (0..b0.len()).find(|&i| b0[i] != b1[i]) {
-            panic!("{}: the viewer's feature {i} differs ({} / {})", what(), b0[i], b1[i]);
+            let diff: Vec<usize> = (0..b0.len()).filter(|&i| b0[i] != b1[i]).collect();
+            panic!(
+                "{}: the viewer's feature {i} differs ({} / {}); all {diff:?}\nreal: {:?} {:?}\n  agenda {}\nworld: {:?} {:?}\n  agenda {}\n{}",
+                what(),
+                b0[i],
+                b1[i],
+                a.g.kind(),
+                a.g.options_desc(),
+                a.g.agenda_tail(4),
+                d.g.kind(),
+                d.g.options_desc(),
+                d.g.agenda_tail(4),
+                a.g.log_lines().iter().rev().take(30).rev().cloned().collect::<Vec<_>>().join("
+")
+            );
         }
         for (i, ob) in a.g.objs().iter().enumerate() {
             let c = engine::CardIdx::new(i as u32);

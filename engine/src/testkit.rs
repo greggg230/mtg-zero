@@ -445,6 +445,13 @@ impl Game {
     /// decision (its options only if the viewer decides). Two worlds a
     /// `determinize(viewer)` may produce must agree on it. The state part
     /// ([`view_state`](Self::view_state)) and the pending decision.
+    /// The engine's continuation (the agenda's last `n` tasks, top last), for a failure's message.
+    #[doc(hidden)]
+    pub fn agenda_tail(&self, n: usize) -> String {
+        let a = &self.agenda;
+        format!("{:?}", &a[a.len().saturating_sub(n)..])
+    }
+
     pub fn view_of(&self, viewer: PlayerId) -> Vec<u64> {
         let mut v: Vec<u64> = Vec::with_capacity(256);
         self.view_state(viewer, None, &mut v);

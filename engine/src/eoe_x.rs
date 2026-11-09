@@ -235,7 +235,13 @@ impl Game {
                             .into_iter()
                             .filter(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(filter, c, &ctx)))
                             .collect();
-                        if opts.is_empty() {
+                        // With no matching card, asked anyway (pass only): the
+                        // hand is hidden from the other player, whose worlds
+                        // must find this same question (ENGINE.md 10, 102.3:
+                        // skipping it showed the other player's encoding, by the
+                        // resolving op, whether the hand held a match). An empty
+                        // hand is public.
+                        if self.players[p as usize].hand.is_empty() {
                             return Flow::Next;
                         }
                         opts.push(Opt { action: act::PASS, choice: Choice::Pass });
