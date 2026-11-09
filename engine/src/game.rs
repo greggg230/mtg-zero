@@ -37,6 +37,12 @@ pub struct GameSpec {
     /// on a deck are then asked regardless (the companion reveal), and a
     /// name is chosen among the names the chooser can know (`known_pools`).
     pub hidden_decks: bool,
+    /// Hidden decklists (EoE sealed, ENGINE.md 102; needs `hidden_decks`):
+    /// the other player knows nothing of a player's deck but the format and
+    /// what it has seen. Clouds over a player's whole hand and library are
+    /// kept (they record shown cards still in the deck), and the other
+    /// player's sideboard size is hidden (out of `view_of` and the encoding).
+    pub hidden_decklists: bool,
 }
 
 impl Default for GameSpec {
@@ -51,6 +57,7 @@ impl Default for GameSpec {
             log: false,
             chooser: None,
             hidden_decks: false,
+            hidden_decklists: false,
         }
     }
 }
@@ -1099,6 +1106,9 @@ impl Game {
         }
         if spec.chooser.is_some_and(|p| p > 1) {
             return Err("chooser must be player 0 or 1".into());
+        }
+        if spec.hidden_decklists && !spec.hidden_decks {
+            return Err("hidden_decklists needs hidden_decks (ENGINE.md 102)".into());
         }
         // (Per-object turn numbers are u16: `Obj::entered`, `pw_turn`,
         // marks; ENGINE.md 46.)

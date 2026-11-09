@@ -1207,7 +1207,7 @@ impl Game {
         let legal = |a: u16| -> bool {
             mine_to_decide && decision.is_some_and(|d| d.options.binary_search_by_key(&a, |o| o.action).is_ok())
         };
-        self.encode_globals(me, &mut out[O_GLOBALS..O_GLOBALS + GLOBALS]);
+        self.encode_globals(me, knower, &mut out[O_GLOBALS..O_GLOBALS + GLOBALS]);
         self.encode_globals_v5(me, &mut out[O_GLOBALS_V5..O_GLOBALS_V5 + GLOBALS_V5]);
         self.encode_globals_v6(me, ids, &mut out[O_GLOBALS_V6..O_GLOBALS_V6 + GLOBALS_V6]);
         self.encode_bags(me, knower, ids, out);
@@ -2051,7 +2051,7 @@ impl Game {
         g[g5::EXTRA_COMBATS] = squash(t.extra_combats as f32 / 2.0);
     }
 
-    fn encode_globals(&self, me: PlayerId, g: &mut [f32]) {
+    fn encode_globals(&self, me: PlayerId, knower: PlayerId, g: &mut [f32]) {
         let t = &self.turn;
         g[0] = squash(t.number as f32 / 50.0);
         g[1 + t.step as usize] = 1.0; // 14 steps: 1..15
@@ -2141,8 +2141,12 @@ impl Game {
             // 100.7.)
             o[glob::COMPLETED] = squash(completed as f32 / 2.0);
             o[glob::EXPERIENCE] = squash(pl.experience as f32 / 4.0);
-            // Layout v4 (ENGINE.md 35).
-            o[glob::SIDEBOARD] = self.sideboard_size(p) as f32 / 15.0;
+            // Layout v4 (ENGINE.md 35). With hidden decklists the other
+            // player's sideboard size is hidden (it tells their basic lands:
+            // left at 0, ENGINE.md 102.1).
+            if !(self.spec.hidden_decklists && p != knower) {
+                o[glob::SIDEBOARD] = self.sideboard_size(p) as f32 / 15.0;
+            }
             o[glob::COMPANION] = self.companion_outside(p).is_some() as u8 as f32;
         }
         g[glob::CHOOSER] = (t.chooser == me) as u8 as f32;
@@ -2484,7 +2488,14 @@ pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
     let flipped = me != knower;
     let pool = &m.pools[op_ as usize];
     let hidden = m.format == super::Format::Bo3;
+    // (Hidden decklists, ENGINE.md 102: nothing of the knower's opponent's
+    // pool is known; framed in their seat, the frame's opponent is the
+    // knower, whose own pool it is.)
+    let unknown_pool = a.g.spec().hidden_decklists && !flipped;
     for &(def, n) in &pool.list[..pool.n_cards] {
+        if unknown_pool {
+            break;
+        }
         if !hidden || flipped || super::sample::known_before(m, op_, ids, def) {
             out[O_BAGS + bag::OPP_POOL * D + ids[def as usize] as usize] += 0.25 * n as f32;
         }

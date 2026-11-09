@@ -275,6 +275,10 @@ pub struct MatchState {
     /// Best-of-three (hidden decks, ENGINE.md 36.11): the prior of each
     /// player's unknown first picks, as the other player samples them.
     pub priors: Option<Arc<[super::sample::FirstPickPrior; 2]>>,
+    /// Hidden decklists (ENGINE.md 102): the prior of each player's deck as
+    /// the other player samples it (`hidden_decks::DeckPrior`); None: that
+    /// deck is open (every other format).
+    pub deck_priors: [Option<Arc<dyn super::hidden_decks::DeckPrior>>; 2],
 }
 
 /// The first game's setup of one player: deck, sideboard, first picks, and
@@ -331,6 +335,7 @@ impl MatchState {
             sb: None,
             rng: Rng::new(seed ^ 0x3A7C_4B0B_D1CE_5EED),
             priors,
+            deck_priors: [None, None],
         })
     }
 
@@ -512,6 +517,15 @@ impl super::MtgAz {
     /// name a card of theirs.
     pub(crate) fn set_known_pools(&mut self) {
         if !self.g.spec().hidden_decks {
+            return;
+        }
+        // Hidden decklists (ENGINE.md 102): nothing of the pool is known
+        // but the format, the support of the deck's prior.
+        if self.g.spec().hidden_decklists {
+            for q in 0..2usize {
+                let prior = self.m.deck_priors[q].as_ref().expect("hidden decklists: a prior for each deck");
+                self.g.known_pools[q] = Some(Arc::from(prior.support()));
+            }
             return;
         }
         let ids = identity::identities(self.g.db());

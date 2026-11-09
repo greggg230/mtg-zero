@@ -28,6 +28,7 @@ pub mod draft;
 pub mod draft_bots;
 pub mod draft_encode;
 pub mod encode;
+pub mod hidden_decks;
 pub mod identity;
 pub mod lab;
 pub mod matches;
@@ -106,6 +107,13 @@ pub enum DeckMode {
 /// sideboarding between games is not built: `"bo3"` is an error), and never
 /// random, evaluation or drafted decks (those are limited's).
 ///
+/// Hidden decklists (ENGINE.md 102): `"hidden_decklists": true` (default false; best-of-one,
+/// not with constructed, drafted or `start`) hides each player's deck from the other entirely
+/// (EoE sealed: nobody sees the opponent's pool): `determinize` deals the opponent's whole unseen
+/// deck from a prior (`hidden_decks.rs`: on this branch the table's `TablePrior`) conditioned on
+/// what the viewer has seen, and no encoding shows what of their decklist they have not shown.
+/// Without it every spec is what it was.
+///
 /// `"log": true` keeps each game's log (`GameSpec::log`) for the spectator view
 /// (`view.rs`, the replay recorder); it changes nothing else.
 ///
@@ -131,6 +139,8 @@ pub struct MtgSpec {
     pub log: bool,
     /// The position lab's start (ENGINE.md 76, `lab.rs`): games begin at this spot.
     pub start: Option<std::sync::Arc<lab::Start>>,
+    /// Hidden decklists (ENGINE.md 102).
+    pub hidden_decklists: bool,
 }
 
 impl Default for MtgSpec {
@@ -149,6 +159,7 @@ impl Default for MtgSpec {
             constructed: false,
             log: false,
             start: None,
+            hidden_decklists: false,
         }
     }
 }
@@ -222,6 +233,7 @@ impl MtgSpec {
                 "seed" => s.seed = Some(int()?),
                 "constructed" => {}
                 "log" => s.log = x.as_bool().ok_or("mtg spec: log must be a boolean")?,
+                "hidden_decklists" => s.hidden_decklists = x.as_bool().ok_or("mtg spec: hidden_decklists must be a boolean")?,
                 "start" => s.start = Some(std::sync::Arc::new(lab::Start::parse(x, db)?)),
                 "chooser" => {
                     let c = int()?;
@@ -299,6 +311,16 @@ impl MtgSpec {
             return Err("mtg spec: start is for best-of-one games without a match seed".into());
         }
         s.pools = pools.unwrap_or(s.format == Format::Bo3);
+        if s.hidden_decklists {
+            // (ENGINE.md 102: best-of-three hides decks within known pools, 36.11; constructed
+            // and drafted decks need priors of their own; a lab start deals its own spot.)
+            if s.format != Format::Bo1 {
+                return Err("mtg spec: hidden_decklists is for best-of-one (best-of-three hides decks within pools, ENGINE.md 36.11)".into());
+            }
+            if s.constructed || matches!(s.decks, DeckMode::Drafted(_)) || s.start.is_some() {
+                return Err("mtg spec: hidden_decklists needs limited decks of the spec (not constructed, drafted or a lab start: no prior for them yet, ENGINE.md 102)".into());
+            }
+        }
         if s.constructed {
             if s.format != Format::Bo1 {
                 return Err("mtg spec: constructed best-of-three (sideboarding to 60+ / 15) is not built yet: format must be \"bo1\"".into());
@@ -434,13 +456,42 @@ impl MtgAz {
             max_turns: spec.max_turns,
             mulligans: spec.mulligans,
             chooser: spec.chooser,
-            hidden_decks: spec.format == Format::Bo3,
+            hidden_decks: spec.format == Format::Bo3 || spec.hidden_decklists,
+            hidden_decklists: spec.hidden_decklists,
             log: spec.log,
             ..GameSpec::default()
         };
-        let [a, b] = &seats;
-        let g = Game::with_sideboards(spec.db(), gspec, [&a.deck, &b.deck], [&a.sideboard, &b.sideboard], seed)?;
-        let m = MatchState::new(spec.db(), spec.format, gspec, &seats, seed)?;
+        let priors: Option<std::sync::Arc<dyn hidden_decks::DeckPrior>> =
+            spec.hidden_decklists.then(|| hidden_decks::TablePrior::of(spec.db()) as std::sync::Arc<dyn hidden_decks::DeckPrior>);
+        MtgAz::from_seats(spec.db(), gspec, spec.format, &seats, seed, [priors.clone(), priors])
+    }
+
+    /// A match whose first game has these seats (`MtgAz::new`'s, and the fuzz's own decks):
+    /// `deck_priors` the hidden decklists' prior of each seat's deck (ENGINE.md 102; both or
+    /// neither, with `gspec.hidden_decklists`). Every real deck must be inside its prior's
+    /// support, or the real game would lie outside the other player's information.
+    pub fn from_seats(
+        db: &'static CardDb,
+        gspec: GameSpec,
+        format: Format,
+        seats: &[Seat; 2],
+        seed: u64,
+        deck_priors: [Option<std::sync::Arc<dyn hidden_decks::DeckPrior>>; 2],
+    ) -> Result<MtgAz, String> {
+        if deck_priors.iter().any(|p| p.is_some() != gspec.hidden_decklists) {
+            return Err("mtg: hidden decklists need a deck prior for each seat, and only they take one (ENGINE.md 102)".into());
+        }
+        for (p, prior) in deck_priors.iter().enumerate() {
+            if let Some(pr) = prior {
+                if let Some(&d) = seats[p].deck.iter().find(|&&d| pr.support().binary_search(&db.def(d).card_def(d)).is_err()) {
+                    return Err(format!("mtg: p{p}'s {} is outside the support of its deck prior {} (ENGINE.md 102)", db.def(d).name, pr.name()));
+                }
+            }
+        }
+        let [a, b] = seats;
+        let g = Game::with_sideboards(db, gspec, [&a.deck, &b.deck], [&a.sideboard, &b.sideboard], seed)?;
+        let mut m = MatchState::new(db, format, gspec, seats, seed)?;
+        m.deck_priors = deck_priors;
         let mut az = MtgAz { g, m, lab: None };
         az.set_known_pools();
         Ok(az)
@@ -584,6 +635,10 @@ impl SearchGame for MtgAz {
         let mut r = Rng::new(rng.next_u64());
         if self.m.format == Format::Bo3 && !self.m.over {
             self.sample_hidden_pool(viewer as u8, &mut r);
+        }
+        // Hidden decklists (ENGINE.md 102): the opponent's whole unseen deck from its prior.
+        if self.hidden_decklists() {
+            self.sample_hidden_deck(viewer as u8, &mut r, None);
         }
         if self.m.sb.is_none() {
             self.g.determinize(viewer as u8, &mut r);

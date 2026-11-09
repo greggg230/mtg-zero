@@ -346,6 +346,7 @@ pub fn fields() -> Vec<Field> {
         sb: Derived "sideboarding between games: encoded by encode_sideboarding, not a game position",
         rng: Hidden "seeds the later games: determinize reseeds it",
         priors: Hidden "the prior of each player's unknown first picks (ENGINE.md 36.11)",
+        deck_priors: Derived "hidden decklists: the prior of each player's deck (ENGINE.md 102), a setting of the match, the same in every world",
     });
     v
 }

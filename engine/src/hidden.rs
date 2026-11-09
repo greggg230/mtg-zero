@@ -505,8 +505,9 @@ impl Game {
     }
 
     /// Merge clouds with intersecting domains (same viewer and owner); drop
-    /// empty clouds and clouds over all of the owner's hidden cards (they
-    /// say nothing a determinize would not keep anyway).
+    /// empty clouds and clouds over all of the owner's hand and library
+    /// (with open decklists they say nothing a determinize would not keep
+    /// anyway; hidden decklists keep them, ENGINE.md 102.1).
     fn tidy_clouds(&mut self) {
         if self.clouds.is_empty() {
             return;
@@ -549,7 +550,11 @@ impl Game {
             });
             k.slots.sort_unstable();
         }
-        self.clouds.retain(|k| !(k.defs.is_empty() || (k.hand && k.library)));
+        // (With hidden decklists a cloud over the whole hand and library is
+        // kept: it is the record that cards the viewer saw are still in the
+        // deck, which a sampled deck must hold, ENGINE.md 102.1.)
+        let keep_whole = self.spec.hidden_decklists;
+        self.clouds.retain(|k| !(k.defs.is_empty() || (k.hand && k.library && !keep_whole)));
         self.clouds.sort_by_key(|k| (k.viewer, k.owner, k.hand, k.library, k.slots.first().copied()));
     }
 

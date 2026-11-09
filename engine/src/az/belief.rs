@@ -83,6 +83,11 @@ impl MtgAz {
         if self.m.format == super::Format::Bo3 && !self.m.over {
             self.sample_hidden_pool(viewer as u8, &mut r);
         }
+        // (Hidden decklists, ENGINE.md 102: the opponent's deck first, as `determinize`; the hand's
+        // weights then read the dealt world's hidden pool, as best-of-three's do.)
+        if self.hidden_decklists() {
+            self.sample_hidden_deck(viewer as u8, &mut r, None);
+        }
         let w = deal_weights(&self.g, viewer as u8, belief_segment(&belief.pred), belief.tilt, belief.clip);
         let ids = identity::identities(self.g.db());
         self.g.determinize_weighted(viewer as u8, &mut r, &|d| w[ids[d as usize] as usize]);
