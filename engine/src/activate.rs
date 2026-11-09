@@ -1469,7 +1469,7 @@ impl Game {
     /// "As this enters, you may pay N life. If you don't, it enters tapped"
     /// (CR 614.12). Asked right after the land is put onto the battlefield,
     /// before anything else happens (nothing can observe the order).
-    pub(crate) fn as_enters(&mut self, card: CardIdx) {
+    pub(crate) fn as_enters(&mut self, card: CardIdx, page: crate::decision::Page) {
         let o = &self.objs[card.i()];
         if o.zone != Zone::Battlefield {
             return;
@@ -1489,7 +1489,7 @@ impl Game {
                         Opt { action: act::PLAYER, choice: Choice::Target(Target::Player(p)) },
                         Opt { action: act::PLAYER + 1, choice: Choice::Target(Target::Player(crate::ids::opp(p))) },
                     ];
-                    self.ask(Task::AsEnters { card }, p, DecisionKind::Target, opts);
+                    self.ask(Task::AsEnters { card, page: crate::decision::Page::FIRST }, p, DecisionKind::Target, opts);
                 }
             }
             return;
@@ -1510,12 +1510,12 @@ impl Game {
                         self.add_effect(crate::layers::Affected::Obj(r), m, crate::layers::Until::Forever, p);
                     }
                     self.note(|_| format!("chosen basic land type: {}", BASICS[k as usize]));
-                    self.agenda.push(Task::AsEnters { card });
+                    self.agenda.push(Task::AsEnters { card, page: crate::decision::Page::FIRST });
                 }
                 Some(other) => unreachable!("land type answer {other:?}"),
                 None => {
                     let opts = (0..5u16).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
-                    self.ask(Task::AsEnters { card }, p, DecisionKind::ChooseColor, opts);
+                    self.ask(Task::AsEnters { card, page: crate::decision::Page::FIRST }, p, DecisionKind::ChooseColor, opts);
                 }
             }
             return;
@@ -1532,13 +1532,13 @@ impl Game {
                 Some(other) => unreachable!("parity answer {other:?}"),
                 None => {
                     let opts = (0..2u16).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
-                    self.ask(Task::AsEnters { card }, p, DecisionKind::ChooseMode, opts);
+                    self.ask(Task::AsEnters { card, page: crate::decision::Page::FIRST }, p, DecisionKind::ChooseMode, opts);
                 }
             }
             return;
         }
         if self.def_of(card).chooses_name && self.chosen_name(self.obj_ref(card)).is_none() {
-            self.choose_name_as_enters(card);
+            self.choose_name_as_enters(card, page);
             return;
         }
         if self.def_of(card).paints {
@@ -1553,7 +1553,7 @@ impl Game {
                 Some(other) => unreachable!("colour answer {other:?}"),
                 None => {
                     let opts = (0..5u16).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
-                    self.ask(Task::AsEnters { card }, p, DecisionKind::ChooseColor, opts);
+                    self.ask(Task::AsEnters { card, page: crate::decision::Page::FIRST }, p, DecisionKind::ChooseColor, opts);
                 }
             }
             return;
@@ -1573,7 +1573,7 @@ impl Game {
                 if self.players[p as usize].life >= n {
                     opts.push(Opt { action: act::YES, choice: Choice::Yes }); // CR 119.4
                 }
-                self.ask(Task::AsEnters { card }, p, DecisionKind::YesNo, opts);
+                self.ask(Task::AsEnters { card, page: crate::decision::Page::FIRST }, p, DecisionKind::YesNo, opts);
             }
         }
     }

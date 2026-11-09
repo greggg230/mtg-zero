@@ -777,6 +777,17 @@ impl Game {
         self.ask_paged_ranges(task, page, player, kind, &ranges, extra);
     }
 
+    /// [`ask_objects`](Self::ask_objects) for options built with their
+    /// unpaged ids: an option naming an object (a `Choice::Card` or
+    /// `Choice::Target` with a permanent, stack, list, graveyard or exile id)
+    /// is an item, the others (`PASS`, `PLAYER`) stay as they are.
+    pub(crate) fn ask_object_opts(&mut self, task: Task, page: Page, player: PlayerId, kind: DecisionKind, opts: Vec<Opt>) {
+        let (objs, extra): (Vec<Opt>, Vec<Opt>) =
+            opts.into_iter().partition(|o| o.action >= act::MY_PERM && matches!(o.choice, Choice::Card(_) | Choice::Target(_)));
+        let items: Vec<Choice> = objs.into_iter().map(|o| o.choice).collect();
+        self.ask_objects(task, page, player, kind, &items, extra);
+    }
+
     // ---- paged choices and big numbers (ENGINE.md 100.1) -------------------
 
     /// Ask `player` to choose among `items` in the range `base .. base + n`

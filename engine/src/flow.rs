@@ -83,7 +83,8 @@ pub(crate) enum Task {
     /// The rest of a priority mana ability's cost (ENGINE.md 28).
     ManaNowCosts { src: Src, sac: Option<CardIdx>, x: u8 },
     // entering the battlefield (CR 614.12)
-    AsEnters { card: CardIdx },
+    /// (`page`: the page of a paged choice, ENGINE.md 100.2.)
+    AsEnters { card: CardIdx, page: crate::decision::Page },
     /// Exile graveyard cards for delve (CR 702.66).
     Delve { id: u32 },
     /// Discard a land for Mox Diamond to enter, or not.
@@ -96,7 +97,7 @@ pub(crate) enum Task {
     /// (Animate Dead returned from exile): `controller` chooses, as it
     /// enters, the creature card in a graveyard it enchants; it waits in its
     /// zone meanwhile.
-    EnterAura { card: CardIdx, controller: PlayerId, tapped: bool },
+    EnterAura { card: CardIdx, controller: PlayerId, tapped: bool, page: crate::decision::Page },
     /// CR 616.1: `chooser` orders the replacement effects of `card`'s move
     /// from `from` (exiled for now): `results` the reachable results.
     ChooseReplacement { card: crate::ids::ObjRef, from: Zone, results: u8, void: Option<crate::db::Counter>, chooser: PlayerId },
@@ -108,7 +109,7 @@ pub(crate) enum Task {
     /// creature card you own in exile" (CR 601.2h; ENGINE.md 99.14): an
     /// exiled card (`ChooseExiled`, `PASS` = a creature instead), then, with
     /// `perm`, a creature (`ChoosePermanent`).
-    ChooseForCost { id: u32, perm: bool },
+    ChooseForCost { id: u32, perm: bool, page: crate::decision::Page },
     /// Which player or planeswalker an attacking creature attacks (CR
     /// 508.1b, 508.4).
     AttackTarget { card: CardIdx },
@@ -125,7 +126,7 @@ pub(crate) enum Task {
     ChooseRoute { p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId> },
     /// What a permanent that may enter as a copy copies (CR 707.5), then
     /// it enters (`note`: its `Enters` event's).
-    EnterAsCopy { card: CardIdx, note: u16, since: u32 },
+    EnterAsCopy { card: CardIdx, note: u16, since: u32, page: crate::decision::Page },
     /// New targets for a copy of a spell (`copy`, CR 707.10c) or a spell
     /// whose controller may choose new targets (115.7), from its target `k`
     /// on.
@@ -317,20 +318,20 @@ impl Game {
             Task::ManaNow { src } => self.mana_now(src),
             Task::ManaNowPick { p, prods } => self.mana_now_pick(p, prods),
             Task::ManaNowCosts { src, sac, x } => self.mana_now_costs(src, sac, x),
-            Task::AsEnters { card } => self.as_enters(card),
+            Task::AsEnters { card, page } => self.as_enters(card, page),
             Task::Delve { id } => self.delve(id),
             Task::EnterByDiscard { id } => self.enter_by_discard(id),
             Task::EnterByDiscardAny { card, controller, tapped } => self.enter_by_discard_any(card, controller, tapped),
-            Task::EnterAura { card, controller, tapped } => self.enter_aura(card, controller, tapped),
+            Task::EnterAura { card, controller, tapped, page } => self.enter_aura(card, controller, tapped, page),
             Task::ChooseReplacement { card, from, results, void, chooser } => self.choose_replacement(card, from, results, void, chooser),
             Task::ChooseX { id } => self.choose_x(id),
             Task::Escalate { id } => self.escalate(id),
-            Task::ChooseForCost { id, perm } => self.choose_for_cost(id, perm),
+            Task::ChooseForCost { id, perm, page } => self.choose_for_cost(id, perm, page),
             Task::AttackTarget { card } => self.choose_attack_target(card),
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
             Task::ChooseAbility { p, card, from } => self.choose_ability(p, card, from),
             Task::ChooseRoute { p, card, face } => self.choose_route(p, card, face),
-            Task::EnterAsCopy { card, note, since } => self.enter_as_copy(card, note, since),
+            Task::EnterAsCopy { card, note, since, page } => self.enter_as_copy(card, note, since, page),
             Task::CopyTargets { id, k, copy, page } => self.copy_targets(id, k, copy, page),
             Task::ChooseTimes { id } => self.choose_times(id),
             Task::Splice { id } => self.choose_splice(id),

@@ -613,7 +613,8 @@ impl Game {
     /// what it entered as enters: its replacement effects apply ("enters
     /// tapped", "enters with counters", "as this enters" choices: 707.5,
     /// 707.6) and its `Enters` event (with `note`) happens.
-    pub(crate) fn enter_as_copy(&mut self, card: CardIdx, note: u16, since: u32) {
+    /// (`page`: the page of the choice, `Game::ask_objects`, ENGINE.md 100.2.)
+    pub(crate) fn enter_as_copy(&mut self, card: CardIdx, note: u16, since: u32, page: crate::decision::Page) {
         if self.objs[card.i()].zone != Zone::Battlefield {
             self.marks.retain(|&(o, m)| !(o.idx == card && m == crate::game::Mark::PriestPending));
             return;
@@ -622,6 +623,10 @@ impl Game {
         let Some(eac) = self.db.def(own).enters_as_copy.as_deref() else { return };
         let p = self.objs[card.i()].controller;
         match self.answer.take() {
+            Some(Choice::Page(next)) => {
+                self.agenda.push(Task::EnterAsCopy { card, note, since, page: next });
+                return;
+            }
             Some(Choice::Card(x)) => {
                 let base = if eac.from_graveyard {
                     CopyVals { def: self.objs[x.i()].def, exc: Except::default() }
@@ -674,7 +679,7 @@ impl Game {
                     }
                 }
                 let kind = if eac.from_graveyard { DecisionKind::ChooseGraveyardCard } else { DecisionKind::ChoosePermanent };
-                self.ask(Task::EnterAsCopy { card, note, since }, p, kind, opts);
+                self.ask_object_opts(Task::EnterAsCopy { card, note, since, page }, page, p, kind, opts);
                 return;
             }
         }

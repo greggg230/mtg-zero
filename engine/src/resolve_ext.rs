@@ -443,7 +443,7 @@ impl Game {
                         f.i += 1;
                         continue;
                     }
-                    self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                    self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseGraveyardCard, opts);
                     return Flow::Suspend;
                 }
                 let chosen = std::mem::take(&mut f.picked);
@@ -1311,7 +1311,7 @@ impl Game {
                     return Flow::Next;
                 }
                 opts.push(Opt { action: act::PASS, choice: Choice::Pass });
-                self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseGraveyardCard, opts);
                 Flow::Suspend
             }
             Ext::LinkedCreaturesToBattlefield { flying, becomes } => {

@@ -2244,7 +2244,7 @@ impl Game {
         if self.def_of(card).casting.choose_creature_or_warped {
             // The additional cost's choice, before the mana (CR 601.2h: the
             // costs in any order; ENGINE.md 99.14).
-            self.agenda.push(Task::ChooseForCost { id, perm: false });
+            self.agenda.push(Task::ChooseForCost { id, perm: false, page: crate::decision::Page::FIRST });
         }
         if self.def_of(card).delve {
             self.agenda.push(Task::Delve { id }); // CR 702.66a: while paying

@@ -302,17 +302,12 @@ impl Game {
             f.picked.clear();
             return Flow::Next;
         }
-        // (In exile order: `EXILE` + k = the k-th card offered.)
-        let cands: Vec<CardIdx> = self
-            .exile
-            .iter()
-            .copied()
-            .filter(|c| f.picked.contains(c) && self.can_cast_free_now(p, *c))
-            .take(act::EXILE_N as usize)
-            .collect();
-        let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
-        opts.extend(cands.into_iter().enumerate().map(|(k, c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) }));
-        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
+        // (In exile order: `EXILE` + k = the k-th card offered, every one:
+        // paged past the 32 ids, ENGINE.md 100.2.)
+        let cands: Vec<Choice> =
+            self.exile.iter().copied().filter(|c| f.picked.contains(c) && self.can_cast_free_now(p, *c)).map(Choice::Card).collect();
+        let pass = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+        self.ask_objects(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseExiled, &cands, pass);
         Flow::Suspend
     }
 

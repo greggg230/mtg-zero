@@ -1761,7 +1761,7 @@ impl Game {
                     }
                 }
             }
-            Task::AsEnters { card: c } => card = Some((self.objs[c.i()].def, None, None)),
+            Task::AsEnters { card: c, .. } => card = Some((self.objs[c.i()].def, None, None)),
             Task::AssignDamage { att, left, .. } => {
                 card = Some((self.objs[att.i()].def, None, None));
                 x[ctx::DAMAGE_LEFT] = squash(*left as f32 / 16.0);

@@ -60,6 +60,13 @@ pub(crate) struct Frame {
     /// The source's transformations when the ability was put on the stack
     /// (`StackItem::flips`, CR 701.27f).
     pub flips: u8,
+    /// The page the current op's choice shows (`Game::ask_objects`,
+    /// `Game::ask_paged`; ENGINE.md 100.2): set by a "next page" answer,
+    /// back to the first page by any other answer and when `pc` moves.
+    pub page: crate::decision::Page,
+    /// Where the current op's big number stands (`Game::ask_number`;
+    /// ENGINE.md 100.2), reset when `pc` moves.
+    pub step: crate::decision::NumberStep,
 }
 
 pub(crate) enum Flow {
@@ -181,6 +188,8 @@ impl Game {
             attack_as: item.attack_as,
             noted: item.noted.clone(),
             flips: item.flips,
+            page: crate::decision::Page::FIRST,
+            step: crate::decision::NumberStep::FIRST,
         };
         // The targets of requirements `offset..offset + n`, renumbered from 0,
         // with their legality bits.
@@ -367,6 +376,17 @@ impl Game {
     }
 
     pub(crate) fn run_frame(&mut self, mut f: Frame) {
+        // A paged choice's "next page" (ENGINE.md 100.1-100.2): the op asks
+        // again, showing that page; after any other answer the op's next
+        // choice starts at the first page.
+        match self.answer {
+            Some(Choice::Page(p)) => {
+                f.page = p;
+                self.answer = None;
+            }
+            Some(_) => f.page = crate::decision::Page::FIRST,
+            None => {}
+        }
         let db = self.db;
         let prog = &db.ability(f.ability).program;
         while (f.pc as usize) < prog.len() {
@@ -377,6 +397,8 @@ impl Game {
                     f.pc += 1;
                     f.i = 0;
                     f.floor = 0;
+                    f.page = crate::decision::Page::FIRST;
+                    f.step = crate::decision::NumberStep::FIRST;
                     self.pile_done(&f, prog);
                     self.new_event();
                 }
@@ -384,6 +406,8 @@ impl Game {
                     f.pc = pc;
                     f.i = 0;
                     f.floor = 0;
+                    f.page = crate::decision::Page::FIRST;
+                    f.step = crate::decision::NumberStep::FIRST;
                     self.pile_done(&f, prog);
                     self.new_event();
                 }

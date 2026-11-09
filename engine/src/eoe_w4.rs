@@ -207,7 +207,7 @@ impl Game {
     /// when there is one), then a creature (`ChoosePermanent`); a decision
     /// with nothing of its kind is skipped. Each candidate is reached by
     /// exactly one sequence. The choice is noted on the spell.
-    pub(crate) fn choose_for_cost(&mut self, id: u32, perm: bool) {
+    pub(crate) fn choose_for_cost(&mut self, id: u32, perm: bool, page: crate::decision::Page) {
         let Some(pos) = self.item_index(id) else { return };
         let p = self.stack[pos].controller;
         match self.answer.take() {
@@ -218,7 +218,11 @@ impl Game {
                 return;
             }
             Some(Choice::Pass) => {
-                self.agenda.push(Task::ChooseForCost { id, perm: true });
+                self.agenda.push(Task::ChooseForCost { id, perm: true, page: crate::decision::Page::FIRST });
+                return;
+            }
+            Some(Choice::Page(next)) => {
+                self.agenda.push(Task::ChooseForCost { id, perm, page: next });
                 return;
             }
             Some(other) => unreachable!("cost choice {other:?}"),
@@ -228,24 +232,22 @@ impl Game {
         if !perm {
             let cards = self.warped_creature_cards(p);
             if !cards.is_empty() {
-                let mut opts: Vec<Opt> = cards
-                    .iter()
-                    .take(act::EXILE_N as usize)
-                    .enumerate()
-                    .map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) })
-                    .collect();
+                // (Every one: `EXILE` + its place, paged past the 32 ids;
+                // ENGINE.md 100.2.)
+                let items: Vec<Choice> = cards.into_iter().map(Choice::Card).collect();
+                let mut opts = Vec::new();
                 if !creatures.is_empty() {
                     opts.push(Opt { action: act::PASS, choice: Choice::Pass });
                 }
-                self.ask(Task::ChooseForCost { id, perm: false }, p, DecisionKind::ChooseExiled, opts);
+                self.ask_objects(Task::ChooseForCost { id, perm: false, page }, page, p, DecisionKind::ChooseExiled, &items, opts);
                 return;
             }
         }
-        let opts: Vec<Opt> = creatures.iter().map(|&c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) }).collect();
-        if opts.is_empty() {
+        if creatures.is_empty() {
             return; // (Castability requires a candidate.)
         }
-        self.ask(Task::ChooseForCost { id, perm: true }, p, DecisionKind::ChoosePermanent, opts);
+        let items: Vec<Choice> = creatures.into_iter().map(Choice::Card).collect();
+        self.ask_objects(Task::ChooseForCost { id, perm: true, page }, page, p, DecisionKind::ChoosePermanent, &items, Vec::new());
     }
 
     /// `Amount::ChosenPower` (CR 608.2h).

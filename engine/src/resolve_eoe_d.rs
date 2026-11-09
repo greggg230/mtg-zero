@@ -178,7 +178,7 @@ impl Game {
                 }
                 let mut opts = opts;
                 opts.sort_by_key(|o| o.action);
-                self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                self.ask_object_opts(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseGraveyardCard, opts);
                 Flow::Suspend
             }
             EoeD::GainControlUntilEndOfTurn { on } => {

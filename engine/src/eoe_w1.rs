@@ -3,7 +3,7 @@
 //! its rule; never after a card.
 
 use crate::db::{types, Counter, Filter};
-use crate::decision::{act, Choice, DecisionKind, Opt};
+use crate::decision::{Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::{Game, Pos};
 use crate::ids::{Target, Zone};
@@ -247,35 +247,17 @@ impl Game {
                 f.made = None;
                 let p = f.controller;
                 let cands: Vec<_> = self.linked_cards(f.source).into_iter().filter(|&c| self.def_of(c).is(types::CREATURE)).collect();
-                let answer = self.answer.take();
-                let pick = match answer {
+                // (Every linked card: `EXILE` + its place, paged past the 32
+                // ids, `Game::ask_objects`; ENGINE.md 100.2.)
+                let pick = match self.answer.take() {
                     Some(Choice::Card(c)) => c,
                     None if cands.len() == 1 => cands[0],
-                    Some(Choice::Pass) | None => {
+                    None => {
                         if cands.is_empty() {
                             return Flow::Next;
                         }
-                        if answer == Some(Choice::Pass) {
-                            f.i += 1;
-                        }
-                        let all = act::EXILE_N as usize;
-                        let page = all - 1;
-                        let (start, end, more) = if cands.len() <= all {
-                            (0, cands.len(), false)
-                        } else {
-                            let start = (f.i as usize * page).min(cands.len() - 1);
-                            let end = (start + page).min(cands.len());
-                            (start, end, end < cands.len())
-                        };
-                        let mut opts: Vec<Opt> = cands[start..end]
-                            .iter()
-                            .enumerate()
-                            .map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) })
-                            .collect();
-                        if more {
-                            opts.push(Opt { action: act::PASS, choice: Choice::Pass });
-                        }
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
+                        let items: Vec<Choice> = cands.into_iter().map(Choice::Card).collect();
+                        self.ask_objects(Task::Run(f.clone()), f.page, p, DecisionKind::ChooseExiled, &items, Vec::new());
                         return Flow::Suspend;
                     }
                     Some(other) => unreachable!("linked card answer {other:?}"),

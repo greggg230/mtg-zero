@@ -1528,7 +1528,7 @@ impl Game {
                 if cands.is_empty() {
                     self.note(|g| format!("{} has nothing to enchant and stays where it is", g.name(idx)));
                 } else {
-                    self.agenda.push(Task::EnterAura { card: idx, controller, tapped });
+                    self.agenda.push(Task::EnterAura { card: idx, controller, tapped, page: crate::decision::Page::FIRST });
                 }
                 return self.obj_ref(idx);
             }
@@ -1650,7 +1650,7 @@ impl Game {
             if priest_after_copy {
                 self.marks.push((r, Mark::PriestPending));
             }
-            self.agenda.push(Task::EnterAsCopy { card: idx, note, since: self.group_ts.1 });
+            self.agenda.push(Task::EnterAsCopy { card: idx, note, since: self.group_ts.1, page: crate::decision::Page::FIRST });
             return r;
         }
         self.entering_own(idx, tapped, x, own);
@@ -1701,8 +1701,9 @@ impl Game {
 
     /// `Task::EnterAura`: the Aura's controller chooses what it enchants;
     /// it enters attached to that (CR 303.4f).
-    pub(crate) fn enter_aura(&mut self, card: CardIdx, p: PlayerId, tapped: bool) {
+    pub(crate) fn enter_aura(&mut self, card: CardIdx, p: PlayerId, tapped: bool, page: crate::decision::Page) {
         match self.answer.take() {
+            Some(Choice::Page(next)) => self.agenda.push(Task::EnterAura { card, controller: p, tapped, page: next }),
             Some(Choice::Card(c)) => {
                 self.entering_tapped = tapped;
                 let h = self.obj_ref(c);
@@ -1721,7 +1722,7 @@ impl Game {
                     })
                     .collect();
                 let kind = if gy { crate::decision::DecisionKind::ChooseGraveyardCard } else { crate::decision::DecisionKind::ChoosePermanent };
-                self.ask(Task::EnterAura { card, controller: p, tapped }, p, kind, opts);
+                self.ask_object_opts(Task::EnterAura { card, controller: p, tapped, page }, page, p, kind, opts);
             }
         }
     }
@@ -1808,7 +1809,7 @@ impl Game {
             || self.def_of(idx).chooses_parity
             || self.def_of(idx).chooses_name
         {
-            self.agenda.push(Task::AsEnters { card: idx });
+            self.agenda.push(Task::AsEnters { card: idx, page: crate::decision::Page::FIRST });
         }
         // "This creature enters prepared" (CR 722.3a).
         if self.def_of(idx).enters_prepared {
