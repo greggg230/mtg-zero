@@ -45,7 +45,7 @@
 //! pool; CR 100.2b makes 40 a minimum); the sideboard is the rest of the pool (CR 100.4b).
 use crate::az::decks::{self, BASICS, DECK_SIZE};
 use crate::az::pools;
-use crate::db::{types, ActEffect, AbilityDef, CardDb, CardDef};
+use crate::db::{supertypes, types, AbilityDef, ActEffect, CardDb, CardDef, Filter};
 use crate::ids::DefId;
 use crate::mana::COLORS;
 use crate::program::Op;
@@ -180,11 +180,12 @@ pub fn fixes(db: &CardDb, d: &CardDef) -> u8 {
 }
 
 fn fixes_depth(db: &CardDb, d: &CardDef, depth: u8) -> u8 {
-    let mut m = decks::land_colors(db, d) & COLORS;
+    let mut mana = 0u8;
+    let mut m = 0u8;
     let mut prog = |ops: &[Op]| {
         for op in ops {
             match op {
-                Op::Search { filter, .. } => m |= decks::search_colors(db, filter),
+                Op::Search { filter, .. } => m |= finds(db, filter).unwrap_or(0),
                 Op::CreateToken { token, .. } if depth > 0 => m |= fixes_depth(db, db.def(db.token_def(*token)), depth - 1),
                 _ => {}
             }
@@ -204,12 +205,31 @@ fn fixes_depth(db: &CardDb, d: &CardDef, depth: u8) -> u8 {
     for t in &d.triggers {
         ab(&t.ability);
     }
-    for a in &d.activated {
-        if let ActEffect::Stack(x) = &a.effect {
-            ab(x);
+    for a in d.activated.iter().chain(&d.hand_abilities) {
+        match &a.effect {
+            ActEffect::Mana(x) => mana |= crate::lower::activated::prod_mask(&x.prod),
+            ActEffect::Stack(x) => ab(x),
         }
     }
-    m & COLORS
+    (m | mana) & COLORS
+}
+
+/// The colours of the lands a library search's filter can find (None: it names no land): a land
+/// card or a basic card, any colour (the deck's basics of every colour it plays); a basic land
+/// type, its colour; "and" narrows, "or" widens.
+fn finds(db: &CardDb, f: &Filter) -> Option<u8> {
+    match f {
+        Filter::Type(bits) if bits & types::LAND != 0 => Some(COLORS),
+        Filter::Supertype(s) if s & supertypes::BASIC != 0 => Some(COLORS),
+        Filter::Subtype(s) => BASICS.iter().position(|b| db.subtype_name(*s) == *b).map(|i| 1u8 << i),
+        Filter::And(a, b) => match (finds(db, a), finds(db, b)) {
+            (Some(x), Some(y)) => Some(x & y),
+            (Some(x), None) | (None, Some(x)) => Some(x),
+            (None, None) => None,
+        },
+        Filter::Or(v) => v.iter().filter_map(|x| finds(db, x)).reduce(|a, b| a | b),
+        _ => None,
+    }
 }
 
 /// The coloured pips of `d`'s mana cost a deck of colours `cols` can't pay with them: per colour,
@@ -238,7 +258,7 @@ fn foreign_pips(d: &CardDef, cols: u8) -> [u8; 5] {
 
 /// A spell a deck of colours `cols` can play: its colours within `cols` and every coloured pip
 /// payable (as `pools::playable`).
-fn playable(d: &CardDef, cols: u8) -> bool {
+pub fn playable(d: &CardDef, cols: u8) -> bool {
     !d.is(types::LAND) && pools::playable(d, cols)
 }
 
