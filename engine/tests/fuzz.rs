@@ -600,6 +600,37 @@ static DELVER_CHARMS: AtomicU64 = AtomicU64::new(0);
 static DELVER_MURK_TRIGGERS: AtomicU64 = AtomicU64::new(0);
 /// The most actions any game took (the fuzzer's cap is 100,000).
 static MAX_GAME_STEPS: AtomicU64 = AtomicU64::new(0);
+/// Decisions of a controlled player made by their controller (CR 722.4;
+/// ENGINE.md 100.5: encoded in the controlled seat).
+static CONTROLLED: AtomicU64 = AtomicU64::new(0);
+
+/// Every `HAND` option of the pending decision is a present hand slot of the
+/// decider's encoding `x` holding its card (the frame's hand: the controlled
+/// player's in a controlled turn, ENGINE.md 100.5), with its legal flag.
+fn check_hand_options(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
+    use engine::act;
+    use engine::az::encode::{CODE, HANDS, HAND_W, O_HAND};
+    let Some(d) = g.pending_decision() else { return };
+    let ids = engine::az::identity::identities(g.db());
+    let hand = g.hand_sorted(d.player);
+    for o in d.options.iter().filter(|o| (act::HAND..act::HAND + HANDS as u16).contains(&o.action)) {
+        let k = (o.action - act::HAND) as usize;
+        let s = &x[O_HAND + k * HAND_W..O_HAND + (k + 1) * HAND_W];
+        let digit = |a: usize, n: usize| s[a..a + n].iter().position(|&v| v == 1.0).unwrap_or(99);
+        let id = digit(0, 16) * 64 + digit(16, 8) * 8 + digit(24, 8);
+        let want = hand.get(k).map(|&c| ids[g.obj(c).def as usize] as usize);
+        assert!(
+            Some(id) == want && s[CODE] == 1.0 && s[CODE + 2] == 1.0,
+            "{}: {:?} option {} ({}) points at hand slot {k} (identity {id}, present {}, legal {}), not its card's ({want:?})",
+            what(),
+            d.kind,
+            o.action,
+            g.describe_choice(o.choice),
+            s[CODE],
+            s[CODE + 2]
+        );
+    }
+}
 
 /// `FUZZ_POOL=delver`: count the Regents and Charms cast and the Regents'
 /// triggers put on the stack (each stack item once, by its id).
@@ -982,6 +1013,10 @@ fn play(seed: u64, checks: bool) -> Played {
             check_encoding(&g, g.to_move().unwrap(), &mut buf, &|| format!("seed {seed} step {steps}"));
             check_graveyard_list(&g, &buf, &|| format!("seed {seed} step {steps}"));
             check_list_options(&g, &buf, &|| format!("seed {seed} step {steps}"));
+            check_hand_options(&g, &buf, &|| format!("seed {seed} step {steps}"));
+            if g.pending_decision().is_some_and(|d| g.to_move() != Some(d.player)) {
+                CONTROLLED.fetch_add(1, Ordering::Relaxed);
+            }
             record_extremes(&g);
         }
         if checks && rng.below(checkpoint_every()) == 0 {
@@ -1270,6 +1305,7 @@ fn fuzz_random_games() {
         assert!(MAX_POWER.load(Ordering::Relaxed) > 65_535, "no board past 65,535 power: {}", extremes_report());
     }
     println!("longest game: {} actions (cap 100,000)", MAX_GAME_STEPS.load(Ordering::Relaxed));
+    println!("controlled decisions (CR 722.4, encoded in the controlled seat: ENGINE.md 100.5): {}", CONTROLLED.load(Ordering::Relaxed));
     if let Some(t) = belief_tilt() {
         let (w, d, u) = (BELIEF_WORLDS.load(Ordering::Relaxed), BELIEF_DEALT.load(Ordering::Relaxed), BELIEF_UNIFORM.load(Ordering::Relaxed));
         println!(

@@ -938,6 +938,9 @@ const SUPPORTED_EOE_EXILE: &[&str] = &[
     "Close Encounter",
     "Scout for Survivors",
     "Susur Secundi, Void Altar",
+    // (ENGINE.md 100.5: a controlled turn's decisions encoded in the
+    // controlled seat; blocked on that since ENGINE.md 99.14.)
+    "The Dominion Bracelet",
 ];
 /// W5 (ENGINE.md 99.15): alternative costs other permanents grant.
 const SUPPORTED_EOE_W5: &[&str] = &[

@@ -1431,7 +1431,6 @@ fn every_activated_ability_is_reachable_past_the_fourth_slot_cr602_2() {
 /// equipped with The Dominion Bracelet has five, the Bracelet's behind the
 /// fourth slot's choice (ENGINE.md 99.13, 99.14).
 #[test]
-#[ignore = "The Dominion Bracelet is blocked on the encoding (ENGINE.md 99.14): run with --ignored once unblocked"]
 fn an_equipments_granted_ability_is_reachable_past_the_fourth_slot_cr301_5() {
     let mut g = scen()
         .battlefield(0, &["The Dominion Bracelet", "W3 Quad"])

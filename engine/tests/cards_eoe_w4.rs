@@ -649,7 +649,6 @@ fn bracelet_on_wurm(p1_hand: &[&str]) -> (Game, CardIdx, CardIdx) {
 /// {15} less its power as the cost is determined (7: {8}, CR 601.2f), and
 /// the Bracelet is exiled as part of the cost (601.2h).
 #[test]
-#[ignore = "The Dominion Bracelet is blocked on the encoding (ENGINE.md 99.14); passed at 84932a5: run with --ignored once unblocked"]
 fn cr_601_2f_the_dominion_bracelet_grants_the_ability_costing_15_less_power() {
     let (mut g, br, wurm) = bracelet_on_wurm(&[]);
     assert_eq!(g.pt(wurm), (7, 7), "+1/+1");
@@ -672,7 +671,6 @@ fn cr_601_2f_the_dominion_bracelet_grants_the_ability_costing_15_less_power() {
 /// Not with less than the reduced cost, not on another creature, and only
 /// as a sorcery (CR 602.5d).
 #[test]
-#[ignore = "The Dominion Bracelet is blocked on the encoding (ENGINE.md 99.14); passed at 84932a5: run with --ignored once unblocked"]
 fn cr_602_5d_the_dominion_bracelet_ability_only_as_a_sorcery() {
     let (mut g, _br, wurm) = bracelet_on_wurm(&[]);
     to_opponent_priority(&mut g);
@@ -688,7 +686,6 @@ fn cr_602_5d_the_dominion_bracelet_ability_only_as_a_sorcery() {
 /// P0 sees what they see (722.3): their hand, and the card they draw. The
 /// turn after, each player decides for themselves again (722.1).
 #[test]
-#[ignore = "The Dominion Bracelet is blocked on the encoding (ENGINE.md 99.14); passed at 84932a5: run with --ignored once unblocked"]
 fn cr_722_4_the_controller_makes_the_controlled_players_decisions() {
     let (mut g, _br, wurm) = bracelet_on_wurm(&["W4 Bolt", "W4 Giant"]);
     let p1_hand: Vec<CardIdx> = g.player(1).hand.clone();
@@ -732,7 +729,6 @@ fn cr_722_4_the_controller_makes_the_controlled_players_decisions() {
 /// (P0) keeps its view and its actions (P1's hand is known to it, CR 722.3,
 /// so never resampled); for P1 too. P1's library stays hidden from P0.
 #[test]
-#[ignore = "The Dominion Bracelet is blocked on the encoding (ENGINE.md 99.14); passed at 84932a5: run with --ignored once unblocked"]
 fn cr_722_3_a_controlled_turn_survives_determinize() {
     let (mut g, _br, wurm) = bracelet_on_wurm(&["W4 Bolt", "W4 Giant", "W4 Elf"]);
     g.choose(act(wurm, 0));
@@ -761,6 +757,79 @@ fn cr_722_3_a_controlled_turn_survives_determinize() {
                     v
                 };
                 assert_eq!(names(&g), names(&d), "P1's hand, known to P0, is never resampled");
+            }
+        }
+    }
+}
+
+/// The encoding of a controlled turn (CR 722.3, 722.4; ENGINE.md 100.5): the
+/// controller (`to_move`) sees the controlled player's decision framed in
+/// that player's seat - their hand in the hand slots, each `HAND` option a
+/// present slot holding its card, their permanents as `MY_PERM` - with the
+/// frame flag set and its own knowledge; the controlled player's own
+/// encoding is its usual seat, with no options (it doesn't decide) and the
+/// "controlled this turn" global. No world of either viewer encodes
+/// differently (no hidden information), and the controller's own hand is
+/// the frame opponent's hand, known exactly.
+#[test]
+fn cr_722_3_a_controlled_decision_is_encoded_in_the_controlled_seat() {
+    use engine::act;
+    use engine::az::encode::{bag, ctx, g6, CODE, D, HANDS, HAND_W, O_BAGS, O_CONTEXT, O_GLOBALS_V6, O_HAND, O_MY_PERM, PERM_W};
+    use engine::az::{identity, NUM_FEATURES};
+    let (mut g, _br, wurm) = bracelet_on_wurm(&["W4 Bolt", "W4 Giant", "W4 Elf"]);
+    g.choose(act(wurm, 0));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(player(1));
+    pay(&mut g);
+    settle(&mut g);
+    quiet_until(&mut g, |g| g.turn().active == 1 && g.turn().step == Step::Main1 && at_priority(g));
+    assert_eq!((g.to_move(), g.pending_decision().unwrap().player), (Some(0), 1));
+    assert_eq!((g.encoding_seat(0), g.encoding_seat(1)), (1, 1), "both framed in P1's seat");
+    let enc = |g: &Game, v: u8| {
+        let mut x = vec![0.0f32; NUM_FEATURES];
+        g.encode_features(v, &mut x);
+        x
+    };
+    let (x0, x1) = (enc(&g, 0), enc(&g, 1));
+    assert_eq!((x0[O_CONTEXT + ctx::FRAME], x0[O_CONTEXT + ctx::DECIDER_IS_VIEWER]), (1.0, 1.0), "P0 decides, for the other seat");
+    assert_eq!((x1[O_CONTEXT + ctx::FRAME], x1[O_CONTEXT + ctx::DECIDER_IS_VIEWER]), (0.0, 0.0), "P1 doesn't decide");
+    assert_eq!(x0[15], 1.0, "the frame's player (P1) is active");
+    assert_eq!(x1[15], 1.0);
+    assert_eq!((x0[O_GLOBALS_V6 + g6::CONTROLLED], x1[O_GLOBALS_V6 + g6::CONTROLLED]), (1.0, 1.0), "the frame's player is controlled");
+    // P1's hand in P0's hand slots, each legal HAND id a present slot of its card, with its legal flag.
+    let ids = identity::identities(g.db());
+    let hand = g.hand_sorted(1);
+    let d = g.pending_decision().unwrap();
+    let mut hand_options = 0;
+    for o in d.options.iter().filter(|o| (act::HAND..act::HAND + HANDS as u16).contains(&o.action)) {
+        let s = (o.action - act::HAND) as usize;
+        let slot = &x0[O_HAND + s * HAND_W..O_HAND + (s + 1) * HAND_W];
+        let digit = |a: usize, n: usize| slot[a..a + n].iter().position(|&v| v == 1.0).unwrap_or(99);
+        let id = digit(0, 16) * 64 + digit(16, 8) * 8 + digit(24, 8);
+        assert_eq!(id, ids[g.obj(hand[s]).def as usize] as usize, "HAND + {s} is {}", g.name(hand[s]));
+        assert_eq!((slot[CODE], slot[CODE + 2], slot[CODE + 4]), (1.0, 1.0, 1.0), "present, legal, known to the frame's opponent (P0)");
+        hand_options += 1;
+    }
+    assert!(hand_options > 0, "P1's hand has a castable card: {:?}", g.options_desc());
+    assert!(x1[O_HAND..O_HAND + HANDS * HAND_W].chunks(HAND_W).all(|s| s[CODE + 2] == 0.0), "no legal flags for the non-decider");
+    // MY_PERM is P1's: its Bear's slot holds the Bear.
+    let bear = bf(&g, 1, "W4 Bear");
+    let s = g.permanents_of(1).position(|c| c == bear).unwrap();
+    let slot = &x0[O_MY_PERM + s * PERM_W..O_MY_PERM + (s + 1) * PERM_W];
+    let digit = |a: usize, n: usize| slot[a..a + n].iter().position(|&v| v == 1.0).unwrap_or(99);
+    assert_eq!(digit(0, 16) * 64 + digit(16, 8) * 8 + digit(24, 8), ids[g.obj(bear).def as usize] as usize);
+    // P0's own hand (empty here) and library: the frame opponent's, known exactly by P0.
+    assert!(x0[O_BAGS + bag::MY_HAND * D..O_BAGS + (bag::MY_HAND + 1) * D].iter().sum::<f32>() == 0.25 * hand.len() as f32);
+    // No hidden information: every world of each viewer encodes alike.
+    let mut rng = engine::rng::Rng::new(7223);
+    for v in 0..2u8 {
+        let base = enc(&g, v);
+        for k in 0..8 {
+            let mut w = g.clone();
+            w.determinize(v, &mut rng);
+            let y = enc(&w, v);
+            if let Some(i) = (0..NUM_FEATURES).find(|&i| base[i] != y[i]) {
+                panic!("P{v}'s world {k}: feature {i} differs ({} / {})", base[i], y[i]);
             }
         }
     }
