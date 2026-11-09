@@ -1662,6 +1662,14 @@ impl Game {
                 Some(Task::Run(f)) => {
                     let mut v = f.pile.clone();
                     v.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
+                    // A paged pile (more cards than the 64 list slots,
+                    // ENGINE.md 100.1): the page's cards at their slots
+                    // (63 a page, the last slot "next page"), as a paged
+                    // graveyard list shows its page (100.2).
+                    if let Stage::Paged { window } = d.stage {
+                        let w = act::LIBRARY_N as usize - 1;
+                        v = v.into_iter().skip(window as usize * w).take(w).collect();
+                    }
                     v
                 }
                 _ => Vec::new(),

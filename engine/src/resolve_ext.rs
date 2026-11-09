@@ -1036,8 +1036,13 @@ impl Game {
             }
             Ext::LookTopN { who, n } => {
                 if let Some(p) = self.who(f, *who) {
-                    let n = self.amount(f, *n).clamp(0, 60) as u8;
+                    // Exactly the top n (any n: past the library's size, all
+                    // of it; the choice among them pages past the 64 list
+                    // slots, `Op::PileTo`).
+                    let n = self.amount(f, *n);
                     if n > 0 {
+                        let lib = self.players[p as usize].library.len();
+                        let n = if n >= lib as crate::num::Wide { lib } else { n as usize };
                         self.look_top(f, p, n, false);
                     }
                 }
@@ -1268,12 +1273,13 @@ impl Game {
                 Flow::Next
             }
             Ext::PutInLibraryAtX { tgt } => {
-                // (X past 255 is past any library, 58.3: the bottom, as 255.)
+                // (Exactly X cards above it, any X; past the library's
+                // cards, the bottom: CR 401.4.)
                 let depth = f.spell_x;
                 for t in self.targets_of(f, *tgt) {
                     if let Target::Obj(o) = t {
                         if self.objs[o.idx.i()].zone == Zone::Battlefield {
-                            self.move_card(o.idx, Zone::Library, Pos::FromTop(u8::try_from(depth).unwrap_or(u8::MAX)));
+                            self.move_card(o.idx, Zone::Library, Pos::FromTop(depth));
                         }
                     }
                 }
@@ -1413,7 +1419,7 @@ impl Game {
                     None => {}
                 }
                 if f.i == 0 {
-                    self.look_top(f, p, *n, true);
+                    self.look_top(f, p, *n as usize, true);
                     f.picked.clear();
                     f.i = 1;
                 }

@@ -496,7 +496,7 @@ impl Game {
                 for c in std::mem::take(&mut f.pile) {
                     self.move_card(c, Zone::Library, Pos::Bottom);
                 }
-                self.look_top(f, p, n, false);
+                self.look_top(f, p, n as usize, false);
             }
             Some(_) => {
                 // "Then shuffle and put the last cards you looked at on
@@ -508,7 +508,7 @@ impl Game {
                 return Flow::Next;
             }
             None if f.i == 0 => {
-                self.look_top(f, p, n, false);
+                self.look_top(f, p, n as usize, false);
                 f.i = 1;
             }
             None => {}

@@ -293,7 +293,7 @@ impl Game {
                     Some(other) => unreachable!("revealed-card answer {other:?}"),
                     None => {
                         if f.i == 0 {
-                            self.look_top(f, p, *n, true);
+                            self.look_top(f, p, *n as usize, true);
                             f.i = 1;
                         }
                         match f.pile.len() {
@@ -466,7 +466,7 @@ impl Game {
                 };
                 let name = named.map(|d| self.db.def(d).name.clone());
                 self.note(|_| format!("P{p} names {}", name.as_deref().unwrap_or("a card not in their library")));
-                self.look_top(f, p, *n, true);
+                self.look_top(f, p, *n as usize, true);
                 for c in std::mem::take(&mut f.pile) {
                     if name.as_deref() == Some(self.name(c)) {
                         self.move_card(c, Zone::Hand, Pos::Top);

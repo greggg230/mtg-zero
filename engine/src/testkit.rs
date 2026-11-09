@@ -382,6 +382,12 @@ impl Game {
         panic!("drive_until: no progress");
     }
 
+    /// Set the X of the top stack item (tests: an X past what a payment
+    /// reaches today, the u8 generic mana of a cost).
+    pub fn set_top_x(&mut self, x: u32) {
+        self.stack.last_mut().expect("a stack item").x = x;
+    }
+
     /// Everything `viewer` can observe, as numbers (hidden-information
     /// tests): public zones and objects, zone sizes, life and mana, the
     /// turn, the viewer's own hand, every card the viewer knows exactly

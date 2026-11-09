@@ -816,7 +816,7 @@ impl Game {
                 for t in self.targets_of(f, tgt) {
                     if let Target::Obj(o) = t {
                         if self.objs[o.idx.i()].zone == Zone::Battlefield {
-                            self.move_card(o.idx, Zone::Library, Pos::FromTop(depth));
+                            self.move_card(o.idx, Zone::Library, Pos::FromTop(depth as u32));
                         }
                     }
                 }
@@ -878,7 +878,7 @@ impl Game {
             }
             Op::LookTop { who, n, reveal } => {
                 if let Some(p) = self.who(f, who) {
-                    self.look_top(f, p, n, reveal);
+                    self.look_top(f, p, n as usize, reveal);
                 }
                 Flow::Next
             }
@@ -932,7 +932,11 @@ impl Game {
                     .collect();
                 // Picks still required: as many as possible up to `min`.
                 let need = if rest { 0 } else { (min as usize).saturating_sub(f.i as usize).min(eligible.len()) };
-                let mut opts = Vec::new();
+                // Each card by its position in the sorted pile (`LIBRARY` +
+                // it while the pile fits the 64 list slots; past them the
+                // choice pages, ENGINE.md 100.1: any number of cards looked
+                // at, each reachable).
+                let mut items: Vec<(u32, Choice)> = Vec::new();
                 for (k, &c) in sorted.iter().enumerate() {
                     let d = self.objs[c.i()].def;
                     if k > 0 && self.objs[sorted[k - 1].i()].def == d {
@@ -943,9 +947,9 @@ impl Game {
                     if set && eligible.len() - first < need {
                         continue;
                     }
-                    assert!((k as u16) < act::LIBRARY_N, "pile slot {k} out of range");
-                    opts.push(Opt { action: act::LIBRARY + k as u16, choice: Choice::Card(c) });
+                    items.push((k as u32, Choice::Card(c)));
                 }
+                let mut extra = Vec::new();
                 if !rest && need == 0 {
                     if f.pile.is_empty() {
                         return Flow::Next;
@@ -953,7 +957,7 @@ impl Game {
                     // Even with no card to pick, ask (pass only): whether a
                     // card matches is hidden from the other player, whose
                     // determinize must find the same decision pending.
-                    opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                    extra.push(Opt { action: act::PASS, choice: Choice::Pass });
                 }
                 let kind = match dest {
                     PileDest::Top => DecisionKind::PutOnTop,
@@ -963,7 +967,7 @@ impl Game {
                     // (Onto the battlefield: a card taken, as to a hand.)
                     PileDest::Hand | PileDest::FaceDown | PileDest::BattlefieldTapped => DecisionKind::PutInHand,
                 };
-                self.ask(Task::Run(f.clone()), p, kind, opts);
+                self.ask_paged(Task::Run(f.clone()), f.page, p, kind, act::LIBRARY, act::LIBRARY_N, &items, extra);
                 Flow::Suspend
             }
             Op::Shuffle { who } => {
@@ -1140,10 +1144,11 @@ impl Game {
     /// `p` looks at the top `n` cards of their library (CR 701.18a,
     /// 701.42a): each is keyed for the looker (or revealed to all); the
     /// other player loses track of which is which as `p` holds them
-    /// (ENGINE.md 10). They become the frame's pile.
-    pub(crate) fn look_top(&mut self, f: &mut Frame, p: PlayerId, n: u8, reveal: bool) {
+    /// (ENGINE.md 10). They become the frame's pile. (Any `n`: the whole
+    /// library when it holds fewer.)
+    pub(crate) fn look_top(&mut self, f: &mut Frame, p: PlayerId, n: usize, reveal: bool) {
         let lib = &self.players[p as usize].library;
-        let pile: Vec<CardIdx> = lib.iter().rev().take(n as usize).copied().collect();
+        let pile: Vec<CardIdx> = lib.iter().rev().take(n).copied().collect();
         for &c in &pile {
             // A forced outcome (zero-core chance_k) swaps the identity in
             // before the card is seen (ENGINE.md 10).

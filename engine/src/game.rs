@@ -580,8 +580,9 @@ pub(crate) enum Dest {
 pub enum Pos {
     Top,
     Bottom,
-    /// With n cards above it (0 = top).
-    FromTop(u8),
+    /// With n cards above it (0 = top; any n, the bottom past the zone's
+    /// cards: CR 401.4).
+    FromTop(u32),
 }
 
 /// The whole game (ENGINE.md 2). `Clone` captures a game suspended anywhere.
@@ -2492,7 +2493,10 @@ impl Game {
                 Pos::Top => list.push(idx),
                 Pos::Bottom => list.insert(0, idx),
                 Pos::FromTop(n) => {
-                    let at = list.len().saturating_sub(n as usize);
+                    // (n cards above it; with fewer cards there, all of
+                    // them: the bottom.)
+                    let n = n as usize;
+                    let at = if n >= list.len() { 0 } else { list.len() - n };
                     list.insert(at, idx);
                 }
             }
