@@ -1040,7 +1040,7 @@ impl Game {
                 let p = f.controller;
                 self.note(|_| format!("P{p} wins the game"));
                 self.players[crate::ids::opp(p) as usize].lost = true;
-                self.outcome = Some(crate::game::Outcome { winner: Some(p), reason: crate::game::EndReason::Effect });
+                self.end_game(Some(p), crate::game::EndReason::Effect);
                 Flow::Next
             }
             Ext::BounceAll => {

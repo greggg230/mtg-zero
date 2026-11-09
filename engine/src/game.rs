@@ -455,6 +455,11 @@ pub enum EndReason {
     TurnLimit,
     /// An effect says a player wins (CR 104.2b; Thassa's Oracle).
     Effect,
+    /// The game can't go on exactly: a number past the engine's exact range
+    /// (64-bit stored values, ENGINE.md 100.7) or past the object limit. Not
+    /// a win, a loss or a draw: self-play drops the game (`Game::aborted`;
+    /// zero-core's `SearchGame::aborted`).
+    Aborted,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -1319,6 +1324,30 @@ impl Game {
     }
     pub fn is_over(&self) -> bool {
         self.outcome.is_some()
+    }
+    /// The game ended aborted (`EndReason::Aborted`, ENGINE.md 100.7): it has
+    /// no result, and self-play drops it.
+    pub fn aborted(&self) -> bool {
+        matches!(self.outcome, Some(Outcome { reason: EndReason::Aborted, .. }))
+    }
+    /// The game ends with `winner` (`None`: a draw) for `reason`, unless it
+    /// already ended: a game aborted before (a number past the exact range
+    /// could have decided this) stays aborted, and a game that ended before an
+    /// overflow keeps its exact result.
+    pub(crate) fn end_game(&mut self, winner: Option<PlayerId>, reason: EndReason) {
+        if self.outcome.is_none() {
+            self.outcome = Some(Outcome { winner, reason });
+        }
+    }
+    /// The game ends aborted (ENGINE.md 100.7): `why` (logged) is the number
+    /// or limit the engine can't keep exact. The running task finishes with
+    /// whatever value it had (the game is dropped); `advance` stops after it.
+    pub(crate) fn abort(&mut self, why: impl FnOnce() -> String) {
+        if self.outcome.is_none() {
+            let w = why();
+            self.note(|_| format!("game aborted: {w}"));
+            self.outcome = Some(Outcome { winner: None, reason: EndReason::Aborted });
+        }
     }
     /// Void holds: a nonland permanent left the battlefield this turn or a
     /// spell was warped this turn (ENGINE.md 99.4).
@@ -2347,7 +2376,7 @@ impl Game {
                     obj: ObjRef { idx, inc: self.objs[idx.i()].inc },
                     ts: self.next_ts,
                     until: crate::layers::Until::Forever,
-                    vals: crate::copies::CopyVals { def: d, exc: v.exc },
+                    vals: crate::copies::CopyVals { def: d, exc: v.exc, dfc: v.dfc },
                     own: d,
                 };
                 self.copies.push(fx);
@@ -2947,7 +2976,7 @@ impl Game {
         {
             self.note(|_| format!("P{p} would draw from an empty library: wins the game"));
             self.players[opp(p) as usize].lost = true;
-            self.outcome = Some(Outcome { winner: Some(p), reason: EndReason::Effect });
+            self.end_game(Some(p), EndReason::Effect);
             return None;
         }
         if self.turn.step == Step::Draw && self.turn.active == p {

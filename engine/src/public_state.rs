@@ -818,7 +818,7 @@ pub fn perturbations() -> Vec<Perturbation> {
             let c = pick(&ss, r)?;
             let others: Vec<DefId> = ss.iter().map(|&x| a.g.objs[x.i()].def).filter(|&d| d != a.g.objs[c.i()].def).collect();
             let d = pick(&others, r)?;
-            a.g.add_copy_effect(c, crate::copies::CopyVals { def: d, exc: Default::default() }, Until::EndOfTurn);
+            a.g.add_copy_effect(c, crate::copies::CopyVals { def: d, exc: Default::default(), dfc: true }, Until::EndOfTurn);
             Some(format!("{} copies {}", a.g.name(c), a.g.db.def(d).name))
         }),
         p!(rare "a prepared permanent stops being prepared", "Game.prepared", |a, r| {

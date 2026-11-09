@@ -613,6 +613,13 @@ impl Game {
         // double-faced token (CR 707.8a: its copy effect follows the face).
         let created = self.is_copy_obj(c)
             && self.copies.iter().filter(|x| x.obj == r).all(|x| x.until == crate::layers::Until::Forever && x.own == x.vals.def);
+        // A token copy of a permanent that isn't a transforming permanent
+        // (Shifting Woodland as Outland Liberator) has only the face it was
+        // created as: it isn't represented by a double-faced card and can't
+        // transform (707.8a, 701.28c; E2).
+        if created && self.copies.iter().any(|x| x.obj == r && !x.vals.dfc) {
+            return false;
+        }
         let copying = self.is_copy(c) && !created;
         // (The face it has: its own, under a copy effect.)
         let own = if copying { self.own_def(c) } else { o.def };

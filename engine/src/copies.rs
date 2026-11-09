@@ -100,6 +100,13 @@ impl Except {
 pub struct CopyVals {
     pub def: DefId,
     pub exc: Except,
+    /// The values are a face of the object they were copied from, and that
+    /// object was a transforming permanent (a double-faced card, or a token
+    /// created double-faced): a token created with them is double-faced (CR
+    /// 707.8a). False when they come from a copy effect on a permanent
+    /// (Shifting Woodland as Outland Liberator): a token copy of it has only
+    /// that face and can't transform (701.28c; ENGINE.md 100.7, E2).
+    pub dfc: bool,
 }
 
 /// A copy effect on a permanent (CR 707, layer 1a).
@@ -195,9 +202,9 @@ impl Game {
             if dd.bestowed || dd.class_level > 1 { dd.card_def(d) } else { d }
         };
         if let Some(x) = self.copy_fx(c) {
-            return CopyVals { def: base(x.vals.def), exc: x.vals.exc };
+            return CopyVals { def: base(x.vals.def), exc: x.vals.exc, dfc: x.vals.dfc };
         }
-        CopyVals { def: base(self.objs[c.i()].def), exc: Except::default() }
+        CopyVals { def: base(self.objs[c.i()].def), exc: Except::default(), dfc: true }
     }
 
     /// The copiable values of permanent `r`: now, or as it last existed on
@@ -213,6 +220,10 @@ impl Game {
     /// 707.2, 613.2a). It stays the same object (707.4: no enter or leave
     /// triggers); noncopy effects, counters and status stay.
     pub(crate) fn add_copy_effect(&mut self, c: CardIdx, vals: CopyVals, until: Until) {
+        // (Its copiable values are now the copy's, on an object that isn't a
+        // token created double-faced: a token copy of it is single-faced,
+        // 707.8a, E2.)
+        let vals = CopyVals { dfc: false, ..vals };
         let own = self.own_def(c);
         self.next_ts += 1;
         let ts = self.next_ts;
@@ -380,7 +391,7 @@ impl Game {
                 };
                 if self.live(r) && self.objs[r.idx.i()].zone == Zone::Graveyard {
                     // A card: its printed values (its front face, 712.8a).
-                    return Some(CopyVals { def: self.objs[r.idx.i()].def, exc: Except::default() });
+                    return Some(CopyVals { def: self.objs[r.idx.i()].def, exc: Except::default(), dfc: true });
                 }
                 self.copiable_of(r)
             }
@@ -396,7 +407,7 @@ impl Game {
             // values (its front face, CR 712.8a).
             CopyOf::SourceCard => {
                 let d = self.db.def(f.source_def).card_def(f.source_def);
-                Some(CopyVals { def: d, exc: Except::default() })
+                Some(CopyVals { def: d, exc: Except::default(), dfc: true })
             }
         }
     }
@@ -411,7 +422,7 @@ impl Game {
                 f.made_all.clear();
                 let Some(p) = self.who(f, *who) else { return Flow::Next };
                 let Some(base) = self.copy_source(f, *of) else { return Flow::Next };
-                let vals = CopyVals { def: base.def, exc: exc.over(base.exc) };
+                let vals = CopyVals { def: base.def, exc: exc.over(base.exc), dfc: base.dfc };
                 let n = self.amount(f, *n).max(0) as u32;
                 let made = self.create_token_copies(vals, p, n);
                 f.made = made.first().copied();
@@ -420,7 +431,7 @@ impl Game {
             }
             Ext::BecomeCopy { on, of, exc, until } => {
                 let Some(base) = self.copy_source(f, *of) else { return Flow::Next };
-                let vals = CopyVals { def: base.def, exc: exc.over(base.exc) };
+                let vals = CopyVals { def: base.def, exc: exc.over(base.exc), dfc: base.dfc };
                 for c in self.objs_on(f, on) {
                     self.add_copy_effect(c, vals, *until);
                 }
@@ -636,7 +647,7 @@ impl Game {
             Some(Choice::Card(x)) => {
                 copied_tapped = eac.tapped;
                 let base = if eac.from_graveyard {
-                    CopyVals { def: self.objs[x.i()].def, exc: Except::default() }
+                    CopyVals { def: self.objs[x.i()].def, exc: Except::default(), dfc: true }
                 } else {
                     self.copiable(x)
                 };
@@ -644,7 +655,7 @@ impl Game {
                 if eac.keep_name {
                     exc.name = Some(own);
                 }
-                let vals = CopyVals { def: base.def, exc: exc.over(base.exc) };
+                let vals = CopyVals { def: base.def, exc: exc.over(base.exc), dfc: base.dfc };
                 self.add_copy_effect(card, vals, Until::Forever);
                 if self.priest_exiles(card) {
                     return;

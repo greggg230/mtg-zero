@@ -303,7 +303,7 @@ impl Game {
                 _ => unreachable!(),
             };
             self.note(|_| format!("game over: winner {winner:?}"));
-            self.outcome = Some(Outcome { winner, reason: EndReason::Sba });
+            self.end_game(winner, EndReason::Sba);
             return true;
         }
         let (zero, destroyed) = self.dying_creatures();

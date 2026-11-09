@@ -194,6 +194,9 @@ impl Game {
                     r[w as usize] = 1.0;
                     r
                 }
+                // (A draw; an aborted game has no result and is dropped by
+                // self-play: 0.5 each is what a driver that doesn't drop it
+                // would see.)
                 None => [0.5, 0.5],
             },
             None => [0.0; 2],
@@ -440,7 +443,7 @@ impl Game {
             self.turn.normal
         };
         if self.turn.number >= self.spec.max_turns {
-            self.outcome = Some(Outcome { winner: None, reason: EndReason::TurnLimit });
+            self.end_game(None, EndReason::TurnLimit);
             return;
         }
         // "If you would begin your turn while this artifact is tapped, you
