@@ -493,6 +493,14 @@ impl SearchGame for MtgAz {
         }
     }
 
+    /// An aborted game (ENGINE.md 100.7: a number past the exact range, or
+    /// past the object limit) has no result: zero-core's driver drops it (no
+    /// samples) and its search values it by the network (the opt-in
+    /// `SearchGame::aborted`). A best-of-three match ends with it.
+    fn aborted(&self) -> bool {
+        self.m.sb.is_none() && self.g.aborted()
+    }
+
     fn legal_actions(&self, out: &mut Vec<u16>) {
         match &self.m.sb {
             Some(sb) => {
