@@ -289,7 +289,7 @@ fn determinize_samples_the_opponents_unseen_cards_from_their_decklist() {
                         assert_eq!(n_own, 60);
                     }
                     let mut cards: Vec<u16> =
-                        (0..120u32).filter(|&i| d.g.obj(engine::CardIdx(i)).owner == opp).map(|i| d.g.ident(engine::CardIdx(i))).collect();
+                        (0..120u32).filter(|&i| d.g.obj(engine::CardIdx::new(i)).owner == opp).map(|i| d.g.ident(engine::CardIdx::new(i))).collect();
                     cards.iter_mut().for_each(|c| {
                         if let Some(f) = d.g.db().def(*c).front {
                             *c = f;
@@ -301,7 +301,7 @@ fn determinize_samples_the_opponents_unseen_cards_from_their_decklist() {
                     // identities moved, within the opponent's unseen cards.
                     assert_eq!(hidden_of(&d), hidden_of(&g), "the opponent's hidden multiset changed");
                     for i in 0..120u32 {
-                        let c = engine::CardIdx(i);
+                        let c = engine::CardIdx::new(i);
                         if g.g.knows(viewer, c) {
                             assert_eq!(g.g.ident(c), d.g.ident(c));
                         }

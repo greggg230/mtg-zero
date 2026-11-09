@@ -41,7 +41,7 @@ fn defs_of(g: &Game, owner: PlayerId) -> Vec<u16> {
         .iter()
         .enumerate()
         .filter(|(_, o)| o.owner == owner)
-        .map(|(i, _)| g.ident(CardIdx(i as u32)))
+        .map(|(i, _)| g.ident(CardIdx::new(i as u32)))
         .collect();
     d.sort();
     d

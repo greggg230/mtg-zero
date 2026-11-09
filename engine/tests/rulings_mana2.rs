@@ -197,7 +197,7 @@ fn a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f()
     ];
     for (name, mv, tapped, g, answer) in cases {
         let c = (0..g.objs().len())
-            .map(|i| CardIdx(i as u32))
+            .map(|i| CardIdx::new(i as u32))
             .find(|&c| g.obj(c).owner == 0 && g.name(c) == name && matches!(g.obj(c).zone, Zone::Hand | Zone::Graveyard))
             .unwrap_or_else(|| panic!("no {name}"));
         let (got, t, life) = drained(g, c, answer);

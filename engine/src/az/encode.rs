@@ -1661,7 +1661,7 @@ impl Game {
             K::PutOnTop | K::PutOnBottom | K::PutInGraveyard | K::PutInHand | K::PutOntoBattlefield => match self.agenda.last() {
                 Some(Task::Run(f)) => {
                     let mut v = f.pile.clone();
-                    v.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+                    v.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
                     v
                 }
                 _ => Vec::new(),
@@ -1942,7 +1942,7 @@ fn opp_candidates(a: &super::MtgAz, me: PlayerId, ids: &[u16], out: &mut [f32]) 
         }
     };
     for i in 0..g.objs.len() {
-        let c = crate::ids::CardIdx(i as u32);
+        let c = crate::ids::CardIdx::new(i as u32);
         let o = &g.objs[i];
         if o.owner == op_ && o.zone != Zone::Nowhere && !g.is_token(c) && !g.is_copy_obj(c) && g.knows(me, c) {
             drop(super::sample::card_of(g, c));

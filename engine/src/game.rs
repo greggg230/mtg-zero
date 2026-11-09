@@ -57,7 +57,8 @@ impl Default for GameSpec {
 
 /// One card slot (ENGINE.md 2). Per-object state resets on zone changes.
 /// Plain data (`Copy`): `Vec<Obj>` clones as one copy, which is most of a
-/// `Game::clone` (ENGINE.md 17).
+/// `Game::clone` (ENGINE.md 17). Rare wide facts live in side lists on
+/// `Game` (`lki_power`, `loyalty`), keeping an object at 64 bytes.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Obj {
     pub def: DefId,
@@ -91,10 +92,6 @@ pub struct Obj {
     pub attached: Option<ObjRef>,
     /// It entered as an evoked spell (CR 702.74a).
     pub evoked: bool,
-    /// Last known information of its last time on the battlefield (CR
-    /// 608.2h): (its `inc` there, its power as it left; an amount, the game
-    /// aborts past `num::AMOUNT_MAX`).
-    pub lki_power: Option<(u32, i64)>,
     /// A spell cast with flashback: exiled whenever it would leave the
     /// stack (CR 702.34a).
     pub flashback: bool,
@@ -111,17 +108,22 @@ pub struct Obj {
     /// The turn it entered the battlefield (0 = never; turn numbers as
     /// u16, which the turn cap keeps far from).
     pub entered: u16,
-    /// Loyalty abilities activated this turn (CR 606.3): in turn `pw_turn`,
-    /// `pw_used` of them, `pw_extra` more allowed than one (Comet; both
-    /// counted exactly, the game aborts past `u32::MAX`).
-    pub pw_turn: u16,
-    pub pw_used: u32,
-    pub pw_extra: u32,
     /// Times this object transformed (CR 701.27f: an ability of a permanent
     /// transforms it only if it hasn't transformed since the ability was
     /// put on the stack): counted exactly, the game aborts past `u32::MAX`
     /// (a wrapping count would alias).
     pub flips: u32,
+}
+
+/// Loyalty abilities of a permanent activated (CR 606.3; `Game::loyalty`):
+/// in turn `turn`, `used` of them, `extra` more allowed than one (Comet;
+/// both counted exactly, the game aborts past `u32::MAX`).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Loyalty {
+    pub card: CardIdx,
+    pub turn: u16,
+    pub used: u32,
+    pub extra: u32,
 }
 
 /// How a spell was cast (CR 601.2a-b, 118.9).
@@ -809,6 +811,16 @@ pub struct Game {
     /// controller as they last existed (CR 608.2h; kept when
     /// `CardDb::watch_toughness`: stationing by toughness, ENGINE.md 99.8).
     pub(crate) lki_toughness: Vec<(ObjRef, i64, PlayerId)>,
+    /// Last known power of the slots that left the battlefield (CR 608.2h),
+    /// the latest departure of each: (slot, its `inc` on the battlefield,
+    /// its power as it left; an amount, the game aborts past
+    /// `num::AMOUNT_MAX`). Read through `Game::lki_power_of`; out of `Obj`
+    /// (rare and wide: objects stay small to copy, ENGINE.md 17).
+    pub(crate) lki_power: Vec<(CardIdx, u32, i64)>,
+    /// Loyalty activations (CR 606.3) of the slots that have any in their
+    /// current incarnation (an entry goes as its object changes zones):
+    /// read through `Game::loyalty_of` (out of `Obj` like `lki_power`).
+    pub(crate) loyalty: Vec<Loyalty>,
     /// Mana in the pools with a spending restriction other than Mishra's
     /// Workshop's (`ManaPool::art`): (player, type, purposes, amount), a
     /// part of that player's `ManaPool::amt` (CR 106.6; ENGINE.md 99.12).
@@ -1217,7 +1229,7 @@ impl Game {
             entering_mods: Vec::new(),
             leaving_to: 0,
             leaving_choice: 0,
-            leaving_card: CardIdx(0),
+            leaving_card: CardIdx::new(0),
             resolving_adventure: false,
             ts_group: (0, 0),
             held: Vec::new(),
@@ -1244,6 +1256,8 @@ impl Game {
             lki_attached: Vec::new(),
             lki_damage: Vec::new(),
             lki_toughness: Vec::new(),
+            lki_power: Vec::new(),
+            loyalty: Vec::new(),
             pool_restr: Vec::new(),
             lands_entered: (0, [0; 2]),
             moon_game: false,
@@ -1278,7 +1292,7 @@ impl Game {
     /// Slot `idx` was just made as a token or a copy (CR 111, 707.10).
     pub(crate) fn token_slot_made(&mut self, idx: CardIdx) {
         self.tokens = self.exact_inc(self.tokens, "tokens made");
-        self.first_token = self.first_token.min(idx.0);
+        self.first_token = self.first_token.min(idx.get());
     }
 
     /// Append a card slot (not yet in any zone list). At `OBJECT_LIMIT`
@@ -1290,7 +1304,7 @@ impl Game {
             self.abort(|| format!("{n} objects: past the engine's object limit"));
         }
         assert!(self.objs.len() < u32::MAX as usize, "too many objects");
-        let idx = CardIdx(self.objs.len() as u32);
+        let idx = CardIdx::new(self.objs.len() as u32);
         // Rare rules some card of this game has (its faces included; a copy
         // copies a card of the game): the hot paths look only if one does.
         let d = self.db.def(def);
@@ -1321,16 +1335,12 @@ impl Game {
             known: 0,
             attached: None,
             evoked: false,
-            lki_power: None,
             flashback: false,
             escaped: false,
             chosen_player: None,
             monstrous: false,
             attacks: None,
             entered: 0,
-            pw_turn: 0,
-            pw_used: 0,
-            pw_extra: 0,
             flips: 0,
         });
         idx
@@ -1394,6 +1404,34 @@ impl Game {
     }
     pub fn objs(&self) -> &[Obj] {
         &self.objs
+    }
+    /// Object `r`'s power as it last existed on the battlefield (CR
+    /// 608.2h), if `r` is its slot's latest incarnation there to leave.
+    pub fn lki_power_of(&self, r: ObjRef) -> Option<i64> {
+        self.lki_power.iter().find(|x| x.0 == r.idx).and_then(|&(_, inc, p)| (inc == r.inc).then_some(p))
+    }
+    /// Slot `idx` left the battlefield as incarnation `inc`, its power `p`.
+    pub(crate) fn set_lki_power(&mut self, idx: CardIdx, inc: u32, p: i64) {
+        match self.lki_power.iter_mut().find(|x| x.0 == idx) {
+            Some(x) => *x = (idx, inc, p),
+            None => self.lki_power.push((idx, inc, p)),
+        }
+    }
+    /// Permanent `c`'s loyalty activations (CR 606.3); none: all 0.
+    pub fn loyalty_of(&self, c: CardIdx) -> Loyalty {
+        self.loyalty.iter().find(|l| l.card == c).copied().unwrap_or(Loyalty { card: c, ..Loyalty::default() })
+    }
+    /// Permanent `c`'s loyalty activations, to change (an entry of all 0
+    /// made if it has none).
+    pub(crate) fn loyalty_mut(&mut self, c: CardIdx) -> &mut Loyalty {
+        let i = match self.loyalty.iter().position(|l| l.card == c) {
+            Some(i) => i,
+            None => {
+                self.loyalty.push(Loyalty { card: c, ..Loyalty::default() });
+                self.loyalty.len() - 1
+            }
+        };
+        &mut self.loyalty[i]
     }
     pub fn battlefield(&self) -> &[CardIdx] {
         &self.battlefield
@@ -1538,7 +1576,7 @@ impl Game {
         // Sage of the Skies) ceases to exist instead, as a token beyond the
         // limit is never created (`token_count`).
         let owner = self.objs[idx.i()].owner;
-        let is_card = idx.0 < self.first_token;
+        let is_card = idx.get() < self.first_token;
         let controller = if (owner != controller || !is_card) && self.perm_room(controller) == 0 {
             if !is_card {
                 self.note(|g| format!("P{controller} controls the engine's most permanents: {} ceases to exist", g.name(idx)));
@@ -2390,19 +2428,19 @@ impl Game {
             o.known = if to.is_hidden() || fd_enter { known_before } else { 0b11 };
             o.attached = None;
             o.evoked = to == Zone::Battlefield && std::mem::take(&mut self.entering_evoked);
-            if lki_power.is_some() {
-                o.lki_power = lki_power;
-            }
             o.flashback = false;
             o.chosen_player = None;
             o.monstrous = false;
             o.attacks = None;
             o.entered = if to == Zone::Battlefield { turn as u16 } else { 0 };
-            o.pw_turn = 0;
-            o.pw_used = 0;
-            o.pw_extra = 0;
             o.flips = 0;
             o.escaped = to == Zone::Battlefield && std::mem::take(&mut self.entering_escaped);
+        }
+        if let Some((inc, p)) = lki_power {
+            self.set_lki_power(idx, inc, p);
+        }
+        if !self.loyalty.is_empty() {
+            self.loyalty.retain(|l| l.card != idx);
         }
         // A token created as a copy (CR 707.2, 111.10): a copy effect for as
         // long as it exists, in place before it is seen entering.
@@ -3319,7 +3357,7 @@ impl Game {
     pub fn describe_target(&self, t: Target) -> String {
         match t {
             Target::Player(p) => format!("P{p}"),
-            Target::Obj(r) => format!("{}#{}", self.name(r.idx), r.idx.0),
+            Target::Obj(r) => format!("{}#{}", self.name(r.idx), r.idx.get()),
             Target::Stack(id) => match self.stack.iter().find(|s| s.id == id) {
                 Some(s) => match s.kind {
                     StackKind::Ability { ability, .. } => format!("ability of {} (stack #{id})", self.db.def(ability.def).name),

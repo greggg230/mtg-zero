@@ -204,7 +204,7 @@ fn a_cost_reduction_reduces_the_offspring_cost_too_cr_601_2f() {
         .hand(0, &["Faithless Looting"])
         .start();
     let loot = g.card(0, "Faithless Looting", Zone::Hand);
-    let t = g.objs().iter().enumerate().find(|(_, o)| o.zone == Zone::Library && db().def(o.def).name == TRAINER).map(|(i, _)| CardIdx(i as u32)).unwrap();
+    let t = g.objs().iter().enumerate().find(|(_, o)| o.zone == Zone::Library && db().def(o.def).name == TRAINER).map(|(i, _)| CardIdx::new(i as u32)).unwrap();
     g.choose(Choice::Cast(loot));
     resolve_with(&mut g, |g| match g.kind() {
         Some(DecisionKind::Discard) => g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&c| c == Choice::Card(t)),

@@ -95,7 +95,7 @@ impl Game {
     fn view_card(&self, c: CardIdx) -> Value {
         let o = self.obj(c);
         let d = self.def_of(c);
-        let mut v = json!({"id": c.0, "name": self.name(c), "owner": o.owner});
+        let mut v = json!({"id": c.get(), "name": self.name(c), "owner": o.owner});
         if o.zone == Zone::FaceDown {
             v["face_down"] = json!(true);
         }
@@ -109,7 +109,7 @@ impl Game {
         let o = self.obj(c);
         let d = self.def_of(c);
         let mut v = json!({
-            "id": c.0,
+            "id": c.get(),
             "name": self.name(c),
             "owner": o.owner,
             "controller": o.controller,
@@ -144,18 +144,18 @@ impl Game {
         if o.attacking {
             v["attacking"] = json!(true);
             if let Some(pw) = o.attacks {
-                v["attacks"] = json!(pw.idx.0);
+                v["attacks"] = json!(pw.idx.get());
             }
             if o.blocked {
                 v["blocked"] = json!(true);
             }
         }
         if let Some(a) = o.blocking {
-            v["blocking"] = json!(a.0);
+            v["blocking"] = json!(a.get());
         }
         if let Some(h) = o.attached {
             if self.live(h) {
-                v["attached"] = json!(h.idx.0);
+                v["attached"] = json!(h.idx.get());
             }
         }
         v
@@ -164,7 +164,7 @@ impl Game {
     fn view_target(&self, t: Target) -> Value {
         match t {
             Target::Player(p) => json!({"player": p}),
-            Target::Obj(r) => json!({"id": r.idx.0, "name": self.name(r.idx), "live": self.live(r)}),
+            Target::Obj(r) => json!({"id": r.idx.get(), "name": self.name(r.idx), "live": self.live(r)}),
             Target::Stack(id) => json!({"stack": id, "name": self.describe_target(t)}),
         }
     }
@@ -174,10 +174,10 @@ impl Game {
             .iter()
             .map(|s| {
                 let mut v = match s.kind {
-                    StackKind::Spell { card } => json!({"stack": s.id, "id": card.0, "name": self.name(card), "spell": true}),
+                    StackKind::Spell { card } => json!({"stack": s.id, "id": card.get(), "name": self.name(card), "spell": true}),
                     StackKind::Ability { ability, source } => json!({
                         "stack": s.id,
-                        "id": source.idx.0,
+                        "id": source.idx.get(),
                         "name": self.db().def(ability.def).name,
                         "ability": ability_kind(ability.slot),
                     }),
@@ -414,7 +414,7 @@ impl Game {
             .map(|o| {
                 let mut v = json!({"a": o.action, "t": self.option_text(d.kind, o.choice)});
                 if let Some(c) = self.choice_card(o.choice) {
-                    v["c"] = json!(c.0);
+                    v["c"] = json!(c.get());
                 }
                 v
             })
@@ -493,8 +493,8 @@ impl Game {
             .collect();
         let other = 1 - p;
         let hand: Vec<Value> =
-            pl.hand.iter().filter(|&&c| self.obj(c).known & (1 << other) != 0).map(|&c| json!([c.0, self.name(c)])).collect();
-        let order: Vec<u32> = pl.library.iter().rev().map(|&c| c.0 as u32).collect();
+            pl.hand.iter().filter(|&&c| self.obj(c).known & (1 << other) != 0).map(|&c| json!([c.get(), self.name(c)])).collect();
+        let order: Vec<u32> = pl.library.iter().rev().map(|&c| c.get() as u32).collect();
         json!({"library": library, "hand": hand, "order": order})
     }
 }

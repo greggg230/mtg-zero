@@ -118,22 +118,23 @@ impl Game {
     /// CR 606.3: no loyalty ability of this permanent was activated this
     /// turn (or fewer than the extra activations an effect allows).
     pub(crate) fn loyalty_ready(&self, card: CardIdx) -> bool {
-        let o = &self.objs[card.i()];
-        // (`pw_used < 1 + pw_extra`, without overflow.)
-        o.pw_turn != self.turn.number as u16 || o.pw_used <= o.pw_extra
+        let o = self.loyalty_of(card);
+        // (`used < 1 + extra`, without overflow.)
+        o.turn != self.turn.number as u16 || o.used <= o.extra
     }
 
     /// A loyalty ability of `card` is being activated (CR 606.3).
     fn note_loyalty_activation(&mut self, card: CardIdx) {
         let turn = self.turn.number as u16;
-        let o = &mut self.objs[card.i()];
-        if o.pw_turn != turn {
-            o.pw_turn = turn;
-            o.pw_used = 0;
-            o.pw_extra = 0;
+        let o = self.loyalty_mut(card);
+        if o.turn != turn {
+            o.turn = turn;
+            o.used = 0;
+            o.extra = 0;
         }
-        let used = o.pw_used;
-        self.objs[card.i()].pw_used = self.exact_inc(used, "loyalty activations this turn");
+        let used = o.used;
+        let used = self.exact_inc(used, "loyalty activations this turn");
+        self.loyalty_mut(card).used = used;
     }
 
     /// The activated abilities `p` may activate with priority now (CR
@@ -949,7 +950,7 @@ impl Game {
                 // CR 702.122a: enough power tapped for crew.
                 Choice::Pass => {
                     crew_done = true;
-                    CardIdx(u32::MAX)
+                    CardIdx::new(0)
                 }
                 other => unreachable!("cost answer {other:?}"),
             };

@@ -345,8 +345,8 @@ impl Game {
             Some(&(_, d)) => d,
             None => crate::game::DamageSource { controller: default_controller, ..self.damage_source_of(r.idx) },
         };
-        let power = match self.objs[r.idx.i()].lki_power {
-            Some((inc, p)) if inc == r.inc => p as crate::num::Wide,
+        let power = match self.lki_power_of(r) {
+            Some(p) => p as crate::num::Wide,
             _ => 0,
         };
         (src, power)

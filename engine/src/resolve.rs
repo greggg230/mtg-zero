@@ -497,8 +497,8 @@ impl Game {
                     // Gone: its power as it last existed on the battlefield
                     // (CR 608.2h; Jacked Rabbit, Ouroboroid: rulings
                     // ef3a8866, b3653e3c).
-                    match self.objs[f.source.idx.i()].lki_power {
-                        Some((inc, p)) if inc == f.source.inc => p as W,
+                    match self.lki_power_of(f.source) {
+                        Some(p) => p as W,
                         _ => self.db.def(f.source_def).power.unwrap_or(0) as W,
                     }
                 }
@@ -519,8 +519,8 @@ impl Game {
             }
             Amount::EventObjPower => match f.ev.obj {
                 Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield => self.power(r.idx),
-                Some(r) => match self.objs[r.idx.i()].lki_power {
-                    Some((inc, p)) if inc == r.inc => p as W,
+                Some(r) => match self.lki_power_of(r) {
+                    Some(p) => p as W,
                     _ => 0,
                 },
                 None => 0,
@@ -544,8 +544,8 @@ impl Game {
             Amount::CostMvPlus(n) => n as W + f.ev.amount as W,
             Amount::ChosenPower => self.chosen_power(f),
             Amount::CostPower => match f.ev.obj {
-                Some(r) => match self.objs[r.idx.i()].lki_power {
-                    Some((inc, p)) if inc == r.inc => p as W,
+                Some(r) => match self.lki_power_of(r) {
+                    Some(p) => p as W,
                     _ => 0,
                 },
                 None => 0,
@@ -912,7 +912,7 @@ impl Game {
                 if rest && set {
                     // "The rest into your graveyard": no choice, canonical order.
                     let mut all = std::mem::take(&mut f.pile);
-                    all.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+                    all.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
                     self.pile_moving = true;
                     for c in all {
                         self.put_from_pile(p, c, dest, reveal);
@@ -922,7 +922,7 @@ impl Game {
                 }
                 let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
                 let mut sorted = f.pile.clone();
-                sorted.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+                sorted.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
                 // The cards that may be picked now (a set is picked in
                 // non-decreasing definition order, so each set once).
                 let eligible: Vec<DefId> = sorted

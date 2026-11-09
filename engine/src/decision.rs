@@ -545,7 +545,7 @@ impl Game {
     /// for a hand of up to 16 cards; ENGINE.md 17).
     pub(crate) fn hand_sorted_in(&self, p: PlayerId) -> SVec<CardIdx, 16> {
         let mut h: SVec<CardIdx, 16> = self.players[p as usize].hand.iter().copied().collect();
-        h.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+        h.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
         h
     }
 
@@ -598,7 +598,7 @@ impl Game {
     /// `p`'s library in canonical order: by definition, then card index.
     pub fn library_sorted(&self, p: PlayerId) -> Vec<CardIdx> {
         let mut l = self.players[p as usize].library.clone();
-        l.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+        l.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
         l
     }
 
@@ -1008,16 +1008,16 @@ impl Game {
             Choice::Pass => "pass".into(),
             Choice::Yes => "yes".into(),
             Choice::Number(n) => format!("{n}"),
-            Choice::Card(i) => format!("{}#{}", self.name(i), i.0),
-            Choice::Play(i) => format!("play {}#{}", self.name(i), i.0),
-            Choice::Cast(i) => format!("cast {}#{}", self.name(i), i.0),
+            Choice::Card(i) => format!("{}#{}", self.name(i), i.get()),
+            Choice::Play(i) => format!("play {}#{}", self.name(i), i.get()),
+            Choice::Cast(i) => format!("cast {}#{}", self.name(i), i.get()),
             Choice::Target(t) => format!("target {}", self.describe_target(t)),
             Choice::Trigger(k) => format!("trigger {k}"),
-            Choice::Ability(i, slot) => format!("activate {}#{} {slot:?}", self.name(i), i.0),
+            Choice::Ability(i, slot) => format!("activate {}#{} {slot:?}", self.name(i), i.get()),
             Choice::Def(d) => format!("a {}", self.db.def(d).name),
-            Choice::CastFace(i) => format!("cast the other face of {}#{}", self.name(i), i.0),
-            Choice::PlayFace(i) => format!("play the other face of {}#{}", self.name(i), i.0),
-            Choice::Faces(i, m) => format!("{}#{} (choose a face, {m:#b})", self.name(i), i.0),
+            Choice::CastFace(i) => format!("cast the other face of {}#{}", self.name(i), i.get()),
+            Choice::PlayFace(i) => format!("play the other face of {}#{}", self.name(i), i.get()),
+            Choice::Faces(i, m) => format!("{}#{} (choose a face, {m:#b})", self.name(i), i.get()),
             Choice::Companion => "put the companion into hand".into(),
             Choice::Page(p) => format!("more (range {}, window {})", p.range, p.window),
         }

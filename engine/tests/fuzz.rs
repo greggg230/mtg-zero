@@ -354,7 +354,7 @@ fn check_determinize_weighted(g: &Game, seed: u64, step: usize, tilt: f64) {
     let mover = g.to_move().unwrap();
     let ids = engine::az::identity::identities(g.db());
     let cards = |g: &Game, p: u8| -> Vec<u16> {
-        let mut v: Vec<u16> = g.objs().iter().enumerate().filter(|(_, o)| o.owner == p).map(|(i, _)| g.ident(engine::CardIdx(i as u32))).collect();
+        let mut v: Vec<u16> = g.objs().iter().enumerate().filter(|(_, o)| o.owner == p).map(|(i, _)| g.ident(engine::CardIdx::new(i as u32))).collect();
         v.sort();
         v
     };
@@ -377,7 +377,7 @@ fn check_determinize_weighted(g: &Game, seed: u64, step: usize, tilt: f64) {
         }
         assert_eq!(g.view_of(viewer), d.view_of(viewer), "{what}: the view changed");
         for (i, o) in g.objs().iter().enumerate() {
-            let c = engine::CardIdx(i as u32);
+            let c = engine::CardIdx::new(i as u32);
             if g.knows(viewer, c) {
                 assert_eq!((o.def, g.ident(c)), (d.obj(c).def, d.ident(c)), "{what}: a known card was dealt again");
             }
@@ -1075,7 +1075,7 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
 ")
         );
         for (i, o) in g.objs().iter().enumerate() {
-            let c = engine::CardIdx(i as u32);
+            let c = engine::CardIdx::new(i as u32);
             if g.knows(viewer, c) {
                 assert_eq!(o.def, d.obj(c).def, "seed {seed}: a card P{viewer} knows was resampled");
                 assert_eq!(g.ident(c), d.ident(c), "seed {seed}: a face-down card P{viewer} knows was resampled");
@@ -1470,7 +1470,7 @@ fn check_hidden_pool(g: &engine::az::MtgAz, d: &engine::az::MtgAz, viewer: u8, s
     assert_eq!(g.g.sideboard_size(o), d.g.sideboard_size(o));
     assert_eq!(g.g.view_of(viewer), d.g.view_of(viewer), "match {seed}: determinize changed the view of P{viewer}");
     for (i, x) in g.g.objs().iter().enumerate() {
-        let c = engine::CardIdx(i as u32);
+        let c = engine::CardIdx::new(i as u32);
         if g.g.knows(viewer, c) {
             assert_eq!((x.def, g.g.ident(c)), (d.g.obj(c).def, d.g.ident(c)), "match {seed}: a card P{viewer} knows was resampled");
         }

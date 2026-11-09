@@ -167,7 +167,7 @@ impl Game {
                 return Flow::Next;
             }
             let mut sorted = pile.clone();
-            sorted.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+            sorted.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
             let mut opts = Vec::new();
             for (k, &c) in sorted.iter().enumerate() {
                 if k > 0 && self.objs[sorted[k - 1].i()].def == self.objs[c.i()].def {
@@ -250,7 +250,7 @@ impl Game {
         // 36.11.)
         let deck = match self.deck_question(p, |d| d.opening.is_some()) {
             Some(known) => known,
-            None => self.objs.iter().enumerate().any(|(i, o)| o.owner == p && self.opening_ok(p, CardIdx(i as u32))),
+            None => self.objs.iter().enumerate().any(|(i, o)| o.owner == p && self.opening_ok(p, CardIdx::new(i as u32))),
         };
         if !deck {
             self.opening_next(p);
@@ -627,7 +627,7 @@ impl Game {
                 // chooser's); the chooser's own deck is theirs to know.
                 let hidden = self.known_pools[q as usize].is_some();
                 let mut defs: Vec<crate::ids::DefId> = (0..self.objs.len())
-                    .map(|i| CardIdx(i as u32))
+                    .map(|i| CardIdx::new(i as u32))
                     .filter(|&c| !self.is_token(c) && !self.is_copy_obj(c) && self.objs[c.i()].zone != Zone::Nowhere)
                     .filter(|&c| self.objs[c.i()].owner == p || !hidden || self.knows(p, c))
                     .map(|c| self.ident_card(c))

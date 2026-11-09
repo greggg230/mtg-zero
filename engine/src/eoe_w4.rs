@@ -263,8 +263,8 @@ impl Game {
         }
         // Gone: as it last existed where it was (a permanent's last known
         // power; a card that left exile, its card's printed power).
-        match o.lki_power {
-            Some((inc, p)) if inc == r.inc => p as crate::num::Wide,
+        match self.lki_power_of(r) {
+            Some(p) => p as crate::num::Wide,
             _ => self.db.def(o.def).power.unwrap_or(0) as crate::num::Wide,
         }
     }

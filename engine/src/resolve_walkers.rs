@@ -86,14 +86,14 @@ impl Game {
             Ext::ExtraLoyaltyActivations { n } => {
                 if let Some(&c) = self.objs_on(f, &On::Source).first() {
                     let turn = self.turn.number as u16;
-                    let o = &mut self.objs[c.i()];
-                    if o.pw_turn != turn {
-                        o.pw_turn = turn;
-                        o.pw_used = 0;
-                        o.pw_extra = 0;
+                    let o = self.loyalty_mut(c);
+                    if o.turn != turn {
+                        o.turn = turn;
+                        o.used = 0;
+                        o.extra = 0;
                     }
                     // (Counted exactly: past `u32::MAX` the game aborts.)
-                    let extra = o.pw_extra as u64 + *n as u64;
+                    let extra = o.extra as u64 + *n as u64;
                     let extra = match u32::try_from(extra) {
                         Ok(v) => v,
                         Err(_) => {
@@ -101,7 +101,7 @@ impl Game {
                             u32::MAX
                         }
                     };
-                    self.objs[c.i()].pw_extra = extra;
+                    self.loyalty_mut(c).extra = extra;
                 }
                 Flow::Next
             }
@@ -301,7 +301,7 @@ impl Game {
                             1 => Some(f.pile[0]),
                             _ => {
                                 let mut sorted = f.pile.clone();
-                                sorted.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+                                sorted.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
                                 let mut opts = Vec::new();
                                 for (k, &c) in sorted.iter().enumerate() {
                                     if k > 0 && self.objs[sorted[k - 1].i()].def == self.objs[c.i()].def {

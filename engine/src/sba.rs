@@ -198,7 +198,7 @@ impl Game {
     /// The slots that may be tokens or copies (from the first one made;
     /// cards are never tokens).
     fn token_range(&self) -> impl Iterator<Item = CardIdx> {
-        (self.first_token as usize..self.objs.len()).map(|i| CardIdx(i as u32))
+        (self.first_token as usize..self.objs.len()).map(|i| CardIdx::new(i as u32))
     }
 
     fn stray_token(&self, c: CardIdx) -> bool {

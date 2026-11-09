@@ -70,7 +70,7 @@ pub(crate) struct Src {
 impl Default for Src {
     /// (A filler for inline storage, never a real source.)
     fn default() -> Src {
-        Src { card: CardIdx(0), slot: AbilitySlot::Spell }
+        Src { card: CardIdx::new(0), slot: AbilitySlot::Spell }
     }
 }
 

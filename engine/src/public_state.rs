@@ -163,6 +163,8 @@ pub fn fields() -> Vec<Field> {
         lki_attached: Derived "last known information (CR 608.2h)",
         lki_damage: Derived "last known information (CR 608.2h)",
         lki_toughness: Derived "last known information (CR 608.2h)",
+        lki_power: Derived "last known information (CR 608.2h)",
+        loyalty: Public "loyalty abilities activated this turn (CR 606.3)",
         pool_restr: Public "the part of a pool's mana with a spending restriction other than the Workshop's (CR 106.6; ENGINE.md 99.12)",
         moon_game: Derived "fast path: a card of the game says nonbasic lands are Mountains",
         lands_entered: Public "the lands that entered the battlefield under each player's control this turn (Bioengineered Future; ENGINE.md 99.12)",
@@ -256,16 +258,12 @@ pub fn fields() -> Vec<Field> {
         known: Public "which players know a hidden card: who knows is public (a look, a reveal, a put-back, a shuffle are seen; ENGINE.md 72), what it is is not (leak-tested, ENGINE.md 10)",
         attached: Public "what it is attached to (CR 301.5, 303.4)",
         evoked: Public "it entered evoked (CR 702.74a)",
-        lki_power: Derived "last known information (CR 608.2h)",
         flashback: Public "a spell cast with flashback: exiled when it leaves the stack (CR 702.34a)",
         escaped: Public "it entered as a spell cast with escape (CR 702.138c)",
         chosen_player: Public "the player chosen as it entered (CR 614.12)",
         monstrous: Public "CR 701.37b",
         attacks: Public "what it attacks (a planeswalker, CR 506.3)",
         entered: Public "the turn it entered (\"entered this turn\")",
-        pw_turn: Public "loyalty abilities activated this turn (CR 606.3)",
-        pw_used: Public "loyalty abilities activated this turn (CR 606.3)",
-        pw_extra: Derived "how many more loyalty abilities it may activate this turn (Comet): read through pw_used's readiness",
         flips: Derived "a wrapping count of transformations, for CR 701.27f's check",
     });
     classify!(v, Turn {
@@ -1390,25 +1388,27 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.objs[c.i()].entered = t;
             Some(a.g.name(c).to_string())
         }),
-        p!("a planeswalker's loyalty ability was activated this turn", "Obj.pw_used", |a, r| {
+        p!("a planeswalker's loyalty ability was activated this turn", "Game.loyalty", |a, r| {
             let t = a.g.turn.number as u16;
             let cs: Vec<CardIdx> = slots(&a.g)
                 .into_iter()
-                .filter(|&c| a.g.is_type(c, types::PLANESWALKER) && !(a.g.objs[c.i()].pw_turn == t && a.g.objs[c.i()].pw_used > 0))
+                .filter(|&c| a.g.is_type(c, types::PLANESWALKER) && !(a.g.loyalty_of(c).turn == t && a.g.loyalty_of(c).used > 0))
                 .collect();
             let c = pick(&cs, r)?;
-            let o = &mut a.g.objs[c.i()];
-            o.pw_turn = t;
-            o.pw_used = 1;
+            let o = a.g.loyalty_mut(c);
+            o.turn = t;
+            o.used = 1;
             Some(a.g.name(c).to_string())
         }),
-        p!("a planeswalker's activations are another turn's", "Obj.pw_turn", |a, r| {
+        p!("a planeswalker's activations are another turn's", "Game.loyalty", |a, r| {
             let t = a.g.turn.number as u16;
-            let cs: Vec<CardIdx> =
-                slots(&a.g).into_iter().filter(|&c| a.g.is_type(c, types::PLANESWALKER) && a.g.objs[c.i()].pw_turn == t && a.g.objs[c.i()].pw_used > 0).collect();
+            let cs: Vec<CardIdx> = slots(&a.g)
+                .into_iter()
+                .filter(|&c| a.g.is_type(c, types::PLANESWALKER) && a.g.loyalty_of(c).turn == t && a.g.loyalty_of(c).used > 0)
+                .collect();
             let c = pick(&cs, r)?;
             // (Another turn: the previous one, or the next before the first.)
-            a.g.objs[c.i()].pw_turn = if t == 0 { 1 } else { t - 1 };
+            a.g.loyalty_mut(c).turn = if t == 0 { 1 } else { t - 1 };
             Some(a.g.name(c).to_string())
         }),
         // ---- StackItem ----

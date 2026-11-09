@@ -193,7 +193,7 @@ fn mayhem_lasts_for_the_turn_the_card_was_discarded() {
     let loot = g.card(0, "Faithless Looting", Zone::Hand);
     g.choose(Choice::Cast(loot));
     pay(&mut g);
-    let bear = g.objs().iter().enumerate().find(|(_, o)| o.zone == Zone::Library && db().def(o.def).name == "Test Bear").map(|(i, _)| CardIdx(i as u32)).unwrap();
+    let bear = g.objs().iter().enumerate().find(|(_, o)| o.zone == Zone::Library && db().def(o.def).name == "Test Bear").map(|(i, _)| CardIdx::new(i as u32)).unwrap();
     resolve_with(&mut g, |g| match g.kind() {
         Some(DecisionKind::Discard) => g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&c| c == Choice::Card(bear)).or(Some(g.pending_decision().unwrap().options[0].choice)),
         _ => None,
