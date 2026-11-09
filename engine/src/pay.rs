@@ -2327,7 +2327,7 @@ impl Game {
         }
         for &(src, _) in &pm.multi {
             if let AbilitySlot::Activated(_) = src.slot {
-                if let Some(m) = self.source_def(src.card).activated_def(src.slot).mana() {
+                if let Some(m) = self.src_ability(src.card, src.slot).mana() {
                     self.check_counter_mana(src.card, &m.prod);
                 }
             }

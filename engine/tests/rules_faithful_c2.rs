@@ -124,7 +124,7 @@ fn bf(g: &Game, p: PlayerId, name: &str) -> CardIdx {
 }
 
 fn gy(g: &Game, p: PlayerId, name: &str) -> Vec<CardIdx> {
-    let mut v: Vec<CardIdx> = (0..g.objs().len() as u16).map(CardIdx).filter(|&c| g.obj(c).owner == p && g.obj(c).zone == Zone::Graveyard && g.name(c) == name).collect();
+    let mut v: Vec<CardIdx> = (0..g.objs().len() as u32).map(CardIdx::new).filter(|&c| g.obj(c).owner == p && g.obj(c).zone == Zone::Graveyard && g.name(c) == name).collect();
     v.sort();
     v
 }
