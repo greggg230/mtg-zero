@@ -1219,6 +1219,13 @@ fn public_state_reaches_the_encoding() {
     let pos = gate_positions(scale(60) as usize, 59);
     let ps = perturbations();
     let lim = limits();
+    // Each perturbation draws from a random stream of its own, keyed by its
+    // name (ENGINE.md 100.5.1: with one shared stream a new perturbation
+    // shifted every later one's picks, and what the gate found depended on
+    // the perturbations before it). `GATE_SEED=n`: other streams.
+    let seed: u64 = std::env::var("GATE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(5959);
+    let fnv = |name: &str| name.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
+    let mut rngs: Vec<Rng> = ps.iter().map(|p| Rng::new(seed ^ fnv(p.name))).collect();
     #[derive(Default)]
     struct Tally {
         applied: usize,
@@ -1227,13 +1234,12 @@ fn public_state_reaches_the_encoding() {
         example: Option<String>,
     }
     let mut t: Vec<Tally> = ps.iter().map(|_| Tally::default()).collect();
-    let mut rng = Rng::new(5959);
     for (spec, a) in &pos {
         let base_enc = [enc(a, 0), enc(a, 1)];
         let base_view = [public_view(a, 0), public_view(a, 1)];
         for (k, p) in ps.iter().enumerate() {
             let mut b = a.clone();
-            let Some(what) = (p.apply)(&mut b, &mut rng) else { continue };
+            let Some(what) = (p.apply)(&mut b, &mut rngs[k]) else { continue };
             t[k].applied += 1;
             for v in 0..2 {
                 if public_view(&b, v as u8) == base_view[v] {
@@ -2035,13 +2041,16 @@ fn the_v5_facts_encode_no_hidden_information() {
     // (and layout v6's, ENGINE.md 100.5)
     let fixed: Vec<_> = ps.iter().filter(|p| V5_FIXED.contains(&p.name) || V6_FIXED.contains(&p.name)).collect();
     assert_eq!(fixed.len(), V5_FIXED.len() + V6_FIXED.len());
-    let mut rng = Rng::new(60);
+    // (A stream of its own for each perturbation, as the gate's: ENGINE.md
+    // 100.5.1.)
+    let fnv = |name: &str| name.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
+    let mut rngs: Vec<Rng> = fixed.iter().map(|p| Rng::new(60 ^ fnv(p.name))).collect();
     let mut zr = zero_search::rng::Rng::new(60);
     let (mut worlds, mut applied) = (0, 0);
     for (spec, a) in gate_positions(scale(24) as usize, 61) {
-        for p in &fixed {
+        for (k, p) in fixed.iter().enumerate() {
             let mut b = a.clone();
-            let Some(what) = (p.apply)(&mut b, &mut rng) else { continue };
+            let Some(what) = (p.apply)(&mut b, &mut rngs[k]) else { continue };
             applied += 1;
             // (Worlds compared with each other: a change made by hand can
             // leave the other player's pending decision stale, and every world
