@@ -23,6 +23,25 @@ pub(crate) fn counter_then_if_spent_below_mv(l: &mut Lowerer, b: &mut Builder, t
     b.patch(end);
 }
 
+/// Modular's triggered ability (CR 702.43a): "When this permanent is put
+/// into a graveyard from the battlefield, you may put a +1/+1 counter on
+/// target artifact creature for each +1/+1 counter on this permanent" (the
+/// counters it had as it left, CR 608.2h, 122.8; whatever its card types
+/// then, Power Depot's ruling). One per instance (702.43b).
+pub(crate) fn modular_trigger() -> crate::db::TriggerDef {
+    use crate::db::{types, EventKind, Filter, Slot, TrigPred};
+    let mut b = Builder::default();
+    let t = b.target(Filter::And(Box::new(Filter::Type(types::ARTIFACT)), Box::new(Filter::Type(types::CREATURE))), 1, 1);
+    let may = b.op(Op::May { who: crate::program::Who::You, skip: 0 });
+    b.op(Op::Ext(Ext::PutCounters {
+        on: crate::program::On::Target(t),
+        counter: crate::db::Counter::P1P1,
+        n: crate::program::Amount::SourceCounters(crate::db::Counter::P1P1),
+    }));
+    b.patch(may);
+    crate::db::TriggerDef { event: EventKind::Dies, pred: TrigPred::IsSelf(Slot::Default), ability: b.finish(), uses_event: false }
+}
+
 /// A replacement effect of a static ability (CR 614.1a) that W6 lowers into
 /// `repl`; `false` if it is not one of these (the caller goes on).
 pub(crate) fn lower_replacement_w6(

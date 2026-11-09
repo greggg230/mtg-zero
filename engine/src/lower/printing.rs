@@ -475,6 +475,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     let mut cascade_kw_ascend = false;
     let mut annihilator: Option<u8> = None;
     let mut devoid = false;
+    let mut modular: u8 = 0;
     for k in keywords {
         match lower_keyword_full(l, k) {
             Some(KwOrProt::Kw(kw)) => kws.insert(kw),
@@ -487,6 +488,10 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             Some(KwOrProt::Ascend) => cascade_kw_ascend = true,
             Some(KwOrProt::Annihilator(n)) => annihilator = Some(n),
             Some(KwOrProt::Devoid) => devoid = true,
+            Some(KwOrProt::Modular(n)) => {
+                modular = modular.saturating_add(n);
+                keyword_triggers.push(super::eoe_w6::modular_trigger());
+            }
             None => {}
         }
     }
@@ -1485,6 +1490,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         let k = super::effect_ext::counter_by_name(l, name);
         enters_counters.push((k, l.int("CardPrinting.enters_with_named_counters", *n, 1, 99) as u8));
     }
+    // Modular n: "This permanent enters with n +1/+1 counters on it" (CR
+    // 702.43a; several instances add up, 702.43b).
+    if modular > 0 {
+        enters_counters.push((crate::db::Counter::P1P1, modular));
+    }
 
     l.land_colors = saved_land_colors;
     l.spell_x = saved_spell_x;
@@ -2320,6 +2330,8 @@ pub(crate) enum KwOrProt {
     Annihilator(u8),
     /// Devoid (CR 702.114a): the card has no colour.
     Devoid,
+    /// Modular n (CR 702.43a; EoE W6).
+    Modular(u8),
 }
 
 pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<KwOrProt> {
@@ -2390,6 +2402,10 @@ pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<K
         K::Annihilator => {
             l.deny("Keyword.quality", quality);
             return Some(KwOrProt::Annihilator(l.int("Keyword.n", *n, 1, 20) as u8));
+        }
+        K::Modular => {
+            l.deny("Keyword.quality", quality);
+            return Some(KwOrProt::Modular(l.int("Keyword.n", *n, 1, 20) as u8));
         }
         _ => {}
     }

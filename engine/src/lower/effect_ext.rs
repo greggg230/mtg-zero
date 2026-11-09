@@ -39,7 +39,8 @@ pub(crate) fn keyword_mods(l: &mut Lowerer, kws: &[cats::Keyword]) -> Vec<Mod> {
                 | super::printing::KwOrProt::Cascade
                 | super::printing::KwOrProt::Ascend
                 | super::printing::KwOrProt::Annihilator(_)
-                | super::printing::KwOrProt::Devoid,
+                | super::printing::KwOrProt::Devoid
+                | super::printing::KwOrProt::Modular(_),
             ) => {
                 l.unsupported("Keyword(granted trigger)")
             }
