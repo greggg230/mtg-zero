@@ -512,3 +512,38 @@ fn seasoned_pyromancer_from_the_graveyard_makes_two_elementals() {
     assert_eq!(g.obj(p).zone, Zone::Exile);
     assert_eq!(tokens_named(&g, "Elemental").len(), 2);
 }
+
+/// Fourteen Fanatics of Rhonas in the graveyard: each card's eternalize is
+/// an option at priority (CR 602.2: an activated ability of a card in a
+/// graveyard may be activated). The first 11 are `GY_ABILITY` + 0..=10 and
+/// `GY_ABILITY` + 11 is "next page"; the page after holds the other three at
+/// + 0..=2 (ENGINE.md 100.2; before it the 13th and later were not offered,
+/// docs/shortcuts.md 27.13.5). The 14th is eternalized.
+#[test]
+fn cr_602_2_every_graveyard_ability_is_offered_past_the_12_ids() {
+    let mut g = scen().battlefield(0, &["Forest"; 4]).graveyard(0, &[FANATIC; 14]).start();
+    let fans: Vec<CardIdx> = g.player(0).graveyard.clone();
+    let gy_opts = |g: &Game| -> Vec<(u16, Choice)> {
+        g.pending_decision()
+            .unwrap()
+            .options
+            .iter()
+            .filter(|o| (act::GY_ABILITY..act::GY_ABILITY + act::GY_ABILITY_N).contains(&o.action))
+            .map(|o| (o.action, o.choice))
+            .collect()
+    };
+    let first = gy_opts(&g);
+    assert_eq!(first.len(), 12);
+    for (k, &(a, c)) in first[..11].iter().enumerate() {
+        assert_eq!((a, c), (act::GY_ABILITY + k as u16, Choice::Ability(fans[k], AbilitySlot::Graveyard(0))));
+    }
+    assert!(matches!(first[11], (a, Choice::Page(_)) if a == act::GY_ABILITY + 11));
+    g.choose(first[11].1);
+    assert_eq!(g.kind(), Some(DecisionKind::Priority));
+    let page: Vec<(u16, Choice)> = g.pending_decision().unwrap().options.iter().map(|o| (o.action, o.choice)).collect();
+    let want: Vec<(u16, Choice)> = (11..14).map(|k| (act::GY_ABILITY + k as u16 - 11, Choice::Ability(fans[k], AbilitySlot::Graveyard(0)))).collect();
+    assert_eq!(page, want, "the range page holds the rest alone");
+    g.choose(Choice::Ability(fans[13], AbilitySlot::Graveyard(0)));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(fans[13]).zone, Zone::Exile, "the 14th exiled as its cost");
+}

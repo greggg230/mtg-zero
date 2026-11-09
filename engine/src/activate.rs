@@ -144,6 +144,7 @@ impl Game {
         slots: &[(u16, CardIdx)],
         sorcery_ok: bool,
         out: &mut Vec<Opt>,
+        gy: &mut Vec<(u32, Choice)>,
     ) {
         // (The battlefield's activation locks, read once.)
         let locks = self.activation_locks();
@@ -176,19 +177,17 @@ impl Game {
             }
         }
         // Abilities of cards in the player's graveyard (CR 602.2; ENGINE.md
-        // 27.5): `GY_ABILITY` + k for the k-th card there that has one (one
-        // each, the lowering checks).
-        let mut k = 0u16;
+        // 27.5): position k of the `GY_ABILITY` range for the k-th card
+        // there that has one (one each, the lowering checks), every one
+        // (paged past the 12 ids, ENGINE.md 100.2).
+        let mut k = 0u32;
         for c in self.graveyard_cards(p) {
             let d = self.def_of(c);
             let Some(ad) = d.gy_abilities.first() else { continue };
-            if k >= act::GY_ABILITY_N {
-                break;
-            }
-            let action = act::GY_ABILITY + k;
+            let pos = k;
             k += 1;
             if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
-                out.push(Opt { action, choice: Choice::Ability(c, AbilitySlot::Graveyard(0)) });
+                gy.push((pos, Choice::Ability(c, AbilitySlot::Graveyard(0))));
             }
         }
     }

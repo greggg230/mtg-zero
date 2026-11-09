@@ -255,7 +255,7 @@ impl Game {
         if keep.is_empty() && !self.sba_possible() {
             if !self.waiting.is_empty() {
                 self.agenda.push(Task::SbaCheck { keep });
-                self.agenda.push(Task::PutTriggers);
+                self.agenda.push(Task::PutTriggers { page: crate::decision::Page::FIRST });
             }
             return;
         }
@@ -276,7 +276,7 @@ impl Game {
         }
         if !self.waiting.is_empty() {
             self.agenda.push(Task::SbaCheck { keep: Vec::new() });
-            self.agenda.push(Task::PutTriggers);
+            self.agenda.push(Task::PutTriggers { page: crate::decision::Page::FIRST });
         } else if did {
             self.agenda.push(Task::SbaCheck { keep: Vec::new() });
         }

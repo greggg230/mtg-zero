@@ -717,7 +717,7 @@ fn cost_floats(x: &mut [f32], c: &crate::mana::ManaCost) {
 /// Kinds of the asking task (context block).
 fn task_code(t: &Task) -> usize {
     match t {
-        Task::PriorityAsk => 0,
+        Task::PriorityAsk { .. } => 0,
         Task::MulliganDeclare { .. } => 1,
         Task::MulliganBottom { .. } => 2,
         Task::DeclareAttackers { .. } => 3,
@@ -727,7 +727,7 @@ fn task_code(t: &Task) -> usize {
         Task::ChooseTargets { .. } => 7,
         Task::PayMana(_) => 8,
         Task::Run(_) => 9,
-        Task::PutTriggers => 10,
+        Task::PutTriggers { .. } => 10,
         Task::SbaCheck { .. } => 11,
         Task::PayCosts { .. } | Task::ManaNowCosts { .. } | Task::Emerge { .. } => 12,
         Task::CastOption { .. } => 13,

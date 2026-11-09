@@ -8,6 +8,10 @@ use crate::ids::{CardIdx, ObjRef, PlayerId, Target, Zone};
 use crate::pay::PayMana;
 use crate::svec::SVec;
 
+/// `Game::priority_options`: the options that never page, the `EXILE`
+/// range's items and the `GY_ABILITY` range's (by position).
+pub(crate) type PriorityOptions = (Vec<Opt>, Vec<(u32, Choice)>, Vec<(u32, Choice)>);
+
 /// Who is asking whether a filter matches: the spell or ability's
 /// controller ("you") and source ("this", "another").
 #[derive(Clone, Copy, Debug)]
@@ -170,28 +174,34 @@ impl Game {
 
     // ---- priority options (CR 117.1, 116.2a, 307.1, 602.2) ----------------
 
-    pub(crate) fn priority_options(&self, p: PlayerId) -> Vec<Opt> {
-        let mut opts = self.priority_options_all(p);
+    /// `p`'s priority options (CR 117.1): the options that never page, and
+    /// the `EXILE` and `GY_ABILITY` ranges' items by position (the k-th
+    /// exiled card `p` may play, the k-th graveyard card with a graveyard
+    /// ability: `Game::ask_paged_ranges`, ENGINE.md 100.2).
+    pub(crate) fn priority_options(&self, p: PlayerId) -> PriorityOptions {
+        let (mut opts, mut exile, gy) = self.priority_options_all(p);
         // "Each player can't cast more than one spell each turn" (Archon of
         // Emeria); "your opponents can't cast spells during your turn"
         // (Jennifer Walters): only lands and abilities are left. (Checked
         // only when a spell could be cast.)
-        let casts = |o: &Opt| matches!(o.choice, Choice::Cast(_) | Choice::CastFace(_) | Choice::Faces(..));
-        if opts.iter().any(casts) && !self.may_cast_spells(p) {
+        let casts = |c: Choice| matches!(c, Choice::Cast(_) | Choice::CastFace(_) | Choice::Faces(..));
+        if (opts.iter().any(|o| casts(o.choice)) || exile.iter().any(|&(_, c)| casts(c))) && !self.may_cast_spells(p) {
             use crate::decision::{FACE_PLAY, OTHER_PLAY};
-            opts.retain_mut(|o| match o.choice {
+            let keep = |c: &mut Choice| match *c {
                 Choice::Cast(_) | Choice::CastFace(_) => false,
-                Choice::Faces(c, m) => match crate::faces::face_choice(c, m & (FACE_PLAY | OTHER_PLAY)) {
+                Choice::Faces(card, m) => match crate::faces::face_choice(card, m & (FACE_PLAY | OTHER_PLAY)) {
                     Some(ch) => {
-                        o.choice = ch;
+                        *c = ch;
                         true
                     }
                     None => false,
                 },
                 _ => true,
-            });
+            };
+            opts.retain_mut(|o| keep(&mut o.choice));
+            exile.retain_mut(|(_, c)| keep(c));
         }
-        opts
+        (opts, exile, gy)
     }
 
     /// May `p` cast spells now at all ("each player can't cast more than one
@@ -218,7 +228,7 @@ impl Game {
         a
     }
 
-    fn priority_options_all(&self, p: PlayerId) -> Vec<Opt> {
+    fn priority_options_all(&self, p: PlayerId) -> PriorityOptions {
         use crate::decision::{FACE_CAST, FACE_PLAY};
         // (Room for the usual options without growing.)
         let mut opts = Vec::with_capacity(16);
@@ -251,16 +261,17 @@ impl Game {
                 opts.push(Opt { action, choice });
             }
         }
-        self.other_zone_options(p, &classes, sorcery_ok, land_ok, &mut opts);
+        let (mut exile, mut gy) = (Vec::new(), Vec::new());
+        self.other_zone_options(p, &classes, sorcery_ok, land_ok, &mut opts, &mut exile);
         if self.seen & crate::game::SEEN_TOP != 0 {
             self.top_options(p, &classes, sorcery_ok, land_ok, &mut opts);
         }
-        self.activation_options(p, &classes, &slots, sorcery_ok, &mut opts);
+        self.activation_options(p, &classes, &slots, sorcery_ok, &mut opts, &mut gy);
         // The companion special action (CR 116.2g; ENGINE.md 35).
         if let Some(o) = self.companion_option(p, sorcery_ok, &classes) {
             opts.push(o);
         }
-        opts
+        (opts, exile, gy)
     }
 
     /// Can `p` cast card `c` from their hand now (timing, the cost with its
@@ -1394,12 +1405,21 @@ impl Game {
         self.players[p as usize].gy_play_turn == self.turn.number && self.turn.number > 0
     }
 
-    /// Priority options for cards in exile with a permission (`EXILE`
-    /// slots) and in the graveyard (`GRAVEYARD` slots): lands to play,
-    /// spells to cast.
-    fn other_zone_options(&self, p: PlayerId, classes: &[crate::pay::Class], sorcery_ok: bool, land_ok: bool, opts: &mut Vec<Opt>) {
+    /// Priority options for cards in exile with a permission (`exile`: the
+    /// k-th such card's option at position k of the `EXILE` range, every
+    /// one, paged past the 32 ids, ENGINE.md 100.2) and in the graveyard
+    /// (`GRAVEYARD` slots): lands to play, spells to cast.
+    fn other_zone_options(
+        &self,
+        p: PlayerId,
+        classes: &[crate::pay::Class],
+        sorcery_ok: bool,
+        land_ok: bool,
+        opts: &mut Vec<Opt>,
+        exile: &mut Vec<(u32, Choice)>,
+    ) {
         use crate::decision::{FACE_CAST, FACE_PLAY};
-        let mut k = 0u16;
+        let mut k = 0u32;
         // (Cards exiled face down that a permission lets `p` play follow the
         // face-up ones: Headliner Scarlett.)
         for &c in self.exile.iter().chain(self.face_down.iter()) {
@@ -1416,10 +1436,7 @@ impl Game {
                 Some(crate::game::PermKind::Prepared { .. }) => true,
                 _ => continue,
             };
-            if k >= act::EXILE_N {
-                break;
-            }
-            let action = act::EXILE + k;
+            let pos = k;
             k += 1;
             let front = if self.def_of(c).halves.is_some() {
                 self.split_left_options(p, c, sorcery_ok, classes)
@@ -1436,7 +1453,7 @@ impl Game {
             };
             let other = if self.def_of(c).other_face().is_some() { self.other_face_options(p, c, sorcery_ok, land_ok && !cast_only, classes) } else { 0 };
             if let Some(choice) = crate::faces::face_choice(c, front | other) {
-                opts.push(Opt { action, choice });
+                exile.push((pos, choice));
             }
         }
         let mut esc = None;

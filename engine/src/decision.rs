@@ -236,7 +236,7 @@ pub enum Choice {
     Cast(CardIdx),
     Target(Target),
     /// Index into the decider's waiting triggers.
-    Trigger(u8),
+    Trigger(u32),
     /// Activate this ability of this card (priority; a mana source while
     /// paying).
     Ability(CardIdx, AbilitySlot),
@@ -1131,7 +1131,7 @@ pub(crate) mod tests {
                     assert_eq!(d.stage, Stage::One);
                     let mut plain = game(false);
                     plain.pending = None;
-                    plain.ask(Task::PriorityAsk, 0, DecisionKind::Target, want.clone());
+                    plain.ask(Task::PriorityAsk { page: Page::FIRST }, 0, DecisionKind::Target, want.clone());
                     assert_eq!(plain.pending.as_ref(), Some(d), "the same decision as ask's");
                     let seqs = sequences(&g);
                     assert!(seqs.iter().all(|(_, path)| path.len() == 1), "one decision each");
@@ -1584,5 +1584,50 @@ pub(crate) mod tests {
         check(&g, with(&[(ctx::DIGIT, 1.0 / 8.0), (ctx::PREFIX, squash(((3u64 << 25) | ((1 << 25) - 1)) as f32 / 32.0))]), "the last digit");
         pick(&mut g, act::NUMBER);
         check(&g, zero.clone(), "priority again");
+    }
+
+    /// Thirty-four Lightning Bolts in exile that P0 may play ("its owner may
+    /// play it for as long as it stays exiled", `PermKind::Taxed(0)`): each
+    /// is a priority option (CR 601.2, 117.1a: cast with its permission).
+    /// The first page offers the first 31 at `EXILE` + 0..=30 and "next page"
+    /// at `EXILE` + 31 with the other options; the range page the other 3 at
+    /// `EXILE` + 0..=2 alone (ENGINE.md 100.2; before it, the first 32 only,
+    /// docs/shortcuts.md 58.4). A refresh asks the same page.
+    #[test]
+    fn cr_601_2_every_exiled_card_a_player_may_cast_is_offered_at_priority() {
+        let mut g = Scenario::new(CardDb::cube())
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Island"; 5])
+            .library(1, &["Island"; 5])
+            .exile(0, &["Lightning Bolt"; 34])
+            .pool(0, [0, 0, 0, 1, 0, 0], 0)
+            .at(Step::Main1, 0)
+            .start();
+        let bolts = g.exile.clone();
+        for &c in &bolts {
+            let card = g.obj_ref(c);
+            g.permissions.push(crate::game::Permission { card, player: 0, turn: None, kind: crate::game::PermKind::Taxed(0) });
+        }
+        g.refresh_pending();
+        let exile_opts = |g: &Game| -> Vec<(u16, Choice)> {
+            g.pending.as_ref().unwrap().options.iter().filter(|o| (act::EXILE..act::EXILE + act::EXILE_N).contains(&o.action)).map(|o| (o.action, o.choice)).collect()
+        };
+        let first = exile_opts(&g);
+        assert_eq!(first.len(), 32);
+        for (k, &(a, c)) in first[..31].iter().enumerate() {
+            assert_eq!((a, c), (act::EXILE + k as u16, Choice::Cast(bolts[k])));
+        }
+        let Choice::Page(next) = first[31].1 else { panic!("{:?}", first[31]) };
+        assert!(g.pending.as_ref().unwrap().options.iter().any(|o| o.choice == Choice::Pass), "the first page has the other options");
+        pick(&mut g, act::EXILE + 31);
+        assert_eq!(g.kind(), Some(DecisionKind::Priority));
+        assert_eq!(g.pending.as_ref().unwrap().stage, Stage::Paged { window: next.window });
+        let page: Vec<(u16, Choice)> = g.pending.as_ref().unwrap().options.iter().map(|o| (o.action, o.choice)).collect();
+        assert_eq!(page, (31..34).map(|k| (act::EXILE + k as u16 - 31, Choice::Cast(bolts[k]))).collect::<Vec<_>>());
+        let mut r = g.clone();
+        r.refresh_pending();
+        assert_eq!(r.pending, g.pending, "a refresh asks the same page");
+        pick(&mut g, act::EXILE + 2);
+        assert_eq!(g.objs[bolts[33].i()].zone, crate::ids::Zone::Stack, "the 34th is cast");
     }
 }

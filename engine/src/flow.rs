@@ -36,11 +36,13 @@ pub(crate) enum Task {
     /// Before priority: SBAs and triggers until stable (CR 117.5), then ask.
     Priority,
     SbaCheck { keep: Vec<CardIdx> },
-    PutTriggers,
+    /// (`page`: the page of the order decision, ENGINE.md 100.2.)
+    PutTriggers { page: crate::decision::Page },
     /// Miracle (CR 702.94a): may `p` reveal `card`, the first card they drew
     /// this turn? (Asked before the next priority.)
     MiracleReveal { p: PlayerId, card: CardIdx },
-    PriorityAsk,
+    /// (`page`: the page of the priority decision, ENGINE.md 100.2.)
+    PriorityAsk { page: crate::decision::Page },
     // combat (CR 508-510)
     DeclareAttackers { next: u8 },
     DeclareBlockers { i: u8 },
@@ -272,13 +274,13 @@ impl Game {
             Task::BeginStep => self.begin_step(),
             Task::NextStep => self.next_step(),
             Task::Priority => {
-                self.agenda.push(Task::PriorityAsk);
+                self.agenda.push(Task::PriorityAsk { page: crate::decision::Page::FIRST });
                 self.agenda.push(Task::SbaCheck { keep: Vec::new() });
             }
             Task::SbaCheck { keep } => self.sba_check(keep),
             Task::MiracleReveal { p, card } => self.miracle_reveal(p, card),
-            Task::PutTriggers => self.put_triggers(),
-            Task::PriorityAsk => self.priority_ask(),
+            Task::PutTriggers { page } => self.put_triggers(page),
+            Task::PriorityAsk { page } => self.priority_ask(page),
             Task::DeclareAttackers { next } => self.declare_attackers(next),
             Task::DeclareBlockers { i } => self.declare_blockers(i),
             Task::CombatDamage { first, att } => self.combat_damage(first, att),
@@ -692,7 +694,7 @@ impl Game {
 
     // ---- priority (CR 117) -------------------------------------------------
 
-    fn priority_ask(&mut self) {
+    fn priority_ask(&mut self, page: crate::decision::Page) {
         let p = self.turn.priority;
         match self.answer.take() {
             None => {
@@ -705,9 +707,16 @@ impl Game {
                 if self.seen & crate::game::SEEN_TOP != 0 {
                     let _ = self.look_tops();
                 }
-                let opts = self.priority_options(p);
-                self.ask(Task::PriorityAsk, p, DecisionKind::Priority, opts);
+                // (Exiled cards to play and graveyard abilities: every one,
+                // paged past their ids, ENGINE.md 100.2.)
+                let (opts, exile, gy) = self.priority_options(p);
+                let ranges = [
+                    crate::decision::PagedRange { base: act::EXILE, n: act::EXILE_N, items: &exile },
+                    crate::decision::PagedRange { base: act::GY_ABILITY, n: act::GY_ABILITY_N, items: &gy },
+                ];
+                self.ask_paged_ranges(Task::PriorityAsk { page }, page, p, DecisionKind::Priority, &ranges, opts);
             }
+            Some(Choice::Page(next)) => self.agenda.push(Task::PriorityAsk { page: next }),
             Some(Choice::Pass) => {
                 self.turn.passes += 1;
                 if self.turn.passes >= 2 {
