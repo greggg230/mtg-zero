@@ -20,13 +20,35 @@ pub const COLORS: ManaMask = 0b1_1111;
 pub const TYPES: ManaMask = 0b11_1111;
 
 /// A unit made in this payment by a mana ability with a mana cost of its
-/// own (Sunken Ruins; ENGINE.md 18): such mana never pays such a cost, so
-/// no ability pays for itself.
+/// own (Sunken Ruins; ENGINE.md 18), its tag's chain id the ability's
+/// (`chain`): it pays such a cost only of an ability activated after its
+/// own (`fits`), so no ability pays for itself.
 pub const MADE: ManaMask = 1 << 6;
 
-/// A need of a payment that `MADE` units can't pay: the mana cost of a
-/// mana ability activated within the payment (CR 605.3a, 602.2b).
+/// A need of a payment that a `MADE` unit pays only when its ability was
+/// activated first: the mana cost of a mana ability activated within the
+/// payment (CR 605.3a, 602.2b), its tag's chain id that ability's.
 pub const NOT_MADE: ManaMask = 1 << 7;
+
+/// Where a tag's chain id starts (`chain`).
+const CHAIN_SHIFT: u32 = 16;
+
+/// The chain id of a tag (`Tag` bits 16-63): of a `MADE` unit, the mana
+/// ability with a mana cost that made it; of a `NOT_MADE` need, the one
+/// whose cost it is (ENGINE.md 100.4.7, docs/shortcuts.md 13.15; 0 for
+/// none). Ids name the payment's activations of such abilities
+/// (`pay::chain_id`); `payable_iter` tries their orders, relabelling the
+/// ids by rank.
+#[inline]
+pub fn chain(t: Tag) -> u64 {
+    t >> CHAIN_SHIFT
+}
+
+/// `t` with chain id `id`.
+#[inline]
+pub fn with_chain(t: Tag, id: u64) -> Tag {
+    (t & ((1 << CHAIN_SHIFT) - 1)) | id << CHAIN_SHIFT
+}
 
 /// On a unit (never on a need, where the bit is `NOT_MADE`): mana with a
 /// spending restriction (CR 106.6: Mishra's Workshop's "only to cast
@@ -38,12 +60,13 @@ pub const RESTRICTED: ManaMask = 1 << 7;
 /// A unit's or a need's tag in the feasibility searches (ENGINE.md 100.4.5,
 /// docs/shortcuts.md N21): bits 0-7 a `ManaMask` (the types, `MADE`, and
 /// `NOT_MADE` on a need or `RESTRICTED` on a unit), bits 8-15 spending
-/// purposes (`purposes`). On a unit they are its restriction (CR 106.6: the
-/// `SPEND_*` purposes of its mana, 0 for none; `FOR_COST` for a creature
-/// tapped for convoke); on a need, what paying it is (the payment's
-/// `Keep::allow` and `FOR_COST` for the cost being paid, `Game::ability_allow`
-/// of the ability for a mana ability's own cost).
-pub type Tag = u32;
+/// purposes (`purposes`), bits 16-63 a chain id (`chain`). On a unit they
+/// are its restriction (CR 106.6: the `SPEND_*` purposes of its mana, 0 for
+/// none; `FOR_COST` for a creature tapped for convoke); on a need, what
+/// paying it is (the payment's `Keep::allow` and `FOR_COST` for the cost
+/// being paid, `Game::ability_allow` of the ability for a mana ability's own
+/// cost).
+pub type Tag = u64;
 
 /// A purpose of no mana ability: paying the cost the payment is for (the
 /// spell's or the activated ability's), never the mana cost of a mana
@@ -86,11 +109,14 @@ pub fn spend_ok(unit: Tag, need: Tag) -> bool {
 }
 
 /// Can a unit tagged `unit` pay a need tagged `need` (their types meet; a
-/// `MADE` unit never pays a `NOT_MADE` need; its restriction allows the
-/// need's purposes)?
+/// `MADE` unit pays a `NOT_MADE` need only of an ability after its own in
+/// the order the chain ids rank, `chain`; its restriction allows the need's
+/// purposes)?
 #[inline]
 pub fn fits(unit: Tag, need: Tag) -> bool {
-    unit & need & TYPES as Tag != 0 && (need & NOT_MADE as Tag == 0 || unit & MADE as Tag == 0) && spend_ok(unit, need)
+    unit & need & TYPES as Tag != 0
+        && (need & NOT_MADE as Tag == 0 || unit & MADE as Tag == 0 || chain(unit) != 0 && chain(unit) < chain(need))
+        && spend_ok(unit, need)
 }
 
 /// Two-colour hybrid pairs (CR 107.4e) in index order.
@@ -367,6 +393,15 @@ pub fn cost_need(mask: ManaMask, allow: u8) -> Tag {
 
 /// [`payable`] over any sequence of available tags (no allocation: this
 /// runs for every castable card at every priority decision).
+///
+/// With mana abilities that have a mana cost (`NOT_MADE` needs among
+/// `extra`) and the mana of such abilities (`MADE` units) that could pay one
+/// of another's (CR 605.3a, 602.2b: a mana ability's mana pays the cost of
+/// one activated after it, never its own or an earlier one's), the payment
+/// is exact when some order of those abilities allows it: each order is
+/// tried, its chain ids relabelled by rank (`chain`, `fits`), abilities alike
+/// (the same needs and units) in a fixed order among themselves
+/// (docs/shortcuts.md 13.15: no such mana paid such a cost).
 fn payable_iter(
     cost: &ManaCost,
     allow: u8,
@@ -379,6 +414,75 @@ fn payable_iter(
     if chosen.len() > need || chosen.len() + n < need {
         return false;
     }
+    let made = |u: &Tag| u & MADE as Tag != 0 && chain(*u) != 0;
+    let linked = extra.iter().any(|&e| e & NOT_MADE as Tag != 0 && chain(e) != 0 && chosen.iter().copied().chain(available.clone()).any(|u| made(&u) && chain(u) != chain(e) && u & e & TYPES as Tag != 0 && spend_ok(u, e)));
+    if !linked {
+        return payable_ordered(cost, allow, extra, chosen, available);
+    }
+    // The ids, and each one's needs and units without it (alike when equal).
+    let units: Vec<Tag> = chosen.iter().copied().chain(available).collect();
+    let mut ids: Vec<u64> = extra.iter().filter(|&&e| e & NOT_MADE as Tag != 0).chain(units.iter().filter(|u| made(u))).map(|&t| chain(t)).filter(|&i| i != 0).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let sig = |id: u64| {
+        let strip = |t: &Tag| with_chain(*t, 0);
+        let mut ns: Vec<Tag> = extra.iter().filter(|&&e| e & NOT_MADE as Tag != 0 && chain(e) == id).map(strip).collect();
+        let mut us: Vec<Tag> = units.iter().filter(|u| made(u) && chain(**u) == id).map(strip).collect();
+        ns.sort_unstable();
+        us.sort_unstable();
+        (ns, us)
+    };
+    let sigs: Vec<(Vec<Tag>, Vec<Tag>)> = ids.iter().map(|&i| sig(i)).collect();
+    let mut nodes = SEARCH_NODES;
+    // (Each order: rank r for the r-th id placed; an id alike an earlier one
+    // only after it.)
+    #[allow(clippy::too_many_arguments)]
+    fn orders(
+        k: usize,
+        rank: &mut Vec<u64>,
+        placed: &mut Vec<bool>,
+        sigs: &[(Vec<Tag>, Vec<Tag>)],
+        ids: &[u64],
+        try_one: &mut dyn FnMut(&[u64]) -> bool,
+        nodes: &mut u32,
+    ) -> Option<bool> {
+        *nodes = nodes.checked_sub(1)?;
+        if k == ids.len() {
+            return Some(try_one(rank));
+        }
+        for i in 0..ids.len() {
+            if placed[i] || (0..i).any(|j| !placed[j] && sigs[j] == sigs[i]) {
+                continue;
+            }
+            placed[i] = true;
+            rank[i] = k as u64 + 1;
+            let r = orders(k + 1, rank, placed, sigs, ids, try_one, nodes);
+            placed[i] = false;
+            if r != Some(false) {
+                return r;
+            }
+        }
+        Some(false)
+    }
+    let relabel = |t: Tag, rank: &[u64]| match ids.binary_search(&chain(t)) {
+        Ok(i) if chain(t) != 0 => with_chain(t, rank[i]),
+        _ => t,
+    };
+    let mut try_one = |rank: &[u64]| {
+        let ex: Vec<Tag> = extra.iter().map(|&t| relabel(t, rank)).collect();
+        let ch: Vec<Tag> = chosen.iter().map(|&t| relabel(t, rank)).collect();
+        let av: Vec<Tag> = units[chosen.len()..].iter().map(|&t| relabel(t, rank)).collect();
+        payable_ordered(cost, allow, &ex, &ch, av.iter().copied())
+    };
+    let mut rank = vec![0u64; ids.len()];
+    let mut placed = vec![false; ids.len()];
+    orders(0, &mut rank, &mut placed, &sigs, &ids, &mut try_one, &mut nodes)
+        .unwrap_or_else(|| search_exhausted(format_args!("the orders of chained mana abilities: cost {cost}, needs {extra:?}, units {units:?}")))
+}
+
+/// [`payable_iter`] with the chained abilities' order given (their chain
+/// ids' ranks).
+fn payable_ordered(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], available: impl Iterator<Item = Tag> + Clone) -> bool {
     // (A restriction that keeps some unit from some need: the exact
     // matching. Otherwise every unit may pay every need it meets in type.)
     let main = cost_need(0, allow);
@@ -386,14 +490,11 @@ fn payable_iter(
     if chosen.iter().any(|&u| kept_from(u)) || available.clone().any(kept_from) {
         return payable_restricted(cost, main, extra, chosen, available);
     }
-    let mut groups = [(0 as Tag, false, 0u8); 128];
-    let mut ng = 0;
-    let mut add = |m: Tag, ch: bool| match groups[..ng].iter_mut().find(|g| g.0 == m && g.1 == ch) {
-        Some(g) => g.2 = g.2.saturating_add(1),
-        None => {
-            groups[ng] = (m, ch, 1);
-            ng += 1;
-        }
+    // (Counted in u32: any number of units of a tag, never saturating.)
+    let mut groups: crate::svec::SVec<(Tag, bool, u32), 32> = crate::svec::SVec::new();
+    let mut add = |m: Tag, ch: bool| match groups.iter_mut().find(|g| g.0 == m && g.1 == ch) {
+        Some(g) => g.2 += 1,
+        None => groups.push((m, ch, 1)),
     };
     for &m in chosen {
         add(m, true);
@@ -401,34 +502,29 @@ fn payable_iter(
     for m in available {
         add(m, false);
     }
-    let mut needs = [(0 as Tag, 0u8); 24];
-    let mut nn = 0;
+    let mut needs: crate::svec::SVec<(Tag, u32), 24> = crate::svec::SVec::new();
     for &m in extra {
-        match needs[..nn].iter_mut().find(|x| x.0 == m) {
+        match needs.iter_mut().find(|x| x.0 == m) {
             Some(x) => x.1 += 1,
-            None => {
-                needs[nn] = (m, 1);
-                nn += 1;
-            }
+            None => needs.push((m, 1)),
         }
     }
     for c in 0..6 {
         if cost.pips[c] > 0 {
-            needs[nn] = (cost_need(1 << c, allow), cost.pips[c]);
-            nn += 1;
+            needs.push((cost_need(1 << c, allow), cost.pips[c] as u32));
         }
     }
     for (i, &k) in cost.hybrid.iter().enumerate() {
         if k > 0 {
-            needs[nn] = (cost_need(pair_mask(i), allow), k);
-            nn += 1;
+            needs.push((cost_need(pair_mask(i), allow), k as u32));
         }
     }
     debug_assert!(!cost.has_phyrexian());
+    let cap = chosen.len() as u32;
     let best = if extra.iter().any(|&m| m & NOT_MADE as Tag != 0) {
-        best_chosen::<true>(&needs[..nn], &mut groups[..ng], chosen.len() as u8)
+        best_chosen::<true>(&needs, &mut groups, cap)
     } else {
-        best_chosen::<false>(&needs[..nn], &mut groups[..ng], chosen.len() as u8)
+        best_chosen::<false>(&needs, &mut groups, cap)
     };
     match best {
         Some(used) => chosen.len() - used as usize <= cost.generic as usize,
@@ -548,7 +644,7 @@ pub(crate) fn max_flow(left: &[u32], right: &[u32], edges: &[Vec<bool>]) -> u32 
 /// them); `None` if the needs cannot be met.
 /// (`STRICT`: some need is `NOT_MADE`; otherwise any meeting of types fits,
 /// the fast path.)
-fn best_chosen<const STRICT: bool>(needs: &[(Tag, u8)], groups: &mut [(Tag, bool, u8)], cap: u8) -> Option<u8> {
+fn best_chosen<const STRICT: bool>(needs: &[(Tag, u32)], groups: &mut [(Tag, bool, u32)], cap: u32) -> Option<u32> {
     match needs.split_first() {
         None => Some(0),
         Some((&(c, k), rest)) => distribute::<STRICT>(c, k, 0, rest, groups, cap),
@@ -557,12 +653,12 @@ fn best_chosen<const STRICT: bool>(needs: &[(Tag, u8)], groups: &mut [(Tag, bool
 
 fn distribute<const STRICT: bool>(
     need: Tag,
-    k: u8,
+    k: u32,
     gi: usize,
-    rest: &[(Tag, u8)],
-    groups: &mut [(Tag, bool, u8)],
-    cap: u8,
-) -> Option<u8> {
+    rest: &[(Tag, u32)],
+    groups: &mut [(Tag, bool, u32)],
+    cap: u32,
+) -> Option<u32> {
     if k == 0 {
         return best_chosen::<STRICT>(rest, groups, cap);
     }
@@ -572,7 +668,7 @@ fn distribute<const STRICT: bool>(
     let (mask, ch, cnt) = groups[gi];
     let meets = if STRICT { fits(mask, need) } else { mask & need & TYPES as Tag != 0 };
     let most = if meets { k.min(cnt) } else { 0 };
-    let mut best: Option<u8> = None;
+    let mut best: Option<u32> = None;
     for t in (0..=most).rev() {
         let used = if ch { t } else { 0 };
         groups[gi].2 -= t;

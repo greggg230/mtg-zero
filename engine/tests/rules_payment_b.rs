@@ -837,6 +837,9 @@ fn b4_db() -> &'static CardDb {
             eoe_w2::card("Test Rebel Pollinator", json!({"card_types": ["Creature"], "subtypes": ["Rebel"], "power": 1, "toughness": 1,
                 "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["G", 1]]}, "mana_cost_str": "{G}",
                 "activated_abilities": [pol]})),
+            // A vanilla artifact costing {U}{U}{U}.
+            eoe_w2::card("Test Blue Rock", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "colored": [["U", 3]]}, "mana_cost_str": "{U}{U}{U}"})),
             // "Tap an untapped Rebel you control, Sacrifice a Rebel: Draw a card."
             eoe_w2::card("Test Rebel Altar", json!({"card_types": ["Artifact"], "type_line": "Artifact",
                 "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
@@ -849,7 +852,7 @@ fn b4_db() -> &'static CardDb {
         cards.extend(engine::db::load_eoe_document().cards.into_iter().filter(|c| c.name == "Gene Pollinator"));
         cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
         let db = CardDb::from_cards(&cards);
-        for n in ["Gene Pollinator", "Test Pollinator Rock", "Test Pollinator Grove", "Test Rebel Pollinator", "Test Rebel Altar"] {
+        for n in ["Gene Pollinator", "Test Pollinator Rock", "Test Pollinator Grove", "Test Rebel Pollinator", "Test Rebel Altar", "Test Blue Rock"] {
             db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
         }
         db.leak()
@@ -1079,4 +1082,36 @@ fn cr_601_2h_one_permanent_tapped_and_sacrificed_for_one_cost() {
     assert_eq!(g.obj(rebel).zone, Zone::Graveyard, "{}", log(&g));
     assert_eq!(g.player(0).hand.len(), 1, "drew a card
 {}", log(&g));
+}
+
+/// docs/shortcuts.md 13.15, CR 605.3a, 602.2b: the mana of a mana ability with
+/// a mana cost may pay another such ability's cost when that one is activated
+/// after it (`MADE` mana paid no ability's cost). Two Sunken Ruins ("{U/B},
+/// {T}: Add {U}{U}, {U}{B} or {B}{B}") and a Swamp: the Swamp for one, one of
+/// its mana for the other: {U}{U}{U} (a Ruins' own "{T}: Add {C}" made the
+/// third mana before); two alone make no {U} (neither can be first).
+#[test]
+fn cr_605_3a_a_mana_abilitys_mana_pays_a_later_ones_cost() {
+    let g = scen().battlefield(0, &["Sunken Ruins", "Sunken Ruins", "Swamp"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{U}{U}{U}")), "the Swamp for one Ruins, its mana for the other");
+    assert!(g.can_pay(0, &cost("{3}")));
+    assert!(!g.can_pay(0, &cost("{4}")));
+    let g = scen().battlefield(0, &["Sunken Ruins", "Sunken Ruins"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{2}")), "their own {{C}}");
+    assert!(!g.can_pay(0, &cost("{U}")), "neither Ruins can be first");
+}
+
+/// The same in a payment (CR 601.2g): B4's Test Blue Rock ({U}{U}{U}) cast
+/// with two Sunken Ruins and a Swamp (not castable before: a Ruins' own "{T}:
+/// Add {C}" made the third mana): both Ruins activated.
+#[test]
+fn cr_601_2g_a_payment_with_a_chain_of_mana_abilities() {
+    let mut g = b4_scen().battlefield(0, &["Sunken Ruins", "Sunken Ruins", "Swamp"]).hand(0, &["Test Blue Rock"]).at(Step::Main1, 0).start();
+    let relic = g.card(0, "Test Blue Rock", Zone::Hand);
+    assert!(options(&g).contains(&Choice::Cast(relic)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(relic));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(relic).zone, Zone::Stack, "{}", log(&g));
+    assert!(g.permanents_of(0).all(|c| g.obj(c).tapped), "{}", log(&g));
+    assert_eq!(g.player(0).pool.amt.iter().map(|&n| n as u32).sum::<u32>(), 0, "{}", log(&g));
 }

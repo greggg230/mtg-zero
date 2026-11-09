@@ -13,7 +13,7 @@ use crate::flow::Task;
 use crate::game::{DamageSource, Game, Pos};
 use crate::ids::{CardIdx, DefId, PlayerId, Target, Zone};
 use crate::mana::{
-    cost_need, payable_n, payable_within_n, purposes, restriction, search_exhausted, tag, Budget, ManaCost, ManaMask, Tag, Unit, COLORS, FOR_COST, MADE,
+    payable_n, payable_within_n, purposes, restriction, search_exhausted, tag, Budget, ManaCost, ManaMask, Tag, Unit, COLORS, FOR_COST, MADE,
     RESTRICTED, SEARCH_NODES, TYPES,
 };
 use crate::svec::SVec;
@@ -100,6 +100,26 @@ impl Default for Src {
 /// The members of a class, inline up to eight (ENGINE.md 17).
 pub(crate) type Members = SVec<Src, 8>;
 
+/// The chain id (`mana::chain`) of the `k`-th activation in a payment of
+/// source `s` of `classes`, an ability with a mana cost (docs/shortcuts.md
+/// 13.15): its place among such sources of the classes (from 1), its uses
+/// after it (a source that only removes counters is used several times); 0
+/// for another source. The classes of a payment are built alike at each of
+/// its steps, so its picks' ids and its candidates' agree.
+fn chain_id(classes: &[Class], s: &Src, k: crate::num::Count) -> u64 {
+    let mut i = 0u64;
+    for cl in classes.iter().filter(|cl| cl.need != 0) {
+        for m in cl.members.iter() {
+            i += 1;
+            if m == s {
+                assert!(k < 1 << 24 && i < 1 << 24, "chain ids: {i}, use {k}");
+                return i << 24 | k as u64;
+            }
+        }
+    }
+    0
+}
+
 /// Converge (exact, any number of units): the most colours (with `fixed`,
 /// already spent) an exact payment of `cost` and of the `marked` needs (the
 /// mana costs of mana abilities activated in the payment: not spent on the
@@ -115,33 +135,24 @@ fn most_colors_matching(units: &[Tag], cost: &ManaCost, marked: &[Tag], fixed: u
     if cost.pips.iter().map(|&n| n as usize).sum::<usize>() + cost.generic as usize + marked.len() != units.len() {
         return None; // (not an exact payment by these units)
     }
-    fn augment(slot: usize, slots: &[Tag], units: &[Tag], seen: &mut [bool], owner: &mut [usize]) -> bool {
-        for (u, &m) in units.iter().enumerate() {
-            if crate::mana::fits(m, slots[slot]) && !seen[u] {
-                seen[u] = true;
-                if owner[u] == usize::MAX || augment(owner[u], slots, units, seen, owner) {
-                    owner[u] = slot;
-                    return true;
-                }
-            }
-        }
-        false
-    }
     let mut best = None;
     for s in 0u8..32 {
-        let mut slots: Vec<Tag> = marked.to_vec();
+        // (Each colour shown not among the pips: one generic pip of it;
+        // every unit used, exactly: `payable_n`, which tries the orders of
+        // the chained mana abilities, 13.15.)
+        let mut c = *cost;
         let mut shows = 0;
-        for t in 0..6u8 {
-            let show = t < 5 && s & (1 << t) != 0 && fixed & (1 << t) == 0;
-            shows += (show && cost.pips[t as usize] == 0) as u8;
-            let need = cost.pips[t as usize].max(show as u8);
-            slots.extend(std::iter::repeat_n(cost_need(1u8 << t, allow), need as usize));
+        for t in 0..5 {
+            if s & (1 << t) != 0 && fixed & (1 << t) == 0 && cost.pips[t] == 0 {
+                c.pips[t] = 1;
+                shows += 1;
+            }
         }
-        if slots.len() > units.len() || shows > cost.generic {
+        if shows > cost.generic {
             continue;
         }
-        let mut owner = vec![usize::MAX; units.len()];
-        let ok = (0..slots.len()).all(|k| augment(k, &slots, units, &mut vec![false; units.len()], &mut owner));
+        c.generic -= shows;
+        let ok = crate::mana::payable_n(&c, allow, marked, units, &[]);
         if ok {
             let n = ((s | fixed) & COLORS).count_ones();
             best = Some(best.map_or(n, |b: u32| b.max(n)));
@@ -438,6 +449,10 @@ pub(crate) struct PayMana {
     pub extra_restr: Vec<crate::eoe_w2::RKind>,
     /// The part of `extra` made by abilities with a mana cost (`MADE`).
     pub extra_made: [u8; 6],
+    /// That part by activation: its chain id (`chain_id`) and production
+    /// (the order of such activations is the payment's: a `MADE` unit pays
+    /// the cost of one after its own, `mana::chain`; docs/shortcuts.md 13.15).
+    pub made_by: Vec<(u64, [u8; 6])>,
     /// The part of `extra_restr` made by abilities with a mana cost.
     pub extra_made_restr: Vec<crate::eoe_w2::RKind>,
     /// The part of `extra[R]` that gives haste (Arena of Glory).
@@ -517,6 +532,7 @@ impl PayMana {
             extra: [0; 6],
             extra_restr: Vec::new(),
             extra_made: [0; 6],
+            made_by: Vec::new(),
             extra_made_restr: Vec::new(),
             extra_haste: 0,
             chosen: Vec::new(),
@@ -1426,7 +1442,8 @@ impl Game {
         let pools = PoolCtx::of(classes, &|_| false, &|a| self.actor_reserved(p, keep, a), &[]);
         let res = self.res_ctx(p, keep, &|_| false);
         let consumes = |cl: &Class, s: &Src| self.consumes(p, keep, cl, s);
-        cands(classes, use_src, &|_| (0, 0), dmg, &|cl, s| self.reserved(p, keep, cl, s) as i32, &consumes, keep.allow, 0, cap, taps.as_ref(), pools, res)
+        let chain_of = |s: &Src| chain_id(classes, s, 0);
+        cands(classes, use_src, &|_| (0, 0), dmg, &|cl, s| self.reserved(p, keep, cl, s) as i32, &consumes, &chain_of, keep.allow, 0, cap, taps.as_ref(), pools, res)
     }
 
     /// `keep.taps` for the feasibility (`cands`): the need, and each
@@ -1473,7 +1490,9 @@ impl Game {
             })
         };
         let res = self.res_ctx(pm.payer, &pm.keep, &gone);
-        let mut c = cands(&classes[from..], &|_| true, &used, dmg, &|cl, s| self.reserved(pm.payer, &pm.keep, cl, s) as i32, &consumes, pm.keep.allow, marked, cap, taps.as_ref(), pools, res);
+        // (Chain ids from every class: the picks' and the candidates' alike.)
+        let chain_of = |s: &Src| chain_id(classes, s, 0);
+        let mut c = cands(&classes[from..], &|_| true, &used, dmg, &|cl, s| self.reserved(pm.payer, &pm.keep, cl, s) as i32, &consumes, &chain_of, pm.keep.allow, marked, cap, taps.as_ref(), pools, res);
         c.converted = pm.convert;
         c
     }
@@ -1515,7 +1534,7 @@ impl Game {
     /// cost's purposes or an ability's (Sunken Citadel's mana for Cascading
     /// Cataracts' {5}, ENGINE.md 100.4.5); the pool's other restricted mana
     /// stays (ENGINE.md 99.12).
-    fn vgroups(&self, pm: &PayMana) -> SVec<(u16, u32), 12> {
+    fn vgroups(&self, pm: &PayMana) -> SVec<(Kind, u32), 12> {
         let pool = &self.players[pm.payer as usize].pool;
         let kinds = self.pool_kinds(pm.payer);
         let any = pm.keep.allow | crate::eoe_w2::SPEND_ABILITIES;
@@ -1523,8 +1542,8 @@ impl Game {
         // can pass a u8; ENGINE.md 100.4.6.)
         let of = |v: &[crate::eoe_w2::RKind], t: usize| v.iter().filter(|k| k.0 as usize == t).map(|k| k.2 as u32).sum::<u32>();
         let made_of = |t: usize, only: u8| pm.extra_made_restr.iter().find(|k| k.0 as usize == t && k.1 == only).map_or(0, |k| k.2 as u32);
-        let mut g: SVec<(u16, u32), 12> = SVec::new();
-        let push = |g: &mut SVec<(u16, u32), 12>, kind: u16, n: u32| {
+        let mut g: SVec<(Kind, u32), 12> = SVec::new();
+        let push = |g: &mut SVec<(Kind, u32), 12>, kind: Kind, n: u32| {
             if n == 0 {
                 return;
             }
@@ -1534,11 +1553,11 @@ impl Game {
             }
         };
         for t in 0..6 {
-            let rk = |only: u8| t as u16 | 16 | (purposes(restriction(only)) as u16) << 8;
+            let rk = |only: u8| t as Kind | 16 | (purposes(restriction(only)) as Kind) << 8;
             let restr = of(&kinds, t) + of(&pm.extra_restr, t);
             let made_restr = of(&pm.extra_made_restr, t);
             let plain = pool.amt[t] as u32 + pm.extra[t] as u32 - pm.extra_made[t] as u32 - (restr - made_restr);
-            push(&mut g, t as u16, plain);
+            push(&mut g, t as Kind, plain);
             for &(_, only, n) in kinds.iter().filter(|k| k.0 as usize == t) {
                 if crate::eoe_w2::spendable(only, any) {
                     push(&mut g, rk(only), n as u32);
@@ -1547,7 +1566,13 @@ impl Game {
             for &(_, only, n) in pm.extra_restr.iter().filter(|k| k.0 as usize == t) {
                 push(&mut g, rk(only), n as u32 - made_of(t, only));
             }
-            push(&mut g, t as u16 | 8, pm.extra_made[t] as u32 - made_restr);
+            // (By activation: its chain id, ENGINE.md 100.4.7. Mana with a
+            // restriction is never made by an ability with a mana cost: the
+            // lowering refuses both.)
+            debug_assert_eq!(made_restr, 0, "restricted mana of an ability with a mana cost");
+            for &(id, prod) in &pm.made_by {
+                push(&mut g, t as Kind | 8 | (id as Kind) << 16, prod[t] as u32);
+            }
             for &(_, only, n) in pm.extra_made_restr.iter().filter(|k| k.0 as usize == t) {
                 push(&mut g, rk(only) | 8, n as u32);
             }
@@ -1559,7 +1584,7 @@ impl Game {
     /// and `marked` can spend with every unit of `chosen` and some of
     /// `rest`; `None` if it can't be paid. Wizard's Rockets' colours count
     /// only when nothing else pays (ENGINE.md 18).
-    fn most_spent(&self, pm: &PayMana, groups: &[(u16, u32)], marked: &[Tag], chosen: &[Tag], rest: &Cands, budget: Budget) -> Option<u32> {
+    fn most_spent(&self, pm: &PayMana, groups: &[(Kind, u32)], marked: &[Tag], chosen: &[Tag], rest: &Cands, budget: Budget) -> Option<u32> {
         self.most_spent_from(pm, groups, marked, chosen, rest, budget, 0)
     }
 
@@ -1568,7 +1593,7 @@ impl Game {
     fn most_spent_from(
         &self,
         pm: &PayMana,
-        groups: &[(u16, u32)],
+        groups: &[(Kind, u32)],
         marked: &[Tag],
         chosen: &[Tag],
         rest: &Cands,
@@ -1611,7 +1636,7 @@ impl Game {
     /// The most of virtual pool `groups` a payment (with `marked` needs) can
     /// spend with single-mana sources paying the rest (`plus` picked once
     /// more); `None` if they can't.
-    fn singles_vm(&self, pm: &PayMana, classes: &[Class], groups: &[(u16, u32)], marked: &[Tag], plus: Option<Src>, budget: Budget, dmg: bool) -> Option<u32> {
+    fn singles_vm(&self, pm: &PayMana, classes: &[Class], groups: &[(Kind, u32)], marked: &[Tag], plus: Option<Src>, budget: Budget, dmg: bool) -> Option<u32> {
         let first = classes.iter().position(|cl| matches!(cl.yld, Yield::One(_))).unwrap_or(classes.len());
         let rest = self.pay_cands(pm, classes, first.max(pm.min_class as usize), plus, dmg);
         self.most_spent(pm, groups, marked, &[], &rest, budget)
@@ -1948,8 +1973,11 @@ impl Game {
         let singles = self.pay_cands(pm, classes, first.max(ci), Some(src), dmg);
         let base = self.vgroups(pm);
         let mut marked = pm.marked.clone();
+        // (Its activation's chain id: its cost a `NOT_MADE` need, its mana
+        // `MADE`.)
+        let id = chain_id(classes, &src, pm.uses(&src));
         if cl.need != 0 {
-            marked.extend(std::iter::repeat_n(cl.need, cl.need_n as usize));
+            marked.extend(std::iter::repeat_n(crate::mana::with_chain(cl.need, id), cl.need_n as usize));
         }
         let mut out = Vec::new();
         for prod in prods.iter().copied().filter(|v| among(v)) {
@@ -1960,7 +1988,9 @@ impl Game {
                     if prod[t] > 0 {
                         // (Mana with a spending restriction, Mishra's
                         // Workshop's artifact-only {C}: its own kind.)
-                        let kind = t as u16 | if cl.need != 0 { 8 } else { 0 } | if cl.only != 0 { 16 | (purposes(restriction(cl.only)) as u16) << 8 } else { 0 };
+                        let kind = t as Kind
+                            | if cl.need != 0 { 8 | (id as Kind) << 16 } else { 0 }
+                            | if cl.only != 0 { 16 | (purposes(restriction(cl.only)) as Kind) << 8 } else { 0 };
                         match groups.iter_mut().find(|g| g.0 == kind) {
                             Some(g) => g.1 += prod[t] as u32,
                             None => groups.push((kind, prod[t] as u32)),
@@ -1979,7 +2009,7 @@ impl Game {
                     // it. A production none of whose mana is spent only
                     // floats, as with priority before the payment.)
                     let rest = self.pay_cands(pm, classes, ci, Some(src), dmg);
-                    let had = |kind: u16| base.iter().find(|g| g.0 == kind).map_or(0, |g| g.1);
+                    let had = |kind: Kind| base.iter().find(|g| g.0 == kind).map_or(0, |g| g.1);
                     let total: usize = groups.iter().map(|g| g.1 as usize).sum();
                     let top = total.min(pm.cost.total() as usize + marked.len());
                     (1..=top).rev().any(|k| {
@@ -2182,7 +2212,7 @@ impl Game {
                     Yield::One(u) => (0..6).filter(|&t| u.mask & (1 << t) != 0).map(|t| one(t, 1)).collect(),
                     Yield::Multi { prods, .. } => prods.clone(),
                 };
-                let kind_of = |t: usize| t as u16 | if cl.only != 0 { 16 | (purposes(restriction(cl.only)) as u16) << 8 } else { 0 };
+                let kind_of = |t: usize| t as Kind | if cl.only != 0 { 16 | (purposes(restriction(cl.only)) as Kind) << 8 } else { 0 };
                 let prods: Vec<[u8; 6]> = all
                     .into_iter()
                     .filter(|prod| {
@@ -2602,8 +2632,8 @@ impl Game {
         // cost). Units alike in all four are the same choice (CR 106.4: the
         // pool holds amounts of mana, and two such units leave the same
         // pool). The pool's mana first (made by nothing in this payment).
-        let mut parts: Vec<((u8, u8, bool, bool), u8)> = Vec::new();
-        let mut add = |key: (u8, u8, bool, bool), n: u8| {
+        let mut parts: Vec<((u8, u8, bool, u64), u8)> = Vec::new();
+        let mut add = |key: (u8, u8, bool, u64), n: u8| {
             if n == 0 {
                 return;
             }
@@ -2617,19 +2647,20 @@ impl Game {
         for t in 0..6u8 {
             let restr: u8 = kinds.iter().filter(|k| k.0 == t).map(|k| k.2).sum();
             let haste = if t as usize == R { pool.haste } else { 0 };
-            add((t, 0, false, false), pool.amt[t as usize] - restr - haste);
-            add((t, 0, true, false), haste);
+            add((t, 0, false, 0), pool.amt[t as usize] - restr - haste);
+            add((t, 0, true, 0), haste);
         }
         for &(t, only, n) in kinds.iter() {
-            add((t, only, false, false), n);
+            add((t, only, false, 0), n);
         }
         // The several-mana sources picked: each production with its class's
-        // restriction, haste and need.
+        // restriction, haste and need (its activation's chain id).
         let any = pm.keep.allow | pm.marked.iter().fold(0, |a, &m| a | purposes(m));
-        for (src, prod) in &pm.multi {
+        for (i, (src, prod)) in pm.multi.iter().enumerate() {
             let cl = classes.iter().find(|cl| cl.members.contains(src)).expect("a picked source's class");
+            let id = if cl.need != 0 { chain_id(classes, src, pm.multi[..i].iter().filter(|m| m.0 == *src).count() as crate::num::Count) } else { 0 };
             for t in 0..6u8 {
-                add((t, cl.only, cl.haste && t as usize == R, cl.need != 0), prod[t as usize]);
+                add((t, cl.only, cl.haste && t as usize == R, id), prod[t as usize]);
             }
         }
         let rem_of = |spent: &[u8]| {
@@ -2658,7 +2689,7 @@ impl Game {
         let groups: SVec<(u8, u32), 12> = spendable.iter().map(|&i| (i as u8, parts[i].1 as u32)).collect();
         let mask_of = |i: usize| {
             let (t, only, _, made) = parts[i].0;
-            let m = ((1u8 << t) | if made { MADE } else { 0 } | if only != 0 { RESTRICTED } else { 0 }) as Tag | restriction(only);
+            let m = crate::mana::with_chain(((1u8 << t) | if made != 0 { MADE } else { 0 } | if only != 0 { RESTRICTED } else { 0 }) as Tag | restriction(only), made);
             if pm.convert {
                 convert(m)
             } else {
@@ -2720,7 +2751,10 @@ impl Game {
             }
         }
         if cl.need != 0 {
-            pm.marked.extend(std::iter::repeat_n(cl.need, cl.need_n as usize));
+            // (Its activation's chain id: its cost and its mana, 13.15.)
+            let id = chain_id(classes, &src, pm.uses(&src));
+            pm.marked.extend(std::iter::repeat_n(crate::mana::with_chain(cl.need, id), cl.need_n as usize));
+            pm.made_by.push((id, prod));
         }
         if cl.haste {
             pm.extra_haste = pm.extra_haste.saturating_add(prod[crate::mana::R]);
@@ -2760,9 +2794,14 @@ impl Game {
             // (Mana with a spending restriction spent, by kind with its
             // purposes: never turned into colours.)
             let vkinds = self.virtual_kinds(pm);
+            // (The mana made by abilities with a mana cost spent: as little
+            // as the rest of the pool allows, which pays more, CR 106.4; whose
+            // is chosen with the colours, `record_converge`.)
+            let mut made_spent = [0u8; 6];
             for t in 0..6 {
-                let made = spent[t].min(pm.extra_made[t]);
-                units.extend(std::iter::repeat_n(conv(((1 << t) | MADE) as Tag), made as usize));
+                let plain = (pool.amt[t] as u32 + pm.extra[t] as u32).saturating_sub(pm.extra_made[t] as u32);
+                made_spent[t] = (spent[t] as u32).saturating_sub(plain).min(pm.extra_made[t] as u32) as u8;
+                let made = made_spent[t];
                 let mut art = 0u8;
                 for &(_, only, n) in vkinds.iter().filter(|k| k.0 as usize == t) {
                     let left = rem.restr.iter().find(|k| k.0 as usize == t && k.1 == only).map_or(0, |k| k.2);
@@ -2772,7 +2811,7 @@ impl Game {
                 }
                 units.extend(std::iter::repeat_n(conv(1 << t), (spent[t] - made - art) as usize));
             }
-            self.record_converge(pm, &units);
+            self.record_converge(pm, &units, made_spent);
         }
         // "The amount of mana spent to cast this" (CR 601.2h; EoE W3): the
         // payment's units (a creature tapped for convoke or an artifact for
@@ -2894,9 +2933,50 @@ impl Game {
     /// colours an exact payment by those units can show (the player chooses
     /// each mana's type as the ability resolves, CR 106.1b; 601.2h which
     /// pays what).
-    fn record_converge(&mut self, pm: &PayMana, units: &[Tag]) {
+    /// `made`: the mana made by abilities with a mana cost spent, by type,
+    /// of which activations (`PayMana::made_by`) the most colours any
+    /// choice shows (ENGINE.md 100.4.7).
+    fn record_converge(&mut self, pm: &PayMana, plain_units: &[Tag], made: [u8; 6]) {
         let Some(k) = self.marks.iter().position(|(_, m)| matches!(m, crate::game::Mark::ConvergePending(_))) else { return };
         let crate::game::Mark::ConvergePending(fixed) = self.marks[k].1 else { unreachable!() };
+        // Each choice of the activations whose made mana was spent.
+        let conv = |m: Tag| if pm.convert { convert(m) } else { m };
+        let mut splits: Vec<Vec<Tag>> = vec![Vec::new()];
+        for t in 0..6 {
+            let mut next = Vec::new();
+            for s in &splits {
+                // (`left` of type t to place among the activations from `i`.)
+                fn place(by: &[(u64, [u8; 6])], t: usize, i: usize, left: u8, cur: &mut Vec<Tag>, out: &mut Vec<Vec<Tag>>, conv: &dyn Fn(Tag) -> Tag) {
+                    if left == 0 {
+                        out.push(cur.clone());
+                        return;
+                    }
+                    if i == by.len() {
+                        return;
+                    }
+                    for n in (0..=left.min(by[i].1[t])).rev() {
+                        let len = cur.len();
+                        cur.extend(std::iter::repeat_n(conv(crate::mana::with_chain(((1u8 << t) | MADE) as Tag, by[i].0)), n as usize));
+                        place(by, t, i + 1, left - n, cur, out, conv);
+                        cur.truncate(len);
+                    }
+                }
+                place(&pm.made_by, t, 0, made[t], &mut s.clone(), &mut next, &conv);
+            }
+            splits = next;
+        }
+        let mut n = 0;
+        for s in &splits {
+            let mut units = plain_units.to_vec();
+            units.extend(s.iter().copied());
+            n = n.max(self.converge_colors(pm, &units, fixed));
+        }
+        self.marks[k].1 = crate::game::Mark::Converge(n as u8);
+    }
+
+    /// The most colours (with `fixed`, shown already) an exact payment by
+    /// `units` can show (`record_converge`).
+    fn converge_colors(&self, pm: &PayMana, units: &[Tag], fixed: u8) -> u32 {
         #[allow(clippy::too_many_arguments)]
         fn best(i: usize, units: &[Tag], cost: &ManaCost, allow: u8, got: &mut Vec<Tag>, fixed: u8) -> u32 {
             if i == units.len() {
@@ -2918,7 +2998,7 @@ impl Game {
             }
             b
         }
-        let n = if units.len() <= 7 && pm.marked.is_empty() {
+        if units.len() <= 7 && pm.marked.is_empty() {
             best(0, units, &pm.cost, pm.keep.allow, &mut Vec::new(), fixed)
         } else {
             match most_colors_matching(units, &pm.cost, &pm.marked, fixed, pm.keep.allow) {
@@ -2930,8 +3010,7 @@ impl Game {
                     all.count_ones().min(fixed.count_ones() + units.len() as u32)
                 }
             }
-        };
-        self.marks[k].1 = crate::game::Mark::Converge(n as u8);
+        }
     }
 
     /// The number of colours of mana spent to cast the spell `source`
@@ -3005,13 +3084,19 @@ fn each_subset<K>(groups: &[(K, u32)], k: usize, cur: &mut SVec<u32, 12>, f: &mu
     false
 }
 
+/// A kind of the virtual pool's mana (`vgroups`): its type (bits 0-2), + 8
+/// for `MADE`, + 16 for `RESTRICTED`, its purposes in bits 8-15, its
+/// activation's chain id from bit 16 (`mana::chain`).
+type Kind = u64;
+
 /// The units of `counts` of `groups` as tags (`MADE` for kinds + 8,
-/// `RESTRICTED` for kinds + 16, the purposes in bits 8-15: `vgroups`).
-fn masks_of(groups: &[(u16, u32)], counts: &[u32]) -> SVec<Tag, 16> {
+/// `RESTRICTED` for kinds + 16, the purposes in bits 8-15, the chain id
+/// from bit 16: `vgroups`).
+fn masks_of(groups: &[(Kind, u32)], counts: &[u32]) -> SVec<Tag, 16> {
     let mut v = SVec::new();
     for (g, &n) in groups.iter().zip(counts) {
         let low = (1u8 << (g.0 & 7)) | if g.0 & 8 != 0 { MADE } else { 0 } | if g.0 & 16 != 0 { RESTRICTED } else { 0 };
-        let m = tag(low, (g.0 >> 8) as u8);
+        let m = crate::mana::with_chain(tag(low, (g.0 >> 8) as u8), g.0 >> 16);
         for _ in 0..n {
             v.push(m);
         }
@@ -3063,12 +3148,11 @@ const PLAIN_TOTAL: usize = 64;
 /// has a mana spent, one per need of the payment. The needs: the cost's
 /// (`total`), the mana costs of the abilities picked (`marked`), and those
 /// the classes' abilities may add (`Class::need`), each member once, or as
-/// often as it is used. An ability with a mana cost makes `MADE` mana, which
-/// pays only the cost (`mana::fits`), so it is used at most `total` times.
+/// often as it is used. An ability with a mana cost is never cut: its mana may
+/// pay the cost of its next use (13.15: one before another's, `mana::chain`).
 /// Uses past these are never spent: leaving them out changes no answer.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct UseCap {
-    total: crate::num::Count,
     needs: crate::num::Count,
 }
 
@@ -3077,17 +3161,18 @@ impl UseCap {
         let t = total as u64;
         let mut needs = t + marked as u64;
         for cl in classes.iter().filter(|cl| cl.need != 0) {
-            let uses = if cl.res == 0 { (cl.reuse as u64).min(t) } else { 1 };
+            let uses = if cl.res == 0 { cl.reuse as u64 } else { 1 };
             needs = needs.saturating_add(cl.need_n as u64 * cl.members.len() as u64 * uses);
         }
         let count = |n: u64| n.min(crate::num::Count::MAX as u64) as crate::num::Count;
-        UseCap { total: count(t), needs: count(needs) }
+        UseCap { needs: count(needs) }
     }
 
     /// The most uses of one member of `cl` a payment spends.
     fn uses(&self, cl: &Class) -> crate::num::Count {
+        // (An ability with a mana cost is never cut, 13.15.)
         if cl.need != 0 {
-            self.total
+            crate::num::Count::MAX
         } else {
             self.needs
         }
@@ -3273,7 +3358,8 @@ impl PoolCtx {
 /// use is taken, or picked as often as its class allows, is out).
 /// `pools`: the shared activations' actors left (`PoolCtx`); `res`: the
 /// candidates of a cost's several reservations (`ResCtx`), which a source
-/// `consumes` uses up one of.
+/// `consumes` uses up one of. `chain_of`: a source's chain id (`chain_id`,
+/// its uses after it), which its mana cost's needs and its mana carry.
 #[allow(clippy::too_many_arguments)]
 fn cands(
     classes: &[Class],
@@ -3282,6 +3368,7 @@ fn cands(
     dmg: bool,
     reserved: &dyn Fn(&Class, &Src) -> i32,
     consumes: &dyn Fn(&Class, &Src) -> bool,
+    chain_of: &dyn Fn(&Src) -> u64,
     allow: u8,
     marked: u8,
     cap: UseCap,
@@ -3493,6 +3580,11 @@ fn cands(
             let sig = sig_use(cl, s, &pools);
             let rsig = rsig_use(cl, s);
             let acts = [act_of(cl), NO_POOL];
+            // (An ability with a mana cost: its activation's chain id on its
+            // cost's needs and on its mana, 13.15; each use its own.)
+            let base = if cl.need != 0 { chain_of(s) + used(s).1 as u64 } else { 0 };
+            let chained = |t: Tag, k: u64| if cl.need != 0 && t & MADE as Tag != 0 { crate::mana::with_chain(t, base + k) } else { t };
+            let need_of = |k: u64| if cl.need != 0 { crate::mana::with_chain(cl.need, base + k) } else { 0 };
             if cl.res == 0 {
                 // Its uses, each one way of its own (identical: the search
                 // counts how many, `ways_payable`), or fixed units when they
@@ -3504,15 +3596,16 @@ fn cands(
                 };
                 let life = extra + if let Yield::One(u) = &cl.yld { u.life as i32 } else { 0 };
                 let free = life == 0 && sac == 0 && rsig == NO_POOL && cl.need == 0 && !units.is_empty();
-                for _ in 0..n {
+                for k in 0..n {
+                    let k = k as u64;
                     if free {
                         out.fixed.extend(units.iter().copied());
                     } else if let Yield::Multi { prods, units: None } = &cl.yld {
                         let way = |p: &[u8; 6]| Way {
-                            units: units_of(p).map(|u| Unit::free(u.mask | made as Tag | restr)).collect(),
+                            units: units_of(p).map(|u| Unit::free(chained(u.mask | made as Tag | restr, k))).collect(),
                             life,
                             sac,
-                            need: cl.need,
+                            need: need_of(k),
                             need_n: cl.need_n,
                             acts: [NO_POOL; 2],
                             sig: NO_POOL,
@@ -3521,7 +3614,8 @@ fn cands(
                         };
                         out.alts.push(prods.iter().map(way).collect());
                     } else {
-                        out.alts.push(vec![Way { units: units.clone(), life, sac, need: cl.need, need_n: cl.need_n, acts: [NO_POOL; 2], sig: NO_POOL, rsig, crew: 0 }]);
+                        let units = units.iter().map(|u| Unit { mask: chained(u.mask, k), ..*u }).collect();
+                        out.alts.push(vec![Way { units, life, sac, need: need_of(k), need_n: cl.need_n, acts: [NO_POOL; 2], sig: NO_POOL, rsig, crew: 0 }]);
                     }
                 }
                 continue;
@@ -3557,7 +3651,7 @@ fn cands(
                 if cl.delve {
                     units.push(Unit::free(0u8));
                 }
-                Way { units, life: extra, sac, need: cl.need, need_n: cl.need_n, acts, sig, rsig, crew: 0 }
+                Way { units, life: extra, sac, need: need_of(0), need_n: cl.need_n, acts, sig, rsig, crew: 0 }
             };
             let ways: Vec<Way> = match &cl.yld {
                 Yield::One(u) => {
@@ -3565,10 +3659,10 @@ fn cands(
                     vec![Way { units, life: u.life as i32 + extra, sac, need: 0, need_n: 0, acts, sig, rsig, crew: 0 }]
                 }
                 Yield::Multi { units: Some(us), .. } => {
-                    vec![multi(us.iter().map(|u| Unit::free(u.mask | made as Tag | restr)).collect())]
+                    vec![multi(us.iter().map(|u| Unit::free(chained(u.mask | made as Tag | restr, 0))).collect())]
                 }
                 Yield::Multi { prods, units: None } => {
-                    prods.iter().map(|p| multi(units_of(p).map(|u| Unit::free(u.mask | made as Tag | restr)).collect())).collect()
+                    prods.iter().map(|p| multi(units_of(p).map(|u| Unit::free(chained(u.mask | made as Tag | restr, 0))).collect())).collect()
                 }
             };
             let ways = ways.into_iter().map(|w| (w, cl.res));
@@ -3662,7 +3756,7 @@ fn cands(
 fn unit_covers(a: Tag, b: Tag) -> bool {
     let (la, lb) = (crate::mana::low(a), crate::mana::low(b));
     lb & TYPES & !la == 0
-        && (la & MADE == 0 || lb & MADE != 0)
+        && (la & MADE == 0 || lb & MADE != 0 && crate::mana::chain(a) == crate::mana::chain(b))
         && (la & RESTRICTED == 0 || lb & RESTRICTED != 0)
         && (purposes(a) == 0 || (purposes(b) != 0 && purposes(b) & !purposes(a) == 0))
 }
@@ -4022,7 +4116,7 @@ mod tests {
         let mut pm = PayMana::new(0, c);
         pm.extra[crate::mana::R] = 100;
         let groups = g.vgroups(&pm);
-        assert_eq!(groups.iter().find(|x| x.0 == crate::mana::R as u16).map(|x| x.1), Some(300));
+        assert_eq!(groups.iter().find(|x| x.0 == crate::mana::R as Kind).map(|x| x.1), Some(300));
     }
 
     #[test]

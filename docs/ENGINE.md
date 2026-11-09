@@ -21204,3 +21204,40 @@ before, no Rebel to tap).
 `3a6e81f85dc10d59` -> `14b9b0e887831eef`: 2 of the 2,500 games change (r 1987: Fury retraced with
 Six for its evoke cost, exiling a red card; h 77: Daze retraced by Wrenn and Six's emblem, returning
 an Island). `RULES_EPOCH` bumped; the Delver canary library's 60 spots reach their positions.
+
+##### 13.15: chains of mana abilities with mana costs
+
+`MADE` and `NOT_MADE` were one bit each: the mana of a mana ability with a mana cost paid no such
+ability's cost in the same payment (Loot, the Pathfinder's three {R} for Arena of Glory's {R};
+one Sunken Ruins' mana for another's {U/B}). CR 605.3a, 602.2b: while paying a cost, mana abilities
+may be activated, each one's mana existing once it resolves; so one's mana pays the cost of one
+activated after it, never its own or an earlier one's: the "pays the cost of" relation is acyclic.
+
+* **Chain ids** (`mana::chain`, `Tag` bits 16-63; `Tag` is a u64): a `MADE` unit carries the
+  activation that made it, a `NOT_MADE` need the one whose cost it is (`pay::chain_id`: the
+  source's place among the classes' sources with a mana cost, and its use, for one used several
+  times); `fits` lets a `MADE` unit pay a `NOT_MADE` need when its id ranks lower. The picks keep
+  them (`PayMana::marked`, `PayMana::made_by`, the virtual pool's kinds, `vgroups`, `pool_rems`),
+  the candidates too (`cands`).
+* **The order** (`payable_iter`): with such needs and such mana that could pay another's, every
+  order of the activations is tried, their ids relabelled by rank; activations alike (the same
+  needs and the same mana) keep a fixed order among themselves. A search past `SEARCH_NODES` is a
+  loud failure (ENGINE.md 51). `payable_iter`'s counts are u32 and its groups unbounded (a u8
+  count saturated, 128 tags and 24 needs were fixed arrays).
+* **`UseCap`** (N10) relied on the old rule ("an ability with a mana cost pays only the cost, so it
+  is used at most the cost's size times"): such an ability is never cut now.
+* **Converge** (`record_converge`): the mana made by such abilities spent is as little as the rest
+  of the pool allows (it pays more), whose (`made_by`) every choice, the most colours any shows;
+  `most_colors_matching` checks each colour set with `payable_n` (the orders tried). (Its hybrid
+  and Phyrexian fallback is 28.8.2k's, workstream D's.)
+
+Tests: `cr_605_3a_a_mana_abilitys_mana_pays_a_later_ones_cost` (two Sunken Ruins and a Swamp:
+{U}{U}{U}, a Ruins' own {C} the third mana before; two alone: no {U}),
+`cr_601_2g_a_payment_with_a_chain_of_mana_abilities` (B4's Test Blue Rock, {U}{U}{U}, cast with
+them; not castable before).
+
+**Digests** (13.15): full `6d25032ffee21839` -> `be4ad3e9916de295`, `DIGEST_ENCODING=0`
+`14b9b0e887831eef` -> `0503082a58e22ca4`: 13 of the 2,500 games change, each with two Sunken Ruins
+or two Arenas of Glory (the five inspected: r 263, 484, 502 with Ruins; r 404, 801 with Arenas):
+one's mana pays the other's cost. `RULES_EPOCH` bumped; the Delver canary library's 60 spots reach
+their positions.
