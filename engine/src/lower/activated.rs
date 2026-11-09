@@ -496,6 +496,11 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     } else {
         l.deny("ActivationCost.tap_permanent_type", tap_permanent_type);
     }
+    // (One tap cost a payment keeps payable, `pay::Keep::taps`, besides "tap
+    // X": crew or saddle with another is refused, loudly.)
+    if [cost.crew > 0, cost.tap_untapped.is_some(), cost.tap_x.is_some()].iter().filter(|&&x| x).count() > 1 {
+        l.unsupported("ActivationCost.crew(with another tap cost)");
+    }
     if sacs.len() > 1 {
         l.unsupported("ActivationCost.sacrifice(more than one kind)");
     }

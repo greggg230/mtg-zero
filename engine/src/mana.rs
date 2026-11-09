@@ -625,8 +625,11 @@ impl Budget {
     pub const FREE: Budget = Budget { life: i32::MAX, sac: i32::MAX, tap: i32::MAX };
 
     fn take(&self, u: &Unit, n: i32) -> Option<Budget> {
-        let b = Budget { life: self.life - u.life as i32 * n, sac: self.sac - if u.sac { n } else { 0 }, tap: self.tap };
-        (b.life >= 0 && b.sac >= 0).then_some(b)
+        // (In i64: exact for any number of units; what is left is within
+        // the i32 it was taken from.)
+        let life = self.life as i64 - u.life as i64 * n as i64;
+        let sac = self.sac as i64 - if u.sac { n as i64 } else { 0 };
+        (life >= 0 && sac >= 0).then_some(Budget { life: life as i32, sac: sac as i32, tap: self.tap })
     }
 }
 
@@ -644,7 +647,8 @@ pub fn payable_within_n(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag
     let paid: Vec<Unit> = available.iter().copied().filter(|u| u.budgeted()).collect();
     // Rare (low life, discard costs): try how many units of each budgeted
     // group to use.
-    let mut groups: Vec<(Unit, u8)> = Vec::new();
+    // (Counted in u32: any number of units, never wrapping.)
+    let mut groups: Vec<(Unit, u32)> = Vec::new();
     for u in paid {
         match groups.iter_mut().find(|g| g.0 == u) {
             Some(g) => g.1 += 1,
@@ -659,14 +663,14 @@ pub fn payable_within_n(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag
         extra: &[Tag],
         chosen: &[Tag],
         units: &mut Vec<Tag>,
-        groups: &[(Unit, u8)],
+        groups: &[(Unit, u32)],
         b: Budget,
         nodes: &mut u32,
     ) -> Option<bool> {
         *nodes = nodes.checked_sub(1)?;
         let Some(((u, n), rest)) = groups.split_first() else { return Some(payable_n(cost, allow, extra, chosen, units)) };
         for take in (0..=*n).rev() {
-            let Some(left) = b.take(u, take as i32) else { continue };
+            let Some(left) = b.take(u, take.min(i32::MAX as u32) as i32) else { continue };
             let len = units.len();
             units.extend(std::iter::repeat_n(u.mask, take as usize));
             let ok = go(cost, allow, extra, chosen, units, rest, left, nodes);

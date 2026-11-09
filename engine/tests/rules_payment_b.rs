@@ -519,3 +519,188 @@ fn cr_106_6_restricted_mana_never_stands_for_a_lands_plain_mana() {
     assert!(g.can_pay(0, &cost("{6}{B}")));
     assert!(!g.can_pay(0, &cost("{7}{B}")));
 }
+
+// ---- 100.4.6: B3, the last of mana and payment ----------------------------
+
+fn charge() -> engine::db::Counter {
+    engine::db::Counter::Named(common::db().subtype_id("counter:charge").expect("charge counters"))
+}
+
+/// docs/shortcuts.md N10, CR 122.1, 605.1a: Pentad Prism's "Remove a charge
+/// counter from Pentad Prism: Add one mana of any color" is activated once
+/// per counter, however many it has (counters have no maximum). With 40 it
+/// pays {33} and Walking Ballista for X = 20 ({X}{X}); with the old 32 uses a
+/// payment it could make was refused.
+#[test]
+fn cr_122_1_pentad_prism_pays_with_every_charge_counter() {
+    let g = scen().battlefield(0, &["Pentad Prism"]).counters(0, "Pentad Prism", charge(), 40).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{33}")), "33 of its 40 counters");
+    assert!(g.can_pay(0, &cost("{40}")));
+    assert!(!g.can_pay(0, &cost("{41}")));
+    assert!(g.can_pay(0, &cost("{W}{U}{B}{R}{G}{35}")));
+    let mut g = scen()
+        .battlefield(0, &["Pentad Prism"])
+        .counters(0, "Pentad Prism", charge(), 40)
+        .hand(0, &["Walking Ballista"])
+        .at(Step::Main1, 0)
+        .start();
+    let ballista = g.card(0, "Walking Ballista", Zone::Hand);
+    g.choose(Choice::Cast(ballista));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "X: {:?}", g.options_desc());
+    // (X is asked with A0's digits past 31: take the largest each time.)
+    for _ in 0..8 {
+        if g.kind() != Some(DecisionKind::ChooseMode) {
+            break;
+        }
+        let last = *options(&g).last().unwrap();
+        g.choose(last);
+    }
+    finish(&mut g, |_| None);
+    let prism = bf(&g, 0, "Pentad Prism");
+    assert_eq!(g.counters_on(prism, charge()), 0, "X = 20 took all 40\n{}", log(&g));
+    assert_eq!(g.stack().len(), 1);
+}
+
+/// The cube with the shared test cards and B3's own (ENGINE.md 100.4.6), a
+/// table of its own (the cube's fuzz pool and digests keep theirs).
+fn b3_db() -> &'static CardDb {
+    use serde_json::json;
+    static DB: std::sync::OnceLock<&'static CardDb> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let mana = |cost: serde_json::Value, g: i64| {
+            json!({"$t": "ActivatedAbility", "cost": cost, "effect": {"$t": "AddManaToPool", "produces": [["G", g]]}, "is_mana_ability": true})
+        };
+        let creature = |name: &str, sub: &str, p: i64, abilities: serde_json::Value| {
+            eoe_w2::card(name, json!({"card_types": ["Creature"], "subtypes": [sub], "power": p, "toughness": 1, "type_line": format!("Creature - {sub}"),
+                "mana_cost": {"$t": "ManaCost", "colored": [["G", 1]]}, "mana_cost_str": "{G}", "activated_abilities": abilities}))
+        };
+        let custom = vec![
+            // "Sacrifice this creature: Add {G}."
+            creature("Test Sac Elf", "Elf", 1, json!([mana(json!({"$t": "ActivationCost", "sacrifice_self": true}), 1)])),
+            // A Rebel with "{T}: Add {G}."
+            creature("Test Mana Rebel", "Rebel", 2, json!([mana(json!({"$t": "ActivationCost", "tap_self": true}), 1)])),
+        ];
+        let mut cards = engine::db::load_cube_document().cards;
+        cards.extend(common::custom_cards());
+        cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
+        CardDb::from_cards(&cards).leak()
+    })
+}
+
+fn b3_scen() -> Scenario {
+    Scenario::new(b3_db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.log = true;
+        })
+        .library(0, &["Island"; 12])
+        .library(1, &["Island"; 12])
+}
+
+/// docs/shortcuts.md 27.13.4, CR 601.2g-h: Otharri, Suns' Glory's "{2}{R}{W},
+/// Tap an untapped Rebel you control: Return this card from your graveyard to
+/// the battlefield tapped" may tap a Rebel with a mana ability while lands pay
+/// the mana (the mana abilities come first, the Rebel is tapped after). Only
+/// Rebels without one counted before. The Rebel can't do both: with three
+/// lands the ability isn't offered.
+#[test]
+fn cr_601_2h_a_rebel_with_a_mana_ability_pays_a_tap_cost() {
+    let lands = ["Mountain", "Plains", "Mountain", "Plains"];
+    let mut g = b3_scen().battlefield(0, &lands).battlefield(0, &["Test Mana Rebel"]).graveyard(0, &["Otharri, Suns' Glory"]).at(Step::Main1, 0).start();
+    let o = g.card(0, "Otharri, Suns' Glory", Zone::Graveyard);
+    let back = options(&g).into_iter().find(|c| matches!(c, Choice::Ability(x, _) if *x == o));
+    let back = back.unwrap_or_else(|| panic!("Otharri's ability is offered: {:?}", g.options_desc()));
+    g.choose(back);
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(o).zone, Zone::Battlefield, "{}", log(&g));
+    assert!(g.obj(bf(&g, 0, "Test Mana Rebel")).tapped, "the Rebel tapped for the cost");
+    let g = b3_scen().battlefield(0, &lands[..3]).battlefield(0, &["Test Mana Rebel"]).graveyard(0, &["Otharri, Suns' Glory"]).at(Step::Main1, 0).start();
+    let o = g.card(0, "Otharri, Suns' Glory", Zone::Graveyard);
+    assert!(!options(&g).iter().any(|c| matches!(c, Choice::Ability(x, _) if *x == o)), "the Rebel can't pay the mana and the tap");
+}
+
+/// P1 casts Lightning Bolt at P0, who then casts We Say Thee Nay! (teamwork
+/// 2: "you may tap any number of untapped creatures you control with total
+/// power 2 or more") with the board `mine`: the game at the teamwork choice
+/// (`ChooseCost`), and the Bolt.
+fn nay_with(mine: &[&str]) -> (Game, CardIdx) {
+    let mut g = b3_scen()
+        .battlefield(0, mine)
+        .hand(0, &["We Say Thee Nay!"])
+        .battlefield(1, &["Mountain", "Mountain", "Mountain"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 1)
+        .start();
+    let b = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(b));
+    g.choose(Choice::Target(engine::Target::Player(0)));
+    finish(&mut g, |_| None);
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+    let n = g.card(0, "We Say Thee Nay!", Zone::Hand);
+    g.choose(Choice::Cast(n));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseCost));
+    (g, b)
+}
+
+/// docs/shortcuts.md N8, CR 702.122a-like teamwork, 601.2g-h: with ten Birds
+/// of Paradise (power 0) and then two Llanowar Elves, teamwork 2 taps the two
+/// Elves and two Birds pay {1}{U}. The castability tried the subsets of only
+/// the first ten creatures with mana abilities, so the Elves never counted
+/// and teamwork wasn't offered.
+#[test]
+fn cr_601_2h_teamwork_counts_every_creature_with_a_mana_ability() {
+    let mut mine = vec!["Birds of Paradise"; 10];
+    mine.extend(["Llanowar Elves", "Llanowar Elves"]);
+    let (mut g, b) = nay_with(&mine);
+    assert!(g.has_option(Choice::Number(1)), "teamwork offered: {:?}", g.options_desc());
+    g.choose(Choice::Number(1));
+    finish(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => Some(g.tgt(b)),
+        _ => None,
+    });
+    let elf = b3_db().id("Llanowar Elves").unwrap();
+    let elves: Vec<&engine::game::Obj> = g.objs().iter().filter(|o| o.zone == Zone::Battlefield && o.def == elf).collect();
+    assert_eq!(elves.len(), 2);
+    assert!(elves.iter().all(|o| o.tapped), "both Elves tapped for teamwork: {}", log(&g));
+    assert_eq!(g.stack().len(), 2, "Nay cast\n{}", log(&g));
+}
+
+/// docs/shortcuts.md 13.17, CR 601.2g-h: a creature tapped for teamwork is
+/// tapped after the spell's mana abilities, so none of them sacrificed it.
+/// Two Test Sac Elves ("Sacrifice this creature: Add {G}") and an Island: the
+/// Elves tapped for teamwork, {1}{U} isn't payable (castability says so);
+/// with two Islands, the payment doesn't offer the tapped Elves'
+/// sacrifices (the engine taps them first; before, it offered them).
+#[test]
+fn cr_601_2g_a_creature_tapped_for_teamwork_pays_no_mana() {
+    let (g, _) = nay_with(&["Test Sac Elf", "Test Sac Elf", "Island"]);
+    assert!(!g.has_option(Choice::Number(1)), "teamwork leaves {{1}}{{U}} unpaid: {:?}", g.options_desc());
+    let (mut g, b) = nay_with(&["Test Sac Elf", "Test Sac Elf", "Island", "Island"]);
+    assert!(g.has_option(Choice::Number(1)));
+    g.choose(Choice::Number(1));
+    let elf = b3_db().id("Test Sac Elf").unwrap();
+    for _ in 0..40 {
+        match g.kind() {
+            Some(DecisionKind::Target) => g.choose(g.tgt(b)),
+            Some(DecisionKind::PayMana) => {
+                let elves: Vec<CardIdx> = options(&g)
+                    .into_iter()
+                    .filter_map(|c| match c {
+                        Choice::Ability(x, _) | Choice::Card(x) if g.obj(x).def == elf => Some(x),
+                        _ => None,
+                    })
+                    .collect();
+                assert!(elves.is_empty(), "a tapped Elf sacrificed for the spell's mana: {:?}", g.options_desc());
+                let c = options(&g)[0];
+                g.choose(c)
+            }
+            _ if at_priority(&g) => break,
+            _ => {
+                let c = options(&g)[0];
+                g.choose(c)
+            }
+        };
+    }
+    assert_eq!(g.stack().len(), 2, "Nay cast: {}", log(&g));
+}

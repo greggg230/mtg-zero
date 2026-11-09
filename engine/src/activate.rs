@@ -531,12 +531,11 @@ impl Game {
         self.cost_payable_with(p, card, cost, mana, classes, exclude, false, 0)
     }
 
-    /// [`cost_payable`](Self::cost_payable); with `zero_mana_taps`, a cost
-    /// with no mana may tap a permanent with a mana ability for its "tap an
-    /// untapped <permanent>" part (no payment competes with it: station's
-    /// "tap another untapped creature you control", CR 702.184a, by a mana
-    /// creature). Without it such a permanent counts only for a cost of
-    /// mana-ability shape (Urza's, whose payment path is its own).
+    /// [`cost_payable`](Self::cost_payable). A "tap n untapped <permanent>"
+    /// part, crew or saddle may tap a permanent with a mana ability: the
+    /// mana is paid with the others (CR 601.2g before 601.2h; the payment
+    /// keeps the taps payable, `Keep::taps`; docs/shortcuts.md 27.13.4).
+    /// (`_zero_mana_taps`: no longer read, every candidate counts.)
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn cost_payable_with(
         &self,
@@ -546,7 +545,7 @@ impl Game {
         mana: &crate::mana::ManaCost,
         classes: &[Class],
         exclude: Option<CardIdx>,
-        zero_mana_taps: bool,
+        _zero_mana_taps: bool,
         // The spending restrictions the payment meets (`Keep::allow`: an
         // ability's source, ENGINE.md 99.12).
         allow: u8,
@@ -603,15 +602,10 @@ impl Game {
                 return false;
             }
         }
-        // (Not counting permanents that could be tapped for mana first: the
-        // mana is paid before, 601.2g-h.)
+        // (Every candidate counts: one tapped for mana instead is the
+        // payment's choice, `Keep::taps`, checked with the mana below.)
         if let Some(t) = &cost.tap_untapped {
-            let n = if zero_mana_taps && mana.is_zero() {
-                self.tap_candidates(p, card, t).count()
-            } else {
-                self.tap_candidates(p, card, t).filter(|&c| !self.has_mana_ability(c)).count()
-            };
-            if n < t.n as usize {
+            if self.tap_candidates(p, card, t).count() < t.n as usize {
                 return false;
             }
         }
@@ -630,7 +624,22 @@ impl Game {
         if mana.is_zero() {
             return true;
         }
-        self.can_pay_without(p, mana, classes, &Keep { allow, ..Self::keep_for(card, cost, exclude) }, exclude)
+        let keep = Keep { allow, taps: self.taps_for(p, card, cost), ..Self::keep_for(card, cost, exclude) };
+        self.can_pay_without(p, mana, classes, &keep, exclude)
+    }
+
+    /// The tap cost `card`'s `cost` pays after its mana (`Keep::taps`): crew
+    /// or saddle of a permanent (teamwork's taps are paid before the mana:
+    /// `crew_mana_ok`, `Keep::committed`), or "tap n untapped <permanents>".
+    /// (The lowering refuses a cost with two of them.)
+    pub(crate) fn taps_for(&self, p: PlayerId, card: CardIdx, cost: &Cost) -> Option<crate::pay::TapsOwed> {
+        if cost.crew > 0 && !self.is_spell_card(card) {
+            let bonus = !cost.saddle;
+            let cands = self.crew_eligible(p, card).into_iter().map(|c| (c, self.crew_power_of(c, bonus))).collect();
+            return Some(crate::pay::TapsOwed { need: cost.crew as i64, cands });
+        }
+        let t = cost.tap_untapped.as_ref()?;
+        Some(crate::pay::TapsOwed { need: t.n as i64, cands: self.tap_candidates(p, card, t).map(|c| (c, 1)).collect() })
     }
 
     /// Sacrifice the permanents chosen for a cost (together, one batch).
@@ -760,12 +769,14 @@ impl Game {
     }
 
     /// Teamwork (a spell's "tap any number of untapped creatures you control
-    /// with total power n or more", paid before its mana, CR 601.2h): can
-    /// `p` tap creatures of `cands`, with the ones already chosen
+    /// with total power n or more", paid in the engine's order before its
+    /// mana): can `p` tap creatures of `cands`, with the ones already chosen
     /// (`tapped_in`), for total power `need` and still pay `mana` from
-    /// `classes` without the mana abilities of the creatures tapped? (The
-    /// taps and the mana compete for creatures with mana abilities: every
-    /// set of those is tried.)
+    /// `classes`? By the rules the mana abilities come first (CR 601.2g,
+    /// then 601.2h), so a creature tapped or sacrificed for mana can't be
+    /// tapped for teamwork: the feasibility tries each creature both ways
+    /// (`Keep::taps`, exact for any number of creatures; docs/shortcuts.md
+    /// N8: only 10 were tried before).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn crew_mana_ok(
         &self,
@@ -778,25 +789,16 @@ impl Game {
         keep: &Keep,
     ) -> bool {
         let have: i64 = tapped_in.iter().map(|&c| self.crew_power_of(c, false)).sum();
-        let (with_mana, plain): (Vec<CardIdx>, Vec<CardIdx>) = cands.iter().copied().partition(|&c| self.has_mana_ability(c));
-        let plain_power: i64 = plain.iter().map(|&c| self.crew_power_of(c, false).max(0)).sum();
-        let k = with_mana.len().min(10);
-        for mask in 0u32..(1 << k) {
-            let extra: i64 = (0..k).filter(|i| mask >> i & 1 != 0).map(|i| self.crew_power_of(with_mana[i], false).max(0)).sum();
-            if have + plain_power + extra < need {
-                continue;
-            }
-            if mana.is_zero() {
-                return true;
-            }
-            let tapped: Vec<CardIdx> =
-                tapped_in.iter().copied().chain((0..k).filter(|i| mask >> i & 1 != 0).map(|i| with_mana[i])).collect();
-            let left = self.classes_without(classes, &tapped);
-            if self.can_pay_with(p, mana, &left, keep) {
-                return true;
-            }
+        let rest: i64 = cands.iter().map(|&c| self.crew_power_of(c, false).max(0)).sum();
+        if have + rest < need {
+            return false;
         }
-        false
+        if mana.is_zero() {
+            return true;
+        }
+        let left = self.classes_without(classes, tapped_in);
+        let taps = crate::pay::TapsOwed { need: need - have, cands: cands.iter().map(|&c| (c, self.crew_power_of(c, false))).collect() };
+        self.can_pay_with(p, mana, &left, &Keep { taps: Some(taps), committed: tapped_in.to_vec(), ..keep.clone() })
     }
 
     /// Cards in `p`'s hand matching `f` other than `card`, one per
@@ -836,6 +838,8 @@ impl Game {
             allow: 0,
             spell: None,
             sac_taps: false,
+            taps: None,
+            committed: Vec::new(),
         }
     }
 
@@ -851,6 +855,9 @@ impl Game {
         pm.keep = Self::keep_for(card, &ad.cost, Self::mana_exclude(card, ad));
         // (Mana spendable on abilities of its source's kind, CR 106.6.)
         pm.keep.allow = self.ability_allow(card);
+        // Crew, saddle, "tap n untapped <permanents>": paid next, so the
+        // mana leaves them payable (27.13.4).
+        pm.keep.taps = self.taps_for(p, card, &ad.cost);
         // "Tap X untapped artifacts": X of them stay for the cost (EoE W3).
         if let Some(r) = Self::tap_x_reserve(&ad.cost, u8::try_from(x).unwrap_or(u8::MAX)) {
             pm.keep.sac = Some((r, card));
@@ -1146,6 +1153,16 @@ impl Game {
         // (The taps of a "tap untapped permanents" cost, then crew's.)
         for &c in picked[n_gy..n_tap].iter().chain(&picked[n_rc..]) {
             self.tap(c);
+        }
+        // Teamwork's creatures, tapped before the spell's mana in the
+        // engine's order: by the rules after its mana abilities (CR 601.2g
+        // before 601.2h), so none of them is a mana source of it
+        // (`Keep::committed`; docs/shortcuts.md 13.17).
+        if cost.crew > 0 && self.is_spell_card(card) && picked.len() > n_rc {
+            let crew: Vec<CardIdx> = picked[n_rc..].to_vec();
+            if let Some(Task::PayMana(pm)) = self.agenda.iter_mut().rev().find(|t| matches!(t, Task::PayMana(_))) {
+                pm.keep.committed.extend(crew);
+            }
         }
         if let Some((_, k)) = cost.remove_counter_from {
             self.remove_counters(picked[n_tap], k, 1);

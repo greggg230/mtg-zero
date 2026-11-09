@@ -20704,3 +20704,77 @@ In the brief's order, still open (100.4.4 has their designs):
   `ManaCost::total`/`plus`, X and tax added into the u8 generic in `activate.rs` and `cast.rs`,
   `keep.life + phyrexian_life`, `phyrexian_life += 2k`, `later as u8`, "pay X life" and `x_range`
   below 255).
+
+#### 100.4.6 B3: the last of mana and payment (branch `eoe-b3-pay`, from `eoe-base` e164d69)
+
+**Why.** 100.4.5's open list (the audit's F4, `docs/faithfulness_audit.md` 5.4) and the payment's
+u8 arithmetic F7 left to workstream B. Tests: `engine/tests/rules_payment_b.rs` (section
+"100.4.6", with a table of its own, `b3_db`: the cube, the shared test cards and B3's, so the
+cube's fuzz pool and digests keep theirs); each failed before its fix.
+
+##### N10: a source that only removes counters, every use
+
+Pentad Prism's "Remove a charge counter: Add one mana of any color" was usable at most 32 times
+in a payment (`.min(32)`), and when it could be used once it took its card as a tap would.
+
+* `Class::reuse` is a `num::Count`: once per n counters, all of them. Such an ability (no {T},
+  no sacrifice, exile or discard of its card) has `Class::res` 0: it uses nothing of its card,
+  so it combines with each other source of the card (tapped for improvise, its own {T}
+  abilities), and `PayMana::uses` counts the picks of that source, not of its card.
+* The feasibility (`cands`) gives its uses ways of their own, or fixed units when they take
+  nothing a payment shares (a several-mana one, each use its whole production: one use was
+  counted before), never one of its card's alternatives. It leaves out only the uses no payment
+  can spend (`UseCap`): in a payment that uses no source it could leave out, every use has a
+  mana spent, one per need, so the uses are at most the needs: the cost's, the picked mana
+  costs, and those the classes' abilities may add (an ability with a mana cost makes `MADE`
+  mana, which pays only the cost, so it is used at most the cost's size times). `plain_cands`,
+  built once per priority decision for every cost, uses a cost size of 64 and says when it cut a
+  source (`Cands::cut`); a larger cost builds its own.
+* Counts that could wrap: `payable_within_n`'s groups of budgeted units (u8 -> u32),
+  `Budget::take` (in i64), `might_pay`'s total (u64).
+
+Test: `cr_122_1_pentad_prism_pays_with_every_charge_counter` (40 counters pay {40}, not {41};
+Walking Ballista cast for X = 20).
+
+##### 27.13.4, N8, 13.17: tap costs and the mana, as one search
+
+By CR 601.2g the mana abilities are activated before the costs are paid (601.2h), so a creature
+tapped or sacrificed for mana can't be tapped for crew, saddle, teamwork or "tap n untapped
+<permanents>", and one tapped for such a cost was never a mana source of it.
+
+* **`Keep::taps`** (`pay::TapsOwed`): a tap cost the payment must leave payable, its need
+  (power, or 1 per permanent) and its candidates. In the feasibility each candidate with a way
+  of making mana gets one more way, tapped for the cost (`Way::crew`, what it counts for; it
+  takes one of the shared taps when it is a Pollinator that could activate or a Lumberjack),
+  among its alternatives; a candidate with none counts at once. A leaf holds when the ways chosen
+  tap enough (`ways_payable`'s `crew`). Tapping for the cost takes no budget and only helps, so
+  it dominates "none" like a free way. A candidate a pick taps or sacrifices is out
+  (`pay_cands`).
+* **Teamwork** (`crew_mana_ok`): exact for any number of creatures (it tried the subsets of the
+  first 10 with mana abilities: N8). The creatures it taps are tapped before the spell's mana in
+  the engine's order; they become `Keep::committed` of the spell's payment (`pay_costs`), whose
+  classes leave out every source that taps or sacrifices one (`payment_classes`): the payment
+  offered a tapped creature's "sacrifice this: add" (13.17). `classes_without` keeps a source
+  that only removes counters and takes the Pollinators among the cards out of `POL_FOR`'s share
+  (and of the improvise and convoke members they split), as it did the Lumberjacks.
+* **Crew, saddle and "tap n untapped <permanents>" of an ability** (`Game::taps_for`): every
+  candidate counts (only those without a mana ability did when mana was owed: 27.13.4), and the
+  payment keeps the cost payable (`act_pay`, `cost_payable_with`). Urza, Lord High Artificer's
+  "Tap an untapped artifact you control: Add {U}" with priority now counts artifacts with mana
+  abilities too (`zero_mana_taps` is no longer read).
+* One such cost per payment: the lowering refuses an activated cost with two of crew, "tap n
+  untapped" and "tap X untapped" (`ActivationCost.crew(with another tap cost)`), and
+  `merge_costs` doesn't merge two.
+
+Tests: `cr_601_2h_a_rebel_with_a_mana_ability_pays_a_tap_cost` (Otharri, Suns' Glory's return
+with B3's Test Mana Rebel; with one land fewer it isn't offered),
+`cr_601_2h_teamwork_counts_every_creature_with_a_mana_ability` (ten Birds of Paradise, then two
+Llanowar Elves: We Say Thee Nay!'s teamwork taps the Elves),
+`cr_601_2g_a_creature_tapped_for_teamwork_pays_no_mana` (B3's Test Sac Elf).
+
+**Digests** (with N10, 27.13.4, N8, 13.17): full `02d4bccc94314d6d` -> `79935610b369fb77`,
+`DIGEST_ENCODING=0` `856218d6b081056c` -> `8ff7d319dba5da5d`: 6 of the 2,500 games change. Four
+(r 517, 905, 1678, 1867) by Urza, Lord High Artificer's "Tap an untapped artifact you control"
+with priority tapping an artifact with a mana ability, two (r 609, 1553) by Pentad Prism's counter
+uses combining with improvise tapping it (Kappa Cannoneer castable). `RULES_EPOCH` bumped; the
+Delver canary library's 60 spots reach their positions (`delver_rerecord.py check --stamp`).

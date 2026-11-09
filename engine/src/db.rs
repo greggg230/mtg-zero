@@ -2114,6 +2114,7 @@ pub(crate) fn merge_costs(a: &Cost, b: &Cost) -> Option<Cost> {
         exile_graveyard: a.exile_graveyard.checked_add(b.exile_graveyard)?,
         remove_counters: one(&a.remove_counters, &b.remove_counters)?,
         crew: if a.crew > 0 && b.crew > 0 { return None } else { a.crew + b.crew },
+        // (Crew with another tap cost: not one `Keep::taps`.)
         saddle: a.saddle || b.saddle,
         tap_untapped: one(&a.tap_untapped, &b.tap_untapped)?,
         waterbend: a.waterbend || b.waterbend,
@@ -2125,6 +2126,9 @@ pub(crate) fn merge_costs(a: &Cost, b: &Cost) -> Option<Cost> {
         remove_counter_from: one(&a.remove_counter_from, &b.remove_counter_from)?,
         tap_x: one(&a.tap_x, &b.tap_x)?,
     };
+    if [c.crew > 0, c.tap_untapped.is_some(), c.tap_x.is_some()].iter().filter(|&&x| x).count() > 1 {
+        return None;
+    }
     let reservations = [c.sacrifice.is_some() || c.bounce.is_some(), c.discard > 0, c.exile_from_hand.is_some()];
     if reservations.iter().filter(|&&x| x).count() > 1 || c.sacrifice.is_some() && c.bounce.is_some() {
         return None;
