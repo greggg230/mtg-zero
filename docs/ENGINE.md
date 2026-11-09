@@ -19947,3 +19947,13 @@ options in the list.
 games change: 94 by Anointed Peacekeeper's names (with the opponent-only names the digest is
 `e6039cb2` again) and 1 (r 1064) by combat damage of 32 or more to divide. The rest of A changes no
 digest game.
+
+**Checks** (the normal release profile, on c5765ef, `eoe-base` 9c67a75 merged). The full engine
+suite: 2,006 passed, 0 failed, 20 ignored (133 binaries). Digests as above; `--test az` 41 passed,
+`--test hidden` 16 passed, `--test limits` 9 passed. The default `FUZZ_GAMES=20000`: 20,000 games
+(wins 9,976 / 9,986, 38 draws) and 1,000 matches, passed (498 s). `FUZZ_POOL=eoe FUZZ_GAMES=20000`:
+20,000 games (wins 8,918 / 9,040, 2,042 draws, mean 40.1 turns, 500.7 decisions), passed (1,012 s).
+`tools/position_lab.py`'s `RULES_EPOCH` is bumped to the re-record (9b403c1's rule). Intermediate
+commits ran the affected test binaries and the digests; the full suite ran on c5765ef (its first run,
+on 2ec2d28's parent, found `tests/az.rs`'s slot test unaware of "next page" options, fixed in
+2ec2d28).
