@@ -214,6 +214,7 @@ pub fn fields() -> Vec<Field> {
             token_asking: Derived "the pending decision is the token replacement's question (Game.pending, public)",
             token_answer: Derived "transient: set and cleared around one op",
             token_frame: Derived "transient: set and cleared around one op",
+            deferred_since: Derived "transient: the entering permanents waiting for their devour choice (Game.agenda), with their entries' first timestamps",
         });
     }
     classify!(v, Player {

@@ -231,6 +231,11 @@ pub struct W6State {
     /// The answer for the instruction being run again: `Choice::Card` of the
     /// Aura whose replacement applies, or `Choice::Pass`.
     pub token_answer: Option<crate::decision::Choice>,
+    /// The entering permanents whose "enters with" counters come after a
+    /// choice made as they enter (devour, CR 702.82a: the lands chosen,
+    /// then the counters), with their entries' first timestamps
+    /// (`W6State::entering`): taken as the counters are put.
+    pub deferred_since: Vec<(crate::ids::CardIdx, u32)>,
     /// Set while a spell's or ability's instruction runs in a game with
     /// such a card (`Game::run_frame`): the only place tokens are created
     /// in a table with one (`W6Db::of`).

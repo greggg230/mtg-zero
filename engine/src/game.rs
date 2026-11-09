@@ -1902,6 +1902,11 @@ impl Game {
         // counters (`Task::Devour`; ENGINE.md 99.12).
         if self.def_of(idx).devour_land > 0 {
             self.agenda.push(Task::Devour { card: idx, picked: Vec::new() });
+            // (Its counters, once the lands are chosen, are counters it enters
+            // with: EoE W6, `W6State::deferred_since`.)
+            if let Some(e) = self.w6.entering.filter(|e| e.0 == idx) {
+                self.w6.deferred_since.push(e);
+            }
         }
         if self.def_of(idx).shock_life > 0
             || self.def_of(idx).chooses_player
