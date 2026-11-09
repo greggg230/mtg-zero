@@ -2251,6 +2251,7 @@ impl CardDb {
         db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
         db.watch_toughness = db.defs.iter().any(|d| d.toughness_assigns_damage || d.toughness_stations);
         db.hand_alt_grants = db.defs.iter().any(|d| !d.casting.hand_alt_grants.is_empty());
+        crate::companion::check_table(&db);
         db.spend_kinds = crate::eoe_w2::spend_kinds(&db.defs);
         db.eldrazi = db.subtype_id("Eldrazi");
         db.moon = db.defs.iter().any(|d| d.nonbasic_lands_are_mountains);

@@ -20278,3 +20278,96 @@ ready, so fewer decisions are auto-answered): full `21badc9235bd1cd1` -> `02cb76
 `DIGEST_ENCODING=0` `b1f5b72e8b3ac987` -> `d0a7be8d70719c90` (2,500 of 2,500 games). Random play
 (the fuzz) makes about twice the decisions (default 215 -> 440 a game; EoE 495 -> 785).
 `RULES_EPOCH` bumped.
+
+#### 100.6 Loose ends (branch `eoe-e-loose`, from `eoe-base` 9b403c1)
+
+The faithfulness audit's small items that no workstream owned: what workstream C found in day and
+night (100.3, "Left for others"), the companion bound (the audit's N13), and the follow-ups for
+the docs (the audit's section 7). Tests: `engine/tests/rules_faithful_e.rs` (its own table: the
+cube, the Edge of Eternities cards the cube lacks and the shared test cards), each named after its
+CR rule; the eight marked "failed before" failed before the fix.
+
+**Day and night (CR 702.145, 732).**
+
+* **The report didn't reproduce.** C read that a daybound card put onto the battlefield at night
+  "is transformed right after it enters (`entering_choices` -> `day_night_check`)". It enters
+  transformed: `put_onto_battlefield` has turned the back face up before the move since M7b part 2
+  (fefd853b, 25.1), so "as it enters" effects, the `Enters` event and the log see the nightbound
+  face, and `day_night_check` finds nothing to turn. Two tests pin it with the transformation
+  count (`Obj::flips` 0) and the log: cast (ruling 483aa586: "it won't enter with its daybound
+  face up and then transform") and Reanimate (ruling 9d7e7537).
+* **702.145b's two conditions.** "If it is night and this permanent is represented by a
+  double-faced card, it enters transformed" was applied by the printed definition. Now it needs
+  a card (a token never: a double-faced token, CR 707.8a or 707.10g, enters front face up) and the
+  ability on the permanent as it would exist on the battlefield (614.12): not with
+  `Mod::LoseAllAbilities` among the entering effects (Xu-Ifit's "has no abilities": Outland
+  Liberator enters front face up and stays so, with no daybound). That is the only way the engine
+  can make a permanent enter without its abilities (no effect removes abilities from a class of
+  permanents).
+* **After the `Enters` event.** The day and night check of an entering permanent ran with the "as
+  it enters" choices, before its `Enters` event. 702.145c-d and f-g are not "as it enters": they
+  apply once it is on the battlefield. It runs after the event now (`Game::day_night_entered`),
+  so a double-faced token with daybound entering at night is seen entering front face up and then
+  transforms (a `Transforms` event). Before, it entered as its back face without transforming.
+* **"Any time" (702.145c-d, f-g).** The check ran only as a daybound or nightbound permanent
+  entered and as day and night changed. Now it also runs (`Game::day_night_any_time`, when a
+  daybound or nightbound face is on the battlefield; `day_night_check` reads the abilities each
+  permanent has now) after:
+  * a permanent is turned face up (front face up, 712.12a): Abhorrent Oculus's manifest dread
+    puts Outland Liberator face down; turned face up at night it transforms, and with neither day
+    nor night it becomes day;
+  * permanents phase in (Robe of Stars): phased out by day, it phases in at night and transforms;
+  * a permanent becomes a copy (`Ext::BecomeCopy`): Shifting Woodland copying Outland Liberator
+    (a graveyard card: its front face) has daybound, so with neither it becomes day;
+  * an effect "loses all abilities for as long as" its source remains ends as the source leaves
+    (`move_card_ctl`; The Wondrous Wasp, Tishana's Tidebinder): a Frenzied Trapbreaker silenced at
+    night keeps its back face when it becomes day, and transforms when the Wasp dies;
+  * the cleanup step ends "until end of turn" effects and copy effects, and "until your next turn"
+    effects end. Not reachable with today's cards (day and night change only in the untap step or
+    from neither, and these end before it), checked because the rule is "any time".
+
+  The cube reaches the first, third and fourth with its own cards; phasing and Xu-Ifit need an
+  Edge of Eternities card with the cube's daybound card (the tables are played apart, but "no card
+  pool does it" is not an argument, audit section 0).
+* **Logged, not fixed** (docs/shortcuts.md): E2, a token copy of a single-faced permanent that is
+  copying a double-faced card's face (Shifting Woodland as Outland Liberator, copied by Three
+  Steps Ahead) is treated as a double-faced token and transforms; CR 707.8a makes it single-faced.
+  `CopyVals` doesn't say whether the copied object was double-faced, so the fix is a copies change
+  (C's area). E3, the untap step's day and night check runs as the turn begins, before phasing
+  (502.1-502.2): equivalent now, as a permanent phasing in is checked at once.
+
+**N13: at most 64 companions a table.** The revealed-companion decision offers each candidate (a
+distinct companion definition) on a `LIBRARY` slot and took the first 64 (`take(64)`). The bound is
+now loud: `companion::check_table`, called by `CardDb::from_cards`, panics for a table with more
+than 64 companion definitions (the cube has 3), and the decision offers every candidate. Tests: a
+table of 64 custom companions loads, one of 65 panics.
+
+**Docs (the audit's section 7).**
+
+* docs/shortcuts.md: 31.7.6 marked fixed (71.2: Nadu's limit counts per granting object); rows
+  for the audit's N5, N8-N14, N19-N21 and N23, each naming the workstream that fixes it (A: N5,
+  N9, N11, N12, N14; B: N8, N10, N19-N21, N23; N13 fixed here). C had added N1, N4, N6, N7, N15
+  and N22. Rows E1 (fixed), E2 (open) and E3 (kept, equivalent) for the day and night findings.
+* docs/ir_defects.md: entries 190 (Palantir of Orthanc's `Scry` leaves `bottom_choice` at its
+  default `false`, a Python "keep all on top" shortcut: the audit's N17) and 191 (Chain of Smog's
+  `needs_target_with_cards_in_hand`, 26.11.9), as a new section R, "Python engine switches the IR
+  carries"; both cards are supported and the engine ignores both fields. The audit's N16 (Celestial
+  Colonnade) was already entry 2 (fixed in the IR, 8ea9fcca); the lowering's check is a refusal,
+  not a repair, and stays as a guard: a note on entry 2 and on the code.
+* The two wrong comments were already corrected by C (e969092): `faces.rs::face_castable` cites
+  Lier's ruling (N4), and `layers.rs::colors_of` no longer says "none of those exists" (layer 5 in
+  timestamp order, 28.8.4).
+
+**Digests.** Unchanged: combined `e6039cb2cfc4206d`, `DIGEST_ENCODING=0` `e56bcf4a9f57ecee`. No digest
+game plays differently: the cube's daybound card entering by cast or by being put onto the
+battlefield already had its face, the moved check finds nothing to turn for a card (it entered
+with the face day or night gives it, and with neither day nor night no nightbound permanent
+exists), and the new checks find nothing to do in the digest games (a check that changes nothing
+emits nothing).
+
+**Results** (normal release profile, `E:/cargo-target/mtg-zero/eoe-e-loose`). The full engine
+suite 2,007 passed, 0 failed, 20 ignored (133 test binaries; `rules_faithful_e` 11 of them). The
+default `FUZZ_GAMES=20000` passed (20,000 games, wins 9,972 / 9,989, 39 draws, mean 27.0 turns,
+215.7 decisions; 1,000 matches; 451 s on a loaded machine); `FUZZ_POOL=eoe FUZZ_GAMES=20000`
+passed (20,000 games, wins 8,918 / 9,040, 2,042 draws, mean 40.1 turns, 500.7 decisions; 992 s).
+Both are the numbers of 100.3, as the unchanged digests say.

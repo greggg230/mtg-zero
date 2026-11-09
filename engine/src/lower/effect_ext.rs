@@ -472,7 +472,10 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 // A land that makes coloured mana animates into a coloured
                 // creature in the cube; the IR lost the colours and the
                 // creature type (Celestial Colonnade: "white and blue
-                // Elemental"). An IR defect (ENGINE.md 20).
+                // Elemental"). An IR defect (ENGINE.md 20; docs/ir_defects.md
+                // 2, fixed in the IR): refused, never repaired (a loud guard
+                // that a land animating into a colourless creature would
+                // also meet: a refusal, not a wrong game).
                 l.unsupported("BecomeLandCreatureUEOT.set_colors(missing for a coloured land)");
             }
             // "a 1/1 Phyrexian Blinkmoth artifact creature" (Inkmoth Nexus):

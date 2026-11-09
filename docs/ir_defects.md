@@ -6,7 +6,7 @@ Status: 2026-10-22, engine at main 7c014ca + the M7b card tests (branch `m7b-tes
 `3073a633` (branch main). Updated 2026-10-23 for M7b part 3 (copies, branch `m7b-copies`, 410 supported): no new
 defect; entry 11 gains two classes, and the copy cards' Python-only switches are listed under "Checked and not
 defects". Updated 2026-10-23 for M7b part 3b (the stack, ward, the initiative, graveyard abilities, branch
-`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". Updated 2026-10-25 (branch `m7d-ir`, 546 supported): the IR now in use is mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`), which fixes entries 1, 2, 4, 12, 13, 15, 16, 17 and 18 (each entry's last bullet); the lowering reads the fixed forms and `lower::IR_DEFECTS` is empty: every cube card is supported. Updated 2026-11-08 (branch `eoe-irfix`, ENGINE.md 99.9): the IR now in use is mtg-bot `feature/eoe-ir-fixes` 5362f5ed (schema `675cfc50fc4e`), which fixes entries 20-23, 26, 40-42, 46, 48, 51, 60, 62-64, 81 and 82 (for 21, 41 and 62 only some of their cards; each entry's last bullet); the other Edge of Eternities entries stand. The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
+`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". Updated 2026-10-25 (branch `m7d-ir`, 546 supported): the IR now in use is mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`), which fixes entries 1, 2, 4, 12, 13, 15, 16, 17 and 18 (each entry's last bullet); the lowering reads the fixed forms and `lower::IR_DEFECTS` is empty: every cube card is supported. Updated 2026-11-08 (branch `eoe-irfix`, ENGINE.md 99.9): the IR now in use is mtg-bot `feature/eoe-ir-fixes` 5362f5ed (schema `675cfc50fc4e`), which fixes entries 20-23, 26, 40-42, 46, 48, 51, 60, 62-64, 81 and 82 (for 21, 41 and 62 only some of their cards; each entry's last bullet); the other Edge of Eternities entries stand. Updated 2026-11-08 (branch `eoe-e-loose`, ENGINE.md 100.6, the faithfulness audit's follow-ups): entries 190 and 191 (Python engine switches the IR carries, section R) and a note on entry 2 (the audit's N16). The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
 cards export-ir`) from the card printings its oracle-text parser builds (`src/mtg_bot/cards/parser/`)
 and the effect dataclasses (`src/mtg_bot/effects/`). This file lists where the IR says something
 other than the Oracle text, or leaves out what a consumer needs, with the parser code that produces
@@ -95,6 +95,8 @@ permission) and a consumer can go wrong with it.
 | 160 | Plaza of Heroes (Edge of Eternities W2, ENGINE.md 99.12) | ability reshaped | its third mana ability as `AddManaToPool { produces: [any 1], spend_restriction: legendary_permanent_ability }` | "{T}: Add one mana of any color among legendary permanents you control" (no restriction: `AddOneManaOfColorAmongControlled { legendary: true }`) | `cards/parser/effects.py` (`_ADD_ANY_MANA_AMONG_GROUP`, `_ADD_MANA_AMONG_RESTRICTION`, ~line 1670) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 161 | Contested War Zone (Edge of Eternities W2, ENGINE.md 99.12) | event widened | `deals_combat_damage` with `And [Subject(IsCreature, source), Controlled(target)]` | "whenever a creature deals combat damage to **you**": also `Subject(IsPlayer, target)` | `cards/parser/land_builder.py` (the Contested War Zone builder, ~line 2897) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 180 | (fixed by W1, mtg-bot feature/eoe-ir-fixes 7c02e5c9, ENGINE.md 99.11) Sothera, the Supervoid (Edge of Eternities, W4, ENGINE.md 99.14) | instructions reordered | the end-step ability as `Sequence [ReanimateOneExiledWithSourceWithCounters { counter_amount: 2 }, SacrificeSelfPreservingExileLink]`: the return first, then the sacrifice | "sacrifice Sothera, then put a creature card exiled with it onto the battlefield ...": the sacrifice first (the cards exiled with it stay linked to it, CR 607.2a) | `effects/generic/exile.py::SacrificeSelfPreservingExileLink` (its docstring: "the engine-level fix is to invert the order at composition time"), the Sothera parser line | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 190 | Palantír of Orthanc (faithfulness audit N17, ENGINE.md 100.6) | Python switch | `Scry { amount: 2 }` with `bottom_choice` left at its default `false` ("keep all on top", the Python class's first-slice shortcut) | a scry (CR 701.18a: any number on the bottom): `bottom_choice: true` | `cards/parser/artifact_effects.py::_parse_palantir_body`; `effects/generic/library_lookat.py::Scry` (the default) | supported; the field is ignored, every scry lowers as 701.18a | confirmed |
+| 191 | Chain of Smog (docs/shortcuts.md 26.11.9, ENGINE.md 100.6) | Python switch | `TargetPlayerMayCopyThisSpell` with `needs_target_with_cards_in_hand` at its default `true` (the copy offered only while a player it could target has cards in hand) | no condition ("That player may copy this spell") | `effects/generic/spell_copies.py::TargetPlayerMayCopyThisSpell` (the default) | supported; the field is ignored, the copy is always offered | confirmed |
 
 ## Confirmed defects
 
@@ -146,6 +148,12 @@ still a land. It can't be blocked this turn."
   (`engine/src/lower/effect_ext.rs::lower_effect_ext`, the `BecomeLandCreatureUEOT` arm: a land
   that makes coloured mana and animates without colours is refused rather than made colourless).
   The missing `granted_subtype` is not detected by the engine.
+* The refusal stays in the lowering after the fix (the faithfulness audit's N16 calls it a repair:
+  it repairs nothing): a land that makes coloured mana and animates with no `set_colors` is refused,
+  never given colours or a creature type the IR doesn't state. It is a loud guard against this
+  parser path coming back. A land that makes coloured mana and really animates into a colourless
+  creature would be refused too (none is in the cube or the Edge of Eternities tables): a refusal,
+  not a wrong game.
 * Fixed in mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: `_try_build_manland` passes `set_colors` (the two colour words) and `granted_subtype: "Elemental"` (every manland of that shape, the Stellar Sights ones too). Both cards are supported (`tests/rules_layers.rs`).
 
 ### B. Values the IR leaves to Python
@@ -1105,6 +1113,48 @@ creature's controller gains control of this land."
   the class's docstring says, every attacking creature): tested on a corrected copy ("Test War
   Zone").
 
+### S. Python engine switches the IR carries (the faithfulness audit's follow-ups, ENGINE.md 100.6)
+
+Two effect classes carry a field that turns a Python engine shortcut on, and its default is on. Read
+literally, the IR then says something the Oracle text doesn't. The engine ignores both fields and
+plays the Oracle text, so both cards are supported; the entries are here so that no consumer reads
+the fields as rules.
+
+**190. Palantír of Orthanc** (the audit's N17). Oracle: "At the beginning of your end step, put an
+influence counter on Palantír of Orthanc and scry 2. ..."
+
+* IR: the end-step ability's `Sequence` holds `Scry { amount: 2 }` with `bottom_choice` omitted, so
+  its default `false`: the class's "first-slice deterministic shortcut: keep all on top" (its
+  docstring), which mirrors the Rust bridge's `ScryN` arm. Preordain's scry has
+  `bottom_choice: true`. These are the only two scry nodes in the cube and Edge of Eternities IR.
+* Should be: the scry of CR 701.18a (any number of the cards on the bottom in any order, the rest on
+  top in any order): `bottom_choice: true`, or no such field (a scry always lets the player choose).
+* Source: `cards/parser/artifact_effects.py::_parse_palantir_body` (~line 598) builds
+  `Scry(amount=...)` without the `bottom_choice=True` that `cards/parser/card_flow_grammar.py` and
+  `cards/parser/keyword_actions.py` pass; the class `effects/generic/library_lookat.py::Scry` defaults
+  it to `False`.
+* Fix: pass `bottom_choice=True` in `_parse_palantir_body`, or make `True` the default.
+* Engine: supported. The lowering ignores the field and lowers every scry as 701.18a
+  (`engine/src/lower/effect.rs`, the `Scry` arm; ENGINE.md 14). The audit classes this as faithful
+  (class 1).
+
+**191. Chain of Smog** (docs/shortcuts.md 26.11.9). Oracle: "Target player discards two cards. That
+player may copy this spell and may choose a new target for that copy."
+
+* IR: `Sequence [TargetPlayerDiscards { amount: 2 }, TargetPlayerMayCopyThisSpell]`, the second with
+  `needs_target_with_cards_in_hand` omitted, so its default `true`: the Python engine offers the
+  copy only while a player the copy could target has cards in hand (a guard against endless
+  copying).
+* Should be: no condition. The Oracle text lets the player copy with any hands; a copy with empty
+  hands still triggers "whenever you cast or copy" abilities (Witherbloom Apprentice).
+* Source: `effects/generic/spell_copies.py::TargetPlayerMayCopyThisSpell` (the field and its
+  default, ~line 95; read at ~line 108).
+* Fix: default the field to `false` (or drop it) and bound the loop in the Python engine, as CR
+  732.2a-732.3 do.
+* Engine: supported. The lowering ignores the field (`engine/src/lower/effect_copies.rs`, the
+  `TargetPlayerMayCopyThisSpell` arm) and always offers the copy, with at most 31 such copies a turn
+  (`copies.rs::MAY_COPY_CAP`, docs/shortcuts.md 26.11.7; ENGINE.md 26.11).
+
 ## Suspected defects (representational)
 
 **7. Animate Dead.** Oracle: "... Enchanted creature gets -1/-0."
@@ -1289,7 +1339,7 @@ once each turn."
 * M7b part 3, the copy cards: `TargetPlayerMayCopyThisSpell.needs_target_with_cards_in_hand`
   (Chain of Smog) is a Python engine switch (offer the copy only if a player it could target has
   cards in hand, a guard against endless copying), not Oracle text; the engine ignores it
-  (ENGINE.md 14, 26.11). Lutri's companion condition isn't in the IR; it works outside the game
+  (ENGINE.md 14, 26.11). Listed as a defect since 2026-11-08: entry 191. Lutri's companion condition isn't in the IR; it works outside the game
   (no sideboards here). `CardPrinting.replicate_cost` is a string with no structured twin (the
   other new costs, squad, offspring, bestow and Springheart Nantuko's payment, agree with their
   `*_str` twins). Chain of Smog's "that player" is the spell's target player, found among its
