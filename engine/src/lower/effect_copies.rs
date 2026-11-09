@@ -161,9 +161,8 @@ pub(crate) fn lower_effect_copies(l: &mut Lowerer, b: &mut Builder, e: &cats::Ef
             }
             let mut exc = Except::default();
             for t in add_card_types {
-                match types::from_name(t) {
-                    Some(bits) => exc.types |= bits,
-                    None => l.unsupported(format!("TargetBecomesCopyOfAnotherTargetUEOT.add_card_types({t})")),
+                if let Some(bits) = super::printing::given_type(l, "TargetBecomesCopyOfAnotherTargetUEOT.add_card_types", t) {
+                    exc.types |= bits;
                 }
             }
             b.op(Op::Ext(Ext::BecomeCopy { on: On::Target(a), of: CopyOf::Target { i: c, lki: false }, exc, until: Until::EndOfTurn }));

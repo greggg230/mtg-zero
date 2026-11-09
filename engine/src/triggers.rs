@@ -86,6 +86,43 @@ pub struct PendingTrigger {
     pub ev: EvCtx,
 }
 
+/// A matched triggered ability with the bookkeeping its triggering does
+/// (`Game::fire`): "whenever one or more" once per event group (`batch`),
+/// "only once each turn" (`check_done`, `once`, keyed by `key`), "only twice
+/// each turn" per granted object (`times`).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Fire {
+    pub t: PendingTrigger,
+    pub key: (ObjRef, u8),
+    pub batch: bool,
+    pub check_done: bool,
+    pub once: bool,
+    pub times: Option<(ObjRef, DefId, u8, ObjRef)>,
+}
+
+/// A triggered ability whose triggering depends on a replacement choice not
+/// made yet (CR 616.1: the card's controller chooses before the event): it
+/// triggers if the card goes to one of `zones` (`db::left_to` bits; "dies or
+/// is put into exile", or a granted "when it dies or is exiled"), matched
+/// as the event happened (look-back, 603.10a) in event group `seq`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Held {
+    pub card: CardIdx,
+    pub zones: u8,
+    pub seq: u32,
+    pub f: Fire,
+}
+
+/// Does the predicate read where a leaving permanent went (`LeftTo`)?
+fn reads_left_to(p: &TrigPred) -> bool {
+    match p {
+        TrigPred::LeftTo(_) => true,
+        TrigPred::And(a, b) | TrigPred::Or(a, b) => reads_left_to(a) || reads_left_to(b),
+        TrigPred::Not(a) => reads_left_to(a),
+        _ => false,
+    }
+}
+
 /// An object whose abilities may trigger on an event.
 #[derive(Clone, Copy)]
 struct Observer {
@@ -270,53 +307,50 @@ impl Game {
             // (Delayed and temporary abilities, from `delayed_base` on,
             // trigger only as such.)
             for (i, t) in def.triggers.iter().enumerate().take(def.delayed_base as usize) {
-                if t.event == ev.kind
-                    && (!def.gy_triggers || o.gy == in_graveyard(&t.pred))
-                    && (!o.spell || names_this_spell(&t.pred))
-                    && (!copied || has_or_copy(&t.pred))
-                    && self.pred_matches(&t.pred, &ev, o)
+                if t.event != ev.kind
+                    || def.gy_triggers && o.gy != in_graveyard(&t.pred)
+                    || o.spell && !names_this_spell(&t.pred)
+                    || copied && !has_or_copy(&t.pred)
                 {
-                    // "Whenever one or more ...": once per event (CR 603.2c:
-                    // one instruction, one cost, one simultaneous move is one
-                    // event; separate events of one resolution trigger it
-                    // separately). "Whenever one or more cards are put into a
-                    // library" says so too.
-                    let batch = has_batch(&t.pred) || ev.kind == crate::db::EventKind::CardsPutIntoLibrary;
-                    if batch && !self.batch_once(o.r, i as u8) {
-                        continue;
-                    }
-                    // CR 603.2h: "Do this only once each turn": it triggers
-                    // only if its controller hasn't done it this turn.
-                    if !self.done_once.is_empty() && self.done_once.contains(&(o.r, i as u8)) {
-                        continue;
-                    }
-                    // (A granted ability's source is the permanent that has
-                    // it; the ability is the granting card's definition's.)
-                    let source = match granted_slot(&t.pred).map(|s| ev.subject(s)) {
-                        Some(Subj::Obj(r)) => r,
-                        _ => o.r,
-                    };
-                    self.waiting.push(PendingTrigger {
-                        controller: o.controller,
-                        source,
-                        source_def: o.def,
-                        slot: i as u8,
-                        ev: ctx,
-                    });
-                    if w6_doubling {
-                        self.w6_entry_triggered();
-                    }
-                    // "This ability triggers only once each turn": not
-                    // again this turn (the object's; a new object is new).
-                    if has_once(&t.pred) {
-                        self.done_once.push((o.r, i as u8));
-                    }
-                    // "... only twice each turn", per granted object (Nadu).
-                    if let Some(s) = times_slot(&t.pred) {
-                        if let Subj::Obj(r) = ev.subject(s) {
-                            self.note_granted_trigger(r, o.def, i as u8, o.r);
-                        }
-                    }
+                    continue;
+                }
+                let dests = self.pred_dests(&t.pred, &ev, o);
+                if dests == 0 {
+                    continue;
+                }
+                // "Whenever one or more ...": once per event (CR 603.2c:
+                // one instruction, one cost, one simultaneous move is one
+                // event; separate events of one resolution trigger it
+                // separately). "Whenever one or more cards are put into a
+                // library" says so too. CR 603.2h: "Do this only once each
+                // turn": it triggers only if its controller hasn't done it
+                // this turn. "This ability triggers only once each turn": not
+                // again this turn (the object's; a new object is new). "...
+                // only twice each turn", per granted object (Nadu).
+                let batch = has_batch(&t.pred) || ev.kind == crate::db::EventKind::CardsPutIntoLibrary;
+                // (A granted ability's source is the permanent that has
+                // it; the ability is the granting card's definition's.)
+                let source = match granted_slot(&t.pred).map(|s| ev.subject(s)) {
+                    Some(Subj::Obj(r)) => r,
+                    _ => o.r,
+                };
+                let times = times_slot(&t.pred).and_then(|s| match ev.subject(s) {
+                    Subj::Obj(r) => Some((r, o.def, i as u8, o.r)),
+                    _ => None,
+                });
+                let f = Fire {
+                    t: PendingTrigger { controller: o.controller, source, source_def: o.def, slot: i as u8, ev: ctx },
+                    key: (o.r, i as u8),
+                    batch,
+                    check_done: true,
+                    once: has_once(&t.pred),
+                    times,
+                };
+                let before = self.waiting.len();
+                self.fire_or_hold(f, dests);
+                // ("Triggers an additional time": EoE W6.)
+                if w6_doubling && self.waiting.len() > before {
+                    self.w6_entry_triggered();
                 }
             }
         }
@@ -327,13 +361,23 @@ impl Game {
             for (r, def, slot, controller) in self.granted_observers(&ev) {
                 let t = &self.db.def(def).triggers[slot as usize];
                 let o = Observer { r, def, controller, spell: false, gy: false };
-                if t.event == ev.kind
-                    && (!copied || has_or_copy(&t.pred))
-                    && self.pred_matches(&t.pred, &ev, o)
-                    && (!has_batch(&t.pred) || self.batch_once(r, slot))
-                {
-                    self.waiting.push(PendingTrigger { controller, source: r, source_def: def, slot, ev: ctx });
-                    if w6_doubling {
+                if t.event != ev.kind || copied && !has_or_copy(&t.pred) {
+                    continue;
+                }
+                let dests = self.pred_dests(&t.pred, &ev, o);
+                if dests != 0 {
+                    let f = Fire {
+                        t: PendingTrigger { controller, source: r, source_def: def, slot, ev: ctx },
+                        key: (r, slot),
+                        batch: has_batch(&t.pred),
+                        check_done: false,
+                        once: false,
+                        times: None,
+                    };
+                    let before = self.waiting.len();
+                    self.fire_or_hold(f, dests);
+                    // ("Triggers an additional time": EoE W6.)
+                    if w6_doubling && self.waiting.len() > before {
                         self.w6_entry_triggered();
                     }
                 }
@@ -345,23 +389,97 @@ impl Game {
             let tt = self.temp_triggers[k];
             let t = &self.db.def(tt.source_def).triggers[tt.slot as usize];
             let o = Observer { r: tt.source, def: tt.source_def, controller: tt.controller, spell: false, gy: false };
-            if t.event == ev.kind
-                && tt.obj.is_none_or(|b| ev.a == Subj::Obj(b))
-                && (!copied || has_or_copy(&t.pred))
-                && self.pred_matches(&t.pred, &ev, o)
-                && !self.done_once.contains(&(tt.source, tt.slot))
-                // "Whenever one or more ...": once per event.
-                && (!has_batch(&t.pred) || self.batch_once(tt.source, tt.slot))
-            {
-                self.waiting.push(PendingTrigger {
-                    controller: tt.controller,
-                    source: tt.source,
-                    source_def: tt.source_def,
-                    slot: tt.slot,
-                    ev: ctx,
-                });
+            if t.event != ev.kind || !tt.obj.is_none_or(|b| ev.a == Subj::Obj(b)) || copied && !has_or_copy(&t.pred) {
+                continue;
+            }
+            let dests = self.pred_dests(&t.pred, &ev, o);
+            if dests != 0 {
+                // ("Whenever one or more ...": once per event.)
+                let f = Fire {
+                    t: PendingTrigger { controller: tt.controller, source: tt.source, source_def: tt.source_def, slot: tt.slot, ev: ctx },
+                    key: (tt.source, tt.slot),
+                    batch: has_batch(&t.pred),
+                    check_done: true,
+                    once: false,
+                    times: None,
+                };
+                self.fire_or_hold(f, dests);
             }
         }
+    }
+
+    /// The `db::left_to` destinations for which trigger predicate `p`
+    /// matches the event (all, 0xFF, when it matches and nothing depends on
+    /// a replacement choice; 0 when it doesn't). While a leave event whose
+    /// destination waits for a 616.1 choice is matched (`leaving_choice`),
+    /// a predicate that reads the destination is tried with each possible
+    /// one.
+    fn pred_dests(&mut self, p: &TrigPred, ev: &Event, o: Observer) -> u8 {
+        let pending = self.leaving_choice;
+        if pending == 0 || ev.kind != EventKind::LeavesBattlefield || !reads_left_to(p) {
+            return if self.pred_matches(p, ev, o) { 0xFF } else { 0 };
+        }
+        let saved = self.leaving_to;
+        let mut m = 0;
+        for k in 0..8 {
+            let bit = 1u8 << k;
+            if pending & bit != 0 {
+                self.leaving_to = bit;
+                if self.pred_matches(p, ev, o) {
+                    m |= bit;
+                }
+            }
+        }
+        self.leaving_to = saved;
+        m
+    }
+
+    /// Trigger `f`, or hold it until the replacement choice it depends on
+    /// is made (`Held`).
+    fn fire_or_hold(&mut self, f: Fire, dests: u8) {
+        let pending = self.leaving_choice;
+        if pending != 0 && dests & pending != pending {
+            self.held.push(Held { card: self.leaving_card, zones: dests & pending, seq: self.ev_seq, f });
+        } else {
+            self.fire(f);
+        }
+    }
+
+    /// A matched triggered ability triggers (603.2), with its bookkeeping.
+    pub(crate) fn fire(&mut self, f: Fire) {
+        if f.batch && !self.batch_once(f.key.0, f.key.1) {
+            return;
+        }
+        if f.check_done && !self.done_once.is_empty() && self.done_once.contains(&f.key) {
+            return;
+        }
+        self.waiting.push(f.t);
+        if f.once {
+            self.done_once.push(f.key);
+        }
+        if let Some((r, def, slot, src)) = f.times {
+            self.note_granted_trigger(r, def, slot, src);
+        }
+    }
+
+    /// CR 616.1: the replacement choice for `card` is made and it went to
+    /// the zone of `db::left_to` bit `zone`: the triggered abilities held
+    /// for it trigger if they match that destination, in the event group
+    /// they were matched in.
+    pub(crate) fn release_held(&mut self, card: CardIdx, zone: u8) {
+        if self.held.is_empty() {
+            return;
+        }
+        let (mine, rest): (Vec<Held>, Vec<Held>) = std::mem::take(&mut self.held).into_iter().partition(|h| h.card == card);
+        self.held = rest;
+        let saved = self.ev_seq;
+        for h in mine {
+            if h.zones & zone != 0 {
+                self.ev_seq = h.seq;
+                self.fire(h.f);
+            }
+        }
+        self.ev_seq = saved;
     }
 
     fn pred_matches(&self, p: &TrigPred, ev: &Event, src: Observer) -> bool {
@@ -495,10 +613,14 @@ impl Game {
         // Triggers of the same ability whose effects ignore the event's
         // subjects are interchangeable.
         let db = self.db;
+        // (And, from different source objects, only if the effect reads
+        // nothing of its source: CR 113.7, 603.3b.)
         let same = |a: &PendingTrigger, b: &PendingTrigger| {
+            let t = &db.def(a.source_def).triggers[a.slot as usize];
             a.source_def == b.source_def
                 && a.slot == b.slot
-                && (a.ev == b.ev || !db.def(a.source_def).triggers[a.slot as usize].uses_event)
+                && (a.ev == b.ev || !t.uses_event)
+                && (a.source == b.source || !t.uses_source())
         };
         // More waiting triggers than `TRIGGER` slots (a board of tokens
         // dying): the first of each interchangeable group first, the copies

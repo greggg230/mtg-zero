@@ -73,6 +73,9 @@ impl<T> IsDefault for Option<T> {
 /// so far.
 pub struct Lowerer<'a> {
     pub subtypes: &'a mut Vec<String>,
+    /// The subtypes copy exceptions of the table name, in order (a copy's
+    /// `Except::subtypes` bits, `CardDb::exc_subtypes`).
+    pub exc_subtypes: &'a mut Vec<u16>,
     /// Token definitions the cards create (`Op::CreateToken` indexes).
     pub tokens: &'a mut Vec<CardDef>,
     /// The card refers to "cards exiled with this": its exile effects
@@ -197,6 +200,37 @@ impl Lowerer<'_> {
         }
     }
 
+    /// The bit of subtype `s` in copy exceptions (`Except::subtypes`); a
+    /// table whose copy exceptions name more than 64 subtypes is refused
+    /// loudly (docs/shortcuts.md 26.11.5).
+    pub fn exc_subtype(&mut self, s: u16) -> Option<u8> {
+        match self.exc_subtypes.iter().position(|&x| x == s) {
+            Some(k) => Some(k as u8),
+            None if self.exc_subtypes.len() < 64 => {
+                self.exc_subtypes.push(s);
+                Some((self.exc_subtypes.len() - 1) as u8)
+            }
+            None => {
+                self.unsupported("copy exception subtypes(more than 64 in the table)");
+                None
+            }
+        }
+    }
+
+    /// A subtype an effect, a copy exception or a printed "becomes" gives an
+    /// object. A basic land type is refused: a land with one has its
+    /// intrinsic mana ability (CR 305.6-305.7), which the engine has only
+    /// where it is built (a printed type: `produces`; Multiversal Passage's
+    /// chosen type: `ManaProd::Chosen`), so a land given one would lack it
+    /// (docs/shortcuts.md N22).
+    pub fn given_subtype(&mut self, field: &str, s: &str) -> Option<u16> {
+        if matches!(s, "Plains" | "Island" | "Swamp" | "Mountain" | "Forest") {
+            self.unsupported(format!("{field}({s}: a basic land type given by an effect, CR 305.6-305.7)"));
+            return None;
+        }
+        Some(self.subtype(s))
+    }
+
     pub fn subtype(&mut self, s: &str) -> u16 {
         match self.subtypes.iter().position(|x| x == s) {
             Some(i) => i as u16,
@@ -246,11 +280,23 @@ pub fn lower_card(
     subtypes: &mut Vec<String>,
     tokens: &mut Vec<CardDef>,
 ) -> Result<(CardDef, Vec<CardDef>), Vec<String>> {
+    lower_card_in(card, subtypes, tokens, &mut Vec::new())
+}
+
+/// [`lower_card`] into a table: `exc_subtypes` are the table's copy
+/// exception subtypes so far (`CardDb::exc_subtypes`).
+pub(crate) fn lower_card_in(
+    card: &card_ir::Card,
+    subtypes: &mut Vec<String>,
+    tokens: &mut Vec<CardDef>,
+    exc_subtypes: &mut Vec<u16>,
+) -> Result<(CardDef, Vec<CardDef>), Vec<String>> {
     let cats::CardPrinting::CardPrinting(p) = &card.printing;
     // A card that refers to "cards exiled with this" links its exiles.
     let link_exiles = format!("{p:?}").contains("ExiledWithSource");
     let mut l = Lowerer {
         subtypes,
+        exc_subtypes,
         tokens,
         errs: Vec::new(),
         land_colors: 0,

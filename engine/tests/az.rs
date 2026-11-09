@@ -1264,6 +1264,8 @@ fn public_state_reaches_the_encoding() {
             "a player will control the other's next turn",
             "the active player is controlled this turn",
             "a spell's granted alternative cost came from another permanent",
+            "the other player learns a hand card past the 16th",
+            "the turn goes on with another phase after its combat phases",
             "a control effect ends at the end of the turn",
             "a copy has an ability by its exception",
             "a player created tokens this turn",
@@ -1272,10 +1274,11 @@ fn public_state_reaches_the_encoding() {
         ],
         "the gaps on the allowlist"
     );
-    // (EoE W6, ENGINE.md 99.16: the recorded control effects and a spell's
-    // mana spent, a player's tokens this turn, a copy's kept ability: 14 ->
-    // 18.)
-    assert_eq!(next, 18);
+    // (Workstream C's: where the turn goes on after combat phases added to another phase, and
+    // the hand cards past the 16 slots, ENGINE.md 100.3; EoE W6, ENGINE.md 99.16: the recorded
+    // control effects, a spell's mana spent, a player's tokens this turn, a copy's kept
+    // ability.)
+    assert_eq!(next, 20);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

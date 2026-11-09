@@ -19730,6 +19730,138 @@ The gate (`python tools/gate.py encoding --expect-digest f6543eb2b1b8752f --expe
 757s - skipped: checkpoint-load` (no checkpoint loaded on this build; the encoding's floats are 0 in
 every state a game reaches until workstream A asks paged or digit decisions).
 
+#### 100.3 C: rules timing and characteristics (branch `eoe-c-timing`, from `eoe-base` 9cdda51)
+
+Workstream C of the faithfulness audit (docs/faithfulness_audit.md 5.5, 5.6): the divergences in
+rules timing, replacement effects, triggers and characteristics. Each fix has a failing-first test
+named after its CR rule in `engine/tests/rules_faithful_c.rs` (its own table: the cube, the EoE
+cards the cube lacks, the shared test cards and twelve `C ...` cards written as card IR), and its
+docs/shortcuts.md row is marked fixed (rows N1, N4, N6 and N22 added).
+
+**Replacement effects and timing.**
+
+* **N1, 616.1 before the event.** A card whose replacement orders give different results
+  (Blightsteel Colossus's library, Dauthi Voidwalker's void counter, Yawgmoth's Will's exile) was
+  exiled for now while its controller (owner) chose, so Syr Vondam's "dies or is put into exile"
+  triggered on the library result and exile counts saw it. Now the card waits in no zone
+  (`Zone::Nowhere`, revealed if it left a hidden zone, allowed by the invariants with its pending
+  `Task::ChooseReplacement`). Its leave events are matched as it moves (look-back, 603.10a); a
+  trigger whose predicate reads the destination (`TrigPred::LeftTo`, and a granted "when it dies
+  or is exiled") is matched for each possible destination (`Game::pred_dests`) and, when the
+  answer decides it, held (`triggers::Held`) with its bookkeeping (`triggers::Fire`: once per
+  event group, once each turn, Nadu's count) and released by the answer in its event group
+  (`release_held`). The card then goes there as the object the move made (one zone change, CR
+  400.7: an "it" of a held trigger still finds it). A choice an SBA queued is asked before the
+  next check and before triggers go on the stack (`sba_check`).
+* **39.1, the Adventure's exile is a replacement.** CR 715.4 is a replacement effect of the move to
+  the graveyard (`replaced_dest` effect 7, result `Dest::Adventure`, `Game::on_adventure`), so it
+  is ordered with Bilbo's "exile it instead", flashback's, Yawgmoth's Will's and Dauthi's by the
+  controller (`ChooseReplacement` `NUMBER` 4; Bilbo's ruling of 2026-06-29). The old forced order
+  was right only when nothing else applied.
+* **N6.** Hullbreacher and Quantum Riddler on one draw: the drawer orders them (`Task::DrawOrder`,
+  `ChooseReplacement` `NUMBER` 5 = the token first, 6 = "draw that many plus one" first). Two
+  results are reachable: after "draw that many plus one", Hullbreacher replaces each card's draw
+  and the instruction's other draw-more effects still apply.
+* **29.6.5, miracle.** The reveal is asked as the card is drawn (702.94a): the draw instruction
+  stops after the card, the question and the rest of the draws are queued (`Task::MiracleReveal`,
+  `Task::DrawRest`, in the instruction's event group), and the effect waits under them (an op that
+  returns `Flow::Next` does through `run_frame`; connive and Malcolm's loot wait explicitly,
+  `Game::wait_for_draw`). The draw step's beginning event follows the draws. `Game::miracle_check`
+  and its deferred SBA path are gone.
+* **32.5.2, "this turn" effects end at 514.2.** "Whenever ... this turn" triggered abilities,
+  permissions to play a card this turn or until the end of a player's turn, Yawgmoth's Will's two
+  effects and "saddled" end in the cleanup step with "until end of turn" effects
+  (`end_this_turn_permissions`), not as the next turn begins (a cleanup step with priority, 514.3a,
+  showed the difference).
+* **29.6.4.** "After this phase, there is an additional combat phase" adds it after whatever phase
+  it resolves in (500.8): after the beginning phase (then the precombat main phase), a main
+  phase, a combat phase or the ending phase (then the turn ends). `Turn::after_combat` says where
+  the turn goes on; it is a public-state gap for the next layout.
+* **13.8.** Waiting triggers of one ability are merged in the ordering decision only when the
+  effect can't tell them apart: the same event or an effect that ignores it, and the same source
+  or an effect that reads nothing of its source (`TriggerDef::uses_source`: no targets, no
+  intervening "if", only draws, life, random discards and "you may" for players and amounts the
+  source doesn't decide; `Op::may_read_source` takes every other instruction to read it). Two
+  Ouroboroids of different power are now ordered (their two orders end differently).
+
+**Characteristics, faces and copies.**
+
+* **N4.** A casting permission granted to "[quality] cards in your graveyard" is judged by the
+  face being cast (Lier, Disciple of the Drowned's ruling of 2025-10-02; CR 601.3e): Wrenn and
+  Six's emblem retraces Petty Theft (not Brazen Borrower), Six retraces the creature (not Petty
+  Theft); Underworld Breach's and mayhem's "nonland" read the face too. `gy_routes_esc` evaluates
+  the grants' filters on the card with that face up (`face_view`, a clone made only when a
+  retrace granter exists and the face isn't the one up); the card's own routes and every other
+  use stay its front's.
+* **28.8.4.** Layer 5 in timestamp order: Painter's Servant adds its colour from its permanent's
+  timestamp, so an earlier "becomes [colours]" (an animated Celestial Colonnade) is added to and a
+  later one overwrites it (`colors_of`, `painters`).
+* **26.11.3.** A double-faced card copying something transforms (701.27c stops only permanents
+  that aren't transforming double-faced cards): its own face turns over (`CopyFx::own`), the copy
+  effect keeps its characteristics (layer 1), and it shows the new face when the effect ends.
+  Daybound and nightbound read its own face ("if this permanent is front face up", 702.145b, e).
+* **26.11.5.** `Except::subtypes` is a bitset over the subtypes the table's copy exceptions name
+  (`CardDb::exc_subtypes`, at most 64, refused loudly beyond): a copy of a copy keeps every one.
+* **31.7.7k.** A Class's level isn't a copiable value: a copy is level 1 (`copiable`) and levels up
+  with its own copied level abilities (its copy effect gives it the level's face).
+
+**Refusals (class 2: no card the engine accepts reaches them).**
+
+* **13.10.** Battles: a card or token with the type, or an effect or copy exception that gives
+  it, is refused until CR 310 is built (`lower/printing.rs::given_type`).
+* **25.10.4, the deny audit.** Split cards are lowered generally. The card IR's schema has no field,
+  keyword or effect for meld, flip, convert, "cast transformed", read ahead, morph, disguise or
+  cloak, and refuses unknown fields at load, so no card with one reaches the engine (a printing
+  whose Oracle text has one and whose IR lacks it is an IR defect).
+* **N22.** An effect, copy exception or printed "becomes" that gives a basic land type is refused
+  (`Lowerer::given_subtype`): the land would lack its intrinsic mana ability (305.6-305.7). No
+  card of the cube or EoE tables has one. Building the ability belongs with W2's moon definitions
+  (`abilities()` returning a definition with the intrinsic ability) and the payment code (B).
+
+* **N15, 613.7m.** Objects given timestamps at the same time (entering together, becoming
+  attached together: `Game::stamped`, by event group) are ordered by the active player
+  (`Task::OrderTimestamps`, a `ChoosePermanent` sequence, earliest first), after the event's "as
+  this enters" choices (a copy choice decides what a permanent's effects are: the task waits
+  under them). It is asked while the order can matter: a member has a static ability whose effect
+  another's order changes (`order_sensitive`: it sets a value, replaces types, removes abilities or
+  changes control; effects that only add commute) and the rest aren't all one definition. The
+  chosen order permutes the members' timestamps and battlefield places. The permanents fit their
+  96 slots (`perm_room`), so the options are `ask`'s `MY_PERM` / `OPP_PERM` ids, as the legend
+  rule's (workstream A's permanent paging covers both).
+
+**Not changed.** N7 (with a token doubler, "create a token, then attach this to it" attaches to
+the first token) is class 1: the tokens are identical objects with identical effects (identical
+static effects give the same result in either timestamp order: setting effects set the same
+value, adding effects commute, "this creature" effects apply to different objects), so the two
+choices give the same game up to which object is which.
+
+**The public-state gate.** Two next-layout gaps are added: "the turn goes on with another phase
+after its combat phases" (`Turn::after_combat`) and, found because the changed play moved the gate
+positions, "the other player learns a hand card past the 16th" (the hand block's 16 `HAND` slots;
+a Delver hand of 22 after Tamiyo's emblem), split from "learns a hand card" (now the encoded slots
+only). "A spell was cast for an alternative cost" perturbs only a spell with an alternative cost
+(a hand-made `alt` on a spell being paid for made a determinized pending payment panic).
+
+**Digests** (re-recorded on purpose, `tests/data/digests.txt`): combined `f6543eb2b1b8752f ->
+e6039cb2cfc4206d`, `DIGEST_ENCODING=0` `-> e56bcf4a9f57ecee`. 115 of the 2,500 games changed (95
+random, 20 heuristic). A probe of the 95 random ones: 50 have a miracle card in a deck (the
+reveal's question now comes at the draw, mid-instruction), 42 order triggers of one ability from
+different sources (13.8: two Mana Crypts' upkeep triggers, two Lotus Cobras), 3 order the
+Adventure's exile with another replacement (seed 1123: Petty Theft resolving under the
+opponent's Dauthi Voidwalker now offers the void exile, `NUMBER` 3, which the old forced
+adventure skipped; seed 1567: an "exile it instead" and the Adventure's exile, `NUMBER` 2 or
+4), and 3 none of these (a game's own path after one of the others, or a determinized clone's).
+N15 and the merge of A0 (`eoe-base` c769cc2) change no digest game.
+
+**Results** (normal release profile, `E:/cargo-target/mtg-zero/eoe-c-timing`). The full engine
+suite 1,996 passed, 0 failed, 20 ignored (with A0's merge; `az` 41, `hidden` and
+`rules_faithful_c` 19 among them). The default `FUZZ_GAMES=20000` passed (20,000 games, wins 9,972 / 9,989, 39 draws, mean 27.0 turns, 215.7 decisions; 1,000 matches; 813 s on a loaded machine); `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed (20,000 games, wins 8,918 / 9,040, 2,042 draws, mean 40.1 turns, 500.7 decisions; 1,780 s).
+
+**Left for others.** Seen while reading `faces.rs`, not in this workstream's list: a daybound double-faced permanent put
+onto the battlefield at night is transformed right after it enters (`entering_choices` -> `day_night_check`), with a
+`Transforms` event; CR 702.145b says it enters transformed (no transformation). A basic land type an effect gives (N22) is
+refused, not built: it waits for W2's moon definitions and the payment code.
+
 #### 99.16 W6: the remaining cards (branch `eoe-w6-rest`, from `eoe-base` 2e01275)
 
 **Why.** The cards the other workstreams left (99.11-99.15): W1's (Nesting Grounds, Terrasymbiosis

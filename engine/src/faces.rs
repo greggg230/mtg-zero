@@ -216,7 +216,13 @@ impl Game {
                 }
                 if f.i == 0 {
                     f.i = 1;
-                    self.draw_cards(p, n as u32);
+                    let queued = self.agenda.len();
+                    if self.draw_cards(p, n as u32) {
+                        // (The discard after the miracle question and the
+                        // rest of the draw, CR 702.94a.)
+                        self.wait_for_draw(queued, f);
+                        return Flow::Suspend;
+                    }
                 }
                 if f.i > n || self.players[p as usize].hand.is_empty() {
                     if let (Some(c), true) = (it, f.x > 0) {
@@ -465,11 +471,13 @@ impl Game {
     /// Can `p` cast card `c` with face `face` up now (a spell face)?
     fn face_castable(&self, p: PlayerId, c: CardIdx, face: DefId, sorcery_ok: bool, classes: &[crate::pay::Class]) -> bool {
         let zone = self.objs[c.i()].zone;
-        // How the card may be cast from where it is comes from the card as
-        // it is there (its front: "instant and sorcery cards in your
-        // graveyard have retrace" doesn't reach an adventurer creature card,
-        // CR 715.4); whether that face can be cast, from the face alone.
-        // (From a graveyard: any of its routes for that face, CR 601.2a-b.)
+        // How the card may be cast from where it is: from a graveyard, any of
+        // its routes for that face (CR 601.2a-b), a granted permission
+        // judged by the face being cast ("instant and sorcery cards in your
+        // graveyard have retrace" reaches an adventurer creature card's
+        // Adventure, not the creature: Lier's ruling of 2025-10-02, CR
+        // 601.3e; `gy_routes_esc`); elsewhere, the card's route. Whether
+        // that face can be cast, from the face alone.
         let routes: Vec<crate::game::CastFrom> = match zone {
             Zone::Hand => Vec::new(),
             Zone::Graveyard => self.gy_routes(p, c, Some(face)).iter().map(|r| self.route_from(c, p, *r)).collect(),
@@ -600,31 +608,40 @@ impl Game {
     /// object, with its counters, damage and attachments (712.18), and a
     /// permanent that becomes a planeswalker this way gets no loyalty
     /// counters (306.5b is about entering). Returns whether it transformed.
+    /// A double-faced card that is copying something transforms too
+    /// (701.27c is about permanents that aren't transforming double-faced
+    /// cards): its own face turns over while the copy effect still gives it
+    /// its characteristics (layer 1, 707.2), and it shows that face when the
+    /// effect ends.
     pub(crate) fn transform(&mut self, c: CardIdx, day_night: bool) -> bool {
         let o = &self.objs[c.i()];
         if o.zone != Zone::Battlefield {
             return false;
         }
-        let d = self.db.def(o.def);
+        let r = self.obj_ref(c);
+        // A token created as a copy of a double-faced permanent is a
+        // double-faced token (CR 707.8a: its copy effect follows the face).
+        let created = self.is_copy_obj(c)
+            && self.copies.iter().filter(|x| x.obj == r).all(|x| x.until == crate::layers::Until::Forever && x.own == x.vals.def);
+        let copying = self.is_copy(c) && !created;
+        // (The face it has: its own, under a copy effect.)
+        let own = if copying { self.own_def(c) } else { o.def };
+        let d = self.db.def(own);
         let Some(other) = d.back else { return false };
         if self.db.def(other).is(types::INSTANT | types::SORCERY) {
             return false;
         }
-        if self.is_copy(c) {
-            // CR 707.8a: a token created as a copy of a double-faced
-            // permanent is a double-faced token (its copy effect follows the
-            // face); a card copying one isn't a double-faced card (701.27c).
-            let r = self.obj_ref(c);
-            let created = self.is_copy_obj(c)
-                && self.copies.iter().filter(|x| x.obj == r).all(|x| x.until == crate::layers::Until::Forever && x.own == x.vals.def);
-            if !created {
-                return false;
-            }
+        if self.is_copy_obj(c) && !created {
+            // (A copy of a card or a token copy whose copy effect changed:
+            // not a double-faced card, 701.27c.)
+            return false;
+        }
+        if created {
             for x in self.copies.iter_mut().filter(|x| x.obj == r) {
                 x.vals.def = other;
                 x.own = other;
             }
-        } else if d.token && d.front != Some(other) && self.db.def(other).front != Some(self.objs[c.i()].def) {
+        } else if d.token && d.front != Some(other) && self.db.def(other).front != Some(own) {
             // (A token transforms only if it is double-faced: the Incubator,
             // whose back face's front is the token, ENGINE.md 28.)
             return false;
@@ -633,7 +650,13 @@ impl Game {
         if (a.daybound || a.nightbound) && !day_night {
             return false;
         }
-        self.set_face(c, other);
+        if copying {
+            for x in self.copies.iter_mut().filter(|x| x.obj == r) {
+                x.own = other;
+            }
+        } else {
+            self.set_face(c, other);
+        }
         let o = &mut self.objs[c.i()];
         o.flips = o.flips.wrapping_add(1);
         self.note(|g| format!("{} transforms", g.name(c)));
@@ -671,8 +694,12 @@ impl Game {
             .iter()
             .copied()
             .filter(|&c| {
+                // (Daybound: "as it becomes night, if this permanent is front
+                // face up, transform it"; nightbound: "... day, if back face
+                // up" (CR 702.145b, e): its own face, under a copy effect.)
                 let a = self.abilities(c);
-                (a.daybound && !day) || (a.nightbound && day)
+                let back = self.db.def(self.own_def(c)).front.is_some();
+                (a.daybound && !day && !back) || (a.nightbound && day && back)
             })
             .collect();
         for c in flip {

@@ -267,7 +267,7 @@ impl Game {
     /// types replaces the printed ones, CR 205.1b; the latest wins)?
     pub fn has_subtype(&self, c: CardIdx, s: u16) -> bool {
         let d = self.def_of(c);
-        let mut printed = d.subtypes.contains(&s) || self.exc(c).is_some_and(|e| e.has_subtype(s));
+        let mut printed = d.subtypes.contains(&s) || self.exc(c).is_some_and(|e| e.has_subtype(self.db, s));
         // Reconfigure (CR 702.151b, 205.3d): attached, it isn't a creature,
         // so it has no creature types either (ruling cff2c1c6). The cube's
         // one reconfigure card, Lion Sash (Equipment Cat), keeps Equipment.
@@ -325,29 +325,55 @@ impl Game {
 
     pub fn colors_of(&self, c: CardIdx) -> ManaMask {
         // Layer 1: a copy's "it's black" (CR 707.9b).
-        let mut base = match self.exc(c).and_then(|e| e.colors) {
+        let base = match self.exc(c).and_then(|e| e.colors) {
             Some(m) => m,
             None => self.def_of(c).colors,
         };
         // Painter's Servant (layer 5): every card, spell and permanent (not
-        // an emblem) is the chosen colour too. (Its timestamp is the only
-        // one in the cube's colour effects that could come before a
-        // "becomes" colour effect: none of those exists, so its order
-        // against `Mod::Colors` is not modelled.)
-        if !self.marks.is_empty() && self.objs[c.i()].zone != Zone::Command {
-            base |= self.painted();
-        }
+        // an emblem) is the chosen colour too.
+        let painted = if !self.marks.is_empty() && self.objs[c.i()].zone != Zone::Command { self.painted() } else { 0 };
         if self.effects.is_empty() || self.objs[c.i()].zone != Zone::Battlefield {
-            return base;
+            return base | painted;
         }
         let r = self.obj_ref(c);
-        self.effects
+        let mut fx = self.effects.iter().filter(|e| e.on == Affected::Obj(r)).filter_map(|e| match &e.m {
+            Mod::Colors(m) => Some((e.ts, *m)),
+            _ => None,
+        });
+        if painted == 0 {
+            return fx.fold(base, |_, (_, m)| m);
+        }
+        // Layer 5 in timestamp order (CR 613.7): a "becomes [colours]"
+        // effect sets the colours, and a Painter's Servant adds its colour
+        // from its own timestamp, the permanent's (613.7a): an earlier
+        // "becomes" effect is added to, a later one overwrites it.
+        let painters = self.painters();
+        let mut col = base;
+        let mut last = 0;
+        for (ts, m) in fx.by_ref() {
+            col = m;
+            last = ts;
+        }
+        painters.iter().filter(|&&(ts, _)| ts > last).fold(col, |col, &(_, m)| col | m)
+    }
+
+    /// The Painter's Servants on the battlefield (`Mark::ChosenColor` of a
+    /// permanent that paints) by timestamp: (timestamp, the colour).
+    fn painters(&self) -> Vec<(u32, ManaMask)> {
+        let mut v: Vec<(u32, ManaMask)> = self
+            .marks
             .iter()
-            .filter(|e| e.on == Affected::Obj(r))
-            .fold(base, |col, e| match &e.m {
-                Mod::Colors(m) => *m,
-                _ => col,
+            .filter_map(|&(r, k)| match k {
+                crate::game::Mark::ChosenColor(i)
+                    if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield && self.abilities(r.idx).paints =>
+                {
+                    Some((self.objs[r.idx.i()].timestamp, 1 << i))
+                }
+                _ => None,
             })
+            .collect();
+        v.sort_unstable();
+        v
     }
 
     /// The colours Painter's Servants on the battlefield add to everything
@@ -808,6 +834,15 @@ impl Game {
         let control = self.control_ending_this_turn();
         self.effects.retain(|e| e.until != Until::EndOfTurn);
         self.return_control(control);
+        // "Whenever ... this turn" triggered abilities end with them (a
+        // delayed triggered ability with a duration, CR 603.7b, 514.2), and
+        // so do the other "this turn" effects: permissions to play a card
+        // this turn or until the end of a player's turn, Yawgmoth's Will's
+        // two, "saddled until end of turn" (702.171b).
+        if !self.temp_triggers.is_empty() {
+            self.temp_triggers.retain(|t| !t.this_turn);
+        }
+        self.end_this_turn_permissions();
         // (Granted triggered abilities until end of turn, regeneration
         // shields, phased-out permanents' damage: EoE W3.)
         if !self.marks.is_empty() || !self.w3.phased.is_empty() {
@@ -816,6 +851,36 @@ impl Game {
         self.effects_changed();
         if !self.copies.is_empty() {
             self.end_copy_effects(Until::EndOfTurn);
+        }
+    }
+
+    /// CR 514.2: the "this turn" effects kept as turn numbers end in the
+    /// cleanup step, not as the next turn begins.
+    fn end_this_turn_permissions(&mut self) {
+        use crate::resolve_tail2::{PERM_LATER, PERM_UNTIL_TURNS};
+        use crate::resolve_tail3::PERM_UNTIL_END_STEP;
+        let n = self.turn.number;
+        let active = self.turn.active;
+        for pl in &mut self.players {
+            if pl.gy_play_turn == n {
+                pl.gy_play_turn = 0;
+            }
+            if pl.gy_exile_turn == n {
+                pl.gy_exile_turn = 0;
+            }
+        }
+        if !self.permissions.is_empty() {
+            let turns = [self.players[0].turns, self.players[1].turns];
+            self.permissions.retain(|p| match p.turn {
+                Some(t) if t & (PERM_LATER | PERM_UNTIL_TURNS | PERM_UNTIL_END_STEP) == 0 => t != n,
+                // (Through the end of the player's k-th turn.)
+                Some(t) if t & PERM_UNTIL_TURNS != 0 => !(p.player == active && turns[p.player as usize] == t & !PERM_UNTIL_TURNS),
+                _ => true,
+            });
+        }
+        if !self.marks.is_empty() {
+            let t = n as u16;
+            self.marks.retain(|&(_, m)| m != crate::game::Mark::Saddled(t));
         }
     }
 

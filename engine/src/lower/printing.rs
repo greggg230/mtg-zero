@@ -377,9 +377,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
 
     let mut ty = 0u16;
     for t in card_types {
-        match types::from_name(t) {
-            Some(b) => ty |= b,
-            None => l.unsupported(format!("CardType:{t}")),
+        if let Some(b) = given_type(l, "CardType", t) {
+            ty |= b;
         }
     }
     let mut sup = 0u8;
@@ -1291,7 +1290,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         if !walker {
             l.unsupported("CardPrinting.creature_during_your_turn(not a planeswalker)");
         }
-        let subtypes = subs.iter().map(|s| l.subtype(s)).collect();
+        let subtypes = subs.iter().filter_map(|s| l.given_subtype("CardPrinting.creature_during_your_turn", s)).collect();
         let mut mods = vec![
             // "it's a 3/4 Ninja creature": its card types and subtypes
             // become exactly these (CR 205.1a-b), so it isn't a planeswalker
@@ -2065,18 +2064,17 @@ fn lower_enters_as_copy(l: &mut Lowerer, x: EnterCopyFields, card_types: u16) ->
     };
     let mut exc = crate::copies::Except::default();
     if !x.add_type.is_empty() {
-        match types::from_name(x.add_type) {
-            Some(b) => exc.types |= b,
-            None => l.unsupported(format!("CardPrinting.enters_as_copy_add_type({})", x.add_type)),
+        if let Some(b) = given_type(l, "CardPrinting.enters_as_copy_add_type", x.add_type) {
+            exc.types |= b;
         }
     }
     if let Some((p, t)) = x.base_pt {
         exc.pt = Some((l.int("CardPrinting.enters_as_copy_base_pt", *p, 0, 99) as i8, l.int("CardPrinting.enters_as_copy_base_pt", *t, 0, 99) as i8));
     }
     for s in x.add_subtypes {
-        let id = l.subtype(s);
-        if !exc.add_subtype(id) {
-            l.unsupported("CardPrinting.enters_as_copy_add_subtypes(too many)");
+        let Some(id) = l.given_subtype("CardPrinting.enters_as_copy_add_subtypes", s) else { continue };
+        if let Some(k) = l.exc_subtype(id) {
+            exc.add_subtype(k);
         }
     }
     for k in x.add_keywords {
@@ -2344,6 +2342,25 @@ pub(crate) enum KwOrProt {
     Devoid,
     /// Modular n (CR 702.43a; EoE W6).
     Modular(u8),
+}
+
+/// A card type an object is given (printed, by a type-changing effect, by a
+/// copy exception) -> its `types` bit. A battle is refused: the engine has
+/// no defense counters, no protector and no attacking a battle (CR 310), so
+/// a battle would be played wrongly (docs/shortcuts.md 13.10). The other
+/// types' words name them in filters too (`types::from_name`).
+pub(crate) fn given_type(l: &mut Lowerer, field: &str, t: &str) -> Option<u16> {
+    match types::from_name(t) {
+        Some(types::BATTLE) => {
+            l.unsupported(format!("{field}(Battle: CR 310 is not built)"));
+            None
+        }
+        Some(b) => Some(b),
+        None => {
+            l.unsupported(format!("{field}({t})"));
+            None
+        }
+    }
 }
 
 pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<KwOrProt> {

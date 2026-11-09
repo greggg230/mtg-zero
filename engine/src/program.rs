@@ -1205,7 +1205,65 @@ pub enum Op {
     Ext(Ext),
 }
 
+impl Who {
+    /// Does the player depend on the ability's source object?
+    pub fn reads_source(&self) -> bool {
+        match self {
+            Who::You
+            | Who::TargetPlayer(_)
+            | Who::ControllerOfTarget(_)
+            | Who::Active
+            | Who::NonActive
+            | Who::Opponent
+            | Who::EventPlayer
+            | Who::TargetOrItsController(_) => false,
+            Who::LkiController | Who::NotLkiController => true,
+        }
+    }
+}
+
+impl Amount {
+    /// Does the number depend on the ability's source object? (Counted
+    /// from the controller's board, the event or fixed: no; anything else
+    /// is taken to.)
+    pub fn reads_source(&self) -> bool {
+        !matches!(
+            self,
+            Amount::Fixed(_)
+                | Amount::EventAmount
+                | Amount::EventObjPower
+                | Amount::EventTimes
+                | Amount::EventSpellTimes
+                | Amount::EventSpellMv
+                | Amount::OpponentsLostLife
+                | Amount::ControllerLife
+                | Amount::Experience
+                | Amount::Devotion(_)
+                | Amount::CountTypes(_)
+                | Amount::CountTypesOpp(_)
+                | Amount::CountTypesTimes(..)
+                | Amount::MulticoloredPermanents
+                | Amount::DifferentlyNamedLands
+                | Amount::Attacking
+        )
+    }
+}
+
 impl Op {
+    /// May the op's result depend on its ability's source object (CR
+    /// 113.7)? False only for drawing, gaining or losing life, discarding
+    /// at random and a "you may", for players and amounts the source
+    /// doesn't decide; every other op is taken to (`TriggerDef::uses_source`).
+    pub fn may_read_source(&self) -> bool {
+        match self {
+            Op::Draw { who, n } | Op::GainLife { who, n } | Op::LoseLife { who, n } | Op::DiscardRandom { who, n } => {
+                who.reads_source() || n.reads_source()
+            }
+            Op::May { who, .. } => who.reads_source(),
+            _ => true,
+        }
+    }
+
     /// Does the op read its triggered ability's event?
     pub fn uses_event(&self) -> bool {
         let amt = |a: &Amount| matches!(a, Amount::EventAmount | Amount::EventObjPower | Amount::EventTimes | Amount::EventSpellTimes | Amount::EventSpellMv);

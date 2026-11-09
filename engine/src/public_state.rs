@@ -135,6 +135,11 @@ pub fn fields() -> Vec<Field> {
         entering_exiled: Derived "transient: set and cleared around one move",
         entering_mods: Derived "transient: set and cleared around one move",
         leaving_to: Derived "transient: set and cleared around one leave event",
+        leaving_choice: Derived "transient: set and cleared around one leave event",
+        leaving_card: Derived "transient: set and cleared around one leave event",
+        resolving_adventure: Derived "transient: set and cleared around one move",
+        ts_group: Derived "event-group bookkeeping (CR 613.7m: which timestamps were given together)",
+        held: Derived "the triggered abilities a pending 616.1 choice releases (ChooseReplacement, the decision's context): what its answers would trigger follows from the public event",
         entering_counters: Derived "transient: set and cleared around one move",
         entering_tapped: Derived "transient: set and cleared around one move",
         discard_entered: Derived "transient: Mox Diamond's answer, consumed by its entering",
@@ -143,7 +148,6 @@ pub fn fields() -> Vec<Field> {
         entering_dash: Derived "transient: set and cleared around one move",
         entering_warp: Derived "transient: set and cleared around one move",
         miracle_cast: Derived "transient: the card a miracle trigger is casting (its decisions' context)",
-        miracle_check: Derived "transient: a first draw that may be revealed for miracle, asked before the next priority",
         entering_face: Derived "transient: set and cleared around one move",
         day: Public "day or night (CR 731)",
         done_once: Public "optional \"only once each turn\" actions done this turn",
@@ -289,6 +293,7 @@ pub fn fields() -> Vec<Field> {
         normal: Public "the player of the last normal turn (extra turns, CR 500.7)",
         cleanup_again: Derived "transient within a cleanup step (CR 514.3a)",
         extra_combats: Public "additional combat phases to follow (CR 500.8)",
+        after_combat: Public "where the turn goes on after combat phases added to another phase (CR 500.8)",
         chooser: Public "who chose who plays first (CR 103.1)",
     });
     classify!(v, StackItem {
@@ -985,6 +990,18 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.turn.extra_combats += 1;
             Some(format!("{}", a.g.turn.extra_combats))
         }),
+        p!("the turn goes on with another phase after its combat phases", "Turn.after_combat", |a, _| {
+            use crate::game::Step;
+            let combat = matches!(
+                a.g.turn.step,
+                Step::BeginCombat | Step::DeclareAttackers | Step::DeclareBlockers | Step::FirstStrikeDamage | Step::CombatDamage | Step::EndCombat
+            );
+            if !combat {
+                return None;
+            }
+            a.g.turn.after_combat = if a.g.turn.after_combat == Step::Main2 { Step::End } else { Step::Main2 };
+            Some(format!("{:?}", a.g.turn.after_combat))
+        }),
         p!("the other player chose who played first", "Turn.chooser", |a, _| {
             a.g.turn.chooser = opp(a.g.turn.chooser);
             Some(format!("P{}", a.g.turn.chooser))
@@ -1209,7 +1226,16 @@ pub fn perturbations() -> Vec<Perturbation> {
         p!("the other player learns a hand card", "Obj.known", |a, r| {
             let p = player(r);
             let q = opp(p);
-            let hs: Vec<CardIdx> = a.g.players[p as usize].hand.iter().copied().filter(|&c| !a.g.knows(q, c)).collect();
+            // (The cards of the encoded `HAND` slots; past them below.)
+            let hs: Vec<CardIdx> = a.g.hand_sorted(p).into_iter().take(crate::az::encode::HANDS).filter(|&c| !a.g.knows(q, c)).collect();
+            let c = pick(&hs, r)?;
+            a.g.learn(q, c);
+            Some(format!("P{q} learns P{p}'s {}", a.g.name(c)))
+        }),
+        p!(rare "the other player learns a hand card past the 16th", "Obj.known", |a, r| {
+            let p = player(r);
+            let q = opp(p);
+            let hs: Vec<CardIdx> = a.g.hand_sorted(p).into_iter().skip(crate::az::encode::HANDS).filter(|&c| !a.g.knows(q, c)).collect();
             let c = pick(&hs, r)?;
             a.g.learn(q, c);
             Some(format!("P{q} learns P{p}'s {}", a.g.name(c)))
@@ -1455,13 +1481,15 @@ pub fn perturbations() -> Vec<Perturbation> {
             s.ev.amount += 1;
             Some(format!("{}", s.ev.amount))
         })),
-        p!("a spell was cast for an alternative cost", "StackItem.alt", |a, r| item(a, r, |s| {
-            if !matches!(s.kind, StackKind::Spell { .. }) {
-                return None;
-            }
-            s.alt ^= 1;
-            Some(format!("alt {}", s.alt))
-        })),
+        p!("a spell was cast for an alternative cost", "StackItem.alt", |a, r| {
+            // (A spell whose card has an alternative cost, or cast for one:
+            // the state stays one a game reaches, so a pending payment can be
+            // recomputed.)
+            let v: Vec<usize> = stack_spells(&a.g).into_iter().filter(|&(i, c)| a.g.stack[i].alt != 0 || !a.g.def_of(c).alt_costs.is_empty()).map(|(i, _)| i).collect();
+            let i = pick(&v, r)?;
+            a.g.stack[i].alt ^= 1;
+            Some(format!("stack item {} from the top: alt {}", a.g.stack.len() - 1 - i, a.g.stack[i].alt))
+        }),
         p!("a spell was cast from a graveyard with flashback", "StackItem.from", |a, r| item(a, r, |s| {
             if !matches!(s.kind, StackKind::Spell { .. }) || s.from == crate::game::CastFrom::Flashback {
                 return None;
@@ -1648,6 +1676,8 @@ pub fn limits() -> Vec<Limit> {
         l("the active player is controlled this turn", NextLayout, "who controls the active player this turn (CR 722.1, 722.4; The Dominion Bracelet) is game state layout v5 has no float for: during a controlled turn the controller decides (to_move) the controlled player's decisions, whose action ids stay that player's, while the controller's encoding is its own seat's (its own hand, the controlled player's hand as known cards, CR 722.3); the next layout encodes it (a global, and the decision's seat)"),
         l("a spell's granted alternative cost came from another permanent", NextLayout, "which permanent's static ability gave the alternative cost a spell was cast for (Mark::AltGranted; Tannuk, Steadfast Second's warp, EoE W5, ENGINE.md 99.15) decides whether the spell still has that ability as it resolves (CR 400.7g, 608.3g: warp's exile); the stack item's alternative cost is encoded (stack::ALT, ALT_INDEX: past the card's own), its granter is not: the next layout encodes it (as a noted object's)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
+        l("the other player learns a hand card past the 16th", NextLayout, "the hand block has 16 `HAND` slots (the viewer's hand sorted by definition, ENGINE.md 58): with more than 16 cards in hand (Tamiyo, Seasoned Scholar's emblem: no maximum hand size), which of the later ones the opponent knows is not encoded (their identities are, in the hand bag); the next layout encodes the known copies per identity (found by workstream C's gate positions, ENGINE.md 100.3)"),
+        l("the turn goes on with another phase after its combat phases", NextLayout, "after combat phases an effect added after the beginning phase, the postcombat main phase or the ending phase (CR 500.8: \"after this phase, there is an additional combat phase\", resolved outside combat; workstream C, ENGINE.md 100.3), the turn goes on with the phase that came next there (Turn::after_combat), not the postcombat main phase; layout v5 encodes the additional combat phases to follow (g5::EXTRA_COMBATS), not where the turn resumes: the next layout encodes it (a global)"),
         l("a control effect ends at the end of the turn", NextLayout, "the control-changing effects behind a permanent's controller (W6State::control: their order and which end at the end of the turn, CR 613.1b, 613.7, 514.2; recorded in games with an Aura that changes control, Tractor Beam, EoE W6, ENGINE.md 99.16) decide who controls it when one ends; layout v5 encodes the controller, not the effects: the next layout encodes them (a permanent's 'controlled until end of turn' and 'by an Aura' flags)"),
         l("a copy has an ability by its exception", NextLayout, "a copy effect's 'except it has this ability' (CR 707.9b; Thespian's Stage, EoE W6, ENGINE.md 99.16: a definition made with the copied one's abilities and the Stage's) gives the copy an ability its identity (the copied card's) doesn't show; the next layout encodes a permanent's activated abilities beyond its identity's"),
         l("a player created tokens this turn", NextLayout, "whether a player created tokens this turn (W6State::tokens_turn, EoE W6, ENGINE.md 99.16) decides whether Moonlit Meditation's 'the first time you would create one or more tokens each turn' can still apply; layout v5 has no float for it: the next layout encodes it (a per-turn flag beside the turn's facts)"),
