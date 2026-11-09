@@ -580,6 +580,18 @@ fn b3_db() -> &'static CardDb {
             // A Rebel with "{T}: Add {G}."
             creature("Test Mana Rebel", "Rebel", 2, json!([mana(json!({"$t": "ActivationCost", "tap_self": true}), 1)])),
         ];
+        let land = |name: &str, draw_cost: serde_json::Value| {
+            eoe_w2::card(name, json!({"card_types": ["Land"], "type_line": "Land", "activated_abilities": [
+                mana(json!({"$t": "ActivationCost", "tap_self": true}), 1),
+                {"$t": "ActivatedAbility", "cost": draw_cost, "effect": {"$t": "DrawCards", "amount": 1}}]}))
+        };
+        let one = json!({"$t": "ManaCost", "generic": 1});
+        let custom = custom.into_iter().chain([
+            // "{T}: Add {G}. {1}, Sacrifice this land: Draw a card."
+            land("Test Cycle Land", json!({"$t": "ActivationCost", "mana": one, "mana_str": "{1}", "sacrifice_self": true})),
+            // "{T}: Add {G}. {1}, {T}: Draw a card."
+            land("Test Tap Draw Land", json!({"$t": "ActivationCost", "mana": one, "mana_str": "{1}", "tap_self": true})),
+        ]);
         let mut cards = engine::db::load_cube_document().cards;
         cards.extend(common::custom_cards());
         cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
@@ -703,4 +715,81 @@ fn cr_601_2g_a_creature_tapped_for_teamwork_pays_no_mana() {
         };
     }
     assert_eq!(g.stack().len(), 2, "Nay cast: {}", log(&g));
+}
+
+/// docs/shortcuts.md 13.3, CR 601.2g-h: a cost's source pays the cost's mana
+/// with a mana ability that doesn't conflict with it. "{T}: Add {G}" and
+/// "{1}, Sacrifice this land: Draw a card": the land taps for {G}, then is
+/// sacrificed (the source was excluded whole before). "{1}, {T}: Draw a card"
+/// can't be paid by its own {T} (both tap it): with a Forest it can.
+#[test]
+fn cr_601_2g_a_source_taps_for_mana_then_is_sacrificed_for_its_cost() {
+    let draws = |g: &Game, name: &str| {
+        let c = g.card(0, name, Zone::Battlefield);
+        options(g).into_iter().filter(|o| matches!(o, Choice::Ability(x, AbilitySlot::Activated(1)) if *x == c)).collect::<Vec<_>>()
+    };
+    let mut g = b3_scen().battlefield(0, &["Test Cycle Land"]).at(Step::Main1, 0).start();
+    let land = g.card(0, "Test Cycle Land", Zone::Battlefield);
+    let opt = draws(&g, "Test Cycle Land");
+    assert_eq!(opt.len(), 1, "the draw ability offered: {:?}", g.options_desc());
+    g.choose(opt[0]);
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(land).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.player(0).hand.len(), 1, "drew a card: {}", log(&g));
+    let g = b3_scen().battlefield(0, &["Test Tap Draw Land"]).at(Step::Main1, 0).start();
+    assert!(draws(&g, "Test Tap Draw Land").is_empty(), "its own {{T}} can't pay {{1}}, {{T}}");
+    let g = b3_scen().battlefield(0, &["Test Tap Draw Land", "Forest"]).at(Step::Main1, 0).start();
+    assert_eq!(draws(&g, "Test Tap Draw Land").len(), 1);
+}
+
+/// docs/shortcuts.md 13.16, CR 601.2g-h, 702.66a: Black Lotus ("{T}, Sacrifice
+/// this artifact: Add three mana of any one color") sacrificed for mana is in
+/// the graveyard before delve's cards are exiled, so it is one of them in the
+/// payment it helps. Treasure Cruise ({7}{U}, delve) with the Lotus, an Island
+/// and three cards in the graveyard: three mana, the Lotus and the three
+/// cards delved, the Island: eight. Only one-mana sources (Lotus Petal) were
+/// counted before.
+#[test]
+fn cr_702_66a_black_lotus_is_delved_in_the_payment_it_helps() {
+    let mut g = scen()
+        .battlefield(0, &["Black Lotus", "Island"])
+        .graveyard(0, &["Mountain", "Mountain", "Mountain"])
+        .hand(0, &["Treasure Cruise"])
+        .at(Step::Main1, 0)
+        .start();
+    let cruise = g.card(0, "Treasure Cruise", Zone::Hand);
+    let lotus = bf(&g, 0, "Black Lotus");
+    assert!(g.has_option(Choice::Cast(cruise)), "castable with the Lotus delved: {:?}", g.options_desc());
+    g.choose(Choice::Cast(cruise));
+    finish(&mut g, |g| options(g).contains(&Choice::Card(lotus)).then_some(Choice::Card(lotus)));
+    assert_eq!(g.obj(cruise).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.obj(lotus).zone, Zone::Exile, "the Lotus delved: {}", log(&g));
+    assert_eq!(g.player(0).graveyard.len(), 0, "{}", log(&g));
+    let g = scen()
+        .battlefield(0, &["Black Lotus", "Island"])
+        .graveyard(0, &["Mountain", "Mountain"])
+        .hand(0, &["Treasure Cruise"])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(!g.has_option(Choice::Cast(g.card(0, "Treasure Cruise", Zone::Hand))), "seven");
+}
+
+/// docs/shortcuts.md 24.7.4, CR 111.2, 614.1a: a creation doubled past 64
+/// makes every token there is room for. Seven Exalted Sunborns ("twice that
+/// many of those tokens") and Eusocial Engineering's landfall Robot: 128
+/// Robots, as many as the player's 96 permanents leave room for (the engine
+/// limit of docs/shortcuts.md 26.11.6, with room for every card they own);
+/// at most 64 were made before.
+#[test]
+fn cr_614_1a_doubled_tokens_past_sixty_four() {
+    let mut mine = vec!["Exalted Sunborn"; 7];
+    mine.push("Eusocial Engineering");
+    let mut g = eoe_w2::scen().battlefield(0, &mine).hand(0, &["Forest"]).at(Step::Main1, 0).start();
+    let f = g.card(0, "Forest", Zone::Hand);
+    g.choose(Choice::Play(f));
+    settle(&mut g);
+    let robots = g.permanents_of(0).filter(|&c| g.name(c) == "Robot").count();
+    // (96 less the eight permanents, the Forest and the ten library cards.)
+    assert_eq!(robots, 96 - 9 - 10, "{}", log(&g));
 }

@@ -1064,7 +1064,8 @@ impl Game {
         let classes = self.mana_classes(p, None);
         let mut out: Vec<CardIdx> = Vec::new();
         for cl in &classes {
-            if cl.sac_self && cl.need == 0 && matches!(cl.yld, crate::pay::Yield::One(_)) && !crate::pay::is_sac_slot(cl.members[0].slot) {
+            // (One mana or several, Black Lotus's: docs/shortcuts.md 13.16.)
+            if crate::pay::delve_source(cl) {
                 for s in cl.members.iter() {
                     // (Only a card that would reach the graveyard: not under
                     // Yawgmoth's Will or an opponent's Dauthi Voidwalker,
@@ -1157,18 +1158,15 @@ impl Game {
     /// graveyard afterwards, one more generic mana of a delve spell.
     pub(crate) fn delve_classes<'a>(&self, p: PlayerId, card: CardIdx, classes: &'a [crate::pay::Class]) -> std::borrow::Cow<'a, [crate::pay::Class]> {
         use crate::pay::Yield;
-        if !self.def_of(card).delve
-            || !classes.iter().any(|cl| cl.sac_self && cl.need == 0 && matches!(cl.yld, Yield::One(_)) && !crate::pay::is_sac_slot(cl.members[0].slot))
-        {
+        if !self.def_of(card).delve || !classes.iter().any(crate::pay::delve_source) {
             return std::borrow::Cow::Borrowed(classes);
         }
         let mut out = classes.to_vec();
         let mut kept = Vec::new();
         for cl in out.iter_mut() {
-            if !(cl.sac_self && cl.need == 0 && !crate::pay::is_sac_slot(cl.members[0].slot)) {
+            if !crate::pay::delve_source(cl) {
                 continue;
             }
-            let Yield::One(u) = cl.yld else { continue };
             // (Tokens cease to exist: no delve; nor a card exiled instead of
             // going to the graveyard, under Yawgmoth's Will or an opponent's
             // Dauthi Voidwalker: `delve_sources`, ENGINE.md 49; nor another
@@ -1186,8 +1184,16 @@ impl Game {
                 continue;
             }
             cl.members = cards;
-            let prods = (0..6).filter(|&t| u.mask & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect();
-            cl.yld = Yield::Multi { prods, units: Some(vec![u, crate::mana::Unit::free(0u8)]) };
+            match cl.yld {
+                Yield::One(u) => {
+                    let prods = (0..6).filter(|&t| u.mask & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect();
+                    cl.yld = Yield::Multi { prods, units: Some(vec![u, crate::mana::Unit::free(0u8)]) };
+                }
+                // (Several mana, Black Lotus's, or Wizard's Rockets: the
+                // typeless unit with each production, `Class::delve`;
+                // docs/shortcuts.md 13.16.)
+                Yield::Multi { .. } => cl.delve = true,
+            }
         }
         for (cl, s) in kept {
             let mut m = crate::pay::Members::new();

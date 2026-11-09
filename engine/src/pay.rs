@@ -208,6 +208,12 @@ pub(crate) struct Class {
     /// could activate tapped for another's ability, 1 for one tapped for
     /// improvise or convoke (it can't activate then; ENGINE.md 99.12).
     pub taps: u8,
+    /// Its card, sacrificed for this mana, is in the graveyard before a
+    /// delve spell's cards are exiled (CR 601.2g before 601.2h) and pays
+    /// {1} of it too: a typeless unit with each production
+    /// (`Game::delve_classes`, a several-mana source; docs/shortcuts.md
+    /// 13.16).
+    pub delve: bool,
 }
 
 impl Class {
@@ -229,8 +235,18 @@ impl Class {
             slot_id: 0,
             share: 0,
             taps: 0,
+            delve: false,
         }
     }
+}
+
+/// A mana source a delve or "exile n cards from your graveyard" can count
+/// on: it sacrifices itself (so its card is in the graveyard by 601.2h),
+/// has no mana cost of its own, and is the card's own ability or a granted
+/// one (not another permanent's sacrifice of it); one mana or several, or
+/// Wizard's Rockets' (docs/shortcuts.md 13.16).
+pub(crate) fn delve_source(cl: &Class) -> bool {
+    cl.sac_self && cl.need == 0 && !is_sac_slot(cl.members[0].slot)
 }
 
 /// The mana cost of a mana ability as `NOT_MADE` needs: one mana, or {n}
@@ -295,6 +311,33 @@ pub(crate) struct Keep {
     /// after the mana abilities (601.2h after 601.2g), so no mana ability
     /// of the payment taps or sacrifices them.
     pub committed: Vec<CardIdx>,
+    /// What the cost takes of its own source after the mana (`SelfUse`).
+    pub self_use: Option<SelfUse>,
+}
+
+/// What a cost takes of its own source, paid after the mana abilities (CR
+/// 601.2h after 601.2g; docs/shortcuts.md 13.3): it taps it, moves it
+/// (sacrifice, exile, discard), removes counters from it. Only the
+/// source's mana abilities that conflict are out of the payment
+/// (`Game::classes_for_self_use`): one that taps or moves it when the cost
+/// taps it, one that moves it when the cost moves it, and uses of one that
+/// removes the same counters past what the cost leaves. Tapping a land for
+/// mana and then sacrificing it for "{1}, Sacrifice this land" is one
+/// payment.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(crate) struct SelfUse {
+    pub card: CardIdx,
+    pub tap: bool,
+    pub moves: bool,
+    pub counters: Option<(crate::db::Counter, u8)>,
+}
+
+impl SelfUse {
+    /// `card`'s cost `cost`'s use of `card`, if any.
+    pub(crate) fn of(card: CardIdx, cost: &crate::db::Cost) -> Option<SelfUse> {
+        let su = SelfUse { card, tap: cost.tap, moves: cost.sac_self || cost.exile_self || cost.discard_self, counters: cost.remove_counters };
+        (su.tap || su.moves || su.counters.is_some()).then_some(su)
+    }
 }
 
 /// A tap cost the mana payment must leave payable (docs/shortcuts.md
@@ -610,10 +653,11 @@ impl Game {
     /// creatures, docs/shortcuts.md 13.17).
     fn payment_classes(&self, pm: &PayMana) -> Vec<Class> {
         let classes = self.pay_classes(pm.payer, pm.keep.exclude, pm.improvise_types(), pm.convoke);
-        if pm.keep.committed.is_empty() {
-            classes
-        } else {
-            self.classes_without(&classes, &pm.keep.committed)
+        let classes = if pm.keep.committed.is_empty() { classes } else { self.classes_without(&classes, &pm.keep.committed) };
+        // (And the source's own conflicting sources, `SelfUse`.)
+        match self.classes_for_self_use(&classes, pm.keep.self_use) {
+            std::borrow::Cow::Borrowed(_) => classes,
+            std::borrow::Cow::Owned(v) => v,
         }
     }
 
@@ -1444,7 +1488,8 @@ impl Game {
     /// Can `p` pay `cost` (Phyrexian pips included) from their pool and the
     /// sources in `classes`, leaving what `keep` needs?
     pub(crate) fn can_pay_with(&self, p: PlayerId, cost: &ManaCost, classes: &[Class], keep: &Keep) -> bool {
-        self.might_pay(p, cost, classes, None) && self.phyrexian_feasible(p, cost, classes, keep, keep.life, None)
+        let classes = self.classes_for_self_use(classes, keep.self_use);
+        self.might_pay(p, cost, &classes, None) && self.phyrexian_feasible(p, cost, &classes, keep, keep.life, None)
     }
 
     /// A cheap necessary condition for paying `cost` from the pool and
@@ -1462,13 +1507,14 @@ impl Game {
             if have >= need as u64 {
                 return true;
             }
-            let most = match &cl.yld {
-                Yield::One(_) => 1,
-                Yield::Multi { prods, units } => {
-                    let most = prods.iter().map(|v| v.iter().map(|&n| n as u32).sum::<u32>()).max().unwrap_or(0);
-                    most.max(units.as_ref().map_or(0, |us| us.len() as u32))
-                }
-            };
+            let most = cl.delve as u32
+                + match &cl.yld {
+                    Yield::One(_) => 1,
+                    Yield::Multi { prods, units } => {
+                        let most = prods.iter().map(|v| v.iter().map(|&n| n as u32).sum::<u32>()).max().unwrap_or(0);
+                        most.max(units.as_ref().map_or(0, |us| us.len() as u32))
+                    }
+                };
             // (In u64: exact for any number of uses, `Class::reuse`.)
             let uses = cl.reuse as u64 * cl.members.iter().filter(|s| Some(s.card) != without).count() as u64;
             have = have.saturating_add(most as u64 * uses);
@@ -1488,7 +1534,67 @@ impl Game {
         without: Option<CardIdx>,
     ) -> bool {
         let classes = self.classes_excluding(p, classes, without);
+        let classes = self.classes_for_self_use(&classes, keep.self_use);
         self.might_pay(p, cost, &classes, without) && self.phyrexian_feasible(p, cost, &classes, keep, keep.life, without)
+    }
+
+    /// `classes` for a cost that takes `su` of its source (`SelfUse`, CR
+    /// 601.2g-h; docs/shortcuts.md 13.3): without the source's sources that
+    /// conflict with it. A source that only removes counters keeps the uses
+    /// the cost's counters leave (and, when the cost needs the source, not
+    /// the one whose last counter sacrifices it); a Pollinator or a
+    /// Lumberjack the cost taps no longer activates (`Class::share`).
+    pub(crate) fn classes_for_self_use<'a>(&self, classes: &'a [Class], su: Option<SelfUse>) -> std::borrow::Cow<'a, [Class]> {
+        let Some(su) = su else { return std::borrow::Cow::Borrowed(classes) };
+        let actor = su.tap && classes.iter().any(|cl| cl.share > 0 && cl.members[0].slot != LJ_FOR) && {
+            let p = self.objs[su.card.i()].controller;
+            self.pol_activators(p).contains(&su.card)
+        };
+        if !actor && !classes.iter().any(|cl| cl.members.iter().any(|s| s.card == su.card) || cl.share > 0) {
+            return std::borrow::Cow::Borrowed(classes);
+        }
+        let conflict = if su.tap { TAP | SAC } else if su.moves { SAC } else { 0 };
+        let mut out = Vec::with_capacity(classes.len());
+        for cl in classes {
+            let first = cl.members[0];
+            let mut cl = cl.clone();
+            let mut reuse = cl.reuse;
+            cl.members.retain(|s| {
+                if s.card != su.card {
+                    return true;
+                }
+                if cl.res & conflict != 0 {
+                    return false;
+                }
+                // (Counters: only an ability of the source removes them.)
+                let (AbilitySlot::Activated(_) | AbilitySlot::Hand(_)) = s.slot else { return true };
+                let ad = self.src_ability(s.card, s.slot);
+                let Some((k, n)) = ad.cost.remove_counters else { return true };
+                let have = self.counters_on(s.card, k);
+                let keep_n = match su.counters {
+                    Some((k2, m)) if k2 == k => m as crate::num::Count,
+                    // (Its last counter's use sacrifices it, before the
+                    // cost is paid.)
+                    _ if (su.tap || su.moves || su.counters.is_some()) && ad.mana().is_some_and(|m| m.sac_if_no == Some(k)) => 1,
+                    _ => 0,
+                };
+                let uses = have.saturating_sub(keep_n) / n.max(1) as crate::num::Count;
+                if cl.res == 0 {
+                    reuse = reuse.min(uses);
+                }
+                uses > 0
+            });
+            cl.reuse = reuse;
+            let shared = cl.share > 0;
+            if shared && su.tap {
+                let tapped = if first.slot == LJ_FOR { self.lumberjack_for(su.card, first.card) } else { actor };
+                cl.share -= tapped as u8;
+            }
+            if !cl.members.is_empty() && !(shared && cl.share == 0) && cl.reuse > 0 {
+                out.push(cl);
+            }
+        }
+        std::borrow::Cow::Owned(out)
     }
 
     /// `classes` (built with nothing excluded) as a payment that excludes
@@ -1871,21 +1977,36 @@ impl Game {
         if pm.now.is_none() && self.answer.is_none() {
             if let Some((src, delve)) = pm.forced.pop() {
                 let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("a delve source's class");
-                let Yield::One(u) = classes[ci].yld else { unreachable!("a delve source makes one mana") };
                 if delve {
                     pm.delve_late.push(src.card);
                 }
+                if classes[ci].convert {
+                    // (Wizard's Rockets: the payment's mana of any colour.)
+                    pm.convert = true;
+                    pm.multi.push((src, [0; 6]));
+                    self.recount(&mut pm, &classes);
+                    self.agenda.push(Task::PayMana(pm));
+                    return;
+                }
                 let (budget, dmg) = self.budget(payer, &pm.keep, pm.keep.life + pm.phyrexian_life);
                 let rest = self.pay_cands(&pm, &classes, 0, Some(src), dmg);
-                let prods: Vec<[u8; 6]> = (0..6)
-                    .filter(|&t| u.mask & (1 << t) != 0)
-                    .map(|t| one(t, 1))
+                // (One mana, its type; several (Black Lotus's three of one
+                // colour), a production: each that leaves the rest payable.)
+                let cl = &classes[ci];
+                let all: Vec<[u8; 6]> = match &cl.yld {
+                    Yield::One(u) => (0..6).filter(|&t| u.mask & (1 << t) != 0).map(|t| one(t, 1)).collect(),
+                    Yield::Multi { prods, .. } => prods.clone(),
+                };
+                let kind_of = |t: usize| t as u16 | if cl.only != 0 { 16 | (purposes(restriction(cl.only)) as u16) << 8 } else { 0 };
+                let prods: Vec<[u8; 6]> = all
+                    .into_iter()
                     .filter(|prod| {
                         let mut groups = self.vgroups(&pm);
-                        let t = prod.iter().position(|&n| n > 0).unwrap() as u16;
-                        match groups.iter_mut().find(|g| g.0 == t) {
-                            Some(g) => g.1 += 1,
-                            None => groups.push((t, 1)),
+                        for t in (0..6).filter(|&t| prod[t] > 0) {
+                            match groups.iter_mut().find(|g| g.0 == kind_of(t)) {
+                                Some(g) => g.1 += prod[t],
+                                None => groups.push((kind_of(t), prod[t])),
+                            }
                         }
                         self.most_spent(&pm, &groups, &pm.marked, &[], &rest, budget).is_some()
                     })
@@ -2677,6 +2798,7 @@ fn masks_of(groups: &[(u16, u8)], counts: &[u8]) -> SVec<Tag, 16> {
 /// budget its activation takes, charged once, all its mana or none; an
 /// ability with a mana cost adds its need). With `dmg`, the damage an
 /// ability deals its controller weighs like life.
+#[derive(Clone)]
 pub(crate) struct Cands {
     fixed: Units,
     alts: Vec<Vec<Way>>,
@@ -2937,7 +3059,8 @@ fn cands(
             if cl.convert {
                 // (Its card's other ways are kept apart, below: activating
                 // it taps and sacrifices the card, so they are out then.)
-                out.convert.push((Way { units: SVec::new(), life: extra, sac, need: 0, need_n: 0, tap: 0, crew: 0 }, None));
+                let units = if cl.delve { std::iter::once(Unit::free(0u8)).collect() } else { SVec::new() };
+                out.convert.push((Way { units, life: extra, sac, need: 0, need_n: 0, tap: 0, crew: 0 }, None));
                 conv_cards.push(s.card);
                 continue;
             }
@@ -2962,11 +3085,21 @@ fn cands(
                 }
                 Yield::Multi { units: Some(us), .. } if alone(s.card) && extra == 0 && sac == 0 && cl.need == 0 && tap == 0 => {
                     out.fixed.extend(us.iter().map(|u| Unit::free(u.mask | restr)));
+                    if cl.delve {
+                        out.fixed.push(Unit::free(0u8));
+                    }
                     continue;
                 }
                 _ => {}
             }
-            let multi = |units: SVec<Unit, 4>| Way { units, life: extra, sac, need: cl.need, need_n: cl.need_n, tap, crew: 0 };
+            // (Delve's {1} of the card a several-mana source sacrifices: a
+            // typeless unit with each production, `Class::delve`.)
+            let multi = |mut units: SVec<Unit, 4>| {
+                if cl.delve {
+                    units.push(Unit::free(0u8));
+                }
+                Way { units, life: extra, sac, need: cl.need, need_n: cl.need_n, tap, crew: 0 }
+            };
             let ways: Vec<Way> = match &cl.yld {
                 Yield::One(u) => {
                     let units = std::iter::repeat_n(Unit::free(u.mask | restr), n as usize).collect();
@@ -3141,7 +3274,16 @@ fn cands_payable_c(cost: &ManaCost, marked: &[Tag], chosen: &[Tag], c: &Cands, b
     convert
         && c.convert.iter().any(|(w, skip)| {
             let left = Budget { life: budget.life - w.life, sac: budget.sac - w.sac, tap: budget.tap };
-            left.life >= 0 && left.sac >= 0 && payable_converted(cost, marked, chosen, c, left, *skip)
+            if left.life < 0 || left.sac < 0 {
+                return false;
+            }
+            // (Its own units: delve's {1} of its card, `Class::delve`.)
+            if w.units.is_empty() {
+                return payable_converted(cost, marked, chosen, c, left, *skip);
+            }
+            let mut with = c.clone();
+            with.fixed.extend(w.units.iter().copied());
+            payable_converted(cost, marked, chosen, &with, left, *skip)
         })
 }
 

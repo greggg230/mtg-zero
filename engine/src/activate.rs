@@ -306,11 +306,13 @@ impl Game {
         m
     }
 
-    /// The source is excluded from paying the ability's mana when the cost
-    /// also taps or moves it (ENGINE.md 18).
-    pub(crate) fn mana_exclude(card: CardIdx, ad: &ActivatedDef) -> Option<CardIdx> {
-        let c = &ad.cost;
-        (c.tap || c.sac_self || c.exile_self || c.discard_self).then_some(card)
+    /// The card whose mana abilities can't pay an ability's mana at all:
+    /// none (ENGINE.md 18 excluded the source whole when the cost tapped or
+    /// moved it). No ability's source is excluded whole any more: the payment leaves
+    /// out its mana abilities that conflict with the cost, `Keep::self_use`
+    /// from `keep_for`; docs/shortcuts.md 13.3.)
+    pub(crate) fn mana_exclude(_card: CardIdx, _ad: &ActivatedDef) -> Option<CardIdx> {
+        None
     }
 
     /// Could `p` activate `ad` of `card` now and complete the activation
@@ -840,6 +842,9 @@ impl Game {
             sac_taps: false,
             taps: None,
             committed: Vec::new(),
+            // (Its source's mana abilities that conflict with the cost: out
+            // of the payment, the others in; docs/shortcuts.md 13.3.)
+            self_use: crate::pay::SelfUse::of(card, cost),
         }
     }
 

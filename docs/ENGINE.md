@@ -20971,3 +20971,56 @@ Llanowar Elves: We Say Thee Nay!'s teamwork taps the Elves),
 with priority tapping an artifact with a mana ability, two (r 609, 1553) by Pentad Prism's counter
 uses combining with improvise tapping it (Kappa Cannoneer castable). `RULES_EPOCH` bumped; the
 Delver canary library's 60 spots reach their positions (`delver_rerecord.py check --stamp`).
+
+##### 13.3: a cost's source, per ability
+
+A cost that tapped, sacrificed, exiled or discarded its source excluded every mana ability of the
+source from paying its mana (`activate::mana_exclude`). CR 601.2g-h: the mana abilities come
+first, the cost after, so only those that conflict are out. `pay::SelfUse` (from `keep_for`,
+`Keep::self_use`) is what the cost takes of its source: it taps it, moves it (sacrifice, exile,
+discard), removes counters. `Game::classes_for_self_use` (applied by `can_pay_with`,
+`can_pay_without` and the payment's `payment_classes`) leaves out the source's sources that tap
+or move it when the cost taps it, that move it when the cost moves it (tapping a land for mana and
+then sacrificing it is one payment), and, for a source that removes the same counters, the uses
+past what the cost leaves (and, when the cost needs the source, the use whose last counter
+sacrifices it); a Pollinator or Lumberjack the cost taps no longer activates. `mana_exclude` now
+excludes no ability's source (its callers are unchanged).
+
+Test: `cr_601_2g_a_source_taps_for_mana_then_is_sacrificed_for_its_cost` (B3's Test Cycle Land,
+"{T}: Add {G}. {1}, Sacrifice this land: Draw a card", alone; Test Tap Draw Land's "{1}, {T}"
+needs another land).
+
+##### 13.16: Black Lotus delved in the payment it helps
+
+A source that sacrifices itself is in the graveyard before delve's cards are exiled (CR 601.2g
+before 601.2h); only one-mana ones (Lotus Petal) were delve or graveyard-exile sources.
+`pay::delve_source`: any that sacrifices itself with no mana cost of its own (one mana, several,
+Wizard's Rockets). `delve_sources` (delve's options, an escape's or "exile n cards from your
+graveyard" forced sources) takes them all; `delve_classes` (castability) gives a several-mana one
+delve's typeless unit with each production (`Class::delve`; a converter's way carries it, used when
+it converts); the payment activates a forced several-mana source first with each production that
+leaves the rest payable (asked when several do), and a forced Rockets as a pick of it.
+
+Test: `cr_702_66a_black_lotus_is_delved_in_the_payment_it_helps` (Treasure Cruise with the Lotus,
+an Island and three graveyard cards; with two it isn't castable).
+
+##### 24.7.4: tokens past 64
+
+`token_count` multiplied a creation and cut it at 64; `CreateTokensN` clamped its number to 64.
+Both now make any number, as many as the player's 96 permanents leave room for (the engine limit of
+docs/shortcuts.md 26.11.6, unchanged: the `MY_PERM` / `OPP_PERM` ids of every caller of
+`perm_action` would have to be paged first, A's note in 100.2). `CreateTokensN` with attacking
+tokens passes a u8 to `CreateTokensAttacking`: 255 or more make as many as any larger number, the
+room being at most 96 (a compile-time assert).
+
+Test: `cr_614_1a_doubled_tokens_past_sixty_four` (seven Exalted Sunborns and Eusocial Engineering:
+77 Robots, the room left; 64 before).
+
+**Digests** (with 13.3, 13.16, 24.7.4): full `79935610b369fb77` -> `3f49f29043418114`,
+`DIGEST_ENCODING=0` `8ff7d319dba5da5d` -> `27f42bffa609f282`: 16 of the 2,500 games change. In
+the ten inspected the first difference is 13.3: an ability whose cost taps its source (Abandoned
+Air Temple's "{3}{W}, {T}") now builds its classes with the source's member and then drops it, so
+the source's class sits at its first member and the payment's options come in another class order
+(the same payments), or a source's other uses now pay (Pyrite Spellbomb tapped by Urza for {U},
+then sacrificed for its "{1}, Sacrifice"). `RULES_EPOCH` bumped; the Delver canary library's 60
+spots reach their positions.
