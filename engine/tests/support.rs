@@ -947,6 +947,7 @@ const SUPPORTED_EOE_W5: &[&str] = &[
 /// EoE W6, the remaining cards (ENGINE.md 99.16).
 const SUPPORTED_EOE_W6: &[&str] = &[
     "Loading Zone",
+    "Moonlit Meditation",
     "Nesting Grounds",
     "Plaza of Heroes",
     "Starfield Vocalist",

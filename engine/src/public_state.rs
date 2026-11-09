@@ -203,6 +203,11 @@ pub fn fields() -> Vec<Field> {
             control: Public "the control-changing effects behind permanents' controllers (CR 613.1b; EoE W6: games with an Aura's control effect): which ends when",
             syncing: Derived "transient: set while the controllers are worked out",
             entry_triggers: Derived "the triggers the current simultaneous entry caused (copies of Game.waiting's, which is public)",
+            tokens_turn: Public "the turn each player last created tokens (CR 111.2; EoE W6: Moonlit Meditation's 'the first time ... each turn')",
+            token_question: Derived "transient: set by a token creation, taken as its instruction returns",
+            token_asking: Derived "the pending decision is the token replacement's question (Game.pending, public)",
+            token_answer: Derived "transient: set and cleared around one op",
+            token_frame: Derived "transient: set and cleared around one op",
         });
     }
     classify!(v, Player {
@@ -1589,6 +1594,16 @@ pub fn perturbations() -> Vec<Perturbation> {
             let &(_, c) = stack_spells(&a.g).first()?;
             mark(&mut a.g, c, crate::game::Mark::ManaSpent(1))
         }),
+        // Player 0 created tokens this turn (Moonlit Meditation's "the
+        // first time ... each turn").
+        p!("a player created tokens this turn", "W6State.tokens_turn", |a, _r| {
+            let t = a.g.turn.number as u16;
+            if a.g.w6.tokens_turn[0] == t {
+                return None;
+            }
+            a.g.w6.tokens_turn[0] = t;
+            Some("P0".to_string())
+        }),
     ]
 }
 
@@ -1621,6 +1636,7 @@ pub fn limits() -> Vec<Limit> {
         l("a spell's granted alternative cost came from another permanent", NextLayout, "which permanent's static ability gave the alternative cost a spell was cast for (Mark::AltGranted; Tannuk, Steadfast Second's warp, EoE W5, ENGINE.md 99.15) decides whether the spell still has that ability as it resolves (CR 400.7g, 608.3g: warp's exile); the stack item's alternative cost is encoded (stack::ALT, ALT_INDEX: past the card's own), its granter is not: the next layout encodes it (as a noted object's)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
         l("a control effect ends at the end of the turn", NextLayout, "the control-changing effects behind a permanent's controller (W6State::control: their order and which end at the end of the turn, CR 613.1b, 613.7, 514.2; recorded in games with an Aura that changes control, Tractor Beam, EoE W6, ENGINE.md 99.16) decide who controls it when one ends; layout v5 encodes the controller, not the effects: the next layout encodes them (a permanent's 'controlled until end of turn' and 'by an Aura' flags)"),
+        l("a player created tokens this turn", NextLayout, "whether a player created tokens this turn (W6State::tokens_turn, EoE W6, ENGINE.md 99.16) decides whether Moonlit Meditation's 'the first time you would create one or more tokens each turn' can still apply; layout v5 has no float for it: the next layout encodes it (a per-turn flag beside the turn's facts)"),
         l("the mana spent to cast a spell", NextLayout, "the amount of mana spent to cast a spell on the stack (Mark::ManaSpent, recorded for every spell in a table with Unravel, EoE W6, ENGINE.md 99.16) decides Unravel's 'if the amount of mana spent to cast that spell was less than its mana value'; layout v5's stack item has no float for it: the next layout encodes it (a stack item's number, as W3's permanent's)"),
         l("an artifact entered under a player's control this turn", NextLayout, "whether an artifact entered the battlefield under a player's control this turn (Player::artifact_entered) is game state the EoE port's W1 added after layout v5 froze (ENGINE.md 99.11), read by one card, Mechan Shieldmate (its attack permission); the next layout encodes it (a per-turn flag beside the turn's facts)"),
     ]

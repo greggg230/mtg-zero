@@ -1789,6 +1789,14 @@ impl Game {
     /// replacement effects that multiply them ("twice that many of those
     /// tokens are created instead", CR 614.1a); the first is first.
     pub(crate) fn create_tokens(&mut self, def: DefId, controller: PlayerId, n: u32, tapped: bool) -> Vec<CardIdx> {
+        // (A replacement with copies of a permanent: EoE W6.)
+        if n > 0 && self.w6.seen & crate::eoe_w6::SEEN_W6_TOKENS != 0 {
+            match self.w6_token_replacement(controller) {
+                Err(()) => return Vec::new(),
+                Ok(Some(vals)) => return self.w6_create_copies(vals, controller, n, tapped),
+                Ok(None) => {}
+            }
+        }
         let n = self.token_count(controller, n);
         (0..n).map(|_| self.create_token(def, controller, tapped)).collect()
     }

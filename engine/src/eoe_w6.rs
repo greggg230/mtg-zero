@@ -31,6 +31,10 @@ pub struct W6Def {
     /// of a permanent you control to trigger, that ability triggers an
     /// additional time" (CR 603.2d, 603.6a).
     pub trigger_doubler: bool,
+    /// An Aura's "The first time you would create one or more tokens each
+    /// turn, you may instead create that many tokens that are copies of
+    /// enchanted permanent" (CR 614.1a, 707.2, 111.2).
+    pub token_copies: bool,
 }
 
 /// The table facts W6 adds (`CardDb::w6`).
@@ -41,8 +45,39 @@ pub struct W6Db {
     pub mana_spent_all: bool,
 }
 
+/// Does the op create tokens other than as its first thing done, for one
+/// player (an op that loops over players, exiles first, or creates tokens
+/// as a draw is replaced)?
+fn creates_tokens_late(op: &crate::program::Op) -> bool {
+    use crate::program::{Ext, Op};
+    matches!(
+        op,
+        Op::Ext(
+            Ext::Amass { .. }
+                | Ext::LinkedOwnersCreateMvToken { .. }
+                | Ext::ExileAllCreaturesIncubate { .. }
+                | Ext::LinkedToGraveyardThenToken { .. }
+                | Ext::CopyTokensEnteredThisTurn
+        )
+    )
+}
+
 impl W6Db {
     pub(crate) fn of(defs: &[crate::db::CardDef]) -> W6Db {
+        // A table with "the first time you would create one or more tokens
+        // each turn, you may instead ..." asks that question as the tokens
+        // are created, then runs the creating instruction again with the
+        // answer (`Game::w6_token_question`): every instruction of the table
+        // that creates tokens must do so first, for one player. The others
+        // (and a draw replaced by a token, outside any instruction) are
+        // refused loudly: no such table is built (none is: the EoE table's
+        // token creators are all of the first kind).
+        if defs.iter().any(|d| d.w6.token_copies) {
+            let late = defs.iter().find(|d| {
+                d.opp_draw_token.is_some() || abilities_of(d).any(|ab| ab.program.iter().chain(ab.modes.iter().flat_map(|m| m.list.iter().flat_map(|x| x.program.iter()))).any(creates_tokens_late))
+            });
+            assert!(late.is_none(), "a card replaces token creation with copies, and {} creates tokens another way (EoE W6)", late.map_or("", |d| d.name.as_str()));
+        }
         W6Db { mana_spent_all: defs.iter().any(|d| d.w6.reads_spells_mana_spent) }
     }
 }
@@ -77,6 +112,24 @@ pub struct W6State {
     /// of its controller's (CR 603.2d, its ruling: "a permanent entering
     /// the battlefield at the same time"). Games with such a card only.
     pub entry_triggers: Vec<((u32, u32), crate::triggers::PendingTrigger)>,
+    /// The turn number of each player's last token creation ("the first
+    /// time you would create one or more tokens each turn", whether a
+    /// replacement applied or not; its rulings), in games with such a card.
+    pub tokens_turn: [u16; 2],
+    /// A token creation that needs the question "replace it with copies?"
+    /// (`W6Def::token_copies`): the player, set as the instruction creates
+    /// none, and asked once it returns (`Game::run_frame`).
+    pub token_question: Option<crate::ids::PlayerId>,
+    /// The question is asked of this player (its answer goes to
+    /// `token_answer`, not to the instruction).
+    pub token_asking: Option<crate::ids::PlayerId>,
+    /// The answer for the instruction being run again: `Choice::Card` of the
+    /// Aura whose replacement applies, or `Choice::Pass`.
+    pub token_answer: Option<crate::decision::Choice>,
+    /// Set while a spell's or ability's instruction runs in a game with
+    /// such a card (`Game::run_frame`): the only place tokens are created
+    /// in a table with one (`W6Db::of`).
+    pub token_frame: bool,
 }
 
 /// A control-changing effect (CR 613.1b) other than an Aura's: `obj` is
@@ -109,6 +162,9 @@ pub(crate) const SEEN_W6_NO_UNTAP: u16 = 8;
 /// entering causes to trigger trigger an additional time
 /// (`W6Def::trigger_doubler`).
 pub(crate) const SEEN_W6_TRIGGERS: u16 = 16;
+/// `W6State::seen`: an Aura replaces a player's first token creation of a
+/// turn with copies of the enchanted permanent (`W6Def::token_copies`).
+pub(crate) const SEEN_W6_TOKENS: u16 = 32;
 
 /// The abilities of a definition that go on the stack (its spell, triggered
 /// and activated abilities).
@@ -160,6 +216,9 @@ pub(crate) fn seen_of(d: &crate::db::CardDef) -> u16 {
     }
     if d.w6.trigger_doubler {
         bits |= SEEN_W6_TRIGGERS;
+    }
+    if d.w6.token_copies {
+        bits |= SEEN_W6_TOKENS;
     }
     bits
 }
@@ -395,6 +454,94 @@ impl Game {
             self.w6.entry_triggers.clear();
         }
         self.w6.entry_triggers.push((key, pt));
+    }
+
+    /// The Auras whose "the first time you would create one or more tokens
+    /// each turn, you may instead create that many tokens that are copies of
+    /// enchanted permanent" applies to `p` creating tokens now: `p` controls
+    /// them, they are attached to a permanent, and `p` hasn't created tokens
+    /// this turn (its rulings: an Aura that came under `p`'s control after
+    /// that doesn't apply that turn).
+    fn w6_token_copiers(&self, p: crate::ids::PlayerId) -> Vec<crate::ids::CardIdx> {
+        if self.w6.tokens_turn[p as usize] == self.turn.number as u16 {
+            return Vec::new();
+        }
+        self.battlefield
+            .iter()
+            .copied()
+            .filter(|&a| {
+                self.objs[a.i()].controller == p
+                    && self.abilities(a).w6.token_copies
+                    && self.objs[a.i()].attached.is_some_and(|h| self.live(h) && self.objs[h.idx.i()].zone == Zone::Battlefield)
+            })
+            .collect()
+    }
+
+    /// `p` would create one or more tokens (CR 111.2): the first time this
+    /// turn, with such an Aura, the replacement is `p`'s choice (CR 614.1a,
+    /// its "may"; with several, which applies: applying one after another
+    /// leaves the last one's copies, so the choice is which, or none).
+    /// `Err(())`: not answered yet (the instruction creates nothing this
+    /// time; the question follows, `w6_token_question`). `Ok(Some(vals))`:
+    /// create that many copies of the enchanted permanent instead (CR 707.2:
+    /// its copiable values), before what modifies how they enter (its
+    /// ruling: tapped, attacking still apply). The creation is noted either
+    /// way: no choice again this turn (its rulings).
+    pub(crate) fn w6_token_replacement(&mut self, p: crate::ids::PlayerId) -> Result<Option<crate::copies::CopyVals>, ()> {
+        let copiers = self.w6_token_copiers(p);
+        if copiers.is_empty() {
+            self.w6.tokens_turn[p as usize] = self.turn.number as u16;
+            return Ok(None);
+        }
+        let Some(answer) = self.w6.token_answer.take() else {
+            assert!(self.w6.token_frame, "tokens created outside a spell or ability with a token replacement to ask about (EoE W6)");
+            self.w6.token_question = Some(p);
+            return Err(());
+        };
+        self.w6.tokens_turn[p as usize] = self.turn.number as u16;
+        match answer {
+            crate::decision::Choice::Card(a) if copiers.contains(&a) => {
+                let host = self.objs[a.i()].attached.expect("attached");
+                self.note(|g| format!("P{p} creates copies of {} instead ({})", g.name(host.idx), g.name(a)));
+                Ok(Some(self.copiable(host.idx)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// The question `w6_token_replacement` left (`W6State::token_question`):
+    /// asked of the creating player, the instruction (`snap`: its frame
+    /// before it ran) to run again with the answer. Options: `PASS` (create
+    /// the tokens), or an Aura whose replacement applies (`MY_PERM`).
+    pub(crate) fn w6_token_question(&mut self, snap: Frame) -> bool {
+        let Some(p) = self.w6.token_question.take() else { return false };
+        assert!(self.pending.is_none(), "the token question with another decision pending");
+        let mut opts = vec![crate::decision::Opt { action: crate::decision::act::PASS, choice: crate::decision::Choice::Pass }];
+        for a in self.w6_token_copiers(p) {
+            opts.push(crate::decision::Opt { action: self.perm_action(p, a), choice: crate::decision::Choice::Card(a) });
+        }
+        self.w6.token_asking = Some(p);
+        self.ask(crate::flow::Task::Run(snap), p, crate::decision::DecisionKind::ChoosePermanent, opts);
+        true
+    }
+
+    /// Create `n` tokens that are copies with values `vals` under `p` (CR
+    /// 707.2, 111.2), the creation's count already replaced, entering tapped
+    /// if the original instruction said so.
+    pub(crate) fn w6_create_copies(&mut self, vals: crate::copies::CopyVals, p: crate::ids::PlayerId, n: u32, tapped: bool) -> Vec<crate::ids::CardIdx> {
+        let n = self.token_count(p, n);
+        let mut made = Vec::with_capacity(n as usize);
+        for _ in 0..n {
+            let idx = self.add_card(vals.def, p, Zone::Nowhere);
+            self.copy_objs.push(idx);
+            self.token_slot_made(idx);
+            self.note(|g| format!("P{p} creates a token copy of {}", g.db.def(vals.def).name));
+            self.entering_copy = Some(vals);
+            self.entering_tapped = tapped;
+            self.put_onto_battlefield(idx, p);
+            made.push(idx);
+        }
+        made
     }
 
     pub(crate) fn exec_eoe_w6(&mut self, f: &mut Frame, op: &W6) -> Flow {

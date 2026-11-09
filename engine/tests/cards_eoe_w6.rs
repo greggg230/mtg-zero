@@ -251,3 +251,109 @@ fn cr_106_6_plaza_of_heroes_makes_a_colour_among_legendary_permanents() {
         assert_eq!(g.has_option(Choice::Cast(bolt)), legend, "{red}: {:?}", g.options_desc());
     }
 }
+
+// ---- Moonlit Meditation (docs/ir_defects.md 30) --------------------------------
+
+/// P0 casts Moonlit Meditation on its `host`.
+fn meditate(g: &mut Game, host: engine::CardIdx) {
+    let m = g.card(0, "Moonlit Meditation", Zone::Hand);
+    start_with(g, Choice::Cast(m), |g| pick(g, &[g.tgt(host)]));
+    settle(g);
+    assert_eq!(g.obj(m).attached.map(|h| h.idx), Some(host), "{}", log(g));
+}
+
+fn tokens_named(g: &Game, p: u8, name: &str) -> usize {
+    g.permanents_of(p).filter(|&c| g.name(c) == name && g.obj(c).owner == p && g.is_token(c)).count()
+}
+
+/// Moonlit Meditation: "Enchant artifact or creature you control / The first
+/// time you would create one or more tokens each turn, you may instead
+/// create that many tokens that are copies of enchanted permanent." (CR
+/// 614.1a, 707.2.) Applied: Test Lander Maker's Lander becomes a token copy
+/// of the enchanted Test Bear (any token, its ruling: a predefined artifact
+/// token too). The next creation that turn is not the first: a Lander, no
+/// question. Declined: a Lander, and no choice again that turn (the ruling).
+#[test]
+fn cr_614_1a_moonlit_meditation_replaces_the_first_tokens_with_copies() {
+    for apply in [true, false] {
+        let mut g = scen()
+            .battlefield(0, &["Island", "Island", "Island", "Forest", "Forest", "Forest", "Forest", "Test Bear"])
+            .hand(0, &["Moonlit Meditation", "Test Lander Maker", "Test Lander Maker"])
+            .at(Step::Main1, 0)
+            .start();
+        let bear = bf(&g, 0, "Test Bear");
+        meditate(&mut g, bear);
+        let med = bf(&g, 0, "Moonlit Meditation");
+        let mut asked = 0;
+        for _ in 0..2 {
+            let c = g.card(0, "Test Lander Maker", Zone::Hand);
+            start_with(&mut g, Choice::Cast(c), |_| None);
+            for _ in 0..50 {
+                g.drive_until(|g| (g.stack().is_empty() && at_priority(g)) || !at_priority(g));
+                if g.stack().is_empty() && at_priority(&g) {
+                    break;
+                }
+                if at_priority(&g) {
+                    g.pass();
+                    continue;
+                }
+                if g.kind() == Some(DecisionKind::ChoosePermanent) && g.has_option(Choice::Card(med)) {
+                    asked += 1;
+                    assert!(g.has_option(Choice::Pass), "a may");
+                    g.choose(if apply { Choice::Card(med) } else { Choice::Pass });
+                    continue;
+                }
+                let ch = g.pending_decision().unwrap().options[0].choice;
+                g.choose(ch);
+            }
+        }
+        assert_eq!(asked, 1, "asked the first time only\n{}", log(&g));
+        assert_eq!(tokens_named(&g, 0, "Test Bear"), apply as usize, "{}", log(&g));
+        assert_eq!(landers(&g, 0), if apply { 1 } else { 2 }, "{}", log(&g));
+    }
+}
+
+/// "That many tokens": Cosmogrand Zenith's "create two 1/1 white Human
+/// Soldier creature tokens" (its trigger on the second spell of the turn,
+/// Honor) becomes two copies of the enchanted creature.
+#[test]
+fn cr_614_1a_moonlit_meditation_makes_that_many_copies() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Island", "Plains", "Cosmogrand Zenith", "Test Bear"])
+        .hand(0, &["Moonlit Meditation", "Honor"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = bf(&g, 0, "Test Bear");
+    meditate(&mut g, bear);
+    let med = bf(&g, 0, "Moonlit Meditation");
+    let honor = g.card(0, "Honor", Zone::Hand);
+    start_with(&mut g, Choice::Cast(honor), |g| pick(g, &[g.tgt(bear)]));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::ChooseMode) => Some(Choice::Number(0)),
+        Some(DecisionKind::ChoosePermanent) => pick(g, &[Choice::Card(med)]),
+        _ => None,
+    });
+    assert_eq!(tokens_named(&g, 0, "Test Bear"), 2, "{}", log(&g));
+    assert_eq!(tokens_named(&g, 0, "Human Soldier"), 0);
+}
+
+/// "If you create one or more tokens, and then Moonlit Meditation comes
+/// under your control that same turn, the replacement effect won't apply
+/// to any tokens you create for the rest of the turn" (ruling).
+#[test]
+fn cr_614_1a_moonlit_meditation_after_tokens_this_turn_waits() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Island", "Forest", "Forest", "Forest", "Forest", "Test Bear"])
+        .hand(0, &["Test Lander Maker", "Moonlit Meditation", "Test Lander Maker"])
+        .at(Step::Main1, 0)
+        .start();
+    cast_and_resolve(&mut g, 0, "Test Lander Maker", |_| None);
+    let bear = bf(&g, 0, "Test Bear");
+    meditate(&mut g, bear);
+    let med = bf(&g, 0, "Moonlit Meditation");
+    cast_and_resolve(&mut g, 0, "Test Lander Maker", |g| {
+        assert!(!(g.kind() == Some(DecisionKind::ChoosePermanent) && g.has_option(Choice::Card(med))), "not this turn");
+        None
+    });
+    assert_eq!(landers(&g, 0), 2, "{}", log(&g));
+}

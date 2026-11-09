@@ -576,6 +576,8 @@ impl Game {
         // Recorded control-changing effects (public, CR 613.1b; EoE W6): in
         // timestamp order, each by its permanent's place, its player and
         // whether it ends with the turn (not the timestamps themselves).
+        // (And the turn each player last created tokens, public.)
+        v.extend(self.w6.tokens_turn.iter().map(|&t| t as u64));
         let mut ctl = self.w6.control.clone();
         ctl.sort_by_key(|x| x.ts);
         for x in ctl {
