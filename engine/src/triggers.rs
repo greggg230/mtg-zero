@@ -268,6 +268,12 @@ impl Game {
                 }
             }
         }
+        // ("Triggers an additional time" for permanents entering at the same
+        // time: EoE W6.)
+        let w6_doubling = ev.kind == EventKind::Enters && self.w6.seen & crate::eoe_w6::SEEN_W6_TRIGGERS != 0;
+        if w6_doubling {
+            self.w6_entering_doubler(&ev);
+        }
         if obs.is_empty() && self.temp_triggers.is_empty() && !self.w3.granted {
             return;
         }
@@ -343,7 +349,12 @@ impl Game {
                     once: has_once(&t.pred),
                     times,
                 };
+                let before = self.waiting.len();
                 self.fire_or_hold(f, dests);
+                // ("Triggers an additional time": EoE W6.)
+                if w6_doubling && self.waiting.len() > before {
+                    self.w6_entry_triggered();
+                }
             }
         }
         // Triggered abilities effects gave permanents ("<it> gains
@@ -366,7 +377,12 @@ impl Game {
                         once: false,
                         times: None,
                     };
+                    let before = self.waiting.len();
                     self.fire_or_hold(f, dests);
+                    // ("Triggers an additional time": EoE W6.)
+                    if w6_doubling && self.waiting.len() > before {
+                        self.w6_entry_triggered();
+                    }
                 }
             }
         }
@@ -544,6 +560,12 @@ impl Game {
             TrigPred::OrCopy => true,
             TrigPred::Once => true,
             TrigPred::LeftTo(mask) => ev.kind == EventKind::LeavesBattlefield && self.leaving_to & mask != 0,
+            // (The `CountersAdded` event carries who put the counters in a
+            // game with such a trigger: EoE W6.)
+            TrigPred::CountersPutBy(you) => match ev.b {
+                Subj::Player(p) => ev.kind == EventKind::CountersAdded && (p == src.controller) == *you,
+                _ => false,
+            },
             // CR 724, 508.1b: it attacks the player who is the monarch.
             TrigPred::AttacksMonarch => match ev.a {
                 Subj::Obj(r) => {

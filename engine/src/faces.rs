@@ -480,6 +480,11 @@ impl Game {
         let routes: Vec<crate::game::CastFrom> = match zone {
             Zone::Hand => Vec::new(),
             Zone::Graveyard => self.gy_routes(p, c, Some(face)).iter().map(|r| self.route_from(c, p, *r)).collect(),
+            // (A permission to cast spells of a kind from the top of a
+            // library asks of the face, CR 601.3e; EoE W6.)
+            Zone::Library if !self.top_play_ok(p, c) => {
+                if self.w6_top_cast_ok(p, c, Some(face)) { vec![crate::game::CastFrom::LibraryTopMana] } else { Vec::new() }
+            }
             _ => self.cast_route(p, c).into_iter().collect(),
         };
         if zone != Zone::Hand && routes.is_empty() {

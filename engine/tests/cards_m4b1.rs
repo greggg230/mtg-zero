@@ -276,12 +276,21 @@ fn zuran_orb_voltaic_key_and_aether_spellbomb() {
     let z = g.card(0, "Test Zero", Zone::Hand);
     g.choose(Choice::Cast(z));
     g.choose(act(ring, 0));
+    // (The Ring's mana covers the rest: `PASS`, the pool pays; the Island
+    // could pay instead, ENGINE.md 100.4.3.)
+    if g.kind() == Some(DecisionKind::PayMana) {
+        g.choose(Choice::Pass);
+    }
     g.drive_until(at_priority);
     assert!(g.obj(ring).tapped);
     assert_eq!(g.player(0).pool.amt[C], 1);
     let key = g.card(0, "Voltaic Key", Zone::Battlefield);
     g.choose(act(key, 0)); // {1}, {T}: untap target artifact; the pool pays
     g.choose(g.tgt(ring));
+    // (`PASS`: the pool pays; the Island could, ENGINE.md 100.4.3.)
+    if g.kind() == Some(DecisionKind::PayMana) {
+        g.choose(Choice::Pass);
+    }
     g.drive_until(at_priority);
     assert_eq!(g.player(0).pool.amt[C], 0);
     settle(&mut g);

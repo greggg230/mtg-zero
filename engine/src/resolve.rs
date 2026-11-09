@@ -393,7 +393,31 @@ impl Game {
         while (f.pc as usize) < prog.len() {
             let op = &prog[f.pc as usize];
             let queued = self.agenda.len();
-            match self.exec(&mut f, op) {
+            // (A token replacement's question, before and after: EoE W6.)
+            let snap = if self.w6.seen & crate::eoe_w6::SEEN_W6_TOKENS != 0 {
+                if self.w6.token_asking.take().is_some() {
+                    self.w6.token_answer = self.answer.take();
+                }
+                Some(f.clone())
+            } else {
+                None
+            };
+            // (Who carries out the instruction: EoE W6, `W6State::actor`.)
+            let actor = std::mem::replace(&mut self.w6.actor, Some(f.controller));
+            self.w6.token_frame = snap.is_some();
+            let flow = self.exec(&mut f, op);
+            self.w6.token_frame = false;
+            self.w6.actor = actor;
+            if let Some(snap) = snap {
+                self.w6.token_answer = None;
+                if self.w6_token_question(snap) {
+                    return;
+                }
+            }
+            if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
+                self.w6_sync_control();
+            }
+            match flow {
                 Flow::Next => {
                     f.pc += 1;
                     f.i = 0;

@@ -165,6 +165,10 @@ pub enum CastFrom {
     /// its mana value rather than its mana cost (an alternative cost, CR
     /// 118.9; X is 0, 107.3b).
     LibraryTop,
+    /// From the top of its owner's library by a permission to cast spells of
+    /// a kind from there ("you may cast artifact spells from the top of your
+    /// library", CR 601.3; EoE W6): for its costs, as from a hand.
+    LibraryTopMana,
 }
 
 /// An `Enters` event's note bit 16: the times an additional cost was paid
@@ -892,6 +896,8 @@ pub struct Game {
     /// EoE workstream W3's state (ENGINE.md 99.13): phasing, granted
     /// triggered abilities, regeneration.
     pub(crate) w3: crate::eoe_w3::W3State,
+    /// EoE workstream W6's state (ENGINE.md 99.16).
+    pub(crate) w6: crate::eoe_w6::W6State,
     /// With hidden decks (`GameSpec::hidden_decks`, ENGINE.md 36.11): per
     /// player, the card names of their pool the other player knows (the pool
     /// but the first picks not seen in earlier games, and the basic lands),
@@ -1279,6 +1285,7 @@ impl Game {
             choosing_for: 0,
             marks: Vec::new(),
             w3: Default::default(),
+            w6: Default::default(),
             known_pools: [None, None],
             batching: false,
             ev_seq: 0,
@@ -1312,6 +1319,7 @@ impl Game {
         let seen = d.seen_bits() | d.back.map_or(0, |b| self.db.def(b).seen_bits());
         self.seen |= seen;
         self.w3.seen |= d.w3.seen | d.back.map_or(0, |b| self.db.def(b).w3.seen);
+        self.w6.seen |= d.w6.seen | d.back.map_or(0, |b| self.db.def(b).w6.seen);
         if d.miracle.is_some() {
             self.seen |= SEEN_MIRACLE_P0 << owner;
         }
@@ -1553,7 +1561,12 @@ impl Game {
     /// leaving the stack loses its stack item. Battlefield entry goes through
     /// [`put_onto_battlefield`](Self::put_onto_battlefield) (controller).
     pub(crate) fn move_card(&mut self, idx: CardIdx, to: Zone, pos: Pos) -> ObjRef {
-        self.move_card_ctl(idx, to, pos, None)
+        let r = self.move_card_ctl(idx, to, pos, None);
+        // (An Aura's control effect may have begun or ended: EoE W6.)
+        if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
+            self.w6_sync_control();
+        }
+        r
     }
 
     pub(crate) fn move_card_to_stack(&mut self, idx: CardIdx, controller: PlayerId) -> ObjRef {
@@ -1757,9 +1770,16 @@ impl Game {
         if !small {
             self.marks.push((r, Mark::Entered { times, x }));
         }
+        // (Its "enters with" counters: EoE W6, `W6State::entering`.)
+        let entering_before = self.w6.entering.replace((idx, self.group_ts.1));
         if let Some(h) = attach {
             self.objs[idx.i()].attached = Some(h);
             self.note(|g| format!("{} enters attached to {}", g.name(idx), g.name(h.idx)));
+        }
+        // (Control effects: EoE W6.)
+        if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
+            self.w6_entered_under(r, controller);
+            self.w6_sync_control();
         }
         if fx_tapped {
             self.objs[idx.i()].tapped = true;
@@ -1811,6 +1831,7 @@ impl Game {
                 self.marks.push((r, Mark::PriestPending));
             }
             self.agenda.push(Task::EnterAsCopy { card: idx, note, since: self.group_ts.1, page: crate::decision::Page::FIRST });
+            self.w6.entering = entering_before;
             return r;
         }
         self.entering_own(idx, tapped, x, own);
@@ -1824,6 +1845,7 @@ impl Game {
                 self.marks.push((r, Mark::KickerX(x)));
             }
         }
+        self.w6.entering = entering_before;
         if self.objs[idx.i()].zone == Zone::Battlefield && self.objs[idx.i()].inc == r.inc {
             self.note_entered(idx);
             self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(r), b: crate::triggers::Subj::None, amount: note as u64 });
@@ -1974,6 +1996,11 @@ impl Game {
         // counters (`Task::Devour`; ENGINE.md 99.12).
         if self.def_of(idx).devour_land > 0 {
             self.agenda.push(Task::Devour { card: idx, picked: Vec::new() });
+            // (Its counters, once the lands are chosen, are counters it enters
+            // with: EoE W6, `W6State::deferred_since`.)
+            if let Some(e) = self.w6.entering.filter(|e| e.0 == idx) {
+                self.w6.deferred_since.push(e);
+            }
         }
         if self.def_of(idx).shock_life > 0
             || self.def_of(idx).chooses_player
@@ -1981,6 +2008,7 @@ impl Game {
             || self.def_of(idx).chooses_land_type
             || self.def_of(idx).chooses_parity
             || self.def_of(idx).chooses_name
+            || self.def_of(idx).w6.chooses_color
         {
             self.agenda.push(Task::AsEnters { card: idx, page: crate::decision::Page::FIRST });
         }
@@ -1994,6 +2022,14 @@ impl Game {
     /// replacement effects that multiply them ("twice that many of those
     /// tokens are created instead", CR 614.1a); the first is first.
     pub(crate) fn create_tokens(&mut self, def: DefId, controller: PlayerId, n: u32, tapped: bool) -> Vec<CardIdx> {
+        // (A replacement with copies of a permanent: EoE W6.)
+        if n > 0 && self.w6.seen & crate::eoe_w6::SEEN_W6_TOKENS != 0 {
+            match self.w6_token_replacement(controller) {
+                Err(()) => return Vec::new(),
+                Ok(Some(vals)) => return self.w6_create_copies(vals, controller, n, tapped),
+                Ok(None) => {}
+            }
+        }
         let n = self.token_count(controller, n);
         (0..n).map(|_| self.create_token(def, controller, tapped)).collect()
     }
@@ -2072,6 +2108,10 @@ impl Game {
         }
         self.next_ts = self.exact_inc(self.next_ts, "timestamps");
         self.objs[c.i()].timestamp = self.next_ts;
+        // (Its control effect follows the attachment: EoE W6.)
+        if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
+            self.w6_sync_control();
+        }
         if let Some(i) = self.battlefield.iter().position(|&x| x == c) {
             self.battlefield.remove(i);
             self.battlefield.push(c);
@@ -2221,6 +2261,19 @@ impl Game {
     /// exchange of control (CR 701.12), which leaves every player's number of
     /// permanents as it was.
     pub(crate) fn set_control(&mut self, c: CardIdx, p: PlayerId) {
+        // (With an Aura's control effect in the game, control is worked out
+        // from every control effect in timestamp order: EoE W6.)
+        if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 && !self.w6.syncing {
+            self.w6_control_effect(c, p, false);
+            return;
+        }
+        self.apply_control(c, p);
+    }
+
+    /// The permanent's controller becomes `p` (CR 613.1b): it is removed
+    /// from combat (506.4); the controller of a face-down permanent may
+    /// look at it (708.5).
+    pub(crate) fn apply_control(&mut self, c: CardIdx, p: PlayerId) {
         if self.objs[c.i()].zone != Zone::Battlefield || self.objs[c.i()].controller == p {
             return;
         }

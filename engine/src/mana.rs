@@ -31,15 +31,66 @@ pub const NOT_MADE: ManaMask = 1 << 7;
 /// On a unit (never on a need, where the bit is `NOT_MADE`): mana with a
 /// spending restriction (CR 106.6: Mishra's Workshop's "only to cast
 /// artifact spells"), which can't pay Wizard's Rockets' {X}, so the Rockets
-/// never turns it into colours (ENGINE.md 49). `fits` reads a unit's types
-/// and `MADE` only.
+/// never turns it into colours (ENGINE.md 49). Which purposes it may pay is
+/// the unit's tag (`Tag`), not this bit.
 pub const RESTRICTED: ManaMask = 1 << 7;
 
-/// Can a unit of `unit` pay a need of `need` (their types meet; a `MADE`
-/// unit never pays a `NOT_MADE` need)?
+/// A unit's or a need's tag in the feasibility searches (ENGINE.md 100.4.5,
+/// docs/shortcuts.md N21): bits 0-7 a `ManaMask` (the types, `MADE`, and
+/// `NOT_MADE` on a need or `RESTRICTED` on a unit), bits 8-15 spending
+/// purposes (`purposes`). On a unit they are its restriction (CR 106.6: the
+/// `SPEND_*` purposes of its mana, 0 for none; `FOR_COST` for a creature
+/// tapped for convoke); on a need, what paying it is (the payment's
+/// `Keep::allow` and `FOR_COST` for the cost being paid, `Game::ability_allow`
+/// of the ability for a mana ability's own cost).
+pub type Tag = u32;
+
+/// A purpose of no mana ability: paying the cost the payment is for (the
+/// spell's or the activated ability's), never the mana cost of a mana
+/// ability activated within it. A creature tapped for convoke pays only it
+/// (CR 702.51a: it pays for the spell's mana). (The purpose byte's top bit:
+/// `db::MANA_UNCOUNTERABLE` is a rider, never a purpose, `restriction`.)
+pub const FOR_COST: u8 = 0x80;
+
+/// `mask` with spending purposes `purposes` (`Tag`).
 #[inline]
-pub fn fits(unit: ManaMask, need: ManaMask) -> bool {
-    unit & need & TYPES != 0 && (need & NOT_MADE == 0 || unit & MADE == 0)
+pub fn tag(mask: ManaMask, purposes: u8) -> Tag {
+    mask as Tag | (purposes as Tag) << 8
+}
+
+/// A tag's spending purposes.
+#[inline]
+pub fn purposes(t: Tag) -> u8 {
+    (t >> 8) as u8
+}
+
+/// A tag's `ManaMask` (its types and flags, without the purposes).
+#[inline]
+pub fn low(t: Tag) -> ManaMask {
+    t as u8
+}
+
+/// The purposes a mana ability's `only` restricts its mana to, as a unit's
+/// tag bits (its rider, "that spell can't be countered", is no purpose).
+#[inline]
+pub fn restriction(only: u8) -> Tag {
+    ((only & !crate::db::MANA_UNCOUNTERABLE) as Tag) << 8
+}
+
+/// May the unit tagged `unit` be spent on the need tagged `need` (CR 106.6:
+/// it has no restriction, or one of its purposes is the need's)?
+#[inline]
+pub fn spend_ok(unit: Tag, need: Tag) -> bool {
+    let only = purposes(unit);
+    only == 0 || only & purposes(need) != 0
+}
+
+/// Can a unit tagged `unit` pay a need tagged `need` (their types meet; a
+/// `MADE` unit never pays a `NOT_MADE` need; its restriction allows the
+/// need's purposes)?
+#[inline]
+pub fn fits(unit: Tag, need: Tag) -> bool {
+    unit & need & TYPES as Tag != 0 && (need & NOT_MADE as Tag == 0 || unit & MADE as Tag == 0) && spend_ok(unit, need)
 }
 
 /// Two-colour hybrid pairs (CR 107.4e) in index order.
@@ -295,40 +346,60 @@ impl ManaPool {
     }
 }
 
-/// Can `cost` (no Phyrexian pips) be paid exactly with every unit in
-/// `chosen` plus some of `available`? Each unit makes one mana of a type in
-/// its mask.
+/// Can `cost` (no Phyrexian pips), paid for purposes `allow` (the payment's
+/// `Keep::allow`), be paid exactly with every unit in `chosen` plus some of
+/// `available`? Each unit makes one mana of a type in its tag, spendable as
+/// its tag's restriction says (`Tag`).
 ///
 /// Generic pips take any mana, so only the coloured (and hybrid) pips need
 /// a matching; among matchings we maximise the chosen units used on pips,
-/// and the leftover chosen units must fit into the generic part.
-pub fn payable(cost: &ManaCost, chosen: &[ManaMask], available: &[ManaMask]) -> bool {
-    payable_iter(cost, &[], chosen, available.iter().copied(), available.len())
+/// and the leftover chosen units must fit into the generic part. When a
+/// unit's restriction keeps it from some need (CR 106.6: Mishra's
+/// Workshop's {C} and Chromatic Star's {1}; Sunken Citadel's mana, which
+/// pays only a land's ability), the generic pips are needs as well and the
+/// answer is an exact matching (`payable_restricted`).
+pub fn payable(cost: &ManaCost, allow: u8, chosen: &[Tag], available: &[Tag]) -> bool {
+    payable_iter(cost, allow, &[], chosen, available.iter().copied(), available.len())
 }
 
 /// [`payable`] with `extra` needs besides the cost (one mana each, of a
-/// type in the mask; `NOT_MADE` ones: the mana costs of mana abilities
-/// activated in the payment).
-pub fn payable_n(cost: &ManaCost, extra: &[ManaMask], chosen: &[ManaMask], available: &[ManaMask]) -> bool {
-    payable_iter(cost, extra, chosen, available.iter().copied(), available.len())
+/// type in the tag; `NOT_MADE` ones: the mana costs of mana abilities
+/// activated in the payment, with the purposes paying them is).
+pub fn payable_n(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], available: &[Tag]) -> bool {
+    payable_iter(cost, allow, extra, chosen, available.iter().copied(), available.len())
 }
 
-/// [`payable`] over any sequence of available masks (no allocation: this
+/// The tag of the needs of a cost paid for purposes `allow` (its pips with
+/// `FOR_COST`, `Tag`).
+#[inline]
+pub fn cost_need(mask: ManaMask, allow: u8) -> Tag {
+    tag(mask, allow | FOR_COST)
+}
+
+/// [`payable`] over any sequence of available tags (no allocation: this
 /// runs for every castable card at every priority decision).
 fn payable_iter(
     cost: &ManaCost,
-    extra: &[ManaMask],
-    chosen: &[ManaMask],
-    available: impl Iterator<Item = ManaMask>,
+    allow: u8,
+    extra: &[Tag],
+    chosen: &[Tag],
+    available: impl Iterator<Item = Tag> + Clone,
     n: usize,
 ) -> bool {
     let need = cost.total() as usize + extra.len();
     if chosen.len() > need || chosen.len() + n < need {
         return false;
     }
-    let mut groups = [(0u8, false, 0u8); 128];
+    // (A restriction that keeps some unit from some need: the exact
+    // matching. Otherwise every unit may pay every need it meets in type.)
+    let main = cost_need(0, allow);
+    let kept_from = |u: Tag| purposes(u) != 0 && (!spend_ok(u, main) || extra.iter().any(|&e| !spend_ok(u, e)));
+    if chosen.iter().any(|&u| kept_from(u)) || available.clone().any(kept_from) {
+        return payable_restricted(cost, main, extra, chosen, available);
+    }
+    let mut groups = [(0 as Tag, false, 0u8); 128];
     let mut ng = 0;
-    let mut add = |m: ManaMask, ch: bool| match groups[..ng].iter_mut().find(|g| g.0 == m && g.1 == ch) {
+    let mut add = |m: Tag, ch: bool| match groups[..ng].iter_mut().find(|g| g.0 == m && g.1 == ch) {
         Some(g) => g.2 = g.2.saturating_add(1),
         None => {
             groups[ng] = (m, ch, 1);
@@ -341,7 +412,7 @@ fn payable_iter(
     for m in available {
         add(m, false);
     }
-    let mut needs = [(0u8, 0u8); 24];
+    let mut needs = [(0 as Tag, 0u8); 24];
     let mut nn = 0;
     for &m in extra {
         match needs[..nn].iter_mut().find(|x| x.0 == m) {
@@ -354,18 +425,18 @@ fn payable_iter(
     }
     for c in 0..6 {
         if cost.pips[c] > 0 {
-            needs[nn] = (1 << c, cost.pips[c]);
+            needs[nn] = (cost_need(1 << c, allow), cost.pips[c]);
             nn += 1;
         }
     }
     for (i, &k) in cost.hybrid.iter().enumerate() {
         if k > 0 {
-            needs[nn] = (pair_mask(i), k);
+            needs[nn] = (cost_need(pair_mask(i), allow), k);
             nn += 1;
         }
     }
     debug_assert!(!cost.has_phyrexian());
-    let best = if extra.iter().any(|&m| m & NOT_MADE != 0) {
+    let best = if extra.iter().any(|&m| m & NOT_MADE as Tag != 0) {
         best_chosen::<true>(&needs[..nn], &mut groups[..ng], chosen.len() as u8)
     } else {
         best_chosen::<false>(&needs[..nn], &mut groups[..ng], chosen.len() as u8)
@@ -376,11 +447,119 @@ fn payable_iter(
     }
 }
 
+/// [`payable_iter`] when spending restrictions matter (ENGINE.md 100.4.5):
+/// the needs (the cost's pips, its generic pips, which any unit its
+/// restriction lets pay the cost may pay, a typeless improvise unit too, and
+/// `extra`) on one side, the units on the other. The payment is exact when
+/// a matching covers every need and every chosen unit; by the
+/// Mendelsohn-Dulmage theorem one exists when a matching covers the needs
+/// and another covers the chosen units, so two maximum flows decide it (the
+/// sides grouped by tag, capacities their counts).
+fn payable_restricted(cost: &ManaCost, main: Tag, extra: &[Tag], chosen: &[Tag], available: impl Iterator<Item = Tag>) -> bool {
+    // Needs by tag: (tag, generic, count).
+    let mut needs: Vec<(Tag, bool, u32)> = Vec::new();
+    let mut add_need = |t: Tag, generic: bool, k: u32| {
+        if k == 0 {
+            return;
+        }
+        match needs.iter_mut().find(|x| x.0 == t && x.1 == generic) {
+            Some(x) => x.2 += k,
+            None => needs.push((t, generic, k)),
+        }
+    };
+    for &e in extra {
+        add_need(e, false, 1);
+    }
+    for c in 0..6 {
+        add_need(main | (1 << c), false, cost.pips[c] as u32);
+    }
+    for (i, &k) in cost.hybrid.iter().enumerate() {
+        add_need(main | pair_mask(i) as Tag, false, k as u32);
+    }
+    add_need(main, true, cost.generic as u32);
+    // Units by tag: (tag, chosen, count).
+    let mut units: Vec<(Tag, bool, u32)> = Vec::new();
+    let mut add_unit = |t: Tag, ch: bool| match units.iter_mut().find(|x| x.0 == t && x.1 == ch) {
+        Some(x) => x.2 += 1,
+        None => units.push((t, ch, 1)),
+    };
+    for &u in chosen {
+        add_unit(u, true);
+    }
+    for u in available {
+        add_unit(u, false);
+    }
+    let pays = |u: Tag, n: &(Tag, bool, u32)| if n.1 { spend_ok(u, n.0) } else { fits(u, n.0) };
+    let edges: Vec<Vec<bool>> = needs.iter().map(|n| units.iter().map(|u| pays(u.0, n)).collect()).collect();
+    let need_total: u32 = needs.iter().map(|n| n.2).sum();
+    let chosen_total = chosen.len() as u32;
+    // Every need paid (by chosen or available units).
+    let left: Vec<u32> = needs.iter().map(|n| n.2).collect();
+    let right: Vec<u32> = units.iter().map(|u| u.2).collect();
+    if max_flow(&left, &right, &edges) < need_total {
+        return false;
+    }
+    // Every chosen unit spent on a need.
+    let right_ch: Vec<u32> = units.iter().map(|u| if u.1 { u.2 } else { 0 }).collect();
+    max_flow(&left, &right_ch, &edges) == chosen_total
+}
+
+/// The maximum flow from the left nodes (capacity `left[i]` each) to the
+/// right nodes (capacity `right[j]`) along the edges (`edges[i][j]`, of any
+/// capacity): a bipartite b-matching, by augmenting paths.
+fn max_flow(left: &[u32], right: &[u32], edges: &[Vec<bool>]) -> u32 {
+    let (nl, nr) = (left.len(), right.len());
+    let mut f = vec![vec![0u32; nr]; nl];
+    let mut out_l = vec![0u32; nl];
+    let mut in_r = vec![0u32; nr];
+    // An augmenting path from left node i with residual capacity: right
+    // nodes reached through edges, back to left nodes through flow.
+    fn augment(i: usize, left: &[u32], right: &[u32], edges: &[Vec<bool>], f: &mut [Vec<u32>], in_r: &mut [u32], seen_l: &mut [bool], seen_r: &mut [bool]) -> bool {
+        let _ = left;
+        for j in 0..right.len() {
+            if !edges[i][j] || seen_r[j] {
+                continue;
+            }
+            seen_r[j] = true;
+            if in_r[j] < right[j] {
+                f[i][j] += 1;
+                in_r[j] += 1;
+                return true;
+            }
+            for k in 0..f.len() {
+                if f[k][j] > 0 && !seen_l[k] {
+                    seen_l[k] = true;
+                    if augment(k, left, right, edges, f, in_r, seen_l, seen_r) {
+                        f[k][j] -= 1;
+                        f[i][j] += 1;
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+    let mut total = 0;
+    for i in 0..nl {
+        while out_l[i] < left[i] {
+            let mut seen_l = vec![false; nl];
+            let mut seen_r = vec![false; nr];
+            seen_l[i] = true;
+            if !augment(i, left, right, edges, &mut f, &mut in_r, &mut seen_l, &mut seen_r) {
+                break;
+            }
+            out_l[i] += 1;
+            total += 1;
+        }
+    }
+    total
+}
+
 /// The most chosen units the coloured needs can use (stops at `cap`, all of
 /// them); `None` if the needs cannot be met.
 /// (`STRICT`: some need is `NOT_MADE`; otherwise any meeting of types fits,
 /// the fast path.)
-fn best_chosen<const STRICT: bool>(needs: &[(ManaMask, u8)], groups: &mut [(ManaMask, bool, u8)], cap: u8) -> Option<u8> {
+fn best_chosen<const STRICT: bool>(needs: &[(Tag, u8)], groups: &mut [(Tag, bool, u8)], cap: u8) -> Option<u8> {
     match needs.split_first() {
         None => Some(0),
         Some((&(c, k), rest)) => distribute::<STRICT>(c, k, 0, rest, groups, cap),
@@ -388,11 +567,11 @@ fn best_chosen<const STRICT: bool>(needs: &[(ManaMask, u8)], groups: &mut [(Mana
 }
 
 fn distribute<const STRICT: bool>(
-    need: ManaMask,
+    need: Tag,
     k: u8,
     gi: usize,
-    rest: &[(ManaMask, u8)],
-    groups: &mut [(ManaMask, bool, u8)],
+    rest: &[(Tag, u8)],
+    groups: &mut [(Tag, bool, u8)],
     cap: u8,
 ) -> Option<u8> {
     if k == 0 {
@@ -402,7 +581,7 @@ fn distribute<const STRICT: bool>(
         return None;
     }
     let (mask, ch, cnt) = groups[gi];
-    let meets = if STRICT { fits(mask, need) } else { mask & need != 0 };
+    let meets = if STRICT { fits(mask, need) } else { mask & need & TYPES as Tag != 0 };
     let most = if meets { k.min(cnt) } else { 0 };
     let mut best: Option<u8> = None;
     for t in (0..=most).rev() {
@@ -421,20 +600,20 @@ fn distribute<const STRICT: bool>(
     best
 }
 
-/// One mana a source can make, with what using it takes from a shared
+// One mana a source can make, with what using it takes from a shared
 /// budget: life (CR 119.4), or a permanent a later part of the cost may
 /// need to sacrifice (a Lotus Petal when Tinker must sacrifice an
 /// artifact).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Unit {
-    pub mask: ManaMask,
+    pub mask: Tag,
     pub life: u8,
     pub sac: bool,
 }
 
 impl Unit {
-    pub fn free(mask: ManaMask) -> Unit {
-        Unit { mask, life: 0, sac: false }
+    pub fn free(mask: impl Into<Tag>) -> Unit {
+        Unit { mask: mask.into(), life: 0, sac: false }
     }
     fn budgeted(&self) -> bool {
         self.life > 0 || self.sac
@@ -463,16 +642,16 @@ impl Budget {
 }
 
 /// [`payable`] within a [`Budget`] for the available units used.
-pub fn payable_within(cost: &ManaCost, chosen: &[ManaMask], available: &[Unit], budget: Budget) -> bool {
-    payable_within_n(cost, &[], chosen, available, budget)
+pub fn payable_within(cost: &ManaCost, allow: u8, chosen: &[Tag], available: &[Unit], budget: Budget) -> bool {
+    payable_within_n(cost, allow, &[], chosen, available, budget)
 }
 
 /// [`payable_within`] with `extra` needs (see [`payable_n`]).
-pub fn payable_within_n(cost: &ManaCost, extra: &[ManaMask], chosen: &[ManaMask], available: &[Unit], budget: Budget) -> bool {
+pub fn payable_within_n(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], available: &[Unit], budget: Budget) -> bool {
     if available.iter().try_fold(budget, |b, u| if u.budgeted() { b.take(u, 1) } else { Some(b) }).is_some() {
-        return payable_iter(cost, extra, chosen, available.iter().map(|u| u.mask), available.len());
+        return payable_iter(cost, allow, extra, chosen, available.iter().map(|u| u.mask), available.len());
     }
-    let free: Vec<ManaMask> = available.iter().filter(|u| !u.budgeted()).map(|u| u.mask).collect();
+    let free: Vec<Tag> = available.iter().filter(|u| !u.budgeted()).map(|u| u.mask).collect();
     let paid: Vec<Unit> = available.iter().copied().filter(|u| u.budgeted()).collect();
     // Rare (low life, discard costs): try how many units of each budgeted
     // group to use.
@@ -487,20 +666,21 @@ pub fn payable_within_n(cost: &ManaCost, extra: &[ManaMask], chosen: &[ManaMask]
     #[allow(clippy::too_many_arguments)]
     fn go(
         cost: &ManaCost,
-        extra: &[ManaMask],
-        chosen: &[ManaMask],
-        units: &mut Vec<ManaMask>,
+        allow: u8,
+        extra: &[Tag],
+        chosen: &[Tag],
+        units: &mut Vec<Tag>,
         groups: &[(Unit, u8)],
         b: Budget,
         nodes: &mut u32,
     ) -> Option<bool> {
         *nodes = nodes.checked_sub(1)?;
-        let Some(((u, n), rest)) = groups.split_first() else { return Some(payable_n(cost, extra, chosen, units)) };
+        let Some(((u, n), rest)) = groups.split_first() else { return Some(payable_n(cost, allow, extra, chosen, units)) };
         for take in (0..=*n).rev() {
             let Some(left) = b.take(u, take as i32) else { continue };
             let len = units.len();
             units.extend(std::iter::repeat_n(u.mask, take as usize));
-            let ok = go(cost, extra, chosen, units, rest, left, nodes);
+            let ok = go(cost, allow, extra, chosen, units, rest, left, nodes);
             units.truncate(len);
             if ok? {
                 return Some(true);
@@ -510,7 +690,7 @@ pub fn payable_within_n(cost: &ManaCost, extra: &[ManaMask], chosen: &[ManaMask]
     }
     let mut units = free;
     let mut nodes = SEARCH_NODES;
-    go(cost, extra, chosen, &mut units, &groups, budget, &mut nodes).unwrap_or_else(|| {
+    go(cost, allow, extra, chosen, &mut units, &groups, budget, &mut nodes).unwrap_or_else(|| {
         search_exhausted(format_args!(
             "units within a budget: cost {cost}, needs {extra:?}, chosen {chosen:?}, units {available:?}, budget {budget:?}"
         ))
@@ -539,10 +719,10 @@ pub(crate) fn search_exhausted(what: std::fmt::Arguments) -> ! {
 mod tests {
     use super::*;
 
-    const MU: ManaMask = 1 << U;
-    const MW: ManaMask = 1 << W;
-    const MR: ManaMask = 1 << R;
-    const MB: ManaMask = 1 << B;
+    const MU: Tag = 1 << U;
+    const MW: Tag = 1 << W;
+    const MR: Tag = 1 << R;
+    const MB: Tag = 1 << B;
 
     #[test]
     fn parse_and_display() {
@@ -556,7 +736,7 @@ mod tests {
         assert_eq!(h.hybrid[pair_index(W, U).unwrap()], 1);
         assert_eq!(h.phyrexian[B], 1);
         assert_eq!(h.mana_value(), 2);
-        assert_eq!(h.colors(), MW | MU | MB);
+        assert_eq!(h.colors() as Tag, MW | MU | MB);
         assert_eq!(h.to_string(), "{W/U}{B/P}");
         assert!(ManaCost::parse("{2/W}").is_none());
         assert!(ManaCost::parse("").is_none());
@@ -565,26 +745,26 @@ mod tests {
     #[test]
     fn payable_respects_colours_and_chosen() {
         let uu = ManaCost::parse("{U}{U}").unwrap();
-        assert!(payable(&uu, &[], &[MU, MU]));
-        assert!(!payable(&uu, &[], &[MU, MR]));
-        assert!(payable(&uu, &[], &[MU, MU | MW]));
+        assert!(payable(&uu, 0, &[], &[MU, MU]));
+        assert!(!payable(&uu, 0, &[], &[MU, MR]));
+        assert!(payable(&uu, 0, &[], &[MU, MU | MW]));
         let one_u = ManaCost::parse("{1}{U}").unwrap();
         // A chosen Mountain is fine: it pays the generic.
-        assert!(payable(&one_u, &[MR], &[MU]));
+        assert!(payable(&one_u, 0, &[MR], &[MU]));
         // Two chosen Mountains are not: only one generic pip.
-        assert!(!payable(&one_u, &[MR, MR], &[MU]));
+        assert!(!payable(&one_u, 0, &[MR, MR], &[MU]));
         // A chosen dual can go either way.
-        assert!(payable(&ManaCost::parse("{U}{W}").unwrap(), &[MU | MW], &[MW]));
-        assert!(payable(&ManaCost::parse("{U}{W}").unwrap(), &[MU | MW], &[MU]));
-        assert!(!payable(&ManaCost::parse("{U}{W}").unwrap(), &[MU | MW], &[MR]));
+        assert!(payable(&ManaCost::parse("{U}{W}").unwrap(), 0, &[MU | MW], &[MW]));
+        assert!(payable(&ManaCost::parse("{U}{W}").unwrap(), 0, &[MU | MW], &[MU]));
+        assert!(!payable(&ManaCost::parse("{U}{W}").unwrap(), 0, &[MU | MW], &[MR]));
     }
 
     #[test]
     fn hybrid_pips_take_either_colour() {
         let h = ManaCost::parse("{R/W}{R/W}").unwrap();
-        assert!(payable(&h, &[], &[MR, MW]));
-        assert!(!payable(&h, &[], &[MR, MU]));
-        assert!(payable(&h, &[MR], &[MR]));
+        assert!(payable(&h, 0, &[], &[MR, MW]));
+        assert!(!payable(&h, 0, &[], &[MR, MU]));
+        assert!(payable(&h, 0, &[MR], &[MR]));
         let mut pool = ManaPool { amt: [1, 0, 0, 1, 0, 0], art: 0, haste: 0 };
         let mut c = h;
         pool.pay_into(&mut c);
@@ -596,12 +776,29 @@ mod tests {
         let two = ManaCost::parse("{2}").unwrap();
         let b = |life, sac| Budget { life, sac, tap: i32::MAX };
         let conf = Unit { life: 1, ..Unit::free(COLORS) };
-        assert!(payable_within(&two, &[], &[conf, conf], b(2, 0)));
-        assert!(!payable_within(&two, &[], &[conf, conf], b(1, 0)));
-        assert!(payable_within(&two, &[], &[conf, conf, Unit::free(MR)], b(1, 0)));
+        assert!(payable_within(&two, 0, &[], &[conf, conf], b(2, 0)));
+        assert!(!payable_within(&two, 0, &[], &[conf, conf], b(1, 0)));
+        assert!(payable_within(&two, 0, &[], &[conf, conf, Unit::free(MR)], b(1, 0)));
         let petal = Unit { sac: true, ..Unit::free(COLORS) };
-        assert!(!payable_within(&two, &[], &[petal, petal], b(9, 1)));
-        assert!(payable_within(&two, &[], &[petal, petal], b(9, 2)));
+        assert!(!payable_within(&two, 0, &[], &[petal, petal], b(9, 1)));
+        assert!(payable_within(&two, 0, &[], &[petal, petal], b(9, 2)));
+    }
+
+    /// CR 106.6 (ENGINE.md 100.4.5): a restricted unit pays only needs whose
+    /// purposes its restriction allows, a chosen one too; generic pips of
+    /// the cost are needs then (`payable_restricted`).
+    #[test]
+    fn restricted_units_pay_only_their_purposes() {
+        let land = tag(1 << U, crate::db::SPEND_LAND_ABILITY);
+        let need_land = tag(TYPES | NOT_MADE, crate::db::SPEND_LAND_ABILITY);
+        let need_other = tag(TYPES | NOT_MADE, 0);
+        let one = ManaCost::parse("{1}").unwrap();
+        assert!(payable_n(&one, 0, &[need_land], &[land], &[MR]), "the land's need, the Mountain the {{1}}");
+        assert!(!payable_n(&one, 0, &[need_other], &[land], &[MR]), "not another ability's need");
+        assert!(!payable_n(&one, 0, &[], &[land], &[MR]), "not the cost's generic");
+        assert!(!payable_n(&one, 0, &[need_land], &[], &[land, land]), "nothing pays the {{1}}");
+        assert!(payable_n(&one, 0, &[need_land, need_land], &[MR], &[land, land]));
+        assert!(payable_n(&one, crate::db::SPEND_LAND_ABILITY, &[], &[land], &[]), "a land's ability's own cost");
     }
 
     #[test]

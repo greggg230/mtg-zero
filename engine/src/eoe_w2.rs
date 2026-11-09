@@ -30,9 +30,11 @@ pub(crate) type RKind = (u8, u8, u8);
 pub(crate) const SPEND_ABILITIES: u8 = SPEND_ARTIFACT_ABILITY | SPEND_ELDRAZI_ABILITY | SPEND_LAND_ABILITY;
 
 /// May mana with purposes `only` pay a cost that satisfies `allow` (CR
-/// 106.6: no restriction, or one of its purposes)?
+/// 106.6: no restriction, or one of its purposes; a rider,
+/// `db::MANA_UNCOUNTERABLE`, is no purpose)?
 #[inline]
 pub(crate) fn spendable(only: u8, allow: u8) -> bool {
+    let only = only & !crate::db::MANA_UNCOUNTERABLE;
     only == 0 || only & allow != 0
 }
 
@@ -150,16 +152,12 @@ impl Game {
     }
 
     /// Mana a mana ability activated with priority adds (CR 106.4), with
-    /// its spending restriction (CR 106.6). Not in a table whose mana has
-    /// only the cube's two restrictions (Mishra's Workshop's, Delighted
-    /// Halfling's): there such mana floated before its source is lost
-    /// (ENGINE.md 86) goes to the pool unrestricted, as before this
-    /// section: a known fault left for the maintainer, since keeping the
-    /// restriction changes 12 of the 2,500 digest games (ENGINE.md 99.12).
+    /// its spending restriction and rider (CR 106.6: they stay with the
+    /// mana), in every table (docs/shortcuts.md N19, N20; ENGINE.md 100.4:
+    /// before it the cube's floated Workshop and Halfling mana lost them).
     pub(crate) fn add_restricted_mana(&mut self, p: PlayerId, mana: &[u8; 6], only: u8) {
         self.add_mana(p, mana);
-        let cube_kinds = SPEND_ARTIFACT | crate::db::SPEND_LEGENDARY;
-        if only == 0 || self.db.spend_kinds & !cube_kinds == 0 {
+        if only == 0 {
             return;
         }
         let mut kinds: Vec<RKind> = self.pool_kinds(p).iter().copied().collect();
@@ -168,65 +166,6 @@ impl Game {
         }
         self.set_pool_kinds(p, &kinds);
     }
-}
-
-/// The restricted mana a payment can leave in the pool (CR 106.4, 601.2h):
-/// of the virtual pool's kinds `vkinds`, `spent[t]` of type t taken from
-/// the kinds the payment may spend (`spend`), every way but those worse
-/// for the player than another (a kind whose purposes are all another's is
-/// spent before it: its mana pays for less, CR 106.6). One way when a type
-/// has one such kind (the cube: Mishra's Workshop's {C}).
-pub(crate) fn kinds_left(vkinds: &[RKind], spent: &[u8; 6], spend: &dyn Fn(u8) -> bool) -> Vec<Vec<RKind>> {
-    let mut out: Vec<Vec<RKind>> = vec![vkinds.to_vec()];
-    for t in 0..6 {
-        if spent[t] == 0 {
-            continue;
-        }
-        let idx: Vec<usize> = (0..vkinds.len()).filter(|&i| vkinds[i].0 as usize == t && spend(vkinds[i].1)).collect();
-        let mut ways: Vec<Vec<u8>> = Vec::new();
-        fn each(idx: &[usize], vkinds: &[RKind], left: u8, cur: &mut Vec<u8>, ways: &mut Vec<Vec<u8>>) {
-            if cur.len() == idx.len() {
-                if left == 0 {
-                    ways.push(cur.clone());
-                }
-                return;
-            }
-            let have = vkinds[idx[cur.len()]].2;
-            for n in (0..=have.min(left)).rev() {
-                cur.push(n);
-                each(idx, vkinds, left - n, cur, ways);
-                cur.pop();
-            }
-        }
-        each(&idx, vkinds, spent[t], &mut Vec::new(), &mut ways);
-        // (Narrower purposes first: a way that keeps some of a kind whose
-        // purposes another's contain while spending that other is worse.)
-        let worse = |w: &[u8]| {
-            (0..idx.len()).any(|a| {
-                (0..idx.len()).any(|b| {
-                    let (oa, ob) = (vkinds[idx[a]].1, vkinds[idx[b]].1);
-                    a != b && oa & !ob == 0 && oa != ob && w[a] < vkinds[idx[a]].2 && w[b] > 0
-                })
-            })
-        };
-        ways.retain(|w| !worse(w));
-        debug_assert!(!ways.is_empty(), "restricted mana spent of type {t} that no kind holds");
-        let mut next = Vec::new();
-        for o in &out {
-            for w in &ways {
-                let mut v = o.clone();
-                for (j, &i) in idx.iter().enumerate() {
-                    v[i].2 -= w[j];
-                }
-                next.push(v);
-            }
-        }
-        out = next;
-    }
-    for v in out.iter_mut() {
-        v.retain(|k| k.2 > 0);
-    }
-    out
 }
 
 impl Game {
@@ -303,13 +242,19 @@ pub(crate) const LAND_TYPES: [&str; 18] = [
 /// The abilities of a nonbasic land that is a Mountain (CR 305.7): its rules
 /// text's are gone, and it has "{T}: Add {R}" (305.6).
 pub(crate) fn mountain_def() -> &'static CardDef {
-    use crate::db::{ActEffect, ActivatedDef, Cost, ManaAbility, ManaProd};
     static M: std::sync::OnceLock<CardDef> = std::sync::OnceLock::new();
-    M.get_or_init(|| CardDef {
+    M.get_or_init(|| basic_land_def(crate::mana::R))
+}
+
+/// A definition holding the intrinsic mana ability of a basic land type
+/// that makes mana of type `t`: "{T}: Add <t>" (CR 305.6).
+pub(crate) fn basic_land_def(t: usize) -> CardDef {
+    use crate::db::{ActEffect, ActivatedDef, Cost, ManaAbility, ManaProd};
+    CardDef {
         activated: vec![ActivatedDef {
             cost: Cost { tap: true, ..Cost::default() },
             effect: ActEffect::Mana(ManaAbility {
-                prod: ManaProd::One(1 << crate::mana::R),
+                prod: ManaProd::One(1 << t),
                 damage_to_you: 0,
                 sac_if_no: None,
                 only: 0,
@@ -329,7 +274,7 @@ pub(crate) fn mountain_def() -> &'static CardDef {
             special: None,
         }],
         ..CardDef::default()
-    })
+    }
 }
 
 impl Game {
@@ -496,7 +441,7 @@ impl Game {
                 .collect();
             let mut units = vec![crate::mana::Unit::free(mask)];
             for t in 0..6 {
-                units.extend(std::iter::repeat_n(crate::mana::Unit::free(1 << t), creature_bonus[t] as usize));
+                units.extend(std::iter::repeat_n(crate::mana::Unit::free(1u8 << t), creature_bonus[t] as usize));
             }
             Yield::Multi { prods, units: Some(units) }
         } else {
@@ -596,6 +541,11 @@ impl Game {
     }
 
     fn devour_done(&mut self, card: CardIdx, picked: &[CardIdx]) {
+        // (The counters it enters with, put by its controller: EoE W6.)
+        let since = match self.w6.deferred_since.iter().position(|x| x.0 == card) {
+            Some(k) => self.w6.deferred_since.remove(k),
+            None => (card, self.objs[card.i()].timestamp),
+        };
         if picked.is_empty() {
             return;
         }
@@ -609,7 +559,9 @@ impl Game {
         }
         self.end_batch();
         if self.objs[card.i()].zone == crate::ids::Zone::Battlefield {
+            let before = self.w6.entering.replace(since);
             self.add_counters(card, crate::db::Counter::P1P1, n as crate::num::Count);
+            self.w6.entering = before;
         }
     }
 }

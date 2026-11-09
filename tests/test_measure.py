@@ -70,7 +70,20 @@ def test_fingerprints_read_a_recorded_replay(tmp_path):
     assert sum(v[1] for v in B.mull.values()) == 12
     # the random bot casts and fetches: the counters are filled and consistent
     c = B.c
-    assert c['fetch_cracked'] > 0 and c['bs'] > 0 and c['murk'] > 0 and c['decided'] == 6
+    assert c['fetch_cracked'] > 0 and c['bs'] > 0 and c['murk'] > 0
+    # decided / starter won are the games' own results: a game the turn limit ends is a draw (with mana
+    # abilities at any priority, ENGINE.md 100.4.3, one of these six is), counted in neither
+    won = [r for r in reps if r['result'][0] != r['result'][1]]
+    starter = sum(1 for r in won if (0 if r['result'][0] > r['result'][1] else 1) == r['states'][0]['starting'])
+    assert c['decided'] == len(won) and c['starter_won'] == starter and c['starter_won'] <= c['decided'] <= B.games
+    # and on fixed results (one recorded game rescored as a draw, a starter's win and the other's)
+    d0 = reps[0]
+    s0 = d0['states'][0]['starting']
+    for res, dec, sw in (([0.5, 0.5], 0, 0), ([1.0, 0.0] if s0 == 0 else [0.0, 1.0], 1, 1),
+                         ([0.0, 1.0] if s0 == 0 else [1.0, 0.0], 1, 0)):
+        b1 = fp.Band()
+        fp.scan_game(dict(d0, result=res), b1)
+        assert (b1.games, b1.c['decided'], b1.c['starter_won']) == (1, dec, sw), res
     assert c['fetch_now'] + c['fetch_later this turn'] + c['fetch_next turn'] + c['fetch_2+ turns'] == c['fetch_cracked']
     assert c['bs_resp'] <= c['bs_shuffle'] <= c['bs'] and c['murk_best'] <= c['murk'] and c['daze_tapout'] <= c['daze_live']
     txt = fp.table(bands)

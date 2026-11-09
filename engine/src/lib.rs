@@ -43,6 +43,7 @@ pub mod eoe_x;
 pub mod eoe_w3;
 pub mod eoe_w4;
 pub mod eoe_w1;
+pub mod eoe_w6;
 pub mod eoe_w5;
 mod eoe_w2;
 pub mod public_state;

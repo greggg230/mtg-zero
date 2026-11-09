@@ -1384,7 +1384,7 @@ def canary(spots_path, ckpts, sims_list=(32,), repeats=8, device='cuda', engine_
         st = json.loads(g.export_state())
         sp['_labels'] = {o['a']: o['t'] for o in (st.get('decision') or {}).get('options') or []}
         if (sp['watch'] not in sp['_labels'].values() or g.to_move != sp['decider']
-                or (sp.get('sig') and spot_sig(st) != sp['sig'])):
+                or (sp.get('sig') and spot_sig(st) != sp['sig']) or not same_pos(st, sp)):
             raise SystemExit(f'spot {sp["kind"]} {sp["source"]} {sp["gid"]}:{sp["k"]} does not replay on this engine')
     res = {}
     if device == 'cpu':
@@ -1463,6 +1463,45 @@ def spot_sig(st):
            sorted(c.get('name') for c in (st['players'][p].get('hand') or [])) if p is not None else None,
            [ps.get('life') for ps in st['players']]]
     return hashlib.sha1(json.dumps(key).encode()).hexdigest()[:16]
+
+
+POS_DROP = ('decision', 'log', 'log_n', 'v')     # what a spot's position (spot_pos) leaves out of the exported state
+
+
+def spot_pos(st):
+    """A spot's position: the hash of the whole exported state but the decision's words and the log (every zone in
+    order with ids, tapped, counters and damage, the stack, pools, life, both libraries' order). `sig` says which
+    decision; `pos` that the game is the same one (tools/delver_rerecord.py, docs/ENGINE.md 100.8)."""
+    key = {k: v for k, v in st.items() if k not in POS_DROP}
+    return hashlib.sha1(json.dumps(key, sort_keys=True, separators=(',', ':')).encode()).hexdigest()[:16]
+
+
+def same_pos(st, sp):
+    """Whether the replayed state `st` is the spot's recorded position (True for a spot without `pos`: the
+    fingerprint alone, as before 100.8)."""
+    return not sp.get('pos') or spot_pos(st) == sp['pos']
+
+
+def rules_epoch(root):
+    """tools/position_lab.py's RULES_EPOCH in the checkout `root` (read from its source, no import: the engine
+    checkout of --engine may be another), or None (none there: a checkout older than 9b403c1)."""
+    p = os.path.join(root, 'tools', 'position_lab.py')
+    if not os.path.exists(p):
+        return None
+    with open(p, encoding='utf-8') as f:
+        m = re.search(r'^RULES_EPOCH = (\d+)', f.read(), re.M)
+    return int(m.group(1)) if m else None
+
+
+def library_rules_note(L, engine_path):
+    """'' when the library was recorded under the engine checkout's rules epoch, else why its spots may not
+    replay there (a library is recorded for one engine's rules: docs/ENGINE.md 100.8)."""
+    have, want = L.get('rules_epoch'), rules_epoch(engine_path)
+    if have == want:
+        return ''
+    return (f'the library was recorded under rules epoch {have}, the engine checkout {engine_path} has {want}: use the '
+            f"library of that checkout's commit (git show <commit>:data/delver_canary_library.json) or re-record it "
+            f'(tools/delver_rerecord.py)')
 
 
 def load_library(path=LIBRARY_PATH):
@@ -1571,14 +1610,16 @@ def library_score(L, ckpts, sims_list=(32,), repeats=8, device='cpu', engine_pat
             st = json.loads(spot_game(E, sp).export_state())
         except Exception:                                       # noqa: BLE001  (an action the engine refuses)
             st = None
-        if st is None or spot_sig(st) != sp['sig']:
+        if st is None or spot_sig(st) != sp['sig'] or not same_pos(st, sp):
             stale.append(sp['id'])
         else:
             ok.append(sp)
+    note = library_rules_note(L, engine_path)
     if stale:
-        log(f'canary library: {len(stale)} of {len(L["spots"])} spots no longer replay on this engine: {stale}')
+        log(f'canary library: {len(stale)} of {len(L["spots"])} spots no longer replay on this engine: {stale}'
+            + (f' ({note})' if note else ''))
     if not ok:
-        raise RuntimeError('canary library: no spot replays on this engine')
+        raise RuntimeError('canary library: no spot replays on this engine' + (f' ({note})' if note else ''))
     C = canary({'spots': [dict(sp) for sp in ok]}, ckpts, sims_list, repeats, device, engine_path, log, rules=rules)
     out = {}
     for lab, by in C['results'].items():

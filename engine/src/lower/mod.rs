@@ -27,6 +27,7 @@ pub mod eoe_x;
 pub mod eoe_w3;
 pub mod eoe_w4;
 pub mod eoe_w1;
+pub mod eoe_w6;
 pub mod eoe_w5;
 pub mod eoe_w2;
 pub mod filter;
@@ -124,6 +125,9 @@ pub struct Lowerer<'a> {
     /// An effect of the card reanimates and attaches it (a reanimating
     /// Aura).
     pub reanimates: bool,
+    /// An effect of the card gives a basic land type in addition
+    /// (`given_subtype`; `CardDef::gives_basic_land_type`).
+    pub gives_basic: bool,
 }
 
 /// Which face of a card a printing describes (ENGINE.md 25).
@@ -225,9 +229,25 @@ impl Lowerer<'_> {
     /// where it is built (a printed type: `produces`; Multiversal Passage's
     /// chosen type: `ManaProd::Chosen`), so a land given one would lack it
     /// (docs/shortcuts.md N22).
-    pub fn given_subtype(&mut self, field: &str, s: &str) -> Option<u16> {
+    /// A subtype an effect gives in addition to the object's others. A basic
+    /// land type brings its intrinsic mana ability to a land (CR 305.6, the
+    /// end of 305.7: `CardDb::basic_abilities`, `Game::granted_activated`;
+    /// ENGINE.md 100.4.5).
+    pub fn given_subtype(&mut self, _field: &str, s: &str) -> Option<u16> {
         if matches!(s, "Plains" | "Island" | "Swamp" | "Mountain" | "Forest") {
-            self.unsupported(format!("{field}({s}: a basic land type given by an effect, CR 305.6-305.7)"));
+            self.gives_basic = true;
+        }
+        Some(self.subtype(s))
+    }
+
+    /// A subtype an effect sets (the object's subtypes become exactly
+    /// these). A basic land type set on a land removes its rules text's
+    /// abilities as well (CR 305.7), which only the "nonbasic lands are
+    /// Mountains" effects build (`Game::moon_def`): refused (ENGINE.md
+    /// 100.4.5; no card of the tables sets one by these effects).
+    pub fn set_subtype(&mut self, field: &str, s: &str) -> Option<u16> {
+        if matches!(s, "Plains" | "Island" | "Swamp" | "Mountain" | "Forest") {
+            self.unsupported(format!("{field}({s}: a basic land type set by an effect, CR 305.7)"));
             return None;
         }
         Some(self.subtype(s))
@@ -263,26 +283,14 @@ impl Lowerer<'_> {
 /// 28-30, 41, 43-45, 47, 49, 50, 61, 62, 65, 67, 80, 100, 101); what is left
 /// below is still wrong in the IR.
 const IR_DEFECTS: &[(&str, &str)] = &[
-    // Lane A (ENGINE.md 99.2; docs/ir_defects.md 21-39).
-    // "Move a counter" narrowed to a +1/+1 counter between your permanents
-    // (27).
-    ("Nesting Grounds", "ir_defect(move a counter narrowed, docs/ir_defects.md 27)"),
-    // "Whenever you put ... counters" without its "you put" (31).
-    ("Terrasymbiosis", "ir_defect(who puts the counters dropped, docs/ir_defects.md 31)"),
+    // Lane A (ENGINE.md 99.2; docs/ir_defects.md 21-39): none left (27 and
+    // 31 fixed by mtg-bot f4f2d663, ENGINE.md 99.16).
 
-    // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79).
-    // "If a permanent entering the battlefield causes a triggered ability
-    // of a permanent you control to trigger": both restrictions dropped
-    // (docs/ir_defects.md 66).
-    ("Starfield Vocalist", "ir_defect(event subjects dropped, docs/ir_defects.md 66)"),
+    // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79): none left (66 fixed
+    // by mtg-bot f4f2d663, ENGINE.md 99.16).
 
-    // W2 mana and lands (ENGINE.md 99.12; docs/ir_defects.md 160-169).
-    // "{T}: Add one mana of any color among legendary permanents you
-    // control" written as any colour with a spending restriction (160).
-    ("Plaza of Heroes", "ir_defect(a mana ability's colours written as a spending restriction, docs/ir_defects.md 160)"),
-    // "Whenever a creature deals combat damage to you": the damaged
-    // "you" widened to anything you control (161).
-    ("Contested War Zone", "ir_defect(combat damage to you widened to your permanents, docs/ir_defects.md 161)"),
+    // W2 mana and lands (ENGINE.md 99.12; docs/ir_defects.md 160-169): none
+    // left (160 and 161 fixed by mtg-bot f4f2d663, ENGINE.md 99.16).
 
     // W3 combat and abilities (ENGINE.md 99.13; docs/ir_defects.md 170-179).
 
@@ -331,9 +339,11 @@ pub(crate) fn lower_card_in(
         act_x_times: 0,
         spell_x: false,
         reanimates: false,
+        gives_basic: false,
     };
     let mut def = printing::lower_printing(&mut l, p);
     def.converge = l.converge;
+    def.gives_basic_land_type = l.gives_basic;
     if l.uses_prepare && def.prepare.is_none() {
         l.unsupported("Effect:SourceBecomesPrepared(without a prepare spell)");
     }

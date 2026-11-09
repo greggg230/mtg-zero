@@ -106,7 +106,7 @@ fn c_cards() -> Vec<card_ir::Card> {
                 "enters_as_copy_types": ["Enchantment"]}),
         ),
         // "... as a copy of a land, except it's a Forest in addition to its
-        // other types": refused (a basic land type from an effect, N22).
+        // other types" (a basic land type from an effect, N22: B2 built it).
         card(
             "C Forest Mimic",
             json!({"card_types": ["Land"], "enters_as_copy_types": ["Land"], "enters_as_copy_add_subtypes": ["Forest"]}),
@@ -797,14 +797,15 @@ fn cr_716_2a_a_copy_of_a_class_starts_at_level_1_and_levels_up() {
 
 // ---- N22: a basic land type from an effect (CR 305.6-305.7) ---------------------------------------
 
-/// A land given a basic land type has that type's intrinsic mana ability
-/// (CR 305.6-305.7); the engine has it only where it is built (a printed
-/// type, Multiversal Passage's chosen type), so an effect or copy exception
-/// that gives one is refused loudly.
+/// A land given a basic land type in addition to its others has that type's
+/// intrinsic mana ability (CR 305.6-305.7). B2 built it (ENGINE.md 100.4.5:
+/// `Game::granted_activated`; `rules_payment_b.rs::cr_305_6_a_land_given_forest_taps_for_green`),
+/// so a copy exception that gives one is no longer refused for it (the test
+/// card has another blocker: a land without a mana ability of its own).
 #[test]
-fn cr_305_6_an_effect_giving_a_basic_land_type_is_refused() {
-    let why = db().unsupported().get("C Forest Mimic").unwrap_or_else(|| panic!("C Forest Mimic must be unsupported"));
-    assert!(why.iter().any(|w| w.contains("basic land type")), "{why:?}");
+fn cr_305_6_an_effect_giving_a_basic_land_type_is_not_refused() {
+    let why = db().unsupported().get("C Forest Mimic").cloned().unwrap_or_default();
+    assert!(!why.iter().any(|w| w.contains("basic land type")), "{why:?}");
 }
 
 // ---- N15: the timestamps of objects entering together (CR 613.7m) --------------------------------

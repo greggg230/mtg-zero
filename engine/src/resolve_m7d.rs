@@ -809,9 +809,13 @@ impl Game {
     pub(crate) fn top_options(&self, p: PlayerId, classes: &[crate::pay::Class], sorcery_ok: bool, land_ok: bool, opts: &mut Vec<crate::decision::Opt>) {
         use crate::decision::{act, Opt, FACE_CAST, FACE_PLAY};
         let Some(&top) = self.players[p as usize].library.last() else { return };
-        if !self.top_play_ok(p, top) {
+        // (Or "you may cast artifact spells from the top of your library":
+        // casts only, of the faces that are artifact spells; EoE W6.)
+        let citadel = self.top_play_ok(p, top);
+        if !citadel && !self.w6_top_cast_source(p) {
             return;
         }
+        let land_ok = land_ok && citadel;
         let def = self.def_of(top);
         let front = if def.halves.is_some() {
             self.split_left_options(p, top, sorcery_ok, classes)
@@ -821,7 +825,9 @@ impl Game {
             } else {
                 0
             }
-        } else if self.castable_via(p, top, crate::game::CastFrom::LibraryTop, classes, sorcery_ok) {
+        } else if citadel && self.castable_via(p, top, crate::game::CastFrom::LibraryTop, classes, sorcery_ok) {
+            FACE_CAST
+        } else if !citadel && self.w6_top_cast_ok(p, top, None) && self.castable_via(p, top, crate::game::CastFrom::LibraryTopMana, classes, sorcery_ok) {
             FACE_CAST
         } else {
             0
@@ -867,13 +873,15 @@ impl Game {
         use crate::pay::{Class, Src, Yield, LJ_FOR, SAC, SAC_FOR, SQ_FOR};
         let mut out = Vec::new();
         let def = self.objs[c.i()].def;
-        let mut k = self.abilities(c).activated.len();
+        // (Its places: after its own abilities and those granted to it,
+        // `Game::activated_home`'s numbering; past the fourth the payment
+        // offers it by the permanent's own id, docs/shortcuts.md 31.7.2k.)
+        let granted = if self.grants_activated_now() { self.granted_activated(c).len() } else { 0 };
+        let mut k = self.abilities(c).activated.len().max(self.own_ability_slots(c)) + granted;
         let mut add = |out: &mut Vec<Class>, slot, yld, share: u8| {
-            if k < 4 {
-                let cl = Class { sac_self: true, res: SAC, slot_id: k as u8, share, ..Class::of(def, Src { card: c, slot }, yld) };
-                out.push(cl);
-                k += 1;
-            }
+            let cl = Class { sac_self: true, res: SAC, slot_id: k.min(u8::MAX as usize) as u8, share, ..Class::of(def, Src { card: c, slot }, yld) };
+            out.push(cl);
+            k += 1;
         };
         if rain && !self.activation_locks_hit(c, locks) {
             let mask = self.sac_mana_of(c);
@@ -956,7 +964,7 @@ impl Game {
             match by {
                 Some((x, i)) => {
                     self.note(|g| format!("P{p} activates {} sacrificing {} for mana", g.name(x), g.name(c)));
-                    let ad = self.source_def(x).activated_def(crate::db::AbilitySlot::Activated(i));
+                    let ad = self.src_ability(x, crate::db::AbilitySlot::Activated(i));
                     if ad.cost.tap {
                         self.tap(x);
                     }

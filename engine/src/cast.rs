@@ -265,6 +265,11 @@ impl Game {
         if let Some(o) = self.companion_option(p, sorcery_ok, &classes) {
             opts.push(o);
         }
+        // Activate mana abilities (CR 605.3a, 117.1d: any time the player
+        // has priority; ENGINE.md 100.4.3).
+        if !self.mana_float_sources(p, &classes, sorcery_ok).is_empty() {
+            opts.push(Opt { action: act::YES, choice: Choice::Yes });
+        }
         (opts, exile, gy)
     }
 
@@ -465,6 +470,9 @@ impl Game {
         match self.objs[card.i()].zone {
             // Bolas's Citadel: the top card of the caster's library.
             Zone::Library if self.top_play_ok(p, card) => Some(CastFrom::LibraryTop),
+            // "You may cast artifact spells from the top of your library"
+            // (EoE W6).
+            Zone::Library if self.w6_top_cast_ok(p, card, None) => Some(CastFrom::LibraryTopMana),
             Zone::Hand if self.miracle_cast == Some(card) => Some(CastFrom::Miracle),
             Zone::Hand => Some(CastFrom::Hand),
             // (The first of its routes; the player chooses among those that
@@ -708,6 +716,7 @@ impl Game {
             CastFrom::Airbent(n) => with(crate::mana::ManaCost { generic: n, ..Default::default() }),
             // Life rather than its mana cost (increases still apply, 601.2f).
             CastFrom::LibraryTop => with(Default::default()),
+            CastFrom::LibraryTopMana => with(def.cost),
         }
     }
 
@@ -1179,7 +1188,7 @@ impl Game {
             }
             cl.members = cards;
             let prods = (0..6).filter(|&t| u.mask & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect();
-            cl.yld = Yield::Multi { prods, units: Some(vec![u, crate::mana::Unit::free(0)]) };
+            cl.yld = Yield::Multi { prods, units: Some(vec![u, crate::mana::Unit::free(0u8)]) };
         }
         for (cl, s) in kept {
             let mut m = crate::pay::Members::new();
@@ -2189,6 +2198,12 @@ impl Game {
                     }
                     None => panic!("a castable card"),
                 }
+            }
+            // (From a library: whether a permission allows the face cast is
+            // the face's question, CR 601.3e; EoE W6.)
+            None if self.objs[card.i()].zone == Zone::Library && face.is_some() && !self.top_play_ok(p, card) => {
+                assert!(self.w6_top_cast_ok(p, card, face), "a castable face");
+                (crate::game::CastFrom::LibraryTopMana, None)
             }
             None => (self.cast_route(p, card).expect("a castable card"), None),
         };

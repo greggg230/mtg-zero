@@ -215,6 +215,9 @@ class Builder:
             if sp.get('sig') and DB.spot_sig(st) != sp['sig']:
                 self.skip('canary', src, 'replays to another position on this engine (its fingerprint differs)', **extra)
                 continue
+            if not DB.same_pos(st, sp):
+                self.skip('canary', src, 'replays to another position on this engine (its state differs: pos)', **extra)
+                continue
             if g.to_move != sp['decider']:
                 self.skip('canary', src, f'the decider is P{g.to_move}, the library says P{sp["decider"]}', **extra)
                 continue
@@ -370,6 +373,7 @@ def main(argv=None):
         HL = {'format': DB.LIBRARY_FORMAT, 'what': f'the canary spots held out of the archive {a.out} ({", ".join(half)} by the '
                                                f"id's sha1; tools/delver_archive.py --canary {a.canary})",
               'held_out': {'archive': a.out, 'canary': a.canary, 'half': half, 'built': out['built']},
+              'engine': info, 'rules_epoch': DB.rules_epoch(ROOT),          # replayed and checked on this engine
               'spots': [h['spot'] for h in B.held_out]}
         with open(a.held_out_library, 'w', encoding='utf-8', newline='\n') as f:
             json.dump(HL, f, indent=1)

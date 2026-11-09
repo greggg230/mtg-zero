@@ -208,6 +208,10 @@ fn basalt_monolith_makes_three_colorless_stays_tapped_and_untaps_for_three() {
     let z = g.card(0, "Test Zero", Zone::Hand);
     g.choose(Choice::Cast(z));
     g.choose(act(mono, 0));
+    // (Its mana covers the rest: `PASS`, the pool pays, ENGINE.md 100.4.3.)
+    if g.kind() == Some(DecisionKind::PayMana) {
+        g.choose(Choice::Pass);
+    }
     g.drive_until(at_priority);
     assert!(g.obj(mono).tapped);
     assert_eq!(g.player(0).pool.amt[engine::mana::C], 2, "the extra {{C}}{{C}} stay (106.4)");
@@ -281,6 +285,10 @@ fn manifold_key_untaps_another_artifact_or_makes_a_creature_unblockable() {
     assert!(!g.has_option(g.tgt(bf(&g, 0, "Island"))), "an artifact");
     g.choose(g.tgt(mono));
     g.choose(act(mono, 0)); // pay {1} with the Monolith ({C}{C} float)
+    // (Its mana covers the rest: `PASS`, the pool pays, ENGINE.md 100.4.3.)
+    if g.kind() == Some(DecisionKind::PayMana) {
+        g.choose(Choice::Pass);
+    }
     g.drive_until(at_priority);
     assert!(g.obj(mono).tapped && g.obj(key).tapped);
     settle(&mut g);

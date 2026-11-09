@@ -774,8 +774,15 @@ impl Game {
         if n == 0 || !matches!(self.objs[c.i()].zone, Zone::Battlefield | Zone::Exile) {
             return;
         }
+        // (Replacement effects that multiply counters: EoE W6.)
+        let n: Wide = if self.w6.seen & crate::eoe_w6::SEEN_W6_COUNTERS != 0 { self.w6_counters_put(c, n) } else { n as Wide };
         let before = self.counters_on(c, k);
-        let after = self.exact_count(before as Wide + n as Wide, "counters of one kind");
+        // (A sum past i128 is past any count either way: `exact_count`
+        // aborts, F7.)
+        let after = self.exact_count((before as Wide).saturating_add(n), "counters of one kind");
+        // (The counters put: exact unless the game just aborted, when
+        // `after` is clamped at or above `before`.)
+        let n: Count = after - before;
         match self.counters.iter_mut().find(|x| x.0 == c && x.1 == k) {
             Some(x) => x.2 = after,
             None => self.counters.push((c, k, after)),
@@ -787,7 +794,13 @@ impl Game {
         // "Whenever one or more +1/+1 counters are put on this" (CR 122.6).
         if k == Counter::P1P1 && self.seen & crate::game::SEEN_RARE_EVENTS != 0 && self.objs[c.i()].zone == Zone::Battlefield {
             let r = self.obj_ref(c);
-            self.event(crate::triggers::Event::obj(crate::db::EventKind::CountersAdded, r));
+            let mut ev = crate::triggers::Event::obj(crate::db::EventKind::CountersAdded, r);
+            // (Who put them and how many, when a trigger reads it: EoE W6.)
+            if self.w6.seen & crate::eoe_w6::SEEN_W6_PUTTER != 0 {
+                ev.b = crate::triggers::Subj::Player(self.w6_putter(c));
+                ev.amount = n;
+            }
+            self.event(ev);
         }
     }
 

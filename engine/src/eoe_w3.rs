@@ -471,6 +471,8 @@ impl Game {
             self.note(|g| format!("{} phases out", g.name(x)));
         }
         self.effects_changed();
+        // (Control effects worked out: EoE W6.)
+        self.w6_sync_control();
     }
 
     /// The static-ability fast paths count permanent `c` (`d` = 1) or not
@@ -518,6 +520,8 @@ impl Game {
             self.note(|g| format!("{} phases in", g.name(x)));
         }
         self.effects_changed();
+        // (Control effects worked out: EoE W6.)
+        self.w6_sync_control();
         // A daybound permanent that phased out by day exists again at night:
         // it transforms at once (CR 702.145c; nightbound by day, 702.145f).
         self.day_night_any_time();
@@ -562,10 +566,27 @@ impl Game {
     ///
     /// A "loses all abilities" effect on `c` with a later timestamp than a
     /// grant removes it, one with an earlier timestamp doesn't (613.7).
+    ///
+    /// First, a land's intrinsic mana abilities of the basic land types an
+    /// effect gave it (CR 305.6, the end of 305.7: "{T}: Add <its mana>",
+    /// `CardDb::basic_abilities`): each basic land type it has that its
+    /// abilities' definition doesn't print (a printed type's ability is
+    /// in the card's text; a Mountain by a "nonbasic lands are Mountains"
+    /// effect has its "{T}: Add {R}" in `moon_def`). The type comes in layer
+    /// 4, so any "loses all abilities" (layer 6) removes the ability.
     pub(crate) fn granted_activated(&self, c: CardIdx) -> Vec<Grant> {
         let mut out = Vec::new();
         if self.objs[c.i()].zone != crate::ids::Zone::Battlefield {
             return out;
+        }
+        if !self.db.basic_abilities.is_empty() && self.is_type(c, crate::db::types::LAND) && !self.lost_abilities(c) {
+            let printed = &self.abilities(c).subtypes;
+            let moon = self.moon_game && self.moon_on(c);
+            for &(sub, def) in &self.db.basic_abilities {
+                if self.has_subtype(c, sub) && !printed.contains(&sub) && !(moon && Some(sub) == self.db.mountain) {
+                    out.push(Grant { def, slot: 0, equipment: None });
+                }
+            }
         }
         let r = self.obj_ref(c);
         let loss = self.loss_ts(c);

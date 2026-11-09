@@ -194,7 +194,14 @@ impl Game {
                     if prev == p {
                         continue;
                     }
-                    self.change_control(c, p);
+                    if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
+                        // (Recorded with its duration: EoE W6.)
+                        if self.objs[c.i()].owner == p || self.perm_room(p) > 0 {
+                            self.w6_control_effect(c, p, true);
+                        }
+                    } else {
+                        self.change_control(c, p);
+                    }
                     if self.objs[c.i()].controller == p {
                         let r = self.obj_ref(c);
                         self.add_effect(Affected::Obj(r), crate::db::Mod::ControlFrom(prev), Until::EndOfTurn, p);
@@ -288,6 +295,12 @@ impl Game {
     /// (the latest effect first: an earlier one then sees what the later one
     /// left, CR 613.7). A later control change by another effect stays.
     pub(crate) fn return_control(&mut self, ended: Vec<(ObjRef, crate::ids::PlayerId, crate::ids::PlayerId)>) {
+        // (With an Aura's control effect in the game, the "until end of
+        // turn" effects are recorded and end together: EoE W6.)
+        if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
+            self.w6_end_eot_control();
+            return;
+        }
         for (r, to, prev) in ended {
             if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield && self.objs[r.idx.i()].controller == to {
                 self.set_control(r.idx, prev);

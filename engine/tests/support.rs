@@ -955,8 +955,25 @@ const SUPPORTED_EOE_W5: &[&str] = &[
     "Tannuk, Steadfast Second",
 ];
 
+/// EoE W6, the remaining cards (ENGINE.md 99.16).
+const SUPPORTED_EOE_W6: &[&str] = &[
+    "Contested War Zone",
+    "Loading Zone",
+    "Mm'menon, the Right Hand",
+    "Moonlit Meditation",
+    "Nesting Grounds",
+    "Plaza of Heroes",
+    "Power Depot",
+    "Starfield Vocalist",
+    "Sunken Citadel",
+    "Terrasymbiosis",
+    "Thespian's Stage",
+    "Tractor Beam",
+    "Unravel",
+];
+
 fn supported_eoe() -> Vec<String> {
-    let lists = [SUPPORTED_EOE_BASE, SUPPORTED_EOE_A, SUPPORTED_EOE_B, SUPPORTED_EOE_C, SUPPORTED_EOE_D, SUPPORTED_EOE_CROSS, SUPPORTED_EOE_IRFIX, SUPPORTED_EOE_MANA, SUPPORTED_EOE_COMBAT, SUPPORTED_EOE_EXILE, SUPPORTED_EOE_W5];
+    let lists = [SUPPORTED_EOE_BASE, SUPPORTED_EOE_A, SUPPORTED_EOE_B, SUPPORTED_EOE_C, SUPPORTED_EOE_D, SUPPORTED_EOE_CROSS, SUPPORTED_EOE_IRFIX, SUPPORTED_EOE_MANA, SUPPORTED_EOE_COMBAT, SUPPORTED_EOE_EXILE, SUPPORTED_EOE_W5, SUPPORTED_EOE_W6];
     let mut v: Vec<String> = lists.concat().into_iter().map(String::from).collect();
     let n = v.len();
     v.sort();

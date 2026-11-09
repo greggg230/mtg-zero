@@ -869,6 +869,11 @@ pub enum TrigPred {
     /// `Game::leaving_to` as the event's triggers are matched; ENGINE.md
     /// 99.11).
     LeftTo(u8),
+    /// A `CountersAdded` event whose counters the ability's controller put
+    /// (`true`) or another player put (`false`): "whenever you put one or
+    /// more +1/+1 counters on ..." (CR 122.6, 122.6a; EoE W6: the event
+    /// carries the player, `SEEN_W6_PUTTER`).
+    CountersPutBy(bool),
 }
 
 /// The zone a permanent left the battlefield for (`Game::leaving_to`,
@@ -1127,6 +1132,10 @@ pub enum ManaProd {
     /// this kind on the source (The Eternity Elevator; ENGINE.md 99.12):
     /// none without such counters.
     SameTypeCounters { mask: ManaMask, counter: Counter },
+    /// n (2 or more) mana of the colour chosen as the source entered (CR
+    /// 614.12, `Mark::ChosenColor`; "add two mana of the chosen color",
+    /// Sunken Citadel; EoE W6): none if no colour was chosen.
+    ChosenN(u8),
 }
 
 /// A mana ability's effect: the mana, plus damage its source deals to its
@@ -1168,6 +1177,11 @@ pub const SPEND_ELDRAZI_ABILITY: u8 = 16;
 pub const SPEND_LAND_ABILITY: u8 = 32;
 /// ... only to cast a spell from anywhere other than your hand.
 pub const SPEND_OUTSIDE_HAND: u8 = 64;
+/// Not a purpose: the rider "and that spell can't be countered" (Delighted
+/// Halfling) on mana in a pool (`Game::pool_restr`'s `only`), which stays
+/// with the mana (CR 106.6; docs/shortcuts.md N20, ENGINE.md 100.4).
+/// `eoe_w2::spendable` ignores it.
+pub const MANA_UNCOUNTERABLE: u8 = 128;
 
 /// Sacrifice n permanents you control matching the filter (`another`: not
 /// the ability's source).
@@ -1718,6 +1732,9 @@ pub struct CardDef {
     /// Its spell reads the colours of mana spent to cast it (converge): the
     /// payment records them (`Mark::Converge`).
     pub converge: bool,
+    /// An effect of the card gives a permanent a basic land type in addition
+    /// to its other types (CR 305.6-305.7: `CardDb::basic_abilities`).
+    pub gives_basic_land_type: bool,
     /// Sunburst (CR 702.44a): it enters with a +1/+1 counter (a creature) or
     /// this counter (charge) for each colour of mana spent to cast it.
     pub sunburst: Option<Counter>,
@@ -1839,6 +1856,8 @@ pub struct CardDef {
     pub toughness_stations: bool,
     /// The printing facts EoE workstream W3 adds (ENGINE.md 99.13).
     pub w3: crate::eoe_w3::W3Def,
+    /// The printing facts EoE workstream W6 adds (ENGINE.md 99.16).
+    pub w6: crate::eoe_w6::W6Def,
     /// "Nonbasic lands are Mountains" (CR 305.7, 613.1d: Magus of the Moon;
     /// `Game::moon_on`, ENGINE.md 99.12).
     pub nonbasic_lands_are_mountains: bool,
@@ -2041,6 +2060,8 @@ pub struct CardDb {
     /// (`CastingRules::hand_alt_grants`): castability looks for granters
     /// (ENGINE.md 99.15).
     pub(crate) hand_alt_grants: bool,
+    /// The table facts EoE workstream W6 adds (ENGINE.md 99.16).
+    pub(crate) w6: crate::eoe_w6::W6Db,
     /// The spending restrictions' purposes the table's mana can have
     /// (`SPEND_*`: the union of its mana abilities' `only`, granted ones
     /// included); payments work out only these (ENGINE.md 99.12).
@@ -2068,6 +2089,11 @@ pub struct CardDb {
     /// Add <mana>" (Gene Pollinator, `pay::POL_FOR`): improvise and convoke
     /// sources look for it (`Game::pol_split`).
     pub(crate) pollinator: bool,
+    /// The intrinsic mana abilities of the basic land types (CR 305.6:
+    /// "{T}: Add <its mana>"), (the subtype, a definition holding the
+    /// ability), when a card of the table gives a basic land type
+    /// (`CardDef::gives_basic_land_type`; `Game::granted_activated`).
+    pub(crate) basic_abilities: Vec<(u16, DefId)>,
     /// A card of the table reads a creature's controller as it last existed
     /// (`EoeW2::EventObjControllerGainsSource`): the game keeps it
     /// (`Game::lki_toughness`; ENGINE.md 99.12).
@@ -2260,6 +2286,16 @@ impl CardDb {
         db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
         db.watch_toughness = db.defs.iter().any(|d| d.toughness_assigns_damage || d.toughness_stations);
         db.hand_alt_grants = db.defs.iter().any(|d| !d.casting.hand_alt_grants.is_empty());
+        // (Cards W6 refuses for what else the table holds: out of the table,
+        // listed with their blockers.)
+        for (name, why) in crate::eoe_w6::table_refusals(&db.defs) {
+            if db.by_name.remove(&name).is_some() {
+                db.unsupported.insert(name, vec![why]);
+            }
+        }
+        // ("Except it has this ability": EoE W6; before the Mountain variants,
+        // which then cover the made definitions too.)
+        let kept = crate::eoe_w6::add_kept_ability_defs(&mut db.defs);
         crate::companion::check_table(&db);
         db.spend_kinds = crate::eoe_w2::spend_kinds(&db.defs);
         db.eldrazi = db.subtype_id("Eldrazi");
@@ -2291,6 +2327,16 @@ impl CardDb {
         db.watch_lands_entered = db.defs.iter().any(|d| d.etb_counter_per_land_entered);
         db.watch_lki_controller = db.defs.iter().any(crate::eoe_w2::reads_lki_controller);
         db.pollinator = db.defs.iter().any(|d| d.activated.iter().any(|a| a.mana().is_some() && a.cost.tap && a.cost.tap_untapped.is_some()));
+        if db.defs.iter().any(|d| d.gives_basic_land_type) {
+            for (name, t) in [("Plains", crate::mana::W), ("Island", crate::mana::U), ("Swamp", crate::mana::B), ("Mountain", crate::mana::R), ("Forest", crate::mana::G)] {
+                if let Some(sub) = db.subtype_id(name) {
+                    db.basic_abilities.push((sub, db.defs.len() as DefId));
+                    db.defs.push(crate::eoe_w2::basic_land_def(t));
+                }
+            }
+        }
+        db.w6 = crate::eoe_w6::W6Db::of(&db.defs);
+        db.w6.kept = kept;
         db
     }
 
@@ -2440,6 +2486,13 @@ impl CardDb {
     #[inline]
     pub fn def(&self, id: DefId) -> &CardDef {
         &self.defs[id as usize]
+    }
+
+    /// A definition to change, for the engine's unit tests that build a card
+    /// no lowering makes yet (`pay::tests`, ENGINE.md 100.4.5).
+    #[cfg(test)]
+    pub(crate) fn def_mut(&mut self, id: DefId) -> &mut CardDef {
+        &mut self.defs[id as usize]
     }
 
     pub fn ability(&self, r: AbilityRef) -> &AbilityDef {

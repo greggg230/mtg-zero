@@ -82,12 +82,16 @@ pub(crate) enum Task {
     ManaNow { src: Src, step: crate::decision::NumberStep },
     /// (`only`: the mana's spending restriction, kept in the pool, CR
     /// 106.6; ENGINE.md 99.12.)
-    ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]>, only: u8 },
+    ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]>, only: u8, page: crate::decision::Page },
+    /// Mana abilities activated with priority (`DecisionKind::ActivateMana`;
+    /// `card`: the permanent whose ability is asked next; `again`: one was
+    /// activated, so `PASS` ends it; ENGINE.md 100.4.3).
+    ActivateMana { p: PlayerId, card: Option<CardIdx>, again: bool },
     /// Devour land (CR 702.82a): the lands chosen so far, in battlefield
     /// order (ENGINE.md 99.12).
     Devour { card: CardIdx, picked: Vec<CardIdx> },
     /// The rest of a priority mana ability's cost (ENGINE.md 28).
-    ManaNowCosts { src: Src, sac: Option<CardIdx>, x: u32 },
+    ManaNowCosts { src: Src, sac: Option<CardIdx>, x: u32, taps: Vec<CardIdx> },
     // entering the battlefield (CR 614.12)
     /// (`page`: the page of a paged choice, ENGINE.md 100.2.)
     AsEnters { card: CardIdx, page: crate::decision::Page },
@@ -326,8 +330,9 @@ impl Game {
             Task::Divide { id, step } => self.divide(id, step),
             Task::ChooseModes { id } => self.choose_modes(id),
             Task::ManaNow { src, step } => self.mana_now(src, step),
-            Task::ManaNowPick { p, prods, only } => self.mana_now_pick(p, prods, only),
-            Task::ManaNowCosts { src, sac, x } => self.mana_now_costs(src, sac, x),
+            Task::ManaNowPick { p, prods, only, page } => self.mana_now_pick(p, prods, only, page),
+            Task::ActivateMana { p, card, again } => self.activate_mana(p, card, again),
+            Task::ManaNowCosts { src, sac, x, taps } => self.mana_now_costs(src, sac, x, taps),
             Task::AsEnters { card, page } => self.as_enters(card, page),
             Task::Devour { card, picked } => self.devour(card, picked),
             Task::Delve { id } => self.delve(id),
@@ -585,7 +590,7 @@ impl Game {
                             continue;
                         }
                     }
-                    if self.objs[c.i()].tapped && !self.abilities(c).no_untap {
+                    if self.objs[c.i()].tapped && !self.abilities(c).no_untap && !(self.w6.seen & crate::eoe_w6::SEEN_W6_NO_UNTAP != 0 && self.w6_no_untap(c)) {
                         self.untap(c);
                     }
                 }
@@ -846,6 +851,15 @@ impl Game {
                 } else {
                     self.begin_activate(p, c, slot);
                 }
+            }
+            Some(Choice::Yes) => {
+                // Activate mana abilities (CR 605.3a, 117.1d; ENGINE.md
+                // 100.4.3): an action, after which the player keeps
+                // priority (605.3b; the first asked offers no `PASS`, so an
+                // activation follows).
+                self.turn.passes = 0;
+                self.agenda.push(Task::Priority);
+                self.agenda.push(Task::ActivateMana { p, card: None, again: false });
             }
             Some(Choice::Companion) => {
                 // A special action (CR 116.2g); the player keeps priority

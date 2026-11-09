@@ -44,7 +44,15 @@ fn mixed(g: &MtgAz, h: &mut Heuristic, rng: &mut Rng) -> u16 {
     if rng.below(2) == 0 {
         h.choose(&g.g, &l)
     } else {
-        l[rng.below(l.len() as u32) as usize]
+        // (Mana abilities with priority, `YES` (ENGINE.md 100.4.3), one
+        // random pick in eight: uniform picks would float most of the mana
+        // and keep the games simple, below the states the gates need.)
+        let pick = l[rng.below(l.len() as u32) as usize];
+        if pick == engine::act::YES && g.g.kind() == Some(engine::DecisionKind::Priority) && l.len() > 1 && rng.below(8) != 0 {
+            l[0]
+        } else {
+            pick
+        }
     }
 }
 
@@ -371,7 +379,11 @@ fn encoding_slots_name_the_action_slots() {
     for g in states(scale(16), 6, 7) {
         let me = g.to_move().unwrap();
         let x = enc(&g, me);
-        assert!(x.iter().all(|v| v.is_finite() && v.abs() < 50.0));
+        // (Bounded by the encoding's bound: amounts are squashed, and mana
+        // floated with priority, ENGINE.md 100.4.3, reaches large X and
+        // event amounts in these games.)
+        let bad = x.iter().enumerate().find(|(_, v)| !(v.is_finite() && v.abs() <= encode::FEATURE_BOUND));
+        assert!(bad.is_none(), "{bad:?}");
         let l = legal(&g);
         // hand slots
         let hand = g.g.hand_sorted(me as u8);
@@ -656,7 +668,8 @@ fn minor_decisions_are_mana_payments() {
     let mut pay = 0;
     for g in states(scale(4), 3, 11) {
         let d = g.g.pending_decision().unwrap();
-        assert_eq!(g.minor_decision(), d.kind == engine::decision::DecisionKind::PayMana);
+        // (Which pool mana pays is minor too, ENGINE.md 34.5.)
+        assert_eq!(g.minor_decision(), matches!(d.kind, engine::decision::DecisionKind::PayMana | engine::decision::DecisionKind::PayPool));
         pay += g.minor_decision() as u32;
     }
     assert!(pay > 0, "no mana payment met");
@@ -845,7 +858,9 @@ fn opening_encodings_but_the_declaration_are_unchanged() {
         assert!(declared > 10 && bottoms > 10, "{name}: {declared} declared, {bottoms} bottoms");
         got.push((name, format!("{:016x}", h.0)));
     }
-    let want = [("cube", "6f267cb231046dd1"), ("bo3", "03550aad88c4a965"), ("delver", "cb3395e062b2fd8f")];
+    // (Re-recorded for mana abilities with priority, ENGINE.md 100.4.3: the
+    // openings' first priority decisions offer `YES`.)
+    let want = [("cube", "fe662b6d88338070"), ("bo3", "96e0eb0155f75cd4"), ("delver", "cb3395e062b2fd8f")];
     let want: Vec<(&str, String)> = want.iter().map(|&(n, h)| (n, h.to_string())).collect();
     assert_eq!(got, want, "the opening's encodings changed beyond the declared-mulligan flag");
 }
@@ -1278,13 +1293,19 @@ fn public_state_reaches_the_encoding() {
             "a land entered the battlefield this turn",
             "the other player learns a hand card past the 16th",
             "the turn goes on with another phase after its combat phases",
+            "a control effect ends at the end of the turn",
+            "a copy has an ability by its exception",
+            "a player created tokens this turn",
+            "the mana spent to cast a spell",
             "an artifact entered under a player's control this turn"
         ],
         "the gaps on the allowlist"
     );
     // (Workstream C's: where the turn goes on after combat phases added to another phase, and
-    // the hand cards past the 16 slots, ENGINE.md 100.3.)
-    assert_eq!(next, 18);
+    // the hand cards past the 16 slots, ENGINE.md 100.3; W2's two, ENGINE.md 99.12; EoE W6,
+    // ENGINE.md 99.16: the recorded control effects, a spell's mana spent, a player's tokens
+    // this turn, a copy's kept ability.)
+    assert_eq!(next, 22);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

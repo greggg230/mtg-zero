@@ -148,7 +148,10 @@ impl Scenario {
         let c = self.g.find_card(p, name, Zone::Battlefield).unwrap_or_else(|| panic!("no {name} of P{p}"));
         let have = self.g.counters_on(c, k);
         self.g.remove_counters(c, k, have);
+        // (Put by its controller: who puts counters, EoE W6.)
+        let actor = self.g.w6.actor.replace(self.g.objs[c.i()].controller);
         self.g.add_counters(c, k, n);
+        self.g.w6.actor = actor;
         self
     }
 
@@ -191,6 +194,17 @@ impl Scenario {
     /// red is Arena of Glory's).
     pub fn pool(mut self, p: PlayerId, amt: [u8; 6], haste: u8) -> Self {
         self.g.players[p as usize].pool = crate::mana::ManaPool { amt, art: 0, haste };
+        self
+    }
+
+    /// `n` more mana of type `ty` in `p`'s pool with the spending
+    /// restriction (and rider) `only` (`SPEND_*`, `MANA_UNCOUNTERABLE`; CR
+    /// 106.6): Mishra's Workshop's artifact-only {C} is the pool's `art`.
+    pub fn pool_restricted(mut self, p: PlayerId, ty: usize, only: u8, n: u8) -> Self {
+        self.g.players[p as usize].pool.amt[ty] += n;
+        let mut kinds: Vec<crate::eoe_w2::RKind> = self.g.pool_kinds(p).iter().copied().collect();
+        crate::eoe_w2::add_kind(&mut kinds, ty as u8, only, n);
+        self.g.set_pool_kinds(p, &kinds);
         self
     }
 
@@ -577,6 +591,17 @@ impl Game {
             v.push(self.w3.indirect.contains(&c) as u64);
         }
         v.push(u64::MAX);
+        // Recorded control-changing effects (public, CR 613.1b; EoE W6): in
+        // timestamp order, each by its permanent's place, its player and
+        // whether it ends with the turn (not the timestamps themselves).
+        // (And the turn each player last created tokens, public.)
+        v.extend(self.w6.tokens_turn.iter().map(|&t| t as u64));
+        let mut ctl = self.w6.control.clone();
+        ctl.sort_by_key(|x| x.ts);
+        for x in ctl {
+            v.extend([live_place(x.obj), x.to as u64, x.eot as u64, (x.ts == 0) as u64]);
+        }
+        v.push(u64::MAX);
         v.push(self.monarch.map_or(9, |p| p as u64));
         // The initiative and the dungeons (public, CR 725, 309).
         v.push(self.initiative.map_or(9, |p| p as u64));
@@ -808,6 +833,7 @@ impl Game {
         self.activations.hash(&mut h);
         self.marks.hash(&mut h);
         self.w3.hash(&mut h);
+        self.w6.hash(&mut h);
         self.face_down.hash(&mut h);
         self.face_down_ids.hash(&mut h);
         self.lki_power.hash(&mut h);

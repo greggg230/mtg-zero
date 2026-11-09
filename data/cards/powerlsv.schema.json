@@ -375,8 +375,8 @@
    "ModalChooseOne",
    "ModalChooseOneNotYetChosen",
    "Monstrosity",
+   "MoveCounterBetweenTargets",
    "MoveEachExiledWithSourceToOwnersGraveyard",
-   "MovePlusOneCounterBetweenPermanentsYouControl",
    "MoveSelfCountersToTargetCreatureYouControl",
    "MutinousMassacreEffect",
    "OathRevealUntilCreature",
@@ -766,6 +766,7 @@
    "ClassLevelReached",
    "Controlled",
    "ControlsAtMostNamed",
+   "CountersPutBy",
    "EnteredNotFromZones",
    "EnteredViaCast",
    "EnteringWithXAtLeast",
@@ -7068,6 +7069,25 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "CounterThenWhenItAttacksMonarch"
+  },
+  "CountersPutBy": {
+   "category": "TriggerPredicate",
+   "fields": [
+    {
+     "annotation": "_Controller",
+     "default": "you",
+     "name": "by",
+     "required": false,
+     "type": {
+      "enum": "_Controller",
+      "t": "enum"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.eoe_fidelity",
+   "qualname": "CountersPutBy"
   },
   "CreateAttackingTokenForEachOpponent": {
    "category": "Effect",
@@ -13602,19 +13622,36 @@
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "Monstrosity"
   },
+  "MoveCounterBetweenTargets": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.eoe_fidelity",
+   "qualname": "MoveCounterBetweenTargets"
+  },
   "MoveEachExiledWithSourceToOwnersGraveyard": {
    "category": "Effect",
    "fields": [],
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.exile",
    "qualname": "MoveEachExiledWithSourceToOwnersGraveyard"
-  },
-  "MovePlusOneCounterBetweenPermanentsYouControl": {
-   "category": "Effect",
-   "fields": [],
-   "kind": "dataclass",
-   "module": "mtg_bot.effects.generic.counters",
-   "qualname": "MovePlusOneCounterBetweenPermanentsYouControl"
   },
   "MoveSelfCountersToTargetCreatureYouControl": {
    "category": "Effect",
@@ -22162,6 +22199,10 @@
     {
      "name": "ABILITY_SOURCE",
      "value": "ability_source"
+    },
+    {
+     "name": "ENTERING_OBJ",
+     "value": "entering_obj"
     },
     {
      "name": "LEVEL",

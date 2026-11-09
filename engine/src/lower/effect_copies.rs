@@ -38,7 +38,7 @@ pub(crate) fn checked_cost(l: &mut Lowerer, what: &str, m: &cats::ManaCost, s: &
 
 /// Two target specifications, the second "another target" (CR 115.3: its
 /// `distinct_from` names the first); returns the two requirement indices.
-fn two_targets(l: &mut Lowerer, b: &mut Builder, specs: &[cats::TargetSpec], what: &str) -> Option<(u8, u8)> {
+pub(crate) fn two_targets(l: &mut Lowerer, b: &mut Builder, specs: &[cats::TargetSpec], what: &str) -> Option<(u8, u8)> {
     if specs.len() != 2 {
         l.unsupported(format!("{what}.targets(len {})", specs.len()));
         return None;

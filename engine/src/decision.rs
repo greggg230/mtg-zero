@@ -217,6 +217,14 @@ pub enum DecisionKind {
     /// The new count in the deck of the entry just chosen (`NUMBER` + n, n
     /// other than its count now). M8b.
     SideboardCount,
+    /// Activate mana abilities with priority (CR 605.3a, 117.1d), after
+    /// `YES` at priority: `MY_PERM` = a permanent with a mana ability its
+    /// controller may activate now (which of its abilities next,
+    /// `ChooseMode` `NUMBER` + k, when it has several), `HAND_ABILITY` = a
+    /// card's in hand (a Spirit Guide's); `PASS` = done, offered after the
+    /// first activation. The mana goes to the pool with its restrictions,
+    /// and the player keeps priority (605.3b). ENGINE.md 100.4.3.
+    ActivateMana,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }
@@ -258,6 +266,9 @@ pub enum Choice {
     /// A paged choice's "next page" ([`Game::ask_paged`], ENGINE.md 100.1):
     /// the page the asking task asks next.
     Page(Page),
+    /// The k-th of the asking task's list, a paged choice of any length (the
+    /// pools a payment can leave, `PayPool`; ENGINE.md 100.4).
+    Item(u32),
 }
 
 /// `Choice::Faces` bits: the front face is cast / played, the other face
@@ -1013,6 +1024,7 @@ impl Game {
             Choice::Cast(i) => format!("cast {}#{}", self.name(i), i.get()),
             Choice::Target(t) => format!("target {}", self.describe_target(t)),
             Choice::Trigger(k) => format!("trigger {k}"),
+            Choice::Item(k) => format!("option {}", k + 1),
             Choice::Ability(i, slot) => format!("activate {}#{} {slot:?}", self.name(i), i.get()),
             Choice::Def(d) => format!("a {}", self.db.def(d).name),
             Choice::CastFace(i) => format!("cast the other face of {}#{}", self.name(i), i.get()),
