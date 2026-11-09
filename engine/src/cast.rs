@@ -1187,7 +1187,7 @@ impl Game {
             }
             cl.members = cards;
             let prods = (0..6).filter(|&t| u.mask & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect();
-            cl.yld = Yield::Multi { prods, units: Some(vec![u, crate::mana::Unit::free(0)]) };
+            cl.yld = Yield::Multi { prods, units: Some(vec![u, crate::mana::Unit::free(0u8)]) };
         }
         for (cl, s) in kept {
             let mut m = crate::pay::Members::new();

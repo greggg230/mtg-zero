@@ -392,3 +392,48 @@ fn cr_601_2g_wizards_rockets_pays_while_a_land_could() {
     assert!(!g.obj(mountain).tapped, "the Mountain kept");
     assert_ne!(g.obj(rockets).zone, Zone::Battlefield, "the Rockets sacrificed");
 }
+
+// ---- 100.4.5 (B2): restrictions on needs (N21), granted mana abilities -------
+
+/// CR 106.6, 602.2b: Mishra's Workshop's {C} may be spent only to cast
+/// artifact spells, so it never pays Chromatic Star's {1} (activating an
+/// ability is not casting a spell), even while an artifact is being cast
+/// (docs/shortcuts.md N21: `mana::fits` read types only). With an Island to
+/// pay the Star, the {1}{U} artifact is castable.
+#[test]
+fn cr_106_6_workshop_mana_never_pays_a_mana_abilitys_cost() {
+    let g = scen().battlefield(0, &["Mishra's Workshop", "Chromatic Star"]).hand(0, &["Cryogen Relic"]).at(Step::Main1, 0).start();
+    let relic = g.card(0, "Cryogen Relic", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(relic)), "the Star's {{1}} has no mana to pay it: {:?}", g.options_desc());
+    let mut g = scen().battlefield(0, &["Mishra's Workshop", "Chromatic Star", "Island"]).hand(0, &["Cryogen Relic"]).at(Step::Main1, 0).start();
+    let relic = g.card(0, "Cryogen Relic", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(relic)), "the Island pays the Star: {:?}", g.options_desc());
+    g.choose(Choice::Cast(relic));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(relic).zone, Zone::Stack, "{}", log(&g));
+    assert!(g.obj(bf(&g, 0, "Island")).tapped && g.obj(bf(&g, 0, "Mishra's Workshop")).tapped);
+}
+
+/// CR 106.6, 605.3a: mana that may be spent only on abilities of lands (Sunken
+/// Citadel's, W2's Test Citadel) pays Cascading Cataracts' {5} while a spell
+/// is cast, and the Cataracts' five mana pays the spell (docs/shortcuts.md
+/// N21: a source whose mana the spell can't take was never offered).
+#[test]
+fn cr_106_6_land_ability_mana_pays_cataracts_while_a_spell_is_cast() {
+    let mut g = eoe_w2::scen()
+        .battlefield(0, &["Test Citadel", "Cascading Cataracts", "Island", "Island", "Island"])
+        .hand(0, &["Starbreach Whale"])
+        .at(Step::Main1, 0)
+        .start();
+    let whale = g.card(0, "Starbreach Whale", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(whale)), "{:?}", g.options_desc());
+    assert!(!g.can_pay(0, &cost("{6}")));
+    g.choose(Choice::Cast(whale));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(whale).zone, Zone::Stack, "{}", log(&g));
+    for name in ["Test Citadel", "Cascading Cataracts"] {
+        assert!(g.obj(bf(&g, 0, name)).tapped, "{name}: {}", log(&g));
+    }
+    assert_eq!(g.player(0).pool.amt, [0; 6]);
+    assert!(g.restricted_mana(0).is_empty(), "{:?}", g.restricted_mana(0));
+}

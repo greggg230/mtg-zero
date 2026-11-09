@@ -20424,6 +20424,76 @@ mana tested), floated restricted mana keeps its restriction (100.4.2), and produ
 are offered with priority (100.4.3); Sunken Citadel's land-ability mana for another land ability's
 mana cost needs N21, and Mm'menon's granted mana ability needs the payment sources above.
 
+#### 100.4.5 B2: the rest of mana and payment (branch `eoe-b2-pay`, from `eoe-b-pay` b666765)
+
+**Why.** 100.4.4's open list, in the brief's order: first what W6 waits for (N21, granted mana
+abilities as payment sources), then the rest of the audit's F4 (`docs/faithfulness_audit.md`
+5.4). Tests: `engine/tests/rules_payment_b.rs` (section "100.4.5") and the unit tests named below;
+each failed before its fix.
+
+##### N21: spending restrictions on needs
+
+A payment's units and needs carry tags (`mana::Tag`, a `u32`: the old `ManaMask` byte and, in
+bits 8-15, spending purposes). On a unit they are its restriction (CR 106.6: the `SPEND_*`
+purposes of its mana, 0 for none; `mana::FOR_COST` for a creature tapped for convoke, which pays
+the spell's mana only, 702.51a); on a need, what paying it is: the cost's pips carry the payment's
+`Keep::allow` and `FOR_COST`, a mana ability's own cost (`Class::need`) carries
+`Game::ability_allow` of its source. `mana::fits` matches types, `MADE` / `NOT_MADE` and
+`mana::spend_ok` (no restriction, or one of its purposes is the need's).
+
+* **The matching.** When a unit's restriction keeps it from some need of the payment
+  (`payable_iter`'s `kept_from`), the generic pips are needs too (any unit the cost's purposes
+  allow, a typeless improvise unit included) and the answer is exact: needs on one side, units on
+  the other, a matching that covers every need and every chosen unit. By the Mendelsohn-Dulmage
+  theorem one exists when a matching covers the needs and another covers the chosen units, so two
+  maximum flows over the grouped sides decide it (`mana::payable_restricted`, `max_flow`).
+  Otherwise the fast path is unchanged (every unit may pay every need it meets in type).
+* **Sources and pool mana a spell can't take.** A class (`cands`), a source offered in `PayMana`,
+  pool mana (`add_pool`, `vgroups`, `pool_rems`) whose restriction allows neither the cost's
+  purposes nor those of a need the payment has or may add (`pay::needs_allow` of the classes, the
+  picked needs) is left out, as before; otherwise it is in, with its purposes, and the matching
+  decides. `vgroups`' kinds grew the purposes (bits 8-15), and the part of the several-mana
+  sources' restricted mana that a mana ability with a mana cost made is kept apart
+  (`PayMana::extra_made_restr`).
+* **A several-mana source spent on a later one's cost.** `feasible_prods_where` rejected a
+  several-mana source whose mana the single-mana sources' completion couldn't spend while they
+  could pay without it; its mana may still pay the mana cost of a several-mana source picked after
+  it (Sunken Citadel's for Cascading Cataracts' {5}, Test Citadel's class first): that completion
+  is tried too.
+* **Converge** reads the restricted mana spent by kind, with its purposes.
+* **The single-way merge.** Single-mana ways of one card are one unit only when their purposes
+  are equal (a {C} and a land-ability {U} of one land are two ways).
+
+Tests: `cr_106_6_workshop_mana_never_pays_a_mana_abilitys_cost` (cube: Mishra's Workshop and
+Chromatic Star, Cryogen Relic not castable; with an Island it is, the Island paying the Star),
+`cr_106_6_land_ability_mana_pays_cataracts_while_a_spell_is_cast` (W2's Test Citadel, Cascading
+Cataracts and three Islands cast Starbreach Whale, {4}{U}), and `mana::tests::
+restricted_units_pay_only_their_purposes`.
+
+##### Granted mana abilities as payment sources
+
+`mana_classes` reads a permanent's own abilities and then those other permanents grant it
+(`Game::granted_activated`, CR 613.1f; at the places past its own, as `Game::activated_home`
+numbers them), when a permanent can grant one (`grants_activated_now`). Two granted sources are one
+class only when their grant is the same (`activated_home`). Every lookup of a source's ability in
+a payment or a mana ability's activation goes through `Game::src_ability` (its own, a Mountain's,
+or the granted one): `activate_mana_costs`, `finish_payment`, `mana_now`, `mana_now_costs`, the
+sacrifice-for-mana path. A source at a place past the permanent's four `ACTIVATE` ids is offered
+by the permanent's own id (`pay::by_perm`, `MY_PERM`, then which one: `ChooseMode`), as improvise
+and the Pollinators' sources are.
+
+Test: `pay::tests::cr_613_1f_a_granted_mana_ability_pays_a_cost` (a unit test: no supported card
+grants a mana ability yet, so the cube's Snapcaster Mage is given Mm'menon, the Right Hand's grant
+as W3's lowering builds Ragost's; two Crucibles of Worlds and a Mountain cast Faithless Looting by
+flashback, and the granted {U} pays nothing cast from the hand). `CardDb::def_mut` (test-only)
+builds it.
+
+**Digests.** Full `3667d9433f0f7a00` -> `02d4bccc94314d6d`, `DIGEST_ENCODING=0` `d0a7be8d70719c90`
+-> `856218d6b081056c`: 6 of the 2,500 games change. Two are N21 (with every restriction ignored
+they don't change: the cube's Mishra's Workshop or Delighted Halfling mana no longer pays a mana
+ability's cost), four the several-mana source spent on a later one's cost (with that completion
+not tried they don't change). `RULES_EPOCH` bumped.
+
 #### 100.8 Test fixtures after the rules changes (branch `eoe-t-fixtures`, from `eoe-b-pay` b666765)
 
 **Why.** On b666765 the engine gate's pytest step failed three tests. The engine was right (the user's
