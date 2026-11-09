@@ -708,7 +708,7 @@ impl Game {
         }
         let s = crate::db::SacCost { filter: filter.clone(), n: 1, another: false };
         let mana = self.alt_mana_via(card, p, from, k, &Default::default());
-        let keep = crate::pay::Keep { allow: self.spend_allow(card), ..Self::keep_for(card, rest, None) };
+        let keep = crate::pay::Keep { allow: self.spend_allow_from(card, from), ..Self::keep_for(card, rest, None) };
         self.sacrifice_candidates(p, card, &s)
             .into_iter()
             .filter(|&x| {
@@ -954,7 +954,7 @@ impl Game {
             match by {
                 Some((x, i)) => {
                     self.note(|g| format!("P{p} activates {} sacrificing {} for mana", g.name(x), g.name(c)));
-                    let ad = self.def_of(x).activated_def(crate::db::AbilitySlot::Activated(i));
+                    let ad = self.source_def(x).activated_def(crate::db::AbilitySlot::Activated(i));
                     if ad.cost.tap {
                         self.tap(x);
                     }

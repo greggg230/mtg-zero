@@ -92,6 +92,8 @@ permission) and a consumer can go wrong with it.
 | 82 | Entropic Battlecruiser (lane D) | target invented | the 1+ trigger "Whenever an opponent discards a card, they lose 3 life" as `TargetPlayerLosesLife` (a targeted effect) | the discarding player, not targeted (the event's player: `BindEventPlayer`, as the cube's "that player loses" triggers) | `cards/parser/effects.py` (`_THEY_LOSE_N_LIFE`, ~line 1718; the Python engine pre-wires the player as a target) | fixed (5362f5ed), supported | confirmed |
 | 100 | Fell Gravship (Edge of Eternities, cross-lane pass, ENGINE.md 99.8) | target invented | "mill three cards, then return a creature or Spacecraft card from your graveyard to your hand" as `Sequence [SelfMill 3, ReturnCreatureFromYourGraveyardToHand { creature, or_spacecraft }]`, a targeted class (its target chosen as the ability triggers, before the mill) | the card chosen as the ability resolves, after the mill, not targeted (a milled card may be returned; the mill happens with no such card in the graveyard) | `cards/parser/effects.py` (`_RETURN_CREATURE_OR_SPACECRAFT_GRAVEYARD_TO_HAND`, ~line 1911) | fixed (20bea9f4), supported | confirmed |
 | 101 | Desculpting Blast (Edge of Eternities, cross-lane pass, ENGINE.md 99.8) | value resolved late | `ReturnTargetCreatureToOwnersHand { allow_nonland_permanent, create_drone_if_was_attacking: true }`: the token by a flag, its printing looked up by name in Python (`TOKEN_PRINTINGS["Drone"]`) | the token's `CardPrinting` inline (a 1/1 colorless Drone artifact creature with flying and "This token can block only creatures with flying"), as the set's other Drone makers carry it (as entries 3, 65) | `cards/parser/effects.py` (the Desculpting Blast literal, ~line 4324), `effects/generic/bounce.py` (~line 177) | fixed (20bea9f4), supported | confirmed |
+| 160 | Plaza of Heroes (Edge of Eternities W2, ENGINE.md 99.12) | ability reshaped | its third mana ability as `AddManaToPool { produces: [any 1], spend_restriction: legendary_permanent_ability }` | "{T}: Add one mana of any color among legendary permanents you control" (no restriction: `AddOneManaOfColorAmongControlled { legendary: true }`) | `cards/parser/effects.py` (`_ADD_ANY_MANA_AMONG_GROUP`, `_ADD_MANA_AMONG_RESTRICTION`, ~line 1670) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 161 | Contested War Zone (Edge of Eternities W2, ENGINE.md 99.12) | event widened | `deals_combat_damage` with `And [Subject(IsCreature, source), Controlled(target)]` | "whenever a creature deals combat damage to **you**": also `Subject(IsPlayer, target)` | `cards/parser/land_builder.py` (the Contested War Zone builder, ~line 2897) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 180 | (fixed by W1, mtg-bot feature/eoe-ir-fixes 7c02e5c9, ENGINE.md 99.11) Sothera, the Supervoid (Edge of Eternities, W4, ENGINE.md 99.14) | instructions reordered | the end-step ability as `Sequence [ReanimateOneExiledWithSourceWithCounters { counter_amount: 2 }, SacrificeSelfPreservingExileLink]`: the return first, then the sacrifice | "sacrifice Sothera, then put a creature card exiled with it onto the battlefield ...": the sacrifice first (the cards exiled with it stay linked to it, CR 607.2a) | `effects/generic/exile.py::SacrificeSelfPreservingExileLink` (its docstring: "the engine-level fix is to invert the order at composition time"), the Sothera parser line | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 190 | Palantír of Orthanc (faithfulness audit N17, ENGINE.md 100.6) | Python switch | `Scry { amount: 2 }` with `bottom_choice` left at its default `false` ("keep all on top", the Python class's first-slice shortcut) | a scry (CR 701.18a: any number on the bottom): `bottom_choice: true` | `cards/parser/artifact_effects.py::_parse_palantir_body`; `effects/generic/library_lookat.py::Scry` (the default) | supported; the field is ignored, every scry lowers as 701.18a | confirmed |
 | 191 | Chain of Smog (docs/shortcuts.md 26.11.9, ENGINE.md 100.6) | Python switch | `TargetPlayerMayCopyThisSpell` with `needs_target_with_cards_in_hand` at its default `true` (the copy offered only while a player it could target has cards in hand) | no condition ("That player may copy this spell") | `effects/generic/spell_copies.py::TargetPlayerMayCopyThisSpell` (the default) | supported; the field is ignored, the copy is always offered | confirmed |
@@ -1069,7 +1071,49 @@ battlefield under your control with two additional +1/+1 counters on it."
   `SacrificeSelfPreservingExileLink` and the predicate `AnyPlayerControlsNoCreatures` are not
   lowered yet either (ENGINE.md 99.14).
 
-### R. Python engine switches the IR carries (the faithfulness audit's follow-ups, ENGINE.md 100.6)
+### R. Edge of Eternities W2, mana and lands (ENGINE.md 99.12)
+
+**160. Plaza of Heroes.** Oracle: "{T}: Add {C}. / {T}: Add one mana of any color. Spend this mana
+only to cast a legendary spell. / {T}: Add one mana of any color among legendary permanents you
+control. / {3}, {T}, Exile this land: Target legendary creature gains hexproof and indestructible
+until end of turn."
+
+* IR (mtg-bot main 2cb79f77): the third ability is `AddManaToPool { produces: [["any", 1]],
+  spend_restriction: "legendary_permanent_ability" }`: one mana of any colour that may be spent
+  only on abilities of legendary permanents.
+* Should be: one mana of a colour among the legendary permanents its controller controls, spent on
+  anything (no legendary permanent of a colour: none of that colour; none at all: no mana). The IR
+  already has the class: `AddOneManaOfColorAmongControlled { card_types: [], legendary: true }`
+  (lowered as Mox Amber's).
+* Source: `cards/parser/effects.py`, `_ADD_ANY_MANA_AMONG_GROUP` and `_ADD_MANA_AMONG_RESTRICTION`
+  (~line 1670): the phrase "add one mana of any color among <group> you control" is mapped to a
+  spending restriction ("legendary permanents" -> `legendary_permanent_ability`).
+* Fix: map the phrase to `AddOneManaOfColorAmongControlled` with the group's types and supertype.
+* Engine: blocked, `ir_defect(a mana ability's colours written as a spending restriction,
+  docs/ir_defects.md 160)` (`lower::IR_DEFECTS`); the restriction itself stays denied
+  (`AddManaToPool.spend_restriction(LegendaryPermanentAbility)`: no Oracle text says it). Everything
+  else of the card is in (the legendary-spell restriction, the colours among legendary permanents,
+  the protection): tested on a corrected copy (`cards_eoe_w2_lands.rs`, "Test Plaza").
+
+**161. Contested War Zone.** Oracle: "Whenever a creature deals combat damage to you, that
+creature's controller gains control of this land."
+
+* IR: the trigger is `event: deals_combat_damage` with `predicate: And [Subject(IsCreature, slot:
+  source), Controlled(subject: target)]`: the damaged object or player is controlled by (is) the
+  War Zone's controller.
+* Should be: the damaged one is the War Zone's controller, a player: `Subject(IsPlayer, slot:
+  target)` as well (as Starwinder's and Elegy Acolyte's "deals combat damage to a player"). As
+  written it also triggers when a creature deals combat damage to a creature or planeswalker its
+  controller controls (a blocker), and the land changes control.
+* Source: `cards/parser/land_builder.py`, the Contested War Zone builder (~line 2897:
+  `IsCreature(source) & Controlled(YOU, subject="target")`).
+* Fix: add `Subject(IsPlayer, slot: target)` to the predicate.
+* Engine: blocked, `ir_defect(combat damage to you widened to your permanents, docs/ir_defects.md
+  161)`. The rest is in (`EoeW2::EventObjControllerGainsSource`; "attacking creatures get +1/+0" as
+  the class's docstring says, every attacking creature): tested on a corrected copy ("Test War
+  Zone").
+
+### S. Python engine switches the IR carries (the faithfulness audit's follow-ups, ENGINE.md 100.6)
 
 Two effect classes carry a field that turns a Python engine shortcut on, and its default is on. Read
 literally, the IR then says something the Oracle text doesn't. The engine ignores both fields and

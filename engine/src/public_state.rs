@@ -163,6 +163,9 @@ pub fn fields() -> Vec<Field> {
         lki_attached: Derived "last known information (CR 608.2h)",
         lki_damage: Derived "last known information (CR 608.2h)",
         lki_toughness: Derived "last known information (CR 608.2h)",
+        pool_restr: Public "the part of a pool's mana with a spending restriction other than the Workshop's (CR 106.6; ENGINE.md 99.12)",
+        moon_game: Derived "fast path: a card of the game says nonbasic lands are Mountains",
+        lands_entered: Public "the lands that entered the battlefield under each player's control this turn (Bioengineered Future; ENGINE.md 99.12)",
         spell_lki: Derived "last known information (CR 608.2h)",
         entering_copy: Derived "transient: set and cleared around one move",
         entering_times: Derived "transient: set and cleared around one move",
@@ -838,6 +841,26 @@ pub fn perturbations() -> Vec<Perturbation> {
             let q = opp(a.g.turn.active);
             a.g.turn_controller = if a.g.turn_controller.is_some() { None } else { Some(q) };
             Some(format!("{:?}", a.g.turn_controller))
+        }),
+        // (Rare: mana in a pool at a sampled decision; draws nothing from
+        // the shared stream: the first player with mana, its first type.)
+        p!(rare "mana in a pool is restricted to activating abilities of lands", "Game.pool_restr", |a, _| {
+            let (p, t) = (0..2u8).find_map(|p| {
+                let pool = &a.g.players[p as usize].pool;
+                let held = |t: usize| a.g.pool_restr.iter().filter(|k| k.0 == p && k.1 as usize == t).map(|k| k.3).sum::<u8>() + if t == 5 { pool.art } else { 0 };
+                (0..6).find(|&t| pool.amt[t] > held(t)).map(|t| (p, t))
+            })?;
+            a.g.pool_restr.push((p, t as u8, crate::db::SPEND_LAND_ABILITY, 1));
+            Some(format!("P{p}: one mana of type {t}"))
+        }),
+        // (Draws nothing from the shared stream: the active player's count.)
+        p!("a land entered the battlefield this turn", "Game.lands_entered", |a, _| {
+            let (t, p) = (a.g.turn.number, a.g.turn.active as usize);
+            if a.g.lands_entered.0 != t {
+                a.g.lands_entered = (t, [0; 2]);
+            }
+            a.g.lands_entered.1[p] += 1;
+            Some(format!("P{p}: {}", a.g.lands_entered.1[p]))
         }),
         p!("void holds (a nonland permanent left the battlefield this turn)", "Game.void_turn", |a, _| {
             let t = a.g.turn.number;
@@ -1616,6 +1639,8 @@ pub fn limits() -> Vec<Limit> {
         l("a player will control the other's next turn", NextLayout, "a pending player-controlling effect (CR 722.1; The Dominion Bracelet, EoE W4, ENGINE.md 99.14) is game state the EoE port added after layout v5 froze: the next layout encodes it (a per-player flag)"),
         l("the active player is controlled this turn", NextLayout, "who controls the active player this turn (CR 722.1, 722.4; The Dominion Bracelet) is game state layout v5 has no float for: during a controlled turn the controller decides (to_move) the controlled player's decisions, whose action ids stay that player's, while the controller's encoding is its own seat's (its own hand, the controlled player's hand as known cards, CR 722.3); the next layout encodes it (a global, and the decision's seat)"),
         l("a spell's granted alternative cost came from another permanent", NextLayout, "which permanent's static ability gave the alternative cost a spell was cast for (Mark::AltGranted; Tannuk, Steadfast Second's warp, EoE W5, ENGINE.md 99.15) decides whether the spell still has that ability as it resolves (CR 400.7g, 608.3g: warp's exile); the stack item's alternative cost is encoded (stack::ALT, ALT_INDEX: past the card's own), its granter is not: the next layout encodes it (as a noted object's)"),
+        l("mana in a pool is restricted to activating abilities of lands", NextLayout, "a pool's mana with a spending restriction other than Mishra's Workshop's (g5::POOL_ART) is game state the EoE port added after layout v5 froze (Eldrazi Temple, Steelswarm Operator, Sunken Citadel, ...; ENGINE.md 99.12): the pool's amounts are encoded, the restriction is not; the next layout encodes it (per player, the restricted part of each type)"),
+        l("a land entered the battlefield this turn", NextLayout, "how many lands entered the battlefield under each player's control this turn (Game::lands_entered) is game state the EoE port added after layout v5 froze, read by one card, Bioengineered Future (ENGINE.md 99.12); LANDS_PLAYED counts lands played only: the next layout encodes it (per player, beside the turn's counts)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
         l("the other player learns a hand card past the 16th", NextLayout, "the hand block has 16 `HAND` slots (the viewer's hand sorted by definition, ENGINE.md 58): with more than 16 cards in hand (Tamiyo, Seasoned Scholar's emblem: no maximum hand size), which of the later ones the opponent knows is not encoded (their identities are, in the hand bag); the next layout encodes the known copies per identity (found by workstream C's gate positions, ENGINE.md 100.3)"),
         l("the turn goes on with another phase after its combat phases", NextLayout, "after combat phases an effect added after the beginning phase, the postcombat main phase or the ending phase (CR 500.8: \"after this phase, there is an additional combat phase\", resolved outside combat; workstream C, ENGINE.md 100.3), the turn goes on with the phase that came next there (Turn::after_combat), not the postcombat main phase; layout v5 encodes the additional combat phases to follow (g5::EXTRA_COMBATS), not where the turn resumes: the next layout encodes it (a global)"),

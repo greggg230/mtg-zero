@@ -736,7 +736,7 @@ fn task_code(t: &Task) -> usize {
         Task::CastOption { .. } => 13,
         Task::ChooseModes { .. } => 14,
         Task::ManaNowPick { .. } => 15,
-        Task::AsEnters { .. } | Task::MaySkipTurn { .. } | Task::MiracleReveal { .. } | Task::Opening { .. } => 16,
+        Task::AsEnters { .. } | Task::Devour { .. } | Task::MaySkipTurn { .. } | Task::MiracleReveal { .. } | Task::Opening { .. } => 16,
         Task::CastPay { .. } | Task::ActPay { .. } => 17,
         Task::AttackTarget { .. } => 19,
         Task::ChooseFace { .. } => 20,

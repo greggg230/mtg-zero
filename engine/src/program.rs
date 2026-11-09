@@ -1001,6 +1001,8 @@ pub enum Ext {
     EoeW4(crate::eoe_w4::EoeW4),
     /// Edge of Eternities W1, the IR-fixed cards (ENGINE.md 99.11).
     EoeW1(crate::eoe_w1::EoeW1),
+    /// Edge of Eternities W2, mana and lands (ENGINE.md 99.12).
+    EoeW2(crate::eoe_w2::EoeW2),
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -1085,6 +1087,9 @@ pub enum PileDest {
     Bottom,
     Graveyard,
     Hand,
+    /// Onto the battlefield tapped under the controller's control
+    /// (Famished Worldsire; ENGINE.md 99.12).
+    BattlefieldTapped,
 }
 
 /// `PileTo.max`: any number of the cards.
@@ -1307,6 +1312,7 @@ impl Op {
             Op::Ext(Ext::EoeW3(x)) => x.uses_event(),
             Op::Ext(Ext::EoeW4(x)) => x.uses_event(),
             Op::Ext(Ext::EoeW1(x)) => x.uses_event(),
+            Op::Ext(Ext::EoeW2(x)) => x.uses_event(),
             Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
             Op::DamagePlayer { amount, who: w } => amt(amount) || who(w),
             Op::Draw { who: w, n } | Op::GainLife { who: w, n } | Op::LoseLife { who: w, n } | Op::DiscardRandom { who: w, n } => {

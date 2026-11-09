@@ -269,7 +269,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.impending_cost", impending_cost);
         l.deny("CardPrinting.impending_cost_str", impending_cost_str);
         l.deny("CardPrinting.impending_count", impending_count);
-        l.deny("CardPrinting.devour_land_multiplier", devour_land_multiplier);
         l.deny("CardPrinting.attached_prevents_untap", attached_prevents_untap);
         l.deny("CardPrinting.attached_grants_control", attached_grants_control);
         l.deny("CardPrinting.attached_sets_base_pt", attached_sets_base_pt);
@@ -289,7 +288,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             super::effect_ext::counter_by_name(l, "charge")
         });
         l.deny("CardPrinting.enters_tapped_unless_any_player_life_at_most", enters_tapped_unless_any_player_life_at_most);
-        l.deny("CardPrinting.optional_copy_land_from_graveyard", optional_copy_land_from_graveyard);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_enchantment", additional_cost_sacrifice_creature_or_enchantment);
         let enters_x_counters = match enters_with_counters_from_x {
             None => false,
@@ -302,7 +300,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                 false
             }
         };
-        l.deny("CardPrinting.grants_etb_counter_per_land_entered_this_turn", grants_etb_counter_per_land_entered_this_turn);
         l.deny("CardPrinting.enters_with_plus_one_counter_if_creature_died_this_turn", enters_with_plus_one_counter_if_creature_died_this_turn);
         // ENGINE.md 99.11 (W1).
         l.deny("CardPrinting.enters_with_minus_one_counters_from_hand_cast", enters_with_minus_one_counters_from_hand_cast);
@@ -310,7 +307,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // spell's target; an Aura's other enchant types (on the battlefield)
         // below, with the card types (ENGINE.md 99.2).
         let aura_gy = *aura_enchant_type == enums::EnchantKind::CreatureCardInGraveyard;
-        l.deny("CardPrinting.nonbasic_lands_are_mountains", nonbasic_lands_are_mountains);
         l.deny("CardPrinting.grants_all_basic_land_types_to_lands_you_control", grants_all_basic_land_types_to_lands_you_control);
         l.deny("CardPrinting.grants_basic_land_type_to_all_lands", grants_basic_land_type_to_all_lands);
         l.deny("CardPrinting.all_permanents_gain_card_type", all_permanents_gain_card_type);
@@ -989,6 +985,22 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         },
         ty,
     );
+    // "You may have this land enter tapped as a copy of any land card in a
+    // graveyard, except it's a Cave in addition to its other types" (the
+    // flag's meaning, Echoing Deeps; CR 707.5, 707.9b; ENGINE.md 99.12).
+    let enters_as_copy = if *optional_copy_land_from_graveyard {
+        if enters_as_copy.is_some() || ty & types::LAND == 0 {
+            l.unsupported("CardPrinting.optional_copy_land_from_graveyard(not a land, or with another copy)");
+        }
+        let mut exc = crate::copies::Except::default();
+        let cave = l.subtype("Cave");
+        if let Some(k) = l.exc_subtype(cave) {
+            exc.add_subtype(k);
+        }
+        Some(Box::new(crate::db::EntersAsCopy { filter: Filter::Type(types::LAND), from_graveyard: true, exc, keep_name: false, exile_k: None, tapped: true }))
+    } else {
+        enters_as_copy
+    };
     // Additional costs paid a number of times (CR 601.2b): squad
     // (702.157a, creatures), offspring (702.175a, once), replicate
     // (702.56a, instants and sorceries: its "when you cast this spell, copy
@@ -1730,6 +1742,23 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if (named_spell_tax > 0 || named_ability_tax > 0) && !*chooses_card_name_as_enters || *chooses_card_name_as_enters && ty & types::PERMANENT == 0 {
         l.unsupported("CardPrinting.named_spell_cost_increase(without a name chosen as it enters)");
     }
+    // "Nonbasic lands are Mountains": a static ability of a permanent
+    // (ENGINE.md 99.12).
+    if *nonbasic_lands_are_mountains && ty & types::PERMANENT == 0 {
+        l.unsupported("CardPrinting.nonbasic_lands_are_mountains(not a permanent)");
+    }
+    // Devour land n (CR 702.82a): a creature's.
+    let devour_land = if *devour_land_multiplier != 0 {
+        if ty & types::CREATURE == 0 {
+            l.unsupported("CardPrinting.devour_land_multiplier(not a creature)");
+        }
+        l.int("CardPrinting.devour_land_multiplier", *devour_land_multiplier, 1, 9) as u8
+    } else {
+        0
+    };
+    if *grants_etb_counter_per_land_entered_this_turn && ty & types::PERMANENT == 0 {
+        l.unsupported("CardPrinting.grants_etb_counter_per_land_entered_this_turn(not a permanent)");
+    }
     if *grants_play_from_top_paying_life && !*grants_look_at_top_of_library || (*grants_look_at_top_of_library && ty & types::PERMANENT == 0) {
         l.unsupported("CardPrinting.grants_play_from_top_paying_life(without looking at the top card)");
     }
@@ -1786,6 +1815,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.unsupported("CardPrinting.attached_cant_be_blocked_by_more_than_one(not an Aura)");
     }
     let mut def = CardDef {
+        nonbasic_lands_are_mountains: *nonbasic_lands_are_mountains && ty & types::PERMANENT != 0,
+        etb_counter_per_land_entered: *grants_etb_counter_per_land_entered_this_turn && ty & types::PERMANENT != 0,
+        devour_land,
         counters_per_exiled,
         enters_counters_per,
         attached_max_one_blocker: *attached_cant_be_blocked_by_more_than_one,
@@ -2062,7 +2094,7 @@ fn lower_enters_as_copy(l: &mut Lowerer, x: EnterCopyFields, card_types: u16) ->
     } else {
         None
     };
-    Some(Box::new(crate::db::EntersAsCopy { filter: Filter::Type(bits), from_graveyard, exc, keep_name: x.keep_name, exile_k }))
+    Some(Box::new(crate::db::EntersAsCopy { filter: Filter::Type(bits), from_graveyard, exc, keep_name: x.keep_name, exile_k, tapped: false }))
 }
 
 /// Replicate's triggered ability (CR 702.56a): "When you cast this spell,
