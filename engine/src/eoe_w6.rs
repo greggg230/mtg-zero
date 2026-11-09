@@ -46,6 +46,9 @@ pub struct W6Def {
     /// on a card that also lets its controller look at that card any time
     /// (the lowering checks), so offering the cast hides nothing.
     pub cast_artifacts_from_top: bool,
+    /// "As this enters, choose a color" (CR 614.12; `Mark::ChosenColor`),
+    /// for its "mana of the chosen color" (Sunken Citadel).
+    pub chooses_color: bool,
 }
 
 /// The table facts W6 adds (`CardDb::w6`).
@@ -666,6 +669,27 @@ impl Game {
     /// the top of your library"?
     pub(crate) fn w6_top_cast_source(&self, p: crate::ids::PlayerId) -> bool {
         self.seen & crate::game::SEEN_TOP != 0 && self.permanents_of(p).any(|c| self.abilities(c).w6.cast_artifacts_from_top)
+    }
+
+    /// "As this enters, choose a color" (CR 614.12, before it is on the
+    /// battlefield as far as anything else is concerned: asked as its
+    /// entry's choices are, `Task::AsEnters`). Choice: `ChooseColor`,
+    /// `NUMBER` = W U B R G index.
+    pub(crate) fn w6_choose_color_as_enters(&mut self, card: crate::ids::CardIdx, p: crate::ids::PlayerId) {
+        use crate::decision::{act, Choice, DecisionKind, Opt};
+        let r = self.obj_ref(card);
+        match self.answer.take() {
+            Some(Choice::Number(k)) => {
+                self.marks.push((r, crate::game::Mark::ChosenColor(k)));
+                self.note(|_| format!("chosen colour: {}", crate::mana::LETTERS[k as usize]));
+                self.agenda.push(crate::flow::Task::AsEnters { card });
+            }
+            Some(other) => unreachable!("colour answer {other:?}"),
+            None => {
+                let opts = (0..5u16).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
+                self.ask(crate::flow::Task::AsEnters { card }, p, DecisionKind::ChooseColor, opts);
+            }
+        }
     }
 
     pub(crate) fn exec_eoe_w6(&mut self, f: &mut Frame, op: &W6) -> Flow {

@@ -1780,6 +1780,7 @@ impl Game {
             || self.def_of(idx).chooses_land_type
             || self.def_of(idx).chooses_parity
             || self.def_of(idx).chooses_name
+            || self.def_of(idx).w6.chooses_color
         {
             self.agenda.push(Task::AsEnters { card: idx });
         }

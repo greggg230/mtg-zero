@@ -51,3 +51,24 @@ fn cr_601_3_only_artifact_spells_from_your_own_library() {
         assert!(!g.has_option(Choice::Cast(t)) && !g.has_option(Choice::Play(t)), "{top_name} mine {mine} perm {perm}: {:?}", g.options_desc());
     }
 }
+
+// ---- "As this enters, choose a color" (Sunken Citadel's) ----------------------
+
+/// "As this land enters, choose a color. / {T}: Add one mana of the chosen
+/// color." (CR 614.12: chosen as it enters.) Played, its controller chooses
+/// red (`ChooseColor`); then it pays for a red spell ({R}: Plasma Bolt) and
+/// not for a white one (Honor, {W}).
+#[test]
+fn cr_614_12_choose_a_color_as_it_enters_and_make_that_mana() {
+    let mut g = scen().hand(0, &["W6 Chosen Land", "Plasma Bolt", "Honor"]).battlefield(1, &["Test Bear"]).at(Step::Main1, 0).start();
+    let land = g.card(0, "W6 Chosen Land", Zone::Hand);
+    g.choose(Choice::Play(land));
+    g.drive_until(|g| g.kind() == Some(engine::DecisionKind::ChooseColor) || at_priority(g));
+    assert_eq!(g.kind(), Some(engine::DecisionKind::ChooseColor), "{}", log(&g));
+    g.choose(Choice::Number(3)); // R
+    settle(&mut g);
+    let bolt = g.card(0, "Plasma Bolt", Zone::Hand);
+    let honor = g.card(0, "Honor", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(bolt)), "{:?}", g.options_desc());
+    assert!(!g.has_option(Choice::Cast(honor)), "{:?}", g.options_desc());
+}

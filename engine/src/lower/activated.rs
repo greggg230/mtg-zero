@@ -527,6 +527,20 @@ fn mask_of(l: &mut Lowerer, what: &str, syms: &[String]) -> ManaMask {
 
 /// `[(symbol, n)]` -> a production: one mana of a mask, or fixed amounts.
 fn lower_produces(l: &mut Lowerer, what: &str, produces: &[(String, i64)]) -> Option<ManaProd> {
+    // "Add one mana of the chosen color" (the colour chosen as it entered,
+    // `Mark::ChosenColor`; EoE W6: Sunken Citadel; the printing must choose
+    // one, checked with it).
+    if let [(sym, n)] = produces {
+        if sym == "chosen" {
+            return match n {
+                1 => Some(ManaProd::Chosen),
+                _ => {
+                    l.unsupported(format!("{what}(chosen, {n})"));
+                    None
+                }
+            };
+        }
+    }
     let mut fixed = [0u8; 6];
     let mut any = 0;
     for (sym, n) in produces {

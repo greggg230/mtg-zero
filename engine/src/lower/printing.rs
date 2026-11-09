@@ -359,7 +359,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.has_no_mana_cost", has_no_mana_cost);
         l.deny("CardPrinting.exile_activated_abilities", exile_activated_abilities);
         l.deny("CardPrinting.aura_enchant_subtype", aura_enchant_subtype);
-        l.deny("CardPrinting.enters_choosing_color", enters_choosing_color);
         l.deny("CardPrinting.enchanted_land_adds_chosen_color", enchanted_land_adds_chosen_color);
         l.deny("CardPrinting.additional_cost_discard_x", additional_cost_discard_x);
         l.deny("CardPrinting.optional_sacrifice_any_number", optional_sacrifice_any_number);
@@ -1962,6 +1961,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             // "You may cast artifact spells from the top of your library"
             // (EoE W6; with "you may look at the top card ... any time").
             cast_artifacts_from_top: *grants_cast_artifact_from_top_of_library,
+            // "As this enters, choose a color" (EoE W6).
+            chooses_color: *enters_choosing_color,
             ..Default::default()
         },
     };
@@ -1969,6 +1970,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     def.w3.seen = crate::eoe_w3::seen_of(&def);
     def.w3.mana_spent = def.w3.counters_mana_spent || crate::eoe_w3::reads_mana_spent(&def);
     crate::eoe_w6::finish_def(&mut def);
+    // "Mana of the chosen color": a colour chosen as it enters (or, for a
+    // land, a basic land type, Multiversal Passage).
+    let makes_chosen = def.activated.iter().any(|a| a.mana().is_some_and(|m| m.prod == crate::db::ManaProd::Chosen));
+    if makes_chosen && !(def.w6.chooses_color || def.chooses_land_type) || def.w6.chooses_color && (def.chooses_land_type || def.paints || !def.is(types::PERMANENT)) {
+        l.unsupported("CardPrinting.enters_choosing_color(with its mana of the chosen color)");
+    }
     if def.w6.cast_artifacts_from_top && !(def.look_top && def.is(types::PERMANENT)) {
         l.unsupported("CardPrinting.grants_cast_artifact_from_top_of_library(without looking at the top card, or not a permanent)");
     }

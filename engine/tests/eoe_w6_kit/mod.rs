@@ -34,6 +34,11 @@ pub fn w6_cards() -> Vec<card_ir::Card> {
         card("W6 Top Caster", json!({"card_types": ["Creature"], "subtypes": ["Test"], "power": 1, "toughness": 1,
             "mana_cost": {"$t": "ManaCost", "colored": [["U", 1]]}, "mana_cost_str": "{U}",
             "grants_look_at_top_of_library": true, "grants_cast_artifact_from_top_of_library": true})),
+        // "As this land enters, choose a color. / {T}: Add one mana of the
+        // chosen color." (Sunken Citadel's first two lines.)
+        card("W6 Chosen Land", json!({"card_types": ["Land"], "enters_choosing_color": true,
+            "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_self": true},
+                "effect": {"$t": "AddManaToPool", "produces": [["chosen", 1]]}, "is_mana_ability": true}]})),
     ];
     v.into_iter().map(|v| serde_json::from_value(v).expect("W6 test card IR")).collect()
 }
