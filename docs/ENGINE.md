@@ -20876,4 +20876,24 @@ with Cascading Cataracts), `cards_eoe_w6_granted.rs` 3 (Mm'menon's grant: a paym
 spell from the library and not the hand, only your artifacts and only with Mm'menon, floating with
 priority).
 
-**Results** (the final head, normal release profile): see the commit that records them.
+**Merges.** `eoe-base` merged as it moved: A0's choice ranges (c769cc2), C (9c67a75), A with the loose
+ends and W2 through B (5f0b07e), B's payment work with T's fixtures (b5e94ff), B2's N21 and granted
+payment sources (`eoe-b2-pay` 755fe0b, before `eoe-base` had it: Mm'menon waited for it), then B2's
+Cascading Cataracts fix, the canary re-stamp and N22 (e164d69). The digests are `eoe-base`'s at each
+step: W6 changes no cube game (its paths are behind `SEEN_W6_*` bits and card flags no cube card has).
+
+**Results** (bc0459a + this section, normal release profile, `E:/cargo-target/mtg-zero/eoe-w6-rest`).
+The engine and `card_ir` suites: 2,108 passed, 0 failed, 20 ignored (145 test binaries; W6's 35 in
+five). Digests unchanged from `eoe-base` e164d69: full `02d4bccc94314d6d`, `DIGEST_ENCODING=0`
+`856218d6b081056c`. Support: EoE 319 / 320, the cube 546 / 546. `FUZZ_POOL=eoe FUZZ_GAMES=20000`
+passed on every seed, none excluded (20,000 games in ten chunks, wins 7,119 / 7,115, 5,766 draws,
+mean 45.7 turns, 787.5 decisions; the matches and replays passed); the default `FUZZ_GAMES=20000`
+passed (20,000 games, wins 9,846 / 10,030, 124 draws, mean 31.8 turns, 438.7 decisions; 1,000
+matches, replays). `python -m pytest tests` 206 passed, 1 skipped; `python -m pytest tools/codegen`
+2 passed. Before the last merges the EoE fuzz found, outside W6 (reported, routed): B2's
+Cascading Cataracts castability against its payment after N21 (ten seeds, fixed in e164d69), B's
+payment search slowing to seconds a decision (Cataracts, Gene Pollinator, six manlands: fixed in
+b666765), Gene Pollinator's castability (fixed in e164d69), and an Aura that Anticausal Vestige puts
+onto the battlefield from the hand staying there while `Task::EnterAura` asks, so `determinize`
+re-deals it and the refreshed question has no option (hidden.rs `refresh_pending`; workstream D's
+final round: the seed now plays another game, the bug is still there).
