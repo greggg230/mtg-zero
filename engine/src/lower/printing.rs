@@ -2008,7 +2008,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     crate::eoe_w6::finish_def(&mut def);
     // "Mana of the chosen color": a colour chosen as it enters (or, for a
     // land, a basic land type, Multiversal Passage).
-    let makes_chosen = def.activated.iter().any(|a| a.mana().is_some_and(|m| m.prod == crate::db::ManaProd::Chosen));
+    let makes_chosen = def.activated.iter().any(|a| a.mana().is_some_and(|m| matches!(m.prod, crate::db::ManaProd::Chosen | crate::db::ManaProd::ChosenN(_))));
     if makes_chosen && !(def.w6.chooses_color || def.chooses_land_type) || def.w6.chooses_color && (def.chooses_land_type || def.paints || !def.is(types::PERMANENT)) {
         l.unsupported("CardPrinting.enters_choosing_color(with its mana of the chosen color)");
     }

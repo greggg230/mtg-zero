@@ -553,6 +553,7 @@ fn lower_produces(l: &mut Lowerer, what: &str, produces: &[(String, i64)]) -> Op
         if sym == "chosen" {
             return match n {
                 1 => Some(ManaProd::Chosen),
+                2..=20 => Some(ManaProd::ChosenN(*n as u8)),
                 _ => {
                     l.unsupported(format!("{what}(chosen, {n})"));
                     None
@@ -879,7 +880,7 @@ pub(crate) fn prod_mask(p: &ManaProd) -> ManaMask {
         ManaProd::ColorAmong(_) => COLORS,
         ManaProd::IfElse { then, els, .. } => (0..6).filter(|&i| then[i] + els[i] > 0).fold(0, |m, i| m | (1 << i)),
         ManaProd::OneOf(v) => v.iter().flat_map(|f| (0..6).filter(move |&i| f[i] > 0)).fold(0, |m, i| m | (1 << i)),
-        ManaProd::Linked | ManaProd::Chosen => COLORS,
+        ManaProd::Linked | ManaProd::Chosen | ManaProd::ChosenN(_) => COLORS,
         ManaProd::IfCounter { then, els, .. } => then | els,
         ManaProd::SacrificedLand | ManaProd::LandsCouldProduce => 0b11_1111,
     }

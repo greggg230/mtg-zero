@@ -160,3 +160,52 @@ fn cr_510_2_contested_war_zone_goes_to_the_damaging_creatures_controller() {
         assert!(!g.obj(zone).tapped);
     }
 }
+
+// ---- Sunken Citadel (docs/ir_defects.md 50) -----------------------------------
+
+/// P0 plays Sunken Citadel choosing green, then it is P0's next turn (it
+/// untapped).
+fn citadel(bf0: &[&str], hand: &[&str]) -> Game {
+    let mut h = vec!["Sunken Citadel"];
+    h.extend_from_slice(hand);
+    let mut g = scen().battlefield(0, bf0).hand(0, &h).at(Step::Main1, 0).start();
+    let c = g.card(0, "Sunken Citadel", Zone::Hand);
+    g.choose(Choice::Play(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseColor) || at_priority(g));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseColor), "as it enters, choose a color\n{}", log(&g));
+    g.choose(Choice::Number(4)); // G
+    settle(&mut g);
+    assert!(g.obj(c).tapped, "enters tapped");
+    quiet_until(&mut g, main1_of(1));
+    quiet_until(&mut g, main1_of(0));
+    g
+}
+
+/// Sunken Citadel: "This land enters tapped. As it enters, choose a color. /
+/// {T}: Add one mana of the chosen color. / {T}: Add two mana of the chosen
+/// color. Spend this mana only to activate abilities of land sources." Its
+/// one green mana casts nothing that costs two (Test Bear, {1}{G}): the two
+/// green are only for land abilities (CR 106.6); they pay Endless Sands'
+/// "{2}, {T}: Exile target creature you control" ("land sources", the
+/// ruling).
+#[test]
+fn cr_106_6_sunken_citadel_makes_the_chosen_colour_and_land_ability_mana() {
+    let g = citadel(&[], &["Test Bear", "Honor"]);
+    let bear = g.card(0, "Test Bear", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(bear)), "two mana only for land abilities: {:?}", g.options_desc());
+    let mut g = citadel(&["Endless Sands", "Test Bear"], &[]);
+    let sands = bf(&g, 0, "Endless Sands");
+    let bear = bf(&g, 0, "Test Bear");
+    let ex = g
+        .pending_decision()
+        .unwrap()
+        .options
+        .iter()
+        .map(|o| o.choice)
+        .find(|c| matches!(c, Choice::Ability(x, engine::db::AbilitySlot::Activated(_)) if *x == sands))
+        .unwrap_or_else(|| panic!("Endless Sands' ability, paid by the Citadel: {:?}", g.options_desc()));
+    start_with(&mut g, ex, |g| pick(g, &[g.tgt(bear)]));
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Exile, "{}", log(&g));
+    assert!(g.obj(bf(&g, 0, "Sunken Citadel")).tapped);
+}

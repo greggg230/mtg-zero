@@ -456,6 +456,10 @@ pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<Ca
         ManaProd::IfElse { cond, then, els } => vec![if g.cond_holds(cond, p) { *then } else { *els }],
         ManaProd::SameType { mask, n } => (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| one(t, *n)).collect(),
         // (Saturating: at most 255 of a type, shortcuts.md 46.3.)
+        ManaProd::ChosenN(n) => {
+            let m = src.map_or(0, |c| g.chosen_land_color(c));
+            (0..5).filter(|&t| m & (1 << t) != 0).map(|t| one(t, *n)).collect()
+        }
         ManaProd::SameTypeCounters { mask, counter } => match src.map_or(0, |c| g.counters_on(c, *counter)).min(255) as u8 {
             0 => Vec::new(),
             n => (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| one(t, n)).collect(),
@@ -749,7 +753,7 @@ impl Game {
                     cl.def == def && cl.members[0].slot == src.slot && cl.sac_self == sac_self && (!bonuses || extra_of(cl.members[0].card) == extra)
                 };
                 let per_source =
-                    matches!(m.prod, ManaProd::Linked | ManaProd::Chosen | ManaProd::IfCounter { .. } | ManaProd::SameTypeCounters { .. }) || reuse > 1;
+                    matches!(m.prod, ManaProd::Linked | ManaProd::Chosen | ManaProd::ChosenN(_) | ManaProd::IfCounter { .. } | ManaProd::SameTypeCounters { .. }) || reuse > 1;
                 if let Some(cl) = out.iter_mut().find(same).filter(|_| !per_source) {
                     cl.members.push(src);
                     continue;

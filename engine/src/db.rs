@@ -1118,6 +1118,10 @@ pub enum ManaProd {
     /// this kind on the source (The Eternity Elevator; ENGINE.md 99.12):
     /// none without such counters.
     SameTypeCounters { mask: ManaMask, counter: Counter },
+    /// n (2 or more) mana of the colour chosen as the source entered (CR
+    /// 614.12, `Mark::ChosenColor`; "add two mana of the chosen color",
+    /// Sunken Citadel; EoE W6): none if no colour was chosen.
+    ChosenN(u8),
 }
 
 /// A mana ability's effect: the mana, plus damage its source deals to its

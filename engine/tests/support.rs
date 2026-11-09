@@ -964,6 +964,7 @@ const SUPPORTED_EOE_W6: &[&str] = &[
     "Plaza of Heroes",
     "Power Depot",
     "Starfield Vocalist",
+    "Sunken Citadel",
     "Terrasymbiosis",
     "Thespian's Stage",
     "Tractor Beam",
