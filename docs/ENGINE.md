@@ -21387,3 +21387,28 @@ of 60 spots, with each):
 decision for the colours a payment's choices spend, inside B4's payment code (`pay.rs`
 `record_converge`, `pick_multi`, the hybrid/Phyrexian upper bound), so it waits for B4 to land in
 `eoe-base`.
+
+**Results** (normal release profile, `E:/cargo-target/mtg-zero/eoe-d-encoding`, on a desktop shared
+with other workstreams' fuzzes). The full engine suite on af8c555: **2,146 passed, 0 failed, 15
+ignored** (`az` 43, `hidden` 16; on the merge before fa6c97c: 2,138 passed and the base's
+`cards_eoe_w6_granted` failure). The three digests on 1e052a2: full 408ee16a94d0ffec,
+`DIGEST_ENCODING=0` 4a2a227cb45204cd, `DIGEST_ENCODING=v5` 6fa4fab18b624326. pytest: 208 passed, 1
+skipped. The default `FUZZ_GAMES=20000` passed on af8c555 (20,000 games, wins 9,819 / 10,057, 124
+draws, mean 31.8 turns, 438.1 decisions; 1,000 matches; 1,254 s).
+
+`FUZZ_POOL=eoe FUZZ_GAMES=20000` **did not finish** (stopped after 75 minutes; at 100.5 the whole run
+took 1,711 s). Seed 1024 never ends: in turn 55's upkeep random play activates Lavaclaw Reaches'
+"{X}: +X/+0" with X = 0 and Wandering Fumarole's "{0}: switch" thousands of times. Each activation
+adds a stack item, so every state is new and F7's loop rule (100.7: an action is withheld only at a
+state where it was taken) never applies; the stack is a random walk that rarely empties. The
+replay test (`same_seed_and_actions_replay_identically`, seeds 1000..1029) plays the same game. Ten
+chunks of 2,000 seeds with seed 1024 skipped (`FUZZ_SKIP=1024`, run side by side) each ran past 40
+minutes, so other seeds do the same. This is F7's (100.7) rule on the base, not this branch's:
+seeds 1000..1023 and 1025..1029 each finish in at most 3 s here, and EoE seed 10071 in 12 s.
+
+The gates on 1e052a2 (`--no-mac`): `python tools/gate.py encoding --expect-digest 408ee16a94d0ffec
+--expect-digest0 4a2a227cb45204cd --checkpoint E:/mtg-zero-scratch/eoe-d2-widen/fork-delver2/models/iter_0000.pt`:
+build, both digests, `--test az` (43), the checkpoint load (h2h, 8 games, 0 unfinished) and pytest
+(208 passed, 1 skipped) passed: `GATE PASSED encoding 1e052a27ccf3 in 348s` (bccd4f0 too, in
+451 s). `python tools/gate.py engine --tested-sha 1e052a2 ...`: build, both digests, `az` 43,
+`limits` 10, `hidden` 16, pytest, the search smoke: `GATE PASSED engine 1e052a27ccf3 in 778s`.
