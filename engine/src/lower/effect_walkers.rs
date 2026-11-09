@@ -343,7 +343,7 @@ pub(crate) fn lower_effect_walkers(l: &mut Lowerer, b: &mut Builder, e: &cats::E
                 b.op(Op::Ext(Ext::PutCounters { on: On::Target(t), counter, n: Amount::Fixed(n) }));
             }
             b.op(Op::Untap { tgt: t });
-            let subs = subtypes.iter().map(|s| l.subtype(s)).collect();
+            let subs = subtypes.iter().filter_map(|s| l.given_subtype("subtypes", s)).collect();
             let mut mods = vec![Mod::Types { add: types::CREATURE, subtypes: subs, replace: false }];
             match base_pt[..] {
                 [p, q] => mods.push(Mod::SetPt(
@@ -395,7 +395,7 @@ pub(crate) fn lower_effect_walkers(l: &mut Lowerer, b: &mut Builder, e: &cats::E
             // duration). CR 205.1a: its card types become exactly creature,
             // its creature types exactly these.
             let Some(t) = lower_targets(l, b, targets, "TargetBecomesCreatureIndefinitely") else { return true };
-            let subtypes = creature_subtypes.iter().map(|s| l.subtype(s)).collect();
+            let subtypes = creature_subtypes.iter().filter_map(|s| l.given_subtype("TargetBecomesCreatureIndefinitely.creature_subtypes", s)).collect();
             let mut mods = vec![Mod::BecomeTypes { types: types::CREATURE, subtypes }];
             if !colors.is_empty() {
                 let mut m = 0;

@@ -1264,11 +1264,15 @@ fn public_state_reaches_the_encoding() {
             "a player will control the other's next turn",
             "the active player is controlled this turn",
             "a spell's granted alternative cost came from another permanent",
+            "the other player learns a hand card past the 16th",
+            "the turn goes on with another phase after its combat phases",
             "an artifact entered under a player's control this turn"
         ],
         "the gaps on the allowlist"
     );
-    assert_eq!(next, 14);
+    // (Workstream C's: where the turn goes on after combat phases added to another phase, and
+    // the hand cards past the 16 slots, ENGINE.md 100.3.)
+    assert_eq!(next, 16);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

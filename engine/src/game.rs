@@ -409,8 +409,17 @@ pub struct Turn {
     pub normal: PlayerId,
     /// Another cleanup step follows this one (CR 514.3a).
     pub cleanup_again: bool,
-    /// Additional combat phases to follow this one (CR 500.8).
+    /// Additional combat phases directly after the current phase (CR
+    /// 500.8: "after this phase", whatever phase it is; a combat phase's
+    /// own and those after it, one after another).
     pub extra_combats: u8,
+    /// Where the turn goes on after a combat phase with no additional one
+    /// to follow: the postcombat main phase (`Main2`), or, after combat
+    /// phases added to another phase (500.8), the phase that came next
+    /// there: the precombat main phase (`Main1`, after the beginning
+    /// phase), the ending phase (`End`, after the postcombat main phase),
+    /// or the next turn (`Untap`, after the ending phase).
+    pub after_combat: Step,
     /// The player who chose who takes the first turn (CR 103.1).
     pub chooser: PlayerId,
 }
@@ -446,6 +455,29 @@ pub struct Link {
     /// "Until an opponent of this player becomes the monarch" (Palace
     /// Jailer): then it returns to the battlefield.
     pub until_monarch: Option<PlayerId>,
+}
+
+/// What a draw instruction did (`Game::draw_instruction`).
+pub(crate) enum Drew {
+    Done,
+    /// It stopped after a card its owner is asked about revealing for
+    /// miracle (CR 702.94a), with this many draws left.
+    Miracle(CardIdx, u32),
+    /// It waits for a question it queued (`Task::DrawOrder`).
+    Asked,
+}
+
+/// The `db::left_to` bits of a 616.1 choice's results (`Dest::Choose`: bit
+/// 1 the library, 2 exile, 3 exile with a void counter).
+fn choice_left_to(results: u8) -> u8 {
+    let mut m = 0;
+    if results & 0b0010 != 0 {
+        m |= crate::db::left_to::LIBRARY;
+    }
+    if results & 0b1_1100 != 0 {
+        m |= crate::db::left_to::EXILE;
+    }
+    m
 }
 
 /// A triggered ability a player has for a while (until their next turn, or
@@ -487,8 +519,12 @@ pub(crate) enum Dest {
     Library,
     Exile,
     Void(crate::db::Counter),
+    /// Exiled on an adventure (CR 715.4): its controller may cast the card
+    /// (not as an Adventure) while it stays exiled.
+    Adventure,
     /// Several results (bits: 1 library, 2 exile, 3 exile with a void
-    /// counter) and the void counter's kind: the controller chooses.
+    /// counter, 4 on an adventure) and the void counter's kind: the
+    /// controller chooses.
     Choose(u8, Option<crate::db::Counter>),
 }
 
@@ -633,6 +669,23 @@ pub struct Game {
     /// matched goes to (`db::left_to` bits, `TrigPred::LeftTo`: "dies or is
     /// put into exile"; set and cleared around that event, ENGINE.md 99.11).
     pub(crate) leaving_to: u8,
+    /// While the leave event of a card whose destination waits for a 616.1
+    /// choice (`Task::ChooseReplacement`) is matched: the destinations it
+    /// may still go to (`db::left_to` bits), and the card; 0 otherwise.
+    pub(crate) leaving_choice: u8,
+    pub(crate) leaving_card: CardIdx,
+    /// The resolving spell, cast as an Adventure, is being put into its
+    /// owner's graveyard (CR 715.4's replacement applies: `replaced_dest`).
+    pub(crate) resolving_adventure: bool,
+    /// The event group (`ev_seq`) of the latest object given a timestamp
+    /// (entering, becoming attached) and the first timestamp given in it:
+    /// objects given one in the same event got them simultaneously, and the
+    /// active player orders them (CR 613.7m, `Task::OrderTimestamps`).
+    pub(crate) ts_group: (u32, u32),
+    /// Triggered abilities that trigger only if a pending 616.1 choice
+    /// sends its card to one of their zones (`triggers::Held`), released
+    /// with the answer (`release_held`).
+    pub(crate) held: Vec<crate::triggers::Held>,
     /// Counters the permanent being put onto the battlefield enters with
     /// because of the effect that puts it there ("with a corpse counter on
     /// it", persist; CR 614.1c, 122.6): on it before its `Enters` event.
@@ -658,9 +711,6 @@ pub struct Game {
     /// The card whose miracle trigger is casting it (CR 702.94a): cast for
     /// its miracle cost (`CastFrom::Miracle`).
     pub(crate) miracle_cast: Option<CardIdx>,
-    /// A first card drawn this turn whose owner may reveal it for miracle
-    /// (asked before the next priority, `sba_check`).
-    pub(crate) miracle_check: Option<(PlayerId, CardIdx)>,
     /// ... with this face up (a back face: "transformed", CR 712.14a; an
     /// MDFC's land face played, 712.12) instead of its front (712.14).
     pub(crate) entering_face: Option<DefId>,
@@ -1057,6 +1107,7 @@ impl Game {
                 normal: 0,
                 cleanup_again: false,
                 extra_combats: 0,
+                after_combat: Step::Main2,
                 chooser: 0,
             },
             agenda: Vec::new(),
@@ -1097,6 +1148,11 @@ impl Game {
             entering_exiled: 0,
             entering_mods: Vec::new(),
             leaving_to: 0,
+            leaving_choice: 0,
+            leaving_card: CardIdx(0),
+            resolving_adventure: false,
+            ts_group: (0, 0),
+            held: Vec::new(),
             entering_counters: Vec::new(),
             entering_tapped: false,
             discard_entered: false,
@@ -1105,7 +1161,6 @@ impl Game {
             entering_dash: None,
             entering_warp: false,
             miracle_cast: None,
-            miracle_check: None,
             entering_face: None,
             day: None,
             done_once: Vec::new(),
@@ -1843,6 +1898,113 @@ impl Game {
             self.battlefield.remove(i);
             self.battlefield.push(c);
         }
+        self.stamped(self.next_ts);
+    }
+
+    /// An object got timestamp `ts` (entering, becoming attached): with
+    /// another given one in the same event whose order can matter, the
+    /// active player orders them (CR 613.7m; `Task::OrderTimestamps`).
+    pub(crate) fn stamped(&mut self, ts: u32) {
+        if self.ts_group.0 != self.ev_seq || self.ts_group.1 == 0 {
+            self.ts_group = (self.ev_seq, ts);
+            return;
+        }
+        let first = self.ts_group.1;
+        if self.agenda.iter().any(|t| matches!(t, crate::flow::Task::OrderTimestamps { first: f, .. } if *f == first)) {
+            return;
+        }
+        let members = self.ts_members(first, true);
+        if members.len() >= 2 && members.iter().any(|&c| self.order_sensitive(c, true)) {
+            self.agenda.push(crate::flow::Task::OrderTimestamps { first, settled: false, picked: Vec::new() });
+        }
+    }
+
+    /// Does permanent `c` have a static ability whose effect another
+    /// effect's order can change (CR 613.7: one that sets a value, replaces
+    /// types, removes abilities or changes control, not one that only adds,
+    /// whose results commute); `maybe`: or a copy choice still to make?
+    fn order_sensitive(&self, c: CardIdx, maybe: bool) -> bool {
+        use crate::db::Mod;
+        self.abilities(c).statics.iter().any(|st| {
+            st.mods.iter().any(|m| {
+                matches!(
+                    m,
+                    Mod::SetPt(..) | Mod::SwitchPt | Mod::Types { replace: true, .. } | Mod::BecomeTypes { .. } | Mod::LoseAllAbilities | Mod::Colors(_) | Mod::ControlFrom(_)
+                )
+            })
+        }) || maybe && self.def_of(c).enters_as_copy.is_some() && !self.is_copy(c)
+    }
+
+    /// The permanents given a timestamp since `first` whose timestamps
+    /// order effects (a static ability: layers 1-7, an Aura's or an
+    /// Equipment's; a Painter's colour; a granted activated ability), in
+    /// timestamp order; `maybe`: also one whose copy choice is still to be
+    /// made (it may copy one).
+    pub(crate) fn ts_members(&self, first: u32, maybe: bool) -> Vec<CardIdx> {
+        self.battlefield
+            .iter()
+            .copied()
+            .filter(|&c| self.objs[c.i()].timestamp >= first)
+            .filter(|&c| {
+                let d = self.abilities(c);
+                !d.statics.is_empty()
+                    || d.paints
+                    || !d.w3.grants_activated.is_empty()
+                    || d.grants_equipped.is_some()
+                    || maybe && self.def_of(c).enters_as_copy.is_some() && !self.is_copy(c)
+            })
+            .collect()
+    }
+
+    /// CR 613.7m: the active player orders the timestamps of the objects
+    /// given ones simultaneously since `first` (`ts_members`), earliest
+    /// first (`ChoosePermanent`), once their "as this enters" choices are
+    /// made (`settled`: it waits under them). Asked only while the order can
+    /// matter: a member's effect is order-sensitive (`order_sensitive`), and
+    /// the rest aren't all one definition (identical effects give the same
+    /// result in either order); the rest then in their order. The chosen order permutes the members'
+    /// timestamps and battlefield places (the battlefield is in timestamp
+    /// order).
+    pub(crate) fn order_timestamps(&mut self, first: u32, settled: bool, mut picked: Vec<CardIdx>) {
+        use crate::flow::Task;
+        if !settled {
+            // (Below the entering choices of the same event still waiting:
+            // a copy choice decides what the permanent's effects are.)
+            let mut k = self.agenda.len();
+            while k > 0 && matches!(self.agenda[k - 1], Task::AsEnters { .. } | Task::EnterAsCopy { .. } | Task::EnterAura { .. } | Task::EnterByDiscardAny { .. }) {
+                k -= 1;
+            }
+            self.agenda.insert(k, Task::OrderTimestamps { first, settled: true, picked });
+            return;
+        }
+        if let Some(Choice::Card(c)) = self.answer.take() {
+            picked.push(c);
+        }
+        let members = self.ts_members(first, false);
+        picked.retain(|c| members.contains(c));
+        let rest: Vec<CardIdx> = members.iter().copied().filter(|c| !picked.contains(c)).collect();
+        // (Effects that only add commute: their order can't matter.)
+        let interchangeable = rest.iter().all(|&c| self.objs[c.i()].def == self.objs[rest[0].i()].def) || !members.iter().any(|&c| self.order_sensitive(c, false));
+        if rest.len() >= 2 && !interchangeable {
+            let ap = self.turn.active;
+            let opts = rest.iter().map(|&c| crate::decision::Opt { action: self.perm_action(ap, c), choice: Choice::Card(c) }).collect();
+            self.ask(Task::OrderTimestamps { first, settled: true, picked }, ap, crate::decision::DecisionKind::ChoosePermanent, opts);
+            return;
+        }
+        if picked.is_empty() {
+            return;
+        }
+        let order: Vec<CardIdx> = picked.iter().copied().chain(rest).collect();
+        let mut stamps: Vec<u32> = members.iter().map(|&c| self.objs[c.i()].timestamp).collect();
+        stamps.sort_unstable();
+        let mut places: Vec<usize> = members.iter().map(|&c| self.battlefield.iter().position(|&x| x == c).expect("on the battlefield")).collect();
+        places.sort_unstable();
+        for (i, &c) in order.iter().enumerate() {
+            self.objs[c.i()].timestamp = stamps[i];
+            self.battlefield[places[i]] = c;
+        }
+        self.note(|g| format!("timestamps ordered: {}", order.iter().map(|&c| g.name(c)).collect::<Vec<_>>().join(", ")));
+        self.effects_changed();
     }
 
     /// Lose life (CR 119.3; paying life is losing it, 119.4).
@@ -1934,16 +2096,25 @@ impl Game {
         // the events, in the order the affected object's controller (its
         // owner if it has none) chooses (616.1): `replaced_dest`.
         let decided = std::mem::take(&mut self.repl_decided);
+        let mut adventure = false;
         let (to, void, choose) = match if decided { Dest::To(to) } else { self.replaced_dest(idx, from, to) } {
             Dest::To(z) => (z, None, None),
             Dest::Library => return self.shuffle_in_instead(idx, from),
             Dest::Exile => (Zone::Exile, None, None),
             Dest::Void(k) => (Zone::Exile, Some(k), None),
-            // Exiled for now; its controller (owner) chooses next, before
-            // anything can see the difference (`Task::ChooseReplacement`).
+            Dest::Adventure => {
+                adventure = true;
+                (Zone::Exile, None, None)
+            }
+            // CR 616.1: its controller (owner) chooses which replacement
+            // applies before the event; until the answer, right after the
+            // move and before anything else, the card is in no zone, so
+            // nothing sees a destination it may not get
+            // (`Task::ChooseReplacement`), and leave triggers that depend on
+            // the destination wait for it (`triggers::Held`).
             Dest::Choose(results, k) => {
                 let chooser = if matches!(from, Zone::Battlefield | Zone::Stack) { old_controller } else { self.objs[idx.i()].owner };
-                (Zone::Exile, None, Some((results, k, chooser)))
+                (Zone::Nowhere, None, Some((results, k, chooser)))
             }
         };
         // "Whenever a card leaves your graveyard" looks back in time too
@@ -1965,10 +2136,17 @@ impl Game {
                 self.event(Event::obj(EventKind::Dies, old));
             }
             // (Where it goes, for "dies or is put into exile": read as the
-            // event's triggers are matched, ENGINE.md 99.11.)
+            // event's triggers are matched, ENGINE.md 99.11; each place a
+            // pending replacement choice may still send it, ENGINE.md
+            // 100.3.)
             self.leaving_to = crate::db::left_to::bit(to);
+            if let Some((results, ..)) = choose {
+                self.leaving_choice = choice_left_to(results);
+                self.leaving_card = idx;
+            }
             self.event(Event::obj(EventKind::LeavesBattlefield, old));
             self.leaving_to = 0;
+            self.leaving_choice = 0;
         }
         let lki_power = (from == Zone::Battlefield).then(|| (old.inc, self.power(idx)));
         if from == Zone::Battlefield && (self.w3.seen != 0 || self.w3.granted) {
@@ -2027,6 +2205,7 @@ impl Game {
         } else {
             0
         };
+        let stamp = ts;
         let turn = self.turn.number;
         let known_before = if from.is_hidden() { self.objs[idx.i()].known } else { 0b11 };
         {
@@ -2116,6 +2295,9 @@ impl Game {
                 }
             }
         }
+        if stamp != 0 {
+            self.stamped(stamp);
+        }
         // A card leaving a hidden zone for a public one is revealed to all.
         // It is keyed even if everyone knew it: which known card a hidden
         // choice (a hand slot) named can differ between sampled worlds.
@@ -2131,13 +2313,18 @@ impl Game {
                 self.knowledge_moves(idx, owner, from, to);
             } else {
                 self.knowledge_leaves(idx, owner, from, def, known_before);
-                if to != Zone::Nowhere {
+                // (Waiting for a replacement choice, it is revealed: every
+                // result shows it, CR 616.1.)
+                if to != Zone::Nowhere || choose.is_some() {
                     self.emit_public(KEY_REVEAL, owner, def as u64);
                 }
             }
         }
         let new = self.obj_ref(idx);
         self.note(|g| format!("{} {:?} -> {:?}", g.name(idx), from, to));
+        if adventure {
+            self.on_adventure(new, old_controller);
+        }
         if let Some(k) = void {
             if self.objs[idx.i()].zone == Zone::Exile {
                 self.add_counters(idx, k, 1);
@@ -2187,19 +2374,28 @@ impl Game {
             // back): "when it dies [or is exiled]", about the card now. (Not
             // if it had lost all abilities: those grants came first, as it
             // entered or before the loss, CR 613.1f, 613.7.)
-            let fired: Vec<(DefId, u8)> = self
+            // (Waiting for a replacement choice, "when it dies or is
+            // exiled" triggers if it is exiled: held until the answer.)
+            let fired: Vec<(DefId, u8, bool)> = self
                 .marks
                 .iter()
                 .filter_map(|&(r, m)| match m {
                     Mark::LeaveTrigger { def, slot, exile } if r == old && (to == Zone::Graveyard || exile && to == Zone::Exile) => {
-                        Some((def, slot))
+                        Some((def, slot, false))
                     }
+                    Mark::LeaveTrigger { def, slot, exile: true } if r == old && choose.is_some() => Some((def, slot, true)),
                     _ => None,
                 })
                 .collect();
-            for (def, slot) in fired {
+            for (def, slot, held) in fired {
                 let ev = crate::triggers::EvCtx { obj: Some(new), ..Default::default() };
-                self.waiting.push(crate::triggers::PendingTrigger { controller: old_controller, source: old, source_def: def, slot, ev });
+                let t = crate::triggers::PendingTrigger { controller: old_controller, source: old, source_def: def, slot, ev };
+                if held {
+                    let f = crate::triggers::Fire { t, key: (old, slot), batch: false, check_done: false, once: false, times: None };
+                    self.held.push(crate::triggers::Held { card: idx, zones: crate::db::left_to::EXILE, seq: self.ev_seq, f });
+                } else {
+                    self.waiting.push(t);
+                }
             }
         }
         new
@@ -2230,9 +2426,17 @@ impl Game {
         let gy = to == Zone::Graveyard;
         // Which effects could apply (to a graveyard destination unless
         // said), by index: 0 library, 1 Will, 2 void, 3 dies-exile,
-        // 4 leaves-exile, 5 flashback, 6 the spell's exile.
+        // 4 leaves-exile, 5 flashback, 6 the spell's exile, 7 the
+        // Adventure's exile.
         let mut can = 0u8;
         let mut void = None;
+        // CR 715.4: "instead of putting a spell that was cast as an
+        // Adventure into its owner's graveyard as it resolves, its controller
+        // exiles it" (Bilbo's ruling of 2026-06-29: it is one of the
+        // replacement effects the controller orders).
+        if gy && from == Zone::Stack && self.resolving_adventure {
+            can |= 128;
+        }
         if gy && from_known && self.def_of(idx).gy_to_library {
             can |= 1;
         }
@@ -2269,10 +2473,11 @@ impl Game {
             return Dest::To(to);
         }
         // States: 0 = `to`, 1 = the library, 2 = exile, 3 = exile with a
-        // void counter. The results every order reaches (bit per state).
+        // void counter, 4 = exile on an adventure. The results every order
+        // reaches (bit per state).
         fn walk(can: u8, gy: bool, to_exile: bool, state: u8, applied: u8, out: &mut u8) {
             let mut any = false;
-            for e in 0..7u8 {
+            for e in 0..8u8 {
                 if can & (1 << e) == 0 || applied & (1 << e) != 0 {
                     continue;
                 }
@@ -2282,6 +2487,7 @@ impl Game {
                     0 if at_gy => 1,
                     1 | 3 | 6 if at_gy => 2,
                     2 if at_gy => 3,
+                    7 if at_gy => 4,
                     4 | 5 if !exiled => 2,
                     _ => continue,
                 };
@@ -2299,31 +2505,34 @@ impl Game {
             0b0010 => Dest::Library,
             0b0100 => Dest::Exile,
             0b1000 => Dest::Void(void.expect("a void counter")),
+            0b1_0000 => Dest::Adventure,
             _ => Dest::Choose(out, void),
         }
     }
 
     /// CR 616.1: the affected object's controller (owner) chooses which
-    /// replacement applies to `card`, exiled for now (`move_card`):
+    /// replacement applies to `card`, in no zone until then (`move_card`):
     /// `NUMBER` 1 = shuffled into its owner's library, 2 = exile, 3 = exile
-    /// with a void counter (the results the orders reach; each offered
-    /// once).
+    /// with a void counter, 4 = exiled on an adventure (the results the
+    /// orders reach; each offered once). The card goes there as the object the move made (one zone
+    /// change, CR 400.7), and the triggered abilities that waited for the
+    /// destination trigger (`release_held`).
     pub(crate) fn choose_replacement(&mut self, card: ObjRef, from: Zone, results: u8, void: Option<crate::db::Counter>, chooser: PlayerId) {
-        if !self.live(card) || self.objs[card.idx.i()].zone != Zone::Exile {
+        if self.objs[card.idx.i()].inc != card.inc || self.objs[card.idx.i()].zone != Zone::Nowhere {
             return;
         }
         let idx = card.idx;
         let owner = self.objs[idx.i()].owner;
         match self.answer.take() {
             Some(Choice::Number(k)) => {
-                self.note(|g| format!("P{chooser} applies {} to {}", ["", "the library", "exile", "a void counter"][k as usize], g.name(idx)));
+                self.note(|g| format!("P{chooser} applies {} to {}", ["", "the library", "exile", "a void counter", "an adventure"][k as usize], g.name(idx)));
+                let to = if k == 1 { Zone::Library } else { Zone::Exile };
+                self.repl_decided = true;
+                self.move_card_ctl(idx, to, Pos::Top, None);
+                self.objs[idx.i()].inc = card.inc;
                 match k {
-                    1 => {
-                        // (Revealed: it is public now.)
-                        self.repl_decided = true;
-                        self.move_card_ctl(idx, Zone::Library, Pos::Top, None);
-                        self.shuffle_library(owner);
-                    }
+                    1 => self.shuffle_library(owner),
+                    4 => self.on_adventure(card, chooser),
                     _ => {
                         if k == 3 {
                             if let Some(c) = void {
@@ -2335,10 +2544,11 @@ impl Game {
                         }
                     }
                 }
+                self.release_held(idx, crate::db::left_to::bit(to));
             }
             Some(other) => unreachable!("replacement answer {other:?}"),
             None => {
-                let opts: Vec<crate::decision::Opt> = (1..4u8)
+                let opts: Vec<crate::decision::Opt> = (1..5u8)
                     .filter(|&k| results & (1 << k) != 0)
                     .map(|k| crate::decision::Opt { action: crate::decision::act::NUMBER + k as u16, choice: Choice::Number(k) })
                     .collect();
@@ -2350,6 +2560,14 @@ impl Game {
                 );
             }
         }
+    }
+
+    /// CR 715.4: card `r`, exiled as its Adventure resolved, is on an
+    /// adventure: `controller` may cast it (not as an Adventure) for as long
+    /// as it stays exiled.
+    fn on_adventure(&mut self, r: ObjRef, controller: PlayerId) {
+        self.note(|g| format!("{} goes on an adventure", g.name(r.idx)));
+        self.permissions.push(crate::game::Permission { card: r, player: controller, turn: None, kind: crate::game::PermKind::Adventure });
     }
 
     fn shuffle_in_instead(&mut self, idx: CardIdx, from: Zone) -> ObjRef {
@@ -2450,36 +2668,137 @@ impl Game {
     /// `p` draws n cards (one instruction, CR 121.2): "if you would draw one
     /// or more cards, you draw that many plus d instead" (Quantum Riddler,
     /// while its controller has few cards in hand) applies to it as a whole.
-    pub(crate) fn draw_cards(&mut self, p: PlayerId, n: u32) {
+    /// True when a miracle question interrupted it (CR 702.94a: a card is
+    /// revealed as it is drawn, before the instruction's next card): the
+    /// question and the rest of the draws are queued (`Task::MiracleReveal`,
+    /// `Task::DrawRest`), and the caller's own work must wait under them (an
+    /// op returning `Flow::Next` does: `run_frame`; `wait_for_draw`).
+    pub(crate) fn draw_cards(&mut self, p: PlayerId, n: u32) -> bool {
+        match self.draw_instruction(p, n, false) {
+            Drew::Miracle(card, left) => {
+                self.queue_miracle(p, card, left, false);
+                true
+            }
+            Drew::Asked => true,
+            Drew::Done => false,
+        }
+    }
+
+    /// [`draw_cards`](Self::draw_cards) without queueing a miracle
+    /// question (`step`: the draw step's, whose beginning event follows the
+    /// draws).
+    pub(crate) fn draw_instruction(&mut self, p: PlayerId, n: u32, step: bool) -> Drew {
         let mut n = n;
-        // One card, which an opponent's Hullbreacher would replace too: both
-        // replace the same draw and the drawer chooses the order (CR 616.1).
-        // Hullbreacher first leaves no draw for Quantum Riddler (one
-        // Treasure); Quantum Riddler first gives "draw two", each replaced
-        // (two Treasures, no card either). The engine takes the first order
-        // for the drawer: the other only gives the opponent a Treasure more.
-        // (To more than one card Quantum Riddler applies first, to the
-        // instruction, its ruling: then Hullbreacher to each draw.)
+        // One card, which an opponent's Hullbreacher would replace too, and
+        // Quantum Riddler's "draw that many plus one": both replace the same
+        // draw, and the drawer chooses the order (CR 616.1;
+        // `Task::DrawOrder`). (To more than one card Quantum Riddler applies
+        // first, to the instruction, its ruling: then Hullbreacher to each
+        // draw.)
         if n == 1 && self.seen & SEEN_DRAW_REPL != 0 && self.opp_draw_token(p).is_some() {
-            self.draw(p);
-            return;
+            let plus = self.draw_plus(p);
+            if plus > 0 {
+                self.agenda.push(crate::flow::Task::DrawOrder { p, plus, ev: self.ev_seq, step });
+                return Drew::Asked;
+            }
+            return self.draw(p).map_or(Drew::Done, |c| Drew::Miracle(c, 0));
         }
         if n > 0 && self.seen & SEEN_DRAW_REPL != 0 {
-            let hand = self.players[p as usize].hand.len();
-            let plus: u32 = self
-                .permanents_of(p)
-                .filter_map(|c| self.abilities(c).draw_plus)
-                .filter(|&(_, at_most)| hand <= at_most as usize)
-                .map(|(d, _)| d as u32)
-                .sum();
+            let plus = self.draw_plus(p);
             if plus > 0 {
                 self.note(|_| format!("P{p} draws {plus} more (a replacement)"));
                 n += plus;
             }
         }
-        for _ in 0..n {
-            self.draw(p);
+        self.draw_seq(p, n).map_or(Drew::Done, |(c, left)| Drew::Miracle(c, left))
+    }
+
+    /// "If you would draw one or more cards, you draw that many plus d
+    /// instead" while `p` has few cards in hand (Quantum Riddler): the d's.
+    fn draw_plus(&self, p: PlayerId) -> u32 {
+        let hand = self.players[p as usize].hand.len();
+        self.permanents_of(p)
+            .filter_map(|c| self.abilities(c).draw_plus)
+            .filter(|&(_, at_most)| hand <= at_most as usize)
+            .map(|(d, _)| d as u32)
+            .sum()
+    }
+
+    /// CR 616.1: `p` orders an opponent's "create a token instead" and
+    /// their own "draw that many plus `plus` instead" on one draw: `NUMBER`
+    /// 5 = the token first (no draw is left to add to: one token), 6 = the
+    /// added draws first (each draw then replaced). Then as the draw
+    /// instruction would go on (`ev`, `step`: `draw_rest`'s).
+    pub(crate) fn draw_order(&mut self, p: PlayerId, plus: u32, ev: u32, step: bool) {
+        match self.answer.take() {
+            Some(Choice::Number(k)) => {
+                let saved = self.ev_seq;
+                self.ev_seq = ev;
+                let cut = if k == 5 {
+                    self.draw(p).map(|c| (c, 0))
+                } else {
+                    self.note(|_| format!("P{p} draws {plus} more (a replacement)"));
+                    self.draw_seq(p, 1 + plus)
+                };
+                match cut {
+                    Some((card, left)) => self.queue_miracle(p, card, left, step),
+                    None if step => self.event(Event::player(EventKind::BeginningOfDrawStep, p)),
+                    None => {}
+                }
+                self.ev_seq = saved;
+            }
+            Some(other) => unreachable!("draw order answer {other:?}"),
+            None => {
+                let opts = [5u8, 6]
+                    .iter()
+                    .map(|&k| crate::decision::Opt { action: crate::decision::act::NUMBER + k as u16, choice: Choice::Number(k) })
+                    .collect();
+                self.ask(crate::flow::Task::DrawOrder { p, plus, ev, step }, p, crate::decision::DecisionKind::ChooseReplacement, opts);
+            }
         }
+    }
+
+    /// `p` draws `n` cards one at a time, stopping after one a miracle
+    /// question is due for: that card and the draws left.
+    fn draw_seq(&mut self, p: PlayerId, n: u32) -> Option<(CardIdx, u32)> {
+        for k in 0..n {
+            if let Some(c) = self.draw(p) {
+                return Some((c, n - k - 1));
+            }
+        }
+        None
+    }
+
+    /// Queue the miracle question about `card`, then the `left` draws of
+    /// its instruction (and, `step`, the draw step's beginning event after
+    /// them), in the current event group.
+    pub(crate) fn queue_miracle(&mut self, p: PlayerId, card: CardIdx, left: u32, step: bool) {
+        if left > 0 || step {
+            self.agenda.push(crate::flow::Task::DrawRest { p, n: left, ev: self.ev_seq, step });
+        }
+        self.agenda.push(crate::flow::Task::MiracleReveal { p, card });
+    }
+
+    /// The rest of a draw instruction a miracle question interrupted
+    /// (`queue_miracle`), in the instruction's event group (CR 603.2c).
+    pub(crate) fn draw_rest(&mut self, p: PlayerId, n: u32, ev: u32, step: bool) {
+        let saved = self.ev_seq;
+        self.ev_seq = ev;
+        let cut = self.draw_seq(p, n);
+        match cut {
+            Some((card, left)) => self.queue_miracle(p, card, left, step),
+            None if step => self.event(Event::player(EventKind::BeginningOfDrawStep, p)),
+            None => {}
+        }
+        self.ev_seq = saved;
+    }
+
+    /// The frame `f`, re-entered at the op that drew, waits under the tasks
+    /// a draw queued since the agenda had `queued` (`draw_cards`).
+    pub(crate) fn wait_for_draw(&mut self, queued: usize, f: &crate::resolve::Frame) {
+        let tasks = self.agenda.split_off(queued);
+        self.agenda.push(crate::flow::Task::Run(f.clone()));
+        self.agenda.extend(tasks);
     }
 
     /// The token an opponent's Hullbreacher would create instead if `p` drew
@@ -2497,14 +2816,16 @@ impl Game {
     }
 
     /// Draw a card (CR 121.2); from an empty library, flag 704.5b instead.
-    pub(crate) fn draw(&mut self, p: PlayerId) {
+    /// The card, when its owner is asked about revealing it for miracle
+    /// (`draw_cards` asks before the next draw).
+    pub(crate) fn draw(&mut self, p: PlayerId) -> Option<CardIdx> {
         // "Each opponent can't draw more than one card each turn" (Narset).
         if self.players[p as usize].drawn >= 1
             && self.turn.number > 0
             && self.permanents_of(opp(p)).any(|c| self.abilities(c).opp_draw_limit)
         {
             self.note(|_| format!("P{p} can't draw another card this turn"));
-            return;
+            return None;
         }
         // "If an opponent would draw a card except the first one they draw in
         // each of their draw steps, instead you create a Treasure token"
@@ -2515,7 +2836,7 @@ impl Game {
                 self.note(|_| format!("P{p} would draw: P{q} creates a token instead"));
                 let def = self.db.token_def(token);
                 self.create_tokens(def, q, 1, false);
-                return;
+                return None;
             }
         }
         // "If you would draw a card while your library has no cards in it,
@@ -2527,7 +2848,7 @@ impl Game {
             self.note(|_| format!("P{p} would draw from an empty library: wins the game"));
             self.players[opp(p) as usize].lost = true;
             self.outcome = Some(Outcome { winner: Some(p), reason: EndReason::Effect });
-            return;
+            return None;
         }
         if self.turn.step == Step::Draw && self.turn.active == p {
             let pl = &mut self.players[p as usize];
@@ -2539,7 +2860,7 @@ impl Game {
         let Some(&top) = self.players[p as usize].library.last() else {
             self.players[p as usize].drew_from_empty = true;
             self.note(|_| format!("P{p} draws from an empty library"));
-            return;
+            return None;
         };
         self.move_card(top, Zone::Hand, Pos::Top);
         self.objs[top.i()].known |= 1 << p;
@@ -2548,16 +2869,15 @@ impl Game {
         let pl = &mut self.players[p as usize];
         pl.drawn = pl.drawn.saturating_add(1);
         // Miracle (CR 702.94a): the first card drawn this turn may be
-        // revealed. Asked of a player whose deck has a miracle card at all
-        // (both decklists are known, ENGINE.md 10), on every first draw,
-        // so that the question says nothing about the card.
-        if self.players[p as usize].drawn == 1
+        // revealed as it is drawn. Asked of a player whose deck has a
+        // miracle card at all (both decklists are known, ENGINE.md 10), on
+        // every first draw, so that the question says nothing about the
+        // card.
+        let miracle = self.players[p as usize].drawn == 1
             && self.turn.number > 0
-            && self.deck_question(p, |d| d.miracle.is_some()).unwrap_or_else(|| self.has_miracle_card(p))
-        {
-            self.miracle_check = Some((p, top));
-        }
+            && self.deck_question(p, |d| d.miracle.is_some()).unwrap_or_else(|| self.has_miracle_card(p));
         self.event(Event::player(EventKind::DrawsCard, p));
+        miracle.then_some(top)
     }
 
     /// With hidden decks (ENGINE.md 36.11), whether a question asked because

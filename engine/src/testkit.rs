@@ -397,7 +397,7 @@ impl Game {
         v.push(self.outcome.map_or(9, |o| o.winner.map_or(2, |w| w as u64)));
         // The turn's other public parts and the extra turns to come (ENGINE.md
         // 58.6: the public-state gate's view).
-        v.extend([t.normal as u64, t.extra_combats as u64, t.cleanup_again as u64]);
+        v.extend([t.normal as u64, t.extra_combats as u64, t.after_combat as u64, t.cleanup_again as u64]);
         v.extend(self.extra_turns.iter().map(|&p| p as u64));
         v.push(u64::MAX - 6);
         let obj = |v: &mut Vec<u64>, c: CardIdx| {
@@ -791,7 +791,6 @@ impl Game {
         self.dungeons.hash(&mut h);
         self.rules_srcs.hash(&mut h);
         self.activations.hash(&mut h);
-        self.miracle_check.hash(&mut h);
         self.marks.hash(&mut h);
         self.w3.hash(&mut h);
         self.face_down.hash(&mut h);
@@ -857,12 +856,14 @@ impl Game {
             // (A completed dungeon and the source of the initiative's
             // abilities are rules objects in no zone, ENGINE.md 27.4.)
             // (Nor is a Mox Diamond whose "discard a land card instead" is
-            // being decided, `Task::EnterByDiscardAny`, nor a revealed
-            // companion outside the game, ENGINE.md 35.)
+            // being decided, `Task::EnterByDiscardAny`, nor a card whose
+            // replacement effects' order is (616.1, `Task::ChooseReplacement`),
+            // nor a revealed companion outside the game, ENGINE.md 35.)
             if self.objs[i].zone == Zone::Nowhere
                 && !self.is_token(CardIdx(i as u16))
                 && !self.def_of(CardIdx(i as u16)).rules
                 && !self.agenda.iter().any(|t| matches!(t, Task::EnterByDiscardAny { card, .. } if card.0 == i as u16))
+                && !self.agenda.iter().any(|t| matches!(t, Task::ChooseReplacement { card, .. } if card.idx.0 == i as u16))
                 && !self.players.iter().any(|p| p.companion == Some(CardIdx(i as u16)))
             {
                 return Err(format!("card {i} is nowhere"));

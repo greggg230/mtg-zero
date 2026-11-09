@@ -80,7 +80,7 @@ pub(crate) fn lower_effect_eoe_w1(l: &mut Lowerer, b: &mut Builder, e: &cats::Ef
             let tgt = b.target(Filter::InGraveyard(Box::new(and(cf, Filter::Owner(true)))), 1, 1);
             let mut mods = Vec::new();
             if !added_subtypes.is_empty() {
-                let subtypes = added_subtypes.iter().map(|s| l.subtype(s)).collect();
+                let subtypes = added_subtypes.iter().filter_map(|s| l.given_subtype("added_subtypes", s)).collect();
                 mods.push(Mod::Types { add: 0, subtypes, replace: false });
             }
             if *loses_all_abilities {

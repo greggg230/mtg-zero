@@ -151,15 +151,11 @@ impl Game {
             }
             Ext::Cascade => self.cascade(f),
             Ext::ExtraCombat => {
-                use crate::game::Step;
-                let combat = matches!(
-                    self.turn.step,
-                    Step::BeginCombat | Step::DeclareAttackers | Step::DeclareBlockers | Step::FirstStrikeDamage | Step::CombatDamage | Step::EndCombat
-                );
-                if combat {
-                    self.turn.extra_combats = self.turn.extra_combats.saturating_add(1);
-                    self.note(|_| "an additional combat phase follows".to_string());
-                }
+                // CR 500.8: "after this phase, there is an additional combat
+                // phase", directly after the current phase, whichever it is
+                // (`Game::next_step`).
+                self.turn.extra_combats = self.turn.extra_combats.saturating_add(1);
+                self.note(|_| "an additional combat phase follows this phase".to_string());
                 Flow::Next
             }
             Ext::WarpExile => {

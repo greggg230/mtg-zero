@@ -56,7 +56,7 @@ pub(crate) fn lower_effect_tail2(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             let mods = if add_subtype.is_empty() {
                 Vec::new()
             } else {
-                vec![Mod::Types { add: 0, subtypes: vec![l.subtype(add_subtype)], replace: false }]
+                vec![Mod::Types { add: 0, subtypes: l.given_subtype("ReanimateTargetCreatureCardFromAGraveyard.add_subtype", add_subtype).into_iter().collect(), replace: false }]
             };
             b.op(Op::Ext(Ext::FromGraveyardAs { tgt: t, mods }));
         }

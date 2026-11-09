@@ -347,12 +347,20 @@ impl Game {
             M7d::GainClassLevel { level } => {
                 // CR 716.2a: the Class's level becomes N (the same object,
                 // as a transform: counters, damage and effects stay). A copy
-                // of a Class doesn't (no such copy in the cube).
-                if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield && !self.is_copy(f.source.idx) {
+                // of a Class has a level of its own (it starts at 1, the
+                // level isn't copied: `copiable`), its copy effect giving it
+                // the level's face.
+                if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
                     let c = f.source.idx;
                     let d = self.def_of(c);
                     if d.class_level < *level {
                         if let Some(&face) = d.levels.get(*level as usize - 2) {
+                            if self.is_copy(c) {
+                                let r = self.obj_ref(c);
+                                if let Some(x) = self.copies.iter_mut().rev().find(|x| x.obj == r) {
+                                    x.vals.def = face;
+                                }
+                            }
                             self.set_face(c, face);
                             self.note(|g| format!("{} becomes level {level}", g.name(c)));
                             let r = self.obj_ref(c);

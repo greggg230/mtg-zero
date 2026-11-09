@@ -346,18 +346,16 @@ impl Game {
                     } else if self.def_of(card).buyback && item.cost_option == 1 {
                         // CR 702.27a: bought back.
                         self.move_card(card, Zone::Hand, Pos::Top);
-                    } else if self.is_adventure(self.objs[card.i()].def) && !self.objs[card.i()].flashback {
-                        // CR 715.3d: an Adventure is exiled as it resolves;
-                        // its controller may cast the card (not as an
-                        // Adventure) while it stays exiled.
-                        let r = self.move_card(card, Zone::Exile, Pos::Top);
-                        self.note(|g| format!("{} goes on an adventure", g.name(card)));
-                        self.permissions.push(crate::game::Permission {
-                            card: r,
-                            player: item.controller,
-                            turn: None,
-                            kind: crate::game::PermKind::Adventure,
-                        });
+                    } else if self.is_adventure(self.objs[card.i()].def) {
+                        // CR 715.4: an Adventure resolving is exiled on an
+                        // adventure instead of being put into its owner's
+                        // graveyard: a replacement effect of the move,
+                        // ordered with the others (Bilbo's "exile it
+                        // instead", flashback's, Dauthi Voidwalker's) by its
+                        // controller (616.1; `replaced_dest`).
+                        self.resolving_adventure = true;
+                        self.move_card(card, Zone::Graveyard, Pos::Top);
+                        self.resolving_adventure = false;
                     } else {
                         self.move_card(card, Zone::Graveyard, Pos::Top);
                     }

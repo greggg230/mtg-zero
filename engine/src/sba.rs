@@ -235,13 +235,6 @@ impl Game {
         if let Some(Choice::Card(c)) = self.answer.take() {
             keep.push(c);
         }
-        // Miracle (CR 702.94a): the reveal question about a first card drawn
-        // this turn, before anyone gets priority.
-        if let Some((p, card)) = self.miracle_check.take() {
-            self.agenda.push(Task::SbaCheck { keep });
-            self.agenda.push(Task::MiracleReveal { p, card });
-            return;
-        }
         // Ascend (CR 702.131b): the city's blessing, for the rest of the
         // game, once a player with an ascend permanent controls ten (a
         // static ability: noted here, before anyone gets priority).
@@ -270,8 +263,18 @@ impl Game {
                 return;
             }
         }
+        let queued = self.agenda.len();
         let did = self.perform_sbas(&groups, &keep);
         if self.outcome.is_some() {
+            return;
+        }
+        // A replacement choice an action queued (CR 616.1: made as the card
+        // moves, before anything else): first, then the check again, and
+        // the triggers its answer may add with the rest.
+        if self.agenda.len() > queued {
+            let tasks = self.agenda.split_off(queued);
+            self.agenda.push(Task::SbaCheck { keep: Vec::new() });
+            self.agenda.extend(tasks);
             return;
         }
         if !self.waiting.is_empty() {
