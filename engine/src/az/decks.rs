@@ -68,7 +68,7 @@ pub fn land_colors(db: &CardDb, d: &CardDef) -> u8 {
 }
 
 /// Colours of the basic land types (or "basic") a search filter names.
-fn search_colors(db: &CardDb, f: &Filter) -> u8 {
+pub(crate) fn search_colors(db: &CardDb, f: &Filter) -> u8 {
     match f {
         Filter::Subtype(s) => {
             BASICS.iter().position(|b| db.subtype_name(*s) == *b).map_or(0, |i| 1 << i)
