@@ -199,7 +199,8 @@ pub(crate) fn lower_effect_copies(l: &mut Lowerer, b: &mut Builder, e: &cats::Ef
         // that copy" (Chain of Smog: the spell's target player). The IR's
         // `needs_target_with_cards_in_hand` is a Python shortcut (it offers
         // the copy only while a player with cards in hand can be targeted);
-        // the copy is always offered here (ENGINE.md 14).
+        // the copy is always offered here (ENGINE.md 14; docs/ir_defects.md
+        // 191).
         E::TargetPlayerMayCopyThisSpell(nodes::TargetPlayerMayCopyThisSpell { needs_target_with_cards_in_hand }) => {
             let _ = needs_target_with_cards_in_hand;
             let players: Vec<usize> = b.targets.iter().enumerate().filter(|(_, r)| is_player_req(r)).map(|(i, _)| i).collect();

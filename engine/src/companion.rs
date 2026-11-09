@@ -13,6 +13,20 @@ use crate::pay::{Class, Keep, PayMana};
 /// The companion special action's cost (CR 116.2g, 702.139a).
 pub const COMPANION_COST: ManaCost = ManaCost { generic: 3, pips: [0; 6], hybrid: [0; 10], phyrexian: [0; 5] };
 
+/// The revealed-companion decision (`Game::reveal_companion`) offers each
+/// candidate, a distinct companion definition, on a `LIBRARY` slot, so a
+/// table has at most `act::LIBRARY_N` (64) companion definitions; more fail
+/// loudly as the table loads (`CardDb::from_cards`), never a candidate left
+/// out of the decision (docs/faithfulness_audit.md N13, ENGINE.md 100.6).
+pub(crate) fn check_table(db: &crate::db::CardDb) {
+    let n = (0..db.len()).filter(|&d| db.def(d as DefId).companion.is_some()).count();
+    assert!(
+        n <= act::LIBRARY_N as usize,
+        "{n} companion definitions in one table: the revealed-companion decision has {} LIBRARY slots (docs/faithfulness_audit.md N13)",
+        act::LIBRARY_N
+    );
+}
+
 impl Game {
     /// `Task::PlayDraw`: `p`, the chooser, chooses who takes the first turn
     /// (CR 103.1): `PLAYER` = themselves (they play first), `PLAYER` + 1 =
@@ -97,10 +111,9 @@ impl Game {
                 // the deck, which the other player does not know.
                 let always = self.spec.hidden_decks;
                 if !cands.is_empty() || always {
+                    // (Every candidate fits a `LIBRARY` slot: `check_table`.)
                     let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
-                    opts.extend(
-                        cands.iter().take(act::LIBRARY_N as usize).enumerate().map(|(k, &d)| Opt { action: act::LIBRARY + k as u16, choice: Choice::Def(d) }),
-                    );
+                    opts.extend(cands.iter().enumerate().map(|(k, &d)| Opt { action: act::LIBRARY + k as u16, choice: Choice::Def(d) }));
                     let no_auto = self.no_auto;
                     self.no_auto |= always;
                     self.ask(Task::RevealCompanion { p }, p, DecisionKind::RevealCompanion, opts);
