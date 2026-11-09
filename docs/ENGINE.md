@@ -21241,3 +21241,21 @@ them; not castable before).
 or two Arenas of Glory (the five inspected: r 263, 484, 502 with Ruins; r 404, 801 with Arenas):
 one's mana pays the other's cost. `RULES_EPOCH` bumped; the Delver canary library's 60 spots reach
 their positions.
+
+##### Not done in this session (left for the next pass)
+
+In the brief's order (100.4.4 to 100.4.6 have the earlier designs):
+
+* **26.11.6** (96 permanents a player): unchanged. The payment's ids for sources past `MY_PERM`'s
+  96 come with the paging of every `perm_action` caller (A's note in 100.2: 46 call sites,
+  attackers and blockers, priority's `ACTIVATE` ids through W3's ability page) and the end of
+  `perm_room` and `token_count`'s room; one change across the engine, not the payment's alone.
+* **The u8 parts of a `ManaCost`** (100.4.6's design): left for after F7's merge (`eoe-f7-numbers`,
+  its exact or aborted numbers), which had not reached `eoe-base` in this session. (`payable_iter`'s
+  counts are exact now, 13.15 above.)
+* **A cost that sacrifices, exiles graveyard cards and taps** (found on the way, 24.7.5k above):
+  its sacrifices are made before its graveyard cards are chosen (ruling bea302d9), so before its
+  taps, and a permanent sacrificed can't be one tapped for it, which CR 601.2h allows (tap it,
+  then sacrifice it, then exile from the graveyard). Exact: when the cost has a tap part, its tap
+  choices before the early sacrifice (`pay_costs`' order).
+* **28.8.2k** is workstream D's (a new decision kind).
