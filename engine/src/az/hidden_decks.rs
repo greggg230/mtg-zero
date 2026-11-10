@@ -342,7 +342,7 @@ impl MtgAz {
         let d: Arc<Dealt> = match deck_tilt {
             Some(t) if self.m.deal.k > 0 && !kn.slots.is_empty() => {
                 let decks = self.m.deal.decks(&*prior, o, &want);
-                let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &t), || {
+                let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &kn, &t), || {
                     let ids = identity::identities(db);
                     tilt_decks(&decks, &kn.required, &kn.fixed_by_identity(ids), kn.slots.len(), ids, t)
                 });
@@ -415,7 +415,7 @@ impl MtgAz {
         let comp = self.g.player(o).companion_def;
         let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None };
         let decks = self.m.deal.decks(&*prior, o, &want);
-        let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &t), || {
+        let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &kn, &t), || {
             let ids = identity::identities(db);
             tilt_decks(&decks, &kn.required, &kn.fixed_by_identity(ids), kn.slots.len(), ids, t)
         });
@@ -853,9 +853,16 @@ pub fn tilt_decks(decks: &[Arc<Dealt>], shown: &[DefId], fixed: &[f64], n: usize
     TiltedDecks { w, probs, beta, ess, n, fixed: fixed.to_vec(), u, excess: ex }
 }
 
-/// The key of a deck tilt's weighing: the request's key and the prediction, tilt and clip.
-fn tilt_key(request: u64, t: &DeckTilt) -> u64 {
+/// The key of a deck tilt's weighing: everything `tilt_decks` reads - the request's key (its K decks and
+/// R), the viewer's other knowledge of the unseen cards (the deck cards it knows, the non-deck cards it lost
+/// track of, their number: the fixed part and N) and the prediction, tilt and clip.
+fn tilt_key(request: u64, kn: &sample::Knowledge, t: &DeckTilt) -> u64 {
     let mut h = crate::rng::split64(request ^ 0x7111_7DEC ^ t.tilt.to_bits().rotate_left(17) ^ t.clip.to_bits());
+    h = crate::rng::split64(h ^ (kn.slots.len() as u64) << 32 ^ kn.known.len() as u64);
+    for &d in kn.known.iter().chain(&kn.extras) {
+        h = crate::rng::split64(h ^ d as u64);
+    }
+    h = crate::rng::split64(h ^ kn.extras.len() as u64);
     for &x in t.p {
         h = crate::rng::split64(h ^ x.to_bits() as u64);
     }
