@@ -163,7 +163,9 @@ def read_deck(path):
         d = json.loads(s)
         if isinstance(d, list):
             d = {'deck': d}
-        return {'name': d.get('name', name), 'deck': list(d['deck']), 'sideboard': list(d.get('sideboard', []))}
+        out = {'name': d.get('name', name), 'deck': list(d['deck']), 'sideboard': list(d.get('sideboard', []))}
+        out.update({k: d[k] for k in ('colors', 'lands') if k in d})
+        return out
     deck, side, cur = [], [], None
     cur = deck
     for line in txt.splitlines():

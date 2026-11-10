@@ -243,6 +243,7 @@ def test_the_cli(builds, tmp_path):
     counts = collections.Counter(bs[2]['deck'])
     txt.write_text('\n'.join(f'{k} {n}' for n, k in sorted(counts.items())) + '\nSideboard\n'
                    + '\n'.join(bs[2]['sideboard']), encoding='utf-8')
+    assert K.read_deck(paths[0])['colors'] == bs[0]['colors']        # a builds file keeps its colours
     d = K.read_deck(str(txt))
     assert sorted(d['deck']) == sorted(bs[2]['deck']) and sorted(d['sideboard']) == sorted(bs[2]['sideboard'])
     out = tmp_path / 'out.json'
