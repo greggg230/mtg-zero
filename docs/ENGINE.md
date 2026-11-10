@@ -21427,3 +21427,209 @@ build, both digests, `--test az` (43), the checkpoint load (h2h, 8 games, 0 unfi
 (208 passed, 1 skipped) passed: `GATE PASSED encoding 1e052a27ccf3 in 348s` (bccd4f0 too, in
 451 s). `python tools/gate.py engine --tested-sha 1e052a2 ...`: build, both digests, `az` 43,
 `limits` 10, `hidden` 16, pytest, the search smoke: `GATE PASSED engine 1e052a27ccf3 in 778s`.
+## 101. EoE sealed: pools, the builder and the sealed spec (S2)
+
+Branch `eoe-s2-pools` (from 36f98af), 2026-11-09. DESIGN.md 9, milestone S2: the parts of sealed
+play that touch neither the rules engine nor the encoding. **The sealed pools in Rust** (a
+bit-identical port of the Python collations of `docs/sealed_data.md` 3), **a randomised deck
+builder** (DESIGN.md 9 item 1), **the `mtg` spec's `"sealed"` key** (each game: two pools from its
+seed, two built decks, best-of-one on the EoE table), **the 17lands yardstick pools in engine
+terms**, and **`FUZZ_POOL=sealed`**. Code: `engine/src/az/sealed/` (`collation.rs`, `builder.rs`,
+`mod.rs`), the engine module's sealed functions (`py/src/lib.rs`, `mtgz/sealed/engine.py`),
+`mtgz/sealed/yardstick.py`. No rules, layout, encoding or zero-core change; the digests are
+unchanged.
+
+### 101.1 The collations in Rust (`az/sealed/collation.rs`)
+
+A line-by-line port of `mtgz.sealed.collation` (paper and arena, `generate(seed, collation,
+Options { boosters, prerelease_promo, paradox_haze })`): the card list is `data/sealed/eoe_set.json`
+compiled in (the sheets in the file's order, the booster-fun printings in the treatments' order);
+the randomness is the reference's own splitmix64 with its integer-only sampling (`SplitMix`:
+rejection for `below`, a partial Fisher-Yates `sample`, integer `weighted`; u128 weights, the
+uncommon run's weights stay below 2^64), never the engine's `Rng`; the draws in the reference's
+order; Paradox Haze drawn again within the Special Guest slot. The result is each booster's
+(slot, name) and the promo; `cards()` is the 78 nonbasic names, sorted.
+
+**Bit-identical, proven:** `tests/test_sealed_rust.py` compares the Rust pools (through the engine
+module's `sealed_pool`) with the Python reference slot by slot for 2,006 seeds per collation
+(0..1999 and six edge seeds up to 2^64 - 1), plus 300 paper seeds with the prerelease promo, 300
+with Paradox Haze and 24 boosters, 100 arena seeds with Paradox Haze and 12 boosters: all equal
+(18 s; the Python side in 16 processes, ~50 ms per arena pool). Unit tests: the splitmix64
+reference stream, the reference's pinned paper booster, 78 cards per pool, 13 / 14 per booster.
+
+**Names to definitions** (`sealed::card_ids`): every name through `CardDb::eoe().expect_id`; an
+unknown name or an unsupported card fails loudly with its blockers ("The Dominion Bracelet is not
+supported: ..."), never a dropped card. Speed: 0.015 ms per paper pool, 1.8 ms per arena pool (the
+uncommon run's greedy build dominates, as in Python), 0.05 ms per build.
+
+### 101.2 The randomised builder (`az/sealed/builder.rs`)
+
+**Pure self-play: no human data of any kind.** A card's weight is `pools::weight` (creature 3,
+interaction 2 - damage, removal, counters, discard, edicts, token makers, read from its IR - other
+coloured 1, colourless 0.5) and its mana value; no ratings, win rates, pick orders or hand-made
+grades. The settings (`builder::Settings`, the spec's `sealed.builder`; defaults):
+
+| Key | Default | What |
+|---|---|---|
+| `lands` | [16, 18] | lands per deck, uniform; spells 40 - lands |
+| `mono` | 0.1 | probability of trying one colour (only if a colour has enough playable spells) |
+| `splash` | 0.3 | probability of trying a splash (only if one is castable, below) |
+| `max_splash`, `splash_sources` | 3, 3 | splash spells 1..=max (uniform); sources of the splash colour played |
+| `temperature` | 4.0 | the pair's softmax over pair scores, in weight points (0: the best pair) |
+| `power` | 2.0 | spells drawn with probability proportional to weight^power x the curve factor |
+| `curve` | 1.0 | the curve tilt t, uniform in [-curve, curve]: factor exp(-t (mana value - 3) / 2) |
+| `max_mv5`, `max_mv4` | 5, 7 | caps on spells of mana value 5+ and 4 (lifted when the playable spells run out) |
+
+The rules: (1) the land count; (2) the colours: a pair's score is the weight of its best 40 - n
+playable spells (colours within the pair, every pip payable, hybrid by either colour, colourless
+spells everywhere); pairs with 40 - n playable spells are eligible; with probability `mono` a
+single colour with enough spells is tried first; else the pair is drawn by the softmax (none
+eligible: the best pair, basics make up the 40 - never seen in generated pools); (3) **the splash
+rule**: a third colour X only when the deck can cast it: the pool holds a **fixer** for X that the
+pair can play - a nonbasic land, or a spell, whose own abilities add mana of X (a mana ability,
+`lower::activated::prod_mask`), search the library for a land that makes X ("a basic land card" or
+"a land card": any colour; a basic land type: its colour; "and" narrows, "or" widens) or create a
+token that does (the Lander token's search, a Treasure) - and splash spells: of colour X, castable
+with the pair plus X, exactly one plain X pip (no X phyrexian pip; a hybrid pip the pair can pay is
+not an X pip). X is drawn by its best `max_splash` splash spells' weight, then 1..=`max_splash`
+splash spells by weight^power. The deck plays every fixer for X (a nonland fixer is one of its
+spells), then basics of X until it has `splash_sources` sources of X, and at least one basic of X
+when its only fixers are spells; (4) the spells: splash spells and nonland fixers, then drawn
+without replacement (copies separate) by weight^power x the curve factor, under the caps; (5) the
+lands: the pool's nonbasic lands that make or fetch a colour of the deck, at most one
+colourless-only land (half the time), up to min(9, n - 7) (the splash's first); basics: the
+splash's, the rest by the spells' pips (+1 each, at least a third each in a pair). **Always exactly
+40 cards** (ENGINE.md 42); the rest of the pool is the sideboard. A per-card rule exists nowhere:
+the fixers are read from the IR (`builder::fixes`; 24 nonland fixers in the table, e.g. the
+Lander-token makers, Gene Pollinator's any-colour mana, Starfield Shepherd's "basic Plains" search).
+
+**The spread over 1,000 pools** (`engine/tests/sealed.rs::the_builder_spread_over_1000_pools`;
+pools 10,000-10,999, the default settings; pools holding The Dominion Bracelet skipped):
+
+| | arena (952 built) | paper (956 built) |
+|---|---|---|
+| two colours / mono | 937 / 15 (1.6%) | 913 / 43 (4.5%) |
+| splash (of the decks) | 247 (26%): 75 / 81 / 91 with 1 / 2 / 3 splash spells | 236 (25%): 75 / 81 / 80 |
+| lands 16 / 17 / 18 | 288 / 329 / 335 | 293 / 328 / 335 |
+| the pairs | all ten, 66 (WU) to 130 (BG) | all ten, 74 (UB) to 104 (BG) |
+| per deck: creatures, nonbasic lands | 16.7, 1.66 | 16.8, 1.62 |
+| per deck, mana value 1 / 2 / 3 / 4 / 5 / 6 / 7+ | 3.2 / 5.6 / 6.4 / 4.0 / 1.7 / 0.9 / 1.1 | 3.3 / 5.7 / 6.3 / 3.9 / 1.7 / 0.9 / 1.1 |
+| curve tilt t > 0.5 (a low curve) | 234 | 248 |
+
+Mono is rare because a colour rarely has 22+ playable spells (arena's balanced colours rarer
+still, `docs/sealed_data.md` 4.3). Every build of the test passes the checks: 40 cards, deck +
+sideboard = the pool + basics, every spell castable in the colours, the splash's fixer in the deck,
+`splash_sources` sources, one splash pip per splash spell. Seeded and independent of the pool's
+order.
+
+### 101.3 The sealed spec (`"sealed"`)
+
+```json
+{"sealed": {"set": "eoe", "collation": "arena", "boosters": 6, "builder": {"splash": 0.3},
+            "p0": {"pool": ["..."]}, "p1": {"deck": ["..."], "sideboard": ["..."]}}}
+```
+
+* `set` `"eoe"` (required; the only set); `collation` `"arena"` or `"paper"` (required when a seat's
+  pool is generated: no default, as the reference); `boosters` (6); `builder` (101.2); `p0` / `p1`
+  (optional): a given pool (built every game from the game seed) or a given deck and sideboard
+  (played as built: a 17lands human build, at least 40 cards, CR 100.2b; no basics in a pool or a
+  sideboard). A seat without one gets a generated pool.
+* **A game with seed s**: seat p's pool is `collation.generate(pool_seed(s, p))`, `pool_seed(s, p) =
+  split64(s ^ 0x5EA1_ED00_9001 ^ p << 40)`; its build uses the engine `Rng` `build_rng(s, p)`
+  (`split64(s ^ 0xB011_DDEC_0000 ^ p << 40)`). `"decks": "eval"` (what `eval_json` makes): the
+  pools and builds of `eval_game_seed(eval_seed, i)`, i = `split64(s) % eval_decks`: a fixed
+  evaluation set. Reproducible from the seed (tested).
+* The card table is `CardDb::eoe()` (`MtgSpec::db`); best-of-one with **open decklists**
+  (`GameSpec::hidden_decks` false: the engine's determinize assumes both decklists known); the
+  sideboard is the rest of the pool (CR 100.4b; unused in best-of-one).
+* Errors: `format` bo3 (sealed best-of-three is not built: pools of ~66 different cards pass the
+  64-entry pool list, 36.2), `constructed`, `pools`, `lands` (the builder has its own), `decks`
+  lists (seats go in `p0` / `p1`), an unknown key, set or collation, a non-card name. **A pool
+  holding a card the engine doesn't support fails loudly** (`MtgSpec::try_seats`, `MtgAz::new`,
+  so the driver's `new_game` errs): on this base The Dominion Bracelet (another branch), in ~4.8%
+  of pools (~10% of games); with it merged, none. `seats` (infallible) panics there.
+* Without the key every spec is what it was: the behaviour digests are unchanged (full
+  af00cc85e05ea0c1, `DIGEST_ENCODING=0` 660b3c387f18be70).
+* Python: `mtgz._engine.sealed_pool / sealed_build / sealed_seats / eoe_lookup` (JSON results;
+  `mtgz.sealed.engine` parses them). The module is zero-core's `engine_module!` spelled out in
+  `py/src/lib.rs` to add them; the registered games are unchanged.
+
+### 101.4 The 17lands yardstick in engine terms (`mtgz/sealed/yardstick.py`)
+
+A yardstick only (DESIGN.md 0): never a training input. `lookup(pools)` maps every card of the
+17lands pools and human builds to its `CardDb::eoe` id or the reason it has none (through the
+engine, not `support.rs`); `report(pools)`; `spec(pool, build=None, opponent=None, collation='arena',
+builder=None, **top)` makes the `mtg` sealed spec where seat 0 plays the human build (or our
+builder's build of the pool, made again per game seed) and seat 1 a generated pool, another pool
+or another human build. The human sideboard is the pool minus the deck (a launch-day card 17lands'
+rows missed included). `python -m mtgz.sealed.yardstick report`:
+
+| | pools | fully supported | builds | deck supported | of those, 40 cards |
+|---|---|---|---|---|---|
+| Premier Sealed | 9,765 | **9,149 (93.7%)** | 13,787 | 13,519 | 12,248 |
+| Traditional Sealed | 903 | **835 (92.5%)** | 2,887 | 2,840 | 2,481 |
+
+Blockers: The Dominion Bracelet (530 / 52 pools; another branch) and Paradox Haze (87 / 17; no IR,
+excluded by the user). With the Bracelet merged, 9,678 (99.1%) and 886 (98.1%) pools.
+
+### 101.5 What hidden decklists will need (the next step; the encoding owner's)
+
+Best-of-one sealed keeps open decklists. Hiding them means the search deals the opponent's whole
+unseen deck from a prior instead of their actual deck (and the opponent's-unseen-cards bag goes).
+What that prior needs from here:
+
+* **The opponent's pool generator**: the spec's `sealed.collation` and `boosters`
+  (`SealedSpec`), and `sealed::generated_pool(db, collation, boosters, seed)` with a seed drawn from
+  `determinize`'s generator (never `pool_seed`: the real pool would leak). In real sealed a player
+  never sees the opponent's pool, so the prior is over pools too.
+* **The builder and its settings**: `builder::build(db, pool, &settings, &mut rng)` with the spec's
+  `sealed.builder` and an `Rng` from the deal: a sampled deck is a fresh pool built as self-play
+  builds. Per seat source: a generated seat as above; a given pool (`p0`/`p1` `pool`) or a given
+  build: the deal needs a decision on what the viewer knows of it (the yardstick's human build is
+  the real opponent's, unknown in a real game: sample as a generated seat).
+* **Conditioning on what the opponent revealed** (in the deck: every `KEY_REVEAL`, the public deck
+  size 40, or a given build's size): rejection is hopeless after a few reveals, so the deal must
+  construct: a pool that contains the revealed cards (e.g. the generator with those cards placed in
+  slots of their rarity) and a build forced to play them (a `must` input to `builder::build`: the
+  revealed cards first among the spells and lands, their colours among the deck's). Neither exists
+  yet; both are additive.
+* **The encoding**: EoE cards have no identities in `identity.rs` (the cube's list and the legacy
+  registry; EoE cards encode as `UNKNOWN`, ENGINE.md 99 lists the EoE layout's gaps): S3's layout.
+
+### 101.6 Tests, fuzz, gate
+
+* `engine/tests/sealed.rs` (11): the builder (40 cards from the pool, castable, the splash rule,
+  seeded; the spread above; the settings; a thin pool; the fixers read from the IR); the spec
+  (reproducible seats, evaluation pairs fixed, given pools and builds, loud errors, specs without
+  the key unchanged, games through `MtgAz` to the end with `determinize` and both encodings).
+  Unit tests in `collation.rs` (3).
+* `tests/test_sealed_rust.py` (3; 101.1), `tests/test_sealed_yardstick.py` (4: the mapping, a human
+  build played as built against a generated pool, our builder on the same pool, a game through the
+  engine, the builder through the bindings).
+* **`FUZZ_POOL=sealed`** (`engine/tests/fuzz.rs`): each game's decks are the sealed spec's (arena
+  pools for even seeds, paper for odd), every check of the default mode; a game whose pool holds an
+  unsupported card is skipped, counted and named; games only. **`FUZZ_GAMES=20000`** (seeds 0-19,999,
+  run in parallel chunks): 19,997 seeds pass (18,038 games played, 1,959 skipped for The Dominion
+  Bracelet; wins 8,631 / 8,700, 707 draws, none aborted); **three seeds find engine bugs**, not fixed
+  here (the engine's owners'; 101.7).
+* Full engine suite (`cargo test --release -p engine`): 2,143 passed, 0 failed, 20 ignored (146
+  binaries). `python -m pytest tests -q`: 213 passed, 1 skipped. Digests unchanged. `python
+  tools/gate.py engine --no-mac --tested-sha 5097fa3 --expect-digest af00cc85e05ea0c1
+  --expect-digest0 660b3c387f18be70`: GATE PASSED engine 5097fa3327f0 in 523s (the Mac recheck not
+  needed).
+
+### 101.7 Engine bugs the sealed fuzz found (reported, not fixed)
+
+* **Seed 18106** (`FUZZ_POOL=sealed FUZZ_FIRST=18106 FUZZ_GAMES=1 FUZZ_LOG=1`): a panic in payment,
+  `pay.rs:2427` "a Pollinator to activate (the budget counts them)": in a world determinized for P1,
+  P1 casts Starbreach Whale from exile and pays with Island, Forest, then Gene Pollinator's "{T}, tap
+  an untapped permanent you control: add one mana of any color" (option 553) choosing Mechan
+  Shieldmate as the tapped permanent; the payment's `pol_actors` list is empty when the
+  `POL_FOR` source is paid (the option completes in the check of every option, `check_options_complete`).
+* **Seeds 3230 and 12350** (the same rerun line): a turn that doesn't end. Random play activates
+  Wandering Fumarole's "{0}: switch its power and toughness" (and, in 12350, Lavaclaw Reaches' "{X}:
+  +X/+0" with X = 0) again and again: past 1,000 decisions in one turn (turn 40 and turn 27), still
+  going after the fuzzer's minutes. The no-progress rule (100.7) should end such loops; here every
+  activation and resolution leaves a new until-end-of-turn effect, so (apparently) no state repeats.
+
+
