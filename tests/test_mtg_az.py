@@ -8,6 +8,7 @@ import json
 import numpy as np
 import pytest
 
+import mtgz.az
 from mtgz.az import evaldecks
 from mtgz.az import games as G
 from mtgz.az import protocol, run
@@ -425,7 +426,7 @@ def test_a_belief_teacher_distils_into_a_student_with_its_head_on_delver_view_ro
         w.add(drv.take_samples())
         assert w.close()['samples'] > 50
     torch.manual_seed(0)
-    belief = [['belief', 1024, 'multinomial']]
+    belief = mtgz.az.PACKAGE.aux_of('mtg')   # (the hand's and the deck's targets, docs/ENGINE.md 102.4)
     t = make_net(info, 'mtg', 'tokens', 32, 1, heads=2, aux=belief)
     with torch.no_grad():
         for lin in (t.gen, t.ptr, t.aux_head[2]):

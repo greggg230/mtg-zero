@@ -146,7 +146,7 @@ def test_belief_mode_deals_toward_the_prediction(spot):
     pred = [1e-4] * B.D
     pred[names.index(FOW)] = 0.5
     tot = sum(pred)
-    pred = [p / tot for p in pred]
+    pred = [p / tot for p in pred] + [1.0 / B.D] * B.D   # (and the deck target's, uniform: docs/ENGINE.md 102.4)
     o = 1 - spot['decider']
 
     def fow(**kw):
