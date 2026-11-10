@@ -21829,15 +21829,56 @@ needs to grow a head by a target (its `add_aux` adds a head to a checkpoint with
 
 ### 102.5 What S2 and S3 need to do to finish
 
-* **S2** (`eoe-s2-pools`): the `"sealed"` spec sets `hidden_decklists` and gives each seat its prior through
-  `MtgAz::from_seats`; `SealedPrior: DeckPrior` from its pieces - the collation with a seed from the deal's
-  generator, the conditioning by rarity (102.1 (b)), and `builder::build` with a `must` input (the shown cards played
-  first, their colours among the deck's) and an exact size n (a given human build's size may not be 40), its weights
-  times `DeckWant::tilt`; `support()` = every card the collation can put in a pool, and the basic lands;
-  `expected_fill` by its own samples (or exactly). A given build or pool of the yardstick is sampled as a generated
-  seat (the viewer does not know the human's pool either). `FUZZ_POOL=sealed` with `FUZZ_HIDDEN_DECKS=1`.
+* **S2** (`eoe-s2-pools`): done here after its merge (102.6): the `"sealed"` spec sets `hidden_decklists`, each
+  seat's prior is `SealedPrior` (S2's collation and builder, conditioned), `FUZZ_POOL=sealed` with
+  `FUZZ_HIDDEN_DECKS=1`. Left: the deal's speed with arena pools (102.6), and, if self-play shows the forced swaps
+  distort, a builder that takes the shown cards as an input of its own colour and curve choices.
 * **S3** (zero-core `feat/deck-reader`): the package passes `readers=mtgz.az.deck_reader.READERS` once the pin has
   readers; runs set `aux_deck_w` and `reader_deck`; the tilt is wired (`determinize_with`'s prediction has the deck
   columns: `deck_weights` and `determinize_deck_tilted`, with a seat key of its own, never a silent default); the
   EoE layout gives the set's cards identities (until then every EoE card is `UNKNOWN` in the target and in every
   bag, so the reader learns nothing on EoE), and re-declares the inputs on it (330 identities: 36.8's plan).
+
+### 102.6 The sealed prior (S2 merged)
+
+S2 finished (`eoe-s2-pools` 6f7f2f8, ENGINE.md 101) and was merged into this branch (9b72575; conflicts kept both
+sides: `MtgSpec` has `sealed` and `hidden_decklists`, the fuzz has `FUZZ_POOL=sealed` and `FUZZ_HIDDEN_DECKS`, and
+pay.rs's granted-ability counter check was the same fix on both branches). With D2's The Dominion Bracelet here,
+no sealed pool is unplayable: `the_builder_spread_over_1000_pools` builds all 1,000 arena and 1,000 paper pools
+(none skipped), `FUZZ_POOL=sealed` skips none, and `sealed_spec_errors_are_loud` names Paradox Haze (no IR) as its
+missing card instead.
+
+**The `"sealed"` spec turns hidden decklists on** (`"hidden_decklists": false` keeps 101.3's open decklists), and
+each seat's deck prior is `hidden_decks::SealedPrior` of the spec's collation (a spec without one - given pools or
+builds - `arena`, whose pools are Arena's: the yardstick's human builds are sampled as generated seats, since the
+viewer does not know the human's pool either), boosters and builder settings. 102.1's default, built:
+
+1. **The pool**: `sealed::generated_pool(collation, boosters, seed)`, the seed drawn from the deal's generator,
+   never the game's `pool_seed`.
+2. **R's nonbasic cards placed in it**: each one the pool lacks replaces a pool card of its rarity (the set list's)
+   that is not itself shown, uniformly; any card not shown when that rarity runs out. Exact: the pool holds R and
+   has the collation's size.
+3. **The build**: S2's builder, `builder::build_tilted` (`build` with the deck reader's tilt multiplying its spell
+   weights; `None` is `build` draw for draw, so every real sealed deck is S2's), up to `SEALED_TRIES` (4) builds,
+   the first whose colours (pair and splash) cover R's nonland cards' colours, else the one covering most.
+4. **R forced in**: R's cards the build lacks replace build cards that are not shown, each of its kind (a land for a
+   land, a spell for a spell; any when the kind runs out), chosen with probability proportional to 1 / tilt; then
+   basic lands in the build's proportions up to n (a given build's size), or non-shown cards removed down to it.
+   The sideboard is the rest of the pool.
+
+Every step is bounded (a fixed number of builds, no loop that waits for a match) and always returns a deck that
+meets K1-K3 (`check_sample` at every deal). Modelled, not exact: the rarity replacement (a pool the collation could
+deal, R placed where the real pool had it, not drawn by the collation's slot odds given R), the bounded colour
+retries (a deck of R's colours most of the time, not the builder's posterior colours given R), the forced swaps (the
+build's other choices are not re-made around R). `expected_fill` is the mean of 16 deals from a generator seeded by
+the request. Cost: a deal generates a pool (1.8 ms for arena, 0.015 ms for paper, 101.1) and up to 4 builds
+(~0.05 ms each): far above a search simulation's budget with arena; a bank of pools drawn once per decision, or a
+cached arena generator, is the speed-up when search runs on sealed (not built: S3's first runs measure it).
+
+Tests (`tests/hidden.rs`, 2 new): `the_sealed_prior_meets_its_contract` (120 requests from real arena builds, 0 to 40
+shown cards: 40 cards holding R, every card in the support, the deck's nonbasic cards and the sideboard 78 cards (six
+Arena boosters); 60 of 66 requests with 8+ shown cards of two colours give a deck in those colours and a splash at
+most; a tilt of 1 is the untilted deal), `the_sealed_spec_deals_hidden_decks_from_the_sealed_prior` (paper sealed
+games: priors named `sealed`, 56 worlds holding what the viewer saw, with its view, actions and encoding, each with
+another deck; `"hidden_decklists": false` keeps open decklists). `FUZZ_HIDDEN_DECKS=1 FUZZ_POOL=sealed` deals from
+the spec's sealed prior (arena for even seeds, paper for odd).
