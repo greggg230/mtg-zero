@@ -360,3 +360,193 @@ impl MtgAz {
         self.sample_hidden_deck(viewer, rng, tilt);
     }
 }
+
+// ---- The sealed prior (ENGINE.md 102.6): S2's collation and builder, conditioned ----
+
+/// The default prior of a sealed seat's deck (ENGINE.md 102.6): what S2's `"sealed"` spec makes,
+/// conditioned exactly on the shown cards R, every step bounded:
+///
+/// 1. **The pool**: the spec's collation and boosters (`sealed::generated_pool`), its seed drawn
+///    from the deal's generator (never the game's `pool_seed`: the real pool would leak).
+/// 2. **R's nonbasic cards placed in it**: each one the pool lacks replaces a pool card of its
+///    rarity (from the set list) that is not itself shown, chosen uniformly; any card not shown
+///    when that rarity runs out. The pool holds R.
+/// 3. **The build**: S2's builder (`builder::build_tilted`: the spec's settings, the deck reader's
+///    tilt on its spell weights), up to [`SEALED_TRIES`] builds, the first whose colours (pair and
+///    splash) cover R's nonland cards' colours, else the one covering most (the first of those).
+/// 4. **R forced in**: R's cards the build lacks replace build cards that are not shown, each of
+///    its kind (a land for a land, a spell for a spell; any when the kind runs out), chosen with
+///    probability proportional to 1 / tilt (the reader's favourites kept); then basic lands of
+///    the build's colours (by its basic lands' proportions) up to the size n, or non-shown cards
+///    removed down to it (a given build's size). The sideboard is the rest of the pool.
+///
+/// Exact: the deck has n cards, holds R and comes from a pool the collation's slots and rarities
+/// allow but for R's own placement. Modelled (the prior's choices, not the Bayes posterior of
+/// "collation, then builder" given R): the replacement by rarity, the bounded colour retries, the
+/// forced swaps.
+pub struct SealedPrior {
+    collation: super::sealed::collation::Collation,
+    boosters: usize,
+    settings: super::sealed::builder::Settings,
+    /// Every card a pool of the set can hold and the basic lands (sorted).
+    support: Arc<Vec<DefId>>,
+    /// The set list's rarity of each definition (indexed by `DefId`; 0 none).
+    rarity: Arc<Vec<u8>>,
+}
+
+/// Step 3's builds at most (ENGINE.md 102.6).
+pub const SEALED_TRIES: usize = 4;
+
+impl SealedPrior {
+    pub fn new(collation: super::sealed::collation::Collation, boosters: usize, settings: super::sealed::builder::Settings) -> SealedPrior {
+        static TABLES: OnceLock<(Arc<Vec<DefId>>, Arc<Vec<u8>>)> = OnceLock::new();
+        let (support, rarity) = TABLES
+            .get_or_init(|| {
+                let db = super::sealed::db();
+                let mut rarity = vec![0u8; db.len()];
+                let mut support: Vec<DefId> = super::pools::basic_ids(db).to_vec();
+                let data = super::sealed::collation::set_data();
+                let names = data.cards.iter().map(|c| (c.name, c.rarity)).chain(data.treatments.iter().flat_map(|t| t.1.iter().copied()));
+                for (name, r) in names {
+                    if let Some(id) = db.id(name) {
+                        support.push(id);
+                        if rarity[id as usize] == 0 {
+                            rarity[id as usize] = r.bytes().next().unwrap_or(b'?');
+                        }
+                    }
+                }
+                support.sort_unstable();
+                support.dedup();
+                (Arc::new(support), Arc::new(rarity))
+            })
+            .clone();
+        SealedPrior { collation, boosters, settings, support, rarity }
+    }
+
+    /// The prior of seat `p`'s deck of a sealed spec: its collation (a seat without one, a given
+    /// pool or build of the yardstick: `arena`, whose pools are Arena's, ENGINE.md 101.1), its
+    /// boosters and builder settings.
+    pub fn of_spec(s: &super::sealed::SealedSpec) -> SealedPrior {
+        SealedPrior::new(s.collation.unwrap_or(super::sealed::collation::Collation::Arena), s.boosters, s.builder.clone())
+    }
+}
+
+impl DeckPrior for SealedPrior {
+    fn name(&self) -> &'static str {
+        "sealed"
+    }
+
+    fn support(&self) -> &[DefId] {
+        &self.support
+    }
+
+    fn sample(&self, want: &DeckWant, rng: &mut Rng) -> SampledDeck {
+        let db = want.db;
+        let basics = super::pools::basic_ids(db);
+        let is_land = |d: DefId| db.def(d).is(types::LAND);
+        let tilt = |d: DefId| want.tilt.map_or(1.0, |t| t(d));
+        // 1. The pool.
+        let seed = rng.next_u64();
+        let mut pool = super::sealed::generated_pool(db, self.collation, self.boosters, seed)
+            .unwrap_or_else(|e| panic!("hidden decklists, the sealed prior: {e} (a set card the engine doesn't support)"));
+        pool.sort_unstable();
+        // 2. R's nonbasic cards placed in it, by rarity.
+        let mut shown_in = vec![false; pool.len()];
+        let mut extra: Vec<DefId> = Vec::new();
+        for &r in want.shown.iter().filter(|d| !basics.contains(d)) {
+            if let Some(i) = (0..pool.len()).find(|&i| pool[i] == r && !shown_in[i]) {
+                shown_in[i] = true;
+                continue;
+            }
+            let free: Vec<usize> = (0..pool.len()).filter(|&i| !shown_in[i]).collect();
+            let same: Vec<usize> = free.iter().copied().filter(|&i| self.rarity[pool[i] as usize] == self.rarity[r as usize]).collect();
+            let from = if same.is_empty() { &free } else { &same };
+            match from.len() {
+                0 => extra.push(r),
+                k => {
+                    let i = from[rng.below(k as u32) as usize];
+                    pool[i] = r;
+                    shown_in[i] = true;
+                }
+            }
+        }
+        pool.extend(extra);
+        pool.sort_unstable();
+        // 3. The build: the first of a few whose colours cover the shown cards'.
+        let need = want.shown.iter().filter(|&&d| !is_land(d)).fold(0u8, |m, &d| m | db.def(d).colors) & crate::mana::COLORS;
+        let mut best: Option<(u32, super::sealed::builder::Build)> = None;
+        for _ in 0..SEALED_TRIES {
+            let b = super::sealed::builder::build_tilted(db, &pool, &self.settings, want.tilt, rng);
+            let miss = (need & !(b.colors | b.splash)).count_ones();
+            if best.as_ref().is_none_or(|x| miss < x.0) {
+                best = Some((miss, b));
+            }
+            if miss == 0 {
+                break;
+            }
+        }
+        let b = best.expect("a build").1;
+        // 4. R forced in, then the size n.
+        let mut rest = b.deck.clone();
+        let mut add: Vec<DefId> = Vec::new();
+        for &r in want.shown {
+            match rest.binary_search(&r) {
+                Ok(i) => {
+                    rest.remove(i);
+                }
+                Err(_) => add.push(r),
+            }
+        }
+        for &r in &add {
+            let kind: Vec<usize> = (0..rest.len()).filter(|&i| is_land(rest[i]) == is_land(r)).collect();
+            let from: Vec<usize> = if kind.is_empty() { (0..rest.len()).collect() } else { kind };
+            if from.is_empty() {
+                break;
+            }
+            let w: Vec<f64> = from.iter().map(|&i| 1.0 / tilt(rest[i])).collect();
+            let k = pick(rng, &w).unwrap_or(0);
+            rest.remove(from[k]);
+        }
+        let mut deck: Vec<DefId> = want.shown.to_vec();
+        deck.extend_from_slice(&rest);
+        let basic_mix: Vec<DefId> = b.deck.iter().copied().filter(|d| basics.contains(d)).collect();
+        while deck.len() < want.n {
+            let d = if basic_mix.is_empty() { basics[rng.below(5) as usize] } else { basic_mix[rng.below(basic_mix.len() as u32) as usize] };
+            deck.push(d);
+        }
+        while deck.len() > want.n {
+            // (Only a deck holding R and more than n cards: R comes first, `rest` after it.)
+            let k = want.shown.len() + rng.below((deck.len() - want.shown.len()) as u32) as usize;
+            deck.remove(k);
+        }
+        deck.sort_unstable();
+        let mut side = pool;
+        for d in &deck {
+            if let Ok(i) = side.binary_search(d) {
+                side.remove(i);
+            }
+        }
+        SampledDeck { deck, sideboard: side }
+    }
+
+    /// By the prior's own samples: 16 deals from a generator seeded by the request (the shown
+    /// cards and the size), the mean count of each card beyond R.
+    fn expected_fill(&self, want: &DeckWant) -> Vec<f64> {
+        let mut e = vec![0.0; want.db.len()];
+        let seed = want.shown.iter().fold(0x5EA1_ED_F111u64 ^ want.n as u64, |h, &d| crate::rng::split64(h ^ d as u64));
+        let mut rng = Rng::new(seed);
+        let plain = DeckWant { db: want.db, n: want.n, shown: want.shown, companion: want.companion, tilt: None };
+        const K: usize = 16;
+        for _ in 0..K {
+            let s = self.sample(&plain, &mut rng);
+            let mut left = s.deck;
+            for &d in want.shown {
+                take_one(&mut left, d);
+            }
+            for d in left {
+                e[d as usize] += 1.0 / K as f64;
+            }
+        }
+        e
+    }
+}

@@ -748,6 +748,18 @@ skipped in both. **Decision (user, 2026-11-08):** inferring how the game generat
 data is environment modelling, not human play, and is allowed (the `arena` collation); 17lands stays a
 yardstick for everything humans do.
 
+**S2 status (2026-11-09, branch `eoe-s2-pools`; ENGINE.md 101):** the collations in Rust, bit-identical
+to the Python reference (2,006 seeds per collation compared slot by slot); a randomised builder with
+no human data (land count 16-18, colour pair by a softmax over pair scores, sometimes mono, ~25%
+splashes only when a fixer makes the splash castable, a random curve tilt; always 40 cards, the rest
+of the pool the sideboard); the `mtg` spec's `"sealed"` key (two generated or given pools per game
+from its seed, built, best-of-one on the EoE table with open decklists; an evaluation set; a pool
+holding an unsupported card fails loudly); the 17lands pools in engine terms (93.7% of Premier
+pools fully supported on this base, 99.1% once The Dominion Bracelet merges) and a helper that
+makes a spec playing a pool's human build or our build of it; `FUZZ_POOL=sealed` (20,000 seeds: three
+find engine bugs, a payment panic and two loops that don't end, ENGINE.md 101.7). Next: hidden
+decklists (the encoding owner's; ENGINE.md 101.5 lists what the deal's prior needs), then S3.
+
 **Hidden decklists (2026-11-09, branch `eoe-hidden-decks`; docs/ENGINE.md 102):** the spec key
 `"hidden_decklists"` (best-of-one) hides each deck from the other player: `determinize` deals the opponent's whole
 unseen deck from a prior conditioned on what the viewer has seen (a `DeckPrior` per seat: a stub over the set's

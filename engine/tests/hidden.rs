@@ -1066,3 +1066,92 @@ fn the_hidden_decklists_switch() {
     assert_eq!(deck_cards(&off, 0), deck_cards(&a, 0));
     assert_eq!(deck_cards(&off, 1), deck_cards(&a, 1));
 }
+
+// ---- The sealed prior (ENGINE.md 102.6) ----
+
+/// The sealed prior's contract on real builds of S2's sealed spec (ENGINE.md 102.6): for shown
+/// sets R drawn from a real deck (0 to 40 of its cards), the sampled deck has 40 cards, holds R,
+/// every card in the support, and its nonbasic cards and the sideboard make a pool of the
+/// collation's size; mostly in R's colours; a tilt of 1 is the untilted deal draw for draw.
+#[test]
+fn the_sealed_prior_meets_its_contract() {
+    use engine::az::hidden_decks::SealedPrior;
+    use engine::az::sealed::{collation::Collation, SealedSpec};
+    let db = engine::az::sealed::db();
+    let basics = engine::az::pools::basic_ids(db);
+    let spec = SealedSpec::parse(&serde_json::json!({"set": "eoe", "collation": "arena"})).unwrap();
+    let prior = SealedPrior::new(Collation::Arena, 6, spec.builder);
+    let mut rng = Rng::new(1026);
+    let (mut covered, mut two) = (0, 0);
+    for seed in 0..120u64 {
+        let real = spec.seat(seed, 0).unwrap().0.deck;
+        let k = (seed % 41) as usize;
+        let mut shown: Vec<u16> = (0..k).map(|i| real[(i * 7 + seed as usize) % real.len()]).collect();
+        shown.sort_unstable();
+        // (a multiset inside the real deck: drop extra copies)
+        let mut left = real.clone();
+        shown.retain(|d| match left.iter().position(|x| x == d) {
+            Some(i) => {
+                left.remove(i);
+                true
+            }
+            None => false,
+        });
+        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None };
+        let s = prior.sample(&want, &mut rng);
+        check_sample(&prior, &want, &s).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+        let nonbasic = s.deck.iter().filter(|d| !basics.contains(d)).count();
+        assert_eq!(nonbasic + s.sideboard.len(), 78, "seed {seed}: a pool of six Arena boosters");
+        let cols = |v: &[u16]| v.iter().filter(|&&d| !db.def(d).is(engine::db::types::LAND)).fold(0u8, |m, &d| m | db.def(d).colors) & 31;
+        // (R of two colours: the deck stays in them, a splash at most)
+        if k >= 8 && cols(&shown).count_ones() == 2 {
+            two += 1;
+            covered += (cols(&s.deck).count_ones() <= 3) as u32;
+        }
+        let one = |_: u16| 1.0;
+        let w1 = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: Some(&one) };
+        assert_eq!(prior.sample(&w1, &mut Rng::new(seed)), prior.sample(&want, &mut Rng::new(seed)), "seed {seed}: a tilt of 1");
+    }
+    println!("{two} requests with 8+ shown cards of two colours, {covered} decks in those and a splash at most");
+    assert!(two > 20 && covered * 10 >= two * 9, "{covered} of {two}");
+}
+
+/// S2's `"sealed"` spec hides the decklists (ENGINE.md 102.6), each seat's deck dealt from the
+/// sealed prior: worlds hold what the viewer saw, keep its view, actions and encoding, and change
+/// the deck; `"hidden_decklists": false` keeps S2's open decklists.
+#[test]
+fn the_sealed_spec_deals_hidden_decks_from_the_sealed_prior() {
+    let open = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "arena"}, "hidden_decklists": false}"#).unwrap();
+    assert!(!open.hidden_decklists);
+    let sp = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "paper"}}"#).unwrap();
+    assert!(sp.hidden_decklists);
+    let mut rng = Rng::new(1027);
+    let mut zr = zero_search::rng::Rng::new(1027);
+    let (mut worlds, mut other) = (0, 0);
+    for s in 0..6u64 {
+        let mut a = MtgAz::new_game(&sp, 2, 1027 + s).unwrap();
+        assert!(a.m.deck_priors.iter().all(|p| p.as_ref().is_some_and(|p| p.name() == "sealed")));
+        let mut keys = Vec::new();
+        while a.to_move().is_some() {
+            if a.g.turn().number >= 3 && rng.below(60) == 0 {
+                let v = a.to_move().unwrap() as u8;
+                let (shown, real, x) = (shown_of(&a, v), deck_cards(&a, 1 - v), az_enc(&a, v as usize));
+                for _ in 0..2 {
+                    let mut d = a.clone();
+                    d.determinize(v as usize, &mut zr);
+                    let world = deck_cards(&d, 1 - v);
+                    assert!(world.len() == real.len() && holds(&world, &shown), "game {s}: the world's deck");
+                    assert_eq!(d.g.view_of(v), a.g.view_of(v));
+                    assert_eq!(az_legal(&d), az_legal(&a));
+                    assert_eq!(az_enc(&d, v as usize), x);
+                    worlds += 1;
+                    other += (world != real) as u32;
+                }
+            }
+            let l = az_legal(&a);
+            a.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+        }
+    }
+    println!("{worlds} sealed worlds, {other} with another deck");
+    assert!(worlds >= 20 && other == worlds, "{worlds} {other}");
+}

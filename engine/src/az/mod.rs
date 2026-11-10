@@ -34,6 +34,7 @@ pub mod lab;
 pub mod matches;
 pub mod pools;
 pub mod sample;
+pub mod sealed;
 pub mod view;
 
 use crate::db::CardDb;
@@ -120,6 +121,17 @@ pub enum DeckMode {
 /// The position lab (ENGINE.md 76): `"start"` starts every game at a spot of another game of
 /// this spec (its seed and actions), the hidden cards dealt again, the decider's first moves
 /// forced (`lab.rs`); best-of-one only, not with `"seed"`. Without it every game is what it was.
+///
+/// Sealed (ENGINE.md 101, `sealed/`): `"sealed": {"set": "eoe", "collation": "arena" | "paper",
+/// "boosters": 6, "builder": {...}, "p0": ..., "p1": ...}` plays best-of-one on the Edge of
+/// Eternities card table (`CardDb::eoe`): each game generates a pool per player from its seed
+/// (the collation's six Play Boosters), builds both decks with the randomised builder (40 cards,
+/// the rest of the pool the sideboard) and plays them with open decklists; `"decks": "eval"` takes
+/// the pools and builds of evaluation pair `split64(seed) % eval_decks` of `eval_seed` instead.
+/// `p0` / `p1` give a seat a pool (`{"pool": [names]}`, built every game) or a build (`{"deck":
+/// [...], "sideboard": [...]}`, played as it is). Best-of-one only; not with `constructed`,
+/// `pools`, `lands` (the builder has its own) or decklists. Without the key every spec is what it
+/// was.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MtgSpec {
     pub max_turns: u32,
@@ -141,6 +153,8 @@ pub struct MtgSpec {
     pub start: Option<std::sync::Arc<lab::Start>>,
     /// Hidden decklists (ENGINE.md 102).
     pub hidden_decklists: bool,
+    /// Sealed play (ENGINE.md 101): the pools, the builder and the seats; None for every other spec.
+    pub sealed: Option<sealed::Shared>,
 }
 
 impl Default for MtgSpec {
@@ -160,6 +174,7 @@ impl Default for MtgSpec {
             log: false,
             start: None,
             hidden_decklists: false,
+            sealed: None,
         }
     }
 }
@@ -213,11 +228,18 @@ impl MtgSpec {
         if let Some(x) = obj.get("constructed") {
             s.constructed = x.as_bool().ok_or("mtg spec: constructed must be a boolean")?;
         }
+        if let Some(x) = obj.get("sealed") {
+            s.sealed = Some(std::sync::Arc::new(sealed::SealedSpec::parse(x)?));
+            // Sealed hides the decklists (ENGINE.md 102.6: nobody sees the opponent's pool), unless
+            // the spec says `"hidden_decklists": false` (open decklists, ENGINE.md 101.3's game).
+            s.hidden_decklists = true;
+        }
         let db = s.db();
         let mut pools = None;
         for (k, x) in obj {
             let int = || x.as_u64().ok_or_else(|| format!("mtg spec: {k} must be a non-negative integer"));
             match k.as_str() {
+                "sealed" => {}
                 "max_turns" => s.max_turns = int()? as u32,
                 "format" => {
                     s.format = match x.as_str() {
@@ -321,6 +343,23 @@ impl MtgSpec {
                 return Err("mtg spec: hidden_decklists needs limited decks of the spec (not constructed, drafted or a lab start: no prior for them yet, ENGINE.md 102)".into());
             }
         }
+        if s.sealed.is_some() {
+            if s.format != Format::Bo1 {
+                return Err("mtg spec: sealed best-of-three (sideboarding, hidden decklists) is not built yet: format must be \"bo1\"".into());
+            }
+            if s.constructed {
+                return Err("mtg spec: sealed and constructed are different formats".into());
+            }
+            if s.pools {
+                return Err("mtg spec: sealed pools come from the sealed key, not pools".into());
+            }
+            if obj.contains_key("lands") {
+                return Err("mtg spec: sealed decks' lands are the builder's (sealed.builder.lands)".into());
+            }
+            if !matches!(s.decks, DeckMode::Random | DeckMode::Eval) {
+                return Err("mtg spec: sealed seats are given as sealed.p0 / sealed.p1, not decks lists".into());
+            }
+        }
         if s.constructed {
             if s.format != Format::Bo1 {
                 return Err("mtg spec: constructed best-of-three (sideboarding to 60+ / 15) is not built yet: format must be \"bo1\"".into());
@@ -359,10 +398,24 @@ impl MtgSpec {
     /// The card table this spec's games use: the cube's, or with
     /// `constructed` the cube's and the legacy cards (ENGINE.md 54).
     pub fn db(&self) -> &'static CardDb {
-        if self.constructed {
+        if self.sealed.is_some() {
+            sealed::db()
+        } else if self.constructed {
             CardDb::constructed()
         } else {
             CardDb::cube()
+        }
+    }
+
+    /// The seed whose pools and builds a sealed game with seed `seed` plays: `seed`, or with
+    /// `"decks": "eval"` evaluation pair `split64(seed) % eval_decks`'s (ENGINE.md 101.3).
+    pub fn sealed_seed(&self, seed: u64) -> u64 {
+        match self.decks {
+            DeckMode::Eval => {
+                let i = (zero_search::rng::split64(seed) % self.eval_decks as u64) as u32;
+                sealed::eval_game_seed(self.eval_seed, i)
+            }
+            _ => seed,
         }
     }
 
@@ -380,8 +433,23 @@ impl MtgSpec {
     }
 
     /// The first game's decks, sideboards and first picks of a match with
-    /// this seed (ENGINE.md 36.4).
+    /// this seed (ENGINE.md 36.4). Panics where [`try_seats`](Self::try_seats)
+    /// fails (a sealed pool holding a card the engine doesn't support).
     pub fn seats(&self, seed: u64) -> [Seat; 2] {
+        self.try_seats(seed).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// [`seats`](Self::seats), or why there are none: a sealed game's
+    /// generated pool can hold a card the engine doesn't support (ENGINE.md
+    /// 101.3: a loud failure, never a dropped card). Every other spec has seats.
+    pub fn try_seats(&self, seed: u64) -> Result<[Seat; 2], String> {
+        if let Some(s) = &self.sealed {
+            return s.seats(self.sealed_seed(seed)).map_err(|e| format!("mtg spec: sealed game {seed}: {e}"));
+        }
+        Ok(self.cube_seats(seed))
+    }
+
+    fn cube_seats(&self, seed: u64) -> [Seat; 2] {
         let db = CardDb::cube();
         let built = |p: pools::Pool| -> Seat {
             let (deck, sideboard) = pools::build_deck(db, &p.cards, &self.gen);
@@ -449,7 +517,7 @@ pub struct MtgAz {
 
 impl MtgAz {
     pub fn new(spec: &MtgSpec, seed: u64) -> Result<MtgAz, String> {
-        let seats = spec.seats(seed);
+        let seats = spec.try_seats(seed)?;
         // Best-of-three: the decks are hidden within the pools (ENGINE.md
         // 36.11); best-of-one keeps open decklists (M5a-M8a's game).
         let gspec = GameSpec {
@@ -461,8 +529,12 @@ impl MtgAz {
             log: spec.log,
             ..GameSpec::default()
         };
-        let priors: Option<std::sync::Arc<dyn hidden_decks::DeckPrior>> =
-            spec.hidden_decklists.then(|| hidden_decks::TablePrior::of(spec.db()) as std::sync::Arc<dyn hidden_decks::DeckPrior>);
+        // (The prior of each deck, ENGINE.md 102: a sealed spec's seats the sealed prior of its
+        // collation, boosters and builder; any other spec the stub over its table.)
+        let priors: Option<std::sync::Arc<dyn hidden_decks::DeckPrior>> = spec.hidden_decklists.then(|| match &spec.sealed {
+            Some(sl) => std::sync::Arc::new(hidden_decks::SealedPrior::of_spec(sl)) as std::sync::Arc<dyn hidden_decks::DeckPrior>,
+            None => hidden_decks::TablePrior::of(spec.db()) as std::sync::Arc<dyn hidden_decks::DeckPrior>,
+        });
         MtgAz::from_seats(spec.db(), gspec, spec.format, &seats, seed, [priors.clone(), priors])
     }
 

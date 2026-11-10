@@ -58,6 +58,12 @@
 //! `FUZZ_POOL=eoe` (ENGINE.md 99): Edge of Eternities sealed, the set's own
 //! card table (`CardDb::eoe`): random 40-card decks of its supported cards
 //! (17 lands, 23 spells; games only, no matches).
+//! `FUZZ_POOL=sealed` (ENGINE.md 101.6): Edge of Eternities sealed decks as the `mtg` spec's
+//! `"sealed"` key makes them: each game's two pools generated from its seed (the `arena`
+//! collation for even seeds, `paper` for odd ones), built by the randomised builder (40 cards,
+//! the rest of the pool the sideboard), on the EoE card table; every check of the default mode.
+//! A pool holding a card this checkout doesn't support (a loud error of the spec, never a dropped
+//! card) skips its game, counted and named at the end. Games only (sealed is best-of-one).
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 //!
 //! `FUZZ_HIDDEN_DECKS=1` (ENGINE.md 102): the mode's games (the default decks or `FUZZ_POOL=eoe`'s)
@@ -272,6 +278,7 @@ enum PoolMode {
     Drafted,
     Delver,
     Eoe,
+    Sealed,
 }
 
 fn pool_mode() -> PoolMode {
@@ -282,7 +289,8 @@ fn pool_mode() -> PoolMode {
         Ok("drafted") => PoolMode::Drafted,
         Ok("delver") => PoolMode::Delver,
         Ok("eoe") => PoolMode::Eoe,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\" or \"eoe\")"),
+        Ok("sealed") => PoolMode::Sealed,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -300,6 +308,33 @@ fn delver_mode() -> bool {
 
 fn eoe_mode() -> bool {
     pool_mode() == PoolMode::Eoe
+}
+
+fn sealed_mode() -> bool {
+    pool_mode() == PoolMode::Sealed
+}
+
+/// The sealed spec of game `seed` (`FUZZ_POOL=sealed`): arena pools for even seeds, paper for odd.
+fn sealed_spec(seed: u64) -> &'static engine::az::MtgSpec {
+    static SPECS: std::sync::OnceLock<[engine::az::MtgSpec; 2]> = std::sync::OnceLock::new();
+    let specs = SPECS.get_or_init(|| {
+        ["arena", "paper"].map(|c| engine::az::MtgSpec::parse(&format!(r#"{{"sealed": {{"set": "eoe", "collation": "{c}"}}}}"#)).unwrap())
+    });
+    &specs[(seed % 2) as usize]
+}
+
+/// The decks and sideboards of sealed game `seed`, or why it has none (a pool holding a card
+/// this checkout doesn't support).
+fn sealed_decks(seed: u64) -> Result<[(Vec<u16>, Vec<u16>); 2], String> {
+    Ok(sealed_spec(seed).try_seats(seed)?.map(|s| (s.deck, s.sideboard)))
+}
+
+/// `FUZZ_POOL=sealed`: game `seed` can't be dealt (its error), else None.
+fn sealed_unplayable(seed: u64) -> Option<String> {
+    if !sealed_mode() {
+        return None;
+    }
+    sealed_decks(seed).err()
 }
 
 /// The supported cards of the Edge of Eternities table (`FUZZ_POOL=eoe`):
@@ -602,7 +637,7 @@ fn check_forced_chance(g: &Game, seed: u64, step: usize) {
 fn game_db() -> &'static CardDb {
     if delver_mode() {
         CardDb::constructed()
-    } else if eoe_mode() {
+    } else if eoe_mode() || sealed_mode() {
         CardDb::eoe()
     } else {
         common::db()
@@ -1024,6 +1059,9 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     if eoe_mode() {
         return [(eoe_deck(&mut rng), Vec::new()), (eoe_deck(&mut rng), Vec::new())];
     }
+    if sealed_mode() {
+        return sealed_decks(seed).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+    }
     if seed % 4 == 3 {
         let gen = engine::az::decks::DeckGen::default();
         return [
@@ -1358,9 +1396,16 @@ fn fuzz_random_games() {
     let (mut wins, mut draws, mut aborted, mut turns, mut decisions) = ([0u32; 2], 0u32, 0u32, 0u64, 0u64);
     let (mut companions, mut companions_used) = (0u32, 0u32);
     let mut skips = 0u64;
+    let mut unplayable: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
     for seed in first..first + n {
         if skipped(seed) {
             skips += 1;
+            continue;
+        }
+        if let Some(e) = sealed_unplayable(seed) {
+            // (The error names the card: "... <name> is not supported: <blockers>".)
+            let card = e.split(": ").find(|x| x.ends_with(" is not supported")).map_or(e.clone(), |x| x.trim_end_matches(" is not supported").to_string());
+            *unplayable.entry(card).or_insert(0) += 1;
             continue;
         }
         let p = std::panic::catch_unwind(|| if hidden_decks_mode() { play_hidden(seed) } else { play(seed, true) }).unwrap_or_else(|e| {
@@ -1440,6 +1485,10 @@ fn fuzz_random_games() {
             assert!(f > 0, "FUZZ_CHANCE: no replay took a forced outcome ({w} walks, {s} steps)");
         }
     }
+    if sealed_mode() {
+        let total: u64 = unplayable.values().sum();
+        println!("FUZZ_POOL=sealed: {} games played; {total} games skipped, a pool holding a card this checkout doesn't support: {unplayable:?}", n - total - skips);
+    }
     if delver_mode() {
         let (m, t, c) =
             (DELVER_MURKTIDES.load(Ordering::Relaxed), DELVER_MURK_TRIGGERS.load(Ordering::Relaxed), DELVER_CHARMS.load(Ordering::Relaxed));
@@ -1453,6 +1502,9 @@ fn fuzz_random_games() {
 #[test]
 fn same_seed_and_actions_replay_identically() {
     for seed in 1000..1030 {
+        if sealed_unplayable(seed).is_some() {
+            continue;
+        }
         let a = play(seed, false);
         // Replay the recorded actions from the same seed.
         let mut g = new_game(seed);
@@ -1822,6 +1874,10 @@ fn fuzz_random_matches() {
         println!("FUZZ_POOL=eoe: games only (sealed matches come with milestone S2)");
         return;
     }
+    if sealed_mode() {
+        println!("FUZZ_POOL=sealed: games only (sealed is best-of-one: ENGINE.md 101)");
+        return;
+    }
     if hidden_decks_mode() {
         println!("FUZZ_HIDDEN_DECKS: games only (hidden decklists are best-of-one)");
         return;
@@ -1869,7 +1925,7 @@ fn fuzz_random_matches() {
 fn same_seed_and_actions_replay_matches_identically() {
     use engine::az::MtgAz;
     use zero_search::game::SearchGame;
-    if delver_mode() || eoe_mode() {
+    if delver_mode() || eoe_mode() || sealed_mode() {
         return;
     }
     for seed in 2000..2012 {

@@ -289,15 +289,30 @@ spread than Arena's, and whether paper boosters are balanced is not public.
 
 ## 5. Open questions for S2
 
+(Status 2026-11-09, branch `eoe-s2-pools`: the Rust port, the builder and the sealed spec are
+docs/ENGINE.md 101.)
+
 1. **The residuals of 4.3** (mythics, cross-pack repeats, five-uncommon sharing, uneven same-colour
    pairs). The whole draft file (142 MB, ~7x the packs) would sharpen all of them if they matter.
-2. **Paradox Haze**: excluded from both collations; 1% of 17lands pools hold it (flagged).
-3. **Support**: until Gene Pollinator, Unravel, Steelswarm Operator, Tractor Beam (commons) and the
-   rest land, 8% of real pools are fully supported; the S5 comparison needs (nearly) all.
-4. **Speed**: an arena pool takes ~40 ms in Python; self-play at scale wants the Rust port (pinned
-   by `test_the_generator_is_pinned`).
+   Open; the Rust port reproduces the model as it is, so a change goes to both (and the comparison
+   test shows a drift).
+2. **Paradox Haze**: excluded from both collations; 1% of 17lands pools hold it (flagged, and
+   `mtgz.sealed.yardstick` reports them as unplayable: no IR).
+3. **Support**: at `eoe-s2-pools` (319 of the table's 320 cards; The Dominion Bracelet on another
+   branch) **9,149 of 9,765 Premier pools (93.7%) and 835 of 903 Traditional (92.5%) are fully
+   supported** (`python -m mtgz.sealed.yardstick report`, read from the engine's card table); with
+   the Bracelet merged 99.1% / 98.1%, Paradox Haze the rest. A generated pool holding an
+   unsupported card fails loudly in the `mtg` spec (~4.8% of pools on this base).
+4. **Speed**: done. `engine/src/az/sealed/collation.rs` reproduces both collations bit for bit
+   (`tests/test_sealed_rust.py`: 2,006 seeds per collation and the options, slot by slot): 0.015 ms
+   per paper pool, 1.8 ms per arena pool (Python ~50 ms).
 5. **Best-of-three**: the 903 Traditional pools (with per-game sideboarding) are kept for the later
-   best-of-three milestone.
+   best-of-three milestone. Sealed best-of-three also needs a pool list past 64 entries (a pool has
+   ~66 different cards; ENGINE.md 36.2's sideboarding list holds 59 and the basics) and hidden
+   decklists (ENGINE.md 101.5).
+6. **The builder's spread** (ENGINE.md 101.2, no human data): ~1.6% (arena) / 4.5% (paper) mono
+   decks, ~25% splashes, lands uniform 16-18, every colour pair. Whether these rates suit the play
+   network (S3) is open: they are settings of the spec.
 
 ## 6. Reproducing
 
