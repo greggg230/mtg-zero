@@ -1034,6 +1034,10 @@ pub enum Mark {
     /// as the total cost is paid, after the mana abilities (CR 601.2g-h,
     /// 702.66a), as the payment ends (ENGINE.md 51).
     DelveExile,
+    /// A hand card chosen for the delve of the spell being cast that the
+    /// spell's cost discards (retrace's land card): exiled once discarded
+    /// (CR 601.2h: the discard paid before the mana; ENGINE.md 100.4.9).
+    DelvePromised,
     /// On a spell whose permanent enters with a counter for each card
     /// exiled with it (Murktide Regent, `CardDef::counters_per_exiled`): a
     /// card (in exile, this object) its delve exiled to pay its cost (CR

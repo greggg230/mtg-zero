@@ -682,6 +682,9 @@ impl Game {
             }
             let left = o.left();
             if left == 0 {
+                // The cards promised to delve, discarded: exiled (CR 601.2h,
+                // 702.66a).
+                self.exile_promised(o.p, Some(o.card));
                 return;
             }
             if self.order_free(&o) {
@@ -716,6 +719,8 @@ impl Game {
         use part::*;
         match ch {
             Choice::Card(c) => {
+                // (A card of the definition promised to delve, if any.)
+                let c = if matches!(k, DISCARD | DISCARD_ALSO) { self.promised_twin(o.p, c) } else { c };
                 match k {
                     DISCARD | DISCARD_ALSO => self.discard(c),
                     EXILE_HAND => {
@@ -782,6 +787,15 @@ impl Game {
                     let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
                     opts.retain(|x| matches!(x.choice, Choice::Card(c) if self.card_matches(f, c, &ctx)));
                 }
+                // (The cards promised to delve are the discards': each pick
+                // leaves the discards after it those, ENGINE.md 100.4.9.)
+                let other = |j: u8, m: usize| if o.done & (1 << j) == 0 { m } else { 0 };
+                let left = if k == DISCARD_ALSO {
+                    (n as usize - picked.len() - 1, other(DISCARD, cost.discard as usize))
+                } else {
+                    (other(DISCARD_ALSO, cost.discard_also.as_ref().map_or(0, |d| d.0 as usize)), n as usize - picked.len() - 1)
+                };
+                opts.retain(|x| matches!(x.choice, Choice::Card(c) if self.promises_kept(p, card, cost, self.promised_twin(p, c), left)));
                 Some(opts)
             }
             EXILE_HAND => {

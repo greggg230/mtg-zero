@@ -1639,3 +1639,48 @@ fn cr_601_2h_no_order_asked_when_it_cant_matter() {
     settle(&mut g);
     assert_eq!(g.obj(rebel).zone, Zone::Graveyard, "{}", log(&g));
 }
+
+/// CR 601.2h, 702.66a, 702.81a: Treasure Cruise retraced by Wrenn and Six's
+/// emblem pays "discard a land card" and its mana with delve in any order: the
+/// Forest discarded first is one of the cards delve exiles. With two Islands,
+/// five other cards in the graveyard and a Forest in hand: {7}{U} less six,
+/// paid by the Islands. (Delve chose its cards before the discard: not
+/// castable.)
+#[test]
+fn cr_601_2h_a_card_discarded_for_the_cost_is_delved() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island"])
+        .graveyard(0, &["Treasure Cruise", "Mountain", "Mountain", "Mountain", "Mountain", "Mountain"])
+        .hand(0, &["Forest", "Swamp"])
+        .emblem(0, "Wrenn and Six")
+        .at(Step::Main1, 0)
+        .start();
+    let cruise = g.card(0, "Treasure Cruise", Zone::Graveyard);
+    let forest = g.card(0, "Forest", Zone::Hand);
+    assert!(castable_from_gy(&g, cruise), "retrace with delve, the land card delved: {:?}", g.options_desc());
+    g.choose(Choice::Cast(cruise));
+    let mut promised = false;
+    for _ in 0..60 {
+        if at_priority(&g) {
+            break;
+        }
+        let c = match g.kind() {
+            Some(DecisionKind::ChooseGraveyardCard) if !promised && options(&g).contains(&Choice::Card(forest)) => {
+                promised = true;
+                Choice::Card(forest)
+            }
+            Some(DecisionKind::DiscardCost) => {
+                // (The promised Forest only: the Swamp would leave it in hand.)
+                assert_eq!(options(&g), vec![Choice::Card(forest)], "{:?}", g.options_desc());
+                Choice::Card(forest)
+            }
+            _ => options(&g)[0],
+        };
+        g.choose(c);
+    }
+    assert!(promised, "delve offered the Forest\n{}", log(&g));
+    assert_eq!(g.obj(cruise).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.obj(forest).zone, Zone::Exile, "discarded, then delved\n{}", log(&g));
+    assert_eq!(g.count_in(0, "Mountain", Zone::Exile), 5, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Swamp", Zone::Hand), 1, "{}", log(&g));
+}

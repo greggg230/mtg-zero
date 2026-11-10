@@ -1132,7 +1132,10 @@ impl Game {
                 picked.push(c);
             } else if picked.len() < n_disc {
                 // Discards happen one at a time: a chosen hand card is never
-                // left hidden while another decision is pending.
+                // left hidden while another decision is pending. (A card of
+                // the definition promised to delve, if any: ENGINE.md
+                // 100.4.9.)
+                let c = self.promised_twin(p, c);
                 self.discard(c);
                 picked.push(c);
             } else if picked.len() < n_exile {
@@ -1186,6 +1189,10 @@ impl Game {
                 opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(f, c, &ctx)));
             }
             opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.cost_picks_ok(p, card, cost, &picked, c)));
+            // The cards promised to delve are the discards' (ENGINE.md
+            // 100.4.9): each pick leaves the discards after it those.
+            let left = if picked.len() < n_also { (n_also - picked.len() - 1, cost.discard as usize) } else { (0, n_disc - picked.len() - 1) };
+            opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.promises_kept(p, card, cost, self.promised_twin(p, c), left)));
             // A cost that also exiles graveyard cards (escape): while the
             // graveyard (the discards so far in it, the sacrifices chosen to
             // come) would be short by as many cards as discards are left,
@@ -1340,6 +1347,9 @@ impl Game {
         for &c in &picked[gy_r] {
             self.move_card(c, Zone::Exile, Pos::Top);
         }
+        // The cards promised to delve, discarded: exiled (CR 601.2h, 702.66a;
+        // ENGINE.md 100.4.9).
+        self.exile_promised(p, Some(card));
         if let Some((k, n)) = cost.remove_counters {
             self.remove_counters(card, k, n as crate::num::Count);
         }
