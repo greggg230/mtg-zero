@@ -130,9 +130,10 @@ pub enum DeckMode {
 /// the rest of the pool the sideboard) and plays them with open decklists; `"decks": "eval"` takes
 /// the pools and builds of evaluation pair `split64(seed) % eval_decks` of `eval_seed` instead.
 /// `p0` / `p1` give a seat a pool (`{"pool": [names]}`, built every game) or a build (`{"deck":
-/// [...], "sideboard": [...]}`, played as it is). Best-of-one only; not with `constructed`,
-/// `pools`, `lands` (the builder has its own) or decklists. Without the key every spec is what it
-/// was.
+/// [...], "sideboard": [...]}`, played as it is; with `"order": "given"` its library before the
+/// setup shuffle is the list in that order, the paired deck comparison's slots, ENGINE.md 104).
+/// Best-of-one only; not with `constructed`, `pools`, `lands` (the builder has its own) or
+/// decklists. Without the key every spec is what it was.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MtgSpec {
     pub max_turns: u32,

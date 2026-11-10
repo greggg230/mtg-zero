@@ -767,6 +767,16 @@ table until S2's sealed builder plugs in), and no encoding shows an unseen deckl
 gate, `tests/hidden.rs` and `FUZZ_HIDDEN_DECKS=1`). The deck reader's target (`aux` `deck`, the opponent's unseen
 cards) and its declared inputs (`mtgz/az/deck_reader_v6.json`) are in place for zero-core's reader.
 
+**S4 verify / S5 yardstick tool (2026-11-09, branch `eoe-paired`; ENGINE.md 104):** paired deck
+comparison, `python -m mtgz.sealed.compare`: candidate decks play the same games against a field (a
+fixed deck or our builder's decks from generated pools) with one pilot (random, the heuristic, or a
+network checkpoint as zero.h2h plays it): one seed, opponent, seat and chooser per game for every
+candidate, the decks laid out slot by slot so the setup shuffle maps their slots alike (the sealed
+spec's `"order": "given"`, digests unchanged), the pilot's streams shared; paired differences with
+their intervals; racing by pairwise GSPRT against every survivor (ENGINE.md 73's test, alpha / (N - 1));
+the 17lands mode (a human build against our builds of its pool, a yardstick only). The heuristic's
+noise and what it means for S4: ENGINE.md 104.5.
+
 **Yardsticks on EoE (2026-11-09, branch `eoe-bot`; ENGINE.md 103):** the heuristic reads station,
 warp, void and Landers (general rules; `Heuristic::m7c` keeps the old policy): 99.4% / 99.8% against
 random on random / two-colour EoE decks, at most 0.1% turn-limit draws, 57% against the M7c policy; the

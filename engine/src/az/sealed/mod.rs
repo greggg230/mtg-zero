@@ -18,6 +18,13 @@
 //! they are: a 17lands human build, `mtgz.sealed.yardstick`); a seat without one gets a generated
 //! pool. Decklists stay open (best-of-one, `GameSpec::hidden_decks` false); ENGINE.md 101.5 lists
 //! what hidden decklists need from here.
+//!
+//! A given deck may carry `"order": "given"` (ENGINE.md 104): its library before the setup shuffle
+//! (CR 103.3) is the list in the order given, not sorted by definition (`"sorted"`, the default).
+//! The shuffle is uniform either way, so a game's distribution is unchanged; what changes is which
+//! card a position of the shuffled library holds for a given seed: two decks of one size laid out
+//! slot by slot get the same permutation of their slots from the same seed (the paired deck
+//! comparison's common random numbers, `mtgz.sealed.compare`). Without the key nothing changes.
 pub mod builder;
 pub mod collation;
 
@@ -42,8 +49,9 @@ pub enum SeatSource {
     Generated,
     /// A given pool (nonbasic cards, sorted), built by the builder every game.
     Pool(Vec<DefId>),
-    /// A given deck and sideboard (sorted), played as they are.
-    Build { deck: Vec<DefId>, sideboard: Vec<DefId> },
+    /// A given deck and sideboard (sorted), played as they are; `ordered` (`"order": "given"`): the
+    /// deck in its given order instead, the library's order before the setup shuffle (module docs).
+    Build { deck: Vec<DefId>, sideboard: Vec<DefId>, ordered: bool },
 }
 
 /// The `mtg` spec's `"sealed"` object (module docs).
@@ -150,20 +158,35 @@ impl SealedSpec {
 
     fn parse_seat(db: &CardDb, k: &str, x: &Value) -> Result<SeatSource, String> {
         let o = x.as_object().ok_or_else(|| format!("mtg spec: sealed.{k} must be an object"))?;
-        let list = |key: &str| -> Result<Vec<DefId>, String> {
+        // `sorted`: by definition (every list but an ordered deck), else in the given order
+        let ids = |key: &str, sorted: bool| -> Result<Vec<DefId>, String> {
             let a = o.get(key).and_then(|v| v.as_array()).ok_or_else(|| format!("mtg spec: sealed.{k}.{key} must be a list of card names"))?;
             let names: Vec<&str> = a.iter().map(|n| n.as_str().ok_or("mtg spec: card names are strings")).collect::<Result<_, _>>()?;
-            card_ids(db, &names).map_err(|e| format!("mtg spec: sealed.{k}.{key}: {e}"))
+            let v = if sorted { card_ids(db, &names) } else { names.iter().map(|n| card_id(db, n)).collect() };
+            v.map_err(|e| format!("mtg spec: sealed.{k}.{key}: {e}"))
         };
+        let list = |key: &str| ids(key, true);
         for key in o.keys() {
-            if !["pool", "deck", "sideboard"].contains(&key.as_str()) {
+            if !["pool", "deck", "sideboard", "order"].contains(&key.as_str()) {
                 return Err(format!("mtg spec: unknown sealed.{k} key {key:?}"));
             }
         }
+        // ENGINE.md 104: a given deck's order (module docs)
+        let ordered = match o.get("order") {
+            None => false,
+            Some(x) => match x.as_str() {
+                Some("given") => true,
+                Some("sorted") => false,
+                _ => return Err(format!("mtg spec: sealed.{k}.order must be \"given\" or \"sorted\", not {x}")),
+            },
+        };
         let basics = super::pools::basic_ids(db);
         if o.contains_key("pool") {
             if o.contains_key("deck") || o.contains_key("sideboard") {
                 return Err(format!("mtg spec: sealed.{k}: a pool or a deck and sideboard, not both"));
+            }
+            if o.contains_key("order") {
+                return Err(format!("mtg spec: sealed.{k}.order is a given deck's (a pool's deck is the builder's)"));
             }
             let pool = list("pool")?;
             if let Some(&b) = pool.iter().find(|d| basics.contains(d)) {
@@ -171,7 +194,7 @@ impl SealedSpec {
             }
             return Ok(SeatSource::Pool(pool));
         }
-        let deck = list("deck")?;
+        let deck = ids("deck", !ordered)?;
         let sideboard = if o.contains_key("sideboard") { list("sideboard")? } else { Vec::new() };
         if let Some(&b) = sideboard.iter().find(|d| basics.contains(d)) {
             return Err(format!("mtg spec: sealed.{k}.sideboard holds a basic land ({}): basics are free, not pool cards", db.def(b).name));
@@ -181,7 +204,7 @@ impl SealedSpec {
         if deck.len() < DECK_SIZE || deck.len() > MAX_DECK {
             return Err(format!("mtg spec: sealed.{k}.deck has {} cards (40..={MAX_DECK})", deck.len()));
         }
-        Ok(SeatSource::Build { deck, sideboard })
+        Ok(SeatSource::Build { deck, sideboard, ordered })
     }
 
     /// The spec as JSON (what `parse` reads back to an equal spec; given cards by name).
@@ -195,7 +218,10 @@ impl SealedSpec {
             let v = match s {
                 SeatSource::Generated => continue,
                 SeatSource::Pool(pool) => json!({"pool": names(db, pool)}),
-                SeatSource::Build { deck, sideboard } => json!({"deck": names(db, deck), "sideboard": names(db, sideboard)}),
+                SeatSource::Build { deck, sideboard, ordered: false } => json!({"deck": names(db, deck), "sideboard": names(db, sideboard)}),
+                SeatSource::Build { deck, sideboard, ordered: true } => {
+                    json!({"deck": names(db, deck), "sideboard": names(db, sideboard), "order": "given"})
+                }
             };
             o[format!("p{p}")] = v;
         }
@@ -206,7 +232,7 @@ impl SealedSpec {
     pub fn seat(&self, seed: u64, p: u8) -> Result<(Seat, SeatInfo), String> {
         let db = db();
         let (pool, pool_seed) = match &self.seats[p as usize] {
-            SeatSource::Build { deck, sideboard } => {
+            SeatSource::Build { deck, sideboard, .. } => {
                 let basics = super::pools::basic_ids(db);
                 let mut pool: Vec<DefId> = deck.iter().copied().filter(|d| !basics.contains(d)).chain(sideboard.iter().copied()).collect();
                 pool.sort_unstable();

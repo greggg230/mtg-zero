@@ -8,5 +8,10 @@
 * `mtgz.sealed.collation`: a seeded sealed-pool generator with two EoE Play Booster collations,
   `paper` (Wizards' published booster) and `arena` (Arena's boosters as 17lands shows them).
 
-Pure Python (no engine module needed).
+Pure Python (no engine module needed). With the engine module (`tools/build_py.sh`):
+
+* `mtgz.sealed.engine`: the Rust collations, builder and sealed seats (docs/ENGINE.md 101).
+* `mtgz.sealed.yardstick`: the 17lands pools and human builds as sealed specs (ENGINE.md 101.4).
+* `mtgz.sealed.compare`: paired deck comparison and racing against a field, the S4 verify step and
+  the S5 yardstick (ENGINE.md 104; `python -m mtgz.sealed.compare`).
 """
