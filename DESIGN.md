@@ -772,3 +772,12 @@ warp, void and Landers (general rules; `Heuristic::m7c` keeps the old policy): 9
 random on random / two-colour EoE decks, at most 0.1% turn-limit draws, 57% against the M7c policy; the
 cube's numbers unchanged (97.8% against random). A run's evaluation can play these baselines on EoE
 once S2's `"sealed"` spec merges (and 103.6's payment panic is fixed).
+
+**The EoE network's input and run setup (2026-11-10, branch `eoe-net`; ENGINE.md 105):** EoE cards have identities
+of their own (a per-card-table space: the set's 321 cards in set order, then its 9 token kinds; every other table
+keeps the cube's), so EoE sealed is the zero-core game `mtg_eoe` with the layout `eoe` (layout v6's shape; the
+encoding guard refuses a cube or Delver network on it and the reverse). The deck reader is wired (its inputs narrowed
+to the EoE identities: 3,169 floats), the zero-core pin is `feat/aux-widen` 477a026, and the presets `eoe-smoke`
+(CPU) and `eoe-1` (GPU, 128 x 4) train the deck target with its reader; the smoke ran end to end (the reader 3.68
+nats per card after 4 iterations, against 4.47 for the static composition and 6.93 uniform). Left before the first
+run: the deck tilt in the search, `eoe-1`'s throughput on the GPU (ENGINE.md 105.8).

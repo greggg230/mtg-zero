@@ -22896,3 +22896,72 @@ preset's, `eoe_eval` its evaluation pairs; game `mtg_eoe`; eoe-1's self-play sea
 evaluator): on 65d6c5c (hidden decklists) 4 of 4 configurations, 800 games, 0 unfinished, ~1,210 decisions and
 ~33,000 simulations a game, 610 s; before the hidden-decks merge (3020b2a, open decklists) the same, 1,057 s on a
 busier desktop.
+
+### 105.7 Digests, tests, gates
+
+**Digests** (re-recorded on purpose for the merges only; the EoE identity space changes no digest game: none plays
+the EoE table, and the cube's identities are computed as before - `compute_cube` is the old code with the token
+lookup factored out, and a nameless definition, which the cube's table has none of besides the face-down
+characteristics, is keyed as that one was):
+
+| Commit | Full | `DIGEST_ENCODING=0` | `DIGEST_ENCODING=v5` | Why |
+|---|---|---|---|---|
+| before (`eoe-d-encoding` 45ed2b2) | 408ee16a94d0ffec | 4a2a227cb45204cd | 6fa4fab18b624326 | |
+| 3a2f5ad (the merges of `eoe-base` 7953d2a, `eoe-s2-pools`, `eoe-bot`) | **e54c1a555a764f25** | **2d89506974459aa8** | **6195d80c0bb8d5b7** | 32 of 2,500 games: 20 random ones by `eoe-base`'s loop rule (100.7), 12 heuristic ones by `eoe-bot`'s heuristic (103.5) |
+| 5a6646f, ad8861e (the EoE space, `mtg_eoe`, the gate's EoE kind) | unchanged | unchanged | unchanged | no digest game plays the EoE table |
+| 44d5bf3 (the merge of `eoe-hidden-decks` 1edadcb) | **634e25f2bfb5ffa8** | **f1250d17c89a192e** | **377bcc07380ee6c6** | 1 game (random seed 609): `eoe-base` fa5a30d's payment work, which the branch brought |
+| 1a0bd71 (the merge of `eoe-base` a07821f) | **ae88eae20abb14ca** | **d0da2e6030aa0d08** | **418dc8195dc6afb5** | 4 games (random 634, 1553; heuristic 8, 166): 28.8.2k's `ChooseColorsSpent` |
+
+RULES_EPOCH bumped and the Delver canary library stamped (60 of 60 spots) with each re-record.
+
+**Tests.** `engine/tests/eoe_net.rs` (4): the registries and identities (every EoE card and token kind covered, the
+card registry the set's list, an identity one card or token kind, none `UNKNOWN`), the layout file, `mtg_eoe` = `mtg`
+move for move on EoE games with every slot's code and every bag in the EoE space (1,801 steps, 64,347 slot
+identities read), a card shared with the cube in both spaces. `tests/az.rs`: the gate's EoE sealed kind (above);
+`the_deck_target_is_the_opponents_unseen_cards_and_never_an_input` on EoE positions (60 of 60 worlds with another
+unseen deck, none counting `UNKNOWN`); `belief_deals_keep_every_determinize_invariant` treats EoE sealed as the
+hidden-decklist game it now is. `tests/test_eoe_net.py` (7): the registration, each game refusing the other's specs,
+the guard both ways, the belief and deck targets by EoE name through the bindings, self-play and the bots through the
+driver, the presets, the EoE reader's inputs. On the final code (1a0bd71): the full engine suite **2,208 passed, 0
+failed, 20 ignored** (147 binaries); `--test az` 45, `--test hidden` 25; pytest **225 passed, 1 skipped**; the smoke
+run again (runs/eoe-smoke3: the same losses as 105.6's, 62-79 s an iteration) and the search smoke (4 of 4, 621 s).
+The new decision kind (`ChooseColorsSpent`, 28.8.2k) needs nothing here: the identity space is per card table, not
+per decision kind, and its context-block floats are the layout's (the EoE layout file and the reader's inputs are
+unchanged).
+
+**Gates** (`--no-mac`):
+
+* `python tools/gate.py encoding --no-mac --expect-digest ae88eae20abb14ca --expect-digest0 d0da2e6030aa0d08 --checkpoint
+  runs/eoe-smoke2/models/iter_0004.pt --checkpoint-spec <EVAL_SPEC_EOE>` on 1a0bd71 (the checkpoint an `mtg_eoe`
+  network with the deck reader): build, both digests, `az` 45, the checkpoint load (h2h, 8 games, 0 unfinished),
+  pytest 225: **`GATE PASSED encoding 1a0bd719159b in 678s`** (3020b2a before the hidden-decks merge: `GATE PASSED
+  encoding 3020b2ace620 in 359s`).
+* `python tools/gate.py engine --no-mac --tested-sha 1a0bd71 --expect-digest ae88eae20abb14ca --expect-digest0
+  d0da2e6030aa0d08`: build, digests, `az` 45, `limits` 10, `hidden` 25, pytest, the search smoke: **`GATE PASSED
+  engine 1a0bd719159b in 604s`** (3020b2a: `GATE PASSED engine 3020b2ace620 in 671s`).
+* `python tools/gate.py optin-core --no-mac --baseline-root <a checkout of 1e42b89, the commit before the pin>` on
+  the pin commit 65d6c5c (477a026): build, the core's cargo tests (143), `check_checkpoint_compat` byte identity
+  (identical: 2,426 samples visits and cq), `az` 45, `hidden` 25, the other games' build-only (3 of 3), the core
+  build: passed; the core's pytest under the desktop's load: **`GATE FAILED optin-core 65d6c5c6b120 in 3172s -
+  core-pytest: 5 failed, 0 error(s), 432 passed`** - two toy runs' subprocesses crashed (0xC0000005) or timed out
+  under the load of this branch's suite and builds beside it, and `test_remoteplay`'s known timing test; the four
+  pass alone (45 s), the fifth on its second lone run. (97a00c0, the 0974e50 pin, the same way: 3 load timeouts, all
+  passing alone in 23 s.)
+
+### 105.8 What is left before the first real run
+
+* **The deck tilt in the search.** The search deals the opponent's unseen deck from the sealed prior alone:
+  `determinize_with` does not yet deal it by a prediction (102.1's `determinize_deck_tilted` and `deck_weights`
+  exist; the root belief rows would need the deck columns, and the reader `belief: true`, zero-core 36.5). The
+  reader and the head train and feed the trunk without it; the tilt is the next step (an A/B of its own).
+* **`eoe-1` on the GPU is unmeasured**: throughput (the sealed deal's K cached decks, 102.8, under 768 games in
+  flight), RAM per iteration, and whether mtg-3's CPU side or the Delver line's 16 x 4 / 1,536 suits a desktop
+  shared with the Delver line. Launch from a pinned worktree with `--shard-sparse 1`.
+* **The weights** `aux_deck_w` 0.5 and `aux_belief_w` 0.25 are first guesses (the smoke shows both targets learn;
+  nothing shows their effect on play), and the reader's width (hidden 256) and `reader_detach` are zero-core 36.9's
+  open A/B arms.
+* **The Elo anchor** is the heuristic improved for EoE at 1000 on a new scale (103.7); random saturates at once.
+  17lands stays S5's yardstick (the same network piloting human and our builds), not part of `eoe-1`.
+* **Early games run long**: the smoke's untrained networks played many games to the 60-turn limit (iteration 1:
+  59.1 turns on average); with 64 simulations and a learning network this should fall quickly, as the cube's did -
+  watch the first iterations' draw rate.
