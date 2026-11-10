@@ -2070,6 +2070,9 @@ fn the_v5_facts_encode_no_hidden_information() {
     let mut rngs: Vec<Rng> = fixed.iter().map(|p| Rng::new(60 ^ fnv(p.name))).collect();
     let mut zr = zero_search::rng::Rng::new(60);
     let (mut worlds, mut applied) = (0, 0);
+    // (the deck tilt, ENGINE.md 106.3: on hidden-decklist positions one more world dealt by a random deck
+    // prediction at tilt 1, from a stream of its own)
+    let (mut trng, mut tilted) = (Rng::new(106), 0);
     for (spec, a) in gate_positions(scale(24) as usize, 61) {
         for (k, p) in fixed.iter().enumerate() {
             let mut b = a.clone();
@@ -2091,11 +2094,21 @@ fn the_v5_facts_encode_no_hidden_information() {
                     }
                     worlds += 1;
                 }
+                if b.hidden_decklists() {
+                    let mut d = b.clone();
+                    let bel = zbelief_deck(&mut trng, 0.0, 1.0, 20.0);
+                    d.determinize_with(v, &mut zero_search::rng::Rng::new(trng.next_u64()), &bel);
+                    let y = enc(&d, v);
+                    if let Some(i) = (0..NUM_FEATURES).find(|&i| x[i] != y[i]) {
+                        panic!("{spec}: {} ({what}): P{v}'s feature {i} differs in a deck-tilted world ({} / {})", p.name, x[i], y[i]);
+                    }
+                    tilted += 1;
+                }
             }
         }
     }
-    println!("{applied} perturbed positions, {worlds} worlds compared");
-    assert!(applied > 1000 && worlds > 4000, "{applied} {worlds}");
+    println!("{applied} perturbed positions, {worlds} worlds compared, {tilted} of them deck-tilted");
+    assert!(applied > 1000 && worlds > 4000 && tilted > 500, "{applied} {worlds} {tilted}");
     // Headliner Scarlett: the top card of P0's library exiled face down, P0
     // may play it this turn.
     let mut g = Scenario::new(CardDb::cube())
