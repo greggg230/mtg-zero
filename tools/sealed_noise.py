@@ -123,7 +123,9 @@ def work(args):
                    'b_colors': b['colors'], 'a_lands': sum(1 for n in a['deck'] if 'Land' in K.C.cards()[n]['type_line']),
                    'b_lands': sum(1 for n in b['deck'] if 'Land' in K.C.cards()[n]['type_line']),
                    'shared_slots': K.shared_slots(*K.slots([a['deck'], b['deck']])), **st,
-                   'failed': len(out['failed']), 'unfinished': [c['unfinished'] for c in out['candidates']],
+                   'failed': len(out['failed']), 'failures': [dict(f, spec_seed=g['spec']['seed'])
+                                                              for f, g in zip(out['failed'], comp.failed)],
+                   'unfinished': [c['unfinished'] for c in out['candidates']],
                    'seconds': round(time.time() - t0, 1)}
             rows.append(row)
             with open(os.path.join(opts['out'], 'results.jsonl'), 'a', encoding='utf-8') as f:
