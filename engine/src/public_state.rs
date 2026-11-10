@@ -933,8 +933,11 @@ pub fn perturbations() -> Vec<Perturbation> {
         // EoE W4 (ENGINE.md 99.14): a copy's "except it's legendary" (CR
         // 707.9b; Adagia's token copies). On a copy effect that is already
         // there (adding one would set the encoded copy flag too); no draw
-        // from the gate's random stream.
-        p!("a copy is legendary by its exception", "Game.copies", |a, _r| {
+        // from the gate's random stream. Rare: the gate's positions hold a
+        // copy effect only when its heuristic games made one (11 of the
+        // drafted game's positions with the M7c heuristic, none since
+        // ENGINE.md 103), as its sibling "a copy has an ability".
+        p!(rare "a copy is legendary by its exception", "Game.copies", |a, _r| {
             let ss = slots(&a.g);
             let db = a.g.db;
             let legendary = crate::db::supertypes::LEGENDARY;
