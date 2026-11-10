@@ -1059,6 +1059,8 @@ fn task_code(t: &Task) -> usize {
         // ENGINE.md 100.5: which graveyard card Priority's "cast or play
         // from the graveyard" casts or plays.
         Task::GraveyardCast { .. } => 27,
+        // ENGINE.md 100.5.1: which colours the mana spent on a spell was.
+        Task::ColorsSpent { .. } => 28,
         _ => 18,
     }
 }
@@ -2365,6 +2367,8 @@ impl Game {
                 }
             }
             Task::AsEnters { card: c, .. } => card = Some((self.objs[c.i()].def, None, None)),
+            // The spell whose mana's colours are chosen (ENGINE.md 100.5.1).
+            Task::ColorsSpent { spell, .. } => card = Some((self.objs[spell.idx.i()].def, Some(AbilitySlot::Spell), None)),
             Task::AssignDamage { att, left, .. } => {
                 card = Some((self.objs[att.i()].def, None, None));
                 x[ctx::DAMAGE_LEFT] = squash(*left as f32 / 16.0);

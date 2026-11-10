@@ -590,6 +590,17 @@ impl Heuristic {
             // CR 103.1: play first (the tempo of the first land drop is
             // worth more than a card in these decks; ENGINE.md 35).
             K::PlayDraw => Some(act::PLAYER),
+            // The colours spent on a converge or sunburst spell (ENGINE.md
+            // 100.5.1): the most (what the engine counted before).
+            K::ChooseColorsSpent => d
+                .options
+                .iter()
+                .filter_map(|o| match o.choice {
+                    Choice::Number(m) => Some((m.count_ones(), std::cmp::Reverse(o.action), o.action)),
+                    _ => None,
+                })
+                .max()
+                .map(|x| x.2),
             // CR 103.2b: reveal a companion whenever it can (it costs
             // nothing to reveal and is a free extra card for {3}).
             K::RevealCompanion => d.options.iter().find(|o| o.action != act::PASS).map(|o| o.action),

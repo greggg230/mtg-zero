@@ -21792,7 +21792,7 @@ of 60 spots, with each):
 | 4396d38 paged blocks | unchanged | unchanged | unchanged | no digest game pages these ranges |
 | cd412c5 seed 10071 | unchanged | unchanged | unchanged | no digest game puts an Aura from a hidden zone with a choice |
 
-**Not done: 28.8.2k** (the colours spent; docs/shortcuts.md 28.8.2, the audit's F4). It needs a
+**28.8.2k** (the colours spent; docs/shortcuts.md 28.8.2, the audit's F4; done after B4, below). It needs a
 decision for the colours a payment's choices spend, inside B4's payment code (`pay.rs`
 `record_converge`, `pick_multi`, the hybrid/Phyrexian upper bound), so it waits for B4 to land in
 `eoe-base`.
@@ -21821,3 +21821,62 @@ build, both digests, `--test az` (43), the checkpoint load (h2h, 8 games, 0 unfi
 (208 passed, 1 skipped) passed: `GATE PASSED encoding 1e052a27ccf3 in 348s` (bccd4f0 too, in
 451 s). `python tools/gate.py engine --tested-sha 1e052a2 ...`: build, both digests, `az` 43,
 `limits` 10, `hidden` 16, pytest, the search smoke: `GATE PASSED engine 1e052a27ccf3 in 778s`.
+
+##### The merge of `eoe-base` fa5a30d (B4) (fe3ee9c)
+
+`eoe-base` fa5a30d is 2f065ff with C2, F7, this branch's hidden-Aura fix (cd412c5, as 7953d2a) and
+B4 (100.4.7). Conflicts: `finish_payment`'s `src_ability` (B4's text is fa6c97c's), `RULES_EPOCH`,
+the digests and the canary stamp. Four of B4's tests (three through `rules_payment_b`'s
+`castable_from_gy`, and a `pay.rs` unit test) read Priority's casts from a graveyard as options of
+their own; they now go through gap #1's "cast or play from the graveyard" (100.5:
+`testkit::offered`, `choose`). Digests: full 408ee16a94d0ffec -> **684840012af3432b**,
+`DIGEST_ENCODING=0` 4a2a227cb45204cd -> **c860817b0cf925ac** (58 of 2,500 games play differently:
+55 random, 3 heuristic; B4's rules), `DIGEST_ENCODING=v5` 6fa4fab18b624326 -> 5c5ad44094f680bf, in
+exactly those 58 games (per-game digests of both sides, `DIGEST_LINES`). The suite on the merge
+before those tests were changed: 2,166 passed, 4 failed (those four).
+
+##### 28.8.2k: the payer chooses the colours spent
+
+**Why.** docs/shortcuts.md 28.8.2's kept part (the audit's F4): converge and sunburst counted the
+most colours the payment's sources could show, so a player couldn't spend fewer, which matters when
+more colours hurt (Prismatic Ending on a permanent of its caster's, fewer charge counters), and
+hybrid pips with many sources were an upper bound. CR 106.1b: each mana's type is chosen as the mana
+ability resolves; 601.2h: the player chooses which mana pays what. The colours spent are those
+choices.
+
+**What.** `pay.rs::colour_sets` computes, exactly, every set of colours an exact payment of the
+spell's cost by the payment's units can spend (with the colours `fixed` already): for each WUBRG set
+m, every unit makes a type of m or colourless, and each colour of m not shown yet is made by some
+unit, so the slot it pays (a generic pip or a hybrid pip with that colour; a coloured pip of it
+needs it anyway) becomes a pip of that colour, each in turn, and the rest must be an exact payment
+(`shows_exactly`, `mana::payable_n`); a payment showing exactly m gives such a choice of slots and
+back. The mana costs of mana abilities activated in the payment (`PayMana::marked`) are paid by some
+of the units, a multiset of them at a time, and that mana isn't spent on the spell. B4's activations
+of abilities with a mana cost (`made_by`) are each of their splits. `record_converge` takes the union:
+one set is recorded; several push `Task::ColorsSpent`, which asks the payer right after the payment
+(part of casting the spell, nothing between): `DecisionKind::ChooseColorsSpent` (the 48th kind), its
+options `NUMBER` + the WUBRG mask of each set (32 ids, every subset: no paging). `Mark::Converge`
+holds the set; `converge_of` counts it, so a reader of a colour ("if {R} was spent") finds it. The
+heuristic bot spends the most colours (what was counted before). `most_colors_matching`,
+`converge_colors` and the hybrid upper bound are gone.
+
+**The encoding.** No layout change: the context block shows the kind (one-hot 47), the asking task
+(code 28) and the spell (its card code, `AbilitySlot::Spell`); the options are their sets' ids, legal
+by the action mask. The sets depend on public permanents and the pool only, so every world of either
+player asks the same (tested).
+
+**Tests** (each failing before): `cards_m7c_tail::cr_106_1b_cr_601_2h_the_caster_chooses_the_colours_spent`
+(Prismatic Ending, X = 2, paid by Plains, Tundra and Underground Sea: exactly W U, W B and W U B
+offered; W U leaves Coalition Relic, W U B exiles it; determinized worlds ask the same),
+`cr_601_2h_one_possible_set_of_colours_asks_nothing` (Plains, Island, Swamp),
+`prismatic_ending_counts_the_colours_spent_converge_cr106_1b` (rewritten: the most, chosen),
+`cards_m7c_tail3::cr_702_44a_sunburst_counts_the_colours_chosen` (Pentad Prism by Tundra and
+Underground Sea: U, W U, W B, U B; blue only, one charge counter), and the unit test
+`pay::tests::cr_106_1b_the_colour_sets_a_payment_can_spend` (hybrid pips, colours spent already, a
+mana ability's own cost paid by one of the units). docs/shortcuts.md 28.8.2: the kept part **fixed**.
+
+**Digests**: full 684840012af3432b -> **fc293d3c24d0c0cc**, `DIGEST_ENCODING=0` c860817b0cf925ac ->
+**117effec150157b5**: 65 of 2,500 games (46 random, 19 heuristic: a converge or sunburst spell paid
+with more than one possible set of colours, now a decision); `DIGEST_ENCODING=v5` 5c5ad44094f680bf
+-> 7e397431df7a60fb, in exactly those 65 games. `RULES_EPOCH` bumped, the canary library 60 of 60,
+stamped.
