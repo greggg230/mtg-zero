@@ -22196,3 +22196,44 @@ the options are `NUMBER` ids. The heuristic bot takes the parts in `part::DOMINA
   ability's side effect (a Treasure sacrificed, a painland's damage) changing one through a static
   ability is not seen (the payment then reads the state as it is). Where the order can matter, the
   search sees it (it runs the mana abilities).
+
+##### Tests
+
+`rules_payment_b`, section "100.4.9" (each failing before its fix):
+`cr_601_2h_a_static_ability_sacrificed_first_changes_crews_power` (Test Crew Shrine with Test Weakness
+Charm and a 1/1 Rebel: only the sacrifice first is offered; asked again identically after
+`determinize`), `cr_601_2h_life_paid_first_changes_crews_power` (Test Blood Shrine and Test Desperate
+Rebel at 11 and 12 life; not at 13), `cr_601_2h_an_island_returned_then_discarded_for_one_cost` (Daze
+retraced with one Island and no land card: only the return first),
+`cr_601_2h_either_order_with_a_land_card_in_hand` (both orders, each outcome),
+`cr_601_2g_the_mana_leaves_the_parts_payable_in_some_order` (Test Crew Altar: the Elf Rebel's mana would
+leave no crew, only the Forest is offered), `cr_601_2h_a_card_discarded_for_the_cost_is_delved`
+(Treasure Cruise retraced, the Forest discarded then delved), and two that the order isn't asked
+where it can't matter: `cr_601_2h_no_order_asked_when_it_cant_matter` (Test Rebel Altar),
+`cr_601_2h_an_ability_granted_to_tapped_creatures_leaves_a_creatures_sacrifice_free` (High Market with
+The Seriema; the EoE fuzz asked it before characteristics were told apart by kind). docs/shortcuts.md:
+no row (100.4.8 found the gap; nothing was logged there).
+
+##### Results
+
+The full engine suite on 3ba572e: **2,191 passed, 0 failed, 15 ignored** (`az` 43, `hidden` 16,
+`limits` 13; `rules_payment_b` 51, B6's 8 new). Digests unchanged by every commit: full fc293d3c24d0c0cc,
+`DIGEST_ENCODING=0` 117effec150157b5, `DIGEST_ENCODING=v5` 7e397431df7a60fb (no digest game's cost has
+parts whose order can matter, nor delve with a discard; `RULES_EPOCH` not bumped). pytest 208 passed,
+1 skipped. The default `FUZZ_GAMES=20000` passed in four shards of 5,000 seeds (`FUZZ_FIRST` 0, 5,000, 10,000, 15,000), every seed: 20,000 games, wins 9,804 /
+10,074, 122 draws, 0 aborted, mean 31.8 turns (the games of 100.4.8), and the 1,000 matches and both
+replay tests (`FUZZ_GAMES=20000`). `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed in the same four shards, every
+seed: 20,000 games, wins 7,112 / 7,072, 5,816 draws, 0 aborted, mean 45.8 turns, 654.2 decisions, 32
+controlled decisions, longest turn 264 decisions (100.4.8's totals), and the replay test (1,376-1,519 s
+a shard on a shared desktop). On 337a10f, before characteristics were told apart by kind, a traced run
+(not committed) showed the EoE fuzz searching the order for castability of "{T}, Sacrifice a ..."
+(Dust Bowl, High Market, Scavenger Grounds, Memorial Vault, Kavaron, Memorial World, Slagdrill
+Scrapper) and asking it in payments of the first three, with The Seriema in play (wins 7,113 / 7,071
+then: one game ended otherwise), and the default fuzz once for Tinker escaped by Underworld Breach
+(its sacrifice's types, the escape's exile changing a graveyard that a power reads); every such search
+passed the fuzz's check that each option of a sampled decision completes. On 3ba572e the totals are
+100.4.8's again.
+
+The gates on 3ba572e (`--no-mac`): `GATE PASSED engine 3ba572e4e424 in 414s` (build, both digests, `az`
+43, `limits` 13, `hidden` 16, pytest, the search smoke); `GATE PASSED encoding 3ba572e4e424 in 270s` (build, both
+digests, `az` 43, the checkpoint load of 100.5.1's fork, h2h 8 games, pytest).
