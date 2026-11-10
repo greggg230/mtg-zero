@@ -799,3 +799,13 @@ of the sealed prior by likelihood ratio (69's per-card weights against the K dec
 tilts (`selfplay_belief_tilts` / `eval_belief_tilts` = `{"deck": alpha}`); `eoe-1` deals at 1 in self-play and
 evaluation (a first value, to be A/B'd). Left before the first run: `eoe-1`'s throughput on the GPU, the zero-core pin on
 GitHub (ENGINE.md 106.7).
+
+**Status 2026-11-10 (gates engine, encoding and optin-core passed on d1c2edc):** S1 complete: all 320 cards of
+the set's table (Paradox Haze excluded by the user), and the faithfulness audit's workstreams done (A0, A, B-B6, C,
+C2, D, D2, E, F7; B6's narrower cost-order cases are a todo). S2 complete: the collations, the randomised builder,
+the `"sealed"` spec and the 17lands yardstick pools (ENGINE.md 101), the paired deck comparison (104). S3 built:
+hidden decklists (102), the game `mtg_eoe` with its own identities, the deck reader and the presets `eoe-smoke` /
+`eoe-1` (105), the deck tilt (106), the heuristic yardstick on EoE (103). Verified on the integrated commit: the
+full suite (2,232 passed), 20k fuzz of the default, EoE, EoE with hidden decklists, sealed and sealed with the deck
+tilt (0 aborted). zero-core pin `feat/deck-tilt` 193ee15. Next: `eoe-1`'s throughput on the GPU, then the first
+run (the user's go-ahead).
