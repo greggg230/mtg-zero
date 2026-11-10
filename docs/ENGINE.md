@@ -22794,3 +22794,35 @@ so `mtg_eoe` games are hidden-decklist games: the search deals the opponent's un
   the 128 x 4 trunk's 21.9M (36.8's 2% assumed a 330-wide target; the target is the AUX's 1,024 wide). The
   parameters: 1.20M, about 77% of the 1.55M network's (36.8: run once per position, not per token).
 * **The presets** set `aux_deck_w` 0.5 and `reader_deck` 1 (both).
+
+### 105.6 The smoke run, the search smoke
+
+**`python -m mtgz.az.run --run runs/eoe-smoke2 --preset eoe-smoke --iters 4`** (CPU, on 65d6c5c: the final pin;
+runs/eoe-smoke1 on 1e42b89 with 0974e50 gave the same losses to the last digit, the pin being byte-identical here).
+Every iteration self-plays 16 hidden-decklist `mtg_eoe` games (generated Arena pools, built, the search dealing
+the opponent's deck from the sealed prior), trains the token network with the belief head, the deck head and the
+deck reader, and evaluates against the heuristic, random and earlier checkpoints:
+
+| iter | self-play: decisions / game, turns | policy | value | belief (head) | deck (head) | deck (reader) | reader hit | seconds |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 942, 59.1 | 0.982 | 0.645 | 3.918 | 4.187 | 4.655 | 0.51 | 66 |
+| 2 | 665, 44.6 | 0.966 | 0.618 | 3.129 | 3.404 | 3.993 | 0.92 | 81 |
+| 3 | 638, 41.1 | 0.962 | 0.577 | 3.228 | 3.457 | 3.804 | 0.97 | 74 |
+| 4 | 646, 43.3 | 0.942 | 0.594 | 2.995 | 3.348 | 3.682 | 0.99 | 80 |
+
+(Losses in nats per card, training loss of the iteration; seconds = the whole iteration: self-play 22-30 s, training
+6-9 s on ~2,600-3,800 samples, the evaluations the rest; the desktop shared with other workstreams.) **The deck
+target against its baselines** (computed from the run's shards: 11,596 rows with a target, 25.0 unseen cards on
+average, 283 identities seen): uniform over the 1,024 identities 6.931 (the reader's first prediction), uniform over
+the set's 321 cards 5.771, the mean composition (the best static per-identity prediction, fitted in sample) 4.468.
+After 4 iterations of ~80 steps the reader is at 3.68 and the head at 3.35: both below the static composition, so
+they read the public information (the opponent's colours from their shown cards). A smoke, not a measurement:
+tiny networks, 8 simulations, every game near-random (iteration 1's games ran to the 60-turn limit). Every game
+finished; no panic. The checkpoint (`models/iter_0004.pt`): game `mtg_eoe`, layout `eoe` v6, auxiliary targets
+[belief, deck], one reader (`deck`, 3,169 inputs, hidden 256).
+
+**`python tools/search_smoke.py --specs eoe,eoe_eval --seeds 0-1 --games 200 --preset eoe-1`** (new specs `eoe` = the
+preset's, `eoe_eval` its evaluation pairs; game `mtg_eoe`; eoe-1's self-play seat, 64 simulations, a uniform
+evaluator): on 65d6c5c (hidden decklists) 4 of 4 configurations, 800 games, 0 unfinished, ~1,210 decisions and
+~33,000 simulations a game, 610 s; before the hidden-decks merge (3020b2a, open decklists) the same, 1,057 s on a
+busier desktop.
