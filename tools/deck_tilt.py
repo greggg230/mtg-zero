@@ -6,7 +6,8 @@ the true one, by tilt and by the prediction's source, on Edge of Eternities seal
 Positions: random play of `mtg_eoe` games on the spec's pools (turn 3 or later, one every ~20 decisions; the decider
 the viewer). Per position: the network's prediction of the `deck` target from the decider's features - the auxiliary
 head's (`NetEvaluator.aux`) and the deck reader's (`NetEvaluator.reader`) - and `--deals` worlds per arm (tilt 0: the
-untilted K-sample deal, `determinize`; else `determinize_with` at `belief_tilts.deck` = the tilt, clip 20). Columns: the
+untilted K-sample deal, `determinize`; else `determinize_with` at `belief_tilts.deck` = the tilt, clip 20; the 'flat'
+source is an untrained network's prediction, uniform over the 1,024 identities). Columns: the
 cross-entropy per true unseen card of the worlds' mean unseen composition (1% of the untilted deal's mixed in), the
 cards misplaced by it (half the L1 distance to the true composition), the distinct opponent decks among the worlds,
 and the prediction's own cross-entropy per card. CPU only, below normal priority; reads only the checkpoint.
@@ -70,17 +71,17 @@ def cmd_deals(a):
     ev = NetEvaluator(m, 'cpu')
     spec = a.spec or json.loads(open(os.path.join(os.path.dirname(os.path.dirname(a.model)), 'config.json')).read())['spec']
     pos = positions(spec, a.positions, a.seed)
-    arms = [('untilted', None, 0.0)] + [(f'head, tilt {t:g}', 'head', t) for t in a.tilts] + \
-           [(f'reader, tilt {t:g}', 'reader', t) for t in a.tilts]
+    arms = [('untilted', None, 0.0)] + [(f'{src}, tilt {t:g}', src, t) for src in ('flat', 'head', 'reader') for t in a.tilts]
     rows = {name: {'ce': [], 'mis': [], 'distinct': []} for name, _, _ in arms}
-    own = {'head': [], 'reader': []}
+    own = {'head': [], 'reader': [], 'flat': []}
     t0 = time.time()
     for pi, g in enumerate(pos):
         v = g.to_move
         x = np.asarray(g.encode(v), np.float32)[None]
         n2 = np.full(1, 2, np.int64)
         pred = {'head': np.asarray(ev.aux(x, n2)['deck'][0], np.float32),
-                'reader': np.asarray(ev.reader(x, n2)['deck'][0], np.float32)}
+                'reader': np.asarray(ev.reader(x, n2)['deck'][0], np.float32),
+                'flat': np.full(D, 1.0 / D, np.float32)}          # (an untrained network's: uniform over the identities)
         true = np.asarray(g.aux_target(v), np.float64)[D:2 * D]
         if true.sum() < 1:
             continue
