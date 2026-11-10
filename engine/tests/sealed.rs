@@ -484,3 +484,198 @@ fn sealed_games_play_to_the_end_through_mtgaz() {
     }
     assert!(played >= 8, "{played} games");
 }
+
+// ---- The mixed field (ENGINE.md 107.1) ----
+
+/// Without `best_share` the builder, the spec's seats and the sealed prior draw exactly as before the
+/// mixed field: a hash of 400 builds (two settings), 200 spec seats (self-play and evaluation) and 150
+/// prior samples (fresh pools and a bank's), recorded on 72a44fb, before the change.
+#[test]
+fn without_best_share_the_builder_seats_and_prior_draw_as_before() {
+    use engine::az::hidden_decks::{DeckPrior, DeckWant, SealedPrior};
+    let db = db();
+    let mut h = 0u64;
+    let mut mix = |x: u64| h = engine::rng::split64(h ^ x);
+    let other = Settings::parse(&serde_json::json!({"splash": 1.0, "mono": 0.5, "temperature": 1.0, "lands": [15, 19]})).unwrap();
+    for c in [Collation::Arena, Collation::Paper] {
+        for seed in 0..100u64 {
+            let p = pool(c, seed).unwrap();
+            for s in [Settings::default(), other] {
+                let b = builder::build(db, &p, &s, &mut Rng::new(seed));
+                for &d in b.deck.iter().chain(&b.sideboard) {
+                    mix(d as u64);
+                }
+                mix(b.colors as u64 | (b.splash as u64) << 8 | (b.lands as u64) << 16 | (b.splash_spells as u64) << 24 | (b.tilt_milli as u32 as u64) << 32);
+            }
+        }
+    }
+    for spec in [r#"{"sealed": {"set": "eoe", "collation": "arena"}}"#, r#"{"sealed": {"set": "eoe", "collation": "paper"}, "decks": "eval", "eval_decks": 8}"#] {
+        let sp = MtgSpec::parse(spec).unwrap();
+        for seed in 0..50u64 {
+            for s in sp.try_seats(seed).unwrap() {
+                for &d in s.deck.iter().chain(&s.sideboard) {
+                    mix(d as u64);
+                }
+                mix(0xFFFF);
+            }
+        }
+    }
+    let spec = SealedSpec::parse(&serde_json::json!({"set": "eoe", "collation": "arena"})).unwrap();
+    let prior = SealedPrior::of_spec(&spec);
+    let bank = prior.bank(4, &mut Rng::new(7));
+    for seed in 0..75u64 {
+        let real = spec.seat(seed, 1).unwrap().0.deck;
+        let k = (seed % 13) as usize;
+        let mut shown: Vec<u16> = real.iter().copied().step_by(3).take(k).collect();
+        shown.sort_unstable();
+        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None };
+        let a = prior.sample(&want, &mut Rng::new(seed));
+        let b = prior.sample_from(&want, Some(&bank[(seed % 4) as usize]), &mut Rng::new(seed));
+        for s in [a, b] {
+            for &d in s.deck.iter().chain(&s.sideboard) {
+                mix(d as u64);
+            }
+            mix(0xFFFE);
+        }
+    }
+    println!("fingerprint {h:016x}");
+    assert_eq!(format!("{h:016x}"), "5e986ac22869924f", "the draws without best_share changed");
+}
+
+/// The best guess (ENGINE.md 107.1) is the builder with every random choice at its most likely value:
+/// 40 cards from the pool, 17 lands, the pair the builder takes at temperature 0 (no mono, no splash, no
+/// tilt), the spells greedy by weight (no playable spell left out is heavier than one played, but for the
+/// mana-value caps; on a tie the mana value nearest 3), no colourless-only land, and no randomness: the
+/// same deck for any order of the pool.
+#[test]
+fn the_best_guess_is_the_builders_most_likely_build() {
+    let db = db();
+    let s = Settings::default();
+    let modal = Settings::parse(&serde_json::json!({"temperature": 0.0, "mono": 0.0, "splash": 0.0, "curve": 0.0, "lands": [17, 17]})).unwrap();
+    let mut pairs = std::collections::BTreeMap::new();
+    let (mut creatures, mut decks, mut capped) = (0usize, 0usize, 0usize);
+    for c in [Collation::Arena, Collation::Paper] {
+        for seed in 0..200u64 {
+            let p = pool(c, 20_000 + seed).unwrap();
+            let what = format!("{c:?} pool {}", 20_000 + seed);
+            let b = builder::best_guess(db, &p, &s);
+            check_build(&p, &b, &s, &what);
+            assert_eq!((b.lands, b.splash, b.splash_spells, b.tilt_milli), (17, 0, 0, 0), "{what}");
+            assert_eq!(b.colors.count_ones(), 2, "{what}: a pair");
+            let mut rev = p.clone();
+            rev.reverse();
+            assert_eq!(builder::best_guess(db, &rev, &s), b, "{what}: the pool's order");
+            assert_eq!(builder::best_guess_covering(db, &p, &s, None, 0), Some(b.clone()), "{what}");
+            // the pair: the builder's at temperature 0 (its spells are drawn, the pair is not)
+            for r in 0..3 {
+                assert_eq!(builder::build(db, &p, &modal, &mut Rng::new(r)).colors, b.colors, "{what}: the temperature-0 pair");
+            }
+            // greedy: a playable spell left out is no heavier than every spell played (the caps aside)
+            let spells: Vec<u16> = b.deck.iter().copied().filter(|&d| !db.def(d).is(types::LAND)).collect();
+            let lightest = spells.iter().map(|&d| builder::spell_weight(db.def(d))).fold(f64::MAX, f64::min);
+            let mv = |d: u16| db.def(d).mana_value() as i64;
+            let at_cap = spells.iter().filter(|&&d| mv(d) >= 5).count() >= s.max_mv5 as usize
+                || spells.iter().filter(|&&d| mv(d) == 4).count() >= s.max_mv4 as usize;
+            for &d in b.sideboard.iter().filter(|&&d| builder::playable(db.def(d), b.colors)) {
+                let w = builder::spell_weight(db.def(d));
+                if w > lightest {
+                    assert!(at_cap && mv(d) >= 4, "{what}: {} (weight {w}) left out, a spell of weight {lightest} played", db.def(d).name);
+                    capped += 1;
+                }
+                // on a tie of weight, the mana value nearest 3 first
+                for &x in spells.iter().filter(|&&x| builder::spell_weight(db.def(x)) == w) {
+                    assert!(at_cap || (mv(x) - 3).abs() <= (mv(d) - 3).abs(), "{what}: {} played before {}", db.def(x).name, db.def(d).name);
+                }
+            }
+            // no colourless-only land: every nonbasic land makes or fetches a colour of the pair
+            for &d in b.deck.iter().filter(|&&d| db.def(d).is(types::LAND) && db.def(d).supertypes & engine::db::supertypes::BASIC == 0) {
+                assert!(builder::fixes(db, db.def(d)) & b.colors != 0, "{what}: {} makes none of the pair's colours", db.def(d).name);
+            }
+            *pairs.entry(builder::letters(b.colors)).or_insert(0u32) += 1;
+            creatures += spells.iter().filter(|&&d| db.def(d).is(types::CREATURE)).count();
+            decks += 1;
+        }
+    }
+    println!(
+        "400 best guesses: pairs {pairs:?}; {:.1} creatures a deck; {capped} heavier spells left out by the caps",
+        creatures as f64 / decks as f64
+    );
+    assert!(pairs.len() >= 8, "the best guesses' pairs {pairs:?}");
+    // a pair holding a colour: the strongest such pair; three colours: none (no splash)
+    let p = pool(Collation::Arena, 20_000).unwrap();
+    let b = builder::best_guess(db, &p, &s);
+    let other = (0..5).map(|i| 1u8 << i).find(|c| b.colors & c == 0).unwrap();
+    let held = builder::best_guess_covering(db, &p, &s, None, other).unwrap();
+    assert!(held.colors & other != 0 && held.colors.count_ones() == 2);
+    assert_eq!(builder::best_guess_covering(db, &p, &s, None, b.colors | other), None);
+}
+
+/// The mixed field (ENGINE.md 107.1): `best_share` p makes each built seat's deck the best guess with
+/// probability p, independently per seat, from the game's seed; the randomised builds and the pools are
+/// the draws without the key; 0 is no key; evaluation pairs keep their modes; given builds are `given`.
+#[test]
+fn best_share_mixes_the_field() {
+    let db = db();
+    let parse = |share: &str| MtgSpec::parse(&format!(r#"{{"sealed": {{"set": "eoe", "collation": "arena"{share}}}}}"#)).unwrap();
+    let plain = parse("");
+    let half = parse(r#", "best_share": 0.5"#);
+    let zero = parse(r#", "best_share": 0"#);
+    let all = parse(r#", "best_share": 1"#);
+    assert_eq!(zero, plain, "0 is no key");
+    let sl = half.sealed.as_deref().unwrap();
+    assert_eq!(SealedSpec::parse(&sl.to_json()).unwrap(), *sl, "the JSON round trip");
+    assert!(plain.sealed.as_deref().unwrap().to_json().get("best_share").is_none());
+    for bad in ["-0.1", "1.5", r#""half""#] {
+        let e = MtgSpec::parse(&format!(r#"{{"sealed": {{"set": "eoe", "collation": "arena", "best_share": {bad}}}}}"#)).unwrap_err();
+        assert!(e.contains("best_share"), "{e}");
+    }
+    let (mut best, mut both) = (0u32, 0u32);
+    let n = 1000u64;
+    for seed in 0..n {
+        let mut modes = [sealed::Mode::Given; 2];
+        for p in 0..2u8 {
+            let (s0, i0) = plain.sealed.as_deref().unwrap().seat(seed, p).unwrap();
+            let (s1, i1) = sl.seat(seed, p).unwrap();
+            assert_eq!(i0.mode, sealed::Mode::Explore);
+            assert_eq!((i1.pool_seed, &i1.pool), (i0.pool_seed, &i0.pool), "seed {seed}: the same pool");
+            assert_eq!(i1.mode == sealed::Mode::Best, sealed::best_seat(seed, p, 0.5));
+            match i1.mode {
+                sealed::Mode::Explore => assert_eq!(s1, s0, "seed {seed}: the randomised build unchanged"),
+                sealed::Mode::Best => {
+                    assert_eq!(i1.build.as_ref(), Some(&builder::best_guess(db, &i1.pool, &sl.builder)));
+                    assert_eq!(s1.deck, i1.build.as_ref().unwrap().deck);
+                    best += 1;
+                }
+                sealed::Mode::Given => unreachable!(),
+            }
+            modes[p as usize] = i1.mode;
+            if seed < 50 {
+                assert_eq!(all.sealed.as_deref().unwrap().seat(seed, p).unwrap().1.mode, sealed::Mode::Best);
+            }
+        }
+        both += (modes == [sealed::Mode::Best; 2]) as u32;
+        // the game's decks are the seats'
+        if seed < 20 {
+            let seats = half.try_seats(seed).unwrap();
+            assert_eq!(seats[0].deck, sl.seat(seed, 0).unwrap().0.deck);
+        }
+    }
+    println!("best_share 0.5: {best} best guesses of {} seats, both seats in {both} of {n} games", 2 * n);
+    assert!((900..=1100).contains(&best) && (180..=320).contains(&both), "{best} {both}");
+    // evaluation pairs: a pair's seed, so its modes and decks are fixed
+    let ev = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "arena", "best_share": 0.5}, "decks": "eval", "eval_decks": 4}"#).unwrap();
+    for seed in 0..40u64 {
+        let i = (zero_search::rng::split64(seed) % 4) as u32;
+        assert_eq!(ev.try_seats(seed).unwrap(), half.try_seats(sealed::eval_game_seed(1, i)).unwrap());
+    }
+    // a given build is played as given
+    let given = sl.seat(3, 0).unwrap().0.deck;
+    let names: Vec<String> = given.iter().map(|&d| db.def(d).name.clone()).collect();
+    let gs = SealedSpec::parse(&serde_json::json!({"set": "eoe", "collation": "arena", "best_share": 1.0, "p0": {"deck": names}})).unwrap();
+    let (s, i) = gs.seat(0, 0).unwrap();
+    assert_eq!((s.deck, i.mode), (given, sealed::Mode::Given));
+    assert_eq!(gs.seat(0, 1).unwrap().1.mode, sealed::Mode::Best);
+    // the seats' JSON names the mode
+    let j: serde_json::Value = serde_json::from_str(&sealed::seats_json(r#"{"sealed": {"set": "eoe", "collation": "arena", "best_share": 1}}"#, 5).unwrap()).unwrap();
+    assert_eq!(j[0]["mode"], "best");
+}

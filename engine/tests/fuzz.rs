@@ -64,6 +64,9 @@
 //! the rest of the pool the sideboard), on the EoE card table; every check of the default mode.
 //! A pool holding a card this checkout doesn't support (a loud error of the spec, never a dropped
 //! card) skips its game, counted and named at the end. Games only (sealed is best-of-one).
+//! `FUZZ_BEST_SHARE=p` (ENGINE.md 107.1): the sealed spec's mixed field, `"best_share": p` (each
+//! seat's deck the builder's best guess with probability p; with `FUZZ_HIDDEN_DECKS=1` the prior
+//! samples the same mixture). Unset: the spec without the key, unchanged.
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 //!
 //! `FUZZ_HIDDEN_DECKS=1` (ENGINE.md 102): the mode's games (the default decks, `FUZZ_POOL=eoe`'s or
@@ -323,11 +326,16 @@ fn sealed_mode() -> bool {
     pool_mode() == PoolMode::Sealed
 }
 
-/// The sealed spec of game `seed` (`FUZZ_POOL=sealed`): arena pools for even seeds, paper for odd.
+/// The sealed spec of game `seed` (`FUZZ_POOL=sealed`): arena pools for even seeds, paper for odd;
+/// with `FUZZ_BEST_SHARE=p` the mixed field's `"best_share": p` (ENGINE.md 107.1).
 fn sealed_spec(seed: u64) -> &'static engine::az::MtgSpec {
     static SPECS: std::sync::OnceLock<[engine::az::MtgSpec; 2]> = std::sync::OnceLock::new();
     let specs = SPECS.get_or_init(|| {
-        ["arena", "paper"].map(|c| engine::az::MtgSpec::parse(&format!(r#"{{"sealed": {{"set": "eoe", "collation": "{c}"}}}}"#)).unwrap())
+        let share = match std::env::var("FUZZ_BEST_SHARE") {
+            Ok(v) => format!(r#", "best_share": {}"#, v.parse::<f64>().expect("FUZZ_BEST_SHARE: a probability")),
+            Err(_) => String::new(),
+        };
+        ["arena", "paper"].map(|c| engine::az::MtgSpec::parse(&format!(r#"{{"sealed": {{"set": "eoe", "collation": "{c}"{share}}}}}"#)).unwrap())
     });
     &specs[(seed % 2) as usize]
 }
@@ -1517,6 +1525,12 @@ fn fuzz_random_games() {
     if sealed_mode() {
         let total: u64 = unplayable.values().sum();
         println!("FUZZ_POOL=sealed: {} games played; {total} games skipped, a pool holding a card this checkout doesn't support: {unplayable:?}", n - total - skips);
+        // the mixed field (ENGINE.md 107.1): how many seats played the best guess
+        if let Ok(v) = std::env::var("FUZZ_BEST_SHARE") {
+            let p: f64 = v.parse().expect("FUZZ_BEST_SHARE: a probability");
+            let best = (first..first + n).map(|s| (0..2).filter(|&q| engine::az::sealed::best_seat(s, q, p)).count()).sum::<usize>();
+            println!("FUZZ_BEST_SHARE={p}: {best} of {} seats the builder's best guess", 2 * n);
+        }
     }
     if delver_mode() {
         let (m, t, c) =

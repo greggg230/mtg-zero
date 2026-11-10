@@ -1156,6 +1156,90 @@ fn the_sealed_spec_deals_hidden_decks_from_the_sealed_prior() {
     assert!(worlds >= 20 && other == worlds, "{worlds} {other}");
 }
 
+/// The mixed field's prior (ENGINE.md 107.1): the sealed prior of a spec with `best_share` samples the
+/// spec's mixture. With nothing shown, the share of best-guess decks (a deck equal to the best guess of
+/// its own pool) is the spec's, and at share 1 every deck is one; shown cards of a real best guess keep
+/// the contract at shares 0.5 and 1, and at 1 the deck stays in the shown cards' pair; share 0 is the
+/// prior without the key, draw for draw; a hidden-decklist game of the mixed field deals worlds that hold
+/// what the viewer saw.
+#[test]
+fn the_sealed_prior_samples_the_mixed_field() {
+    use engine::az::hidden_decks::{SampledDeck, SealedPrior};
+    use engine::az::sealed::{builder, collation::Collation, SealedSpec};
+    let db = engine::az::sealed::db();
+    let basics = engine::az::pools::basic_ids(db);
+    let spec = |share: f64| SealedSpec::parse(&serde_json::json!({"set": "eoe", "collation": "arena", "best_share": share})).unwrap();
+    let settings = spec(0.0).builder;
+    let half = SealedPrior::of_spec(&spec(0.5));
+    let all = SealedPrior::of_spec(&spec(1.0));
+    let plain = SealedPrior::new(Collation::Arena, 6, settings);
+    let zero = SealedPrior::of_spec(&spec(0.0));
+    let is_best = |s: &SampledDeck| {
+        let pool: Vec<u16> = s.deck.iter().copied().filter(|d| !basics.contains(d)).chain(s.sideboard.iter().copied()).collect();
+        builder::best_guess(db, &pool, &settings).deck == s.deck
+    };
+    let empty = DeckWant { db, n: 40, shown: &[], companion: None, tilt: None };
+    let mut rng = Rng::new(1071);
+    let n = 400u32;
+    let mut best = 0u32;
+    for _ in 0..n {
+        let s = half.sample(&empty, &mut rng);
+        check_sample(&half, &empty, &s).unwrap();
+        best += is_best(&s) as u32;
+    }
+    println!("best_share 0.5, nothing shown: {best} best guesses of {n} samples");
+    assert!((160..=240).contains(&best), "{best} of {n}");
+    for i in 0..40u64 {
+        assert!(is_best(&all.sample(&empty, &mut Rng::new(i))), "share 1, sample {i}");
+        assert_eq!(zero.sample(&empty, &mut Rng::new(i)), plain.sample(&empty, &mut Rng::new(i)), "share 0, sample {i}");
+    }
+    // shown cards of a real best guess
+    let cols = |v: &[u16]| v.iter().filter(|&&d| !db.def(d).is(engine::db::types::LAND)).fold(0u8, |m, &d| m | db.def(d).colors) & 31;
+    let real_spec = spec(1.0);
+    for seed in 0..60u64 {
+        let real = real_spec.seat(seed, 0).unwrap().0.deck;
+        let k = (seed % 21) as usize;
+        let mut shown: Vec<u16> = real.iter().copied().step_by(2).take(k).collect();
+        shown.sort_unstable();
+        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None };
+        for (prior, r) in [(&half, 2 * seed), (&all, 2 * seed + 1)] {
+            let s = prior.sample(&want, &mut Rng::new(r));
+            check_sample(prior, &want, &s).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+            assert_eq!(s.deck.iter().filter(|d| !basics.contains(d)).count() + s.sideboard.len(), 78, "seed {seed}: the pool");
+            if std::ptr::eq(prior, &all) {
+                let (need, got) = (cols(&shown), cols(&s.deck));
+                assert!(got.count_ones() <= 2 && got & need == need, "seed {seed}: shown {need:05b}, the deck {got:05b}");
+            }
+        }
+    }
+    // a game of the mixed field with hidden decklists
+    let sp = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "paper", "best_share": 0.5}}"#).unwrap();
+    let mut zr = zero_search::rng::Rng::new(1072);
+    let (mut worlds, mut other) = (0, 0);
+    for g in 0..4u64 {
+        let mut a = MtgAz::new_game(&sp, 2, 1072 + g).unwrap();
+        let mut keys = Vec::new();
+        while a.to_move().is_some() {
+            if a.g.turn().number >= 3 && rng.below(60) == 0 {
+                let v = a.to_move().unwrap() as u8;
+                let (shown, real, x) = (shown_of(&a, v), deck_cards(&a, 1 - v), az_enc(&a, v as usize));
+                let mut d = a.clone();
+                d.determinize(v as usize, &mut zr);
+                let world = deck_cards(&d, 1 - v);
+                assert!(world.len() == real.len() && holds(&world, &shown), "game {g}: the world's deck");
+                assert_eq!(az_legal(&d), az_legal(&a));
+                assert_eq!(az_enc(&d, v as usize), x);
+                worlds += 1;
+                other += (world != real) as u32;
+            }
+            let l = az_legal(&a);
+            a.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+        }
+    }
+    println!("{worlds} worlds of the mixed field, {other} with another deck");
+    assert!(worlds >= 8 && other == worlds, "{worlds} {other}");
+}
+
 // ---- The K-sample deal's cost (ENGINE.md 102.8) ----
 
 /// The per-simulation cost of a hidden-decklist world on sealed positions (ENGINE.md 102.8;

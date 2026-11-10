@@ -204,10 +204,15 @@ PRESETS['delver-smoke'] = dict(PRESETS['mtg-smoke'], spec=SPEC_DELVER, eval_spec
 # boosters, docs/sealed_data.md), each built by the randomised builder (no human data, ENGINE.md 101.2), best-of-one;
 # evaluation on the fixed pairs of the evaluation set (`"decks": "eval"`: `eval_decks` pools-and-builds pairs generated
 # from `eval_seed`). Yardsticks: the heuristic improved for EoE (ENGINE.md 103; the Elo anchor) and random. 17lands is a
-# yardstick of S5 only (mtgz/sealed/yardstick.py), never in a run.
+# yardstick of S5 only (mtgz/sealed/yardstick.py), never in a run. The mixed field (ENGINE.md 107.1, the user's decision of
+# 2026-11-10): `best_share` 0.5 - per game and seat, the deck is the builder's best guess (every random choice at its most
+# likely value: the strongest pair, 17 lands, no splash, no curve tilt, the spells greedy by weight) half the time, an
+# exploratory build of the randomised builder the other half; the hidden-decklist prior samples the same mixture. Every
+# finished game's decks, modes and result go to the run's game log (<run>/games/, mtgz.sealed.games).
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_eoe.json'), encoding='utf-8') as _f:
     LAYOUT_EOE = json.load(_f)
-SPEC_EOE = '{"sealed": {"set": "eoe", "collation": "arena"}, "max_turns": 60, "eval_decks": 64, "eval_seed": 1}'
+SPEC_EOE = ('{"sealed": {"set": "eoe", "collation": "arena", "best_share": 0.5}, "max_turns": 60, "eval_decks": 64, '
+            '"eval_seed": 1}')
 EVAL_SPEC_EOE = eval_spec(SPEC_EOE)
 # Both presets play hidden decklists (the sealed spec's default, docs/ENGINE.md 102: the search deals the opponent's
 # unseen deck from the sealed prior) and train the deck target with its reader (docs/ENGINE.md 105.5: aux_deck_w, the

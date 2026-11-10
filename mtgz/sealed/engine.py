@@ -5,6 +5,7 @@
     build(pool_names, seed, builder)    # the randomised deck builder on a pool of names
     seats(spec, seed)                   # a sealed `mtg` spec's two seats in the game `seed`
     lookup(names)                       # name -> engine card id, or why it has none
+    game_log(path)                      # the EoE sealed game log on (a file) or off (None): docs/ENGINE.md 107.1
 
 `pool` reproduces `mtgz.sealed.collation.generate` bit for bit (tests/test_sealed_rust.py); the
 builder uses no human data (DESIGN.md 0, ENGINE.md 101.2).
@@ -37,3 +38,9 @@ def seats(spec, seed):
 def lookup(names):
     """{name: engine card id (int) or the reason it has none (str)} in the EoE card table."""
     return json.loads(E.eoe_lookup(list(names)))
+
+
+def game_log(path):
+    """Turn the EoE sealed game log on (every finished `mtg_eoe` game started after it appends a line to `path`)
+    or off (None); docs/ENGINE.md 107.1, `mtgz.sealed.games`."""
+    E.game_log(None if path is None else str(path))

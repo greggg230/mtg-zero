@@ -26,6 +26,8 @@ fn _engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sealed_build, m)?)?;
     m.add_function(wrap_pyfunction!(sealed_seats, m)?)?;
     m.add_function(wrap_pyfunction!(eoe_lookup, m)?)?;
+    m.add_function(wrap_pyfunction!(game_log, m)?)?;
+    m.add_function(wrap_pyfunction!(game_log_path, m)?)?;
     Ok(())
 }
 
@@ -60,4 +62,18 @@ fn sealed_seats(spec: &str, seed: u64) -> PyResult<String> {
 #[pyfunction]
 fn eoe_lookup(names: Vec<String>) -> String {
     engine::az::sealed::lookup_json(&names)
+}
+
+/// The EoE sealed game log (docs/ENGINE.md 107.1): every finished `mtg_eoe` game started while it is
+/// set appends a JSON line to `path` (its directory created); None stops it.
+#[pyfunction]
+#[pyo3(signature = (path=None))]
+fn game_log(path: Option<&str>) -> PyResult<()> {
+    engine::az::game_log::set(path).map_err(verr)
+}
+
+/// The game log's file, or None while it is off.
+#[pyfunction]
+fn game_log_path() -> Option<String> {
+    engine::az::game_log::path()
 }

@@ -25,6 +25,14 @@
 //! card a position of the shuffled library holds for a given seed: two decks of one size laid out
 //! slot by slot get the same permutation of their slots from the same seed (the paired deck
 //! comparison's common random numbers, `mtgz.sealed.compare`). Without the key nothing changes.
+//!
+//! `best_share` p (ENGINE.md 107.1, the mixed field; default 0): per game and per built seat (a
+//! generated or given pool), with probability p the deck is the builder's best guess
+//! (`builder::best_guess`: every random choice at its most likely value, no randomness), else the
+//! randomised build as before; the draw is a generator of its own from the game's (pools') seed and
+//! the seat ([`best_seat`]), so the pools and the randomised builds are the same draws with or
+//! without the key. The hidden decklists' sealed prior samples the same mixture (ENGINE.md 107.1).
+//! Without the key (or at 0) nothing changes.
 pub mod builder;
 pub mod collation;
 
@@ -61,6 +69,31 @@ pub struct SealedSpec {
     pub boosters: usize,
     pub builder: Settings,
     pub seats: [SeatSource; 2],
+    /// The mixed field (ENGINE.md 107.1, `"best_share"`, default 0): per game and seat (a built seat:
+    /// a generated or given pool), the deck is the builder's best guess (`builder::best_guess`) with
+    /// this probability, else the randomised build; drawn from the game's seed ([`best_seat`]).
+    pub best_share: super::Share,
+}
+
+/// How a seat's deck was built (ENGINE.md 107.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// The randomised builder (`builder::build`): the exploratory builds.
+    Explore,
+    /// The builder's best guess (`builder::best_guess`).
+    Best,
+    /// A given deck, played as given.
+    Given,
+}
+
+impl Mode {
+    pub fn name(self) -> &'static str {
+        match self {
+            Mode::Explore => "explore",
+            Mode::Best => "best",
+            Mode::Given => "given",
+        }
+    }
 }
 
 /// How a seat's deck was made in one game (for reports and the Python helpers).
@@ -72,6 +105,18 @@ pub struct SeatInfo {
     pub pool: Vec<DefId>,
     /// The builder's build (a generated or given pool), else None (a given deck).
     pub build: Option<Build>,
+    /// Which builder made the deck.
+    pub mode: Mode,
+}
+
+/// Does seat `p` of the game whose pools and builds come from `seed` play the best guess, with the
+/// mixed field's share `share` (ENGINE.md 107.1)? A uniform draw of a generator of its own (seeded by
+/// `seed` and `p`, never the pool's or the build's), below `share`; no draw at 0.
+pub fn best_seat(seed: u64, p: u8, share: f64) -> bool {
+    share > 0.0 && {
+        let mut r = Rng::new(split64(seed ^ 0xBE57_6E55_0000 ^ ((p as u64) << 40)));
+        ((r.next_u64() >> 11) as f64 / (1u64 << 53) as f64) < share
+    }
 }
 
 /// The card table of sealed play.
@@ -127,7 +172,13 @@ impl SealedSpec {
     pub fn parse(v: &Value) -> Result<SealedSpec, String> {
         let db = db();
         let o = v.as_object().ok_or("mtg spec: sealed must be a JSON object")?;
-        let mut s = SealedSpec { collation: None, boosters: collation::BOOSTERS, builder: Settings::default(), seats: [SeatSource::Generated, SeatSource::Generated] };
+        let mut s = SealedSpec {
+            collation: None,
+            boosters: collation::BOOSTERS,
+            builder: Settings::default(),
+            seats: [SeatSource::Generated, SeatSource::Generated],
+            best_share: super::Share(0.0),
+        };
         let mut set = None;
         for (k, x) in o {
             match k.as_str() {
@@ -138,6 +189,10 @@ impl SealedSpec {
                     s.boosters = n as usize;
                 }
                 "builder" => s.builder = Settings::parse(x).map_err(|e| format!("mtg spec: {e}"))?,
+                "best_share" => {
+                    let p = x.as_f64().filter(|p| (0.0..=1.0).contains(p)).ok_or("mtg spec: sealed.best_share must be a probability (0..=1)")?;
+                    s.best_share = super::Share(p);
+                }
                 "p0" | "p1" => {
                     let p = (k == "p1") as usize;
                     s.seats[p] = Self::parse_seat(db, k, x)?;
@@ -214,6 +269,9 @@ impl SealedSpec {
         if let Some(c) = self.collation {
             o["collation"] = json!(c.name());
         }
+        if self.best_share.0 > 0.0 {
+            o["best_share"] = json!(self.best_share.0);
+        }
         for (p, s) in self.seats.iter().enumerate() {
             let v = match s {
                 SeatSource::Generated => continue,
@@ -237,7 +295,7 @@ impl SealedSpec {
                 let mut pool: Vec<DefId> = deck.iter().copied().filter(|d| !basics.contains(d)).chain(sideboard.iter().copied()).collect();
                 pool.sort_unstable();
                 let seat = Seat { deck: deck.clone(), sideboard: sideboard.clone(), first_picks: Vec::new(), elsewhere: Vec::new() };
-                return Ok((seat, SeatInfo { pool_seed: None, pool, build: None }));
+                return Ok((seat, SeatInfo { pool_seed: None, pool, build: None, mode: Mode::Given }));
             }
             SeatSource::Pool(pool) => (pool.clone(), None),
             SeatSource::Generated => {
@@ -246,9 +304,14 @@ impl SealedSpec {
                 (generated_pool(db, c, self.boosters, ps).map_err(|e| format!("player {p}: {e}"))?, Some(ps))
             }
         };
-        let b = builder::build(db, &pool, &self.builder, &mut build_rng(seed, p));
+        // ENGINE.md 107.1: the mixed field's best guess, or the randomised build (its generator untouched)
+        let (b, mode) = if best_seat(seed, p, self.best_share.0) {
+            (builder::best_guess(db, &pool, &self.builder), Mode::Best)
+        } else {
+            (builder::build(db, &pool, &self.builder, &mut build_rng(seed, p)), Mode::Explore)
+        };
         let seat = Seat { deck: b.deck.clone(), sideboard: b.sideboard.clone(), first_picks: Vec::new(), elsewhere: Vec::new() };
-        Ok((seat, SeatInfo { pool_seed, pool, build: Some(b) }))
+        Ok((seat, SeatInfo { pool_seed, pool, build: Some(b), mode }))
     }
 
     /// Both seats of the game with seed `seed`.
@@ -271,7 +334,7 @@ pub fn build_json(db: &CardDb, b: &Build) -> Value {
 pub fn seat_json(db: &CardDb, seat: &Seat, info: &SeatInfo) -> Value {
     let mut v = json!({
         "deck": names(db, &seat.deck), "sideboard": names(db, &seat.sideboard), "pool": names(db, &info.pool),
-        "pool_seed": info.pool_seed,
+        "pool_seed": info.pool_seed, "mode": info.mode.name(),
     });
     if let Some(b) = &info.build {
         v["build"] = build_json(db, b);

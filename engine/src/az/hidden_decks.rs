@@ -448,10 +448,20 @@ impl MtgAz {
 /// allow but for R's own placement. Modelled (the prior's choices, not the Bayes posterior of
 /// "collation, then builder" given R): the replacement by rarity, the bounded colour retries, the
 /// forced swaps.
+///
+/// **The mixed field** (ENGINE.md 107.1, the spec's `best_share` p): the sample's builder is the
+/// spec's mixture - with probability p (one uniform draw of the generator after step 2, none at p 0
+/// or 1) the builder's best guess, else step 3's randomised builds. A best-guess sample is
+/// `builder::best_guess_covering` of the pool with R's nonland colours as `need` (the strongest pair
+/// holding R's colours: the best guess is a function of the pool, so this is the best guess of a pool
+/// holding R whose colours could have shown R); when no pair holds them (three colours or more: the
+/// best guess never splashes) the sample falls back to step 3's randomised builds. Step 4 as before.
 pub struct SealedPrior {
     collation: super::sealed::collation::Collation,
     boosters: usize,
     settings: super::sealed::builder::Settings,
+    /// The mixed field's best-guess share (ENGINE.md 107.1; 0: the randomised builder only).
+    best_share: f64,
     /// Every card a pool of the set can hold and the basic lands (sorted).
     support: Arc<Vec<DefId>>,
     /// The set list's rarity of each definition (indexed by `DefId`; 0 none).
@@ -484,7 +494,14 @@ impl SealedPrior {
                 (Arc::new(support), Arc::new(rarity))
             })
             .clone();
-        SealedPrior { collation, boosters, settings, support, rarity }
+        SealedPrior { collation, boosters, settings, best_share: 0.0, support, rarity }
+    }
+
+    /// The prior of the mixed field with best-guess share `p` (ENGINE.md 107.1).
+    pub fn with_best_share(mut self, p: f64) -> SealedPrior {
+        assert!((0.0..=1.0).contains(&p), "best_share {p}: a probability");
+        self.best_share = p;
+        self
     }
 
     /// A pool of the collation (sorted), its seed drawn from `rng` (never the game's `pool_seed`).
@@ -498,9 +515,10 @@ impl SealedPrior {
 
     /// The prior of seat `p`'s deck of a sealed spec: its collation (a seat without one, a given
     /// pool or build of the yardstick: `arena`, whose pools are Arena's, ENGINE.md 101.1), its
-    /// boosters and builder settings.
+    /// boosters and builder settings, and its mixed field's best-guess share (ENGINE.md 107.1).
     pub fn of_spec(s: &super::sealed::SealedSpec) -> SealedPrior {
         SealedPrior::new(s.collation.unwrap_or(super::sealed::collation::Collation::Arena), s.boosters, s.builder.clone())
+            .with_best_share(s.best_share.0)
     }
 }
 
@@ -556,20 +574,30 @@ impl DeckPrior for SealedPrior {
         pool.sort_unstable();
         // 3. The build: the first of a few whose colours cover the shown cards'.
         let need = want.shown.iter().filter(|&&d| !is_land(d)).fold(0u8, |m, &d| m | db.def(d).colors) & crate::mana::COLORS;
-        let mut best: Option<(u32, super::sealed::builder::Build)> = None;
-        // (Shown cards of four or five colours: no pair and splash covers them, one build.)
-        let tries = if need.count_ones() > 3 { 1 } else { SEALED_TRIES };
-        for _ in 0..tries {
-            let b = super::sealed::builder::build_tilted(db, &pool, &self.settings, want.tilt, rng);
-            let miss = (need & !(b.colors | b.splash)).count_ones();
-            if best.as_ref().is_none_or(|x| miss < x.0) {
-                best = Some((miss, b));
+        // (The mixed field, ENGINE.md 107.1: the best guess holding R's colours with the spec's share;
+        // one draw only when the share is strictly between 0 and 1.)
+        let p = self.best_share;
+        let best_mode = p >= 1.0 || (p > 0.0 && unit(rng) < p);
+        let guess = if best_mode { super::sealed::builder::best_guess_covering(db, &pool, &self.settings, want.tilt, need) } else { None };
+        let b = match guess {
+            Some(b) => b,
+            None => {
+                let mut best: Option<(u32, super::sealed::builder::Build)> = None;
+                // (Shown cards of four or five colours: no pair and splash covers them, one build.)
+                let tries = if need.count_ones() > 3 { 1 } else { SEALED_TRIES };
+                for _ in 0..tries {
+                    let b = super::sealed::builder::build_tilted(db, &pool, &self.settings, want.tilt, rng);
+                    let miss = (need & !(b.colors | b.splash)).count_ones();
+                    if best.as_ref().is_none_or(|x| miss < x.0) {
+                        best = Some((miss, b));
+                    }
+                    if miss == 0 {
+                        break;
+                    }
+                }
+                best.expect("a build").1
             }
-            if miss == 0 {
-                break;
-            }
-        }
-        let b = best.expect("a build").1;
+        };
         // 4. R forced in, then the size n.
         let mut rest = b.deck.clone();
         let mut add: Vec<DefId> = Vec::new();

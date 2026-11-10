@@ -9,14 +9,35 @@
 //!
 //! Its spec is an `mtg` spec with the `"sealed"` key (ENGINE.md 101.3): a spec on another card
 //! table is refused, as `mtg` refuses a sealed spec (`MtgSpec::check_game`).
+//!
+//! With the game log on (`game_log::set`, ENGINE.md 107.1) each live game carries its record: a
+//! search's worlds drop it (`determinize`, `determinize_with`), the live game writes it at the step
+//! that ends it. Nothing else of the game reads it.
+use std::sync::Arc;
+
 use zero_search::game::{Belief, Bot, SearchGame, MAX_SEATS};
 use zero_search::rng::Rng;
 
-use super::{MtgAz, MtgSpec};
+use super::{game_log, MtgAz, MtgSpec};
 
-/// An `mtg` game on the EoE table, as the zero-core game `mtg_eoe`.
+/// An `mtg` game on the EoE table, as the zero-core game `mtg_eoe`; with the game log on, the live
+/// game's record (ENGINE.md 107.1).
 #[derive(Clone)]
-pub struct MtgEoeAz(pub MtgAz);
+pub struct MtgEoeAz(pub MtgAz, Option<Arc<game_log::Record>>);
+
+impl MtgEoeAz {
+    /// Does this game carry a game-log record (a live game while the log is on, ENGINE.md 107.1)?
+    pub fn logging(&self) -> bool {
+        self.1.is_some()
+    }
+
+    /// A world of the game: the record dropped, `viewer`'s search marked.
+    fn world(&mut self, viewer: usize) {
+        if let Some(r) = self.1.take() {
+            r.searched(viewer);
+        }
+    }
+}
 
 /// One of `MtgAz`'s bots playing `mtg_eoe` (the same game underneath).
 struct EoeBot(Box<dyn Bot<MtgAz>>);
@@ -43,7 +64,9 @@ impl SearchGame for MtgEoeAz {
     }
 
     fn new_game(spec: &MtgSpec, players: usize, seed: u64) -> Result<Self, String> {
-        <MtgAz as SearchGame>::new_game(spec, players, seed).map(MtgEoeAz)
+        let g = <MtgAz as SearchGame>::new_game(spec, players, seed)?;
+        // (the record of the game log, ENGINE.md 107.1: None while it is off; the match seed as `new_game`'s)
+        Ok(MtgEoeAz(g, game_log::Record::start(spec, spec.seed.unwrap_or(seed))))
     }
 
     fn num_players(&self) -> usize {
@@ -63,7 +86,14 @@ impl SearchGame for MtgEoeAz {
     }
 
     fn step(&mut self, a: u16, chance: &mut Vec<u64>) -> Result<(), String> {
-        self.0.step(a, chance)
+        self.0.step(a, chance)?;
+        // (the game log, ENGINE.md 107.1: the live game's line at the step that ends it)
+        if self.1.is_some() && (self.0.to_move().is_none() || self.0.aborted()) {
+            if let Some(r) = self.1.take() {
+                r.finish(&self.0);
+            }
+        }
+        Ok(())
     }
 
     fn force_chance(&mut self, forced: &[u64]) {
@@ -83,6 +113,7 @@ impl SearchGame for MtgEoeAz {
     }
 
     fn determinize(&mut self, viewer: usize, rng: &mut Rng) {
+        self.world(viewer);
         self.0.determinize(viewer, rng)
     }
 
@@ -119,6 +150,7 @@ impl SearchGame for MtgEoeAz {
     }
 
     fn determinize_with(&mut self, viewer: usize, rng: &mut Rng, belief: &Belief) {
+        self.world(viewer);
         self.0.determinize_with(viewer, rng, belief)
     }
 }

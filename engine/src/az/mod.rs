@@ -29,6 +29,7 @@ pub mod draft_bots;
 pub mod draft_encode;
 pub mod encode;
 pub mod eoe;
+pub mod game_log;
 pub mod hidden_decks;
 pub mod identity;
 pub mod lab;
