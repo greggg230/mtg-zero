@@ -21897,3 +21897,52 @@ most; a tilt of 1 is the untilted deal), `the_sealed_spec_deals_hidden_decks_fro
 games: priors named `sealed`, 56 worlds holding what the viewer saw, with its view, actions and encoding, each with
 another deck; `"hidden_decklists": false` keeps open decklists). `FUZZ_HIDDEN_DECKS=1 FUZZ_POOL=sealed` deals from
 the spec's sealed prior (arena for even seeds, paper for odd).
+
+### 102.7 eoe-base merged; results
+
+**eoe-base 7953d2a merged** (c3e56e8): its 026ebd4, the loop rule reads the board (a loop action's own stack objects
+are no progress, MTR 4.4, ENGINE.md 100.7), ends the free-activation stacks that kept 100.5.1's EoE fuzz from
+finishing; 7953d2a is D2's cd412c5, already here. The digests re-recorded with it (RULES_EPOCH bumped, the Delver
+canary library stamped on this engine: `tools/delver_rerecord.py check --stamp`, 60 of 60 spots reach their
+position):
+
+| Commit | Full | `DIGEST_ENCODING=0` | `DIGEST_ENCODING=v5` | Why |
+|---|---|---|---|---|
+| before (45ed2b2) | 408ee16a94d0ffec | 4a2a227cb45204cd | 6fa4fab18b624326 | |
+| 675795f..ddaf065 (this branch's commits) and 9b72575 (S2's merge) | unchanged | unchanged | unchanged | the switch off changes no game, encoding or v5 float; S2's sealed key changes nothing without it |
+| c3e56e8 eoe-base merged | **5636329c0553f226** | **21ecc979c7a67fea** | **1b361246865ddf4e** | the board-reading loop rule's games (re-recorded, `DIGEST_WRITE=1`) |
+
+The merge's public-state gate run offered "a creature can't block" a creature that already couldn't (a hidden-
+decklist position): the perturbation now picks one that can, as "a creature can't be blocked" does (100.5.1).
+
+**Results** (normal release profile, `E:/cargo-target/mtg-zero/eoe-hidden-decks`, on a desktop shared with other
+workstreams' fuzzes):
+
+* Full engine suite on c3e56e8: **2,172 passed, 0 failed, 15 ignored** (146 binaries; `az` 45, `hidden` 24,
+  `sealed` 11). On ebabc0d, before the last two fixes, three `hidden` tests failed when the cube's and the sealed
+  table's tests shared a binary (`seen_bits_of` asserted one card table per process; 081ac07 keys it per table).
+* `FUZZ_GAMES=20000` (default) on c3e56e8: passed (20,000 games, wins 9,815 / 10,061, 124 draws; 1,000 matches;
+  3,207 s). On 8e60cab, before the merges: passed (wins 9,819 / 10,057, 124 draws: the base's games).
+* `FUZZ_POOL=eoe FUZZ_HIDDEN_DECKS=1 FUZZ_GAMES=20000` on c3e56e8 (four chunks of 5,000): **passed**, every seed:
+  wins 7,197 / 7,155, 5,648 draws; 653,952 hidden-decklist worlds checked, 653,950 with another deck than the real
+  one; 3,227,182 information-set steps in step; no turn reached the long-turn rule (the loop rule). On 8e60cab
+  (before the merges, the long-turn rule at work in 1,676 turns): passed too, 756,088 worlds, after the two
+  findings of 102.3 (seeds 15503, 17153) were fixed.
+* `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_GAMES=20000` on c3e56e8 (the sealed prior): 19,994 seeds pass (469,498
+  worlds in the completed chunks, 469,347 with another deck; no pool skipped); **six seeds hit B4's Gene Pollinator
+  payment panic** (`pay.rs:2429` "a Pollinator to activate (the budget counts them)", in the real game's option
+  completion, not in a deal: 101.7's seed 18106, and 3106, 10787, 12276, 12711, 13674 found here), run around
+  with `FUZZ_SKIP` / `FUZZ_FIRST`; B4 has it.
+* pytest (the gate's): see the gates below.
+* **The gates** on c3e56e8 (`--no-mac`; the e4779b2 pin is on GitHub, no `ZERO_CORE_UNPINNED`): `python tools/gate.py
+  encoding --expect-digest 5636329c0553f226 --expect-digest0 21ecc979c7a67fea --checkpoint
+  E:/mtg-zero-scratch/eoe-d2-widen/fork-delver2/models/iter_0000.pt`: build, both digests, `az` 45, the checkpoint
+  load (h2h, 8 games, 0 unfinished), pytest 218 passed and 1 skipped: `GATE PASSED encoding c3e56e849875 in 1491s`.
+  `python tools/gate.py engine --tested-sha c3e56e8 ...`: build, both digests, `az` 45, `limits` 10, `hidden` 24
+  passed; pytest failed twice on time limits only, on a desktop running about fifteen other workstreams' fuzzers
+  (first run: the toy smoke fixture past its 300 s, 5 errors; second: `test_mtg_smoke_iteration` past its 900 s, 1
+  failed, 217 passed) - the same sha's pytest passed whole in the encoding gate. Last line: `GATE FAILED engine
+  c3e56e849875 in 1332s - pytest: 1 failed, 0 error(s), 217 passed; not run: search-smoke, mac-recheck`. To rerun
+  on a quiet machine.
+* pytest (`tests/test_deck_reader.py` 3 new; `test_belief.py`, `test_mtg_az.py`, `test_position_lab.py` and
+  `lab.rs` read the two targets).
