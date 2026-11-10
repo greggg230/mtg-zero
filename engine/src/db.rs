@@ -1188,7 +1188,9 @@ pub const MANA_UNCOUNTERABLE: u8 = 128;
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct SacCost {
     pub filter: Filter,
-    pub n: u8,
+    /// (A u32: "tap X untapped <permanents>" takes any X, ENGINE.md
+    /// 100.4.8; printed counts are small.)
+    pub n: u32,
     pub another: bool,
 }
 

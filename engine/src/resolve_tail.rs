@@ -454,7 +454,7 @@ impl Game {
         // f.i == 2: "you may pay {X}, where X is the difference."
         let c = f.picked[0];
         // (Two mana values: at most 255 apart.)
-        let diff = (self.def_of(c).mana_value() as i64 - f.x).clamp(0, 255) as u8;
+        let diff = (self.def_of(c).mana_value() as i64 - f.x).clamp(0, 255) as u64;
         let cost = crate::mana::ManaCost { generic: diff, ..Default::default() };
         match self.answer.take() {
             Some(Choice::Yes) => {

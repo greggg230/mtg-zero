@@ -21987,3 +21987,47 @@ for Test Rebel Shrine's "Sacrifice a Rebel": `MY_PERM` + 3 and its "{T}: Add {G}
 12), `cr_614_1a_doubled_tokens_past_sixty_four` (128 Robots, 77 before). Each page is asked again
 identically after `determinize`. docs/shortcuts.md 26.11.6 **fixed**, 24.7.4 updated. Digests unchanged
 (full fc293d3c24d0c0cc, `DIGEST_ENCODING=0` 117effec150157b5, `DIGEST_ENCODING=v5` 7e397431df7a60fb).
+
+##### The u8 parts of a `ManaCost`
+
+X, taxes and the times an additional cost is paid were added into a cost's u8 parts (`act_mana_x`,
+`total_mana`, `extra_costs`, `ManaCost::plus` saturating), so `x_range`, `mana_now`'s X and
+`choose_times` offered no value whose generic part would pass 255 (Mind Twist stopped at X = 254), and
+the counts in reductions were u8 too: "costs {1} less for each artifact you control" counted 256
+artifacts as none (`discount`'s `count() as u8`), and Anointed Peacekeeper's tax, "tap X untapped
+artifacts" (`SacCost::n`, `tap_x_most`'s 255) and "spend mana as though any colour" (`any_colour`'s u8
+sum) saturated or wrapped. A cost's Phyrexian pips past 31 of a colour (a replicate cost of {B/P})
+were offered as `NUMBER` + k past `NUMBER`'s 32 ids, into the `HAND` ids.
+
+* **`ManaCost`'s parts are `num::Count`s** (generic, pips, hybrid, Phyrexian). Sums saturate past
+  `u64::MAX`, exactly: no payment pays such a cost, as none pays the cost it stands for (a payment's
+  mana is less than 2^33: one mana a source and fewer than 2^32 objects, at most 255 of a type in a pool
+  and in its several-mana picks, 100.7; reductions take less than 2^63 + 2^42 from it: a power and counts
+  of objects). `ManaCost::times` (the cost paid n times) replaces `extra_costs`' loop over the times;
+  `less_generic` takes a count; `total` is a u64; `Display` writes a symbol 16 times or more once with
+  its count.
+* **No u8 bound on X or the times**: `x_range`, `mana_now`'s X and `choose_times` offer every value the
+  payment pays (`most_allowed`, monotone), with kicker {X}'s X added once per time exactly.
+* **The reductions** are counts: `discount` (domain, affinity, differently named lands: u64),
+  `named_tax`, a source's power (`SourcePower`, past u64 a reduction to 0), the artifact and Zirda
+  discounts (to one mana), delve's graveyard count, emerge's mana value; `any_colour` sums in u64.
+* **"Tap X untapped <permanents>"**: `SacCost::n` is a u32, `tap_x_reserve` takes X as it is, and
+  `tap_x_most` finds the most by `most_allowed` (one more kept untapped only makes the payment harder)
+  over every candidate (it stopped at 255).
+* **Phyrexian pips paid with life** (`PayPhyrexian`): the numbers k a payment allows, at most what the
+  life left allows (2 each, CR 119.4), are offered as before while they fit `NUMBER` (`NUMBER` + k); past
+  31, every one paged (A0's `ask_paged`, `Choice::Item(k)`, the page in `PayMana::pool_page`); past a
+  u32 of them the game ends aborted (100.7). `PayMana::phyrexian_life` is a u64 (`lose_life` takes it).
+* **Bounds kept, by the lowering**: `need_of`'s count (a mana ability's printed {n}, 30 at most, which
+  nothing increases), airbend's printed {n} (`PermKind::Airbent`'s u8: the lowering refuses one past a
+  u8). The matching counts a cost's needs in u32 once `payable_iter` has checked that the cost takes no
+  more mana than the units it has (each need a unit of its own, 100.4.6's u32 unit counts:
+  `mana::units_count`). The encoding's `ctx::COST` reads the parts as before (layout unchanged).
+
+Tests (`rules_payment_b`): `cr_107_3_an_x_whose_cost_passes_255` (Mind Twist with 255 {B} and 255 {C}
+floating: X to 509, here 300; 254 before), `cr_601_2f_a_reduction_per_permanent_past_255` (Emry, Lurker of
+the Loch with 256 Mishra's Baubles and an Island: cast for {U}; not castable before),
+`cr_107_4f_phyrexian_pips_past_31_paid_with_life` (B5's Test Phyrexian Echo, {B} with replicate {B/P},
+replicated 40 times: 30 to 40 of the {B/P} with life, paged; `NUMBER` + 40 was offered before).
+docs/shortcuts.md 46.3: the open part **fixed**. Digests unchanged (full fc293d3c24d0c0cc,
+`DIGEST_ENCODING=0` 117effec150157b5, `DIGEST_ENCODING=v5` 7e397431df7a60fb).

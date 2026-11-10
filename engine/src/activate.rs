@@ -268,11 +268,9 @@ impl Game {
         // (An X that taps artifacts is no mana: EoE W3. "{X}{X}": the X paid
         // twice, `Cost::x_times`, ENGINE.md 99.12.)
         if ad.cost.tap_x.is_none() {
-            // (A mana amount is a u8: docs/shortcuts.md 46.3, the audit's F7;
-            // `Game::x_range` offers no X past it. "{X}{X}": the X paid
-            // twice, `Cost::x_times`, ENGINE.md 99.12.)
-            let xs = x.saturating_mul(ad.cost.x_times.max(1) as u32);
-            m.generic = m.generic.saturating_add(u8::try_from(xs).unwrap_or(u8::MAX));
+            // (Any X: the cost's parts are counts, ENGINE.md 100.4.8.)
+            let xs = x as u64 * ad.cost.x_times.max(1) as u64;
+            m.generic = m.generic.saturating_add(xs);
         }
         // "Activated abilities of sources with the chosen name cost {2} more
         // to activate unless they're mana abilities" (Anointed Peacekeeper;
@@ -286,9 +284,8 @@ impl Game {
         for d in &ad.discounts {
             let n = match d {
                 // "Where X is this creature's power" (ENGINE.md 99.14).
-                // (A reduction past the u8 generic part is a reduction to
-                // 0, CR 601.2f: exact.)
-                crate::db::Discount::SourcePower if self.is_creature(card) => self.power(card).clamp(0, 255) as u8,
+                // (Past u64, a reduction to 0 as u64::MAX is: exact, CR 601.2f.)
+                crate::db::Discount::SourcePower if self.is_creature(card) => u64::try_from(self.power(card).max(0)).unwrap_or(u64::MAX),
                 _ => self.discount(d, p),
             };
             m.generic = m.generic.saturating_sub(n);
@@ -298,8 +295,7 @@ impl Game {
             for c in self.permanents_of(p) {
                 let n = self.abilities(c).artifact_ability_discount;
                 if n > 0 {
-                    let floor = u8::try_from(m.total().saturating_sub(1)).unwrap_or(u8::MAX); // (exact: n is a u8)
-                    m.generic = m.generic.saturating_sub(n.min(floor));
+                    m.generic = m.generic.saturating_sub((n as u64).min(m.total().saturating_sub(1)));
                 }
             }
         }
@@ -309,8 +305,7 @@ impl Game {
             for c in self.permanents_of(p) {
                 let n = self.abilities(c).ability_discount;
                 if n > 0 {
-                    let floor = u8::try_from(m.total().saturating_sub(1)).unwrap_or(u8::MAX); // (exact: n is a u8)
-                    m.generic = m.generic.saturating_sub(n.min(floor));
+                    m.generic = m.generic.saturating_sub((n as u64).min(m.total().saturating_sub(1)));
                 }
             }
         }
@@ -851,16 +846,16 @@ impl Game {
         let k = picked.len() + 1;
         let left = |lo: usize, hi: usize| ((hi - lo) - k.saturating_sub(lo).min(hi - lo)) as u8;
         let mut rs: Vec<(Reserve, CardIdx)> = Vec::new();
-        let perm = |rs: &mut Vec<(Reserve, CardIdx)>, s: &crate::db::SacCost, n: u8| {
+        let perm = |rs: &mut Vec<(Reserve, CardIdx)>, s: &crate::db::SacCost, n: u32| {
             if n > 0 {
                 rs.push((Reserve::Perm(crate::db::SacCost { n, ..s.clone() }, false), card));
             }
         };
         if let Some(s) = &cost.sacrifice {
-            perm(&mut rs, s, left(0, n_sac));
+            perm(&mut rs, s, left(0, n_sac) as u32);
         }
         if let Some(b) = &cost.bounce {
-            perm(&mut rs, b, left(n_exile, n_bounce));
+            perm(&mut rs, b, left(n_exile, n_bounce) as u32);
         }
         if let Some(r) = Self::remove_counter_reserve(cost) {
             perm(&mut rs, &r, r.n);
@@ -935,7 +930,7 @@ impl Game {
         // mana leaves them payable (27.13.4).
         pm.keep.taps = self.taps_for(p, card, &ad.cost);
         // "Tap X untapped artifacts": X of them stay for the cost (EoE W3).
-        if let Some(r) = Self::tap_x_reserve(&ad.cost, u8::try_from(x).unwrap_or(u8::MAX)) {
+        if let Some(r) = Self::tap_x_reserve(&ad.cost, x) {
             pm.keep.reserves.push((crate::pay::Reserve::Perm(r, true), card));
         }
         pm.waterbend = ad.cost.waterbend;
@@ -1503,15 +1498,14 @@ impl Game {
         // "{X}, {T}, ...: Add X mana" (CR 107.3, 602.2b: X is announced as
         // the ability is activated): as much as can be paid, not with the
         // source's own mana. Choice: `ChooseMode`, `Game::ask_amount` (any
-        // X it can pay, digits past 31; the cost's mana a u8, 46.3: ENGINE.md
-        // 100.2).
+        // X it can pay, digits past 31: ENGINE.md 100.2, 100.4.8).
         let x = if ad.x {
             let exclude = Self::mana_exclude(src.card, ad);
             let classes = self.mana_classes(p, exclude);
             let keep = Keep { allow: self.ability_allow(src.card), ..Self::keep_for(src.card, &ad.cost, exclude) };
             let most = crate::decision::most_allowed(0, u32::MAX as u64, |x| {
                 let m = self.act_mana_x(p, src.card, ad, x as u32);
-                x < 255 && m.generic < u8::MAX && self.can_pay_without(p, &m, &classes, &keep, exclude)
+                self.can_pay_without(p, &m, &classes, &keep, exclude)
             });
             match self.answer.take() {
                 Some(Choice::Number(k)) => match step.answer_amount(0, most, k) {

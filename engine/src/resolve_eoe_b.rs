@@ -106,7 +106,7 @@ impl Game {
 
     /// The number of differently named lands `p` controls (a nameless
     /// permanent has no name to count, CR 201.2).
-    pub(crate) fn differently_named_lands(&self, p: PlayerId) -> u8 {
+    pub(crate) fn differently_named_lands(&self, p: PlayerId) -> u64 {
         let mut names: Vec<&str> = self
             .permanents_of(p)
             .filter(|&c| self.is_type(c, types::LAND))
@@ -115,6 +115,7 @@ impl Game {
             .collect();
         names.sort_unstable();
         names.dedup();
-        names.len().min(255) as u8
+        // (Any number: a count, ENGINE.md 100.4.8; it was clamped at 255.)
+        names.len() as u64
     }
 }

@@ -1191,6 +1191,10 @@ fn b5_db() -> &'static CardDb {
                 "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["G", 1]]}, "mana_cost_str": "{G}",
                 "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_self": true},
                     "effect": {"$t": "AddManaToPool", "produces": [["G", 1]]}, "is_mana_ability": true}]})),
+            // "{B}: Draw a card. Replicate {B/P}." (An instant.)
+            eoe_w2::card("Test Phyrexian Echo", json!({"card_types": ["Instant"], "type_line": "Instant",
+                "mana_cost": {"$t": "ManaCost", "colored": [["B", 1]]}, "mana_cost_str": "{B}", "replicate_cost": "{B/P}",
+                "spell_effect": {"$t": "DrawCards", "amount": 1}})),
             // "Sacrifice a Rebel: Draw a card."
             eoe_w2::card("Test Rebel Shrine", json!({"card_types": ["Artifact"], "type_line": "Artifact",
                 "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
@@ -1200,7 +1204,7 @@ fn b5_db() -> &'static CardDb {
         cards.extend(common::custom_cards());
         cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
         let db = CardDb::from_cards(&cards);
-        for n in ["Test Rebel Crypt", "Test Crew Crypt", "Test Rebel", "Test Elf Rebel", "Test Rebel Shrine"] {
+        for n in ["Test Rebel Crypt", "Test Crew Crypt", "Test Rebel", "Test Elf Rebel", "Test Rebel Shrine", "Test Phyrexian Echo"] {
             db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
         }
         db.leak()
@@ -1285,4 +1289,106 @@ fn cr_601_2h_a_permanent_past_96_sacrificed_after_its_mana_ability() {
     assert_eq!(g.player(0).pool.amt[engine::mana::G], 1, "{}", log(&g));
     settle(&mut g);
     assert_eq!(g.player(0).hand.len(), hand + 1, "{}", log(&g));
+}
+
+/// The ids of the pending decision.
+fn actions(g: &Game) -> Vec<u16> {
+    g.pending_decision().map(|d| d.options.iter().map(|o| o.action).collect()).unwrap_or_default()
+}
+
+/// CR 107.3, 601.2b: X may be any number the payment allows; the generic
+/// part of a cost is a count (ENGINE.md 100.4.8; a u8 before, so X stopped at
+/// 254). Mind Twist ({X}{B}) with 255 {B} and 255 {C} floating: X goes to
+/// 509 (`ask_amount`: "31 or more", then two digits, the first up to 14;
+/// 6 before), here 300.
+#[test]
+fn cr_107_3_an_x_whose_cost_passes_255() {
+    use engine::decision::act;
+    let mut g = scen().hand(0, &["Mind Twist"]).hand(1, &["Island", "Island"]).pool(0, [0, 0, 255, 0, 0, 255], 0).at(Step::Main1, 0).start();
+    let mt = g.card(0, "Mind Twist", Zone::Hand);
+    g.choose(Choice::Cast(mt));
+    for _ in 0..20 {
+        match g.kind() {
+            Some(DecisionKind::ChooseMode) => break,
+            Some(DecisionKind::Target) => g.choose(Choice::Target(engine::Target::Player(1))),
+            _ => {
+                let c = options(&g)[0];
+                g.choose(c)
+            }
+        };
+    }
+    g.choose(Choice::Number(31));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "{:?}", g.options_desc());
+    assert_eq!(*actions(&g).last().unwrap(), act::NUMBER + 14, "X to 509: rest 478 = 14 x 32 + 30");
+    g.choose(Choice::Number(8));
+    g.choose(Choice::Number(13));
+    finish(&mut g, |_| None);
+    let item = g.stack().last().expect("Mind Twist on the stack");
+    assert_eq!(item.x, 300, "{}", log(&g));
+    assert_eq!(g.player(0).pool.total(), 510 - 301, "301 of the 510 spent: {}", log(&g));
+}
+
+/// CR 601.2f: a cost reduction "for each artifact you control" counts every
+/// one (a u8 count wrapped: with 256 artifacts, no reduction). Emry, Lurker of
+/// the Loch ({2}{U}, "costs {1} less for each artifact you control") with 256
+/// Mishra's Baubles and an Island: cast for {U}.
+#[test]
+fn cr_601_2f_a_reduction_per_permanent_past_255() {
+    let mut mine = vec!["Mishra's Bauble"; 256];
+    mine.push("Island");
+    let mut g = scen().battlefield(0, &mine).hand(0, &["Emry, Lurker of the Loch"]).at(Step::Main1, 0).start();
+    let emry = g.card(0, "Emry, Lurker of the Loch", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(emry)), "castable for {{U}}");
+    g.choose(Choice::Cast(emry));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(emry).zone, Zone::Battlefield, "{}", log(&g));
+}
+
+/// CR 107.4f, 601.2b: a Phyrexian pip added by a cost paid many times may be
+/// paid with life whatever their number; how many with life is one number,
+/// paged past `NUMBER`'s 32 ids (ENGINE.md 100.4.8: the options went past
+/// them into the `HAND` ids). B5's Test Phyrexian Echo ({B}, replicate {B/P})
+/// replicated 40 times with a Swamp and ten {B} floating, at 100 life: 30 to
+/// 40 of the 40 {B/P} with life (`NUMBER` + 30 and "next page", then 31..40),
+/// here 40: 80 life.
+#[test]
+fn cr_107_4f_phyrexian_pips_past_31_paid_with_life() {
+    use engine::decision::act;
+    let mut g = b5_scen()
+        .battlefield(0, &["Swamp"])
+        .hand(0, &["Test Phyrexian Echo"])
+        .pool(0, [0, 0, 10, 0, 0, 0], 0)
+        .life(0, 100)
+        .library(0, &["Island"; 60])
+        .at(Step::Main1, 0)
+        .start();
+    let echo = g.card(0, "Test Phyrexian Echo", Zone::Hand);
+    g.choose(Choice::Cast(echo));
+    // Replicate 40 times ("31 or more", then the digit 9).
+    for _ in 0..20 {
+        if g.kind() == Some(DecisionKind::ChooseMode) {
+            break;
+        }
+        let c = options(&g)[0];
+        g.choose(c);
+    }
+    g.choose(Choice::Number(31));
+    g.choose(Choice::Number(9));
+    for _ in 0..20 {
+        if g.kind() == Some(DecisionKind::PayPhyrexian) {
+            break;
+        }
+        let c = options(&g)[0];
+        g.choose(c);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::PayPhyrexian), "{}", log(&g));
+    assert!(actions(&g).iter().all(|&a| a < act::NUMBER + act::NUMBER_N), "{:?}", g.options_desc());
+    assert_eq!(actions(&g), vec![act::NUMBER + 30, act::NUMBER + 31], "30, then next page: {:?}", g.options_desc());
+    let next = options(&g)[1];
+    g.choose(next);
+    assert_eq!(actions(&g), (act::NUMBER..act::NUMBER + 10).collect::<Vec<_>>(), "31..=40: {:?}", g.options_desc());
+    g.choose(Choice::Item(40));
+    finish(&mut g, |_| None);
+    assert_eq!(g.life(0), 20, "{}", log(&g));
 }

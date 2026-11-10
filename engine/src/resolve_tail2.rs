@@ -228,7 +228,8 @@ impl Game {
                             card,
                             player: owner,
                             turn: None,
-                            kind: crate::game::PermKind::Airbent(cost.generic),
+                            // (Airbend's printed {n}: the lowering's bounds.)
+                            kind: crate::game::PermKind::Airbent(u8::try_from(cost.generic).expect("airbend's printed {n}: a u8")),
                         });
                     }
                 }

@@ -788,7 +788,7 @@ impl Game {
     /// artifact you control" or "sacrifice an artifact") uses it up; X of
     /// them must stay untapped. Any mana ability that doesn't (Pentad
     /// Prism's counters) is free. None for X = 0.
-    pub(crate) fn tap_x_reserve(cost: &Cost, x: u8) -> Option<crate::db::SacCost> {
+    pub(crate) fn tap_x_reserve(cost: &Cost, x: u32) -> Option<crate::db::SacCost> {
         let f = cost.tap_x.as_ref()?;
         if x == 0 {
             return None;
@@ -800,28 +800,27 @@ impl Game {
     /// The most X "tap X untapped <permanents> you control" allows for
     /// `card`'s ability `ad` (CR 107.3a, 601.2b): as many of them as stay
     /// untapped while the mana is paid (`tap_x_reserve`).
-    pub(crate) fn tap_x_most(&self, p: PlayerId, card: CardIdx, ad: &crate::db::ActivatedDef) -> u8 {
+    /// (Any number of them, ENGINE.md 100.4.8: it stopped at 255. One more
+    /// kept untapped only makes the payment harder, so the most is found
+    /// by `most_allowed`.)
+    pub(crate) fn tap_x_most(&self, p: PlayerId, card: CardIdx, ad: &crate::db::ActivatedDef) -> u64 {
         if ad.cost.tap_x.is_none() {
-            return u8::MAX;
+            return u64::MAX;
         }
         let Some(all) = Self::tap_x_reserve(&ad.cost, 1) else { return 0 };
-        let cands = self.sacrifice_candidates(p, card, &all).len();
+        let cands = self.sacrifice_candidates(p, card, &all).len() as u64;
         let mana = self.act_mana_x(p, card, ad, 0);
+        if mana.is_zero() {
+            return cands;
+        }
         let exclude = Self::mana_exclude(card, ad);
         let classes = self.mana_classes(p, exclude);
-        let mut x = 0usize;
-        while x < cands.min(255) {
-            if !mana.is_zero() {
-                let r = Self::tap_x_reserve(&ad.cost, (x + 1) as u8).unwrap();
-                let mut keep = Self::keep_for(card, &ad.cost, exclude);
-                keep.reserves.push((crate::pay::Reserve::Perm(r, true), card));
-                if !self.can_pay_without(p, &mana, &classes, &keep, exclude) {
-                    break;
-                }
-            }
-            x += 1;
-        }
-        x as u8
+        crate::decision::most_allowed(0, cands, |x| {
+            let r = Self::tap_x_reserve(&ad.cost, x as u32).unwrap();
+            let mut keep = Self::keep_for(card, &ad.cost, exclude);
+            keep.reserves.push((crate::pay::Reserve::Perm(r, true), card));
+            self.can_pay_without(p, &mana, &classes, &keep, exclude)
+        })
     }
 
     /// The X of stack item `id` when `cost` says "tap X untapped <permanents>

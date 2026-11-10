@@ -2381,7 +2381,7 @@ impl Game {
                     // spell: ENGINE.md 99.15.)
                     if let StackKind::Spell { card: c } = item.kind {
                         if item.alt == 0 || self.item_alt(c, item).is_some() {
-                            cost_floats(x, &self.total_mana(c, item).less_generic(item.delved));
+                            cost_floats(x, &self.total_mana(c, item).less_generic(item.delved as u64));
                         }
                     }
                 }

@@ -1134,7 +1134,7 @@ impl Game {
             Ext::SacMadeUnlessPayReduced { n } => {
                 let Some(c) = f.made.filter(|&c| self.objs[c.i()].zone == Zone::Battlefield) else { return Flow::Next };
                 let p = f.controller;
-                let cost = self.def_of(c).cost.less_generic(*n);
+                let cost = self.def_of(c).cost.less_generic(*n as u64);
                 match self.answer.take() {
                     Some(Choice::Yes) => {
                         let mut back = f.clone();

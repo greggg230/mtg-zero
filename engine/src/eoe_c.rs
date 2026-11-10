@@ -130,7 +130,7 @@ impl Game {
         def.discounts.iter().any(|d| {
             let crate::db::Discount::IfTargets(f, n) = d else { return false };
             let mut cost = self.route_mana(card, p, from);
-            cost.generic = cost.generic.saturating_sub(*n);
+            cost.generic = cost.generic.saturating_sub(*n as u64);
             self.can_pay_without(p, &cost, classes, &Default::default(), Some(card))
                 && self.as_cast(card, p, |g, r| {
                     let ctx = crate::cast::Ctx { controller: p, source: Some(r) };
