@@ -1260,3 +1260,273 @@ fn the_k_sample_deal_is_a_function_of_the_seed_and_the_information() {
     }
     assert!(decks.len() <= 4 && decks.len() >= 2, "{} decks for K = 4", decks.len());
 }
+
+// ---- The deck tilt (ENGINE.md 106): the search deals from the deck prediction ----
+
+use engine::az::hidden_decks::{DealCache, DeckTilt, TiltedDecks, DECK_TILT_ESS};
+
+/// Mid-game positions (turn 3 or later) of EoE sealed games with `collation` pools and K = `k`
+/// cached decks, `n` of them (random play; one every ~20 decisions).
+fn sealed_positions(n: usize, seed: u64, collation: &str, k: usize) -> Vec<MtgAz> {
+    let sp = MtgSpec::parse(&format!(r#"{{"sealed": {{"set": "eoe", "collation": "{collation}"}}, "deal_samples": {k}}}"#)).unwrap();
+    let mut rng = Rng::new(seed);
+    let mut out = Vec::new();
+    let mut s = 0;
+    while out.len() < n {
+        let mut a = MtgAz::new_game(&sp, 2, seed * 1000 + s).unwrap();
+        s += 1;
+        let mut keys = Vec::new();
+        let mut taken = 0;
+        while a.to_move().is_some() && out.len() < n && taken < 6 {
+            if a.g.turn().number >= 3 && rng.below(20) == 0 {
+                out.push(a.clone());
+                taken += 1;
+            }
+            let l = az_legal(&a);
+            a.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+        }
+    }
+    out
+}
+
+/// A prediction of the opponent's unseen cards (`identity::D` floats, sum 1) with expected counts
+/// `fixed + excess` among the `n` unseen cards (the composition of a deck whose excess over the shown
+/// cards is `excess`).
+fn composition(td: &TiltedDecks, excess: &[(u16, f64)]) -> Vec<f32> {
+    let mut c = td.fixed.clone();
+    for &(id, x) in excess {
+        c[id as usize] += x;
+    }
+    c.iter().map(|&x| (x / td.n as f64) as f32).collect()
+}
+
+/// A belief of both targets: a flat hand belief, the deck prediction `p`, the hand's tilt `hand`
+/// (`belief_tilt`) and the deck's `deck` (`belief_tilts.deck`).
+fn deck_belief(p: &[f32], hand: f64, deck: f64, clip: f64) -> zero_search::game::Belief {
+    let d = engine::az::identity::D;
+    let mut pred = vec![1.0 / d as f32; d];
+    pred.extend_from_slice(p);
+    zero_search::game::Belief { pred, tilt: hand, clip, tilts: vec![0.0, deck] }
+}
+
+/// The deck tilt's weighing of the K cached decks (ENGINE.md 106.1), on EoE sealed positions: the
+/// prior's own composition (the K decks' mean) weighs every deck 1 (the uniform pick); one cached
+/// deck's own composition (half and half with the prior's) makes it likelier than the uniform pick; a stronger tilt moves the
+/// probabilities further toward it (the expected log weight grows with alpha); the effective sample
+/// size never falls below `DECK_TILT_ESS` x K (the tempering); the deals draw the decks at those
+/// probabilities.
+#[test]
+fn the_deck_tilt_weighs_the_cached_decks_by_the_prediction() {
+    let pos = sealed_positions(24, 106, "paper", 32);
+    let (mut sharp, mut tempered, mut checked) = (0, 0, 0);
+    for (pi, a) in pos.iter().enumerate() {
+        let v = a.to_move().unwrap() as u8;
+        let flat = vec![1.0 / engine::az::identity::D as f32; engine::az::identity::D];
+        let Some((decks, td0)) = a.deck_tilt_of(v, DeckTilt { p: &flat, tilt: 1.0, clip: 20.0 }) else { continue };
+        let k = decks.len();
+        checked += 1;
+        assert_eq!(k, 32);
+        assert!(td0.ess >= DECK_TILT_ESS * k as f64 - 1e-9, "the ESS floor: {}", td0.ess);
+        // the prior's own composition: every weight 1, the uniform pick
+        let mut own = td0.fixed.clone();
+        for i in 0..own.len() {
+            own[i] += td0.u[i];
+        }
+        let p_own: Vec<f32> = own.iter().map(|&x| (x / td0.n as f64) as f32).collect();
+        let (_, td) = a.deck_tilt_of(v, DeckTilt { p: &p_own, tilt: 1.0, clip: 20.0 }).unwrap();
+        assert!(td.probs.iter().all(|&q| (q - 1.0 / k as f64).abs() < 1e-4), "the prior's own composition: {:?}", td.probs);
+        assert!(td.beta == 1.0 && td.ess > k as f64 - 0.01);
+        // one cached deck's composition, half and half with the prior's own (every identity the decks add
+        // predicted above 0: then w_alpha = w_1^alpha below the clip, and the weighing's exponent is alpha beta)
+        let j = pi % k;
+        let p_j: Vec<f32> = composition(&td0, &td0.excess[j]).iter().zip(&p_own).map(|(x, y)| 0.5 * x + 0.5 * y).collect();
+        let log_w1 = |t: &TiltedDecks| -> Vec<f64> { t.excess.iter().map(|e| e.iter().map(|&(id, c)| c * t.w[id as usize].ln()).sum()).collect() };
+        let mut last = f64::NEG_INFINITY;
+        let (_, base) = a.deck_tilt_of(v, DeckTilt { p: &p_j, tilt: 1.0, clip: 1e6 }).unwrap();
+        let l1 = log_w1(&base);
+        for alpha in [0.25, 1.0, 4.0, 16.0] {
+            let (_, t) = a.deck_tilt_of(v, DeckTilt { p: &p_j, tilt: alpha, clip: 1e6 }).unwrap();
+            assert!(t.ess >= DECK_TILT_ESS * k as f64 - 1e-6, "alpha {alpha}: ESS {} below the floor", t.ess);
+            let m: f64 = t.probs.iter().zip(&l1).map(|(q, l)| q * l).sum();
+            // (the tempering's bisection: beta to 2^-40)
+            assert!(m >= last - 1e-6, "alpha {alpha}: the expected log weight fell ({last} -> {m})");
+            last = m;
+            tempered += (t.beta < 1.0) as u32;
+            if alpha == 1.0 {
+                sharp += (t.probs[j] > 1.0 / k as f64) as u32;
+            }
+        }
+    }
+    println!("{} positions, {checked} with unseen cards; deck j likelier than uniform at alpha 1 in {sharp}; tempered weighings {tempered}", pos.len());
+    // the spec's floor: "deck_tilt_ess" 0.75 keeps 24 effective decks of 32
+    let sp = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "paper"}, "deck_tilt_ess": 0.75}"#).unwrap();
+    assert_eq!(sp.deck_tilt_ess.0, 0.75);
+    assert_eq!(MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "paper"}}"#).unwrap().deck_tilt_ess.0, DECK_TILT_ESS);
+    for bad in ["0", "1.5", "-1", "true"] {
+        assert!(MtgSpec::parse(&format!(r#"{{"sealed": {{"set": "eoe", "collation": "paper"}}, "deck_tilt_ess": {bad}}}"#)).is_err(), "{bad}");
+    }
+    let mut b = pos[0].clone();
+    b.m.deal = DealCache::new(32, b.m.deal.salt);
+    b.m.deal.ess = 0.75;
+    let v = b.to_move().unwrap() as u8;
+    let (_, t0) = b.deck_tilt_of(v, DeckTilt { p: &vec![1.0 / engine::az::identity::D as f32; engine::az::identity::D], tilt: 1.0, clip: 20.0 }).unwrap();
+    let p: Vec<f32> = composition(&t0, &t0.excess[0]);
+    let (_, t) = b.deck_tilt_of(v, DeckTilt { p: &p, tilt: 4.0, clip: 1e6 }).unwrap();
+    assert!(t.ess >= 24.0 - 1e-6 && t.beta < 1.0, "the spec's floor: ESS {} beta {}", t.ess, t.beta);
+    assert!(checked >= 20 && sharp * 10 >= checked * 9, "{sharp} of {checked}");
+
+    // the deals: one position, 4,000 worlds, each cached deck at its probability
+    let a = &pos[0];
+    let v = a.to_move().unwrap();
+    let o = 1 - v as u8;
+    let (_, td0) = a.deck_tilt_of(v as u8, DeckTilt { p: &vec![1.0 / engine::az::identity::D as f32; engine::az::identity::D], tilt: 1.0, clip: 20.0 }).unwrap();
+    let p = composition(&td0, &td0.excess[3]);
+    let p: Vec<f32> = p.iter().zip(composition(&td0, &[]).iter().zip(&td0.u).map(|(f, u)| f + (u / td0.n as f64) as f32)).map(|(x, y)| 0.5 * x + 0.5 * y).collect();
+    let (decks, td) = a.deck_tilt_of(v as u8, DeckTilt { p: &p, tilt: 1.0, clip: 20.0 }).unwrap();
+    let mut want: Vec<(Vec<u16>, f64, u32)> = Vec::new();
+    for (d, &q) in decks.iter().zip(&td.probs) {
+        match want.iter_mut().find(|w| w.0 == d.deck) {
+            Some(w) => w.1 += q,
+            None => want.push((d.deck.clone(), q, 0)),
+        }
+    }
+    let b = deck_belief(&p, 0.0, 1.0, 20.0);
+    let n = 4000;
+    for s in 0..n {
+        let mut d = a.clone();
+        let w = d.determinize_belief(v, &mut zero_search::rng::Rng::new(s), &b);
+        assert!(w.is_none(), "no hand tilt: the hand dealt uniformly");
+        let dk = deck_cards(&d, o);
+        want.iter_mut().find(|w| w.0 == dk).expect("a world's deck is one of the K cached decks").2 += 1;
+    }
+    for (_, q, c) in &want {
+        let f = *c as f64 / n as f64;
+        let se = (q * (1.0 - q) / n as f64).sqrt();
+        assert!((f - q).abs() < 4.0 * se + 2e-3, "a deck dealt {f} of the worlds, its probability {q}");
+    }
+    println!("deals: {} distinct decks, probabilities {:?}", want.len(), want.iter().map(|w| (w.1 * 1000.0).round() / 1000.0).collect::<Vec<_>>());
+}
+
+/// The deck tilt off is the deal of before, bit for bit (ENGINE.md 106.3): a belief without per-target
+/// tilts, or with them at 0, deals as before (the hand's tilt alone, or `determinize`); the hand's own
+/// per-target tilt is `belief_tilt`; a world depends only on its seed, the information and the
+/// prediction (a cold memo deals the same world); with K = 0 the deck tilt tilts the prior's own draws
+/// (every world holding what the viewer saw).
+#[test]
+fn deck_tilt_off_is_the_deal_of_before_and_deals_are_functions_of_the_seed() {
+    let mut pos = sealed_positions(8, 1061, "paper", 32);
+    pos.extend(hidden_positions(8, 30, 1062));
+    let flat = vec![1.0 / engine::az::identity::D as f32; engine::az::identity::D];
+    let mut zr = Rng::new(1063);
+    for a in &pos {
+        let v = a.to_move().unwrap();
+        let p: Vec<f32> = {
+            let mut p: Vec<f32> = (0..engine::az::identity::D).map(|_| (zr.below(1000) + 1) as f32).collect();
+            let s: f32 = p.iter().sum();
+            p.iter_mut().for_each(|x| *x /= s);
+            p
+        };
+        let fp = |b: &zero_search::game::Belief, s: u64, cold: bool| {
+            let mut d = a.clone();
+            if cold {
+                d.m.deal = DealCache::new(a.m.deal.k, a.m.deal.salt);
+            }
+            d.determinize_with(v, &mut zero_search::rng::Rng::new(s), b);
+            d.g.fingerprint()
+        };
+        let plain = |s: u64| {
+            let mut d = a.clone();
+            d.determinize(v, &mut zero_search::rng::Rng::new(s));
+            d.g.fingerprint()
+        };
+        let mut b = deck_belief(&p, 0.7, 0.0, 20.0);
+        let with_zero = fp(&b, 5, false);
+        b.tilts.clear();
+        assert_eq!(fp(&b, 5, false), with_zero, "per-target tilts at 0 = none");
+        b.tilt = 0.0;
+        assert_eq!(fp(&b, 5, false), plain(5), "no tilt at all = determinize");
+        let hand_own = zero_search::game::Belief { tilt: 0.0, tilts: vec![0.7, 0.0], ..deck_belief(&p, 0.0, 0.0, 20.0) };
+        assert_eq!(fp(&hand_own, 5, false), with_zero, "belief_tilts.belief = belief_tilt");
+        let t = deck_belief(&p, 0.5, 1.0, 20.0);
+        assert_eq!(fp(&t, 9, false), fp(&t, 9, true), "the memo changed a deck-tilted world");
+        assert_eq!(fp(&t, 9, false), fp(&t, 9, false));
+        let _ = &flat;
+    }
+    // K = 0: the prior's draws tilted (cube positions, the table prior)
+    let sp = MtgSpec::parse(r#"{"hidden_decklists": true, "deal_samples": 0}"#).unwrap();
+    let mut rng = Rng::new(1064);
+    let mut a = MtgAz::new_game(&sp, 2, 1064).unwrap();
+    let mut keys = Vec::new();
+    while a.g.turn().number < 3 {
+        let l = az_legal(&a);
+        a.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+    }
+    let v = a.to_move().unwrap();
+    let (x, shown) = (az_enc(&a, v), shown_of(&a, v as u8));
+    let bolt = engine::az::identity::identities(a.g.db())[a.g.db().id("Lightning Bolt").unwrap() as usize] as usize;
+    let mut p = vec![0.0f32; engine::az::identity::D];
+    p[bolt] = 1.0;
+    let (mut bolts, mut base) = (0, 0);
+    for s in 0..40 {
+        let mut d = a.clone();
+        d.determinize_with(v, &mut zero_search::rng::Rng::new(s), &deck_belief(&p, 0.0, 1.0, 1e6));
+        let mut u = a.clone();
+        u.determinize(v, &mut zero_search::rng::Rng::new(s));
+        assert_eq!(az_enc(&d, v), x);
+        assert!(holds(&deck_cards(&d, 1 - v as u8), &shown));
+        let id = a.g.db().id("Lightning Bolt").unwrap();
+        bolts += deck_cards(&d, 1 - v as u8).iter().filter(|&&c| c == id).count();
+        base += deck_cards(&u, 1 - v as u8).iter().filter(|&&c| c == id).count();
+    }
+    println!("K = 0: Lightning Bolts dealt {bolts} tilted, {base} untilted (40 worlds)");
+    assert!(bolts > 10 * base.max(1), "{bolts} vs {base}");
+}
+
+/// The deck tilt's cost (ENGINE.md 106.4): per deal (every simulation deals), the untilted K-sample
+/// deal against the deck-tilted one (the weighing made once per request and prediction, then a weighted
+/// pick), on sealed positions with the game's bank built; and the weighing's own cost.
+#[test]
+#[ignore]
+fn deck_tilt_cost() {
+    use std::time::Instant;
+    for coll in ["arena", "paper"] {
+        let pos = sealed_positions(40, 1065, coll, 32);
+        let shared = DealCache::new(32, 77);
+        let mut zr = Rng::new(1066);
+        for label in ["untilted", "deck tilt 1", "deck tilt 1 + hand 1"] {
+            let (mut total, mut first) = (0.0, 0.0);
+            for a in &pos {
+                let mut b = a.clone();
+                b.m.deal = shared.clone();
+                let v = b.to_move().unwrap();
+                let mut p: Vec<f32> = (0..engine::az::identity::D).map(|_| (zr.below(1000) + 1) as f32).collect();
+                let s: f32 = p.iter().sum();
+                p.iter_mut().for_each(|x| *x /= s);
+                let bel = match label {
+                    "deck tilt 1" => deck_belief(&p, 0.0, 1.0, 20.0),
+                    _ => deck_belief(&p, 1.0, 1.0, 20.0),
+                };
+                // (the request's K decks drawn before the clock, as in a search's later simulations)
+                b.clone().determinize(v, &mut zero_search::rng::Rng::new(1));
+                let mut r = zero_search::rng::Rng::new(5);
+                for i in 0..128 {
+                    let t = Instant::now();
+                    let mut d = b.clone();
+                    if label == "untilted" {
+                        d.determinize(v, &mut r);
+                    } else {
+                        d.determinize_with(v, &mut r, &bel);
+                    }
+                    std::hint::black_box(&d);
+                    let e = t.elapsed().as_secs_f64();
+                    total += e;
+                    if i == 0 {
+                        first += e;
+                    }
+                }
+            }
+            let n = pos.len() as f64;
+            println!("{coll} {label}: {} positions, {:.1} us per deal over 128 (the first {:.1} us)", pos.len(), total * 1e6 / (n * 128.0), first * 1e6 / n);
+        }
+    }
+}

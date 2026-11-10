@@ -791,3 +791,11 @@ to the EoE identities: 3,169 floats), the zero-core pin is `feat/aux-widen` 477a
 (CPU) and `eoe-1` (GPU, 128 x 4) train the deck target with its reader; the smoke ran end to end (the reader 3.68
 nats per card after 4 iterations, against 4.47 for the static composition and 6.93 uniform). Left before the first
 run: the deck tilt in the search, `eoe-1`'s throughput on the GPU (ENGINE.md 105.8).
+
+**The deck tilt (2026-11-10, branch `eoe-tilt`; ENGINE.md 106):** the deck prediction is now a head, an input and the
+search's deal, as the hand's belief is: the root's prediction of the opponent's unseen cards weighs the K cached decks
+of the sealed prior by likelihood ratio (69's per-card weights against the K decks' own composition, tempered to at least
+16 effective decks of 32), and the hand's tilt deals the chosen deck's hand. zero-core `feat/deck-tilt` adds per-target
+tilts (`selfplay_belief_tilts` / `eval_belief_tilts` = `{"deck": alpha}`); `eoe-1` deals at 1 in self-play and
+evaluation (a first value, to be A/B'd). Left before the first run: `eoe-1`'s throughput on the GPU, the zero-core pin on
+GitHub (ENGINE.md 106.7).

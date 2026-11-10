@@ -69,6 +69,18 @@ pub enum DeckMode {
     Drafted(Box<[Seat; 2]>),
 }
 
+/// A share in (0, 1] of a spec (`MtgSpec::deck_tilt_ess`), compared by its bits (the spec is `Eq`).
+#[derive(Clone, Copy, Debug)]
+pub struct Share(pub f64);
+
+impl PartialEq for Share {
+    fn eq(&self, o: &Share) -> bool {
+        self.0.to_bits() == o.0.to_bits()
+    }
+}
+
+impl Eq for Share {}
+
 /// The spec of the `mtg` game (JSON; every key optional):
 ///
 /// ```json
@@ -158,6 +170,9 @@ pub struct MtgSpec {
     /// Hidden decklists' K-sample deal (ENGINE.md 102.8): the prior's K decks per request, one
     /// picked per deal (`"deal_samples"`, default 32; 0 = sample the prior at every deal).
     pub deal_samples: usize,
+    /// The deck tilt's effective-sample-size floor, a share of the K decks in (0, 1] (ENGINE.md 106.1;
+    /// `"deck_tilt_ess"`, default `hidden_decks::DECK_TILT_ESS` 0.5). Read only by a deck-tilted deal.
+    pub deck_tilt_ess: Share,
     /// Sealed play (ENGINE.md 101): the pools, the builder and the seats; None for every other spec.
     pub sealed: Option<sealed::Shared>,
 }
@@ -180,6 +195,7 @@ impl Default for MtgSpec {
             start: None,
             hidden_decklists: false,
             deal_samples: 32,
+            deck_tilt_ess: Share(hidden_decks::DECK_TILT_ESS),
             sealed: None,
         }
     }
@@ -263,6 +279,10 @@ impl MtgSpec {
                 "log" => s.log = x.as_bool().ok_or("mtg spec: log must be a boolean")?,
                 "hidden_decklists" => s.hidden_decklists = x.as_bool().ok_or("mtg spec: hidden_decklists must be a boolean")?,
                 "deal_samples" => s.deal_samples = int()? as usize,
+                "deck_tilt_ess" => {
+                    let e = x.as_f64().filter(|e| *e > 0.0 && *e <= 1.0).ok_or("mtg spec: deck_tilt_ess must be a number in (0, 1] (a share of the K decks)")?;
+                    s.deck_tilt_ess = Share(e);
+                }
                 "start" => s.start = Some(std::sync::Arc::new(lab::Start::parse(x, db)?)),
                 "chooser" => {
                     let c = int()?;
@@ -569,6 +589,7 @@ impl MtgAz {
         });
         let mut az = MtgAz::from_seats(spec.db(), gspec, spec.format, &seats, seed, [priors.clone(), priors])?;
         az.m.deal.k = spec.deal_samples;
+        az.m.deal.ess = spec.deck_tilt_ess.0;
         Ok(az)
     }
 
@@ -747,7 +768,7 @@ impl SearchGame for MtgAz {
         }
         // Hidden decklists (ENGINE.md 102): the opponent's whole unseen deck from its prior.
         if self.hidden_decklists() {
-            self.sample_hidden_deck(viewer as u8, &mut r, None);
+            self.sample_hidden_deck(viewer as u8, &mut r, None, None);
         }
         if self.m.sb.is_none() {
             self.g.determinize(viewer as u8, &mut r);
@@ -832,11 +853,13 @@ impl SearchGame for MtgAz {
         }
     }
 
-    /// `determinize` dealt by the root's belief (ENGINE.md 69, zero-core docs/search.md 3.8): the
-    /// same constraints, the best-of-three hidden pool first, then the opponent's hand's unknown
-    /// slots drawn by the weights of `belief::deal_weights` (the head's distribution over their
-    /// hand's cards against the uniform deal's, tilted and clipped). Between the games of a match
-    /// (no hand to deal): `determinize`.
+    /// `determinize` dealt by the root's belief (ENGINE.md 69, 106; zero-core docs/search.md 3.8): the
+    /// same constraints, the best-of-three hidden pool first; with hidden decklists and the `deck`
+    /// target's tilt (`belief_tilts`, ENGINE.md 106) the opponent's deck drawn among the K cached decks
+    /// by the deck prediction; then, with the hand's tilt, the opponent's hand's unknown slots drawn by
+    /// the weights of `belief::deal_weights` (the head's distribution over their hand's cards against
+    /// the dealt world's uniform deal, tilted and clipped). Between the games of a match (no hand to
+    /// deal): `determinize`.
     fn determinize_with(&mut self, viewer: usize, rng: &mut zero_search::rng::Rng, belief: &zero_search::game::Belief) {
         self.determinize_belief(viewer, rng, belief);
     }

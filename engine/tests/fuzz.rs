@@ -87,6 +87,15 @@
 //! opponent's hidden pool is dealt into the hand more than uniformly. Its own generator: the games are
 //! the same with or without it.
 //!
+//! `FUZZ_DECK_TILT=t` (ENGINE.md 106; with `FUZZ_HIDDEN_DECKS=1`): each checkpoint's hidden-decklist
+//! worlds are dealt by `MtgAz::determinize_with` with a random prediction of both targets (weights
+//! (1..1000)^3, normalized), the deck's tilt t (`belief_tilts.deck`) and on every other check the hand's
+//! too, clip 1e6 - every check of the mode's world (actions, view, whole encoding, known cards, the
+//! deck's size and shown cards, the match's deck, own cards, invariants, every option completes, the
+//! information-set check, 30 moves on), plus: the world's deck is one of the K cached decks, and at the
+//! end the dealt decks' probability against the uniform pick's (K x p of the dealt deck, averaged: 1
+//! untilted, K / ESS tilted). The prediction from its own generator: the games are the same.
+//!
 //! `FUZZ_CHANCE=n` (ENGINE.md 74): one decision in `n` (its own generator) runs a chance walk,
 //! what zero-core's search does at `chance_k` > 0: two worlds of the decider (each dealt as a
 //! simulation's, uniform or by random weights) walk one random path while they are at one node of
@@ -380,6 +389,18 @@ fn belief_tilt() -> Option<f64> {
         assert!(t > 0.0 && t.is_finite(), "FUZZ_BELIEF={t}: a tilt > 0");
     })
 }
+
+/// `FUZZ_DECK_TILT=t`: the deck tilt of the hidden-decklist worlds (ENGINE.md 106); unset: none.
+fn deck_tilt_fuzz() -> Option<f64> {
+    std::env::var("FUZZ_DECK_TILT").ok().map(|s| s.parse::<f64>().unwrap_or_else(|_| panic!("FUZZ_DECK_TILT={s}: a tilt (a number > 0)"))).inspect(|&t| {
+        assert!(t > 0.0 && t.is_finite(), "FUZZ_DECK_TILT={t}: a tilt > 0");
+        assert!(hidden_decks_mode(), "FUZZ_DECK_TILT needs FUZZ_HIDDEN_DECKS=1 (the deck tilt deals hidden decklists)");
+    })
+}
+
+/// Deck-tilted worlds dealt from the K cached decks, and K x the dealt deck's probability summed (x 1e6).
+static DT_WORLDS: AtomicU64 = AtomicU64::new(0);
+static DT_RATIO: AtomicU64 = AtomicU64::new(0);
 
 /// The weighted deals checked, and the most favoured identity's dealt copies in the opponent's
 /// unknown hand slots against the uniform deal's expected copies (x 1000, summed).
@@ -1453,6 +1474,14 @@ fn fuzz_random_games() {
             assert!(w > 0 && x * 10 > w * 9, "FUZZ_HIDDEN_DECKS: {x} of {w} worlds with another deck");
         }
     }
+    if let Some(t) = deck_tilt_fuzz() {
+        let (w, r) = (DT_WORLDS.load(Ordering::Relaxed), DT_RATIO.load(Ordering::Relaxed));
+        let mean = r as f64 / 1e6 / w.max(1) as f64;
+        println!("FUZZ_DECK_TILT={t}: {w} deck-tilted worlds from the K cached decks; K x the dealt deck's probability {mean:.3} on average (uniform 1)");
+        if w >= 100 {
+            assert!(mean > 1.5, "FUZZ_DECK_TILT: the deck tilt does not concentrate the deal ({mean:.3})");
+        }
+    }
     if let Some(t) = belief_tilt() {
         let (w, d, u) = (BELIEF_WORLDS.load(Ordering::Relaxed), BELIEF_DEALT.load(Ordering::Relaxed), BELIEF_UNIFORM.load(Ordering::Relaxed));
         println!(
@@ -1781,7 +1810,7 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
                     let mut brng = Rng::new(seed ^ (actions.len() as u64).wrapping_mul(0x9E37) ^ viewer as u64);
                     let pred = random_weights(&mut brng, 1.0).iter().map(|&x| x as f32).collect::<Vec<f32>>();
                     let s: f32 = pred.iter().sum();
-                    let b = zero_search::game::Belief { pred: pred.iter().map(|x| x / s).collect(), tilt: t, clip: 1e6 };
+                    let b = zero_search::game::Belief { pred: pred.iter().map(|x| x / s).collect(), tilt: t, clip: 1e6, tilts: Vec::new() };
                     let mut dw = g.clone();
                     dw.determinize_belief(viewer, &mut zero_search::rng::Rng::new(brng.next_u64()), &b);
                     dw.legal_actions(&mut legal2);
@@ -2098,8 +2127,37 @@ fn check_determinize_hidden(a: &engine::az::MtgAz, seed: u64, rng: &mut Rng) {
         let shown = hd_shown(a, viewer);
         let (real, mine) = (hd_deck(a, o), hd_deck(a, viewer));
         let mut d = a.clone();
-        d.determinize(viewer as usize, &mut zero_search::rng::Rng::new(rng.next_u64()));
-        let what = || format!("seed {seed}: a hidden-decklist world for P{viewer} (mover P{mover})");
+        let s = rng.next_u64();
+        // (FUZZ_DECK_TILT: the deck-tilted deal, ENGINE.md 106; the prediction from its own generator)
+        let tilted = deck_tilt_fuzz().map(|t| {
+            let mut pr = Rng::new(s ^ 0xDEC_7117);
+            let mut seg = || {
+                let mut p: Vec<f32> = (0..engine::az::identity::D).map(|_| ((pr.below(1000) + 1) as f32).powi(3)).collect();
+                let sum: f32 = p.iter().sum();
+                p.iter_mut().for_each(|x| *x /= sum);
+                p
+            };
+            let mut pred = seg();
+            pred.extend(seg());
+            let hand = if pr.below(2) == 0 { t } else { 0.0 };
+            zero_search::game::Belief { pred, tilt: hand, clip: 1e6, tilts: vec![0.0, t] }
+        });
+        let cached = tilted.as_ref().and_then(|b| {
+            let t = engine::az::hidden_decks::DeckTilt { p: engine::az::belief::deck_segment(&b.pred), tilt: b.tilts[1], clip: b.clip };
+            a.deck_tilt_of(viewer, t)
+        });
+        match &tilted {
+            Some(b) => d.determinize_with(viewer as usize, &mut zero_search::rng::Rng::new(s), b),
+            None => d.determinize(viewer as usize, &mut zero_search::rng::Rng::new(s)),
+        }
+        let what = || format!("seed {seed}: a hidden-decklist world for P{viewer} (mover P{mover}){}", if tilted.is_some() { ", deck-tilted" } else { "" });
+        if let Some((decks, td)) = &cached {
+            let world = hd_deck(&d, o);
+            let q: f64 = decks.iter().zip(&td.probs).filter(|(x, _)| x.deck == world).map(|(_, q)| q).sum();
+            assert!(decks.iter().any(|x| x.deck == world), "{}: the world's deck is not one of the K cached decks", what());
+            DT_WORLDS.fetch_add(1, Ordering::Relaxed);
+            DT_RATIO.fetch_add((q * decks.len() as f64 * 1e6) as u64, Ordering::Relaxed);
+        }
         if viewer == mover {
             assert_eq!(az_legal(&d), az_legal(a), "{}: the decider's actions", what());
         } else {

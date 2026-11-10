@@ -215,6 +215,22 @@ pub(crate) struct Knowledge {
     pub required: Vec<DefId>,
 }
 
+impl Knowledge {
+    /// Per card identity (`identity::D`, by `ids`), the unseen cards every sampled deck deals the same
+    /// (ENGINE.md 106): R's cards the viewer does not know where they are (`required` less `known`: its
+    /// clouds' identities) and the non-deck cards it lost track of (`extras`).
+    pub fn fixed_by_identity(&self, ids: &[u16]) -> Vec<f64> {
+        let mut f = vec![0.0f64; super::identity::D];
+        for &d in self.required.iter().chain(&self.extras) {
+            f[ids[d as usize] as usize] += 1.0;
+        }
+        for &d in &self.known {
+            f[ids[d as usize] as usize] -= 1.0;
+        }
+        f
+    }
+}
+
 /// The identities (card definitions, sorted) of player `p`'s cards in the
 /// current (or last) game of match `a`, wherever they are: their starting
 /// deck's and a revealed companion's (tests: in a sampled world they are the

@@ -23396,7 +23396,7 @@ unchanged).
 
 ### 105.8 What is left before the first real run
 
-* **The deck tilt in the search.** The search deals the opponent's unseen deck from the sealed prior alone:
+* **The deck tilt in the search** (built: section 106). The search deals the opponent's unseen deck from the sealed prior alone:
   `determinize_with` does not yet deal it by a prediction (102.1's `determinize_deck_tilted` and `deck_weights`
   exist; the root belief rows would need the deck columns, and the reader `belief: true`, zero-core 36.5). The
   reader and the head train and feed the trunk without it; the tilt is the next step (an A/B of its own).
@@ -23411,3 +23411,275 @@ unchanged).
 * **Early games run long**: the smoke's untrained networks played many games to the 60-turn limit (iteration 1:
   59.1 turns on average); with 64 simulations and a learning network this should fall quickly, as the cube's did -
   watch the first iterations' draw rate.
+
+## 106. The deck tilt: the search deals from the deck prediction
+
+Branch `eoe-tilt` (from `eoe-net` 67ed047), 2026-11-10; zero-core `feat/deck-tilt` (from `feat/aux-widen` 477a026, not
+pushed). **Why.** In EoE sealed the opponent's deck is hidden (102): every simulation deals it from the prior (S2's
+collation and builder conditioned on what the opponent showed, K decks cached per request, 102.8). The network predicts
+the opponent's unseen cards - the `deck` target, its auxiliary head and its deck reader (102.4, 105.5) - and the user's
+design (2026-11-09) wants that prediction "both as a head and as an input, similar to how we architected the
+hand-reading". 105.5 built the input (the reader feeds the trunk); this section is the other half, the analogue of 69 for
+the whole unseen deck: the root's prediction tilts which deck the search deals.
+
+### 106.1 The design
+
+**The prediction.** p = the `deck` segment of the root belief row's answer (69's `ROW_BELIEF`: one forward of the root
+decider's own features per search): a distribution over the 1,024 identities of a random unseen card of the opponent's
+(their hand, library and face-down cards the decider does not know), so N p_k is its expected count of identity k among
+the N unseen cards (N public). The head's columns by default, the reader's when the reader is declared `belief: true`
+(zero-core az.md 36.5; 106.2).
+
+**The prior's own composition, from the K cached decks.** For the request (the opponent's seat, their deck's size, the
+shown cards R, a revealed companion, 102.8) the prior's K decks D_1..D_K are drawn once. Each deck's unseen cards are
+U_j = D_j - known + extras (what the deal gives the opponent's unseen slots: the deck less the cards the decider knows
+exactly, plus the non-deck cards it lost track of), and every U_j = F + e_j: a **fixed part** F = (R - known) + extras -
+the cards it saw and lost track of, the same in every deck - and the **excess** e_j = D_j - R, what the prior added. The
+prior's expected excess is the K decks' mean, u_k = mean_j e_k(D_j).
+
+**The weights** - 69's formula, the uniform deal's expectation replaced by the prior's: per identity k with u_k > 0,
+
+  w_k = `belief_weight`(N p_k - F_k, u_k, alpha, R) = clip(((N p_k - F_k)^+ / u_k)^alpha, 1/R, R)
+
+(1 where no deck adds k: nothing to choose). alpha the deck's tilt, R the clip (`belief_clip`, shared with the hand's):
+no card's weight below 1/R or above R.
+
+**The sampling: the K cached decks weighed by likelihood ratio, not cards drawn.** The deal picks deck j with
+probability pi_j proportional to prod_k w_k^{e_k(D_j)} = exp(L_j) - an exponential tilt of the empirical prior (the K
+decks), the importance-reweighted prior whose expected counts move toward N p (to first order, as 69's Wallenius urn
+does for the hand). Then the deck's cards are dealt as always (102.1 step 3: its unseen part to the opponent's unseen
+slots, each cloud's identities in its domain, the sideboard and the match's pool and deck the sampled ones). Why decks
+and not cards:
+* **A deck stays a built deck.** Weighted sampling of the unseen cards themselves (40 draws from the format by w)
+  would deal the reader's favourite cards whatever their colours: a five-colour pile no builder makes. A cached deck is
+  S2's build - colours, curve, lands - and the tilt only chooses among such decks (the reader saying "blue-black" moves
+  the deal to the blue-black decks of the K).
+* **The cost.** No new prior samples: the K decks are the request's anyway (102.8). The weighing (each deck's excess by
+  identity, the 1,024 weights, the tempering below) is made once per request and prediction - memoized beside the K
+  decks (`DealCache::tilted`, keyed by the request and a hash of the prediction, tilt and clip) - and every simulation's
+  deal is then one draw over K probabilities. Against the prior's own tilt (`determinize_deck_tilted`, 102.1: the
+  builder's draws weighted) it saves a fresh conditioned build per simulation (2.7 ms with arena pools, 102.8) or K new
+  builds per search (~6.6 ms) with no reuse across decisions.
+* **Exact by construction.** Every cached deck passed `check_sample` (K1-K3: the size, R inside, the support, a
+  companion's condition): the tilt cannot deal a world outside the viewer's information.
+* **Its limit**: the support is the K decks. A prediction pointing at a deck the K do not contain cannot be honoured;
+  K (`deal_samples`, 32) is the knob.
+
+**The effective sample size floor.** A deck's ratio multiplies ~25 card weights, so mild per-card ratios spread the
+decks' probabilities by orders of magnitude (106.4-106.5: the floor binds in nearly every weighing), and the
+clip R bounds a card, not a deck. A search whose worlds all hold one deck believes it knows the opponent's whole list. So
+the tilt is tempered: pi_j proportional to exp(beta L_j), beta = 1 unless the effective sample size 1 / sum pi^2 would
+fall below a share of K - the spec key `"deck_tilt_ess"`, default `DECK_TILT_ESS` 0.5: 16 decks of 32 (106.5 chose it) -
+then the largest beta that keeps it (bisection, 40 steps; the ESS falls as beta grows: d log ESS / d beta =
+2 (E_beta[L] - E_2beta[L]) <= 0). This is the deck-level reading of "no card forced": at least 16 effective decks. "No card ruled out" holds per card (1/R); a deck's own probability can approach 0 -
+`belief_mix` (a share of simulations dealt untilted, every deck >= mix / K) is the floor if one is wanted.
+
+**With the hand's tilt: one deal.** The hand is a subset of the unseen cards, so the two tilts are one deal in two steps:
+(1) the deck - which cards exist - by the deck tilt; (2) where they are - the hand's unknown slots drawn by 69's weights
+(`deal_weights`), which compare the hand belief with the uniform deal **of the dealt world's** hidden pool (as
+best-of-three's sampled deck, 69.2). The hand's weights are relative to the chosen deck, so what the deck tilt already
+put into the world (three removals instead of one) is not counted again in the hand. Without the hand's tilt step (2) is
+`Game::determinize`.
+
+**What stays exact.** Every world holds what the viewer saw where it saw it (K1-K3, known cards, clouds, pinned cards,
+the viewer's own cards untouched); the tilt changes which cached deck is dealt, never the rules, the options or what is
+legal. **Determinism and hidden information.** pi is a function of the K decks (the game's salt and the request: the
+viewer's information), of F and N (the viewer's knowledge and public counts), of the prediction (the root decider's
+features) and of alpha and R; the memo only saves work. A world depends only on its seed, the viewer's information and
+the prediction.
+
+**Edges.** Only for a viewer whose encoding is framed in its own seat: deciding for a player it controls (100.5) the
+prediction is of another player's cards, and the deal is untilted. Without unseen opponent cards: untilted. K = 0
+(`deal_samples` 0, every deal a fresh prior sample): the prior's own draws tilted by `deck_weights` (102.1's hook) - exact,
+slow (a sealed prior's `expected_fill` samples 16 decks a call), a debugging setting. **Open decklists** (the cube, the
+Delver mirror, best-of-three): a deck tilt would deal nothing differently - every deck is the real one - so it is
+refused (a panic at the first deal), never a setting that silently does nothing.
+
+### 106.2 The plumbing: the prediction reaches `determinize` (zero-core `feat/deck-tilt`)
+
+**What zero-core already had.** The root belief row (69, zero-core az.md 18) answers every auxiliary target - `Belief::pred`
+is `aux_width()` floats in `AUX` order: MTG's [belief 1,024 | deck 1,024] - and a reader declared `belief: true` answers
+its target's columns from the same forward (`net.aux_answer`, az.md 36.5). So the deck prediction already reached
+`determinize_with`; what was missing: a tilt of its own (`Belief` had one `tilt`, MTG's hand's), and a row without the
+hand's tilt (a seat asked for the belief only when `belief_tilt` > 0).
+
+**The zero-core change** (`feat/deck-tilt` 193ee15 on 477a026; its docs/search.md 3.8.1, az.md 38; opt-in, defaults
+byte-identical): **per-target tilts**. Seat key `belief_tilts` ({target: alpha}), run settings `selfplay_belief_tilts` /
+`eval_belief_tilts` (default {}); a seat with one > 0 takes the root's belief - one row per full search - even with
+`belief_tilt` 0; `Belief::tilts` carries them in `AUX` order (`target_tilt(i)`); the driver refuses a name the game does not
+have, a name twice, a tilt not finite or < 0, and per-target tilts on a lookahead seat. The bindings
+(`Game.determinize_with(..., tilts=)`, `SearchTree.set_belief(..., tilts=)`), the Python tree and `NNSeat`, replays, h2h
+(`--a-belief-tilts '{"deck": 1}'`, a run's `eval_belief_tilts`), the Elo tag (`-b0-tdeck0.5`), the head checks (a run, a
+league opponent, h2h's sides), the self-play metrics and remote self-play's hello (an older checkout is refused) follow.
+Tests: Rust `per_target_tilts_take_the_belief_and_deal_by_it` (HiddenMull at `belief_tilt` 0 and `hand` 1 shifts the
+root value as `belief_tilt` 1 does), `per_target_tilts_are_checked`; `tests/test_belief_tilts.py` (2). `Belief` gained a
+field: struct literals add `tilts: Vec::new()` (this repo's three).
+
+**This repo.** `MtgAz::determinize_with` (= `determinize_belief`, `az/belief.rs`): the hand's tilt is `belief_tilts.belief`
+when set, else `belief_tilt` (69, unchanged); the deck's is `belief_tilts.deck` with `belief_clip`; with neither,
+`determinize`. The deck tilt is passed to `sample_hidden_deck` (`hidden_decks::DeckTilt`), which draws the cached deck by
+`tilt_decks`' probabilities (`TiltedDecks`: the weights, the probabilities, beta, the ESS, and for tests the fixed part, u
+and each deck's excess; `Knowledge::fixed_by_identity`; `DealCache::decks` factored out of `pick`, unchanged in its draws).
+`MtgAz::deck_tilt_of` (tests, analysis) gives the weighing the live state's deal would use. The pin: `third_party/zero-core`
+477a026 -> 193ee15.
+
+**Which prediction: the head's, by default.** The reader is declared `belief: false` (105.5), so the row's `deck` columns
+are the auxiliary head's: it reads the trunk, which reads the reader's prediction and everything else (the opponent's
+play), and it is the better predictor in the smoke (105.6: 3.35 against the reader's 3.68 nats per card; 106.5). The
+reader's instead: declare it `belief: true` (`mtgz.az.deck_reader.readers(belief=True)`). That flag is part of the
+reader's normal form stored in the checkpoint (zero-core compares it: a run cannot switch it on a checkpoint, a fork
+cannot either), so today the source is chosen per run family, not per seat; a per-seat source is a zero-core change (an
+evaluator setting overriding `net.aux_answer`'s declared flags) - left (106.7).
+
+### 106.3 Settings
+
+* `selfplay_belief_tilts` / `eval_belief_tilts` = `{"deck": alpha}` (zero-core; default {} = today's deal, byte-identical;
+  the run's config.json gains the two keys). `belief_clip` (R, 20), `belief_mix`, `belief_fast` are the hand's and apply
+  to the deck's too. The hand's tilt stays `selfplay_belief_tilt` / `eval_belief_tilt`.
+* Evaluation names its Elo pool: `cq-n4-v50-s0.3-b0-tdeck0.5` (eoe-1's evaluation rule with the deck tilt 0.5).
+* The spec key `"deck_tilt_ess"` (in (0, 1], default 0.5): the floor's share of K (per game, both seats, as
+  `deal_samples`); read only by a deck-tilted deal.
+* `eoe-smoke` deals by the deck tilt at 1 in both seats (the smoke exercises the path); `eoe-1` at **1** (106.6).
+* A deck tilt on an open-decklist spec panics at its first deal (106.1).
+
+### 106.4 The checks
+
+* **The full engine suite** on 8904565: **2,215 passed, 0 failed, 21 ignored** (147 binaries); `--test az` 48, `--test
+  hidden` 27 + 2 ignored. `python -m pytest tests -q`: **240 passed, 1 skipped** (a first run under the fuzz's load
+  timed out in `test_loop`'s toy-smoke fixture; alone, whole).
+* **Tests** (`tests/hidden.rs`, 3 new): `the_deck_tilt_weighs_the_cached_decks_by_the_prediction` (24 EoE sealed paper
+  positions, K = 32: the prior's own composition weighs every deck 1 - the uniform pick, ESS 32; one cached deck's
+  composition, half and half with the prior's, makes it likelier than the uniform pick in 24 of 24; the expected log
+  weight never falls as alpha grows 0.25 -> 16; the ESS never below the floor - it binds in all 96 of these sharp
+  weighings; 4,000 deals of one position draw each distinct cached deck at its probability within 4 se; the spec key,
+  its refusals and a 0.75 floor keeping 24 decks), `deck_tilt_off_is_the_deal_of_before_and_deals_are_functions_of_the_seed`
+  (sealed and cube hidden-decklist positions: per-target tilts at 0 = none, no tilt = `determinize`, bit for bit;
+  `belief_tilts.belief` = `belief_tilt`; a cold memo deals the same deck-tilted world; K = 0: the prior's draws tilted,
+  880 Lightning Bolts in 40 worlds against 1 untilted, every world holding what the viewer saw), `deck_tilt_cost`
+  (ignored). `tests/az.rs` (3 new, 1 extended): `deck_tilt_deals_keep_every_determinize_invariant` (the public-state
+  gate's hidden-decklist positions - the cube's random decks and EoE sealed -, random predictions of both targets at deck
+  tilts 0.5 / 1 / 8, clips 20 / 1e6, with and without the hand's tilt, both viewers: the decider's actions, each viewer's
+  whole encoding, the cards it knows, invariants, knowledge, hand sizes, its own cards; 480 worlds, every one with
+  another opponent deck), `the_deck_tilt_ignores_the_opponents_hidden_cards` (worlds the decider cannot tell from the
+  real game, each with another opponent deck - 144 of 144 -, weigh the cached decks bit for bit the same with a cold
+  memo and deal the same opponent deck from one seed), `a_deck_tilt_on_open_decklists_is_refused`;
+  `the_v5_facts_encode_no_hidden_information` deals one deck-tilted world per viewer on its hidden-decklist positions
+  (6,137 perturbed positions, 4,108 deck-tilted worlds encode as the uniform ones). `tests/test_deck_tilt.py` (3): the
+  presets and the run's seats, a deck-tilted deal through the bindings (view, options and encoding kept; a function of
+  the seed), the refusal on open decklists.
+* **The fuzz** `FUZZ_DECK_TILT=t` (with `FUZZ_HIDDEN_DECKS=1`): every check of the hidden mode on worlds dealt by
+  `determinize_with` with a random prediction of both targets ((1..1000)^3, normalised) at deck tilt t, the hand's too on
+  every other check, clip 1e6; plus each world's deck one of the K cached decks, and at the end K x the dealt deck's
+  probability averaged (1 untilted, K / ESS tilted). Its own generator: the games are those of the hidden mode.
+  `FUZZ_HIDDEN_DECKS=1 FUZZ_POOL=sealed FUZZ_DECK_TILT=1 FUZZ_GAMES=20000`, four chunks of 5,000, on 8904565 (the floor 0.5) **passed, every seed** (wins 9,629 / 9,545, 826 draws; 577,888 hidden-decklist worlds, 577,666 with another deck than the real one, 577,715 of them deck-tilted, every one a cached deck; K x the dealt deck's probability 2.00 on average - the floor's 16 effective decks of 32 -; 3.02M information-set steps in step; ~2,200 s a chunk, the four in parallel). On c91cfb1 (the floor then 0.25) also passed, every seed (577,996 worlds, 577,838 deck-tilted, K x p 3.99: 8 effective decks).
+* **Digests** (the tilt off, the default): on 8904565 full **ae88eae20abb14ca**, `DIGEST_ENCODING=0` **d0da2e6030aa0d08**, `DIGEST_ENCODING=v5` **418dc8195dc6afb5** - 105.7's (1a0bd71), unchanged: with no per-target tilt nothing calls the deck tilt, and `DealCache::pick` draws as before.
+* **The deal's cost** (`deck_tilt_cost`: 40 sealed positions per collation, 128 deals each, the game's bank built and
+  the request's decks drawn before the clock): untilted **1.9 us** a deal (arena and paper alike, the bank built), deck-tilted **4.8 us** (the knowledge, the prediction's hash for the memo and a draw over K), with the hand's tilt too **6.3 us**; a prediction's first deal ~45 us (two runs, the desktop quiet). The weighing (each deck's excess, the 1,024 weights,
+  the tempering) is that first deal, once per search; then a draw over K.
+  Beside a search's 64 leaves both are noise; the root belief row is 69's (one row per full search:
+  `selfplay.belief.per_decision` 0.25 in the smoke, p_full 0.25).
+
+### 106.5 CPU evidence: the deal against the true deck, by floor and source
+
+`python tools/deck_tilt.py deals --model runs/eoe-tilt-smoke/models/iter_0004.pt --positions 200 --deals 64 --ess ...`
+(CPU, the desktop shared with the fuzz): 200 positions of random play on `SPEC_EOE` (turn 3 or later), the decider's
+`deck` prediction from the smoke's 4-iteration checkpoint (106.6; a tiny network), 64 worlds per arm. Columns: the
+cross-entropy per true unseen card of the worlds' mean unseen composition (1% of a uniform over the set's 321 cards mixed
+in), paired against the untilted deal; the cards misplaced by the mean composition (half the L1 distance to the true
+one); the distinct decks among the 64 worlds. 'flat' is an untrained network's prediction (uniform over the 1,024
+identities: iteration 1).
+
+| deal (alpha 1 unless named) | cross-entropy per card | paired vs untilted | cards misplaced | distinct decks of 64 |
+|---|---|---|---|---|
+| untilted (K = 32 decks) | 4.850 +- 0.024 | | 24.60 | 28.0 |
+| head, floor 0.125 x K | 5.159 +- 0.061 | +0.309 +- 0.056 | **21.20** | 9.9 |
+| head, floor 0.25 x K (alpha 0.5 / 1) | 4.840 / 4.837 | -0.010 / -0.013 +- 0.037 | 21.41 / 21.39 | 15.0 / 15.4 |
+| head, floor 0.375 x K | 4.744 +- 0.034 | -0.106 +- 0.026 | 21.85 | 19.1 |
+| **head, floor 0.5 x K** (alpha 0.5 / 1) | **4.707** / 4.711 | **-0.143** / -0.139 +- 0.021 | 22.25 / 22.25 | 21.3 / 21.7 |
+| head, floor 0.75 x K | 4.718 +- 0.026 | -0.132 +- 0.014 | 23.06 | 25.4 |
+| reader, floor 0.25 / 0.5 / 0.75 x K | 4.851 / 4.728 / 4.730 | +0.001 / -0.122 / -0.120 | 22.11 / 22.81 / 23.44 | 16.0 / 22.0 / 25.4 |
+| flat, floor 0.25 / 0.5 / 0.75 x K | 5.277 / 5.034 / 4.920 | +0.427 / +0.184 / +0.070 | 26.72 / 26.09 / 25.46 | 17.2 / 22.9 / 25.6 |
+| the head's own prediction | 4.907 +- 0.038 | | | |
+| the reader's own prediction | 4.562 +- 0.021 | | | |
+
+Read: (1) **the tilt works**: by the head's prediction the dealt decks hold more of the opponent's real cards (2.4 fewer
+misplaced at the floor 0.5, 3.2 at 0.25, of 33.8 on average unseen cards). (2) **The floor, not alpha, sets its strength**: alpha
+0.5 and 1 agree to the third decimal - the floor binds in nearly every weighing (a deck's ratio is ~25 cards'). (3)
+**Calibration picks the floor**: as 69.5 found for the hand, the deal that moves furthest toward the truth is
+overconfident - at 0.25 the mean composition is closer but its cross-entropy no better (the worlds concentrate on 15
+distinct decks of 64 draws), at 0.125 worse than untilted (+0.31); 0.5 and 0.75 are the best calibrated (-0.14 nats per
+card, ~7 and ~9 se), 0.5 still moving 2.4 cards: hence the default 0.5. (4) **An untrained prediction tilts the wrong
+way**: the flat prediction favours decks of the cards the prior adds rarely (its ratio N/1,024 against a small u_k): +0.18
+nats and 1.5 cards worse at the floor 0.5 - iteration 1's self-play of a fresh run, bounded by the floor, gone once the
+head has the base rates (the smoke's head at iteration 2: 3.45 nats, below the static composition's 4.47). (5) Here the
+reader's own prediction beats the head's (4.56 vs 4.91: random-play positions, outside the self-play distribution the
+trunk learned; in training the head is better, 3.34 vs 3.63 at iteration 4) and the two deal alike (-0.12 vs -0.14). A
+smoke's tiny network and 200 positions: a first look, not the measurement - the A/B (106.6) is.
+
+### 106.6 The smoke, and eoe-1's choice
+
+**`python -m mtgz.az.run --run runs/eoe-tilt-smoke --preset eoe-smoke --iters 4`** (CPU, `CUDA_VISIBLE_DEVICES=-1`, on
+5218d32: the deck tilt at 1 in self-play and evaluation, the floor then 0.25; the desktop running this section's fuzz):
+
+| iter | self-play: decisions / game, rounds | policy | value | belief (head) | deck (head) | deck (reader) | reader hit | belief rows / decision | seconds |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 943, 59.4 | 0.967 | 0.681 | 4.026 | 4.239 | 4.666 | 0.51 | 0.252 | 120 |
+| 2 | 691, 45.9 | 0.980 | 0.629 | 3.269 | 3.447 | 4.012 | 0.90 | 0.247 | 122 |
+| 3 | 862, 53.1 | 1.011 | 0.589 | 3.063 | 3.381 | 3.711 | 0.98 | 0.248 | 119 |
+| 4 | 601, 42.2 | 1.005 | 0.609 | 2.960 | 3.340 | 3.634 | 0.98 | 0.249 | 134 |
+
+Every game finished; no panic; one root belief row per full search (a quarter of the decisions: p_full 0.25); the
+evaluations' pool `visits-b0-tdeck1`. The head's and the reader's losses follow 105.6's run without the tilt (the head
+4.187 / 3.404 / 3.457 / 3.348, the reader 4.655 / 3.993 / 3.804 / 3.682): the targets are the true unseen cards whatever
+the search dealt. Its checkpoint is 106.5's model.
+
+**eoe-1: `selfplay_belief_tilts` = `eval_belief_tilts` = `{"deck": 1}`, the floor 0.5 (the default), the hand's tilt off.**
+* **On from the start, in both seats.** Self-play is where the deal shapes the targets; evaluation with the same deal
+  keeps the Elo pool (`cq-n4-v50-s0.3-b0-tdeck1`) measuring the run's own search. The cost: one row per full search
+  (69.6: 1-3% of self-play's throughput) and microseconds a deal.
+* **alpha 1**, the prediction's own odds: alpha does not matter once the floor binds (106.5), and where it does not (a
+  weak prediction) 1 is the head's expected counts - 69.7's best arm for the hand.
+* **The floor 0.5**: the best-calibrated deal of 106.5 that still moves the composition (0.25 moves more and is
+  overconfident; 0.75 moves less).
+* **The risk**: iteration 1's untrained prediction tilts the wrong way (106.5 (4)), bounded by the floor, short.
+* **The A/B, 69.9's order**: evaluation only on one checkpoint first (`zero.h2h A A --a-belief-tilts '{"deck": 1}'
+  --b-belief-tilts '{}'`, 600 games), then a self-play fork without the tilt against the run; the floor by forks
+  (`"deck_tilt_ess"` is a spec key, per game: two h2h sides share it).
+
+### 106.7 What is left
+
+* **The zero-core pin is not on GitHub**: `feat/deck-tilt` 193ee15 was not pushed (this task's rule); a pin must exist
+  there (AGENTS.md). The maintainer pushes it; the gitlink is right as it is.
+* **A per-seat source** (head or reader): the reader's `belief` flag is part of the checkpoint's reader (106.2); a
+  zero-core evaluator setting overriding `net.aux_answer`'s flags would make it an A/B arm on one checkpoint.
+* **`eoe-1` on the GPU** (105.8): throughput and RAM, now with one more row per full search.
+* **The A/B** (106.6) once a run has a trained head: the floor was chosen on a smoke's network and random-play positions.
+* **K = 32 bounds the tilt's reach** (its support is the K decks): a larger `deal_samples` gives it more decks to choose
+  from, at K conditioned builds per new request (102.8).
+
+### 106.8 Gates, conflict points
+
+**Gates** on 8904565 (`--no-mac`; the zero-core pin 193ee15 is not on GitHub - the gates build it from the submodule's
+checkout, the pin check satisfied by the gitlink):
+
+* `python tools/gate.py engine --no-mac --tested-sha 8904565 --expect-digest ae88eae20abb14ca --expect-digest0
+  d0da2e6030aa0d08`: build, both digests, `az` 48, `limits`, `hidden` 27, pytest, the search smoke: **`GATE PASSED engine
+  8904565ba5b9 in 504s`**.
+* `python tools/gate.py optin-core --no-mac --baseline-root <a detached worktree of 67ed047, the commit before the pin,
+  its own build>`: build, the core's cargo tests (145 passed), `check_checkpoint_compat` byte identity (identical: 2,465
+  samples visits and cq), `az` 48, `hidden` 27, the other games' build-only (3 of 3), the core build: passed; the core's
+  pytest **438 passed, 1 failed**: `tests/test_measure.py::test_anchors_on_a_local_remote` (a local remote evaluation's
+  subprocesses, 1,836 s of pytest on a desktop shared with other workstreams) - it passes alone (12 s), and
+  `test_measure.py` + `test_belief.py` + `test_belief_tilts.py` pass whole (25). Last line: **`GATE FAILED optin-core
+  8904565ba5b9 in 2347s - core-pytest: 1 failed, 0 error(s), 438 passed (not retried: FAILED
+  tests/test_measure.py::test_anchors_on_a_local_remote is not in tests/test_remoteplay.py)`** - the load, as 105.7's
+  three runs; a rerun on a quiet desktop is the maintainer's.
+
+**Conflict points.** zero-core: `game.rs` (`Belief::tilts`: every struct literal), `driver.rs` (`NnSeat::belief_tilts`,
+`takes_belief`, `check_belief_tilts`), `driver/worker.rs` (`set_belief`), `dynapi.rs` (`determinize_with`'s and
+`set_belief`'s signatures), `crates/py` (`SEAT_KEYS`, the bindings), `toy.rs`, `mull_game.rs`; Python `mcts.py`,
+`games.py`, `run.py` (DEFAULTS, `belief_keys`), `h2h.py`, `elo.py`, `league.py`, `play.py`, `replay.py`; docs search.md
+3.8.1, az.md 38. This repo: `az/hidden_decks.rs` (`DealCache::decks` / `tilted` / `ess`, the deck tilt), `az/belief.rs`
+(`determinize_belief`), `az/mod.rs` (`MtgSpec::deck_tilt_ess`, `Share`), `az/sample.rs` (`Knowledge::fixed_by_identity`),
+`az/lab.rs` (a `Belief` literal), tests at the ends of `tests/hidden.rs` and `tests/az.rs`, `tests/fuzz.rs`'s hidden mode,
+the presets (`mtgz/az/__init__.py`), ENGINE.md 106 after 105.

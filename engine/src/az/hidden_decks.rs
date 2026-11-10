@@ -311,13 +311,25 @@ impl MtgAz {
     /// The hidden-decklist deal of `viewer`'s opponent (module docs; ENGINE.md 102.1): their deck
     /// sampled from the prior conditioned on what `viewer` knows, its unknown cards dealt to their
     /// cards `viewer` does not know, their sideboard and the match's pool and deck of theirs the
-    /// sampled ones. `Game::determinize` follows (`SearchGame::determinize`). `tilt`: the deck
-    /// reader's weights per card definition.
-    pub(crate) fn sample_hidden_deck(&mut self, viewer: PlayerId, rng: &mut Rng, tilt: Option<&dyn Fn(DefId) -> f64>) {
+    /// sampled ones. `Game::determinize` follows (`SearchGame::determinize`). `tilt`: weights per
+    /// card definition the prior's own draws are multiplied by (a fresh sample). `deck_tilt`: the deck
+    /// prediction's tilt (ENGINE.md 106): with K cached decks one of them drawn by `tilt_decks`'
+    /// probabilities instead of uniformly; with K = 0 the prior sampled with `deck_weights` as `tilt`.
+    /// Only for a viewer whose encoding is framed in its own seat (the prediction is of its opponent's
+    /// cards: not while it decides for the player it controls, ENGINE.md 100.5) and who has unseen
+    /// cards of theirs; else the untilted deal.
+    pub(crate) fn sample_hidden_deck(&mut self, viewer: PlayerId, rng: &mut Rng, tilt: Option<&dyn Fn(DefId) -> f64>, deck_tilt: Option<DeckTilt>) {
         let o = opp(viewer);
         let Some(prior) = self.m.deck_priors[o as usize].clone() else { return };
         if self.m.sb.is_some() || self.g.is_over() {
             return;
+        }
+        let deck_tilt = deck_tilt.filter(|_| tilt.is_none() && self.g.encoding_seat(viewer) == viewer);
+        if let (Some(t), 0) = (deck_tilt, self.m.deal.k) {
+            // (K = 0: no cached decks to weigh - the prior's own draws tilted, ENGINE.md 102.1)
+            let w = deck_weights(self, viewer, t.p, t.tilt, t.clip);
+            let ids = identity::identities(self.g.db());
+            return self.sample_hidden_deck(viewer, rng, Some(&|d: DefId| w[ids[d as usize] as usize]), None);
         }
         let db = self.g.db();
         let sizes = [self.m.decks[0].iter().map(|&c| c as usize).sum(), self.m.decks[1].iter().map(|&c| c as usize).sum()];
@@ -325,11 +337,29 @@ impl MtgAz {
         let comp = self.g.player(o).companion_def;
         let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt };
         // The K-sample deal (ENGINE.md 102.8): one of the K decks the prior gave for this request
-        // (memoized per game), else a fresh sample (K = 0, or a tilt).
-        let d: Arc<Dealt> = if want.tilt.is_none() && self.m.deal.k > 0 {
-            self.m.deal.pick(&*prior, o, &want, rng)
-        } else {
-            Arc::new(Dealt::new(&*prior, &want, prior.sample(&want, rng)))
+        // (memoized per game) - uniformly, or by the deck tilt (ENGINE.md 106) -, else a fresh sample
+        // (K = 0, or a tilt of the prior's draws).
+        let d: Arc<Dealt> = match deck_tilt {
+            Some(t) if self.m.deal.k > 0 && !kn.slots.is_empty() => {
+                let ess = self.m.deal.ess;
+                let decks = self.m.deal.decks(&*prior, o, &want);
+                let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &kn, &t, ess), || {
+                    let ids = identity::identities(db);
+                    tilt_decks(&decks, &kn.required, &kn.fixed_by_identity(ids), kn.slots.len(), ids, t, ess)
+                });
+                let mut x = unit(rng);
+                let mut i = td.probs.len() - 1;
+                for (j, &q) in td.probs.iter().enumerate() {
+                    if x < q {
+                        i = j;
+                        break;
+                    }
+                    x -= q;
+                }
+                decks[i].clone()
+            }
+            _ if want.tilt.is_none() && self.m.deal.k > 0 => self.m.deal.pick(&*prior, o, &want, rng),
+            _ => Arc::new(Dealt::new(&*prior, &want, prior.sample(&want, rng))),
         };
         let mut deal = d.deck.clone();
         deal.extend_from_slice(&kn.extras);
@@ -352,7 +382,7 @@ impl MtgAz {
     pub fn determinize_deck_tilted(&mut self, viewer: usize, rng: &mut zero_search::rng::Rng, w: &dyn Fn(DefId) -> f64) {
         let mut r = Rng::new(rng.next_u64());
         if self.hidden_decklists() {
-            self.sample_hidden_deck(viewer as u8, &mut r, Some(w));
+            self.sample_hidden_deck(viewer as u8, &mut r, Some(w), None);
         }
         if self.m.sb.is_none() {
             self.g.determinize(viewer as u8, &mut r);
@@ -364,7 +394,34 @@ impl MtgAz {
     /// from what `viewer` knows, the game's cards dealt to it (no `Game::determinize` after it).
     #[doc(hidden)]
     pub fn sample_hidden_deck_for(&mut self, viewer: u8, rng: &mut Rng, tilt: Option<&dyn Fn(DefId) -> f64>) {
-        self.sample_hidden_deck(viewer, rng, tilt);
+        self.sample_hidden_deck(viewer, rng, tilt, None);
+    }
+
+    /// The deck tilt's weighing of the K cached decks `viewer`'s deal of the live state would use
+    /// (ENGINE.md 106; tests and analysis): None without hidden decklists, cached decks (K = 0), unseen
+    /// cards of the opponent, or with the viewer deciding for the player it controls.
+    #[doc(hidden)]
+    pub fn deck_tilt_of(&self, viewer: u8, t: DeckTilt) -> Option<(Arc<Vec<Arc<Dealt>>>, Arc<TiltedDecks>)> {
+        let o = opp(viewer);
+        let prior = self.m.deck_priors[o as usize].clone()?;
+        if self.m.sb.is_some() || self.g.is_over() || self.m.deal.k == 0 || self.g.encoding_seat(viewer) != viewer {
+            return None;
+        }
+        let db = self.g.db();
+        let sizes = [self.m.decks[0].iter().map(|&c| c as usize).sum(), self.m.decks[1].iter().map(|&c| c as usize).sum()];
+        let kn = sample::knowledge(&self.g, viewer, o, sizes);
+        if kn.slots.is_empty() {
+            return None;
+        }
+        let comp = self.g.player(o).companion_def;
+        let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None };
+        let decks = self.m.deal.decks(&*prior, o, &want);
+        let ess = self.m.deal.ess;
+        let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &kn, &t, ess), || {
+            let ids = identity::identities(db);
+            tilt_decks(&decks, &kn.required, &kn.fixed_by_identity(ids), kn.slots.len(), ids, t, ess)
+        });
+        Some((decks, td))
     }
 }
 
@@ -606,11 +663,13 @@ impl Dealt {
     }
 }
 
-/// The K decks of one request (its key) and the per-seat pool banks of one game.
+/// The K decks of one request (its key), the per-seat pool banks of one game, and the deck tilt's
+/// weighings of the K decks (ENGINE.md 106: by the request's and the prediction's key).
 #[derive(Default)]
 struct DealMemo {
     entries: Vec<(u64, Arc<Vec<Arc<Dealt>>>)>,
     banks: [Option<Arc<Vec<Vec<DefId>>>>; 2],
+    tilted: Vec<(u64, Arc<TiltedDecks>)>,
 }
 
 /// Requests remembered (a game's shown cards change a few dozen times; the latest are reused).
@@ -629,12 +688,15 @@ pub struct DealCache {
     /// K (0: every deal samples the prior afresh).
     pub k: usize,
     pub salt: u64,
+    /// The deck tilt's effective-sample-size floor, a share of K (ENGINE.md 106.1; spec key
+    /// `"deck_tilt_ess"`, default `DECK_TILT_ESS`).
+    pub ess: f64,
     memo: Arc<Mutex<DealMemo>>,
 }
 
 impl DealCache {
     pub fn new(k: usize, salt: u64) -> DealCache {
-        DealCache { k, salt, memo: Arc::new(Mutex::new(DealMemo::default())) }
+        DealCache { k, salt, ess: DECK_TILT_ESS, memo: Arc::new(Mutex::new(DealMemo::default())) }
     }
 
     /// The request's key: the seat, the size, the companion and R.
@@ -648,11 +710,16 @@ impl DealCache {
 
     /// One of the K decks of `want` for seat `o`, drawn uniformly with `rng`.
     pub fn pick(&self, prior: &dyn DeckPrior, o: PlayerId, want: &DeckWant, rng: &mut Rng) -> Arc<Dealt> {
-        let key = Self::key(o, want);
         let i = rng.below(self.k as u32) as usize;
+        self.decks(prior, o, want)[i].clone()
+    }
+
+    /// The K decks of `want` for seat `o` (drawn once per request, from the salt and the request alone).
+    pub fn decks(&self, prior: &dyn DeckPrior, o: PlayerId, want: &DeckWant) -> Arc<Vec<Arc<Dealt>>> {
+        let key = Self::key(o, want);
         let mut m = self.memo.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((_, v)) = m.entries.iter().find(|e| e.0 == key) {
-            return v[i].clone();
+            return v.clone();
         }
         let bank = m.banks[o as usize]
             .get_or_insert_with(|| Arc::new(prior.bank(self.k, &mut Rng::new(crate::rng::split64(self.salt ^ 0xBA4C ^ o as u64)))))
@@ -665,6 +732,144 @@ impl DealCache {
             m.entries.remove(0);
         }
         m.entries.push((key, v.clone()));
-        v[i].clone()
+        v
     }
+
+    /// The deck tilt's weighing of a request's K decks under the key `key` (the request's and the
+    /// prediction's, ENGINE.md 106), made by `make` the first time: a pure function of its key's inputs,
+    /// so the memo only saves work.
+    fn tilted(&self, key: u64, make: impl FnOnce() -> TiltedDecks) -> Arc<TiltedDecks> {
+        let mut m = self.memo.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, t)) = m.tilted.iter().find(|e| e.0 == key) {
+            return t.clone();
+        }
+        let t = Arc::new(make());
+        if m.tilted.len() >= MEMO {
+            m.tilted.remove(0);
+        }
+        m.tilted.push((key, t.clone()));
+        t
+    }
+}
+
+// ---- The deck tilt (ENGINE.md 106): the K cached decks weighed by the deck prediction ----
+
+/// The effective share of the K cached decks the deck tilt keeps at least, by default (ENGINE.md 106.1;
+/// the spec key `"deck_tilt_ess"`): when the weighed decks' effective sample size would fall below this
+/// x K, the tilt is tempered (its exponent scaled by beta < 1) until it is that.
+pub const DECK_TILT_ESS: f64 = 0.5;
+
+/// The deck tilt of a search (ENGINE.md 106): `p`, the network's prediction of the opponent's unseen
+/// cards by identity (the `deck` target's distribution, `identity::D` floats: the root decider's,
+/// from its own features), the tilt alpha > 0 and the clip R >= 1 (the seat's `belief_tilts.deck`
+/// and `belief_clip`).
+#[derive(Clone, Copy, Debug)]
+pub struct DeckTilt<'a> {
+    pub p: &'a [f32],
+    pub tilt: f64,
+    pub clip: f64,
+}
+
+/// How the deck tilt weighs one request's K cached decks (ENGINE.md 106.1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TiltedDecks {
+    /// The weight w_k of each card identity (`identity::D`; 1 where no deck adds the identity).
+    pub w: Vec<f64>,
+    /// Each cached deck's probability (they sum to 1).
+    pub probs: Vec<f64>,
+    /// The tempering exponent in (0, 1] (1: the tilt as set).
+    pub beta: f64,
+    /// The probabilities' effective sample size, 1 / sum p^2 (K for the uniform pick).
+    pub ess: f64,
+    /// What they were made from (tests, analysis): N, the opponent's unseen cards; per identity the
+    /// fixed part (`fixed`) and the prior's expected excess u_k (`u`); per cached deck its excess over
+    /// the shown cards by identity (`excess`: (identity, copies), in the deck's order).
+    pub n: usize,
+    pub fixed: Vec<f64>,
+    pub u: Vec<f64>,
+    pub excess: Vec<Vec<(u16, f64)>>,
+}
+
+/// The effective sample size of the probabilities proportional to exp(beta (l - max l)).
+fn tilt_probs(l: &[f64], beta: f64) -> (Vec<f64>, f64) {
+    let mx = l.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let e: Vec<f64> = l.iter().map(|&x| (beta * (x - mx)).exp()).collect();
+    let s: f64 = e.iter().sum();
+    let p: Vec<f64> = e.iter().map(|x| x / s).collect();
+    let ess = 1.0 / p.iter().map(|x| x * x).sum::<f64>();
+    (p, ess)
+}
+
+/// The deck tilt's weighing of the K decks `decks` the prior gave for a request whose shown cards
+/// are `shown` (R, sorted), of the opponent whose unseen cards number `n`, `fixed` (per identity) of
+/// them the same in every deck (R's cards the viewer does not know where they are, and the non-deck
+/// cards it lost track of): ENGINE.md 106.1. The excess e_k(D) = copies of identity k the prior added
+/// to deck D beyond R; the prior's own expected excess u_k = mean over the K decks; the prediction's
+/// excess N p_k - fixed_k; w_k = `belief_weight`(N p_k - fixed_k, u_k, alpha, R) where u_k > 0; deck D's
+/// log weight sum_k e_k(D) ln w_k; its probability proportional to exp(beta x that), beta = 1 unless
+/// the effective sample size would fall below `ess` x K (then the largest beta that keeps it, by
+/// bisection: the ESS falls as beta grows).
+pub fn tilt_decks(decks: &[Arc<Dealt>], shown: &[DefId], fixed: &[f64], n: usize, ids: &[u16], t: DeckTilt, ess: f64) -> TiltedDecks {
+    let k = decks.len();
+    assert!(k > 0, "the deck tilt needs the K cached decks (deal_samples > 0)");
+    let d = identity::D;
+    // each deck's excess over R, by identity (sparse)
+    let mut ex: Vec<Vec<(u16, f64)>> = Vec::with_capacity(k);
+    let mut u = vec![0.0f64; d];
+    for dl in decks {
+        let mut left = dl.deck.clone();
+        for &s in shown {
+            assert!(take_one(&mut left, s), "a cached deck without a shown card");
+        }
+        let mut e: Vec<(u16, f64)> = Vec::new();
+        for c in left {
+            let id = ids[c as usize];
+            match e.iter_mut().find(|x| x.0 == id) {
+                Some(x) => x.1 += 1.0,
+                None => e.push((id, 1.0)),
+            }
+            u[id as usize] += 1.0 / k as f64;
+        }
+        ex.push(e);
+    }
+    let mut w = vec![1.0f64; d];
+    for i in 0..d {
+        if u[i] > 0.0 {
+            w[i] = zero_search::game::belief_weight(n as f64 * t.p[i] as f64 - fixed[i], u[i], t.tilt, t.clip);
+        }
+    }
+    let l: Vec<f64> = ex.iter().map(|e| e.iter().map(|&(id, c)| c * w[id as usize].ln()).sum()).collect();
+    let floor = ess * k as f64;
+    let (mut probs, mut ess) = tilt_probs(&l, 1.0);
+    let mut beta = 1.0;
+    if ess < floor {
+        let (mut lo, mut hi) = (0.0f64, 1.0f64);
+        for _ in 0..40 {
+            let mid = 0.5 * (lo + hi);
+            if tilt_probs(&l, mid).1 >= floor {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        beta = lo;
+        (probs, ess) = tilt_probs(&l, beta);
+    }
+    TiltedDecks { w, probs, beta, ess, n, fixed: fixed.to_vec(), u, excess: ex }
+}
+
+/// The key of a deck tilt's weighing: everything `tilt_decks` reads - the request's key (its K decks and
+/// R), the viewer's other knowledge of the unseen cards (the deck cards it knows, the non-deck cards it lost
+/// track of, their number: the fixed part and N) and the prediction, tilt and clip.
+fn tilt_key(request: u64, kn: &sample::Knowledge, t: &DeckTilt, ess: f64) -> u64 {
+    let mut h = crate::rng::split64(request ^ 0x7111_7DEC ^ t.tilt.to_bits().rotate_left(17) ^ t.clip.to_bits() ^ ess.to_bits().rotate_left(41));
+    h = crate::rng::split64(h ^ (kn.slots.len() as u64) << 32 ^ kn.known.len() as u64);
+    for &d in kn.known.iter().chain(&kn.extras) {
+        h = crate::rng::split64(h ^ d as u64);
+    }
+    h = crate::rng::split64(h ^ kn.extras.len() as u64);
+    for &x in t.p {
+        h = crate::rng::split64(h ^ x.to_bits() as u64);
+    }
+    h
 }
