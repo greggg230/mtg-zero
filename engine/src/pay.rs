@@ -593,6 +593,10 @@ pub(crate) struct PayMana {
     /// than `NUMBER` ids), or of the question which source a permanent
     /// picked by its own id stands for (more than `NUMBER` ids).
     pub pool_page: crate::decision::Page,
+    /// The mana of a cost whose other parts the player orders (CR 601.2h;
+    /// ENGINE.md 100.4.9): the payment's floor on the agenda; each option
+    /// leaves the whole payment completable (`Game::completing`).
+    pub oracle: Option<u32>,
 }
 
 impl PayMana {
@@ -630,6 +634,7 @@ impl PayMana {
             now_taken: [0; 6],
             now_min: 0,
             pool_page: crate::decision::Page::FIRST,
+            oracle: None,
         }
     }
 
@@ -2218,6 +2223,7 @@ impl Game {
                                 return;
                             }
                             let items: Vec<(u32, Choice)> = ks.iter().map(|&k| (k as u32, Choice::Item(k as u32))).collect();
+                            let items = self.completing_items(&Task::PayMana(pm.clone()), items);
                             let page = pm.pool_page;
                             self.ask_paged(Task::PayMana(pm), page, payer, DecisionKind::PayPhyrexian, act::NUMBER, act::NUMBER_N, &items, Vec::new());
                         }
@@ -2419,6 +2425,7 @@ impl Game {
                 return;
             }
             let items: Vec<(u32, Choice)> = (0..n as u32).map(|k| (k, Choice::Item(k))).collect();
+            let items = g.completing_items(&Task::PayMana(pm.clone()), items);
             let page = pm.pool_page;
             g.ask_paged(Task::PayMana(pm), page, payer, DecisionKind::ChooseMode, act::NUMBER, act::NUMBER_N, &items, Vec::new());
         };
@@ -2713,6 +2720,7 @@ impl Game {
         let items: Vec<(u32, Choice)> = (0..rems.len() as u32).map(|k| (k, Choice::Item(k))).collect();
         let (payer, page) = (pm.payer, pm.pool_page);
         pm.spend = Some(rems);
+        let items = self.completing_items(&Task::PayMana(pm.clone()), items);
         self.ask_paged(Task::PayMana(pm), page, payer, DecisionKind::PayPool, act::NUMBER, act::NUMBER_N, &items, Vec::new());
     }
 

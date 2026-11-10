@@ -232,6 +232,10 @@ pub enum DecisionKind {
     /// converge, sunburst): `NUMBER` + the WUBRG mask of the set
     /// (`Task::ColorsSpent`; ENGINE.md 100.5.1).
     ChooseColorsSpent,
+    /// Which part of a cost is paid next, when their order can matter (CR
+    /// 601.2h: any order; `NUMBER` + the part, `cost_order::part`; the parts
+    /// whose payment next leaves the cost payable). ENGINE.md 100.4.9.
+    CostPart,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }

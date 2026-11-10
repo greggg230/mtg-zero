@@ -2578,7 +2578,19 @@ impl Game {
         // (118.9): paid after the mana abilities are activated (601.2g; a
         // painland's damage first), by the payment (`PayMana::life_after`).
         let life_later = self.life_later(card, item);
+        // CR 601.2h: the parts of the cost besides its mana in any order,
+        // when that can matter (ENGINE.md 100.4.9): the mana first (601.2g),
+        // every option leaving the whole payment completable (down to the
+        // agenda's `floor`: escalate's discards included), then the parts as
+        // the player orders them.
+        let floor = self.agenda.len() - matches!(self.agenda.last(), Some(Task::Escalate { id: i }) if *i == id) as usize;
         let Some(pos) = self.item_index(id) else { return };
+        let item = &self.stack[pos];
+        let rest_cost = if item.alt > 0 { Some(self.item_alt_rest(card, item)) } else { self.route_extra(card, item.from, item.cost_option) };
+        let ordered = rest_cost
+            .map(|c| crate::cost_order::Order::new(p, card, c, 0, 0, floor as u32))
+            .filter(|o| !self.order_free(o))
+            .map(Box::new);
         let item = &self.stack[pos];
         if item.alt > 0 {
             // (Its own alternative cost, or the granted one noted on it:
@@ -2598,11 +2610,15 @@ impl Game {
             pm.keep = Self::keep_for(card, rest, None);
             pm.keep.allow = self.spend_allow_from(card, item.from);
             pm.keep.spell = Some(card);
+            if ordered.is_some() {
+                pm.keep = crate::pay::Keep { allow: pm.keep.allow, spell: Some(card), ..Default::default() };
+                pm.oracle = Some(floor as u32);
+            }
             if let Some(r) = emerge {
                 pm.keep.exclude = self.sacrifices_itself_for_mana(r.idx).then_some(r.idx);
                 self.agenda.push(Task::Emerge { id, sac: true });
             }
-            self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
+            self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None, order: ordered });
             if !pm.cost.is_zero() {
                 pm.keep.life = pm.keep.life.checked_add(life_later).expect("a cost's life: at most a life total and 99");
                 pm.life_after = life_later;
@@ -2640,19 +2656,29 @@ impl Game {
         // Teamwork (a crew-like additional cost): its taps are paid before
         // the mana (CR 601.2h: any order), leaving the mana payable.
         let mut taps_first = false;
+        let in_order = ordered.is_some();
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
-            pm.keep = Self::keep_for(card, extra, None);
+            if !in_order {
+                pm.keep = Self::keep_for(card, extra, None);
+            }
             pm.forced.extend(self.exile_sources(p, card, extra, None));
-            if extra.crew > 0 {
+            if in_order {
+                // (Below the mana: teamwork's taps too, by the rules after
+                // the mana abilities, CR 601.2g-h.)
+                self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None, order: ordered });
+            } else if extra.crew > 0 {
                 taps_first = true;
             } else {
-                self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
+                self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None, order: None });
             }
         }
         pm.keep.allow = self.spend_allow_from(card, item.from);
         pm.keep.spell = Some(card);
+        if in_order {
+            pm.oracle = Some(floor as u32);
+        }
         let escalated = item.modes.len().saturating_sub(1) as u8;
-        if escalated > 0 && def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
+        if !in_order && escalated > 0 && def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
             pm.keep.reserves.push((crate::pay::Reserve::Discard(escalated, None), card));
         }
         let _ = def;
@@ -2660,7 +2686,7 @@ impl Game {
         pm.life_after = life_later;
         self.agenda.push(Task::PayMana(Box::new(pm)));
         if taps_first {
-            self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
+            self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None, order: None });
         }
     }
 

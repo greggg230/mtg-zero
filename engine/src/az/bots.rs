@@ -590,6 +590,11 @@ impl Heuristic {
             // CR 103.1: play first (the tempo of the first land drop is
             // worth more than a card in these decks; ENGINE.md 35).
             K::PlayDraw => Some(act::PLAYER),
+            // Which part of a cost next (ENGINE.md 100.4.9): the first in the
+            // order the engine pays parts whose order is free.
+            K::CostPart => crate::cost_order::part::DOMINANT
+                .iter()
+                .find_map(|&k| d.options.iter().find(|o| o.choice == Choice::Number(k)).map(|o| o.action)),
             // The colours spent on a converge or sunburst spell (ENGINE.md
             // 100.5.1): the most (what the engine counted before).
             K::ChooseColorsSpent => d

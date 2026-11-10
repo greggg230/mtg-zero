@@ -674,6 +674,11 @@ pub struct Game {
     pub(crate) decisions: u32,
     /// While refreshing a decision after `determinize`: never auto-answer.
     pub(crate) no_auto: bool,
+    /// A copy the payment search runs (`Game::payment_completes`, ENGINE.md
+    /// 100.4.9): its decisions offer every option, unchecked.
+    pub(crate) oracle: bool,
+    /// Such a copy reached a part of a cost it can't pay: a dead end.
+    pub(crate) oracle_dead: bool,
     /// Continuous effects from resolved spells and abilities (CR 611.2).
     pub(crate) effects: Vec<crate::layers::Effect>,
     /// Some effect makes a permanent lose all abilities (a fast path for
@@ -1224,6 +1229,8 @@ impl Game {
             forced_at: 0,
             decisions: 0,
             no_auto: false,
+            oracle: false,
+            oracle_dead: false,
             effects: Vec::new(),
             any_loss: false,
             counters: Vec::new(),

@@ -1392,3 +1392,250 @@ fn cr_107_4f_phyrexian_pips_past_31_paid_with_life() {
     finish(&mut g, |_| None);
     assert_eq!(g.life(0), 20, "{}", log(&g));
 }
+
+// ---- 100.4.9: B6, the order of a cost's parts --------------------------------
+
+/// The cube, the shared test cards and B6's: costs whose parts change what
+/// another part may take.
+fn b6_db() -> &'static CardDb {
+    use serde_json::json;
+    static DB: std::sync::OnceLock<&'static CardDb> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let draw = json!({"$t": "DrawCards", "amount": 1});
+        let custom = vec![
+            // "Creatures you control get -1/-0." (An enchantment.)
+            eoe_w2::card("Test Weakness Charm", json!({"card_types": ["Enchantment"], "type_line": "Enchantment",
+                "mana_cost": {"$t": "ManaCost", "colored": [["B", 1]]}, "mana_cost_str": "{B}",
+                "static_abilities": [{"$t": "StaticAbility", "scope": {"$t": "StaticScope", "kind": "creatures_you_control"},
+                    "continuous_effect": {"$t": "ContinuousModifier", "layer": 7, "payload": {"$t": "PowerToughnessBonus", "power_bonus": -1}}}]})),
+            // "Crew 1, Sacrifice an enchantment: Draw a card."
+            eoe_w2::card("Test Crew Shrine", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "crew": 1, "sacrifice_a_permanent_type": "enchantment"}, "effect": draw.clone()}]})),
+            // A 1/1 Rebel: "As long as your life total is at most half your
+            // starting life total, this gets +2/+0."
+            eoe_w2::card("Test Desperate Rebel", json!({"card_types": ["Creature"], "subtypes": ["Rebel"], "power": 1, "toughness": 1,
+                "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["R", 1]]}, "mana_cost_str": "{R}",
+                "static_abilities": [{"$t": "StaticAbility", "scope": {"$t": "StaticScope", "kind": "self"},
+                    "condition": {"$t": "LifeAtMostHalfStartingLife"},
+                    "continuous_effect": {"$t": "ContinuousModifier", "layer": 7, "payload": {"$t": "PowerToughnessBonus", "power_bonus": 2}}}]})),
+            // "Crew 3, Pay 2 life: Draw a card."
+            eoe_w2::card("Test Blood Shrine", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "crew": 3, "pay_life": 2}, "effect": draw.clone()}]})),
+            // A vanilla 1/1 Rebel.
+            eoe_w2::card("Test Rebel", json!({"card_types": ["Creature"], "subtypes": ["Rebel"], "power": 1, "toughness": 1,
+                "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["W", 1]]}, "mana_cost_str": "{W}"})),
+            // "Tap an untapped Rebel you control, Sacrifice a Rebel: Draw a card."
+            eoe_w2::card("Test Rebel Altar", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "sacrifice_subtype": "Rebel", "extra_costs": [{"$t": "TapUntappedPermanentsCost",
+                        "label": "an untapped Rebel you control", "permanent_filter": {"$t": "HasSubtype", "name": "Rebel"}}]},
+                    "effect": draw}]})),
+        ];
+        let mut cards = engine::db::load_cube_document().cards;
+        cards.extend(common::custom_cards());
+        cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
+        let db = CardDb::from_cards(&cards);
+        for n in ["Test Weakness Charm", "Test Crew Shrine", "Test Desperate Rebel", "Test Blood Shrine", "Test Rebel", "Test Rebel Altar"] {
+            db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
+        }
+        db.leak()
+    })
+}
+
+fn b6_scen() -> Scenario {
+    Scenario::new(b6_db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.log = true;
+        })
+        .library(0, &["Island"; 12])
+        .library(1, &["Island"; 12])
+}
+
+/// `CostPart`'s options, as the parts (`NUMBER` + the part: `cost_order::part`'s
+/// numbering, 0 sacrifice, 2 discard, 4 return, 8 crew, 11 life).
+fn cost_parts(g: &Game) -> Vec<u8> {
+    assert_eq!(g.kind(), Some(DecisionKind::CostPart), "{:?}\n{}", g.options_desc(), log(g));
+    options(g)
+        .into_iter()
+        .map(|c| match c {
+            Choice::Number(k) => k,
+            other => panic!("cost part option {other:?}"),
+        })
+        .collect()
+}
+
+const PART_SACRIFICE: u8 = 0;
+const PART_DISCARD: u8 = 2;
+const PART_BOUNCE: u8 = 4;
+const PART_LIFE: u8 = 11;
+
+/// Answer with the first option until a `CostPart` decision.
+fn until_cost_part(g: &mut Game) {
+    for _ in 0..20 {
+        if g.kind() == Some(DecisionKind::CostPart) {
+            return;
+        }
+        let c = match g.kind() {
+            Some(DecisionKind::ChooseAltCost) => options(g).into_iter().find(|c| *c != Choice::Number(0)).unwrap(),
+            _ => options(g)[0],
+        };
+        g.choose(c);
+    }
+    panic!("no cost part decision: {:?}\n{}", g.options_desc(), log(g));
+}
+
+/// A determinized world of the decider asks the same (ENGINE.md 10, 99.8).
+fn same_after_determinize(g: &Game) {
+    let p = g.pending_decision().unwrap().player;
+    let mut d = g.clone();
+    d.determinize(p, &mut engine::rng::Rng::new(7));
+    assert_eq!(d.pending_decision(), g.pending_decision(), "determinize changed the decision");
+}
+
+/// CR 601.2h: the parts of a cost are paid in any order. Test Crew Shrine's
+/// "Crew 1, Sacrifice an enchantment" with Test Weakness Charm ("creatures you
+/// control get -1/-0"), the only enchantment, and a 1/1 Rebel: sacrificed
+/// first, the Charm's -1/-0 is gone and the Rebel crews with power 1. The
+/// engine read crew's power before the payment (0): the ability wasn't
+/// offered. Now the player orders the parts, and only the sacrifice first
+/// leaves the cost payable.
+#[test]
+fn cr_601_2h_a_static_ability_sacrificed_first_changes_crews_power() {
+    let mut g = b6_scen().battlefield(0, &["Test Crew Shrine", "Test Weakness Charm", "Test Rebel"]).at(Step::Main1, 0).start();
+    let shrine = bf(&g, 0, "Test Crew Shrine");
+    let rebel = bf(&g, 0, "Test Rebel");
+    let charm = bf(&g, 0, "Test Weakness Charm");
+    assert_eq!(g.power(rebel), 0);
+    assert!(g.has_option(act(shrine, 0)), "{:?}", g.options_desc());
+    g.choose(act(shrine, 0));
+    until_cost_part(&mut g);
+    assert_eq!(cost_parts(&g), vec![PART_SACRIFICE], "crew first can't be paid: {:?}", g.options_desc());
+    same_after_determinize(&g);
+    g.choose(Choice::Number(PART_SACRIFICE));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(charm).zone, Zone::Graveyard, "{}", log(&g));
+    assert!(g.obj(rebel).tapped, "the Rebel crewed with power 1\n{}", log(&g));
+    assert_eq!(g.player(0).hand.len(), 1, "drew a card\n{}", log(&g));
+}
+
+/// CR 601.2h, 119.4: Test Blood Shrine's "Crew 3, Pay 2 life" with Test
+/// Desperate Rebel (1/1, +2/+0 at half its controller's starting life or
+/// less) at 11 life: the life paid first, the Rebel is 3/1 and crews 3. Not
+/// offered before (crew's power read before the life was paid).
+#[test]
+fn cr_601_2h_life_paid_first_changes_crews_power() {
+    let mut g = b6_scen().battlefield(0, &["Test Blood Shrine", "Test Desperate Rebel"]).life(0, 11).at(Step::Main1, 0).start();
+    let shrine = bf(&g, 0, "Test Blood Shrine");
+    let rebel = bf(&g, 0, "Test Desperate Rebel");
+    assert_eq!(g.power(rebel), 1);
+    assert!(g.has_option(act(shrine, 0)), "{:?}", g.options_desc());
+    g.choose(act(shrine, 0));
+    until_cost_part(&mut g);
+    assert_eq!(cost_parts(&g), vec![PART_LIFE], "{:?}", g.options_desc());
+    g.choose(Choice::Number(PART_LIFE));
+    assert_eq!(g.power(rebel), 3, "{}", log(&g));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.life(0), 9, "{}", log(&g));
+    assert!(g.obj(rebel).tapped, "{}", log(&g));
+    assert_eq!(g.player(0).hand.len(), 1, "{}", log(&g));
+    // At 12 life, 2 paid leaves 10, half of 20: so too.
+    let g = b6_scen().battlefield(0, &["Test Blood Shrine", "Test Desperate Rebel"]).life(0, 12).at(Step::Main1, 0).start();
+    assert!(g.has_option(act(bf(&g, 0, "Test Blood Shrine"), 0)), "{:?}", g.options_desc());
+    // At 13, 11 is more than half: no order pays it.
+    let g = b6_scen().battlefield(0, &["Test Blood Shrine", "Test Desperate Rebel"]).life(0, 13).at(Step::Main1, 0).start();
+    assert!(!g.has_option(act(bf(&g, 0, "Test Blood Shrine"), 0)), "{:?}", g.options_desc());
+}
+
+/// P1 casts Lightning Bolt at P0, who then has priority with Daze in the
+/// graveyard, Wrenn and Six's emblem (retrace for instants) and `mine`.
+fn daze_retrace(hand: &[&str]) -> Game {
+    let mut g = scen()
+        .battlefield(0, &["Island"])
+        .graveyard(0, &["Daze"])
+        .hand(0, hand)
+        .emblem(0, "Wrenn and Six")
+        .battlefield(1, &["Mountain"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 1)
+        .start();
+    let b = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(b));
+    g.choose(Choice::Target(engine::Target::Player(0)));
+    finish(&mut g, |_| None);
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+    g
+}
+
+/// CR 601.2h, 702.81a, 118.9: Daze retraced by Wrenn and Six's emblem is cast
+/// for "return an Island you control to its owner's hand" and "discard a land
+/// card", in any order: with an Island and no land card in hand, the Island is
+/// returned, then discarded. (The engine discarded first: not castable.)
+#[test]
+fn cr_601_2h_an_island_returned_then_discarded_for_one_cost() {
+    let mut g = daze_retrace(&[]);
+    let daze = g.card(0, "Daze", Zone::Graveyard);
+    let island = bf(&g, 0, "Island");
+    assert!(castable_from_gy(&g, daze), "retrace with Daze's return, the Island discarded: {:?}", g.options_desc());
+    g.choose(Choice::Cast(daze));
+    until_cost_part(&mut g);
+    assert_eq!(cost_parts(&g), vec![PART_BOUNCE], "the discard first leaves no land card: {:?}", g.options_desc());
+    same_after_determinize(&g);
+    g.choose(Choice::Number(PART_BOUNCE));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(daze).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.obj(island).zone, Zone::Graveyard, "returned, then discarded\n{}", log(&g));
+}
+
+/// CR 601.2h: with a land card in hand too, both orders pay Daze's retrace, and
+/// the player chooses: the Forest discarded and the Island kept in hand, or
+/// the Island returned and then either discarded.
+#[test]
+fn cr_601_2h_either_order_with_a_land_card_in_hand() {
+    let mut g = daze_retrace(&["Forest"]);
+    let daze = g.card(0, "Daze", Zone::Graveyard);
+    g.choose(Choice::Cast(daze));
+    until_cost_part(&mut g);
+    assert_eq!(cost_parts(&g), vec![PART_DISCARD, PART_BOUNCE], "{:?}", g.options_desc());
+    same_after_determinize(&g);
+    // The discard first: the Forest; the Island stays in hand.
+    let mut h = g.clone();
+    h.choose(Choice::Number(PART_DISCARD));
+    finish(&mut h, |_| None);
+    assert_eq!(h.count_in(0, "Forest", Zone::Graveyard), 1, "{}", log(&h));
+    assert_eq!(h.count_in(0, "Island", Zone::Hand), 1, "{}", log(&h));
+    // The return first: the Island and the Forest may each be discarded.
+    g.choose(Choice::Number(PART_BOUNCE));
+    finish(&mut g, |g| match g.kind() {
+        Some(DecisionKind::DiscardCost) => {
+            assert_eq!(options(g).len(), 2, "the Island and the Forest: {:?}", g.options_desc());
+            let island = g.card(0, "Island", Zone::Hand);
+            options(g).into_iter().find(|c| *c == Choice::Card(island))
+        }
+        _ => None,
+    });
+    assert_eq!(g.count_in(0, "Island", Zone::Graveyard), 1, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Forest", Zone::Hand), 1, "{}", log(&g));
+}
+
+/// CR 601.2h: where no part can change what another may take but by taking
+/// objects, the order isn't asked (Test Rebel Altar's "tap an untapped Rebel,
+/// sacrifice a Rebel", no continuous effect in play): the engine's order,
+/// taps first, reaches every outcome (`order_free`, ENGINE.md 100.4.9).
+#[test]
+fn cr_601_2h_no_order_asked_when_it_cant_matter() {
+    let mut g = b6_scen().battlefield(0, &["Test Rebel Altar", "Test Rebel"]).at(Step::Main1, 0).start();
+    let altar = bf(&g, 0, "Test Rebel Altar");
+    let rebel = bf(&g, 0, "Test Rebel");
+    g.choose(act(altar, 0));
+    finish(&mut g, |g| {
+        assert_ne!(g.kind(), Some(DecisionKind::CostPart), "{:?}", g.options_desc());
+        None
+    });
+    settle(&mut g);
+    assert_eq!(g.obj(rebel).zone, Zone::Graveyard, "{}", log(&g));
+}

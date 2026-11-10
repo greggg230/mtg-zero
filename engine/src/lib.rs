@@ -8,6 +8,7 @@
 mod activate;
 pub mod az;
 mod cast;
+mod cost_order;
 mod combat;
 mod companion;
 pub mod copies;

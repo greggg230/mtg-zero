@@ -403,6 +403,7 @@ impl Game {
             (K::ChooseFace, Choice::Number(0)) => "Front face".into(),
             (K::ChooseFace, Choice::Number(_)) => "Other face".into(),
             (K::PayPool, Choice::Item(n)) => format!("Leave mana option {}", n + 1),
+            (K::CostPart, Choice::Number(k)) => format!("Pay the cost's {} next", crate::cost_order::part::name(k)),
             (K::ChooseColorsSpent, Choice::Number(m)) => format!(
                 "Spend mana of {}",
                 if m == 0 { "no colour".to_string() } else { (0..5).filter(|t| m & (1 << t) != 0).map(|t| ["W", "U", "B", "R", "G"][t]).collect::<String>() }
