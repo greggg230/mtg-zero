@@ -21830,3 +21830,21 @@ threads; the outputs are in `E:/mtg-zero-scratch/eoe-paired/races/`.
 * **The ranking is the pilot's**: which build is better depends on who plays it (the heuristic plays
   every deck the same simple way), so the heuristic's verdicts are not S4's; the games needed per
   difference scale with var(D), which a network's measured `var_ratio` translates.
+
+### 104.8 Tests, checks, gate
+
+* `tests/test_sealed_compare.py` (12): slot layouts (shared copies in shared slots, the differing cards
+  paired land with land, three decks and a 41-card one, deterministic); identical decks play identical
+  games in the full pairing (every candidate's game k: one seed, one opponent, one chooser; the seats
+  alternating); a comparison replays exactly at 1 and 3 driver threads, and a one-card swap shares 39
+  slots and most games; the four designs (what each shares); the GSPRT is zero.h2h's formula; the paired
+  statistics; the race drops a bad deck and calls two identical decks equivalent, and a two-deck race
+  names its winner; a failed game is left out for every candidate with its spec; a network pilot (a
+  tiny random token network: identical decks give identical games; against a heuristic field); the
+  yardstick's candidates and a fixed field; the CLI (`pair`, `race`, `builds`, `yardstick`, JSON and
+  text deck files).
+* `engine/tests/sealed.rs` (13, 2 new): 104.2's tests and the `order` errors.
+* Full engine suite (`cargo test --release -p engine`, 9039a4a, after the merges): 2,153 passed, 0
+  failed, 24 ignored (146 binaries). `python -m pytest tests -q`: 225 passed, 1 skipped. Digests as
+  104.2 (eoe-bot's, unchanged). Not run: the 20,000-game fuzz - no rule or card changed, and no fuzz
+  mode gives a deck an order.
