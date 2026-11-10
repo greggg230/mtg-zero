@@ -22,6 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 D = 1024                      # identities (engine/src/az/identity.rs D)
 CUBE_CAP = 768                # tokens from here (identity.rs CUBE_CAP)
 LEGACY_BASE = 546             # the legacy registry's first identity (identity.rs LEGACY_BASE)
+EOE_CAP = 384                 # the EoE space's tokens from here (identity.rs EOE_CAP, docs/ENGINE.md 105)
 # The feature offsets the baselines read (engine/src/az/encode.rs, layout v5): the bags (0.25 per
 # card), the opponent's hand size in the globals (the second player block: hand / 10).
 O_BAGS = 384
@@ -49,17 +50,32 @@ def names():
     return out
 
 
-def counts_by_name(v, top=None, digits=3):
-    """[[name, value], ...] of the non-zero entries of a per-identity vector, largest first."""
+@functools.lru_cache(maxsize=1)
+def eoe_names():
+    """Identity -> name in the EoE identity space (game mtg_eoe, docs/ENGINE.md 105; a list of D, None where no card
+    has the identity): the EoE card registry (0.., engine/src/az/eoe_cards.txt: the set's list in set order), the EoE
+    token registry's keys (384.., eoe_tokens.txt)."""
+    out = [None] * D
+    az = os.path.join(ROOT, 'engine', 'src', 'az')
+    for base, file in ((0, 'eoe_cards.txt'), (EOE_CAP, 'eoe_tokens.txt')):
+        with open(os.path.join(az, file), encoding='utf-8') as f:
+            for k, line in enumerate(x for x in (l.rstrip('\r\n') for l in f) if x):
+                out[base + k] = line
+    return out
+
+
+def counts_by_name(v, top=None, digits=3, nm=None):
+    """[[name, value], ...] of the non-zero entries of a per-identity vector, largest first (`nm`: the identities'
+    names, default the cube space's `names()`)."""
     v = np.asarray(v, np.float64)
-    nm = names()
+    nm = nm or names()
     idx = [int(i) for i in np.argsort(-v, kind='stable') if v[i] > 0]
     if top:
         idx = idx[:top]
     return [[nm[i] if nm[i] is not None else f'#{i}', round(float(v[i]), digits)] for i in idx]
 
 
-def render(pred, state, seat, frame, top=12):
+def render(pred, state, seat, frame, top=12, nm=None):
     """zero.replay's frame field of the belief head (the game package's `replay_aux`): {'belief': {'for':
     the seat whose hand is predicted (the decider's opponent), 'n': that seat's hand size in the
     frame's state, 'cards': [[name, expected count], ...] - the head's distribution x n, the `top`
@@ -68,7 +84,12 @@ def render(pred, state, seat, frame, top=12):
     opp = 1 - int(seat)
     pl = [x for x in state.get('players', []) if x.get('id') == opp]
     n = len(pl[0].get('hand', [])) if pl else 0
-    return {'belief': {'for': opp, 'n': n, 'cards': counts_by_name(p * n, top) if n else []}}
+    return {'belief': {'for': opp, 'n': n, 'cards': counts_by_name(p * n, top, nm=nm) if n else []}}
+
+
+def render_eoe(pred, state, seat, frame, top=12):
+    """`render` for game mtg_eoe (docs/ENGINE.md 105): the EoE identity space's names."""
+    return render(pred, state, seat, frame, top, nm=eoe_names())
 
 
 def public(x):

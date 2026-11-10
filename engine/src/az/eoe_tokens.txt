@@ -1,0 +1,9 @@
+Robot 2/2 C ac Robot
+Lander -/- C a Lander
+Human Soldier 1/1 W c Human Soldier
+Drone 1/1 C ac Drone flying
+Sliver 1/1 C c Sliver
+Eldrazi Scion 1/1 C c Eldrazi Scion
+Munitions -/- C a Munitions
+ 2/2 C c
+ -/- C 

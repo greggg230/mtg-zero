@@ -8,9 +8,13 @@ self-play search reaches states that random play (tests/fuzz.rs) does not.
   python tools/search_smoke.py --seeds 0-15 --games 400 --threads 8 --sims 64 --preset mtg-3
   python tools/search_smoke.py --specs team_draft,team_draft_2v2 --seeds 0-1
   python tools/search_smoke.py --specs delver --preset delver-mirror   # the constructed Delver mirror
+  python tools/search_smoke.py --specs eoe,eoe_eval --preset eoe-1     # EoE sealed (game mtg_eoe)
 
 The constructed Delver mirror (docs/ENGINE.md 54): `delver` is the preset delver-mirror's spec (both
 seats the pinned 60 of data/decks/izzet_delver_8016541.json, best-of-one, constructed play's card table).
+
+EoE sealed (docs/ENGINE.md 101, 105): `eoe` is the preset eoe-1's spec (game `mtg_eoe`: two generated Arena pools per
+game, each built by the randomised builder, best-of-one on the EoE card table), `eoe_eval` its fixed evaluation pairs.
 
 The team draft (M6 part 3, docs/ENGINE.md 45): `team_draft` (4v4) and `team_draft_2v2` draft and
 build `--events` events with the self-play seat of the co-training preset (team_draft-4v4: picks
@@ -58,6 +62,12 @@ def _mirror(deck):
 
 
 SPECS['delver'] = _mirror('izzet_delver_8016541')
+# Edge of Eternities sealed (docs/ENGINE.md 101, 105): the game `mtg_eoe` (`mtg` on the EoE card table, its own identity
+# space), each game two generated Arena pools built by the randomised builder; `eoe_eval` its evaluation pairs
+SPECS['eoe'] = {'sealed': {'set': 'eoe', 'collation': 'arena'}, 'max_turns': 60, 'eval_decks': 64, 'eval_seed': 1}
+SPECS['eoe_eval'] = dict(SPECS['eoe'], decks='eval')
+# the game of a spec that is not `mtg`'s
+GAMES = {'eoe': 'mtg_eoe', 'eoe_eval': 'mtg_eoe'}
 DRAFT_SPECS = {
     'team_draft': (8, {'build_sims_div': 2}),
     'team_draft_2v2': (4, {'build_sims_div': 2}),
@@ -146,8 +156,8 @@ def one(seed, spec, games, threads, sims, conc, preset, stall):
                      c.get('cq_c_visit', 50.0), c.get('cq_c_scale', 1.0), sims_minor=c.get('sims_minor', 0) or None)
     # (a match is up to three games: three times the step cap)
     steps = c['max_steps'] * (3 if SPECS[spec].get('format') == 'bo3' else 1)
-    drv = G.Driver('mtg', [[seat, seat]] * games, spec=json.dumps(SPECS[spec]), concurrency=conc, seed=seed,
-                   threads=threads, groups=c['groups'], record=True, max_steps=steps)
+    drv = G.Driver(GAMES.get(spec, 'mtg'), [[seat, seat]] * games, spec=json.dumps(SPECS[spec]), concurrency=conc,
+                   seed=seed, threads=threads, groups=c['groups'], record=True, max_steps=steps)
     t0 = time.time()
     last = [time.time()]
 

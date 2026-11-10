@@ -2417,8 +2417,14 @@ impl CardDb {
     /// out of `by_name`, and the support report (`tests/support.rs`) lists
     /// their blockers.
     pub fn eoe() -> &'static CardDb {
-        static EOE: OnceLock<&'static CardDb> = OnceLock::new();
-        EOE.get_or_init(|| CardDb::from_document(&load_eoe_document()).leak())
+        EOE_TABLE.get_or_init(|| CardDb::from_document(&load_eoe_document()).leak())
+    }
+
+    /// Is this the EoE card table ([`eoe`](Self::eoe))? Its definitions take the
+    /// encoding's EoE identities (`az::identity`, ENGINE.md 105); every other
+    /// table the cube's. (No rules read it.)
+    pub fn is_eoe(&self) -> bool {
+        EOE_TABLE.get().is_some_and(|e| std::ptr::eq(*e, self))
     }
 
     pub fn id(&self, name: &str) -> Option<DefId> {
@@ -2585,6 +2591,9 @@ pub const EOE_IR: &str = include_str!("../../data/cards/eoe.ir.json");
 pub fn load_eoe_document() -> card_ir::Document {
     card_ir::load_document(EOE_IR).unwrap_or_else(|e| panic!("{e}"))
 }
+
+/// The EoE card table once lowered (`CardDb::eoe`, `CardDb::is_eoe`).
+static EOE_TABLE: OnceLock<&'static CardDb> = OnceLock::new();
 
 /// A face-down permanent's characteristics (CR 708.2a): a 2/2 creature, no
 /// name, colour, mana cost, subtypes or abilities. Its one activated entry is

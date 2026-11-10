@@ -28,6 +28,7 @@ pub mod draft;
 pub mod draft_bots;
 pub mod draft_encode;
 pub mod encode;
+pub mod eoe;
 pub mod identity;
 pub mod lab;
 pub mod matches;
@@ -370,6 +371,31 @@ impl MtgSpec {
         Ok(s)
     }
 
+    /// The zero-core game this spec's games are (ENGINE.md 105): a sealed spec plays the EoE
+    /// table, whose encodings carry the EoE identity space, so it is `mtg_eoe`'s (`eoe.rs`);
+    /// every other spec is `mtg`'s.
+    pub fn game(&self) -> &'static str {
+        if self.sealed.is_some() {
+            "mtg_eoe"
+        } else {
+            "mtg"
+        }
+    }
+
+    /// An error unless this spec is game `game`'s (`game`): a network of one identity space is
+    /// never fed another's encodings through the wrong game's name.
+    pub fn check_game(&self, game: &str) -> Result<(), String> {
+        let mine = self.game();
+        if mine == game {
+            return Ok(());
+        }
+        Err(if mine == "mtg_eoe" {
+            format!("{game} spec: a sealed spec (Edge of Eternities) is game mtg_eoe: its encodings carry the EoE identities (ENGINE.md 105)")
+        } else {
+            format!("{game} spec: game {game} plays Edge of Eternities sealed (the \"sealed\" key); this spec is game {mine}'s (ENGINE.md 105)")
+        })
+    }
+
     /// The card table this spec's games use: the cube's, or with
     /// `constructed` the cube's and the legacy cards (ENGINE.md 54).
     pub fn db(&self) -> &'static CardDb {
@@ -532,8 +558,11 @@ impl SearchGame for MtgAz {
     const MIN_PLAYERS: usize = 2;
     const MAX_PLAYERS: usize = 2;
 
+    /// A sealed spec is refused: it is game `mtg_eoe`'s (ENGINE.md 105).
     fn parse_spec(json: &str) -> Result<MtgSpec, String> {
-        MtgSpec::parse(json)
+        let s = MtgSpec::parse(json)?;
+        s.check_game(Self::NAME)?;
+        Ok(s)
     }
 
     fn new_game(spec: &MtgSpec, players: usize, seed: u64) -> Result<Self, String> {

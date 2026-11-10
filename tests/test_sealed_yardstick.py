@@ -68,7 +68,8 @@ def test_a_yardstick_spec_plays_through_the_engine(sealed):
     pool, build = _supported_pool(pools, table)
     other, ob = _supported_pool(pools[100:], table)
     E = G.engine()
-    g = E.Game('mtg', json.dumps(Y.spec(pool, build, opponent=(other, ob), max_turns=20)), 2, 3)
+    # (a sealed spec is game mtg_eoe's: the EoE identity space, docs/ENGINE.md 105)
+    g = E.Game('mtg_eoe', json.dumps(Y.spec(pool, build, opponent=(other, ob), max_turns=20)), 2, 3)
     rng = np.random.default_rng(0)
     steps = 0
     while not g.over and steps < 20000:

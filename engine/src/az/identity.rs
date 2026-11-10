@@ -29,6 +29,23 @@
 //! d0 * 64 + d1 * 8 + d2). A checkpoint stays valid as cards are ported (a newly supported card
 //! simply starts appearing under its fixed identity); a change to the cube list itself (its
 //! IR card order) or to the capacity is a new layout.
+//!
+//! **The EoE identity space** (ENGINE.md 105): the definitions of the Edge of Eternities card
+//! table (`CardDb::eoe`, `CardDb::is_eoe`) take identities of their own, read only by EoE
+//! networks (zero-core game `mtg_eoe`, whose token layout is named `eoe`: the encoding guard
+//! refuses a cube or Delver network on EoE encodings and the reverse):
+//!
+//! * an EoE card: its line in the EoE card registry `eoe_cards.txt` (the set's list in set order:
+//!   Edge of Eternities by collector number, its five basic lands, Stellar Sights, the Special
+//!   Guests; `data/sealed/eoe_set.json`, Paradox Haze included though it has no IR): 0..320,
+//!   capacity [`EOE_CAP`]; append-only;
+//! * an EoE token (a rules definition, the face-down characteristics): [`EOE_CAP`] + its line in
+//!   the EoE token registry `eoe_tokens.txt` (the keys of [`token_key`], appended, never inserted;
+//!   `MTGZ_WRITE_TOKENS=1 cargo test -p engine --test az eoe_registries` appends the missing ones);
+//! * emblems, faces and [`UNKNOWN`] as in the cube's space.
+//!
+//! Every other table (the cube's, constructed play's, a test's small one) has the cube's space.
+use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use crate::db::{types, CardDb, CardDef, Kw};
@@ -49,9 +66,51 @@ pub const LEGACY_BASE: usize = 546;
 /// `LEGACY_BASE + k`; append-only).
 pub const LEGACY_CARDS: &str = include_str!("legacy_cards.txt");
 
+/// EoE cards take the identities below this (their line in [`EOE_CARDS`]), EoE tokens the ones
+/// from it (ENGINE.md 105).
+pub const EOE_CAP: usize = 384;
+/// The EoE card registry (one card name per line, in set order; line k is identity k;
+/// append-only).
+pub const EOE_CARDS: &str = include_str!("eoe_cards.txt");
+/// The EoE token registry (one [`token_key`] per line; line k is identity `EOE_CAP + k`;
+/// append-only).
+pub const EOE_TOKENS: &str = include_str!("eoe_tokens.txt");
+
+fn lines(text: &'static str) -> Vec<&'static str> {
+    text.lines().map(|l| l.trim_end_matches('\r')).filter(|l| !l.is_empty()).collect()
+}
+
 /// The legacy registry's names in order.
 pub fn legacy_registry() -> Vec<&'static str> {
-    LEGACY_CARDS.lines().map(|l| l.trim_end_matches('\r')).filter(|l| !l.is_empty()).collect()
+    lines(LEGACY_CARDS)
+}
+
+/// The EoE card registry's names in order (their identities).
+pub fn eoe_registry() -> Vec<&'static str> {
+    lines(EOE_CARDS)
+}
+
+/// The EoE token registry's keys in order (identity `EOE_CAP` + the index).
+pub fn eoe_token_registry() -> Vec<&'static str> {
+    lines(EOE_TOKENS)
+}
+
+/// The identity space of a card table's definitions (ENGINE.md 105).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Space {
+    /// The cube's cards, the legacy registry, the token registry (ENGINE.md 22.2).
+    Cube,
+    /// Edge of Eternities: its card registry and its token registry.
+    Eoe,
+}
+
+/// `db`'s identity space: the EoE table's is [`Space::Eoe`], every other table's the cube's.
+pub fn space_of(db: &CardDb) -> Space {
+    if db.is_eoe() {
+        Space::Eoe
+    } else {
+        Space::Cube
+    }
 }
 
 /// Keywords in a token's key, in this order.
@@ -108,7 +167,7 @@ pub fn token_key(db: &CardDb, d: &CardDef) -> String {
 
 /// The registry's keys in order.
 pub fn registry() -> Vec<&'static str> {
-    TOKENS.lines().map(|l| l.trim_end_matches('\r')).filter(|l| !l.is_empty()).collect()
+    lines(TOKENS)
 }
 
 /// The cube's card names in IR order (their identities).
@@ -118,9 +177,16 @@ pub fn cube_names() -> &'static [String] {
 }
 
 fn compute(db: &CardDb) -> Vec<u16> {
+    match space_of(db) {
+        Space::Cube => compute_cube(db),
+        Space::Eoe => compute_eoe(db),
+    }
+}
+
+fn compute_cube(db: &CardDb) -> Vec<u16> {
     let names = cube_names();
     assert!(names.len() <= CUBE_CAP, "the cube list ({}) exceeds the identity capacity {CUBE_CAP}", names.len());
-    let mut pos: std::collections::HashMap<&str, u16> = names.iter().enumerate().map(|(i, n)| (n.as_str(), i as u16)).collect();
+    let mut pos: HashMap<&str, u16> = names.iter().enumerate().map(|(i, n)| (n.as_str(), i as u16)).collect();
     let legacy = legacy_registry();
     // (A cube list of more than 546 cards would take the legacy cards' identities: a change to the
     // cube list is a new layout anyway (ENGINE.md 22.2, 54.1), which then moves LEGACY_BASE and
@@ -134,11 +200,36 @@ fn compute(db: &CardDb) -> Vec<u16> {
     for (k, n) in legacy.into_iter().enumerate() {
         assert!(pos.insert(n, (LEGACY_BASE + k) as u16).is_none(), "legacy registry: {n} is a cube card or listed twice");
     }
-    let reg: std::collections::HashMap<&str, u16> = registry().into_iter().enumerate().map(|(i, k)| (k, i as u16)).collect();
+    let reg: HashMap<&str, u16> = registry().into_iter().enumerate().map(|(i, k)| (k, i as u16)).collect();
     assert!(CUBE_CAP + reg.len() < D, "the token registry ({}) exceeds the identity capacity", reg.len());
+    assign(db, &pos, &reg, CUBE_CAP as u16)
+}
+
+/// The EoE space (ENGINE.md 105): the card registry's lines, then the token registry's from
+/// `EOE_CAP`.
+fn compute_eoe(db: &CardDb) -> Vec<u16> {
+    let cards = eoe_registry();
+    assert!(cards.len() <= EOE_CAP, "the EoE card registry ({}) exceeds its identities ({EOE_CAP})", cards.len());
+    let mut pos: HashMap<&str, u16> = HashMap::new();
+    for (k, n) in cards.into_iter().enumerate() {
+        assert!(pos.insert(n, k as u16).is_none(), "EoE card registry: {n} listed twice");
+    }
+    let mut reg: HashMap<&str, u16> = HashMap::new();
+    for (k, key) in eoe_token_registry().into_iter().enumerate() {
+        assert!(reg.insert(key, k as u16).is_none(), "EoE token registry: {key} listed twice");
+    }
+    assert!(EOE_CAP + reg.len() < D, "the EoE token registry ({}) exceeds the identity capacity", reg.len());
+    assign(db, &pos, &reg, EOE_CAP as u16)
+}
+
+/// Every definition's identity: a card's name in `pos`, a token's (a rules definition's, the
+/// face-down characteristics') key in `reg` from `token_base`, an emblem its card's, a face its
+/// front's; `UNKNOWN` for the rest.
+fn assign(db: &CardDb, pos: &HashMap<&str, u16>, reg: &HashMap<&str, u16>, token_base: u16) -> Vec<u16> {
+    let tok = |d: &CardDef| -> u16 { reg.get(token_key(db, d).as_str()).map_or(UNKNOWN, |&k| token_base + k) };
     let of = |d: &CardDef| -> u16 {
         if d.token || d.rules {
-            reg.get(token_key(db, d).as_str()).map_or(UNKNOWN, |&k| CUBE_CAP as u16 + k)
+            tok(d)
         } else if d.emblem {
             d.name.strip_suffix(" emblem").and_then(|n| pos.get(n).copied()).unwrap_or(UNKNOWN)
         } else {
@@ -153,10 +244,12 @@ fn compute(db: &CardDb) -> Vec<u16> {
             match d.front {
                 Some(f) => of(db.def(f)),
                 // A face-down permanent's characteristics (CR 708.2a, ENGINE.md
-                // 31): no name, so a registry key like a token's.
-                None if i as DefId == db.face_down_def() => {
-                    reg.get(token_key(db, d).as_str()).map_or(UNKNOWN, |&k| CUBE_CAP as u16 + k)
-                }
+                // 31): no name, so a registry key like a token's; so too every
+                // other definition without a name (the EoE table's: a nonbasic
+                // land that is a Mountain, CR 305.7, EoE W2's `moon_base` and its
+                // variants, and the kept-ability copies of these, ENGINE.md 105;
+                // the cube's table has none).
+                None if i as DefId == db.face_down_def() || d.name.is_empty() => tok(d),
                 None => of(d),
             }
         })
@@ -165,6 +258,10 @@ fn compute(db: &CardDb) -> Vec<u16> {
 
 /// The identity of every definition of `db` (indexed by `DefId`); computed once per card table.
 pub fn identities(db: &'static CardDb) -> &'static [u16] {
+    static EOE: OnceLock<&'static [u16]> = OnceLock::new();
+    if db.is_eoe() {
+        return EOE.get_or_init(|| Box::leak(compute(db).into_boxed_slice()));
+    }
     static CUBE: OnceLock<&'static [u16]> = OnceLock::new();
     if std::ptr::eq(db, CardDb::cube()) {
         return CUBE.get_or_init(|| Box::leak(compute(db).into_boxed_slice()));

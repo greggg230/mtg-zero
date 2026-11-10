@@ -21881,3 +21881,78 @@ spec with `"decks": "eval"`). What exists and what is missing:
 * **The measurements' own gap:** `eoe_yardsticks` should gain a `sealed` deck source (the S2 spec's
   `MtgSpec::try_seats`) when S2 lands; `eoe2c` stands in for it. `Heuristic::m7c` is not a registered
   bot (on the cube the two are within 0.1%; register it only if a run wants the old anchor).
+
+## 105. The EoE network: identities, the deck reader, presets
+
+Branch `eoe-net` (from `eoe-d-encoding` 45ed2b2; `eoe-base` 7953d2a, `eoe-s2-pools` 6f7f2f8 and `eoe-bot`
+927d2bf merged), 2026-11-09. DESIGN.md 9, milestone S3's input: the last piece before the first Edge of
+Eternities sealed run. The encoding's card identities (22.2) cover the PowerLSV cube, the legacy registry and
+the tokens; every EoE card was `UNKNOWN`, so an EoE network could not tell its cards apart (101.5, 102.5).
+
+### 105.1 The identity space: a per-card-table space (design)
+
+**The two candidates.**
+
+* **(a) Widen the shared space.** One space for every table: the cube's 546 cards, the legacy registry
+  (546..547), the tokens (768..). The EoE table has 320 cards (321 with Paradox Haze, which has no IR) and
+  its tokens. The cube's free range below `CUBE_CAP` holds 220 (548..767); the cards the set shares with
+  the cube (the Stellar Sights lands, a few Special Guests) could keep their cube identities, but most of
+  the set is new, so it does not fit: `D` past 1024 (the card code's radix 16 / 8 / 8 grows a digit or a
+  digit's width: every slot is wider, the 23 bags twice as wide, +23.5k features), a new layout, and every
+  existing checkpoint (the Delver line, mtg5, td1) widened exactly as 60.2 did. And it changes the cube's
+  and the Delver mirror's encodings, for networks that never see an EoE card.
+* **(b) A per-card-table space.** The EoE table's definitions take identities of their own (the set's
+  cards in set order, then its tokens), read only by EoE networks; every other table keeps the cube's
+  space. Layout v6's shape is unchanged (1,024 identities, the same floats), no existing checkpoint or
+  encoding changes, and nothing is widened. What it needs: the encoding guard (61) must refuse a cube or
+  Delver checkpoint on EoE encodings and the reverse.
+
+**Chosen: (b).** The EoE network is a separate network anyway (sealed best-of-one on its own table), and
+(b) changes no existing checkpoint. **The one thing (b) needs that the plan did not say: its own game
+name.** zero-core's guard (`net.encoding_mismatch`) judges a checkpoint by its game, its feature and action
+counts and its game's token layout (`GamePackage.tokens_of(game)`): per game, not per spec. Under one game
+`mtg` a sealed run and a cube run would have the same layout, and a cube checkpoint would load into an EoE
+run without a word. So EoE sealed is the zero-core game **`mtg_eoe`** (`az/eoe.rs`: `MtgEoeAz`, a newtype
+over `MtgAz` delegating every `SearchGame` method; its own `NAME`, the same features, actions, auxiliary
+targets and bots), and its layout is `layout_eoe.json`: layout v6 under the name `eoe`. The guard then
+refuses either way by the game ("game 'mtg' -> 'mtg_eoe'"), and by the layout name when both sides carry
+one. No zero-core change.
+
+**Which game a spec is.** The space belongs to the card table (`identity::space_of(db)`: the EoE table,
+`CardDb::is_eoe`, is `Space::Eoe`; every other table, constructed play's and a test's small tables
+included, `Space::Cube`), so a game's encoding needs no flag: every reader of identities (`encode`, the
+match block, `aux_target`, the belief weights, the deck prior's tilt, the layout's names) calls
+`identity::identities(db)` as before. The game names it for zero-core: `MtgSpec::game()` is `mtg_eoe` for a
+sealed spec (the EoE table) and `mtg` otherwise, and each game's `parse_spec` refuses the other's specs
+(`check_game`: "a sealed spec (Edge of Eternities) is game mtg_eoe"). Rust code that builds `MtgAz` from a
+parsed spec (the tests, the fuzz, the bots' measurements) is unchanged; the refusal sits where zero-core
+and Python create games.
+
+**The EoE space** (`az/identity.rs`):
+
+| Identities | What | Registry |
+|---|---|---|
+| 0..320 | the set's cards in set order: Edge of Eternities 1-261, its basic lands (267-275), Stellar Sights 1-45, the Special Guests 119-128 (Paradox Haze, 123, has its line and no IR) | `az/eoe_cards.txt`, one name per line = `data/sealed/eoe_set.json`'s list in order; append-only |
+| 321..383 | free (`EOE_CAP` 384) | |
+| 384.. | the EoE table's token kinds, rules definitions and the face-down characteristics, by `token_key` | `az/eoe_tokens.txt`, append-only (`MTGZ_WRITE_TOKENS=1` appends the missing keys) |
+| 1023 | `UNKNOWN` (never on the EoE table: tested) | |
+
+Emblems take their card's identity and faces their front's, as in the cube's space. Stable by construction:
+a registry line never moves, a new card or token kind is appended. The card registry is the set's list and
+not the IR's order (the IR is sorted by name, which a card added later would shift). The tokens have a
+registry of their own (not lines of `tokens.txt`): the EoE space is self-contained.
+
+### 105.2 EoE encodings
+
+Nothing in `encode.rs` changed but the layout's name: every identity it writes - the card codes of every
+slot (permanents, hand, stack, triggers, the list block, graveyard abilities, companions, tops, the context's
+card), the 23 bags, the match block's pools, the noted and exiled references of v6 - comes from
+`identity::identities(db)`, which on the EoE table is the EoE space. So an EoE encoding is a v6 encoding
+(44,212 floats, the same offsets and spare floats) whose identities are EoE's: a card in a hand slot codes
+its line of `eoe_cards.txt` in the 16 / 8 / 8 digits, the token network embeds it from its row of the
+embedding table (an EoE network's table: its rows mean EoE cards), a bag counts it in that column.
+`layout_json(CardDb::eoe())` (`mtgz/az/layout_eoe.json`) is `layout_v6.json` with `"name": "eoe"` and the EoE
+space's card names; `layout_v6.json` and every cube, Delver or constructed encoding are byte-identical (the
+digests below). The public-state gate's positions gain a fifth kind, EoE sealed games (`gate_positions`'s
+last, so the other kinds' positions are as before), so `public_state_reaches_the_encoding` and
+`the_v5_facts_encode_no_hidden_information` run on EoE positions too.

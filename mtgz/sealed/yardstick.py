@@ -5,7 +5,7 @@ docs/sealed_data.md 5).
 17lands pools (`seventeen_lands.load`) and their human builds to the engine's EoE card table
 (`CardDb::eoe`, through the engine module: an id, or why a card has none), reports how many are
 playable on this checkout, and turns a pool (and optionally one of its human builds) into an `mtg`
-sealed spec that plays it (ENGINE.md 101.3):
+sealed spec that plays it (ENGINE.md 101.3; the zero-core game `mtg_eoe`, ENGINE.md 105):
 
     pools = seventeen_lands.load('Sealed')
     report(pools)                                    # fully supported pools / builds, blockers

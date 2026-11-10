@@ -2658,6 +2658,12 @@ pub fn layout_json(db: &'static CardDb) -> String {
                     {"name": "globals_v6", "offset": O_GLOBALS_V6, "count": GLOBALS_V6}],
         "cards": cards,
     });
+    // The EoE table's identity space (ENGINE.md 105): the same layout under the name `eoe`, so
+    // zero-core's guard tells an EoE network from a cube one (the cube's layout has no name).
+    let mut v = v;
+    if identity::space_of(db) == identity::Space::Eoe {
+        v["name"] = json!("eoe");
+    }
     serde_json::to_string_pretty(&v).unwrap() + "\n"
 }
 
