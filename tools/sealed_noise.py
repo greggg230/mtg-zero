@@ -34,6 +34,7 @@ sys.path.insert(0, ROOT)
 VARIANTS = ('card', 'land+', 'land-', 'pair')
 MODES = ('full', 'sorted', 'opponent', 'none')
 Z80 = (1.959964 + 0.841621) ** 2                   # two-sided 5%, power 80%
+_FIELDS = {}
 
 
 def pools(n, seed):
@@ -104,7 +105,9 @@ def work(args):
     except Exception:                              # noqa: BLE001
         pass
     from mtgz.sealed import compare as K
-    field = K.Field(seed=opts['field_seed'])
+    if opts['field_seed'] not in _FIELDS:            # (one field per worker process: its decks are cached)
+        _FIELDS[opts['field_seed']] = K.Field(seed=opts['field_seed'])
+    field = _FIELDS[opts['field_seed']]
     rows = []
     for v, (a, b) in variants(p, K.mix(opts['seed'], pi)).items():
         for mode in MODES:
