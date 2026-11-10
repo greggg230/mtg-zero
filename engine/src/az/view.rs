@@ -403,6 +403,10 @@ impl Game {
             (K::ChooseFace, Choice::Number(0)) => "Front face".into(),
             (K::ChooseFace, Choice::Number(_)) => "Other face".into(),
             (K::PayPool, Choice::Item(n)) => format!("Leave mana option {}", n + 1),
+            (K::ChooseColorsSpent, Choice::Number(m)) => format!(
+                "Spend mana of {}",
+                if m == 0 { "no colour".to_string() } else { (0..5).filter(|t| m & (1 << t) != 0).map(|t| ["W", "U", "B", "R", "G"][t]).collect::<String>() }
+            ),
             (K::PlayDraw, Choice::Target(Target::Player(p))) => {
                 if Some(p) == self.to_move() { "Play first".into() } else { "Draw first".into() }
             }

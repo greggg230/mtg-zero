@@ -120,45 +120,116 @@ fn chain_id(classes: &[Class], s: &Src, k: crate::num::Count) -> u64 {
     0
 }
 
-/// Converge (exact, any number of units): the most colours (with `fixed`,
-/// already spent) an exact payment of `cost` and of the `marked` needs (the
-/// mana costs of mana abilities activated in the payment: not spent on the
-/// spell) by one mana from each of `units` (the types each can make) can
-/// show. A colour set S is reachable iff the units can be matched to the
-/// coloured pips, the marked needs and one mana of each colour of S not yet
-/// shown (the rest pay the generic part): a bipartite matching per S.
-/// `None` with hybrid or Phyrexian pips (not modelled here).
-fn most_colors_matching(units: &[Tag], cost: &ManaCost, marked: &[Tag], fixed: u8, allow: u8) -> Option<u32> {
-    if cost.hybrid.iter().any(|&n| n > 0) || cost.phyrexian.iter().any(|&n| n > 0) {
-        return None;
-    }
-    if cost.pips.iter().map(|&n| n as usize).sum::<usize>() + cost.generic as usize + marked.len() != units.len() {
-        return None; // (not an exact payment by these units)
-    }
-    let mut best = None;
-    for s in 0u8..32 {
-        // (Each colour shown not among the pips: one generic pip of it;
-        // every unit used, exactly: `payable_n`, which tries the orders of
-        // the chained mana abilities, 13.15.)
-        let mut c = *cost;
-        let mut shows = 0;
-        for t in 0..5 {
-            if s & (1 << t) != 0 && fixed & (1 << t) == 0 && cost.pips[t] == 0 {
-                c.pips[t] = 1;
-                shows += 1;
-            }
+/// The colour sets an exact payment can spend on a spell (CR 106.1b: each
+/// mana's type is chosen as it is made; 601.2h: which mana pays which part;
+/// ENGINE.md 100.5.1, docs/shortcuts.md 28.8.2k): bit m of the result for the
+/// WUBRG set m, with `fixed` (colours spent already) in every set. The cost
+/// is paid exactly by one mana from each of `units` (the types each can
+/// make), and the `marked` needs (the mana costs of mana abilities activated
+/// in the payment) by some of them: that mana isn't spent on the spell, so a
+/// set counts only the units paying `cost`. Exact for any number of units and
+/// hybrid pips (`shows_exactly`).
+fn colour_sets(units: &[Tag], cost: &ManaCost, marked: &[Tag], fixed: u8, allow: u8) -> u32 {
+    // (Units alike are one choice: the marked needs take a multiset of them.)
+    let mut groups: Vec<(Tag, usize)> = Vec::new();
+    let mut sorted = units.to_vec();
+    sorted.sort_unstable();
+    for u in sorted {
+        match groups.last_mut() {
+            Some(g) if g.0 == u => g.1 += 1,
+            _ => groups.push((u, 1)),
         }
-        if shows > cost.generic {
+    }
+    let mut sets = 0u32;
+    let mut take = vec![0usize; groups.len()];
+    fn rec(i: usize, left: usize, groups: &[(Tag, usize)], take: &mut Vec<usize>, cost: &ManaCost, marked: &[Tag], fixed: u8, allow: u8, sets: &mut u32) {
+        if *sets == u32::MAX {
+            return;
+        }
+        if i == groups.len() {
+            if left > 0 {
+                return;
+            }
+            let mut paying = Vec::new();
+            let mut rest = Vec::new();
+            for (k, &(u, n)) in groups.iter().enumerate() {
+                paying.extend(std::iter::repeat_n(u, take[k]));
+                rest.extend(std::iter::repeat_n(u, n - take[k]));
+            }
+            if !marked.is_empty() && !payable_n(&ManaCost::default(), allow, marked, &paying, &[]) {
+                return;
+            }
+            for m in 0..32u8 {
+                if *sets & (1 << m) == 0 && shows_exactly(m, &rest, cost, fixed, allow) {
+                    *sets |= 1 << m;
+                }
+            }
+            return;
+        }
+        for n in 0..=groups[i].1.min(left) {
+            take[i] = n;
+            rec(i + 1, left - n, groups, take, cost, marked, fixed, allow, sets);
+        }
+        take[i] = 0;
+    }
+    rec(0, marked.len(), &groups, &mut take, cost, marked, fixed, allow, &mut sets);
+    sets
+}
+
+/// Can `units` (one mana each, of a type in its tag) pay `cost` exactly
+/// with the colours spent exactly `m` (with `fixed`, spent already)? Every
+/// unit makes a type of `m` or colourless, and each colour of `m` not spent
+/// yet is made by some unit: the slot it pays (a generic or a hybrid pip
+/// with that colour; a coloured pip of it needs it anyway) becomes a pip of
+/// that colour, each colour's in turn, and the rest is an exact payment
+/// (`payable_n`). A payment showing exactly `m` gives such a choice of slots
+/// (distinct colours, distinct units, distinct slots), and a payment of the
+/// changed cost pays the cost with exactly `m` shown.
+fn shows_exactly(m: u8, units: &[Tag], cost: &ManaCost, fixed: u8, allow: u8) -> bool {
+    let f = fixed & COLORS;
+    if f & !m != 0 {
+        return false;
+    }
+    let keep = (m as Tag) | (1 << crate::mana::C) as Tag;
+    let mut r: Vec<Tag> = Vec::with_capacity(units.len());
+    for &u in units {
+        if u & TYPES as Tag == 0 {
+            r.push(u);
             continue;
         }
-        c.generic -= shows;
-        let ok = crate::mana::payable_n(&c, allow, marked, units, &[]);
-        if ok {
-            let n = ((s | fixed) & COLORS).count_ones();
-            best = Some(best.map_or(n, |b: u32| b.max(n)));
+        let x = (u & !(TYPES as Tag)) | (u & keep);
+        if x & TYPES as Tag == 0 {
+            return false;
         }
+        r.push(x);
     }
-    best.or(Some(0))
+    let need: SVec<usize, 5> = (0..5).filter(|&t| m & (1 << t) != 0 && f & (1 << t) == 0 && cost.pips[t] == 0).collect();
+    fn cover(i: usize, need: &[usize], cost: ManaCost, allow: u8, r: &[Tag]) -> bool {
+        if i == need.len() {
+            return payable_n(&cost, allow, &[], r, &[]);
+        }
+        let t = need[i];
+        if cost.generic > 0 {
+            let mut c = cost;
+            c.generic -= 1;
+            c.pips[t] += 1;
+            if cover(i + 1, need, c, allow, r) {
+                return true;
+            }
+        }
+        for h in 0..cost.hybrid.len() {
+            if cost.hybrid[h] > 0 && crate::mana::pair_mask(h) & (1 << t) != 0 {
+                let mut c = cost;
+                c.hybrid[h] -= 1;
+                c.pips[t] += 1;
+                if cover(i + 1, need, c, allow, r) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    cover(0, &need, *cost, allow, &r)
 }
 
 fn one_member(src: Src) -> Members {
@@ -2949,16 +3020,16 @@ impl Game {
         }
     }
 
-    /// Converge (ENGINE.md 28): the colours of mana spent on a spell, from
-    /// the payment's `units` (the picked single-mana sources' types, the
-    /// pool's and several-mana sources' mana spent): each single-mana
-    /// source makes the colour the player prefers, so the count is the most
-    /// colours an exact payment by those units can show (the player chooses
-    /// each mana's type as the ability resolves, CR 106.1b; 601.2h which
-    /// pays what).
-    /// `made`: the mana made by abilities with a mana cost spent, by type,
-    /// of which activations (`PayMana::made_by`) the most colours any
-    /// choice shows (ENGINE.md 100.4.7).
+    /// The colours of mana spent on a spell that reads them (converge,
+    /// sunburst; ENGINE.md 28), from the payment's `units` (the picked
+    /// single-mana sources' types, the pool's and several-mana sources' mana
+    /// spent) and `made` (the mana made by abilities with a mana cost spent,
+    /// by type, of any of the activations that made it: `PayMana::made_by`,
+    /// ENGINE.md 100.4.7). Each mana's type is the player's choice as it is
+    /// made (CR 106.1b) and so is which mana pays what (601.2h): when the
+    /// payment can spend more than one set of colours, the payer chooses it
+    /// (`Task::ColorsSpent`; ENGINE.md 100.5.1, docs/shortcuts.md 28.8.2k:
+    /// before, the most colours were counted, never fewer).
     fn record_converge(&mut self, pm: &PayMana, plain_units: &[Tag], made: [u8; 6]) {
         let Some(k) = self.marks.iter().position(|(_, m)| matches!(m, crate::game::Mark::ConvergePending(_))) else { return };
         let crate::game::Mark::ConvergePending(fixed) = self.marks[k].1 else { unreachable!() };
@@ -2988,51 +3059,43 @@ impl Game {
             }
             splits = next;
         }
-        let mut n = 0;
+        let mut sets = 0u32;
         for s in &splits {
             let mut units = plain_units.to_vec();
             units.extend(s.iter().copied());
-            n = n.max(self.converge_colors(pm, &units, fixed));
+            sets |= colour_sets(&units, &pm.cost, &pm.marked, fixed, pm.keep.allow);
         }
-        self.marks[k].1 = crate::game::Mark::Converge(n as u8);
+        assert!(sets != 0, "the colours spent: no set of colours pays the cost exactly (the payment did)");
+        if sets.count_ones() == 1 {
+            self.marks[k].1 = crate::game::Mark::Converge(sets.trailing_zeros() as u8);
+        } else {
+            let spell = self.marks[k].0;
+            self.agenda.push(Task::ColorsSpent { p: pm.payer, spell, sets });
+        }
     }
 
-    /// The most colours (with `fixed`, shown already) an exact payment by
-    /// `units` can show (`record_converge`).
-    fn converge_colors(&self, pm: &PayMana, units: &[Tag], fixed: u8) -> u32 {
-        #[allow(clippy::too_many_arguments)]
-        fn best(i: usize, units: &[Tag], cost: &ManaCost, allow: u8, got: &mut Vec<Tag>, fixed: u8) -> u32 {
-            if i == units.len() {
-                if !crate::mana::payable(cost, allow, &[], got) {
-                    return 0;
+    /// `Task::ColorsSpent`: `p` chooses which colours the mana spent to cast
+    /// `spell` was, among the sets its payment can spend (`sets`, bit m: the
+    /// WUBRG set m; CR 106.1b, 601.2h; ENGINE.md 100.5.1). The question comes
+    /// right after the payment, as part of casting the spell: nothing happens
+    /// between them. Choice: `ChooseColorsSpent`, `NUMBER` + the set (32 ids,
+    /// every subset of WUBRG: no paging).
+    pub(crate) fn colors_spent(&mut self, p: PlayerId, spell: crate::ids::ObjRef, sets: u32) {
+        match self.answer.take() {
+            Some(Choice::Number(m)) => {
+                if let Some(x) = self.marks.iter_mut().find(|(o, mk)| *o == spell && matches!(mk, crate::game::Mark::ConvergePending(_))) {
+                    x.1 = crate::game::Mark::Converge(m);
                 }
-                return (got.iter().fold(fixed, |m, &x| m | crate::mana::low(x)) & COLORS).count_ones();
+                self.note(|_| format!("P{p} spent mana of {} colours (mask {m:#07b})", m.count_ones()));
             }
-            let options: SVec<Tag, 6> = if units[i] & TYPES as Tag == 0 {
-                [units[i]].into_iter().collect()
-            } else {
-                (0..6).filter(|t| units[i] & (1 << t) != 0).map(|t| (1 << t) | (units[i] & !(TYPES as Tag))).collect()
-            };
-            let mut b = 0;
-            for o in options.iter() {
-                got.push(*o);
-                b = b.max(best(i + 1, units, cost, allow, got, fixed));
-                got.pop();
+            None => {
+                let opts: Vec<Opt> = (0..32u8)
+                    .filter(|&m| sets & (1 << m) != 0)
+                    .map(|m| Opt { action: act::NUMBER + m as u16, choice: Choice::Number(m) })
+                    .collect();
+                self.ask(Task::ColorsSpent { p, spell, sets }, p, DecisionKind::ChooseColorsSpent, opts);
             }
-            b
-        }
-        if units.len() <= 7 && pm.marked.is_empty() {
-            best(0, units, &pm.cost, pm.keep.allow, &mut Vec::new(), fixed)
-        } else {
-            match most_colors_matching(units, &pm.cost, &pm.marked, fixed, pm.keep.allow) {
-                Some(n) => n,
-                // (Hybrid or Phyrexian pips left with many units: no
-                // converge spell in the cube has them; an upper bound.)
-                None => {
-                    let all = units.iter().fold(fixed, |m, &x| m | crate::mana::low(x)) & COLORS;
-                    all.count_ones().min(fixed.count_ones() + units.len() as u32)
-                }
-            }
+            Some(other) => unreachable!("colours spent answer {other:?}"),
         }
     }
 
@@ -3043,7 +3106,7 @@ impl Game {
         self.marks
             .iter()
             .find_map(|&(o, m)| match m {
-                crate::game::Mark::Converge(n) if o == r => Some(n),
+                crate::game::Mark::Converge(m) if o == r => Some(m.count_ones() as u8),
                 crate::game::Mark::ConvergePending(x) if o == r => Some(x.count_ones() as u8),
                 _ => None,
             })
@@ -4171,6 +4234,31 @@ mod tests {
             db.expect_id("Gene Pollinator").expect("supported");
             db.leak()
         })
+    }
+
+    /// The colour sets a payment can spend, exactly (CR 106.1b, 601.2h;
+    /// docs/shortcuts.md 28.8.2k): hybrid pips (no more upper bound) and a
+    /// mana ability's own cost, whose mana isn't spent on the spell.
+    #[test]
+    fn cr_106_1b_the_colour_sets_a_payment_can_spend() {
+        use crate::mana::{B, G, U, W};
+        let one = |t: usize| (1u8 << t) as Tag;
+        let two = |a: usize, b: usize| ((1u8 << a) | (1u8 << b)) as Tag;
+        let sets = |v: &[u8]| v.iter().fold(0u32, |s, &m| s | 1 << m);
+        let (w, u, b, g) = (1u8 << W, 1u8 << U, 1u8 << B, 1u8 << G);
+        // {W/U}{W/U} by two W/U duals: W, U or W U.
+        let c = ManaCost::parse("{W/U}{W/U}").unwrap();
+        assert_eq!(colour_sets(&[two(W, U), two(W, U)], &c, &[], 0, 0), sets(&[w, u, w | u]));
+        // {W/U}{1} by Plains and a U/B dual: W U or W B (the dual pays the
+        // hybrid pip as U, or the generic one as U or B; never W alone).
+        let c = ManaCost::parse("{W/U}{1}").unwrap();
+        assert_eq!(colour_sets(&[one(W), two(U, B)], &c, &[], 0, 0), sets(&[w | u, w | b]));
+        // With W spent already (`fixed`), every set has it.
+        assert_eq!(colour_sets(&[two(W, U), two(W, U)], &ManaCost::parse("{W/U}{W/U}").unwrap(), &[], w, 0), sets(&[w, w | u]));
+        // {1} and a mana ability's own {U/B}: one of a U/B dual and a G/W
+        // dual pays the {U/B}, the other the spell; only the spell's counts.
+        let need = ((u | b) | crate::mana::NOT_MADE) as Tag;
+        assert_eq!(colour_sets(&[two(U, B), two(G, W)], &ManaCost::parse("{1}").unwrap(), &[need], 0, 0), sets(&[g, w]));
     }
 
     /// docs/shortcuts.md N23, CR 602.2b, 601.2g (the EoE S2 sealed fuzz, seed

@@ -919,32 +919,90 @@ fn black_widow_counter_or_cast_their_card_with_any_mana_cr609_4b() {
 
 /// "Converge - Exile target nonland permanent if its mana value is less than
 /// or equal to the number of colors of mana spent to cast this spell" (CR
-/// 106.1b: a dual land's mana is the colour its controller chooses, so the
-/// count is the most its sources can show).
+/// 106.1b: a dual land's mana is the colour its controller chooses as it is
+/// made; 601.2h: which mana pays what). With one set of colours possible it
+/// is recorded; with several the caster chooses (`ChooseColorsSpent`,
+/// `NUMBER` + the WUBRG set: ENGINE.md 100.5.1, docs/shortcuts.md 28.8.2k):
+/// here the most.
 #[test]
 fn prismatic_ending_counts_the_colours_spent_converge_cr106_1b() {
     // ruling: b64c158e
     for (lands, exiled) in [(["Plains", "Island", "Swamp"], true), (["Plains", "Plains", "Island"], false), (["Plains", "Tundra", "Underground Sea"], true)] {
-        let mut g = scen()
-            .battlefield(0, &lands)
-            .battlefield(1, &["Coalition Relic"])
-            .hand(0, &["Prismatic Ending"])
-            .at(Step::Main1, 0)
-            .start();
-        let pe = g.card(0, "Prismatic Ending", Zone::Hand);
-        let relic = bf(&g, 1, "Coalition Relic");
-        g.choose(Choice::Cast(pe));
-        g.drive_until(|g| !at_priority(g));
-        // X = 2 (the mana value of the Relic is 3).
-        if g.kind() == Some(DecisionKind::ChooseMode) {
-            g.choose(Choice::Number(2));
+        let (mut g, relic) = prismatic_ending_at_relic(&lands);
+        if g.kind() == Some(DecisionKind::ChooseColorsSpent) {
+            let most = g.pending_decision().unwrap().options.iter().map(|o| o.choice).max_by_key(|c| match c {
+                Choice::Number(m) => m.count_ones(),
+                _ => 0,
+            });
+            g.choose(most.unwrap());
         }
-        g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
-        g.choose(g.tgt(relic));
-        pay(&mut g);
         settle(&mut g);
         assert_eq!(g.obj(relic).zone == Zone::Exile, exiled, "{lands:?}");
     }
+}
+
+/// P0 casts Prismatic Ending (X = 2) on P1's Coalition Relic (mana value 3),
+/// paying with `lands`' first sources, up to what follows the payment;
+/// the Relic.
+fn prismatic_ending_at_relic(lands: &[&str]) -> (Game, CardIdx) {
+    let mut g = scen()
+        .battlefield(0, lands)
+        .battlefield(1, &["Coalition Relic"])
+        .hand(0, &["Prismatic Ending"])
+        .at(Step::Main1, 0)
+        .start();
+    let pe = g.card(0, "Prismatic Ending", Zone::Hand);
+    let relic = bf(&g, 1, "Coalition Relic");
+    g.choose(Choice::Cast(pe));
+    g.drive_until(|g| !at_priority(g));
+    if g.kind() == Some(DecisionKind::ChooseMode) {
+        g.choose(Choice::Number(2));
+    }
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(relic));
+    pay(&mut g);
+    (g, relic)
+}
+
+/// The caster chooses which colours the mana spent was when the payment
+/// allows several sets (CR 106.1b, 601.2h; docs/shortcuts.md 28.8.2k, the
+/// audit's F4: before, the most colours its sources could show were
+/// counted, and a player couldn't spend fewer). Prismatic Ending (X = 2,
+/// {2}{W}) paid by Plains, Tundra and Underground Sea: the sets are W U, W B
+/// and W U B (the Plains' {W}; the Sea can't make {W}), offered as `NUMBER`
+/// + the WUBRG mask; W U leaves Coalition Relic (mana value 3) where it is,
+/// W U B exiles it. Every world of either player asks the same.
+#[test]
+fn cr_106_1b_cr_601_2h_the_caster_chooses_the_colours_spent() {
+    const W: u8 = 1;
+    const U: u8 = 2;
+    const B: u8 = 4;
+    for (pick, exiled) in [(W | U, false), (W | U | B, true)] {
+        let (mut g, relic) = prismatic_ending_at_relic(&["Plains", "Tundra", "Underground Sea"]);
+        assert_eq!(g.kind(), Some(DecisionKind::ChooseColorsSpent), "{}", g.log_lines().join("\n"));
+        let d = g.pending_decision().unwrap();
+        let sets: Vec<(u16, Choice)> = d.options.iter().map(|o| (o.action, o.choice)).collect();
+        let want: Vec<(u16, Choice)> = [W | U, W | B, W | U | B].iter().map(|&m| (engine::act::NUMBER + m as u16, Choice::Number(m))).collect();
+        assert_eq!(sets, want, "{:?}", g.options_desc());
+        for v in 0..2u8 {
+            let mut w = g.clone();
+            w.determinize(v, &mut engine::rng::Rng::new(28));
+            assert_eq!(w.pending_decision(), g.pending_decision(), "P{v}'s world");
+        }
+        g.choose(Choice::Number(pick));
+        settle(&mut g);
+        assert_eq!(g.obj(relic).zone == Zone::Exile, exiled, "{pick:#b}\n{}", g.log_lines().join("\n"));
+    }
+}
+
+/// One possible set of colours is recorded without a question: Plains,
+/// Island and Swamp spend W U B (each makes one colour).
+#[test]
+fn cr_601_2h_one_possible_set_of_colours_asks_nothing() {
+    let (mut g, relic) = prismatic_ending_at_relic(&["Plains", "Island", "Swamp"]);
+    assert_ne!(g.kind(), Some(DecisionKind::ChooseColorsSpent));
+    settle(&mut g);
+    assert_eq!(g.obj(relic).zone, Zone::Exile);
 }
 
 // ---- Painter's Servant -----------------------------------------------------

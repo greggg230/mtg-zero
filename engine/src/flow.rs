@@ -137,6 +137,10 @@ pub(crate) enum Task {
     /// `LIBRARY` + the card's slot in the graveyard list, its cast or play
     /// as Priority offered it; answered as Priority's answer.
     GraveyardCast { p: PlayerId },
+    /// Which colours the mana spent to cast `spell` was, among the sets its
+    /// payment can spend (bit m of `sets`: the WUBRG set m; CR 106.1b, 601.2h;
+    /// ENGINE.md 100.5.1). Choice: `ChooseColorsSpent`, `NUMBER` + the set.
+    ColorsSpent { p: PlayerId, spell: crate::ids::ObjRef, sets: u32 },
     /// CR 601.2a-b: which permission casts graveyard card `card` (face
     /// `face`; `cast::route`).
     ChooseRoute { p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId> },
@@ -356,6 +360,7 @@ impl Game {
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
             Task::ChooseAbility { p, card, page } => self.choose_ability(p, card, page),
             Task::GraveyardCast { p } => self.graveyard_cast(p),
+            Task::ColorsSpent { p, spell, sets } => self.colors_spent(p, spell, sets),
             Task::ChooseRoute { p, card, face } => self.choose_route(p, card, face),
             Task::EntersTogether => self.enters_together(),
             Task::EnterAsCopy { card, note, since, page } => self.enter_as_copy(card, note, since, page),

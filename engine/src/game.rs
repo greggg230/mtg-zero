@@ -967,7 +967,8 @@ pub enum Mark {
     /// A spell with converge being paid for: the colours of the pool mana
     /// spent so far.
     ConvergePending(u8),
-    /// The number of colours of mana spent to cast this spell (converge).
+    /// The colours of mana spent to cast this spell (a WUBRG mask; converge,
+    /// sunburst read how many: ENGINE.md 100.5.1).
     Converge(u8),
     /// The colour (index W U B R G) chosen as it entered (CR 614.12).
     ChosenColor(u8),

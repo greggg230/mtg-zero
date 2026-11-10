@@ -460,6 +460,30 @@ fn pentad_prism_sunburst_counters_cr702_44a_and_its_mana() {
     assert!(!g.can_pay(0, &engine::mana::ManaCost::parse("{U}{B}{G}").unwrap()));
 }
 
+/// Sunburst counts the colours the caster chose to spend (CR 702.44a,
+/// 106.1b, 601.2h; docs/shortcuts.md 28.8.2k): Pentad Prism ({2}) paid by
+/// Tundra and Underground Sea can spend U, W U, W B or U B; the caster
+/// spends only blue, and it enters with one charge counter.
+#[test]
+fn cr_702_44a_sunburst_counts_the_colours_chosen() {
+    let mut g = scen()
+        .battlefield(0, &["Tundra", "Underground Sea"])
+        .hand(0, &["Pentad Prism"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Pentad Prism", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseColorsSpent), "{}", log(&g));
+    let sets: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+    assert_eq!(sets, vec![Choice::Number(0b10), Choice::Number(0b11), Choice::Number(0b101), Choice::Number(0b110)], "U, W U, W B, U B");
+    g.choose(Choice::Number(0b10));
+    settle(&mut g);
+    let prism = bf(&g, 0, "Pentad Prism");
+    let charge = engine::db::Counter::Named(db().subtype_id("counter:charge").unwrap());
+    assert_eq!(g.counters_on(prism, charge), 1, "blue only\n{}", log(&g));
+}
+
 // ---- "Put into a graveyard from anywhere": Worldspine Wurm, Emrakul, Blightsteel ----
 
 /// "When this creature dies, create three 5/5 green Wurm creature tokens with

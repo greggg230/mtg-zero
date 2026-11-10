@@ -225,6 +225,11 @@ pub enum DecisionKind {
     /// first activation. The mana goes to the pool with its restrictions,
     /// and the player keeps priority (605.3b). ENGINE.md 100.4.3.
     ActivateMana,
+    /// Which colours the mana spent to cast a spell was, when its payment
+    /// can spend several sets (CR 106.1b, 601.2h; the spell reads them:
+    /// converge, sunburst): `NUMBER` + the WUBRG mask of the set
+    /// (`Task::ColorsSpent`; ENGINE.md 100.5.1).
+    ChooseColorsSpent,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }
