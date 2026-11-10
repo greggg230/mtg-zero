@@ -22721,7 +22721,7 @@ digests below). The public-state gate's positions gain a fifth kind, EoE sealed 
 last, so the other kinds' positions are as before), so `public_state_reaches_the_encoding` and
 `the_v5_facts_encode_no_hidden_information` run on EoE positions too.
 
-### 105.3 The zero-core pin: `feat/deck-reader` 0974e50
+### 105.3 The zero-core pin: `feat/deck-reader` 0974e50, then `feat/aux-widen` 477a026
 
 `third_party/zero-core` e4779b2 -> **0974e50** (`feat/deck-reader`, on GitHub): zero-core's readers (its
 docs/az.md 36: a game package declares `readers={game: [{target, inputs, hidden, enter, belief}]}`, each a
@@ -22732,6 +22732,12 @@ optimizer and losses are the code of before (zero-core's byte-identity check, it
 reads the pin from the gitlink (no sha of its own). On this branch with the new core: `python -m pytest
 tests -q` 221 passed, 1 skipped; config.json gains `reader_detach` (and `reader_<target>` once the package
 declares a reader).
+
+**Then `feat/aux-widen` 477a026** (0974e50 + `net.widen_aux`, zero-core docs/az.md 37; on GitHub): a checkpoint whose
+auxiliary layout is a subset of the run's gains the new targets exactly, so the Delver line's belief-only checkpoints
+load onto `mtg`'s [belief, deck] layout bit for bit (102.4's open question), one pin for both lines. Python only
+again; byte-identical otherwise (its author's 8 run configurations). EoE networks start fresh and do not need it.
+On this branch with it: `python -m pytest tests -q` 225 passed, 1 skipped.
 
 ### 105.4 The presets
 
