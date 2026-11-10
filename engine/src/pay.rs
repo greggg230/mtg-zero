@@ -4286,8 +4286,7 @@ mod tests {
         let fl = g.card(0, "Faithless Looting", Zone::Graveyard);
         let pol = g.permanents_of(0).find(|&c| g.def_of(c).name == "Gene Pollinator").unwrap();
         let others: Vec<CardIdx> = g.permanents_of(0).filter(|&c| matches!(g.def_of(c).name.as_str(), "Island" | "Mountain")).collect();
-        // (Priority's "cast or play from the graveyard", then the card:
-        // ENGINE.md 100.5.)
+        // (Priority's "cast or play from the graveyard", then the card: ENGINE.md 100.5.)
         g.choose(Choice::Cast(fl));
         assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}", g.options_desc());
         let granted = Choice::Ability(pol, AbilitySlot::Activated(1));

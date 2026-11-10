@@ -979,7 +979,8 @@ fn cr_601_2h_the_pollinator_a_tap_cost_needs_doesnt_activate() {
 
 /// Can `c` (in P0's graveyard) be cast now (any route)?
 fn castable_from_gy(g: &Game, c: CardIdx) -> bool {
-    // (Priority's "cast or play from the graveyard" expanded, ENGINE.md 100.5.)
+    // (Priority's casts from a graveyard are one option, then the list's choice: the testkit's
+    // `offered` expands them, ENGINE.md 100.5.)
     g.offered().iter().any(|o| matches!(o, Choice::Cast(x) if *x == c))
 }
 
