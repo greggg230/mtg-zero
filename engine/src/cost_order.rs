@@ -168,17 +168,28 @@ fn bits(m: u32) -> impl Iterator<Item = u8> {
     (0..part::N).filter(move |&k| m & (1 << k) != 0)
 }
 
+/// The kinds of characteristic a part reads or a continuous effect changes
+/// (`Reads::kinds`, `Change`): types (card types, subtypes, supertypes),
+/// colours, abilities (keywords, protection, activated abilities), power and
+/// toughness.
+mod kind {
+    pub const TYPES: u8 = 1;
+    pub const COLORS: u8 = 2;
+    pub const ABILITIES: u8 = 4;
+    pub const PT: u8 = 8;
+    pub const ALL: u8 = 15;
+}
+
 /// What a part of a cost reads of its candidates that paying another part
-/// can change: their characteristics (`chars`: types, colours, keywords and
-/// abilities; `pt`: power and toughness: what continuous effects change),
-/// whether they are tapped, their counters, the number of some permanents;
-/// `hand`: the candidates are cards in a hand (where only Painter's Servant
-/// and characteristic-defining abilities change characteristics, CR 604.3,
-/// 611.3: a static ability of a permanent affects permanents).
+/// can change: their characteristics (`kinds`: what continuous effects
+/// change), whether they are tapped, their counters, the number of some
+/// permanents; `hand`: the candidates are cards in a hand (where only
+/// Painter's Servant and characteristic-defining abilities change
+/// characteristics, CR 604.3, 611.3: a static ability of a permanent affects
+/// permanents).
 #[derive(Clone, Copy, Default, Debug)]
 struct Reads {
-    chars: bool,
-    pt: bool,
+    kinds: u8,
     tapped: bool,
     counters: bool,
     counts: bool,
@@ -188,8 +199,7 @@ struct Reads {
 impl Reads {
     fn or(self, o: Reads) -> Reads {
         Reads {
-            chars: self.chars || o.chars,
-            pt: self.pt || o.pt,
+            kinds: self.kinds | o.kinds,
             tapped: self.tapped || o.tapped,
             counters: self.counters || o.counters,
             counts: self.counts || o.counts,
@@ -198,48 +208,34 @@ impl Reads {
     }
 
     fn any(self) -> bool {
-        self.chars || self.pt || self.tapped || self.counters || self.counts
+        self.kinds != 0 || self.tapped || self.counters || self.counts
     }
 }
 
-/// Which characteristics a change may change (`Game::chars_may_change`).
+/// Which kinds of characteristic a change may change
+/// (`Game::chars_may_change`).
 #[derive(Clone, Copy, Default, Debug)]
-struct Change {
-    chars: bool,
-    pt: bool,
-}
+struct Change(u8);
 
 impl Change {
-    const BOTH: Change = Change { chars: true, pt: true };
-
-    fn or(self, o: Change) -> Change {
-        Change { chars: self.chars || o.chars, pt: self.pt || o.pt }
-    }
-
     fn hits(self, r: Reads) -> bool {
-        (self.chars && r.chars) || (self.pt && r.pt)
+        self.0 & r.kinds != 0
     }
 }
 
 /// What a static ability's or an effect's modification changes (exhaustive:
 /// a new modification says). Rules effects ("can't block") change nothing a
 /// cost reads.
-fn mod_change(m: &Mod) -> Change {
-    let pt = Change { chars: false, pt: true };
-    let chars = Change { chars: true, pt: false };
+fn mod_change(m: &Mod) -> u8 {
+    use kind::*;
     match m {
-        Mod::SetPt(..) | Mod::Pt(..) | Mod::PtPer { .. } | Mod::PtPerSourceCounter { .. } | Mod::SwitchPt | Mod::PowerPlusGreatestMv { .. } => pt,
-        Mod::Types { .. }
-        | Mod::Colors(_)
-        | Mod::Keywords(_)
-        | Mod::Protection(_)
-        | Mod::GainSacMana(_)
-        | Mod::AllCreatureTypes
-        | Mod::BecomeTypes { .. }
-        | Mod::GainLatent(_) => chars,
+        Mod::SetPt(..) | Mod::Pt(..) | Mod::PtPer { .. } | Mod::PtPerSourceCounter { .. } | Mod::SwitchPt | Mod::PowerPlusGreatestMv { .. } => PT,
+        Mod::Types { .. } | Mod::AllCreatureTypes | Mod::BecomeTypes { .. } => TYPES,
+        Mod::Colors(_) => COLORS,
+        Mod::Keywords(_) | Mod::Protection(_) | Mod::GainSacMana(_) | Mod::GainLatent(_) => ABILITIES,
         // (Losing all abilities loses static abilities too; a change of
         // control changes what "you control" reads.)
-        Mod::LoseAllAbilities | Mod::ControlFrom(_) => Change::BOTH,
+        Mod::LoseAllAbilities | Mod::ControlFrom(_) => ALL,
         Mod::CantBlock
         | Mod::CantBeBlocked
         | Mod::MustAttack
@@ -248,28 +244,22 @@ fn mod_change(m: &Mod) -> Change {
         | Mod::Goad
         | Mod::ExileIfLeaves
         | Mod::PreventCombatDamage
-        | Mod::MustAttackPlayer => Change::default(),
+        | Mod::MustAttackPlayer => 0,
     }
 }
 
 /// What a filter reads (exhaustive: a new filter says).
 fn filter_reads(f: &Filter) -> Reads {
-    let chars = Reads { chars: true, ..Reads::default() };
-    let pt = Reads { pt: true, ..Reads::default() };
+    let k = |kinds: u8| Reads { kinds, ..Reads::default() };
     match f {
         Filter::And(a, b) => filter_reads(a).or(filter_reads(b)),
         Filter::Or(v) => v.iter().fold(Reads::default(), |r, x| r.or(filter_reads(x))),
         Filter::Not(x) | Filter::Spell(x) | Filter::InGraveyard(x) | Filter::InExile(x) | Filter::TargetsMatching(x) => filter_reads(x),
-        Filter::AttachedTo(x) => filter_reads(x).or(chars),
-        Filter::Type(_)
-        | Filter::Subtype(_)
-        | Filter::Supertype(_)
-        | Filter::Color(_)
-        | Filter::Colorless
-        | Filter::HasKeyword(_)
-        | Filter::HasActivatedAbility
-        | Filter::HasWarp => chars,
-        Filter::TotalPtAtMost(_) | Filter::PowerAtLeast(_) | Filter::PowerAtMost(_) | Filter::ToughnessAtMost(_) | Filter::PtIs(..) => pt,
+        Filter::AttachedTo(x) => filter_reads(x).or(k(kind::ALL)),
+        Filter::Type(_) | Filter::Subtype(_) | Filter::Supertype(_) => k(kind::TYPES),
+        Filter::Color(_) | Filter::Colorless => k(kind::COLORS),
+        Filter::HasKeyword(_) | Filter::HasActivatedAbility | Filter::HasWarp => k(kind::ABILITIES),
+        Filter::TotalPtAtMost(_) | Filter::PowerAtLeast(_) | Filter::PowerAtMost(_) | Filter::ToughnessAtMost(_) | Filter::PtIs(..) => k(kind::PT),
         Filter::Tapped => Reads { tapped: true, ..Reads::default() },
         Filter::HasCounter(_) | Filter::NoCounters(_) | Filter::MvIsSourceCounters(_) => Reads { counters: true, ..Reads::default() },
         Filter::MvAtMostLandsYouControl | Filter::OathTarget => Reads { counts: true, ..Reads::default() },
@@ -386,7 +376,7 @@ impl Game {
                 // (Creatures, their power and "crews as though its power were
                 // greater".)
                 w.tapped = self.crew_eligible(p, card);
-                Reads { chars: true, pt: true, ..Reads::default() }
+                Reads { kinds: kind::TYPES | kind::PT | kind::ABILITIES, ..Reads::default() }
             }
             REMOVE_COUNTER_FROM => {
                 let (f, kind) = cost.remove_counter_from.as_ref().expect("the part's cost");
@@ -473,15 +463,15 @@ impl Game {
             if (r.tapped && !w.tapped.is_empty()) || (r.counters && !w.counters.is_empty()) || (r.counts && !w.leave.is_empty()) {
                 return false;
             }
-            if (r.chars || r.pt) && self.chars_may_change(o.p, &w, r.hand).hits(*r) {
+            if r.kinds != 0 && self.chars_may_change(o.p, &w, r.hand).hits(*r) {
                 return false;
             }
         }
         true
     }
 
-    /// Which characteristics could changes `w` change (`Change`: types,
-    /// subtypes, colours, keywords and abilities; power and toughness)? Every
+    /// Which kinds of characteristic could changes `w` change (`Change`,
+    /// `kind`: types, colours, abilities, power and toughness)? Every
     /// continuous effect the layers apply (`layers.rs`) is looked at: static
     /// abilities of permanents and emblems (their source leaving, their
     /// condition, the objects they affect, their amounts), effects lasting
@@ -514,11 +504,11 @@ impl Game {
         };
         let cdas = if hand { self.players[p as usize].hand.iter().any(|&c| cda_hit(c)) } else { self.battlefield.iter().any(|&c| cda_hit(c)) };
         if cdas {
-            out.pt = true;
+            out.0 |= kind::PT;
         }
         // Painter's Servant: every card's colour (CR 613.1e).
         if w.leave.iter().any(|&c| self.abilities(c).paints) {
-            out.chars = true;
+            out.0 |= kind::COLORS;
         }
         if hand {
             return out;
@@ -526,7 +516,7 @@ impl Game {
         // Counters are part of an object's power and toughness and keywords
         // (CR 122.1a-b).
         if !w.counters.is_empty() {
-            return Change::BOTH;
+            out.0 |= kind::PT | kind::ABILITIES;
         }
         if self.n_static > 0 {
             for &s in self.battlefield.iter().chain(self.command.iter()) {
@@ -543,7 +533,7 @@ impl Game {
                             _ => false,
                         };
                         if sensitive || amount {
-                            out = out.or(mod_change(m));
+                            out.0 |= mod_change(m);
                         }
                     }
                 }
@@ -552,19 +542,29 @@ impl Game {
         for e in &self.effects {
             if let crate::layers::Until::WhileOnBattlefield(r) = e.until {
                 if leaving(r.idx) {
-                    out = out.or(mod_change(&e.m));
+                    out.0 |= mod_change(&e.m);
                 }
             }
         }
-        // (An Equipment's granted abilities; a Blood Moon; W3's granted
-        // subtypes and abilities; a reconfigure creature unattached.)
-        if !w.leave.is_empty()
-            && (w.leave.iter().any(|&c| self.abilities(c).grants_equipped.is_some())
-                || self.moon_game
-                || self.w3.seen & (crate::eoe_w3::SEEN_W3_SUBTYPE | crate::eoe_w3::SEEN_W3_GRANT_ACT) != 0
-                || self.battlefield.iter().any(|&c| self.def_of(c).reconfigure && self.objs[c.i()].attached.is_some_and(|h| leaving(h.idx))))
-        {
-            out = Change::BOTH;
+        // (An Equipment's granted abilities; a Blood Moon's land types and
+        // abilities; W3's granted subtypes and abilities; a reconfigure
+        // creature unattached.)
+        if !w.leave.is_empty() {
+            if w.leave.iter().any(|&c| self.abilities(c).grants_equipped.is_some()) {
+                out.0 |= kind::ABILITIES;
+            }
+            if self.moon_game {
+                out.0 |= kind::TYPES | kind::ABILITIES;
+            }
+            if self.w3.seen & crate::eoe_w3::SEEN_W3_SUBTYPE != 0 {
+                out.0 |= kind::TYPES;
+            }
+            if self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 {
+                out.0 |= kind::ABILITIES;
+            }
+            if self.battlefield.iter().any(|&c| self.def_of(c).reconfigure && self.objs[c.i()].attached.is_some_and(|h| leaving(h.idx))) {
+                out.0 |= kind::ALL;
+            }
         }
         out
     }

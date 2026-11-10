@@ -22101,16 +22101,16 @@ The proof has two halves:
   tapped, a card discarded is not exiled) is what the engine's order handles: taps and counters
   before what leaves the battlefield, so any part's objects could have been taken (B4, B5).
 * **No part changes what another reads but by taking objects.** Each part reads of its candidates
-  their characteristics (`Reads::chars`: types, colours, keywords and abilities; `Reads::pt`: power
-  and toughness), whether they are tapped, their counters, or a number of permanents (a filter's
-  atoms, `filter_reads`, exhaustive; crew reads creatures and power); a hand's cards are read only
+  their characteristics by kind (`Reads::kinds`, `kind`: types, colours, abilities, power and
+  toughness), whether they are tapped, their counters, or a number of permanents (a filter's atoms,
+  `filter_reads`, exhaustive; crew reads creatures, power and its bonus); a hand's cards are read only
   through Painter's Servant and the payer's hand's characteristic-defining abilities (static
   abilities of permanents affect permanents). Each part writes (`Writes`): the permanents that may
   leave (its candidates), the hand, graveyard and exile, life, counters, tapped permanents. The
   order is free only when, for every part that reads, the other parts' writes change nothing it
   reads: no tap while it reads tapped, no counter while it reads counters, no permanent leaving
   while it counts permanents, and no continuous effect the layers apply whose source or input the
-  writes touch changing a characteristic it reads (`chars_may_change`, by kind: every static ability
+  writes touch changing a kind of characteristic it reads (`chars_may_change`: every static ability
   of a permanent or emblem, by its source leaving, its condition (`cond_reads`, exhaustive over
   `Cond`), its scope's tapped, counter and count atoms, its amounts; effects lasting while an object
   remains; characteristic-defining abilities; counters; Painter's Servant; a Blood Moon; W3's
@@ -22122,7 +22122,8 @@ The proof has two halves:
 A fetch land's "{T}, Pay 1 life, Sacrifice this" reads nothing (its {T} is paid with the source
 untapped; summoning sickness is a restriction on activating, CR 602.5a, checked as it begins), so it
 is free in every state; "{T}, Sacrifice a creature" is free unless a static ability reads tapped
-permanents. No game of the digests asks the order.
+permanents (The Seriema's indestructible for tapped legendary creatures changes abilities, which
+High Market's "{T}, Sacrifice a creature" doesn't read). No game of the digests asks the order.
 
 ##### The payment when the order can matter
 

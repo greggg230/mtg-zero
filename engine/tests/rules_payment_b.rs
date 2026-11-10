@@ -1445,9 +1445,10 @@ fn b6_db() -> &'static CardDb {
         ];
         let mut cards = engine::db::load_cube_document().cards;
         cards.extend(common::custom_cards());
+        cards.extend(engine::db::load_eoe_document().cards.into_iter().filter(|c| c.name == "High Market" || c.name == "The Seriema"));
         cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
         let db = CardDb::from_cards(&cards);
-        for n in ["Test Weakness Charm", "Test Crew Shrine", "Test Desperate Rebel", "Test Blood Shrine", "Test Rebel", "Test Rebel Altar", "Test Crew Altar", "Test Elf Rebel"] {
+        for n in ["Test Weakness Charm", "Test Crew Shrine", "Test Desperate Rebel", "Test Blood Shrine", "Test Rebel", "Test Rebel Altar", "Test Crew Altar", "Test Elf Rebel", "High Market", "The Seriema"] {
             db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
         }
         db.leak()
@@ -1725,4 +1726,27 @@ fn cr_601_2g_the_mana_leaves_the_parts_payable_in_some_order() {
     assert!(g.obj(rebel).tapped && g.obj(forest).tapped, "{}", log(&g));
     assert_eq!(g.count_in(0, "Test Weakness Charm", Zone::Graveyard), 1, "{}", log(&g));
     assert_eq!(g.player(0).hand.len(), 1, "{}", log(&g));
+}
+
+/// CR 601.2h, 613: a continuous effect a part's payment can change matters to
+/// another part only through the kind of characteristic that part reads.
+/// High Market's "{T}, Sacrifice a creature" with The Seriema ("other tapped
+/// legendary creatures you control have indestructible"): tapping High Market
+/// could change only abilities, which "a creature" doesn't read, so the order
+/// isn't asked (it was, before characteristics were told apart by kind).
+#[test]
+fn cr_601_2h_an_ability_granted_to_tapped_creatures_leaves_a_creatures_sacrifice_free() {
+    let mut g = b6_scen().battlefield(0, &["High Market", "The Seriema", "Test Rebel"]).at(Step::Main1, 0).start();
+    let market = bf(&g, 0, "High Market");
+    let rebel = bf(&g, 0, "Test Rebel");
+    // (Its ability after "{T}: Add {C}".)
+    assert!(g.has_option(act(market, 1)), "{:?}", g.options_desc());
+    g.choose(act(market, 1));
+    finish(&mut g, |g| {
+        assert_ne!(g.kind(), Some(DecisionKind::CostPart), "{:?}", g.options_desc());
+        None
+    });
+    settle(&mut g);
+    assert_eq!(g.obj(rebel).zone, Zone::Graveyard, "{}", log(&g));
+    assert!(g.obj(market).tapped, "{}", log(&g));
 }
