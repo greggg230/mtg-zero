@@ -22758,3 +22758,33 @@ cube's) and `random`. **Pure self-play**: nothing in either preset reads 17lands
 line's later schedule (lr 3e-5, `eval_games` 0, anchors) belongs to a long run, not a first one. Its CPU side is
 mtg-3's (8 threads, 2 groups, 1 inference worker: the GPU and the desktop are shared); a run that has the
 machine to itself takes the Delver line's 16 threads x 4 groups and 1,536 in flight with flags.
+
+### 105.5 The deck reader (after the hidden-decks merge)
+
+`eoe-hidden-decks` 1edadcb merged (8856568; ENGINE.md 102: hidden decklists, the sealed prior, K cached decks per
+information set, the `deck` target, the reader's declared inputs). The `"sealed"` spec turns hidden decklists on,
+so `mtg_eoe` games are hidden-decklist games: the search deals the opponent's unseen deck from the sealed prior.
+
+* **The target** is the engine's `deck` (`MtgAz::AUX`'s second segment, 102.4: the frame opponent's unseen cards,
+  hand, library and face-down, by identity), the same for `mtg_eoe` (`MtgEoeAz::AUX` is `MtgAz`'s). On the EoE
+  table it is now in the EoE space: before this branch every EoE card counted in column 1023 (`UNKNOWN`), so the
+  target and the reader's bags carried nothing (102.5). The package declares `belief` and `deck` for both games
+  (the auxiliary head has 2,048 outputs once a weight is on).
+* **The readers** (`mtgz.az.deck_reader.READERS`, passed to the package now that the pin has readers, 105.3):
+  `mtg`'s reads the declared v6 ranges as they are (8,281 floats, 102.4); `mtg_eoe`'s reads the same ranges on
+  `layout_eoe.json`, each whole bag row narrowed to the EoE space's columns - the cards [0, 321) and the first 64
+  token identities [384, 448) (the registry has 9; `eoe_registries_and_identities` fails past 64) - **derived
+  from the layout**, not from offsets: the bag rows are the declared ranges inside the layout's `bags` block
+  (offset, count, width by name), the card count is `eoe_cards.txt`'s, and `eoe_inputs` refuses a declaration of
+  another layout shape. The EoE space moves no bag row (the layout is v6's); it decides which columns of a row
+  hold EoE cards. **3,169 inputs**: the game's 24 and the opponent's 40 globals, 8 bags x 385 (their battlefield,
+  graveyard, exile, known hand, hand clouds, known library, earlier reveals, phased-out permanents), their deck
+  size, their 24 v5 globals; hidden 256, its prediction into the trunk (`enter` 'trunk', detached:
+  `reader_detach` 1), `belief` false (the search does not yet deal the opponent's deck by a prediction: 102.1's
+  `determinize_deck_tilted` exists, `determinize_with` does not call it). `test_the_eoe_deck_reader_reads_the_eoe_
+  identities_of_the_declared_inputs`: the narrowed ranges as derived, both readers complete through the package,
+  and on EoE positions every declared feature outside the narrowed ranges is zero (nothing lost).
+* **Cost** (zero-core 36.8's arithmetic): 3,169 x 256 + 256 x 1,024 + 1,024 x 128 = 1.20M multiply-adds, 5.5% of
+  the 128 x 4 trunk's 21.9M (36.8's 2% assumed a 330-wide target; the target is the AUX's 1,024 wide). The
+  parameters: 1.20M, about 77% of the 1.55M network's (36.8: run once per position, not per token).
+* **The presets** set `aux_deck_w` 0.5 and `reader_deck` 1 (both).

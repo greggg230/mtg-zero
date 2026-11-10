@@ -2278,17 +2278,22 @@ fn selfplay_records_the_belief_target_with_the_samples() {
 /// The auxiliary target `deck` (ENGINE.md 102.4) is the frame opponent's unseen cards - their
 /// hand, library and face-down cards the decider does not know exactly - by identity, its total
 /// public (the decider knows how many cards it knows), and never an input: on the gate's positions
-/// (open decklists, best-of-three, a drafted match, hidden decklists) every world of the decider's
+/// (open decklists, best-of-three, a drafted match, hidden decklists, EoE sealed) every world of the decider's
 /// encodes alike while the target is that world's own; with hidden decklists the worlds' targets
 /// differ beyond the order of the cards (their decks differ), which the reader is to predict.
 #[test]
 fn the_deck_target_is_the_opponents_unseen_cards_and_never_an_input() {
     let mut zr = zero_search::rng::Rng::new(102);
-    let (mut worlds, mut other) = (0, 0);
+    // (cube hidden decklists, EoE sealed: worlds and those with another unseen deck)
+    let (mut worlds, mut other) = ([0u32; 2], [0u32; 2]);
     for (name, g) in gate_positions(scale(20) as usize, 1024) {
         let v = g.to_move().unwrap();
         let t = deck_target(&g, v);
         assert_eq!(t, unseen_cards(&g, v), "{name}: the deck target");
+        if name == "eoe" {
+            // in the EoE identity space (ENGINE.md 105): no unseen card is UNKNOWN
+            assert_eq!(t[identity::UNKNOWN as usize], 0.0, "{name}: an unseen card without an EoE identity");
+        }
         let o = 1 - g.g.encoding_seat(v as u8);
         assert_eq!(t.iter().sum::<f32>() as usize, g.g.unknown_to(v as u8, o).len(), "{name}: its total");
         let x = enc(&g, v);
@@ -2299,14 +2304,17 @@ fn the_deck_target_is_the_opponents_unseen_cards_and_never_an_input() {
             let td = deck_target(&d, v);
             assert_eq!(td, unseen_cards(&d, v), "{name}: a world's target is its own");
             assert_eq!(td.iter().sum::<f32>(), t.iter().sum::<f32>(), "{name}: the public total");
-            if name == "hidden decklists" {
-                worlds += 1;
-                other += (td != t) as u32;
+            if name == "hidden decklists" || name == "eoe" {
+                let k = (name == "eoe") as usize;
+                worlds[k] += 1;
+                other[k] += (td != t) as u32;
             }
         }
     }
-    println!("hidden decklists: {worlds} worlds, {other} with another unseen deck");
-    assert!(worlds >= 60 && other * 10 > worlds * 9, "{worlds} {other}");
+    println!("hidden decklists: {} worlds, {} with another unseen deck; EoE sealed: {} worlds, {} with another", worlds[0], other[0], worlds[1], other[1]);
+    for k in 0..2 {
+        assert!(worlds[k] >= 60 && other[k] * 10 > worlds[k] * 9, "{worlds:?} {other:?}");
+    }
 }
 
 /// The deck reader's declared inputs (ENGINE.md 102.4) are checked in (`mtgz/az/deck_reader_v6.json`
@@ -2494,7 +2502,8 @@ fn belief_deals_keep_every_determinize_invariant() {
                 d.g.check_knowledge().unwrap_or_else(|e| panic!("{name}: {e}"));
                 for p in 0..2u8 {
                     assert_eq!(g.g.player(p).hand.len(), d.g.player(p).hand.len(), "{name}: hand size");
-                    if name != "bo3" && name != "drafted" && name != "hidden decklists" {
+                    // (EoE sealed is a hidden-decklist game too: its spec's default, ENGINE.md 102.6, 105)
+                    if name != "bo3" && name != "drafted" && name != "hidden decklists" && name != "eoe" {
                         assert_eq!(cards_of(&g, p), cards_of(&d, p), "{name}: P{p}'s cards");
                     }
                 }
