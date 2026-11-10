@@ -77,19 +77,22 @@ pub struct Cloud {
 /// face's included (as `Game::add_card` sets them; not the per-player
 /// miracle bits); computed once.
 fn seen_bits_of(db: &'static crate::db::CardDb) -> &'static [u16] {
-    static BITS: std::sync::OnceLock<(usize, Vec<u16>)> = std::sync::OnceLock::new();
+    // (Per card table: a process may play the cube's games and sealed ones, ENGINE.md 102.6.)
+    static BITS: std::sync::Mutex<Vec<(usize, &'static [u16])>> = std::sync::Mutex::new(Vec::new());
     let key = db as *const crate::db::CardDb as usize;
-    let b = BITS.get_or_init(|| {
-        let v = (0..db.len())
-            .map(|i| {
-                let d = db.def(i as DefId);
-                d.seen_bits() | d.back.map_or(0, |b| db.def(b).seen_bits())
-            })
-            .collect();
-        (key, v)
-    });
-    assert_eq!(b.0, key, "one card database per process");
-    &b.1
+    let mut v = BITS.lock().unwrap();
+    if let Some(&(_, b)) = v.iter().find(|(k, _)| *k == key) {
+        return b;
+    }
+    let bits: Vec<u16> = (0..db.len())
+        .map(|i| {
+            let d = db.def(i as DefId);
+            d.seen_bits() | d.back.map_or(0, |b| db.def(b).seen_bits())
+        })
+        .collect();
+    let b: &'static [u16] = Box::leak(bits.into_boxed_slice());
+    v.push((key, b));
+    b
 }
 
 /// `k` sequential draws without replacement from the sorted multiset
