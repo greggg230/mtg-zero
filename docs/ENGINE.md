@@ -21988,7 +21988,7 @@ cube's) and `random`. **Pure self-play**: nothing in either preset reads 17lands
 | training | batch 128, min 10 steps | batch 512, reuse 2, lr 1e-3, window 6 (growing), 30,000 samples first, RAM budget 12 GB |
 | evaluation | 8 vs the heuristic, 4 vs random at 4 sims, 4 Elo games | 100 vs the heuristic, 50 vs random at 32 sims, 20 Elo games against the 2 previous, the cq move rule |
 | auxiliary | the belief head (`aux_belief_w` 0.5) | the belief head (0.25, as the Delver line) |
-| throughput | | sparse batches and shards, window cache and prefetch, the shard writer thread, `eval_cache` 8192 (the Delver line's measured settings, runs/r3-deep128x8-2410) |
+| throughput | | sparse batches and windows, window cache and prefetch, the shard writer thread, `eval_cache` 8192 (the Delver line's measured settings, runs/r3-deep128x8-2410); sparse shards at launch (`--shard-sparse 1`: presets leave it off, 94, `test_presets_leave_shard_sparse_off`) |
 
 `eoe-1` is mtg-3 (the last GPU best-of-one preset) with the Delver line's infrastructure settings; the Delver
 line's later schedule (lr 3e-5, `eval_games` 0, anchors) belongs to a long run, not a first one. Its CPU side is

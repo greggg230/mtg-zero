@@ -216,11 +216,12 @@ PRESETS['eoe-smoke'] = dict(PRESETS['mtg-smoke'], game='mtg_eoe', spec=SPEC_EOE,
 # training, 64 / 16 simulations, mana payments at 4, completed-Q targets, 600 games an iteration, lr 1e-3, evaluation
 # every iteration: 100 games against the heuristic and 50 against random at 32 simulations on the evaluation pairs, Elo
 # against the 2 previous checkpoints) with what the Delver line measured on this desktop since (ENGINE.md 54.6, 82, 86,
-# 93; runs/r3-deep128x8-2410): sparse batches and shards, the window cache and prefetch, the shard writer thread, the
+# 93; runs/r3-deep128x8-2410): sparse batches and windows, the window cache and prefetch, the shard writer thread, the
 # evaluation cache, cq scale 0.3, value targets 0.6 search estimate, the cq move rule in evaluation; the belief head on
-# (aux_belief_w 0.25, as the Delver line)
+# (aux_belief_w 0.25, as the Delver line). Sparse shards are a launch flag (--shard-sparse 1: presets leave it off,
+# ENGINE.md 94)
 PRESETS['eoe-1'] = dict(PRESETS['mtg-3'], game='mtg_eoe', spec=SPEC_EOE, eval_spec=EVAL_SPEC_EOE, sparse=1,
-                        shard_sparse=1, window_sparse=1, window_cache=1, train_prefetch=2, shard_writer_thread=1,
+                        window_sparse=1, window_cache=1, train_prefetch=2, shard_writer_thread=1,
                         eval_cache=8192, cq_c_scale=0.3, value_q=0.6, eval_select='cq', aux_belief_w=0.25)
 
 # a rented GPU box's self-play settings (tools/vast.py, docs/ENGINE.md 97): one worker process, CUDA inference with
