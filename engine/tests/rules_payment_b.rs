@@ -1750,3 +1750,119 @@ fn cr_601_2h_an_ability_granted_to_tapped_creatures_leaves_a_creatures_sacrifice
     assert_eq!(g.obj(rebel).zone, Zone::Graveyard, "{}", log(&g));
     assert!(g.obj(market).tapped, "{}", log(&g));
 }
+
+// ---- 100.4.10: B7, the last cost-order gaps ----------------------------------
+
+/// The cube, the shared test cards, B6's and B7's.
+fn b7_db() -> &'static CardDb {
+    use serde_json::json;
+    static DB: std::sync::OnceLock<&'static CardDb> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let draw = json!({"$t": "DrawCards", "amount": 1});
+        let custom = vec![
+            // A 1/1 Rebel: "As long as your life total is at most half your
+            // starting life total, this gets +2/+0." (B6's.)
+            eoe_w2::card("Test Desperate Rebel", json!({"card_types": ["Creature"], "subtypes": ["Rebel"], "power": 1, "toughness": 1,
+                "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["R", 1]]}, "mana_cost_str": "{R}",
+                "static_abilities": [{"$t": "StaticAbility", "scope": {"$t": "StaticScope", "kind": "self"},
+                    "condition": {"$t": "LifeAtMostHalfStartingLife"},
+                    "continuous_effect": {"$t": "ContinuousModifier", "layer": 7, "payload": {"$t": "PowerToughnessBonus", "power_bonus": 2}}}]})),
+            // "{1}, Crew 3: Draw a card."
+            eoe_w2::card("Test Crew Bank", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "mana": {"$t": "ManaCost", "generic": 1}, "mana_str": "{1}", "crew": 3}, "effect": draw.clone()}]})),
+            // "Sacrifice a creature, Sacrifice this artifact: Draw a card."
+            eoe_w2::card("Test Pact Idol", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "sacrifice_self": true, "sacrifice_a_permanent_type": "creature"}, "effect": draw}]})),
+        ];
+        let mut cards = engine::db::load_cube_document().cards;
+        cards.extend(common::custom_cards());
+        cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
+        let db = CardDb::from_cards(&cards);
+        for n in ["Test Desperate Rebel", "Test Crew Bank", "Test Pact Idol"] {
+            db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
+        }
+        db.leak()
+    })
+}
+
+fn b7_scen() -> Scenario {
+    Scenario::new(b7_db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.log = true;
+        })
+        .library(0, &["Island"; 12])
+        .library(1, &["Island"; 12])
+}
+
+/// CR 601.2g-h, 605.3a, 119.4: the mana abilities are activated before the
+/// cost's other parts are paid, so their side effects come first. Test Crew
+/// Bank's "{1}, Crew 3" with Test Desperate Rebel (1/1, +2/+0 at half its
+/// controller's starting life or less) at 11 life and Talisman of Dominance:
+/// its {U} or {B} deals 1 damage, the Rebel is 3/1 and crews. Castability
+/// read crew's power before the mana (1): not offered. The payment offers only
+/// that ability of the Talisman ({C} would leave no crew).
+#[test]
+fn cr_601_2g_a_mana_abilitys_damage_changes_crews_power() {
+    let mut g = b7_scen().battlefield(0, &["Test Crew Bank", "Test Desperate Rebel", "Talisman of Dominance"]).life(0, 11).at(Step::Main1, 0).start();
+    let bank = bf(&g, 0, "Test Crew Bank");
+    let rebel = bf(&g, 0, "Test Desperate Rebel");
+    let talisman = bf(&g, 0, "Talisman of Dominance");
+    assert_eq!(g.power(rebel), 1);
+    assert!(g.has_option(act(bank, 0)), "the Talisman's damage first: {:?}", g.options_desc());
+    g.choose(act(bank, 0));
+    for _ in 0..10 {
+        if g.kind() == Some(DecisionKind::PayMana) {
+            break;
+        }
+        let c = options(&g)[0];
+        g.choose(c);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}\n{}", g.options_desc(), log(&g));
+    assert_eq!(options(&g), vec![act(talisman, 1)], "its {{C}} would leave no crew: {:?}", g.options_desc());
+    same_after_determinize(&g);
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.life(0), 10, "{}", log(&g));
+    assert!(g.obj(rebel).tapped, "the Rebel crewed with power 3\n{}", log(&g));
+    assert_eq!(g.player(0).hand.len(), 1, "{}", log(&g));
+    // At 12 life the damage leaves 11: no payment crews.
+    let g = b7_scen().battlefield(0, &["Test Crew Bank", "Test Desperate Rebel", "Talisman of Dominance"]).life(0, 12).at(Step::Main1, 0).start();
+    assert!(!g.has_option(act(bf(&g, 0, "Test Crew Bank"), 0)), "{:?}", g.options_desc());
+}
+
+const PART_SAC_SELF: u8 = 13;
+
+/// CR 601.2h, 614.1a, 614.6: where a part's object goes is read as it moves,
+/// so a part that removes a replacement effect's source changes another
+/// part's outcome. P0 controls P1's Test Pact Idol ("Sacrifice a creature,
+/// Sacrifice this artifact") and its own Dauthi Voidwalker ("if a card would
+/// be put into an opponent's graveyard from anywhere, instead exile it with a
+/// void counter"): the Idol sacrificed first is exiled with a void counter;
+/// the Voidwalker sacrificed first, the Idol goes to P1's graveyard. The
+/// engine paid the creature first, always (the order was "free").
+#[test]
+fn cr_614_1a_a_replacement_effects_source_sacrificed_first_or_not() {
+    let mut g = b7_scen().battlefield(0, &["Dauthi Voidwalker"]).battlefield(1, &["Test Pact Idol"]).at(Step::Main1, 0).start();
+    let idol = bf(&g, 1, "Test Pact Idol");
+    let walker = bf(&g, 0, "Dauthi Voidwalker");
+    g.take_control(idol, 0);
+    assert!(g.has_option(act(idol, 0)), "{:?}", g.options_desc());
+    g.choose(act(idol, 0));
+    until_cost_part(&mut g);
+    assert_eq!(cost_parts(&g), vec![PART_SACRIFICE, PART_SAC_SELF], "{:?}", g.options_desc());
+    same_after_determinize(&g);
+    // The Idol first: exiled with a void counter.
+    let mut h = g.clone();
+    h.choose(Choice::Number(PART_SAC_SELF));
+    finish(&mut h, |_| None);
+    assert_eq!(h.obj(idol).zone, Zone::Exile, "{}", log(&h));
+    assert_eq!(h.obj(walker).zone, Zone::Graveyard, "{}", log(&h));
+    // The Voidwalker first: the Idol goes to its owner's graveyard.
+    g.choose(Choice::Number(PART_SACRIFICE));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(idol).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.obj(walker).zone, Zone::Graveyard, "{}", log(&g));
+}

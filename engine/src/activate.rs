@@ -570,22 +570,29 @@ impl Game {
         cast: bool,
     ) -> Option<bool> {
         let o = crate::cost_order::Order::new(p, card, cost, 0, loyalty, 0);
-        if self.order_free(&o) {
-            return None;
-        }
         let keep = Keep { exclude, allow, spell: cast.then_some(card), ..Keep::default() };
-        let forced = self.exile_sources(p, card, cost, exclude);
-        let pm = if mana.is_zero() && forced.is_empty() {
-            None
-        } else {
+        let new_pm = |forced: Vec<(crate::pay::Src, bool)>| {
             let mut pm = PayMana::new(p, *mana);
-            pm.keep = keep;
+            pm.keep = keep.clone();
             pm.forced = forced;
             pm.waterbend = cost.waterbend;
             if cast {
                 pm.improvise = self.def_of(card).improvise;
                 pm.convoke = self.def_of(card).casting.convoke;
             }
+            pm
+        };
+        // (The mana, and what it may change, come first: ENGINE.md 100.4.10.)
+        let forced = self.exile_sources(p, card, cost, exclude);
+        let paying = !(mana.is_zero() && forced.is_empty());
+        let delve = cast && self.def_of(card).delve;
+        if self.order_free_with(&o, || if paying || delve { self.mana_writes(&new_pm(Vec::new()), delve) } else { Default::default() }) {
+            return None;
+        }
+        let pm = if !paying {
+            None
+        } else {
+            let pm = new_pm(forced);
             // (The sources the payment itself will have: `PayMana` is begun
             // only when they pay the mana.)
             let _ = classes;
@@ -980,18 +987,22 @@ impl Game {
         // whole payment completable; then the parts as the player orders
         // them (`PayCosts::order`, below on the agenda).
         let mut o = crate::cost_order::Order::new(p, card, &ad.cost, self.tap_x_n(id, &ad.cost) as u32, ad.loyalty.map_or(0, |d| d as i32), 0);
-        if !self.order_free(&o) {
+        let exclude = Self::mana_exclude(card, ad);
+        let mut pm = PayMana::new(p, mana);
+        pm.keep = Keep { exclude, allow: self.ability_allow(card), ..Keep::default() };
+        pm.waterbend = ad.cost.waterbend;
+        let forced = self.exile_sources(p, card, &ad.cost, exclude);
+        let paying = !(mana.is_zero() && forced.is_empty());
+        // (The mana, and what it may change, come first: ENGINE.md 100.4.10;
+        // as castability decides it, `cost_payable_order`.)
+        if !self.order_free_with(&o, || if paying { self.mana_writes(&pm, false) } else { Default::default() }) {
             let floor = self.agenda.len() - 1;
             assert!(matches!(self.agenda.last(), Some(Task::PayCosts { id: i, order: None, .. }) if *i == id), "the activation's cost below its mana");
             o.floor = floor as u32;
             *self.agenda.last_mut().expect("the cost") = Task::PayCosts { id, picked: Vec::new(), early: None, order: Some(Box::new(o)) };
-            let exclude = Self::mana_exclude(card, ad);
-            let mut pm = PayMana::new(p, mana);
-            pm.keep = Keep { exclude, allow: self.ability_allow(card), ..Keep::default() };
-            pm.waterbend = ad.cost.waterbend;
-            pm.forced = self.exile_sources(p, card, &ad.cost, exclude);
+            pm.forced = forced;
             pm.oracle = Some(floor as u32);
-            if !(mana.is_zero() && pm.forced.is_empty()) {
+            if paying {
                 self.agenda.push(Task::PayMana(Box::new(pm)));
             }
             return;

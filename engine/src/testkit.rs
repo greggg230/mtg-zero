@@ -319,6 +319,14 @@ impl Game {
         self.objs[c.i()].tapped = tapped;
     }
 
+    /// Player `p` gains control of permanent `c` (as a control-changing
+    /// effect does, CR 613.1b): a test's setup; the pending decision is
+    /// asked again.
+    pub fn take_control(&mut self, c: CardIdx, p: PlayerId) {
+        self.change_control(c, p);
+        self.refresh_pending();
+    }
+
     pub fn kind(&self) -> Option<DecisionKind> {
         self.pending.as_ref().map(|d| d.kind)
     }

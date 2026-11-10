@@ -2789,9 +2789,24 @@ impl Game {
         let Some(pos) = self.item_index(id) else { return };
         let item = &self.stack[pos];
         let rest_cost = if item.alt > 0 { Some(self.item_alt_rest(card, item)) } else { self.route_extra(card, item.from, item.cost_option) };
+        // (The mana, and what it may change, come first: ENGINE.md 100.4.10;
+        // as castability decides it, `cost_payable_order`.)
+        let delve = self.def_of(card).delve;
         let ordered = rest_cost
             .map(|c| crate::cost_order::Order::new(p, card, c, 0, 0, floor as u32))
-            .filter(|o| !self.order_free(o))
+            .filter(|o| {
+                let paying = !cost.is_zero() || !self.exile_sources(p, card, &o.cost, None).is_empty();
+                !self.order_free_with(o, || {
+                    if !(paying || delve) {
+                        return Default::default();
+                    }
+                    let mut pm = PayMana::new(p, cost);
+                    pm.improvise = self.def_of(card).improvise;
+                    pm.convoke = self.def_of(card).casting.convoke;
+                    pm.life_after = life_later;
+                    self.mana_writes(&pm, delve)
+                })
+            })
             .map(Box::new);
         let item = &self.stack[pos];
         if item.alt > 0 {
