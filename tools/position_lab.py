@@ -77,7 +77,7 @@ REPLAYS = os.environ.get('MTGZ_LAB_REPLAYS', r'C:/Users/Gregg Keithley/mtg-zero/
 # can't be rebuilt action for action (the decisions differ: e.g. ENGINE.md 100.3 orders triggers of
 # different objects of one card, which the old engine offered once). Bump it with every commit that
 # re-records the behaviour digests; replays recorded since are the ones `check_spot` must rebuild.
-RULES_EPOCH = 1794292876  # 2026-11-09 22:41:17 -0800: eoe-net, eoe-hidden-decks merged (eoe-base fa5a30d's payments; ENGINE.md 105; digests 634e25f2bfb5ffa8)
+RULES_EPOCH = 1794296790  # 2026-11-09 23:46:30 -0800: eoe-net, eoe-base a07821f merged (28.8.2k, the colours spent; ENGINE.md 105; digests ae88eae20abb14ca)
 PUBLISH_LOG = r'E:/mtg-zero-scratch/delverai-publish.log'
 MODES = ('belief', 'actual', 'pinned', 'uniform')
 
