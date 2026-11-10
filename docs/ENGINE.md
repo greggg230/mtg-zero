@@ -22340,3 +22340,56 @@ workstreams' fuzzes):
   on a quiet machine.
 * pytest (`tests/test_deck_reader.py` 3 new; `test_belief.py`, `test_mtg_az.py`, `test_position_lab.py` and
   `lab.rs` read the two targets).
+
+### 102.8 eoe-base fa5a30d merged; the K-sample deal
+
+**The merge** (1cd3e5e): eoe-base fa5a30d, B4's payment work with the Gene Pollinator fix (N23's actor pools).
+Digests re-recorded on purpose: full 5636329c0553f226 -> **684840012af3432b**, `DIGEST_ENCODING=0` 21ecc979c7a67fea
+-> **c860817b0cf925ac**, `DIGEST_ENCODING=v5` 1b361246865ddf4e -> **5c5ad44094f680bf**; RULES_EPOCH bumped and the Delver
+canary library stamped (60 of 60 spots) in the same commit. The six sealed seeds that hit the Pollinator panic (102.7:
+3106, 10787, 12276, 12711, 13674, 18106) pass with `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1`.
+
+**Why a K-sample deal.** zero-core determinizes once per simulation (128+ a decision). The sealed prior costs
+**2,673 us a deal with arena pools** (115 us with paper) against a few microseconds for the rest of a deal
+(`deal_cost`): an arena pool alone is 2,225 us (the collation's uncommon run, 101.1), a paper pool 10 us, a build 31 us.
+
+**The design** (`hidden_decks::DealCache`, in `MatchState::deal`; `Game` untouched). A request of the prior is
+everything it reads: the opponent's seat, the deck's size n, the shown cards R, a revealed companion. For a request the
+prior's K decks are drawn once, from a generator seeded by the game's salt (from the match seed) and the request alone,
+each checked (`check_sample`) and stored ready to deal (the deck, the sideboard, the match's pool and counts); every
+deal draws one of the K uniformly with its own generator, then deals hand, library and clouds as before. The memo
+(the last 16 requests) is shared by a game's clones behind a mutex in `MtgAz`, so a simulation after the first finds
+its request's decks. A sealed prior's pools come from a **bank of K pools per seat and game** (`DeckPrior::bank`,
+`sample_from`: what the prior draws before it reads R), so a new R costs K conditionings and builds, not K arena pool
+generations; a request whose shown cards span four or five colours builds once (no pair and splash covers them).
+Determinism: the K decks are a function of the salt and the request, the pick of the deal's seed; the memo only saves
+work (`the_k_sample_deal_is_a_function_of_the_seed_and_the_information`: a cold memo deals the same world bit for bit).
+A tilted deal (the reader's hook) samples the prior afresh. The spec key `"deal_samples"` (default **32**; 0: the prior
+sampled at every deal, 102.6's behaviour); the fuzz's hidden mode follows `FUZZ_DEAL_SAMPLES` (default 32).
+
+**What K changes.** Within a request the search's worlds are K draws of the prior, reused: a Monte Carlo approximation
+of the prior inside the search (the empirical distribution of K samples instead of the prior itself), not a rules
+change - every world still meets K1-K3 exactly and depends only on its seed and the viewer's information. The bank adds
+that one game's requests share K pools (a new R reconditions the same pools), which correlates the worlds across
+requests of a game, not within one. K = 32: at 128 simulations a decision each deck is used about four times, and 32
+decks span the prior's colour choices (pairs, splash) well while a new request costs 32 conditioned builds (~6.6 ms,
+about one arena pool generation x 3).
+
+**Measured** (`cargo test --release -p engine --test hidden deal_cost -- --ignored --nocapture`, 40 sealed positions
+each, 128 deals a position, the desktop shared with other fuzzers):
+
+| | K = 0 (102.6) | K = 32, a memo per position (bank built at its first deal) | K = 32, the game's bank built |
+|---|---:|---:|---:|
+| arena: mean per deal over 128 | 2,673 us | 615 us (first deal 78 ms) | **54 us** (first deal 6.6 ms, then ~2.5 us) |
+| paper: mean per deal over 128 | 115 us | 31 us (first 3.7 ms) | **23 us** (first 2.7 ms, then ~2 us) |
+
+A decision whose request repeats an earlier one (no new card shown) costs ~2-3 us a deal. The bank's 32 arena pools
+(~71 ms) are paid once per seat and game.
+
+**Results on 8b940c8** (the K-sample deal at its default 32): full engine suite 2,191 passed, 4 failed, 16 ignored -
+the four were B4's graveyard-cast tests from the merge, written before D2's two-step cast from a graveyard (100.5);
+3d77293 makes them take the two steps (tests only), and they pass (`--lib` 1, `rules_payment_b` 37). `FUZZ_GAMES=20000`
+(default): passed (wins 9,815 / 10,060, 125 draws; 1,000 matches; 2,435 s). `FUZZ_POOL=eoe FUZZ_HIDDEN_DECKS=1
+FUZZ_GAMES=20000`: passed, every seed (wins 7,206 / 7,045, 5,749 draws; 655,562 worlds, all with another deck; 2,502 s
+in four chunks). `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_GAMES=20000`: passed, every seed, none skipped (wins
+9,653 / 9,504, 843 draws; 577,942 worlds, 577,718 with another deck; 2,648 s). The gate: below.
