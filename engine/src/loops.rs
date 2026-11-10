@@ -22,6 +22,19 @@
 //! a card discarded, life lost, an extra turn) keeps the loop going, with no
 //! limit: Grim Monolith untaps as long as lands pay for it.
 //!
+//! **The board** (the user's decision, 2026-11-09: tournament rules require a
+//! player who loops without progressing the board state to choose a
+//! different action, MTR 4.4). The hash reads the state without the stack
+//! objects loop actions put there ([`loop_product`]: activated abilities of
+//! permanents). So holding priority and activating again while the first
+//! activation waits is no progress, unless the activation itself changed the
+//! board (a cost paid: mana spent, a land tapped, life paid, a card
+//! discarded) or something else did (another player's response, a
+//! triggered ability, a resolution). Free activations stacked in endless
+//! new orders (the EoE fuzz's seeds 1016 and 1024: Wandering Fumarole's
+//! "{0}: Switch" and Lavaclaw Reaches' X = 0 pump, held priority) stop after
+//! one of each a board; paid ones go on as long as resources are spent.
+//!
 //! **The hash** is a fixed hash (`DefaultHasher::new()`) of numbers: the
 //! state part of `Game::view_of` (`Game::view_state`) for the decider, the
 //! view the hidden-information checks compare across determinized worlds (so
@@ -73,6 +86,15 @@ use std::hash::{Hash, Hasher};
 /// toughness switches are read by their parity instead (`switch_parity`).
 pub(crate) fn inert(e: &crate::layers::Effect) -> bool {
     matches!(e.m, crate::db::Mod::Pt(0, 0)) || is_object_switch(e)
+}
+
+/// A stack object a loop action put there: an activated ability of a
+/// permanent (`AbilitySlot::Activated`; the only activated abilities that
+/// use the stack and come from the battlefield). The loop hash reads the
+/// board without them (module docs, "the board"): stacking another
+/// activation while the first waits changes nothing on the board.
+pub(crate) fn loop_product(s: &StackItem) -> bool {
+    matches!(&s.kind, StackKind::Ability { ability, .. } if matches!(ability.slot, crate::db::AbilitySlot::Activated(_)))
 }
 
 /// A switch of one object's power and toughness (layer 7d, CR 613.4d).
@@ -183,6 +205,25 @@ impl Game {
     /// A stack item by its position (99: none).
     fn stack_pos(&self, id: u32) -> u64 {
         self.stack.iter().position(|x| x.id == id).map_or(99, |i| i as u64)
+    }
+
+    /// A stack item by its position in the view (`board` false: among all
+    /// of them), or in the loop hash's board (`board`: among those that
+    /// aren't loop products; 98 names a loop product). 99: none.
+    pub(crate) fn view_stack_pos(&self, id: u32, board: bool) -> u64 {
+        if !board {
+            return self.stack_pos(id);
+        }
+        let mut k = 0;
+        for s in &self.stack {
+            if s.id == id {
+                return if loop_product(s) { 98 } else { k };
+            }
+            if !loop_product(s) {
+                k += 1;
+            }
+        }
+        99
     }
 
     /// The gone objects (stale references, CR 400.7) that stack items,
@@ -344,8 +385,9 @@ impl Game {
         v.extend(ctl.iter().map(|x| k.rank(x.ts)));
         v.push(u64::MAX - 24);
         // Stack items: Mox Diamond's note; whether an ability's source
-        // transformed since (CR 701.27f).
-        for s in &self.stack {
+        // transformed since (CR 701.27f). (Loop products left out, as in
+        // `view_state`.)
+        for s in self.stack.iter().filter(|s| !loop_product(s)) {
             v.push(s.discarded_land as u64);
             v.push(match s.kind {
                 StackKind::Ability { source, .. } if self.live(source) => self.objs[source.idx.i()].flips.wrapping_sub(s.flips) as u64,
