@@ -1839,7 +1839,11 @@ impl Game {
         // (In a controlled turn the controller sees the controlled player's
         // hand, CR 722.3: `encode_features` checks it.)
         for &c in &self.players[me as usize].hand {
-            bag_add(out, ids, bag::MY_HAND, self.objs[c.i()].def);
+            // (A card promised to a delve in progress, `Mark::DelvePromised`:
+            // committed, as a graveyard card chosen for it is; ENGINE.md
+            // 100.4.9.)
+            let b = if self.delve_promising(c) { bag::MY_EXILE } else { bag::MY_HAND };
+            bag_add(out, ids, b, self.objs[c.i()].def);
         }
         for &c in &self.battlefield {
             // (By what it is: a copy by its own identity, ENGINE.md 26.)

@@ -385,7 +385,12 @@ impl Game {
         };
         // (A non-mana ability: with no mana to pay, a permanent with a mana
         // ability may be tapped for a "tap an untapped <permanent>" cost.)
-        if !self.cost_payable_with(p, card, &ad.cost, &self.act_mana(p, card, ad), classes, Self::mana_exclude(card, ad), true, self.ability_allow(card)) {
+        // (Its parts in any order when that can matter: ENGINE.md 100.4.9.)
+        let loyalty = ad.loyalty.map_or(0, |d| d as i32);
+        let mana = self.act_mana(p, card, ad);
+        let exclude = Self::mana_exclude(card, ad);
+        let ordered = self.cost_payable_order(p, card, &ad.cost, &mana, classes, exclude, self.ability_allow(card), loyalty, false);
+        if !ordered.unwrap_or_else(|| self.cost_payable_with(p, card, &ad.cost, &mana, classes, exclude, true, self.ability_allow(card))) {
             return false;
         }
         let ActEffect::Stack(ab) = &ad.effect else { unreachable!() };
@@ -482,7 +487,7 @@ impl Game {
             times: 0,
             spliced: Vec::new(),
         });
-        self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
+        self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None, order: None });
         self.agenda.push(Task::ActPay { id });
         let ab = self.db.ability(ability);
         if ab.has_targets() {
@@ -538,7 +543,58 @@ impl Game {
         classes: &[Class],
         exclude: Option<CardIdx>,
     ) -> bool {
+        // (A spell's: its parts in any order when that can matter, ENGINE.md
+        // 100.4.9.)
+        if let Some(r) = self.cost_payable_order(p, card, cost, mana, classes, exclude, 0, 0, true) {
+            return r;
+        }
         self.cost_payable_with(p, card, cost, mana, classes, exclude, false, 0)
+    }
+
+    /// Castability of a cost whose parts' order can matter (CR 601.2h;
+    /// `order_free`, ENGINE.md 100.4.9): `Some` of whether some order pays
+    /// it, with its mana first (`payable_in_some_order`); `None` when the
+    /// order is free (the fixed order's checks are exact). `cast`: a spell's
+    /// cost (improvise, convoke; the spell on the stack).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn cost_payable_order(
+        &self,
+        p: PlayerId,
+        card: CardIdx,
+        cost: &Cost,
+        mana: &crate::mana::ManaCost,
+        classes: &[Class],
+        exclude: Option<CardIdx>,
+        allow: u8,
+        loyalty: i32,
+        cast: bool,
+    ) -> Option<bool> {
+        let o = crate::cost_order::Order::new(p, card, cost, 0, loyalty, 0);
+        if self.order_free(&o) {
+            return None;
+        }
+        let keep = Keep { exclude, allow, spell: cast.then_some(card), ..Keep::default() };
+        let forced = self.exile_sources(p, card, cost, exclude);
+        let pm = if mana.is_zero() && forced.is_empty() {
+            None
+        } else {
+            let mut pm = PayMana::new(p, *mana);
+            pm.keep = keep;
+            pm.forced = forced;
+            pm.waterbend = cost.waterbend;
+            if cast {
+                pm.improvise = self.def_of(card).improvise;
+                pm.convoke = self.def_of(card).casting.convoke;
+            }
+            // (The sources the payment itself will have: `PayMana` is begun
+            // only when they pay the mana.)
+            let _ = classes;
+            if !mana.is_zero() && !self.can_pay_with(p, mana, &self.payment_classes(&pm), &pm.keep) {
+                return Some(false);
+            }
+            Some(pm)
+        };
+        Some(self.payable_in_some_order(o, pm, cast))
     }
 
     /// [`cost_payable`](Self::cost_payable). A "tap n untapped <permanent>"
@@ -658,7 +714,7 @@ impl Game {
     }
 
     /// Sacrifice the permanents chosen for a cost (together, one batch).
-    fn sacrifice_picked(&mut self, p: PlayerId, id: u32, picked: &[CardIdx]) {
+    pub(crate) fn sacrifice_picked(&mut self, p: PlayerId, id: u32, picked: &[CardIdx]) {
         let mut sacs: Vec<CardIdx> = picked.to_vec();
         sacs.sort_by_key(|c| self.objs[c.i()].timestamp);
         // "The sacrificed permanent's mana value" (as it last existed, CR
@@ -919,6 +975,27 @@ impl Game {
         let Some((p, card, ad)) = self.act_item(id) else { return };
         let x = self.item_index(id).map_or(0, |pos| self.stack[pos].x);
         let mana = self.act_mana_x(p, card, ad, x);
+        // CR 601.2h: the parts in any order, when that can matter (ENGINE.md
+        // 100.4.9): the mana first (601.2g), with every option leaving the
+        // whole payment completable; then the parts as the player orders
+        // them (`PayCosts::order`, below on the agenda).
+        let mut o = crate::cost_order::Order::new(p, card, &ad.cost, self.tap_x_n(id, &ad.cost) as u32, ad.loyalty.map_or(0, |d| d as i32), 0);
+        if !self.order_free(&o) {
+            let floor = self.agenda.len() - 1;
+            assert!(matches!(self.agenda.last(), Some(Task::PayCosts { id: i, order: None, .. }) if *i == id), "the activation's cost below its mana");
+            o.floor = floor as u32;
+            *self.agenda.last_mut().expect("the cost") = Task::PayCosts { id, picked: Vec::new(), early: None, order: Some(Box::new(o)) };
+            let exclude = Self::mana_exclude(card, ad);
+            let mut pm = PayMana::new(p, mana);
+            pm.keep = Keep { exclude, allow: self.ability_allow(card), ..Keep::default() };
+            pm.waterbend = ad.cost.waterbend;
+            pm.forced = self.exile_sources(p, card, &ad.cost, exclude);
+            pm.oracle = Some(floor as u32);
+            if !(mana.is_zero() && pm.forced.is_empty()) {
+                self.agenda.push(Task::PayMana(Box::new(pm)));
+            }
+            return;
+        }
         if mana.is_zero() && self.exile_short(p, card, &ad.cost) == 0 {
             return;
         }
@@ -975,7 +1052,7 @@ impl Game {
     /// mana source also `ACTIVATE` + its slot x 4 + i = "activate its mana
     /// ability i first, then sacrifice or return it" (ENGINE.md 86.2; CR
     /// 601.2g-h; `float_before_cost`, `life_after` = the cost's life).
-    fn cost_pick_options(&self, p: PlayerId, cands: &[CardIdx], life_after: u32) -> Vec<Opt> {
+    pub(crate) fn cost_pick_options(&self, p: PlayerId, cands: &[CardIdx], life_after: u32) -> Vec<Opt> {
         let mut opts = Vec::with_capacity(cands.len());
         for &c in cands {
             opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
@@ -1058,7 +1135,10 @@ impl Game {
                 picked.push(c);
             } else if picked.len() < n_disc {
                 // Discards happen one at a time: a chosen hand card is never
-                // left hidden while another decision is pending.
+                // left hidden while another decision is pending. (A card of
+                // the definition promised to delve, if any: ENGINE.md
+                // 100.4.9.)
+                let c = self.promised_twin(p, c);
                 self.discard(c);
                 picked.push(c);
             } else if picked.len() < n_exile {
@@ -1073,7 +1153,7 @@ impl Game {
                 // the pool (it stays there until the step ends); then the
                 // rest of the cost as chosen.
                 debug_assert!(picked.len() <= n_sac || (n_exile < picked.len() && picked.len() <= n_bounce));
-                self.agenda.push(Task::PayCosts { id, picked, early });
+                self.agenda.push(Task::PayCosts { id, picked, early, order: None });
                 self.begin_activate(p, c, slot);
                 return;
             }
@@ -1101,7 +1181,7 @@ impl Game {
                 .filter(|&c| self.cost_picks_ok(p, card, cost, &picked, c))
                 .collect();
             let opts = self.cost_pick_options(p, &cands, cost.life);
-            self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::Sacrifice, opts);
+            self.ask(Task::PayCosts { id, picked, early, order: None }, p, DecisionKind::Sacrifice, opts);
             return;
         }
         if picked.len() < n_disc {
@@ -1112,6 +1192,10 @@ impl Game {
                 opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(f, c, &ctx)));
             }
             opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.cost_picks_ok(p, card, cost, &picked, c)));
+            // The cards promised to delve are the discards' (ENGINE.md
+            // 100.4.9): each pick leaves the discards after it those.
+            let left = if picked.len() < n_also { (n_also - picked.len() - 1, cost.discard as usize) } else { (0, n_disc - picked.len() - 1) };
+            opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.promises_kept(p, card, cost, self.promised_twin(p, c), left)));
             // A cost that also exiles graveyard cards (escape): while the
             // graveyard (the discards so far in it, the sacrifices chosen to
             // come) would be short by as many cards as discards are left,
@@ -1124,14 +1208,14 @@ impl Game {
                     opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.discard_feeds(p, card, cost, c)));
                 }
             }
-            self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::DiscardCost, opts);
+            self.ask(Task::PayCosts { id, picked, early, order: None }, p, DecisionKind::DiscardCost, opts);
             return;
         }
         if picked.len() < n_exile {
             let f = cost.exile_from_hand.as_ref().unwrap();
             let mut opts = self.exile_candidates(p, card, f);
             opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.cost_picks_ok(p, card, cost, &picked, c)));
-            self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::ExileCost, opts);
+            self.ask(Task::PayCosts { id, picked, early, order: None }, p, DecisionKind::ExileCost, opts);
             return;
         }
         if picked.len() < n_bounce {
@@ -1143,7 +1227,7 @@ impl Game {
                 .filter(|c| !picked.contains(c) && self.cost_picks_ok(p, card, cost, &picked, *c))
                 .collect();
             let opts = self.cost_pick_options(p, &cands, cost.life);
-            self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::BounceCost, opts);
+            self.ask(Task::PayCosts { id, picked, early, order: None }, p, DecisionKind::BounceCost, opts);
             return;
         }
         if !late && picked.len() < gy_r.end {
@@ -1179,7 +1263,7 @@ impl Game {
                 .filter(|(k, _)| cands.len() - k >= still)
                 .map(|(_, &c)| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                 .collect();
-            self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::ChoosePermanent, opts);
+            self.ask(Task::PayCosts { id, picked, early, order: None }, p, DecisionKind::ChoosePermanent, opts);
             return;
         }
         if early.is_none() && picked.len() < n_rc {
@@ -1191,7 +1275,7 @@ impl Game {
                 .into_iter()
                 .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                 .collect();
-            self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::ChoosePermanent, opts);
+            self.ask(Task::PayCosts { id, picked, early, order: None }, p, DecisionKind::ChoosePermanent, opts);
             return;
         }
         if cost.crew > 0 && !crew_done && early.is_none() {
@@ -1244,7 +1328,7 @@ impl Game {
                 opts.push(Opt { action: act::PASS, choice: Choice::Pass });
             }
             if !(opts.len() == 1 && done) {
-                self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::ChoosePermanent, opts);
+                self.ask(Task::PayCosts { id, picked, early, order: None }, p, DecisionKind::ChoosePermanent, opts);
                 return;
             }
         }
@@ -1266,6 +1350,9 @@ impl Game {
         for &c in &picked[gy_r] {
             self.move_card(c, Zone::Exile, Pos::Top);
         }
+        // The cards promised to delve, discarded: exiled (CR 601.2h, 702.66a;
+        // ENGINE.md 100.4.9).
+        self.exile_promised(p, Some(card));
         if let Some((k, n)) = cost.remove_counters {
             self.remove_counters(card, k, n as crate::num::Count);
         }
@@ -1327,7 +1414,7 @@ impl Game {
     /// crew's (`crew`, a spell's teamwork committed: its mana is paid after),
     /// the counter removed from `rc`, and the tapped creature noted for an
     /// ability that reads it (station).
-    fn pay_tap_parts(&mut self, id: u32, card: CardIdx, cost: &Cost, taps: &[CardIdx], crew: &[CardIdx], rc: Option<CardIdx>) {
+    pub(crate) fn pay_tap_parts(&mut self, id: u32, card: CardIdx, cost: &Cost, taps: &[CardIdx], crew: &[CardIdx], rc: Option<CardIdx>) {
         for &c in taps.iter().chain(crew) {
             self.tap(c);
         }
@@ -1371,7 +1458,7 @@ impl Game {
             .filter(|&(i, _)| i >= after && gy.len() - i >= still)
             .map(|(_, &c)| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
             .collect();
-        self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::ChooseGraveyardCard, opts);
+        self.ask(Task::PayCosts { id, picked, early, order: None }, p, DecisionKind::ChooseGraveyardCard, opts);
     }
 
     /// Is mana ability `ad` of `c` offered with priority (ENGINE.md 18)? One

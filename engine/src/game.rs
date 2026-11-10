@@ -681,6 +681,11 @@ pub struct Game {
     pub(crate) decisions: u32,
     /// While refreshing a decision after `determinize`: never auto-answer.
     pub(crate) no_auto: bool,
+    /// A copy the payment search runs (`Game::payment_completes`, ENGINE.md
+    /// 100.4.9): its decisions offer every option, unchecked.
+    pub(crate) oracle: bool,
+    /// Such a copy reached a part of a cost it can't pay: a dead end.
+    pub(crate) oracle_dead: bool,
     /// Continuous effects from resolved spells and abilities (CR 611.2).
     pub(crate) effects: Vec<crate::layers::Effect>,
     /// Some effect makes a permanent lose all abilities (a fast path for
@@ -1036,6 +1041,10 @@ pub enum Mark {
     /// as the total cost is paid, after the mana abilities (CR 601.2g-h,
     /// 702.66a), as the payment ends (ENGINE.md 51).
     DelveExile,
+    /// A hand card chosen for the delve of the spell being cast that the
+    /// spell's cost discards (retrace's land card): exiled once discarded
+    /// (CR 601.2h: the discard paid before the mana; ENGINE.md 100.4.9).
+    DelvePromised,
     /// On a spell whose permanent enters with a counter for each card
     /// exiled with it (Murktide Regent, `CardDef::counters_per_exiled`): a
     /// card (in exile, this object) its delve exiled to pay its cost (CR
@@ -1234,6 +1243,8 @@ impl Game {
             forced_at: 0,
             decisions: 0,
             no_auto: false,
+            oracle: false,
+            oracle_dead: false,
             effects: Vec::new(),
             any_loss: false,
             counters: Vec::new(),

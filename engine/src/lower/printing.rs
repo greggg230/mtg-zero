@@ -1820,6 +1820,17 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if *attached_cant_be_blocked_by_more_than_one && !subtypes.iter().any(|s| s == "Aura") {
         l.unsupported("CardPrinting.attached_cant_be_blocked_by_more_than_one(not an Aura)");
     }
+    // Delve with a cost part that puts its own cards into the graveyard but
+    // by discarding them (a sacrifice, emerge's, "discard your hand"): delve
+    // may exile those once that part is paid (CR 601.2h: any order), which
+    // the payment reaches for a cost's discards only (`Mark::DelvePromised`,
+    // ENGINE.md 100.4.9). Refused, loudly.
+    if *has_delve {
+        let feeds = |c: &crate::db::Cost| c.sacrifice.is_some() || c.sac_self || c.discard_hand;
+        if additional.iter().any(feeds) || alt_costs.iter().any(|a: &crate::db::AltCost| feeds(&a.cost) || a.emerge.is_some()) || escape.as_ref().is_some_and(|(_, c)| feeds(c)) {
+            l.unsupported("CardPrinting.has_delve(with a cost that sacrifices or discards the hand: ENGINE.md 100.4.9)");
+        }
+    }
     let mut def = CardDef {
         nonbasic_lands_are_mountains: *nonbasic_lands_are_mountains && ty & types::PERMANENT != 0,
         etb_counter_per_land_entered: *grants_etb_counter_per_land_entered_this_turn && ty & types::PERMANENT != 0,

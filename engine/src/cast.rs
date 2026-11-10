@@ -906,7 +906,7 @@ impl Game {
         }
         // `extra`: the mana of additional costs announced (CR 601.2f).
         let paid = |extra: &crate::mana::ManaCost| {
-            let mana = self.delve_reduced(card, p, self.route_mana_plus(card, p, from, extra), keep);
+            let mana = self.delve_reduced_with(card, p, self.route_mana_plus(card, p, from, extra), keep, self.route_extra(card, from, 0));
             match from {
                 _ if !def.additional.is_empty() => self.options_payable(p, card, from, extra, keep, classes, None),
                 crate::game::CastFrom::Escape | crate::game::CastFrom::Retrace => {
@@ -1082,7 +1082,7 @@ impl Game {
                     .and_then(|ab| ab.modes.as_ref())
                     .is_some_and(|m| self.spell_targets_available(&m.list[k], p, card)))
                 && {
-                    let cost = self.delve_reduced(card, p, self.route_mana_plus(card, p, from, &extra.plus(&o.mana)), keep);
+                    let cost = self.delve_reduced_with(card, p, self.route_mana_plus(card, p, from, &extra.plus(&o.mana)), keep, Some(o));
                     self.cost_payable(p, card, &Self::with_life(o, top_life as u32), &cost, classes, exclude)
                 }
         })
@@ -1092,10 +1092,17 @@ impl Game {
     /// graveyard can pay (castability, CR 702.66).
     /// (`keep`: graveyard cards another part of the cost exiles, escape.)
     pub(crate) fn delve_reduced(&self, card: CardIdx, p: PlayerId, cost: crate::mana::ManaCost, keep: u8) -> crate::mana::ManaCost {
+        self.delve_reduced_with(card, p, cost, keep, None)
+    }
+
+    /// `delve_reduced` with the cards `rest`, the cost's other parts, can
+    /// put into the graveyard for delve to exile: its discards (CR 601.2h:
+    /// the discard paid first; `delve_feed`, ENGINE.md 100.4.9).
+    pub(crate) fn delve_reduced_with(&self, card: CardIdx, p: PlayerId, cost: crate::mana::ManaCost, keep: u8, rest: Option<&crate::db::Cost>) -> crate::mana::ManaCost {
         if !self.def_of(card).delve {
             return cost;
         }
-        let n = self.graveyard_cards(p).filter(|&c| c != card).count().saturating_sub(keep as usize);
+        let n = self.graveyard_cards(p).filter(|&c| c != card).count().saturating_sub(keep as usize) + self.delve_feed(p, card, rest);
         cost.less_generic(n as u64)
     }
 
@@ -1272,6 +1279,20 @@ impl Game {
                 self.agenda.push(Task::Delve { id });
                 return;
             }
+            // A hand card the cost will discard (retrace's land card): the
+            // discard paid before the mana with delve (CR 601.2h: any order),
+            // the card exiled once it is in the graveyard (`exile_promised`;
+            // ENGINE.md 100.4.9). Revealed now: the cost discards it (it is
+            // public from the promise on, no hidden card waits on a
+            // decision).
+            Some(Choice::Card(c)) if self.objs[c.i()].zone == Zone::Hand => {
+                let r = self.obj_ref(c);
+                self.reveal(c);
+                self.marks.push((r, crate::game::Mark::DelvePromised));
+                self.stack[pos].delved += 1;
+                self.agenda.push(Task::Delve { id });
+                return;
+            }
             // A graveyard card: chosen now, exiled as the total cost is
             // paid (CR 601.2h, 702.66a), after the mana abilities (601.2g),
             // so a mana ability that reads the graveyard sees it whole:
@@ -1309,12 +1330,14 @@ impl Game {
         let gy = &self.players[p as usize].graveyard;
         let late = self.delve_sources(p);
         let committed: Vec<CardIdx> = late.iter().copied().filter(|&c| self.delve_late(c)).collect();
+        // (Hand cards promised: not graveyard picks, ENGINE.md 100.4.9.)
+        let promised = self.delve_promised(p);
         // Picks go up the graveyard (each set once), leaving enough cards
         // above for the picks still needed. (Cards only: a token there isn't
         // one, CR 108.2. The cards picked so far, below `floor`, are still
         // there: not counted.)
         let card_at = |i: usize| !self.is_token(gy[i]);
-        let n_cards = (0..gy.len()).filter(|&i| card_at(i)).count().saturating_sub((item.delved as usize).saturating_sub(committed.len()));
+        let n_cards = (0..gy.len()).filter(|&i| card_at(i)).count().saturating_sub((item.delved as usize).saturating_sub(committed.len() + promised.len()));
         let mut opts: Vec<Opt> = gy
             .iter()
             .enumerate()
@@ -1337,10 +1360,189 @@ impl Game {
                 }
             }
         }
+        // Hand cards the cost discards (retrace's land card), after the
+        // sources and before the graveyard's cards, in increasing hand order
+        // (each set once): `promise_options`.
+        if item.delved as usize == committed.len() + promised.len() {
+            if let Some(rest_cost) = self.spell_rest(card, item) {
+                let gy_left = n_cards.saturating_sub(keep);
+                opts.extend(self.promise_options(p, card, &cost, rest_cost, gy_left, allow));
+            }
+        }
         if need == 0 || opts.is_empty() {
             opts.push(Opt { action: act::PASS, choice: Choice::Pass });
         }
         self.ask(Task::Delve { id }, p, DecisionKind::ChooseGraveyardCard, opts);
+    }
+
+    // ---- delve and a cost's discards (CR 601.2h; ENGINE.md 100.4.9) ---------
+
+    /// The cost spell `card` (on the stack as `item`) pays besides its mana:
+    /// its alternative cost's rest, or the additional cost chosen (retrace's
+    /// land card merged in).
+    pub(crate) fn spell_rest(&self, card: CardIdx, item: &crate::game::StackItem) -> Option<&'static crate::db::Cost> {
+        if item.alt > 0 {
+            Some(self.item_alt_rest(card, item))
+        } else {
+            self.route_extra(card, item.from, item.cost_option)
+        }
+    }
+
+    /// May discard `k` of `cost` (0: `discard_also`, retrace's land card; 1:
+    /// `discard`) take hand card `c`?
+    fn discard_slot_fits(&self, p: PlayerId, card: CardIdx, cost: &crate::db::Cost, k: usize, c: CardIdx) -> bool {
+        let (n, f) = match k {
+            0 => (cost.discard_also.as_ref().map_or(0, |d| d.0), cost.discard_also.as_ref().map(|d| &d.1)),
+            _ => (cost.discard, cost.discard_filter.as_ref()),
+        };
+        n > 0
+            && c != card
+            && f.is_none_or(|f| {
+                let ctx = Ctx { controller: p, source: Some(self.obj_ref(card)) };
+                self.card_matches(f, c, &ctx)
+            })
+    }
+
+    /// The most cards of `set` the discards of `cost` take together, with
+    /// `left` discards of each kind (`discard_also`, `discard`) still to
+    /// make: each card one discard whose filter it matches. (Two kinds of
+    /// discard: a matching's size is its least cut, min(a + b, a + |B|, |A|
+    /// + b, |A or B|), A and B the cards each kind may take.)
+    pub(crate) fn discards_take(&self, p: PlayerId, card: CardIdx, cost: &crate::db::Cost, set: &[CardIdx], left: (usize, usize)) -> usize {
+        let fa = |c: CardIdx| left.0 > 0 && self.discard_slot_fits(p, card, cost, 0, c);
+        let fb = |c: CardIdx| left.1 > 0 && self.discard_slot_fits(p, card, cost, 1, c);
+        let a = set.iter().filter(|&&c| fa(c)).count();
+        let b = set.iter().filter(|&&c| fb(c)).count();
+        let u = set.iter().filter(|&&c| fa(c) || fb(c)).count();
+        (left.0 + left.1).min(left.0 + b).min(a + left.1).min(u)
+    }
+
+    /// Would hand card `c` of `p`, discarded, be a card in `p`'s graveyard
+    /// (delve may exile it then; not a card exiled instead, CR 614.1a, nor
+    /// another player's, which goes to its owner's graveyard, CR 400.3)?
+    fn discard_feeds_delve(&self, p: PlayerId, c: CardIdx) -> bool {
+        self.objs[c.i()].owner == p && matches!(self.replaced_dest(c, Zone::Hand, Zone::Graveyard), crate::game::Dest::To(Zone::Graveyard))
+    }
+
+    /// The hand cards `p` has promised to delve once its cost discards them
+    /// (`Mark::DelvePromised`), in the order promised.
+    pub(crate) fn delve_promised(&self, p: PlayerId) -> Vec<CardIdx> {
+        if self.marks.is_empty() {
+            return Vec::new();
+        }
+        self.marks
+            .iter()
+            .filter(|&&(o, m)| m == crate::game::Mark::DelvePromised && self.live(o) && self.objs[o.idx.i()].owner == p)
+            .map(|&(o, _)| o.idx)
+            .collect()
+    }
+
+    /// How many cards `cost`'s discards can put into `p`'s graveyard for
+    /// `card`'s delve to exile (castability: CR 601.2h, the discards paid
+    /// before the mana; ENGINE.md 100.4.9).
+    pub(crate) fn delve_feed(&self, p: PlayerId, card: CardIdx, cost: Option<&crate::db::Cost>) -> usize {
+        let Some(cost) = cost else { return 0 };
+        if !self.def_of(card).delve || (cost.discard == 0 && cost.discard_also.is_none()) {
+            return 0;
+        }
+        let cands: Vec<CardIdx> = self.players[p as usize].hand.iter().copied().filter(|&c| c != card && self.discard_feeds_delve(p, c)).collect();
+        let left = (cost.discard_also.as_ref().map_or(0, |d| d.0 as usize), cost.discard as usize);
+        self.discards_take(p, card, cost, &cands, left)
+    }
+
+    /// Delve's choices of hand cards the cost will discard (each exiled once
+    /// it is in the graveyard, `exile_promised`): the first card not promised
+    /// of each definition from the last one promised on (each set once), that
+    /// the cost's discards can take with those promised already, and whose
+    /// promise leaves the payment payable (`gy_left`: the graveyard's cards
+    /// left to delve).
+    fn promise_options(&self, p: PlayerId, card: CardIdx, cost: &crate::mana::ManaCost, rest_cost: &crate::db::Cost, gy_left: usize, allow: u8) -> Vec<Opt> {
+        let promised = self.delve_promised(p);
+        let left = (rest_cost.discard_also.as_ref().map_or(0, |d| d.0 as usize), rest_cost.discard as usize);
+        if promised.len() >= left.0 + left.1 {
+            return Vec::new();
+        }
+        let hand = self.hand_sorted_in(p);
+        // (Per definition, from the run of the last one promised on.)
+        let from = promised.last().map_or(0, |&c| {
+            let d = self.objs[c.i()].def;
+            hand.iter().position(|&x| self.objs[x.i()].def == d).expect("a promised card in hand")
+        });
+        let mut runs: Vec<(usize, CardIdx)> = Vec::new();
+        let mut i = 0;
+        while i < hand.len() {
+            let def = self.objs[hand[i].i()].def;
+            let mut j = i;
+            while j < hand.len() && self.objs[hand[j].i()].def == def {
+                j += 1;
+            }
+            if i >= from {
+                if let Some(&c) = hand[i..j].iter().find(|&&c| c != card && !promised.contains(&c) && self.discard_feeds_delve(p, c)) {
+                    runs.push((i, c));
+                }
+            }
+            i = j;
+        }
+        let rest = cost.less_generic(1);
+        let mut opts = Vec::new();
+        for (k, &(i, c)) in runs.iter().enumerate() {
+            let mut set = promised.clone();
+            set.push(c);
+            if self.discards_take(p, card, rest_cost, &set, left) < set.len() {
+                continue;
+            }
+            // (The promises still possible after it.)
+            let mut all = set.clone();
+            all.extend(runs[k + 1..].iter().map(|r| r.1));
+            let later = self.discards_take(p, card, rest_cost, &all, left) - set.len();
+            if (0..=((gy_left + later) as u64).min(rest.generic)).any(|d| self.can_pay_for(p, &rest.less_generic(d), allow)) {
+                opts.push(Opt { action: act::HAND + i as u16, choice: Choice::Card(c) });
+            }
+        }
+        opts
+    }
+
+    /// Exile the hand cards promised to `spell`'s delve, discarded by its cost
+    /// and now in `p`'s graveyard (CR 702.66a, 601.2h: the discard paid
+    /// first, then the mana with delve).
+    pub(crate) fn exile_promised(&mut self, p: PlayerId, spell: Option<CardIdx>) {
+        if !self.marks.iter().any(|&(_, m)| m == crate::game::Mark::DelvePromised) {
+            return;
+        }
+        let promised: Vec<ObjRef> = self.marks.iter().filter(|&&(_, m)| m == crate::game::Mark::DelvePromised).map(|&(o, _)| o).collect();
+        self.marks.retain(|&(_, m)| m != crate::game::Mark::DelvePromised);
+        for r in promised {
+            let c = r.idx;
+            assert!(
+                self.objs[c.i()].zone == Zone::Graveyard,
+                "a card promised to delve was not discarded: {}\n{}",
+                self.name(c),
+                self.log_lines().join("\n")
+            );
+            self.note(|g| format!("P{p} exiles {} (delve)", g.name(c)));
+            let e = self.move_card(c, Zone::Exile, Pos::Top);
+            self.record_exiled_to_pay(spell, e);
+        }
+    }
+
+    /// The card a discard of definition `c` takes: a card of `c`'s
+    /// definition promised to delve, if one is in hand (equal definitions in
+    /// a hand are one choice, ENGINE.md 10), else `c`.
+    pub(crate) fn promised_twin(&self, p: PlayerId, c: CardIdx) -> CardIdx {
+        let d = self.objs[c.i()].def;
+        self.delve_promised(p).into_iter().find(|&x| self.objs[x.i()].def == d && self.objs[x.i()].zone == Zone::Hand).unwrap_or(c)
+    }
+
+    /// May the discards of `cost` with `left` still to make (after this one)
+    /// take every card promised to delve still in hand but `taken`?
+    pub(crate) fn promises_kept(&self, p: PlayerId, card: CardIdx, cost: &crate::db::Cost, taken: CardIdx, left: (usize, usize)) -> bool {
+        let pend: Vec<CardIdx> = self.delve_promised(p).into_iter().filter(|&c| c != taken && self.objs[c.i()].zone == Zone::Hand).collect();
+        pend.is_empty() || self.discards_take(p, card, cost, &pend, left) == pend.len()
+    }
+
+    /// Is hand card `c` promised to a delve in progress (`Mark::DelvePromised`)?
+    pub(crate) fn delve_promising(&self, c: CardIdx) -> bool {
+        !self.marks.is_empty() && self.marks.iter().any(|&(o, m)| o.idx == c && m == crate::game::Mark::DelvePromised && self.live(o))
     }
 
     /// Escalate (CR 702.120a): discard a card for each mode beyond the
@@ -2404,7 +2606,7 @@ impl Game {
                 let opts: Vec<Opt> = (0..def.additional.len())
                     .filter(|&k| {
                         base.cost_option = k as u8;
-                        let cost = self.delve_reduced(card, p, self.total_mana(card, &base), keep);
+                        let cost = self.delve_reduced_with(card, p, self.total_mana(card, &base), keep, self.route_extra(card, item.from, k as u8));
                         kicker_ok(k)
                             && self
                                 .route_extra(card, item.from, k as u8)
@@ -2578,7 +2780,19 @@ impl Game {
         // (118.9): paid after the mana abilities are activated (601.2g; a
         // painland's damage first), by the payment (`PayMana::life_after`).
         let life_later = self.life_later(card, item);
+        // CR 601.2h: the parts of the cost besides its mana in any order,
+        // when that can matter (ENGINE.md 100.4.9): the mana first (601.2g),
+        // every option leaving the whole payment completable (down to the
+        // agenda's `floor`: escalate's discards included), then the parts as
+        // the player orders them.
+        let floor = self.agenda.len() - matches!(self.agenda.last(), Some(Task::Escalate { id: i }) if *i == id) as usize;
         let Some(pos) = self.item_index(id) else { return };
+        let item = &self.stack[pos];
+        let rest_cost = if item.alt > 0 { Some(self.item_alt_rest(card, item)) } else { self.route_extra(card, item.from, item.cost_option) };
+        let ordered = rest_cost
+            .map(|c| crate::cost_order::Order::new(p, card, c, 0, 0, floor as u32))
+            .filter(|o| !self.order_free(o))
+            .map(Box::new);
         let item = &self.stack[pos];
         if item.alt > 0 {
             // (Its own alternative cost, or the granted one noted on it:
@@ -2598,11 +2812,18 @@ impl Game {
             pm.keep = Self::keep_for(card, rest, None);
             pm.keep.allow = self.spend_allow_from(card, item.from);
             pm.keep.spell = Some(card);
+            if ordered.is_some() {
+                pm.keep = crate::pay::Keep { allow: pm.keep.allow, spell: Some(card), ..Default::default() };
+                pm.oracle = Some(floor as u32);
+            }
+            // (Hand cards promised to delve: the cost discards them, CR
+            // 601.2h; no mana ability uses them.)
+            pm.keep.committed.extend(self.delve_promised(p));
             if let Some(r) = emerge {
                 pm.keep.exclude = self.sacrifices_itself_for_mana(r.idx).then_some(r.idx);
                 self.agenda.push(Task::Emerge { id, sac: true });
             }
-            self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
+            self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None, order: ordered });
             if !pm.cost.is_zero() {
                 pm.keep.life = pm.keep.life.checked_add(life_later).expect("a cost's life: at most a life total and 99");
                 pm.life_after = life_later;
@@ -2640,19 +2861,32 @@ impl Game {
         // Teamwork (a crew-like additional cost): its taps are paid before
         // the mana (CR 601.2h: any order), leaving the mana payable.
         let mut taps_first = false;
+        let in_order = ordered.is_some();
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
-            pm.keep = Self::keep_for(card, extra, None);
+            if !in_order {
+                pm.keep = Self::keep_for(card, extra, None);
+            }
             pm.forced.extend(self.exile_sources(p, card, extra, None));
-            if extra.crew > 0 {
+            if in_order {
+                // (Below the mana: teamwork's taps too, by the rules after
+                // the mana abilities, CR 601.2g-h.)
+                self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None, order: ordered });
+            } else if extra.crew > 0 {
                 taps_first = true;
             } else {
-                self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
+                self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None, order: None });
             }
         }
         pm.keep.allow = self.spend_allow_from(card, item.from);
         pm.keep.spell = Some(card);
+        // (Hand cards promised to delve: the cost discards them, CR 601.2h;
+        // no mana ability uses them.)
+        pm.keep.committed.extend(self.delve_promised(p));
+        if in_order {
+            pm.oracle = Some(floor as u32);
+        }
         let escalated = item.modes.len().saturating_sub(1) as u8;
-        if escalated > 0 && def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
+        if !in_order && escalated > 0 && def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
             pm.keep.reserves.push((crate::pay::Reserve::Discard(escalated, None), card));
         }
         let _ = def;
@@ -2660,7 +2894,7 @@ impl Game {
         pm.life_after = life_later;
         self.agenda.push(Task::PayMana(Box::new(pm)));
         if taps_first {
-            self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
+            self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None, order: None });
         }
     }
 

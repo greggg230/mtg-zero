@@ -116,6 +116,8 @@ pub fn fields() -> Vec<Field> {
         forced_at: Derived "the search's forced chance outcomes",
         decisions: Derived "a count of decisions answered (statistics)",
         no_auto: Derived "a flag of determinize's refresh",
+        oracle: Derived "a flag of the payment search's copies",
+        oracle_dead: Derived "a flag of the payment search's copies",
         effects: Public "continuous effects from resolved spells and abilities",
         any_loss: Derived "a fast path: some effect removes all abilities",
         counters: Public "counters on permanents",

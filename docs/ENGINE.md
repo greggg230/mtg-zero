@@ -22066,6 +22066,181 @@ and the 1,000 matches and both replay tests (`FUZZ_GAMES=20000`). `FUZZ_POOL=eoe
 (`--no-mac`): `GATE PASSED engine 965170ebf147 in 514s` (build, both digests, `az` 43, `limits` 13,
 `hidden` 16, pytest, the search smoke); `GATE PASSED encoding 965170ebf147 in 349s` (build, both digests, `az` 43, the checkpoint load of 100.5.1's fork, h2h 8 games, pytest).
 
+#### 100.4.9 B6: the order of a cost's parts (CR 601.2h) (branch `eoe-b6-order`, from `eoe-b5-pay` c96ecb4)
+
+**Why.** 100.4.8's "found, not done": CR 601.2h pays a cost's parts in any order the player chooses,
+and the engine chose every part's objects from the state before the payment and paid in a fixed
+order. That reaches every outcome only while paying one part can't change what another may take
+but by taking objects. It can: a permanent returned to its owner's hand may then be discarded (Daze
+retraced by Wrenn and Six's emblem with one Island and no land card in hand: "return an Island" then
+"discard a land card", the Island both; not castable), a static ability leaves with the permanent
+sacrificed (B6's Test Crew Shrine, "Crew 1, Sacrifice an enchantment", with Test Weakness Charm's
+"creatures you control get -1/-0": crew's power read with the Charm there), life paid changes a
+power ("Crew 3, Pay 2 life" with a creature that grows at half its controller's starting life), and
+delve chose its cards before the cost's discards were paid (Treasure Cruise retraced: the land card
+discarded is one delve may exile). Tests: `engine/tests/rules_payment_b.rs`, section "100.4.9" (a
+table of its own, `b6_db`: the cube, the shared test cards and B6's), each failing before its fix
+(checked by running them with the order forced back to the engine's: the four castability and
+ordering tests fail; the delve test's spell isn't castable).
+
+##### The parts, and when their order is free
+
+`engine/src/cost_order.rs`. A cost's parts paid after its mana (`cost_order::part`, 17: sacrifice,
+the two discards, exile from hand, return, exile from graveyard, tap untapped permanents (X too),
+remove a counter from a permanent, crew (saddle, teamwork), the source's counters, {T}, life,
+discard the hand, the source sacrificed, discarded or exiled, a loyalty cost).
+
+`Game::order_free` proves, in the state as it is, that the engine's order reaches every outcome
+of every order, and only then is the order not asked (the engine's payment, `pay_costs`, unchanged).
+The proof has two halves:
+
+* **No part gives another objects that the engine's order pays first.** Returning a permanent to
+  hand gives the hand's parts a card (`BOUNCE` with a discard, the exile from hand or "discard your
+  hand"; "discard your hand" before or after the return differ, so that pair has no best order at
+  all); "discard your hand" gives the graveyard's exile cards (the engine discards the hand last);
+  a loyalty cost that adds counters gives the counter parts counters. Every other way one part makes
+  another's candidates is paid first by the engine already (the sacrifices before the graveyard's
+  cards, B5's `late`; the discards before them), and taking objects (a permanent sacrificed is not
+  tapped, a card discarded is not exiled) is what the engine's order handles: taps and counters
+  before what leaves the battlefield, so any part's objects could have been taken (B4, B5).
+* **No part changes what another reads but by taking objects.** Each part reads of its candidates
+  their characteristics by kind (`Reads::kinds`, `kind`: types, colours, abilities, power and
+  toughness), whether they are tapped, their counters, or a number of permanents (a filter's atoms,
+  `filter_reads`, exhaustive; crew reads creatures, power and its bonus); a hand's cards are read only
+  through Painter's Servant and the payer's hand's characteristic-defining abilities (static
+  abilities of permanents affect permanents). Each part writes (`Writes`): the permanents that may
+  leave (its candidates), the hand, graveyard and exile, life, counters, tapped permanents. The
+  order is free only when, for every part that reads, the other parts' writes change nothing it
+  reads: no tap while it reads tapped, no counter while it reads counters, no permanent leaving
+  while it counts permanents, and no continuous effect the layers apply whose source or input the
+  writes touch changing a kind of characteristic it reads (`chars_may_change`: every static ability
+  of a permanent or emblem, by its source leaving, its condition (`cond_reads`, exhaustive over
+  `Cond`), its scope's tapped, counter and count atoms, its amounts; effects lasting while an object
+  remains; characteristic-defining abilities; counters; Painter's Servant; a Blood Moon; W3's
+  granted subtypes and abilities; an Equipment's granted abilities; reconfigure; each by what its
+  modifications change, `mod_change`, exhaustive over `Mod`). The writes are each part's candidates
+  now: by induction over the payment, while no part changes what another reads, each part's
+  candidates in any order are its candidates now less the objects taken.
+
+A fetch land's "{T}, Pay 1 life, Sacrifice this" reads nothing (its {T} is paid with the source
+untapped; summoning sickness is a restriction on activating, CR 602.5a, checked as it begins), so it
+is free in every state; "{T}, Sacrifice a creature" is free unless a static ability reads tapped
+permanents (The Seriema's indestructible for tapped legendary creatures changes abilities, which
+High Market's "{T}, Sacrifice a creature" doesn't read). No game of the digests asks the order.
+
+##### The payment when the order can matter
+
+The mana first, as the rules order it (601.2g's mana abilities, then the mana with its own
+alternatives), then the parts as the player orders them (`Task::PayCosts::order`, a
+`cost_order::Order`: the cost, the parts paid, the part being chosen, the search's floor):
+
+* **`DecisionKind::CostPart`** (the 49th kind): which part is paid next, `NUMBER` + the part, asked
+  while the order of the parts left can matter (`order_free` again on what is left); else the next
+  part in `part::DOMINANT` (an order in which each part comes no later than any part it gives
+  objects to and no earlier than any that takes its objects).
+* Each part's objects are chosen from the state as it is (the parts paid before it paid), one per
+  decision with the kinds the engine's payment asks (`Sacrifice`, `BounceCost`, `DiscardCost`,
+  `ExileCost`, `ChooseGraveyardCard`, `ChoosePermanent`; sets in increasing order; a permanent to
+  sacrifice or return with its mana ability first, 86.2), and the part is paid as they are chosen
+  (a sacrifice's permanents together; a discard at once, as before).
+* **Every option leaves the payment completable** (ENGINE.md 6, 49): `Game::ask` keeps only those
+  (`completing`), for these parts and for the mana payment before them (`PayMana::oracle`, whose
+  `Keep` reserves nothing for the parts then: the search sees what they need). A search of the
+  payment's own decisions decides it (`payment_completes`): a copy of the game with the option
+  answered runs the payment's tasks (those above the agenda's floor) and tries every option of each
+  decision (`Game::oracle`: the copies' decisions are not checked again; a part with nothing to take
+  is a dead end, `oracle_dead`) until a copy has paid everything; a decision of another player
+  inside the payment (616.1's order of replacement effects for a permanent of theirs sacrificed)
+  must complete for each of its answers. Past 2,000,000 copies it fails loudly (`ORACLE_NODES`, as
+  51's `SEARCH_NODES`).
+* **Castability** asks the same search (`cost_payable_order`, `payable_in_some_order`: the spell
+  moved to the stack on a copy, CR 601.2a; the mana payment the cast or activation makes, then the
+  parts), so an activation or cast is offered exactly when some order pays it.
+* Re-entrant (ENGINE.md 99.8): the cost's event group opens once (`Order::started`); a question is
+  asked with nothing paid on the way; a refresh after `determinize` asks it again identically
+  (tested).
+
+##### Delve and the cost's discards
+
+Delve chose its graveyard cards before the cost's discards were paid. Its choice now also offers the
+hand cards the cost's discards can take that would go to the graveyard (`promise_options`, `HAND`
+ids: after the mana sources that sacrifice themselves, before the graveyard's cards, each set once;
+the discards must be able to take all of them, a matching, `discards_take`): a card chosen is
+revealed (the cost discards it) and marked (`Mark::DelvePromised`), the mana payment keeps it
+(`Keep::committed`), the discards take it (`promised_twin`, `promises_kept`), and it is exiled once
+discarded (`exile_promised`): the discard paid before the mana with delve, which the order of
+601.2h allows, the mana abilities still activated first. Castability counts those cards
+(`delve_reduced_with`, `delve_feed`). The payer's encoding shows a promised card committed (the
+`MY_EXILE` bag, as a graveyard card chosen for delve). A delve card with a cost that sacrifices or
+discards the hand (no card has one) is refused by the lowering.
+
+**The encoding** (layout v6 unchanged): the context block shows the new kind (one-hot 48), the
+asking task (`PayCosts`, code 12), the card whose cost it is and the picks so far (`ctx::PICKED`);
+the options are `NUMBER` ids. The heuristic bot takes the parts in `part::DOMINANT`'s order.
+
+##### What is left (found, not done)
+
+* **The mana part's place.** When the order can matter, the mana (601.2g's mana abilities, then the
+  mana with convoke, improvise, waterbend, Phyrexian life) is paid first, then the parts in the
+  player's order. Paying the mana's own alternatives later than another part can matter only
+  through a continuous effect: a creature's colour for convoke changed by a permanent another part
+  sacrifices, a restriction on spending read from a type another part changes, life paid for a
+  Phyrexian pip read by a static ability another part reads (the structural case, delve after the
+  cost's discards, is above). Exact: the mana abilities activated first (601.2g) as a float of their
+  own, then the mana's alternatives as one more part (`PayMana` with no activations), searched with
+  the rest.
+* **Parts paid outside `pay_costs`** keep their place: escalate's discards (after the other parts,
+  `Task::Escalate`; in the search's floor, so the options leave them payable), emerge's sacrifice
+  (after), "exile the Equipment granting this ability" (first, `pay_exile_granter`).
+* **A mana ability's own cost** (paid by `PayMana`'s activations and `ManaNowCosts`) keeps the
+  engine's order.
+* **601.2g's side effects in a free order.** Where the order is free, castability's reservations
+  (`Keep::reserves`, `Keep::taps`) read the parts' candidates before the mana abilities; a mana
+  ability's side effect (a Treasure sacrificed, a painland's damage) changing one through a static
+  ability is not seen (the payment then reads the state as it is). Where the order can matter, the
+  search sees it (it runs the mana abilities).
+
+##### Tests
+
+`rules_payment_b`, section "100.4.9" (each failing before its fix):
+`cr_601_2h_a_static_ability_sacrificed_first_changes_crews_power` (Test Crew Shrine with Test Weakness
+Charm and a 1/1 Rebel: only the sacrifice first is offered; asked again identically after
+`determinize`), `cr_601_2h_life_paid_first_changes_crews_power` (Test Blood Shrine and Test Desperate
+Rebel at 11 and 12 life; not at 13), `cr_601_2h_an_island_returned_then_discarded_for_one_cost` (Daze
+retraced with one Island and no land card: only the return first),
+`cr_601_2h_either_order_with_a_land_card_in_hand` (both orders, each outcome),
+`cr_601_2g_the_mana_leaves_the_parts_payable_in_some_order` (Test Crew Altar: the Elf Rebel's mana would
+leave no crew, only the Forest is offered), `cr_601_2h_a_card_discarded_for_the_cost_is_delved`
+(Treasure Cruise retraced, the Forest discarded then delved), and two that the order isn't asked
+where it can't matter: `cr_601_2h_no_order_asked_when_it_cant_matter` (Test Rebel Altar),
+`cr_601_2h_an_ability_granted_to_tapped_creatures_leaves_a_creatures_sacrifice_free` (High Market with
+The Seriema; the EoE fuzz asked it before characteristics were told apart by kind). docs/shortcuts.md:
+no row (100.4.8 found the gap; nothing was logged there).
+
+##### Results
+
+The full engine suite on 3ba572e: **2,191 passed, 0 failed, 15 ignored** (`az` 43, `hidden` 16,
+`limits` 13; `rules_payment_b` 51, B6's 8 new). Digests unchanged by every commit: full fc293d3c24d0c0cc,
+`DIGEST_ENCODING=0` 117effec150157b5, `DIGEST_ENCODING=v5` 7e397431df7a60fb (no digest game's cost has
+parts whose order can matter, nor delve with a discard; `RULES_EPOCH` not bumped). pytest 208 passed,
+1 skipped. The default `FUZZ_GAMES=20000` passed in four shards of 5,000 seeds (`FUZZ_FIRST` 0, 5,000, 10,000, 15,000), every seed: 20,000 games, wins 9,804 /
+10,074, 122 draws, 0 aborted, mean 31.8 turns (the games of 100.4.8), and the 1,000 matches and both
+replay tests (`FUZZ_GAMES=20000`). `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed in the same four shards, every
+seed: 20,000 games, wins 7,112 / 7,072, 5,816 draws, 0 aborted, mean 45.8 turns, 654.2 decisions, 32
+controlled decisions, longest turn 264 decisions (100.4.8's totals), and the replay test (1,376-1,519 s
+a shard on a shared desktop). On 337a10f, before characteristics were told apart by kind, a traced run
+(not committed) showed the EoE fuzz searching the order for castability of "{T}, Sacrifice a ..."
+(Dust Bowl, High Market, Scavenger Grounds, Memorial Vault, Kavaron, Memorial World, Slagdrill
+Scrapper) and asking it in payments of the first three, with The Seriema in play (wins 7,113 / 7,071
+then: one game ended otherwise), and the default fuzz once for Tinker escaped by Underworld Breach
+(its sacrifice's types, the escape's exile changing a graveyard that a power reads); every such search
+passed the fuzz's check that each option of a sampled decision completes. On 3ba572e the totals are
+100.4.8's again.
+
+The gates on 3ba572e (`--no-mac`): `GATE PASSED engine 3ba572e4e424 in 414s` (build, both digests, `az`
+43, `limits` 13, `hidden` 16, pytest, the search smoke); `GATE PASSED encoding 3ba572e4e424 in 270s` (build, both
+digests, `az` 43, the checkpoint load of 100.5.1's fork, h2h 8 games, pytest).
+
 ## 101. EoE sealed: pools, the builder and the sealed spec (S2)
 
 Branch `eoe-s2-pools` (from 36f98af), 2026-11-09. DESIGN.md 9, milestone S2: the parts of sealed
