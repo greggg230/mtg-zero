@@ -21427,6 +21427,7 @@ build, both digests, `--test az` (43), the checkpoint load (h2h, 8 games, 0 unfi
 (208 passed, 1 skipped) passed: `GATE PASSED encoding 1e052a27ccf3 in 348s` (bccd4f0 too, in
 451 s). `python tools/gate.py engine --tested-sha 1e052a2 ...`: build, both digests, `az` 43,
 `limits` 10, `hidden` 16, pytest, the search smoke: `GATE PASSED engine 1e052a27ccf3 in 778s`.
+
 ## 101. EoE sealed: pools, the builder and the sealed spec (S2)
 
 Branch `eoe-s2-pools` (from 36f98af), 2026-11-09. DESIGN.md 9, milestone S2: the parts of sealed
@@ -21633,3 +21634,250 @@ What that prior needs from here:
   activation and resolution leaves a new until-end-of-turn effect, so (apparently) no state repeats.
 
 
+## 103. The heuristic and the yardsticks on Edge of Eternities (branch `eoe-bot`, 2026-11-09)
+
+**Why.** Every EoE run will be measured against fixed baselines: uniform random play and the
+hand-written `heuristic` (`engine/src/az/bots.rs`, the M7c policy of 21.4, 24-25 and 41.4; the Elo
+anchor). It was written for the cube's cards; EoE brings station, warp, void and Landers. A
+yardstick only (DESIGN.md 0): hand-written rules are fine, never a training signal. This section
+measures the heuristic on EoE decks, lists what it did badly with the set's mechanics, adds general
+rules for them (by what the cards do, no per-card cases) and lists what a run's evaluation still
+needs to play these baselines on EoE games.
+
+### 103.1 The measurements (`engine/tests/bots.rs`)
+
+Three deck sources (`BOTS_DECKS`); best-of-one, the 60-turn cap, the London mulligan:
+
+* `cube`: the runs' default spec's random two-colour decks (`MtgSpec::default().decks(seed)`).
+* `eoe`: `FUZZ_POOL=eoe`'s decks (17 random lands and 23 random spells of the EoE table's supported
+  cards, every colour; the fuzz's own seeding).
+* `eoe2c`: the cube's two-colour generator (`az::decks::generate`) on the EoE table: two colours,
+  16-17 lands (basics by the spells' pips, colour-matching nonbasics), singleton spells weighted to
+  creatures and interaction. A stand-in for S2's randomised sealed builder (branch `eoe-s2-pools`,
+  ENGINE.md 101), which had not landed.
+
+`cargo test --release -p engine --test bots eoe_yardsticks -- --ignored --nocapture`
+(`BOTS_GAMES` deck pairs, each played with both seatings; `BOTS_MATCHUPS`, e.g.
+`new-random,new-new,new-m7c`; `BOTS_THREADS`, default 8): the score, its standard error over deck
+pairs and the 95% interval, the turn-limit draws, how the games ended (life, library, poison, an
+effect, the turn cap), turns and decisions (two or more options) per game, each bot's time per
+decision. `eoe_mechanics`: per activated ability, alternative cost and cast from another zone, the
+turns the heuristic was offered it and the times it took it. `eoe_inventory`: the EoE table by warp,
+void and station. `eoe_trace`: a game's decisions or its log (`GameSpec::log`; `BOTS_HEUR=m7c` traces
+the old policy). An engine panic names the game and leaves its deck pair out (103.6).
+
+**Before** (the M7c policy, `Heuristic::m7c`; 2,000 deck pairs = 4,000 games each, seeds from
+6,000,000):
+
+| decks | heuristic vs random | its turn-limit draws | heuristic vs itself: draws, turns | random vs random: draws, turns |
+|---|---|---|---|---|
+| eoe | 98.5% +- 0.2 | 3 (0.1%) | 0, 18.4 | 1,098 (27.4%), 45.7 |
+| eoe2c | 99.9% +- 0.1 | 0 | 0, 16.0 | 334 (8.3%), 41.3 |
+| cube | 97.8% +- 0.2 | 0 | 0, 14.4 | 8 (0.2%), 30.7 |
+
+The heuristic already beat random clearly on EoE decks and finished its games (random EoE play
+draws 27% of the fuzz decks' games at the cap, the heuristic 0.1%): an anchor against random as it
+was. Against random on the fuzz decks: 20.4 turns, 293 decisions a game (201 its own), 0.8 us per
+heuristic decision (the engine's steps dominate: a few ms a game per thread).
+
+### 103.2 What it did badly with EoE mechanics
+
+From `eoe_mechanics` (1,000 heuristic-vs-heuristic games on `eoe2c`, seat 0: turns offered /
+times taken) and the logs of `eoe_trace` (`BOTS_DECKS=eoe2c BOTS_HEUR=m7c BOTS_OPP=m7c
+BOTS_TRACE_LOG=1`):
+
+* **Landers cracked before spells.** A land search that costs mana was `Kind::Fetch`, tier 2 (before
+  spells, 1,500), like a free fetch land: 512 of 540 offered turns, mostly in main phase 1. Game
+  6000010, turn 12: the {2} for the Lander (paid with Mana Confluence's life too), then Green Sun's
+  Zenith for X = 3 instead of 5:
+  ```
+  T12 Main1 P0 activates Lander (Activated(0))
+  T12 Main1 P0 activates a mana ability of Mana Confluence
+  T12 Main1 P0 activates a mana ability of Mountain
+  T12 Main1 P0 finds Forest
+  T12 Main1 P0 casts Green Sun's Zenith (Hand)
+  T12 Main1 X = 3
+  ```
+* **Always stationing.** Station was `Kind::Grow`: once a turn, in main phase 1 after the spells,
+  past every threshold, tapping the creature least likely to attack (summoning sick, else the
+  smallest), which then can't attack or block: Warmaker Gunship 105 of 106 offered turns, Synthesizer
+  Labship 75 / 78, the planets (station 12+ lands) every turn (Adagia, Windswept Bastion 355 / 375).
+  Game 6000011: Uthros Scanship (8+) had 4 + 3 + 2 = 9 counters and attacked on turn 12; on turn 14
+  it was stationed again (counters past 8 do nothing), tapping Blooming Stinger, a blocker:
+  ```
+  T12 Main1 2 Named(1) counter(s) on Uthros Scanship
+  T12 DeclareAttackers attacks with Uthros Scanship
+  ...
+  T14 Main1 P0 activates Uthros Scanship (Activated(0))
+  T14 Main1 2 Named(1) counter(s) on Uthros Scanship
+  ```
+* **Warping vanilla bodies.** A card whose mana cost it can't pay but whose warp cost it can was
+  scored by its mana value (the costliest castable spell first) and `ChooseAltCost`'s first option
+  then is the warp cost: the card enters, is exiled at the next end step and is cast again later
+  (496 casts from exile in 1,000 games). Worth it for a card that does something as it enters (an
+  enters trigger) or leaves; not for a body. Game 6000002, turn 4: Exalted Sunborn (no enters
+  ability, no haste) warped and exiled having done nothing, instead of a permanent:
+  ```
+  T4 Main1 P1 casts Exalted Sunborn (Hand)
+  T4 Main1 cost 1
+  T4 Main1 Exalted Sunborn Stack -> Battlefield
+  T4 End trigger of Exalted Sunborn goes on the stack
+  T4 End Exalted Sunborn Battlefield -> Exile
+  ```
+* **Ignoring void.** Cards better with void (16 in the table: "void - instead" spells, "if void"
+  enters and end-step triggers) were cast whenever. Game 6000003, turn 7: Plasma Bolt in main phase
+  1 with no void, 2 damage (3 with void) to a Skystinger it didn't kill, before combat could have
+  made void:
+  ```
+  T7 Main1 P0 casts Plasma Bolt (Hand)
+  T7 Main1 target Skystinger#75
+  T7 Main1 2 damage to Skystinger#75
+  T7 DeclareAttackers attacks with Slagdrill Scrapper
+  ```
+* **A free cast declined.** With Weftwalking out ("the first spell each player casts during each of
+  their turns may be cast without paying its mana cost"), `ChooseAltCost` answered its first option:
+  the mana cost (each time it was offered, e.g. Codecracker Hound).
+* **Not found:** mana-sink loops (`cap` and `TURN_CAP` hold: every measured game ended, 0.1% at the
+  turn cap), an attack policy worse on EoE than on the cube (a Spacecraft at its creature threshold
+  attacks under the usual rule).
+
+### 103.3 The rules (`bots.rs`; `Heuristic::new`, the registered `heuristic`)
+
+`Heuristic::m7c(seed)` keeps the policy before them (a measurement reference, like `HeuristicV1`);
+every rule is behind its `eoe` flag. All read only the decider's view (its own hand and mana, the
+public board, the turn's void).
+
+* **A land search that costs mana is a mana sink** (`Kind::Fetch` with mana in its cost: a Lander,
+  CR 111.10): tier 1 (after spells, 190), at the opponent's end step or in the second main phase
+  (only the second main phase when sorcery-speed). A free fetch land stays tier 2. Only a search of
+  the controller's own library (`Who::You`) is the ability's search: Boseiju's "that land's controller
+  may search" is part of its removal (`classify`'s `eoe` argument).
+* **Station** (`station_counter`: an ability whose cost taps another creature and whose effect puts
+  counters on its source by the tapped creature's power, CR 702.184a): in a main phase, toward the
+  source's next threshold (`thresholds`: every "N or more counters" its statics, triggers and
+  activated abilities ask for, CR 722.2a), never past the highest, while the next is within reach (at
+  most twice the power that may tap now together); the creatures that may tap (`station_tappers`)
+  are the other untapped ones with power that no opposing creature makes worth keeping back (one it
+  would block and survive, or kill: `blocks_well`), and before combat only those that would not
+  attack (summoning sick, or eaten by an untapped blocker). The tapped one (`station_tap`, at the
+  cost's `ChoosePermanent`) is the smallest that reaches the next threshold, else the strongest.
+  Tier 1, 280, once a turn.
+* **A cast only its warp cost pays** (`warp_only`: a hand card with warp whose mana cost can't be paid
+  now, `normal_payable`) is worth it only for what the card does in its stay (`warp_worth`: a
+  triggered ability of its own on being cast, entering or leaving the battlefield, or haste in the
+  first main phase), scored (warp mana value x 4 - 1) below the permanents of that cost.
+* **A spell better with void waits** (`better_with_void`: an `Op::JumpUnless { cond: Void }` in its
+  spell, or a self enters / cast trigger with an "if void"): not cast in the first main phase while
+  there is no void (combat may make it); cast in the second either way.
+* **`ChooseAltCost`**: a cost that pays nothing (`FREE_FIRST_SPELL`, CR 118.9) first, then the mana
+  cost, then the first alternative offered (the warp cost when the mana cost can't be paid).
+
+**Measured** (head to head, `eoe` / `eoe2c`, 2,000-4,000 deck pairs each; within the new policy a
+row is the rule against the policy without it):
+
+| | eoe | eoe2c |
+|---|---|---|
+| all rules vs M7c | 56.9% +- 0.5 | 57.6% +- 0.5 |
+| station alone vs M7c (before the reach rule) | 55.7% | 54.4% |
+| warp alone vs M7c | 50.3% | 52.1% |
+| Lander alone vs M7c | 49.8% | 50.7% |
+| warp rule vs warping as M7c did | 50.7% | 52.5% |
+| warp rule vs never casting a card only warp pays | 50.5% | 50.3% |
+| Lander rule vs cracking as M7c did | 50.3% | 50.5% |
+| station rule (Spacecraft) vs never stationing | 50.4% | 50.4% |
+| reach rule vs never stationing a land | 49.9% | 49.9% |
+| void rule vs none | 49.9% | 50.0% |
+| free alternative cost vs none | 50.1% | 50.0% |
+
+Most of the gain is M7c's stationing undone (tapping attackers and blockers every turn for planets
+at 12+). Stationing by the rule is worth ~0.4% over never stationing; the reach rule, which stops the
+planets' station with the same strength as a "no land" rule, is the general one kept; up to four
+stations a turn and `blocks_well` (once the planets are not stationed every turn) measured neutral
+(+-0.1%). Void is neutral within noise (few cards; the waiting spell sometimes finds the mana spent),
+kept because it reads the mechanic the right way and costs nothing measurable.
+
+### 103.4 After (`Heuristic::new`; 2,000 deck pairs = 4,000 games each, same seeds)
+
+| decks | heuristic vs random | turn-limit draws | vs itself: draws, turns | vs M7c |
+|---|---|---|---|---|
+| eoe | 99.4% +- 0.1 (98.5) | 0 (3) | 2 (0.1%), 18.0 | 56.9% +- 0.5 |
+| eoe2c | 99.8% +- 0.1 (99.9) | 0 | 0, 16.5 | 57.6% +- 0.5 |
+| cube | 97.8% +- 0.2 (97.8) | 0 | 0, 14.4 | 50.0% +- 0.1 |
+
+(Before in brackets.) Against random on the fuzz decks: 19.1 turns, 258 decisions a game (176 its
+own), 1.1 us per heuristic decision. The cube's heuristic is unchanged in strength (97.8% on 8,000
+games; 50.0% +- 0.1 against M7c): the cube's cards these rules read are few (103.5).
+
+Usage (`eoe_mechanics`, 1,000 games, before -> after): Lander 512 / 540 offered turns -> 322 /
+1,169 (spare mana only); Warmaker Gunship's station 105 / 106 -> 20 / 142; Adagia's 355 / 375 -> 18
+/ 405; casts from exile (warped cards cast again) 496 -> 197.
+
+### 103.5 Digests, tests, gate
+
+* **Digests** (on purpose): 12 of the 500 heuristic games change, none of the 2,000 random ones. The
+  current cube holds EoE's Pinnacle Emissary and Quantum Riddler (warp: no longer warped when only
+  warp pays; Pinnacle Emissary's artifact-cast trigger is not its own) and Boseiju, Who Endures (its
+  channel no longer a tier-2 fetch). Full 3d59118e6fb9e706 -> 7dc8e4b953b933a7,
+  `DIGEST_ENCODING=0` 9bf41c0836e39125 -> ae871e79dc5c0a44. RULES_EPOCH bumped
+  (tools/position_lab.py), the Delver canary library stamped (60 of 60 spots reach their position).
+* **The public-state gate** (`tests/az.rs::public_state_reaches_the_encoding`) samples its positions
+  from heuristic games: "a copy is legendary by its exception" found its copy effects in 11 positions
+  of the drafted game under M7c, none now. It is `rare` (`public_state.rs`), as its sibling "a copy
+  has an ability by its exception" already was: a gate-coverage flag, not a rules change.
+* **Tests** (`tests/bots.rs`, 5 new on the EoE table, each with the M7c answer where it differed): a
+  land search that costs mana waits for spare mana (Kav Landseeker's Lander, Wurmwall Sweeper cast
+  first); stations with a creature that would neither attack nor block, up to the highest threshold
+  (Warmaker Gunship; none at 6 counters; none while Haliya is there to block); a cast only warp pays
+  needs something the card does in its stay (Exalted Sunborn not warped, Sinister Cryologist warped);
+  a free alternative cost before the mana cost (Weftwalking); a spell better with void waits for the
+  second main phase (Plasma Bolt).
+* Full engine suite on cefb4e1: 2,136 passed, 0 failed, 24 ignored.
+
+### 103.6 An engine bug found (reported, not fixed: payment is another workstream's)
+
+`FUZZ_POOL=eoe` deck pair 6000978, P0 the M7c heuristic, P1 the new one (`BOTS_DECKS=eoe
+BOTS_TRACE_SEED=6000978 BOTS_HEUR=m7c BOTS_SEAT=0 BOTS_OPP=new cargo test --release -p engine --test
+bots eoe_trace -- --ignored --nocapture`): turn 17, P0 casts Weftblade Enhancer from exile (its warp
+permission) with Mm'menon, the Right Hand (artifacts have a restricted "{T}: Add {U}") and Gene
+Pollinator out; `PayMana` offers Flight-Deck Coordinator (the Pollinator's "tap an untapped
+permanent"), and applying it panics: `pay.rs:2427 a Pollinator to activate (the budget counts
+them)`. The log up to it:
+```
+T15 Main1 P0 casts Mm'menon, the Right Hand (Hand)
+T15 Main1 P0 activates a mana ability of Gene Pollinator, tapping Flight-Deck Coordinator
+...
+T17 Main1 Weftblade Enhancer Exile -> Stack
+T17 Main1 P0 casts Weftblade Enhancer (Permission { free: false, any_mana: false })
+T17 Main1 cost 0
+(PayMana P0: Flight-Deck Coordinator -> panic)
+```
+A legal action panics, so a run's evaluation game would crash on it; the payment owner's to fix
+(likely the budget counting Gene Pollinator both for its granted mana ability and as the Pollinator
+that taps another permanent). The measurements leave that deck pair out (1 of 2,000).
+
+### 103.7 What a run's evaluation needs to play these baselines on EoE games
+
+A run's evaluation (zero-core: `yardstick` 'heuristic', `eval_random_games`, the Elo matches) plays
+`make_bot::<MtgAz>(spec, name, seed)` on the evaluation spec (`mtgz.az.evaldecks.eval_spec`: the
+spec with `"decks": "eval"`). What exists and what is missing:
+
+* **The bots need nothing per table.** `heuristic` (`HeuristicBot(Heuristic::new(seed))`) and zero-core's
+  `random` read the game's own card table; best-of-one has no sideboarding (`bots::sideboard` is
+  never asked).
+* **Gap: no EoE spec on this branch.** `MtgSpec::db` is the cube's or constructed play's table: no
+  spec plays EoE. S2's `"sealed"` key (branch `eoe-s2-pools`, ENGINE.md 101.3, unmerged) adds it:
+  `CardDb::eoe`, per-game pools and builds, best-of-one with open decklists, and `"decks": "eval"`
+  as fixed evaluation pairs (`eval_decks`, `eval_seed`). `eval_spec` makes that from a sealed spec
+  unchanged (its `decks` defaults to random), so the yardstick plumbing works once S2 merges.
+* **Gap: the panic of 103.6** must be fixed first: one evaluation game in ~2,000 would take a
+  worker down.
+* **Gap: no EoE preset** (it waits on the EoE network layout and hidden decklists: EoE cards encode
+  as `UNKNOWN` identities, void / warp-cast / life-gained are layout gaps, DESIGN.md 9, ENGINE.md
+  101.5). Not built here.
+* **The anchor's scale.** Heuristic = 1000 Elo on EoE is a new scale, not comparable with the cube's
+  runs. Random loses 99.4-99.8% of its games to it, so `eval_random_games` saturates at once: a
+  sanity check only. The cap: heuristic games end by turn ~16-19 (random's EoE games draw 8-27% at 60):
+  keep `max_turns` 60.
+* **The measurements' own gap:** `eoe_yardsticks` should gain a `sealed` deck source (the S2 spec's
+  `MtgSpec::try_seats`) when S2 lands; `eoe2c` stands in for it. `Heuristic::m7c` is not a registered
+  bot (on the cube the two are within 0.1%; register it only if a run wants the old anchor).
