@@ -747,3 +747,10 @@ Arena's pools and packs including their colour depth (paper's spreads 1.5-2x wid
 skipped in both. **Decision (user, 2026-11-08):** inferring how the game generates packs from 17lands'
 data is environment modelling, not human play, and is allowed (the `arena` collation); 17lands stays a
 yardstick for everything humans do.
+
+**Hidden decklists (2026-11-09, branch `eoe-hidden-decks`; docs/ENGINE.md 102):** the spec key
+`"hidden_decklists"` (best-of-one) hides each deck from the other player: `determinize` deals the opponent's whole
+unseen deck from a prior conditioned on what the viewer has seen (a `DeckPrior` per seat: a stub over the set's
+table until S2's sealed builder plugs in), and no encoding shows an unseen decklist (checked by the public-state
+gate, `tests/hidden.rs` and `FUZZ_HIDDEN_DECKS=1`). The deck reader's target (`aux` `deck`, the opponent's unseen
+cards) and its declared inputs (`mtgz/az/deck_reader_v6.json`) are in place for zero-core's reader.
