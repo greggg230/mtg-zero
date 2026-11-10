@@ -515,6 +515,24 @@ fn mark(g: &mut Game, c: CardIdx, m: crate::game::Mark) -> Option<String> {
     Some(format!("{m:?} on {}", g.name(c)))
 }
 
+/// The mana spent to cast `c` made another amount (CR 601.2h: an object has one amount, its one
+/// `ManaSpent` mark, which the rules read: `mana_spent_of`): the mark set to `n` (`n + 1` where it
+/// was `n`), or added. (A second mark would change the view and no fact the rules read: on the
+/// EoE table every spell has one, `W6Db::mana_spent_all`; ENGINE.md 105.)
+fn mana_spent(g: &mut Game, c: CardIdx, n: u32) -> Option<String> {
+    use crate::game::Mark;
+    let r = g.obj_ref(c);
+    match g.marks.iter().position(|&(o, m)| o == r && matches!(m, Mark::ManaSpent(_))) {
+        Some(i) => {
+            let Mark::ManaSpent(old) = g.marks[i].1 else { unreachable!() };
+            let new = if old == n { n + 1 } else { n };
+            g.marks[i].1 = Mark::ManaSpent(new);
+            Some(format!("ManaSpent {old} -> {new} on {}", g.name(c)))
+        }
+        None => mark(g, c, Mark::ManaSpent(n)),
+    }
+}
+
 /// A player's field changed by `f` (a random player).
 fn pl(a: &mut MtgAz, r: &mut Rng, f: impl FnOnce(&mut Player) -> Option<String>) -> Option<String> {
     let p = player(r);
@@ -939,7 +957,7 @@ pub fn perturbations() -> Vec<Perturbation> {
         }),
         p!("the mana spent to cast a permanent", "Game.marks", |a, _r| {
             let c = *slots(&a.g).first()?;
-            mark(&mut a.g, c, crate::game::Mark::ManaSpent(3))
+            mana_spent(&mut a.g, c, 3)
         }),
         p!("a permanent is phased out", "W3State.phased", |a, _r| phased_out(&mut a.g, false)),
         p!("a phased-out permanent phased out indirectly", "W3State.indirect", |a, _r| phased_out(&mut a.g, true)),
@@ -1665,7 +1683,7 @@ pub fn perturbations() -> Vec<Perturbation> {
         // condition; W3's perturbation covers permanents).
         p!(rare "the mana spent to cast a spell", "Game.marks", |a, _r| {
             let &(_, c) = stack_spells(&a.g).first()?;
-            mark(&mut a.g, c, crate::game::Mark::ManaSpent(1))
+            mana_spent(&mut a.g, c, 1)
         }),
         // A copy effect's "except it has this ability" (Thespian's Stage):
         // its definition made with the ability (only in a table with one).

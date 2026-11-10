@@ -1177,6 +1177,9 @@ fn gate_positions(per: usize, seed: u64) -> Vec<(&'static str, MtgAz)> {
     let setup = ev.matches().unwrap().remove(0);
     let json = engine::az::draft_bots::match_spec(&setup, ev.ev.max_turns, ev.ev.format);
     specs.push(("drafted", MtgSpec::parse(&json).unwrap()));
+    // Edge of Eternities sealed: the EoE table, its identity space (ENGINE.md 105); last, so the
+    // other kinds' positions are as before
+    specs.push(("eoe", MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "arena"}, "max_turns": 60}"#).unwrap()));
     let mut out = Vec::new();
     for (name, sp) in specs {
         let mut h = Heuristic::new(seed);
@@ -1208,7 +1211,7 @@ fn public_view(g: &MtgAz, v: u8) -> Vec<u64> {
 /// The dual of the hidden-information checks (ENGINE.md 58.6): every public
 /// field of the game state is classified (`public_state::fields`, an
 /// exhaustive destructuring) and has a perturbation; each perturbation, made
-/// on positions of the four kinds of games, changes the public view for both
+/// on positions of the five kinds of games (EoE sealed's since ENGINE.md 105), changes the public view for both
 /// players (it is public) and the encoding for both viewers (it reaches the
 /// network), but the deliberate limits (`public_state::limits`; layout v5,
 /// ENGINE.md 60, left no gap).
@@ -2026,7 +2029,7 @@ fn to_choice(g: &mut engine::Game, k: engine::DecisionKind) {
 }
 
 /// Layout v5's facts hide nothing (ENGINE.md 60.4): on the gate's positions
-/// (the cube, the Delver mirror, best-of-three, a drafted match) with each of
+/// (the cube, the Delver mirror, best-of-three, a drafted match, EoE sealed) with each of
 /// the 42 perturbations v5 encodes applied, every world `determinize` makes
 /// for a viewer encodes the same for it; and a card exiled face
 /// down that its owner may play (Headliner Scarlett) is in its owner's
