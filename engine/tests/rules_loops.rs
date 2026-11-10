@@ -200,10 +200,10 @@ fn answer_x_0(g: &mut Game) {
 /// turn"): with X = 0 the activation is free and its effect, +0/+0, changes
 /// nothing (CR 613.4c), so once it resolves the game is where it was and the
 /// ability is not offered again (the effect is left out of the loop hash,
-/// `loops::inert`). Before, random play stacked and resolved X = 0
-/// activations without end (the fuzz's Edge of Eternities seed 1004). No
-/// option is cut on the way: holding priority, another one is a new state (the
-/// stack is longer) and stays offered.
+/// `loops::inert`; the fuzz's Edge of Eternities seed 1004). Holding
+/// priority, another X = 0 activation isn't offered either: the board is what
+/// it was when the first was taken (its stack object is the loop's own, MTR
+/// 4.4: no progress of the board state).
 #[test]
 fn cr_732_2a_lavaclaw_reaches_x_0_pump_is_no_progress() {
     let mut g = eoe_scen().battlefield(0, &["Lavaclaw Reaches", "Swamp", "Mountain", "Island"]).at(Step::Main1, 0).start();
@@ -219,13 +219,95 @@ fn cr_732_2a_lavaclaw_reaches_x_0_pump_is_no_progress() {
 {}", g.options_desc(), log(&g));
     g.choose(act(l, n - 1));
     answer_x_0(&mut g);
-    assert!(g.has_option(act(l, n - 1)), "holding priority, the stack is longer: a new state
-{}", log(&g));
-    g.choose(act(l, n - 1));
-    answer_x_0(&mut g);
+    assert!(!g.has_option(act(l, n - 1)), "holding priority, the board is unchanged: {:?}
+{}", g.options_desc(), log(&g));
     settle(&mut g);
     assert!(!g.has_option(act(l, n - 1)), "X = 0 changed nothing: {:?}
 {}", g.options_desc(), log(&g));
+}
+
+/// The same ability paid for: X = 1 taps a land, so holding priority the
+/// board has changed and another activation is offered (a loop that spends
+/// resources progresses, MTR 4.4).
+#[test]
+fn cr_732_2a_lavaclaw_reaches_x_1_pumps_stack_while_lands_pay() {
+    let mut g = eoe_scen().battlefield(0, &["Lavaclaw Reaches", "Swamp", "Mountain", "Island", "Mountain", "Mountain"]).at(Step::Main1, 0).start();
+    let l = bf(&g, 0, "Lavaclaw Reaches");
+    let n = g.def_of(l).activated.len() as u8;
+    let animate = (0..n).find(|&i| g.def_of(l).activated[i as usize].cost.mana.total() == 3).expect("{{1}}{{B}}{{R}}");
+    g.choose(act(l, animate));
+    let swamp = bf(&g, 0, "Swamp");
+    pay_with(&mut g, swamp, &[l]);
+    settle(&mut g);
+    let untapped = |g: &Game| g.permanents_of(0).filter(|&c| !g.obj(c).tapped).count();
+    let before = untapped(&g);
+    assert!(before >= 3, "the Reaches and two Mountains untapped: {before}
+{}", log(&g));
+    for k in 0..2 {
+        assert!(g.has_option(act(l, n - 1)), "pump {k}: {:?}
+{}", g.options_desc(), log(&g));
+        g.choose(act(l, n - 1));
+        for _ in 0..20 {
+            if at_priority(&g) {
+                break;
+            }
+            let c = if g.has_option(Choice::Number(1)) { Choice::Number(1) } else { g.pending_decision().unwrap().options[0].choice };
+            g.choose(c);
+        }
+    }
+    assert_eq!(untapped(&g), before - 2, "each X = 1 tapped a land (the Reaches itself or a Mountain)
+{}", log(&g));
+    settle(&mut g);
+    assert_eq!(g.pt(l).0, 4, "2 + 1 + 1
+{}", log(&g));
+}
+
+/// The EoE fuzz's seeds 1016 and 1024: Wandering Fumarole's "{0}: Switch" and
+/// Lavaclaw Reaches' X = 0 pump activated while holding priority in endless
+/// new orders, each a longer stack. By the board rule (the user's decision:
+/// tournament rules require a player looping without progressing the board
+/// state to choose a different action, MTR 4.4), each is offered once a
+/// board; then the player must pass, and random play from there ends the turn.
+#[test]
+fn mtr_4_4_free_activations_stacked_without_board_progress_stop() {
+    let mut g = eoe_scen()
+        .battlefield(0, &["Lavaclaw Reaches", "Wandering Fumarole", "Swamp", "Mountain", "Island", "Island", "Island", "Mountain", "Mountain"])
+        .at(Step::Main1, 0)
+        .start();
+    let (l, w) = (bf(&g, 0, "Lavaclaw Reaches"), bf(&g, 0, "Wandering Fumarole"));
+    let (nl, nw) = (g.def_of(l).activated.len() as u8, g.def_of(w).activated.len() as u8);
+    let al = (0..nl).find(|&i| g.def_of(l).activated[i as usize].cost.mana.total() == 3).expect("{{1}}{{B}}{{R}}");
+    let aw = (0..nw).find(|&i| g.def_of(w).activated[i as usize].cost.mana.total() == 4).expect("{{2}}{{U}}{{R}}");
+    g.choose(act(l, al));
+    let swamp = bf(&g, 0, "Swamp");
+    pay_with(&mut g, swamp, &[l, w]);
+    settle(&mut g);
+    g.choose(act(w, aw));
+    let island = bf(&g, 0, "Island");
+    pay_with(&mut g, island, &[l, w]);
+    settle(&mut g);
+    assert!(g.has_option(act(w, nw - 1)) && g.has_option(act(l, nl - 1)), "both animated: {:?}
+{}", g.options_desc(), log(&g));
+    g.choose(act(w, nw - 1));
+    answer_x_0(&mut g);
+    assert!(!g.has_option(act(w, nw - 1)), "the switch again, same board: {:?}", g.options_desc());
+    assert!(g.has_option(act(l, nl - 1)), "the pump not taken yet: {:?}", g.options_desc());
+    g.choose(act(l, nl - 1));
+    answer_x_0(&mut g);
+    assert!(!g.has_option(act(w, nw - 1)) && !g.has_option(act(l, nl - 1)), "neither again: {:?}", g.options_desc());
+    // Random play (X always 0, so nothing is paid) ends the turn.
+    let turn = g.turn().number;
+    let mut rng = Rng::new(1016);
+    let mut steps = 0;
+    while g.turn().number == turn && !g.is_over() {
+        let d = g.pending_decision().unwrap();
+        let c = if g.has_option(Choice::Number(0)) { Choice::Number(0) } else { d.options[rng.below(d.options.len() as u32) as usize].choice };
+        g.choose(c);
+        steps += 1;
+        assert!(steps < 2_000, "the turn goes on: {steps} decisions
+{}", g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
+"));
+    }
 }
 
 /// Wandering Fumarole, animated ("{0}: Switch this creature's power and

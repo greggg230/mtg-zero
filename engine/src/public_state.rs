@@ -663,7 +663,10 @@ pub fn perturbations() -> Vec<Perturbation> {
             effect(&mut a.g, c, Mod::ExileIfLeaves)
         }),
         p!("a creature can't block", "Game.effects", |a, r| {
-            let c = pick(&slot_creatures(&a.g), r)?;
+            // (One that can block now, as "can't be blocked" below: a creature that already can't
+            // block would not change; ENGINE.md 102.7 found one in a hidden-decklist position.)
+            let cs: Vec<CardIdx> = slot_creatures(&a.g).into_iter().filter(|&c| !a.g.flags_of(c).cant_block).collect();
+            let c = pick(&cs, r)?;
             effect(&mut a.g, c, Mod::CantBlock)
         }),
         p!("a creature can't be blocked", "Game.effects", |a, r| {
