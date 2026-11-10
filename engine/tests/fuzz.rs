@@ -66,9 +66,9 @@
 //! card) skips its game, counted and named at the end. Games only (sealed is best-of-one).
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 //!
-//! `FUZZ_HIDDEN_DECKS=1` (ENGINE.md 102): the mode's games (the default decks or `FUZZ_POOL=eoe`'s)
-//! with hidden decklists, played through `MtgAz` (`MtgAz::from_seats`, the table's `TablePrior`
-//! for both decks): every check of a game (the decider's encoding through `MtgAz::encode`) and at
+//! `FUZZ_HIDDEN_DECKS=1` (ENGINE.md 102): the mode's games (the default decks, `FUZZ_POOL=eoe`'s or
+//! `FUZZ_POOL=sealed`'s) with hidden decklists, played through `MtgAz` (`MtgAz::from_seats`, the
+//! table's `TablePrior` for both decks; with `FUZZ_POOL=sealed` the spec's `SealedPrior`, 102.6): every check of a game (the decider's encoding through `MtgAz::encode`) and at
 //! each checkpoint `MtgAz::determinize` for both viewers - the decider's actions, the viewer's
 //! view and whole encoding as in the real game, no known card dealt again, the opponent's sampled
 //! deck of the public size holding every card the viewer saw and equal to the match's, the
@@ -2020,7 +2020,11 @@ fn play_hidden(seed: u64) -> Played {
     let log = std::env::var("FUZZ_LOG").is_ok();
     let gspec = GameSpec { log, hidden_decks: true, hidden_decklists: true, ..GameSpec::default() };
     let seat = |deck: Vec<u16>, sideboard: Vec<u16>| engine::az::Seat { deck, sideboard, first_picks: Vec::new(), elsewhere: Vec::new() };
-    let prior: std::sync::Arc<dyn engine::az::hidden_decks::DeckPrior> = engine::az::hidden_decks::TablePrior::of(game_db());
+    // (FUZZ_POOL=sealed: the sealed prior of the game's spec, ENGINE.md 102.6; else the table's stub.)
+    let prior: std::sync::Arc<dyn engine::az::hidden_decks::DeckPrior> = match sealed_spec(seed).sealed.as_deref().filter(|_| sealed_mode()) {
+        Some(sl) => std::sync::Arc::new(engine::az::hidden_decks::SealedPrior::of_spec(sl)),
+        None => engine::az::hidden_decks::TablePrior::of(game_db()),
+    };
     let mut a = engine::az::MtgAz::from_seats(game_db(), gspec, engine::az::Format::Bo1, &[seat(d0, s0), seat(d1, s1)], seed, [Some(prior.clone()), Some(prior)])
         .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
     let mut rng = Rng::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 1);
