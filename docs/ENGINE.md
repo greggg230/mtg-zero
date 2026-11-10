@@ -21294,5 +21294,28 @@ What that prior needs from here:
   engine, the builder through the bindings).
 * **`FUZZ_POOL=sealed`** (`engine/tests/fuzz.rs`): each game's decks are the sealed spec's (arena
   pools for even seeds, paper for odd), every check of the default mode; a game whose pool holds an
-  unsupported card is skipped, counted and named; games only. 200 games: no failure.
+  unsupported card is skipped, counted and named; games only. **`FUZZ_GAMES=20000`** (seeds 0-19,999,
+  run in parallel chunks): 19,997 seeds pass (18,038 games played, 1,959 skipped for The Dominion
+  Bracelet; wins 8,631 / 8,700, 707 draws, none aborted); **three seeds find engine bugs**, not fixed
+  here (the engine's owners'; 101.7).
+* Full engine suite (`cargo test --release -p engine`): 2,143 passed, 0 failed, 20 ignored (146
+  binaries). `python -m pytest tests -q`: 213 passed, 1 skipped. Digests unchanged. `python
+  tools/gate.py engine --no-mac --tested-sha 5097fa3 --expect-digest af00cc85e05ea0c1
+  --expect-digest0 660b3c387f18be70`: GATE PASSED engine 5097fa3327f0 in 523s (the Mac recheck not
+  needed).
+
+### 101.7 Engine bugs the sealed fuzz found (reported, not fixed)
+
+* **Seed 18106** (`FUZZ_POOL=sealed FUZZ_FIRST=18106 FUZZ_GAMES=1 FUZZ_LOG=1`): a panic in payment,
+  `pay.rs:2427` "a Pollinator to activate (the budget counts them)": in a world determinized for P1,
+  P1 casts Starbreach Whale from exile and pays with Island, Forest, then Gene Pollinator's "{T}, tap
+  an untapped permanent you control: add one mana of any color" (option 553) choosing Mechan
+  Shieldmate as the tapped permanent; the payment's `pol_actors` list is empty when the
+  `POL_FOR` source is paid (the option completes in the check of every option, `check_options_complete`).
+* **Seeds 3230 and 12350** (the same rerun line): a turn that doesn't end. Random play activates
+  Wandering Fumarole's "{0}: switch its power and toughness" (and, in 12350, Lavaclaw Reaches' "{X}:
+  +X/+0" with X = 0) again and again: past 1,000 decisions in one turn (turn 40 and turn 27), still
+  going after the fuzzer's minutes. The no-progress rule (100.7) should end such loops; here every
+  activation and resolution leaves a new until-end-of-turn effect, so (apparently) no state repeats.
+
 

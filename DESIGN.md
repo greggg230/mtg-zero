@@ -756,5 +756,6 @@ of the pool the sideboard); the `mtg` spec's `"sealed"` key (two generated or gi
 from its seed, built, best-of-one on the EoE table with open decklists; an evaluation set; a pool
 holding an unsupported card fails loudly); the 17lands pools in engine terms (93.7% of Premier
 pools fully supported on this base, 99.1% once The Dominion Bracelet merges) and a helper that
-makes a spec playing a pool's human build or our build of it; `FUZZ_POOL=sealed`. Next: hidden
+makes a spec playing a pool's human build or our build of it; `FUZZ_POOL=sealed` (20,000 seeds: three
+find engine bugs, a payment panic and two loops that don't end, ENGINE.md 101.7). Next: hidden
 decklists (the encoding owner's; ENGINE.md 101.5 lists what the deal's prior needs), then S3.
