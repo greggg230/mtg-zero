@@ -4094,6 +4094,92 @@ mod tests {
         })
     }
 
+    /// `granting_db`'s grant with Gene Pollinator (an artifact creature: "{T},
+    /// Tap an untapped permanent you control: Add one mana of any color") in
+    /// the table: the Pollinator has the granted "{T}: Add {U}" too.
+    fn pollinator_granting_db() -> &'static crate::db::CardDb {
+        static DB: std::sync::OnceLock<&'static crate::db::CardDb> = std::sync::OnceLock::new();
+        DB.get_or_init(|| {
+            use crate::db::{ActEffect, ActivatedDef, CardDb, Cost, ManaAbility, ManaProd, SPEND_OUTSIDE_HAND};
+            let mut cards = crate::db::load_cube_document().cards;
+            cards.extend(crate::db::load_eoe_document().cards.into_iter().filter(|c| c.name == "Gene Pollinator"));
+            let mut db = CardDb::from_cards(&cards);
+            let id = db.expect_id("Snapcaster Mage").unwrap();
+            let mana = ManaAbility { prod: ManaProd::One(1 << crate::mana::U), damage_to_you: 0, sac_if_no: None, only: SPEND_OUTSIDE_HAND, uncounterable: false, haste: false, opp_life: 0 };
+            let ad = ActivatedDef {
+                cost: Cost { tap: true, ..Cost::default() },
+                effect: ActEffect::Mana(mana),
+                sorcery: false,
+                instant_only: false,
+                exhaust: false,
+                only_if: None,
+                your_turn: false,
+                loyalty: None,
+                discounts: Vec::new(),
+                boast: false,
+                x: false,
+                special: None,
+            };
+            let yours = Filter::And(Box::new(Filter::Type(crate::db::types::ARTIFACT)), Box::new(Filter::Controller(true)));
+            let d = db.def_mut(id);
+            let k = d.activated.len();
+            d.activated.push(ad);
+            d.latent += 1;
+            d.w3.grants_activated.push((yours, k as u8));
+            d.w3.seen |= crate::eoe_w3::SEEN_W3_GRANT_ACT;
+            db.spend_kinds |= SPEND_OUTSIDE_HAND;
+            db.expect_id("Gene Pollinator").expect("supported");
+            db.leak()
+        })
+    }
+
+    /// docs/shortcuts.md N23, CR 602.2b, 601.2g (the EoE S2 sealed fuzz, seed
+    /// 18106: Gene Pollinator tapped for Mm'menon's granted "{T}: Add {U}" while
+    /// a spell was cast from exile, then a Pollinator source of another
+    /// permanent offered and its payment unable to finish: "a Pollinator to
+    /// activate"). A Pollinator tapped for its own other mana ability can't
+    /// activate its Pollinator ability: once it is picked for the granted {U},
+    /// no permanent is offered for a Pollinator's ability (the pools count it:
+    /// ENGINE.md 100.4.7), and the payment completes. Faithless Looting's
+    /// flashback ({2}{R}) with the Pollinator's {U}, two Islands and a Mountain.
+    #[test]
+    fn cr_602_2b_a_pollinator_tapped_for_a_granted_mana_ability_activates_no_more() {
+        use crate::testkit::Scenario;
+        let mut g = Scenario::new(pollinator_granting_db())
+            .spec(|s| {
+                s.auto_single = false;
+                s.log = true;
+            })
+            .library(0, &["Island"; 10])
+            .library(1, &["Island"; 10])
+            .battlefield(0, &["Snapcaster Mage", "Gene Pollinator", "Island", "Island", "Mountain"])
+            .graveyard(0, &["Faithless Looting"])
+            .hand(0, &["Island"])
+            .at(crate::game::Step::Main1, 0)
+            .start();
+        let fl = g.card(0, "Faithless Looting", Zone::Graveyard);
+        let pol = g.permanents_of(0).find(|&c| g.def_of(c).name == "Gene Pollinator").unwrap();
+        let others: Vec<CardIdx> = g.permanents_of(0).filter(|&c| matches!(g.def_of(c).name.as_str(), "Island" | "Mountain")).collect();
+        let a = g.graveyard_action(0, fl);
+        g.apply(a, &mut Vec::new()).unwrap();
+        assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}", g.options_desc());
+        let granted = Choice::Ability(pol, AbilitySlot::Activated(1));
+        assert!(g.has_option(granted), "the Pollinator's granted {{U}}: {:?}", g.options_desc());
+        // (The rest, {1}{R}: the lands; the Pollinator's sources of them, by
+        // their own ids, were offered too, and the payment couldn't finish.)
+        g.choose(granted);
+        assert!(!others.iter().any(|&c| g.has_option(Choice::Card(c))), "no Pollinator to activate: {:?}", g.options_desc());
+        for _ in 0..20 {
+            if g.obj(fl).zone == Zone::Stack && g.kind() == Some(DecisionKind::Priority) {
+                break;
+            }
+            let c = g.pending_decision().unwrap().options[0].choice;
+            g.choose(c);
+        }
+        assert_eq!(g.obj(fl).zone, Zone::Stack, "{}", g.log_lines().join("\n"));
+        assert!(g.objs[pol.i()].tapped, "{}", g.log_lines().join("\n"));
+    }
+
     /// The cube and a land with four activated abilities ("{T}: Add {C}" and
     /// three "{1}: Draw a card."), to reach a payment source past a
     /// permanent's fourth `ACTIVATE` id (docs/shortcuts.md 31.7.2k).

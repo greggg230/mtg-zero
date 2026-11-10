@@ -21152,6 +21152,11 @@ Pollinator and the artifact Pollinator: {G}{G}{G}{U}, never four {G}; a loud fai
 `cr_601_2h_the_pollinator_a_tap_cost_needs_doesnt_activate` (Otharri, Suns' Glory's "Tap an untapped
 Rebel" with the Rebel Pollinator and Gene Pollinator: Gene Pollinator taps the Bear; the Rebel
 activated before, and the cost had no Rebel to tap).
+`pay::tests::cr_602_2b_a_pollinator_tapped_for_a_granted_mana_ability_activates_no_more` (the S2
+sealed fuzz's seed 18106 on `eoe-s2-pools`, from before this rework: Gene Pollinator tapped for
+Mm'menon's granted "{T}: Add {U}" while a spell was cast from exile, then a Pollinator source of
+another permanent offered and the payment's end panicking, "a Pollinator to activate"; rebuilt with
+`granting_db`'s grant and Faithless Looting's flashback: it fails so at 7ae9032).
 
 **Digests** (N23): full `3f49f29043418114` -> `36a8a84c37356ff8`, `DIGEST_ENCODING=0`
 `27f42bffa609f282` -> `3a6e81f85dc10d59`: 1 of the 2,500 games changes (h 475: two Orcish
