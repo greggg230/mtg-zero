@@ -21956,3 +21956,15 @@ space's card names; `layout_v6.json` and every cube, Delver or constructed encod
 digests below). The public-state gate's positions gain a fifth kind, EoE sealed games (`gate_positions`'s
 last, so the other kinds' positions are as before), so `public_state_reaches_the_encoding` and
 `the_v5_facts_encode_no_hidden_information` run on EoE positions too.
+
+### 105.3 The zero-core pin: `feat/deck-reader` 0974e50
+
+`third_party/zero-core` e4779b2 -> **0974e50** (`feat/deck-reader`, on GitHub): zero-core's readers (its
+docs/az.md 36: a game package declares `readers={game: [{target, inputs, hidden, enter, belief}]}`, each a
+small MLP of the network over declared bag and global features that predicts an auxiliary target, trains
+by its loss and feeds its prediction into the trunk; run settings `reader_<target>`, `reader_detach`). A
+Python-only change (no Rust between the two commits); every reader is off by default and the network,
+optimizer and losses are the code of before (zero-core's byte-identity check, its 36.6-36.7). `build_py.sh`
+reads the pin from the gitlink (no sha of its own). On this branch with the new core: `python -m pytest
+tests -q` 221 passed, 1 skipped; config.json gains `reader_detach` (and `reader_<target>` once the package
+declares a reader).
