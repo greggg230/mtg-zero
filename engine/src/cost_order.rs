@@ -168,27 +168,94 @@ fn bits(m: u32) -> impl Iterator<Item = u8> {
     (0..part::N).filter(move |&k| m & (1 << k) != 0)
 }
 
-/// What a filter on objects reads that paying a cost can change: their
-/// characteristics (types, colours, power, abilities: what continuous
-/// effects change), whether they are tapped, their counters, the number of
-/// some permanents.
+/// What a part of a cost reads of its candidates that paying another part
+/// can change: their characteristics (`chars`: types, colours, keywords and
+/// abilities; `pt`: power and toughness: what continuous effects change),
+/// whether they are tapped, their counters, the number of some permanents;
+/// `hand`: the candidates are cards in a hand (where only Painter's Servant
+/// and characteristic-defining abilities change characteristics, CR 604.3,
+/// 611.3: a static ability of a permanent affects permanents).
 #[derive(Clone, Copy, Default, Debug)]
 struct Reads {
     chars: bool,
+    pt: bool,
     tapped: bool,
     counters: bool,
     counts: bool,
+    hand: bool,
 }
 
 impl Reads {
     fn or(self, o: Reads) -> Reads {
-        Reads { chars: self.chars || o.chars, tapped: self.tapped || o.tapped, counters: self.counters || o.counters, counts: self.counts || o.counts }
+        Reads {
+            chars: self.chars || o.chars,
+            pt: self.pt || o.pt,
+            tapped: self.tapped || o.tapped,
+            counters: self.counters || o.counters,
+            counts: self.counts || o.counts,
+            hand: self.hand || o.hand,
+        }
+    }
+
+    fn any(self) -> bool {
+        self.chars || self.pt || self.tapped || self.counters || self.counts
+    }
+}
+
+/// Which characteristics a change may change (`Game::chars_may_change`).
+#[derive(Clone, Copy, Default, Debug)]
+struct Change {
+    chars: bool,
+    pt: bool,
+}
+
+impl Change {
+    const BOTH: Change = Change { chars: true, pt: true };
+
+    fn or(self, o: Change) -> Change {
+        Change { chars: self.chars || o.chars, pt: self.pt || o.pt }
+    }
+
+    fn hits(self, r: Reads) -> bool {
+        (self.chars && r.chars) || (self.pt && r.pt)
+    }
+}
+
+/// What a static ability's or an effect's modification changes (exhaustive:
+/// a new modification says). Rules effects ("can't block") change nothing a
+/// cost reads.
+fn mod_change(m: &Mod) -> Change {
+    let pt = Change { chars: false, pt: true };
+    let chars = Change { chars: true, pt: false };
+    match m {
+        Mod::SetPt(..) | Mod::Pt(..) | Mod::PtPer { .. } | Mod::PtPerSourceCounter { .. } | Mod::SwitchPt | Mod::PowerPlusGreatestMv { .. } => pt,
+        Mod::Types { .. }
+        | Mod::Colors(_)
+        | Mod::Keywords(_)
+        | Mod::Protection(_)
+        | Mod::GainSacMana(_)
+        | Mod::AllCreatureTypes
+        | Mod::BecomeTypes { .. }
+        | Mod::GainLatent(_) => chars,
+        // (Losing all abilities loses static abilities too; a change of
+        // control changes what "you control" reads.)
+        Mod::LoseAllAbilities | Mod::ControlFrom(_) => Change::BOTH,
+        Mod::CantBlock
+        | Mod::CantBeBlocked
+        | Mod::MustAttack
+        | Mod::ExileIfDies
+        | Mod::AttackDespiteDefender
+        | Mod::Goad
+        | Mod::ExileIfLeaves
+        | Mod::PreventCombatDamage
+        | Mod::MustAttackPlayer => Change::default(),
     }
 }
 
 /// What a filter reads (exhaustive: a new filter says).
 fn filter_reads(f: &Filter) -> Reads {
     let chars = Reads { chars: true, ..Reads::default() };
+    let pt = Reads { pt: true, ..Reads::default() };
     match f {
         Filter::And(a, b) => filter_reads(a).or(filter_reads(b)),
         Filter::Or(v) => v.iter().fold(Reads::default(), |r, x| r.or(filter_reads(x))),
@@ -199,14 +266,10 @@ fn filter_reads(f: &Filter) -> Reads {
         | Filter::Supertype(_)
         | Filter::Color(_)
         | Filter::Colorless
-        | Filter::TotalPtAtMost(_)
-        | Filter::PowerAtLeast(_)
-        | Filter::PowerAtMost(_)
-        | Filter::ToughnessAtMost(_)
-        | Filter::PtIs(..)
         | Filter::HasKeyword(_)
         | Filter::HasActivatedAbility
         | Filter::HasWarp => chars,
+        Filter::TotalPtAtMost(_) | Filter::PowerAtLeast(_) | Filter::PowerAtMost(_) | Filter::ToughnessAtMost(_) | Filter::PtIs(..) => pt,
         Filter::Tapped => Reads { tapped: true, ..Reads::default() },
         Filter::HasCounter(_) | Filter::NoCounters(_) | Filter::MvIsSourceCounters(_) => Reads { counters: true, ..Reads::default() },
         Filter::MvAtMostLandsYouControl | Filter::OathTarget => Reads { counts: true, ..Reads::default() },
@@ -278,7 +341,7 @@ impl Game {
         let r = match k {
             SACRIFICE | BOUNCE => {
                 let s = if k == SACRIFICE { cost.sacrifice.as_ref() } else { cost.bounce.as_ref() }.expect("the part's cost");
-                w.leave = self.permanents_of(p).collect();
+                w.leave = self.sacrifice_candidates(p, card, s);
                 w.zones = true;
                 filter_reads(&s.filter)
             }
@@ -308,25 +371,26 @@ impl Game {
                     DISCARD_ALSO => cost.discard_also.as_ref().map(|d| &d.1),
                     _ => cost.exile_from_hand.as_ref(),
                 };
-                f.map_or(none, filter_reads)
+                Reads { hand: true, ..f.map_or(none, filter_reads) }
             }
             TAP_UNTAPPED => {
-                w.tapped = self.permanents_of(p).filter(|&c| c != card).collect();
-                match (&cost.tap_untapped, &cost.tap_x) {
-                    (Some(t), _) => filter_reads(&t.filter),
-                    (None, Some(f)) => filter_reads(f),
-                    (None, None) => none,
-                }
+                let t = match (&cost.tap_untapped, &cost.tap_x) {
+                    (Some(t), _) => t.clone(),
+                    (None, Some(f)) => crate::db::SacCost { filter: f.clone(), n: 0, another: true },
+                    (None, None) => unreachable!("taps owed without a tap cost"),
+                };
+                w.tapped = self.tap_candidates(p, card, &t).collect();
+                filter_reads(&t.filter)
             }
             CREW => {
                 // (Creatures, their power and "crews as though its power were
                 // greater".)
-                w.tapped = self.permanents_of(p).filter(|&c| c != card).collect();
-                Reads { chars: true, ..Reads::default() }
+                w.tapped = self.crew_eligible(p, card);
+                Reads { chars: true, pt: true, ..Reads::default() }
             }
             REMOVE_COUNTER_FROM => {
-                w.counters = self.permanents_of(p).collect();
-                let (f, _) = cost.remove_counter_from.as_ref().expect("the part's cost");
+                let (f, kind) = cost.remove_counter_from.as_ref().expect("the part's cost");
+                w.counters = self.remove_counter_candidates(p, card, f, *kind);
                 filter_reads(f).or(Reads { counters: true, ..Reads::default() })
             }
             REMOVE_COUNTERS | LOYALTY => {
@@ -367,7 +431,10 @@ impl Game {
     /// take, and the engine's order (taps and counters first, then what leaves
     /// the battlefield, the hand, the graveyard: `pay_costs`, `part::DOMINANT`)
     /// is one in which any part's objects could have been taken: every
-    /// outcome of any order is one of its own (ENGINE.md 100.4.9).
+    /// outcome of any order is one of its own (ENGINE.md 100.4.9). (Each part's
+    /// writes are its candidates' now: by induction over the payment, while no
+    /// part's payment changes what another reads, every part's candidates are
+    /// its candidates now, less the objects taken.)
     pub(crate) fn order_free(&self, o: &Order) -> bool {
         use part::*;
         let left = o.left();
@@ -394,7 +461,7 @@ impl Game {
             (k, r, w)
         }).collect();
         for (k, r, _) in &views {
-            if !(r.chars || r.tapped || r.counters || r.counts) {
+            if !r.any() {
                 continue;
             }
             let mut w = Writes::default();
@@ -406,76 +473,36 @@ impl Game {
             if (r.tapped && !w.tapped.is_empty()) || (r.counters && !w.counters.is_empty()) || (r.counts && !w.leave.is_empty()) {
                 return false;
             }
-            if r.chars && self.chars_may_change(&w) {
+            if (r.chars || r.pt) && self.chars_may_change(o.p, &w, r.hand).hits(*r) {
                 return false;
             }
         }
         true
     }
 
-    /// Could changes `w` change any object's characteristics (its types,
-    /// subtypes, colours, power and toughness, abilities)? Every continuous
-    /// effect the layers apply (`layers.rs`) is looked at: static abilities of
-    /// permanents and emblems (their source leaving, their condition, the
-    /// objects they affect, their amounts), effects lasting while an object
-    /// remains, characteristic-defining abilities, counters, Painter's
-    /// Servant, a Blood Moon, W3's subtype grants and granted abilities,
-    /// reconfigure. `true` when any of them reads what `w` changes.
-    fn chars_may_change(&self, w: &Writes) -> bool {
+    /// Which characteristics could changes `w` change (`Change`: types,
+    /// subtypes, colours, keywords and abilities; power and toughness)? Every
+    /// continuous effect the layers apply (`layers.rs`) is looked at: static
+    /// abilities of permanents and emblems (their source leaving, their
+    /// condition, the objects they affect, their amounts), effects lasting
+    /// while an object remains, characteristic-defining abilities, counters,
+    /// Painter's Servant, a Blood Moon, W3's subtype grants and granted
+    /// abilities, reconfigure; each by what it changes. `hand`: of cards in a
+    /// hand (Painter's Servant and characteristic-defining abilities only):
+    /// `p`'s, whose cards the cost may take (no other hidden card is read).
+    fn chars_may_change(&self, p: PlayerId, w: &Writes, hand: bool) -> Change {
+        let mut out = Change::default();
         if w.leave.is_empty() && !w.zones && !w.life && w.counters.is_empty() && w.tapped.is_empty() {
-            return false;
-        }
-        // Counters are part of an object's power and toughness and keywords
-        // (CR 122.1a-b).
-        if !w.counters.is_empty() {
-            return true;
+            return out;
         }
         let leaving = |c: CardIdx| w.leave.contains(&c);
+        // (What a scope's or a count's filter reads that `w` changes. An
+        // object's own types and colours change only through the effects
+        // looked at here themselves.)
         let reads_w = |f: &Filter| {
             let r = filter_reads(f);
-            (r.tapped && !w.tapped.is_empty()) || (r.counters && !w.counters.is_empty()) || ((r.counts || r.chars) && !w.leave.is_empty())
+            (r.tapped && !w.tapped.is_empty()) || (r.counters && !w.counters.is_empty()) || (r.counts && !w.leave.is_empty())
         };
-        if self.n_static > 0 {
-            for &s in self.battlefield.iter().chain(self.command.iter()) {
-                let own = self.db.def(self.objs[s.i()].def);
-                for st in self.abilities(s).statics.iter().chain(own.statics.iter()) {
-                    if leaving(s) && st.scope != Scope::This {
-                        return true;
-                    }
-                    if st.cond.as_ref().is_some_and(|k| self.cond_reads(k, s, w)) {
-                        return true;
-                    }
-                    if let Scope::Matching { filter, .. } = &st.scope {
-                        if reads_w(filter) {
-                            return true;
-                        }
-                    }
-                    for m in &st.mods {
-                        let hit = match m {
-                            Mod::PtPer { filter, .. } => !w.leave.is_empty() || reads_w(filter),
-                            Mod::PtPerSourceCounter { .. } => w.counters.contains(&s),
-                            Mod::PowerPlusGreatestMv { .. } => !w.leave.is_empty(),
-                            _ => false,
-                        };
-                        if hit {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        for e in &self.effects {
-            if let crate::layers::Until::WhileOnBattlefield(r) = e.until {
-                if leaving(r.idx) {
-                    return true;
-                }
-            }
-            if let crate::layers::Affected::Group(f) = &e.on {
-                if reads_w(f) {
-                    return true;
-                }
-            }
-        }
         // Characteristic-defining power and toughness (in every zone, CR
         // 604.3).
         let cda_hit = |c: CardIdx| {
@@ -485,21 +512,61 @@ impl Game {
                 PtCda::Leveler { .. } => w.counters.contains(&c),
             })
         };
-        if self.battlefield.iter().any(|&c| cda_hit(c)) || self.players.iter().any(|pl| pl.hand.iter().any(|&c| cda_hit(c))) {
-            return true;
+        let cdas = if hand { self.players[p as usize].hand.iter().any(|&c| cda_hit(c)) } else { self.battlefield.iter().any(|&c| cda_hit(c)) };
+        if cdas {
+            out.pt = true;
         }
-        if !w.leave.is_empty() {
-            if w.leave.iter().any(|&c| self.abilities(c).paints || self.abilities(c).grants_equipped.is_some()) {
-                return true;
-            }
-            if self.moon_game || self.w3.seen & (crate::eoe_w3::SEEN_W3_SUBTYPE | crate::eoe_w3::SEEN_W3_GRANT_ACT) != 0 {
-                return true;
-            }
-            if self.battlefield.iter().any(|&c| self.def_of(c).reconfigure && self.objs[c.i()].attached.is_some_and(|h| leaving(h.idx))) {
-                return true;
+        // Painter's Servant: every card's colour (CR 613.1e).
+        if w.leave.iter().any(|&c| self.abilities(c).paints) {
+            out.chars = true;
+        }
+        if hand {
+            return out;
+        }
+        // Counters are part of an object's power and toughness and keywords
+        // (CR 122.1a-b).
+        if !w.counters.is_empty() {
+            return Change::BOTH;
+        }
+        if self.n_static > 0 {
+            for &s in self.battlefield.iter().chain(self.command.iter()) {
+                let own = self.db.def(self.objs[s.i()].def);
+                for st in self.abilities(s).statics.iter().chain(own.statics.iter()) {
+                    let sensitive = (leaving(s) && st.scope != Scope::This)
+                        || st.cond.as_ref().is_some_and(|k| self.cond_reads(k, s, w))
+                        || matches!(&st.scope, Scope::Matching { filter, .. } if reads_w(filter));
+                    for m in &st.mods {
+                        let amount = match m {
+                            Mod::PtPer { filter, .. } => !w.leave.is_empty() || reads_w(filter),
+                            Mod::PtPerSourceCounter { .. } => w.counters.contains(&s),
+                            Mod::PowerPlusGreatestMv { .. } => !w.leave.is_empty(),
+                            _ => false,
+                        };
+                        if sensitive || amount {
+                            out = out.or(mod_change(m));
+                        }
+                    }
+                }
             }
         }
-        false
+        for e in &self.effects {
+            if let crate::layers::Until::WhileOnBattlefield(r) = e.until {
+                if leaving(r.idx) {
+                    out = out.or(mod_change(&e.m));
+                }
+            }
+        }
+        // (An Equipment's granted abilities; a Blood Moon; W3's granted
+        // subtypes and abilities; a reconfigure creature unattached.)
+        if !w.leave.is_empty()
+            && (w.leave.iter().any(|&c| self.abilities(c).grants_equipped.is_some())
+                || self.moon_game
+                || self.w3.seen & (crate::eoe_w3::SEEN_W3_SUBTYPE | crate::eoe_w3::SEEN_W3_GRANT_ACT) != 0
+                || self.battlefield.iter().any(|&c| self.def_of(c).reconfigure && self.objs[c.i()].attached.is_some_and(|h| leaving(h.idx))))
+        {
+            out = Change::BOTH;
+        }
+        out
     }
 
     /// Does condition `k` of a static ability of `s` read what `w` changes
