@@ -21580,3 +21580,205 @@ spec with `"decks": "eval"`). What exists and what is missing:
 * **The measurements' own gap:** `eoe_yardsticks` should gain a `sealed` deck source (the S2 spec's
   `MtgSpec::try_seats`) when S2 lands; `eoe2c` stands in for it. `Heuristic::m7c` is not a registered
   bot (on the cube the two are within 0.1%; register it only if a run wants the old anchor).
+
+## 104. Paired deck comparison (S4 verify, S5 yardstick)
+
+Branch `eoe-paired` (from `eoe-s2-pools` 6f7f2f8), 2026-11-09. DESIGN.md 9 item 4, "the best few
+raced in paired games (same opponents, same shuffles), losers dropped early", and the S5 yardstick
+(our build of a 17lands pool against the human build of the same pool, piloted by the same player),
+built with the players there are today (`random`, the heuristic) and taking a network checkpoint as
+the pilot without changes. Code: `mtgz/sealed/compare.py` (the tool and its CLI),
+`tools/sealed_noise.py` (the noise study), one addition to the sealed spec (104.2,
+`engine/src/az/sealed/mod.rs`). No rules, layout, encoding or zero-core change; the digests are
+unchanged. The 17lands builds enter only as yardstick candidates (DESIGN.md 0): nothing here is on a
+training path.
+
+### 104.1 What "the same shuffles" can mean
+
+A game's randomness is one stream, `Game::rng` (xoshiro256++ from the game seed), consumed in the
+order the game asks: the chooser (CR 103.1, when the spec names none), the setup shuffles (103.3:
+the starting player's library, then the other's), a mulligan's shuffle, every later shuffle and
+random choice. A Fisher-Yates shuffle of n cards draws below(n), below(n - 1), ..., below(2)
+whatever the cards are, so with one seed two decks of one size are shuffled by **the same
+permutation of the positions of the list their library starts from** - and the comparison controls
+that list.
+
+* **Per card slot (chosen).** The candidates are laid out slot by slot (`compare.slots`): each copy
+  of a card is an item held by some of the decks; items held by more decks come first, then lands
+  before spells, then by mana value and name, and each takes the lowest slot free in all its decks.
+  For two decks: the shared cards fill the same slots and the cards they differ in follow in pairs,
+  land with land, then a spell with the spell nearest in mana value. Every deck is given in that
+  order (`"order": "given"`, 104.2). Then, from one seed, a shared card lies at the same position
+  of the shuffled library in every candidate's game and a swapped card where its counterpart lies:
+  the opening hands agree slot for slot, and so does every draw from a library not shuffled since.
+* **Per library position, decks sorted (the engine's default).** A given deck is sorted by
+  definition, so a swap x -> y moves every card whose definition lies between x and y by one slot,
+  and those cards land elsewhere: over 24 setups of a one-card swap, the sorted decks differ in more
+  than three positions per setup, the laid-out ones in exactly one (`engine/tests/sealed.rs`). The
+  study's `sorted` design measures what that costs (104.5).
+* **Per card** is the slot layout for the shared cards and undefined for a card only one deck has;
+  the layout's pairing of the differing cards (by kind and mana value) is the coupling chosen for
+  those.
+
+Shared besides the deal: the opponent (the same deck in the same order: its whole library and every
+draw it makes), the seat of the deck under test, the chooser, and the pilot's own randomness (a
+bot's generator, a search's determinizations and noise), which zero-core derives from (driver seed,
+game id): each candidate plays a block of games in its own driver with the block's driver seed and
+the same queue order. **What cannot be shared is everything after the first divergence.** A
+different decision (one deck's hand kept and the other's mulliganed; another play once the swapped
+card is drawn) or a different number of random draws (a shuffle effect - EoE's Lander tokens search
+and shuffle - or a random choice in one game only) offsets the two streams, and their later
+shuffles are independent draws: the rules give no correspondence between two games' later
+shuffles. Keeping each player's later shuffles coupled would need per-player streams in `Game` (its
+RNG and `determinize`'s reseeding of it), an engine change outside this branch. **Decks of
+different sizes** (a 41-card human build; 1,271 of the 13,519 supported 17lands builds are not 40
+cards, 101.4) share no setup permutation: such a pair shares the seed, the opponent, the seat and the
+chooser, and the opponent's library only when the opponent takes the first turn (it shuffles
+first); the tool's output says so.
+
+Game k's layout, every candidate alike: the game seed mix(seed, k) (chained splitmix64); the field's
+opponent k; the deck under test in seat (its place in its block's driver) % 2, which is k % 2 (a
+game an engine error removes shifts the rest of its block); the chooser (k // 2) % 2. Four games
+cover seat x chooser, and the heuristic always takes the first turn when it chooses (bots.rs), so
+play and draw alternate in twos.
+
+### 104.2 The sealed spec's `"order"` (the engine addition)
+
+A seat's given deck (`sealed.p0` / `p1` with `deck`) may carry `"order": "given"`: its library
+before the setup shuffle is the list in that order (`SeatSource::Build { ordered }`); `"sorted"`,
+the default and the behaviour of before, sorts it by definition; `"order"` with a pool is an error
+(a pool's deck is the builder's). The shuffle is uniform either way, so the distribution of games is
+unchanged; only which slot a shuffled position holds for a given seed changes. `SealedSpec::to_json`
+writes it back. Tests (`engine/tests/sealed.rs`): `a_given_order_is_the_library_before_the_setup_shuffle`
+(the sorted order given is the default's game; another order another game of the same cards, the
+other seat's setup untouched; the JSON round trip), `decks_laid_out_slot_by_slot_share_the_setup_shuffle`
+(two 40-card decks differing in one slot agree in every other position of the hand and library
+after the setup, for 24 seeds and the deck in either seat, with the same starting player and the
+opponent's setup equal; sorted decks don't), and the errors. Without the key every spec is what it
+was: digests unchanged (full af00cc85e05ea0c1, `DIGEST_ENCODING=0` 660b3c387f18be70).
+
+### 104.3 The tool (`mtgz/sealed/compare.py`)
+
+* **`Field`**: fixed decks (game k plays deck k mod their number), or (the default) a seeded stream
+  of our builder's decks from generated pools (collation arena by default, the builder's settings):
+  deck j is built from the j-th pool of the stream mix(seed, i), i = 0, 1, ..., whose every card the
+  engine supports; a pool holding an unsupported card is passed over whole and listed in `skipped`
+  (on this base The Dominion Bracelet, ~5% of pools), never a dropped card.
+* **`Pilot`**: `random`, `heuristic`, or a checkpoint path (`--sims`, `--chance-k` default 0,
+  `--device`): a network seat as zero.h2h builds it (`G.nn_seat` + `h2h.run_rule`: its run's
+  evaluation move rule, root belief, root search) with a `NetEvaluator`. The same pilot plays both
+  seats unless `--opp-pilot` names another one for the field (the driver's seat table alternates
+  with the game id, the deck under test's seat).
+* **`Comparison(cands, field, pilot, seed, pairing, block, threads)`**, pairing `full` (104.1),
+  `sorted` (no slot layout), `opponent` (the same opponent, seat and chooser; independent seeds and
+  pilot streams) or `none` (independent opponents as well: the unpaired baseline). Blocks of `block`
+  games: per candidate one zero-core driver (rolling, queued setups: one sealed spec per game). An
+  engine error in a game (a panic: an engine bug) removes that game for every candidate and replays
+  the block without it; the game's spec, driver seed and game id are kept in `failed` (the repro).
+  **A comparison replays exactly** from its seed, block size, field and pilot: the scores are equal
+  for 1 and 3 driver threads (tested).
+* **Output**: each candidate's games, score and se; each pair's paired difference over the common
+  games (mean D, se = sd(D) / sqrt(n), a 95% normal interval), the unpaired se of the same games
+  (sqrt((var_a + var_b) / n)), `var_ratio` = var(D) / (var_a + var_b) (the variance the pairing
+  left: 1 = none removed), the Elo difference against the field, and how many games came out the
+  same, better or worse.
+* **CLI** (`python -m mtgz.sealed.compare`): `pair A.json B.json --games 2000`; `race D1 D2 ...
+  --race --games 512 --delta 0.03`; `yardstick --pool N --ours 0,1,2,3 [--race]` (the N-th fully
+  supported 17lands pool with a 40-card build, or a pool id; its human build against our builder's
+  builds with those seeds); `builds --pool-seed S --seeds 0,1,2 --out DIR` (our builder's decks as
+  files). Decks are JSON (`{"name", "deck", "sideboard"}`) or text ("17 Plains" lines, a
+  "Sideboard" line); the field `--field DECK` or generated (`--field-seed`, `--collation`,
+  `--field-builder`); one JSON line on stdout (and `--json PATH`), progress on stderr.
+
+### 104.4 Racing (`race`)
+
+Every surviving candidate plays the same rounds of games (`--games` per round). After each round, once
+`--min-games` (128) are played, for every ordered pair (i, j) of survivors: zero.h2h's GSPRT (73: the
+normal approximation of the observations, Fishtest's; `gsprt_llr` is `sprt_llr`'s formula on the
+paired differences, tested equal) of **H0: E[D_ij] = 0 against H1: E[D_ij] = -delta**, at error
+rates **alpha / (N - 1)** and beta. Candidate i is dropped once some survivor j's test accepts H1 (i is
+worse than j by delta). The race stops when one candidate is left (the winner: `decided`), when every
+pair of survivors has accepted H0 both ways (`equivalent`: within delta of each other; the leader is
+named, undecided), or at `--max-games` per candidate (the leader, undecided). The output: the winner,
+each candidate's games and score and when (and by whom) it was dropped, each one's paired difference
+against the winner with its interval, the rounds.
+
+Why this test: it is 73's (paired observations, Wald's bounds on the normal-approximation GSPRT,
+alpha = beta = 0.05), on the scale the comparison measures (the score against a common field: delta
+in score points, not an Elo between the decks). Testing each candidate against every survivor, not
+against the data's leader, keeps the guarantee simple: the true best build is dropped only if one of
+its N - 1 tests, each with a true difference >= 0 and so each at most alpha / (N - 1), crosses its upper
+bound - at most alpha in all (Bonferroni). Checking only at round ends can only lower the error rates.
+Defaults: delta 0.03, alpha = beta = 0.05, rounds of `--games`, at least 128 and at most 8,192 games
+per candidate.
+
+### 104.5 The noise with the heuristic pilot: games per difference, what pairing removes
+
+`python tools/sealed_noise.py --out DIR --pools 12 --procs 3 --threads 2` (one JSON line per
+comparison in DIR/results.jsonl; `--summary` prints the table). Twelve arena pools of a seeded stream
+(`--pool-seed 104`, fully supported ones); per pool A = our builder's build (seed 0) and four
+variants: **card** (one of A's nonland spells, drawn at random, for a random sideboard spell
+castable in A's colours), **land+** (A's most expensive spell for a basic of A's commonest basic
+type), **land-** (a basic of that type for a random castable sideboard spell), **pair** (the
+builder's build of the pool with the first seed whose main colour pair differs). Each (A, variant)
+plays 16,384 paired games in the full pairing and 4,096 in each weaker design against the generated
+field (`--field-seed 0`), the heuristic on both sides. var(D) is per game (the paired differences'
+variance); the unpaired variance is var(A) + var(B) of the same games; n80 is the number of games per
+build for 80% power at 5% (two-sided) to detect a difference of 1, 2 or 3 points, 7.85 var / delta^2.
+
+(The merged heuristic's table, eoe-bot's EoE rules: measuring.)
+
+**The S2 base's heuristic** (the M7c policy, before eoe-bot's EoE rules; `noise-s2heur`, the same
+pools, variants and seeds):
+
+| variant | abs. difference, median (range) | var(D) | unpaired | var ratio full / sorted / opponent / none | n80 paired, 1 / 2 / 3 points | n80 unpaired |
+|---|---|---|---|---|---|---|
+| card | 0.013 (0.002-0.056) | 0.050 | 0.469 | 0.108 / 0.481 / 0.933 / 0.985 | 3,942 / 986 / 438 | 36,811 / 9,203 / 4,091 |
+| land+ | 0.016 (0.002-0.086) | 0.079 | 0.469 | 0.169 / 0.427 / 0.933 / 0.985 | 6,225 / 1,557 / 692 | 36,811 / 9,203 / 4,091 |
+| land- | 0.025 (0.005-0.056) | 0.066 | 0.460 | 0.153 / 0.458 / 0.936 / 0.994 | 5,144 / 1,286 / 572 | 36,136 / 9,034 / 4,016 |
+| pair | 0.047 (0.013-0.343) | 0.289 | 0.460 | 0.621 / 0.731 / 0.931 / 0.992 | 22,685 / 5,672 / 2,521 | 36,123 / 9,031 / 4,014 |
+
+### 104.6 Races and the yardstick (the heuristic pilot, the generated field)
+
+On the merged heuristic (104.5), `--games 512` rounds, delta 0.03, alpha = beta = 0.05, 2 driver
+threads; the outputs are in `E:/mtg-zero-scratch/eoe-paired/races/`.
+
+* **Eight builds of one pool** (`builds --pool-seed 3 --seeds 0,...,7`: our randomised builder's WG+R
+  17 lands, RG+W 18, RG+U 16, WG 16, UR 16, UG+W 16, RG+B 18, BG 16; `race ... --max-games 16384`):
+  three dropped after 512 games (10-30 points behind the winner), three after 1,024 (6-8 points), and
+  WG (0.705 against the field) beat BG (0.686) after 12,288 games each: +0.020 [0.010, 0.029],
+  var_ratio 0.65 (two colour pairs share few slots). 29,184 games in 105 s. The pool's best two builds
+  were two points apart, and the heuristic needed 12k paired games to tell them apart.
+* **The yardstick** (`yardstick --pool N --ours 0,1,2,3 --race`; the N-th fully supported Premier
+  Sealed pool with a 40-card human build, that build against our builder's seeds 0-3):
+
+| pool (17lands id) | human build (record) | winner | games | the human build against the winner |
+|---|---|---|---|---|
+| 0 (e1e2335e) | 2, BR (0-1) | ours1 RG+W, 0.709 | 512 | -0.180 [-0.231, -0.128] (dropped at 512) |
+| 1 (98d2e403) | 0, WB (0-1) | ours1 RG+W, 0.645 | 2,560 | -0.115 [-0.152, -0.079] (dropped at 1,024); ours0 WR+G -0.033 [-0.054, -0.012] at 2,560 |
+| 2 (16adb2f8) | 0, WR (5-3) | ours3 WG, 0.559 | 1,024 | -0.143 [-0.189, -0.096] (dropped at 512) |
+
+  The heuristic plays our builder's decks better than these human builds - a statement about the
+  heuristic (one fixed policy, which plays every deck the same simple way) and the builder's fit to
+  it, not about the human builds. The yardstick is meant for S5's network; this shows it runs end to
+  end, with var_ratio 0.57-0.77 between builds of different colours.
+
+### 104.7 When a network pilots
+
+* **Nothing in the tool changes**: `--pilot runs/<run>/models/iter_N.pt --sims S --device cuda` (and
+  `--opp-pilot` for a different field pilot). Tested with a tiny random token network
+  (`test_a_network_pilot_plays_the_same_comparison`): identical decks give identical games, and a
+  comparison's rows (steps, life totals) replay exactly at 1 and 4 driver threads. An EoE network
+  needs S3's layout (EoE cards encode as `UNKNOWN` in today's, 101.5).
+* **Cost**: a heuristic game costs ~3 ms of CPU; a network game at 32-64 simulations ~1-2 s on the
+  GPU (73.6: 600 Delver games in 19 min at 32). 104.5's games per difference become hours, so S4
+  verifies only the evaluator's best few builds, with a delta the evaluator cannot already settle.
+* **Less variance removed, probably**: with open decklists the network reads both decks before any
+  card is drawn, so its evaluations - and near ties its choices - differ between the two games of a
+  pair even when the swapped card never shows; the heuristic never reads the opponent's list, so the
+  study's "same" games are often bit-identical. Measure it once on the first S3 network: one pair with
+  `--pairing full` and `--pairing opponent` (the `var_ratio` of each). Hidden decklists (101.5) would
+  give the opponent's side of the pairing back.
+* **The ranking is the pilot's**: which build is better depends on who plays it (the heuristic plays
+  every deck the same simple way), so the heuristic's verdicts are not S4's; the games needed per
+  difference scale with var(D), which a network's measured `var_ratio` translates.
