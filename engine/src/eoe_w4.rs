@@ -151,9 +151,9 @@ impl Game {
     }
 
     /// The mana value of a target object (0 for a player or an ability).
-    fn target_mv(&self, t: Target) -> u32 {
+    fn target_mv(&self, t: Target) -> u64 {
         match t {
-            Target::Obj(r) => self.mana_value_of(r.idx) as u32,
+            Target::Obj(r) => self.mana_value_of(r.idx),
             Target::Player(_) | Target::Stack(_) => 0,
         }
     }
@@ -168,8 +168,8 @@ impl Game {
     /// there, so the total holds as the spell resolves (608.2b checks each
     /// target on its own).
     pub(crate) fn retain_within_total_mv(&self, total: u8, chosen: &[Target], cands: &mut Vec<Target>) {
-        let sum: u32 = chosen.iter().map(|&t| self.target_mv(t)).sum();
-        cands.retain(|&t| sum + self.target_mv(t) <= total as u32);
+        let sum: u64 = chosen.iter().map(|&t| self.target_mv(t)).sum();
+        cands.retain(|&t| sum + self.target_mv(t) <= total as u64);
     }
 
     /// Is `c` a warped card: in exile by warp's delayed ability, which may
@@ -251,21 +251,21 @@ impl Game {
     }
 
     /// `Amount::ChosenPower` (CR 608.2h).
-    pub(crate) fn chosen_power(&self, f: &Frame) -> i32 {
+    pub(crate) fn chosen_power(&self, f: &Frame) -> crate::num::Wide {
         let Some(&r) = f.noted.first() else { return 0 };
         let o = &self.objs[r.idx.i()];
         if self.live(r) {
             return match o.zone {
                 Zone::Battlefield => self.power(r.idx),
                 // A card in exile: its own power (no effect applies there).
-                _ => self.def_of(r.idx).power.unwrap_or(0),
+                _ => self.def_of(r.idx).power.unwrap_or(0) as crate::num::Wide,
             };
         }
         // Gone: as it last existed where it was (a permanent's last known
         // power; a card that left exile, its card's printed power).
-        match o.lki_power {
-            Some((inc, p)) if inc == r.inc => p,
-            _ => self.db.def(o.def).power.unwrap_or(0),
+        match self.lki_power_of(r) {
+            Some(p) => p as crate::num::Wide,
+            _ => self.db.def(o.def).power.unwrap_or(0) as crate::num::Wide,
         }
     }
 
@@ -304,6 +304,10 @@ impl Game {
             EoeW4::GraveyardTargetsOntoBattlefield { tgt, counter, tapped, attacking } => {
                 use crate::game::Step;
                 let mut entered: Vec<CardIdx> = Vec::new();
+                // (The targets enter at once, attacking ones attacking as
+                // they enter: one entry, CR 603.6a, 508.4. The counters come
+                // after, the instruction's next sentence.)
+                self.begin_entering(false);
                 for t in self.targets_of(f, *tgt) {
                     let Target::Obj(o) = t else { continue };
                     if self.objs[o.idx.i()].zone != Zone::Graveyard {
@@ -314,11 +318,6 @@ impl Game {
                     self.entering_tapped = false;
                     if self.objs[o.idx.i()].zone == Zone::Battlefield {
                         entered.push(o.idx);
-                    }
-                }
-                if let Some(k) = counter {
-                    for &c in &entered {
-                        self.add_counters(c, *k, 1);
                     }
                 }
                 if *attacking {
@@ -334,6 +333,12 @@ impl Game {
                     // CR 508.4: its controller chooses what each attacks.
                     for &c in asks.iter().rev() {
                         self.agenda.push(Task::AttackTarget { card: c });
+                    }
+                }
+                self.end_entering();
+                if let Some(k) = counter {
+                    for &c in &entered {
+                        self.add_counters(c, *k, 1);
                     }
                 }
                 Flow::Next

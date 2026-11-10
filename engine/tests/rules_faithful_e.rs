@@ -292,6 +292,46 @@ fn cr_702_145d_a_permanent_that_becomes_a_copy_of_a_daybound_card_makes_it_day()
     assert_eq!(g.day(), Some(true), "{}", log(&g));
 }
 
+/// E2. Shifting Woodland as Outland Liberator is a single-faced card with the
+/// Liberator's front face as its copiable values. Reflection of Kiki-Jiki's
+/// token copy of it at night has daybound, but it is a copy of a permanent
+/// that isn't a transforming permanent: the token is single-faced (CR 707.8a
+/// covers only copies of transforming permanents) and isn't represented by a
+/// double-faced card, so it can't transform (701.28c) and stays Outland
+/// Liberator. A token copy of the Liberator card itself is double-faced
+/// (`cr_702_145c_a_double_faced_token_...` above). Failed before: the token
+/// transformed into Frenzied Trapbreaker.
+#[test]
+fn cr_707_8a_a_token_copy_of_a_single_faced_permanent_copying_a_daybound_card_cant_transform() {
+    let mut g = scen()
+        .battlefield(0, &[WOODLAND, FABLE, "Forest", "Forest", "Forest", "Forest", "Forest"])
+        .transformed(0, FABLE)
+        .graveyard(0, &[LIBERATOR, "Lightning Bolt", "Mox Pearl", "Island"])
+        .day(Some(false))
+        .start();
+    let w = bf(&g, 0, WOODLAND);
+    let l = g.card(0, LIBERATOR, Zone::Graveyard);
+    let pay = move |g: &Game, t: CardIdx| match g.kind() {
+        Some(DecisionKind::Target) => Some(Choice::Target(Target::Obj(g.obj_ref(t)))),
+        Some(DecisionKind::PayMana) => {
+            g.pending_decision().unwrap().options.iter().find(|o| !matches!(o.choice, Choice::Ability(c, _) if c == w)).map(|o| o.choice)
+        }
+        _ => None,
+    };
+    let slot = (0..g.def_of(w).activated.len() as u8).find(|&i| g.has_option(act(w, i))).expect("delirium");
+    g.choose(act(w, slot));
+    resolve_with(&mut g, |g| pay(g, l));
+    assert!(front(&g, w) && g.obj(w).flips == 0, "Woodland as the Liberator's front face: {}\n{}", g.name(w), log(&g));
+    let r = bf(&g, 0, "Reflection of Kiki-Jiki");
+    g.choose(act(r, 0));
+    resolve_with(&mut g, |g| pay(g, w));
+    let tok = g.permanents_of(0).find(|&c| g.is_token(c)).unwrap_or_else(|| panic!("a token\n{}", log(&g)));
+    assert_eq!(g.day(), Some(false));
+    assert!(front(&g, tok), "the token keeps the face it was created as: {}\n{}", g.name(tok), log(&g));
+    assert_eq!(g.obj(tok).flips, 0, "{}", log(&g));
+    assert!(!log(&g).contains("transforms"), "{}", log(&g));
+}
+
 /// At night, Frenzied Trapbreaker loses all its abilities while The Wondrous
 /// Wasp remains; it becomes day, and with no nightbound it keeps its back
 /// face. When the Wasp leaves, it has nightbound again, back face up by day:

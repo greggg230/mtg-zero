@@ -360,7 +360,7 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
     };
     let mut mods = Vec::new();
     if *power_bonus != 0 || *toughness_bonus != 0 {
-        mods.push(Mod::Pt(
+        mods.push(Mod::pt(
             l.int("StaticAbility.power_bonus", *power_bonus, -99, 99),
             l.int("StaticAbility.toughness_bonus", *toughness_bonus, -99, 99),
         ));
@@ -382,7 +382,7 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
                 mods.extend(super::effect_ext::keyword_mods(l, std::slice::from_ref(&**keyword)))
             }
             (P::PowerToughnessBonus(nodes::PowerToughnessBonus { power_bonus, toughness_bonus }), 7) => {
-                mods.push(Mod::Pt(
+                mods.push(Mod::pt(
                     l.int("PowerToughnessBonus.power_bonus", *power_bonus, -99, 99),
                     l.int("PowerToughnessBonus.toughness_bonus", *toughness_bonus, -99, 99),
                 ))

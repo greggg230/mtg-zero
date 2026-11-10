@@ -281,7 +281,7 @@ fn delayed_returns_happen_without_their_source_and_a_returned_permanent_misses_t
     cast_at(&mut g, 1, "Lightning Bolt", ph);
     assert_eq!(g.obj(ph).zone, Zone::Graveyard);
     quiet_until(&mut g, |g| g.turn().active == 1);
-    assert_eq!(g.card(1, "Test Wall", Zone::Battlefield).0 > 0 || g.count_in(1, "Test Wall", Zone::Battlefield) == 1, true, "{}", log(&g));
+    assert_eq!(g.card(1, "Test Wall", Zone::Battlefield).get() > 0 || g.count_in(1, "Test Wall", Zone::Battlefield) == 1, true, "{}", log(&g));
     assert_eq!(g.count_in(1, "Test Wall", Zone::Battlefield), 1, "returned without Phelia\n{}", log(&g));
     // Flickerwisp and Ocelot Pride.
     let mut g = scen()

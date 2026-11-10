@@ -218,7 +218,7 @@ fn spacecraft_are_artifact_creatures_at_their_threshold_cr722_2b() {
     ];
     for &(name, n, p, t, kws) in ships {
         for k in [0, n - 1, n, n + 3] {
-            let g = scen().battlefield(0, &[name]).counters(0, name, charge(), k).at(Step::Main1, 0).start();
+            let g = scen().battlefield(0, &[name]).counters(0, name, charge(), k as u64).at(Step::Main1, 0).start();
             let c = bf(&g, 0, name);
             assert!(g.types_of(c) & types::ARTIFACT != 0, "{name}");
             assert_eq!(creature(&g, c), k >= n, "{name} with {k}");
@@ -226,7 +226,7 @@ fn spacecraft_are_artifact_creatures_at_their_threshold_cr722_2b() {
                 assert_eq!(g.has_kw(c, kw), k >= n, "{name} {kw:?} with {k}");
             }
             if k >= n {
-                assert_eq!((g.power(c), g.toughness(c)), (p, t), "{name}");
+                assert_eq!((g.power(c), g.toughness(c)), (p.into(), t.into()), "{name}");
             }
             // The station ability, at all times (CR 722.4).
             let d = g.def_of(c);

@@ -223,7 +223,7 @@ pub(crate) struct Knowledge {
 pub fn game_cards(a: &super::MtgAz, p: PlayerId) -> Vec<DefId> {
     let sizes = [a.m.decks[0].iter().map(|&c| c as usize).sum(), a.m.decks[1].iter().map(|&c| c as usize).sum()];
     let comp = a.g.players[p as usize].companion;
-    let mut v: Vec<DefId> = deck_range(sizes, p).chain(comp.map(|c| c.i())).map(|i| card_of(&a.g, CardIdx(i as u16))).collect();
+    let mut v: Vec<DefId> = deck_range(sizes, p).chain(comp.map(|c| c.i())).map(|i| card_of(&a.g, CardIdx::new(i as u32))).collect();
     v.sort_unstable();
     v
 }
@@ -256,7 +256,7 @@ pub(crate) fn knowledge(g: &Game, viewer: PlayerId, owner: PlayerId, sizes: [usi
     let mut known = Vec::with_capacity(range.len());
     for i in range.clone() {
         if !in_slots[i] {
-            known.push(card_of(g, CardIdx(i as u16)));
+            known.push(card_of(g, CardIdx::new(i as u32)));
         }
     }
     known.sort_unstable();

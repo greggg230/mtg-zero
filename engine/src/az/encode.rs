@@ -1521,8 +1521,8 @@ impl Game {
             o[15] = pl.lost as u8 as f32;
             o[16] = squash(pl.turns as f32 / 25.0);
             o[17] = pl.left_battlefield as u8 as f32;
-            // (Power and toughness summed in i64: no maximum, ENGINE.md 46.)
-            let (mut perms, mut creatures, mut lands, mut untapped_lands, mut power, mut tough) = (0, 0, 0, 0, 0i64, 0i64);
+            // (Power and toughness summed in `Wide`: exact, ENGINE.md 46, 100.7.)
+            let (mut perms, mut creatures, mut lands, mut untapped_lands, mut power, mut tough) = (0, 0, 0, 0, 0 as crate::num::Wide, 0 as crate::num::Wide);
             let (mut ready, mut artifacts, mut tokens) = (0, 0, 0);
             for c in self.permanents_of(p) {
                 perms += 1;
@@ -1530,8 +1530,8 @@ impl Game {
                 if self.is_creature(c) {
                     creatures += 1;
                     let (pw, th) = self.pt(c);
-                    power += pw.max(0) as i64;
-                    tough += th.max(0) as i64;
+                    power += pw.max(0);
+                    tough += th.max(0);
                     if !ob.tapped && (!self.is_sick(c) || self.has_kw(c, Kw::Haste)) {
                         ready += 1;
                     }
@@ -1576,7 +1576,9 @@ impl Game {
             let (room, completed) = self.dungeon(p);
             o[glob::INITIATIVE] = self.has_initiative(p) as u8 as f32;
             o[glob::IN_DUNGEON] = room.is_some() as u8 as f32;
-            o[glob::COMPLETED] = completed as f32 / 2.0;
+            // (Squashed: the identity for every count a u8 held, ENGINE.md
+            // 100.7.)
+            o[glob::COMPLETED] = squash(completed as f32 / 2.0);
             o[glob::EXPERIENCE] = squash(pl.experience as f32 / 4.0);
             // Layout v4 (ENGINE.md 35).
             o[glob::SIDEBOARD] = self.sideboard_size(p) as f32 / 15.0;
@@ -1659,7 +1661,15 @@ impl Game {
             K::PutOnTop | K::PutOnBottom | K::PutInGraveyard | K::PutInHand | K::PutOntoBattlefield => match self.agenda.last() {
                 Some(Task::Run(f)) => {
                     let mut v = f.pile.clone();
-                    v.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+                    v.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
+                    // A paged pile (more cards than the 64 list slots,
+                    // ENGINE.md 100.1): the page's cards at their slots
+                    // (63 a page, the last slot "next page"), as a paged
+                    // graveyard list shows its page (100.2).
+                    if let Stage::Paged { window } = d.stage {
+                        let w = act::LIBRARY_N as usize - 1;
+                        v = v.into_iter().skip(window as usize * w).take(w).collect();
+                    }
                     v
                 }
                 _ => Vec::new(),
@@ -1940,7 +1950,7 @@ fn opp_candidates(a: &super::MtgAz, me: PlayerId, ids: &[u16], out: &mut [f32]) 
         }
     };
     for i in 0..g.objs.len() {
-        let c = crate::ids::CardIdx(i as u16);
+        let c = crate::ids::CardIdx::new(i as u32);
         let o = &g.objs[i];
         if o.owner == op_ && o.zone != Zone::Nowhere && !g.is_token(c) && !g.is_copy_obj(c) && g.knows(me, c) {
             drop(super::sample::card_of(g, c));

@@ -7,11 +7,8 @@ use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::{Game, Pos, StackItem, StackKind};
 use crate::ids::{Target, CardIdx, PlayerId, Zone};
+use crate::loops::LoopAct;
 use crate::pay::{productions, Class, Keep, PayMana, Src};
-
-/// Activations of one permanent's non-mana ability in a turn the engine offers
-/// (a loop of optional actions, CR 732.2a; as `copies::MAY_COPY_CAP`).
-pub(crate) const ACTIVATION_CAP: u8 = 31;
 
 /// The `ACTIVATE` action slots of one permanent (`decision::act::ACTIVATE`:
 /// slot * 4 + i).
@@ -55,7 +52,7 @@ impl Game {
             Cond::GainedLifeThisTurn => pl.gained_life,
             Cond::ArtifactEnteredThisTurn => pl.artifact_entered,
             Cond::APlayerControlsNoCreatures => (0..2u8).any(|q| self.creatures_of(q).next().is_none()),
-            Cond::GainedLifeAtLeast(n) => pl.life_gained >= *n as u32,
+            Cond::GainedLifeAtLeast(n) => pl.life_gained >= *n as i64,
             Cond::OpponentHasMoreCards => self.players[crate::ids::opp(p) as usize].hand.len() > pl.hand.len(),
             Cond::OpponentControlsMoreLands => {
                 let lands = |q: PlayerId| self.permanents_of(q).filter(|&x| self.is_type(x, crate::db::types::LAND)).count();
@@ -66,7 +63,8 @@ impl Game {
             }
             Cond::LibraryEmpty => pl.library.is_empty(),
             Cond::YourTurn => self.turn.active == p,
-            Cond::LifeAtMostHalfStart => pl.life as i64 * 2 <= self.spec.starting_life as i64,
+            // (In `Wide`: twice a life total is exact.)
+            Cond::LifeAtMostHalfStart => pl.life as crate::num::Wide * 2 <= self.spec.starting_life as crate::num::Wide,
             Cond::ControlOtherOfColor(m) => {
                 self.permanents_of(p).any(|x| self.colors_of(x) & m != 0 && Some(self.obj_ref(x)) != source)
             }
@@ -98,13 +96,6 @@ impl Game {
         self.permanents_of(p).any(|c| self.abilities(c).ascend) && self.permanents_of(p).count() >= 10
     }
 
-    /// A permanent's activated ability `i` was activated `ACTIVATION_CAP`
-    /// times this turn.
-    pub(crate) fn activation_capped(&self, c: CardIdx, i: u8) -> bool {
-        let r = self.obj_ref(c);
-        self.activations.iter().any(|x| x.0 == r && x.1 == i && x.2 >= ACTIVATION_CAP)
-    }
-
     /// The card types among the cards exiled with `source` (CR 607.2a,
     /// 205.2a): linked cards still in exile.
     pub(crate) fn linked_types(&self, source: crate::ids::ObjRef) -> u16 {
@@ -117,20 +108,23 @@ impl Game {
     /// CR 606.3: no loyalty ability of this permanent was activated this
     /// turn (or fewer than the extra activations an effect allows).
     pub(crate) fn loyalty_ready(&self, card: CardIdx) -> bool {
-        let o = &self.objs[card.i()];
-        o.pw_turn != self.turn.number as u16 || o.pw_used < 1 + o.pw_extra
+        let o = self.loyalty_of(card);
+        // (`used < 1 + extra`, without overflow.)
+        o.turn != self.turn.number as u16 || o.used <= o.extra
     }
 
     /// A loyalty ability of `card` is being activated (CR 606.3).
     fn note_loyalty_activation(&mut self, card: CardIdx) {
         let turn = self.turn.number as u16;
-        let o = &mut self.objs[card.i()];
-        if o.pw_turn != turn {
-            o.pw_turn = turn;
-            o.pw_used = 0;
-            o.pw_extra = 0;
+        let o = self.loyalty_mut(card);
+        if o.turn != turn {
+            o.turn = turn;
+            o.used = 0;
+            o.extra = 0;
         }
-        o.pw_used = o.pw_used.saturating_add(1);
+        let used = o.used;
+        let used = self.exact_inc(used, "loyalty activations this turn");
+        self.loyalty_mut(card).used = used;
     }
 
     /// The activated abilities `p` may activate with priority now (CR
@@ -146,10 +140,12 @@ impl Game {
         out: &mut Vec<Opt>,
         gy: &mut Vec<(u32, Choice)>,
     ) {
-        // (The battlefield's activation locks, read once.)
+        // (The battlefield's activation locks, read once; the loop hash of
+        // this decision, computed once if needed, `loops.rs`.)
         let locks = self.activation_locks();
+        let loop_hash = std::cell::OnceCell::new();
         for c in self.permanents_of(p) {
-            let live = self.permanent_activations(p, c, classes, sorcery_ok, locks);
+            let live = self.permanent_activations(p, c, classes, sorcery_ok, locks, &loop_hash);
             // A permanent with more activated abilities than its four
             // `ACTIVATE` slots (its card's own and those other permanents
             // grant it, EoE W3): the fourth slot opens a choice among the
@@ -197,10 +193,23 @@ impl Game {
     /// abilities and then those other permanents grant it (EoE W3; ascending):
     /// mana abilities only where `mana_at_priority` says; a special action
     /// (CR 116.2b, 708.7: turning a face-down permanent face up) survives
-    /// "loses all abilities".
-    pub(crate) fn permanent_activations(&self, p: PlayerId, c: CardIdx, classes: &[Class], sorcery_ok: bool, locks: u16) -> Vec<u8> {
+    /// "loses all abilities". A non-mana ability `p` activated this turn at
+    /// a state with the same loop hash is not offered (a loop of optional
+    /// actions that made no progress, `loops.rs`; `loop_hash` caches the
+    /// decision's hash).
+    pub(crate) fn permanent_activations(
+        &self,
+        p: PlayerId,
+        c: CardIdx,
+        classes: &[Class],
+        sorcery_ok: bool,
+        locks: u16,
+        loop_hash: &std::cell::OnceCell<u64>,
+    ) -> Vec<u8> {
         let mut live = Vec::new();
         let d = self.abilities(c);
+        let place = if self.loop_taken.is_empty() { None } else { self.battlefield.iter().position(|&x| x == c).map(|k| k as u32) };
+        let repeats = |i: usize| place.is_some_and(|place| self.loop_repeats(p, LoopAct::Activate { place, slot: i as u8 }, None, loop_hash));
         for (i, ad) in d.activated.iter().enumerate() {
             if ad.mana().is_some() && !self.mana_at_priority(c, ad) {
                 continue; // paid with while paying a cost (ENGINE.md 18)
@@ -211,8 +220,8 @@ impl Game {
             if ad.exhaust && self.exhausted(c, i as u8) {
                 continue; // CR 702.177a: only once
             }
-            if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
-                continue; // a loop of optional actions (ENGINE.md 29)
+            if repeats(i) {
+                continue; // a loop that made no progress (CR 732.2a, MTR 4.4)
             }
             if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
                 live.push(i as u8);
@@ -233,7 +242,7 @@ impl Game {
         for (j, g) in self.granted_activated(c).into_iter().enumerate() {
             let i = own + j;
             let ad = self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot));
-            if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
+            if repeats(i) {
                 continue;
             }
             if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
@@ -277,6 +286,8 @@ impl Game {
         for d in &ad.discounts {
             let n = match d {
                 // "Where X is this creature's power" (ENGINE.md 99.14).
+                // (A reduction past the u8 generic part is a reduction to
+                // 0, CR 601.2f: exact.)
                 crate::db::Discount::SourcePower if self.is_creature(card) => self.power(card).clamp(0, 255) as u8,
                 _ => self.discount(d, p),
             };
@@ -347,7 +358,7 @@ impl Game {
                 if !(sorcery_ok || instant_ok) || !self.loyalty_ready(card) {
                     return false;
                 }
-                if d < 0 && self.counters_on(card, crate::db::Counter::Loyalty) < crate::num::count(-(d as i64)) {
+                if d < 0 && self.counters_on(card, crate::db::Counter::Loyalty) < (-(d as i64)) as crate::num::Count {
                     return false;
                 }
             }
@@ -402,6 +413,15 @@ impl Game {
         // face, ENGINE.md 99.14, or a static ability's card, 99.13; `slot`
         // stays the permanent's place for its records.)
         let (def, aslot, granter) = self.activated_home(card, slot);
+        // A loop action (a non-mana ability of a permanent on the
+        // battlefield, `loops.rs`): noted with the state it is taken at,
+        // before anything changes.
+        if let (AbilitySlot::Activated(i), crate::db::ActEffect::Stack(_), Zone::Battlefield) =
+            (slot, &self.db.def(def).activated_def(aslot).effect, self.objs[card.i()].zone)
+        {
+            let place = self.battlefield.iter().position(|&x| x == card).expect("a permanent") as u32;
+            self.note_loop(p, LoopAct::Activate { place, slot: i }, None);
+        }
         self.note(|g| format!("P{p} activates {} ({slot:?})", g.name(card)));
         if self.objs[card.i()].zone == Zone::Hand {
             self.reveal(card); // 602.2a: activated from a hidden zone
@@ -416,13 +436,6 @@ impl Game {
         if ad.boast {
             let r = self.obj_ref(card);
             self.marks.push((r, crate::game::Mark::Boasted(self.turn.number as u16)));
-        }
-        if let (AbilitySlot::Activated(i), crate::db::ActEffect::Stack(_), Zone::Battlefield) = (slot, &ad.effect, self.objs[card.i()].zone) {
-            let r = self.obj_ref(card);
-            match self.activations.iter_mut().find(|x| x.0 == r && x.1 == i) {
-                Some(x) => x.2 = x.2.saturating_add(1),
-                None => self.activations.push((r, i, 1)),
-            }
         }
         if ad.mana().is_some() {
             self.agenda.push(Task::ManaNow { src: Src::of(card, slot), step: crate::decision::NumberStep::FIRST });
@@ -553,7 +566,7 @@ impl Game {
         allow: u8,
     ) -> bool {
         let pl = &self.players[p as usize];
-        if cost.life as i64 > pl.life as i64 {
+        if (cost.life as i64) > pl.life {
             return false; // CR 119.4
         }
         if let Some(s) = &cost.sacrifice {
@@ -602,10 +615,10 @@ impl Game {
                 // Teamwork: the taps (paid first) and the mana compete.
                 let cands = self.crew_eligible(p, card);
                 let keep = Self::keep_for(card, cost, exclude);
-                if !self.crew_mana_ok(p, cost.crew as i64, &[], &cands, mana, classes, &keep) {
+                if !self.crew_mana_ok(p, cost.crew as crate::num::Wide, &[], &cands, mana, classes, &keep) {
                     return false;
                 }
-            } else if self.crew_power(p, card, !cost.saddle) < cost.crew as i64 {
+            } else if self.crew_power(p, card, !cost.saddle) < cost.crew as crate::num::Wide {
                 return false;
             }
         }
@@ -643,10 +656,10 @@ impl Game {
         if cost.crew > 0 && !self.is_spell_card(card) {
             let bonus = !cost.saddle;
             let cands = self.crew_eligible(p, card).into_iter().map(|c| (c, self.crew_power_of(c, bonus))).collect();
-            return Some(crate::pay::TapsOwed { need: cost.crew as i64, cands });
+            return Some(crate::pay::TapsOwed { need: cost.crew as crate::num::Wide, cands });
         }
         let t = cost.tap_untapped.as_ref()?;
-        Some(crate::pay::TapsOwed { need: t.n as i64, cands: self.tap_candidates(p, card, t).map(|c| (c, 1)).collect() })
+        Some(crate::pay::TapsOwed { need: t.n as crate::num::Wide, cands: self.tap_candidates(p, card, t).map(|c| (c, 1)).collect() })
     }
 
     /// Sacrifice the permanents chosen for a cost (together, one batch).
@@ -657,7 +670,7 @@ impl Game {
         // 608.2h): an activated ability's item keeps it (`Amount::CostMvPlus`).
         if let (Some(&c), Some(pos)) = (sacs.first(), self.item_index(id)) {
             if matches!(self.stack[pos].kind, StackKind::Ability { .. }) {
-                self.stack[pos].ev.amount = self.mana_value_of(c) as u32;
+                self.stack[pos].ev.amount = self.mana_value_of(c) as u64;
                 // (And the permanent, for its power: `Amount::CostPower`.)
                 if self.stack[pos].ev.obj.is_none() {
                     self.stack[pos].ev.obj = Some(self.obj_ref(c));
@@ -767,16 +780,16 @@ impl Game {
 
     /// The most power `p` can tap to crew `vehicle` (`bonus`: crew itself,
     /// where "crews Vehicles as though its power were greater" applies).
-    /// (Powers are summed in i64: ENGINE.md 46.)
-    pub(crate) fn crew_power(&self, p: PlayerId, vehicle: CardIdx, bonus: bool) -> i64 {
+    /// (Powers are summed in `Wide`: exact, ENGINE.md 46, 100.7.)
+    pub(crate) fn crew_power(&self, p: PlayerId, vehicle: CardIdx, bonus: bool) -> crate::num::Wide {
         self.crew_eligible(p, vehicle).into_iter().map(|c| self.crew_power_of(c, bonus).max(0)).sum()
     }
 
     /// A creature's power for crewing (a Pilot crews as though its power
     /// were greater: crew only, not saddle or teamwork, CR 702.122,
     /// 702.171a).
-    pub(crate) fn crew_power_of(&self, c: CardIdx, bonus: bool) -> i64 {
-        self.power(c) as i64 + if bonus { self.abilities(c).crew_bonus as i64 } else { 0 }
+    pub(crate) fn crew_power_of(&self, c: CardIdx, bonus: bool) -> crate::num::Wide {
+        self.power(c) + if bonus { self.abilities(c).crew_bonus as crate::num::Wide } else { 0 }
     }
 
     /// Teamwork (a spell's "tap any number of untapped creatures you control
@@ -792,15 +805,15 @@ impl Game {
     pub(crate) fn crew_mana_ok(
         &self,
         p: PlayerId,
-        need: i64,
+        need: crate::num::Wide,
         tapped_in: &[CardIdx],
         cands: &[CardIdx],
         mana: &crate::mana::ManaCost,
         classes: &[crate::pay::Class],
         keep: &Keep,
     ) -> bool {
-        let have: i64 = tapped_in.iter().map(|&c| self.crew_power_of(c, false)).sum();
-        let rest: i64 = cands.iter().map(|&c| self.crew_power_of(c, false).max(0)).sum();
+        let have: crate::num::Wide = tapped_in.iter().map(|&c| self.crew_power_of(c, false)).sum();
+        let rest: crate::num::Wide = cands.iter().map(|&c| self.crew_power_of(c, false).max(0)).sum();
         if have + rest < need {
             return false;
         }
@@ -1016,7 +1029,7 @@ impl Game {
                 // CR 702.122a: enough power tapped for crew.
                 Choice::Pass => {
                     crew_done = true;
-                    CardIdx(u16::MAX)
+                    CardIdx::new(0)
                 }
                 other => unreachable!("cost answer {other:?}"),
             };
@@ -1178,10 +1191,10 @@ impl Game {
             // Crew (CR 702.122a): untapped creatures other than the source,
             // one decision each in increasing slot order; PASS once their
             // total power is enough. A pick must leave the total reachable.
-            let need = cost.crew as i64;
+            let need = cost.crew as crate::num::Wide;
             let bonus = !cost.saddle && !self.is_spell_card(card);
             let tapped_in: Vec<CardIdx> = picked[n_rc..].to_vec();
-            let have: i64 = tapped_in.iter().map(|&c| self.crew_power_of(c, bonus)).sum();
+            let have: crate::num::Wide = tapped_in.iter().map(|&c| self.crew_power_of(c, bonus)).sum();
             let floor = tapped_in.last().map(|&c| self.perm_action(p, c));
             let cands: Vec<CardIdx> = self
                 .crew_eligible(p, card)
@@ -1208,7 +1221,7 @@ impl Game {
                         self.crew_mana_ok(p, need, &t, &cands[k + 1..], mana, &classes, keep)
                     }
                     None => {
-                        let rest: i64 = cands[k + 1..].iter().map(|&x| self.crew_power_of(x, bonus).max(0)).sum();
+                        let rest: crate::num::Wide = cands[k + 1..].iter().map(|&x| self.crew_power_of(x, bonus).max(0)).sum();
                         have + self.crew_power_of(c, bonus) + rest >= need
                     }
                 };
@@ -1307,9 +1320,9 @@ impl Game {
         // counters.
         if let Some((_, src, ad)) = self.act_item(id) {
             match ad.loyalty {
-                Some(d) if d > 0 => self.add_counters(src, crate::db::Counter::Loyalty, crate::num::count(d as i64)),
+                Some(d) if d > 0 => self.add_counters(src, crate::db::Counter::Loyalty, d as crate::num::Count),
                 Some(d) if d < 0 => {
-                    self.remove_counters(src, crate::db::Counter::Loyalty, crate::num::count(-(d as i64)));
+                    self.remove_counters(src, crate::db::Counter::Loyalty, (-(d as i64)) as crate::num::Count);
                 }
                 _ => {}
             }
@@ -1411,9 +1424,9 @@ impl Game {
             }
             // CR 119.4: its life, and the cost's life after it (with a
             // painland's damage first).
-            // (In i64: exact.)
-            let (life, spent) = (life as i64, k.life as i64 + if life_after > 0 { m.damage_to_you as i64 } else { 0 });
-            if k.life as i64 > life || (life_after > 0 && life - spent < life_after as i64) {
+            // (In `Wide` with the life total: exact.)
+            let (life, spent) = (life as crate::num::Wide, k.life as crate::num::Wide + if life_after > 0 { m.damage_to_you as crate::num::Wide } else { 0 });
+            if (k.life as crate::num::Wide) > life || (life_after > 0 && life - spent < life_after as crate::num::Wide) {
                 continue;
             }
             if productions(self, p, &m.prod, Some(c)).is_empty() {
@@ -1534,7 +1547,11 @@ impl Game {
                 let m = self.could_produce(land);
                 (0..6).filter(|&t| m & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect()
             }
-            _ => productions(self, p, prod, Some(src.card)),
+            _ => {
+                // (F7: mana from counters past the pool's u8 aborts.)
+                self.check_counter_mana(src.card, prod);
+                productions(self, p, prod, Some(src.card))
+            }
         };
         // "Whenever you tap a creature for mana, add an additional {G}",
         // "whenever you tap a <land subtype> for mana, add an additional
@@ -1556,7 +1573,14 @@ impl Game {
             if more != [0; 6] {
                 for v in prods.iter_mut() {
                     for t in 0..6 {
-                        v[t] += more[t];
+                        // (F7: past the pool's u8 the game aborts.)
+                        v[t] = match v[t].checked_add(more[t]) {
+                            Some(n) => n,
+                            None => {
+                                self.abort(|| "more than 255 mana of one type from one ability".to_string());
+                                u8::MAX
+                            }
+                        };
                     }
                 }
             }
@@ -1577,7 +1601,8 @@ impl Game {
             let v = prods[0];
             self.add_mana(p, &v);
             let pool = &mut self.players[p as usize].pool;
-            pool.haste = pool.haste.saturating_add(v[crate::mana::R]).min(pool.amt[crate::mana::R]);
+            // (Exact: at most the red mana in the pool, a u8.)
+            pool.haste = (pool.haste as u16 + v[crate::mana::R] as u16).min(pool.amt[crate::mana::R] as u16) as u8;
             return;
         }
         if !prods.is_empty() {
@@ -1734,7 +1759,7 @@ impl Game {
             }
             return;
         }
-        let n = self.def_of(card).shock_life as i32;
+        let n = self.def_of(card).shock_life as i64;
         if n == 0 {
             return;
         }
@@ -1763,8 +1788,10 @@ impl Game {
     }
 
     /// Would a permanent with this definition enter tapped for `p` (CR
-    /// 614.1c)? Checked before it moves, so "other lands" are the lands
-    /// already there.
+    /// 614.1c)? "Other lands" are the lands already there: not those
+    /// entering at the same time, nor their effects (CR 614.12a; the fast
+    /// lands' rulings: "it doesn't take those lands into consideration";
+    /// `entry_since`).
     pub(crate) fn enters_tapped(&self, card: CardIdx, p: PlayerId) -> bool {
         self.enters_tapped_own(card, p, true)
     }
@@ -1772,15 +1799,18 @@ impl Game {
     /// [`enters_tapped`](Self::enters_tapped); without `own`, its own "enters
     /// tapped" doesn't apply (it enters with no abilities, CR 614.12).
     pub(crate) fn enters_tapped_own(&self, card: CardIdx, p: PlayerId, own: bool) -> bool {
-        // "<Types> / nonbasic lands your opponents control enter tapped."
+        // "<Types> / nonbasic lands your opponents control enter tapped" (a
+        // permanent already there, CR 614.12a).
         let d = self.def_of(card);
         let q = crate::ids::opp(p);
+        let since = self.entry_since();
         let forced = self.permanents_of(q).any(|c| {
             let od = self.abilities(c);
-            od.opp_enter_tapped & d.types != 0
-                || (od.opp_nonbasic_enter_tapped
-                    && d.is(crate::db::types::LAND)
-                    && d.supertypes & crate::db::supertypes::BASIC == 0)
+            self.objs[c.i()].timestamp < since
+                && (od.opp_enter_tapped & d.types != 0
+                    || (od.opp_nonbasic_enter_tapped
+                        && d.is(crate::db::types::LAND)
+                        && d.supertypes & crate::db::supertypes::BASIC == 0))
         });
         if forced {
             return true;
@@ -1793,8 +1823,23 @@ impl Game {
         match &self.def_of(card).enters_tapped {
             crate::db::EntersTapped::No => false,
             crate::db::EntersTapped::Always => true,
-            crate::db::EntersTapped::Unless(c) => !self.cond_holds(c, p),
+            crate::db::EntersTapped::Unless(c) => !self.cond_before_entry(c, p, since),
         }
+    }
+
+    /// Condition `c` for `p` in the game as it was before the entry whose
+    /// first timestamp is `since` (CR 614.12a): the permanents entering at
+    /// the same time (timestamp `since` or later) are not there yet, nor
+    /// their static abilities. Read on a copy of the game without them when
+    /// there are any.
+    fn cond_before_entry(&self, c: &Cond, p: PlayerId, since: u32) -> bool {
+        if !self.battlefield.iter().any(|&x| self.objs[x.i()].timestamp >= since) {
+            return self.cond_holds(c, p);
+        }
+        let mut before = self.clone();
+        before.log = None;
+        before.battlefield.retain(|&x| self.objs[x.i()].timestamp < since);
+        before.cond_holds(c, p)
     }
 
     /// Is this permanent indestructible (CR 702.12)?

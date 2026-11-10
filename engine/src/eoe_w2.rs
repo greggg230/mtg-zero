@@ -54,7 +54,10 @@ pub(crate) fn add_kind(v: &mut Vec<RKind>, ty: u8, only: u8, n: u8) {
         return;
     }
     match v.iter_mut().find(|k| k.0 == ty && k.1 == only) {
-        Some(k) => k.2 = k.2.saturating_add(n),
+        // (Exact: the kinds are parts of the pool's mana of type `ty`, a
+        // `u8` that `Game::add_mana` keeps exact; past it only once the game
+        // ended aborted, the running task finishing with 255.)
+        Some(k) => k.2 = k.2.checked_add(n).unwrap_or(u8::MAX),
         None => {
             v.push((ty, only, n));
             v.sort_unstable();
@@ -203,11 +206,11 @@ impl EoeW2 {
 impl Game {
     /// The number of counters of kind `k` on object `s`: now, or as it last
     /// existed on the battlefield if it left (CR 608.2h).
-    pub(crate) fn source_counters(&self, s: crate::ids::ObjRef, k: crate::db::Counter) -> i64 {
+    pub(crate) fn source_counters(&self, s: crate::ids::ObjRef, k: crate::db::Counter) -> crate::num::Wide {
         if self.live(s) && self.objs[s.idx.i()].zone == crate::ids::Zone::Battlefield {
-            self.counters_on(s.idx, k) as i64
+            self.counters_on(s.idx, k) as crate::num::Wide
         } else {
-            self.lki_counters.iter().filter(|x| x.0 == s && x.1 == k).map(|x| x.2 as i64).sum()
+            self.lki_counters.iter().filter(|x| x.0 == s && x.1 == k).map(|x| x.2 as crate::num::Wide).sum()
         }
     }
 
@@ -278,16 +281,32 @@ impl Game {
     /// A permanent says "nonbasic lands are Mountains" (CR 305.7; one that
     /// lost its abilities doesn't).
     pub(crate) fn moon_source(&self) -> bool {
-        self.battlefield.iter().any(|&x| self.db.def(self.objs[x.i()].def).nonbasic_lands_are_mountains && !self.lost_abilities(x))
+        self.moon_source_before(u32::MAX)
+    }
+
+    /// [`moon_source`](Self::moon_source) among the permanents with a
+    /// timestamp before `since`.
+    fn moon_source_before(&self, since: u32) -> bool {
+        self.battlefield.iter().any(|&x| {
+            self.db.def(self.objs[x.i()].def).nonbasic_lands_are_mountains && !self.lost_abilities(x) && self.objs[x.i()].timestamp < since
+        })
     }
 
     /// Is the nonbasic land `c` (a land by its card types and a copy's;
     /// not basic) a Mountain because of such a permanent (CR 305.7, layer
-    /// 4: 613.1d)? Wherever it is (it is about to enter: CR 614.12).
+    /// 4: 613.1d) as it enters (CR 614.12)? Such a permanent already on the
+    /// battlefield, not one entering at the same time (614.12a: its effect
+    /// doesn't exist yet; `Game::entry_since`).
     pub(crate) fn moon_entering(&self, c: CardIdx) -> bool {
+        self.moon_land(c, self.entry_since())
+    }
+
+    /// Is the nonbasic land `c` a Mountain because of such a permanent with a
+    /// timestamp before `since`?
+    fn moon_land(&self, c: CardIdx, since: u32) -> bool {
         let d = self.def_of(c);
         let types = d.types | self.exc(c).map_or(0, |e| e.types);
-        types & types::LAND != 0 && d.supertypes & crate::db::supertypes::BASIC == 0 && self.moon_source()
+        types & types::LAND != 0 && d.supertypes & crate::db::supertypes::BASIC == 0 && self.moon_source_before(since)
     }
 
     /// The definition of a Mountain's abilities for `c` (`CardDb::moon_of`:
@@ -320,10 +339,10 @@ impl Game {
         }
     }
 
-    /// [`moon_entering`](Self::moon_entering) for a permanent on the
-    /// battlefield.
+    /// Is permanent `c` a nonbasic land that is a Mountain now (every such
+    /// permanent on the battlefield)?
     pub(crate) fn moon_on(&self, c: CardIdx) -> bool {
-        self.objs[c.i()].zone == crate::ids::Zone::Battlefield && self.moon_entering(c)
+        self.objs[c.i()].zone == crate::ids::Zone::Battlefield && self.moon_land(c, u32::MAX)
     }
 }
 
@@ -343,7 +362,7 @@ impl Game {
 impl Game {
     /// The lands that entered the battlefield under `p`'s control this turn
     /// (`Game::lands_entered`).
-    pub(crate) fn lands_entered_this_turn(&self, p: PlayerId) -> u8 {
+    pub(crate) fn lands_entered_this_turn(&self, p: PlayerId) -> u32 {
         if self.lands_entered.0 == self.turn.number {
             self.lands_entered.1[p as usize]
         } else {
@@ -355,14 +374,21 @@ impl Game {
     /// creature gets an additional +1/+1 counter per land that entered under
     /// its controller's control this turn for each of that player's
     /// permanents that says so (Bioengineered Future); then a land is
-    /// counted.
+    /// counted. Not such a permanent entering at the same time, and not the
+    /// lands entering at the same time: they haven't entered yet as the
+    /// replacement applies (CR 614.12a; `Game::entry_since`).
     pub(crate) fn lands_entering(&mut self, c: CardIdx) {
         let p = self.objs[c.i()].controller;
         if self.is_creature(c) {
-            let n = self.lands_entered_this_turn(p);
-            let k = self.permanents_of(p).filter(|&x| x != c && self.abilities(x).etb_counter_per_land_entered).count();
+            let since = self.entry_since();
+            let together = self.permanents_of(p).filter(|&x| x != c && self.objs[x.i()].timestamp >= since && self.is_type(x, types::LAND)).count();
+            let n = (self.lands_entered_this_turn(p) as usize).saturating_sub(together);
+            let k = self
+                .permanents_of(p)
+                .filter(|&x| x != c && self.objs[x.i()].timestamp < since && self.abilities(x).etb_counter_per_land_entered)
+                .count();
             if n > 0 && k > 0 {
-                self.add_counters(c, crate::db::Counter::P1P1, (n as usize * k) as crate::num::Count);
+                self.add_counters(c, crate::db::Counter::P1P1, (n * k) as crate::num::Count);
             }
         }
         if self.is_type(c, types::LAND) {
@@ -370,8 +396,8 @@ impl Game {
             if self.lands_entered.0 != t {
                 self.lands_entered = (t, [0; 2]);
             }
-            let x = &mut self.lands_entered.1[p as usize];
-            *x = x.saturating_add(1);
+            let n = self.lands_entered.1[p as usize];
+            self.lands_entered.1[p as usize] = self.exact_inc(n, "lands entered this turn");
         }
     }
 }
@@ -486,11 +512,20 @@ impl Game {
             None => {}
         }
         let after = picked.last().and_then(|l| self.battlefield.iter().position(|x| x == l));
+        // (Lands already there, not ones entering at the same time: CR
+        // 614.12a, `entry_since`; this task runs while its entry waits.)
+        let since = self.entry_since();
         let cands: Vec<CardIdx> = self
             .battlefield
             .iter()
             .enumerate()
-            .filter(|&(i, &c)| after.is_none_or(|a| i > a) && c != card && self.objs[c.i()].controller == p && self.is_type(c, types::LAND))
+            .filter(|&(i, &c)| {
+                after.is_none_or(|a| i > a)
+                    && c != card
+                    && self.objs[c.i()].timestamp < since
+                    && self.objs[c.i()].controller == p
+                    && self.is_type(c, types::LAND)
+            })
             .map(|(_, &c)| c)
             .collect();
         if cands.is_empty() || self.objs[card.i()].zone != crate::ids::Zone::Battlefield {
@@ -521,7 +556,7 @@ impl Game {
         self.end_batch();
         if self.objs[card.i()].zone == crate::ids::Zone::Battlefield {
             let before = self.w6.entering.replace(since);
-            self.add_counters(card, crate::db::Counter::P1P1, n.min(u16::MAX as usize) as crate::num::Count);
+            self.add_counters(card, crate::db::Counter::P1P1, n as crate::num::Count);
             self.w6.entering = before;
         }
     }

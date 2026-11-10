@@ -171,10 +171,11 @@ pub enum Mod {
     Keywords(KwSet),
     /// Layer 6: gains protection.
     Protection(Prot),
-    /// Layer 7b: its base power and toughness become p/t.
-    SetPt(i32, i32),
+    /// Layer 7b: its base power and toughness become p/t (amounts: an
+    /// effect's number may be any, ENGINE.md 100.7).
+    SetPt(i64, i64),
     /// Layer 7c: +p/+t.
-    Pt(i32, i32),
+    Pt(i64, i64),
     /// Rules effects (not characteristics): it can't block.
     CantBlock,
     /// It can't be blocked.
@@ -235,6 +236,18 @@ pub enum Mod {
     /// controls (a static ability of the permanent itself; Emissary Escort,
     /// ENGINE.md 99.2).
     PowerPlusGreatestMv { types: u16 },
+}
+
+impl Mod {
+    /// `Mod::Pt` of a card's printed numbers.
+    pub fn pt(p: i32, t: i32) -> Mod {
+        Mod::Pt(p as i64, t as i64)
+    }
+
+    /// `Mod::SetPt` of a card's printed numbers.
+    pub fn set_pt(p: i32, t: i32) -> Mod {
+        Mod::SetPt(p as i64, t as i64)
+    }
 }
 
 /// Which objects a static ability affects (CR 611.3a: re-evaluated
@@ -517,12 +530,13 @@ pub enum DivAmount {
 }
 
 impl DivAmount {
-    /// The amount for a spell cast with this X.
-    pub fn of(self, x: u32) -> u32 {
+    /// The amount for a spell cast with this X (exact: twice a `u32` fits a
+    /// `u64`).
+    pub fn of(self, x: u32) -> u64 {
         match self {
-            DivAmount::Fixed(n) => n as u32,
-            DivAmount::X { double_at } if double_at > 0 && x >= double_at as u32 => x.saturating_mul(2),
-            DivAmount::X { .. } => x,
+            DivAmount::Fixed(n) => n as u64,
+            DivAmount::X { double_at } if double_at > 0 && x >= double_at as u32 => x as u64 * 2,
+            DivAmount::X { .. } => x as u64,
         }
     }
 }

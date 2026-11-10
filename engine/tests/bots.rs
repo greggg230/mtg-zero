@@ -1,5 +1,6 @@
 //! The heuristic bot (ENGINE.md 21.4): it answers every decision kind with a
-//! legal id and every game ends (the activation caps), it uses loyalty and
+//! legal id and every game ends (a loop of optional actions ends when it
+//! comes back to a state, `engine/src/loops.rs`), it uses loyalty and
 //! other activated abilities in the situations its policy names, and its
 //! strength against the policy before activated abilities (`HeuristicV1`)
 //! and random. The long measurements are `#[ignore]`d:

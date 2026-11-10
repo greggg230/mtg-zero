@@ -19,14 +19,15 @@ pub(crate) enum Subj {
 }
 
 /// Something that happened (603.2), with its subjects (`EventKind`
-/// documents them) and an amount (damage dealt: any amount, ENGINE.md 46;
-/// or a note's bits, `Game::put_onto_battlefield`).
+/// documents them) and an amount (damage dealt: any amount within
+/// `num::AMOUNT_MAX`, ENGINE.md 100.7; or a note's bits,
+/// `Game::put_onto_battlefield`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Event {
     pub kind: EventKind,
     pub a: Subj,
     pub b: Subj,
-    pub amount: u32,
+    pub amount: u64,
 }
 
 impl Event {
@@ -68,7 +69,9 @@ pub struct EvCtx {
     pub obj: Option<ObjRef>,
     /// The second object subject ("that creature" dealt damage).
     pub obj2: Option<ObjRef>,
-    pub amount: u32,
+    /// The event's amount (damage, life, counters: within
+    /// `num::AMOUNT_MAX`) or note (`ENTER_BIG`, chapters).
+    pub amount: u64,
     /// The spell or ability of the event, by stack item id (0 = none):
     /// the one that targets ("counter that spell or ability", ward).
     pub item: u32,
@@ -111,6 +114,36 @@ pub struct Held {
     pub zones: u8,
     pub seq: u32,
     pub f: Fire,
+}
+
+/// A simultaneous entry (CR 603.6a: "each time an event puts one or more
+/// permanents onto the battlefield, all permanents on the battlefield
+/// (including the newcomers) are checked"): the permanents of one event are
+/// put onto the battlefield one by one, and their `Enters` events wait here
+/// until the last of them is there and what applies as they enter is done
+/// (their "as this enters" choices and copy choices, CR 614.12, 603.6d; the
+/// order of their timestamps, 613.7m). Then the events are matched together,
+/// so each newcomer sees the others enter (`Game::begin_entering`).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Entry {
+    /// The permanents that entered, with their `Enters` events' notes, in
+    /// the order they entered.
+    pub held: Vec<(ObjRef, u32)>,
+    /// The event group the entry happened in (CR 603.2c).
+    pub seq: u32,
+    /// The timestamp its first permanent got (`u32::MAX` until one entered):
+    /// the permanents with this one or a later one are entering at the same
+    /// time, not yet on the battlefield as replacement effects apply to
+    /// each of them (CR 614.12a; `Game::entry_since`).
+    pub since: u32,
+    /// The agenda's length as it began: the tasks its permanents queued as
+    /// they entered sit above, and `Task::EntersTogether` under them.
+    pub base: u32,
+    /// How many `begin_entering`s are open.
+    pub open: u8,
+    /// The entry is complete and waits for its choices: its
+    /// `Task::EntersTogether` is queued.
+    pub queued: bool,
 }
 
 /// Does the predicate read where a leaving permanent went (`LeftTo`)?
@@ -265,12 +298,10 @@ impl Game {
                 }
             }
         }
-        // ("Triggers an additional time" for permanents entering at the same
-        // time: EoE W6.)
+        // ("Triggers an additional time": EoE W6. A permanent entering at the
+        // same time is on the battlefield as its entry's events are matched,
+        // `enters_together`.)
         let w6_doubling = ev.kind == EventKind::Enters && self.w6.seen & crate::eoe_w6::SEEN_W6_TRIGGERS != 0;
-        if w6_doubling {
-            self.w6_entering_doubler(&ev);
-        }
         if obs.is_empty() && self.temp_triggers.is_empty() && !self.w3.granted {
             return;
         }
@@ -533,8 +564,8 @@ impl Game {
                 let host = self.objs[src.r.idx.i()].attached;
                 host.is_some_and(|h| self.live(h) && self.objs[h.idx.i()].attacking) && self.attackers().len() >= 2
             }
-            TrigPred::Chapter(n) => ev.a == Subj::Obj(src.r) && ev.amount == *n as u32,
-            TrigPred::Level(n) => ev.kind == EventKind::ClassLevel && ev.a == Subj::Obj(src.r) && ev.amount == *n as u32,
+            TrigPred::Chapter(n) => ev.a == Subj::Obj(src.r) && ev.amount == *n as u64,
+            TrigPred::Level(n) => ev.kind == EventKind::ClassLevel && ev.a == Subj::Obj(src.r) && ev.amount == *n as u64,
             TrigPred::TimesPerSubject(s, n) => match ev.subject(*s) {
                 Subj::Obj(r) => self.granted_triggered(r, src.def, src.r) < *n,
                 _ => false,
@@ -544,10 +575,10 @@ impl Game {
             TrigPred::EnteredCast => ev.kind == EventKind::Enters && ev.amount & 1 != 0,
             TrigPred::EnteredPaid => ev.kind == EventKind::Enters && self.entered_counts(ev.amount, match ev.a { Subj::Obj(r) => Some(r), _ => None }).0 != 0,
             TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && self.entered_counts(ev.amount, match ev.a { Subj::Obj(r) => Some(r), _ => None }).1 >= *n as u32,
-            TrigPred::EnteredNotFromGyExile => ev.kind == EventKind::Enters && ev.amount >> 15 == 0,
+            TrigPred::EnteredNotFromGyExile => ev.kind == EventKind::Enters && (ev.amount >> 15) & 1 == 0,
             TrigPred::InGraveyard => true,
             TrigPred::SpellMvParity => match (ev.a, self.parity_of(src.r)) {
-                (Subj::Obj(r), Some(k)) => self.mana_value_of(r.idx) % 2 == k,
+                (Subj::Obj(r), Some(k)) => self.mana_value_of(r.idx) % 2 == k as u64,
                 _ => false,
             },
             TrigPred::SpellPaid => match ev.a {
@@ -816,13 +847,125 @@ impl Game {
         self.leaving.clear();
         self.batching = false;
         self.new_event();
+        // The cards exiled until one of them left return now, after the
+        // event (CR 610.3), together: those returning to the battlefield
+        // are one entry (603.6a).
+        if !self.releasing.is_empty() {
+            let sources = std::mem::take(&mut self.releasing);
+            self.begin_entering(false);
+            for s in sources {
+                self.release_links(s);
+            }
+            self.end_entering();
+        }
+    }
+
+    /// Begin putting permanents onto the battlefield as one event (CR
+    /// 603.6a): their `Enters` events wait until the matching
+    /// [`end_entering`](Self::end_entering) and the choices made as they
+    /// enter (`Entry`). Nests: inside an open entry, it joins it; inside a
+    /// task that a waiting entry's permanent queued as it entered, `join`
+    /// joins that entry (an Aura choosing what it enchants, CR 303.4f; Mox
+    /// Diamond's discard, 614.1a: the permanent enters with the others). Any
+    /// other entry while one waits (a land sacrificed to devour returning a
+    /// card exiled until it leaves, 610.3a) is an event of its own.
+    pub(crate) fn begin_entering(&mut self, join: bool) {
+        if let Some(e) = self.entries.last_mut() {
+            if e.open > 0 || join {
+                e.open += 1;
+                return;
+            }
+        }
+        self.entries.push(Entry { held: Vec::new(), seq: self.ev_seq, since: u32::MAX, base: self.agenda.len() as u32, open: 1, queued: false });
+    }
+
+    /// End [`begin_entering`](Self::begin_entering). Once the entry is
+    /// complete its `Enters` events are matched together now, or, when its
+    /// permanents queued choices as they entered (CR 614.12, 613.7m), after
+    /// them (`Task::EntersTogether`, under those tasks).
+    pub(crate) fn end_entering(&mut self) {
+        let e = self.entries.last_mut().expect("an entry in progress");
+        e.open -= 1;
+        // (A join: its entry waits for its `Task::EntersTogether` already.)
+        if e.open > 0 || e.queued {
+            return;
+        }
+        let base = e.base as usize;
+        if self.agenda.len() > base {
+            e.queued = true;
+            self.agenda.insert(base, Task::EntersTogether);
+        } else {
+            self.enters_together();
+        }
+    }
+
+    /// The first timestamp of the entry in progress (`Entry::since`;
+    /// `u32::MAX` outside one, or before its first permanent entered): what
+    /// applies as a permanent enters is what was there before its entry, not
+    /// a permanent entering at the same time (CR 614.12a: Containment
+    /// Priest's, a fast land's "other lands", Blood Moon's, an "enter as a
+    /// copy" choice; their rulings), so permanents with this timestamp or a
+    /// later one are left out.
+    pub(crate) fn entry_since(&self) -> u32 {
+        self.entries.last().map_or(u32::MAX, |e| e.since)
+    }
+
+    /// The `Enters` event of permanent `r` (its note: cast, times paid, ...;
+    /// `Game::put_onto_battlefield`): held for its entry, or matched now
+    /// outside one.
+    pub(crate) fn entered_event(&mut self, r: ObjRef, note: u32) {
+        match self.entries.last_mut() {
+            Some(e) => e.held.push((r, note)),
+            None => {
+                self.note_entered(r.idx);
+                self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u64 });
+                self.day_night_entered(r.idx);
+            }
+        }
+    }
+
+    /// The last entry is complete (`Task::EntersTogether`, or its end with
+    /// nothing queued): its permanents' `Enters` events are matched in its
+    /// event group, each against every permanent on the battlefield,
+    /// newcomers included (CR 603.6a, 603.10: the game as it is after the
+    /// event); then day and night look at the newcomers (CR 702.145c-g,
+    /// after the event: a double-faced token entered front face up).
+    pub(crate) fn enters_together(&mut self) {
+        let e = self.entries.pop().expect("an entry to match");
+        debug_assert_eq!(e.open, 0, "an entry matched while open");
+        // (Each still the permanent that entered: nothing between its entry
+        // and the end of its entry's choices moves a newcomer: what devour
+        // sacrifices and what a copy copies were there before, CR 614.12a.
+        // Loud, never a silently lost event.)
+        let held = e.held;
+        assert!(
+            held.iter().all(|&(r, _)| self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield),
+            "a permanent left the battlefield before its entry's events were matched"
+        );
+        if held.is_empty() {
+            return;
+        }
+        let saved = self.ev_seq;
+        self.ev_seq = e.seq;
+        for &(r, _) in &held {
+            self.note_entered(r.idx);
+        }
+        for &(r, note) in &held {
+            self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u64 });
+        }
+        self.ev_seq = saved;
+        for &(r, _) in &held {
+            if self.live(r) {
+                self.day_night_entered(r.idx);
+            }
+        }
     }
 
     /// A new event group begins (CR 603.2c: an instruction ended, a
     /// resolution or a simultaneous move began).
     #[inline]
     pub(crate) fn new_event(&mut self) {
-        self.ev_seq = self.ev_seq.wrapping_add(1);
+        self.ev_seq = self.exact_inc(self.ev_seq, "event groups");
     }
 
     /// A "whenever one or more ..." ability of `source` (slot `slot`)
@@ -833,7 +976,10 @@ impl Game {
         if self.batch_fired.iter().any(|&(s, k, g)| s == source && k == slot && g == q) {
             return false;
         }
-        self.batch_fired.retain(|&(_, _, g)| g == q);
+        // (Older groups are done; a later one stays: an entry's events and a
+        // replacement choice's held triggers are matched in their own,
+        // earlier group, `enters_together`, `release_held`.)
+        self.batch_fired.retain(|&(_, _, g)| (g.wrapping_sub(q) as i32) >= 0);
         self.batch_fired.push((source, slot, q));
         true
     }

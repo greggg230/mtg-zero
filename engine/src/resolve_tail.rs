@@ -47,7 +47,7 @@ impl Game {
                 // CR 205.2a: card types among the cards (counted now, locked
                 // in, 608.2h).
                 let t = self.graveyard_cards(p).fold(0u16, |m, c| m | self.types_of(c));
-                let x = t.count_ones() as i32;
+                let x = t.count_ones() as i64;
                 if let Some(&c) = self.objs_on(f, &On::Source).first() {
                     let r = self.obj_ref(c);
                     self.add_effect(Affected::Obj(r), Mod::MustAttackPlayer, Until::EndOfTurn, p);
@@ -186,16 +186,17 @@ impl Game {
                     None => 0,
                 };
                 self.note(|_| format!("P{p} removes {n} counter(s) for mana"));
-                // (One mana per counter, one choice each, counted by the
-                // frame's u8 `i` (1 + the mana added): at most 254 mana,
-                // shortcuts.md 46.4.)
-                f.x = n.min(254) as i32;
+                // (One mana per counter, one choice each, any number: `f.x`
+                // holds the count exactly. The pool keeps 255 a type, so
+                // past 6 x 255 mana `add_mana` has ended the game aborted
+                // long before the frame's `u32` `i` could run out.)
+                f.x = crate::num::count_amount(n);
                 f.i = 1;
                 f.floor = 0;
             }
             None => {}
         }
-        if (f.i as i32 - 1) >= f.x {
+        if (f.i as i64 - 1) >= f.x {
             return Flow::Next;
         }
         let opts = (f.floor..5).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
@@ -215,9 +216,9 @@ impl Game {
                 // X: the counters on the source, as it last existed on the
                 // battlefield if it left (CR 608.2h).
                 let x = self.amount(f, crate::program::Amount::SourceCounters(counter)).max(0);
-                let mut mv = 0i32;
-                for c in self.mill(p, x as usize, false) {
-                    mv += self.def_of(c).mana_value() as i32;
+                let mut mv: crate::num::Wide = 0;
+                for c in self.mill(p, crate::num::cards_n(x), false) {
+                    mv += self.def_of(c).mana_value() as crate::num::Wide;
                 }
                 self.note(|_| format!("P{p} mills {x}; P{q} loses {mv}"));
                 if mv > 0 {
@@ -311,7 +312,7 @@ impl Game {
                 }
             }
             if f.i % 2 == 0 {
-                f.x = (0..2u8).map(|p| count(self, p)).min().unwrap() as i32;
+                f.x = (0..2u8).map(|p| count(self, p)).min().unwrap() as i64;
                 f.i += 1;
                 f.picked.clear();
             }
@@ -393,7 +394,7 @@ impl Game {
             match self.answer.take() {
                 Some(Choice::Card(c)) => {
                     // (As it last existed: CR 608.2h.)
-                    f.x = self.mana_value_of(c) as i32;
+                    f.x = self.mana_value_of(c) as i64;
                     self.sacrifice(c);
                     f.i = 1;
                 }
@@ -419,7 +420,7 @@ impl Game {
                     let c = self.library_sorted(p).into_iter().find(|&c| self.objs[c.i()].def == d).expect("found card");
                     self.scramble(p, &[], false, true);
                     self.note(|g| format!("P{p} finds {}", g.name(c)));
-                    if (self.def_of(c).mana_value() as i32) <= f.x {
+                    if (self.def_of(c).mana_value() as i64) <= f.x {
                         self.put_onto_battlefield(c, p);
                         self.shuffle_library(p);
                         return Flow::Next;
@@ -450,7 +451,8 @@ impl Game {
         }
         // f.i == 2: "you may pay {X}, where X is the difference."
         let c = f.picked[0];
-        let diff = (self.def_of(c).mana_value() as i32 - f.x).clamp(0, 99) as u8;
+        // (Two mana values: at most 255 apart.)
+        let diff = (self.def_of(c).mana_value() as i64 - f.x).clamp(0, 255) as u8;
         let cost = crate::mana::ManaCost { generic: diff, ..Default::default() };
         match self.answer.take() {
             Some(Choice::Yes) => {
@@ -494,7 +496,7 @@ impl Game {
                 for c in std::mem::take(&mut f.pile) {
                     self.move_card(c, Zone::Library, Pos::Bottom);
                 }
-                self.look_top(f, p, n, false);
+                self.look_top(f, p, n as usize, false);
             }
             Some(_) => {
                 // "Then shuffle and put the last cards you looked at on
@@ -506,14 +508,14 @@ impl Game {
                 return Flow::Next;
             }
             None if f.i == 0 => {
-                self.look_top(f, p, n, false);
+                self.look_top(f, p, n as usize, false);
                 f.i = 1;
             }
             None => {}
         }
         let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
         // CR 119.4: life can be paid only up to the life total.
-        if self.players[p as usize].life >= life as i32 {
+        if self.players[p as usize].life >= life as i64 {
             opts.push(Opt { action: act::YES, choice: Choice::Yes });
         }
         self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
@@ -538,7 +540,7 @@ impl Game {
                 Some(Choice::Card(c)) => {
                     let r = self.discard_to(c);
                     f.i = 2;
-                    let enough = self.amount(f, crate::program::Amount::SourceCounters(counter)) >= n as i32;
+                    let enough = self.amount(f, crate::program::Amount::SourceCounters(counter)) >= n as crate::num::Wide;
                     match r {
                         Some(card) if enough => f.picked = vec![card],
                         _ => return Flow::Next,

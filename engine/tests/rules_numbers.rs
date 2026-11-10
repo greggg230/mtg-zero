@@ -1,9 +1,11 @@
-//! Unbounded numbers (M6, ENGINE.md 46): Magic has no maximum for counters,
-//! life, power, toughness or damage (CR 107.1, 122.1, 119, 120, 208). The
-//! engine keeps every such value exact up to its class-B bound
-//! (docs/shortcuts.md 46.1-46.6) and saturates there, never wrapping or
-//! truncating; and every feature `encode` writes stays finite and bounded
-//! (|x| <= `encode::FEATURE_BOUND`, 256) whatever the game state.
+//! Unbounded numbers (M6, ENGINE.md 46; F7, 100.7): Magic has no maximum for
+//! counters, life, power, toughness or damage (CR 107.1, 122.1, 119, 120,
+//! 208). The engine keeps every such value exact: stored counts and amounts
+//! are 64-bit, derived values (power, toughness, sums) `i128`, and a number
+//! the game would keep past `i64::MAX` ends the game **aborted** (no result)
+//! instead of saturating, wrapping or truncating. Every feature `encode`
+//! writes stays finite and bounded (|x| <= `encode::FEATURE_BOUND`, 256)
+//! whatever the game state.
 //!
 //! The reproduction of the mtg5 incident (iteration 14, 2026-10-27): an
 //! Ouroboroid board grew past 65,535 counters a creature (the old `u16`
@@ -15,6 +17,8 @@ mod common;
 use common::db;
 use engine::az::encode::NUM_FEATURES;
 use engine::db::Counter;
+use engine::db::AbilitySlot;
+use engine::game::EndReason;
 use engine::testkit::Scenario;
 use engine::{CardIdx, Choice, DecisionKind, Game, PlayerId, Step, Zone};
 
@@ -219,4 +223,170 @@ fn lethal_damage_past_65535_for_a_tramplers_assignment_cr_702_19b() {
     assert_eq!(g.life(1), 20, "nothing trampled over (the wall's lethal damage is 65,539)");
     assert!(g.find_card(1, "Test Wall", Zone::Battlefield).is_none(), "the wall was dealt lethal damage");
     assert!(g.find_card(0, "Test Trampler", Zone::Battlefield).is_some(), "the trampler survives 65,535 damage");
+}
+
+// ---- F7 (ENGINE.md 100.7): exact past 32 bits, aborted past 64 -------------------
+
+/// Pay with the first source offered until the payment is done.
+fn pay(g: &mut Game) {
+    let paying = |g: &Game| matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana));
+    g.drive_until(|g| at_priority(g) || !paying(g));
+    while paying(g) {
+        let c = g.pending_decision().unwrap().options[0].choice;
+        g.choose(c);
+        g.drive_until(|g| at_priority(g) || !paying(g));
+    }
+}
+
+/// Attack with `attacker` (nothing blocks) and play on to the end of combat
+/// or the end of the game.
+fn attack_unblocked(g: &mut Game, attacker: CardIdx) {
+    assert_eq!(g.kind(), Some(DecisionKind::DeclareAttackers));
+    g.choose(Choice::Card(attacker));
+    g.choose(Choice::Pass);
+    for _ in 0..200 {
+        if g.is_over() || g.turn().step == Step::EndCombat {
+            return;
+        }
+        let d = g.pending_decision().expect("game running");
+        let c = match d.kind {
+            DecisionKind::Priority | DecisionKind::DeclareBlockers | DecisionKind::DeclareAttackers => Choice::Pass,
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    panic!("attack_unblocked: no progress\n{}", g.log_lines().join("\n"));
+}
+
+/// The game ended aborted: no winner, no result (ENGINE.md 100.7).
+fn assert_aborted(g: &Game, what: &str) {
+    assert!(g.is_over(), "{what}: the game goes on\n{}", g.log_lines().join("\n"));
+    assert!(g.aborted(), "{what}: {:?}", g.outcome());
+    let o = g.outcome().unwrap();
+    assert_eq!(o.reason, EndReason::Aborted, "{what}");
+    assert_eq!(o.winner, None, "{what}");
+    assert!(g.pending_decision().is_none(), "{what}: no decision after an abort");
+}
+
+/// Bristly Bill doubles the +1/+1 counters of a creature with 3,000,000,000
+/// of them: 6,000,000,000, past `u32::MAX` and exact (CR 122.1: no
+/// maximum; the old `u32` counts saturated at 4,294,967,295), and its power
+/// and toughness with them (CR 613.4c).
+#[test]
+fn cr_122_1_counters_doubled_past_u32_max_stay_exact() {
+    let mut g = scen()
+        .battlefield(0, &["Bristly Bill, Spine Sower", "Test Bear"])
+        .battlefield(0, &["Forest"; 5])
+        .battlefield(1, &["Test Reacher"])
+        .counters(0, "Test Bear", Counter::P1P1, 3_000_000_000)
+        .at(Step::Main1, 0)
+        .start();
+    let bill = bf(&g, 0, "Bristly Bill, Spine Sower");
+    let bear = bf(&g, 0, "Test Bear");
+    assert_eq!(g.pt(bear), (3_000_000_002, 3_000_000_002));
+    g.choose(Choice::Ability(bill, AbilitySlot::Activated(0)));
+    pay(&mut g);
+    settle(&mut g);
+    assert!(!g.is_over());
+    assert_eq!(g.counters_on(bear, Counter::P1P1), 6_000_000_000, "doubled exactly");
+    assert_eq!(g.pt(bear), (6_000_000_002, 6_000_000_002));
+    assert_features_bounded(&g, "6,000,000,000 counters");
+    // And again: 12,000,000,000.
+    let t0 = g.turn().number;
+    quiet_until(&mut g, |g| g.turn().number == t0 + 2 && g.turn().step == Step::Main1 && at_priority(g));
+    g.choose(Choice::Ability(bill, AbilitySlot::Activated(0)));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.counters_on(bear, Counter::P1P1), 12_000_000_000);
+    assert_eq!(g.power(bear), 12_000_000_002);
+}
+
+/// Combat damage and a life total past `i32::MAX` are exact (CR 510.2,
+/// 120.3a, 119.3): a creature with 3,000,000,000 +1/+1 counters deals
+/// 3,000,000,002 to a player at 5,000,000,000 life, who is left at
+/// 1,999,999,998 (the old `i32` amounts saturated at 2,147,483,647).
+#[test]
+fn cr_510_2_combat_damage_and_life_past_i32_max_are_exact() {
+    let mut g = scen()
+        .battlefield(0, &["Test Lifelinker"])
+        .counters(0, "Test Lifelinker", Counter::P1P1, 3_000_000_000)
+        .life(0, 4_000_000_000)
+        .life(1, 5_000_000_000)
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let l = bf(&g, 0, "Test Lifelinker");
+    assert_eq!(g.power(l), 3_000_000_002);
+    attack_unblocked(&mut g, l);
+    assert!(!g.is_over(), "{:?}", g.outcome());
+    assert_eq!(g.life(1), 1_999_999_998, "5,000,000,000 - 3,000,000,002");
+    assert_eq!(g.life(0), 7_000_000_002, "lifelink: 4,000,000,000 + 3,000,000,002 (CR 702.15b)");
+    assert_eq!(g.player(0).life_gained, 3_000_000_002, "the life gained this turn");
+    assert_features_bounded(&g, "life past i32");
+}
+
+/// A life total pushed past `i64::MAX` (CR 119.3 has no maximum) ends the
+/// game aborted: lifelink's gain from a player at `i64::MAX - 1` life
+/// (ENGINE.md 100.7: a number the game keeps leaves its exact range).
+#[test]
+fn cr_119_3_a_life_total_past_i64_ends_the_game_aborted() {
+    let mut g = scen()
+        .battlefield(0, &["Test Lifelinker"])
+        .life(0, i64::MAX - 1)
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let l = bf(&g, 0, "Test Lifelinker");
+    attack_unblocked(&mut g, l);
+    assert_aborted(&g, "life past i64::MAX");
+    assert_eq!(g.life(1), 18, "the damage was dealt before the gain");
+    assert_features_bounded(&g, "an aborted game at i64::MAX life");
+}
+
+/// A count of counters pushed past `i64::MAX` (CR 122.1 has no maximum)
+/// ends the game aborted: Bristly Bill doubling 5,000,000,000,000,000,000
+/// +1/+1 counters. The board before the doubling (power past 2^62)
+/// encodes finite and bounded.
+#[test]
+fn cr_122_1_a_counter_count_past_i64_ends_the_game_aborted() {
+    let mut g = scen()
+        .battlefield(0, &["Bristly Bill, Spine Sower", "Test Bear"])
+        .battlefield(0, &["Forest"; 5])
+        .counters(0, "Test Bear", Counter::P1P1, 5_000_000_000_000_000_000)
+        .at(Step::Main1, 0)
+        .start();
+    let bill = bf(&g, 0, "Bristly Bill, Spine Sower");
+    let bear = bf(&g, 0, "Test Bear");
+    assert_eq!(g.power(bear), 5_000_000_000_000_000_002);
+    assert_features_bounded(&g, "5 x 10^18 counters");
+    g.choose(Choice::Ability(bill, AbilitySlot::Activated(0)));
+    pay(&mut g);
+    for _ in 0..50 {
+        if g.is_over() {
+            break;
+        }
+        let c = match g.kind() {
+            Some(DecisionKind::Priority) => Choice::Pass,
+            _ => g.pending_decision().unwrap().options[0].choice,
+        };
+        g.choose(c);
+    }
+    assert_aborted(&g, "counters past i64::MAX");
+    assert_features_bounded(&g, "an aborted game past i64 counters");
+}
+
+/// Power past `i64::MAX` is exact as a derived value (layer 7 in `i128`, CR
+/// 613.4c: a 2/2 with `i64::MAX` +1/+1 counters has power 2^63 + 1), and
+/// assigning it as combat damage, a number the game keeps, ends the game
+/// aborted (CR 510.1a; ENGINE.md 100.7).
+#[test]
+fn cr_510_1a_combat_damage_past_i64_ends_the_game_aborted() {
+    let mut g = scen()
+        .battlefield(0, &["Test Bear"])
+        .counters(0, "Test Bear", Counter::P1P1, i64::MAX as u64)
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let bear = bf(&g, 0, "Test Bear");
+    assert_eq!(g.power(bear), i64::MAX as i128 + 2);
+    assert_features_bounded(&g, "power past i64");
+    attack_unblocked(&mut g, bear);
+    assert_aborted(&g, "combat damage past i64::MAX");
 }

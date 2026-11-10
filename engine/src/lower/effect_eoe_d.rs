@@ -212,7 +212,7 @@ pub(crate) fn lower_effect_eoe_d(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
                 l.int("OptionalSacAnotherForPumpSelfUEOT.toughness_bonus", *toughness_bonus, -99, 99),
             );
             if p != 0 || t != 0 {
-                mods.push(Mod::Pt(p, t));
+                mods.push(Mod::pt(p, t));
             }
             mods.extend(keyword_names(l, "OptionalSacAnotherForPumpSelfUEOT.granted_keywords", granted_keywords));
             if mods.is_empty() {
@@ -228,7 +228,7 @@ pub(crate) fn lower_effect_eoe_d(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
         E::DepressurizeEffect(nodes::DepressurizeEffect { power_penalty }) => {
             let p = l.int("DepressurizeEffect.power_penalty", *power_penalty, 1, 99);
             let t = b.target(creature(), 1, 1);
-            apply(b, On::Target(t), vec![Mod::Pt(-p, 0)], Until::EndOfTurn);
+            apply(b, On::Target(t), vec![Mod::pt(-p, 0)], Until::EndOfTurn);
             let at = b.op(Op::JumpUnlessTarget { tgt: t, filter: Filter::PowerAtMost(0), to: 0 });
             b.op(Op::Destroy { tgt: t });
             b.patch(at);
@@ -253,11 +253,11 @@ pub(crate) fn lower_effect_eoe_d(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             upgrade_power,
             upgrade_toughness,
         }) => {
-            let base = Mod::SetPt(
+            let base = Mod::set_pt(
                 l.int("SetBasePTConditionalUntilEOT.default_power", *default_power, 0, 99),
                 l.int("SetBasePTConditionalUntilEOT.default_toughness", *default_toughness, 0, 99),
             );
-            let up = Mod::SetPt(
+            let up = Mod::set_pt(
                 l.int("SetBasePTConditionalUntilEOT.upgrade_power", *upgrade_power, 0, 99),
                 l.int("SetBasePTConditionalUntilEOT.upgrade_toughness", *upgrade_toughness, 0, 99),
             );
@@ -411,7 +411,7 @@ pub(crate) fn lower_effect_eoe_d(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
                 l.int("PumpCreaturesOpponentsControlUntilEOT.toughness_bonus", *toughness_bonus, -99, 99),
             );
             if p != 0 || t != 0 {
-                mods.push(Mod::Pt(p, t));
+                mods.push(Mod::pt(p, t));
             }
             mods.extend(keyword_names(l, "PumpCreaturesOpponentsControlUntilEOT.granted_keywords", granted_keywords));
             if mods.is_empty() {

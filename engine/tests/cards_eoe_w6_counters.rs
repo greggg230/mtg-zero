@@ -28,7 +28,7 @@ fn cast_on(g: &mut Game, p: u8, name: &str, target: Option<engine::CardIdx>) {
 /// ruling: "four times the original number").
 #[test]
 fn cr_614_1a_loading_zone_doubles_counters_on_your_creatures() {
-    for (zones, mine, want) in [(1usize, true, 2u32), (1, false, 1), (2, true, 4), (0, true, 1)] {
+    for (zones, mine, want) in [(1usize, true, 2u64), (1, false, 1), (2, true, 4), (0, true, 1)] {
         let mut bf0: Vec<&str> = vec!["Plains", "Lane A Bear"];
         bf0.extend(std::iter::repeat_n("Loading Zone", zones));
         let mut g = scen().battlefield(0, &bf0).battlefield(1, &["Lane A Bear"]).hand(0, &["Honor"]).at(Step::Main1, 0).start();

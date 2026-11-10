@@ -525,9 +525,9 @@ fn random_board(seed: u64, pools: &Pools, log: bool) -> (Game, String) {
         .hand(1, &hand1)
         .graveyard(0, &gy)
         .pool(0, pool, 0)
-        .life(0, life);
+        .life(0, life as i64);
     for (n, k, m) in counters {
-        s = s.counters(0, n, k, m);
+        s = s.counters(0, n, k, m as u64);
     }
     (s.at(Step::Main1, 0).start(), desc)
 }

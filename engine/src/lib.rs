@@ -19,6 +19,7 @@ pub mod game;
 pub mod hidden;
 pub mod ids;
 pub mod lower;
+mod loops;
 pub mod mana;
 pub mod num;
 mod pay;

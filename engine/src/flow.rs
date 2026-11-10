@@ -2,7 +2,7 @@
 //! mulligans and cleanup (ENGINE.md 4, 5, 11).
 
 use crate::decision::{act, Choice, Decision, DecisionKind, Opt};
-use crate::game::{EndReason, Game, Outcome, Pos, Step};
+use crate::game::{EndReason, Game, Pos, Step};
 use crate::ids::{opp, CardIdx, PlayerId, Zone};
 use crate::pay::{PayMana, Src};
 use crate::resolve::Frame;
@@ -59,7 +59,7 @@ pub(crate) enum Task {
     DeclareBlockers { i: u8 },
     CombatDamage { first: bool, att: u8 },
     /// (`step`: where the amount's digits stand, ENGINE.md 100.2.)
-    AssignDamage { att: CardIdx, j: u32, left: u32, step: crate::decision::NumberStep },
+    AssignDamage { att: CardIdx, j: u32, left: u64, step: crate::decision::NumberStep },
     // cleanup (CR 514)
     CleanupDiscard,
     CleanupRest,
@@ -135,6 +135,10 @@ pub(crate) enum Task {
     /// CR 601.2a-b: which permission casts graveyard card `card` (face
     /// `face`; `cast::route`).
     ChooseRoute { p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId> },
+    /// CR 603.6a: the innermost waiting entry's choices are made (the tasks
+    /// above this one); its permanents' `Enters` events are matched together
+    /// (`Game::enters_together`).
+    EntersTogether,
     /// What a permanent that may enter as a copy copies (CR 707.5), then
     /// it enters (`note`: its `Enters` event's).
     EnterAsCopy { card: CardIdx, note: u32, since: u32, page: crate::decision::Page },
@@ -198,6 +202,9 @@ impl Game {
                     r[w as usize] = 1.0;
                     r
                 }
+                // (A draw; an aborted game has no result and is dropped by
+                // self-play: 0.5 each is what a driver that doesn't drop it
+                // would see.)
                 None => [0.5, 0.5],
             },
             None => [0.0; 2],
@@ -217,7 +224,7 @@ impl Game {
         let choice = d.choice_of(action).ok_or_else(|| format!("illegal action {action} for {:?}", d.kind))?;
         self.pending = None;
         self.answer = Some(choice);
-        self.decisions += 1;
+        self.decisions = self.exact_inc(self.decisions, "decisions");
         self.advance();
         chance.append(&mut self.keys);
         Ok(())
@@ -344,6 +351,7 @@ impl Game {
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
             Task::ChooseAbility { p, card, page } => self.choose_ability(p, card, page),
             Task::ChooseRoute { p, card, face } => self.choose_route(p, card, face),
+            Task::EntersTogether => self.enters_together(),
             Task::EnterAsCopy { card, note, since, page } => self.enter_as_copy(card, note, since, page),
             Task::CopyTargets { id, k, copy, page } => self.copy_targets(id, k, copy, page),
             Task::ChooseTimes { id, step } => self.choose_times(id, step),
@@ -445,7 +453,7 @@ impl Game {
             self.turn.normal
         };
         if self.turn.number >= self.spec.max_turns {
-            self.outcome = Some(Outcome { winner: None, reason: EndReason::TurnLimit });
+            self.end_game(None, EndReason::TurnLimit);
             return;
         }
         // "If you would begin your turn while this artifact is tapped, you
@@ -528,8 +536,7 @@ impl Game {
         self.w3.lki_host.clear();
         self.w3.lki_loss.clear();
         self.spell_lki.clear();
-        self.may_copies = 0;
-        self.activations.clear();
+        self.loop_taken.clear();
         // Permissions end with their turn, or when the card moves.
         let perms = std::mem::take(&mut self.permissions);
         self.permissions = perms

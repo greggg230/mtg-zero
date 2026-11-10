@@ -100,7 +100,7 @@ fn drained(mut g: Game, spell: CardIdx, answer: impl Fn(&Game) -> Option<Choice>
         g.choose(c);
     }
     assert_eq!(g.obj(spell).zone, Zone::Stack, "{}\n{}", g.name(spell), log(&g));
-    let paid = (g.permanents_of(0).filter(|&c| g.obj(c).tapped).count(), 20 - g.life(0));
+    let paid = (g.permanents_of(0).filter(|&c| g.obj(c).tapped).count(), (20 - g.life(0)) as i32);
     g.pass();
     g.drive_until(|g| at_priority(g) && g.turn().priority == 1);
     let md = g.card(1, "Mana Drain", Zone::Hand);
@@ -197,7 +197,7 @@ fn a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f()
     ];
     for (name, mv, tapped, g, answer) in cases {
         let c = (0..g.objs().len())
-            .map(|i| CardIdx(i as u16))
+            .map(|i| CardIdx::new(i as u32))
             .find(|&c| g.obj(c).owner == 0 && g.name(c) == name && matches!(g.obj(c).zone, Zone::Hand | Zone::Graveyard))
             .unwrap_or_else(|| panic!("no {name}"));
         let (got, t, life) = drained(g, c, answer);

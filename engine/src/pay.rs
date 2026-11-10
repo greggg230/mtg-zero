@@ -93,7 +93,7 @@ impl Src {
 impl Default for Src {
     /// (A filler for inline storage, never a real source.)
     fn default() -> Src {
-        Src::of(CardIdx(0), AbilitySlot::Spell)
+        Src::of(CardIdx::new(0), AbilitySlot::Spell)
     }
 }
 
@@ -423,8 +423,8 @@ impl SelfUse {
 /// pay this; the feasibility tries each candidate both ways (`Way::crew`).
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
 pub(crate) struct TapsOwed {
-    pub need: i64,
-    pub cands: Vec<(CardIdx, i64)>,
+    pub need: crate::num::Wide,
+    pub cands: Vec<(CardIdx, crate::num::Wide)>,
 }
 
 /// Paying a mana cost (ENGINE.md 6, 18). Stages: Phyrexian pips (how many
@@ -668,11 +668,12 @@ pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<Ca
         ManaProd::Fixed(v) => vec![*v],
         ManaProd::IfElse { cond, then, els } => vec![if g.cond_holds(cond, p) { *then } else { *els }],
         ManaProd::SameType { mask, n } => (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| one(t, *n)).collect(),
-        // (Saturating: at most 255 of a type, shortcuts.md 46.3.)
         ManaProd::ChosenN(n) => {
             let m = src.map_or(0, |c| g.chosen_land_color(c));
             (0..5).filter(|&t| m & (1 << t) != 0).map(|t| one(t, *n)).collect()
         }
+        // (At most 255 of a type, the pool's u8: past it the game aborts as
+        // the ability is activated, `Game::check_counter_mana`, F7.)
         ManaProd::SameTypeCounters { mask, counter } => match src.map_or(0, |c| g.counters_on(c, *counter)).min(255) as u8 {
             0 => Vec::new(),
             n => (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| one(t, n)).collect(),
@@ -1307,8 +1308,10 @@ impl Game {
             }
             _ => i32::MAX as i64,
         };
-        // (In i64: what is left is within the life total.)
-        let life = (pl.life as i64 - later.min(i64::MAX as u64) as i64).max(0) as i32;
+        // (The life a payment may spend: a life total past `i32::MAX` is the
+        // same budget, as a payment spends far less: exact. F7, ENGINE.md
+        // 100.7.)
+        let life = (pl.life as crate::num::Wide - later as crate::num::Wide).clamp(0, i32::MAX as crate::num::Wide) as i32;
         (Budget { life, sac: sac.clamp(0, i32::MAX as i64) as i32 }, later > 0)
     }
 
@@ -1451,7 +1454,7 @@ impl Game {
     /// (tapping one that is an actor of a shared activation leaves its pool
     /// one fewer: `PoolCtx`).
     #[allow(clippy::type_complexity)]
-    fn taps_owed(&self, keep: &Keep, free: &dyn Fn(CardIdx) -> bool) -> Option<(i64, Vec<(CardIdx, i64)>)> {
+    fn taps_owed(&self, keep: &Keep, free: &dyn Fn(CardIdx) -> bool) -> Option<(crate::num::Wide, Vec<(CardIdx, crate::num::Wide)>)> {
         let t = keep.taps.as_ref()?;
         let cands = t.cands.iter().filter(|&&(c, n)| n > 0 && free(c)).copied().collect();
         Some((t.need, cands))
@@ -1852,7 +1855,8 @@ impl Game {
         if plain.cut && cost.total() as usize > PLAIN_TOTAL {
             return self.can_pay_with(p, cost, classes, &Keep::default());
         }
-        let life = self.players[p as usize].life.max(0);
+        // (A life total past `i32::MAX` is the same budget: exact, above.)
+        let life = self.players[p as usize].life.clamp(0, i32::MAX as i64) as i32;
         cost.is_zero() || cands_payable(cost, &[], &[], plain, Budget { life, sac: i32::MAX })
     }
 
@@ -2781,6 +2785,23 @@ impl Game {
     fn finish_payment(&mut self, pm: &PayMana, rem: Rem) {
         let payer = pm.payer;
         let pool = self.players[payer as usize].pool;
+        // F7 (ENGINE.md 100.7): the virtual pool (the pool's mana and the
+        // picked several-mana sources', `pm.extra`) keeps a `u8` a type, as
+        // the pool does (workstream B's model); past it the game ends
+        // aborted, counted here exactly from the picks.
+        for t in 0..6 {
+            let total = pool.amt[t] as u32 + pm.multi.iter().map(|m| m.1[t] as u32).sum::<u32>();
+            if total > u8::MAX as u32 {
+                self.abort(|| format!("P{payer}'s pool and payment: {total} mana of one type, past 255"));
+            }
+        }
+        for &(src, _) in &pm.multi {
+            if let AbilitySlot::Activated(_) = src.slot {
+                if let Some(m) = self.src_ability(src.card, src.slot).mana() {
+                    self.check_counter_mana(src.card, &m.prod);
+                }
+            }
+        }
         let mut spent = [0u8; 6];
         for t in 0..6 {
             spent[t] = pool.amt[t].saturating_add(pm.extra[t]) - rem.amt[t];
@@ -3027,8 +3048,25 @@ impl Game {
             .unwrap_or(0)
     }
 
+    /// Add mana to `p`'s pool (CR 106.4): past 255 of a type (the pool's
+    /// `u8`, workstream B) the game ends aborted (ENGINE.md 100.7).
     pub(crate) fn add_mana(&mut self, p: PlayerId, mana: &[u8; 6]) {
-        self.players[p as usize].pool.add(mana);
+        if !self.players[p as usize].pool.add(mana) {
+            self.abort(|| format!("P{p}'s pool: more than 255 mana of one type"));
+        }
+    }
+
+    /// F7 (ENGINE.md 100.7): a mana ability of `src` that makes mana equal to
+    /// the counters on it (`ManaProd::SameTypeCounters`) makes more than the
+    /// pool's 255 of a type (`productions` reads at most 255: workstream B's
+    /// `u8` model): the game ends aborted.
+    pub(crate) fn check_counter_mana(&mut self, src: CardIdx, prod: &ManaProd) {
+        if let ManaProd::SameTypeCounters { counter, .. } = prod {
+            let n = self.counters_on(src, *counter);
+            if n > u8::MAX as crate::num::Count {
+                self.abort(|| format!("{n} mana of one type from counters: past the pool's 255"));
+            }
+        }
     }
 }
 
@@ -3135,7 +3173,7 @@ pub(crate) struct Cands {
     pub(crate) cut: bool,
     /// What a later tap cost still needs from the candidates with another
     /// way (`TapsOwed`: the others counted already); 0 or less: nothing.
-    crew: i64,
+    crew: crate::num::Wide,
 }
 
 /// The cost size `plain_cands` are built for (`UseCap`): a larger cost with
@@ -3204,7 +3242,7 @@ struct Way {
     rsig: u16,
     /// It taps its card for a later tap cost: what the card counts for
     /// there (`TapsOwed`, `Cands::crew`); 0 for a mana way.
-    crew: i64,
+    crew: crate::num::Wide,
 }
 
 impl Way {
@@ -3372,7 +3410,7 @@ fn cands(
     allow: u8,
     marked: u8,
     cap: UseCap,
-    taps: Option<&(i64, Vec<(CardIdx, i64)>)>,
+    taps: Option<&(crate::num::Wide, Vec<(CardIdx, crate::num::Wide)>)>,
     mut pools: PoolCtx,
     res: ResCtx,
 ) -> Cands {
@@ -3918,7 +3956,7 @@ impl Shared<'_> {
 /// among them out of the sacrifice budget; a branch with more activations of
 /// a pool than its actors left is cut.
 #[allow(clippy::too_many_arguments)]
-fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixed: &Units, alts: &[Vec<Way>], budget: Budget, crew: i64, pools: &PoolCtx, res: &ResCtx) -> bool {
+fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixed: &Units, alts: &[Vec<Way>], budget: Budget, crew: crate::num::Wide, pools: &PoolCtx, res: &ResCtx) -> bool {
     /// A way that takes nothing a payment shares: its units are free.
     fn free_way(w: &Way) -> bool {
         w.life <= 0 && w.sac <= 0 && w.need == 0 && w.unpooled()
@@ -3933,7 +3971,7 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
         units: &mut Units,
         groups: &[(&[Way], Vec<&[Way]>)],
         b: Budget,
-        crew: i64,
+        crew: crate::num::Wide,
         sh: &mut Shared,
         nodes: &mut u32,
     ) -> Option<bool> {
@@ -3961,7 +3999,7 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
         none_ok: bool,
         rest: &[(&[Way], Vec<&[Way]>)],
         b: Budget,
-        crew: i64,
+        crew: crate::num::Wide,
         sh: &mut Shared,
         members: &[&[Way]],
         placed: usize,

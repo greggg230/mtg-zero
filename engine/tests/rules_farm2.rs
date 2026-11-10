@@ -331,7 +331,7 @@ fn a_companion_cast_beside_a_twin_looks_the_same_in_every_world() {
         let mut w = g.clone();
         w.determinize(1, &mut Rng::new(900 + s));
         let lutri = w.objs().iter().position(|o| o.zone == Zone::Hand && o.owner == 0 && w.db().def(o.def).name == LUTRI);
-        match lutri.map(|i| CardIdx(i as u16)) {
+        match lutri.map(|i| CardIdx::new(i as u32)) {
             Some(c) if c == lo && by_slot[0].is_none() => by_slot[0] = Some(w),
             Some(c) if c == hi && by_slot[1].is_none() => by_slot[1] = Some(w),
             _ => {}

@@ -100,6 +100,13 @@ impl Except {
 pub struct CopyVals {
     pub def: DefId,
     pub exc: Except,
+    /// The values are a face of the object they were copied from, and that
+    /// object was a transforming permanent (a double-faced card, or a token
+    /// created double-faced): a token created with them is double-faced (CR
+    /// 707.8a). False when they come from a copy effect on a permanent
+    /// (Shifting Woodland as Outland Liberator): a token copy of it has only
+    /// that face and can't transform (701.28c; ENGINE.md 100.7, E2).
+    pub dfc: bool,
 }
 
 /// A copy effect on a permanent (CR 707, layer 1a).
@@ -121,15 +128,7 @@ pub struct CopyFx {
 /// not cast; "whenever you cast or copy" sees it, `TrigPred::OrCopy`). A
 /// cast spell's event amount is the number of spells cast before it this
 /// turn (storm), never this.
-pub(crate) const COPIED: u32 = u32::MAX;
-
-/// At most this many copies a turn by "may copy this spell" effects. Chain
-/// of Smog's copies cost nothing, so players who always copy would loop
-/// forever; the CR has a loop of optional actions repeated a chosen number
-/// of times (732.2a) and broken when it comes back to the same game state
-/// (732.3). 31 (the `NUMBER` range) keeps the drain loop of Chain of Smog
-/// and a magecraft creature lethal (ENGINE.md 26.11).
-pub(crate) const MAY_COPY_CAP: u8 = 31;
+pub(crate) const COPIED: u64 = u64::MAX;
 
 impl Game {
     /// The copy effect that gives `c` its copiable values now (the latest),
@@ -195,9 +194,9 @@ impl Game {
             if dd.bestowed || dd.class_level > 1 { dd.card_def(d) } else { d }
         };
         if let Some(x) = self.copy_fx(c) {
-            return CopyVals { def: base(x.vals.def), exc: x.vals.exc };
+            return CopyVals { def: base(x.vals.def), exc: x.vals.exc, dfc: x.vals.dfc };
         }
-        CopyVals { def: base(self.objs[c.i()].def), exc: Except::default() }
+        CopyVals { def: base(self.objs[c.i()].def), exc: Except::default(), dfc: true }
     }
 
     /// The copiable values of permanent `r`: now, or as it last existed on
@@ -213,8 +212,12 @@ impl Game {
     /// 707.2, 613.2a). It stays the same object (707.4: no enter or leave
     /// triggers); noncopy effects, counters and status stay.
     pub(crate) fn add_copy_effect(&mut self, c: CardIdx, vals: CopyVals, until: Until) {
+        // (Its copiable values are now the copy's, on an object that isn't a
+        // token created double-faced: a token copy of it is single-faced,
+        // 707.8a, E2.)
+        let vals = CopyVals { dfc: false, ..vals };
         let own = self.own_def(c);
-        self.next_ts += 1;
+        self.next_ts = self.exact_inc(self.next_ts, "timestamps");
         let ts = self.next_ts;
         let obj = self.obj_ref(c);
         self.copies.push(CopyFx { obj, ts, until, vals, own });
@@ -279,6 +282,8 @@ impl Game {
         }
         let n = self.token_count(controller, n);
         let mut made = Vec::with_capacity(n as usize);
+        // (They enter at the same time: one entry, CR 603.6a.)
+        self.begin_entering(false);
         for _ in 0..n {
             let idx = self.add_card(vals.def, controller, Zone::Nowhere);
             self.copy_objs.push(idx);
@@ -288,6 +293,7 @@ impl Game {
             self.put_onto_battlefield(idx, controller);
             made.push(idx);
         }
+        self.end_entering();
         made
     }
 
@@ -388,7 +394,7 @@ impl Game {
                 };
                 if self.live(r) && self.objs[r.idx.i()].zone == Zone::Graveyard {
                     // A card: its printed values (its front face, 712.8a).
-                    return Some(CopyVals { def: self.objs[r.idx.i()].def, exc: Except::default() });
+                    return Some(CopyVals { def: self.objs[r.idx.i()].def, exc: Except::default(), dfc: true });
                 }
                 self.copiable_of(r)
             }
@@ -404,7 +410,7 @@ impl Game {
             // values (its front face, CR 712.8a).
             CopyOf::SourceCard => {
                 let d = self.db.def(f.source_def).card_def(f.source_def);
-                Some(CopyVals { def: d, exc: Except::default() })
+                Some(CopyVals { def: d, exc: Except::default(), dfc: true })
             }
         }
     }
@@ -419,8 +425,8 @@ impl Game {
                 f.made_all.clear();
                 let Some(p) = self.who(f, *who) else { return Flow::Next };
                 let Some(base) = self.copy_source(f, *of) else { return Flow::Next };
-                let vals = CopyVals { def: base.def, exc: exc.over(base.exc) };
-                let n = self.amount(f, *n).max(0) as u32;
+                let vals = CopyVals { def: base.def, exc: exc.over(base.exc), dfc: base.dfc };
+                let n = crate::num::tokens_n(self.amount(f, *n));
                 let made = self.create_token_copies(vals, p, n);
                 f.made = made.first().copied();
                 f.made_all = made;
@@ -428,7 +434,7 @@ impl Game {
             }
             Ext::BecomeCopy { on, of, exc, until } => {
                 let Some(base) = self.copy_source(f, *of) else { return Flow::Next };
-                let vals = CopyVals { def: base.def, exc: exc.over(base.exc) };
+                let vals = CopyVals { def: base.def, exc: exc.over(base.exc), dfc: base.dfc };
                 for c in self.objs_on(f, on) {
                     self.add_copy_effect(c, vals, *until);
                 }
@@ -442,11 +448,17 @@ impl Game {
                 let Some(p) = self.who(f, *who) else { return Flow::Next };
                 let Some((def, item)) = self.spell_source(f, *of) else { return Flow::Next };
                 // `f.i`: the copies made so far (the "may" is asked first).
+                // YES is a loop action (Chain of Smog's copies cost nothing):
+                // noted with the state, the frame included, and not offered
+                // again at a state with the same loop hash, where the "may"
+                // isn't asked (CR 732.2a, MTR 4.4; `loops.rs`).
                 if *may && f.i == 0 {
                     match self.answer.take() {
-                        Some(Choice::Yes) => self.may_copies = self.may_copies.saturating_add(1),
+                        Some(Choice::Yes) => self.note_loop(p, crate::loops::LoopAct::MayCopy, Some(&*f)),
                         Some(_) => return Flow::Next,
-                        None if self.may_copies >= MAY_COPY_CAP => return Flow::Next,
+                        None if self.loop_repeats(p, crate::loops::LoopAct::MayCopy, Some(&*f), &std::cell::OnceCell::new()) => {
+                            return Flow::Next
+                        }
                         None => {
                             let opts = vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
                             self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
@@ -454,7 +466,10 @@ impl Game {
                         }
                     }
                 }
-                let n = self.amount(f, *n).max(0) as u32; // (any number: 46.4, ENGINE.md 100.2)
+                // (Any number: 46.4, ENGINE.md 100.2; a negative number is
+                // none, CR 107.1b; past `u32::MAX` copies the game aborts.)
+                let n = self.amount(f, *n).max(0);
+                let n = self.exact_u32(n, "copies to make");
                 if f.i >= n {
                     return Flow::Next;
                 }
@@ -644,7 +659,7 @@ impl Game {
             Some(Choice::Card(x)) => {
                 copied_tapped = eac.tapped;
                 let base = if eac.from_graveyard {
-                    CopyVals { def: self.objs[x.i()].def, exc: Except::default() }
+                    CopyVals { def: self.objs[x.i()].def, exc: Except::default(), dfc: true }
                 } else {
                     self.copiable(x)
                 };
@@ -652,7 +667,7 @@ impl Game {
                 if eac.keep_name {
                     exc.name = Some(own);
                 }
-                let vals = CopyVals { def: base.def, exc: exc.over(base.exc) };
+                let vals = CopyVals { def: base.def, exc: exc.over(base.exc), dfc: base.dfc };
                 self.add_copy_effect(card, vals, Until::Forever);
                 if self.priest_exiles(card) {
                     return;
@@ -704,8 +719,8 @@ impl Game {
         let entering_before = self.w6.entering.replace((card, since));
         self.entering(card, tapped, 0);
         self.w6.entering = entering_before;
-        self.note_entered(card);
-        self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u32 });
-        self.day_night_entered(card);
+        // (Matched with the others of its entry, CR 603.6a: this task runs
+        // while its entry waits, `Task::EntersTogether` under it.)
+        self.entered_event(r, note);
     }
 }

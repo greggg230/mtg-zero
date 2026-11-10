@@ -1,4 +1,6 @@
-//! Scenario builder and helpers for tests (not used by the engine).
+//! Scenario builder and helpers for tests (not used by the engine), and
+//! [`Game::view_of`], whose state part the engine's loop rule also hashes
+//! (`loops.rs`).
 
 use crate::db::CardDb;
 use crate::decision::{Choice, DecisionKind};
@@ -7,8 +9,8 @@ use crate::game::{Game, GameSpec, Step};
 use crate::ids::{CardIdx, PlayerId, Target, Zone};
 use std::hash::{Hash, Hasher};
 
-/// A hash of a value (for `view_of`).
-fn h64<T: Hash>(x: &T) -> u64 {
+/// A hash of a value (for `view_of` and the loop hash).
+pub(crate) fn h64<T: Hash>(x: &T) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     x.hash(&mut h);
     h.finish()
@@ -83,7 +85,7 @@ impl Scenario {
     pub fn battlefield(mut self, p: PlayerId, names: &[&str]) -> Self {
         for n in names {
             let c = self.add(p, n, Zone::Battlefield);
-            self.g.next_ts += 1;
+            self.g.next_ts = self.g.exact_inc(self.g.next_ts, "timestamps");
             self.g.objs[c.i()].timestamp = self.g.next_ts;
             self.g.objs[c.i()].control_since = 0;
             self.g.battlefield.push(c);
@@ -95,7 +97,7 @@ impl Scenario {
             }
             // A planeswalker entered with its printed loyalty (CR 306.5b).
             if let (Some(n), true) = (self.g.def_of(c).loyalty, self.g.def_of(c).is(crate::db::types::PLANESWALKER)) {
-                self.g.add_counters(c, crate::db::Counter::Loyalty, crate::num::count(n as i64));
+                self.g.add_counters(c, crate::db::Counter::Loyalty, n.max(0) as crate::num::Count);
             }
         }
         self
@@ -109,7 +111,7 @@ impl Scenario {
         let back = self.g.def_of(c).back.unwrap_or_else(|| panic!("{name} has no back face"));
         self.g.set_face(c, back);
         if let (Some(n), true) = (self.g.def_of(c).loyalty, self.g.def_of(c).is(crate::db::types::PLANESWALKER)) {
-            self.g.add_counters(c, crate::db::Counter::Loyalty, crate::num::count(n as i64));
+            self.g.add_counters(c, crate::db::Counter::Loyalty, n.max(0) as crate::num::Count);
         }
         self
     }
@@ -178,7 +180,7 @@ impl Scenario {
             self.g.dungeons[p as usize].obj = Some(c);
             self.g.dungeons[p as usize].room = r;
         }
-        self.g.dungeons[p as usize].completed = completed;
+        self.g.dungeons[p as usize].completed = completed as u32;
         self
     }
 
@@ -227,7 +229,7 @@ impl Scenario {
         self
     }
 
-    pub fn life(mut self, p: PlayerId, n: i32) -> Self {
+    pub fn life(mut self, p: PlayerId, n: i64) -> Self {
         self.g.players[p as usize].life = n;
         self
     }
@@ -272,7 +274,7 @@ impl Game {
     /// First card named `name` owned by `owner` in `zone` (canonical order).
     pub fn find_card(&self, owner: PlayerId, name: &str, zone: Zone) -> Option<CardIdx> {
         (0..self.objs.len())
-            .map(|i| CardIdx(i as u16))
+            .map(|i| CardIdx::new(i as u32))
             .find(|&c| self.objs[c.i()].owner == owner && self.objs[c.i()].zone == zone && self.name(c) == name)
     }
 
@@ -283,7 +285,7 @@ impl Game {
 
     pub fn count_in(&self, owner: PlayerId, name: &str, zone: Zone) -> usize {
         (0..self.objs.len())
-            .map(|i| CardIdx(i as u16))
+            .map(|i| CardIdx::new(i as u32))
             .filter(|&c| self.objs[c.i()].owner == owner && self.objs[c.i()].zone == zone && self.name(c) == name)
             .count()
     }
@@ -396,6 +398,12 @@ impl Game {
         panic!("drive_until: no progress");
     }
 
+    /// Set the X of the top stack item (tests: an X past what a payment
+    /// reaches today, the u8 generic mana of a cost).
+    pub fn set_top_x(&mut self, x: u32) {
+        self.stack.last_mut().expect("a stack item").x = x;
+    }
+
     /// Everything `viewer` can observe, as numbers (hidden-information
     /// tests): public zones and objects, zone sizes, life and mana, the
     /// turn, the viewer's own hand, every card the viewer knows exactly
@@ -403,11 +411,65 @@ impl Game {
     /// cards are not told apart), the library positions the other player
     /// knows (ENGINE.md 72), the viewer's clouds, and the pending
     /// decision (its options only if the viewer decides). Two worlds a
-    /// `determinize(viewer)` may produce must agree on it.
+    /// `determinize(viewer)` may produce must agree on it. The state part
+    /// ([`view_state`](Self::view_state)) and the pending decision.
     pub fn view_of(&self, viewer: PlayerId) -> Vec<u64> {
         let mut v: Vec<u64> = Vec::with_capacity(256);
+        self.view_state(viewer, None, &mut v);
+        if let Some(d) = &self.pending {
+            v.extend([d.player as u64, d.kind as u64]);
+            if d.player == viewer {
+                v.extend(d.options.iter().map(|o| o.action as u64));
+                // (A page or a digit: the decider's, as the encoding's
+                // context floats, ENGINE.md 100.1.)
+                if d.stage != crate::decision::Stage::One {
+                    v.push(h64(&d.stage));
+                }
+            }
+        }
+        v
+    }
+
+    /// An object by its public place (`view_of`; CardIdx identities are
+    /// not observable): its battlefield position, its stack position, its
+    /// definition in another public zone, nothing in a hidden one.
+    pub(crate) fn view_place(&self, c: CardIdx) -> u64 {
+        match self.objs[c.i()].zone {
+            Zone::Battlefield => self.battlefield.iter().position(|&x| x == c).unwrap() as u64,
+            Zone::Stack => {
+                1000 + self
+                    .stack
+                    .iter()
+                    .position(|s| s.kind == crate::game::StackKind::Spell { card: c })
+                    .unwrap_or(99) as u64
+            }
+            // In a hidden zone the slot's identity is not public (an
+            // ability's own definition says where it came from).
+            z if z.is_hidden() => 3000,
+            _ => 2000 + self.objs[c.i()].def as u64,
+        }
+    }
+
+    /// [`view_place`](Self::view_place) of a reference; a stale one names
+    /// no object (7777).
+    pub(crate) fn view_live_place(&self, r: crate::ids::ObjRef) -> u64 {
+        if self.live(r) {
+            self.view_place(r.idx)
+        } else {
+            7777
+        }
+    }
+
+    /// The state part of [`view_of`](Self::view_of): everything `viewer`
+    /// observes but the pending decision. With `canon` (the loop hash,
+    /// `loops.rs`), the consecutive passes are left out (taking a loop
+    /// action sets them to 0, CR 117.3c; a may-copy is asked while a spell
+    /// resolves, with none) and timestamps are named by their rank in
+    /// `canon` (a uniform renumbering is the same state, CR 613.7).
+    pub(crate) fn view_state(&self, viewer: PlayerId, canon: Option<&crate::loops::Canon>, v: &mut Vec<u64>) {
         let t = &self.turn;
-        v.extend([t.number as u64, t.step as u64, t.active as u64, t.priority as u64, t.passes as u64]);
+        let passes = if canon.is_some() { u64::MAX - 11 } else { t.passes as u64 };
+        v.extend([t.number as u64, t.step as u64, t.active as u64, t.priority as u64, passes]);
         v.push(self.outcome.map_or(9, |o| o.winner.map_or(2, |w| w as u64)));
         // The turn's other public parts and the extra turns to come (ENGINE.md
         // 58.6: the public-state gate's view).
@@ -422,7 +484,8 @@ impl Game {
             // What it attacks (a planeswalker by its place), loyalty
             // activations this turn, when it entered (public).
             v.push(o.attacks.map_or(u64::MAX, |r| self.battlefield.iter().position(|&x| x == r.idx).unwrap_or(999) as u64));
-            v.extend([o.pw_turn as u64, o.pw_used as u64, o.pw_extra as u64, o.entered as u64]);
+            let l = self.loyalty_of(c);
+            v.extend([l.turn as u64, l.used as u64, l.extra as u64, o.entered as u64]);
             // Since when its controller controls it, what it blocks (by
             // place), first-strike damage dealt, evoked, cast with flashback
             // (public; ENGINE.md 58.6).
@@ -438,7 +501,7 @@ impl Game {
             v.extend([self.own_def(c) as u64, h64(&self.exc(c)), self.is_token(c) as u64, self.is_prepared(c) as u64]);
         };
         for &c in &self.battlefield {
-            obj(&mut v, c);
+            obj(v, c);
             // A face-down permanent (CR 708): its card only if the viewer
             // knows it (ENGINE.md 31).
             if self.objs[c.i()].def == self.db.face_down_def() {
@@ -447,7 +510,7 @@ impl Game {
         }
         v.push(u64::MAX);
         for &c in &self.exile {
-            obj(&mut v, c);
+            obj(v, c);
         }
         v.push(u64::MAX);
         // Cards exiled face down (ENGINE.md 30), per owner: how many, and the
@@ -468,25 +531,15 @@ impl Game {
         v.push(u64::MAX);
         // Objects are named by their public place (CardIdx identities are
         // not observable): battlefield position, stack position, their
-        // definition in another public zone.
-        let place = |c: CardIdx| -> u64 {
-            match self.objs[c.i()].zone {
-                Zone::Battlefield => self.battlefield.iter().position(|&x| x == c).unwrap() as u64,
-                Zone::Stack => {
-                    1000 + self
-                        .stack
-                        .iter()
-                        .position(|s| s.kind == crate::game::StackKind::Spell { card: c })
-                        .unwrap_or(99) as u64
-                }
-                // In a hidden zone the slot's identity is not public (an
-                // ability's own definition says where it came from).
-                z if z.is_hidden() => 3000,
-                _ => 2000 + self.objs[c.i()].def as u64,
-            }
-        };
-        let live_place = |r: crate::ids::ObjRef| -> u64 { if self.live(r) { place(r.idx) } else { 7777 } };
+        // definition in another public zone (`view_place`).
+        let place = |c: CardIdx| -> u64 { self.view_place(c) };
+        let live_place = |r: crate::ids::ObjRef| -> u64 { self.view_live_place(r) };
         for s in &self.stack {
+            // (The loop hash reads the board: a loop action's own stack
+            // object is no progress, `loops::loop_product`.)
+            if canon.is_some() && crate::loops::loop_product(s) {
+                continue;
+            }
             match s.kind {
                 crate::game::StackKind::Spell { card } => {
                     v.extend([1, self.objs[card.i()].def as u64, self.is_copy_obj(card) as u64, s.times as u64]);
@@ -514,7 +567,7 @@ impl Game {
             v.extend(s.spliced.iter().map(|&d| d as u64));
             v.push(s.attack_as.map_or(u64::MAX, |a| a.map_or(u64::MAX - 1, live_place)));
             v.extend([s.ev.player.map_or(9, |p| p as u64), s.ev.obj.map_or(u64::MAX, live_place), s.ev.obj2.map_or(u64::MAX, live_place)]);
-            v.extend([s.ev.amount as u64, self.stack.iter().position(|x| x.id == s.ev.item).map_or(99, |i| i as u64)]);
+            v.extend([s.ev.amount as u64, self.view_stack_pos(s.ev.item, canon.is_some())]);
             v.extend(s.noted.iter().map(|&r| live_place(r)));
             v.push(u64::MAX - 7);
             for &(r, tg) in &s.targets {
@@ -523,7 +576,7 @@ impl Game {
                     Target::Player(p) => p as u64,
                     Target::Obj(o) => 100 + place(o.idx),
                     // An ability by its stack position (public).
-                    Target::Stack(id) => 9000 + self.stack.iter().position(|x| x.id == id).map_or(99, |i| i as u64),
+                    Target::Stack(id) => 9000 + self.view_stack_pos(id, canon.is_some()),
                 });
             }
             v.extend(s.modes.iter().map(|&m| m as u64));
@@ -534,8 +587,12 @@ impl Game {
         }
         v.push(u64::MAX);
         // Continuous effects (public), with the objects they affect by
-        // place.
+        // place (the loop hash: but those that change nothing,
+        // `loops::inert`).
         for e in &self.effects {
+            if canon.is_some() && crate::loops::inert(e) {
+                continue;
+            }
             // (A duration "while <it> remains on the battlefield" names it
             // by its place.)
             let until = match e.until {
@@ -545,7 +602,7 @@ impl Game {
                 crate::layers::Until::WhileOnBattlefield(r) => 3000 + live_place(r),
                 crate::layers::Until::WhileSource => unreachable!("a lowered duration"),
             };
-            v.extend([e.ts as u64, e.controller as u64, until]);
+            v.extend([canon.map_or(e.ts as u64, |k| k.rank(e.ts)), e.controller as u64, until]);
             match &e.on {
                 crate::layers::Affected::Obj(r) => v.push(500 + place(r.idx)),
                 crate::layers::Affected::Group(_) => v.push(1),
@@ -572,6 +629,10 @@ impl Game {
                 crate::game::Mark::ExiledToPay(x) => 1_000_000 + live_place(x),
                 crate::game::Mark::Reanimated(x) => 2_000_000 + live_place(x),
                 crate::game::Mark::Triggered { def, slot, turn, n, src } => h64(&(def, slot, turn, n, live_place(src))),
+                // (Its timestamp by its rank: the loop hash.)
+                crate::game::Mark::Granted { def, slot, this_turn, ts } if canon.is_some() => {
+                    h64(&(def, slot, this_turn, canon.unwrap().rank(ts), "granted"))
+                }
                 m => h64(&m),
             };
             v.extend([live_place(r), what]);
@@ -580,7 +641,7 @@ impl Game {
         // Phased-out permanents (public, CR 702.26; EoE W3): what they are,
         // and whether each phased out with what it is attached to.
         for &c in &self.w3.phased {
-            obj(&mut v, c);
+            obj(v, c);
             v.push(self.w3.indirect.contains(&c) as u64);
         }
         v.push(u64::MAX);
@@ -756,18 +817,6 @@ impl Game {
             v.extend(k.defs.iter().map(|&d| d as u64));
             v.push(u64::MAX - 2);
         }
-        if let Some(d) = &self.pending {
-            v.extend([d.player as u64, d.kind as u64]);
-            if d.player == viewer {
-                v.extend(d.options.iter().map(|o| o.action as u64));
-                // (A page or a digit: the decider's, as the encoding's
-                // context floats, ENGINE.md 100.1.)
-                if d.stage != crate::decision::Stage::One {
-                    v.push(h64(&d.stage));
-                }
-            }
-        }
-        v
     }
 
     /// A hash of the whole mutable state (determinism checks).
@@ -812,23 +861,24 @@ impl Game {
         self.gy_exile.hash(&mut h);
         self.ev_seq.hash(&mut h);
         self.batch_fired.hash(&mut h);
-        self.group_ts.hash(&mut h);
+        self.entries.hash(&mut h);
         self.copies.hash(&mut h);
         self.copy_objs.hash(&mut h);
         self.prepared.hash(&mut h);
         self.lki_copy.hash(&mut h);
         self.lki_damage.hash(&mut h);
         self.spell_lki.hash(&mut h);
-        self.may_copies.hash(&mut h);
+        self.loop_taken.hash(&mut h);
         self.initiative.hash(&mut h);
         self.dungeons.hash(&mut h);
         self.rules_srcs.hash(&mut h);
-        self.activations.hash(&mut h);
         self.marks.hash(&mut h);
         self.w3.hash(&mut h);
         self.w6.hash(&mut h);
         self.face_down.hash(&mut h);
         self.face_down_ids.hash(&mut h);
+        self.lki_power.hash(&mut h);
+        self.loyalty.hash(&mut h);
         h.finish()
     }
 
@@ -839,11 +889,11 @@ impl Game {
         let mut mark = |c: CardIdx, z: Zone, owner: Option<PlayerId>| -> Result<(), String> {
             let o = &self.objs[c.i()];
             if o.zone != z {
-                return Err(format!("card {} listed in {z:?} but zone is {:?}", c.0, o.zone));
+                return Err(format!("card {} listed in {z:?} but zone is {:?}", c.get(), o.zone));
             }
             if let Some(p) = owner {
                 if o.owner != p {
-                    return Err(format!("card {} in P{p}'s zone but owned by P{}", c.0, o.owner));
+                    return Err(format!("card {} in P{p}'s zone but owned by P{}", c.get(), o.owner));
                 }
             }
             seen[c.i()] += 1;
@@ -885,7 +935,7 @@ impl Game {
             // A token that ceased to exist is in no zone (CR 704.5d).
             let want = (self.objs[i].zone != Zone::Nowhere) as u8;
             if n != want {
-                return Err(format!("card {i} ({}) appears {n} times", self.name(CardIdx(i as u16))));
+                return Err(format!("card {i} ({}) appears {n} times", self.name(CardIdx::new(i as u32))));
             }
             // (A completed dungeon and the source of the initiative's
             // abilities are rules objects in no zone, ENGINE.md 27.4.)
@@ -894,11 +944,11 @@ impl Game {
             // replacement effects' order is (616.1, `Task::ChooseReplacement`),
             // nor a revealed companion outside the game, ENGINE.md 35.)
             if self.objs[i].zone == Zone::Nowhere
-                && !self.is_token(CardIdx(i as u16))
-                && !self.def_of(CardIdx(i as u16)).rules
-                && !self.agenda.iter().any(|t| matches!(t, Task::EnterByDiscardAny { card, .. } if card.0 == i as u16))
-                && !self.agenda.iter().any(|t| matches!(t, Task::ChooseReplacement { card, .. } if card.idx.0 == i as u16))
-                && !self.players.iter().any(|p| p.companion == Some(CardIdx(i as u16)))
+                && !self.is_token(CardIdx::new(i as u32))
+                && !self.def_of(CardIdx::new(i as u32)).rules
+                && !self.agenda.iter().any(|t| matches!(t, Task::EnterByDiscardAny { card, .. } if card.get() == i as u32))
+                && !self.agenda.iter().any(|t| matches!(t, Task::ChooseReplacement { card, .. } if card.idx.get() == i as u32))
+                && !self.players.iter().any(|p| p.companion == Some(CardIdx::new(i as u32)))
             {
                 return Err(format!("card {i} is nowhere"));
             }
@@ -908,9 +958,9 @@ impl Game {
             // CR 722.3c.)
             if self.db.is_face(self.objs[i].def)
                 && !matches!(self.objs[i].zone, Zone::Battlefield | Zone::Stack | Zone::PhasedOut)
-                && !(self.objs[i].zone == Zone::Exile && self.is_copy_obj(CardIdx(i as u16)))
+                && !(self.objs[i].zone == Zone::Exile && self.is_copy_obj(CardIdx::new(i as u32)))
             {
-                return Err(format!("card {i} ({}) has a face up in {:?}", self.name(CardIdx(i as u16)), self.objs[i].zone));
+                return Err(format!("card {i} ({}) has a face up in {:?}", self.name(CardIdx::new(i as u32)), self.objs[i].zone));
             }
         }
         if self.entering_face.is_some() {
@@ -923,7 +973,7 @@ impl Game {
             return Err(format!("n_static {} but {n_static} permanents and emblems with static abilities", self.n_static));
         }
         // The 704.5d check looks only from the first token slot.
-        if let Some(i) = (0..(self.first_token as usize).min(self.objs.len())).find(|&i| self.is_token(CardIdx(i as u16))) {
+        if let Some(i) = (0..(self.first_token as usize).min(self.objs.len())).find(|&i| self.is_token(CardIdx::new(i as u32))) {
             return Err(format!("slot {i} is a token below the first token slot {}", self.first_token));
         }
         if !self.keys.is_empty() {

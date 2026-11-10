@@ -83,8 +83,8 @@ fn known_deck_cards(g: &MtgAz, viewer: u8, o: u8) -> Vec<u16> {
     let sizes: Vec<usize> = (0..2).map(|p| g.m.decks[p].iter().map(|&c| c as usize).sum()).collect();
     let start = if o == 0 { 0 } else { sizes[0] };
     let mut v: Vec<u16> = (start..start + sizes[o as usize])
-        .filter(|&i| g.g.knows(viewer, CardIdx(i as u16)))
-        .map(|i| sample::card_of(&g.g, CardIdx(i as u16)))
+        .filter(|&i| g.g.knows(viewer, CardIdx::new(i as u32)))
+        .map(|i| sample::card_of(&g.g, CardIdx::new(i as u32)))
         .collect();
     v.sort_unstable();
     debug_assert!(v.iter().all(|d| all.contains(d)));

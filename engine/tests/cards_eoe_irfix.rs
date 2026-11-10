@@ -128,7 +128,7 @@ fn bodies_and_keywords_match_the_oracle_text() {
     for &(name, pt, ty, subs, kws) in rows {
         let g = scen().battlefield(0, &[name]).at(Step::Main1, 0).start();
         let c = bf(&g, 0, name);
-        assert_eq!(g.pt(c), pt, "{name}");
+        assert_eq!(g.pt(c), (pt.0.into(), pt.1.into()), "{name}");
         assert_eq!(g.types_of(c) & (types::ARTIFACT | types::CREATURE), ty, "{name}");
         for s in subs {
             assert!(subtype(&g, c, s), "{name}: {s}");
@@ -1053,7 +1053,7 @@ fn gravkill_exiles_target_creature_or_spacecraft() {
 #[test]
 fn cr_722_2b_dawnsire_is_a_20_20_flier_at_twenty() {
     for k in [0, 10, 19, 20] {
-        let g = scen().battlefield(0, &["Dawnsire, Sunstar Dreadnought"]).counters(0, "Dawnsire, Sunstar Dreadnought", charge(), k).at(Step::Main1, 0).start();
+        let g = scen().battlefield(0, &["Dawnsire, Sunstar Dreadnought"]).counters(0, "Dawnsire, Sunstar Dreadnought", charge(), k as u64).at(Step::Main1, 0).start();
         let d = bf(&g, 0, "Dawnsire, Sunstar Dreadnought");
         assert!(g.is_type(d, types::ARTIFACT) && subtype(&g, d, "Spacecraft"));
         assert_eq!(g.is_creature(d), k >= 20, "{k} counters");
@@ -1076,7 +1076,7 @@ fn cr_120_3c_dawnsire_deals_100_to_up_to_one_creature_or_planeswalker_when_you_a
     let setup = |k: u32| {
         scen()
             .battlefield(0, &["Dawnsire, Sunstar Dreadnought", "Test Bear", "Test Flyer"])
-            .counters(0, "Dawnsire, Sunstar Dreadnought", charge(), k)
+            .counters(0, "Dawnsire, Sunstar Dreadnought", charge(), k as u64)
             .battlefield(1, &["Tezzeret, Cruel Captain", "Test Trampler"])
             .at(Step::Main1, 0)
             .start()
@@ -1127,7 +1127,7 @@ fn cr_120_3c_dawnsire_deals_100_to_up_to_one_creature_or_planeswalker_when_you_a
 #[test]
 fn cr_722_2b_entropic_battlecruiser_is_a_3_10_flier_with_deathtouch_at_eight() {
     for k in [0, 7, 8] {
-        let g = scen().battlefield(0, &["Entropic Battlecruiser"]).counters(0, "Entropic Battlecruiser", charge(), k).at(Step::Main1, 0).start();
+        let g = scen().battlefield(0, &["Entropic Battlecruiser"]).counters(0, "Entropic Battlecruiser", charge(), k as u64).at(Step::Main1, 0).start();
         let b = bf(&g, 0, "Entropic Battlecruiser");
         assert_eq!(g.is_creature(b), k >= 8, "{k}");
         assert_eq!(g.has_kw(b, Kw::Flying) && g.has_kw(b, Kw::Deathtouch), k >= 8, "{k}");
@@ -1146,7 +1146,7 @@ fn entropic_battlecruiser_makes_a_discarding_opponent_lose_three() {
     for k in [0u32, 1] {
         let mut g = scen()
             .battlefield(0, &["Entropic Battlecruiser"])
-            .counters(0, "Entropic Battlecruiser", charge(), k)
+            .counters(0, "Entropic Battlecruiser", charge(), k as u64)
             .battlefield(1, &["Mountain"])
             .hand(1, &["Test Rummage", "Test Bear"])
             .at(Step::Main1, 1)

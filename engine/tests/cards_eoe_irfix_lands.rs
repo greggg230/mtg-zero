@@ -439,7 +439,7 @@ fn cr_702_90b_inkmoth_nexus_becomes_a_phyrexian_blinkmoth_with_infect() {
     g.choose(Choice::Pass);
     quiet_until(&mut g, |g| g.turn().step == Step::EndCombat);
     assert_eq!(g.life(1), 20, "no life lost");
-    assert_eq!(g.player(1).poison, engine::num::count(1), "a poison counter");
+    assert_eq!(g.player(1).poison, 1, "a poison counter");
     quiet_until(&mut g, main1_of(1));
     assert!(!g.is_creature(n) && !g.is_type(n, types::ARTIFACT) && !g.has_kw(n, Kw::Infect));
 

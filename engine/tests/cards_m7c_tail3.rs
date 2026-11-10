@@ -1335,7 +1335,7 @@ fn headliner_scarlett_exiles_face_down_and_may_play_it_this_turn_cr406_3() {
         .at(Step::Main2, 1)
         .start();
     quiet_until(&mut g, |g| g.turn().active == 0 && g.turn().step == Step::Main1 && at_priority(g));
-    let fd: Vec<CardIdx> = g.objs().iter().enumerate().filter(|(_, o)| o.zone == Zone::FaceDown).map(|(i, _)| CardIdx(i as u16)).collect();
+    let fd: Vec<CardIdx> = g.objs().iter().enumerate().filter(|(_, o)| o.zone == Zone::FaceDown).map(|(i, _)| CardIdx::new(i as u32)).collect();
     assert_eq!(fd.len(), 1, "{}", log(&g));
     let c = fd[0];
     face_down_is_hidden(&g, c, 0);

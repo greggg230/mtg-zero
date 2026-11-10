@@ -857,7 +857,7 @@ impl Game {
         // Bolas's Citadel: life equal to its mana value (CR 119.4), kept from
         // the mana payment.
         let top_life = if from == crate::game::CastFrom::LibraryTop { def.mana_value() } else { 0 };
-        if top_life as i32 > self.players[p as usize].life {
+        if top_life as i64 > self.players[p as usize].life {
             return false;
         }
         // `extra`: the mana of additional costs announced (CR 601.2f).
@@ -994,18 +994,19 @@ impl Game {
         Some((0, most))
     }
 
-    /// Mana value (CR 202.3), with X on the stack (202.3e).
-    pub(crate) fn mana_value_of(&self, c: CardIdx) -> u8 {
+    /// Mana value (CR 202.3), with X on the stack (202.3e): exact (a card's
+    /// `u8` plus a `u32` X times its X pips fits a `u64`).
+    pub(crate) fn mana_value_of(&self, c: CardIdx) -> u64 {
         // A copy "with no mana cost" (eternalize) has mana value 0.
         if self.exc(c).is_some_and(|e| e.no_cost) {
             return 0;
         }
-        let mv = self.def_of(c).mana_value();
+        let mv = self.def_of(c).mana_value() as u64;
         if self.objs[c.i()].zone != Zone::Stack {
             return mv;
         }
         let x = self.stack.iter().find(|s| s.kind == StackKind::Spell { card: c }).map_or(0, |s| s.x);
-        mv.saturating_add(u8::try_from(x as u64 * self.def_of(c).x_pips as u64).unwrap_or(u8::MAX))
+        mv + x as u64 * self.def_of(c).x_pips as u64
     }
 
     /// Can `p` pay one of the spell's additional-cost options (CR 601.2b),
@@ -1354,7 +1355,7 @@ impl Game {
                 self.discard(c);
                 self.discard_entered = true;
                 self.entering_tapped = tapped;
-                self.put_onto_battlefield(card, p);
+                self.put_onto_battlefield_joining(card, p, None);
             }
             Some(Choice::Pass) => {
                 self.move_card(card, Zone::Graveyard, Pos::Top);
@@ -1949,7 +1950,7 @@ impl Game {
         let Some((req, amount)) = self.db.ability(ar).divide else { return };
         let amount = amount.of(item.x);
         let n = item.targets.iter().filter(|(r, _)| *r == req).count();
-        let given: u32 = item.division.iter().sum();
+        let given: u64 = item.division.iter().sum();
         let k = item.division.len();
         if n == 0 || k >= n {
             return;
@@ -1960,13 +1961,13 @@ impl Game {
             return;
         }
         // Leave at least 1 for each target after this one.
-        let most = (left - (n - k - 1) as u32) as u64;
+        let most = left - (n - k - 1) as u64;
         let p = item.controller;
         match self.answer.take() {
             Some(Choice::Number(a)) => match step.answer_amount(1, most, a) {
                 crate::decision::NumberAnswer::Next(s) => self.agenda.push(Task::Divide { id, step: s }),
                 crate::decision::NumberAnswer::Value(v) => {
-                    self.stack[pos].division.push(v as u32);
+                    self.stack[pos].division.push(v);
                     self.agenda.push(Task::Divide { id, step: crate::decision::NumberStep::FIRST });
                 }
             },
@@ -2388,7 +2389,7 @@ impl Game {
 
     pub(crate) fn new_stack_id(&mut self) -> u32 {
         let id = self.next_stack_id;
-        self.next_stack_id += 1;
+        self.next_stack_id = self.exact_inc(self.next_stack_id, "stack items");
         id
     }
 
@@ -2458,7 +2459,7 @@ impl Game {
         // Divided damage: each target gets at least 1 (CR 601.2d), so no
         // more targets than the amount (an X spell's X is announced first).
         let max = match self.db.ability(ar).divide {
-            Some((r, amount)) if r == req && ar.mode.is_none() => (tr.max as u32).min(amount.of(item.x)),
+            Some((r, amount)) if r == req && ar.mode.is_none() => (tr.max as u64).min(amount.of(item.x)) as u32,
             // "X targets": exactly X (CR 601.2c).
             _ if tr.max == crate::db::X_TARGETS => item.x,
             // "Up to X targets".
@@ -2557,7 +2558,9 @@ impl Game {
             // abilities that sacrifice it can't pay (it is sacrificed next).
             let emerge = a.emerge.as_ref().and(item.noted.first().copied()).filter(|r| self.live(*r));
             let cost = match emerge {
-                Some(r) => cost.less_generic(self.mana_value_of(r.idx)),
+                // (A reduction past the u8 generic part is a reduction to 0,
+                // CR 601.2f: exact.)
+                Some(r) => cost.less_generic(self.mana_value_of(r.idx).min(u8::MAX as u64) as u8),
                 None => cost,
             };
             let mut pm = PayMana::new(p, cost);
@@ -2646,12 +2649,14 @@ impl Game {
         if self.item_alt(card, item).is_some_and(|(a, _)| a.warp) {
             self.void_turn = self.turn.number;
         }
-        let pl = &mut self.players[p as usize];
-        pl.spells_cast = pl.spells_cast.saturating_add(1);
-        pl.spells_game = pl.spells_game.saturating_add(1);
+        // (Counted exactly: past `u32::MAX` the game aborts.)
+        let n = self.players[p as usize].spells_cast;
+        self.players[p as usize].spells_cast = self.exact_inc(n, "spells cast this turn");
+        let n = self.players[p as usize].spells_game;
+        self.players[p as usize].spells_game = self.exact_inc(n, "spells cast this game");
         if !self.def_of(card).is(types::CREATURE) {
-            let pl = &mut self.players[p as usize];
-            pl.noncreature_cast = pl.noncreature_cast.saturating_add(1);
+            let n = self.players[p as usize].noncreature_cast;
+            self.players[p as usize].noncreature_cast = self.exact_inc(n, "noncreature spells cast this turn");
         }
         let r = self.obj_ref(card);
         // CR 722.3c: casting the copy of its prepare spell unprepares the
@@ -2661,7 +2666,7 @@ impl Game {
         }
         // The event's amount: the spells cast before it this turn, by any
         // player (storm, CR 702.40a).
-        let before = self.players.iter().map(|pl| pl.spells_cast as u32).sum::<u32>() - 1;
+        let before = self.players.iter().map(|pl| pl.spells_cast as u64).sum::<u64>() - 1;
         self.event(crate::triggers::Event {
             kind: crate::db::EventKind::IsCast,
             a: crate::triggers::Subj::Obj(r),
@@ -2915,17 +2920,17 @@ impl Game {
             Filter::Player | Filter::Spell(_) | Filter::Opponent => false,
             Filter::Type(bits) => self.types_of(c) & bits != 0,
             Filter::Color(m) => self.colors_of(c) & m != 0,
-            Filter::TotalPtAtMost(n) => self.is_creature(c) && self.power(c) as i64 + self.toughness(c) as i64 <= *n as i64,
+            Filter::TotalPtAtMost(n) => self.is_creature(c) && self.power(c) + self.toughness(c) <= *n as crate::num::Wide,
             Filter::Subtype(s) => self.has_subtype(c, *s),
             Filter::Supertype(bits) => self.supertypes_of(c) & bits != 0,
-            Filter::ManaValueAtMost(n) => self.mana_value_of(c) <= *n,
-            Filter::MvAtMostConverge => self.mana_value_of(c) <= self.converge_of(ctx.source),
-            Filter::PowerAtLeast(n) => self.is_creature(c) && self.power(c) >= *n,
-            Filter::PowerAtMost(n) => self.is_creature(c) && self.power(c) <= *n,
-            Filter::ToughnessAtMost(n) => self.is_creature(c) && self.toughness(c) <= *n,
+            Filter::ManaValueAtMost(n) => self.mana_value_of(c) <= *n as u64,
+            Filter::MvAtMostConverge => self.mana_value_of(c) <= self.converge_of(ctx.source) as u64,
+            Filter::PowerAtLeast(n) => self.is_creature(c) && self.power(c) >= *n as crate::num::Wide,
+            Filter::PowerAtMost(n) => self.is_creature(c) && self.power(c) <= *n as crate::num::Wide,
+            Filter::ToughnessAtMost(n) => self.is_creature(c) && self.toughness(c) <= *n as crate::num::Wide,
             Filter::Controller(you) => (self.objs[c.i()].controller == ctx.controller) == *you,
             Filter::Source => ctx.source.is_some_and(|s| s.idx == c && self.live(s)),
-            Filter::MvAtMostManaSpent => ctx.source.is_some_and(|s| self.mana_value_of(c) <= self.mana_spent_of(s)),
+            Filter::MvAtMostManaSpent => ctx.source.is_some_and(|s| self.mana_value_of(c) <= self.mana_spent_of(s) as u64),
             Filter::HostOfSource => {
                 ctx.source.is_some_and(|s| self.live(s) && self.objs[s.idx.i()].attached.is_some_and(|h| h.idx == c && self.live(h)))
             }
@@ -2939,7 +2944,7 @@ impl Game {
             Filter::DrewThisTurn(_) | Filter::InGraveyard(_) => false,
             Filter::Evoked => self.objs[c.i()].evoked,
             Filter::Named(n) => self.db.def(self.objs[c.i()].def).name == *n,
-            Filter::PtIs(p, t) => self.is_creature(c) && self.power(c) == *p && self.toughness(c) == *t,
+            Filter::PtIs(p, t) => self.is_creature(c) && self.power(c) == *p as crate::num::Wide && self.toughness(c) == *t as crate::num::Wide,
             Filter::Saddled => {
                 let r = self.obj_ref(c);
                 let t = self.turn.number as u16;
@@ -2952,11 +2957,11 @@ impl Game {
                         _ => None,
                     })
                 });
-                x.is_some_and(|x| self.mana_value_of(c) as u32 <= x)
+                x.is_some_and(|x| self.mana_value_of(c) <= x as u64)
             }
             Filter::MvAtMostX => {
                 let x = ctx.source.and_then(|s| self.stack.iter().find(|i| i.kind == StackKind::Spell { card: s.idx })).map_or(0, |i| i.x);
-                self.mana_value_of(c) as u32 <= x
+                self.mana_value_of(c) <= x as u64
             }
             Filter::Harnessed => {
                 let r = self.obj_ref(c);
@@ -2980,7 +2985,7 @@ impl Game {
                             | crate::game::Step::EndCombat
                     )
             }
-            Filter::ManaValueAtLeast(n) => self.mana_value_of(c) >= *n,
+            Filter::ManaValueAtLeast(n) => self.mana_value_of(c) >= *n as u64,
             Filter::ManaCostIn(v) => {
                 // (Back faces have no mana cost, CR 712.8e; nor has an
                 // eternalized copy.)
@@ -3026,9 +3031,9 @@ impl Game {
             // (Or warp another permanent gives it: ENGINE.md 99.15.)
             Filter::HasWarp => self.abilities(c).alt_costs.iter().any(|a| a.warp) || self.has_granted_warp(c),
             Filter::MvAtMostLandsYouControl => {
-                self.mana_value_of(c) as u32 <= self.count_controlled(ctx.controller, &Filter::Type(crate::db::types::LAND))
+                self.mana_value_of(c) <= self.count_controlled(ctx.controller, &Filter::Type(crate::db::types::LAND)) as u64
             }
-            Filter::MvIsSourceCounters(k) => ctx.source.is_some_and(|s| self.mana_value_of(c) as i64 == self.source_counters(s, *k)),
+            Filter::MvIsSourceCounters(k) => ctx.source.is_some_and(|s| self.mana_value_of(c) as crate::num::Wide == self.source_counters(s, *k)),
         }
     }
 }

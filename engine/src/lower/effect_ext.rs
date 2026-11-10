@@ -61,7 +61,7 @@ pub(crate) fn keyword_mods(l: &mut Lowerer, kws: &[cats::Keyword]) -> Vec<Mod> {
 fn pump_mods(l: &mut Lowerer, p: i64, t: i64, kws: &[cats::Keyword]) -> Vec<Mod> {
     let mut mods = Vec::new();
     if p != 0 || t != 0 {
-        mods.push(Mod::Pt(l.int("pump.power", p, -99, 99), l.int("pump.toughness", t, -99, 99)));
+        mods.push(Mod::pt(l.int("pump.power", p, -99, 99), l.int("pump.toughness", t, -99, 99)));
     }
     mods.extend(keyword_mods(l, kws));
     if mods.is_empty() {
@@ -510,7 +510,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 }
                 mods.push(Mod::Colors(m));
             }
-            mods.push(Mod::SetPt(
+            mods.push(Mod::set_pt(
                 l.int("BecomeLandCreatureUEOT.power", *power, 0, 99),
                 l.int("BecomeLandCreatureUEOT.toughness", *toughness, 0, 99),
             ));
@@ -548,7 +548,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let subs = subtypes.iter().filter_map(|s| l.set_subtype("SourceBecomesIfSubtype.subtypes", s)).collect();
             let mut mods = vec![Mod::Types { add: 0, subtypes: subs, replace: true }];
             match base_pt[..] {
-                [p, t] => mods.push(Mod::SetPt(
+                [p, t] => mods.push(Mod::set_pt(
                     l.int("SourceBecomesIfSubtype.base_pt", p, 0, 99),
                     l.int("SourceBecomesIfSubtype.base_pt", t, 0, 99),
                 )),
@@ -566,7 +566,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 f = and(f, not(Filter::Source));
             }
             let t = b.target(f, if *optional { 0 } else { 1 }, 1);
-            let m = Mod::SetPt(
+            let m = Mod::set_pt(
                 l.int("SetBasePTUntilEOT.power", *power, 0, 99),
                 l.int("SetBasePTUntilEOT.toughness", *toughness, 0, 99),
             );
@@ -1757,7 +1757,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                     let subtypes: Vec<u16> = subtypes_to_add.iter().filter_map(|s| l.given_subtype("BecomeType.subtypes_to_add", s)).collect();
                     let mut mods = vec![Mod::Types { add, subtypes, replace: false }];
                     if let Some((p, t)) = base_pt {
-                        mods.push(Mod::SetPt(l.int("BecomeType.base_pt", *p, 0, 99), l.int("BecomeType.base_pt", *t, 0, 99)));
+                        mods.push(Mod::set_pt(l.int("BecomeType.base_pt", *p, 0, 99), l.int("BecomeType.base_pt", *t, 0, 99)));
                     }
                     apply(b, On::Source, mods, until);
                 }

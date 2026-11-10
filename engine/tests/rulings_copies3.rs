@@ -993,8 +993,8 @@ fn earthbend_makes_a_colourless_land_creature_that_keeps_its_mana_ability_and_re
         let t = g.tgt(forest);
         resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target) && g.has_option(t)).then_some(t));
         assert!(g.is_creature(forest) && g.is_type(forest, types::LAND), "{}", log(&g));
-        assert_eq!(g.counters_on(forest, Counter::P1P1), n);
-        assert_eq!(g.pt(forest), (n as i32, n as i32));
+        assert_eq!(g.counters_on(forest, Counter::P1P1), n as u64);
+        assert_eq!(g.pt(forest), (n as i128, n as i128));
         assert_eq!(g.colors_of(forest), 0, "colourless");
         assert!(g.has_subtype(forest, sub("Forest")) && g.has_kw(forest, Kw::Haste));
     }

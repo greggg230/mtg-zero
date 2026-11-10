@@ -384,6 +384,11 @@ suspends the frame below that task.
   one cost, one simultaneous move (a batch: SBAs, "destroy all", a combat damage step) is one
   event however many objects it touches; `Game::ev_seq` names the current group and a "whenever
   one or more ..." ability triggers once per group (section 33).
+* **Entries** (603.6a, 100.9): the permanents one event puts onto the battlefield are one entry
+  (`Game::begin_entering`, `triggers::Entry`); their `Enters` events wait until the last one is there
+  and the choices made as they enter are made, then are matched together against every permanent
+  on the battlefield, newcomers included. What applies as a permanent enters leaves out the others
+  of its entry (614.12a, `Game::entry_since`).
 * `PutTriggers` (run by the `Priority` loop): **APNAP** (603.3b): the active player puts all
   their waiting triggers on the stack in the order they choose (one "which next" decision
   while two or more distinct triggers remain), then the other player; so the non-active
@@ -21267,12 +21272,252 @@ In the brief's order (100.4.4 to 100.4.6 have the earlier designs):
   96 come with the paging of every `perm_action` caller (A's note in 100.2: 46 call sites,
   attackers and blockers, priority's `ACTIVATE` ids through W3's ability page) and the end of
   `perm_room` and `token_count`'s room; one change across the engine, not the payment's alone.
-* **The u8 parts of a `ManaCost`** (100.4.6's design): left for after F7's merge (`eoe-f7-numbers`,
-  its exact or aborted numbers), which had not reached `eoe-base` in this session. (`payable_iter`'s
-  counts are exact now, 13.15 above.)
+* **The u8 parts of a `ManaCost`** (100.4.6's design): not started; it waited for F7's numbers
+  (`eoe-base` 7953d2a, merged at the end of this session, below). (`payable_iter`'s counts are exact
+  now, 13.15 above.)
 * **A cost that sacrifices, exiles graveyard cards and taps** (found on the way, 24.7.5k above):
   its sacrifices are made before its graveyard cards are chosen (ruling bea302d9), so before its
   taps, and a permanent sacrificed can't be one tapped for it, which CR 601.2h allows (tap it,
   then sacrifice it, then exile from the graveyard). Exact: when the cost has a tap part, its tap
   choices before the early sacrifice (`pay_costs`' order).
 * **28.8.2k** is workstream D's (a new decision kind).
+
+##### The merge of `eoe-base` 7953d2a (C2, F7, D2's hidden-Aura fix)
+
+Conflicts: `game.rs` (`token_count`) and `stack_ext.rs` (`CreateTokensN`) keep B3's any number of
+tokens (F7's side cut at 64; `CreateTokensN`'s amount, an i64 now, converted with `try_from`), `pay.rs`
+takes F7's `CardIdx::new` and life budget (`Wide`, clamped to `i32::MAX`) with B4's `Budget` (no
+`tap`), keeps B3's exact Phyrexian life (u64 against an i64 life) and the cut check of
+`can_pay_plain`; `activate.rs` keeps B3's exact teamwork (`crew_mana_ok`) in F7's `Wide`, and the
+payment's tap costs (`TapsOwed`, `Way::crew`) are `Wide` now; `cast.rs` keeps B3's exact "pay X life"
+and `life_later`. docs/shortcuts.md 46.3: F7's "exact or aborted" with the payment's own counts
+(B3, B4) and the open u8 parts of a `ManaCost`. The zero-core pin is e4779b2.
+
+Digests (re-recorded): full `3d59118e6fb9e706` (eoe-base) -> `694861906d331e06`,
+`DIGEST_ENCODING=0` `9bf41c0836e39125` -> `949af93ae06843a2`: 38 of the 2,500 games differ from
+`eoe-base`, the branch's own (B3's 6 and 16, B4's 1, 2 and 13). `RULES_EPOCH` bumped; the Delver
+canary library's 60 spots reach their positions.
+#### 100.9 C2: permanents entering simultaneously (branch `eoe-c2-together`, from `eoe-base` 2f065ff)
+
+**Why.** W6 found it (99.16, docs/shortcuts.md 99.16.1): the engine put the permanents of one event
+onto the battlefield one by one and matched each one's `Enters` event as it arrived, so a newcomer
+never saw the newcomers before it enter. CR 603.6a: "Each time an event puts one or more permanents
+onto the battlefield, all permanents on the battlefield (including the newcomers) are checked for any
+enters-the-battlefield triggers that match the event." Two creatures with "whenever another creature
+enters" returned together triggered once instead of twice, and which one triggered depended on the
+order the engine moved them. The same order leaked into what applies as a permanent enters (CR
+614.12a: only effects that already exist): an earlier newcomer's "enter tapped", Blood Moon or "other
+lands" counted for a later one.
+
+**Entries** (`triggers::Entry`, `Game::begin_entering` / `end_entering`, `Task::EntersTogether`).
+Every `put_onto_battlefield` is an entry of its own unless it runs inside one; an effect that puts
+several permanents onto the battlefield with one instruction opens one entry around them. Each
+newcomer's `Enters` event (with its note) is held in the entry (`entered_event`). When the entry ends:
+
+* nothing was queued as its permanents entered: the events are matched at once (`enters_together`),
+  in entry order, each against every permanent on the battlefield, the newcomers included; then
+  day and night look at the newcomers (702.145c-g come after the event);
+* its permanents queued choices as they entered ("as this enters", "enter as a copy", devour,
+  Mox Diamond's discard, an Aura's object, the 613.7m timestamp order: CR 614.12, 603.6d, all part
+  of the entering event): `Task::EntersTogether` goes under those tasks and matches the events once
+  they are done. A copy's event already waited for its copy choice (26.3); now the other newcomers'
+  wait with it, so a Clone entering beside Guide of Souls copies first and then sees it enter. A task
+  that puts its permanent onto the battlefield later (EnterAura, EnterByDiscardAny) joins the waiting
+  entry (`put_onto_battlefield_joining`). Any other entry while one waits is an event of its own.
+
+The events are matched in the entry's event group (603.2c: a "whenever one or more" ability
+triggers once for it); `batch_once` keeps later groups' records when an earlier group is matched
+afterwards (an entry's task, a 616.1 choice's `release_held`).
+
+**What applies as a permanent enters** (`Game::entry_since`: the entry's first timestamp; permanents
+with it or a later one are the entry's, not yet on the battlefield for 614.12a): Containment Priest
+(already so, by event group: now by entry), "enter as a copy" choices (26.3, likewise),
+`enters_counters_per` (likewise), an opponent's "enter tapped" (Spider-Woman, Stunning Savior;
+Archon of Emeria) and the permanent's own "enters tapped unless" condition (the fast lands' rulings:
+"it doesn't take those lands into consideration"; read on a copy of the game without the entry's
+permanents, `cond_before_entry`), "nonbasic lands are Mountains" as a land enters (`moon_entering`;
+`moon_on` for permanents already there is unchanged), Bioengineered Future (neither one entering at
+the same time nor the lands of the entry), devour's lands (not one entering at the same time), and
+Loading Zone and the counters' putter (W6, `W6State::entering`). `Game::group_ts` is gone.
+
+**The instructions that put several permanents onto the battlefield** (each one entry): token
+creation (`create_tokens`, `create_token_copies`, W6's Moonlit Meditation copies; the tokens of one
+instruction, doublers included), `FromGraveyard` and `FromGraveyardAs` (several targets), Exhume's
+`EachPutFromGraveyard`, Scout for Survivors and Chorale of the Void (`GraveyardTargetsOntoBattlefield`:
+attacking ones attacking as they enter, 508.4; the +1/+1 counters after, the next sentence), Parallax
+Wave's `LinkedToBattlefieldOwners`, Endless Sands' `LinkedToBattlefieldOwnersMatching`, Ghost
+Vacuum's `LinkedCreaturesToBattlefield` (with its counter and as a Spirit), Skyclave Apparition's
+`LinkedOwnersCreateMvToken` (each token X/X as it is made), Ocelot Pride's copies
+(`CopyTokensEnteredThisTurn`), Nissa's `finish_search_any`, the cards exiled until a permanent leaves
+(`release_links`) and until a player becomes the monarch (`set_monarch`). Famished Worldsire's pile
+(`PileTo` to the battlefield): the lands are chosen first (`Frame::picked`; they stay in the library,
+known to their owner, like the rest of the pile) and put onto the battlefield together when the
+choice ends (`pile_to_battlefield`); before, each entered as it was picked.
+
+Found with a temporary counter of entries per instruction over 3,000 default and 2,000 EoE fuzz
+games (not committed): every instruction left with two or more entries does them in sequence by the
+rules (a draw replaced by a Treasure each time, CR 121.2; an exile whose "until" cards return before
+the "return it" that follows, 610.3).
+
+**Leaving together.** The cards exiled until a permanent leaves return immediately after the event it
+left in (CR 610.3): in a simultaneous move (`begin_batch`) they now wait for its end
+(`Game::releasing`, `end_batch`), then return together, one entry; before, each returned as its
+source moved, while the others were still leaving (a returned creature saw them leave). The
+instructions that destroy, exile or return to hand several targets (`Op::Destroy`, `Op::Exile`,
+`Op::ReturnToHand`) and "exile all ... until this leaves" (`ExileEachUntilSourceLeaves`) are one
+simultaneous move (603.10a: each one's leave abilities see the others leave).
+
+**W6's Vocalist.** `W6State::entry_triggers` (a Vocalist entering later in an entry added instances
+for its controller's triggers that earlier newcomers caused) is gone: the Vocalist is on the
+battlefield as its entry's events are matched, so `w6_entry_triggered` counts it for all of them.
+
+**Left as it was.** A permanent is still moved onto the battlefield before the choices made as it
+enters are asked (26.3's model); its entry's events, and the other newcomers', now wait for them, so
+no trigger sees the permanent before its choices. An entry that begins while another waits for its
+choices is matched first: the one way is a land sacrificed to devour that had exiled cards "until
+this leaves the battlefield" (610.3), and no land of the cube or EoE tables does.
+
+**Tests** (`engine/tests/rules_faithful_c2.rs`, each failing before the fix): two Guide of Souls
+returned by Scout for Survivors each trigger for the other, in either target order; Devastating
+Onslaught's two copies of Weftstalker Ardent each trigger for the other (4 damage, not 3); C2 Mimic
+returned beside Guide of Souls enters as a copy of Weftstalker Ardent and, as an Ardent, sees Guide
+enter (and Guide, entering at the same time, isn't offered to copy); Parallax Wave's two Guides return
+together; Famished Worldsire's three lands (two C2 Cartographers, "whenever another land you control
+enters, you gain 1 life", and an Island) enter together: 4 life, not 1; Exhume returning
+Spider-Woman, Stunning Savior and the opponent's creature together: the creature enters untapped;
+"destroy two target creatures" on two C2 Mourners ("whenever another creature you control dies"):
+each sees the other die; C2 Devourer (devour land 1) returned beside C2 Arbor (a land creature) isn't
+offered the Arbor to sacrifice. The custom cards are card IR in the test file, lowered with the cube
+and the EoE table.
+
+**Digests** (re-recorded on purpose, `tests/data/digests.txt`): combined `02d4bccc94314d6d ->
+f89120ddaaecc3f3`; `DIGEST_ENCODING=0` unchanged, `856218d6b081056c`. No game's play changed (no
+digest game has two permanents entering together with a trigger that sees the other, or a 614.12a
+case); 11 of the 2,500 games (8 random: seeds 280, 693, 1414, 1557, 1613, 1753, 1927, 1998; 3
+heuristic: 73, 270, 321) changed in an encoding only, each at a land's "as this enters" question
+with a landfall permanent on the battlefield (found by replaying them on both engines with each
+decision's waiting triggers): random seed 280, turn 21, P0 plays Watery Grave beside Mole Man,
+Moloid Master and is asked whether to pay 2 life; seed 693, turn 11, P0's Flooded Strand finds Steam
+Vents beside Scythecat Cub, the same question. The old engine had the landfall trigger waiting
+(encoded) during the question; it now triggers once the land has entered, after the choice made as
+it enters (CR 614.12, 603.6d: part of the event that puts it onto the battlefield). The others are the
+same with Icetill Explorer, Bristly Bill, Spine Sower and Multiversal Passage (its basic land type, then its 2 life). The Delver canary
+library still reaches every spot (60 of 60): `RULES_EPOCH` bumped and the library stamped
+(`tools/delver_rerecord.py check --stamp`).
+
+**Results** (normal release profile, `E:/cargo-target/mtg-zero/eoe-c2-together`). The engine suite:
+2,112 passed, 0 failed, 20 ignored (143 test binaries; `rules_faithful_c2` 9, `az` 41, `hidden` 16
+among them). `python -m pytest tests`: 206 passed, 1 skipped. The default `FUZZ_GAMES=20000` passed
+(20,000 games, wins 9,845 / 10,031, 124 draws, mean 31.8 turns, 438.7 decisions; 1,000 matches,
+replays; 1,267 s).
+
+#### 100.7 F7: exact numbers, ranges and loops (branch `eoe-f7-numbers`, from `eoe-base` 5f0b07e; `eoe-base` 2f065ff and `eoe-c2-together` merged)
+
+The audit's F7 (docs/faithfulness_audit.md 5.7) and E2 (100.6). Every number the game keeps is
+exact or the game ends **aborted**, and no optional loop is cut by a count.
+
+**The aborted terminal** (2cab11d, 6af45fe). `EndReason::Aborted` via `Game::abort(why)`: the
+game has no result (`Game::aborted`), its running task finishes and `advance` stops. Every outcome
+is set through `Game::end_game`: an aborted game stays aborted, and a game that ended before an
+overflow keeps its exact result. An aborted game aborts a best-of-three match
+(`MtgAz::match_aborted`). zero-core `feat/aborted-games` e4779b2 (opt-in `SearchGame::aborted`):
+the driver ends such a game as not over with no samples, and the search values an aborted terminal
+by the network, like a deferred one. Every other zero-core game is unchanged.
+
+**Numbers** (d94e9ed, e658d58; `engine/src/num.rs`). `num::Count` = u64 within `COUNT_MAX` =
+i64::MAX; stored amounts i64 (life totals, life gained, marked damage, `Mod::Pt` / `SetPt`, LKI
+power and toughness, `Frame::x`, starting life); derived values `num::Wide` = i128 (power and
+toughness in layers.rs, `Game::amount`, every sum). Narrowing goes through `Game::exact` /
+`exact_count` / `exact_u32` / `exact_u8` (abort out of range), and bookkeeping counts through
+`Game::exact_inc` (abort at u32::MAX: timestamps, stack ids, event groups, tokens, spells cast,
+cards drawn). Objects: `CardIdx` and `ObjRef::inc` are u32 (`add_card` aborts at `OBJECT_LIMIT`);
+`CardIdx` is a `NonZeroU32` holding index + 1, so `Option<CardIdx>` / `Option<ObjRef>` carry no
+tag. LKI power and loyalty bookkeeping moved to side lists (`Game::lki_power`, `Game::loyalty`),
+which keeps `Obj` at 64 bytes. Mana keeps B's u8 model: `ManaPool::add` reports overflow and
+`Game::add_mana` / `finish_payment` / `check_counter_mana` abort past 255 of a type (B4 widens the
+cost side, 100.4.7). Fixes found on the way: devour's 65,535 cap, `ExileAll`'s 8-bit per-player
+count, "enters not from a graveyard or exile" reading bit 15 wrong with `ENTER_BIG`, the cascade
+mana value as u8, the encoding's total power, `KEY_GAME`'s 255 clamp (a loud assert now). Perf on
+e658d58 against 5f0b07e: clone 1,279 vs 1,220 ns, determinize 948 vs 830 ns, 7.61 us/decision.
+
+**Ranges** (d301776). `Ext::LookTopN` looks at exactly n cards (it clamped n to 60); the pick
+among the pile pages through `Game::ask_paged` over the LIBRARY range, with the decider's list
+block showing the page (az/encode.rs `decision_list`; unpaged piles encode as before).
+`Pos::FromTop` is u32: "beneath the top X" goes exactly X deep (CR 401.4).
+
+**E2** (2cab11d). A copy effect put on a permanent makes its copiable values single-faced
+(`CopyVals::dfc`, CR 707.8a), so a token copy of Shifting Woodland as Outland Liberator can't
+transform (701.28c).
+
+##### Loops (CR 732.2a, MTR 4.4): no progress is a stop (0a58c14)
+
+`ACTIVATION_CAP` (31 activations a turn of one permanent's non-mana ability) and `MAY_COPY_CAP`
+(31 "may copy this spell" copies a turn) are gone, with `Game::activations` / `may_copies`
+(docs/shortcuts.md 29.6.6, 26.11.7). `engine/src/loops.rs` replaces them:
+
+* **Loop actions**: activating a non-mana activated ability of a permanent on the battlefield
+  (own or granted; what the activation cap counted), and YES to "may copy this spell". These are
+  the engine's only sources of unbounded optional repetition.
+* **The rule**: when player p takes a loop action, `Game::loop_taken` records (until the turn
+  ends) the loop hash of the state as p's decider sees it, with the action (`LoopAct::Activate
+  { place, slot }` / `LoopAct::MayCopy`). The action is not offered to p at a decision whose hash
+  equals a recorded one for the same action. The state is then identical to one where p took it,
+  so everything reachable by taking it now was reachable then; taking it again can only repeat an
+  iteration that made no progress (MTR 4.4). Manual repetition that changes anything is unlimited:
+  Grim Monolith untaps as long as lands pay for it, Chain of Smog copies until both hands are
+  empty, and Time Vault + Voltaic Key take turns until the turn limit.
+* **The loop hash** (`Game::loop_hash`): a fixed hash of the state part of `Game::view_of`
+  (factored out as `view_state`; `view_of` = state part + pending decision, unchanged). Its
+  properties: it is the same in every world `determinize` deals for that viewer (options stay
+  determinize-invariant and reveal nothing hidden), and the public-state gate proves that every
+  public field changes it. Canonicalised so a repeated state hashes equal:
+  - consecutive passes left out (a loop action sets them to 0, CR 117.3c);
+  - every timestamp named by its rank;
+  - continuous effects that change nothing left out (+0/+0, CR 613.4c: Lavaclaw Reaches' "{X}:
+    +X/+0" with X = 0, the EoE fuzz's seed 1004 that never ended);
+  - an object's power and toughness switches read by parity (layer 7d holds only switches and
+    each toggles, CR 613.4d: Wandering Fumarole's free "{0}: Switch" is back at its state after
+    two).
+
+  It adds what the view leaves out but the rules read: the order of timestamps across kinds, group
+  effects' filters, deathtouch damage, waiting/delayed triggers' full events, the LKI of gone
+  objects that stack items and frames name, an open simultaneous entry's held Enters events (C2,
+  100.9), and for a may-copy the suspended frame (destructured exhaustively, so a new field is a
+  compile error) and the rest of the agenda. Nothing else is dropped: a wrong "equal" would prune
+  a legal option, while a missed one only lets a loop run longer. A 64-bit collision within one
+  turn has probability ~n^2 / 2^65.
+* **The board** (the user's decision, 2026-11-09). The EoE fuzz's seeds 1016 and 1024 never ended:
+  a player holding priority stacked Wandering Fumarole's "{0}: Switch" and Lavaclaw Reaches' X = 0
+  pump in endless new orders, and each longer stack was a new state. The user: tournament rules
+  require a player who loops without progressing the board state to choose a different action
+  (MTR 4.4), so the loop detection enforces it. The hash reads the state without the stack
+  objects loop actions put there (`loops::loop_product`: activated abilities of permanents). So
+  holding priority and activating again while the first activation waits is no progress, unless
+  the activation changed the board itself (a cost paid: mana, a land tapped, life, a card) or
+  something else did (another player's response, a triggered ability, a resolution). Free
+  activations stop after one of each a board; paid ones go on while resources are spent (Lavaclaw
+  Reaches with X = 1 stacks while lands pay). Digests 3d59118e6fb9e706 (from af00cc85e05ea0c1;
+  DIGEST_ENCODING=0 660b3c387f18be70 -> 9bf41c0836e39125): 21 of the 2,000 random games change and
+  none of the 500 heuristic games, which matches a rule that only removes a repeated activation of
+  the same ability while the board is unchanged.
+* **Cost**: computed only when a loop action is taken and at a decision where the decider has a
+  record of that action (once per decision). `determinize` keeps the viewer's own records and
+  drops another decider's (hashes of views that hold what the viewer doesn't know).
+* **Not built: "repeat it N more times"** (the audit's cycle detection + `ask_number`). Exact
+  repetition needs a replay of every iteration, CR 732.2b lets each other player shorten a
+  proposed shortcut, and the legal range depends on hidden information. The rule above already
+  ends every no-progress loop, and manual repetition is exactly what the CR allows.
+
+Tests: engine/tests/rules_loops.rs (10: Basalt Monolith paid by itself loops once, also with an
+unused land; Lavaclaw Reaches X = 0, not offered again holding priority (the board is unchanged);
+Lavaclaw Reaches X = 1 stacks while lands pay; Fumarole and Lavaclaw stacked for free stop after
+one of each, and random play from there ends the turn; Wandering Fumarole, offered after one switch and not after two; Grim Monolith untaps past
+31; Time Vault + Voltaic Key to the turn limit; Chain of Smog past 31; the options are the same in
+every determinized world). Also: Chain of Smog forever stops after 2 questions, and Zirda +
+Basalt Monolith goes past 31.
+
+Digests: 02d4bccc94314d6d -> ab7e8aea0f65b8df (DIGEST_ENCODING=0 856218d6b081056c ->
+660b3c387f18be70): 73 of 2,500 games, all random play re-taking a no-progress loop action at a
+revisited state (Basalt Monolith's self-paid untap; Lightning Greaves' equip {0} back and forth;
+also inside the heuristic decider's determinized playouts). With C2 merged: full af00cc85e05ea0c1;
+the encoding-free digest stays 660b3c387f18be70 (C2 changes no game's play, 100.9).

@@ -339,12 +339,23 @@ impl ManaPool {
         self.pay_into_for(cost, false)
     }
 
-    /// Add mana (CR 106.4). At most 255 of a type: more saturates (an
-    /// engine limit, shortcuts.md 46.3; CR 106 has no maximum).
-    pub fn add(&mut self, mana: &[u8; 6]) {
+    /// Add mana (CR 106.4). At most 255 of a type (the payment model's `u8`,
+    /// workstream B; CR 106 has no maximum): false when a type would pass
+    /// it (that type is left at 255), and the caller ends the game aborted
+    /// (`Game::add_mana`, ENGINE.md 100.7).
+    #[must_use]
+    pub fn add(&mut self, mana: &[u8; 6]) -> bool {
+        let mut exact = true;
         for (a, &n) in self.amt.iter_mut().zip(mana) {
-            *a = a.saturating_add(n);
+            match a.checked_add(n) {
+                Some(v) => *a = v,
+                None => {
+                    *a = u8::MAX;
+                    exact = false;
+                }
+            }
         }
+        exact
     }
 
     /// Spend pool mana on `cost` (no Phyrexian pips) as far as it goes,

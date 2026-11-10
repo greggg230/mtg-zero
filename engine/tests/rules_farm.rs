@@ -184,7 +184,7 @@ fn hidden_pool_world_while_paying(card: &str, spell: &str, lands: &[&str]) {
         d.determinize(1, &mut zero_search::rng::Rng::new(s));
         let want = d.m.deck(0);
         assert_eq!(sample::game_cards(&d, 0), want, "world {s}: P0's cards are not the sampled deck");
-        let copies: Vec<CardIdx> = (0..40).map(|i| CardIdx(i as u16)).filter(|&c| sample::card_of(&d.g, c) == def).collect();
+        let copies: Vec<CardIdx> = (0..40).map(|i| CardIdx::new(i as u32)).filter(|&c| sample::card_of(&d.g, c) == def).collect();
         assert_eq!(copies.len(), 1, "world {s}: one {card}");
         assert_eq!(d.g.obj(copies[0]).zone, Zone::Library, "world {s}: the cloud's {card} in the library");
         d.g.check_knowledge().unwrap_or_else(|e| panic!("world {s}: {e}"));

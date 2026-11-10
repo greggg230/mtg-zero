@@ -115,10 +115,11 @@ impl Game {
             }
             Ext::Poison { who, n } => {
                 if let Some(p) = self.who(f, *who) {
-                    // (Etali: that many, any number: CR 122.1f.)
-                    let n = crate::num::count(self.amount(f, *n) as i64);
-                    let pl = &mut self.players[p as usize];
-                    pl.poison = pl.poison.saturating_add(n);
+                    // (Etali: that many, any number: CR 122.1f; a negative
+                    // number is none, 107.1b.)
+                    let n = self.amount(f, *n).max(0);
+                    let total = self.players[p as usize].poison as crate::num::Wide + n;
+                    self.players[p as usize].poison = self.exact_count(total, "poison counters");
                     self.note(|_| format!("P{p} gets {n} poison counter(s)"));
                 }
                 Flow::Next
@@ -197,7 +198,10 @@ impl Game {
                 // discarded puts a +1/+1 counter on it if it is still that
                 // permanent. `f.i`: 0 = to draw, then 1 + discards made;
                 // `f.x`: nonland cards discarded.
-                let n = self.amount(f, *n).max(0) as u32; // (any number: 46.4, ENGINE.md 100.2)
+                // (Any number: 46.4, ENGINE.md 100.2; past `u32::MAX` cards the
+                // game aborts.)
+                let n = self.amount(f, *n).max(0);
+                let n = self.exact_u32(n, "cards to connive");
                 if f.i == 0 {
                     f.x = 0;
                 }
@@ -226,7 +230,7 @@ impl Game {
                 }
                 if f.i > n || self.players[p as usize].hand.is_empty() {
                     if let (Some(c), true) = (it, f.x > 0) {
-                        self.add_counters(c, crate::db::Counter::P1P1, crate::num::count(f.x as i64));
+                        self.add_counters(c, crate::db::Counter::P1P1, f.x as crate::num::Count);
                     }
                     return Flow::Next;
                 }
@@ -537,7 +541,14 @@ impl Game {
     /// another zone with a permission) with face `face` up (an MDFC's land
     /// face, 712.12; `None` = its front).
     pub(crate) fn play_land(&mut self, p: PlayerId, c: CardIdx, face: Option<DefId>) {
-        self.players[p as usize].lands_played = self.players[p as usize].lands_played.saturating_add(1);
+        let n = self.players[p as usize].lands_played;
+        self.players[p as usize].lands_played = match n.checked_add(1) {
+            Some(v) => v,
+            None => {
+                self.abort(|| "more than 255 lands played in a turn".to_string());
+                n
+            }
+        };
         self.entering_face = face;
         // From a graveyard without a "play lands from your graveyard"
         // permanent: Serra Paragon's permission.
@@ -618,6 +629,13 @@ impl Game {
         // double-faced token (CR 707.8a: its copy effect follows the face).
         let created = self.is_copy_obj(c)
             && self.copies.iter().filter(|x| x.obj == r).all(|x| x.until == crate::layers::Until::Forever && x.own == x.vals.def);
+        // A token copy of a permanent that isn't a transforming permanent
+        // (Shifting Woodland as Outland Liberator) has only the face it was
+        // created as: it isn't represented by a double-faced card and can't
+        // transform (707.8a, 701.28c; E2).
+        if created && self.copies.iter().any(|x| x.obj == r && !x.vals.dfc) {
+            return false;
+        }
         let copying = self.is_copy(c) && !created;
         // (The face it has: its own, under a copy effect.)
         let own = if copying { self.own_def(c) } else { o.def };
@@ -652,8 +670,9 @@ impl Game {
         } else {
             self.set_face(c, other);
         }
-        let o = &mut self.objs[c.i()];
-        o.flips = o.flips.wrapping_add(1);
+        // (Counted exactly: a wrapping count would alias, CR 701.27f.)
+        let flips = self.objs[c.i()].flips;
+        self.objs[c.i()].flips = self.exact_inc(flips, "an object's transformations");
         self.note(|g| format!("{} transforms", g.name(c)));
         let r = self.obj_ref(c);
         self.event(Event::obj(EventKind::Transforms, r));
@@ -759,7 +778,9 @@ impl Game {
     pub(crate) fn chapters_reached(&mut self, c: CardIdx, before: crate::num::Count, after: crate::num::Count) {
         let last = self.abilities(c).chapters as crate::num::Count;
         let r = self.obj_ref(c);
-        for n in before.saturating_add(1)..=after.min(last) {
+        // (`before + 1`: a count is at most `num::COUNT_MAX`, below
+        // `u64::MAX`.)
+        for n in before + 1..=after.min(last) {
             self.event(Event { kind: EventKind::Chapter, a: Subj::Obj(r), b: Subj::None, amount: n });
         }
     }

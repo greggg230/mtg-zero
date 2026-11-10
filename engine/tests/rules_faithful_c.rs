@@ -549,7 +549,7 @@ fn cr_616_1_the_replacement_choice_comes_before_the_event_syr_vondam() {
         resolve_with(&mut g, |_| None);
         let zone = if k == 1 { Zone::Library } else { Zone::Exile };
         assert_eq!(g.obj(bs).zone, zone, "{}", log(&g));
-        assert_eq!(g.counters_on(sv, Counter::P1P1), want_counters, "choice {k}\n{}", log(&g));
+        assert_eq!(g.counters_on(sv, Counter::P1P1), want_counters as u64, "choice {k}\n{}", log(&g));
     }
 }
 
