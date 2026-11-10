@@ -1358,6 +1358,21 @@ fn the_deck_tilt_weighs_the_cached_decks_by_the_prediction() {
         }
     }
     println!("{} positions, {checked} with unseen cards; deck j likelier than uniform at alpha 1 in {sharp}; tempered weighings {tempered}", pos.len());
+    // the spec's floor: "deck_tilt_ess" 0.5 keeps 16 effective decks of 32
+    let sp = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "paper"}, "deck_tilt_ess": 0.5}"#).unwrap();
+    assert_eq!(sp.deck_tilt_ess.0, 0.5);
+    assert_eq!(MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "paper"}}"#).unwrap().deck_tilt_ess.0, DECK_TILT_ESS);
+    for bad in ["0", "1.5", "-1", "true"] {
+        assert!(MtgSpec::parse(&format!(r#"{{"sealed": {{"set": "eoe", "collation": "paper"}}, "deck_tilt_ess": {bad}}}"#)).is_err(), "{bad}");
+    }
+    let mut b = pos[0].clone();
+    b.m.deal = DealCache::new(32, b.m.deal.salt);
+    b.m.deal.ess = 0.5;
+    let v = b.to_move().unwrap() as u8;
+    let (_, t0) = b.deck_tilt_of(v, DeckTilt { p: &vec![1.0 / engine::az::identity::D as f32; engine::az::identity::D], tilt: 1.0, clip: 20.0 }).unwrap();
+    let p: Vec<f32> = composition(&t0, &t0.excess[0]);
+    let (_, t) = b.deck_tilt_of(v, DeckTilt { p: &p, tilt: 4.0, clip: 1e6 }).unwrap();
+    assert!(t.ess >= 16.0 - 1e-6 && t.beta < 1.0, "the spec's floor: ESS {} beta {}", t.ess, t.beta);
     assert!(checked >= 20 && sharp * 10 >= checked * 9, "{sharp} of {checked}");
 
     // the deals: one position, 4,000 worlds, each cached deck at its probability

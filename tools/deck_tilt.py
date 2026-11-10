@@ -21,6 +21,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault('CUDA_VISIBLE_DEVICES', '-1')
 
+import mtgz.az                         # noqa: E402,F401  (puts the pinned zero-core on sys.path)
 import numpy as np                     # noqa: E402
 
 D = 1024    # identities of each auxiliary target (docs/ENGINE.md 102.4)

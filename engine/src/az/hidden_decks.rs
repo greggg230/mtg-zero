@@ -341,10 +341,11 @@ impl MtgAz {
         // (K = 0, or a tilt of the prior's draws).
         let d: Arc<Dealt> = match deck_tilt {
             Some(t) if self.m.deal.k > 0 && !kn.slots.is_empty() => {
+                let ess = self.m.deal.ess;
                 let decks = self.m.deal.decks(&*prior, o, &want);
-                let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &kn, &t), || {
+                let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &kn, &t, ess), || {
                     let ids = identity::identities(db);
-                    tilt_decks(&decks, &kn.required, &kn.fixed_by_identity(ids), kn.slots.len(), ids, t)
+                    tilt_decks(&decks, &kn.required, &kn.fixed_by_identity(ids), kn.slots.len(), ids, t, ess)
                 });
                 let mut x = unit(rng);
                 let mut i = td.probs.len() - 1;
@@ -415,9 +416,10 @@ impl MtgAz {
         let comp = self.g.player(o).companion_def;
         let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None };
         let decks = self.m.deal.decks(&*prior, o, &want);
-        let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &kn, &t), || {
+        let ess = self.m.deal.ess;
+        let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &kn, &t, ess), || {
             let ids = identity::identities(db);
-            tilt_decks(&decks, &kn.required, &kn.fixed_by_identity(ids), kn.slots.len(), ids, t)
+            tilt_decks(&decks, &kn.required, &kn.fixed_by_identity(ids), kn.slots.len(), ids, t, ess)
         });
         Some((decks, td))
     }
@@ -686,12 +688,15 @@ pub struct DealCache {
     /// K (0: every deal samples the prior afresh).
     pub k: usize,
     pub salt: u64,
+    /// The deck tilt's effective-sample-size floor, a share of K (ENGINE.md 106.1; spec key
+    /// `"deck_tilt_ess"`, default `DECK_TILT_ESS`).
+    pub ess: f64,
     memo: Arc<Mutex<DealMemo>>,
 }
 
 impl DealCache {
     pub fn new(k: usize, salt: u64) -> DealCache {
-        DealCache { k, salt, memo: Arc::new(Mutex::new(DealMemo::default())) }
+        DealCache { k, salt, ess: DECK_TILT_ESS, memo: Arc::new(Mutex::new(DealMemo::default())) }
     }
 
     /// The request's key: the seat, the size, the companion and R.
@@ -749,9 +754,9 @@ impl DealCache {
 
 // ---- The deck tilt (ENGINE.md 106): the K cached decks weighed by the deck prediction ----
 
-/// The effective share of the K cached decks the deck tilt keeps at least (ENGINE.md 106.1): when the
-/// weighed decks' effective sample size would fall below `DECK_TILT_ESS` x K, the tilt is tempered
-/// (its exponent scaled by beta < 1) until it is that.
+/// The effective share of the K cached decks the deck tilt keeps at least, by default (ENGINE.md 106.1;
+/// the spec key `"deck_tilt_ess"`): when the weighed decks' effective sample size would fall below this
+/// x K, the tilt is tempered (its exponent scaled by beta < 1) until it is that.
 pub const DECK_TILT_ESS: f64 = 0.25;
 
 /// The deck tilt of a search (ENGINE.md 106): `p`, the network's prediction of the opponent's unseen
@@ -802,9 +807,9 @@ fn tilt_probs(l: &[f64], beta: f64) -> (Vec<f64>, f64) {
 /// to deck D beyond R; the prior's own expected excess u_k = mean over the K decks; the prediction's
 /// excess N p_k - fixed_k; w_k = `belief_weight`(N p_k - fixed_k, u_k, alpha, R) where u_k > 0; deck D's
 /// log weight sum_k e_k(D) ln w_k; its probability proportional to exp(beta x that), beta = 1 unless
-/// the effective sample size would fall below `DECK_TILT_ESS` x K (then the largest beta that keeps
-/// it, by bisection: the ESS falls as beta grows).
-pub fn tilt_decks(decks: &[Arc<Dealt>], shown: &[DefId], fixed: &[f64], n: usize, ids: &[u16], t: DeckTilt) -> TiltedDecks {
+/// the effective sample size would fall below `ess` x K (then the largest beta that keeps it, by
+/// bisection: the ESS falls as beta grows).
+pub fn tilt_decks(decks: &[Arc<Dealt>], shown: &[DefId], fixed: &[f64], n: usize, ids: &[u16], t: DeckTilt, ess: f64) -> TiltedDecks {
     let k = decks.len();
     assert!(k > 0, "the deck tilt needs the K cached decks (deal_samples > 0)");
     let d = identity::D;
@@ -834,7 +839,7 @@ pub fn tilt_decks(decks: &[Arc<Dealt>], shown: &[DefId], fixed: &[f64], n: usize
         }
     }
     let l: Vec<f64> = ex.iter().map(|e| e.iter().map(|&(id, c)| c * w[id as usize].ln()).sum()).collect();
-    let floor = DECK_TILT_ESS * k as f64;
+    let floor = ess * k as f64;
     let (mut probs, mut ess) = tilt_probs(&l, 1.0);
     let mut beta = 1.0;
     if ess < floor {
@@ -856,8 +861,8 @@ pub fn tilt_decks(decks: &[Arc<Dealt>], shown: &[DefId], fixed: &[f64], n: usize
 /// The key of a deck tilt's weighing: everything `tilt_decks` reads - the request's key (its K decks and
 /// R), the viewer's other knowledge of the unseen cards (the deck cards it knows, the non-deck cards it lost
 /// track of, their number: the fixed part and N) and the prediction, tilt and clip.
-fn tilt_key(request: u64, kn: &sample::Knowledge, t: &DeckTilt) -> u64 {
-    let mut h = crate::rng::split64(request ^ 0x7111_7DEC ^ t.tilt.to_bits().rotate_left(17) ^ t.clip.to_bits());
+fn tilt_key(request: u64, kn: &sample::Knowledge, t: &DeckTilt, ess: f64) -> u64 {
+    let mut h = crate::rng::split64(request ^ 0x7111_7DEC ^ t.tilt.to_bits().rotate_left(17) ^ t.clip.to_bits() ^ ess.to_bits().rotate_left(41));
     h = crate::rng::split64(h ^ (kn.slots.len() as u64) << 32 ^ kn.known.len() as u64);
     for &d in kn.known.iter().chain(&kn.extras) {
         h = crate::rng::split64(h ^ d as u64);
