@@ -1937,11 +1937,21 @@ fn hd_shown(a: &engine::az::MtgAz, viewer: u8) -> Vec<u16> {
     let n1: usize = a.m.decks[1].iter().map(|&c| c as usize).sum();
     let r = if o == 0 { 0..n0 } else { n0..n0 + n1 };
     let mut v: Vec<u16> =
-        r.map(|i| engine::CardIdx::new(i as u32)).filter(|&c| g.knows(viewer, c)).map(|c| engine::az::sample::card_of(g, c)).collect();
+        r.clone().map(|i| engine::CardIdx::new(i as u32)).filter(|&c| g.knows(viewer, c)).map(|c| engine::az::sample::card_of(g, c)).collect();
     for k in g.clouds().iter().filter(|k| k.viewer == viewer && k.owner == o) {
         v.extend(k.defs.iter().map(|&d| g.db().def(d).card_def(d)));
     }
     v.sort_unstable();
+    // (A cloud's identity may be a card of theirs outside their deck, hidden from the viewer: a
+    // token in a hidden zone, a companion put into the hand. Not a deck card.)
+    for (i, ob) in g.objs().iter().enumerate() {
+        let c = engine::CardIdx::new(i as u32);
+        if ob.owner == o && !r.contains(&i) && matches!(ob.zone, engine::Zone::Hand | engine::Zone::Library | engine::Zone::FaceDown) && !g.knows(viewer, c) {
+            if let Ok(at) = v.binary_search(&engine::az::sample::card_of(g, c)) {
+                v.remove(at);
+            }
+        }
+    }
     v
 }
 

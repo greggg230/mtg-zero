@@ -821,6 +821,19 @@ impl Game {
     fn hidden_slots_with(&self, viewer: PlayerId, owner: PlayerId, payer: Option<PlayerId>) -> (SVec<CardIdx, 64>, Vec<CardIdx>) {
         let mut slots = self.unknown_to_in(viewer, owner);
         let mut pinned: Vec<CardIdx> = Vec::new();
+        // A token in a hidden zone (it ceases to exist at the next state-based
+        // actions, CR 111.8, 704.5d) is not a card: its identity is never dealt
+        // to a card's slot, nor a card's to it (ENGINE.md 102.3: a world held a
+        // Robot token's identity in a card's slot). It stays, as a pinned card.
+        if slots.iter().any(|c| c.get() >= self.first_token) {
+            slots.retain(|&c| {
+                let token = self.is_token(c);
+                if token {
+                    pinned.push(c);
+                }
+                !token
+            });
+        }
         if payer == Some(owner) && owner != viewer {
             // A payment in progress may count on the payer's mana sources in
             // hand, and on the cards a cost exiles from hand: they are pinned
