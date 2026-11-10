@@ -101,6 +101,12 @@ impl MtgAz {
     #[doc(hidden)]
     pub fn determinize_belief(&mut self, viewer: usize, rng: &mut zero_search::rng::Rng, belief: &Belief) -> Option<Vec<f64>> {
         let (hand, deck) = tilts(belief);
+        // (A deck tilt where the decklists are open would deal nothing differently - every deck is
+        // the real one: a setting that silently does nothing is refused, ENGINE.md 106.2.)
+        assert!(
+            deck <= 0.0 || self.hidden_decklists(),
+            "belief_tilts.deck {deck}: the deck tilt deals hidden decklists (ENGINE.md 106), this game's decklists are open"
+        );
         if self.m.sb.is_some() || (hand <= 0.0 && deck <= 0.0) {
             self.determinize(viewer, rng);
             return None;

@@ -2727,8 +2727,8 @@ fn zbelief_deck(rng: &mut Rng, hand: f64, deck: f64, clip: f64) -> zero_search::
     zero_search::game::Belief { pred, tilt: hand, clip, tilts: vec![0.0, deck] }
 }
 
-/// The deck tilt keeps every `determinize` invariant (ENGINE.md 106.3): the gate's positions (every kind;
-/// the deck tilt deals the hidden-decklist and EoE sealed kinds' decks, the others ignore it), random
+/// The deck tilt keeps every `determinize` invariant (ENGINE.md 106.3): the gate's hidden-decklist
+/// positions (the cube's random decks and EoE sealed; an open-decklist game refuses it), random
 /// predictions of both targets at deck tilts 0.5 / 1 / 8 (clips 20 / 1e6), with and without the hand's
 /// tilt, both viewers: the decider's actions, each viewer's whole encoding, the cards it knows, the
 /// invariants and knowledge, hand sizes; in the open-decklist kinds every player's cards.
@@ -2736,7 +2736,10 @@ fn zbelief_deck(rng: &mut Rng, hand: f64, deck: f64, clip: f64) -> zero_search::
 fn deck_tilt_deals_keep_every_determinize_invariant() {
     let mut rng = Rng::new(106);
     let (mut worlds, mut decks) = (0, 0);
-    for (name, g) in gate_positions(scale(20) as usize, 106) {
+    for (name, g) in gate_positions(scale(40) as usize, 106) {
+        if !g.hidden_decklists() {
+            continue;
+        }
         let mover = g.to_move().unwrap();
         for viewer in [mover, 1 - mover] {
             let x0 = enc(&g, viewer);
@@ -2762,17 +2765,27 @@ fn deck_tilt_deals_keep_every_determinize_invariant() {
                 d.g.check_knowledge().unwrap_or_else(|e| panic!("{name}: {e}"));
                 for p in 0..2u8 {
                     assert_eq!(g.g.player(p).hand.len(), d.g.player(p).hand.len(), "{name}: hand size");
-                    if !g.hidden_decklists() && name != "bo3" && name != "drafted" {
-                        assert_eq!(cards_of(&g, p), cards_of(&d, p), "{name}: P{p}'s cards");
-                    }
                 }
-                decks += (g.hidden_decklists() && cards_of(&g, 1 - viewer as u8) != cards_of(&d, 1 - viewer as u8)) as u32;
+                assert_eq!(cards_of(&g, viewer as u8), cards_of(&d, viewer as u8), "{name}: the viewer's own cards");
+                decks += (cards_of(&g, 1 - viewer as u8) != cards_of(&d, 1 - viewer as u8)) as u32;
                 worlds += 1;
             }
         }
     }
     println!("{worlds} deck-tilted worlds, {decks} with another opponent deck");
-    assert!(worlds > 300 && decks > 50, "{worlds} {decks}");
+    assert!(worlds > 300 && decks * 10 > worlds * 9, "{worlds} {decks}");
+}
+
+/// A deck tilt on an open-decklist game is refused loudly (ENGINE.md 106.2: it would deal nothing
+/// differently), never a silent no-op.
+#[test]
+#[should_panic(expected = "the deck tilt deals hidden decklists")]
+fn a_deck_tilt_on_open_decklists_is_refused() {
+    let (name, g) = gate_positions(4, 108).into_iter().find(|(_, g)| !g.hidden_decklists() && g.m.sb.is_none()).unwrap();
+    let mut d = g.clone();
+    let b = zbelief_deck(&mut Rng::new(1), 0.0, 1.0, 20.0);
+    d.determinize_with(g.to_move().unwrap(), &mut zero_search::rng::Rng::new(1), &b);
+    println!("{name}: dealt");
 }
 
 /// The deck tilt reads only the viewer's information (ENGINE.md 106.2): on the gate's hidden-decklist

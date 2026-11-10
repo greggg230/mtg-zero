@@ -214,9 +214,11 @@ EVAL_SPEC_EOE = eval_spec(SPEC_EOE)
 # reader over the EoE identities of the opponent's shown cards and the public counts, fed into the trunk) and the belief
 # head (the auxiliary head covers both targets: 2,048 outputs).
 # the end-to-end check on CPU: mtg-smoke's tiny network and sims on EoE sealed
+# (the deck tilt at 1 in both seats, docs/ENGINE.md 106: the smoke exercises the search's deck-tilted deal and its
+# root belief rows)
 PRESETS['eoe-smoke'] = dict(PRESETS['mtg-smoke'], game='mtg_eoe', spec=SPEC_EOE, eval_spec=EVAL_SPEC_EOE, arch='tokens',
                             hidden=32, blocks=1, heads=2, ff=64, sims_minor=2, aux_belief_w=0.5, aux_deck_w=0.5,
-                            reader_deck=1)
+                            reader_deck=1, selfplay_belief_tilts={'deck': 1.0}, eval_belief_tilts={'deck': 1.0})
 # the first real run (S3): the token network 128 x 4 (the Delver line's start) on mtg-3's settings (GPU inference and
 # training, 64 / 16 simulations, mana payments at 4, completed-Q targets, 600 games an iteration, lr 1e-3, evaluation
 # every iteration: 100 games against the heuristic and 50 against random at 32 simulations on the evaluation pairs, Elo
