@@ -154,14 +154,14 @@ impl Game {
 
     /// Declare attackers (CR 508.1): one creature per decision in increasing
     /// slot order; `PASS` finishes. Each attacking set is reachable once.
-    pub(crate) fn declare_attackers(&mut self, next: u8) {
+    pub(crate) fn declare_attackers(&mut self, next: u32) {
         let ap = self.turn.active;
         match self.answer.take() {
             Some(Choice::Card(c)) => {
                 self.objs[c.i()].attacking = true;
-                let slot = self.perm_action(ap, c) - act::MY_PERM;
+                let slot = self.perm_slot(c);
                 self.note(|g| format!("attacks with {}", g.name(c)));
-                self.agenda.push(Task::DeclareAttackers { next: slot as u8 + 1 });
+                self.agenda.push(Task::DeclareAttackers { next: slot + 1 });
                 // CR 508.1b: what it attacks, when there is a choice.
                 self.agenda.push(Task::AttackTarget { card: c });
                 return;
@@ -217,10 +217,10 @@ impl Game {
             }
         }
         let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
-        for c in self.permanents_of(ap).collect::<Vec<_>>() {
-            let a = self.perm_action(ap, c);
-            if a - act::MY_PERM >= next as u16 && !self.objs[c.i()].attacking && self.can_attack(c) {
-                opts.push(Opt { action: a, choice: Choice::Card(c) });
+        // (By position: past slot 94 the ids page, ENGINE.md 100.4.8.)
+        for (slot, c) in self.permanents_of(ap).enumerate().collect::<Vec<_>>() {
+            if slot as u32 >= next && !self.objs[c.i()].attacking && self.can_attack(c) {
+                opts.push(Opt { action: self.perm_action(ap, c), choice: Choice::Card(c) });
             }
         }
         self.ask(Task::DeclareAttackers { next }, ap, DecisionKind::DeclareAttackers, opts);
@@ -229,7 +229,7 @@ impl Game {
     /// Declare blockers (CR 509.1): for each potential blocker in slot order,
     /// which attacker it blocks (`OPP_PERM` slot) or `PASS`. Options that
     /// would make the declaration illegal (menace) are not offered.
-    pub(crate) fn declare_blockers(&mut self, i: u8) {
+    pub(crate) fn declare_blockers(&mut self, i: u32) {
         let dp = opp(self.turn.active);
         let pot = self.potential_blockers();
         if let Some(ch) = self.answer.take() {
@@ -358,7 +358,7 @@ impl Game {
     /// Combat damage step (CR 510.1-2): assignments attacker by attacker
     /// (decisions where the attacking player divides damage), then the
     /// blockers', then all damage at once.
-    pub(crate) fn combat_damage(&mut self, first: bool, att: u8) {
+    pub(crate) fn combat_damage(&mut self, first: bool, att: u32) {
         let attackers = self.attackers();
         for (k, &a) in attackers.iter().enumerate().skip(att as usize) {
             if !self.deals_damage_now(a, first) {
@@ -389,7 +389,7 @@ impl Game {
                 let b = self.obj_ref(blockers[0]);
                 self.combat_dmg.push((a, Target::Obj(b), power));
             } else {
-                self.agenda.push(Task::CombatDamage { first, att: k as u8 + 1 });
+                self.agenda.push(Task::CombatDamage { first, att: k as u32 + 1 });
                 self.agenda.push(Task::AssignDamage { att: a, j: 0, left: power, step: crate::decision::NumberStep::FIRST });
                 return;
             }

@@ -65,6 +65,8 @@ pub mod act {
     /// 27.5).
     pub const GY_ABILITY: u16 = 1012;
     pub const GY_ABILITY_N: u16 = 12;
+    // (Four `ACTIVATE` ids a `MY_PERM` slot, before the hand's.)
+    const _: () = assert!(ACTIVATE + PERM_N * 4 == HAND_ABILITY && MY_PERM + PERM_N == OPP_PERM && OPP_PERM + PERM_N == STACK);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -344,12 +346,49 @@ pub struct PagedRange<'a> {
     pub base: u16,
     pub n: u16,
     pub items: &'a [(u32, Choice)],
+    /// A second id range whose items page with this range's, by the same
+    /// positions (ENGINE.md 100.4.8): the decider's permanents' `ACTIVATE`
+    /// ids, four a `MY_PERM` position.
+    pub linked: Option<Linked<'a>>,
 }
 
-impl PagedRange<'_> {
-    /// An item lies past the range's last id: the range is paged.
+/// The items of a range that pages with another ([`PagedRange::linked`]):
+/// `(position, k, choice)`, increasing, `k < stride`, has the id `base +
+/// (position - first) * stride + k` on the page whose first position is
+/// `first` (`base + position * stride + k` when the range doesn't page).
+#[derive(Clone, Copy, Debug)]
+pub struct Linked<'a> {
+    pub base: u16,
+    pub stride: u16,
+    pub items: &'a [(u32, u16, Choice)],
+}
+
+/// The permanents a choice names, by position (`Game::perm_items`, ENGINE.md
+/// 100.4.8): the decider's (`MY_PERM`), their abilities (`ACTIVATE`: the
+/// position and which of the four ids), the other player's (`OPP_PERM`).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PermItems {
+    pub mine: Vec<(u32, Choice)>,
+    pub acts: Vec<(u32, u16, Choice)>,
+    pub theirs: Vec<(u32, Choice)>,
+}
+
+impl<'a> PagedRange<'a> {
+    /// A range with no linked range.
+    pub(crate) const fn new(base: u16, n: u16, items: &'a [(u32, Choice)]) -> PagedRange<'a> {
+        PagedRange { base, n, items, linked: None }
+    }
+
+    /// Every item's position, the linked items' too.
+    fn positions(&self) -> impl Iterator<Item = u32> + '_ {
+        let linked = self.linked.map_or(&[][..], |l| l.items);
+        self.items.iter().map(|&(pos, _)| pos).chain(linked.iter().map(|&(pos, _, _)| pos))
+    }
+
+    /// An item (or a linked item) lies past the range's last id: the range
+    /// is paged.
     pub(crate) fn paged(&self) -> bool {
-        self.items.last().is_some_and(|&(pos, _)| pos >= self.n as u32)
+        self.positions().any(|pos| pos >= self.n as u32)
     }
 
     /// The window of a position: `n - 1` positions each (the last id is
@@ -358,14 +397,25 @@ impl PagedRange<'_> {
         pos / (self.n as u32 - 1)
     }
 
+    /// Does window `w` hold an item (or a linked item)?
+    fn holds_window(&self, w: u32) -> bool {
+        self.positions().any(|pos| self.window(pos) == w)
+    }
+
     /// The first window after `w` that holds an item (windows with none are
     /// skipped: no page offers only "next").
     fn next_window(&self, w: u32) -> Option<u32> {
-        self.items.iter().map(|&(pos, _)| self.window(pos)).find(|&x| x > w)
+        self.positions().map(|pos| self.window(pos)).filter(|&x| x > w).min()
     }
 
     fn holds(&self, action: u16) -> bool {
         (self.base..self.base + self.n).contains(&action)
+            || self.linked.is_some_and(|l| (l.base..l.base + self.n * l.stride).contains(&action))
+    }
+
+    /// The id span of the range and its linked range.
+    fn spans(&self) -> impl Iterator<Item = (u16, u16)> {
+        std::iter::once((self.base, self.base + self.n)).chain(self.linked.map(|l| (l.base, l.base + self.n * l.stride)))
     }
 }
 
@@ -625,11 +675,16 @@ impl Game {
         l
     }
 
-    /// `MY_PERM` / `OPP_PERM` slot of a permanent, relative to `viewer`.
+    /// `MY_PERM` / `OPP_PERM` slot of a permanent, relative to `viewer` (the
+    /// decision's player): its id in a decision that doesn't page its
+    /// permanents. A permanent past slot 94 has the range's last id here
+    /// (`PERM_N - 1`); a decision with one past slot 95 pages that range,
+    /// and `ask` names each permanent by its place there instead
+    /// (`Game::perm_items`, ENGINE.md 100.4.8; 26.11.6: any number of
+    /// permanents a player).
     pub fn perm_action(&self, viewer: PlayerId, idx: CardIdx) -> u16 {
         let ctl = self.objs[idx.i()].controller;
-        let slot = self.perm_slot(idx);
-        assert!(slot < act::PERM_N as u32, "permanent slot {slot} out of range");
+        let slot = self.perm_slot(idx).min(act::PERM_N as u32 - 1);
         if ctl == viewer {
             act::MY_PERM + slot as u16
         } else {
@@ -851,11 +906,11 @@ impl Game {
             v.sort_by_key(|&(pos, _)| pos);
         }
         let ranges = [
-            PagedRange { base: act::MY_PERM, n: act::PERM_N, items: &mine },
-            PagedRange { base: act::OPP_PERM, n: act::PERM_N, items: &theirs },
-            PagedRange { base: act::STACK, n: act::STACK_N, items: &stack },
-            PagedRange { base: act::LIBRARY, n: act::LIBRARY_N, items: &gy },
-            PagedRange { base: act::EXILE, n: act::EXILE_N, items: &ex },
+            PagedRange::new(act::MY_PERM, act::PERM_N, &mine),
+            PagedRange::new(act::OPP_PERM, act::PERM_N, &theirs),
+            PagedRange::new(act::STACK, act::STACK_N, &stack),
+            PagedRange::new(act::LIBRARY, act::LIBRARY_N, &gy),
+            PagedRange::new(act::EXILE, act::EXILE_N, &ex),
         ];
         self.ask_paged_ranges(task, page, player, kind, &ranges, extra);
     }
@@ -891,7 +946,7 @@ impl Game {
         items: &[(u32, Choice)],
         extra: Vec<Opt>,
     ) {
-        self.ask_paged_ranges(task, page, player, kind, &[PagedRange { base, n, items }], extra);
+        self.ask_paged_ranges(task, page, player, kind, &[PagedRange::new(base, n, items)], extra);
     }
 
     /// Ask `player` a choice whose items may outnumber their action ranges
@@ -925,7 +980,13 @@ impl Game {
     /// `ChooseGraveyardCard` options (ENGINE.md 65.10, 99.14) after this:
     /// a paged range of such cards takes its positions from that naming
     /// (workstream A).
-    #[allow(dead_code)]
+    ///
+    /// Options of `extra` that name permanents with the ids `perm_action`
+    /// and `ability_action` give (`MY_PERM`, `OPP_PERM`, `ACTIVATE`) are two
+    /// more ranges, after `ranges`, when one of them is past slot 95
+    /// ([`perm_items`](Self::perm_items), ENGINE.md 100.4.8): the decider's
+    /// permanents (`MY_PERM`, their `ACTIVATE` ids linked) and the other
+    /// player's (`OPP_PERM`).
     pub(crate) fn ask_paged_ranges(
         &mut self,
         task: Task,
@@ -935,20 +996,148 @@ impl Game {
         ranges: &[PagedRange],
         extra: Vec<Opt>,
     ) {
-        for (k, r) in ranges.iter().enumerate() {
-            assert!(r.n >= 2 && (r.base + r.n) as usize <= NUM_ACTIONS, "{kind:?}: paged range {k} at {} of {} ids", r.base, r.n);
-            assert!(r.items.windows(2).all(|w| w[0].0 < w[1].0), "{kind:?}: paged range {k}'s positions are not increasing");
-            assert!(ranges[..k].iter().all(|q| q.base + q.n <= r.base || r.base + r.n <= q.base), "{kind:?}: paged ranges overlap");
-            assert!(!extra.iter().any(|o| r.holds(o.action)), "{kind:?}: an extra option in paged range {k}");
+        self.ask_ranges(task, page, player, kind, ranges, extra, false);
+    }
+
+    /// [`ask_paged_ranges`](Self::ask_paged_ranges); with `engine`, the page
+    /// is the engine's ([`Game::page`]: `ask`'s choices whose permanents
+    /// page, ENGINE.md 100.4.8), not the asking task's.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn ask_ranges(
+        &mut self,
+        task: Task,
+        page: Page,
+        player: PlayerId,
+        kind: DecisionKind,
+        ranges: &[PagedRange],
+        extra: Vec<Opt>,
+        engine: bool,
+    ) {
+        let (opts, shown, paged) = self.paged_decision(page, player, kind, ranges, extra);
+        self.ask_options(task, player, kind, opts);
+        if engine {
+            match self.answer {
+                // (A page offering only "next page", answered by the engine:
+                // the asking task, pushed, asks that page.)
+                Some(Choice::Page(p)) => {
+                    self.answer = None;
+                    self.page = Some(p);
+                }
+                Some(_) => self.page = None,
+                None => self.page = Some(shown),
+            }
+        } else {
+            self.page = None;
         }
-        let (opts, shown) = paged_options(page, ranges, extra);
-        let paged = ranges.iter().any(|r| r.paged());
-        self.ask(task, player, kind, opts);
         if paged {
             if let Some(d) = &mut self.pending {
                 d.stage = Stage::Paged { window: shown.window };
             }
         }
+    }
+
+    /// The options of page `page` of a choice over `ranges` and `extra`
+    /// (with the permanents' ranges `extra`'s permanents need: `perm_items`),
+    /// the page shown, and whether a range pages.
+    pub(crate) fn paged_decision(
+        &self,
+        page: Page,
+        player: PlayerId,
+        kind: DecisionKind,
+        ranges: &[PagedRange],
+        mut extra: Vec<Opt>,
+    ) -> (Vec<Opt>, Page, bool) {
+        let perms = if self.perms_past_slots(player, &extra) { Some(self.perm_items(player, &mut extra)) } else { None };
+        let mut all: Vec<PagedRange> = ranges.to_vec();
+        if let Some(pi) = &perms {
+            all.push(PagedRange {
+                base: act::MY_PERM,
+                n: act::PERM_N,
+                items: &pi.mine,
+                linked: Some(Linked { base: act::ACTIVATE, stride: crate::activate::ACTIVATE_SLOTS as u16, items: &pi.acts }),
+            });
+            all.push(PagedRange::new(act::OPP_PERM, act::PERM_N, &pi.theirs));
+        }
+        for (k, r) in all.iter().enumerate() {
+            for (lo, hi) in r.spans() {
+                assert!(r.n >= 2 && hi as usize <= NUM_ACTIONS, "{kind:?}: paged range {k} at {lo}..{hi}");
+                assert!(
+                    all[..k].iter().all(|q| q.spans().all(|(qlo, qhi)| qhi <= lo || hi <= qlo)),
+                    "{kind:?}: paged ranges overlap"
+                );
+            }
+            assert!(r.items.windows(2).all(|w| w[0].0 < w[1].0), "{kind:?}: paged range {k}'s positions are not increasing");
+            if let Some(l) = r.linked {
+                assert!(
+                    l.items.windows(2).all(|w| (w[0].0, w[0].1) < (w[1].0, w[1].1)) && l.items.iter().all(|&(_, j, _)| j < l.stride),
+                    "{kind:?}: paged range {k}'s linked items are not increasing"
+                );
+            }
+            assert!(!extra.iter().any(|o| r.holds(o.action)), "{kind:?}: an extra option in paged range {k}");
+        }
+        let paged = all.iter().any(|r| r.paged());
+        let (opts, shown) = paged_options(page, &all, extra);
+        (opts, shown, paged)
+    }
+
+    /// Does an option of `opts` name a permanent past slot 95 (an id
+    /// `perm_action` or `ability_action` gives at the range's last slot,
+    /// ENGINE.md 100.4.8)? Then its permanents page.
+    pub(crate) fn perms_past_slots(&self, player: PlayerId, opts: &[Opt]) -> bool {
+        let last = act::PERM_N - 1;
+        let act_last = act::ACTIVATE + last * crate::activate::ACTIVATE_SLOTS as u16;
+        opts.iter().any(|o| {
+            let at_last = o.action == act::MY_PERM + last
+                || o.action == act::OPP_PERM + last
+                || (act_last..act_last + crate::activate::ACTIVATE_SLOTS as u16).contains(&o.action);
+            at_last && self.perm_option(player, o).is_some_and(|(_, pos, _)| pos > last as u32)
+        })
+    }
+
+    /// What option `o` names among the permanents (ids from `perm_action` and
+    /// `ability_action`): 0 the decider's (`MY_PERM`), 1 the other player's
+    /// (`OPP_PERM`), 2 an ability of the decider's (`ACTIVATE`: its `k` of
+    /// four), with the permanent's position among its controller's
+    /// (`perm_slot`). `None` for any other option (one naming no object
+    /// there: a unit test's probe items).
+    fn perm_option(&self, player: PlayerId, o: &Opt) -> Option<(u8, u32, u16)> {
+        let stride = crate::activate::ACTIVATE_SLOTS as u16;
+        let a = o.action;
+        let (side, c, k) = match o.choice {
+            Choice::Card(c) | Choice::Target(Target::Obj(crate::ids::ObjRef { idx: c, .. })) if (act::MY_PERM..act::MY_PERM + act::PERM_N).contains(&a) => (0, c, 0),
+            Choice::Card(c) | Choice::Target(Target::Obj(crate::ids::ObjRef { idx: c, .. })) if (act::OPP_PERM..act::OPP_PERM + act::PERM_N).contains(&a) => (1, c, 0),
+            Choice::Ability(c, _) if (act::ACTIVATE..act::ACTIVATE + act::PERM_N * stride).contains(&a) => (2, c, (a - act::ACTIVATE) % stride),
+            _ => return None,
+        };
+        let mine = self.objs[c.i()].controller == player;
+        assert_eq!(mine, side != 1, "P{player}: id {a} for {}, controlled by P{}", self.name(c), self.objs[c.i()].controller);
+        Some((side, self.perm_slot(c), k))
+    }
+
+    /// The options of `extra` that name permanents, taken out of it as the
+    /// items of the permanents' ranges (ENGINE.md 100.4.8): every one by its
+    /// permanent's position (`perm_slot`), whatever id `perm_action` gave it.
+    pub(crate) fn perm_items(&self, player: PlayerId, extra: &mut Vec<Opt>) -> PermItems {
+        let mut pi = PermItems::default();
+        extra.retain(|o| match self.perm_option(player, o) {
+            Some((0, pos, _)) => {
+                pi.mine.push((pos, o.choice));
+                false
+            }
+            Some((1, pos, _)) => {
+                pi.theirs.push((pos, o.choice));
+                false
+            }
+            Some((_, pos, k)) => {
+                pi.acts.push((pos, k, o.choice));
+                false
+            }
+            None => true,
+        });
+        pi.mine.sort_by_key(|&(pos, _)| pos);
+        pi.theirs.sort_by_key(|&(pos, _)| pos);
+        pi.acts.sort_by_key(|&(pos, k, _)| (pos, k));
+        pi
     }
 
     /// Ask `player` for a number in `lo..=hi` (ENGINE.md 100.1; the
@@ -1033,29 +1222,39 @@ impl Game {
 /// and the page shown: `page`, or the first page when `page` holds no item.
 pub(crate) fn paged_options(page: Page, ranges: &[PagedRange], extra: Vec<Opt>) -> (Vec<Opt>, Page) {
     let shown = match ranges.get(page.range as usize) {
-        Some(r) if page.window > 0 && r.paged() && r.items.iter().any(|&(pos, _)| r.window(pos) == page.window) => page,
+        Some(r) if page.window > 0 && r.paged() && r.holds_window(page.window) => page,
         _ => Page::FIRST,
     };
+    // A range's items of window `w` (all of them when it doesn't page), at
+    // their ids on that window's page (ENGINE.md 100.1; the linked ones by
+    // the same positions, 100.4.8).
+    fn window_items(r: &PagedRange, w: Option<u32>, opts: &mut Vec<Opt>) {
+        let first = w.map_or(0, |w| w * (r.n as u32 - 1));
+        let shown = |pos: u32| w.is_none_or(|w| r.window(pos) == w);
+        for &(pos, c) in r.items.iter().filter(|&&(pos, _)| shown(pos)) {
+            opts.push(Opt { action: r.base + (pos - first) as u16, choice: c });
+        }
+        if let Some(l) = r.linked {
+            for &(pos, k, c) in l.items.iter().filter(|&&(pos, _, _)| shown(pos)) {
+                opts.push(Opt { action: l.base + (pos - first) as u16 * l.stride + k, choice: c });
+            }
+        }
+    }
     let mut opts = Vec::new();
     if shown.window == 0 {
         opts = extra;
         for (k, r) in ranges.iter().enumerate() {
             if !r.paged() {
-                opts.extend(r.items.iter().map(|&(pos, c)| Opt { action: r.base + pos as u16, choice: c }));
+                window_items(r, None, &mut opts);
                 continue;
             }
-            for &(pos, c) in r.items.iter().take_while(|&&(pos, _)| r.window(pos) == 0) {
-                opts.push(Opt { action: r.base + pos as u16, choice: c });
-            }
+            window_items(r, Some(0), &mut opts);
             let next = r.next_window(0).expect("a paged range holds an item past its first window");
             opts.push(Opt { action: r.base + r.n - 1, choice: Choice::Page(Page { range: k as u8, window: next }) });
         }
     } else {
         let r = &ranges[shown.range as usize];
-        let first = shown.window * (r.n as u32 - 1);
-        for &(pos, c) in r.items.iter().filter(|&&(pos, _)| r.window(pos) == shown.window) {
-            opts.push(Opt { action: r.base + (pos - first) as u16, choice: c });
-        }
+        window_items(r, Some(shown.window), &mut opts);
         if let Some(next) = r.next_window(shown.window) {
             opts.push(Opt { action: r.base + r.n - 1, choice: Choice::Page(Page { range: shown.range, window: next }) });
         }
@@ -1109,7 +1308,7 @@ pub(crate) mod tests {
                     None => {
                         let items: Vec<Vec<(u32, Choice)>> =
                             ranges.iter().enumerate().map(|(r, (_, _, ps))| ps.iter().map(|&pos| (pos, item(r, pos))).collect()).collect();
-                        let rs: Vec<PagedRange> = ranges.iter().zip(&items).map(|(&(base, n, _), items)| PagedRange { base, n, items }).collect();
+                        let rs: Vec<PagedRange> = ranges.iter().zip(&items).map(|(&(base, n, _), items)| PagedRange::new(base, n, items)).collect();
                         let task = Task::Probe(Box::new(Probe::Paged { p, kind, ranges: ranges.clone(), extra: extra.clone(), page }));
                         self.ask_paged_ranges(task, page, p, kind, &rs, extra);
                     }

@@ -196,9 +196,7 @@ impl Game {
                     }
                     if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
                         // (Recorded with its duration: EoE W6.)
-                        if self.objs[c.i()].owner == p || self.perm_room(p) > 0 {
-                            self.w6_control_effect(c, p, true);
-                        }
+                        self.w6_control_effect(c, p, true);
                     } else {
                         self.change_control(c, p);
                     }

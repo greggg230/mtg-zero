@@ -235,12 +235,12 @@ impl Game {
                     return Flow::Jump(*skip);
                 }
                 if f.picked.len() < n {
-                    let floor = f.picked.last().map(|&c| self.perm_action(p, c));
+                    let floor = f.picked.last().map(|&c| self.perm_slot(c));
                     let rest: Vec<Opt> = cands
                         .iter()
                         .filter(|c| !f.picked.contains(c))
+                        .filter(|&&c| floor.is_none_or(|fl| self.perm_slot(c) > fl))
                         .map(|&c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
-                        .filter(|o| floor.is_none_or(|fl| o.action > fl))
                         .collect();
                     // (Leaving enough later ones for the picks still owed.)
                     let still = n - f.picked.len();

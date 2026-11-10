@@ -790,8 +790,9 @@ fn cr_614_1a_doubled_tokens_past_sixty_four() {
     g.choose(Choice::Play(f));
     settle(&mut g);
     let robots = g.permanents_of(0).filter(|&c| g.name(c) == "Robot").count();
-    // (96 less the eight permanents, the Forest and the ten library cards.)
-    assert_eq!(robots, 96 - 9 - 10, "{}", log(&g));
+    // (Twice that many seven times: any number, ENGINE.md 100.4.8; 77 before,
+    // the room the engine's 96 permanents left.)
+    assert_eq!(robots, 128, "{}", log(&g));
 }
 
 /// The payment's life, exact (F7's list, ENGINE.md 100.4.6), CR 119.4,
@@ -1185,12 +1186,21 @@ fn b5_db() -> &'static CardDb {
             // A vanilla 1/1 Rebel.
             eoe_w2::card("Test Rebel", json!({"card_types": ["Creature"], "subtypes": ["Rebel"], "power": 1, "toughness": 1,
                 "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["W", 1]]}, "mana_cost_str": "{W}"})),
+            // A 1/1 Rebel with "{T}: Add {G}".
+            eoe_w2::card("Test Elf Rebel", json!({"card_types": ["Creature"], "subtypes": ["Rebel"], "power": 1, "toughness": 1,
+                "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["G", 1]]}, "mana_cost_str": "{G}",
+                "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_self": true},
+                    "effect": {"$t": "AddManaToPool", "produces": [["G", 1]]}, "is_mana_ability": true}]})),
+            // "Sacrifice a Rebel: Draw a card."
+            eoe_w2::card("Test Rebel Shrine", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "sacrifice_subtype": "Rebel"}, "effect": {"$t": "DrawCards", "amount": 1}}]})),
         ];
         let mut cards = engine::db::load_cube_document().cards;
         cards.extend(common::custom_cards());
         cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
         let db = CardDb::from_cards(&cards);
-        for n in ["Test Rebel Crypt", "Test Crew Crypt", "Test Rebel"] {
+        for n in ["Test Rebel Crypt", "Test Crew Crypt", "Test Rebel", "Test Elf Rebel", "Test Rebel Shrine"] {
             db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
         }
         db.leak()
@@ -1238,4 +1248,41 @@ fn cr_601_2h_a_creature_crewed_then_sacrificed_then_exiled_from_the_graveyard() 
     settle(&mut g);
     assert_eq!(g.obj(rebel).zone, Zone::Exile, "{}", log(&g));
     assert_eq!(g.player(0).hand.len(), 1, "drew a card\n{}", log(&g));
+}
+
+/// docs/shortcuts.md 26.11.6, CR 601.2g-h: a permanent past the 96 slots is
+/// sacrificed for a cost, its mana ability activated first (`ACTIVATE` +
+/// position x 4 + i, ENGINE.md 86.2), on the page of the decider's
+/// permanents (ENGINE.md 100.4.8). Test Rebel Shrine ("Sacrifice a Rebel:
+/// Draw a card"), 97 Test Rebels, then Test Elf Rebel ("{T}: Add {G}") at
+/// position 98: the second page offers it at `MY_PERM` + 3 and its mana
+/// ability first at `ACTIVATE` + 12; the Elf taps for {G}, then is
+/// sacrificed.
+#[test]
+fn cr_601_2h_a_permanent_past_96_sacrificed_after_its_mana_ability() {
+    let mut mine = vec!["Test Rebel Shrine"];
+    mine.extend(["Test Rebel"; 97]);
+    mine.push("Test Elf Rebel");
+    let mut g = b5_scen().battlefield(0, &mine).at(Step::Main1, 0).start();
+    let shrine = bf(&g, 0, "Test Rebel Shrine");
+    let elf = bf(&g, 0, "Test Elf Rebel");
+    assert_eq!(g.perm_slot(elf), 98);
+    g.choose(act(shrine, 0));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Sacrifice));
+    let d = g.pending_decision().unwrap();
+    assert_eq!(d.options.len(), 95, "Rebels at positions 1..94 and next page: {:?}", g.options_desc());
+    assert!(matches!(d.choice_of(engine::decision::act::MY_PERM + 95), Some(Choice::Page(_))));
+    let next = d.choice_of(engine::decision::act::MY_PERM + 95).unwrap();
+    g.choose(next);
+    let d = g.pending_decision().unwrap();
+    use engine::decision::act as a;
+    assert_eq!(d.action_of(Choice::Card(elf)), Some(a::MY_PERM + 3), "{:?}", g.options_desc());
+    assert_eq!(d.action_of(act(elf, 0)), Some(a::ACTIVATE + 12), "{:?}", g.options_desc());
+    let hand = g.player(0).hand.len();
+    g.choose(act(elf, 0));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(elf).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.player(0).pool.amt[engine::mana::G], 1, "{}", log(&g));
+    settle(&mut g);
+    assert_eq!(g.player(0).hand.len(), hand + 1, "{}", log(&g));
 }

@@ -1035,8 +1035,9 @@ impl Game {
         let n_rc = n_tap + n_rcs;
         let mut crew_done = false;
         // The cost is one event (CR 603.2c; its discards, exiles): a group of
-        // its own.
-        if picked.is_empty() && self.answer.is_none() {
+        // its own. (Not again when its first choice shows another page of
+        // its permanents, ENGINE.md 100.4.8.)
+        if picked.is_empty() && self.answer.is_none() && self.page.is_none() {
             self.new_event();
             self.pay_exile_granter(id);
         }
@@ -1575,12 +1576,12 @@ impl Game {
                 }
             }
             if taps.len() < t.n as usize {
-                let floor = taps.last().map(|&c| self.perm_action(p, c));
+                let floor = taps.last().map(|&c| self.perm_slot(c));
                 let cands: Vec<Opt> = self
                     .tap_candidates(p, src.card, t)
                     .filter(|c| !taps.contains(c) && Some(*c) != sac)
+                    .filter(|&c| floor.is_none_or(|f| self.perm_slot(c) > f))
                     .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
-                    .filter(|o| floor.is_none_or(|f| o.action > f))
                     .collect();
                 let still = t.n as usize - taps.len();
                 let opts: Vec<Opt> = cands.iter().enumerate().filter(|(k, _)| cands.len() - k >= still).map(|(_, o)| *o).collect();

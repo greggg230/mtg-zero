@@ -204,15 +204,13 @@ impl Game {
     /// card's cast or play was a Priority option (ENGINE.md 100.5: the bots
     /// judge these, `priority_ask`'s ranges and paging).
     pub(crate) fn priority_decision_split(&self, p: PlayerId) -> crate::decision::Decision {
-        use crate::decision::{paged_options, Page, PagedRange, Stage};
+        use crate::decision::{Page, PagedRange, Stage};
         let (opts, exile, gy) = self.priority_options_split(p);
-        let ranges = [
-            PagedRange { base: act::EXILE, n: act::EXILE_N, items: &exile },
-            PagedRange { base: act::GY_ABILITY, n: act::GY_ABILITY_N, items: &gy },
-        ];
-        let (mut options, _) = paged_options(Page::FIRST, &ranges, opts);
+        let ranges = [PagedRange::new(act::EXILE, act::EXILE_N, &exile), PagedRange::new(act::GY_ABILITY, act::GY_ABILITY_N, &gy)];
+        // (With the permanents' ranges past slot 95, ENGINE.md 100.4.8.)
+        let (mut options, _, paged) = self.paged_decision(Page::FIRST, p, crate::decision::DecisionKind::Priority, &ranges, opts);
         options.sort_by_key(|o| o.action);
-        let stage = if ranges.iter().any(|r| r.paged()) { Stage::Paged { window: 0 } } else { Stage::One };
+        let stage = if paged { Stage::Paged { window: 0 } } else { Stage::One };
         crate::decision::Decision { player: p, kind: crate::decision::DecisionKind::Priority, options, stage }
     }
 

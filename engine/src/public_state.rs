@@ -94,6 +94,7 @@ pub fn fields() -> Vec<Field> {
         agenda: Derived "the engine's continuation stack: what a player sees of it is the pending decision (the context block)",
         pending: Derived "the pending decision, computed from the agenda: its kind and decider are the context block's, its options the decider's",
         answer: Derived "the answer being applied: always empty between apply calls",
+        page: Derived "the page of the pending decision when its permanents page (ENGINE.md 100.4.8): part of the agenda's continuation; the decider's options and context floats show it",
         waiting: Public "triggered abilities waiting to be put on the stack",
         extra_turns: Public "extra turns to come",
         combat_dmg: Derived "combat damage assigned so far in a damage step, read by the assigning player's next AssignDamage decision (the context's damage left)",

@@ -55,9 +55,12 @@ pub(crate) enum Task {
     /// (`page`: the page of the priority decision, ENGINE.md 100.2.)
     PriorityAsk { page: crate::decision::Page },
     // combat (CR 508-510)
-    DeclareAttackers { next: u8 },
-    DeclareBlockers { i: u8 },
-    CombatDamage { first: bool, att: u8 },
+    /// (`next`: the first position among the attacking player's permanents
+    /// still to offer; `i`, `att`: the potential blocker's and the attacker's
+    /// places, any number: ENGINE.md 100.4.8.)
+    DeclareAttackers { next: u32 },
+    DeclareBlockers { i: u32 },
+    CombatDamage { first: bool, att: u32 },
     /// (`step`: where the amount's digits stand, ENGINE.md 100.2.)
     AssignDamage { att: CardIdx, j: u32, left: u64, step: crate::decision::NumberStep },
     // cleanup (CR 514)
@@ -234,7 +237,15 @@ impl Game {
         let d = self.pending.as_ref().ok_or_else(|| "no decision is pending".to_string())?;
         let choice = d.choice_of(action).ok_or_else(|| format!("illegal action {action} for {:?}", d.kind))?;
         self.pending = None;
-        self.answer = Some(choice);
+        match (self.page, choice) {
+            // "Next page" of a choice whose permanents page (ENGINE.md
+            // 100.4.8): the asking task, on the agenda, asks that page.
+            (Some(_), Choice::Page(p)) => self.page = Some(p),
+            _ => {
+                self.page = None;
+                self.answer = Some(choice);
+            }
+        }
         self.decisions = self.exact_inc(self.decisions, "decisions");
         self.advance();
         chance.append(&mut self.keys);
@@ -253,6 +264,7 @@ impl Game {
         if self.outcome.is_some() {
             self.pending = None;
             self.answer = None;
+            self.page = None;
             self.agenda.clear();
         }
         // "You may look at the top card of your library any time" (Bolas's
@@ -274,8 +286,24 @@ impl Game {
     }
 
     /// Ask `player` (ENGINE.md 4): push the asker back and set the decision,
-    /// or answer a single option directly (`auto_single`).
-    pub(crate) fn ask(&mut self, task: Task, player: PlayerId, kind: DecisionKind, mut options: Vec<Opt>) {
+    /// or answer a single option directly (`auto_single`). A choice naming a
+    /// permanent past slot 95 (`perm_action`'s last id) pages its permanents,
+    /// the page kept by the engine (`Game::page`; ENGINE.md 100.4.8: every
+    /// permanent reachable, docs/shortcuts.md 26.11.6): a "next page" answer
+    /// runs the asking task again, which asks the same choice, showing that
+    /// page.
+    pub(crate) fn ask(&mut self, task: Task, player: PlayerId, kind: DecisionKind, options: Vec<Opt>) {
+        if self.perms_past_slots(player, &options) {
+            let page = self.page.unwrap_or(crate::decision::Page::FIRST);
+            self.ask_ranges(task, page, player, kind, &[], options, true);
+            return;
+        }
+        self.page = None;
+        self.ask_options(task, player, kind, options);
+    }
+
+    /// [`ask`](Self::ask) with the options' ids as they are.
+    pub(crate) fn ask_options(&mut self, task: Task, player: PlayerId, kind: DecisionKind, mut options: Vec<Opt>) {
         assert!(!options.is_empty(), "{kind:?} with no options");
         // A graveyard card's option outside Priority: its slot in the
         // decision's graveyard list (ENGINE.md 65.10).
@@ -800,8 +828,8 @@ impl Game {
                 // paged past their ids, ENGINE.md 100.2.)
                 let (opts, exile, gy) = self.priority_options(p);
                 let ranges = [
-                    crate::decision::PagedRange { base: act::EXILE, n: act::EXILE_N, items: &exile },
-                    crate::decision::PagedRange { base: act::GY_ABILITY, n: act::GY_ABILITY_N, items: &gy },
+                    crate::decision::PagedRange::new(act::EXILE, act::EXILE_N, &exile),
+                    crate::decision::PagedRange::new(act::GY_ABILITY, act::GY_ABILITY_N, &gy),
                 ];
                 self.ask_paged_ranges(Task::PriorityAsk { page }, page, p, DecisionKind::Priority, &ranges, opts);
             }

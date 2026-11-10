@@ -341,7 +341,7 @@ impl Game {
                                 .picked
                                 .iter()
                                 .filter(|&&c| self.objs[c.i()].controller == p)
-                                .map(|&c| self.perm_action(p, c))
+                                .map(|&c| self.perm_slot(c))
                                 .max();
                             let cands: Vec<CardIdx> = self
                                 .permanents_of(p)
@@ -349,14 +349,16 @@ impl Game {
                                 .collect();
                             let mine = f.picked.iter().filter(|&&c| self.objs[c.i()].controller == p).count();
                             let still = count(self, p) - mine - f.x as usize;
-                            let mut acts: Vec<(u16, CardIdx)> =
-                                cands.iter().map(|&c| (self.perm_action(p, c), c)).filter(|&(a, _)| floor.is_none_or(|fl| a > fl)).collect();
+                            // (By position: past slot 94 the ids page, ENGINE.md
+                            // 100.4.8.)
+                            let mut acts: Vec<(u32, CardIdx)> =
+                                cands.iter().map(|&c| (self.perm_slot(c), c)).filter(|&(a, _)| floor.is_none_or(|fl| a > fl)).collect();
                             acts.sort();
                             let len = acts.len();
                             acts.into_iter()
                                 .enumerate()
                                 .filter(|&(k, _)| len - k >= still)
-                                .map(|(_, (a, c))| Opt { action: a, choice: Choice::Card(c) })
+                                .map(|(_, (_, c))| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                                 .collect()
                         }
                         None => self.hand_options(p),

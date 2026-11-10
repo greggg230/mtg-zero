@@ -21923,3 +21923,67 @@ with one Rebel and an empty graveyard: the Rebel is tapped, sacrificed and exile
 `cr_601_2h_a_creature_crewed_then_sacrificed_then_exiled_from_the_graveyard` (Test Crew Crypt, "Crew 1,
 Sacrifice a Rebel, Exile a card from your graveyard"); both asked a decision with no options before.
 Digests unchanged (full fc293d3c24d0c0cc, `DIGEST_ENCODING=0` 117effec150157b5).
+
+##### 26.11.6: any number of permanents a player
+
+The `MY_PERM` / `OPP_PERM` ids are 96 a side, and `ACTIVATE` four a `MY_PERM` slot. `perm_action`
+asserted a slot below 96, and the engine kept every player within 96 permanents (`perm_room`,
+`perm_reserve`, `token_count`'s room; ENGINE.md 58.2): tokens past it weren't created, a copy of a
+permanent spell ceased to exist, another player's card entered under its owner's control, control of
+another player's permanent wasn't gained. B4 counted 46 callers of `perm_action` (attackers, blockers,
+costs, effects, the payment), and priority's and the payment's `ACTIVATE` ids.
+
+**The design** (A0's paging, 100.1, inside the existing ranges; no layout change):
+
+* **The ids.** `perm_action` gives a permanent's id in a choice that doesn't page (its position among
+  its controller's permanents), and past position 94 the range's last id; `ability_action`'s
+  `ACTIVATE` ids likewise. A choice naming a permanent past position 95 (`Game::perms_past_slots`: an
+  option at a range's last id whose permanent is further) pages its permanents: its options with those
+  ids become two paged ranges by the permanents' positions (`Game::perm_items`), after the caller's own
+  ranges: the decider's permanents (`MY_PERM`, with their `ACTIVATE` ids linked: `PagedRange::linked`,
+  four ids a position that page with it, `ACTIVATE` + 4 j + i on the page whose `MY_PERM` + j is that
+  permanent) and the other player's (`OPP_PERM`). A0's rules hold: windows of 95 positions, the first
+  page positions 0..94 with the other options and "next page" at the range's last id (`MY_PERM` + 95,
+  `OPP_PERM` + 95), a range page w positions 95 w .. 95 w + 94 at `base` + j, every option reached by one
+  sequence of decisions. A choice that doesn't page is exactly as before (no digest game pages).
+* **The page.** Every caller of `ask` gets this (`Game::ask`), so none is left out: the page is the
+  engine's (`Game::page`), set when such a choice is asked. A "next page" answer (`apply`) records the
+  page and runs the asking task (on the agenda, pushed by `ask`) again with no answer: it asks the same
+  choice, showing that page, exactly as a refresh after `determinize` re-runs it (so the askers are
+  re-entrant already, ENGINE.md 99.8; `pay_costs` doesn't open a second event group then). Any other
+  answer clears it. A page whose one option is "next page", with `auto_single`, is answered by the engine
+  the same way. A choice whose page lives in its task (`ask_paged_ranges`: priority, A's `ask_objects`)
+  keeps it there: priority's permanents' ranges are its ranges 2 and 3 (after `EXILE` and
+  `GY_ABILITY`), in `PriorityAsk`'s page; the bots' first page of priority too (`paged_decision`).
+* **Sets in slot order** compare positions (`perm_slot`), not ids: attackers (`DeclareAttackers::next`,
+  a u32 now, as `DeclareBlockers::i` and `CombatDamage::att`), "tap n untapped <permanents>" (a cost's,
+  a mana ability's), crew, "remove counters from n permanents", the sacrifice sets of effects.
+* **No room.** `perm_room`, `perm_reserve` and `token_count`'s room are gone: control is gained, a card
+  enters under the player putting it there, a token or a copy enters. `token_count` multiplies exactly
+  (in `Wide`); past the objects the engine holds (`OBJECT_LIMIT`, where `add_card` ends the game aborted,
+  100.7) it ends the game aborted at once, creating none (creating them would abort it there).
+  `CreateTokensAttacking` takes a u32 (a u8 was exact only under the room).
+
+**The encoding** (layout v6 unchanged). On a page of the decider's choice of permanents (window w >= 1),
+that side's permanent blocks show the permanents from position 95 w (`encode::perm_page_first`), so
+block j holds the permanent of `MY_PERM` + j with the `ACTIVATE` flags of `ACTIVATE` + 4 j + i (or of
+`OPP_PERM` + j), as D2's stack, trigger and graveyard-ability blocks show their pages (100.5.1). On a
+first page an id is the position, and the blocks show positions 0..31 as before (ids 32..94 have no
+block, as before: scored without a token). The other player's encoding and every first page are
+unchanged. `tests/az.rs`' slot check follows the page.
+
+Tests (`engine/tests/limits.rs`): `cr_508_1a_attackers_and_blockers_past_96_permanents` (96 Islands, then
+Llanowar Elves and Elvish Mystic: the attackers' first page is `PASS` and "next page", the second the
+two at `MY_PERM` + 1 and + 2, block 1 the Elves with its option flag; P1's Elves block the Mystic on
+the blockers' second page), `cr_602_2_an_ability_of_a_permanent_past_96_is_offered_at_priority` (Mishra's
+Bauble at position 96: `ACTIVATE` + 4 on priority's second page, block 1's `ACTIVATE` flag),
+`cr_601_2g_a_mana_source_past_96_permanents_pays` (a Mountain at position 96 pays Lightning Bolt, the
+payment's first page only "next page"; with `auto_single` the engine turns it), the 58.2 tests rewritten
+to the rules (`cr_613_1b_control_of_another_players_permanent_past_96`,
+`cr_110_2_another_players_card_enters_under_the_reanimator_past_96`,
+`cr_707_10_a_copy_of_a_permanent_spell_enters_past_96`, with 120 Islands); `rules_payment_b`:
+`cr_601_2h_a_permanent_past_96_sacrificed_after_its_mana_ability` (B5's Test Elf Rebel at position 98
+for Test Rebel Shrine's "Sacrifice a Rebel": `MY_PERM` + 3 and its "{T}: Add {G}" first at `ACTIVATE` +
+12), `cr_614_1a_doubled_tokens_past_sixty_four` (128 Robots, 77 before). Each page is asked again
+identically after `determinize`. docs/shortcuts.md 26.11.6 **fixed**, 24.7.4 updated. Digests unchanged
+(full fc293d3c24d0c0cc, `DIGEST_ENCODING=0` 117effec150157b5, `DIGEST_ENCODING=v5` 7e397431df7a60fb).

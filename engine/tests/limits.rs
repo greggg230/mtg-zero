@@ -6,7 +6,9 @@
 //! below the targeting spell or ability, the deeper (older) items can't be
 //! targeted, and a cast or a trigger is offered only with a target in reach.
 //! 58.2: 96 permanents a player (a control change or another player's card
-//! entering). 58.3: the deck limit counts a companion. 65.10: the graveyard
+//! entering; since ENGINE.md 100.4.8 any number, every one reachable through
+//! the pages of the `MY_PERM` / `OPP_PERM` ids). 58.3: the deck limit counts a
+//! companion. 65.10: the graveyard
 //! cards a choice or a target offers fill the 64 list slots; more fail
 //! loudly.
 
@@ -303,9 +305,7 @@ fn the_deck_limit_counts_a_companion_58_3() {
 }
 
 /// P0 controls Dack Fayden and `islands` Islands, with ten cards in their
-/// library: room (`perm_room`) for 96 - (`islands` + 1) - 10 - (their other
-/// cards: in hand, on the stack, in a graveyard) more permanents that
-/// aren't their own cards.
+/// library.
 fn crowded(islands: usize) -> Scenario {
     Scenario::new(db())
         .spec(|s| s.auto_single = false)
@@ -316,12 +316,13 @@ fn crowded(islands: usize) -> Scenario {
         .battlefield(0, &vec!["Island"; islands])
 }
 
+/// docs/shortcuts.md 26.11.6, CR 613.1b: a player may control any number of
+/// permanents (ENGINE.md 100.4.8). Dack Fayden's -2 ("gain control of target
+/// artifact") takes the Bauble with 120 Islands too (before: with no room
+/// left under the engine's 96, nothing happened, ENGINE.md 58.2).
 #[test]
-fn no_control_of_another_players_permanent_beyond_96_58_2() {
-    // Dack Fayden's -2 ("gain control of target artifact"): with room for one
-    // more permanent the Bauble changes control; with none, nothing happens
-    // (ENGINE.md 58.2), and P0 never controls more than 96 permanents.
-    for (islands, gained) in [(84usize, true), (85, false)] {
+fn cr_613_1b_control_of_another_players_permanent_past_96() {
+    for islands in [84usize, 85, 120] {
         let mut g = crowded(islands).battlefield(1, &["Mishra's Bauble"]).start();
         let dack = g.card(0, "Dack Fayden", Zone::Battlefield);
         let bauble = g.card(1, "Mishra's Bauble", Zone::Battlefield);
@@ -330,16 +331,17 @@ fn no_control_of_another_players_permanent_beyond_96_58_2() {
         g.pass();
         g.pass();
         g.drive_until(at_priority);
-        assert_eq!(g.obj(bauble).controller == 0, gained, "{islands} Islands");
-        assert!(g.permanents_of(0).count() <= act::PERM_N as usize);
+        assert_eq!(g.obj(bauble).controller, 0, "{islands} Islands");
+        assert_eq!(g.permanents_of(0).count(), islands + 2);
     }
 }
 
+/// CR 110.2: Reanimate puts P1's Llanowar Elves onto the battlefield under
+/// P0's control however many permanents P0 has (before: under its owner's
+/// past the engine's 96).
 #[test]
-fn another_players_card_enters_under_its_owner_beyond_96_58_2() {
-    // Reanimate on P1's Llanowar Elves: under P0's control with room, under
-    // its owner's without (its owner's room keeps it).
-    for (islands, mine) in [(83usize, true), (84, false)] {
+fn cr_110_2_another_players_card_enters_under_the_reanimator_past_96() {
+    for islands in [83usize, 84, 120] {
         let mut g = crowded(islands).hand(0, &["Reanimate"]).pool(0, [0, 0, 1, 0, 0, 0], 0).graveyard(1, &["Llanowar Elves"]).start();
         let elves = g.card(1, "Llanowar Elves", Zone::Graveyard);
         let r = g.card(0, "Reanimate", Zone::Hand);
@@ -349,18 +351,17 @@ fn another_players_card_enters_under_its_owner_beyond_96_58_2() {
         g.pass();
         g.drive_until(at_priority);
         let e = g.card(1, "Llanowar Elves", Zone::Battlefield);
-        assert_eq!(g.obj(e).controller == 0, mine, "{islands} Islands");
-        assert!(g.permanents_of(0).count() <= act::PERM_N as usize);
+        assert_eq!(g.obj(e).controller, 0, "{islands} Islands");
     }
 }
 
+/// CR 707.10, 111.1: Sage of the Skies ("when you cast this spell, if you've
+/// cast another spell this turn, copy it"): the copy of the permanent spell
+/// enters as a token however many permanents its controller has (before: it
+/// ceased to exist past the engine's 96).
 #[test]
-fn a_copy_of_a_permanent_spell_beyond_96_ceases_to_exist_58_2() {
-    // Sage of the Skies ("when you cast this spell, if you've cast another
-    // spell this turn, copy it"; a copy of a permanent spell becomes a token,
-    // CR 707.10, 111.1): the copy enters with room, else it ceases to exist;
-    // the card enters either way (its owner's room keeps it).
-    for (islands, copies) in [(82usize, 1usize), (83, 0)] {
+fn cr_707_10_a_copy_of_a_permanent_spell_enters_past_96() {
+    for islands in [82usize, 83, 120] {
         let mut g = crowded(islands)
             .hand(0, &["Lightning Bolt", "Sage of the Skies"])
             .pool(0, [1, 0, 0, 1, 0, 2], 0)
@@ -381,8 +382,7 @@ fn a_copy_of_a_permanent_spell_beyond_96_ceases_to_exist_58_2() {
             g.choose(c);
         }
         let sages = g.permanents_of(0).filter(|&c| g.name(c) == "Sage of the Skies").count();
-        assert_eq!(sages, 1 + copies, "{islands} Islands: {}", g.log_lines().join("\n"));
-        assert!(g.permanents_of(0).count() <= act::PERM_N as usize);
+        assert_eq!(sages, 2, "{islands} Islands: {}", g.log_lines().join("\n"));
     }
 }
 
@@ -482,5 +482,131 @@ fn cr_115_1_a_page_of_stack_items_is_the_stack_blocks() {
         } else {
             assert_eq!(slots, [Some(counter)].into_iter().chain([Some(bolt); 7]).collect::<Vec<_>>(), "P0 doesn't decide: the top");
         }
+    }
+}
+
+// ---- 26.11.6: any number of permanents (ENGINE.md 100.4.8) -------------------
+
+/// Choose `c`, following "next page" until it is offered (ENGINE.md 100.1),
+/// checking that a determinized world of the decider asks each page again.
+/// The pages turned.
+fn choose_paged(g: &mut Game, c: Choice) -> usize {
+    let mut turned = 0;
+    while !g.has_option(c) {
+        let next = next_page(g);
+        g.choose(next);
+        same_page_after_determinize(g);
+        turned += 1;
+    }
+    g.choose(c);
+    turned
+}
+
+fn enc(g: &Game, v: u8) -> Vec<f32> {
+    let mut x = vec![0.0f32; engine::az::NUM_FEATURES];
+    g.encode_features(v, &mut x);
+    x
+}
+
+/// CR 508.1a, 509.1a: attackers and blockers past the 96 `MY_PERM` /
+/// `OPP_PERM` ids (docs/shortcuts.md 26.11.6). P0 controls 96 Islands, then
+/// Llanowar Elves and Elvish Mystic (positions 96 and 97): the attackers'
+/// first page offers `PASS` and "next page" (`MY_PERM` + 95), the second the
+/// Elves and the Mystic at `MY_PERM` + 1 and + 2 (positions 95 + j), and the
+/// decider's permanent blocks show positions 95 on there (its block 1 is the
+/// Elves, with its option flag). Both attack; P1's Elves block the Mystic,
+/// also past the `OPP_PERM` ids. (Before: a loud failure, "permanent slot 96
+/// out of range", and no player could have 97 permanents.)
+#[test]
+fn cr_508_1a_attackers_and_blockers_past_96_permanents() {
+    use engine::az::encode::{perm, CODE, O_MY_PERM, PERM_W};
+    use engine::Step;
+    let mut mine = vec!["Island"; 96];
+    mine.extend(["Llanowar Elves", "Elvish Mystic"]);
+    let mut g = scen().battlefield(0, &mine).battlefield(1, &["Llanowar Elves"]).at(Step::Main1, 0).start();
+    let elves = g.card(0, "Llanowar Elves", Zone::Battlefield);
+    let birds = g.card(0, "Elvish Mystic", Zone::Battlefield);
+    let blocker = g.card(1, "Llanowar Elves", Zone::Battlefield);
+    assert_eq!((g.perm_slot(elves), g.perm_slot(birds)), (96, 97));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    assert_eq!(actions(&g), vec![act::PASS, act::MY_PERM + 95], "{:?}", g.options_desc());
+    g.choose(next_page(&g));
+    same_page_after_determinize(&g);
+    assert_eq!(actions(&g), vec![act::MY_PERM + 1, act::MY_PERM + 2], "{:?}", g.options_desc());
+    let ids = engine::az::identity::identities(db());
+    let x = enc(&g, 0);
+    assert_eq!(slot_identity(&x, O_MY_PERM + PERM_W), Some(ids[g.obj(elves).def as usize] as usize), "block 1: position 96");
+    assert_eq!(x[O_MY_PERM + PERM_W + CODE + perm::OPTION], 1.0);
+    assert_eq!(x[O_MY_PERM + CODE + perm::OPTION], 0.0, "block 0: the Island at position 95");
+    assert_eq!(slot_identity(&x, O_MY_PERM + 3 * PERM_W), None, "no position 98");
+    g.choose(Choice::Card(elves));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    choose_paged(&mut g, Choice::Card(birds));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareBlockers));
+    assert_eq!(g.pending_decision().unwrap().player, 1);
+    assert_eq!(choose_paged(&mut g, Choice::Card(birds)), 1, "the Mystic on the second page: {:?}", g.options_desc());
+    g.drive_until(|g| g.turn().step == Step::Main2 || g.is_over());
+    assert_eq!(g.life(1), 19, "the Elves unblocked: {}", g.log_lines().join("\n"));
+    assert_eq!(g.obj(blocker).zone, Zone::Graveyard, "the Mystic and its blocker trade: {}", g.log_lines().join("\n"));
+    assert_eq!(g.obj(birds).zone, Zone::Graveyard);
+}
+
+/// CR 602.2, 117.1b: an activated ability of a permanent past the 96 slots is
+/// offered at priority, its `ACTIVATE` id on the page of the decider's
+/// permanents (`MY_PERM` + 95 = "next page" there; ENGINE.md 100.4.8): 96
+/// Islands, then Mishra's Bauble (position 96): the second page offers its
+/// "{T}, Sacrifice" at `ACTIVATE` + 4, and the permanent blocks show it at
+/// block 1 with its `ACTIVATE` flag.
+#[test]
+fn cr_602_2_an_ability_of_a_permanent_past_96_is_offered_at_priority() {
+    use engine::az::encode::{perm, CODE, O_MY_PERM, PERM_W};
+    use engine::Step;
+    let mut mine = vec!["Island"; 96];
+    mine.push("Mishra's Bauble");
+    let mut g = scen().battlefield(0, &mine).at(Step::Main1, 0).start();
+    let bauble = g.card(0, "Mishra's Bauble", Zone::Battlefield);
+    let activate = Choice::Ability(bauble, AbilitySlot::Activated(0));
+    assert!(!g.has_option(activate));
+    assert!(actions(&g).contains(&(act::MY_PERM + 95)), "{:?}", g.options_desc());
+    g.choose(next_page(&g));
+    same_page_after_determinize(&g);
+    assert_eq!(g.pending_decision().unwrap().action_of(activate), Some(act::ACTIVATE + 4), "{:?}", g.options_desc());
+    let x = enc(&g, 0);
+    assert_eq!(x[O_MY_PERM + PERM_W + CODE + perm::ACTIVATE], 1.0, "block 1: the Bauble's ability");
+    assert_eq!(x[O_MY_PERM + CODE + perm::ACTIVATE], 0.0);
+    g.choose(activate);
+    finish(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then_some(player(1)));
+    assert_eq!(g.obj(bauble).zone, Zone::Graveyard, "{}", g.log_lines().join("\n"));
+}
+
+/// CR 601.2g: a mana source past the 96 slots pays (ENGINE.md 100.4.8): 96
+/// Islands, then a Mountain (position 96), Lightning Bolt in hand. The
+/// payment's first page offers only "next page"; the Mountain's ability is on
+/// the second. With `auto_single` (as games are played), the engine answers
+/// both one-option pages and the Bolt is cast.
+#[test]
+fn cr_601_2g_a_mana_source_past_96_permanents_pays() {
+    use engine::Step;
+    let mut mine = vec!["Island"; 96];
+    mine.push("Mountain");
+    for auto in [false, true] {
+        let mut g = scen().spec(|s| s.auto_single = auto).battlefield(0, &mine).hand(0, &["Lightning Bolt"]).at(Step::Main1, 0).start();
+        let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+        let mountain = g.card(0, "Mountain", Zone::Battlefield);
+        g.choose(Choice::Cast(bolt));
+        if !auto {
+            g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+            g.choose(player(1));
+            assert_eq!(g.kind(), Some(DecisionKind::PayMana));
+            assert_eq!(actions(&g), vec![act::MY_PERM + 95], "{:?}", g.options_desc());
+            assert_eq!(choose_paged(&mut g, Choice::Ability(mountain, AbilitySlot::Activated(0))), 1);
+        } else {
+            finish(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then_some(player(1)));
+        }
+        g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+        assert_eq!(g.life(1), 17, "auto {auto}: {}", g.log_lines().join("\n"));
+        assert!(g.obj(mountain).tapped);
     }
 }

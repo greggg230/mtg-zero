@@ -927,6 +927,23 @@ fn page_first(d: &crate::decision::Decision, base: u16, n: u16) -> usize {
     }
 }
 
+/// The first position among the frame's permanents (`side` 0) or the other
+/// player's (1) that decision `d` shows (ENGINE.md 100.4.8): on a range page
+/// (window w >= 1) of a choice whose permanents page past slot 95, `MY_PERM`
+/// + j (with its `ACTIVATE` ids, `ACTIVATE` + 4 j + i) or `OPP_PERM` + j is
+/// the permanent at position w (`PERM_N` - 1) + j, so that side's blocks show
+/// them from there; 0 otherwise (a first page: its ids are the positions).
+fn perm_page_first(d: &crate::decision::Decision, side: usize) -> usize {
+    let ids = |a: u16| match side {
+        0 => (act::MY_PERM..act::MY_PERM + act::PERM_N).contains(&a) || (act::ACTIVATE..act::HAND_ABILITY).contains(&a),
+        _ => (act::OPP_PERM..act::OPP_PERM + act::PERM_N).contains(&a),
+    };
+    match d.stage {
+        Stage::Paged { window } if window > 0 && d.options.iter().any(|o| ids(o.action)) => window as usize * (act::PERM_N as usize - 1),
+        _ => 0,
+    }
+}
+
 /// The kind of a pool's restricted mana (`g6::POOL_KINDS`, ENGINE.md
 /// 100.5.1): its purposes `only` (`SPEND_*`, CR 106.6) as one of the
 /// restrictions a mana ability can have (lower/activated.rs refuses every
@@ -1258,10 +1275,13 @@ impl Game {
             let list = if ctl == me { &mine } else { &theirs };
             list.iter().position(|&x| x == c)
         };
+        // (On a page of the viewer's choice of permanents past slot 95, the
+        // page's: `perm_page_first`, ENGINE.md 100.4.8, as the stack's.)
+        let perm_first = |side: usize| decision.filter(|_| mine_to_decide).map_or(0, |d| perm_page_first(d, side));
         for (side, list) in [&mine, &theirs].into_iter().enumerate() {
             let base = if side == 0 { O_MY_PERM } else { O_OPP_PERM };
             let range = if side == 0 { act::MY_PERM } else { act::OPP_PERM };
-            for (s, &c) in list.iter().enumerate().take(PERMS) {
+            for (s, &c) in list.iter().skip(perm_first(side)).enumerate().take(PERMS) {
                 let o = base + s * PERM_W;
                 let ob = &self.objs[c.i()];
                 // What it is (its identity) and the copiable values it has
