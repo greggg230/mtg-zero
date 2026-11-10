@@ -14,6 +14,14 @@
 //! reads only public information and its own cards. Every ability is
 //! activated at most a few times a turn (`cap`), so it never loops.
 //!
+//! Edge of Eternities (ENGINE.md 103): a land search that costs mana (a
+//! Lander) spends spare mana after the spells; station goes toward a
+//! threshold within reach, never past the highest, with a creature that
+//! would neither attack nor block; a card only its warp cost pays is cast
+//! only for what it does as it is cast, enters or leaves; a spell better
+//! with void waits for the second main phase; a free alternative cost comes
+//! first. `Heuristic::m7c` is the policy without these rules.
+//!
 //! `v1::HeuristicV1` is the policy before activated abilities (it never
 //! activates anything at priority), kept to measure the two against each
 //! other (`tests/bots.rs`).

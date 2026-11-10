@@ -5,7 +5,9 @@
 //! strength against the policy before activated abilities (`HeuristicV1`)
 //! and random. The long measurements are `#[ignore]`d:
 //! `cargo test --release -p engine --test bots -- --ignored --nocapture`
-//! (`BOTS_GAMES=n` sets the number of deck pairs).
+//! (`BOTS_GAMES=n` sets the number of deck pairs). The Edge of Eternities
+//! yardsticks (ENGINE.md 103): `eoe_yardsticks`, `eoe_mechanics`,
+//! `eoe_inventory`, `eoe_trace` (`BOTS_DECKS` cube, eoe or eoe2c).
 
 mod common;
 
@@ -739,10 +741,11 @@ fn eoe_mechanics() {
     }
 }
 
-/// A logged game of the heuristic (seat `BOTS_SEAT`, default 0) against `BOTS_OPP` (default
-/// random) on `BOTS_DECKS` (default eoe): its decks, then each decision of the heuristic with its
-/// options, or the game log (`BOTS_TRACE_LOG=1`), for `BOTS_TRACE_SEED` and the next
-/// `BOTS_GAMES - 1` seeds.
+/// A logged game of the heuristic (`BOTS_HEUR`, default new; seat `BOTS_SEAT`, default 0) against
+/// `BOTS_OPP` (default random) on `BOTS_DECKS` (default eoe), the bots seeded as in
+/// `eoe_yardsticks`: its decks, then each decision of the heuristic, or the game log
+/// (`BOTS_TRACE_LOG=1`), for `BOTS_TRACE_SEED` and the next `BOTS_GAMES - 1` seeds. An engine
+/// panic prints the log so far and the action taken.
 #[test]
 #[ignore]
 fn eoe_trace() {
@@ -750,6 +753,7 @@ fn eoe_trace() {
     let first = std::env::var("BOTS_TRACE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(6_000_000u64);
     let seat: u8 = std::env::var("BOTS_SEAT").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
     let opp = std::env::var("BOTS_OPP").unwrap_or_else(|_| "random".into());
+    let heur = std::env::var("BOTS_HEUR").unwrap_or_else(|_| "new".into());
     for seed in first..first + games(1) {
         let [d0, d1] = src.decks(seed);
         let db = src.db();
@@ -761,7 +765,7 @@ fn eoe_trace() {
         let gs = engine::GameSpec { max_turns: 60, log: true, ..engine::GameSpec::default() };
         let mut g = Game::new(db, gs, [&d0, &d1], seed).unwrap();
         let mut kinds = [opp.as_str(), opp.as_str()];
-        kinds[seat as usize] = "new";
+        kinds[seat as usize] = heur.as_str();
         let mut bots = [Bot::new(kinds[0], seed * 2 + 1), Bot::new(kinds[1], seed * 2 + 2)];
         let mut legal = Vec::new();
         let mut keys = Vec::new();
@@ -775,7 +779,14 @@ fn eoe_trace() {
                 println!("T{} {:?} {:?}: {} (of {})", g.turn().number, g.turn().step, d.kind, g.describe_action(a).unwrap(), legal.len());
             }
             keys.clear();
-            g.apply(a, &mut keys).unwrap();
+            let what = g.describe_action(a).unwrap_or_default();
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| g.apply(a, &mut keys).unwrap())).is_err() {
+                println!("ENGINE PANIC at T{} {:?} applying {what}", g.turn().number, g.turn().step);
+                for l in g.log_lines() {
+                    println!("   {l}");
+                }
+                break;
+            }
         }
         if full {
             for l in g.log_lines() {

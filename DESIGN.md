@@ -747,3 +747,9 @@ Arena's pools and packs including their colour depth (paper's spreads 1.5-2x wid
 skipped in both. **Decision (user, 2026-11-08):** inferring how the game generates packs from 17lands'
 data is environment modelling, not human play, and is allowed (the `arena` collation); 17lands stays a
 yardstick for everything humans do.
+
+**Yardsticks on EoE (2026-11-09, branch `eoe-bot`; ENGINE.md 103):** the heuristic reads station,
+warp, void and Landers (general rules; `Heuristic::m7c` keeps the old policy): 99.4% / 99.8% against
+random on random / two-colour EoE decks, at most 0.1% turn-limit draws, 57% against the M7c policy; the
+cube's numbers unchanged (97.8% against random). A run's evaluation can play these baselines on EoE
+once S2's `"sealed"` spec merges (and 103.6's payment panic is fixed).
