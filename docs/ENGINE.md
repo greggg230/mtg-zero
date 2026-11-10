@@ -21156,7 +21156,11 @@ activated before, and the cost had no Rebel to tap).
 sealed fuzz's seed 18106 on `eoe-s2-pools`, from before this rework: Gene Pollinator tapped for
 Mm'menon's granted "{T}: Add {U}" while a spell was cast from exile, then a Pollinator source of
 another permanent offered and the payment's end panicking, "a Pollinator to activate"; rebuilt with
-`granting_db`'s grant and Faithless Looting's flashback: it fails so at 7ae9032).
+`granting_db`'s grant and Faithless Looting's flashback: it fails so at 7ae9032),
+`cr_602_2b_gene_pollinator_tapped_for_mmmenons_mana_activates_no_more` (the heuristic-bot agent's EoE
+deck pair 6000978 on `eoe-bot`, the same panic with Flight-Deck Coordinator: Mm'menon, the Right Hand,
+Gene Pollinator and the Coordinator, All-Fates Scroll cast from the top of the library; it fails so at
+7ae9032).
 
 **Digests** (N23): full `3f49f29043418114` -> `36a8a84c37356ff8`, `DIGEST_ENCODING=0`
 `27f42bffa609f282` -> `3a6e81f85dc10d59`: 1 of the 2,500 games changes (h 475: two Orcish

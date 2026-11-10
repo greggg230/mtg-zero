@@ -1115,3 +1115,43 @@ fn cr_601_2g_a_payment_with_a_chain_of_mana_abilities() {
     assert!(g.permanents_of(0).all(|c| g.obj(c).tapped), "{}", log(&g));
     assert_eq!(g.player(0).pool.amt.iter().map(|&n| n as u32).sum::<u32>(), 0, "{}", log(&g));
 }
+
+/// docs/shortcuts.md N23, CR 602.2b, 613.1f (the heuristic-bot agent's EoE
+/// deck pair 6000978 on `eoe-bot`, from before the N23 rework: Weftblade
+/// Enhancer cast from exile with Mm'menon, the Right Hand and Gene Pollinator
+/// out; after the Pollinator's granted mana, Flight-Deck Coordinator was
+/// offered for a Pollinator's ability and the payment's end panicked, "a
+/// Pollinator to activate"). Mm'menon's "artifacts you control have '{T}: Add
+/// {U}. Spend this mana only to cast a spell from anywhere other than your
+/// hand'" on Gene Pollinator: All-Fates Scroll ({3}) cast from the top of the
+/// library (Mm'menon's other ability); once the Pollinator is tapped for its
+/// granted {U}, no permanent is offered for its Pollinator ability.
+#[test]
+fn cr_602_2b_gene_pollinator_tapped_for_mmmenons_mana_activates_no_more() {
+    let mut g = Scenario::new(eoe_w2::db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.log = true;
+        })
+        .library(0, &["All-Fates Scroll", "Island", "Island", "Island", "Island", "Island", "Island", "Island"])
+        .library(1, &["Forest"; 8])
+        .battlefield(0, &["Mm'menon, the Right Hand", "Gene Pollinator", "Flight-Deck Coordinator", "Island", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let scroll = g.card(0, "All-Fates Scroll", Zone::Library);
+    let pol = bf(&g, 0, "Gene Pollinator");
+    let fdc = bf(&g, 0, "Flight-Deck Coordinator");
+    let islands: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.name(c) == "Island").collect();
+    let cast = options(&g).into_iter().find(|c| matches!(c, Choice::Cast(x) if *x == scroll));
+    g.choose(cast.unwrap_or_else(|| panic!("All-Fates Scroll from the top of the library: {:?}", g.options_desc())));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::Priority));
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}", g.options_desc());
+    let granted = Choice::Ability(pol, AbilitySlot::Activated(1));
+    assert!(g.has_option(granted), "the Pollinator's granted {{U}}: {:?}", g.options_desc());
+    g.choose(granted);
+    let pol_sources = |g: &Game| [fdc, islands[0], islands[1]].iter().any(|&c| g.has_option(Choice::Card(c)));
+    assert!(!pol_sources(&g), "no Pollinator to activate: {:?}", g.options_desc());
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(scroll).zone, Zone::Stack, "{}", log(&g));
+    assert!(g.obj(pol).tapped && !g.obj(fdc).tapped, "{}", log(&g));
+}
