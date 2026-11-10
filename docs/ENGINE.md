@@ -22393,3 +22393,7 @@ the four were B4's graveyard-cast tests from the merge, written before D2's two-
 FUZZ_GAMES=20000`: passed, every seed (wins 7,206 / 7,045, 5,749 draws; 655,562 worlds, all with another deck; 2,502 s
 in four chunks). `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_GAMES=20000`: passed, every seed, none skipped (wins
 9,653 / 9,504, 843 draws; 577,942 worlds, 577,718 with another deck; 2,648 s). The gate: below.
+
+The engine gate on 1be6d67 (`python tools/gate.py engine --tested-sha 8b940c8 --expect-digest 684840012af3432b --expect-digest0
+c860817b0cf925ac --no-mac`, a quieter machine): build, both digests, `az` 45, `limits` 10, `hidden` 25, pytest 218 passed and 1
+skipped, the search smoke: `GATE PASSED WITH SKIPS engine 1be6d67382b9 in 828s - skipped: mac-recheck (--no-mac)`.
