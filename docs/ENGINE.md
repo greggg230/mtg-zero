@@ -21655,7 +21655,12 @@ other seat's setup untouched; the JSON round trip), `decks_laid_out_slot_by_slot
 (two 40-card decks differing in one slot agree in every other position of the hand and library
 after the setup, for 24 seeds and the deck in either seat, with the same starting player and the
 opponent's setup equal; sorted decks don't), and the errors. Without the key every spec is what it
-was: digests unchanged (full af00cc85e05ea0c1, `DIGEST_ENCODING=0` 660b3c387f18be70).
+was: digests unchanged (full af00cc85e05ea0c1, `DIGEST_ENCODING=0` 660b3c387f18be70, on the S2 base).
+After merging eoe-base 7953d2a (the board-state loop rule, 100.7) and eoe-bot 927d2bf (the heuristic on
+EoE, 103) - the coordinator's request, so the noise is measured with the EoE heuristic and without the
+never-ending turns of 101.7 - the branch plays every digest game as eoe-bot recorded it: full
+7dc8e4b953b933a7, `DIGEST_ENCODING=0` ae871e79dc5c0a44, no re-record (`RULES_EPOCH` and the canary
+library as eoe-bot left them; `tools/delver_rerecord.py check`: 60 of 60 spots, epoch 1794269090).
 
 ### 104.3 The tool (`mtgz/sealed/compare.py`)
 
@@ -21726,7 +21731,50 @@ field (`--field-seed 0`), the heuristic on both sides. var(D) is per game (the p
 variance); the unpaired variance is var(A) + var(B) of the same games; n80 is the number of games per
 build for 80% power at 5% (two-sided) to detect a difference of 1, 2 or 3 points, 7.85 var / delta^2.
 
-(The merged heuristic's table, eoe-bot's EoE rules: measuring.)
+**The merged heuristic** (eoe-bot's EoE rules, ENGINE.md 103; `E:/mtg-zero-scratch/eoe-paired/noise`,
+5,044 s on 3 processes x 2 threads of the shared desktop, 2.75 million games):
+
+| variant | abs. difference, median (range) | significant at 16,384 | var(D) | unpaired | var ratio full / sorted / opponent / none | n80 paired, 1 / 2 / 3 points | n80 unpaired |
+|---|---|---|---|---|---|---|---|
+| card | 0.015 (0.002-0.076) | 11 of 12 | 0.053 | 0.478 | **0.111** / 0.482 / 0.935 / 1.004 | 4,167 / 1,042 / 463 | 37,499 / 9,375 / 4,167 |
+| land+ | 0.008 (0.000-0.078) | 8 of 12 | 0.076 | 0.478 | **0.166** / 0.417 / 0.937 / 0.987 | 5,948 / 1,487 / 661 | 37,510 / 9,378 / 4,168 |
+| land- | 0.027 (0.007-0.046) | 12 of 12 | 0.069 | 0.469 | **0.151** / 0.465 / 0.938 / 0.995 | 5,408 / 1,352 / 601 | 36,811 / 9,203 / 4,091 |
+| pair | 0.050 (0.012-0.364) | 12 of 12 | 0.282 | 0.460 | **0.623** / 0.715 / 0.950 / 0.996 | 22,151 / 5,538 / 2,462 | 36,123 / 9,031 / 4,014 |
+
+What it says:
+
+* **Pairing removes 83-89% of the variance between builds that differ by a card or a land** (var
+  ratio 0.11-0.17: 6-9 times fewer games for the same precision) and 38% between two colour pairs
+  (0.62: 1.6 times). With the full pairing 92-95% of the one-card games end the same way for both
+  builds (71% for two colour pairs): most games never draw the swapped card, and with the heuristic
+  those games are the same game.
+* **The slot layout is most of it**: sorted libraries (the engine's default order) leave 42-48% for
+  the small differences - `"order": "given"` alone is worth 3-4 times; the same opponent, seat and
+  chooser with independent shuffles (`opponent`) only 6%; independent games (`none`) 1.00, which
+  confirms the unpaired estimate var(A) + var(B) the tool reports.
+* **Games to separate two builds** (80% power, 5%): one card or one land is typically worth 1-3 points
+  against this field (medians 1.5, 0.8 and 2.7 points; up to 8), so 500-6,000 paired games per build
+  - and 4,000-37,000 unpaired; the median one-card swap needs ~1,200 paired games, the median land+
+  ~10,000, land- ~630. Two colour pairs are typically 5 points apart (1-36): ~860 paired games at the
+  median. The race of 104.6 matches: builds 6-30 points behind were dropped after 512-1,024 games, the
+  last two (2 points apart, two colour pairs) took 12,288.
+* **The policy changes the differences, not the noise structure**: the S2 base's heuristic (below)
+  has the same ratios within 0.02 and var(D) within 10%; the differences between builds moved (land+
+  1.6 -> 0.8 points).
+* **Engine errors**: 11 games of the 2.75 million stopped with the Gene Pollinator payment panic
+  (`pay.rs:2427`, ENGINE.md 101.7 and 103.6; the payment owner's fix, B4); each was removed for both
+  builds as designed. Two reproduced with `mtgz.sealed.compare` (the study's pool 1 `pair` design
+  `opponent`, game 2174, game seed 2929072975214121418; pool 0 `card` full, game 11704, seed
+  13512790427548655895), their specs in `E:/mtg-zero-scratch/eoe-paired/fail_*.json`.
+
+**What is realistic for S4's verify step.** With a network at 1-2 s per game on the GPU (73.6), the
+heuristic's numbers mean: a race of the evaluator's best 3-5 builds at delta 3 points costs ~500-2,000
+paired games per build (one-card differences of 3 points, colour choices of ~5), i.e. 1-4 GPU hours -
+feasible for the last step of a pool, not inside a search. Differences under ~2 points (most single
+swaps, most land counts) need thousands of games per build: S4 should leave those to the evaluator or
+accept them as ties (the race's `equivalent`), and set delta to the smallest difference worth an hour.
+These counts assume the network keeps the heuristic's var(D); 104.7 says why it may not, and how to
+measure it.
 
 **The S2 base's heuristic** (the M7c policy, before eoe-bot's EoE rules; `noise-s2heur`, the same
 pools, variants and seeds):
