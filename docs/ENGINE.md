@@ -21880,3 +21880,14 @@ mana ability's own cost paid by one of the units). docs/shortcuts.md 28.8.2: the
 with more than one possible set of colours, now a decision); `DIGEST_ENCODING=v5` 5c5ad44094f680bf
 -> 7e397431df7a60fb, in exactly those 65 games. `RULES_EPOCH` bumped, the canary library 60 of 60,
 stamped.
+
+**Results after 28.8.2k** (a4a6342; fd4b9ff words B4's test fixes as `eoe-hidden-decks`' 3d77293,
+comments only). The full engine suite: **2,174 passed, 0 failed, 15 ignored**. Digests: full
+fc293d3c24d0c0cc, `DIGEST_ENCODING=0` 117effec150157b5, `DIGEST_ENCODING=v5` 7e397431df7a60fb.
+`--test az` 43, `--test hidden` 16, pytest 208 passed, 1 skipped. The default `FUZZ_GAMES=20000`
+passed (20,000 games, wins 9,804 / 10,074, 122 draws, mean 31.8 turns, 438.2 decisions; 1,000
+matches; 1,250 s). `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed, every seed (20,000 games, wins 7,112 /
+7,072, 5,816 draws, mean 45.8 turns, 654.2 decisions; 32 controlled decisions; longest turn 264
+decisions; the replay test too: F7's board-state loop rule ends seed 1024's turn; 5,020 s on a
+shared desktop). The gates on fd4b9ff (`--no-mac`): `GATE PASSED engine fd4b9ff49475 in 709s`,
+`GATE PASSED encoding fd4b9ff49475 in 319s` (the checkpoint: the fork of 100.5.1, unchanged layout).
