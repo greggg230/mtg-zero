@@ -228,7 +228,8 @@ impl Game {
                             card,
                             player: owner,
                             turn: None,
-                            kind: crate::game::PermKind::Airbent(cost.generic),
+                            // (Airbend's printed {n}: the lowering's bounds.)
+                            kind: crate::game::PermKind::Airbent(u8::try_from(cost.generic).expect("airbend's printed {n}: a u8")),
                         });
                     }
                 }
@@ -566,11 +567,12 @@ impl Game {
         } else if f.picked.len() >= n as usize {
             std::mem::take(&mut f.picked)
         } else {
-            let floor = f.picked.iter().map(|&c| self.perm_action(p, c)).max();
-            let mut acts: Vec<(u16, CardIdx)> = all
+            // (By position: past slot 94 the ids page, ENGINE.md 100.4.8.)
+            let floor = f.picked.iter().map(|&c| self.perm_slot(c)).max();
+            let mut acts: Vec<(u32, CardIdx)> = all
                 .iter()
                 .filter(|c| !f.picked.contains(c))
-                .map(|&c| (self.perm_action(p, c), c))
+                .map(|&c| (self.perm_slot(c), c))
                 .filter(|&(a, _)| floor.is_none_or(|fl| a > fl))
                 .collect();
             acts.sort();
@@ -581,7 +583,7 @@ impl Game {
                 .into_iter()
                 .enumerate()
                 .filter(|&(k, _)| len - k >= still)
-                .map(|(_, (a, c))| Opt { action: a, choice: Choice::Card(c) })
+                .map(|(_, (_, c))| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                 .collect();
             self.ask(Task::Run(f.clone()), p, DecisionKind::Sacrifice, opts);
             return Flow::Suspend;

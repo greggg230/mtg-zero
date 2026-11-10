@@ -73,7 +73,7 @@ impl Game {
         for &c in &self.battlefield {
             for (f, n) in &self.abilities(c).spell_tax {
                 if self.card_matches(f, card, &ctx) {
-                    cost.generic = cost.generic.saturating_add(*n);
+                    cost.generic = cost.generic.saturating_add(*n as u64);
                 }
             }
         }
@@ -86,7 +86,7 @@ impl Game {
         // mana only, not below zero).
         for d in &self.def_of(card).discounts {
             let n = match d {
-                crate::db::Discount::IfTargets(f, n) => self.target_discount(card, p, f, *n),
+                crate::db::Discount::IfTargets(f, n) => self.target_discount(card, p, f, *n) as u64,
                 d => self.discount(d, p),
             };
             cost.generic = cost.generic.saturating_sub(n);
@@ -108,7 +108,7 @@ impl Game {
         };
         if from_gy {
             for c in self.permanents_of(p) {
-                cost.generic = cost.generic.saturating_sub(self.abilities(c).gy_spell_discount);
+                cost.generic = cost.generic.saturating_sub(self.abilities(c).gy_spell_discount as u64);
             }
         }
         // "Spells you cast from anywhere other than your hand cost {1} less"
@@ -120,7 +120,7 @@ impl Game {
         };
         if self.seen & crate::game::SEEN_OUTSIDE_DISCOUNT != 0 && cost.generic > 0 && outside() {
             for c in self.permanents_of(p) {
-                cost.generic = cost.generic.saturating_sub(self.abilities(c).outside_hand_discount);
+                cost.generic = cost.generic.saturating_sub(self.abilities(c).outside_hand_discount as u64);
             }
         }
         cost
@@ -140,17 +140,19 @@ impl Game {
     }
 
     /// How much a cost reduction takes off for `p` now (generic mana).
-    pub(crate) fn discount(&self, d: &crate::db::Discount, p: PlayerId) -> u8 {
+    /// (A count: per permanent, exact for any number of them; ENGINE.md
+    /// 100.4.8, a u8 wrapped past 255.)
+    pub(crate) fn discount(&self, d: &crate::db::Discount, p: PlayerId) -> u64 {
         let ctx = Ctx { controller: p, source: None };
         match d {
-            crate::db::Discount::PerBasicLandType(n) => self.basic_land_types(p).saturating_mul(*n),
+            crate::db::Discount::PerBasicLandType(n) => self.basic_land_types(p) as u64 * *n as u64,
             crate::db::Discount::PerControlled(f, n) => {
-                (self.permanents_of(p).filter(|&c| self.card_matches(f, c, &ctx)).count() as u8).saturating_mul(*n)
+                self.permanents_of(p).filter(|&c| self.card_matches(f, c, &ctx)).count() as u64 * *n as u64
             }
-            crate::db::Discount::PerDifferentlyNamedLand(n) => self.differently_named_lands(p).saturating_mul(*n),
+            crate::db::Discount::PerDifferentlyNamedLand(n) => self.differently_named_lands(p) * *n as u64,
             crate::db::Discount::If(c, n) => {
                 if self.cond_holds(c, p) {
-                    *n
+                    *n as u64
                 } else {
                     0
                 }
@@ -204,15 +206,13 @@ impl Game {
     /// card's cast or play was a Priority option (ENGINE.md 100.5: the bots
     /// judge these, `priority_ask`'s ranges and paging).
     pub(crate) fn priority_decision_split(&self, p: PlayerId) -> crate::decision::Decision {
-        use crate::decision::{paged_options, Page, PagedRange, Stage};
+        use crate::decision::{Page, PagedRange, Stage};
         let (opts, exile, gy) = self.priority_options_split(p);
-        let ranges = [
-            PagedRange { base: act::EXILE, n: act::EXILE_N, items: &exile },
-            PagedRange { base: act::GY_ABILITY, n: act::GY_ABILITY_N, items: &gy },
-        ];
-        let (mut options, _) = paged_options(Page::FIRST, &ranges, opts);
+        let ranges = [PagedRange::new(act::EXILE, act::EXILE_N, &exile), PagedRange::new(act::GY_ABILITY, act::GY_ABILITY_N, &gy)];
+        // (With the permanents' ranges past slot 95, ENGINE.md 100.4.8.)
+        let (mut options, _, paged) = self.paged_decision(Page::FIRST, p, crate::decision::DecisionKind::Priority, &ranges, opts);
         options.sort_by_key(|o| o.action);
-        let stage = if ranges.iter().any(|r| r.paged()) { Stage::Paged { window: 0 } } else { Stage::One };
+        let stage = if paged { Stage::Paged { window: 0 } } else { Stage::One };
         crate::decision::Decision { player: p, kind: crate::decision::DecisionKind::Priority, options, stage }
     }
 
@@ -754,10 +754,10 @@ impl Game {
             // cost, CR 702.187b; increases apply, 601.2f).
             CastFrom::Mayhem => with(def.cost),
             // "A spell cast this way costs {n} more" (CR 601.2f).
-            CastFrom::Taxed(n) => with(def.cost.plus(&crate::mana::ManaCost { generic: n, ..Default::default() })),
+            CastFrom::Taxed(n) => with(def.cost.plus(&crate::mana::ManaCost { generic: n as u64, ..Default::default() })),
             CastFrom::Paragon => with(def.cost),
             CastFrom::Miracle => with(def.miracle.as_ref().map_or(def.cost, |m| m.0)),
-            CastFrom::Airbent(n) => with(crate::mana::ManaCost { generic: n, ..Default::default() }),
+            CastFrom::Airbent(n) => with(crate::mana::ManaCost { generic: n as u64, ..Default::default() }),
             // Life rather than its mana cost (increases still apply, 601.2f).
             CastFrom::LibraryTop => with(Default::default()),
             CastFrom::LibraryTopMana => with(def.cost),
@@ -945,10 +945,9 @@ impl Game {
     }
 
     /// The values X may take for stack item `pos` (CR 601.2b, 602.2b,
-    /// 107.3): `None` when no X is announced (an unkicked kicker {X}).
-    /// Mana-paid X stays within the u8 mana amounts of a cost
-    /// (docs/shortcuts.md 46.3, the audit's F7): a cost whose generic part
-    /// would pass 255 is not offered.
+    /// 107.3): `None` when no X is announced (an unkicked kicker {X}). Any
+    /// X a payment pays (the cost's parts are counts: ENGINE.md 100.4.8; a
+    /// cost whose u8 generic part would pass 255 was not offered).
     fn x_range(&self, pos: usize) -> Option<(u64, u64)> {
         let p = self.stack[pos].controller;
         if let StackKind::Ability { ability, source } = self.stack[pos].kind {
@@ -966,7 +965,7 @@ impl Game {
             // "Tap X untapped artifacts you control" (EoE W3): as many as
             // can be tapped with the mana still payable.
             if ad.cost.tap_x.is_some() {
-                cap = cap.min(self.tap_x_most(p, source.idx, ad) as u64);
+                cap = cap.min(self.tap_x_most(p, source.idx, ad));
             }
             // (Not with the source's own mana when the cost taps it: an
             // artifact Urza could tap for mana, ENGINE.md 31.)
@@ -975,7 +974,7 @@ impl Game {
             let keep = crate::pay::Keep { allow: self.ability_allow(source.idx), ..Self::keep_for(source.idx, &ad.cost, exclude) };
             let most = crate::decision::most_allowed(0, cap, |x| {
                 let m = self.act_mana_x(p, source.idx, ad, x as u32);
-                (ad.cost.tap_x.is_some() || x < 255 && m.generic < u8::MAX) && self.can_pay_without(p, &m, &classes, &keep, exclude)
+                self.can_pay_without(p, &m, &classes, &keep, exclude)
             });
             return Some((0, most));
         }
@@ -985,13 +984,13 @@ impl Game {
         // CR 107.3b; ENGINE.md 99.15.)
         let free = matches!(item.from, crate::game::CastFrom::Permission { free: true, .. } | crate::game::CastFrom::LibraryTop)
             || self.cast_for_granted_alt(card, item);
-        // A spell's X with its cost: payable, and the cost's generic part
-        // within a u8 (46.3).
+        // A spell's X with its cost: payable (any amount, ENGINE.md
+        // 100.4.8).
         let pays = |x: u64| {
             let mut tmp = item.clone();
             tmp.x = x as u32;
             let cost = self.total_mana(card, &tmp);
-            x < 255 && cost.generic < u8::MAX && self.can_pay_spell(card, &tmp, &cost)
+            self.can_pay_spell(card, &tmp, &cost)
         };
         if self.def_of(card).times_cost.as_ref().is_some_and(|t| t.x) {
             // Kicker {X} (CR 601.2b): announced only if kicked, at least
@@ -1096,8 +1095,8 @@ impl Game {
         if !self.def_of(card).delve {
             return cost;
         }
-        let n = self.graveyard_cards(p).filter(|&c| c != card).count().saturating_sub(keep as usize).min(255) as u8;
-        cost.less_generic(n)
+        let n = self.graveyard_cards(p).filter(|&c| c != card).count().saturating_sub(keep as usize);
+        cost.less_generic(n as u64)
     }
 
     /// `p`'s mana sources that sacrifice themselves and are cards (one mana,
@@ -1296,14 +1295,15 @@ impl Game {
             None => {}
         }
         let item = &self.stack[pos];
-        let cost = self.total_mana(card, item).less_generic(item.delved);
+        let cost = self.total_mana(card, item).less_generic(item.delved as u64);
         if cost.generic == 0 {
             return;
         }
         // The fewest more cards that leave a payable cost (castability
         // made sure some number does).
         let allow = self.spend_allow_from(card, item.from);
-        let need = (0..=cost.generic).find(|&d| self.can_pay_for(p, &cost.less_generic(d), allow)).unwrap_or(cost.generic) as usize;
+        let gy_cards = self.graveyard_cards(p).count() as u64;
+        let need = (0..=cost.generic.min(gy_cards)).find(|&d| self.can_pay_for(p, &cost.less_generic(d), allow)).unwrap_or(cost.generic) as usize;
         let floor = item.delve_floor as usize;
         let keep = self.escape_exiles(card, item.from) as usize;
         let gy = &self.players[p as usize].graveyard;
@@ -1332,7 +1332,7 @@ impl Game {
                 // (The sources after it may be delved as well: castability
                 // counted each, `delve_classes`; ENGINE.md 49.)
                 let later = late.len() - j - 1;
-                if (0..=(gy_left + later).min(rest.generic as usize)).any(|d| self.can_pay_for(p, &rest.less_generic(d as u8), allow)) {
+                if (0..=((gy_left + later) as u64).min(rest.generic)).any(|d| self.can_pay_for(p, &rest.less_generic(d), allow)) {
                     opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
                 }
             }
@@ -1803,11 +1803,11 @@ impl Game {
             }
         }
         if let Some(tc) = &def.times_cost {
-            for _ in 0..item.times {
-                c = c.plus(&tc.mana);
-                if tc.x {
-                    c.generic = c.generic.saturating_add(u8::try_from(item.x).unwrap_or(u8::MAX));
-                }
+            // (The cost `times` times, kicker {X}'s X each time: counts,
+            // ENGINE.md 100.4.8.)
+            c = c.plus(&tc.mana.times(item.times as u64));
+            if tc.x {
+                c.generic = c.generic.saturating_add(item.x as u64 * item.times as u64);
             }
         }
         if let Some(m) = def.spell.as_ref().and_then(|ab| ab.modes.as_ref()) {
@@ -1887,7 +1887,7 @@ impl Game {
                 more = more.plus(&c.mana);
             }
         }
-        more.generic = more.generic.saturating_add(u8::try_from(item.x as u64 * def.x_pips as u64).unwrap_or(u8::MAX));
+        more.generic = more.generic.saturating_add(item.x as u64 * def.x_pips as u64);
         self.announced_cost(card, item, &more)
     }
 
@@ -1910,7 +1910,7 @@ impl Game {
     /// (replicate, squad: any number; offspring: once or not), among the
     /// numbers that leave the cost payable (`ChooseMode`, `Game::ask_amount`:
     /// `NUMBER` + times while every value fits, else digits; ENGINE.md
-    /// 100.2). The cost's mana stays within u8 amounts (46.3, F7).
+    /// 100.2; any number its mana allows, 100.4.8).
     pub(crate) fn choose_times(&mut self, id: u32, step: crate::decision::NumberStep) {
         let Some(pos) = self.item_index(id) else { return };
         let StackKind::Spell { card } = self.stack[pos].kind else { return };
@@ -1918,26 +1918,12 @@ impl Game {
         let Some(tc) = self.def_of(card).times_cost.clone() else { return };
         let x_min = if tc.x { self.def_of(card).x_min as u64 } else { 0 };
         let pays = |n: u64| {
-            // `n` times the cost (with kicker {X}'s least X each time), every
-            // amount of it a u8.
-            let amt = |a: u8| -> Option<u8> { u8::try_from(a as u64 * n).ok() };
-            let mut more = crate::mana::ManaCost::default();
-            let Some(g) = u8::try_from((tc.mana.generic as u64 + x_min) * n).ok() else { return false };
-            more.generic = g;
-            for i in 0..6 {
-                let Some(v) = amt(tc.mana.pips[i]) else { return false };
-                more.pips[i] = v;
-            }
-            for i in 0..10 {
-                let Some(v) = amt(tc.mana.hybrid[i]) else { return false };
-                more.hybrid[i] = v;
-            }
-            for i in 0..5 {
-                let Some(v) = amt(tc.mana.phyrexian[i]) else { return false };
-                more.phyrexian[i] = v;
-            }
+            // `n` times the cost (with kicker {X}'s least X each time; any
+            // amount, ENGINE.md 100.4.8).
+            let mut more = tc.mana.times(n);
+            more.generic = more.generic.saturating_add(x_min.saturating_mul(n));
             let cost = self.announced_cost(card, &self.stack[pos], &more);
-            cost.generic < u8::MAX && self.can_pay_spell(card, &self.stack[pos], &cost)
+            self.can_pay_spell(card, &self.stack[pos], &cost)
         };
         let most = crate::decision::most_allowed(0, tc.max as u64, pays);
         match self.answer.take() {
@@ -2105,7 +2091,7 @@ impl Game {
     ) -> crate::mana::ManaCost {
         let mut base = a.mana.plus(extra);
         if let crate::game::CastFrom::Taxed(n) = from {
-            base = base.plus(&crate::mana::ManaCost { generic: n, ..Default::default() });
+            base = base.plus(&crate::mana::ManaCost { generic: n as u64, ..Default::default() });
         }
         let c = self.cost_with(card, p, base);
         match from {
@@ -2586,7 +2572,7 @@ impl Game {
         let p = item.controller;
         // CR 601.2f: the total cost, then delve's exiled cards pay for some
         // of its generic mana (702.66b).
-        let cost = self.total_mana(card, item).less_generic(item.delved);
+        let cost = self.total_mana(card, item).less_generic(item.delved as u64);
         // "As an additional cost, pay X life" (CR 601.2h; 119.4), and Bolas's
         // Citadel's life equal to its mana value rather than its mana cost
         // (118.9): paid after the mana abilities are activated (601.2g; a
@@ -2602,9 +2588,7 @@ impl Game {
             // abilities that sacrifice it can't pay (it is sacrificed next).
             let emerge = a.emerge.as_ref().and(item.noted.first().copied()).filter(|r| self.live(*r));
             let cost = match emerge {
-                // (A reduction past the u8 generic part is a reduction to 0,
-                // CR 601.2f: exact.)
-                Some(r) => cost.less_generic(self.mana_value_of(r.idx).min(u8::MAX as u64) as u8),
+                Some(r) => cost.less_generic(self.mana_value_of(r.idx)),
                 None => cost,
             };
             let mut pm = PayMana::new(p, cost);
@@ -2618,7 +2602,7 @@ impl Game {
                 pm.keep.exclude = self.sacrifices_itself_for_mana(r.idx).then_some(r.idx);
                 self.agenda.push(Task::Emerge { id, sac: true });
             }
-            self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+            self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
             if !pm.cost.is_zero() {
                 pm.keep.life = pm.keep.life.checked_add(life_later).expect("a cost's life: at most a life total and 99");
                 pm.life_after = life_later;
@@ -2662,7 +2646,7 @@ impl Game {
             if extra.crew > 0 {
                 taps_first = true;
             } else {
-                self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+                self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
             }
         }
         pm.keep.allow = self.spend_allow_from(card, item.from);
@@ -2676,7 +2660,7 @@ impl Game {
         pm.life_after = life_later;
         self.agenda.push(Task::PayMana(Box::new(pm)));
         if taps_first {
-            self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+            self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
         }
     }
 
@@ -3140,7 +3124,8 @@ fn ability_ok(f: &Filter, s: &StackItem) -> bool {
 /// coloured, hybrid and Phyrexian symbol of `c` is paid by any mana ({C}
 /// stays {C}).
 pub(crate) fn any_colour(mut c: crate::mana::ManaCost) -> crate::mana::ManaCost {
-    let colored: u8 = c.pips[..5].iter().sum::<u8>() + c.hybrid.iter().sum::<u8>() + c.phyrexian.iter().sum::<u8>();
+    // (Counts: a u8 sum wrapped past 255, ENGINE.md 100.4.8.)
+    let colored = c.pips[..5].iter().chain(&c.hybrid).chain(&c.phyrexian).fold(0u64, |a, &n| a.saturating_add(n));
     c.generic = c.generic.saturating_add(colored);
     c.pips[..5].fill(0);
     c.hybrid = Default::default();

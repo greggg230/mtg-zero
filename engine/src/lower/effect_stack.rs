@@ -108,7 +108,7 @@ pub(crate) fn lower_effect_stack(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
         E::Mobilize(nodes::Mobilize { n }) => {
             let n = l.int("Mobilize.n", *n, 1, 10) as u8;
             let warrior = json_token(l, WARRIOR);
-            b.op(Op::Ext(Ext::CreateTokensAttacking { token: warrior, n, tapped: true }));
+            b.op(Op::Ext(Ext::CreateTokensAttacking { token: warrior, n: n.into(), tapped: true }));
             let mut d = Builder::default();
             d.op(Op::Ext(Ext::SacrificeEventObj));
             let k = l.delayed_ability(d.finish());

@@ -211,7 +211,7 @@ pub(crate) fn lower_effect_tail2(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
         // spell. (Exile it. While it's exiled, its owner may cast it for
         // {2} rather than its mana cost.)"
         E::Airbend(nodes::Airbend { alt_cost }) => {
-            let Some(cost) = crate::mana::ManaCost::parse(alt_cost).filter(|c| c.total() == c.generic as u32) else {
+            let Some(cost) = crate::mana::ManaCost::parse(alt_cost).filter(|c| c.total() == c.generic && c.generic <= u8::MAX as u64) else {
                 l.unsupported(format!("Airbend.alt_cost({alt_cost})"));
                 return true;
             };

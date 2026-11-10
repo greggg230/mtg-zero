@@ -21895,6 +21895,177 @@ decisions; the replay test too: F7's board-state loop rule ends seed 1024's turn
 shared desktop). The gates on fd4b9ff (`--no-mac`): `GATE PASSED engine fd4b9ff49475 in 709s`,
 `GATE PASSED encoding fd4b9ff49475 in 319s` (the checkpoint: the fork of 100.5.1, unchanged layout).
 
+#### 100.4.8 B5: the last of mana and payment (branch `eoe-b5-pay`, from `eoe-base` a07821f)
+
+**Why.** 100.4.6's and 100.4.7's open lists (the audit's F1 for 26.11.6, F4 and F7 for the payment).
+Tests: `engine/tests/rules_payment_b.rs` (section "100.4.8", with a table of its own, `b5_db`: the
+cube, the shared test cards and B5's), and `engine/tests/limits.rs` for the permanents past 96; each
+failed before its fix.
+
+##### A cost that taps, sacrifices and exiles graveyard cards
+
+A cost that sacrifices and exiles graveyard cards sacrifices before its graveyard cards are chosen (CR
+601.2h, any order: a card sacrificed may be exiled, ruling bea302d9). That early sacrifice came before
+the cost's taps too (`pay_costs`' order: sacrifice and return picks, discards, the card exiled from hand,
+then the sacrifice, the graveyard cards, the taps of "tap n untapped <permanents>", the counter, crew),
+so a permanent couldn't be tapped and then sacrificed for it, which 601.2h allows and the feasibility
+counted (`Keep::taps`): with one Rebel, B5's Test Rebel Crypt ("Tap an untapped Rebel you control,
+Sacrifice a Rebel, Exile a card from your graveyard") was offered and its tap choice had no option.
+
+Now such a cost (`late`) chooses its taps, its counter and crew's creatures before the sacrifice and
+pays them (`pay_tap_parts`: the taps, teamwork committed, the counter removed, the tapped creature
+noted), then sacrifices, then asks its graveyard cards (`ask_cost_graveyard_cards`), last. The
+graveyard cards depend on nothing those parts change (they act on permanents), and tapping, crewing or
+removing a counter first leaves every permanent picked to be sacrificed a candidate, so every order of
+601.2h's is reached. `Task::PayCosts::early` holds the number of picks once those parts and the
+sacrifice are paid (a refresh or the graveyard picks after it don't pay them again). Every other cost
+keeps its order of decisions.
+
+Tests: `cr_601_2h_a_permanent_tapped_then_sacrificed_then_exiled_from_the_graveyard` (Test Rebel Crypt
+with one Rebel and an empty graveyard: the Rebel is tapped, sacrificed and exiled), and
+`cr_601_2h_a_creature_crewed_then_sacrificed_then_exiled_from_the_graveyard` (Test Crew Crypt, "Crew 1,
+Sacrifice a Rebel, Exile a card from your graveyard"); both asked a decision with no options before.
+Digests unchanged (full fc293d3c24d0c0cc, `DIGEST_ENCODING=0` 117effec150157b5).
+
+##### 26.11.6: any number of permanents a player
+
+The `MY_PERM` / `OPP_PERM` ids are 96 a side, and `ACTIVATE` four a `MY_PERM` slot. `perm_action`
+asserted a slot below 96, and the engine kept every player within 96 permanents (`perm_room`,
+`perm_reserve`, `token_count`'s room; ENGINE.md 58.2): tokens past it weren't created, a copy of a
+permanent spell ceased to exist, another player's card entered under its owner's control, control of
+another player's permanent wasn't gained. B4 counted 46 callers of `perm_action` (attackers, blockers,
+costs, effects, the payment), and priority's and the payment's `ACTIVATE` ids.
+
+**The design** (A0's paging, 100.1, inside the existing ranges; no layout change):
+
+* **The ids.** `perm_action` gives a permanent's id in a choice that doesn't page (its position among
+  its controller's permanents), and past position 94 the range's last id; `ability_action`'s
+  `ACTIVATE` ids likewise. A choice naming a permanent past position 95 (`Game::perms_past_slots`: an
+  option at a range's last id whose permanent is further) pages its permanents: its options with those
+  ids become two paged ranges by the permanents' positions (`Game::perm_items`), after the caller's own
+  ranges: the decider's permanents (`MY_PERM`, with their `ACTIVATE` ids linked: `PagedRange::linked`,
+  four ids a position that page with it, `ACTIVATE` + 4 j + i on the page whose `MY_PERM` + j is that
+  permanent) and the other player's (`OPP_PERM`). A0's rules hold: windows of 95 positions, the first
+  page positions 0..94 with the other options and "next page" at the range's last id (`MY_PERM` + 95,
+  `OPP_PERM` + 95), a range page w positions 95 w .. 95 w + 94 at `base` + j, every option reached by one
+  sequence of decisions. A choice that doesn't page is exactly as before (no digest game pages).
+* **The page.** Every caller of `ask` gets this (`Game::ask`), so none is left out: the page is the
+  engine's (`Game::page`), set when such a choice is asked. A "next page" answer (`apply`) records the
+  page and runs the asking task (on the agenda, pushed by `ask`) again with no answer: it asks the same
+  choice, showing that page, exactly as a refresh after `determinize` re-runs it (so the askers are
+  re-entrant already, ENGINE.md 99.8; `pay_costs` doesn't open a second event group then). Any other
+  answer clears it. A page whose one option is "next page", with `auto_single`, is answered by the engine
+  the same way. A choice whose page lives in its task (`ask_paged_ranges`: priority, A's `ask_objects`)
+  keeps it there: priority's permanents' ranges are its ranges 2 and 3 (after `EXILE` and
+  `GY_ABILITY`), in `PriorityAsk`'s page; the bots' first page of priority too (`paged_decision`).
+* **Sets in slot order** compare positions (`perm_slot`), not ids: attackers (`DeclareAttackers::next`,
+  a u32 now, as `DeclareBlockers::i` and `CombatDamage::att`), "tap n untapped <permanents>" (a cost's,
+  a mana ability's), crew, "remove counters from n permanents", the sacrifice sets of effects.
+* **No room.** `perm_room`, `perm_reserve` and `token_count`'s room are gone: control is gained, a card
+  enters under the player putting it there, a token or a copy enters. `token_count` multiplies exactly
+  (in `Wide`); past the objects the engine holds (`OBJECT_LIMIT`, where `add_card` ends the game aborted,
+  100.7) it ends the game aborted at once, creating none (creating them would abort it there).
+  `CreateTokensAttacking` takes a u32 (a u8 was exact only under the room).
+
+**The encoding** (layout v6 unchanged). On a page of the decider's choice of permanents (window w >= 1),
+that side's permanent blocks show the permanents from position 95 w (`encode::perm_page_first`), so
+block j holds the permanent of `MY_PERM` + j with the `ACTIVATE` flags of `ACTIVATE` + 4 j + i (or of
+`OPP_PERM` + j), as D2's stack, trigger and graveyard-ability blocks show their pages (100.5.1). On a
+first page an id is the position, and the blocks show positions 0..31 as before (ids 32..94 have no
+block, as before: scored without a token). The other player's encoding and every first page are
+unchanged. `tests/az.rs`' slot check follows the page.
+
+Tests (`engine/tests/limits.rs`): `cr_508_1a_attackers_and_blockers_past_96_permanents` (96 Islands, then
+Llanowar Elves and Elvish Mystic: the attackers' first page is `PASS` and "next page", the second the
+two at `MY_PERM` + 1 and + 2, block 1 the Elves with its option flag; P1's Elves block the Mystic on
+the blockers' second page), `cr_602_2_an_ability_of_a_permanent_past_96_is_offered_at_priority` (Mishra's
+Bauble at position 96: `ACTIVATE` + 4 on priority's second page, block 1's `ACTIVATE` flag),
+`cr_601_2g_a_mana_source_past_96_permanents_pays` (a Mountain at position 96 pays Lightning Bolt, the
+payment's first page only "next page"; with `auto_single` the engine turns it), the 58.2 tests rewritten
+to the rules (`cr_613_1b_control_of_another_players_permanent_past_96`,
+`cr_110_2_another_players_card_enters_under_the_reanimator_past_96`,
+`cr_707_10_a_copy_of_a_permanent_spell_enters_past_96`, with 120 Islands); `rules_payment_b`:
+`cr_601_2h_a_permanent_past_96_sacrificed_after_its_mana_ability` (B5's Test Elf Rebel at position 98
+for Test Rebel Shrine's "Sacrifice a Rebel": `MY_PERM` + 3 and its "{T}: Add {G}" first at `ACTIVATE` +
+12), `cr_614_1a_doubled_tokens_past_sixty_four` (128 Robots, 77 before). Each page is asked again
+identically after `determinize`. docs/shortcuts.md 26.11.6 **fixed**, 24.7.4 updated. Digests unchanged
+(full fc293d3c24d0c0cc, `DIGEST_ENCODING=0` 117effec150157b5, `DIGEST_ENCODING=v5` 7e397431df7a60fb).
+
+##### The u8 parts of a `ManaCost`
+
+X, taxes and the times an additional cost is paid were added into a cost's u8 parts (`act_mana_x`,
+`total_mana`, `extra_costs`, `ManaCost::plus` saturating), so `x_range`, `mana_now`'s X and
+`choose_times` offered no value whose generic part would pass 255 (Mind Twist stopped at X = 254), and
+the counts in reductions were u8 too: "costs {1} less for each artifact you control" counted 256
+artifacts as none (`discount`'s `count() as u8`), and Anointed Peacekeeper's tax, "tap X untapped
+artifacts" (`SacCost::n`, `tap_x_most`'s 255) and "spend mana as though any colour" (`any_colour`'s u8
+sum) saturated or wrapped. A cost's Phyrexian pips past 31 of a colour (a replicate cost of {B/P})
+were offered as `NUMBER` + k past `NUMBER`'s 32 ids, into the `HAND` ids.
+
+* **`ManaCost`'s parts are `num::Count`s** (generic, pips, hybrid, Phyrexian). Sums saturate past
+  `u64::MAX`, exactly: no payment pays such a cost, as none pays the cost it stands for (a payment's
+  mana is less than 2^33: one mana a source and fewer than 2^32 objects, at most 255 of a type in a pool
+  and in its several-mana picks, 100.7; reductions take less than 2^63 + 2^42 from it: a power and counts
+  of objects). `ManaCost::times` (the cost paid n times) replaces `extra_costs`' loop over the times;
+  `less_generic` takes a count; `total` is a u64; `Display` writes a symbol 16 times or more once with
+  its count.
+* **No u8 bound on X or the times**: `x_range`, `mana_now`'s X and `choose_times` offer every value the
+  payment pays (`most_allowed`, monotone), with kicker {X}'s X added once per time exactly.
+* **The reductions** are counts: `discount` (domain, affinity, differently named lands: u64),
+  `named_tax`, a source's power (`SourcePower`, past u64 a reduction to 0), the artifact and Zirda
+  discounts (to one mana), delve's graveyard count, emerge's mana value; `any_colour` sums in u64.
+* **"Tap X untapped <permanents>"**: `SacCost::n` is a u32, `tap_x_reserve` takes X as it is, and
+  `tap_x_most` finds the most by `most_allowed` (one more kept untapped only makes the payment harder)
+  over every candidate (it stopped at 255).
+* **Phyrexian pips paid with life** (`PayPhyrexian`): the numbers k a payment allows, at most what the
+  life left allows (2 each, CR 119.4), are offered as before while they fit `NUMBER` (`NUMBER` + k); past
+  31, every one paged (A0's `ask_paged`, `Choice::Item(k)`, the page in `PayMana::pool_page`); past a
+  u32 of them the game ends aborted (100.7). `PayMana::phyrexian_life` is a u64 (`lose_life` takes it).
+* **Bounds kept, by the lowering**: `need_of`'s count (a mana ability's printed {n}, 30 at most, which
+  nothing increases), airbend's printed {n} (`PermKind::Airbent`'s u8: the lowering refuses one past a
+  u8). The matching counts a cost's needs in u32 once `payable_iter` has checked that the cost takes no
+  more mana than the units it has (each need a unit of its own, 100.4.6's u32 unit counts:
+  `mana::units_count`). The encoding's `ctx::COST` reads the parts as before (layout unchanged).
+
+Tests (`rules_payment_b`): `cr_107_3_an_x_whose_cost_passes_255` (Mind Twist with 255 {B} and 255 {C}
+floating: X to 509, here 300; 254 before), `cr_601_2f_a_reduction_per_permanent_past_255` (Emry, Lurker of
+the Loch with 256 Mishra's Baubles and an Island: cast for {U}; not castable before),
+`cr_107_4f_phyrexian_pips_past_31_paid_with_life` (B5's Test Phyrexian Echo, {B} with replicate {B/P},
+replicated 40 times: 30 to 40 of the {B/P} with life, paged; `NUMBER` + 40 was offered before).
+docs/shortcuts.md 46.3: the open part **fixed**. Digests unchanged (full fc293d3c24d0c0cc,
+`DIGEST_ENCODING=0` 117effec150157b5, `DIGEST_ENCODING=v5` 7e397431df7a60fb).
+
+##### The lists, checked
+
+100.4.6's "Not done": N23, 24.7.5k / 40.1 and 13.15 were B4's (100.4.7), 28.8.2k D2's (100.5.1);
+26.11.6 and the u8 parts of a `ManaCost` are above. 100.4.7's: 26.11.6, the u8 parts, the cost that
+taps, sacrifices and exiles graveyard cards: above; 28.8.2k: D2's. 100.2's payment bounds: "pay X life"
+was B3's (100.4.6); "tap X untapped artifacts" within a u8 is fixed above. The productions' and the
+pool's u8 amounts are F7's, aborted past 255 (`check_counter_mana`, `finish_payment`).
+
+**Found, not done** (a design of its own). CR 601.2h pays a cost's parts in any order the player
+chooses; the engine chooses every part's objects with the state before the payment (but the
+discards and the card exiled from hand, paid as chosen, and the late sacrifice above) and pays in a
+fixed order. That reaches every assignment when paying one part changes no other part's candidates
+but by taking objects away, which holds for removing a permanent (sacrifice, return) and exiling or
+discarding a card, except through static abilities: a permanent sacrificed (or returned) whose static
+ability keeps another from a later part's filter (it removes a creature type, makes creatures 1/1 for
+crew) could be paid first, giving that part more candidates. Exact: when a part's candidates with
+another part paid first differ (`card_matches` with the paid objects gone), the order is a choice of
+the player's (which part first), each part's candidates computed after the parts paid before it.
+
+##### Results
+
+The full engine suite on 965170e: **2,183 passed, 0 failed, 15 ignored** (`az` 43, `hidden` 16, `limits`
+13). Digests unchanged by every commit: full fc293d3c24d0c0cc, `DIGEST_ENCODING=0` 117effec150157b5,
+`DIGEST_ENCODING=v5` 7e397431df7a60fb (no digest game has more than 96 permanents a player, a cost past
+255, or a cost that taps, sacrifices and exiles graveyard cards; `RULES_EPOCH` not bumped). pytest 208 passed, 1 skipped. The default
+`FUZZ_GAMES=20000` passed in four shards of 5,000 seeds (`FUZZ_FIRST` 0, 5,000, 10,000, 15,000), every
+seed: 20,000 games, wins 9,804 / 10,074, 122 draws, 0 aborted, mean 31.8 turns (the games of 100.5.1),
+and the 1,000 matches and both replay tests (`FUZZ_GAMES=20000`). `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed in the same four shards, every seed: 20,000 games, wins 7,112 / 7,072, 5,816 draws, 0 aborted, mean 45.8 turns, 654.2 decisions, 32 controlled decisions, longest turn 264 decisions (the games of 100.5.1), and the replay test (1,162-1,296 s a shard on a shared desktop). The gates on 965170e
+(`--no-mac`): `GATE PASSED engine 965170ebf147 in 514s` (build, both digests, `az` 43, `limits` 13,
+`hidden` 16, pytest, the search smoke); `GATE PASSED encoding 965170ebf147 in 349s` (build, both digests, `az` 43, the checkpoint load of 100.5.1's fork, h2h 8 games, pytest).
+
 ## 101. EoE sealed: pools, the builder and the sealed spec (S2)
 
 Branch `eoe-s2-pools` (from 36f98af), 2026-11-09. DESIGN.md 9, milestone S2: the parts of sealed

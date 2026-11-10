@@ -895,7 +895,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 return;
             }
             if *attacking {
-                b.op(Op::Ext(crate::program::Ext::CreateTokensAttacking { token, n, tapped: *tapped }));
+                b.op(Op::Ext(crate::program::Ext::CreateTokensAttacking { token, n: n.into(), tapped: *tapped }));
             } else {
                 b.op(Op::CreateToken { token, n, tapped: *tapped });
             }

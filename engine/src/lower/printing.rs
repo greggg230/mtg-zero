@@ -2257,14 +2257,14 @@ fn lower_alt_cost(l: &mut Lowerer, a: &cats::AlternativeCost) -> Option<AltCost>
     let n_ret = l.int("AlternativeCost.return_count", *return_count, 1, 9) as u8;
     if !return_subtype.is_empty() {
         let f = Filter::Subtype(l.subtype(return_subtype));
-        out.cost.bounce = Some(SacCost { filter: f, n: n_ret, another: false });
+        out.cost.bounce = Some(SacCost { filter: f, n: n_ret as u32, another: false });
     } else if n_ret != 1 {
         l.unsupported("AlternativeCost.return_count(without return_subtype)");
     }
     let n_sac = l.int("AlternativeCost.sacrifice_count", *sacrifice_count, 1, 9) as u8;
     if !sacrifice_subtype.is_empty() {
         let f = Filter::Subtype(l.subtype(sacrifice_subtype));
-        out.cost.sacrifice = Some(SacCost { filter: f, n: n_sac, another: false });
+        out.cost.sacrifice = Some(SacCost { filter: f, n: n_sac as u32, another: false });
     } else if n_sac != 1 {
         l.unsupported("AlternativeCost.sacrifice_count(without sacrifice_subtype)");
     }
@@ -2299,7 +2299,7 @@ fn lower_additional_option(l: &mut Lowerer, o: &cats::AdditionalCostOption) -> O
                 return None;
             };
             let filter = super::filter::lower_pred(l, p)?;
-            c.sacrifice = Some(SacCost { filter, n, another: false });
+            c.sacrifice = Some(SacCost { filter, n: n as u32, another: false });
         }
     }
     if *kind != enums::AdditionalCostKind::Sacrifice && permanent_filter.is_some() {
@@ -2340,10 +2340,10 @@ fn kicker_mana(l: &mut Lowerer, m: &cats::ManaCost, s: &str) -> Option<(ManaCost
 pub(crate) fn lower_mana_cost(l: &mut Lowerer, what: &str, c: &cats::ManaCost) -> ManaCost {
     let cats::ManaCost::ManaCost(nodes::ManaCost { generic, colored, x_pips, hybrid, phyrexian }) = c;
     l.deny(&format!("{what}.x_pips"), x_pips);
-    let mut out = ManaCost { generic: l.int("ManaCost.generic", *generic, 0, 30) as u8, ..ManaCost::default() };
+    let mut out = ManaCost { generic: l.int("ManaCost.generic", *generic, 0, 30) as u64, ..ManaCost::default() };
     for (sym, n) in colored {
         match letter_index(sym) {
-            Some(i) => out.pips[i] += l.int("ManaCost.colored", *n, 0, 30) as u8,
+            Some(i) => out.pips[i] += l.int("ManaCost.colored", *n, 0, 30) as u64,
             None => l.unsupported(format!("ManaCost.colored({sym})")),
         }
     }

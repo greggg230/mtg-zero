@@ -83,7 +83,7 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         if cost.sacrifice.as_ref().is_some_and(|s| s.another || cost.sac_self || !cost.mana.is_zero() || cost.life > 0) {
             l.unsupported("ManaAbility.cost.sacrifice(with more)");
         }
-        let pips = cost.mana.pips.iter().sum::<u8>() + cost.mana.hybrid.iter().sum::<u8>();
+        let pips = cost.mana.pips.iter().sum::<u64>() + cost.mana.hybrid.iter().sum::<u64>();
         // (One mana, or {n}: n generic needs of the payment, Cascading
         // Cataracts' {5}; ENGINE.md 99.12.)
         if !cost.mana.is_zero() && !((pips + cost.mana.generic == 1 || pips == 0) && !cost.mana.has_phyrexian()) {
@@ -414,7 +414,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         let n = l.int("ActivationCost.sacrifice_n_nonland_permanents", *sacrifice_n_nonland_permanents, 1, 10) as u8;
         sacs.push(SacCost {
             filter: Filter::And(Box::new(t(types::PERMANENT)), Box::new(Filter::Not(Box::new(t(types::LAND))))),
-            n,
+            n: n as u32,
             another: false,
         });
     }
@@ -444,7 +444,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
                 let _ = label; // display text
                 let n = l.int("SacrificePermanentsCost.count", *count, 1, 9) as u8;
                 if let Some(f) = lower_pred(l, permanent_filter) {
-                    sacs.push(SacCost { filter: f, n, another: *another });
+                    sacs.push(SacCost { filter: f, n: n as u32, another: *another });
                 }
             }
             // "Exile this card from your graveyard" (an ability of a card in
@@ -463,7 +463,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
                     if cost.tap_untapped.is_some() {
                         l.unsupported("CostAtom:TapUntappedPermanentsCost(twice)");
                     }
-                    cost.tap_untapped = Some(SacCost { filter: f, n, another: true });
+                    cost.tap_untapped = Some(SacCost { filter: f, n: n as u32, another: true });
                 }
             }
             // "Remove n +1/+1 counters from this" (Walking Ballista).

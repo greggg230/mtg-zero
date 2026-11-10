@@ -235,9 +235,9 @@ fn finds(db: &CardDb, f: &Filter) -> Option<u8> {
 /// The coloured pips of `d`'s mana cost a deck of colours `cols` can't pay with them: per colour,
 /// the plain and phyrexian pips outside `cols` (hybrid pips payable by `cols` excluded, others
 /// counted for both of their colours).
-fn foreign_pips(d: &CardDef, cols: u8) -> [u8; 5] {
+fn foreign_pips(d: &CardDef, cols: u8) -> [crate::num::Count; 5] {
     let c = &d.cost;
-    let mut out = [0u8; 5];
+    let mut out: [crate::num::Count; 5] = [0; 5];
     for (i, o) in out.iter_mut().enumerate() {
         if cols & (1 << i) == 0 {
             *o += c.pips[i] + c.phyrexian[i];

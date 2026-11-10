@@ -627,6 +627,10 @@ pub struct Game {
     pub(crate) agenda: Vec<Task>,
     pub(crate) pending: Option<Decision>,
     pub(crate) answer: Option<Choice>,
+    /// The page of the pending decision when its permanents page, kept by
+    /// the engine (`Game::ask`: a choice naming a permanent past slot 95;
+    /// ENGINE.md 100.4.8); `None` otherwise.
+    pub(crate) page: Option<crate::decision::Page>,
     pub(crate) waiting: Vec<PendingTrigger>,
     pub(crate) extra_turns: Vec<PlayerId>,
     /// Combat damage assigned so far in the current damage step (amounts
@@ -1214,6 +1218,7 @@ impl Game {
             agenda: Vec::new(),
             pending: None,
             answer: None,
+            page: None,
             waiting: Vec::new(),
             extra_turns: Vec::new(),
             combat_dmg: Vec::new(),
@@ -1619,26 +1624,7 @@ impl Game {
     }
 
     fn enter_permanent(&mut self, idx: CardIdx, controller: PlayerId, attach: Option<ObjRef>) -> ObjRef {
-        // The engine's 96 permanents a player (`perm_room`; class B, ENGINE.md
-        // 58.2): when the player it would enter under has no room, another
-        // player's card enters under its owner's control (whose room keeps
-        // it), and a token or a copy (a copy of a permanent spell, CR 707.10:
-        // Sage of the Skies) ceases to exist instead, as a token beyond the
-        // limit is never created (`token_count`).
-        let owner = self.objs[idx.i()].owner;
         let is_card = idx.get() < self.first_token;
-        let controller = if (owner != controller || !is_card) && self.perm_room(controller) == 0 {
-            if !is_card {
-                self.note(|g| format!("P{controller} controls the engine's most permanents: {} ceases to exist", g.name(idx)));
-                self.entering_cast = false;
-                self.clear_entering();
-                return self.move_card(idx, Zone::Nowhere, Pos::Top);
-            }
-            self.note(|g| format!("P{controller} controls the engine's most permanents: {} enters under its owner's control", g.name(idx)));
-            owner
-        } else {
-            controller
-        };
         // Mox Diamond: "If this would enter, you may discard a land card
         // instead. If you do, put it onto the battlefield. If you don't, put
         // it into its owner's graveyard" (CR 614.1a), however it would enter
@@ -2080,54 +2066,26 @@ impl Game {
     }
 
     /// How many tokens `controller` creates instead of n ("twice that many
-    /// of those tokens", CR 614.1a; any number: docs/shortcuts.md 24.7.4),
-    /// and no more than leave them
-    /// 96 permanents (an engine limit: the `MY_PERM` / `OPP_PERM` action
-    /// slots; ENGINE.md 26.11) with room for every card they own to enter
-    /// too (ENGINE.md 30: a board of tokens, then a spell).
-    pub(crate) fn token_count(&self, controller: PlayerId, n: u32) -> u32 {
-        let mut n = n;
-        let mut have = 0u32;
+    /// of those tokens", CR 614.1a): any number (docs/shortcuts.md 24.7.4,
+    /// 26.11.6: a player may have any number of permanents, ENGINE.md
+    /// 100.4.8), exact. Past the objects the engine can hold (`OBJECT_LIMIT`,
+    /// where `add_card` aborts the game, ENGINE.md 100.7) the game ends
+    /// aborted now, and none are created: creating them would abort it there.
+    pub(crate) fn token_count(&mut self, controller: PlayerId, n: u32) -> u32 {
+        let mut n = n as crate::num::Wide;
         for c in self.permanents_of(controller) {
-            have += 1;
             let f = self.abilities(c).token_factor;
             if f > 1 {
-                // (Saturating at u32::MAX: past the room below either way.)
-                n = n.saturating_mul(f as u32);
+                // (Past the objects left after a few doublings: no overflow.)
+                n = n.saturating_mul(f as crate::num::Wide);
             }
         }
-        // (The room left: at least 0.)
-        n.min((crate::decision::act::PERM_N as u32).saturating_sub(have + self.perm_reserve(controller)))
-    }
-
-    /// The cards `p` owns that may still enter the battlefield under their
-    /// control: elsewhere, or controlled by another player (the room the
-    /// limit on `p`'s permanents keeps: `token_count`, `perm_room`).
-    fn perm_reserve(&self, p: PlayerId) -> u32 {
-        self.objs
-            .iter()
-            .enumerate()
-            .filter(|&(i, o)| {
-                o.owner == p
-                    && i < self.first_token as usize
-                    && !(o.zone == Zone::Battlefield && o.controller == p)
-                    && o.zone != Zone::Nowhere
-            })
-            .count() as u32
-    }
-
-    /// How many more permanents `p` may get that are not cards they own (a
-    /// token, another player's permanent or card): 96 less their permanents
-    /// and the room kept for their own cards (`perm_reserve`). The engine
-    /// limit of 96 permanents a player (the `MY_PERM` / `OPP_PERM` action
-    /// slots, class B: docs/shortcuts.md 26.11.6, ENGINE.md 58.2): tokens
-    /// beyond it aren't created (`token_count`), and a player with no room
-    /// gains control of no other player's permanent (`change_control`) and
-    /// gets no other player's card onto the battlefield (it enters under its
-    /// owner's control: `put_onto_battlefield_attached`).
-    pub(crate) fn perm_room(&self, p: PlayerId) -> u32 {
-        let have = self.permanents_of(p).count() as u32;
-        (crate::decision::act::PERM_N as u32).saturating_sub(have + self.perm_reserve(p))
+        let room = OBJECT_LIMIT.saturating_sub(self.objs.len()) as crate::num::Wide;
+        if n > room {
+            self.abort(|| format!("{n} tokens: past the {OBJECT_LIMIT} objects the engine holds"));
+            return 0;
+        }
+        n as u32
     }
 
     /// Create one token (CR 111.2): a new object slot, put onto the
@@ -2286,24 +2244,13 @@ impl Game {
     }
 
     /// `p` gains control of permanent `c` (CR 613.1b; an effect without a
-    /// duration). It is removed from combat (506.4). Not a permanent `p`
-    /// doesn't own while `p` has no room for another permanent (the engine's
-    /// 96, `perm_room`; class B, ENGINE.md 58.2): then nothing happens.
+    /// duration). It is removed from combat (506.4).
     pub(crate) fn change_control(&mut self, c: CardIdx, p: PlayerId) {
-        if self.objs[c.i()].zone == Zone::Battlefield
-            && self.objs[c.i()].controller != p
-            && self.objs[c.i()].owner != p
-            && self.perm_room(p) == 0
-        {
-            self.note(|g| format!("P{p} controls the engine's most permanents: no control of {}", g.name(c)));
-            return;
-        }
         self.set_control(c, p);
     }
 
-    /// [`change_control`](Self::change_control) without the room check: an
-    /// exchange of control (CR 701.12), which leaves every player's number of
-    /// permanents as it was.
+    /// [`change_control`](Self::change_control), also for an exchange of
+    /// control (CR 701.12).
     pub(crate) fn set_control(&mut self, c: CardIdx, p: PlayerId) {
         // (With an Aura's control effect in the game, control is worked out
         // from every control effect in timestamp order: EoE W6.)

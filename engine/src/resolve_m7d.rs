@@ -659,8 +659,9 @@ impl Game {
     /// The tax of names chosen for `card`: a spell `caster` casts (an
     /// opponent of the chooser's), else an activated ability of `card` as a
     /// source (anyone's).
-    pub(crate) fn named_tax(&self, card: CardIdx, caster: Option<PlayerId>) -> u8 {
-        let mut tax = 0u8;
+    pub(crate) fn named_tax(&self, card: CardIdx, caster: Option<PlayerId>) -> u64 {
+        // (Any number of them: a count, ENGINE.md 100.4.8; a u8 saturated.)
+        let mut tax = 0u64;
         for &c in &self.battlefield {
             let d = self.abilities(c);
             let n = if caster.is_some() { d.named_spell_tax } else { d.named_ability_tax };
@@ -669,7 +670,7 @@ impl Game {
             }
             let Some(nd) = self.chosen_name(self.obj_ref(c)) else { continue };
             if nd != crate::game::NO_NAME && self.name(card) == self.db.def(nd).name {
-                tax = tax.saturating_add(n);
+                tax += n as u64;
             }
         }
         tax
@@ -712,9 +713,7 @@ impl Game {
         self.sacrifice_candidates(p, card, &s)
             .into_iter()
             .filter(|&x| {
-                // (A reduction past the u8 generic part is a reduction to 0,
-                // CR 601.2f: exact.)
-                let m = mana.less_generic(self.mana_value_of(x).min(u8::MAX as u64) as u8);
+                let m = mana.less_generic(self.mana_value_of(x));
                 let without = if self.sacrifices_itself_for_mana(x) { Some(x) } else { Some(card) };
                 m.is_zero() || self.can_pay_without(p, &m, classes, &keep, without)
             })

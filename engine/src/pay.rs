@@ -354,7 +354,9 @@ fn need_of(cost: &ManaCost, allow: u8) -> (Tag, u8) {
     let pip = (0..6).find(|&t| cost.pips[t] > 0).map(|t| 1u8 << t);
     let hyb = (0..10).find(|&i| cost.hybrid[i] > 0).map(crate::mana::pair_mask);
     let generic = (cost.generic > 0).then_some(TYPES);
-    let n = if pip.or(hyb).is_some() { 1 } else { cost.generic };
+    // (A mana ability's printed cost, which nothing increases: the lowering's
+    // bounds, {30} at most.)
+    let n = if pip.or(hyb).is_some() { 1 } else { u8::try_from(cost.generic).expect("a mana ability's printed {n}: a u8") };
     (pip.or(hyb).or(generic).map_or(0, |m| tag(m | crate::mana::NOT_MADE, allow)), n)
 }
 
@@ -555,7 +557,7 @@ pub(crate) struct PayMana {
     /// What later parts of the cost need.
     pub keep: Keep,
     /// Life to pay for Phyrexian pips once the mana abilities are done.
-    pub phyrexian_life: u32,
+    pub phyrexian_life: u64,
     /// A several-mana source whose production is being chosen, with the
     /// feasible productions.
     pub now: Option<(Src, Vec<[u8; 6]>)>,
@@ -1759,7 +1761,7 @@ impl Game {
     /// production (ENGINE.md 17: most unaffordable costs fail here, before
     /// any candidates are built).
     pub(crate) fn might_pay(&self, p: PlayerId, cost: &ManaCost, classes: &[Class], without: Option<CardIdx>) -> bool {
-        let need = cost.total() as u32 - cost.phyrexian.iter().map(|&n| n as u32).sum::<u32>();
+        let need = cost.total() - cost.phyrexian.iter().sum::<u64>();
         if need == 0 {
             return true;
         }
@@ -1900,8 +1902,9 @@ impl Game {
                 self.add_pool(p, keep.allow | needs_allow(classes), &mut c);
                 cands_payable(cost, &[], &[], &c, budget)
             }
-            Some(col) => (0..=cost.phyrexian[col]).any(|k| {
-                let later = later + 2 * k as u64;
+            // (2 life each: no more than the life left allows, CR 119.4.)
+            Some(col) => (0..=cost.phyrexian[col].min((life_total.max(0) as u64).saturating_sub(later) / 2)).any(|k| {
+                let later = later + 2 * k;
                 later <= life_total.max(0) as u64 && self.phyrexian_feasible(p, &split_phyrexian(cost, col, k), classes, keep, later, without)
             }),
         }
@@ -2179,25 +2182,50 @@ impl Game {
         // CR 107.4f: per colour, how many Phyrexian pips are paid with 2 life
         // (paid at the end, after the mana abilities).
         if let Some(col) = (0..5).find(|&c| pm.cost.phyrexian[c] > 0) {
+            let take = |g: &mut Game, mut pm: Box<PayMana>, k: u64| {
+                pm.pool_page = crate::decision::Page::FIRST;
+                pm.phyrexian_life += 2 * k;
+                pm.cost = split_phyrexian(&pm.cost, col, k);
+                g.agenda.push(Task::PayMana(pm));
+            };
             match self.answer.take() {
-                Some(Choice::Number(k)) => {
-                    pm.phyrexian_life += 2 * k as u32;
-                    pm.cost = split_phyrexian(&pm.cost, col, k);
+                Some(Choice::Number(k)) => take(self, pm, k as u64),
+                Some(Choice::Item(k)) => take(self, pm, k as u64),
+                Some(Choice::Page(p)) => {
+                    pm.pool_page = p;
                     self.agenda.push(Task::PayMana(pm));
                 }
                 Some(other) => unreachable!("Phyrexian answer {other:?}"),
                 None => {
                     let classes = self.payment_classes(&pm);
-                    let life = self.players[payer as usize].life;
-                    let opts: Vec<Opt> = (0..=pm.cost.phyrexian[col])
+                    let life = self.players[payer as usize].life.max(0) as u64;
+                    // (2 life each: no more than the life left allows, CR
+                    // 119.4.)
+                    let most = pm.cost.phyrexian[col].min(life.saturating_sub(pm.later_life()) / 2);
+                    let ks: Vec<u64> = (0..=most)
                         .filter(|&k| {
-                            let later = pm.later_life() + 2 * k as u64;
-                            later <= life.max(0) as u64
-                                && self.phyrexian_feasible(payer, &split_phyrexian(&pm.cost, col, k), &classes, &pm.keep, later, None)
+                            let later = pm.later_life() + 2 * k;
+                            later <= life && self.phyrexian_feasible(payer, &split_phyrexian(&pm.cost, col, k), &classes, &pm.keep, later, None)
                         })
-                        .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k) })
                         .collect();
-                    self.ask(Task::PayMana(pm), payer, DecisionKind::PayPhyrexian, opts);
+                    match ks.last() {
+                        // Past `NUMBER`'s 32 ids (Phyrexian pips added by a cost
+                        // paid many times, ENGINE.md 100.4.8): every number,
+                        // paged (`Choice::Item`, A0's helper).
+                        Some(&last) if last >= act::NUMBER_N as u64 => {
+                            if u32::try_from(last).is_err() {
+                                self.abort(|| format!("{last} Phyrexian pips paid with life: past a u32 of choices"));
+                                return;
+                            }
+                            let items: Vec<(u32, Choice)> = ks.iter().map(|&k| (k as u32, Choice::Item(k as u32))).collect();
+                            let page = pm.pool_page;
+                            self.ask_paged(Task::PayMana(pm), page, payer, DecisionKind::PayPhyrexian, act::NUMBER, act::NUMBER_N, &items, Vec::new());
+                        }
+                        _ => {
+                            let opts: Vec<Opt> = ks.iter().map(|&k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
+                            self.ask(Task::PayMana(pm), payer, DecisionKind::PayPhyrexian, opts);
+                        }
+                    }
                 }
             }
             return;
@@ -3009,7 +3037,7 @@ impl Game {
         }
         // (Both within the life total, an i32: the budget kept them.)
         if pm.phyrexian_life > 0 {
-            self.lose_life(payer, i32::try_from(pm.phyrexian_life).expect("Phyrexian life within the life total"));
+            self.lose_life(payer, pm.phyrexian_life);
             let n = pm.phyrexian_life;
             self.note(|_| format!("P{payer} pays {n} life for Phyrexian mana"));
         }
@@ -3137,7 +3165,7 @@ impl Game {
 
 /// `cost` with `k` of its Phyrexian pips of colour `col` paid with life and
 /// the others turned into ordinary pips.
-fn split_phyrexian(cost: &ManaCost, col: usize, k: u8) -> ManaCost {
+fn split_phyrexian(cost: &ManaCost, col: usize, k: u64) -> ManaCost {
     let mut c = *cost;
     c.pips[col] += c.phyrexian[col] - k;
     c.phyrexian[col] = 0;

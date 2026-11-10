@@ -442,7 +442,7 @@ pub enum Ext {
     /// Create n tokens [tapped] and attacking (CR 508.4: not declared as
     /// attackers); outside combat, or for a player not attacking, they
     /// just enter (506.3).
-    CreateTokensAttacking { token: u16, n: u8, tapped: bool },
+    CreateTokensAttacking { token: u16, n: u32, tapped: bool },
     /// `who` puts all the cards from their graveyard on the bottom of
     /// their library in a random order.
     GraveyardToBottomRandom { who: Who },

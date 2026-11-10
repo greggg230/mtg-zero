@@ -169,20 +169,39 @@ pub fn letter_index(s: &str) -> Option<usize> {
 /// A mana cost without X (CR 107.3; not supported yet, the lowering
 /// reports it). `pips[C]` counts `{C}`; hybrid pips are counted per colour
 /// pair (`PAIRS`), Phyrexian pips per colour (CR 107.4f).
+///
+/// Every part is a `num::Count` (ENGINE.md 100.4.8: X, taxes and the times an
+/// additional cost is paid are added into them, any amount; a u8 generic part
+/// kept X below 255). Sums saturate past `u64::MAX`, exactly: no payment pays
+/// such a cost, as none pays the cost it stands for (a payment's mana is
+/// less than 2^33: one mana a source and fewer than 2^32 objects, at most 255
+/// of a type in a pool and in a payment's several-mana picks, ENGINE.md
+/// 100.7; what reductions take from the generic part is less than 2^63 +
+/// 2^42: a power, and counts of objects).
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
 pub struct ManaCost {
-    pub generic: u8,
-    pub pips: [u8; 6],
-    pub hybrid: [u8; 10],
-    pub phyrexian: [u8; 5],
+    pub generic: crate::num::Count,
+    pub pips: [crate::num::Count; 6],
+    pub hybrid: [crate::num::Count; 10],
+    pub phyrexian: [crate::num::Count; 5],
 }
 
 impl ManaCost {
-    /// Every symbol, counted in u32 (exact: the u8 sum wrapped past 255,
-    /// and a cost of 256 read as none; ENGINE.md 100.4.6).
-    pub fn total(&self) -> u32 {
-        let sum = |v: &[u8]| v.iter().map(|&n| n as u32).sum::<u32>();
-        self.generic as u32 + sum(&self.pips) + sum(&self.hybrid) + sum(&self.phyrexian)
+    /// Every symbol (saturating: see the type).
+    pub fn total(&self) -> u64 {
+        let sum = |v: &[u64]| v.iter().fold(0u64, |a, &n| a.saturating_add(n));
+        self.generic.saturating_add(sum(&self.pips)).saturating_add(sum(&self.hybrid)).saturating_add(sum(&self.phyrexian))
+    }
+
+    /// The cost paid `n` times (an additional cost paid that many times,
+    /// CR 601.2b: replicate, squad, multikicker): every part times `n`.
+    pub fn times(&self, n: u64) -> ManaCost {
+        let mut c = *self;
+        c.generic = c.generic.saturating_mul(n);
+        for v in c.pips.iter_mut().chain(c.hybrid.iter_mut()).chain(c.phyrexian.iter_mut()) {
+            *v = v.saturating_mul(n);
+        }
+        c
     }
 
     pub fn is_zero(&self) -> bool {
@@ -205,8 +224,9 @@ impl ManaCost {
         c
     }
 
-    /// This cost with its generic part reduced by up to n.
-    pub fn less_generic(&self, n: u8) -> ManaCost {
+    /// This cost with its generic part reduced by up to n (CR 601.2f: not
+    /// below zero).
+    pub fn less_generic(&self, n: u64) -> ManaCost {
         let mut c = *self;
         c.generic = c.generic.saturating_sub(n);
         c
@@ -246,7 +266,7 @@ impl ManaCost {
             let end = inner.find('}')?;
             let sym = &inner[..end];
             if let Ok(n) = sym.parse::<u8>() {
-                c.generic = c.generic.checked_add(n)?;
+                c.generic = c.generic.checked_add(n as u64)?;
             } else if let Some((a, b)) = sym.split_once('/') {
                 let x = letter_index(a).filter(|&x| x < C)?;
                 if b == "P" {
@@ -266,23 +286,27 @@ impl ManaCost {
 
 impl std::fmt::Display for ManaCost {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // (A symbol 16 times or more: once, with its count.)
+        fn sym(f: &mut std::fmt::Formatter<'_>, s: std::fmt::Arguments, n: u64) -> std::fmt::Result {
+            if n >= 16 {
+                return write!(f, "{{{s}}}x{n}");
+            }
+            for _ in 0..n {
+                write!(f, "{{{s}}}")?;
+            }
+            Ok(())
+        }
         if self.generic > 0 || self.is_zero() {
             write!(f, "{{{}}}", self.generic)?;
         }
         for (i, &n) in self.hybrid.iter().enumerate() {
-            for _ in 0..n {
-                write!(f, "{{{}/{}}}", LETTERS[PAIRS[i].0], LETTERS[PAIRS[i].1])?;
-            }
+            sym(f, format_args!("{}/{}", LETTERS[PAIRS[i].0], LETTERS[PAIRS[i].1]), n)?;
         }
         for (i, &n) in self.phyrexian.iter().enumerate() {
-            for _ in 0..n {
-                write!(f, "{{{}/P}}", LETTERS[i])?;
-            }
+            sym(f, format_args!("{}/P", LETTERS[i]), n)?;
         }
         for (i, &n) in self.pips.iter().enumerate() {
-            for _ in 0..n {
-                write!(f, "{{{}}}", LETTERS[i])?;
-            }
+            sym(f, format_args!("{}", LETTERS[i]), n)?;
         }
         Ok(())
     }
@@ -366,8 +390,8 @@ impl ManaPool {
     /// (ENGINE.md 5). Any of the pool's mana.
     fn pay_any(&mut self, cost: &mut ManaCost) {
         for c in 0..6 {
-            let t = self.amt[c].min(cost.pips[c]);
-            self.amt[c] -= t;
+            let t = (self.amt[c] as u64).min(cost.pips[c]);
+            self.amt[c] -= t as u8;
             cost.pips[c] -= t;
         }
         for (h, &(a, b)) in cost.hybrid.iter_mut().zip(PAIRS.iter()) {
@@ -443,8 +467,11 @@ fn payable_iter(
     available: impl Iterator<Item = Tag> + Clone,
     n: usize,
 ) -> bool {
-    let need = cost.total() as usize + extra.len();
-    if chosen.len() > need || chosen.len() + n < need {
+    // (Each need takes a unit of its own: so past this, every count of the
+    // cost is at most the units, which are counted in u32, ENGINE.md
+    // 100.4.6.)
+    let need = cost.total().saturating_add(extra.len() as u64);
+    if chosen.len() as u64 > need || ((chosen.len() + n) as u64) < need {
         return false;
     }
     let made = |u: &Tag| u & MADE as Tag != 0 && chain(*u) != 0;
@@ -522,6 +549,14 @@ fn payable_iter(
         .unwrap_or_else(|| search_exhausted(format_args!("the orders of chained mana abilities: cost {cost}, needs {extra:?}, units {units:?}")))
 }
 
+/// A count of a cost's needs as the matching counts units (u32), once
+/// `payable_iter` checked that the cost takes no more mana than the units it
+/// has (each need its own unit), which are counted in u32 (ENGINE.md
+/// 100.4.6, 100.4.8).
+fn units_count(k: u64) -> u32 {
+    u32::try_from(k).expect("a cost's need of at most its payment's units, counted in u32")
+}
+
 /// [`payable_iter`] with the chained abilities' order given (their chain
 /// ids' ranks).
 fn payable_ordered(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], available: impl Iterator<Item = Tag> + Clone, mode: Chains) -> bool {
@@ -557,12 +592,12 @@ fn payable_ordered(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], av
     }
     for c in 0..6 {
         if cost.pips[c] > 0 {
-            needs.push((cost_need(1 << c, allow), cost.pips[c] as u32));
+            needs.push((cost_need(1 << c, allow), units_count(cost.pips[c])));
         }
     }
     for (i, &k) in cost.hybrid.iter().enumerate() {
         if k > 0 {
-            needs.push((cost_need(pair_mask(i), allow), k as u32));
+            needs.push((cost_need(pair_mask(i), allow), units_count(k)));
         }
     }
     debug_assert!(!cost.has_phyrexian());
@@ -573,7 +608,7 @@ fn payable_ordered(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], av
         best_chosen::<false>(&needs, &mut groups, cap, mode)
     };
     match best {
-        Some(used) => chosen.len() - used as usize <= cost.generic as usize,
+        Some(used) => (chosen.len() - used as usize) as u64 <= cost.generic,
         None => false,
     }
 }
@@ -602,12 +637,12 @@ fn payable_restricted(cost: &ManaCost, main: Tag, extra: &[Tag], chosen: &[Tag],
         add_need(e, false, 1);
     }
     for c in 0..6 {
-        add_need(main | (1 << c), false, cost.pips[c] as u32);
+        add_need(main | (1 << c), false, units_count(cost.pips[c]));
     }
     for (i, &k) in cost.hybrid.iter().enumerate() {
-        add_need(main | pair_mask(i) as Tag, false, k as u32);
+        add_need(main | pair_mask(i) as Tag, false, units_count(k));
     }
-    add_need(main, true, cost.generic as u32);
+    add_need(main, true, units_count(cost.generic));
     // Units by tag: (tag, chosen, count).
     let mut units: Vec<(Tag, bool, u32)> = Vec::new();
     let mut add_unit = |t: Tag, ch: bool| match units.iter_mut().find(|x| x.0 == t && x.1 == ch) {

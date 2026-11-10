@@ -59,9 +59,9 @@ pub fn count_amount(n: Count) -> i64 {
 
 /// A derived number of tokens to create (`Game::create_tokens`'s `u32`):
 /// a negative number is none (CR 107.1b), and any number past `u32::MAX`
-/// creates exactly what `u32::MAX` does: `Game::token_count` creates at most
-/// the 96 permanents a player may have (`act::PERM_N`, docs/shortcuts.md
-/// 26.11.6), so the result is exact.
+/// does exactly what `u32::MAX` does: it is past the objects the engine
+/// holds (`OBJECT_LIMIT` < `u32::MAX`), so `Game::token_count` ends the game
+/// aborted (ENGINE.md 100.7, 100.4.8): exact.
 #[inline]
 pub fn tokens_n(v: Wide) -> u32 {
     v.clamp(0, u32::MAX as Wide) as u32

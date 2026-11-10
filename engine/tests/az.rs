@@ -392,11 +392,20 @@ fn encoding_slots_name_the_action_slots() {
             assert_eq!(decode_id(&x[o..o + CODE]), ident(g.g.obj(c).def));
             assert_eq!(x[o + CODE + 2] == 1.0, l.contains(&(act::HAND + s as u16)));
         }
-        // permanents
+        // permanents (on a page of the permanents past slot 95, the page's,
+        // ENGINE.md 100.4.8)
+        let pd = g.g.pending_decision().unwrap();
         for (side, p) in [me as u8, 1 - me as u8].into_iter().enumerate() {
             let base = if side == 0 { encode::O_MY_PERM } else { encode::O_OPP_PERM };
             let range = if side == 0 { act::MY_PERM } else { act::OPP_PERM };
-            for (s, c) in g.g.permanents_of(p).enumerate().take(encode::PERMS) {
+            let on_page = |a: u16| (range..range + act::PERM_N).contains(&a) || (side == 0 && (act::ACTIVATE..act::HAND_ABILITY).contains(&a));
+            let first = match pd.stage {
+                engine::decision::Stage::Paged { window } if window > 0 && pd.player == me as u8 && pd.options.iter().any(|o| on_page(o.action)) => {
+                    window as usize * (act::PERM_N as usize - 1)
+                }
+                _ => 0,
+            };
+            for (s, c) in g.g.permanents_of(p).skip(first).enumerate().take(encode::PERMS) {
                 let o = base + s * encode::PERM_W;
                 // (A copy: what it is, and what it copies, ENGINE.md 26.)
                 assert_eq!(decode_id(&x[o..o + CODE]), ident(g.g.own_def(c)));

@@ -517,10 +517,6 @@ impl Game {
             if p == now {
                 continue;
             }
-            if p != self.objs[c.i()].owner && self.perm_room(p) == 0 {
-                self.note(|g| format!("P{p} controls the engine's most permanents: no control of {}", g.name(c)));
-                continue;
-            }
             self.apply_control(c, p);
         }
         self.w6.syncing = false;

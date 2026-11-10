@@ -790,8 +790,9 @@ fn cr_614_1a_doubled_tokens_past_sixty_four() {
     g.choose(Choice::Play(f));
     settle(&mut g);
     let robots = g.permanents_of(0).filter(|&c| g.name(c) == "Robot").count();
-    // (96 less the eight permanents, the Forest and the ten library cards.)
-    assert_eq!(robots, 96 - 9 - 10, "{}", log(&g));
+    // (Twice that many seven times: any number, ENGINE.md 100.4.8; 77 before,
+    // the room the engine's 96 permanents left.)
+    assert_eq!(robots, 128, "{}", log(&g));
 }
 
 /// The payment's life, exact (F7's list, ENGINE.md 100.4.6), CR 119.4,
@@ -1156,4 +1157,238 @@ fn cr_602_2b_gene_pollinator_tapped_for_mmmenons_mana_activates_no_more() {
     finish(&mut g, |_| None);
     assert_eq!(g.obj(scroll).zone, Zone::Stack, "{}", log(&g));
     assert!(g.obj(pol).tapped && !g.obj(fdc).tapped, "{}", log(&g));
+}
+
+// ---- 100.4.8: B5, the last of mana and payment ------------------------------
+
+/// The cube, the shared test cards and B5's: costs that tap, sacrifice and
+/// exile graveyard cards together.
+fn b5_db() -> &'static CardDb {
+    use serde_json::json;
+    static DB: std::sync::OnceLock<&'static CardDb> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let draw = json!({"$t": "DrawCards", "amount": 1});
+        let custom = vec![
+            // "Tap an untapped Rebel you control, Sacrifice a Rebel, Exile a
+            // card from your graveyard: Draw a card."
+            eoe_w2::card("Test Rebel Crypt", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "sacrifice_subtype": "Rebel", "exile_cards_from_graveyard": 1,
+                        "extra_costs": [{"$t": "TapUntappedPermanentsCost", "label": "an untapped Rebel you control",
+                            "permanent_filter": {"$t": "HasSubtype", "name": "Rebel"}}]},
+                    "effect": draw.clone()}]})),
+            // "Crew 1, Sacrifice a Rebel, Exile a card from your graveyard:
+            // Draw a card."
+            eoe_w2::card("Test Crew Crypt", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "sacrifice_subtype": "Rebel", "exile_cards_from_graveyard": 1, "crew": 1},
+                    "effect": draw}]})),
+            // A vanilla 1/1 Rebel.
+            eoe_w2::card("Test Rebel", json!({"card_types": ["Creature"], "subtypes": ["Rebel"], "power": 1, "toughness": 1,
+                "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["W", 1]]}, "mana_cost_str": "{W}"})),
+            // A 1/1 Rebel with "{T}: Add {G}".
+            eoe_w2::card("Test Elf Rebel", json!({"card_types": ["Creature"], "subtypes": ["Rebel"], "power": 1, "toughness": 1,
+                "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["G", 1]]}, "mana_cost_str": "{G}",
+                "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_self": true},
+                    "effect": {"$t": "AddManaToPool", "produces": [["G", 1]]}, "is_mana_ability": true}]})),
+            // "{B}: Draw a card. Replicate {B/P}." (An instant.)
+            eoe_w2::card("Test Phyrexian Echo", json!({"card_types": ["Instant"], "type_line": "Instant",
+                "mana_cost": {"$t": "ManaCost", "colored": [["B", 1]]}, "mana_cost_str": "{B}", "replicate_cost": "{B/P}",
+                "spell_effect": {"$t": "DrawCards", "amount": 1}})),
+            // "Sacrifice a Rebel: Draw a card."
+            eoe_w2::card("Test Rebel Shrine", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "sacrifice_subtype": "Rebel"}, "effect": {"$t": "DrawCards", "amount": 1}}]})),
+        ];
+        let mut cards = engine::db::load_cube_document().cards;
+        cards.extend(common::custom_cards());
+        cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
+        let db = CardDb::from_cards(&cards);
+        for n in ["Test Rebel Crypt", "Test Crew Crypt", "Test Rebel", "Test Elf Rebel", "Test Rebel Shrine", "Test Phyrexian Echo"] {
+            db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
+        }
+        db.leak()
+    })
+}
+
+fn b5_scen() -> Scenario {
+    Scenario::new(b5_db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.log = true;
+        })
+        .library(0, &["Island"; 12])
+        .library(1, &["Island"; 12])
+}
+
+/// CR 601.2h: a cost's parts are paid in any order, and a card sacrificed for
+/// a cost may be exiled from the graveyard for it (ruling bea302d9). So the
+/// one Rebel is tapped for "tap an untapped Rebel you control", then
+/// sacrificed, then exiled from the graveyard. (The sacrifice was made before
+/// the graveyard card was chosen, and so before the tap: no Rebel to tap.)
+#[test]
+fn cr_601_2h_a_permanent_tapped_then_sacrificed_then_exiled_from_the_graveyard() {
+    let mut g = b5_scen().battlefield(0, &["Test Rebel Crypt", "Test Rebel"]).at(Step::Main1, 0).start();
+    let crypt = bf(&g, 0, "Test Rebel Crypt");
+    let rebel = bf(&g, 0, "Test Rebel");
+    assert!(g.has_option(act(crypt, 0)), "{:?}", g.options_desc());
+    g.choose(act(crypt, 0));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(rebel).zone, Zone::Exile, "{}", log(&g));
+    assert_eq!(g.player(0).hand.len(), 1, "drew a card\n{}", log(&g));
+}
+
+/// The same with crew (CR 702.122a, 601.2h): the Rebel crews, is
+/// sacrificed, then exiled from the graveyard.
+#[test]
+fn cr_601_2h_a_creature_crewed_then_sacrificed_then_exiled_from_the_graveyard() {
+    let mut g = b5_scen().battlefield(0, &["Test Crew Crypt", "Test Rebel"]).at(Step::Main1, 0).start();
+    let crypt = bf(&g, 0, "Test Crew Crypt");
+    let rebel = bf(&g, 0, "Test Rebel");
+    assert!(g.has_option(act(crypt, 0)), "{:?}", g.options_desc());
+    g.choose(act(crypt, 0));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(rebel).zone, Zone::Exile, "{}", log(&g));
+    assert_eq!(g.player(0).hand.len(), 1, "drew a card\n{}", log(&g));
+}
+
+/// docs/shortcuts.md 26.11.6, CR 601.2g-h: a permanent past the 96 slots is
+/// sacrificed for a cost, its mana ability activated first (`ACTIVATE` +
+/// position x 4 + i, ENGINE.md 86.2), on the page of the decider's
+/// permanents (ENGINE.md 100.4.8). Test Rebel Shrine ("Sacrifice a Rebel:
+/// Draw a card"), 97 Test Rebels, then Test Elf Rebel ("{T}: Add {G}") at
+/// position 98: the second page offers it at `MY_PERM` + 3 and its mana
+/// ability first at `ACTIVATE` + 12; the Elf taps for {G}, then is
+/// sacrificed.
+#[test]
+fn cr_601_2h_a_permanent_past_96_sacrificed_after_its_mana_ability() {
+    let mut mine = vec!["Test Rebel Shrine"];
+    mine.extend(["Test Rebel"; 97]);
+    mine.push("Test Elf Rebel");
+    let mut g = b5_scen().battlefield(0, &mine).at(Step::Main1, 0).start();
+    let shrine = bf(&g, 0, "Test Rebel Shrine");
+    let elf = bf(&g, 0, "Test Elf Rebel");
+    assert_eq!(g.perm_slot(elf), 98);
+    g.choose(act(shrine, 0));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Sacrifice));
+    let d = g.pending_decision().unwrap();
+    assert_eq!(d.options.len(), 95, "Rebels at positions 1..94 and next page: {:?}", g.options_desc());
+    assert!(matches!(d.choice_of(engine::decision::act::MY_PERM + 95), Some(Choice::Page(_))));
+    let next = d.choice_of(engine::decision::act::MY_PERM + 95).unwrap();
+    g.choose(next);
+    let d = g.pending_decision().unwrap();
+    use engine::decision::act as a;
+    assert_eq!(d.action_of(Choice::Card(elf)), Some(a::MY_PERM + 3), "{:?}", g.options_desc());
+    assert_eq!(d.action_of(act(elf, 0)), Some(a::ACTIVATE + 12), "{:?}", g.options_desc());
+    let hand = g.player(0).hand.len();
+    g.choose(act(elf, 0));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(elf).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.player(0).pool.amt[engine::mana::G], 1, "{}", log(&g));
+    settle(&mut g);
+    assert_eq!(g.player(0).hand.len(), hand + 1, "{}", log(&g));
+}
+
+/// The ids of the pending decision.
+fn actions(g: &Game) -> Vec<u16> {
+    g.pending_decision().map(|d| d.options.iter().map(|o| o.action).collect()).unwrap_or_default()
+}
+
+/// CR 107.3, 601.2b: X may be any number the payment allows; the generic
+/// part of a cost is a count (ENGINE.md 100.4.8; a u8 before, so X stopped at
+/// 254). Mind Twist ({X}{B}) with 255 {B} and 255 {C} floating: X goes to
+/// 509 (`ask_amount`: "31 or more", then two digits, the first up to 14;
+/// 6 before), here 300.
+#[test]
+fn cr_107_3_an_x_whose_cost_passes_255() {
+    use engine::decision::act;
+    let mut g = scen().hand(0, &["Mind Twist"]).hand(1, &["Island", "Island"]).pool(0, [0, 0, 255, 0, 0, 255], 0).at(Step::Main1, 0).start();
+    let mt = g.card(0, "Mind Twist", Zone::Hand);
+    g.choose(Choice::Cast(mt));
+    for _ in 0..20 {
+        match g.kind() {
+            Some(DecisionKind::ChooseMode) => break,
+            Some(DecisionKind::Target) => g.choose(Choice::Target(engine::Target::Player(1))),
+            _ => {
+                let c = options(&g)[0];
+                g.choose(c)
+            }
+        };
+    }
+    g.choose(Choice::Number(31));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "{:?}", g.options_desc());
+    assert_eq!(*actions(&g).last().unwrap(), act::NUMBER + 14, "X to 509: rest 478 = 14 x 32 + 30");
+    g.choose(Choice::Number(8));
+    g.choose(Choice::Number(13));
+    finish(&mut g, |_| None);
+    let item = g.stack().last().expect("Mind Twist on the stack");
+    assert_eq!(item.x, 300, "{}", log(&g));
+    assert_eq!(g.player(0).pool.total(), 510 - 301, "301 of the 510 spent: {}", log(&g));
+}
+
+/// CR 601.2f: a cost reduction "for each artifact you control" counts every
+/// one (a u8 count wrapped: with 256 artifacts, no reduction). Emry, Lurker of
+/// the Loch ({2}{U}, "costs {1} less for each artifact you control") with 256
+/// Mishra's Baubles and an Island: cast for {U}.
+#[test]
+fn cr_601_2f_a_reduction_per_permanent_past_255() {
+    let mut mine = vec!["Mishra's Bauble"; 256];
+    mine.push("Island");
+    let mut g = scen().battlefield(0, &mine).hand(0, &["Emry, Lurker of the Loch"]).at(Step::Main1, 0).start();
+    let emry = g.card(0, "Emry, Lurker of the Loch", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(emry)), "castable for {{U}}");
+    g.choose(Choice::Cast(emry));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(emry).zone, Zone::Battlefield, "{}", log(&g));
+}
+
+/// CR 107.4f, 601.2b: a Phyrexian pip added by a cost paid many times may be
+/// paid with life whatever their number; how many with life is one number,
+/// paged past `NUMBER`'s 32 ids (ENGINE.md 100.4.8: the options went past
+/// them into the `HAND` ids). B5's Test Phyrexian Echo ({B}, replicate {B/P})
+/// replicated 40 times with a Swamp and ten {B} floating, at 100 life: 30 to
+/// 40 of the 40 {B/P} with life (`NUMBER` + 30 and "next page", then 31..40),
+/// here 40: 80 life.
+#[test]
+fn cr_107_4f_phyrexian_pips_past_31_paid_with_life() {
+    use engine::decision::act;
+    let mut g = b5_scen()
+        .battlefield(0, &["Swamp"])
+        .hand(0, &["Test Phyrexian Echo"])
+        .pool(0, [0, 0, 10, 0, 0, 0], 0)
+        .life(0, 100)
+        .library(0, &["Island"; 60])
+        .at(Step::Main1, 0)
+        .start();
+    let echo = g.card(0, "Test Phyrexian Echo", Zone::Hand);
+    g.choose(Choice::Cast(echo));
+    // Replicate 40 times ("31 or more", then the digit 9).
+    for _ in 0..20 {
+        if g.kind() == Some(DecisionKind::ChooseMode) {
+            break;
+        }
+        let c = options(&g)[0];
+        g.choose(c);
+    }
+    g.choose(Choice::Number(31));
+    g.choose(Choice::Number(9));
+    for _ in 0..20 {
+        if g.kind() == Some(DecisionKind::PayPhyrexian) {
+            break;
+        }
+        let c = options(&g)[0];
+        g.choose(c);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::PayPhyrexian), "{}", log(&g));
+    assert!(actions(&g).iter().all(|&a| a < act::NUMBER + act::NUMBER_N), "{:?}", g.options_desc());
+    assert_eq!(actions(&g), vec![act::NUMBER + 30, act::NUMBER + 31], "30, then next page: {:?}", g.options_desc());
+    let next = options(&g)[1];
+    g.choose(next);
+    assert_eq!(actions(&g), (act::NUMBER..act::NUMBER + 10).collect::<Vec<_>>(), "31..=40: {:?}", g.options_desc());
+    g.choose(Choice::Item(40));
+    finish(&mut g, |_| None);
+    assert_eq!(g.life(0), 20, "{}", log(&g));
 }
