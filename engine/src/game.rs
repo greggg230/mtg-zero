@@ -2069,7 +2069,8 @@ impl Game {
     }
 
     /// How many tokens `controller` creates instead of n ("twice that many
-    /// of those tokens", CR 614.1a; at most 64), and no more than leave them
+    /// of those tokens", CR 614.1a; any number: docs/shortcuts.md 24.7.4),
+    /// and no more than leave them
     /// 96 permanents (an engine limit: the `MY_PERM` / `OPP_PERM` action
     /// slots; ENGINE.md 26.11) with room for every card they own to enter
     /// too (ENGINE.md 30: a board of tokens, then a spell).
@@ -2080,10 +2081,8 @@ impl Game {
             have += 1;
             let f = self.abilities(c).token_factor;
             if f > 1 {
-                // (Exact: the product, then the 64 of docs/shortcuts.md
-                // 24.7.4 (workstream A); a saturated product is past 64
-                // too.)
-                n = n.saturating_mul(f as u32).min(64);
+                // (Saturating at u32::MAX: past the room below either way.)
+                n = n.saturating_mul(f as u32);
             }
         }
         // (The room left: at least 0.)

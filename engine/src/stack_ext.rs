@@ -152,14 +152,19 @@ impl Game {
                 Flow::Next
             }
             Ext::CreateTokensN { token, n, tapped, attacking } => {
-                // (At most 64 tokens a creation: docs/shortcuts.md 24.7.4,
-                // workstream A's open cap; a negative number is none.)
-                let n = self.amount(f, *n).clamp(0, 64) as u8;
+                // (Any number, CR 111.2 / 107.1b: a negative one is none;
+                // docs/shortcuts.md 24.7.4: it was cut at 64.)
+                let n = u32::try_from(self.amount(f, *n).max(0)).unwrap_or(u32::MAX);
                 if *attacking {
+                    // (`CreateTokensAttacking` holds a u8: `token_count` makes
+                    // at most the 96 permanents a player may have, so 255 or
+                    // more make as many tokens as any larger number: exact.)
+                    const _: () = assert!(crate::decision::act::PERM_N < u8::MAX as u16);
+                    let n = n.min(u8::MAX as u32) as u8;
                     return self.exec_ext(f, &Ext::CreateTokensAttacking { token: *token, n, tapped: *tapped });
                 }
                 let def = self.db.token_def(*token);
-                let made = self.create_tokens(def, f.controller, n as u32, *tapped);
+                let made = self.create_tokens(def, f.controller, n, *tapped);
                 f.made = made.first().copied();
                 f.made_all = made;
                 Flow::Next

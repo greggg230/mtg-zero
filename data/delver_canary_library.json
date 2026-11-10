@@ -3,10 +3,10 @@
  "what": "Delver mirror canary spots with their right answers (tools/delver_blunders.py, docs/blunders.md 6a)",
  "engine": {
   "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-d-encoding",
-  "commit": "fa6c97cfee4765a05d4baec22250cb4d6f50835b",
+  "commit": "45ed2b2163c61c3e648feaf3c82bf1406a2f8abf",
   "branch": "eoe-d-encoding",
   "dirty": true,
-  "engine_sha256": "5e68fff1eb0e189f",
+  "engine_sha256": "bb103dc9e0a4f535",
   "digest": null
  },
  "reference": {
@@ -13582,7 +13582,7 @@
   }
  },
  "live_rule": "spots only in undecided games: the decider's raw value at the spot, by the network that played it, between 0.10 and 0.90",
- "rules_epoch": 1794246090,
+ "rules_epoch": 1794286020,
  "recorded": [
   {
    "engine": {
@@ -13653,27 +13653,40 @@
   },
   {
    "engine": {
-    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-d-encoding",
-    "commit": "9646ee9feff90648552fc3930da93427d90783cb",
-    "branch": "eoe-d-encoding",
+    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-f7-numbers",
+    "commit": "36f98af6bf0088378af10912551c5a48cbc3db59",
+    "branch": "eoe-f7-numbers",
     "dirty": true,
-    "engine_sha256": "bd55d88559502a4b",
+    "engine_sha256": "7107a6ed1b23c6c5",
     "digest": null
    },
-   "rules_epoch": 1794245194,
+   "rules_epoch": 1794262624,
+   "date": "2026-11-09",
+   "how": "tools/delver_rerecord.py check --stamp: every spot reached its position unchanged"
+  },
+  {
+   "engine": {
+    "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-b3-pay",
+    "commit": "36f72e009051fe61e4e5c00e6e56b6cd0f485eb6",
+    "branch": "eoe-b3-pay",
+    "dirty": true,
+    "engine_sha256": "82f7645e400ff265",
+    "digest": null
+   },
+   "rules_epoch": 1794281643,
    "date": "2026-11-09",
    "how": "tools/delver_rerecord.py check --stamp: every spot reached its position unchanged"
   },
   {
    "engine": {
     "checkout": "C:\\Users\\Gregg Keithley\\mtg-zero-wt\\eoe-d-encoding",
-    "commit": "fa6c97cfee4765a05d4baec22250cb4d6f50835b",
+    "commit": "45ed2b2163c61c3e648feaf3c82bf1406a2f8abf",
     "branch": "eoe-d-encoding",
     "dirty": true,
-    "engine_sha256": "5e68fff1eb0e189f",
+    "engine_sha256": "bb103dc9e0a4f535",
     "digest": null
    },
-   "rules_epoch": 1794246090,
+   "rules_epoch": 1794286020,
    "date": "2026-11-09",
    "how": "tools/delver_rerecord.py check --stamp: every spot reached its position unchanged"
   }

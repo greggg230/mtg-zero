@@ -403,131 +403,95 @@ impl Game {
 }
 
 impl Game {
-    /// `p`'s permanents ready to activate a "{T}, Tap an untapped permanent
-    /// you control: Add <mana>" ability (Gene Pollinator; `pay::POL_FOR`),
-    /// in battlefield order.
-    pub(crate) fn pol_activators(&self, p: PlayerId) -> Vec<CardIdx> {
-        let locks = self.activation_locks();
-        self.permanents_of(p)
-            .filter(|&c| {
-                let d = self.abilities(c);
-                d.activated.iter().enumerate().any(|(i, ad)| {
-                    ad.mana().is_some()
-                        && ad.cost.tap
-                        && ad.cost.tap_untapped.is_some()
-                        && !ad.instant_only
-                        && self.activation_ready(p, c, ad, locks)
-                        && !(d.latent > 0 && !self.has_activated(c, i))
-                        && !(ad.exhaust && self.exhausted(c, i as u8))
-                })
-            })
-            .collect()
-    }
-
     /// The sources of the Pollinators' "{T}, Tap an untapped permanent you
-    /// control: Add <mana>" (`pol`: each ready one's mana and filter): one
-    /// per untapped permanent it may tap (CR 602.2b, 601.2g), the activating
-    /// Pollinator tapped as well: `share` = how many can activate, a
-    /// permanent that could activate itself taking two (`taps`). Its id
-    /// is the permanent's own (`MY_PERM`; which source asked when it stands
-    /// for several, `PayMana::which`).
-    /// With a "whenever you tap a creature for mana" bonus (CR 605.1b) and
-    /// creatures activating, each source makes that mana as well (a
-    /// several-mana source then, inserted at `n_multi`; the number inserted
-    /// returned).
+    /// control: Add <mana>" (`pol`: each ready one's mana and filter): one per
+    /// untapped permanent it may tap (CR 602.2b, 601.2g), of a pool
+    /// (`Class::pool`) per group of Pollinators alike: the same mana and
+    /// filter, and the same bonus their own tap adds (CR 106.12, 605.1b:
+    /// Badgermole Cub's "whenever you tap a creature for mana" when the
+    /// Pollinator is a creature, Nissa's "whenever you tap a Forest for mana"
+    /// when it is a Forest; `Game::tap_bonus`). The Pollinator that activates
+    /// is tapped as well: one of its pool's actors (`pay::PoolCtx`), the
+    /// player's choice (`PayMana::actors`); a permanent that is an actor
+    /// itself, tapped for one, leaves its own pool one fewer. Its id is the
+    /// permanent's own (`MY_PERM`; which source asked when it stands for
+    /// several, `PayMana::which`). A source with a bonus makes several mana
+    /// (inserted among the several-mana classes, at `n_multi`; the number
+    /// inserted returned). `pools`: the last pool number used.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn pol_classes(
         &self,
         p: PlayerId,
         exclude: Option<CardIdx>,
         pol: &[(CardIdx, crate::mana::ManaMask, &crate::db::Filter)],
-        creature_bonus: [u8; 6],
+        bonus: &[(u16, u8)],
+        creature_bonus: &[u8; 6],
         n_multi: usize,
         out: &mut Vec<crate::pay::Class>,
+        pools: &mut u16,
     ) -> usize {
         use crate::pay::{Class, Src, Yield, POL_FOR, TAP};
-        let (_, mask, filter) = pol[0];
-        // (The bonus: when every Pollinator that can activate is a creature,
-        // as the one activated then is; with some that are not, it depends on
-        // which activates: not modelled, a loud failure.)
-        let bonus = creature_bonus != [0; 6];
-        if bonus {
-            assert!(pol.iter().all(|x| self.is_creature(x.0)), "Pollinators of which some are creatures with a creature-mana bonus (ENGINE.md 99.12)");
+        // (The groups, in the order of their first Pollinator.)
+        #[allow(clippy::type_complexity)]
+        let mut groups: Vec<(crate::mana::ManaMask, &crate::db::Filter, [u8; 6], Vec<CardIdx>)> = Vec::new();
+        for &(a, mask, f) in pol {
+            let extra = self.tap_bonus(a, true, bonus, creature_bonus);
+            match groups.iter_mut().find(|g| g.0 == mask && g.1 == f && g.2 == extra) {
+                Some(g) => {
+                    if !g.3.contains(&a) {
+                        g.3.push(a);
+                    }
+                }
+                None => groups.push((mask, f, extra, vec![a])),
+            }
         }
-        let yld = if bonus {
-            let prods: Vec<[u8; 6]> = (0..6)
-                .filter(|&t| mask & (1 << t) != 0)
-                .map(|t| {
-                    let mut v = creature_bonus;
-                    v[t] += 1;
-                    v
-                })
-                .collect();
-            let mut units = vec![crate::mana::Unit::free(mask)];
-            for t in 0..6 {
-                units.extend(std::iter::repeat_n(crate::mana::Unit::free(1u8 << t), creature_bonus[t] as usize));
-            }
-            Yield::Multi { prods, units: Some(units) }
-        } else {
-            Yield::One(crate::mana::Unit::free(mask))
-        };
         let mut inserted = 0;
-        debug_assert!(pol.iter().all(|x| x.1 == mask && x.2 == filter), "one kind of Pollinator ability (CardDb::new checks)");
-        let actors: Vec<CardIdx> = pol.iter().map(|x| x.0).collect();
-        let k = actors.len().min(u8::MAX as usize) as u8;
         let ctx = crate::cast::Ctx { controller: p, source: None };
-        for x in self.permanents_of(p) {
-            if Some(x) == exclude || self.objs[x.i()].tapped || !self.card_matches(filter, x, &ctx) {
-                continue;
-            }
-            let taps = if actors.contains(&x) { 2 } else { 1 };
-            if taps > k {
-                continue;
-            }
-            let def = self.objs[x.i()].def;
-            let src = Src { card: x, slot: POL_FOR };
-            match out.iter_mut().find(|cl| cl.def == def && cl.members[0].slot == POL_FOR && cl.taps == taps) {
-                Some(cl) => cl.members.push(src),
-                None => {
-                    let cl = Class { res: TAP, share: k, taps, ..Class::of(def, src, yld.clone()) };
-                    if bonus {
-                        out.insert(n_multi + inserted, cl);
-                        inserted += 1;
-                    } else {
-                        out.push(cl);
+        for (mask, filter, extra, actors) in groups {
+            *pools += 1;
+            let pool = *pools;
+            let yld = if extra != [0; 6] {
+                let prods: Vec<[u8; 6]> = (0..6)
+                    .filter(|&t| mask & (1 << t) != 0)
+                    .map(|t| {
+                        let mut v = extra;
+                        v[t] += 1;
+                        v
+                    })
+                    .collect();
+                let mut units = vec![crate::mana::Unit::free(mask)];
+                for t in 0..6 {
+                    units.extend(std::iter::repeat_n(crate::mana::Unit::free(1u8 << t), extra[t] as usize));
+                }
+                Yield::Multi { prods, units: Some(units) }
+            } else {
+                Yield::One(crate::mana::Unit::free(mask))
+            };
+            for x in self.permanents_of(p) {
+                if Some(x) == exclude || self.objs[x.i()].tapped || !self.card_matches(filter, x, &ctx) {
+                    continue;
+                }
+                // (A pool's only Pollinator can't tap itself for its cost.)
+                if actors.len() == 1 && actors[0] == x {
+                    continue;
+                }
+                let def = self.objs[x.i()].def;
+                let src = Src { card: x, slot: POL_FOR, g: pool };
+                match out.iter_mut().find(|cl| cl.def == def && cl.members[0].slot == POL_FOR && cl.pool == pool) {
+                    Some(cl) => cl.members.push(src),
+                    None => {
+                        let cl = Class { res: TAP, pool, actors: actors.clone(), ..Class::of(def, src, yld.clone()) };
+                        if matches!(cl.yld, Yield::Multi { .. }) {
+                            out.insert(n_multi + inserted, cl);
+                            inserted += 1;
+                        } else {
+                            out.push(cl);
+                        }
                     }
                 }
             }
         }
         inserted
-    }
-
-    /// A Pollinator that could activate, tapped for improvise or convoke,
-    /// can't activate any more: those members take one of the Pollinators'
-    /// `share` (ENGINE.md 99.12).
-    pub(crate) fn pol_split(&self, p: PlayerId, classes: &mut Vec<crate::pay::Class>) {
-        use crate::pay::{Members, IMPROVISE};
-        let actors = self.pol_activators(p);
-        let k = actors.len().min(u8::MAX as usize) as u8;
-        if k == 0 {
-            return;
-        }
-        let mut split = Vec::new();
-        for cl in classes.iter_mut().filter(|cl| cl.members[0].slot == IMPROVISE) {
-            let (mut a, mut rest) = (Members::new(), Members::new());
-            for s in cl.members.iter() {
-                if actors.contains(&s.card) {
-                    a.push(*s);
-                } else {
-                    rest.push(*s);
-                }
-            }
-            if !a.is_empty() {
-                split.push(crate::pay::Class { members: a, share: k, taps: 1, ..cl.clone() });
-                cl.members = rest;
-            }
-        }
-        classes.retain(|cl| !cl.members.is_empty());
-        classes.extend(split);
     }
 }
 
