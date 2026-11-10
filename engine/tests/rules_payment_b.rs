@@ -1431,13 +1431,23 @@ fn b6_db() -> &'static CardDb {
                 "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
                     "cost": {"$t": "ActivationCost", "sacrifice_subtype": "Rebel", "extra_costs": [{"$t": "TapUntappedPermanentsCost",
                         "label": "an untapped Rebel you control", "permanent_filter": {"$t": "HasSubtype", "name": "Rebel"}}]},
-                    "effect": draw}]})),
+                    "effect": draw.clone()}]})),
+            // "{1}, Crew 1, Sacrifice an enchantment: Draw a card."
+            eoe_w2::card("Test Crew Altar", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "mana": {"$t": "ManaCost", "generic": 1}, "mana_str": "{1}", "crew": 1,
+                        "sacrifice_a_permanent_type": "enchantment"}, "effect": draw}]})),
+            // A 1/1 Rebel with "{T}: Add {G}".
+            eoe_w2::card("Test Elf Rebel", json!({"card_types": ["Creature"], "subtypes": ["Rebel"], "power": 1, "toughness": 1,
+                "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["G", 1]]}, "mana_cost_str": "{G}",
+                "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_self": true},
+                    "effect": {"$t": "AddManaToPool", "produces": [["G", 1]]}, "is_mana_ability": true}]})),
         ];
         let mut cards = engine::db::load_cube_document().cards;
         cards.extend(common::custom_cards());
         cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
         let db = CardDb::from_cards(&cards);
-        for n in ["Test Weakness Charm", "Test Crew Shrine", "Test Desperate Rebel", "Test Blood Shrine", "Test Rebel", "Test Rebel Altar"] {
+        for n in ["Test Weakness Charm", "Test Crew Shrine", "Test Desperate Rebel", "Test Blood Shrine", "Test Rebel", "Test Rebel Altar", "Test Crew Altar", "Test Elf Rebel"] {
             db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
         }
         db.leak()
@@ -1683,4 +1693,36 @@ fn cr_601_2h_a_card_discarded_for_the_cost_is_delved() {
     assert_eq!(g.obj(forest).zone, Zone::Exile, "discarded, then delved\n{}", log(&g));
     assert_eq!(g.count_in(0, "Mountain", Zone::Exile), 5, "{}", log(&g));
     assert_eq!(g.count_in(0, "Swamp", Zone::Hand), 1, "{}", log(&g));
+}
+
+/// CR 601.2g-h: where the order of a cost's parts can matter, the mana is paid
+/// first (601.2g's mana abilities) and every source offered leaves the rest
+/// payable in some order. Test Crew Altar's "{1}, Crew 1, Sacrifice an
+/// enchantment" with Test Weakness Charm, Test Elf Rebel (1/1, "{T}: Add
+/// {G}") and a Forest: the Rebel tapped for mana couldn't crew, so only the
+/// Forest pays the {1}; then the Charm is sacrificed and the Rebel crews.
+#[test]
+fn cr_601_2g_the_mana_leaves_the_parts_payable_in_some_order() {
+    let mut g = b6_scen().battlefield(0, &["Test Crew Altar", "Test Weakness Charm", "Test Elf Rebel", "Forest"]).at(Step::Main1, 0).start();
+    let altar = bf(&g, 0, "Test Crew Altar");
+    let rebel = bf(&g, 0, "Test Elf Rebel");
+    let forest = bf(&g, 0, "Forest");
+    assert!(g.has_option(act(altar, 0)), "{:?}", g.options_desc());
+    g.choose(act(altar, 0));
+    for _ in 0..10 {
+        if g.kind() == Some(DecisionKind::PayMana) {
+            break;
+        }
+        let c = options(&g)[0];
+        g.choose(c);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}
+{}", g.options_desc(), log(&g));
+    assert_eq!(options(&g), vec![act(forest, 0)], "the Rebel's mana would leave no crew: {:?}", g.options_desc());
+    same_after_determinize(&g);
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert!(g.obj(rebel).tapped && g.obj(forest).tapped, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Test Weakness Charm", Zone::Graveyard), 1, "{}", log(&g));
+    assert_eq!(g.player(0).hand.len(), 1, "{}", log(&g));
 }
