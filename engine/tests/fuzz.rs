@@ -2027,6 +2027,9 @@ fn play_hidden(seed: u64) -> Played {
     };
     let mut a = engine::az::MtgAz::from_seats(game_db(), gspec, engine::az::Format::Bo1, &[seat(d0, s0), seat(d1, s1)], seed, [Some(prior.clone()), Some(prior)])
         .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+    // (The K-sample deal, ENGINE.md 102.8: `FUZZ_DEAL_SAMPLES=k`, default the spec's 32; 0 = a
+    // fresh sample of the prior at every deal.)
+    a.m.deal.k = std::env::var("FUZZ_DEAL_SAMPLES").ok().map_or(32, |v| v.parse().expect("FUZZ_DEAL_SAMPLES: a number"));
     let mut rng = Rng::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 1);
     let mut crng = Rng::new(seed ^ 0xC0_4D_1E7E);
     let (mut actions, mut keys, mut buf) = (Vec::new(), Vec::new(), Vec::new());

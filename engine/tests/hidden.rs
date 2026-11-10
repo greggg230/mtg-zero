@@ -1155,3 +1155,108 @@ fn the_sealed_spec_deals_hidden_decks_from_the_sealed_prior() {
     println!("{worlds} sealed worlds, {other} with another deck");
     assert!(worlds >= 20 && other == worlds, "{worlds} {other}");
 }
+
+// ---- The K-sample deal's cost (ENGINE.md 102.8) ----
+
+/// The per-simulation cost of a hidden-decklist world on sealed positions (ENGINE.md 102.8;
+/// `cargo test --release -p engine --test hidden deal_cost -- --ignored --nocapture`): for each
+/// position, 128 deals as a search's simulations make them (clone + `determinize`), with K = 0
+/// (the prior sampled at every deal) and K = 32 (its first deal fills the memo), the mean per deal;
+/// and the sealed prior's parts (an arena and a paper pool, a build).
+#[test]
+#[ignore]
+fn deal_cost() {
+    use engine::az::sealed::{builder, collation::Collation, generated_pool, SealedSpec};
+    use std::time::Instant;
+    let db = engine::az::sealed::db();
+    let spec = SealedSpec::parse(&serde_json::json!({"set": "eoe", "collation": "arena"})).unwrap();
+    for c in [Collation::Arena, Collation::Paper] {
+        let t = Instant::now();
+        for s in 0..50 {
+            std::hint::black_box(generated_pool(db, c, 6, s).unwrap());
+        }
+        println!("{c:?} pool: {:.1} us", t.elapsed().as_secs_f64() * 1e6 / 50.0);
+    }
+    let pool = generated_pool(db, Collation::Arena, 6, 1).unwrap();
+    let t = Instant::now();
+    for s in 0..200 {
+        std::hint::black_box(builder::build(db, &pool, &spec.builder, &mut Rng::new(s)));
+    }
+    println!("a build: {:.1} us", t.elapsed().as_secs_f64() * 1e6 / 200.0);
+    for coll in ["arena", "paper"] {
+        let mut rng = Rng::new(1028);
+        let mut pos = Vec::new();
+        let sp = MtgSpec::parse(&format!(r#"{{"sealed": {{"set": "eoe", "collation": "{coll}"}}}}"#)).unwrap();
+        for s in 0..8u64 {
+            let mut a = MtgAz::new_game(&sp, 2, 1028 + s).unwrap();
+            let mut keys = Vec::new();
+            while a.to_move().is_some() && pos.len() < 5 * (s as usize + 1) {
+                if a.g.turn().number >= 3 && rng.below(20) == 0 {
+                    pos.push(a.clone());
+                }
+                let l = az_legal(&a);
+                a.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+            }
+        }
+        // (K = 32 with one deal memo across the positions: its pool bank built once, as within a
+        // game, so a position's first deal costs K conditioned builds; 'fresh': a memo per position.)
+        let shared = engine::az::hidden_decks::DealCache::new(32, 77);
+        for (k, label) in [(0usize, "fresh"), (32, "fresh"), (32, "bank built")] {
+            let (mut total, mut first) = (0.0, 0.0);
+            for a in &pos {
+                let mut b = a.clone();
+                b.m.deal = if label == "bank built" { shared.clone() } else { engine::az::hidden_decks::DealCache::new(k, 77) };
+                let v = b.to_move().unwrap();
+                let mut zr = zero_search::rng::Rng::new(5);
+                for i in 0..128 {
+                    let t = Instant::now();
+                    let mut d = b.clone();
+                    d.determinize(v, &mut zr);
+                    std::hint::black_box(&d);
+                    let e = t.elapsed().as_secs_f64();
+                    total += e;
+                    if i == 0 {
+                        first += e;
+                    }
+                }
+            }
+            let n = pos.len() as f64;
+            println!("{coll} K = {k} ({label}): {} positions, {:.1} us per deal over 128 (the first {:.1} us)", pos.len(), total * 1e6 / (n * 128.0), first * 1e6 / n);
+        }
+    }
+}
+
+/// The K-sample deal (ENGINE.md 102.8): a world depends only on its generator and the viewer's
+/// information - the same with a warm memo, a cold one or a clone's - and the worlds of one
+/// request hold at most K decks (each still holding what the viewer saw); K = 0 samples afresh.
+#[test]
+fn the_k_sample_deal_is_a_function_of_the_seed_and_the_information() {
+    let sp = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "paper"}, "deal_samples": 4}"#).unwrap();
+    assert_eq!(sp.deal_samples, 4);
+    assert_eq!(MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "paper"}}"#).unwrap().deal_samples, 32);
+    let mut rng = Rng::new(1029);
+    let mut a = MtgAz::new_game(&sp, 2, 1029).unwrap();
+    let mut keys = Vec::new();
+    while a.g.turn().number < 4 && a.to_move().is_some() {
+        let l = az_legal(&a);
+        a.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+    }
+    let v = a.to_move().unwrap();
+    let shown = shown_of(&a, v as u8);
+    let mut decks = Vec::new();
+    for s in 0..40u64 {
+        let mut x = a.clone();
+        x.determinize(v, &mut zero_search::rng::Rng::new(s));
+        // a cold memo (a fresh game state with the same information) deals the same world
+        let mut y = a.clone();
+        y.m.deal = engine::az::hidden_decks::DealCache::new(4, a.m.deal.salt);
+        y.determinize(v, &mut zero_search::rng::Rng::new(s));
+        assert_eq!(x.g.fingerprint(), y.g.fingerprint(), "world {s}: the memo changed the world");
+        let d = deck_cards(&x, 1 - v as u8);
+        assert!(holds(&d, &shown));
+        if !decks.contains(&d) {
+            decks.push(d);
+        }
+    }
+    assert!(decks.len() <= 4 && decks.len() >= 2, "{} decks for K = 4", decks.len());
+}

@@ -71,6 +71,15 @@ pub trait DeckPrior: Send + Sync {
     /// long) among the cards [`sample`](Self::sample) adds beyond `want.shown`, untilted: the
     /// baseline of the deck reader's weights ([`deck_weights`]).
     fn expected_fill(&self, want: &DeckWant) -> Vec<f64>;
+    /// A bank of `k` pools the K-sample deal reuses for every set of shown cards of one game
+    /// (ENGINE.md 102.8: what the prior draws before it reads the shown cards); empty: none.
+    fn bank(&self, _k: usize, _rng: &mut Rng) -> Vec<Vec<DefId>> {
+        Vec::new()
+    }
+    /// [`sample`](Self::sample) from a pool of the [`bank`](Self::bank) instead of a new one.
+    fn sample_from(&self, want: &DeckWant, _pool: Option<&[DefId]>, rng: &mut Rng) -> SampledDeck {
+        self.sample(want, rng)
+    }
 }
 
 /// The stub prior until S2's sealed builder lands (ENGINE.md 102.1): FUZZ_POOL=eoe's random deck
@@ -315,28 +324,26 @@ impl MtgAz {
         let kn = sample::knowledge(&self.g, viewer, o, sizes);
         let comp = self.g.player(o).companion_def;
         let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt };
-        let s = prior.sample(&want, rng);
-        if let Err(e) = check_sample(&*prior, &want, &s) {
-            panic!("hidden decklists, P{viewer}'s deal of P{o}'s deck: {e}");
-        }
-        let mut deal = s.deck.clone();
+        // The K-sample deal (ENGINE.md 102.8): one of the K decks the prior gave for this request
+        // (memoized per game), else a fresh sample (K = 0, or a tilt).
+        let d: Arc<Dealt> = if want.tilt.is_none() && self.m.deal.k > 0 {
+            self.m.deal.pick(&*prior, o, &want, rng)
+        } else {
+            Arc::new(Dealt::new(&*prior, &want, prior.sample(&want, rng)))
+        };
+        let mut deal = d.deck.clone();
         deal.extend_from_slice(&kn.extras);
         deal.sort_unstable();
         for &d in &kn.known {
             assert!(take_one(&mut deal, d), "a card P{viewer} knows of P{o}'s is not in the sampled deck");
         }
         assert_eq!(deal.len(), kn.slots.len(), "P{o}'s sampled deck does not fit their cards");
-        let mut side = s.sideboard;
-        if let Some(c) = comp.filter(|c| !side.contains(c)) {
-            side.push(c);
-        }
-        side.sort_unstable();
-        self.g.redeal(viewer, o, &kn.slots, &kn.pinned, &deal, Arc::from(side.clone()), rng);
-        let (pool, counts) = MatchPool::new(db, &s.deck, &side, &[]);
+        let _ = db;
+        self.g.redeal(viewer, o, &kn.slots, &kn.pinned, &deal, d.side.clone(), rng);
         let mut pools = (*self.m.pools).clone();
-        pools[o as usize] = pool;
+        pools[o as usize] = d.pool.clone();
         self.m.pools = Arc::new(pools);
-        self.m.decks[o as usize] = Arc::from(counts);
+        self.m.decks[o as usize] = d.counts.clone();
     }
 
     /// `determinize` with the opponent's hidden deck dealt by the deck reader's weights `w` (per
@@ -423,6 +430,15 @@ impl SealedPrior {
         SealedPrior { collation, boosters, settings, support, rarity }
     }
 
+    /// A pool of the collation (sorted), its seed drawn from `rng` (never the game's `pool_seed`).
+    fn pool(&self, rng: &mut Rng) -> Vec<DefId> {
+        let seed = rng.next_u64();
+        let mut pool = super::sealed::generated_pool(super::sealed::db(), self.collation, self.boosters, seed)
+            .unwrap_or_else(|e| panic!("hidden decklists, the sealed prior: {e} (a set card the engine doesn't support)"));
+        pool.sort_unstable();
+        pool
+    }
+
     /// The prior of seat `p`'s deck of a sealed spec: its collation (a seat without one, a given
     /// pool or build of the yardstick: `arena`, whose pools are Arena's, ENGINE.md 101.1), its
     /// boosters and builder settings.
@@ -441,15 +457,24 @@ impl DeckPrior for SealedPrior {
     }
 
     fn sample(&self, want: &DeckWant, rng: &mut Rng) -> SampledDeck {
+        self.sample_from(want, None, rng)
+    }
+
+    /// Pools of the collation, each from its own seed drawn from `rng` (the K-sample deal's bank).
+    fn bank(&self, k: usize, rng: &mut Rng) -> Vec<Vec<DefId>> {
+        (0..k).map(|_| self.pool(rng)).collect()
+    }
+
+    fn sample_from(&self, want: &DeckWant, given: Option<&[DefId]>, rng: &mut Rng) -> SampledDeck {
         let db = want.db;
         let basics = super::pools::basic_ids(db);
         let is_land = |d: DefId| db.def(d).is(types::LAND);
         let tilt = |d: DefId| want.tilt.map_or(1.0, |t| t(d));
-        // 1. The pool.
-        let seed = rng.next_u64();
-        let mut pool = super::sealed::generated_pool(db, self.collation, self.boosters, seed)
-            .unwrap_or_else(|e| panic!("hidden decklists, the sealed prior: {e} (a set card the engine doesn't support)"));
-        pool.sort_unstable();
+        // 1. The pool (a bank's, or a new one).
+        let mut pool = match given {
+            Some(p) => p.to_vec(),
+            None => self.pool(rng),
+        };
         // 2. R's nonbasic cards placed in it, by rarity.
         let mut shown_in = vec![false; pool.len()];
         let mut extra: Vec<DefId> = Vec::new();
@@ -475,7 +500,9 @@ impl DeckPrior for SealedPrior {
         // 3. The build: the first of a few whose colours cover the shown cards'.
         let need = want.shown.iter().filter(|&&d| !is_land(d)).fold(0u8, |m, &d| m | db.def(d).colors) & crate::mana::COLORS;
         let mut best: Option<(u32, super::sealed::builder::Build)> = None;
-        for _ in 0..SEALED_TRIES {
+        // (Shown cards of four or five colours: no pair and splash covers them, one build.)
+        let tries = if need.count_ones() > 3 { 1 } else { SEALED_TRIES };
+        for _ in 0..tries {
             let b = super::sealed::builder::build_tilted(db, &pool, &self.settings, want.tilt, rng);
             let miss = (need & !(b.colors | b.splash)).count_ones();
             if best.as_ref().is_none_or(|x| miss < x.0) {
@@ -548,5 +575,96 @@ impl DeckPrior for SealedPrior {
             }
         }
         e
+    }
+}
+
+// ---- The K-sample deal (ENGINE.md 102.8) ----
+
+/// A deck the prior gave, ready to deal: the deck, the sideboard (a revealed companion among it),
+/// the match's pool and deck counts of it.
+pub struct Dealt {
+    pub deck: Vec<DefId>,
+    pub side: Arc<[DefId]>,
+    pub pool: MatchPool,
+    pub counts: Arc<[u8]>,
+}
+
+impl Dealt {
+    /// A sample `s` of `prior` for `want`, checked against the prior's contract (a prior that
+    /// breaks it would deal a world outside the viewer's information: a panic).
+    pub fn new(prior: &dyn DeckPrior, want: &DeckWant, s: SampledDeck) -> Dealt {
+        if let Err(e) = check_sample(prior, want, &s) {
+            panic!("hidden decklists, a deal: {e}");
+        }
+        let mut side = s.sideboard;
+        if let Some(c) = want.companion.filter(|c| !side.contains(c)) {
+            side.push(c);
+        }
+        side.sort_unstable();
+        let (pool, counts) = MatchPool::new(want.db, &s.deck, &side, &[]);
+        Dealt { deck: s.deck, side: Arc::from(side), pool, counts: Arc::from(counts) }
+    }
+}
+
+/// The K decks of one request (its key) and the per-seat pool banks of one game.
+#[derive(Default)]
+struct DealMemo {
+    entries: Vec<(u64, Arc<Vec<Arc<Dealt>>>)>,
+    banks: [Option<Arc<Vec<Vec<DefId>>>>; 2],
+}
+
+/// Requests remembered (a game's shown cards change a few dozen times; the latest are reused).
+const MEMO: usize = 16;
+
+/// The K-sample deal (ENGINE.md 102.8): for a request of the prior (the opponent's seat, the deck's
+/// size, the shown cards R, a revealed companion: everything the prior reads) the prior's K decks
+/// are drawn once, from a generator seeded by the game's `salt` and the request alone, and every
+/// deal picks one of them uniformly with its own generator. The decks are a function of the salt
+/// and the viewer's information, so a world depends only on its seed and that information; the
+/// memo (shared by a game's clones, behind a mutex: `MtgAz`'s, never `Game`'s) only saves work.
+/// A sealed prior's pools come from a bank of K pools per seat and game (what it draws before it
+/// reads R), so a new R costs K conditionings and builds, not K pool generations.
+#[derive(Clone)]
+pub struct DealCache {
+    /// K (0: every deal samples the prior afresh).
+    pub k: usize,
+    pub salt: u64,
+    memo: Arc<Mutex<DealMemo>>,
+}
+
+impl DealCache {
+    pub fn new(k: usize, salt: u64) -> DealCache {
+        DealCache { k, salt, memo: Arc::new(Mutex::new(DealMemo::default())) }
+    }
+
+    /// The request's key: the seat, the size, the companion and R.
+    fn key(o: PlayerId, want: &DeckWant) -> u64 {
+        let mut h = crate::rng::split64(0x0DEA_15A1_0000 ^ o as u64 ^ (want.n as u64) << 8 ^ (want.companion.map_or(0xFFFF, |c| c as u64)) << 24);
+        for &d in want.shown {
+            h = crate::rng::split64(h ^ d as u64);
+        }
+        h
+    }
+
+    /// One of the K decks of `want` for seat `o`, drawn uniformly with `rng`.
+    pub fn pick(&self, prior: &dyn DeckPrior, o: PlayerId, want: &DeckWant, rng: &mut Rng) -> Arc<Dealt> {
+        let key = Self::key(o, want);
+        let i = rng.below(self.k as u32) as usize;
+        let mut m = self.memo.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, v)) = m.entries.iter().find(|e| e.0 == key) {
+            return v[i].clone();
+        }
+        let bank = m.banks[o as usize]
+            .get_or_insert_with(|| Arc::new(prior.bank(self.k, &mut Rng::new(crate::rng::split64(self.salt ^ 0xBA4C ^ o as u64)))))
+            .clone();
+        let mut r = Rng::new(crate::rng::split64(self.salt ^ key));
+        let v: Vec<Arc<Dealt>> =
+            (0..self.k).map(|j| Arc::new(Dealt::new(prior, want, prior.sample_from(want, bank.get(j).map(|p| &p[..]), &mut r)))).collect();
+        let v = Arc::new(v);
+        if m.entries.len() >= MEMO {
+            m.entries.remove(0);
+        }
+        m.entries.push((key, v.clone()));
+        v[i].clone()
     }
 }

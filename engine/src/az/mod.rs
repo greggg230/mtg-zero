@@ -153,6 +153,9 @@ pub struct MtgSpec {
     pub start: Option<std::sync::Arc<lab::Start>>,
     /// Hidden decklists (ENGINE.md 102).
     pub hidden_decklists: bool,
+    /// Hidden decklists' K-sample deal (ENGINE.md 102.8): the prior's K decks per request, one
+    /// picked per deal (`"deal_samples"`, default 32; 0 = sample the prior at every deal).
+    pub deal_samples: usize,
     /// Sealed play (ENGINE.md 101): the pools, the builder and the seats; None for every other spec.
     pub sealed: Option<sealed::Shared>,
 }
@@ -174,6 +177,7 @@ impl Default for MtgSpec {
             log: false,
             start: None,
             hidden_decklists: false,
+            deal_samples: 32,
             sealed: None,
         }
     }
@@ -256,6 +260,7 @@ impl MtgSpec {
                 "constructed" => {}
                 "log" => s.log = x.as_bool().ok_or("mtg spec: log must be a boolean")?,
                 "hidden_decklists" => s.hidden_decklists = x.as_bool().ok_or("mtg spec: hidden_decklists must be a boolean")?,
+                "deal_samples" => s.deal_samples = int()? as usize,
                 "start" => s.start = Some(std::sync::Arc::new(lab::Start::parse(x, db)?)),
                 "chooser" => {
                     let c = int()?;
@@ -535,7 +540,9 @@ impl MtgAz {
             Some(sl) => std::sync::Arc::new(hidden_decks::SealedPrior::of_spec(sl)) as std::sync::Arc<dyn hidden_decks::DeckPrior>,
             None => hidden_decks::TablePrior::of(spec.db()) as std::sync::Arc<dyn hidden_decks::DeckPrior>,
         });
-        MtgAz::from_seats(spec.db(), gspec, spec.format, &seats, seed, [priors.clone(), priors])
+        let mut az = MtgAz::from_seats(spec.db(), gspec, spec.format, &seats, seed, [priors.clone(), priors])?;
+        az.m.deal.k = spec.deal_samples;
+        Ok(az)
     }
 
     /// A match whose first game has these seats (`MtgAz::new`'s, and the fuzz's own decks):

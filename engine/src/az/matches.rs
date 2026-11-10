@@ -279,6 +279,9 @@ pub struct MatchState {
     /// the other player samples it (`hidden_decks::DeckPrior`); None: that
     /// deck is open (every other format).
     pub deck_priors: [Option<Arc<dyn super::hidden_decks::DeckPrior>>; 2],
+    /// Hidden decklists' K-sample deal (ENGINE.md 102.8): K and the memo of a game's K decks
+    /// per request, shared by its clones.
+    pub deal: super::hidden_decks::DealCache,
 }
 
 /// The first game's setup of one player: deck, sideboard, first picks, and
@@ -336,6 +339,7 @@ impl MatchState {
             rng: Rng::new(seed ^ 0x3A7C_4B0B_D1CE_5EED),
             priors,
             deck_priors: [None, None],
+            deal: super::hidden_decks::DealCache::new(0, crate::rng::split64(seed ^ 0xDEA1_5A17_0000)),
         })
     }
 

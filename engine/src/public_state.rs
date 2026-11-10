@@ -347,6 +347,7 @@ pub fn fields() -> Vec<Field> {
         rng: Hidden "seeds the later games: determinize reseeds it",
         priors: Hidden "the prior of each player's unknown first picks (ENGINE.md 36.11)",
         deck_priors: Derived "hidden decklists: the prior of each player's deck (ENGINE.md 102), a setting of the match, the same in every world",
+        deal: Derived "hidden decklists: the K-sample deal's setting and memo (ENGINE.md 102.8), a function of the match's salt and what the viewer knows",
     });
     v
 }
