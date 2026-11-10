@@ -14,6 +14,14 @@
 //! reads only public information and its own cards. Every ability is
 //! activated at most a few times a turn (`cap`), so it never loops.
 //!
+//! Edge of Eternities (ENGINE.md 103): a land search that costs mana (a
+//! Lander) spends spare mana after the spells; station goes toward a
+//! threshold within reach, never past the highest, with a creature that
+//! would neither attack nor block; a card only its warp cost pays is cast
+//! only for what it does as it is cast, enters or leaves; a spell better
+//! with void waits for the second main phase; a free alternative cost comes
+//! first. `Heuristic::m7c` is the policy without these rules.
+//!
 //! `v1::HeuristicV1` is the policy before activated abilities (it never
 //! activates anything at priority), kept to measure the two against each
 //! other (`tests/bots.rs`).
@@ -102,6 +110,15 @@ pub struct Heuristic {
     /// This turn's plan is to burn the opponent out with repeated
     /// activations (damage targets the player).
     face: bool,
+    /// The rules of ENGINE.md 103 (Edge of Eternities' mechanics, by what
+    /// the cards do): a land search that costs mana is a mana sink, station
+    /// up to the highest threshold with creatures that would neither attack
+    /// nor block, a cast only its warp cost pays only for what the card does
+    /// as it is cast, enters or leaves, a spell better with void waits for
+    /// the second main phase, a free alternative cost before the mana cost.
+    /// `false`: the M7c policy before them ([`Heuristic::m7c`]), kept to
+    /// measure the two against each other (`tests/bots.rs`).
+    eoe: bool,
 }
 
 /// At most this many activations of one ability in a turn: 1 for most, a
@@ -345,7 +362,10 @@ fn opponent_only(f: &Filter) -> bool {
     }
 }
 
-fn classify(g: &Game, ad: &ActivatedDef, slot: AbilitySlot) -> Kind {
+/// (`eoe`: ENGINE.md 103's reading, where only a search of the controller's
+/// own library is its search: Boseiju's "that land's controller may search"
+/// is part of its removal.)
+fn classify(g: &Game, ad: &ActivatedDef, slot: AbilitySlot, eoe: bool) -> Kind {
     let ActEffect::Stack(ab) = &ad.effect else { return Kind::Never };
     #[derive(Default)]
     struct Fx {
@@ -381,6 +401,7 @@ fn classify(g: &Game, ad: &ActivatedDef, slot: AbilitySlot) -> Kind {
                 _ => f.draws += 1,
             },
             Op::GainLife { .. } => f.life = true,
+            Op::Search { who, .. } if eoe && *who != Who::You => {}
             Op::Search { dest, filter, .. } => match dest {
                 SearchDest::Battlefield { .. } if finds_land(g, filter) => f.fetch = true,
                 SearchDest::Hand if finds_land(g, filter) => f.land_tutor = true,
@@ -489,6 +510,115 @@ fn classify(g: &Game, ad: &ActivatedDef, slot: AbilitySlot) -> Kind {
     }
 }
 
+/// The counter a station ability puts on its source (CR 702.184a: "tap
+/// another untapped creature you control: put charge counters equal to the
+/// tapped creature's power on this permanent"), if `ad` is one: a cost that
+/// taps another permanent and an effect that puts counters on the source by
+/// the tapped one's power.
+fn station_counter(ad: &ActivatedDef) -> Option<Counter> {
+    ad.cost.tap_untapped.as_ref()?;
+    let ActEffect::Stack(ab) = &ad.effect else { return None };
+    ab.program.iter().find_map(|op| match op {
+        Op::Ext(Ext::PutCounters { on: On::Source, counter, n: Amount::TappedPower }) => Some(*counter),
+        _ => None,
+    })
+}
+
+/// The numbers of counters of kind `k` the card's abilities ask of their
+/// source ("as long as it has N or more": a station card's striations, CR
+/// 722.2a; a level up's ranges).
+fn thresholds(def: &crate::db::CardDef, k: Counter) -> Vec<u8> {
+    fn cond(c: &crate::db::Cond, k: Counter, out: &mut Vec<u8>) {
+        match c {
+            crate::db::Cond::SourceCountersIn(x, n, _) if *x == k => out.push(*n),
+            crate::db::Cond::All(v) => v.iter().for_each(|c| cond(c, k, out)),
+            _ => {}
+        }
+    }
+    fn pred(p: &crate::db::TrigPred, k: Counter, out: &mut Vec<u8>) {
+        use crate::db::TrigPred as P;
+        match p {
+            P::And(a, b) | P::Or(a, b) => {
+                pred(a, k, out);
+                pred(b, k, out);
+            }
+            P::Not(a) => pred(a, k, out),
+            P::If(c) | P::State(c) => cond(c, k, out),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for s in &def.statics {
+        if let Some(c) = &s.cond {
+            cond(c, k, &mut out);
+        }
+    }
+    for t in &def.triggers {
+        pred(&t.pred, k, &mut out);
+    }
+    for a in &def.activated {
+        if let Some(c) = &a.only_if {
+            cond(c, k, &mut out);
+        }
+    }
+    out
+}
+
+/// Is the trigger's subject its own source ("when this ...")?
+fn self_pred(p: &crate::db::TrigPred) -> bool {
+    match p {
+        crate::db::TrigPred::IsSelf(_) => true,
+        crate::db::TrigPred::And(a, b) => self_pred(a) || self_pred(b),
+        _ => false,
+    }
+}
+
+/// Does the ability, or the trigger's condition, read void (the ability
+/// word: a nonland permanent left the battlefield or a spell was warped this
+/// turn; ENGINE.md 99.4)?
+fn reads_void(ab: &AbilityDef) -> bool {
+    ops_of(ab).into_iter().any(|op| matches!(op, Op::JumpUnless { cond: crate::db::Cond::Void, .. }))
+}
+
+fn pred_void(p: &crate::db::TrigPred) -> bool {
+    use crate::db::TrigPred as P;
+    match p {
+        P::And(a, b) | P::Or(a, b) => pred_void(a) || pred_void(b),
+        P::If(c) | P::State(c) => matches!(c, crate::db::Cond::Void),
+        _ => false,
+    }
+}
+
+/// A card that does more with void as it resolves, is cast or enters (a
+/// spell's "void - instead", an enters trigger's "if void").
+fn better_with_void(def: &crate::db::CardDef) -> bool {
+    use crate::db::EventKind as E;
+    def.spell.as_ref().is_some_and(reads_void)
+        || def.triggers.iter().any(|t| {
+            matches!(t.event, E::Enters | E::IsCast) && self_pred(&t.pred) && (pred_void(&t.pred) || reads_void(&t.ability))
+        })
+}
+
+/// What a warped card does in its short stay (CR 702.185a: exiled at the
+/// beginning of the next end step): a triggered ability of its own as it is
+/// cast, enters or leaves the battlefield, or an attack this turn (haste).
+fn warp_worth(def: &crate::db::CardDef, attack_now: bool) -> bool {
+    use crate::db::EventKind as E;
+    def.triggers.iter().any(|t| matches!(t.event, E::Enters | E::LeavesBattlefield | E::IsCast) && self_pred(&t.pred))
+        || attack_now && def.keywords.has(Kw::Haste)
+}
+
+/// A cast of hand card `c` that only its warp cost pays (its mana cost
+/// can't be paid now): the warp cost's mana value.
+fn warp_only(g: &Game, p: PlayerId, c: CardIdx) -> Option<i32> {
+    if g.obj(c).zone != Zone::Hand {
+        return None;
+    }
+    let warp = g.def_of(c).alt_costs.iter().find(|a| a.warp)?;
+    let classes = g.mana_classes(p, None);
+    (!g.normal_payable(p, c, &classes)).then_some(warp.mana.mana_value() as i32)
+}
+
 /// When the bot is asked at priority (with an empty stack).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum When {
@@ -534,7 +664,13 @@ impl Default for Heuristic {
 
 impl Heuristic {
     pub fn new(seed: u64) -> Heuristic {
-        Heuristic { rng: Rng::new(seed), acts: Vec::new(), turn: 0, seen: 0, face: false }
+        Heuristic { rng: Rng::new(seed), acts: Vec::new(), turn: 0, seen: 0, face: false, eoe: true }
+    }
+
+    /// The M7c policy (ENGINE.md 24-25, 41.4), without ENGINE.md 103's
+    /// rules: a reference to measure them against (`tests/bots.rs`).
+    pub fn m7c(seed: u64) -> Heuristic {
+        Heuristic { eoe: false, ..Heuristic::new(seed) }
     }
 
     /// The bot's action for the pending decision (`legal` = its ids).
@@ -622,7 +758,8 @@ impl Heuristic {
             // done as soon as it may be, else the creature least likely to
             // attack (summoning sick first, then the smallest).
             K::ChoosePermanent if matches!(g.agenda.last(), Some(Task::PayCosts { .. })) => {
-                d.options.iter().find(|o| o.action == act::PASS).map(|o| o.action).or_else(|| {
+                let station = if self.eoe { self.station_tap(g, d, p) } else { None };
+                station.or_else(|| d.options.iter().find(|o| o.action == act::PASS).map(|o| o.action)).or_else(|| {
                     d.options
                         .iter()
                         .filter_map(|o| match o.choice {
@@ -686,6 +823,15 @@ impl Heuristic {
                 }
             }
             K::PutInHand | K::ChooseDiscard | K::PutOntoBattlefield => Some(Self::best_card(g, d)),
+            // CR 118.9, 601.2b (ENGINE.md 103): a cost that pays nothing
+            // first, then the mana cost; an alternative cost (warp) only when
+            // the mana cost can't be paid (then the first offered).
+            K::ChooseAltCost if self.eoe => d
+                .options
+                .iter()
+                .find(|o| o.choice == Choice::Number(crate::eoe_c::FREE_FIRST_SPELL))
+                .or_else(|| d.options.iter().find(|o| o.choice == Choice::Number(0)))
+                .map(|o| o.action),
             K::ChooseReplacement => Some(replacement_choice(g, d)),
             K::ChooseRoute => Some(route_choice(g, d)),
             // Enter as a copy of the most valuable permanent, or of the
@@ -851,30 +997,45 @@ impl Heuristic {
         let mut best: Option<(i32, u16)> = None;
         // The faces each option would cast (an MDFC's back face, an
         // Adventure: CR 712.11b, 715.3).
-        let mut casts: Vec<(&'static crate::db::CardDef, u16)> = Vec::new();
+        // (The card of a plain cast, for its warp cost.)
+        let mut casts: Vec<(&'static crate::db::CardDef, u16, Option<CardIdx>)> = Vec::new();
         for o in &d.options {
             match o.choice {
                 // (From the top of its library paying life, Bolas's Citadel:
                 // not at half its life or more.)
                 Choice::Cast(c) if g.obj(c).zone == Zone::Library && g.def_of(c).mana_value() as i32 * 2 >= h32(g.life(p)) => {}
-                Choice::Cast(c) => casts.push((g.def_of(c), o.action)),
-                Choice::CastFace(c) => casts.extend(g.other_face(c).map(|f| (g.db.def(f), o.action))),
+                Choice::Cast(c) => casts.push((g.def_of(c), o.action, Some(c))),
+                Choice::CastFace(c) => casts.extend(g.other_face(c).map(|f| (g.db.def(f), o.action, None))),
                 Choice::Faces(c, m) => {
                     if m & crate::decision::FACE_CAST != 0 {
-                        casts.push((g.def_of(c), o.action));
+                        casts.push((g.def_of(c), o.action, None));
                     }
                     if m & crate::decision::OTHER_CAST != 0 {
-                        casts.extend(g.other_face(c).map(|f| (g.db.def(f), o.action)));
+                        casts.extend(g.other_face(c).map(|f| (g.db.def(f), o.action, None)));
                     }
                 }
                 _ => {}
             }
         }
-        for (def, action) in casts {
+        // (ENGINE.md 103) A card better with void waits for the second main
+        // phase while there is none (combat may make it).
+        let wait_void = |def: &crate::db::CardDef| {
+            self.eoe && g.turn().step == Step::Main1 && !g.void_active() && better_with_void(def)
+        };
+        for (def, action, card) in casts {
             let Some(ab) = &def.spell else {
                 // A permanent spell: in the main phase.
-                if my_main {
-                    let score = def.mana_value() as i32 * 4 + def.is(types::CREATURE) as i32 * 2;
+                if my_main && !wait_void(def) {
+                    let mut score = def.mana_value() as i32 * 4 + def.is(types::CREATURE) as i32 * 2;
+                    // (ENGINE.md 103) Only its warp cost pays: worth it for
+                    // what the card does in its stay, after the permanents
+                    // of that cost.
+                    if let Some(mv) = card.filter(|_| self.eoe).and_then(|c| warp_only(g, p, c)) {
+                        if !warp_worth(def, g.turn().step == Step::Main1) {
+                            continue;
+                        }
+                        score = mv * 4 - 1;
+                    }
                     best = best.max(Some((score, action)));
                 }
                 continue;
@@ -890,7 +1051,7 @@ impl Heuristic {
             if dmg >= h32(g.life(q)) && dmg > 0 && Self::can_target_player(g, ab, p, q) {
                 return Some(action);
             }
-            if !my_main || !Self::worth_casting(g, ab, p) {
+            if !my_main || !Self::worth_casting(g, ab, p) || wait_void(def) {
                 continue;
             }
             let score = def.mana_value() as i32 * 4 + 1;
@@ -932,11 +1093,16 @@ impl Heuristic {
             None => {}
         }
         let ActEffect::Stack(ab) = &ad.effect else { return None };
+        if self.eoe {
+            if let Some(k) = station_counter(ad) {
+                return self.station_score(g, p, c, k, w);
+            }
+        }
         // A Class's level (CR 716): after the spells, in a main phase.
         if ab.program.iter().any(|o| matches!(o, Op::Ext(Ext::M7d(crate::program::M7d::GainClassLevel { .. })))) {
             return matches!(w, When::Main1 | When::Main2).then_some((1, 200, false));
         }
-        let kind = classify(g, ad, slot);
+        let kind = classify(g, ad, slot, self.eoe);
         if let Some(d) = ad.loyalty {
             return self.loyalty_score(g, p, c, ab, kind, d as i32).map(|s| (2, s, false));
         }
@@ -1001,6 +1167,14 @@ impl Heuristic {
         }
         let score = match kind {
             Kind::Never => return None,
+            // (ENGINE.md 103) A search that costs mana (a Lander, CR 111.10):
+            // spare mana after the spells, not before them.
+            Kind::Fetch if self.eoe && !cost.mana.is_zero() => {
+                if !(if instant { matches!(w, When::OppEnd | When::Main2) } else { w == When::Main2 }) {
+                    return None;
+                }
+                (1, 190)
+            }
             Kind::Fetch => {
                 if !(main || w == When::OppEnd) {
                     return None;
@@ -1197,6 +1371,65 @@ impl Heuristic {
             return Some(if mana_only { 350 } else { 420 });
         }
         (l + d >= 1 && !matches!(kind, Kind::Never | Kind::Removal)).then_some(300 + d)
+    }
+
+    /// Station (CR 702.184a; ENGINE.md 103): in a main phase, toward the
+    /// source's next threshold (none past the highest: more counters do
+    /// nothing) while it is within reach, at most twice the power of the
+    /// creatures station may tap now (`station_tappers`) together.
+    fn station_score(&self, g: &Game, p: PlayerId, c: CardIdx, k: Counter, w: When) -> Option<(u8, i32, bool)> {
+        if !matches!(w, When::Main1 | When::Main2) {
+            return None;
+        }
+        let have = g.counters_on(c, k);
+        let next = thresholds(g.def_of(c), k).into_iter().map(|n| n as crate::num::Count).filter(|&n| n > have).min()?;
+        let power: i64 = self.station_tappers(g, p, c, w == When::Main1).iter().map(|&x| h32(g.power(x)) as i64).sum();
+        if power == 0 || (next - have) as i64 > 2 * power {
+            return None;
+        }
+        Some((1, 280, false))
+    }
+
+    /// The creatures station may tap: `p`'s other untapped creatures with
+    /// power, kept back by no opposing creature (one it would block and
+    /// survive, or kill), and before combat only those that would not attack
+    /// (summoning sick, or an untapped blocker would eat them).
+    fn station_tappers(&self, g: &Game, p: PlayerId, src: CardIdx, before_combat: bool) -> Vec<CardIdx> {
+        let q = opp(p);
+        g.creatures_of(p)
+            .filter(|&x| x != src && !g.obj(x).tapped && h32(g.power(x)) > 0)
+            .filter(|&x| !before_combat || g.is_sick(x) || self.eaten(g, x, q))
+            .filter(|&x| !Self::blocks_well(g, x, q))
+            .collect()
+    }
+
+    /// Would `x` block a creature of `q` well (survive it, or kill it)?
+    fn blocks_well(g: &Game, x: CardIdx, q: PlayerId) -> bool {
+        g.creatures_of(q).any(|a| h32(g.power(a)) > 0 && g.can_block(x, a) && (!Self::kills(g, a, x) || Self::kills(g, x, a)))
+    }
+
+    /// The creature to tap for a station ability being paid for: among
+    /// `station_tappers`, the smallest that reaches the source's next
+    /// threshold, else the strongest.
+    fn station_tap(&self, g: &Game, d: &Decision, p: PlayerId) -> Option<u16> {
+        let Some(&Task::PayCosts { id, .. }) = g.agenda.last() else { return None };
+        let item = &g.stack[g.item_index(id)?];
+        let StackKind::Ability { ability, source } = item.kind else { return None };
+        let k = station_counter(g.db.def(ability.def).activated_def(ability.slot))?;
+        let src = source.idx;
+        let have = g.counters_on(src, k);
+        let next = thresholds(g.def_of(src), k).into_iter().map(|n| n as crate::num::Count).filter(|&n| n > have).min()?;
+        let need = h32(next - have);
+        let free = self.station_tappers(g, p, src, g.turn().step == Step::Main1);
+        let cands: Vec<(i32, u16)> = d
+            .options
+            .iter()
+            .filter_map(|o| match o.choice {
+                Choice::Card(x) if free.contains(&x) => Some((h32(g.power(x)), o.action)),
+                _ => None,
+            })
+            .collect();
+        cands.iter().filter(|x| x.0 >= need).min().or_else(|| cands.iter().max()).map(|x| x.1)
     }
 
     /// The most valuable opposing permanent the ability would remove (its

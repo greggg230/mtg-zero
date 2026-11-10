@@ -769,3 +769,9 @@ spec's `"order": "given"`, digests unchanged), the pilot's streams shared; paire
 their intervals; racing by pairwise GSPRT against every survivor (ENGINE.md 73's test, alpha / (N - 1));
 the 17lands mode (a human build against our builds of its pool, a yardstick only). The heuristic's
 noise and what it means for S4: ENGINE.md 104.5.
+
+**Yardsticks on EoE (2026-11-09, branch `eoe-bot`; ENGINE.md 103):** the heuristic reads station,
+warp, void and Landers (general rules; `Heuristic::m7c` keeps the old policy): 99.4% / 99.8% against
+random on random / two-colour EoE decks, at most 0.1% turn-limit draws, 57% against the M7c policy; the
+cube's numbers unchanged (97.8% against random). A run's evaluation can play these baselines on EoE
+once S2's `"sealed"` spec merges (and 103.6's payment panic is fixed).
