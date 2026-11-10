@@ -255,3 +255,8 @@ def test_the_cli(builds, tmp_path):
     assert r['games'] <= 128 and len(r['candidates']) == 3
     assert K.main(['builds', '--pool-seed', str(p['seed']), '--seeds', '0,1', '--out', str(tmp_path / 'decks')]) == 0
     assert len(os.listdir(tmp_path / 'decks')) == 2
+    # the yardstick: the first fully supported pool's human build against our builds of it
+    assert K.main(['yardstick', '--pool', '0', '--ours', '0', '--games', '32', '--block', '32', '--threads', '2',
+                   '--quiet', '--json', str(out)]) == 0
+    r = json.loads(out.read_text(encoding='utf-8'))
+    assert r['yardstick']['note'].startswith('a yardstick only') and [c['name'] for c in r['candidates']][1] == 'ours0'

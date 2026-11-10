@@ -759,3 +759,13 @@ pools fully supported on this base, 99.1% once The Dominion Bracelet merges) and
 makes a spec playing a pool's human build or our build of it; `FUZZ_POOL=sealed` (20,000 seeds: three
 find engine bugs, a payment panic and two loops that don't end, ENGINE.md 101.7). Next: hidden
 decklists (the encoding owner's; ENGINE.md 101.5 lists what the deal's prior needs), then S3.
+
+**S4 verify / S5 yardstick tool (2026-11-09, branch `eoe-paired`; ENGINE.md 104):** paired deck
+comparison, `python -m mtgz.sealed.compare`: candidate decks play the same games against a field (a
+fixed deck or our builder's decks from generated pools) with one pilot (random, the heuristic, or a
+network checkpoint as zero.h2h plays it): one seed, opponent, seat and chooser per game for every
+candidate, the decks laid out slot by slot so the setup shuffle maps their slots alike (the sealed
+spec's `"order": "given"`, digests unchanged), the pilot's streams shared; paired differences with
+their intervals; racing by pairwise GSPRT against every survivor (ENGINE.md 73's test, alpha / (N - 1));
+the 17lands mode (a human build against our builds of its pool, a yardstick only). The heuristic's
+noise and what it means for S4: ENGINE.md 104.5.
