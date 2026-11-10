@@ -1866,3 +1866,82 @@ fn cr_614_1a_a_replacement_effects_source_sacrificed_first_or_not() {
     assert_eq!(g.obj(idol).zone, Zone::Graveyard, "{}", log(&g));
     assert_eq!(g.obj(walker).zone, Zone::Graveyard, "{}", log(&g));
 }
+
+/// Cast Collective Brutality from P0's graveyard, answering with the first
+/// option, until its first mode is asked.
+fn brutality_to_modes(g: &mut Game) -> CardIdx {
+    let cb = g.card(0, "Collective Brutality", Zone::Graveyard);
+    assert!(castable_from_gy(g, cb), "{:?}\n{}", g.options_desc(), log(g));
+    g.choose(Choice::Cast(cb));
+    for _ in 0..10 {
+        if g.kind() == Some(DecisionKind::ChooseMode) {
+            return cb;
+        }
+        let c = options(g)[0];
+        g.choose(c);
+    }
+    panic!("no mode decision: {:?}\n{}", g.options_desc(), log(g));
+}
+
+/// CR 702.120a, 601.2b, 601.2f-h: escalate's discards are an additional
+/// cost, paid with the cost's other parts. Collective Brutality retraced by
+/// Wrenn and Six's emblem ("discard a land card") with a Forest and an Island
+/// in hand: two modes (the Forest for retrace, the Island for escalate), never
+/// three. The engine offered the third mode (two cards in hand, two discards:
+/// it didn't count retrace's) and then paid one discard fewer.
+#[test]
+fn cr_702_120a_escalate_counts_the_costs_other_discard() {
+    let mut g = b7_scen()
+        .battlefield(0, &["Swamp", "Swamp"])
+        .graveyard(0, &["Collective Brutality"])
+        .hand(0, &["Forest", "Island"])
+        .emblem(0, "Wrenn and Six")
+        .battlefield(1, &["Test Bear"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = bf(&g, 1, "Test Bear");
+    let cb = brutality_to_modes(&mut g);
+    g.choose(Choice::Number(0));
+    g.choose(Choice::Number(1));
+    assert_eq!(options(&g), vec![Choice::Pass], "a third mode: three cards to discard, two in hand: {:?}", g.options_desc());
+    g.choose(Choice::Pass);
+    finish(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) if g.has_option(g.tgt(bear)) => Some(g.tgt(bear)),
+        Some(DecisionKind::Target) => Some(Choice::Target(engine::Target::Player(1))),
+        _ => None,
+    });
+    assert_eq!(g.obj(cb).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Forest", Zone::Graveyard) + g.count_in(0, "Island", Zone::Graveyard), 2, "both discarded\n{}", log(&g));
+}
+
+/// CR 702.120a, 702.138a, 601.2h: escalate's discards and escape's "exile
+/// three other cards from your graveyard" are paid in any order: a card
+/// discarded for escalate is one escape may exile. Collective Brutality with
+/// Underworld Breach, two other cards in the graveyard and an Island in hand:
+/// cast with two modes (one discard), the Island discarded and exiled. With one
+/// mode the graveyard is a card short, so its first mode can't be the last.
+/// (The engine discarded for escalate after the exile, and its castability
+/// counted one mode: not castable.)
+#[test]
+fn cr_702_120a_a_card_discarded_for_escalate_is_exiled_for_escape() {
+    let mut g = b7_scen()
+        .battlefield(0, &["Swamp", "Swamp", "Underworld Breach"])
+        .graveyard(0, &["Collective Brutality", "Mountain", "Mountain"])
+        .hand(0, &["Island"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let island = g.card(0, "Island", Zone::Hand);
+    let cb = brutality_to_modes(&mut g);
+    g.choose(Choice::Number(0));
+    assert_eq!(options(&g), vec![Choice::Number(2)], "one mode leaves the graveyard short: {:?}", g.options_desc());
+    g.choose(Choice::Number(2));
+    finish(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => Some(Choice::Target(engine::Target::Player(1))),
+        _ => None,
+    });
+    assert_eq!(g.obj(cb).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.obj(island).zone, Zone::Exile, "discarded, then exiled\n{}", log(&g));
+    assert_eq!(g.count_in(0, "Mountain", Zone::Exile), 2, "{}", log(&g));
+}

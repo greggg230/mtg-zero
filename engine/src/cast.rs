@@ -364,6 +364,17 @@ impl Game {
                 return self.options_payable(p, c, crate::game::CastFrom::Hand, extra, 0, cls, Some(c));
             }
             let cost = self.delve_reduced(c, p, self.route_mana_plus(c, p, crate::game::CastFrom::Hand, extra), 0);
+            // Escalate's discards (CR 702.120a): the cost with one mode is
+            // checked below; with more, the discards are the rest of it
+            // (`escalate_any`).
+            if self.escalate_any(p, c, None, |rest| {
+                rest.is_some_and(|r| {
+                    let cost = self.delve_reduced_with(c, p, self.route_mana_plus(c, p, crate::game::CastFrom::Hand, extra), 0, Some(r));
+                    self.cost_payable(p, c, r, &cost, cls, Some(c))
+                })
+            }) {
+                return true;
+            }
             // Mana that can only be spent on some spells (Mishra's
             // Workshop, Delighted Halfling): with what this spell allows.
             let allow = self.spend_allow(c);
@@ -905,15 +916,25 @@ impl Game {
             return false;
         }
         // `extra`: the mana of additional costs announced (CR 601.2f).
+        // (Escalate's discards with the rest: `escalate_any`.)
         let paid = |extra: &crate::mana::ManaCost| {
-            let mana = self.delve_reduced_with(card, p, self.route_mana_plus(card, p, from, extra), keep, self.route_extra(card, from, 0));
-            match from {
-                _ if !def.additional.is_empty() => self.options_payable(p, card, from, extra, keep, classes, None),
-                crate::game::CastFrom::Escape | crate::game::CastFrom::Retrace => {
-                    self.cost_payable(p, card, self.route_extra(card, from, 0).expect("an escape or retrace cost"), &mana, classes, None)
-                }
-                _ => self.can_pay_with(p, &mana, classes, &crate::pay::Keep { allow: self.spend_allow_from(card, from), life: top_life as u32, ..Default::default() }),
+            if !def.additional.is_empty() {
+                return self.options_payable(p, card, from, extra, keep, classes, None);
             }
+            let base = match from {
+                crate::game::CastFrom::Escape | crate::game::CastFrom::Retrace => self.route_extra(card, from, 0),
+                _ => None,
+            };
+            self.escalate_any(p, card, base, |rest| {
+                let mana = self.delve_reduced_with(card, p, self.route_mana_plus(card, p, from, extra), keep, rest);
+                match (from, rest) {
+                    (crate::game::CastFrom::Escape | crate::game::CastFrom::Retrace, _) => {
+                        self.cost_payable(p, card, rest.expect("an escape or retrace cost"), &mana, classes, None)
+                    }
+                    (_, Some(r)) => self.cost_payable(p, card, &Self::with_life(r, top_life as u32), &mana, classes, None),
+                    (_, None) => self.can_pay_with(p, &mana, classes, &crate::pay::Keep { allow: self.spend_allow_from(card, from), life: top_life as u32, ..Default::default() }),
+                }
+            })
         };
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
         match self.spree_extras(card, p) {
@@ -1081,10 +1102,11 @@ impl Game {
                     .as_ref()
                     .and_then(|ab| ab.modes.as_ref())
                     .is_some_and(|m| self.spell_targets_available(&m.list[k], p, card)))
-                && {
-                    let cost = self.delve_reduced_with(card, p, self.route_mana_plus(card, p, from, &extra.plus(&o.mana)), keep, Some(o));
-                    self.cost_payable(p, card, &Self::with_life(o, top_life as u32), &cost, classes, exclude)
-                }
+                && self.escalate_any(p, card, Some(o), |r| {
+                    let r = r.expect("a cost");
+                    let cost = self.delve_reduced_with(card, p, self.route_mana_plus(card, p, from, &extra.plus(&o.mana)), keep, Some(r));
+                    self.cost_payable(p, card, &Self::with_life(r, top_life as u32), &cost, classes, exclude)
+                })
         })
     }
 
@@ -1366,7 +1388,7 @@ impl Game {
         if item.delved as usize == committed.len() + promised.len() {
             if let Some(rest_cost) = self.spell_rest(card, item) {
                 let gy_left = n_cards.saturating_sub(keep);
-                opts.extend(self.promise_options(p, card, &cost, rest_cost, gy_left, allow));
+                opts.extend(self.promise_options(p, card, &cost, &rest_cost, gy_left, allow));
             }
         }
         if need == 0 || opts.is_empty() {
@@ -1379,12 +1401,69 @@ impl Game {
 
     /// The cost spell `card` (on the stack as `item`) pays besides its mana:
     /// its alternative cost's rest, or the additional cost chosen (retrace's
-    /// land card merged in).
-    pub(crate) fn spell_rest(&self, card: CardIdx, item: &crate::game::StackItem) -> Option<&'static crate::db::Cost> {
-        if item.alt > 0 {
-            Some(self.item_alt_rest(card, item))
-        } else {
-            self.route_extra(card, item.from, item.cost_option)
+    /// land card merged in); with escalate's discards for the modes chosen
+    /// beyond the first (CR 702.120a: an additional cost, paid with the
+    /// others in any order, 601.2h; ENGINE.md 100.4.10).
+    pub(crate) fn spell_rest(&self, card: CardIdx, item: &crate::game::StackItem) -> Option<std::borrow::Cow<'static, crate::db::Cost>> {
+        let base = if item.alt > 0 { Some(self.item_alt_rest(card, item)) } else { self.route_extra(card, item.from, item.cost_option) };
+        let n = self.escalated(card, item);
+        if n == 0 {
+            return base.map(std::borrow::Cow::Borrowed);
+        }
+        Some(std::borrow::Cow::Owned(Self::with_escalate(base, n)))
+    }
+
+    /// Can spell `card` (on the stack as `item`, with its alternative cost and
+    /// option chosen, X not yet) be paid with `n` cards discarded for escalate
+    /// besides the rest of its cost (CR 702.120a, 601.2f-h; ENGINE.md
+    /// 100.4.10)?
+    pub(crate) fn escalated_payable(&self, card: CardIdx, item: &crate::game::StackItem, n: usize) -> bool {
+        let p = item.controller;
+        let def = self.def_of(card);
+        let base = if item.alt > 0 { Some(self.item_alt_rest(card, item)) } else { self.route_extra(card, item.from, item.cost_option) };
+        let rest = Self::with_escalate(base, u8::try_from(n).expect("escalate: at most 255 modes"));
+        let classes = self.pay_classes(p, None, if def.improvise { types::ARTIFACT } else { 0 }, def.casting.convoke);
+        let classes = self.delve_classes(p, card, &classes).into_owned();
+        let keep = self.escape_exiles(card, item.from);
+        let life_later = self.life_later(card, item);
+        let mana = self.delve_reduced_with(card, p, self.total_mana(card, item), keep, Some(&rest));
+        self.cost_payable(p, card, &Self::with_life(&rest, life_later), &mana, &classes, None)
+    }
+
+    /// Castability with escalate (CR 702.120a, 601.2b; ENGINE.md 100.4.10):
+    /// `pays` the cost with `rest` besides the mana, or with `rest` and `e`
+    /// cards discarded for escalate for some `e` such that `e + 1` of
+    /// `card`'s modes have their targets now (more discards can help: the
+    /// cards they put into the graveyard exiled for escape).
+    pub(crate) fn escalate_any(&self, p: PlayerId, card: CardIdx, rest: Option<&crate::db::Cost>, pays: impl Fn(Option<&crate::db::Cost>) -> bool) -> bool {
+        if pays(rest) {
+            return true;
+        }
+        let Some(m) = self.def_of(card).spell.as_ref().and_then(|ab| ab.modes.as_ref()).filter(|m| m.escalate_discard) else { return false };
+        let with_targets = m.list.iter().filter(|ab| self.spell_targets_available(ab, p, card)).count().min(m.max as usize);
+        (1..with_targets).any(|e| {
+            let c = Self::with_escalate(rest, u8::try_from(e).expect("escalate: at most 255 modes"));
+            pays(Some(&c))
+        })
+    }
+
+    /// Escalate's discards (CR 702.120a): one for each mode of spell `card`
+    /// chosen beyond the first.
+    pub(crate) fn escalated(&self, card: CardIdx, item: &crate::game::StackItem) -> u8 {
+        let esc = self.def_of(card).spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard);
+        if !esc {
+            return 0;
+        }
+        u8::try_from(item.modes.len().saturating_sub(1)).expect("escalate: at most 255 modes")
+    }
+
+    /// Cost `base` (none: nothing) with `n` more cards to discard, escalate's
+    /// ("discard a card": the cost's discard without a filter, `merge_costs`).
+    pub(crate) fn with_escalate(base: Option<&crate::db::Cost>, n: u8) -> crate::db::Cost {
+        let e = crate::db::Cost { discard: n, ..crate::db::Cost::default() };
+        match base {
+            Some(b) => crate::db::merge_costs(b, &e).expect("escalate's discards merge into a spell's cost (one discard without a filter)"),
+            None => e,
         }
     }
 
@@ -1543,23 +1622,6 @@ impl Game {
     /// Is hand card `c` promised to a delve in progress (`Mark::DelvePromised`)?
     pub(crate) fn delve_promising(&self, c: CardIdx) -> bool {
         !self.marks.is_empty() && self.marks.iter().any(|&(o, m)| o.idx == c && m == crate::game::Mark::DelvePromised && self.live(o))
-    }
-
-    /// Escalate (CR 702.120a): discard a card for each mode beyond the
-    /// first, one decision per card.
-    pub(crate) fn escalate(&mut self, id: u32) {
-        let Some(pos) = self.item_index(id) else { return };
-        let p = self.stack[pos].controller;
-        if let Some(Choice::Card(c)) = self.answer.take() {
-            self.discard(c);
-            self.stack[pos].delve_floor += 1; // (discards paid so far)
-        }
-        let item = &self.stack[pos];
-        let owed = item.modes.len().saturating_sub(1);
-        if (item.delve_floor as usize) < owed && !self.players[p as usize].hand.is_empty() {
-            let opts = self.hand_options(p);
-            self.ask(Task::Escalate { id }, p, DecisionKind::DiscardCost, opts);
-        }
     }
 
     /// Mox Diamond as it resolves: discard a land card (it enters) or not
@@ -1903,14 +1965,15 @@ impl Game {
         if chosen >= m.max as usize {
             return;
         }
-        // Escalate (702.120a): another mode needs another card to discard.
-        let escalate_cap = m.escalate_discard && chosen >= 1 && {
-            let StackKind::Spell { card } = item.kind else { return };
-            let p = item.controller;
-            // Enough other cards, and the mana payable while keeping them.
-            let mana = self.route_mana(card, p, item.from);
-            let keep = crate::pay::Keep { reserves: vec![(crate::pay::Reserve::Discard(chosen as u8, None), card)], ..Default::default() };
-            self.players[p as usize].hand.len() < chosen || !self.can_pay_with(p, &mana, &self.mana_classes(p, None), &keep)
+        // Escalate (702.120a): each mode beyond the first is one more card to
+        // discard, a part of the cost paid with its others (601.2h): with
+        // `n` modes chosen, can the whole cost be paid (`escalate_ok`)?
+        let escalate_ok = |g: &Game, n: usize| -> bool {
+            let StackKind::Spell { card } = item.kind else { return true };
+            if !m.escalate_discard {
+                return true;
+            }
+            g.escalated_payable(card, item, n.saturating_sub(1))
         };
         let (p, source) = (item.controller, Some(self.item_source(item)));
         // (Not the ability itself, already on the stack: CR 115.5.)
@@ -1944,11 +2007,16 @@ impl Game {
             // After k, the later picks come from k on (k itself if modes
             // repeat): enough must be available.
             let later = if m.repeat { avail[k] as usize * need } else { avail[k + 1..].iter().filter(|&&a| a).count() };
-            if avail[k] && later >= need && !escalate_cap {
+            // (Escalate: some number of modes from this one on whose cost can
+            // be paid; more discards can help, the cards they put into the
+            // graveyard exiled for escape.)
+            let reach = if m.repeat { usize::MAX } else { chosen + 1 + later };
+            let esc = !m.escalate_discard || (chosen + 1..=reach.min(m.max as usize)).any(|n| n >= m.min as usize && escalate_ok(self, n));
+            if avail[k] && later >= need && esc {
                 opts.push(Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) });
             }
         }
-        if chosen >= m.min as usize {
+        if chosen >= m.min as usize && escalate_ok(self, chosen) {
             opts.push(Opt { action: act::PASS, choice: Choice::Pass });
         }
         if opts.is_empty() && m.once_each && chosen == 0 {
@@ -2249,7 +2317,8 @@ impl Game {
         }
         let mana = self.alt_mana_via(card, p, from, k, &Default::default());
         // (A card cast from hand is on the stack while its cost is paid.)
-        self.cost_payable(p, card, rest, &mana, classes, Some(card))
+        // (Escalate's discards with it: `escalate_any`.)
+        self.escalate_any(p, card, Some(rest), |r| self.cost_payable(p, card, r.expect("a cost"), &mana, classes, Some(card)))
     }
 
     /// The non-mana part of alternative cost `k` of `card` cast the way
@@ -2506,11 +2575,6 @@ impl Game {
             spliced: Vec::new(),
         });
         self.agenda.push(Task::CastDone { id });
-        if self.def_of(card).spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
-            // CR 702.120a: the discards, after the mana (which keeps the
-            // cards they need).
-            self.agenda.push(Task::Escalate { id });
-        }
         self.agenda.push(Task::CastPay { id });
         if self.def_of(card).casting.choose_creature_or_warped {
             // The additional cost's choice, before the mana (CR 601.2h: the
@@ -2783,16 +2847,17 @@ impl Game {
         // CR 601.2h: the parts of the cost besides its mana in any order,
         // when that can matter (ENGINE.md 100.4.9): the mana first (601.2g),
         // every option leaving the whole payment completable (down to the
-        // agenda's `floor`: escalate's discards included), then the parts as
-        // the player orders them.
-        let floor = self.agenda.len() - matches!(self.agenda.last(), Some(Task::Escalate { id: i }) if *i == id) as usize;
+        // agenda's `floor`), then the parts as the player orders them.
+        // (Escalate's discards are parts of it: `spell_rest`.)
+        let floor = self.agenda.len();
         let Some(pos) = self.item_index(id) else { return };
         let item = &self.stack[pos];
-        let rest_cost = if item.alt > 0 { Some(self.item_alt_rest(card, item)) } else { self.route_extra(card, item.from, item.cost_option) };
+        let rest_cost = self.spell_rest(card, item);
         // (The mana, and what it may change, come first: ENGINE.md 100.4.10;
         // as castability decides it, `cost_payable_order`.)
         let delve = self.def_of(card).delve;
         let ordered = rest_cost
+            .as_deref()
             .map(|c| crate::cost_order::Order::new(p, card, c, 0, 0, floor as u32))
             .filter(|o| {
                 let paying = !cost.is_zero() || !self.exile_sources(p, card, &o.cost, None).is_empty();
@@ -2823,7 +2888,7 @@ impl Game {
             let mut pm = PayMana::new(p, cost);
             pm.improvise = def.improvise;
             pm.convoke = def.casting.convoke;
-            let rest = self.item_alt_rest(card, item);
+            let rest = rest_cost.as_deref().expect("an alternative cost's rest");
             pm.keep = Self::keep_for(card, rest, None);
             pm.keep.allow = self.spend_allow_from(card, item.from);
             pm.keep.spell = Some(card);
@@ -2877,7 +2942,7 @@ impl Game {
         // the mana (CR 601.2h: any order), leaving the mana payable.
         let mut taps_first = false;
         let in_order = ordered.is_some();
-        if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
+        if let Some(extra) = rest_cost.as_deref() {
             if !in_order {
                 pm.keep = Self::keep_for(card, extra, None);
             }
@@ -2899,10 +2964,6 @@ impl Game {
         pm.keep.committed.extend(self.delve_promised(p));
         if in_order {
             pm.oracle = Some(floor as u32);
-        }
-        let escalated = item.modes.len().saturating_sub(1) as u8;
-        if !in_order && escalated > 0 && def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
-            pm.keep.reserves.push((crate::pay::Reserve::Discard(escalated, None), card));
         }
         let _ = def;
         pm.keep.life = pm.keep.life.checked_add(life_later).expect("a cost's life: at most a life total and 99");

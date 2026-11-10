@@ -120,8 +120,6 @@ pub(crate) enum Task {
     ChooseReplacement { card: crate::ids::ObjRef, from: Zone, results: u8, void: Option<crate::db::Counter>, chooser: PlayerId },
     /// Announce X (CR 601.2b, 107.3).
     ChooseX { id: u32, step: crate::decision::NumberStep },
-    /// Discard for escalate (CR 702.120a).
-    Escalate { id: u32 },
     /// "As an additional cost, choose a creature you control or a warped
     /// creature card you own in exile" (CR 601.2h; ENGINE.md 99.14): an
     /// exiled card (`ChooseExiled`, `PASS` = a creature instead), then, with
@@ -390,7 +388,6 @@ impl Game {
             Task::EnterAura { card, controller, tapped, page } => self.enter_aura(card, controller, tapped, page),
             Task::ChooseReplacement { card, from, results, void, chooser } => self.choose_replacement(card, from, results, void, chooser),
             Task::ChooseX { id, step } => self.choose_x(id, step),
-            Task::Escalate { id } => self.escalate(id),
             Task::ChooseForCost { id, perm, page } => self.choose_for_cost(id, perm, page),
             Task::AttackTarget { card } => self.choose_attack_target(card),
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),

@@ -512,21 +512,17 @@ impl Game {
 
     /// The cost of stack item `id` besides its mana: an activated ability's,
     /// or the additional cost the caster of a spell chose.
-    fn item_cost(&self, id: u32) -> Option<(PlayerId, CardIdx, &'static Cost)> {
+    fn item_cost(&self, id: u32) -> Option<(PlayerId, CardIdx, std::borrow::Cow<'static, Cost>)> {
         let pos = self.item_index(id)?;
         let item = &self.stack[pos];
         match item.kind {
             StackKind::Ability { ability, source } => {
-                Some((item.controller, source.idx, &self.db.def(ability.def).activated_def(ability.slot).cost))
+                Some((item.controller, source.idx, std::borrow::Cow::Borrowed(&self.db.def(ability.def).activated_def(ability.slot).cost)))
             }
             StackKind::Spell { card } => {
-                // (Its own alternative cost or a granted one: ENGINE.md 99.15.)
-                let c = if item.alt > 0 {
-                    self.item_alt_rest(card, item)
-                } else {
-                    self.route_extra(card, item.from, item.cost_option)?
-                };
-                Some((item.controller, card, c))
+                // (Its own alternative cost or a granted one: ENGINE.md 99.15;
+                // escalate's discards with it, 100.4.10.)
+                Some((item.controller, card, self.spell_rest(card, item)?))
             }
         }
     }
@@ -1092,6 +1088,7 @@ impl Game {
     /// graveyard cards' picks follow).
     pub(crate) fn pay_costs(&mut self, id: u32, mut picked: Vec<CardIdx>, mut early: Option<u32>) {
         let Some((p, card, cost)) = self.item_cost(id) else { return };
+        let cost: &Cost = &cost;
         let n_sac = cost.sacrifice.as_ref().map_or(0, |s| s.n) as usize;
         // (A second discard with a filter of its own first: retrace's land
         // card with the card's own discard, docs/shortcuts.md 24.7.5k.)
