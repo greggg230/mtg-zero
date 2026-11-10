@@ -21575,6 +21575,12 @@ opponent's `glob::SIDEBOARD` 0. Nothing else in an encoding reads the opponent's
   `resolve.rs`'s hand choices do, the question is asked with pass only (an empty hand is public);
   `cards_eoe_cross_more::alpharael_without_an_artifact_discard_discards_two_cr701_9a` updated. No digest game has
   the card.
+* **And** (8e60cab): seed 17153, a Robot token in a hidden zone (it ceases to exist at the next state-based actions,
+  CR 111.8, 704.5d) that the viewer lost track of in a shuffle was among the slots `determinize` deals, so its
+  identity could land in a card's slot and a card's in the token's (open decklists too: the fuzz saw it only through
+  the hidden mode's stricter deck check). A hidden token is now kept where it is, as a pinned card
+  (`Game::hidden_slots_with`; a cloud listing it counts it in place, as for a payment's pinned cards). Digests
+  unchanged.
 
 ### 102.4 The deck target and the reader's inputs
 
