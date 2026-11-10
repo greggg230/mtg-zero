@@ -22945,8 +22945,12 @@ unchanged).
   build: passed; the core's pytest under the desktop's load: **`GATE FAILED optin-core 65d6c5c6b120 in 3172s -
   core-pytest: 5 failed, 0 error(s), 432 passed`** - two toy runs' subprocesses crashed (0xC0000005) or timed out
   under the load of this branch's suite and builds beside it, and `test_remoteplay`'s known timing test; the four
-  pass alone (45 s), the fifth on its second lone run. (97a00c0, the 0974e50 pin, the same way: 3 load timeouts, all
-  passing alone in 23 s.)
+  pass alone (45 s), the fifth on its second lone run. Run again on a quieter start: every step passed but the core's
+  pytest, **`GATE FAILED optin-core 65d6c5c6b120 in 2807s - core-pytest: 3 failed, 0 error(s), 434 passed`** - three
+  other remote / fork tests (`test_forks.py` x 2, `test_remoteplay.py::test_backoff_moves_the_quota_to_this_machine`)
+  timing out as other workstreams loaded the desktop again; the three pass alone (24 s). Different tests each time,
+  each passing alone: the load, not the core (zero-core 36.7 saw the same). (97a00c0, the 0974e50 pin: 3 load
+  timeouts, all passing alone in 23 s.) A run on a quiet desktop is the maintainer's.
 
 ### 105.8 What is left before the first real run
 
