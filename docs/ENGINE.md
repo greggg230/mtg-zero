@@ -21891,3 +21891,35 @@ matches; 1,250 s). `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed, every seed (20,000 g
 decisions; the replay test too: F7's board-state loop rule ends seed 1024's turn; 5,020 s on a
 shared desktop). The gates on fd4b9ff (`--no-mac`): `GATE PASSED engine fd4b9ff49475 in 709s`,
 `GATE PASSED encoding fd4b9ff49475 in 319s` (the checkpoint: the fork of 100.5.1, unchanged layout).
+
+#### 100.4.8 B5: the last of mana and payment (branch `eoe-b5-pay`, from `eoe-base` a07821f)
+
+**Why.** 100.4.6's and 100.4.7's open lists (the audit's F1 for 26.11.6, F4 and F7 for the payment).
+Tests: `engine/tests/rules_payment_b.rs` (section "100.4.8", with a table of its own, `b5_db`: the
+cube, the shared test cards and B5's), and `engine/tests/limits.rs` for the permanents past 96; each
+failed before its fix.
+
+##### A cost that taps, sacrifices and exiles graveyard cards
+
+A cost that sacrifices and exiles graveyard cards sacrifices before its graveyard cards are chosen (CR
+601.2h, any order: a card sacrificed may be exiled, ruling bea302d9). That early sacrifice came before
+the cost's taps too (`pay_costs`' order: sacrifice and return picks, discards, the card exiled from hand,
+then the sacrifice, the graveyard cards, the taps of "tap n untapped <permanents>", the counter, crew),
+so a permanent couldn't be tapped and then sacrificed for it, which 601.2h allows and the feasibility
+counted (`Keep::taps`): with one Rebel, B5's Test Rebel Crypt ("Tap an untapped Rebel you control,
+Sacrifice a Rebel, Exile a card from your graveyard") was offered and its tap choice had no option.
+
+Now such a cost (`late`) chooses its taps, its counter and crew's creatures before the sacrifice and
+pays them (`pay_tap_parts`: the taps, teamwork committed, the counter removed, the tapped creature
+noted), then sacrifices, then asks its graveyard cards (`ask_cost_graveyard_cards`), last. The
+graveyard cards depend on nothing those parts change (they act on permanents), and tapping, crewing or
+removing a counter first leaves every permanent picked to be sacrificed a candidate, so every order of
+601.2h's is reached. `Task::PayCosts::early` holds the number of picks once those parts and the
+sacrifice are paid (a refresh or the graveyard picks after it don't pay them again). Every other cost
+keeps its order of decisions.
+
+Tests: `cr_601_2h_a_permanent_tapped_then_sacrificed_then_exiled_from_the_graveyard` (Test Rebel Crypt
+with one Rebel and an empty graveyard: the Rebel is tapped, sacrificed and exiled), and
+`cr_601_2h_a_creature_crewed_then_sacrificed_then_exiled_from_the_graveyard` (Test Crew Crypt, "Crew 1,
+Sacrifice a Rebel, Exile a card from your graveyard"); both asked a decision with no options before.
+Digests unchanged (full fc293d3c24d0c0cc, `DIGEST_ENCODING=0` 117effec150157b5).

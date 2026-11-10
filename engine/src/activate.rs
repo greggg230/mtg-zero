@@ -487,7 +487,7 @@ impl Game {
             times: 0,
             spliced: Vec::new(),
         });
-        self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+        self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
         self.agenda.push(Task::ActPay { id });
         let ab = self.db.ability(ability);
         if ab.has_targets() {
@@ -995,7 +995,19 @@ impl Game {
     /// The rest of a cost after its mana (601.2h): sacrifice and discard
     /// choices, one decision per object; then {T}, life, and the source's
     /// own costs.
-    pub(crate) fn pay_costs(&mut self, id: u32, mut picked: Vec<CardIdx>) {
+    ///
+    /// The picks, in `picked`, part by part: the sacrifices, the discards,
+    /// the card exiled from hand, the returns; then the graveyard cards to
+    /// exile, the taps of "tap n untapped <permanents>", the permanent to
+    /// remove a counter from and crew's creatures. A cost that sacrifices and
+    /// exiles graveyard cards sacrifices before its graveyard cards are chosen
+    /// (CR 601.2h, any order: a card sacrificed may be exiled, ruling
+    /// bea302d9); its taps, counter and crew are chosen and paid before that
+    /// sacrifice, so a permanent may be tapped (or crew) and then sacrificed
+    /// (ENGINE.md 100.4.8), and its graveyard cards come last. `early`: the
+    /// number of picks once those parts and the sacrifice are paid (the
+    /// graveyard cards' picks follow).
+    pub(crate) fn pay_costs(&mut self, id: u32, mut picked: Vec<CardIdx>, mut early: Option<u32>) {
         let Some((p, card, cost)) = self.item_cost(id) else { return };
         let n_sac = cost.sacrifice.as_ref().map_or(0, |s| s.n) as usize;
         // (A second discard with a filter of its own first: retrace's land
@@ -1004,11 +1016,23 @@ impl Game {
         let n_disc = n_also + cost.discard as usize;
         let n_exile = n_disc + cost.exile_from_hand.is_some() as usize;
         let n_bounce = n_exile + cost.bounce.as_ref().map_or(0, |b| b.n) as usize;
-        let n_gy = n_bounce + cost.exile_graveyard as usize;
-        let n_tap = n_gy + cost.tap_untapped.as_ref().map_or(0, |t| t.n) as usize + self.tap_x_n(id, cost);
+        let n_gyc = cost.exile_graveyard as usize;
+        let n_taps = cost.tap_untapped.as_ref().map_or(0, |t| t.n) as usize + self.tap_x_n(id, cost);
         // "Remove a counter from a <permanent> you control": one choice
         // (never with crew, whose picks come last: lowering).
-        let n_rc = n_tap + cost.remove_counter_from.is_some() as usize;
+        let n_rcs = cost.remove_counter_from.is_some() as usize;
+        // The sacrifice comes before the graveyard cards (CR 601.2h).
+        let late = n_sac > 0 && n_gyc > 0;
+        // Where each part's picks are: the graveyard cards' range, the taps',
+        // then the counter's (`n_tap .. n_rc`) and crew's (from `n_rc`).
+        let (gy_r, tap_r) = if late {
+            let gy = early.map_or(usize::MAX..usize::MAX, |e| e as usize..e as usize + n_gyc);
+            (gy, n_bounce..n_bounce + n_taps)
+        } else {
+            (n_bounce..n_bounce + n_gyc, n_bounce + n_gyc..n_bounce + n_gyc + n_taps)
+        };
+        let n_tap = tap_r.end;
+        let n_rc = n_tap + n_rcs;
         let mut crew_done = false;
         // The cost is one event (CR 603.2c; its discards, exiles): a group of
         // its own.
@@ -1053,7 +1077,7 @@ impl Game {
                 // the pool (it stays there until the step ends); then the
                 // rest of the cost as chosen.
                 debug_assert!(picked.len() <= n_sac || (n_exile < picked.len() && picked.len() <= n_bounce));
-                self.agenda.push(Task::PayCosts { id, picked });
+                self.agenda.push(Task::PayCosts { id, picked, early });
                 self.begin_activate(p, c, slot);
                 return;
             }
@@ -1081,7 +1105,7 @@ impl Game {
                 .filter(|&c| self.cost_picks_ok(p, card, cost, &picked, c))
                 .collect();
             let opts = self.cost_pick_options(p, &cands, cost.life);
-            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::Sacrifice, opts);
+            self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::Sacrifice, opts);
             return;
         }
         if picked.len() < n_disc {
@@ -1104,14 +1128,14 @@ impl Game {
                     opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.discard_feeds(p, card, cost, c)));
                 }
             }
-            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::DiscardCost, opts);
+            self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::DiscardCost, opts);
             return;
         }
         if picked.len() < n_exile {
             let f = cost.exile_from_hand.as_ref().unwrap();
             let mut opts = self.exile_candidates(p, card, f);
             opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.cost_picks_ok(p, card, cost, &picked, c)));
-            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ExileCost, opts);
+            self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::ExileCost, opts);
             return;
         }
         if picked.len() < n_bounce {
@@ -1123,31 +1147,14 @@ impl Game {
                 .filter(|c| !picked.contains(c) && self.cost_picks_ok(p, card, cost, &picked, *c))
                 .collect();
             let opts = self.cost_pick_options(p, &cands, cost.life);
-            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::BounceCost, opts);
+            self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::BounceCost, opts);
             return;
         }
-        if picked.len() == n_bounce && n_sac > 0 && cost.exile_graveyard > 0 {
-            // CR 601.2h, any order: the permanents sacrificed first, so
-            // they may be exiled from the graveyard too (ruling bea302d9).
-            self.sacrifice_picked(p, id, &picked[..n_sac]);
-        }
-        if picked.len() < n_gy {
-            // Graveyard cards to exile, a set: picked in increasing
-            // position, leaving enough later ones.
-            // (Cards only: not the source, not a token, CR 108.2.)
-            let gy: Vec<CardIdx> = self.graveyard_cards(p).filter(|&c| c != card && self.gy_cost_card(cost, c)).collect();
-            let after = picked[n_bounce..].last().map(|c| gy.iter().position(|x| x == c).unwrap() + 1).unwrap_or(0);
-            let still = n_gy - picked.len();
-            let opts: Vec<Opt> = gy
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| i >= after && gy.len() - i >= still)
-                .map(|(_, &c)| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
-                .collect();
-            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChooseGraveyardCard, opts);
+        if !late && picked.len() < gy_r.end {
+            self.ask_cost_graveyard_cards(p, id, card, cost, picked, gy_r.start, early);
             return;
         }
-        if picked.len() < n_tap {
+        if early.is_none() && picked.len() < n_tap {
             // "Tap n untapped <permanents> you control" ("tap X ..."): one
             // decision each (a set: increasing slot order).
             let tx;
@@ -1159,23 +1166,27 @@ impl Game {
                 }
                 (None, None) => unreachable!("taps owed without a tap cost"),
             };
-            let floor = picked[n_gy..].last().map(|&c| self.perm_action(p, c));
+            let floor = picked[tap_r.start..].last().map(|&c| self.perm_slot(c));
             // (A permanent picked to be sacrificed or returned is still
             // there, and may be tapped first: CR 601.2h, the parts in any
             // order; the taps come before the sacrifices and returns.)
-            let cands: Vec<Opt> = self
+            let cands: Vec<CardIdx> = self
                 .tap_candidates(p, card, t)
-                .filter(|c| !picked[n_gy..].contains(c))
-                .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
-                .filter(|o| floor.is_none_or(|f| o.action > f))
+                .filter(|c| !picked[tap_r.start..].contains(c))
+                .filter(|&c| floor.is_none_or(|f| self.perm_slot(c) > f))
                 .collect();
             // (Leaving enough later candidates for the taps still owed.)
             let still = n_tap - picked.len();
-            let opts: Vec<Opt> = cands.iter().enumerate().filter(|(k, _)| cands.len() - k >= still).map(|(_, o)| *o).collect();
-            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChoosePermanent, opts);
+            let opts: Vec<Opt> = cands
+                .iter()
+                .enumerate()
+                .filter(|(k, _)| cands.len() - k >= still)
+                .map(|(_, &c)| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
+                .collect();
+            self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::ChoosePermanent, opts);
             return;
         }
-        if picked.len() < n_rc {
+        if early.is_none() && picked.len() < n_rc {
             // "Remove a <k> counter from a <permanent> you control" (CR
             // 118.3): the permanent.
             let (f, k) = cost.remove_counter_from.as_ref().unwrap();
@@ -1184,10 +1195,10 @@ impl Game {
                 .into_iter()
                 .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                 .collect();
-            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChoosePermanent, opts);
+            self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::ChoosePermanent, opts);
             return;
         }
-        if cost.crew > 0 && !crew_done {
+        if cost.crew > 0 && !crew_done && early.is_none() {
             // Crew (CR 702.122a): untapped creatures other than the source,
             // one decision each in increasing slot order; PASS once their
             // total power is enough. A pick must leave the total reachable.
@@ -1195,11 +1206,11 @@ impl Game {
             let bonus = !cost.saddle && !self.is_spell_card(card);
             let tapped_in: Vec<CardIdx> = picked[n_rc..].to_vec();
             let have: crate::num::Wide = tapped_in.iter().map(|&c| self.crew_power_of(c, bonus)).sum();
-            let floor = tapped_in.last().map(|&c| self.perm_action(p, c));
+            let floor = tapped_in.last().map(|&c| self.perm_slot(c));
             let cands: Vec<CardIdx> = self
                 .crew_eligible(p, card)
                 .into_iter()
-                .filter(|c| !tapped_in.contains(c) && floor.is_none_or(|f| self.perm_action(p, *c) > f))
+                .filter(|c| !tapped_in.contains(c) && floor.is_none_or(|f| self.perm_slot(*c) > f))
                 .collect();
             // Teamwork: the spell's mana is paid next (`cast.rs`); every
             // choice leaves it payable without the creatures tapped.
@@ -1237,39 +1248,26 @@ impl Game {
                 opts.push(Opt { action: act::PASS, choice: Choice::Pass });
             }
             if !(opts.len() == 1 && done) {
-                self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChoosePermanent, opts);
+                self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::ChoosePermanent, opts);
                 return;
             }
         }
-        // (The taps of a "tap untapped permanents" cost, then crew's.)
-        for &c in picked[n_gy..n_tap].iter().chain(&picked[n_rc..]) {
-            self.tap(c);
-        }
-        // Teamwork's creatures, tapped before the spell's mana in the
-        // engine's order: by the rules after its mana abilities (CR 601.2g
-        // before 601.2h), so none of them is a mana source of it
-        // (`Keep::committed`; docs/shortcuts.md 13.17).
-        if cost.crew > 0 && self.is_spell_card(card) && picked.len() > n_rc {
+        // The taps, the counter and crew are paid, then (`late`) the
+        // sacrifice, before the graveyard cards are chosen (CR 601.2h).
+        if early.is_none() {
             let crew: Vec<CardIdx> = picked[n_rc..].to_vec();
-            if let Some(Task::PayMana(pm)) = self.agenda.iter_mut().rev().find(|t| matches!(t, Task::PayMana(_))) {
-                pm.keep.committed.extend(crew);
+            self.pay_tap_parts(id, card, cost, &picked[tap_r.clone()], &crew, picked.get(n_tap).filter(|_| n_rcs > 0).copied());
+            if late {
+                self.sacrifice_picked(p, id, &picked[..n_sac]);
+                early = Some(picked.len() as u32);
             }
         }
-        if let Some((_, k)) = cost.remove_counter_from {
-            self.remove_counters(picked[n_tap], k, 1);
+        let gy_r = if late { early.map_or(gy_r, |e| e as usize..e as usize + n_gyc) } else { gy_r };
+        if late && picked.len() < gy_r.end {
+            self.ask_cost_graveyard_cards(p, id, card, cost, picked, gy_r.start, early);
+            return;
         }
-        // "The tapped creature" of an activated ability's "tap an untapped
-        // creature you control" cost (station, CR 702.184a): the stack item
-        // notes it (`Amount::TappedPower`).
-        if n_tap > n_gy {
-            if let Some(pos) = self.item_index(id) {
-                if matches!(self.stack[pos].kind, StackKind::Ability { .. }) {
-                    let tapped: Vec<crate::ids::ObjRef> = picked[n_gy..n_tap].iter().map(|&c| self.obj_ref(c)).collect();
-                    self.stack[pos].noted = tapped;
-                }
-            }
-        }
-        for &c in &picked[n_bounce..n_gy] {
+        for &c in &picked[gy_r] {
             self.move_card(c, Zone::Exile, Pos::Top);
         }
         if let Some((k, n)) = cost.remove_counters {
@@ -1293,7 +1291,7 @@ impl Game {
         if cost.tap {
             self.tap(card);
         }
-        if !(n_sac > 0 && cost.exile_graveyard > 0) {
+        if !late {
             self.sacrifice_picked(p, id, &picked[..n_sac]);
         }
         if cost.life > 0 {
@@ -1327,6 +1325,57 @@ impl Game {
                 _ => {}
             }
         }
+    }
+
+    /// `pay_costs`' taps of "tap n untapped <permanents>" (`taps`), then
+    /// crew's (`crew`, a spell's teamwork committed: its mana is paid after),
+    /// the counter removed from `rc`, and the tapped creature noted for an
+    /// ability that reads it (station).
+    fn pay_tap_parts(&mut self, id: u32, card: CardIdx, cost: &Cost, taps: &[CardIdx], crew: &[CardIdx], rc: Option<CardIdx>) {
+        for &c in taps.iter().chain(crew) {
+            self.tap(c);
+        }
+        // Teamwork's creatures, tapped before the spell's mana in the
+        // engine's order: by the rules after its mana abilities (CR 601.2g
+        // before 601.2h), so none of them is a mana source of it
+        // (`Keep::committed`; docs/shortcuts.md 13.17).
+        if cost.crew > 0 && self.is_spell_card(card) && !crew.is_empty() {
+            if let Some(Task::PayMana(pm)) = self.agenda.iter_mut().rev().find(|t| matches!(t, Task::PayMana(_))) {
+                pm.keep.committed.extend_from_slice(crew);
+            }
+        }
+        if let (Some((_, k)), Some(c)) = (&cost.remove_counter_from, rc) {
+            self.remove_counters(c, *k, 1);
+        }
+        // "The tapped creature" of an activated ability's "tap an untapped
+        // creature you control" cost (station, CR 702.184a): the stack item
+        // notes it (`Amount::TappedPower`).
+        if !taps.is_empty() {
+            if let Some(pos) = self.item_index(id) {
+                if matches!(self.stack[pos].kind, StackKind::Ability { .. }) {
+                    let tapped: Vec<crate::ids::ObjRef> = taps.iter().map(|&c| self.obj_ref(c)).collect();
+                    self.stack[pos].noted = tapped;
+                }
+            }
+        }
+    }
+
+    /// `pay_costs`' choice of a graveyard card to exile for "exile n cards
+    /// from your graveyard": a set picked in increasing position from
+    /// `picked[from..]`, leaving enough later ones (cards only: not the
+    /// source, not a token, CR 108.2).
+    #[allow(clippy::too_many_arguments)]
+    fn ask_cost_graveyard_cards(&mut self, p: PlayerId, id: u32, card: CardIdx, cost: &Cost, picked: Vec<CardIdx>, from: usize, early: Option<u32>) {
+        let gy: Vec<CardIdx> = self.graveyard_cards(p).filter(|&c| c != card && self.gy_cost_card(cost, c)).collect();
+        let after = picked[from..].last().map(|c| gy.iter().position(|x| x == c).unwrap() + 1).unwrap_or(0);
+        let still = from + cost.exile_graveyard as usize - picked.len();
+        let opts: Vec<Opt> = gy
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| i >= after && gy.len() - i >= still)
+            .map(|(_, &c)| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
+            .collect();
+        self.ask(Task::PayCosts { id, picked, early }, p, DecisionKind::ChooseGraveyardCard, opts);
     }
 
     /// Is mana ability `ad` of `c` offered with priority (ENGINE.md 18)? One

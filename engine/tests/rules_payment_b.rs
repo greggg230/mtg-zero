@@ -1157,3 +1157,85 @@ fn cr_602_2b_gene_pollinator_tapped_for_mmmenons_mana_activates_no_more() {
     assert_eq!(g.obj(scroll).zone, Zone::Stack, "{}", log(&g));
     assert!(g.obj(pol).tapped && !g.obj(fdc).tapped, "{}", log(&g));
 }
+
+// ---- 100.4.8: B5, the last of mana and payment ------------------------------
+
+/// The cube, the shared test cards and B5's: costs that tap, sacrifice and
+/// exile graveyard cards together.
+fn b5_db() -> &'static CardDb {
+    use serde_json::json;
+    static DB: std::sync::OnceLock<&'static CardDb> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let draw = json!({"$t": "DrawCards", "amount": 1});
+        let custom = vec![
+            // "Tap an untapped Rebel you control, Sacrifice a Rebel, Exile a
+            // card from your graveyard: Draw a card."
+            eoe_w2::card("Test Rebel Crypt", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "sacrifice_subtype": "Rebel", "exile_cards_from_graveyard": 1,
+                        "extra_costs": [{"$t": "TapUntappedPermanentsCost", "label": "an untapped Rebel you control",
+                            "permanent_filter": {"$t": "HasSubtype", "name": "Rebel"}}]},
+                    "effect": draw.clone()}]})),
+            // "Crew 1, Sacrifice a Rebel, Exile a card from your graveyard:
+            // Draw a card."
+            eoe_w2::card("Test Crew Crypt", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "sacrifice_subtype": "Rebel", "exile_cards_from_graveyard": 1, "crew": 1},
+                    "effect": draw}]})),
+            // A vanilla 1/1 Rebel.
+            eoe_w2::card("Test Rebel", json!({"card_types": ["Creature"], "subtypes": ["Rebel"], "power": 1, "toughness": 1,
+                "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["W", 1]]}, "mana_cost_str": "{W}"})),
+        ];
+        let mut cards = engine::db::load_cube_document().cards;
+        cards.extend(common::custom_cards());
+        cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
+        let db = CardDb::from_cards(&cards);
+        for n in ["Test Rebel Crypt", "Test Crew Crypt", "Test Rebel"] {
+            db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
+        }
+        db.leak()
+    })
+}
+
+fn b5_scen() -> Scenario {
+    Scenario::new(b5_db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.log = true;
+        })
+        .library(0, &["Island"; 12])
+        .library(1, &["Island"; 12])
+}
+
+/// CR 601.2h: a cost's parts are paid in any order, and a card sacrificed for
+/// a cost may be exiled from the graveyard for it (ruling bea302d9). So the
+/// one Rebel is tapped for "tap an untapped Rebel you control", then
+/// sacrificed, then exiled from the graveyard. (The sacrifice was made before
+/// the graveyard card was chosen, and so before the tap: no Rebel to tap.)
+#[test]
+fn cr_601_2h_a_permanent_tapped_then_sacrificed_then_exiled_from_the_graveyard() {
+    let mut g = b5_scen().battlefield(0, &["Test Rebel Crypt", "Test Rebel"]).at(Step::Main1, 0).start();
+    let crypt = bf(&g, 0, "Test Rebel Crypt");
+    let rebel = bf(&g, 0, "Test Rebel");
+    assert!(g.has_option(act(crypt, 0)), "{:?}", g.options_desc());
+    g.choose(act(crypt, 0));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(rebel).zone, Zone::Exile, "{}", log(&g));
+    assert_eq!(g.player(0).hand.len(), 1, "drew a card\n{}", log(&g));
+}
+
+/// The same with crew (CR 702.122a, 601.2h): the Rebel crews, is
+/// sacrificed, then exiled from the graveyard.
+#[test]
+fn cr_601_2h_a_creature_crewed_then_sacrificed_then_exiled_from_the_graveyard() {
+    let mut g = b5_scen().battlefield(0, &["Test Crew Crypt", "Test Rebel"]).at(Step::Main1, 0).start();
+    let crypt = bf(&g, 0, "Test Crew Crypt");
+    let rebel = bf(&g, 0, "Test Rebel");
+    assert!(g.has_option(act(crypt, 0)), "{:?}", g.options_desc());
+    g.choose(act(crypt, 0));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(rebel).zone, Zone::Exile, "{}", log(&g));
+    assert_eq!(g.player(0).hand.len(), 1, "drew a card\n{}", log(&g));
+}

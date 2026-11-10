@@ -74,7 +74,9 @@ pub(crate) enum Task {
     FinishResolve { id: u32 },
     // activated abilities (CR 602, 605)
     ActPay { id: u32 },
-    PayCosts { id: u32, picked: Vec<CardIdx> },
+    /// (`early`: `Game::pay_costs`' picks once its taps, counter, crew and
+    /// early sacrifice are paid.)
+    PayCosts { id: u32, picked: Vec<CardIdx>, early: Option<u32> },
     CastOption { id: u32 },
     CastAlt { id: u32 },
     Divide { id: u32, step: crate::decision::NumberStep },
@@ -337,7 +339,7 @@ impl Game {
             Task::Run(f) => self.run_frame(f),
             Task::FinishResolve { id } => self.finish_resolve(id),
             Task::ActPay { id } => self.act_pay(id),
-            Task::PayCosts { id, picked } => self.pay_costs(id, picked),
+            Task::PayCosts { id, picked, early } => self.pay_costs(id, picked, early),
             Task::CastOption { id } => self.cast_option(id),
             Task::CastAlt { id } => self.cast_alt(id),
             Task::Divide { id, step } => self.divide(id, step),

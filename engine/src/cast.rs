@@ -2618,7 +2618,7 @@ impl Game {
                 pm.keep.exclude = self.sacrifices_itself_for_mana(r.idx).then_some(r.idx);
                 self.agenda.push(Task::Emerge { id, sac: true });
             }
-            self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+            self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
             if !pm.cost.is_zero() {
                 pm.keep.life = pm.keep.life.checked_add(life_later).expect("a cost's life: at most a life total and 99");
                 pm.life_after = life_later;
@@ -2662,7 +2662,7 @@ impl Game {
             if extra.crew > 0 {
                 taps_first = true;
             } else {
-                self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+                self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
             }
         }
         pm.keep.allow = self.spend_allow_from(card, item.from);
@@ -2676,7 +2676,7 @@ impl Game {
         pm.life_after = life_later;
         self.agenda.push(Task::PayMana(Box::new(pm)));
         if taps_first {
-            self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+            self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None });
         }
     }
 
