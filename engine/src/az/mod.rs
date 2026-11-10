@@ -747,7 +747,7 @@ impl SearchGame for MtgAz {
         }
         // Hidden decklists (ENGINE.md 102): the opponent's whole unseen deck from its prior.
         if self.hidden_decklists() {
-            self.sample_hidden_deck(viewer as u8, &mut r, None);
+            self.sample_hidden_deck(viewer as u8, &mut r, None, None);
         }
         if self.m.sb.is_none() {
             self.g.determinize(viewer as u8, &mut r);
@@ -832,11 +832,13 @@ impl SearchGame for MtgAz {
         }
     }
 
-    /// `determinize` dealt by the root's belief (ENGINE.md 69, zero-core docs/search.md 3.8): the
-    /// same constraints, the best-of-three hidden pool first, then the opponent's hand's unknown
-    /// slots drawn by the weights of `belief::deal_weights` (the head's distribution over their
-    /// hand's cards against the uniform deal's, tilted and clipped). Between the games of a match
-    /// (no hand to deal): `determinize`.
+    /// `determinize` dealt by the root's belief (ENGINE.md 69, 106; zero-core docs/search.md 3.8): the
+    /// same constraints, the best-of-three hidden pool first; with hidden decklists and the `deck`
+    /// target's tilt (`belief_tilts`, ENGINE.md 106) the opponent's deck drawn among the K cached decks
+    /// by the deck prediction; then, with the hand's tilt, the opponent's hand's unknown slots drawn by
+    /// the weights of `belief::deal_weights` (the head's distribution over their hand's cards against
+    /// the dealt world's uniform deal, tilted and clipped). Between the games of a match (no hand to
+    /// deal): `determinize`.
     fn determinize_with(&mut self, viewer: usize, rng: &mut zero_search::rng::Rng, belief: &zero_search::game::Belief) {
         self.determinize_belief(viewer, rng, belief);
     }

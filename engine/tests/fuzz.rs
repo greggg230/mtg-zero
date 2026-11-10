@@ -1781,7 +1781,7 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
                     let mut brng = Rng::new(seed ^ (actions.len() as u64).wrapping_mul(0x9E37) ^ viewer as u64);
                     let pred = random_weights(&mut brng, 1.0).iter().map(|&x| x as f32).collect::<Vec<f32>>();
                     let s: f32 = pred.iter().sum();
-                    let b = zero_search::game::Belief { pred: pred.iter().map(|x| x / s).collect(), tilt: t, clip: 1e6 };
+                    let b = zero_search::game::Belief { pred: pred.iter().map(|x| x / s).collect(), tilt: t, clip: 1e6, tilts: Vec::new() };
                     let mut dw = g.clone();
                     dw.determinize_belief(viewer, &mut zero_search::rng::Rng::new(brng.next_u64()), &b);
                     dw.legal_actions(&mut legal2);

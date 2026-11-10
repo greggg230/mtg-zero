@@ -636,7 +636,7 @@ impl MtgAz {
                         return Err(format!("start: no deal can give P{o}'s hand of {n_hand} the held cards {:?}", names(az.g.db(), &st.hold)));
                     }
                 }
-                let belief = Belief { pred: st.pred.clone(), tilt: st.tilt, clip: st.clip };
+                let belief = Belief { pred: st.pred.clone(), tilt: st.tilt, clip: st.clip, tilts: Vec::new() };
                 let base = az.clone();
                 let mut dealt = None;
                 for _ in 0..st.tries {

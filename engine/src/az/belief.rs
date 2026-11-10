@@ -14,6 +14,10 @@
 //!   sampled deck's in best-of-three (sampled first, from what the decider knows: ENGINE.md 36.11).
 //! * **The deal** (`Game::determinize_weighted`): `determinize`'s, the hand's unknown slots drawn
 //!   one at a time from the hidden pool with probability proportional to w x copies left.
+//! * **The deck tilt** (ENGINE.md 106; zero-core's per-target tilt `belief_tilts.deck`): with hidden
+//!   decklists, the opponent's deck drawn among the K cached decks by the `deck` segment's prediction
+//!   (`hidden_decks::tilt_decks`) before the hand is dealt - one deal: the deck, then its hand.
+use super::hidden_decks::DeckTilt;
 use super::{identity, MtgAz};
 use crate::game::Game;
 use zero_search::game::{belief_weight, Belief, SearchGame};
@@ -21,14 +25,37 @@ use zero_search::game::{belief_weight, Belief, SearchGame};
 /// The `belief` segment of a prediction of `MtgAz::AUX` (the head's distribution over the
 /// opponent's hand's cards by identity, `identity::D` floats).
 pub fn belief_segment(pred: &[f32]) -> &[f32] {
+    segment(pred, "belief")
+}
+
+/// The `deck` segment of a prediction of `MtgAz::AUX` (the distribution over the opponent's unseen
+/// cards by identity, `identity::D` floats: the head's, or the deck reader's when it is declared
+/// `belief`, zero-core docs/az.md 36.5).
+pub fn deck_segment(pred: &[f32]) -> &[f32] {
+    segment(pred, "deck")
+}
+
+fn segment<'a>(pred: &'a [f32], target: &str) -> &'a [f32] {
     let mut off = 0;
     for &(name, w) in MtgAz::AUX {
-        if name == "belief" {
+        if name == target {
             return &pred[off..off + w];
         }
         off += w;
     }
-    unreachable!("MtgAz::AUX has the belief target")
+    unreachable!("MtgAz::AUX has the {target} target")
+}
+
+/// The index of target `name` in `MtgAz::AUX` (`Belief::tilts` order).
+fn target(name: &str) -> usize {
+    MtgAz::AUX.iter().position(|t| t.0 == name).expect("an MtgAz::AUX target")
+}
+
+/// The hand's and the deck's tilts of a belief (ENGINE.md 106): the hand's is the `belief` target's own
+/// (`belief_tilts.belief`) when the seat sets one, else `belief_tilt`; the deck's is `belief_tilts.deck`.
+pub fn tilts(belief: &Belief) -> (f64, f64) {
+    let own = belief.target_tilt(target("belief"));
+    (if own > 0.0 { own } else { belief.tilt }, belief.target_tilt(target("deck")))
 }
 
 /// The weights per card identity (`identity::D`; 1 for identities not in the hidden pool) of the
@@ -69,11 +96,12 @@ pub fn deal_weights(g: &Game, viewer: u8, p: &[f32], tilt: f64, clip: f64) -> Ve
 }
 
 impl MtgAz {
-    /// `SearchGame::determinize_with` returning the weights it dealt by (None: between the games of
-    /// a match, a uniform `determinize`; tests and analysis, ENGINE.md 69.4).
+    /// `SearchGame::determinize_with` returning the hand's weights it dealt by (None: between the games
+    /// of a match, a uniform `determinize`, or no hand tilt; tests and analysis, ENGINE.md 69.4, 106).
     #[doc(hidden)]
     pub fn determinize_belief(&mut self, viewer: usize, rng: &mut zero_search::rng::Rng, belief: &Belief) -> Option<Vec<f64>> {
-        if self.m.sb.is_some() || belief.tilt <= 0.0 {
+        let (hand, deck) = tilts(belief);
+        if self.m.sb.is_some() || (hand <= 0.0 && deck <= 0.0) {
             self.determinize(viewer, rng);
             return None;
         }
@@ -83,12 +111,19 @@ impl MtgAz {
         if self.m.format == super::Format::Bo3 && !self.m.over {
             self.sample_hidden_pool(viewer as u8, &mut r);
         }
-        // (Hidden decklists, ENGINE.md 102: the opponent's deck first, as `determinize`; the hand's
-        // weights then read the dealt world's hidden pool, as best-of-three's do.)
+        // (Hidden decklists, ENGINE.md 102: the opponent's deck first, as `determinize` - by the deck
+        // prediction with the deck's tilt, ENGINE.md 106; the hand's weights then read the dealt world's
+        // hidden pool, as best-of-three's do: one deal, the deck and then its hand.)
         if self.hidden_decklists() {
-            self.sample_hidden_deck(viewer as u8, &mut r, None);
+            let t = (deck > 0.0).then(|| DeckTilt { p: deck_segment(&belief.pred), tilt: deck, clip: belief.clip });
+            self.sample_hidden_deck(viewer as u8, &mut r, None, t);
         }
-        let w = deal_weights(&self.g, viewer as u8, belief_segment(&belief.pred), belief.tilt, belief.clip);
+        if hand <= 0.0 {
+            self.g.determinize(viewer as u8, &mut r);
+            self.m.rng = crate::rng::Rng::new(r.next_u64());
+            return None;
+        }
+        let w = deal_weights(&self.g, viewer as u8, belief_segment(&belief.pred), hand, belief.clip);
         let ids = identity::identities(self.g.db());
         self.g.determinize_weighted(viewer as u8, &mut r, &|d| w[ids[d as usize] as usize]);
         self.m.rng = crate::rng::Rng::new(r.next_u64());

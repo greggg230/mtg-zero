@@ -2456,7 +2456,7 @@ fn random_belief(rng: &mut Rng, sharp: u32) -> Vec<f32> {
 }
 
 fn zbelief(pred: Vec<f32>, tilt: f64, clip: f64) -> zero_search::game::Belief {
-    zero_search::game::Belief { pred, tilt, clip }
+    zero_search::game::Belief { pred, tilt, clip, tilts: Vec::new() }
 }
 
 /// Every card `owner` has in the game, by identity (sorted).
@@ -2717,4 +2717,105 @@ fn who_knows_a_librarys_top_cards_is_encoded() {
     settle(&mut g, |_| None);
     g.card(0, "Polluted Delta", Zone::Graveyard);
     check(&g, "the fetch land's shuffle", [no; 3]);
+}
+
+/// A belief of both targets (ENGINE.md 106): random hand and deck predictions, the hand's tilt `hand`
+/// (`belief_tilt`) and the deck's `deck` (`belief_tilts.deck`).
+fn zbelief_deck(rng: &mut Rng, hand: f64, deck: f64, clip: f64) -> zero_search::game::Belief {
+    let mut pred = random_belief(rng, 3);
+    pred.extend(random_belief(rng, 3));
+    zero_search::game::Belief { pred, tilt: hand, clip, tilts: vec![0.0, deck] }
+}
+
+/// The deck tilt keeps every `determinize` invariant (ENGINE.md 106.3): the gate's positions (every kind;
+/// the deck tilt deals the hidden-decklist and EoE sealed kinds' decks, the others ignore it), random
+/// predictions of both targets at deck tilts 0.5 / 1 / 8 (clips 20 / 1e6), with and without the hand's
+/// tilt, both viewers: the decider's actions, each viewer's whole encoding, the cards it knows, the
+/// invariants and knowledge, hand sizes; in the open-decklist kinds every player's cards.
+#[test]
+fn deck_tilt_deals_keep_every_determinize_invariant() {
+    let mut rng = Rng::new(106);
+    let (mut worlds, mut decks) = (0, 0);
+    for (name, g) in gate_positions(scale(20) as usize, 106) {
+        let mover = g.to_move().unwrap();
+        for viewer in [mover, 1 - mover] {
+            let x0 = enc(&g, viewer);
+            for (hand, deck, clip) in [(0.0, 0.5, 20.0), (1.0, 1.0, 20.0), (0.0, 8.0, 1e6)] {
+                let b = zbelief_deck(&mut rng, hand, deck, clip);
+                let mut d = g.clone();
+                d.determinize_with(viewer, &mut zero_search::rng::Rng::new(rng.next_u64()), &b);
+                assert_eq!(d.to_move(), Some(mover), "{name}");
+                if viewer == mover {
+                    assert_eq!(legal(&g), legal(&d), "{name}: the decider's actions changed");
+                }
+                let x1 = enc(&d, viewer);
+                if let Some(i) = (0..NUM_FEATURES).find(|&i| x0[i] != x1[i]) {
+                    panic!("{name}: feature {i} of P{viewer} changed in a deck-tilted world ({} -> {})", x0[i], x1[i]);
+                }
+                for (i, o) in g.g.objs().iter().enumerate() {
+                    let c = engine::CardIdx::new(i as u32);
+                    if g.g.knows(viewer as u8, c) {
+                        assert_eq!((o.def, g.g.ident(c)), (d.g.obj(c).def, d.g.ident(c)), "{name}: a card P{viewer} knows was dealt again");
+                    }
+                }
+                d.g.check_invariants().unwrap_or_else(|e| panic!("{name}: {e}"));
+                d.g.check_knowledge().unwrap_or_else(|e| panic!("{name}: {e}"));
+                for p in 0..2u8 {
+                    assert_eq!(g.g.player(p).hand.len(), d.g.player(p).hand.len(), "{name}: hand size");
+                    if !g.hidden_decklists() && name != "bo3" && name != "drafted" {
+                        assert_eq!(cards_of(&g, p), cards_of(&d, p), "{name}: P{p}'s cards");
+                    }
+                }
+                decks += (g.hidden_decklists() && cards_of(&g, 1 - viewer as u8) != cards_of(&d, 1 - viewer as u8)) as u32;
+                worlds += 1;
+            }
+        }
+    }
+    println!("{worlds} deck-tilted worlds, {decks} with another opponent deck");
+    assert!(worlds > 300 && decks > 50, "{worlds} {decks}");
+}
+
+/// The deck tilt reads only the viewer's information (ENGINE.md 106.2): on the gate's hidden-decklist
+/// positions, worlds the decider cannot tell from the real game (its features identical) weigh the
+/// cached decks the same, bit for bit, with a cold memo - the K decks, the weights, the probabilities -
+/// and deal the same opponent deck from the same seed.
+#[test]
+fn the_deck_tilt_ignores_the_opponents_hidden_cards() {
+    use engine::az::hidden_decks::{DealCache, DeckTilt};
+    let mut rng = Rng::new(107);
+    let (mut worlds, mut differ) = (0, 0);
+    for (name, g) in gate_positions(scale(24) as usize, 107) {
+        if !g.hidden_decklists() {
+            continue;
+        }
+        let v = g.to_move().unwrap();
+        let p = random_belief(&mut rng, 2);
+        let t = DeckTilt { p: &p, tilt: 1.0, clip: 20.0 };
+        let x = enc(&g, v);
+        let cold = |w: &MtgAz| {
+            let mut w = w.clone();
+            w.m.deal = DealCache::new(w.m.deal.k, w.m.deal.salt);
+            w.deck_tilt_of(v as u8, t).map(|(decks, td)| (decks.iter().map(|d| d.deck.clone()).collect::<Vec<_>>(), (*td).clone()))
+        };
+        let dealt = |w: &MtgAz, s: u64| {
+            let mut w = w.clone();
+            w.m.deal = DealCache::new(w.m.deal.k, w.m.deal.salt);
+            let mut pred = random_belief(&mut Rng::new(1), 1);
+            pred.extend_from_slice(&p);
+            w.determinize_with(v, &mut zero_search::rng::Rng::new(s), &zero_search::game::Belief { pred, tilt: 0.0, clip: 20.0, tilts: vec![0.0, 1.0] });
+            cards_of(&w, 1 - v as u8)
+        };
+        let (t0, d0) = (cold(&g), dealt(&g, 11));
+        for k in 0..3 {
+            let mut d = g.clone();
+            d.determinize(v, &mut zero_search::rng::Rng::new(rng.next_u64() ^ k));
+            assert_eq!(enc(&d, v), x, "{name}: the decider's features");
+            differ += (cards_of(&d, 1 - v as u8) != cards_of(&g, 1 - v as u8)) as u32;
+            assert!(cold(&d) == t0, "{name}: the deck tilt read the opponent's hidden cards");
+            assert_eq!(dealt(&d, 11), d0, "{name}: the deck-tilted deal read the opponent's hidden cards");
+            worlds += 1;
+        }
+    }
+    println!("{worlds} worlds, {differ} with another opponent deck");
+    assert!(worlds >= 60 && differ > worlds / 2, "{worlds} {differ}");
 }
