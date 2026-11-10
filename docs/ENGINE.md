@@ -22031,3 +22031,34 @@ the Loch with 256 Mishra's Baubles and an Island: cast for {U}; not castable bef
 replicated 40 times: 30 to 40 of the {B/P} with life, paged; `NUMBER` + 40 was offered before).
 docs/shortcuts.md 46.3: the open part **fixed**. Digests unchanged (full fc293d3c24d0c0cc,
 `DIGEST_ENCODING=0` 117effec150157b5, `DIGEST_ENCODING=v5` 7e397431df7a60fb).
+
+##### The lists, checked
+
+100.4.6's "Not done": N23, 24.7.5k / 40.1 and 13.15 were B4's (100.4.7), 28.8.2k D2's (100.5.1);
+26.11.6 and the u8 parts of a `ManaCost` are above. 100.4.7's: 26.11.6, the u8 parts, the cost that
+taps, sacrifices and exiles graveyard cards: above; 28.8.2k: D2's. 100.2's payment bounds: "pay X life"
+was B3's (100.4.6); "tap X untapped artifacts" within a u8 is fixed above. The productions' and the
+pool's u8 amounts are F7's, aborted past 255 (`check_counter_mana`, `finish_payment`).
+
+**Found, not done** (a design of its own). CR 601.2h pays a cost's parts in any order the player
+chooses; the engine chooses every part's objects with the state before the payment (but the
+discards and the card exiled from hand, paid as chosen, and the late sacrifice above) and pays in a
+fixed order. That reaches every assignment when paying one part changes no other part's candidates
+but by taking objects away, which holds for removing a permanent (sacrifice, return) and exiling or
+discarding a card, except through static abilities: a permanent sacrificed (or returned) whose static
+ability keeps another from a later part's filter (it removes a creature type, makes creatures 1/1 for
+crew) could be paid first, giving that part more candidates. Exact: when a part's candidates with
+another part paid first differ (`card_matches` with the paid objects gone), the order is a choice of
+the player's (which part first), each part's candidates computed after the parts paid before it.
+
+##### Results
+
+The full engine suite on 965170e: **2,183 passed, 0 failed, 15 ignored** (`az` 43, `hidden` 16, `limits`
+13). Digests unchanged by every commit: full fc293d3c24d0c0cc, `DIGEST_ENCODING=0` 117effec150157b5,
+`DIGEST_ENCODING=v5` 7e397431df7a60fb (no digest game has more than 96 permanents a player, a cost past
+255, or a cost that taps, sacrifices and exiles graveyard cards; `RULES_EPOCH` not bumped). pytest 208 passed, 1 skipped. The default
+`FUZZ_GAMES=20000` passed in four shards of 5,000 seeds (`FUZZ_FIRST` 0, 5,000, 10,000, 15,000), every
+seed: 20,000 games, wins 9,804 / 10,074, 122 draws, 0 aborted, mean 31.8 turns (the games of 100.5.1),
+and the 1,000 matches and both replay tests (`FUZZ_GAMES=20000`). `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed in the same four shards, every seed: 20,000 games, wins 7,112 / 7,072, 5,816 draws, 0 aborted, mean 45.8 turns, 654.2 decisions, 32 controlled decisions, longest turn 264 decisions (the games of 100.5.1), and the replay test (1,162-1,296 s a shard on a shared desktop). The gates on 965170e
+(`--no-mac`): `GATE PASSED engine 965170ebf147 in 514s` (build, both digests, `az` 43, `limits` 13,
+`hidden` 16, pytest, the search smoke); `GATE PASSED encoding 965170ebf147 in 349s` (build, both digests, `az` 43, the checkpoint load of 100.5.1's fork, h2h 8 games, pytest).
