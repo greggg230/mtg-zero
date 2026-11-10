@@ -283,6 +283,111 @@ fn given_pools_and_builds_play_as_given() {
     assert!(MtgAz::new(&sp, 3).is_ok());
 }
 
+/// Seat `p`'s hand then library (definitions) after the setup of the game with this spec and seed:
+/// the chooser takes the first turn, then the setup shuffle (CR 103.3) and the opening hands
+/// (103.5) up to the first mulligan decision (ENGINE.md 104).
+fn after_setup(sp: &MtgSpec, seed: u64, p: u8) -> (Vec<u16>, u8) {
+    let mut g = MtgAz::new(sp, seed).unwrap();
+    let (mut legal, mut keys) = (Vec::new(), Vec::new());
+    g.legal_actions(&mut legal);
+    g.step(legal[0], &mut keys).unwrap();
+    assert_eq!(g.g.player(p).hand.len(), 7, "seed {seed}: the opening hands are drawn");
+    let pl = g.g.player(p);
+    (pl.hand.iter().chain(pl.library.iter()).map(|&c| g.g.obj(c).def).collect(), g.g.turn().starting)
+}
+
+fn names_of(ids: &[u16]) -> Vec<String> {
+    ids.iter().map(|&id| db().def(id).name.clone()).collect()
+}
+
+/// A seat's given deck in a given order (ENGINE.md 104): `"order": "given"` makes the list's order
+/// the library's before the setup shuffle; `"sorted"` (the default) sorts it by definition.
+fn seat_json(deck: &[u16], order: Option<&str>) -> serde_json::Value {
+    let mut v = serde_json::json!({"deck": names_of(deck)});
+    if let Some(o) = order {
+        v["order"] = serde_json::json!(o);
+    }
+    v
+}
+
+#[test]
+fn a_given_order_is_the_library_before_the_setup_shuffle() {
+    let db = db();
+    let a = builder::build(db, &pool(Collation::Arena, 21).unwrap(), &Settings::default(), &mut Rng::new(1));
+    let opp = builder::build(db, &pool(Collation::Arena, 22).unwrap(), &Settings::default(), &mut Rng::new(2));
+    let mut rev = a.deck.clone();
+    rev.reverse();
+    let spec = |hero: serde_json::Value| {
+        let s = serde_json::json!({"sealed": {"set": "eoe", "p0": hero, "p1": {"deck": names_of(&opp.deck)}}});
+        MtgSpec::parse(&s.to_string()).unwrap()
+    };
+    let plain = spec(seat_json(&a.deck, None));
+    // the default sorts: any given order is the sorted deck's game, and "sorted" says so explicitly
+    assert_eq!(spec(seat_json(&rev, None)), plain);
+    assert_eq!(spec(seat_json(&rev, Some("sorted"))), plain);
+    // the sorted order given is the default's game; the reversed order given is another game of the
+    // same cards (the shuffle maps slots, not cards), the other seat's untouched
+    let sorted_given = spec(seat_json(&a.deck, Some("given")));
+    let rev_given = spec(seat_json(&rev, Some("given")));
+    let mut differ = 0;
+    for seed in 0..16u64 {
+        let base = after_setup(&plain, seed, 0);
+        assert_eq!(after_setup(&sorted_given, seed, 0), base, "seed {seed}");
+        let r = after_setup(&rev_given, seed, 0);
+        let (mut x, mut y) = (r.0.clone(), base.0.clone());
+        x.sort_unstable();
+        y.sort_unstable();
+        assert_eq!(x, y, "seed {seed}: the same cards");
+        differ += (r.0 != base.0) as u32;
+        assert_eq!(after_setup(&rev_given, seed, 1), after_setup(&plain, seed, 1), "seed {seed}: p1's setup");
+    }
+    assert!(differ >= 15, "{differ} of 16 setups differ");
+    let s = rev_given.sealed.as_deref().unwrap();
+    assert_eq!(&SealedSpec::parse(&s.to_json()).unwrap(), s, "the order reads back from the JSON");
+}
+
+/// The paired deck comparison's common random numbers (ENGINE.md 104): two 40-card decks laid out
+/// slot by slot, differing in one slot, get the same permutation of their slots from one seed: the
+/// shuffled libraries and opening hands agree everywhere but where that slot went, the other
+/// player's deck is dealt the same and the same player takes the first turn. Sorted by definition
+/// (the default), the cards between the two swapped definitions shift a slot and land elsewhere.
+#[test]
+fn decks_laid_out_slot_by_slot_share_the_setup_shuffle() {
+    let db = db();
+    let a = builder::build(db, &pool(Collation::Arena, 21).unwrap(), &Settings::default(), &mut Rng::new(1));
+    let opp = builder::build(db, &pool(Collation::Arena, 22).unwrap(), &Settings::default(), &mut Rng::new(2));
+    // swap the deck's lowest definition for the sideboard card with the most deck cards below it
+    let x = a.deck[0];
+    let y = *a.sideboard.iter().max_by_key(|&&d| (a.deck.iter().filter(|&&e| e < d).count(), d)).unwrap();
+    assert!(a.deck.iter().filter(|&&e| e > x && e < y).count() >= 5, "a swap across the deck");
+    let mut b = a.deck.clone();
+    b[0] = y;
+    for hero in 0..2u8 {
+        let spec = |deck: &[u16], order: Option<&str>| {
+            let mut sealed = serde_json::json!({"set": "eoe"});
+            sealed[format!("p{hero}")] = seat_json(deck, order);
+            sealed[format!("p{}", 1 - hero)] = serde_json::json!({"deck": names_of(&opp.deck)});
+            MtgSpec::parse(&serde_json::json!({"sealed": sealed}).to_string()).unwrap()
+        };
+        let (sa, sb) = (spec(&a.deck, Some("given")), spec(&b, Some("given")));
+        let (ua, ub) = (spec(&a.deck, None), spec(&b, None));
+        let mut sorted_moved = 0;
+        for seed in 0..24u64 {
+            let (la, start_a) = after_setup(&sa, seed, hero);
+            let (lb, start_b) = after_setup(&sb, seed, hero);
+            assert_eq!(start_a, start_b, "seed {seed}: the same player takes the first turn");
+            let diff: Vec<usize> = (0..40).filter(|&i| la[i] != lb[i]).collect();
+            assert_eq!(diff.len(), 1, "seed {seed} hero p{hero}: one position differs");
+            assert_eq!((la[diff[0]], lb[diff[0]]), (x, y), "seed {seed}: the swapped slot");
+            assert_eq!(after_setup(&sa, seed, 1 - hero), after_setup(&sb, seed, 1 - hero), "seed {seed}: the opponent's setup");
+            let (ma, _) = after_setup(&ua, seed, hero);
+            let (mb, _) = after_setup(&ub, seed, hero);
+            sorted_moved += (0..40).filter(|&i| ma[i] != mb[i]).count();
+        }
+        assert!(sorted_moved > 3 * 24, "sorted decks: {sorted_moved} positions differ over 24 setups");
+    }
+}
+
 #[test]
 fn sealed_spec_errors_are_loud() {
     let bad = [
@@ -301,6 +406,9 @@ fn sealed_spec_errors_are_loud() {
         r#"{"sealed": {"set": "eoe", "collation": "arena", "p0": {"pool": ["The Dominion Bracelet"]}}}"#,
         r#"{"sealed": {"set": "eoe", "collation": "arena", "p0": {"deck": ["Plains"]}}}"#,
         r#"{"sealed": {"set": "eoe", "collation": "arena", "builder": {"lands": [3, 4]}}}"#,
+        // (ENGINE.md 104: a given deck's order, "given" or "sorted"; a pool has none)
+        r#"{"sealed": {"set": "eoe", "collation": "arena", "p0": {"pool": ["Mechan Shieldmate"], "order": "given"}}}"#,
+        r#"{"sealed": {"set": "eoe", "collation": "arena", "p0": {"deck": ["Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains"], "order": "random"}}}"#,
     ];
     for b in bad {
         assert!(MtgSpec::parse(b).is_err(), "{b} parsed");
@@ -308,6 +416,12 @@ fn sealed_spec_errors_are_loud() {
     // An unsupported card says which and why.
     let e = MtgSpec::parse(bad[12]).unwrap_err();
     assert!(e.contains("The Dominion Bracelet") && e.contains("not supported"), "{e}");
+    for b in &bad[15..] {
+        let e = MtgSpec::parse(b).unwrap_err();
+        assert!(e.contains("order"), "{e}");
+    }
+    // the same 40 cards with "order": "sorted" parse (the default, explicitly)
+    assert!(MtgSpec::parse(&bad[16].replace("\"random\"", "\"sorted\"")).is_ok());
 }
 
 #[test]
