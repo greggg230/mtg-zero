@@ -757,7 +757,7 @@ impl DealCache {
 /// The effective share of the K cached decks the deck tilt keeps at least, by default (ENGINE.md 106.1;
 /// the spec key `"deck_tilt_ess"`): when the weighed decks' effective sample size would fall below this
 /// x K, the tilt is tempered (its exponent scaled by beta < 1) until it is that.
-pub const DECK_TILT_ESS: f64 = 0.25;
+pub const DECK_TILT_ESS: f64 = 0.5;
 
 /// The deck tilt of a search (ENGINE.md 106): `p`, the network's prediction of the opponent's unseen
 /// cards by identity (the `deck` target's distribution, `identity::D` floats: the root decider's,

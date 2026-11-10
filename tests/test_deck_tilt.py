@@ -18,7 +18,7 @@ D = 1024
 def test_the_presets_and_seats():
     smoke, big = P.PRESETS['eoe-smoke'], P.PRESETS['eoe-1']
     assert smoke['selfplay_belief_tilts'] == smoke['eval_belief_tilts'] == {'deck': 1.0}
-    assert big['selfplay_belief_tilts'] == big['eval_belief_tilts'] == {'deck': 0.5}
+    assert big['selfplay_belief_tilts'] == big['eval_belief_tilts'] == {'deck': 1.0}
     for name in ('eoe-smoke', 'eoe-1'):
         c = run.resolve_config(run.parse(['--run', 'x', '--preset', name]), {})
         assert c['selfplay_belief_tilt'] == c['eval_belief_tilt'] == 0.0, 'the hand tilt stays off'

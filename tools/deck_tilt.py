@@ -25,6 +25,7 @@ import mtgz.az                         # noqa: E402,F401  (puts the pinned zero-
 import numpy as np                     # noqa: E402
 
 D = 1024    # identities of each auxiliary target (docs/ENGINE.md 102.4)
+SET_CARDS = 321    # the EoE space's card identities (docs/ENGINE.md 105.1)
 
 
 def low_priority(threads):
@@ -58,10 +59,13 @@ def positions(spec, n, seed):
 
 
 def ce(mean, true):
-    """Cross-entropy per true card of the composition `mean` (counts) for the true counts `true`."""
-    q = mean / mean.sum()
+    """Cross-entropy per true card of the composition `mean` (counts; 1% of a uniform over the set's cards mixed in, so
+    a true card absent from every dealt deck costs ln(321 / 0.01) = 10.4 nats, not infinity) for the true counts `true`."""
+    floor = np.zeros(D)
+    floor[:SET_CARDS] = 1.0 / SET_CARDS
+    q = 0.99 * mean / mean.sum() + 0.01 * floor
     k = true > 0
-    return float(-(true[k] * np.log(np.maximum(q[k], 1e-12))).sum() / true.sum())
+    return float(-(true[k] * np.log(np.maximum(q[k], 1e-300))).sum() / true.sum())
 
 
 def cmd_deals(a):
@@ -71,12 +75,17 @@ def cmd_deals(a):
     m, _ = load(a.model, 'cpu', game='mtg_eoe')
     ev = NetEvaluator(m, 'cpu')
     spec = a.spec or json.loads(open(os.path.join(os.path.dirname(os.path.dirname(a.model)), 'config.json')).read())['spec']
-    pos = positions(spec, a.positions, a.seed)
-    arms = [('untilted', None, 0.0)] + [(f'{src}, tilt {t:g}', src, t) for src in ('flat', 'head', 'reader') for t in a.tilts]
-    rows = {name: {'ce': [], 'mis': [], 'distinct': []} for name, _, _ in arms}
+    # (one set of positions per effective-sample-size floor: the same games, the spec's deck_tilt_ess differing)
+    ess = [None] + list(a.ess)
+    pos = {e: positions(spec if e is None else json.dumps(dict(json.loads(spec), deck_tilt_ess=e)), a.positions, a.seed)
+           for e in ess}
+    arms = [('untilted', None, 0.0, None)] + [(f'{src}, tilt {t:g}', src, t, None) for src in ('flat', 'head', 'reader')
+                                              for t in a.tilts]
+    arms += [(f'{src}, tilt {t:g}, ESS floor {e:g} x K', src, t, e) for e in a.ess for src in ('flat', 'head', 'reader') for t in a.tilts]
+    rows = {name: {'ce': [], 'mis': [], 'distinct': []} for name, *_ in arms}
     own = {'head': [], 'reader': [], 'flat': []}
     t0 = time.time()
-    for pi, g in enumerate(pos):
+    for pi, g in enumerate(pos[None]):
         v = g.to_move
         x = np.asarray(g.encode(v), np.float32)[None]
         n2 = np.full(1, 2, np.int64)
@@ -88,11 +97,11 @@ def cmd_deals(a):
             continue
         for src in own:
             own[src].append(ce(pred[src] * true.sum(), true))
-        base = None
-        for name, src, t in arms:
+        for name, src, t, e in arms:
+            ge = pos[e][pi]
             dealt, decks = [], set()
             for s in range(a.deals):
-                w = g.clone()
+                w = ge.clone()
                 if src is None:
                     w.determinize(v, 1000 * pi + s)
                 else:
@@ -102,23 +111,26 @@ def cmd_deals(a):
                 dealt.append(d)
                 decks.add(d.tobytes())
             mean = np.mean(dealt, 0)
-            if base is None:
-                base = mean
             r = rows[name]
-            r['ce'].append(ce(0.99 * mean + 0.01 * base, true))
+            r['ce'].append(ce(mean, true))
             r['mis'].append(0.5 * float(np.abs(mean - true).sum()))
             r['distinct'].append(len(decks))
-    print(f'{len(rows["untilted"]["ce"])} positions, {a.deals} worlds an arm, {time.time() - t0:.0f} s; model {a.model}')
-    print('| deal | cross-entropy per card +- se | cards misplaced | distinct decks of %d |' % a.deals)
-    print('|---|---|---|---|')
-    for name, _, _ in arms:
+    n = len(rows['untilted']['ce'])
+    unseen = np.mean([float(np.asarray(g.aux_target(g.to_move))[D:].sum()) for g in pos[None]])
+    print(f'{n} positions ({unseen:.1f} unseen opponent cards on average), {a.deals} worlds an arm, {time.time() - t0:.0f} s; '
+          f'model {a.model}')
+    print('| deal | cross-entropy per card +- se | paired vs untilted | cards misplaced | distinct decks of %d |' % a.deals)
+    print('|---|---|---|---|---|')
+    c0 = np.asarray(rows['untilted']['ce'])
+    for name, *_ in arms:
         r = rows[name]
         c = np.asarray(r['ce'])
-        print(f'| {name} | {c.mean():.3f} +- {c.std() / np.sqrt(len(c)):.3f} | {np.mean(r["mis"]):.2f} | '
-              f'{np.mean(r["distinct"]):.1f} |')
+        dlt = c - c0
+        print(f'| {name} | {c.mean():.3f} +- {c.std() / np.sqrt(n):.3f} | {dlt.mean():+.3f} +- {dlt.std() / np.sqrt(n):.3f} | '
+              f'{np.mean(r["mis"]):.2f} | {np.mean(r["distinct"]):.1f} |')
     for src, c in own.items():
         c = np.asarray(c)
-        print(f'| the {src}\'s own prediction | {c.mean():.3f} +- {c.std() / np.sqrt(len(c)):.3f} | | |')
+        print(f'| the {src} source\'s own prediction | {c.mean():.3f} +- {c.std() / np.sqrt(n):.3f} | | | |')
 
 
 def main(argv=None):
@@ -131,6 +143,8 @@ def main(argv=None):
     p.add_argument('--deals', type=int, default=64)
     p.add_argument('--tilts', type=float, nargs='+', default=[0.5, 1.0])
     p.add_argument('--clip', type=float, default=20.0)
+    p.add_argument('--ess', type=float, nargs='*', default=[],
+                   help='more effective-sample-size floors (deck_tilt_ess) to compare, every source at each')
     p.add_argument('--seed', type=int, default=106)
     p.add_argument('--torch-threads', type=int, default=4)
     a = ap.parse_args(argv)

@@ -171,7 +171,7 @@ pub struct MtgSpec {
     /// picked per deal (`"deal_samples"`, default 32; 0 = sample the prior at every deal).
     pub deal_samples: usize,
     /// The deck tilt's effective-sample-size floor, a share of the K decks in (0, 1] (ENGINE.md 106.1;
-    /// `"deck_tilt_ess"`, default `hidden_decks::DECK_TILT_ESS` 0.25). Read only by a deck-tilted deal.
+    /// `"deck_tilt_ess"`, default `hidden_decks::DECK_TILT_ESS` 0.5). Read only by a deck-tilted deal.
     pub deck_tilt_ess: Share,
     /// Sealed play (ENGINE.md 101): the pools, the builder and the seats; None for every other spec.
     pub sealed: Option<sealed::Shared>,
