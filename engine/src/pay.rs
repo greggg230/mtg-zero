@@ -832,7 +832,7 @@ impl Game {
     /// The sources of payment `pm` (`pay_classes`), without those of the
     /// permanents a cost tapped already (`Keep::committed`: teamwork's
     /// creatures, docs/shortcuts.md 13.17).
-    fn payment_classes(&self, pm: &PayMana) -> Vec<Class> {
+    pub(crate) fn payment_classes(&self, pm: &PayMana) -> Vec<Class> {
         let classes = self.pay_classes(pm.payer, pm.keep.exclude, pm.improvise_types(), pm.convoke);
         let classes = if pm.keep.committed.is_empty() { classes } else { self.classes_without(&classes, &pm.keep.committed) };
         // (And the source's own conflicting sources, `SelfUse`.)

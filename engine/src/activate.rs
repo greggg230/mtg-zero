@@ -578,9 +578,6 @@ impl Game {
         let pm = if mana.is_zero() && forced.is_empty() {
             None
         } else {
-            if !mana.is_zero() && !self.can_pay_with(p, mana, classes, &keep) {
-                return Some(false);
-            }
             let mut pm = PayMana::new(p, *mana);
             pm.keep = keep;
             pm.forced = forced;
@@ -588,6 +585,12 @@ impl Game {
             if cast {
                 pm.improvise = self.def_of(card).improvise;
                 pm.convoke = self.def_of(card).casting.convoke;
+            }
+            // (The sources the payment itself will have: `PayMana` is begun
+            // only when they pay the mana.)
+            let _ = classes;
+            if !mana.is_zero() && !self.can_pay_with(p, mana, &self.payment_classes(&pm), &pm.keep) {
+                return Some(false);
             }
             Some(pm)
         };

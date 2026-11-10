@@ -1008,18 +1008,16 @@ impl Game {
     /// if the payment can still be completed, ENGINE.md 6, 49)? A search of
     /// the payment's own decisions on copies of the game, every option of
     /// each (`Game::oracle`: the copies ask without this check), until a
-    /// copy has paid everything.
-    pub(crate) fn payment_completes(&self, floor: usize) -> bool {
+    /// copy has paid everything. A decision of another player than `payer`
+    /// within the payment (616.1's order of replacement effects for a
+    /// permanent of theirs sacrificed) must complete for each of its answers.
+    pub(crate) fn payment_completes(&self, floor: usize, payer: PlayerId) -> bool {
         let mut g = self.clone();
-        g.oracle = true;
-        g.oracle_dead = false;
-        g.spec.log = false;
         g.pending = None;
-        let mut nodes = 0u64;
-        Self::complete_from(g, floor, &mut nodes)
+        g.payment_completes_from(floor, payer)
     }
 
-    fn complete_from(mut g: Game, floor: usize, nodes: &mut u64) -> bool {
+    fn complete_from(mut g: Game, floor: usize, payer: PlayerId, nodes: &mut u64) -> bool {
         *nodes += 1;
         assert!(*nodes <= ORACLE_NODES, "the payment search passed {ORACLE_NODES} copies (ENGINE.md 100.4.9)");
         while g.pending.is_none() {
@@ -1036,14 +1034,16 @@ impl Game {
             return false;
         }
         let d = g.pending.take().expect("a decision");
-        for o in &d.options {
+        let mut each = d.options.iter().map(|o| {
             let mut h = g.clone();
             h.inject(o.choice);
-            if Self::complete_from(h, floor, nodes) {
-                return true;
-            }
+            Self::complete_from(h, floor, payer, nodes)
+        });
+        if d.player == payer {
+            each.any(|x| x)
+        } else {
+            each.all(|x| x)
         }
-        false
     }
 
     /// Answer the pending decision with `choice` as `apply` does, without
@@ -1061,13 +1061,13 @@ impl Game {
     /// The payment search's floor for `task`, if it is a payment whose
     /// options must leave it completable: a cost whose parts the player
     /// orders, or the mana payment before one.
-    fn completing_floor(&self, task: &Task) -> Option<usize> {
+    fn completing_floor(&self, task: &Task) -> Option<(usize, PlayerId)> {
         if self.oracle {
             return None;
         }
         match task {
-            Task::PayCosts { order: Some(o), .. } => Some(o.floor as usize),
-            Task::PayMana(pm) => pm.oracle.map(|f| f as usize),
+            Task::PayCosts { order: Some(o), .. } => Some((o.floor as usize, o.p)),
+            Task::PayMana(pm) => pm.oracle.map(|f| (f as usize, pm.payer)),
             _ => None,
         }
     }
@@ -1075,7 +1075,7 @@ impl Game {
     /// `options` of `task` that leave its payment completable (all of them
     /// for any other task).
     pub(crate) fn completing(&self, task: &Task, options: Vec<Opt>) -> Vec<Opt> {
-        let Some(floor) = self.completing_floor(task) else { return options };
+        let Some((floor, payer)) = self.completing_floor(task) else { return options };
         options
             .into_iter()
             .filter(|o| {
@@ -1083,14 +1083,14 @@ impl Game {
                 g.pending = None;
                 g.agenda.push(task.clone());
                 g.inject_fresh(o.choice);
-                g.payment_completes_from(floor)
+                g.payment_completes_from(floor, payer)
             })
             .collect()
     }
 
     /// `completing` for the items of a paged choice.
     pub(crate) fn completing_items(&self, task: &Task, items: Vec<(u32, Choice)>) -> Vec<(u32, Choice)> {
-        let Some(floor) = self.completing_floor(task) else { return items };
+        let Some((floor, payer)) = self.completing_floor(task) else { return items };
         items
             .into_iter()
             .filter(|&(_, c)| {
@@ -1098,7 +1098,7 @@ impl Game {
                 g.pending = None;
                 g.agenda.push(task.clone());
                 g.inject_fresh(c);
-                g.payment_completes_from(floor)
+                g.payment_completes_from(floor, payer)
             })
             .collect()
     }
@@ -1111,12 +1111,12 @@ impl Game {
 
     /// `payment_completes` from this copy as it is (its task pushed and
     /// answered).
-    fn payment_completes_from(mut self, floor: usize) -> bool {
+    fn payment_completes_from(mut self, floor: usize, payer: PlayerId) -> bool {
         self.oracle = true;
         self.oracle_dead = false;
         self.spec.log = false;
         let mut nodes = 0u64;
-        Self::complete_from(self, floor, &mut nodes)
+        Self::complete_from(self, floor, payer, &mut nodes)
     }
 
     /// Castability (ENGINE.md 49) of a cost whose parts' order can matter
@@ -1140,7 +1140,11 @@ impl Game {
             pm.oracle = None;
             g.agenda.push(Task::PayMana(Box::new(pm)));
         }
-        g.payment_completes(floor)
+        let payer = g.agenda.iter().rev().find_map(|t| match t {
+            Task::PayCosts { order: Some(o), .. } => Some(o.p),
+            _ => None,
+        });
+        g.payment_completes(floor, payer.expect("the cost just pushed"))
     }
 }
 
