@@ -298,16 +298,17 @@ fn sealed_spec_errors_are_loud() {
         r#"{"sealed": {"set": "eoe", "collation": "arena"}, "decks": {"p0": ["Plains"], "p1": ["Plains"]}}"#,
         r#"{"sealed": {"set": "eoe", "collation": "arena", "p0": {"pool": ["Lightning Bolt"]}}}"#,
         r#"{"sealed": {"set": "eoe", "collation": "arena", "p0": {"pool": ["Plains"]}}}"#,
-        r#"{"sealed": {"set": "eoe", "collation": "arena", "p0": {"pool": ["The Dominion Bracelet"]}}}"#,
+        r#"{"sealed": {"set": "eoe", "collation": "arena", "p0": {"pool": ["Paradox Haze"]}}}"#,
         r#"{"sealed": {"set": "eoe", "collation": "arena", "p0": {"deck": ["Plains"]}}}"#,
         r#"{"sealed": {"set": "eoe", "collation": "arena", "builder": {"lands": [3, 4]}}}"#,
     ];
     for b in bad {
         assert!(MtgSpec::parse(b).is_err(), "{b} parsed");
     }
-    // An unsupported card says which and why.
+    // A card the table lacks says which (since the merge into eoe-hidden-decks The Dominion
+    // Bracelet is supported, D2's ENGINE.md 100.5; Paradox Haze has no IR, excluded by the user).
     let e = MtgSpec::parse(bad[12]).unwrap_err();
-    assert!(e.contains("The Dominion Bracelet") && e.contains("not supported"), "{e}");
+    assert!(e.contains("Paradox Haze"), "{e}");
 }
 
 #[test]
