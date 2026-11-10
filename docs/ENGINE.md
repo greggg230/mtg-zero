@@ -21848,3 +21848,6 @@ threads; the outputs are in `E:/mtg-zero-scratch/eoe-paired/races/`.
   failed, 24 ignored (146 binaries). `python -m pytest tests -q`: 225 passed, 1 skipped. Digests as
   104.2 (eoe-bot's, unchanged). Not run: the 20,000-game fuzz - no rule or card changed, and no fuzz
   mode gives a deck an order.
+* `python tools/gate.py engine --no-mac --tested-sha 444e3be --expect-digest 7dc8e4b953b933a7
+  --expect-digest0 ae871e79dc5c0a44`: GATE PASSED engine 444e3be73e70 in 458s (the Mac recheck not
+  needed). The commit after it is this line.
