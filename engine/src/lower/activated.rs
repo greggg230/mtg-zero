@@ -297,7 +297,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         },
         x_times: 0,
         tap: *tap_self,
-        life: l.int("ActivationCost.pay_life", *pay_life, 0, 99) as u8,
+        life: l.int("ActivationCost.pay_life", *pay_life, 0, 99) as u32,
         sac_self: *sacrifice_self,
         exile_self: *exile_self,
         discard_self: *discard_self,
@@ -305,6 +305,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         sacrifice: None,
         discard: *discard_a_card as u8,
         discard_filter: None,
+        discard_also: None,
         exile_from_hand: None,
         bounce: None,
         exile_graveyard: l.int("ActivationCost.exile_cards_from_graveyard", *exile_cards_from_graveyard, 0, 20) as u8,
@@ -495,6 +496,11 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         cost.tap_untapped = Some(SacCost { filter, n: 1, another: false });
     } else {
         l.deny("ActivationCost.tap_permanent_type", tap_permanent_type);
+    }
+    // (One tap cost a payment keeps payable, `pay::Keep::taps`, besides "tap
+    // X": crew or saddle with another is refused, loudly.)
+    if [cost.crew > 0, cost.tap_untapped.is_some(), cost.tap_x.is_some()].iter().filter(|&&x| x).count() > 1 {
+        l.unsupported("ActivationCost.crew(with another tap cost)");
     }
     if sacs.len() > 1 {
         l.unsupported("ActivationCost.sacrifice(more than one kind)");

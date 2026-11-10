@@ -20,13 +20,35 @@ pub const COLORS: ManaMask = 0b1_1111;
 pub const TYPES: ManaMask = 0b11_1111;
 
 /// A unit made in this payment by a mana ability with a mana cost of its
-/// own (Sunken Ruins; ENGINE.md 18): such mana never pays such a cost, so
-/// no ability pays for itself.
+/// own (Sunken Ruins; ENGINE.md 18), its tag's chain id the ability's
+/// (`chain`): it pays such a cost only of an ability activated after its
+/// own (`fits`), so no ability pays for itself.
 pub const MADE: ManaMask = 1 << 6;
 
-/// A need of a payment that `MADE` units can't pay: the mana cost of a
-/// mana ability activated within the payment (CR 605.3a, 602.2b).
+/// A need of a payment that a `MADE` unit pays only when its ability was
+/// activated first: the mana cost of a mana ability activated within the
+/// payment (CR 605.3a, 602.2b), its tag's chain id that ability's.
 pub const NOT_MADE: ManaMask = 1 << 7;
+
+/// Where a tag's chain id starts (`chain`).
+const CHAIN_SHIFT: u32 = 16;
+
+/// The chain id of a tag (`Tag` bits 16-63): of a `MADE` unit, the mana
+/// ability with a mana cost that made it; of a `NOT_MADE` need, the one
+/// whose cost it is (ENGINE.md 100.4.7, docs/shortcuts.md 13.15; 0 for
+/// none). Ids name the payment's activations of such abilities
+/// (`pay::chain_id`); `payable_iter` tries their orders, relabelling the
+/// ids by rank.
+#[inline]
+pub fn chain(t: Tag) -> u64 {
+    t >> CHAIN_SHIFT
+}
+
+/// `t` with chain id `id`.
+#[inline]
+pub fn with_chain(t: Tag, id: u64) -> Tag {
+    (t & ((1 << CHAIN_SHIFT) - 1)) | id << CHAIN_SHIFT
+}
 
 /// On a unit (never on a need, where the bit is `NOT_MADE`): mana with a
 /// spending restriction (CR 106.6: Mishra's Workshop's "only to cast
@@ -38,12 +60,13 @@ pub const RESTRICTED: ManaMask = 1 << 7;
 /// A unit's or a need's tag in the feasibility searches (ENGINE.md 100.4.5,
 /// docs/shortcuts.md N21): bits 0-7 a `ManaMask` (the types, `MADE`, and
 /// `NOT_MADE` on a need or `RESTRICTED` on a unit), bits 8-15 spending
-/// purposes (`purposes`). On a unit they are its restriction (CR 106.6: the
-/// `SPEND_*` purposes of its mana, 0 for none; `FOR_COST` for a creature
-/// tapped for convoke); on a need, what paying it is (the payment's
-/// `Keep::allow` and `FOR_COST` for the cost being paid, `Game::ability_allow`
-/// of the ability for a mana ability's own cost).
-pub type Tag = u32;
+/// purposes (`purposes`), bits 16-63 a chain id (`chain`). On a unit they
+/// are its restriction (CR 106.6: the `SPEND_*` purposes of its mana, 0 for
+/// none; `FOR_COST` for a creature tapped for convoke); on a need, what
+/// paying it is (the payment's `Keep::allow` and `FOR_COST` for the cost
+/// being paid, `Game::ability_allow` of the ability for a mana ability's own
+/// cost).
+pub type Tag = u64;
 
 /// A purpose of no mana ability: paying the cost the payment is for (the
 /// spell's or the activated ability's), never the mana cost of a mana
@@ -86,11 +109,36 @@ pub fn spend_ok(unit: Tag, need: Tag) -> bool {
 }
 
 /// Can a unit tagged `unit` pay a need tagged `need` (their types meet; a
-/// `MADE` unit never pays a `NOT_MADE` need; its restriction allows the
-/// need's purposes)?
+/// `MADE` unit pays a `NOT_MADE` need only of an ability after its own in
+/// the order the chain ids rank, `chain`; its restriction allows the need's
+/// purposes)?
 #[inline]
 pub fn fits(unit: Tag, need: Tag) -> bool {
-    unit & need & TYPES as Tag != 0 && (need & NOT_MADE as Tag == 0 || unit & MADE as Tag == 0) && spend_ok(unit, need)
+    fits_in(unit, need, Chains::Ranked)
+}
+
+/// How a `MADE` unit may pay a `NOT_MADE` need in a matching
+/// (`payable_iter`): never (the order of no edge, a bound), always (every
+/// order at once, its own too: a bound), or by the chain ids' ranks.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Chains {
+    Never,
+    Always,
+    Ranked,
+}
+
+/// [`fits`] under `mode`.
+#[inline]
+fn fits_in(unit: Tag, need: Tag, mode: Chains) -> bool {
+    unit & need & TYPES as Tag != 0
+        && (need & NOT_MADE as Tag == 0
+            || unit & MADE as Tag == 0
+            || match mode {
+                Chains::Never => false,
+                Chains::Always => true,
+                Chains::Ranked => chain(unit) != 0 && chain(unit) < chain(need),
+            })
+        && spend_ok(unit, need)
 }
 
 /// Two-colour hybrid pairs (CR 107.4e) in index order.
@@ -130,11 +178,11 @@ pub struct ManaCost {
 }
 
 impl ManaCost {
-    pub fn total(&self) -> u8 {
-        self.generic
-            + self.pips.iter().sum::<u8>()
-            + self.hybrid.iter().sum::<u8>()
-            + self.phyrexian.iter().sum::<u8>()
+    /// Every symbol, counted in u32 (exact: the u8 sum wrapped past 255,
+    /// and a cost of 256 read as none; ENGINE.md 100.4.6).
+    pub fn total(&self) -> u32 {
+        let sum = |v: &[u8]| v.iter().map(|&n| n as u32).sum::<u32>();
+        self.generic as u32 + sum(&self.pips) + sum(&self.hybrid) + sum(&self.phyrexian)
     }
 
     pub fn is_zero(&self) -> bool {
@@ -165,9 +213,9 @@ impl ManaCost {
     }
 
     /// Mana value (CR 202.3): every symbol counts one (hybrid and
-    /// Phyrexian included).
+    /// Phyrexian included). (Of a printed cost: a u8, the lowering's bounds.)
     pub fn mana_value(&self) -> u8 {
-        self.total()
+        u8::try_from(self.total()).expect("a printed cost's mana value: a u8")
     }
 
     pub fn has_phyrexian(&self) -> bool {
@@ -378,6 +426,15 @@ pub fn cost_need(mask: ManaMask, allow: u8) -> Tag {
 
 /// [`payable`] over any sequence of available tags (no allocation: this
 /// runs for every castable card at every priority decision).
+///
+/// With mana abilities that have a mana cost (`NOT_MADE` needs among
+/// `extra`) and the mana of such abilities (`MADE` units) that could pay one
+/// of another's (CR 605.3a, 602.2b: a mana ability's mana pays the cost of
+/// one activated after it, never its own or an earlier one's), the payment
+/// is exact when some order of those abilities allows it: each order is
+/// tried, its chain ids relabelled by rank (`chain`, `fits`), abilities alike
+/// (the same needs and units) in a fixed order among themselves
+/// (docs/shortcuts.md 13.15: no such mana paid such a cost).
 fn payable_iter(
     cost: &ManaCost,
     allow: u8,
@@ -390,21 +447,100 @@ fn payable_iter(
     if chosen.len() > need || chosen.len() + n < need {
         return false;
     }
+    let made = |u: &Tag| u & MADE as Tag != 0 && chain(*u) != 0;
+    let linked = extra.iter().any(|&e| e & NOT_MADE as Tag != 0 && chain(e) != 0 && chosen.iter().copied().chain(available.clone()).any(|u| made(&u) && chain(u) != chain(e) && u & e & TYPES as Tag != 0 && spend_ok(u, e)));
+    if !linked {
+        return payable_ordered(cost, allow, extra, chosen, available, Chains::Ranked);
+    }
+    // (Two bounds first, each one matching: with no such mana paying such
+    // a cost, a payment every order allows holds; with every such mana free
+    // to pay every such cost, its own too, a payment no order allows fails.)
+    if payable_ordered(cost, allow, extra, chosen, available.clone(), Chains::Never) {
+        return true;
+    }
+    if !payable_ordered(cost, allow, extra, chosen, available.clone(), Chains::Always) {
+        return false;
+    }
+    // The ids, and each one's needs and units without it (alike when equal).
+    let units: Vec<Tag> = chosen.iter().copied().chain(available).collect();
+    let mut ids: Vec<u64> = extra.iter().filter(|&&e| e & NOT_MADE as Tag != 0).chain(units.iter().filter(|u| made(u))).map(|&t| chain(t)).filter(|&i| i != 0).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let sig = |id: u64| {
+        let strip = |t: &Tag| with_chain(*t, 0);
+        let mut ns: Vec<Tag> = extra.iter().filter(|&&e| e & NOT_MADE as Tag != 0 && chain(e) == id).map(strip).collect();
+        let mut us: Vec<Tag> = units.iter().filter(|u| made(u) && chain(**u) == id).map(strip).collect();
+        ns.sort_unstable();
+        us.sort_unstable();
+        (ns, us)
+    };
+    let sigs: Vec<(Vec<Tag>, Vec<Tag>)> = ids.iter().map(|&i| sig(i)).collect();
+    let mut nodes = SEARCH_NODES;
+    // (Each order: rank r for the r-th id placed; an id alike an earlier one
+    // only after it.)
+    #[allow(clippy::too_many_arguments)]
+    fn orders(
+        k: usize,
+        rank: &mut Vec<u64>,
+        placed: &mut Vec<bool>,
+        sigs: &[(Vec<Tag>, Vec<Tag>)],
+        ids: &[u64],
+        try_one: &mut dyn FnMut(&[u64]) -> bool,
+        nodes: &mut u32,
+    ) -> Option<bool> {
+        *nodes = nodes.checked_sub(1)?;
+        if k == ids.len() {
+            return Some(try_one(rank));
+        }
+        for i in 0..ids.len() {
+            if placed[i] || (0..i).any(|j| !placed[j] && sigs[j] == sigs[i]) {
+                continue;
+            }
+            placed[i] = true;
+            rank[i] = k as u64 + 1;
+            let r = orders(k + 1, rank, placed, sigs, ids, try_one, nodes);
+            placed[i] = false;
+            if r != Some(false) {
+                return r;
+            }
+        }
+        Some(false)
+    }
+    let relabel = |t: Tag, rank: &[u64]| match ids.binary_search(&chain(t)) {
+        Ok(i) if chain(t) != 0 => with_chain(t, rank[i]),
+        _ => t,
+    };
+    let mut try_one = |rank: &[u64]| {
+        let ex: Vec<Tag> = extra.iter().map(|&t| relabel(t, rank)).collect();
+        let ch: Vec<Tag> = chosen.iter().map(|&t| relabel(t, rank)).collect();
+        let av: Vec<Tag> = units[chosen.len()..].iter().map(|&t| relabel(t, rank)).collect();
+        payable_ordered(cost, allow, &ex, &ch, av.iter().copied(), Chains::Ranked)
+    };
+    let mut rank = vec![0u64; ids.len()];
+    let mut placed = vec![false; ids.len()];
+    orders(0, &mut rank, &mut placed, &sigs, &ids, &mut try_one, &mut nodes)
+        .unwrap_or_else(|| search_exhausted(format_args!("the orders of chained mana abilities: cost {cost}, needs {extra:?}, units {units:?}")))
+}
+
+/// [`payable_iter`] with the chained abilities' order given (their chain
+/// ids' ranks).
+fn payable_ordered(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], available: impl Iterator<Item = Tag> + Clone, mode: Chains) -> bool {
     // (A restriction that keeps some unit from some need: the exact
     // matching. Otherwise every unit may pay every need it meets in type.)
     let main = cost_need(0, allow);
     let kept_from = |u: Tag| purposes(u) != 0 && (!spend_ok(u, main) || extra.iter().any(|&e| !spend_ok(u, e)));
-    if chosen.iter().any(|&u| kept_from(u)) || available.clone().any(kept_from) {
-        return payable_restricted(cost, main, extra, chosen, available);
+    // (And with the mana costs of mana abilities among the needs: their chain
+    // ids part the needs and the units into many groups, which
+    // `best_chosen`'s split of each need over the groups made exponential,
+    // 13.15; the matching is polynomial.)
+    if extra.iter().any(|&e| e & NOT_MADE as Tag != 0) || chosen.iter().any(|&u| kept_from(u)) || available.clone().any(kept_from) {
+        return payable_restricted(cost, main, extra, chosen, available, mode);
     }
-    let mut groups = [(0 as Tag, false, 0u8); 128];
-    let mut ng = 0;
-    let mut add = |m: Tag, ch: bool| match groups[..ng].iter_mut().find(|g| g.0 == m && g.1 == ch) {
-        Some(g) => g.2 = g.2.saturating_add(1),
-        None => {
-            groups[ng] = (m, ch, 1);
-            ng += 1;
-        }
+    // (Counted in u32: any number of units of a tag, never saturating.)
+    let mut groups: crate::svec::SVec<(Tag, bool, u32), 32> = crate::svec::SVec::new();
+    let mut add = |m: Tag, ch: bool| match groups.iter_mut().find(|g| g.0 == m && g.1 == ch) {
+        Some(g) => g.2 += 1,
+        None => groups.push((m, ch, 1)),
     };
     for &m in chosen {
         add(m, true);
@@ -412,34 +548,29 @@ fn payable_iter(
     for m in available {
         add(m, false);
     }
-    let mut needs = [(0 as Tag, 0u8); 24];
-    let mut nn = 0;
+    let mut needs: crate::svec::SVec<(Tag, u32), 24> = crate::svec::SVec::new();
     for &m in extra {
-        match needs[..nn].iter_mut().find(|x| x.0 == m) {
+        match needs.iter_mut().find(|x| x.0 == m) {
             Some(x) => x.1 += 1,
-            None => {
-                needs[nn] = (m, 1);
-                nn += 1;
-            }
+            None => needs.push((m, 1)),
         }
     }
     for c in 0..6 {
         if cost.pips[c] > 0 {
-            needs[nn] = (cost_need(1 << c, allow), cost.pips[c]);
-            nn += 1;
+            needs.push((cost_need(1 << c, allow), cost.pips[c] as u32));
         }
     }
     for (i, &k) in cost.hybrid.iter().enumerate() {
         if k > 0 {
-            needs[nn] = (cost_need(pair_mask(i), allow), k);
-            nn += 1;
+            needs.push((cost_need(pair_mask(i), allow), k as u32));
         }
     }
     debug_assert!(!cost.has_phyrexian());
+    let cap = chosen.len() as u32;
     let best = if extra.iter().any(|&m| m & NOT_MADE as Tag != 0) {
-        best_chosen::<true>(&needs[..nn], &mut groups[..ng], chosen.len() as u8)
+        best_chosen::<true>(&needs, &mut groups, cap, mode)
     } else {
-        best_chosen::<false>(&needs[..nn], &mut groups[..ng], chosen.len() as u8)
+        best_chosen::<false>(&needs, &mut groups, cap, mode)
     };
     match best {
         Some(used) => chosen.len() - used as usize <= cost.generic as usize,
@@ -455,7 +586,7 @@ fn payable_iter(
 /// Mendelsohn-Dulmage theorem one exists when a matching covers the needs
 /// and another covers the chosen units, so two maximum flows decide it (the
 /// sides grouped by tag, capacities their counts).
-fn payable_restricted(cost: &ManaCost, main: Tag, extra: &[Tag], chosen: &[Tag], available: impl Iterator<Item = Tag>) -> bool {
+fn payable_restricted(cost: &ManaCost, main: Tag, extra: &[Tag], chosen: &[Tag], available: impl Iterator<Item = Tag>, mode: Chains) -> bool {
     // Needs by tag: (tag, generic, count).
     let mut needs: Vec<(Tag, bool, u32)> = Vec::new();
     let mut add_need = |t: Tag, generic: bool, k: u32| {
@@ -489,7 +620,7 @@ fn payable_restricted(cost: &ManaCost, main: Tag, extra: &[Tag], chosen: &[Tag],
     for u in available {
         add_unit(u, false);
     }
-    let pays = |u: Tag, n: &(Tag, bool, u32)| if n.1 { spend_ok(u, n.0) } else { fits(u, n.0) };
+    let pays = |u: Tag, n: &(Tag, bool, u32)| if n.1 { spend_ok(u, n.0) } else { fits_in(u, n.0, mode) };
     let edges: Vec<Vec<bool>> = needs.iter().map(|n| units.iter().map(|u| pays(u.0, n)).collect()).collect();
     let need_total: u32 = needs.iter().map(|n| n.2).sum();
     let chosen_total = chosen.len() as u32;
@@ -507,7 +638,7 @@ fn payable_restricted(cost: &ManaCost, main: Tag, extra: &[Tag], chosen: &[Tag],
 /// The maximum flow from the left nodes (capacity `left[i]` each) to the
 /// right nodes (capacity `right[j]`) along the edges (`edges[i][j]`, of any
 /// capacity): a bipartite b-matching, by augmenting paths.
-fn max_flow(left: &[u32], right: &[u32], edges: &[Vec<bool>]) -> u32 {
+pub(crate) fn max_flow(left: &[u32], right: &[u32], edges: &[Vec<bool>]) -> u32 {
     let (nl, nr) = (left.len(), right.len());
     let mut f = vec![vec![0u32; nr]; nl];
     let mut out_l = vec![0u32; nl];
@@ -559,35 +690,36 @@ fn max_flow(left: &[u32], right: &[u32], edges: &[Vec<bool>]) -> u32 {
 /// them); `None` if the needs cannot be met.
 /// (`STRICT`: some need is `NOT_MADE`; otherwise any meeting of types fits,
 /// the fast path.)
-fn best_chosen<const STRICT: bool>(needs: &[(Tag, u8)], groups: &mut [(Tag, bool, u8)], cap: u8) -> Option<u8> {
+fn best_chosen<const STRICT: bool>(needs: &[(Tag, u32)], groups: &mut [(Tag, bool, u32)], cap: u32, mode: Chains) -> Option<u32> {
     match needs.split_first() {
         None => Some(0),
-        Some((&(c, k), rest)) => distribute::<STRICT>(c, k, 0, rest, groups, cap),
+        Some((&(c, k), rest)) => distribute::<STRICT>(c, k, 0, rest, groups, cap, mode),
     }
 }
 
 fn distribute<const STRICT: bool>(
     need: Tag,
-    k: u8,
+    k: u32,
     gi: usize,
-    rest: &[(Tag, u8)],
-    groups: &mut [(Tag, bool, u8)],
-    cap: u8,
-) -> Option<u8> {
+    rest: &[(Tag, u32)],
+    groups: &mut [(Tag, bool, u32)],
+    cap: u32,
+    mode: Chains,
+) -> Option<u32> {
     if k == 0 {
-        return best_chosen::<STRICT>(rest, groups, cap);
+        return best_chosen::<STRICT>(rest, groups, cap, mode);
     }
     if gi == groups.len() {
         return None;
     }
     let (mask, ch, cnt) = groups[gi];
-    let meets = if STRICT { fits(mask, need) } else { mask & need & TYPES as Tag != 0 };
+    let meets = if STRICT { fits_in(mask, need, mode) } else { mask & need & TYPES as Tag != 0 };
     let most = if meets { k.min(cnt) } else { 0 };
-    let mut best: Option<u8> = None;
+    let mut best: Option<u32> = None;
     for t in (0..=most).rev() {
         let used = if ch { t } else { 0 };
         groups[gi].2 -= t;
-        let r = distribute::<STRICT>(need, k - t, gi + 1, rest, groups, cap.saturating_sub(used));
+        let r = distribute::<STRICT>(need, k - t, gi + 1, rest, groups, cap.saturating_sub(used), mode);
         groups[gi].2 += t;
         if let Some(v) = r {
             let v = v + used;
@@ -626,18 +758,20 @@ impl Unit {
 pub struct Budget {
     pub life: i32,
     pub sac: i32,
-    /// Activations of a shared source (Orcish Lumberjack, tapped for each
-    /// Forest it sacrifices).
-    pub tap: i32,
 }
 
 impl Budget {
-    /// No limits that matter.
-    pub const FREE: Budget = Budget { life: i32::MAX, sac: i32::MAX, tap: i32::MAX };
+    /// No limits that matter. (The actors of shared activations, Gene
+    /// Pollinators and Orcish Lumberjacks, are counted per pool by the
+    /// payment's search: `pay::PoolCtx`, ENGINE.md 100.4.7.)
+    pub const FREE: Budget = Budget { life: i32::MAX, sac: i32::MAX };
 
     fn take(&self, u: &Unit, n: i32) -> Option<Budget> {
-        let b = Budget { life: self.life - u.life as i32 * n, sac: self.sac - if u.sac { n } else { 0 }, tap: self.tap };
-        (b.life >= 0 && b.sac >= 0).then_some(b)
+        // (In i64: exact for any number of units; what is left is within
+        // the i32 it was taken from.)
+        let life = self.life as i64 - u.life as i64 * n as i64;
+        let sac = self.sac as i64 - if u.sac { n as i64 } else { 0 };
+        (life >= 0 && sac >= 0).then_some(Budget { life: life as i32, sac: sac as i32 })
     }
 }
 
@@ -655,7 +789,8 @@ pub fn payable_within_n(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag
     let paid: Vec<Unit> = available.iter().copied().filter(|u| u.budgeted()).collect();
     // Rare (low life, discard costs): try how many units of each budgeted
     // group to use.
-    let mut groups: Vec<(Unit, u8)> = Vec::new();
+    // (Counted in u32: any number of units, never wrapping.)
+    let mut groups: Vec<(Unit, u32)> = Vec::new();
     for u in paid {
         match groups.iter_mut().find(|g| g.0 == u) {
             Some(g) => g.1 += 1,
@@ -670,14 +805,14 @@ pub fn payable_within_n(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag
         extra: &[Tag],
         chosen: &[Tag],
         units: &mut Vec<Tag>,
-        groups: &[(Unit, u8)],
+        groups: &[(Unit, u32)],
         b: Budget,
         nodes: &mut u32,
     ) -> Option<bool> {
         *nodes = nodes.checked_sub(1)?;
         let Some(((u, n), rest)) = groups.split_first() else { return Some(payable_n(cost, allow, extra, chosen, units)) };
         for take in (0..=*n).rev() {
-            let Some(left) = b.take(u, take as i32) else { continue };
+            let Some(left) = b.take(u, take.min(i32::MAX as u32) as i32) else { continue };
             let len = units.len();
             units.extend(std::iter::repeat_n(u.mask, take as usize));
             let ok = go(cost, allow, extra, chosen, units, rest, left, nodes);
@@ -774,7 +909,7 @@ mod tests {
     #[test]
     fn budgets_limit_life_and_hand_units() {
         let two = ManaCost::parse("{2}").unwrap();
-        let b = |life, sac| Budget { life, sac, tap: i32::MAX };
+        let b = |life, sac| Budget { life, sac };
         let conf = Unit { life: 1, ..Unit::free(COLORS) };
         assert!(payable_within(&two, 0, &[], &[conf, conf], b(2, 0)));
         assert!(!payable_within(&two, 0, &[], &[conf, conf], b(1, 0)));

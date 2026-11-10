@@ -912,7 +912,7 @@ impl Game {
                 crate::game::CastFrom::Escape | crate::game::CastFrom::Retrace => {
                     self.cost_payable(p, card, self.route_extra(card, from, 0).expect("an escape or retrace cost"), &mana, classes, None)
                 }
-                _ => self.can_pay_with(p, &mana, classes, &crate::pay::Keep { allow: self.spend_allow_from(card, from), life: top_life, ..Default::default() }),
+                _ => self.can_pay_with(p, &mana, classes, &crate::pay::Keep { allow: self.spend_allow_from(card, from), life: top_life as u32, ..Default::default() }),
             }
         };
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
@@ -1006,14 +1006,14 @@ impl Game {
             // "Pay X life" (CR 119.4: no more than one's life total; X isn't
             // in the mana cost, so a free cast doesn't fix it, 107.3b).
             // The life the mana payment may need is kept (a painland).
-            // (The payment keeps life as a u8, `pay::Keep::life`: workstream
-            // B's payment model; at most 255 here.)
-            let life = self.players[p as usize].life.clamp(0, u8::MAX as i64) as u64;
+            // (Any amount up to the life total: `pay::Keep::life` is a u32.)
+            let life = self.players[p as usize].life.max(0) as u64;
             let cost = self.total_mana(card, item);
             let classes = self.mana_classes(p, None);
             let allow = self.spend_allow_from(card, item.from);
             crate::decision::most_allowed(0, life, |v| {
-                self.can_pay_with(p, &cost, &classes, &crate::pay::Keep { life: v as u8, allow, ..Default::default() })
+                let life = u32::try_from(v).expect("X life within the life total");
+                self.can_pay_with(p, &cost, &classes, &crate::pay::Keep { life, allow, ..Default::default() })
             })
         } else if !free {
             // CR 601.2f: X is part of the mana cost, before reductions. Cast
@@ -1084,7 +1084,7 @@ impl Game {
                     .is_some_and(|m| self.spell_targets_available(&m.list[k], p, card)))
                 && {
                     let cost = self.delve_reduced(card, p, self.route_mana_plus(card, p, from, &extra.plus(&o.mana)), keep);
-                    self.cost_payable(p, card, &Self::with_life(o, top_life), &cost, classes, exclude)
+                    self.cost_payable(p, card, &Self::with_life(o, top_life as u32), &cost, classes, exclude)
                 }
         })
     }
@@ -1109,7 +1109,8 @@ impl Game {
         let classes = self.mana_classes(p, None);
         let mut out: Vec<CardIdx> = Vec::new();
         for cl in &classes {
-            if cl.sac_self && cl.need == 0 && matches!(cl.yld, crate::pay::Yield::One(_)) && !crate::pay::is_sac_slot(cl.members[0].slot) {
+            // (One mana or several, Black Lotus's: docs/shortcuts.md 13.16.)
+            if crate::pay::delve_source(cl) {
                 for s in cl.members.iter() {
                     // (Only a card that would reach the graveyard: not under
                     // Yawgmoth's Will or an opponent's Dauthi Voidwalker,
@@ -1202,18 +1203,15 @@ impl Game {
     /// graveyard afterwards, one more generic mana of a delve spell.
     pub(crate) fn delve_classes<'a>(&self, p: PlayerId, card: CardIdx, classes: &'a [crate::pay::Class]) -> std::borrow::Cow<'a, [crate::pay::Class]> {
         use crate::pay::Yield;
-        if !self.def_of(card).delve
-            || !classes.iter().any(|cl| cl.sac_self && cl.need == 0 && matches!(cl.yld, Yield::One(_)) && !crate::pay::is_sac_slot(cl.members[0].slot))
-        {
+        if !self.def_of(card).delve || !classes.iter().any(crate::pay::delve_source) {
             return std::borrow::Cow::Borrowed(classes);
         }
         let mut out = classes.to_vec();
         let mut kept = Vec::new();
         for cl in out.iter_mut() {
-            if !(cl.sac_self && cl.need == 0 && !crate::pay::is_sac_slot(cl.members[0].slot)) {
+            if !crate::pay::delve_source(cl) {
                 continue;
             }
-            let Yield::One(u) = cl.yld else { continue };
             // (Tokens cease to exist: no delve; nor a card exiled instead of
             // going to the graveyard, under Yawgmoth's Will or an opponent's
             // Dauthi Voidwalker: `delve_sources`, ENGINE.md 49; nor another
@@ -1231,8 +1229,16 @@ impl Game {
                 continue;
             }
             cl.members = cards;
-            let prods = (0..6).filter(|&t| u.mask & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect();
-            cl.yld = Yield::Multi { prods, units: Some(vec![u, crate::mana::Unit::free(0u8)]) };
+            match cl.yld {
+                Yield::One(u) => {
+                    let prods = (0..6).filter(|&t| u.mask & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect();
+                    cl.yld = Yield::Multi { prods, units: Some(vec![u, crate::mana::Unit::free(0u8)]) };
+                }
+                // (Several mana, Black Lotus's, or Wizard's Rockets: the
+                // typeless unit with each production, `Class::delve`;
+                // docs/shortcuts.md 13.16.)
+                Yield::Multi { .. } => cl.delve = true,
+            }
         }
         for (cl, s) in kept {
             let mut m = crate::pay::Members::new();
@@ -1701,7 +1707,7 @@ impl Game {
             let p = item.controller;
             // Enough other cards, and the mana payable while keeping them.
             let mana = self.route_mana(card, p, item.from);
-            let keep = crate::pay::Keep { discard: Some((chosen as u8, card)), ..Default::default() };
+            let keep = crate::pay::Keep { reserves: vec![(crate::pay::Reserve::Discard(chosen as u8, None), card)], ..Default::default() };
             self.players[p as usize].hand.len() < chosen || !self.can_pay_with(p, &mana, &self.mana_classes(p, None), &keep)
         };
         let (p, source) = (item.controller, Some(self.item_source(item)));
@@ -1826,25 +1832,23 @@ impl Game {
     /// to its mana value (118.9). A check that a mana cost announced while
     /// casting can be paid keeps it (ENGINE.md 38: Three Steps Ahead's spree
     /// costs from the Citadel at low life, Mana Confluence's life).
-    pub(crate) fn life_later(&self, card: CardIdx, item: &StackItem) -> u8 {
+    pub(crate) fn life_later(&self, card: CardIdx, item: &StackItem) -> u32 {
         let x_life = if self.def_of(card).x_life { item.x } else { 0 };
-        let citadel = if item.from == crate::game::CastFrom::LibraryTop { self.mana_value_of(card) } else { 0 };
-        // (Exact: "pay X life" stays within the payment's u8 life, `x_range`
-        // (workstream B's model), and a spell cast from the top of the
-        // library has X = 0 (CR 107.3b), so its mana value is its card's,
-        // a u8: one of the two terms is 0.)
-        debug_assert!(x_life == 0 || citadel == 0);
-        u8::try_from(x_life as u64 + citadel).expect("the life a cost takes later: a u8 (workstream B)")
+        let citadel = if item.from == crate::game::CastFrom::LibraryTop { self.mana_value_of(card) as u32 } else { 0 };
+        // (Exact: X life is at most a life total, and a spell cast from the
+        // top of the library has X = 0, CR 107.3b, so one term is 0.)
+        x_life.checked_add(citadel).expect("the life a cost takes later: at most a life total")
     }
 
     /// Cost `o` with `life` more life to pay after its mana (X life,
     /// Bolas's Citadel's: kept by its mana payment, CR 601.2h).
-    fn with_life(o: &crate::db::Cost, life: u8) -> std::borrow::Cow<'_, crate::db::Cost> {
+    fn with_life(o: &crate::db::Cost, life: u32) -> std::borrow::Cow<'_, crate::db::Cost> {
         if life == 0 {
             return std::borrow::Cow::Borrowed(o);
         }
         let mut c = o.clone();
-        c.life = c.life.saturating_add(life);
+        // (A printed life, at most 99, and at most a life total: a u32.)
+        c.life = c.life.checked_add(life).expect("a cost's life: at most a life total and 99");
         std::borrow::Cow::Owned(c)
     }
 
@@ -2616,13 +2620,13 @@ impl Game {
             }
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
             if !pm.cost.is_zero() {
-                pm.keep.life = pm.keep.life.saturating_add(life_later);
+                pm.keep.life = pm.keep.life.checked_add(life_later).expect("a cost's life: at most a life total and 99");
                 pm.life_after = life_later;
                 self.agenda.push(Task::PayMana(Box::new(pm)));
             } else {
                 if life_later > 0 {
                     self.note(|_| format!("P{p} pays {life_later} life"));
-                    self.lose_life(p, life_later as i32);
+                    self.lose_life(p, i32::try_from(life_later).expect("life within the life total"));
                 }
                 // (No mana to pay: delve's cards now, ENGINE.md 51.)
                 self.exile_delved(p, Some(card));
@@ -2665,10 +2669,10 @@ impl Game {
         pm.keep.spell = Some(card);
         let escalated = item.modes.len().saturating_sub(1) as u8;
         if escalated > 0 && def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
-            pm.keep.discard = Some((escalated, card));
+            pm.keep.reserves.push((crate::pay::Reserve::Discard(escalated, None), card));
         }
         let _ = def;
-        pm.keep.life = pm.keep.life.saturating_add(life_later);
+        pm.keep.life = pm.keep.life.checked_add(life_later).expect("a cost's life: at most a life total and 99");
         pm.life_after = life_later;
         self.agenda.push(Task::PayMana(Box::new(pm)));
         if taps_first {

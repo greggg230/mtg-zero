@@ -519,3 +519,639 @@ fn cr_106_6_restricted_mana_never_stands_for_a_lands_plain_mana() {
     assert!(g.can_pay(0, &cost("{6}{B}")));
     assert!(!g.can_pay(0, &cost("{7}{B}")));
 }
+
+// ---- 100.4.6: B3, the last of mana and payment ----------------------------
+
+fn charge() -> engine::db::Counter {
+    engine::db::Counter::Named(common::db().subtype_id("counter:charge").expect("charge counters"))
+}
+
+/// docs/shortcuts.md N10, CR 122.1, 605.1a: Pentad Prism's "Remove a charge
+/// counter from Pentad Prism: Add one mana of any color" is activated once
+/// per counter, however many it has (counters have no maximum). With 40 it
+/// pays {33} and Walking Ballista for X = 20 ({X}{X}); with the old 32 uses a
+/// payment it could make was refused.
+#[test]
+fn cr_122_1_pentad_prism_pays_with_every_charge_counter() {
+    let g = scen().battlefield(0, &["Pentad Prism"]).counters(0, "Pentad Prism", charge(), 40).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{33}")), "33 of its 40 counters");
+    assert!(g.can_pay(0, &cost("{40}")));
+    assert!(!g.can_pay(0, &cost("{41}")));
+    assert!(g.can_pay(0, &cost("{W}{U}{B}{R}{G}{35}")));
+    let mut g = scen()
+        .battlefield(0, &["Pentad Prism"])
+        .counters(0, "Pentad Prism", charge(), 40)
+        .hand(0, &["Walking Ballista"])
+        .at(Step::Main1, 0)
+        .start();
+    let ballista = g.card(0, "Walking Ballista", Zone::Hand);
+    g.choose(Choice::Cast(ballista));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "X: {:?}", g.options_desc());
+    // (X is asked with A0's digits past 31: take the largest each time.)
+    for _ in 0..8 {
+        if g.kind() != Some(DecisionKind::ChooseMode) {
+            break;
+        }
+        let last = *options(&g).last().unwrap();
+        g.choose(last);
+    }
+    finish(&mut g, |_| None);
+    let prism = bf(&g, 0, "Pentad Prism");
+    assert_eq!(g.counters_on(prism, charge()), 0, "X = 20 took all 40\n{}", log(&g));
+    assert_eq!(g.stack().len(), 1);
+}
+
+/// The cube with the shared test cards and B3's own (ENGINE.md 100.4.6), a
+/// table of its own (the cube's fuzz pool and digests keep theirs).
+fn b3_db() -> &'static CardDb {
+    use serde_json::json;
+    static DB: std::sync::OnceLock<&'static CardDb> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let mana = |cost: serde_json::Value, g: i64| {
+            json!({"$t": "ActivatedAbility", "cost": cost, "effect": {"$t": "AddManaToPool", "produces": [["G", g]]}, "is_mana_ability": true})
+        };
+        let creature = |name: &str, sub: &str, p: i64, abilities: serde_json::Value| {
+            eoe_w2::card(name, json!({"card_types": ["Creature"], "subtypes": [sub], "power": p, "toughness": 1, "type_line": format!("Creature - {sub}"),
+                "mana_cost": {"$t": "ManaCost", "colored": [["G", 1]]}, "mana_cost_str": "{G}", "activated_abilities": abilities}))
+        };
+        let custom = vec![
+            // "Sacrifice this creature: Add {G}."
+            creature("Test Sac Elf", "Elf", 1, json!([mana(json!({"$t": "ActivationCost", "sacrifice_self": true}), 1)])),
+            // A Rebel with "{T}: Add {G}."
+            creature("Test Mana Rebel", "Rebel", 2, json!([mana(json!({"$t": "ActivationCost", "tap_self": true}), 1)])),
+        ];
+        let land = |name: &str, draw_cost: serde_json::Value| {
+            eoe_w2::card(name, json!({"card_types": ["Land"], "type_line": "Land", "activated_abilities": [
+                mana(json!({"$t": "ActivationCost", "tap_self": true}), 1),
+                {"$t": "ActivatedAbility", "cost": draw_cost, "effect": {"$t": "DrawCards", "amount": 1}}]}))
+        };
+        let one = json!({"$t": "ManaCost", "generic": 1});
+        let custom = custom.into_iter().chain([
+            // "{T}: Add {G}. {1}, Sacrifice this land: Draw a card."
+            land("Test Cycle Land", json!({"$t": "ActivationCost", "mana": one, "mana_str": "{1}", "sacrifice_self": true})),
+            // "{T}: Add {G}. {1}, {T}: Draw a card."
+            land("Test Tap Draw Land", json!({"$t": "ActivationCost", "mana": one, "mana_str": "{1}", "tap_self": true})),
+        ]);
+        let mut cards = engine::db::load_cube_document().cards;
+        cards.extend(common::custom_cards());
+        cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
+        CardDb::from_cards(&cards).leak()
+    })
+}
+
+fn b3_scen() -> Scenario {
+    Scenario::new(b3_db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.log = true;
+        })
+        .library(0, &["Island"; 12])
+        .library(1, &["Island"; 12])
+}
+
+/// docs/shortcuts.md 27.13.4, CR 601.2g-h: Otharri, Suns' Glory's "{2}{R}{W},
+/// Tap an untapped Rebel you control: Return this card from your graveyard to
+/// the battlefield tapped" may tap a Rebel with a mana ability while lands pay
+/// the mana (the mana abilities come first, the Rebel is tapped after). Only
+/// Rebels without one counted before. The Rebel can't do both: with three
+/// lands the ability isn't offered.
+#[test]
+fn cr_601_2h_a_rebel_with_a_mana_ability_pays_a_tap_cost() {
+    let lands = ["Mountain", "Plains", "Mountain", "Plains"];
+    let mut g = b3_scen().battlefield(0, &lands).battlefield(0, &["Test Mana Rebel"]).graveyard(0, &["Otharri, Suns' Glory"]).at(Step::Main1, 0).start();
+    let o = g.card(0, "Otharri, Suns' Glory", Zone::Graveyard);
+    let back = options(&g).into_iter().find(|c| matches!(c, Choice::Ability(x, _) if *x == o));
+    let back = back.unwrap_or_else(|| panic!("Otharri's ability is offered: {:?}", g.options_desc()));
+    g.choose(back);
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(o).zone, Zone::Battlefield, "{}", log(&g));
+    assert!(g.obj(bf(&g, 0, "Test Mana Rebel")).tapped, "the Rebel tapped for the cost");
+    let g = b3_scen().battlefield(0, &lands[..3]).battlefield(0, &["Test Mana Rebel"]).graveyard(0, &["Otharri, Suns' Glory"]).at(Step::Main1, 0).start();
+    let o = g.card(0, "Otharri, Suns' Glory", Zone::Graveyard);
+    assert!(!options(&g).iter().any(|c| matches!(c, Choice::Ability(x, _) if *x == o)), "the Rebel can't pay the mana and the tap");
+}
+
+/// P1 casts Lightning Bolt at P0, who then casts We Say Thee Nay! (teamwork
+/// 2: "you may tap any number of untapped creatures you control with total
+/// power 2 or more") with the board `mine`: the game at the teamwork choice
+/// (`ChooseCost`), and the Bolt.
+fn nay_with(mine: &[&str]) -> (Game, CardIdx) {
+    let mut g = b3_scen()
+        .battlefield(0, mine)
+        .hand(0, &["We Say Thee Nay!"])
+        .battlefield(1, &["Mountain", "Mountain", "Mountain"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 1)
+        .start();
+    let b = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(b));
+    g.choose(Choice::Target(engine::Target::Player(0)));
+    finish(&mut g, |_| None);
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+    let n = g.card(0, "We Say Thee Nay!", Zone::Hand);
+    g.choose(Choice::Cast(n));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseCost));
+    (g, b)
+}
+
+/// docs/shortcuts.md N8, CR 702.122a-like teamwork, 601.2g-h: with ten Birds
+/// of Paradise (power 0) and then two Llanowar Elves, teamwork 2 taps the two
+/// Elves and two Birds pay {1}{U}. The castability tried the subsets of only
+/// the first ten creatures with mana abilities, so the Elves never counted
+/// and teamwork wasn't offered.
+#[test]
+fn cr_601_2h_teamwork_counts_every_creature_with_a_mana_ability() {
+    let mut mine = vec!["Birds of Paradise"; 10];
+    mine.extend(["Llanowar Elves", "Llanowar Elves"]);
+    let (mut g, b) = nay_with(&mine);
+    assert!(g.has_option(Choice::Number(1)), "teamwork offered: {:?}", g.options_desc());
+    g.choose(Choice::Number(1));
+    finish(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => Some(g.tgt(b)),
+        _ => None,
+    });
+    let elf = b3_db().id("Llanowar Elves").unwrap();
+    let elves: Vec<&engine::game::Obj> = g.objs().iter().filter(|o| o.zone == Zone::Battlefield && o.def == elf).collect();
+    assert_eq!(elves.len(), 2);
+    assert!(elves.iter().all(|o| o.tapped), "both Elves tapped for teamwork: {}", log(&g));
+    assert_eq!(g.stack().len(), 2, "Nay cast\n{}", log(&g));
+}
+
+/// docs/shortcuts.md 13.17, CR 601.2g-h: a creature tapped for teamwork is
+/// tapped after the spell's mana abilities, so none of them sacrificed it.
+/// Two Test Sac Elves ("Sacrifice this creature: Add {G}") and an Island: the
+/// Elves tapped for teamwork, {1}{U} isn't payable (castability says so);
+/// with two Islands, the payment doesn't offer the tapped Elves'
+/// sacrifices (the engine taps them first; before, it offered them).
+#[test]
+fn cr_601_2g_a_creature_tapped_for_teamwork_pays_no_mana() {
+    let (g, _) = nay_with(&["Test Sac Elf", "Test Sac Elf", "Island"]);
+    assert!(!g.has_option(Choice::Number(1)), "teamwork leaves {{1}}{{U}} unpaid: {:?}", g.options_desc());
+    let (mut g, b) = nay_with(&["Test Sac Elf", "Test Sac Elf", "Island", "Island"]);
+    assert!(g.has_option(Choice::Number(1)));
+    g.choose(Choice::Number(1));
+    let elf = b3_db().id("Test Sac Elf").unwrap();
+    for _ in 0..40 {
+        match g.kind() {
+            Some(DecisionKind::Target) => g.choose(g.tgt(b)),
+            Some(DecisionKind::PayMana) => {
+                let elves: Vec<CardIdx> = options(&g)
+                    .into_iter()
+                    .filter_map(|c| match c {
+                        Choice::Ability(x, _) | Choice::Card(x) if g.obj(x).def == elf => Some(x),
+                        _ => None,
+                    })
+                    .collect();
+                assert!(elves.is_empty(), "a tapped Elf sacrificed for the spell's mana: {:?}", g.options_desc());
+                let c = options(&g)[0];
+                g.choose(c)
+            }
+            _ if at_priority(&g) => break,
+            _ => {
+                let c = options(&g)[0];
+                g.choose(c)
+            }
+        };
+    }
+    assert_eq!(g.stack().len(), 2, "Nay cast: {}", log(&g));
+}
+
+/// docs/shortcuts.md 13.3, CR 601.2g-h: a cost's source pays the cost's mana
+/// with a mana ability that doesn't conflict with it. "{T}: Add {G}" and
+/// "{1}, Sacrifice this land: Draw a card": the land taps for {G}, then is
+/// sacrificed (the source was excluded whole before). "{1}, {T}: Draw a card"
+/// can't be paid by its own {T} (both tap it): with a Forest it can.
+#[test]
+fn cr_601_2g_a_source_taps_for_mana_then_is_sacrificed_for_its_cost() {
+    let draws = |g: &Game, name: &str| {
+        let c = g.card(0, name, Zone::Battlefield);
+        options(g).into_iter().filter(|o| matches!(o, Choice::Ability(x, AbilitySlot::Activated(1)) if *x == c)).collect::<Vec<_>>()
+    };
+    let mut g = b3_scen().battlefield(0, &["Test Cycle Land"]).at(Step::Main1, 0).start();
+    let land = g.card(0, "Test Cycle Land", Zone::Battlefield);
+    let opt = draws(&g, "Test Cycle Land");
+    assert_eq!(opt.len(), 1, "the draw ability offered: {:?}", g.options_desc());
+    g.choose(opt[0]);
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(land).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.player(0).hand.len(), 1, "drew a card: {}", log(&g));
+    let g = b3_scen().battlefield(0, &["Test Tap Draw Land"]).at(Step::Main1, 0).start();
+    assert!(draws(&g, "Test Tap Draw Land").is_empty(), "its own {{T}} can't pay {{1}}, {{T}}");
+    let g = b3_scen().battlefield(0, &["Test Tap Draw Land", "Forest"]).at(Step::Main1, 0).start();
+    assert_eq!(draws(&g, "Test Tap Draw Land").len(), 1);
+}
+
+/// docs/shortcuts.md 13.16, CR 601.2g-h, 702.66a: Black Lotus ("{T}, Sacrifice
+/// this artifact: Add three mana of any one color") sacrificed for mana is in
+/// the graveyard before delve's cards are exiled, so it is one of them in the
+/// payment it helps. Treasure Cruise ({7}{U}, delve) with the Lotus, an Island
+/// and three cards in the graveyard: three mana, the Lotus and the three
+/// cards delved, the Island: eight. Only one-mana sources (Lotus Petal) were
+/// counted before.
+#[test]
+fn cr_702_66a_black_lotus_is_delved_in_the_payment_it_helps() {
+    let mut g = scen()
+        .battlefield(0, &["Black Lotus", "Island"])
+        .graveyard(0, &["Mountain", "Mountain", "Mountain"])
+        .hand(0, &["Treasure Cruise"])
+        .at(Step::Main1, 0)
+        .start();
+    let cruise = g.card(0, "Treasure Cruise", Zone::Hand);
+    let lotus = bf(&g, 0, "Black Lotus");
+    assert!(g.has_option(Choice::Cast(cruise)), "castable with the Lotus delved: {:?}", g.options_desc());
+    g.choose(Choice::Cast(cruise));
+    finish(&mut g, |g| options(g).contains(&Choice::Card(lotus)).then_some(Choice::Card(lotus)));
+    assert_eq!(g.obj(cruise).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.obj(lotus).zone, Zone::Exile, "the Lotus delved: {}", log(&g));
+    assert_eq!(g.player(0).graveyard.len(), 0, "{}", log(&g));
+    let g = scen()
+        .battlefield(0, &["Black Lotus", "Island"])
+        .graveyard(0, &["Mountain", "Mountain"])
+        .hand(0, &["Treasure Cruise"])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(!g.has_option(Choice::Cast(g.card(0, "Treasure Cruise", Zone::Hand))), "seven");
+}
+
+/// docs/shortcuts.md 24.7.4, CR 111.2, 614.1a: a creation doubled past 64
+/// makes every token there is room for. Seven Exalted Sunborns ("twice that
+/// many of those tokens") and Eusocial Engineering's landfall Robot: 128
+/// Robots, as many as the player's 96 permanents leave room for (the engine
+/// limit of docs/shortcuts.md 26.11.6, with room for every card they own);
+/// at most 64 were made before.
+#[test]
+fn cr_614_1a_doubled_tokens_past_sixty_four() {
+    let mut mine = vec!["Exalted Sunborn"; 7];
+    mine.push("Eusocial Engineering");
+    let mut g = eoe_w2::scen().battlefield(0, &mine).hand(0, &["Forest"]).at(Step::Main1, 0).start();
+    let f = g.card(0, "Forest", Zone::Hand);
+    g.choose(Choice::Play(f));
+    settle(&mut g);
+    let robots = g.permanents_of(0).filter(|&c| g.name(c) == "Robot").count();
+    // (96 less the eight permanents, the Forest and the ten library cards.)
+    assert_eq!(robots, 96 - 9 - 10, "{}", log(&g));
+}
+
+/// The payment's life, exact (F7's list, ENGINE.md 100.4.6), CR 119.4,
+/// 107.3: Toxic Deluge's "As an additional cost to cast this spell, pay X
+/// life" may take every point of a life total past 255 (the payment kept
+/// life in a u8, so X stopped at 255).
+#[test]
+fn cr_119_4_pay_x_life_past_255() {
+    let mut g = scen().battlefield(0, &["Swamp", "Swamp", "Swamp"]).hand(0, &["Toxic Deluge"]).life(0, 400).at(Step::Main1, 0).start();
+    let d = g.card(0, "Toxic Deluge", Zone::Hand);
+    g.choose(Choice::Cast(d));
+    // (X with A0's digits past 31: the largest each time.)
+    for _ in 0..12 {
+        if g.kind() != Some(DecisionKind::ChooseMode) {
+            break;
+        }
+        let last = *options(&g).last().unwrap();
+        g.choose(last);
+    }
+    finish(&mut g, |_| None);
+    assert_eq!(g.life(0), 0, "X = 400: {}", log(&g));
+}
+
+// ---- 100.4.7: B4, the last of mana and payment ------------------------------
+
+/// The cube, the shared test cards, Gene Pollinator and B4's: Pollinators of
+/// other kinds of permanent (a noncreature artifact, a Forest, a Rebel), each
+/// with Gene Pollinator's "{T}, Tap an untapped permanent you control: Add
+/// one mana of any color".
+fn b4_db() -> &'static CardDb {
+    use serde_json::json;
+    static DB: std::sync::OnceLock<&'static CardDb> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let pol = json!({"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_permanent_you_control": true, "tap_self": true},
+            "effect": {"$t": "AddManaToPool", "produces": [["any", 1]]}, "is_mana_ability": true});
+        let tap_g = json!({"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_self": true},
+            "effect": {"$t": "AddManaToPool", "produces": [["G", 1]]}, "is_mana_ability": true});
+        let custom = vec![
+            eoe_w2::card("Test Pollinator Rock", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [pol.clone()]})),
+            eoe_w2::card("Test Pollinator Grove", json!({"card_types": ["Land"], "subtypes": ["Forest"], "type_line": "Land - Forest",
+                "activated_abilities": [tap_g, pol.clone()]})),
+            eoe_w2::card("Test Rebel Pollinator", json!({"card_types": ["Creature"], "subtypes": ["Rebel"], "power": 1, "toughness": 1,
+                "type_line": "Creature - Rebel", "mana_cost": {"$t": "ManaCost", "colored": [["G", 1]]}, "mana_cost_str": "{G}",
+                "activated_abilities": [pol]})),
+            // A vanilla artifact costing {U}{U}{U}.
+            eoe_w2::card("Test Blue Rock", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "colored": [["U", 3]]}, "mana_cost_str": "{U}{U}{U}"})),
+            // "Tap an untapped Rebel you control, Sacrifice a Rebel: Draw a card."
+            eoe_w2::card("Test Rebel Altar", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
+                    "cost": {"$t": "ActivationCost", "sacrifice_subtype": "Rebel", "extra_costs": [{"$t": "TapUntappedPermanentsCost",
+                        "label": "an untapped Rebel you control", "permanent_filter": {"$t": "HasSubtype", "name": "Rebel"}}]},
+                    "effect": {"$t": "DrawCards", "amount": 1}}]})),
+        ];
+        let mut cards = engine::db::load_cube_document().cards;
+        cards.extend(common::custom_cards());
+        cards.extend(engine::db::load_eoe_document().cards.into_iter().filter(|c| c.name == "Gene Pollinator"));
+        cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
+        let db = CardDb::from_cards(&cards);
+        for n in ["Gene Pollinator", "Test Pollinator Rock", "Test Pollinator Grove", "Test Rebel Pollinator", "Test Rebel Altar", "Test Blue Rock"] {
+            db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
+        }
+        db.leak()
+    })
+}
+
+fn b4_scen() -> Scenario {
+    Scenario::new(b4_db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.log = true;
+        })
+        .library(0, &["Island"; 12])
+        .library(1, &["Island"; 12])
+}
+
+/// docs/shortcuts.md N23, CR 106.12, 605.1b: Badgermole Cub's "whenever you
+/// tap a creature for mana, add an additional {G}" adds {G} to the mana of a
+/// Pollinator that is a creature (it is the permanent tapped for mana: its
+/// ability has {T}), not to a noncreature one's. Gene Pollinator tapping an
+/// Island makes two mana, the artifact Pollinator tapping the Cub one, the
+/// other Island {U}: {G}{G}{G}{U}, never four {G}. (A loud failure before:
+/// Pollinators of which only some are creatures.)
+#[test]
+fn cr_106_12_the_creature_mana_bonus_follows_the_pollinator_that_taps() {
+    let g = b4_scen()
+        .battlefield(0, &["Badgermole Cub", "Gene Pollinator", "Test Pollinator Rock", "Island", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(g.can_pay(0, &cost("{G}{G}{G}{U}")));
+    assert!(g.can_pay(0, &cost("{G}{G}{U}{U}")), "the Islands for themselves, Gene Pollinator tapping the other Pollinator");
+    assert!(!g.can_pay(0, &cost("{G}{G}{G}{G}")));
+    assert!(!g.can_pay(0, &cost("{5}")));
+}
+
+/// docs/shortcuts.md N23, CR 106.12, 305.6: Nissa, Who Shakes the World's
+/// "whenever you tap a Forest for mana, add an additional {G}" adds {G} to the
+/// mana of a Pollinator that is a Forest (no Pollinator got a land-subtype
+/// bonus). Such a Pollinator tapped for its own "{T}: Add {G}" can't also
+/// activate its Pollinator ability (its other mana ability took no part of
+/// the Pollinators' count: {R}{G}{G} was payable).
+#[test]
+fn cr_106_12_a_forest_pollinator_gets_the_forest_bonus_and_taps_once() {
+    let g = b4_scen().battlefield(0, &["Nissa, Who Shakes the World", "Test Pollinator Grove", "Island"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{R}{G}")), "the Grove tapping the Island: one mana of any color and Nissa's {{G}}");
+    assert!(g.can_pay(0, &cost("{G}{G}{U}")), "the Grove for its own {{G}} and Nissa's, the Island for {{U}}");
+    assert!(!g.can_pay(0, &cost("{R}{G}{G}")), "the Grove taps once");
+}
+
+/// docs/shortcuts.md N23, CR 602.2b, 601.2g: which Gene Pollinator activates
+/// for a permanent picked for a Pollinator's ability is the player's choice
+/// (`ChoosePermanent`); the payment tapped the first ready one.
+#[test]
+fn cr_601_2g_which_pollinator_activates_is_the_players_choice() {
+    let mut g = b4_scen().battlefield(0, &["Gene Pollinator", "Gene Pollinator", "Island"]).hand(0, &["Sol Ring"]).at(Step::Main1, 0).start();
+    let pols: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.name(c) == "Gene Pollinator").collect();
+    let island = bf(&g, 0, "Island");
+    let ring = g.card(0, "Sol Ring", Zone::Hand);
+    g.choose(Choice::Cast(ring));
+    // The Island by its own id: tapped for a Pollinator's ability.
+    assert!(options(&g).contains(&Choice::Card(island)), "{:?}", g.options_desc());
+    g.choose(Choice::Card(island));
+    assert_eq!(g.kind(), Some(DecisionKind::ChoosePermanent), "which Pollinator: {:?}", g.options_desc());
+    let o = options(&g);
+    assert!(o.contains(&Choice::Card(pols[0])) && o.contains(&Choice::Card(pols[1])), "{o:?}");
+    g.choose(Choice::Card(pols[1]));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(ring).zone, Zone::Stack, "{}", log(&g));
+    assert!(g.obj(pols[1]).tapped && !g.obj(pols[0]).tapped && g.obj(island).tapped, "{}", log(&g));
+}
+
+/// docs/shortcuts.md N23, CR 602.2b, 601.2g: which Orcish Lumberjack
+/// sacrifices the Forest (and is tapped) is the player's choice; the first
+/// able one was.
+#[test]
+fn cr_601_2g_which_lumberjack_sacrifices_the_forest_is_the_players_choice() {
+    let mut g = scen().battlefield(0, &["Orcish Lumberjack", "Orcish Lumberjack", "Forest"]).hand(0, &["Sol Ring"]).at(Step::Main1, 0).start();
+    let ljs: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.name(c) == "Orcish Lumberjack").collect();
+    let forest = bf(&g, 0, "Forest");
+    let ring = g.card(0, "Sol Ring", Zone::Hand);
+    g.choose(Choice::Cast(ring));
+    // The Lumberjacks' sacrifice of the Forest: after the Forest's own ability.
+    let sac = options(&g).into_iter().find(|c| matches!(c, Choice::Ability(x, s) if *x == forest && *s != AbilitySlot::Activated(0)));
+    g.choose(sac.unwrap_or_else(|| panic!("the Lumberjacks' source on the Forest: {:?}", g.options_desc())));
+    // (The production, then which Lumberjack.)
+    for _ in 0..4 {
+        if g.kind() == Some(DecisionKind::ChoosePermanent) {
+            break;
+        }
+        let c = options(&g)[0];
+        g.choose(c);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::ChoosePermanent), "which Lumberjack: {:?}", g.options_desc());
+    let o = options(&g);
+    assert!(o.contains(&Choice::Card(ljs[0])) && o.contains(&Choice::Card(ljs[1])), "{o:?}");
+    g.choose(Choice::Card(ljs[1]));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(ring).zone, Zone::Stack, "{}", log(&g));
+    assert!(g.obj(ljs[1]).tapped && !g.obj(ljs[0]).tapped && g.obj(forest).zone == Zone::Graveyard, "{}", log(&g));
+}
+
+/// docs/shortcuts.md N23, CR 601.2g-h: a Pollinator a later tap cost needs is
+/// not the one that activates. Otharri, Suns' Glory's "{2}{R}{W}, Tap an
+/// untapped Rebel you control" with a Pollinator that is the only Rebel and
+/// Gene Pollinator: Gene Pollinator taps the Bear (the payment tapped the
+/// first ready Pollinator, the Rebel, and the cost had no Rebel to tap).
+#[test]
+fn cr_601_2h_the_pollinator_a_tap_cost_needs_doesnt_activate() {
+    let mut g = b4_scen()
+        .battlefield(0, &["Test Rebel Pollinator", "Gene Pollinator", "Test Bear", "Mountain", "Plains", "Island"])
+        .graveyard(0, &["Otharri, Suns' Glory"])
+        .at(Step::Main1, 0)
+        .start();
+    let o = g.card(0, "Otharri, Suns' Glory", Zone::Graveyard);
+    let rebel = bf(&g, 0, "Test Rebel Pollinator");
+    let gene = bf(&g, 0, "Gene Pollinator");
+    let back = options(&g).into_iter().find(|c| matches!(c, Choice::Ability(x, _) if *x == o));
+    g.choose(back.unwrap_or_else(|| panic!("Otharri's ability is offered: {:?}", g.options_desc())));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(o).zone, Zone::Battlefield, "{}", log(&g));
+    assert!(g.obj(rebel).tapped && g.obj(gene).tapped && g.obj(bf(&g, 0, "Test Bear")).tapped, "{}", log(&g));
+}
+
+/// Can `c` (in P0's graveyard) be cast now (any route)?
+fn castable_from_gy(g: &Game, c: CardIdx) -> bool {
+    options(g).iter().any(|o| matches!(o, Choice::Cast(x) if *x == c))
+}
+
+/// docs/shortcuts.md 40.1, CR 702.81a, 118.9, 601.2b: Six's retrace ("a land
+/// card discarded") with Grief's evoke ("exile a black card from your hand")
+/// is one cost with two parts that take hand cards (`merge_costs` kept one
+/// reservation: retrace wasn't offered with evoke). With a Swamp and Dark
+/// Ritual in hand, Grief is cast from the graveyard for no mana: the Swamp
+/// discarded, Dark Ritual exiled.
+#[test]
+fn cr_702_81a_retrace_with_a_pitch_evoke() {
+    let mut g = scen().battlefield(0, &["Six"]).graveyard(0, &["Grief"]).hand(0, &["Swamp", "Dark Ritual"]).at(Step::Main1, 0).start();
+    let grief = g.card(0, "Grief", Zone::Graveyard);
+    assert!(castable_from_gy(&g, grief), "retrace with evoke: {:?}", g.options_desc());
+    g.choose(Choice::Cast(grief));
+    finish(&mut g, |g| match g.kind() {
+        Some(DecisionKind::ChooseAltCost) => options(g).into_iter().find(|c| *c != Choice::Number(0)),
+        _ => None,
+    });
+    assert_eq!(g.obj(grief).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Swamp", Zone::Graveyard), 1, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Dark Ritual", Zone::Exile), 1, "{}", log(&g));
+    // (One card in hand can't be both.)
+    let g = scen().battlefield(0, &["Six"]).graveyard(0, &["Grief"]).hand(0, &["Swamp"]).at(Step::Main1, 0).start();
+    assert!(!castable_from_gy(&g, g.card(0, "Grief", Zone::Graveyard)));
+}
+
+/// docs/shortcuts.md 24.7.5k, CR 702.81a, 601.2b, 601.2g-h: Wrenn and Six's
+/// emblem's retrace ("a land card discarded") with Bitter Triumph's "discard a
+/// card" is one cost of two discards (two discards with different filters
+/// weren't one cost: not offered). P0 has 2 life (3 can't be paid). With a
+/// Forest and Simian Spirit Guide in hand and a Swamp, the Spirit Guide's
+/// mana is needed for {1}{B} and it can't be discarded too: not castable;
+/// with an Island as well, castable (the Forest and the Island discarded).
+#[test]
+fn cr_702_81a_retrace_with_the_cards_own_discard() {
+    let setup = |hand: &[&str]| {
+        scen()
+            .battlefield(0, &["Swamp"])
+            .graveyard(0, &["Bitter Triumph"])
+            .hand(0, hand)
+            .battlefield(1, &["Test Bear"])
+            .emblem(0, "Wrenn and Six")
+            .life(0, 2)
+            .at(Step::Main1, 0)
+            .start()
+    };
+    let g = setup(&["Forest", "Simian Spirit Guide"]);
+    assert!(!castable_from_gy(&g, g.card(0, "Bitter Triumph", Zone::Graveyard)), "{:?}", g.options_desc());
+    let mut g = setup(&["Forest", "Simian Spirit Guide", "Island"]);
+    let bt = g.card(0, "Bitter Triumph", Zone::Graveyard);
+    let bear = bf(&g, 1, "Test Bear");
+    assert!(castable_from_gy(&g, bt), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(bt));
+    finish(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => options(g).into_iter().find(|c| *c == Choice::Target(engine::Target::Obj(g.obj_ref(bear)))),
+        _ => None,
+    });
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Forest", Zone::Graveyard) + g.count_in(0, "Island", Zone::Graveyard), 2, "{}", log(&g));
+    assert_eq!(g.life(0), 2);
+}
+
+/// docs/shortcuts.md 40.1, CR 702.81a, 118.9: Six's retrace with Daze's "return
+/// an Island you control to its owner's hand" (an instant, by Wrenn and Six's
+/// emblem): one cost, an Island returned and a land card discarded.
+#[test]
+fn cr_702_81a_retrace_with_daze_returning_an_island() {
+    let mut g = scen()
+        .battlefield(0, &["Island"])
+        .graveyard(0, &["Daze"])
+        .hand(0, &["Forest"])
+        .emblem(0, "Wrenn and Six")
+        .battlefield(1, &["Mountain"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 1)
+        .start();
+    let b = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(b));
+    g.choose(Choice::Target(engine::Target::Player(0)));
+    finish(&mut g, |_| None);
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+    let daze = g.card(0, "Daze", Zone::Graveyard);
+    assert!(castable_from_gy(&g, daze), "retrace with Daze's return: {:?}", g.options_desc());
+}
+
+/// CR 601.2h: a cost's parts are paid in any order, so one permanent may be
+/// tapped for "tap an untapped Rebel you control" and then sacrificed for
+/// "sacrifice a Rebel" (the feasibility let it, `Keep::taps`; the payment's
+/// tap choice left out a permanent picked to be sacrificed: no Rebel to tap).
+#[test]
+fn cr_601_2h_one_permanent_tapped_and_sacrificed_for_one_cost() {
+    let mut g = b4_scen().battlefield(0, &["Test Rebel Altar", "Test Rebel Pollinator"]).at(Step::Main1, 0).start();
+    let altar = bf(&g, 0, "Test Rebel Altar");
+    let rebel = bf(&g, 0, "Test Rebel Pollinator");
+    assert!(g.has_option(act(altar, 0)), "{:?}", g.options_desc());
+    g.choose(act(altar, 0));
+    finish(&mut g, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(rebel).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.player(0).hand.len(), 1, "drew a card
+{}", log(&g));
+}
+
+/// docs/shortcuts.md 13.15, CR 605.3a, 602.2b: the mana of a mana ability with
+/// a mana cost may pay another such ability's cost when that one is activated
+/// after it (`MADE` mana paid no ability's cost). Two Sunken Ruins ("{U/B},
+/// {T}: Add {U}{U}, {U}{B} or {B}{B}") and a Swamp: the Swamp for one, one of
+/// its mana for the other: {U}{U}{U} (a Ruins' own "{T}: Add {C}" made the
+/// third mana before); two alone make no {U} (neither can be first).
+#[test]
+fn cr_605_3a_a_mana_abilitys_mana_pays_a_later_ones_cost() {
+    let g = scen().battlefield(0, &["Sunken Ruins", "Sunken Ruins", "Swamp"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{U}{U}{U}")), "the Swamp for one Ruins, its mana for the other");
+    assert!(g.can_pay(0, &cost("{3}")));
+    assert!(!g.can_pay(0, &cost("{4}")));
+    let g = scen().battlefield(0, &["Sunken Ruins", "Sunken Ruins"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{2}")), "their own {{C}}");
+    assert!(!g.can_pay(0, &cost("{U}")), "neither Ruins can be first");
+}
+
+/// The same in a payment (CR 601.2g): B4's Test Blue Rock ({U}{U}{U}) cast
+/// with two Sunken Ruins and a Swamp (not castable before: a Ruins' own "{T}:
+/// Add {C}" made the third mana): both Ruins activated.
+#[test]
+fn cr_601_2g_a_payment_with_a_chain_of_mana_abilities() {
+    let mut g = b4_scen().battlefield(0, &["Sunken Ruins", "Sunken Ruins", "Swamp"]).hand(0, &["Test Blue Rock"]).at(Step::Main1, 0).start();
+    let relic = g.card(0, "Test Blue Rock", Zone::Hand);
+    assert!(options(&g).contains(&Choice::Cast(relic)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(relic));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(relic).zone, Zone::Stack, "{}", log(&g));
+    assert!(g.permanents_of(0).all(|c| g.obj(c).tapped), "{}", log(&g));
+    assert_eq!(g.player(0).pool.amt.iter().map(|&n| n as u32).sum::<u32>(), 0, "{}", log(&g));
+}
+
+/// docs/shortcuts.md N23, CR 602.2b, 613.1f (the heuristic-bot agent's EoE
+/// deck pair 6000978 on `eoe-bot`, from before the N23 rework: Weftblade
+/// Enhancer cast from exile with Mm'menon, the Right Hand and Gene Pollinator
+/// out; after the Pollinator's granted mana, Flight-Deck Coordinator was
+/// offered for a Pollinator's ability and the payment's end panicked, "a
+/// Pollinator to activate"). Mm'menon's "artifacts you control have '{T}: Add
+/// {U}. Spend this mana only to cast a spell from anywhere other than your
+/// hand'" on Gene Pollinator: All-Fates Scroll ({3}) cast from the top of the
+/// library (Mm'menon's other ability); once the Pollinator is tapped for its
+/// granted {U}, no permanent is offered for its Pollinator ability.
+#[test]
+fn cr_602_2b_gene_pollinator_tapped_for_mmmenons_mana_activates_no_more() {
+    let mut g = Scenario::new(eoe_w2::db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.log = true;
+        })
+        .library(0, &["All-Fates Scroll", "Island", "Island", "Island", "Island", "Island", "Island", "Island"])
+        .library(1, &["Forest"; 8])
+        .battlefield(0, &["Mm'menon, the Right Hand", "Gene Pollinator", "Flight-Deck Coordinator", "Island", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let scroll = g.card(0, "All-Fates Scroll", Zone::Library);
+    let pol = bf(&g, 0, "Gene Pollinator");
+    let fdc = bf(&g, 0, "Flight-Deck Coordinator");
+    let islands: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.name(c) == "Island").collect();
+    let cast = options(&g).into_iter().find(|c| matches!(c, Choice::Cast(x) if *x == scroll));
+    g.choose(cast.unwrap_or_else(|| panic!("All-Fates Scroll from the top of the library: {:?}", g.options_desc())));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::Priority));
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}", g.options_desc());
+    let granted = Choice::Ability(pol, AbilitySlot::Activated(1));
+    assert!(g.has_option(granted), "the Pollinator's granted {{U}}: {:?}", g.options_desc());
+    g.choose(granted);
+    let pol_sources = |g: &Game| [fdc, islands[0], islands[1]].iter().any(|&c| g.has_option(Choice::Card(c)));
+    assert!(!pol_sources(&g), "no Pollinator to activate: {:?}", g.options_desc());
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(scroll).zone, Zone::Stack, "{}", log(&g));
+    assert!(g.obj(pol).tapped && !g.obj(fdc).tapped, "{}", log(&g));
+}

@@ -20906,6 +20906,400 @@ onto the battlefield from the hand staying there while `Task::EnterAura` asks, s
 re-deals it and the refreshed question has no option (hidden.rs `refresh_pending`; workstream D's
 final round: the seed now plays another game, the bug is still there).
 
+#### 100.4.6 B3: the last of mana and payment (branch `eoe-b3-pay`, from `eoe-base` e164d69)
+
+**Why.** 100.4.5's open list (the audit's F4, `docs/faithfulness_audit.md` 5.4) and the payment's
+u8 arithmetic F7 left to workstream B. Tests: `engine/tests/rules_payment_b.rs` (section
+"100.4.6", with a table of its own, `b3_db`: the cube, the shared test cards and B3's, so the
+cube's fuzz pool and digests keep theirs); each failed before its fix.
+
+##### N10: a source that only removes counters, every use
+
+Pentad Prism's "Remove a charge counter: Add one mana of any color" was usable at most 32 times
+in a payment (`.min(32)`), and when it could be used once it took its card as a tap would.
+
+* `Class::reuse` is a `num::Count`: once per n counters, all of them. Such an ability (no {T},
+  no sacrifice, exile or discard of its card) has `Class::res` 0: it uses nothing of its card,
+  so it combines with each other source of the card (tapped for improvise, its own {T}
+  abilities), and `PayMana::uses` counts the picks of that source, not of its card.
+* The feasibility (`cands`) gives its uses ways of their own, or fixed units when they take
+  nothing a payment shares (a several-mana one, each use its whole production: one use was
+  counted before), never one of its card's alternatives. It leaves out only the uses no payment
+  can spend (`UseCap`): in a payment that uses no source it could leave out, every use has a
+  mana spent, one per need, so the uses are at most the needs: the cost's, the picked mana
+  costs, and those the classes' abilities may add (an ability with a mana cost makes `MADE`
+  mana, which pays only the cost, so it is used at most the cost's size times). `plain_cands`,
+  built once per priority decision for every cost, uses a cost size of 64 and says when it cut a
+  source (`Cands::cut`); a larger cost builds its own.
+* Counts that could wrap: `payable_within_n`'s groups of budgeted units (u8 -> u32),
+  `Budget::take` (in i64), `might_pay`'s total (u64).
+
+Test: `cr_122_1_pentad_prism_pays_with_every_charge_counter` (40 counters pay {40}, not {41};
+Walking Ballista cast for X = 20).
+
+##### 27.13.4, N8, 13.17: tap costs and the mana, as one search
+
+By CR 601.2g the mana abilities are activated before the costs are paid (601.2h), so a creature
+tapped or sacrificed for mana can't be tapped for crew, saddle, teamwork or "tap n untapped
+<permanents>", and one tapped for such a cost was never a mana source of it.
+
+* **`Keep::taps`** (`pay::TapsOwed`): a tap cost the payment must leave payable, its need
+  (power, or 1 per permanent) and its candidates. In the feasibility each candidate with a way
+  of making mana gets one more way, tapped for the cost (`Way::crew`, what it counts for; it
+  takes one of the shared taps when it is a Pollinator that could activate or a Lumberjack),
+  among its alternatives; a candidate with none counts at once. A leaf holds when the ways chosen
+  tap enough (`ways_payable`'s `crew`). Tapping for the cost takes no budget and only helps, so
+  it dominates "none" like a free way. A candidate a pick taps or sacrifices is out
+  (`pay_cands`).
+* **Teamwork** (`crew_mana_ok`): exact for any number of creatures (it tried the subsets of the
+  first 10 with mana abilities: N8). The creatures it taps are tapped before the spell's mana in
+  the engine's order; they become `Keep::committed` of the spell's payment (`pay_costs`), whose
+  classes leave out every source that taps or sacrifices one (`payment_classes`): the payment
+  offered a tapped creature's "sacrifice this: add" (13.17). `classes_without` keeps a source
+  that only removes counters and takes the Pollinators among the cards out of `POL_FOR`'s share
+  (and of the improvise and convoke members they split), as it did the Lumberjacks.
+* **Crew, saddle and "tap n untapped <permanents>" of an ability** (`Game::taps_for`): every
+  candidate counts (only those without a mana ability did when mana was owed: 27.13.4), and the
+  payment keeps the cost payable (`act_pay`, `cost_payable_with`). Urza, Lord High Artificer's
+  "Tap an untapped artifact you control: Add {U}" with priority now counts artifacts with mana
+  abilities too (`zero_mana_taps` is no longer read).
+* One such cost per payment: the lowering refuses an activated cost with two of crew, "tap n
+  untapped" and "tap X untapped" (`ActivationCost.crew(with another tap cost)`), and
+  `merge_costs` doesn't merge two.
+
+Tests: `cr_601_2h_a_rebel_with_a_mana_ability_pays_a_tap_cost` (Otharri, Suns' Glory's return
+with B3's Test Mana Rebel; with one land fewer it isn't offered),
+`cr_601_2h_teamwork_counts_every_creature_with_a_mana_ability` (ten Birds of Paradise, then two
+Llanowar Elves: We Say Thee Nay!'s teamwork taps the Elves),
+`cr_601_2g_a_creature_tapped_for_teamwork_pays_no_mana` (B3's Test Sac Elf).
+
+**Digests** (with N10, 27.13.4, N8, 13.17): full `02d4bccc94314d6d` -> `79935610b369fb77`,
+`DIGEST_ENCODING=0` `856218d6b081056c` -> `8ff7d319dba5da5d`: 6 of the 2,500 games change. Four
+(r 517, 905, 1678, 1867) by Urza, Lord High Artificer's "Tap an untapped artifact you control"
+with priority tapping an artifact with a mana ability, two (r 609, 1553) by Pentad Prism's counter
+uses combining with improvise tapping it (Kappa Cannoneer castable). `RULES_EPOCH` bumped; the
+Delver canary library's 60 spots reach their positions (`delver_rerecord.py check --stamp`).
+
+##### 13.3: a cost's source, per ability
+
+A cost that tapped, sacrificed, exiled or discarded its source excluded every mana ability of the
+source from paying its mana (`activate::mana_exclude`). CR 601.2g-h: the mana abilities come
+first, the cost after, so only those that conflict are out. `pay::SelfUse` (from `keep_for`,
+`Keep::self_use`) is what the cost takes of its source: it taps it, moves it (sacrifice, exile,
+discard), removes counters. `Game::classes_for_self_use` (applied by `can_pay_with`,
+`can_pay_without` and the payment's `payment_classes`) leaves out the source's sources that tap
+or move it when the cost taps it, that move it when the cost moves it (tapping a land for mana and
+then sacrificing it is one payment), and, for a source that removes the same counters, the uses
+past what the cost leaves (and, when the cost needs the source, the use whose last counter
+sacrifices it); a Pollinator or Lumberjack the cost taps no longer activates. `mana_exclude` now
+excludes no ability's source (its callers are unchanged).
+
+Test: `cr_601_2g_a_source_taps_for_mana_then_is_sacrificed_for_its_cost` (B3's Test Cycle Land,
+"{T}: Add {G}. {1}, Sacrifice this land: Draw a card", alone; Test Tap Draw Land's "{1}, {T}"
+needs another land).
+
+##### 13.16: Black Lotus delved in the payment it helps
+
+A source that sacrifices itself is in the graveyard before delve's cards are exiled (CR 601.2g
+before 601.2h); only one-mana ones (Lotus Petal) were delve or graveyard-exile sources.
+`pay::delve_source`: any that sacrifices itself with no mana cost of its own (one mana, several,
+Wizard's Rockets). `delve_sources` (delve's options, an escape's or "exile n cards from your
+graveyard" forced sources) takes them all; `delve_classes` (castability) gives a several-mana one
+delve's typeless unit with each production (`Class::delve`; a converter's way carries it, used when
+it converts); the payment activates a forced several-mana source first with each production that
+leaves the rest payable (asked when several do), and a forced Rockets as a pick of it.
+
+Test: `cr_702_66a_black_lotus_is_delved_in_the_payment_it_helps` (Treasure Cruise with the Lotus,
+an Island and three graveyard cards; with two it isn't castable).
+
+##### 24.7.4: tokens past 64
+
+`token_count` multiplied a creation and cut it at 64; `CreateTokensN` clamped its number to 64.
+Both now make any number, as many as the player's 96 permanents leave room for (the engine limit of
+docs/shortcuts.md 26.11.6, unchanged: the `MY_PERM` / `OPP_PERM` ids of every caller of
+`perm_action` would have to be paged first, A's note in 100.2). `CreateTokensN` with attacking
+tokens passes a u8 to `CreateTokensAttacking`: 255 or more make as many as any larger number, the
+room being at most 96 (a compile-time assert).
+
+Test: `cr_614_1a_doubled_tokens_past_sixty_four` (seven Exalted Sunborns and Eusocial Engineering:
+77 Robots, the room left; 64 before).
+
+**Digests** (with 13.3, 13.16, 24.7.4): full `79935610b369fb77` -> `3f49f29043418114`,
+`DIGEST_ENCODING=0` `8ff7d319dba5da5d` -> `27f42bffa609f282`: 16 of the 2,500 games change. In
+the ten inspected the first difference is 13.3: an ability whose cost taps its source (Abandoned
+Air Temple's "{3}{W}, {T}") now builds its classes with the source's member and then drops it, so
+the source's class sits at its first member and the payment's options come in another class order
+(the same payments), or a source's other uses now pay (Pyrite Spellbomb tapped by Urza for {U},
+then sacrificed for its "{1}, Sacrifice"). `RULES_EPOCH` bumped; the Delver canary library's 60
+spots reach their positions.
+
+##### The payment's numbers (F7's list, part)
+
+* **Life** (`Keep::life`, `PayMana::life_after`, `PayMana::phyrexian_life`, `db::Cost::life`): u32,
+  their sums in u64 (`PayMana::later_life`; `keep.life + phyrexian_life` and `phyrexian_life += 2k`
+  could wrap a u8), `budget` and the Phyrexian split compare in i64, and the life paid goes to
+  `lose_life` through `i32::try_from` (at most the life total: CR 119.4 was checked). "Pay X life"
+  (`x_range`) offers every X up to the life total (255 at most before); `life_later` adds X life
+  and Bolas's Citadel's mana value exactly (one of them is 0, CR 107.3b); `with_life` adds with a
+  checked add.
+* **`ManaCost::total`** is a u32: the u8 sum wrapped, so {250}{R}{R}{R}{R}{R}{R} read as a cost of
+  nothing. `mana_value` (of a printed cost) is a u8 by the lowering's bounds (`try_from`).
+* **The virtual pool's counts** (`vgroups`, `most_spent`, `singles_vm`, `PayMana::vm`,
+  `each_subset`, `masks_of`, `pool_rems`' groups): u32. The pool's and the picks' mana of a type
+  together passed a u8 (clamped at 255), and `most_spent`'s spend was cut to a u8 (`k as u8`).
+* **Not done** (open, with the design): the u8 parts of a `ManaCost`. X and taxes are added into
+  its u8 generic part (`act_mana_x`, `total_mana`, `ManaCost::plus` saturating), and `x_range`,
+  `mana_now`'s X and `choose_times` offer no value whose generic part would pass 255. Exact needs
+  the generic part (and the pips `plus` adds, multikicker's) widened to u64, `less_generic` and the
+  discounts in it, `need_of`'s count from the lowering's bounds, `PermKind::Airbent`'s copy, and
+  the encoding's `ctx::COST` read as before. The pool's u8 amounts and a production's (`ManaPool`,
+  `[u8; 6]`, `PerPermanent`'s and `SameTypeCounters`' `.min(255)`) are F7's (aborted past them).
+
+Tests: `cr_119_4_pay_x_life_past_255` (Toxic Deluge with 400 life: X = 400, 255 before),
+`pay::tests::cr_601_2h_the_payments_amounts_pass_255` (a cost of 256 symbols isn't zero; the
+pool's 200 {R} and a pick's 100 are 300 in the virtual pool). Digests unchanged.
+
+##### Not done in this session (left for the next pass)
+
+In the brief's order (100.4.4 and 100.4.5 have the earlier designs):
+
+* **N23** (Gene Pollinators of which only some are creatures, with a "whenever you tap a creature
+  for mana" bonus: `pol_classes`' assertion; which Pollinator taps in `finish_payment`;
+  `reserved_n`'s assertion). Found on the way: `pol_classes` gives no Pollinator a land-subtype
+  bonus ("whenever you tap a Forest for mana") when it is a land, and with a later tap cost
+  (`Keep::taps`, above) `finish_payment`'s "first ready" Pollinators may tap one the cost needs.
+  Exact: the actors grouped by the extra mana their tap adds (`extra_of`), a `POL_FOR` class per
+  group with its own shared-tap budget (`Budget::tap` per group; a source on an actor of another
+  group takes one of each), the group in the source's id (`Src::slot`; the classes are rebuilt from
+  the same state each step, so the numbering holds), and the actor of each pick a choice among its
+  group's (asked when they differ), recorded in `PayMana` for `finish_payment`. The single
+  `Budget::tap` LJ and POL classes share (`tap_limit`: the least share) is the same flaw.
+* **24.7.5k / 40.1** (retrace with another discard; with an alternative cost whose rest takes a hand
+  card, returns or sacrifices a permanent): `merge_costs` and `Game::keep_for` keep one reservation
+  (`Keep::sac`, `discard`, `exile`), and the budget one `sac` count. Exact: a list of reservations,
+  each a candidate set and a count, checked at a leaf of the search by a matching of the candidates
+  the chosen ways leave (Hall's condition over the reservations), and `pay_costs` asking them in
+  order. The same holds for a cost with a sacrifice and "tap n untapped" (`Keep::taps` lets one
+  permanent be both, the payment's `tap_candidates` excludes a sacrificed one: they agree only
+  without overlap).
+* **28.8.2k** (the colours spent: `ChooseColorsSpent`, `NUMBER` + the WUBRG mask): a new decision
+  kind of the encoding (D's); `record_converge` still counts the most colours.
+* **13.15** (chains of mana abilities with mana costs): `MADE` / `NOT_MADE` still forbid every chain;
+  `UseCap` (N10) relies on that rule (an ability with a mana cost pays only the cost) and must be
+  revisited with it.
+* **26.11.6** (96 permanents a player): unchanged; the payment's ids for sources past `MY_PERM`'s 96
+  come with the paging of every `perm_action` caller (A's note in 100.2).
+* **The u8 parts of a `ManaCost`** (above).
+
+#### 100.4.7 B4: the last of mana and payment (branch `eoe-b3-pay`, from 7ae9032)
+
+**Why.** 100.4.6's open list, in the brief's order. Tests: `engine/tests/rules_payment_b.rs`
+(section "100.4.7", with a table of its own, `b4_db`: the cube, the shared test cards, Gene
+Pollinator and B4's Pollinators of other kinds: a noncreature artifact, a Forest, a Rebel); each
+failed before its fix.
+
+##### N23: the actors of shared activations
+
+Gene Pollinator's "{T}, Tap an untapped permanent you control: Add one mana of any color" and Orcish
+Lumberjack's "{T}, Sacrifice a Forest: Add three mana" are sources on the permanent tapped or
+sacrificed, and the permanent whose ability it is (the actor) is tapped too. One count of
+Pollinators (`Class::share`, with `Class::taps`) stood for every actor, and the Lumberjacks shared
+the same `Budget::tap`: a "whenever you tap a creature for mana" bonus was a loud failure with
+Pollinators of which only some are creatures (`pol_classes`' assertion), no Pollinator got a
+land-subtype bonus when it was a land, an actor tapped for its own other mana ability (a Pollinator
+given Mm'menon's "{T}: Add {U}", one that is a Forest) or for convoke (a Lumberjack) still
+activated, one Lumberjack and two Pollinators allowed one activation in all, a later "tap X
+artifacts" with Pollinators of which only some are artifacts was a loud failure (`reserved_n`), and
+the Pollinator, Lumberjack or Squandered Resources that activated was the first ready one
+(`finish_payment`, `activate_sac_for`), which could be the one a later tap cost needed.
+
+* **Pools** (`Class::pool`, `Class::actors`). The actors are grouped by what their activation is:
+  for Pollinators the mana and filter and the bonus their own tap adds (CR 106.12: the permanent
+  whose mana ability has {T} is the one tapped for mana, so Badgermole Cub's {G} and Nissa's "Forest"
+  {G} follow the actor; `Game::tap_bonus`), for Lumberjacks the productions with that bonus and the
+  permanents they may sacrifice (`Game::sac_groups`; a Lumberjack that is a Forest may sacrifice
+  itself). Each group of actors that tap is a pool, numbered per `mana_classes` call; its sources
+  carry the pool in their id (`Src::g`), so one permanent is a source of each pool that may tap or
+  sacrifice it (asked which by its own id, `PayMana::which`, when it stands for several; an
+  `LJ_FOR` source with another of its slot on the permanent goes by the permanent's own id too).
+  Squandered Resources' kind taps nothing: one source per land, its `actors` the permanents whose
+  ability may sacrifice it, no pool.
+* **The feasibility** (`pay::PoolCtx`). Each activation of a pool needs one of its actors that
+  nothing else taps. Actors alike in their pools and in whether a later "tap X untapped
+  <permanents>" needs them (a signature) do the same, so the search counts activations per pool and
+  the actors tapped otherwise per signature: a way that taps its card, when the card is an actor
+  (its own mana abilities, tapped for a Pollinator's ability, improvise, convoke, Urza's tap, a later
+  tap cost's `Way::crew`), takes one from its signature (`Way::sig`); a sacrifice doesn't (the actor
+  activates, then is sacrificed: CR 601.2g). A branch with more activations of a pool than actors
+  left is cut; a leaf holds when the activations get distinct actors (`PoolCtx::fit`: per pool when
+  no actor is in two pools, else a matching, `mana::max_flow`), the fewest reserved ones among them
+  coming out of the sacrifice budget (the largest matching into actors not reserved is the most any
+  matching of every activation uses: an augmenting path keeps every actor it had). That replaces
+  `pol_split`, `reserved_n`'s assertion, `tap_limit` and `Budget::tap`.
+* **Its reductions, kept exact.** A Pollinator source on a permanent with another way, or on an
+  actor, is left out when each pool's free targets (whose only ways are Pollinator activations, not
+  actors, not reserved, not a later tap cost's candidates) number at least the activations still
+  possible, the actors left (any such activation moves to an unused free target: the same mana).
+  Free targets of one pool only are committed as fixed units up to the pool's idle actors (not
+  reserved, no other way that taps them) less the activations counted already: those activations
+  take actors nothing else could use (`free_shared` committed up to one count of taps, whatever the
+  actors' other ways).
+* **The actor, a choice** (CR 602.2b). Right after a shared source is picked (`PayMana::actor_for`),
+  the payment asks which of its class's actors activates (`ChoosePermanent`, the actors' own ids):
+  those no pick taps whose choice leaves the payment payable with the picks so far and the sources
+  still to pick (`actor_options`; one is recorded without a question). The choice is recorded
+  (`PayMana::actors`): picks then count the actor as tapped (`used_res`), a reserved one leaves the
+  sacrifice budget one fewer (`after_picks`), and `finish_payment` taps it (`activate_sac_for` with
+  the actor, its own or granted ability that may sacrifice the land).
+
+Tests: `cr_106_12_the_creature_mana_bonus_follows_the_pollinator_that_taps` (Badgermole Cub, Gene
+Pollinator and the artifact Pollinator: {G}{G}{G}{U}, never four {G}; a loud failure before),
+`cr_106_12_a_forest_pollinator_gets_the_forest_bonus_and_taps_once` (Nissa and the Forest Pollinator:
+{R}{G}; {R}{G}{G} was payable), `cr_601_2g_which_pollinator_activates_is_the_players_choice`,
+`cr_601_2g_which_lumberjack_sacrifices_the_forest_is_the_players_choice`,
+`cr_601_2h_the_pollinator_a_tap_cost_needs_doesnt_activate` (Otharri, Suns' Glory's "Tap an untapped
+Rebel" with the Rebel Pollinator and Gene Pollinator: Gene Pollinator taps the Bear; the Rebel
+activated before, and the cost had no Rebel to tap).
+`pay::tests::cr_602_2b_a_pollinator_tapped_for_a_granted_mana_ability_activates_no_more` (the S2
+sealed fuzz's seed 18106 on `eoe-s2-pools`, from before this rework: Gene Pollinator tapped for
+Mm'menon's granted "{T}: Add {U}" while a spell was cast from exile, then a Pollinator source of
+another permanent offered and the payment's end panicking, "a Pollinator to activate"; rebuilt with
+`granting_db`'s grant and Faithless Looting's flashback: it fails so at 7ae9032),
+`cr_602_2b_gene_pollinator_tapped_for_mmmenons_mana_activates_no_more` (the heuristic-bot agent's EoE
+deck pair 6000978 on `eoe-bot`, the same panic with Flight-Deck Coordinator: Mm'menon, the Right Hand,
+Gene Pollinator and the Coordinator, All-Fates Scroll cast from the top of the library; it fails so at
+7ae9032).
+
+**Digests** (N23): full `3f49f29043418114` -> `36a8a84c37356ff8`, `DIGEST_ENCODING=0`
+`27f42bffa609f282` -> `3a6e81f85dc10d59`: 1 of the 2,500 games changes (h 475: two Orcish
+Lumberjacks; the payment for Questing Beast now asks which one sacrifices the Forest). `RULES_EPOCH`
+bumped; the Delver canary library's 60 spots reach their positions (`delver_rerecord.py check
+--stamp`).
+
+##### 24.7.5k, 40.1: costs with several parts that take cards
+
+`merge_costs` refused two parts that take permanents or cards in hand (retrace's land discard with
+Force of Will's or an evoke Incarnation's "exile a <color> card from your hand", Daze's "return an
+Island", Mine Collapse's "sacrifice a Mountain", Bitter Triumph's or Bone Shards' "discard a card"),
+because `Game::keep_for` kept one reservation (`Keep::sac`, `discard`, `exile`) and the budget one
+count; so retrace wasn't offered with them.
+
+* **`Keep::reserves`** (`pay::Reserve`): every such part, with its card: `Perm` (sacrifice, return,
+  remove a counter from; with `true`, "tap X untapped <permanents>", which taps), `Discard(n,
+  filter)`, `Exile(filter)`. A filtered discard is one now too (retrace's "a land card"; it wasn't
+  kept, by a pool argument: no mana source in hand is a land). One reservation is counted as before
+  (`Budget::sac`, `reserved`); several by `pay::ResCtx`: their candidates grouped by the reservations
+  each is a candidate of, and a payment holds when, for every set of reservations, the candidates
+  of any of them left are at least what they need together (Hall's condition: distinct candidates
+  for each; a card discarded is not exiled, a permanent sacrificed not returned). A mana source
+  that sacrifices a permanent or exiles a card from hand uses one up (`Game::consumes`, `Way::rsig`):
+  the search cuts a branch that breaks the condition and checks it at each leaf; such a source is
+  never a fixed unit then. ("Tap X" is paid alone, the lowering's `check_cost_w3`, which `merge_costs`
+  keeps: a `ResCtx` never holds one.)
+* **Two discards** (`Cost::discard_also`): `merge_costs` adds discards of one filter and keeps two
+  filters apart (the unfiltered one is `discard`); `pay_costs` asks the filtered one first.
+* **The cost's checks** (`cost_payable_with`) see the parts together (`reserves_ok`: with Grief's
+  evoke and one Swamp in hand, retrace isn't offered), and **`pay_costs`** offers only picks that
+  leave the later parts their candidates (`cost_picks_ok`: the parts left, the picks so far and this
+  one out). A permanent picked to be returned isn't one picked to be sacrificed.
+* **A permanent tapped and sacrificed for one cost** (CR 601.2h: the parts in any order): the tap
+  choice of "tap n untapped <permanents>" left out the permanents picked to be sacrificed or
+  returned, which the feasibility counted (`Keep::taps`); the taps come before the sacrifices and
+  returns, so they are offered now. (Not yet when the cost also exiles graveyard cards: its
+  sacrifices are made before those are chosen, so that sacrificed cards may be exiled, ruling
+  bea302d9, and so before the taps: left open, below.)
+
+Tests: `cr_702_81a_retrace_with_a_pitch_evoke` (Six, Grief in the graveyard, a Swamp and Dark Ritual in
+hand: cast for no mana; with the Swamp alone, not), `cr_702_81a_retrace_with_the_cards_own_discard`
+(Wrenn and Six's emblem, Bitter Triumph at 2 life: with a Forest and Simian Spirit Guide, whose mana
+is needed, not castable; with an Island too, the Forest and the Island discarded),
+`cr_702_81a_retrace_with_daze_returning_an_island`, `cr_601_2h_one_permanent_tapped_and_sacrificed_for_one_cost`
+(B4's Test Rebel Altar: "Tap an untapped Rebel you control, Sacrifice a Rebel"; a loud failure
+before, no Rebel to tap).
+
+**Digests** (24.7.5k, 40.1): full `36a8a84c37356ff8` -> `6d25032ffee21839`, `DIGEST_ENCODING=0`
+`3a6e81f85dc10d59` -> `14b9b0e887831eef`: 2 of the 2,500 games change (r 1987: Fury retraced with
+Six for its evoke cost, exiling a red card; h 77: Daze retraced by Wrenn and Six's emblem, returning
+an Island). `RULES_EPOCH` bumped; the Delver canary library's 60 spots reach their positions.
+
+##### 13.15: chains of mana abilities with mana costs
+
+`MADE` and `NOT_MADE` were one bit each: the mana of a mana ability with a mana cost paid no such
+ability's cost in the same payment (Loot, the Pathfinder's three {R} for Arena of Glory's {R};
+one Sunken Ruins' mana for another's {U/B}). CR 605.3a, 602.2b: while paying a cost, mana abilities
+may be activated, each one's mana existing once it resolves; so one's mana pays the cost of one
+activated after it, never its own or an earlier one's: the "pays the cost of" relation is acyclic.
+
+* **Chain ids** (`mana::chain`, `Tag` bits 16-63; `Tag` is a u64): a `MADE` unit carries the
+  activation that made it, a `NOT_MADE` need the one whose cost it is (`pay::chain_id`: the
+  source's place among the classes' sources with a mana cost, and its use, for one used several
+  times); `fits` lets a `MADE` unit pay a `NOT_MADE` need when its id ranks lower. The picks keep
+  them (`PayMana::marked`, `PayMana::made_by`, the virtual pool's kinds, `vgroups`, `pool_rems`),
+  the candidates too (`cands`).
+* **The order** (`payable_iter`): with such needs and such mana that could pay another's, every
+  order of the activations is tried, their ids relabelled by rank; activations alike (the same
+  needs and the same mana) keep a fixed order among themselves. Two bounds come first, one
+  matching each (`Chains`): with no such mana paying such a cost (the old rule) a payment every
+  order allows holds; with every such mana free to pay every such cost (its own too) one that fails
+  fails every order. A payment with such costs among its needs is decided by the matching
+  (`payable_restricted`: their chain ids part the needs and units into many groups, which
+  `best_chosen`'s split of each need over the groups made exponential), and cards alike but for
+  their activations' chain ids are one group of `ways_payable`'s search (each copy takes the next
+  card's way). (Without these the EoE fuzz ran seven times slower, some games a hundred times:
+  seed 1005, 0.4 s before 13.15, over 120 s; now 1.3 s.) A search past `SEARCH_NODES` is a loud
+  failure (ENGINE.md 51). `payable_iter`'s counts are u32 and its groups unbounded (a u8
+  count saturated, 128 tags and 24 needs were fixed arrays).
+* **`UseCap`** (N10) relied on the old rule ("an ability with a mana cost pays only the cost, so it
+  is used at most the cost's size times"): such an ability is never cut now.
+* **Converge** (`record_converge`): the mana made by such abilities spent is as little as the rest
+  of the pool allows (it pays more), whose (`made_by`) every choice, the most colours any shows;
+  `most_colors_matching` checks each colour set with `payable_n` (the orders tried). (Its hybrid
+  and Phyrexian fallback is 28.8.2k's, workstream D's.)
+
+Tests: `cr_605_3a_a_mana_abilitys_mana_pays_a_later_ones_cost` (two Sunken Ruins and a Swamp:
+{U}{U}{U}, a Ruins' own {C} the third mana before; two alone: no {U}),
+`cr_601_2g_a_payment_with_a_chain_of_mana_abilities` (B4's Test Blue Rock, {U}{U}{U}, cast with
+them; not castable before).
+
+**Digests** (13.15): full `6d25032ffee21839` -> `be4ad3e9916de295`, `DIGEST_ENCODING=0`
+`14b9b0e887831eef` -> `0503082a58e22ca4`: 13 of the 2,500 games change, each with two Sunken Ruins
+or two Arenas of Glory (the five inspected: r 263, 484, 502 with Ruins; r 404, 801 with Arenas):
+one's mana pays the other's cost. `RULES_EPOCH` bumped; the Delver canary library's 60 spots reach
+their positions.
+
+##### Not done in this session (left for the next pass)
+
+In the brief's order (100.4.4 to 100.4.6 have the earlier designs):
+
+* **26.11.6** (96 permanents a player): unchanged. The payment's ids for sources past `MY_PERM`'s
+  96 come with the paging of every `perm_action` caller (A's note in 100.2: 46 call sites,
+  attackers and blockers, priority's `ACTIVATE` ids through W3's ability page) and the end of
+  `perm_room` and `token_count`'s room; one change across the engine, not the payment's alone.
+* **The u8 parts of a `ManaCost`** (100.4.6's design): not started; it waited for F7's numbers
+  (`eoe-base` 7953d2a, merged at the end of this session, below). (`payable_iter`'s counts are exact
+  now, 13.15 above.)
+* **A cost that sacrifices, exiles graveyard cards and taps** (found on the way, 24.7.5k above):
+  its sacrifices are made before its graveyard cards are chosen (ruling bea302d9), so before its
+  taps, and a permanent sacrificed can't be one tapped for it, which CR 601.2h allows (tap it,
+  then sacrifice it, then exile from the graveyard). Exact: when the cost has a tap part, its tap
+  choices before the early sacrifice (`pay_costs`' order).
+* **28.8.2k** is workstream D's (a new decision kind).
+
+##### The merge of `eoe-base` 7953d2a (C2, F7, D2's hidden-Aura fix)
+
+Conflicts: `game.rs` (`token_count`) and `stack_ext.rs` (`CreateTokensN`) keep B3's any number of
+tokens (F7's side cut at 64; `CreateTokensN`'s amount, an i64 now, converted with `try_from`), `pay.rs`
+takes F7's `CardIdx::new` and life budget (`Wide`, clamped to `i32::MAX`) with B4's `Budget` (no
+`tap`), keeps B3's exact Phyrexian life (u64 against an i64 life) and the cut check of
+`can_pay_plain`; `activate.rs` keeps B3's exact teamwork (`crew_mana_ok`) in F7's `Wide`, and the
+payment's tap costs (`TapsOwed`, `Way::crew`) are `Wide` now; `cast.rs` keeps B3's exact "pay X life"
+and `life_later`. docs/shortcuts.md 46.3: F7's "exact or aborted" with the payment's own counts
+(B3, B4) and the open u8 parts of a `ManaCost`. The zero-core pin is e4779b2.
+
+Digests (re-recorded): full `3d59118e6fb9e706` (eoe-base) -> `694861906d331e06`,
+`DIGEST_ENCODING=0` `9bf41c0836e39125` -> `949af93ae06843a2`: 38 of the 2,500 games differ from
+`eoe-base`, the branch's own (B3's 6 and 16, B4's 1, 2 and 13). `RULES_EPOCH` bumped; the Delver
+canary library's 60 spots reach their positions.
 #### 100.9 C2: permanents entering simultaneously (branch `eoe-c2-together`, from `eoe-base` 2f065ff)
 
 **Why.** W6 found it (99.16, docs/shortcuts.md 99.16.1): the engine put the permanents of one event
