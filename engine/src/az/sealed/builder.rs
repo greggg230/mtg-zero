@@ -313,6 +313,13 @@ fn bits(m: u8) -> impl Iterator<Item = usize> {
 /// Build a 40-card deck from `pool` (nonbasic cards of `db`, any order, copies repeated) with
 /// `rng` (module docs). Deterministic in `rng`'s state; the pool's order doesn't matter.
 pub fn build(db: &CardDb, pool: &[DefId], s: &Settings, rng: &mut Rng) -> Build {
+    build_tilted(db, pool, s, None, rng)
+}
+
+/// [`build`] with the spells' draw weights (step 4) times `tilt` of each card (finite, > 0): the
+/// hidden decklists' sealed prior, tilted by the deck reader (ENGINE.md 102). `None`: `build`,
+/// draw for draw.
+pub fn build_tilted(db: &CardDb, pool: &[DefId], s: &Settings, tilt: Option<&dyn Fn(DefId) -> f64>, rng: &mut Rng) -> Build {
     let mut pool: Vec<DefId> = pool.to_vec();
     pool.sort_unstable();
     let basics = pools::basic_ids(db);
@@ -415,7 +422,11 @@ pub fn build(db: &CardDb, pool: &[DefId], s: &Settings, rng: &mut Rng) -> Build 
         .iter()
         .map(|&id| {
             let d = db.def(id);
-            pools::weight(d).powf(s.power) * (-t * (d.mana_value() as f64 - 3.0) / 2.0).exp()
+            let w = pools::weight(d).powf(s.power) * (-t * (d.mana_value() as f64 - 3.0) / 2.0).exp();
+            match tilt {
+                Some(f) => w * f(id),
+                None => w,
+            }
         })
         .collect();
     let mut capped: Vec<usize> = Vec::new();

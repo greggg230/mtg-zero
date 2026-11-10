@@ -251,12 +251,14 @@ fn held_cards_are_in_the_hand_and_excluded_ones_are_not() {
 fn the_belief_deal_follows_the_prediction() {
     // a constructed belief: the opponent's hand is mostly Force of Will
     let db = CardDb::constructed();
+    // (every target's prediction: the hand's, then the deck's, uniform: ENGINE.md 102.4)
     let w: usize = MtgAz::AUX.iter().map(|t| t.1).sum();
-    assert_eq!(w, identity::D);
-    let mut pred = vec![1e-4f32; w];
+    assert_eq!(w, 2 * identity::D);
+    let mut pred = vec![1e-4f32; identity::D];
     pred[identity_of(db, "Force of Will").unwrap()] = 0.5;
     let total: f32 = pred.iter().sum();
-    let pred: Vec<f32> = pred.iter().map(|p| p / total).collect();
+    let mut pred: Vec<f32> = pred.iter().map(|p| p / total).collect();
+    pred.extend(std::iter::repeat_n(1.0 / identity::D as f32, identity::D));
     let fow = |hs: &[Vec<String>]| hs.iter().map(|h| h.iter().filter(|c| *c == "Force of Will").count()).sum::<usize>();
     let mut seen = [0usize; 3];
     let mut tried = 0;

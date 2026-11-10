@@ -39,6 +39,14 @@ sys.path.insert(0, ROOT)
 import mtgz.az as A                    # noqa: E402  (puts the pinned zero-core on sys.path)
 import numpy as np                     # noqa: E402
 
+D = 1024    # the belief target's identities: aux_target's first segment (docs/ENGINE.md 66.2, 102.4)
+
+
+def full_pred(p):
+    """A belief over the opponent's hand (D floats) as the prediction of every auxiliary target
+    `determinize_with` takes (the deck target's, which the hand's deal does not read, uniform)."""
+    return np.concatenate([np.asarray(p, np.float32), np.full(D, 1.0 / D, np.float32)])
+
 RULE = ('cq', 4, 50.0, 0.3)            # the Delver line's evaluation rule (cq-n4-v50-s0.3)
 SEAT = {'select': 'cq', 'select_min_visits': 4, 'cq_c_visit': 50.0, 'cq_c_scale': 0.3}
 M64 = (1 << 64) - 1
@@ -160,7 +168,7 @@ def cmd_deals(a):
     n_seen = 0
     for gid, k, g in rebuilt(a.positions):
         v = g.to_move
-        t = np.asarray(g.aux_target(v), np.float64)
+        t = np.asarray(g.aux_target(v), np.float64)[:D]
         if t.sum() == 0:
             continue
         n_seen += 1
@@ -186,8 +194,8 @@ def cmd_deals(a):
                 if tt == 0:
                     w.determinize(v, seed)
                 else:
-                    w.determinize_with(v, seed, p[j], tt, a.clip)
-                d = np.asarray(w.aux_target(v), np.float64)
+                    w.determinize_with(v, seed, full_pred(p[j]), tt, a.clip)
+                d = np.asarray(w.aux_target(v), np.float64)[:D]
                 e += d
                 nz = np.flatnonzero(d)
                 hands.add(tuple(nz) + tuple(d[nz]))
@@ -284,7 +292,7 @@ def cmd_decisions(a):
         if not casts:
             continue
         _, lands = state_facts(g, v)
-        if lands < 1 or sum(np.asarray(g.aux_target(v))) < 2:
+        if lands < 1 or sum(np.asarray(g.aux_target(v))[:D]) < 2:
             continue
         found.append((gid, k, g, v, casts, dec))
         if len(found) >= a.max:
@@ -297,7 +305,7 @@ def cmd_decisions(a):
         cast_a = casts[0]['a']
         pass_a = next((o['a'] for o in dec['options'] if o.get('t', '').startswith('Pass')), None)
         from mtgz.az import belief as B
-        t_hand = np.asarray(g.aux_target(v), np.float64)
+        t_hand = np.asarray(g.aux_target(v), np.float64)[:D]
         nh = t_hand.sum()
         st = json.loads(g.export_state())
         row = {'game': gid, 'move': k, 'cast': casts[0]['t'], 'turn': st.get('turn'), 'step': st.get('step'),

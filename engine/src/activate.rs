@@ -298,7 +298,7 @@ impl Game {
             for c in self.permanents_of(p) {
                 let n = self.abilities(c).artifact_ability_discount;
                 if n > 0 {
-                    let floor = m.total().saturating_sub(1);
+                    let floor = u8::try_from(m.total().saturating_sub(1)).unwrap_or(u8::MAX); // (exact: n is a u8)
                     m.generic = m.generic.saturating_sub(n.min(floor));
                 }
             }
@@ -309,7 +309,7 @@ impl Game {
             for c in self.permanents_of(p) {
                 let n = self.abilities(c).ability_discount;
                 if n > 0 {
-                    let floor = m.total().saturating_sub(1);
+                    let floor = u8::try_from(m.total().saturating_sub(1)).unwrap_or(u8::MAX); // (exact: n is a u8)
                     m.generic = m.generic.saturating_sub(n.min(floor));
                 }
             }
@@ -317,11 +317,13 @@ impl Game {
         m
     }
 
-    /// The source is excluded from paying the ability's mana when the cost
-    /// also taps or moves it (ENGINE.md 18).
-    pub(crate) fn mana_exclude(card: CardIdx, ad: &ActivatedDef) -> Option<CardIdx> {
-        let c = &ad.cost;
-        (c.tap || c.sac_self || c.exile_self || c.discard_self).then_some(card)
+    /// The card whose mana abilities can't pay an ability's mana at all:
+    /// none (ENGINE.md 18 excluded the source whole when the cost tapped or
+    /// moved it). No ability's source is excluded whole any more: the payment leaves
+    /// out its mana abilities that conflict with the cost, `Keep::self_use`
+    /// from `keep_for`; docs/shortcuts.md 13.3.)
+    pub(crate) fn mana_exclude(_card: CardIdx, _ad: &ActivatedDef) -> Option<CardIdx> {
+        None
     }
 
     /// Could `p` activate `ad` of `card` now and complete the activation
@@ -436,7 +438,7 @@ impl Game {
             self.marks.push((r, crate::game::Mark::Boasted(self.turn.number as u16)));
         }
         if ad.mana().is_some() {
-            self.agenda.push(Task::ManaNow { src: Src { card, slot }, step: crate::decision::NumberStep::FIRST });
+            self.agenda.push(Task::ManaNow { src: Src::of(card, slot), step: crate::decision::NumberStep::FIRST });
             return;
         }
         // A special action (CR 116.2): its cost, then it happens; no stack.
@@ -544,12 +546,11 @@ impl Game {
         self.cost_payable_with(p, card, cost, mana, classes, exclude, false, 0)
     }
 
-    /// [`cost_payable`](Self::cost_payable); with `zero_mana_taps`, a cost
-    /// with no mana may tap a permanent with a mana ability for its "tap an
-    /// untapped <permanent>" part (no payment competes with it: station's
-    /// "tap another untapped creature you control", CR 702.184a, by a mana
-    /// creature). Without it such a permanent counts only for a cost of
-    /// mana-ability shape (Urza's, whose payment path is its own).
+    /// [`cost_payable`](Self::cost_payable). A "tap n untapped <permanent>"
+    /// part, crew or saddle may tap a permanent with a mana ability: the
+    /// mana is paid with the others (CR 601.2g before 601.2h; the payment
+    /// keeps the taps payable, `Keep::taps`; docs/shortcuts.md 27.13.4).
+    /// (`_zero_mana_taps`: no longer read, every candidate counts.)
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn cost_payable_with(
         &self,
@@ -559,7 +560,7 @@ impl Game {
         mana: &crate::mana::ManaCost,
         classes: &[Class],
         exclude: Option<CardIdx>,
-        zero_mana_taps: bool,
+        _zero_mana_taps: bool,
         // The spending restrictions the payment meets (`Keep::allow`: an
         // ability's source, ENGINE.md 99.12).
         allow: u8,
@@ -594,6 +595,11 @@ impl Game {
                 return false;
             }
         }
+        // (Its parts that take permanents or cards in hand, together:
+        // distinct candidates for each, ENGINE.md 100.4.7.)
+        if !self.reserves_ok(p, &Self::keep_for(card, cost, exclude)) {
+            return false;
+        }
         if let Some((k, n)) = cost.remove_counters {
             if self.counters_on(card, k) < n as crate::num::Count {
                 return false;
@@ -616,15 +622,10 @@ impl Game {
                 return false;
             }
         }
-        // (Not counting permanents that could be tapped for mana first: the
-        // mana is paid before, 601.2g-h.)
+        // (Every candidate counts: one tapped for mana instead is the
+        // payment's choice, `Keep::taps`, checked with the mana below.)
         if let Some(t) = &cost.tap_untapped {
-            let n = if zero_mana_taps && mana.is_zero() {
-                self.tap_candidates(p, card, t).count()
-            } else {
-                self.tap_candidates(p, card, t).filter(|&c| !self.has_mana_ability(c)).count()
-            };
-            if n < t.n as usize {
+            if self.tap_candidates(p, card, t).count() < t.n as usize {
                 return false;
             }
         }
@@ -643,7 +644,22 @@ impl Game {
         if mana.is_zero() {
             return true;
         }
-        self.can_pay_without(p, mana, classes, &Keep { allow, ..Self::keep_for(card, cost, exclude) }, exclude)
+        let keep = Keep { allow, taps: self.taps_for(p, card, cost), ..Self::keep_for(card, cost, exclude) };
+        self.can_pay_without(p, mana, classes, &keep, exclude)
+    }
+
+    /// The tap cost `card`'s `cost` pays after its mana (`Keep::taps`): crew
+    /// or saddle of a permanent (teamwork's taps are paid before the mana:
+    /// `crew_mana_ok`, `Keep::committed`), or "tap n untapped <permanents>".
+    /// (The lowering refuses a cost with two of them.)
+    pub(crate) fn taps_for(&self, p: PlayerId, card: CardIdx, cost: &Cost) -> Option<crate::pay::TapsOwed> {
+        if cost.crew > 0 && !self.is_spell_card(card) {
+            let bonus = !cost.saddle;
+            let cands = self.crew_eligible(p, card).into_iter().map(|c| (c, self.crew_power_of(c, bonus))).collect();
+            return Some(crate::pay::TapsOwed { need: cost.crew as crate::num::Wide, cands });
+        }
+        let t = cost.tap_untapped.as_ref()?;
+        Some(crate::pay::TapsOwed { need: t.n as crate::num::Wide, cands: self.tap_candidates(p, card, t).map(|c| (c, 1)).collect() })
     }
 
     /// Sacrifice the permanents chosen for a cost (together, one batch).
@@ -684,6 +700,10 @@ impl Game {
     /// (none under "exile it instead", CR 614.1a; not Blightsteel Colossus,
     /// shuffled into its library: ENGINE.md 49).
     pub(crate) fn discards_feed(&self, p: PlayerId, card: CardIdx, cost: &Cost) -> usize {
+        // (A second discard, `discard_also`, is retrace's land card merged
+        // with a card's own discard option, and an option is one kind of
+        // cost: no such cost exiles graveyard cards too, `merge_costs`.)
+        assert!(cost.discard_also.is_none() || cost.exile_graveyard == 0, "a cost of two discards that exiles graveyard cards");
         if cost.discard == 0 {
             return 0;
         }
@@ -773,12 +793,14 @@ impl Game {
     }
 
     /// Teamwork (a spell's "tap any number of untapped creatures you control
-    /// with total power n or more", paid before its mana, CR 601.2h): can
-    /// `p` tap creatures of `cands`, with the ones already chosen
+    /// with total power n or more", paid in the engine's order before its
+    /// mana): can `p` tap creatures of `cands`, with the ones already chosen
     /// (`tapped_in`), for total power `need` and still pay `mana` from
-    /// `classes` without the mana abilities of the creatures tapped? (The
-    /// taps and the mana compete for creatures with mana abilities: every
-    /// set of those is tried.)
+    /// `classes`? By the rules the mana abilities come first (CR 601.2g,
+    /// then 601.2h), so a creature tapped or sacrificed for mana can't be
+    /// tapped for teamwork: the feasibility tries each creature both ways
+    /// (`Keep::taps`, exact for any number of creatures; docs/shortcuts.md
+    /// N8: only 10 were tried before).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn crew_mana_ok(
         &self,
@@ -791,25 +813,16 @@ impl Game {
         keep: &Keep,
     ) -> bool {
         let have: crate::num::Wide = tapped_in.iter().map(|&c| self.crew_power_of(c, false)).sum();
-        let (with_mana, plain): (Vec<CardIdx>, Vec<CardIdx>) = cands.iter().copied().partition(|&c| self.has_mana_ability(c));
-        let plain_power: crate::num::Wide = plain.iter().map(|&c| self.crew_power_of(c, false).max(0)).sum();
-        let k = with_mana.len().min(10);
-        for mask in 0u32..(1 << k) {
-            let extra: crate::num::Wide = (0..k).filter(|i| mask >> i & 1 != 0).map(|i| self.crew_power_of(with_mana[i], false).max(0)).sum();
-            if have + plain_power + extra < need {
-                continue;
-            }
-            if mana.is_zero() {
-                return true;
-            }
-            let tapped: Vec<CardIdx> =
-                tapped_in.iter().copied().chain((0..k).filter(|i| mask >> i & 1 != 0).map(|i| with_mana[i])).collect();
-            let left = self.classes_without(classes, &tapped);
-            if self.can_pay_with(p, mana, &left, keep) {
-                return true;
-            }
+        let rest: crate::num::Wide = cands.iter().map(|&c| self.crew_power_of(c, false).max(0)).sum();
+        if have + rest < need {
+            return false;
         }
-        false
+        if mana.is_zero() {
+            return true;
+        }
+        let left = self.classes_without(classes, tapped_in);
+        let taps = crate::pay::TapsOwed { need: need - have, cands: cands.iter().map(|&c| (c, self.crew_power_of(c, false))).collect() };
+        self.can_pay_with(p, mana, &left, &Keep { taps: Some(taps), committed: tapped_in.to_vec(), ..keep.clone() })
     }
 
     /// Cards in `p`'s hand matching `f` other than `card`, one per
@@ -822,33 +835,87 @@ impl Game {
             .collect()
     }
 
-    /// What the parts of `cost` paid after its mana need from that payment.
+    /// Do the parts of `card`'s `cost` that take permanents or cards in hand
+    /// still find distinct candidates once `next` is picked for the part
+    /// being paid, the picks so far (`picked`, `pay_costs`' order) left out
+    /// (ENGINE.md 100.4.7: a pick could take the only candidate of a later
+    /// part)?
+    fn cost_picks_ok(&self, p: PlayerId, card: CardIdx, cost: &Cost, picked: &[CardIdx], next: CardIdx) -> bool {
+        use crate::pay::Reserve;
+        let n_sac = cost.sacrifice.as_ref().map_or(0, |s| s.n) as usize;
+        let n_also = n_sac + cost.discard_also.as_ref().map_or(0, |d| d.0) as usize;
+        let n_disc = n_also + cost.discard as usize;
+        let n_exile = n_disc + cost.exile_from_hand.is_some() as usize;
+        let n_bounce = n_exile + cost.bounce.as_ref().map_or(0, |b| b.n) as usize;
+        // (What part [lo, hi) of the picks still needs, `next` picked.)
+        let k = picked.len() + 1;
+        let left = |lo: usize, hi: usize| ((hi - lo) - k.saturating_sub(lo).min(hi - lo)) as u8;
+        let mut rs: Vec<(Reserve, CardIdx)> = Vec::new();
+        let perm = |rs: &mut Vec<(Reserve, CardIdx)>, s: &crate::db::SacCost, n: u8| {
+            if n > 0 {
+                rs.push((Reserve::Perm(crate::db::SacCost { n, ..s.clone() }, false), card));
+            }
+        };
+        if let Some(s) = &cost.sacrifice {
+            perm(&mut rs, s, left(0, n_sac));
+        }
+        if let Some(b) = &cost.bounce {
+            perm(&mut rs, b, left(n_exile, n_bounce));
+        }
+        if let Some(r) = Self::remove_counter_reserve(cost) {
+            perm(&mut rs, &r, r.n);
+        }
+        if let Some((_, f)) = &cost.discard_also {
+            let n = left(n_sac, n_also);
+            if n > 0 {
+                rs.push((Reserve::Discard(n, Some(f.clone())), card));
+            }
+        }
+        let n = left(n_also, n_disc);
+        if n > 0 {
+            rs.push((Reserve::Discard(n, cost.discard_filter.clone()), card));
+        }
+        if let Some(f) = &cost.exile_from_hand {
+            if left(n_disc, n_exile) > 0 {
+                rs.push((Reserve::Exile(f.clone()), card));
+            }
+        }
+        self.reserves_left_ok(p, &rs, &|c| c == next || picked.contains(&c))
+    }
+
+    /// What the parts of `cost` paid after its mana need from that payment:
+    /// each part that takes permanents or cards in hand a reservation
+    /// (`Keep::reserves`, checked together: ENGINE.md 100.4.7).
     pub(crate) fn keep_for(card: CardIdx, cost: &Cost, exclude: Option<CardIdx>) -> Keep {
-        debug_assert!(
-            [cost.sacrifice.is_some() || cost.bounce.is_some(), cost.discard > 0, cost.exile_from_hand.is_some()]
-                .iter()
-                .filter(|&&x| x)
-                .count()
-                <= 1,
-            "one reservation per cost (lowering)"
-        );
-        debug_assert!(!(cost.sacrifice.is_some() && cost.bounce.is_some()), "one reservation per cost (lowering)");
+        use crate::pay::Reserve;
+        let mut reserves: Vec<(Reserve, CardIdx)> = Vec::new();
+        // (A permanent to return to its owner's hand, ninjutsu's unblocked
+        // attacker, is reserved like one to sacrifice: a mana ability that
+        // sacrifices it can't pay the mana first. So is one to remove a
+        // counter from, CR 601.2g; EoE W3.)
+        for s in [cost.sacrifice.clone(), cost.bounce.clone(), Self::remove_counter_reserve(cost)].into_iter().flatten() {
+            reserves.push((Reserve::Perm(s, false), card));
+        }
+        if cost.discard > 0 {
+            reserves.push((Reserve::Discard(cost.discard, cost.discard_filter.clone()), card));
+        }
+        if let Some((n, f)) = &cost.discard_also {
+            reserves.push((Reserve::Discard(*n, Some(f.clone())), card));
+        }
+        if let Some(f) = &cost.exile_from_hand {
+            reserves.push((Reserve::Exile(f.clone()), card));
+        }
         Keep {
             exclude,
             life: cost.life,
-            // (A permanent to return to its owner's hand, ninjutsu's
-            // unblocked attacker, is reserved like one to sacrifice: a mana
-            // ability that sacrifices it can't pay the mana first.)
-            // (So is one to remove a counter from: a mana ability that
-            // sacrifices it can't pay the mana first, CR 601.2g; EoE W3.)
-            sac: cost.sacrifice.clone().or_else(|| cost.bounce.clone()).or_else(|| Self::remove_counter_reserve(cost)).map(|s| (s, card)),
-            // (A land-card discard never competes with a mana source in
-            // hand: those are not lands.)
-            discard: (cost.discard > 0 && cost.discard_filter.is_none()).then_some((cost.discard, card)),
-            exile: cost.exile_from_hand.clone().map(|f| (f, card)),
+            reserves,
             allow: 0,
             spell: None,
-            sac_taps: false,
+            taps: None,
+            committed: Vec::new(),
+            // (Its source's mana abilities that conflict with the cost: out
+            // of the payment, the others in; docs/shortcuts.md 13.3.)
+            self_use: crate::pay::SelfUse::of(card, cost),
         }
     }
 
@@ -864,10 +931,12 @@ impl Game {
         pm.keep = Self::keep_for(card, &ad.cost, Self::mana_exclude(card, ad));
         // (Mana spendable on abilities of its source's kind, CR 106.6.)
         pm.keep.allow = self.ability_allow(card);
+        // Crew, saddle, "tap n untapped <permanents>": paid next, so the
+        // mana leaves them payable (27.13.4).
+        pm.keep.taps = self.taps_for(p, card, &ad.cost);
         // "Tap X untapped artifacts": X of them stay for the cost (EoE W3).
         if let Some(r) = Self::tap_x_reserve(&ad.cost, u8::try_from(x).unwrap_or(u8::MAX)) {
-            pm.keep.sac = Some((r, card));
-            pm.keep.sac_taps = true;
+            pm.keep.reserves.push((crate::pay::Reserve::Perm(r, true), card));
         }
         pm.waterbend = ad.cost.waterbend;
         pm.forced = self.exile_sources(p, card, &ad.cost, Self::mana_exclude(card, ad));
@@ -911,7 +980,7 @@ impl Game {
     /// mana source also `ACTIVATE` + its slot x 4 + i = "activate its mana
     /// ability i first, then sacrifice or return it" (ENGINE.md 86.2; CR
     /// 601.2g-h; `float_before_cost`, `life_after` = the cost's life).
-    fn cost_pick_options(&self, p: PlayerId, cands: &[CardIdx], life_after: u8) -> Vec<Opt> {
+    fn cost_pick_options(&self, p: PlayerId, cands: &[CardIdx], life_after: u32) -> Vec<Opt> {
         let mut opts = Vec::with_capacity(cands.len());
         for &c in cands {
             opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
@@ -929,7 +998,10 @@ impl Game {
     pub(crate) fn pay_costs(&mut self, id: u32, mut picked: Vec<CardIdx>) {
         let Some((p, card, cost)) = self.item_cost(id) else { return };
         let n_sac = cost.sacrifice.as_ref().map_or(0, |s| s.n) as usize;
-        let n_disc = n_sac + cost.discard as usize;
+        // (A second discard with a filter of its own first: retrace's land
+        // card with the card's own discard, docs/shortcuts.md 24.7.5k.)
+        let n_also = n_sac + cost.discard_also.as_ref().map_or(0, |d| d.0) as usize;
+        let n_disc = n_also + cost.discard as usize;
         let n_exile = n_disc + cost.exile_from_hand.is_some() as usize;
         let n_bounce = n_exile + cost.bounce.as_ref().map_or(0, |b| b.n) as usize;
         let n_gy = n_bounce + cost.exile_graveyard as usize;
@@ -1000,10 +1072,13 @@ impl Game {
                 0
             };
             let only_cards = need > 0 && need >= n_sac - picked.len();
+            // (Each pick leaves the cost's other parts that take permanents or
+            // cards in hand their candidates: ENGINE.md 100.4.7.)
             let cands: Vec<CardIdx> = self
                 .sacrifice_candidates(p, card, s)
                 .into_iter()
                 .filter(|c| !picked.contains(c) && (!only_cards || self.feeds_graveyard(p, *c) && self.gy_cost_card(cost, *c)))
+                .filter(|&c| self.cost_picks_ok(p, card, cost, &picked, c))
                 .collect();
             let opts = self.cost_pick_options(p, &cands, cost.life);
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::Sacrifice, opts);
@@ -1011,10 +1086,12 @@ impl Game {
         }
         if picked.len() < n_disc {
             let mut opts = self.hand_options_except(p, Some(card));
-            if let Some(f) = &cost.discard_filter {
+            let filter = if picked.len() < n_also { cost.discard_also.as_ref().map(|d| &d.1) } else { cost.discard_filter.as_ref() };
+            if let Some(f) = filter {
                 let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
                 opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(f, c, &ctx)));
             }
+            opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.cost_picks_ok(p, card, cost, &picked, c)));
             // A cost that also exiles graveyard cards (escape): while the
             // graveyard (the discards so far in it, the sacrifices chosen to
             // come) would be short by as many cards as discards are left,
@@ -1032,14 +1109,19 @@ impl Game {
         }
         if picked.len() < n_exile {
             let f = cost.exile_from_hand.as_ref().unwrap();
-            let opts = self.exile_candidates(p, card, f);
+            let mut opts = self.exile_candidates(p, card, f);
+            opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.cost_picks_ok(p, card, cost, &picked, c)));
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ExileCost, opts);
             return;
         }
         if picked.len() < n_bounce {
             let b = cost.bounce.as_ref().unwrap();
-            let cands: Vec<CardIdx> =
-                self.sacrifice_candidates(p, card, b).into_iter().filter(|c| !picked[n_exile..].contains(c)).collect();
+            // (Not a permanent picked to be sacrificed: it is returned first.)
+            let cands: Vec<CardIdx> = self
+                .sacrifice_candidates(p, card, b)
+                .into_iter()
+                .filter(|c| !picked.contains(c) && self.cost_picks_ok(p, card, cost, &picked, *c))
+                .collect();
             let opts = self.cost_pick_options(p, &cands, cost.life);
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::BounceCost, opts);
             return;
@@ -1078,9 +1160,12 @@ impl Game {
                 (None, None) => unreachable!("taps owed without a tap cost"),
             };
             let floor = picked[n_gy..].last().map(|&c| self.perm_action(p, c));
+            // (A permanent picked to be sacrificed or returned is still
+            // there, and may be tapped first: CR 601.2h, the parts in any
+            // order; the taps come before the sacrifices and returns.)
             let cands: Vec<Opt> = self
                 .tap_candidates(p, card, t)
-                .filter(|c| !picked.contains(c))
+                .filter(|c| !picked[n_gy..].contains(c))
                 .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                 .filter(|o| floor.is_none_or(|f| o.action > f))
                 .collect();
@@ -1160,6 +1245,16 @@ impl Game {
         for &c in picked[n_gy..n_tap].iter().chain(&picked[n_rc..]) {
             self.tap(c);
         }
+        // Teamwork's creatures, tapped before the spell's mana in the
+        // engine's order: by the rules after its mana abilities (CR 601.2g
+        // before 601.2h), so none of them is a mana source of it
+        // (`Keep::committed`; docs/shortcuts.md 13.17).
+        if cost.crew > 0 && self.is_spell_card(card) && picked.len() > n_rc {
+            let crew: Vec<CardIdx> = picked[n_rc..].to_vec();
+            if let Some(Task::PayMana(pm)) = self.agenda.iter_mut().rev().find(|t| matches!(t, Task::PayMana(_))) {
+                pm.keep.committed.extend(crew);
+            }
+        }
         if let Some((_, k)) = cost.remove_counter_from {
             self.remove_counters(picked[n_tap], k, 1);
         }
@@ -1202,7 +1297,8 @@ impl Game {
             self.sacrifice_picked(p, id, &picked[..n_sac]);
         }
         if cost.life > 0 {
-            self.lose_life(p, cost.life as i32);
+            // (At most the life total, an i32: CR 119.4 was checked.)
+            self.lose_life(p, i32::try_from(cost.life).expect("life within the life total"));
         }
         if cost.discard_hand {
             for h in self.hand_sorted(p) {
@@ -1291,7 +1387,7 @@ impl Game {
     /// changes. A cost that taps the source itself (a fetch land, Wasteland:
     /// the source of the ability) is not one of these: its source isn't
     /// picked.
-    pub(crate) fn float_before_cost(&self, p: PlayerId, c: CardIdx, life_after: u8) -> crate::svec::SVec<u8, 4> {
+    pub(crate) fn float_before_cost(&self, p: PlayerId, c: CardIdx, life_after: u32) -> crate::svec::SVec<u8, 4> {
         let mut out = crate::svec::SVec::new();
         let o = &self.objs[c.i()];
         if o.zone != Zone::Battlefield || o.controller != p || o.tapped {
@@ -1863,7 +1959,7 @@ impl Game {
             if slot == crate::pay::SAC_FOR {
                 // A granted "sacrifice this: add <mana>" (Rain of Filth).
                 let mask = g.sac_mana_of(c);
-                g.activate_sac_for(Src { card: c, slot });
+                g.activate_sac_for(Src::of(c, slot), None);
                 let prods: Vec<[u8; 6]> = (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect();
                 g.agenda.push(Task::ManaNowPick { p, prods, only: 0, page: crate::decision::Page::FIRST });
             } else {

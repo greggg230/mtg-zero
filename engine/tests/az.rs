@@ -1161,8 +1161,10 @@ fn the_opening_encodes_no_hidden_information() {
 
 /// The positions of the public-state gate: mid-game states (mixed heuristic
 /// and random play, one every ~`every` decisions, sideboarding left out) of
-/// the cube's random decks, the Delver mirror, best-of-three matches and a
-/// drafted match (a random 2v2 `team_draft` event's spec), `per` of each.
+/// the cube's random decks, the Delver mirror, best-of-three matches, a
+/// drafted match (a random 2v2 `team_draft` event's spec) and the cube's
+/// random decks with hidden decklists (ENGINE.md 102; last, so the others'
+/// positions are as before), `per` of each.
 fn gate_positions(per: usize, seed: u64) -> Vec<(&'static str, MtgAz)> {
     use engine::az::draft::{DraftSpec, TeamDraftAz};
     let mut specs: Vec<(&'static str, MtgSpec)> = opening_specs();
@@ -1177,8 +1179,9 @@ fn gate_positions(per: usize, seed: u64) -> Vec<(&'static str, MtgAz)> {
     let setup = ev.matches().unwrap().remove(0);
     let json = engine::az::draft_bots::match_spec(&setup, ev.ev.max_turns, ev.ev.format);
     specs.push(("drafted", MtgSpec::parse(&json).unwrap()));
-    // Edge of Eternities sealed: the EoE table, its identity space (ENGINE.md 105); last, so the
-    // other kinds' positions are as before
+    specs.push(("hidden decklists", MtgSpec::parse(r#"{"hidden_decklists": true}"#).unwrap()));
+    // Edge of Eternities sealed (hidden decklists: the sealed spec's default): the EoE table, its
+    // identity space (ENGINE.md 105); last, so the other kinds' positions are as before
     specs.push(("eoe", MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "arena"}, "max_turns": 60}"#).unwrap()));
     let mut out = Vec::new();
     for (name, sp) in specs {
@@ -1211,7 +1214,7 @@ fn public_view(g: &MtgAz, v: u8) -> Vec<u64> {
 /// The dual of the hidden-information checks (ENGINE.md 58.6): every public
 /// field of the game state is classified (`public_state::fields`, an
 /// exhaustive destructuring) and has a perturbation; each perturbation, made
-/// on positions of the five kinds of games (EoE sealed's since ENGINE.md 105), changes the public view for both
+/// on positions of the six kinds of games (cube hidden decklists since ENGINE.md 102, EoE sealed since 105), changes the public view for both
 /// players (it is public) and the encoding for both viewers (it reaches the
 /// network), but the deliberate limits (`public_state::limits`; layout v5,
 /// ENGINE.md 60, left no gap).
@@ -1237,12 +1240,26 @@ fn public_state_reaches_the_encoding() {
         example: Option<String>,
     }
     let mut t: Vec<Tally> = ps.iter().map(|_| Tally::default()).collect();
+    // With hidden decklists (ENGINE.md 102) the fields `HIDDEN_BY_DECKLISTS` names are hidden
+    // from the other player: such a perturbation must change its owner's view and encoding and
+    // neither of the other player's.
+    let (mut hidden_ok, mut leaks) = (0, Vec::new());
     for (spec, a) in &pos {
         let base_enc = [enc(a, 0), enc(a, 1)];
         let base_view = [public_view(a, 0), public_view(a, 1)];
         for (k, p) in ps.iter().enumerate() {
             let mut b = a.clone();
             let Some(what) = (p.apply)(&mut b, &mut rngs[k]) else { continue };
+            if a.g.spec().hidden_decklists && engine::public_state::HIDDEN_BY_DECKLISTS.contains(&p.name) {
+                let view: Vec<bool> = (0..2).map(|v| public_view(&b, v as u8) != base_view[v]).collect();
+                let code: Vec<bool> = (0..2).map(|v| enc(&b, v) != base_enc[v]).collect();
+                if view.iter().filter(|&&x| x).count() == 1 && view == code {
+                    hidden_ok += 1;
+                } else {
+                    leaks.push(format!("{spec}: {what}: views changed {view:?}, encodings {code:?}"));
+                }
+                continue;
+            }
             t[k].applied += 1;
             for v in 0..2 {
                 if public_view(&b, v as u8) == base_view[v] {
@@ -1305,6 +1322,9 @@ fn public_state_reaches_the_encoding() {
         }
     }
     println!("{ok} perturbations encoded, {by_design} deliberate limits, {next} gaps for the next layout (ENGINE.md 58.10, 60)");
+    println!("hidden decklists: {hidden_ok} perturbations of fields they hide reached only their owner");
+    assert!(leaks.is_empty(), "hidden decklists: {} perturbations of hidden fields reached the other player:\n{}", leaks.len(), leaks.join("\n"));
+    assert!(hidden_ok > 0, "hidden decklists: no perturbation of a field they hide applied");
     assert!(findings.is_empty(), "{} findings:\n{}", findings.len(), findings.join("\n"));
     // Layout v5 (ENGINE.md 60) encodes layout v4's 42 gaps, layout v6 (ENGINE.md 100.5) the Edge
     // of Eternities port's and workstream C's (`public_state::V6_FIXED`), and the graveyard's
@@ -2029,7 +2049,7 @@ fn to_choice(g: &mut engine::Game, k: engine::DecisionKind) {
 }
 
 /// Layout v5's facts hide nothing (ENGINE.md 60.4): on the gate's positions
-/// (the cube, the Delver mirror, best-of-three, a drafted match, EoE sealed) with each of
+/// (the cube, the Delver mirror, best-of-three, a drafted match, hidden decklists, EoE sealed) with each of
 /// the 42 perturbations v5 encodes applied, every world `determinize` makes
 /// for a viewer encodes the same for it; and a card exiled face
 /// down that its owner may play (Headliner Scarlett) is in its owner's
@@ -2124,6 +2144,26 @@ fn the_v5_facts_encode_no_hidden_information() {
 fn belief(g: &MtgAz, viewer: usize) -> Vec<f32> {
     let mut t = vec![0.0; MtgAz::aux_width()];
     g.aux_target(viewer, &mut t);
+    t.truncate(identity::D);
+    t
+}
+
+/// The `deck` target (ENGINE.md 102.4): the second segment of `aux_target`.
+fn deck_target(g: &MtgAz, viewer: usize) -> Vec<f32> {
+    let mut t = vec![0.0; MtgAz::aux_width()];
+    g.aux_target(viewer, &mut t);
+    t[identity::D..].to_vec()
+}
+
+/// The frame opponent's cards `viewer` does not know exactly, by identity (what the `deck` target
+/// must be).
+fn unseen_cards(g: &MtgAz, viewer: usize) -> Vec<f32> {
+    let ids = identity::identities(g.g.db());
+    let o = 1 - g.g.encoding_seat(viewer as u8);
+    let mut t = vec![0.0; identity::D];
+    for c in g.g.unknown_to(viewer as u8, o) {
+        t[ids[g.g.ident(c) as usize] as usize] += 1.0;
+    }
     t
 }
 
@@ -2144,7 +2184,7 @@ fn opponent_hand(g: &MtgAz, viewer: usize) -> Vec<f32> {
 /// own hand (never the decider's); between the games of a match there is none.
 #[test]
 fn the_belief_target_is_the_true_opponent_hand_and_never_an_input() {
-    assert_eq!(MtgAz::AUX, &[("belief", identity::D)]);
+    assert_eq!(MtgAz::AUX, &[("belief", identity::D), ("deck", identity::D)]);
     let mut zr = zero_search::rng::Rng::new(66);
     let mut pos: Vec<(&'static str, MtgAz)> = gate_positions(scale(40) as usize, 66);
     for (name, sp) in opening_specs() {
@@ -2225,12 +2265,79 @@ fn selfplay_records_the_belief_target_with_the_samples() {
     assert!(!r1.is_empty());
     for (a, b) in r0.iter().zip(&r1) {
         assert_eq!((&a.x, &a.pi, a.player), (&b.x, &b.pi, b.player));
-        assert!(a.aux.is_empty() && b.aux.len() == identity::D);
-        let n: f32 = b.aux.iter().sum();
+        assert!(a.aux.is_empty() && b.aux.len() == 2 * identity::D);
+        let n: f32 = b.aux[..identity::D].iter().sum();
         assert!((0.0..=12.0).contains(&n) && b.aux.iter().all(|&v| v >= 0.0 && v.fract() == 0.0));
+        // (the deck target: at most the 60 cards of a Delver deck)
+        assert!(b.aux[identity::D..].iter().sum::<f32>() <= 60.0);
     }
-    assert!(r1.iter().filter(|r| r.aux.iter().sum::<f32>() > 0.0).count() > r1.len() / 2);
+    assert!(r1.iter().filter(|r| r.aux[..identity::D].iter().sum::<f32>() > 0.0).count() > r1.len() / 2);
     assert!(engine::az::draft::TeamDraftAz::aux_width() == 0);
+}
+
+/// The auxiliary target `deck` (ENGINE.md 102.4) is the frame opponent's unseen cards - their
+/// hand, library and face-down cards the decider does not know exactly - by identity, its total
+/// public (the decider knows how many cards it knows), and never an input: on the gate's positions
+/// (open decklists, best-of-three, a drafted match, hidden decklists) every world of the decider's
+/// encodes alike while the target is that world's own; with hidden decklists the worlds' targets
+/// differ beyond the order of the cards (their decks differ), which the reader is to predict.
+#[test]
+fn the_deck_target_is_the_opponents_unseen_cards_and_never_an_input() {
+    let mut zr = zero_search::rng::Rng::new(102);
+    let (mut worlds, mut other) = (0, 0);
+    for (name, g) in gate_positions(scale(20) as usize, 1024) {
+        let v = g.to_move().unwrap();
+        let t = deck_target(&g, v);
+        assert_eq!(t, unseen_cards(&g, v), "{name}: the deck target");
+        let o = 1 - g.g.encoding_seat(v as u8);
+        assert_eq!(t.iter().sum::<f32>() as usize, g.g.unknown_to(v as u8, o).len(), "{name}: its total");
+        let x = enc(&g, v);
+        for _ in 0..3 {
+            let mut d = g.clone();
+            d.determinize(v, &mut zr);
+            assert_eq!(enc(&d, v), x, "{name}: the decider's features");
+            let td = deck_target(&d, v);
+            assert_eq!(td, unseen_cards(&d, v), "{name}: a world's target is its own");
+            assert_eq!(td.iter().sum::<f32>(), t.iter().sum::<f32>(), "{name}: the public total");
+            if name == "hidden decklists" {
+                worlds += 1;
+                other += (td != t) as u32;
+            }
+        }
+    }
+    println!("hidden decklists: {worlds} worlds, {other} with another unseen deck");
+    assert!(worlds >= 60 && other * 10 > worlds * 9, "{worlds} {other}");
+}
+
+/// The deck reader's declared inputs (ENGINE.md 102.4) are checked in (`mtgz/az/deck_reader_v6.json`
+/// = `encode::deck_reader_json`; `MTGZ_WRITE_LAYOUT=1` rewrites it) and are what zero-core's reader
+/// accepts (its docs/az.md 36.2): ranges in feature order, disjoint, inside the features, none in a
+/// token segment (the bags and the global blocks only); every viewer-side bag left out.
+#[test]
+fn deck_reader_inputs_are_checked_in_and_read_bags_and_globals_only() {
+    let want = encode::deck_reader_json();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/deck_reader_v6.json");
+    if std::env::var("MTGZ_WRITE_LAYOUT").is_ok_and(|v| v == "1") {
+        std::fs::write(&path, &want).unwrap();
+    }
+    let have = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+    assert!(have == want, "{} differs from encode::deck_reader_json (MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test az deck_reader)", path.display());
+    let ins = encode::deck_reader_inputs();
+    let l: serde_json::Value = serde_json::from_str(&encode::layout_json(CardDb::cube())).unwrap();
+    let mut end = 0;
+    for &(name, o, n) in &ins {
+        assert!(n > 0 && o >= end && o + n <= NUM_FEATURES, "{name}: [{o}, {n}) out of order or outside");
+        end = o + n;
+        for sg in l["segments"].as_array().unwrap() {
+            let (so, sc, sw) = (sg["offset"].as_u64().unwrap() as usize, sg["count"].as_u64().unwrap() as usize, sg["width"].as_u64().unwrap() as usize);
+            assert!(o + n <= so || o >= so + sc * sw, "{name}: inside the token segment {}", sg["name"]);
+        }
+    }
+    let bag_of = |b: usize| encode::O_BAGS + b * encode::D;
+    use encode::bag;
+    for b in [bag::MY_HAND, bag::MY_BATTLEFIELD, bag::MY_GRAVEYARD, bag::MY_EXILE, bag::MY_LIBRARY, bag::OPP_HIDDEN, bag::OPP_POOL, bag::MY_HAND_KNOWN] {
+        assert!(!ins.iter().any(|&(_, o, _)| o == bag_of(b)), "bag {b} is not the opponent's shown cards");
+    }
 }
 
 // ---- A non-deciding viewer's encoding (ENGINE.md 67) ------------------------
@@ -2387,7 +2494,7 @@ fn belief_deals_keep_every_determinize_invariant() {
                 d.g.check_knowledge().unwrap_or_else(|e| panic!("{name}: {e}"));
                 for p in 0..2u8 {
                     assert_eq!(g.g.player(p).hand.len(), d.g.player(p).hand.len(), "{name}: hand size");
-                    if name != "bo3" && name != "drafted" {
+                    if name != "bo3" && name != "drafted" && name != "hidden decklists" {
                         assert_eq!(cards_of(&g, p), cards_of(&d, p), "{name}: P{p}'s cards");
                     }
                 }
@@ -2496,8 +2603,9 @@ fn a_sharp_belief_concentrates_the_deal() {
 /// The belief's input and weights read only the decider's information (ENGINE.md 69.2): worlds
 /// `determinize(decider)` deals - other opponent hands, other best-of-three decks - give the decider
 /// the same features (so the head's prediction is the same) and, for one prediction, the same
-/// weights: best-of-one bit for bit; best-of-three after the hidden pool is sampled with one seed
-/// (the deal samples it first, from what the decider knows).
+/// weights: best-of-one bit for bit; best-of-three after the hidden pool is sampled with one seed,
+/// hidden decklists (ENGINE.md 102) after the opponent's deck is (the deal samples it first, from
+/// what the decider knows).
 #[test]
 fn the_belief_weights_ignore_the_opponents_hidden_cards() {
     let mut rng = Rng::new(72);
@@ -2511,6 +2619,9 @@ fn the_belief_weights_ignore_the_opponents_hidden_cards() {
             let mut w = w.clone();
             if bo3 {
                 w.sample_hidden_pool_for(v as u8, &mut Rng::new(9));
+            }
+            if w.hidden_decklists() {
+                w.sample_hidden_deck_for(v as u8, &mut Rng::new(9), None);
             }
             engine::az::belief::deal_weights(&w.g, v as u8, &p, 1.0, 20.0)
         };

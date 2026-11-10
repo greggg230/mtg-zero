@@ -77,19 +77,22 @@ pub struct Cloud {
 /// face's included (as `Game::add_card` sets them; not the per-player
 /// miracle bits); computed once.
 fn seen_bits_of(db: &'static crate::db::CardDb) -> &'static [u16] {
-    static BITS: std::sync::OnceLock<(usize, Vec<u16>)> = std::sync::OnceLock::new();
+    // (Per card table: a process may play the cube's games and sealed ones, ENGINE.md 102.6.)
+    static BITS: std::sync::Mutex<Vec<(usize, &'static [u16])>> = std::sync::Mutex::new(Vec::new());
     let key = db as *const crate::db::CardDb as usize;
-    let b = BITS.get_or_init(|| {
-        let v = (0..db.len())
-            .map(|i| {
-                let d = db.def(i as DefId);
-                d.seen_bits() | d.back.map_or(0, |b| db.def(b).seen_bits())
-            })
-            .collect();
-        (key, v)
-    });
-    assert_eq!(b.0, key, "one card database per process");
-    &b.1
+    let mut v = BITS.lock().unwrap();
+    if let Some(&(_, b)) = v.iter().find(|(k, _)| *k == key) {
+        return b;
+    }
+    let bits: Vec<u16> = (0..db.len())
+        .map(|i| {
+            let d = db.def(i as DefId);
+            d.seen_bits() | d.back.map_or(0, |b| db.def(b).seen_bits())
+        })
+        .collect();
+    let b: &'static [u16] = Box::leak(bits.into_boxed_slice());
+    v.push((key, b));
+    b
 }
 
 /// `k` sequential draws without replacement from the sorted multiset
@@ -505,8 +508,9 @@ impl Game {
     }
 
     /// Merge clouds with intersecting domains (same viewer and owner); drop
-    /// empty clouds and clouds over all of the owner's hidden cards (they
-    /// say nothing a determinize would not keep anyway).
+    /// empty clouds and clouds over all of the owner's hand and library
+    /// (with open decklists they say nothing a determinize would not keep
+    /// anyway; hidden decklists keep them, ENGINE.md 102.1).
     fn tidy_clouds(&mut self) {
         if self.clouds.is_empty() {
             return;
@@ -549,7 +553,11 @@ impl Game {
             });
             k.slots.sort_unstable();
         }
-        self.clouds.retain(|k| !(k.defs.is_empty() || (k.hand && k.library)));
+        // (With hidden decklists a cloud over the whole hand and library is
+        // kept: it is the record that cards the viewer saw are still in the
+        // deck, which a sampled deck must hold, ENGINE.md 102.1.)
+        let keep_whole = self.spec.hidden_decklists;
+        self.clouds.retain(|k| !(k.defs.is_empty() || (k.hand && k.library && !keep_whole)));
         self.clouds.sort_by_key(|k| (k.viewer, k.owner, k.hand, k.library, k.slots.first().copied()));
     }
 
@@ -816,6 +824,19 @@ impl Game {
     fn hidden_slots_with(&self, viewer: PlayerId, owner: PlayerId, payer: Option<PlayerId>) -> (SVec<CardIdx, 64>, Vec<CardIdx>) {
         let mut slots = self.unknown_to_in(viewer, owner);
         let mut pinned: Vec<CardIdx> = Vec::new();
+        // A token in a hidden zone (it ceases to exist at the next state-based
+        // actions, CR 111.8, 704.5d) is not a card: its identity is never dealt
+        // to a card's slot, nor a card's to it (ENGINE.md 102.3: a world held a
+        // Robot token's identity in a card's slot). It stays, as a pinned card.
+        if slots.iter().any(|c| c.get() >= self.first_token) {
+            slots.retain(|&c| {
+                let token = self.is_token(c);
+                if token {
+                    pinned.push(c);
+                }
+                !token
+            });
+        }
         if payer == Some(owner) && owner != viewer {
             // A payment in progress may count on the payer's mana sources in
             // hand, and on the cards a cost exiles from hand: they are pinned

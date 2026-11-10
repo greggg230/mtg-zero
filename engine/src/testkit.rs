@@ -445,6 +445,13 @@ impl Game {
     /// decision (its options only if the viewer decides). Two worlds a
     /// `determinize(viewer)` may produce must agree on it. The state part
     /// ([`view_state`](Self::view_state)) and the pending decision.
+    /// The engine's continuation (the agenda's last `n` tasks, top last), for a failure's message.
+    #[doc(hidden)]
+    pub fn agenda_tail(&self, n: usize) -> String {
+        let a = &self.agenda;
+        format!("{:?}", &a[a.len().saturating_sub(n)..])
+    }
+
     pub fn view_of(&self, viewer: PlayerId) -> Vec<u64> {
         let mut v: Vec<u64> = Vec::with_capacity(256);
         self.view_state(viewer, None, &mut v);
@@ -759,7 +766,10 @@ impl Game {
             if p == viewer {
                 v.extend(pl.sideboard.iter().map(|&d| d as u64));
             }
-            v.extend([self.sideboard_size(p) as u64, pl.companion_used as u64]);
+            // (With hidden decklists the other player's sideboard size is
+            // hidden too: it tells their basic lands, ENGINE.md 102.1.)
+            let size = if self.spec.hidden_decklists && p != viewer { u64::MAX - 9 } else { self.sideboard_size(p) as u64 };
+            v.extend([size, pl.companion_used as u64]);
             v.push(pl.companion_def.map_or(u64::MAX, |d| d as u64));
             // The London mulligan's public state (CR 103.5; ENGINE.md 55):
             // mulligans taken, kept, a declared mulligan not yet taken.

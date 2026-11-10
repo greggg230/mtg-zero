@@ -36,7 +36,7 @@ import os
 
 from zero.package import GamePackage, register
 
-from . import decklists
+from . import deck_reader, decklists
 from .evaldecks import eval_spec
 from .mac import LocalGpuRemote, RunCommitRemote
 
@@ -247,10 +247,19 @@ PACKAGE = register(GamePackage(
     'mtgz', 'MTG Zero', ROOT, engine='mtgz._engine', run_module='mtgz.az.run', game='mtg',
     # the belief target (docs/ENGINE.md 66, zero-core docs/az.md 15): the decider's opponent's hand by
     # card identity, learned as a distribution by an auxiliary head (run setting aux_belief_w, 0 = off);
-    # replays of a checkpoint with the head show it per network decision (`mtgz.az.belief.render`)
-    aux={'mtg': [{'name': 'belief', 'width': 1024, 'loss': 'multinomial'}],
-         'mtg_eoe': [{'name': 'belief', 'width': 1024, 'loss': 'multinomial'}]},
+    # replays of a checkpoint with the head show it per network decision (`mtgz.az.belief.render`);
+    # the deck target (docs/ENGINE.md 102.4): the opponent's unseen cards by identity (run setting
+    # aux_deck_w, 0 = off), the deck reader's target (`mtgz.az.deck_reader`); `mtg_eoe` (docs/ENGINE.md 105)
+    # the same targets in the EoE identity space
+    aux={'mtg': [{'name': 'belief', 'width': 1024, 'loss': 'multinomial'},
+                 {'name': 'deck', 'width': 1024, 'loss': 'multinomial'}],
+         'mtg_eoe': [{'name': 'belief', 'width': 1024, 'loss': 'multinomial'},
+                     {'name': 'deck', 'width': 1024, 'loss': 'multinomial'}]},
     replay_aux={'mtg': 'mtgz.az.belief:render', 'mtg_eoe': 'mtgz.az.belief:render_eoe'},
+    # the deck readers (zero-core docs/az.md 36, docs/ENGINE.md 102.4, 105.5): a small branch of the network
+    # over the declared bags and globals predicts the `deck` target and feeds the trunk (run settings
+    # reader_deck 1 with aux_deck_w > 0; off by default); `mtg_eoe`'s reads the EoE space's identities
+    readers=deck_reader.READERS,
     # team_draft's deferred results and its other yardstick (M6 part 3, docs/ENGINE.md 45)
     deferred={'team_draft': 'mtgz.az.drafted:GLUE'}, evals={'team_draft': 'mtgz.az.human_picks:EVALS'},
     specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',

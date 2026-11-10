@@ -730,3 +730,533 @@ fn deal_weights_ignore_the_opponents_hidden_cards() {
     }
     assert!(worlds > 100 && differ > worlds / 3, "{worlds} worlds, {differ} with another opponent hand");
 }
+
+// ---- Hidden decklists (ENGINE.md 102) ----
+
+/// Brainstorm puts back the Test Bear P1 knew in P0's hand, then P0's fetch land shuffles the
+/// library: P1's cloud now covers P0's whole hand and library. With open decklists it is dropped
+/// (it says nothing the decklist does not); with hidden decklists it is the record that the Bear
+/// is still in P0's deck, and is kept (ENGINE.md 102.1).
+fn bear_brainstormed_then_shuffled(decklists: bool) -> (Game, u16) {
+    let mut g = Scenario::new(db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.hidden_decks = decklists;
+            s.hidden_decklists = decklists;
+        })
+        .battlefield(0, &["Island", "Polluted Delta"])
+        .hand(0, &["Brainstorm", "Mountain"])
+        .hand_known(0, &["Test Bear"])
+        .library(0, &["Forest", "Plains", "Swamp", "Island", "Lightning Bolt", "Counterspell", "Forest", "Forest"])
+        .library(1, &["Island"; 6])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = g.card(0, "Test Bear", Zone::Hand);
+    let bear_def = g.obj(bear).def;
+    g.choose(Choice::Cast(g.card(0, "Brainstorm", Zone::Hand)));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseHandCard));
+    g.choose(Choice::Card(bear));
+    g.choose(Choice::Card(g.card(0, "Mountain", Zone::Hand)));
+    assert_eq!(g.clouds().len(), 1, "the Brainstorm cloud");
+    g.choose(Choice::Ability(g.card(0, "Polluted Delta", Zone::Battlefield), engine::db::AbilitySlot::Activated(0)));
+    for _ in 0..40 {
+        if g.player(0).graveyard.iter().any(|&c| g.db().def(g.obj(c).def).name == "Polluted Delta") && g.stack().is_empty() && g.kind() == Some(DecisionKind::Priority) {
+            break;
+        }
+        let d = g.pending_decision().unwrap();
+        let c = d.options.iter().find(|o| !matches!(o.choice, Choice::Pass)).map_or(d.options[0].choice, |o| o.choice);
+        let c = if d.kind == DecisionKind::Priority { Choice::Pass } else { c };
+        g.choose(c);
+    }
+    g.check_invariants().unwrap();
+    g.check_knowledge().unwrap();
+    (g, bear_def)
+}
+
+#[test]
+fn hidden_decklists_keep_a_cloud_over_the_whole_hand_and_library() {
+    let (open, _) = bear_brainstormed_then_shuffled(false);
+    assert!(open.clouds().is_empty(), "open decklists: the cloud over hand and library says nothing: {:?}", open.clouds());
+    let (g, bear) = bear_brainstormed_then_shuffled(true);
+    assert_eq!(g.clouds().len(), 1, "{:?}", g.clouds());
+    let k = &g.clouds()[0];
+    assert_eq!((k.viewer, k.owner, k.hand, k.library), (1, 0, true, true));
+    assert_eq!(k.defs, vec![bear]);
+    // Every world of P1's keeps the Bear in P0's hand or library.
+    for s in 0..100 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(s));
+        d.check_invariants().unwrap();
+        d.check_knowledge().unwrap();
+        assert!(!slots_with(&d, 0, bear).is_empty(), "world {s}: the Bear left P0's hand and library");
+    }
+}
+
+use engine::az::encode::{bag, glob, NUM_FEATURES, O_BAGS, O_GLOBALS};
+use engine::az::hidden_decks::{check_sample, DeckPrior, DeckWant, TablePrior};
+use engine::az::{MtgAz, MtgSpec};
+use zero_search::game::SearchGame;
+
+fn az_enc(a: &MtgAz, v: usize) -> Vec<f32> {
+    let mut x = vec![0.0; NUM_FEATURES];
+    a.encode(v, &mut x);
+    x
+}
+
+fn az_legal(a: &MtgAz) -> Vec<u16> {
+    let mut l = Vec::new();
+    a.legal_actions(&mut l);
+    l
+}
+
+/// Mid-game positions (turn 2 or later) of cube games with hidden decklists (random play; one
+/// every ~`every` decisions), `n` of them.
+fn hidden_positions(n: usize, every: u32, seed: u64) -> Vec<MtgAz> {
+    let sp = MtgSpec::parse(r#"{"hidden_decklists": true}"#).unwrap();
+    let mut rng = Rng::new(seed);
+    let mut out = Vec::new();
+    let mut s = 0;
+    while out.len() < n {
+        let mut a = MtgAz::new_game(&sp, 2, seed * 1000 + s).unwrap();
+        s += 1;
+        let mut keys = Vec::new();
+        while a.to_move().is_some() && out.len() < n {
+            if a.g.turn().number >= 2 && rng.below(every) == 0 {
+                out.push(a.clone());
+            }
+            let l = az_legal(&a);
+            a.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+        }
+    }
+    out
+}
+
+/// Player `p`'s cards in the game, by card (sorted): their starting deck's (`MtgAz::g`'s objects
+/// are the two decks first, P0's then P1's).
+fn deck_cards(a: &MtgAz, p: u8) -> Vec<u16> {
+    let n0: usize = a.m.decks[0].iter().map(|&c| c as usize).sum();
+    let n1: usize = a.m.decks[1].iter().map(|&c| c as usize).sum();
+    let r = if p == 0 { 0..n0 } else { n0..n0 + n1 };
+    let mut v: Vec<u16> = r.map(|i| engine::az::sample::card_of(&a.g, CardIdx::new(i as u32))).collect();
+    v.sort_unstable();
+    v
+}
+
+/// The cards the viewer knows of `o`'s deck (every deck card it knows exactly, by card, and its
+/// clouds' identities): what every world's deck of `o`'s must hold.
+fn shown_of(a: &MtgAz, viewer: u8) -> Vec<u16> {
+    let o = 1 - viewer;
+    let g = &a.g;
+    let n0: usize = a.m.decks[0].iter().map(|&c| c as usize).sum();
+    let n1: usize = a.m.decks[1].iter().map(|&c| c as usize).sum();
+    let r = if o == 0 { 0..n0 } else { n0..n0 + n1 };
+    let mut v: Vec<u16> = r.map(|i| CardIdx::new(i as u32)).filter(|&c| g.knows(viewer, c)).map(|c| engine::az::sample::card_of(g, c)).collect();
+    for k in g.clouds().iter().filter(|k| k.viewer == viewer && k.owner == o) {
+        v.extend(k.defs.iter().map(|&d| g.db().def(d).card_def(d)));
+    }
+    v.sort_unstable();
+    v
+}
+
+fn holds(big: &[u16], small: &[u16]) -> bool {
+    let mut b = big.to_vec();
+    small.iter().all(|d| match b.binary_search(d) {
+        Ok(i) => {
+            b.remove(i);
+            true
+        }
+        Err(_) => false,
+    })
+}
+
+/// ENGINE.md 102.1's constraints, world by world: every card the viewer knows stays where it is,
+/// the opponent's sampled deck has the public size and holds every card the viewer has seen (with
+/// copies), the viewer's own cards are untouched; the viewer's view, legal actions (when it
+/// decides) and whole encoding are those of the real game; and most worlds change which cards
+/// make up the opponent's deck (the deal is not the real deck's).
+#[test]
+fn hidden_decklist_worlds_hold_what_the_viewer_saw_and_deal_the_rest() {
+    let pos = hidden_positions(60, 30, 102);
+    let mut zr = zero_search::rng::Rng::new(102);
+    let (mut worlds, mut other_deck) = (0, 0);
+    for a in &pos {
+        let mover = a.to_move().unwrap() as u8;
+        for viewer in [mover, 1 - mover] {
+            let o = 1 - viewer;
+            let shown = shown_of(a, viewer);
+            let (real, mine, x, view) = (deck_cards(a, o), deck_cards(a, viewer), az_enc(a, viewer as usize), a.g.view_of(viewer));
+            for _ in 0..6 {
+                let mut d = a.clone();
+                d.determinize(viewer as usize, &mut zr);
+                d.g.check_invariants().unwrap();
+                d.g.check_knowledge().unwrap();
+                for (i, ob) in a.g.objs().iter().enumerate() {
+                    let c = CardIdx::new(i as u32);
+                    if a.g.knows(viewer, c) {
+                        assert_eq!(ob.def, d.g.obj(c).def, "a card P{viewer} knows was resampled");
+                    }
+                }
+                let world = deck_cards(&d, o);
+                assert_eq!(world.len(), real.len(), "the deck's size");
+                assert!(holds(&world, &shown), "the world's deck lacks a card P{viewer} saw");
+                assert_eq!(deck_cards(&d, viewer), mine, "P{viewer}'s own cards");
+                assert_eq!(d.m.deck(o), world, "the match's deck of P{o} is the world's");
+                assert_eq!(d.g.view_of(viewer), view, "P{viewer}'s view");
+                if viewer == mover {
+                    assert_eq!(az_legal(&d), az_legal(a), "the decider's actions");
+                }
+                assert_eq!(az_enc(&d, viewer as usize), x, "P{viewer}'s encoding");
+                worlds += 1;
+                other_deck += (world != real) as u32;
+            }
+        }
+    }
+    println!("{} positions, {worlds} worlds, {other_deck} with another deck", pos.len());
+    assert!(other_deck * 10 > worlds * 9, "the deal changes the deck: {other_deck} of {worlds}");
+}
+
+/// No encoding or option set tells the opponent's unseen list (ENGINE.md 102.1): the bags of
+/// the opponent's unseen cards and of their pool, and their sideboard's size, are zero for both
+/// viewers (with open decklists the same games fill them); extreme worlds (a tilt of 10^6 on one
+/// card, so nearly every unseen card is that card) still encode as the real game and keep the
+/// decider's actions.
+#[test]
+fn no_encoding_or_option_tells_an_unseen_decklist() {
+    let pos = hidden_positions(40, 30, 1020);
+    let mut zr = zero_search::rng::Rng::new(1020);
+    let row = |x: &[f32], b: usize| x[O_BAGS + b * engine::az::encode::D..O_BAGS + (b + 1) * engine::az::encode::D].iter().any(|&f| f != 0.0);
+    let mut extreme = 0;
+    for a in &pos {
+        let mover = a.to_move().unwrap();
+        for v in 0..2usize {
+            let x = az_enc(a, v);
+            assert!(!row(&x, bag::OPP_HIDDEN) && !row(&x, bag::OPP_POOL), "P{v}: the opponent's unseen cards or pool are encoded");
+            assert_eq!(x[O_GLOBALS + 64 + glob::SIDEBOARD], 0.0, "P{v}: the opponent's sideboard size is encoded");
+            for &star in &[a.g.db().id("Lightning Bolt").unwrap(), a.g.db().id("Forest").unwrap()] {
+                let mut d = a.clone();
+                d.determinize_deck_tilted(v, &mut zr, &|c| if c == star { 1e6 } else { 1.0 });
+                assert_eq!(az_enc(&d, v), x, "P{v}'s encoding in an extreme world");
+                if v == mover {
+                    assert_eq!(az_legal(&d), az_legal(a), "the decider's actions in an extreme world");
+                }
+                extreme += 1;
+            }
+        }
+    }
+    // The control: the same games with open decklists show the opponent's unseen cards and pool.
+    let sp = MtgSpec::parse("{}").unwrap();
+    let a = MtgAz::new_game(&sp, 2, 1020 * 1000).unwrap();
+    let x = az_enc(&a, 0);
+    assert!(row(&x, bag::OPP_HIDDEN) && row(&x, bag::OPP_POOL), "open decklists encode them");
+    println!("{} positions, {extreme} extreme worlds", pos.len());
+}
+
+/// zero-core's child signature (ENGINE.md 10): two worlds a viewer deals with hidden decklists,
+/// played with the same actions, stay indistinguishable to it - the same view and encoding -
+/// while their keys, next decider and legal actions agree.
+#[test]
+fn hidden_decklist_worlds_stay_indistinguishable_while_keys_agree() {
+    let pos = hidden_positions(60, 30, 1021);
+    let mut rng = Rng::new(1021);
+    let (mut steps, mut split) = (0, 0);
+    for a in &pos {
+        let v = a.to_move().unwrap();
+        let mut x = a.clone();
+        x.determinize(v, &mut zero_search::rng::Rng::new(rng.next_u64()));
+        let mut y = a.clone();
+        y.determinize(v, &mut zero_search::rng::Rng::new(rng.next_u64()));
+        for _ in 0..25 {
+            let (lx, ly) = (az_legal(&x), az_legal(&y));
+            if x.to_move() != y.to_move() || lx != ly {
+                assert!(!(x.to_move() == Some(v) && y.to_move() == Some(v)), "the viewer's options differ");
+                split += 1;
+                break;
+            }
+            assert_eq!(x.g.view_of(v as u8), y.g.view_of(v as u8), "same keys, different views");
+            assert_eq!(az_enc(&x, v), az_enc(&y, v), "same keys, different encodings");
+            if x.to_move().is_none() {
+                break;
+            }
+            let act = lx[rng.below(lx.len() as u32) as usize];
+            let (mut kx, mut ky) = (Vec::new(), Vec::new());
+            x.step(act, &mut kx).unwrap();
+            y.step(act, &mut ky).unwrap();
+            steps += 1;
+            if kx != ky {
+                split += 1;
+                break;
+            }
+        }
+    }
+    println!("{} positions, {steps} steps in step, {split} split by keys or options", pos.len());
+    assert!(steps > 200, "{steps}");
+}
+
+/// The stub prior's contract (ENGINE.md 102.1): exactly n cards holding the shown ones, every
+/// other card in the support; never a failure (n shown, more shown lands than its target); a
+/// revealed companion's condition kept; a tilt of 1 everywhere is the untilted deal draw for draw;
+/// a sharp tilt concentrates the fill.
+#[test]
+fn the_table_prior_meets_its_contract() {
+    let db = engine::db::CardDb::eoe();
+    let p = TablePrior::of(db);
+    let mut rng = Rng::new(7);
+    let forest = db.id("Forest").unwrap();
+    let spells: Vec<u16> = p.support().iter().copied().filter(|&d| !db.def(d).is(engine::db::types::LAND)).collect();
+    for case in 0..300u64 {
+        let k = (case % 41) as usize;
+        let mut shown: Vec<u16> = (0..k).map(|i| if case % 3 == 0 && i < 25 { forest } else { spells[rng.below(spells.len() as u32) as usize] }).collect();
+        shown.sort_unstable();
+        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None };
+        let s = p.sample(&want, &mut rng);
+        check_sample(&*p, &want, &s).unwrap();
+        let lands = s.deck.iter().filter(|&&d| db.def(d).is(engine::db::types::LAND)).count();
+        let shown_lands = shown.iter().filter(|&&d| db.def(d).is(engine::db::types::LAND)).count();
+        assert!(lands == 17.max(shown_lands).min(40 - (k - shown_lands)), "lands {lands} for {k} shown ({shown_lands} lands)");
+    }
+    // A tilt of 1 is the untilted deal, draw for draw.
+    let shown = vec![forest; 3];
+    let one = |_: u16| 1.0;
+    let w1 = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: Some(&one) };
+    let w0 = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None };
+    assert_eq!(p.sample(&w1, &mut Rng::new(9)), p.sample(&w0, &mut Rng::new(9)));
+    // A sharp tilt: the starred spell takes most of the fill; the expected fill is the baseline.
+    let star = spells[spells.len() / 2];
+    let sharp = |d: u16| if d == star { 1e4 } else { 1.0 };
+    let ws = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: Some(&sharp) };
+    let (mut tilted, mut plain) = (0usize, 0usize);
+    for s in 0..200 {
+        tilted += p.sample(&ws, &mut Rng::new(s)).deck.iter().filter(|&&d| d == star).count();
+        plain += p.sample(&w0, &mut Rng::new(s)).deck.iter().filter(|&&d| d == star).count();
+    }
+    let e = p.expected_fill(&w0)[star as usize];
+    assert!((plain as f64 / 200.0 - e).abs() < 0.1 + 4.0 * (e / 200.0).sqrt(), "plain {plain} vs expected {e}");
+    assert!(tilted > 200 * 15, "tilted {tilted}");
+    // A revealed companion (cube: Lurrus, every permanent of mana value 2 or less): kept.
+    let cube = engine::db::CardDb::cube();
+    let lurrus = cube.id("Lurrus of the Dream-Den").unwrap();
+    let pc = TablePrior::of(cube);
+    for s in 0..100 {
+        let want = DeckWant { db: cube, n: 40, shown: &[], companion: Some(lurrus), tilt: None };
+        let x = pc.sample(&want, &mut Rng::new(s));
+        check_sample(&*pc, &want, &x).unwrap();
+        assert_eq!(x.sideboard, vec![lurrus]);
+    }
+}
+
+/// The spec switch (ENGINE.md 102.1): off by default; best-of-one only, not with constructed
+/// decks; on, the game hides the decks (`hidden_decks`, `hidden_decklists`), each deck has its
+/// prior and the names a player may name for the other's deck are its support.
+#[test]
+fn the_hidden_decklists_switch() {
+    assert!(!MtgSpec::parse("{}").unwrap().hidden_decklists);
+    assert!(MtgSpec::parse(r#"{"hidden_decklists": true, "format": "bo3"}"#).is_err());
+    assert!(MtgSpec::parse(r#"{"hidden_decklists": 1}"#).is_err());
+    let sp = MtgSpec::parse(r#"{"hidden_decklists": true}"#).unwrap();
+    let a = MtgAz::new_game(&sp, 2, 5).unwrap();
+    assert!(a.g.spec().hidden_decks && a.g.spec().hidden_decklists && a.hidden_decklists());
+    for p in 0..2 {
+        let prior = a.m.deck_priors[p].as_ref().unwrap();
+        assert_eq!(prior.name(), "table");
+        assert!(deck_cards(&a, p as u8).iter().all(|d| prior.support().binary_search(d).is_ok()));
+    }
+    let off = MtgAz::new_game(&MtgSpec::parse("{}").unwrap(), 2, 5).unwrap();
+    assert!(!off.g.spec().hidden_decklists && off.m.deck_priors.iter().all(|p| p.is_none()));
+    // The same game but for the switch: the same decks, the same first decision.
+    assert_eq!(deck_cards(&off, 0), deck_cards(&a, 0));
+    assert_eq!(deck_cards(&off, 1), deck_cards(&a, 1));
+}
+
+// ---- The sealed prior (ENGINE.md 102.6) ----
+
+/// The sealed prior's contract on real builds of S2's sealed spec (ENGINE.md 102.6): for shown
+/// sets R drawn from a real deck (0 to 40 of its cards), the sampled deck has 40 cards, holds R,
+/// every card in the support, and its nonbasic cards and the sideboard make a pool of the
+/// collation's size; mostly in R's colours; a tilt of 1 is the untilted deal draw for draw.
+#[test]
+fn the_sealed_prior_meets_its_contract() {
+    use engine::az::hidden_decks::SealedPrior;
+    use engine::az::sealed::{collation::Collation, SealedSpec};
+    let db = engine::az::sealed::db();
+    let basics = engine::az::pools::basic_ids(db);
+    let spec = SealedSpec::parse(&serde_json::json!({"set": "eoe", "collation": "arena"})).unwrap();
+    let prior = SealedPrior::new(Collation::Arena, 6, spec.builder);
+    let mut rng = Rng::new(1026);
+    let (mut covered, mut two) = (0, 0);
+    for seed in 0..120u64 {
+        let real = spec.seat(seed, 0).unwrap().0.deck;
+        let k = (seed % 41) as usize;
+        let mut shown: Vec<u16> = (0..k).map(|i| real[(i * 7 + seed as usize) % real.len()]).collect();
+        shown.sort_unstable();
+        // (a multiset inside the real deck: drop extra copies)
+        let mut left = real.clone();
+        shown.retain(|d| match left.iter().position(|x| x == d) {
+            Some(i) => {
+                left.remove(i);
+                true
+            }
+            None => false,
+        });
+        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None };
+        let s = prior.sample(&want, &mut rng);
+        check_sample(&prior, &want, &s).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+        let nonbasic = s.deck.iter().filter(|d| !basics.contains(d)).count();
+        assert_eq!(nonbasic + s.sideboard.len(), 78, "seed {seed}: a pool of six Arena boosters");
+        let cols = |v: &[u16]| v.iter().filter(|&&d| !db.def(d).is(engine::db::types::LAND)).fold(0u8, |m, &d| m | db.def(d).colors) & 31;
+        // (R of two colours: the deck stays in them, a splash at most)
+        if k >= 8 && cols(&shown).count_ones() == 2 {
+            two += 1;
+            covered += (cols(&s.deck).count_ones() <= 3) as u32;
+        }
+        let one = |_: u16| 1.0;
+        let w1 = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: Some(&one) };
+        assert_eq!(prior.sample(&w1, &mut Rng::new(seed)), prior.sample(&want, &mut Rng::new(seed)), "seed {seed}: a tilt of 1");
+    }
+    println!("{two} requests with 8+ shown cards of two colours, {covered} decks in those and a splash at most");
+    assert!(two > 20 && covered * 10 >= two * 9, "{covered} of {two}");
+}
+
+/// S2's `"sealed"` spec hides the decklists (ENGINE.md 102.6), each seat's deck dealt from the
+/// sealed prior: worlds hold what the viewer saw, keep its view, actions and encoding, and change
+/// the deck; `"hidden_decklists": false` keeps S2's open decklists.
+#[test]
+fn the_sealed_spec_deals_hidden_decks_from_the_sealed_prior() {
+    let open = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "arena"}, "hidden_decklists": false}"#).unwrap();
+    assert!(!open.hidden_decklists);
+    let sp = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "paper"}}"#).unwrap();
+    assert!(sp.hidden_decklists);
+    let mut rng = Rng::new(1027);
+    let mut zr = zero_search::rng::Rng::new(1027);
+    let (mut worlds, mut other) = (0, 0);
+    for s in 0..6u64 {
+        let mut a = MtgAz::new_game(&sp, 2, 1027 + s).unwrap();
+        assert!(a.m.deck_priors.iter().all(|p| p.as_ref().is_some_and(|p| p.name() == "sealed")));
+        let mut keys = Vec::new();
+        while a.to_move().is_some() {
+            if a.g.turn().number >= 3 && rng.below(60) == 0 {
+                let v = a.to_move().unwrap() as u8;
+                let (shown, real, x) = (shown_of(&a, v), deck_cards(&a, 1 - v), az_enc(&a, v as usize));
+                for _ in 0..2 {
+                    let mut d = a.clone();
+                    d.determinize(v as usize, &mut zr);
+                    let world = deck_cards(&d, 1 - v);
+                    assert!(world.len() == real.len() && holds(&world, &shown), "game {s}: the world's deck");
+                    assert_eq!(d.g.view_of(v), a.g.view_of(v));
+                    assert_eq!(az_legal(&d), az_legal(&a));
+                    assert_eq!(az_enc(&d, v as usize), x);
+                    worlds += 1;
+                    other += (world != real) as u32;
+                }
+            }
+            let l = az_legal(&a);
+            a.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+        }
+    }
+    println!("{worlds} sealed worlds, {other} with another deck");
+    assert!(worlds >= 20 && other == worlds, "{worlds} {other}");
+}
+
+// ---- The K-sample deal's cost (ENGINE.md 102.8) ----
+
+/// The per-simulation cost of a hidden-decklist world on sealed positions (ENGINE.md 102.8;
+/// `cargo test --release -p engine --test hidden deal_cost -- --ignored --nocapture`): for each
+/// position, 128 deals as a search's simulations make them (clone + `determinize`), with K = 0
+/// (the prior sampled at every deal) and K = 32 (its first deal fills the memo), the mean per deal;
+/// and the sealed prior's parts (an arena and a paper pool, a build).
+#[test]
+#[ignore]
+fn deal_cost() {
+    use engine::az::sealed::{builder, collation::Collation, generated_pool, SealedSpec};
+    use std::time::Instant;
+    let db = engine::az::sealed::db();
+    let spec = SealedSpec::parse(&serde_json::json!({"set": "eoe", "collation": "arena"})).unwrap();
+    for c in [Collation::Arena, Collation::Paper] {
+        let t = Instant::now();
+        for s in 0..50 {
+            std::hint::black_box(generated_pool(db, c, 6, s).unwrap());
+        }
+        println!("{c:?} pool: {:.1} us", t.elapsed().as_secs_f64() * 1e6 / 50.0);
+    }
+    let pool = generated_pool(db, Collation::Arena, 6, 1).unwrap();
+    let t = Instant::now();
+    for s in 0..200 {
+        std::hint::black_box(builder::build(db, &pool, &spec.builder, &mut Rng::new(s)));
+    }
+    println!("a build: {:.1} us", t.elapsed().as_secs_f64() * 1e6 / 200.0);
+    for coll in ["arena", "paper"] {
+        let mut rng = Rng::new(1028);
+        let mut pos = Vec::new();
+        let sp = MtgSpec::parse(&format!(r#"{{"sealed": {{"set": "eoe", "collation": "{coll}"}}}}"#)).unwrap();
+        for s in 0..8u64 {
+            let mut a = MtgAz::new_game(&sp, 2, 1028 + s).unwrap();
+            let mut keys = Vec::new();
+            while a.to_move().is_some() && pos.len() < 5 * (s as usize + 1) {
+                if a.g.turn().number >= 3 && rng.below(20) == 0 {
+                    pos.push(a.clone());
+                }
+                let l = az_legal(&a);
+                a.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+            }
+        }
+        // (K = 32 with one deal memo across the positions: its pool bank built once, as within a
+        // game, so a position's first deal costs K conditioned builds; 'fresh': a memo per position.)
+        let shared = engine::az::hidden_decks::DealCache::new(32, 77);
+        for (k, label) in [(0usize, "fresh"), (32, "fresh"), (32, "bank built")] {
+            let (mut total, mut first) = (0.0, 0.0);
+            for a in &pos {
+                let mut b = a.clone();
+                b.m.deal = if label == "bank built" { shared.clone() } else { engine::az::hidden_decks::DealCache::new(k, 77) };
+                let v = b.to_move().unwrap();
+                let mut zr = zero_search::rng::Rng::new(5);
+                for i in 0..128 {
+                    let t = Instant::now();
+                    let mut d = b.clone();
+                    d.determinize(v, &mut zr);
+                    std::hint::black_box(&d);
+                    let e = t.elapsed().as_secs_f64();
+                    total += e;
+                    if i == 0 {
+                        first += e;
+                    }
+                }
+            }
+            let n = pos.len() as f64;
+            println!("{coll} K = {k} ({label}): {} positions, {:.1} us per deal over 128 (the first {:.1} us)", pos.len(), total * 1e6 / (n * 128.0), first * 1e6 / n);
+        }
+    }
+}
+
+/// The K-sample deal (ENGINE.md 102.8): a world depends only on its generator and the viewer's
+/// information - the same with a warm memo, a cold one or a clone's - and the worlds of one
+/// request hold at most K decks (each still holding what the viewer saw); K = 0 samples afresh.
+#[test]
+fn the_k_sample_deal_is_a_function_of_the_seed_and_the_information() {
+    let sp = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "paper"}, "deal_samples": 4}"#).unwrap();
+    assert_eq!(sp.deal_samples, 4);
+    assert_eq!(MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "paper"}}"#).unwrap().deal_samples, 32);
+    let mut rng = Rng::new(1029);
+    let mut a = MtgAz::new_game(&sp, 2, 1029).unwrap();
+    let mut keys = Vec::new();
+    while a.g.turn().number < 4 && a.to_move().is_some() {
+        let l = az_legal(&a);
+        a.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+    }
+    let v = a.to_move().unwrap();
+    let shown = shown_of(&a, v as u8);
+    let mut decks = Vec::new();
+    for s in 0..40u64 {
+        let mut x = a.clone();
+        x.determinize(v, &mut zero_search::rng::Rng::new(s));
+        // a cold memo (a fresh game state with the same information) deals the same world
+        let mut y = a.clone();
+        y.m.deal = engine::az::hidden_decks::DealCache::new(4, a.m.deal.salt);
+        y.determinize(v, &mut zero_search::rng::Rng::new(s));
+        assert_eq!(x.g.fingerprint(), y.g.fingerprint(), "world {s}: the memo changed the world");
+        let d = deck_cards(&x, 1 - v as u8);
+        assert!(holds(&d, &shown));
+        if !decks.contains(&d) {
+            decks.push(d);
+        }
+    }
+    assert!(decks.len() <= 4 && decks.len() >= 2, "{} decks for K = 4", decks.len());
+}

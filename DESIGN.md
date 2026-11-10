@@ -760,6 +760,13 @@ makes a spec playing a pool's human build or our build of it; `FUZZ_POOL=sealed`
 find engine bugs, a payment panic and two loops that don't end, ENGINE.md 101.7). Next: hidden
 decklists (the encoding owner's; ENGINE.md 101.5 lists what the deal's prior needs), then S3.
 
+**Hidden decklists (2026-11-09, branch `eoe-hidden-decks`; docs/ENGINE.md 102):** the spec key
+`"hidden_decklists"` (best-of-one) hides each deck from the other player: `determinize` deals the opponent's whole
+unseen deck from a prior conditioned on what the viewer has seen (a `DeckPrior` per seat: a stub over the set's
+table until S2's sealed builder plugs in), and no encoding shows an unseen decklist (checked by the public-state
+gate, `tests/hidden.rs` and `FUZZ_HIDDEN_DECKS=1`). The deck reader's target (`aux` `deck`, the opponent's unseen
+cards) and its declared inputs (`mtgz/az/deck_reader_v6.json`) are in place for zero-core's reader.
+
 **Yardsticks on EoE (2026-11-09, branch `eoe-bot`; ENGINE.md 103):** the heuristic reads station,
 warp, void and Landers (general rules; `Heuristic::m7c` keeps the old policy): 99.4% / 99.8% against
 random on random / two-colour EoE decks, at most 0.1% turn-limit draws, 57% against the M7c policy; the

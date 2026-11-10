@@ -37,6 +37,12 @@ pub struct GameSpec {
     /// on a deck are then asked regardless (the companion reveal), and a
     /// name is chosen among the names the chooser can know (`known_pools`).
     pub hidden_decks: bool,
+    /// Hidden decklists (EoE sealed, ENGINE.md 102; needs `hidden_decks`):
+    /// the other player knows nothing of a player's deck but the format and
+    /// what it has seen. Clouds over a player's whole hand and library are
+    /// kept (they record shown cards still in the deck), and the other
+    /// player's sideboard size is hidden (out of `view_of` and the encoding).
+    pub hidden_decklists: bool,
 }
 
 impl Default for GameSpec {
@@ -51,6 +57,7 @@ impl Default for GameSpec {
             log: false,
             chooser: None,
             hidden_decks: false,
+            hidden_decklists: false,
         }
     }
 }
@@ -1100,6 +1107,9 @@ impl Game {
         if spec.chooser.is_some_and(|p| p > 1) {
             return Err("chooser must be player 0 or 1".into());
         }
+        if spec.hidden_decklists && !spec.hidden_decks {
+            return Err("hidden_decklists needs hidden_decks (ENGINE.md 102)".into());
+        }
         // (Per-object turn numbers are u16: `Obj::entered`, `pw_turn`,
         // marks; ENGINE.md 46.)
         if spec.max_turns > u16::MAX as u32 {
@@ -2069,7 +2079,8 @@ impl Game {
     }
 
     /// How many tokens `controller` creates instead of n ("twice that many
-    /// of those tokens", CR 614.1a; at most 64), and no more than leave them
+    /// of those tokens", CR 614.1a; any number: docs/shortcuts.md 24.7.4),
+    /// and no more than leave them
     /// 96 permanents (an engine limit: the `MY_PERM` / `OPP_PERM` action
     /// slots; ENGINE.md 26.11) with room for every card they own to enter
     /// too (ENGINE.md 30: a board of tokens, then a spell).
@@ -2080,10 +2091,8 @@ impl Game {
             have += 1;
             let f = self.abilities(c).token_factor;
             if f > 1 {
-                // (Exact: the product, then the 64 of docs/shortcuts.md
-                // 24.7.4 (workstream A); a saturated product is past 64
-                // too.)
-                n = n.saturating_mul(f as u32).min(64);
+                // (Saturating at u32::MAX: past the room below either way.)
+                n = n.saturating_mul(f as u32);
             }
         }
         // (The room left: at least 0.)

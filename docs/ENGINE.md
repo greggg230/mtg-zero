@@ -503,7 +503,10 @@ at once (704.5e, section 26.4).
   (`Game::redeal`), then runs this one. **Sideboards** (M8a, section 35.5) are hidden from the
   other player but for a revealed companion (public, a card in no zone); with open decklists
   `determinize` keeps them (no card of a sideboard can enter the game but a revealed
-  companion), with hidden decks the opponent's is the rest of their sampled pool.
+  companion), with hidden decks the opponent's is the rest of their sampled pool. **Hidden decklists**
+  (EoE sealed, section 102, `"hidden_decklists"`) hide the whole deck: the match's `determinize` samples the
+  opponent's deck from a prior conditioned on what the viewer has seen (`az/hidden_decks.rs`), deals it
+  (`Game::redeal`), then runs this one; clouds over a whole hand and library are kept there.
 * **Cards exiled face down** (M7c tail part 3, section 30.2): `Zone::FaceDown` is hidden like a
   library. A card moved there keeps its knowledge bits and is known to its owner, who saw it go
   (a look keyed `KEY_LOOK`, private; a hand exiled face down; a hideaway pile); a cloud whose
@@ -20903,6 +20906,400 @@ onto the battlefield from the hand staying there while `Task::EnterAura` asks, s
 re-deals it and the refreshed question has no option (hidden.rs `refresh_pending`; workstream D's
 final round: the seed now plays another game, the bug is still there).
 
+#### 100.4.6 B3: the last of mana and payment (branch `eoe-b3-pay`, from `eoe-base` e164d69)
+
+**Why.** 100.4.5's open list (the audit's F4, `docs/faithfulness_audit.md` 5.4) and the payment's
+u8 arithmetic F7 left to workstream B. Tests: `engine/tests/rules_payment_b.rs` (section
+"100.4.6", with a table of its own, `b3_db`: the cube, the shared test cards and B3's, so the
+cube's fuzz pool and digests keep theirs); each failed before its fix.
+
+##### N10: a source that only removes counters, every use
+
+Pentad Prism's "Remove a charge counter: Add one mana of any color" was usable at most 32 times
+in a payment (`.min(32)`), and when it could be used once it took its card as a tap would.
+
+* `Class::reuse` is a `num::Count`: once per n counters, all of them. Such an ability (no {T},
+  no sacrifice, exile or discard of its card) has `Class::res` 0: it uses nothing of its card,
+  so it combines with each other source of the card (tapped for improvise, its own {T}
+  abilities), and `PayMana::uses` counts the picks of that source, not of its card.
+* The feasibility (`cands`) gives its uses ways of their own, or fixed units when they take
+  nothing a payment shares (a several-mana one, each use its whole production: one use was
+  counted before), never one of its card's alternatives. It leaves out only the uses no payment
+  can spend (`UseCap`): in a payment that uses no source it could leave out, every use has a
+  mana spent, one per need, so the uses are at most the needs: the cost's, the picked mana
+  costs, and those the classes' abilities may add (an ability with a mana cost makes `MADE`
+  mana, which pays only the cost, so it is used at most the cost's size times). `plain_cands`,
+  built once per priority decision for every cost, uses a cost size of 64 and says when it cut a
+  source (`Cands::cut`); a larger cost builds its own.
+* Counts that could wrap: `payable_within_n`'s groups of budgeted units (u8 -> u32),
+  `Budget::take` (in i64), `might_pay`'s total (u64).
+
+Test: `cr_122_1_pentad_prism_pays_with_every_charge_counter` (40 counters pay {40}, not {41};
+Walking Ballista cast for X = 20).
+
+##### 27.13.4, N8, 13.17: tap costs and the mana, as one search
+
+By CR 601.2g the mana abilities are activated before the costs are paid (601.2h), so a creature
+tapped or sacrificed for mana can't be tapped for crew, saddle, teamwork or "tap n untapped
+<permanents>", and one tapped for such a cost was never a mana source of it.
+
+* **`Keep::taps`** (`pay::TapsOwed`): a tap cost the payment must leave payable, its need
+  (power, or 1 per permanent) and its candidates. In the feasibility each candidate with a way
+  of making mana gets one more way, tapped for the cost (`Way::crew`, what it counts for; it
+  takes one of the shared taps when it is a Pollinator that could activate or a Lumberjack),
+  among its alternatives; a candidate with none counts at once. A leaf holds when the ways chosen
+  tap enough (`ways_payable`'s `crew`). Tapping for the cost takes no budget and only helps, so
+  it dominates "none" like a free way. A candidate a pick taps or sacrifices is out
+  (`pay_cands`).
+* **Teamwork** (`crew_mana_ok`): exact for any number of creatures (it tried the subsets of the
+  first 10 with mana abilities: N8). The creatures it taps are tapped before the spell's mana in
+  the engine's order; they become `Keep::committed` of the spell's payment (`pay_costs`), whose
+  classes leave out every source that taps or sacrifices one (`payment_classes`): the payment
+  offered a tapped creature's "sacrifice this: add" (13.17). `classes_without` keeps a source
+  that only removes counters and takes the Pollinators among the cards out of `POL_FOR`'s share
+  (and of the improvise and convoke members they split), as it did the Lumberjacks.
+* **Crew, saddle and "tap n untapped <permanents>" of an ability** (`Game::taps_for`): every
+  candidate counts (only those without a mana ability did when mana was owed: 27.13.4), and the
+  payment keeps the cost payable (`act_pay`, `cost_payable_with`). Urza, Lord High Artificer's
+  "Tap an untapped artifact you control: Add {U}" with priority now counts artifacts with mana
+  abilities too (`zero_mana_taps` is no longer read).
+* One such cost per payment: the lowering refuses an activated cost with two of crew, "tap n
+  untapped" and "tap X untapped" (`ActivationCost.crew(with another tap cost)`), and
+  `merge_costs` doesn't merge two.
+
+Tests: `cr_601_2h_a_rebel_with_a_mana_ability_pays_a_tap_cost` (Otharri, Suns' Glory's return
+with B3's Test Mana Rebel; with one land fewer it isn't offered),
+`cr_601_2h_teamwork_counts_every_creature_with_a_mana_ability` (ten Birds of Paradise, then two
+Llanowar Elves: We Say Thee Nay!'s teamwork taps the Elves),
+`cr_601_2g_a_creature_tapped_for_teamwork_pays_no_mana` (B3's Test Sac Elf).
+
+**Digests** (with N10, 27.13.4, N8, 13.17): full `02d4bccc94314d6d` -> `79935610b369fb77`,
+`DIGEST_ENCODING=0` `856218d6b081056c` -> `8ff7d319dba5da5d`: 6 of the 2,500 games change. Four
+(r 517, 905, 1678, 1867) by Urza, Lord High Artificer's "Tap an untapped artifact you control"
+with priority tapping an artifact with a mana ability, two (r 609, 1553) by Pentad Prism's counter
+uses combining with improvise tapping it (Kappa Cannoneer castable). `RULES_EPOCH` bumped; the
+Delver canary library's 60 spots reach their positions (`delver_rerecord.py check --stamp`).
+
+##### 13.3: a cost's source, per ability
+
+A cost that tapped, sacrificed, exiled or discarded its source excluded every mana ability of the
+source from paying its mana (`activate::mana_exclude`). CR 601.2g-h: the mana abilities come
+first, the cost after, so only those that conflict are out. `pay::SelfUse` (from `keep_for`,
+`Keep::self_use`) is what the cost takes of its source: it taps it, moves it (sacrifice, exile,
+discard), removes counters. `Game::classes_for_self_use` (applied by `can_pay_with`,
+`can_pay_without` and the payment's `payment_classes`) leaves out the source's sources that tap
+or move it when the cost taps it, that move it when the cost moves it (tapping a land for mana and
+then sacrificing it is one payment), and, for a source that removes the same counters, the uses
+past what the cost leaves (and, when the cost needs the source, the use whose last counter
+sacrifices it); a Pollinator or Lumberjack the cost taps no longer activates. `mana_exclude` now
+excludes no ability's source (its callers are unchanged).
+
+Test: `cr_601_2g_a_source_taps_for_mana_then_is_sacrificed_for_its_cost` (B3's Test Cycle Land,
+"{T}: Add {G}. {1}, Sacrifice this land: Draw a card", alone; Test Tap Draw Land's "{1}, {T}"
+needs another land).
+
+##### 13.16: Black Lotus delved in the payment it helps
+
+A source that sacrifices itself is in the graveyard before delve's cards are exiled (CR 601.2g
+before 601.2h); only one-mana ones (Lotus Petal) were delve or graveyard-exile sources.
+`pay::delve_source`: any that sacrifices itself with no mana cost of its own (one mana, several,
+Wizard's Rockets). `delve_sources` (delve's options, an escape's or "exile n cards from your
+graveyard" forced sources) takes them all; `delve_classes` (castability) gives a several-mana one
+delve's typeless unit with each production (`Class::delve`; a converter's way carries it, used when
+it converts); the payment activates a forced several-mana source first with each production that
+leaves the rest payable (asked when several do), and a forced Rockets as a pick of it.
+
+Test: `cr_702_66a_black_lotus_is_delved_in_the_payment_it_helps` (Treasure Cruise with the Lotus,
+an Island and three graveyard cards; with two it isn't castable).
+
+##### 24.7.4: tokens past 64
+
+`token_count` multiplied a creation and cut it at 64; `CreateTokensN` clamped its number to 64.
+Both now make any number, as many as the player's 96 permanents leave room for (the engine limit of
+docs/shortcuts.md 26.11.6, unchanged: the `MY_PERM` / `OPP_PERM` ids of every caller of
+`perm_action` would have to be paged first, A's note in 100.2). `CreateTokensN` with attacking
+tokens passes a u8 to `CreateTokensAttacking`: 255 or more make as many as any larger number, the
+room being at most 96 (a compile-time assert).
+
+Test: `cr_614_1a_doubled_tokens_past_sixty_four` (seven Exalted Sunborns and Eusocial Engineering:
+77 Robots, the room left; 64 before).
+
+**Digests** (with 13.3, 13.16, 24.7.4): full `79935610b369fb77` -> `3f49f29043418114`,
+`DIGEST_ENCODING=0` `8ff7d319dba5da5d` -> `27f42bffa609f282`: 16 of the 2,500 games change. In
+the ten inspected the first difference is 13.3: an ability whose cost taps its source (Abandoned
+Air Temple's "{3}{W}, {T}") now builds its classes with the source's member and then drops it, so
+the source's class sits at its first member and the payment's options come in another class order
+(the same payments), or a source's other uses now pay (Pyrite Spellbomb tapped by Urza for {U},
+then sacrificed for its "{1}, Sacrifice"). `RULES_EPOCH` bumped; the Delver canary library's 60
+spots reach their positions.
+
+##### The payment's numbers (F7's list, part)
+
+* **Life** (`Keep::life`, `PayMana::life_after`, `PayMana::phyrexian_life`, `db::Cost::life`): u32,
+  their sums in u64 (`PayMana::later_life`; `keep.life + phyrexian_life` and `phyrexian_life += 2k`
+  could wrap a u8), `budget` and the Phyrexian split compare in i64, and the life paid goes to
+  `lose_life` through `i32::try_from` (at most the life total: CR 119.4 was checked). "Pay X life"
+  (`x_range`) offers every X up to the life total (255 at most before); `life_later` adds X life
+  and Bolas's Citadel's mana value exactly (one of them is 0, CR 107.3b); `with_life` adds with a
+  checked add.
+* **`ManaCost::total`** is a u32: the u8 sum wrapped, so {250}{R}{R}{R}{R}{R}{R} read as a cost of
+  nothing. `mana_value` (of a printed cost) is a u8 by the lowering's bounds (`try_from`).
+* **The virtual pool's counts** (`vgroups`, `most_spent`, `singles_vm`, `PayMana::vm`,
+  `each_subset`, `masks_of`, `pool_rems`' groups): u32. The pool's and the picks' mana of a type
+  together passed a u8 (clamped at 255), and `most_spent`'s spend was cut to a u8 (`k as u8`).
+* **Not done** (open, with the design): the u8 parts of a `ManaCost`. X and taxes are added into
+  its u8 generic part (`act_mana_x`, `total_mana`, `ManaCost::plus` saturating), and `x_range`,
+  `mana_now`'s X and `choose_times` offer no value whose generic part would pass 255. Exact needs
+  the generic part (and the pips `plus` adds, multikicker's) widened to u64, `less_generic` and the
+  discounts in it, `need_of`'s count from the lowering's bounds, `PermKind::Airbent`'s copy, and
+  the encoding's `ctx::COST` read as before. The pool's u8 amounts and a production's (`ManaPool`,
+  `[u8; 6]`, `PerPermanent`'s and `SameTypeCounters`' `.min(255)`) are F7's (aborted past them).
+
+Tests: `cr_119_4_pay_x_life_past_255` (Toxic Deluge with 400 life: X = 400, 255 before),
+`pay::tests::cr_601_2h_the_payments_amounts_pass_255` (a cost of 256 symbols isn't zero; the
+pool's 200 {R} and a pick's 100 are 300 in the virtual pool). Digests unchanged.
+
+##### Not done in this session (left for the next pass)
+
+In the brief's order (100.4.4 and 100.4.5 have the earlier designs):
+
+* **N23** (Gene Pollinators of which only some are creatures, with a "whenever you tap a creature
+  for mana" bonus: `pol_classes`' assertion; which Pollinator taps in `finish_payment`;
+  `reserved_n`'s assertion). Found on the way: `pol_classes` gives no Pollinator a land-subtype
+  bonus ("whenever you tap a Forest for mana") when it is a land, and with a later tap cost
+  (`Keep::taps`, above) `finish_payment`'s "first ready" Pollinators may tap one the cost needs.
+  Exact: the actors grouped by the extra mana their tap adds (`extra_of`), a `POL_FOR` class per
+  group with its own shared-tap budget (`Budget::tap` per group; a source on an actor of another
+  group takes one of each), the group in the source's id (`Src::slot`; the classes are rebuilt from
+  the same state each step, so the numbering holds), and the actor of each pick a choice among its
+  group's (asked when they differ), recorded in `PayMana` for `finish_payment`. The single
+  `Budget::tap` LJ and POL classes share (`tap_limit`: the least share) is the same flaw.
+* **24.7.5k / 40.1** (retrace with another discard; with an alternative cost whose rest takes a hand
+  card, returns or sacrifices a permanent): `merge_costs` and `Game::keep_for` keep one reservation
+  (`Keep::sac`, `discard`, `exile`), and the budget one `sac` count. Exact: a list of reservations,
+  each a candidate set and a count, checked at a leaf of the search by a matching of the candidates
+  the chosen ways leave (Hall's condition over the reservations), and `pay_costs` asking them in
+  order. The same holds for a cost with a sacrifice and "tap n untapped" (`Keep::taps` lets one
+  permanent be both, the payment's `tap_candidates` excludes a sacrificed one: they agree only
+  without overlap).
+* **28.8.2k** (the colours spent: `ChooseColorsSpent`, `NUMBER` + the WUBRG mask): a new decision
+  kind of the encoding (D's); `record_converge` still counts the most colours.
+* **13.15** (chains of mana abilities with mana costs): `MADE` / `NOT_MADE` still forbid every chain;
+  `UseCap` (N10) relies on that rule (an ability with a mana cost pays only the cost) and must be
+  revisited with it.
+* **26.11.6** (96 permanents a player): unchanged; the payment's ids for sources past `MY_PERM`'s 96
+  come with the paging of every `perm_action` caller (A's note in 100.2).
+* **The u8 parts of a `ManaCost`** (above).
+
+#### 100.4.7 B4: the last of mana and payment (branch `eoe-b3-pay`, from 7ae9032)
+
+**Why.** 100.4.6's open list, in the brief's order. Tests: `engine/tests/rules_payment_b.rs`
+(section "100.4.7", with a table of its own, `b4_db`: the cube, the shared test cards, Gene
+Pollinator and B4's Pollinators of other kinds: a noncreature artifact, a Forest, a Rebel); each
+failed before its fix.
+
+##### N23: the actors of shared activations
+
+Gene Pollinator's "{T}, Tap an untapped permanent you control: Add one mana of any color" and Orcish
+Lumberjack's "{T}, Sacrifice a Forest: Add three mana" are sources on the permanent tapped or
+sacrificed, and the permanent whose ability it is (the actor) is tapped too. One count of
+Pollinators (`Class::share`, with `Class::taps`) stood for every actor, and the Lumberjacks shared
+the same `Budget::tap`: a "whenever you tap a creature for mana" bonus was a loud failure with
+Pollinators of which only some are creatures (`pol_classes`' assertion), no Pollinator got a
+land-subtype bonus when it was a land, an actor tapped for its own other mana ability (a Pollinator
+given Mm'menon's "{T}: Add {U}", one that is a Forest) or for convoke (a Lumberjack) still
+activated, one Lumberjack and two Pollinators allowed one activation in all, a later "tap X
+artifacts" with Pollinators of which only some are artifacts was a loud failure (`reserved_n`), and
+the Pollinator, Lumberjack or Squandered Resources that activated was the first ready one
+(`finish_payment`, `activate_sac_for`), which could be the one a later tap cost needed.
+
+* **Pools** (`Class::pool`, `Class::actors`). The actors are grouped by what their activation is:
+  for Pollinators the mana and filter and the bonus their own tap adds (CR 106.12: the permanent
+  whose mana ability has {T} is the one tapped for mana, so Badgermole Cub's {G} and Nissa's "Forest"
+  {G} follow the actor; `Game::tap_bonus`), for Lumberjacks the productions with that bonus and the
+  permanents they may sacrifice (`Game::sac_groups`; a Lumberjack that is a Forest may sacrifice
+  itself). Each group of actors that tap is a pool, numbered per `mana_classes` call; its sources
+  carry the pool in their id (`Src::g`), so one permanent is a source of each pool that may tap or
+  sacrifice it (asked which by its own id, `PayMana::which`, when it stands for several; an
+  `LJ_FOR` source with another of its slot on the permanent goes by the permanent's own id too).
+  Squandered Resources' kind taps nothing: one source per land, its `actors` the permanents whose
+  ability may sacrifice it, no pool.
+* **The feasibility** (`pay::PoolCtx`). Each activation of a pool needs one of its actors that
+  nothing else taps. Actors alike in their pools and in whether a later "tap X untapped
+  <permanents>" needs them (a signature) do the same, so the search counts activations per pool and
+  the actors tapped otherwise per signature: a way that taps its card, when the card is an actor
+  (its own mana abilities, tapped for a Pollinator's ability, improvise, convoke, Urza's tap, a later
+  tap cost's `Way::crew`), takes one from its signature (`Way::sig`); a sacrifice doesn't (the actor
+  activates, then is sacrificed: CR 601.2g). A branch with more activations of a pool than actors
+  left is cut; a leaf holds when the activations get distinct actors (`PoolCtx::fit`: per pool when
+  no actor is in two pools, else a matching, `mana::max_flow`), the fewest reserved ones among them
+  coming out of the sacrifice budget (the largest matching into actors not reserved is the most any
+  matching of every activation uses: an augmenting path keeps every actor it had). That replaces
+  `pol_split`, `reserved_n`'s assertion, `tap_limit` and `Budget::tap`.
+* **Its reductions, kept exact.** A Pollinator source on a permanent with another way, or on an
+  actor, is left out when each pool's free targets (whose only ways are Pollinator activations, not
+  actors, not reserved, not a later tap cost's candidates) number at least the activations still
+  possible, the actors left (any such activation moves to an unused free target: the same mana).
+  Free targets of one pool only are committed as fixed units up to the pool's idle actors (not
+  reserved, no other way that taps them) less the activations counted already: those activations
+  take actors nothing else could use (`free_shared` committed up to one count of taps, whatever the
+  actors' other ways).
+* **The actor, a choice** (CR 602.2b). Right after a shared source is picked (`PayMana::actor_for`),
+  the payment asks which of its class's actors activates (`ChoosePermanent`, the actors' own ids):
+  those no pick taps whose choice leaves the payment payable with the picks so far and the sources
+  still to pick (`actor_options`; one is recorded without a question). The choice is recorded
+  (`PayMana::actors`): picks then count the actor as tapped (`used_res`), a reserved one leaves the
+  sacrifice budget one fewer (`after_picks`), and `finish_payment` taps it (`activate_sac_for` with
+  the actor, its own or granted ability that may sacrifice the land).
+
+Tests: `cr_106_12_the_creature_mana_bonus_follows_the_pollinator_that_taps` (Badgermole Cub, Gene
+Pollinator and the artifact Pollinator: {G}{G}{G}{U}, never four {G}; a loud failure before),
+`cr_106_12_a_forest_pollinator_gets_the_forest_bonus_and_taps_once` (Nissa and the Forest Pollinator:
+{R}{G}; {R}{G}{G} was payable), `cr_601_2g_which_pollinator_activates_is_the_players_choice`,
+`cr_601_2g_which_lumberjack_sacrifices_the_forest_is_the_players_choice`,
+`cr_601_2h_the_pollinator_a_tap_cost_needs_doesnt_activate` (Otharri, Suns' Glory's "Tap an untapped
+Rebel" with the Rebel Pollinator and Gene Pollinator: Gene Pollinator taps the Bear; the Rebel
+activated before, and the cost had no Rebel to tap).
+`pay::tests::cr_602_2b_a_pollinator_tapped_for_a_granted_mana_ability_activates_no_more` (the S2
+sealed fuzz's seed 18106 on `eoe-s2-pools`, from before this rework: Gene Pollinator tapped for
+Mm'menon's granted "{T}: Add {U}" while a spell was cast from exile, then a Pollinator source of
+another permanent offered and the payment's end panicking, "a Pollinator to activate"; rebuilt with
+`granting_db`'s grant and Faithless Looting's flashback: it fails so at 7ae9032),
+`cr_602_2b_gene_pollinator_tapped_for_mmmenons_mana_activates_no_more` (the heuristic-bot agent's EoE
+deck pair 6000978 on `eoe-bot`, the same panic with Flight-Deck Coordinator: Mm'menon, the Right Hand,
+Gene Pollinator and the Coordinator, All-Fates Scroll cast from the top of the library; it fails so at
+7ae9032).
+
+**Digests** (N23): full `3f49f29043418114` -> `36a8a84c37356ff8`, `DIGEST_ENCODING=0`
+`27f42bffa609f282` -> `3a6e81f85dc10d59`: 1 of the 2,500 games changes (h 475: two Orcish
+Lumberjacks; the payment for Questing Beast now asks which one sacrifices the Forest). `RULES_EPOCH`
+bumped; the Delver canary library's 60 spots reach their positions (`delver_rerecord.py check
+--stamp`).
+
+##### 24.7.5k, 40.1: costs with several parts that take cards
+
+`merge_costs` refused two parts that take permanents or cards in hand (retrace's land discard with
+Force of Will's or an evoke Incarnation's "exile a <color> card from your hand", Daze's "return an
+Island", Mine Collapse's "sacrifice a Mountain", Bitter Triumph's or Bone Shards' "discard a card"),
+because `Game::keep_for` kept one reservation (`Keep::sac`, `discard`, `exile`) and the budget one
+count; so retrace wasn't offered with them.
+
+* **`Keep::reserves`** (`pay::Reserve`): every such part, with its card: `Perm` (sacrifice, return,
+  remove a counter from; with `true`, "tap X untapped <permanents>", which taps), `Discard(n,
+  filter)`, `Exile(filter)`. A filtered discard is one now too (retrace's "a land card"; it wasn't
+  kept, by a pool argument: no mana source in hand is a land). One reservation is counted as before
+  (`Budget::sac`, `reserved`); several by `pay::ResCtx`: their candidates grouped by the reservations
+  each is a candidate of, and a payment holds when, for every set of reservations, the candidates
+  of any of them left are at least what they need together (Hall's condition: distinct candidates
+  for each; a card discarded is not exiled, a permanent sacrificed not returned). A mana source
+  that sacrifices a permanent or exiles a card from hand uses one up (`Game::consumes`, `Way::rsig`):
+  the search cuts a branch that breaks the condition and checks it at each leaf; such a source is
+  never a fixed unit then. ("Tap X" is paid alone, the lowering's `check_cost_w3`, which `merge_costs`
+  keeps: a `ResCtx` never holds one.)
+* **Two discards** (`Cost::discard_also`): `merge_costs` adds discards of one filter and keeps two
+  filters apart (the unfiltered one is `discard`); `pay_costs` asks the filtered one first.
+* **The cost's checks** (`cost_payable_with`) see the parts together (`reserves_ok`: with Grief's
+  evoke and one Swamp in hand, retrace isn't offered), and **`pay_costs`** offers only picks that
+  leave the later parts their candidates (`cost_picks_ok`: the parts left, the picks so far and this
+  one out). A permanent picked to be returned isn't one picked to be sacrificed.
+* **A permanent tapped and sacrificed for one cost** (CR 601.2h: the parts in any order): the tap
+  choice of "tap n untapped <permanents>" left out the permanents picked to be sacrificed or
+  returned, which the feasibility counted (`Keep::taps`); the taps come before the sacrifices and
+  returns, so they are offered now. (Not yet when the cost also exiles graveyard cards: its
+  sacrifices are made before those are chosen, so that sacrificed cards may be exiled, ruling
+  bea302d9, and so before the taps: left open, below.)
+
+Tests: `cr_702_81a_retrace_with_a_pitch_evoke` (Six, Grief in the graveyard, a Swamp and Dark Ritual in
+hand: cast for no mana; with the Swamp alone, not), `cr_702_81a_retrace_with_the_cards_own_discard`
+(Wrenn and Six's emblem, Bitter Triumph at 2 life: with a Forest and Simian Spirit Guide, whose mana
+is needed, not castable; with an Island too, the Forest and the Island discarded),
+`cr_702_81a_retrace_with_daze_returning_an_island`, `cr_601_2h_one_permanent_tapped_and_sacrificed_for_one_cost`
+(B4's Test Rebel Altar: "Tap an untapped Rebel you control, Sacrifice a Rebel"; a loud failure
+before, no Rebel to tap).
+
+**Digests** (24.7.5k, 40.1): full `36a8a84c37356ff8` -> `6d25032ffee21839`, `DIGEST_ENCODING=0`
+`3a6e81f85dc10d59` -> `14b9b0e887831eef`: 2 of the 2,500 games change (r 1987: Fury retraced with
+Six for its evoke cost, exiling a red card; h 77: Daze retraced by Wrenn and Six's emblem, returning
+an Island). `RULES_EPOCH` bumped; the Delver canary library's 60 spots reach their positions.
+
+##### 13.15: chains of mana abilities with mana costs
+
+`MADE` and `NOT_MADE` were one bit each: the mana of a mana ability with a mana cost paid no such
+ability's cost in the same payment (Loot, the Pathfinder's three {R} for Arena of Glory's {R};
+one Sunken Ruins' mana for another's {U/B}). CR 605.3a, 602.2b: while paying a cost, mana abilities
+may be activated, each one's mana existing once it resolves; so one's mana pays the cost of one
+activated after it, never its own or an earlier one's: the "pays the cost of" relation is acyclic.
+
+* **Chain ids** (`mana::chain`, `Tag` bits 16-63; `Tag` is a u64): a `MADE` unit carries the
+  activation that made it, a `NOT_MADE` need the one whose cost it is (`pay::chain_id`: the
+  source's place among the classes' sources with a mana cost, and its use, for one used several
+  times); `fits` lets a `MADE` unit pay a `NOT_MADE` need when its id ranks lower. The picks keep
+  them (`PayMana::marked`, `PayMana::made_by`, the virtual pool's kinds, `vgroups`, `pool_rems`),
+  the candidates too (`cands`).
+* **The order** (`payable_iter`): with such needs and such mana that could pay another's, every
+  order of the activations is tried, their ids relabelled by rank; activations alike (the same
+  needs and the same mana) keep a fixed order among themselves. Two bounds come first, one
+  matching each (`Chains`): with no such mana paying such a cost (the old rule) a payment every
+  order allows holds; with every such mana free to pay every such cost (its own too) one that fails
+  fails every order. A payment with such costs among its needs is decided by the matching
+  (`payable_restricted`: their chain ids part the needs and units into many groups, which
+  `best_chosen`'s split of each need over the groups made exponential), and cards alike but for
+  their activations' chain ids are one group of `ways_payable`'s search (each copy takes the next
+  card's way). (Without these the EoE fuzz ran seven times slower, some games a hundred times:
+  seed 1005, 0.4 s before 13.15, over 120 s; now 1.3 s.) A search past `SEARCH_NODES` is a loud
+  failure (ENGINE.md 51). `payable_iter`'s counts are u32 and its groups unbounded (a u8
+  count saturated, 128 tags and 24 needs were fixed arrays).
+* **`UseCap`** (N10) relied on the old rule ("an ability with a mana cost pays only the cost, so it
+  is used at most the cost's size times"): such an ability is never cut now.
+* **Converge** (`record_converge`): the mana made by such abilities spent is as little as the rest
+  of the pool allows (it pays more), whose (`made_by`) every choice, the most colours any shows;
+  `most_colors_matching` checks each colour set with `payable_n` (the orders tried). (Its hybrid
+  and Phyrexian fallback is 28.8.2k's, workstream D's.)
+
+Tests: `cr_605_3a_a_mana_abilitys_mana_pays_a_later_ones_cost` (two Sunken Ruins and a Swamp:
+{U}{U}{U}, a Ruins' own {C} the third mana before; two alone: no {U}),
+`cr_601_2g_a_payment_with_a_chain_of_mana_abilities` (B4's Test Blue Rock, {U}{U}{U}, cast with
+them; not castable before).
+
+**Digests** (13.15): full `6d25032ffee21839` -> `be4ad3e9916de295`, `DIGEST_ENCODING=0`
+`14b9b0e887831eef` -> `0503082a58e22ca4`: 13 of the 2,500 games change, each with two Sunken Ruins
+or two Arenas of Glory (the five inspected: r 263, 484, 502 with Ruins; r 404, 801 with Arenas):
+one's mana pays the other's cost. `RULES_EPOCH` bumped; the Delver canary library's 60 spots reach
+their positions.
+
+##### Not done in this session (left for the next pass)
+
+In the brief's order (100.4.4 to 100.4.6 have the earlier designs):
+
+* **26.11.6** (96 permanents a player): unchanged. The payment's ids for sources past `MY_PERM`'s
+  96 come with the paging of every `perm_action` caller (A's note in 100.2: 46 call sites,
+  attackers and blockers, priority's `ACTIVATE` ids through W3's ability page) and the end of
+  `perm_room` and `token_count`'s room; one change across the engine, not the payment's alone.
+* **The u8 parts of a `ManaCost`** (100.4.6's design): not started; it waited for F7's numbers
+  (`eoe-base` 7953d2a, merged at the end of this session, below). (`payable_iter`'s counts are exact
+  now, 13.15 above.)
+* **A cost that sacrifices, exiles graveyard cards and taps** (found on the way, 24.7.5k above):
+  its sacrifices are made before its graveyard cards are chosen (ruling bea302d9), so before its
+  taps, and a permanent sacrificed can't be one tapped for it, which CR 601.2h allows (tap it,
+  then sacrifice it, then exile from the graveyard). Exact: when the cost has a tap part, its tap
+  choices before the early sacrifice (`pay_costs`' order).
+* **28.8.2k** is workstream D's (a new decision kind).
+
+##### The merge of `eoe-base` 7953d2a (C2, F7, D2's hidden-Aura fix)
+
+Conflicts: `game.rs` (`token_count`) and `stack_ext.rs` (`CreateTokensN`) keep B3's any number of
+tokens (F7's side cut at 64; `CreateTokensN`'s amount, an i64 now, converted with `try_from`), `pay.rs`
+takes F7's `CardIdx::new` and life budget (`Wide`, clamped to `i32::MAX`) with B4's `Budget` (no
+`tap`), keeps B3's exact Phyrexian life (u64 against an i64 life) and the cut check of
+`can_pay_plain`; `activate.rs` keeps B3's exact teamwork (`crew_mana_ok`) in F7's `Wide`, and the
+payment's tap costs (`TapsOwed`, `Way::crew`) are `Wide` now; `cast.rs` keeps B3's exact "pay X life"
+and `life_later`. docs/shortcuts.md 46.3: F7's "exact or aborted" with the payment's own counts
+(B3, B4) and the open u8 parts of a `ManaCost`. The zero-core pin is e4779b2.
+
+Digests (re-recorded): full `3d59118e6fb9e706` (eoe-base) -> `694861906d331e06`,
+`DIGEST_ENCODING=0` `9bf41c0836e39125` -> `949af93ae06843a2`: 38 of the 2,500 games differ from
+`eoe-base`, the branch's own (B3's 6 and 16, B4's 1, 2 and 13). `RULES_EPOCH` bumped; the Delver
+canary library's 60 spots reach their positions.
 #### 100.9 C2: permanents entering simultaneously (branch `eoe-c2-together`, from `eoe-base` 2f065ff)
 
 **Why.** W6 found it (99.16, docs/shortcuts.md 99.16.1): the engine put the permanents of one event
@@ -21633,6 +22030,373 @@ What that prior needs from here:
   going after the fuzzer's minutes. The no-progress rule (100.7) should end such loops; here every
   activation and resolution leaves a new until-end-of-turn effect, so (apparently) no state repeats.
 
+
+## 102. Hidden decklists (EoE sealed)
+
+Branch `eoe-hidden-decks` (from `eoe-d-encoding` 45ed2b2, layout v6), 2026-11-09. **Why.** Until now
+`Game::determinize(viewer)` re-dealt the viewer's unknown cards but never changed WHICH cards make up the
+opponent's deck, and the encoding showed the opponent's unseen cards by identity (`bag::OPP_HIDDEN`, their pool
+in `OPP_POOL`): open decklists, right for the Delver mirror. In sealed nobody sees the opponent's pool or deck. The
+network is to predict it - a deck reader (zero-core `feat/deck-reader`, its docs/az.md 36) whose prediction is an
+auxiliary target and an input - and the search is to deal the opponent's deck from a prior tilted by that
+prediction, as section 69 tilts the hand. This section is the engine's side: the information model, the deal and
+its prior, the spec switch, the checks, the `deck` target and the reader's declared inputs. Best-of-three's hidden
+pool (36.11: the pool known but its first picks) is the precedent and stays as it is.
+
+### 102.1 The design
+
+**What an EoE sealed player knows of the opponent's deck.**
+
+| | known to the viewer | hidden from it |
+|---|---|---|
+| before the game | the format: the set (the prior's support: every card a pool of the collation can hold, and the five basic lands); the deck's size (public: the cards they have in the game, 40 for a built sealed deck, CR 100.2b, ENGINE.md 42) | the pool, the deck, the sideboard, and the sideboard's size too (pool size less the deck's pool cards: it tells the number of basic lands) |
+| during the game | every card of theirs in a public zone (battlefield, graveyard, exile, the stack, the command zone); every hidden card of theirs it knows exactly (revealed, looked at, seen going from a public zone to a hidden one, ENGINE.md 10); its clouds (cards it saw and lost track of exactly: "these identities are among those cards"); the public counts (hand, library, graveyard, the lands on the battlefield, mulligans taken, cards drawn); the decisions it saw them make and what they answered | the rest of the deck (their hand, library and face-down cards it does not know), the order, the sideboard |
+
+Mulligans, land drops and passes are public facts and evidence (what the reader learns from), not constraints: no
+rule makes a deck impossible because its owner passed. The **constraints** a world must meet, all exact:
+
+* **K1** the deck has the public size n (their starting deck: `MatchState::decks[o]`'s total);
+* **K2** the deck contains the multiset R of cards the viewer has seen: their deck cards it knows exactly where they
+  are (every public card included) and the identities of its clouds over their cards (`sample::knowledge`'s
+  `required`, 36.11); every card it knows exactly stays where it is; every cloud's identities stay in its domain;
+* **K3** every card is in the format's support; a revealed companion stays in the sideboard and the deck fulfills its
+  condition (CR 702.139a; none in EoE, but the stub is also run on the cube's decks);
+* the pinned cards of a payment in progress stay (ENGINE.md 10), and the viewer's own cards are never touched.
+
+**K2 needs one change: clouds over the hand and the library are kept.** `tidy_clouds` drops a cloud whose domain is
+the owner's whole hand and library: with open decklists it says nothing the decklist does not. With hidden
+decklists it is the only record that a card the viewer saw is still in the deck (two copies revealed, shuffled into
+the library, one drawn: the merged cloud covers hand and library). `GameSpec::hidden_decklists` keeps such clouds
+(`Game::tidy_clouds`), so the cards seen and lost track of are always in some cloud and R counts copies exactly.
+Nothing else in the knowledge rules changes; with the switch off nothing changes at all.
+
+**The deal.** `MtgAz::determinize(viewer)` with hidden decklists, for the opponent o (`az/hidden_decks.rs`,
+`sample_hidden_deck`; best-of-one, in a game):
+
+1. `sample::knowledge` (36.11's, unchanged): o's cards hidden from the viewer (the slots), the pinned ones, the
+   deck cards it knows (`known`), the non-deck cards it lost track of (`extras`) and R;
+2. the prior samples a whole deck D of n cards with R inside it, and its sideboard (`DeckPrior::sample`);
+3. D less `known` (plus the extras) is dealt to the slots, each cloud's identities in its domain, and o's sideboard
+   becomes the sampled one (`Game::redeal`, 36.11's); the match's `pools[o]` and `decks[o]` become the sampled pool
+   and deck, so nothing of the real deck is left in the world;
+4. `Game::determinize` follows as before (the shuffle among the slots, the reseeding, the observer, the refresh).
+
+**The prior** (`hidden_decks::DeckPrior`, a trait; one per seat in `MatchState::deck_priors`, the prior of that
+seat's deck as the other player samples it): `sample(&DeckWant { db, n, shown: R, companion, tilt }, rng) ->
+SampledDeck { deck, sideboard }` - exactly n cards, R inside, every other card in `support()`, the companion's
+condition kept; bounded time and never a failure (no rejection loop: R comes from the real deck, so a deck holding
+it always exists, and the prior must construct one). `support()` is also what the game's questions may name for
+that player (`Game::known_pools`: the name chosen for Anointed Peacekeeper's kind of card, the questions asked
+because a deck has a card, 36.11). `expected_fill` is the tilt's baseline (below).
+
+* **The default, once S2 lands** (`eoe-s2-pools`, ENGINE.md 101.5): (a) a pool from the spec's collation and
+  boosters, its seed drawn from the deal's generator (never the game's `pool_seed`: the real pool would leak);
+  (b) conditioned by construction: each shown nonbasic card the pool lacks replaces a pool card of its rarity that is
+  not itself shown (any card not shown when the rarity runs out), so the pool holds R; (c) S2's builder with a `must`
+  input (R's cards played first, their colours among the deck's) and the exact size n; the sideboard is the rest of
+  the pool. S2 has the collation and the builder; the `must` input and the exact size are what this needs from it.
+* **The stub, until then** (`TablePrior`): FUZZ_POOL=eoe's random deck generator conditioned on R - R first, then
+  lands up to round(17 n / 40) and spells up to n, each drawn uniformly (with replacement, times the tilt) from the
+  table's supported cards (basic lands among the lands), the companion's condition kept; the sideboard is the
+  revealed companion if any. Built for any table, so the cube's decks can run it (the leak tests need the cube's
+  stable identities: every EoE card encodes as identity `UNKNOWN` until an EoE layout exists, 101.5).
+
+**Exact, and modelled.** Exact (rules and knowledge): K1-K3, the pinned cards, the clouds, the viewer's own cards,
+every world a legal state that holds everything the viewer knows; a world depends only on the generator and the
+viewer's information (the prior reads n, R, the companion and the tilt). Modelled (the prior's choice, not a rules
+approximation): the distribution over the rest of the deck. The conditioned construction is not the Bayes posterior
+of "collation, then builder" given R (that needs rejection or a Markov chain; placing R by rarity and making the
+builder play it leans the colours toward R's, the intended direction, but not by the exact posterior weights), the
+stub's fill is uniform, and nothing reads play patterns: that is the reader's job, through the tilt.
+
+**The tilt** (the deck reader's hook, as 69's `determinize_weighted` for the hand): `DeckWant::tilt`, a weight per
+card definition that multiplies the prior's probability of each card it adds beyond R (sequential draws, Wallenius'
+urn as 69.2), never R and never the size. `MtgAz::determinize_deck_tilted(viewer, rng, w)` deals with it;
+`hidden_decks::deck_weights` makes the weights from a prediction p over identities the way 69 does:
+w_k = clip(((N p_k - c_k)^+ / u_k)^t, 1/C, C) (C the clip), N the number of the opponent's unseen cards, c_k the clouds'
+identities already placed, u_k the prior's expected fill of k (`expected_fill`: exact for the stub; the sealed
+prior's by its own samples). Not wired into `determinize_with`: which prediction drives it (the head's `deck`
+columns or the reader's, zero-core az.md 36.5) and with what tilt is the reader's integration.
+
+**The switch** `"hidden_decklists": true` (default false; the `"sealed"` spec of 101 will set it): best-of-one,
+not with constructed, drafted or a lab start. The game is created with `hidden_decks` (36.11's question rules:
+the companion question asked of everyone, the deck questions and names by `known_pools`) and `hidden_decklists`
+(clouds kept; the opponent's sideboard size out of the view). The encoding (layout v6 unchanged: floats left at
+zero): `OPP_HIDDEN` not written (as best-of-three), `OPP_POOL` not written for the knower's opponent, the
+opponent's `glob::SIDEBOARD` 0. Nothing else in an encoding reads the opponent's unseen cards (102.3 checks it).
+
+### 102.2 What was built
+
+* `GameSpec::hidden_decklists` (needs `hidden_decks`, refused otherwise): `Game::tidy_clouds` keeps a cloud over the
+  whole hand and library; `Game::view_of` leaves out the other player's sideboard size; `encode_globals` leaves the
+  other player's `glob::SIDEBOARD` at 0 (from the knower's side: framed in a controlled seat, ENGINE.md 100.5, the
+  controlled player's is the hidden one).
+* `encode_match`: `OPP_POOL` is not written for the knower's opponent (framed in their seat, the frame's opponent
+  is the knower, whose own pool it is). `OPP_HIDDEN` was already left to the match with `hidden_decks` (36.11), and
+  the match writes candidates only for best-of-three.
+* `az/hidden_decks.rs`: `DeckWant`, `SampledDeck`, the `DeckPrior` trait, `TablePrior` (built once per card
+  table), `check_sample` (the contract, checked at every deal: a prior that breaks it panics, never a world outside
+  the viewer's information), `deck_weights`, `MtgAz::sample_hidden_deck` (the deal), `determinize_deck_tilted`
+  (the tilt hook), `hidden_decklists()`. `MatchState::deck_priors` (classified `Derived`: a setting, the same in
+  every world). `MtgAz::from_seats` (factored out of `MtgAz::new`, unchanged for every other spec): a match from
+  seats and per-seat priors, refusing a real deck outside its prior's support. `set_known_pools`: with hidden
+  decklists, each player's `known_pools` is its deck prior's support.
+* `MtgAz::determinize` and `determinize_belief` (69) deal the hidden deck first (as best-of-three's pool), so the
+  hand's belief weights read the dealt world's hidden pool.
+* The spec key `"hidden_decklists"` (`MtgSpec::hidden_decklists`): best-of-one, limited decks of the spec (random,
+  evaluation, lists); refused with best-of-three, constructed, drafted or a lab start. On this branch both seats get
+  the spec table's `TablePrior`; the `"sealed"` spec (101.3) is to set the key and pass S2's prior per seat.
+* `sample::allowed` and `one_per_name` (the companion's conditions) are `pub(crate)` for the stub.
+
+### 102.3 The checks
+
+* **Digests, the switch off** (13c0f9e and every commit after it): full **408ee16a94d0ffec**, `DIGEST_ENCODING=0`
+  **4a2a227cb45204cd**, `DIGEST_ENCODING=v5` **6fa4fab18b624326**, the base's: no game, encoding or v5 float changes.
+* **`tests/hidden.rs`** (6 new): `hidden_decklists_keep_a_cloud_over_the_whole_hand_and_library` (Brainstorm puts
+  the known Test Bear back, Polluted Delta shuffles: open decklists drop the cloud, hidden decklists keep it, and
+  every world of P1's keeps the Bear in P0's hand or library); `hidden_decklist_worlds_hold_what_the_viewer_saw_and_
+  deal_the_rest` (60 cube positions, both viewers, 720 worlds: known cards in place, the deck's size, every card
+  seen inside the sampled deck with its copies, the match's deck the world's, the viewer's own cards, view, the
+  decider's actions and the whole encoding as in the real game; 720 of 720 with another deck);
+  `no_encoding_or_option_tells_an_unseen_decklist` (the `OPP_HIDDEN` and `OPP_POOL` rows and the opponent's sideboard
+  size zero for both viewers, filled by the same games with open decklists; 160 extreme worlds - a tilt of 10^6 on
+  Lightning Bolt or on Forest, so nearly every unseen card is that card - still encode as the real game and keep
+  the decider's actions); `hidden_decklist_worlds_stay_indistinguishable_while_keys_agree` (zero-core's child
+  signature: 481 steps in step over 60 positions, view and encoding equal); `the_table_prior_meets_its_contract`
+  (300 requests on the EoE table, 0 to 40 shown cards, more shown lands than its target: exact size, the shown
+  cards, the land count; a tilt of 1 is the untilted deal draw for draw; a 10^4 tilt concentrates the fill; the
+  expected fill matches the draws; a revealed Lurrus's condition kept); `the_hidden_decklists_switch`.
+* **The public-state gate** (`tests/az.rs`): `gate_positions` gains a fifth kind, the cube's random decks with hidden
+  decklists (last, so the other kinds' positions are as before). `public_state_reaches_the_encoding`: every
+  perturbation still reaches both views and encodings there (156 encoded, the 4 deliberate limits) but the fields
+  hidden decklists hide (`public_state::HIDDEN_BY_DECKLISTS`: "a sideboard card fewer"), which must reach their
+  owner's view and encoding and neither of the other player's (60 applied, 0 leaks).
+  `the_v5_facts_encode_no_hidden_information`: 5,123 perturbed positions, 20,492 worlds (hidden-decklist worlds among
+  them) encode alike. The belief tests run there too (`belief_deals_keep_every_determinize_invariant`: the cards of
+  a hidden-decklist world are the sampled deck's, as best-of-three's; `the_belief_weights_ignore_the_opponents_
+  hidden_cards`: the weights after the hidden deck is sampled with one seed).
+* **The fuzz** `FUZZ_HIDDEN_DECKS=1` (module docs; with the default decks or `FUZZ_POOL=eoe`): the games through
+  `MtgAz` with hidden decklists, every game check, and at each checkpoint `MtgAz::determinize` for both viewers with
+  the whole-encoding comparison against the real game (stricter than the open-decklist fuzz, which compares the
+  view and bounds the encodings), the deck constraints, the information-set check and 30 moves on. Past 500
+  decisions in one turn the random player passes when it may: random play on this base loops on free activations
+  (100.5.1's seed 1024, fixed by `eoe-f7-numbers` 026ebd4's board-reading loop rule, not on this branch).
+
+* **Found and fixed by the hidden fuzz** (567726e): `FUZZ_POOL=eoe` seed 15503, Alpharael, Dreaming Acolyte's "then
+  discard two cards unless you discard an artifact card": `EoeX::DiscardMatchingOrContinue` skipped its question when
+  the hand held no artifact card, so the other player's encoding (the resolving op and pc of the next decision, both
+  `Discard`) told whether the decider's hidden hand held one, and that player's worlds without one refreshed past the
+  question. Open decklists had the same leak (their fuzz compares the other viewer's view, not its encoding). As
+  `resolve.rs`'s hand choices do, the question is asked with pass only (an empty hand is public);
+  `cards_eoe_cross_more::alpharael_without_an_artifact_discard_discards_two_cr701_9a` updated. No digest game has
+  the card.
+* **And** (8e60cab): seed 17153, a Robot token in a hidden zone (it ceases to exist at the next state-based actions,
+  CR 111.8, 704.5d) that the viewer lost track of in a shuffle was among the slots `determinize` deals, so its
+  identity could land in a card's slot and a card's in the token's (open decklists too: the fuzz saw it only through
+  the hidden mode's stricter deck check). A hidden token is now kept where it is, as a pinned card
+  (`Game::hidden_slots_with`; a cloud listing it counts it in place, as for a payment's pinned cards). Digests
+  unchanged.
+
+### 102.4 The deck target and the reader's inputs
+
+**The target** (`MtgAz::AUX` = `[("belief", 1024), ("deck", 1024)]`, `aux_target`): `deck` is the frame opponent's
+cards the decider does not know exactly - their hand, library and face-down cards (`Game::unknown_to`, each by the
+card it is) - as counts per identity: what `determinize` deals, so in every world the target is that world's own.
+Its total is public (the decider knows how many of their cards it knows), so a multinomial ('multinomial', 66.3)
+spends nothing on it. The package declares it (`aux_deck_w`, default 0: nothing recorded). Tests:
+`the_deck_target_is_the_opponents_unseen_cards_and_never_an_input` (the gate's positions, every kind: the target is
+the unseen cards, its total, every world encodes alike while its target is its own; hidden decklists: 60 of 60
+worlds with another unseen deck), `tests/test_deck_reader.py` (the declaration, the run setting, 40 unseen cards
+before any play, worlds that encode alike and deal other decks).
+
+**The reader's declared inputs** (`encode::deck_reader_inputs`, checked in as `mtgz/az/deck_reader_v6.json`;
+`mtgz.az.deck_reader.READERS` is zero-core `feat/deck-reader`'s package entry, `{target: 'deck', inputs, hidden: 256,
+enter: 'trunk'}`): layout v6 ranges, in feature order, bags and global blocks only (zero-core's reader refuses token
+segments; `deck_reader_inputs_are_checked_in_and_read_bags_and_globals_only` checks it against `layout_json`):
+
+| Range | Floats | What |
+|---|---:|---|
+| globals 0-23 | 24 | the game: turn, step, who is active and has priority, passes, the stack's size, ... |
+| globals 64-103 | 40 | the opponent's block: life, hand, library, graveyard and exile sizes, lands played, mana pool, mulligans, the board's summary, sideboard size (0 under hidden decklists), companion |
+| bags 2, 4, 6 | 3 x 1024 | `OPP_BATTLEFIELD`, `OPP_GRAVEYARD`, `OPP_EXILE` |
+| bags 9, 10, 12 | 3 x 1024 | `OPP_HAND_KNOWN`, `OPP_HAND_CLOUD` (with hidden decklists also the clouds over hand and library), `OPP_LIBRARY_KNOWN` |
+| bags 16, 21 | 2 x 1024 | `OPP_REVEALED` (earlier games of a match), `OPP_PHASED` |
+| match 9 | 1 | the opponent's deck size |
+| globals v5 24-47 | 24 | the opponent's v5 block: cards drawn, spells cast this turn and this game, ... |
+
+8,281 floats. The stack (the opponent's spell being cast) is a token segment, out of the reader's reach; the
+opponent's spells reach it once they resolve (battlefield, graveyard, exile).
+
+**What changes for runs with a belief head.** `aux_target` is 2,048 floats and the package declares both targets, so
+a run with `aux_belief_w` > 0 trains a head over both; zero-core refuses a checkpoint whose head has the belief
+columns only ("checkpoint ... has the auxiliary head ..., this run trains ...": `net.strip_aux`, then fork), and
+`determinize_with` takes a prediction of every target (2,048 floats; the hand's deal reads the first 1,024).
+`tests/test_belief.py` and `tools/belief_search.py` read the belief segment and pad a hand-only belief with a
+uniform deck segment. Before a run with a belief head (the Delver line's belief arms) moves onto this code, zero-core
+needs to grow a head by a target (its `add_aux` adds a head to a checkpoint without one), or the run forks with
+`strip_aux` and loses the trained head: a maintainer's decision.
+
+### 102.5 What S2 and S3 need to do to finish
+
+* **S2** (`eoe-s2-pools`): done here after its merge (102.6): the `"sealed"` spec sets `hidden_decklists`, each
+  seat's prior is `SealedPrior` (S2's collation and builder, conditioned), `FUZZ_POOL=sealed` with
+  `FUZZ_HIDDEN_DECKS=1`. Left: the deal's speed with arena pools (102.6), and, if self-play shows the forced swaps
+  distort, a builder that takes the shown cards as an input of its own colour and curve choices.
+* **S3** (zero-core `feat/deck-reader`): the package passes `readers=mtgz.az.deck_reader.READERS` once the pin has
+  readers; runs set `aux_deck_w` and `reader_deck`; the tilt is wired (`determinize_with`'s prediction has the deck
+  columns: `deck_weights` and `determinize_deck_tilted`, with a seat key of its own, never a silent default); the
+  EoE layout gives the set's cards identities (until then every EoE card is `UNKNOWN` in the target and in every
+  bag, so the reader learns nothing on EoE), and re-declares the inputs on it (330 identities: 36.8's plan).
+
+### 102.6 The sealed prior (S2 merged)
+
+S2 finished (`eoe-s2-pools` 6f7f2f8, ENGINE.md 101) and was merged into this branch (9b72575; conflicts kept both
+sides: `MtgSpec` has `sealed` and `hidden_decklists`, the fuzz has `FUZZ_POOL=sealed` and `FUZZ_HIDDEN_DECKS`, and
+pay.rs's granted-ability counter check was the same fix on both branches). With D2's The Dominion Bracelet here,
+no sealed pool is unplayable: `the_builder_spread_over_1000_pools` builds all 1,000 arena and 1,000 paper pools
+(none skipped), `FUZZ_POOL=sealed` skips none, and `sealed_spec_errors_are_loud` names Paradox Haze (no IR) as its
+missing card instead.
+
+**The `"sealed"` spec turns hidden decklists on** (`"hidden_decklists": false` keeps 101.3's open decklists), and
+each seat's deck prior is `hidden_decks::SealedPrior` of the spec's collation (a spec without one - given pools or
+builds - `arena`, whose pools are Arena's: the yardstick's human builds are sampled as generated seats, since the
+viewer does not know the human's pool either), boosters and builder settings. 102.1's default, built:
+
+1. **The pool**: `sealed::generated_pool(collation, boosters, seed)`, the seed drawn from the deal's generator,
+   never the game's `pool_seed`.
+2. **R's nonbasic cards placed in it**: each one the pool lacks replaces a pool card of its rarity (the set list's)
+   that is not itself shown, uniformly; any card not shown when that rarity runs out. Exact: the pool holds R and
+   has the collation's size.
+3. **The build**: S2's builder, `builder::build_tilted` (`build` with the deck reader's tilt multiplying its spell
+   weights; `None` is `build` draw for draw, so every real sealed deck is S2's), up to `SEALED_TRIES` (4) builds,
+   the first whose colours (pair and splash) cover R's nonland cards' colours, else the one covering most.
+4. **R forced in**: R's cards the build lacks replace build cards that are not shown, each of its kind (a land for a
+   land, a spell for a spell; any when the kind runs out), chosen with probability proportional to 1 / tilt; then
+   basic lands in the build's proportions up to n (a given build's size), or non-shown cards removed down to it.
+   The sideboard is the rest of the pool.
+
+Every step is bounded (a fixed number of builds, no loop that waits for a match) and always returns a deck that
+meets K1-K3 (`check_sample` at every deal). Modelled, not exact: the rarity replacement (a pool the collation could
+deal, R placed where the real pool had it, not drawn by the collation's slot odds given R), the bounded colour
+retries (a deck of R's colours most of the time, not the builder's posterior colours given R), the forced swaps (the
+build's other choices are not re-made around R). `expected_fill` is the mean of 16 deals from a generator seeded by
+the request. Cost: a deal generates a pool (1.8 ms for arena, 0.015 ms for paper, 101.1) and up to 4 builds
+(~0.05 ms each): far above a search simulation's budget with arena; a bank of pools drawn once per decision, or a
+cached arena generator, is the speed-up when search runs on sealed (not built: S3's first runs measure it).
+
+Tests (`tests/hidden.rs`, 2 new): `the_sealed_prior_meets_its_contract` (120 requests from real arena builds, 0 to 40
+shown cards: 40 cards holding R, every card in the support, the deck's nonbasic cards and the sideboard 78 cards (six
+Arena boosters); 60 of 66 requests with 8+ shown cards of two colours give a deck in those colours and a splash at
+most; a tilt of 1 is the untilted deal), `the_sealed_spec_deals_hidden_decks_from_the_sealed_prior` (paper sealed
+games: priors named `sealed`, 56 worlds holding what the viewer saw, with its view, actions and encoding, each with
+another deck; `"hidden_decklists": false` keeps open decklists). `FUZZ_HIDDEN_DECKS=1 FUZZ_POOL=sealed` deals from
+the spec's sealed prior (arena for even seeds, paper for odd).
+
+### 102.7 eoe-base merged; results
+
+**eoe-base 7953d2a merged** (c3e56e8): its 026ebd4, the loop rule reads the board (a loop action's own stack objects
+are no progress, MTR 4.4, ENGINE.md 100.7), ends the free-activation stacks that kept 100.5.1's EoE fuzz from
+finishing; 7953d2a is D2's cd412c5, already here. The digests re-recorded with it (RULES_EPOCH bumped, the Delver
+canary library stamped on this engine: `tools/delver_rerecord.py check --stamp`, 60 of 60 spots reach their
+position):
+
+| Commit | Full | `DIGEST_ENCODING=0` | `DIGEST_ENCODING=v5` | Why |
+|---|---|---|---|---|
+| before (45ed2b2) | 408ee16a94d0ffec | 4a2a227cb45204cd | 6fa4fab18b624326 | |
+| 675795f..ddaf065 (this branch's commits) and 9b72575 (S2's merge) | unchanged | unchanged | unchanged | the switch off changes no game, encoding or v5 float; S2's sealed key changes nothing without it |
+| c3e56e8 eoe-base merged | **5636329c0553f226** | **21ecc979c7a67fea** | **1b361246865ddf4e** | the board-reading loop rule's games (re-recorded, `DIGEST_WRITE=1`) |
+
+The merge's public-state gate run offered "a creature can't block" a creature that already couldn't (a hidden-
+decklist position): the perturbation now picks one that can, as "a creature can't be blocked" does (100.5.1).
+
+**Results** (normal release profile, `E:/cargo-target/mtg-zero/eoe-hidden-decks`, on a desktop shared with other
+workstreams' fuzzes):
+
+* Full engine suite on c3e56e8: **2,172 passed, 0 failed, 15 ignored** (146 binaries; `az` 45, `hidden` 24,
+  `sealed` 11). On ebabc0d, before the last two fixes, three `hidden` tests failed when the cube's and the sealed
+  table's tests shared a binary (`seen_bits_of` asserted one card table per process; 081ac07 keys it per table).
+* `FUZZ_GAMES=20000` (default) on c3e56e8: passed (20,000 games, wins 9,815 / 10,061, 124 draws; 1,000 matches;
+  3,207 s). On 8e60cab, before the merges: passed (wins 9,819 / 10,057, 124 draws: the base's games).
+* `FUZZ_POOL=eoe FUZZ_HIDDEN_DECKS=1 FUZZ_GAMES=20000` on c3e56e8 (four chunks of 5,000): **passed**, every seed:
+  wins 7,197 / 7,155, 5,648 draws; 653,952 hidden-decklist worlds checked, 653,950 with another deck than the real
+  one; 3,227,182 information-set steps in step; no turn reached the long-turn rule (the loop rule). On 8e60cab
+  (before the merges, the long-turn rule at work in 1,676 turns): passed too, 756,088 worlds, after the two
+  findings of 102.3 (seeds 15503, 17153) were fixed.
+* `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_GAMES=20000` on c3e56e8 (the sealed prior): 19,994 seeds pass (469,498
+  worlds in the completed chunks, 469,347 with another deck; no pool skipped); **six seeds hit B4's Gene Pollinator
+  payment panic** (`pay.rs:2429` "a Pollinator to activate (the budget counts them)", in the real game's option
+  completion, not in a deal: 101.7's seed 18106, and 3106, 10787, 12276, 12711, 13674 found here), run around
+  with `FUZZ_SKIP` / `FUZZ_FIRST`; B4 has it.
+* pytest (the gate's): see the gates below.
+* **The gates** on c3e56e8 (`--no-mac`; the e4779b2 pin is on GitHub, no `ZERO_CORE_UNPINNED`): `python tools/gate.py
+  encoding --expect-digest 5636329c0553f226 --expect-digest0 21ecc979c7a67fea --checkpoint
+  E:/mtg-zero-scratch/eoe-d2-widen/fork-delver2/models/iter_0000.pt`: build, both digests, `az` 45, the checkpoint
+  load (h2h, 8 games, 0 unfinished), pytest 218 passed and 1 skipped: `GATE PASSED encoding c3e56e849875 in 1491s`.
+  `python tools/gate.py engine --tested-sha c3e56e8 ...`: build, both digests, `az` 45, `limits` 10, `hidden` 24
+  passed; pytest failed twice on time limits only, on a desktop running about fifteen other workstreams' fuzzers
+  (first run: the toy smoke fixture past its 300 s, 5 errors; second: `test_mtg_smoke_iteration` past its 900 s, 1
+  failed, 217 passed) - the same sha's pytest passed whole in the encoding gate. Last line: `GATE FAILED engine
+  c3e56e849875 in 1332s - pytest: 1 failed, 0 error(s), 217 passed; not run: search-smoke, mac-recheck`. To rerun
+  on a quiet machine.
+* pytest (`tests/test_deck_reader.py` 3 new; `test_belief.py`, `test_mtg_az.py`, `test_position_lab.py` and
+  `lab.rs` read the two targets).
+
+### 102.8 eoe-base fa5a30d merged; the K-sample deal
+
+**The merge** (1cd3e5e): eoe-base fa5a30d, B4's payment work with the Gene Pollinator fix (N23's actor pools).
+Digests re-recorded on purpose: full 5636329c0553f226 -> **684840012af3432b**, `DIGEST_ENCODING=0` 21ecc979c7a67fea
+-> **c860817b0cf925ac**, `DIGEST_ENCODING=v5` 1b361246865ddf4e -> **5c5ad44094f680bf**; RULES_EPOCH bumped and the Delver
+canary library stamped (60 of 60 spots) in the same commit. The six sealed seeds that hit the Pollinator panic (102.7:
+3106, 10787, 12276, 12711, 13674, 18106) pass with `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1`.
+
+**Why a K-sample deal.** zero-core determinizes once per simulation (128+ a decision). The sealed prior costs
+**2,673 us a deal with arena pools** (115 us with paper) against a few microseconds for the rest of a deal
+(`deal_cost`): an arena pool alone is 2,225 us (the collation's uncommon run, 101.1), a paper pool 10 us, a build 31 us.
+
+**The design** (`hidden_decks::DealCache`, in `MatchState::deal`; `Game` untouched). A request of the prior is
+everything it reads: the opponent's seat, the deck's size n, the shown cards R, a revealed companion. For a request the
+prior's K decks are drawn once, from a generator seeded by the game's salt (from the match seed) and the request alone,
+each checked (`check_sample`) and stored ready to deal (the deck, the sideboard, the match's pool and counts); every
+deal draws one of the K uniformly with its own generator, then deals hand, library and clouds as before. The memo
+(the last 16 requests) is shared by a game's clones behind a mutex in `MtgAz`, so a simulation after the first finds
+its request's decks. A sealed prior's pools come from a **bank of K pools per seat and game** (`DeckPrior::bank`,
+`sample_from`: what the prior draws before it reads R), so a new R costs K conditionings and builds, not K arena pool
+generations; a request whose shown cards span four or five colours builds once (no pair and splash covers them).
+Determinism: the K decks are a function of the salt and the request, the pick of the deal's seed; the memo only saves
+work (`the_k_sample_deal_is_a_function_of_the_seed_and_the_information`: a cold memo deals the same world bit for bit).
+A tilted deal (the reader's hook) samples the prior afresh. The spec key `"deal_samples"` (default **32**; 0: the prior
+sampled at every deal, 102.6's behaviour); the fuzz's hidden mode follows `FUZZ_DEAL_SAMPLES` (default 32).
+
+**What K changes.** Within a request the search's worlds are K draws of the prior, reused: a Monte Carlo approximation
+of the prior inside the search (the empirical distribution of K samples instead of the prior itself), not a rules
+change - every world still meets K1-K3 exactly and depends only on its seed and the viewer's information. The bank adds
+that one game's requests share K pools (a new R reconditions the same pools), which correlates the worlds across
+requests of a game, not within one. K = 32: at 128 simulations a decision each deck is used about four times, and 32
+decks span the prior's colour choices (pairs, splash) well while a new request costs 32 conditioned builds (~6.6 ms,
+about one arena pool generation x 3).
+
+**Measured** (`cargo test --release -p engine --test hidden deal_cost -- --ignored --nocapture`, 40 sealed positions
+each, 128 deals a position, the desktop shared with other fuzzers):
+
+| | K = 0 (102.6) | K = 32, a memo per position (bank built at its first deal) | K = 32, the game's bank built |
+|---|---:|---:|---:|
+| arena: mean per deal over 128 | 2,673 us | 615 us (first deal 78 ms) | **54 us** (first deal 6.6 ms, then ~2.5 us) |
+| paper: mean per deal over 128 | 115 us | 31 us (first 3.7 ms) | **23 us** (first 2.7 ms, then ~2 us) |
+
+A decision whose request repeats an earlier one (no new card shown) costs ~2-3 us a deal. The bank's 32 arena pools
+(~71 ms) are paid once per seat and game.
+
+**Results on 8b940c8** (the K-sample deal at its default 32): full engine suite 2,191 passed, 4 failed, 16 ignored -
+the four were B4's graveyard-cast tests from the merge, written before D2's two-step cast from a graveyard (100.5);
+3d77293 makes them take the two steps (tests only), and they pass (`--lib` 1, `rules_payment_b` 37). `FUZZ_GAMES=20000`
+(default): passed (wins 9,815 / 10,060, 125 draws; 1,000 matches; 2,435 s). `FUZZ_POOL=eoe FUZZ_HIDDEN_DECKS=1
+FUZZ_GAMES=20000`: passed, every seed (wins 7,206 / 7,045, 5,749 draws; 655,562 worlds, all with another deck; 2,502 s
+in four chunks). `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_GAMES=20000`: passed, every seed, none skipped (wins
+9,653 / 9,504, 843 draws; 577,942 worlds, 577,718 with another deck; 2,648 s). The gate: below.
+
+The engine gate on 1be6d67 (`python tools/gate.py engine --tested-sha 8b940c8 --expect-digest 684840012af3432b --expect-digest0
+c860817b0cf925ac --no-mac`, a quieter machine): build, both digests, `az` 45, `limits` 10, `hidden` 25, pytest 218 passed and 1
+skipped, the search smoke: `GATE PASSED WITH SKIPS engine 1be6d67382b9 in 828s - skipped: mac-recheck (--no-mac)`.
 
 ## 103. The heuristic and the yardsticks on Edge of Eternities (branch `eoe-bot`, 2026-11-09)
 

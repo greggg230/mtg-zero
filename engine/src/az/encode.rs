@@ -1207,7 +1207,7 @@ impl Game {
         let legal = |a: u16| -> bool {
             mine_to_decide && decision.is_some_and(|d| d.options.binary_search_by_key(&a, |o| o.action).is_ok())
         };
-        self.encode_globals(me, &mut out[O_GLOBALS..O_GLOBALS + GLOBALS]);
+        self.encode_globals(me, knower, &mut out[O_GLOBALS..O_GLOBALS + GLOBALS]);
         self.encode_globals_v5(me, &mut out[O_GLOBALS_V5..O_GLOBALS_V5 + GLOBALS_V5]);
         self.encode_globals_v6(me, ids, &mut out[O_GLOBALS_V6..O_GLOBALS_V6 + GLOBALS_V6]);
         self.encode_bags(me, knower, ids, out);
@@ -2051,7 +2051,7 @@ impl Game {
         g[g5::EXTRA_COMBATS] = squash(t.extra_combats as f32 / 2.0);
     }
 
-    fn encode_globals(&self, me: PlayerId, g: &mut [f32]) {
+    fn encode_globals(&self, me: PlayerId, knower: PlayerId, g: &mut [f32]) {
         let t = &self.turn;
         g[0] = squash(t.number as f32 / 50.0);
         g[1 + t.step as usize] = 1.0; // 14 steps: 1..15
@@ -2141,8 +2141,12 @@ impl Game {
             // 100.7.)
             o[glob::COMPLETED] = squash(completed as f32 / 2.0);
             o[glob::EXPERIENCE] = squash(pl.experience as f32 / 4.0);
-            // Layout v4 (ENGINE.md 35).
-            o[glob::SIDEBOARD] = self.sideboard_size(p) as f32 / 15.0;
+            // Layout v4 (ENGINE.md 35). With hidden decklists the other
+            // player's sideboard size is hidden (it tells their basic lands:
+            // left at 0, ENGINE.md 102.1).
+            if !(self.spec.hidden_decklists && p != knower) {
+                o[glob::SIDEBOARD] = self.sideboard_size(p) as f32 / 15.0;
+            }
             o[glob::COMPANION] = self.companion_outside(p).is_some() as u8 as f32;
         }
         g[glob::CHOOSER] = (t.chooser == me) as u8 as f32;
@@ -2484,7 +2488,14 @@ pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
     let flipped = me != knower;
     let pool = &m.pools[op_ as usize];
     let hidden = m.format == super::Format::Bo3;
+    // (Hidden decklists, ENGINE.md 102: nothing of the knower's opponent's
+    // pool is known; framed in their seat, the frame's opponent is the
+    // knower, whose own pool it is.)
+    let unknown_pool = a.g.spec().hidden_decklists && !flipped;
     for &(def, n) in &pool.list[..pool.n_cards] {
+        if unknown_pool {
+            break;
+        }
         if !hidden || flipped || super::sample::known_before(m, op_, ids, def) {
             out[O_BAGS + bag::OPP_POOL * D + ids[def as usize] as usize] += 0.25 * n as f32;
         }
@@ -2596,6 +2607,43 @@ pub fn encode_sideboarding(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) 
         s[list::BASIC] = basic as u8 as f32;
         s[list::DECIDED] = sb.last.is_some_and(|l| k <= l as usize) as u8 as f32;
     }
+}
+
+/// The deck reader's declared inputs (ENGINE.md 102.4; zero-core `feat/deck-reader`, its docs/az.md
+/// 36: a game package's `readers` entry `{target: 'deck', inputs: [[offset, count], ...]}`, flat
+/// features of the bags and global blocks only, in feature order, each once): what the viewer has
+/// seen of its opponent's cards, by identity, and the public counts. (name, offset, count) in
+/// layout v6. Framed as the encoding (ENGINE.md 100.5): "the opponent" is the frame's.
+pub fn deck_reader_inputs() -> Vec<(&'static str, usize, usize)> {
+    let b = |i: usize| O_BAGS + i * D;
+    vec![
+        ("globals: the game (turn, step, who is active and has priority, the stack's size, ...)", O_GLOBALS, 24),
+        ("globals: the opponent (life, hand, library, graveyard and exile sizes, lands played, mana, mulligans, the board's summary, ...)", O_GLOBALS + 64, 40),
+        ("bag OPP_BATTLEFIELD: their permanents", b(bag::OPP_BATTLEFIELD), D),
+        ("bag OPP_GRAVEYARD", b(bag::OPP_GRAVEYARD), D),
+        ("bag OPP_EXILE: their exiled cards (face down where the viewer knows them)", b(bag::OPP_EXILE), D),
+        ("bag OPP_HAND_KNOWN: their hand cards the viewer knows", b(bag::OPP_HAND_KNOWN), D),
+        ("bag OPP_HAND_CLOUD: cards the viewer saw and knows are in their hand (or their library, under hidden decklists)", b(bag::OPP_HAND_CLOUD), D),
+        ("bag OPP_LIBRARY_KNOWN: their library cards the viewer knows, or knows are in some cards of it", b(bag::OPP_LIBRARY_KNOWN), D),
+        ("bag OPP_REVEALED: their reveals in earlier games of a match", b(bag::OPP_REVEALED), D),
+        ("bag OPP_PHASED: their phased-out permanents", b(bag::OPP_PHASED), D),
+        ("match: the opponent's deck size", O_MATCH + mtch::OPP_DECK, 1),
+        ("globals v5: the opponent (cards drawn, spells cast this turn and this game, ...)", O_GLOBALS_V5 + g5::PLAYER, g5::PLAYER),
+    ]
+}
+
+/// `deck_reader_inputs` as JSON (checked in as `mtgz/az/deck_reader_v6.json`, a test keeps the
+/// two equal): `{"target": "deck", "layout": 6, "inputs": [[offset, count], ...], "names": [...]}`.
+pub fn deck_reader_json() -> String {
+    let ins = deck_reader_inputs();
+    let v = serde_json::json!({
+        "target": "deck",
+        "layout": 6,
+        "features": NUM_FEATURES,
+        "inputs": ins.iter().map(|&(_, o, n)| [o, n]).collect::<Vec<_>>(),
+        "names": ins.iter().map(|&(name, _, _)| name).collect::<Vec<_>>(),
+    });
+    serde_json::to_string_pretty(&v).unwrap() + "\n"
 }
 
 /// The object layout of this encoding for zero-core's token network (arch `tokens`, zero-core

@@ -37,8 +37,9 @@ def positions(n=40, seed=0, spec=SPEC):
 
 def test_the_package_declares_belief_and_the_engine_computes_it():
     info = G.info('mtg')
-    assert [tuple(t) for t in info['aux_layout']] == [('belief', 1024)] and info['aux_width'] == 1024
-    assert P.PACKAGE.aux_of('mtg') == [['belief', 1024, 'multinomial']]
+    # (and the deck target, docs/ENGINE.md 102.4)
+    assert [tuple(t) for t in info['aux_layout']] == [('belief', 1024), ('deck', 1024)] and info['aux_width'] == 2048
+    assert P.PACKAGE.aux_of('mtg') == [['belief', 1024, 'multinomial'], ['deck', 1024, 'multinomial']]
     assert G.info('team_draft')['aux_layout'] == []
     from mtgz.az.run import DEFAULTS
     assert DEFAULTS['aux_belief_w'] == 0.0
@@ -52,7 +53,7 @@ def test_the_target_is_the_opponents_hand_by_name_and_never_in_the_features(spec
         me = g.to_move
         st = json.loads(g.export_state())
         opp = [p for p in st['players'] if p['id'] == 1 - me][0]
-        t = np.asarray(g.aux_target(me))
+        t = np.asarray(g.aux_target(me))[:B.D]
         assert collections.Counter({nm[i]: int(t[i]) for i in np.flatnonzero(t)}) == \
             collections.Counter(c['name'] for c in opp['hand'])
         x = np.asarray(g.encode(me))
@@ -65,7 +66,7 @@ def test_the_target_is_the_opponents_hand_by_name_and_never_in_the_features(spec
             d = g.clone()
             d.determinize(me, 1000 + k)
             assert np.array_equal(np.asarray(d.encode(me)), x)
-            differ += not np.array_equal(np.asarray(d.aux_target(me)), t)
+            differ += not np.array_equal(np.asarray(d.aux_target(me))[:B.D], t)
     assert differ > 20
 
 
@@ -78,11 +79,12 @@ def test_selfplay_records_it_and_it_sums_to_the_public_hand_size():
         drive(drv, {'m': UniformEvaluator()})
         rows[aux] = drv.take_samples()
     s0, s1 = rows[False], rows[True]
-    assert 'aux' not in s0 and s1['aux'].shape == (len(s1['player']), 1024)
+    # (both targets: the hand's 1024 columns, then the deck's, docs/ENGINE.md 102.4)
+    assert 'aux' not in s0 and s1['aux'].shape == (len(s1['player']), 2048)
     for k in s0:
         assert np.array_equal(s0[k], s1[k]), k
     n, _, _, _ = B.public(s1['x'])
-    assert np.array_equal(s1['aux'].sum(1), n)
+    assert np.array_equal(s1['aux'][:, :1024].sum(1), n)
     assert (n > 0).mean() > 0.8
 
 
@@ -121,7 +123,7 @@ def test_a_replay_of_a_checkpoint_with_the_head_shows_belief(tmp_path):
         assert b['for'] == 1 - f['p'] and b['n'] == len(opp['hand']) and len(b['cards']) <= 12
         assert all(isinstance(c[0], str) for c in b['cards'])
         assert sum(c[1] for c in b['cards']) <= b['n'] + 1e-6
-    assert [s['aux'] for s in reps[0]['seats'] if s['kind'] == 'nn'] == [['belief']]
+    assert [s['aux'] for s in reps[0]['seats'] if s['kind'] == 'nn'] == [['belief', 'deck']]
     from mtgz.az.replays import summary
     assert summary(reps[0])['belief'] is True
 
@@ -149,14 +151,15 @@ def test_belief_search_rebuilds_the_drivers_games_and_deals_by_the_belief(tmp_pa
     for gid, k, g in bs.rebuilt(str(p)):          # (raises when a rebuilt game leaves its log)
         seen += 1
         v = g.to_move
-        t = np.asarray(g.aux_target(v))
+        t = np.asarray(g.aux_target(v))[:B.D]
         if not t.sum() or seen % 25:
             continue
         x = np.asarray(g.encode(v))
         pred = np.full(B.D, 1e-4, np.float32)
         pred[np.flatnonzero(t)[0]] = 1.0
         w = g.clone()
-        w.determinize_with(v, 5, pred / pred.sum(), 2.0, 1000.0)
+        # (the prediction of every target: the deck's, which this deal does not read, uniform)
+        w.determinize_with(v, 5, np.concatenate([pred / pred.sum(), np.full(B.D, 1.0 / B.D, np.float32)]), 2.0, 1000.0)
         assert np.array_equal(np.asarray(w.encode(v)), x) and w.legal() == g.legal()
         dealt += 1
     assert seen > 100 and dealt > 3, (seen, dealt)

@@ -278,14 +278,14 @@ pub(crate) fn knowledge(g: &Game, viewer: PlayerId, owner: PlayerId, sizes: [usi
 
 /// May card `d` be in a deck that fulfills companion condition `cond`
 /// (per card; `DifferentNames` limits copies, below)?
-fn allowed(db: &CardDb, cond: Option<&DeckCond>, d: DefId) -> bool {
+pub(crate) fn allowed(db: &CardDb, cond: Option<&DeckCond>, d: DefId) -> bool {
     match cond {
         Some(DeckCond::Each { cards, must }) => db.def_matches(cards, d) != Some(true) || db.def_matches(must, d) == Some(true),
         _ => true,
     }
 }
 
-fn one_per_name(db: &CardDb, cond: Option<&DeckCond>, d: DefId) -> bool {
+pub(crate) fn one_per_name(db: &CardDb, cond: Option<&DeckCond>, d: DefId) -> bool {
     matches!(cond, Some(DeckCond::DifferentNames { cards }) if db.def_matches(cards, d) == Some(true))
 }
 

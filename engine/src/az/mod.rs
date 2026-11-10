@@ -29,6 +29,7 @@ pub mod draft_bots;
 pub mod draft_encode;
 pub mod encode;
 pub mod eoe;
+pub mod hidden_decks;
 pub mod identity;
 pub mod lab;
 pub mod matches;
@@ -108,6 +109,13 @@ pub enum DeckMode {
 /// sideboarding between games is not built: `"bo3"` is an error), and never
 /// random, evaluation or drafted decks (those are limited's).
 ///
+/// Hidden decklists (ENGINE.md 102): `"hidden_decklists": true` (default false; best-of-one,
+/// not with constructed, drafted or `start`) hides each player's deck from the other entirely
+/// (EoE sealed: nobody sees the opponent's pool): `determinize` deals the opponent's whole unseen
+/// deck from a prior (`hidden_decks.rs`: on this branch the table's `TablePrior`) conditioned on
+/// what the viewer has seen, and no encoding shows what of their decklist they have not shown.
+/// Without it every spec is what it was.
+///
 /// `"log": true` keeps each game's log (`GameSpec::log`) for the spectator view
 /// (`view.rs`, the replay recorder); it changes nothing else.
 ///
@@ -144,6 +152,11 @@ pub struct MtgSpec {
     pub log: bool,
     /// The position lab's start (ENGINE.md 76, `lab.rs`): games begin at this spot.
     pub start: Option<std::sync::Arc<lab::Start>>,
+    /// Hidden decklists (ENGINE.md 102).
+    pub hidden_decklists: bool,
+    /// Hidden decklists' K-sample deal (ENGINE.md 102.8): the prior's K decks per request, one
+    /// picked per deal (`"deal_samples"`, default 32; 0 = sample the prior at every deal).
+    pub deal_samples: usize,
     /// Sealed play (ENGINE.md 101): the pools, the builder and the seats; None for every other spec.
     pub sealed: Option<sealed::Shared>,
 }
@@ -164,6 +177,8 @@ impl Default for MtgSpec {
             constructed: false,
             log: false,
             start: None,
+            hidden_decklists: false,
+            deal_samples: 32,
             sealed: None,
         }
     }
@@ -220,6 +235,9 @@ impl MtgSpec {
         }
         if let Some(x) = obj.get("sealed") {
             s.sealed = Some(std::sync::Arc::new(sealed::SealedSpec::parse(x)?));
+            // Sealed hides the decklists (ENGINE.md 102.6: nobody sees the opponent's pool), unless
+            // the spec says `"hidden_decklists": false` (open decklists, ENGINE.md 101.3's game).
+            s.hidden_decklists = true;
         }
         let db = s.db();
         let mut pools = None;
@@ -242,6 +260,8 @@ impl MtgSpec {
                 "seed" => s.seed = Some(int()?),
                 "constructed" => {}
                 "log" => s.log = x.as_bool().ok_or("mtg spec: log must be a boolean")?,
+                "hidden_decklists" => s.hidden_decklists = x.as_bool().ok_or("mtg spec: hidden_decklists must be a boolean")?,
+                "deal_samples" => s.deal_samples = int()? as usize,
                 "start" => s.start = Some(std::sync::Arc::new(lab::Start::parse(x, db)?)),
                 "chooser" => {
                     let c = int()?;
@@ -319,6 +339,16 @@ impl MtgSpec {
             return Err("mtg spec: start is for best-of-one games without a match seed".into());
         }
         s.pools = pools.unwrap_or(s.format == Format::Bo3);
+        if s.hidden_decklists {
+            // (ENGINE.md 102: best-of-three hides decks within known pools, 36.11; constructed
+            // and drafted decks need priors of their own; a lab start deals its own spot.)
+            if s.format != Format::Bo1 {
+                return Err("mtg spec: hidden_decklists is for best-of-one (best-of-three hides decks within pools, ENGINE.md 36.11)".into());
+            }
+            if s.constructed || matches!(s.decks, DeckMode::Drafted(_)) || s.start.is_some() {
+                return Err("mtg spec: hidden_decklists needs limited decks of the spec (not constructed, drafted or a lab start: no prior for them yet, ENGINE.md 102)".into());
+            }
+        }
         if s.sealed.is_some() {
             if s.format != Format::Bo1 {
                 return Err("mtg spec: sealed best-of-three (sideboarding, hidden decklists) is not built yet: format must be \"bo1\"".into());
@@ -525,13 +555,48 @@ impl MtgAz {
             max_turns: spec.max_turns,
             mulligans: spec.mulligans,
             chooser: spec.chooser,
-            hidden_decks: spec.format == Format::Bo3,
+            hidden_decks: spec.format == Format::Bo3 || spec.hidden_decklists,
+            hidden_decklists: spec.hidden_decklists,
             log: spec.log,
             ..GameSpec::default()
         };
-        let [a, b] = &seats;
-        let g = Game::with_sideboards(spec.db(), gspec, [&a.deck, &b.deck], [&a.sideboard, &b.sideboard], seed)?;
-        let m = MatchState::new(spec.db(), spec.format, gspec, &seats, seed)?;
+        // (The prior of each deck, ENGINE.md 102: a sealed spec's seats the sealed prior of its
+        // collation, boosters and builder; any other spec the stub over its table.)
+        let priors: Option<std::sync::Arc<dyn hidden_decks::DeckPrior>> = spec.hidden_decklists.then(|| match &spec.sealed {
+            Some(sl) => std::sync::Arc::new(hidden_decks::SealedPrior::of_spec(sl)) as std::sync::Arc<dyn hidden_decks::DeckPrior>,
+            None => hidden_decks::TablePrior::of(spec.db()) as std::sync::Arc<dyn hidden_decks::DeckPrior>,
+        });
+        let mut az = MtgAz::from_seats(spec.db(), gspec, spec.format, &seats, seed, [priors.clone(), priors])?;
+        az.m.deal.k = spec.deal_samples;
+        Ok(az)
+    }
+
+    /// A match whose first game has these seats (`MtgAz::new`'s, and the fuzz's own decks):
+    /// `deck_priors` the hidden decklists' prior of each seat's deck (ENGINE.md 102; both or
+    /// neither, with `gspec.hidden_decklists`). Every real deck must be inside its prior's
+    /// support, or the real game would lie outside the other player's information.
+    pub fn from_seats(
+        db: &'static CardDb,
+        gspec: GameSpec,
+        format: Format,
+        seats: &[Seat; 2],
+        seed: u64,
+        deck_priors: [Option<std::sync::Arc<dyn hidden_decks::DeckPrior>>; 2],
+    ) -> Result<MtgAz, String> {
+        if deck_priors.iter().any(|p| p.is_some() != gspec.hidden_decklists) {
+            return Err("mtg: hidden decklists need a deck prior for each seat, and only they take one (ENGINE.md 102)".into());
+        }
+        for (p, prior) in deck_priors.iter().enumerate() {
+            if let Some(pr) = prior {
+                if let Some(&d) = seats[p].deck.iter().find(|&&d| pr.support().binary_search(&db.def(d).card_def(d)).is_err()) {
+                    return Err(format!("mtg: p{p}'s {} is outside the support of its deck prior {} (ENGINE.md 102)", db.def(d).name, pr.name()));
+                }
+            }
+        }
+        let [a, b] = seats;
+        let g = Game::with_sideboards(db, gspec, [&a.deck, &b.deck], [&a.sideboard, &b.sideboard], seed)?;
+        let mut m = MatchState::new(db, format, gspec, seats, seed)?;
+        m.deck_priors = deck_priors;
         let mut az = MtgAz { g, m, lab: None };
         az.set_known_pools();
         Ok(az)
@@ -679,6 +744,10 @@ impl SearchGame for MtgAz {
         if self.m.format == Format::Bo3 && !self.m.over {
             self.sample_hidden_pool(viewer as u8, &mut r);
         }
+        // Hidden decklists (ENGINE.md 102): the opponent's whole unseen deck from its prior.
+        if self.hidden_decklists() {
+            self.sample_hidden_deck(viewer as u8, &mut r, None);
+        }
         if self.m.sb.is_none() {
             self.g.determinize(viewer as u8, &mut r);
         }
@@ -732,13 +801,16 @@ impl SearchGame for MtgAz {
         }
     }
 
-    /// One auxiliary target (ENGINE.md 66, zero-core docs/az.md 15): `belief`, the decider's
-    /// opponent's hand (the encoding frame's opponent's, ENGINE.md 100.5) as counts per card identity (the `identity::D` identities of the
-    /// encoding, ENGINE.md 22.2: the cube's, the legacy cards', the tokens'). The TRUE hand -
-    /// a training label that zero-core records with a sample when a run's `aux_belief_w` is on,
-    /// never an input: `encode` shows the viewer only what it knows (ENGINE.md 10). Empty
-    /// (no target) while sideboarding, between the games of a match.
-    const AUX: &'static [(&'static str, usize)] = &[("belief", identity::D)];
+    /// Two auxiliary targets (ENGINE.md 66, 102.4, zero-core docs/az.md 15), each counts per card
+    /// identity (the `identity::D` identities of the encoding, ENGINE.md 22.2: the cube's, the
+    /// legacy cards', the tokens'): `belief`, the decider's opponent's hand (the encoding frame's
+    /// opponent's, ENGINE.md 100.5); `deck`, that player's unseen cards - their hand, library and
+    /// face-down cards the decider does not know exactly (what `determinize` deals, and with hidden
+    /// decklists the deck reader's target: a multinomial whose total is public). TRUE states -
+    /// training labels that zero-core records with a sample when a run's `aux_belief_w` or
+    /// `aux_deck_w` is on, never inputs: `encode` shows the viewer only what it knows (ENGINE.md
+    /// 10). Empty (no target) while sideboarding, between the games of a match.
+    const AUX: &'static [(&'static str, usize)] = &[("belief", identity::D), ("deck", identity::D)];
 
     fn aux_target(&self, viewer: usize, out: &mut [f32]) {
         if self.m.sb.is_some() {
@@ -750,6 +822,12 @@ impl SearchGame for MtgAz {
         let seat = self.g.encoding_seat(viewer as u8);
         for &c in &self.g.player(1 - seat).hand {
             out[ids[self.g.obj(c).def as usize] as usize] += 1.0;
+        }
+        // `deck` (ENGINE.md 102.4): the frame opponent's cards the decider does not know exactly,
+        // each by the card it is (a face-down permanent's card: `Game::ident`).
+        let deck = &mut out[identity::D..2 * identity::D];
+        for c in self.g.unknown_to(viewer as u8, 1 - seat) {
+            deck[ids[self.g.ident(c) as usize] as usize] += 1.0;
         }
     }
 

@@ -346,6 +346,8 @@ pub fn fields() -> Vec<Field> {
         sb: Derived "sideboarding between games: encoded by encode_sideboarding, not a game position",
         rng: Hidden "seeds the later games: determinize reseeds it",
         priors: Hidden "the prior of each player's unknown first picks (ENGINE.md 36.11)",
+        deck_priors: Derived "hidden decklists: the prior of each player's deck (ENGINE.md 102), a setting of the match, the same in every world",
+        deal: Derived "hidden decklists: the K-sample deal's setting and memo (ENGINE.md 102.8), a function of the match's salt and what the viewer knows",
     });
     v
 }
@@ -680,7 +682,10 @@ pub fn perturbations() -> Vec<Perturbation> {
             effect(&mut a.g, c, Mod::ExileIfLeaves)
         }),
         p!("a creature can't block", "Game.effects", |a, r| {
-            let c = pick(&slot_creatures(&a.g), r)?;
+            // (One that can block now, as "can't be blocked" below: a creature that already can't
+            // block would not change; ENGINE.md 102.7 found one in a hidden-decklist position.)
+            let cs: Vec<CardIdx> = slot_creatures(&a.g).into_iter().filter(|&c| !a.g.flags_of(c).cant_block).collect();
+            let c = pick(&cs, r)?;
             effect(&mut a.g, c, Mod::CantBlock)
         }),
         p!("a creature can't be blocked", "Game.effects", |a, r| {
@@ -1731,6 +1736,13 @@ pub fn limits() -> Vec<Limit> {
         l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),
     ]
 }
+
+/// The perturbations of fields hidden decklists hide from the other player
+/// (ENGINE.md 102: public in every other format): with hidden decklists the
+/// gate requires each to reach its owner's view and encoding and neither of
+/// the other player's (`tests/az.rs`, `public_state_reaches_the_encoding`).
+/// The sideboard's size tells the number of basic lands in the deck.
+pub const HIDDEN_BY_DECKLISTS: [&str; 1] = ["a sideboard card fewer"];
 
 /// The perturbations layout v6 encodes (ENGINE.md 100.5): the next-layout
 /// gaps of the Edge of Eternities port (ENGINE.md 99) and workstream C
