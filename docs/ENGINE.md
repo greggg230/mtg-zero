@@ -503,7 +503,10 @@ at once (704.5e, section 26.4).
   (`Game::redeal`), then runs this one. **Sideboards** (M8a, section 35.5) are hidden from the
   other player but for a revealed companion (public, a card in no zone); with open decklists
   `determinize` keeps them (no card of a sideboard can enter the game but a revealed
-  companion), with hidden decks the opponent's is the rest of their sampled pool.
+  companion), with hidden decks the opponent's is the rest of their sampled pool. **Hidden decklists**
+  (EoE sealed, section 102, `"hidden_decklists"`) hide the whole deck: the match's `determinize` samples the
+  opponent's deck from a prior conditioned on what the viewer has seen (`az/hidden_decks.rs`), deals it
+  (`Game::redeal`), then runs this one; clouds over a whole hand and library are kept there.
 * **Cards exiled face down** (M7c tail part 3, section 30.2): `Zone::FaceDown` is hidden like a
   library. A card moved there keeps its knowledge bits and is known to its owner, who saw it go
   (a look keyed `KEY_LOOK`, private; a hand exiled face down; a hideaway pile); a cloud whose
