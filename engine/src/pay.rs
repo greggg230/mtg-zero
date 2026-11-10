@@ -3931,21 +3931,23 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
         needs: &mut SVec<Tag, 8>,
         chosen: &[Tag],
         units: &mut Units,
-        groups: &[(&[Way], usize)],
+        groups: &[(&[Way], Vec<&[Way]>)],
         b: Budget,
         crew: i64,
         sh: &mut Shared,
         nodes: &mut u32,
     ) -> Option<bool> {
         *nodes = nodes.checked_sub(1)?;
-        let Some((&(ways, m), rest)) = groups.split_first() else {
+        let Some(((ways, members), rest)) = groups.split_first() else {
             return Some(crew <= 0 && sh.leaf(b).is_some_and(|b| payable_within_n(cost, allow, needs, chosen, units, b)));
         };
         let none_ok = !ways.iter().any(free_way);
-        each_way(cost, allow, needs, chosen, units, ways, 0, m, none_ok, rest, b, crew, sh, nodes)
+        each_way(cost, allow, needs, chosen, units, ways, 0, members.len(), none_ok, rest, b, crew, sh, members, 0, nodes)
     }
     /// The `left` cards of a group still to place, among `ways[i..]` (and
     /// none, with `none_ok`): how many use `ways[i]`, the rest after it.
+    /// (`members`: the group's cards, `placed` of them placed: each copy
+    /// takes the next card's own way, its chain ids its own, 13.15.)
     #[allow(clippy::too_many_arguments)]
     fn each_way(
         cost: &ManaCost,
@@ -3957,10 +3959,12 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
         i: usize,
         left: usize,
         none_ok: bool,
-        rest: &[(&[Way], usize)],
+        rest: &[(&[Way], Vec<&[Way]>)],
         b: Budget,
         crew: i64,
         sh: &mut Shared,
+        members: &[&[Way]],
+        placed: usize,
         nodes: &mut u32,
     ) -> Option<bool> {
         if left == 0 || i == ways.len() {
@@ -3975,7 +3979,7 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
         let mut lc = crew;
         let mut t = 0;
         let found = loop {
-            match each_way(cost, allow, needs, chosen, units, ways, i + 1, left - t, none_ok, rest, lb, lc, sh, nodes) {
+            match each_way(cost, allow, needs, chosen, units, ways, i + 1, left - t, none_ok, rest, lb, lc, sh, members, placed + t, nodes) {
                 Some(false) => {}
                 other => break other,
             }
@@ -3987,13 +3991,14 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
                 break Some(false);
             }
             sh.add(w, 1);
+            let wm = &members[placed + t][i];
             t += 1;
             if !w.unpooled() && !sh.bound_ok() {
                 break Some(false);
             }
-            units.extend(w.units.iter().copied());
-            if w.need != 0 {
-                needs.extend(std::iter::repeat_n(w.need, w.need_n as usize));
+            units.extend(wm.units.iter().copied());
+            if wm.need != 0 {
+                needs.extend(std::iter::repeat_n(wm.need, wm.need_n as usize));
             }
             lc = lc.saturating_sub(w.crew);
         };
@@ -4012,12 +4017,28 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
     if alts.is_empty() {
         return crew <= 0 && sh.leaf(budget).is_some_and(|b| payable_within_n(cost, allow, marked, chosen, fixed, b));
     }
-    // Identical cards, grouped (in first-appearance order).
-    let mut groups: Vec<(&[Way], usize)> = Vec::new();
+    // Identical cards, grouped (in first-appearance order): alike but for
+    // their activations' chain ids (13.15: their orders are tried alike,
+    // `mana::payable_iter`).
+    let strip = |ws: &[Way]| -> Vec<Way> {
+        ws.iter()
+            .map(|w| Way {
+                units: w.units.iter().map(|u| Unit { mask: crate::mana::with_chain(u.mask, 0), ..*u }).collect(),
+                need: crate::mana::with_chain(w.need, 0),
+                ..w.clone()
+            })
+            .collect()
+    };
+    let mut keys: Vec<Vec<Way>> = Vec::new();
+    let mut groups: Vec<(&[Way], Vec<&[Way]>)> = Vec::new();
     for ws in alts {
-        match groups.iter_mut().find(|(g, _)| *g == &ws[..]) {
-            Some((_, m)) => *m += 1,
-            None => groups.push((&ws[..], 1)),
+        let key = strip(ws);
+        match keys.iter().position(|k| *k == key) {
+            Some(g) => groups[g].1.push(&ws[..]),
+            None => {
+                keys.push(key);
+                groups.push((&ws[..], vec![&ws[..]]));
+            }
         }
     }
     let mut units = fixed.clone();

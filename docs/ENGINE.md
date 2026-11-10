@@ -21224,8 +21224,13 @@ activated after it, never its own or an earlier one's: the "pays the cost of" re
   needs and the same mana) keep a fixed order among themselves. Two bounds come first, one
   matching each (`Chains`): with no such mana paying such a cost (the old rule) a payment every
   order allows holds; with every such mana free to pay every such cost (its own too) one that fails
-  fails every order. (Without them the EoE fuzz ran seven times slower: 150 games in 281 s against
-  36.) A search past `SEARCH_NODES` is a loud failure (ENGINE.md 51). `payable_iter`'s counts are u32 and its groups unbounded (a u8
+  fails every order. A payment with such costs among its needs is decided by the matching
+  (`payable_restricted`: their chain ids part the needs and units into many groups, which
+  `best_chosen`'s split of each need over the groups made exponential), and cards alike but for
+  their activations' chain ids are one group of `ways_payable`'s search (each copy takes the next
+  card's way). (Without these the EoE fuzz ran seven times slower, some games a hundred times:
+  seed 1005, 0.4 s before 13.15, over 120 s; now 1.3 s.) A search past `SEARCH_NODES` is a loud
+  failure (ENGINE.md 51). `payable_iter`'s counts are u32 and its groups unbounded (a u8
   count saturated, 128 tags and 24 needs were fixed arrays).
 * **`UseCap`** (N10) relied on the old rule ("an ability with a mana cost pays only the cost, so it
   is used at most the cost's size times"): such an ability is never cut now.

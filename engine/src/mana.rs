@@ -518,7 +518,11 @@ fn payable_ordered(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], av
     // matching. Otherwise every unit may pay every need it meets in type.)
     let main = cost_need(0, allow);
     let kept_from = |u: Tag| purposes(u) != 0 && (!spend_ok(u, main) || extra.iter().any(|&e| !spend_ok(u, e)));
-    if chosen.iter().any(|&u| kept_from(u)) || available.clone().any(kept_from) {
+    // (And with the mana costs of mana abilities among the needs: their chain
+    // ids part the needs and the units into many groups, which
+    // `best_chosen`'s split of each need over the groups made exponential,
+    // 13.15; the matching is polynomial.)
+    if extra.iter().any(|&e| e & NOT_MADE as Tag != 0) || chosen.iter().any(|&u| kept_from(u)) || available.clone().any(kept_from) {
         return payable_restricted(cost, main, extra, chosen, available, mode);
     }
     // (Counted in u32: any number of units of a tag, never saturating.)
