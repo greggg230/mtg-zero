@@ -225,12 +225,14 @@ PRESETS['eoe-smoke'] = dict(PRESETS['mtg-smoke'], game='mtg_eoe', spec=SPEC_EOE,
 # against the 2 previous checkpoints) with what the Delver line measured on this desktop since (ENGINE.md 54.6, 82, 86,
 # 93; runs/r3-deep128x8-2410): sparse batches and windows, the window cache and prefetch, the shard writer thread, the
 # evaluation cache, cq scale 0.3, value targets 0.6 search estimate, the cq move rule in evaluation; the belief head on
-# (aux_belief_w 0.25, as the Delver line), the deck target 0.5 with its reader. Sparse shards are a launch flag (--shard-sparse 1: presets leave it off,
-# ENGINE.md 94)
+# (aux_belief_w 0.25, as the Delver line), the deck target 0.5 with its reader; the search deals the opponent's deck by
+# the deck prediction at the deck tilt 0.5 in self-play and evaluation (ENGINE.md 106.6: a first value, to be A/B'd; the
+# hand's tilt off). Sparse shards are a launch flag (--shard-sparse 1: presets leave it off, ENGINE.md 94)
 PRESETS['eoe-1'] = dict(PRESETS['mtg-3'], game='mtg_eoe', spec=SPEC_EOE, eval_spec=EVAL_SPEC_EOE, sparse=1,
                         window_sparse=1, window_cache=1, train_prefetch=2, shard_writer_thread=1,
                         eval_cache=8192, cq_c_scale=0.3, value_q=0.6, eval_select='cq', aux_belief_w=0.25,
-                        aux_deck_w=0.5, reader_deck=1)
+                        aux_deck_w=0.5, reader_deck=1, selfplay_belief_tilts={'deck': 0.5},
+                        eval_belief_tilts={'deck': 0.5})
 
 # a rented GPU box's self-play settings (tools/vast.py, docs/ENGINE.md 97): one worker process, CUDA inference with
 # token CUDA graphs, the Delver line's 16 threads x 3 groups and 1,536 games in flight (the box's bench: ~25 games/s,
