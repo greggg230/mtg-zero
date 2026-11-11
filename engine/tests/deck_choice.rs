@@ -260,3 +260,56 @@ fn the_game_log_records_the_chosen_decks() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// What the deck choice adds to a game's start (ENGINE.md 107.2; `cargo test --release -p engine --test deck_choice
+/// deck_choice_cost -- --ignored --nocapture`): arena games of eoe-1's spec with and without `deck_choice` (k 32) - the
+/// game's creation, the first world of the decider (the prior's bank and first request, shared with the game's), and one
+/// value choice's worlds (32 candidates x 8 worlds: clone, deal, the choice's step that starts the game, the decider's
+/// encoding) without the network.
+#[test]
+#[ignore]
+fn deck_choice_cost() {
+    use std::time::Instant;
+    let base = r#"{"sealed": {"set": "eoe", "collation": "arena", "best_share": 0.5}, "max_turns": 60}"#;
+    let choice = r#"{"sealed": {"set": "eoe", "collation": "arena", "best_share": 0.5, "deck_choice": {"k": 32, "explore": 0.1}}, "max_turns": 60}"#;
+    let n = 20u64;
+    for (name, sp) in [("eoe-1", base), ("deck choice", choice)] {
+        let s = MtgSpec::parse(sp).unwrap();
+        let (mut create, mut first, mut worlds, mut nw) = (0.0f64, 0.0f64, 0.0f64, 0u64);
+        let mut zr = zero_search::rng::Rng::new(7);
+        let mut x = vec![0.0f32; encode::NUM_FEATURES];
+        for seed in 0..n {
+            let t = Instant::now();
+            let a = MtgAz::new_game(&s, 2, 500 + seed).unwrap();
+            create += t.elapsed().as_secs_f64();
+            let v = a.to_move().unwrap();
+            let t = Instant::now();
+            let mut w = a.clone();
+            w.determinize(v, &mut zr);
+            first += t.elapsed().as_secs_f64();
+            if a.value_choice() {
+                let t = Instant::now();
+                let k = legal(&a).len() as u16;
+                for j in 0..k {
+                    for _ in 0..8 {
+                        let mut w = a.clone();
+                        w.determinize(v, &mut zr);
+                        w.step(act::NUMBER + j, &mut Vec::new()).unwrap();
+                        x.iter_mut().for_each(|f| *f = 0.0);
+                        w.encode(v, &mut x);
+                        nw += 1;
+                    }
+                }
+                worlds += t.elapsed().as_secs_f64();
+            }
+        }
+        println!(
+            "{name}: creation {:.2} ms, the first world (the prior's bank and first request) {:.1} ms, a value choice's worlds {:.1} ms ({} worlds, {:.1} us each)",
+            create * 1e3 / n as f64,
+            first * 1e3 / n as f64,
+            worlds * 1e3 / n as f64,
+            nw / n,
+            worlds * 1e6 / nw.max(1) as f64
+        );
+    }
+}
