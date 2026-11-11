@@ -7119,8 +7119,9 @@ stops at start with the command (44.3).
   `eval_remote` (`team_draft-4v4`: the Mac); the draft network's evaluation stays on the desktop.
 * zerodash (`zero-core/dashboard`) reads `metrics.jsonl` and `elo/ratings.json` only: with
   `eval_remote` its Elo is current (ratings.json comes back) but its win rates vs the yardstick and
-  random stop at the last local evaluation; the game dashboard merges `evals.jsonl`. `models/best.pt`
-  is not copied back (index.json is). Core changes, not made here.
+  random stop at the last local evaluation; the game dashboard merges `evals.jsonl`. A core change, not
+  made here. (`models/best.pt` was not copied back until zero-core f9ca5c3, section 109.1: it now follows
+  the returned index.json.)
 * The Mac shares the venv `~/.venvs/dominion-zero`: a torch upgrade there changes its arithmetic (at
   rounding level, 44.4); the checkout check covers the code, not the venv. Other projects' remote
   evaluations on the Mac (`~/kbz-remote`, `~/domz-remote`) have their own locks and would share its
@@ -7128,6 +7129,15 @@ stops at start with the command (44.3).
 * The remote's host and paths are fixed in `mtgz/az/__init__.py` (`MTGZ_MAC` is mac.sh's only).
 * The Mac's results are not bit-identical to the desktop's for network players (44.4), so a run's
   evaluations before and after the switch differ by the usual noise only.
+
+### 44.7 EoE runs and the S4 races (section 109)
+
+An `mtg_eoe` run's remote evaluation was first tested end to end on 2026-11-11 (run 1's iteration 60 and an
+eoe-smoke run, both on the Mac): its results match the desktop's, and two gaps were closed - the evaluation's
+games now reach the run's game log (`games/eval-iter_NNNN-<pid>.jsonl`), and `models/best.pt` follows the Mac's
+fit (zero-core f9ca5c3). The Mac evaluates one eoe-1 iteration in ~217 s, more than the ~2.2 minutes the
+desktop then spends per iteration (109.3). `tools/mac_races.sh` runs the S4 races (108.6, 107.2) on the Mac
+detached and fetches their results (109.2).
 
 ## 45. Team drafting end to end (M6 part 3)
 
@@ -24765,6 +24775,13 @@ human field.
   (The pool seeds of the earlier value-pick race can replace these, to set the evaluators against the same pools; each
   pool races 4-6 builds, a decided pool stops early.)
 
+  **On the Mac** (section 109.2: its CPU, detached, while the desktop trains): `bash tools/mac_races.sh launch
+  E:/mtg-zero/runs/eoe1/models/iter_0080.pt --procs 6` runs this race (pools 2026-2033; v0's evaluators by default,
+  `--evaluators <v1>` for the retrained ones) and the value-pick race of pools 1001-1004 (`compare choice`, the
+  iteration-39 race's layout), one process per pool; `bash tools/mac_races.sh wait eoe1-iter_0080` fetches the results
+  to `E:/mtg-zero/s4a/races/eoe1-iter_0080/` when they end (`out/evalpick.json`: the pools and the summary over them, as
+  the command above prints; `out/choice.json`).
+
 ### 108.7 Reproducing it, tests, checks
 
 ```
@@ -24800,3 +24817,165 @@ the small log; `compare evalpick` with a tiny network and two evaluators, its su
 * **S4b**: hill climbing on the evaluator (10 us a deck) from the card ranking's seeds, the top builds re-scored and raced;
   more data before a richer model (the set network ties the linear one at 22,700 games), and draw credit (107.3) on the
   version-2 games as a second per-card signal.
+
+## 109. The Mac for EoE: remote evaluation of `mtg_eoe` runs, the S4 races (branch `mac-offload`, 2026-11-11)
+
+Branch `mac-offload` (from main 34e2cf4; zero-core `remote-eval-files` f9ca5c3 from 3eaf8df). **Why.** Run 1's iteration
+is ~5 minutes: self-play ~2 min, training 8 s, the evaluation ~2.8 min (100 games against the heuristic and 10 against
+random at 32 simulations: 49 s; the paired Elo matches against the two previous checkpoints, 2 x 20 games: 122 s;
+iteration 60's metrics) - 55% of it. Run 2 can send that to the Mac (`eval_remote mac`, section 44), which had only
+evaluated `mtg` runs (mtg5, October). And the S4 races (108.6's evaluator picks, 107.2's value pick), network-piloted at
+64 simulations a decision, would hold the desktop for hours after run 1. This section tests the first, fixes what it
+found, measures both on the Mac, and gives the races a launcher. No engine, encoding or search change: digests untouched.
+
+### 109.1 Remote evaluation of an `mtg_eoe` run: tested, two gaps closed
+
+**The tests** (the Mac shared with another agent's fuzz farm, 4-7 cores at nice 19):
+
+* **E1, eoe-1 at run 1's settings**: a scratch copy of run 1 just before iteration 60's evaluation
+  (`E:/mtg-zero-scratch/eval-remote-test/eoe1-iter60`: config.json, checkpoints 58-60, metrics up to 59, the Elo pool
+  `elo/cq-v50-s0.3/results.json` without iteration 60's pairs) resumed with `--iters 60 --eval-remote mac
+  --infer-device cpu --train-device cpu`: no self-play, iteration 60 evaluated through the run's own path (the preflight,
+  `RemoteEval`, the mirror, `python -m mtgz.az.remote eval` on the Mac, the copies back). The mirror's config carried
+  every evaluation setting of run 1 (`elo_paired` 1, `eval_random_games` 10, `eval_select` cq with `cq_c_scale` 0.3,
+  `eval_belief_tilts` {}, `eval_cache` 8192, the evaluation spec's fixed pairs and hidden decklists) and the Mac's
+  overrides (CPU, threads 12, groups 2, 3 inference workers, dense batches).
+* **E2, eoe-smoke from launch**: `python -m mtgz.az.run --run E:/mtg-zero-scratch/eval-remote-test/eoe-smoke-mac --preset
+  eoe-smoke --iters 2 --eval-remote mac --elo-paired 1 --eval-random-games 4 --threads 2` - a fresh mirror, the reference
+  games and every Elo match on the Mac, the deck tilt on (`eval_belief_tilts` deck 1: the pool `visits-b0-tdeck1`).
+  Then the same three evaluations replayed on the desktop's CPU with the mirror's own config and code path
+  (`zero.remote.evaluate_mirror` on a local copy, the game log on as the shim turns it on).
+
+| | the Mac | the desktop |
+|---|---|---|
+| E1 vs the heuristic | 32/100, margin -8.03, rounds 18.32 | 32/100, -8.03, 18.32 (run 1's own evaluation, CUDA) |
+| E1 vs random | 10/10, margin 21.9, rounds 20.0 | 10/10, 21.9, 20.0 |
+| E1 Elo matches (iteration 60's points) | 10/20 against 59, 10/20 against 58 | 11/20, 9/20 |
+| E1 fitted Elo | 850.4 +- 32.2 | 850.3 +- 32.2 |
+| E2 iterations 0-2: vs heuristic, vs random, Elo | 0/8, 0.5/4, -20.6; 0/8, 0/4, -70.0; 0/8, 1/4, 53.1 | the same, every margin and round count too (desktop CPU) |
+| E2 Elo pool (`results.json`, 10 pairs) | | identical |
+| E2 game log (56 games: 24 yardstick, 12 random, 8 reference, 12 Elo) | | identical line for line (actions included) |
+
+The engine is deterministic and the yardstick and random games repeat exactly across machines; network-against-network
+games (Elo) differ now and then by float rounding (the network's priors differ at ~4e-7 between machines, 44.4): two Elo
+games of 40 went the other way in E1, the total the same. Within that, a remote evaluation of an EoE run lands as a
+local one: `evals.jsonl` rows (`eval_yard`, `eval_random`, `elo`, the pool's tag), the pool's `results.json` and
+`ratings.json`, `models/index.json`. **Nothing refused or skipped a setting**: the result's `select` must name the run's
+evaluation rule, which includes the belief tilts (`visits-b0-tdeck1`, `cq-v50-s0.3`), else zero.remote refuses it; the
+mirror's config carries `elo_paired` and `eval_random_games` (the Elo games came in pairs, the random games were played);
+zero-core's co-training refusal concerns `resolver` runs only (an EoE run is a single-game run).
+
+**Two gaps, both silent before:**
+
+* **The game log** (107.1): every finished `mtg_eoe` game of a run's process is logged - self-play and evaluation - but
+  `python -m mtgz.az.remote eval` never turned the log on, so a remote-evaluated EoE run lost every evaluation game: 150 an
+  iteration at eoe-1's settings (100 + 10 + the 40 Elo games, which S4a trains on: 1,700 of its 27,857 games, 108.1).
+  Now the shim turns it on (`mtgz.az.mac.eval_log`) at `MIRROR/games/eval-iter_NNNN-<pid>.jsonl` (one file per evaluating
+  process, as the run's own `games-<pid>.jsonl`; created first, so an evaluation that plays nothing leaves an empty
+  record), the package declares that pattern (`remote_eval_files`), and zero.remote copies every such file into the run's
+  `games/` before the result is recorded - a missing one fails the evaluation (logged, retried every 5 minutes). Those
+  games belong to iteration NNNN whatever their time (the run wrote the iteration's metrics line before the Mac evaluated
+  it): `mtgz.sealed.games.game_iteration`, which `cardstats`, the evaluator's dataset and `tools/sealedai_publish.py` use
+  (a local game's iteration is by time, as before). A retried evaluation logs its replayed games again in its own file,
+  as a run restarted mid-evaluation does locally.
+* **`models/best.pt`** stayed at the last local evaluation's (44.6): zero-core f9ca5c3 sets it after each remote
+  evaluation to the checkpoint the returned `index.json` names best, copied from the run's own `models/`
+  (`elo.set_best`, factored out of `tag_checkpoints` unchanged). E2: best.pt = iteration 0's file, as index.json says.
+
+**zero-core** (`remote-eval-files` f9ca5c3, docs/az.md 5.2): `GamePackage(remote_eval_files={game: [path, ...]})` -
+mirror-relative paths formatted with `iter`, a `*` in the last component matching any characters, refused at
+registration if absolute or leaving the mirror; `RemoteEval._fetch_files`; best.pt; a mirror without `models/index.json`
+after an evaluation is an error (Run.elo_update always writes it). No run setting, nothing in self-play, search or local
+evaluation. The branch is pushed to the desktop's `C:/Users/Gregg Keithley/zero-core` (where worktrees initialise the
+submodule from) and to the Mac's mirror by mac.sh, **not to GitHub** (to do before merging: a pin must exist there).
+
+### 109.2 The S4 races on the Mac
+
+**What one race process does there.** A comparison plays its candidates block by block, one driver at a time, and the
+network's batches are computed on the process's main thread: on the Mac's CPU the inference is the bottleneck (a
+process runs at ~130-170% of a core, its main thread in Accelerate's SGEMM), so the Mac's cores are used by running
+several races at once, one pool each. Measured with run 1's iteration 60 piloting at 64 simulations
+(`mtgz.sealed.compare` at main 34e2cf4, CPU, the fuzz farm beside it):
+
+| layout | games / s |
+|---|---|
+| 1 process, blocks of 16 games, 10 search threads, 4 torch threads | 0.097 |
+| 3 processes, blocks of 128 (evalpick's), 4 search threads and 2 torch threads each, nice 10 | 0.14-0.18 each, **0.49** together |
+| **6 processes, the same** (`mac_races.sh`'s default) | 0.09-0.14 each, **0.76** together |
+| the desktop, 4 CPU threads (3 search, 1 torch), blocks of 16 | 0.031 |
+| the desktop's GPU, race1 (iteration 39, 4 pools at once, blocks of 512 and 256) | ~1.1 together |
+
+**The same race on both machines** (pool 2026, the evalpick candidates of 108.6 - both evaluators and the value pick
+chose candidate 1, as on the desktop - and two random builds, 16 games each, blocks of 16): the picks and every
+evaluator score identical; **45 of the 48 games identical** (result, rounds, life totals), 47 with the same result. As
+in 44.4, the three that differ are near-ties of a network in both seats resolved the other way by float rounding: the
+Mac's races are the desktop's within noise, not bit for bit.
+
+**`tools/mac_races.sh`** (its header has the details): `launch CKPT` pins the checkout's commit on the Mac
+(`mac.sh --pin races`: `~/mtg-zero-wt/races-<sha12>`, built once and reused, never rebuilt under a running race), copies
+the checkpoint beside its run's config.json (the pilot's move rule and belief settings come from it, zero.h2h.run_rule;
+sha256-checked) and the evaluators to `~/mtgz-races/<name>/`, writes one job per pool (`compare evalpick` or `compare
+choice --pool-seed N`, `--pilot <ckpt> --sims 64 --device cpu`) and starts them, P at once, under a `nohup` runner at
+nice 10 (run evaluations, at 0, come first; the fuzz farm, at 19, after); `status`, `fetch` (to
+`E:/mtg-zero/s4a/races/<name>/`), `wait` (poll every 10 minutes, then fetch), `stop`. At the end the runner merges the
+evalpick pools into `out/evalpick.json` (`evalpick_summary` over them: what one multi-pool `evalpick` prints) and the
+choice pools into `out/choice.json` (the picked build's mean difference against the random builds, se over pools). The
+defaults are 108.6's evalpick race (pools 2026-2033, rounds of 128, 256-1024 games) and the iteration-39 value-pick
+race's layout (`E:/mtg-zero-scratch/race1`: pools 1001-1004, three random builds, 512 games in one block), so its result
+compares with the earlier one pool for pool. After run 1 (from a checkout at this branch's code, or main once merged):
+
+```
+bash tools/mac_races.sh launch E:/mtg-zero/runs/eoe1/models/iter_0080.pt --procs 6
+bash tools/mac_races.sh status eoe1-iter_0080
+bash tools/mac_races.sh wait eoe1-iter_0080      # in the background; or fetch when status says DONE
+```
+
+**How long.** The value-pick race is 4 pools x 4 builds x 512 games = 8,192 games; the evalpick race 8 pools x 4-6 builds
+x 256-1,024 games (a decided pool stops early), ~10,000-40,000 games, ~20,000 if half the builds go at 256-512. At
+0.76 games/s with six processes that is **~10 hours** for both (6.5-18 hours over that range); with three ~16 hours.
+
+### 109.3 The Mac's evaluation time, and run 2
+
+One eoe-1 evaluation of iteration 60 on the Mac (`python -m mtgz.az.remote eval` on a pristine copy of the mirror, the
+fuzz farm at 1-5 cores):
+
+| Mac settings (44.3's overrides, then variations) | heuristic + random | Elo | all |
+|---|---|---|---|
+| threads 12, groups 2, 3 inference workers x 4 torch threads (the default) | 85 s | 131 s | **217 s** (270 s with a race process beside it, shipping included) |
+| groups 4, 4 workers x 2 threads | 105 s | 284 s | 390 s |
+| MPS inference | - | - | aborted: Metal's "A command encoder is already encoding to this command buffer" with several inference workers |
+
+(The desktop, run 1's iteration 60 on its GPU: 49 + 122 = 171 s.) Every setting played the same games (the same results
+and Elo pairs). **The Mac does not keep up with run 2 evaluating every iteration**: with the evaluation gone the
+desktop's iteration is ~2.2 minutes (132 s), and the Mac needs ~217 s for each - the queue would grow by ~85 s an
+iteration (a run of 80 iterations would end ~2 hours behind, its evaluations still queued; a failure never blocks
+training, and the run waits up to 6 hours for its queue at the end). What would keep up: **`--eval-every 2`** (217 s of
+every ~264 s, if nothing else runs on the Mac; the Elo pool then rates every second checkpoint against the two evaluated
+before it), or keeping the evaluation on the desktop (the 5-minute iteration of run 1). The races and the evaluations
+compete for the same cores: run both and the races (nice 10) slow down first.
+
+**Run 2's launch with the Mac evaluating** (from its pinned worktree, after `bash tools/mac.sh --eval-checkout` there):
+the flags of run 1's launch plus `--eval-remote mac` (and `--eval-every 2` to keep up), e.g. `... python
+tools/supervise.py <run2> --preset eoe-2 --seed 1 --threads 16 --groups 3 --conc 1152 --train-static 1 --ram-budget-gb 40
+--eval-random-games 10 --elo-paired 1 --shard-sparse 1 --eval-remote mac --eval-every 2`. Its log then says `evaluations
+on the remote 'mac'`; each evaluated iteration logs `iter N vs heuristic (remote mac, ...s)` and adds
+`games/eval-iter_NNNN-<pid>.jsonl`.
+
+### 109.4 Tests, gate
+
+* zero-core: `tests/test_loop.py` `test_remote_evaluation_local` (best.pt = index.json's best after the remote
+  evaluations), `test_remote_evaluation_copies_the_packages_files` (new: a pattern's matches copied, a path with no file
+  fails, paths outside the mirror refused).
+* `tests/test_mac_remote.py` `test_a_remote_eoe_evaluation_logs_its_games` (new: an eoe-smoke mirror's evaluation with the
+  shim's log on - 8 games, the yardstick, random, reference and Elo games, all in `eval-iter_0001-<pid>.jsonl`, read as
+  evaluation games of iteration 1; `mtg` declares and writes nothing).
+* GATES
+
+### 109.5 Left on the Mac
+
+`~/mtg-zero-wt/run-34e2cf45d7b7` and `run-61466fe72ff1` (evaluation checkouts of main and this branch) and
+`races-34e2cf45d7b7` (the races' pinned checkout of main), their target dirs under `~/cargo-target/mtg-zero/`;
+`~/mtgz-remote-test/` (E1's and E2's mirrors), `~/mtgz-remote-tune/` (the timing copies), `~/mtgz-races/` (the
+measurements: `out/`, the copied checkpoint and evaluators). No process. Cleanup: `rm -rf ~/mtgz-remote-test
+~/mtgz-remote-tune ~/mtgz-races/out ~/mtgz-races/eoe1 ~/mtgz-races/s4a ~/mtgz-races/race_rows.py`, and `git -C
+~/mtg-zero worktree remove --force` each checkout with its target dir when no longer needed.

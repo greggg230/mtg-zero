@@ -17,7 +17,7 @@
 #                         --max-games 1024 --delta 0.03: 108.6's race]
 #   --choice-pools L     ['' = none] [1001,1002,1003,1004: the value-pick race of iteration 39, E:/mtg-zero-scratch/race1]
 #   --choice-args A      [--collation arena --k 32 --worlds 8 --vs 3 --games 512 --block 512: race1's pool 1001]
-#   --procs P            race processes at once [3]      --threads T   search threads each [4]
+#   --procs P            race processes at once [6: ~10 cores, 109.2]      --threads T   search threads each [4]
 #   --torch N            torch threads each (OMP_NUM_THREADS) [2]     --nice N   [10: below run evaluations (0)]
 # fetch / wait: --out DIR (where the results go) [E:/mtg-zero/s4a/races/NAME]
 #
@@ -78,7 +78,7 @@ EP_POOLS="2026,2027,2028,2029,2030,2031,2032,2033"
 EP_ARGS="--collation arena --k 32 --worlds 8 --vs 3 --race --games 128 --min-games 256 --max-games 1024 --delta 0.03"
 CH_POOLS="1001,1002,1003,1004"
 CH_ARGS="--collation arena --k 32 --worlds 8 --vs 3 --games 512 --block 512"
-PROCS=3; THREADS=4; TORCH=2; NICE=10
+PROCS=6; THREADS=4; TORCH=2; NICE=10
 while [ $# -gt 0 ]; do
   case "$1" in
     --name) NAME="$2" ;; --evaluators) EVALS="$2" ;; --evalpick-pools) EP_POOLS="$2" ;; --evalpick-args) EP_ARGS="$2" ;;
@@ -96,6 +96,11 @@ done
 FILE="$(basename "$CKPT")"
 [ -n "$NAME" ] || NAME="$(basename "$RUNDIR")-${FILE%.pt}"
 case "$NAME" in *[!A-Za-z0-9._-]*) echo "mac_races: name $NAME: letters, digits, . _ - only" >&2; exit 1 ;; esac
+JOBS="$(
+  for p in ${EP_POOLS//,/ }; do echo "evalpick $p"; done
+  for p in ${CH_POOLS//,/ }; do echo "choice $p"; done
+)"
+[ -n "$JOBS" ] || { echo "mac_races: no pools" >&2; exit 1; }
 SHA="$(git rev-parse HEAD)"
 D="mtgz-races/$NAME"
 WT="mtg-zero-wt/races-${SHA:0:12}"
@@ -121,13 +126,7 @@ got="$(ssh_mac "shasum -a 256 $D/run/models/$FILE" | cut -c1-64)"
 [ "$want" = "$got" ] || { echo "mac_races: the checkpoint's copy differs (sha256 $got, here $want)" >&2; exit 1; }
 
 # the jobs, the settings, the runner
-{
-  for p in ${EP_POOLS//,/ }; do echo "evalpick $p"; done
-  for p in ${CH_POOLS//,/ }; do echo "choice $p"; done
-} > "$ROOT/.mac_races_jobs.tmp"
-[ -s "$ROOT/.mac_races_jobs.tmp" ] || { rm -f "$ROOT/.mac_races_jobs.tmp"; echo "mac_races: no pools" >&2; exit 1; }
-scp -q -o BatchMode=yes "$ROOT/.mac_races_jobs.tmp" "$HOST:$D/jobs.txt"
-rm -f "$ROOT/.mac_races_jobs.tmp"
+ssh_mac "cat > $D/jobs.txt" <<< "$JOBS"
 SETTINGS="{\"name\": \"$NAME\", \"checkpoint\": \"$CKPT\", \"sha256\": \"$want\", \"commit\": \"$SHA\", \"evaluators\": \"$EVALS\",
  \"evalpick_pools\": \"$EP_POOLS\", \"evalpick_args\": \"$EP_ARGS\", \"choice_pools\": \"$CH_POOLS\", \"choice_args\": \"$CH_ARGS\",
  \"procs\": $PROCS, \"threads\": $THREADS, \"torch\": $TORCH, \"nice\": $NICE, \"launched\": \"$(date -u +%FT%TZ)\"}"
