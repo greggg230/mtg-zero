@@ -42,8 +42,14 @@ pub(crate) mod part {
     pub const DISCARD_SELF: u8 = 14;
     pub const EXILE_SELF: u8 = 15;
     pub const LOYALTY: u8 = 16;
+    /// Emerge's sacrifice of the permanent chosen as the total cost was
+    /// determined (CR 702.119a, 601.2f; ENGINE.md 100.4.10).
+    pub const EMERGE: u8 = 17;
+    /// "Exile <the Equipment granting this ability>" (EoE W4,
+    /// `CardDef::exiles_granter`).
+    pub const EXILE_GRANTER: u8 = 18;
     /// The number of parts.
-    pub const N: u8 = 17;
+    pub const N: u8 = 19;
 
     /// An order in which each part is paid no later than any part it can
     /// give objects to and no earlier than any part that can take its
@@ -60,8 +66,10 @@ pub(crate) mod part {
         REMOVE_COUNTERS,
         TAP,
         LIFE,
+        EXILE_GRANTER,
         BOUNCE,
         SACRIFICE,
+        EMERGE,
         SAC_SELF,
         DISCARD_ALSO,
         DISCARD,
@@ -92,6 +100,8 @@ pub(crate) mod part {
             DISCARD_SELF => "discard the source",
             EXILE_SELF => "exile the source",
             LOYALTY => "loyalty",
+            EMERGE => "sacrifice for emerge",
+            EXILE_GRANTER => "exile the Equipment",
             _ => "?",
         }
     }
@@ -122,11 +132,29 @@ pub(crate) struct Order {
     /// Its event group is open (CR 603.2c: the cost is one event; once, so a
     /// refresh doesn't open another).
     pub started: bool,
+    /// Emerge's permanent (`part::EMERGE`).
+    pub emerge: Option<CardIdx>,
+    /// The Equipment the cost exiles (`part::EXILE_GRANTER`).
+    pub granter: Option<CardIdx>,
 }
 
 impl Order {
     pub(crate) fn new(p: PlayerId, card: CardIdx, cost: &Cost, x: u32, loyalty: i32, floor: u32) -> Order {
-        Order { p, card, cost: cost.clone(), x, loyalty, parts: parts_of(cost, x, loyalty), done: 0, cur: None, floor, started: false }
+        Order { p, card, cost: cost.clone(), x, loyalty, parts: parts_of(cost, x, loyalty), done: 0, cur: None, floor, started: false, emerge: None, granter: None }
+    }
+
+    /// With emerge's sacrifice of `emerge` and the exile of the Equipment
+    /// `granter` among its parts (ENGINE.md 100.4.10).
+    pub(crate) fn with_moves(mut self, emerge: Option<CardIdx>, granter: Option<CardIdx>) -> Order {
+        self.emerge = emerge;
+        self.granter = granter;
+        if emerge.is_some() {
+            self.parts |= 1 << part::EMERGE;
+        }
+        if granter.is_some() {
+            self.parts |= 1 << part::EXILE_GRANTER;
+        }
+        self
     }
 
     fn left(&self) -> u32 {
@@ -171,13 +199,16 @@ fn bits(m: u32) -> impl Iterator<Item = u8> {
 /// The kinds of characteristic a part reads or a continuous effect changes
 /// (`Reads::kinds`, `Change`): types (card types, subtypes, supertypes),
 /// colours, abilities (keywords, protection, activated abilities), power and
-/// toughness.
+/// toughness; and `DEST`, where an object the part moves goes (the
+/// replacement effects that apply to it, CR 614.1a, 614.6: "exile it
+/// instead", a void counter; ENGINE.md 100.4.10).
 mod kind {
     pub const TYPES: u8 = 1;
     pub const COLORS: u8 = 2;
     pub const ABILITIES: u8 = 4;
     pub const PT: u8 = 8;
-    pub const ALL: u8 = 15;
+    pub const DEST: u8 = 16;
+    pub const ALL: u8 = 31;
 }
 
 /// What a part of a cost reads of its candidates that paying another part
@@ -233,16 +264,16 @@ fn mod_change(m: &Mod) -> u8 {
         Mod::Types { .. } | Mod::AllCreatureTypes | Mod::BecomeTypes { .. } => TYPES,
         Mod::Colors(_) => COLORS,
         Mod::Keywords(_) | Mod::Protection(_) | Mod::GainSacMana(_) | Mod::GainLatent(_) => ABILITIES,
+        // (Where it goes if it would die or leave, CR 614.1a.)
+        Mod::ExileIfDies | Mod::ExileIfLeaves => DEST,
         // (Losing all abilities loses static abilities too; a change of
         // control changes what "you control" reads.)
         Mod::LoseAllAbilities | Mod::ControlFrom(_) => ALL,
         Mod::CantBlock
         | Mod::CantBeBlocked
         | Mod::MustAttack
-        | Mod::ExileIfDies
         | Mod::AttackDespiteDefender
         | Mod::Goad
-        | Mod::ExileIfLeaves
         | Mod::PreventCombatDamage
         | Mod::MustAttackPlayer => 0,
     }
@@ -295,9 +326,10 @@ fn filter_reads(f: &Filter) -> Reads {
     }
 }
 
-/// What paying parts of a cost may change (`Game::order_free`).
+/// What paying parts of a cost may change (`Game::order_free`), or the mana
+/// payment before them (`Game::mana_writes`).
 #[derive(Clone, Default, Debug)]
-struct Writes {
+pub(crate) struct Writes {
     /// Permanents that may leave the battlefield.
     leave: Vec<CardIdx>,
     /// The contents of a hand, graveyard or exile (cards moved).
@@ -318,6 +350,10 @@ impl Writes {
         self.counters.extend_from_slice(&o.counters);
         self.tapped.extend_from_slice(&o.tapped);
     }
+
+    fn is_empty(&self) -> bool {
+        self.leave.is_empty() && !self.zones && !self.life && self.counters.is_empty() && self.tapped.is_empty()
+    }
 }
 
 impl Game {
@@ -328,15 +364,34 @@ impl Game {
         let (p, card, cost) = (o.p, o.card, &o.cost);
         let mut w = Writes::default();
         let none = Reads::default();
+        // A part that moves permanents reads the replacement effects that
+        // say where they go (CR 614.1a: "exile it instead", a void counter;
+        // `Game::replaced_dest`). (A card of the payer's hand goes where the
+        // payer's cards go: the effects that apply to those are its own
+        // card's, the turn's or an opponent's permanents', which no part of
+        // the payer's cost changes.)
+        let dest = Reads { kinds: kind::DEST, ..Reads::default() };
         let r = match k {
             SACRIFICE | BOUNCE => {
                 let s = if k == SACRIFICE { cost.sacrifice.as_ref() } else { cost.bounce.as_ref() }.expect("the part's cost");
                 w.leave = self.sacrifice_candidates(p, card, s);
                 w.zones = true;
-                filter_reads(&s.filter)
+                // (And where they go: CR 614.1a.)
+                filter_reads(&s.filter).or(dest)
             }
             SAC_SELF => {
                 w.leave = vec![card];
+                w.zones = true;
+                dest
+            }
+            EMERGE => {
+                w.leave = vec![o.emerge.expect("emerge's permanent")];
+                w.zones = true;
+                dest
+            }
+            EXILE_GRANTER => {
+                // (To exile: no replacement applies, CR 614.1a.)
+                w.leave = vec![o.granter.expect("the Equipment")];
                 w.zones = true;
                 none
             }
@@ -426,12 +481,54 @@ impl Game {
     /// part's payment changes what another reads, every part's candidates are
     /// its candidates now, less the objects taken.)
     pub(crate) fn order_free(&self, o: &Order) -> bool {
+        self.order_free_with(o, Writes::default)
+    }
+
+    /// [`order_free`](Self::order_free) for a payment whose mana comes first
+    /// (CR 601.2g before 601.2h): `pre`, what the mana payment may change
+    /// (`mana_writes`), is paid before every part, so a part that reads what
+    /// it changes (a painland's damage and a creature's power read by crew,
+    /// through a static ability) can't be decided from the state before the
+    /// mana: castability and the payment then search (ENGINE.md 100.4.10).
+    /// `pre` is computed only when some part reads something.
+    pub(crate) fn order_free_with(&self, o: &Order, pre: impl FnOnce() -> Writes) -> bool {
         use part::*;
         let left = o.left();
-        if left.count_ones() < 2 {
+        if left == 0 {
             return true;
         }
+        let views: Vec<(u8, Reads, Writes)> = bits(left).map(|k| {
+            let (r, w) = self.part_view(o, k);
+            (k, r, w)
+        }).collect();
         let has = |k: u8| left & (1 << k) != 0;
+        // (Emerge's permanent and the Equipment are one object each, which
+        // the engine's order moves last and first: `pre` matters to them.)
+        let moves = has(EMERGE) || has(EXILE_GRANTER);
+        if !views.iter().any(|(_, r, _)| r.any()) && left.count_ones() < 2 && !moves {
+            return true;
+        }
+        let pre = if views.iter().any(|(_, r, _)| r.any()) || moves { pre() } else { Writes::default() };
+        // Emerge's sacrifice (paid last by the engine): no other part nor
+        // the mana may take its permanent first, and the graveyard's cards
+        // come after it (it gives them one).
+        if let (true, Some(e)) = (has(EMERGE), o.emerge) {
+            let takes = views.iter().any(|(k, _, w)| *k != EMERGE && w.leave.contains(&e));
+            if takes || pre.leave.contains(&e) || has(EXILE_GRAVEYARD) {
+                return false;
+            }
+        }
+        // The Equipment's exile (paid first by the engine): no part may tap
+        // it, remove a counter from it or take it first, nor the mana move it.
+        if let (true, Some(g)) = (has(EXILE_GRANTER), o.granter) {
+            let uses = views.iter().any(|(k, _, w)| *k != EXILE_GRANTER && (w.leave.contains(&g) || w.tapped.contains(&g) || w.counters.contains(&g)));
+            if uses || pre.leave.contains(&g) {
+                return false;
+            }
+        }
+        if left.count_ones() < 2 && pre.is_empty() {
+            return true;
+        }
         // A permanent returned to its owner's hand may then be discarded or
         // exiled from it; "discard your hand" before or after it differ.
         if has(BOUNCE) && (has(DISCARD) || has(DISCARD_ALSO) || has(EXILE_HAND) || has(DISCARD_HAND)) {
@@ -446,15 +543,11 @@ impl Game {
         if has(LOYALTY) && o.loyalty > 0 && (has(REMOVE_COUNTERS) || has(REMOVE_COUNTER_FROM)) {
             return false;
         }
-        let views: Vec<(u8, Reads, Writes)> = bits(left).map(|k| {
-            let (r, w) = self.part_view(o, k);
-            (k, r, w)
-        }).collect();
         for (k, r, _) in &views {
             if !r.any() {
                 continue;
             }
-            let mut w = Writes::default();
+            let mut w = pre.clone();
             for (j, _, wj) in &views {
                 if j != k {
                     w.add(wj);
@@ -470,6 +563,72 @@ impl Game {
         true
     }
 
+    /// What the mana payment `pm` may change before the cost's other parts
+    /// are paid (CR 601.2g's mana abilities, then the mana with its own
+    /// alternatives, which the engine pays first: ENGINE.md 100.4.9), over
+    /// every source it may use (`Game::pay_classes`): the permanents its
+    /// sources and their actors tap (improvise, convoke and waterbend too),
+    /// those they sacrifice, the counters they remove, the hand's cards they
+    /// exile or discard, life (a cost of life, a painland's damage, an
+    /// opponent's life gained, Phyrexian pips, life paid after the mana);
+    /// with `delve`, the graveyard's cards it exiles (ENGINE.md 100.4.10).
+    pub(crate) fn mana_writes(&self, pm: &crate::pay::PayMana, delve: bool) -> Writes {
+        use crate::pay::{is_sac_slot, IMPROVISE, POL_FOR, SQ_FOR, TAP_FOR};
+        let mut w = Writes { zones: delve, life: pm.cost.has_phyrexian() || pm.life_after > 0, ..Writes::default() };
+        for cl in self.pay_classes(pm.payer, pm.keep.exclude, pm.improvise_types(), pm.convoke) {
+            if cl.dmg > 0 {
+                w.life = true;
+            }
+            if cl.sac_self || cl.convert {
+                w.leave.extend(cl.members.iter().map(|s| s.card));
+                w.zones = true;
+            }
+            for s in cl.members.iter() {
+                let c = s.card;
+                if s.slot == IMPROVISE || s.slot == TAP_FOR || s.slot == POL_FOR {
+                    w.tapped.push(c);
+                } else if is_sac_slot(s.slot) {
+                    w.leave.push(c);
+                    w.zones = true;
+                }
+                if s.slot != IMPROVISE && s.slot != TAP_FOR && s.slot != POL_FOR && !is_sac_slot(s.slot) {
+                    let ad = self.src_ability(c, s.slot);
+                    let cost = &ad.cost;
+                    if cost.tap {
+                        w.tapped.push(c);
+                    }
+                    if cost.sac_self || (cost.exile_self && self.objs[c.i()].zone == Zone::Battlefield) {
+                        w.leave.push(c);
+                    }
+                    if cost.sac_self || cost.exile_self || cost.discard_self || cost.discard_hand || self.objs[c.i()].zone != Zone::Battlefield {
+                        w.zones = true;
+                    }
+                    if cost.life > 0 {
+                        w.life = true;
+                    }
+                    if cost.remove_counters.is_some() {
+                        w.counters.push(c);
+                    }
+                    if let Some(m) = ad.mana() {
+                        if m.damage_to_you > 0 || m.opp_life > 0 {
+                            w.life = true;
+                        }
+                        if m.sac_if_no.is_some() {
+                            w.leave.push(c);
+                            w.zones = true;
+                        }
+                    }
+                }
+            }
+            // (The actors of shared activations: a Pollinator or a
+            // Lumberjack is tapped; Squandered Resources taps nothing.)
+            if cl.members.first().is_some_and(|s| s.slot != SQ_FOR) {
+                w.tapped.extend(cl.actors.iter().copied());
+            }
+        }
+        w
+    }
+
     /// Which kinds of characteristic could changes `w` change (`Change`,
     /// `kind`: types, colours, abilities, power and toughness)? Every
     /// continuous effect the layers apply (`layers.rs`) is looked at: static
@@ -482,7 +641,7 @@ impl Game {
     /// `p`'s, whose cards the cost may take (no other hidden card is read).
     fn chars_may_change(&self, p: PlayerId, w: &Writes, hand: bool) -> Change {
         let mut out = Change::default();
-        if w.leave.is_empty() && !w.zones && !w.life && w.counters.is_empty() && w.tapped.is_empty() {
+        if w.is_empty() {
             return out;
         }
         let leaving = |c: CardIdx| w.leave.contains(&c);
@@ -509,6 +668,13 @@ impl Game {
         // Painter's Servant: every card's colour (CR 613.1e).
         if w.leave.iter().any(|&c| self.abilities(c).paints) {
             out.0 |= kind::COLORS;
+        }
+        // A void counter's exile (Dauthi Voidwalker: "if a card would be put
+        // into an opponent's graveyard from anywhere, exile it instead with a
+        // void counter", `Game::void_counter_for`) leaving: where an
+        // opponent's card the payer controls goes.
+        if w.leave.iter().any(|&c| self.abilities(c).void_exile.is_some()) {
+            out.0 |= kind::DEST;
         }
         if hand {
             return out;
@@ -633,9 +799,8 @@ impl Game {
             o.started = true;
             // The cost is one event (CR 603.2c): a group of its own.
             self.new_event();
-            // ("Exile <the Equipment granting this ability>": first, as the
-            // engine's order pays it; ENGINE.md 100.4.9 names what is left.)
-            self.pay_exile_granter(id);
+            // ("Exile <the Equipment granting this ability>" and emerge's
+            // sacrifice are parts of it: ENGINE.md 100.4.10.)
         }
         if let Some(ch) = self.answer.take() {
             match o.cur {
@@ -954,6 +1119,17 @@ impl Game {
                     return false;
                 }
                 self.move_card(card, Zone::Exile, Pos::Top);
+            }
+            EMERGE => {
+                // CR 702.119a: the permanent chosen, if it is still there.
+                let Some(e) = o.emerge.filter(|&e| self.objs[e.i()].zone == Zone::Battlefield && self.objs[e.i()].controller == p) else { return false };
+                self.note(|g| format!("P{p} sacrifices {} for emerge", g.name(e)));
+                self.sacrifice(e);
+            }
+            EXILE_GRANTER => {
+                let Some(e) = o.granter.filter(|&e| self.objs[e.i()].zone == Zone::Battlefield) else { return false };
+                self.note(|g| format!("P{p} exiles {} to pay", g.name(e)));
+                self.move_card(e, Zone::Exile, Pos::Top);
             }
             LOYALTY => {
                 // CR 606.4.
