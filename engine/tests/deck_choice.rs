@@ -257,8 +257,48 @@ fn the_game_log_records_the_chosen_decks() {
             }
             assert_eq!(l["seats"][p]["deck"], serde_json::Value::Object(m));
         }
+        // the exact replay (ENGINE.md 107.3): the spec line, the seed and the actions - the deck choices first
+        let raw = base64_bytes(l["actions"].as_str().unwrap());
+        let acts: Vec<u16> = raw.chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        assert_eq!(acts[0], act::NUMBER + picks[0] as u16, "the first action: seat 0's choice");
+        let mut sp = lines.iter().find(|x| x.get("sealed").is_some() && x["spec"] == l["spec"]).unwrap().as_object().unwrap().clone();
+        sp.remove("v");
+        sp.remove("spec");
+        let rs = MtgSpec::parse(&serde_json::Value::Object(sp).to_string()).unwrap();
+        let mut r = MtgEoeAz::new_game(&rs, 2, *seed).unwrap();
+        for &a in &acts {
+            r.step(a, &mut Vec::new()).unwrap();
+        }
+        assert!(r.to_move().is_none());
+        assert_eq!(serde_json::json!([r.result()[0], r.result()[1]]), l["result"]);
+        for p in 0..2u8 {
+            assert_eq!(r.0.m.deck(p), sl.candidates(*seed, p).unwrap().unwrap().0[picks[p as usize]].deck);
+        }
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Standard base64 back to bytes.
+fn base64_bytes(s: &str) -> Vec<u8> {
+    let val = |c: u8| -> u32 {
+        match c {
+            b'A'..=b'Z' => (c - b'A') as u32,
+            b'a'..=b'z' => (c - b'a' + 26) as u32,
+            b'0'..=b'9' => (c - b'0' + 52) as u32,
+            b'+' => 62,
+            b'/' => 63,
+            _ => panic!("not base64: {c}"),
+        }
+    };
+    let mut out = Vec::new();
+    for ch in s.as_bytes().chunks(4) {
+        let pad = ch.iter().filter(|&&c| c == b'=').count();
+        let n = ch.iter().take(4 - pad).enumerate().fold(0u32, |n, (i, &c)| n | val(c) << (18 - 6 * i));
+        for k in 0..3 - pad {
+            out.push((n >> (16 - 8 * k)) as u8);
+        }
+    }
+    out
 }
 
 /// What the deck choice adds to a game's start (ENGINE.md 107.2; `cargo test --release -p engine --test deck_choice

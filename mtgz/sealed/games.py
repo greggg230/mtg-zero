@@ -12,7 +12,11 @@ per finished live game (`engine/src/az/game_log.rs`):
      "searched": [seat 0's search dealt worlds, seat 1's], "result": [r0, r1] or null (aborted), "aborted",
      "turns", "time"}
 
-after a spec line per spec (`{"v": 1, "spec": key, "sealed": {...}, "decks": "random" | "eval", ...}`).
+after a spec line per spec (`{"v": 1, "spec": key, "sealed": {...}, "decks": "random" | "eval", ...}`). Version 2 (docs/ENGINE.md
+107.3) adds what replays a game exactly - `"actions"` (little-endian u16, base64; `mtgz.sealed.cardcredit.actions_of`) and
+`"n_actions"`, the spec line being the game's whole spec (`cardcredit.replay_spec`) - and per seat `"draws"` ([turn, kind, card]:
+kind 0 a hand before the first turn, 1 the draw step, 2 an effect), `"bottom"`, `"mulligans"`, `"plays"` ([turn, kind, card]: 0 a
+land, 1 a spell), a card as its index among the seat's sorted deck names, else its name.
 `searched` tells a network seat (its search deals worlds) from a bot's; `decks` "eval" marks an evaluation
 game (the run's evaluation set). The iteration is the one whose metrics line (written at the end of its
 evaluation) is the first after the game's time.
