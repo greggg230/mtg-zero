@@ -257,8 +257,14 @@ class Publisher:
         if not due or not done:
             return
         window = (done[max(0, len(done) - self.a.credit_window)], done[-1])
-        rec = credit_record(self.run, it, path, window, self.a.credit_games, self.a.threads, self.log)
         self.credit_ckpt = it
+        try:
+            rec = credit_record(self.run, it, path, window, self.a.credit_games, self.a.threads, self.log)
+        except SystemExit as e:
+            # cardcredit refuses a broken record (a game that does not replay to its result) with SystemExit: said loudly,
+            # the site keeps the last credit (labelled with its own checkpoint and iterations), the cards still publish
+            self.log(f'DRAW CREDIT FAILED (checkpoint {it}, iterations {window[0]}-{window[1]}): {e}')
+            return
         if rec is not None:
             self.credit = rec
 

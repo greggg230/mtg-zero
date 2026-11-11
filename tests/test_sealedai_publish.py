@@ -147,6 +147,16 @@ def test_the_draw_credit_is_due_at_multiples(tmp_path, monkeypatch):
     CK[0] = 9
     pub.cards_pass()
     assert calls[-1][0] == 9                                                     # crossed 8 (9 itself is newest)
+    # a broken record (cardcredit's SystemExit) is said loudly; the last credit stays, the cards still go out
+    logged = []
+    pub.log = logged.append
+
+    def broken(*a):
+        raise SystemExit('1 games did not replay to their logged result')
+    monkeypatch.setattr(P, 'credit_record', broken)
+    CK[0] = 12
+    pub.cards_pass()
+    assert pub.credit['checkpoint_iter'] == 9 and any('DRAW CREDIT FAILED' in m for m in logged)
 
 
 def test_dry_run_command_line(tmp_path, capsys):
