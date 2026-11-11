@@ -166,7 +166,7 @@ impl Game {
         for &(a, c) in slots {
             for (i, ad) in self.def_of(c).hand_abilities.iter().enumerate() {
                 let slot = AbilitySlot::Hand(i as u8);
-                if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+                if self.can_activate(p, c, ad, classes, sorcery_ok, locks, None) {
                     // One hand ability per card (lowering): the card's slot.
                     out.push(Opt { action: act::HAND_ABILITY + (a - act::HAND), choice: Choice::Ability(c, slot) });
                 }
@@ -182,7 +182,7 @@ impl Game {
             let Some(ad) = d.gy_abilities.first() else { continue };
             let pos = k;
             k += 1;
-            if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+            if self.can_activate(p, c, ad, classes, sorcery_ok, locks, None) {
                 gy.push((pos, Choice::Ability(c, AbilitySlot::Graveyard(0))));
             }
         }
@@ -223,13 +223,13 @@ impl Game {
             if repeats(i) {
                 continue; // a loop that made no progress (CR 732.2a, MTR 4.4)
             }
-            if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+            if self.can_activate(p, c, ad, classes, sorcery_ok, locks, None) {
                 live.push(i as u8);
             }
         }
         if self.lost_abilities(c) {
             for (i, ad) in self.db.def(self.objs[c.i()].def).activated.iter().enumerate() {
-                if ad.special.is_some() && self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+                if ad.special.is_some() && self.can_activate(p, c, ad, classes, sorcery_ok, locks, None) {
                     live.push(i as u8);
                 }
             }
@@ -245,7 +245,8 @@ impl Game {
             if repeats(i) {
                 continue;
             }
-            if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+            let granter = g.equipment.filter(|_| self.db.def(g.def).exiles_granter);
+            if self.can_activate(p, c, ad, classes, sorcery_ok, locks, granter) {
                 live.push(i as u8);
             }
         }
@@ -324,6 +325,9 @@ impl Game {
     /// Could `p` activate `ad` of `card` now and complete the activation
     /// (timing, restrictions, every part of the cost, targets)? An
     /// activation is offered only if it can be completed (ENGINE.md 6).
+    /// `granter`: the Equipment a granted ability's cost exiles
+    /// (`CardDef::exiles_granter`, ENGINE.md 100.4.10).
+    #[allow(clippy::too_many_arguments)]
     fn can_activate(
         &self,
         p: PlayerId,
@@ -332,6 +336,7 @@ impl Game {
         classes: &[Class],
         sorcery_ok: bool,
         locks: u16,
+        granter: Option<CardIdx>,
     ) -> bool {
         let mana_ability = ad.mana().is_some();
         if mana_ability && !self.mana_at_priority(card, ad) {
@@ -389,7 +394,7 @@ impl Game {
         let loyalty = ad.loyalty.map_or(0, |d| d as i32);
         let mana = self.act_mana(p, card, ad);
         let exclude = Self::mana_exclude(card, ad);
-        let ordered = self.cost_payable_order(p, card, &ad.cost, &mana, classes, exclude, self.ability_allow(card), loyalty, false);
+        let ordered = self.cost_payable_order(p, card, &ad.cost, &mana, classes, exclude, self.ability_allow(card), loyalty, false, granter);
         if !ordered.unwrap_or_else(|| self.cost_payable_with(p, card, &ad.cost, &mana, classes, exclude, true, self.ability_allow(card))) {
             return false;
         }
@@ -541,7 +546,7 @@ impl Game {
     ) -> bool {
         // (A spell's: its parts in any order when that can matter, ENGINE.md
         // 100.4.9.)
-        if let Some(r) = self.cost_payable_order(p, card, cost, mana, classes, exclude, 0, 0, true) {
+        if let Some(r) = self.cost_payable_order(p, card, cost, mana, classes, exclude, 0, 0, true, None) {
             return r;
         }
         self.cost_payable_with(p, card, cost, mana, classes, exclude, false, 0)
@@ -564,8 +569,9 @@ impl Game {
         allow: u8,
         loyalty: i32,
         cast: bool,
+        granter: Option<CardIdx>,
     ) -> Option<bool> {
-        let o = crate::cost_order::Order::new(p, card, cost, 0, loyalty, 0);
+        let o = crate::cost_order::Order::new(p, card, cost, 0, loyalty, 0).with_moves(None, granter);
         let keep = Keep { exclude, allow, spell: cast.then_some(card), ..Keep::default() };
         let new_pm = |forced: Vec<(crate::pay::Src, bool)>| {
             let mut pm = PayMana::new(p, *mana);
@@ -982,7 +988,8 @@ impl Game {
         // 100.4.9): the mana first (601.2g), with every option leaving the
         // whole payment completable; then the parts as the player orders
         // them (`PayCosts::order`, below on the agenda).
-        let mut o = crate::cost_order::Order::new(p, card, &ad.cost, self.tap_x_n(id, &ad.cost) as u32, ad.loyalty.map_or(0, |d| d as i32), 0);
+        let mut o = crate::cost_order::Order::new(p, card, &ad.cost, self.tap_x_n(id, &ad.cost) as u32, ad.loyalty.map_or(0, |d| d as i32), 0)
+            .with_moves(None, self.exiled_granter(id));
         let exclude = Self::mana_exclude(card, ad);
         let mut pm = PayMana::new(p, mana);
         pm.keep = Keep { exclude, allow: self.ability_allow(card), ..Keep::default() };

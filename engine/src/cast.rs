@@ -2856,9 +2856,15 @@ impl Game {
         // (The mana, and what it may change, come first: ENGINE.md 100.4.10;
         // as castability decides it, `cost_payable_order`.)
         let delve = self.def_of(card).delve;
+        // (Emerge's sacrifice is a part too: ENGINE.md 100.4.10.)
+        let emerge_part = if item.alt > 0 {
+            self.item_alt(card, item).and_then(|(a, _)| a.emerge.as_ref().and(item.noted.first().copied())).filter(|r| self.live(*r)).map(|r| r.idx)
+        } else {
+            None
+        };
         let ordered = rest_cost
             .as_deref()
-            .map(|c| crate::cost_order::Order::new(p, card, c, 0, 0, floor as u32))
+            .map(|c| crate::cost_order::Order::new(p, card, c, 0, 0, floor as u32).with_moves(emerge_part, None))
             .filter(|o| {
                 let paying = !cost.is_zero() || !self.exile_sources(p, card, &o.cost, None).is_empty();
                 !self.order_free_with(o, || {
@@ -2901,7 +2907,10 @@ impl Game {
             pm.keep.committed.extend(self.delve_promised(p));
             if let Some(r) = emerge {
                 pm.keep.exclude = self.sacrifices_itself_for_mana(r.idx).then_some(r.idx);
-                self.agenda.push(Task::Emerge { id, sac: true });
+                // (Paid among the parts when their order can matter.)
+                if ordered.is_none() {
+                    self.agenda.push(Task::Emerge { id, sac: true });
+                }
             }
             self.agenda.push(Task::PayCosts { id, picked: Vec::new(), early: None, order: ordered });
             if !pm.cost.is_zero() {

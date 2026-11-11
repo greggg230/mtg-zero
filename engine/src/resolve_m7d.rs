@@ -710,10 +710,35 @@ impl Game {
         let s = crate::db::SacCost { filter: filter.clone(), n: 1, another: false };
         let mana = self.alt_mana_via(card, p, from, k, &Default::default());
         let keep = crate::pay::Keep { allow: self.spend_allow_from(card, from), ..Self::keep_for(card, rest, None) };
+        let def = self.def_of(card);
         self.sacrifice_candidates(p, card, &s)
             .into_iter()
             .filter(|&x| {
                 let m = mana.less_generic(self.mana_value_of(x));
+                // (The sacrifice is a part of the cost, with the rest's: in
+                // any order when that can matter, CR 601.2h; ENGINE.md
+                // 100.4.10. As the payment decides it, `cast_pay`.)
+                let o = crate::cost_order::Order::new(p, card, rest, 0, 0, 0).with_moves(Some(x), None);
+                let new_pm = || {
+                    let mut pm = crate::pay::PayMana::new(p, m);
+                    pm.keep = crate::pay::Keep { allow: self.spend_allow_from(card, from), spell: Some(card), ..Default::default() };
+                    pm.improvise = def.improvise;
+                    pm.convoke = def.casting.convoke;
+                    pm
+                };
+                let paying = !mana.is_zero();
+                if !self.order_free_with(&o, || if paying || def.delve { self.mana_writes(&new_pm(), def.delve) } else { Default::default() }) {
+                    if m.is_zero() {
+                        return self.payable_in_some_order(o, None, true);
+                    }
+                    // (The mana alone first: the search's payment starts
+                    // from a payable cost, as `cost_payable_order`'s.)
+                    let pm = new_pm();
+                    if !self.can_pay_with(p, &m, &self.payment_classes(&pm), &pm.keep) {
+                        return false;
+                    }
+                    return self.payable_in_some_order(o, Some(pm), true);
+                }
                 let without = if self.sacrifices_itself_for_mana(x) { Some(x) } else { Some(card) };
                 m.is_zero() || self.can_pay_without(p, &m, classes, &keep, without)
             })

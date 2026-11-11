@@ -1771,6 +1771,15 @@ fn b7_db() -> &'static CardDb {
             eoe_w2::card("Test Crew Bank", json!({"card_types": ["Artifact"], "type_line": "Artifact",
                 "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
                     "cost": {"$t": "ActivationCost", "mana": {"$t": "ManaCost", "generic": 1}, "mana_str": "{1}", "crew": 3}, "effect": draw.clone()}]})),
+            // An enchantment: "Sacrifice an artifact: Add {C}."
+            eoe_w2::card("Test Scrap Engine", json!({"card_types": ["Enchantment"], "type_line": "Enchantment",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}",
+                "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "sacrifice_a_permanent_type": "artifact"},
+                    "effect": {"$t": "AddManaToPool", "produces": [["C", 1]]}, "is_mana_ability": true}]})),
+            // An artifact land: "{T}: Add {C}."
+            eoe_w2::card("Test Artifact Land", json!({"card_types": ["Artifact", "Land"], "type_line": "Artifact Land",
+                "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_self": true},
+                    "effect": {"$t": "AddManaToPool", "produces": [["C", 1]]}, "is_mana_ability": true}]})),
             // "Sacrifice a creature, Sacrifice this artifact: Draw a card."
             eoe_w2::card("Test Pact Idol", json!({"card_types": ["Artifact"], "type_line": "Artifact",
                 "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": [{"$t": "ActivatedAbility",
@@ -1778,9 +1787,10 @@ fn b7_db() -> &'static CardDb {
         ];
         let mut cards = engine::db::load_cube_document().cards;
         cards.extend(common::custom_cards());
+        cards.extend(engine::db::load_eoe_document().cards.into_iter().filter(|c| c.name == "The Dominion Bracelet"));
         cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
         let db = CardDb::from_cards(&cards);
-        for n in ["Test Desperate Rebel", "Test Crew Bank", "Test Pact Idol"] {
+        for n in ["Test Desperate Rebel", "Test Crew Bank", "Test Pact Idol", "Test Artifact Land", "Test Scrap Engine", "The Dominion Bracelet"] {
             db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
         }
         db.leak()
@@ -1944,4 +1954,83 @@ fn cr_702_120a_a_card_discarded_for_escalate_is_exiled_for_escape() {
     assert_eq!(g.obj(cb).zone, Zone::Stack, "{}", log(&g));
     assert_eq!(g.obj(island).zone, Zone::Exile, "discarded, then exiled\n{}", log(&g));
     assert_eq!(g.count_in(0, "Mountain", Zone::Exile), 2, "{}", log(&g));
+}
+
+/// CR 702.119a, 601.2g-h: emerge's permanent is chosen as the total cost is
+/// determined and sacrificed as the cost is paid, after the mana abilities;
+/// a mana ability that sacrifices it first leaves the cost unpaid.
+/// Crabomination cast for emerge, sacrificing Test Artifact Land, with
+/// Squandered Resources ("Sacrifice a land: Add one mana of any type that
+/// land could produce") and six Swamps: the land may be tapped for {C} (then
+/// sacrificed for emerge), never sacrificed to Squandered Resources. The
+/// engine offered that, then skipped emerge's sacrifice.
+#[test]
+fn cr_702_119a_emerges_permanent_is_not_sacrificed_for_mana() {
+    let mut g = b7_scen()
+        .battlefield(0, &["Test Artifact Land", "Squandered Resources", "Swamp", "Swamp", "Swamp", "Swamp", "Swamp", "Swamp"])
+        .hand(0, &["Crabomination"])
+        .at(Step::Main1, 0)
+        .start();
+    let land = bf(&g, 0, "Test Artifact Land");
+    let crab = g.card(0, "Crabomination", Zone::Hand);
+    g.choose(Choice::Cast(crab));
+    for _ in 0..10 {
+        if g.kind() == Some(DecisionKind::PayMana) {
+            break;
+        }
+        let c = match g.kind() {
+            Some(DecisionKind::ChooseAltCost) => options(&g).into_iter().find(|c| *c != Choice::Number(0)).unwrap(),
+            Some(DecisionKind::Sacrifice) => Choice::Card(land),
+            _ => options(&g)[0],
+        };
+        g.choose(c);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}\n{}", g.options_desc(), log(&g));
+    for h in each_item(&g) {
+        assert_eq!(h.obj(crab).zone, Zone::Stack, "{}", log(&h));
+        assert!(log(&h).contains("sacrifices Test Artifact Land for emerge"), "every payment sacrifices the land for emerge\n{}", log(&h));
+    }
+}
+
+/// CR 601.2g-h: the mana abilities are activated before "Exile The Dominion
+/// Bracelet" is paid, so one that sacrifices the Bracelet leaves the cost
+/// unpaid. Test Bear equipped with the Bracelet (3/3: {15} less 3), Test
+/// Scrap Engine (an enchantment: "Sacrifice an artifact: Add {C}") and twelve
+/// Islands: every
+/// payment exiles the Bracelet. The engine offered the Engine sacrificing
+/// the Bracelet, then skipped the exile.
+#[test]
+fn cr_601_2h_the_equipment_a_cost_exiles_is_not_sacrificed_for_mana() {
+    let mut g = b7_scen()
+        .battlefield(0, &["The Dominion Bracelet", "Test Bear", "Test Scrap Engine"])
+        .battlefield(0, &["Island"; 13])
+        .at(Step::Main1, 0)
+        .start();
+    let br = bf(&g, 0, "The Dominion Bracelet");
+    let bear = bf(&g, 0, "Test Bear");
+    // Equip {1}, paid with an Island.
+    g.choose(act(br, 0));
+    finish(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => Some(g.tgt(bear)),
+        Some(DecisionKind::PayMana) => options(g).into_iter().find(|c| matches!(c, Choice::Ability(x, _) if g.name(*x).starts_with("Island"))),
+        _ => None,
+    });
+    settle(&mut g);
+    assert_eq!(g.obj(br).attached.map(|r| r.idx), Some(bear), "equipped\n{}", log(&g));
+    assert!(g.has_option(act(bear, 0)), "{:?}", g.options_desc());
+    g.choose(act(bear, 0));
+    for _ in 0..10 {
+        if g.kind() == Some(DecisionKind::PayMana) {
+            break;
+        }
+        let c = match g.kind() {
+            Some(DecisionKind::Target) => Choice::Target(engine::Target::Player(1)),
+            _ => options(&g)[0],
+        };
+        g.choose(c);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}\n{}", g.options_desc(), log(&g));
+    for h in each_item(&g) {
+        assert_eq!(h.obj(br).zone, Zone::Exile, "exiled for the cost\n{}", log(&h));
+    }
 }

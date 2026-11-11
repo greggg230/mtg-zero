@@ -42,8 +42,14 @@ pub(crate) mod part {
     pub const DISCARD_SELF: u8 = 14;
     pub const EXILE_SELF: u8 = 15;
     pub const LOYALTY: u8 = 16;
+    /// Emerge's sacrifice of the permanent chosen as the total cost was
+    /// determined (CR 702.119a, 601.2f; ENGINE.md 100.4.10).
+    pub const EMERGE: u8 = 17;
+    /// "Exile <the Equipment granting this ability>" (EoE W4,
+    /// `CardDef::exiles_granter`).
+    pub const EXILE_GRANTER: u8 = 18;
     /// The number of parts.
-    pub const N: u8 = 17;
+    pub const N: u8 = 19;
 
     /// An order in which each part is paid no later than any part it can
     /// give objects to and no earlier than any part that can take its
@@ -60,8 +66,10 @@ pub(crate) mod part {
         REMOVE_COUNTERS,
         TAP,
         LIFE,
+        EXILE_GRANTER,
         BOUNCE,
         SACRIFICE,
+        EMERGE,
         SAC_SELF,
         DISCARD_ALSO,
         DISCARD,
@@ -92,6 +100,8 @@ pub(crate) mod part {
             DISCARD_SELF => "discard the source",
             EXILE_SELF => "exile the source",
             LOYALTY => "loyalty",
+            EMERGE => "sacrifice for emerge",
+            EXILE_GRANTER => "exile the Equipment",
             _ => "?",
         }
     }
@@ -122,11 +132,29 @@ pub(crate) struct Order {
     /// Its event group is open (CR 603.2c: the cost is one event; once, so a
     /// refresh doesn't open another).
     pub started: bool,
+    /// Emerge's permanent (`part::EMERGE`).
+    pub emerge: Option<CardIdx>,
+    /// The Equipment the cost exiles (`part::EXILE_GRANTER`).
+    pub granter: Option<CardIdx>,
 }
 
 impl Order {
     pub(crate) fn new(p: PlayerId, card: CardIdx, cost: &Cost, x: u32, loyalty: i32, floor: u32) -> Order {
-        Order { p, card, cost: cost.clone(), x, loyalty, parts: parts_of(cost, x, loyalty), done: 0, cur: None, floor, started: false }
+        Order { p, card, cost: cost.clone(), x, loyalty, parts: parts_of(cost, x, loyalty), done: 0, cur: None, floor, started: false, emerge: None, granter: None }
+    }
+
+    /// With emerge's sacrifice of `emerge` and the exile of the Equipment
+    /// `granter` among its parts (ENGINE.md 100.4.10).
+    pub(crate) fn with_moves(mut self, emerge: Option<CardIdx>, granter: Option<CardIdx>) -> Order {
+        self.emerge = emerge;
+        self.granter = granter;
+        if emerge.is_some() {
+            self.parts |= 1 << part::EMERGE;
+        }
+        if granter.is_some() {
+            self.parts |= 1 << part::EXILE_GRANTER;
+        }
+        self
     }
 
     fn left(&self) -> u32 {
@@ -356,6 +384,17 @@ impl Game {
                 w.zones = true;
                 dest
             }
+            EMERGE => {
+                w.leave = vec![o.emerge.expect("emerge's permanent")];
+                w.zones = true;
+                dest
+            }
+            EXILE_GRANTER => {
+                // (To exile: no replacement applies, CR 614.1a.)
+                w.leave = vec![o.granter.expect("the Equipment")];
+                w.zones = true;
+                none
+            }
             EXILE_SELF => {
                 if self.objs[card.i()].zone == Zone::Battlefield {
                     w.leave = vec![card];
@@ -462,14 +501,34 @@ impl Game {
             let (r, w) = self.part_view(o, k);
             (k, r, w)
         }).collect();
-        if !views.iter().any(|(_, r, _)| r.any()) && left.count_ones() < 2 {
+        let has = |k: u8| left & (1 << k) != 0;
+        // (Emerge's permanent and the Equipment are one object each, which
+        // the engine's order moves last and first: `pre` matters to them.)
+        let moves = has(EMERGE) || has(EXILE_GRANTER);
+        if !views.iter().any(|(_, r, _)| r.any()) && left.count_ones() < 2 && !moves {
             return true;
         }
-        let pre = if views.iter().any(|(_, r, _)| r.any()) { pre() } else { Writes::default() };
+        let pre = if views.iter().any(|(_, r, _)| r.any()) || moves { pre() } else { Writes::default() };
+        // Emerge's sacrifice (paid last by the engine): no other part nor
+        // the mana may take its permanent first, and the graveyard's cards
+        // come after it (it gives them one).
+        if let (true, Some(e)) = (has(EMERGE), o.emerge) {
+            let takes = views.iter().any(|(k, _, w)| *k != EMERGE && w.leave.contains(&e));
+            if takes || pre.leave.contains(&e) || has(EXILE_GRAVEYARD) {
+                return false;
+            }
+        }
+        // The Equipment's exile (paid first by the engine): no part may tap
+        // it, remove a counter from it or take it first, nor the mana move it.
+        if let (true, Some(g)) = (has(EXILE_GRANTER), o.granter) {
+            let uses = views.iter().any(|(k, _, w)| *k != EXILE_GRANTER && (w.leave.contains(&g) || w.tapped.contains(&g) || w.counters.contains(&g)));
+            if uses || pre.leave.contains(&g) {
+                return false;
+            }
+        }
         if left.count_ones() < 2 && pre.is_empty() {
             return true;
         }
-        let has = |k: u8| left & (1 << k) != 0;
         // A permanent returned to its owner's hand may then be discarded or
         // exiled from it; "discard your hand" before or after it differ.
         if has(BOUNCE) && (has(DISCARD) || has(DISCARD_ALSO) || has(EXILE_HAND) || has(DISCARD_HAND)) {
@@ -740,9 +799,8 @@ impl Game {
             o.started = true;
             // The cost is one event (CR 603.2c): a group of its own.
             self.new_event();
-            // ("Exile <the Equipment granting this ability>": first, as the
-            // engine's order pays it; ENGINE.md 100.4.9 names what is left.)
-            self.pay_exile_granter(id);
+            // ("Exile <the Equipment granting this ability>" and emerge's
+            // sacrifice are parts of it: ENGINE.md 100.4.10.)
         }
         if let Some(ch) = self.answer.take() {
             match o.cur {
@@ -1061,6 +1119,17 @@ impl Game {
                     return false;
                 }
                 self.move_card(card, Zone::Exile, Pos::Top);
+            }
+            EMERGE => {
+                // CR 702.119a: the permanent chosen, if it is still there.
+                let Some(e) = o.emerge.filter(|&e| self.objs[e.i()].zone == Zone::Battlefield && self.objs[e.i()].controller == p) else { return false };
+                self.note(|g| format!("P{p} sacrifices {} for emerge", g.name(e)));
+                self.sacrifice(e);
+            }
+            EXILE_GRANTER => {
+                let Some(e) = o.granter.filter(|&e| self.objs[e.i()].zone == Zone::Battlefield) else { return false };
+                self.note(|g| format!("P{p} exiles {} to pay", g.name(e)));
+                self.move_card(e, Zone::Exile, Pos::Top);
             }
             LOYALTY => {
                 // CR 606.4.

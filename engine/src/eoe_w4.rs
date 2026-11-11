@@ -183,6 +183,18 @@ impl Game {
         }
     }
 
+    /// The Equipment the cost of stack item `id` exiles ("exile <the
+    /// Equipment granting this ability>": the one noted at activation), if
+    /// its ability's cost says so.
+    pub(crate) fn exiled_granter(&self, id: u32) -> Option<CardIdx> {
+        let pos = self.item_index(id)?;
+        let crate::game::StackKind::Ability { ability, .. } = self.stack[pos].kind else { return None };
+        if !self.db.def(ability.def).exiles_granter {
+            return None;
+        }
+        self.stack[pos].noted.first().map(|r| r.idx)
+    }
+
     /// The mana value of a target object (0 for a player or an ability).
     fn target_mv(&self, t: Target) -> u64 {
         match t {
