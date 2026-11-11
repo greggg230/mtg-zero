@@ -819,3 +819,59 @@ tilt, the spells greedy by weight; deterministic per pool), the sealed spec's `"
 with that probability, else an exploratory build; `eoe-smoke` and `eoe-1` at 0.5), the hidden-decklist prior sampling the same
 mixture, and the **game log** (every finished `mtg_eoe` game's two decks, their modes and the result in `<run>/games/`,
 `python -m mtgz.sealed.games RUN --check`; no zero-core change). Next: deck choice by value (107.2).
+
+### 9.1 Deckbuilding from a pool: the plan (user, 2026-11-10)
+
+**Best-of-one only.** A deck is only "best" against a field. Training uses our own decks (pure self-play),
+so the field is our builders' and choosers' decks, and the target is the fixed point the loop converges to:
+every player builds the best deck for its pool against a field of everyone else doing the same.
+
+**The runs.**
+- **Run 1 (`eoe1`, live 2026-11-10):** play skill on a **mixed field**. Each seat's deck is the builder's
+  best guess half the time and an exploratory build otherwise (ENGINE.md 107.1). Every game's decks and
+  result are logged.
+- **Run 2:** **deck choice by value** (ENGINE.md 107.2; preset `eoe-2`, forked from run 1). Each seat
+  picks among K = 32 builder candidates of its own pool by the network's own-view value of the game
+  started with that deck, averaged over 8 opponent-deck worlds; 10% of seats play a random build. The
+  chosen decks become the field. The deck tilt (106) corrects the opponent prior toward chosen decks. Draws
+  and exact replays are logged for card credit (107.3).
+
+**The search, not enumeration.** A pool has far too many builds to enumerate (about 23 spells from about
+40 playables, times land counts, splashes and basic splits).
+1. **A card ranking from self-play:**
+   - **draw credit:** the mean change in the drawing player's value across a draw, computed offline from
+     exact replays with any checkpoint; less biased than drawn-vs-not-drawn win rates;
+   - **marginal value in context:** from the deck evaluator (step 2), per colour pair and curve;
+   - **pairwise synergy:** from the evaluator's interactions, or an explicit pairwise term (card vectors
+     interacting by dot product).
+
+   It also replaces the builder's hand-made weights (every creature above any removal) for run 2's
+   candidates and later.
+2. **A deck evaluator (S4a):** a small set network over a deck's cards predicting its win probability
+   against the field, in microseconds. It is trained on the logged games (deck, opponent deck, result),
+   with the play network's pre-game value as a low-noise target and draw credit as per-card signal.
+3. **Seeds:** for each colour pair, mono, and pair plus a castable splash (about 30-60 seeds), the
+   top-ranked playable cards plus their best synergy partners, within curve and creature-count limits.
+   A few deliberately different seeds (lower curve, more removal) keep the climb from settling on one
+   style.
+4. **Hill climbing on the evaluator (S4b):** swaps of a deck card for a pool card, add or remove,
+   land count, basic split (given the spells, land count and split are enumerated exactly). Restarts and
+   annealing. About 500k evaluations a pool: seconds.
+5. **Don't trust the evaluator blindly** (the search finds what it overrates):
+   - the top about 100 are re-scored by the play network (more opponent worlds);
+   - the top 3-5 go to the **paired race** (ENGINE.md 104: same opponents, seeds, seats and pilot; losers
+     dropped by a sequential test).
+6. **Close the loop (S4c):** the search's best decks enter self-play as candidates, so wherever the search
+   goes the evaluator gets real results, and the field and evaluator improve together.
+
+**What "optimal" means in practice:** no build we can find beats it by a meaningful margin in a paired race.
+Paired games separate builds 3 points apart in about 460 games each and 1 point in about 4,200 (heuristic
+pilot; a network pilot is likely 1.5-2x noisier, to be measured on run 1's network). Napkin cost per pool
+on the desktop once the evaluator exists: search and re-scoring take seconds; a 5-finalist race takes about
+10-20 minutes to 3-point resolution, or 1-2 hours to 1 point.
+
+**Measures of success** (yardsticks; human data never trains):
+1. the value-picked build vs a random build of the same pool (run 1's final network as pilot, before run 2);
+2. our build vs the human build of the same 17lands pool, same pilot;
+3. both against a field of 17lands human decks (closest to "would this help on Arena");
+4. our card ranking's correlation with 17lands' game-in-hand win rates (a sanity check).
