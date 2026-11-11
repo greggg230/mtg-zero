@@ -54,31 +54,89 @@ def files(run):
     return sorted(glob.glob(os.path.join(d if os.path.isdir(d) else run, '*.jsonl')))
 
 
+def parse_line(line, specs, f, n):
+    """One log line (text, with or without its newline) -> the game line (with 'file' and 'phase'), or None for a
+    spec line (recorded in `specs`) or a blank one. `f`, `n`: the file and line number, for the errors."""
+    line = line.strip()
+    if not line:
+        return None
+    try:
+        x = json.loads(line)
+    except json.JSONDecodeError as e:
+        raise ValueError(f'{f}:{n}: not JSON ({e})') from None
+    if 'seats' in x:
+        if x['spec'] not in specs:
+            raise ValueError(f'{f}:{n}: game of spec {x["spec"]} before its spec line')
+        x['file'] = os.path.basename(f)
+        x['phase'] = 'eval' if specs[x['spec']]['decks'] == 'eval' else 'selfplay'
+        return x
+    if 'sealed' in x:
+        specs[x['spec']] = x
+        return None
+    raise ValueError(f'{f}:{n}: neither a game nor a spec line')
+
+
+def stream(run, specs=None):
+    """The game lines of every log file of `run`, one at a time (as `load`'s, without holding them all); the spec
+    lines go into `specs` (a dict) as they are read. A last line without its newline is being written by the live run:
+    it is left for the next read, never an error."""
+    specs = {} if specs is None else specs
+    for f in files(run):
+        with open(f, encoding='utf-8', newline='') as fh:
+            for n, line in enumerate(fh, 1):
+                if not line.endswith('\n'):
+                    break
+                x = parse_line(line, specs, f, n)
+                if x is not None:
+                    yield x
+
+
 def load(run):
     """({spec key: spec line}, [game line, ...]) of every log file of `run`, each game line with its file
     ('file') and phase ('phase': 'selfplay' or 'eval', from its spec's decks)."""
-    specs, games = {}, []
-    for f in files(run):
-        with open(f, encoding='utf-8') as fh:
-            for n, line in enumerate(fh, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    x = json.loads(line)
-                except json.JSONDecodeError as e:
-                    raise ValueError(f'{f}:{n}: not JSON ({e})') from None
-                if 'seats' in x:
-                    if x['spec'] not in specs:
-                        raise ValueError(f'{f}:{n}: game of spec {x["spec"]} before its spec line')
-                    x['file'] = os.path.basename(f)
-                    x['phase'] = 'eval' if specs[x['spec']]['decks'] == 'eval' else 'selfplay'
-                    games.append(x)
-                elif 'sealed' in x:
-                    specs[x['spec']] = x
-                else:
-                    raise ValueError(f'{f}:{n}: neither a game nor a spec line')
+    specs = {}
+    games = list(stream(run, specs))
     return specs, games
+
+
+def card_name(seat, c):
+    """A version-2 line's card (an index among the seat's sorted deck names, or a name) -> its name."""
+    return sorted(seat['deck'])[c] if isinstance(c, int) else c
+
+
+HAND_SIZE = 7
+
+
+def kept_hand(seat, hand_size=HAND_SIZE):
+    """The names of the seat's kept opening hand (a version-2 line): its last hand drawn before the first turn, less the
+    cards it put on the bottom for its mulligans.
+
+    How the engine mulligans (engine/src/flow.rs `mulligan_run` / `mulligan_bottom`, CR 103.5): after its m-th mulligan a
+    player draws a new hand of seven and at once puts m cards of it on the bottom, then keeps or mulligans again. So the
+    line's `draws` of kind 0 are seven per hand (the opening hand and one per mulligan) and its `bottom` holds every
+    hand's bottomed cards in order (1 + 2 + ... + m of them), not only the kept hand's. A bottom choice with a single option
+    - every card left in the hand the same definition (the options are one per definition) - is answered by the engine
+    itself (`auto_single`, flow.rs `ask`) and is no action, so it is not in the line: here such a card goes to the bottom
+    without a logged entry. A line whose draws and bottoms do not fit this is an error (a broken record)."""
+    drawn = [card_name(seat, d[2]) for d in seat['draws'] if d[1] == 0]
+    m = int(seat['mulligans'])
+    if len(drawn) != hand_size * (m + 1):
+        raise ValueError(f'{len(drawn)} cards drawn before the first turn for {m} mulligans')
+    logged = [card_name(seat, b) for b in seat['bottom']]
+    k, hand = 0, []
+    for r in range(m + 1):
+        hand = drawn[r * hand_size:(r + 1) * hand_size]
+        for _ in range(min(r, len(hand))):
+            if len(set(hand)) == 1:                       # one definition left: the engine's own answer, unlogged
+                hand.remove(hand[0])
+                continue
+            if k >= len(logged) or logged[k] not in hand:
+                raise ValueError(f'bottom {logged[k:k + 1]} after mulligan {r} is not in that hand')
+            hand.remove(logged[k])
+            k += 1
+    if k != len(logged):
+        raise ValueError(f'{len(logged) - k} bottomed cards left over after {m} mulligans')
+    return hand
 
 
 def deck_counts(names):
