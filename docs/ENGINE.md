@@ -24134,3 +24134,14 @@ and 5 and their verification (each full suite builds for about an hour on the sh
 `cr_106_6_workshop_mana_pays_an_artifact_spell_with_an_additional_cost`, `cr_702_172a_a_spree_mode_counts_the_costs_other_parts`,
 `cr_702_119a_emerges_permanent_is_chosen_after_the_additional_costs`. docs/shortcuts.md: 31.7.3 **fixed**; N23's row
 notes 100.4.11's actors (no new rows).
+
+##### Results
+
+The full engine suite on 1f62427 (the code of 165076e): **2,246 passed, 0 failed, 21 ignored** (`az` 48, `hidden`
+27, `limits` 13; `rules_payment_b` 65, B8's 8 new); on b7807a1 2,241 passed. Digests as above. pytest 240 passed,
+1 skipped. `FUZZ_GAMES=10000` in two shards (`FUZZ_FIRST` 0 and 10,000; two at a time on the shared desktop), every
+seed, the matches and both replay tests, each `test result: ok. 4 passed; 0 failed`: the default pool 20,000 games
+(543-544 s a shard), `FUZZ_POOL=eoe` 20,000 games (2,373-3,077 s a shard), `FUZZ_POOL=sealed` 20,000 games
+(1,500-1,515 s a shard). The gate on 165076e (`--no-mac`, tested sha 1f62427): `GATE PASSED engine 165076ef5f40 in
+1075s` (build, both digests, `az` 48, `limits` 13, `hidden` 27, pytest, the search smoke). The encoding gate was
+not run: the layout and the encoding of a state are unchanged (the v5 digest moved with the two games' play).
