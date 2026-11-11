@@ -2063,6 +2063,35 @@ fn b8_db() -> &'static CardDb {
                 "mana_cost": {"$t": "ManaCost", "generic": 4}, "mana_cost_str": "{4}"})),
             eoe_w2::card("Test Five Relic", json!({"card_types": ["Artifact"], "type_line": "Artifact",
                 "mana_cost": {"$t": "ManaCost", "generic": 5}, "mana_cost_str": "{5}"})),
+            // B8's castability: a convoke spell with kicker {2} ("draw a
+            // card; kicked, two"), a convoke creature costing {X}{G}, an
+            // artifact with "as an additional cost, exile a card from your
+            // graveyard", and a spree sorcery costing {0} with "as an
+            // additional cost, sacrifice an artifact" (+{0}: draw a card;
+            // +{1}: draw two cards).
+            eoe_w2::card("Test Kicked Convoke", json!({"card_types": ["Sorcery"], "type_line": "Sorcery", "has_convoke": true,
+                "mana_cost": {"$t": "ManaCost", "colored": [["G", 1]], "generic": 1}, "mana_cost_str": "{1}{G}",
+                "kicker_cost": {"$t": "ManaCost", "generic": 2}, "kicker_cost_str": "{2}",
+                "spell_effect": {"$t": "IfConditionElse", "condition": {"$t": "SpellWasKicked"},
+                    "then_effect": {"$t": "DrawCards", "amount": 2}, "else_effect": {"$t": "DrawCards", "amount": 1}}})),
+            eoe_w2::card("Test Convoke Sprout", json!({"card_types": ["Creature"], "subtypes": ["Plant"], "power": 0, "toughness": 1,
+                "type_line": "Creature - Plant", "has_convoke": true,
+                "mana_cost": {"$t": "ManaCost", "colored": [["G", 1]], "x_pips": 1}, "mana_cost_str": "{X}{G}"})),
+            eoe_w2::card("Test Grave Relic", json!({"card_types": ["Artifact"], "type_line": "Artifact", "additional_cost_exile_from_graveyard": 1,
+                "mana_cost": {"$t": "ManaCost", "generic": 3}, "mana_cost_str": "{3}"})),
+            eoe_w2::card("Test Spree Pact", json!({"card_types": ["Sorcery"], "type_line": "Sorcery",
+                "mana_cost": {"$t": "ManaCost"}, "mana_cost_str": "{0}",
+                "additional_cost_sacrifice_filter": {"$t": "CardFilter", "any_types": ["Artifact"]},
+                "spell_effect": {"$t": "ChooseModes", "header": "Spree", "max_modes": 2, "mode_mana_costs": ["{0}", "{1}"],
+                    "modes": [{"$t": "DrawCards", "amount": 1}, {"$t": "DrawCards", "amount": 2}]}})),
+            // A 4/4 costing {6}{G} with emerge {5}{G} and kicker {2}: "When
+            // you cast this spell, if it was kicked, draw a card."
+            eoe_w2::card("Test Emerge Wurm", json!({"card_types": ["Creature"], "subtypes": ["Wurm"], "power": 4, "toughness": 4,
+                "type_line": "Creature - Wurm", "mana_cost": {"$t": "ManaCost", "colored": [["G", 1]], "generic": 6}, "mana_cost_str": "{6}{G}",
+                "emerge_cost": {"$t": "ManaCost", "colored": [["G", 1]], "generic": 5}, "emerge_cost_str": "{5}{G}", "emerge_sacrifice_type": "Creature",
+                "kicker_cost": {"$t": "ManaCost", "generic": 2}, "kicker_cost_str": "{2}",
+                "triggered_abilities": [{"$t": "TriggeredAbility", "effect": {"$t": "DrawCards", "amount": 1}, "event": "is_cast",
+                    "predicate": {"$t": "And", "left": {"$t": "IsThisSpell"}, "right": {"$t": "ThisSpellWasKicked"}}}]})),
             // A Forest: "{T}: Add {G}." "Sacrifice a creature: Add {C}{C}."
             eoe_w2::card("Test Grove Altar", json!({"card_types": ["Land"], "subtypes": ["Forest"], "type_line": "Land - Forest",
                 "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_self": true},
@@ -2072,7 +2101,8 @@ fn b8_db() -> &'static CardDb {
         cards.extend(common::custom_cards());
         cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
         let db = CardDb::from_cards(&cards);
-        for n in ["Test Scrap Idol", "Test Bone Altar", "Test Scrap Golem", "Test Four Relic", "Test Five Relic", "Test Grove Altar", "Orcish Lumberjack", "Mind Stone"] {
+        for n in ["Test Scrap Idol", "Test Bone Altar", "Test Scrap Golem", "Test Four Relic", "Test Five Relic", "Test Grove Altar", "Orcish Lumberjack", "Mind Stone",
+            "Test Kicked Convoke", "Test Convoke Sprout", "Test Grave Relic", "Test Spree Pact", "Mishra's Workshop", "Lotus Petal", "Test Emerge Wurm"] {
             db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
         }
         db.leak()
@@ -2196,4 +2226,112 @@ fn cr_602_2b_a_lumberjack_and_an_altar_that_sacrifice_each_other() {
         assert_eq!(h.obj(grove).zone, Zone::Graveyard, "{}", log(h));
         assert_eq!(h.obj(lj).zone, Zone::Battlefield, "{}", log(h));
     }
+}
+
+/// CR 601.2b, 702.51a, 702.33a: the additional costs offered are those the
+/// whole payment can pay, convoke's creatures among its sources. Test
+/// Kicked Convoke ({1}{G}, kicker {2}) with a Forest and three Test Bears:
+/// kicked or not. The options' check left convoke out: neither was offered
+/// (a cast with no option, a loud failure).
+#[test]
+fn cr_702_51a_a_convoke_spells_kicker_counts_its_creatures() {
+    let mut g = b8_scen().battlefield(0, &["Forest", "Test Bear", "Test Bear", "Test Bear"]).hand(0, &["Test Kicked Convoke"]).at(Step::Main1, 0).start();
+    let spell = g.card(0, "Test Kicked Convoke", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(spell)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(spell));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseCost), "{:?}\n{}", g.options_desc(), log(&g));
+    assert_eq!(options(&g), vec![Choice::Number(0), Choice::Number(1)], "{:?}", g.options_desc());
+    g.choose(Choice::Number(1));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(spell).zone, Zone::Stack, "{}", log(&g));
+    settle(&mut g);
+    assert_eq!(g.player(0).hand.len(), 2, "kicked: two cards\n{}", log(&g));
+}
+
+/// CR 601.2b, 107.3a, 702.51a: X may be as much as the whole payment pays,
+/// convoke's creatures too. Test Convoke Sprout ({X}{G}, convoke) with a
+/// Forest and three Test Bears: X up to 3. The check of each X read the mana
+/// abilities only: X was 0.
+#[test]
+fn cr_107_3a_a_convoke_spells_x_counts_its_creatures() {
+    let mut g = b8_scen().battlefield(0, &["Forest", "Test Bear", "Test Bear", "Test Bear"]).hand(0, &["Test Convoke Sprout"]).at(Step::Main1, 0).start();
+    let spell = g.card(0, "Test Convoke Sprout", Zone::Hand);
+    g.choose(Choice::Cast(spell));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "{:?}\n{}", g.options_desc(), log(&g));
+    let o = options(&g);
+    assert!(o.contains(&Choice::Number(3)) && !o.contains(&Choice::Number(4)), "X up to 3: {:?}", g.options_desc());
+    g.choose(Choice::Number(3));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(spell).zone, Zone::Stack, "{}", log(&g));
+}
+
+/// CR 106.6, 601.2f-h: Mishra's Workshop's mana ("spend this mana only to
+/// cast artifact spells") pays an artifact spell with another part to its
+/// cost. Test Grave Relic ({3}, "as an additional cost, exile a card from
+/// your graveyard") with the Workshop and a graveyard card: castable. The
+/// check of a cost with other parts passed no spending purposes.
+#[test]
+fn cr_106_6_workshop_mana_pays_an_artifact_spell_with_an_additional_cost() {
+    let mut g = b8_scen().battlefield(0, &["Mishra's Workshop"]).graveyard(0, &["Island"]).hand(0, &["Test Grave Relic"]).at(Step::Main1, 0).start();
+    let relic = g.card(0, "Test Grave Relic", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(relic)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(relic));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(relic).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Island", Zone::Exile), 1, "{}", log(&g));
+}
+
+/// CR 702.172a, 601.2b, 601.2f-h: a spree mode is offered only when the
+/// whole cost with it can be paid, the cost's other parts too. Test Spree
+/// Pact ({0}, "as an additional cost, sacrifice an artifact"; +{0}: draw a
+/// card; +{1}: draw two) with Lotus Petal alone: the Petal is sacrificed for
+/// the cost, so the {1} mode can't be paid. The modes' check read the mana
+/// alone and offered it.
+#[test]
+fn cr_702_172a_a_spree_mode_counts_the_costs_other_parts() {
+    let mut g = b8_scen().battlefield(0, &["Lotus Petal"]).hand(0, &["Test Spree Pact"]).at(Step::Main1, 0).start();
+    let pact = g.card(0, "Test Spree Pact", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(pact)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(pact));
+    for _ in 0..4 {
+        if g.kind() == Some(DecisionKind::ChooseMode) {
+            break;
+        }
+        let c = options(&g)[0];
+        g.choose(c);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "{:?}\n{}", g.options_desc(), log(&g));
+    assert_eq!(options(&g), vec![Choice::Number(0)], "the {{1}} mode leaves no artifact to sacrifice: {:?}", g.options_desc());
+    g.choose(Choice::Number(0));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(pact).zone, Zone::Stack, "{}", log(&g));
+}
+
+/// CR 702.119a, 601.2b, 601.2f: emerge's permanent is chosen as the total
+/// cost is determined, after the additional costs are announced. Test
+/// Emerge Wurm (emerge {5}{G}, kicker {2}) with Test Bear (mana value 2) and
+/// six Forests: cast for emerge, kicked or not (kicked: {5}{G} with the Bear
+/// sacrificed), then the creature to sacrifice, then the mana. The engine
+/// asked for the creature right after the alternative cost (docs/shortcuts.md
+/// 31.7.3), and the kicker's check left emerge's reduction out.
+#[test]
+fn cr_702_119a_emerges_permanent_is_chosen_after_the_additional_costs() {
+    let mut g = b8_scen().battlefield(0, &["Test Bear"]).battlefield(0, &["Forest"; 6]).hand(0, &["Test Emerge Wurm"]).at(Step::Main1, 0).start();
+    let wurm = g.card(0, "Test Emerge Wurm", Zone::Hand);
+    let bear = bf(&g, 0, "Test Bear");
+    assert!(g.has_option(Choice::Cast(wurm)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(wurm));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseAltCost), "{:?}\n{}", g.options_desc(), log(&g));
+    let emerge = options(&g).into_iter().find(|c| *c != Choice::Number(0)).expect("the emerge cost");
+    g.choose(emerge);
+    // (Kicked once or not: `ChooseMode`, the times.)
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "the kicker before the creature: {:?}\n{}", g.options_desc(), log(&g));
+    assert_eq!(options(&g), vec![Choice::Number(0), Choice::Number(1)], "{:?}", g.options_desc());
+    g.choose(Choice::Number(1));
+    assert_eq!(g.kind(), Some(DecisionKind::Sacrifice), "{:?}\n{}", g.options_desc(), log(&g));
+    assert_eq!(options(&g), vec![Choice::Card(bear)], "{:?}", g.options_desc());
+    g.choose(Choice::Card(bear));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(wurm).zone, Zone::Stack, "{}", log(&g));
+    assert_eq!(g.obj(bear).zone, Zone::Graveyard, "{}", log(&g));
 }

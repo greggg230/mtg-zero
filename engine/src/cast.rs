@@ -370,7 +370,7 @@ impl Game {
             if self.escalate_any(p, c, None, |rest| {
                 rest.is_some_and(|r| {
                     let cost = self.delve_reduced_with(c, p, self.route_mana_plus(c, p, crate::game::CastFrom::Hand, extra), 0, Some(r));
-                    self.cost_payable(p, c, r, &cost, cls, Some(c))
+                    self.cost_payable(p, c, r, &cost, cls, Some(c), crate::game::CastFrom::Hand)
                 })
             }) {
                 return true;
@@ -929,9 +929,9 @@ impl Game {
                 let mana = self.delve_reduced_with(card, p, self.route_mana_plus(card, p, from, extra), keep, rest);
                 match (from, rest) {
                     (crate::game::CastFrom::Escape | crate::game::CastFrom::Retrace, _) => {
-                        self.cost_payable(p, card, rest.expect("an escape or retrace cost"), &mana, classes, None)
+                        self.cost_payable(p, card, rest.expect("an escape or retrace cost"), &mana, classes, None, from)
                     }
-                    (_, Some(r)) => self.cost_payable(p, card, &Self::with_life(r, top_life as u32), &mana, classes, None),
+                    (_, Some(r)) => self.cost_payable(p, card, &Self::with_life(r, top_life as u32), &mana, classes, None, from),
                     (_, None) => self.can_pay_with(p, &mana, classes, &crate::pay::Keep { allow: self.spend_allow_from(card, from), life: top_life as u32, ..Default::default() }),
                 }
             })
@@ -1105,7 +1105,7 @@ impl Game {
                 && self.escalate_any(p, card, Some(o), |r| {
                     let r = r.expect("a cost");
                     let cost = self.delve_reduced_with(card, p, self.route_mana_plus(card, p, from, &extra.plus(&o.mana)), keep, Some(r));
-                    self.cost_payable(p, card, &Self::with_life(r, top_life as u32), &cost, classes, exclude)
+                    self.cost_payable(p, card, &Self::with_life(r, top_life as u32), &cost, classes, exclude, from)
                 })
         })
     }
@@ -1418,16 +1418,9 @@ impl Game {
     /// besides the rest of its cost (CR 702.120a, 601.2f-h; ENGINE.md
     /// 100.4.10)?
     pub(crate) fn escalated_payable(&self, card: CardIdx, item: &crate::game::StackItem, n: usize) -> bool {
-        let p = item.controller;
-        let def = self.def_of(card);
         let base = if item.alt > 0 { Some(self.item_alt_rest(card, item)) } else { self.route_extra(card, item.from, item.cost_option) };
         let rest = Self::with_escalate(base, u8::try_from(n).expect("escalate: at most 255 modes"));
-        let classes = self.pay_classes(p, None, if def.improvise { types::ARTIFACT } else { 0 }, def.casting.convoke);
-        let classes = self.delve_classes(p, card, &classes).into_owned();
-        let keep = self.escape_exiles(card, item.from);
-        let life_later = self.life_later(card, item);
-        let mana = self.delve_reduced_with(card, p, self.total_mana(card, item), keep, Some(&rest));
-        self.cost_payable(p, card, &Self::with_life(&rest, life_later), &mana, &classes, None)
+        self.spell_payable(card, item, &self.total_mana(card, item), Some(&rest))
     }
 
     /// Castability with escalate (CR 702.120a, 601.2b; ENGINE.md 100.4.10):
@@ -2122,12 +2115,45 @@ impl Game {
         std::borrow::Cow::Owned(c)
     }
 
-    /// Can the caster of `item` pay `cost` for spell `card` (its spending
-    /// restrictions, the life its cost takes later kept)?
+    /// Can the caster of `item` pay spell `card`'s total cost with `cost`
+    /// its mana (an X, a mode's or the times' mana announced: CR 601.2b-f)?
+    /// The whole cost as `cast_pay` pays it (`spell_payable`).
     pub(crate) fn can_pay_spell(&self, card: CardIdx, item: &StackItem, cost: &crate::mana::ManaCost) -> bool {
+        self.spell_payable(card, item, cost, self.spell_rest(card, item).as_deref())
+    }
+
+    /// Can the caster of `item` pay spell `card`'s total cost, `mana` and
+    /// `rest` (its parts besides the mana), as `cast_pay` pays it (CR
+    /// 601.2f-h; ENGINE.md 100.4.11)? The payment's sources (improvise's
+    /// artifacts, convoke's creatures, delve's: the graveyard's cards and
+    /// the cards the rest puts there), its spending restrictions (cast the
+    /// way it is, CR 106.6), the life the rest takes after the mana, and
+    /// emerge's permanent (its mana value less, its sacrifice a part).
+    pub(crate) fn spell_payable(&self, card: CardIdx, item: &StackItem, mana: &crate::mana::ManaCost, rest: Option<&crate::db::Cost>) -> bool {
         let p = item.controller;
-        let keep = crate::pay::Keep { allow: self.spend_allow_from(card, item.from), life: self.life_later(card, item), ..Default::default() };
-        self.can_pay_with(p, cost, &self.mana_classes(p, None), &keep)
+        let def = self.def_of(card);
+        let classes = self.pay_classes(p, None, if def.improvise { types::ARTIFACT } else { 0 }, def.casting.convoke);
+        let classes = self.delve_classes(p, card, &classes).into_owned();
+        let keep = self.escape_exiles(card, item.from);
+        let life_later = self.life_later(card, item);
+        let reduced = self.delve_reduced_with(card, p, *mana, keep, rest);
+        let emerge_alt = if item.alt > 0 { self.item_alt(card, item).and_then(|(a, _)| a.emerge.as_ref()) } else { None };
+        let emerge = emerge_alt.and(item.noted.first().copied()).filter(|r| self.live(*r)).map(|r| r.idx);
+        if let (Some(filter), None) = (emerge_alt, emerge) {
+            // (Emerge's permanent not chosen yet, CR 601.2f: some permanent
+            // it may sacrifice pays the rest.)
+            let s = crate::db::SacCost { filter: filter.clone(), n: 1, another: false };
+            return self.sacrifice_candidates(p, card, &s).into_iter().any(|x| {
+                let mut tmp = item.clone();
+                tmp.noted = vec![self.obj_ref(x)];
+                self.spell_payable(card, &tmp, mana, rest)
+            });
+        }
+        match (emerge, rest) {
+            (Some(x), Some(r)) => self.emerge_payable(p, card, &Self::with_life(r, life_later), x, !mana.is_zero(), &reduced, &classes, item.from),
+            (_, Some(r)) => self.cost_payable(p, card, &Self::with_life(r, life_later), &reduced, &classes, None, item.from),
+            (_, None) => self.can_pay_with(p, &reduced, &classes, &crate::pay::Keep { allow: self.spend_allow_from(card, item.from), life: life_later, ..Default::default() }),
+        }
     }
 
     fn announced_cost(&self, card: CardIdx, item: &StackItem, more: &crate::mana::ManaCost) -> crate::mana::ManaCost {
@@ -2318,7 +2344,7 @@ impl Game {
         let mana = self.alt_mana_via(card, p, from, k, &Default::default());
         // (A card cast from hand is on the stack while its cost is paid.)
         // (Escalate's discards with it: `escalate_any`.)
-        self.escalate_any(p, card, Some(rest), |r| self.cost_payable(p, card, r.expect("a cost"), &mana, classes, Some(card)))
+        self.escalate_any(p, card, Some(rest), |r| self.cost_payable(p, card, r.expect("a cost"), &mana, classes, Some(card), from))
     }
 
     /// The non-mana part of alternative cost `k` of `card` cast the way
@@ -2419,9 +2445,17 @@ impl Game {
                     self.stack[pos].modes = vec![(k > 0) as u8];
                 }
                 if k > 0 && self.def_of(card).alt_costs[k as usize - 1].emerge.is_some() {
-                    // CR 702.119: the permanent to sacrifice, before the
-                    // total cost (601.2f) is determined.
-                    self.agenda.push(Task::Emerge { id, sac: false });
+                    // CR 702.119a, 601.2f: the permanent to sacrifice is
+                    // chosen as the total cost is determined, after the
+                    // modes, X, targets and division (601.2b-d), before
+                    // delve's cards and the payment (docs/shortcuts.md
+                    // 31.7.3, ENGINE.md 100.4.11).
+                    let at = self
+                        .agenda
+                        .iter()
+                        .rposition(|t| matches!(t, Task::CastPay { id: i } | Task::Delve { id: i } | Task::ChooseForCost { id: i, .. } if *i == id))
+                        .expect("the spell's payment on the agenda");
+                    self.agenda.insert(at + 1, Task::Emerge { id, sac: false });
                 }
                 if k > 0 && self.def_of(card).alt_costs[k as usize - 1].bestow {
                     // CR 702.103b: cast bestowed, it becomes an Aura spell
@@ -2656,25 +2690,21 @@ impl Game {
             Some(other) => unreachable!("cost option answer {other:?}"),
             None => {
                 let def = self.def_of(card);
-                let classes = self.mana_classes(p, None);
-                let classes = self.delve_classes(p, card, &classes).into_owned();
-                let keep = self.escape_exiles(card, item.from);
-                let life_later = self.life_later(card, item);
                 let src = Some(self.obj_ref(card));
                 let kicker_ok = |k: usize| {
                     !def.kicker
                         || def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| self.targets_available(&m.list[k], p, src))
                 };
                 // CR 601.2f: the option's mana is added before reductions.
+                // (The whole cost with it, as `cast_pay` pays it: the
+                // payment's sources, improvise's and convoke's too, its
+                // spending restrictions, emerge's permanent to choose;
+                // ENGINE.md 100.4.11.)
                 let mut base = item.clone();
                 let opts: Vec<Opt> = (0..def.additional.len())
                     .filter(|&k| {
                         base.cost_option = k as u8;
-                        let cost = self.delve_reduced_with(card, p, self.total_mana(card, &base), keep, self.route_extra(card, item.from, k as u8));
-                        kicker_ok(k)
-                            && self
-                                .route_extra(card, item.from, k as u8)
-                                .is_some_and(|o| self.cost_payable(p, card, &Self::with_life(o, life_later), &cost, &classes, None))
+                        kicker_ok(k) && self.route_extra(card, item.from, k as u8).is_some() && self.can_pay_spell(card, &base, &self.total_mana(card, &base))
                     })
                     .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
                     .collect();

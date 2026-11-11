@@ -532,9 +532,10 @@ impl Game {
         }
     }
 
-    /// Can `p` pay the non-mana parts of `cost` for the card `card` and,
-    /// together, its `mana` (CR 601.2h; the parts paid after the mana are
-    /// reserved from it)?
+    /// Can `p` pay the non-mana parts of `cost` for the spell `card`, cast
+    /// the way `from` says, and, together, its `mana` (CR 601.2h; the parts
+    /// paid after the mana are reserved from it)?
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn cost_payable(
         &self,
         p: PlayerId,
@@ -543,13 +544,18 @@ impl Game {
         mana: &crate::mana::ManaCost,
         classes: &[Class],
         exclude: Option<CardIdx>,
+        from: crate::game::CastFrom,
     ) -> bool {
+        // (The spending restrictions casting it that way satisfies, CR
+        // 106.6: Mishra's Workshop's mana for an artifact spell, as the
+        // payment spends it, `cast_pay`; ENGINE.md 100.4.11.)
+        let allow = self.spend_allow_from(card, from);
         // (A spell's: its parts in any order when that can matter, ENGINE.md
         // 100.4.9.)
-        if let Some(r) = self.cost_payable_order(p, card, cost, mana, classes, exclude, 0, 0, true, None) {
+        if let Some(r) = self.cost_payable_order(p, card, cost, mana, classes, exclude, allow, 0, true, None) {
             return r;
         }
-        self.cost_payable_with(p, card, cost, mana, classes, exclude, false, 0)
+        self.cost_payable_with(p, card, cost, mana, classes, exclude, false, allow)
     }
 
     /// Castability of a cost whose parts' order can matter (CR 601.2h;

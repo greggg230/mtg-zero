@@ -704,50 +704,64 @@ impl Game {
         // (Emerge's own rest is empty, so no sacrifice changes whether the
         // rest's non-mana parts can be paid: checked once, without mana.)
         let Some(rest) = self.alt_rest(card, from, k) else { return Vec::new() };
-        if !self.cost_payable(p, card, rest, &Default::default(), classes, Some(card)) {
+        if !self.cost_payable(p, card, rest, &Default::default(), classes, Some(card), from) {
             return Vec::new();
         }
         let s = crate::db::SacCost { filter: filter.clone(), n: 1, another: false };
         let mana = self.alt_mana_via(card, p, from, k, &Default::default());
-        let keep = crate::pay::Keep { allow: self.spend_allow_from(card, from), ..Self::keep_for(card, rest, None) };
+        self.sacrifice_candidates(p, card, &s).into_iter().filter(|&x| self.emerge_payable(p, card, rest, x, !mana.is_zero(), &mana, classes, from)).collect()
+    }
+
+    /// Can `p` pay spell `card`'s emerge cost sacrificing `x`: `mana` less
+    /// `x`'s mana value and `rest` (`paying`: the mana before the reduction
+    /// is not zero), cast the way `from` says, as `cast_pay` pays it (CR
+    /// 702.119a, 601.2f-h)?
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn emerge_payable(
+        &self,
+        p: PlayerId,
+        card: CardIdx,
+        rest: &crate::db::Cost,
+        x: CardIdx,
+        paying: bool,
+        mana: &crate::mana::ManaCost,
+        classes: &[crate::pay::Class],
+        from: crate::game::CastFrom,
+    ) -> bool {
         let def = self.def_of(card);
-        self.sacrifice_candidates(p, card, &s)
-            .into_iter()
-            .filter(|&x| {
-                let m = mana.less_generic(self.mana_value_of(x));
-                // (The sacrifice is a part of the cost, with the rest's: in
-                // any order when that can matter, CR 601.2h; ENGINE.md
-                // 100.4.10. As the payment decides it, `cast_pay`.)
-                let o = crate::cost_order::Order::new(p, card, rest, 0, 0, 0).with_moves(Some(x), None);
-                let new_pm = || {
-                    let mut pm = crate::pay::PayMana::new(p, m);
-                    pm.keep = crate::pay::Keep { allow: self.spend_allow_from(card, from), spell: Some(card), ..Default::default() };
-                    pm.improvise = def.improvise;
-                    pm.convoke = def.casting.convoke;
-                    pm
-                };
-                let paying = !mana.is_zero();
-                if !self.order_free_with(&o, || if paying || def.delve { self.mana_writes(&new_pm(), def.delve) } else { Default::default() }) {
-                    if m.is_zero() {
-                        return self.payable_in_some_order(o, None, true);
-                    }
-                    // (The mana alone first: the search's payment starts
-                    // from a payable cost, as `cost_payable_order`'s.)
-                    let pm = new_pm();
-                    if !self.can_pay_with(p, &m, &self.payment_classes(&pm), &pm.keep) {
-                        return false;
-                    }
-                    return self.payable_in_some_order(o, Some(pm), true);
-                }
-                let without = if self.sacrifices_itself_for_mana(x) { Some(x) } else { Some(card) };
-                m.is_zero() || self.can_pay_without(p, &m, classes, &keep, without)
-            })
-            .collect()
+        let m = mana.less_generic(self.mana_value_of(x));
+        // (The sacrifice is a part of the cost, with the rest's: in any
+        // order when that can matter, CR 601.2h; ENGINE.md 100.4.10. As the
+        // payment decides it, `cast_pay`.)
+        let o = crate::cost_order::Order::new(p, card, rest, 0, 0, 0).with_moves(Some(x), None);
+        let new_pm = || {
+            let mut pm = crate::pay::PayMana::new(p, m);
+            pm.keep = crate::pay::Keep { allow: self.spend_allow_from(card, from), spell: Some(card), ..Default::default() };
+            pm.improvise = def.improvise;
+            pm.convoke = def.casting.convoke;
+            pm
+        };
+        if !self.order_free_with(&o, || if paying || def.delve { self.mana_writes(&new_pm(), def.delve) } else { Default::default() }) {
+            if m.is_zero() {
+                return self.payable_in_some_order(o, None, true);
+            }
+            // (The mana alone first: the search's payment starts from a
+            // payable cost, as `cost_payable_order`'s.)
+            let pm = new_pm();
+            if !self.can_pay_with(p, &m, &self.payment_classes(&pm), &pm.keep) {
+                return false;
+            }
+            return self.payable_in_some_order(o, Some(pm), true);
+        }
+        let keep = crate::pay::Keep { allow: self.spend_allow_from(card, from), ..Self::keep_for(card, rest, None) };
+        let without = if self.sacrifices_itself_for_mana(x) { Some(x) } else { Some(card) };
+        m.is_zero() || self.can_pay_without(p, &m, classes, &keep, without)
     }
 
     /// `Task::Emerge`: choose the permanent to sacrifice (a `Sacrifice`
-    /// decision, before the cost is determined, CR 702.119, 601.2f), or
-    /// sacrifice it after the mana is paid (601.2h).
+    /// decision, as the total cost is determined, CR 702.119a, 601.2f: those
+    /// whose sacrifice leaves the whole cost payable, the modes, X and
+    /// options announced), or sacrifice it after the mana is paid (601.2h).
     pub(crate) fn emerge(&mut self, id: u32, sac: bool) {
         use crate::decision::{Choice, DecisionKind, Opt};
         use crate::flow::Task;
@@ -770,12 +784,17 @@ impl Game {
             }
             Some(other) => unreachable!("emerge answer {other:?}"),
             None => {
-                let k = self.stack[pos].alt as usize - 1;
-                let from = self.stack[pos].from;
-                let classes = self.mana_classes(p, None);
+                let item = self.stack[pos].clone();
+                let Some(filter) = self.item_alt(card, &item).and_then(|(a, _)| a.emerge.clone()) else { return };
+                let s = crate::db::SacCost { filter, n: 1, another: false };
                 let opts: Vec<Opt> = self
-                    .emerge_options(p, card, k, &classes, from)
+                    .sacrifice_candidates(p, card, &s)
                     .into_iter()
+                    .filter(|&x| {
+                        let mut tmp = item.clone();
+                        tmp.noted = vec![self.obj_ref(x)];
+                        self.can_pay_spell(card, &tmp, &self.total_mana(card, &tmp))
+                    })
                     .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                     .collect();
                 self.ask(Task::Emerge { id, sac }, p, DecisionKind::Sacrifice, opts);
