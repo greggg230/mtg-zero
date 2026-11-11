@@ -885,21 +885,34 @@ every player builds the best deck for its pool against a field of everyone else 
 4. **Hill climbing on the evaluator (S4b):** swaps of a deck card for a pool card, add or remove,
    land count, basic split (given the spells, land count and split are enumerated exactly). Restarts and
    annealing. About 500k evaluations a pool: seconds.
-5. **Don't trust the evaluator blindly** (the search finds what it overrates):
-   - the top about 100 are re-scored by the play network (more opponent worlds);
-   - the top 3-5 go to the **paired race** (ENGINE.md 104: same opponents, seeds, seats and pilot; losers
-     dropped by a sequential test).
+5. **Don't trust the evaluator blindly** (the search finds what it overrates): the top about 100 builds are
+   re-scored by the play network over many opponent-deck worlds, and the best re-scored build is the answer.
+   Seconds to minutes a pool. **No race per pool** (the user, 2026-11-11): races are an offline check of the
+   evaluator, not a step of the tool (below).
 6. **Close the loop (S4c):** the search's best decks enter self-play as candidates, so wherever the search
    goes the evaluator gets real results, and the field and evaluator improve together.
 
-**What "optimal" means in practice:** no build we can find beats it by a meaningful margin in a paired race.
-Paired games separate builds 3 points apart in about 460 games each and 1 point in about 4,200 (heuristic
-pilot; a network pilot is likely 1.5-2x noisier, to be measured on run 1's network). Napkin cost per pool
-on the desktop once the evaluator exists: search and re-scoring take seconds; a 5-finalist race takes about
-10-20 minutes to 3-point resolution, or 1-2 hours to 1 point.
+**What "optimal" means in practice:** no build the search finds re-scores meaningfully above it, and the
+evaluator's picks hold up in real games whenever a race checks them.
+
+**Races are an offline check** (the user, 2026-11-11). A paired race (ENGINE.md 104: same opponents, seeds, seats
+and pilot; losers dropped by a sequential test) validates each evaluator version on a handful of pools: its picks
+against the previous evaluator's, the value pick and random builds. It is not part of training (run 2 and later
+choose decks with the evaluator, in microseconds) nor of the per-pool tool; as the evaluator learns from the self-play
+results of the decks the search finds (S4c), it needs checking less. Paired games separate builds 3 points apart in
+about 460 games each and 1 point in about 4,200 (heuristic pilot). **Measured cost** (2026-11-11, evaluator v1's race,
+ENGINE.md 108.6, run 1's iteration 78 piloting at 64 simulations on every decision): pool 2030 on the MacBook (one CPU
+process of six) took 4.1 h for 1,664 games (0.11 games/s; 5 builds, decided at 384 games each); a close pool runs to
+1,024 games a build, about 10-12 h. The earlier napkin estimate (10-20 minutes for 5 finalists) was some 15x too low:
+searching every decision at 64 simulations costs about 4x self-play's mix per game (~32k network evaluations against
+~8.4k), and one process per pool gives the GPU small batches (about 2x). **When races are needed again**, make them
+about 10x cheaper first: every pool's games in one batched driver (self-play's concurrency), self-play's simulation
+mix or 16 simulations (the search sweep of iteration 78 measures what that costs in pilot strength), and a screening
+round at 5 points before 3-point finals.
 
 **Measures of success** (yardsticks; human data never trains):
-1. the value-picked build vs a random build of the same pool (run 1's final network as pilot, before run 2);
+1. the picked build (the evaluator's; the value pick beside it) vs a random build of the same pool (run 1's
+   final network as pilot, before run 2; the race of ENGINE.md 108.6);
 2. our build vs the human build of the same 17lands pool, same pilot;
 3. both against a field of 17lands human decks (closest to "would this help on Arena");
 4. our card ranking's correlation with 17lands' game-in-hand win rates (a sanity check).
