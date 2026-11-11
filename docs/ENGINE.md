@@ -24014,3 +24014,18 @@ Sacrifice a <filter>" (Orcish Lumberjack, `LJ_FOR`), "{T}, Tap an untapped <filt
 `cr_702_120a_a_card_discarded_for_escalate_is_exiled_for_escape`, `cr_702_119a_emerges_permanent_is_not_sacrificed_for_mana`,
 `cr_601_2h_the_equipment_a_cost_exiles_is_not_sacrificed_for_mana`. docs/shortcuts.md: no row changes (the
 fixed gaps were 100.4.9's list, not rows).
+
+##### Results
+
+The full engine suite on bb4a391 (the code of bc1856b): **2,238 passed, 0 failed, 21 ignored** (`az` 48, `hidden`
+27, `limits` 13; `rules_payment_b` 57, B7's 6 new). Digests: full ae88eae20abb14ca -> 87c045d0d54359ac,
+`DIGEST_ENCODING=v5` 418dc8195dc6afb5 -> a5204acf0d463bb7 (85edad7: 5 of 2,500 games, their encodings),
+`DIGEST_ENCODING=0` d0da2e6030aa0d08 unchanged; c69b2cd and bb4a391 changed none. pytest 240 passed, 1 skipped.
+`FUZZ_GAMES=20000` in four shards of 5,000 seeds (`FUZZ_FIRST` 0, 5,000, 10,000, 15,000), every seed, the matches
+and both replay tests: the default pool 20,000 games, wins 9,804 / 10,074, 122 draws, 0 aborted (100.4.9's games;
+297-309 s a shard); `FUZZ_POOL=eoe` 20,000 games, wins 7,112 / 7,072, 5,816 draws, 0 aborted, mean 45.8 turns,
+654.2 decisions (100.4.9's; 1,332-1,549 s a shard); `FUZZ_POOL=sealed` 20,000 games, wins 9,566 / 9,650, 784
+draws, 0 aborted, mean 40.6 turns (533-544 s a shard). The gates on bc1856b (`--no-mac`): `GATE PASSED engine
+bc1856bba87a in 692s` (build, both digests, `az` 48, `limits` 13, `hidden` 27, pytest, the search smoke);
+`GATE PASSED encoding bc1856bba87a in 421s` (build, both digests, `az` 48, the checkpoint load of `eoe-net`'s
+`eoe-smoke2` iter 4 with `EVAL_SPEC_EOE`, 8 games, pytest).
