@@ -646,7 +646,7 @@ fn best_share_mixes_the_field() {
                     assert_eq!(s1.deck, i1.build.as_ref().unwrap().deck);
                     best += 1;
                 }
-                sealed::Mode::Given => unreachable!(),
+                sealed::Mode::Given | sealed::Mode::Chosen => unreachable!(),
             }
             modes[p as usize] = i1.mode;
             if seed < 50 {

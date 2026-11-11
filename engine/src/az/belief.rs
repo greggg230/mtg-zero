@@ -107,7 +107,7 @@ impl MtgAz {
             deck <= 0.0 || self.hidden_decklists(),
             "belief_tilts.deck {deck}: the deck tilt deals hidden decklists (ENGINE.md 106), this game's decklists are open"
         );
-        if self.m.sb.is_some() || (hand <= 0.0 && deck <= 0.0) {
+        if self.m.sb.is_some() || self.m.choice.is_some() || (hand <= 0.0 && deck <= 0.0) {
             self.determinize(viewer, rng);
             return None;
         }

@@ -24006,3 +24006,230 @@ workstreams):
   commit after it is this section (docs only).
 * Not run: the deck-tilted hidden fuzz (`FUZZ_DECK_TILT=1`) with the mix - the tilt's code is 106's, unchanged; it weighs the
   K cached decks, which the hidden fuzz above drew from the mixture.
+
+### 107.2 Phase B: the deck choice by value (run 2)
+
+Commits 281eec8, fef38bc, fe56244 (from ccd1b6a: 107.1 landed, run 1 live on it); zero-core `feat/value-choice` **3eaf8df** (from 193ee15,
+pushed; its docs/search.md 3.17, az.md 39), the pin 193ee15 -> 3eaf8df. **The user's design (2026-11-10)**, approved with a
+zero-core change by the coordinator: at the start of a sealed game each seat (but an explore share) chooses its deck among K
+candidate builds of its own pool by the network's value of the game started with it, the opponent's deck hidden and dealt
+from the prior; the choice a proper decision of the game (determinize-safe, hidden, no hidden information in an encoding),
+never trained on options the network cannot see. Run 2 forks from run 1 with it on: the built decks become the field.
+
+**Why a zero-core change** (asked and approved first). In zero-core's tree a deck choice is valued wrongly three ways: (1)
+a leaf is valued from its decider's view, and the first decision after a seat's choice is often the opponent's (who chooses
+who plays first, CR 103.1), whose view cannot see the chosen deck - every candidate of the non-chooser would look the same;
+(2) a game can lower a decision's simulations, never raise them, and eoe-1's fast searches (16) give 32 candidates less than
+a visit each; (3) the decision would be recorded with a policy target over candidates the network cannot see. zero-core's
+lookahead (docs/search.md 3.9) already values every option in many worlds from the root decider's view: a **value choice**
+(zero-core 3.17) is its one-ply case as a decision of any network seat.
+
+**The candidates** (`SealedSpec::candidates`, `az/sealed/mod.rs`): per built seat (a generated or given pool) K builds of
+its pool: candidate 0 the builder's best guess (107.1), 1..K-1 the randomised builder from generators of their own
+(`candidate_rng(seed, p, j)`; copies possible). No human data. **The explore share** (the Fable review's epsilon): with
+probability `explore` (`explore_pick`, a generator of its own) the seat plays candidate 1 + a uniform of the K - 1
+randomised ones and does not choose - builder-random decks stay in the field whatever the network rates highly. A given
+deck (17lands, comparisons) is played as given. The spec key: `"sealed": {..., "deck_choice": {"k": 32, "explore": 0.1}}`
+(k 2..=32: the actions are `NUMBER` + j; needs hidden decklists).
+
+**The decision** (`DecisionKind::ChooseDeck`, `matches::DeckChoice`; the match's, as best-of-three's sideboarding, 36):
+before the first game the choosing seats decide in seat order, `NUMBER` + j = play candidate j. Then the game is made with
+the chosen decks (its seed from the match's RNG): CR 100.4b's registration first, CR 103.1's choice of who plays first
+after it, as the rules order them. Until then `MtgAz::g` holds a game of the candidates 0 that nothing shows or plays.
+* **Hidden.** `determinize` during the choice (`determinize_deck_choice`): the other seat's deck is dealt from its prior
+  (`sample_hidden_deck`: nothing of it is shown, so the request is the game's first, R empty: the K-sample deal's bank and
+  decks are the ones the game uses next, 102.8), as the match's pool and deck of theirs; in the decider's world the other
+  seat has chosen (the choice ends with the decider's: one step starts the game); for the other viewer the decider's
+  candidates are K copies of its dealt deck (whatever it picks, its deck is unknown). The second chooser's worlds deal the
+  first's chosen deck: a choice never reaches the other seat. `MatchState::how` (the game log's) is None in a world.
+* **The encoding** (`encode_deck_choice`): the match block (both decks 40 cards; nothing of the other pool under hidden
+  decklists) and the context - the kind, whether the viewer decides, its number of candidates. The candidates are not
+  encoded: nothing distinguishes them for the network but the games they start.
+* **Its value** (zero-core 3.17): a seat with `value_choice_worlds` M values each candidate by a one-ply `Look`: M worlds
+  of the decider, the candidate played (the game begins), the state's value-only row `encode(decider)`; the mean over the
+  worlds. That state is the first decision of the game - who plays first - **before any hand is drawn** (CR 103.1 before
+  103.4; the coordinator's decision: keep the order): its value is the network's own expectation over the opening hands
+  (and the draws), and the M worlds average over what the decider cannot see (the opponent's dealt deck) and over who
+  chooses play or draw (random per world). Rows shared by observation: a candidate's worlds encode alike but for that, so
+  a choice sends about two rows per candidate. The move: the best mean (temperature 0, evaluation), or a draw by
+  softmax(mean / tau) (self-play's exploration).
+* **Never recorded: masked, not encoded.** Encoding the candidates would put a 40-card deck in each option's slot - a new
+  layout, every checkpoint of run 1 incompatible (60, 61) - while the value already reads each deck where it is encoded,
+  the game it starts. So the decision has no policy target and no sample (zero-core 3.17).
+* **Bots**: the heuristic takes candidate 0 (the best guess); random any.
+
+**What the value is, and its risks** (the Fable review's plan risks). Under hidden decklists the pre-game value is a
+rating of "my deck against the field" (the prior's), not of two decks - DESIGN.md 9 item 3's "crude evaluator", now one
+deck at a time. The network may rate highly what it trains on (the chosen decks become the field): the explore share keeps
+a tenth of the seats on builder-random decks, the temperature explores among the candidates, and **the paired race
+(104.4-104.5) is the arbiter**: `python -m mtgz.sealed.compare choice` races a pool's value-picked build against its
+randomised builds with a network pilot. The value at the play-or-draw state is trained by the chooser's recorded decision
+there (one a game); the non-chooser's view of it is not a decision of its own - zero-core's value-only samples
+(`selfplay_view_samples`, 67) would train it, an A/B for run 2. **The prior** of the opponent's deck stays 107.1's mixture
+(the best guess and the randomised builds), while run 2's field is chosen decks: the deck tilt (106) moves each search's
+deal toward the network's prediction of the actual opponent; a prior of value-chosen decks would need the network in the
+prior (not built).
+
+**Settings** (`mtgz/az/__init__.py`): `eoe-2` = eoe-1 + `SPEC_EOE_CHOICE` (K 32, explore 0.1) +
+`selfplay_value_choice_worlds` 8, `selfplay_value_choice_temp` 0.03 (values differ by a few hundredths: 0.03 makes a
+candidate 0.03 better e times likelier). Evaluation keeps run 1's spec (the fixed pairs, no choice: the Elo pool and the
+yardsticks continue); `eval_value_choice_worlds` stays 0. **The iteration it turns on**: run 2 is a fork of run 1
+(`tools/fork_run.py`) at the iteration chosen to start it - once run 1's value head has a field to rate (its value loss
+past the first iterations' fall, its Elo above the heuristic): the user's and coordinator's call; the presets carry no
+iteration of their own. `eoe-choice-smoke`: eoe-smoke with K 8, 4 worlds.
+
+**The game log** (107.1) records each seat's mode `chosen` (or `explore`) and its `candidate`; the record reads the decks
+and modes from the finished match (`MatchState::deck`, `MatchState::how`), so 107.1's recomputation at the game's start
+(~4 ms) is gone. `mtgz.sealed.games --check` rebuilds a deck-choice game's candidates and checks the logged one; the summary
+counts the chosen candidates and the chosen decks' score against explore ones.
+
+**Cost** (`deck_choice_cost`, ignored; arena, one thread): a game's creation 5.4 -> 7.8 ms (both seats' candidates: a pool
+and 32 builds each), the decider's first world 86 ms either way (the prior's bank: shared with the game), one value choice's
+256 worlds 3.1 ms (12 us each: clone, deal, the step that starts the game, the encoding) without the network, and about
+2 x K rows. Two choices a game: ~9 ms and ~130 rows against the Fable review's ~265 ms of prior and ~670 ms of search a game
+(~1%).
+
+**Tests.** `engine/tests/deck_choice.rs` (6 + 1 ignored): `the_deck_choice_key_parses_and_refuses` (the defaults K 32 /
+explore 0.1, the JSON round trip, k 1 and 33, an explore past 1, an unknown key, open decklists refused);
+`the_candidates_are_the_best_guess_and_randomised_builds` (40 seats: candidate 0 the pool's best guess, j the builder from
+`candidate_rng`, seeded; none for a given deck or without the key); `the_explore_share_plays_a_random_build` (824 of 8,000
+seats at 0.1, every randomised candidate picked; none at 0, all at 1); `the_deck_choice_is_a_hidden_pre_game_decision` (10
+games: seat 0 decides a value choice of K options, nothing of `how` known; the decider's worlds keep its decision and whole
+encoding, deal the other seat a 40-card deck (40 of 40 another than its candidates), and one step starts the game with the
+chosen and the dealt decks; the other viewer's world keeps its encoding and gives the decider K copies of its dealt deck;
+seat 0's choice j or j + 1 leaves seat 1's encoding the same; seat 1's worlds deal seat 0's deck; the game begins with both
+chosen decks, the same choices the same game, played to the end); `explore_seats_and_given_decks_do_not_choose` (explore 1:
+no choice, the picks played; a given deck: one chooser; without the key the decks of before); `the_game_log_records_the_chosen_decks`
+(each seat `chosen` with its candidate, the candidate's deck); `deck_choice_cost` (ignored, above). `engine/tests/sealed.rs`:
+107.1's pin (`without_best_share_..._draw_as_before`) holds. `tests/test_deck_choice.py` (4): the presets (eoe-2's spec and
+seats, eoe-1 unchanged), the candidates through the bindings, zero-core's driver (three games of value-choice seats: six
+choices, their rows, no record of them, the log's `chosen` decks rebuilt by `--check`, a uniform network's first best =
+candidate 0; seats without value choices and the bots play the same spec), `value_pick` / `choice_candidates` / the `choice`
+command with a tiny random network (the same pick from the same seeds, the heuristic's candidate 0). The fuzz:
+`FUZZ_DECK_CHOICE=k` (module docs of `tests/fuzz.rs`): sealed hidden-decklist games made by `MtgAz::new` with the choice, its
+worlds checked (the decision and the viewer's encoding kept, the other seat chosen in the decider's world, one choice starts
+the world's game, 30 moves on), then every check of the hidden mode. zero-core's own: its docs/search.md 3.17, az.md 39.
+
+**The smoke** (`python -m mtgz.az.run --run runs/eoe-choice-smoke --preset eoe-choice-smoke --iters 2`, CPU, on 281eec8):
+both iterations end to end (16 self-play games each, 913 / 846 decisions a game, the training and evaluations as 107.1's
+smoke), and the game log: 88 games; self-play's 32: 58 seats chose (6 explored: 6 games a chosen deck against an explore
+one), the candidates picked 0 to 7: 6 / 7 / 11 / 5 / 5 / 7 / 11 / 6 - a 2-iteration network's values differ by little, the
+temperature spreads the picks, the best guess 6 of 58; `python -m mtgz.sealed.games runs/eoe-choice-smoke --check`: **88 of
+88 games' decks rebuilt exactly**, the chosen candidates included. Rows a choice (a uniform network, K 32, 12 choices): 53
+at 2 worlds, 64 at 8 - about two a candidate.
+
+**The paired race** (the demonstration: `python -m mtgz.sealed.compare choice --pool-seed 2026 --collation arena --k 8
+--worlds 4 --vs 3 --pilot runs/eoe-choice-smoke/models/iter_0002.pt --sims 8 --race --games 64 --min-games 64 --max-games
+128`; CPU, 2 driver threads, 1,593 s on the shared desktop): the smoke's network picked candidate 5 (WG, 16 lands) of the
+pool's 8; raced against three randomised builds of the same pool, the same network piloting both seats against the
+generated field, the race dropped the pick and random1 at 128 games (`random2`, WB 18 lands, 0.566 against the field; the
+pick 0.344, -0.223 [-0.287, -0.159] against it) and stopped undecided between random2 and random3 at the cap. The machinery
+works end to end - the value choice, the candidates, the race as the arbiter - and the arbiter overruled a 2-iteration
+network's pick, as it must be able to; strength is run 2's to show. With a network pilot pairing removed little of the
+variance (var_ratio 0.81-0.96: 104.7's expectation).
+
+**Checks** (fe56244, the zero-core pin 3eaf8df; normal release profile, `E:/cargo-target/mtg-zero/eoe-field`, at most 4
+build jobs and 2 fuzz shards beside run 1 on the desktop):
+
+* zero-core `feat/value-choice` 3eaf8df: `cargo test` 147 passed; `tests/test_value_choice.py` 2; pushed to GitHub (the pin
+  is valid).
+* Full engine suite: **2,243 passed, 0 failed, 22 ignored** (149 binaries; `--test az` 48, `--test hidden` 28 + 2 ignored,
+  `sealed` 16, `game_log` 1, `eoe_net` 4, `deck_choice` 6 + 1 ignored).
+* `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_BEST_SHARE=0.5 FUZZ_DECK_CHOICE=32 FUZZ_GAMES=20000`, four chunks of 5,000, two at a
+  time: **passed, every seed** (wins 9,706 / 9,493, 801 draws, none aborted; 36,046 deck choices played, 144,184 worlds
+  checked during them; then 575,120 hidden-decklist worlds, 574,947 with another deck than the real one; 3.02M
+  information-set steps in step; ~1,550 s a chunk). The plain sealed fuzz is 107.1's: phase B changes no rule, and
+  that mode plays `Game` on the spec's seats, which phase B leaves as they were.
+* **`python tools/gate.py optin-core --no-mac --jobs 4 --baseline-root <a built checkout of ccd1b6a, the commit before the
+  pin>`** on fe56244: build, the core's cargo tests (147), `check_checkpoint_compat` byte identity (identical: 2,465 samples
+  visits and cq), `az` 48, `hidden` 28, the other games' build-only (glassroad, caverna, kingdombuilder: 3 of 3), the core
+  build, the core's pytest 441 passed and 11 skipped: **`GATE PASSED optin-core fe56244801e3 in 2240s`**.
+* **`python tools/gate.py engine --no-mac --jobs 4 --tested-sha fe56244 --expect-digest ae88eae20abb14ca --expect-digest0
+  d0da2e6030aa0d08`** on fe56244: build, both digests, `az` 48, `limits` 13, `hidden` 28, pytest 248 passed and 1 skipped, the
+  search smoke: **`GATE PASSED engine fe56244801e3 in 633s`** (the Mac recheck not needed).
+* Digests unchanged: full **ae88eae20abb14ca**, `DIGEST_ENCODING=0` **d0da2e6030aa0d08**, `DIGEST_ENCODING=v5`
+  **418dc8195dc6afb5** (no digest game plays the EoE table; the deck choice is a sealed spec key).
+* The commit after these is this section (docs only).
+
+### 107.3 The game record for draw credit: exact replays, draws and plays
+
+Commit f19cb32 (on b3dcf65). **Why.** The S4 plan (the user's, 2026-11-10): a card ranking learned from self-play - draw
+credit, the deck evaluator's marginal values and pairwise synergy - seeds the deck search. Draw credit needs every draw of
+every game, and the network's value just before and just after it; computed offline with any checkpoint (later, better ones
+included), so each game must replay exactly. 107.1's log (version 1) has the decks, the modes and the result: neither.
+
+**Version 2 of the game log** (`az/game_log.rs`; a line's `"v": 2`):
+
+* **The trace.** The live game's record keeps every action applied to it (`MtgEoeAz::step`: the deck choice's, every
+  decision's, the single-option ones zero-core steps too) and, per seat: its **draws** - turn, kind, card: kind 0 a hand
+  drawn before the first turn (the opening hand, a mulligan's), 1 the draw step's, 2 an effect's; from the live game's own
+  chance keys (`KEY_DRAW` carries the true card: the live game has no observer); the draw step's are a step's first draws
+  of the seat, as many as its `draw_step_draws` grew (from 0 in a new turn) -, the cards it put on the **bottom** after a
+  mulligan and its **mulligans** (from the decisions' choices), and the cards it **played or cast** - turn, kind (0 a land
+  played, 1 a spell cast), card: the `Play` / `Cast` choice of the action at Priority or the graveyard list (a free cast an
+  effect offers is not counted). Behind a mutex in the record, which the game's clones share but never write: `MtgEoeAz`
+  is the live game only when `new_game` made it (its `Clone` gives `false`), so a world or a clone never writes a trace or a
+  line (107.1's branch game, a clone, now writes none). The draws' turn is the turn after their step: a step that crosses
+  into a new turn (an end-of-turn draw, then the draw step) gives both the later turn - the replay has every draw's exact
+  position.
+* **The line** adds `"actions"` (the actions as little-endian u16, base64) and `"n_actions"`, and per seat `"draws"`
+  (`[turn, kind, card]`), `"bottom"`, `"mulligans"`, `"plays"` (`[turn, kind, card]`), a card as its index among the sorted
+  names of the seat's `"deck"`, else its name. The **spec line** is now the game's whole spec as far as a game depends on it
+  (107.1's keys plus `mulligans`, `deck_tilt_ess`, `chooser` when given): `MtgSpec::parse(spec line less "v", "spec")`,
+  `new_game(spec, 2, seed)` and the actions replay the game - **bit for bit** (`Game::fingerprint`; tested). No chance keys
+  are needed: the game's RNG and the actions decide everything (`same_seed_and_actions_replay_identically`, tests/fuzz.rs).
+* **Size** (the smoke below, 2 iterations, CPU): a self-play game line **4,750 bytes** on average (6,031 at most; 881
+  actions: 2,351 bytes of base64, the draws and plays 1,195), an evaluation game's 2,902 (306 actions); the file gzips 5.0
+  times. eoe-1's 600 self-play games an iteration: ~2.9 MB an iteration (~0.6 MB gzipped). Kept as one JSON line a game: a
+  file per process and run segment already (`games-<pid>.jsonl`), compressible as a whole when a segment closes.
+
+**The tool** `python -m mtgz.sealed.cardcredit RUN --checkpoint CKPT [--device cpu] [--phase selfplay|eval|all] [--games N]
+[--include-opening] [--json PATH]` (`mtgz/sealed/cardcredit.py`; CPU by default, 4 torch threads): replays every logged game
+of the phase (engine Game objects; twice - once to find the draw steps, once to encode), and at each step in which a player
+draws, values that player's own view (`encode(drawer)`, a value-only row: P(drawer wins), a draw 0.5) before the step - the
+last decision before the draw - and after it - the first decision after it (a finished game: its result). A card's **draw
+credit** is the mean change over its draws (a step drawing n cards credits each with 1/n), with its standard error;
+`relative` subtracts the mean change over all credited draws (a step's other events, a new turn's untap, move every card
+alike). Hands drawn before the first turn are left out by default (a hand is judged as a hand; `--include-opening` credits
+them) and their mean change reported apart. Beside it, from the log alone, **the raw drawn-vs-not-drawn win rates**
+(17lands' "game in hand" / "not seen", a yardstick): per card and game where the seat's deck holds it, seen = in the kept
+opening hand (the last seven cards drawn before the first turn, less the bottomed ones) or drawn later; GIH, GNS and their
+difference IWD. Every game must replay to its logged result (else an error: a broken record is never skipped), and a
+version-1 line (no actions) is refused. Pure self-play: the run's own games and networks only.
+
+**On the smoke run** (`python -m mtgz.az.run --run runs/eoe-cc-smoke --preset eoe-choice-smoke --iters 2` on f19cb32, CPU;
+then `python -m mtgz.sealed.cardcredit runs/eoe-cc-smoke --checkpoint runs/eoe-cc-smoke/models/iter_0002.pt`, 3.5 s): 32
+self-play games replayed (every one to its logged result), **1,783 draws credited**, 3,744 value rows; the mean change a draw
++0.0011 +- 0.0004, the opening hands' +0.041 +- 0.010 (89 steps); 249 cards, 231 credited, 42 with 10 draws or more. Of
+those, the highest credit: Flight-Deck Coordinator +0.0165 +- 0.0043 (10 draws), Insatiable Skittermaw +0.0160 +- 0.0028 (11),
+Mountain +0.0124 +- 0.0016 (83), Island +0.0108 +- 0.0009 (124); the lowest: Pinnacle Kill-Ship -0.0249 +- 0.0107 (11), Drix
+Fatemaker -0.0209 +- 0.0055 (18), Dockworker Drone -0.0177 +- 0.0072 (15), Chrome Companion -0.0173 +- 0.0062 (29). A tiny
+network after two iterations: the numbers show the machinery, not the cards (the raw rates over 32 games mostly have one
+not-seen game or none).
+
+**Off the log nothing changes**: the trace exists only for a live `mtg_eoe` game while the log is on (`mtgz.az.run`'s runs);
+no zero-core change, no encoding change; the digests are unchanged.
+
+**Tests.** `engine/tests/game_log.rs` (extended): every finished game's line has its actions (the very actions applied),
+replays from its spec line and seed to the same game bit for bit (fingerprint, result), its draws are the game's own (its
+`KEY_DRAW` keys, in order, by seat), turn 0's kind 0 and the later 1 or 2, an opening hand, bottomed cards exactly after
+mulligans, its plays the Priority / graveyard-list casts and plays; 2,664 bytes a line on these 24-turn games.
+`engine/tests/deck_choice.rs::the_game_log_records_the_chosen_decks`: a deck-choice game's actions begin with the choice and
+replay to its result and chosen decks. `tests/test_cardcredit.py` (2): driver games with value-choice seats logged and
+replayed (the logged draws the replay's, plays in the deck, seen cards in the deck, `--check`), the tool with a tiny random
+network (credits within [-1, 1], standard errors, the raw rates, the same numbers twice, the command line, a version-1 line
+refused).
+
+**Checks** (f19cb32; at most 4 build jobs and 2 fuzz shards, run 1 live on the desktop):
+
+* Full engine suite: **2,243 passed, 0 failed, 22 ignored** (149 binaries; `az` 48, `hidden` 28 + 2 ignored, `game_log` 1,
+  `deck_choice` 6 + 1 ignored).
+* Digests unchanged: full **ae88eae20abb14ca**, `DIGEST_ENCODING=0` **d0da2e6030aa0d08**, `DIGEST_ENCODING=v5`
+  **418dc8195dc6afb5**.
+* `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_BEST_SHARE=0.5 FUZZ_DECK_CHOICE=32 FUZZ_GAMES=20000`, four chunks, two at a time:
+  **passed, every seed** - the very games of 107.2's run (wins 9,706 / 9,493, 801 draws; 36,046 deck choices, 144,184 worlds
+  during them; 575,120 hidden-decklist worlds): the fuzz plays `MtgAz`, which this change leaves as it was.
+* **`python tools/gate.py engine --no-mac --jobs 4 --tested-sha f19cb32 --expect-digest ae88eae20abb14ca --expect-digest0
+  d0da2e6030aa0d08`** on f19cb32: build, both digests, `az` 48, `limits` 13, `hidden` 28, pytest 250 passed and 1 skipped
+  (`tests/test_cardcredit.py` included), the search smoke: **`GATE PASSED engine f19cb32170b5 in 1163s`**.
+* No zero-core change (the pin stays 3eaf8df), no encoding change. The commit after these is this section (docs only).

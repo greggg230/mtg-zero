@@ -21,9 +21,16 @@ use zero_search::rng::Rng;
 use super::{game_log, MtgAz, MtgSpec};
 
 /// An `mtg` game on the EoE table, as the zero-core game `mtg_eoe`; with the game log on, the live
-/// game's record (ENGINE.md 107.1).
-#[derive(Clone)]
-pub struct MtgEoeAz(pub MtgAz, Option<Arc<game_log::Record>>);
+/// game's record (ENGINE.md 107.1) and whether this is the live game (a game `new_game` made: its clones
+/// are not, ENGINE.md 107.3 - only the live game writes its trace and its line).
+pub struct MtgEoeAz(pub MtgAz, Option<Arc<game_log::Record>>, bool);
+
+impl Clone for MtgEoeAz {
+    /// A clone carries the record (a world drops it, marking its seat's search) but is never the live game.
+    fn clone(&self) -> Self {
+        MtgEoeAz(self.0.clone(), self.1.clone(), false)
+    }
+}
 
 impl MtgEoeAz {
     /// Does this game carry a game-log record (a live game while the log is on, ENGINE.md 107.1)?
@@ -66,7 +73,7 @@ impl SearchGame for MtgEoeAz {
     fn new_game(spec: &MtgSpec, players: usize, seed: u64) -> Result<Self, String> {
         let g = <MtgAz as SearchGame>::new_game(spec, players, seed)?;
         // (the record of the game log, ENGINE.md 107.1: None while it is off; the match seed as `new_game`'s)
-        Ok(MtgEoeAz(g, game_log::Record::start(spec, spec.seed.unwrap_or(seed))))
+        Ok(MtgEoeAz(g, game_log::Record::start(spec, spec.seed.unwrap_or(seed)), true))
     }
 
     fn num_players(&self) -> usize {
@@ -86,11 +93,16 @@ impl SearchGame for MtgEoeAz {
     }
 
     fn step(&mut self, a: u16, chance: &mut Vec<u64>) -> Result<(), String> {
+        // (the game log, ENGINE.md 107.1, 107.3: the live game's trace of every step, its line at the step that ends it)
+        let live = self.1.as_ref().filter(|_| self.2).cloned();
+        let before = live.as_ref().map(|r| r.before(&self.0, a));
+        let k0 = chance.len();
         self.0.step(a, chance)?;
-        // (the game log, ENGINE.md 107.1: the live game's line at the step that ends it)
-        if self.1.is_some() && (self.0.to_move().is_none() || self.0.aborted()) {
-            if let Some(r) = self.1.take() {
+        if let (Some(r), Some(b)) = (live, before) {
+            r.after(&self.0, a, b, &chance[k0..]);
+            if self.0.to_move().is_none() || self.0.aborted() {
                 r.finish(&self.0);
+                self.1 = None;
             }
         }
         Ok(())
@@ -152,5 +164,9 @@ impl SearchGame for MtgEoeAz {
     fn determinize_with(&mut self, viewer: usize, rng: &mut Rng, belief: &Belief) {
         self.world(viewer);
         self.0.determinize_with(viewer, rng, belief)
+    }
+
+    fn value_choice(&self) -> bool {
+        self.0.value_choice()
     }
 }

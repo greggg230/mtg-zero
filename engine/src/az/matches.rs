@@ -27,6 +27,13 @@
 //!   choices, its seed from the match's RNG (which `determinize` reseeds).
 //! * The cards each player revealed (made public: `KEY_REVEAL`) in earlier
 //!   games are kept for the encoding.
+//! * The sealed deck choice (ENGINE.md 107.2, `DeckChoice`): before the first
+//!   game, each choosing seat picks one of its candidate decks (`ChooseDeck`,
+//!   `NUMBER` + j), seat 0 first; the choice is hidden (the second chooser's
+//!   `determinize` deals the first's deck from its prior, and the first
+//!   chooser's worlds deal the second's: in a world the other seat has chosen).
+//!   After the last choice the game starts with the chosen decks, its seed
+//!   from the match's RNG (which `determinize` reseeds).
 
 use std::sync::Arc;
 
@@ -243,6 +250,71 @@ impl Sideboarding {
     }
 }
 
+/// How a seat's deck was made in a sealed game (ENGINE.md 107.1, 107.2): the builder's mode, the deck
+/// choice's candidate, the pool's seed, the build's colours (the game log's; never read by the rules,
+/// the encodings or the search; None in a world for the other seat).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SeatHow {
+    pub mode: super::sealed::Mode,
+    /// The candidate it is (a deck choice's: chosen, or the explore pick).
+    pub candidate: Option<u8>,
+    pub pool_seed: Option<u64>,
+    /// The main colours and the splash (`ManaMask`; 0 for a given deck).
+    pub colors: u8,
+    pub splash: u8,
+}
+
+/// One candidate deck of a deck choice (ENGINE.md 107.2): the deck, the sideboard, how it was built.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Candidate {
+    pub deck: Vec<DefId>,
+    pub sideboard: Vec<DefId>,
+    pub how: SeatHow,
+}
+
+/// The sealed deck choice before the first game (ENGINE.md 107.2; module docs).
+#[derive(Clone, Debug)]
+pub struct DeckChoice {
+    /// The choosing seats in order (seat 0 first) and how many: 1 or 2.
+    pub order: [PlayerId; 2],
+    pub n: u8,
+    /// The decider: `order[turn]`.
+    pub turn: u8,
+    /// Each choosing seat's candidates (shared by clones); None for a seat that does not choose or,
+    /// in a world, the other seat's (hidden).
+    pub cands: [Option<Arc<[Candidate]>>; 2],
+    /// The pending decision.
+    pub decision: Decision,
+}
+
+impl DeckChoice {
+    pub fn decider(&self) -> PlayerId {
+        self.order[self.turn as usize]
+    }
+
+    /// The decision of the decider: `NUMBER` + j for each of its candidates j.
+    fn ask(&mut self) {
+        let p = self.decider();
+        let k = self.cands[p as usize].as_ref().expect("the decider's candidates").len();
+        let options = (0..k).map(|j| Opt { action: act::NUMBER + j as u16, choice: Choice::Number(j as u8) }).collect();
+        self.decision = Decision { player: p, kind: DecisionKind::ChooseDeck, options, stage: Stage::One };
+    }
+
+    /// The choice of `choosers` (seat order), each with its candidates.
+    pub fn new(choosers: &[PlayerId], cands: [Option<Arc<[Candidate]>>; 2]) -> DeckChoice {
+        assert!(matches!(choosers.len(), 1 | 2), "a deck choice of {} seats", choosers.len());
+        let mut c = DeckChoice {
+            order: [choosers[0], *choosers.last().unwrap()],
+            n: choosers.len() as u8,
+            turn: 0,
+            cands,
+            decision: Decision { player: choosers[0], kind: DecisionKind::ChooseDeck, options: Vec::new(), stage: Stage::One },
+        };
+        c.ask();
+        c
+    }
+}
+
 /// What a match holds besides its current game (`MtgAz::g`).
 #[derive(Clone)]
 pub struct MatchState {
@@ -282,6 +354,10 @@ pub struct MatchState {
     /// Hidden decklists' K-sample deal (ENGINE.md 102.8): K and the memo of a game's K decks
     /// per request, shared by its clones.
     pub deal: super::hidden_decks::DealCache,
+    /// The sealed deck choice in progress (ENGINE.md 107.2; None: none, or done).
+    pub choice: Option<Box<DeckChoice>>,
+    /// How each seat's deck was made, in a sealed game (ENGINE.md 107; the game log's).
+    pub how: [Option<SeatHow>; 2],
 }
 
 /// The first game's setup of one player: deck, sideboard, first picks, and
@@ -340,6 +416,8 @@ impl MatchState {
             priors,
             deck_priors: [None, None],
             deal: super::hidden_decks::DealCache::new(0, crate::rng::split64(seed ^ 0xDEA1_5A17_0000)),
+            choice: None,
+            how: [None, None],
         })
     }
 
@@ -370,12 +448,66 @@ impl super::MtgAz {
         self.m.sb.as_deref()
     }
 
-    /// The pending decision: a sideboarding decision or the game's.
+    /// The pending decision: a deck choice's, a sideboarding decision or the game's.
     pub fn pending_decision(&self) -> Option<&Decision> {
+        if let Some(c) = &self.m.choice {
+            return Some(&c.decision);
+        }
         match &self.m.sb {
             Some(sb) => Some(&sb.decision),
             None => self.g.pending_decision(),
         }
+    }
+
+    /// The deck choice in progress, if any (ENGINE.md 107.2).
+    pub fn deck_choice(&self) -> Option<&DeckChoice> {
+        self.m.choice.as_deref()
+    }
+
+    /// Seat `p` plays `deck` with `sideboard` (sorted): its match pool and deck counts (ENGINE.md 107.2).
+    pub(crate) fn set_seat_deck(&mut self, p: PlayerId, deck: &[DefId], sideboard: &[DefId]) {
+        let (pool, counts) = MatchPool::new(self.g.db(), deck, sideboard, &[]);
+        let mut pools = (*self.m.pools).clone();
+        pools[p as usize] = pool;
+        self.m.pools = Arc::new(pools);
+        self.m.decks[p as usize] = Arc::from(counts);
+    }
+
+    /// The deck choice's step (ENGINE.md 107.2): the decider plays candidate `a - NUMBER`; the next
+    /// chooser decides, or the game starts with the match's decks.
+    fn deck_choice_step(&mut self, a: u16, chance: &mut Vec<u64>) -> Result<(), String> {
+        let c = self.m.choice.as_mut().expect("a deck choice");
+        if c.decision.choice_of(a).is_none() {
+            return Err(format!("illegal action {a} for ChooseDeck"));
+        }
+        let p = c.decider();
+        let j = (a - act::NUMBER) as usize;
+        let cand = c.cands[p as usize].as_ref().expect("the decider's candidates")[j].clone();
+        c.turn += 1;
+        let more = c.turn < c.n;
+        if more {
+            c.ask();
+        }
+        self.set_seat_deck(p, &cand.deck, &cand.sideboard);
+        self.m.how[p as usize] = Some(SeatHow { mode: super::sealed::Mode::Chosen, candidate: Some(j as u8), ..cand.how });
+        if more {
+            return Ok(());
+        }
+        self.m.choice = None;
+        self.start_chosen_game(chance)
+    }
+
+    /// The game after the deck choice (ENGINE.md 107.2): the match's decks and sideboards (the chosen,
+    /// or in a world the dealt ones), its seed from the match's RNG.
+    pub(crate) fn start_chosen_game(&mut self, chance: &mut Vec<u64>) -> Result<(), String> {
+        let _ = chance;
+        let m = &mut self.m;
+        let decks = [m.deck(0), m.deck(1)];
+        let sides = [m.pools[0].sideboard(&m.decks[0]), m.pools[1].sideboard(&m.decks[1])];
+        let seed = m.rng.next_u64();
+        self.g = Game::with_sideboards(self.g.db(), m.gspec, [&decks[0], &decks[1]], [&sides[0], &sides[1]], seed)?;
+        self.set_known_pools();
+        Ok(())
     }
 
     /// Did the match (its current game) end aborted (ENGINE.md 100.7)? It has
@@ -395,6 +527,9 @@ impl super::MtgAz {
     /// One action of the match: the game's (and, when it ends the game, the
     /// match's next step: its end or sideboarding) or sideboarding's.
     pub(crate) fn match_step(&mut self, a: u16, chance: &mut Vec<u64>) -> Result<(), String> {
+        if self.m.choice.is_some() {
+            return self.deck_choice_step(a, chance);
+        }
         if self.m.sb.is_some() {
             return self.sideboard_step(a, chance);
         }
