@@ -24520,3 +24520,214 @@ refused).
   d0da2e6030aa0d08`** on f19cb32: build, both digests, `az` 48, `limits` 13, `hidden` 28, pytest 250 passed and 1 skipped
   (`tests/test_cardcredit.py` included), the search smoke: **`GATE PASSED engine f19cb32170b5 in 1163s`**.
 * No zero-core change (the pin stays 3eaf8df), no encoding change. The commit after these is this section (docs only).
+
+## 108. S4a: the deck evaluator (branch `s4-evaluator`, 2026-11-11)
+
+Branch `s4-evaluator` (from main 033df1f). **Why.** DESIGN.md 9.1's deck search rests on a fast learned deck evaluator (seeds
+from a card ranking, hill climbing, re-scoring by the play network, a paired race of finalists). Run 1's own pre-game value
+(107.2's value choice) was the first candidate judge, and a paired race showed it is not yet a reliable one: value-picked
+builds beat random builds of the same pool by about +3 +- 7 points over 4 pools, stable and reproducible picks, so a matter
+of quality, not noise. S4a is a dedicated evaluator trained directly on deck outcomes. **Pure self-play**: run 1's own games
+and networks train it; 17lands appears only as a yardstick (a Spearman correlation), never an input, target or prior.
+`mtgz/sealed/evaluator.py` (`python -m mtgz.sealed.evaluator values | train | rank`), `python -m mtgz.sealed.compare
+evalpick`; no engine, binding or zero-core change (digests untouched).
+
+### 108.1 The dataset
+
+* **The log** (107.1, 107.3): a snapshot of run 1's `games/*.jsonl` and `metrics.jsonl` taken 2026-11-11 06:47 (the log
+  grows while the run trains; a copy keeps every number here reproducible): **32,797 finished games**, 30,191 version-1 lines
+  (iterations 1-40) and 2,606 version-2 (41-43 and 356 of the iteration in progress), none aborted. A game's iteration is
+  the first metrics line after it (`games.iteration_of`); iteration i is played by `iter_{i-1}.pt` (written before the
+  iteration's metrics line, after its self-play).
+* **Rows** (`dataset`): one per (game, seat): the seat's deck as counts over the card table (`vocab`: the engine's 320 EoE
+  names, sorted), its opponent's row, both modes (`best` / `explore`), who searched, iteration, phase, pool seed and the
+  seat's result (1 / 0.5 / 0). Kept: the games both seats searched, **27,857 games, 55,714 rows** (26,157 self-play, 1,700
+  Elo games between checkpoints); left out: 4,940 games with a bot seat (the network against the heuristic or random,
+  bot against bot: a pilot mismatch the deck does not explain).
+* **Deck features** (`deck_features`, 36): lands, nonbasic lands, creatures, other spells, the nonland curve (<= 1, 2, 3, 4,
+  5, 6+), mean mana value, colours, splash spells (a colour outside the two with the most spells), colourless spells, spells
+  and basics per colour, mono, the pair one-hot. No builder mode in the evaluators: a deck is judged by its cards (the
+  baseline `feat+mode` adds the mode to show it adds nothing the features miss).
+* **Held out by game** (`split_of`): a game's two rows are always on one side; evaluation games (the 128 fixed decks of
+  the evaluation set, replayed every iteration) always train. **The time split** (the default; the numbers below): test =
+  iterations 40 on and the iteration in progress, which no checkpoint up to 39 trained on: **2,756 games, 5,512 rows**;
+  validation = iterations 36-39 (2,400 games: it mirrors the test, the most recent games); train = iterations 1-35 and
+  the Elo games (22,701 games). **The hash split** (a seed hash): test 3,933 games of all iterations, validation 2,657,
+  train 21,267.
+
+### 108.2 The pre-game value target, and what it showed
+
+* **The start position** (`start_position`): the game from its spec line (`cardcredit.replay_spec`) and seed, at its first
+  decision - CR 103.1's play-or-draw choice (`PlayDraw`, turn 0), before any hand is drawn; the chooser forced to each seat
+  with the spec's `chooser` (the decks, built from the sealed seed, do not depend on it; checked for every game: the
+  chooser's decision at turn 0). **Version-1 lines rebuild too**: no action precedes this state, and their spec lines lack
+  only `mulligans` and `deck_tilt_ess`, whose defaults are the version-2 lines' values; `python -m mtgz.sealed.games <snapshot>
+  --check`: **32,797 of 32,797 games' decks, modes and pool seeds rebuilt exactly**.
+* **The value**: `encode(p)` of each seat (P(p wins), a draw 0.5) with either chooser: `v[game, seat, chooser]`, 4 rows a
+  game; the target is the mean over the two choosers (the value choice's own average, 107.2). Hidden decklists: the view
+  holds the seat's own deck and pool, never the opponent's, so **the encoding is the same in every world the viewer deals**
+  (checked: 240 dealt worlds, 20 games x 2 seats x 2 choosers x 3, all equal): one evaluation per (seat, chooser) is
+  exactly the average over dealt worlds. **Cost**: 32,797 games in 258 s on 4 CPU threads (~8 ms a game: two game
+  creations, four encodings and rows). `NetJudge` values any given deck the same way (the deck and its sideboard in seat 0,
+  a placeholder opponent; the same encoding of seat 0 as the logged spec's game: tested).
+* **Which checkpoint.** Iteration 39 for every game (one fixed judge, the best so far), and **`played`**: each game by the
+  checkpoint that played it (`iter_{i-1}`, 44 checkpoints, 263 s). The correlation of the mean value with the results of
+  the self-play games:
+
+  | iterations | 1-10 | 11-20 | 21-30 | 31-33 | 34-36 | 37-39 | 40 | 41-43 | in progress |
+  |---|---|---|---|---|---|---|---|---|---|
+  | iteration 39 | 0.067 | 0.127 | 0.185 | 0.259 | 0.229 | 0.206 | 0.053 | 0.085 | 0.022 |
+  | the playing checkpoint | 0.021 | 0.028 | 0.030 | 0.087 | 0.042 | 0.063 | 0.053 | 0.074 | 0.033 |
+
+  **The play network's pre-game value half-memorises the games it trained on.** Iteration 39 "predicts" the results of its
+  own training games (0.21-0.26 on iterations 31-39) and falls to 0.05-0.09 on the games after it, the level of the
+  checkpoints that played the games and never saw their results (0.02-0.09 everywhere). Out of sample the value is a poor
+  deck judge: on the test, log loss **0.697** (worse than the constant's 0.693), the winner's deck ranked higher in **53.2%**
+  of games; its two views of the same deck (choosing or not) correlate only 0.55; on the unseen games the builder's mode
+  alone correlates more with the result (0.090) than the value (0.070). This is the race's +3 +- 7 explained: the value
+  choice picks by a signal that is mostly noise on decks the network has not trained on.
+* **The target used: the playing checkpoint's value** (leak-free). Iteration 39's value as an auxiliary target leaks the
+  memorised results into any validation inside its training window: with the time split, validation on iterations 36-39
+  selects a 0.5 mix for the linear model, which is worse on the test than results alone (log loss 0.6798 against 0.6771).
+  With the leak-free target every model kind selects **lam = 0, results only**, on both splits; the distillation mix is kept
+  as an option (`--lams`), and the judge of the same-pool ranking (108.4) is iteration 39, the network whose value choice
+  the race tested.
+
+### 108.3 The models and their held-out numbers
+
+`fit`: log loss + L2 to y = (1 - lam) result + lam value, lam in {0, 0.25, 0.5, 0.75, 1} and the L2 grid selected on the
+validation games' results; the selected setting refitted as an ensemble of 5 fits on bootstraps of the training games
+(seeded); its mean probability tested. **const**: a bias. **feat**: logistic regression on the deck features; **feat+mode**:
+plus the builder's mode. **linear**: logistic regression on card counts and the features, L2 on the card weights (0.01
+selected): its card weights are card ranking v0's basis. **set**: the linear terms, DeepSets (a 32-dimensional embedding per
+card, their mean over the 40 cards with the features through a 64-unit MLP) and a pairwise term (card vectors u in R^8:
+0.5 (|sum n_c u_c|^2 - sum n_c |u_c|^2) / 40, every pair of the deck's cards by dot product); Adam, early stopping on the
+validation. Every model sees only its own deck: the deck against the field.
+
+Test, the time split (2,756 games of iterations 40 on; `corr_v`: correlation with the leak-free pre-game value; `rank`: the
+winner's deck scored higher, 2,754 decisive games):
+
+| model | lam | log loss | Brier | corr_v | rank |
+|---|---|---|---|---|---|
+| constant | - | 0.69315 | 0.24982 | - | 50.0% |
+| deck features | 0 | 0.67856 | 0.24260 | 0.419 | 59.9% |
+| deck features + mode | 0 | 0.67858 | 0.24261 | 0.418 | 59.7% |
+| **linear (cards + features)** | 0 | **0.67697** | **0.24185** | 0.459 | **60.8%** |
+| set network | 0 | 0.67726 | 0.24200 | 0.462 | 60.1% |
+| network value, mean of choosers | - | 0.69711 | 0.25168 | 1 | 53.2% |
+| network value, as chooser | - | 0.70275 | 0.25441 | 0.884 | 51.8% |
+| network value, not choosing | - | 0.69911 | 0.25256 | 0.907 | 54.2% |
+
+The hash split (3,933 test games of all iterations; early iterations' weak pilots make results noisier): constant 0.69315,
+features 0.68508 (56.7%), linear **0.68333** (58.7%), set 0.68373 (58.8%), the value 0.70228 (51.7%).
+
+* **The evaluator is calibrated** (linear, test quintiles): predicted 0.40 / 0.46 / 0.50 / 0.54 / 0.60, results 0.365 / 0.457
+  / 0.500 / 0.565 / 0.612. Builds of the best guess against explore builds on the test: results 0.545 / 0.455, the linear
+  evaluator 0.534 / 0.467, the set network 0.541 / 0.469, the value 0.510 / 0.480.
+* **Most of the signal is in the deck's shape** (lands, curve, creatures, colours: 59.9%); the cards add a little (60.8%);
+  the set network's embeddings and pairwise term add nothing measurable at 22,700 training games (its fits stop early).
+  The builder's mode adds nothing beyond the features.
+* **A matchup model (an extra)**: the linear model on the difference of the two decks (Bradley-Terry, a seat bias): game
+  log loss 0.6605 (time) / 0.6723 (hash), its deck score ranks 60.6% / 58.6% - knowing the opponent explains more of a game,
+  not more of a deck.
+* **Speed**: ~10 us a deck in batches (the 5-member ensemble and its features; 20,000 decks), ~0.4 ms for one call: S4b's
+  500k evaluations a pool take seconds.
+
+### 108.4 Same-pool ranking, against the network's value
+
+The log has no two builds of one pool with results (every game deals new pools), so the evaluator's ordering of one pool's
+builds is checked against the play network's pre-game value (`pool_ranking`, `NetJudge`, iteration 39, the mean over who
+chooses): 200 pools of the test games, the deck choice's 16 candidates each (the best guess and 15 randomised builds, 107.2).
+
+| picker | pairs ordered as the value | top pick = the value's | the value of its pick above the candidates' mean | below the best |
+|---|---|---|---|---|
+| linear | 63.6% | 19% | +5.3 +- 0.5 points | 7.6 |
+| set | 63.4% | 19% | +4.8 +- 0.5 | 8.0 |
+| the best guess (candidate 0) | 51.3% | 9.5% | +2.5 +- 0.5 | 10.3 |
+
+(The value's best is 12.8 points above the candidates' mean.) A measure of agreement with the value, not of quality: 108.2
+shows the value is the weaker judge of the two on results. Ordering builds by their results is the race's job (108.6).
+
+### 108.5 Card ranking v0 and the 17lands yardstick
+
+`card_values`: per card, the evaluator's change in win probability when one copy replaces a card of a typical deck of its
+colours (150 training decks whose main colours hold the card's, any deck for a colourless card): in a deck without it, the
+card replaces each of the deck's nonland cards in turn (a nonbasic land each basic), in a deck holding it each of those
+replaces one copy; the mean over copies and decks, per ensemble member: the value is the members' mean, the uncertainty
+their sd (points). `<out>/cards_linear.json`, `cards_set.json` (313 cards each; the two rankings' Spearman 0.947).
+
+Linear, top 10: Harmonious Grovestrider +2.92 +- 0.19, Kavaron Skywarden +2.51 +- 0.33, Exalted Sunborn +2.21 +- 0.29, Lashwhip
+Predator +2.02 +- 0.31, Gigastorm Titan +1.89 +- 0.49, Mechan Assembler +1.86 +- 0.31, Blooming Stinger +1.64 +- 0.47, Quantum
+Riddler +1.50 +- 0.32, Sunset Saboteur +1.49 +- 0.36, Sami, Wildcat Captain +1.47 +- 0.48. Bottom 10: All-Fates Scroll -2.55 +-
+0.30, Uthros, Titanic Godcore -2.53 +- 0.51, Lithobraking -2.46 +- 0.62, Embrace Oblivion -2.42 +- 0.37, Ruinous Rampage -2.09 +-
+0.63, Zero Point Ballad -2.06 +- 0.34, Thaumaton Torpedo -2.04 +- 0.58, Zealous Display -2.02 +- 0.19, Bygone Colossus -2.01 +-
+0.66, Warmaker Gunship -1.97 +- 0.31. (The set network's top 5: Harmonious Grovestrider, Exalted Sunborn, Kavaron Skywarden,
+Sunset Saboteur, Gigastorm Titan; bottom: Uthros, Zero Point Ballad, All-Fates Scroll, Embrace Oblivion, Lithobraking.)
+
+**The yardstick (never training):** `seventeen_lands_rates`: 17lands' EoE Premier Sealed games (56,256; the data has
+draws, so **game in hand**: the card in the opening hand or drawn), the 267 cards with at least 200 such games: Spearman
+with the linear ranking **0.17** (game played, the card in the deck: 0.14), the set network's 0.18 (0.15). Positive and low:
+run 1's network after 40 iterations, playing a field of builder decks, values cards differently from human players of a
+human field.
+
+### 108.6 The picker and the race
+
+* `rank(pool, candidates, evaluator)` -> P(win against the field) per candidate, each checked to be a build of the pool (40
+  cards or more, every nonbasic card within the pool's count); `python -m mtgz.sealed.evaluator rank --evaluator E
+  --pool-seed N --k 32` scores a generated pool's deck-choice candidates.
+* **`python -m mtgz.sealed.compare evalpick`** (structured as `choice`, 107.2): per pool, the deck choice's K candidates; each
+  evaluator's top build (`--evaluator` takes several, comma-separated: their picks race in the same games), the pilot's
+  value-picked build (`value_pick`), each build once (named after who picked it: `linear+set+value1`), and `--vs` random
+  candidates; one paired comparison or race (104) per pool; per picker, the paired differences against the random builds and
+  against the value pick, and over several pools (`--pool-seed 2026,2027,...`) their means with the se over pools.
+* **The dry run** (CPU, iteration 39 piloting at 8 simulations, 4 games, 2 driver threads; 104 s): `python -m
+  mtgz.sealed.compare evalpick --evaluator <v0>/evaluator_linear.pt,<v0>/evaluator_set.pt --pool-seed 2026 --collation arena
+  --k 32 --worlds 8 --vs 3 --pilot E:/mtg-zero/runs/eoe1/models/iter_0039.pt --sims 8 --device cpu --games 4 --block 4
+  --threads 2`: both evaluators and the value picked candidate 1 of pool 2026 (BG, 17 lands); it raced three random builds
+  for 4 games. **The race to run** after run 1 (GPU; first retrain the evaluator on the whole log, 108.7):
+
+  ```
+  python -m mtgz.sealed.compare evalpick --evaluator <v1>/evaluator_linear.pt,<v1>/evaluator_set.pt \
+      --pool-seed 2026,2027,2028,2029,2030,2031,2032,2033 --collation arena --k 32 --worlds 8 --vs 3 \
+      --pilot E:/mtg-zero/runs/eoe1/models/iter_0080.pt --sims 64 --device cuda \
+      --race --games 128 --min-games 256 --max-games 1024 --delta 0.03 --json race_evalpick.json
+  ```
+
+  (The pool seeds of the earlier value-pick race can replace these, to set the evaluators against the same pools; each
+  pool races 4-6 builds, a decided pool stops early.)
+
+### 108.7 Reproducing it, tests, checks
+
+```
+python -m mtgz.sealed.evaluator values SNAP --checkpoint played --models E:/mtg-zero/runs/eoe1/models --out values_played.npz
+python -m mtgz.sealed.evaluator values SNAP --checkpoint E:/mtg-zero/runs/eoe1/models/iter_0039.pt --out values_iter0039.npz
+python -m mtgz.sealed.evaluator train SNAP --values values_played.npz --out v0_time --judge E:/mtg-zero/runs/eoe1/models/iter_0039.pt
+python -m mtgz.sealed.evaluator train SNAP --values values_played.npz --out v0_hash --split hash --pools 0
+```
+
+(SNAP: a copy of the run's `games/` and `metrics.jsonl`; on the desktop `E:/mtg-zero/s4a/eoe1-snap`, the outputs beside it in
+`E:/mtg-zero/s4a/`: `v0_time/report.json`, the evaluators and card files.) Training: 83 s on 4 CPU threads (the time split, the
+200-pool ranking and the card values included; reruns give the same numbers). All CPU, at most 4 torch threads (run 1 trains on the GPU).
+
+**Tests** (`tests/test_evaluator.py`, 7): the card table and deck features; the dataset (two rows a game on one side, the
+time and hash splits, bot seats left out); the pre-game value on a version-1 log made from the sealed seats of 24 seeds (the
+start position, three dealt worlds per view, the values file round trip, the given-deck judge equal to the logged game's
+value, the dataset's views, `played` by the checkpoint of each game's iteration); the models (planted card values recovered by
+the linear model, the constant's bias, a seeded set network reproducible), the saved evaluator round trip, the picker's
+build check; card values (a planted card first) and the yardstick's Spearman; 17lands rates; the pipeline end to end on
+the small log; `compare evalpick` with a tiny network and two evaluators, its summary over pools.
+
+**Checks**: `python -m pytest tests -q`, `python tools/gate.py python --no-mac` (below, on the branch head).
+
+### 108.8 What next
+
+* **Retrain on the whole of run 1** once it finishes (iterations 40-80: stronger pilots, where the deck explains more of a
+  game - the time split's test scores better than the hash split's), then run 108.6's race: the evaluators' picks against the
+  value pick and random builds, by results.
+* **The deck choice of run 2** (107.2) picks by the value 108.2 measured as weak out of sample (and memorising what it trains
+  on): the race decides, but the evidence here favours the evaluator (or a mix) as run 2's chooser over the value alone.
+  The memorisation itself is a play-network question (the pre-game state is unique to its game; value-only samples or a
+  pre-game value head trained across many deals could curb it).
+* **S4b**: hill climbing on the evaluator (10 us a deck) from the card ranking's seeds, the top builds re-scored and raced;
+  more data before a richer model (the set network ties the linear one at 22,700 games), and draw credit (107.3) on the
+  version-2 games as a second per-card signal.

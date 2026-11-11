@@ -845,7 +845,7 @@ GRID = {
     'const': [{}],
     'feat': [{'l2_other': 1e-4}],
     'feat+mode': [{'l2_other': 1e-4}],
-    'linear': [{'l2_cards': c, 'l2_other': 1e-4} for c in (1e-4, 3e-4, 1e-3, 3e-3, 1e-2)],
+    'linear': [{'l2_cards': c, 'l2_other': 1e-4} for c in (1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2)],
     'set': [{'l2_cards': 1e-3, 'l2_other': o} for o in (1e-4, 1e-3)],
 }
 SET_HYPER = {'d': 32, 'k': 8, 'hidden': 64}

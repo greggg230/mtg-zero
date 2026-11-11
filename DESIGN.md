@@ -838,6 +838,16 @@ exactly (its whole spec, seed and actions: ~4.8 KB a self-play game line) and ev
 per seat; `python -m mtgz.sealed.cardcredit RUN --checkpoint CKPT` replays the games and gives each card's draw credit - the
 drawer's value just after its draws less just before, with any checkpoint - beside the raw drawn-vs-not-drawn win rates.
 
+**S4a, the deck evaluator (2026-11-11, branch `s4-evaluator`; ENGINE.md 108):** `mtgz.sealed.evaluator` trains on run 1's
+logged games (27,857 network-vs-network games to iteration 43, held out by iteration: the test from 40 on). Found: the play
+network's pre-game value half-memorises the games it trained on (correlation with results 0.21-0.26 on iteration 39's own
+games, 0.05-0.09 on later ones) and is a poor judge out of sample (test log loss 0.697, worse than a constant; the winner's
+deck ranked higher in 53%), which explains the value pick's +3 +- 7 in the race. The leak-free target (each game valued by the
+network that played it) adds nothing over results, so evaluator v0 trains on results: a linear card-value model (log loss
+0.677, winner's deck ranked higher in 60.8%, calibrated) and a set network that ties it; card ranking v0 (Spearman 0.17 with
+17lands' game-in-hand rates, a yardstick); the picker `python -m mtgz.sealed.compare evalpick` races the evaluators' picks
+against the value pick and random builds (dry-run on CPU; the GPU race waits for run 1's end).
+
 ### 9.1 Deckbuilding from a pool: the plan (user, 2026-11-10)
 
 **Best-of-one only.** A deck is only "best" against a field. Training uses our own decks (pure self-play),
