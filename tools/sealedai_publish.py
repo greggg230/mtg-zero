@@ -115,7 +115,7 @@ class CardTallies:
             g.pop('actions', None)                    # (the counts need the draws, not the replay)
         changed, keep = set(), []
         for g in self.pending + new:
-            it = GL.iteration_of(g['time'], times) if times else None
+            it = GL.game_iteration(g, times)
             if it is None:
                 keep.append(g)
                 continue
@@ -167,7 +167,7 @@ def credit_record(run, ckpt_iter, ckpt_path, window, max_games=None, threads=4, 
     for g in GL.stream(run, specs):
         if g['phase'] != 'selfplay' or g.get('v', 1) < 2 or g['result'] is None:
             continue
-        it = GL.iteration_of(g['time'], times)
+        it = GL.game_iteration(g, times)
         if it is not None and window[0] <= it <= window[1] and of(g):
             games.append(g)
     if not games:

@@ -288,7 +288,7 @@ def stats(run, last=10, iters=None, phase='selfplay', seats='network', mode=None
         n_lines += 1
         if phase != 'all' and g['phase'] != phase:
             continue
-        it = GL.iteration_of(g['time'], times) if times else None
+        it = GL.game_iteration(g, times)
         if window is not None and (it is None or not window[0] <= it <= window[1]):
             continue
         ss = of(g)

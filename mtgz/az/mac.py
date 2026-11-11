@@ -77,6 +77,31 @@ def problems(root, expect):
     return out
 
 
+def eval_log(mirror, it):
+    """The game log of a remote evaluation (`python -m mtgz.az.remote eval MIRROR ITER`, docs/ENGINE.md 109): when the
+    mirror's game declares remote evaluation files (the package's `remote_eval_files`: `mtg_eoe`'s game log), this
+    process logs every game it plays - the yardstick, random, reference and Elo games, as the run's own process does
+    when it evaluates (docs/ENGINE.md 107.1) - to MIRROR/games/eval-iter_NNNN-<pid>.jsonl (`games.remote_eval_log`),
+    created now, so an evaluation that plays no game leaves an empty record rather than none; zero.remote copies
+    every such file of the iteration into the run's games/ (a missing one fails the evaluation there). -> the log's
+    path, or None (a game without a log)."""
+    import json
+
+    from zero import package
+
+    from mtgz.sealed.games import remote_eval_log
+    with open(os.path.join(mirror, 'config.json'), encoding='utf-8') as f:
+        game = json.load(f)['game']
+    if not package.active().remote_eval_files_of(game, it):
+        return None
+    path = remote_eval_log(mirror, it)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    open(path, 'w', encoding='utf-8').close()
+    from mtgz import _engine
+    _engine.game_log(path)
+    return path
+
+
 def verify_checkout(root=ROOT, expect=None):
     """SystemExit unless the checkout `root` is exactly the run's commit (`expect`, default
     $MTGZ_REMOTE_COMMIT) with its engine built at it."""
