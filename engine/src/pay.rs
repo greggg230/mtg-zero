@@ -64,6 +64,13 @@ pub(crate) fn by_perm(slot: AbilitySlot) -> bool {
     slot == IMPROVISE || slot == TAP_FOR || slot == POL_FOR || matches!(slot, AbilitySlot::Activated(i) if i >= 4)
 }
 
+/// Does shared source `s`'s activation tap its actor (its class has a pool,
+/// `Class::pool`: Orcish Lumberjack's, Gene Pollinator's {T})? Squandered
+/// Resources' and other abilities without {T} tap nothing (CR 602.2b).
+fn taps_actor(classes: &[Class], s: &Src) -> bool {
+    classes.iter().find(|cl| cl.members.contains(s)).map_or(s.slot != SQ_FOR, |cl| cl.pool > 0)
+}
+
 /// The slots of a permanent sacrificed for another's or a granted mana
 /// ability.
 pub(crate) fn is_sac_slot(slot: AbilitySlot) -> bool {
@@ -236,6 +243,19 @@ fn one_member(src: Src) -> Members {
     let mut m = Members::new();
     m.push(src);
     m
+}
+
+/// A shared activation that sacrifices another permanent (`SQ_FOR`,
+/// `LJ_FOR`: `Class::actors`).
+fn shared_sac(cl: &Class) -> bool {
+    !cl.actors.is_empty() && is_sac_slot(cl.members[0].slot)
+}
+
+/// A world of the shared activations' kills (`Game::kill_worlds`): the
+/// classes, and the actors its picks with {T} tap.
+pub(crate) struct KillWorld {
+    pub classes: Vec<Class>,
+    pub tapped: Vec<CardIdx>,
 }
 
 /// What a source contributes to a payment.
@@ -653,7 +673,10 @@ impl PayMana {
     /// What the picks so far use of card `c` (`Class::res`; an actor of a
     /// shared source picked is tapped).
     fn used_res(&self, classes: &[Class], c: CardIdx) -> u8 {
-        let acts = if self.actors.iter().any(|(s, a)| *a == c && s.slot != SQ_FOR) { TAP } else { 0 };
+        // (An actor is tapped by its pool's activation, `Class::pool`; an
+        // ability without {T} taps nothing: Squandered Resources', "Sacrifice
+        // an artifact: Add {C}", CR 602.2b.)
+        let acts = if self.actors.iter().any(|(s, a)| *a == c && taps_actor(classes, s)) { TAP } else { 0 };
         self.chosen
             .iter()
             .chain(self.multi.iter().map(|m| &m.0))
@@ -827,6 +850,149 @@ impl Game {
                 Some(Class { members: m, actors, ..cl.clone() })
             })
             .collect()
+    }
+
+    /// Can a pick of `classes` sacrifice a permanent that activates another
+    /// pick (CR 602.2b: a shared activation, `Class::actors`, needs its
+    /// actor on the battlefield; ENGINE.md 100.4.11)? `None` when it can't,
+    /// or when there is one actor (each pick it activates comes before the
+    /// one that sacrifices it). `Some(false)` when every class such a
+    /// permanent touches (as an actor or sacrificed) has the same actors
+    /// and taps them alike: the candidates' counts are exact (one group:
+    /// without {T}, its picks all by one actor, the one a pick sacrifices
+    /// sacrificing itself last; with {T}, each pick that sacrifices an
+    /// actor left activated by that actor itself, the others by actors no
+    /// pick sacrifices, as many as the pool's count needs). Otherwise
+    /// `Some(true)`: the counts may hold for picks no order activates
+    /// (each actor sacrificed by the other's ability), so feasibility goes
+    /// through `kill_worlds`; and either way the payment's options are
+    /// searched (an actor chosen may close a cycle).
+    pub(crate) fn actor_kills(&self, classes: &[Class]) -> Option<bool> {
+        let shared: Vec<usize> = (0..classes.len()).filter(|&i| shared_sac(&classes[i])).collect();
+        if shared.is_empty() {
+            return None;
+        }
+        let mut actors: Vec<CardIdx> = Vec::new();
+        for &i in &shared {
+            for &a in &classes[i].actors {
+                if !actors.contains(&a) {
+                    actors.push(a);
+                }
+            }
+        }
+        let victims: Vec<CardIdx> = actors.iter().copied().filter(|&a| shared.iter().any(|&i| classes[i].members.iter().any(|s| s.card == a))).collect();
+        if actors.len() < 2 || victims.is_empty() {
+            return None;
+        }
+        let touching: Vec<usize> = shared
+            .iter()
+            .copied()
+            .filter(|&i| classes[i].members.iter().any(|s| victims.contains(&s.card)) || classes[i].actors.iter().any(|a| victims.contains(a)))
+            .collect();
+        let set = |i: usize| {
+            let mut v = classes[i].actors.clone();
+            v.sort_unstable();
+            v
+        };
+        let first = (set(touching[0]), classes[touching[0]].pool > 0);
+        Some(!touching.iter().all(|&i| (set(i), classes[i].pool > 0) == first))
+    }
+
+    /// The worlds of the shared activations' kills when the candidates'
+    /// counts may not be exact (`actor_kills` is `Some(true)`); `None`
+    /// otherwise. Each picks, for every permanent that is an actor and that
+    /// a shared pick may sacrifice (a victim), whether one does: which class
+    /// and which actor activates it (CR 602.2b), with the actors of picks
+    /// with {T} distinct and an order in which each actor is there when it
+    /// activates (no cycle). In a world the other sacrifices of victims are
+    /// left out, a pick with {T} keeps its actor (tapped: out of the pools,
+    /// its card's ways that tap it out, `KillWorld::tapped`), and every
+    /// other pick (its permanent no actor) comes first, all actors there.
+    /// A payment is payable exactly when some world's candidates pay it: a
+    /// world's picks a payment leaves out are another world's, and a
+    /// payable order puts the picks that sacrifice no actor first.
+    pub(crate) fn kill_worlds(&self, classes: &[Class]) -> Option<Vec<KillWorld>> {
+        if self.actor_kills(classes) != Some(true) {
+            return None;
+        }
+        let shared: Vec<usize> = (0..classes.len()).filter(|&i| shared_sac(&classes[i])).collect();
+        let mut victims: Vec<CardIdx> = Vec::new();
+        for &i in &shared {
+            for &a in &classes[i].actors {
+                if !victims.contains(&a) && shared.iter().any(|&j| classes[j].members.iter().any(|s| s.card == a)) {
+                    victims.push(a);
+                }
+            }
+        }
+        // Each victim's ways to be sacrificed: (class, its member, actor).
+        let ways: Vec<Vec<(usize, Src, CardIdx)>> = victims
+            .iter()
+            .map(|&r| {
+                let mut v = Vec::new();
+                for &i in &shared {
+                    for s in classes[i].members.iter().filter(|s| s.card == r) {
+                        for &a in &classes[i].actors {
+                            v.push((i, *s, a));
+                        }
+                    }
+                }
+                v
+            })
+            .collect();
+        let mut out = Vec::new();
+        let mut picks: Vec<(usize, Src, CardIdx)> = Vec::new();
+        Self::each_kill_world(classes, &ways, 0, &mut picks, &mut out);
+        Some(out)
+    }
+
+    fn each_kill_world(classes: &[Class], ways: &[Vec<(usize, Src, CardIdx)>], k: usize, picks: &mut Vec<(usize, Src, CardIdx)>, out: &mut Vec<KillWorld>) {
+        if k == ways.len() {
+            // (An order exists: repeatedly, a pick no other activates with
+            // the permanent it sacrifices.)
+            let mut left: Vec<(CardIdx, CardIdx)> = picks.iter().map(|p| (p.1.card, p.2)).collect();
+            while !left.is_empty() {
+                let Some(j) = (0..left.len()).find(|&j| !left.iter().enumerate().any(|(i, x)| i != j && x.1 == left[j].0)) else { return };
+                left.remove(j);
+            }
+            out.push(Self::kill_world(classes, picks));
+            return;
+        }
+        Self::each_kill_world(classes, ways, k + 1, picks, out);
+        for &(i, s, a) in &ways[k] {
+            // (Actors of picks with {T}: distinct.)
+            if classes[i].pool > 0 && picks.iter().any(|p| classes[p.0].pool > 0 && p.2 == a) {
+                continue;
+            }
+            picks.push((i, s, a));
+            Self::each_kill_world(classes, ways, k + 1, picks, out);
+            picks.pop();
+        }
+    }
+
+    /// `classes` in the world of kills `picks` (`kill_worlds`).
+    fn kill_world(classes: &[Class], picks: &[(usize, Src, CardIdx)]) -> KillWorld {
+        let tapped: Vec<CardIdx> = picks.iter().filter(|p| classes[p.0].pool > 0).map(|p| p.2).collect();
+        let victim = |c: CardIdx| classes.iter().any(|cl| shared_sac(cl) && cl.actors.contains(&c));
+        let mut out: Vec<Class> = Vec::with_capacity(classes.len());
+        for (i, cl) in classes.iter().enumerate() {
+            let mut kept = Members::new();
+            for s in cl.members.iter() {
+                if shared_sac(cl) && victim(s.card) {
+                    match picks.iter().find(|p| p.0 == i && p.1 == *s) {
+                        // (Its actor kept: with {T}, tapped already.)
+                        Some(p) if cl.pool > 0 => out.push(Class { members: one_member(*s), pool: 0, actors: vec![p.2], ..cl.clone() }),
+                        Some(_) => kept.push(*s),
+                        None => {}
+                    }
+                } else if !(cl.res & TAP != 0 && tapped.contains(&s.card)) {
+                    kept.push(*s);
+                }
+            }
+            if !kept.is_empty() {
+                out.push(Class { members: kept, ..cl.clone() });
+            }
+        }
+        KillWorld { classes: out, tapped }
     }
 
     /// The sources of payment `pm` (`pay_classes`), without those of the
@@ -1517,10 +1683,13 @@ impl Game {
     /// The candidates of a payment of a cost of `total` mana (`ManaCost::total`;
     /// it bounds the uses of a source that only removes counters,
     /// `UseCap`).
-    fn cands(&self, p: PlayerId, keep: &Keep, classes: &[Class], use_src: &dyn Fn(&Src) -> bool, dmg: bool, total: usize) -> Cands {
+    /// `tapped`: actors a shared activation taps already (`KillWorld`):
+    /// out of the pools and of a later tap cost's candidates.
+    #[allow(clippy::too_many_arguments)]
+    fn cands(&self, p: PlayerId, keep: &Keep, classes: &[Class], use_src: &dyn Fn(&Src) -> bool, dmg: bool, total: usize, tapped: &[CardIdx]) -> Cands {
         let cap = UseCap::of(classes, total, 0);
-        let taps = self.taps_owed(keep, &|_| true);
-        let pools = PoolCtx::of(classes, &|_| false, &|a| self.actor_reserved(p, keep, a), &[]);
+        let taps = self.taps_owed(keep, &|c| !tapped.contains(&c));
+        let pools = PoolCtx::of(classes, &|a| tapped.contains(&a), &|a| self.actor_reserved(p, keep, a), &[]);
         let res = self.res_ctx(p, keep, &|_| false);
         let consumes = |cl: &Class, s: &Src| self.consumes(p, keep, cl, s);
         let chain_of = |s: &Src| chain_id(classes, s, 0);
@@ -1903,9 +2072,24 @@ impl Game {
                     return true;
                 }
                 let (budget, dmg) = self.budget(p, keep, later);
-                let mut c = self.cands(p, keep, classes, &|s| Some(s.card) != without, dmg, cost.total() as usize);
-                self.add_pool(p, keep.allow | needs_allow(classes), &mut c);
-                cands_payable(cost, &[], &[], &c, budget)
+                let pay = |classes: &[Class], tapped: &[CardIdx]| {
+                    // (An actor a later tap cost needs, tapped already: one
+                    // of its candidates used, as `after_picks` counts it.)
+                    let used = tapped.iter().filter(|&&a| self.actor_reserved(p, keep, a)).count() as i32;
+                    let budget = Budget { sac: budget.sac - used, ..budget };
+                    if budget.sac < 0 {
+                        return false;
+                    }
+                    let mut c = self.cands(p, keep, classes, &|s| Some(s.card) != without, dmg, cost.total() as usize, tapped);
+                    self.add_pool(p, keep.allow | needs_allow(classes), &mut c);
+                    cands_payable(cost, &[], &[], &c, budget)
+                };
+                // (Shared activations that sacrifice each other's actors:
+                // each world of their kills, `kill_worlds`; ENGINE.md 100.4.11.)
+                match self.kill_worlds(classes) {
+                    None => pay(classes, &[]),
+                    Some(worlds) => worlds.iter().any(|w| pay(&w.classes, &w.tapped)),
+                }
             }
             // (2 life each: no more than the life left allows, CR 119.4.)
             Some(col) => (0..=cost.phyrexian[col].min((life_total.max(0) as u64).saturating_sub(later) / 2)).any(|k| {
@@ -1918,7 +2102,7 @@ impl Game {
     /// The candidates of an unrestricted payment by `p` (computed once per
     /// priority decision).
     pub(crate) fn plain_cands(&self, p: PlayerId, classes: &[Class]) -> Cands {
-        let mut c = self.cands(p, &Keep::default(), classes, &|_| true, false, PLAIN_TOTAL);
+        let mut c = self.cands(p, &Keep::default(), classes, &|_| true, false, PLAIN_TOTAL, &[]);
         self.add_pool(p, needs_allow(classes), &mut c);
         c
     }
@@ -1932,6 +2116,11 @@ impl Game {
         // (Candidates whose counter sources were cut for smaller costs are
         // built again for this one: `UseCap`.)
         if plain.cut && cost.total() as usize > PLAIN_TOTAL {
+            return self.can_pay_with(p, cost, classes, &Keep::default());
+        }
+        // (Shared activations that sacrifice each other's actors: the worlds
+        // of their kills, `kill_worlds`.)
+        if self.actor_kills(classes) == Some(true) {
             return self.can_pay_with(p, cost, classes, &Keep::default());
         }
         // (A life total past `i32::MAX` is the same budget: exact, above.)
@@ -2174,7 +2363,7 @@ impl Game {
         // pools have actors enough for the picks is the candidates' part,
         // `PoolCtx`.)
         for (s, a) in &pm.actors {
-            if s.slot != SQ_FOR && self.actor_reserved(pm.payer, &pm.keep, *a) {
+            if taps_actor(classes, s) && self.actor_reserved(pm.payer, &pm.keep, *a) {
                 b.sac -= 1;
             }
         }
@@ -2252,6 +2441,13 @@ impl Game {
                 Some(other) => unreachable!("actor answer {other:?}"),
                 None => {
                     let ok = self.actor_options(&pm, &classes, src);
+                    if ok.is_empty() && self.oracle {
+                        // (The payment search's copies only, `Game::oracle`:
+                        // a pick no actor can activate any longer; the real
+                        // payment offers only completable picks.)
+                        self.oracle_dead = true;
+                        return;
+                    }
                     assert!(!ok.is_empty(), "PayMana: no actor for {src:?}: {pm:?} classes {classes:?}\n{}", self.log_lines().join("\n"));
                     if ok.len() == 1 {
                         pm.actor_for = None;
@@ -2294,6 +2490,14 @@ impl Game {
         if !pm.pooled {
             // The pool pays as much as it can (ENGINE.md 18).
             pm.pooled = true;
+            // Shared activations whose actors a pick may sacrifice (CR
+            // 602.2b: an actor activates while it is there): every option
+            // leaves the payment completable, searched (`Game::oracle`;
+            // `finish_payment` orders the activations, the copies whose
+            // actors need each other's sacrifice first are dead ends).
+            if pm.oracle.is_none() && !self.oracle && self.actor_kills(&classes).is_some() {
+                pm.oracle = Some(self.agenda.len() as u32);
+            }
             self.recount(&mut pm, &classes);
         }
         // Sources delve exiles once activated: first, each with its mana's
@@ -2679,12 +2883,16 @@ impl Game {
     }
 
     /// The actors of shared source `src`, just picked, that may activate it
-    /// (`PayMana::actor_for`): its class's actors that no pick taps (a
-    /// Squandered Resources is tapped by nothing) and whose choice leaves the
-    /// payment payable (with the picks so far and the sources still to pick).
+    /// (`PayMana::actor_for`): its class's actors that no pick taps when its
+    /// activation taps them (an ability without {T}, Squandered Resources',
+    /// taps nothing: an actor activates it again, and a pick may sacrifice
+    /// it after, CR 602.2b) and whose choice leaves the payment payable (with
+    /// the picks so far and the sources still to pick; an order in which
+    /// every actor is there when it activates, `finish_payment`, is the
+    /// payment search's part when one can be missing, `Game::actor_kills`).
     fn actor_options(&self, pm: &PayMana, classes: &[Class], src: Src) -> Vec<CardIdx> {
         let cl = classes.iter().find(|cl| cl.members.contains(&src)).expect("the shared source's class");
-        let tapped = |a: CardIdx| src.slot != SQ_FOR && pm.used_res(classes, a) & TAP != 0;
+        let tapped = |a: CardIdx| cl.pool > 0 && pm.used_res(classes, a) & TAP != 0;
         cl.actors
             .iter()
             .copied()
@@ -2891,6 +3099,16 @@ impl Game {
     /// Phyrexian life.
     fn finish_payment(&mut self, pm: &PayMana, rem: Rem) {
         let payer = pm.payer;
+        let Some(order) = self.activation_order(pm) else {
+            // (The payment search's copies only: picks whose actors each
+            // need another's sacrificed first; the real payment offers only
+            // completable picks, `Game::actor_kills`.)
+            assert!(self.oracle, "PayMana: no order of the activations leaves each actor there: {pm:?}
+{}", self.log_lines().join("
+"));
+            self.oracle_dead = true;
+            return;
+        };
         let pool = self.players[payer as usize].pool;
         // F7 (ENGINE.md 100.7): the virtual pool (the pool's mana and the
         // picked several-mana sources', `pm.extra`) keeps a `u8` a type, as
@@ -2969,27 +3187,6 @@ impl Game {
                 self.marks.push((r, crate::game::Mark::Uncounterable));
             }
         }
-        let mut order: Vec<Src> = pm.chosen.iter().copied().chain(pm.multi.iter().map(|m| m.0)).collect();
-        // Sources that keep their permanent first ("activate only if you
-        // control three artifacts" still holds; counts are unchanged), life
-        // payments before damage, sacrifices last.
-        // (Artifacts tapped for improvise after the mana abilities, CR
-        // 702.126a.)
-        order.sort_by_key(|s| {
-            if s.slot == IMPROVISE {
-                return (true, false, false, false);
-            }
-            if s.slot == TAP_FOR || s.slot == POL_FOR {
-                return (false, false, false, false);
-            }
-            if is_sac_slot(s.slot) {
-                return (false, true, false, true);
-            }
-            let ad = self.src_ability(s.card, s.slot);
-            let dmg = ad.mana().map_or(0, |m| m.damage_to_you);
-            let last = ad.mana().and_then(|m| m.sac_if_no).is_some_and(|k| self.counters_on(s.card, k) <= 1);
-            (false, ad.cost.sac_self || last, dmg > 0, ad.cost.life == 0)
-        });
         // (The permanent each shared source's activation is: the player's
         // choice, `PayMana::actors`.)
         let actor_of = |src: &Src| pm.actors.iter().find(|(x, _)| x == src).map(|x| x.1);
@@ -3054,6 +3251,67 @@ impl Game {
             self.note(|_| format!("P{payer} pays {n} life"));
             self.lose_life(payer, i32::try_from(n).expect("life within the life total"));
         }
+    }
+
+    /// The order the picks of payment `pm` are activated in (CR 601.2g, an
+    /// order the rules allow): sources that keep their permanent first
+    /// ("activate only if you control three artifacts" still holds; counts
+    /// are unchanged), life payments before damage, sacrifices last
+    /// (artifacts tapped for improvise after the mana abilities, CR
+    /// 702.126a); and a shared activation before the pick that sacrifices
+    /// its actor (CR 602.2b: the permanent activating it is on the
+    /// battlefield; one may sacrifice itself, its own pick). `None` when the
+    /// actors need each other's sacrifice first (a cycle: no order).
+    fn activation_order(&self, pm: &PayMana) -> Option<Vec<Src>> {
+        let mut order: Vec<Src> = pm.chosen.iter().copied().chain(pm.multi.iter().map(|m| m.0)).collect();
+        // Sources that keep their permanent first ("activate only if you
+        // control three artifacts" still holds; counts are unchanged), life
+        // payments before damage, sacrifices last.
+        // (Artifacts tapped for improvise after the mana abilities, CR
+        // 702.126a.)
+        order.sort_by_key(|s| {
+            if s.slot == IMPROVISE {
+                return (true, false, false, false);
+            }
+            if s.slot == TAP_FOR || s.slot == POL_FOR {
+                return (false, false, false, false);
+            }
+            if is_sac_slot(s.slot) {
+                return (false, true, false, true);
+            }
+            let ad = self.src_ability(s.card, s.slot);
+            let dmg = ad.mana().map_or(0, |m| m.damage_to_you);
+            let last = ad.mana().and_then(|m| m.sac_if_no).is_some_and(|k| self.counters_on(s.card, k) <= 1);
+            (false, ad.cost.sac_self || last, dmg > 0, ad.cost.life == 0)
+        });
+        // (The permanent each shared source's activation is: the player's
+        // choice, `PayMana::actors`.)
+        let actor_of = |src: &Src| pm.actors.iter().find(|(x, _)| x == src).map(|x| x.1);
+        // The permanent a pick takes from the battlefield (sacrifices or
+        // exiles), if any.
+        let takes = |s: &Src| -> Option<CardIdx> {
+            if is_sac_slot(s.slot) {
+                return Some(s.card);
+            }
+            if s.slot == IMPROVISE || s.slot == TAP_FOR || s.slot == POL_FOR || !matches!(s.slot, AbilitySlot::Activated(_)) {
+                return None;
+            }
+            let ad = self.src_ability(s.card, s.slot);
+            let last = ad.mana().and_then(|m| m.sac_if_no).is_some_and(|k| self.counters_on(s.card, k) <= 1);
+            (ad.cost.sac_self || ad.cost.exile_self || last).then_some(s.card)
+        };
+        if !pm.actors.iter().any(|(s, a)| order.iter().any(|q| q != s && takes(q) == Some(*a))) {
+            return Some(order);
+        }
+        // (The first in the order above whose permanent no pick still to
+        // come activates with: the order kept where it can be.)
+        let mut left: Vec<(Src, Option<CardIdx>, Option<CardIdx>)> = order.iter().map(|s| (*s, takes(s), actor_of(s))).collect();
+        let mut out = Vec::with_capacity(left.len());
+        while !left.is_empty() {
+            let k = (0..left.len()).find(|&k| left[k].1.is_none_or(|c| !left.iter().enumerate().any(|(i, x)| i != k && x.2 == Some(c))))?;
+            out.push(left.remove(k).0);
+        }
+        Some(out)
     }
 
     /// The colours of mana spent on a spell that reads them (converge,

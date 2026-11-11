@@ -2034,3 +2034,166 @@ fn cr_601_2h_the_equipment_a_cost_exiles_is_not_sacrificed_for_mana() {
         assert_eq!(h.obj(br).zone, Zone::Exile, "exiled for the cost\n{}", log(&h));
     }
 }
+
+// ---- 100.4.11: B8, the last payment items ----------------------------------
+
+/// The cube, the shared test cards, B7's and B8's.
+fn b8_db() -> &'static CardDb {
+    use serde_json::json;
+    static DB: std::sync::OnceLock<&'static CardDb> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let sac_for = |what: &str, n: u8| {
+            json!([{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "sacrifice_a_permanent_type": what},
+                "effect": {"$t": "AddManaToPool", "produces": [["C", n]]}, "is_mana_ability": true}])
+        };
+        let custom = vec![
+            // An artifact: "Sacrifice an artifact: Add {C}." (It may
+            // sacrifice itself.)
+            eoe_w2::card("Test Scrap Idol", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 2}, "mana_cost_str": "{2}", "activated_abilities": sac_for("artifact", 1)})),
+            // An artifact, not a creature: "Sacrifice a creature: Add {C}{C}."
+            eoe_w2::card("Test Bone Altar", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}", "activated_abilities": sac_for("creature", 2)})),
+            // A creature, not an artifact: "Sacrifice an artifact: Add {C}{C}."
+            eoe_w2::card("Test Scrap Golem", json!({"card_types": ["Creature"], "subtypes": ["Golem"], "power": 1, "toughness": 1,
+                "type_line": "Creature - Golem", "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}",
+                "activated_abilities": sac_for("artifact", 2)})),
+            // A vanilla artifact costing {4}, and one costing {5}.
+            eoe_w2::card("Test Four Relic", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 4}, "mana_cost_str": "{4}"})),
+            eoe_w2::card("Test Five Relic", json!({"card_types": ["Artifact"], "type_line": "Artifact",
+                "mana_cost": {"$t": "ManaCost", "generic": 5}, "mana_cost_str": "{5}"})),
+            // A Forest: "{T}: Add {G}." "Sacrifice a creature: Add {C}{C}."
+            eoe_w2::card("Test Grove Altar", json!({"card_types": ["Land"], "subtypes": ["Forest"], "type_line": "Land - Forest",
+                "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_self": true},
+                    "effect": {"$t": "AddManaToPool", "produces": [["G", 1]]}, "is_mana_ability": true}, sac_for("creature", 2)[0].clone()]})),
+        ];
+        let mut cards = engine::db::load_cube_document().cards;
+        cards.extend(common::custom_cards());
+        cards.extend(custom.into_iter().map(|v| serde_json::from_value::<card_ir::Card>(v).expect("custom card IR")));
+        let db = CardDb::from_cards(&cards);
+        for n in ["Test Scrap Idol", "Test Bone Altar", "Test Scrap Golem", "Test Four Relic", "Test Five Relic", "Test Grove Altar", "Orcish Lumberjack", "Mind Stone"] {
+            db.expect_id(n).unwrap_or_else(|e| panic!("{e}"));
+        }
+        db.leak()
+    })
+}
+
+fn b8_scen() -> Scenario {
+    Scenario::new(b8_db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.log = true;
+        })
+        .library(0, &["Island"; 12])
+        .library(1, &["Island"; 12])
+}
+
+/// Every way the pending decisions can go (each option of each, pages
+/// followed) until priority: the games at their ends.
+fn every_end(g: &Game) -> Vec<Game> {
+    fn go(g: Game, out: &mut Vec<Game>, budget: &mut u32) {
+        *budget = budget.checked_sub(1).expect("every_end: too many paths");
+        if at_priority(&g) || g.is_over() {
+            out.push(g);
+            return;
+        }
+        for c in options(&g) {
+            let mut h = g.clone();
+            h.choose(c);
+            go(h, out, budget);
+        }
+    }
+    let mut out = Vec::new();
+    go(g.clone(), &mut out, &mut 100_000);
+    out
+}
+
+/// CR 602.2b, 601.2g, 605.3a: a shared mana ability may sacrifice the
+/// permanent whose ability it is, and that permanent may activate it again
+/// first (its ability doesn't tap it). Test Scrap Idol ("Sacrifice an
+/// artifact: Add {C}") and Test Four Relic pay Mind Stone's {2}: the Idol
+/// sacrifices the Relic, then itself (picked first or not). The engine
+/// counted the Idol tapped by its first activation and, asked for the
+/// second's actor, found none ("no actor", a loud failure in a legal game).
+#[test]
+fn cr_602_2b_a_shared_mana_ability_sacrifices_its_own_permanent_last() {
+    let g = b8_scen().battlefield(0, &["Test Scrap Idol", "Test Four Relic"]).hand(0, &["Mind Stone"]).at(Step::Main1, 0).start();
+    let idol = bf(&g, 0, "Test Scrap Idol");
+    let bank = bf(&g, 0, "Test Four Relic");
+    let stone = g.card(0, "Mind Stone", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(stone)), "{:?}", g.options_desc());
+    let mut g = g;
+    g.choose(Choice::Cast(stone));
+    let ends = every_end(&g);
+    assert!(!ends.is_empty());
+    for h in &ends {
+        assert_eq!(h.obj(stone).zone, Zone::Stack, "{}", log(h));
+        assert_eq!(h.obj(idol).zone, Zone::Graveyard, "{}", log(h));
+        assert_eq!(h.obj(bank).zone, Zone::Graveyard, "{}", log(h));
+        let l = log(h);
+        let (relic_at, idol_at) = (l.find("sacrificing Test Four Relic"), l.find("sacrificing Test Scrap Idol"));
+        assert!(relic_at.is_some() && relic_at < idol_at, "the Idol activates before it is sacrificed
+{l}");
+    }
+}
+
+/// CR 602.2b, 601.2g: each activation needs its permanent on the
+/// battlefield. Test Bone Altar ("Sacrifice a creature: Add {C}{C}", an
+/// artifact) and Test Scrap Golem ("Sacrifice an artifact: Add {C}{C}", a
+/// creature) may each sacrifice the other, not both: the second activation's
+/// permanent is gone. {C}{C} at most: Test Four Relic ({4}) can't be cast;
+/// Mind Stone ({2}) can, either way, and every payment completes. The engine
+/// counted both activations ({4}), offered the Relic and failed paying it.
+#[test]
+fn cr_602_2b_two_mana_abilities_that_sacrifice_each_others_permanent() {
+    let mut g = b8_scen()
+        .battlefield(0, &["Test Bone Altar", "Test Scrap Golem"])
+        .hand(0, &["Test Four Relic", "Mind Stone"])
+        .at(Step::Main1, 0)
+        .start();
+    let altar = bf(&g, 0, "Test Bone Altar");
+    let golem = bf(&g, 0, "Test Scrap Golem");
+    let relic = g.card(0, "Test Four Relic", Zone::Hand);
+    let stone = g.card(0, "Mind Stone", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(relic)), "{{C}}{{C}} at most: {:?}", g.options_desc());
+    assert!(g.has_option(Choice::Cast(stone)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(stone));
+    let ends = every_end(&g);
+    assert_eq!(ends.len(), 2, "the Altar or the Golem sacrificed");
+    for h in &ends {
+        assert_eq!(h.obj(stone).zone, Zone::Stack, "{}", log(h));
+        let gone = [altar, golem].iter().filter(|&&c| h.obj(c).zone == Zone::Graveyard).count();
+        assert_eq!(gone, 1, "{}", log(h));
+    }
+}
+
+/// CR 602.2b, 601.2g: a shared activation with {T} (Orcish
+/// Lumberjack's "{T}, Sacrifice a Forest: Add three mana in any combination
+/// of {R} and/or {G}") and one without (Test Grove Altar, a Forest: "Sacrifice
+/// a creature: Add {C}{C}") whose permanents each may sacrifice the other.
+/// The Grove tapped for {G} and then sacrificed by the Lumberjack makes four
+/// mana, the most: Test Four Relic can be cast, Test Five Relic can't (the
+/// counts took both sacrifices, six).
+#[test]
+fn cr_602_2b_a_lumberjack_and_an_altar_that_sacrifice_each_other() {
+    let mut g = b8_scen()
+        .battlefield(0, &["Orcish Lumberjack", "Test Grove Altar"])
+        .hand(0, &["Test Four Relic", "Test Five Relic"])
+        .at(Step::Main1, 0)
+        .start();
+    let lj = bf(&g, 0, "Orcish Lumberjack");
+    let grove = bf(&g, 0, "Test Grove Altar");
+    let four = g.card(0, "Test Four Relic", Zone::Hand);
+    let five = g.card(0, "Test Five Relic", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(five)), "four mana at most: {:?}", g.options_desc());
+    assert!(g.has_option(Choice::Cast(four)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(four));
+    let ends = every_end(&g);
+    assert!(!ends.is_empty());
+    for h in &ends {
+        assert_eq!(h.obj(four).zone, Zone::Stack, "{}", log(h));
+        assert_eq!(h.obj(grove).zone, Zone::Graveyard, "{}", log(h));
+        assert_eq!(h.obj(lj).zone, Zone::Battlefield, "{}", log(h));
+    }
+}
