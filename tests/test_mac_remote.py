@@ -151,6 +151,54 @@ def test_an_eval_net_mirror_is_evaluated_after_the_same_check(tmp_path):
     assert [r['iter'] for r in map(json.loads, open(mirror / 'metrics.jsonl'))] == [0]
 
 
+_EOE_EVAL = r'''
+import sys
+from mtgz.az.mac import eval_log
+from zero import remote
+print('LOG', eval_log(sys.argv[1], int(sys.argv[2])))
+remote.evaluate_mirror(sys.argv[1], int(sys.argv[2]))
+'''
+
+
+def test_a_remote_eoe_evaluation_logs_its_games(tmp_path):
+    """docs/ENGINE.md 109: an `mtg_eoe` mirror's evaluation (the remote side of `python -m mtgz.az.remote eval`:
+    `mac.eval_log`, then zero.remote.evaluate_mirror) logs every game it plays - the yardstick, random, reference
+    and Elo games - to MIRROR/games/eval-iter_NNNN-<pid>.jsonl, whose pattern the package declares as the
+    evaluation's files (zero.remote copies them into the run); the game log reads them as evaluation games of
+    iteration NNNN whatever their time. A game without a log (`mtg`) writes and declares nothing."""
+    from mtgz.sealed import games as GL
+    from zero.net import save
+    from zero.run import DEFAULTS, PRESETS, Run, model_path
+    assert package.active().remote_eval_files_of('mtg_eoe', 1) == ['games/eval-iter_0001-*.jsonl']
+    assert package.active().remote_eval_files_of('mtg', 1) == []
+    cfg = dict(DEFAULTS, **PRESETS['eoe-smoke'])
+    cfg.update(eval_games=2, eval_random_games=2, ref_games=2, elo_games=2, elo_paired=1, elo_opponents=1, threads=2)
+    mirror = tmp_path / 'mtgz-remote' / 'eoe'
+    (mirror / 'models').mkdir(parents=True)
+    (mirror / 'config.json').write_text(json.dumps(cfg))
+    R = Run(str(mirror), cfg)
+    for k in (0, 1):
+        save(R.new_model(), model_path(str(mirror), k), {'iter': k})
+    p = subprocess.run([sys.executable, '-c', _EOE_EVAL, str(mirror), '1'], cwd=ROOT, capture_output=True, text=True,
+                       timeout=600, env=dict(os.environ, PYTHONIOENCODING='utf-8'))
+    assert p.returncode == 0, p.stdout + p.stderr
+    logs = sorted(os.listdir(mirror / 'games'))
+    assert len(logs) == 1 and logs[0].startswith('eval-iter_0001-') and GL.file_iteration(logs[0]) == 1, logs
+    assert f"LOG {mirror / 'games' / logs[0]}" in p.stdout
+    specs, games = GL.load(str(mirror))
+    assert {g['phase'] for g in games} == {'eval'} and {g['iter'] for g in games} == {1}
+    kinds = sorted(''.join('n' if s else 'b' for s in g['searched']) for g in games)
+    # 2 against the heuristic, 2 against random (one network seat each), 2 reference games (bots), 2 Elo games
+    assert kinds.count('bb') == 2 and kinds.count('nn') == 2 and len(kinds) == 8, kinds
+    assert GL.game_iteration(games[0], [(games[0]['time'] - 100, 0), (games[0]['time'] + 100, 7)]) == 1
+    assert GL.game_iteration({'time': 5.0}, [(1.0, 3), (9.0, 4)]) == 4 and GL.game_iteration({'time': 5.0}, []) is None
+    # a game without a log: no file, nothing declared
+    other = tmp_path / 'mtgz-remote' / 'cube'
+    other.mkdir()
+    (other / 'config.json').write_text(json.dumps({'game': 'mtg'}))
+    assert mac.eval_log(str(other), 3) is None and not (other / 'games').exists()
+
+
 # ---------------------------------------------------------------- remote self-play (ENGINE.md 52)
 
 def test_the_macs_selfplay_settings():

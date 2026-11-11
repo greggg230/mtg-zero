@@ -227,7 +227,7 @@ def dataset(run, games=None, specs=None, how='hash', pilots='nn', **split_kw):
     X = counts_matrix([s['deck'] for g in keep for s in g['seats']])
     out = {'X': X, 'keys': [game_key(g) for g in keep], 'skipped': skipped}
     col = lambda f, dt: np.array([f(g, p) for g in keep for p in (0, 1)], dt)  # noqa: E731
-    its = [GL.iteration_of(g['time'], times) if times else None for g in keep]
+    its = [GL.game_iteration(g, times) for g in keep]
     sp = {'train': 0, 'val': 1, 'test': 2}
     splits = [sp[split_of(g, it, how, **split_kw)] for g, it in zip(keep, its)]
     out['game'] = np.repeat(np.arange(len(keep)), 2)
@@ -323,7 +323,7 @@ def pregame_values(run, checkpoint, out=None, device='cpu', batch=256, threads=4
         times = GL.iteration_times(run)
         if not times:
             raise ValueError(f'{run}: no metrics lines (the games\' iterations)')
-        cks = [played_checkpoint(models, GL.iteration_of(g['time'], times), times[-1][1]) for g in games]
+        cks = [played_checkpoint(models, GL.game_iteration(g, times), times[-1][1]) for g in games]
     else:
         cks = [checkpoint] * len(games)
     missing = sorted({c for c in cks if not os.path.isfile(c)})

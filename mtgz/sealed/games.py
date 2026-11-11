@@ -19,7 +19,12 @@ kind 0 a hand before the first turn, 1 the draw step, 2 an effect), `"bottom"`, 
 land, 1 a spell), a card as its index among the seat's sorted deck names, else its name.
 `searched` tells a network seat (its search deals worlds) from a bot's; `decks` "eval" marks an evaluation
 game (the run's evaluation set). The iteration is the one whose metrics line (written at the end of its
-evaluation) is the first after the game's time.
+evaluation) is the first after the game's time - except for an evaluation on a remote (run setting
+eval_remote, docs/ENGINE.md 44 and 109): its process logs to `<mirror>/games/eval-iter_NNNN-<pid>.jsonl`
+(`remote_eval_log`, the shim `python -m mtgz.az.remote eval`), zero.remote copies those files into the run's
+`games/` after the evaluation (the package's `remote_eval_files`), and their games belong to iteration NNNN,
+the checkpoint evaluated (`game_iteration`; their times fall after its metrics line, which the run wrote before
+the remote evaluated it).
 
     python -m mtgz.sealed.games RUN [--check] [--json PATH]
 
@@ -34,7 +39,24 @@ import glob
 import json
 import math
 import os
+import re
 import sys
+
+# a remote evaluation's game log (module docs): written in the mirror by the evaluating process, one file per
+# process, copied into the run's games/ by zero.remote (mtgz.az's remote_eval_files: the same pattern)
+REMOTE_EVAL_LOG = 'games/eval-iter_{iter:04d}-*.jsonl'
+_REMOTE_EVAL_FILE = re.compile(r'^eval-iter_(\d+)-\d+\.jsonl$')
+
+
+def remote_eval_log(mirror, it, pid=None):
+    """The game log file of a remote evaluation of iteration `it` in the mirror `mirror` (this process's)."""
+    return os.path.join(mirror, *REMOTE_EVAL_LOG.format(iter=int(it)).replace('*', str(pid or os.getpid())).split('/'))
+
+
+def file_iteration(path):
+    """The iteration a log file's games belong to by its name (a remote evaluation's), else None (by time)."""
+    m = _REMOTE_EVAL_FILE.match(os.path.basename(path))
+    return int(m.group(1)) if m else None
 
 
 def log_path(argv, pid=None):
@@ -69,6 +91,9 @@ def parse_line(line, specs, f, n):
             raise ValueError(f'{f}:{n}: game of spec {x["spec"]} before its spec line')
         x['file'] = os.path.basename(f)
         x['phase'] = 'eval' if specs[x['spec']]['decks'] == 'eval' else 'selfplay'
+        it = file_iteration(f)
+        if it is not None:
+            x['iter'] = it                                # a remote evaluation's game (module docs)
         return x
     if 'sealed' in x:
         specs[x['spec']] = x
@@ -197,6 +222,14 @@ def iteration_of(t, times):
     return times[i][1] if i < len(times) else None
 
 
+def game_iteration(g, times):
+    """The iteration a game line belongs to: a remote evaluation's by its file (`'iter'`), else by its time
+    (`iteration_of`; None: an iteration in progress, or no metrics lines)."""
+    if 'iter' in g:
+        return g['iter']
+    return iteration_of(g['time'], times) if times else None
+
+
 def score(games, seat_of):
     """{'games', 'score', 'se'}: the mean result (1 win, 0.5 draw, 0 loss) of the seat `seat_of(game)` over
     finished games (aborted ones left out)."""
@@ -220,7 +253,7 @@ def summary(run, specs, games):
             modes[k] = modes.get(k, 0) + 1
         iters = {}
         for g in gs:
-            it = iteration_of(g['time'], times)
+            it = game_iteration(g, times)
             iters[str(it)] = iters.get(str(it), 0) + 1
         mixed = [g for g in gs if sorted(s['mode'] for s in g['seats']) == ['best', 'explore']]
         # the deck choice (docs/ENGINE.md 107.2): the chosen candidates, and a chosen deck against an explore one

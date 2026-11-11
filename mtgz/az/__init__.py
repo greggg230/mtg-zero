@@ -39,6 +39,7 @@ from zero.package import GamePackage, register
 from . import deck_reader, decklists
 from .evaldecks import eval_spec
 from .mac import LocalGpuRemote, RunCommitRemote
+from ..sealed.games import REMOTE_EVAL_LOG
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -292,6 +293,9 @@ PACKAGE = register(GamePackage(
     readers=deck_reader.READERS,
     # team_draft's deferred results and its other yardstick (M6 part 3, docs/ENGINE.md 45)
     deferred={'team_draft': 'mtgz.az.drafted:GLUE'}, evals={'team_draft': 'mtgz.az.human_picks:EVALS'},
+    # the game log of a remote evaluation (docs/ENGINE.md 109): the evaluating process on the remote logs the games
+    # it plays to the mirror (mtgz.az.mac.eval_log), and zero.remote copies the files into the run's games/
+    remote_eval_files={'mtg_eoe': [REMOTE_EVAL_LOG]},
     specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',
     env_prefix='MTGZ', presets=PRESETS, tokens={'mtg': LAYOUT, 'team_draft': LAYOUT_DRAFT, 'mtg_eoe': LAYOUT_EOE},
     eval_specs={'mtg': eval_spec, 'mtg_eoe': eval_spec},
