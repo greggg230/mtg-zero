@@ -56,29 +56,25 @@ def draws_of(keys):
     return [((k >> 48) & 0xFF, k & ((1 << 48) - 1)) for k in keys if (k >> 56) == KEY_DRAW]
 
 
-def card_name(seat, c):
-    """A line's card (an index among the seat's sorted deck names, or a name)."""
-    return sorted(seat['deck'])[c] if isinstance(c, int) else c
+card_name = GL.card_name
 
 
 def seen_cards(seat):
-    """The names a seat saw in a game (version 2): its kept opening hand - the last seven of the cards it drew before the
-    first turn, less those it put on the bottom - and every card it drew later."""
-    opening = [card_name(seat, d[2]) for d in seat['draws'] if d[0] == 0][-7:]
-    for b in seat['bottom']:
-        n = card_name(seat, b)
-        if n in opening:
-            opening.remove(n)
-    return set(opening) | {card_name(seat, d[2]) for d in seat['draws'] if d[0] > 0}
+    """The names a seat saw in a game (version 2): its kept opening hand (`games.kept_hand`: its last hand drawn before
+    the first turn, less that hand's bottomed cards) and every card it drew later."""
+    return set(GL.kept_hand(seat)) | {card_name(seat, d[2]) for d in seat['draws'] if d[1] != 0}
 
 
-def raw_rates(games):
-    """{name: {'gih': [results], 'gns': [results]}} over the games' seats whose deck holds the card."""
+def raw_rates(games, seats_of=None):
+    """{name: {'gih': [results], 'gns': [results]}} over the games' seats (those `seats_of(g)` names, default both)
+    whose deck holds the card."""
     out = {}
     for g in games:
         if g['result'] is None:
             continue
         for p, seat in enumerate(g['seats']):
+            if seats_of is not None and p not in seats_of(g):
+                continue
             seen = seen_cards(seat)
             for n in seat['deck']:
                 e = out.setdefault(n, {'gih': [], 'gns': []})
@@ -122,10 +118,10 @@ class Valuer:
         self.rows = []
 
 
-def credit_game(G, spec_json, g, valuer, include_opening=False):
-    """Replay one game twice: find its draw steps, then value the drawer's view before and after each. -> (events, ok):
-    events [(kind, n_cards, [names], before id, after id or None, terminal value or None)], ok = the replay ended at the
-    logged result."""
+def credit_game(G, spec_json, g, valuer, include_opening=False, seats=(0, 1)):
+    """Replay one game twice: find its draw steps, then value the drawer's view before and after each (only the draws of
+    the seats in `seats`). -> (events, ok): events [(kind, n_cards, [names], before id, after id or None, terminal value
+    or None)], ok = the replay ended at the logged result."""
     acts = actions_of(g)
     names = {}
     for seat in g['seats']:
@@ -145,7 +141,8 @@ def credit_game(G, spec_json, g, valuer, include_opening=False):
     game = G.engine().Game('mtg_eoe', spec_json, 2, g['seed'])
     by_step = {}
     for (i, p), e in steps.items():
-        by_step.setdefault(i, []).append((p, e))
+        if p in seats:
+            by_step.setdefault(i, []).append((p, e))
     events = []
     for i, a in enumerate(acts):
         # (every draw step, the hands before the first turn included: their change is reported apart)
@@ -176,10 +173,6 @@ def GL_lookup(names):
 def credit(run, checkpoint, device='cpu', phase='selfplay', max_games=None, include_opening=False, batch=256,
            threads=4, log=None):
     """The run's per-card draw credit (module docs) -> the summary dict."""
-    import torch
-    torch.set_num_threads(max(1, int(threads)))
-    import mtgz.az  # noqa: F401  (the game package)
-    from zero import games as G
     specs, games = GL.load(run)
     games = [g for g in games if (phase == 'all' or g['phase'] == phase) and g['result'] is not None]
     old = [g for g in games if g.get('v', 1) < 2]
@@ -189,10 +182,23 @@ def credit(run, checkpoint, device='cpu', phase='selfplay', max_games=None, incl
         games = games[:int(max_games)]
     if not games:
         raise SystemExit(f'no finished {phase} games with actions in {run}')
+    out = credit_games(specs, games, checkpoint, device, include_opening, batch, threads, log)
+    return {'run': run, 'phase': phase, **out}
+
+
+def credit_games(specs, games, checkpoint, device='cpu', include_opening=False, batch=256, threads=4, log=None,
+                 seats_of=None):
+    """`credit`'s numbers over the given finished version-2 game lines (`specs`: their spec lines). `seats_of(g)`: the
+    seats whose draws are credited (default both; e.g. the network's seats only); the raw rates count the same seats."""
+    import torch
+    torch.set_num_threads(max(1, int(threads)))
+    import mtgz.az  # noqa: F401  (the game package)
+    from zero import games as G
+    seats_of = seats_of or (lambda g: (0, 1))
     valuer = Valuer(checkpoint, device, batch)
     per_game, bad = [], []
     for k, g in enumerate(games):
-        ev, ok = credit_game(G, replay_spec(specs[g['spec']]), g, valuer, include_opening)
+        ev, ok = credit_game(G, replay_spec(specs[g['spec']]), g, valuer, include_opening, tuple(seats_of(g)))
         if not ok:
             bad.append((g['file'], g['seed']))
         per_game.append(ev)
@@ -214,7 +220,7 @@ def credit(run, checkpoint, device='cpu', phase='selfplay', max_games=None, incl
             for c in cards:
                 per_card.setdefault(c, []).append(d / n)
     base, base_se = mean_se(deltas)
-    raw = raw_rates(games)
+    raw = raw_rates(games, seats_of)
     rows = []
     for name in sorted(set(per_card) | set(raw)):
         xs = per_card.get(name, [])
@@ -230,7 +236,7 @@ def credit(run, checkpoint, device='cpu', phase='selfplay', max_games=None, incl
                      'iwd': None if gih is None or gns is None else round(gih - gns, 4)})
     rows.sort(key=lambda x: (x['credit'] is None, -(x['credit'] or 0.0)))
     om, ose = mean_se(opening)
-    return {'run': run, 'checkpoint': checkpoint, 'phase': phase, 'games': len(games), 'replayed': len(games),
+    return {'checkpoint': checkpoint, 'games': len(games), 'replayed': len(games),
             'draws_credited': len(deltas), 'mean_change': None if base is None else round(base, 5),
             'mean_change_se': None if base_se is None else round(base_se, 5),
             'opening': {'steps': len(opening), 'mean_change': None if om is None else round(om, 5),
