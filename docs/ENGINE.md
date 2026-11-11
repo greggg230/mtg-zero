@@ -24862,7 +24862,8 @@ games of 40 went the other way in E1, the total the same. Within that, a remote 
 local one: `evals.jsonl` rows (`eval_yard`, `eval_random`, `elo`, the pool's tag), the pool's `results.json` and
 `ratings.json`, `models/index.json`. **Nothing refused or skipped a setting**: the result's `select` must name the run's
 evaluation rule, which includes the belief tilts (`visits-b0-tdeck1`, `cq-v50-s0.3`), else zero.remote refuses it; the
-mirror's config carries `elo_paired` and `eval_random_games` (the Elo games came in pairs, the random games were played);
+mirror's config carries `elo_paired` and `eval_random_games` (E2's 12 Elo games are 6 deals played twice with the
+seats swapped, the random games were played);
 zero-core's co-training refusal concerns `resolver` runs only (an EoE run is a single-game run).
 
 **Two gaps, both silent before:**
@@ -24954,12 +24955,23 @@ every ~264 s, if nothing else runs on the Mac; the Elo pool then rates every sec
 before it), or keeping the evaluation on the desktop (the 5-minute iteration of run 1). The races and the evaluations
 compete for the same cores: run both and the races (nice 10) slow down first.
 
-**Run 2's launch with the Mac evaluating** (from its pinned worktree, after `bash tools/mac.sh --eval-checkout` there):
-the flags of run 1's launch plus `--eval-remote mac` (and `--eval-every 2` to keep up), e.g. `... python
-tools/supervise.py <run2> --preset eoe-2 --seed 1 --threads 16 --groups 3 --conc 1152 --train-static 1 --ram-budget-gb 40
---eval-random-games 10 --elo-paired 1 --shard-sparse 1 --eval-remote mac --eval-every 2`. Its log then says `evaluations
-on the remote 'mac'`; each evaluated iteration logs `iter N vs heuristic (remote mac, ...s)` and adds
-`games/eval-iter_NNNN-<pid>.jsonl`.
+**Run 2's launch with the Mac evaluating**: in its pinned worktree (the commit it trains from, with this branch's
+code) `bash tools/mac.sh --eval-checkout` once, then the launch with `--eval-remote mac` (and `--eval-every 2` to keep
+up). A fork of run 1 (`tools/fork_run.py --source ... --dest ...`) saves every setting of run 1, and a saved setting
+beats a preset (`resolve_config`: DEFAULTS < preset < saved < flags), so `--preset eoe-2` alone leaves the deck choice
+off: eoe-2's own settings go in as flags (or `--set` at the fork). For example:
+
+```
+python tools/launch_hidden.py <run2>/supervisor_console.txt python tools/supervise.py <run2> --preset eoe-2 --seed 1 \
+  --iters <N> --threads 16 --groups 3 --conc 1152 --train-static 1 --ram-budget-gb 40 --eval-random-games 10 \
+  --elo-paired 1 --shard-sparse 1 --selfplay-value-choice-worlds 8 --selfplay-value-choice-temp 0.03 \
+  --spec '{"sealed": {"set": "eoe", "collation": "arena", "best_share": 0.5, "deck_choice": {"k": 32, "explore": 0.1}}, "max_turns": 60, "eval_decks": 64, "eval_seed": 1}' \
+  --eval-remote mac --eval-every 2
+```
+
+Its log then says `evaluations on the remote 'mac' (greggkeithley@100.95.248.116)`; each evaluated iteration logs `iter
+N vs heuristic (remote mac, ...s)` and `iter N elo ... (remote mac)`, and adds a row to `evals.jsonl` and
+`games/eval-iter_NNNN-<pid>.jsonl` to the game log. `--eval-remote ''` at a restart brings the evaluation back.
 
 ### 109.4 Tests, gate
 
@@ -24969,13 +24981,15 @@ on the remote 'mac'`; each evaluated iteration logs `iter N vs heuristic (remote
 * `tests/test_mac_remote.py` `test_a_remote_eoe_evaluation_logs_its_games` (new: an eoe-smoke mirror's evaluation with the
   shim's log on - 8 games, the yardstick, random, reference and Elo games, all in `eval-iter_0001-<pid>.jsonl`, read as
   evaluation games of iteration 1; `mtg` declares and writes nothing).
-* GATES
+* Gates, on e9be266 (the code; run from a worktree of it, at most 4 build jobs beside run 1): `python tools/gate.py python` - the build, pytest 269 passed and 1 skipped, the mtg-smoke loop: **GATE PASSED python e9be266bbbfb in 347s**; `python tools/gate.py optin-core --baseline-root <a built worktree of main 34e2cf4>` - the build, the core's cargo tests (147), checkpoint_compat byte identity (2,465 samples, visits and cq), `az` 48, `hidden` 28, the other games' build-only (3 of 3), the core build, the core's pytest 442 passed and 11 skipped: **GATE PASSED optin-core e9be266bbbfb in 1220s**. The commits after it change docs and `tools/mac_races.sh` (its job list made before anything is copied, 6 processes by default), which was run by hand: a tiny race (one evalpick and one choice pool, 4 games) launched, `status`, `fetch` and the merged `out/evalpick.json` / `out/choice.json`; a second launch reusing the pinned checkout, ended by `stop` (no job left, no new one started).
 
 ### 109.5 Left on the Mac
 
-`~/mtg-zero-wt/run-34e2cf45d7b7` and `run-61466fe72ff1` (evaluation checkouts of main and this branch) and
-`races-34e2cf45d7b7` (the races' pinned checkout of main), their target dirs under `~/cargo-target/mtg-zero/`;
-`~/mtgz-remote-test/` (E1's and E2's mirrors), `~/mtgz-remote-tune/` (the timing copies), `~/mtgz-races/` (the
-measurements: `out/`, the copied checkpoint and evaluators). No process. Cleanup: `rm -rf ~/mtgz-remote-test
-~/mtgz-remote-tune ~/mtgz-races/out ~/mtgz-races/eoe1 ~/mtgz-races/s4a ~/mtgz-races/race_rows.py`, and `git -C
-~/mtg-zero worktree remove --force` each checkout with its target dir when no longer needed.
+Nothing of these tests: their mirrors (`~/mtgz-remote-test`, `~/mtgz-remote-tune`), the race measurements and copies
+(`~/mtgz-races`) and the four checkouts with their target dirs (`run-34e2cf45d7b7`, `run-61466fe72ff1`,
+`races-34e2cf45d7b7`, `races-e57b3edb98f4`) were removed; only the refs mac.sh pushed stay in the bare repos. What later
+work leaves: a `tools/mac_races.sh` race, `~/mtg-zero-wt/races-<sha12>` with `~/cargo-target/mtg-zero/races-<sha12>`
+(~0.4 GB) and `~/mtgz-races/<name>/` (the checkpoint, evaluators, outputs and logs); run 2's evaluations,
+`~/mtg-zero-wt/run-<sha12>` and the mirror `~/mtgz-remote/<run>` (every checkpoint shipped). Cleanup when done:
+`rm -rf ~/mtgz-races/<name>`, `git -C ~/mtg-zero worktree remove --force ~/mtg-zero-wt/races-<sha12>` and `rm -rf
+~/cargo-target/mtg-zero/races-<sha12>`.
