@@ -342,7 +342,12 @@ def main(argv=None):
 
     pub = Publisher(a.run, a, key, log)
     pub.tallies.update()            # the finished iterations first: the progress record carries the builder's score
-    pub.progress_pass()
+    try:
+        pub.progress_pass()
+    except Exception as e:                             # looping: the progress thread posts again shortly
+        if a.loop is None:
+            raise
+        log(f'progress post failed: {e!r}')
     if a.loop is not None:
         threading.Thread(target=progress_loop, args=(pub, a, log), daemon=True).start()
     while True:
