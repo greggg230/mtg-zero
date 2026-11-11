@@ -831,3 +831,9 @@ temperature and the paired race (`python -m mtgz.sealed.compare choice`: a pool'
 builds) guard against a field that rates what it trains on. Presets `eoe-2` (eoe-1 + the choice, 8 worlds, temperature
 0.03; a fork of run 1) and `eoe-choice-smoke`. Success is then measured three ways: the picked build against a random build of
 the same pool, our build against the human build (S5), both against a field of 17lands human decks (a yardstick only).
+
+**The game record for draw credit (2026-11-10, branch `eoe-field`; ENGINE.md 107.3):** for S4's card ranking (draw credit, the
+deck evaluator's marginal values, pairwise synergy: the user's plan), the game log's version 2 carries what replays each game
+exactly (its whole spec, seed and actions: ~4.8 KB a self-play game line) and every draw (turn, kind), bottomed card and play
+per seat; `python -m mtgz.sealed.cardcredit RUN --checkpoint CKPT` replays the games and gives each card's draw credit - the
+drawer's value just after its draws less just before, with any checkpoint - beside the raw drawn-vs-not-drawn win rates.

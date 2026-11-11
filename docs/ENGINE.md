@@ -24150,3 +24150,86 @@ build jobs and 2 fuzz shards beside run 1 on the desktop):
 * Digests unchanged: full **ae88eae20abb14ca**, `DIGEST_ENCODING=0` **d0da2e6030aa0d08**, `DIGEST_ENCODING=v5`
   **418dc8195dc6afb5** (no digest game plays the EoE table; the deck choice is a sealed spec key).
 * The commit after these is this section (docs only).
+
+### 107.3 The game record for draw credit: exact replays, draws and plays
+
+Commit f19cb32 (on b3dcf65). **Why.** The S4 plan (the user's, 2026-11-10): a card ranking learned from self-play - draw
+credit, the deck evaluator's marginal values and pairwise synergy - seeds the deck search. Draw credit needs every draw of
+every game, and the network's value just before and just after it; computed offline with any checkpoint (later, better ones
+included), so each game must replay exactly. 107.1's log (version 1) has the decks, the modes and the result: neither.
+
+**Version 2 of the game log** (`az/game_log.rs`; a line's `"v": 2`):
+
+* **The trace.** The live game's record keeps every action applied to it (`MtgEoeAz::step`: the deck choice's, every
+  decision's, the single-option ones zero-core steps too) and, per seat: its **draws** - turn, kind, card: kind 0 a hand
+  drawn before the first turn (the opening hand, a mulligan's), 1 the draw step's, 2 an effect's; from the live game's own
+  chance keys (`KEY_DRAW` carries the true card: the live game has no observer); the draw step's are a step's first draws
+  of the seat, as many as its `draw_step_draws` grew (from 0 in a new turn) -, the cards it put on the **bottom** after a
+  mulligan and its **mulligans** (from the decisions' choices), and the cards it **played or cast** - turn, kind (0 a land
+  played, 1 a spell cast), card: the `Play` / `Cast` choice of the action at Priority or the graveyard list (a free cast an
+  effect offers is not counted). Behind a mutex in the record, which the game's clones share but never write: `MtgEoeAz`
+  is the live game only when `new_game` made it (its `Clone` gives `false`), so a world or a clone never writes a trace or a
+  line (107.1's branch game, a clone, now writes none). The draws' turn is the turn after their step: a step that crosses
+  into a new turn (an end-of-turn draw, then the draw step) gives both the later turn - the replay has every draw's exact
+  position.
+* **The line** adds `"actions"` (the actions as little-endian u16, base64) and `"n_actions"`, and per seat `"draws"`
+  (`[turn, kind, card]`), `"bottom"`, `"mulligans"`, `"plays"` (`[turn, kind, card]`), a card as its index among the sorted
+  names of the seat's `"deck"`, else its name. The **spec line** is now the game's whole spec as far as a game depends on it
+  (107.1's keys plus `mulligans`, `deck_tilt_ess`, `chooser` when given): `MtgSpec::parse(spec line less "v", "spec")`,
+  `new_game(spec, 2, seed)` and the actions replay the game - **bit for bit** (`Game::fingerprint`; tested). No chance keys
+  are needed: the game's RNG and the actions decide everything (`same_seed_and_actions_replay_identically`, tests/fuzz.rs).
+* **Size** (the smoke below, 2 iterations, CPU): a self-play game line **4,750 bytes** on average (6,031 at most; 881
+  actions: 2,351 bytes of base64, the draws and plays 1,195), an evaluation game's 2,902 (306 actions); the file gzips 5.0
+  times. eoe-1's 600 self-play games an iteration: ~2.9 MB an iteration (~0.6 MB gzipped). Kept as one JSON line a game: a
+  file per process and run segment already (`games-<pid>.jsonl`), compressible as a whole when a segment closes.
+
+**The tool** `python -m mtgz.sealed.cardcredit RUN --checkpoint CKPT [--device cpu] [--phase selfplay|eval|all] [--games N]
+[--include-opening] [--json PATH]` (`mtgz/sealed/cardcredit.py`; CPU by default, 4 torch threads): replays every logged game
+of the phase (engine Game objects; twice - once to find the draw steps, once to encode), and at each step in which a player
+draws, values that player's own view (`encode(drawer)`, a value-only row: P(drawer wins), a draw 0.5) before the step - the
+last decision before the draw - and after it - the first decision after it (a finished game: its result). A card's **draw
+credit** is the mean change over its draws (a step drawing n cards credits each with 1/n), with its standard error;
+`relative` subtracts the mean change over all credited draws (a step's other events, a new turn's untap, move every card
+alike). Hands drawn before the first turn are left out by default (a hand is judged as a hand; `--include-opening` credits
+them) and their mean change reported apart. Beside it, from the log alone, **the raw drawn-vs-not-drawn win rates**
+(17lands' "game in hand" / "not seen", a yardstick): per card and game where the seat's deck holds it, seen = in the kept
+opening hand (the last seven cards drawn before the first turn, less the bottomed ones) or drawn later; GIH, GNS and their
+difference IWD. Every game must replay to its logged result (else an error: a broken record is never skipped), and a
+version-1 line (no actions) is refused. Pure self-play: the run's own games and networks only.
+
+**On the smoke run** (`python -m mtgz.az.run --run runs/eoe-cc-smoke --preset eoe-choice-smoke --iters 2` on f19cb32, CPU;
+then `python -m mtgz.sealed.cardcredit runs/eoe-cc-smoke --checkpoint runs/eoe-cc-smoke/models/iter_0002.pt`, 3.5 s): 32
+self-play games replayed (every one to its logged result), **1,783 draws credited**, 3,744 value rows; the mean change a draw
++0.0011 +- 0.0004, the opening hands' +0.041 +- 0.010 (89 steps); 249 cards, 231 credited, 42 with 10 draws or more. Of
+those, the highest credit: Flight-Deck Coordinator +0.0165 +- 0.0043 (10 draws), Insatiable Skittermaw +0.0160 +- 0.0028 (11),
+Mountain +0.0124 +- 0.0016 (83), Island +0.0108 +- 0.0009 (124); the lowest: Pinnacle Kill-Ship -0.0249 +- 0.0107 (11), Drix
+Fatemaker -0.0209 +- 0.0055 (18), Dockworker Drone -0.0177 +- 0.0072 (15), Chrome Companion -0.0173 +- 0.0062 (29). A tiny
+network after two iterations: the numbers show the machinery, not the cards (the raw rates over 32 games mostly have one
+not-seen game or none).
+
+**Off the log nothing changes**: the trace exists only for a live `mtg_eoe` game while the log is on (`mtgz.az.run`'s runs);
+no zero-core change, no encoding change; the digests are unchanged.
+
+**Tests.** `engine/tests/game_log.rs` (extended): every finished game's line has its actions (the very actions applied),
+replays from its spec line and seed to the same game bit for bit (fingerprint, result), its draws are the game's own (its
+`KEY_DRAW` keys, in order, by seat), turn 0's kind 0 and the later 1 or 2, an opening hand, bottomed cards exactly after
+mulligans, its plays the Priority / graveyard-list casts and plays; 2,664 bytes a line on these 24-turn games.
+`engine/tests/deck_choice.rs::the_game_log_records_the_chosen_decks`: a deck-choice game's actions begin with the choice and
+replay to its result and chosen decks. `tests/test_cardcredit.py` (2): driver games with value-choice seats logged and
+replayed (the logged draws the replay's, plays in the deck, seen cards in the deck, `--check`), the tool with a tiny random
+network (credits within [-1, 1], standard errors, the raw rates, the same numbers twice, the command line, a version-1 line
+refused).
+
+**Checks** (f19cb32; at most 4 build jobs and 2 fuzz shards, run 1 live on the desktop):
+
+* Full engine suite: **2,243 passed, 0 failed, 22 ignored** (149 binaries; `az` 48, `hidden` 28 + 2 ignored, `game_log` 1,
+  `deck_choice` 6 + 1 ignored).
+* Digests unchanged: full **ae88eae20abb14ca**, `DIGEST_ENCODING=0` **d0da2e6030aa0d08**, `DIGEST_ENCODING=v5`
+  **418dc8195dc6afb5**.
+* `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_BEST_SHARE=0.5 FUZZ_DECK_CHOICE=32 FUZZ_GAMES=20000`, four chunks, two at a time:
+  **passed, every seed** - the very games of 107.2's run (wins 9,706 / 9,493, 801 draws; 36,046 deck choices, 144,184 worlds
+  during them; 575,120 hidden-decklist worlds): the fuzz plays `MtgAz`, which this change leaves as it was.
+* **`python tools/gate.py engine --no-mac --jobs 4 --tested-sha f19cb32 --expect-digest ae88eae20abb14ca --expect-digest0
+  d0da2e6030aa0d08`** on f19cb32: build, both digests, `az` 48, `limits` 13, `hidden` 28, pytest 250 passed and 1 skipped
+  (`tests/test_cardcredit.py` included), the search smoke: **`GATE PASSED engine f19cb32170b5 in 1163s`**.
+* No zero-core change (the pin stays 3eaf8df), no encoding change. The commit after these is this section (docs only).
