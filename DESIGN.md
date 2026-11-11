@@ -809,3 +809,13 @@ hidden decklists (102), the game `mtg_eoe` with its own identities, the deck rea
 full suite (2,232 passed), 20k fuzz of the default, EoE, EoE with hidden decklists, sealed and sealed with the deck
 tilt (0 aborted). zero-core pin `feat/deck-tilt` 193ee15. Next: `eoe-1`'s throughput on the GPU, then the first
 run (the user's go-ahead).
+
+**The mixed field (2026-11-10, branch `eoe-field`; ENGINE.md 107.1):** the user's decisions of 2026-11-10 - best-of-one only;
+run 1 trains play on a mixed field; run 2 brings deck choice into self-play (each player picks its deck among builder
+candidates by the network's value); success measured as the picked build against a random build of the same pool, our build
+against the human build of the same pool, both against a field of 17lands human decks (a yardstick only). Built for run 1:
+the builder's **best guess** (every random choice at its most likely value: 17 lands, the strongest pair, no splash, no curve
+tilt, the spells greedy by weight; deterministic per pool), the sealed spec's `"best_share"` (per game and seat the best guess
+with that probability, else an exploratory build; `eoe-smoke` and `eoe-1` at 0.5), the hidden-decklist prior sampling the same
+mixture, and the **game log** (every finished `mtg_eoe` game's two decks, their modes and the result in `<run>/games/`,
+`python -m mtgz.sealed.games RUN --check`; no zero-core change). Next: deck choice by value (107.2).

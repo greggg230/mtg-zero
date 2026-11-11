@@ -23858,3 +23858,151 @@ checkout, the pin check satisfied by the gitlink):
 (`determinize_belief`), `az/mod.rs` (`MtgSpec::deck_tilt_ess`, `Share`), `az/sample.rs` (`Knowledge::fixed_by_identity`),
 `az/lab.rs` (a `Belief` literal), tests at the ends of `tests/hidden.rs` and `tests/az.rs`, `tests/fuzz.rs`'s hidden mode,
 the presets (`mtgz/az/__init__.py`), ENGINE.md 106 after 105.
+
+## 107. The EoE field and deck choice
+
+Branch `eoe-field` (from main 72a44fb), 2026-11-10. **The user's decisions (2026-11-10):** best-of-one only. Run 1 trains
+play on a **mixed field**. Run 2 brings **deck choice into self-play**: each player picks its deck among builder candidates
+by the network's value, so the built decks become the field and the field improves over runs. Success is then measured three
+ways: the picked build against a random build of the same pool; our build against the human build of the same pool; both
+against a field of 17lands human decks - the last a yardstick only: human data never enters training (DESIGN.md 0). 107.1 is
+what run 1 needs (the mixed field, its prior, a record of every game's decks); 107.2 the deck choice.
+
+### 107.1 Phase A: the mixed field, its prior, the game log
+
+**The best guess** (`builder::best_guess`, `az/sealed/builder.rs`). The randomised builder (101.2) with every random choice
+at its most likely value under the same settings - no randomness at all, a function of the pool (any order) and the settings.
+No human data: the builder's own weights and knobs only.
+
+| The builder's choice (101.2) | its draw (default settings) | the best guess |
+|---|---|---|
+| land count | uniform in `lands` (16..=18) | the middle: 17 (`best_lands`, (lo + hi) / 2 rounded down) |
+| one colour | a coin at `mono` (0.1) | never (the coin's likelier side; a pair holding the colour scores at least as much) |
+| the pair | softmax over pair scores at `temperature` (4) | temperature 0: the strongest eligible pair, the first in the builder's order on a tie |
+| splash | a coin at `splash` (0.3), then the colour by its spells' weight and 1..=`max_splash` spells uniformly | **never** (below) |
+| curve tilt | t uniform in [-`curve`, `curve`] | t = 0 (the middle) |
+| the spells | drawn without replacement by weight^`power` x the curve factor | **greedy**: the heaviest first (weight^power keeps the order); on a tie of weight the mana value nearest 3 (the curve tilt's pivot, where every tilt agrees), then the lower, then the definition; the caps `max_mv5` / `max_mv4` as the builder's (lifted, cheapest first, only when the playable spells run out) |
+| a colourless-only land | a coin at 0.5 | none (an even coin: left out, a land that casts none of the deck's spells) |
+| nonbasic lands, basics | (no randomness) | the builder's: the lands that make or fetch a colour of the pair, then basics by the spells' pips |
+
+**The splash rule: the best guess never splashes.** The splash coin's likelier side (0.3 by default), and the splash's
+colour (drawn by its spells' weight) and size (uniform 1..=3) have no most likely value of their own. A rule that splashes
+whenever a splash raises the deck's weight would splash in most pools (a splash creature, weight 3, beats any other spell
+of weight 1 or 2 the pair plays): the builder's weights cannot price the splash's mana. Splashes stay in the field through the
+exploratory builds (25% of them splash, 101.2), and phase B's candidates include them for the network's value to judge.
+
+What it builds (`the_best_guess_is_the_builders_most_likely_build`, 200 arena + 200 paper pools 20,000-20,199): always a
+pair, 17 lands, no splash; all ten pairs (WG 63 ... BR 17); **20.7 creatures a deck** against the randomised builder's 16.7
+(101.2): greedy by weight takes every playable creature (weight 3) before any interaction (2) - the builder's weights at their
+mode -, and the mana-value caps left 257 heavier spells (creatures of mana value 4+) out of 400 decks. The pair is the one
+the builder itself takes at temperature 0 (checked against `build` at temperature 0, no mono, no splash, no tilt, 17 lands).
+
+**Against the exploratory builds, with the heuristic** (a yardstick only, 103 / 104: `mtgz.sealed.compare`'s full
+pairing, 12 arena pools, each pool's best guess against its randomised builds of seeds 0-2, 1,024 paired games per pair
+against the generated field): the best guess scores **0.641** against the field, the explore builds 0.518; the paired
+difference averages **+12.3 points** (median +10.2, -7.2 to +39.8 over the 36 pairs; 32 significantly better at 95%, one
+worse). A statement about the heuristic, which plays every deck the same simple way and may suit a creature-heavy deck,
+not about what the network will make of either; it says the "best" half of the field is the stronger half by the only
+fixed pilot there is.
+
+**The spec key `"best_share"`** (`SealedSpec::best_share`, default 0): per game and per built seat (a generated or given
+pool), the deck is the best guess with probability p, else the randomised build as before. The draw is a generator of its own,
+`best_seat(seed, p, share)`: a uniform of `Rng(split64(seed ^ 0xBE57_6E55_0000 ^ p << 40))` below the share (no draw at 0),
+where `seed` is the game's pools' seed (`MtgSpec::sealed_seed`: the game seed, or its evaluation pair's), so the pools and the
+randomised builds are the same draws with or without the key, the two seats independent, and an evaluation pair keeps its
+modes (the run's evaluation set, `EVAL_SPEC_EOE`: 55 of its 128 seats the best guess; 12 pairs both, 21 neither). A given deck
+is played as given (mode `given`). `SeatInfo::mode` (`explore` / `best` / `given`) is in `sealed_seats`' JSON. `to_json`
+writes the key only when it is above 0 (0 and no key are the same spec). Errors: not a number in [0, 1].
+
+**The prior samples the same mixture** (`SealedPrior`, 102.6; `of_spec` carries the share). After the pool and R's
+placement (102.6 steps 1-2), one uniform draw (none at 0 or 1) picks the sample's builder: with probability p the best guess,
+else step 3's randomised builds. A best-guess sample is `best_guess_covering` of the pool with R's nonland colours as `need`:
+the strongest pair holding them - the best guess is a function of the pool, so it is the best guess of a pool holding R whose
+colours could have shown R; when no pair holds them (three colours or more: the best guess never splashes) the sample falls
+back to step 3's builds, as the posterior says (a best-guess deck shows no third colour). Step 4 (R forced in, the size) as
+before. Every sample still meets the contract (`check_sample` at every deal), the K-sample deal (102.8) caches K draws of
+the mixture per request, and the deck tilt (106) weighs those K: it tilts the mixture. Exact, modelled: as 102.6, plus the
+mode's prior probability is the spec's share, not its posterior given R (the colours' fallback is the only conditioning).
+
+**What was recorded, and the game log.** Deck scoring needs every game's two decks, how each was built and the result.
+Nothing recorded today gives them: zero-core's result rows (gid, result, turns) stay in memory and the metrics keep
+aggregates; its shards hold samples without a game id or seed; replays are not recorded in runs; a game's seed derives from
+the driver's seed and the game id (zero-core `worker.rs`), neither of which is kept, and the rolling self-play driver lives
+across iterations. So the game records itself, in mtg-zero, with no zero-core change (`az/game_log.rs`):
+
+* **On for every run `mtgz.az.run` starts** (the run shim calls `mtgz._engine.game_log(<run>/games/games-<pid>.jsonl)`
+  before zero.run's `cli`; `MTGZ_GAME_LOG=0` off; `mtgz.sealed.games.log_path`). A process-wide sink; only `mtg_eoe` games
+  write, and the file is made at the first line, so cube and Delver runs make none.
+* **Which games.** `MtgEoeAz::new_game` gives a live game a record (its spec, seed, both seats' decks and modes, recomputed
+  from the spec as `MtgAz::new` built them); a search's worlds drop it - every simulation's world is a determinized clone
+  (zero-core `tree.rs`: `deal` before any step), and `MtgEoeAz::determinize` / `determinize_with` drop the clone's record and
+  mark the seat whose search dealt it (`searched`: a network seat; a bot never deals worlds). The live game writes its line at
+  the step that ends it (over or aborted) and drops the record: one line per finished game. Unfinished games (stopped by the
+  driver at a phase's end, resigned) write none; a branch game (zero-core `selfplay_branch`, off in eoe-1) writes its own line
+  with its parent's seed. Remote self-play workers (other processes, not started by the shim) do not log: eoe-1 has none.
+* **The line**: `{"v": 1, "spec", "seed", "deck_seed", "eval", "seats": [{"mode", "pool_seed", "colors", "splash", "lands",
+  "deck": {name: copies}}, x2], "searched", "result" ([r0, r1]; null aborted), "aborted", "turns", "time"}`, after a spec
+  line per spec and file (the sealed spec's JSON, `decks` random / eval, `eval_seed`, `eval_decks`, `max_turns`,
+  `hidden_decklists`, `deal_samples`). Self-play and evaluation games are told apart by the spec (`decks` eval); in an
+  evaluation game `searched` names the network's seat against a bot (both, an Elo game between two checkpoints: which is which
+  is not known to the game); the iteration is the one whose metrics line follows the game's time. The decks are written
+  out, not only the seeds: a later builder may build other decks from the same seeds.
+* **The tool** `python -m mtgz.sealed.games RUN [--check]`: the games by phase and iteration, the modes, the network /
+  bot seats, the best guess's score against the explore builds in self-play (a yardstick of the builder); `--check`
+  rebuilds every game's decks, modes and pool seeds from its spec and deck seed with this checkout's builder
+  (`sealed_seats`) and compares them with the logged ones; a log with no game is an error. `load(run)` for deck scoring.
+* Nothing in it touches a game's state (the record is beside `MtgAz`, never read by the rules, the encodings or the
+  search): digests and encodings unchanged. Cost: a record per game start (both seats' pools and builds again: ~4 ms with
+  arena pools, 101.1, beside a game's ~1,000 searched decisions) and a line per game end; a failing write panics (loud, never a missing record).
+
+**The presets**: `SPEC_EOE` (`eoe-smoke`, `eoe-1`, their evaluation spec) has `"best_share": 0.5`. **The fuzz**:
+`FUZZ_BEST_SHARE=p` puts the key in `FUZZ_POOL=sealed`'s spec (with `FUZZ_HIDDEN_DECKS=1` the prior samples the mixture); it
+prints how many seats played the best guess.
+
+**Tests.** `engine/tests/sealed.rs` (3 new): `without_best_share_the_builder_seats_and_prior_draw_as_before` (a hash of 400
+builds at two settings, 200 spec seats - self-play and evaluation - and 150 prior samples - fresh pools and a bank's -,
+recorded on 72a44fb before any change: 5e986ac22869924f; it held through the refactor of the builder's step 5);
+`the_best_guess_is_the_builders_most_likely_build` (above: 40 cards from the pool, 17 lands, no splash, the order of the pool,
+the temperature-0 pair, greedy by weight with the ties and caps, no colourless land, `best_guess_covering` with a colour and
+with three); `best_share_mixes_the_field` (0 = no key, the JSON round trip and errors, 1,000 games: 1,027 of 2,000 seats the
+best guess, both seats in 276 games, every explore seat the build without the key and every best seat the pool's best guess,
+share 1 all best, the evaluation pairs fixed, a given deck `given`, the mode in the seats' JSON). `engine/tests/hidden.rs`:
+`the_sealed_prior_samples_the_mixed_field` (with nothing shown 200 of 400 samples are the best guess of their own pool at 0.5,
+all at 1; 0 = the prior without the key, draw for draw; shown cards of real best guesses: the contract at 0.5 and 1, and at 1
+the deck in the shown cards' pair; a hidden-decklist game of the mixed field: 24 worlds holding what the viewer saw, its
+actions and encoding, each with another deck). `engine/tests/game_log.rs` (its own binary: the sink is process-wide): off,
+no record; a cube game none; six games, one left unfinished, worlds dealt for one, both or neither seat and played on - one
+line per finished game, none for the unfinished one or any world, the spec lines, the decks and modes and pool seeds the
+seats', the results, turns and `searched`. `tests/test_sealed_games.py` (4): the presets' share, the seats' modes through the
+bindings, the run shim's path, zero-core's driver (three self-play games of a search seat, two evaluation games against the
+heuristic): five lines, results and turns the driver's rows', `searched` both in self-play and the network's seat against the
+heuristic, `--check` rebuilds every deck, a tampered deck is a mismatch, an empty log fails.
+
+**The smoke** (`python -m mtgz.az.run --run runs/eoe-field-smoke --preset eoe-smoke --iters 2`, CPU,
+`CUDA_VISIBLE_DEVICES=-1`, on 6841bdc): both iterations end to end (16 self-play games each, 928 / 1,083 decisions a game,
+the training and evaluations as 106.6's), and the game log: **88 games** in one file - 32 self-play (10 with both seats the
+best guess, 9 one, 13 none; both seats searched in all 32; iterations 1 and 2, 16 each) and 56 evaluation games (iteration 0:
+20, 1: 16, 2: 20; 36 a network against a bot, 12 Elo games between networks, 8 of the reference's random against the
+heuristic); `python -m mtgz.sealed.games runs/eoe-field-smoke --check`: **88 of 88 games' decks, modes and pool seeds rebuilt
+exactly** from their spec and deck seed. (The best guess's self-play score, 0.44 over 9 games of a 2-iteration tiny network,
+is noise.)
+
+**Checks** (6841bdc; normal release profile, `E:/cargo-target/mtg-zero/eoe-field`; the desktop shared with other
+workstreams):
+
+* Full engine suite: **2,237 passed, 0 failed, 21 ignored** (148 binaries; `--test az` 48, `--test hidden` 28 + 2 ignored,
+  `sealed` 16, `game_log` 1, `eoe_net` 4).
+* Digests unchanged: full **ae88eae20abb14ca**, `DIGEST_ENCODING=0` **d0da2e6030aa0d08**, `DIGEST_ENCODING=v5`
+  **418dc8195dc6afb5** (no digest game plays the EoE table; a sealed spec without the key draws as before, pinned above).
+* `FUZZ_POOL=sealed FUZZ_BEST_SHARE=0.5 FUZZ_GAMES=20000`, four chunks of 5,000: **passed, every seed** (20,000 games, none
+  skipped, wins 9,620 / 9,641, 739 draws, none aborted; 19,902 of 40,000 seats the best guess; ~700 s a chunk).
+* `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_BEST_SHARE=0.5 FUZZ_GAMES=20000` (the prior samples the mixture), four chunks:
+  **passed, every seed** (wins 9,706 / 9,576, 718 draws, none aborted; 559,548 hidden-decklist worlds, 559,348 with another
+  deck than the real one; 2.91M information-set steps in step; ~1,690 s a chunk).
+* `python -m pytest tests -q` (CPU): **244 passed, 1 skipped**.
+* The gate: `python tools/gate.py engine --no-mac --tested-sha 6841bdc --expect-digest ae88eae20abb14ca --expect-digest0
+  d0da2e6030aa0d08` on 6841bdc (`CUDA_VISIBLE_DEVICES=-1`): build, both digests, `az` 48, `limits` 13, `hidden` 28, pytest 244
+  passed and 1 skipped, the search smoke: **`GATE PASSED engine 6841bdcfa915 in 680s`** (the Mac recheck not needed). The
+  commit after it is this section (docs only).
+* Not run: the deck-tilted hidden fuzz (`FUZZ_DECK_TILT=1`) with the mix - the tilt's code is 106's, unchanged; it weighs the
+  K cached decks, which the hidden fuzz above drew from the mixture.
