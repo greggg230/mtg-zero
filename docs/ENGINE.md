@@ -24520,3 +24520,72 @@ refused).
   d0da2e6030aa0d08`** on f19cb32: build, both digests, `az` 48, `limits` 13, `hidden` 28, pytest 250 passed and 1 skipped
   (`tests/test_cardcredit.py` included), the search smoke: **`GATE PASSED engine f19cb32170b5 in 1163s`**.
 * No zero-core change (the pin stays 3eaf8df), no encoding change. The commit after these is this section (docs only).
+
+### 107.4 Card statistics from self-play (17lands' metrics) and the sealedai site
+
+Branch `sealedai` (from main 033df1f), 2026-11-11. **Why** (the user, 2026-11-11): a public site for the EoE sealed AI,
+modelled on delverai, whose first page is 17lands-style card quality data from our own self-play, starting with each card's
+game-in-hand win rate. Python only: no engine, encoding, zero-core or digest change.
+
+**`mtgz.sealed.cardstats`** (`python -m mtgz.sealed.cardstats RUN [--last 10 | --iters A-B] [--phase selfplay|eval|all]
+[--seats network|all] [--mode M] [--pair XY] [--credit CKPT|latest] [--no-17lands] [--json PATH]`). Per card, over the games of
+the window and the counted seats - a seat of a game is one deck, a card counts once per seat and game whatever its copies, a
+draw is half a win -, 17lands' metrics with their definitions: **GP** (in the main deck), **OH** (in the final opening hand:
+the last hand drawn before the first turn less that hand's bottomed cards), **GD** (a copy drawn after the opening hand: the
+draw step's and effects' draws), **GIH** (OH or GD), **GNS** (in the deck, never in hand: GP less GIH), each win rate with its
+count and a Wilson 95% interval, and **IWD** = GIH WR - GNS WR with Newcombe's interval (method 10). OH, GD, GIH and GNS need
+107.3's draws (version-2 lines, iteration 41 on in run 1); GP counts every game of the window. Defaults: the latest 10 finished
+iterations (the network improves), self-play only (evaluation games replay the run's 64 fixed evaluation decks against bots),
+the network's seats (`searched`; `all` adds a bot's seat). `--credit` adds 107.3's draw credit over the window's version-2 games
+and seats (`cardcredit.credit_games`, given games and a seat filter; `latest` = the run's newest checkpoint). **The 17lands
+column**: their GIH WR when the dataset has the games' hands and draws (it has), else GP WR, computed from
+`data/sealed/eoe_17lands_sealed.json.gz` (Premier Sealed, best of one, 56,256 games), carrying the dataset's `license` (17lands
+public data, CC BY 4.0) and its source - a yardstick only (DESIGN.md 0), never read by training.
+
+**The kept hand** (`games.kept_hand`): the engine bottoms after *every* mulligan, at once after drawing the new seven
+(`flow.rs` `mulligan_run` / `mulligan_bottom`), so a line's `bottom` holds 1 + 2 + ... + m cards for m mulligans; and a bottom
+choice whose remaining hand is one definition (the options are one per definition) is answered by `ask` itself
+(`auto_single`): no action, no logged entry. The reconstruction replays the hands seven by seven and takes a logged bottom only
+where the engine would have asked; a line that does not fit is an error. On run 1's 8,926 version-2 seats (iterations 41-46):
+**every one reconstructs** (7,758 kept 7, 926 kept 6, 173 kept 5, 33 kept 4, 28 kept 3, 3 kept 2, 1 kept 1, 4 kept 0). 107.3's
+`seen_cards` removed every bottomed name from the last seven, so a card bottomed from an earlier hand but kept in the last was
+lost: it now uses `kept_hand`. `games.stream` reads the log a line at a time (`load` builds on it) and leaves a last line
+without its newline (being written by the live run) for the next read instead of failing.
+
+**The publisher** `tools/sealedai_publish.py RUN [--loop 300] [--url U] [--dry-run] [--credit-every 4] [--credit-window 4]`:
+reads the game log incrementally (each file's complete lines once), counts every finished self-play game for the network's
+seats into its iteration's `cardstats.Tally` (games of an unfinished iteration wait for its metrics line) and posts per
+iteration the per-card counts (`FIELDS`: gp, h - the games with draws -, oh, gd, gih, each games and doubled wins) - only
+iterations that changed since the last post - with the record's info (the set's 321 cards as the rows' index, the definitions,
+the 17lands column, the draw credit); the site sums any window and computes the rates and intervals itself (`public/stats.js`,
+the same formulas, pinned to the same values in both test suites). The draw credit: the newest checkpoint each time it crosses
+a multiple of `--credit-every`, over the version-2 games of the latest `--credit-window` iterations. Progress: delverai's
+iteration rows plus the auxiliary losses, the Elo pool's current fit and the best guess's score against the explore builds
+from the log. CPU only (`CUDA_VISIBLE_DEVICES=-1` before torch loads), below normal priority, 4 torch threads; nothing
+written under the run; no local path reaches the site (the Worker refuses one).
+
+**Run 1, iterations 40-49** (`--last 10`, 2026-11-11 07:20): 6,000 self-play games, 5,400 with draws; 318 cards seen, 313
+nonbasic; GIH games per card median 185 (1 to 2,608), the GIH interval's median width **14.3 points**; 93 of 313 cards with the
+whole interval off 50%. The best guess beat the explore builds **58.8%** (3,042 games, 57.0-60.5). Highest GIH WR with 100+ GIH
+games: Ouroboroid 68.6% (137), Harmonious Grovestrider 67.6% (527), Elegy Acolyte 62.7% (263), Vaultguard Trooper 61.7% (448).
+Against 17lands' human GIH WR, cards with 100+ GIH games (205): Pearson 0.29, Spearman 0.25 - weak agreement; the network still
+plays far below the heuristic (21% against it at iteration 49), and a self-play rate mixes the card with its decks (best guess
+or explore) and game length. The draw credit at checkpoint 49 over iterations 46-49 (2,400 games, 58,673 draws): 83 s on 4
+threads. Publishing every iteration: 49 iterations' counts 495 KB (GP-only iterations ~4 KB, those with draws ~13 KB), the
+progress record 38 KB.
+
+**The site** (`~/sealedai`, a new repo in delverai's shape: Worker + D1 + `public/`; not deployed - local on hub entry
+`sealedai` :5355 until the user approves it from screenshots): Cards (the table: picture, colour, rarity, the counts and win
+rates with their ranges, IWD, draw credit, the 17lands column labelled human with its attribution and license; filters
+colour, rarity, basics, window, minimum sample, name; sortable; key columns on a phone) and Progress (vs the heuristic, Elo,
+the best guess vs explore, game length, losses, the reading heads), with the deck builder, the evaluator's ranking and replays
+marked "soon" in the header. Its README has the deployment steps.
+
+**Tests.** `tests/test_cardstats.py` (6): the kept hand through 0, 1, 2 mulligans (a card bottomed from an earlier hand stays),
+cards as indices, the engine's own single-option bottoms, broken records refused; Wilson and Newcombe (his worked example: 0.2000
+(0.0524, 0.3339)); the counts against hand-made games (OH, GD by a draw step and by an effect, GNS, IWD, a version-1 line GP only,
+an aborted game, an evaluation game, a game after the last metrics line); every filter; the 17lands column and the command line;
+the draw credit on real logged driver games equal to `cardcredit`'s own and every seat's kept hand fitting its mulligans.
+`tests/test_sealedai_publish.py` (4): the log read once with a half-written line completed later, an unfinished iteration's
+games held, only changed iterations re-sent, the rows' counts, the info's 17lands license, the progress record's extra fields,
+no local path in anything posted, the credit due at multiples, the dry run. `tests/test_cardcredit.py` unchanged and passing.
