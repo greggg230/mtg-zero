@@ -33,6 +33,14 @@
 //! the seat ([`best_seat`]), so the pools and the randomised builds are the same draws with or
 //! without the key. The hidden decklists' sealed prior samples the same mixture (ENGINE.md 107.1).
 //! Without the key (or at 0) nothing changes.
+//!
+//! `deck_choice` (ENGINE.md 107.2): `{"k": 32, "explore": 0.1}` - each built seat (a generated or
+//! given pool) has K candidate builds of its pool ([`SealedSpec::candidates`]: candidate 0 the best
+//! guess, 1..K the randomised builder from generators of their own); with probability `explore` (a
+//! generator of its own, [`explore_pick`]) it plays candidate 1 + a uniform of the K - 1 randomised
+//! ones, else it **chooses** among the K in a pre-game decision (`DecisionKind::ChooseDeck`, the
+//! match's: `MtgAz::new`, `matches.rs`), hidden from the opponent. Needs hidden decklists. Without
+//! the key nothing changes.
 pub mod builder;
 pub mod collation;
 
@@ -73,6 +81,39 @@ pub struct SealedSpec {
     /// a generated or given pool), the deck is the builder's best guess (`builder::best_guess`) with
     /// this probability, else the randomised build; drawn from the game's seed ([`best_seat`]).
     pub best_share: super::Share,
+    /// The deck choice (ENGINE.md 107.2, `"deck_choice"`; None: none).
+    pub deck_choice: Option<DeckChoiceSpec>,
+}
+
+/// The sealed spec's `"deck_choice"` (ENGINE.md 107.2): K candidate builds per built seat and the
+/// share of seats that play a random one instead of choosing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeckChoiceSpec {
+    /// Candidates per seat, 2..=32 (`"k"`, default 32; the choice's actions are `NUMBER` + j).
+    pub k: u8,
+    /// The share of built seats that play a uniformly drawn randomised candidate (1..K) without a
+    /// choice (`"explore"`, default 0.1; the field's builder-random decks).
+    pub explore: super::Share,
+}
+
+/// The largest K of a deck choice (`act::NUMBER_N`: its actions are `NUMBER` + j).
+pub const MAX_CANDIDATES: u8 = crate::decision::act::NUMBER_N as u8;
+
+/// Whether seat `p` of the game whose pools come from `seed` plays a random candidate instead of
+/// choosing (ENGINE.md 107.2): Some(j), j in 1..k (a uniform of the randomised candidates), with
+/// probability `explore`, from a generator of its own; else None (it chooses). No draw at 0.
+pub fn explore_pick(seed: u64, p: u8, explore: f64, k: u8) -> Option<u8> {
+    if explore <= 0.0 {
+        return None;
+    }
+    let mut r = Rng::new(split64(seed ^ 0xE7B1_0EE5_0000 ^ ((p as u64) << 40)));
+    let u = (r.next_u64() >> 11) as f64 / (1u64 << 53) as f64;
+    (u < explore).then(|| 1 + r.below(k as u32 - 1) as u8)
+}
+
+/// Candidate j's builder generator (j >= 1) of seat `p` in the game whose pools come from `seed`.
+pub fn candidate_rng(seed: u64, p: u8, j: u8) -> Rng {
+    Rng::new(split64(seed ^ 0xDEC5_C401_CE00 ^ ((p as u64) << 40) ^ ((j as u64) << 48)))
 }
 
 /// How a seat's deck was built (ENGINE.md 107.1).
@@ -84,6 +125,8 @@ pub enum Mode {
     Best,
     /// A given deck, played as given.
     Given,
+    /// Chosen among the candidates by the deck choice (ENGINE.md 107.2).
+    Chosen,
 }
 
 impl Mode {
@@ -92,6 +135,7 @@ impl Mode {
             Mode::Explore => "explore",
             Mode::Best => "best",
             Mode::Given => "given",
+            Mode::Chosen => "chosen",
         }
     }
 }
@@ -178,6 +222,7 @@ impl SealedSpec {
             builder: Settings::default(),
             seats: [SeatSource::Generated, SeatSource::Generated],
             best_share: super::Share(0.0),
+            deck_choice: None,
         };
         let mut set = None;
         for (k, x) in o {
@@ -193,6 +238,7 @@ impl SealedSpec {
                     let p = x.as_f64().filter(|p| (0.0..=1.0).contains(p)).ok_or("mtg spec: sealed.best_share must be a probability (0..=1)")?;
                     s.best_share = super::Share(p);
                 }
+                "deck_choice" => s.deck_choice = Some(DeckChoiceSpec::parse(x)?),
                 "p0" | "p1" => {
                     let p = (k == "p1") as usize;
                     s.seats[p] = Self::parse_seat(db, k, x)?;
@@ -272,6 +318,9 @@ impl SealedSpec {
         if self.best_share.0 > 0.0 {
             o["best_share"] = json!(self.best_share.0);
         }
+        if let Some(c) = &self.deck_choice {
+            o["deck_choice"] = json!({"k": c.k, "explore": c.explore.0});
+        }
         for (p, s) in self.seats.iter().enumerate() {
             let v = match s {
                 SeatSource::Generated => continue,
@@ -314,9 +363,63 @@ impl SealedSpec {
         Ok((seat, SeatInfo { pool_seed, pool, build: Some(b), mode }))
     }
 
+    /// Seat `p`'s pool in the game whose pools come from `seed` and its seed (a generated one), or
+    /// None for a given deck.
+    pub fn pool_of(&self, seed: u64, p: u8) -> Result<Option<(Vec<DefId>, Option<u64>)>, String> {
+        Ok(match &self.seats[p as usize] {
+            SeatSource::Build { .. } => None,
+            SeatSource::Pool(pool) => Some((pool.clone(), None)),
+            SeatSource::Generated => {
+                let ps = pool_seed(seed, p);
+                let c = self.collation.expect("parse: a collation for a generated pool");
+                Some((generated_pool(db(), c, self.boosters, ps).map_err(|e| format!("player {p}: {e}"))?, Some(ps)))
+            }
+        })
+    }
+
+    /// Seat `p`'s K candidate builds (ENGINE.md 107.2) in the game whose pools come from `seed`: 0 the
+    /// builder's best guess, j >= 1 the randomised builder from `candidate_rng(seed, p, j)` (copies
+    /// possible); None for a given deck or without a deck choice. With the pool's seed.
+    pub fn candidates(&self, seed: u64, p: u8) -> Result<Option<(Vec<Build>, Option<u64>)>, String> {
+        let Some(c) = &self.deck_choice else { return Ok(None) };
+        let Some((pool, ps)) = self.pool_of(seed, p)? else { return Ok(None) };
+        let db = db();
+        let mut v = Vec::with_capacity(c.k as usize);
+        v.push(builder::best_guess(db, &pool, &self.builder));
+        for j in 1..c.k {
+            v.push(builder::build(db, &pool, &self.builder, &mut candidate_rng(seed, p, j)));
+        }
+        Ok(Some((v, ps)))
+    }
+
     /// Both seats of the game with seed `seed`.
     pub fn seats(&self, seed: u64) -> Result<[Seat; 2], String> {
         Ok([self.seat(seed, 0)?.0, self.seat(seed, 1)?.0])
+    }
+}
+
+impl DeckChoiceSpec {
+    /// The spec's `"deck_choice"` object: `k` (2..=32, default 32), `explore` (a probability, default
+    /// 0.1); an unknown key is an error.
+    pub fn parse(v: &Value) -> Result<DeckChoiceSpec, String> {
+        let o = v.as_object().ok_or("mtg spec: sealed.deck_choice must be an object {\"k\": 32, \"explore\": 0.1}")?;
+        let mut c = DeckChoiceSpec { k: MAX_CANDIDATES, explore: super::Share(0.1) };
+        for (k, x) in o {
+            match k.as_str() {
+                "k" => {
+                    c.k = x
+                        .as_u64()
+                        .filter(|n| (2..=MAX_CANDIDATES as u64).contains(n))
+                        .ok_or_else(|| format!("mtg spec: sealed.deck_choice.k must be 2..={MAX_CANDIDATES}"))? as u8
+                }
+                "explore" => {
+                    let p = x.as_f64().filter(|p| (0.0..=1.0).contains(p)).ok_or("mtg spec: sealed.deck_choice.explore must be a probability (0..=1)")?;
+                    c.explore = super::Share(p);
+                }
+                other => return Err(format!("mtg spec: unknown sealed.deck_choice key {other:?} (k, explore)")),
+            }
+        }
+        Ok(c)
     }
 }
 
@@ -361,6 +464,28 @@ pub fn build_names_json(pool: &[String], seed: u64, settings: &str) -> Result<St
     let ids = card_ids(db, pool)?;
     let b = builder::build(db, &ids, &s, &mut Rng::new(seed));
     Ok(build_json(db, &b).to_string())
+}
+
+/// A deck-choice spec's candidates of a game (ENGINE.md 107.2) as JSON (the Python binding's
+/// `sealed_candidates`): per seat `{"pool_seed", "explore": j or null, "candidates": [build JSON, ...]}`
+/// (null for a given deck).
+pub fn candidates_json(spec: &str, seed: u64) -> Result<String, String> {
+    let sp = super::MtgSpec::parse(spec)?;
+    let s = sp.sealed.as_deref().ok_or("sealed_candidates: not a sealed spec")?;
+    let c = s.deck_choice.ok_or("sealed_candidates: not a deck-choice spec (sealed.deck_choice)")?;
+    let seed = sp.sealed_seed(seed);
+    let db = db();
+    let mut out = Vec::new();
+    for p in 0..2u8 {
+        out.push(match s.candidates(seed, p)? {
+            None => Value::Null,
+            Some((v, ps)) => json!({
+                "pool_seed": ps, "explore": explore_pick(seed, p, c.explore.0, c.k),
+                "candidates": v.iter().map(|b| build_json(db, b)).collect::<Vec<_>>(),
+            }),
+        });
+    }
+    Ok(Value::Array(out).to_string())
 }
 
 /// The seats of an `mtg` spec's game (a sealed spec) as JSON (the Python binding's

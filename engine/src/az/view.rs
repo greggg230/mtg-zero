@@ -539,6 +539,14 @@ impl MtgAz {
             "wins": self.m.wins,
             "over": self.match_over(),
         });
+        if let Some(c) = &self.m.choice {
+            // (the deck choice, ENGINE.md 107.2: the game has not begun)
+            v["decision"] = json!({
+                "player": c.decider(),
+                "kind": "ChooseDeck",
+                "options": c.decision.options.iter().map(|o| json!({"a": o.action, "t": format!("{:?}", o.choice)})).collect::<Vec<_>>(),
+            });
+        }
         if let Some(sb) = &self.m.sb {
             v["decision"] = json!({
                 "player": sb.decider(),

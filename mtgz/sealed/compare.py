@@ -620,6 +620,44 @@ def yardstick_candidates(pool, build, ours, builder=None):
     return cands
 
 
+def value_pick(pool_names, pilot, k=32, worlds=8, seed=0, collation='arena', max_turns=60):
+    """The deck the pilot's network chooses for a pool (docs/ENGINE.md 107.2): one game of the deck-choice spec with the
+    pool in seat 0 (`"seed"` fixes the game: its candidates are `engine.candidates(spec, seed)`), its first move by
+    the pilot's seat with value choices (`worlds`, temperature 0: the best mean value; zero-core docs/search.md 3.17),
+    the driver stopped after it -> (j, the candidates). A bot pilot takes candidate 0 (the heuristic's choice)."""
+    G = _games()
+    spec = {'sealed': {'set': 'eoe', 'collation': collation, 'p0': {'pool': list(pool_names)},
+                       'deck_choice': {'k': int(k), 'explore': 0.0}}, 'max_turns': max_turns, 'seed': int(seed)}
+    cands = R.candidates(spec, seed)[0]['candidates']
+    if not pilot.is_net:
+        return 0, cands
+    s0 = dict(pilot.seat(), value_choice_worlds=int(worlds), value_choice_temp=0.0)
+    drv = G.Driver('mtg_eoe', [[s0, G.seat_dict('random')]], spec=json.dumps(spec), concurrency=1, seed=int(seed),
+                   max_steps=1, move_log=1, threads=1)
+    from zero.infer import drive
+    drive(drv, pilot.evaluators())
+    res = drv.take_results()
+    if len(res) != 1 or not res[0].get('moves'):
+        raise RuntimeError(f'value_pick: no deck choice was played ({res})')
+    seat, a, legal = res[0]['moves'][0]
+    if seat != 0 or len(legal) != len(cands) or drv.stats()['value_choices'] != 1:
+        raise RuntimeError(f'value_pick: the first move is not seat 0\'s value choice ({res[0]["moves"][0]})')
+    return list(legal).index(a), cands
+
+
+def choice_candidates(pool_names, pilot, k=32, worlds=8, seed=0, vs=3, collation='arena'):
+    """The value-picked build of a pool (`value_pick`) and the first `vs` other randomised candidates, as comparison
+    candidates (docs/ENGINE.md 107.2's demonstration: the picked build against random builds of the same pool)."""
+    j, cands = value_pick(pool_names, pilot, k, worlds, seed, collation)
+    def cand(i, name):
+        b = cands[i]
+        return {'name': name, 'deck': b['deck'], 'sideboard': b['sideboard'],
+                'colors': b['colors'] + (('+' + b['splash']) if b['splash'] else ''), 'lands': b['lands']}
+    out = [cand(j, f'picked{j}')]
+    out += [cand(i, f'random{i}') for i in range(1, len(cands)) if i != j][:vs]
+    return j, out
+
+
 # ----------------------------------------------------------------------------- the command line
 
 def _pilot(a, prefix=''):
@@ -701,6 +739,14 @@ def main(argv=None):
     py.add_argument('--builder', default=None, help='our builder\'s settings (JSON)')
     _common(py)
     _race_args(py)
+    pc = sub.add_parser('choice', help='a pool\'s value-picked build (the pilot\'s deck choice, ENGINE.md 107.2) against '
+                                       'random builds of the same pool')
+    pc.add_argument('--pool-seed', type=int, required=True)
+    pc.add_argument('--k', type=int, default=32, help='candidates of the deck choice')
+    pc.add_argument('--worlds', type=int, default=8, help='the value choice\'s worlds per candidate')
+    pc.add_argument('--vs', type=int, default=3, help='random candidates to race against the picked one')
+    _common(pc)
+    _race_args(pc)
     pb = sub.add_parser('builds', help='our builder\'s builds of a generated pool, as deck files')
     pb.add_argument('--pool-seed', type=int, required=True)
     pb.add_argument('--collation', default='arena', choices=['arena', 'paper'])
@@ -717,6 +763,17 @@ def main(argv=None):
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(b, f, indent=1)
             print(path, b['colors'], b['lands'], 'lands')
+        return 0
+    if a.cmd == 'choice':
+        p = R.pool(a.pool_seed, collation=a.collation)
+        j, cands = choice_candidates(p['cards'], _pilot(a), a.k, a.worlds, a.pool_seed, a.vs, a.collation)
+        out = _run(a, cands)
+        out['choice'] = {'pool_seed': a.pool_seed, 'k': a.k, 'worlds': a.worlds, 'picked': j,
+                         'pilot': _pilot(a).describe()}
+        if a.json:
+            with open(a.json, 'w', encoding='utf-8') as f:
+                json.dump(out, f, indent=1)
+        print(json.dumps(out), flush=True)
         return 0
     if a.cmd == 'yardstick':
         from . import seventeen_lands as L

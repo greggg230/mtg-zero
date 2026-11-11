@@ -6,6 +6,7 @@
     seats(spec, seed)                   # a sealed `mtg` spec's two seats in the game `seed`
     lookup(names)                       # name -> engine card id, or why it has none
     game_log(path)                      # the EoE sealed game log on (a file) or off (None): docs/ENGINE.md 107.1
+    candidates(spec, seed)              # a deck-choice spec's candidates of a game: docs/ENGINE.md 107.2
 
 `pool` reproduces `mtgz.sealed.collation.generate` bit for bit (tests/test_sealed_rust.py); the
 builder uses no human data (DESIGN.md 0, ENGINE.md 101.2).
@@ -38,6 +39,12 @@ def seats(spec, seed):
 def lookup(names):
     """{name: engine card id (int) or the reason it has none (str)} in the EoE card table."""
     return json.loads(E.eoe_lookup(list(names)))
+
+
+def candidates(spec, seed):
+    """A deck-choice spec's candidates of the game `seed` (docs/ENGINE.md 107.2): per seat {'pool_seed', 'explore': j or
+    None, 'candidates': [build, ...]} (candidate 0 the builder's best guess), None for a given deck."""
+    return json.loads(E.sealed_candidates(spec if isinstance(spec, str) else json.dumps(spec), seed))
 
 
 def game_log(path):

@@ -153,4 +153,8 @@ impl SearchGame for MtgEoeAz {
         self.world(viewer);
         self.0.determinize_with(viewer, rng, belief)
     }
+
+    fn value_choice(&self) -> bool {
+        self.0.value_choice()
+    }
 }

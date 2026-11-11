@@ -374,6 +374,8 @@ impl MtgAz {
         pools[o as usize] = d.pool.clone();
         self.m.pools = Arc::new(pools);
         self.m.decks[o as usize] = d.counts.clone();
+        // (how their deck was made is theirs: unknown in the world, ENGINE.md 107)
+        self.m.how[o as usize] = None;
     }
 
     /// `determinize` with the opponent's hidden deck dealt by the deck reader's weights `w` (per

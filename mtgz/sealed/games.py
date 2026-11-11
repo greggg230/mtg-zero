@@ -86,13 +86,27 @@ def deck_counts(names):
 
 def check(specs, games):
     """Rebuild every game's two seats from its spec and deck seed with this checkout's builder and compare the
-    decks, modes and pool seeds with the logged ones: {'checked', 'mismatch': [(file, seed, seat, what)]}."""
+    decks, modes and pool seeds with the logged ones: {'checked', 'mismatch': [(file, seed, seat, what)]}. A deck-choice
+    game's seat (docs/ENGINE.md 107.2) is its logged candidate (chosen, or the explore pick) of the rebuilt candidates."""
     from mtgz.sealed import engine as SE
     bad = []
     for g in games:
-        sp = json.dumps({'sealed': specs[g['spec']]['sealed'], 'decks': 'random'})
+        sl = specs[g['spec']]['sealed']
+        sp = json.dumps({'sealed': sl, 'decks': 'random'})
         seats = SE.seats(sp, g['deck_seed'])
+        cands = SE.candidates(sp, g['deck_seed']) if sl.get('deck_choice') else [None, None]
         for p, (got, want) in enumerate(zip(seats, g['seats'])):
+            if cands[p] is not None:
+                j = want.get('candidate')
+                ok = j is not None and 0 <= j < len(cands[p]['candidates'])
+                if not ok or deck_counts(cands[p]['candidates'][j]['deck']) != want['deck']:
+                    bad.append((g['file'], g['seed'], p, 'deck'))
+                exp = cands[p]['explore']
+                if want['mode'] not in (('explore',) if exp is not None else ('chosen',)) or (exp is not None and exp != j):
+                    bad.append((g['file'], g['seed'], p, 'mode'))
+                if cands[p]['pool_seed'] != want['pool_seed']:
+                    bad.append((g['file'], g['seed'], p, 'pool_seed'))
+                continue
             for what, a, b in (('deck', deck_counts(got['deck']), want['deck']), ('mode', got['mode'], want['mode']),
                                ('pool_seed', got['pool_seed'], want['pool_seed'])):
                 if a != b:
@@ -147,6 +161,9 @@ def summary(run, specs, games):
             it = iteration_of(g['time'], times)
             iters[str(it)] = iters.get(str(it), 0) + 1
         mixed = [g for g in gs if sorted(s['mode'] for s in g['seats']) == ['best', 'explore']]
+        # the deck choice (docs/ENGINE.md 107.2): the chosen candidates, and a chosen deck against an explore one
+        chosen = [s['candidate'] for g in gs for s in g['seats'] if s['mode'] == 'chosen']
+        cvx = [g for g in gs if sorted(s['mode'] for s in g['seats']) == ['chosen', 'explore']]
         out[phase] = {
             'games': len(gs), 'aborted': sum(g['aborted'] for g in gs),
             'draws': sum(1 for g in gs if g['result'] is not None and g['result'][0] == g['result'][1]),
@@ -157,6 +174,10 @@ def summary(run, specs, games):
             # self-play): a yardstick of the builder, never a training signal
             'best_vs_explore': score(mixed, lambda g: [s['mode'] for s in g['seats']].index('best')),
         }
+        if chosen:
+            out[phase]['chosen'] = {'seats': len(chosen), 'best_guess': sum(1 for j in chosen if j == 0),
+                                    'candidates': {str(j): chosen.count(j) for j in sorted(set(chosen))}}
+            out[phase]['chosen_vs_explore'] = score(cvx, lambda g: [s['mode'] for s in g['seats']].index('chosen'))
     return out
 
 

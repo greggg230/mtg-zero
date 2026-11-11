@@ -387,6 +387,13 @@ impl MtgSpec {
             if !matches!(s.decks, DeckMode::Random | DeckMode::Eval) {
                 return Err("mtg spec: sealed seats are given as sealed.p0 / sealed.p1, not decks lists".into());
             }
+            // (ENGINE.md 107.2: a seat's chosen deck is hidden from the other player)
+            if s.sealed.as_ref().is_some_and(|x| x.deck_choice.is_some()) && !s.hidden_decklists {
+                return Err("mtg spec: sealed.deck_choice needs hidden decklists (a seat's choice is hidden from the other player)".into());
+            }
+            if s.sealed.as_ref().is_some_and(|x| x.deck_choice.is_some()) && s.start.is_some() {
+                return Err("mtg spec: sealed.deck_choice is the match's start, not with a lab start".into());
+            }
         }
         if s.constructed {
             if s.format != Format::Bo1 {
@@ -570,7 +577,12 @@ pub struct MtgAz {
 
 impl MtgAz {
     pub fn new(spec: &MtgSpec, seed: u64) -> Result<MtgAz, String> {
-        let seats = spec.try_seats(seed)?;
+        // (A sealed game: each seat's deck and how it was made, ENGINE.md 107; with a deck choice the
+        // choosing seats' candidates, the game started with their first candidate until they choose.)
+        let (seats, how, choice) = match spec.sealed.as_deref() {
+            Some(sl) => Self::sealed_seats(sl, spec.sealed_seed(seed)).map_err(|e| format!("mtg spec: sealed game {seed}: {e}"))?,
+            None => (spec.try_seats(seed)?, [None, None], None),
+        };
         // Best-of-three: the decks are hidden within the pools (ENGINE.md
         // 36.11); best-of-one keeps open decklists (M5a-M8a's game).
         let gspec = GameSpec {
@@ -591,7 +603,81 @@ impl MtgAz {
         let mut az = MtgAz::from_seats(spec.db(), gspec, spec.format, &seats, seed, [priors.clone(), priors])?;
         az.m.deal.k = spec.deal_samples;
         az.m.deal.ess = spec.deck_tilt_ess.0;
+        az.m.how = how;
+        az.m.choice = choice;
         Ok(az)
+    }
+
+    /// A sealed game's seats (the game whose pools come from `seed`), how each deck was made, and the
+    /// deck choice (ENGINE.md 107.2) if a seat chooses: a choosing seat's seat is its candidate 0 until
+    /// it chooses; an exploring one plays its explore pick; a seat without candidates (a given deck, or
+    /// no deck choice) the spec's seat (`SealedSpec::seat`, 107.1's modes).
+    #[allow(clippy::type_complexity)]
+    fn sealed_seats(sl: &sealed::SealedSpec, seed: u64) -> Result<([Seat; 2], [Option<matches::SeatHow>; 2], Option<Box<matches::DeckChoice>>), String> {
+        use matches::{Candidate, DeckChoice, SeatHow};
+        let mut seats: Vec<Seat> = Vec::with_capacity(2);
+        let mut how = [None, None];
+        let mut choosers: Vec<crate::ids::PlayerId> = Vec::new();
+        let mut cands: [Option<std::sync::Arc<[Candidate]>>; 2] = [None, None];
+        for p in 0..2u8 {
+            let seat = |deck: &[DefId], sideboard: &[DefId]| Seat { deck: deck.to_vec(), sideboard: sideboard.to_vec(), first_picks: Vec::new(), elsewhere: Vec::new() };
+            match (sl.deck_choice, sl.candidates(seed, p)?) {
+                (Some(dc), Some((builds, ps))) => {
+                    let cs: Vec<Candidate> = builds
+                        .into_iter()
+                        .enumerate()
+                        .map(|(j, b)| {
+                            let mode = if j == 0 { sealed::Mode::Best } else { sealed::Mode::Explore };
+                            let how = SeatHow { mode, candidate: Some(j as u8), pool_seed: ps, colors: b.colors, splash: b.splash };
+                            Candidate { deck: b.deck, sideboard: b.sideboard, how }
+                        })
+                        .collect();
+                    let pick = sealed::explore_pick(seed, p, dc.explore.0, dc.k);
+                    let c = &cs[pick.unwrap_or(0) as usize];
+                    seats.push(seat(&c.deck, &c.sideboard));
+                    match pick {
+                        Some(_) => how[p as usize] = Some(SeatHow { mode: sealed::Mode::Explore, ..c.how }),
+                        None => {
+                            choosers.push(p);
+                            cands[p as usize] = Some(std::sync::Arc::from(cs));
+                        }
+                    }
+                }
+                _ => {
+                    let (s, info) = sl.seat(seed, p)?;
+                    let (colors, splash) = info.build.as_ref().map_or((0, 0), |b| (b.colors, b.splash));
+                    how[p as usize] = Some(SeatHow { mode: info.mode, candidate: None, pool_seed: info.pool_seed, colors, splash });
+                    seats.push(s);
+                }
+            }
+        }
+        let choice = (!choosers.is_empty()).then(|| Box::new(DeckChoice::new(&choosers, cands)));
+        let s1 = seats.pop().expect("two seats");
+        let s0 = seats.pop().expect("two seats");
+        Ok(([s0, s1], how, choice))
+    }
+
+    /// `determinize` during the deck choice (ENGINE.md 107.2): the other seat's deck dealt from its prior
+    /// (nothing of it is known: hidden decklists), as the match's pool and deck of theirs and their cards
+    /// of the game in waiting; in the deciding viewer's world the other seat has chosen (its deck the
+    /// dealt one, its candidates gone: the choice ends with the viewer's); for another viewer the
+    /// decider's candidates are K copies of its dealt deck (whatever it chooses, its deck is unknown).
+    fn determinize_deck_choice(&mut self, viewer: crate::ids::PlayerId, rng: &mut Rng) {
+        let o = crate::ids::opp(viewer);
+        self.sample_hidden_deck(viewer, rng, None, None);
+        self.m.how[o as usize] = None;
+        let dealt = matches::Candidate {
+            deck: self.m.deck(o),
+            sideboard: self.m.pools[o as usize].sideboard(&self.m.decks[o as usize]),
+            how: matches::SeatHow { mode: sealed::Mode::Explore, candidate: None, pool_seed: None, colors: 0, splash: 0 },
+        };
+        let c = self.m.choice.as_mut().expect("a deck choice");
+        if c.decider() == viewer {
+            c.cands[o as usize] = None;
+            c.n = c.turn + 1;
+        } else if let Some(k) = c.cands[o as usize].as_ref().map(|v| v.len()) {
+            c.cands[o as usize] = Some(std::sync::Arc::from(vec![dealt; k]));
+        }
     }
 
     /// A match whose first game has these seats (`MtgAz::new`'s, and the fuzz's own decks):
@@ -631,6 +717,10 @@ struct HeuristicBot(bots::Heuristic);
 
 impl Bot<MtgAz> for HeuristicBot {
     fn choose(&mut self, g: &MtgAz, legal: &[u16]) -> u16 {
+        // (the deck choice, ENGINE.md 107.2: candidate 0, the builder's best guess)
+        if g.m.choice.is_some() {
+            return legal[0];
+        }
         match g.sideboarding() {
             Some(sb) => bots::sideboard(sb, legal),
             None => self.0.choose(&g.g, legal),
@@ -669,6 +759,9 @@ impl SearchGame for MtgAz {
     }
 
     fn to_move(&self) -> Option<usize> {
+        if let Some(c) = &self.m.choice {
+            return Some(c.decider() as usize);
+        }
         match &self.m.sb {
             Some(sb) => Some(sb.decider() as usize),
             None => self.g.to_move().map(|p| p as usize),
@@ -684,6 +777,11 @@ impl SearchGame for MtgAz {
     }
 
     fn legal_actions(&self, out: &mut Vec<u16>) {
+        if let Some(c) = &self.m.choice {
+            out.clear();
+            out.extend(c.decision.options.iter().map(|o| o.action));
+            return;
+        }
         match &self.m.sb {
             Some(sb) => {
                 out.clear();
@@ -764,6 +862,12 @@ impl SearchGame for MtgAz {
     /// sampled from what the viewer knows (`sample.rs`).
     fn determinize(&mut self, viewer: usize, rng: &mut zero_search::rng::Rng) {
         let mut r = Rng::new(rng.next_u64());
+        // (the deck choice before the game, ENGINE.md 107.2: the other seat's deck dealt, nothing else)
+        if self.m.choice.is_some() {
+            self.determinize_deck_choice(viewer as u8, &mut r);
+            self.m.rng = Rng::new(r.next_u64());
+            return;
+        }
         if self.m.format == Format::Bo3 && !self.m.over {
             self.sample_hidden_pool(viewer as u8, &mut r);
         }
@@ -778,7 +882,9 @@ impl SearchGame for MtgAz {
     }
 
     fn encode(&self, viewer: usize, out: &mut [f32]) {
-        if self.m.sb.is_some() {
+        if self.m.choice.is_some() {
+            encode::encode_deck_choice(self, viewer as u8, out);
+        } else if self.m.sb.is_some() {
             encode::encode_sideboarding(self, viewer as u8, out);
         } else {
             self.g.encode_features(viewer as u8, out);
@@ -794,7 +900,9 @@ impl SearchGame for MtgAz {
     /// Minor: which mana source to tap next while paying (ENGINE.md 22; zero-core searches it
     /// with the seat's `sims_minor` and never records it).
     fn minor_decision(&self) -> bool {
-        self.g
+        self.m.choice.is_none()
+            && self
+                .g
             .pending_decision()
             .is_some_and(|d| matches!(d.kind, crate::decision::DecisionKind::PayMana | crate::decision::DecisionKind::PayPool))
     }
@@ -836,7 +944,7 @@ impl SearchGame for MtgAz {
     const AUX: &'static [(&'static str, usize)] = &[("belief", identity::D), ("deck", identity::D)];
 
     fn aux_target(&self, viewer: usize, out: &mut [f32]) {
-        if self.m.sb.is_some() {
+        if self.m.sb.is_some() || self.m.choice.is_some() {
             return;
         }
         let ids = identity::identities(self.g.db());
@@ -863,5 +971,12 @@ impl SearchGame for MtgAz {
     /// deal): `determinize`.
     fn determinize_with(&mut self, viewer: usize, rng: &mut zero_search::rng::Rng, belief: &zero_search::game::Belief) {
         self.determinize_belief(viewer, rng, belief);
+    }
+
+    /// The sealed deck choice before the game (ENGINE.md 107.2) is a value choice (zero-core
+    /// docs/search.md 3.17): a seat with `value_choice_worlds` values each candidate by the network's value,
+    /// from its own view, of the game started with it.
+    fn value_choice(&self) -> bool {
+        self.m.choice.is_some()
     }
 }

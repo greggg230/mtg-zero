@@ -2637,6 +2637,27 @@ pub fn encode_sideboarding(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) 
     }
 }
 
+/// The encoding during the sealed deck choice before the game (ENGINE.md 107.2): the match block and
+/// bags (both decks' sizes: 40; under hidden decklists nothing of the other pool) and the context - the
+/// decision kind (`ChooseDeck`), whether the viewer decides, its number of candidates when it does. The
+/// game blocks are empty (the game has not begun), and nothing tells which deck a seat chose or holds:
+/// the candidates are not shown (the choice is a value choice, valued by the decks' games, never
+/// recorded: zero-core docs/search.md 3.17).
+pub fn encode_deck_choice(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
+    assert_eq!(out.len(), NUM_FEATURES);
+    encode_match(a, viewer, out);
+    let c = a.deck_choice().expect("a deck choice");
+    let d = &c.decision;
+    let mine = d.player == viewer;
+    let x = &mut out[O_CONTEXT..O_CONTEXT + CONTEXT];
+    x[ctx::KIND + crate::decision::DecisionKind::ChooseDeck as usize] = 1.0;
+    x[ctx::DECIDER_IS_VIEWER] = mine as u8 as f32;
+    x[ctx::PENDING] = 1.0;
+    if mine {
+        x[ctx::OPTIONS] = d.options.len() as f32 / 32.0;
+    }
+}
+
 /// The deck reader's declared inputs (ENGINE.md 102.4; zero-core `feat/deck-reader`, its docs/az.md
 /// 36: a game package's `readers` entry `{target: 'deck', inputs: [[offset, count], ...]}`, flat
 /// features of the bags and global blocks only, in feature order, each once): what the viewer has

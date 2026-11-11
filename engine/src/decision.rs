@@ -236,6 +236,10 @@ pub enum DecisionKind {
     /// 601.2h: any order; `NUMBER` + the part, `cost_order::part`; the parts
     /// whose payment next leaves the cost payable). ENGINE.md 100.4.9.
     CostPart,
+    /// The sealed deck choice before the first game (the match's, not a game's: ENGINE.md 107.2):
+    /// `NUMBER` + j = play candidate deck j of the decider's pool (0 the builder's best guess);
+    /// hidden from the other player.
+    ChooseDeck,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }

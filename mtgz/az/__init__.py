@@ -233,11 +233,26 @@ PRESETS['eoe-smoke'] = dict(PRESETS['mtg-smoke'], game='mtg_eoe', spec=SPEC_EOE,
 # (aux_belief_w 0.25, as the Delver line), the deck target 0.5 with its reader; the search deals the opponent's deck by
 # the deck prediction at the deck tilt 1 in self-play and evaluation, the spec's default floor of 16 effective decks of 32
 # (ENGINE.md 106.6: a first value, to be A/B'd; the hand's tilt off). Sparse shards are a launch flag (--shard-sparse 1: presets leave it off, ENGINE.md 94)
+# Run 2's deck choice (docs/ENGINE.md 107.2): self-play's seats choose their decks among K = 32 candidate builds of their
+# pools (the best guess and 31 randomised builds) by the network's value of the game started with each (zero-core value
+# choices: 8 worlds, temperature 0.03), a 0.1 share of seats playing a random candidate instead; never recorded. Evaluation
+# keeps run 1's spec (the fixed evaluation pairs, no choice: the Elo pool and yardsticks continue); the picked build is
+# measured by `mtgz.sealed.compare choice` (paired races against random builds of the same pool).
+DECK_CHOICE = {'k': 32, 'explore': 0.1}
+SPEC_EOE_CHOICE = json.dumps(dict(json.loads(SPEC_EOE), sealed=dict(json.loads(SPEC_EOE)['sealed'], deck_choice=DECK_CHOICE)))
 PRESETS['eoe-1'] = dict(PRESETS['mtg-3'], game='mtg_eoe', spec=SPEC_EOE, eval_spec=EVAL_SPEC_EOE, sparse=1,
                         window_sparse=1, window_cache=1, train_prefetch=2, shard_writer_thread=1,
                         eval_cache=8192, cq_c_scale=0.3, value_q=0.6, eval_select='cq', aux_belief_w=0.25,
                         aux_deck_w=0.5, reader_deck=1, selfplay_belief_tilts={'deck': 1.0},
                         eval_belief_tilts={'deck': 1.0})
+# run 2 (docs/ENGINE.md 107.2): eoe-1 with the deck choice in self-play - a fork of run 1 at the iteration chosen to
+# turn it on (its value head's then; `tools/fork_run.py`), not a fresh start
+PRESETS['eoe-2'] = dict(PRESETS['eoe-1'], spec=SPEC_EOE_CHOICE, selfplay_value_choice_worlds=8,
+                        selfplay_value_choice_temp=0.03)
+# the deck choice end to end on CPU: eoe-smoke with 8 candidates, 4 worlds
+PRESETS['eoe-choice-smoke'] = dict(PRESETS['eoe-smoke'], spec=json.dumps(dict(json.loads(SPEC_EOE), sealed=dict(
+    json.loads(SPEC_EOE)['sealed'], deck_choice={'k': 8, 'explore': 0.1}))), selfplay_value_choice_worlds=4,
+                                   selfplay_value_choice_temp=0.03)
 
 # a rented GPU box's self-play settings (tools/vast.py, docs/ENGINE.md 97): one worker process, CUDA inference with
 # token CUDA graphs, the Delver line's 16 threads x 3 groups and 1,536 games in flight (the box's bench: ~25 games/s,

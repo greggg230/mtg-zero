@@ -25,6 +25,7 @@ fn _engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sealed_pool, m)?)?;
     m.add_function(wrap_pyfunction!(sealed_build, m)?)?;
     m.add_function(wrap_pyfunction!(sealed_seats, m)?)?;
+    m.add_function(wrap_pyfunction!(sealed_candidates, m)?)?;
     m.add_function(wrap_pyfunction!(eoe_lookup, m)?)?;
     m.add_function(wrap_pyfunction!(game_log, m)?)?;
     m.add_function(wrap_pyfunction!(game_log_path, m)?)?;
@@ -56,6 +57,13 @@ fn sealed_build(pool: Vec<String>, seed: u64, settings: &str) -> PyResult<String
 #[pyfunction]
 fn sealed_seats(spec: &str, seed: u64) -> PyResult<String> {
     engine::az::sealed::seats_json(spec, seed).map_err(verr)
+}
+
+/// A deck-choice spec's candidates of a game (docs/ENGINE.md 107.2), as JSON: per seat {"pool_seed",
+/// "explore": j or null, "candidates": [build, ...]} (null for a given deck).
+#[pyfunction]
+fn sealed_candidates(spec: &str, seed: u64) -> PyResult<String> {
+    engine::az::sealed::candidates_json(spec, seed).map_err(verr)
 }
 
 /// Each name's definition in the EoE card table, or why it has none, as JSON {name: id | error}.
