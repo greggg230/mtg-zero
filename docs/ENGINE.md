@@ -24029,3 +24029,108 @@ draws, 0 aborted, mean 40.6 turns (533-544 s a shard). The gates on bc1856b (`--
 bc1856bba87a in 692s` (build, both digests, `az` 48, `limits` 13, `hidden` 27, pytest, the search smoke);
 `GATE PASSED encoding bc1856bba87a in 421s` (build, both digests, `az` 48, the checkpoint load of `eoe-net`'s
 `eoe-smoke2` iter 4 with `EVAL_SPEC_EOE`, 8 games, pytest).
+
+#### 100.4.11 B8: the last payment items (branch `eoe-b8-pay`, from `eoe-b7-order` f25918f)
+
+**Why.** 100.4.10's "not done" and "found": a shared mana ability that sacrifices its own actor failed
+loudly; castability's edges (a cost option's sources, a spell's spending restrictions with other parts,
+the checks of X, modes and times without the cost's other parts); emerge's choice timing (docs/shortcuts.md
+31.7.3); the mana's own alternatives and a mana ability's own parts in the player's order. Tests:
+`engine/tests/rules_payment_b.rs`, section "100.4.11" (a table of its own, `b8_db`: the cube, the shared
+test cards and B8's), each failing before its fix (checked by running them on the code before it).
+
+##### Actors sacrificed by the payment's picks (item 1)
+
+A shared activation (`Class::actors`: Squandered Resources', Orcish Lumberjack's, any "Sacrifice a
+<filter>: Add <mana>") needs its permanent on the battlefield as it is activated (CR 602.2b); it may
+sacrifice that permanent (an artifact's "Sacrifice an artifact: Add {C}"), and a permanent another pick
+sacrifices may activate first. Three faults: an actor was counted tapped by any shared activation
+(`PayMana::used_res`, `actor_options`), so after "Sacrifice an artifact: Add {C}" sacrificed itself it
+had no actor for its next pick ("no actor", the assertion B7 found); `finish_payment` activated the
+picks in pick order, so an actor could be sacrificed before it activated; and the candidates' counts
+took picks no order activates (two permanents each sacrificed by the other's ability).
+
+* **What taps.** An actor is tapped only by its pool's activation (`Class::pool > 0`, an ability with
+  {T}: `pay::taps_actor`); an ability without {T} activates again.
+* **The order** (`Game::activation_order`): the engine's order (sources that keep their permanent first,
+  life before damage, sacrifices last), then each shared activation before the pick that takes its actor
+  (a sacrifice or exile of it; its own pick may sacrifice it): the first pick in that order no remaining
+  pick activates with the permanent it takes. None when the actors need each other's sacrifice first.
+* **Feasibility** (`Game::actor_kills`, `kill_worlds`). When a shared pick may sacrifice an actor
+  (a victim) and there are two actors or more: if every class a victim touches has the same actors and
+  taps them alike (one group), the counts are exact (without {T}: every pick by one actor, the one a pick
+  sacrifices sacrificing itself last; with {T}: each pick that sacrifices an actor activated by that actor
+  itself, the others by actors no pick sacrifices, as many as the pool's count). Otherwise feasibility is
+  the union of the worlds of kills: for each victim, whether a shared pick sacrifices it, by which class
+  and which actor (distinct for picks with {T}), with an order (no cycle); the other sacrifices of victims
+  left out, a pick with {T} keeping its actor (out of the pools and of a later tap cost's candidates, its
+  card's ways that tap it out: `KillWorld::tapped`). Exact: a payable order puts the picks that sacrifice
+  no actor first (all actors there), and a world's picks a payment leaves out are another world's.
+  `phyrexian_feasible` (every castability check) and `can_pay_plain` take it.
+* **The payment** with any victim and two actors or more: every option is searched to completion
+  (`PayMana::oracle`, 100.4.9's search), so an actor chosen that closes a cycle, or a pick no actor can
+  still activate, is never offered; the copies' dead ends (`activation_order` none, no actor) end there.
+
+Tests: `cr_602_2b_a_shared_mana_ability_sacrifices_its_own_permanent_last` (Test Scrap Idol, "Sacrifice
+an artifact: Add {C}", and Test Four Relic pay Mind Stone: the Idol sacrifices the Relic, then itself),
+`cr_602_2b_two_mana_abilities_that_sacrifice_each_others_permanent` (Test Bone Altar and Test Scrap Golem:
+{C}{C} at most, Test Four Relic not castable, Mind Stone either way),
+`cr_602_2b_a_lumberjack_and_an_altar_that_sacrifice_each_other` (Orcish Lumberjack and Test Grove Altar, a
+Forest: four mana at most, the Grove tapped and then sacrificed by the Lumberjack).
+
+##### Castability's edges (item 4)
+
+The checks made while a spell is cast (a cost option, X, spree's modes, the times, a target that changes
+the cost, splice) read the mana abilities alone (`can_pay_spell`: `mana_classes`, the mana, the life
+later), and a spell's cost with other parts passed no spending purposes (`cost_payable`, allow 0). Now
+each is the whole cost as `cast_pay` pays it (`Game::spell_payable`): the payment's sources (`pay_classes`
+with improvise's artifacts and convoke's creatures, delve's), the graveyard's and the rest's cards for
+delve, the cost's other parts (`spell_rest`: the option's or the alternative cost's rest, escalate's
+discards), the life it takes later, emerge's permanent, and the spending restrictions of the spell cast
+the way it is (`cost_payable` takes `from`: `spend_allow_from`, CR 106.6). The option's check
+(`cast_option`) and escalate's (`escalated_payable`) go through it too. Tests:
+`cr_702_51a_a_convoke_spells_kicker_counts_its_creatures` (Test Kicked Convoke with a Forest and three Test
+Bears: neither option was offered, a cast with no option),
+`cr_107_3a_a_convoke_spells_x_counts_its_creatures` (Test Convoke Sprout, {X}{G}: X up to 3, was 0),
+`cr_106_6_workshop_mana_pays_an_artifact_spell_with_an_additional_cost` (Test Grave Relic, {3} and "exile a
+card from your graveyard", with Mishra's Workshop: castable), `cr_702_172a_a_spree_mode_counts_the_costs_other_parts`
+(Test Spree Pact, {0}, "sacrifice an artifact", +{0} / +{1}, with Lotus Petal alone: the {1} mode not offered).
+
+##### Emerge's choice at 601.2f (item 5; docs/shortcuts.md 31.7.3)
+
+Emerge's permanent was chosen right after the alternative cost (601.2b), kept on a card-pool argument. Now
+it is chosen as the total cost is determined (CR 702.119a, 601.2f): `cast_alt` puts `Task::Emerge` below
+the modes, X, the times, the options, the targets and the division, above delve's cards and the payment.
+Before it, `spell_payable` asks whether some permanent the alternative cost may sacrifice leaves the whole
+cost payable; its choice offers those whose sacrifice does with everything announced (the reduction and
+the sacrifice as a part, `emerge_payable`, B7's order rules). (The lowering refuses emerge on a card that
+isn't a creature, so a spell with emerge has no targets of its own; X, the times and the options are
+asked before it.) Test: `cr_702_119a_emerges_permanent_is_chosen_after_the_additional_costs` (Test Emerge
+Wurm, emerge {5}{G} and kicker {2}, with Test Bear and six Forests: kicked once or not, then the Bear;
+the engine asked for the creature first and its kicker check left emerge's reduction out).
+
+Digests (1f62427): full 87c045d0d54359ac -> 53839c837bbaf034, `DIGEST_ENCODING=0` d0da2e6030aa0d08 ->
+208c723daced22fe, `DIGEST_ENCODING=v5` a5204acf0d463bb7 -> dc33538c0497dbf0: 2 of the 2,500 games, both from
+the spending purposes of a cost with other parts: r 647 (Palantir of Orthanc escaped by Underworld Breach
+with Mishra's Workshop's floating {C}{C}{C}) and r 1647 (Uro escaped with Delighted Halfling's mana), each
+offered now and not before. `RULES_EPOCH` bumped; `delver_rerecord.py check --stamp`: 60 of 60 spots. b7807a1
+(item 1) changed none.
+
+##### Not done: the mana's own alternatives and a mana ability's own parts in the player's order (items 2, 3)
+
+Unchanged from 100.4.10's designs: the mana's alternatives (convoke's, improvise's and waterbend's taps,
+Phyrexian life, delve's exile) are still paid right after 601.2g's mana abilities when the order can
+matter, and a mana ability's own parts ("{T}, Sacrifice a <filter>", "{T}, Tap an untapped <filter>",
+"{T}, Sacrifice this") keep the engine's order with priority and inside a payment. Both need `PayMana`
+split at 601.2g/601.2h (its picks are planned together and activated at `finish_payment`), with the
+float of 601.2g's mana and `part::MANA` as a part (100.4.10's design); B8 spent its budget on items 1, 4
+and 5 and their verification (each full suite builds for about an hour on the shared desktop).
+
+##### Tests
+
+`rules_payment_b`, section "100.4.11" (each failing before its fix): `cr_602_2b_a_shared_mana_ability_sacrifices_its_own_permanent_last`,
+`cr_602_2b_two_mana_abilities_that_sacrifice_each_others_permanent`, `cr_602_2b_a_lumberjack_and_an_altar_that_sacrifice_each_other`,
+`cr_702_51a_a_convoke_spells_kicker_counts_its_creatures`, `cr_107_3a_a_convoke_spells_x_counts_its_creatures`,
+`cr_106_6_workshop_mana_pays_an_artifact_spell_with_an_additional_cost`, `cr_702_172a_a_spree_mode_counts_the_costs_other_parts`,
+`cr_702_119a_emerges_permanent_is_chosen_after_the_additional_costs`. docs/shortcuts.md: 31.7.3 **fixed**; N23's row
+notes 100.4.11's actors (no new rows).
