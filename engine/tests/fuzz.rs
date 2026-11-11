@@ -67,6 +67,12 @@
 //! `FUZZ_BEST_SHARE=p` (ENGINE.md 107.1): the sealed spec's mixed field, `"best_share": p` (each
 //! seat's deck the builder's best guess with probability p; with `FUZZ_HIDDEN_DECKS=1` the prior
 //! samples the same mixture). Unset: the spec without the key, unchanged.
+//! `FUZZ_DECK_CHOICE=k` (with `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1`; ENGINE.md 107.2): each game is the sealed
+//! spec's with `"deck_choice": {"k": k, "explore": 0.1}`, made by `MtgAz::new`: its pre-game deck choice is played
+//! first - at each choice, worlds of the decider and of the other player (the decision, its options and the
+//! viewer's whole encoding as in the real game; in the decider's world the other seat chose a deck of 40 cards
+//! of its prior's support; one choice in the world starts the game, 30 random moves on), then a random choice -
+//! and the game goes on with every check of the hidden mode.
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 //!
 //! `FUZZ_HIDDEN_DECKS=1` (ENGINE.md 102): the mode's games (the default decks, `FUZZ_POOL=eoe`'s or
@@ -1482,6 +1488,13 @@ fn fuzz_random_games() {
             assert!(w > 0 && x * 10 > w * 9, "FUZZ_HIDDEN_DECKS: {x} of {w} worlds with another deck");
         }
     }
+    if let Some(k) = deck_choice_fuzz().filter(|_| sealed_mode() && hidden_decks_mode()) {
+        let (c, w) = (DC_CHOICES.load(Ordering::Relaxed), DC_WORLDS.load(Ordering::Relaxed));
+        println!("FUZZ_DECK_CHOICE={k}: {c} deck choices played, {w} worlds checked during them");
+        if n >= 100 {
+            assert!(c > 0 && w > 0, "FUZZ_DECK_CHOICE: no deck choice was played");
+        }
+    }
     if let Some(t) = deck_tilt_fuzz() {
         let (w, r) = (DT_WORLDS.load(Ordering::Relaxed), DT_RATIO.load(Ordering::Relaxed));
         let mean = r as f64 / 1e6 / w.max(1) as f64;
@@ -1998,6 +2011,74 @@ static HD_WORLDS: AtomicU64 = AtomicU64::new(0);
 static HD_OTHER_DECK: AtomicU64 = AtomicU64::new(0);
 static HD_STEPS: AtomicU64 = AtomicU64::new(0);
 static HD_LONG_TURNS: AtomicU64 = AtomicU64::new(0);
+/// `FUZZ_DECK_CHOICE` (ENGINE.md 107.2): deck choices played, worlds checked during them.
+static DC_CHOICES: AtomicU64 = AtomicU64::new(0);
+static DC_WORLDS: AtomicU64 = AtomicU64::new(0);
+
+/// `FUZZ_DECK_CHOICE=k`: the candidates per seat (module docs), or None.
+fn deck_choice_fuzz() -> Option<u8> {
+    std::env::var("FUZZ_DECK_CHOICE").ok().map(|v| v.parse().expect("FUZZ_DECK_CHOICE: the candidates per seat (2..=32)"))
+}
+
+/// The deck-choice spec of game `seed` (`FUZZ_DECK_CHOICE`): `sealed_spec`'s with the choice.
+fn choice_spec(seed: u64, k: u8) -> &'static engine::az::MtgSpec {
+    static SPECS: std::sync::OnceLock<[engine::az::MtgSpec; 2]> = std::sync::OnceLock::new();
+    let specs = SPECS.get_or_init(|| {
+        [0u64, 1].map(|s| {
+            let mut v: serde_json::Value = serde_json::from_str(&format!(r#"{{"sealed": {}}}"#, sealed_spec(s).sealed.as_deref().unwrap().to_json())).unwrap();
+            v["sealed"]["deck_choice"] = serde_json::json!({"k": k, "explore": 0.1});
+            engine::az::MtgSpec::parse(&v.to_string()).unwrap()
+        })
+    });
+    &specs[(seed % 2) as usize]
+}
+
+/// The deck choice of a `FUZZ_DECK_CHOICE` game (module docs), played until the game begins.
+fn play_deck_choice(a: &mut engine::az::MtgAz, seed: u64, rng: &mut Rng) {
+    use zero_search::game::SearchGame;
+    let mut zr = zero_search::rng::Rng::new(seed ^ 0xDEC0_C401);
+    let (mut b0, mut b1) = (Vec::new(), Vec::new());
+    let mut keys = Vec::new();
+    while a.deck_choice().is_some() {
+        assert!(a.value_choice(), "seed {seed}: a deck choice is a value choice");
+        let p = a.to_move().unwrap() as u8;
+        let legal = az_legal(a);
+        assert!(legal.len() >= 2 && legal.iter().enumerate().all(|(j, &x)| x == engine::act::NUMBER + j as u16), "seed {seed}: the choice's options {legal:?}");
+        for viewer in [p, 1 - p] {
+            for _ in 0..2 {
+                let mut w = a.clone();
+                w.determinize(viewer as usize, &mut zr);
+                assert_eq!((w.to_move(), az_legal(&w)), (Some(p as usize), legal.clone()), "seed {seed}: a world of P{viewer} changed the choice");
+                az_encode(a, viewer, &mut b0);
+                az_encode(&w, viewer, &mut b1);
+                assert!(b0 == b1, "seed {seed}: a world of P{viewer} changed its encoding during the deck choice");
+                let o = 1 - viewer;
+                assert_eq!(w.m.deck(o).len(), 40, "seed {seed}: the dealt deck");
+                assert!(w.m.how[o as usize].is_none(), "seed {seed}: the world knows how P{o}'s deck was made");
+                if viewer == p {
+                    let c = w.deck_choice().unwrap();
+                    assert_eq!(c.n, c.turn + 1, "seed {seed}: in the decider's world the other seat has chosen");
+                    let x = legal[rng.below(legal.len() as u32) as usize];
+                    w.step(x, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+                    assert!(w.deck_choice().is_none(), "seed {seed}: the world's game begins with the decider's choice");
+                    w.g.check_invariants().unwrap_or_else(|e| panic!("seed {seed}: the world's game: {e}"));
+                    for _ in 0..30 {
+                        if w.to_move().is_none() {
+                            break;
+                        }
+                        let l = az_legal(&w);
+                        w.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+                    }
+                }
+                DC_WORLDS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let x = legal[rng.below(legal.len() as u32) as usize];
+        a.step(x, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+        DC_CHOICES.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 /// `FUZZ_HIDDEN_DECKS`: past this many decisions in one turn the random player passes priority
 /// whenever it may (module docs: random play loops on the base's free activations).
 const HD_LONG_TURN: u64 = 500;
@@ -2068,12 +2149,21 @@ fn play_hidden(seed: u64) -> Played {
         Some(sl) => std::sync::Arc::new(engine::az::hidden_decks::SealedPrior::of_spec(sl)),
         None => engine::az::hidden_decks::TablePrior::of(game_db()),
     };
-    let mut a = engine::az::MtgAz::from_seats(game_db(), gspec, engine::az::Format::Bo1, &[seat(d0, s0), seat(d1, s1)], seed, [Some(prior.clone()), Some(prior)])
-        .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+    // (FUZZ_DECK_CHOICE, ENGINE.md 107.2: the spec's game with its deck choice, made by `MtgAz::new`)
+    let choice = deck_choice_fuzz().filter(|_| sealed_mode());
+    let mut a = match choice {
+        Some(k) => engine::az::MtgAz::new(choice_spec(seed, k), seed).unwrap_or_else(|e| panic!("seed {seed}: {e}")),
+        None => engine::az::MtgAz::from_seats(game_db(), gspec, engine::az::Format::Bo1, &[seat(d0, s0), seat(d1, s1)], seed, [Some(prior.clone()), Some(prior)])
+            .unwrap_or_else(|e| panic!("seed {seed}: {e}")),
+    };
+    let _ = log;
     // (The K-sample deal, ENGINE.md 102.8: `FUZZ_DEAL_SAMPLES=k`, default the spec's 32; 0 = a
     // fresh sample of the prior at every deal.)
     a.m.deal.k = std::env::var("FUZZ_DEAL_SAMPLES").ok().map_or(32, |v| v.parse().expect("FUZZ_DEAL_SAMPLES: a number"));
     let mut rng = Rng::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 1);
+    if choice.is_some() {
+        play_deck_choice(&mut a, seed, &mut rng);
+    }
     let mut crng = Rng::new(seed ^ 0xC0_4D_1E7E);
     let (mut actions, mut keys, mut buf) = (Vec::new(), Vec::new(), Vec::new());
     let mut steps = 0usize;
