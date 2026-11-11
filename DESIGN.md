@@ -819,3 +819,15 @@ tilt, the spells greedy by weight; deterministic per pool), the sealed spec's `"
 with that probability, else an exploratory build; `eoe-smoke` and `eoe-1` at 0.5), the hidden-decklist prior sampling the same
 mixture, and the **game log** (every finished `mtg_eoe` game's two decks, their modes and the result in `<run>/games/`,
 `python -m mtgz.sealed.games RUN --check`; no zero-core change). Next: deck choice by value (107.2).
+
+**The deck choice by value (2026-11-10, branch `eoe-field`; ENGINE.md 107.2):** for run 2, the sealed spec's
+`"deck_choice": {"k": 32, "explore": 0.1}`: each seat's K candidate builds of its pool (the best guess and 31 randomised
+builds), a tenth of the seats playing a random one, the others choosing in a hidden pre-game decision (`ChooseDeck`, before
+CR 103.1's choice of who plays first) by the network's value of the game started with each candidate - zero-core's opt-in
+**value choice** (`feat/value-choice`, docs/search.md 3.17: a one-ply lookahead over M worlds from the decider's view, the
+best mean or a softmax draw, never recorded: the network cannot see the candidates) - so the built decks become the field.
+The value is "my deck against the field" before any hand (the network's expectation over hands); the explore share, the
+temperature and the paired race (`python -m mtgz.sealed.compare choice`: a pool's value-picked build against its random
+builds) guard against a field that rates what it trains on. Presets `eoe-2` (eoe-1 + the choice, 8 worlds, temperature
+0.03; a fork of run 1) and `eoe-choice-smoke`. Success is then measured three ways: the picked build against a random build of
+the same pool, our build against the human build (S5), both against a field of 17lands human decks (a yardstick only).
