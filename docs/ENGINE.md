@@ -23858,3 +23858,159 @@ checkout, the pin check satisfied by the gitlink):
 (`determinize_belief`), `az/mod.rs` (`MtgSpec::deck_tilt_ess`, `Share`), `az/sample.rs` (`Knowledge::fixed_by_identity`),
 `az/lab.rs` (a `Belief` literal), tests at the ends of `tests/hidden.rs` and `tests/az.rs`, `tests/fuzz.rs`'s hidden mode,
 the presets (`mtgz/az/__init__.py`), ENGINE.md 106 after 105.
+
+#### 100.4.10 B7: the last cost-order gaps (branch `eoe-b7-order`, from main 72a44fb)
+
+**Why.** 100.4.9's "What is left": the mana's own alternatives paid first, escalate's discards, emerge's
+sacrifice and the Equipment's exile paid at fixed points, a mana ability's own cost in the engine's order,
+and castability blind to a mana ability's side effects where the order is free. Tests:
+`engine/tests/rules_payment_b.rs`, section "100.4.10" (a table of its own, `b7_db`: the cube, the shared
+test cards, The Dominion Bracelet and B7's), each failing before its fix (checked by running them on the
+code before it). Testkit: `Game::take_control` (a control change as a test's setup, the pending decision
+asked again).
+
+##### The mana's side effects come first (item 4; c69b2cd)
+
+The mana abilities are activated before any other part is paid (CR 601.2g before 601.2h), so what they
+do is paid before every part: a painland's damage or a Talisman's, a Treasure or a Lotus Petal
+sacrificed, a Spirit Guide exiled, Gemstone Mine's counter, a Gene Pollinator's or a Lumberjack's tap, and
+the mana's own alternatives the engine pays with it (convoke's, improvise's and waterbend's taps, Phyrexian
+life, life paid after the mana, delve's exile). Castability read the parts' candidates (`Keep::reserves`,
+`Keep::taps`) before them; the payment then read the state after them. `Game::mana_writes` is what the
+payment may change, over every source it may use (`pay_classes`; each source's cost and its ability's
+damage, opponents' life and "sacrifice it if no counters"; the actors of shared activations), and
+`order_free_with` pays it before every part: a part that reads what it may change (through a static
+ability, a count, tapped permanents, counters) makes castability and the payment search (100.4.9's
+`payable_in_some_order`, the oracle `PayMana`), with one part as well as with several. Castability
+(`cost_payable_order`) and the payment (`act_pay`, `cast_pay`) decide it alike (a payment with no mana
+and no source to activate first changes nothing; delve exiles anyway). Test:
+`cr_601_2g_a_mana_abilitys_damage_changes_crews_power` (Test Crew Bank's "{1}, Crew 3" with Test Desperate
+Rebel at 11 life and Talisman of Dominance: castable, and the payment offers only the Talisman's {U}/{B}
+ability, whose damage makes the Rebel 3/1; at 12 life not castable). The fuzz's castability searches grew
+(rules_castpay's 4,000 boards: 4.9 s -> 8.8 s on a shared desktop).
+
+##### Where a part's objects go (found on the way; c69b2cd)
+
+A part that moves permanents (a sacrifice, a return, the source sacrificed, emerge's) reads where they go:
+the replacement effects that apply as they move (CR 614.1a, 614.6; `Game::replaced_dest`). B6's proof left
+them out, so an order that changes them was "free". `kind::DEST`: changed by a static ability's or an
+effect's "exile it if it would die / leave" (`Mod::ExileIfDies`, `Mod::ExileIfLeaves`, `mod_change`) and by
+a void exile's source leaving (Dauthi Voidwalker, `void_exile`: an opponent's card the payer controls).
+(A finality counter removed first changes no outcome: the part that removes it could remove it from the
+permanent moved only before moving it, which the engine's order, counters first, reaches. A hand card
+goes where the payer's own cards go, by its own card's, the turn's or an opponent's permanents' effects:
+no part of the payer's cost changes those.) Test: `cr_614_1a_a_replacement_effects_source_sacrificed_first_or_not`
+(P0 controls P1's Test Pact Idol, "Sacrifice a creature, Sacrifice this artifact", and its own Dauthi
+Voidwalker: the Idol first is exiled with a void counter, the Voidwalker first sends the Idol to P1's
+graveyard; both orders are asked).
+
+##### Escalate's discards (item 2; 85edad7)
+
+Escalate's discards (CR 702.120a) are an additional cost, paid with the others in any order. They were a
+task after the cost's other parts (`Task::Escalate`, now gone). Now they are the discard without a filter
+of the spell's rest cost (`Game::spell_rest`, `with_escalate`: `merge_costs` with retrace's land card or an
+alternative cost's rest), so the order proof, the reservations and `pay_costs` see them with the rest: a
+card discarded for escalate is one escape may exile (the discards before the graveyard's cards). Found with
+it: the modes' cap counted the mana and the hand only, so Collective Brutality retraced by Wrenn and Six's
+emblem with two cards in hand offered a third mode (three discards) and then paid one fewer (the escalate
+task stopped at an empty hand). Now the modes are exact (`escalated_payable`, the whole cost with that
+many discards: a mode is offered when some number of modes from it on can be paid, `PASS` when the modes
+chosen can), and castability tries every number of modes whose targets exist (`escalate_any`: from hand,
+by escape or retrace, with an additional-cost option, with an alternative cost): more discards can be what
+pays (escape's graveyard). Tests: `cr_702_120a_escalate_counts_the_costs_other_discard`,
+`cr_702_120a_a_card_discarded_for_escalate_is_exiled_for_escape` (Brutality with Underworld Breach, two
+other graveyard cards and an Island in hand: castable, one mode not enough, two modes: the Island
+discarded, then exiled).
+
+Digests: full ae88eae20abb14ca -> 87c045d0d54359ac, `DIGEST_ENCODING=v5` 418dc8195dc6afb5 -> a5204acf0d463bb7: 5
+of the 2,500 games (r 825, 1540, 1942, h 181, 300), each casting Collective Brutality from hand with
+escalate: the discard is asked by `PayCosts` (the context block's task code); `DIGEST_ENCODING=0` unchanged
+(d0da2e6030aa0d08: the same actions). `RULES_EPOCH` bumped; `delver_rerecord.py check --stamp`: 60 of 60
+spots.
+
+##### Emerge's sacrifice and the Equipment's exile (item 2; bb4a391)
+
+Two more parts (`part::EMERGE`, `part::EXILE_GRANTER`; `Order::with_moves`): emerge's permanent (chosen as
+the total cost is determined, CR 702.119a, 601.2f; sacrificed in 601.2h) and "exile <the Equipment granting
+this ability>" (`CardDef::exiles_granter`). The engine's order pays the Equipment first and emerge last;
+`order_free_with` keeps that order only when no other part nor the mana may take, tap or remove a counter
+from the object first (and, for emerge, no graveyard card is exiled after it: its sacrifice gives one).
+Otherwise the payment searches with the parts in the player's order (each a whole part, `pay_whole_part`:
+a dead end when its object is gone), and castability too: `emerge_options` per permanent
+(`payable_in_some_order` after the mana alone is payable), `can_activate`'s granted ability with its
+Equipment. Found with it: a mana ability that sacrifices emerge's permanent (Squandered Resources on an
+artifact land) or the Bracelet ("Sacrifice an artifact: Add {C}") before its part, after which the engine
+skipped the sacrifice or the exile (`Task::Emerge`, `pay_exile_granter`: "if it is still there"). Tests:
+`cr_702_119a_emerges_permanent_is_not_sacrificed_for_mana` (Crabomination for emerge sacrificing Test
+Artifact Land, Squandered Resources and six Swamps: every payment sacrifices the land for emerge),
+`cr_601_2h_the_equipment_a_cost_exiles_is_not_sacrificed_for_mana` (The Dominion Bracelet on Test Bear, Test
+Scrap Engine, twelve Islands: every payment exiles the Bracelet). Digests unchanged.
+
+##### Not done: the mana's own alternatives in the player's order (item 1)
+
+When the order can matter, the engine pays the mana with its own alternatives (convoke, improvise,
+waterbend taps; Phyrexian life; the pool's mana spent, whose restrictions and riders read the spell's or
+the source's types; delve's exile) right after 601.2g's mana abilities, before every part. The design:
+
+* **The proof** (`order_free_with`): the alternatives as a part `M` with reads (convoke: its candidates'
+  types, colours and untapped; improvise and waterbend: types and untapped; the pool's spend: the spell's
+  or the source's types; Phyrexian life: an amount, CR 119.4, which adds with the parts' life; delve: the
+  graveyard, B6's promises for the discards) and writes (the candidates tapped, life, the graveyard). When
+  no part's writes change `M`'s reads and `M`'s writes change no part's reads, `M` first reaches every
+  outcome (`M` takes objects only by tapping them, and a permanent tapped for convoke may still be
+  sacrificed or returned, never the reverse; life adds), which is what the engine does now.
+* **Otherwise `M` is a part** (`part::MANA`, `NUMBER` + 19 in `CostPart`): 601.2g's activations first, as a
+  float into the pool, then `M` = a `PayMana` of the pool and the alternatives only, paid when the player
+  orders it. A source whose activation commutes with every part (its writes change no part's reads, no
+  part's writes change its ability, activation or production) is activated inside `M`'s `PayMana` instead
+  (the same outcomes, by commutation), so the float asks only for the others (`ActivateMana`'s question
+  with `PASS`, each option kept by the payment search); castability the same search. Not built: the float
+  and `M` as a part need `PayMana` split at 601.2g/601.2h, which it interleaves (the picks are planned
+  together and paid at `finish_payment`). Reachable by the rules: Birthing Pod's "{1}{G/P}, {T}, Sacrifice a
+  creature" with a static ability whose condition reads life and changes a creature's type; a convoke spell
+  with an additional sacrifice and a colour-changing lord sacrificed.
+
+##### Not done: a mana ability's own cost (item 3)
+
+A mana ability's parts are paid in the engine's order: with priority (`mana_now_costs`: the sacrifice and the
+taps chosen, then the sacrifice, the taps, {T}, counters, life, the source moved) and inside a payment
+(`finish_payment`: a pick's member, the permanent sacrificed or tapped, chosen from the state before the
+payment, the actor tapped as it activates). The lowering admits these parts with one that reads: "{T},
+Sacrifice a <filter>" (Orcish Lumberjack, `LJ_FOR`), "{T}, Tap an untapped <filter>" (Gene Pollinator,
+`POL_FOR`), and "{T}, Sacrifice this" (where it goes, `DEST`). The design, with mana abilities' timing (CR
+605.3a-b: activated while paying, resolved at once; no priority between):
+
+* **With priority**: `order_free_with` on the ability's cost (its own mana first); when the order can matter,
+  its parts through `pay_order` (`Task::PayCosts { id: NO_ITEM, order }`: `CostPart` and the search), then the
+  mana (the productions and the tap bonuses read before the costs, as now; the effects after: damage,
+  opponents' life, "sacrifice it if no counters"); castability (`can_activate` for a mana ability) through
+  `cost_payable_order`.
+* **Inside a payment**: a group's members are the candidates in either order (a copy with the actor tapped
+  for the other), each pick's activation paid in an order in which its member is legal, and a `CostPart`
+  question when both are and the outcome differs (`DEST`); the feasibility counts the members of either
+  order.
+
+##### Found, not done
+
+* **A shared activation that sacrifices its own actor** (`sac_groups` without a tap: "Sacrifice an artifact:
+  Add {C}" on an artifact, Squandered Resources made a land): picking it to sacrifice itself and then another
+  permanent asserts "no actor" (`actor_options`, a loud failure); by the rules legal with the
+  self-sacrifice activated last. Exact: an actor a pick sacrifices still activates the picks before its own
+  (the activations ordered at `finish_payment`, a cycle refused). (B7's Bracelet test uses an enchantment
+  Engine.)
+* **docs/shortcuts.md 31.7.3**: emerge's permanent chosen right after the alternative cost (601.2b), not as
+  the total cost is determined (601.2f, after targets); kept on a card-pool argument.
+* **Castability of a cost option** (`CastOption`, 601.2b): improvise's and convoke's sources are left out
+  (`mana_classes` and delve's only): a kicked convoke spell paid by convoke isn't offered its option.
+* **Spells' `cost_payable`** passes no spending purposes (allow 0): restricted mana (Mishra's Workshop for
+  an artifact spell with an additional part) is not counted by castability, while the payment spends it.
+* **Spree's modes** (`can_pay_spell`) check the mana with the rest cost's parts left out (a spree spell
+  retraced).
+
+##### Tests
+
+`rules_payment_b`, section "100.4.10" (each failing before its fix): `cr_601_2g_a_mana_abilitys_damage_changes_crews_power`,
+`cr_614_1a_a_replacement_effects_source_sacrificed_first_or_not`, `cr_702_120a_escalate_counts_the_costs_other_discard`,
+`cr_702_120a_a_card_discarded_for_escalate_is_exiled_for_escape`, `cr_702_119a_emerges_permanent_is_not_sacrificed_for_mana`,
+`cr_601_2h_the_equipment_a_cost_exiles_is_not_sacrificed_for_mana`. docs/shortcuts.md: no row changes (the
+fixed gaps were 100.4.9's list, not rows).
