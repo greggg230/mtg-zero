@@ -5,8 +5,9 @@ games (`mtgz.sealed.games`), with the play network's pre-game value as a low-noi
 * **The dataset** (`dataset`): one row per (game, seat) of the run's finished games: the seat's deck as card counts
   over the EoE table (`vocab`: the engine's 320 names, sorted), the opponent's deck (its row), both builder modes, who
   piloted (a network seat searched; a bot did not), the iteration (the first metrics line after the game) and the seat's
-  result (win 1, draw 0.5, loss 0). Held out **by game**: a game's two rows are always on one side (`split_of`: a hash
-  of the game seed; evaluation games, whose 128 fixed decks repeat every iteration, are never held out).
+  result (win 1, draw 0.5, loss 0). Held out **by game**: a game's two rows are always on one side (`split_of`: by
+  iteration - the test the iterations from 40 on, which no checkpoint up to 39 trained on, the validation the 4 before
+  them - or by a hash of the game seed; evaluation games, whose 128 fixed decks repeat every iteration, never held out).
 * **The pre-game value** (`pregame_values`): each logged game's start position rebuilt from its spec line and seed (no
   action precedes it: version-1 lines rebuild too), the first decision of the game - CR 103.1's choice of who plays
   first, before any hand is drawn - with the chooser forced to each seat (the spec's `chooser`; the decks do not depend
@@ -14,7 +15,9 @@ games (`mtgz.sealed.games`), with the play network's pre-game value as a low-noi
   the view holds the seat's own deck and pool, never the opponent's; the encoding is the same in every world the
   viewer's `determinize` deals (checked), so one evaluation per (seat, chooser) is the average over dealt worlds.
   `v[game, seat, chooser]`; the target `pregame_target` is the mean over the two choosers (the value choice's own
-  average, docs/ENGINE.md 107.2).
+  average, docs/ENGINE.md 107.2). By one checkpoint for every game, or (`'played'`) by the checkpoint that played each
+  game: a network values the games it trained on with their results half-memorised (docs/ENGINE.md 108.2), so only
+  the playing checkpoint's value is a leak-free target.
 * **The models** (`DeckNet`, `fit`): a constant; a logistic regression on deck features (`FEATURES`: lands, curve,
   creatures, colours, splash; with or without the builder's mode); a linear card-value model (L2 logistic regression on
   card counts plus the deck features: its coefficients are card ranking v0); a set network (DeepSets over card
@@ -30,7 +33,8 @@ games (`mtgz.sealed.games`), with the play network's pre-game value as a low-noi
   yardstick only** (DESIGN.md 0): a Spearman correlation reported, never an input, target or prior.
 
     python -m mtgz.sealed.evaluator values RUN --checkpoint CKPT --out VALUES.npz [--threads 4]
-    python -m mtgz.sealed.evaluator train RUN --values VALUES.npz --out DIR [--split hash|time]
+    python -m mtgz.sealed.evaluator values RUN --checkpoint played --models RUN/models --out VALUES.npz
+    python -m mtgz.sealed.evaluator train RUN --values VALUES.npz --out DIR [--split time|hash] --judge CKPT
     python -m mtgz.sealed.evaluator rank --evaluator DIR/evaluator_set.pt --pool-seed 2026 [--k 32]
 
 CPU only by default (`--device cpu`, at most `--threads` torch threads); deterministic from its seeds. Pure self-play:
@@ -183,18 +187,19 @@ def game_key(g):
     return f"{g['file']}:{g['seed']}:{g['time']}"
 
 
-def split_of(g, it=None, how='hash', test=0.15, val=0.10, time_from=40):
+def split_of(g, it=None, how='hash', test=0.15, val=0.10, time_from=40, val_iters=4):
     """'train', 'val' or 'test' for a game (both its rows). Evaluation games (the run's 128 fixed decks, replayed every
     iteration) always train: holding them out would test decks seen in training. `hash`: a self-play game is test with
     probability `test` by its seed's hash, else val with `val`; `time`: a self-play game of iteration >= `time_from`
-    (or of the iteration in progress) is test, the rest val by hash with `val`."""
+    (or of the iteration in progress) is test, of the `val_iters` iterations before it val (the validation mirrors
+    the test: the most recent games), the rest train."""
     if g['phase'] == 'eval':
         return 'train'
     h = mix(g['seed'], SPLIT_SALT) / 2.0 ** 64
     if how == 'time':
         if it is None or it >= time_from:
             return 'test'
-        return 'val' if h < val else 'train'
+        return 'val' if it >= time_from - val_iters else 'train'
     if how != 'hash':
         raise ValueError(f'split {how!r}: hash or time')
     return 'test' if h < test else ('val' if h < test + val else 'train')
@@ -856,7 +861,7 @@ def _bootstrap(ds, rows, seed):
     return w[ds['game'][rows]]
 
 
-def train(run, values, out, how='hash', seed=0, ensemble=5, judge=None, pools=200, k=16, threads=4, kinds=None,
+def train(run, values, out, how='time', seed=0, ensemble=5, judge=None, pools=200, k=16, threads=4, kinds=None,
           lams=LAMS, split_kw=None, set_epochs=60, n_card_decks=150, log=None):
     """The whole S4a pipeline (module docs): the dataset with its pre-game values, every model kind fitted to each
     distillation mix and selected on the validation games' results, ensembles of the selected (and of the results-only)
@@ -1035,7 +1040,8 @@ def main(argv=None):
     pt.add_argument('run')
     pt.add_argument('--values', required=True)
     pt.add_argument('--out', required=True, help='a directory: report.json, cards_*.json, evaluator_*.pt')
-    pt.add_argument('--split', default='hash', choices=['hash', 'time'])
+    pt.add_argument('--split', default='time', choices=['hash', 'time'],
+                    help='time (default): test the iterations from 40 on, validate on the 4 before; hash: by game seed')
     pt.add_argument('--seed', type=int, default=0)
     pt.add_argument('--ensemble', type=int, default=5)
     pt.add_argument('--kinds', default=','.join(GRID), help='model kinds, comma-separated')

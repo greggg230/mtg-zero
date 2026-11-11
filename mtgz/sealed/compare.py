@@ -57,7 +57,7 @@ candidate; nothing here feeds training.
     python -m mtgz.sealed.compare yardstick --pool 0 --ours 0,1,2,3
     python -m mtgz.sealed.compare builds --pool-seed 7 --seeds 0,1,2,3 --out decks/
     python -m mtgz.sealed.compare choice --pool-seed 2026 --k 32 --vs 3 --race
-    python -m mtgz.sealed.compare evalpick --evaluator E.pt --pool-seed 2026,2027 --k 32 --vs 3 --race
+    python -m mtgz.sealed.compare evalpick --evaluator L.pt,S.pt --pool-seed 2026,2027 --k 32 --vs 3 --race
     (--pilot random | heuristic | runs/<run>/models/iter_NNNN.pt [--sims 64 --device cuda])
 
 `choice` races a pool's value-picked build (ENGINE.md 107.2) against random builds of it; `evalpick` races the deck
@@ -664,60 +664,75 @@ def choice_candidates(pool_names, pilot, k=32, worlds=8, seed=0, vs=3, collation
     return j, out
 
 
-def evalpick_candidates(pool_names, evaluator, pilot, k=32, worlds=8, seed=0, vs=3, collation='arena'):
-    """The deck evaluator's top build of a pool (S4a, docs/ENGINE.md 108: `mtgz.sealed.evaluator.rank` over the deck
+def evalpick_candidates(pool_names, evaluators, pilot, k=32, worlds=8, seed=0, vs=3, collation='arena'):
+    """The deck evaluators' top builds of a pool (S4a, docs/ENGINE.md 108: `mtgz.sealed.evaluator.rank` over the deck
     choice's K candidates, the first best on a tie), the pilot's value-picked build of the same candidates
-    (`value_pick`; a bot pilot: candidate 0, the best guess) unless it is the same build, and the first `vs` other
-    randomised candidates -> (info, comparison candidates: 'eval<j>', 'value<j>', 'random<i>')."""
+    (`value_pick`; a bot pilot: candidate 0, the best guess), each build once, and the first `vs` other randomised
+    candidates. `evaluators`: [(label, Evaluator)] (or one Evaluator, label 'eval'). A picked build is named after
+    who picked it ('linear7', 'linear+value7'); the rest 'random<i>' -> (info, comparison candidates)."""
     from . import evaluator as EV
+    if not isinstance(evaluators, (list, tuple)):
+        evaluators = [('eval', evaluators)]
     jv, cands = value_pick(pool_names, pilot, k, worlds, seed, collation)
-    scores = [float(x) for x in EV.rank(pool_names, cands, evaluator)]
-    je = max(range(len(cands)), key=lambda i: (scores[i], -i))
+    scores, picks = {}, {}
+    for label, e in evaluators:
+        s = [float(x) for x in EV.rank(pool_names, cands, e)]
+        scores[label] = [round(x, 4) for x in s]
+        picks[label] = max(range(len(cands)), key=lambda i: (s[i], -i))
+    picks['value'] = jv
+    by = {}
+    for label, j in picks.items():
+        by.setdefault(j, []).append(label)
 
     def cand(i, name):
         b = cands[i]
         return {'name': name, 'deck': b['deck'], 'sideboard': b['sideboard'],
                 'colors': b['colors'] + (('+' + b['splash']) if b['splash'] else ''), 'lands': b['lands']}
-    out = [cand(je, f'eval{je}')]
-    if jv != je:
-        out.append(cand(jv, f'value{jv}'))
-    out += [cand(i, f'random{i}') for i in range(1, len(cands)) if i not in (je, jv)][:vs]
-    info = {'eval_pick': je, 'value_pick': jv, 'same_pick': je == jv, 'scores': [round(s, 4) for s in scores],
-            'eval_rank_of_value_pick': sorted(range(len(cands)), key=lambda i: (-scores[i], i)).index(jv)}
+    out = [cand(j, '+'.join(labels) + str(j)) for j, labels in by.items()]
+    out += [cand(i, f'random{i}') for i in range(1, len(cands)) if i not in by][:vs]
+    names = {label: '+'.join(by[j]) + str(j) for label, j in picks.items()}
+    info = {'picks': picks, 'names': names, 'scores': scores,
+            'rank_of_value_pick': {label: sorted(range(len(cands)), key=lambda i: (-s[i], i)).index(jv)
+                                   for label, s in scores.items()}}
     return info, out
 
 
-def evalpick_paired(comp):
-    """The paired differences of an evalpick comparison: the evaluator's pick against the value pick and against each
-    random build, the value pick against each random build (`Comparison.stats`, over the games both played)."""
-    names = [c['name'] for c in comp.cands]
-    ev = 0
-    val = next((i for i, n in enumerate(names) if n.startswith('value')), None)
-    rnd = [i for i, n in enumerate(names) if n.startswith('random')]
-    out = {'eval_vs_random': {names[i]: comp.stats(ev, i) for i in rnd}}
-    if val is not None:
-        out['eval_vs_value'] = comp.stats(ev, val)
-        out['value_vs_random'] = {names[i]: comp.stats(val, i) for i in rnd}
+def evalpick_paired(comp, names):
+    """The paired differences of an evalpick comparison (`Comparison.stats`, over the games both played): each
+    evaluator's pick against the value pick (None when they are the same build) and against each random build, and the
+    value pick against each random build. `names`: {label: its pick's candidate name} (`evalpick_candidates`' info)."""
+    at = {c['name']: i for i, c in enumerate(comp.cands)}
+    rnd = [i for i, c in enumerate(comp.cands) if c['name'].startswith('random')]
+    out = {}
+    for label, name in names.items():
+        i = at[name]
+        e = {'vs_random': {comp.cands[r]['name']: comp.stats(i, r) for r in rnd}}
+        if label != 'value':
+            e['vs_value'] = None if name == names['value'] else comp.stats(i, at[names['value']])
+        out[label] = e
     return out
 
 
 def evalpick_summary(paired):
-    """Over pools (a list of `evalpick_paired`): per comparison, the pools' mean paired difference (a pool's random
-    builds averaged first) with the se over pools; a pool where both picks are the same build counts 0 for
-    eval_vs_value."""
+    """Over pools (a list of `evalpick_paired`): per picker, its mean paired difference against the random builds (a
+    pool's random builds averaged first) and, for an evaluator, against the value pick (0 in a pool where they are the
+    same build), each with the se over pools."""
     def agg(xs):
         n = len(xs)
         if not n:
             return None
         m = sum(xs) / n
         se = math.sqrt(sum((x - m) ** 2 for x in xs) / (n - 1) / n) if n > 1 else None
-        return {'pools': n, 'mean': round(m, 4), 'se': None if se is None else round(se, 4), 'per_pool': [round(x, 4) for x in xs]}
-    er = [sum(s['diff'] for s in p['eval_vs_random'].values()) / len(p['eval_vs_random']) for p in paired if p['eval_vs_random']]
-    vr = [sum(s['diff'] for s in p['value_vs_random'].values()) / len(p['value_vs_random']) if 'value_vs_random' in p
-          else (sum(s['diff'] for s in p['eval_vs_random'].values()) / len(p['eval_vs_random']))
-          for p in paired if p['eval_vs_random']]
-    ev = [p['eval_vs_value']['diff'] if 'eval_vs_value' in p else 0.0 for p in paired]
-    return {'eval_vs_random': agg(er), 'value_vs_random': agg(vr), 'eval_vs_value': agg(ev)}
+        return {'pools': n, 'mean': round(m, 4), 'se': None if se is None else round(se, 4),
+                'per_pool': [round(x, 4) for x in xs]}
+    out = {}
+    for label in (paired[0] if paired else []):
+        e = {'vs_random': agg([sum(s['diff'] for s in p[label]['vs_random'].values()) / len(p[label]['vs_random'])
+                               for p in paired if p[label]['vs_random']])}
+        if label != 'value':
+            e['vs_value'] = agg([p[label]['vs_value']['diff'] if p[label]['vs_value'] else 0.0 for p in paired])
+        out[label] = e
+    return out
 
 
 # ----------------------------------------------------------------------------- the command line
@@ -811,7 +826,8 @@ def main(argv=None):
     _race_args(pc)
     pe = sub.add_parser('evalpick', help='a pool\'s build picked by the deck evaluator (S4a, ENGINE.md 108) against the '
                                          'value-picked build and random builds of the same pool')
-    pe.add_argument('--evaluator', required=True, help='a saved deck evaluator (mtgz.sealed.evaluator train)')
+    pe.add_argument('--evaluator', required=True, help='saved deck evaluators (mtgz.sealed.evaluator train), '
+                                                       'comma-separated: their picks race in the same games')
     pe.add_argument('--pool-seed', required=True, help='a pool seed, or several comma-separated (one race each)')
     pe.add_argument('--k', type=int, default=32, help='candidates of the deck choice')
     pe.add_argument('--worlds', type=int, default=8, help='the value pick\'s worlds per candidate')
@@ -848,19 +864,23 @@ def main(argv=None):
         return 0
     if a.cmd == 'evalpick':
         from . import evaluator as EV
-        ev = EV.Evaluator.load(a.evaluator)
+        evs = []
+        for path in a.evaluator.split(','):
+            e = EV.Evaluator.load(path)
+            label = e.kind if e.kind not in [x[0] for x in evs] else os.path.splitext(os.path.basename(path))[0]
+            evs.append((label, e))
         per = []
         for ps in (int(x) for x in str(a.pool_seed).split(',')):
             p = R.pool(ps, collation=a.collation)
-            info, cands = evalpick_candidates(p['cards'], ev, _pilot(a), a.k, a.worlds, ps, a.vs, a.collation)
+            info, cands = evalpick_candidates(p['cards'], evs, _pilot(a), a.k, a.worlds, ps, a.vs, a.collation)
             o, comp = _run(a, cands, with_comp=True)
-            o['evalpick'] = dict(info, pool_seed=ps, k=a.k, worlds=a.worlds, evaluator=a.evaluator,
-                                 evaluator_kind=ev.kind, pilot=_pilot(a).describe(), paired=evalpick_paired(comp))
+            o['evalpick'] = dict(info, pool_seed=ps, k=a.k, worlds=a.worlds, evaluators=a.evaluator.split(','),
+                                 pilot=_pilot(a).describe(), paired=evalpick_paired(comp, info['names']))
             per.append(o)
             if not a.quiet:
-                print('# pool ' + json.dumps({'pool_seed': ps, 'eval_pick': info['eval_pick'], 'value_pick': info['value_pick'],
-                                              'paired': {k: v['diff'] if 'diff' in v else {n: s['diff'] for n, s in v.items()}
-                                                         for k, v in o['evalpick']['paired'].items()}}),
+                print('# pool ' + json.dumps({'pool_seed': ps, 'picks': info['picks'],
+                                              'vs_random': {k: {n: s['diff'] for n, s in v['vs_random'].items()}
+                                                            for k, v in o['evalpick']['paired'].items()}}),
                       file=sys.stderr, flush=True)
         out = per[0] if len(per) == 1 else {'pools': per}
         out['summary'] = evalpick_summary([o['evalpick']['paired'] for o in per])

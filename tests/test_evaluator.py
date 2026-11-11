@@ -90,9 +90,9 @@ def test_the_dataset_is_held_out_by_game(run):
     specs, games = GL.load(run)
     assert ds['X'][1, EV.index()[next(iter(games[0]['seats'][1]['deck']))]] >= 1
     assert sorted(set(ds['iter'])) == [1, 2, 3]
-    # the time split: the last iterations are the test
-    t = EV.dataset(run, how='time', time_from=3)
-    assert (t['split'][t['iter'] == 3] == 2).all() and (t['split'][t['iter'] < 3] != 2).all()
+    # the time split: the last iterations are the test, the ones just before them the validation
+    t = EV.dataset(run, how='time', time_from=3, val_iters=1)
+    assert [sorted(set(t['split'][t['iter'] == k])) for k in (1, 2, 3)] == [[0], [1], [2]]
     # bot seats are left out unless asked for
     games[0]['searched'] = [True, False]
     assert EV.describe(EV.dataset(run, games=games, specs=specs))['skipped']['bot_seat'] == 1
@@ -195,7 +195,7 @@ def test_the_pipeline_on_a_small_log(run, models, tmp_path):
     vals = str(tmp_path / 'v.npz')
     EV.pregame_values(run, cks[1], vals, threads=1, worlds_check=0)
     out = str(tmp_path / 'out')
-    rep = EV.train(run, vals, out, seed=0, ensemble=2, pools=2, k=4, threads=1, kinds=['const', 'feat', 'linear', 'set'],
+    rep = EV.train(run, vals, out, how='hash', seed=0, ensemble=2, pools=2, k=4, threads=1, kinds=['const', 'feat', 'linear', 'set'],
                    lams=(0.0, 1.0), split_kw={'test': 0.3, 'val': 0.25}, set_epochs=2, n_card_decks=5)
     torch.set_num_threads(1)
     assert set(rep['models']) == {'const', 'feat', 'linear', 'set'}
@@ -219,20 +219,28 @@ def test_evalpick_races_the_evaluators_pick(tmp_path, models):
     e.save(ep)
     p = SE.pool(11, collation='paper')
     pilot = K.Pilot(cks[0], sims=2)
-    info, cands = K.evalpick_candidates(p['cards'], e, pilot, k=5, worlds=2, seed=11, vs=2, collation='paper')
-    assert cands[0]['name'] == f"eval{info['eval_pick']}" and len(info['scores']) == 5
-    assert info['scores'][info['eval_pick']] == max(info['scores'])
-    assert (len(cands) == 3) == info['same_pick'] and all(c['name'].startswith('random') for c in cands[-2:])
+    e2 = EV.Evaluator('const', [EV.fit('const', X, sc(EV.deck_features(X)), y)], sc)
+    info, cands = K.evalpick_candidates(p['cards'], [('linear', e), ('const', e2)], pilot, k=5, worlds=2, seed=11, vs=2,
+                                        collation='paper')
+    assert set(info['picks']) == {'linear', 'const', 'value'} and len(info['scores']['linear']) == 5
+    assert info['scores']['linear'][info['picks']['linear']] == max(info['scores']['linear'])
+    assert info['picks']['const'] == 0, 'a constant ties every build: the first'
+    picked = {info['names'][x] for x in info['picks']}
+    assert [c['name'] for c in cands[:len(picked)]] == list(dict.fromkeys(info['names'][x] for x in info['picks']))
+    assert len(cands) == len(picked) + 2 and all(c['name'].startswith('random') for c in cands[-2:])
     out_path = tmp_path / 'evalpick.json'
     rc = K.main(['evalpick', '--evaluator', ep, '--pool-seed', '11', '--collation', 'paper', '--k', '5', '--worlds', '2',
                  '--vs', '1', '--pilot', cks[0], '--sims', '2', '--games', '4', '--block', '4', '--threads', '1',
                  '--max-turns', '6', '--json', str(out_path), '--quiet'])
     out = json.load(open(out_path))
-    assert rc == 0 and out['evalpick']['eval_pick'] == info['eval_pick'] and out['candidates'][0]['games'] == 4
-    assert out['summary']['eval_vs_random']['pools'] == 1
-    # over pools: the summary averages each pool's paired differences
-    s = K.evalpick_summary([{'eval_vs_random': {'random1': {'diff': 0.1}, 'random2': {'diff': 0.3}}},
-                            {'eval_vs_random': {'random1': {'diff': -0.1}}, 'eval_vs_value': {'diff': 0.05},
-                             'value_vs_random': {'random1': {'diff': -0.15}}}])
-    assert s['eval_vs_random']['mean'] == pytest.approx(0.05) and s['eval_vs_value']['per_pool'] == [0.0, 0.05]
-    assert s['value_vs_random']['per_pool'] == [0.2, -0.15]
+    ev = out['evalpick']
+    assert rc == 0 and ev['picks']['linear'] == info['picks']['linear'] and out['candidates'][0]['games'] == 4
+    assert out['summary']['linear']['vs_random']['pools'] == 1 and set(out['summary']) == {'linear', 'value'}
+    assert (ev['paired']['linear']['vs_value'] is None) == (ev['picks']['linear'] == ev['picks']['value'])
+    # over pools: the summary averages each pool's paired differences (a pool where the picks agree: 0 against value)
+    s = K.evalpick_summary([{'linear': {'vs_random': {'random1': {'diff': 0.1}, 'random2': {'diff': 0.3}}, 'vs_value': None},
+                             'value': {'vs_random': {'random1': {'diff': 0.2}, 'random2': {'diff': 0.2}}}},
+                            {'linear': {'vs_random': {'random1': {'diff': -0.1}}, 'vs_value': {'diff': 0.05}},
+                             'value': {'vs_random': {'random1': {'diff': -0.15}}}}])
+    assert s['linear']['vs_random']['mean'] == pytest.approx(0.05) and s['linear']['vs_value']['per_pool'] == [0.0, 0.05]
+    assert s['value']['vs_random']['per_pool'] == [0.2, -0.15] and 'vs_value' not in s['value']
