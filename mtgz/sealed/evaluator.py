@@ -874,8 +874,8 @@ def train(run, values, out, how='time', seed=0, ensemble=5, judge=None, pools=20
     kinds = list(kinds or GRID)
     vals = load_values(values)
     ds = attach_values(dataset(run, how=how, **(split_kw or {})), vals)
-    rep = {'run': run, 'values': values, 'values_meta': vals['meta'], 'split': how, 'seed': seed, 'ensemble': ensemble,
-           'dataset': describe(ds)}
+    rep = {'run': run, 'values': values, 'values_meta': vals['meta'], 'split': how, 'split_kw': split_kw or {},
+           'seed': seed, 'ensemble': ensemble, 'dataset': describe(ds)}
     say('# dataset ' + json.dumps(rep['dataset']))
     X = ds['X']
     Fraw = deck_features(X)
@@ -885,7 +885,8 @@ def train(run, values, out, how='time', seed=0, ensemble=5, judge=None, pools=20
     M = np.stack([ds['mode'] == 0, ds['mode'] == 1], 1).astype(np.float32)
     Fm = np.concatenate([Fz, Scaler(M[tr])(M)], 1)
     r, v = ds['result'], pregame_target(ds)
-    unseen = te & ((ds['iter'] < 0) | (ds['iter'] >= 40))
+    time_from = (split_kw or {}).get('time_from', 40)
+    unseen = te & ((ds['iter'] < 0) | (ds['iter'] >= time_from))
     rep['test_unseen_rows'] = int(unseen.sum())
 
     def feats(kind):
@@ -1041,7 +1042,10 @@ def main(argv=None):
     pt.add_argument('--values', required=True)
     pt.add_argument('--out', required=True, help='a directory: report.json, cards_*.json, evaluator_*.pt')
     pt.add_argument('--split', default='time', choices=['hash', 'time'],
-                    help='time (default): test the iterations from 40 on, validate on the 4 before; hash: by game seed')
+                    help='time (default): test the iterations from --time-from on, validate on the --val-iters before; '
+                         'hash: by game seed')
+    pt.add_argument('--time-from', type=int, default=40, help='--split time: the first test iteration')
+    pt.add_argument('--val-iters', type=int, default=4, help='--split time: validation iterations before it')
     pt.add_argument('--seed', type=int, default=0)
     pt.add_argument('--ensemble', type=int, default=5)
     pt.add_argument('--kinds', default=','.join(GRID), help='model kinds, comma-separated')
@@ -1063,7 +1067,8 @@ def main(argv=None):
         return r['meta']
     if a.cmd == 'train':
         rep = train(a.run, a.values, a.out, a.split, a.seed, a.ensemble, a.judge, a.pools, a.k, a.threads,
-                    a.kinds.split(','), tuple(float(x) for x in a.lams.split(',')), log=log)
+                    a.kinds.split(','), tuple(float(x) for x in a.lams.split(',')), log=log,
+                    split_kw={'time_from': a.time_from, 'val_iters': a.val_iters} if a.split == 'time' else None)
         print(summary_table(rep))
         return rep
     e = Evaluator.load(a.evaluator)
