@@ -450,7 +450,6 @@ fn sealed_games_play_to_the_end_through_mtgaz() {
     let sp = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "paper"}, "max_turns": 30}"#).unwrap();
     let mut rng = Rng::new(3);
     let mut played = 0;
-    let mut buf = vec![0f32; MtgAz::NUM_FEATURES];
     for seed in 0..12u64 {
         let Ok(mut g) = MtgAz::new_game(&sp, 2, seed) else { continue };
         let mut legal = Vec::new();
@@ -468,9 +467,9 @@ fn sealed_games_play_to_the_end_through_mtgaz() {
                 d.legal_actions(&mut l2);
                 assert_eq!(legal, l2, "seed {seed}: determinize changed the decider's actions");
                 for v in 0..2 {
-                    buf.iter_mut().for_each(|x| *x = 0.0);
-                    g.encode(v, &mut buf);
-                    assert!(buf.iter().all(|x| x.is_finite()));
+                    // (layout v7: the whole row, ENGINE.md 125)
+                    let row = engine::az::tail_encode::Row::of_az(&g, v);
+                    assert!(row.head.iter().chain(row.tail.iter().flat_map(|t| t.2.iter())).all(|x| x.is_finite()));
                 }
             }
             let a = legal[rng.below(legal.len() as u32) as usize];

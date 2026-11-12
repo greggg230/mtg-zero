@@ -12,7 +12,7 @@ use engine::az::draft::{cube, DraftSpec, Phase, TeamDraftAz};
 use engine::az::draft_bots::{self, match_game, match_spec, Consensus};
 use engine::az::draft_encode;
 use engine::az::matches::Format;
-use engine::az::{DeckMode, MtgAz, MtgSpec, NUM_FEATURES};
+use engine::az::{DeckMode, MtgAz, MtgSpec};
 use engine::db::CardDb;
 use engine::ids::DefId;
 use engine::rng::Rng;
@@ -40,10 +40,9 @@ fn drafted(players: usize, seed: u64, consensus: bool) -> TeamDraftAz {
     g
 }
 
+/// (Layout v7, ENGINE.md 125: the whole row, head, tail tokens and overrides; `Row::flat`.)
 fn enc(g: &MtgAz, viewer: usize) -> Vec<f32> {
-    let mut x = vec![0.0; NUM_FEATURES];
-    g.encode(viewer, &mut x);
-    x
+    engine::az::tail_encode::Row::of_az(g, viewer).flat()
 }
 
 /// Play a match with the heuristic on both sides -> (keys, results, steps).

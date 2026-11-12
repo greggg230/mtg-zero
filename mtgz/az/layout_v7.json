@@ -1033,7 +1033,8 @@
     null,
     null
   ],
-  "features": 47892,
+  "draft": true,
+  "features": 56192,
   "globals": [
     {
       "count": 128,
@@ -1043,24 +1044,26 @@
     {
       "count": 32,
       "name": "match",
-      "offset": 43796
+      "offset": 52096
     },
     {
       "count": 64,
       "name": "globals_v5",
-      "offset": 43828
+      "offset": 52128
     },
     {
       "count": 320,
       "name": "globals_v6",
-      "offset": 43892
+      "offset": 52192
     },
     {
       "count": 3680,
       "name": "globals_v7",
-      "offset": 44212
+      "offset": 52512
     }
   ],
+  "max_row_tokens": 4096,
+  "option_pointers": true,
   "segments": [
     {
       "count": 1,
@@ -1127,7 +1130,8 @@
       "name": "my_permanents",
       "offset": 24260,
       "present": 52,
-      "width": 196
+      "tail": true,
+      "width": 278
     },
     {
       "actions": [
@@ -1146,9 +1150,10 @@
         ]
       },
       "name": "opponent_permanents",
-      "offset": 30532,
+      "offset": 33156,
       "present": 52,
-      "width": 196
+      "tail": true,
+      "width": 278
     },
     {
       "actions": [
@@ -1171,9 +1176,10 @@
         ]
       },
       "name": "hand",
-      "offset": 36804,
+      "offset": 42052,
       "present": 52,
-      "width": 60
+      "tail": true,
+      "width": 64
     },
     {
       "actions": [
@@ -1192,9 +1198,10 @@
         ]
       },
       "name": "stack",
-      "offset": 37764,
+      "offset": 43076,
       "present": 52,
-      "width": 204
+      "tail": true,
+      "width": 438
     },
     {
       "actions": [
@@ -1213,9 +1220,10 @@
         ]
       },
       "name": "triggers",
-      "offset": 39396,
+      "offset": 46580,
       "present": 52,
-      "width": 56
+      "tail": true,
+      "width": 271
     },
     {
       "actions": [
@@ -1234,9 +1242,10 @@
         ]
       },
       "name": "list",
-      "offset": 39620,
+      "offset": 47664,
       "present": 52,
-      "width": 60
+      "tail": true,
+      "width": 64
     },
     {
       "actions": [
@@ -1255,8 +1264,9 @@
         ]
       },
       "name": "graveyard_abilities",
-      "offset": 43460,
+      "offset": 51760,
       "present": 52,
+      "tail": true,
       "width": 56
     },
     {
@@ -1276,7 +1286,7 @@
         ]
       },
       "name": "my_companion",
-      "offset": 43684,
+      "offset": 51984,
       "present": 52,
       "width": 56
     },
@@ -1292,9 +1302,136 @@
         ]
       },
       "name": "opponent_companion",
-      "offset": 43740,
+      "offset": 52040,
       "present": 52,
       "width": 56
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "opponent_triggers",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 271
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "delayed",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 283
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "links",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 182
+    },
+    {
+      "actions": [],
+      "columns": 1,
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "exile_offered",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 81
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "library_known",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 75
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "stack_relations",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 177
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "graveyard_order",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 104
     }
   ],
   "version": 7,

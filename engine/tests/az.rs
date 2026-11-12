@@ -26,10 +26,10 @@ fn spec() -> MtgSpec {
     MtgSpec { max_turns: 60, ..MtgSpec::default() }
 }
 
+/// `viewer`'s whole row (layout v7, ENGINE.md 125): the head ([`NUM_FEATURES`] floats first),
+/// then the tail tokens and the pointer overrides (`tail_encode::Row::flat`).
 fn enc(g: &MtgAz, viewer: usize) -> Vec<f32> {
-    let mut x = vec![0.0; NUM_FEATURES];
-    g.encode(viewer, &mut x);
-    x
+    engine::az::tail_encode::Row::of_az(g, viewer).flat()
 }
 
 fn legal(g: &MtgAz) -> Vec<u16> {
@@ -215,7 +215,13 @@ fn encode_sparse_is_the_rows_non_zeros_with_the_same_key() {
     let mut rows = 0;
     for g in &gs {
         for viewer in 0..2 {
-            let x = enc(g, viewer);
+            // (Layout v7, ENGINE.md 125: a row with tail tokens is read by `encode_row`, never
+            // `encode_sparse`, whose `encode` refuses it: zero-core R1, `tests/v7_tails.rs`.)
+            let row = engine::az::tail_encode::Row::of_az(g, viewer);
+            if !row.tail.is_empty() {
+                continue;
+            }
+            let x = row.head;
             idx.clear();
             val.clear();
             idx.push(u32::MAX);
@@ -230,8 +236,10 @@ fn encode_sparse_is_the_rows_non_zeros_with_the_same_key() {
             rows += 1;
         }
     }
-    println!("encode_sparse checked on {rows} rows");
-    assert!(rows > 1000, "{rows}");
+    // (Most rows of these games have tail tokens: a mulligan's bottom cards known below the top
+    // three, delayed triggers, ... ENGINE.md 125.)
+    println!("encode_sparse checked on {rows} rows without a tail");
+    assert!(rows > 300, "{rows}");
 }
 
 /// zero-core keys children by (chance keys, next decider, next legal
@@ -372,90 +380,30 @@ fn ident(def: engine::ids::DefId) -> usize {
     identity::identities(CardDb::cube())[def as usize] as usize
 }
 
+/// Every option of the decider's row points at the token of the object it names (layout v7,
+/// ENGINE.md 125: absolute positions, tail tokens past a segment's head slots, pointer overrides
+/// on range pages and for exile offers; `tail_encode::check_pointers`), each token holding its
+/// object's identity and option flag; the encoding is bounded.
 #[test]
 fn encoding_slots_name_the_action_slots() {
-    assert_eq!(NUM_FEATURES, 47_892);
-    let mut lists = 0;
+    assert_eq!(NUM_FEATURES, 56_192);
+    let (mut lists, mut checked) = (0, 0);
     for g in states(scale(16), 6, 7) {
         let me = g.to_move().unwrap();
         let x = enc(&g, me);
+        let row = engine::az::tail_encode::Row::of(&g.g, me as u8);
         // (Bounded by the encoding's bound: amounts are squashed, and mana
         // floated with priority, ENGINE.md 100.4.3, reaches large X and
-        // event amounts in these games.)
-        let bad = x.iter().enumerate().find(|(_, v)| !(v.is_finite() && v.abs() <= encode::FEATURE_BOUND));
+        // event amounts in these games; the head and every tail token.)
+        let bad = row.head.iter().chain(row.tail.iter().flat_map(|t| t.2.iter())).find(|v| !(v.is_finite() && v.abs() <= encode::FEATURE_BOUND));
         assert!(bad.is_none(), "{bad:?}");
-        let l = legal(&g);
-        // hand slots
-        let hand = g.g.hand_sorted(me as u8);
-        for (s, &c) in hand.iter().enumerate().take(encode::HANDS) {
-            let o = encode::O_HAND + s * encode::HAND_W;
-            assert_eq!(decode_id(&x[o..o + CODE]), ident(g.g.obj(c).def));
-            assert_eq!(x[o + CODE + 2] == 1.0, l.contains(&(act::HAND + s as u16)));
-        }
-        // permanents (on a page of the permanents past slot 95, the page's,
-        // ENGINE.md 100.4.8)
-        let pd = g.g.pending_decision().unwrap();
-        for (side, p) in [me as u8, 1 - me as u8].into_iter().enumerate() {
-            let base = if side == 0 { encode::O_MY_PERM } else { encode::O_OPP_PERM };
-            let range = if side == 0 { act::MY_PERM } else { act::OPP_PERM };
-            let on_page = |a: u16| (range..range + act::PERM_N).contains(&a) || (side == 0 && (act::ACTIVATE..act::HAND_ABILITY).contains(&a));
-            let first = match pd.stage {
-                engine::decision::Stage::Paged { window } if window > 0 && pd.player == me as u8 && pd.options.iter().any(|o| on_page(o.action)) => {
-                    window as usize * (act::PERM_N as usize - 1)
-                }
-                _ => 0,
-            };
-            for (s, c) in g.g.permanents_of(p).skip(first).enumerate().take(encode::PERMS) {
-                let o = base + s * encode::PERM_W;
-                // (A copy: what it is, and what it copies, ENGINE.md 26.)
-                assert_eq!(decode_id(&x[o..o + CODE]), ident(g.g.own_def(c)));
-                if g.g.is_copy(c) {
-                    let co = o + CODE + encode::perm::COPY_OF;
-                    assert_eq!(decode_id(&x[co..co + 32]), ident(g.g.obj(c).def));
-                }
-                assert_eq!(x[o + CODE + encode::perm::TAPPED] == 1.0, g.g.obj(c).tapped);
-                assert_eq!(x[o + CODE + encode::perm::OPTION] == 1.0, l.contains(&(range + s as u16)));
-            }
-        }
-        // the LIBRARY list of a search / pile / seen hand / graveyard choice or target
+        checked += engine::az::tail_encode::check_pointers(&g.g, me as u8, &row).unwrap_or_else(|e| panic!("{e}"));
         let d = g.g.pending_decision().unwrap();
-        for o in &d.options {
-            if (act::LIBRARY..act::LIBRARY + encode::LIST as u16).contains(&o.action) {
-                let k = (o.action - act::LIBRARY) as usize;
-                let off = encode::O_LIST + k * encode::LIST_W;
-                let want = match o.choice {
-                    engine::Choice::Def(d) => ident(d),
-                    engine::Choice::Card(c) => ident(g.g.obj(c).def),
-                    // Bolas's Citadel: cast or play the top card (LIBRARY + 0)
-                    engine::Choice::Cast(c) | engine::Choice::Play(c) => ident(g.g.obj(c).def),
-                    // a graveyard card targeted: its graveyard list's slot (ENGINE.md 65.10)
-                    engine::Choice::Target(engine::Target::Obj(r)) => ident(g.g.obj(r.idx).def),
-                    // a paged list's "next page" (ENGINE.md 100.1-100.2): no card
-                    engine::Choice::Page(_) => continue,
-                    // the fourth slot's ability choice: the definition with it (100.2)
-                    engine::Choice::Ability(c, slot) => ident(g.g.activated_home_pub(c, slot)),
-                    _ => unreachable!(),
-                };
-                assert_eq!(decode_id(&x[off..off + CODE]), want);
-                assert_eq!(x[off + CODE + 1], 1.0);
-                lists += 1;
-            }
-            // a graveyard card's ability (ENGINE.md 27.5)
-            if (act::GY_ABILITY..act::GY_ABILITY + encode::GYAS as u16).contains(&o.action) {
-                let k = (o.action - act::GY_ABILITY) as usize;
-                let off = encode::O_GYA + k * encode::GYA_W;
-                // (A paged range's "next page", ENGINE.md 100.2: no card.)
-                let engine::Choice::Ability(c, _) = o.choice else {
-                    assert!(matches!(o.choice, engine::Choice::Page(_)), "{:?}", o.choice);
-                    continue;
-                };
-                assert_eq!(decode_id(&x[off..off + CODE]), ident(g.g.obj(c).def));
-                assert_eq!(x[off + CODE + 1], 1.0);
-            }
-        }
+        lists += d.options.iter().filter(|o| (act::LIBRARY..act::LIBRARY + encode::LIST as u16).contains(&o.action)).count();
         // the decision kind
         assert_eq!(x[encode::O_CONTEXT + d.kind as usize], 1.0);
     }
+    println!("{checked} options' pointers checked");
     assert!(lists > 0, "no LIBRARY decision met");
 }
 
@@ -478,12 +426,12 @@ fn layout_json_is_checked_in() {
     assert_eq!(v["cards"].as_array().unwrap().len(), identity::D);
 }
 
-/// Layout v7 is layout v6 with one block of globals appended (ENGINE.md 124.2: `globals_v7`, the
-/// pool's mana of a chosen creature type, 3,680 floats at 44,212): the map a widen derives from
-/// the two checked-in descriptions is `encode::v6_projection` (the identity on v6's 44,212
-/// features), every segment, bag and v6 global block the same; layout_v6.json is layout v6 as
-/// frozen (ENGINE.md 100.5.1), and layout_v7.json without the new block, its version and its
-/// feature count is layout_v6.json.
+/// Layout v7 widens layout v6 exactly (ENGINE.md 124.2, 125): the map a widen derives from the
+/// two checked-in descriptions is `encode::v6_projection` (v6's segments, bags and global blocks
+/// the same, the permanents', hand's, stack's, triggers' and list's slots wider at their ends, the
+/// Cavern block and v7's tail-only segments new), layout_v6.json is layout v6 as frozen (ENGINE.md
+/// 100.5.1), v7's segments are v6's plus the appended tail-only, gated ones, and the variable-length
+/// keys are set (tails on the seven capped segments, pointer overrides, the row limit, a draft).
 #[test]
 fn layout_v7_widens_layout_v6_exactly() {
     let (l6, l7) = (read_layout("layout_v6.json"), read_layout("layout_v7.json"));
@@ -498,13 +446,23 @@ fn layout_v7_widens_layout_v6_exactly() {
     assert_eq!((v7[0], v7.len()), (encode::O_GLOBALS_V7, encode::GLOBALS_V7));
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az");
     let read = |f: &str| -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(dir.join(f)).unwrap()).unwrap() };
-    let (mut j6, mut j7) = (read("layout_v6.json"), read("layout_v7.json"));
-    j7["globals"].as_array_mut().unwrap().pop();
-    for j in [&mut j6, &mut j7] {
-        j.as_object_mut().unwrap().remove("version");
-        j.as_object_mut().unwrap().remove("features");
+    let j7 = read("layout_v7.json");
+    assert_eq!((j7["option_pointers"].as_bool(), j7["max_row_tokens"].as_u64(), j7["draft"].as_bool()), (Some(true), Some(4096), Some(true)));
+    let segs = j7["segments"].as_array().unwrap();
+    let names: Vec<&str> = segs.iter().map(|s| s["name"].as_str().unwrap()).collect();
+    assert_eq!(names.len(), 18);
+    let tails: Vec<&str> = segs.iter().filter(|s| s["tail"] == true).map(|s| s["name"].as_str().unwrap()).collect();
+    let want: Vec<&str> = engine::az::tail_encode::TAILS.iter().map(|t| t.name).collect();
+    assert_eq!(tails, want, "the tail segments are TAILS");
+    for t in engine::az::tail_encode::TAILS.iter() {
+        let s = &segs[t.seg as usize];
+        assert_eq!((s["name"].as_str().unwrap(), s["width"].as_u64().unwrap() as usize, s["count"].as_u64().unwrap() as usize), (t.name, t.width, t.head));
+        assert_eq!(s["gate"] == true, t.head == 0, "{}: gated iff tail-only", t.name);
+        assert_eq!(s["offset"].is_null(), t.head == 0);
     }
-    assert!(j6 == j7, "layout_v7.json is layout_v6.json and one block");
+    assert_eq!(segs[engine::az::tail_encode::seg::EXILE_OFFERED as usize]["columns"], 1);
+    let head: usize = 1 + segs.iter().map(|s| s["count"].as_u64().unwrap() as usize).sum::<usize>();
+    assert_eq!(head, engine::az::tail_encode::HEAD_TOKENS);
     // (and v5's widen onto v7 is v5 -> v6 -> v7)
     let l5 = read_layout("layout_v5.json");
     assert_eq!(widen_map(&l5, &l7), encode::v5_projection());
@@ -531,7 +489,7 @@ fn read_layout(file: &str) -> Layout {
         .iter()
         .map(|s| {
             let key = serde_json::json!([s["present"], s["id"], s["actions"]]);
-            (s["name"].as_str().unwrap().to_string(), u(&s["offset"]), u(&s["count"]), u(&s["width"]), key)
+            (s["name"].as_str().unwrap().to_string(), s["offset"].as_u64().map_or(0, |o| o as usize), u(&s["count"]), u(&s["width"]), key)
         })
         .collect();
     let bags: Vec<_> = v["bags"]
@@ -567,7 +525,9 @@ fn read_layout(file: &str) -> Layout {
 /// declared block (or, when the old layout declares none, as the new layout's first globals in
 /// feature order).
 fn widen_map(l4: &Layout, l5: &Layout) -> Vec<usize> {
-    assert_eq!(l4.segs.iter().map(|s| &s.0).collect::<Vec<_>>(), l5.segs.iter().map(|s| &s.0).collect::<Vec<_>>());
+    // (New segments are appended after the old ones: layout v7's tail-only segments, ENGINE.md 125.)
+    assert_eq!(l4.segs.iter().map(|s| &s.0).collect::<Vec<_>>(), l5.segs[..l4.segs.len()].iter().map(|s| &s.0).collect::<Vec<_>>());
+    assert!(l5.segs[l4.segs.len()..].iter().all(|s| s.2 == 0), "new segments are tail-only");
     let mut map = vec![usize::MAX; l4.features];
     for (a, b) in l4.segs.iter().zip(&l5.segs) {
         assert_eq!((a.2, &a.4), (b.2, &b.4), "segment {}: the same slots, present flag, identity and actions", a.0);
@@ -620,10 +580,11 @@ fn layout_v6_widens_layout_v5_exactly() {
     let (l5, l6) = (read_layout("layout_v5.json"), read_layout("layout_v6.json"));
     assert_eq!((l5.features, l6.features), (encode::v5::NUM_FEATURES, encode::NUM_FEATURES_V6));
     assert_eq!(l5.globals.iter().map(|g| g.0.clone().unwrap()).collect::<Vec<_>>(), ["globals", "match", "globals_v5"]);
-    assert_eq!(widen_map(&l5, &l6), encode::v5_projection(), "the widen's map is the v5 projection");
+    assert_eq!(widen_map(&l5, &l6), encode::v5_to_v6(), "the widen's map is the v5 projection");
     // (and v4's widen onto v6 is v4 -> v5 -> v6)
     let l4 = read_layout("layout_v4.json");
-    assert_eq!(widen_map(&l4, &l6), encode::v4_projection(), "v4 widens onto v6 through the v4 projection");
+    let (a, b) = (encode::v4_to_v5(), encode::v5_to_v6());
+    assert_eq!(widen_map(&l4, &l6), a.into_iter().map(|i| b[i]).collect::<Vec<_>>(), "v4 widens onto v6 through the v4 projection");
 }
 
 /// Layout v5 is layout v4 with additions only (ENGINE.md 60.2): the map a widen derives from the
@@ -1376,7 +1337,8 @@ fn public_state_reaches_the_encoding() {
     // (W2's and W6's six, added after layout v6 was built, too: ENGINE.md 100.5.1.)
     assert!(gaps.is_empty(), "next-layout gaps: {gaps:?}");
     assert_eq!(next, 0);
-    assert_eq!(by_design, 4, "the deliberate limits");
+    // (Layout v7 encodes the library cards known below the top three, ENGINE.md 125.)
+    assert_eq!(by_design, 3, "the deliberate limits");
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.
@@ -1412,10 +1374,9 @@ fn settle(g: &mut engine::Game, prefer: impl Fn(&engine::Game) -> Option<engine:
     panic!("settle: no progress\n{}", g.log_lines().join("\n"));
 }
 
+/// `v`'s whole row of game `g` (`tail_encode::Row::flat`: the head first).
 fn features(g: &engine::Game, v: u8) -> Vec<f32> {
-    let mut x = vec![0.0; NUM_FEATURES];
-    g.encode_features(v, &mut x);
-    x
+    engine::az::tail_encode::Row::of(g, v).flat()
 }
 
 /// The public-state gate's encoding fixes (ENGINE.md 58.8), each read back
@@ -2295,7 +2256,8 @@ fn selfplay_records_the_belief_target_with_the_samples() {
         s.p_full = 0.5;
         let cfg = DriverCfg { spec: spec.clone(), seats: vec![SeatCfg::Nn(s)], games: vec![vec![0, 0]; 2], keys: vec![("m".into(), KeyKind::Nn)],
                               concurrency: 2, seed: 5, record: true, threads: 2, groups: 1, max_steps: 100_000, rolling: false, net: 0,
-                              queue_only: false, move_log: 0, aux, paired: false, sparse: false, branch: None, starts: None };
+                              queue_only: false, move_log: 0, aux, paired: false, sparse: false, branch: None, starts: None,
+                              max_row_tokens: None };
         let mut d = Driver::<MtgAz>::new(cfg).unwrap();
         let mut recs = Vec::new();
         while let Some(b) = d.next_batch(true).unwrap() {
@@ -2378,28 +2340,32 @@ fn the_deck_target_is_the_opponents_unseen_cards_and_never_an_input() {
 /// token segment (the bags and the global blocks only); every viewer-side bag left out.
 #[test]
 fn deck_reader_inputs_are_checked_in_and_read_bags_and_globals_only() {
-    let want = encode::deck_reader_json();
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/deck_reader_v6.json");
-    if std::env::var("MTGZ_WRITE_LAYOUT").is_ok_and(|v| v == "1") {
-        std::fs::write(&path, &want).unwrap();
-    }
-    let have = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
-    assert!(have == want, "{} differs from encode::deck_reader_json (MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test az deck_reader)", path.display());
-    let ins = encode::deck_reader_inputs();
-    let l: serde_json::Value = serde_json::from_str(&encode::layout_json(CardDb::cube())).unwrap();
-    let mut end = 0;
-    for &(name, o, n) in &ins {
-        assert!(n > 0 && o >= end && o + n <= NUM_FEATURES, "{name}: [{o}, {n}) out of order or outside");
-        end = o + n;
-        for sg in l["segments"].as_array().unwrap() {
-            let (so, sc, sw) = (sg["offset"].as_u64().unwrap() as usize, sg["count"].as_u64().unwrap() as usize, sg["width"].as_u64().unwrap() as usize);
-            assert!(o + n <= so || o >= so + sc * sw, "{name}: inside the token segment {}", sg["name"]);
+    // (Layout v7's for `mtg`, v6's for `mtg_eoe`: ENGINE.md 125.)
+    for (file, lay, db) in [("deck_reader_v7.json", &encode::LAY7, CardDb::cube()), ("deck_reader_v6.json", &encode::LAY6, CardDb::eoe())] {
+        let want = encode::deck_reader_json(lay);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az").join(file);
+        if std::env::var("MTGZ_WRITE_LAYOUT").is_ok_and(|v| v == "1") {
+            std::fs::write(&path, &want).unwrap();
         }
-    }
-    let bag_of = |b: usize| encode::O_BAGS + b * encode::D;
-    use encode::bag;
-    for b in [bag::MY_HAND, bag::MY_BATTLEFIELD, bag::MY_GRAVEYARD, bag::MY_EXILE, bag::MY_LIBRARY, bag::OPP_HIDDEN, bag::OPP_POOL, bag::MY_HAND_KNOWN] {
-        assert!(!ins.iter().any(|&(_, o, _)| o == bag_of(b)), "bag {b} is not the opponent's shown cards");
+        let have = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+        assert!(have == want, "{} differs from encode::deck_reader_json (MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test az deck_reader)", path.display());
+        let ins = encode::deck_reader_inputs(lay);
+        let l: serde_json::Value = serde_json::from_str(&encode::layout_json(db)).unwrap();
+        let mut end = 0;
+        for &(name, o, n) in &ins {
+            assert!(n > 0 && o >= end && o + n <= lay.features, "{name}: [{o}, {n}) out of order or outside");
+            end = o + n;
+            for sg in l["segments"].as_array().unwrap() {
+                let Some(so) = sg["offset"].as_u64() else { continue };
+                let (so, sc, sw) = (so as usize, sg["count"].as_u64().unwrap() as usize, sg["width"].as_u64().unwrap() as usize);
+                assert!(o + n <= so || o >= so + sc * sw, "{name}: inside the token segment {}", sg["name"]);
+            }
+        }
+        let bag_of = |b: usize| encode::O_BAGS + b * encode::D;
+        use encode::bag;
+        for b in [bag::MY_HAND, bag::MY_BATTLEFIELD, bag::MY_GRAVEYARD, bag::MY_EXILE, bag::MY_LIBRARY, bag::OPP_HIDDEN, bag::OPP_POOL, bag::MY_HAND_KNOWN] {
+            assert!(!ins.iter().any(|&(_, o, _)| o == bag_of(b)), "bag {b} is not the opponent's shown cards");
+        }
     }
 }
 

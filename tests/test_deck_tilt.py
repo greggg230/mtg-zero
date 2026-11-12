@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from mtgz import az as P
+from mtgz.az.games import row
 from zero import games as G
 from zero import run
 from zero.run import DEFAULTS, Run
@@ -45,7 +46,7 @@ def _position(spec, seed, game='mtg_eoe'):
 def test_a_deck_tilted_deal_through_the_bindings():
     g = _position(P.SPEC_EOE, 11)
     v = g.to_move
-    x, legal = np.asarray(g.encode(v)), list(g.legal())
+    x, legal = row(g, v), list(g.legal())
     rng = np.random.default_rng(1)
     pred = rng.random(2 * D).astype(np.float32) ** 6
     pred[:D] /= pred[:D].sum()
@@ -54,7 +55,7 @@ def test_a_deck_tilted_deal_through_the_bindings():
     for s in range(24):
         w = g.clone()
         w.determinize_with(v, s, pred, 0.0, 20.0, {'deck': 1.0})
-        assert np.array_equal(np.asarray(w.encode(v)), x) and list(w.legal()) == legal
+        assert np.array_equal(row(w, v), x) and list(w.legal()) == legal
         again = g.clone()
         again.determinize_with(v, s, pred, 0.0, 20.0, {'deck': 1.0})
         assert np.array_equal(np.asarray(w.aux_target(v)), np.asarray(again.aux_target(v))), 'a function of the seed'

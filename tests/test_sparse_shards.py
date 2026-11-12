@@ -1,6 +1,7 @@
 """Sparse sample shards (zero-core run setting `shard_sparse`, zero-core docs/az.md 32; ENGINE.md 94) on MTG's own
-rows: two Delver mirror self-play games' samples (37,620 features, the auxiliary targets off) written dense and
-sparse read back the same, and the windows of both are the same; the presets leave the setting off."""
+rows: two Delver mirror self-play games' samples (layout v7's heads, the auxiliary targets off) written dense and
+sparse read back the same, and the windows of both are the same; their tails and overrides read back from a sparse
+v2 shard (ENGINE.md 125); the presets leave the setting off."""
 import numpy as np
 import torch
 
@@ -34,7 +35,23 @@ def _chunks(s, n=32):
 def test_delver_rows_in_sparse_shards(tmp_path):
     info = G.info('mtg')
     F, A = info['num_features'], info['num_actions']
-    s = _delver_samples()
+    whole = _delver_samples()
+    # Layout v7's rows (ENGINE.md 125): their tails and overrides go only to a sparse v2 shard, read back as they
+    # were (below); the dense / sparse comparison is of the heads.
+    rows = protocol.ROW_SAMPLE_KEYS
+    assert all(k in whole for k in rows) and len(whole['t_seg']) > 0
+    v2 = D.ShardWriter(str(tmp_path / 'v2'), 'r00', rows=1 << 16,
+                       meta={'game': 'mtg', 'features': F, 'actions': A, 'iter': 1, **D.shard_format({'shard_sparse': 1}, info)})
+    v2.add(whole)
+    assert v2.close()['samples'] == len(whole['player'])
+    (p2,) = D.shard_paths(str(tmp_path / 'v2'))
+    back = D.read_shard(p2)
+    # (format v2's members: the CSR offsets as `t_ptr` / `ov_ptr`, the tail floats in float16 as the head's)
+    for k, w in (('t_off', 't_ptr'), ('t_seg', 't_seg'), ('t_slot', 't_slot'), ('ov_off', 'ov_ptr'), ('ov_opt', 'ov_opt'),
+                 ('ov_tok', 'ov_tok')):
+        assert np.array_equal(back[w], whole[k]), k
+    assert np.array_equal(back['t_val'], whole['t_val'].astype(np.float16))
+    s = {k: v for k, v in whole.items() if k not in rows}
     parts = list(_chunks(s))
     paths = {}
     for fmt in ({}, D.shard_format({'shard_sparse': 1})):

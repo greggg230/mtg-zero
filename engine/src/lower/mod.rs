@@ -34,6 +34,7 @@ pub mod eoe_w5;
 pub mod eoe_w2;
 pub mod doomsday_b;
 pub mod filter;
+pub mod graveyard_order;
 pub mod printing;
 pub mod statics;
 pub mod support;

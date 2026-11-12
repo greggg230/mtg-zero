@@ -23,11 +23,11 @@
 //!    changed for both viewers.
 //! 3. **Limits** ([`limits`]): the perturbations whose change the encoding
 //!    leaves out, each with its reason: by design (bag order, what the
-//!    opponent knows of the viewer's cards; the perturbations change objects
-//!    in the encoded slots only: 32 permanents a side, 8 stack items). Layout
-//!    v4's 42 gaps (ENGINE.md 58.10) are layout v5's fixes (60); one gap is
-//!    left for the next layout, the graveyard's order (ENGINE.md 65): anything
-//!    else that fails is a finding.
+//!    opponent knows of the viewer's cards). Layout v4's 42 gaps (ENGINE.md
+//!    58.10) are layout v5's fixes (60), v6's and v7's theirs (100.5, 124.2,
+//!    125: since v7 every object is a token, so the perturbations change any
+//!    object, and there is one perturbation per `Mark` variant,
+//!    `MARK_PERTURBATIONS`): anything else that fails is a finding.
 
 use crate::az::matches::{Format, MatchState};
 use crate::az::MtgAz;
@@ -396,11 +396,12 @@ fn pick<T: Copy>(v: &[T], r: &mut Rng) -> Option<T> {
     }
 }
 
-/// The permanents in the encoded slots (the first 32 of each controller,
-/// timestamp order), but face-down ones (their card is hidden).
+/// The permanents (each player's, timestamp order: every one encoded since
+/// layout v7, past slot 31 as a tail token, ENGINE.md 125), but face-down
+/// ones (their card is hidden).
 fn slots(g: &Game) -> Vec<CardIdx> {
-    let mut v: Vec<CardIdx> = g.permanents_of(0).take(crate::az::encode::PERMS).collect();
-    v.extend(g.permanents_of(1).take(crate::az::encode::PERMS));
+    let mut v: Vec<CardIdx> = g.permanents_of(0).collect();
+    v.extend(g.permanents_of(1));
     v.retain(|&c| g.objs[c.i()].def != g.db.face_down_def());
     v
 }
@@ -409,10 +410,10 @@ fn slot_creatures(g: &Game) -> Vec<CardIdx> {
     slots(g).into_iter().filter(|&c| g.is_creature(c)).collect()
 }
 
-/// The stack items in the encoded slots (the top 8), as indices into
-/// `Game::stack`.
+/// The stack items (every one encoded since layout v7, past the top 8 as tail
+/// tokens, ENGINE.md 125), as indices into `Game::stack`, top first.
 fn stack_slots(g: &Game) -> Vec<usize> {
-    (0..g.stack.len()).rev().take(crate::az::encode::STACKS).collect()
+    (0..g.stack.len()).rev().collect()
 }
 
 fn stack_spells(g: &Game) -> Vec<(usize, CardIdx)> {
@@ -1020,12 +1021,203 @@ pub fn perturbations() -> Vec<Perturbation> {
             let (_, c) = pick(&spells, r)?;
             mark(&mut a.g, c, crate::game::Mark::Uncounterable)
         }),
-        // A delve in progress (CR 702.66a, 601.2h): a graveyard card chosen,
+        // A graveyard card is chosen for delve (CR 702.66a, 601.2h): a graveyard card chosen,
         // still in the graveyard until the payment ends (ENGINE.md 51.6, 65).
         p!("a graveyard card is chosen for delve", "Game.marks", |a, r| {
             let cards: Vec<CardIdx> = (0..2).flat_map(|p| a.g.players[p].graveyard.clone()).filter(|&c| !a.g.is_token(c)).collect();
             let c = pick(&cards, r)?;
             mark(&mut a.g, c, crate::game::Mark::DelveExile)
+        }),
+        // ---- Game.marks: every other variant (layout v7, ENGINE.md 125: the gate's G1, one
+        // perturbation per `Mark` variant; `MARK_PERTURBATIONS` lists them). A permanent's in its
+        // slot (`perm::*`), a spell's in its stack slot (`stack::*`), a relation to another object
+        // or an ability a `links` token. No draw from the gate's random stream: the first object
+        // that can take it.
+        p!("a permanent entered with a big kicker count and X", "Game.marks", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::Entered { times: 300, x: 70 })
+        }),
+        p!("Containment Priest's replacement waits for a copy choice", "Game.marks", |a, _r| {
+            let c = *slot_creatures(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::PriestPending)
+        }),
+        p!("a spell's converge colours spent so far", "Game.marks", |a, _r| {
+            let (_, c) = *stack_spells(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::ConvergePending(0b00101))
+        }),
+        p!("a spell's converge colours spent", "Game.marks", |a, _r| {
+            let (_, c) = *stack_spells(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::Converge(0b10010))
+        }),
+        p!("a permanent has a granted leave-the-battlefield trigger", "Game.marks", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            let def = a.g.objs[c.i()].def;
+            mark(&mut a.g, c, crate::game::Mark::LeaveTrigger { def, slot: 0, exile: false })
+        }),
+        p!("a spell will give its permanent a trigger as it enters", "Game.marks", |a, _r| {
+            let (_, c) = *stack_spells(&a.g).first()?;
+            let def = a.g.objs[c.i()].def;
+            mark(&mut a.g, c, crate::game::Mark::GrantOnEnter { def, slot: 0 })
+        }),
+        p!("a permanent's once-each-turn permission was used this turn", "Game.marks", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            let t = a.g.turn.number as u16;
+            mark(&mut a.g, c, crate::game::Mark::UsedTurn(t))
+        }),
+        p!("a spell's X is capped by a permission's mana value", "Game.marks", |a, _r| {
+            let (_, c) = *stack_spells(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::MvCap(3))
+        }),
+        p!("a permanent was harnessed", "Game.marks", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::Harnessed)
+        }),
+        p!("a permanent boasted this turn", "Game.marks", |a, _r| {
+            let c = *slot_creatures(&a.g).first()?;
+            let t = a.g.turn.number as u16;
+            mark(&mut a.g, c, crate::game::Mark::Boasted(t))
+        }),
+        p!("a permanent entered kicked with an X", "Game.marks", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::KickerX(5))
+        }),
+        p!("a creature became saddled this turn", "Game.marks", |a, _r| {
+            let c = *slot_creatures(&a.g).first()?;
+            let t = a.g.turn.number as u16;
+            mark(&mut a.g, c, crate::game::Mark::Saddled(t))
+        }),
+        p!("a permanent's once-chosen modes", "Game.marks", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::ModesUsed(0b101))
+        }),
+        p!("odd or even was chosen as a permanent entered", "Game.marks", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::Parity(1))
+        }),
+        p!("an Aura reanimated a creature", "Game.marks", |a, _r| {
+            let ss = slots(&a.g);
+            let (&c, &other) = (ss.first()?, ss.get(1)?);
+            let o = a.g.obj_ref(other);
+            mark(&mut a.g, c, crate::game::Mark::Reanimated(o))
+        }),
+        p!("a spell was cast when a sorcery couldn't have been", "Game.marks", |a, _r| {
+            let (_, c) = *stack_spells(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::NotSorceryTiming)
+        }),
+        p!("a granted trigger triggered this turn for a permanent", "Game.marks", |a, _r| {
+            let ss = slots(&a.g);
+            let (&c, &src) = (ss.first()?, ss.last()?);
+            let (def, turn, src) = (a.g.objs[src.i()].def, a.g.turn.number as u16, a.g.obj_ref(src));
+            mark(&mut a.g, c, crate::game::Mark::Triggered { def, slot: 0, turn, n: 1, src })
+        }),
+        p!("a permanent looked at the opponent's hand as it entered", "Game.marks", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::LookedHand)
+        }),
+        p!("a card name was chosen as a permanent entered", "Game.marks", |a, r| {
+            let ss = slots(&a.g);
+            let c = *ss.first()?;
+            // (A card of the game's, or a name of none: `NO_NAME`, ENGINE.md 125.)
+            let d = if r.below(4) == 0 { crate::game::NO_NAME } else { a.g.objs[pick(&ss, r)?.i()].def };
+            if a.g.chosen_name(a.g.obj_ref(c)) == Some(d) {
+                return None;
+            }
+            a.g.marks.retain(|(o, m)| !(o.idx == c && matches!(m, crate::game::Mark::ChosenName(_))));
+            mark(&mut a.g, c, crate::game::Mark::ChosenName(d))
+        }),
+        p!("mana that gives haste was spent on a spell", "Game.marks", |a, _r| {
+            let (_, c) = *stack_spells(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::HasteMana)
+        }),
+        p!("a mana source is chosen to be exiled by delve", "Game.marks", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::DelveLate)
+        }),
+        p!("a hand card is promised to a delve", "Game.marks", |a, r| {
+            let p = player(r);
+            let c = *a.g.players[p as usize].hand.first()?;
+            // (A promised card is revealed: the cost discards it, ENGINE.md 100.4.9.)
+            a.g.learn(opp(p), c);
+            mark(&mut a.g, c, crate::game::Mark::DelvePromised)
+        }),
+        p!("a spell's delve exiled a card to pay", "Game.marks", |a, _r| {
+            let (_, c) = *stack_spells(&a.g).first()?;
+            let e = *a.g.exile.first()?;
+            let o = a.g.obj_ref(e);
+            mark(&mut a.g, c, crate::game::Mark::ExiledToPay(o))
+        }),
+        p!("a permanent was dealt damage this turn", "Game.marks", |a, _r| {
+            let c = *slot_creatures(&a.g).first()?;
+            let t = a.g.turn.number as u16;
+            if a.g.marks.iter().any(|&(o, m)| o.idx == c && matches!(m, crate::game::Mark::DealtDamage(_))) {
+                return None;
+            }
+            mark(&mut a.g, c, crate::game::Mark::DealtDamage(t))
+        }),
+        p!("a spell was cast from its caster's hand free", "Game.marks", |a, _r| {
+            let (_, c) = *stack_spells(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::FreeFromHand)
+        }),
+        // ---- Layout v7's other new state (ENGINE.md 125) ----
+        p!("two creature cards of a graveyard swap places", "Player.graveyard", |a, r| {
+            // (The order a positional reader reads, Shallow Grave's: `graveyard_order` tokens; a
+            // table without one has nothing to change.)
+            let readers = crate::lower::graveyard_order::readers(a.g.db);
+            let f = &readers.first()?.filter;
+            let p = player(r) as usize;
+            let gy = &a.g.players[p].graveyard;
+            let m: Vec<usize> = (0..gy.len()).filter(|&i| crate::lower::graveyard_order::matches(a.g.db, f, a.g.def_of(gy[i]))).collect();
+            let pairs: Vec<(usize, usize)> = m
+                .iter()
+                .flat_map(|&i| m.iter().filter(move |&&j| j > i).map(move |&j| (i, j)))
+                .filter(|&(i, j)| a.g.objs[gy[i].i()].def != a.g.objs[gy[j].i()].def)
+                .collect();
+            let (i, j) = pick(&pairs, r)?;
+            a.g.players[p].graveyard.swap(i, j);
+            Some(format!("P{p}'s {i} and {j}"))
+        }),
+        p!("a stack ability's source is another permanent", "StackItem.kind", |a, _r| {
+            let g = &mut a.g;
+            let i = stack_slots(g).into_iter().find(|&i| matches!(g.stack[i].kind, StackKind::Ability { source, .. } if g.live(source) && g.objs[source.idx.i()].zone == Zone::Battlefield))?;
+            let StackKind::Ability { source, .. } = g.stack[i].kind else { return None };
+            let other = g.battlefield.iter().copied().find(|&c| c != source.idx && g.objs[c.i()].def == g.objs[source.idx.i()].def).or_else(|| g.battlefield.iter().copied().find(|&c| c != source.idx))?;
+            let o = g.obj_ref(other);
+            if let StackKind::Ability { source, .. } = &mut g.stack[i].kind {
+                *source = o;
+            }
+            Some(g.name(other).to_string())
+        }),
+        p!("a trigger's event names another object", "StackItem.ev", |a, r| {
+            let c = pick(&slots(&a.g), r)?;
+            let o = a.g.obj_ref(c);
+            item(a, r, move |s| {
+                if !matches!(s.kind, StackKind::Ability { ability, .. } if matches!(ability.slot, AbilitySlot::Trigger(_))) || s.ev.obj == Some(o) {
+                    return None;
+                }
+                s.ev.obj = Some(o);
+                Some("another event object".into())
+            })
+        }),
+        p!("a trigger's event names the other player", "StackItem.ev", |a, r| item(a, r, |s| {
+            if !matches!(s.kind, StackKind::Ability { ability, .. } if matches!(ability.slot, AbilitySlot::Trigger(_))) {
+                return None;
+            }
+            s.ev.player = Some(s.ev.player.map_or(0, opp));
+            Some(format!("{:?}", s.ev.player))
+        })),
+        p!(rare "a stack item's third target is another", "StackItem.targets", |a, _r| {
+            let g = &mut a.g;
+            let i = stack_slots(g).into_iter().find(|&i| g.stack[i].targets.len() >= 3)?;
+            let t = match g.stack[i].targets[2].1 {
+                Target::Player(p) => Target::Player(opp(p)),
+                Target::Obj(o) => {
+                    let other = g.battlefield.iter().copied().find(|&c| c != o.idx)?;
+                    Target::Obj(g.obj_ref(other))
+                }
+                Target::Stack(_) => return None,
+            };
+            g.stack[i].targets[2].1 = t;
+            Some("the third target".into())
         }),
         // ---- Dungeon ----
         p!("a player completes a dungeon", "Dungeon.completed", |a, r| {
@@ -1762,7 +1954,6 @@ pub fn limits() -> Vec<Limit> {
         l("two graveyard cards swap places", Design, "graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2); no action id depends on the order: a graveyard-card choice or target is a list id whose token is its card, the graveyards in order in the list block while it is pending (ENGINE.md 65.10), and Priority's casts and plays from the graveyard are one option, GRAVEYARD + 0, then that list's choice (ENGINE.md 100.5)"),
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
-        l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),
     ]
 }
 
@@ -1813,7 +2004,136 @@ pub const V6_FIXED: [&str; 25] = [
 /// globals, the pool's mana of a chosen creature type by colour and type,
 /// exact for any number of types). Its tests read them back and check that
 /// they hide nothing (`tests/az.rs`, `tests/cards_doomsday_b.rs`).
-pub const V7_FIXED: [&str; 1] = ["mana in a pool is restricted to creature spells of a chosen type"];
+///
+/// ENGINE.md 125 (layout v7's variable-length rows): every `Game.marks`
+/// variant the encoding missed (the gate's G1: one perturbation per variant,
+/// `MARK_PERTURBATIONS`), the library cards someone knows below the top three
+/// (`library_known`), a positional graveyard reader's order (Shallow Grave:
+/// `graveyard_order`), a stack ability's source, a trigger's event, a third
+/// target.
+pub const V7_FIXED: [&str; 32] = [
+    "mana in a pool is restricted to creature spells of a chosen type",
+    "a permanent entered with a big kicker count and X",
+    "Containment Priest's replacement waits for a copy choice",
+    "a spell's converge colours spent so far",
+    "a spell's converge colours spent",
+    "a permanent has a granted leave-the-battlefield trigger",
+    "a spell will give its permanent a trigger as it enters",
+    "a permanent's once-each-turn permission was used this turn",
+    "a spell's X is capped by a permission's mana value",
+    "a permanent was harnessed",
+    "a permanent boasted this turn",
+    "a permanent entered kicked with an X",
+    "a creature became saddled this turn",
+    "a permanent's once-chosen modes",
+    "odd or even was chosen as a permanent entered",
+    "an Aura reanimated a creature",
+    "a spell was cast when a sorcery couldn't have been",
+    "a granted trigger triggered this turn for a permanent",
+    "a permanent looked at the opponent's hand as it entered",
+    "a card name was chosen as a permanent entered",
+    "mana that gives haste was spent on a spell",
+    "a mana source is chosen to be exiled by delve",
+    "a hand card is promised to a delve",
+    "a spell's delve exiled a card to pay",
+    "a permanent was dealt damage this turn",
+    "a spell was cast from its caster's hand free",
+    "the owner learns a library card below the top three",
+    "two creature cards of a graveyard swap places",
+    "a stack ability's source is another permanent",
+    "a trigger's event names another object",
+    "a trigger's event names the other player",
+    "a stack item's third target is another",
+];
+
+/// One perturbation per `Mark` variant (ENGINE.md 125, the gate's G1): the
+/// variant, the perturbation that makes it. `tests/v7_tails.rs` checks that
+/// every variant has one (`mark_variant`, an exhaustive match) and the gate
+/// that each reaches the encoding.
+pub const MARK_PERTURBATIONS: [(&str, &str); 36] = [
+    ("Entered", "a permanent entered with a big kicker count and X"),
+    ("PriestPending", "Containment Priest's replacement waits for a copy choice"),
+    ("Exhausted", "a permanent was exhausted (an exhaust ability)"),
+    ("ConvergePending", "a spell's converge colours spent so far"),
+    ("Converge", "a spell's converge colours spent"),
+    ("ChosenColor", "a colour was chosen as a permanent entered"),
+    ("ChosenCreatureType", "a creature type was chosen as a permanent entered"),
+    ("Uncounterable", "a spell can't be countered"),
+    ("LeaveTrigger", "a permanent has a granted leave-the-battlefield trigger"),
+    ("GrantOnEnter", "a spell will give its permanent a trigger as it enters"),
+    ("UsedTurn", "a permanent's once-each-turn permission was used this turn"),
+    ("MvCap", "a spell's X is capped by a permission's mana value"),
+    ("Harnessed", "a permanent was harnessed"),
+    ("Boasted", "a permanent boasted this turn"),
+    ("KickerX", "a permanent entered kicked with an X"),
+    ("Saddled", "a creature became saddled this turn"),
+    ("ModesUsed", "a permanent's once-chosen modes"),
+    ("Parity", "odd or even was chosen as a permanent entered"),
+    ("Reanimated", "an Aura reanimated a creature"),
+    ("NotSorceryTiming", "a spell was cast when a sorcery couldn't have been"),
+    ("Triggered", "a granted trigger triggered this turn for a permanent"),
+    ("LookedHand", "a permanent looked at the opponent's hand as it entered"),
+    ("ChosenName", "a card name was chosen as a permanent entered"),
+    ("Exerted", "a creature was exerted"),
+    ("HasteMana", "mana that gives haste was spent on a spell"),
+    ("DelveLate", "a mana source is chosen to be exiled by delve"),
+    ("DelveExile", "a graveyard card is chosen for delve"),
+    ("DelvePromised", "a hand card is promised to a delve"),
+    ("ExiledToPay", "a spell's delve exiled a card to pay"),
+    ("DealtDamage", "a permanent was dealt damage this turn"),
+    ("Granted", "a permanent gained a triggered ability"),
+    ("WarpCast", "a creature was cast for its warp cost"),
+    ("RegenShield", "a creature has a regeneration shield"),
+    ("ManaSpent", "the mana spent to cast a permanent"),
+    ("AltGranted", "a spell's granted alternative cost came from another permanent"),
+    ("FreeFromHand", "a spell was cast from its caster's hand free"),
+];
+
+/// The variant's name of a mark (`MARK_PERTURBATIONS`): an exhaustive match,
+/// so a new variant is a compile error here until it has a perturbation and an
+/// encoding.
+pub fn mark_variant(m: &crate::game::Mark) -> &'static str {
+    use crate::game::Mark as M;
+    match m {
+        M::Entered { .. } => "Entered",
+        M::PriestPending => "PriestPending",
+        M::Exhausted(_) => "Exhausted",
+        M::ConvergePending(_) => "ConvergePending",
+        M::Converge(_) => "Converge",
+        M::ChosenColor(_) => "ChosenColor",
+        M::ChosenCreatureType(_) => "ChosenCreatureType",
+        M::Uncounterable => "Uncounterable",
+        M::LeaveTrigger { .. } => "LeaveTrigger",
+        M::GrantOnEnter { .. } => "GrantOnEnter",
+        M::UsedTurn(_) => "UsedTurn",
+        M::MvCap(_) => "MvCap",
+        M::Harnessed => "Harnessed",
+        M::Boasted(_) => "Boasted",
+        M::KickerX(_) => "KickerX",
+        M::Saddled(_) => "Saddled",
+        M::ModesUsed(_) => "ModesUsed",
+        M::Parity(_) => "Parity",
+        M::Reanimated(_) => "Reanimated",
+        M::NotSorceryTiming => "NotSorceryTiming",
+        M::Triggered { .. } => "Triggered",
+        M::LookedHand => "LookedHand",
+        M::ChosenName(_) => "ChosenName",
+        M::Exerted => "Exerted",
+        M::HasteMana => "HasteMana",
+        M::DelveLate => "DelveLate",
+        M::DelveExile => "DelveExile",
+        M::DelvePromised => "DelvePromised",
+        M::ExiledToPay(_) => "ExiledToPay",
+        M::DealtDamage(_) => "DealtDamage",
+        M::Granted { .. } => "Granted",
+        M::WarpCast => "WarpCast",
+        M::RegenShield => "RegenShield",
+        M::ManaSpent(_) => "ManaSpent",
+        M::AltGranted { .. } => "AltGranted",
+        M::FreeFromHand => "FreeFromHand",
+    }
+}
+
 
 /// The perturbations of layout v4's 42 gaps (ENGINE.md 58.10), which layout
 /// v5 encodes (ENGINE.md 60.3): its tests read them back and check that they

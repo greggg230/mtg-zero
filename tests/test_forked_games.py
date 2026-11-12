@@ -113,8 +113,9 @@ def test_the_delver_driver_branches_and_starts_from_the_archive(tmp_path):
     d = G.Driver('mtg', [[seat, seat]] * 12, spec=SPEC, concurrency=12, seed=3, record=True, threads=4,
                  branch={'p': 0.5, 'moves': 3, 'temp': 2.0}, starts={'p': 0.5, 'specs': A2['specs']}, move_log=4000)
     rows = []
-    drive(d, {'m': UniformEvaluator()}, on_batch=lambda lb: rows.extend(split_games(d.take_results(), d.take_samples())))
-    rows.extend(split_games(d.take_results(), d.take_samples()))
+    tw = G.tail_widths(G.info('mtg'))                # (layout v7's rows carry tails: ENGINE.md 125)
+    drive(d, {'m': UniformEvaluator()}, on_batch=lambda lb: rows.extend(split_games(d.take_results(), d.take_samples(), tw)))
+    rows.extend(split_games(d.take_results(), d.take_samples(), tw))
     main = [r for r, _ in rows if 'branch' not in r]
     br = [(r, s) for r, s in rows if 'branch' in r]
     starts = [r for r in main if 'start' in r]

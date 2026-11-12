@@ -42,7 +42,7 @@ def test_mtg_eoe_is_registered_with_its_layout_and_targets():
     for k in ('num_actions', 'min_players', 'max_players', 'bots', 'aux_layout'):
         assert a[k] == b[k], k
     # mtg_eoe keeps layout v6; mtg's layout v7 appends a block the EoE table's mana can't fill (ENGINE.md 124.2)
-    assert (a['num_features'], b['num_features']) == (47892, 44212)
+    assert (a['num_features'], b['num_features']) == (56192, 44212)
     assert P.PACKAGE.aux_of('mtg_eoe') == P.PACKAGE.aux_of('mtg')
     lay = P.PACKAGE.tokens_of('mtg_eoe')
     assert lay is P.LAYOUT_EOE and lay['name'] == 'eoe' and lay['version'] == 6
@@ -149,9 +149,9 @@ def test_the_eoe_deck_reader_reads_the_eoe_identities_of_the_declared_inputs():
     positions every declared feature outside the narrowed ranges is zero. The package declares the deck target for
     both games and completes both readers."""
     from mtgz.az import deck_reader as R
-    d = R.declaration()
+    d = R.declaration()                                  # (layout v6's: mtg_eoe's; mtg's is layout v7's, ENGINE.md 125)
     mtg, eoe = R.READERS['mtg'][0], R.READERS['mtg_eoe'][0]
-    assert mtg['inputs'] == [list(x) for x in d['inputs']]
+    assert mtg['inputs'] == [list(x) for x in R.declaration(R.PATH_V7)['inputs']]
     assert eoe['target'] == 'deck' and eoe['enter'] == 'trunk' and eoe['hidden'] == 256
     (bags,) = P.LAYOUT_EOE['bags']
     rows = [o for o, n in d['inputs'] if bags['offset'] <= o < bags['offset'] + bags['count'] * bags['width']]
@@ -166,7 +166,7 @@ def test_the_eoe_deck_reader_reads_the_eoe_identities_of_the_declared_inputs():
         (r,) = P.PACKAGE.readers_of(g)
         assert r['target'] == 'deck' and r['width'] == 1024
     declared = np.zeros(G.info('mtg_eoe')['num_features'], bool)
-    for o, n in mtg['inputs']:
+    for o, n in d['inputs']:
         declared[o:o + n] = True
     read = np.zeros_like(declared)
     for o, n in eoe['inputs']:

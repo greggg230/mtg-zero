@@ -2406,6 +2406,8 @@ impl CardDb {
         }
         db.w6 = crate::eoe_w6::W6Db::of(&db.defs);
         db.w6.kept = kept;
+        // R17 (ENGINE.md 125): no card reads a graveyard order the layout leaves out.
+        crate::lower::graveyard_order::check(&db);
         db
     }
 

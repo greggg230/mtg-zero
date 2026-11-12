@@ -26164,3 +26164,343 @@ differ by that, not by their games.)
 **Left.** A network can't play the deck until layout v7 (the spec refuses Cavern of Souls, 124.2); constructed
 best-of-three and sideboarding (54.8) remain unbuilt, so the deck's sideboard (Flusterstorm, Leyline of the Void) is
 played only by the lanes' pools `dd_b` and `dd_c`.
+
+## 125. Layout v7: uncapped inputs, the MTG side (branch `v7-varlen`; zero-core `feat/varlen` 311cf3c)
+
+**Why.** MTG Zero's rule is that the engine **and the network's input** are exact in every reachable state. Layout v6
+had fixed caps (32 permanents a side, 16 hand cards, 8 stack items, 4 waiting triggers of the viewer, a 64-card list,
+4 graveyard-ability cards: past them an object was a bag count, or nothing), showed a paged choice's page as a
+window, and left out several kinds of public state: the other player's waiting triggers, delayed and temporary
+triggers (only per-player counts), the cards exiled with an object (a count), which exiled card an `EXILE` option
+casts (no token at all, 100.5.1), library cards someone knows below the top three (a declared limit, 72.4), a stack
+item's targets past the first two and the targets its target block can't name (a graveyard card), a stack ability's
+source object, a trigger's event (only the amount), most of `Game.marks` (the public-state gate perturbed 9 of 36
+variants), and the order a positional graveyard reader reads (Shallow Grave). Layout v7 closes all of them with
+zero-core's variable-length rows (zero-core docs/search.md 1.4, 2.15, docs/az.md 43; the frozen API
+`E:/mtg-zero-scratch/doomsday/varlen_api.md`, the design `varlen_design.md`): a row is the fixed **head** plus a
+**tail** of tokens and the options' **pointer overrides**. This section is lane Z of that project (the MTG encoder,
+layout and checks); lanes X and Y built the core's rows and network.
+
+**One layout, v7** (`mtgz/az/layout_v7.json`, `encode::layout_json`; a **draft**, `"draft": true`, until the project
+ends: run launches refuse it without `allow_draft_layout`): layout v6, plus lane B's Cavern block (124.2, kept),
+lane A's per-slot floats, tails on the seven capped segments, seven tail-only gated segments, pointer overrides, and
+`max_row_tokens` 4,096. Only the `mtg` game: `mtg_eoe` keeps layout v6 byte for byte (its encoding is the encoder's
+v6 path, `encode::LAY6`; `layout_eoe.json` unchanged), and refuses a table that makes mana of a chosen creature type
+(the Cavern guard is now "layout < 7").
+
+### 125.1 The layout
+
+| | v6 | v7 |
+|---|---:|---:|
+| features (head) | 44,212 | **56,192** (`NUM_FEATURES`) |
+| head tokens (`HEAD_TOKENS` = 1 + sum count) | 170 | 170 |
+| segments | 11 | 18 (11 + 7 tail-only, appended) |
+| permanent slot | 196 | 278 (`PERM_V7` 82) |
+| hand / list slot | 60 | 64 |
+| stack slot | 204 | 438 (`STACK_V7` 234) |
+| trigger slot | 56 | 271 |
+| row limit | - | 4,096 tokens (`MAX_ROW_TOKENS`; the game is aborted past it, counted and logged by zero-core) |
+
+Block offsets (`encode::O_*`, `LAY7`): globals 0, context 128, bags 384 (23 x 1,024), tops 23,936, my_permanents
+24,260, opponent_permanents 33,156, hand 42,052, stack 43,076, triggers 46,580, list 47,664, graveyard_abilities
+51,760, companions 51,984, match 52,096, globals_v5 52,128, globals_v6 52,192, globals_v7 (Cavern, 124.2) 52,512.
+
+Segments (index: name, head slots, width; tail; gate): 0 context 1 x 256; 1 tops 6 x 54; 2 my_permanents 32 x 278,
+tail; 3 opponent_permanents 32 x 278, tail; 4 hand 16 x 64, tail; 5 stack 8 x 438, tail; 6 triggers 4 x 271, tail;
+7 list 64 x 64, tail; 8 graveyard_abilities 4 x 56, tail; 9 my_companion 1 x 56; 10 opponent_companion 1 x 56;
+11 opponent_triggers 0 x 271; 12 delayed 0 x 283; 13 links 0 x 182; 14 exile_offered 0 x 81 (`columns: 1`);
+15 library_known 0 x 75; 16 stack_relations 0 x 177; 17 graveyard_order 0 x 104 - each of 11-17 `tail: true`,
+`gate: true`, `offset: null`, its card code first (`id` at 0). `TAILS` (`tail_encode::TAILS`) lists the 14 tail
+segments in this order; `OPTION_POINTERS` true.
+
+### 125.2 Head + tail: one writer per segment
+
+`tail_encode::put` writes object `s` (its **absolute** position) of a segment into its head slot when `s` is below the
+head slots, else into a tail token at `s`; the same writer fills both (`Game::write_perm`, `write_hand`,
+`write_stack`, the trigger, list and graveyard-ability writers). Every permanent, hand card, stack item, waiting
+trigger of the frame, list entry and graveyard-ability card is a token, at its position in the range's canonical order
+(the action ranges' positions: `decision::Decision::option_object`). On a range page (window w >= 1 of a paged
+choice) layout v6 showed the page's window from slot 0; v7 shows every object at its absolute position, and the
+page's options point at them by overrides. The list block holds the decision's whole list by position (a looked-at
+pile whole; a paged graveyard list, the page's cards at their positions; the names and abilities lists by their
+options' ids, which fixes v6's misplaced ability floats when an ability between two offered ones is not
+activatable).
+
+Layout v6's encoding (`mtg_eoe`, and `v6_projection`'s check) is the same writers into a v7-wide scratch slot, its
+first v6 floats copied (v7 adds floats only at slot ends), the page windows as v6 had them, no tail.
+
+### 125.3 The new per-slot floats
+
+* **Permanents** (status 144-225, `perm::*`): lane A's picks in progress (`PICK_RANK`, `PICKS_ME`, `PICKS_OPP`: rank
+  of its first pick / 8 and the times each player picked it / 2: votes count); the keywords outside v4's 15
+  (`KW_V7`: Infect, Shadow, Plainswalk ... Forestwalk; `encode::kw_float` is an exhaustive match on `Kw`, so a new
+  keyword can't compile without a float); `Mark::ChosenName` (present, a name of no card in the game - `NO_NAME`, one
+  shared value -, the named identity's 32 digits; Anointed Peacekeeper, and any card that uses the mark); and the
+  per-permanent marks the gate's G1 found unencoded: `Entered` (big kicker count and X), `UsedTurn` this turn,
+  `Harnessed`, `Boasted` this turn, `KickerX`, `Saddled` this turn, `ModesUsed` (8 bits), `Parity`, `LookedHand`,
+  `DelveLate`, `DealtDamage` this turn, `PriestPending`, `NotSorceryTiming`, `Converge` (5 colours), and which exhaust
+  ability `Exhausted(k)` marks (8 bits; v6 had their count).
+* **Hand and list** (floats 8-9): picked (the times / 4) and the rank of the first pick.
+* **Stack** (status 152-385): an ability's source object (a reference, below), the triggered ability's event (below),
+  the requirement of its first two targets, and a spell's marks: `ConvergePending` and `Converge` colours, `MvCap`,
+  `HasteMana`, `NotSorceryTiming`, `FreeFromHand`.
+* **Triggers** (both players', after v6's four floats): the source object and the event.
+
+Lane A's per-permanent delayed-trigger counts are not added: the `delayed` tokens make them exact (each names its
+source and its event's objects).
+
+**An object reference** (`tail_encode::rf`, 48 floats): present; live (the same incarnation, CR 400.7); its zone
+(one-hot); whose (controller on the battlefield and the stack, owner elsewhere); its position ((k + 1) / 32 among its
+controller's permanents, from the top of the stack, in the frame's sorted hand, in exile or face-down exile, among the
+phased-out; none in a graveyard - unordered -, a library or the command zone); for a stale reference a **key**, its
+rank among the row's stale references in the order the encoder meets them (equal keys: the same gone object: two gone
+Memory Jars' links and delayed triggers pair exactly); the identity where the viewer knows it.
+
+**A triggered ability's event** (`tail_encode::ev`, 167 floats): "that player" (the frame's or the other), "that
+object" and the second object (references), the event's spell or ability (its place on the stack while it is there),
+the amount / 8 (squashed) and its **64 binary digits** (exact: Mana Drain's 5,000 and 5,001 differ).
+
+### 125.4 The tail-only segments (gated)
+
+* **opponent_triggers**: the other player's waiting triggers (G2), each as the frame's trigger slot (card code,
+  slot, source, event).
+* **delayed**: every `Game::delayed` entry, then every `Game::temp_triggers` entry: kind (delayed / temporary), when
+  (`DelayedWhen`, one-hot), until the end of the turn, controller, trigger slot, created this turn and turns since,
+  the source (a reference) and the event (a temporary trigger's object in its `OBJ`). Pact of Negation's
+  pay-or-lose, the Baubles, Mana Drain's exact amount, Sneak Attack, Necromancy, dash and warp's "that permanent",
+  Flickerwisp's and Phelia's exiled card, Tamiyo's +2: all one struct, no class table.
+* **links** (kind one-hot): `Game::links` entries whose card is still exiled (A the source, B the card, `until`, where
+  it returns, "until an opponent becomes the monarch"); and, approved as an extension of API 10.2, the relations the
+  marks hold any number of: `Granted` (A the permanent, the ability's card and slot, until end of turn, still active
+  after "loses all abilities"), `LeaveTrigger` (Serra Paragon's, earthbend's), `GrantOnEnter`, `Triggered` (Nadu's
+  count this turn and the granting object), `Reanimated`, `ExiledToPay` (Murktide Regent's delved cards),
+  `DelvePromised`; and the picks in progress no other block holds (a graveyard pick while the list is the library:
+  Doomsday's), and a library search's picks by definition (the searcher's own rows only).
+* **exile_offered** (`columns: 1`, no static action): the `EXILE` range's items of the viewer's decision at their
+  positions: the card, face down or not, whose, the option's choice (cast, play, either face, a target, ...), the
+  permission it is played by (kind, free, any mana, cast only, a tax, this turn only), its place in exile. Every
+  `EXILE` option points at its token (an override). (v6: no token, 100.5.1.)
+* **library_known**: each library card below the top three that someone knows (a mulligan's bottom cards,
+  Doomsday's piles 4-5 deep, a card put under others): whose library, its depth ((k + 1) / 64 and 16 binary digits),
+  who knows it (public), the identity only where the viewer knows it. The tops block keeps the top three. The limit
+  "the owner learns a library card below the top three" (72.4) is closed.
+* **stack_relations**: per stack item (top first) its targets past the first two and any target the head's target
+  block can't name (a card in a graveyard or exile, a hand, a gone object), with its requirement; divided amounts
+  past the first two (exact digits); noted objects past the first, and a first one off the battlefield; the spliced
+  cards' identities (v6: their count); a ninjutsu creature's planeswalker (v6: a flag).
+* **graveyard_order** (R17, below): for each positional graveyard reader of the table and each player, the cards of
+  their graveyard the reader's filter matches, top first, with their rank and the reader's identity. The cube's and
+  constructed play's one reader is Shallow Grave ("the top creature card of your graveyard"): the creature cards of
+  each graveyard, in order. Every other card's order stays unencoded (graveyards are bags: D5).
+
+### 125.5 Pointer overrides
+
+`SearchGame::option_overrides` (`tail_encode::option_overrides`, with `decision::Decision::option_object`, the one
+helper in decision.rs): for each option about an object whose token is not what the layout's static table gives its
+action (a present head slot whose action it is): the token's `(segment, column, absolute slot)` - an object past a
+segment's head (a tail token), every object option on a range page, every exile offer; and -1 (the generic logit) for
+a paged list's "next page" `LIBRARY` + 63 where the static slot 63 holds the pile's 64th card. Rows within the old
+caps (unpaged, no exile offer) list none (a fast path returns before any work), so a widened network scores them as
+before. An option about no object keeps the static table, the companion's `PLAYER` id included (as v6).
+
+### 125.6 Checks
+
+* **R1.** `encode` (`Game::encode_features`, `MtgAz::encode`) of a state whose v7 row has a tail panics ("use
+  encode_row"); `encode_row` has the row. With a layout v6 buffer it is `mtg_eoe`'s encoding.
+* **R17, the graveyard-order check** (`lower/graveyard_order.rs`, run by every table's build in
+  `CardDb::from_cards`): an exhaustive classification of the IR (every variant of `Op`, `Ext` and the nested
+  instruction enums, generated then each reader named by hand: a new instruction is a compile error until it is
+  classified) finds the positional graveyard readers. A reader is allowed only with a filter a card keeps while in a
+  graveyard (card types - `types_of` reads the definition off the battlefield, asserted as the tokens are written -,
+  names, and combinations); any other filter (a colour: Painter's Servant changes it) fails the build naming the
+  card. The cube's, legacy's and EoE's tables pass; a synthetic Shallow Grave by colour fails
+  (`tests/v7_tails.rs`).
+* **The public-state gate** (`tests/az.rs`, on whole rows: head, tail and overrides): one perturbation per `Mark`
+  variant (`public_state::MARK_PERTURBATIONS`, `mark_variant` an exhaustive match), the deep known library card, a
+  creature pair of a graveyard swapped, a stack ability's source, a trigger's event objects and player, a third
+  target; perturbations act on every object (v6: the first 32 permanents and 8 stack items). Result: see 125.7.
+  The synthetic big boards (`tail_encode::board`, `tests/v7_tails.rs`): perturbations past every old cap and order
+  swaps change both viewers' rows; the decoder test reconstructs every segment's objects from the row (counts 3-5,
+  7-9, 15-17, 31-33, 63-65, 95-97, 191-192).
+* **The fuzz** (`tests/fuzz.rs`, every decision): the whole row bounded; the head is `encode_features`' when the row
+  has no tail; the head's `v6_projection` is layout v6's encoding (the v6 path) but on a page v6 showed as a window;
+  every option points at its object's token (`tail_encode::check_pointers`, generalizing v6's hand and list checks);
+  the rows past the limit counted. `FUZZ_CAP_CENSUS=1` writes the census (125.7).
+* **Digests** (`tests/digest.rs`): the full digest hashes the v7 row (head, tail, overrides);
+  `DIGEST_ENCODING=v6` hashes layout v6's encoding and asserts that the v7 head's v6 projection equals it but on a
+  page v6 showed as a window (counted).
+
+### 125.7 Results (branch `v7-varlen`, zero-core `feat/varlen` 311cf3c)
+
+**The public-state gate** (`tests/az.rs`, whole rows): **188 perturbations encoded, 3 deliberate limits, 0 gaps**. The three limits are v6's,
+by design and unchanged: two graveyard cards swap places (graveyards are bags; the positional
+readers' cards are `graveyard_order` tokens, so only the order no rule reads is left out); an
+exiled card turned face down (the owner's view: what the opponent knows of the owner's exiled
+card); an identity revealed in an earlier game (what the opponent knows of the viewer's pool).
+v6 had 135 encoded, 4 limits, 1 gap (the graveyard order).
+
+**`Game.marks`, every variant** (`public_state::MARK_PERTURBATIONS`, 36; each perturbed and
+encoded): 25 were not encoded before v7 (`V7_FIXED`): Entered (big kicker count and X),
+PriestPending, ConvergePending, Converge, LeaveTrigger, GrantOnEnter, UsedTurn, MvCap, Harnessed,
+Boasted, KickerX, Saddled, ModesUsed, Parity, Reanimated, NotSorceryTiming, Triggered, LookedHand,
+ChosenName, HasteMana, DelveLate, DelvePromised, ExiledToPay, DealtDamage, FreeFromHand. Already
+encoded in v6: Exhausted (now which ability, not a count), ChosenColor, ChosenCreatureType,
+Uncounterable, Exerted, DelveExile, Granted, WarpCast, RegenShield, ManaSpent, AltGranted. `V7_FIXED`
+also holds the Cavern block's fact (124.2) and six others: the deep known library card, a creature
+pair of a graveyard swapped, a stack ability's source, a trigger's event object and player, a third
+target.
+
+**The census** (`FUZZ_CAP_CENSUS=1`, both viewers, every decision; 2,000 random games a pool):
+
+| pool | games | rows | my_permanents past head % (max) | opponent_permanents past head % (max) | hand past head % (max) | stack past head % (max) | triggers past head % (max) | list past head % (max) | graveyard_abilities past head % (max) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| cube | 2000 | 1917092 | 0.0168 (47) | 0.0168 (47) | 0.0018 (23) | 0.0076 (15) | 0.002 (14) | 0.0 (63) | 0.0 (2) |
+| delver | 2000 | 1680030 | 0.0 (17) | 0.0 (17) | 0.1795 (28) | 0.023 (15) | 0.004 (9) | 0.0 (59) | 0.0 (0) |
+| doomsday | 2000 | 1409920 | 0.0 (17) | 0.0 (17) | 0.1587 (28) | 0.0248 (19) | 0.0019 (7) | 0.0 (59) | 0.0 (0) |
+| dd_a | 2000 | 863750 | 0.0 (16) | 0.0 (16) | 0.1069 (26) | 0.0324 (17) | 0.003 (9) | 0.0 (59) | 0.0 (0) |
+| dd_b | 2000 | 2064920 | 0.0 (19) | 0.0 (19) | 0.1109 (29) | 0.0653 (29) | 0.0211 (18) | 0.0 (59) | 0.0 (0) |
+| dd_c | 2000 | 2094358 | 0.0 (17) | 0.0 (17) | 0.2429 (34) | 0.0146 (17) | 0.0025 (7) | 0.0 (59) | 0.0 (0) |
+| eoe | 2000 | 2879078 | 0.0088 (33) | 0.0088 (33) | 0.0012 (18) | 0.0146 (13) | 0.0001 (6) | 0.0 (34) | 0.0 (0) |
+
+| pool | opponent_triggers rows % (max) | delayed rows % (max) | links rows % (max) | exile_offered rows % (max) | library_known rows % (max) | stack_relations rows % (max) | graveyard_order rows % (max) | exile offers 2+ % | 3+ targets % |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| cube | 0.1231 (14) | 0.6524 (4) | 14.9001 (29) | 0.0591 (6) | 38.1535 (22) | 1.5694 (10) | 78.4848 (23) | 0.008 | 0.1068 |
+| delver | 0.2783 (9) | 5.0673 (3) | 0.1914 (5) | 0.0 (0) | 9.8726 (11) | 0.4312 (2) | 72.4549 (13) | 0.0 | 0.0 |
+| doomsday | 0.1462 (7) | 6.3265 (3) | 0.3823 (5) | 0.0 (0) | 17.3892 (10) | 0.3734 (3) | 76.3958 (12) | 0.0 | 0.0 |
+| dd_a | 0.1652 (9) | 7.1185 (4) | 0.3176 (5) | 0.0 (0) | 23.5184 (11) | 0.3256 (3) | 48.7759 (9) | 0.0 | 0.0 |
+| dd_b | 0.3449 (18) | 5.3309 (3) | 0.1001 (5) | 0.0 (0) | 9.759 (11) | 0.4453 (5) | 74.6965 (12) | 0.0 | 0.0 |
+| dd_c | 0.1541 (7) | 6.4004 (3) | 0.0524 (5) | 0.0 (0) | 9.0236 (11) | 0.2843 (3) | 87.1415 (13) | 0.0 | 0.0 |
+| eoe | 0.0291 (6) | 0.4655 (3) | 4.5148 (4) | 0.067 (5) | 64.0274 (22) | 0.6193 (5) | 0.0 (0) | 0.0068 | 0.0011 |
+
+| pool | tokens/row v6 present mean / p99 / max | v7 total mean / p99 / max | tail tokens/row |
+|---|---|---|---:|
+| cube | 26.78 / 45 / 110 | 31.49 / 56 / 130 | 4.71 |
+| delver | 19.12 / 47 / 73 | 21.57 / 51 / 78 | 2.46 |
+| doomsday | 18.57 / 50 / 72 | 20.91 / 53 / 79 | 2.34 |
+| dd_a | 18.57 / 57 / 73 | 20.12 / 59 / 79 | 1.55 |
+| dd_b | 20.41 / 37 / 74 | 22.82 / 42 / 81 | 2.41 |
+| dd_c | 19.01 / 37 / 72 | 22.57 / 43 / 80 | 3.56 |
+| eoe | 29.87 / 46 / 77 | 31.68 / 49 / 79 | 1.81 |
+
+`graveyard_order` is not small: 49-87% of the constructed pools' rows hold some, because a table's
+readers are the table's (Shallow Grave is in constructed play's table whether or not a deck plays
+it), and any creature card in a graveyard is then encoded in order. Restricting them to the readers
+the game's decks could hold is an option for later (it needs the hidden decklists' care: an
+opponent's unseen deck must not be told by it); every token is gated, so it costs nothing until a
+gate opens. EoE has no reader (none).
+
+**The fuzz** (`tests/fuzz.rs`, every decision; the pointer, bounds, projection and limit checks of
+125.6): `FUZZ_POOL=cube` 20,000 games (4 x 5,000): 10,519,323 rows, 17,211,471 options' pointers
+checked, the v6 projection equal on every row but 9 on pages v6 showed as a window, the most tokens
+in a row 214 (limit 4,096), none past it; `doomsday` 20,000 games: 7,586,883 rows, 9,546,262 pointers,
+1 paged, at most 196 tokens; `delver` 4,000 games: 1,840,856 rows, 2,271,639 pointers, 0 paged, at most
+193 tokens. No failure; the games are 124.4's exactly (doomsday: wins 9,725 / 9,693, 582 drawn,
+11,288,752 options completed).
+
+**Digests** (no `DIGEST_WRITE`): `DIGEST_ENCODING=0` **208c723daced22fe** (= recorded: no game plays
+differently), `DIGEST_ENCODING=v5` **dc33538c0497dbf0** (= recorded), `DIGEST_ENCODING=v6` **53839c837bbaf034** (= recorded;
+102,734 states, 0 on a page v6 showed as a window), the full v7 digest **40958ca20584ba83** (new:
+not recorded here).
+
+**Tests**: the engine suite (`cargo test --release -p engine -p card_ir --no-fail-fast`) 156 binaries, **2,387 passed, 0
+failed**, 23 ignored (`az` 49, `v7_tails` 11 + `dump_v6_projection` ignored, the engine's unit tests 43, `eoe_net` 4,
+`limits` 13, `hidden` 28 + 2); `bash tools/build_py.sh`, `python -m pytest -q tests`: **286 passed, 1 failed, 1
+skipped** - the failure is `test_blunders.py::test_canary_search_of_a_rebuilt_spot`, tools/delver_blunders.py's
+search without rows (125.9). The tests that played `mtg` through head-only paths read whole rows now (`Row::of`,
+`Row::of_az`, `games.row`, `encode_row`), the page tests read absolute positions and pointers, the run tests set
+v7's flags, the shard tests write v2 shards.
+
+**The real-checkpoint widen** (`E:/mtg-zero-scratch/doomsday/lane_z/widen/`, the run directory only
+read): the Delver line's `r3-deep128x8-2410` iteration 3198 is a **layout v5** network (37,620
+features, 128 x 8, the auxiliary head); `tools/fork_run.py --allow-draft` widens it onto layout v7
+(56,192 features; tails on the 7 capped segments; the 7 new segments gated at 0). zero-core's
+`token_feature_map` of the two layouts is `encode::v5_projection` index for index (dumped by
+`tests/v7_tails.rs`'s `dump_v6_projection`), and `DIGEST_ENCODING=v5` shows that projection is v5's
+encoding. On Delver-mirror games played by the original's policy, the original on each row's v5
+encoding against the widened network on its v7 row (head, tail, overrides):
+
+| path (rows, games) | rows without a tail token or override | rows with gated tokens only (g = 0) | rows past v5's caps (not compared) | max abs diff, priors / value / margin | bit-identical rows |
+|---|---:|---:|---:|---|---|
+| CPU eager (40 games, 14,726 decisions, both viewers) | 5,263 | 22,217 | 1,972 | 4.2e-6 / 5.4e-7 / 1.0e-6 (no tail); 4.0e-6 / 8.9e-7 / 1.3e-6 (gated) | 0 of 5,263; 0 of 22,217 |
+| CUDA eager (10 games, 3,442 decisions) | 1,193 | 5,468 | 223 | 3.6e-6 / 2.4e-7 / 3.6e-7; 2.4e-6 / 8.9e-7 / 7.2e-7 | 1,130 of 1,193; 3,776 of 5,468 |
+| CUDA graphs (the same 10 games) | 1,193 | 5,468 | 223 | 2.9e-6 / 6.9e-7 / 8.0e-7; 2.9e-6 / 7.7e-7 / 1.1e-6 | 0; 0 |
+
+(The rows past v5's caps are hand cards past 16 and stack items past 8 - tail tokens of capped segments, which no v5
+row holds. The tail tokens seen in the CPU games: graveyard_order 59,174, hand 9,180, delayed 5,394, links 1,384,
+library_known 894, stack 446, opponent_triggers 342, stack_relations 56.)
+
+The outputs are equal **within float32 rounding, not bit for bit**: a slot made wider is one input
+product over more columns (my_permanents 172 -> 278 floats, stack 124 -> 438); the new columns' weights
+are exact zeros, but BLAS blocks the sum over the larger K differently, so an embedding moves by up to
+an ulp (6e-8 on the CPU, 1.2e-7 on CUDA); every segment whose width is unchanged embeds bit for bit.
+The coordinator's decision (2026-11-12): accepted - the function is the same; splitting the product
+(as zero-core's `ptr_parts` does for pointer columns) would add kernels to every step. The bound is a
+test: `tests/test_mtg_az.py::test_a_widened_network_reads_v7_rows_within_rounding` (a 128-wide v5 / v6
+network, or the real checkpoint with `MTGZ_WIDEN_CHECKPOINT`, widened, on real Delver rows without a
+tail and with gated tokens only: |diff| <= 1e-5 on priors, value and margin; the unchanged segments'
+embeddings equal).
+
+**The tail smokes**: `python -m mtgz.az.run`, 3 iterations each in a scratch directory, a token network 32 x 1 (heads 2, ff
+64) with `--allow-draft-layout 1 --shard-sparse 1 --window-sparse 1`: `delver-smoke` 205 s, the Doomsday mirror
+154 s, `mtg-smoke` (the cube) 226 s - self-play with tails (iteration 1: 111k tail tokens on 27k rows, 59k on 20k,
+388k on 46k; at most 14, 17 and 31 a row; none past the limit), v2 sparse shards, training (the gates logged and
+moving), evaluation and Elo; every one exits 0. A v7 run needs `--shard-sparse 1` (zero-core R8 refuses a dense
+shard of a game with tails, exit 78) besides `--arch tokens` and `--allow-draft-layout 1`; the `mtg` presets set none
+of them while the layout is a draft. Found by the smokes and the cost check, zero-core 311cf3c (reported, lane Y
+fixing): a gated network's AdamW state is dropped at every iteration ("optimizer state not loaded ... fresh
+optimizer": `opt_state_mismatch` walks the parameters in model order, the optimizer has the gates last); and two
+bf16-autocast failures of the CUDA training step (an override's gate blend, net.py:1380; the explicit attention's
+backward at g = 0, net.py:662) - the GPU smoke of the widened 128 x 8 network waits for the fix.
+
+**The Delver-like cost** (the real 128 x 8 network, real Delver rows, the desktop's RTX 5090 shared):
+inference through the run's own self-play (`Run._selfplay`, the r3 line's settings - rolling,
+sparse batches, CUDA graphs, conc 768, sims 64 / 16, belief-tilted worlds, root-view leaves - on this machine only,
+the GPU idle before each side, alternated): iteration 3198 on its own build (layout v5), its v5 -> v6 widen on main
+7025f2a and its v5 -> v7 widen on this branch (both zero-core 311cf3c, so only the layout differs):
+
+| | v5 | v6 | v7 |
+|---|---:|---:|---:|
+| head features / floats in head slots | 37,620 / 17,940 | 44,212 / 20,116 | 56,192 / 28,416 |
+| permanent / stack / trigger / hand / list slot | 172 / 124 / 56 / 60 / 60 | 196 / 204 / 56 / 60 / 60 | 278 / 438 / 271 / 64 / 64 |
+| leaves/s, 200 games (two rounds) | 65.5k, 65.5k | 63.9k, 63.9k | 54.5k, 55.0k |
+| leaves/s, 1,000 games | 65.8k | 65.1k | 51.4k |
+| decisions/s (finished games' rows), 1,000 games | 698 | 611 | 483 |
+| GPU busy | 87-91% | 89-90% | 84-87% |
+| host encode a row | 6.8 us | 5.5 us | 6.2 us (`encode_row` + overrides) |
+
+v5 -> v6 costs 1-2.5% of the leaves; v6 -> v7 14-21%: the slots made wider (the stack's and the triggers' source
+reference and event, 48 + 167 floats; the static forward embeds every head slot, present or not) and the gated tail
+tokens (about 2 a row on most rows). The training step (`forward_static` under bf16 autocast, 512 rows of the
+proof's Delver rows, their overrides left out, alternated, medians): v5 26.7 ms, v7 with the gates at 0.5 29.9 ms
+(+12%); v7 with the gates at 0 fails (above).
+
+### 125.8 Deviations from and extensions of the frozen API (each the coordinator's decision)
+
+1. A **seventh** tail-only segment, `graveyard_order` (the API had six): the positional graveyard
+   readers' order (R17), approved 2026-11-11 instead of ordered graveyards.
+2. `links` holds, besides `Game::links`, the relations the marks hold any number of (Granted,
+   LeaveTrigger, GrantOnEnter, Triggered, Reanimated, ExiledToPay, DelvePromised) and the picks in
+   progress no head float holds, with a kind one-hot (10 kinds).
+3. A stack ability's **source object** (a reference) and a triggered ability's **event** (EvCtx: player,
+   object, second object, item, the amount in 64 binary digits) on the stack and trigger slots (and
+   the `opponent_triggers` / `delayed` tokens).
+4. `exile_offered` holds the `EXILE` items of the viewer's pending decision (the options), not every
+   exiled card: an exiled card no option names is in the bags as before.
+5. A paged graveyard list shows the page's cards at their absolute positions (the list of a
+   decision about graveyard cards is the decision's, page by page); a looked-at pile and every other
+   list are whole.
+6. `HEAD_TOKENS` 170 (= 1 + sum of the head counts), as the API's change of 2026-11-11.
+
+### 125.9 Left
+
+* zero-core: the three training findings of 125.7 (the optimizer state of a gated network, the two bf16 autocast
+  failures; lane Y fixing), then the GPU smoke of the widened 128 x 8 network (`run_smoke_gpu.sh` in the scratch
+  directory) and the training step at g = 0; the inference cost of the wide stack and trigger slots (125.7) for the
+  core's performance pass.
+* Python tools that search or encode `mtg` states without rows refuse a row with a tail (R1, zero-core R12) until
+  ported to `encode_row` / the rows API: the coordinator's list (Delver Lab x-ply, tools/position_lab.py,
+  tools/delver_blunders.py - `tests/test_blunders.py::test_canary_search_of_a_rebuilt_spot` fails on it until then -,
+  root_view.py, gumbel_eval.py, belief_search.py, mull_floor.py, deck_tilt.py); `mtg_eoe`'s tools are layout v6 and
+  unaffected.
+* The layout stays `draft` until the project ends; no run uses it yet. A v7 run needs `--arch tokens
+  --allow-draft-layout 1 --shard-sparse 1` (the `mtg` presets set none of them).

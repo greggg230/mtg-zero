@@ -49,11 +49,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 SPEC = '{"max_turns": 60, "eval_decks": 16, "eval_seed": 1}'
 EVAL_SPEC = eval_spec(SPEC)
 
-# The objects of encode layout v7 for zero-core's token network (docs/ENGINE.md 22, 35, 60, 100.5, 124.2; v6 + one
-# block of globals appended, the pool's mana of a chosen creature type; v6 was v5 + additions, v5 was v4 + additions: a
-# v6, v5 or v4 network widens onto it exactly, `python tools/fork_run.py <checkpoint> <new run>`, and the encoding guard
-# refuses one unwidened). layout_v6.json, layout_v5.json and layout_v4.json stay: the layouts of the v6, v5 and v4 runs'
-# checkpoints (their configs carry them too). The game `mtg_eoe` keeps layout v6 (`layout_eoe.json`, below).
+# The objects of encode layout v7 for zero-core's token network (docs/ENGINE.md 22, 35, 60, 100.5, 124.2, 125): v6 with
+# wider permanent, hand, stack, trigger and list slots (new floats at their ends), the Cavern block of globals, tails on
+# the seven capped segments (objects past their head slots as tail tokens: zero-core docs/search.md 1.4) and seven
+# tail-only gated segments (the other player's waiting triggers, delayed triggers, links, exile offers, deep known
+# library cards, stack relations, a positional graveyard reader's order), with pointer overrides and a row limit of
+# 4,096 tokens. A draft (`draft: true`) until the variable-length project ends: runs refuse it without
+# `allow_draft_layout`. A v6, v5 or v4 network widens onto it exactly (`python tools/fork_run.py <checkpoint> <new run>`,
+# gates at 0), and the encoding guard refuses one unwidened. layout_v6.json, layout_v5.json and layout_v4.json stay: the
+# layouts of the v6, v5 and v4 runs' checkpoints (their configs carry them too). The game `mtg_eoe` keeps layout v6
+# (`layout_eoe.json`, below).
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v7.json'), encoding='utf-8') as _f:
     LAYOUT = json.load(_f)
 # The team draft's objects (DESIGN.md 2.3.5, docs/ENGINE.md 41, 47: layout draft_v2, the pack and pool

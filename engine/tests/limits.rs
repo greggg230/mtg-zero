@@ -16,6 +16,7 @@ mod common;
 
 use common::db;
 use engine::az::constructed;
+use engine::az::tail_encode::{self, code_identity, seg, Row};
 use engine::db::AbilitySlot;
 use engine::decision::act;
 use engine::testkit::Scenario;
@@ -435,23 +436,31 @@ fn cr_115_1_graveyard_targets_past_the_64_list_slots_are_paged_65_10() {
     }
 }
 
-/// The identity a block slot at `o` holds, if present (its card code's three
-/// one-hot digits; present: the status's first float).
-fn slot_identity(x: &[f32], o: usize) -> Option<usize> {
-    use engine::az::encode::CODE;
-    let digit = |a: usize, n: usize| x[o + a..o + a + n].iter().position(|&v| v == 1.0);
-    (x[o + CODE] == 1.0).then(|| digit(0, 16).unwrap() * 64 + digit(16, 8).unwrap() * 8 + digit(24, 8).unwrap())
+/// Layout v7 (ENGINE.md 125): `v`'s row and the token each option of the
+/// pending decision points at (`Row::pointer`: its override, else its static
+/// slot; None: the generic logit), the pointers checked (`check_pointers`).
+fn row_pointers(g: &Game, v: PlayerId) -> (Row, Vec<Option<(u16, u8, u32)>>) {
+    let row = Row::of(g, v);
+    tail_encode::check_pointers(g, v, &row).unwrap();
+    let mut legal = Vec::new();
+    g.legal_actions(&mut legal);
+    let p = legal.iter().enumerate().map(|(k, &a)| row.pointer(k, a)).collect();
+    (row, p)
 }
 
-/// On a page of a choice among stack items, the stack block shows the page's
-/// items at their slots (ENGINE.md 100.5.1: `STACK` + j is the item at
-/// position 31 + j on the second page, so its token is that item's): with
-/// Counterspell on top of 35 Bolts, the second page's slot 0 holds the Bolt
-/// 31 below the top, not Counterspell, and slots 5..7 (positions 36..38) are
-/// empty. The first page and the other player's encoding show the top.
+/// The identities of segment `sg`'s tokens of a row, by slot.
+fn token_ids(row: &Row, sg: u16) -> Vec<(u32, Option<usize>)> {
+    row.tokens(sg).into_iter().map(|(s, x)| (s, code_identity(x))).collect()
+}
+
+/// On a page of a choice among stack items, every item is still a token at its
+/// place from the top (layout v7, ENGINE.md 125; v6 showed the page's items in
+/// the 8 blocks), and the page's options point at theirs: with Counterspell on
+/// top of 35 Bolts, the second page's `STACK` + j (the Bolt 31 + j below the
+/// top) points at the token at place 31 + j, a tail token (the head holds
+/// places 0..7). The other player's row holds the same 36 tokens.
 #[test]
 fn cr_115_1_a_page_of_stack_items_is_the_stack_blocks() {
-    use engine::az::encode::{O_STACK, STACKS, STACK_W};
     let mut g = scen()
         .hand(0, &["Lightning Bolt"; 35])
         .pool(0, [0, 0, 0, 35, 0, 0], 0)
@@ -465,22 +474,32 @@ fn cr_115_1_a_page_of_stack_items_is_the_stack_blocks() {
     g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
     let ids = engine::az::identity::identities(db());
     let id = |c: CardIdx| ids[g.obj(c).def as usize] as usize;
-    let enc = |g: &Game, v: u8| {
-        let mut x = vec![0.0f32; engine::az::NUM_FEATURES];
-        g.encode_features(v, &mut x);
-        x
-    };
     let (bolt, counter) = (id(spell_at(&g, 1)), id(cs));
-    let x = enc(&g, 1);
-    assert_eq!(slot_identity(&x, O_STACK), Some(counter), "the first page: the top");
+    let all: Vec<(u32, Option<usize>)> = (0..36).map(|s| (s, Some(if s == 0 { counter } else { bolt }))).collect();
+    // (action - `STACK`, pointer) of the page's stack items offered ("next page" aside: the
+    // generic logit)
+    let stack_targets = |g: &Game, p: &[Option<(u16, u8, u32)>]| -> Vec<(u16, Option<(u16, u8, u32)>)> {
+        let mut legal = Vec::new();
+        g.legal_actions(&mut legal);
+        let opts = options(g);
+        assert_eq!(opts.len(), legal.len());
+        (0..legal.len())
+            .filter(|&k| (act::STACK..act::STACK + act::STACK_N).contains(&legal[k]) && !matches!(opts[k], Choice::Page(_)))
+            .map(|k| (legal[k] - act::STACK, p[k]))
+            .collect()
+    };
+    let (row, p) = row_pointers(&g, 1);
+    assert_eq!(token_ids(&row, seg::STACK), all, "the first page: every item");
+    let first = stack_targets(&g, &p);
+    assert!(!first.is_empty() && first.iter().all(|&(j, t)| t == Some((seg::STACK, 0, j as u32))), "the first page: place j: {first:?}");
     g.choose(next_page(&g));
     for v in 0..2u8 {
-        let x = enc(&g, v);
-        let slots: Vec<Option<usize>> = (0..STACKS).map(|s| slot_identity(&x, O_STACK + s * STACK_W)).collect();
+        let (row, p) = row_pointers(&g, v);
+        assert_eq!(token_ids(&row, seg::STACK), all, "P{v}: every item, whatever the page");
         if v == 1 {
-            assert_eq!(slots, [Some(bolt); 5].into_iter().chain([None; 3]).collect::<Vec<_>>(), "P1's page: positions 31..35");
+            assert_eq!(stack_targets(&g, &p), (31..36).map(|s| (s as u16 - 31, Some((seg::STACK, 0, s)))).collect::<Vec<_>>(), "P1's page: places 31..35");
         } else {
-            assert_eq!(slots, [Some(counter)].into_iter().chain([Some(bolt); 7]).collect::<Vec<_>>(), "P0 doesn't decide: the top");
+            assert!(row.ov.is_empty(), "P0 doesn't decide");
         }
     }
 }
@@ -502,12 +521,6 @@ fn choose_paged(g: &mut Game, c: Choice) -> usize {
     turned
 }
 
-fn enc(g: &Game, v: u8) -> Vec<f32> {
-    let mut x = vec![0.0f32; engine::az::NUM_FEATURES];
-    g.encode_features(v, &mut x);
-    x
-}
-
 /// CR 508.1a, 509.1a: attackers and blockers past the 96 `MY_PERM` /
 /// `OPP_PERM` ids (docs/shortcuts.md 26.11.6). P0 controls 96 Islands, then
 /// Llanowar Elves and Elvish Mystic (positions 96 and 97): the attackers'
@@ -516,10 +529,13 @@ fn enc(g: &Game, v: u8) -> Vec<f32> {
 /// decider's permanent blocks show positions 95 on there (its block 1 is the
 /// Elves, with its option flag). Both attack; P1's Elves block the Mystic,
 /// also past the `OPP_PERM` ids. (Before: a loud failure, "permanent slot 96
-/// out of range", and no player could have 97 permanents.)
+/// out of range", and no player could have 97 permanents.) Layout v7 (ENGINE.md
+/// 125): every permanent is a token at its position, the page's options point
+/// at the Elves' and the Mystic's (tail tokens 96 and 97, the Elves' with its
+/// option flag), the Island at 95 has none, and there is no token 98.
 #[test]
 fn cr_508_1a_attackers_and_blockers_past_96_permanents() {
-    use engine::az::encode::{perm, CODE, O_MY_PERM, PERM_W};
+    use engine::az::encode::{perm, CODE};
     use engine::Step;
     let mut mine = vec!["Island"; 96];
     mine.extend(["Llanowar Elves", "Elvish Mystic"]);
@@ -534,11 +550,14 @@ fn cr_508_1a_attackers_and_blockers_past_96_permanents() {
     same_page_after_determinize(&g);
     assert_eq!(actions(&g), vec![act::MY_PERM + 1, act::MY_PERM + 2], "{:?}", g.options_desc());
     let ids = engine::az::identity::identities(db());
-    let x = enc(&g, 0);
-    assert_eq!(slot_identity(&x, O_MY_PERM + PERM_W), Some(ids[g.obj(elves).def as usize] as usize), "block 1: position 96");
-    assert_eq!(x[O_MY_PERM + PERM_W + CODE + perm::OPTION], 1.0);
-    assert_eq!(x[O_MY_PERM + CODE + perm::OPTION], 0.0, "block 0: the Island at position 95");
-    assert_eq!(slot_identity(&x, O_MY_PERM + 3 * PERM_W), None, "no position 98");
+    let (row, p) = row_pointers(&g, 0);
+    assert_eq!(p, [Some((seg::MY_PERM, 0, 96)), Some((seg::MY_PERM, 0, 97))]);
+    let t96 = row.token(seg::MY_PERM, 96).unwrap();
+    assert_eq!(code_identity(t96), Some(ids[g.obj(elves).def as usize] as usize), "token 96: the Elves");
+    assert_eq!(t96[CODE + perm::OPTION], 1.0);
+    assert_eq!(row.token(seg::MY_PERM, 95).unwrap()[CODE + perm::OPTION], 0.0, "the Island at position 95");
+    assert_eq!(row.token(seg::MY_PERM, 98), None, "no position 98");
+    assert_eq!(row.tokens(seg::MY_PERM).len(), 98);
     g.choose(Choice::Card(elves));
     g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers));
     choose_paged(&mut g, Choice::Card(birds));
@@ -557,11 +576,12 @@ fn cr_508_1a_attackers_and_blockers_past_96_permanents() {
 /// offered at priority, its `ACTIVATE` id on the page of the decider's
 /// permanents (`MY_PERM` + 95 = "next page" there; ENGINE.md 100.4.8): 96
 /// Islands, then Mishra's Bauble (position 96): the second page offers its
-/// "{T}, Sacrifice" at `ACTIVATE` + 4, and the permanent blocks show it at
-/// block 1 with its `ACTIVATE` flag.
+/// "{T}, Sacrifice" at `ACTIVATE` + 4, which points at the Bauble's token
+/// (position 96, its first ability's column; layout v7, ENGINE.md 125), its
+/// `ACTIVATE` flag set.
 #[test]
 fn cr_602_2_an_ability_of_a_permanent_past_96_is_offered_at_priority() {
-    use engine::az::encode::{perm, CODE, O_MY_PERM, PERM_W};
+    use engine::az::encode::{perm, CODE};
     use engine::Step;
     let mut mine = vec!["Island"; 96];
     mine.push("Mishra's Bauble");
@@ -573,9 +593,11 @@ fn cr_602_2_an_ability_of_a_permanent_past_96_is_offered_at_priority() {
     g.choose(next_page(&g));
     same_page_after_determinize(&g);
     assert_eq!(g.pending_decision().unwrap().action_of(activate), Some(act::ACTIVATE + 4), "{:?}", g.options_desc());
-    let x = enc(&g, 0);
-    assert_eq!(x[O_MY_PERM + PERM_W + CODE + perm::ACTIVATE], 1.0, "block 1: the Bauble's ability");
-    assert_eq!(x[O_MY_PERM + CODE + perm::ACTIVATE], 0.0);
+    let (row, p) = row_pointers(&g, 0);
+    let k = g.pending_decision().unwrap().options.iter().position(|o| o.choice == activate).unwrap();
+    assert_eq!(p[k], Some((seg::MY_PERM, 1, 96)), "the Bauble's first ability");
+    assert_eq!(row.token(seg::MY_PERM, 96).unwrap()[CODE + perm::ACTIVATE], 1.0, "the Bauble's ability");
+    assert_eq!(row.token(seg::MY_PERM, 95).unwrap()[CODE + perm::ACTIVATE], 0.0);
     g.choose(activate);
     finish(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then_some(player(1)));
     assert_eq!(g.obj(bauble).zone, Zone::Graveyard, "{}", g.log_lines().join("\n"));

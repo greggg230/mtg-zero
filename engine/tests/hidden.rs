@@ -461,10 +461,9 @@ fn casting_a_known_card_is_keyed() {
 
 // ---- A non-deciding viewer's encoding (ENGINE.md 67) ------------------------
 
+/// (Layout v7, ENGINE.md 125: the whole row, head, tail tokens and overrides; `Row::flat`.)
 fn features_of(g: &Game, viewer: PlayerId) -> Vec<f32> {
-    let mut x = vec![0.0; engine::az::encode::NUM_FEATURES];
-    g.encode_features(viewer, &mut x);
-    x
+    engine::az::tail_encode::Row::of(g, viewer).flat()
 }
 
 /// zero-core's root-view leaf values evaluate positions where the other
@@ -488,8 +487,8 @@ fn a_non_deciding_viewers_features_ignore_the_deciders_hidden_cards() {
             d.resample_unpinned(viewer, &mut Rng::new(seed * 31 + r));
             changed += g.player(mover).hand.iter().any(|&c| g.obj(c).def != d.obj(c).def) as u32;
             let y = features_of(&d, viewer);
-            if let Some(i) = (0..x.len()).find(|&i| x[i] != y[i]) {
-                panic!("seed {seed}: P{viewer}'s feature {i} reads P{mover}'s hidden cards ({} -> {})", x[i], y[i]);
+            if let Some(i) = (0..x.len().max(y.len())).find(|&i| x.get(i) != y.get(i)) {
+                panic!("seed {seed}: P{viewer}'s feature {i} reads P{mover}'s hidden cards ({:?} -> {:?})", x.get(i), y.get(i));
             }
             worlds += 1;
         }
@@ -792,15 +791,14 @@ fn hidden_decklists_keep_a_cloud_over_the_whole_hand_and_library() {
     }
 }
 
-use engine::az::encode::{bag, glob, NUM_FEATURES, O_BAGS, O_GLOBALS};
+use engine::az::encode::{bag, glob, O_BAGS, O_GLOBALS};
 use engine::az::hidden_decks::{check_sample, DeckPrior, DeckWant, TablePrior};
 use engine::az::{MtgAz, MtgSpec};
 use zero_search::game::SearchGame;
 
+/// (Layout v7, ENGINE.md 125: the whole row, head, tail tokens and overrides; `Row::flat`.)
 fn az_enc(a: &MtgAz, v: usize) -> Vec<f32> {
-    let mut x = vec![0.0; NUM_FEATURES];
-    a.encode(v, &mut x);
-    x
+    engine::az::tail_encode::Row::of_az(a, v).flat()
 }
 
 fn az_legal(a: &MtgAz) -> Vec<u16> {

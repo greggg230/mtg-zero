@@ -9,7 +9,7 @@
 //! `force_chance` in matches.
 
 use engine::az::bots::{self, Heuristic};
-use engine::az::encode::{self, NUM_FEATURES};
+use engine::az::encode;
 use engine::az::{identity, sample, MtgAz, MtgSpec};
 use engine::db::CardDb;
 use engine::decision::act;
@@ -32,10 +32,9 @@ fn legal(g: &MtgAz) -> Vec<u16> {
     v
 }
 
+/// (Layout v7, ENGINE.md 125: the whole row, head, tail tokens and overrides; `Row::flat`.)
 fn enc(g: &MtgAz, viewer: usize) -> Vec<f32> {
-    let mut x = vec![0.0; NUM_FEATURES];
-    g.encode(viewer, &mut x);
-    x
+    engine::az::tail_encode::Row::of_az(g, viewer).flat()
 }
 
 fn world(g: &MtgAz, viewer: usize, seed: u64) -> MtgAz {
@@ -368,8 +367,8 @@ fn the_bags_show_what_the_viewer_knows_of_the_pool() {
             for w in 0..2 {
                 let d = world(&g, v, 77 + w);
                 let y = enc(&d, v);
-                if let Some(i) = (0..NUM_FEATURES).find(|&i| x[i] != y[i]) {
-                    panic!("features of P{v} changed at {i} ({} -> {}); mover P{mover}", x[i], y[i]);
+                if let Some(i) = (0..x.len().max(y.len())).find(|&i| x.get(i) != y.get(i)) {
+                    panic!("features of P{v} changed at {i} ({:?} -> {:?}); mover P{mover}", x.get(i), y.get(i));
                 }
                 checked += 1;
             }

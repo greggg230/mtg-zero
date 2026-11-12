@@ -110,8 +110,9 @@ fn cr_608_2d_pillage_the_bog_looks_at_62_cards_and_may_keep_the_62nd() {
 /// card and, 70th, a card sorted after them: its list position is 69, past
 /// the 64 `LIBRARY` slots, so the choice pages (ENGINE.md 100.1). The first
 /// page offers the copies at `LIBRARY` + 0 and "next page" at `LIBRARY` + 63;
-/// the next page offers the 70th card alone at `LIBRARY` + 6 (69 - 63), its
-/// identity in list slot 6 of the decider's encoding; it is kept (CR 608.2d).
+/// the next page offers the 70th card alone at `LIBRARY` + 6 (69 - 63), which
+/// points at its list token, place 69 (layout v7, ENGINE.md 125: the whole
+/// list, a tail token past the 64 head slots); it is kept (CR 608.2d).
 /// Each page is asked again identically in the decider's determinized worlds.
 #[test]
 fn cr_608_2d_pillage_the_bog_pages_70_cards_and_may_keep_the_70th() {
@@ -139,18 +140,20 @@ fn cr_608_2d_pillage_the_bog_pages_70_cards_and_may_keep_the_70th() {
         d.determinize(1, &mut engine::rng::Rng::new(seed));
         assert_eq!((d.kind(), d.pending_decision().unwrap().player), (Some(DecisionKind::PutInHand), 0));
     }
-    // The decider's list block shows the page's card at its slot (ENGINE.md
-    // 100.2's rule for a paged list).
+    // The decider's row: the whole list of 70, the page's option pointing at
+    // the 70th card's token (layout v7, ENGINE.md 125).
     {
-        use engine::az::encode::{list, CODE, LIST_W, O_LIST};
-        let mut x = vec![0.0f32; engine::az::NUM_FEATURES];
-        g.encode_features(0, &mut x);
+        use engine::az::encode::{list, CODE};
+        use engine::az::tail_encode::{check_pointers, code_identity, seg, Row};
+        let row = Row::of(&g, 0);
+        check_pointers(&g, 0, &row).unwrap();
+        assert_eq!(row.tokens(seg::LIST).len(), 70);
+        assert_eq!(row.pointer(0, act::LIBRARY + 6), Some((seg::LIST, 0, 69)));
         let ids = engine::az::identity::identities(g.db());
-        let s = &x[O_LIST + 6 * LIST_W..O_LIST + 7 * LIST_W];
-        let digit = |a: usize, n: usize| s[a..a + n].iter().position(|&v| v == 1.0).unwrap_or(99);
-        let id = digit(0, 16) * 64 + digit(16, 8) * 8 + digit(24, 8);
-        assert_eq!(id, ids[g.obj(target).def as usize] as usize, "list slot 6 holds the 70th card");
+        let s = row.token(seg::LIST, 69).unwrap();
+        assert_eq!(code_identity(s), Some(ids[g.obj(target).def as usize] as usize), "list token 69 holds the 70th card");
         assert_eq!((s[CODE + list::PRESENT], s[CODE + list::OPTION]), (1.0, 1.0));
+        assert_eq!(row.token(seg::LIST, 68).unwrap()[CODE + list::OPTION], 0.0, "the 69th: not on this page");
     }
     g.choose(Choice::Card(target));
     g.drive_until(|g| at_priority(g) && g.stack().is_empty());

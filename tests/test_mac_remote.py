@@ -278,6 +278,8 @@ def test_a_worker_plays_mtg(tmp_path, mode):
     from mtgz.az import SPEC_BO3
     cfg = dict(DEFAULTS, **PRESETS['mtg-smoke'])
     cfg.update(conc=4, threads=2, shard_rows=64, max_steps=60_000)
+    # (layout v7, ENGINE.md 125: a token network, sparse v2 shards, the draft layout allowed)
+    cfg.update(arch='tokens', hidden=32, blocks=1, heads=2, ff=64, allow_draft_layout=1, shard_sparse=1, window_sparse=1)
     mirror = tmp_path / 'mtgz-selfplay' / 'r'
     p, events, send, wait_for = _worker(mirror, cfg, mode)
     try:

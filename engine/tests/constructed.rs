@@ -8,7 +8,6 @@
 
 use engine::az::bots::Heuristic;
 use engine::az::constructed::{self, Decklist};
-use engine::az::encode::NUM_FEATURES;
 use engine::az::identity;
 use engine::az::{DeckMode, MtgAz, MtgSpec};
 use engine::db::CardDb;
@@ -110,12 +109,13 @@ fn the_doomsday_75_and_its_provenance() {
         ["Doomsday", "Pact of Negation", "Personal Tutor", "Flow State", "Misdirection", "Cavern of Souls", "Edge of Autumn", "Street Wraith"]
     );
     assert_eq!(side_only, ["Murktide Regent", "Flusterstorm", "Leyline of the Void"]);
-    // A network-driven game can't play it on layout v6: Cavern of Souls'
-    // floating mana needs layout v7 (ENGINE.md 124.2). Rules tests and the
-    // fuzzer (`FUZZ_POOL=doomsday`) play it.
+    // A network-driven game plays it on layout v7 (the `mtg` game: Cavern of
+    // Souls' floating mana is encoded, ENGINE.md 124.2, 125); the layout v6
+    // game `mtg_eoe` refuses a table that makes such mana.
     let spec = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": d.main_names(), "p1": delver().main_names()}});
-    let e = MtgSpec::parse(&spec.to_string()).unwrap_err();
-    assert!(e.contains("p0's deck: Cavern of Souls' floating mana needs layout v7"), "{e}");
+    MtgSpec::parse(&spec.to_string()).unwrap();
+    let e = <engine::az::eoe::MtgEoeAz as zero_search::game::SearchGame>::parse_spec(&spec.to_string()).err().unwrap();
+    assert!(e.contains("mtg_eoe"), "{e}");
 }
 
 #[test]
@@ -372,10 +372,9 @@ fn determinize_samples_the_opponents_unseen_cards_from_their_decklist() {
                             assert_eq!(g.g.ident(c), d.g.ident(c));
                         }
                     }
-                    let mut x = vec![0.0; NUM_FEATURES];
-                    let mut y = vec![0.0; NUM_FEATURES];
-                    g.encode(viewer as usize, &mut x);
-                    d.encode(viewer as usize, &mut y);
+                    // (layout v7: the whole rows, ENGINE.md 125)
+                    let x = engine::az::tail_encode::Row::of_az(&g, viewer as usize);
+                    let y = engine::az::tail_encode::Row::of_az(&d, viewer as usize);
                     assert!(x == y, "the viewer's encoding changed");
                     let hand: Vec<u16> = d.g.player(opp).hand.iter().map(|&c| d.g.obj(c).def).collect();
                     varied += (hand != base_hand) as u32;

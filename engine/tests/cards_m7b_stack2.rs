@@ -345,10 +345,10 @@ fn fanatic_of_rhonas_eternalize_from_the_graveyard_cr_702_129a() {
     let a = Choice::Ability(f, AbilitySlot::Graveyard(0));
     assert_eq!(g.pending_decision().unwrap().action_of(a), Some(act::GY_ABILITY));
     // Encoded: graveyard-ability slot 0 is the Fanatic, an option of P0's.
-    use engine::az::encode::{self, CODE, GYA_W, NUM_FEATURES};
+    use engine::az::encode::{self, CODE, GYA_W};
+    use engine::az::tail_encode::Row;
     for viewer in [0u8, 1] {
-        let mut x = vec![0.0; NUM_FEATURES];
-        g.encode_features(viewer, &mut x);
+        let x = Row::of(&g, viewer).head;
         let s = &x[encode::O_GYA..encode::O_GYA + GYA_W];
         let want = if viewer == 0 { (1.0, 1.0) } else { (0.0, 0.0) };
         assert_eq!((s[CODE], s[CODE + 1]), want, "P0's graveyard for P0; P1's (empty) for P1");
@@ -363,8 +363,7 @@ fn fanatic_of_rhonas_eternalize_from_the_graveyard_cr_702_129a() {
     assert_eq!(g.pt(t), (4, 4));
     assert_eq!(g.colors_of(t), 1 << 2, "black");
     // Its card code's descriptor: black, mana value 0, a 4/4 (CR 707.9b).
-    let mut x = vec![0.0; NUM_FEATURES];
-    g.encode_features(0, &mut x);
+    let x = Row::of(&g, 0).head;
     let o = encode::O_MY_PERM + g.permanents_of(0).position(|c| c == t).unwrap() * encode::PERM_W;
     assert_eq!(&x[o + 38..o + 46], &[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.5, 0.5]);
     let zombie = db().subtype_id("Zombie").unwrap();
@@ -548,31 +547,30 @@ fn cr_602_2_every_graveyard_ability_is_offered_past_the_12_ids() {
     assert_eq!(g.obj(fans[13]).zone, Zone::Exile, "the 14th exiled as its cost");
 }
 
-/// The identity a block slot at `o` holds, if present (its card code's three
-/// one-hot digits; present: the status's first float).
-fn slot_identity(x: &[f32], o: usize) -> Option<usize> {
-    use engine::az::encode::CODE;
-    let digit = |a: usize, n: usize| x[o + a..o + a + n].iter().position(|&v| v == 1.0);
-    (x[o + CODE] == 1.0).then(|| digit(0, 16).unwrap() * 64 + digit(16, 8).unwrap() * 8 + digit(24, 8).unwrap())
-}
-
-/// On a page of Priority's graveyard abilities, the graveyard-abilities
-/// block shows the page's cards at their slots (ENGINE.md 100.5.1:
-/// `GY_ABILITY` + j is the card at place 11 + j on the second page):
-/// fourteen Fanatics of Rhonas, the second page holds three, in slots 0..2,
-/// and slot 3 is empty (the first page: four).
+/// On a page of graveyard abilities, every graveyard card with one is still a
+/// token at its place (layout v7, ENGINE.md 125; v6 showed the page's cards in
+/// the 4 blocks), and the page's options point at theirs: fourteen Fanatics of
+/// Rhonas, the second page's `GY_ABILITY` + j points at the token at place
+/// 11 + j (tail tokens; the head holds places 0..3).
 #[test]
 fn cr_602_2_a_page_of_graveyard_abilities_is_the_blocks() {
-    use engine::az::encode::{GYAS, GYA_W, O_GYA};
+    use engine::az::tail_encode::{check_pointers, seg, Row};
     let mut g = scen().battlefield(0, &["Forest"; 4]).graveyard(0, &[FANATIC; 14]).start();
-    let present = |g: &Game| {
-        let mut x = vec![0.0f32; engine::az::NUM_FEATURES];
-        g.encode_features(0, &mut x);
-        (0..GYAS).map(|k| slot_identity(&x, O_GYA + k * GYA_W).is_some()).collect::<Vec<bool>>()
+    let rows = |g: &Game| {
+        let row = Row::of(g, 0);
+        check_pointers(g, 0, &row).unwrap();
+        let mut legal = Vec::new();
+        g.legal_actions(&mut legal);
+        let p: Vec<_> = legal.iter().enumerate().filter(|(_, &a)| (act::GY_ABILITY..act::GY_ABILITY + act::GY_ABILITY_N).contains(&a)).map(|(k, &a)| row.pointer(k, a)).collect();
+        (row.tokens(seg::GYA).into_iter().map(|t| t.0).collect::<Vec<u32>>(), p)
     };
-    assert_eq!(present(&g), [true; 4]);
+    let (slots, p) = rows(&g);
+    assert_eq!(slots, (0..14).collect::<Vec<u32>>());
+    assert_eq!(p[0], Some((seg::GYA, 0, 0)));
     let next = options(&g).into_iter().find(|c| matches!(c, Choice::Page(_))).unwrap();
     g.choose(next);
     assert_eq!(g.pending_decision().unwrap().options.len(), 3);
-    assert_eq!(present(&g), [true, true, true, false], "places 11..13");
+    let (slots, p) = rows(&g);
+    assert_eq!(slots, (0..14).collect::<Vec<u32>>(), "every card, whatever the page");
+    assert_eq!(p, (11..14).map(|s| Some((seg::GYA, 0, s))).collect::<Vec<_>>(), "places 11..13");
 }

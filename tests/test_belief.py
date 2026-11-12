@@ -56,7 +56,7 @@ def test_the_target_is_the_opponents_hand_by_name_and_never_in_the_features(spec
         t = np.asarray(g.aux_target(me))[:B.D]
         assert collections.Counter({nm[i]: int(t[i]) for i in np.flatnonzero(t)}) == \
             collections.Counter(c['name'] for c in opp['hand'])
-        x = np.asarray(g.encode(me))
+        x = G.row(g, me)
         n, hidden, known, cloud = B.public(x[None])
         assert n[0] == len(opp['hand'])
         # what determinize may deal covers the true hand
@@ -65,7 +65,7 @@ def test_the_target_is_the_opponents_hand_by_name_and_never_in_the_features(spec
         for k in range(2):
             d = g.clone()
             d.determinize(me, 1000 + k)
-            assert np.array_equal(np.asarray(d.encode(me)), x)
+            assert np.array_equal(G.row(d, me), x)
             differ += not np.array_equal(np.asarray(d.aux_target(me))[:B.D], t)
     assert differ > 20
 
@@ -154,12 +154,12 @@ def test_belief_search_rebuilds_the_drivers_games_and_deals_by_the_belief(tmp_pa
         t = np.asarray(g.aux_target(v))[:B.D]
         if not t.sum() or seen % 25:
             continue
-        x = np.asarray(g.encode(v))
+        x = G.row(g, v)
         pred = np.full(B.D, 1e-4, np.float32)
         pred[np.flatnonzero(t)[0]] = 1.0
         w = g.clone()
         # (the prediction of every target: the deck's, which this deal does not read, uniform)
         w.determinize_with(v, 5, np.concatenate([pred / pred.sum(), np.full(B.D, 1.0 / B.D, np.float32)]), 2.0, 1000.0)
-        assert np.array_equal(np.asarray(w.encode(v)), x) and w.legal() == g.legal()
+        assert np.array_equal(G.row(w, v), x) and w.legal() == g.legal()
         dealt += 1
     assert seen > 100 and dealt > 3, (seen, dealt)

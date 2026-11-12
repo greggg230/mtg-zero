@@ -33,6 +33,7 @@ fn cfg(players: usize, events: usize, spec: &str, sims: u32) -> DriverCfg {
         sparse: false,
         branch: None,
         starts: None,
+        max_row_tokens: None,
     }
 }
 

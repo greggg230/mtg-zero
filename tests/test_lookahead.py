@@ -23,7 +23,8 @@ class Ev:
         self.u = UniformEvaluator()
         self.w = G.info('mtg')['aux_width']
 
-    def evaluate(self, x, n_players, opt_off, opt_action, extra=None):
+    def evaluate(self, x, n_players, opt_off, opt_action, extra=None, tail=None, ov=None):
+        # (layout v7's rows carry tails and overrides, ENGINE.md 125: a uniform answer reads neither)
         lb = type('LB', (), {'opt_off': opt_off, 'B': len(n_players), 'n_players': np.asarray(n_players)})()
         pri, val, mar = self.u(lb)
         nb = 0 if extra is None else int((np.asarray(extra) == 2).sum())

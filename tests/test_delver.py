@@ -28,8 +28,8 @@ def test_the_pinned_deck_and_its_loader():
 
 
 def test_the_doomsday_deck_and_its_loader():
-    # ENGINE.md 124.4: the Legacy Doomsday 75; layout v6 refuses it to the engine's spec (Cavern of
-    # Souls' floating mana needs layout v7, ENGINE.md 124.2).
+    # ENGINE.md 124.4: the Legacy Doomsday 75; layout v7 (the `mtg` game) plays it: Cavern of Souls' floating
+    # mana is encoded (ENGINE.md 124.2, 125).
     d = decklists.load(decklists.LEGACY_DOOMSDAY)
     assert (d['player'], d['event'], d['date']) == (
         'wonderPreaux', 'North American Eternal Weekend - Legacy Championship', '2026-10-31')
@@ -37,8 +37,8 @@ def test_the_doomsday_deck_and_its_loader():
     main, side = decklists.names(d['main']), decklists.names(d['sideboard'])
     assert len(main) == 60 and len(side) == 15
     assert main.count('Doomsday') == 4 and main.count('Cavern of Souls') == 1
-    with pytest.raises(Exception, match="Cavern of Souls' floating mana needs layout v7"):
-        G.engine().Game('mtg', decklists.mirror_spec(decklists.LEGACY_DOOMSDAY), 2, 1)
+    g = G.engine().Game('mtg', decklists.mirror_spec(decklists.LEGACY_DOOMSDAY), 2, 1)
+    assert not g.over
 
 
 def test_the_presets():
@@ -67,13 +67,13 @@ def test_the_mirror_through_the_bindings():
     while not g.over:
         legal = g.legal()
         p = g.to_move
-        x = np.asarray(g.encode(p))
-        assert x.shape == (G.info('mtg')['num_features'],) and np.isfinite(x).all()
+        x = G.row(g, p)                                  # (the whole row: head, tail, overrides; ENGINE.md 125)
+        assert np.asarray(g.encode_row(p)[0]).shape == (G.info('mtg')['num_features'],) and np.isfinite(x).all()
         if steps % 20 == 0:
             d = g.clone()
             d.determinize(p, 7)
             assert list(d.legal()) == list(legal)
-            assert np.array_equal(np.asarray(d.encode(p)), x)
+            assert np.array_equal(G.row(d, p), x)
         g.step(int(legal[rng.integers(len(legal))]))
         steps += 1
         assert steps < 20000
@@ -110,5 +110,6 @@ def test_mirror_selfplay_records_samples():
     drive(drv, {'m': UniformEvaluator()}, on_batch=lambda lb: parts.append(drv.take_samples()))
     parts.append(drv.take_samples())
     s = protocol.concat_samples(parts)
-    protocol.validate_samples(s, G.info('mtg')['num_features'])
+    from zero.games import tail_widths
+    protocol.validate_samples(s, G.info('mtg')['num_features'], tail_widths(G.info('mtg')))
     assert len(drv.take_results()) == 2

@@ -104,6 +104,16 @@
 //! and the game goes on with every check of the hidden mode.
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 //!
+//! Layout v7's rows (ENGINE.md 125), at every decision of a game: the decider's whole row (head,
+//! tail, pointer overrides) is bounded, its head is `encode_features`' when it has no tail, its v6
+//! projection is layout v6's encoding (`mtg_eoe`'s path) but on a page v6 showed as a window, and
+//! every option of the decision points at the token of the object it names
+//! (`tail_encode::check_pointers`: static slots, tail tokens, overrides on pages and for exile
+//! offers); rows past `max_row_tokens` are counted. `FUZZ_CAP_CENSUS=1`: per pool, both viewers'
+//! rows at every decision, how often each capped segment passes its head slots, the rows with each
+//! tail-only segment's tokens, the tokens per row (layout v6's present tokens and v7's total; mean,
+//! p99, max), as JSON (`FUZZ_CAP_CENSUS_OUT`, default `fuzz_cap_census_<pool>.json`).
+//!
 //! `FUZZ_HIDDEN_DECKS=1` (ENGINE.md 102): the mode's games (the default decks, `FUZZ_POOL=eoe`'s or
 //! `FUZZ_POOL=sealed`'s) with hidden decklists, played through `MtgAz` (`MtgAz::from_seats`, the
 //! table's `TablePrior` for both decks; with `FUZZ_POOL=sealed` the spec's `SealedPrior`, 102.6): every check of a game (the decider's encoding through `MtgAz::encode`) and at
@@ -1148,33 +1158,6 @@ static MAX_GAME_STEPS: AtomicU64 = AtomicU64::new(0);
 /// ENGINE.md 100.5: encoded in the controlled seat).
 static CONTROLLED: AtomicU64 = AtomicU64::new(0);
 
-/// Every `HAND` option of the pending decision is a present hand slot of the
-/// decider's encoding `x` holding its card (the frame's hand: the controlled
-/// player's in a controlled turn, ENGINE.md 100.5), with its legal flag.
-fn check_hand_options(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
-    use engine::act;
-    use engine::az::encode::{CODE, HANDS, HAND_W, O_HAND};
-    let Some(d) = g.pending_decision() else { return };
-    let ids = engine::az::identity::identities(g.db());
-    let hand = g.hand_sorted(d.player);
-    for o in d.options.iter().filter(|o| (act::HAND..act::HAND + HANDS as u16).contains(&o.action)) {
-        let k = (o.action - act::HAND) as usize;
-        let s = &x[O_HAND + k * HAND_W..O_HAND + (k + 1) * HAND_W];
-        let digit = |a: usize, n: usize| s[a..a + n].iter().position(|&v| v == 1.0).unwrap_or(99);
-        let id = digit(0, 16) * 64 + digit(16, 8) * 8 + digit(24, 8);
-        let want = hand.get(k).map(|&c| ids[g.obj(c).def as usize] as usize);
-        assert!(
-            Some(id) == want && s[CODE] == 1.0 && s[CODE + 2] == 1.0,
-            "{}: {:?} option {} ({}) points at hand slot {k} (identity {id}, present {}, legal {}), not its card's ({want:?})",
-            what(),
-            d.kind,
-            o.action,
-            g.describe_choice(o.choice),
-            s[CODE],
-            s[CODE + 2]
-        );
-    }
-}
 /// The most decisions in one turn of a game (loops of optional actions have
 /// no cap, `engine/src/loops.rs`): (decisions, seed, turn).
 static LONGEST_TURN: std::sync::Mutex<(u64, u64, u32)> = std::sync::Mutex::new((0, 0, 0));
@@ -1305,16 +1288,16 @@ static GY_LIST_MAX: AtomicU64 = AtomicU64::new(0);
 static GY_LIST_BOTH_MAX: AtomicU64 = AtomicU64::new(0);
 
 /// The pending decision's graveyard list (ENGINE.md 65.10) in the decider's
-/// encoding `x`: each option naming a card in a graveyard is `LIBRARY` + k,
-/// k that card's slot in the list (the offered cards' graveyard whole, in
-/// order; offered cards in both: those only, the decider's first), and the
-/// list token in slot k is
-/// that card (its identity, present, an option, whose graveyard); the slots
-/// after the list are empty; no option of any decision but Priority keeps a
-/// `GRAVEYARD` id.
-fn check_graveyard_list(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
+/// row: each option naming a card in a graveyard is `LIBRARY` + k, the card at
+/// the page's first position + k of the list (layout v7: absolute positions,
+/// ENGINE.md 125; the offered cards' graveyard whole, in order; offered cards
+/// in both: those only, the decider's first), and the list token there is that
+/// card (its identity, present, an option, whose graveyard); no option of any
+/// decision but Priority keeps a `GRAVEYARD` id.
+fn check_graveyard_list(g: &Game, row: &engine::az::tail_encode::Row, what: &dyn Fn() -> String) {
     use engine::act;
-    use engine::az::encode::{list, CODE, LIST, LIST_W, O_LIST};
+    use engine::az::encode::{list, CODE};
+    use engine::az::tail_encode::seg;
     use engine::{Target, Zone};
     let Some(d) = g.pending_decision() else { return };
     if d.kind != DecisionKind::Priority {
@@ -1325,13 +1308,13 @@ fn check_graveyard_list(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
             d.kind
         );
     }
-    // (On a page of a paged list, the page's cards at their slots, the
-    // other slots empty: ENGINE.md 100.2.)
+    // (On a page of a paged list, the page's cards at their slots: ENGINE.md 100.2.)
     let slots = g.decision_graveyard_list(d.player, d);
     let gy: Vec<engine::CardIdx> = slots.iter().flatten().copied().collect();
     if gy.is_empty() {
         return;
     }
+    let first = d.range_first(act::LIBRARY, act::LIBRARY_N);
     GY_LISTS.fetch_add(1, Ordering::Relaxed);
     GY_LIST_MAX.fetch_max(gy.len() as u64, Ordering::Relaxed);
     if gy.iter().any(|&c| g.obj(c).owner == d.player) && gy.iter().any(|&c| g.obj(c).owner != d.player) {
@@ -1343,13 +1326,6 @@ fn check_graveyard_list(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
         );
     }
     let ids = engine::az::identity::identities(g.db());
-    let id_at = |k: usize| -> usize {
-        let c = &x[O_LIST + k * LIST_W..O_LIST + k * LIST_W + 32];
-        let a = c[..16].iter().position(|&v| v == 1.0).unwrap_or(99);
-        let b = c[16..24].iter().position(|&v| v == 1.0).unwrap_or(99);
-        let e = c[24..32].iter().position(|&v| v == 1.0).unwrap_or(99);
-        a * 64 + b * 8 + e
-    };
     let mut named = 0;
     for o in &d.options {
         let c = match o.choice {
@@ -1364,65 +1340,197 @@ fn check_graveyard_list(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
         }
         let k = slots.iter().position(|&y| y == Some(c)).unwrap_or_else(|| panic!("{}: {} not in its graveyard list", what(), g.name(c)));
         assert_eq!(o.action, act::LIBRARY + k as u16, "{}: {:?} {} is list slot {k}", what(), d.kind, g.name(c));
-        let s = &x[O_LIST + k * LIST_W + CODE..O_LIST + (k + 1) * LIST_W];
-        assert_eq!(id_at(k), ids[g.obj(c).def as usize] as usize, "{}: {:?} slot {k}'s token isn't {}", what(), d.kind, g.name(c));
-        assert_eq!((s[list::PRESENT], s[list::OPTION]), (1.0, 1.0), "{}: {:?} slot {k}", what(), d.kind);
-        assert_eq!(s[list::THEIRS], (g.obj(c).owner != d.player) as u8 as f32, "{}: slot {k}", what());
+        let pos = first + k as u32;
+        let x = row.token(seg::LIST, pos).unwrap_or_else(|| panic!("{}: {:?} {}: no list token at {pos}", what(), d.kind, g.name(c)));
+        assert_eq!(engine::az::tail_encode::code_identity(&x[..CODE]), Some(ids[g.obj(c).def as usize] as usize), "{}: {:?} position {pos}'s token isn't {}", what(), d.kind, g.name(c));
+        assert_eq!((x[CODE + list::PRESENT], x[CODE + list::OPTION]), (1.0, 1.0), "{}: {:?} position {pos}", what(), d.kind);
+        assert_eq!(x[CODE + list::THEIRS], (g.obj(c).owner != d.player) as u8 as f32, "{}: position {pos}", what());
         named += 1;
     }
     assert!(named > 0, "{}: a graveyard list without a graveyard option", what());
-    for k in slots.len()..LIST {
-        assert!(x[O_LIST + k * LIST_W..O_LIST + (k + 1) * LIST_W].iter().all(|&v| v == 0.0), "{}: list slot {k} after the list", what());
+}
+
+/// Rows read back (`FUZZ_CAP_CENSUS` and the invariants): every option's pointer checked,
+/// the v6 projections compared, the rows past the limit.
+static POINTERS: AtomicU64 = AtomicU64::new(0);
+static V6_SAME: AtomicU64 = AtomicU64::new(0);
+static V6_PAGED: AtomicU64 = AtomicU64::new(0);
+static ROWS_OVER_LIMIT: AtomicU64 = AtomicU64::new(0);
+static MAX_CAPACITY: AtomicU64 = AtomicU64::new(0);
+
+/// Is the pending decision a page layout v6 showed as a window (a range page, or a paged list's
+/// first page whose slot 63 v6 left empty)? There the v6 projection of the v7 head differs from
+/// v6's encoding by design (ENGINE.md 125).
+fn v6_window(g: &Game) -> bool {
+    let Some(d) = g.pending_decision() else { return false };
+    match d.stage {
+        engine::decision::Stage::Paged { window } if window > 0 => true,
+        engine::decision::Stage::Paged { .. } => d.options.iter().any(|o| o.action == engine::act::LIBRARY + engine::act::LIBRARY_N - 1),
+        _ => false,
     }
 }
 
-/// Every `LIBRARY` option of the pending decision points at a list token
-/// of the card it names (ENGINE.md 11, 65.10): the decider's list slot k
-/// (`x`) is present, an option, and the identity of the option's card or
-/// definition (a searched library, a pile, a seen hand, a name, a companion,
-/// the Citadel's top card, a graveyard card).
-fn check_list_options(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
-    use engine::act;
-    use engine::az::encode::{list, CODE, LIST_W, O_LIST};
-    use engine::Target;
-    let Some(d) = g.pending_decision() else { return };
-    let ids = engine::az::identity::identities(g.db());
-    for o in d.options.iter().filter(|o| (act::LIBRARY..act::LIBRARY + act::LIBRARY_N).contains(&o.action)) {
-        let k = (o.action - act::LIBRARY) as usize;
-        let def = match o.choice {
-            Choice::Def(d) => d,
-            Choice::Card(c) | Choice::Cast(c) | Choice::Play(c) | Choice::CastFace(c) | Choice::PlayFace(c) | Choice::Faces(c, _) => g.obj(c).def,
-            Choice::Target(Target::Obj(r)) => g.obj(r.idx).def,
-            // The fourth slot's ability choice (ENGINE.md 100.2): the
-            // definition that has the ability.
-            Choice::Ability(c, slot) => g.activated_home_pub(c, slot),
-            // A paged list's "next page": no card.
-            Choice::Page(_) => continue,
-            other => panic!("{}: {:?}'s LIBRARY option {other:?}", what(), d.kind),
-        };
-        let s = &x[O_LIST + k * LIST_W..O_LIST + (k + 1) * LIST_W];
-        let digit = |a: usize, n: usize| s[a..a + n].iter().position(|&v| v == 1.0).unwrap_or(99);
-        let id = digit(0, 16) * 64 + digit(16, 8) * 8 + digit(24, 8);
-        assert!(
-            id == ids[def as usize] as usize && s[CODE + list::PRESENT] == 1.0 && s[CODE + list::OPTION] == 1.0,
-            "{}: {:?} option {} ({}) points at list slot {k} (identity {id}, present {}, option {}), not its card's token ({})",
-            what(),
-            d.kind,
-            o.action,
-            g.describe_choice(o.choice),
-            s[CODE + list::PRESENT],
-            s[CODE + list::OPTION],
-            ids[def as usize]
-        );
+/// Layout v7's encoding invariants on `viewer`'s row of `g` (ENGINE.md 125): every value finite
+/// and bounded (head and tail); the head is `encode_features`' when the row has no tail (a row with
+/// one is refused there: R1, `tests/v7_tails.rs`); the head's v6 projection is layout v6's encoding
+/// (`mtg_eoe`'s path) but on a page v6 showed as a window; every option of the viewer's decision
+/// points at its object's token (`check_pointers`); the row's capacity within the limit (counted:
+/// zero-core's driver aborts such a game); the census (`FUZZ_CAP_CENSUS`).
+fn check_row(g: &Game, viewer: u8, row: &engine::az::tail_encode::Row, what: &dyn Fn() -> String) {
+    use engine::az::encode::{v6_projection, NUM_FEATURES_V6};
+    let vals: Vec<f32> = row.head.iter().chain(row.tail.iter().flat_map(|t| t.2.iter())).copied().collect();
+    check_bounded(&vals, &|| format!("{} (viewer P{viewer})", what()));
+    if row.tail.is_empty() {
+        let mut h = vec![0.0f32; engine::az::NUM_FEATURES];
+        g.encode_features(viewer, &mut h);
+        assert!(h.iter().zip(&row.head).all(|(a, b)| a.to_bits() == b.to_bits()), "{}: encode_features is not encode_row's head (viewer P{viewer})", what());
     }
+    static P6: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+    let p = P6.get_or_init(v6_projection);
+    let mut v6 = vec![0.0f32; NUM_FEATURES_V6];
+    g.encode_features_v6_check(viewer, &mut v6);
+    if p.iter().zip(&v6).all(|(&i, &y)| row.head[i].to_bits() == y.to_bits()) {
+        V6_SAME.fetch_add(1, Ordering::Relaxed);
+    } else {
+        let i = p.iter().zip(&v6).position(|(&i, &y)| row.head[i].to_bits() != y.to_bits()).unwrap();
+        assert!(v6_window(g), "{}: the v6 projection of the v7 head differs from layout v6's encoding at v6 feature {i} outside a page (viewer P{viewer})", what());
+        V6_PAGED.fetch_add(1, Ordering::Relaxed);
+    }
+    let n = engine::az::tail_encode::check_pointers(g, viewer, row).unwrap_or_else(|e| panic!("{}: {e} (viewer P{viewer})", what()));
+    POINTERS.fetch_add(n as u64, Ordering::Relaxed);
+    let cap = row.capacity() as u64;
+    MAX_CAPACITY.fetch_max(cap, Ordering::Relaxed);
+    if cap > engine::az::tail_encode::MAX_ROW_TOKENS as u64 {
+        ROWS_OVER_LIMIT.fetch_add(1, Ordering::Relaxed);
+    }
+    census::record(g, viewer, row);
 }
 
-/// `viewer`'s encoding of `g` (`buf`: a scratch vector) is bounded.
+/// `viewer`'s whole row of `g` (`buf`: the row as one vector, `Row::flat`, the head first), checked
+/// (`check_row`).
 fn check_encoding(g: &Game, viewer: u8, buf: &mut Vec<f32>, what: &dyn Fn() -> String) {
-    buf.clear();
-    buf.resize(engine::az::NUM_FEATURES, 0.0);
-    g.encode_features(viewer, buf);
-    check_bounded(buf, &|| format!("{} (viewer P{viewer})", what()));
+    let row = engine::az::tail_encode::Row::of(g, viewer);
+    check_row(g, viewer, &row, what);
+    *buf = row.flat();
+}
+
+/// The rows' report: pointers checked, v6 projections, the limit.
+fn rows_report() -> String {
+    format!(
+        "rows: {} options' pointers checked; v6 projection equal on {} rows, {} on pages v6 showed as a window; the most tokens in a row {} (limit {}), {} rows past it",
+        POINTERS.load(Ordering::Relaxed),
+        V6_SAME.load(Ordering::Relaxed),
+        V6_PAGED.load(Ordering::Relaxed),
+        MAX_CAPACITY.load(Ordering::Relaxed),
+        engine::az::tail_encode::MAX_ROW_TOKENS,
+        ROWS_OVER_LIMIT.load(Ordering::Relaxed)
+    )
+}
+
+/// `FUZZ_CAP_CENSUS=1` (ENGINE.md 125; API 10.6): at every decision both viewers' rows, per pool:
+/// per capped segment the rows past its head slots and the most objects; the rows with tokens of
+/// each tail-only segment (1 and 2+ for exile offers), opponent triggers, knowledge at depth >= 3,
+/// stack items with 3+ targets, graveyard-order tokens; the tokens per row (the head's present
+/// tokens - layout v6's count - and v7's total) mean, p99, max. Written as JSON to
+/// `FUZZ_CAP_CENSUS_OUT` (default `target/fuzz_cap_census_<pool>.json`) and printed.
+mod census {
+    use super::*;
+    use engine::az::tail_encode::{seg, Row, SEG_HEAD};
+
+    #[derive(Default)]
+    pub struct Census {
+        pub rows: u64,
+        pub past_head: [u64; seg::N],
+        pub max_objects: [u64; seg::N],
+        pub with_tokens: [u64; seg::N],
+        pub exile_offers_2: u64,
+        pub targets_3: u64,
+        pub tokens_v6: Vec<u32>,
+        pub tokens_v7: Vec<u32>,
+        pub tail_tokens: u64,
+    }
+
+    pub static C: std::sync::Mutex<Option<Census>> = std::sync::Mutex::new(None);
+
+    pub fn on() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var("FUZZ_CAP_CENSUS").is_ok_and(|v| v == "1"))
+    }
+
+    pub fn record(g: &Game, _viewer: u8, row: &Row) {
+        if !on() {
+            return;
+        }
+        let mut objs = [0u64; seg::N];
+        for sg in 0..seg::N as u16 {
+            objs[sg as usize] = row.tokens(sg).iter().map(|t| t.0 as u64 + 1).max().unwrap_or(0);
+        }
+        let present_head: u32 = (0..seg::N as u16).map(|sg| row.tokens(sg).iter().filter(|t| (t.0 as usize) < SEG_HEAD[sg as usize]).count() as u32).sum();
+        let targets_3 = g.stack().iter().any(|s| s.targets.len() >= 3);
+        let mut c = C.lock().unwrap();
+        let c = c.get_or_insert_with(Census::default);
+        c.rows += 1;
+        for i in 0..seg::N {
+            if SEG_HEAD[i] > 0 && objs[i] > SEG_HEAD[i] as u64 {
+                c.past_head[i] += 1;
+            }
+            c.max_objects[i] = c.max_objects[i].max(objs[i]);
+            if row.tail.iter().any(|t| t.0 as usize == i) {
+                c.with_tokens[i] += 1;
+            }
+        }
+        if row.tail.iter().filter(|t| t.0 == seg::EXILE_OFFERED).count() >= 2 {
+            c.exile_offers_2 += 1;
+        }
+        c.targets_3 += targets_3 as u64;
+        c.tokens_v6.push(1 + present_head);
+        c.tokens_v7.push(1 + present_head + row.tail.len() as u32);
+        c.tail_tokens += row.tail.len() as u64;
+    }
+
+    fn stats(v: &mut [u32]) -> serde_json::Value {
+        if v.is_empty() {
+            return serde_json::json!(null);
+        }
+        v.sort_unstable();
+        let mean = v.iter().map(|&x| x as f64).sum::<f64>() / v.len() as f64;
+        let p99 = v[((v.len() as f64 * 0.99) as usize).min(v.len() - 1)];
+        serde_json::json!({"mean": (mean * 100.0).round() / 100.0, "p99": p99, "max": v[v.len() - 1]})
+    }
+
+    /// The census as JSON (`pool`: the `FUZZ_POOL`), written and returned.
+    pub fn report(pool: &str, games: u64) -> Option<String> {
+        if !on() {
+            return None;
+        }
+        let mut g = C.lock().unwrap();
+        let c = g.get_or_insert_with(Census::default);
+        let names = ["context", "tops", "my_permanents", "opponent_permanents", "hand", "stack", "triggers", "list", "graveyard_abilities", "my_companion", "opponent_companion", "opponent_triggers", "delayed", "links", "exile_offered", "library_known", "stack_relations", "graveyard_order"];
+        let share = |n: u64| if c.rows == 0 { 0.0 } else { (n as f64 / c.rows as f64 * 1e6).round() / 1e4 };
+        let mut capped = serde_json::Map::new();
+        let mut tail_only = serde_json::Map::new();
+        for i in 0..seg::N {
+            if SEG_HEAD[i] > 0 && ![seg::CONTEXT as usize, seg::TOPS as usize, seg::MY_COMP as usize, seg::OPP_COMP as usize].contains(&i) {
+                capped.insert(names[i].into(), serde_json::json!({"head": SEG_HEAD[i], "rows_past_head": c.past_head[i], "share_pct": share(c.past_head[i]), "max_objects": c.max_objects[i]}));
+            } else if SEG_HEAD[i] == 0 {
+                tail_only.insert(names[i].into(), serde_json::json!({"rows_with_tokens": c.with_tokens[i], "share_pct": share(c.with_tokens[i]), "max_tokens": c.max_objects[i]}));
+            }
+        }
+        let v = serde_json::json!({
+            "pool": pool, "games": games, "rows": c.rows, "viewers": "both, every decision",
+            "capped_segments": capped,
+            "tail_only_segments": tail_only,
+            "exile_offers_2_plus": {"rows": c.exile_offers_2, "share_pct": share(c.exile_offers_2)},
+            "stack_item_with_3_plus_targets": {"rows": c.targets_3, "share_pct": share(c.targets_3)},
+            "tail_tokens_total": c.tail_tokens,
+            "tokens_per_row_v6_present": stats(&mut c.tokens_v6),
+            "tokens_per_row_v7_total": stats(&mut c.tokens_v7),
+        });
+        let s = serde_json::to_string_pretty(&v).unwrap();
+        let path = std::env::var("FUZZ_CAP_CENSUS_OUT").unwrap_or_else(|_| format!("fuzz_cap_census_{pool}.json"));
+        std::fs::write(&path, &s).unwrap_or_else(|e| panic!("FUZZ_CAP_CENSUS_OUT {path}: {e}"));
+        Some(s)
+    }
 }
 
 /// The spec of drafted match `seed` (`FUZZ_POOL=drafted`): a 4v4 or 2v2 event
@@ -1605,7 +1713,6 @@ fn play(seed: u64, checks: bool) -> Played {
     let mut keys = Vec::new();
     let mut steps = 0;
     let exp = exponential_mode();
-    let mut buf = Vec::new();
     let mut stack_seen: Vec<u32> = Vec::new();
     // (`FUZZ_POOL=dd_b`: lane B's counts, ENGINE.md 124.2.)
     let mut dd_b_seen = Vec::new();
@@ -1630,10 +1737,15 @@ fn play(seed: u64, checks: bool) -> Played {
             // The decider's encoding is finite and bounded (ENGINE.md 46);
             // a graveyard card's option points at its list token (ENGINE.md
             // 65.10).
-            check_encoding(&g, g.to_move().unwrap(), &mut buf, &|| format!("seed {seed} step {steps}"));
-            check_graveyard_list(&g, &buf, &|| format!("seed {seed} step {steps}"));
-            check_list_options(&g, &buf, &|| format!("seed {seed} step {steps}"));
-            check_hand_options(&g, &buf, &|| format!("seed {seed} step {steps}"));
+            // (Layout v7, ENGINE.md 125: the whole row, every option's pointer.)
+            let mover = g.to_move().unwrap();
+            let row = engine::az::tail_encode::Row::of(&g, mover);
+            check_row(&g, mover, &row, &|| format!("seed {seed} step {steps}"));
+            if census::on() {
+                let other = engine::az::tail_encode::Row::of(&g, 1 - mover);
+                census::record(&g, 1 - mover, &other);
+            }
+            check_graveyard_list(&g, &row, &|| format!("seed {seed} step {steps}"));
             if g.pending_decision().is_some_and(|d| g.to_move() != Some(d.player)) {
                 CONTROLLED.fetch_add(1, Ordering::Relaxed);
             }
@@ -1959,6 +2071,11 @@ fn fuzz_random_games() {
     println!("companions revealed {companions}, put into a hand {companions_used}");
     println!("decisions{}: {}", if interactions_mode() { " (FUZZ_POOL=interactions)" } else { "" }, kinds_report());
     println!("numbers{}: {}", if exponential_mode() { " (FUZZ_POOL=exponential)" } else { "" }, extremes_report());
+    // Layout v7's rows (ENGINE.md 125): pointers, the v6 projection, the limit; the census.
+    println!("{}", rows_report());
+    if let Some(c) = census::report(&std::env::var("FUZZ_POOL").unwrap_or_else(|_| "cube".into()), n) {
+        println!("FUZZ_CAP_CENSUS:\n{c}");
+    }
     if n >= 200 && pool_mode() == PoolMode::Default {
         assert!(companions_used > 0, "no companion special action in {n} games");
     }
@@ -2268,7 +2385,7 @@ fn check_match_information_set(g: &engine::az::MtgAz, viewer: usize, seed: u64, 
     let mut b = g.clone();
     b.determinize(viewer, &mut zero_search::rng::Rng::new(s ^ 0x5EED));
     let (mut la, mut lb) = (Vec::new(), Vec::new());
-    let (mut xa, mut xb) = (vec![0.0f32; engine::az::NUM_FEATURES], vec![0.0f32; engine::az::NUM_FEATURES]);
+    let (mut xa, mut xb): (Vec<f32>, Vec<f32>);
     for step in 0..25 {
         if a.match_over() || b.match_over() {
             return;
@@ -2279,10 +2396,8 @@ fn check_match_information_set(g: &engine::az::MtgAz, viewer: usize, seed: u64, 
             assert!(!(a.to_move() == Some(viewer) && b.to_move() == Some(viewer)), "match {seed} step {step}: the viewer's options differ");
             return;
         }
-        xa.fill(0.0);
-        xb.fill(0.0);
-        a.encode(viewer, &mut xa);
-        b.encode(viewer, &mut xb);
+        xa = engine::az::tail_encode::Row::of_az(&a, viewer).flat();
+        xb = engine::az::tail_encode::Row::of_az(&b, viewer).flat();
         if let Some(i) = (0..xa.len()).find(|&i| xa[i] != xb[i]) {
             panic!(
                 "match {seed} step {step}: same keys, different encodings of P{viewer} at {i} ({} / {}); decisions {:?} / {:?}; game {} sb {}
@@ -2337,8 +2452,8 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
     let mut g = MtgAz::new_game(&sp, 2, seed).unwrap_or_else(|e| panic!("match {seed}: {e}"));
     let mut rng = Rng::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 5);
     let (mut legal, mut legal2, mut keys, mut all_keys, mut actions) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
-    let mut x1 = vec![0.0f32; engine::az::NUM_FEATURES];
-    let mut x2 = vec![0.0f32; engine::az::NUM_FEATURES];
+    let mut x1: Vec<f32>;
+    let mut x2: Vec<f32>;
     let (mut sideboard_decisions, mut changed_decks) = (0u32, 0u32);
     let mut decks = [g.m.decks[0].clone(), g.m.decks[1].clone()];
     let mut game_no = 1;
@@ -2352,9 +2467,7 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
         let a = legal[rng.below(legal.len() as u32) as usize];
         if checks {
             // The decider's encoding is finite and bounded (ENGINE.md 46).
-            x1.fill(0.0);
-            g.encode(p, &mut x1);
-            check_bounded(&x1, &|| format!("match {seed} step {}", actions.len()));
+            az_row_checked(&g, p, &|| format!("match {seed} step {}", actions.len()));
         }
         if checks && rng.below(checkpoint_every()) == 0 {
             // A clone continues identically.
@@ -2375,11 +2488,8 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
                 } else {
                     assert_eq!(d.to_move(), Some(p), "match {seed}: determinize changed the decider: {:?} -> {:?}", g.pending_decision(), d.pending_decision());
                 }
-                x1.fill(0.0);
-                x2.fill(0.0);
-                g.encode(viewer, &mut x1);
-                d.encode(viewer, &mut x2);
-                check_bounded(&x2, &|| format!("match {seed}: a world determinized for P{viewer}"));
+                x1 = engine::az::tail_encode::Row::of_az(&g, viewer).flat();
+                x2 = az_row_checked(&d, viewer, &|| format!("match {seed}: a world determinized for P{viewer}"));
                 if let Some(i) = (0..x1.len()).find(|&i| x1[i] != x2[i]) {
                     panic!("match {seed}: determinize changed the encoding of P{viewer} (mover P{p}) at {i}: {} -> {}", x1[i], x2[i]);
                 }
@@ -2400,8 +2510,7 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
                     if viewer == p {
                         assert_eq!(legal, legal2, "match {seed}: a weighted deal changed the decider's actions");
                     }
-                    x2.fill(0.0);
-                    dw.encode(viewer, &mut x2);
+                    x2 = engine::az::tail_encode::Row::of_az(&dw, viewer).flat();
                     if let Some(i) = (0..x1.len()).find(|&i| x1[i] != x2[i]) {
                         panic!("match {seed}: a weighted deal changed the encoding of P{viewer} at {i}");
                     }
@@ -2639,11 +2748,22 @@ fn play_deck_choice(a: &mut engine::az::MtgAz, seed: u64, rng: &mut Rng) {
 /// whenever it may (module docs: random play loops on the base's free activations).
 const HD_LONG_TURN: u64 = 500;
 
+/// `viewer`'s whole row of match `a` as one vector (`Row::flat`; layout v7, ENGINE.md 125).
 fn az_encode(a: &engine::az::MtgAz, viewer: u8, buf: &mut Vec<f32>) {
-    use zero_search::game::SearchGame;
-    buf.clear();
-    buf.resize(engine::az::NUM_FEATURES, 0.0);
-    a.encode(viewer as usize, buf);
+    *buf = engine::az::tail_encode::Row::of_az(a, viewer as usize).flat();
+}
+
+/// `viewer`'s whole row of match `a` as one vector, its values bounded; in a game (not between
+/// the games of a match, not the deck choice) the game's row checked (`check_row`).
+fn az_row_checked(a: &engine::az::MtgAz, viewer: usize, what: &dyn Fn() -> String) -> Vec<f32> {
+    let row = engine::az::tail_encode::Row::of_az(a, viewer);
+    let vals: Vec<f32> = row.head.iter().chain(row.tail.iter().flat_map(|t| t.2.iter())).copied().collect();
+    check_bounded(&vals, &|| format!("{} (viewer P{viewer})", what()));
+    if a.sideboarding().is_none() && a.deck_choice().is_none() && a.g.pending_decision().is_some() {
+        let r = engine::az::tail_encode::Row::of(&a.g, viewer as u8);
+        check_row(&a.g, viewer as u8, &r, what);
+    }
+    row.flat()
 }
 
 fn az_legal(a: &engine::az::MtgAz) -> Vec<u16> {
@@ -2721,7 +2841,7 @@ fn play_hidden(seed: u64) -> Played {
         play_deck_choice(&mut a, seed, &mut rng);
     }
     let mut crng = Rng::new(seed ^ 0xC0_4D_1E7E);
-    let (mut actions, mut keys, mut buf) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut actions, mut keys) = (Vec::new(), Vec::new());
     let mut steps = 0usize;
     let (mut turn, mut turn_steps) = (a.g.turn().number, 0u64);
     while !a.g.is_over() {
@@ -2738,11 +2858,11 @@ fn play_hidden(seed: u64) -> Played {
         };
         count_kind(a.g.kind());
         let mover = a.to_move().unwrap() as u8;
-        az_encode(&a, mover, &mut buf);
-        check_bounded(&buf, &|| format!("seed {seed} step {steps} (viewer P{mover})"));
-        check_graveyard_list(&a.g, &buf, &|| format!("seed {seed} step {steps}"));
-        check_list_options(&a.g, &buf, &|| format!("seed {seed} step {steps}"));
-        check_hand_options(&a.g, &buf, &|| format!("seed {seed} step {steps}"));
+        az_row_checked(&a, mover as usize, &|| format!("seed {seed} step {steps}"));
+        if a.deck_choice().is_none() {
+            let row = engine::az::tail_encode::Row::of(&a.g, mover);
+            check_graveyard_list(&a.g, &row, &|| format!("seed {seed} step {steps}"));
+        }
         if rng.below(checkpoint_every()) == 0 {
             check_clone(&a.g, act, seed);
             check_determinize_hidden(&a, seed, &mut rng);
@@ -2865,8 +2985,7 @@ fn check_determinize_hidden(a: &engine::az::MtgAz, seed: u64, rng: &mut Rng) {
         assert_eq!(d.m.deck(o), world, "{}: the match's deck of the opponent", what());
         assert_eq!(hd_deck(&d, viewer), mine, "{}: the viewer's own cards", what());
         for v in [0u8, 1] {
-            az_encode(&d, v, &mut b1);
-            check_bounded(&b1, &|| format!("{} (viewer P{v})", what()));
+            b1 = az_row_checked(&d, v as usize, &what);
         }
         HD_WORLDS.fetch_add(1, Ordering::Relaxed);
         HD_OTHER_DECK.fetch_add((world != real) as u64, Ordering::Relaxed);

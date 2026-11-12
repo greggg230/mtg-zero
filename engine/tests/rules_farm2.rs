@@ -26,7 +26,6 @@ use engine::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_LOOK};
 use engine::rng::Rng;
 use engine::testkit::Scenario;
 use engine::{CardIdx, Choice, DecisionKind, Game, PlayerId, Step, Target, Zone};
-use engine::az::NUM_FEATURES;
 
 fn scen() -> Scenario {
     Scenario::new(db()).spec(|s| {
@@ -51,10 +50,9 @@ fn bf(g: &Game, p: PlayerId, name: &str) -> CardIdx {
     g.card(p, name, Zone::Battlefield)
 }
 
+/// (Layout v7, ENGINE.md 125: the whole row, head, tail tokens and overrides; `Row::flat`.)
 fn encoding(g: &Game, viewer: PlayerId) -> Vec<f32> {
-    let mut x = vec![0.0f32; NUM_FEATURES];
-    g.encode_features(viewer, &mut x);
-    x
+    engine::az::tail_encode::Row::of(g, viewer).flat()
 }
 
 /// The pending decision's action whose description names `what`.

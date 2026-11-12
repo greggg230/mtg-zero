@@ -26,7 +26,7 @@ def test_engine_module_registers_the_games():
     from mtgz import _engine as E
     assert G.engine() is E and E.game_names() == ['toy', 'mtg', 'team_draft', 'mtg_eoe']
     info = G.info('mtg')
-    assert info['num_actions'] == 1024 and info['num_features'] == 47892      # layout v7 (ENGINE.md 124.2)
+    assert info['num_actions'] == 1024 and info['num_features'] == 56192      # layout v7 (ENGINE.md 125)
     assert G.info('mtg_eoe')['num_features'] == 44212                        # mtg_eoe: layout v6 (ENGINE.md 100.5)
     assert info['min_players'] == info['max_players'] == 2
     assert info['bots'] == ['random', 'heuristic']
@@ -41,13 +41,13 @@ def test_game_through_the_bindings():
         legal = g.legal()
         assert len(legal) >= 1 and list(legal) == sorted(set(legal)) and max(legal) < 1024
         p = g.to_move
-        x = np.asarray(g.encode(p))
-        assert x.shape == (nf(),) and np.isfinite(x).all()
+        x = G.row(g, p)                                  # (the whole row: head, tail, overrides; ENGINE.md 125)
+        assert np.asarray(g.encode_row(p)[0]).shape == (nf(),) and np.isfinite(x).all()
         if steps % 25 == 0:
             d = g.clone()
             d.determinize(p, 99)
             assert list(d.legal()) == list(legal)
-            assert np.array_equal(np.asarray(d.encode(p)), x)          # no hidden information
+            assert np.array_equal(G.row(d, p), x)          # no hidden information
         g.step(int(legal[rng.integers(len(legal))]))
         steps += 1
         assert steps < 20000
@@ -79,7 +79,8 @@ def test_selfplay_records_samples():
     drive(drv, {'m': UniformEvaluator()}, on_batch=lambda lb: parts.append(drv.take_samples()))
     parts.append(drv.take_samples())
     s = protocol.concat_samples(parts)
-    protocol.validate_samples(s, nf())
+    from zero.games import tail_widths
+    protocol.validate_samples(s, nf(), tail_widths(G.info('mtg')))
     assert len(s['x']) > 50
     res = drv.take_results()
     assert len(res) == 2 and all(r['over'] for r in res)
@@ -97,11 +98,11 @@ def test_match_through_the_bindings():
         while not g.over:
             legal = g.legal()
             p = g.to_move
-            x = np.asarray(g.encode(p))
+            x = G.row(g, p)
             if steps % 40 == 0:
                 d = g.clone()
                 d.determinize(p, 7)
-                assert list(d.legal()) == list(legal) and np.array_equal(np.asarray(d.encode(p)), x)
+                assert list(d.legal()) == list(legal) and np.array_equal(G.row(d, p), x)
             g.step(int(legal[rng.integers(len(legal))]))
             steps += 1
             assert steps < 60000
@@ -269,24 +270,111 @@ def test_an_older_token_network_widens_onto_layout_v7_exactly(tmp_path, old_vers
             while not g.over and k < 400:
                 if k % 7 == 0:
                     for v in range(2):
-                        xs.append(np.asarray(g.encode(v)))
+                        xs.append(np.asarray(g.encode_row(v)[0]))    # (the head: what the old layout read)
                 legal = g.legal()
                 g.step(int(legal[rng.integers(len(legal))]))
                 k += 1
     x5 = torch.from_numpy(np.stack(xs))
     x4 = x5[:, fmap]
+    # (the rows' heads, with an empty tail and override set: what the old network reads; real rows with their tails
+    # and overrides: test_a_widened_network_reads_v7_rows_within_rounding)
+    from zero import rows as R
+    B = x5.shape[0]
+    nt = R.Tail.empty(B, R.layout_tails(new.config['layout']))
+    pres = np.ones((B, 1 + len(new.present_index())), bool)
+    kw = {'tail': nt.to_torch('cpu'), 'ov': R.ov_torch(R.resolve(nt, R.Overrides.empty(B), np.zeros(B + 1, np.int64),
+                                                                 np.zeros(0, np.int64), new.config['layout'], present=pres), 'cpu')}
     newcols = torch.ones(x5.shape[1], dtype=torch.bool)
     newcols[fmap] = False
     assert int(newcols.sum()) == info['num_features'] - old_features
     assert old_version == 6 or (x5[:, newcols] != 0).any()      # new facts present (v7's own block: no Cavern here)
     n = torch.full((x5.shape[0],), 2)
     with torch.no_grad():
-        p, q = old(x4, n), new(x5, n)
+        p, q = old(x4, n), new(x5, n, **kw)
         noisy = x5.clone()
         noisy[:, newcols] = torch.rand(x5.shape[0], int(newcols.sum())) * 4 - 2
-        r = new(noisy, n)
+        r = new(noisy, n, **kw)
     for a, b, c in zip(p, q, r):
         assert torch.allclose(a, b, atol=1e-5) and torch.allclose(a, c, atol=1e-5)
+
+
+@pytest.mark.parametrize('old_version, old_features', [(5, 37620), (6, 44212)])
+def test_a_widened_network_reads_v7_rows_within_rounding(old_version, old_features):
+    """ENGINE.md 125.7: a token network of layout v5 or v6 of the Delver line's width (128; the real
+    checkpoint with MTGZ_WIDEN_CHECKPOINT=<a layout v5 / v6 .pt>, a random one otherwise), widened onto
+    layout v7, answers real Delver-mirror rows of this build through the evaluator (CPU, the rows' tails
+    and overrides): on rows without a tail token or override, and on rows whose only new tokens are in
+    gated segments (gates exactly 0), its priors, value and margin are the old network's on the rows' old
+    encodings within float32 rounding, |diff| <= 1e-5 (a slot made wider is one product over more
+    columns: the new ones are exact zeros, but BLAS sums the old ones in another order); the head
+    segments whose width did not change embed bit for bit. A real widen bug is far past the bound."""
+    import os
+    import torch
+    import mtgz.az as A
+    from mtgz.az import decklists
+    from zero import rows as R
+    from zero.infer import NetEvaluator
+    from zero.net import TokenNet, load, token_feature_map, tokens_layout, widen
+    info = G.info('mtg')
+    ck = os.environ.get('MTGZ_WIDEN_CHECKPOINT')
+    old = load(ck, allow_mismatch=True)[0] if ck else None
+    if old is None or old.config['features'] != old_features:
+        with open(os.path.join(os.path.dirname(A.__file__), f'layout_v{old_version}.json'), encoding='utf-8') as f:
+            lo = json.load(f)
+        torch.manual_seed(5)
+        old = TokenNet(old_features, info['num_actions'], lo, d=128, layers=2, heads=4, ff=256, game='mtg').eval()
+        with torch.no_grad():
+            for lin in (old.gen, old.ptr):
+                lin.weight.normal_(0, 0.3)
+                lin.bias.normal_(0, 0.3)
+    new = widen(old, info['num_features'], info['num_actions'], layout=A.LAYOUT)
+    lay = tokens_layout(A.LAYOUT, info['num_features'], info['num_actions'])
+    fmap = np.asarray(token_feature_map(old.config['layout'], old_features, lay, info['num_features']))
+    old.config['game'] = None      # (it reads its own layout's rows, no tail: the v7 game's tail check is not for it)
+    eo, en = NetEvaluator(old, graphs=False), NetEvaluator(new, graphs=False)
+    widths = R.layout_tails(new.config['layout'])
+    gated = {i for i, s in enumerate(new.config['layout']['segments']) if s.get('gate')}
+    assert len(gated) == 7 and set(new.gates().values()) == {0.0}
+    E = G.engine()
+    rng = np.random.default_rng(8)
+    seen = {'plain': 0, 'gated': 0}
+    worst = 0.0
+    spec = decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)
+    for seed in range(2):
+        g = E.Game('mtg', spec, 2, seed)
+        k = 0
+        while not g.over and k < 300:
+            legal = np.asarray(g.legal(), np.int64)
+            if k % 3 == 0:
+                for v in range(2):
+                    x, t = g.encode_row(v)
+                    o, tok = g.option_overrides(v) if v == g.to_move else (np.zeros(0, np.int32), np.zeros(0, np.int64))
+                    segs = set(np.asarray(t['t_seg']).tolist()) | {R.unpack_tok(int(z))[0] for z in tok if z >= 0}
+                    if not segs <= gated:
+                        continue                  # (objects past the old caps: no old encoding holds them)
+                    seen['gated' if len(t['t_seg']) or len(o) else 'plain'] += 1
+                    x = np.asarray(x, np.float32)[None]
+                    acts = legal if v == g.to_move else np.zeros(0, np.int64)
+                    off = np.array([0, len(acts)], np.int64)
+                    n = np.full(1, 2, np.int64)
+                    tail = R.Tail(np.array([0, len(t['t_seg'])], np.int64), t['t_seg'], t['t_slot'], t['t_val'], widths)
+                    ov = R.Overrides(np.array([0, len(o)], np.int64), o, tok)
+                    a = eo.evaluate(x[:, fmap], n, off, acts)
+                    b = en.evaluate(x, n, off, acts, None, tail, ov)
+                    for u, w in zip(a[:3], b[:3]):
+                        worst = max(worst, float(np.max(np.abs(np.asarray(u, np.float64) - np.asarray(w, np.float64)), initial=0.0)))
+            g.step(int(legal[rng.integers(len(legal))]))
+            k += 1
+    assert seen['plain'] > 20 and seen['gated'] > 20, seen
+    assert worst <= 1e-5, worst
+    # the segments of the same width: bit for bit
+    xs = torch.from_numpy(np.asarray(E.Game('mtg', spec, 2, 3).encode_row(0)[0], np.float32))[None]
+    with torch.no_grad():
+        for (so, lo_), (sn, ln) in zip(zip(old.segs, old.seg_in), zip(new.segs, new.seg_in)):
+            if so['count'] and so['width'] == sn['width']:
+                a = lo_(xs[:, fmap][:, so['offset']:so['offset'] + so['count'] * so['width']].reshape(1, so['count'], -1))
+                b = ln(xs[:, sn['offset']:sn['offset'] + sn['count'] * sn['width']].reshape(1, sn['count'], -1))
+                assert torch.equal(a, b), so['name']
 
 
 @pytest.mark.parametrize('old_version, old_features', [(4, 33652), (5, 37620), (6, 44212)])
@@ -294,7 +382,7 @@ def test_the_encoding_guard_refuses_an_older_network_and_takes_a_v7_one(tmp_path
     """ENGINE.md 61, 100.5, 124.2: zero-core's encoding guard (`zero.net.check_encoding`, its
     docs/az.md 10.4) on this build (layout v7): a layout v4, v5 or v6 token network is refused
     wherever it is loaded - net.load, a run's evaluator, the replay recorder - naming both sides
-    (33,652, 37,620 or 44,212 -> 47,892 features, layout v7); its fork_run widen is taken and
+    (33,652, 37,620 or 44,212 -> 56,192 features, layout v7); its fork_run widen is taken and
     written as a v7 network; a new network records layout version 7, and a v7 network recorded as
     another version is refused."""
     import os
@@ -313,8 +401,8 @@ def test_the_encoding_guard_refuses_an_older_network_and_takes_a_v7_one(tmp_path
     with pytest.raises(EncodingMismatch) as e:
         load(p4)
     msg = str(e.value)
-    assert f'features {old_features} -> 47892' in msg and f'token layout v{old_version} (11 segments' in msg
-    assert 'token layout v7 (11' in msg and 'tools/fork_run.py' in msg
+    assert f'features {old_features} -> 56192' in msg and f'token layout v{old_version} (11 segments' in msg
+    assert 'token layout v7 (18' in msg and 'tools/fork_run.py' in msg
     R = run.Run(str(tmp_path / 'r'), run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-smoke']), {}))
     with pytest.raises(EncodingMismatch):
         R.evaluator(p4)
@@ -341,10 +429,10 @@ def test_the_encoding_guard_refuses_an_older_network_and_takes_a_v7_one(tmp_path
         check_encoding(d.config, 'mtg')
 
 
-def test_a_bigger_network_distilled_on_delver_shards_reads_layout_v6(tmp_path):
+def test_a_bigger_network_distilled_on_delver_shards_reads_layout_v7(tmp_path):
     """ENGINE.md 62: zero-core's distillation (tools/distill.py) on Delver mirror self-play shards of
     this build: a token network of another size trained on a small teacher's answers, held out on
-    another shard; the student is a layout v6 network (version recorded, the encoding guard accepts
+    another shard; the student is a layout v7 network (version recorded, the encoding guard accepts
     it), its record in the checkpoint, and it moved toward its teacher."""
     import os
     import sys
@@ -354,7 +442,9 @@ def test_a_bigger_network_distilled_on_delver_shards_reads_layout_v6(tmp_path):
     from zero.net import load, make_net, save
     info = G.info('mtg')
     spec = decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)
-    meta = {'game': 'mtg', 'features': info['num_features'], 'actions': info['num_actions']}
+    from zero.data import shard_format
+    meta = {'game': 'mtg', 'features': info['num_features'], 'actions': info['num_actions'],
+            **shard_format({'shard_sparse': 1}, info)}       # (layout v7: sparse v2 shards, R8)
     for name, seed in (('iter_0001', 3), ('iter_0002', 4)):
         seat = G.nn_seat('m', 4, selfplay=True, sims_fast=2, p_full=0.5, temp_moves=10)
         drv = G.Driver('mtg', [[seat, seat]] * 2, spec=spec, concurrency=2, threads=1, seed=seed, record=True,
@@ -378,7 +468,7 @@ def test_a_bigger_network_distilled_on_delver_shards_reads_layout_v6(tmp_path):
                          '--steps', '40', '--batch', '64', '--lr', '2e-3', '--warmup', '5', '--eval-every', '0',
                          '--torch-threads', '1', '--normal-priority']) == 0
     s, extra = load(out, game='mtg')
-    assert (s.config['d'], s.config['layers'], s.config['layout']['version']) == (48, 2, 6)
+    assert (s.config['d'], s.config['layers'], s.config['layout']['version']) == (48, 2, 7)
     h = extra['distill']['heldout']
     assert [x['step'] for x in h] == [0, 40] and h[-1]['policy_kl'] < h[0]['policy_kl']
     assert extra['teacher_extra'] == {'iter': 3} and extra['distill']['student_net']['params'] == s.n_params()
@@ -420,7 +510,9 @@ def test_a_belief_teacher_distils_into_a_student_with_its_head_on_delver_view_ro
     from zero.net import check_belief_head, load, make_net, save
     info = G.info('mtg')
     spec = decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)
-    meta = {'game': 'mtg', 'features': info['num_features'], 'actions': info['num_actions']}
+    from zero.data import shard_format
+    meta = {'game': 'mtg', 'features': info['num_features'], 'actions': info['num_actions'],
+            **shard_format({'shard_sparse': 1}, info)}       # (layout v7: sparse v2 shards, R8)
     for name, seed in (('iter_0001', 3), ('iter_0002', 4)):
         seat = G.nn_seat('m', 4, selfplay=True, sims_fast=2, p_full=0.5, temp_moves=10, view_samples=0.5)
         drv = G.Driver('mtg', [[seat, seat]] * 2, spec=spec, concurrency=2, threads=1, seed=seed, record=True,

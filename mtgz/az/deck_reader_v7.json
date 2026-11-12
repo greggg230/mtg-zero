@@ -1,0 +1,69 @@
+{
+  "features": 56192,
+  "inputs": [
+    [
+      0,
+      24
+    ],
+    [
+      64,
+      40
+    ],
+    [
+      2432,
+      1024
+    ],
+    [
+      4480,
+      1024
+    ],
+    [
+      6528,
+      1024
+    ],
+    [
+      9600,
+      1024
+    ],
+    [
+      10624,
+      1024
+    ],
+    [
+      12672,
+      1024
+    ],
+    [
+      16768,
+      1024
+    ],
+    [
+      21888,
+      1024
+    ],
+    [
+      52105,
+      1
+    ],
+    [
+      52152,
+      24
+    ]
+  ],
+  "layout": 7,
+  "names": [
+    "globals: the game (turn, step, who is active and has priority, the stack's size, ...)",
+    "globals: the opponent (life, hand, library, graveyard and exile sizes, lands played, mana, mulligans, the board's summary, ...)",
+    "bag OPP_BATTLEFIELD: their permanents",
+    "bag OPP_GRAVEYARD",
+    "bag OPP_EXILE: their exiled cards (face down where the viewer knows them)",
+    "bag OPP_HAND_KNOWN: their hand cards the viewer knows",
+    "bag OPP_HAND_CLOUD: cards the viewer saw and knows are in their hand (or their library, under hidden decklists)",
+    "bag OPP_LIBRARY_KNOWN: their library cards the viewer knows, or knows are in some cards of it",
+    "bag OPP_REVEALED: their reveals in earlier games of a match",
+    "bag OPP_PHASED: their phased-out permanents",
+    "match: the opponent's deck size",
+    "globals v5: the opponent (cards drawn, spells cast this turn and this game, ...)"
+  ],
+  "target": "deck"
+}

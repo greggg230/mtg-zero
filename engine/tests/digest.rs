@@ -175,6 +175,23 @@ fn hash_determinized(h: &mut H, g: &Game, seed: u64, step: u32, legal: &mut Vec<
     }
 }
 
+/// `DIGEST_ENCODING=v6` (ENGINE.md 125): hashed states, and those whose v6 projection of the v7
+/// head is not layout v6's encoding (a range page: v6 showed the page's window, v7 absolute
+/// positions), each hashed by its v6 encoding instead.
+static V6_STATES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static V6_PAGED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Is the pending decision a page of a paged choice that layout v6 showed as a window: a range
+/// page (window >= 1) or a paged list's first page (v6 left its slot 63 empty)?
+fn v6_window(g: &Game) -> bool {
+    let Some(d) = g.pending_decision() else { return false };
+    match d.stage {
+        engine::decision::Stage::Paged { window } if window > 0 => true,
+        engine::decision::Stage::Paged { .. } => d.options.iter().any(|o| o.action == engine::act::LIBRARY + engine::act::LIBRARY_N - 1),
+        _ => false,
+    }
+}
+
 fn hash_encoding(h: &mut H, g: &Game, buf: &mut [f32]) {
     // `DIGEST_ENCODING=0`: leave the encodings out (the behaviour alone, to
     // compare across a layout change: ENGINE.md 36.9).
@@ -182,8 +199,9 @@ fn hash_encoding(h: &mut H, g: &Game, buf: &mut [f32]) {
         return;
     }
     let Some(viewer) = g.to_move() else { return };
-    buf.fill(0.0);
-    g.encode_features(viewer, buf);
+    // Layout v7's whole row (ENGINE.md 125): the head, the tail, the overrides.
+    let row = engine::az::tail_encode::Row::of(g, viewer);
+    buf.copy_from_slice(&row.head);
     let mut x = H::new();
     // `DIGEST_ENCODING=v4`: hash the layout v4 part of each encoding (the
     // v4 projection, ENGINE.md 60.2): the combined digest is then layout v4's
@@ -200,12 +218,28 @@ fn hash_encoding(h: &mut H, g: &Game, buf: &mut [f32]) {
             static P5: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
             Some(P5.get_or_init(engine::az::encode::v5_projection))
         }
-        // `DIGEST_ENCODING=v6`: the layout v6 part (the first 44,212 floats,
-        // ENGINE.md 124.2): layout v6's recorded full digest while every v6
-        // float of layout v7 is v6's.
+        // `DIGEST_ENCODING=v6` (ENGINE.md 125): the layout v6 part of the v7
+        // head (`encode::v6_projection`): layout v6's recorded full digest
+        // while every v6 float of layout v7 is v6's. The v6 encoding itself
+        // (`mtg_eoe`'s path) is computed too: the projection must equal it but
+        // on a page layout v6 showed as a window (`v6_window`, counted, its v6
+        // encoding hashed).
         Ok("v6") => {
             static P6: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
-            Some(P6.get_or_init(engine::az::encode::v6_projection))
+            let p = P6.get_or_init(engine::az::encode::v6_projection);
+            let mut v6 = vec![0.0f32; engine::az::encode::NUM_FEATURES_V6];
+            g.encode_features(viewer, &mut v6);
+            V6_STATES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let same = p.iter().zip(&v6).all(|(&i, &y)| buf[i].to_bits() == y.to_bits());
+            if !same {
+                assert!(v6_window(g), "the v6 projection of the v7 head is not layout v6's encoding outside a page (ENGINE.md 125)");
+                V6_PAGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            for &y in &v6 {
+                x.u64(y.to_bits() as u64);
+            }
+            h.u64(x.0);
+            return;
         }
         _ => None,
     };
@@ -217,10 +251,26 @@ fn hash_encoding(h: &mut H, g: &Game, buf: &mut [f32]) {
         for &f in buf.iter() {
             x.u64(f.to_bits() as u64);
         }
+        // (Layout v7: the tail tokens and the overrides, when the row has any.)
+        if !row.tail.is_empty() || !row.ov.is_empty() {
+            x.u64(0x7A11_7A11_7A11_7A11);
+            for (sg, sl, v) in &row.tail {
+                x.u64(*sg as u64);
+                x.u64(*sl as u64);
+                for &f in v {
+                    x.u64(f.to_bits() as u64);
+                }
+            }
+            x.u64(row.tail.len() as u64);
+            for &(o, t) in &row.ov {
+                x.u64(o as u64);
+                x.u64(t as u64);
+            }
+            x.u64(row.ov.len() as u64);
+        }
     }
     h.u64(x.0);
 }
-
 /// One game; `bot`: the seat the heuristic plays (else both random).
 fn play(seed: u64, bot: Option<u8>, buf: &mut [f32]) -> u64 {
     let (d0, d1) = decks(seed + if bot.is_some() { 1_000_000 } else { 0 });
@@ -288,6 +338,10 @@ fn behaviour_digests() {
         t.elapsed().as_secs_f64(),
         all.0
     );
+    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "v6") {
+        use std::sync::atomic::Ordering::Relaxed;
+        println!("v6: {} states hashed, {} on a page v6 showed as a window (their v6 encoding hashed)", V6_STATES.load(Relaxed), V6_PAGED.load(Relaxed));
+    }
     // `DIGEST_LINES=<file>`: every game's digest written there, in any mode
     // (to count the games a change alters in a mode the recorded file
     // doesn't hold: run on both sides and compare).

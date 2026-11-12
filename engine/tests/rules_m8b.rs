@@ -29,10 +29,9 @@ fn legal(g: &MtgAz) -> Vec<u16> {
     v
 }
 
+/// (Layout v7, ENGINE.md 125: the whole row, head, tail tokens and overrides; `Row::flat`.)
 fn enc(g: &MtgAz, viewer: usize) -> Vec<f32> {
-    let mut x = vec![0.0; encode::NUM_FEATURES];
-    g.encode(viewer, &mut x);
-    x
+    engine::az::tail_encode::Row::of_az(g, viewer).flat()
 }
 
 /// Play a match with random actions (`rng`), or the heuristic in the

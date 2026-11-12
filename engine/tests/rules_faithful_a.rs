@@ -7,6 +7,7 @@
 mod common;
 
 use engine::db::CardDb;
+use engine::az::tail_encode::{seg, Row};
 use engine::decision::act;
 use engine::testkit::Scenario;
 use engine::{CardIdx, Choice, DecisionKind, Game, Step};
@@ -338,32 +339,30 @@ fn cr_122_1_any_of_eighteen_counter_kinds_may_be_removed() {
     assert_eq!(g.counters_on(lh, last), 0, "the 18th kind is removed\n{}", log(&g));
 }
 
-/// The identity a block slot at `o` holds, if present (its card code's three
-/// one-hot digits; present: the status's first float).
-fn slot_identity(x: &[f32], o: usize) -> Option<usize> {
-    use engine::az::encode::CODE;
-    let digit = |a: usize, n: usize| x[o + a..o + a + n].iter().position(|&v| v == 1.0);
-    (x[o + CODE] == 1.0).then(|| digit(0, 16).unwrap() * 64 + digit(16, 8).unwrap() * 8 + digit(24, 8).unwrap())
-}
-
-/// On a page of the trigger order, the triggers block shows the page's
-/// triggers at their slots (ENGINE.md 100.5.1: `TRIGGER` + j is the trigger
-/// at place 15 + j on the second page): eighteen Ouroboroid triggers, the
-/// second page holds three, in slots 0..2, and slot 3 is empty (the first
-/// page: four).
+/// On a page of the trigger order, every trigger is still a token at its place
+/// (layout v7, ENGINE.md 125; v6 showed the page's triggers in the 4 blocks),
+/// and the page's options point at theirs: eighteen Ouroboroid triggers, the
+/// second page's `TRIGGER` + j points at the token at place 15 + j (tail
+/// tokens; the head holds places 0..3).
 #[test]
 fn cr_603_3b_a_page_of_triggers_is_the_trigger_blocks() {
-    use engine::az::encode::{O_TRIG, TRIGS, TRIG_W};
     let mut g = scen().battlefield(0, &["Ouroboroid"; 18]).at(Step::Main1, 0).start();
     g.pass();
     g.drive_until(|g| g.kind() == Some(DecisionKind::OrderTriggers));
-    let present = |g: &Game| {
-        let mut x = vec![0.0f32; engine::az::NUM_FEATURES];
-        g.encode_features(0, &mut x);
-        (0..TRIGS).map(|k| slot_identity(&x, O_TRIG + k * TRIG_W).is_some()).collect::<Vec<bool>>()
+    let rows = |g: &Game| {
+        let row = Row::of(g, 0);
+        engine::az::tail_encode::check_pointers(g, 0, &row).unwrap();
+        let mut legal = Vec::new();
+        g.legal_actions(&mut legal);
+        let p: Vec<_> = legal.iter().enumerate().map(|(k, &a)| row.pointer(k, a)).collect();
+        (row.tokens(seg::TRIGGERS).into_iter().map(|t| t.0).collect::<Vec<u32>>(), p)
     };
-    assert_eq!(present(&g), [true; 4]);
+    let (slots, p) = rows(&g);
+    assert_eq!(slots, (0..18).collect::<Vec<u32>>());
+    assert_eq!(p[0], Some((seg::TRIGGERS, 0, 0)));
     g.choose(next_page(&g));
     assert_eq!(actions(&g), vec![act::TRIGGER, act::TRIGGER + 1, act::TRIGGER + 2]);
-    assert_eq!(present(&g), [true, true, true, false], "places 15..17");
+    let (slots, p) = rows(&g);
+    assert_eq!(slots, (0..18).collect::<Vec<u32>>(), "every trigger, whatever the page");
+    assert_eq!(p, (15..18).map(|s| Some((seg::TRIGGERS, 0, s))).collect::<Vec<_>>(), "places 15..17");
 }

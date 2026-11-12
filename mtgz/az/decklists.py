@@ -22,9 +22,8 @@ IZZET_DELVER = 'izzet_delver_8016541'
 
 # The Legacy Doomsday deck (ENGINE.md 124.4): MTGGoldfish's archetype "Legacy Doomsday" (paper), deck
 # 8027957, "Sultai Doomsday" by wonderPreaux, North American Eternal Weekend - Legacy Championship,
-# 2026-10-31, 7th place (11-2-2); https://www.mtggoldfish.com/deck/8027957. Its Cavern of Souls makes
-# the engine refuse it to network-driven games on layout v6 (floating chosen-type mana needs layout v7,
-# ENGINE.md 124.2).
+# 2026-10-31, 7th place (11-2-2); https://www.mtggoldfish.com/deck/8027957. Its Cavern of Souls' floating mana
+# is encoded by layout v7 (ENGINE.md 124.2, 125): the `mtg` game plays it.
 LEGACY_DOOMSDAY = 'doomsday_8027957'
 
 

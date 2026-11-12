@@ -607,6 +607,89 @@ impl Decision {
     pub fn action_of(&self, choice: Choice) -> Option<u16> {
         self.options.iter().find(|o| o.choice == choice).map(|o| o.action)
     }
+
+    /// The first position of range `base .. base + n` this decision shows (ENGINE.md 100.1,
+    /// 100.4.8, 125): on a range page (window w >= 1 of a paged choice, which offers that range's
+    /// items alone), id `base + j` is the item at position `w (n - 1) + j`; 0 otherwise. The
+    /// decider's permanents page with their `ACTIVATE` ids (`range_first_perms`).
+    pub fn range_first(&self, base: u16, n: u16) -> u32 {
+        match self.stage {
+            Stage::Paged { window } if window > 0 && self.options.iter().any(|o| (base..base + n).contains(&o.action)) => window * (n as u32 - 1),
+            _ => 0,
+        }
+    }
+
+    /// [`range_first`](Self::range_first) of the frame's permanents (`side` 0: `MY_PERM` and
+    /// their `ACTIVATE` ids, linked, ENGINE.md 100.4.8) or the other player's (`OPP_PERM`).
+    pub fn range_first_perms(&self, side: usize) -> u32 {
+        let ids = |a: u16| match side {
+            0 => (act::MY_PERM..act::MY_PERM + act::PERM_N).contains(&a) || (act::ACTIVATE..act::HAND_ABILITY).contains(&a),
+            _ => (act::OPP_PERM..act::OPP_PERM + act::PERM_N).contains(&a),
+        };
+        match self.stage {
+            Stage::Paged { window } if window > 0 && self.options.iter().any(|o| ids(o.action)) => window * (act::PERM_N as u32 - 1),
+            _ => 0,
+        }
+    }
+
+    /// The pointer overrides' helper (layout v7, ENGINE.md 125; zero-core docs/search.md 2.15):
+    /// the object option `a` of this decision names, by its range and its absolute position there
+    /// (a page's `base + j` is the object at the page's first position + j), or None for an option
+    /// about no object (`PASS`, a player, a number, "next page", ...). Positions are the ranges'
+    /// canonical orders (`ask_paged_ranges`): the decider's (frame's) permanents and the other
+    /// player's in timestamp order, the hand sorted by definition, the stack from the top, the
+    /// decider's waiting triggers, the list block's list, the graveyard cards with a graveyard
+    /// ability in graveyard order, the `EXILE` range's items.
+    pub fn option_object(&self, a: u16) -> Option<OptObject> {
+        if matches!(self.choice_of(a), Some(Choice::Page(_)) | None) {
+            return None;
+        }
+        let rel = |base: u16| (a - base) as u32;
+        Some(if (act::MY_PERM..act::MY_PERM + act::PERM_N).contains(&a) {
+            OptObject::MyPerm(self.range_first_perms(0) + rel(act::MY_PERM))
+        } else if (act::ACTIVATE..act::HAND_ABILITY).contains(&a) {
+            let j = rel(act::ACTIVATE);
+            OptObject::Activate(self.range_first_perms(0) + j / 4, (j % 4) as u8)
+        } else if (act::OPP_PERM..act::OPP_PERM + act::PERM_N).contains(&a) {
+            OptObject::OppPerm(self.range_first_perms(1) + rel(act::OPP_PERM))
+        } else if (act::HAND..act::HAND + act::HAND_N).contains(&a) {
+            // (A hand is never paged: at most `MAX_DECK` cards, its 64 ids.)
+            OptObject::Hand(rel(act::HAND))
+        } else if (act::HAND_ABILITY..act::HAND_ABILITY + act::HAND_N).contains(&a) {
+            OptObject::HandAbility(rel(act::HAND_ABILITY))
+        } else if (act::STACK..act::STACK + act::STACK_N).contains(&a) {
+            OptObject::Stack(self.range_first(act::STACK, act::STACK_N) + rel(act::STACK))
+        } else if (act::TRIGGER..act::TRIGGER + act::TRIGGER_N).contains(&a) {
+            OptObject::Trigger(self.range_first(act::TRIGGER, act::TRIGGER_N) + rel(act::TRIGGER))
+        } else if (act::LIBRARY..act::LIBRARY + act::LIBRARY_N).contains(&a) {
+            OptObject::List(self.range_first(act::LIBRARY, act::LIBRARY_N) + rel(act::LIBRARY))
+        } else if (act::GY_ABILITY..act::GY_ABILITY + act::GY_ABILITY_N).contains(&a) {
+            OptObject::GyAbility(self.range_first(act::GY_ABILITY, act::GY_ABILITY_N) + rel(act::GY_ABILITY))
+        } else if (act::EXILE..act::EXILE + act::EXILE_N).contains(&a) {
+            OptObject::Exile(self.range_first(act::EXILE, act::EXILE_N) + rel(act::EXILE))
+        } else if a == act::COMPANION && self.kind == DecisionKind::Priority {
+            OptObject::Companion
+        } else {
+            return None;
+        })
+    }
+}
+
+/// The object an option names ([`Decision::option_object`]): its range and absolute position
+/// (an `ACTIVATE` option: its permanent's position and which of the four abilities).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum OptObject {
+    MyPerm(u32),
+    Activate(u32, u8),
+    OppPerm(u32),
+    Hand(u32),
+    HandAbility(u32),
+    Stack(u32),
+    Trigger(u32),
+    List(u32),
+    GyAbility(u32),
+    Exile(u32),
+    Companion,
 }
 
 // ---- the slot codec (ENGINE.md 11) -----------------------------------------

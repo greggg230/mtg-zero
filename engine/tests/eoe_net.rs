@@ -223,15 +223,18 @@ fn mtg_eoe_is_mtg_on_the_eoe_table() {
             b.legal_actions(&mut lb);
             assert_eq!(la, lb);
             for v in 0..2 {
-                let (mut xa, mut xb) = (vec![0.0; NUM_FEATURES], vec![0.0; encode::NUM_FEATURES_V6]);
-                a.encode(v, &mut xa);
-                b.encode(v, &mut xb);
-                assert!(xa[..encode::NUM_FEATURES_V6] == xb[..], "seed {seed}: the encodings differ");
-                assert!(xa[encode::NUM_FEATURES_V6..].iter().all(|&f| f == 0.0), "seed {seed}: layout v7's block on the EoE table");
+                // (`mtg_eoe`'s layout v6 encoding, and the v7 row's head of the same game: its v6
+                // projection is that encoding, ENGINE.md 125; the Cavern block is zero.)
+                let mut xb = vec![0.0; encode::NUM_FEATURES_V6];
+                a.encode(v, &mut xb);
+                let xa = engine::az::tail_encode::Row::of_az(&b, v).head;
+                assert_eq!(xa.len(), NUM_FEATURES);
+                assert!(encode::v6_projection().iter().zip(&xb).all(|(&j, &y)| xa[j] == y), "seed {seed}: the encodings differ");
+                assert!(xa[encode::O_GLOBALS_V7..].iter().all(|&f| f == 0.0), "seed {seed}: layout v7's Cavern block on the EoE table");
                 for r in 0..BAGS {
-                    assert_eq!(xa[O_BAGS + r * D + UNKNOWN as usize], 0.0, "bag {r} counts UNKNOWN");
+                    assert_eq!(xb[O_BAGS + r * D + UNKNOWN as usize], 0.0, "bag {r} counts UNKNOWN");
                 }
-                let found = slot_identities(&layout, &xa);
+                let found = slot_identities(&layout, &xb);
                 assert!(!found.contains(&(UNKNOWN as usize)), "seed {seed}: a slot codes UNKNOWN");
                 slots += found.len();
                 if a.0.sideboarding().is_none() {

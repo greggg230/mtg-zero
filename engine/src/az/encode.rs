@@ -95,6 +95,8 @@ use crate::ids::{opp, CardIdx, DefId, PlayerId, Target, Zone};
 use crate::program::Op;
 
 use super::identity;
+use super::tail_encode::Cx;
+use zero_search::tail::TailBuf;
 
 /// Identity width: the capacity of the stable card identities (`identity.rs`).
 pub const D: usize = identity::D;
@@ -116,9 +118,13 @@ pub const PERM_V5: usize = 24;
 /// Layout v6 (ENGINE.md 100.5): the permanent status floats v6 added at the
 /// slot's end (status 120..143, `perm::WARP_CAST` ..; 11 spare).
 pub const PERM_V6: usize = 24;
-pub const PERM_W: usize = CODE + 96 + PERM_V5 + PERM_V6;
+/// Layout v7 (ENGINE.md 125): the permanent status floats v7 adds at the
+/// slot's end (status 144.., `perm::PICK_RANK` ..).
+pub const PERM_V7: usize = perm::V7_END - perm::V7;
+pub const PERM_W: usize = CODE + 96 + PERM_V5 + PERM_V6 + PERM_V7;
 pub const HANDS: usize = 16;
-pub const HAND_W: usize = CODE + 8;
+/// Layout v7 (ENGINE.md 125): four more floats (`hand::PICKED` ..).
+pub const HAND_W: usize = CODE + 12;
 pub const STACKS: usize = 8;
 /// Layout v5: the stack status floats v5 added at the slot's end (status
 /// 32..71, `stack::MODES` ..; 8 spare).
@@ -126,13 +132,19 @@ pub const STACK_V5: usize = 40;
 /// Layout v6 (ENGINE.md 100.5): the stack status floats v6 added at the
 /// slot's end (status 72..151, `stack::TARGETS_EXILED` ..; 3 spare).
 pub const STACK_V6: usize = 80;
-pub const STACK_W: usize = CODE + 32 + STACK_V5 + STACK_V6;
+/// Layout v7 (ENGINE.md 125): the stack status floats v7 adds at the slot's
+/// end (status 152.., `stack::SOURCE` ..).
+pub const STACK_V7: usize = stack::V7_END - stack::V7;
+pub const STACK_W: usize = CODE + 32 + STACK_V5 + STACK_V6 + STACK_V7;
 pub const TRIGS: usize = 4;
-pub const TRIG_W: usize = CODE + 4;
+/// Layout v7 (ENGINE.md 125): a waiting trigger's source and event after
+/// v6's four floats (`trig::*`).
+pub const TRIG_W: usize = CODE + trig::END;
 /// M8b: 64 slots (every `LIBRARY` id; a sideboarding pool list has up to
-/// 64 entries), four more floats (`list::*`).
+/// 64 entries), four more floats (`list::*`); layout v7 (ENGINE.md 125):
+/// four more (`list::PICKED` ..).
 pub const LIST: usize = 64;
-pub const LIST_W: usize = CODE + 8;
+pub const LIST_W: usize = CODE + 12;
 pub const GYAS: usize = 4;
 pub const GYA_W: usize = CODE + 4;
 /// Companions (layout v4): the viewer's, then the opponent's.
@@ -161,18 +173,89 @@ pub const O_COMP: usize = O_GYA + GYAS * GYA_W;
 pub const O_MATCH: usize = O_COMP + COMPS * COMP_W;
 pub const O_GLOBALS_V5: usize = O_MATCH + MATCH;
 pub const O_GLOBALS_V6: usize = O_GLOBALS_V5 + GLOBALS_V5;
-/// Layout v6's features (ENGINE.md 100.5): the `mtg_eoe` game's encoding
-/// (`layout_eoe.json`), and the first features of layout v7 (`v6_projection`).
-pub const NUM_FEATURES_V6: usize = O_GLOBALS_V6 + GLOBALS_V6;
 /// Layout v7 (ENGINE.md 124.2): the fourth block of globals (`g7::*`), after
 /// v6's: per player (viewer first) the pool's mana that may be spent only to
 /// cast a creature spell of a chosen type, by colour and type.
 pub const GLOBALS_V7: usize = 2 * g7::PLAYER;
-pub const O_GLOBALS_V7: usize = NUM_FEATURES_V6;
-/// Layout v7's features: the `mtg` game's encoding (the cube's, constructed
-/// play's: `layout_v7.json`).
+pub const O_GLOBALS_V7: usize = O_GLOBALS_V6 + GLOBALS_V6;
+/// Layout v7's features (ENGINE.md 125): the `mtg` game's encoding (the
+/// cube's, constructed play's: `layout_v7.json`), its head; the tail tokens
+/// are `tail_encode`'s.
 pub const NUM_FEATURES: usize = O_GLOBALS_V7 + GLOBALS_V7;
-const _: () = assert!(NUM_FEATURES_V6 == 44_212 && NUM_FEATURES == 47_892);
+const _: () = assert!(NUM_FEATURES == 56_192 && O_MY_PERM == 24_260 && O_STACK == 43_076 && O_MATCH == 52_096 && O_GLOBALS_V7 == 52_512);
+/// Layout v6's features (ENGINE.md 100.5): the `mtg_eoe` game's encoding
+/// (`layout_eoe.json`); every one is a feature of layout v7 (`v6_projection`).
+pub const NUM_FEATURES_V6: usize = v6::NUM_FEATURES;
+
+/// Layout v6 (ENGINE.md 100.5, `mtgz/az/layout_v6.json`): the `mtg_eoe`
+/// game's encoding, and what the widening to v7 needs: its slot widths and
+/// every block's v6 offset.
+pub mod v6 {
+    use super::*;
+    pub const PERM_W: usize = CODE + 96 + PERM_V5 + PERM_V6;
+    pub const HAND_W: usize = CODE + 8;
+    pub const STACK_W: usize = CODE + 32 + STACK_V5 + STACK_V6;
+    pub const TRIG_W: usize = CODE + 4;
+    pub const LIST_W: usize = CODE + 8;
+    pub const O_MY_PERM: usize = O_TOPS + 2 * TOPS * TOP_W;
+    pub const O_OPP_PERM: usize = O_MY_PERM + PERMS * PERM_W;
+    pub const O_HAND: usize = O_OPP_PERM + PERMS * PERM_W;
+    pub const O_STACK: usize = O_HAND + HANDS * HAND_W;
+    pub const O_TRIG: usize = O_STACK + STACKS * STACK_W;
+    pub const O_LIST: usize = O_TRIG + TRIGS * TRIG_W;
+    pub const O_GYA: usize = O_LIST + LIST * LIST_W;
+    pub const O_COMP: usize = O_GYA + GYAS * GYA_W;
+    pub const O_MATCH: usize = O_COMP + COMPS * COMP_W;
+    pub const O_GLOBALS_V5: usize = O_MATCH + MATCH;
+    pub const O_GLOBALS_V6: usize = O_GLOBALS_V5 + GLOBALS_V5;
+    pub const NUM_FEATURES: usize = O_GLOBALS_V6 + GLOBALS_V6;
+    const _: () = assert!(NUM_FEATURES == 44_212 && O_MY_PERM == 24_260 && O_STACK == 37_764 && O_MATCH == 43_796);
+}
+
+/// A layout's offsets and slot widths, by segment index (`tail_encode::seg`):
+/// the encoder writes layout v7 (`LAY7`, the `mtg` game) or v6 (`LAY6`,
+/// `mtg_eoe`: no tail, the v7 floats left out, pages shown as v6 showed them).
+pub struct Lay {
+    pub v7: bool,
+    pub features: usize,
+    /// Each object segment's offset and slot width (tail-only segments: 0).
+    pub off: [usize; super::tail_encode::seg::N],
+    pub w: [usize; super::tail_encode::seg::N],
+    pub o_match: usize,
+    pub o_globals_v5: usize,
+    pub o_globals_v6: usize,
+}
+
+pub const LAY7: Lay = Lay {
+    v7: true,
+    features: NUM_FEATURES,
+    off: [O_CONTEXT, O_TOPS, O_MY_PERM, O_OPP_PERM, O_HAND, O_STACK, O_TRIG, O_LIST, O_GYA, O_COMP, O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0],
+    w: super::tail_encode::SEG_W,
+    o_match: O_MATCH,
+    o_globals_v5: O_GLOBALS_V5,
+    o_globals_v6: O_GLOBALS_V6,
+};
+
+pub const LAY6: Lay = Lay {
+    v7: false,
+    features: v6::NUM_FEATURES,
+    off: [O_CONTEXT, O_TOPS, v6::O_MY_PERM, v6::O_OPP_PERM, v6::O_HAND, v6::O_STACK, v6::O_TRIG, v6::O_LIST, v6::O_GYA, v6::O_COMP, v6::O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0],
+    w: [CONTEXT, TOP_W, v6::PERM_W, v6::PERM_W, v6::HAND_W, v6::STACK_W, v6::TRIG_W, v6::LIST_W, GYA_W, COMP_W, COMP_W, 0, 0, 0, 0, 0, 0, 0],
+    o_match: v6::O_MATCH,
+    o_globals_v5: v6::O_GLOBALS_V5,
+    o_globals_v6: v6::O_GLOBALS_V6,
+};
+
+impl Lay {
+    /// The layout of an encoding of `n` floats: v7's or v6's (a loud failure otherwise).
+    pub fn of(n: usize) -> &'static Lay {
+        match n {
+            NUM_FEATURES => &LAY7,
+            v6::NUM_FEATURES => &LAY6,
+            _ => panic!("an encoding of {n} floats: layout v7's {NUM_FEATURES} or v6's {}", v6::NUM_FEATURES),
+        }
+    }
+}
 
 /// Layout v5 (ENGINE.md 60, `mtgz/az/layout_v5.json`), as far as the
 /// widening to v6 needs it: its features, its bags and the widths of the
@@ -187,10 +270,10 @@ pub mod v5 {
     pub const O_MY_PERM: usize = O_TOPS + 2 * TOPS * TOP_W;
     pub const O_OPP_PERM: usize = O_MY_PERM + PERMS * PERM_W;
     pub const O_HAND: usize = O_OPP_PERM + PERMS * PERM_W;
-    pub const O_STACK: usize = O_HAND + HANDS * HAND_W;
+    pub const O_STACK: usize = O_HAND + HANDS * super::v6::HAND_W;
     pub const O_TRIG: usize = O_STACK + STACKS * STACK_W;
-    pub const O_LIST: usize = O_TRIG + TRIGS * TRIG_W;
-    pub const O_GYA: usize = O_LIST + LIST * LIST_W;
+    pub const O_LIST: usize = O_TRIG + TRIGS * super::v6::TRIG_W;
+    pub const O_GYA: usize = O_LIST + LIST * super::v6::LIST_W;
     pub const O_COMP: usize = O_GYA + GYAS * GYA_W;
     pub const O_MATCH: usize = O_COMP + COMPS * COMP_W;
     pub const O_GLOBALS_V5: usize = O_MATCH + MATCH;
@@ -211,10 +294,10 @@ pub mod v4 {
     pub const O_MY_PERM: usize = O_TOPS + 2 * TOPS * TOP_W;
     pub const O_OPP_PERM: usize = O_MY_PERM + PERMS * PERM_W;
     pub const O_HAND: usize = O_OPP_PERM + PERMS * PERM_W;
-    pub const O_STACK: usize = O_HAND + HANDS * HAND_W;
+    pub const O_STACK: usize = O_HAND + HANDS * super::v6::HAND_W;
     pub const O_TRIG: usize = O_STACK + STACKS * STACK_W;
-    pub const O_LIST: usize = O_TRIG + TRIGS * TRIG_W;
-    pub const O_GYA: usize = O_LIST + LIST * LIST_W;
+    pub const O_LIST: usize = O_TRIG + TRIGS * super::v6::TRIG_W;
+    pub const O_GYA: usize = O_LIST + LIST * super::v6::LIST_W;
     pub const O_COMP: usize = O_GYA + GYAS * GYA_W;
     pub const O_MATCH: usize = O_COMP + COMPS * COMP_W;
     pub const NUM_FEATURES: usize = O_MATCH + MATCH;
@@ -269,50 +352,80 @@ pub fn v4_to_v5() -> Vec<usize> {
     )
 }
 
-/// Where each layout v5 feature is in layout v6 (ENGINE.md 100.5), as
+//// Where each layout v5 feature is in layout v6 (ENGINE.md 100.5), as
 /// [`v4_to_v5`] for v4: every block keeps its order; a v5 slot's floats are
 /// the first ones of the v6 slot (the permanents' 172 of 196, the stack's
 /// 124 of 204), v5's bags the first 19 of v6's 23, and v5's three global
 /// blocks the same blocks of v6 (v6's own block comes after them). So the
-/// v6 encoding at these indices IS the v5 encoding (`DIGEST_ENCODING=v5`
-/// hashes this projection and reproduces layout v5's recorded digest), and
-/// zero-core's `net.widen` with `layout_v6.json` maps a v5 network's input
-/// columns the same way (`layout_v6_widens_layout_v5_exactly`).
-pub fn v5_projection() -> Vec<usize> {
+/// v6 encoding at these indices IS the v5 encoding, and zero-core's
+/// `net.widen` with `layout_v6.json` maps a v5 network's input columns the
+/// same way (`layout_v6_widens_layout_v5_exactly`).
+pub fn v5_to_v6() -> Vec<usize> {
     project(
         v5::NUM_FEATURES,
-        NUM_FEATURES,
+        v6::NUM_FEATURES,
         &[
             (O_GLOBALS, O_GLOBALS, 1, GLOBALS, GLOBALS),
             (O_CONTEXT, O_CONTEXT, 1, CONTEXT, CONTEXT),
             (v5::O_BAGS, O_BAGS, 1, v5::BAGS * D, BAGS * D),
             (v5::O_TOPS, O_TOPS, 2 * TOPS, TOP_W, TOP_W),
-            (v5::O_MY_PERM, O_MY_PERM, PERMS, v5::PERM_W, PERM_W),
-            (v5::O_OPP_PERM, O_OPP_PERM, PERMS, v5::PERM_W, PERM_W),
-            (v5::O_HAND, O_HAND, HANDS, HAND_W, HAND_W),
-            (v5::O_STACK, O_STACK, STACKS, v5::STACK_W, STACK_W),
-            (v5::O_TRIG, O_TRIG, TRIGS, TRIG_W, TRIG_W),
-            (v5::O_LIST, O_LIST, LIST, LIST_W, LIST_W),
-            (v5::O_GYA, O_GYA, GYAS, GYA_W, GYA_W),
-            (v5::O_COMP, O_COMP, COMPS, COMP_W, COMP_W),
-            (v5::O_MATCH, O_MATCH, 1, MATCH, MATCH),
-            (v5::O_GLOBALS_V5, O_GLOBALS_V5, 1, GLOBALS_V5, GLOBALS_V5),
+            (v5::O_MY_PERM, v6::O_MY_PERM, PERMS, v5::PERM_W, v6::PERM_W),
+            (v5::O_OPP_PERM, v6::O_OPP_PERM, PERMS, v5::PERM_W, v6::PERM_W),
+            (v5::O_HAND, v6::O_HAND, HANDS, v6::HAND_W, v6::HAND_W),
+            (v5::O_STACK, v6::O_STACK, STACKS, v5::STACK_W, v6::STACK_W),
+            (v5::O_TRIG, v6::O_TRIG, TRIGS, v6::TRIG_W, v6::TRIG_W),
+            (v5::O_LIST, v6::O_LIST, LIST, v6::LIST_W, v6::LIST_W),
+            (v5::O_GYA, v6::O_GYA, GYAS, GYA_W, GYA_W),
+            (v5::O_COMP, v6::O_COMP, COMPS, COMP_W, COMP_W),
+            (v5::O_MATCH, v6::O_MATCH, 1, MATCH, MATCH),
+            (v5::O_GLOBALS_V5, v6::O_GLOBALS_V5, 1, GLOBALS_V5, GLOBALS_V5),
         ],
     )
 }
 
-/// Where each layout v6 feature is in layout v7 (ENGINE.md 124.2): the same
-/// index (v7 appends one block of globals after v6's last feature), so the
-/// v7 encoding's first [`NUM_FEATURES_V6`] floats ARE the v6 encoding
-/// (`DIGEST_ENCODING=v6` hashes them: layout v6's recorded full digest while
-/// no game plays differently), and zero-core's `net.widen` with
-/// `layout_v7.json` maps a v6 network's input columns the same way
+/// Where each layout v6 feature is in layout v7 (ENGINE.md 125): every
+/// block keeps its order; a v6 slot's floats are the first ones of the v7
+/// slot (permanents, hand, stack, triggers and list are wider: v7's floats
+/// at their ends), the globals the same blocks (v7's Cavern block after
+/// them, ENGINE.md 124.2). So the v7 head at these indices IS the v6
+/// encoding on every state v6 encodes alike (not a range page, where v6
+/// showed the page's window and v7 absolute positions: `DIGEST_ENCODING=v6`
+/// counts those), and zero-core's `net.widen` with `layout_v7.json` maps a
+/// v6 network's input columns the same way
 /// (`layout_v7_widens_layout_v6_exactly`).
 pub fn v6_projection() -> Vec<usize> {
-    (0..NUM_FEATURES_V6).collect()
+    project(
+        v6::NUM_FEATURES,
+        NUM_FEATURES,
+        &[
+            (O_GLOBALS, O_GLOBALS, 1, GLOBALS, GLOBALS),
+            (O_CONTEXT, O_CONTEXT, 1, CONTEXT, CONTEXT),
+            (O_BAGS, O_BAGS, 1, BAGS * D, BAGS * D),
+            (O_TOPS, O_TOPS, 2 * TOPS, TOP_W, TOP_W),
+            (v6::O_MY_PERM, O_MY_PERM, PERMS, v6::PERM_W, PERM_W),
+            (v6::O_OPP_PERM, O_OPP_PERM, PERMS, v6::PERM_W, PERM_W),
+            (v6::O_HAND, O_HAND, HANDS, v6::HAND_W, HAND_W),
+            (v6::O_STACK, O_STACK, STACKS, v6::STACK_W, STACK_W),
+            (v6::O_TRIG, O_TRIG, TRIGS, v6::TRIG_W, TRIG_W),
+            (v6::O_LIST, O_LIST, LIST, v6::LIST_W, LIST_W),
+            (v6::O_GYA, O_GYA, GYAS, GYA_W, GYA_W),
+            (v6::O_COMP, O_COMP, COMPS, COMP_W, COMP_W),
+            (v6::O_MATCH, O_MATCH, 1, MATCH, MATCH),
+            (v6::O_GLOBALS_V5, O_GLOBALS_V5, 1, GLOBALS_V5, GLOBALS_V5),
+            (v6::O_GLOBALS_V6, O_GLOBALS_V6, 1, GLOBALS_V6, GLOBALS_V6),
+        ],
+    )
 }
 
-/// Where each layout v4 feature is in layout v6: [`v4_to_v5`] then
+/// Where each layout v5 feature is in layout v7: [`v5_to_v6`] then
+/// [`v6_projection`] (`DIGEST_ENCODING=v5` hashes it: layout v5's recorded
+/// digest while no game plays differently).
+pub fn v5_projection() -> Vec<usize> {
+    let (a, b) = (v5_to_v6(), v6_projection());
+    a.into_iter().map(|i| b[i]).collect()
+}
+
+/// Where each layout v4 feature is in layout v7: [`v4_to_v5`] then
 /// [`v5_projection`] (`DIGEST_ENCODING=v4` hashes it: layout v4's recorded
 /// digest while no game plays differently).
 pub fn v4_projection() -> Vec<usize> {
@@ -320,7 +433,7 @@ pub fn v4_projection() -> Vec<usize> {
     a.into_iter().map(|i| b[i]).collect()
 }
 
-/// Features are exact within +-`SQUASH_FROM` (ENGINE.md 46): a 1,024-power
+// Features are exact within +-`SQUASH_FROM` (ENGINE.md 46): a 1,024-power
 /// creature (P/T / 8), 2,560 total power or life (/ 20), any bag. The
 /// behaviour digests' largest value is 68.1 (a 545/545 creature of random
 /// play), so none of their states changes.
@@ -380,6 +493,47 @@ pub mod list {
     /// Decided: at or before the last entry changed (entries change in
     /// increasing order).
     pub const DECIDED: usize = 7;
+    /// Layout v7 (ENGINE.md 125), floats 8-11 (the slot's new end): a pick in
+    /// progress of the pending decision's frame (`tail_encode::Picks`): the
+    /// times this card was picked / 4, its rank (its first pick, 1-based) / 8.
+    pub const PICKED: usize = 8;
+    pub const PICK_RANK: usize = 9;
+}
+
+/// Offsets inside a hand slot (after its card code; layout v4's floats 0-7, layout v7's 8-11).
+pub mod hand {
+    pub const PRESENT: usize = 0;
+    /// Copies of its definition in the hand / 4.
+    pub const COPIES: usize = 1;
+    /// Its `HAND` / `HAND_ABILITY` id is an option of the viewer's decision.
+    pub const LEGAL: usize = 2;
+    pub const ABILITY_LEGAL: usize = 3;
+    /// The opponent knows it.
+    pub const OPP_KNOWS: usize = 4;
+    pub const LAND: usize = 5;
+    /// What its `HAND` id casts or plays: its front face, its other face.
+    pub const FRONT: usize = 6;
+    pub const OTHER: usize = 7;
+    /// Layout v7 (ENGINE.md 125): picked by the pending decision's frame (`list::PICKED`).
+    pub const PICKED: usize = 8;
+    pub const PICK_RANK: usize = 9;
+}
+
+/// Offsets inside a waiting trigger's slot (after its card code; both players' triggers,
+/// `triggers` and `opponent_triggers`).
+pub mod trig {
+    use super::super::tail_encode::{ev, rf};
+    pub const PRESENT: usize = 0;
+    /// Its slot in its definition's triggers, (k + 1) / 4.
+    pub const SLOT: usize = 1;
+    /// Its `TRIGGER` id is an option of the viewer's decision.
+    pub const LEGAL: usize = 2;
+    /// Layout v7 (ENGINE.md 125), after v6's four floats: its source object
+    /// (`tail_encode::rf`) and its event (`tail_encode::ev`: "that player",
+    /// "that creature", "that much").
+    pub const SOURCE: usize = 4;
+    pub const EV: usize = SOURCE + rf::W;
+    pub const END: usize = EV + ev::W;
 }
 
 /// Offsets inside the match block (layout v4, M8b, ENGINE.md 36.7). "Me" is
@@ -672,12 +826,67 @@ pub mod perm {
     pub const CHOSEN_CREATURE_TYPE: usize = 133;
     /// The first spare status float of layout v6 (142..143 spare).
     pub const V6_END: usize = CHOSEN_CREATURE_TYPE + super::TYPE_BITS;
+    /// Layout v7 (ENGINE.md 125), status 144.. (the slot's new end). Lane A's
+    /// picks in progress (`tail_encode::Picks`): its rank (its first pick,
+    /// 1-based) / 8 (squashed), the times the frame player and the other
+    /// picked it / 2 (votes count).
+    pub const V7: usize = 144;
+    pub const PICK_RANK: usize = V7;
+    pub const PICKS_ME: usize = V7 + 1;
+    pub const PICKS_OPP: usize = V7 + 2;
+    /// The keywords outside `KWS` (Infect, Shadow, Plainswalk, Islandwalk,
+    /// Swampwalk, Mountainwalk, Forestwalk: `kw_float`, an exhaustive match).
+    pub const KW_V7: usize = V7 + 3;
+    pub const KW_V7_N: usize = 7;
+    /// `Mark::ChosenName` (Anointed Peacekeeper): a name was chosen, it is a
+    /// name of no card in the game (`NO_NAME`, one shared value), the named
+    /// identity's 32 digits.
+    pub const CHOSEN_NAME: usize = KW_V7 + KW_V7_N;
+    pub const CHOSEN_NAME_NONE: usize = CHOSEN_NAME + 1;
+    pub const CHOSEN_NAME_DIGITS: usize = CHOSEN_NAME + 2;
+    /// `Mark::Entered`: it entered with an additional cost paid more than 255
+    /// times or an X above 63 (its enters note's `ENTER_BIG`): the times / 8
+    /// and X / 8 (squashed).
+    pub const ENTERED_BIG: usize = CHOSEN_NAME_DIGITS + 32;
+    pub const ENTERED_TIMES: usize = ENTERED_BIG + 1;
+    pub const ENTERED_X: usize = ENTERED_BIG + 2;
+    /// `Mark::UsedTurn` of this turn (Serra Paragon's "once during each of
+    /// your turns" used), `Mark::Harnessed`, `Mark::Boasted` this turn.
+    pub const USED_TURN: usize = ENTERED_BIG + 3;
+    pub const HARNESSED: usize = USED_TURN + 1;
+    pub const BOASTED: usize = USED_TURN + 2;
+    /// `Mark::KickerX`: kicked with this X (present, X / 8 squashed).
+    pub const KICKER_X: usize = USED_TURN + 3;
+    pub const KICKER_X_VAL: usize = KICKER_X + 1;
+    /// `Mark::Saddled` this turn.
+    pub const SADDLED: usize = KICKER_X + 2;
+    /// `Mark::ModesUsed`: the modes chosen so far (8 bits).
+    pub const MODES_USED: usize = SADDLED + 1;
+    /// `Mark::Parity`: chosen, and odd.
+    pub const PARITY: usize = MODES_USED + 8;
+    pub const PARITY_ODD: usize = PARITY + 1;
+    /// `Mark::LookedHand`, `Mark::DelveLate`, `Mark::DealtDamage` this turn,
+    /// `Mark::PriestPending`, `Mark::NotSorceryTiming`.
+    pub const LOOKED_HAND: usize = PARITY + 2;
+    pub const DELVE_LATE: usize = LOOKED_HAND + 1;
+    pub const DEALT_DAMAGE: usize = LOOKED_HAND + 2;
+    pub const PRIEST_PENDING: usize = LOOKED_HAND + 3;
+    pub const NOT_SORCERY: usize = LOOKED_HAND + 4;
+    /// `Mark::Converge`: present, the colours of mana spent (W U B R G).
+    pub const CONVERGE: usize = LOOKED_HAND + 5;
+    pub const CONVERGE_COLORS: usize = CONVERGE + 1;
+    /// `Mark::Exhausted(k)` per exhaust ability k (8 bits; `perm::EXHAUSTED`
+    /// is their count).
+    pub const EXHAUSTED_K: usize = CONVERGE_COLORS + 5;
+    pub const EXHAUSTED_K_N: usize = 8;
+    pub const V7_END: usize = EXHAUSTED_K + EXHAUSTED_K_N;
 }
 const _: () = assert!(
     CODE + perm::PROTECTED + 1 == v4::PERM_W
         && perm::MUST_ATTACK == 96
         && CODE + perm::WARP_CAST == v5::PERM_W
-        && CODE + perm::V6_END <= PERM_W
+        && CODE + perm::V6_END <= v6::PERM_W
+        && CODE + perm::V7 == v6::PERM_W
 );
 
 /// Offsets inside a stack slot's status (after its card code).
@@ -775,6 +984,28 @@ pub mod stack {
     pub const MANA_SPENT: usize = 148;
     /// The first spare status float of layout v6 (149..151 spare).
     pub const V6_END: usize = 149;
+    /// Layout v7 (ENGINE.md 125), status 152.. (the slot's new end): an
+    /// ability's source object (`tail_encode::rf`), a triggered ability's
+    /// event (`tail_encode::ev`), the target requirement of its first two
+    /// targets ((r + 1) / 8; the rest are `stack_relations` tokens), and the
+    /// marks of a spell: converge's colours spent so far (`ConvergePending`)
+    /// and spent (`Converge`), the mana value cap of a permission's X
+    /// (`MvCap`, / 8), mana that gives haste spent on it, cast when a
+    /// sorcery couldn't have been, cast from its caster's hand free.
+    pub const V7: usize = 152;
+    pub const SOURCE: usize = V7;
+    pub const EV: usize = SOURCE + super::super::tail_encode::rf::W;
+    pub const TARGET_REQ: usize = EV + super::super::tail_encode::ev::W;
+    pub const CONVERGE_PENDING: usize = TARGET_REQ + 2;
+    pub const CONVERGE_PENDING_COLORS: usize = CONVERGE_PENDING + 1;
+    pub const CONVERGE: usize = CONVERGE_PENDING + 6;
+    pub const CONVERGE_COLORS: usize = CONVERGE + 1;
+    pub const MV_CAP: usize = CONVERGE + 6;
+    pub const MV_CAP_VAL: usize = MV_CAP + 1;
+    pub const HASTE_MANA: usize = MV_CAP + 2;
+    pub const NOT_SORCERY: usize = HASTE_MANA + 1;
+    pub const FREE_FROM_HAND: usize = HASTE_MANA + 2;
+    pub const V7_END: usize = FREE_FROM_HAND + 1;
 }
 const _: () = assert!(
     CODE + stack::X + 1 == v4::STACK_W
@@ -782,7 +1013,8 @@ const _: () = assert!(
         && CODE + stack::TARGETS_EXILED == v5::STACK_W
         && stack::EXILE_TARGET + 34 == stack::NOTED_PERM
         && stack::NOTED_DIGITS + 32 == stack::ALT_GRANTED
-        && CODE + stack::V6_END <= STACK_W
+        && CODE + stack::V6_END <= v6::STACK_W
+        && CODE + stack::V7 == v6::STACK_W
 );
 
 /// Offsets inside the globals of layout v5 (ENGINE.md 60; the block at
@@ -974,39 +1206,6 @@ const _: () = assert!(
         && glob::MONARCH + 1 == GLOBALS
 );
 
-/// A card code: the identity's digits (16, 8, 8), then types, colours, size.
-/// The first position of the range `base .. base + n` that decision `d`
-/// shows (ENGINE.md 100.1, 100.5.1): on a range page (window w >= 1 of a
-/// paged choice, offering that range's items alone), id `base + j` is the
-/// item at position `w (n - 1) + j`, so the block holding that range's items
-/// (the stack, the waiting triggers, the graveyard abilities) shows them
-/// from there; 0 otherwise.
-fn page_first(d: &crate::decision::Decision, base: u16, n: u16) -> usize {
-    match d.stage {
-        Stage::Paged { window } if window > 0 && d.options.iter().any(|o| (base..base + n).contains(&o.action)) => {
-            window as usize * (n as usize - 1)
-        }
-        _ => 0,
-    }
-}
-
-/// The first position among the frame's permanents (`side` 0) or the other
-/// player's (1) that decision `d` shows (ENGINE.md 100.4.8): on a range page
-/// (window w >= 1) of a choice whose permanents page past slot 95, `MY_PERM`
-/// + j (with its `ACTIVATE` ids, `ACTIVATE` + 4 j + i) or `OPP_PERM` + j is
-/// the permanent at position w (`PERM_N` - 1) + j, so that side's blocks show
-/// them from there; 0 otherwise (a first page: its ids are the positions).
-fn perm_page_first(d: &crate::decision::Decision, side: usize) -> usize {
-    let ids = |a: u16| match side {
-        0 => (act::MY_PERM..act::MY_PERM + act::PERM_N).contains(&a) || (act::ACTIVATE..act::HAND_ABILITY).contains(&a),
-        _ => (act::OPP_PERM..act::OPP_PERM + act::PERM_N).contains(&a),
-    };
-    match d.stage {
-        Stage::Paged { window } if window > 0 && d.options.iter().any(|o| ids(o.action)) => window as usize * (act::PERM_N as usize - 1),
-        _ => 0,
-    }
-}
-
 /// The kind of a pool's restricted mana (`g6::POOL_KINDS`, ENGINE.md
 /// 100.5.1): its purposes `only` (`SPEND_*`, CR 106.6) as one of the
 /// restrictions a mana ability can have (lower/activated.rs refuses every
@@ -1035,12 +1234,12 @@ fn pool_kind(only: crate::db::Spend) -> usize {
     k
 }
 
-fn code(out: &mut [f32], db: &CardDb, ids: &[u16], def: DefId) {
+pub(crate) fn code(out: &mut [f32], db: &CardDb, ids: &[u16], def: DefId) {
     code_of(out, db, ids, def, def);
 }
 
 /// The identity digits (16, 8, 8) of definition `def`'s identity.
-fn digits(out: &mut [f32], ids: &[u16], def: DefId) {
+pub(crate) fn digits(out: &mut [f32], ids: &[u16], def: DefId) {
     let i = ids[def as usize] as usize;
     out[(i >> 6) & 15] = 1.0;
     out[16 + ((i >> 3) & 7)] = 1.0;
@@ -1053,7 +1252,7 @@ impl Game {
     /// A permanent's identity for viewer `me` (ENGINE.md 26, 31): what it is
     /// without copy effects; a face-down permanent's card only for a viewer
     /// who knows it (else the face-down definition: an unknown 2/2).
-    fn perm_identity(&self, me: PlayerId, c: CardIdx) -> DefId {
+    pub(crate) fn perm_identity(&self, me: PlayerId, c: CardIdx) -> DefId {
         match self.face_down_id(c) {
             Some(d) if self.knows(me, c) => d,
             Some(_) => self.objs[c.i()].def,
@@ -1062,7 +1261,7 @@ impl Game {
     }
 }
 
-fn code_of(out: &mut [f32], db: &CardDb, ids: &[u16], who: DefId, def: DefId) {
+pub(crate) fn code_of(out: &mut [f32], db: &CardDb, ids: &[u16], who: DefId, def: DefId) {
     digits(out, ids, who);
     let d = db.def(def);
     for (k, t) in [types::ARTIFACT, types::CREATURE, types::ENCHANTMENT, types::INSTANT, types::LAND, types::SORCERY]
@@ -1277,32 +1476,61 @@ impl Game {
         }
     }
 
-    /// The network input for `viewer` (module docs); `out` has
-    /// [`NUM_FEATURES`] floats, zeroed by the caller. Framed in
+    /// The network input for `viewer` (module docs), the head of its row:
+    /// `out` has [`NUM_FEATURES`] floats (layout v7, the `mtg` game) or
+    /// [`NUM_FEATURES_V6`] (layout v6, `mtg_eoe`'s: no tail, ENGINE.md
+    /// 124.2), zeroed by the caller. Framed in
     /// [`encoding_seat`](Self::encoding_seat)'s seat ("me" below), with
-    /// `viewer`'s knowledge (`knower`).
-    /// (`mtg_eoe`'s encoding is layout v6's, [`NUM_FEATURES_V6`] floats:
-    /// without v7's block, which the EoE table's mana can't fill.)
+    /// `viewer`'s knowledge (`knower`). A head-only reader: layout v7's row
+    /// of a state with tail tokens (an object past a segment's head slots, a
+    /// delayed trigger, ...) is a loud failure (zero-core R1; ENGINE.md
+    /// 125): [`encode_features_row`](Self::encode_features_row) has it whole.
     pub fn encode_features(&self, viewer: PlayerId, out: &mut [f32]) {
-        let v7 = out.len() == NUM_FEATURES;
-        assert!(v7 || out.len() == NUM_FEATURES_V6, "an encoding of {} floats", out.len());
-        assert!(v7 || self.db.spend_kinds & crate::db::SPEND_CHOSEN_CREATURE_TYPE == 0, "a layout v6 encoding of a table with mana of a chosen creature type");
-        let ids = identity::identities(self.db);
+        let lay = Lay::of(out.len());
+        if !lay.v7 {
+            assert!(self.db.spend_kinds & crate::db::SPEND_CHOSEN_CREATURE_TYPE == 0, "a layout v6 encoding of a table with mana of a chosen creature type");
+            self.encode_lay(viewer, out, lay, None);
+            return;
+        }
+        let mut t = TailBuf::new(&super::tail_encode::TAILS);
+        self.encode_lay(viewer, out, lay, Some(&mut t));
+        assert!(
+            t.is_empty(),
+            "a head-only encoding of a state with {} tail tokens (layout v7: use encode_features_row / encode_row; zero-core R1, ENGINE.md 125)",
+            t.len()
+        );
+    }
+
+    /// Layout v6's encoding for `viewer` whatever the table (the fuzz's
+    /// check of `v6_projection`, ENGINE.md 125: a table with Cavern of Souls
+    /// too, whose floating mana layout v6 leaves out; `encode_features`
+    /// refuses that table a v6 encoding).
+    pub fn encode_features_v6_check(&self, viewer: PlayerId, out: &mut [f32]) {
+        assert_eq!(out.len(), NUM_FEATURES_V6);
+        self.encode_lay(viewer, out, &LAY6, None);
+    }
+
+    /// Layout v7's whole row for `viewer` (ENGINE.md 125): the head into
+    /// `head` ([`NUM_FEATURES`] floats, zeroed by the caller) and the tail
+    /// tokens into `tail` (empty on entry; any order, zero-core's driver
+    /// seals them).
+    pub fn encode_features_row(&self, viewer: PlayerId, head: &mut [f32], tail: &mut TailBuf) {
+        assert_eq!(head.len(), NUM_FEATURES, "layout v7's row");
+        self.encode_lay(viewer, head, &LAY7, Some(tail));
+    }
+
+    /// The encoding in layout `lay` (`tail`: layout v7's tail; None for v6).
+    fn encode_lay(&self, viewer: PlayerId, out: &mut [f32], lay: &Lay, mut tail: Option<&mut TailBuf>) {
+        use super::tail_encode::{put, seg};
+        let cx = Cx::new(self, viewer);
+        let ids = cx.ids;
         let knower = viewer;
-        let me = self.encoding_seat(viewer);
-        let op_ = opp(me);
-        let decision = self.pending.as_ref();
-        // (The frame's decision is the knower's to make: its options and
-        // list are encoded; a controlled player's own decisions are not
-        // theirs to make, CR 722.4.)
-        let mine_to_decide = decision.is_some_and(|d| d.player == me && self.decider_of(d.player) == knower);
-        let legal = |a: u16| -> bool {
-            mine_to_decide && decision.is_some_and(|d| d.options.binary_search_by_key(&a, |o| o.action).is_ok())
-        };
+        let (me, op_) = (cx.me, cx.op_);
+        let mut scratch: Vec<f32> = Vec::new();
         self.encode_globals(me, knower, &mut out[O_GLOBALS..O_GLOBALS + GLOBALS]);
-        self.encode_globals_v5(me, &mut out[O_GLOBALS_V5..O_GLOBALS_V5 + GLOBALS_V5]);
-        self.encode_globals_v6(me, ids, &mut out[O_GLOBALS_V6..O_GLOBALS_V6 + GLOBALS_V6]);
-        if v7 {
+        self.encode_globals_v5(me, &mut out[lay.o_globals_v5..lay.o_globals_v5 + GLOBALS_V5]);
+        self.encode_globals_v6(me, ids, &mut out[lay.o_globals_v6..lay.o_globals_v6 + GLOBALS_V6]);
+        if lay.v7 {
             self.encode_globals_v7(me, &mut out[O_GLOBALS_V7..O_GLOBALS_V7 + GLOBALS_V7]);
         }
         self.encode_bags(me, knower, ids, out);
@@ -1319,7 +1547,119 @@ impl Game {
                 }
             }
         }
-        // Permanents.
+        // Permanents: every one at its position (layout v7: past slot 31 a
+        // tail token; v6: a range page's window, ENGINE.md 100.4.8).
+        let pc = self.perm_cx(&cx);
+        for (side, list) in [&cx.mine, &cx.theirs].into_iter().enumerate() {
+            let sg = if side == 0 { seg::MY_PERM } else { seg::OPP_PERM };
+            let first = cx.first_perms(side);
+            let shown = if lay.v7 { 0..list.len() } else { first.min(list.len())..(first + PERMS).min(list.len()) };
+            for p in shown {
+                let s = if lay.v7 { p } else { p - first };
+                put(out, lay, &mut tail, &mut scratch, sg, s, |x| self.write_perm(&cx, &pc, side, list[p], p, first, x));
+            }
+        }
+        // The frame's hand, sorted (in a controlled turn the controlled
+        // player's, which its controller sees, CR 722.3).
+        debug_assert!(me == knower || cx.hand.iter().all(|&c| self.knows(knower, c)), "a controlled hand card its controller doesn't see (CR 722.3)");
+        let hand_n = if lay.v7 { cx.hand.len() } else { cx.hand.len().min(HANDS) };
+        for s in 0..hand_n {
+            put(out, lay, &mut tail, &mut scratch, seg::HAND, s, |x| self.write_hand(&cx, s, x));
+        }
+        // The stack, top first (v6: a range page's window, ENGINE.md
+        // 100.5.1).
+        let stack_targets: Vec<Target> = self.stack.iter().flat_map(|s| s.targets.iter().map(|&(_, t)| t)).collect();
+        let first = cx.first(act::STACK, act::STACK_N);
+        let n = self.stack.len();
+        let shown = if lay.v7 { 0..n } else { first.min(n)..(first + STACKS).min(n) };
+        for p in shown {
+            let s = if lay.v7 { p } else { p - first };
+            put(out, lay, &mut tail, &mut scratch, seg::STACK, s, |x| self.write_stack(&cx, &stack_targets, p, first, x));
+        }
+        // The frame's waiting triggers (the `TRIGGER` slots when it orders
+        // them).
+        let mine_waiting: Vec<&crate::triggers::PendingTrigger> = self.waiting.iter().filter(|t| t.controller == me).collect();
+        let first = cx.first(act::TRIGGER, act::TRIGGER_N);
+        let n = mine_waiting.len();
+        let shown = if lay.v7 { 0..n } else { first.min(n)..(first + TRIGS).min(n) };
+        for p in shown {
+            let s = if lay.v7 { p } else { p - first };
+            let t = mine_waiting[p];
+            put(out, lay, &mut tail, &mut scratch, seg::TRIGGERS, s, |x| {
+                code(&mut x[..CODE], self.db, ids, t.source_def);
+                let st = &mut x[CODE..];
+                st[trig::PRESENT] = 1.0;
+                st[trig::SLOT] = (t.slot as f32 + 1.0) / 4.0;
+                st[trig::LEGAL] = cx.opt_legal(act::TRIGGER, act::TRIGGER_N, first, p) as u8 as f32;
+                cx.write_trigger_v7(st, t);
+            });
+        }
+        // The `LIBRARY` list of the knower's own decision.
+        let list = self.list_block(&cx, lay.v7);
+        for (k, e) in list.entries.iter().enumerate() {
+            let Some(e) = e else { continue };
+            put(out, lay, &mut tail, &mut scratch, seg::LIST, k, |x| self.write_list_entry(&cx, &list, k, e, lay.v7, x));
+        }
+        // Layout v6: the fourth slot's ability choice's floats at each
+        // option's id (ENGINE.md 100.2), as v6 wrote them.
+        if let (false, Some(d)) = (lay.v7, cx.d) {
+            if d.kind == crate::decision::DecisionKind::ChooseMode && matches!(self.agenda.last(), Some(Task::ChooseAbility { .. })) {
+                for o in &d.options {
+                    if let (true, Choice::Ability(c, slot)) = (o.action >= act::LIBRARY, o.choice) {
+                        let k = (o.action - act::LIBRARY) as usize;
+                        if let (crate::db::AbilitySlot::Activated(i), true) = (self.activated_home(c, slot).1, k < LIST) {
+                            out[lay.off[seg::LIST as usize] + k * lay.w[seg::LIST as usize] + CODE + list::ABILITY] = (i as f32 + 1.0) / 4.0;
+                        }
+                    }
+                }
+            }
+        }
+        // The cards in the frame's graveyard with a graveyard ability (the
+        // `GY_ABILITY` ids, graveyard order: `Game::activation_options`).
+        let gya: Vec<CardIdx> = self.graveyard_cards(me).filter(|&c| !self.def_of(c).gy_abilities.is_empty()).collect();
+        let first = cx.first(act::GY_ABILITY, act::GY_ABILITY_N);
+        let n = gya.len();
+        let shown = if lay.v7 { 0..n } else { first.min(n)..(first + GYAS).min(n) };
+        for p in shown {
+            let s = if lay.v7 { p } else { p - first };
+            let c = gya[p];
+            put(out, lay, &mut tail, &mut scratch, seg::GYA, s, |x| {
+                code(&mut x[..CODE], self.db, ids, self.objs[c.i()].def);
+                x[CODE] = 1.0;
+                x[CODE + 1] = cx.opt_legal(act::GY_ABILITY, act::GY_ABILITY_N, first, p) as u8 as f32;
+            });
+        }
+        // Revealed companions (public; layout v4, ENGINE.md 35).
+        for (side, p) in [me, op_].into_iter().enumerate() {
+            let pl = &self.players[p as usize];
+            // (Its identity as revealed: once in the game the card may be
+            // hidden again, a library card.)
+            let Some(def) = pl.companion_def else { continue };
+            let o = lay.off[seg::MY_COMP as usize + side];
+            code(&mut out[o..o + CODE], self.db, ids, def);
+            out[o + CODE + comp::PRESENT] = 1.0;
+            out[o + CODE + comp::AVAILABLE] = self.companion_outside(p).is_some() as u8 as f32;
+            let at_priority = cx.d.is_some_and(|d| d.kind == crate::decision::DecisionKind::Priority);
+            out[o + CODE + comp::LEGAL] = (p == me && at_priority && cx.legal(act::COMPANION)) as u8 as f32;
+            out[o + CODE + comp::IN_GAME] = pl.companion_used as u8 as f32;
+        }
+        self.encode_context(me, knower, ids, &mut out[O_CONTEXT..O_CONTEXT + CONTEXT]);
+        // Game facts in the match block's spare floats (ENGINE.md 58.8; the
+        // match's own floats are `encode_match`'s).
+        for (side, p) in [me, op_].into_iter().enumerate() {
+            let pl = &self.players[p as usize];
+            out[lay.o_match + mtch::SPELLS + side] = squash(pl.spells_cast as f32 / 4.0);
+            out[lay.o_match + mtch::ENERGY + side] = squash(pl.energy as f32 / 4.0);
+        }
+        // Layout v7's tail-only segments (ENGINE.md 125).
+        if let Some(t) = tail {
+            let objs: Vec<Option<CardIdx>> = list.entries.iter().map(|e| e.and_then(|e| e.card)).collect();
+            super::tail_encode::write_tail_segments(&cx, &objs, t);
+        }
+    }
+
+    /// What every permanent's slot reads of the game, once per encoding.
+    fn perm_cx(&self, cx: &Cx) -> PermCx {
         let targeted: Vec<CardIdx> = self
             .stack
             .iter()
@@ -1334,556 +1674,622 @@ impl Game {
             (true, Some(Task::AttackTarget { card })) => Some(*card),
             _ => None,
         };
-        let mine: Vec<CardIdx> = self.permanents_of(me).collect();
-        let theirs: Vec<CardIdx> = self.permanents_of(op_).collect();
-        // (Layout v6: the activated abilities granted by an attached
-        // permanent or a static ability; `granted_activated` only where one
-        // can be.)
-        let grants = self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 || self.battlefield.iter().any(|&g| self.objs[g.i()].attached.is_some());
-        // (Control effects beyond the controller: recorded ones, or "until
-        // end of turn" ones, ENGINE.md 100.5.1.)
-        let control_fx = self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0
-            || self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::ControlFrom(_)));
+        let _ = cx;
+        PermCx {
+            targeted,
+            asked_blocker,
+            dmg_att,
+            dmg_blk,
+            asked_attacker,
+            // (Layout v6: the activated abilities granted by an attached
+            // permanent or a static ability; `granted_activated` only where
+            // one can be.)
+            grants: self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 || self.battlefield.iter().any(|&g| self.objs[g.i()].attached.is_some()),
+            // (Control effects beyond the controller: recorded ones, or "until
+            // end of turn" ones, ENGINE.md 100.5.1.)
+            control_fx: self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0
+                || self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::ControlFrom(_))),
+        }
+    }
+
+    /// Permanent `c` (side 0: the frame's, at absolute position `pos` among
+    /// them; the page's first position of its range `first`) into its slot
+    /// `x` (layout v7's width).
+    #[allow(clippy::too_many_arguments)]
+    fn write_perm(&self, cx: &Cx, pc: &PermCx, side: usize, c: CardIdx, pos: usize, first: usize, x: &mut [f32]) {
+        let ids = cx.ids;
+        let (me, op_, knower) = (cx.me, cx.op_, cx.knower);
+        let range = if side == 0 { act::MY_PERM } else { act::OPP_PERM };
         let side_of = |p: PlayerId| if p == me { 1.0 } else { -1.0 };
-        let stack_refs = |r: crate::ids::ObjRef| self.stack.iter().filter(|s| s.noted.contains(&r)).count();
-        let slot_of = |c: CardIdx| -> Option<usize> {
-            let ctl = self.objs[c.i()].controller;
-            let list = if ctl == me { &mine } else { &theirs };
-            list.iter().position(|&x| x == c)
-        };
-        // (On a page of the viewer's choice of permanents past slot 95, the
-        // page's: `perm_page_first`, ENGINE.md 100.4.8, as the stack's.)
-        let perm_first = |side: usize| decision.filter(|_| mine_to_decide).map_or(0, |d| perm_page_first(d, side));
-        for (side, list) in [&mine, &theirs].into_iter().enumerate() {
-            let base = if side == 0 { O_MY_PERM } else { O_OPP_PERM };
-            let range = if side == 0 { act::MY_PERM } else { act::OPP_PERM };
-            for (s, &c) in list.iter().skip(perm_first(side)).enumerate().take(PERMS) {
-                let o = base + s * PERM_W;
-                let ob = &self.objs[c.i()];
-                // What it is (its identity) and the copiable values it has
-                // (the descriptor; a copy's copied face, CR 707.2).
-                code_of(&mut out[o..o + CODE], self.db, ids, self.perm_identity(knower, c), ob.def);
-                out[o + 46] = self.is_token(c) as u8 as f32;
-                // A copy's exceptions to the copiable values (CR 707.9b:
-                // eternalize's black 4/4 with no mana cost).
-                if let Some(e) = self.exc(c) {
-                    for (k, t) in [types::ARTIFACT, types::CREATURE, types::ENCHANTMENT, types::INSTANT, types::LAND, types::SORCERY]
-                        .iter()
-                        .enumerate()
-                    {
-                        if e.types & t != 0 {
-                            out[o + 32 + k] = 1.0;
-                        }
-                    }
-                    if let Some(m) = e.colors {
-                        for k in 0..5 {
-                            out[o + 38 + k] = (m & (1 << k) != 0) as u8 as f32;
-                        }
-                    }
-                    if e.no_cost {
-                        out[o + 43] = 0.0;
-                    }
-                    if let Some((pw, th)) = e.pt {
-                        out[o + 44] = pw as f32 / 8.0;
-                        out[o + 45] = th as f32 / 8.0;
-                    }
+        let slot_of = |c: CardIdx| -> Option<usize> { cx.perm_pos(c).map(|x| x.1) };
+        let ob = &self.objs[c.i()];
+        // What it is (its identity) and the copiable values it has
+        // (the descriptor; a copy's copied face, CR 707.2).
+        code_of(&mut x[..CODE], self.db, ids, self.perm_identity(knower, c), ob.def);
+        x[46] = self.is_token(c) as u8 as f32;
+        // A copy's exceptions to the copiable values (CR 707.9b:
+        // eternalize's black 4/4 with no mana cost).
+        if let Some(e) = self.exc(c) {
+            for (k, t) in [types::ARTIFACT, types::CREATURE, types::ENCHANTMENT, types::INSTANT, types::LAND, types::SORCERY]
+                .iter()
+                .enumerate()
+            {
+                if e.types & t != 0 {
+                    x[32 + k] = 1.0;
                 }
-                // ENGINE.md 58.8: its card types and colours as they are (layers
-                // 4 and 5, with a copy's exceptions above: an animated land is a
-                // creature, Painter's Servant's colour), not its card's.
-                let (ty, col) = (self.types_of(c), self.colors_of(c));
-                for (k, t) in [types::ARTIFACT, types::CREATURE, types::ENCHANTMENT, types::INSTANT, types::LAND, types::SORCERY]
-                    .iter()
-                    .enumerate()
-                {
-                    out[o + 32 + k] = (ty & t != 0) as u8 as f32;
-                }
+            }
+            if let Some(m) = e.colors {
                 for k in 0..5 {
-                    out[o + 38 + k] = (col & (1 << k) != 0) as u8 as f32;
+                    x[38 + k] = (m & (1 << k) != 0) as u8 as f32;
                 }
-                let st = &mut out[o + CODE..o + PERM_W];
-                st[perm::PRESENT] = 1.0;
-                st[perm::TAPPED] = ob.tapped as u8 as f32;
-                st[perm::DAMAGE] = squash(ob.damage as f32 / 8.0);
-                let (pw, th) = self.pt(c);
-                st[perm::POWER] = squash(pw as f32 / 8.0);
-                st[perm::TOUGHNESS] = squash(th as f32 / 8.0);
-                st[perm::SICK] = (self.is_creature(c) && self.is_sick(c) && !self.has_kw(c, Kw::Haste)) as u8 as f32;
-                st[perm::ATTACKING] = ob.attacking as u8 as f32;
-                st[perm::BLOCKED] = ob.blocked as u8 as f32;
-                if let Some(a) = ob.blocking {
-                    st[perm::BLOCKING] = 1.0;
-                    st[perm::BLOCKING_SLOT] = slot_of(a).map_or(0.0, |x| (x + 1) as f32 / 32.0);
-                }
-                st[perm::STRUCK_FIRST] = ob.struck_first as u8 as f32;
-                st[perm::ASKED_BLOCKER] = (asked_blocker == Some(c)) as u8 as f32;
-                st[perm::DAMAGE_ATTACKER] = (dmg_att == Some(c)) as u8 as f32;
-                st[perm::DAMAGE_BLOCKER] = (dmg_blk == Some(c)) as u8 as f32;
-                st[perm::OPTION] = legal(range + s as u16) as u8 as f32;
-                if side == 0 {
-                    for i in 0..4u16 {
-                        st[perm::ACTIVATE + i as usize] = legal(act::ACTIVATE + s as u16 * 4 + i) as u8 as f32;
-                    }
-                }
-                st[perm::TARGETED] = targeted.contains(&c) as u8 as f32;
-                st[perm::BLOCKERS] =
-                    squash(self.battlefield.iter().filter(|&&x| self.objs[x.i()].blocking == Some(c)).count() as f32 / 4.0);
-                for (k, kw) in KWS.iter().enumerate() {
-                    st[perm::KEYWORDS + k] = self.has_kw(c, *kw) as u8 as f32;
-                }
-                st[perm::TOKEN] = self.is_token(c) as u8 as f32;
-                st[perm::NEW] = (ob.control_since == self.turn.number) as u8 as f32;
-                st[perm::STOLEN] = (ob.controller != ob.owner) as u8 as f32;
-                let walker = self.is_type(c, types::PLANESWALKER);
-                st[perm::LOYALTY] = squash(self.counters_on(c, crate::db::Counter::Loyalty) as f32 / 8.0);
-                st[perm::LOYALTY_READY] = (walker && self.loyalty_ready(c)) as u8 as f32;
-                if let Some(Target::Obj(r)) = self.attack_dest(c) {
-                    st[perm::ATTACKS_WALKER] = 1.0;
-                    st[perm::ATTACKS_SLOT] = slot_of(r.idx).map_or(0.0, |x| (x + 1) as f32 / 32.0);
-                }
-                if walker {
-                    let by = self
-                        .battlefield
-                        .iter()
-                        .filter(|&&x| self.attack_dest(x) == Some(Target::Obj(self.obj_ref(c))))
-                        .count();
-                    st[perm::ATTACKED_BY] = squash(by as f32 / 4.0);
-                }
-                st[perm::ASKED_ATTACKER] = (asked_attacker == Some(c)) as u8 as f32;
-                st[perm::LORE] = squash(self.counters_on(c, crate::db::Counter::Lore) as f32 / 4.0);
-                st[perm::BACK_FACE] = self.db.is_face(ob.def) as u8 as f32;
-                if self.is_copy(c) {
-                    st[perm::COPY] = 1.0;
-                    digits(&mut st[perm::COPY_OF..perm::COPY_OF + 32], ids, ob.def);
-                }
-                if let Some(h) = ob.attached.filter(|&h| self.live(h) && self.objs[h.idx.i()].zone == Zone::Battlefield) {
-                    st[perm::ATTACHED] = 1.0;
-                    st[perm::ATTACHED_SLOT] = slot_of(h.idx).map_or(0.0, |x| (x + 1) as f32 / 32.0);
-                    st[perm::ATTACHED_OPP] = (self.objs[h.idx.i()].controller != me) as u8 as f32;
-                }
-                st[perm::PREPARED] = self.is_prepared(c) as u8 as f32;
-                let wards = self.wards_of(c);
-                st[perm::WARD] = wards.len() as f32 / 2.0;
-                for w in wards {
-                    match w {
-                        WardCost::Mana(m) => {
-                            st[perm::WARD_MANA] = st[perm::WARD_MANA].max(m.total() as f32 / 4.0)
-                        }
-                        WardCost::Life(n) => st[perm::WARD_LIFE] = st[perm::WARD_LIFE].max(n as f32 / 4.0),
-                        // (A random discard: the same float, ENGINE.md 99.14.)
-                        WardCost::Discard | WardCost::DiscardRandom => st[perm::WARD_DISCARD] = 1.0,
-                    }
-                }
-                st[perm::LOST_ABILITIES] = self.lost_abilities(c) as u8 as f32;
-                st[perm::GOADED] = [me, op_].iter().any(|&p| self.goaded_by(c, p)) as u8 as f32;
-                let flags = self.flags_of(c);
-                st[perm::EXILE_IF_LEAVES] = flags.exile_if_leaves as u8 as f32;
-                // ENGINE.md 58.8 (spare floats 91-95).
-                st[perm::CANT_BLOCK] = flags.cant_block as u8 as f32;
-                st[perm::CANT_BE_BLOCKED] = flags.cant_be_blocked as u8 as f32;
-                if !self.counters.is_empty() {
-                    use crate::db::Counter as K;
-                    let n: u64 = self
-                        .counters
-                        .iter()
-                        .filter(|x| x.0 == c && !matches!(x.1, K::P1P1 | K::M1M1 | K::Loyalty | K::Lore))
-                        .map(|x| x.2 as u64)
-                        .sum();
-                    st[perm::OTHER_COUNTERS] = squash(n as f32 / 4.0);
-                }
-                if !self.links.is_empty() {
-                    let r = self.obj_ref(c);
-                    let n = self
-                        .links
-                        .iter()
-                        .filter(|l| l.source == r && self.live(l.card) && self.objs[l.card.idx.i()].zone == Zone::Exile)
-                        .count();
-                    st[perm::EXILED_WITH] = squash(n as f32 / 4.0);
-                }
-                st[perm::PROTECTED] = !self.protection_of(c).is_empty() as u8 as f32;
-                // Layout v5 (ENGINE.md 60): status 96-119.
-                let (must, exile_dies, subtypes) = self.effect_counts(c);
-                st[perm::MUST_ATTACK] = squash(must as f32 / 2.0);
-                st[perm::EXILE_IF_DIES] = squash(exile_dies as f32 / 2.0);
-                st[perm::SUBTYPES] = squash(subtypes as f32 / 2.0);
-                st[perm::EVOKED] = ob.evoked as u8 as f32;
-                st[perm::ESCAPED] = ob.escaped as u8 as f32;
-                st[perm::MONSTROUS] = ob.monstrous as u8 as f32;
-                st[perm::CHOSEN_PLAYER] = match ob.chosen_player {
-                    Some(p) if p == me => 1.0,
-                    Some(_) => -1.0,
-                    None => 0.0,
-                };
-                if !self.marks.is_empty() {
-                    let r = self.obj_ref(c);
-                    let (mut exhausted, mut regen, mut granted, mut grants_alt) = (0u32, 0u32, 0u32, 0u32);
-                    let loss = self.loss_ts(c);
-                    for &(o, m) in self.marks.iter() {
-                        if o != r {
-                            // (A spell cast for an alternative cost this
-                            // permanent gave it, CR 118.9; ENGINE.md 99.15.)
-                            if let Mark::AltGranted { granter, .. } = m {
-                                if granter == r && self.live(o) && self.objs[o.idx.i()].zone == Zone::Stack {
-                                    grants_alt += 1;
-                                }
-                            }
-                            continue;
-                        }
-                        match m {
-                            Mark::Exhausted(_) => exhausted += 1,
-                            Mark::ChosenColor(k) if (k as usize) < 5 => st[perm::CHOSEN_COLOR + k as usize] = 1.0,
-                            // ENGINE.md 124.2.
-                            Mark::ChosenCreatureType(t) => type_bits(&mut st[perm::CHOSEN_CREATURE_TYPE..], Some(t)),
-                            Mark::Exerted => st[perm::EXERTED] = 1.0,
-                            // Layout v6 (ENGINE.md 100.5).
-                            Mark::WarpCast => st[perm::WARP_CAST] = 1.0,
-                            Mark::RegenShield => regen += 1,
-                            Mark::ManaSpent(n) => st[perm::MANA_SPENT] = squash(n as f32 / 8.0),
-                            // (A grant a later "loses all abilities" removed
-                            // doesn't count, CR 613.7: `granted_observers`.)
-                            Mark::Granted { ts, .. } if loss.is_none_or(|l| ts > l) => granted += 1,
-                            _ => {}
-                        }
-                    }
-                    st[perm::EXHAUSTED] = squash(exhausted as f32 / 2.0);
-                    st[perm::REGEN] = squash(regen as f32 / 2.0);
-                    st[perm::GRANTED_TRIGGERS] = squash(granted as f32 / 2.0);
-                    st[perm::GRANTS_ALT] = squash(grants_alt as f32 / 2.0);
-                }
-                // Layout v6 (ENGINE.md 100.5): status 120-143 (the marks'
-                // above).
-                st[perm::LEGENDARY] = self.is_legendary(c) as u8 as f32;
-                if grants {
-                    st[perm::GRANTED_ACTIVATED] = squash(self.granted_activated(c).len() as f32 / 2.0);
-                }
-                if !self.stack.is_empty() {
-                    st[perm::NOTED] = squash(stack_refs(self.obj_ref(c)) as f32 / 2.0);
-                }
-                st[perm::ENTERED] = (ob.entered as u32 == self.turn.number) as u8 as f32;
-                // ENGINE.md 100.5.1: status 129-132.
-                let w6d = &self.db.def(ob.def).w6;
-                if w6d.kept_from.is_some() {
-                    st[perm::KEPT_ABILITY] = (w6d.kept_index as f32 + 1.0) / 8.0;
-                }
-                if control_fx {
-                    if let Some((eot, lasting)) = self.w6_control_layers(c) {
-                        st[perm::CONTROL_EOT] = eot.map_or(0.0, side_of);
-                        st[perm::CONTROL_LASTING] = side_of(lasting);
-                    }
-                    if let Some(v) = self.w6_aura_control_place(c) {
-                        st[perm::AURA_CONTROL] = v;
-                    }
-                }
-                if !self.resolved.is_empty() || !self.done_once.is_empty() {
-                    let r = self.obj_ref(c);
-                    let n: u32 = self.resolved.iter().filter(|x| x.0 == r).map(|x| x.1 as u32).sum();
-                    st[perm::RESOLVED] = squash(n as f32 / 4.0);
-                    st[perm::DONE_ONCE] = squash(self.done_once.iter().filter(|x| x.0 == r).count() as f32 / 2.0);
-                }
+            }
+            if e.no_cost {
+                x[43] = 0.0;
+            }
+            if let Some((pw, th)) = e.pt {
+                x[44] = pw as f32 / 8.0;
+                x[45] = th as f32 / 8.0;
             }
         }
-        // The viewer's hand (the frame's: in a controlled turn the
-        // controlled player's, which its controller sees, CR 722.3).
-        let hand = self.hand_sorted(me);
-        let opp_knows = |c: CardIdx| self.objs[c.i()].known & (1 << op_) != 0;
-        debug_assert!(me == knower || hand.iter().all(|&c| self.knows(knower, c)), "a controlled hand card its controller doesn't see (CR 722.3)");
-        for (s, &c) in hand.iter().enumerate().take(HANDS) {
-            let o = O_HAND + s * HAND_W;
-            let def = self.objs[c.i()].def;
-            code(&mut out[o..o + CODE], self.db, ids, def);
-            let st = &mut out[o + CODE..o + HAND_W];
-            st[0] = 1.0;
-            st[1] = hand.iter().filter(|&&x| self.objs[x.i()].def == def).count() as f32 / 4.0;
-            st[2] = legal(act::HAND + s as u16) as u8 as f32;
-            st[3] = legal(act::HAND_ABILITY + s as u16) as u8 as f32;
-            st[4] = opp_knows(c) as u8 as f32;
-            st[5] = self.def_of(c).is(types::LAND) as u8 as f32;
-            // What its `HAND` id does: cast or play its front face, its other
-            // face (an MDFC's back face, an Adventure), or both (a face
-            // choice follows, ENGINE.md 25).
-            if mine_to_decide {
-                let (front, other) = match decision.and_then(|d| d.choice_of(act::HAND + s as u16)) {
-                    Some(Choice::Cast(_)) | Some(Choice::Play(_)) => (true, false),
-                    Some(Choice::CastFace(_)) | Some(Choice::PlayFace(_)) => (false, true),
-                    Some(Choice::Faces(_, m)) => (m & (FACE_CAST | FACE_PLAY) != 0, m & (OTHER_CAST | OTHER_PLAY) != 0),
-                    _ => (false, false),
-                };
-                st[6] = front as u8 as f32;
-                st[7] = other as u8 as f32;
+        // ENGINE.md 58.8: its card types and colours as they are (layers
+        // 4 and 5, with a copy's exceptions above: an animated land is a
+        // creature, Painter's Servant's colour), not its card's.
+        let (ty, col) = (self.types_of(c), self.colors_of(c));
+        for (k, t) in [types::ARTIFACT, types::CREATURE, types::ENCHANTMENT, types::INSTANT, types::LAND, types::SORCERY]
+            .iter()
+            .enumerate()
+        {
+            x[32 + k] = (ty & t != 0) as u8 as f32;
+        }
+        for k in 0..5 {
+            x[38 + k] = (col & (1 << k) != 0) as u8 as f32;
+        }
+        let st = &mut x[CODE..];
+        st[perm::PRESENT] = 1.0;
+        st[perm::TAPPED] = ob.tapped as u8 as f32;
+        st[perm::DAMAGE] = squash(ob.damage as f32 / 8.0);
+        let (pw, th) = self.pt(c);
+        st[perm::POWER] = squash(pw as f32 / 8.0);
+        st[perm::TOUGHNESS] = squash(th as f32 / 8.0);
+        st[perm::SICK] = (self.is_creature(c) && self.is_sick(c) && !self.has_kw(c, Kw::Haste)) as u8 as f32;
+        st[perm::ATTACKING] = ob.attacking as u8 as f32;
+        st[perm::BLOCKED] = ob.blocked as u8 as f32;
+        if let Some(a) = ob.blocking {
+            st[perm::BLOCKING] = 1.0;
+            st[perm::BLOCKING_SLOT] = slot_of(a).map_or(0.0, |x| (x + 1) as f32 / 32.0);
+        }
+        st[perm::STRUCK_FIRST] = ob.struck_first as u8 as f32;
+        st[perm::ASKED_BLOCKER] = (pc.asked_blocker == Some(c)) as u8 as f32;
+        st[perm::DAMAGE_ATTACKER] = (pc.dmg_att == Some(c)) as u8 as f32;
+        st[perm::DAMAGE_BLOCKER] = (pc.dmg_blk == Some(c)) as u8 as f32;
+        st[perm::OPTION] = cx.opt_legal(range, act::PERM_N, first, pos) as u8 as f32;
+        if side == 0 && pos >= first && pos - first < act::PERM_N as usize {
+            let j = (pos - first) as u16;
+            for i in 0..4u16 {
+                st[perm::ACTIVATE + i as usize] = cx.legal(act::ACTIVATE + j * 4 + i) as u8 as f32;
             }
         }
-        // The stack, top first (on a page of the viewer's paged choice of
-        // stack items, the page's: `page_first`, ENGINE.md 100.5.1).
-        let stack_targets: Vec<Target> = self.stack.iter().flat_map(|s| s.targets.iter().map(|&(_, t)| t)).collect();
-        let paged_first = |base: u16, n: u16| decision.filter(|_| mine_to_decide).map_or(0, |d| page_first(d, base, n));
-        for (s, item) in self.stack.iter().rev().skip(paged_first(act::STACK, act::STACK_N)).enumerate().take(STACKS) {
-            let o = O_STACK + s * STACK_W;
-            let (def, kind) = match item.kind {
-                StackKind::Spell { card } => (self.objs[card.i()].def, 1),
-                StackKind::Ability { ability, .. } => {
-                    (ability.def, if matches!(ability.slot, AbilitySlot::Trigger(_)) { 3 } else { 2 })
+        st[perm::TARGETED] = pc.targeted.contains(&c) as u8 as f32;
+        st[perm::BLOCKERS] = squash(self.battlefield.iter().filter(|&&x| self.objs[x.i()].blocking == Some(c)).count() as f32 / 4.0);
+        let kws = self.keywords_of(c);
+        for kw in KWS.iter().chain(KWS_V7.iter()) {
+            st[kw_float(*kw)] = kws.has(*kw) as u8 as f32;
+        }
+        st[perm::TOKEN] = self.is_token(c) as u8 as f32;
+        st[perm::NEW] = (ob.control_since == self.turn.number) as u8 as f32;
+        st[perm::STOLEN] = (ob.controller != ob.owner) as u8 as f32;
+        let walker = self.is_type(c, types::PLANESWALKER);
+        st[perm::LOYALTY] = squash(self.counters_on(c, crate::db::Counter::Loyalty) as f32 / 8.0);
+        st[perm::LOYALTY_READY] = (walker && self.loyalty_ready(c)) as u8 as f32;
+        if let Some(Target::Obj(r)) = self.attack_dest(c) {
+            st[perm::ATTACKS_WALKER] = 1.0;
+            st[perm::ATTACKS_SLOT] = slot_of(r.idx).map_or(0.0, |x| (x + 1) as f32 / 32.0);
+        }
+        if walker {
+            let by = self.battlefield.iter().filter(|&&x| self.attack_dest(x) == Some(Target::Obj(self.obj_ref(c)))).count();
+            st[perm::ATTACKED_BY] = squash(by as f32 / 4.0);
+        }
+        st[perm::ASKED_ATTACKER] = (pc.asked_attacker == Some(c)) as u8 as f32;
+        st[perm::LORE] = squash(self.counters_on(c, crate::db::Counter::Lore) as f32 / 4.0);
+        st[perm::BACK_FACE] = self.db.is_face(ob.def) as u8 as f32;
+        if self.is_copy(c) {
+            st[perm::COPY] = 1.0;
+            digits(&mut st[perm::COPY_OF..perm::COPY_OF + 32], ids, ob.def);
+        }
+        if let Some(h) = ob.attached.filter(|&h| self.live(h) && self.objs[h.idx.i()].zone == Zone::Battlefield) {
+            st[perm::ATTACHED] = 1.0;
+            st[perm::ATTACHED_SLOT] = slot_of(h.idx).map_or(0.0, |x| (x + 1) as f32 / 32.0);
+            st[perm::ATTACHED_OPP] = (self.objs[h.idx.i()].controller != me) as u8 as f32;
+        }
+        st[perm::PREPARED] = self.is_prepared(c) as u8 as f32;
+        let wards = self.wards_of(c);
+        st[perm::WARD] = wards.len() as f32 / 2.0;
+        for w in wards {
+            match w {
+                WardCost::Mana(m) => st[perm::WARD_MANA] = st[perm::WARD_MANA].max(m.total() as f32 / 4.0),
+                WardCost::Life(n) => st[perm::WARD_LIFE] = st[perm::WARD_LIFE].max(n as f32 / 4.0),
+                // (A random discard: the same float, ENGINE.md 99.14.)
+                WardCost::Discard | WardCost::DiscardRandom => st[perm::WARD_DISCARD] = 1.0,
+            }
+        }
+        st[perm::LOST_ABILITIES] = self.lost_abilities(c) as u8 as f32;
+        st[perm::GOADED] = [me, op_].iter().any(|&p| self.goaded_by(c, p)) as u8 as f32;
+        let flags = self.flags_of(c);
+        st[perm::EXILE_IF_LEAVES] = flags.exile_if_leaves as u8 as f32;
+        // ENGINE.md 58.8 (spare floats 91-95).
+        st[perm::CANT_BLOCK] = flags.cant_block as u8 as f32;
+        st[perm::CANT_BE_BLOCKED] = flags.cant_be_blocked as u8 as f32;
+        if !self.counters.is_empty() {
+            use crate::db::Counter as K;
+            let n: u64 = self
+                .counters
+                .iter()
+                .filter(|x| x.0 == c && !matches!(x.1, K::P1P1 | K::M1M1 | K::Loyalty | K::Lore))
+                .map(|x| x.2 as u64)
+                .sum();
+            st[perm::OTHER_COUNTERS] = squash(n as f32 / 4.0);
+        }
+        if !self.links.is_empty() {
+            let r = self.obj_ref(c);
+            let n = self.links.iter().filter(|l| l.source == r && self.live(l.card) && self.objs[l.card.idx.i()].zone == Zone::Exile).count();
+            st[perm::EXILED_WITH] = squash(n as f32 / 4.0);
+        }
+        st[perm::PROTECTED] = !self.protection_of(c).is_empty() as u8 as f32;
+        // Layout v5 (ENGINE.md 60): status 96-119.
+        let (must, exile_dies, subtypes) = self.effect_counts(c);
+        st[perm::MUST_ATTACK] = squash(must as f32 / 2.0);
+        st[perm::EXILE_IF_DIES] = squash(exile_dies as f32 / 2.0);
+        st[perm::SUBTYPES] = squash(subtypes as f32 / 2.0);
+        st[perm::EVOKED] = ob.evoked as u8 as f32;
+        st[perm::ESCAPED] = ob.escaped as u8 as f32;
+        st[perm::MONSTROUS] = ob.monstrous as u8 as f32;
+        st[perm::CHOSEN_PLAYER] = match ob.chosen_player {
+            Some(p) if p == me => 1.0,
+            Some(_) => -1.0,
+            None => 0.0,
+        };
+        if !self.marks.is_empty() {
+            let r = self.obj_ref(c);
+            let turn = self.turn.number as u16;
+            let (mut exhausted, mut regen, mut granted, mut grants_alt) = (0u32, 0u32, 0u32, 0u32);
+            let loss = self.loss_ts(c);
+            for &(o, m) in self.marks.iter() {
+                if o != r {
+                    // (A spell cast for an alternative cost this
+                    // permanent gave it, CR 118.9; ENGINE.md 99.15.)
+                    if let Mark::AltGranted { granter, .. } = m {
+                        if granter == r && self.live(o) && self.objs[o.idx.i()].zone == Zone::Stack {
+                            grants_alt += 1;
+                        }
+                    }
+                    continue;
                 }
+                match m {
+                    Mark::Exhausted(k) => {
+                        exhausted += 1;
+                        // Layout v7 (ENGINE.md 125): which exhaust ability.
+                        assert!((k as usize) < perm::EXHAUSTED_K_N, "{}: exhaust ability {k} past the encoding's {}", self.name(c), perm::EXHAUSTED_K_N);
+                        st[perm::EXHAUSTED_K + k as usize] = 1.0;
+                    }
+                    Mark::ChosenColor(k) if (k as usize) < 5 => st[perm::CHOSEN_COLOR + k as usize] = 1.0,
+                    // ENGINE.md 124.2.
+                    Mark::ChosenCreatureType(t) => type_bits(&mut st[perm::CHOSEN_CREATURE_TYPE..], Some(t)),
+                    Mark::Exerted => st[perm::EXERTED] = 1.0,
+                    // Layout v6 (ENGINE.md 100.5).
+                    Mark::WarpCast => st[perm::WARP_CAST] = 1.0,
+                    Mark::RegenShield => regen += 1,
+                    Mark::ManaSpent(n) => st[perm::MANA_SPENT] = squash(n as f32 / 8.0),
+                    // (A grant a later "loses all abilities" removed
+                    // doesn't count, CR 613.7: `granted_observers`.)
+                    Mark::Granted { ts, .. } if loss.is_none_or(|l| ts > l) => granted += 1,
+                    // Layout v7 (ENGINE.md 125, the public-state gate's G1).
+                    Mark::ChosenName(d) => {
+                        st[perm::CHOSEN_NAME] = 1.0;
+                        if d == crate::game::NO_NAME {
+                            st[perm::CHOSEN_NAME_NONE] = 1.0;
+                        } else {
+                            digits(&mut st[perm::CHOSEN_NAME_DIGITS..perm::CHOSEN_NAME_DIGITS + 32], ids, d);
+                        }
+                    }
+                    Mark::Entered { times, x } => {
+                        st[perm::ENTERED_BIG] = 1.0;
+                        st[perm::ENTERED_TIMES] = squash(times as f32 / 8.0);
+                        st[perm::ENTERED_X] = squash(x as f32 / 8.0);
+                    }
+                    Mark::UsedTurn(t) if t == turn => st[perm::USED_TURN] = 1.0,
+                    Mark::Harnessed => st[perm::HARNESSED] = 1.0,
+                    Mark::Boasted(t) if t == turn => st[perm::BOASTED] = 1.0,
+                    Mark::KickerX(v) => {
+                        st[perm::KICKER_X] = 1.0;
+                        st[perm::KICKER_X_VAL] = squash(v as f32 / 8.0);
+                    }
+                    Mark::Saddled(t) if t == turn => st[perm::SADDLED] = 1.0,
+                    Mark::ModesUsed(b) => {
+                        for i in 0..8 {
+                            st[perm::MODES_USED + i] = (b >> i & 1) as f32;
+                        }
+                    }
+                    Mark::Parity(k) => {
+                        st[perm::PARITY] = 1.0;
+                        st[perm::PARITY_ODD] = (k == 1) as u8 as f32;
+                    }
+                    Mark::LookedHand => st[perm::LOOKED_HAND] = 1.0,
+                    Mark::DelveLate => st[perm::DELVE_LATE] = 1.0,
+                    Mark::DealtDamage(t) if t == turn => st[perm::DEALT_DAMAGE] = 1.0,
+                    Mark::PriestPending => st[perm::PRIEST_PENDING] = 1.0,
+                    Mark::NotSorceryTiming => st[perm::NOT_SORCERY] = 1.0,
+                    Mark::Converge(m) => {
+                        st[perm::CONVERGE] = 1.0;
+                        for i in 0..5 {
+                            st[perm::CONVERGE_COLORS + i] = (m >> i & 1) as f32;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            st[perm::EXHAUSTED] = squash(exhausted as f32 / 2.0);
+            st[perm::REGEN] = squash(regen as f32 / 2.0);
+            st[perm::GRANTED_TRIGGERS] = squash(granted as f32 / 2.0);
+            st[perm::GRANTS_ALT] = squash(grants_alt as f32 / 2.0);
+        }
+        // Layout v6 (ENGINE.md 100.5): status 120-143 (the marks' above).
+        st[perm::LEGENDARY] = self.is_legendary(c) as u8 as f32;
+        if pc.grants {
+            st[perm::GRANTED_ACTIVATED] = squash(self.granted_activated(c).len() as f32 / 2.0);
+        }
+        if !self.stack.is_empty() {
+            let r = self.obj_ref(c);
+            st[perm::NOTED] = squash(self.stack.iter().filter(|s| s.noted.contains(&r)).count() as f32 / 2.0);
+        }
+        st[perm::ENTERED] = (ob.entered as u32 == self.turn.number) as u8 as f32;
+        // ENGINE.md 100.5.1: status 129-132.
+        let w6d = &self.db.def(ob.def).w6;
+        if w6d.kept_from.is_some() {
+            st[perm::KEPT_ABILITY] = (w6d.kept_index as f32 + 1.0) / 8.0;
+        }
+        if pc.control_fx {
+            if let Some((eot, lasting)) = self.w6_control_layers(c) {
+                st[perm::CONTROL_EOT] = eot.map_or(0.0, side_of);
+                st[perm::CONTROL_LASTING] = side_of(lasting);
+            }
+            if let Some(v) = self.w6_aura_control_place(c) {
+                st[perm::AURA_CONTROL] = v;
+            }
+        }
+        if !self.resolved.is_empty() || !self.done_once.is_empty() {
+            let r = self.obj_ref(c);
+            let n: u32 = self.resolved.iter().filter(|x| x.0 == r).map(|x| x.1 as u32).sum();
+            st[perm::RESOLVED] = squash(n as f32 / 4.0);
+            st[perm::DONE_ONCE] = squash(self.done_once.iter().filter(|x| x.0 == r).count() as f32 / 2.0);
+        }
+        // Layout v7 (ENGINE.md 125): picks in progress.
+        if let Some((rank, by_me, by_opp)) = cx.picks.of(c) {
+            st[perm::PICK_RANK] = squash(rank as f32 / 8.0);
+            st[perm::PICKS_ME] = squash(by_me as f32 / 2.0);
+            st[perm::PICKS_OPP] = squash(by_opp as f32 / 2.0);
+        }
+    }
+
+    /// The frame's hand card at sorted position `s` into its slot `x`.
+    fn write_hand(&self, cx: &Cx, s: usize, x: &mut [f32]) {
+        let hand = &cx.hand;
+        let c = hand[s];
+        let def = self.objs[c.i()].def;
+        code(&mut x[..CODE], self.db, cx.ids, def);
+        let st = &mut x[CODE..];
+        st[hand::PRESENT] = 1.0;
+        st[hand::COPIES] = hand.iter().filter(|&&x| self.objs[x.i()].def == def).count() as f32 / 4.0;
+        // (No paging: a hand's ids are its 64 positions, the deck limit.)
+        st[hand::LEGAL] = (s < act::HAND_N as usize && cx.legal(act::HAND + s as u16)) as u8 as f32;
+        st[hand::ABILITY_LEGAL] = (s < act::HAND_N as usize && cx.legal(act::HAND_ABILITY + s as u16)) as u8 as f32;
+        st[hand::OPP_KNOWS] = (self.objs[c.i()].known & (1 << cx.op_) != 0) as u8 as f32;
+        st[hand::LAND] = self.def_of(c).is(types::LAND) as u8 as f32;
+        // What its `HAND` id does: cast or play its front face, its other
+        // face (an MDFC's back face, an Adventure), or both (a face choice
+        // follows, ENGINE.md 25).
+        if let Some(d) = cx.d.filter(|_| s < act::HAND_N as usize) {
+            let (front, other) = match d.choice_of(act::HAND + s as u16) {
+                Some(Choice::Cast(_)) | Some(Choice::Play(_)) => (true, false),
+                Some(Choice::CastFace(_)) | Some(Choice::PlayFace(_)) => (false, true),
+                Some(Choice::Faces(_, m)) => (m & (FACE_CAST | FACE_PLAY) != 0, m & (OTHER_CAST | OTHER_PLAY) != 0),
+                _ => (false, false),
             };
-            code(&mut out[o..o + CODE], self.db, ids, def);
-            let st = &mut out[o + CODE..o + STACK_W];
-            st[0] = 1.0;
-            st[kind] = 1.0;
-            st[4] = (item.controller == me) as u8 as f32;
-            st[5] = item.modes.len() as f32 / 4.0;
-            st[6] = item.cost_option as f32 / 4.0;
-            st[7] = item.targets.len() as f32 / 4.0;
-            // ENGINE.md 58.8 (spare float 31).
-            st[stack::X] = squash(item.x as f32 / 8.0);
-            // Layout v5 (ENGINE.md 60): status 32-71.
-            for &m in &item.modes {
-                if (m as usize) < stack::MODES_N {
-                    st[stack::MODES + m as usize] += 0.5;
-                }
+            st[hand::FRONT] = front as u8 as f32;
+            st[hand::OTHER] = other as u8 as f32;
+        }
+        // Layout v7 (ENGINE.md 125): picks in progress.
+        if let Some((rank, me, opp)) = cx.picks.of(c) {
+            st[hand::PICKED] = (me + opp) as f32 / 4.0;
+            st[hand::PICK_RANK] = squash(rank as f32 / 8.0);
+        }
+    }
+
+    /// The stack item at position `pos` from the top (the page's first
+    /// position of the `STACK` range `first`) into its slot `x`.
+    fn write_stack(&self, cx: &Cx, stack_targets: &[Target], pos: usize, first: usize, x: &mut [f32]) {
+        let ids = cx.ids;
+        let (me, knower) = (cx.me, cx.knower);
+        let slot_of = |c: CardIdx| -> Option<usize> { cx.perm_pos(c).map(|x| x.1) };
+        let item = &self.stack[self.stack.len() - 1 - pos];
+        let (def, kind) = match item.kind {
+            StackKind::Spell { card } => (self.objs[card.i()].def, 1),
+            StackKind::Ability { ability, .. } => (ability.def, if matches!(ability.slot, AbilitySlot::Trigger(_)) { 3 } else { 2 }),
+        };
+        code(&mut x[..CODE], self.db, ids, def);
+        let st = &mut x[CODE..];
+        st[0] = 1.0;
+        st[kind] = 1.0;
+        st[4] = (item.controller == me) as u8 as f32;
+        st[5] = item.modes.len() as f32 / 4.0;
+        st[6] = item.cost_option as f32 / 4.0;
+        st[7] = item.targets.len() as f32 / 4.0;
+        // ENGINE.md 58.8 (spare float 31).
+        st[stack::X] = squash(item.x as f32 / 8.0);
+        // Layout v5 (ENGINE.md 60): status 32-71.
+        for &m in &item.modes {
+            if (m as usize) < stack::MODES_N {
+                st[stack::MODES + m as usize] += 0.5;
             }
-            if item.alt != 0 {
-                st[stack::ALT] = 1.0;
-                st[stack::ALT_INDEX] = item.alt as f32 / 4.0;
-            }
-            {
-                use crate::game::CastFrom as F;
-                let from = match item.from {
-                    F::Hand => None,
-                    F::Flashback => Some(0),
-                    F::FlashbackMana => Some(1),
-                    F::Escape => Some(2),
-                    F::Permission { .. } | F::Taxed(_) | F::Airbent(_) => Some(3),
-                    F::Retrace | F::Mayhem | F::Paragon => Some(4),
-                    F::Miracle => Some(5),
-                    F::LibraryTop | F::LibraryTopMana => Some(6),
-                };
-                if let Some(k) = from {
-                    st[stack::FROM + k] = 1.0;
-                }
-                st[stack::FREE] = matches!(item.from, F::Permission { free: true, .. }) as u8 as f32;
-            }
-            let origin = match item.origin {
-                Zone::Hand | Zone::Nowhere => None,
-                Zone::Graveyard => Some(0),
-                Zone::Exile | Zone::FaceDown => Some(1),
-                Zone::Library => Some(2),
-                Zone::Battlefield | Zone::Stack | Zone::Command | Zone::PhasedOut => Some(3),
+        }
+        if item.alt != 0 {
+            st[stack::ALT] = 1.0;
+            st[stack::ALT_INDEX] = item.alt as f32 / 4.0;
+        }
+        {
+            use crate::game::CastFrom as F;
+            let from = match item.from {
+                F::Hand => None,
+                F::Flashback => Some(0),
+                F::FlashbackMana => Some(1),
+                F::Escape => Some(2),
+                F::Permission { .. } | F::Taxed(_) | F::Airbent(_) => Some(3),
+                F::Retrace | F::Mayhem | F::Paragon => Some(4),
+                F::Miracle => Some(5),
+                F::LibraryTop | F::LibraryTopMana => Some(6),
             };
-            if let Some(k) = origin {
-                st[stack::ORIGIN + k] = 1.0;
+            if let Some(k) = from {
+                st[stack::FROM + k] = 1.0;
             }
-            st[stack::DELVED] = squash(item.delved as f32 / 4.0);
-            st[stack::AMOUNT] = squash(item.ev.amount as f32 / 8.0);
-            st[stack::NOTED] = squash(item.noted.len() as f32 / 4.0);
-            for (k, &n) in item.division.iter().take(2).enumerate() {
-                st[stack::DIVISION + k] = squash(n as f32 / 8.0);
+            st[stack::FREE] = matches!(item.from, F::Permission { free: true, .. }) as u8 as f32;
+        }
+        let origin = match item.origin {
+            Zone::Hand | Zone::Nowhere => None,
+            Zone::Graveyard => Some(0),
+            Zone::Exile | Zone::FaceDown => Some(1),
+            Zone::Library => Some(2),
+            Zone::Battlefield | Zone::Stack | Zone::Command | Zone::PhasedOut => Some(3),
+        };
+        if let Some(k) = origin {
+            st[stack::ORIGIN + k] = 1.0;
+        }
+        st[stack::DELVED] = squash(item.delved as f32 / 4.0);
+        st[stack::AMOUNT] = squash(item.ev.amount as f32 / 8.0);
+        st[stack::NOTED] = squash(item.noted.len() as f32 / 4.0);
+        for (k, &n) in item.division.iter().take(2).enumerate() {
+            st[stack::DIVISION + k] = squash(n as f32 / 8.0);
+        }
+        st[stack::ATTACK_AS] = item.attack_as.is_some() as u8 as f32;
+        st[stack::ATTACK_WALKER] = matches!(item.attack_as, Some(Some(_))) as u8 as f32;
+        st[stack::SPLICED] = squash(item.spliced.len() as f32 / 4.0);
+        // Layout v6 (ENGINE.md 100.5): status 72-151. The exiled cards it
+        // targets and noted (all of them in `bag::EXILE_REFS`), its first
+        // exiled target and its first noted object.
+        {
+            let exiled = |r: crate::ids::ObjRef| self.live(r) && matches!(self.objs[r.idx.i()].zone, Zone::Exile | Zone::FaceDown);
+            let seen = |c: CardIdx| !self.hidden_obj(c) || self.knows(knower, c);
+            let ex_t: Vec<crate::ids::ObjRef> = item
+                .targets
+                .iter()
+                .filter_map(|&(_, t)| match t {
+                    Target::Obj(r) if exiled(r) => Some(r),
+                    _ => None,
+                })
+                .collect();
+            st[stack::TARGETS_EXILED] = squash(ex_t.len() as f32 / 4.0);
+            st[stack::NOTED_EXILED] = squash(item.noted.iter().filter(|&&r| exiled(r)).count() as f32 / 4.0);
+            if let Some(&r) = ex_t.first() {
+                st[stack::EXILE_TARGET] = 1.0;
+                st[stack::EXILE_TARGET + 1] = (self.objs[r.idx.i()].owner != me) as u8 as f32;
+                if seen(r.idx) {
+                    digits(&mut st[stack::EXILE_TARGET + 2..stack::EXILE_TARGET + 34], ids, self.objs[r.idx.i()].def);
+                }
             }
-            st[stack::ATTACK_AS] = item.attack_as.is_some() as u8 as f32;
-            st[stack::ATTACK_WALKER] = matches!(item.attack_as, Some(Some(_))) as u8 as f32;
-            st[stack::SPLICED] = squash(item.spliced.len() as f32 / 4.0);
-            // Layout v6 (ENGINE.md 100.5): status 72-151. The exiled cards
-            // it targets and noted (all of them in `bag::EXILE_REFS`), its
-            // first exiled target and its first noted object.
-            {
-                let exiled = |r: crate::ids::ObjRef| self.live(r) && matches!(self.objs[r.idx.i()].zone, Zone::Exile | Zone::FaceDown);
-                let seen = |c: CardIdx| !self.hidden_obj(c) || self.knows(knower, c);
-                let ex_t: Vec<crate::ids::ObjRef> = item
-                    .targets
-                    .iter()
-                    .filter_map(|&(_, t)| match t {
-                        Target::Obj(r) if exiled(r) => Some(r),
-                        _ => None,
-                    })
-                    .collect();
-                st[stack::TARGETS_EXILED] = squash(ex_t.len() as f32 / 4.0);
-                st[stack::NOTED_EXILED] = squash(item.noted.iter().filter(|&&r| exiled(r)).count() as f32 / 4.0);
-                if let Some(&r) = ex_t.first() {
-                    st[stack::EXILE_TARGET] = 1.0;
-                    st[stack::EXILE_TARGET + 1] = (self.objs[r.idx.i()].owner != me) as u8 as f32;
+            if let Some(&r) = item.noted.first().filter(|&&r| self.live(r)) {
+                let ob = &self.objs[r.idx.i()];
+                if ob.zone == Zone::Battlefield {
+                    st[stack::NOTED_PERM + (ob.controller != me) as usize] = 1.0;
+                    st[stack::NOTED_SLOT] = slot_of(r.idx).map_or(0.0, |x| (x + 1) as f32 / 32.0);
+                } else if ob.zone != Zone::Nowhere {
+                    st[stack::NOTED_CARD] = 1.0;
+                    st[stack::NOTED_THEIRS] = (ob.owner != me) as u8 as f32;
                     if seen(r.idx) {
-                        digits(&mut st[stack::EXILE_TARGET + 2..stack::EXILE_TARGET + 34], ids, self.objs[r.idx.i()].def);
-                    }
-                }
-                if let Some(&r) = item.noted.first().filter(|&&r| self.live(r)) {
-                    let ob = &self.objs[r.idx.i()];
-                    if ob.zone == Zone::Battlefield {
-                        st[stack::NOTED_PERM + (ob.controller != me) as usize] = 1.0;
-                        st[stack::NOTED_SLOT] = slot_of(r.idx).map_or(0.0, |x| (x + 1) as f32 / 32.0);
-                    } else if ob.zone != Zone::Nowhere {
-                        st[stack::NOTED_CARD] = 1.0;
-                        st[stack::NOTED_THEIRS] = (ob.owner != me) as u8 as f32;
-                        if seen(r.idx) {
-                            digits(&mut st[stack::NOTED_DIGITS..stack::NOTED_DIGITS + 32], ids, ob.def);
-                        }
-                    }
-                }
-                if let StackKind::Spell { card } = item.kind {
-                    let r = self.obj_ref(card);
-                    let granter = self.marks.iter().find_map(|&(o, m)| match m {
-                        Mark::AltGranted { granter, .. } if o == r => Some(granter),
-                        _ => None,
-                    });
-                    // ENGINE.md 100.5.1: the mana spent to cast it.
-                    if let Some(n) = self.marks.iter().find_map(|&(o, m)| match m {
-                        Mark::ManaSpent(n) if o == r => Some(n),
-                        _ => None,
-                    }) {
-                        st[stack::MANA_SPENT] = squash(n as f32 / 8.0);
-                    }
-                    if let Some(g) = granter {
-                        st[stack::ALT_GRANTED] = 1.0;
-                        if self.live(g) && self.objs[g.idx.i()].zone == Zone::Battlefield {
-                            st[stack::ALT_GRANTER_SLOT] = slot_of(g.idx).map_or(0.0, |x| (x + 1) as f32 / 32.0);
-                            st[stack::ALT_GRANTER_OPP] = (self.objs[g.idx.i()].controller != me) as u8 as f32;
-                        }
+                        digits(&mut st[stack::NOTED_DIGITS..stack::NOTED_DIGITS + 32], ids, ob.def);
                     }
                 }
             }
             if let StackKind::Spell { card } = item.kind {
-                st[stack::EXILED_AFTER] = self.gy_exile.contains(&card) as u8 as f32;
-                st[stack::FLASHBACK] = self.objs[card.i()].flashback as u8 as f32;
-            }
-            match item.kind {
-                StackKind::Spell { card } => {
-                    st[stack::COPY] = self.is_copy_obj(card) as u8 as f32;
-                    st[stack::TIMES] = item.times as f32 / 4.0;
-                    st[stack::BESTOWED] = self.def_of(card).bestowed as u8 as f32;
-                    st[stack::UNCOUNTERABLE] = self.spell_uncounterable(card) as u8 as f32;
-                    st[stack::TARGETED] =
-                        stack_targets.iter().any(|t| matches!(t, Target::Obj(r) if r.idx == card && self.live(*r))) as u8
-                            as f32;
+                let r = self.obj_ref(card);
+                let granter = self.marks.iter().find_map(|&(o, m)| match m {
+                    Mark::AltGranted { granter, .. } if o == r => Some(granter),
+                    _ => None,
+                });
+                // ENGINE.md 100.5.1: the mana spent to cast it.
+                if let Some(n) = self.marks.iter().find_map(|&(o, m)| match m {
+                    Mark::ManaSpent(n) if o == r => Some(n),
+                    _ => None,
+                }) {
+                    st[stack::MANA_SPENT] = squash(n as f32 / 8.0);
                 }
-                StackKind::Ability { ability, .. } => {
-                    st[stack::TARGETED] = stack_targets.contains(&Target::Stack(item.id)) as u8 as f32;
-                    let i = match ability.slot {
-                        AbilitySlot::Spell => None,
-                        AbilitySlot::Trigger(i) | AbilitySlot::Activated(i) | AbilitySlot::Hand(i) => Some(i),
-                        AbilitySlot::Graveyard(i) => {
-                            st[stack::GRAVEYARD] = 1.0;
-                            Some(i)
-                        }
-                    };
-                    st[stack::SLOT] = i.map_or(0.0, |i| (i as f32 + 1.0) / 8.0);
-                }
-            }
-            for (k, &(_, t)) in item.targets.iter().take(2).enumerate() {
-                let tb = &mut st[8 + 8 * k..16 + 8 * k];
-                match t {
-                    Target::Player(p) => tb[(p != me) as usize] = 1.0,
-                    Target::Obj(r) if self.live(r) => match self.objs[r.idx.i()].zone {
-                        Zone::Battlefield => {
-                            let side = (self.objs[r.idx.i()].controller != me) as usize;
-                            tb[2 + 2 * side] = 1.0;
-                            tb[3 + 2 * side] = slot_of(r.idx).map_or(0.0, |x| x as f32 / 32.0);
-                        }
-                        Zone::Stack => {
-                            tb[6] = 1.0;
-                            let pos = self
-                                .stack
-                                .iter()
-                                .rev()
-                                .position(|x| x.kind == StackKind::Spell { card: r.idx })
-                                .unwrap_or(0);
-                            tb[7] = pos as f32 / 8.0;
-                        }
-                        _ => {}
-                    },
-                    Target::Obj(_) => {}
-                    // An ability on the stack: its stack slot.
-                    Target::Stack(id) => {
-                        if let Some(pos) = self.stack.iter().rev().position(|x| x.id == id) {
-                            tb[6] = 1.0;
-                            tb[7] = pos as f32 / 8.0;
-                        }
+                if let Some(g) = granter {
+                    st[stack::ALT_GRANTED] = 1.0;
+                    if self.live(g) && self.objs[g.idx.i()].zone == Zone::Battlefield {
+                        st[stack::ALT_GRANTER_SLOT] = slot_of(g.idx).map_or(0.0, |x| (x + 1) as f32 / 32.0);
+                        st[stack::ALT_GRANTER_OPP] = (self.objs[g.idx.i()].controller != me) as u8 as f32;
                     }
                 }
-            }
-        }
-        // The viewer's waiting triggers (the `TRIGGER` slots when it orders
-        // them; on a page, the page's).
-        for (k, t) in self.waiting.iter().filter(|t| t.controller == me).skip(paged_first(act::TRIGGER, act::TRIGGER_N)).enumerate().take(TRIGS) {
-            let o = O_TRIG + k * TRIG_W;
-            code(&mut out[o..o + CODE], self.db, ids, t.source_def);
-            out[o + CODE] = 1.0;
-            out[o + CODE + 1] = (t.slot as f32 + 1.0) / 4.0;
-            out[o + CODE + 2] = legal(act::TRIGGER + k as u16) as u8 as f32;
-        }
-        // The `LIBRARY` list of the viewer's own decision.
-        if let Some(d) = decision.filter(|_| mine_to_decide) {
-            // A graveyard list (ENGINE.md 65.10): the graveyards holding a card
-            // the decision offers, whole, in order, the viewer's first; an
-            // offered card is `LIBRARY` + its slot (`Game::graveyard_list`; on a
-            // page of a paged list, the page's cards at their slots:
-            // `Game::decision_graveyard_list`, ENGINE.md 100.2).
-            let gy = self.decision_graveyard_list(me, d);
-            if !gy.is_empty() {
-                for (k, &c) in gy.iter().enumerate().take(LIST) {
-                    let Some(c) = c else { continue };
-                    let def = self.objs[c.i()].def;
-                    let o = O_LIST + k * LIST_W;
-                    code(&mut out[o..o + CODE], self.db, ids, def);
-                    let copies = gy.iter().flatten().filter(|&&x| self.objs[x.i()].def == def).count();
-                    let s = &mut out[o + CODE..o + LIST_W];
-                    s[list::PRESENT] = 1.0;
-                    s[list::OPTION] = legal(act::LIBRARY + k as u16) as u8 as f32;
-                    s[list::COPIES] = copies as f32 / 4.0;
-                    s[list::THEIRS] = (self.objs[c.i()].owner != me) as u8 as f32;
-                    s[list::CHOSEN] = self.delve_exiling(c) as u8 as f32;
-                }
-            } else {
-                let list = self.decision_list(me);
-                for (k, &def) in list.iter().enumerate().take(LIST) {
-                    let o = O_LIST + k * LIST_W;
-                    code(&mut out[o..o + CODE], self.db, ids, def);
-                    out[o + CODE] = 1.0;
-                    out[o + CODE + 1] = legal(act::LIBRARY + k as u16) as u8 as f32;
-                    out[o + CODE + 2] = list.iter().filter(|&&x| x == def).count() as f32 / 4.0;
-                }
-                // The fourth slot's ability choice: each option's ability's
-                // index in the definition that has it (+ 1) / 4 (ENGINE.md
-                // 100.2; the audit's gap #16, inside layout v5).
-                if d.kind == crate::decision::DecisionKind::ChooseMode && matches!(self.agenda.last(), Some(Task::ChooseAbility { .. })) {
-                    for o in &d.options {
-                        if let (true, crate::decision::Choice::Ability(c, slot)) = (o.action >= act::LIBRARY, o.choice) {
-                            let k = (o.action - act::LIBRARY) as usize;
-                            if let (crate::db::AbilitySlot::Activated(i), true) = (self.activated_home(c, slot).1, k < LIST) {
-                                out[O_LIST + k * LIST_W + CODE + list::ABILITY] = (i as f32 + 1.0) / 4.0;
+                // Layout v7 (ENGINE.md 125, the gate's G1): the spell's marks.
+                for &(o, m) in self.marks.iter() {
+                    if o != r {
+                        continue;
+                    }
+                    match m {
+                        Mark::ConvergePending(b) => {
+                            st[stack::CONVERGE_PENDING] = 1.0;
+                            for i in 0..5 {
+                                st[stack::CONVERGE_PENDING_COLORS + i] = (b >> i & 1) as f32;
                             }
                         }
+                        Mark::Converge(b) => {
+                            st[stack::CONVERGE] = 1.0;
+                            for i in 0..5 {
+                                st[stack::CONVERGE_COLORS + i] = (b >> i & 1) as f32;
+                            }
+                        }
+                        Mark::MvCap(n) => {
+                            st[stack::MV_CAP] = 1.0;
+                            st[stack::MV_CAP_VAL] = n as f32 / 8.0;
+                        }
+                        Mark::HasteMana => st[stack::HASTE_MANA] = 1.0,
+                        Mark::NotSorceryTiming => st[stack::NOT_SORCERY] = 1.0,
+                        Mark::FreeFromHand => st[stack::FREE_FROM_HAND] = 1.0,
+                        _ => {}
                     }
                 }
             }
         }
-        // The cards in the viewer's graveyard with a graveyard ability (the
-        // `GY_ABILITY` ids, graveyard order: `Game::activation_options`; on a
-        // page, the page's).
-        let gya_first = paged_first(act::GY_ABILITY, act::GY_ABILITY_N);
-        for (k, c) in self.graveyard_cards(me).filter(|&c| !self.def_of(c).gy_abilities.is_empty()).skip(gya_first).take(GYAS).enumerate() {
-            let o = O_GYA + k * GYA_W;
-            code(&mut out[o..o + CODE], self.db, ids, self.objs[c.i()].def);
-            out[o + CODE] = 1.0;
-            out[o + CODE + 1] = legal(act::GY_ABILITY + k as u16) as u8 as f32;
+        if let StackKind::Spell { card } = item.kind {
+            st[stack::EXILED_AFTER] = self.gy_exile.contains(&card) as u8 as f32;
+            st[stack::FLASHBACK] = self.objs[card.i()].flashback as u8 as f32;
         }
-        // Revealed companions (public; layout v4, ENGINE.md 35).
-        for (side, p) in [me, op_].into_iter().enumerate() {
-            let pl = &self.players[p as usize];
-            // (Its identity as revealed: once in the game the card may be
-            // hidden again, a library card.)
-            let Some(def) = pl.companion_def else { continue };
-            let o = O_COMP + side * COMP_W;
-            code(&mut out[o..o + CODE], self.db, ids, def);
-            out[o + CODE + comp::PRESENT] = 1.0;
-            out[o + CODE + comp::AVAILABLE] = self.companion_outside(p).is_some() as u8 as f32;
-            let at_priority = decision.is_some_and(|d| d.kind == crate::decision::DecisionKind::Priority);
-            out[o + CODE + comp::LEGAL] = (p == me && at_priority && legal(act::COMPANION)) as u8 as f32;
-            out[o + CODE + comp::IN_GAME] = pl.companion_used as u8 as f32;
+        match item.kind {
+            StackKind::Spell { card } => {
+                st[stack::COPY] = self.is_copy_obj(card) as u8 as f32;
+                st[stack::TIMES] = item.times as f32 / 4.0;
+                st[stack::BESTOWED] = self.def_of(card).bestowed as u8 as f32;
+                st[stack::UNCOUNTERABLE] = self.spell_uncounterable(card) as u8 as f32;
+                st[stack::TARGETED] = stack_targets.iter().any(|t| matches!(t, Target::Obj(r) if r.idx == card && self.live(*r))) as u8 as f32;
+            }
+            StackKind::Ability { ability, source } => {
+                st[stack::TARGETED] = stack_targets.contains(&Target::Stack(item.id)) as u8 as f32;
+                let i = match ability.slot {
+                    AbilitySlot::Spell => None,
+                    AbilitySlot::Trigger(i) | AbilitySlot::Activated(i) | AbilitySlot::Hand(i) => Some(i),
+                    AbilitySlot::Graveyard(i) => {
+                        st[stack::GRAVEYARD] = 1.0;
+                        Some(i)
+                    }
+                };
+                st[stack::SLOT] = i.map_or(0.0, |i| (i as f32 + 1.0) / 8.0);
+                // Layout v7 (ENGINE.md 125): which object it is from.
+                cx.write_ref(&mut st[stack::SOURCE..stack::SOURCE + super::tail_encode::rf::W], source);
+            }
         }
-        self.encode_context(me, knower, ids, &mut out[O_CONTEXT..O_CONTEXT + CONTEXT]);
-        // Game facts in the match block's spare floats (ENGINE.md 58.8; the
-        // match's own floats are `encode_match`'s).
-        for (side, p) in [me, op_].into_iter().enumerate() {
-            let pl = &self.players[p as usize];
-            out[O_MATCH + mtch::SPELLS + side] = squash(pl.spells_cast as f32 / 4.0);
-            out[O_MATCH + mtch::ENERGY + side] = squash(pl.energy as f32 / 4.0);
+        for (k, &(req, t)) in item.targets.iter().take(2).enumerate() {
+            let tb = &mut st[8 + 8 * k..16 + 8 * k];
+            match t {
+                Target::Player(p) => tb[(p != me) as usize] = 1.0,
+                Target::Obj(r) if self.live(r) => match self.objs[r.idx.i()].zone {
+                    Zone::Battlefield => {
+                        let side = (self.objs[r.idx.i()].controller != me) as usize;
+                        tb[2 + 2 * side] = 1.0;
+                        tb[3 + 2 * side] = slot_of(r.idx).map_or(0.0, |x| x as f32 / 32.0);
+                    }
+                    Zone::Stack => {
+                        tb[6] = 1.0;
+                        let pos = self.stack.iter().rev().position(|x| x.kind == StackKind::Spell { card: r.idx }).unwrap_or(0);
+                        tb[7] = pos as f32 / 8.0;
+                    }
+                    _ => {}
+                },
+                Target::Obj(_) => {}
+                // An ability on the stack: its stack slot.
+                Target::Stack(id) => {
+                    if let Some(pos) = self.stack.iter().rev().position(|x| x.id == id) {
+                        tb[6] = 1.0;
+                        tb[7] = pos as f32 / 8.0;
+                    }
+                }
+            }
+            // Layout v7 (ENGINE.md 125): its requirement.
+            st[stack::TARGET_REQ + k] = (req as f32 + 1.0) / 8.0;
+        }
+        // Layout v7 (ENGINE.md 125): a triggered ability's event.
+        cx.write_ev(&mut st[stack::EV..stack::EV + super::tail_encode::ev::W], &item.ev);
+        let _ = first;
+    }
+
+    /// The list block of the knower's decision (ENGINE.md 11, 65.10, 100.2;
+    /// layout v7 125): its entries by absolute position (`whole`: v7; a
+    /// paged list's other pages' positions empty for a graveyard list, the
+    /// whole pile for a looked-at pile), or as layout v6 shows them (a
+    /// page's window at slots 0..).
+    fn list_block(&self, cx: &Cx, whole: bool) -> ListBlock {
+        let Some(d) = cx.d else { return ListBlock::default() };
+        let gy = self.decision_graveyard_list(cx.me, d);
+        if !gy.is_empty() {
+            let first = if whole { d.range_first(act::LIBRARY, act::LIBRARY_N) as usize } else { 0 };
+            let mut entries: Vec<Option<ListEntry>> = vec![None; first];
+            let defs: Vec<DefId> = gy.iter().flatten().map(|&c| self.objs[c.i()].def).collect();
+            entries.extend(gy.iter().map(|&c| {
+                c.map(|c| {
+                    let def = self.objs[c.i()].def;
+                    ListEntry { def, card: Some(c), copies: defs.iter().filter(|&&x| x == def).count() }
+                })
+            }));
+            if !whole {
+                entries.truncate(LIST);
+            }
+            return ListBlock { graveyard: true, first, entries };
+        }
+        let first = if whole { d.range_first(act::LIBRARY, act::LIBRARY_N) as usize } else { 0 };
+        if whole {
+            if let Some(v) = self.decision_list_by_ids(d) {
+                let entries = v
+                    .iter()
+                    .map(|e| e.map(|(def, card)| ListEntry { def, card, copies: v.iter().flatten().filter(|x| x.0 == def).count() }))
+                    .collect();
+                return ListBlock { graveyard: false, first, entries };
+            }
+        }
+        let list = self.decision_list(cx.me, whole);
+        let mut entries: Vec<Option<ListEntry>> = list
+            .iter()
+            .map(|&(def, card)| Some(ListEntry { def, card, copies: list.iter().filter(|x| x.0 == def).count() }))
+            .collect();
+        if !whole {
+            entries.truncate(LIST);
+        }
+        ListBlock { graveyard: false, first, entries }
+    }
+
+    /// List entry `k` (an absolute position in layout v7) into its slot `x`.
+    fn write_list_entry(&self, cx: &Cx, list: &ListBlock, k: usize, e: &ListEntry, v7: bool, x: &mut [f32]) {
+        let d = cx.d.expect("a list of the knower's decision");
+        code(&mut x[..CODE], self.db, cx.ids, e.def);
+        let s = &mut x[CODE..];
+        s[list::PRESENT] = 1.0;
+        s[list::OPTION] = cx.opt_legal(act::LIBRARY, act::LIBRARY_N, list.first, k) as u8 as f32;
+        s[list::COPIES] = e.copies as f32 / 4.0;
+        if list.graveyard {
+            let c = e.card.expect("a graveyard list's card");
+            s[list::THEIRS] = (self.objs[c.i()].owner != cx.me) as u8 as f32;
+            s[list::CHOSEN] = self.delve_exiling(c) as u8 as f32;
+        } else if v7 && d.kind == crate::decision::DecisionKind::ChooseMode && matches!(self.agenda.last(), Some(Task::ChooseAbility { .. })) {
+            // The fourth slot's ability choice: each option's ability's
+            // index in the definition that has it (+ 1) / 4 (ENGINE.md
+            // 100.2; the audit's gap #16, inside layout v5).
+            if let Some(a) = cx.opt_id(act::LIBRARY, act::LIBRARY_N, list.first, k) {
+                if let Some(crate::decision::Choice::Ability(c, slot)) = d.choice_of(a) {
+                    if let crate::db::AbilitySlot::Activated(i) = self.activated_home(c, slot).1 {
+                        s[list::ABILITY] = (i as f32 + 1.0) / 4.0;
+                    }
+                }
+            }
+        }
+        // Layout v7 (ENGINE.md 125): picks in progress.
+        if let Some((rank, me, opp)) = e.card.and_then(|c| cx.picks.of(c)) {
+            s[list::PICKED] = (me + opp) as f32 / 4.0;
+            s[list::PICK_RANK] = squash(rank as f32 / 8.0);
         }
     }
 
@@ -2317,39 +2723,39 @@ impl Game {
     /// The definitions behind the `LIBRARY` slots of `p`'s pending decision:
     /// a searched library, a looked-at pile, a seen hand (sorted by
     /// definition, ENGINE.md 11).
-    fn decision_list(&self, p: PlayerId) -> Vec<DefId> {
+    fn decision_list(&self, p: PlayerId, whole: bool) -> Vec<(DefId, Option<CardIdx>)> {
         use crate::decision::DecisionKind as K;
         let Some(d) = &self.pending else { return Vec::new() };
         // A companion to reveal (ENGINE.md 35): `LIBRARY` + k is the k-th
         // candidate, by definition.
         if d.kind == K::RevealCompanion {
-            return self.companion_candidates(p);
+            return self.companion_candidates(p).into_iter().map(|x| (x, None)).collect();
         }
+        // (Layout v7, `whole`: an option's entry at its id's absolute
+        // position, ENGINE.md 125; v6: the options' in id order.)
+        let at_ids = |f: &dyn Fn(crate::decision::Choice) -> Option<DefId>| -> Vec<(DefId, Option<CardIdx>)> {
+            d.options.iter().filter(|o| o.action >= act::LIBRARY).filter_map(|o| f(o.choice).map(|x| (x, None))).collect()
+        };
         // "As this enters, look at an opponent's hand, then choose any card
         // name" (`Game::choose_name_as_enters`): `LIBRARY` + k is the k-th
         // name of the opponent's cards by definition, not a library slot
         // (ENGINE.md 65.10: the list was the namer's library).
-        if d.kind == K::NameCard && matches!(self.agenda.last(), Some(Task::AsEnters { .. })) {
-            return d
-                .options
-                .iter()
-                .filter_map(|o| match o.choice {
-                    crate::decision::Choice::Def(x) if o.action >= act::LIBRARY => Some(x),
-                    _ => None,
-                })
-                .collect();
-        }
+        let names = d.kind == K::NameCard && matches!(self.agenda.last(), Some(Task::AsEnters { .. }));
         // The fourth slot's ability choice (ENGINE.md 100.2): `LIBRARY` + k is
         // an ability, by the definition that has it (`Game::activated_home`).
-        if d.kind == K::ChooseMode && matches!(self.agenda.last(), Some(Task::ChooseAbility { .. })) {
-            return d
-                .options
-                .iter()
-                .filter_map(|o| match o.choice {
-                    crate::decision::Choice::Ability(c, slot) if o.action >= act::LIBRARY => Some(self.activated_home(c, slot).0),
-                    _ => None,
-                })
-                .collect();
+        let abilities = d.kind == K::ChooseMode && matches!(self.agenda.last(), Some(Task::ChooseAbility { .. }));
+        let of_choice = |c: crate::decision::Choice| -> Option<DefId> {
+            match c {
+                crate::decision::Choice::Def(x) if names => Some(x),
+                crate::decision::Choice::Ability(c, slot) if abilities => Some(self.activated_home(c, slot).0),
+                _ => None,
+            }
+        };
+        if names || abilities {
+            if !whole {
+                return at_ids(&of_choice);
+            }
+            panic!("decision_list: option-derived lists by position are `list_block`'s");
         }
         let cards: Vec<CardIdx> = match d.kind {
             K::SearchLibrary | K::NameCard => self.library_sorted(p),
@@ -2360,8 +2766,9 @@ impl Game {
                     // A paged pile (more cards than the 64 list slots,
                     // ENGINE.md 100.1): the page's cards at their slots
                     // (63 a page, the last slot "next page"), as a paged
-                    // graveyard list shows its page (100.2).
-                    if let Stage::Paged { window } = d.stage {
+                    // graveyard list shows its page (100.2); layout v7
+                    // (`whole`), the pile at its absolute positions.
+                    if let (Stage::Paged { window }, false) = (d.stage, whole) {
                         let w = act::LIBRARY_N as usize - 1;
                         v = v.into_iter().skip(window as usize * w).take(w).collect();
                     }
@@ -2404,7 +2811,32 @@ impl Game {
                 .unwrap_or_default(),
             _ => Vec::new(),
         };
-        cards.iter().map(|c| self.objs[c.i()].def).collect()
+        cards.iter().map(|&c| (self.objs[c.i()].def, Some(c))).collect()
+    }
+
+    /// The names and abilities lists (a `NameCard` as a permanent enters, the
+    /// fourth slot's ability choice) by their options' ids: `LIBRARY` + j at
+    /// absolute position `first` + j (layout v7, ENGINE.md 125).
+    fn decision_list_by_ids(&self, d: &crate::decision::Decision) -> Option<Vec<Option<(DefId, Option<CardIdx>)>>> {
+        use crate::decision::DecisionKind as K;
+        let names = d.kind == K::NameCard && matches!(self.agenda.last(), Some(Task::AsEnters { .. }));
+        let abilities = d.kind == K::ChooseMode && matches!(self.agenda.last(), Some(Task::ChooseAbility { .. }));
+        if !(names || abilities) {
+            return None;
+        }
+        let first = d.range_first(act::LIBRARY, act::LIBRARY_N) as usize;
+        let mut v: Vec<Option<(DefId, Option<CardIdx>)>> = Vec::new();
+        for o in d.options.iter().filter(|o| (act::LIBRARY..act::LIBRARY + act::LIBRARY_N).contains(&o.action)) {
+            let def = match o.choice {
+                crate::decision::Choice::Def(x) if names => x,
+                crate::decision::Choice::Ability(c, slot) if abilities => self.activated_home(c, slot).0,
+                _ => continue,
+            };
+            let k = first + (o.action - act::LIBRARY) as usize;
+            v.resize(v.len().max(k + 1), None);
+            v[k] = Some((def, None));
+        }
+        Some(v)
     }
 
     fn encode_context(&self, me: PlayerId, knower: PlayerId, ids: &[u16], x: &mut [f32]) {
@@ -2575,7 +3007,8 @@ pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
     let op_ = opp(me);
     let db = a.g.db();
     let ids = identity::identities(db);
-    let x = &mut out[O_MATCH..O_MATCH + MATCH];
+    let lay = Lay::of(out.len());
+    let x = &mut out[lay.o_match..lay.o_match + MATCH];
     x[mtch::BO3] = (m.format == super::Format::Bo3) as u8 as f32;
     x[mtch::GAME] = m.game_no as f32 / 3.0;
     x[mtch::MY_WINS] = m.wins[me as usize] as f32 / 2.0;
@@ -2699,7 +3132,7 @@ fn candidates(a: &super::MtgAz, me: PlayerId, op_: PlayerId, b: usize, ids: &[u1
 /// list block. The game blocks are empty (the last game is over). The
 /// other player's deck being built is not shown (a simultaneous choice).
 pub fn encode_sideboarding(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
-    assert!(out.len() == NUM_FEATURES || out.len() == NUM_FEATURES_V6);
+    let lay = Lay::of(out.len());
     encode_match(a, viewer, out);
     let sb = a.sideboarding().expect("sideboarding");
     let db = a.g.db();
@@ -2725,10 +3158,14 @@ pub fn encode_sideboarding(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) 
         x[ctx::HAS_CARD] = 1.0;
     }
     let legal = |id: u16| d.options.binary_search_by_key(&id, |o| o.action).is_ok();
-    for (k, &(def, n)) in pool.list.iter().enumerate().take(LIST) {
-        let o = O_LIST + k * LIST_W;
+    // (A pool list's entries are `LIBRARY` ids: at most the list's 64 head
+    // slots, a loud failure past them.)
+    assert!(pool.list.len() <= LIST, "a sideboarding pool list of {} entries", pool.list.len());
+    let (lo, lw) = (lay.off[super::tail_encode::seg::LIST as usize], lay.w[super::tail_encode::seg::LIST as usize]);
+    for (k, &(def, n)) in pool.list.iter().enumerate() {
+        let o = lo + k * lw;
         code(&mut out[o..o + CODE], db, ids, def);
-        let s = &mut out[o + CODE..o + LIST_W];
+        let s = &mut out[o + CODE..o + lw];
         let basic = k >= pool.n_cards;
         s[list::PRESENT] = 1.0;
         s[list::OPTION] = (d.kind == crate::decision::DecisionKind::Sideboard && legal(act::LIBRARY + k as u16)) as u8 as f32;
@@ -2748,7 +3185,7 @@ pub fn encode_sideboarding(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) 
 /// the candidates are not shown (the choice is a value choice, valued by the decks' games, never
 /// recorded: zero-core docs/search.md 3.17).
 pub fn encode_deck_choice(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
-    assert!(out.len() == NUM_FEATURES || out.len() == NUM_FEATURES_V6);
+    let _ = Lay::of(out.len());
     encode_match(a, viewer, out);
     let c = a.deck_choice().expect("a deck choice");
     let d = &c.decision;
@@ -2766,8 +3203,9 @@ pub fn encode_deck_choice(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
 /// 36: a game package's `readers` entry `{target: 'deck', inputs: [[offset, count], ...]}`, flat
 /// features of the bags and global blocks only, in feature order, each once): what the viewer has
 /// seen of its opponent's cards, by identity, and the public counts. (name, offset, count) in
-/// layout v6. Framed as the encoding (ENGINE.md 100.5): "the opponent" is the frame's.
-pub fn deck_reader_inputs() -> Vec<(&'static str, usize, usize)> {
+/// layout `lay` (v7: the `mtg` game's, ENGINE.md 125; v6: `mtg_eoe`'s). Framed as the encoding
+/// (ENGINE.md 100.5): "the opponent" is the frame's.
+pub fn deck_reader_inputs(lay: &Lay) -> Vec<(&'static str, usize, usize)> {
     let b = |i: usize| O_BAGS + i * D;
     vec![
         ("globals: the game (turn, step, who is active and has priority, the stack's size, ...)", O_GLOBALS, 24),
@@ -2780,21 +3218,20 @@ pub fn deck_reader_inputs() -> Vec<(&'static str, usize, usize)> {
         ("bag OPP_LIBRARY_KNOWN: their library cards the viewer knows, or knows are in some cards of it", b(bag::OPP_LIBRARY_KNOWN), D),
         ("bag OPP_REVEALED: their reveals in earlier games of a match", b(bag::OPP_REVEALED), D),
         ("bag OPP_PHASED: their phased-out permanents", b(bag::OPP_PHASED), D),
-        ("match: the opponent's deck size", O_MATCH + mtch::OPP_DECK, 1),
-        ("globals v5: the opponent (cards drawn, spells cast this turn and this game, ...)", O_GLOBALS_V5 + g5::PLAYER, g5::PLAYER),
+        ("match: the opponent's deck size", lay.o_match + mtch::OPP_DECK, 1),
+        ("globals v5: the opponent (cards drawn, spells cast this turn and this game, ...)", lay.o_globals_v5 + g5::PLAYER, g5::PLAYER),
     ]
 }
 
-/// `deck_reader_inputs` as JSON (checked in as `mtgz/az/deck_reader_v6.json`, a test keeps the
-/// two equal): `{"target": "deck", "layout": 6, "inputs": [[offset, count], ...], "names": [...]}`.
-/// In layout v6's features: the same ranges in layout v7 (`mtg`, which appends one block after
-/// them, ENGINE.md 124.2) and v6 (`mtg_eoe`).
-pub fn deck_reader_json() -> String {
-    let ins = deck_reader_inputs();
+/// `deck_reader_inputs` as JSON (checked in as `mtgz/az/deck_reader_v6.json`, layout v6's,
+/// `mtg_eoe`'s, and `deck_reader_v7.json`, layout v7's, `mtg`'s; a test keeps them equal):
+/// `{"target": "deck", "layout": 6 | 7, "inputs": [[offset, count], ...], "names": [...]}`.
+pub fn deck_reader_json(lay: &Lay) -> String {
+    let ins = deck_reader_inputs(lay);
     let v = serde_json::json!({
         "target": "deck",
-        "layout": 6,
-        "features": NUM_FEATURES_V6,
+        "layout": if lay.v7 { 7 } else { 6 },
+        "features": lay.features,
         "inputs": ins.iter().map(|&(_, o, n)| [o, n]).collect::<Vec<_>>(),
         "names": ins.iter().map(|&(name, _, _)| name).collect::<Vec<_>>(),
     });
@@ -2811,11 +3248,22 @@ pub fn deck_reader_json() -> String {
 /// for the widen of v5 and v4 networks, ENGINE.md 60.2, 100.5). `cards` (the name behind each
 /// identity of `db`, for analysis; null where none) is not read by the network.
 pub fn layout_json(db: &'static CardDb) -> String {
+    use super::tail_encode::{self as te, seg as sg};
     use serde_json::json;
     let id = json!({"at": 0, "radix": [16, 8, 8]});
-    let seg = |name: &str, offset: usize, count: usize, width: usize, present: usize, actions: serde_json::Value| {
-        json!({"name": name, "offset": offset, "count": count, "width": width, "present": present,
-               "id": id.clone(), "actions": actions})
+    // (The EoE table's game, `mtg_eoe`, keeps layout v6: ENGINE.md 124.2.)
+    let eoe = identity::space_of(db) == identity::Space::Eoe;
+    let lay = if eoe { &LAY6 } else { &LAY7 };
+    let seg = |k: u16, name: &str, present: usize, actions: serde_json::Value| {
+        let i = k as usize;
+        let mut v = json!({"name": name, "offset": lay.off[i], "count": te::SEG_HEAD[i], "width": lay.w[i], "present": present,
+               "id": id.clone(), "actions": actions});
+        // Layout v7 (ENGINE.md 125): the capped segments' objects past their head slots are tail
+        // tokens (zero-core docs/search.md 1.4).
+        if lay.v7 {
+            v["tail"] = json!(true);
+        }
+        v
     };
     let a = |base: u16, stride: u16| json!([base, stride]);
     let ids = identity::identities(db);
@@ -2827,45 +3275,69 @@ pub fn layout_json(db: &'static CardDb) -> String {
             cards[i as usize] = Some(db.def(def as DefId).name.clone());
         }
     }
-    // (The EoE table's game, `mtg_eoe`, keeps layout v6: ENGINE.md 124.2.)
-    let eoe = identity::space_of(db) == identity::Space::Eoe;
+    let mut segments = vec![
+        json!({"name": "context", "offset": O_CONTEXT, "count": 1, "width": CONTEXT, "present": null,
+         "id": {"at": ctx::CARD, "radix": [16, 8, 8]}}),
+        json!({"name": "tops", "offset": O_TOPS, "count": 2 * TOPS, "width": TOP_W, "present": 1,
+         "id": {"at": 2, "radix": [16, 8, 8]}}),
+        seg(sg::MY_PERM, "my_permanents", CODE + perm::PRESENT,
+            json!([a(act::MY_PERM, 1), a(act::ACTIVATE, 4), a(act::ACTIVATE + 1, 4), a(act::ACTIVATE + 2, 4),
+                   a(act::ACTIVATE + 3, 4)])),
+        seg(sg::OPP_PERM, "opponent_permanents", CODE + perm::PRESENT, json!([a(act::OPP_PERM, 1)])),
+        seg(sg::HAND, "hand", CODE, json!([a(act::HAND, 1), a(act::HAND_ABILITY, 1)])),
+        seg(sg::STACK, "stack", CODE, json!([a(act::STACK, 1)])),
+        seg(sg::TRIGGERS, "triggers", CODE, json!([a(act::TRIGGER, 1)])),
+        seg(sg::LIST, "list", CODE, json!([a(act::LIBRARY, 1)])),
+        seg(sg::GYA, "graveyard_abilities", CODE, json!([a(act::GY_ABILITY, 1)])),
+        // Layout v4 (ENGINE.md 35): the companion special action is the
+        // viewer's companion's.
+        json!({"name": "my_companion", "offset": lay.off[sg::MY_COMP as usize], "count": 1, "width": COMP_W, "present": CODE + comp::PRESENT,
+               "id": id.clone(), "actions": [a(act::COMPANION, 1)]}),
+        json!({"name": "opponent_companion", "offset": lay.off[sg::OPP_COMP as usize], "count": 1, "width": COMP_W, "present": CODE + comp::PRESENT,
+               "id": id.clone(), "actions": []}),
+    ];
+    if lay.v7 {
+        // Layout v7's tail-only segments (ENGINE.md 125): no head slot, gated (a widen adds them at
+        // gate 0), their objects' card code first; `exile_offered`'s options point at their tokens
+        // (a pointer column, no static action).
+        let tail_only = |k: u16, name: &str, present: usize| {
+            json!({"name": name, "offset": null, "count": 0, "width": te::SEG_W[k as usize], "present": present,
+                   "id": id.clone(), "actions": [], "tail": true, "gate": true})
+        };
+        segments.push(tail_only(sg::OPP_TRIGGERS, "opponent_triggers", CODE + trig::PRESENT));
+        segments.push(tail_only(sg::DELAYED, "delayed", CODE + te::dl::PRESENT));
+        segments.push(tail_only(sg::LINKS, "links", CODE + te::lk::PRESENT));
+        let mut xo = tail_only(sg::EXILE_OFFERED, "exile_offered", CODE + te::xo::PRESENT);
+        xo["columns"] = json!(1);
+        segments.push(xo);
+        segments.push(tail_only(sg::LIBRARY_KNOWN, "library_known", CODE + te::lb::PRESENT));
+        segments.push(tail_only(sg::STACK_RELATIONS, "stack_relations", CODE + te::sr::PRESENT));
+        segments.push(tail_only(sg::GRAVEYARD_ORDER, "graveyard_order", CODE + te::go::PRESENT));
+    }
     let mut v = json!({
         "version": if eoe { 6 } else { 7 },
-        "features": if eoe { NUM_FEATURES_V6 } else { NUM_FEATURES },
+        "features": lay.features,
         "vocab": D,
-        "segments": [
-            {"name": "context", "offset": O_CONTEXT, "count": 1, "width": CONTEXT, "present": null,
-             "id": {"at": ctx::CARD, "radix": [16, 8, 8]}},
-            {"name": "tops", "offset": O_TOPS, "count": 2 * TOPS, "width": TOP_W, "present": 1,
-             "id": {"at": 2, "radix": [16, 8, 8]}},
-            seg("my_permanents", O_MY_PERM, PERMS, PERM_W, CODE + perm::PRESENT,
-                json!([a(act::MY_PERM, 1), a(act::ACTIVATE, 4), a(act::ACTIVATE + 1, 4), a(act::ACTIVATE + 2, 4),
-                       a(act::ACTIVATE + 3, 4)])),
-            seg("opponent_permanents", O_OPP_PERM, PERMS, PERM_W, CODE + perm::PRESENT, json!([a(act::OPP_PERM, 1)])),
-            seg("hand", O_HAND, HANDS, HAND_W, CODE, json!([a(act::HAND, 1), a(act::HAND_ABILITY, 1)])),
-            seg("stack", O_STACK, STACKS, STACK_W, CODE, json!([a(act::STACK, 1)])),
-            seg("triggers", O_TRIG, TRIGS, TRIG_W, CODE, json!([a(act::TRIGGER, 1)])),
-            seg("list", O_LIST, LIST, LIST_W, CODE, json!([a(act::LIBRARY, 1)])),
-            seg("graveyard_abilities", O_GYA, GYAS, GYA_W, CODE, json!([a(act::GY_ABILITY, 1)])),
-            // Layout v4 (ENGINE.md 35): the companion special action is the
-            // viewer's companion's.
-            seg("my_companion", O_COMP, 1, COMP_W, CODE + comp::PRESENT, json!([a(act::COMPANION, 1)])),
-            seg("opponent_companion", O_COMP + COMP_W, 1, COMP_W, CODE + comp::PRESENT, json!([])),
-        ],
+        "segments": segments,
         "bags": [{"name": "bags", "offset": O_BAGS, "count": BAGS, "width": D}],
         // Layout v5 (ENGINE.md 60): the global blocks, so a widen maps a v5
         // network's globals by name (zero-core `net.tokens_layout`): v4's
         // globals and its match block, then v5's; layout v6 (ENGINE.md
         // 100.5) adds its block after them.
         "globals": [{"name": "globals", "offset": O_GLOBALS, "count": GLOBALS},
-                    {"name": "match", "offset": O_MATCH, "count": MATCH},
-                    {"name": "globals_v5", "offset": O_GLOBALS_V5, "count": GLOBALS_V5},
-                    {"name": "globals_v6", "offset": O_GLOBALS_V6, "count": GLOBALS_V6}],
+                    {"name": "match", "offset": lay.o_match, "count": MATCH},
+                    {"name": "globals_v5", "offset": lay.o_globals_v5, "count": GLOBALS_V5},
+                    {"name": "globals_v6", "offset": lay.o_globals_v6, "count": GLOBALS_V6}],
         "cards": cards,
     });
-    // Layout v7 (ENGINE.md 124.2): its block of globals after v6's.
-    if !eoe {
+    if lay.v7 {
+        // Layout v7 (ENGINE.md 124.2): its block of globals after v6's.
         v["globals"].as_array_mut().unwrap().push(json!({"name": "globals_v7", "offset": O_GLOBALS_V7, "count": GLOBALS_V7}));
+        // ENGINE.md 125: the rows' pointer overrides, the resource limit, and a draft until the
+        // project ends (run launches refuse it without `allow_draft_layout`).
+        v["option_pointers"] = json!(true);
+        v["max_row_tokens"] = json!(te::MAX_ROW_TOKENS);
+        v["draft"] = json!(true);
     }
     // The EoE table's identity space (ENGINE.md 105): the same layout under the name `eoe`, so
     // zero-core's guard tells an EoE network from a cube one (the cube's layout has no name).
@@ -2874,9 +3346,81 @@ pub fn layout_json(db: &'static CardDb) -> String {
     }
     serde_json::to_string_pretty(&v).unwrap() + "\n"
 }
+/// What every permanent's slot reads of the game, once per encoding
+/// (`Game::perm_cx`).
+struct PermCx {
+    targeted: Vec<CardIdx>,
+    asked_blocker: Option<CardIdx>,
+    dmg_att: Option<CardIdx>,
+    dmg_blk: Option<CardIdx>,
+    asked_attacker: Option<CardIdx>,
+    grants: bool,
+    control_fx: bool,
+}
+
+/// One entry of the list block: a definition, its card where the list holds
+/// cards, and the copies of its definition in the list.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ListEntry {
+    pub def: DefId,
+    pub card: Option<CardIdx>,
+    pub copies: usize,
+}
+
+/// The list block of the knower's decision (`Game::list_block`): its entries
+/// by position, the page's first position, a graveyard list or not.
+#[derive(Default)]
+pub(crate) struct ListBlock {
+    pub graveyard: bool,
+    pub first: usize,
+    pub entries: Vec<Option<ListEntry>>,
+}
+
+impl Game {
+    /// The list block's entries of `viewer`'s row (layout v7: absolute
+    /// positions; ENGINE.md 125): what the pointer overrides check a static
+    /// list slot against.
+    pub(crate) fn list_entries_v7(&self, cx: &Cx) -> Vec<Option<ListEntry>> {
+        self.list_block(cx, true).entries
+    }
+}
+
+/// Every keyword's float in a permanent's status: v4's 15 (`KWS`, at
+/// `perm::KEYWORDS`) and layout v7's 7 (`KWS_V7`, at `perm::KW_V7`; ENGINE.md
+/// 125). Exhaustive: a new keyword is a compile error here until it has a
+/// float (a new layout).
+pub fn kw_float(kw: Kw) -> usize {
+    match kw {
+        Kw::Flying => perm::KEYWORDS,
+        Kw::Reach => perm::KEYWORDS + 1,
+        Kw::FirstStrike => perm::KEYWORDS + 2,
+        Kw::DoubleStrike => perm::KEYWORDS + 3,
+        Kw::Deathtouch => perm::KEYWORDS + 4,
+        Kw::Trample => perm::KEYWORDS + 5,
+        Kw::Lifelink => perm::KEYWORDS + 6,
+        Kw::Vigilance => perm::KEYWORDS + 7,
+        Kw::Haste => perm::KEYWORDS + 8,
+        Kw::Defender => perm::KEYWORDS + 9,
+        Kw::Menace => perm::KEYWORDS + 10,
+        Kw::Flash => perm::KEYWORDS + 11,
+        Kw::Hexproof => perm::KEYWORDS + 12,
+        Kw::Shroud => perm::KEYWORDS + 13,
+        Kw::Indestructible => perm::KEYWORDS + 14,
+        Kw::Infect => perm::KW_V7,
+        Kw::Shadow => perm::KW_V7 + 1,
+        Kw::Plainswalk => perm::KW_V7 + 2,
+        Kw::Islandwalk => perm::KW_V7 + 3,
+        Kw::Swampwalk => perm::KW_V7 + 4,
+        Kw::Mountainwalk => perm::KW_V7 + 5,
+        Kw::Forestwalk => perm::KW_V7 + 6,
+    }
+}
+
+/// Layout v7's keywords outside `KWS` (ENGINE.md 125), in `perm::KW_V7`'s order.
+pub const KWS_V7: [Kw; perm::KW_V7_N] = [Kw::Infect, Kw::Shadow, Kw::Plainswalk, Kw::Islandwalk, Kw::Swampwalk, Kw::Mountainwalk, Kw::Forestwalk];
 
 /// Keywords in the permanent status, in this order.
-const KWS: [Kw; 15] = [
+pub const KWS: [Kw; 15] = [
     Kw::Flying,
     Kw::Reach,
     Kw::FirstStrike,
@@ -2900,9 +3444,11 @@ mod tests {
     use crate::testkit::Scenario;
     use crate::{Choice, DecisionKind, Step};
 
+    /// The head of `v`'s layout v7 row (these tests read head floats; the tail is `tail_encode`'s).
     fn features(g: &Game, v: PlayerId) -> Vec<f32> {
         let mut x = vec![0.0; NUM_FEATURES];
-        g.encode_features(v, &mut x);
+        let mut t = TailBuf::new(&super::super::tail_encode::TAILS);
+        g.encode_features_row(v, &mut x, &mut t);
         x
     }
 
@@ -3127,6 +3673,9 @@ mod tests {
                 // (the targets' count, v4's float 7; the noted objects' count, v5's)
                 top + 7,
                 top + stack::NOTED,
+                // (layout v7, ENGINE.md 125: the new target's requirement; the exiled target and the
+                // exiled noted card are `stack_relations` tokens)
+                top + stack::TARGET_REQ + 1,
             ];
             if v == 0 {
                 want.extend([top + stack::EXILE_TARGET + 1, top + stack::NOTED_THEIRS, top + stack::ALT_GRANTER_OPP]);
@@ -3243,38 +3792,67 @@ mod tests {
     /// block).
     #[test]
     fn the_v5_projection_leaves_exactly_the_v6_additions() {
-        let p = v5_projection();
+        let p = v5_to_v6();
+        let n = v6::NUM_FEATURES;
+        let mut hit = vec![false; n];
+        for &i in &p {
+            assert!(!hit[i]);
+            hit[i] = true;
+        }
+        let mut new = vec![false; n];
+        new[O_BAGS + v5::BAGS * D..O_BAGS + BAGS * D].iter_mut().for_each(|x| *x = true);
+        for base in [v6::O_MY_PERM, v6::O_OPP_PERM] {
+            for s in 0..PERMS {
+                new[base + s * v6::PERM_W + v5::PERM_W..base + (s + 1) * v6::PERM_W].iter_mut().for_each(|x| *x = true);
+            }
+        }
+        for s in 0..STACKS {
+            new[v6::O_STACK + s * v6::STACK_W + v5::STACK_W..v6::O_STACK + (s + 1) * v6::STACK_W].iter_mut().for_each(|x| *x = true);
+        }
+        new[v6::O_GLOBALS_V6..].iter_mut().for_each(|x| *x = true);
+        for i in 0..n {
+            assert_eq!(hit[i], !new[i], "feature {i}");
+        }
+        assert_eq!(new.iter().filter(|&&x| x).count(), n - v5::NUM_FEATURES);
+        assert_eq!(n - v5::NUM_FEATURES, 4 * D + 2 * PERMS * PERM_V6 + STACKS * STACK_V6 + GLOBALS_V6);
+        // (and v5 -> v7 is v5 -> v6 -> v7)
+        let (q, r) = (v5_projection(), v6_projection());
+        assert!(p.iter().zip(&q).all(|(&a, &b)| r[a] == b));
+    }
+
+    /// Every layout v6 feature has one v7 index (ENGINE.md 125), and the v7
+    /// floats nothing maps to are exactly v7's additions: the permanents',
+    /// hand's, stack's, triggers' and list's new floats at their slots' ends
+    /// and the Cavern block (124.2).
+    #[test]
+    fn the_v6_projection_leaves_exactly_the_v7_additions() {
+        let p = v6_projection();
+        assert_eq!(p.len(), NUM_FEATURES_V6);
         let mut hit = vec![false; NUM_FEATURES];
         for &i in &p {
             assert!(!hit[i]);
             hit[i] = true;
         }
         let mut new = vec![false; NUM_FEATURES];
-        new[O_BAGS + v5::BAGS * D..O_BAGS + BAGS * D].iter_mut().for_each(|x| *x = true);
-        for base in [O_MY_PERM, O_OPP_PERM] {
-            for s in 0..PERMS {
-                new[base + s * PERM_W + v5::PERM_W..base + (s + 1) * PERM_W].iter_mut().for_each(|x| *x = true);
+        let mut wider = |base: usize, n: usize, w6: usize, w7: usize| {
+            for s in 0..n {
+                new[base + s * w7 + w6..base + (s + 1) * w7].iter_mut().for_each(|x| *x = true);
             }
-        }
-        for s in 0..STACKS {
-            new[O_STACK + s * STACK_W + v5::STACK_W..O_STACK + (s + 1) * STACK_W].iter_mut().for_each(|x| *x = true);
-        }
-        new[O_GLOBALS_V6..].iter_mut().for_each(|x| *x = true);
+        };
+        wider(O_MY_PERM, PERMS, v6::PERM_W, PERM_W);
+        wider(O_OPP_PERM, PERMS, v6::PERM_W, PERM_W);
+        wider(O_HAND, HANDS, v6::HAND_W, HAND_W);
+        wider(O_STACK, STACKS, v6::STACK_W, STACK_W);
+        wider(O_TRIG, TRIGS, v6::TRIG_W, TRIG_W);
+        wider(O_LIST, LIST, v6::LIST_W, LIST_W);
+        new[O_GLOBALS_V7..].iter_mut().for_each(|x| *x = true);
         for i in 0..NUM_FEATURES {
             assert_eq!(hit[i], !new[i], "feature {i}");
         }
-        assert_eq!(new.iter().filter(|&&x| x).count(), NUM_FEATURES - v5::NUM_FEATURES);
-        // (layout v7's block too: ENGINE.md 124.2)
-        assert_eq!(NUM_FEATURES - v5::NUM_FEATURES, 4 * D + 2 * PERMS * PERM_V6 + STACKS * STACK_V6 + GLOBALS_V6 + GLOBALS_V7);
-    }
-
-    /// Every layout v6 feature is the same v7 feature, and the v7 floats
-    /// nothing maps to are exactly v7's block (ENGINE.md 124.2).
-    #[test]
-    fn the_v6_projection_leaves_exactly_the_v7_block() {
-        let p = v6_projection();
-        assert_eq!(p.len(), NUM_FEATURES_V6);
-        assert!(p.iter().enumerate().all(|(i, &j)| i == j));
-        assert_eq!((O_GLOBALS_V7, GLOBALS_V7, NUM_FEATURES), (NUM_FEATURES_V6, 3_680, NUM_FEATURES_V6 + 3_680));
+        assert_eq!(new.iter().filter(|&&x| x).count(), NUM_FEATURES - NUM_FEATURES_V6);
+        assert_eq!(
+            NUM_FEATURES - NUM_FEATURES_V6,
+            2 * PERMS * PERM_V7 + HANDS * (HAND_W - v6::HAND_W) + STACKS * STACK_V7 + TRIGS * (TRIG_W - v6::TRIG_W) + LIST * (LIST_W - v6::LIST_W) + GLOBALS_V7
+        );
     }
 }

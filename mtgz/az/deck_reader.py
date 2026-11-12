@@ -7,8 +7,9 @@ declared raw inputs, predicts an auxiliary target and feeds the trunk. For `mtg`
 * the target is the auxiliary target `deck` (`MtgAz::aux_target`'s second segment, the package's
   `aux`): the frame opponent's unseen cards - their hand, library and face-down cards the decider
   does not know exactly - as counts per card identity (1024), a multinomial whose total is public;
-* the inputs are `deck_reader_v6.json` (`encode::deck_reader_inputs`, checked in by the engine's
-  tests): layout v6 ranges of what the viewer has seen of the opponent's cards (the opponent's
+* the inputs are `deck_reader_v7.json` for `mtg` (layout v7, docs/ENGINE.md 125) and `deck_reader_v6.json` for
+  `mtg_eoe` (layout v6) (`encode::deck_reader_inputs`, checked in by the engine's tests): the layout's ranges of
+  what the viewer has seen of the opponent's cards (the opponent's
   battlefield, graveyard, exile, known hand, hand clouds, known library, earlier reveals and
   phased-out permanents, by identity) and the public counts (the game's and the opponent's
   globals, their deck size, their v5 globals) - bags and global blocks only, as zero-core's reader
@@ -18,8 +19,8 @@ declared raw inputs, predicts an auxiliary target and feeds the trunk. For `mtg`
 `mtgz.az` since the zero-core pin has readers: docs/ENGINE.md 105.3): a run sets `aux_deck_w` > 0 and
 `reader_deck` 1. It declares two readers:
 
-* `mtg`: the declaration's ranges as they are (the cube's identity space);
-* `mtg_eoe` (docs/ENGINE.md 105.5): the same ranges on the EoE layout (`layout_eoe.json`: layout v6, so
+* `mtg`: layout v7's declaration's ranges as they are (the cube's identity space);
+* `mtg_eoe` (docs/ENGINE.md 105.5): layout v6's declaration on the EoE layout (`layout_eoe.json`: layout v6, so
   the same offsets, which `eoe_inputs` checks), each bag row narrowed to the EoE identity space's
   identities - its cards (0..320, `engine/src/az/eoe_cards.txt`) and the first 64 token identities (384..;
   the registry has 9) - found by the layout's `bags` block, never by a hard-coded offset; the globals as
@@ -29,6 +30,8 @@ import json
 import os
 
 PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'deck_reader_v6.json')
+# layout v7's (the `mtg` game's, docs/ENGINE.md 125: its slots are wider, the match block and v5's globals moved)
+PATH_V7 = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'deck_reader_v7.json')
 
 
 def declaration(path=PATH):
@@ -73,14 +76,17 @@ def eoe_inputs(path=PATH, layout=None):
     return out
 
 
-def readers(hidden=256, enter='trunk', belief=False, path=PATH):
+def readers(hidden=256, enter='trunk', belief=False, path=PATH, path_v7=PATH_V7):
     """`{'mtg': [...], 'mtg_eoe': [...]}`, each `[{target, inputs, hidden, enter, belief}]`: zero-core's `readers`
-    package entry (its docs/az.md 36.2) for the deck target (module docs)."""
+    package entry (its docs/az.md 36.2) for the deck target (module docs): `mtg`'s on layout v7's declaration,
+    `mtg_eoe`'s on layout v6's."""
     d = declaration(path)
+    d7 = declaration(path_v7)
+    assert d7['target'] == d['target'] and d7['layout'] == 7 and d['layout'] == 6
 
     def reader(inputs):
         return {'target': d['target'], 'inputs': inputs, 'hidden': hidden, 'enter': enter, 'belief': belief}
-    return {'mtg': [reader([list(r) for r in d['inputs']])], 'mtg_eoe': [reader(eoe_inputs(path))]}
+    return {'mtg': [reader([list(r) for r in d7['inputs']])], 'mtg_eoe': [reader(eoe_inputs(path))]}
 
 
 READERS = readers()

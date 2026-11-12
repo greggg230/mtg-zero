@@ -37,6 +37,7 @@ pub mod matches;
 pub mod pools;
 pub mod sample;
 pub mod sealed;
+pub mod tail_encode;
 pub mod view;
 
 use crate::db::CardDb;
@@ -881,6 +882,8 @@ impl SearchGame for MtgAz {
         self.m.rng = Rng::new(r.next_u64());
     }
 
+    /// The head of `encode_row` (layout v7, ENGINE.md 125; a loud failure on a state with tail
+    /// tokens: zero-core R1), or with a layout v6 buffer the `mtg_eoe` game's encoding (no tail).
     fn encode(&self, viewer: usize, out: &mut [f32]) {
         if self.m.choice.is_some() {
             encode::encode_deck_choice(self, viewer as u8, out);
@@ -890,6 +893,34 @@ impl SearchGame for MtgAz {
             self.g.encode_features(viewer as u8, out);
             encode::encode_match(self, viewer as u8, out);
         }
+    }
+
+    // Layout v7's variable-length rows (ENGINE.md 125; zero-core docs/search.md 1.4, 2.15).
+    const TAILS: &'static [zero_search::tail::TailSeg] = &tail_encode::TAILS;
+    const OPTION_POINTERS: bool = true;
+    const MAX_ROW_TOKENS: usize = tail_encode::MAX_ROW_TOKENS;
+    const HEAD_TOKENS: usize = tail_encode::HEAD_TOKENS;
+
+    /// Layout v7's row: the head and the tail tokens (`tail_encode`). The deck choice's and
+    /// sideboarding's encodings have no tail (their lists fit the head).
+    fn encode_row(&self, viewer: usize, head: &mut [f32], tail: &mut zero_search::tail::TailBuf) {
+        if self.m.choice.is_some() {
+            encode::encode_deck_choice(self, viewer as u8, head);
+        } else if self.m.sb.is_some() {
+            encode::encode_sideboarding(self, viewer as u8, head);
+        } else {
+            self.g.encode_features_row(viewer as u8, head, tail);
+            encode::encode_match(self, viewer as u8, head);
+        }
+    }
+
+    /// The pointer overrides (`tail_encode::option_overrides`): none during the deck choice and
+    /// sideboarding (their options keep the static table).
+    fn option_overrides(&self, viewer: usize, legal: &[u16], out: &mut Vec<(u32, i64)>) {
+        if self.m.choice.is_some() || self.m.sb.is_some() {
+            return;
+        }
+        tail_encode::option_overrides(&self.g, viewer as u8, legal, out);
     }
 
     /// The turns of the match's games.
