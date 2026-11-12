@@ -178,3 +178,38 @@ def strings(x, out=None):
         for v in x:
             strings(v, out)
     return out
+
+
+def test_the_real_deck_yardstick_in_the_progress_record(tmp_path, monkeypatch):
+    """docs/ENGINE.md 113: the run's own real-deck evaluations (metrics.jsonl's or evals.jsonl's extras.real_decks) and
+    the command line's files of its checkpoints (--real-decks DIR, <run>-iter_NNNN.json; another run's ignored) in the
+    progress record by iteration, the run's own over a file, with the source's license - numbers only, no path; none at
+    all: None."""
+    run, _ = make_run(tmp_path)
+    assert P.real_decks_record(run, []) is None
+    off = tmp_path / 'realdecks'
+    off.mkdir()
+    point = {'a': 0.42, 'a_se': 0.04, 'b': 0.45, 'b_se': 0.04, 'diff': -0.03, 'diff_se': 0.05, 'diff_se_pools': 0.06,
+             'n': 128, 'pools': 64, 'games_per_pool': 2, 'builder': 'best', 'sims': 32, 'checkpoint': 'E:/x/iter_0001.pt',
+             'per_pool': [{'pool': 'p'}], 'setting': {'test_pools': 64, 'games_per_pool': 2, 'field_decks_used': 128,
+                                                      'universe': {'counted': 8932, 'pools': 9765}},
+             'heuristic': {'a': 0.6, 'b': 0.5, 'diff': 0.1, 'diff_se': 0.05, 'n': 128}}
+    for name in ('eoe-test-iter_0001.json', 'eoe-test-iter_0002.json', 'other-iter_0003.json'):
+        (off / name).write_text(json.dumps(point))
+    metrics(run, [{'iter': 2, 'time': 200.0, 'extras': {'real_decks': dict(point, a=0.5, per_pool=None)}}])
+    with open(os.path.join(run, 'evals.jsonl'), 'w', encoding='utf-8') as f:
+        f.write(json.dumps({'iter': 4, 'extras': {'real_decks': dict(point, a=0.55, builder='evaluator:E:/v1/l.pt')}}) + '\n')
+        f.write(json.dumps({'iter': 5, 'extras': {'real_decks': {'error': 'boom'}}}) + '\n')
+    sent = []
+    monkeypatch.setattr(P, 'post', lambda url, path, body, key: sent.append((path, json.loads(json.dumps(body)))) or {'ok': True})
+    pub = P.Publisher(run, args(real_decks=[str(off)]), 'k', log=lambda m: None)
+    p = pub.progress_pass()
+    rd = p['real_decks']
+    assert [(x['iter'], x['source'], x['a']) for x in rd['points']] == [(1, 'offline', 0.42), (2, 'run', 0.5), (4, 'run', 0.55)]
+    assert rd['points'][0]['heuristic']['diff'] == 0.1 and 'per_pool' not in rd['points'][0]
+    assert [x['builder'] for x in rd['points']] == ['best', 'best', 'evaluator']
+    a = rd['about']
+    assert 'CC BY 4.0' in a['license'] and '17lands' in a['source'] and 'yardstick only' in a['rule']
+    assert (a['test_pools'], a['field_decks_used'], a['pools_counted'], a['pools_in_data']) == (64, 128, 8932, 9765)
+    bad = [s for s in strings(sent[-1][1]) if PATH_RE.search(s)]
+    assert not bad, bad

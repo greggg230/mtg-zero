@@ -937,3 +937,10 @@ is the per-process race game for game), `--pilot-search mix` (or a lower `--sims
 2. our build vs the human build of the same 17lands pool, same pilot;
 3. both against a field of 17lands human decks (closest to "would this help on Arena");
 4. our card ranking's correlation with 17lands' game-in-hand win rates (a sanity check).
+
+Measures 2 and 3 are built as one paired metric, **win % against real players' decks** (user, 2026-11-11: "a
+separate metric ... It should not be a target for deck building"; ENGINE.md 113, `mtgz.sealed.realdecks`): our deck of
+a fixed set of 17lands pools and the player's own deck of each pool, in the same games against real players' decks, one
+checkpoint piloting every seat; A, B and A - B with standard errors. Computed and logged only - a run's opt-in extra
+evaluation (`real_decks_every`, off by default) and a command line for any checkpoint - never fed to training, the deck
+choice, the evaluator, model selection or best.pt.

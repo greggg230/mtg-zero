@@ -298,6 +298,10 @@ def vast_remote(box, host=None):
                                      'env': {'ZERO_TOKEN_GRAPHS': '1'}, 'overrides': dict(VAST_SELFPLAY)})
 
 
+# the real-deck yardstick's run settings (docs/ENGINE.md 113; mtgz.sealed.realdecks.DEFAULTS' pools, games, builder)
+REAL_DECKS_SETTINGS = {'real_decks_every': 0, 'real_decks_pools': 64, 'real_decks_games': 2, 'real_decks_builder': 'best'}
+assert not set(REAL_DECKS_SETTINGS) & set(ROLLING_SETTINGS), 'two features of the package declare one setting'
+
 PACKAGE = register(GamePackage(
     'mtgz', 'MTG Zero', ROOT, engine='mtgz._engine', run_module='mtgz.az.run', game='mtg',
     # the belief target (docs/ENGINE.md 66, zero-core docs/az.md 15): the decider's opponent's hand by
@@ -317,15 +321,24 @@ PACKAGE = register(GamePackage(
     readers=deck_reader.READERS,
     # team_draft's deferred results and its other yardstick (M6 part 3, docs/ENGINE.md 45)
     deferred={'team_draft': 'mtgz.az.drafted:GLUE'},
-    evals={'team_draft': 'mtgz.az.human_picks:EVALS', 'mtg_eoe': 'mtgz.sealed.rolling:EVALS'},
+    # `mtg_eoe`'s two other yardsticks, in this order (docs/ENGINE.md 126): the deck-choice evaluation (112.5,
+    # mtgz.sealed.rolling; deckchoice_eval_games 0 = off: it answers None) and the win % against real decks (113)
+    evals={'team_draft': 'mtgz.az.human_picks:EVALS',
+           'mtg_eoe': {'deckchoice': 'mtgz.sealed.rolling:deckchoice_eval', 'real_decks': 'mtgz.sealed.realdecks:run_eval'}},
+    # win % against real players' decks (docs/ENGINE.md 113, mtgz.sealed.realdecks): an EoE run's extra evaluation, a
+    # yardstick only (never a training signal, deck choice, evaluator target, model selection or best.pt), OFF by
+    # default; real_decks_every N > 0 runs it on the evaluated iterations that are multiples of N (zero-core docs/az.md
+    # 40: `evals_every`), real_decks_pools test pools of 17lands Premier Sealed x real_decks_games games each, our deck
+    # by real_decks_builder ('best' = the builder's best guess; 'value', 'evaluator:PATH', 'module:attr')
+    evals_every={'real_decks': 'real_decks_every'},
     # the game log of a remote evaluation (docs/ENGINE.md 109): the evaluating process on the remote logs the games
     # it plays to the mirror (mtgz.az.mac.eval_log), and zero.remote copies the files into the run's games/
     remote_eval_files={'mtg_eoe': [REMOTE_EVAL_LOG]},
     # the deck choice by the evaluator, retrained inside the run (docs/ENGINE.md 112, zero-core docs/az.md 40): the
     # package's run settings (evaluator_every 0 and deckchoice_eval_games 0: off), each self-play phase's spec naming
     # the run's newest evaluator version, the deck-choice evaluation (a yardstick: None when off) and its evaluator
-    # file shipped to a remote evaluation
-    settings=ROLLING_SETTINGS, selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec'},
+    # file shipped to a remote evaluation; the package's run settings are both features' (every one off by default)
+    settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS), selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec'},
     remote_eval_inputs={'mtg_eoe': 'mtgz.sealed.rolling:remote_eval_inputs'},
     specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',
     env_prefix='MTGZ', presets=PRESETS, tokens={'mtg': LAYOUT, 'team_draft': LAYOUT_DRAFT, 'mtg_eoe': LAYOUT_EOE},

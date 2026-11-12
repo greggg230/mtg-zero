@@ -25840,6 +25840,193 @@ other agents' gates and runs, the CPU at 96-100% much of the night - gate steps 
   E:/mtg-zero/s4a/v2_time/evaluator_set.json --games 64 --set infer_device=cuda threads=4 groups=1`, then the same with
   `--best-guess` (the baseline): the difference is what run 2's `extras.deckchoice` starts from.
 
+## 113. Win % against real players' decks: a yardstick of our deckbuilding (branch `realdecks`, 2026-11-11)
+
+Branch `realdecks` (from main 60397f3); zero-core `feat/extra-evals` **6ed51d5** (from f9ca5c3; its docs/az.md 40), the pin
+f9ca5c3 -> 6ed51d5. **Why** (the user, 2026-11-11): "it's useful for evaluation, and we should add that now as a separate
+metric (win % against real decks). It should not be a target for deck building." DESIGN.md 9.1's measures of success 2 and
+3 (our build against the human build of the same 17lands pool, both against a field of 17lands human decks) as one paired
+metric, computed for any checkpoint and, opt-in, inside a run. **A yardstick only (DESIGN.md 0)**: it is measured and logged
+(metrics.jsonl or evals.jsonl `extras.real_decks`, the command line's JSON, the site), and nothing reads it back - not
+self-play, the deck choice (107.2), the deck evaluator's training (108), model selection, the Elo pool or best.pt. No engine,
+encoding or search change: digests untouched.
+
+### 113.1 The definition
+
+**The data**: 17lands' public EOE Premier Sealed games (best of one; `data/sealed/eoe_17lands_sealed.json.gz`, 101.4; 17lands
+public data, CC BY 4.0, https://www.17lands.com/public_datasets): 9,765 pools, 13,787 distinct builds.
+
+**The pools that count** (`realdecks.universe`, in the order of the checks; every skip counted by reason, never a dropped
+card): a pool holding a card the engine does not support is skipped whole - **87 pools, every one for Paradox Haze** (no IR;
+in no pool's main deck: always a sideboard card); an incomplete pool (not the 78 cards of six Arena boosters, or a build's
+rows missing a launch-day card, 101.4) - **19**; a pool without a 40-card build (its player's decks are 41-60 cards: we pair
+40-card decks, 104.1) - **727** (751 builds of 41, 82 of 42, ...). **8,932 pools count.** A pool's **real deck** is its
+player's main 40-card build: the 40-card build with the most games, then the lowest build index (`main_build`; 6,247 of the
+pools have one 40-card build, 2,087 two, 598 three or more).
+
+**The test pools and the field** (`RealDecks(pools, games, seed)`): the 8,932 pools sorted by 17lands id, then ordered by
+mix(seed, salt, position) (splitmix64, `compare.mix`); the first `pools` are the test pools, every later pool gives the field
+its real deck. Game k plays field deck k, so the field is fixed by (pools, games, seed): every evaluation of one setting
+meets the same opponents in the same games, and no test pool's deck (or its player's) is ever an opponent. The field decks
+are played as built (their sideboard the rest of their pool, unused in best of one).
+
+**The games** (104's full pairing; `measure`): test pool i plays games k = i x games ... (i + 1) x games - 1. Game k has one
+seed mix(seed, salt, k), one field opponent (deck k), one seat for the deck under test (k % 2) and one chooser of play or
+draw ((k // 2) % 2) - the same for both decks of the pool:
+
+* **A, "our deck vs real decks"**: our deck of pool i, from **our builder** (a parameter, `builder_of`): `best` - the
+  builder's best guess (107.1: run 1's builder; a function of the pool), `value` - the pilot network's value pick among the
+  deck choice's 32 candidates (run 2's deck choice, 107.2), `evaluator:PATH` - a saved deck evaluator's pick among them (108;
+  `evaluator.rank`, whoever trains it: eval-v2's 111, deck-choice-eval's 112), or `module:attr` - any callable
+  fn(pool names, seed) -> deck. Checked to be a 40-card build of the pool (loudly otherwise).
+* **B, "the player's own deck vs real decks"**: the test pool's real deck, in the same games.
+* A_i and B_i laid out slot by slot (`compare.slots`, `"order": "given"`): their shared cards in the same library slots,
+  so the same opening hands and draws until they differ; each side in its own driver with the same driver seed and the same
+  queue (game id = k's place), so the pilot's streams agree too.
+* **The pilot**: one network checkpoint on every seat (the deck under test and the field), with its run's evaluation seat
+  (`zero.run.Run.nn_seat`: eval_sims, the move rule `eval_select`, eval_cache, belief settings) and its run's evaluation
+  spec's sealed prior (collation, best_share: how the search deals the opponent's hidden deck; `base_spec`), max_turns 60.
+  The network sees neither decklist (hidden decklists, 102). So A and B differ only by the deck: A - B is our deckbuilding
+  against the player's, against real decks, with this network playing.
+* **Option C** (`--heuristic`): the same games with the heuristic bot on every seat. Kept off in a run: with the best-guess
+  builder it is a constant (it depends on no checkpoint), and the heuristic's verdict is the heuristic's (104.7: "the ranking
+  is the pilot's"; it favours the builder's creature-heavy decks, 104.6) - a fixed reference, computed once below.
+
+**Reported**: A, B and D = A - B (1 a win, 0.5 a draw), each with its standard error **over the games** (`a_se`, `b_se`,
+`diff_se`: the noise of this fixed set of pools and opponents - what moves between evaluations of one setting) and **over
+the pools** (`*_se_pools`: a pool's games averaged first; the pools as a sample of 17lands pools); `diff_ci95`, `var_ratio`
+(104.3), the games ending the same / better / worse, games an engine error removed (for both decks, with their specs:
+`failed`), unfinished games, and on the command line every pool's decks and points.
+
+### 113.2 The tool, the run's evaluation
+
+* **`python -m mtgz.sealed.realdecks CKPT [CKPT ...] [--pools 64] [--games 2] [--seed 0] [--builder best] [--sims N]
+  [--device cuda] [--threads 4] [--heuristic] [--out DIR]`**: one JSON per checkpoint (`<run>-iter_NNNN.json`: the numbers,
+  the setting and field counts, the pilot, the spec, every pool); the checkpoint's run settings from its run's config.json
+  (DEFAULTS < preset < saved), never written to. `python -m mtgz.sealed.realdecks field` prints the field and the test pools.
+* **In a run**: the package's extra evaluation `real_decks` of `mtg_eoe` (`mtgz.sealed.realdecks:EVALS`), with run settings of
+  the package's own (zero-core 40: `GamePackage.settings`) - **`real_decks_every` 0 (off)**, `real_decks_pools` 64,
+  `real_decks_games` 2, `real_decks_builder` 'best' - and a cadence of its own (`GamePackage.evals_every`): it runs on the
+  evaluated iterations that are multiples of `real_decks_every` and is passed over silently otherwise (no call, no log line,
+  no metrics key). The run's evaluation seat and spec, the run's driver settings (threads, groups, sparse, conc), PAUSE
+  checked while it plays; logged as `iter N real_decks: {...}` and under `extras.real_decks` (A as `value`, B as a reference
+  line: zero's dashboard draws it in "Other yardsticks"), compact (no per-pool detail). Turned on at a restart with
+  `--real-decks-every N` (a saved setting, shipped to a remote evaluation's mirror with the rest).
+* **Remote evaluation** (109): `python -m mtgz.az.remote eval` runs `Run.evaluate`, extra evaluations included, on the mirror
+  with the mirror's config (the real-deck settings shipped in it); zero-core 6ed51d5 brings `extras` back into the run's
+  evals.jsonl (before, a remote evaluation computed extras and dropped them: zero-core 40.1). The 17lands file is committed
+  (data/sealed/), so the Mac's checkout of the run's commit has it.
+
+### 113.3 Cost and cadence
+
+**The setting: 64 test pools x 2 games** (`real_decks_pools` 64, `real_decks_games` 2): 128 paired games, 256 games, every
+seat searched at `eval_sims` (32 in eoe-1), 128 field decks. Each pool plays both seats once (k % 2); the chooser alternates
+by pool.
+
+**Work** (counted, not timed: the desktop was saturated throughout - eight S4 race processes, other agents' test suites -
+and the Mac was not to be used): run 1's iteration 78 at this setting searched **129,578 decisions** (506 a game, both
+seats; 24.0 turns a game). Run 1's own evaluation, for scale: iteration 60's 100 games against the heuristic and 10 against
+random at 32 simulations searched **17,828** (the network's seat only; `calib.py` beside the backfill replayed exactly the
+games 109.3 timed on the Mac: 32 of 100 against the heuristic, 18.32 turns, as on the Mac and run 1's GPU), plus the Elo
+matches' 40 games of a network on both seats.
+
+**Time, estimated from those counts**: the Mac evaluated the 17,828 decisions in 85 s (109.3: ~210 searched decisions a
+second at ~110 games in flight); at that rate a real-deck evaluation (128 games in flight in each of its two drivers, one
+network) is **~620 s, about 10 minutes, on the Mac** - three times its whole regular evaluation (217 s), so not every
+evaluation. On the desktop's GPU (run 1's 49 s for the same 17,828) **~6 minutes**. Measured on the desktop's CPU, 4 search
++ 2 torch threads under that load: 6,807 s for iteration 78 (an upper bound, not a rate). The heuristic's option C: 256
+games in 0.5 s.
+
+**Cadence**: off by default. Run 2 on the Mac (eval_every 2, 217 s of every ~264 s: ~47 s spare per evaluation) affords
+620 s every N iterations when 620 / (N / 2) < 47: N >= 28. **Recommended `--real-decks-every 40`** (a multiple of eval_every:
+~31 s per evaluation on average; each real-deck evaluation delays the Mac's queue by ~10 minutes and the queue catches up
+within ~26 iterations, if nothing else runs there); 30 only with the Mac otherwise idle. A run evaluating locally on the
+desktop's GPU (run 1: ~2.8 minutes an evaluation) can take every 10 (~36 s an iteration on average).
+
+**Precision at this setting** (iteration 78): se(A) = se(B) = 0.044, **se(A - B) = 0.053** over the games (0.048 over the
+pools); the pairing left 71% of the unpaired variance (var_ratio 0.71; 83 of 128 games ended alike for both decks - most
+pools' two decks share few slots: 15.5 of 40 on average, 8 of 64 pools the same colours). So one evaluation resolves
+differences of ~10 points (95%); 80% power for 5 points takes ~1,100 paired games (7.85 var(D) / delta^2, var(D) = 0.354 a
+game) - several evaluations, or the command line with more pools.
+
+### 113.4 Run 1, backfilled
+
+`python -m mtgz.sealed.realdecks E:/mtg-zero/runs/eoe1/models/iter_00NN.pt --pools 64 --games 2 --heuristic --device cpu
+--threads 4 --torch-threads 2 --out E:/mtg-zero/s4a/realdecks/` per checkpoint (the GPU busy with the S4 races and the sweep),
+run 1's final evaluation settings for every checkpoint (eval_sims 32, the cq move rule, eval_cache 8192, best_share 0.5's
+prior), our builder `best` (run 1's builder); nothing written under runs/eoe1. 0 games failed, 0 unfinished.
+
+| iteration | A: our deck | B: the players' own | A - B (se: games / pools) | 95% (games) | var_ratio | same | searched decisions | turns |
+|---:|---|---|---|---|---|---:|---:|---:|
+| 10 | 0.559 +- 0.044 | 0.488 +- 0.043 | **+0.070** +- 0.053 / 0.050 | [-0.033, +0.174] | 0.74 | 76 of 128 | 150,407 | 26.7 |
+| 78 | 0.547 +- 0.044 | 0.539 +- 0.044 | **+0.008** +- 0.053 / 0.048 | [-0.095, +0.111] | 0.71 | 83 of 128 | 129,578 | 24.0 |
+
+Iteration 10 took 9,713 s and 78 6,807 s on the loaded desktop's CPU. Iterations 20, 40 and 60 were still to come when this
+was written (40 running on the CPU; the rest the GPU's once free, the same command with `--device cuda`); each lands in
+`E:/mtg-zero/s4a/realdecks/eoe1-iter_00NN.json` and on the site's Progress page with the publisher's `--real-decks
+E:/mtg-zero/s4a/realdecks`. Read so far: the early network (iteration 10) does slightly better with our best guesses than
+with the players' builds (+7 points, not significant at 128 games); the final one plays both about equally well (+0.8) - the
+players' decks gained 5 points against the field while ours stayed (0.559 -> 0.547).
+
+**The heuristic's reading** (option C, the same games; it depends on no checkpoint): our best guess 0.656 +- 0.042, the
+players' decks 0.531 +- 0.044, **+0.125 +- 0.048** (var_ratio 0.63). The heuristic plays the builder's creature-heavy best
+guesses better than the players' builds (as in 104.6); run 1's final network finds them about even (+0.008 +- 0.053 at
+iteration 78): the deck verdict is the pilot's (104.7), and this metric follows the network as it learns.
+
+### 113.5 The site
+
+`tools/sealedai_publish.py --real-decks DIR` adds the run's real-deck points to the progress record (`real_decks`: the run's
+own `extras.real_decks` from metrics.jsonl or evals.jsonl, else the command line's files `<run>-iter_NNNN.json` in DIR; the
+builder by kind only, numbers only - no path; the source, its license and the field's counts). The sealedai site (branch
+`realdecks`, not deployed): the Progress page's section "Against real players' decks" - a tile, the two win rates by
+iteration with ±1 se, our deck minus the players' with its 95% range, the heuristic reference, the table's columns - with
+17lands' attribution (CC BY 4.0, linked) and the statement that it is a yardstick only; the Worker refuses a record without
+the license or with rates outside 0..1. Screenshots for approval (local preview, hub entry `sealedai_realdecks` :5356, run 1's progress record with the backfill): `screenshot-server/static/sealedai/realdecks-{desktop,phone}{,-tiles,-page}.png`.
+
+### 113.6 Tests, checks, gates
+
+* **`tests/test_realdecks.py` (8)**: the field and the test pools (every pool counted or skipped by a reason, the main build's
+  rule, the test pools disjoint from the field and fixed by the seed, every field deck 40 supported cards and its pool's
+  rest as sideboard, too many games for the field refused, the license); the builders (`best` = candidate 0, a plugged
+  `module:attr`, a deck that is not a 40-card build of the pool refused, `value` without a network refused); **the pairing**
+  (with the human build as "our" deck every game is the same game: D = 0 in 24 of 24, 40 shared slots; the same numbers at 1
+  and 2 driver threads; game k's opponent, seat and chooser); the statistics (over the games and over the pools, by hand);
+  the command line with a network (the run's evaluation seat, a JSON file per checkpoint, the same numbers at 1 and 2 driver
+  threads, option C); **the run's extra evaluation** (off at real_decks_every 0 and when not due - no key, no log line; on
+  at a multiple, compact, logged; the command line on the same checkpoint plays the same games: equal A, B, D); the remote
+  side (the mirror's `evaluate_mirror` with the settings in its config puts `extras.real_decks` in its result); a failed game
+  removed for both decks with its spec, the other games' seats kept. `tests/test_sealedai_publish.py` (5, 1 new): the
+  progress record's `real_decks` - the run's own extras over a file, another run's files ignored, an error skipped, the
+  builder by kind, the license, no path.
+* zero-core `tests/test_extra_evals.py` (3; its docs/az.md 40.5).
+* **The remote path end to end** (`E:/mtg-zero-scratch/realdecks/e2e.sh`): an eoe-smoke run with `--eval-remote local
+  --real-decks-every 1 --real-decks-pools 2 --real-decks-games 2`, the 'local' remote standing in for the Mac - the run's
+  RemoteEval shipping the mirror (its config.json carries the four real-deck settings), `python -m mtgz.az.remote eval`
+  with its checkout check (`mtgz remote: ... is e336d5de242b, unchanged, its engine built there`), `evaluate_mirror` on the
+  mirror, the result copied back: the run's evals.jsonl rows of iterations 0 and 1 carry `extras.real_decks` (n 4, 2 pools,
+  sims 4) beside eval_yard, and its log reads `iter 0 real_decks (remote local): {...}`. On the Mac the same commands run
+  over ssh (109.1); not run there (the Mac was fully busy with races).
+* Gates (`--no-mac`), on e336d5d, the desktop saturated by eight S4 race processes and other agents' suites throughout:
+  `python tools/gate.py python`: build, pytest **274 passed, 4 failed** - all four in `tests/test_mac_remote.py`, subprocess
+  timeouts (600 s, 300 s, "timed out; events []"), and the file passes alone (12 of 12, 166 s); the run-loop smoke not run:
+  **GATE FAILED python e336d5de242b in 3588s**. `python tools/gate.py optin-core --baseline-root <a built worktree of main
+  60397f3>`: build, the core's cargo tests (147), **checkpoint_compat byte identity (identical: 2,465 samples, visits and
+  cq)**, `az`, `hidden` (28), the other games' build-only (3 of 3), the core build: passed; the core's pytest killed at the
+  step's 3600 s timeout at 47% with two failures, `test_multi_remote.py`'s `test_selfplay_local_0_leaves_the_quota_to_the_hosts`
+  and `test_cotrain_resolver_on_two_hosts` (threaded multi-host self-play, untouched here): **GATE FAILED optin-core
+  e336d5de242b in 6242s**. Both again on f8e99e4 (the docs commit after it), one after the other, the core's pytest with
+  `--step-timeout 10800`: `python`: pytest **277 passed, 1 failed** (`tests/test_loop.py::test_supervisor_with_fake_run`, a
+  state poll with a deadline; passes alone in 1 s; test_mac_remote passed this time), the run-loop smoke not run (run by
+  hand: `python -m mtgz.az.run --run <scratch> --preset mtg-smoke --iters 1`, iterations 0 and 1, 16 games, 0 unfinished):
+  **GATE FAILED python f8e99e4f8c48 in 1991s**; `optin-core`: build, core cargo tests 147, **checkpoint_compat identical
+  again (2,465 samples, visits and cq)**, `az` 48, `hidden` 28, build-only 3 of 3, core build passed; core pytest **437
+  passed, 8 failed** in 6,150 s - all remote self-play, worker and pause-mid-phase timing tests (`test_remoteplay.py` x 3,
+  `test_infoset_merge.py` x 2, `test_belief.py`, `test_encoding_guard.py`, `test_shard_thread.py`), none near this change
+  (remote *evaluation*, package settings, an extra evaluation's cadence), the two of the first run passing this time, and all
+  nine (with the parametrised case) passing alone in 129 s: **GATE FAILED optin-core f8e99e4f8c48 in 8707s**. Every
+  failure is a different timing test per run and passes alone: the load, as 105.7 saw. A run of both tiers on a quieter
+  desktop is the maintainer's before merging.
+
 ## 123. Legacy Sneak and Show: the deck's cards (branch `sneak-show`, mtg-bot `feature/sneak-show-ir`)
 
 **Why.** The next constructed deck after the Delver mirror (54) and Legacy Doomsday (124): MTGGoldfish's "Sneak and
