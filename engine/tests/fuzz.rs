@@ -2900,7 +2900,8 @@ fn check_match_information_set(g: &engine::az::MtgAz, viewer: usize, seed: u64, 
     let (mut la, mut lb) = (Vec::new(), Vec::new());
     let (mut xa, mut xb) = (vec![0.0f32; engine::az::NUM_FEATURES], vec![0.0f32; engine::az::NUM_FEATURES]);
     for step in 0..25 {
-        if a.match_over() || b.match_over() {
+        // (or a game's end with one episode per game, ENGINE.md 121: the episode is over)
+        if a.match_over() || b.match_over() || a.to_move().is_none() || b.to_move().is_none() {
             return;
         }
         a.legal_actions(&mut la);
