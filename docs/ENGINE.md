@@ -26352,6 +26352,30 @@ checkout, the venv with onnx / onnxruntime):
 "C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07
 ```
 
+### 114.6 GPU inference: the Windows ML runtime pack, a zero-core pin with the session factory (zero-farm phase 4, 2026-11-12)
+
+**Why.** zero-farm PROTOCOL.md rev 7 section 8: friends' GPUs of every vendor, through one session factory in
+zero-core's worker (`zero_worker::session::create_session`: providers in the job line's order, each accepted only
+through the self-test) and runtime packs that carry the providers.
+
+**What.**
+
+* The zero-core pin moves to its `gpu` branch (1ed81c0, on `farm` b655e91): the session factory and `mtgz-worker
+  probe-providers`; the exporter's graphs that DirectML and TensorRT run with the same answers (zero-core docs/az.md
+  41.1: densify without a scatter-add, `portable()`); a checkpoint exported here is bit for bit the old export's on the
+  CPU (eoe1 iter 80: 137 of 137 pieces, 7,713 rows identical) and gate 1 passes again (eoe1 packed / mask, Delver).
+* `tools/farm_build.py --runtime --pack winml`: the GPU runtime pack - Windows ML's ONNX Runtime 1.28.3 (CPU and
+  DirectML built in), DirectML.dll and Microsoft.Windows.AI.MachineLearning.dll (the provider catalog's C API) from the
+  NuGet package Microsoft.Windows.AI.MachineLearning 2.5.96, each Microsoft-signed, checked through a release build
+  (`info`, `probe-providers --providers cpu`). A release worker build for it names it with `--runtime-id`.
+
+**Off by default.** A run uses the GPU pack only when its definition names it as its `runtime`; the CPU pack and the
+builds that require it are unchanged.
+
+**Tests and checks.** zero-farm-notes phase4-gpu.md (the per-provider gate, CPU fallback nodes and speeds, measured on
+the desktop's RTX 5090 and the Windows 10 canary's RTX 4070 Ti).
+
+
 ## 123. Legacy Sneak and Show: the deck's cards (branch `sneak-show`, mtg-bot `feature/sneak-show-ir`)
 
 **Why.** The next constructed deck after the Delver mirror (54) and Legacy Doomsday (124): MTGGoldfish's "Sneak and
