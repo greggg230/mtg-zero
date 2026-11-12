@@ -25088,10 +25088,11 @@ Readings taken:
   of a card it knew in the library is exiled it can't tell which copy was kept, and the cloud drops it. A later draw
   carries the cloud into the hand (with open decklists a cloud over the whole hand and library says nothing and goes).
   No layout change was needed: clouds are the existing model.
-* **An instant card and a sorcery card**: two existence checks over the graveyard's cards (as mtg-bot's class reads
-  it). They differ from "two different cards" only for one card that is both an instant and a sorcery (a split card
-  with one half of each, combined in a graveyard, 709.4); no card of the cube, legacy or EoE tables is one, and the
-  rules don't settle the reading; flagged here.
+* **An instant card and a sorcery card** (a reading taken; the maintainer's decision, 2026-11-11): two existence checks
+  over the graveyard's cards (as mtg-bot's class reads it), so one card that is both satisfies both: CR 709.4, in a
+  graveyard a split card has its two halves' characteristics combined, so one with an instant half and a sorcery half
+  is an instant card and a sorcery card. (It differs from "two different cards" only for such a card; no card of the
+  cube, legacy or EoE tables is one.)
 * **Flow State's bottom cards** follow every look-and-bottom card (Dig Through Time, Stock Up): `put_from_pile` leaves
   them known to the caster at their places; the opponent knows only what its cloud from the look holds. Knowledge the
   precedent drops: none for the rules; for the network, the caster's knowledge of cards below its library's top three is
