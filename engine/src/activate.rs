@@ -1899,12 +1899,9 @@ impl Game {
             return;
         }
         if self.def_of(card).chooses_name && self.chosen_name(self.obj_ref(card)).is_none() {
-            // (A plain "choose a card name": ENGINE.md 123.)
-            if self.def_of(card).sns.plain_name {
-                self.choose_plain_name_as_enters(card, page);
-            } else {
-                self.choose_name_as_enters(card, page);
-            }
+            // (Anointed Peacekeeper's, after its look at a hand, and Disruptor
+            // Flute's: one choice over one list, ENGINE.md 123, 127.)
+            self.choose_name_as_enters(card, page);
             return;
         }
         if self.def_of(card).paints {

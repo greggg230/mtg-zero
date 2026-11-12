@@ -306,6 +306,184 @@ fn anointed_peacekeepers_tax_applies_to_a_named_card_cast_from_a_graveyard_cr_60
     }
 }
 
+/// Every name the pending `NameCard` decision offers, over its pages (a
+/// clone answers "next page").
+fn names_offered(g: &Game) -> Vec<u16> {
+    let mut g = g.clone();
+    let mut out = Vec::new();
+    loop {
+        let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+        out.extend(opts.iter().filter_map(|c| match *c {
+            Choice::Def(d) => Some(d),
+            _ => None,
+        }));
+        match opts.iter().find(|c| matches!(c, Choice::Page(_))) {
+            Some(&next) => {
+                g.choose(next);
+            }
+            None => return out,
+        }
+    }
+}
+
+/// Pay with the first options and pass priority until a `NameCard`
+/// decision is pending.
+fn to_name_question(g: &mut Game) {
+    for _ in 0..100 {
+        if g.kind() == Some(DecisionKind::NameCard) {
+            return;
+        }
+        let c = if at_priority(g) { Choice::Pass } else { g.pending_decision().unwrap().options[0].choice };
+        g.choose(c);
+    }
+    panic!("no name question: {}", opts(g));
+}
+
+/// P0 casts Anointed Peacekeeper from its hand and, when it asks, names `d`
+/// (`None`: `PASS`), paging to it; the stack resolves.
+fn peacekeeper_names(g: &mut Game, d: Option<u16>) {
+    let ap = g.card(0, "Anointed Peacekeeper", Zone::Hand);
+    g.choose(Choice::Cast(ap));
+    let want = d.map_or(Choice::Pass, Choice::Def);
+    resolve_with(g, |g| match g.kind() {
+        Some(DecisionKind::NameCard) if g.has_option(want) => Some(want),
+        Some(DecisionKind::NameCard) => {
+            let next = g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|c| matches!(c, Choice::Page(_)));
+            Some(next.unwrap_or_else(|| panic!("{want:?} is not offered")))
+        }
+        _ => None,
+    });
+    let ap = bf(g, 0, "Anointed Peacekeeper");
+    let named = engine::game::Mark::ChosenName(d.unwrap_or(u16::MAX));
+    assert!(g.marks_of(ap).contains(&named), "{:?}", g.marks_of(ap));
+}
+
+#[test]
+fn anointed_peacekeepers_ability_tax_takes_equip_and_leaves_triggered_abilities_alone_cr_602_2b() {
+    // ruling: a6040722 252f0b38
+    // Named Skullclamp: equip {1} is an activated ability (a keyword one; it
+    // costs mana and adds none, so it is no mana ability): {3}, not with two
+    // Swamps, yes with three. Its "whenever equipped creature dies, draw two
+    // cards" is a triggered ability: unaffected, it draws two.
+    for (swamps, ok) in [(2usize, false), (3, true)] {
+        let mut g = scen()
+            .battlefield(0, &["Plains", "Plains", "Plains", "Skullclamp", "Test Hasty"])
+            .battlefield(0, &vec!["Swamp"; swamps])
+            .hand(0, &["Anointed Peacekeeper"])
+            .at(Step::Main1, 0)
+            .start();
+        peacekeeper_names(&mut g, Some(id("Skullclamp")));
+        let clamp = bf(&g, 0, "Skullclamp");
+        assert_eq!(g.has_option(ab(clamp, 0)), ok, "{swamps} Swamps: {}", opts(&g));
+        if ok {
+            let hasty = bf(&g, 0, "Test Hasty");
+            let before = g.player(0).hand.len();
+            g.choose(ab(clamp, 0));
+            resolve_at(&mut g, hasty);
+            assert_eq!(g.obj(hasty).zone, Zone::Graveyard, "a 2/1 equipped is 3/0");
+            assert_eq!(g.player(0).hand.len(), before + 2, "the trigger draws two");
+        }
+    }
+}
+
+#[test]
+fn anointed_peacekeeper_leaves_mana_abilities_and_a_triggers_payment_alone_cr_605_1a() {
+    // ruling: 252f0b38 a6040722
+    // Named Mana Vault. "{T}: Add {C}{C}{C}" adds mana as it resolves: a
+    // mana ability, no tax: with only the Vault untapped, Nettlecyst ({3})
+    // is cast. "At the beginning of your upkeep, you may pay {4}. If you do,
+    // untap Mana Vault" is a triggered ability: {4} (four lands), not {6}.
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains", "Island", "Mana Vault"])
+        .hand(0, &["Anointed Peacekeeper", "Nettlecyst"])
+        .at(Step::Main1, 0)
+        .start();
+    peacekeeper_names(&mut g, Some(id("Mana Vault")));
+    let vault = bf(&g, 0, "Mana Vault");
+    for c in g.lands_of(0).collect::<Vec<_>>() {
+        g.set_tapped(c, true);
+    }
+    g.set_tapped(vault, false);
+    g.refresh_decision();
+    let nc = g.card(0, "Nettlecyst", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(nc)), "{}", opts(&g));
+    g.choose(Choice::Cast(nc));
+    resolve(&mut g);
+    assert_eq!(g.count_in(0, "Nettlecyst", Zone::Battlefield), 1);
+    assert!(g.obj(vault).tapped);
+    let t = g.turn().number;
+    quiet_until(&mut g, |g| g.turn().number == t + 2 && g.kind() == Some(DecisionKind::YesNo));
+    assert_eq!((g.turn().active, g.turn().step), (0, Step::Upkeep));
+    assert!(g.has_option(Choice::Yes), "four lands pay {{4}}: {}", opts(&g));
+    g.choose(Choice::Yes);
+    resolve(&mut g);
+    assert!(!g.obj(vault).tapped, "paid {{4}}: untapped");
+}
+
+#[test]
+fn anointed_peacekeeper_may_name_a_card_it_didnt_see_or_without_activated_abilities_cr_201_3() {
+    // ruling: 2a160983
+    // P1's hand is an Island; its library holds Lightning Bolt (on top) and
+    // Test Bear (no activated ability), cards P0 never saw: both names are
+    // offered. Named Lightning Bolt: P1 draws it, {2}{R}, not castable with
+    // two Mountains.
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains"])
+        .hand(0, &["Anointed Peacekeeper"])
+        .hand(1, &["Island"])
+        .library(1, &["Lightning Bolt", "Test Bear"])
+        .battlefield(1, &["Mountain", "Mountain"])
+        .at(Step::Main1, 0)
+        .start();
+    let ap = g.card(0, "Anointed Peacekeeper", Zone::Hand);
+    g.choose(Choice::Cast(ap));
+    to_name_question(&mut g);
+    let bolt = g.card(1, "Lightning Bolt", Zone::Library);
+    assert!(!g.knows(0, bolt) && g.knows(0, g.card(1, "Island", Zone::Hand)), "it saw the hand only");
+    let offered = names_offered(&g);
+    assert!(offered.contains(&id("Lightning Bolt")) && offered.contains(&id("Test Bear")), "{offered:?}");
+    while !g.has_option(Choice::Def(id("Lightning Bolt"))) {
+        let next = g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|c| matches!(c, Choice::Page(_))).unwrap();
+        g.choose(next);
+    }
+    g.choose(Choice::Def(id("Lightning Bolt")));
+    resolve(&mut g);
+    quiet_until(&mut g, |g| g.turn().active == 1 && g.turn().step == Step::Main1 && at_priority(g) && g.stack().is_empty());
+    let bolt = g.card(1, "Lightning Bolt", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(bolt)), "{{2}}{{R}} with two Mountains: {}", opts(&g));
+}
+
+#[test]
+fn anointed_peacekeeper_offers_a_tokens_name_only_if_a_card_has_it_cr_201_3() {
+    // ruling: abac3051
+    // The table's token names: Faerie Dragon (Feywild Caretaker's token;
+    // also an Astral card's name) is offered, Treasure, Clue and Goblin
+    // Shaman (no card's names) are not; each token name offered is a card's.
+    let mut g = scen().battlefield(0, &["Plains", "Plains", "Plains"]).hand(0, &["Anointed Peacekeeper"]).at(Step::Main1, 0).start();
+    let ap = g.card(0, "Anointed Peacekeeper", Zone::Hand);
+    g.choose(Choice::Cast(ap));
+    to_name_question(&mut g);
+    let names: Vec<&str> = names_offered(&g).iter().map(|&d| engine::sneak_show::face_name(db().def(d))).collect();
+    let n = db().num_cards();
+    let card_faces: Vec<&str> = (0..db().len() as u16)
+        .filter(|&d| {
+            let dd = db().def(d);
+            !dd.token && ((d as usize) < n || dd.front.is_some_and(|f| (f as usize) < n))
+        })
+        .map(|d| engine::sneak_show::face_name(db().def(d)))
+        .collect();
+    assert!(db().token_by_name("Faerie Dragon").is_some() && names.contains(&"Faerie Dragon"), "{names:?}");
+    for t in ["Treasure", "Clue", "Goblin Shaman"] {
+        assert!(db().token_by_name(t).is_some(), "the table has a {t} token");
+        assert!(!card_faces.contains(&t) && !names.contains(&t), "{t}");
+    }
+    for d in (n..db().len()).map(|t| t as u16).filter(|&t| db().def(t).token) {
+        let name = engine::sneak_show::face_name(db().def(d));
+        let card_name = card_faces.contains(&name) || name == "Faerie Dragon";
+        assert_eq!(names.contains(&name), card_name, "token {name}");
+    }
+}
+
 // ---- Archon of Emeria: one spell a turn --------------------------------------------------------
 
 #[test]

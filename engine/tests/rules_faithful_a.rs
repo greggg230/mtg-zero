@@ -107,19 +107,30 @@ fn cr_603_3b_any_of_eighteen_distinct_triggers_goes_on_the_stack_first() {
 /// Anointed Peacekeeper ("as this enters, look at an opponent's hand, then
 /// choose any card name ... activated abilities of sources with the chosen
 /// name cost {2} more"): the names are those of every card in the game, the
-/// chooser's own too (the tax is on every source's abilities), 72 here: the
-/// first page offers 63 at `LIBRARY` + 0..=62, "next page" at `LIBRARY` + 63
-/// and `PASS` (a name of no card in the game); the second the other 9 at
-/// `LIBRARY` + 0..=8 (ENGINE.md 100.2; before it the opponent's names only,
-/// cut at 64: docs/shortcuts.md 31.7.5, the audit's N14). One of the
-/// chooser's own cards' names is chosen.
+/// chooser's own too (the tax is on every source's abilities), and of the
+/// table's tokens whose names are card names (ENGINE.md 127; 72 cards of one
+/// face here): the first page offers 63 at `LIBRARY` + 0..=62, "next page"
+/// at `LIBRARY` + 63 and `PASS` (a name no spell or source of the game can
+/// have); the second the rest at `LIBRARY` + 0.. (ENGINE.md 100.2; before it
+/// the opponent's names only, cut at 64: docs/shortcuts.md 31.7.5, the
+/// audit's N14). One of the chooser's own cards' names is chosen.
 #[test]
 fn cr_201_3_peacekeeper_may_name_any_card_in_the_game_even_its_controllers() {
-    let names: Vec<&str> = db()
+    use engine::ids::DefId;
+    use engine::sneak_show::face_name;
+    let one_face = |d: DefId| {
+        let dd = db().def(d);
+        dd.halves.is_none() && dd.back.is_none() && dd.adventure.is_none() && dd.prepare.is_none()
+    };
+    let mut names: Vec<&str> = db()
         .supported()
-        .filter(|n| !["Anointed Peacekeeper", "Plains", "Island"].contains(n) && db().id(n).is_some_and(|d| !db().def(d).is(engine::db::types::LAND)))
-        .take(70)
+        .filter(|n| {
+            !["Anointed Peacekeeper", "Plains", "Island"].contains(n)
+                && db().id(n).is_some_and(|d| !db().def(d).is(engine::db::types::LAND) && one_face(d))
+        })
         .collect();
+    names.sort_unstable();
+    names.truncate(70);
     assert_eq!(names.len(), 70);
     let mut g = Scenario::new(db())
         .spec(|s| {
@@ -148,17 +159,36 @@ fn cr_201_3_peacekeeper_may_name_any_card_in_the_game_even_its_controllers() {
     let mut want: Vec<u16> = vec![act::PASS];
     want.extend(act::LIBRARY..act::LIBRARY + 64);
     assert_eq!(actions(&g), want);
-    let mut defs: Vec<engine::ids::DefId> = names.iter().map(|n| db().id(n).unwrap()).collect();
-    defs.push(db().id("Anointed Peacekeeper").unwrap());
-    defs.push(db().id("Plains").unwrap());
+    let mut cards: Vec<DefId> = names.iter().map(|n| db().id(n).unwrap()).collect();
+    cards.push(db().id("Anointed Peacekeeper").unwrap());
+    cards.push(db().id("Plains").unwrap());
+    cards.sort_unstable();
+    cards.dedup();
+    assert_eq!(cards.len(), 72);
+    // The table's tokens with a card's name (a face of a card of the table,
+    // or Faerie Dragon: CR 201.3), one definition a name, the smallest.
+    let n = db().num_cards();
+    let card_faces: Vec<&str> = (0..db().len() as DefId)
+        .filter(|&d| {
+            let dd = db().def(d);
+            !dd.token && ((d as usize) < n || dd.front.is_some_and(|f| (f as usize) < n))
+        })
+        .map(|d| face_name(db().def(d)))
+        .collect();
+    let mut defs = cards.clone();
+    defs.extend((n..db().len()).map(|t| t as DefId).filter(|&t| {
+        let d = db().def(t);
+        d.token && !d.emblem && !d.rules && (card_faces.contains(&face_name(d)) || d.name == "Faerie Dragon")
+    }));
+    defs.sort_unstable_by(|&a, &b| face_name(db().def(a)).cmp(face_name(db().def(b))).then(a.cmp(&b)));
+    defs.dedup_by(|a, b| face_name(db().def(*a)) == face_name(db().def(*b)));
     defs.sort_unstable();
-    defs.dedup();
-    assert_eq!(defs.len(), 72);
+    assert!(defs.len() > 64 && defs.len() <= 63 + 64, "two pages: {}", defs.len());
     assert_eq!(options(&g)[1..64], defs[..63].iter().map(|&d| Choice::Def(d)).collect::<Vec<_>>()[..]);
     g.choose(next_page(&g));
     same_after_determinize(&g);
     assert_eq!(options(&g), defs[63..].iter().map(|&d| Choice::Def(d)).collect::<Vec<_>>());
-    assert_eq!(actions(&g), (act::LIBRARY..act::LIBRARY + 9).collect::<Vec<_>>());
+    assert_eq!(actions(&g), (act::LIBRARY..act::LIBRARY + (defs.len() - 63) as u16).collect::<Vec<_>>());
     let own = *defs[63..].iter().find(|&&d| names[30..].iter().any(|n| db().id(n) == Some(d))).expect("one of P0's names on page 2");
     g.choose(Choice::Def(own));
     assert!(g.log_lines().iter().any(|l| l.contains(&format!("chosen name: {}", db().def(own).name))), "{}", log(&g));

@@ -602,6 +602,234 @@ fn anointed_peacekeeper_names_a_card_and_taxes_it_cr601_2f() {
     assert!(!g.has_option(act(tapper, 0)), "{{2}} more with one land: {:?}", g.options_desc());
 }
 
+// ---- Anointed Peacekeeper: every name, by face (ENGINE.md 127) ---------------------
+
+/// The definition the name list gives name `name` (the smallest with that
+/// face name: a card's definition for its front face).
+fn name_def(name: &str) -> engine::ids::DefId {
+    (0..db().len() as engine::ids::DefId)
+        .find(|&d| engine::sneak_show::face_name(db().def(d)) == name)
+        .unwrap_or_else(|| panic!("no face named {name}"))
+}
+
+/// Every name the pending `NameCard` decision offers, over all its pages (a
+/// clone answers "next page").
+fn names_offered(g: &Game) -> Vec<engine::ids::DefId> {
+    let mut g = g.clone();
+    let mut out = Vec::new();
+    loop {
+        let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+        out.extend(opts.iter().filter_map(|c| match *c {
+            Choice::Def(d) => Some(d),
+            _ => None,
+        }));
+        match opts.iter().find(|c| matches!(c, Choice::Page(_))) {
+            Some(&next) => {
+                g.choose(next);
+            }
+            None => return out,
+        }
+    }
+}
+
+/// P0 casts Anointed Peacekeeper from its hand, looks, and answers the name
+/// question with `c` (paging to it); everything resolves.
+fn peacekeeper_names(g: &mut Game, c: Choice) {
+    let ap = g.card(0, "Anointed Peacekeeper", Zone::Hand);
+    g.choose(Choice::Cast(ap));
+    pay(g);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::NameCard));
+    assert_eq!(g.kind(), Some(DecisionKind::NameCard), "{}", log(g));
+    while !g.has_option(c) {
+        let next = g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|x| matches!(x, Choice::Page(_)));
+        g.choose(next.unwrap_or_else(|| panic!("{c:?} is not offered")));
+    }
+    g.choose(c);
+    settle(g);
+}
+
+/// Which faces of card `c` its owner may cast now: (front, other).
+fn castable_faces(g: &Game, c: CardIdx) -> (bool, bool) {
+    use engine::decision::{FACE_CAST, OTHER_CAST};
+    let ch = g.pending_decision().and_then(|d| {
+        d.options.iter().map(|o| o.choice).find(|ch| matches!(*ch, Choice::Cast(x) | Choice::CastFace(x) | Choice::Faces(x, _) if x == c))
+    });
+    match ch {
+        Some(Choice::Cast(_)) => (true, false),
+        Some(Choice::CastFace(_)) => (false, true),
+        Some(Choice::Faces(_, m)) => (m & FACE_CAST != 0, m & OTHER_CAST != 0),
+        _ => (false, false),
+    }
+}
+
+/// "Choose any card name" (CR 201.3): every face of every card of the game,
+/// both players', in any zone (open decklists: the decks are public, so the
+/// list is): a double-faced card's front and back faces (712: Fable of the
+/// Mirror-Breaker, Reflection of Kiki-Jiki), an adventurer card's creature
+/// and Adventure (715: Brazen Borrower, Petty Theft), a split card's halves
+/// (709.4: Life, Death), never "<left> // <right>", a name no card has; the
+/// table's token names that are card names, not other token names (Treasure);
+/// each name once; `PASS` for every other name. The same list in a world of
+/// the chooser's (ENGINE.md 10).
+#[test]
+fn cr_201_3_peacekeeper_offers_every_face_of_every_card_of_the_game() {
+    const FABLE: &str = "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki";
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains"])
+        .hand(0, &["Anointed Peacekeeper"])
+        .graveyard(0, &["Life // Death"])
+        .library(1, &["Brazen Borrower // Petty Theft"])
+        .battlefield(1, &[FABLE])
+        .transformed(1, FABLE)
+        .at(Step::Main1, 0)
+        .start();
+    let ap = g.card(0, "Anointed Peacekeeper", Zone::Hand);
+    g.choose(Choice::Cast(ap));
+    pay(&mut g);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::NameCard));
+    assert_eq!(g.kind(), Some(DecisionKind::NameCard), "{}", log(&g));
+    assert!(g.has_option(Choice::Pass));
+    let defs = names_offered(&g);
+    let names: Vec<&str> = defs.iter().map(|&d| engine::sneak_show::face_name(db().def(d))).collect();
+    for n in [
+        "Anointed Peacekeeper",
+        "Plains",
+        "Island",
+        "Forest",
+        "Life",
+        "Death",
+        "Brazen Borrower",
+        "Petty Theft",
+        "Fable of the Mirror-Breaker",
+        "Reflection of Kiki-Jiki",
+    ] {
+        assert!(names.contains(&n), "{n} among {names:?}");
+    }
+    assert!(!names.iter().any(|n| n.contains(" // ")), "no combined name: {names:?}");
+    let mut uniq = names.clone();
+    uniq.sort_unstable();
+    uniq.dedup();
+    assert_eq!(uniq.len(), names.len(), "each name once");
+    // Token names: those of the table's tokens that are card names only.
+    let n = db().num_cards();
+    let card_faces: Vec<&str> = (0..db().len() as engine::ids::DefId)
+        .filter(|&d| {
+            let dd = db().def(d);
+            !dd.token && ((d as usize) < n || dd.front.is_some_and(|f| (f as usize) < n))
+        })
+        .map(|d| engine::sneak_show::face_name(db().def(d)))
+        .collect();
+    let treasure = db().token_by_name("Treasure").expect("the Treasure token");
+    assert!(!card_faces.contains(&"Treasure") && !defs.contains(&treasure), "Treasure is no card's name");
+    // Nothing else: the game's cards' faces and those tokens (sorted by
+    // definition).
+    let mut sorted = defs.clone();
+    sorted.sort_unstable();
+    assert_eq!(sorted, defs, "by definition");
+    for &d in &defs {
+        let dd = db().def(d);
+        assert!(!dd.token || card_faces.contains(&engine::sneak_show::face_name(dd)) || dd.name == "Faerie Dragon", "{}", dd.name);
+    }
+    // A world of the chooser's asks the same.
+    let mut w = g.clone();
+    w.determinize(0, &mut engine::rng::Rng::new(5));
+    assert_eq!(w.pending_decision(), g.pending_decision());
+    assert_eq!(names_offered(&w), defs);
+}
+
+/// A back face (CR 712.8): naming Reflection of Kiki-Jiki taxes the
+/// activated ability of a permanent with that face up ("{1}, {T}: ..." costs
+/// {3}: not with one Mountain, yes with three); naming the front face, Fable
+/// of the Mirror-Breaker, doesn't tax it.
+#[test]
+fn cr_712_8_peacekeeper_naming_a_back_face_taxes_that_face() {
+    const FABLE: &str = "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki";
+    for (named, mountains, offered) in
+        [("Reflection of Kiki-Jiki", 1usize, false), ("Reflection of Kiki-Jiki", 3, true), ("Fable of the Mirror-Breaker", 1, true)]
+    {
+        let mut g = scen()
+            .battlefield(0, &["Plains", "Plains", "Plains"])
+            .hand(0, &["Anointed Peacekeeper"])
+            .battlefield(1, &[FABLE, "Test Bear"])
+            .battlefield(1, &vec!["Mountain"; mountains])
+            .transformed(1, FABLE)
+            .at(Step::Main1, 0)
+            .start();
+        peacekeeper_names(&mut g, Choice::Def(name_def(named)));
+        assert!(log(&g).contains(&format!("chosen name: {named}")), "{}", log(&g));
+        let r = bf(&g, 1, "Reflection of Kiki-Jiki");
+        g.pass();
+        assert_eq!(g.pending_decision().unwrap().player, 1);
+        assert_eq!(g.has_option(act(r, 0)), offered, "named {named}, {mountains} Mountains: {:?}", g.options_desc());
+    }
+}
+
+/// An Adventure (CR 715.3, 715.4): naming Petty Theft taxes the Adventure
+/// ({1}{U} + {2}: not with three Islands) and not the creature (Brazen
+/// Borrower, {1}{U}{U}: yes); naming Brazen Borrower the other way round.
+#[test]
+fn cr_715_4_peacekeeper_naming_an_adventure_taxes_the_adventure_not_the_creature() {
+    const BORROWER: &str = "Brazen Borrower // Petty Theft";
+    for (named, creature, adventure) in [("Petty Theft", true, false), ("Brazen Borrower", false, true)] {
+        let mut g = scen()
+            .battlefield(0, &["Plains", "Plains", "Plains"])
+            .hand(0, &["Anointed Peacekeeper"])
+            .battlefield(1, &["Island", "Island", "Island"])
+            .hand(1, &[BORROWER])
+            .at(Step::Main1, 0)
+            .start();
+        peacekeeper_names(&mut g, Choice::Def(name_def(named)));
+        g.pass();
+        assert_eq!(g.pending_decision().unwrap().player, 1);
+        let bb = g.card(1, BORROWER, Zone::Hand);
+        assert_eq!(castable_faces(&g, bb), (creature, adventure), "named {named}: {:?}", g.options_desc());
+    }
+}
+
+/// A split card's half (CR 709.3, 709.4): naming Death taxes Death ({1}{B} +
+/// {2}: not with two lands) and not Life ({G}: yes); naming Life the other
+/// way round. "Life // Death" is no name to choose.
+#[test]
+fn cr_709_4_peacekeeper_naming_a_split_cards_half_taxes_that_half() {
+    const LIFE_DEATH: &str = "Life // Death";
+    for (named, life, death) in [("Death", true, false), ("Life", false, true)] {
+        let mut g = scen()
+            .battlefield(0, &["Plains", "Plains", "Plains"])
+            .hand(0, &["Anointed Peacekeeper"])
+            .battlefield(1, &["Forest", "Swamp"])
+            .hand(1, &[LIFE_DEATH])
+            .graveyard(1, &["Test Giant"])
+            .at(Step::Main1, 0)
+            .start();
+        peacekeeper_names(&mut g, Choice::Def(name_def(named)));
+        quiet_until(&mut g, |g| g.turn().active == 1 && g.turn().step == Step::Main1 && at_priority(g) && g.stack().is_empty());
+        assert_eq!(g.pending_decision().unwrap().player, 1);
+        let ld = g.card(1, LIFE_DEATH, Zone::Hand);
+        assert_eq!(castable_faces(&g, ld), (life, death), "named {named}: {:?}", g.options_desc());
+    }
+}
+
+/// `PASS`, the one answer for every name no spell or source of the game can
+/// have (ENGINE.md 123.4, 127): nothing is taxed (P1's Lightning Bolt for
+/// {R}), and the name kept is `NO_NAME`.
+#[test]
+fn cr_201_3_peacekeeper_naming_no_card_of_the_game_taxes_nothing() {
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains"])
+        .hand(0, &["Anointed Peacekeeper"])
+        .battlefield(1, &["Mountain"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    peacekeeper_names(&mut g, Choice::Pass);
+    let ap = bf(&g, 0, "Anointed Peacekeeper");
+    assert!(g.marks_of(ap).contains(&engine::game::Mark::ChosenName(engine::ids::DefId::MAX)), "{:?}", g.marks_of(ap));
+    assert!(g.marks_of(ap).contains(&engine::game::Mark::LookedHand), "it looked first");
+    g.pass();
+    let bolt = g.card(1, "Lightning Bolt", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(bolt)), "{:?}", g.options_desc());
+}
+
 // ---- Urza, Lord High Artificer (a mana ability that taps another permanent) -----
 
 /// "Tap an untapped artifact you control: Add {U}." A mana ability (CR

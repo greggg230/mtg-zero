@@ -2260,10 +2260,11 @@ impl Game {
         if d.kind == K::RevealCompanion {
             return self.companion_candidates(p);
         }
-        // "As this enters, look at an opponent's hand, then choose any card
+        // "As this enters, [look at an opponent's hand, then] choose a card
         // name" (`Game::choose_name_as_enters`): `LIBRARY` + k is the k-th
-        // name of the opponent's cards by definition, not a library slot
-        // (ENGINE.md 65.10: the list was the namer's library).
+        // name of `Game::nameable_defs` (by definition; on a later page, the
+        // page's k-th), not a library slot (ENGINE.md 65.10: the list was the
+        // namer's library; 127: the list).
         if d.kind == K::NameCard && matches!(self.agenda.last(), Some(Task::AsEnters { .. })) {
             return d
                 .options
