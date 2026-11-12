@@ -24993,3 +24993,152 @@ work leaves: a `tools/mac_races.sh` race, `~/mtg-zero-wt/races-<sha12>` with `~/
 `~/mtg-zero-wt/run-<sha12>` and the mirror `~/mtgz-remote/<run>` (every checkpoint shipped). Cleanup when done:
 `rm -rf ~/mtgz-races/<name>`, `git -C ~/mtg-zero worktree remove --force ~/mtg-zero-wt/races-<sha12>` and `rm -rf
 ~/cargo-target/mtg-zero/races-<sha12>`.
+
+### 110.3 Lane C: Edge of Autumn, Street Wraith, Leyline of the Void (branch `doomsday-c`, mtg-bot `feature/doomsday-c-ir`)
+
+**Why.** Lane C of the Legacy Doomsday cards (MTGGoldfish archetype "Legacy Doomsday", paper,
+deck 8027957; `E:/mtg-zero-scratch/doomsday/`): the main deck's two cycling cards and the
+sideboard's Leyline. Branch `doomsday-c` from main 60397f3; mtg-bot
+`feature/doomsday-c-ir` from `feature/eoe-ir-fixes` f4f2d663. No layout, encoding, identity-scheme
+or zero-core change; no docs/shortcuts.md entry.
+
+* Edge of Autumn {1}{G}, Sorcery: "If you control four or fewer lands, search your library for a
+  basic land card, put it onto the battlefield tapped, then shuffle. Cycling—Sacrifice a land."
+* Street Wraith {3}{B}{B}, Creature — Wraith 3/4: "Swampwalk. Cycling—Pay 2 life."
+* Leyline of the Void {2}{B}{B}, Enchantment: "If this card is in your opening hand, you may begin
+  the game with it on the battlefield. If a card would be put into an opponent's graveyard from
+  anywhere, exile it instead."
+
+**The IR** (mtg-bot `feature/doomsday-c-ir` 870228f5). The legacy pool (`data/legacy_delver.json`, its sheet and
+sidecar) gains the three cards' Scryfall records (the deck's fetch of 2026-11-11). Street Wraith and
+Leyline of the Void already parsed (mtg-bot's roto pool claims them: `PayLifeCost(2)` as the cycling
+cost's atom, `BeginGameOnBattlefield` and `GraveyardExileInstead { opponents_only }`); Edge of Autumn
+didn't. Two parameterized recognizers:
+
+* "Cycling—<non-mana cost>." (CR 702.29a; `roto_keywords.parse_hand_keyword_line`, replacing the
+  pay-life-only one): the cost's comma-separated pieces become `ActivationCost.extra_costs` atoms
+  (the atoms mtg-bot's hand-activation path pays): "Pay N life" -> `PayLifeCost`, any other piece
+  through the composable cost-atom grammar ("Sacrifice a land" -> `SacrificePermanentsCost(IsLand)`).
+  Street Wraith's printing is unchanged.
+* "if you control <N> or fewer <permanents>, <effect>" (`effects_ext`, the unified effect grammar's
+  condition phrasebook) -> `IfCondition(ControlsAtMost(<pred>, N), <effect>)`: Edge of Autumn is
+  `IfCondition(ControlsAtMost(IsLand, 4), SearchLibraryForBasicLandTapped)`.
+
+Every pool's claimed printings (cube, roto, eoe, all) are the previous ones card for card (compared
+per card with the branch point's export); `legacy` gains the three. `cards export-ir --pool cube
+legacy eoe`, `filter_eoe_ir.py`, `gen_card_ir.py`: schema `a681cd197ad862b8...` (was
+`1cbe33073b1b...`), 710 classes, one more: `PayLifeCost` joins the `CostAtom` category (the cube and
+EoE pools never used it). `powerlsv.ir.json` (546 cards) and `eoe.ir.json` (320) are the previous
+files card for card, `schema_sha256` aside; `legacy.ir.json` holds 5 cards (sorted by name, so
+`CardDb::constructed()` gives Murktide Regent and Prismari Charm other definition ids than before;
+their identities come from the registry by name and are unchanged). `cards roundtrip --pool cube
+legacy eoe` passes. No IR defect was found (240-259 unused).
+
+**Identities.** `engine/src/az/legacy_cards.txt` gains Edge of Autumn, Street Wraith, Leyline of
+the Void (548, 549, 550 on this branch; the integrated order puts lanes A and B's cards before
+them). Tests never hard-code them.
+
+**Rules** (new code in `engine/src/doomsday_c.rs` and `engine/src/lower/doomsday_c.rs`; additive
+edits elsewhere):
+
+| Text | CR | How |
+|---|---|---|
+| "Cycling—Pay 2 life", "Cycling—Sacrifice a land" | 702.29a, 602.2b, 601.2g-h, 118.3, 119.4, 701.21 | the existing hand abilities (`CardDef::hand_abilities`, `HAND_ABILITY` ids): instant speed, the discard and the other part are costs. `CostAtom::PayLifeCost` lowers to `Cost::life` (payable only with life >= 2; paying to 0 loses at the next SBA check, 704.5a), `SacrificePermanentsCost(IsLand)` to `SacCost { Type(LAND), n: 1 }`: any land its controller controls, tapped or not, the last one too; an untapped land may first be tapped for mana and then sacrificed (the cost pick's `ACTIVATE` option, ENGINE.md 86.2) |
+| Edge of Autumn's spell | 608.2c, 701.23a-b, 701.24, 614.1c | `IfCondition` -> `JumpUnless(Cond::ControlAtMost(Type(LAND), 4))` over `Op::Search` (a basic land card, onto the battlefield tapped, may fail to find, then the shuffle): the lands are counted as it resolves; with five or more nothing happens, no search and no shuffle (ruling 3079d582) |
+| Swampwalk (and the other basic landwalks) | 702.14a-e, 509.1b, 305.7 | `Kw::Plainswalk` .. `Kw::Forestwalk` (outside the encoding's keyword list, like shadow and infect: a printed keyword comes with its identity); `Game::can_block` refuses a block when `landwalk_unblockable`: the defending player (the blocker's controller) controls a land with the walked land type (`has_subtype`, layer 4: a nonbasic land under a "nonbasic lands are Mountains" effect is a Mountain only); the attacker's own lands and the blocker's own landwalk don't matter |
+| Leyline's opening-hand action | 103.6, 103.6a | the existing `Task::Opening` (Gemstone Caverns', ENGINE.md 31): after the mulligans the starting player, then the other, may put any number of such cards from their opening hand onto the battlefield, one per `ChooseHandCard` decision (`PASS` = no more); asked of a player whose (open) decklist holds one |
+| "If a card would be put into an opponent's graveyard from anywhere, exile it instead" | 614.1a, 616.1, 616.1e-f, 614.6, 700.4, 108.2b, 707.10a, 603.10a | `CardDef::opp_gy_exile` (`lower_zone_abilities`: only `opponents_only`, no tokens, no colours; other forms refused loudly); in `Game::replaced_dest` the ninth replacement effect (index 8, `can` widened to `u16`): a card (not a token, not a copy of a spell) going to the graveyard of a player an opponent of whom controls a permanent with the ability now (`abilities`: none if it lost its abilities), or had it as it left the battlefield earlier in the same simultaneous move (`Lki::opp_gy_exile`, recorded before the move). It leads to exile, the same result as Yawgmoth's Will's or flashback's (no choice between them); with Dauthi Voidwalker's void counter or Blightsteel Colossus's library the affected object's owner (controller) chooses (`Dest::Choose`, `ChooseReplacement`, the existing results). `SEEN_VOID` covers both cards; cost ordering (ENGINE.md 100.4.9) counts a Leyline leaving as a cost as changing destinations, as it did Dauthi |
+
+Readings taken:
+
+* **Discarded is still discarded** (ruling e64b1395): `Game::discard` records the discard event for
+  the card wherever the replacement put it, so "whenever you discard" abilities trigger (Inti) and
+  "if you discarded a nonland card" reads the card in exile (Norman Osborn's connive).
+* **Exiled creatures don't die** (ruling ef9cd497, CR 700.4): the `Dies` event is recorded only
+  for the destination after the replacements; tokens are not cards and still die (ruling 4226f05f:
+  a Pest's "when this token dies"). A copy of a spell ceases to exist (707.10a); the card is exiled.
+* **The Leyline's controller's own cards** go to their own graveyard; two Leylines of one player
+  are two effects with one result (no choice); each player's Leyline exiles the other's cards.
+* **Leaving together.** A card destroyed in the same event as the Leyline (Pest Infestation
+  destroying the Leyline and the opponent's Chromatic Star) is exiled whichever of the two moves
+  first: the replacement exists as the event begins (614.1a). The same last-known reading now
+  applies to Dauthi Voidwalker: before, a Voidwalker leaving earlier in a simultaneous move was
+  read from its printed definition, so one that had lost all abilities (The Wondrous Wasp) still
+  exiled the opponent's creatures dying with it (Wrath of God); `Lki::void_exile` records its
+  abilities as they were (a fix of a divergence reachable with cube cards; tested both ways; the
+  digests are unchanged).
+* **A stolen Leyline** (untested: no card of the two decks takes control of an enchantment): its
+  controller's opponents are the owner's side; leaving the battlefield it is still there as its own
+  destination is decided, so it exiles itself, as Rest in Peace does.
+* **The opening-hand question and hidden information.** Leyline uses Gemstone Caverns' question
+  unchanged (the orchestrator's decision, 2026-11-11): it is asked whenever the player's decklist
+  holds such a card; with none in the hand its only option is `PASS`, which `auto_single` answers
+  with a public `KEY_AUTO` (section 10's treatment of every single-option decision, recorded for
+  Gemstone Caverns in 55.4). The key affects only search trees rooted before the opening actions
+  (the play-or-draw and mulligan decisions), which branch on whether the hand holds one; it doesn't
+  affect `determinize` (past keys constrain no world) or the encodings. A Leyline begun on the
+  battlefield is public from then on (54.5's open-decklist worlds exclude it). If the auto-answer
+  treatment changes, it changes engine-wide.
+
+**Tests.** `engine/tests/cards_doomsday_c.rs` (37 tests): the definitions; Street Wraith's
+cycling at instant speed on the opponent's turn, at exactly 2 life (and losing at 0), not at 1, its
+discard triggering Inti before the draw; swampwalk against a basic Swamp, Underground Sea, Undercity
+Sewers and only Islands or Volcanic Island, the attacker's Swamps, a swampwalking blocker (702.14d),
+a blocked Wraith's damage; Edge of Autumn with four lands (basic land cards only, may fail, enters
+tapped), with five (no search, the library's order unchanged), cast with five then one sacrificed
+to another Edge's cycling in response (searches), no basic land in the library; its cycling over
+every land (the tapped one too), not without a land, the last land, a land first tapped for mana,
+the fetch land a Wasteland targets; Leyline's opening action (the starting player first, two
+Leylines one decision each, then the other player; a Leyline bottomed by the London mulligan not
+offered; a deck without one never asked); the replacement on every path of the two decks: resolved
+and countered spells, Force of Will (its pitched card exiled as a cost), Thoughtseize's discard,
+Street Wraith cycled under it (and Inti), the cleanup discard, the legend rule, Lightning Bolt
+killing Sanguine Evangelist (no Bat) and a Pest token (its life), Consider's surveil, Chromatic
+Star sacrificed for mana (no draw), Lotus Petal, a fetch land, Lion's Eye Diamond and the
+discarded hand, Brainstorm's put-back (the library), Murktide Regent with nothing to delve, Titania
+not triggering on Edge's sacrifice, a replicated Lose Focus's copy, two Leylines on one side and
+one on each, Dauthi Voidwalker and Blightsteel Colossus (the owner chooses), Yawgmoth's Will (no
+choice), the simultaneous destruction in both orders, the Voidwalker without abilities. The five
+rulings (`data/rulings/legacy.rulings.json`, fetched with `tools/fetch_rulings.py`; triaged in
+`data/rulings/triage.tsv`) are tested; `docs/rulings.md` regenerated (1,615 rulings, 1,233 class a, every one tested).
+`tools/untested_cards.py` now lists the legacy cards too: 5 legacy cards, none untested.
+
+mtg-bot: `tests/test_doomsday_c_cards.py` (16: the printings, the cost and condition grammars, the
+Python engine's Edge of Autumn and its cycling), the legacy pool's pinned lists.
+
+**Checks** (the code at 718f486; the commit after it is this section):
+
+* Full engine suite (`cargo test --release -p engine -p card_ir --no-fail-fast`, the desktop,
+  shared with lanes A and B): **2,299 passed, 0 failed, 22 ignored** (`az` 48, `limits` 13,
+  `hidden` 28, `support` 8, `cards_doomsday_c` 37, `cards_legacy` 24, `constructed` 7; the
+  constructed table's test now counts the legacy registry instead of two cards).
+* Behaviour digests unchanged: full **53839c837bbaf034** (every one of the 2,500 games equal to
+  `tests/data/digests.txt`), `DIGEST_ENCODING=0` **208c723daced22fe**.
+* `FUZZ_POOL=dd_c` (`engine/tests/fuzz.rs`; the Doomsday 60 with the cards no branch supports
+  yet swapped for Leyline of the Void x4, Street Wraith and Edge of Autumn x2 more, Duress, Fatal
+  Push and a Forest; against the Delver 60 in either seat and the mirror, by seed): **20,000 games,
+  no failure** (the desktop, 8 shards of 2,500 seeds over 0..19,999, 186-191 s each; the Mac was
+  busy with the S4 races and the fuzz farm): wins 8,509 / 8,455, 3,036 drawn at the turn cap, none
+  aborted, 43.7 turns and 478.0 decisions a game, the longest game 1,052 actions, 16,120,500
+  options completed (27.7 million decisions after them); Edge of Autumn cast 1,033 times and cycled
+  51,780, Street Wraith cast 244 and cycled 22,747, 7 blocker decisions facing a swampwalker while
+  controlling a Swamp (checked: never offered it), Leyline of the Void on the battlefield as the
+  first turn began in 4,338 games and at some time in 9,326. Every check of the default mode
+  (invariants, clones, `determinize` for both viewers, the encoding, options completed in the game
+  and in the worlds). The binary's other tests with `FUZZ_POOL=dd_c` (300 games, the replays)
+  pass.
+* `FUZZ_POOL=delver FUZZ_GAMES=4000` (4 shards): no failure; wins 1,924 / 1,907, 169 drawn, 37.0
+  turns and 383.3 decisions a game, 2,390,436 options completed; Murktide Regent cast 2,031 times,
+  its trigger 84, Prismari Charm 2,937.
+* `bash tools/build_py.sh`, `python -m pytest -q tests`: 268 passed, 1 skipped, 1 failed:
+  `test_mac_remote.py::test_a_remote_eoe_evaluation_logs_its_games` hit its 600 s subprocess timeout
+  while the engine suite built beside it; alone it passes (62 s). `python -m pytest tools/codegen`
+  2 passed; `python tools/rulings_doc.py --check` passes.
+* mtg-bot (870228f5): `cards roundtrip --pool cube legacy eoe` passes; the full suite (`pytest -n 6
+  --no-cov`) 49 failed, 21,096 passed: 48 of the 49 fail at the branch point f4f2d663 too (run by
+  name in this worktree checked out there; the cross-engine parity, fingerprint and coverage-doc
+  tests of W6's list); the 49th (`test_spacecraft_phase_4_cycle_2_flip.py::
+  test_eternity_elevator_admits_at_loader_admits_helper`) passes alone and with its module (an
+  xdist ordering flake).
+* `docs/card_ir.md` ("Current numbers") is left to the merge: lanes A and B change the schema too,
+  and the integrated export replaces all three files at once.
