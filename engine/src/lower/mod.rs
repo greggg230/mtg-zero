@@ -32,6 +32,7 @@ pub mod eoe_w6;
 pub mod effect_doomsday_a;
 pub mod eoe_w5;
 pub mod sneak_show;
+pub mod delver_sb;
 pub mod eoe_w2;
 pub mod doomsday_b;
 pub mod filter;

@@ -10339,7 +10339,7 @@ yardsticks 4.5-6.5 min, Elo 6-10 min: **~18-25 minutes**, 40 iterations in ~12-1
 
 ### 54.8 Limits, and what best-of-three needs
 
-* **The five sideboard cards outside the cube are not supported**: Consign to Memory, Hydroblast,
+* **The five sideboard cards outside the cube are not supported** (since section 122 they are): Consign to Memory, Hydroblast,
   Meltdown, Price of Progress, Rough // Tumble (`Decklist::unsupported_sideboard`; the deck file keeps
   the full 75). mtg-bot's parser already claims four of them in its roto pool (all but Rough //
   Tumble); each needs its IR appended to the legacy pool and registry (identities 548..), its
@@ -25492,6 +25492,183 @@ remote self-play worker test (`test_mac_remote.py::test_a_worker_plays_mtg[match
 load on the first pass and passed when rerun. **`python tools/gate.py python --no-mac` on ff5ba08: build, pytest 273
 passed and 1 skipped, the mtg-smoke loop (16 games, 0 unfinished), tracked files unchanged: GATE PASSED python
 ff5ba0847e85 in 935s.** The commit after it adds this paragraph only.
+
+## 122. The Legacy Izzet Delver 75's sideboard: Consign to Memory, Hydroblast, Meltdown, Price of Progress, Rough // Tumble (branch `delver-sb-cards`, mtg-bot `feature/delver-sb-ir`)
+
+**Why.** The five cards of the Delver mirror's pinned 75 (54) that were outside the cube and unsupported (54.8):
+Consign to Memory (2), Hydroblast (2), Meltdown (1), Price of Progress (1), Rough // Tumble (1), all sideboard.
+With them every card of the Delver 75, and of the Sneak and Show 75's sideboard (Consign to Memory, 123), is
+supported in constructed play: `Decklist::unsupported_sideboard` is empty for both. Branch `delver-sb-cards` from
+main 3d898d7 (Legacy Doomsday and Sneak and Show merged); mtg-bot `feature/delver-sb-ir` from `feature/sneak-show-ir`
+60e76c0a. Card support only: best-of-three and sideboarding are branches `delver-bo3` (120) and `bo3-game-episodes`
+(121), untouched here. The user's rules: no approximation of any class (docs/shortcuts.md unchanged), no
+input-layout change (none was needed: no new decision, no new public state), the digests unchanged.
+
+* Consign to Memory {U}, Instant: "Replicate {1} (When you cast this spell, copy it for each time you paid its
+  replicate cost. You may choose new targets for the copies.) Counter target triggered ability or colorless spell."
+* Hydroblast {U}, Instant: "Choose one — Counter target spell if it's red. • Destroy target permanent if it's red."
+* Meltdown {X}{R}, Sorcery: "Destroy each artifact with mana value X or less."
+* Price of Progress {1}{R}, Instant: "Price of Progress deals damage to each player equal to twice the number of
+  nonbasic lands that player controls."
+* Rough // Tumble {1}{R} // {5}{R}, Sorcery // Sorcery (a split card): "Rough deals 2 damage to each creature
+  without flying." // "Tumble deals 6 damage to each creature with flying."
+
+(54.8's estimate said "damage to each player by the nonbasic lands they control": the Oracle text is twice that
+number; the IR has `multiplier: 2`.)
+
+### 122.1 What was built
+
+| Part | Where | What |
+|---|---|---|
+| The IR | mtg-bot `feature/delver-sb-ir`; `data/cards/*.ir.json`, `powerlsv.schema.json`, `card_ir/src/generated.rs` | the five Scryfall records appended to the legacy pool; one recognizer (Rough // Tumble's halves); 122.2 |
+| Identities | `engine/src/az/legacy_cards.txt` | after Magus of the Moon (563): **Consign to Memory 564, Hydroblast 565, Meltdown 566, Price of Progress 567, Rough // Tumble 568** (the halves Rough and Tumble are faces: their card's identity, 568); append-only, layout unchanged |
+| Lowering | `lower/delver_sb.rs` (new), `lower/filter.rs` (`roto_stack.IsColorless`), `lower/effect_stack.rs` (`stack_object_filter_with`) | every field named, the rest denied |
+| Rules | `delver_sb.rs` (new): `Ext::DelverSb(DelverSb::DamageEachPlayerByCount)` | 122.3; the other four cards lower onto existing ops |
+| Tests | `engine/tests/cards_delver_sb.rs` (36), `support.rs` (`SUPPORTED_LEGACY`, `legacy_support_report`), `constructed.rs`, `fuzz.rs` (`FUZZ_POOL=delver_sb`) | 122.5 |
+| Rulings | `data/rulings/legacy.rulings.json` (refetched: the five's 11 rulings), `triage.tsv` (3 new texts; `b83b7a27` now class a), `docs/rulings.md` | every class-a ruling tested |
+| Docs | this section; `docs/ir_defects.md` W (no defect), `docs/card_ir.md`, `docs/interactions.md`, `docs/rulings.md`; 54.8 points here | |
+
+### 122.2 The IR
+
+Four of the five parsed through mtg-bot's roto recognizers: Consign to Memory (`CounterTargetStackObjectFiltered {
+kinds: [triggered, spell], spell_filter: roto_stack.IsColorless }`, `replicate_cost: "{1}"`), Hydroblast (Pyroblast's
+`ModalChooseOne` of `CounterSpell` and `RemoveTargetPermanents`, each `only_if: HasColor R`), Meltdown
+(`RemoveAllMatching { IsArtifact, max_mana_value_from_x }`, Vicious Rivalry's shape) and Price of Progress
+(`DamageEachPlayerPerControlled { per_filter: IsLand & ~IsBasic, multiplier: 2 }`). Rough // Tumble did not: its
+halves' sentences had no grammar. mtg-bot's `cards/parser/legacy_delver_sb.py` adds one parameterized recognizer,
+the very last fallback of `effects._parse_effect` (after the Doomsday and Sneak and Show lanes'): "deals N damage
+to each creature with <qualifier>" (the target-phrase grammar's `with` tail: a keyword or a disjunction of them,
+mana value or power N or greater / less) and "... without <keyword>" (keywords only, negated) ->
+`DealNDamageToEachCreatureMatching { amount, creature_filter }` (new, `effects/generic/legacy_delver_sb.py`); the
+split card builds through the existing `split_faces` path (Life // Death's: the combined mana cost {6}{R}{R}, both
+names, a sorcery). The recognizer claims Rough // Tumble only: every other pool's claimed printings (cube, roto,
+eoe, all) are byte for byte the same with and without it (compared card by card, `PYTHONHASHSEED=0`).
+`cards export-ir --pool cube legacy eoe`, `filter_eoe_ir.py`, `gen_card_ir.py`: schema `693d23a4a259...` (was
+`245e4bc208c6...`), 728 classes, exactly four more (`CounterTargetStackObjectFiltered`,
+`DamageEachPlayerPerControlled`, `DealNDamageToEachCreatureMatching`, `roto_stack.IsColorless`; no class, field or
+enum changed); `powerlsv.ir.json` and `eoe.ir.json` are the previous files byte for byte once the schema hash is
+replaced; `legacy.ir.json` holds 23 cards, the previous 18 unchanged. No IR defect (docs/ir_defects.md W; entries
+260-279 unused).
+
+### 122.3 The rules, as built
+
+| Text | Rule | How |
+|---|---|---|
+| Consign to Memory: "Counter target triggered ability or colorless spell" | 115.1, 113.3c, 701.6a, 105.2c | `CounterTargetStackObjectFiltered` -> one target of `Or[Spell(Colorless), Ability(TRIGGERED)]` (`effect_stack::stack_object_filter_with`: `CounterTargetStackObject`'s kinds, the spells limited by the filter) and `Op::Counter` (27.2): a triggered ability is removed from the stack, a spell put into its owner's graveyard. Triggered: every ability on the stack that isn't activated (delayed, reflexive and keyword triggers: ward, storm, replicate, a cast trigger); activated abilities (a fetch land's, loyalty, cycling) are no target; mana abilities never use the stack. "Colorless": the spell's colours now (layer 5: Painter's Servant makes a Bauble red) |
+| "Replicate {1}" | 702.56a, 707.10c | the existing replicate (26.5, Lose Focus): `ChooseMode` for the times paid, a cast trigger copying the spell once per payment, each copy's targets chosen anew (`NewTarget`) among the legal ones |
+| a spell that can't be countered | 101.2 | targeted, not countered (Emrakul, the Aeons Torn); its cast trigger can be |
+| Hydroblast: "Choose one — Counter target spell if it's red. • Destroy target permanent if it's red." | 700.2a, 608.2b, 701.6a, 701.8a | Pyroblast's shape (the existing `ModalChooseOne`, `CounterSpell` and `RemoveTargetPermanents` arms): the mode chosen as it is cast, the target any spell / any permanent, the colour checked as it resolves (`JumpUnlessTarget` with `Color(R)`: colour-changing effects apply) |
+| Meltdown: "Destroy each artifact with mana value X or less" | 107.3a, 202.3e, 701.8a, 702.12b | `RemoveAllMatching` with `max_mana_value_from_x` -> `Op::DestroyAll` over `Type(ARTIFACT) & MvAtMostX` (the spell's X on the stack): both players' artifacts, its caster's too; an {X} permanent and a token have mana value 0 on the battlefield; indestructible survives; cast for free X is 0 (107.3b) |
+| Price of Progress: "deals damage to each player equal to twice the number of nonbasic lands that player controls" | 120.3a, 120.8, 205.4c, 608.2h, 104.4a | `DamageEachPlayerPerControlled` -> **`DelverSb::DamageEachPlayerByCount { filter: Type(LAND) & Not(Supertype(BASIC)), times: 2 }`** (new): each player's count taken once, as the effect is applied, before any damage, then the damage dealt in APNAP order by the spell (its source's characteristics, 120.3); a count of 0 is no damage at all (120.8); a filter naming a controller is refused (the grouping is "that player controls"). Both players at 0 at once: a draw (104.4a) |
+| Rough // Tumble, a split card | 709.3, 709.3a-b, 709.4, 202.3d | the existing split card (25: Life // Death): cast as one half (`Cast` = Rough, `CastFace` = Tumble, `Faces` + `ChooseFace` when both can be), only that half's characteristics on the stack (Rough's mana value 2, Tumble's 6), both halves' combined elsewhere (mana value 8, red, a sorcery) |
+| Rough: "deals 2 damage to each creature without flying"; Tumble: "deals 6 damage to each creature with flying" | 120.3, 702.9a, 613.1f | `DealNDamageToEachCreatureMatching` -> `Op::DamageAll` over `Type(CREATURE) & [Not] HasKeyword(Flying)`: one damage event per creature matching as it resolves (flying as the creature has it now: Dragon's Rage Channeler's delirium), none to a player |
+
+### 122.4 Readings taken
+
+* **"Triggered ability" is every ability on the stack that isn't activated** (CR 113.3b-c): the engine's stack
+  abilities are activated (a permanent's, a hand card's, a graveyard card's) or triggered (printed, granted,
+  delayed, reflexive and keyword triggers); `ability_ok` already sorts them so for Tishana's Tidebinder (27.2).
+  Static abilities and mana abilities are never on the stack.
+* **Consign to Memory's spell filter applies to spells only.** mtg-bot's class filters spells
+  (`legal_targets` skips an item with no ability that fails the filter); the lowering says it as
+  `Spell(Colorless)`, the abilities untouched. A filter with no spell kind is refused.
+* **The colour of a colourless spell is read when it is targeted and again on resolution** (601.2c, 608.2b): the
+  existing target check of every spell; a spell made coloured in between is an illegal target then. The tests
+  check the targeting (Painter's Servant's red Bauble), not a colour change in between.
+* **Price of Progress's damage is one event per player, the players in APNAP order.** CR 120.3 has the damage
+  dealt at once; the engine deals it player by player with nothing in between (no state-based action, no trigger
+  put on the stack: 704.3, 603.3), as `Op::DamageAll` does for permanents (Brotherhood's End, 123.3): the same
+  result.
+* **A copy of Meltdown keeps its X** (707.10: the copy's X is the original's) through the stack item's `x`, as
+  every X spell's copy; no test of the five's needs it.
+
+### 122.5 Tests, the fuzz pool
+
+* **`engine/tests/cards_delver_sb.rs`, 36 tests** (the CR in each name; every ruling of the five cards: `// ruling:`):
+  Consign to Memory (its definition; the targets offered: two triggered abilities and a colourless spell, not a red
+  spell, not a fetch land's ability; no target, no cast; Painter's Servant's red Bauble no target; Pact of
+  Negation's upkeep trigger countered, no payment, no loss; Emrakul's cast trigger countered, no extra turn, and
+  Emrakul itself targeted, not countered; replicated, the copy aimed at a second trigger, both countered; Daze on
+  the original, the copy still counters; ward's trigger countered, Bolt resolves; storm's trigger countered, no
+  copies); Hydroblast (its definition; a red spell countered; a blue spell and a blue creature targeted and
+  untouched, a land offered; Dragon's Rage Channeler and Cori-Steel Cutter destroyed; an Island red under Painter's
+  Servant destroyed; the counter mode kept through Misdirection: only spells offered); Meltdown (its definition,
+  mana value 1 off the stack; X = 1 over both players' artifacts; X = 0 and Walking Ballista; Kaldra Compleat
+  indestructible at X = 7; cast for free, X only 0); Price of Progress (its definition; twice each player's
+  nonbasic lands, basic lands and artifacts not counted; a fetch land cracked in response; Magus of the Moon's
+  Mountains still nonbasic; no damage to a player with basics only; both players dead at once, a draw); Rough //
+  Tumble (one half cast, the characteristics on and off the stack; Inquisition of Kozilek can't take it (mana value
+  8); Rough's and Tumble's damage; flying read now (Dragon's Rage Channeler with and without delirium); Lutri's
+  copy of Rough is Rough; Disruptor Flute naming Rough taxes Rough only, naming Tumble not Rough; Murktide Regent's
+  delve counts it once; Hydroblast counters Rough). `docs/interactions.md` has the matrix.
+* **`support.rs`**: `SUPPORTED_LEGACY` (the legacy IR's 23 cards) and `legacy_support_report`: every one supported
+  in a table of its own and in `CardDb::constructed`. **`constructed.rs`**: the Delver 75 every card supported, the
+  deck rules over the 75, a spec with the sideboards accepted on layout v6, the five in the registry's order; the
+  Sneak and Show 75's sideboard all supported (Consign to Memory last in the registry's order); the constructed
+  card table's test knows the legacy faces (Rough and Tumble, after the cube's tokens and faces and before the
+  face-down characteristics, each with its card's identity). `tools/untested_cards.py`: 569 supported (23 legacy),
+  0 named by no card test.
+* **`FUZZ_POOL=delver_sb`** (`fuzz.rs`, `DELVER_SB_DECK`): the Delver 60 with the five in (Consign to Memory,
+  Hydroblast, Price of Progress, Rough // Tumble three each, Meltdown two) for Daze, Ponder, Unholy Heat, Prismari
+  Charm and three Brainstorms, against the Delver 60 in either seat, the sideboarded mirror, or the Sneak and Show
+  60 (colourless spells: Emrakul, Lotus Petal; Emrakul's cast trigger), by `seed % 4`; constructed play's table;
+  every check of the default mode. With 200 games or more each of the five must have been cast and a Consign to
+  Memory aimed at a triggered ability.
+
+### 122.6 Results
+
+Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/delver-sb-cards`, normal release profile (the desktop shared with
+other sessions' runs and suites).
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): **2,471
+  passed, 0 failed, 22 ignored** (157 binaries: main's 2,434, `cards_delver_sb` 36, `support` 9 with
+  `legacy_support_report`; `az` 50, `constructed` 9).
+* **Behaviour digests unchanged** (`cargo test --release -p engine --test digest -- --ignored --nocapture`, no
+  `DIGEST_WRITE`): full **53839c837bbaf034**, `DIGEST_ENCODING=0` **208c723daced22fe**, main's (3d898d7); every one of
+  the 2,500 games equal to `tests/data/digests.txt`. The cube's table and games are untouched.
+* **The default fuzz, `FUZZ_GAMES=20000`** (four shards of 5,000, `FUZZ_FIRST` 0/5000/10000/15000): no failure;
+  20,000 games (wins 9,804 / 10,074, 122 drawn, none aborted), 31.8 turns and 438 decisions a game, 19,192,377
+  options completed; 1,000 matches (2,538 games, 538 of three, 742 drawn games, none aborted).
+* **`FUZZ_POOL=delver_sb FUZZ_GAMES=20000`** (four shards of 5,000): no failure; 20,000 games (wins 11,351 / 7,817,
+  832 drawn at the turn cap, none aborted), 29.5 turns and 272.5 decisions a game, 8,127,019 options completed; seen
+  on the stack Consign to Memory 9,586 times (aimed at a triggered ability 4,570), Hydroblast 23,667, Meltdown 6,007,
+  Price of Progress 14,791, Rough 5,323, Tumble 19 (six mana: random play rarely casts it; the counters are
+  process-wide, the binary's replay test's games included, 124.4). Every check of the default mode: invariants,
+  clones, `determinize` for both viewers (view, known cards, clouds, the information-set check), every option
+  completed in the game and in the sampled worlds, the encodings finite.
+* **Under the `fuzz` profile** (debug assertions), `FUZZ_POOL=delver_sb`, 1,000 games: no failure (562 / 397, 41
+  drawn).
+* **The other constructed pools play as before** (the legacy cards' definition ids moved: the IR is sorted by name):
+  `FUZZ_POOL=delver FUZZ_GAMES=4000` (four shards of 1,000): wins 1,924 / 1,907, 169 drawn, 2,390,436 options
+  completed, Murktide Regent cast 2,031 times, its trigger 84, Prismari Charm 2,937: 124.4's games exactly.
+  `FUZZ_POOL=doomsday` 5,000: 2,406 / 2,457, 137 drawn, 2,843,120 options; `FUZZ_POOL=sns` 5,000: 2,442 / 2,443, 115
+  drawn, 2,839,330 options: 123.10's exactly.
+* `python -m pytest -q tools/codegen` (generated.rs current): 2 passed. `python tools/rulings_doc.py --check`:
+  current (1,667 rulings, 1,301 distinct, 1,285 class a, every one tested). `python tools/untested_cards.py`: 569
+  supported (23 legacy), 0 named by no card test.
+* mtg-bot (`feature/delver-sb-ir` 22aa7682): `cards roundtrip --pool cube legacy eoe roto` passes (546, 23, 483, 849
+  cards); its export is the committed `data/cards` byte for byte; `tests/test_legacy_delver_sb.py` 20 (both new
+  modules 100% covered) and the legacy pool's tests (175) pass; the full suite (`pytest -n 6 --no-cov`): 48 failed,
+  21,164 passed; 47 of the 48 fail at the branch point 60e76c0a too (run there by name), the 48th
+  (`test_eternity_elevator_admits_at_loader_admits_helper`, lane C's known xdist ordering flake) passes alone and with
+  its module.
+* No docs/shortcuts.md entry; no layout or encoding change (no new decision kind, no new public state); no zero-core
+  change.
+
+### 122.7 Limits and merge points
+
+* **Best-of-three** is `delver-bo3`'s (120): its preset `delver-mirror-bo3` refuses until these five cards are
+  ported, and its DESIGN.md 8 row D3 names "the five sideboard cards: another lane": both are for the merge to update
+  (this branch leaves DESIGN.md alone so as not to conflict with it).
+* **Anointed Peacekeeper's names** (123.5, reported, not changed: the digests) are its cards' front definitions
+  only, so a Peacekeeper facing Rough // Tumble couldn't name "Rough" or "Tumble" (CR 709.4a). No deck of
+  constructed play holds both; Disruptor Flute's list names them (tested).
+* **Merge points**: `legacy_cards.txt` (the five after Magus of the Moon), `lower/effect.rs` (one more
+  `lower_effect_*` in the chain), `program.rs` and `resolve_ext.rs` (`Ext::DelverSb`), `lib.rs` and `lower/mod.rs`,
+  `tests/fuzz.rs` (`PoolMode::DelverSb`, `constructed_mode`, `decks`, the report; `delver-bo3` changes other hunks of
+  the file), `tests/constructed.rs` (the Delver and Sneak and Show tests' sideboards, the card table's legacy faces),
+  `tests/support.rs`, the legacy pool and the schema (re-export at integration if another lane changed it),
+  `data/rulings/*`, `docs/rulings.md` (regenerate).
 
 ## 123. Legacy Sneak and Show: the deck's cards (branch `sneak-show`, mtg-bot `feature/sneak-show-ir`)
 

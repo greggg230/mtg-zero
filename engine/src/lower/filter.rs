@@ -106,6 +106,9 @@ macro_rules! lower_object_predicate {
             E::IsPermanentCard(nodes::IsPermanentCard {}) => Some(Filter::Type(types::PERMANENT)),
             E::HasActivatedAbility(nodes::HasActivatedAbility {}) => Some(Filter::HasActivatedAbility),
             E::CubeWalkersIsColorless(nodes::CubeWalkersIsColorless {}) => Some(Filter::Colorless),
+            // "Colorless spell" (Consign to Memory; CR 105.2c: an object with
+            // no colour, read through the colour-changing effects).
+            E::RotoStackIsColorless(nodes::RotoStackIsColorless {}) => Some(Filter::Colorless),
             // "<Type> spell" (a counterspell's noun phrase: Flusterstorm's
             // "instant or sorcery spell"; ENGINE.md 124.2): the object's card
             // types as they are (CR 205.2a; a spell's are its own).
