@@ -64,6 +64,15 @@ candidate; nothing here feeds training.
 evaluator's pick (ENGINE.md 108) against the value pick and random builds, per pool, with the paired differences
 summarised over the pools.
 
+Cheaper races (docs/ENGINE.md 110, each opt-in; without them every command runs as before): `--batched` (every build's
+and, with `evalpick`, every pool's drivers in one process, their batches answered together by `batch.RowExact`, whose
+answers depend on each row alone: the per-process race with `--eval rowexact`, bit for bit), `--pilot-search mix`
+(self-play's simulation mix instead of `--sims` on every decision; or a lower `--sims`), `--screen-delta 0.05` (a
+screening stage before the final tests, alpha split between them: `RaceState`).
+
+    python -m mtgz.sealed.compare evalpick --evaluator L.pt,S.pt --pool-seed 2026,2027,2028 --race --batched \\
+        --pilot runs/<run>/models/iter_NNNN.pt --pilot-search mix --device cuda --screen-delta 0.05
+
 Needs `mtgz._engine` (tools/build_py.sh).
 """
 import argparse
@@ -250,42 +259,136 @@ def _games():
     return G
 
 
+SEARCHES = ('flat', 'mix')
+EVALS = ('default', 'rowexact')
+
+
+def run_config(ckpt):
+    """The run config of a checkpoint runs/<run>/models/<file>.pt (its config.json), or {}."""
+    d = os.path.dirname(os.path.dirname(os.path.abspath(ckpt)))
+    try:
+        with open(os.path.join(d, 'config.json'), encoding='utf-8') as f:
+            c = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return c if isinstance(c, dict) else {}
+
+
+def mix_settings(ckpt):
+    """Self-play's simulation mix of a checkpoint's run (docs/ENGINE.md 110.3): `sims` on a share `p_full` of
+    the searched decisions, `sims_fast` on the others, `sims_minor` on the game's minor decisions (MTG Zero's
+    mana payments) - the run config's own values, drawn per decision by the driver's playout cap as self-play
+    draws them. A run without a fast budget is refused (it has no mix)."""
+    c = run_config(ckpt)
+    if not c:
+        raise ValueError(f'--pilot-search mix: no run config.json beside {ckpt} (the mix is the run\'s own)')
+    if not c.get('sims_fast'):
+        raise ValueError(f'--pilot-search mix: the run of {ckpt} has no sims_fast (no simulation mix)')
+    return {'sims': int(c['sims']), 'sims_fast': int(c['sims_fast']), 'p_full': float(c['p_full']),
+            'sims_minor': int(c['sims_minor']) if c.get('sims_minor') else None}
+
+
 class Pilot:
     """Who plays both seats: 'random', 'heuristic' (the engine's bots) or a checkpoint path (a
     network seat as zero.h2h plays it: `sims` simulations, `chance_k`, its run's evaluation move rule
-    from runs/<run>/config.json next to models/; evaluated on `device`)."""
+    from runs/<run>/config.json next to models/; evaluated on `device`).
 
-    def __init__(self, spec='heuristic', sims=64, chance_k=0, c_puct=1.0, device='cpu', key='net'):
+    `search` (docs/ENGINE.md 110.3): 'flat' (the default: `sims` on every decision) or 'mix' (self-play's
+    simulation mix from the run's config, `mix_settings`: the driver's own playout cap and minor decisions,
+    an evaluation seat otherwise - no noise, no temperature, nothing recorded, the run's move rule). The value
+    pick (`value_pick`) is always the flat seat's: a value choice searches nothing. `evaluator`: 'default'
+    (zero.infer.NetEvaluator) or 'rowexact' (`batch.RowExact`: each row's answer independent of its batch;
+    `rows` per chunk, CUDA `graphs` (None: on), CPU `workers`). `eval_cache` N > 0 (with 'rowexact' only): each
+    game's evaluation cache (zero-core docs/search.md 3.12) - a row the game already sent is answered from it;
+    with answers that depend on the row alone the same games bit for bit, fewer network rows."""
+
+    def __init__(self, spec='heuristic', sims=64, chance_k=0, c_puct=1.0, device='cpu', key='net', search='flat',
+                 evaluator='default', rows=None, graphs=None, workers=None, eval_cache=0):
+        if search not in SEARCHES:
+            raise ValueError(f'pilot search {search!r}: one of {SEARCHES}')
+        if evaluator not in EVALS:
+            raise ValueError(f'pilot evaluator {evaluator!r}: one of {EVALS}')
+        if eval_cache and evaluator != 'rowexact':
+            raise ValueError(f'eval_cache {eval_cache}: with the rowexact evaluator only (its cached answers are the '
+                             f'answers it would compute again; the default evaluator answers by the batch)')
+        self.eval_cache = int(eval_cache)
         self.spec, self.sims, self.chance_k, self.c_puct, self.device, self.key = spec, sims, chance_k, c_puct, device, key
         self.is_net = spec not in ('random', 'heuristic')
-        self._ev = None
+        self.search, self.evaluator, self.rows, self.graphs = search, evaluator, rows, graphs
+        self.workers = workers
+        self.mix = mix_settings(spec) if self.is_net and search == 'mix' else None
+        self._model = None
+        self._evs = {}
 
     def describe(self):
         if not self.is_net:
             return self.spec
-        return {'checkpoint': self.spec, 'sims': self.sims, 'chance_k': self.chance_k, 'device': self.device}
+        out = {'checkpoint': self.spec, 'sims': self.sims, 'chance_k': self.chance_k, 'device': self.device,
+               'search': 'flat'}
+        if self.mix is not None:
+            out['sims'] = self.mix['sims']
+            out['search'] = dict(self.mix, kind='mix', note="self-play's simulation mix (the run config's)")
+        if self.evaluator != 'default':
+            out['evaluator'] = self._ev('rowexact').describe() if self._model is not None else {
+                'evaluator': self.evaluator, 'rows': self.rows, 'graphs': self.graphs}
+        if self.eval_cache:
+            out['eval_cache'] = self.eval_cache
+        return out
 
-    def seat(self):
+    def seat(self, search=None, cache=True):
+        """The pilot's driver seat; `search` 'flat' forces the flat seat and `cache` False drops the evaluation
+        cache (the value pick's seat: today's)."""
         G = _games()
         if not self.is_net:
             return G.seat_dict(self.spec)
         from zero import h2h
-        s = G.nn_seat(self.key, self.sims, self.c_puct, chance_k=self.chance_k)
+        ec = self.eval_cache if cache else 0
+        if (search or self.search) == 'flat':
+            s = G.nn_seat(self.key, self.sims, self.c_puct, chance_k=self.chance_k, eval_cache=ec)
+        else:
+            m = self.mix
+            # self-play's split as self-play draws it (the driver's playout cap: `sims` on a share p_full,
+            # else sims_fast; sims_minor on minor decisions, which the driver applies to self-play seats
+            # only), and nothing else of self-play: eps 0 (the root's Dirichlet mix leaves the priors as
+            # they are, bit for bit), no temperature (temp_moves 0: every move by the run's move rule),
+            # nothing recorded (record False; the race's drivers record nothing either)
+            s = G.nn_seat(self.key, m['sims'], self.c_puct, selfplay=True, eps=0.0, temp_moves=0,
+                          sims_fast=m['sims_fast'], p_full=m['p_full'], chance_k=self.chance_k,
+                          sims_minor=m['sims_minor'], eval_cache=ec)
+            s['record'] = False
         s.update(h2h.run_rule(self.spec))
         return s
 
-    def evaluators(self):
+    def model(self):
+        if self._model is None:
+            _games()                                # (MTG Zero's game package registered: the encoding guard)
+            from zero.net import load
+            self._model, _ = load(self.spec, self.device, game='mtg_eoe')
+        return self._model
+
+    def _ev(self, kind):
+        if kind not in self._evs:
+            if kind == 'default':
+                from zero.infer import NetEvaluator
+                self._evs[kind] = NetEvaluator(self.model(), self.device)
+            else:
+                from .batch import RowExact
+                self._evs[kind] = RowExact(self.model(), self.device, rows=self.rows, graphs=self.graphs,
+                                           workers=self.workers)
+        return self._evs[kind]
+
+    def evaluators(self, kind=None):
+        """{key: the evaluator} (`kind`: 'default' | 'rowexact', None: the pilot's)."""
         if not self.is_net:
             return {}
-        if self._ev is None:
-            from zero.infer import NetEvaluator
-            from zero.net import load
-            m, _ = load(self.spec, self.device, game='mtg_eoe')
-            self._ev = NetEvaluator(m, self.device)
-        return {self.key: self._ev}
+        return {self.key: self._ev(kind or self.evaluator)}
 
     def same(self, other):
-        return other is None or other is self or (other.spec, other.sims, other.chance_k) == (self.spec, self.sims, self.chance_k)
+        return other is None or other is self or (
+            (other.spec, other.sims, other.chance_k, other.search, other.evaluator, other.rows, other.graphs,
+             other.eval_cache)
+            == (self.spec, self.sims, self.chance_k, self.search, self.evaluator, self.rows, self.graphs,
+                self.eval_cache))
 
 
 # ----------------------------------------------------------------------------- one game's spec
@@ -369,7 +472,7 @@ class Comparison:
     in the block); `threads`: the driver's search threads."""
 
     def __init__(self, cands, field, pilot, seed=0, pairing='full', max_turns=60, block=128, threads=4,
-                 opp_pilot=None, max_steps=20_000, log=None):
+                 opp_pilot=None, max_steps=20_000, log=None, progress=None):
         if pairing not in PAIRINGS:
             raise ValueError(f'pairing {pairing!r}: one of {PAIRINGS}')
         if len(cands) < 2:
@@ -381,6 +484,7 @@ class Comparison:
         self.cands, self.field, self.pilot, self.opp_pilot = cands, field, pilot, opp_pilot
         self.seed, self.pairing, self.max_turns, self.block = int(seed), pairing, int(max_turns), int(block)
         self.threads, self.max_steps, self.log = int(threads), int(max_steps), log
+        self.progress = progress                    # seconds between progress lines of a driver (None: none)
         laid = slots([c['deck'] for c in cands]) if pairing == 'full' else [list(c['deck']) for c in cands]
         self.laid = [dict(c, deck=d) for c, d in zip(cands, laid)]
         self.scores = [dict() for _ in cands]     # candidate -> {k: score}
@@ -421,26 +525,46 @@ class Comparison:
             evs.update(self.opp_pilot.evaluators())
         return evs
 
-    def _run(self, i, b, ks):
-        """Candidate i plays games `ks` (block b, in order: the game ids 0, 1, ... of one driver; the
-        deck under test in seat id % 2) -> {k: row}."""
+    def driver(self, i, b, ks, threads=None, sparse=False):
+        """Candidate i's driver of games `ks` (block b, in order: the game ids 0, 1, ... of one driver; the
+        deck under test in seat id % 2), started with every game queued. `sparse`: sparse network batches
+        (the same features, the same games: zero-core docs/search.md 2.2; the batched races' drivers)."""
         G = _games()
-        from zero.infer import drive
         specs = [json.dumps(self.spec_of(i, k, g % 2), separators=(',', ':')) for g, k in enumerate(ks)]
-        if not specs:
-            return {}
         # (Game mtg_eoe takes only sealed specs, docs/ENGINE.md 105: the driver's own spec is the
         # block's first game's; every game is enqueued with its own.)
+        kw = {'sparse': True} if sparse else {}
         drv = G.Driver('mtg_eoe', self._seats(), spec=specs[0], concurrency=max(1, len(ks)), seed=self.driver_seed(i, b),
-                       threads=self.threads, groups=2 if self._evaluators() else 1, record=False,
-                       max_steps=self.max_steps, rolling=True, queue_only=True)
+                       threads=self.threads if threads is None else threads, groups=2 if self._evaluators() else 1,
+                       record=False, max_steps=self.max_steps, rolling=True, queue_only=True, **kw)
         drv.resume(BIG, 0)
         for k, s in zip(ks, specs):
             drv.enqueue(str(k), s)
+        return drv
+
+    def _run(self, i, b, ks):
+        """Candidate i plays games `ks` (block b: `driver`) -> {k: row}."""
+        from zero.infer import drive
+        if not ks:
+            return {}
+        drv = self.driver(i, b, ks)
         rows = {}
         evs = self._evaluators()
+        t0 = last = time.time()
+
+        def tick(_lb):
+            # a progress line at most every `progress` seconds (a network block can take hours: ENGINE.md 110.5)
+            nonlocal last
+            now = time.time()
+            if now - last >= self.progress:
+                last = now
+                left = drv.in_flight()['games'] + drv.queued
+                self.log('# progress ' + json.dumps({'candidate': self.cands[i]['name'], 'block': b,
+                                                     'games': len(ks) - left, 'of': len(ks),
+                                                     'leaves': sum(int(getattr(e, 'leaves', 0)) for e in evs.values()),
+                                                     'seconds': round(now - t0, 1)}))
         while True:
-            drive(drv, evs)
+            drive(drv, evs, on_batch=tick if self.log and self.progress else None)
             for r in drv.take_results():
                 rows[int(r['tag'])] = r
             if not drv.queued and not drv.in_flight()['games']:
@@ -456,8 +580,7 @@ class Comparison:
         error stops (a panic: an engine bug) is removed for every candidate - its spec kept in `failed`
         for the repro - and the block is played again without it (deterministic: the same failures
         every time)."""
-        import re
-        ks = [k for k in range(b * self.block, (b + 1) * self.block) if k not in {f['k'] for f in self.failed}]
+        ks = self.block_games(b)
         t0 = time.time()
         while True:
             got = {}
@@ -465,18 +588,36 @@ class Comparison:
                 for i in alive:
                     got[i] = self._run(i, b, ks)
             except RuntimeError as e:
-                m = re.search(r'queued setup "(\d+)"', str(e))
-                if not m:
-                    raise
-                k = int(m.group(1))
-                self.failed.append({'k': k, 'candidate': self.cands[i]['name'], 'error': str(e)[:2000],
-                                    'spec': self.spec_of(i, k, ks.index(k) % 2),
-                                    'driver_seed': self.driver_seed(i, b), 'game_id': ks.index(k)})
-                if self.log:
-                    self.log(f'# game {k} failed for {self.cands[i]["name"]} (left out for every candidate): {str(e)[:300]}')
+                k = self.record_failure(i, b, ks, e)
                 ks = [x for x in ks if x != k]
                 continue
             break
+        self.record_block(b, alive, ks, got)
+        self.seconds += time.time() - t0
+        return ks
+
+    def block_games(self, b):
+        """Block b's games, those an engine error removed left out."""
+        gone = {f['k'] for f in self.failed}
+        return [k for k in range(b * self.block, (b + 1) * self.block) if k not in gone]
+
+    def record_failure(self, i, b, ks, e):
+        """Candidate i's driver of block b (games `ks`) stopped with `e`: the game it names (its queued setup)
+        is kept in `failed` with its repro -> its k; an error that names no game is raised again."""
+        import re
+        m = re.search(r'queued setup "(\d+)"', str(e))
+        if not m:
+            raise e
+        k = int(m.group(1))
+        self.failed.append({'k': k, 'candidate': self.cands[i]['name'], 'error': str(e)[:2000],
+                            'spec': self.spec_of(i, k, ks.index(k) % 2),
+                            'driver_seed': self.driver_seed(i, b), 'game_id': ks.index(k)})
+        if self.log:
+            self.log(f'# game {k} failed for {self.cands[i]["name"]} (left out for every candidate): {str(e)[:300]}')
+        return k
+
+    def record_block(self, b, alive, ks, got):
+        """Block b's games `ks` played by the candidates `alive` (`got`: candidate -> {k: result row})."""
         for i in alive:
             for g, k in enumerate(ks):
                 r = got[i][k]
@@ -485,8 +626,6 @@ class Comparison:
         for g, k in enumerate(ks):
             opp = self.field.opponent(k) if self.pairing != 'none' else None
             self.info[k] = {'hero': g % 2, 'chooser': chooser_of(k), 'opp_pool_seed': opp.get('pool_seed') if opp else None}
-        self.seconds += time.time() - t0
-        return ks
 
     def common(self, i, j):
         ks = sorted(set(self.scores[i]) & set(self.scores[j]))
@@ -528,83 +667,209 @@ def play(comp, games):
     return comp
 
 
-def compare(comp, games):
-    """Play `games` and report every candidate's score and each pair's paired difference."""
-    play(comp, games)
+def compare_out(comp):
+    """Every candidate's score and each pair's paired difference (`compare`'s report)."""
     n = len(comp.cands)
     out = {'setup': comp.setup(), 'candidates': [comp.summary(i) for i in range(n)],
            'pairs': {f'{comp.cands[i]["name"]}-{comp.cands[j]["name"]}': comp.stats(i, j)
                      for i in range(n) for j in range(i + 1, n)},
            'failed': [{k: f[k] for k in ('k', 'candidate', 'error')} for f in comp.failed],
-           'seconds': round(comp.seconds, 1)}
+           'seconds': round(comp.seconds, 1), 'game_scores': game_scores(comp)}
     return out
 
 
-def race(comp, delta=0.03, alpha=0.05, beta=0.05, round_games=None, max_games=4096, min_games=128):
+def game_scores(comp):
+    """Every candidate's score in each of its games: {name: [[k, score], ...]} (k ascending)."""
+    return {c['name']: [[k, comp.scores[i][k]] for k in sorted(comp.scores[i])] for i, c in enumerate(comp.cands)}
+
+
+def compare(comp, games):
+    """Play `games` and report every candidate's score and each pair's paired difference."""
+    play(comp, games)
+    return compare_out(comp)
+
+
+class FixedState:
+    """`compare`'s games as one round of every block (the batched driver's form of `play`: docs/ENGINE.md 110)."""
+
+    def __init__(self, comp, games):
+        self.comp, self.games = comp, int(games)
+        self.alive = list(range(len(comp.cands)))
+        self.stop = None
+
+    def stage_name(self):
+        return 'fixed'
+
+    def round_blocks(self):
+        return list(range((self.games + self.comp.block - 1) // self.comp.block))
+
+    def end_round(self):
+        self.stop = 'done'
+        return {'games': len(self.comp.scores[0]), 'seconds': round(self.comp.seconds, 1)}
+
+    def result(self):
+        return compare_out(self.comp)
+
+
+class RaceState:
+    """A race's sequential elimination (`race`), round by round: `round_blocks()` -> the next round's blocks
+    (every survivor plays them), `end_round()` once they are recorded -> the round's row (the tests, the
+    drops, `stop`), `result()` once `stop` is set. The per-process `race` and the batched driver
+    (`batch.run_races`, docs/ENGINE.md 110) run the same state.
+
+    One stage by default: the race of ENGINE.md 104.4. **Screening** (`screen_delta`, docs/ENGINE.md 110.4):
+    the same tests at the looser `screen_delta` first, at `screen_alpha` (default alpha / 2) shared over
+    each build's N - 1 tests, until one build is left (decided), every survivor pair accepted H0 at the
+    screening delta, or `screen_max_games`; then the final stage at `delta` and alpha - screen_alpha (per
+    test: / (N - 1), N the race's builds), on all the games played (data reused: each test is checked at
+    more times, never with fewer games). The best build is dropped with probability at most screen_alpha +
+    (alpha - screen_alpha) = alpha: a union bound over its 2 (N - 1) tests, each crossing its upper bound
+    with probability at most its level when its true difference is >= 0 (Wald; checking at round ends
+    only lowers it). Beta is the final stage's: a build worse by delta survives a final 'equivalent' with
+    probability at most beta per pair; the screening's acceptances of H0 only end the screening."""
+
+    def __init__(self, comp, delta=0.03, alpha=0.05, beta=0.05, round_games=None, max_games=4096, min_games=128,
+                 screen_delta=None, screen_alpha=None, screen_max_games=None, screen_min_games=None):
+        n = len(comp.cands)
+        round_games = int(round_games or comp.block)
+        if round_games % comp.block:
+            raise ValueError(f'round_games {round_games} is not a whole number of blocks ({comp.block})')
+        self.comp, self.n = comp, n
+        self.delta, self.alpha, self.beta = delta, alpha, beta
+        self.round_games, self.max_games, self.min_games = round_games, max_games, min_games
+        stages = []
+        final_alpha = alpha
+        if screen_delta is not None:
+            sa = alpha / 2 if screen_alpha is None else float(screen_alpha)
+            if not 0 < sa < alpha:
+                raise ValueError(f'screen_alpha {sa}: in (0, alpha {alpha}) (the final stage keeps the rest)')
+            if not screen_delta > delta:
+                raise ValueError(f'screen_delta {screen_delta}: looser (larger) than delta {delta}')
+            stages.append({'name': 'screen', 'delta': screen_delta, 'alpha': sa,
+                           'max_games': int(screen_max_games or max_games),
+                           'min_games': int(min_games if screen_min_games is None else screen_min_games)})
+            final_alpha = alpha - sa
+        stages.append({'name': 'final', 'delta': delta, 'alpha': final_alpha, 'max_games': int(max_games),
+                       'min_games': int(min_games)})
+        for s in stages:
+            s['alpha_per_test'] = s['alpha'] / (n - 1)
+            s['lower'], s['upper'] = sprt_bounds(s['alpha_per_test'], beta)
+        self.stages, self.s = stages, 0
+        self.screening = screen_delta is not None
+        self.alive = list(range(n))
+        self.dropped = {}
+        self.rounds = []
+        self.stop = None
+        self.b = 0
+
+    def stage_name(self):
+        return self.stages[self.s]['name']
+
+    def round_blocks(self):
+        k = self.round_games // self.comp.block
+        bs = list(range(self.b, self.b + k))
+        self.b += k
+        return bs
+
+    def end_round(self):
+        comp = self.comp
+        alive = self.alive
+        played = len(comp.scores[alive[0]])
+        while True:
+            st = self.stages[self.s]
+            llr = {}
+            if played >= st['min_games']:
+                for i in alive:
+                    for j in alive:
+                        if i != j:
+                            a, c = comp.common(i, j)
+                            llr[(i, j)] = gsprt_llr([x - y for x, y in zip(a, c)], 0.0, -st['delta'])
+                drop = {}
+                for i in alive:
+                    worst = max(((llr[(i, j)], j) for j in alive if j != i), default=None)
+                    if worst and worst[0] >= st['upper']:
+                        drop[i] = worst[1]
+                for i, j in drop.items():
+                    self.dropped[i] = {'at_games': played, 'by': comp.cands[j]['name'], 'llr': round(llr[(i, j)], 3)}
+                    if self.screening:
+                        self.dropped[i]['stage'] = st['name']
+                alive = [i for i in alive if i not in drop]
+            if st['name'] == 'screen' and len(alive) > 1:
+                equiv = llr and all(llr[(i, j)] <= st['lower'] for i in alive for j in alive if i != j)
+                if equiv or played >= st['max_games']:
+                    st['ended'] = {'games': played, 'reason': 'equivalent' if equiv else 'max_games',
+                                   'survivors': [comp.cands[i]['name'] for i in alive]}
+                    self.s += 1                       # the final stage's tests, on the same games, now
+                    continue
+            break
+        self.alive = alive
+        row = {'games': played, 'alive': [comp.cands[i]['name'] for i in alive],
+               'scores': {comp.cands[i]['name']: comp.summary(i)['score'] for i in alive},
+               'seconds': round(comp.seconds, 1)}
+        if self.screening:
+            row['stage'] = st['name']
+        self.rounds.append(row)
+        if len(alive) == 1:
+            self.stop = 'one left'
+        elif st['name'] == 'final' and llr and all(llr[(i, j)] <= st['lower'] for i in alive for j in alive if i != j):
+            self.stop = 'equivalent'
+        elif played >= self.max_games:
+            self.stop = 'max_games'
+        return row
+
+    def result(self):
+        comp, n, alive = self.comp, self.n, self.alive
+        fin = self.stages[-1]
+        lead = max(alive, key=lambda i: (comp.summary(i)['score'], -i))
+        test = {'name': 'pairwise GSPRT against every survivor (zero.h2h.sprt_llr on the paired differences)',
+                'h0': 'E[D] = 0', 'h1': f'E[D] = -{self.delta}', 'delta': self.delta, 'alpha': self.alpha,
+                'alpha_per_test': round(fin['alpha_per_test'], 5), 'beta': self.beta, 'lower': round(fin['lower'], 3),
+                'upper': round(fin['upper'], 3), 'round_games': self.round_games, 'min_games': self.min_games,
+                'max_games': self.max_games}
+        if self.screening:
+            sc = self.stages[0]
+            test['final_alpha'] = round(fin['alpha'], 5)
+            test['screen'] = {'delta': sc['delta'], 'alpha': round(sc['alpha'], 5),
+                              'alpha_per_test': round(sc['alpha_per_test'], 5), 'lower': round(sc['lower'], 3),
+                              'upper': round(sc['upper'], 3), 'min_games': sc['min_games'], 'max_games': sc['max_games'],
+                              'ended': sc.get('ended')}
+            test['error_rates'] = (f"the best build is dropped with probability <= screen alpha {round(sc['alpha'], 5)} + "
+                                   f"final alpha {round(fin['alpha'], 5)} = {self.alpha} (union bound over its 2 (N - 1) "
+                                   f"tests, each at alpha / (N - 1), N = {n}); beta {self.beta} per pair in the final stage")
+        return {'setup': comp.setup(), 'test': test,
+                'winner': comp.cands[lead]['name'], 'decided': self.stop == 'one left', 'stop': self.stop,
+                'games': len(comp.scores[lead]),
+                'survivors': [comp.cands[i]['name'] for i in alive],
+                'candidates': [dict(comp.summary(i), **({'dropped': self.dropped[i]} if i in self.dropped else {}))
+                               for i in range(n)],
+                'vs_winner': {comp.cands[i]['name']: comp.stats(lead, i) for i in range(n) if i != lead},
+                'rounds': self.rounds,
+                'failed': [{k: f[k] for k in ('k', 'candidate', 'error')} for f in comp.failed],
+                'seconds': round(comp.seconds, 1), 'game_scores': game_scores(comp)}
+
+
+def race(comp, delta=0.03, alpha=0.05, beta=0.05, round_games=None, max_games=4096, min_games=128,
+         screen_delta=None, screen_alpha=None, screen_max_games=None, screen_min_games=None):
     """Sequential elimination (module docs): rounds of `round_games` (default: one block) for every
     survivor; after each round with at least `min_games` played, candidate i is dropped once a
     survivor j's GSPRT of H0: E[D_ij] = 0 against H1: E[D_ij] = -delta accepts H1 at alpha / (N - 1),
     beta. Stops at one survivor, at every survivor pair equivalent (H0 accepted both ways), or at
     `max_games` per survivor. -> the verdict: the winner (or the leader, undecided), each candidate's
-    games, score and when it was dropped, and the paired difference of each against the winner."""
-    n = len(comp.cands)
-    round_games = int(round_games or comp.block)
-    if round_games % comp.block:
-        raise ValueError(f'round_games {round_games} is not a whole number of blocks ({comp.block})')
-    a1 = alpha / (n - 1)
-    lo, hi = sprt_bounds(a1, beta)
-    alive = list(range(n))
-    dropped = {}
-    rounds = []
-    stop = None
-    b = 0
-    while stop is None:
-        for _ in range(round_games // comp.block):
-            comp.play_block(b, alive)
-            b += 1
-        played = len(comp.scores[alive[0]])
-        llr = {}
-        if played >= min_games:
-            for i in alive:
-                for j in alive:
-                    if i != j:
-                        a, c = comp.common(i, j)
-                        llr[(i, j)] = gsprt_llr([x - y for x, y in zip(a, c)], 0.0, -delta)
-            drop = {}
-            for i in alive:
-                worst = max(((llr[(i, j)], j) for j in alive if j != i), default=None)
-                if worst and worst[0] >= hi:
-                    drop[i] = worst[1]
-            for i, j in drop.items():
-                dropped[i] = {'at_games': played, 'by': comp.cands[j]['name'], 'llr': round(llr[(i, j)], 3)}
-            alive = [i for i in alive if i not in drop]
-        row = {'games': played, 'alive': [comp.cands[i]['name'] for i in alive],
-               'scores': {comp.cands[i]['name']: comp.summary(i)['score'] for i in alive},
-               'seconds': round(comp.seconds, 1)}
-        rounds.append(row)
+    games, score and when it was dropped, and the paired difference of each against the winner.
+    `screen_delta`: a screening stage first (`RaceState`, docs/ENGINE.md 110.4)."""
+    st = RaceState(comp, delta, alpha, beta, round_games, max_games, min_games, screen_delta, screen_alpha,
+                   screen_max_games, screen_min_games)
+    while st.stop is None:
+        for b in st.round_blocks():
+            comp.play_block(b, st.alive)
+            if comp.log:
+                comp.log('# block ' + json.dumps({'block': b, 'alive': len(st.alive),
+                                                  'games': len(comp.scores[st.alive[0]]),
+                                                  'seconds': round(comp.seconds, 1)}))
+        row = st.end_round()
         if comp.log:
             comp.log('# round ' + json.dumps(row))
-        if len(alive) == 1:
-            stop = 'one left'
-        elif llr and all(llr[(i, j)] <= lo for i in alive for j in alive if i != j):
-            stop = 'equivalent'
-        elif played >= max_games:
-            stop = 'max_games'
-    lead = max(alive, key=lambda i: (comp.summary(i)['score'], -i))
-    out = {'setup': comp.setup(),
-           'test': {'name': 'pairwise GSPRT against every survivor (zero.h2h.sprt_llr on the paired differences)',
-                    'h0': 'E[D] = 0', 'h1': f'E[D] = -{delta}', 'delta': delta, 'alpha': alpha,
-                    'alpha_per_test': round(a1, 5), 'beta': beta, 'lower': round(lo, 3), 'upper': round(hi, 3),
-                    'round_games': round_games, 'min_games': min_games, 'max_games': max_games},
-           'winner': comp.cands[lead]['name'], 'decided': stop == 'one left', 'stop': stop,
-           'games': len(comp.scores[lead]),
-           'survivors': [comp.cands[i]['name'] for i in alive],
-           'candidates': [dict(comp.summary(i), **({'dropped': dropped[i]} if i in dropped else {})) for i in range(n)],
-           'vs_winner': {comp.cands[i]['name']: comp.stats(lead, i) for i in range(n) if i != lead},
-           'rounds': rounds,
-           'failed': [{k: f[k] for k in ('k', 'candidate', 'error')} for f in comp.failed],
-           'seconds': round(comp.seconds, 1)}
-    return out
+    return st.result()
 
 
 # ----------------------------------------------------------------------------- builds and the yardstick
@@ -637,11 +902,13 @@ def value_pick(pool_names, pilot, k=32, worlds=8, seed=0, collation='arena', max
     cands = R.candidates(spec, seed)[0]['candidates']
     if not pilot.is_net:
         return 0, cands
-    s0 = dict(pilot.seat(), value_choice_worlds=int(worlds), value_choice_temp=0.0)
+    # (the flat seat and the usual evaluator whatever the race's pilot search and evaluator: a value choice
+    # searches nothing, and every pilot setting picks the same build - docs/ENGINE.md 110.3)
+    s0 = dict(pilot.seat('flat', cache=False), value_choice_worlds=int(worlds), value_choice_temp=0.0)
     drv = G.Driver('mtg_eoe', [[s0, G.seat_dict('random')]], spec=json.dumps(spec), concurrency=1, seed=int(seed),
                    max_steps=1, move_log=1, threads=1)
     from zero.infer import drive
-    drive(drv, pilot.evaluators())
+    drive(drv, pilot.evaluators('default'))
     res = drv.take_results()
     if len(res) != 1 or not res[0].get('moves'):
         raise RuntimeError(f'value_pick: no deck choice was played ({res})')
@@ -737,11 +1004,25 @@ def evalpick_summary(paired):
 
 # ----------------------------------------------------------------------------- the command line
 
+def _eval_kind(a):
+    """The pilots' evaluator: --eval, else 'rowexact' with --batched and 'default' without (ENGINE.md 110.2)."""
+    e = getattr(a, 'eval', None) or ('rowexact' if getattr(a, 'batched', False) else 'default')
+    if e == 'batchwise' and not getattr(a, 'batched', False):
+        raise SystemExit('--eval batchwise is a mode of --batched (each driver\'s batch alone: the per-process answers)')
+    return 'default' if e == 'batchwise' else e
+
+
 def _pilot(a, prefix=''):
-    spec = getattr(a, f'{prefix}pilot')
-    if spec is None:
-        return None
-    return Pilot(spec, sims=a.sims, chance_k=a.chance_k, device=a.device, key=f'{prefix}net' if prefix else 'net')
+    """The pilot of --pilot (prefix 'opp_': --opp-pilot), made once per command (every pool and comparison of it
+    shares its network and evaluators)."""
+    cache = a.__dict__.setdefault('_pilots', {})
+    if prefix not in cache:
+        spec = getattr(a, f'{prefix}pilot')
+        cache[prefix] = None if spec is None else Pilot(
+            spec, sims=a.sims, chance_k=a.chance_k, device=a.device, key=f'{prefix}net' if prefix else 'net',
+            search=getattr(a, 'pilot_search', 'flat'), evaluator=_eval_kind(a), rows=getattr(a, 'eval_rows', None),
+            workers=getattr(a, 'eval_workers', None), eval_cache=getattr(a, 'eval_cache', 0))
+    return cache[prefix]
 
 
 def _field(a):
@@ -751,10 +1032,37 @@ def _field(a):
     return Field(seed=a.field_seed, collation=a.collation, builder=json.loads(a.field_builder) if a.field_builder else None)
 
 
+def _log(a):
+    return (lambda s: print(s, file=sys.stderr, flush=True)) if not a.quiet else None
+
+
 def _comparison(a, cands):
-    log = (lambda s: print(s, file=sys.stderr, flush=True)) if not a.quiet else None
     return Comparison(cands, _field(a), _pilot(a), seed=a.seed, pairing=a.pairing, max_turns=a.max_turns,
-                      block=a.block, threads=a.threads, opp_pilot=_pilot(a, 'opp_'), log=log)
+                      block=a.block, threads=a.threads, opp_pilot=_pilot(a, 'opp_'), log=_log(a),
+                      progress=a.progress)
+
+
+def _state(a, comp):
+    """The race (`RaceState`) or the fixed number of games (`FixedState`) the command asks for."""
+    if getattr(a, 'race', False):
+        return RaceState(comp, a.delta, a.alpha, a.beta, round_games=a.games, max_games=a.max_games,
+                         min_games=a.min_games, screen_delta=a.screen_delta, screen_alpha=a.screen_alpha,
+                         screen_max_games=a.screen_max_games, screen_min_games=a.screen_min_games)
+    return FixedState(comp, a.games)
+
+
+def _batched(a, comps, on_done=None):
+    """Every comparison of `comps` [(label, comp)] at once in one batched driver (docs/ENGINE.md 110) -> ({label:
+    its result}, the batched run's statistics)."""
+    from . import batch as BT
+    evs = {}
+    for _, comp in comps:
+        evs.update(comp._evaluators())
+    mode = 'each' if getattr(a, 'eval', None) == 'batchwise' else 'merged'
+    outs, st = BT.run_races([(label, comp, _state(a, comp)) for label, comp in comps], evs, mode=mode,
+                            threads=a.driver_threads, log=_log(a), progress=a.progress, on_done=on_done)
+    st['evaluator'] = 'batchwise' if mode == 'each' else 'rowexact'
+    return outs, st
 
 
 def _common(p):
@@ -774,6 +1082,31 @@ def _common(p):
     p.add_argument('--threads', type=int, default=4, help='driver threads')
     p.add_argument('--json', default=None, help='also write the result to this file')
     p.add_argument('--quiet', action='store_true')
+    # docs/ENGINE.md 110: the batched driver, the pilot's search, the evaluator, the machine
+    p.add_argument('--batched', action='store_true',
+                   help='every build (evalpick: every pool) in one process, its drivers\' batches answered together '
+                        '(ENGINE.md 110; default: one driver at a time, as before)')
+    p.add_argument('--eval', default=None, choices=['default', 'rowexact', 'batchwise'],
+                   help="a network pilot's evaluator: 'default' (zero.infer.NetEvaluator; the default without "
+                        "--batched), 'rowexact' (each row's answer independent of its batch; the default with "
+                        "--batched), 'batchwise' (--batched only: each driver's batch alone, the per-process answers)")
+    p.add_argument('--eval-rows', type=int, default=None, help='rowexact: rows per evaluated chunk (the answers '
+                                                               'depend on it; default 512 on CUDA, 16 on the CPU)')
+    p.add_argument('--eval-workers', type=int, default=None,
+                   help='rowexact on the CPU: chunks evaluated side by side on this many threads (each kernel on one '
+                        'thread: the answers are the same for any number; default min(8, CPUs))')
+    p.add_argument('--eval-cache', type=int, default=0,
+                   help='with --eval rowexact (the --batched default): each game an evaluation cache of this many '
+                        'answers (zero-core docs/search.md 3.12): the same games bit for bit, fewer network rows '
+                        '(default 0: none)')
+    p.add_argument('--pilot-search', default='flat', choices=list(SEARCHES),
+                   help="'flat' (--sims on every decision, the default) or 'mix' (self-play's simulation mix: the "
+                        "pilot run's sims / sims_fast / p_full / sims_minor; ENGINE.md 110.3)")
+    p.add_argument('--driver-threads', type=int, default=1, help='--batched: search threads of each driver')
+    p.add_argument('--progress', type=float, default=60.0, help='seconds between progress lines (0: none)')
+    p.add_argument('--cpus', type=int, default=None, help='run on this many logical CPUs (process affinity)')
+    p.add_argument('--torch-threads', type=int, default=None,
+                   help='torch\'s intra-op threads (the default evaluator; rowexact on the CPU runs each kernel on one)')
 
 
 def _race_args(p):
@@ -784,16 +1117,41 @@ def _race_args(p):
     p.add_argument('--beta', type=float, default=0.05)
     p.add_argument('--max-games', type=int, default=8192)
     p.add_argument('--min-games', type=int, default=128)
+    p.add_argument('--screen-delta', type=float, default=None,
+                   help='race: a screening stage at this looser delta first (e.g. 0.05; ENGINE.md 110.4; default none)')
+    p.add_argument('--screen-alpha', type=float, default=None,
+                   help='race: the screening stage\'s share of alpha (default alpha / 2; the final stage the rest)')
+    p.add_argument('--screen-max-games', type=int, default=None,
+                   help='race: games per build after which the screening ends (default --max-games)')
+    p.add_argument('--screen-min-games', type=int, default=None,
+                   help='race: games per build before the screening stage tests (default --min-games)')
 
 
 def _run(a, cands, with_comp=False):
     comp = _comparison(a, cands)
-    if getattr(a, 'race', False):
-        out = race(comp, a.delta, a.alpha, a.beta, round_games=a.games, max_games=a.max_games, min_games=a.min_games)
+    if getattr(a, 'batched', False):
+        outs, st = _batched(a, [('0', comp)])
+        out = outs['0']
+        out['batched'] = st
+    elif getattr(a, 'race', False):
+        out = race(comp, a.delta, a.alpha, a.beta, round_games=a.games, max_games=a.max_games, min_games=a.min_games,
+                   screen_delta=a.screen_delta, screen_alpha=a.screen_alpha, screen_max_games=a.screen_max_games,
+                   screen_min_games=a.screen_min_games)
     else:
         out = compare(comp, a.games)
     out['decks'] = [{k: c[k] for k in c if k in ('name', 'colors', 'lands')} for c in cands]
     return (out, comp) if with_comp else out
+
+
+def _machine(a):
+    """--cpus, --torch-threads; stderr line-buffered (progress in a log as it happens)."""
+    from . import batch as BT
+    BT.line_buffered()
+    if getattr(a, 'cpus', None):
+        BT.limit_cpus(a.cpus)
+    if getattr(a, 'torch_threads', None):
+        import torch
+        torch.set_num_threads(int(a.torch_threads))
 
 
 def main(argv=None):
@@ -841,6 +1199,8 @@ def main(argv=None):
     pb.add_argument('--builder', default=None)
     pb.add_argument('--out', required=True)
     a = ap.parse_args(argv)
+    if a.cmd != 'builds':
+        _machine(a)
     if a.cmd == 'builds':
         p = R.pool(a.pool_seed, collation=a.collation)
         os.makedirs(a.out, exist_ok=True)
@@ -870,20 +1230,54 @@ def main(argv=None):
             label = e.kind if e.kind not in [x[0] for x in evs] else os.path.splitext(os.path.basename(path))[0]
             evs.append((label, e))
         per = []
-        for ps in (int(x) for x in str(a.pool_seed).split(',')):
-            p = R.pool(ps, collation=a.collation)
-            info, cands = evalpick_candidates(p['cards'], evs, _pilot(a), a.k, a.worlds, ps, a.vs, a.collation)
-            o, comp = _run(a, cands, with_comp=True)
+        seeds = [int(x) for x in str(a.pool_seed).split(',')]
+        if len(set(seeds)) != len(seeds):
+            raise SystemExit(f'--pool-seed {a.pool_seed}: a pool named twice')
+
+        def finish(ps, info, o, comp):
             o['evalpick'] = dict(info, pool_seed=ps, k=a.k, worlds=a.worlds, evaluators=a.evaluator.split(','),
                                  pilot=_pilot(a).describe(), paired=evalpick_paired(comp, info['names']))
-            per.append(o)
             if not a.quiet:
                 print('# pool ' + json.dumps({'pool_seed': ps, 'picks': info['picks'],
                                               'vs_random': {k: {n: s['diff'] for n, s in v['vs_random'].items()}
                                                             for k, v in o['evalpick']['paired'].items()}}),
                       file=sys.stderr, flush=True)
+            return o
+        if a.batched:
+            # every pool's candidates first (the evaluators' and the value pick: one decision each), then every
+            # pool's race at once in one batched driver (docs/ENGINE.md 110)
+            pools = {}
+            for ps in seeds:
+                p = R.pool(ps, collation=a.collation)
+                info, cands = evalpick_candidates(p['cards'], evs, _pilot(a), a.k, a.worlds, ps, a.vs, a.collation)
+                pools[str(ps)] = (ps, info, cands, _comparison(a, cands))
+                if not a.quiet:
+                    print('# candidates ' + json.dumps({'pool_seed': ps, 'picks': info['picks'],
+                                                        'builds': [c['name'] for c in cands]}), file=sys.stderr,
+                          flush=True)
+            done = {}
+
+            def on_done(label, o):
+                ps, info, cands, comp = pools[label]
+                o['decks'] = [{k: c[k] for k in c if k in ('name', 'colors', 'lands')} for c in cands]
+                done[label] = finish(ps, info, o, comp)
+            _, st = _batched(a, [(label, v[3]) for label, v in pools.items()], on_done=on_done)
+            per = [done[str(ps)] for ps in seeds]
+        else:
+            # every pool's candidates before any race, as the batched path (a value pick runs on the usual evaluator
+            # at the process's torch threads; the row-exact evaluator, made for the first race, sets them to 1)
+            picked = []
+            for ps in seeds:
+                p = R.pool(ps, collation=a.collation)
+                picked.append((ps,) + evalpick_candidates(p['cards'], evs, _pilot(a), a.k, a.worlds, ps, a.vs,
+                                                          a.collation))
+            for ps, info, cands in picked:
+                o, comp = _run(a, cands, with_comp=True)
+                per.append(finish(ps, info, o, comp))
         out = per[0] if len(per) == 1 else {'pools': per}
         out['summary'] = evalpick_summary([o['evalpick']['paired'] for o in per])
+        if a.batched:
+            out['batched'] = st
         if a.json:
             with open(a.json, 'w', encoding='utf-8') as f:
                 json.dump(out, f, indent=1)
