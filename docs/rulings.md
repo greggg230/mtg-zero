@@ -3534,7 +3534,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `0dfaac8c` | a | other | Pact of Negation is blue by its colour indicator; colour-changing effects still apply (text-changing effects: none in this engine) | `cards_doomsday_a::pact_of_negation_is_a_blue_zero_mana_instant`; `cards_doomsday_a::pact_is_a_blue_card_force_of_will_can_exile` |
+| `0dfaac8c` | a | other | Pact of Negation is blue by its colour indicator; colour-changing effects still apply (text-changing effects: none in this engine) | `cards_doomsday_a::pact_of_negation_is_a_blue_zero_mana_instant`; `cards_doomsday_a::pact_is_a_blue_card_force_of_will_can_exile`; `cards_doomsday_a::pyroblast_counters_pact_because_it_is_blue` |
 | `4c4f55a3` | a | stack | Pact of Negation countered or not resolving (an illegal target) creates no delayed trigger | `cards_doomsday_a::pact_whose_target_is_gone_doesnt_resolve_and_makes_no_trigger`; `cards_doomsday_a::pact_countered_by_daze_makes_no_trigger_unless_daze_is_paid`; `cards_doomsday_a::pact_countered_by_force_of_will_makes_no_trigger` |
 | `3e504e2e` | a | stack | Pact of Negation resolving with a legal target that can't be countered still creates its trigger | `cards_doomsday_a::pact_that_resolves_but_cant_counter_still_makes_its_trigger` |
 

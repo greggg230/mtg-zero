@@ -1372,3 +1372,33 @@ fn pyroblast_counters_pact_because_it_is_blue() {
     quiet_until(&mut g, |g| pact_asks(g) || (g.turn().active == 0 && g.turn().step == Step::Draw));
     assert_ne!(g.kind(), Some(DecisionKind::YesNo), "no trigger\n{}", log(&g));
 }
+
+#[test]
+fn doomsday_the_searchers_worlds_agree_on_what_it_knows() {
+    // P0 doesn't know its library's order: two of its worlds deal it
+    // differently. The same picks must leave the same view (which places it
+    // knows, and what is there): the found cards wait on top in definition
+    // order until P0 orders them (the fuzz's information-set check).
+    let mut g = dd_scen(LIB10, &["Force of Will"]).start();
+    cast_doomsday(&mut g);
+    let fow = g.card(0, "Force of Will", Zone::Graveyard);
+    // (The graveyard's one card: then the library.)
+    g.choose(Choice::Card(fow));
+    assert_eq!(g.kind(), Some(DecisionKind::SearchLibrary));
+    let mut picks: Vec<u16> = ["Brainstorm", "Ponder", ORACLE, "Island"].map(def).to_vec();
+    picks.sort();
+    let mut views = BTreeSet::new();
+    let mut orders = BTreeSet::new();
+    for s in 0..12 {
+        let mut d = g.clone();
+        d.determinize(0, &mut Rng::new(s));
+        orders.insert(defs_in(&d, &d.player(0).library.clone()));
+        for &p in &picks {
+            d.choose(Choice::Def(p));
+        }
+        assert_eq!(d.kind(), Some(DecisionKind::PutOnTop));
+        views.insert(d.view_of(0));
+    }
+    assert!(orders.len() > 1, "P0's worlds deal its library differently");
+    assert_eq!(views.len(), 1, "the same picks, the same view in every world of P0");
+}
