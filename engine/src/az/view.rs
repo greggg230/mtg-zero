@@ -546,6 +546,11 @@ impl MtgAz {
             "wins": self.m.wins,
             "over": self.match_over(),
         });
+        // (ENGINE.md 130: game 1 was not played - its result drawn; the board shown before game 2 is that
+        // unplayed game's setup)
+        if self.m.post_board {
+            v["match"]["post_board"] = json!(true);
+        }
         if let Some(c) = &self.m.choice {
             // (the deck choice, ENGINE.md 107.2: the game has not begun)
             v["decision"] = json!({

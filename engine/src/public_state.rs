@@ -357,6 +357,8 @@ pub fn fields() -> Vec<Field> {
         constructed_bo3: Derived "a constructed best-of-three (ENGINE.md 120): the match's format setting, the same in every world",
         game_episodes: Derived "the spec's one episode per game (ENGINE.md 121): a setting of the match, the same in every world",
         between: Derived "one episode per game (ENGINE.md 121): a game ended, the match did not - a terminal state, never encoded for a decision",
+        keep: Hidden "the seats that keep their decks at every sideboarding (ENGINE.md 130, an evaluation yardstick): a seat's own policy, off in the other player's worlds",
+        post_board: Derived "game 1 was not played (ENGINE.md 130, start_game 2): a setting of the match, the same in every world, never encoded - a real game 2 encodes as a synthetic one",
     });
     v
 }
@@ -431,6 +433,13 @@ fn stack_spells(g: &Game) -> Vec<(usize, CardIdx)> {
 
 fn player(r: &mut Rng) -> PlayerId {
     r.below(2) as PlayerId
+}
+
+/// The first game played whose chooser and starter the match block encodes: game 1, but in a
+/// constructed best-of-three game 2 (ENGINE.md 130: game 1's are not encoded); None before it.
+fn encoded_game(a: &MtgAz) -> Option<usize> {
+    let i = a.m.constructed_bo3 as usize;
+    (a.m.results[i] != 0).then_some(i)
 }
 
 /// A card moves from where it is to `to` by hand (no events, no triggers):
@@ -1669,17 +1678,23 @@ pub fn perturbations() -> Vec<Perturbation> {
             Some(format!("game {}: {}", i + 1, a.m.results[i]))
         }),
         p!(rare "another chose who played first", "MatchState.choosers", |a, _| {
-            // (Of a game played: the current game's is the game's chooser.)
-            if a.m.results[0] == 0 {
+            // (Of a game played: the current game's is the game's chooser. A constructed
+            // best-of-three's game 1's is not encoded, ENGINE.md 130: its game 2's, once played.)
+            let i = encoded_game(a)?;
+            a.m.choosers[i] = opp(a.m.choosers[i]);
+            Some(format!("game {}", i + 1))
+        }),
+        p!(rare "another played first", "MatchState.starters", |a, _| {
+            let i = encoded_game(a)?;
+            a.m.starters[i] = opp(a.m.starters[i]);
+            Some(format!("game {}", i + 1))
+        }),
+        p!(rare "a constructed best-of-three's game 1 had another chooser and starter", "MatchState.choosers", |a, _| {
+            // (ENGINE.md 130: not encoded, a limit by design)
+            if !a.m.constructed_bo3 || a.m.results[0] == 0 {
                 return None;
             }
             a.m.choosers[0] = opp(a.m.choosers[0]);
-            Some("game 1".into())
-        }),
-        p!(rare "another played first", "MatchState.starters", |a, _| {
-            if a.m.results[0] == 0 {
-                return None;
-            }
             a.m.starters[0] = opp(a.m.starters[0]);
             Some("game 1".into())
         }),
@@ -1783,6 +1798,7 @@ pub fn limits() -> Vec<Limit> {
         l("two graveyard cards swap places", Design, "graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2); no action id depends on the order: a graveyard-card choice or target is a list id whose token is its card, the graveyards in order in the list block while it is pending (ENGINE.md 65.10), and Priority's casts and plays from the graveyard are one option, GRAVEYARD + 0, then that list's choice (ENGINE.md 100.5)"),
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
+        l("a constructed best-of-three's game 1 had another chooser and starter", Design, "with both 75s public, game 1 played with the registered mains and each game labelled by its own result, who chose and who played first in game 1 tells nothing about the decks or the game being played; a match that starts at game 2 (start_game 2) has none, and a real game 2 must encode as a synthetic one (ENGINE.md 130): the match block leaves them out; game 1's result is encoded (the score)"),
         l(CHOSEN_TYPE_MANA_GAP, NextLayout, "layout v6 has no float for a pool's mana restricted to creature spells of a chosen type (Cavern of Souls, CR 106.6): any number of types can float at once (a Cavern that enters again chooses again, CR 400.7, 614.12; the mana stays until the step ends, 106.4), past v6's spares; layout v7's block encodes it (branch doomsday-b-v7). Until then every network-driven game (self-play, evaluation, h2h: the engine's MtgSpec) whose decks or sideboards hold such a card is refused with \"Cavern of Souls' floating mana needs layout v7 (ENGINE.md 124.2)\" (tests/az.rs, cavern_decks_are_refused_to_networks_on_layout_v6), so no network sees a position with it; rules tests and the fuzzer play it"),
         l(CHOSEN_NAME_GAP, NextLayout, "layout v6 has no float for the card name chosen as a permanent entered (`Mark::ChosenName`, CR 201.3, 614.12: any card name, about 10 bits; perm floats 142-143 are the only spares outside the v5 projection); layout v7's chosen-name column encodes it (ENGINE.md 125). Anointed Peacekeeper's name in the cube was never encoded (the gap lane A's review found, G1, older than this entry); Disruptor Flute's games are refused to networks until v7: every network-driven game (self-play, evaluation, h2h: the engine's MtgSpec) whose decks or sideboards hold a card choosing a card name the plain way is refused with \"Disruptor Flute's chosen name needs layout v7 (ENGINE.md 123)\" (tests/az.rs, flute_decks_are_refused_to_networks_on_layout_v6), so no network sees a position with it; rules tests and the fuzzer play it"),
         l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),
