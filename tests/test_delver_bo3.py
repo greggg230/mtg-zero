@@ -1,6 +1,6 @@
 """The Delver mirror's constructed best-of-three (docs/ENGINE.md 120) through the bindings: the presets
-`delver-mirror-bo3` (the full 75, refused while five of its sideboard cards are unsupported, naming them) and
-`delver-bo3-smoke` (the main and the 75's supported sideboard cards), the deck target and its tilt declared as
+`delver-mirror-bo3` and `delver-bo3-smoke` (both the full 75 - its five sideboard cards outside the cube are
+supported, ENGINE.md 122 - and one episode per game, ENGINE.md 121; 129.2), the deck target and its tilt declared as
 the EoE presets do, a match through the engine module (sideboarding between games, determinize keeping the
 decider's view, the deck-tilted deal in a later game), and the heuristic yardstick against random in matches."""
 import json
@@ -13,17 +13,21 @@ from mtgz.az import games as G
 from mtgz.az.evaldecks import eval_spec
 from mtgz.az.infer import drive
 
-UNSUPPORTED = ('Consign to Memory', 'Hydroblast', 'Meltdown', 'Price of Progress', 'Rough // Tumble')
+# the Delver 75's sideboard cards outside the cube (docs/ENGINE.md 122)
+OUTSIDE_THE_CUBE = ('Consign to Memory', 'Hydroblast', 'Meltdown', 'Price of Progress', 'Rough // Tumble')
 
 
 def test_the_bo3_presets():
     import mtgz.az as A
     full, smoke = A.PRESETS['delver-mirror-bo3'], A.PRESETS['delver-bo3-smoke']
     d = decklists.load(decklists.IZZET_DELVER)
-    for p, base, side in ((full, A.PRESETS['delver-mirror'], decklists.names(d['sideboard'])),
-                          (smoke, A.PRESETS['delver-smoke'], decklists.names(decklists.DELVER_SMOKE_SIDEBOARD))):
+    for p, base in ((full, A.PRESETS['delver-mirror']), (smoke, A.PRESETS['delver-smoke'])):
+        side = decklists.names(d['sideboard'])
         s = json.loads(p['spec'])
         assert s['constructed'] is True and s['format'] == 'bo3' and s['max_turns'] == 60 and s['mulligans'] is True
+        # one episode per game (docs/ENGINE.md 121: each game's rows labelled by its own outcome), in the
+        # evaluation spec too
+        assert s['game_episodes'] is True and json.loads(p['eval_spec'])['game_episodes'] is True
         assert s['decks']['p0'] == s['decks']['p1'] == decklists.names(d['main'])
         assert s['decks']['p0_sideboard'] == s['decks']['p1_sideboard'] == side
         # the decks are fixed: evaluation plays the same matches
@@ -36,20 +40,26 @@ def test_the_bo3_presets():
             if k not in ('spec', 'eval_spec', 'aux_deck_w', 'selfplay_belief_tilts', 'eval_belief_tilts', 'max_steps'):
                 assert p[k] == v, k
     assert len(json.loads(full['spec'])['decks']['p0_sideboard']) == 15
-    assert len(json.loads(smoke['spec'])['decks']['p0_sideboard']) == 8
+    assert smoke['spec'] == full['spec']
     with pytest.raises(ValueError):
         decklists.mirror_bo3_spec(sideboard=[[4, 'Pyroblast']])
+    # without the key: one episode per match, as before
+    assert 'game_episodes' not in json.loads(decklists.mirror_bo3_spec())
 
 
-def test_the_full_preset_refuses_naming_the_unsupported_cards():
+def test_the_full_preset_builds_with_the_full_75():
     import mtgz.az as A
     E = G.engine()
-    with pytest.raises(Exception) as e:
-        E.Game('mtg', A.PRESETS['delver-mirror-bo3']['spec'], 2, 1)
-    for c in UNSUPPORTED:
-        assert c in str(e.value), (c, str(e.value))
-    # every card of the smoke's sideboard is supported (its spec plays)
-    E.Game('mtg', A.PRESETS['delver-bo3-smoke']['spec'], 2, 1)
+    g = E.Game('mtg', A.PRESETS['delver-mirror-bo3']['spec'], 2, 1)
+    assert g.chained
+    side = json.loads(A.PRESETS['delver-mirror-bo3']['spec'])['decks']['p0_sideboard']
+    for c in OUTSIDE_THE_CUBE:
+        assert c in side, c
+    # a card the engine does not support is still refused by name (no silent drop, no substitution)
+    bad = json.loads(A.PRESETS['delver-mirror-bo3']['spec'])
+    bad['decks']['p1_sideboard'] = bad['decks']['p1_sideboard'][:-1] + ['Not A Real Card']
+    with pytest.raises(Exception, match='Not A Real Card'):
+        E.Game('mtg', json.dumps(bad), 2, 1)
 
 
 def test_a_constructed_match_through_the_bindings():
@@ -60,7 +70,15 @@ def test_a_constructed_match_through_the_bindings():
     g = E.Game('mtg', spec, 2, 7)
     steps, checked, later = 0, 0, 0
     pred = np.full(2048, 1.0 / 1024, dtype=np.float32)
-    while not g.over:
+    res = None
+    while True:
+        if g.to_move is None:
+            # a game's end ends its episode (docs/ENGINE.md 121): the next one begins with the sideboarding
+            g, res = g.next_episode(conceded=None)
+            if res is not None:
+                break
+            later += 1
+            continue
         legal = g.legal()
         p = g.to_move
         x = np.asarray(g.encode(p))
@@ -80,7 +98,7 @@ def test_a_constructed_match_through_the_bindings():
         g.step(int(legal[rng.integers(len(legal))]))
         steps += 1
         assert steps < 60000
-    assert abs(sum(g.result()) - 1) < 1e-6 and checked > 10
+    assert abs(sum(res[:2]) - 1) < 1e-6 and checked > 10 and later >= 1
 
 
 def test_the_yardstick_beats_random_in_bo3_matches():

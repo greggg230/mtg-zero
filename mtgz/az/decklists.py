@@ -51,17 +51,16 @@ def names(entries):
     return out
 
 
-# The sideboard cards of the Delver 75 the engine supports (docs/ENGINE.md 120): the 75 less the five
-# not ported yet (Consign to Memory, Hydroblast, Meltdown, Price of Progress, Rough // Tumble; ENGINE.md
-# 54.8). The smoke preset's and the fuzz's sideboard until they are ported; the full preset refuses meanwhile.
-DELVER_SMOKE_SIDEBOARD = [[3, 'Force of Negation'], [1, 'Karakas'], [3, 'Pyroblast'], [1, 'Unholy Heat']]
+# (The smoke's sideboard of the 75's then-supported cards, DELVER_SMOKE_SIDEBOARD, is gone: since its five
+# sideboard cards outside the cube are supported (docs/ENGINE.md 122) the smoke plays the full 75 too, 129.2.)
 
 
-def mirror_bo3_spec(name=IZZET_DELVER, sideboard=None, max_turns=60, mulligans=True):
+def mirror_bo3_spec(name=IZZET_DELVER, sideboard=None, max_turns=60, mulligans=True, game_episodes=False):
     """The `mtg` spec of a constructed best-of-three mirror (docs/ENGINE.md 120): both seats the
     decklist's main (exactly 60) and `sideboard` ([[count, name], ...]; None: the decklist's own 15),
-    `"format": "bo3"` (JSON). The engine refuses a spec holding a card it does not support, naming every
-    one (no silent drop, no substitution): the full Delver 75 until its five sideboard cards are ported."""
+    `"format": "bo3"` (JSON); `game_episodes`: each game its own episode, labelled by its own outcome
+    (`"game_episodes": true`, ENGINE.md 121). The engine refuses a spec holding a card it does not support,
+    naming every one (no silent drop, no substitution)."""
     d = load(name)
     main = names(d['main'])
     side = names(d['sideboard'] if sideboard is None else sideboard)
@@ -71,9 +70,11 @@ def mirror_bo3_spec(name=IZZET_DELVER, sideboard=None, max_turns=60, mulligans=T
     for card in set(side):
         if side.count(card) > full.count(card):
             raise ValueError(f'decklist {name}: {side.count(card)} {card} in the sideboard, the 75 has {full.count(card)}')
-    return json.dumps({'max_turns': max_turns, 'mulligans': mulligans, 'constructed': True, 'format': 'bo3',
-                       'decks': {'p0': main, 'p1': main, 'p0_sideboard': side, 'p1_sideboard': side}},
-                      separators=(',', ':'))
+    spec = {'max_turns': max_turns, 'mulligans': mulligans, 'constructed': True, 'format': 'bo3'}
+    if game_episodes:
+        spec['game_episodes'] = True
+    spec['decks'] = {'p0': main, 'p1': main, 'p0_sideboard': side, 'p1_sideboard': side}
+    return json.dumps(spec, separators=(',', ':'))
 
 
 def mirror_spec(name=IZZET_DELVER, max_turns=60, mulligans=True):

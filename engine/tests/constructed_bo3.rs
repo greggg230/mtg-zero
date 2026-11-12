@@ -1,6 +1,7 @@
 //! Constructed best-of-three (ENGINE.md 120): the Legacy Izzet Delver mirror's matches with
 //! sideboarding. The spec (`"constructed": true` with `"format": "bo3"`: the main exactly 60, the
-//! 75 refused while a card of it is unsupported, every unsupported card named), the pool (exactly
+//! full Delver 75 since its five sideboard cards are supported (ENGINE.md 122), a 75 with a card the
+//! table does not know refused, every such card named), the pool (exactly
 //! the 75, no free basic land entries, CR 100.4a), sideboarding to exactly 60 (every legal 60
 //! reachable in exactly one decision sequence), the information model (game 1 open, the later
 //! games' 60s hidden within the public 75s and dealt by `ConstructedPrior` from what the viewer
@@ -27,7 +28,8 @@ fn delver() -> Decklist {
     Decklist::izzet_delver()
 }
 
-/// The sideboard cards of the 75 the engine supports (the smoke's sideboard: ENGINE.md 120.1).
+/// Eight of the 75's sideboard cards, all from the cube (a 68 of the Delver 75: the smaller 75 these tests
+/// play; the smoke's sideboard before the five outside the cube were supported, ENGINE.md 120.1, 129.2).
 const SMOKE_SIDEBOARD: [(u32, &str); 4] = [(3, "Force of Negation"), (1, "Karakas"), (3, "Pyroblast"), (1, "Unholy Heat")];
 
 fn names(list: &[(u32, &str)]) -> Vec<String> {
@@ -122,16 +124,24 @@ fn the_constructed_bo3_spec() {
     // The evaluation spec of a decklist spec is the spec.
     let json = bo3_json(&names(&SMOKE_SIDEBOARD), 60);
     assert_eq!(MtgSpec::parse(&MtgSpec::eval_json(&json).unwrap()).unwrap(), s);
-    // The full 75 is refused while a sideboard card is unsupported, every one of them named.
+    // The full 75 parses: its five sideboard cards outside the cube are supported (ENGINE.md 122, 129.2).
     let full = delver();
-    let unsupported = full.unsupported_sideboard(db());
+    assert!(full.unsupported_sideboard(db()).is_empty(), "{:?}", full.unsupported_sideboard(db()));
     let side: Vec<String> = full.sideboard.iter().flat_map(|(n, s)| std::iter::repeat_n(s.clone(), *n as usize)).collect();
-    let e = MtgSpec::parse(&bo3_json(&side, 60)).unwrap_err();
-    assert!(!unsupported.is_empty(), "the five sideboard cards are ported: the full 75 must parse now (update this test)");
-    for c in &unsupported {
-        assert!(e.contains(c.as_str()), "the refusal names {c}: {e}");
+    match &MtgSpec::parse(&bo3_json(&side, 60)).unwrap().decks {
+        DeckMode::ListsWithSideboards(p) => assert_eq!((p[0].0.len(), p[0].1.len(), p[1].1.len()), (60, 15, 15)),
+        other => panic!("{other:?}"),
     }
-    println!("the full 75: {e}");
+    // A 75 holding cards the table does not know is refused, every one of them named (no silent drop, no
+    // substitution).
+    let mut bad = side.clone();
+    bad.truncate(13);
+    bad.extend(["Not A Card".to_string(), "Nor This One".to_string()]);
+    let e = MtgSpec::parse(&bo3_json(&bad, 60)).unwrap_err();
+    for c in ["Not A Card", "Nor This One"] {
+        assert!(e.contains(c), "the refusal names {c}: {e}");
+    }
+    println!("two unknown cards: {e}");
     let main = full.main_names();
     let bad = |v: serde_json::Value| MtgSpec::parse(&v.to_string()).unwrap_err();
     let side8 = names(&SMOKE_SIDEBOARD);

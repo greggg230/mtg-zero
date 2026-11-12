@@ -13,9 +13,10 @@ self-play search reaches states that random play (tests/fuzz.rs) does not.
 
 The constructed Delver mirror (docs/ENGINE.md 54): `delver` is the preset delver-mirror's spec (both
 seats the pinned 60 of data/decks/izzet_delver_8016541.json, best-of-one, constructed play's card table).
-`delver_bo3` is its best-of-three (docs/ENGINE.md 120): the preset delver-bo3-smoke's spec, both seats the main
-and the 75's supported sideboard cards, sideboarding to exactly 60, the later games' decks hidden (the search deals
-them from the constructed prior).
+`delver_bo3` is its best-of-three (docs/ENGINE.md 120): the presets delver-mirror-bo3's and delver-bo3-smoke's spec,
+both seats the full 75 (its five sideboard cards outside the cube: ENGINE.md 122), sideboarding to exactly 60, the
+later games' decks hidden (the search deals them from the constructed prior), each game its own episode (ENGINE.md 121;
+129.2).
 
 EoE sealed (docs/ENGINE.md 101, 105): `eoe` is the preset eoe-1's spec (game `mtg_eoe`: two generated Arena pools per
 game, each built by the randomised builder, best-of-one on the EoE card table), `eoe_eval` its fixed evaluation pairs.
@@ -70,15 +71,14 @@ def _mirror(deck):
 SPECS['delver'] = _mirror('izzet_delver_8016541')
 
 
-# its best-of-three (docs/ENGINE.md 120): the preset delver-bo3-smoke's spec (the main and the 75's supported
-# sideboard cards; the full 75 is refused until its five unsupported cards are ported)
+# its best-of-three (docs/ENGINE.md 120): the presets' spec - the full 75, one episode per game (ENGINE.md 121, 129.2)
 def _mirror_bo3(deck):
     # (mtgz/az/decklists.py loaded by its path: json only, without the package's registration)
     import importlib.util
     spec = importlib.util.spec_from_file_location('_decklists', os.path.join(ROOT, 'mtgz', 'az', 'decklists.py'))
     decklists = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(decklists)
-    return json.loads(decklists.mirror_bo3_spec(deck, sideboard=decklists.DELVER_SMOKE_SIDEBOARD))
+    return json.loads(decklists.mirror_bo3_spec(deck, game_episodes=True))
 
 
 SPECS['delver_bo3'] = _mirror_bo3('izzet_delver_8016541')

@@ -26258,9 +26258,13 @@ belief-only head widens onto [belief, deck] exactly (`net.widen_aux`, 105.3) - a
 * **Bounds that do not bite here and are refused loudly**: a 75 of more than 64 different cards (`LIBRARY`'s ids and
   the list block's 64 slots) or more than 31 copies of one card (`NUMBER`'s range) is refused at the match; making
   every such 75 playable needs a decomposed entry choice and a list block past 64 slots (a layout change), not built.
+* **Approved by the user (2026-11-12)**: the base prior as it is - uniform over the swap count, then uniform over the
+  decks with it (120.2); the first sideboarder's choice dealt from that same prior (120.2); the loud refusal of a 75
+  past the action ranges (above). (That day's fourth approval, temperature at the start of every game, is 121.7's.)
 * **The five sideboard cards** (54.8; their section is to be 122): the full preset refuses until they are ported; then `DELVER_SMOKE_SIDEBOARD` and
   `test_the_constructed_bo3_spec`'s refusal check (it fails loudly once the five parse) are to be updated, and the fuzz
-  and the gate kind pick the full 75 up by themselves (they take the supported sideboard cards).
+  and the gate kind pick the full 75 up by themselves (they take the supported sideboard cards). Done at the
+  integration (129.2): both presets play the full 75.
 * **Not mine** (other lanes): each game of a match as its own episode and the value labels (`bo3-game-episodes`, 121; the
   `SearchGame` result mapping is untouched here), the MTGO pilot, runs.
 * `temp_moves` in a match covers game 1's opening only (36.12): kept as `delver-mirror`'s.
@@ -26273,7 +26277,8 @@ belief-only head widens onto [belief, deck] exactly (`net.widen_aux`, 105.3) - a
   `MtgAz::determinize_belief` (`belief.rs`) and `determinize_deck_tilted` (`hidden_decks.rs`); nothing here deals hand
   slots outside that path. A constraint on which cards exist (not only where they are: a face-down pick that must be a
   creature or a land) has to reach the deck's request too (`sample::knowledge` / `DeckWant`), or a dealt 60 may hold no
-  card that passes it; with open decklists the real deck always does.
+  card that passes it; with open decklists the real deck always does. Show and Tell's pick reaches the request since
+  the integration (129.3).
 
 ## 121. Best-of-three with one episode per game (`"game_episodes": true`; branch `bo3-game-episodes`, 2026-11-11)
 
@@ -26403,6 +26408,9 @@ resolver with the key, lookahead seats, the local and remote linger (nothing in 
   best-of-one iteration); `eval_games`, `elo_games`, the anchors' games count matches too (the user's measure).
 * **`temp_moves` per game**: zero-core counts it per episode, so each game's opening is sampled (60 = the first ~60
   searched decisions of every game, sideboarding included) - 36.12's wish, a behaviour of the key to confirm.
+  **Approved by the user (2026-11-12)**: temperature at the start of every game, its sideboarding included.
+* **The label** (the user, 2026-11-12): each row's value target is its own game's outcome; the Delver best-of-three
+  presets turn the key on, in the spec and so in the evaluation spec (129.2).
 * **Human play** (the Delver site's Play tab, `zero.play` servers): a Python consumer that plays a chained game must
   call `next_episode` at a game's end (zero.replay and zero-core's Python driver do); the Play tab does not yet.
 
@@ -26577,7 +26585,7 @@ other sessions' runs and suites).
 
 * **Best-of-three** is `delver-bo3`'s (120): its preset `delver-mirror-bo3` refuses until these five cards are
   ported, and its DESIGN.md 8 row D3 names "the five sideboard cards: another lane": both are for the merge to update
-  (this branch leaves DESIGN.md alone so as not to conflict with it).
+  (this branch leaves DESIGN.md alone so as not to conflict with it). Updated at the integration (129.2).
 * **Anointed Peacekeeper's names** (123.5, reported, not changed: the digests) are its cards' front definitions
   only, so a Peacekeeper facing Rough // Tumble couldn't name "Rough" or "Tumble" (CR 709.4a). No deck of
   constructed play holds both; Disruptor Flute's list names them (tested).
@@ -28251,3 +28259,48 @@ failed, 25 ignored**. That includes `--test az` (the public-state gate: `public_
    `canon_hand_knowledge` itself (128.4).
 4. **Section number.** 128 was the next free number above 127 on 2026-11-12: no branch and no worktree's ENGINE.md
    had 128 or higher.
+
+## 129. Constructed best-of-three integrated: delver-bo3 (120), bo3-game-episodes (121) and the five sideboard cards (122) on one commit (branch `delver-bo3-int`, 2026-11-12)
+
+Branch `delver-bo3-int` from main 1d5508af (127), main c3abdb8a (128) merged in while it was built; zero-core pinned at
+`feat/match-episodes-int` 2aab098. Three lanes gated one by one, built from different bases (120 and 121 from 60397f3
+side by side, 122 from 3d898d7), meet here. (Section number: 128 is `known-face-key`'s; no branch, remote branch or
+worktree's ENGINE.md had 129 or higher on 2026-11-12.)
+
+### 129.1 The merges and the pin
+
+Merge commits, never a rebase or a squash, in this order:
+
+| merge | branch | conflicts, and how each was resolved |
+|---|---|---|
+| 3065d93 | `delver-bo3` b34d78f (120) | `docs/ENGINE.md` (main's 110-113 and 123-127 against 120): every section kept, ordered by number. `engine/tests/fuzz.rs`: main had widened the Delver-only "games only" returns of the match fuzz and the match replay test to every constructed pool (`dd_a`, `dd_b`, `dd_c`, `doomsday`, `sneak_show`, `sns`, `names`); the branch turned `FUZZ_POOL=delver`'s matches on. Now `FUZZ_POOL=delver` plays its constructed best-of-three matches and every other constructed pool stays games only. `mtgz/az/decklists.py`: the docstring keeps both texts |
+| a3ad86d | `bo3-game-episodes` 292a525 (121) | `docs/ENGINE.md`; `engine/src/az/matches.rs` (module doc, the `MatchState` fields, `MatchState::new`), `public_state.rs` (the fields' classes): both sides' additions; `az/mod.rs` (`MtgSpec::parse`): 120's default `pools` (none for constructed) and 121's refusal of `game_episodes` outside best-of-three; the gitlink: 2aab098. **One fix in the merge**: `MtgAz::new` returned early for a constructed best-of-three (120's `MtgAz::constructed_bo3`) before 121's `az.m.game_episodes = spec.game_episodes`, so the key would have been ignored, silently, on the Delver presets; the constructed path sets it too. Otherwise the two compose as built: `next_match_episode` begins the sideboarding with the same `begin_sideboarding`, and the later games come from the same `next_game` (hidden 60s, deck clouds) |
+| 45fefc2 | `delver-sb-cards` ff9493b (122) | `docs/ENGINE.md`; `docs/rulings.md`: regenerated by `tools/rulings_doc.py` from the merged inputs (127's and 122's rows; `--check` clean), not merged by hand; `engine/tests/fuzz.rs`: main's `FUZZ_POOL=names` (127) and the branch's `FUZZ_POOL=delver_sb` both kept (git had interleaved `count_names` and `count_delver_sb` on their common lines: each rebuilt whole). Main's `data/cards` and `card_ir` had not changed since 3d898d7: identical to the branch's (mtg-bot `feature/delver-sb-ir` 22aa7682's export) |
+| 7a99c09 | main c3abdb8a (128) | none. 128's `canon_hand_knowledge` in `Game::after_deal` covers every hidden deal here: `sample_hidden_deck`'s `redeal` is always followed by `Game::determinize` or `determinize_weighted` (in `SearchGame::determinize`, `determinize_deck_tilted`, `determinize_belief`); `deal_constructed_between` deals no game card (the game is over: it sets the match's decks, pools and the sideboarding in progress) |
+
+**The zero-core pin.** `feat/match-episodes-int` = 25a7f50 (main's pin: `feat/eoe-run2`) + `feat/match-episodes` cb1308c
+(az.md 42, search.md 2.14), a merge commit 2aab098, pushed to GitHub. Conflicts only in `docs/az.md` (40 and 42 both
+appended after 39) and `docs/search.md` (2.13 and 2.14 both appended after 2.12): both kept, 25a7f50's first; 42 and 2.14
+do not collide with 25a7f50's numbering, so nothing was renumbered. (zero-core's unmerged `farm` also numbers az.md 41
+and 42 and search.md 2.14, and `feat/varlen*` 43 and 2.15: whichever of those lands second renumbers.) The code merged
+cleanly (`run.py`, `package.py`, `remote.py`: both sides' additions). After the switch, `cargo clean -p zero_search`
+(cargo once reused a stale build of the core).
+
+### 129.2 What the merge needed
+
+* **The full 75 everywhere.** The five sideboard cards are supported, so `delver-mirror-bo3` builds (its spec parses and
+  plays the pinned 75: `test_the_full_preset_builds_with_the_full_75`, which also checks that a card the table does not
+  know is still refused by name). `delver-bo3-smoke` plays **the same spec** on `delver-smoke` (CPU, the tiny network):
+  chosen over keeping the cube-only 68, so the smoke runs the five new cards too; `DELVER_SMOKE_SIDEBOARD` is gone, and
+  `tools/search_smoke.py`'s `delver_bo3` is the presets' spec. `tests/constructed_bo3.rs::the_constructed_bo3_spec`
+  now checks that the full 75 parses (60 + 15 a seat) and that a 75 with two cards the table does not know is refused,
+  both named; its 68 (`SMOKE_SIDEBOARD`) stays as those tests' smaller 75. The fuzz, `tests/az.rs`'s constructed
+  positions and the gate's kind take the supported sideboard cards: all 15 now.
+* **One episode per game on** in both presets: `"game_episodes": true` in the spec, so in the evaluation spec
+  (`eval_json` keeps it); `decklists.mirror_bo3_spec(game_episodes=True)`. The user's decision (2026-11-12): the label is
+  each game's outcome (121.7).
+* **The user's approvals of 2026-11-12** recorded where the decisions were open: 120.7 (the swap-count base prior, the
+  first sideboarder dealt from the same prior, the loud refusal of oversized 75s) and 121.7 (temperature at the start of
+  every game, sideboarding included).
+* DESIGN.md 8's D3 row and 122's pointer updated; `tests/test_delver_bo3.py` follows the presets (its match through the
+  bindings steps each game's episode with `next_episode`).

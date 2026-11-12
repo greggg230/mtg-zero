@@ -2591,7 +2591,7 @@ fn match_spec(seed: u64) -> engine::az::MtgSpec {
 }
 
 /// `FUZZ_POOL=delver`'s matches (ENGINE.md 120): constructed best-of-three, both seats the pinned
-/// main and the sideboard cards of the 75 this checkout supports (all 15 once the five are ported);
+/// main and the sideboard cards of the 75 this checkout supports (all 15 since ENGINE.md 122);
 /// one match in four P1 plays another 75 of supported cards (`OTHER_75`: the format takes any two
 /// 75s), one in four 12-turn games (drawn games).
 fn delver_bo3_spec(seed: u64) -> engine::az::MtgSpec {

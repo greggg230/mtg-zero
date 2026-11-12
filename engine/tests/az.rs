@@ -2939,7 +2939,7 @@ fn the_deck_tilt_ignores_the_opponents_hidden_cards() {
 // ---- Constructed best-of-three: the hidden 60s (ENGINE.md 120) ----
 
 /// The Delver mirror's constructed best-of-three: both seats the pinned main and the 75's supported
-/// sideboard cards (ENGINE.md 120.1: the smoke's 68 until the five are ported).
+/// sideboard cards (all 15 since ENGINE.md 122; 120.1 played the smoke's 68 before).
 fn constructed_bo3_spec() -> MtgSpec {
     let d = engine::az::constructed::Decklist::izzet_delver();
     let db = CardDb::constructed();

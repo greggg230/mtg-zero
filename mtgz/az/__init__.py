@@ -205,17 +205,16 @@ PRESETS['delver-smoke'] = dict(PRESETS['mtg-smoke'], spec=SPEC_DELVER, eval_spec
 # Self-play and evaluation play the same matches (the evaluation spec is the spec). The deck target (docs/ENGINE.md
 # 102.4: the opponent's unseen cards by identity) is trained (aux_deck_w, as the EoE presets) and the search deals the
 # opponent's hidden 60 by its prediction (the deck tilt at 1 in self-play and evaluation, ENGINE.md 106; nothing to tilt
-# in game 1); the deck reader is not on. A match is up to three games: the step cap x 3. The full preset REFUSES (the
-# engine names the cards) while a card of the 75 is unsupported - five of the sideboard's are not yet (ENGINE.md 54.8).
+# in game 1); the deck reader is not on. A match is up to three games: the step cap x 3. Every card of the 75 is supported
+# (the five sideboard cards outside the cube: ENGINE.md 122), so both presets play the full 75. Each game of a match is
+# its own episode, its rows labelled by that game's outcome (`"game_episodes": true` in the spec and so in the evaluation
+# spec, ENGINE.md 121; the user's decision of 2026-11-11, on in the presets since 129.2): self-play still plays matches
+# and evaluation measures the match win rate, with the games' numbers beside it.
 _DELVER_BO3 = dict(aux_deck_w=0.5, selfplay_belief_tilts={'deck': 1.0}, eval_belief_tilts={'deck': 1.0}, max_steps=60_000)
-SPEC_DELVER_BO3 = decklists.mirror_bo3_spec(decklists.IZZET_DELVER, max_turns=60)
+SPEC_DELVER_BO3 = decklists.mirror_bo3_spec(decklists.IZZET_DELVER, max_turns=60, game_episodes=True)
 PRESETS['delver-mirror-bo3'] = dict(PRESETS['delver-mirror'], spec=SPEC_DELVER_BO3, eval_spec=SPEC_DELVER_BO3, **_DELVER_BO3)
-# tests, fuzz and smokes: the main and the 75's supported sideboard cards (3 Pyroblast, 3 Force of Negation, Karakas,
-# Unholy Heat), mtg-smoke's tiny network and sims on CPU
-SPEC_DELVER_BO3_SMOKE = decklists.mirror_bo3_spec(decklists.IZZET_DELVER, sideboard=decklists.DELVER_SMOKE_SIDEBOARD,
-                                                  max_turns=60)
-PRESETS['delver-bo3-smoke'] = dict(PRESETS['delver-smoke'], spec=SPEC_DELVER_BO3_SMOKE, eval_spec=SPEC_DELVER_BO3_SMOKE,
-                                   **_DELVER_BO3)
+# the end-to-end check on CPU: the same spec (the full 75, one episode per game) with mtg-smoke's tiny network and sims
+PRESETS['delver-bo3-smoke'] = dict(PRESETS['delver-smoke'], spec=SPEC_DELVER_BO3, eval_spec=SPEC_DELVER_BO3, **_DELVER_BO3)
 
 # Edge of Eternities sealed (DESIGN.md 9, docs/ENGINE.md 101, 105): the game `mtg_eoe` - `mtg` on the EoE card table,
 # whose encodings carry the EoE identity space (the set's cards in set order, then its tokens: engine/src/az/eoe_cards.txt,
