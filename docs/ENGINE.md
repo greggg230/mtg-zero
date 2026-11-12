@@ -25231,5 +25231,9 @@ dropped, the minibatch path); `test_the_export_and_its_reference_scorer` (111.6)
 (111.7); the small-log pipeline with the opt-ins (pair, half-life, from-iter, field, exports, `rank` with a pair
 evaluator) and none of them in the default report.
 
-**Gate**: see the commit message and the merge note.
+**Checks**: `python -m pytest tests -q` (2 torch threads, the desktop shared with other suites): all pass - one
+remote self-play worker test (`test_mac_remote.py::test_a_worker_plays_mtg[matches]`) hit its 300 s timeout under the
+load on the first pass and passed when rerun. **`python tools/gate.py python --no-mac` on ff5ba08: build, pytest 273
+passed and 1 skipped, the mtg-smoke loop (16 games, 0 unfinished), tracked files unchanged: GATE PASSED python
+ff5ba0847e85 in 935s.** The commit after it adds this paragraph only.
 
