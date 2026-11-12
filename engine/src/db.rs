@@ -703,6 +703,10 @@ pub enum DelayedWhen {
     /// At the next end of combat ("at end of combat": as the end of combat
     /// step begins, CR 511.2; EoE lane D, ENGINE.md 99.5).
     EndOfCombat,
+    /// At the beginning of its controller's next upkeep (Pact of Negation;
+    /// ENGINE.md 110.1): an upkeep of theirs that begins after it was
+    /// created (one in progress has begun already, CR 603.7a, 503.1a).
+    YourNextUpkeep,
 }
 
 impl EventKind {

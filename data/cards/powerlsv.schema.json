@@ -225,6 +225,7 @@
    "DiscardUpToNThenDrawThatMany",
    "DiscardYourHand",
    "DoThenReflexive",
+   "DoomsdayPile",
    "DoublePlusOneCountersOnEach",
    "DoubleTargetCreaturesPowerUEOT",
    "DrawCardPerMulticoloredPermanent",
@@ -345,6 +346,7 @@
    "LookAtTopCardsDistribute",
    "LookAtTopCardsPutIntoHand",
    "LookAtTopNRevealOrCounter",
+   "LookAtTopPutIntoHandMoreIfInstantAndSorcery",
    "LookAtTopRepeatPayLifeThenStackTop",
    "LookTopNKeepUpToOneOnTopRestBottom",
    "LookTopNMayRevealMatchingToHandRestBottomRandom",
@@ -353,6 +355,7 @@
    "LoseLife",
    "LoseLifeEqualToEventAmount",
    "LoseLifePerCounterOnSource",
+   "LoseTheGame",
    "ManifestDread",
    "ManifestDreadThenAttachSelf",
    "ManifestDreadThenPutPlusOneCountersOnIt",
@@ -397,6 +400,7 @@
    "PainForAllETBEffect",
    "PairedTargetPumpDebuffUEOT",
    "PayEnergy",
+   "PayManaOrElse",
    "PayToCopyEnchantedCreatureElseToken",
    "PeekTopMayBattlefieldIfLandElseHand",
    "PerigeeBeckonerDiesReturnTappedEffect",
@@ -9301,6 +9305,24 @@
    "module": "mtg_bot.effects.pt_formulas",
    "qualname": "DomainPT"
   },
+  "DoomsdayPile": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 5,
+     "name": "count",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_zones",
+   "qualname": "DoomsdayPile"
+  },
   "DoublePlusOneCountersOnEach": {
    "category": "Effect",
    "fields": [
@@ -12871,6 +12893,44 @@
    "module": "mtg_bot.effects.generic.library_lookat",
    "qualname": "LookAtTopNRevealOrCounter"
   },
+  "LookAtTopPutIntoHandMoreIfInstantAndSorcery": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 3,
+     "name": "count",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "take",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 2,
+     "name": "take_if",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_zones",
+   "qualname": "LookAtTopPutIntoHandMoreIfInstantAndSorcery"
+  },
   "LookAtTopRepeatPayLifeThenStackTop": {
    "category": "Effect",
    "fields": [
@@ -13068,6 +13128,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.artifact_mechanics",
    "qualname": "LoseLifePerCounterOnSource"
+  },
+  "LoseTheGame": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_walkers",
+   "qualname": "LoseTheGame"
   },
   "MVOfCostPaidObjectPlus": {
    "category": "Formula",
@@ -14363,6 +14430,35 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "PayEnergy"
+  },
+  "PayManaOrElse": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "str",
+     "name": "cost",
+     "required": true,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "Effect",
+     "name": "otherwise",
+     "required": true,
+     "type": {
+      "categories": [
+       "Effect"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.legacy_spells",
+   "qualname": "PayManaOrElse"
   },
   "PayToCopyEnchantedCreatureElseToken": {
    "category": "Effect",
@@ -21887,6 +21983,10 @@
     {
      "name": "END",
      "value": "end"
+    },
+    {
+     "name": "YOUR_UPKEEP",
+     "value": "your_upkeep"
     }
    ],
    "module": "mtg_bot.effects.vocab",

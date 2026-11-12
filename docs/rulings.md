@@ -16,17 +16,17 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
-| fetched | 1610 | 1262 |
-| class a | 1228 | 978 |
+| fetched | 1616 | 1268 |
+| class a | 1234 | 984 |
 | class b | 200 | 151 |
 | class c | 182 | 133 |
-| a, tested (passing) | 1228 | 978 |
+| a, tested (passing) | 1234 | 984 |
 | a, tested by a rulings test (`rulings_*`, `interactions_*`) | 930 | 777 |
-| a, tested only by an earlier test (Oracle or rules) | 298 | 201 |
+| a, tested only by an earlier test (Oracle or rules) | 304 | 207 |
 | a, deferred | 0 | 0 |
 | a, untested | 0 | 0 |
 
-Class a by area (distinct texts): mana 175/175, triggers 139/139, stack 126/126, zones 123/123, copies 96/96, other 94/94, dfc 65/65, replacement 59/59, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 175/175, triggers 139/139, stack 128/128, zones 126/126, copies 96/96, other 95/95, dfc 65/65, replacement 59/59, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -2034,9 +2034,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `03d27f15` | a | dfc | daybound/nightbound transform immediately on any day/night change, any time, and its not a state-based action | `rulings_faces::it_becomes_night_after_a_turn_without_spells_and_day_after_two_cr_726_3a` |
 | `b5368c51` | a | other | it becomes night if it's currently day and the previous turn's active player cast no spells | `rulings_faces::it_becomes_night_after_a_turn_without_spells_and_day_after_two_cr_726_3a` |
 | `0a3a2fe8` | a | other | it becomes day if it's currently night and the previous turn's active player cast two or more spells | `rulings_faces::it_becomes_night_after_a_turn_without_spells_and_day_after_two_cr_726_3a` |
-| `9d7e7537` | a | dfc | during night, a daybound permanent entering without being cast enters with its nightbound face up | `rulings_faces::a_daybound_card_put_onto_the_battlefield_at_night_is_nightbound_cr_702_145e` |
+| `9d7e7537` | a | dfc | during night, a daybound permanent entering without being cast enters with its nightbound face up | `rules_faithful_e::cr_702_145b_a_daybound_card_put_onto_the_battlefield_at_night_enters_transformed`; `rulings_faces::a_daybound_card_put_onto_the_battlefield_at_night_is_nightbound_cr_702_145e` |
 | `c574f848` | c | NR | with no day/night set, daybound and nightbound appearing together sets day, transforming the nightbound one [part 3, was a/other: no cube effect puts a daybound and a nightbound permanent onto the battlefield at once while it's neither] | not reachable with the cube's cards |
-| `483aa586` | a | dfc | a daybound spell cast at night stays daybound on the stack but enters the battlefield nightbound-face-up | `rulings_faces::a_daybound_card_cast_at_night_enters_with_its_nightbound_face_up_cr_702_145d` |
+| `483aa586` | a | dfc | a daybound spell cast at night stays daybound on the stack but enters the battlefield nightbound-face-up | `rules_faithful_e::cr_702_145b_a_daybound_spell_cast_at_night_enters_transformed_without_transforming`; `rulings_faces::a_daybound_card_cast_at_night_enters_with_its_nightbound_face_up_cr_702_145d` |
 | `a73ce155` | a | dfc | daybound/nightbound only transform via their own abilities, not generic transform effects from other cards | `rules_faces::a_daybound_permanent_transforms_only_through_day_and_night_cr_702_145b` |
 
 ### Scythecat Cub
@@ -2528,7 +2528,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `1efd0607` | a | mana | a self-untapping mana ability can be activated as many times as you can pay for it, enabling unbounded mana generation | `cards_m7c_tail2::zirda_and_basalt_monolith_loop_is_cut_at_31_activations_cr732_2a` |
+| `1efd0607` | a | mana | a self-untapping mana ability can be activated as many times as you can pay for it, enabling unbounded mana generation | `cards_m7c_tail2::zirda_and_basalt_monolith_loop_goes_on_past_31_activations_cr732_2a` |
 
 ### Coalition Relic
 
@@ -3523,6 +3523,27 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `87078369` | a | mana | delve does not change the mana cost or mana value (Murktide Regent stays 7) | `cards_legacy::delve_doesnt_change_its_mana_value_cr_702_66a` |
 | `05ce86bd` | a | mana | delve pays only generic mana, at most the generic part of the total cost (five for Murktide Regent) | `cards_legacy::delve_exiles_at_most_its_generic_mana_cr_702_66a` |
 
-## Cards without rulings (172)
+### Doomsday (legacy, constructed play: ENGINE.md 54)
 
-Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54)
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `6c6f247d` | a | zones | Doomsday with fewer than five cards in library and graveyard puts all of them on top | `cards_doomsday_a::cr_701_23d_with_fewer_than_five_cards_all_of_them_go_on_top` |
+| `4c669d8c` | a | zones | Doomsday must choose five cards when library and graveyard hold five or more (CR 701.23d) | `cards_doomsday_a::cr_701_23d_doomsday_must_find_five_of_its_library_and_graveyard` |
+
+### Pact of Negation (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `0dfaac8c` | a | other | Pact of Negation is blue by its colour indicator; colour-changing effects still apply (text-changing effects: none in this engine) | `cards_doomsday_a::pact_of_negation_is_a_blue_zero_mana_instant`; `cards_doomsday_a::pact_is_a_blue_card_force_of_will_can_exile` |
+| `4c4f55a3` | a | stack | Pact of Negation countered or not resolving (an illegal target) creates no delayed trigger | `cards_doomsday_a::pact_whose_target_is_gone_doesnt_resolve_and_makes_no_trigger`; `cards_doomsday_a::pact_countered_by_daze_makes_no_trigger_unless_daze_is_paid`; `cards_doomsday_a::pact_countered_by_force_of_will_makes_no_trigger` |
+| `3e504e2e` | a | stack | Pact of Negation resolving with a legal target that can't be countered still creates its trigger | `cards_doomsday_a::pact_that_resolves_but_cant_counter_still_makes_its_trigger` |
+
+### Personal Tutor (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `ce207f9e` | a | zones | a search for a card with a stated quality may find nothing (CR 701.23b) | `cards_doomsday_a::cr_701_23b_personal_tutor_offers_the_sorcery_cards_and_may_find_none` |
+
+## Cards without rulings (173)
+
+Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54), Flow State (legacy, constructed play: ENGINE.md 54)
