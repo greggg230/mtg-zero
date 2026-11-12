@@ -198,8 +198,9 @@ impl Game {
                     }
                     Some(other) => unreachable!("hand choice {other:?}"),
                     None => {
-                        // One option per definition (the chooser's own hand).
-                        let hand = self.hand_sorted(p);
+                        // One option per definition (the chooser's own hand;
+                        // its card the slot's, ENGINE.md 128).
+                        let hand = self.hand_slot_order_in(p);
                         let mut opts = Vec::new();
                         for (k, &c) in hand.iter().enumerate() {
                             if k > 0 && self.objs[hand[k - 1].i()].def == self.objs[c.i()].def {
