@@ -256,26 +256,28 @@ PRESETS['eoe-choice-smoke'] = dict(PRESETS['eoe-smoke'], spec=json.dumps(dict(js
     json.loads(SPEC_EOE)['sealed'], deck_choice={'k': 8, 'explore': 0.1}))), selfplay_value_choice_worlds=4,
                                    selfplay_value_choice_temp=0.03)
 # Run 2 with the deck choice by the evaluator (docs/ENGINE.md 112): each self-play seat scores its own pool's K = 32
-# candidates with the exported deck evaluator (the engine's scorer, no Python in self-play) and plays the best, a 0.1
-# share a random candidate; the hidden decklists' prior of a choosing seat chooses the same way. The evaluator is
-# retrained every 4 iterations by a background CPU job on the newest 8 iterations' games (the last 2 validate) and
-# published as <run>/evaluators/v<iter>.json, used from the next phase (`mtgz.sealed.rolling`); the deck-choice
+# candidates with the deck evaluator's export (ENGINE.md 111.6; the engine's scorer, no Python in self-play) and plays
+# the best, a 0.1 share a random candidate; the hidden decklists' prior of a choosing seat chooses the same way. The
+# evaluator (the set kind) is retrained every 4 iterations by a background CPU job on the run's newest games (8
+# iterations at first, then up to 40, weighted by recency with a half-life of 40 iterations - v2's pick, ENGINE.md 111;
+# the last 2 validate) and published as <run>/evaluators/v<iter>.json, used from the next phase (`mtgz.sealed.rolling`); the deck-choice
 # evaluation (64 games: the network chooses from the fixed evaluation pools by its iteration's evaluator, the heuristic
 # plays its best guess) beside run 1's evaluations, unchanged. The spec's evaluator file is the run's first version: a
 # launch names it (`--spec`; EVALUATOR below is a placeholder the launch replaces, ENGINE.md 112 has the command).
 # Evaluation on the Mac every second iteration (`--eval-remote mac --eval-every 2`, ENGINE.md 109.3) is the launch's.
-EVALUATOR_PLACEHOLDER = '<the exported evaluator: python -m mtgz.sealed.scorer export ...>'
+EVALUATOR_PLACEHOLDER = '<the deck evaluator export: python -m mtgz.sealed.evaluator export ...>'
 SPEC_EOE_EVAL_CHOICE = json.dumps(dict(json.loads(SPEC_EOE), sealed=dict(
     json.loads(SPEC_EOE)['sealed'], deck_choice={'k': 32, 'explore': 0.1, 'by': 'evaluator',
                                                  'evaluator': EVALUATOR_PLACEHOLDER})))
-PRESETS['eoe-2e'] = dict(PRESETS['eoe-1'], spec=SPEC_EOE_EVAL_CHOICE, evaluator_every=4, evaluator_window=8,
-                         evaluator_val_iters=2, evaluator_kind='set', evaluator_threads=4, deckchoice_eval_games=64)
+PRESETS['eoe-2e'] = dict(PRESETS['eoe-1'], spec=SPEC_EOE_EVAL_CHOICE, evaluator_every=4, evaluator_window=40,
+                         evaluator_min_window=8, evaluator_val_iters=2, evaluator_kind='set', evaluator_half_life=40.0,
+                         evaluator_threads=4, deckchoice_eval_games=64)
 # the same end to end on CPU (ENGINE.md 112's smoke): eoe-smoke, K = 8, a retrain every iteration on the 2 newest
 PRESETS['eoe-2e-smoke'] = dict(PRESETS['eoe-smoke'], spec=json.dumps(dict(json.loads(SPEC_EOE), sealed=dict(
     json.loads(SPEC_EOE)['sealed'], deck_choice={'k': 8, 'explore': 0.1, 'by': 'evaluator',
                                                  'evaluator': EVALUATOR_PLACEHOLDER}))),
-                               evaluator_every=1, evaluator_window=2, evaluator_val_iters=1, evaluator_kind='set',
-                               evaluator_threads=2, deckchoice_eval_games=4)
+                               evaluator_every=1, evaluator_window=2, evaluator_min_window=2, evaluator_val_iters=1,
+                               evaluator_kind='set', evaluator_half_life=40.0, evaluator_threads=2, deckchoice_eval_games=4)
 
 # a rented GPU box's self-play settings (tools/vast.py, docs/ENGINE.md 97): one worker process, CUDA inference with
 # token CUDA graphs, the Delver line's 16 threads x 3 groups and 1,536 games in flight (the box's bench: ~25 games/s,

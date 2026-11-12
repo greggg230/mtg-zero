@@ -20,18 +20,20 @@ from mtgz.sealed import rolling as RO
 from mtgz.sealed import scorer as S
 
 FIXTURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'engine', 'tests', 'data')
-V1 = 'E:/mtg-zero/s4a/v1_time'
+V2 = 'E:/mtg-zero/s4a/v2_time'
 
 
 @pytest.fixture(scope='module')
 def exported(tmp_path_factory):
+    """Random evaluators of every kind, saved (.pt) and exported (`Evaluator.export`): {kind: (pt, json, sha256)}."""
     d = tmp_path_factory.mktemp('scorer')
     out = {}
-    for kind in S.KINDS:
-        e = S.random_evaluator(kind, seed=11, members=3, d=5, k=2, hidden=6)
-        pt = str(d / f'evaluator_{kind}.pt')
+    for kind, kw in (('linear', {}), ('set', {}), ('pair', {'base': 'set', 'dim': 2})):
+        e = S.random_evaluator(kind, seed=11, members=3, d=5, k=2, hidden=6, **kw)
+        pt, js = str(d / f'evaluator_{kind}.pt'), str(d / f'{kind}.json')
         e.save(pt)
-        out[kind] = (pt, str(d / f'{kind}.json'), S.export(pt, str(d / f'{kind}.json')))
+        e.export(js)
+        out[kind] = (pt, js, S.sha256_file(js))
     return out
 
 
@@ -43,35 +45,32 @@ def test_the_engines_fixtures_are_reproducible(tmp_path):
             assert S.hashlib.sha256(f.read()).hexdigest() == sha, name
 
 
-def test_the_export_scores_as_torch_in_numpy_and_in_the_engine(exported):
+def test_the_engine_scores_the_export_as_its_reference_and_torch(exported):
     decks = S.sample_decks(300, seed=4)
     for kind, (pt, js, sha) in exported.items():
-        assert S.sha256_file(js) == sha and S.export(pt, js + '.again') == sha, 'one evaluator, one file'
-        doc = S.load(js)
-        assert doc['kind'] == kind and len(doc['members']) == 3 and len(doc['cards']) == len(EV.vocab())
-        r = S.compare(js, pt, decks)
-        assert r['torch_numpy'] < 1e-6 and r['torch_engine'] < S.TOLERANCE and r['numpy_engine'] < 1e-9, r
+        r = S.compare(js, decks, pt)
+        assert S.failed(r) is None and r['reference_engine'] < 1e-12 and r['torch_engine'] < 1e-6, r
         assert r['score_sd'] > 0.01, 'random weights spread the scores'
         info = S.engine_info(js)
-        assert (info['sha256'], info['kind'], info['members'], info['cards']) == (sha, kind, 3, len(EV.vocab()))
-        # the features, by name
-        X = EV.counts_matrix(decks[:20])
-        assert np.allclose(S.features(doc, X), EV.deck_features(X), atol=1e-5)
-    with pytest.raises(ValueError, match='not a card'):
-        S.score(S.load(exported['set'][1]), [['No Such Card'] * 40])
+        assert (info['sha256'], info['kind'], info['members']) == (sha, kind, 3)
+        assert info['field_decks'] == (24 if kind == 'pair' else 0)
+        # one evaluator, one file
+        EV.Evaluator.load(pt).export(js + '.again')
+        assert S.sha256_file(js + '.again') == sha
     with pytest.raises(ValueError, match='Paradox Haze|not a card'):
         E.sealed_scores(exported['set'][1], json.dumps([['Paradox Haze'] * 40]))
+    with pytest.raises(ValueError, match='No Such Card'):
+        E.sealed_scores(exported['set'][1], json.dumps([['No Such Card'] * 40]))
 
 
-@pytest.mark.skipif(not os.path.exists(os.path.join(V1, 'evaluator_set.pt')), reason='the v1 evaluators (E:) are private data')
-def test_the_v1_evaluators_export_exactly(tmp_path):
+@pytest.mark.skipif(not os.path.exists(os.path.join(V2, 'evaluator_set.json')), reason='the v2 evaluators (E:) are private data')
+def test_the_v2_evaluators_score_exactly():
+    """eval-v2's trained evaluators (ENGINE.md 111; their exports): the engine against the reference and torch."""
     decks = S.sample_decks(2000, seed=0)
     for kind in S.KINDS:
-        js = str(tmp_path / f'v1_{kind}.json')
-        S.export(os.path.join(V1, f'evaluator_{kind}.pt'), js)
-        r = S.compare(js, os.path.join(V1, f'evaluator_{kind}.pt'), decks)
+        r = S.compare(os.path.join(V2, f'evaluator_{kind}.json'), decks, os.path.join(V2, f'evaluator_{kind}.pt'))
         print(kind, json.dumps(r))
-        assert max(r['torch_engine'], r['torch_numpy']) < S.TOLERANCE, r
+        assert S.failed(r) is None, r
 
 
 def choice_spec(js, k=6, explore=0.25, **dc):
@@ -82,12 +81,12 @@ def choice_spec(js, k=6, explore=0.25, **dc):
 
 def test_the_candidates_carry_the_evaluators_scores_and_choice(exported):
     pt, js, sha = exported['set']
-    doc = S.load(js)
+    ref = EV.ReferenceScorer(js)
     n_chosen = 0
     for seed in range(12):
         for seat in SE.candidates(choice_spec(js), seed):
             s = np.array(seat['scores'])
-            assert np.allclose(s, S.score(doc, [c['deck'] for c in seat['candidates']]), atol=1e-9)
+            assert np.allclose(s, ref.score([c['deck'] for c in seat['candidates']]), atol=1e-12)
             assert seat['evaluator_sha'] == sha
             if seat['explore'] is None:
                 n_chosen += 1
@@ -140,7 +139,8 @@ class FakeRun:
 def test_the_versions_and_the_retrains_schedule(exported, tmp_path, monkeypatch):
     pt, js, sha = exported['set']
     spec = choice_spec(js, k=32, explore=0.1)
-    cfg = dict(run.DEFAULTS, game='mtg_eoe', spec=spec, evaluator_every=4, evaluator_window=8, evaluator_val_iters=2)
+    cfg = dict(run.DEFAULTS, game='mtg_eoe', spec=spec, evaluator_every=4, evaluator_window=40, evaluator_min_window=8,
+               evaluator_val_iters=2)
     R = FakeRun(tmp_path / 'r', cfg)
     os.makedirs(R.run)
     started = []
@@ -162,8 +162,8 @@ def test_the_versions_and_the_retrains_schedule(exported, tmp_path, monkeypatch)
         RO.selfplay_spec(R, it)
     assert not started
     RO.selfplay_spec(R, 89)                        # b = 88: the window 81-88, after v0078
-    assert len(started) == 1 and started[0][3:7] == ['retrain', R.run, '--iter', '88']
-    assert '--window' in started[0] and started[0][started[0].index('--kind') + 1] == 'set'
+    assert len(started) == 1 and started[0][3:9] == ['retrain', R.run, '--iter', '88', '--from-iter', '79']
+    assert started[0][started[0].index('--kind') + 1] == 'set'
     RO.selfplay_spec(R, 90)                        # the job ended without a status: reported failed once
     assert sum('EVALUATOR RETRAIN FAILED v0088' in x for x in R.lines) == 1
     RO.selfplay_spec(R, 91)
@@ -239,7 +239,8 @@ def test_the_presets_of_run_2e():
     c = run.resolve_config(run.parse(['--run', 'x', '--preset', 'eoe-2e']), {})
     dc = json.loads(c['spec'])['sealed']['deck_choice']
     assert (dc['k'], dc['explore'], dc['by']) == (32, 0.1, 'evaluator')
-    assert (c['evaluator_every'], c['evaluator_window'], c['evaluator_kind'], c['deckchoice_eval_games']) == (4, 8, 'set', 64)
+    assert (c['evaluator_every'], c['evaluator_window'], c['evaluator_min_window'], c['evaluator_kind'],
+            c['evaluator_half_life'], c['deckchoice_eval_games']) == (4, 40, 8, 'set', 40.0, 64)
     assert c['eval_spec'] == P.EVAL_SPEC_EOE and c['selfplay_value_choice_worlds'] == 0
     one = run.resolve_config(run.parse(['--run', 'x', '--preset', 'eoe-1']), {})
     assert (one['evaluator_every'], one['deckchoice_eval_games']) == (0, 0), 'off by default'

@@ -44,8 +44,9 @@
 //!
 //! The deck choice **by an evaluator** (ENGINE.md 112): `{"k": 32, "explore": 0.1, "by": "evaluator", "evaluator":
 //! "<path>.json", "evaluator_sha": "<sha256>", "temperature": 0}` - a choosing seat scores its own pool's K
-//! candidates with the exported deck evaluator ([`scorer`], read from the file; `evaluator_sha` optional, a file
-//! with other contents an error) and plays the best (the first on a tie), or with `temperature` t > 0 one drawn with
+//! candidates with the deck evaluator's export (`mtgz.sealed.evaluator`'s `Evaluator.export`: linear, set or pair -
+//! a pair against its stored field; [`scorer`], read from the file; `evaluator_sha` optional, a file with other
+//! contents an error) and plays the best (the first on a tie), or with `temperature` t > 0 one drawn with
 //! probability proportional to exp((score - best) / t) from a generator of its own ([`choice_rng`]). No decision:
 //! the deck is chosen when the game is made, from the seat's own pool alone. `"seats": [0]` (either deck choice):
 //! only these built seats choose (or explore); the others play the spec's seat (`best_share`'s mixed field).
@@ -654,11 +655,17 @@ pub fn scores_json(path: &str, decks: &str) -> Result<String, String> {
 /// What the engine reads of the exported evaluator at `path` (the binding's `sealed_scorer_info`), as JSON.
 pub fn scorer_info_json(path: &str) -> Result<String, String> {
     let s = scorer::load(path, db())?;
-    let model = match s.kind {
-        scorer::Kind::Linear => json!({"kind": "linear"}),
-        scorer::Kind::Set { d, k, hidden } => json!({"kind": "set", "d": d, "k": k, "hidden": hidden}),
+    let base = |b: scorer::Base| match b {
+        scorer::Base::Linear => json!({"kind": "linear"}),
+        scorer::Base::Set { d, k, hidden } => json!({"kind": "set", "d": d, "k": k, "hidden": hidden}),
     };
-    Ok(json!({"path": s.path, "sha256": s.sha_hex(), "kind": model["kind"], "model": model, "members": s.members(), "cards": s.cards()}).to_string())
+    let model = match s.kind {
+        scorer::Kind::Linear => base(scorer::Base::Linear),
+        scorer::Kind::Set { d, k, hidden } => base(scorer::Base::Set { d, k, hidden }),
+        scorer::Kind::Pair { base: b, dim } => json!({"kind": "pair", "base": base(b), "dim": dim}),
+    };
+    Ok(json!({"path": s.path, "sha256": s.sha_hex(), "kind": model["kind"], "model": model, "members": s.members(), "cards": s.cards(),
+              "field_decks": s.field_decks()}).to_string())
 }
 
 /// The seats of an `mtg` spec's game (a sealed spec) as JSON (the Python binding's

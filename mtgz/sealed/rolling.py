@@ -14,18 +14,20 @@ side, through zero-core's game-package hooks (its docs/az.md 40; `mtgz.az` regis
   in the game log names its version's file and sha256, and every chosen deck its sha256 (docs/ENGINE.md 112): a game
   replays exactly from its line whatever the run did later.
 * **The rolling retrain** (run setting `evaluator_every` N > 0): at the start of iteration it, when b = it - 1 is a
-  multiple of N, its window of `evaluator_window` iterations [b - W + 1, b] lies inside the run's own games and no job
-  runs, a background job starts (`python -m mtgz.sealed.rolling retrain RUN --iter b ...`: CPU only, below-normal
-  priority, `evaluator_threads` threads). It snapshots the window's games (the log lines of those iterations and the
-  metrics up to b), values them with the checkpoints that played them (`python -m mtgz.sealed.evaluator values ...
-  --checkpoint played`: the leak-free pre-game value, docs/ENGINE.md 108.2), trains (`python -m mtgz.sealed.evaluator
-  train ... --split time --time-from b + 1 --val-iters V --kinds K --pools 0`: the window's last V iterations validate
-  - the selection of the distillation mix and the L2, early stopping -, the rest train; `--half-life` when the
-  evaluator's command line has it and `evaluator_half_life` > 0), exports the selected `evaluator_<kind>.pt`
-  (`mtgz.sealed.scorer`), checks the export against torch and the engine (1e-5 on candidate decks), and publishes it
-  atomically as `v<b>.json`. Self-play never waits for it. A failed job is logged loudly at the next phase (EVALUATOR
-  RETRAIN FAILED ...) and the run keeps the version it has; a job outliving its run process is found by its pid file and
-  waited for, never doubled.
+  multiple of N, at least `evaluator_min_window` iterations of the run's own games follow its first version and no job
+  runs, a background job starts (`python -m mtgz.sealed.rolling retrain RUN --iter b --from-iter lo ...`: CPU only,
+  below-normal priority, `evaluator_threads` threads) on the window lo..b - the newest `evaluator_window` iterations of
+  the run's own games. It snapshots the window's games (the log lines of those iterations and the metrics up to b),
+  values them with the checkpoints that played them (`python -m mtgz.sealed.evaluator values ... --checkpoint played`:
+  the leak-free pre-game value, docs/ENGINE.md 108.2), trains (`python -m mtgz.sealed.evaluator train ... --split time
+  --time-from b + 1 --val-iters V --kinds K --pools 0 --from-iter lo [--half-life H] [--pair-base B]`: the window's last
+  V iterations validate - the selection of the distillation mix and the L2, early stopping -, the rest train, weighted
+  by recency with `evaluator_half_life` H > 0, ENGINE.md 111), exports the selected `evaluator_<kind>.pt`
+  (`Evaluator.export`, the export format of ENGINE.md 111.6; its informational meta's NaN metrics of the empty test
+  split as null), checks the engine against the export's numpy reference and torch on candidate decks
+  (`mtgz.sealed.scorer`), and publishes it atomically as `v<b>.json`. Self-play never waits for it. A failed job is
+  logged loudly at the next phase (EVALUATOR RETRAIN FAILED ...) and the run keeps the version it has; a job outliving
+  its run process is found by its pid file and waited for, never doubled.
 * **The deck-choice evaluation** (`deckchoice`, a yardstick of zero-core's `evals`; run setting
   `deckchoice_eval_games` N > 0): the checkpoint's seat chooses its deck among its K candidates of the fixed evaluation
   pools by the evaluator its iteration's self-play used (`used.jsonl`; shipped to a remote evaluation with
@@ -51,11 +53,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 # the package's run settings (zero-core GamePackage.settings; registered by mtgz.az)
 SETTINGS = {
     'evaluator_every': 0,         # N > 0: retrain the deck evaluator every N iterations (a background job); 0: off
-    'evaluator_window': 8,        # the iterations of games a retrain reads (the newest W)
+    'evaluator_window': 40,       # a retrain reads at most the newest W iterations of the run's own games
+    'evaluator_min_window': 8,    # ... and waits for this many after the run's first version
     'evaluator_val_iters': 2,     # of them, the newest V validate
-    'evaluator_kind': 'set',      # the model retrained and exported: 'set' or 'linear'
+    'evaluator_kind': 'set',      # the model retrained and exported: 'linear', 'set' or 'pair'
+    'evaluator_pair_base': 'linear',  # a pair evaluator's strength model ('linear' or 'set': train's --pair-base)
     'evaluator_threads': 4,       # the job's CPU threads
-    'evaluator_half_life': 0.0,   # > 0: the train command's --half-life (iterations), when it has one
+    'evaluator_half_life': 0.0,   # > 0: train's recency weighting --half-life (iterations); 0: none
     'deckchoice_eval_games': 0,   # N > 0: the deck-choice evaluation's games per evaluated iteration; 0: off
 }
 VERSION_RE = re.compile(r'^v(\d{4,})\.json$')
@@ -218,22 +222,24 @@ def launch_if_due(R, it, vs):
     """Start the retrain of iteration b = it - 1 when it is due (module docs)."""
     c = R.cfg
     every = int(c['evaluator_every'])
-    W, V = int(c.get('evaluator_window', 8)), int(c.get('evaluator_val_iters', 2))
+    W, V = int(c.get('evaluator_window', 40)), int(c.get('evaluator_val_iters', 2))
+    M = int(c.get('evaluator_min_window', 8))
     b = it - 1
     first = vs[0][0]                               # the run's first version: no game of the run before it
-    if b % every or b - W + 1 <= first or any(v == b for v, _ in vs) or os.path.isdir(job_dir(R.run, b)):
+    lo = max(first + 1, b - W + 1)                 # the window: the newest W iterations of the run's own games
+    if b % every or b - first < M or any(v == b for v, _ in vs) or os.path.isdir(job_dir(R.run, b)):
         return
-    if not 1 <= V < W:
-        raise ValueError(f'evaluator_val_iters {V}: 1 .. evaluator_window - 1 ({W})')
+    if not 1 <= V < M <= W:
+        raise ValueError(f'evaluator_val_iters {V} < evaluator_min_window {M} <= evaluator_window {W}: not so')
     r = running(R)
     if r is not None:
         _log(R, f'iter {it} deck evaluator: the retrain of v{r:04d} is still running; v{b:04d} skipped')
         return
     d = job_dir(R.run, b)
     os.makedirs(d, exist_ok=True)
-    cmd = [sys.executable, '-m', 'mtgz.sealed.rolling', 'retrain', R.run, '--iter', str(b), '--window', str(W),
+    cmd = [sys.executable, '-m', 'mtgz.sealed.rolling', 'retrain', R.run, '--iter', str(b), '--from-iter', str(lo),
            '--val-iters', str(V), '--kind', str(c.get('evaluator_kind', 'set')),
-           '--threads', str(int(c.get('evaluator_threads', 4))),
+           '--pair-base', str(c.get('evaluator_pair_base', 'linear')), '--threads', str(int(c.get('evaluator_threads', 4))),
            '--half-life', str(float(c.get('evaluator_half_life', 0.0) or 0.0))]
     log = open(os.path.join(d, 'log.txt'), 'w', encoding='utf-8')
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -242,7 +248,7 @@ def launch_if_due(R, it, vs):
     with open(os.path.join(d, 'pid'), 'w') as f:
         f.write(str(p.pid))
     _JOBS[R.run] = (b, p)
-    _log(R, f'iter {it} deck evaluator: the retrain of v{b:04d} started (the games of iterations {b - W + 1}-{b}, '
+    _log(R, f'iter {it} deck evaluator: the retrain of v{b:04d} started (the games of iterations {lo}-{b}, '
             f'pid {p.pid}, {d})')
 
 
@@ -309,30 +315,38 @@ def _run(cmd, log, threads):
     return r.stdout
 
 
-def train_has(flag):
-    """Whether `python -m mtgz.sealed.evaluator train` has the option `flag` (eval-v2's recency options)."""
-    r = subprocess.run([sys.executable, '-m', 'mtgz.sealed.evaluator', 'train', '--help'], cwd=ROOT, capture_output=True,
-                       text=True, env=job_env(1), **({'creationflags': 0x08000000} if os.name == 'nt' else {}))
-    return flag in (r.stdout or '')
+def _finite(x):
+    """A JSON-able copy with every non-finite float None (an export's informational meta: the job's empty test split
+    gives NaN metrics, which JSON parsers refuse)."""
+    if isinstance(x, dict):
+        return {k: _finite(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_finite(v) for v in x]
+    if isinstance(x, float) and (x != x or x in (float('inf'), float('-inf'))):
+        return None
+    return x
 
 
-def retrain(run, b, window=8, val_iters=2, kind='set', threads=4, half_life=0.0, check_decks=400, log=print):
-    """The job (module docs) -> its status dict (also written to status.json; a failure raises after writing it)."""
+def retrain(run, b, lo, val_iters=2, kind='set', threads=4, half_life=0.0, pair_base='linear', check_decks=400,
+            log=print):
+    """The job (module docs): the games of iterations lo..b -> its status dict (also written to status.json; a failure
+    raises after writing it)."""
     from . import scorer as S
+    from .evaluator import Evaluator
     t0 = time.time()
     d = job_dir(run, b)
     os.makedirs(d, exist_ok=True)
-    status = {'ok': False, 'version': f'v{b:04d}', 'iter': b, 'window': [b - window + 1, b], 'kind': kind,
+    status = {'ok': False, 'version': f'v{b:04d}', 'iter': b, 'window': [lo, b], 'kind': kind, 'half_life': half_life,
               'started': t0}
     try:
         snap = os.path.join(d, 'snap')
         if os.path.isdir(snap):
             shutil.rmtree(snap)
-        n, seen = snapshot(run, b - window + 1, b, snap)
+        n, seen = snapshot(run, lo, b, snap)
         status.update(games_lines=n, iterations=seen)
         log(f'# snapshot: {n} games of iterations {seen}')
         if len(seen) < val_iters + 1:
-            raise RuntimeError(f'the window {b - window + 1}-{b} has games of {len(seen)} iterations: too few to train')
+            raise RuntimeError(f'the window {lo}-{b} has games of {len(seen)} iterations: too few to train')
         py = sys.executable
         values = os.path.join(d, 'values.npz')
         _run([py, '-m', 'mtgz.sealed.evaluator', 'values', snap, '--checkpoint', 'played', '--models',
@@ -340,27 +354,31 @@ def retrain(run, b, window=8, val_iters=2, kind='set', threads=4, half_life=0.0,
         tdir = os.path.join(d, 'train')
         cmd = [py, '-m', 'mtgz.sealed.evaluator', 'train', snap, '--values', values, '--out', tdir, '--split', 'time',
                '--time-from', str(b + 1), '--val-iters', str(val_iters), '--kinds', kind, '--pools', '0',
-               '--threads', str(threads), '--seed', str(b)]
+               '--threads', str(threads), '--seed', str(b), '--from-iter', str(lo)]
+        if kind == 'pair':
+            cmd += ['--pair-base', pair_base]
         if half_life > 0:
-            if not train_has('--half-life'):
-                raise RuntimeError('evaluator_half_life is set but `mtgz.sealed.evaluator train` has no --half-life')
             cmd += ['--half-life', str(half_life)]
         _run(cmd, log, threads)
         with open(os.path.join(tdir, 'report.json'), encoding='utf-8') as f:
             rep = json.load(f)
         pt = os.path.join(tdir, f'evaluator_{kind}.pt')
         staged = os.path.join(d, f'v{b:04d}.json')
-        sha = S.export(pt, staged)
-        cmp = S.compare(staged, pt, S.sample_decks(check_decks, seed=b))
+        e = Evaluator.load(pt)
+        e.meta = _finite(e.meta)
+        e.export(staged)                           # (mtgz.sealed.evaluator's export format, ENGINE.md 111.6)
+        sha = S.sha256_file(staged)
+        cmp = S.compare(staged, S.sample_decks(check_decks, seed=b), pt)
         log('# export check ' + json.dumps(cmp))
-        if max(cmp['torch_engine'], cmp['torch_numpy'], cmp['numpy_engine']) > S.TOLERANCE:
-            raise RuntimeError(f'the export differs from torch by more than {S.TOLERANCE}: {cmp}')
+        why = S.failed(cmp)
+        if why:
+            raise RuntimeError(f'the export does not score as its reference and torch: {why}')
         dst = os.path.join(edir(run), f'v{b:04d}.json')
         tmp = dst + f'.{os.getpid()}.tmp'
         shutil.copyfile(staged, tmp)
         os.replace(tmp, dst)
         sel = rep['models'][kind]['selected']
-        status.update(ok=True, sha256=sha, games=rep['dataset']['games'], selected={'lam': sel['lam'], 'hyper': sel['hyper']},
+        status.update(ok=True, sha256=sha, games=rep['dataset']['games'], selected={'lam': sel.get('lam'), 'hyper': sel['hyper']},
                       val=min((g['val_logloss'] for g in rep['models'][kind]['grid']), default=None),
                       export_check=cmp, seconds=round(time.time() - t0, 1))
         _append(os.path.join(edir(run), 'index.jsonl'), {'version': f'v{b:04d}', 'iter': b, 'sha256': sha, 'window':
@@ -477,9 +495,10 @@ def main(argv=None):
     pr = sub.add_parser('retrain', help='one retrain of a run\'s evaluator (the background job)')
     pr.add_argument('run')
     pr.add_argument('--iter', type=int, required=True)
-    pr.add_argument('--window', type=int, default=8)
+    pr.add_argument('--from-iter', type=int, required=True, help="the window's first iteration")
     pr.add_argument('--val-iters', type=int, default=2)
-    pr.add_argument('--kind', default='set', choices=['set', 'linear'])
+    pr.add_argument('--kind', default='set', choices=['linear', 'set', 'pair'])
+    pr.add_argument('--pair-base', default='linear', choices=['linear', 'set'])
     pr.add_argument('--threads', type=int, default=4)
     pr.add_argument('--half-life', type=float, default=0.0)
     pd = sub.add_parser('deckeval', help='the deck-choice evaluation of any checkpoint')
@@ -496,7 +515,7 @@ def main(argv=None):
     if a.cmd == 'retrain':
         def log(s):
             print(s, flush=True)
-        st = retrain(a.run, a.iter, a.window, a.val_iters, a.kind, a.threads, a.half_life, log=log)
+        st = retrain(a.run, a.iter, a.from_iter, a.val_iters, a.kind, a.threads, a.half_life, a.pair_base, log=log)
         print(json.dumps({k: v for k, v in st.items() if k != 'export_check'}))
         return st
     import mtgz.az  # noqa: F401

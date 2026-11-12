@@ -27,30 +27,39 @@ fn choice_spec(kind: &str, k: u8, explore: f64, extra: &str) -> MtgSpec {
     .unwrap()
 }
 
+/// The fixtures: `python -m mtgz.sealed.scorer fixtures` (random evaluators of every kind, exported by
+/// `mtgz.sealed.evaluator`'s `Evaluator.export`, and torch's scores of 48 decks).
+const FIXTURES: [&str; 4] = ["linear", "set", "pair", "pair_linear"];
+
 #[test]
 fn the_scorer_scores_as_torch_does() {
     let check: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(data("scorer_check.json")).unwrap()).unwrap();
     let decks: Vec<Vec<u16>> = check["decks"].as_array().unwrap().iter().map(|d| ids(d.as_array().unwrap())).collect();
     assert!(decks.len() >= 40);
-    for kind in ["linear", "set"] {
-        let path = data(&format!("scorer_{kind}.json"));
+    for name in FIXTURES {
+        let path = data(&format!("scorer_{name}.json"));
         let s = scorer::load(&path, sealed::db()).unwrap();
         let bytes = std::fs::read(&path).unwrap();
         assert_eq!(s.sha256, scorer::sha256(&bytes), "the sha256 of the bytes");
-        let want: Vec<f64> = check[kind].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+        match name {
+            "pair" => assert_eq!((s.kind, s.field_decks()), (scorer::Kind::Pair { base: scorer::Base::Set { d: 4, k: 3, hidden: 8 }, dim: 3 }, 24)),
+            "pair_linear" => assert_eq!((s.kind, s.field_decks()), (scorer::Kind::Pair { base: scorer::Base::Linear, dim: 0 }, 24)),
+            _ => assert_eq!(s.field_decks(), 0),
+        }
+        let want: Vec<f64> = check[name].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
         let mut worst = 0.0f64;
         for (d, w) in decks.iter().zip(&want) {
             let got = s.score(d).unwrap();
             worst = worst.max((got - w).abs());
         }
-        println!("{kind}: {} decks, the largest |engine - torch| {worst:.2e}", decks.len());
-        assert!(worst < 1e-5, "{kind}: {worst}");
+        println!("{name}: {} decks, the largest |engine - torch| {worst:.2e}", decks.len());
+        assert!(worst < 1e-5, "{name}: {worst}");
         // the deck's order does not matter, and the spread of the scores is real (a fixture that tests something)
         let mut rev = decks[0].clone();
         rev.reverse();
         assert_eq!(s.score(&rev).unwrap(), s.score(&decks[0]).unwrap());
         let (lo, hi) = want.iter().fold((1.0f64, 0.0f64), |(a, b), &x| (a.min(x), b.max(x)));
-        assert!(hi - lo > 0.05, "{kind}: the fixture's scores spread {lo}..{hi}");
+        assert!(hi - lo > 0.05, "{name}: the fixture's scores spread {lo}..{hi}");
         let again = scorer::load(&path, sealed::db()).unwrap();
         assert!(std::sync::Arc::ptr_eq(&s, &again) || again.sha256 == s.sha256, "read once per process (or again, the same)");
     }
@@ -60,42 +69,51 @@ fn the_scorer_scores_as_torch_does() {
 fn the_scorer_refuses_what_it_cannot_score() {
     let db = sealed::db();
     let base: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(data("scorer_set.json")).unwrap()).unwrap();
-    let bad = |f: &dyn Fn(&mut serde_json::Value), what: &str| {
-        let mut v = base.clone();
+    let pair: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(data("scorer_pair.json")).unwrap()).unwrap();
+    let bad = |v0: &serde_json::Value, f: &dyn Fn(&mut serde_json::Value), what: &str| {
+        let mut v = v0.clone();
         f(&mut v);
         let e = scorer::Scorer::parse(v.to_string().as_bytes(), "x.json", db).unwrap_err();
         assert!(e.contains(what), "{what}: {e}");
     };
-    bad(&|v| v["format"] = serde_json::json!("other"), "not an mtgz-deck-scorer");
-    bad(&|v| v["version"] = serde_json::json!(2), "version");
-    bad(&|v| v["kind"] = serde_json::json!("pair"), "kind \"pair\"");
-    bad(&|v| v["features"][3] = serde_json::json!("x"), "deck features");
-    bad(&|v| v["cards"][0]["name"] = serde_json::json!("No Such Card"), "not a card of the EoE table");
-    bad(&|v| v["cards"][1]["name"] = v["cards"][0]["name"].clone(), "twice");
-    bad(&|v| v["members"][0]["wc"].as_array_mut().unwrap().pop().map(|_| ()).unwrap(), "wc");
-    bad(&|v| v["members"][1]["emb"].as_array_mut().unwrap().pop().map(|_| ()).unwrap(), "emb");
-    bad(&|v| v["members"][0]["mlp"][0]["b"] = serde_json::json!([1.0]), "biases");
-    bad(&|v| v["scaler"]["std"][0] = serde_json::json!(0.0), "scaler");
-    bad(&|v| v["members"] = serde_json::json!([]), "no members");
-    bad(&|v| v["combine"] = serde_json::json!("max"), "combine");
+    let pop = |v: &mut serde_json::Value| v.as_array_mut().unwrap().pop().map(|_| ()).unwrap();
+    bad(&base, &|v| v["format"] = serde_json::json!("other"), "not an mtgz-deck-evaluator-export");
+    bad(&base, &|v| v["version"] = serde_json::json!(2), "version");
+    bad(&base, &|v| v["kind"] = serde_json::json!("triple"), "kind \"triple\"");
+    bad(&base, &|v| v["features"]["names"][3] = serde_json::json!("x"), "deck features");
+    bad(&base, &|v| v["features"]["std"][0] = serde_json::json!(0.0), "std");
+    bad(&base, &|v| v["cards"]["names"][0] = serde_json::json!("No Such Card"), "not a card of the EoE table");
+    bad(&base, &|v| v["cards"]["names"][1] = v["cards"]["names"][0].clone(), "twice");
+    bad(&base, &|v| v["cards"]["land"][0] = serde_json::json!(0.5), "not 0 or 1");
+    bad(&base, &|v| pop(&mut v["cards"]["mv"]), "cards.mv");
+    bad(&base, &|v| pop(&mut v["members"][0]["wc"]), "wc");
+    bad(&base, &|v| pop(&mut v["members"][1]["emb"]), "emb");
+    bad(&base, &|v| v["members"][0]["b1"] = serde_json::json!([1.0]), "b1");
+    bad(&base, &|v| v["members"] = serde_json::json!([]), "no members");
+    bad(&base, &|v| v["hyper"] = serde_json::json!({}), "hyper.d");
+    bad(&pair, &|v| v["field"] = serde_json::Value::Null, "without a stored field");
+    bad(&pair, &|v| v["field"]["decks"][0][0] = serde_json::json!([9999, 1]), "field deck 0");
+    bad(&pair, &|v| v["hyper"]["base"] = serde_json::json!("deep"), "hyper.base");
+    bad(&pair, &|v| v["members"][0]["strength"]["bias"] = serde_json::json!(0.5), "no bias");
+    bad(&pair, &|v| pop(&mut v["members"][0]["W"]), "W");
     let e = scorer::load(&data("no_such_scorer.json"), db).unwrap_err();
     assert!(e.contains("no_such_scorer"), "{e}");
-    // a card outside the table: an error at scoring, never a dropped card
+    // a card out of the table: an error at scoring, never a dropped card; Paradox Haze is in the registry's order but
+    // not the table's (`in_table` 0)
     let mut v = base.clone();
-    let last = v["cards"].as_array_mut().unwrap().pop().unwrap();
-    for m in v["members"].as_array_mut().unwrap() {
-        for k in ["wc", "emb", "u"] {
-            m[k].as_array_mut().unwrap().pop();
-        }
-    }
+    let name = v["cards"]["names"][0].as_str().unwrap().to_string();
+    v["cards"]["in_table"][0] = serde_json::json!(0.0);
     let s = scorer::Scorer::parse(v.to_string().as_bytes(), "short.json", db).unwrap();
-    let card = db.expect_id(last["name"].as_str().unwrap()).unwrap();
-    assert!(s.score(&[card; 40]).unwrap_err().contains("not in its table"));
+    let card = db.expect_id(&name).unwrap();
+    assert!(!s.has(card) && s.score(&[card; 40]).unwrap_err().contains("not in its table"));
+    let names: Vec<&str> = base["cards"]["names"].as_array().unwrap().iter().map(|x| x.as_str().unwrap()).collect();
+    let haze = names.iter().position(|&n| n == "Paradox Haze").expect("Paradox Haze has its line");
+    assert_eq!(base["cards"]["in_table"][haze].as_f64(), Some(0.0));
 }
 
 #[test]
 fn the_evaluator_choice_key_parses_and_refuses() {
-    for kind in ["linear", "set"] {
+    for kind in ["linear", "set", "pair"] {
         let s = choice_spec(kind, 8, 0.25, "");
         let sl = s.sealed.as_deref().unwrap();
         let dc = sl.deck_choice.as_ref().unwrap();
@@ -138,7 +156,7 @@ fn the_evaluator_choice_key_parses_and_refuses() {
 #[test]
 fn the_evaluator_chooses_the_best_candidate_of_the_seats_own_pool() {
     let db = sealed::db();
-    for kind in ["linear", "set"] {
+    for kind in ["linear", "set", "pair"] {
         let s = choice_spec(kind, 8, 0.25, "");
         let sl = s.sealed.as_deref().unwrap();
         let dc = sl.deck_choice.as_ref().unwrap();

@@ -1,23 +1,31 @@
-//! The deck evaluator's scorer (ENGINE.md 112): a trained `mtgz.sealed.evaluator` ensemble read from its exported
-//! JSON (`mtgz.sealed.scorer`, format `mtgz-deck-scorer` version 1), scoring a 40-card deck's probability of winning
-//! against the field exactly as the torch model does (f64 here, f32 there: within 1e-5, tested). The sealed spec's
-//! deck choice by an evaluator (`DeckChoiceSpec::by`) and the hidden decklists' prior of such a field read it, so
-//! self-play chooses decks with no Python callback.
+//! The deck evaluator's scorer (ENGINE.md 112): a trained `mtgz.sealed.evaluator` ensemble read from its torch-free
+//! export (`Evaluator.export`, `"format": "mtgz-deck-evaluator-export"` version 1, specified in that module's docstring
+//! and ENGINE.md 111.6), scoring a 40-card deck's probability of winning against the field exactly as the export's
+//! numpy reference (`ReferenceScorer`) and the torch model do (f64 here; tested). The sealed spec's deck choice by an
+//! evaluator (`DeckChoiceSpec::by`) and the hidden decklists' prior of such a field read it, so self-play chooses
+//! decks with no Python callback.
 //!
-//! * **The file** carries everything a score needs: the card table (the evaluator's vocabulary, each card with the
-//!   attributes the deck features read: land, basic, creature, mana value, colours, a basic's colour), the feature
-//!   names (checked against [`FEATURES`]), the scaler, and per member the weights of its kind (`linear`: bias, the
-//!   features' and the cards' weights; `set`: those, the card embeddings, the pairwise vectors and the MLP). The
-//!   engine never re-derives an attribute from its own card data: the features are the Python ones by construction.
-//! * **The score**: counts over the table (a deck card the table lacks is an error, never a dropped card); the 35
-//!   deck features of `mtgz.sealed.evaluator.deck_features`, scaled; per member z = bias + Fz . wf + X . wc, for
-//!   `set` + mlp([X @ emb / 40, Fz]) + 0.5 (|X @ u|^2 - X . |u|^2) / 40; P = the members' mean of sigmoid(z).
+//! * **The file** carries everything a score needs: the card table in the EoE registry's order (`eoe_cards.txt`; a
+//!   card `in_table` 0 - Paradox Haze - is never in a deck) with the attributes the deck features read (land, basic,
+//!   creature, mana value, colours, a basic's colour), the feature names (checked against [`FEATURES`]) and scaler,
+//!   and per member the weights of its kind. The engine never re-derives an attribute from its own card data: the
+//!   features are the export's by construction.
+//! * **The kinds** ([`Kind`]): `linear` (z = bias + wc . x + wf . f), `set` (+ the MLP of [x emb / 40, f] and the
+//!   pairwise term 0.5 (|x u|^2 - x . |u|^2) / 40), each P = the members' mean of sigmoid(z): P(the deck wins against
+//!   the field its training games had); `pair` (P(A beats B) = sigmoid(s(A) - s(B) + e(A) . W e(B)), s a linear or set
+//!   strength without bias, e(x) = x U / 40 + f P), scored **against the export's stored field** B_1..B_N: the members'
+//!   mean of (1/N) sum_j sigmoid(s(A) - s(B_j) + e(A) . g_j), s(B_j) and g_j = W e(B_j) computed once at load. A pair
+//!   export without a stored field is refused (a named field would be a file of its own, pinned like the evaluator:
+//!   not built, ENGINE.md 112.7).
+//! * **The score**: counts over the table (a deck card the table lacks is an error, never a dropped card); the 35 deck
+//!   features (`mtgz.sealed.evaluator.deck_features`, the export's formulas: the main pair a stable sort, ties to the
+//!   earlier colour), scaled; then the kind's formula.
 //! * **Its identity**: the file's sha256 ([`sha256`], computed here from the bytes read). A spec may pin it
 //!   (`"evaluator_sha"`): a file with other contents is an error. The game log writes it beside every chosen deck.
 //! * **Loading** reads the file once per process and path while its size and modification time stay the same
-//!   ([`load`]; a run's versions are immutable files); the content hash is always the bytes'.
-//! * **Kinds**: `linear` and `set`. Any other (the coming pairwise kind, "P(A beats B)" against a field summary,
-//!   ENGINE.md 112) is refused loudly at load: [`Kind`] is where it goes.
+//!   ([`load`]; a run's versions are immutable files); the content hash is always the bytes'. Everything malformed -
+//!   another format or version, an unknown kind, other feature names, a size, a non-0/1 flag, a card of the table not
+//!   in the EoE table or twice - is refused loudly.
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
@@ -25,8 +33,8 @@ use serde_json::Value;
 use crate::db::CardDb;
 use crate::ids::DefId;
 
-/// The format this engine reads.
-pub const FORMAT: &str = "mtgz-deck-scorer";
+/// The format this engine reads (`mtgz.sealed.evaluator.EXPORT_FORMAT`).
+pub const FORMAT: &str = "mtgz-deck-evaluator-export";
 pub const VERSION: u64 = 1;
 
 /// The deck features, in order (`mtgz.sealed.evaluator.FEATURES`): a file whose list differs is refused.
@@ -37,37 +45,49 @@ pub const FEATURES: [&str; 35] = [
     "pair_BR", "pair_BG", "pair_RG",
 ];
 const NF: usize = FEATURES.len();
-const COLOURS: &str = "WUBRG";
 
-/// A card of the scorer's table: what the deck features read.
+/// A card of the export's table: what the deck features read.
 #[derive(Clone, Copy, Debug)]
 struct Card {
     land: bool,
     basic: bool,
     creature: bool,
     mv: f64,
-    /// WUBRG bits (bit i = `COLOURS[i]`).
+    /// WUBRG bits (bit i: the export's column i).
     colours: u8,
     basic_colour: u8,
 }
 
-/// The model of every member.
+/// A deck model's architecture: the linear terms, or with the set network's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    /// Logistic regression on the card counts and the deck features.
+pub enum Base {
     Linear,
-    /// The linear terms, DeepSets over card embeddings (dimension d) with the features through an MLP (`hidden`
-    /// units), and the pairwise term (card vectors of dimension k).
+    /// Card embeddings of dimension d, pairwise card vectors of dimension k, an MLP of `hidden` units.
     Set { d: usize, k: usize, hidden: usize },
 }
 
-/// One member's weights (dense, row-major).
-struct Member {
+/// The export's kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Linear,
+    Set { d: usize, k: usize, hidden: usize },
+    /// P(A beats B) from a strength (`base`, no bias) and a matchup term of `dim` dimensions (0: Bradley-Terry),
+    /// scored against the stored field.
+    Pair { base: Base, dim: usize },
+}
+
+/// A linear or set member (a pair member's strength: bias 0).
+struct DeckModel {
     bias: f64,
     wf: Vec<f64>,
     wc: Vec<f64>,
-    /// `set`: emb [V x d], u [V x k], |u_c|^2 [V], the MLP's first layer [hidden x (d + F)] and bias [hidden], its
-    /// second layer [hidden] and bias.
+    set: Option<SetPart>,
+}
+
+/// The set network's weights (row-major): emb [C x d], u [C x k], |u_c|^2 [C], w1 [hidden x (d + F)], b1, w2, b2.
+struct SetPart {
+    d: usize,
+    k: usize,
     emb: Vec<f64>,
     u: Vec<f64>,
     uu: Vec<f64>,
@@ -77,6 +97,22 @@ struct Member {
     b2: f64,
 }
 
+/// A pair member: its strength, the embedding's U [C x dim] and P [F x dim], and the stored field precomputed: per field
+/// deck j, s(B_j) and g_j = W e(B_j) [N x dim].
+struct PairMember {
+    strength: DeckModel,
+    dim: usize,
+    u: Vec<f64>,
+    p: Vec<f64>,
+    field_s: Vec<f64>,
+    field_g: Vec<f64>,
+}
+
+enum Members {
+    Deck(Vec<DeckModel>),
+    Pair(Vec<PairMember>),
+}
+
 /// A loaded scorer (module docs).
 pub struct Scorer {
     /// The file it was read from, and the sha256 of its bytes.
@@ -84,22 +120,32 @@ pub struct Scorer {
     pub sha256: [u8; 32],
     pub kind: Kind,
     cards: Vec<Card>,
-    /// Per card definition of the EoE table: its row in the table (u16::MAX: none).
+    /// Per card definition of the EoE table: its row in the export's table (u16::MAX: none).
     index: Vec<u16>,
     mean: Vec<f64>,
     std: Vec<f64>,
-    members: Vec<Member>,
+    members: Members,
+    /// The stored field's decks (pair; 0 otherwise).
+    field_n: usize,
 }
 
 impl std::fmt::Debug for Scorer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Scorer({} {:?}, {} members, sha256 {})", self.path, self.kind, self.members.len(), self.sha_hex())
+        write!(f, "Scorer({} {:?}, {} members, sha256 {})", self.path, self.kind, self.members(), self.sha_hex())
     }
 }
 
 fn floats(v: &Value, what: &str) -> Result<Vec<f64>, String> {
     let a = v.as_array().ok_or_else(|| format!("{what} must be a list of numbers"))?;
     a.iter().map(|x| x.as_f64().filter(|f| f.is_finite()).ok_or_else(|| format!("{what}: {x} is not a finite number"))).collect()
+}
+
+fn floats_n(v: &Value, n: usize, what: &str) -> Result<Vec<f64>, String> {
+    let x = floats(v, what)?;
+    if x.len() != n {
+        return Err(format!("{what}: {} values, not {n}", x.len()));
+    }
+    Ok(x)
 }
 
 /// A matrix (a list of rows) of `rows` x `cols` as one row-major vector.
@@ -110,107 +156,271 @@ fn matrix(v: &Value, rows: usize, cols: usize, what: &str) -> Result<Vec<f64>, S
     }
     let mut out = Vec::with_capacity(rows * cols);
     for (i, r) in a.iter().enumerate() {
-        let r = floats(r, &format!("{what} row {i}"))?;
-        if r.len() != cols {
-            return Err(format!("{what} row {i}: {} columns, not {cols}", r.len()));
-        }
-        out.extend(r);
+        out.extend(floats_n(r, cols, &format!("{what} row {i}"))?);
     }
     Ok(out)
 }
 
-fn colour_bits(s: &str, what: &str) -> Result<u8, String> {
-    s.chars().try_fold(0u8, |m, ch| COLOURS.find(ch).map(|i| m | 1 << i).ok_or_else(|| format!("{what}: colour {ch:?} (WUBRG)")))
+fn scalar(v: &Value, what: &str) -> Result<f64, String> {
+    v.as_f64().filter(|f| f.is_finite()).ok_or_else(|| format!("{what} must be a finite number"))
+}
+
+/// A 0/1 flag of the card table.
+fn flag(x: f64, what: &str) -> Result<bool, String> {
+    if x == 0.0 {
+        Ok(false)
+    } else if x == 1.0 {
+        Ok(true)
+    } else {
+        Err(format!("{what}: {x}, not 0 or 1"))
+    }
+}
+
+fn size(h: &Value, k: &str) -> Result<usize, String> {
+    h.get(k).and_then(|x| x.as_u64()).map(|n| n as usize).ok_or_else(|| format!("hyper.{k} missing"))
+}
+
+fn set_base(h: &Value) -> Result<Base, String> {
+    Ok(Base::Set { d: size(h, "d")?, k: size(h, "k")?, hidden: size(h, "hidden")? })
+}
+
+impl DeckModel {
+    /// A linear or set member of `base` over `nc` cards (`bias`: the key is read; else 0, a pair's strength).
+    fn parse(m: &Value, base: Base, nc: usize, bias: bool, what: &str) -> Result<DeckModel, String> {
+        let w = |k: &str| m.get(k).unwrap_or(&Value::Null);
+        let b = if bias { scalar(w("bias"), &format!("{what} bias"))? } else { 0.0 };
+        if !bias && m.get("bias").is_some() {
+            return Err(format!("{what}: a pair's strength has no bias"));
+        }
+        let wf = floats_n(w("wf"), NF, &format!("{what} wf"))?;
+        let wc = floats_n(w("wc"), nc, &format!("{what} wc"))?;
+        let set = match base {
+            Base::Linear => {
+                if m.get("emb").is_some() {
+                    return Err(format!("{what}: set weights in a linear member"));
+                }
+                None
+            }
+            Base::Set { d, k, hidden } => {
+                let u = matrix(w("u"), nc, k, &format!("{what} u"))?;
+                let uu = (0..nc).map(|c| u[c * k..(c + 1) * k].iter().map(|x| x * x).sum()).collect();
+                Some(SetPart {
+                    d,
+                    k,
+                    emb: matrix(w("emb"), nc, d, &format!("{what} emb"))?,
+                    u,
+                    uu,
+                    w1: matrix(w("w1"), hidden, d + NF, &format!("{what} w1"))?,
+                    b1: floats_n(w("b1"), hidden, &format!("{what} b1"))?,
+                    w2: floats_n(w("w2"), hidden, &format!("{what} w2"))?,
+                    b2: scalar(w("b2"), &format!("{what} b2"))?,
+                })
+            }
+        };
+        Ok(DeckModel { bias: b, wf, wc, set })
+    }
+
+    /// z of a deck (`rows`: (card row, count), `fz`: its scaled features).
+    fn z(&self, rows: &[(usize, f64)], fz: &[f64]) -> f64 {
+        let mut z = self.bias + (0..NF).map(|j| fz[j] * self.wf[j]).sum::<f64>() + rows.iter().map(|&(i, x)| x * self.wc[i]).sum::<f64>();
+        if let Some(s) = &self.set {
+            let (d, k) = (s.d, s.k);
+            // DeepSets: h = x emb / 40, then the MLP of [h, f]
+            let mut x = vec![0.0; d + NF];
+            for &(i, c) in rows {
+                for (j, h) in x[..d].iter_mut().enumerate() {
+                    *h += c * s.emb[i * d + j];
+                }
+            }
+            for h in &mut x[..d] {
+                *h /= 40.0;
+            }
+            x[d..].copy_from_slice(fz);
+            let mut out = s.b2;
+            for (r, (&b, &w2)) in s.b1.iter().zip(&s.w2).enumerate() {
+                let row = &s.w1[r * (d + NF)..(r + 1) * (d + NF)];
+                out += w2 * (b + row.iter().zip(&x).map(|(w, v)| w * v).sum::<f64>()).max(0.0);
+            }
+            z += out;
+            // the pairwise term: 0.5 (|x u|^2 - x . |u|^2) / 40
+            let mut su = vec![0.0; k];
+            for &(i, c) in rows {
+                for (j, v) in su.iter_mut().enumerate() {
+                    *v += c * s.u[i * k + j];
+                }
+            }
+            let own: f64 = rows.iter().map(|&(i, c)| c * s.uu[i]).sum();
+            z += 0.5 * (su.iter().map(|v| v * v).sum::<f64>() - own) / 40.0;
+        }
+        z
+    }
+}
+
+impl PairMember {
+    /// e(x) = x U / 40 + f P (`dim` floats).
+    fn embed(&self, rows: &[(usize, f64)], fz: &[f64]) -> Vec<f64> {
+        let dim = self.dim;
+        let mut e = vec![0.0; dim];
+        for &(i, c) in rows {
+            for (j, v) in e.iter_mut().enumerate() {
+                *v += c * self.u[i * dim + j];
+            }
+        }
+        for v in &mut e {
+            *v /= 40.0;
+        }
+        for (f, &x) in fz.iter().enumerate() {
+            for (j, v) in e.iter_mut().enumerate() {
+                *v += x * self.p[f * dim + j];
+            }
+        }
+        e
+    }
+}
+
+fn sigmoid(z: f64) -> f64 {
+    1.0 / (1.0 + (-z).exp())
 }
 
 impl Scorer {
-    /// The scorer of a file's bytes (`path` for messages and the record). Every check is loud: the format and
-    /// version, a known kind, the features' names, the sizes, every card a card of `db`.
+    /// The scorer of an export's bytes (`path` for messages and the record; `db` the EoE table). Every check is loud
+    /// (module docs).
     pub fn parse(bytes: &[u8], path: &str, db: &CardDb) -> Result<Scorer, String> {
-        let err = |e: String| format!("deck scorer {path}: {e}");
+        let err = |e: String| format!("deck evaluator {path}: {e}");
         let v: Value = serde_json::from_slice(bytes).map_err(|e| err(format!("not JSON: {e}")))?;
         let o = v.as_object().ok_or_else(|| err("not a JSON object".into()))?;
         if o.get("format").and_then(|x| x.as_str()) != Some(FORMAT) || o.get("version").and_then(|x| x.as_u64()) != Some(VERSION) {
-            return Err(err(format!("not an {FORMAT} file of version {VERSION}")));
-        }
-        let names: Vec<&str> = o.get("features").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
-        if names != FEATURES {
-            return Err(err(format!("its deck features {names:?} are not this engine's ({FEATURES:?})")));
+            return Err(err(format!("not an {FORMAT} file of version {VERSION} (mtgz.sealed.evaluator's Evaluator.export)")));
         }
         let hyper = o.get("hyper").cloned().unwrap_or(Value::Null);
-        let size = |k: &str| hyper.get(k).and_then(|x| x.as_u64()).map(|n| n as usize).ok_or_else(|| err(format!("hyper.{k} missing")));
         let kind = match o.get("kind").and_then(|x| x.as_str()) {
             Some("linear") => Kind::Linear,
-            Some("set") => Kind::Set { d: size("d")?, k: size("k")?, hidden: size("hidden")? },
-            Some(other) => return Err(err(format!("kind {other:?}: this engine scores \"linear\" and \"set\" (ENGINE.md 112)"))),
+            Some("set") => match set_base(&hyper).map_err(&err)? {
+                Base::Set { d, k, hidden } => Kind::Set { d, k, hidden },
+                Base::Linear => unreachable!(),
+            },
+            Some("pair") => {
+                let base = match hyper.get("base").and_then(|x| x.as_str()) {
+                    Some("linear") => Base::Linear,
+                    Some("set") => set_base(&hyper).map_err(&err)?,
+                    b => return Err(err(format!("pair: hyper.base {b:?} (linear or set)"))),
+                };
+                Kind::Pair { base, dim: size(&hyper, "dim").map_err(&err)? }
+            }
+            Some(other) => return Err(err(format!("kind {other:?}: this engine scores \"linear\", \"set\" and \"pair\""))),
             None => return Err(err("kind missing".into())),
         };
-        if o.get("combine").and_then(|x| x.as_str()) != Some("mean_sigmoid") {
-            return Err(err("combine must be \"mean_sigmoid\"".into()));
+        // the card table, in the registry's order
+        let c = o.get("cards").ok_or_else(|| err("cards missing".into()))?;
+        let names: Vec<&str> = c.get("names").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
+        let nc = names.len();
+        if nc == 0 || nc >= u16::MAX as usize {
+            return Err(err("cards.names: a list of card names".into()));
         }
-        // the card table
-        let ca = o.get("cards").and_then(|x| x.as_array()).ok_or_else(|| err("cards missing".into()))?;
+        let col = |k: &str| floats_n(c.get(k).unwrap_or(&Value::Null), nc, &format!("cards.{k}")).map_err(&err);
+        let (in_table, land, basic, creature, mv) = (col("in_table")?, col("land")?, col("basic")?, col("creature")?, col("mv")?);
+        let colours = matrix(c.get("colours").unwrap_or(&Value::Null), nc, 5, "cards.colours").map_err(&err)?;
+        let basic_colour = matrix(c.get("basic_colour").unwrap_or(&Value::Null), nc, 5, "cards.basic_colour").map_err(&err)?;
         let mut index = vec![u16::MAX; db.len()];
-        let mut cards = Vec::with_capacity(ca.len());
-        for (i, c) in ca.iter().enumerate() {
-            let name = c.get("name").and_then(|x| x.as_str()).ok_or_else(|| err(format!("card {i}: no name")))?;
-            let flag = |k: &str| match c.get(k).and_then(|x| x.as_u64()) {
-                Some(0) => Ok(false),
-                Some(1) => Ok(true),
-                _ => Err(err(format!("card {name}: {k} must be 0 or 1"))),
+        let mut cards = Vec::with_capacity(nc);
+        for (i, &name) in names.iter().enumerate() {
+            let bits = |m: &[f64]| -> Result<u8, String> {
+                (0..5).try_fold(0u8, |b, j| flag(m[i * 5 + j], &format!("card {name} colour {j}")).map(|on| b | (on as u8) << j))
             };
-            let s = |k: &str| c.get(k).and_then(|x| x.as_str()).ok_or_else(|| err(format!("card {name}: {k} missing")));
-            let card = Card {
-                land: flag("land")?,
-                basic: flag("basic")?,
-                creature: flag("creature")?,
-                mv: c.get("mv").and_then(|x| x.as_f64()).filter(|m| m.is_finite() && *m >= 0.0).ok_or_else(|| err(format!("card {name}: mv")))?,
-                colours: colour_bits(s("colours")?, name).map_err(&err)?,
-                basic_colour: colour_bits(s("basic_colour")?, name).map_err(&err)?,
-            };
-            let id = db.id(name).ok_or_else(|| err(format!("card {name:?} is not a card of the EoE table")))?;
-            if index[id as usize] != u16::MAX {
-                return Err(err(format!("card {name:?} twice in the table")));
+            cards.push(Card {
+                land: flag(land[i], &format!("card {name} land")).map_err(&err)?,
+                basic: flag(basic[i], &format!("card {name} basic")).map_err(&err)?,
+                creature: flag(creature[i], &format!("card {name} creature")).map_err(&err)?,
+                mv: Some(mv[i]).filter(|m| *m >= 0.0).ok_or_else(|| err(format!("card {name}: mv {}", mv[i])))?,
+                colours: bits(&colours).map_err(&err)?,
+                basic_colour: bits(&basic_colour).map_err(&err)?,
+            });
+            if flag(in_table[i], &format!("card {name} in_table")).map_err(&err)? {
+                let id = db.id(name).ok_or_else(|| err(format!("card {name:?} is in its table but not a card of the EoE table")))?;
+                if index[id as usize] != u16::MAX {
+                    return Err(err(format!("card {name:?} twice in the table")));
+                }
+                index[id as usize] = i as u16;
             }
-            index[id as usize] = i as u16;
-            cards.push(card);
         }
-        let nv = cards.len();
-        let sc = o.get("scaler").ok_or_else(|| err("scaler missing".into()))?;
-        let mean = floats(sc.get("mean").unwrap_or(&Value::Null), "scaler.mean").map_err(&err)?;
-        let std = floats(sc.get("std").unwrap_or(&Value::Null), "scaler.std").map_err(&err)?;
-        if mean.len() != NF || std.len() != NF || std.iter().any(|&s| s <= 0.0) {
-            return Err(err(format!("the scaler must have {NF} means and {NF} positive sds")));
+        // the features and their scaler
+        let f = o.get("features").ok_or_else(|| err("features missing".into()))?;
+        let fnames: Vec<&str> = f.get("names").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
+        if fnames != FEATURES {
+            return Err(err(format!("its deck features {fnames:?} are not this engine's ({FEATURES:?})")));
+        }
+        let mean = floats_n(f.get("mean").unwrap_or(&Value::Null), NF, "features.mean").map_err(&err)?;
+        let std = floats_n(f.get("std").unwrap_or(&Value::Null), NF, "features.std").map_err(&err)?;
+        if std.iter().any(|&s| s <= 0.0) {
+            return Err(err("features.std: every sd positive".into()));
         }
         let ma = o.get("members").and_then(|x| x.as_array()).filter(|a| !a.is_empty()).ok_or_else(|| err("no members".into()))?;
-        let mut members = Vec::with_capacity(ma.len());
-        for (mi, m) in ma.iter().enumerate() {
-            let w = |k: &str| m.get(k).unwrap_or(&Value::Null);
-            let what = |k: &str| format!("member {mi} {k}");
-            let bias = w("bias").as_f64().filter(|b| b.is_finite()).ok_or_else(|| err(what("bias")))?;
-            let wf = floats(w("wf"), &what("wf")).map_err(&err)?;
-            let wc = floats(w("wc"), &what("wc")).map_err(&err)?;
-            if wf.len() != NF || wc.len() != nv {
-                return Err(err(format!("member {mi}: wf {} (not {NF}) or wc {} (not {nv}) values", wf.len(), wc.len())));
+        let mut s = Scorer { path: path.to_string(), sha256: sha256(bytes), kind, cards, index, mean, std, members: Members::Deck(Vec::new()), field_n: 0 };
+        let mut field_n = 0;
+        let members = match kind {
+            Kind::Linear | Kind::Set { .. } => {
+                let base = match kind {
+                    Kind::Set { d, k, hidden } => Base::Set { d, k, hidden },
+                    _ => Base::Linear,
+                };
+                Members::Deck(ma.iter().enumerate().map(|(i, m)| DeckModel::parse(m, base, nc, true, &format!("member {i}"))).collect::<Result<_, _>>().map_err(&err)?)
             }
-            let mut mem = Member { bias, wf, wc, emb: Vec::new(), u: Vec::new(), uu: Vec::new(), w1: Vec::new(), b1: Vec::new(), w2: Vec::new(), b2: 0.0 };
-            if let Kind::Set { d, k, hidden } = kind {
-                mem.emb = matrix(w("emb"), nv, d, &what("emb")).map_err(&err)?;
-                mem.u = matrix(w("u"), nv, k, &what("u")).map_err(&err)?;
-                mem.uu = (0..nv).map(|c| mem.u[c * k..(c + 1) * k].iter().map(|x| x * x).sum()).collect();
-                let mlp = w("mlp").as_array().filter(|a| a.len() == 2).ok_or_else(|| err(what("mlp: two layers")))?;
-                mem.w1 = matrix(&mlp[0]["w"], hidden, d + NF, &what("mlp[0].w")).map_err(&err)?;
-                mem.b1 = floats(&mlp[0]["b"], &what("mlp[0].b")).map_err(&err)?;
-                mem.w2 = matrix(&mlp[1]["w"], 1, hidden, &what("mlp[1].w")).map_err(&err)?;
-                let b2 = floats(&mlp[1]["b"], &what("mlp[1].b")).map_err(&err)?;
-                if mem.b1.len() != hidden || b2.len() != 1 {
-                    return Err(err(format!("member {mi}: the MLP's biases ({} and {}, not {hidden} and 1)", mem.b1.len(), b2.len())));
+            Kind::Pair { base, dim } => {
+                // the stored field, as counts over the table
+                let fd = o.get("field").filter(|x| !x.is_null()).ok_or_else(|| {
+                    err("a pair evaluator without a stored field: the engine scores against it (ENGINE.md 112)".into())
+                })?;
+                let decks = fd.get("decks").and_then(|x| x.as_array()).filter(|a| !a.is_empty()).ok_or_else(|| err("field.decks: a list of decks".into()))?;
+                let mut field: Vec<Vec<(usize, f64)>> = Vec::with_capacity(decks.len());
+                for (j, dk) in decks.iter().enumerate() {
+                    let mut rows: Vec<(usize, f64)> = Vec::new();
+                    for e in dk.as_array().ok_or_else(|| err(format!("field deck {j}: a list of [card id, count]")))? {
+                        let (cid, k) = (e.get(0).and_then(|x| x.as_u64()), e.get(1).and_then(|x| x.as_f64()));
+                        let (cid, k) = cid.zip(k).filter(|(c, k)| (*c as usize) < nc && *k > 0.0).ok_or_else(|| err(format!("field deck {j}: {e}")))?;
+                        if in_table[cid as usize] != 1.0 {
+                            return Err(err(format!("field deck {j}: {} is not in the table", names[cid as usize])));
+                        }
+                        match rows.binary_search_by_key(&(cid as usize), |r| r.0) {
+                            Ok(at) => rows[at].1 += k,
+                            Err(at) => rows.insert(at, (cid as usize, k)),
+                        }
+                    }
+                    field.push(rows);
                 }
-                mem.b2 = b2[0];
+                let fz: Vec<[f64; NF]> = field.iter().map(|r| s.scaled(r)).collect();
+                let mut out = Vec::with_capacity(ma.len());
+                for (i, m) in ma.iter().enumerate() {
+                    let what = format!("member {i}");
+                    let strength = DeckModel::parse(m.get("strength").unwrap_or(&Value::Null), base, nc, false, &format!("{what} strength")).map_err(&err)?;
+                    let (u, p, w) = if dim > 0 {
+                        (
+                            matrix(m.get("U").unwrap_or(&Value::Null), nc, dim, &format!("{what} U")).map_err(&err)?,
+                            matrix(m.get("P").unwrap_or(&Value::Null), NF, dim, &format!("{what} P")).map_err(&err)?,
+                            matrix(m.get("W").unwrap_or(&Value::Null), dim, dim, &format!("{what} W")).map_err(&err)?,
+                        )
+                    } else {
+                        if m.get("U").is_some() || m.get("W").is_some() {
+                            return Err(err(format!("{what}: matchup weights with dim 0")));
+                        }
+                        (Vec::new(), Vec::new(), Vec::new())
+                    };
+                    let mut pm = PairMember { strength, dim, u, p, field_s: Vec::with_capacity(field.len()), field_g: Vec::with_capacity(field.len() * dim) };
+                    for (rows, f) in field.iter().zip(&fz) {
+                        pm.field_s.push(pm.strength.z(rows, f));
+                        if dim > 0 {
+                            let e = pm.embed(rows, f);
+                            pm.field_g.extend((0..dim).map(|r| (0..dim).map(|c| w[r * dim + c] * e[c]).sum::<f64>()));
+                        }
+                    }
+                    out.push(pm);
+                }
+                field_n = field.len();
+                Members::Pair(out)
             }
-            members.push(mem);
-        }
-        Ok(Scorer { path: path.to_string(), sha256: sha256(bytes), kind, cards, index, mean, std, members })
+        };
+        s.members = members;
+        s.field_n = field_n;
+        Ok(s)
     }
 
     /// The sha256 of the file, in hex.
@@ -220,12 +430,19 @@ impl Scorer {
 
     /// The members.
     pub fn members(&self) -> usize {
-        self.members.len()
+        match &self.members {
+            Members::Deck(v) => v.len(),
+            Members::Pair(v) => v.len(),
+        }
     }
 
-    /// The cards of the table.
+    /// The cards of the table (in it or not), and the stored field's decks (pair; else 0).
     pub fn cards(&self) -> usize {
         self.cards.len()
+    }
+
+    pub fn field_decks(&self) -> usize {
+        self.field_n
     }
 
     /// Whether the table has card `d` (a definition of the EoE table).
@@ -239,54 +456,44 @@ impl Scorer {
         let mut rows: Vec<(usize, f64)> = Vec::with_capacity(deck.len());
         for &d in deck {
             let i = *self.index.get(d as usize).filter(|&&i| i != u16::MAX).ok_or_else(|| {
-                format!("deck scorer {}: card definition {d} is not in its table", self.path)
+                format!("deck evaluator {}: card definition {d} is not in its table", self.path)
             })? as usize;
             match rows.binary_search_by_key(&i, |r| r.0) {
                 Ok(at) => rows[at].1 += 1.0,
                 Err(at) => rows.insert(at, (i, 1.0)),
             }
         }
-        let f = self.features(&rows);
-        let fz: Vec<f64> = (0..NF).map(|j| (f[j] - self.mean[j]) / self.std[j]).collect();
-        let mut p = 0.0;
-        for m in &self.members {
-            let mut z = m.bias + (0..NF).map(|j| fz[j] * m.wf[j]).sum::<f64>() + rows.iter().map(|&(i, x)| x * m.wc[i]).sum::<f64>();
-            if let Kind::Set { d, k, hidden } = self.kind {
-                // DeepSets: h = X @ emb / 40, then the MLP of [h, Fz]
-                let mut x = vec![0.0; d + NF];
-                for &(i, c) in &rows {
-                    for (j, h) in x[..d].iter_mut().enumerate() {
-                        *h += c * m.emb[i * d + j];
+        let fz = self.scaled(&rows);
+        Ok(match &self.members {
+            Members::Deck(v) => v.iter().map(|m| sigmoid(m.z(&rows, &fz))).sum::<f64>() / v.len() as f64,
+            Members::Pair(v) => {
+                let mut p = 0.0;
+                for m in v {
+                    let s = m.strength.z(&rows, &fz);
+                    let e = if m.dim > 0 { m.embed(&rows, &fz) } else { Vec::new() };
+                    let mut q = 0.0;
+                    for j in 0..m.field_s.len() {
+                        let g = &m.field_g[j * m.dim..(j + 1) * m.dim];
+                        q += sigmoid(s - m.field_s[j] + e.iter().zip(g).map(|(a, b)| a * b).sum::<f64>());
                     }
+                    p += q / m.field_s.len() as f64;
                 }
-                for h in &mut x[..d] {
-                    *h /= 40.0;
-                }
-                x[d..].copy_from_slice(&fz);
-                let mut out = m.b2;
-                for (r, (&b, &w2)) in m.b1.iter().zip(&m.w2).enumerate() {
-                    let row = &m.w1[r * (d + NF)..(r + 1) * (d + NF)];
-                    let a = b + row.iter().zip(&x).map(|(w, v)| w * v).sum::<f64>();
-                    out += w2 * a.max(0.0);
-                }
-                debug_assert_eq!(m.b1.len(), hidden);
-                z += out;
-                // the pairwise term: 0.5 (|X @ u|^2 - X . |u|^2) / 40
-                let mut s = vec![0.0; k];
-                for &(i, c) in &rows {
-                    for (j, sj) in s.iter_mut().enumerate() {
-                        *sj += c * m.u[i * k + j];
-                    }
-                }
-                let self_terms: f64 = rows.iter().map(|&(i, c)| c * m.uu[i]).sum();
-                z += 0.5 * (s.iter().map(|x| x * x).sum::<f64>() - self_terms) / 40.0;
+                p / v.len() as f64
             }
-            p += 1.0 / (1.0 + (-z).exp());
-        }
-        Ok(p / self.members.len() as f64)
+        })
     }
 
-    /// The deck features of `mtgz.sealed.evaluator.deck_features` (unscaled) from the table's attributes.
+    /// The scaled deck features f of `rows`.
+    fn scaled(&self, rows: &[(usize, f64)]) -> [f64; NF] {
+        let f = self.features(rows);
+        let mut out = [0.0; NF];
+        for j in 0..NF {
+            out[j] = (f[j] - self.mean[j]) / self.std[j];
+        }
+        out
+    }
+
+    /// The deck features (the export's formulas; unscaled) from the table's attributes.
     fn features(&self, rows: &[(usize, f64)]) -> [f64; NF] {
         let mut f = [0.0; NF];
         let (mut spells, mut creatures, mut mv_sum, mut colourless) = (0.0, 0.0, 0.0, 0.0);
@@ -361,7 +568,7 @@ impl Scorer {
 /// same (module docs); `db` is the EoE table. An unreadable or invalid file is an error.
 pub fn load(path: &str, db: &CardDb) -> Result<Arc<Scorer>, String> {
     static CACHE: Mutex<Vec<(String, u64, Option<std::time::SystemTime>, Arc<Scorer>)>> = Mutex::new(Vec::new());
-    let meta = std::fs::metadata(path).map_err(|e| format!("deck scorer {path}: {e}"))?;
+    let meta = std::fs::metadata(path).map_err(|e| format!("deck evaluator {path}: {e}"))?;
     let (len, mtime) = (meta.len(), meta.modified().ok());
     {
         let c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
@@ -369,7 +576,7 @@ pub fn load(path: &str, db: &CardDb) -> Result<Arc<Scorer>, String> {
             return Ok(x.3.clone());
         }
     }
-    let bytes = std::fs::read(path).map_err(|e| format!("deck scorer {path}: {e}"))?;
+    let bytes = std::fs::read(path).map_err(|e| format!("deck evaluator {path}: {e}"))?;
     let s = Arc::new(Scorer::parse(&bytes, path, db)?);
     let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     // (another thread read the same file meanwhile: its scorer is the one)
