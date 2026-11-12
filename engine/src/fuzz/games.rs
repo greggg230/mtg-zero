@@ -1,5 +1,5 @@
 //! The random-play fuzzer of `engine/tests/fuzz.rs` as library code (moved here for zero-farm's
-//! worker, docs/ENGINE.md 114.10; the tests `fuzz_random_games` / `fuzz_random_matches` call
+//! worker, docs/ENGINE.md 114.1; the tests `fuzz_random_games` / `fuzz_random_matches` call
 //! [`random_games`] / [`random_matches`], the farm worker the same functions, so the same seeds play
 //! the same games and print the same lines). Settings are read through [`super::env::var`] (the
 //! process environment, or the farm job's settings).

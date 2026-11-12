@@ -1,5 +1,5 @@
 //! The test fixtures `engine/tests/common` shares (moved here with the fuzz loops, docs/ENGINE.md
-//! 114.10; `tests/common` re-exports them): the cube plus custom test cards written as card IR, so
+//! 114.1; `tests/common` re-exports them): the cube plus custom test cards written as card IR, so
 //! they go through the same lowering as real cards; the fuzz pool and random decks.
 
 use crate::db::CardDb;

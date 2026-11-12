@@ -1,5 +1,5 @@
 //! The random-actions fuzz of whole `team_draft` events, `engine/tests/draft.rs`'s
-//! `fuzz_random_events` as library code (docs/ENGINE.md 114.10; the farm's `draft-events` mode), and
+//! `fuzz_random_events` as library code (docs/ENGINE.md 114.1; the farm's `draft-events` mode), and
 //! the helpers it shares with the draft tests.
 //!
 //! The random-actions fuzz of whole events (`DRAFT_FUZZ=n` events, 4v4, 2v2,

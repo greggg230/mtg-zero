@@ -1,4 +1,4 @@
-"""mtgz-worker's phase-1 jobs (zero-farm; docs/ENGINE.md 114.10-114.12): fuzz jobs over `aw/1` (the engine's fuzz
+"""mtgz-worker's phase-1 jobs (zero-farm; docs/ENGINE.md 114.1-114.3): fuzz jobs over `aw/1` (the engine's fuzz
 loops in supervised chunk processes), the reproduction string tools/fuzz_farm.py would write, the per-machine
 self-test (`reference`), and - with a fuzz-profile build - injected panics, aborts, stack overflows and hangs
 isolated to their seed while the job goes on. Skipped without a built worker (`cargo build --release -p

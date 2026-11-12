@@ -1,4 +1,4 @@
-//! The engine's fuzz loops as library code (docs/ENGINE.md 114.10): the random-play fuzzer of games
+//! The engine's fuzz loops as library code (docs/ENGINE.md 114.1): the random-play fuzzer of games
 //! and best-of-three matches ([`games`], from `engine/tests/fuzz.rs`) and the random `team_draft`
 //! events ([`draft`], from `engine/tests/draft.rs`), with the fixtures they share ([`cards`], from
 //! `engine/tests/common`).

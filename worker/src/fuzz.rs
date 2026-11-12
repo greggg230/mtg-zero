@@ -1,5 +1,5 @@
 //! MTG Zero's fuzz loops for zero-farm's `fuzz` jobs (zero-core `zero_worker::fuzz`; docs/ENGINE.md
-//! 114.10): a job's `mode` and `env` name one of the engine's library loops
+//! 114.1): a job's `mode` and `env` name one of the engine's library loops
 //! (`engine::fuzz::games::random_games` / `random_matches`, `engine::fuzz::draft::random_events`) -
 //! the code `cargo test -p engine --test fuzz / --test draft` runs - and the reproduction string of a
 //! failing seed is `tools/fuzz_farm.py`'s `repro_of`.

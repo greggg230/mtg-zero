@@ -1,5 +1,5 @@
 """Pull a zero-farm fuzz campaign's failures into `failures/` in tools/fuzz_farm.py's format (docs/ENGINE.md
-114.12; zero-farm PROTOCOL.md 4 `GET /v1/admin/campaign/{id}/failures`).
+114.3; zero-farm PROTOCOL.md 4 `GET /v1/admin/campaign/{id}/failures`).
 
     python tools/farm_fuzz_pull.py --campaign ID [--url URL] [--out failures] [--token-file F] [--all]
 

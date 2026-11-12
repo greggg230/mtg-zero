@@ -1041,7 +1041,7 @@ fn layout_json_is_checked_in() {
 }
 
 /// The random-actions fuzz of whole events: `engine::fuzz::draft::random_events`
-/// (ENGINE.md 114.10; its docs say what it checks). `DRAFT_FUZZ=n` events
+/// (ENGINE.md 114.1; its docs say what it checks). `DRAFT_FUZZ=n` events
 /// (default 200); `DRAFT_FUZZ_FIRST=f`: events from f on, each on its own
 /// random streams (a failing one prints its rerun).
 #[test]

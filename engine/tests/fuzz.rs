@@ -1,7 +1,7 @@
 //! Random-play fuzzer (ENGINE.md 15): complete games between random decks
 //! of supported cards, and best-of-three matches, with every check after
 //! every action. The loops live in the engine library, `engine::fuzz::games`
-//! (ENGINE.md 114.10; its module docs list every `FUZZ_*` setting and what
+//! (ENGINE.md 114.1; its module docs list every `FUZZ_*` setting and what
 //! each mode checks), so zero-farm's worker runs the same code; these tests
 //! run them with the process environment's settings (`tools/fuzz_farm.py`
 //! drives them unchanged), and check that games and matches replay.
