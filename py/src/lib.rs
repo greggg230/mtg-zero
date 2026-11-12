@@ -26,6 +26,8 @@ fn _engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sealed_build, m)?)?;
     m.add_function(wrap_pyfunction!(sealed_seats, m)?)?;
     m.add_function(wrap_pyfunction!(sealed_candidates, m)?)?;
+    m.add_function(wrap_pyfunction!(sealed_scores, m)?)?;
+    m.add_function(wrap_pyfunction!(sealed_scorer_info, m)?)?;
     m.add_function(wrap_pyfunction!(eoe_lookup, m)?)?;
     m.add_function(wrap_pyfunction!(game_log, m)?)?;
     m.add_function(wrap_pyfunction!(game_log_path, m)?)?;
@@ -64,6 +66,20 @@ fn sealed_seats(spec: &str, seed: u64) -> PyResult<String> {
 #[pyfunction]
 fn sealed_candidates(spec: &str, seed: u64) -> PyResult<String> {
     engine::az::sealed::candidates_json(spec, seed).map_err(verr)
+}
+
+/// The scores of decks (a JSON list of lists of card names) by the exported deck evaluator at `path`
+/// (docs/ENGINE.md 112: the engine's scorer, `mtgz.sealed.scorer`), as a JSON list.
+#[pyfunction]
+fn sealed_scores(path: &str, decks: &str) -> PyResult<String> {
+    engine::az::sealed::scores_json(path, decks).map_err(verr)
+}
+
+/// What the engine reads of the exported deck evaluator at `path`: {"path", "sha256", "kind", "model",
+/// "members", "cards"}, as JSON.
+#[pyfunction]
+fn sealed_scorer_info(path: &str) -> PyResult<String> {
+    engine::az::sealed::scorer_info_json(path).map_err(verr)
 }
 
 /// Each name's definition in the EoE card table, or why it has none, as JSON {name: id | error}.

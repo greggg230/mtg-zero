@@ -278,29 +278,35 @@ fn splash_spell(d: &CardDef, pair: u8, x: u8) -> bool {
     f.iter().enumerate().all(|(i, &n)| if i == xi { n == 1 } else { n == 0 }) && d.cost.pips[xi] == 1
 }
 
-/// Spells (ids, copies separate) of `pool` playable in `cols`, by weight (desc), mana value, id.
-fn ranked(db: &CardDb, pool: &[DefId], cols: u8) -> Vec<DefId> {
-    let mut v: Vec<DefId> = pool.iter().copied().filter(|&id| playable(db.def(id), cols)).collect();
-    v.sort_by(|&x, &y| {
-        let (dx, dy) = (db.def(x), db.def(y));
-        pools::weight(dy).total_cmp(&pools::weight(dx)).then(dx.mana_value().cmp(&dy.mana_value())).then(x.cmp(&y))
-    });
-    v
+/// The spells (nonland cards, copies separate) of `pool` with their weights and mana values, in the pool's order: what
+/// the colours' scores read, each spell's weight computed once per build (ENGINE.md 112's speed-up: the scores and
+/// orders of before, so every build draw for draw as before).
+fn spells_of(db: &CardDb, pool: &[DefId]) -> Vec<(f64, u32, DefId)> {
+    pool.iter()
+        .copied()
+        .filter(|&id| !db.def(id).is(types::LAND))
+        .map(|id| {
+            let d = db.def(id);
+            (pools::weight(d), d.mana_value() as u32, id)
+        })
+        .collect()
 }
 
-/// (score, playable spells) of colours `cols`: the weight of its best `n` playable spells.
-fn score(db: &CardDb, pool: &[DefId], cols: u8, n: usize) -> (f64, usize) {
-    let r = ranked(db, pool, cols);
-    (r.iter().take(n).map(|&id| pools::weight(db.def(id))).sum(), r.len())
+/// (score, playable spells) of colours `cols`: the weight of its best `n` playable spells - the spells of `spells`
+/// (`spells_of`) playable in `cols`, by weight (desc), mana value, id.
+fn score(db: &CardDb, spells: &[(f64, u32, DefId)], cols: u8, n: usize) -> (f64, usize) {
+    let mut v: Vec<(f64, u32, DefId)> = spells.iter().copied().filter(|x| playable(db.def(x.2), cols)).collect();
+    v.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    (v.iter().take(n).map(|x| x.0).sum(), v.len())
 }
 
 /// The ten pairs in the builder's order (WU, WB, WR, WG, UB, ...): (score, pair, playable spells).
-fn pair_scores(db: &CardDb, pool: &[DefId], n_spells: usize) -> Vec<(f64, u8, usize)> {
+fn pair_scores(db: &CardDb, spells: &[(f64, u32, DefId)], n_spells: usize) -> Vec<(f64, u8, usize)> {
     let mut pairs: Vec<(f64, u8, usize)> = Vec::with_capacity(10);
     for a in 0..5 {
         for b in a + 1..5 {
             let p = (1u8 << a) | (1u8 << b);
-            let (sc, n) = score(db, pool, p, n_spells);
+            let (sc, n) = score(db, spells, p, n_spells);
             pairs.push((sc, p, n));
         }
     }
@@ -340,6 +346,8 @@ pub fn build(db: &CardDb, pool: &[DefId], s: &Settings, rng: &mut Rng) -> Build 
 pub fn build_tilted(db: &CardDb, pool: &[DefId], s: &Settings, tilt: Option<&dyn Fn(DefId) -> f64>, rng: &mut Rng) -> Build {
     let mut pool: Vec<DefId> = pool.to_vec();
     pool.sort_unstable();
+    let spells_w = spells_of(db, &pool);
+    let spells = &spells_w[..];
     let n_lands = s.lands.0 as usize + rng.below((s.lands.1 - s.lands.0) as u32 + 1) as usize;
     let n_spells = DECK_SIZE - n_lands;
     // 2. Colours.
@@ -348,7 +356,7 @@ pub fn build_tilted(db: &CardDb, pool: &[DefId], s: &Settings, tilt: Option<&dyn
         let monos: Vec<(f64, u8)> = (0..5)
             .map(|i| 1u8 << i)
             .filter_map(|c| {
-                let (sc, n) = score(db, &pool, c, n_spells);
+                let (sc, n) = score(db, &spells, c, n_spells);
                 (n >= n_spells).then_some((sc, c))
             })
             .collect();
@@ -357,7 +365,7 @@ pub fn build_tilted(db: &CardDb, pool: &[DefId], s: &Settings, tilt: Option<&dyn
         }
     }
     if cols == 0 {
-        let pairs = pair_scores(db, &pool, n_spells);
+        let pairs = pair_scores(db, &spells, n_spells);
         let eligible: Vec<(f64, u8)> = pairs.iter().filter(|x| x.2 >= n_spells).map(|x| (x.0, x.1)).collect();
         cols = if eligible.is_empty() {
             let all: Vec<(f64, u8)> = pairs.iter().map(|x| (x.0, x.1)).collect();
@@ -609,7 +617,7 @@ pub fn best_guess_covering(db: &CardDb, pool: &[DefId], s: &Settings, tilt: Opti
     pool.sort_unstable();
     let n_lands = best_lands(s);
     let n_spells = DECK_SIZE.saturating_sub(n_lands);
-    let ps = pair_scores(db, &pool, n_spells);
+    let ps = pair_scores(db, &spells_of(db, &pool), n_spells);
     // temperature 0's pick first: eligible pairs, then by score, then the builder's order
     let mut order: Vec<usize> = (0..ps.len()).collect();
     order.sort_by(|&i, &j| (ps[j].2 >= n_spells).cmp(&(ps[i].2 >= n_spells)).then(ps[j].0.total_cmp(&ps[i].0)).then(i.cmp(&j)));

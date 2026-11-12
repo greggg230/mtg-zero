@@ -25493,6 +25493,353 @@ load on the first pass and passed when rerun. **`python tools/gate.py python --n
 passed and 1 skipped, the mtg-smoke loop (16 games, 0 unfinished), tracked files unchanged: GATE PASSED python
 ff5ba0847e85 in 935s.** The commit after it adds this paragraph only.
 
+## 112. Run 2's deck choice by the evaluator, retrained inside the run (branch `deck-choice-eval`, 2026-11-11)
+
+Branch `deck-choice-eval` (from main 60397f3; main 37fa30b, eval-v2's ENGINE.md 111, merged in); zero-core `feat/selfplay-spec-hook` **ef63ee1** (from f9ca5c3, pushed),
+the pin f9ca5c3 -> ef63ee1. **Why** (the user, 2026-11-11, approved): run 2 chooses each seat's deck with the learned deck
+evaluator (108), not the network's value (107.2): in pool 2030 the evaluators' pick beat the value pick by **+23.1 points
+[16.7, 29.4]** (384 paired games, iteration 78 piloting at 64 simulations; `E:/mtg-zero/s4a/races/eoe1-iter_0078`, 108.6),
+and 108.2 shows the value is a weak, half-memorising judge out of sample. The evaluator is retrained during the run on its
+recent games. Everything is opt-in; every default is byte-identical.
+
+### 112.1 The engine's scorer of the evaluator's export
+
+**The format is eval-v2's** (ENGINE.md 111.6: `Evaluator.export`, `"format": "mtgz-deck-evaluator-export"` version 1, the
+specification in `mtgz/sealed/evaluator.py`'s docstring; merged here from main 37fa30b): kinds `linear`, `set` and
+`pair`; the card table in the EoE registry's order (`eoe_cards.txt`, `in_table` 0 for Paradox Haze) with the attributes
+the deck features read written out; the features' names, mean and sd; per member the kind's weights; a pair export's
+stored field. An earlier draft of this branch had a format of its own; it is gone (the coordinator, 2026-11-11). A
+version is named by the sha256 of its bytes (`Evaluator.export` writes compact JSON: one evaluator, one file).
+
+**The Rust scorer** (`engine/src/az/sealed/scorer.rs`): reads the file once per process and path while its size and
+mtime stay the same (`scorer::load`; a run's versions are immutable), computes its sha256 (FIPS 180-4, in the module: no
+new dependency; the standard's vectors tested), refuses loudly anything it cannot score - another format or version, an
+unknown kind, other feature names, a size, a flag not 0/1, a card of the table not of the EoE table or twice, a zero sd,
+no members, a pair export without a stored field, a field deck naming a card out of the table, a pair strength with a
+bias - and scores a deck exactly as `ReferenceScorer` does: counts over the table (a deck card out of it an error, never
+dropped), the 35 features (the export's formulas: the main pair a stable sort, ties to the earlier colour), scaled; then
+`linear` z = bias + wc . x + wf . f, `set` + w2 . relu(w1 [x emb / 40, f] + b1) + b2 + 0.5 (|x u|^2 - x . |u|^2) / 40,
+each P the members' mean of sigmoid(z); **`pair`** against the stored field B_1..B_N: per member s(B_j) and g_j = W e(B_j)
+computed once at load (e(x) = x U / 40 + f P), then a deck costs one strength, one embedding and N dot products: P = the
+members' mean of (1/N) sum_j sigmoid(s(A) - s(B_j) + e(A) . g_j). f64 throughout. (A named field instead of the stored
+one would be a file of its own pinned beside the evaluator: not built.)
+
+**The match** (`python -m mtgz.sealed.scorer check EXPORT [--evaluator PT]`, `tests/test_deck_scorer.py`): eval-v2's
+trained evaluators (`E:/mtg-zero/s4a/v2_time`, the half-life-40 run, 111.4), 2,000 candidate decks of generated pools -
+**set: |engine - reference| 2.2e-16, |engine - torch| 3.4e-8; linear 2.2e-16, 3.6e-8; pair (a linear strength, dim 0,
+a 256-deck field) 4.4e-16, 2.4e-8**. The engine tests' fixtures (`engine/tests/data/scorer_{linear,set,pair,pair_linear}.json`:
+random weights of every kind - a pair over a set strength with a 3-dimensional matchup term, a Bradley-Terry pair over a
+linear one, 24-deck fields -, made by `python -m mtgz.sealed.scorer fixtures`, byte-reproducible): 48 decks, at most
+8.9e-8 from torch. Speed through the binding (2,000 decks, the JSON and name lookups included): set 27.5 us a deck, linear
+10.9, pair 17.5.
+
+### 112.2 The deck choice by an evaluator (the sealed spec)
+
+`"deck_choice": {"k": 32, "explore": 0.1, "by": "evaluator", "evaluator": "<file>", "evaluator_sha": "<sha256>",
+"temperature": 0, "seats": [0, 1]}` (`sealed::DeckChoiceSpec`; `by` default `"value"`, 107.2's choice unchanged;
+`evaluator_sha` optional - a file with other bytes is refused; `temperature` default 0; `seats` default both, for either
+`by`). A built seat (a generated or given pool) in `seats`:
+
+* **its K candidates** are 107.2's (candidate 0 the best guess, 1..K-1 the randomised builder from `candidate_rng`);
+* **explore** as 107.2 (`explore_pick`: a uniform randomised candidate with probability `explore`);
+* else **the evaluator scores the K and the seat plays the best** (the first on a tie), or at a temperature t > 0 one
+  drawn with probability proportional to exp((score - best) / t) from a generator of its own (`choice_rng(seed, p)`, so
+  pools, candidates and the explore draw are the same with or without it). **No decision**: the deck is chosen when
+  `MtgAz::new` makes the game (no `ChooseDeck`, no value choice, nothing for zero-core to do: self-play has no Python
+  callback);
+* a seat not in `seats` plays the spec's seat (`SealedSpec::seat`: `best_share`'s mixed field).
+
+**No hidden information**: a seat's choice reads its own pool's candidates and the file only (tested: the other seat given
+another pool, the same choice). **Deterministic and replayable**: the decks are a function of the spec (the file and its
+sha256), the seed and the seat; `MatchState::how` records `mode` `chosen`, the `candidate`, the evaluator's sha256 and
+the deck's score; the **game log** (107.1, 107.3) writes per chosen seat `"evaluator": <sha256>` and `"score"`, and the
+spec line names the file and pins its sha256, so a line replays bit for bit from its spec line, seed and actions (tested);
+`python -m mtgz.sealed.games RUN --check` rebuilds each chosen deck and checks it is the evaluator's own choice by the
+logged sha256 (a tampered sha256 or candidate is a mismatch). `mtgz._engine.sealed_candidates` gives each candidate's
+`scores`, the `chosen` one and the `evaluator_sha`; `sealed_scores(path, decks)` and `sealed_scorer_info(path)` the
+scorer's.
+
+**The builder, faster, draw for draw** (`builder.rs`, `spells_of`, `score`): a colour's score sorted the pool's spells with
+`pools::weight` (an IR walk) inside the sort's comparator, ~10,000 calls a build; each spell's weight and mana value is
+now computed once per build and the same order sorted. Every build is the same (107.1's pin of 400 builds, 200 seats and
+150 prior samples, 5e986ac22869924f, holds; `sealed` 16 passed); a build 105 -> **26 us**, the best guess 85 -> 23 us
+(`builder_cost`, arena pools, the desktop loaded with this section's fuzz). Every sealed game and prior deal gains it.
+
+### 112.3 The prior stays coherent with the field (102, 106)
+
+107.2 left an explicit mismatch: the value choice's field is chosen decks, the opponent prior 107.1's mixture (a prior of
+value-chosen decks would need the network in the prior); the deck tilt (106) corrects toward the actual opponent. **The
+evaluator needs no network, so the prior chooses as the field does**: each seat has its own prior
+(`SealedPrior::of_seat`, named `sealed+evaluator` for a choosing seat), and a sample (102.6 steps 1-2: a pool - the
+K-sample deal's bank, 102.8 - with R placed in it) is then:
+
+* with the seat's `explore` share (one uniform draw, none at 0 or 1) **a randomised build** (102.6 step 3's: as an
+  exploring seat plays a randomised candidate);
+* else **the seat's K candidates of that pool** - its best guess and K - 1 randomised builds drawn from the deal's
+  generator - **scored by the same evaluator file**, and the best of those whose colours (pair and splash) cover R's
+  nonland colours (or a draw at the choice's temperature among them); none covering: step 3's randomised builds;
+* step 4 (R forced in, the size) as before. `best_share` is not read for a choosing seat (it chooses instead); a seat
+  that does not choose keeps 107.1's mixture; the value choice's prior is 107.1's mixture as before (its 107.2 mismatch
+  stays, documented there).
+
+**Exact, modelled.** Exact: every sample meets K1-K3 (`check_sample` at every deal), is a function of the generator and
+the request, and with nothing shown is exactly the evaluator's best of K candidates of a pool of the collation (tested
+draw for draw against the candidates rebuilt from the same generator). Modelled, as 107.1's `best_guess_covering`: given
+shown cards the chosen deck is the best *covering* candidate - the choice restricted to decks whose colours could have
+shown R - not the exact posterior of "the evaluator chose a deck holding R" (that needs rejection). The deck tilt (106)
+then weighs the K cached decks of this prior: it tilts the field's choice. Measured (`the_prior_of_a_choosing_seat_
+chooses_as_the_seat_does`, the set fixture): the choosing prior's samples score 0.986 on average against the real chosen
+decks' 0.984 (the mixed field's prior 0.825); with 8+ cards of a real chosen deck shown, 34 of 36 samples are in its
+colours and a splash at most.
+
+### 112.4 The rolling retrain (zero-core's run loop, through the game package)
+
+**Where it belongs.** The deck choice is the game's (the engine reads the file named in the spec); when to retrain, on
+which games, and which file the next phase's spec names are the run's - but the rolling self-play driver lives across
+iterations with one spec (zero-core `Run.roll`), and nothing in mtgz runs at an iteration boundary. So zero-core
+`feat/selfplay-spec-hook` ef63ee1 (its docs/az.md 40, search.md 2.13; **opt-in, defaults byte-identical**) gives a game
+package three hooks: `settings` (its own run settings: flags, presets, config.json), `selfplay_specs` (game -> fn(run,
+it) -> the phase's spec or None; a rolling driver switches between phases with the new `Driver.set_spec` - the games it
+starts from then on, games in flight keep theirs -, a phase's driver is made with it; remote self-play refuses a changed
+spec) and `remote_eval_inputs` (run files a remote evaluation needs, shipped to the mirror). A package declaring none, or
+a hook answering None, plays exactly as before. mtgz registers them for `mtg_eoe` (`mtgz/sealed/rolling.py`):
+
+* **Settings** (`rolling.SETTINGS`, all off by default): `evaluator_every` N (0 off), `evaluator_window` W (40: at
+  most the newest W iterations of the run's own games), `evaluator_min_window` M (8: the first retrain waits for M
+  iterations after the first version), `evaluator_val_iters` V (2), `evaluator_kind` (`set`; `linear` or `pair`),
+  `evaluator_pair_base` (`linear`), `evaluator_threads` (4), `evaluator_half_life` (0: none; train's recency weighting,
+  111.3), `deckchoice_eval_games` (0 off).
+* **Versions** (`selfplay_spec`, asked at every phase's start): `<run>/evaluators/v<iter>.json`, immutable, `iter` the
+  last iteration whose games trained it. The first is the spec's own file copied in when the run first plays
+  (`v<the iteration before>`). Each phase plays the newest version published before it began - a version finished during
+  a phase is used from the next (an iteration boundary) - its path and sha256 in the phase's spec. `evaluators/used.jsonl`
+  records each iteration's version, `index.jsonl` each version (sha256, window, games, the selected mix and L2,
+  validation log loss). With `evaluator_every` 0 the hook answers None: the spec's file as given.
+* **The job** (`python -m mtgz.sealed.rolling retrain RUN --iter b --from-iter lo ...`; started by the hook at iteration
+  it = b + 1 when b is a multiple of N, M iterations of the run's own games follow the first version, no version b exists
+  and no job runs; the window lo..b = the newest W iterations after the first version; CPU only,
+  `CUDA_VISIBLE_DEVICES=-1`, below-normal priority, no window, `evaluator_threads` threads; stdout in
+  `evaluators/work/v<b>/log.txt`, its pid file): (1) a snapshot of the window's game log lines (a remote evaluation's
+  file by its name, the rest by time, 109.1) and the metrics up to b; (2) `python -m mtgz.sealed.evaluator values SNAP
+  --checkpoint played --models RUN/models` (the leak-free pre-game value, 108.2: the deck choice by an evaluator has no
+  pre-game decision, so 108's start position is the game's first decision); (3) `python -m mtgz.sealed.evaluator train
+  SNAP --values ... --split time --time-from b+1 --val-iters V --kinds K --pools 0 --seed b --from-iter lo [--half-life H]
+  [--pair-base B]` (the existing CLI with eval-v2's recency options: the last V iterations validate - the distillation
+  mix, the L2, early stopping -, the rest train, weighted by recency); (4) the selected `evaluator_<kind>.pt` exported
+  (`Evaluator.export`; its informational meta's NaN metrics - the split has no test iterations - written as null, which a
+  JSON parser accepts), **checked: the engine against the export's reference (1e-9) and torch (1e-5) on 400 candidate
+  decks**, and published atomically as `v<b>.json`; `status.json`. The snapshot is deleted after success (the window is
+  reproducible from the run's log).
+* **Never blocking, loud on failure.** Self-play only reads the versions directory. The next phase reports a finished job
+  once (`deck evaluator v0088 published: ...` or **`EVALUATOR RETRAIN FAILED v0088: <error> - keeping v0084`**, also for
+  a job that died without a status), and a failed version is never retried silently or used. A job outliving its run
+  process (a restart) is found by its pid file (its command line checked: never a reused pid) and waited for, never
+  doubled; while one runs a due retrain is skipped (logged).
+* **Selection bias, by design.** Run 2's games are between chosen decks (and 10% explore builds), so each version learns
+  "P(win) against this field" - the fixed point DESIGN.md 9.1 names - from the field it chose; the explore share keeps
+  builder-random decks in every window.
+
+### 112.5 The deck-choice evaluation
+
+The run's own evaluations are run 1's, unchanged (the fixed evaluation pairs against the heuristic and random, Elo). Added:
+**`deckchoice`** (zero-core's `evals`, logged as `extras.deckchoice`; `deckchoice_eval_games` N > 0): the checkpoint's
+seat chooses its deck among the K candidates of its fixed evaluation pool by the evaluator its iteration's self-play used
+(`used.jsonl`; shipped to a remote evaluation with the version file: `remote_eval_inputs`), against the yardstick (the
+heuristic) playing its pool's best guess (`"best_share": 1`, `"seats": [p]`, explore 0); N games, the network in each seat
+half of them, seeds 7919 it + 5 and + 6. **`python -m mtgz.sealed.rolling deckeval CKPT --evaluator FILE [--best-guess]`**
+plays the same for any checkpoint (`--set key=value` overrides the run settings, e.g. `infer_device=cuda`), and
+`--best-guess` the baseline arm (the network on its best guess), so "does the deck choice help" reads as the evaluator arm
+minus the best-guess arm on the same pools and seeds. **Run 1's comparable number** is that pair of arms for its final
+network, the one run 2 starts from: `python -m mtgz.sealed.rolling deckeval E:/mtg-zero/runs/eoe1/models/iter_0078.pt
+--evaluator E:/mtg-zero/s4a/v2_time/evaluator_set.json --games 64 --set infer_device=cuda` and the same with `--best-guess`
+(GPU minutes once the races end: not run here - the desktop's GPU belonged to the race and the sweep, 112.9). The smoke
+ran the evaluation every iteration (4 games each: the CLI and the in-run path both played).
+
+### 112.6 Run 2: the preset `eoe-2e` and the launch
+
+`eoe-2e` = eoe-1 + the spec's deck choice by the evaluator (K 32, explore 0.1; the file a launch flag) + `evaluator_every`
+4, `evaluator_window` 40, `evaluator_min_window` 8, `evaluator_val_iters` 2, `evaluator_kind` set, `evaluator_half_life` 40
+(v2's pick, 111.4), `evaluator_threads` 4, `deckchoice_eval_games` 64 (one game per evaluation pair: the Mac's budget,
+109.3); `eoe-2e-smoke` the same on eoe-smoke (K 8, a retrain every iteration on 2). **Run 1's search settings stay**
+(64 / 16 simulations, payments at 4, the evaluation's 32: the search sweep found iteration 78's strength against the
+heuristic saturates at 64 simulations - 16: 23.2%, 32: 28.2%, 64: 31.8%, 256: 32.5%). It starts by **forking from
+`E:/mtg-zero/s4a/deep128x8/iter_0078_x2.pt`** (run 1's iteration 78 deepened 128 x 4 -> 128 x 8, bit-identical values) as
+a continuation of run 1 at iteration 78 (`fork_run.py --net`: run 1's window, Elo and metrics to 78, a fresh optimizer with
+run 1's 100 warm-up steps): run 1's saved `lr` 1e-3, `lr_halve_every` 30 and `lr_min` 1e-4 continue its schedule -
+**2.5e-4** from iteration 79 (61-90), 1.25e-4 from 91, then the floor. A fork's saved settings beat a preset (109.3), so
+every run-2 setting goes in as a flag. **The initial evaluator is eval-v2's `set` export**
+(`E:/mtg-zero/s4a/v2_time/evaluator_set.json`, sha256 `1e0ac330913438be...`: trained on the whole of run 1 with a half-life
+of 40, the best winner's-deck ranking of 111.4's kinds, 60.2%; the set kind is also what run 2 retrains). **Not launched**
+(the user approves run 2). From a pinned worktree of the merged commit:
+
+```
+python -m mtgz.sealed.scorer check E:/mtg-zero/s4a/v2_time/evaluator_set.json --evaluator E:/mtg-zero/s4a/v2_time/evaluator_set.pt
+python tools/fork_run.py --source E:/mtg-zero/runs/eoe1 --dest E:/mtg-zero/runs/eoe2e --iter 78 \
+  --net E:/mtg-zero/s4a/deep128x8/iter_0078_x2.pt
+bash tools/mac.sh --eval-checkout
+python tools/launch_hidden.py E:/mtg-zero/runs/eoe2e/supervisor_console.txt python tools/supervise.py E:/mtg-zero/runs/eoe2e \
+  --preset eoe-2e --seed 1 --iters 160 --threads 16 --groups 3 --conc 1152 --train-static 1 --ram-budget-gb 40 \
+  --eval-random-games 10 --elo-paired 1 --shard-sparse 1 \
+  --spec '{"sealed": {"set": "eoe", "collation": "arena", "best_share": 0.5, "deck_choice": {"k": 32, "explore": 0.1, "by": "evaluator", "evaluator": "E:/mtg-zero/s4a/v2_time/evaluator_set.json", "evaluator_sha": "1e0ac330913438be9f6b329bdfbab66aad5818cee1aca079f203f9b3b295a43a"}}, "max_turns": 60, "eval_decks": 64, "eval_seed": 1}' \
+  --evaluator-every 4 --evaluator-window 40 --evaluator-min-window 8 --evaluator-val-iters 2 --evaluator-kind set \
+  --evaluator-half-life 40 --evaluator-threads 4 --deckchoice-eval-games 64 --eval-remote mac --eval-every 2
+```
+
+(`--iters 160` = 82 iterations past 78: the user's to set. `best_share` stays in the spec for the given-pool seats and the
+evaluation set; a choosing seat does not read it.) Its log then says `iter 79 deck evaluator: the spec's ... is the run's
+first version v0078 (1e0ac3309134)`, `iter 79 self-play: decks chosen by the deck evaluator v0078.json`, at iteration 89 `the
+retrain of v0088 started (the games of iterations 79-88 ...)`, then `deck evaluator v0088 published ...` and the next
+phase's `decks chosen by ... v0088.json`; from then every fourth iteration on the run's newest games (up to 40 iterations,
+half-life 40). What to watch: self-play seconds per iteration against run 1's (112.8), `EVALUATOR RETRAIN FAILED`,
+`extras.deckchoice` against `eval_yard`, the chosen candidates in `python -m mtgz.sealed.games`.
+
+### 112.7 The pairwise kind, and a named field
+
+The engine scores eval-v2's `pair` exports (112.1) against **their stored field** (eval-v2's default: a sample of the newest
+training decks), so `evaluator_kind pair` (with `evaluator_pair_base`) works end to end: the choice, the choosing prior
+(each candidate scored against the same field), the log, the retrain (`--kinds pair --pair-base B`; the pair entry's
+selection read from its report). 111.5 found the matchup term adds nothing yet (v2's pick is dim 0: Bradley-Terry), so
+run 2 starts with the set kind. **Not built: a named field.** Scoring against a field other than the stored one - e.g. the
+run's newest chosen decks, which is what "against the field" means once the field moves - needs that field in the
+evaluator's identity: a field file of its own (registry ids and counts, eval-v2's `field.decks` layout) named and pinned
+(sha256) in the spec beside the evaluator, read by `scorer::load` into the same precomputed table (s(B_j), g_j). The rolling
+retrain would write it with each version (the window's newest chosen decks). Nothing else changes.
+
+### 112.8 Costs
+
+Measured on the desktop while it ran eight race processes, a GPU sweep and this section's fuzz (CPU at 100%: the numbers
+are upper bounds; `cargo test --release -p engine --test deck_scorer <name> -- --ignored --nocapture`,
+`DECK_SCORER=E:/mtg-zero/s4a/v2_time/evaluator_set.json` unless named):
+
+* **A game's start** (`choice_cost`; arena, eoe-2's spec, K 32, one thread): the value choice's candidates 10.7 ms; the
+  evaluator's choice 11-17 ms (the same candidates and 64 scores: the v2 set ensemble ~14 us a deck).
+* **The prior** - the real cost. A new request (the opponent showed a new card) draws its K = 32 decks: the mixed field's
+  prior **2.1 ms**, the choosing prior **44 ms** (each sample builds and scores K = 32 candidates: 1,024 builds and scores
+  a request). Per game (`prior_cost_per_game`: 16 heuristic games of ~16 rounds, the decider dealing one world at every
+  decision as its search's first deal does): **324 ms -> 1,008 ms** with the v2 set export (821 ms with the v2 pair; v1's
+  set before the builder's speed-up of 112.2: 430 -> 2,083 ms). Run 1's games average 25.9 rounds: about **+1.1 s of one
+  core a game**, ~+660 core-seconds an iteration of 600 games, ~+40 s an iteration spread over self-play's 16 search
+  threads where self-play is CPU-bound (run 1's self-play ~120 s of its ~5-minute iteration; with the evaluation on the
+  Mac, 109.3, ~132 s an iteration in all: up to ~+30%), less where the GPU bounds it.
+* **Self-play, measured on the CPU** (`bench_net.py` in `E:/mtg-zero-scratch/deck-choice-eval/`: run 1's iteration 78
+  piloting both seats with eoe-1's self-play seat - 64 / 16 simulations, payments at 4, p_full 0.25, the deck tilt -, 8
+  games, 2 search threads, CPU inference): run 1's spec 255.7 s for 8 games (11,313 simulations a game, 21.9 rounds),
+  the evaluator's choice (v1 set) 372.2 s (16,607 simulations a game, 27.5 rounds): **2.83 vs 2.80 ms a simulation** - with
+  CPU inference the prior's cost does not show; the games themselves ran longer (8 games: noise or the chosen decks). With
+  a uniform evaluator (no inference, 12 games of ~59 rounds: random-strength searches reveal far more cards) the CPU work
+  was 4.4 -> 11.8 core-seconds a game: the upper bound. Run 2's first iterations give the GPU number (`selfplay.seconds`,
+  `games_per_h` against run 1's iterations 70-78). If it is too high, the exact speed-ups left: the pool's pair scores
+  shared by its K - 1 randomised builds (most of a build), and a candidate abandoned once its colours cannot cover the
+  shown cards (each candidate on a generator of its own) - both keep the prior's distribution.
+* **The retrain** runs beside the run: the smoke's (44 games, 2 iterations) ~38 s on 2 threads (values 17 s, train 17 s,
+  export and check 4 s). Run 2's (8 iterations at first, ~5,100 games; up to 40, ~25,000, the 128 x 8 network valuing each
+  game twice per chooser on CPU) ~3 to ~15 minutes on 4 threads every 4 iterations (~20 minutes): below-normal priority,
+  never waited for.
+* **The deck-choice evaluation**: 64 games against the heuristic at the evaluation's simulations, ~0.6 of run 1's 100-game
+  yardstick: ~+50 s of the Mac's ~217 s an evaluation (109.3: with `--eval-every 2` the Mac's ~264 s budget is just met).
+
+### 112.9 Tests, smoke, fuzz, gates
+
+**Tests.**
+* `engine/tests/deck_scorer.rs` (8 + 3 ignored): `the_scorer_scores_as_torch_does` (the four fixtures - linear, set, a pair
+  over a set strength with a matchup term, a Bradley-Terry pair over a linear one, 24-deck fields - against torch's scores
+  of 48 decks: at most 8.9e-8; the sha256 of the bytes; order-free; read once), `the_scorer_refuses_what_it_cannot_score`
+  (19 malformed exports, a missing file, a card out of the table at scoring, Paradox Haze's `in_table` 0),
+  `the_evaluator_choice_key_parses_and_refuses` (the defaults, the JSON round trip, the value choice's JSON unchanged,
+  `seats`, a pinned sha256, a temperature, 9 refusals), `the_evaluator_chooses_the_best_candidate_of_the_seats_own_pool`
+  (40 games per kind, linear, set and pair: every seat its explore pick or the evaluator's best candidate - 38-46 of 52
+  chosen seats not the best guess -, `how` with the sha256 and score, the game played with it, the same decks from the same
+  seed, no decision; no hidden information: the other seat given another pool, the same choice; `seats` [0] with
+  `best_share` 1: seat 1 the best guess, its prior the mixed field's), `the_temperature_draws_by_the_softmax_of_the_scores`
+  (40,000 draws within 4 se; a game's pick a function of the seed), `the_prior_of_a_choosing_seat_chooses_as_the_seat_does`
+  (nothing shown: exactly the best of K candidates rebuilt from the generator, 24 of 24; mean score against the real chosen
+  decks; 34 of 36 samples with 8+ shown cards in the real deck's colours and a splash at most; explore 1 = the randomised
+  prior draw for draw), `the_game_log_records_the_evaluator_and_replays` (the spec line's sha256, each chosen seat's
+  sha256 and score, each game replayed bit for bit from its spec line); ignored: `choice_cost`, `prior_cost_per_game`,
+  `builder_cost` (112.8); `the_seats_key_with_the_value_choice` (only seat 1 decides). `scorer::tests::sha256_meets_the_standards_vectors`. `engine/tests/deck_choice.rs` (the spec's
+  `DeckChoiceSpec` is no longer `Copy`: two `.clone()`s), `sealed` (107.1's builder pin holds), `game_log`: pass.
+* `tests/test_deck_scorer.py` (10): the fixtures reproducible byte for byte; the engine against the reference (1e-12) and
+  torch on random evaluators of every kind, one evaluator one file, the refusals through the binding; eval-v2's
+  evaluators (2,000 decks; skipped without E:); the candidates' scores and choice through the binding; driver games with
+  the choice, their log (`evaluator` sha256 per chosen seat, two specs' lines) and `--check` (a tampered sha256 found);
+  the versions and the retrain's schedule (the first version copied, nothing due before the window, the job's command
+  line, a dead job reported once, a published version used from the next phase, `used.jsonl`, the evaluation's evaluator
+  and remote inputs, without the retrain the spec as given, `evaluator_every` without the evaluator's choice refused); the
+  snapshot (by time, a remote evaluation's file by its name); the deck-choice evaluation's spec; the presets; an `mtg_eoe`
+  rolling driver switching evaluators between phases (`Driver.set_spec`: both versions in the log, `--check` clean).
+* zero-core: 112.4's tests (docs/az.md 40.5).
+
+**The smoke** (`python -m mtgz.az.run --run E:/mtg-zero-scratch/deck-choice-eval/smoke2 --preset eoe-2e-smoke --iters 4
+--threads 2 --groups 1 --torch-threads 1 --spec <eoe-2e-smoke's with the evaluator E:/mtg-zero/s4a/v2_time/evaluator_set.json>`,
+CPU, 17 minutes on ca06ac3's code): iteration 1 copied eval-v2's set export in as `v0000` (`1e0ac3309134`) and chose by
+it; iterations 1-3 self-played with v0000 (64 games: 113 seats chose - 51 the best guess, the rest candidates 1-7 -, 15
+explored; the chosen decks scored 0.60 +- 0.05 against the explore ones over 15 games, noise at this size); at iteration
+3's start **the retrain of v0002 started** (the games of iterations 1-2: 44 games, the half-life 40, lam 0.25 selected,
+validation log loss 0.664, 23.5 s; export check: engine - reference 2.2e-16, engine - torch 2.9e-8) and **iteration 4
+chose by v0002** (`c0369c3ae2d5`); a second retrain (v0003, iterations 2-3, 35.1 s) ran past the run's end, as one does past
+a stop. The deck-choice evaluation ran every iteration (4 games; iteration 4's by v0002). `python -m mtgz.sealed.games
+E:/mtg-zero-scratch/deck-choice-eval/smoke2 --check`: **184 of 184 games rebuilt, 0 mismatches** (every chosen deck the
+evaluator's own choice by its logged sha256). An earlier smoke on this branch's first format (`smoke1`, 4 iterations, a
+restart mid-run included) showed the same chain (v0000 -> v0002 -> chosen by v0002, 192 games, 0 mismatches); its files
+are of the retired format.
+
+**The fuzz** (`FUZZ_GAMES=20000`, release, four chunks of 5,000 / two of 10,000 run as the fuzz binary of ca06ac3's engine -
+the engine sources of every later commit of this branch are the same):
+
+* **The new mode**, `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_BEST_SHARE=0.5 FUZZ_DECK_CHOICE=32
+  FUZZ_DECK_CHOICE_BY=E:/mtg-zero/s4a/v2_time/evaluator_set.json`: **passed, every seed** (wins 9,812 / 9,617, 571 draws, none
+  aborted; **36,046 seats chose by the evaluator** - each checked to be its pool's best candidate by the scorer, with the
+  sha256 and score in `how`, its prior `sealed+evaluator` - and 3,954 explored; 541,584 hidden-decklist worlds dealt from the
+  choosing priors, 541,433 with another deck than the real one; 2.87M information-set steps in step; ~5,450-5,780 s a
+  chunk). (An earlier run of this mode on the branch's first scorer format was stopped when the format changed.)
+* **The mode of before**, `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_BEST_SHARE=0.5` (the mixed field's prior; the builder's
+  speed-up under every deal): **passed, every seed** (wins 9,705 / 9,576, 719 draws, none aborted; 559,458 worlds, 559,256
+  with another deck; 2.91M information-set steps; ~4,760-4,790 s a chunk of 10,000).
+
+**Digests**: no digest game plays the EoE table, and every spec without `"by": "evaluator"` builds, deals and plays as before
+(107.1's pin of the builder, seats and prior samples holds): **unchanged**, full **53839c837bbaf034**,
+`DIGEST_ENCODING=0` **208c723daced22fe** - main's (measured on 60397f3, this branch's base, and on this branch).
+
+**Gates** (CPU, `--no-mac`, `--jobs 4`, `--target-dir E:/cargo-target/mtg-zero/deck-choice-eval`; the desktop shared with
+other agents' gates and runs, the CPU at 96-100% much of the night - gate steps run below normal priority):
+
+* **`python tools/gate.py engine --no-mac --tested-sha a1e4119 --expect-digest 53839c837bbaf034 --expect-digest0
+  208c723daced22fe`** on a1e4119: build, both digests (= expected), `az` 48, `hidden` 28, `limits` 13, pytest 283 passed
+  and 1 skipped, the search smoke (random, seed 0): **`GATE PASSED engine a1e4119e51eb in 912s`**.
+* **`python tools/gate.py python --no-mac`** on a1e4119: build, pytest 283 passed and 1 skipped, the run-loop smoke
+  (mtg-smoke, 16 games, 0 unfinished): **`GATE PASSED python a1e4119e51eb in 545s`**. (First runs of both at ~96% CPU
+  failed only on subprocess timeouts: test_loop.py 2 failed and 5 errors - 10 of 10 alone in 45 s -, test_mac_remote.py's
+  remote EoE evaluation - passes alone.) a3f6ac1 changes only the core pin (the core's Python, below); the commit after
+  it, these paragraphs.
+* **`python tools/gate.py optin-core --no-mac --baseline-root <a checkout of 60397f3, zero-core f9ca5c3> --step-timeout
+  7200`** on a3f6ac1 (zero-core ef63ee1): core tests 148, **checkpoint_compat byte identity: identical** (mtg, a random
+  network: visits and cq 2,465 samples each, the same record and result hashes on both sides), `az` 48, `hidden` 28, the
+  other games' build-only 3 of 3 (glassroad-zero, caverna-zero, kingdombuilder-zero), core build: passed; **core pytest
+  failed: 442 passed, 4 failed, 2 errors, under the night's load** - three toy runs of `test_infoset_merge.py` timed out
+  at their 300 s, `test_league.py`'s module fixture lost one toy run to an access violation (exit 0xC0000005, no output:
+  a classic run with the league, a path the hooks do not touch; the core's Rust change is safe code), and
+  `test_measure.py`'s held-out `seconds` (0.0 vs 0.01, a timing comparison; `heldout.py` untouched). **Alone, at the same
+  load: `test_league.py` + `test_infoset_merge.py` 21 of 21 (116 s); `test_select.py` + `test_package_hooks.py` +
+  `test_measure.py` 33 of 33.** A full rerun of the suite on its own at normal priority (ef63ee1, 63 minutes at ~100%
+  CPU): 446 passed, 2 failed - `test_measure.py`'s anchors on a local remote timed out, and `test_distill.py`'s fork toy
+  run exited 0xC0000005 with no output; both pass alone (27 s). The same exit hit toy runs of another branch's core with
+  no Rust change the same night (realdecks' optin-core gate on zero-core 6ed51d5): the machine, not this change. **The
+  optin-core gate is to rerun on a quiet machine** (the command above).
+* The first optin-core run (a1e4119, zero-core b0a3a3b) passed every step but the core pytest, which ran out of its hour.
+  **Run on its own, zero-core's suite then found one real failure, fixed in ef63ee1**:
+  `test_select.py::test_remote_ships_raw_offsets` - `RemoteEval._ship` read the run's `game` setting for the new inputs
+  hook even when the package registers none (a KeyError with the test's settings dict); it now returns before reading it,
+  so `_ship` reads exactly what it did before (docs/az.md 40.3).
+* The launch command of 112.6 resolves (`zero.run.parse` + `resolve_config` against run 1's `config.json`, nothing
+  started: `E:/mtg-zero-scratch/deck-choice-eval/check_launch.py`): preset eoe-2e, sims 64, `sims_fast` 16, `sims_minor`
+  4, `eval_sims` 32, lr 1e-3 halved every 30 to 1e-4 (2.5e-4 at 79), `eval_every` 2 on `mac`, the evaluator settings as
+  given, the spec's choice with its sha256.
+* Not run: the deck-choice evaluation of run 1's iteration 78 on the desktop GPU (beside the evalpick race, 64 games did
+  not finish in 8 minutes on 2 search threads: stopped). The command, for when the GPU is free:
+  `python -m mtgz.sealed.rolling deckeval E:/mtg-zero/runs/eoe1/models/iter_0078.pt --evaluator
+  E:/mtg-zero/s4a/v2_time/evaluator_set.json --games 64 --set infer_device=cuda threads=4 groups=1`, then the same with
+  `--best-guess` (the baseline): the difference is what run 2's `extras.deckchoice` starts from.
+
 ## 123. Legacy Sneak and Show: the deck's cards (branch `sneak-show`, mtg-bot `feature/sneak-show-ir`)
 
 **Why.** The next constructed deck after the Delver mirror (54) and Legacy Doomsday (124): MTGGoldfish's "Sneak and
