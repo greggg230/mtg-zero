@@ -466,6 +466,14 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
                     cost.tap_untapped = Some(SacCost { filter: f, n: n as u32, another: true });
                 }
             }
+            // "Pay N life" as a cost atom (CR 119.4; Street Wraith's
+            // "Cycling—Pay 2 life", ENGINE.md 110.3).
+            cats::CostAtom::PayLifeCost(nodes::PayLifeCost { amount }) => {
+                if cost.life > 0 {
+                    l.unsupported("CostAtom:PayLifeCost(with another life payment)");
+                }
+                cost.life = l.int("PayLifeCost.amount", *amount, 1, 99) as u32;
+            }
             // "Remove n +1/+1 counters from this" (Walking Ballista).
             cats::CostAtom::RemoveCountersFromSelfCost(nodes::RemoveCountersFromSelfCost { count }) => {
                 if cost.remove_counters.is_some() {

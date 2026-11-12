@@ -16,17 +16,17 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
-| fetched | 1633 | 1278 |
-| class a | 1251 | 994 |
+| fetched | 1638 | 1282 |
+| class a | 1256 | 998 |
 | class b | 200 | 151 |
 | class c | 182 | 133 |
-| a, tested (passing) | 1251 | 994 |
+| a, tested (passing) | 1256 | 998 |
 | a, tested by a rulings test (`rulings_*`, `interactions_*`) | 934 | 777 |
-| a, tested only by an earlier test (Oracle or rules) | 317 | 217 |
+| a, tested only by an earlier test (Oracle or rules) | 322 | 221 |
 | a, deferred | 0 | 0 |
 | a, untested | 0 | 0 |
 
-Class a by area (distinct texts): mana 176/176, triggers 139/139, stack 136/136, zones 126/126, other 96/96, copies 96/96, dfc 65/65, replacement 59/59, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 176/176, triggers 139/139, stack 136/136, zones 126/126, other 97/97, copies 96/96, dfc 65/65, replacement 62/62, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -3448,7 +3448,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `5ef962e6` | a | other | opening hand = post-mulligan hand; pregame hand actions happen starting-player-first, then turn order, before turn 1 | `cards_m7d::gemstone_caverns_begins_the_game_on_the_battlefield_with_a_luck_counter_cr103_6` |
+| `5ef962e6` | a | other | opening hand = post-mulligan hand; pregame hand actions happen starting-player-first, then turn order, before turn 1 | `cards_doomsday_c::cr_103_6_leylines_begin_the_game_on_the_battlefield_the_starting_player_first`; `cards_doomsday_c::cr_103_6_a_leyline_put_on_the_bottom_by_a_mulligan_is_not_in_the_opening_hand`; `cards_m7d::gemstone_caverns_begins_the_game_on_the_battlefield_with_a_luck_counter_cr103_6` |
 | `10242be0` | c | NR | extra copies of this land from pregame setup arent legend-ruled away until just before the first upkeeps priority [part 3, was a/triggers: the cube has one Gemstone Caverns per deck (singleton)] | not reachable with the cube's cards |
 
 ### Gemstone Mine
@@ -3576,6 +3576,21 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `919d28a6` | a | mana | Cavern mana on any cost of the spell (kicker too, or a free cast's additional cost) makes it uncounterable | `cards_doomsday_b::cr_106_6_cavern_mana_on_a_kicker_cost_makes_the_spell_uncounterable` |
 | `dc0c0658` | a | other | choose a creature type: an existing creature type of 205.3m only, no card type | `cards_doomsday_b::cr_614_12_cavern_chooses_one_of_the_367_creature_types_as_it_enters` |
 
-## Cards without rulings (173)
+### Edge of Autumn (legacy, constructed play: ENGINE.md 54)
 
-Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54), Flow State (legacy, constructed play: ENGINE.md 54)
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `3079d582` | a | other | Edge of Autumn counts the lands you control as it resolves; with five or more it does nothing (no search, no shuffle) | `cards_doomsday_c::edge_of_autumn_with_five_lands_does_nothing_and_doesnt_shuffle`; `cards_doomsday_c::edge_of_autumn_counts_lands_on_resolution_after_a_cycling_sacrifice` |
+
+### Leyline of the Void (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `5ef962e6` | a | other | opening hand = post-mulligan hand; pregame hand actions happen starting-player-first, then turn order, before turn 1 | `cards_doomsday_c::cr_103_6_leylines_begin_the_game_on_the_battlefield_the_starting_player_first`; `cards_doomsday_c::cr_103_6_a_leyline_put_on_the_bottom_by_a_mulligan_is_not_in_the_opening_hand`; `cards_m7d::gemstone_caverns_begins_the_game_on_the_battlefield_with_a_luck_counter_cr103_6` |
+| `e64b1395` | a | replacement | a card discarded under Leyline of the Void is still discarded (discard triggers, madness); its characteristics are found in exile | `cards_doomsday_c::cr_614_1a_leyline_exiles_discarded_cards_which_were_still_discarded`; `cards_doomsday_c::connive_under_leyline_reads_the_exiled_discarded_card` |
+| `4226f05f` | a | replacement | Leyline of the Void exiles cards only: tokens still die (their dies triggers trigger) | `cards_doomsday_c::cr_700_4_under_leyline_opposing_creature_cards_dont_die_but_tokens_do` |
+| `ef9cd497` | a | replacement | under Leyline of the Void the opponents' nontoken creatures are exiled instead of dying; their dies triggers don't trigger | `cards_doomsday_c::cr_700_4_under_leyline_opposing_creature_cards_dont_die_but_tokens_do` |
+
+## Cards without rulings (174)
+
+Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54), Flow State (legacy, constructed play: ENGINE.md 54), Street Wraith (legacy, constructed play: ENGINE.md 54)

@@ -275,14 +275,16 @@ impl Game {
     /// their graveyard: a permanent an opponent of `owner` controls says so
     /// (Dauthi Voidwalker).
     /// (A Voidwalker leaving in the same simultaneous move still applies:
-    /// the replacement exists as the event begins, CR 614.1a.)
+    /// the replacement exists as the event begins, CR 614.1a; with its
+    /// abilities as it last existed there, `Lki::void_exile`, so not one that
+    /// had lost them, ENGINE.md 110.3.)
     pub(crate) fn void_counter_for(&self, owner: PlayerId) -> Option<crate::db::Counter> {
         let q = crate::ids::opp(owner);
         self.permanents_of(q).find_map(|c| self.abilities(c).void_exile).or_else(|| {
             if !self.batching {
                 return None;
             }
-            self.leaving.iter().find_map(|l| if l.controller == q { self.db.def(l.def).void_exile } else { None })
+            self.leaving.iter().find_map(|l| if l.controller == q { l.void_exile } else { None })
         })
     }
 }
