@@ -11,11 +11,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def test_mtg_smoke_iteration(tmp_path):
     run = tmp_path / 'smoke'
-    # (layout v7, a draft with variable-length rows, ENGINE.md 125: a token network, sparse v2 shards, the draft
-    # allowed)
-    v7 = ['--arch', 'tokens', '--hidden', '32', '--blocks', '1', '--heads', '2', '--ff', '64', '--allow-draft-layout', '1',
-          '--shard-sparse', '1', '--window-sparse', '1']
-    p = subprocess.run([sys.executable, '-m', 'mtgz.az.run', '--run', str(run), '--preset', 'mtg-smoke', '--iters', '1'] + v7,
+    # (layout v7, ENGINE.md 125.12: the preset's token network and sparse v2 shards; no flag)
+    p = subprocess.run([sys.executable, '-m', 'mtgz.az.run', '--run', str(run), '--preset', 'mtg-smoke', '--iters', '1'],
                        cwd=ROOT, capture_output=True, text=True, timeout=900,
                        env=dict(os.environ, PYTHONIOENCODING='utf-8'))
     assert p.returncode == 0, p.stdout[-3000:] + p.stderr[-3000:]

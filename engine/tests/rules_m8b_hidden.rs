@@ -522,3 +522,139 @@ fn a_deck_of_basic_lands_up_to_the_cap_is_sampled() {
     }
     assert!(tested >= 200, "{tested}");
 }
+
+/// Every name the pending `NameCard` decision offers, over its pages (a
+/// clone answers "next page").
+fn names_offered(g: &engine::Game) -> Vec<u16> {
+    let mut g = g.clone();
+    let mut out = Vec::new();
+    loop {
+        let opts: Vec<engine::Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+        out.extend(opts.iter().filter_map(|c| match *c {
+            engine::Choice::Def(d) => Some(d),
+            _ => None,
+        }));
+        match opts.iter().find(|c| matches!(c, engine::Choice::Page(_))) {
+            Some(&next) => {
+                g.choose(next);
+            }
+            None => return out,
+        }
+    }
+}
+
+/// Anointed Peacekeeper's "choose any card name" in a cube best-of-three
+/// match (ENGINE.md 127): with hidden pools (36.11) the opponent's unseen
+/// first picks, deck and library are hidden, so the names offered are a
+/// public set, every face of every card of the table (the support of the
+/// first-pick prior and more) and the table's tokens that share a card's
+/// name, one definition a name: the same in every world of the chooser's
+/// (whose worlds draw other first picks and other libraries for the
+/// opponent) and of the opponent's.
+#[test]
+fn peacekeepers_names_in_a_hidden_pool_match_dont_depend_on_the_opponents_hidden_cards() {
+    use engine::az::{Format, Seat};
+    use engine::sneak_show::face_name;
+    let db = db();
+    let ids = |names: &[&str]| -> Vec<u16> {
+        let mut v: Vec<u16> = names.iter().map(|n| db.expect_id(n).unwrap()).collect();
+        v.sort_unstable();
+        v
+    };
+    let mut d0 = vec!["Anointed Peacekeeper"; 4];
+    d0.extend(["Plains"; 36]);
+    let mut d1 = vec!["Brazen Borrower // Petty Theft", "Thraben Inspector", "Skullclamp", "Nettlecyst"];
+    d1.extend(["Island"; 36]);
+    let side1 = ["Life // Death", "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki", "Mana Vault", "Lightning Bolt"];
+    let firsts1 = ["Life // Death", "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki", "Mana Vault"];
+    let seats = [
+        Seat { deck: ids(&d0), sideboard: Vec::new(), first_picks: Vec::new(), elsewhere: Vec::new() },
+        Seat { deck: ids(&d1), sideboard: ids(&side1), first_picks: ids(&firsts1), elsewhere: Vec::new() },
+    ];
+    // The expected list (CR 201.3): the faces of the table's cards (a split
+    // card's halves, else the card, its back face, Adventure, prepare
+    // spell) and the table's tokens (and a token's back face) named as a card
+    // is (a face above, or Faerie Dragon, an Astral card's name), one
+    // definition a name, the smallest; sorted by definition.
+    let n = db.num_cards();
+    let faces_of = |d: u16| -> Vec<u16> {
+        let dd = db.def(d);
+        match dd.halves {
+            Some((l, r)) => vec![l, r],
+            None => std::iter::once(d).chain(dd.back).chain(dd.adventure).chain(dd.prepare).collect(),
+        }
+    };
+    let card_defs: Vec<u16> = (0..n as u16).filter(|&d| !db.def(d).token && !db.def(d).emblem && !db.def(d).rules).collect();
+    let mut want: Vec<u16> = card_defs.iter().flat_map(|&d| faces_of(d)).collect();
+    let card_faces: Vec<&str> = want.iter().map(|&d| face_name(db.def(d))).collect();
+    for t in n..db.len() {
+        let dd = db.def(t as u16);
+        if dd.token && !dd.emblem && !dd.rules {
+            for f in std::iter::once(t as u16).chain(dd.back) {
+                let name = face_name(db.def(f));
+                if !name.is_empty() && (card_faces.contains(&name) || name == "Faerie Dragon") {
+                    want.push(f);
+                }
+            }
+        }
+    }
+    want.sort_unstable_by(|&a, &b| face_name(db.def(a)).cmp(face_name(db.def(b))).then(a.cmp(&b)));
+    want.dedup_by(|a, b| face_name(db.def(*a)) == face_name(db.def(*b)));
+    want.sort_unstable();
+    let combined: Vec<String> = want
+        .iter()
+        .filter(|&&d| face_name(db.def(d)).contains(" // "))
+        .map(|&d| format!("{} {:?}", db.def(d).name, (db.def(d).back, db.def(d).adventure, db.def(d).prepare, db.def(d).front)))
+        .collect();
+    assert!(combined.is_empty(), "no combined name: {combined:?}");
+    let mut found = 0;
+    for seed in 0..12u64 {
+        let gspec = engine::GameSpec { hidden_decks: true, ..engine::GameSpec::default() };
+        let mut g = MtgAz::from_seats(db, gspec, Format::Bo3, &seats, seed, [None, None]).unwrap();
+        let mut h = Heuristic::new(seed);
+        let mut keys = Vec::new();
+        let mut steps = 0;
+        while g.to_move().is_some() && g.m.game_no == 1 && steps < 3000 {
+            if g.g.kind() == Some(DecisionKind::NameCard) {
+                break;
+            }
+            let l = legal(&g);
+            let a = h.choose(&g.g, &l);
+            g.step(a, &mut keys).unwrap();
+            steps += 1;
+        }
+        if g.g.kind() != Some(DecisionKind::NameCard) {
+            continue;
+        }
+        found += 1;
+        let d = g.g.pending_decision().unwrap().clone();
+        assert_eq!(d.player, 0, "P0's Peacekeeper asks");
+        let real = names_offered(&g.g);
+        assert_eq!(real.len(), want.len(), "the table's names");
+        assert_eq!(real, want);
+        let real_firsts = g.m.pools[1].first_picks.clone();
+        let real_library: Vec<u16> = {
+            let mut v: Vec<u16> = g.g.player(1).library.iter().map(|&c| g.g.obj(c).def).collect();
+            v.sort_unstable();
+            v
+        };
+        let (mut other_firsts, mut other_library) = (0, 0);
+        for s in 0..16 {
+            let w = world(&g, 0, 100 * seed + s);
+            assert_eq!(w.g.pending_decision(), Some(&d), "the chooser's world asks the same");
+            assert_eq!(names_offered(&w.g), real);
+            other_firsts += (w.m.pools[1].first_picks != real_firsts) as u32;
+            let mut lib: Vec<u16> = w.g.player(1).library.iter().map(|&c| w.g.obj(c).def).collect();
+            lib.sort_unstable();
+            other_library += (lib != real_library) as u32;
+            let w = world(&g, 1, 100 * seed + s);
+            assert_eq!(names_offered(&w.g), real, "a world of the opponent's offers the same");
+        }
+        assert!(other_firsts > 0 && other_library > 0, "the worlds hide other cards: {other_firsts} {other_library}");
+        if found == 2 {
+            break;
+        }
+    }
+    assert!(found >= 1, "no Peacekeeper named a card");
+    println!("{found} name questions; {} names offered", want.len());
+}

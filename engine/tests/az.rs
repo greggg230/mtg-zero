@@ -431,7 +431,8 @@ fn layout_json_is_checked_in() {
 /// the same, the permanents', hand's, stack's, triggers' and list's slots wider at their ends, the
 /// Cavern block and v7's tail-only segments new), layout_v6.json is layout v6 as frozen (ENGINE.md
 /// 100.5.1), v7's segments are v6's plus the appended tail-only, gated ones, and the variable-length
-/// keys are set (tails on the seven capped segments, pointer overrides, the row limit, a draft).
+/// keys are set (tails on the seven capped segments, pointer overrides, the row limit; final: `draft` false, ENGINE.md
+/// 125.12).
 #[test]
 fn layout_v7_widens_layout_v6_exactly() {
     let (l6, l7) = (read_layout("layout_v6.json"), read_layout("layout_v7.json"));
@@ -447,7 +448,7 @@ fn layout_v7_widens_layout_v6_exactly() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az");
     let read = |f: &str| -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(dir.join(f)).unwrap()).unwrap() };
     let j7 = read("layout_v7.json");
-    assert_eq!((j7["option_pointers"].as_bool(), j7["max_row_tokens"].as_u64(), j7["draft"].as_bool()), (Some(true), Some(4096), Some(true)));
+    assert_eq!((j7["option_pointers"].as_bool(), j7["max_row_tokens"].as_u64(), j7["draft"].as_bool()), (Some(true), Some(4096), Some(false)));
     let segs = j7["segments"].as_array().unwrap();
     let names: Vec<&str> = segs.iter().map(|s| s["name"].as_str().unwrap()).collect();
     assert_eq!(names.len(), 20);

@@ -2785,10 +2785,11 @@ impl Game {
         let at_ids = |f: &dyn Fn(crate::decision::Choice) -> Option<DefId>| -> Vec<(DefId, Option<CardIdx>)> {
             d.options.iter().filter(|o| o.action >= act::LIBRARY).filter_map(|o| f(o.choice).map(|x| (x, None))).collect()
         };
-        // "As this enters, look at an opponent's hand, then choose any card
+        // "As this enters, [look at an opponent's hand, then] choose a card
         // name" (`Game::choose_name_as_enters`): `LIBRARY` + k is the k-th
-        // name of the opponent's cards by definition, not a library slot
-        // (ENGINE.md 65.10: the list was the namer's library).
+        // name of `Game::nameable_defs` (by definition; on a later page, the
+        // page's k-th), not a library slot (ENGINE.md 65.10: the list was the
+        // namer's library; 127: the list).
         let names = d.kind == K::NameCard && matches!(self.agenda.last(), Some(Task::AsEnters { .. }));
         // The fourth slot's ability choice (ENGINE.md 100.2): `LIBRARY` + k is
         // an ability, by the definition that has it (`Game::activated_home`).
@@ -3384,11 +3385,11 @@ pub fn layout_json(db: &'static CardDb) -> String {
     if lay.v7 {
         // Layout v7 (ENGINE.md 124.2): its block of globals after v6's.
         v["globals"].as_array_mut().unwrap().push(json!({"name": "globals_v7", "offset": O_GLOBALS_V7, "count": GLOBALS_V7}));
-        // ENGINE.md 125: the rows' pointer overrides, the resource limit, and a draft until the
-        // project ends (run launches refuse it without `allow_draft_layout`).
+        // ENGINE.md 125: the rows' pointer overrides and the resource limit; final (`draft: false`,
+        // ENGINE.md 125.12: it freezes at its first run).
         v["option_pointers"] = json!(true);
         v["max_row_tokens"] = json!(te::MAX_ROW_TOKENS);
-        v["draft"] = json!(true);
+        v["draft"] = json!(false);
     }
     // The EoE table's identity space (ENGINE.md 105): the same layout under the name `eoe`, so
     // zero-core's guard tells an EoE network from a cube one (the cube's layout has no name).

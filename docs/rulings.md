@@ -17,16 +17,16 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
 | fetched | 1656 | 1298 |
-| class a | 1274 | 1014 |
-| class b | 200 | 151 |
+| class a | 1279 | 1018 |
+| class b | 195 | 147 |
 | class c | 182 | 133 |
-| a, tested (passing) | 1274 | 1014 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 936 | 777 |
+| a, tested (passing) | 1279 | 1018 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 941 | 781 |
 | a, tested only by an earlier test (Oracle or rules) | 338 | 237 |
 | a, deferred | 0 | 0 |
 | a, untested | 0 | 0 |
 
-Class a by area (distinct texts): mana 177/177, triggers 140/140, stack 138/138, zones 130/130, other 103/103, copies 96/96, dfc 66/66, replacement 63/63, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 178/178, triggers 140/140, stack 138/138, zones 130/130, other 106/106, copies 96/96, dfc 66/66, replacement 63/63, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -187,12 +187,12 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `a6040722` | b | DEF | activated (incl. keyword) abilities use a colon; a tax/hoser on activated abilities leaves triggered ones alone [part 3, was a/other: activated abilities have colons; triggered ones don't; a definition] | a definition, no behaviour of its own |
-| `252f0b38` | b | DEF | a mana ability is one that produces mana on resolution, not one costing mana to activate [part 3, was a/mana: what a mana ability is; a definition] | a definition, no behaviour of its own |
+| `a6040722` | a | other | activated (incl. keyword) abilities use a colon; a tax/hoser on activated abilities leaves triggered ones alone [part 3, was a/other: activated abilities have colons; triggered ones don't; a definition] [ENGINE.md 127, was b/DEF: Anointed Peacekeeper's tax tested on equip and on a triggered ability] | `rulings_other::anointed_peacekeepers_ability_tax_takes_equip_and_leaves_triggered_abilities_alone_cr_602_2b`; `rulings_other::anointed_peacekeeper_leaves_mana_abilities_and_a_triggers_payment_alone_cr_605_1a` |
+| `252f0b38` | a | mana | a mana ability is one that produces mana on resolution, not one costing mana to activate [part 3, was a/mana: what a mana ability is; a definition] [ENGINE.md 127, was b/DEF: Anointed Peacekeeper's tax tested on a mana ability and a non-mana one costing mana] | `rulings_other::anointed_peacekeepers_ability_tax_takes_equip_and_leaves_triggered_abilities_alone_cr_602_2b`; `rulings_other::anointed_peacekeeper_leaves_mana_abilities_and_a_triggers_payment_alone_cr_605_1a` |
 | `93ee06dd` | a | other | a naming ability that affects cards applies in every zone, not just one | `rulings_other::anointed_peacekeepers_tax_applies_to_a_named_card_cast_from_a_graveyard_cr_601_2f` |
 | `90d8b0d0` | b | MP | an ability applying to 'opponents' generally applies to all opponents, not just one you interacted with [part 3, was a/other: all opponents] | multiplayer |
-| `2a160983` | b | DEF | you may name any card, even one without an activated ability, not just ones you've seen [part 3, was a/other: the engine lets the Peacekeeper name any card definition; a definition] | a definition, no behaviour of its own |
-| `abac3051` | b | DEF | you can't name a token's name unless it duplicates an actual card's name [part 3, was a/other: tokens aren't cards to name; a definition] | a definition, no behaviour of its own |
+| `2a160983` | a | other | you may name any card, even one without an activated ability, not just ones you've seen [part 3, was a/other: the engine lets the Peacekeeper name any card definition; a definition] [ENGINE.md 127, was b/DEF: the name list tested: unseen cards and cards without activated abilities] | `rulings_other::anointed_peacekeeper_may_name_a_card_it_didnt_see_or_without_activated_abilities_cr_201_3` |
+| `abac3051` | a | other | you can't name a token's name unless it duplicates an actual card's name [part 3, was a/other: tokens aren't cards to name; a definition] [ENGINE.md 127, was b/DEF: the name list tested: token names only when card names] | `rulings_other::anointed_peacekeeper_offers_a_tokens_name_only_if_a_card_has_it_cr_201_3` |
 
 ### Archon of Emeria
 
@@ -3028,7 +3028,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `ca9bf5c4` | b | DEF | activated abilities use a colon; some keyword abilities like cycling are activated too, shown in reminder text [part 3, was a/other: activated abilities have colons; a definition] | a definition, no behaviour of its own |
 | `f21fe774` | a | combat | using an unblock ability on an already-blocked creature doesnt remove it from combat or unblock what it hit | `rulings_combat::blocks_declared_stand_unblockable_cant_block_and_menace_afterwards_cr_509_1h_506_4` |
-| `252f0b38` | b | DEF | a mana ability is one that produces mana on resolution, not one costing mana to activate [part 3, was a/mana: what a mana ability is; a definition] | a definition, no behaviour of its own |
+| `252f0b38` | a | mana | a mana ability is one that produces mana on resolution, not one costing mana to activate [part 3, was a/mana: what a mana ability is; a definition] [ENGINE.md 127, was b/DEF: Anointed Peacekeeper's tax tested on a mana ability and a non-mana one costing mana] | `rulings_other::anointed_peacekeepers_ability_tax_takes_equip_and_leaves_triggered_abilities_alone_cr_602_2b`; `rulings_other::anointed_peacekeeper_leaves_mana_abilities_and_a_triggers_payment_alone_cr_605_1a` |
 | `a2e75b69` | a | other | before shuffling your library, you may reveal one companion from outside the game if your deck meets its condition | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
 | `92589f1d` | a | mana | a generic cost reduction cant touch colored costs, and wont reduce an already one-or-zero-mana activation further | `cards_m7c_tail2::zirda_reduces_activation_costs_by_two_leaving_one_mana_cr601_2f` |
 | `b4178eed` | a | other | if multiple players reveal companions, the starting player goes first, then turn order; declining is permanent | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |

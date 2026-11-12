@@ -54,9 +54,10 @@ EVAL_SPEC = eval_spec(SPEC)
 # wider permanent, hand, stack, trigger and list slots (new floats at their ends), the Cavern block of globals, tails on
 # the seven capped segments (objects past their head slots as tail tokens: zero-core docs/search.md 1.4) and seven
 # tail-only gated segments (the other player's waiting triggers, delayed triggers, links, exile offers, deep known
-# library cards, stack relations, a positional graveyard reader's order), with pointer overrides and a row limit of
-# 4,096 tokens. A draft (`draft: true`) until the variable-length project ends: runs refuse it without
-# `allow_draft_layout`. A v6, v5 or v4 network widens onto it exactly (`python tools/fork_run.py <checkpoint> <new run>`,
+# library cards, stack relations, a positional graveyard reader's order, the face-down cards, the earlier games'
+# reveals), with pointer overrides and a row limit of 4,096 tokens. Final (`draft: false`, ENGINE.md 125.12: it
+# freezes at its first run); its rows' shards are sparse only (format v2, zero-core R8): every `mtg` preset sets
+# `shard_sparse` 1 (below). A v6, v5 or v4 network widens onto it exactly (`python tools/fork_run.py <checkpoint> <new run>`,
 # gates at 0), and the encoding guard refuses one unwidened. layout_v6.json, layout_v5.json and layout_v4.json stay: the
 # layouts of the v6, v5 and v4 runs' checkpoints (their configs carry them too). The game `mtg_eoe` keeps layout v6
 # (`layout_eoe.json`, below).
@@ -75,8 +76,9 @@ SPEC_DRAFT = '{}'
 PRESETS = {
     # the end-to-end check on CPU (tiny network, few sims; a game has ~300-500 decisions with
     # >= 2 options, docs/ENGINE.md 21.5)
+    # (layout v7, ENGINE.md 125.12: a token network - an MLP takes no tail tokens, zero-core R4)
     'mtg-smoke': dict(game='mtg', spec=SPEC, players=[2], iters=3, games=16, conc=16, sims=8, sims_fast=2,
-                      p_full=0.25, temp_moves=30, hidden=32, blocks=1, batch=128, min_window_samples=0,
+                      p_full=0.25, temp_moves=30, arch='tokens', hidden=32, blocks=1, heads=2, ff=64, batch=128, min_window_samples=0,
                       min_steps=10, lr_warmup_steps=0, yardstick='heuristic', eval_games=8, eval_sims=4,
                       eval_random_games=4, elo_games=4, ref_games=8, threads=2, max_steps=20_000),
     # the first small self-play run (M5a, docs/ENGINE.md 21.6; CPU inference while other
@@ -289,6 +291,13 @@ PRESETS['eoe-2e-smoke'] = dict(PRESETS['eoe-smoke'], spec=json.dumps(dict(json.l
                                evaluator_every=1, evaluator_window=2, evaluator_min_window=2, evaluator_val_iters=1,
                                evaluator_kind='set', evaluator_half_life=40.0, evaluator_threads=2, deckchoice_eval_games=4,
                                real_decks_builder='run_evaluator', real_decks_pools=2, real_decks_games=2)
+
+# Layout v7 (ENGINE.md 125.12): the `mtg` game's rows have tail tokens and pointer overrides, whose shards are sparse
+# only (format v2, zero-core R8: a dense shard would drop them), so every `mtg` preset writes sparse shards. (Its MLP
+# presets, mtg-1 and mtg-2-mlp, layout v6's, are refused on v7 at the start: an MLP takes no tail tokens, R4.)
+for _p in PRESETS.values():
+    if _p.get('game') == 'mtg':
+        _p['shard_sparse'] = 1
 
 # a rented GPU box's self-play settings (tools/vast.py, docs/ENGINE.md 97): one worker process, CUDA inference with
 # token CUDA graphs, the Delver line's 16 threads x 3 groups and 1,536 games in flight (the box's bench: ~25 games/s,

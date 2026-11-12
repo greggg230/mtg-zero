@@ -85,6 +85,9 @@ def test_delver_rows_in_sparse_shards(tmp_path):
 
 
 def test_presets_leave_shard_sparse_off():
+    """Off by default and in every preset of a game without variable-length rows; on in every `mtg` preset (layout v7,
+    ENGINE.md 125.12: a game with tail tokens and overrides writes sparse shards only, zero-core R8)."""
     from mtgz.az.run import DEFAULTS, PRESETS
     assert DEFAULTS['shard_sparse'] == 0
-    assert all(not p.get('shard_sparse') for p in PRESETS.values())
+    assert all(not p.get('shard_sparse') for p in PRESETS.values() if p.get('game') != 'mtg')
+    assert all(p.get('shard_sparse') == 1 for p in PRESETS.values() if p.get('game') == 'mtg')

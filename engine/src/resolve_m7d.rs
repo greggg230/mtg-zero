@@ -589,68 +589,6 @@ impl Game {
         })
     }
 
-    /// `Task::AsEnters` for "as this enters, look at an opponent's hand, then
-    /// choose any card name" (CR 614.12): the look first (once: re-running
-    /// the asker must ask the same question, ENGINE.md 4), then `NameCard`
-    /// over the names of the opponent's cards (decklists are open: the
-    /// names are the same in every world; with hidden decks the names of
-    /// their pool the chooser knows, ENGINE.md 36.11), `PASS` = a name of no
-    /// card in the game.
-    pub(crate) fn choose_name_as_enters(&mut self, card: CardIdx, page: crate::decision::Page) {
-        use crate::decision::{act, Choice, DecisionKind, Opt};
-        use crate::flow::Task;
-        let p = self.objs[card.i()].controller;
-        let q = crate::ids::opp(p);
-        let r = self.obj_ref(card);
-        let looked = self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::LookedHand);
-        if !looked {
-            self.reveal_hand(q, Some(p));
-            self.marks.push((r, crate::game::Mark::LookedHand));
-            self.agenda.push(Task::AsEnters { card, page: crate::decision::Page::FIRST });
-            return;
-        }
-        match self.answer.take() {
-            Some(Choice::Page(next)) => self.agenda.push(Task::AsEnters { card, page: next }),
-            Some(Choice::Def(d)) => {
-                self.marks.push((r, crate::game::Mark::ChosenName(d)));
-                self.note(|g| format!("chosen name: {}", g.db.def(d).name));
-            }
-            Some(Choice::Pass) => self.marks.push((r, crate::game::Mark::ChosenName(crate::game::NO_NAME))),
-            Some(other) => unreachable!("name answer {other:?}"),
-            None => {
-                // Any card name (CR 201.3): the names of the cards in the
-                // game, both players' (the second sentence taxes every
-                // source, so naming one's own card is a choice too), and
-                // `PASS` for a name of no card in the game (all alike: no
-                // card can join the game). With hidden decks (ENGINE.md
-                // 36.11) the opponent's deck is not known: their names are
-                // those of their pool the chooser knows, and of their cards
-                // the chooser knows here (the same in every world of the
-                // chooser's); the chooser's own deck is theirs to know.
-                let hidden = self.known_pools[q as usize].is_some();
-                let mut defs: Vec<crate::ids::DefId> = (0..self.objs.len())
-                    .map(|i| CardIdx::new(i as u32))
-                    .filter(|&c| !self.is_token(c) && !self.is_copy_obj(c) && self.objs[c.i()].zone != Zone::Nowhere)
-                    .filter(|&c| self.objs[c.i()].owner == p || !hidden || self.knows(p, c))
-                    .map(|c| self.ident_card(c))
-                    .collect();
-                if let Some(known) = &self.known_pools[q as usize] {
-                    defs.extend(known.iter().copied());
-                    for k in self.clouds.iter().filter(|k| k.viewer == p && k.owner == q) {
-                        defs.extend(k.defs.iter().map(|&d| self.db.def(d).card_def(d)));
-                    }
-                }
-                defs.sort_unstable();
-                defs.dedup();
-                // (`LIBRARY` + k: the k-th name, by definition; paged past the
-                // 64 ids, ENGINE.md 100.2.)
-                let items: Vec<(u32, Choice)> = defs.iter().enumerate().map(|(i, &d)| (i as u32, Choice::Def(d))).collect();
-                let pass = vec![Opt { action: act::PASS, choice: Choice::Pass }];
-                self.ask_paged(Task::AsEnters { card, page }, page, p, DecisionKind::NameCard, act::LIBRARY, act::LIBRARY_N, &items, pass);
-            }
-        }
-    }
-
     /// The card a slot is (its front face's definition; a face-down
     /// permanent's own card).
     pub(crate) fn ident_card(&self, c: CardIdx) -> crate::ids::DefId {
@@ -675,14 +613,10 @@ impl Game {
             if nd == crate::game::NO_NAME {
                 continue;
             }
-            // (A plain name choice compares a split card's halves too, CR
-            // 709.4: ENGINE.md 123.)
-            let named = if d.sns.plain_name {
-                self.has_name(card, crate::sneak_show::face_name(self.db.def(nd)))
-            } else {
-                self.name(card) == self.db.def(nd).name
-            };
-            if named {
+            // (The name of the face chosen, compared with a spell's or a
+            // source's: a split card's halves too, CR 709.4; ENGINE.md 123,
+            // 127.)
+            if self.has_name(card, crate::sneak_show::face_name(self.db.def(nd))) {
                 tax += n as u64;
             }
         }

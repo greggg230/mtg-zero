@@ -22,7 +22,9 @@
 //!   the chosen name cost {n} more" (601.2f) and "activated abilities of
 //!   sources with the chosen name can't be activated [unless they're mana
 //!   abilities]" (602.5, 605.1a): [`SnsDef`], [`Game::nameable_defs`],
-//!   [`Game::named_ban_hits`].
+//!   [`Game::named_ban_hits`]. The choice and its list are Anointed
+//!   Peacekeeper's too (after its look at a hand; ENGINE.md 127):
+//!   [`Game::choose_name_as_enters`].
 
 use crate::db::Filter;
 use crate::decision::{act, Choice, DecisionKind, Opt};
@@ -37,12 +39,14 @@ pub struct SnsDef {
     /// "You may cast spells from your hand without paying their mana costs"
     /// (CR 118.9; its controller's spells only).
     pub free_casts_from_hand: bool,
-    /// "As this enters, choose a card name" without looking at a hand first:
-    /// any card name (CR 201.3), the faces' names too (a split card's halves,
-    /// a double-faced card's back face, an Adventure; 709.3, 712, 715); the
-    /// name compared with a split card's halves as well (709.4). (Anointed
-    /// Peacekeeper's "look at an opponent's hand, then choose any card name"
-    /// is `CardDef::chooses_name` alone, unchanged.)
+    /// "As this enters, choose a card name" without looking at a hand first
+    /// (Disruptor Flute). Anointed Peacekeeper's "look at an opponent's hand,
+    /// then choose any card name" is `CardDef::chooses_name` without it: the
+    /// look, then the same choice (`Game::choose_name_as_enters` over
+    /// `Game::nameable_defs`: any card name, CR 201.3, the faces' names too,
+    /// 709.4, 712, 715; ENGINE.md 127) and the same comparison
+    /// (`Game::has_name`). Also the mark of layout v7's refusal
+    /// (`plain_name_needs_v7`; Peacekeeper's name, older, is the gap G1).
     pub plain_name: bool,
     /// "Spells with the chosen name cost {n} more to cast": every player's
     /// spells (`CardDef::named_spell_tax`; Peacekeeper's are its controller's
@@ -262,66 +266,84 @@ impl Game {
         })
     }
 
-    /// The names `p` may choose for a permanent's "choose a card name" (CR
-    /// 201.3), as definitions (one per name, the smallest definition with
-    /// it; sorted by definition), besides `PASS`, which stands for every
-    /// name no object of this game can have. The objects of a game are its
-    /// cards (created as it starts, from the decks; the sideboards' cards can
-    /// join it only as a companion, CR 103.2b, 116.2g: no instruction of the
-    /// engine brings another card into a game), its tokens (from the card
-    /// table's token definitions) and copies of these, whose names are their
-    /// copiable values' (CR 707.2; a copy exception names the copying card,
-    /// `EntersAsCopy::keep_name`); a face-down permanent has no name (708.2).
-    /// So every name an object can have is a name of a face of a card of the
-    /// game or of its sideboards (a split card's halves, 709.4; a back face,
-    /// 712; an Adventure, 715; a prepare spell, 722) or a token definition's
-    /// name, and a token's name may be chosen only if it is also a card's
-    /// (201.3): the names of the table's cards, and
-    /// [`TOKEN_NAMES_THAT_ARE_CARD_NAMES`]. With open decklists (ENGINE.md
-    /// 54.5) these are the same in every world; with hidden decks (36.11)
-    /// the other player's are those of their pool `p` knows (the whole pool
-    /// is their deck and sideboard) and their cards `p` knows.
-    pub(crate) fn nameable_defs(&self, p: PlayerId) -> Vec<DefId> {
-        let q = opp(p);
-        let hidden = self.known_pools[q as usize].is_some();
-        let mut cards: Vec<DefId> = (0..self.objs.len())
-            .map(|i| CardIdx::new(i as u32))
-            .filter(|&c| !self.is_token(c) && !self.is_copy_obj(c))
-            .filter(|&c| self.objs[c.i()].zone != Zone::Nowhere || self.players.iter().any(|pl| pl.companion == Some(c)))
-            .filter(|&c| self.objs[c.i()].owner == p || !hidden || self.knows(p, c))
-            .map(|c| self.ident_card(c))
-            .collect();
-        cards.extend(self.players[p as usize].sideboard.iter().copied());
-        match &self.known_pools[q as usize] {
-            Some(known) => {
-                cards.extend(known.iter().copied());
-                for k in self.clouds.iter().filter(|k| k.viewer == p && k.owner == q) {
-                    cards.extend(k.defs.iter().map(|&d| self.db.def(d).card_def(d)));
-                }
-            }
-            None => cards.extend(self.players[q as usize].sideboard.iter().copied()),
-        }
+    /// The names a player may choose for a permanent's "as this enters,
+    /// [look at an opponent's hand, then] choose a card name" (CR 201.3,
+    /// 614.12; Anointed Peacekeeper's and Disruptor Flute's: one list,
+    /// ENGINE.md 127), as definitions (one per name, the smallest definition
+    /// with it; sorted by definition), besides `PASS`, which stands for every
+    /// other name. It is a public list: the same for either player and in
+    /// every world of either (it reads nothing hidden), by the game's mode:
+    ///
+    /// * Open decklists (ENGINE.md 54.5: best-of-one games, the cube's, team
+    ///   draft's and constructed play's): the names of the faces of every card
+    ///   of the game, both players', in any zone, a revealed companion's too
+    ///   (CR 103.2b). The decks are public, so these names are.
+    /// * Hidden decks (`GameSpec::hidden_decks`: a best-of-three match's
+    ///   hidden pools, 36.11, or hidden decklists, 102): the names of the faces
+    ///   of every card of the card table, a public set holding every card
+    ///   either player's pool or deck can hold (an unseen first pick is drawn
+    ///   from the table's cards, `az::sample::FirstPickPrior`; a deck prior's
+    ///   support is the table's). What the chooser knows (its own pool, the
+    ///   hand it looked at) adds no name to it.
+    ///
+    /// A face's name ([`face_name`]): a split card's halves (709.4; not
+    /// "<left> // <right>"), a double-faced card's front and back faces
+    /// (712), an adventurer card's creature and Adventure (715), a prepare
+    /// spell (722). And the table's token definitions (a double-faced token's
+    /// back face too) whose names are card names: a token's name may be
+    /// chosen only then (201.3; the table's card faces' names and
+    /// [`TOKEN_NAMES_THAT_ARE_CARD_NAMES`]).
+    ///
+    /// `PASS` is exact (ENGINE.md 123.4, 127): both cards compare the chosen
+    /// name only with a spell's or an activated ability's source's name. Such
+    /// an object is a card of the game (made as the game starts, from the
+    /// decks; a sideboard card joins it only as a revealed companion, CR
+    /// 103.2b, 116.2g: no instruction of the engine brings another card into
+    /// a game), a token of the table's token definitions, or a copy of one of
+    /// these, named by its copiable values (CR 707.2; a copy exception names
+    /// the copying card, `EntersAsCopy::keep_name`); a face-down permanent has
+    /// no name (708.2); an emblem or a rules object (the monarch, the
+    /// initiative, a dungeon) is never a spell and has no activated ability.
+    /// So every name such an object can have that a player may choose is
+    /// offered, and every name `PASS` stands for is one no spell or source of
+    /// the game can have (with hidden decks, of any game the pools make).
+    pub(crate) fn nameable_defs(&self) -> Vec<DefId> {
+        let n = self.db.num_cards();
+        let is_card = |d: &crate::db::CardDef| !d.token && !d.emblem && !d.rules;
+        let hidden = self.spec.hidden_decks || self.known_pools.iter().any(Option::is_some);
+        let cards: Vec<DefId> = if hidden {
+            (0..n as DefId).filter(|&d| is_card(self.db.def(d))).collect()
+        } else {
+            (0..self.objs.len())
+                .map(|i| CardIdx::new(i as u32))
+                .filter(|&c| !self.is_token(c) && !self.is_copy_obj(c))
+                .map(|c| self.ident_card(c))
+                .filter(|&d| (d as usize) < n && is_card(self.db.def(d)))
+                .collect()
+        };
         let mut names: Vec<DefId> = Vec::new();
         for d in cards {
-            let def = self.db.def(d);
-            match def.halves {
-                Some((l, r)) => names.extend([l, r]),
-                None => {
-                    names.push(d);
-                    names.extend(def.back);
-                    names.extend(def.adventure);
-                    names.extend(def.prepare);
-                }
-            }
+            push_faces(self.db, d, &mut names);
         }
-        // The token definitions whose names are cards' names.
-        for t in self.db.num_cards()..self.db.len() {
+        // The token definitions whose names are card names.
+        let mut faces = Vec::new();
+        for d in (0..n as DefId).filter(|&d| is_card(self.db.def(d))) {
+            push_faces(self.db, d, &mut faces);
+        }
+        let mut card_names: Vec<&str> = TOKEN_NAMES_THAT_ARE_CARD_NAMES.to_vec();
+        card_names.extend(faces.iter().map(|&f| face_name(self.db.def(f))));
+        card_names.sort_unstable();
+        card_names.dedup();
+        for t in n..self.db.len() {
             let d = self.db.def(t as DefId);
-            if d.token
-                && !d.name.is_empty()
-                && (TOKEN_NAMES_THAT_ARE_CARD_NAMES.contains(&d.name.as_str()) || self.db.id(&d.name).is_some_and(|x| (x as usize) < self.db.num_cards()))
-            {
-                names.push(t as DefId);
+            if !d.token || d.emblem || d.rules {
+                continue;
+            }
+            for f in std::iter::once(t as DefId).chain(d.back) {
+                let name = face_name(self.db.def(f));
+                if !name.is_empty() && card_names.binary_search(&name).is_ok() {
+                    names.push(f);
+                }
             }
         }
         // One definition per name (`face_name`), the smallest.
@@ -331,15 +353,24 @@ impl Game {
         names
     }
 
-    /// `Task::AsEnters` for a plain "as this enters, choose a card name"
-    /// (`SnsDef::plain_name`, CR 614.12): `NameCard` over
-    /// [`nameable_defs`](Self::nameable_defs) (`LIBRARY` + k: the k-th name;
-    /// paged past the 64 ids, ENGINE.md 100.2), `PASS` = a name no object of
-    /// this game can have. The name is `Mark::ChosenName` (Anointed
-    /// Peacekeeper's).
-    pub(crate) fn choose_plain_name_as_enters(&mut self, card: CardIdx, page: crate::decision::Page) {
+    /// `Task::AsEnters` for "as this enters, [look at an opponent's hand,
+    /// then] choose a card name" (CR 614.12, 201.3): Anointed Peacekeeper's
+    /// look first (`CardDef::chooses_name` without `SnsDef::plain_name`;
+    /// once: re-running the asker must ask the same question, ENGINE.md 4),
+    /// then, for both cards, `NameCard` over
+    /// [`nameable_defs`](Self::nameable_defs) (`LIBRARY` + k: the k-th name,
+    /// paged past the 64 ids, ENGINE.md 100.2) and `PASS`, a name no spell
+    /// or source of the game can have (`NO_NAME`). The name is
+    /// `Mark::ChosenName`.
+    pub(crate) fn choose_name_as_enters(&mut self, card: CardIdx, page: crate::decision::Page) {
         let p = self.objs[card.i()].controller;
         let r = self.obj_ref(card);
+        if !self.def_of(card).sns.plain_name && !self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::LookedHand) {
+            self.reveal_hand(opp(p), Some(p));
+            self.marks.push((r, crate::game::Mark::LookedHand));
+            self.agenda.push(Task::AsEnters { card, page: crate::decision::Page::FIRST });
+            return;
+        }
         match self.answer.take() {
             Some(Choice::Page(next)) => self.agenda.push(Task::AsEnters { card, page: next }),
             Some(Choice::Def(d)) => {
@@ -349,7 +380,7 @@ impl Game {
             Some(Choice::Pass) => self.marks.push((r, crate::game::Mark::ChosenName(crate::game::NO_NAME))),
             Some(other) => unreachable!("name answer {other:?}"),
             None => {
-                let items: Vec<(u32, Choice)> = self.nameable_defs(p).into_iter().enumerate().map(|(i, d)| (i as u32, Choice::Def(d))).collect();
+                let items: Vec<(u32, Choice)> = self.nameable_defs().into_iter().enumerate().map(|(i, d)| (i as u32, Choice::Def(d))).collect();
                 let pass = vec![Opt { action: act::PASS, choice: Choice::Pass }];
                 self.ask_paged(Task::AsEnters { card, page }, page, p, DecisionKind::NameCard, act::LIBRARY, act::LIBRARY_N, &items, pass);
             }
@@ -357,14 +388,33 @@ impl Game {
     }
 }
 
-/// The name of a face (CR 201.2): a card's definition of a double-faced or
-/// adventurer card is named "<front> // <other>" in the card table (its
-/// card's name), but the face up (712.8, 715.4) is named "<front>"; every
-/// other definition (a back face, an Adventure, a split card's half, a card
-/// with one face, a token) is its name. (A split card's own definition has
-/// its halves' names, 709.4: `Game::has_name`, `Game::nameable_defs`.)
+/// The faces of card definition `d` whose names a player may choose (CR
+/// 201.3): a split card's halves (709.4), else the card's definition (its
+/// front face, [`face_name`]), its back face (712), its Adventure (715) and
+/// its prepare spell (722).
+fn push_faces(db: &crate::db::CardDb, d: DefId, out: &mut Vec<DefId>) {
+    let def = db.def(d);
+    match def.halves {
+        Some((l, r)) => out.extend([l, r]),
+        None => {
+            out.push(d);
+            out.extend(def.back);
+            out.extend(def.adventure);
+            out.extend(def.prepare);
+        }
+    }
+}
+
+/// The name of a face (CR 201.2): a card's definition of a double-faced,
+/// adventurer or preparation card is named "<front> // <other>" in the card
+/// table (its card's name), but the face up (712.8, 715.4, 722.2: the
+/// creature, not its prepare spell) is named "<front>"; every other
+/// definition (a back face, an Adventure, a prepare spell, a split card's
+/// half, a card with one face, a token) is its name. (A split card's own
+/// definition has its halves' names, 709.4: `Game::has_name`,
+/// `Game::nameable_defs`.)
 pub fn face_name(d: &crate::db::CardDef) -> &str {
-    if d.front.is_none() && d.halves.is_none() && (d.back.is_some() || d.adventure.is_some()) {
+    if d.front.is_none() && d.halves.is_none() && (d.back.is_some() || d.adventure.is_some() || d.prepare.is_some()) {
         if let Some((front, _)) = d.name.split_once(" // ") {
             return front;
         }

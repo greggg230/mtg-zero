@@ -77,12 +77,12 @@ ab682fd6	a	triggers	attacking with any creature triggers the ability, even if th
 c264835f	a	copies	a power-defining ability works in every zone, and counts its own source while on the battlefield
 89ee123a	b	MP	the per-opponent token trigger makes a token for every qualifying opponent, not just attacked ones [part 3, was a/combat: one token per opponent; two-player games have one]
 bdd4c462	a	combat	you choose whether each created token attacks that opponent directly or a planeswalker they control
-a6040722	b	DEF	activated (incl. keyword) abilities use a colon; a tax/hoser on activated abilities leaves triggered ones alone [part 3, was a/other: activated abilities have colons; triggered ones don't; a definition]
-252f0b38	b	DEF	a mana ability is one that produces mana on resolution, not one costing mana to activate [part 3, was a/mana: what a mana ability is; a definition]
+a6040722	a	other	activated (incl. keyword) abilities use a colon; a tax/hoser on activated abilities leaves triggered ones alone [part 3, was a/other: activated abilities have colons; triggered ones don't; a definition] [ENGINE.md 127, was b/DEF: Anointed Peacekeeper's tax tested on equip and on a triggered ability]
+252f0b38	a	mana	a mana ability is one that produces mana on resolution, not one costing mana to activate [part 3, was a/mana: what a mana ability is; a definition] [ENGINE.md 127, was b/DEF: Anointed Peacekeeper's tax tested on a mana ability and a non-mana one costing mana]
 93ee06dd	a	other	a naming ability that affects cards applies in every zone, not just one
 90d8b0d0	b	MP	an ability applying to 'opponents' generally applies to all opponents, not just one you interacted with [part 3, was a/other: all opponents]
-2a160983	b	DEF	you may name any card, even one without an activated ability, not just ones you've seen [part 3, was a/other: the engine lets the Peacekeeper name any card definition; a definition]
-abac3051	b	DEF	you can't name a token's name unless it duplicates an actual card's name [part 3, was a/other: tokens aren't cards to name; a definition]
+2a160983	a	other	you may name any card, even one without an activated ability, not just ones you've seen [part 3, was a/other: the engine lets the Peacekeeper name any card definition; a definition] [ENGINE.md 127, was b/DEF: the name list tested: unseen cards and cards without activated abilities]
+abac3051	a	other	you can't name a token's name unless it duplicates an actual card's name [part 3, was a/other: tokens aren't cards to name; a definition] [ENGINE.md 127, was b/DEF: the name list tested: token names only when card names]
 0e494778	a	other	a once-per-turn cast-restriction static ability checks the whole turn, even retroactively, incl. own casts
 e0fa70ce	a	replacement	an enters-tapped-unless-condition land still enters tapped if a separate effect forces it, even if met
 5153b574	a	other	a once-per-turn cast restriction still applies even if the earlier spell was countered

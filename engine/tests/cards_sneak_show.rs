@@ -915,6 +915,64 @@ fn cr_201_3_disruptor_flute_offers_every_name_of_the_games_cards_and_their_faces
     assert_eq!(uniq.len(), names.len(), "each name once");
 }
 
+/// Every name the pending `NameCard` decision offers, over its pages (a
+/// clone answers "next page").
+fn names_offered(g: &Game) -> Vec<u16> {
+    let mut g = g.clone();
+    let mut out = Vec::new();
+    loop {
+        let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+        out.extend(opts.iter().filter_map(|c| match *c {
+            Choice::Def(d) => Some(d),
+            _ => None,
+        }));
+        match opts.iter().find(|c| matches!(c, Choice::Page(_))) {
+            Some(&next) => {
+                g.choose(next);
+            }
+            None => return out,
+        }
+    }
+}
+
+#[test]
+fn cr_201_3_disruptor_flute_and_anointed_peacekeeper_offer_one_list() {
+    // One naming function (ENGINE.md 127): the same game, P0 holding both,
+    // either cast; the Peacekeeper looks at P1's hand first. Open decklists:
+    // the faces of the game's cards; hidden decks (a best-of-three match's
+    // hidden pools, hidden decklists): the faces of every card of the table,
+    // more than one page.
+    for hidden in [false, true] {
+        let names_of = |card: &str| -> Vec<u16> {
+            let mut g = scen()
+                .spec(|s| s.hidden_decks = hidden)
+                .battlefield(0, &["Plains", "Plains", "Plains"])
+                .hand(0, &["Anointed Peacekeeper", FLUTE])
+                .library(0, &["Brazen Borrower // Petty Theft", "Life // Death"])
+                .hand(1, &["Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar"])
+                .at(Step::Main1, 0)
+                .start();
+            cast(&mut g, 0, card);
+            pass_on(&mut g);
+            assert_eq!(g.kind(), Some(DecisionKind::NameCard), "{}\n{}", opts(&g), log(&g));
+            assert!(g.has_option(Choice::Pass));
+            names_offered(&g)
+        };
+        let (pk, fl) = (names_of("Anointed Peacekeeper"), names_of(FLUTE));
+        assert_eq!(pk, fl, "hidden decks: {hidden}");
+        let names: Vec<&str> = fl.iter().map(|&d| engine::sneak_show::face_name(db().def(d))).collect();
+        for n in ["Petty Theft", "Life", "Death", "Tamiyo, Seasoned Scholar", "Plains", FLUTE] {
+            assert!(names.contains(&n), "{n}");
+        }
+        // Hidden: cards of no deck here, from the table (Show and Tell,
+        // Murktide Regent); open: not.
+        for n in ["Show and Tell", "Murktide Regent"] {
+            assert_eq!(names.contains(&n), hidden, "{n}, hidden decks: {hidden}");
+        }
+        assert_eq!(fl.len() > 64, hidden);
+    }
+}
+
 #[test]
 fn cr_601_2f_disruptor_flute_spells_with_the_name_cost_3_more_every_players() {
     // ruling: 560a16f0
