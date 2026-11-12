@@ -27031,7 +27031,7 @@ differ by that, not by their games.)
 best-of-three and sideboarding (54.8) remain unbuilt, so the deck's sideboard (Flusterstorm, Leyline of the Void) is
 played only by the lanes' pools `dd_b` and `dd_c`.
 
-## 125. Layout v7: uncapped inputs, the MTG side (branch `v7-varlen`; zero-core `feat/varlen` 311cf3c, then d9203be)
+## 125. Layout v7: uncapped inputs, the MTG side (branch `v7-varlen`; zero-core `feat/varlen` 311cf3c, then d9203be, then b6ba00f)
 
 **Why.** MTG Zero's rule is that the engine **and the network's input** are exact in every reachable state. Layout v6
 had fixed caps (32 permanents a side, 16 hand cards, 8 stack items, 4 waiting triggers of the viewer, a 64-card list,
@@ -27486,17 +27486,44 @@ failure (311cf3c's three findings are fixed). The training step (`widen/cost.py`
 their overrides, alternated, medians of 30): iteration 3198 on v5 20.7 ms; widened, gates 0 31.4 ms (+52%), gates
 0.5 25.7 ms (+24%).
 
-### 125.12 Final: main 1d5508af merged, the layout's last facts, the digests recorded (2026-11-12)
+### 125.12 Final: main 1d5508af and c3abdb8a merged, the layout's last facts, the digests recorded (2026-11-12)
 
 **Why.** The user approved v7 on main. This is the merge-ready state: main 1d5508af merged (Anointed Peacekeeper's
 card names through Disruptor Flute's one naming function - ENGINE.md 127 -, Etali's free casts of either face,
-`FUZZ_POOL=names`), the layout final, every digest checked, v7's full digest recorded.
+`FUZZ_POOL=names`), then main c3abdb8a (ENGINE.md 128: a hand card both players know keyed when it is revealed,
+canonical worlds), zero-core re-pinned to b6ba00f, the layout final, every digest checked, v7's full digest recorded.
 
-**The merge.** Two conflicts: `decision_list`'s names list (main: the list is `Game::nameable_defs`, paged; v7 keeps
+**zero-core b6ba00f** (`feat/varlen-perf`, a fast-forward of d9203be by 7 commits; docs/az.md 43.11 and 43.12 there):
+inference of variable-length rows with the transfers beside the CUDA graphs, one upload per launch, the downloads
+after the next launch's inputs, the sparse batch and the tail tokens packed in Rust off the GIL
+(`pack_sparse_tokens` / `pack_tail_tokens`, registered in `mtgz._engine` by zero-core's `init_module`: rebuilt,
+both present), `SearchDriver.submit` releasing the GIL - bit for bit, by the core's own gates. Only `crates/py` and
+the Python side changed; the engine's `zero_search` is d9203be's, so the engine and its digests are those of the
+merge (checked: all four, below).
+
+**The first merge** (main 1d5508af). Two conflicts: `decision_list`'s names list (main: the list is `Game::nameable_defs`, paged; v7 keeps
 its v6 path - the page's options by id - and its whole list by absolute position, `decision_list_by_ids` with
 `Decision::range_first`) and the fuzz's match loop (main's name counters beside v7's whole rows). Peacekeeper now
 stores any face's name (`Mark::ChosenName` of `nameable_defs`' definitions): `encode::name_face` covers every one
 (125.11), and the gate's split-halves pair still sees both halves apart.
+
+**The second merge** (main c3abdb8a, ENGINE.md 128): no conflict but the recorded digests. 128's three parts and v7's
+knowledge encodings:
+* *The hand slot's card* (`Game::hand_slot_order_in`: within a definition, a twin an ability names that the other
+  player knows first). A definition's cards keep their run, so the slot ids are those of before; v7's hand segment
+  (head slots and tails) reads the hand in `hand_sorted` order as layout v6 does (main's encoder too: the v6
+  projection's digest is main's). The picks in progress (v7's `hand::PICKED`) are per card, at the card's place.
+* *The key* (`Game::reveal`: a hand card everyone knew is keyed, `KEY_REVEAL`). It teaches no one anything (no
+  `learn`); in a best-of-three match the reveal is recorded with the others (`MatchState::seen`, every `KEY_REVEAL`
+  of a game), so the next game's `my_revealed` tokens hold it: a public reveal, which both players saw. A library
+  card known by its place (`library_known`) and a face-down card known by its object (`face_down`) get no key, as
+  128 says: the same card in every world.
+* *Canonical worlds* (`Game::after_deal` runs `canon_hand_knowledge`): knowledge bits move among a hand's
+  same-definition cards only, so the hand's `OPP_KNOWS` floats are the normal form's in every world; the library's,
+  the face-down cards' and the match's records are not touched.
+* The checks of hidden information on whole rows: 128's four tests (`tests/known_face_key.rs`) compare v7 rows
+  (`tail_encode::Row::of` / `of_az`: the head, the tail tokens, the overrides) where main compares the head; they
+  pass. The hidden-decklist fuzz, 128's mode, compares whole rows at every information-set step (below).
 
 **Layout v7, final** (`mtgz/az/layout_v7.json`, `draft: false`: it freezes at its first run; runs launch without
 `allow_draft_layout`):
@@ -27516,31 +27543,42 @@ stores any face's name (`Mark::ChosenName` of `nameable_defs`' definitions): `en
 `delver-smoke`) is a token network (32 x 1, 2 heads, ff 64): an MLP takes no tail tokens (R4) - layout v6's MLP
 presets mtg-1 and mtg-2-mlp are refused at a v7 run's start. A run of `mtg` needs no flag beyond the preset's.
 
-**Digests.** Main 1d5508af's recorded: full (layout v6) **8d1cce220fbc3eb2**, `DIGEST_ENCODING=0`
-**c3efa1c404527dab**, `v5` **5324310e02757cff**. This branch: `DIGEST_ENCODING=0` **c3efa1c404527dab**, `v5`
-**5324310e02757cff**, `v6` (the v7 head's v6 projection, against layout v6's own encoding) **8d1cce220fbc3eb2** -
-each equal to main's. v7's full digest **33652df8dc65f2eb** is recorded (`DIGEST_WRITE=1`, on purpose: v7 is the
-layout now; `engine/tests/data/digests.txt`); `DIGEST_ENCODING=v6` is the comparison with main's full from here on.
+**Digests.** Main c3abdb8a's recorded: full (layout v6) **b63f643e97a30a61**, `DIGEST_ENCODING=0`
+**a0062bb5569e06d3**, `v5` **d1bbf127a6c5bda0**. This branch: `DIGEST_ENCODING=0` **a0062bb5569e06d3**, `v5`
+**d1bbf127a6c5bda0**, `v6` (the v7 head's v6 projection, against layout v6's own encoding; 102,734 states hashed,
+none on a page v6 showed as a window) **b63f643e97a30a61** - each equal to main's. v7's full digest
+**438164c0429d7fa3** is recorded (`DIGEST_WRITE=1`, on purpose: v7 is the layout now; `engine/tests/data/digests.txt`);
+`DIGEST_ENCODING=v6` is the comparison with main's full from here on. The 213 games whose v7 digest changed with
+128 are exactly the 213 main's changed (128.5). (On the first merge, main 1d5508af: full 8d1cce220fbc3eb2, `=0`
+c3efa1c404527dab, `v5` 5324310e02757cff, each equal here too; v7's full was 33652df8dc65f2eb.)
 
-**Checks on the merged sha.** The engine suite: 158 binaries, **2,473 passed, 0 failed**, 26 ignored. The gate
-(`tests/az.rs::public_state_reaches_the_encoding`): **193 perturbations encoded, 1 deliberate limit (a graveyard's
-order, D5), 0 gaps**; a split card's halves named on 299 positions, both views and encodings apart. The fuzz (every
-check of 125.6): cube 20,000 games, doomsday 20,000, delver 4,000, `sneak_show` 5,000, `names` 5,000, 200 best-of-three
-matches (500 games) - no failure, no aborted game, at most 214 tokens a row (0 past the limit), the v6 projection equal
-to layout v6's encoding on every row v6 can represent. In `names` Anointed Peacekeeper named a card of one face 2,242
-times, a front face 3,686, a back face 3,319, an Adventure 427, a split card's half 400, a prepare spell 200, a token
-329 (and passed 334); Disruptor Flute 3,543 / 6,327 / 5,373 / 686 / 635 / 313 / 505 (547): every kind `name_face`
-encodes, none past it. `bash tools/build_py.sh`, `python -m pytest -q tests`: **313 passed, 1 skipped**. The tail
-smokes, the presets alone (no `--allow-draft-layout`, no `--shard-sparse`; `smokes7/`): `delver-smoke` 260 s, the
-Doomsday mirror on it 285 s, `mtg-smoke` (the cube) 322 s - 3 iterations each, self-play with tails (at most 29 tokens a
-row, none aborted), sparse v2 shards, training on rows with tails (the cube's with 20-22 overrides a window),
-evaluation, Elo. The GPU smoke once, when the GPU was idle (`smokes7/run_smoke_gpu.sh`): iteration 3198 forked onto the
-final layout (`tools/fork_run.py` without `--allow-draft`: 37,620 -> 56,384 features, the 9 gated segments at 0), the
-128 x 8 network on CUDA (graphs, `--train-static 1`, the auxiliary head), 2 iterations, 131 s: tails up to 39 tokens a
-row, 983 overrides in the window, no failure. Its one warning is zero-core's gate check (az.md 43.6): `links` "still
-exactly 0 after 106 training steps" - its theta went below 0 (-0.0076; `library_known` -0.0176), the gradient pushing it
-shut through the straight-through `max(theta, 0)`, not a gate without a gradient (`delayed` opened to 0.0057,
-`graveyard_order` to 0.0068).
+**Checks on the merged sha** (main c3abdb8a merged, zero-core b6ba00f). The engine suite: 159 binaries, **2,477 passed,
+0 failed**, 26 ignored (128's `known_face_key` the new one; on the merge before the re-pin, whose engine sources are the
+same: the core's `crates/search` is unchanged). The gate (`tests/az.rs::public_state_reaches_the_encoding`): **193
+perturbations encoded, 1 deliberate limit (a graveyard's order, D5), 0 gaps**; a split card's halves named on 299
+positions, both views and encodings apart. The digests on the re-pinned tree: `=0` a0062bb5569e06d3, `v5`
+d1bbf127a6c5bda0, `v6` b63f643e97a30a61, the full comparison with the recorded 438164c0429d7fa3 - unchanged by the pin.
+The fuzz (every check of 125.6; `runs8/`): cube 20,000 games, doomsday 20,000, delver 4,000, `sneak_show` 5,000, `names`
+5,000 open and **20,000 with hidden decklists** (128's mode, seeds 0-19999 with 466 and 4248: 557,124 hidden-decklist
+worlds, 2,592,121 information-set steps, each comparing the viewer's whole rows), `names` with `FUZZ_BELIEF=2` 2,000
+(50,343 weighted worlds) and `FUZZ_CHANCE=50` 2,000 (21,496 chance walks), 200 cube best-of-three matches (500 games)
+and 200 drafted matches (515 games) - no failure, no aborted game, at most 276 tokens a row (0 past the limit), the v6
+projection equal to layout v6's encoding on every row v6 can represent. In the open `names` games of the first merge
+Anointed Peacekeeper named a card of one face 2,242 times, a front face 3,686, a back face 3,319, an Adventure 427, a
+split card's half 400, a prepare spell 200, a token 329 (and passed 334); Disruptor Flute 3,543 / 6,327 / 5,373 / 686 /
+635 / 313 / 505 (547): every kind `name_face` encodes. `bash tools/build_py.sh` on b6ba00f, `python -m pytest -q tests`:
+**313 passed, 1 skipped**. The tail smokes, the presets alone (no `--allow-draft-layout`, no `--shard-sparse`;
+`smokes9/`, on b6ba00f): `delver-smoke` 193 s, the Doomsday mirror on it 205 s, `mtg-smoke` (the cube) 257 s - 3
+iterations each, self-play with tails (at most 29 tokens a row, none aborted), sparse v2 shards, training on rows with
+tails (the cube's with 20-22 overrides a window), evaluation, Elo (the same on c3abdb8a before the re-pin, `smokes8/`).
+The GPU smoke once, when the GPU was idle (`smokes9/run_smoke_gpu.sh`, b6ba00f's inference path): iteration 3198 forked
+onto the final layout (`tools/fork_run.py` without `--allow-draft`: 37,620 -> 56,384 features, the 9 gated segments at
+0), the 128 x 8 network on CUDA (graphs, `--train-static 1`, the auxiliary head), 2 iterations, 108 s: tails up to 30
+tokens a row, 514 and 685 overrides in the windows, no failure, no warning; the gates' theta after it: `delayed` 0.004,
+`links` 0.0026, `library_known` 0.024, `graveyard_order` -0.0075 (pushed shut, g = 0), the others 0 (no tokens). (On
+f0e6b6c0, d9203be, the same smoke's one warning was the core's gate check, az.md 43.6: `links` "still exactly 0 after
+106 training steps" - its theta below 0, pushed shut through the straight-through `max(theta, 0)`, not a gate without a
+gradient.)
 
 ## 126. Run 2 integrated: the deck choice by the evaluator (112) and the win % against real decks (113) on one commit (branch `eoe-run2-int`, 2026-11-12)
 
@@ -27968,3 +28006,280 @@ coordinator gates and merges).
    127 or higher; `v7-varlen` has 125, `eoe-run2-int` 126.
 6. **`DIGEST_IDS=choices`** hashes the `NameCard` labels (127.1), so its digest changes where a double-faced,
    adventurer or preparation card's front is offered; it is not one of the recorded digests.
+
+## 128. A hand card both players know: keyed when it is seen, canonical worlds (branch `known-face-key`, 2026-11-12)
+
+ENGINE.md 127.8 (1) left one bug open. A face choice of a hand card both players know could put two of the other
+player's worlds into one search node with different encodings. The names fuzz pool's hidden mode found it at seeds
+466 and 4248. This section fixes it, and its relatives, exactly. Code: 393527c6; this text is the commit after it.
+
+### 128.1 The bug
+
+Zero-core keeps two worlds in one node when, after the same action, their chance keys, next decider and next legal
+actions are equal; it assumes the viewer's view is then equal too (the fuzzer's information-set checks). The engine
+names a card in a hand by a **hand slot**: the place of its definition's first card in the hand sorted by
+definition (`hand_slots_in`, ENGINE.md 11). The hidden cards' definitions count toward that place, so in two worlds
+of the other player's one slot id can name two different definitions.
+
+* Usually the card named then becomes public in a way that is keyed. `move_card` keys every card leaving a hidden
+  zone for a public one "even if everyone knew it: which known card a hidden choice (a hand slot) named can differ
+  between sampled worlds", and `reveal` keys every card a player didn't know.
+* But `reveal` skipped the key when **both players already knew the card**. A card can be revealed in the hand and
+  stay there:
+  * a face choice at priority (`Choice::Faces` → `ChooseFace`);
+  * an ability of a hand card (cycling, channel, ninjutsu, plot);
+  * a hand mana ability (Spirit Guides);
+  * a delve promise;
+  * splice;
+  * an Aura put onto the battlefield from the hand.
+  The encoding's context then names that card (ChooseFace's card code, a mana ability's or a hand ability's
+  source). Two worlds whose slot named two different known cards stayed in one node, with different encodings.
+* Seed 466: P1's hand was known to P0 (the pool's Peacekeepers look at hands) but for two cards. In one world of
+  P0's, `HAND` + 3 was Shatterskull Smashing; in the other it was Norman Osborn (a card P0 didn't know sorted
+  differently). Both cards had both
+  faces castable: no key, equal legal actions (`ChooseFace`: 0 and 1), and different context card codes. Seed 4248
+  was the same with the viewer P1.
+* The open-decklist fuzz compares `view_of`, which leaves out the agenda's cards, so it could not see this. The
+  hidden-decklist mode compares the encodings too.
+
+Two relatives found while auditing, both reachable:
+
+* **A dealt twin below a known card.** `canon_hand_knowledge` keeps every state at rest canonical: within a
+  definition, the better-known twins come first by card index, so a slot's card is a known one whenever the hand
+  holds one. `determinize` didn't keep that form. A world could deal a card the viewer doesn't know the
+  definition of a card it knows, at a lower card index. The slot then named the unknown twin there and the known
+  card in the real game. Revealing the unknown twin made the viewer know two copies, one too many (equal keys,
+  unequal knowledge).
+* **A twin an ability names.** Canonicalization leaves alone a hand card a trigger, a stack item or a delayed
+  trigger names (a card revealed for miracle, ENGINE.md 71.3), so the twins' order there followed card indices.
+  If the named one is known and an unknown twin has a lower index, the slot named the twin in one world and the
+  named card in another.
+
+### 128.2 The fix
+
+Three parts (393527c6). All three are in the functions listed here, for the Delver lane's merge (128.4):
+
+1. **The key** (`hidden.rs` `Game::reveal`). A hand card everyone knew is keyed by its identity too
+   (`KEY_REVEAL`, the definition), as `move_card` keys a known card leaving a hidden zone. The key tells no one
+   anything new; it only keeps apart the worlds whose same action named different cards. Elsewhere (a library card
+   by its place, a face-down card by its object) a known card is the same card in every world, so it gets no key,
+   as before. Learning is unchanged: only players who didn't know the card learn it.
+2. **Canonical worlds** (`hidden.rs` `Game::after_deal`). `canon_hand_knowledge` runs on every dealt world before
+   the reseed and the refresh: in `determinize`, in `determinize_weighted` (belief) and in the az paths that end in
+   them (`MtgAz::determinize`, the deck-tilted and belief deals, hidden decks' `redeal` / `resample_with_clouds`
+   followed by `Game::determinize`). It moves knowledge bits among a hand's same-definition cards only. What
+   anyone knows, a multiset per hand, is unchanged.
+3. **The slot order** (`decision.rs` `Game::hand_slot_order_in`, new). It is the canonical order, except that
+   within a definition a twin an ability names that the other player knows comes first. The definition's cards
+   keep their places as a run, so the slot ids are unchanged. These use it:
+   * `hand_slots_in` and `hand_options_except` (decision.rs);
+   * `promise_options` (cast.rs, delve);
+   * splice's k-th copy (resolve_tail3.rs);
+   * the hand mana sources' class members (pay.rs);
+   * the own-hand choice of `EoeC::ExileFromOwnHandPlayable` (eoe_c.rs).
+   `named_by_an_ability` (hidden.rs) is now `pub(crate)`.
+
+**Exactness.**
+
+Let *v* be a viewer. A world of *v*'s agrees with the real state on everything *v* observes: the public state,
+*v*'s own hidden cards, and what *v* knows exactly (its `known` bit) or partially (its clouds). It differs only in
+the identities of cards hidden from *v*. Invariant (I): two worlds in one node (equal keys, decider, legal
+actions) have equal views and encodings for *v*.
+
+**Only a hand slot can name different cards in two worlds.** An action names one of these:
+
+* a public object, by its battlefield, stack or public-zone place;
+* a definition (searches, name choices);
+* a card of *v*'s own hand when *v* decides (never dealt in *v*'s worlds);
+* a library card by its place: a known card keeps its place; an unknown one is keyed as it is seen;
+* a card of a pile the other player looked at: scrambled for *v* before the choice, so *v* knows none of it
+  exactly;
+* a card of the other player's hand, by hand slot.
+
+**When the named card enters v's view.** A hand slot names a card that enters *v*'s view in one of five ways (the
+audit, 128.3, files every hand choice under one of them):
+
+1. It moves to a public zone: `move_card` keys its identity, always.
+2. It is revealed in place: `reveal` keys a hand card's identity, always (part 1). Every agenda task or context
+   that names a hand card (`ChooseFace`, `ManaNow`, a hand ability's frame, `EnterAura`) comes after such a
+   reveal.
+3. It moves to another hidden zone: the move is scrambled first (`PutFromHandOnTop`, mulligan bottoms:
+   `scramble(hand)`), so *v*'s knowledge doesn't follow the card.
+4. It is a hidden pick: Show and Tell's card. Only the stage is public (`ctx::OP_I`), and *v*'s worlds draw the pick
+   again (`hidden_pick_ok`).
+5. It is a cost pick awaiting its payment: the context holds only the count (`ctx::PICKED`), and the card moves,
+   keyed, when paid.
+
+So when a card became visible, equal keys mean that both worlds named the same definition *d*. When it didn't,
+*v*'s view doesn't depend on which card it was.
+
+**Within d, which card.** *v* knows the other player's hand as a multiset: the hand is one pool (ENGINE.md 10).
+`view_of` lists its known cards as a sorted multiset, and the encoding reads them per definition. So all that
+matters is whether the slot's card is one *v* knows.
+
+* In a canonical state, the first of *d*'s twins that no ability names is known to *v* if any of them is. Every
+  state at rest is canonical, and every world now is too (part 2).
+* A twin an ability names keeps its bits, and its reference is public. If *v* knows it, it is the same card with
+  the same bits in every world, and it comes first (part 3).
+* So the card is known to *v* in every world of the node or in none.
+  * If known: a reveal teaches *v* nothing, and a departure removes one known *d* (`knowledge_leaves`).
+  * If unknown: the keyed reveal teaches *v* one *d* in each world; a departure is matched as before.
+* The multisets stay equal. That proves (I).
+
+**The keys reveal nothing.** Part 1's key fires only for a card both players know. Parts 2 and 3 emit nothing.
+
+**Where the hidden cards came from doesn't matter.** A library shuffle, or a hidden deck dealt from a known pool
+(cube best-of-three, constructed best-of-three's post-board 60 from its 75), both work, because the argument uses
+only three facts:
+
+* `determinize` and `redeal` deal only the cards *v* doesn't know (`hidden_slots_with`), so *v*'s known cards keep
+  their identity and bits;
+* which objects are in a hand is public;
+* every world is canonicalized after its deal (part 2, in `after_deal`), whatever dealt it.
+
+**Forced chance stays aligned.** A reveal of a hand card now always emits one key, whoever knew it. So a world
+replaying another's keys (`force_chance`) emits its keys at the same points.
+
+### 128.3 The audit: every action that names a hand card
+
+| Action (a hand slot, or a definition in a hand) | What follows | Merge before 128 | Now |
+|---|---|---|---|
+| Cast from the hand (`Choice::Cast`, `CastFace`) | `begin_cast_face` moves it to the stack at once | no: `move_card` keys it | unchanged |
+| Cast with a choice of face (`Choice::Faces`) | `reveal`, then `ChooseFace` names it in the context | **yes** (seeds 466, 4248) | keyed (part 1) |
+| Play a land (`Play`, `PlayFace`; an MDFC land's `Faces`) | `play_land` moves it; `Faces` as above | `Faces` only | keyed |
+| A hand card's ability (cycling, channel, ninjutsu, plot) | `activate`: `reveal` (602.2a), then its costs and frame | **yes**: the frame names it until the cost moves it (ninjutsu: until it resolves) | keyed |
+| A hand mana ability (Spirit Guides) at priority or while paying | `reveal`, then `ManaNow` names it | **yes** | keyed |
+| Discard as a cost (`DiscardCost`), exile as a cost (Force of Will, Misdirection; Gemstone Caverns' opening) | picks counted (`ctx::PICKED`), moved and keyed when paid | no | unchanged |
+| A delve promise (retrace's land) | `reveal`, `Mark::DelvePromised` | **yes** | keyed |
+| Splice | `reveal` of the k-th copy | **yes** | keyed, the copy by slot order |
+| Discard as an effect (Faithless Looting, cleanup, Mox Diamond's land, EoE's discards) | `discard`: moved, keyed | no | unchanged |
+| Put onto the battlefield (Sneak Attack, Show and Tell, Leyline openings) | moved, keyed; an Aura: `reveal` then `EnterAura`; Mox Diamond: waits in no zone, keyed explicitly; an "enter as a copy": moved first | the Aura only | keyed |
+| Show and Tell's face-down pick | only the stage is public; the other player's worlds draw it again | no | unchanged |
+| To the library (`PutFromHandOnTop`: Brainstorm; mulligan bottoms) | `scramble(hand)`, then a hidden move | no: the other player's knowledge is a cloud | unchanged |
+| Blightsteel discarded ("reveal it and shuffle it in") | `shuffle_in_instead`: `reveal`, then to the library | **yes** | keyed |
+| A hand reveal (`RevealHand` to all) | `reveal` of each card | no (no slot), harmless keys | keyed, same order in every world |
+| Miracle's reveal | the card drawn, named by its event, not by a slot | no | keyed (harmless) |
+| An opponent's choice from a seen hand (Thoughtseize-like `ChooseDiscard`, `seen_hand_options`) | the chooser knows the whole hand; the owner's hand is never dealt in the owner's worlds | no | unchanged |
+| Random picks (Hymn-like discards, `LookAtRandomHandCard`) | chance keys name the card | no | unchanged |
+| A companion | not a hand slot (a public object outside the game) | no | unchanged |
+| Any slot whose definition has a known twin and a dealt unknown twin below it | the unknown one named in some worlds | **yes** (overclaim) | canonical worlds (part 2) |
+| Any slot whose definition has a known twin an ability names | the twin below named in some worlds | **yes** | slot order (part 3) |
+
+The agenda tasks that name a card were all checked: `MiracleReveal`, `ManaNow`, `ManaNowCosts`, `ActivateMana`,
+`Devour`, `AsEnters`, `EnterByDiscardAny`, `EnterAura`, `ChooseReplacement`, `AttackTarget`, `ChooseFace`,
+`ChooseAbility`, `ColorsSpent`, `ChooseRoute`, `EnterAsCopy` and `Special`. The ones the context encodes name a
+card on the battlefield or the stack, or a hand card already revealed.
+
+* `AsEnters` runs only once the card is on the battlefield.
+* `ChooseReplacement`'s card is keyed by `move_card` (the `choose` branch).
+* No hand card moves face down: no foretell.
+
+### 128.4 For the Delver lane (`delver-bo3`'s hidden post-board dealing)
+
+What 393527c6 touches, exactly:
+
+* in `hidden.rs`: `Game::reveal` (the key) and `Game::after_deal` (one call to `canon_hand_knowledge` at its
+  start). `named_by_an_ability` is now `pub(crate)`.
+* in `decision.rs`: `hand_slots_in` and `hand_options_except` now read `hand_slot_order_in` (new) instead of
+  `hand_sorted_in`. The slot ids are unchanged.
+* elsewhere: `cast.rs` `promise_options`, `resolve_tail3.rs` splice, `pay.rs` (the hand mana sources' loop) and
+  `eoe_c.rs`, each reading `hand_slot_order_in`.
+
+It doesn't touch `redeal`, `resample_with_clouds`, `deal_owner`, `deal_hidden`, `determinize`'s or
+`determinize_weighted`'s deal, `hidden_slots_with` or `hidden_pick_ok`.
+
+A deal that goes through `Game::determinize` or `determinize_weighted` is canonicalized by `after_deal`, which
+covers `sample_hidden_deck` → `redeal` / `resample_with_clouds` → `Game::determinize`. A new path that deals
+without ending in `after_deal` must call `canon_hand_knowledge` itself.
+
+The key needs nothing from the deal (128.2: only that a known card isn't dealt and that worlds are canonical). It
+is correct for a hand whose hidden part was dealt from a hidden deck, as for one drawn from a shuffled library.
+
+### 128.5 Digests
+
+Before, on 1d5508af: full **8d1cce220fbc3eb2**, `DIGEST_ENCODING=0` **c3efa1c404527dab**, `v5`
+**5324310e02757cff**.
+
+After, on 393527c6: full **b63f643e97a30a61**, `=0` **a0062bb5569e06d3**, `v5` **d1bbf127a6c5bda0**.
+`engine/tests/data/digests.txt` is re-recorded, and the comparison passes.
+
+**The change is confined to the games where the fix acts.** A temporary build (never committed) counted each part's
+actions and could switch all three off with `KFK_OFF=1`.
+
+* The key fired in **213** games (375 times). The canonical worlds changed bits in 25 games (32 times), in the
+  determinized clones. The slot order changed nothing in any game.
+* The games whose per-game digest differs are **exactly those 213**, in all three modes. None of the 17 games where
+  only the canonical worlds acted differs: the digest hashes a clone's decisions, keys and zones, not its
+  encodings.
+* With the three parts switched off, the three old digests came back exactly: the full comparison against the old
+  file passes, and the `=0` and v5 values match.
+
+Scripts and lines: E:/mtg-zero-scratch/known-face-key (`instrument.py`, `digests.sh`, `kfk_games.txt`,
+`*_lines_*.txt`).
+
+### 128.6 Tests (`engine/tests/known_face_key.rs`; all four fail with the fix switched off)
+
+* `fuzz_seeds_466_and_4248_a_known_cards_face_choice_keeps_the_worlds_apart` replays both seeds' states from
+  `tests/data/known_face_key.json` (written by the fuzzer with the fix off).
+  * The state: the decks, the game's actions, the viewer, the information-set check's world seed and the actions
+    both worlds took.
+  * Along the recorded path the two worlds stay in one node with equal views and encodings.
+  * At the last action, the other player's hand slot names two different cards the viewer knows (a face choice).
+    The worlds now emit different keys (`KEY_REVEAL` of each card).
+* `a_hand_slot_naming_a_known_card_is_keyed_by_its_identity` builds the minimal case by hand.
+  * The setup: one information set of P0's; P1 holds Brazen Borrower and Life // Death, both known to P0, and one
+    card P0 doesn't know. That card's definition sorts before both in one world and after both in the other.
+  * Equal legal actions; slot `HAND` + 1 is a face choice of a different known card in each world, and is keyed
+    by its identity.
+* `determinized_worlds_put_the_known_twin_first`: P1's known Lightning Bolt and an unknown card at a lower index.
+  Across 200 worlds (some deal the unknown card as a second Bolt), P0 knows the same multiset, and the Bolt slot
+  names a card P0 knows.
+* `a_hand_slot_names_the_known_twin_an_ability_names`: a Metamorphosis Fanatic revealed for miracle (its trigger
+  on the stack) and an unknown Fanatic at a lower index. The slot names the revealed one, in the real game and in
+  50 worlds of P1's.
+
+### 128.7 Checks (on 393527c6)
+
+All of it ran on the desktop, which was idle, with no other run on it.
+
+**The engine suite.** `cargo test --release -p engine --no-fail-fast` passed: 155 targets, **2,455 passed, 0
+failed, 25 ignored**. That includes `--test az` (the public-state gate: `public_state_reaches_the_encoding` and
+`the_v5_facts_encode_no_hidden_information` pass; the encoding's layout is unchanged), `limits`, `hidden`,
+`rules_m8b_hidden` and `known_face_key`.
+
+**Digests.** See 128.5.
+
+**pytest.** After `tools/build_py.sh`: **304 passed, 1 skipped**.
+
+**Fuzz.** Release unless noted, sharded by seed, no `FUZZ_SKIP` anywhere. Everything passed:
+
+* `FUZZ_POOL=names FUZZ_HIDDEN_DECKS=1`: **20,000 games**, seeds 0-19999, so 466 and 4248 included; 60.2M options
+  completed, 557,124 hidden-decklist worlds, 2,592,121 information-set steps.
+* `FUZZ_POOL=names`, open decklists: 5,000 games.
+* The cube's default pool: 20,000 games.
+* `fuzz_random_matches`: 1,000 cube best-of-three matches (2,549 games, 42,956 hidden-pool worlds, first picks
+  resampled in 26,195).
+* `FUZZ_POOL=drafted`: 200 team-draft matches (515 games).
+* `FUZZ_POOL=delver`, `doomsday` and `sneak_show`: 5,000 games each.
+* `FUZZ_BELIEF=2`: 2,000 games of the default pool and 2,000 of `names`.
+* `FUZZ_CHANCE=50`: 2,000 games of the default pool and 2,000 of `names`. In one shard of each, 8,863 and 10,925
+  chance walks, with 4,747 and 4,239 replays whose outcome the force changed.
+* The `fuzz` profile (debug assertions, among them "determinize changed the viewer's decision"): 500 games of
+  `names` hidden (466 included), 1,000 of `names` open, 1,000 of the default pool.
+
+**Not run.** `tools/gate.py engine`: its search smoke can't be skipped, and search smoke is not run in this lane.
+
+### 128.8 Open points
+
+1. **The open-decklist information-set check compares `view_of` only.** `view_of` leaves out the agenda's cards, which
+   is why only the hidden-decklist mode, which compares encodings too, found this bug. Comparing encodings in the
+   open mode's `check_information_set` as well would cover the open modes the same way. That is test code; it was
+   not changed here.
+2. **Told-apart twins share one slot.** A card revealed for miracle and an unrevealed twin of it are different
+   choices in the rules, but the engine offers one slot per definition. The slot now takes the revealed one
+   (before, the one with the lower card index); casting or discarding the other while the trigger waits isn't
+   offered. This choice collapse predates the branch and is not a merge.
+3. **A new deal path must end in `after_deal`** (`Game::determinize` or `determinize_weighted`) or call
+   `canon_hand_knowledge` itself (128.4).
+4. **Section number.** 128 was the next free number above 127 on 2026-11-12: no branch and no worktree's ENGINE.md
+   had 128 or higher.

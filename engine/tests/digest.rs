@@ -32,9 +32,9 @@
 //! v5 float of layout v6 is v5's (ENGINE.md 100.5). `DIGEST_ENCODING=v6`
 //! hashes the layout v6 part (`encode::v6_projection`: where each of layout
 //! v6's 44,212 floats is in the v7 head): layout v6's recorded full digest
-//! (8d1cce220fbc3eb2, main 1d5508af) while every v6 float of layout v7 is
+//! (b63f643e97a30a61, main c3abdb8a) while every v6 float of layout v7 is
 //! v6's (ENGINE.md 125). The recorded file is layout v7's full digest
-//! (33652df8dc65f2eb, ENGINE.md 125.12).
+//! (438164c0429d7fa3, ENGINE.md 125.12).
 //!
 //! `DIGEST_IDS=choices` (ENGINE.md 65.11): an id-agnostic trace of the same
 //! games, to compare across a change that renames action ids and nothing

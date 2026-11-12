@@ -1360,7 +1360,9 @@ impl Game {
         // paying like any other; a Spirit Guide exiles itself). One mana
         // each (the lowering checks), after the permanents.
         if self.players[p as usize].hand.iter().any(|&c| self.hand_mana_source(c)) {
-            for c in self.hand_sorted_in(p) {
+            // (A class's members in the order hand slots take their cards
+            // in: its first free member is the one used, ENGINE.md 128.)
+            for c in self.hand_slot_order_in(p) {
                 if Some(c) == exclude || !self.hand_mana_source(c) {
                     continue;
                 }
