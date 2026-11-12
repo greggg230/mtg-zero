@@ -553,6 +553,10 @@ impl Game {
             // knows it (ENGINE.md 31).
             if self.objs[c.i()].def == self.db.face_down_def() {
                 v.push(if self.knows(viewer, c) { self.ident(c) as u64 } else { u64::MAX - 4 });
+                // Who knows it (public: who looked at it; ENGINE.md 125.7). (Not the loop hash's.)
+                if canon.is_none() {
+                    v.push(self.objs[c.i()].known as u64 & 3);
+                }
             }
         }
         v.push(u64::MAX);
@@ -568,6 +572,16 @@ impl Game {
             known.sort_unstable();
             v.push(mine.len() as u64);
             v.extend(known);
+            // Who knows each (public: who looked; ENGINE.md 125.7), as a multiset of (its identity where the
+            // viewer knows it, who knows it). (Not the loop hash's.)
+            if canon.is_none() {
+                let mut who: Vec<u64> = mine
+                    .iter()
+                    .map(|&c| (if self.knows(viewer, c) { self.objs[c.i()].def as u64 } else { 0xFFFF }) << 2 | (self.objs[c.i()].known as u64 & 3))
+                    .collect();
+                who.sort_unstable();
+                v.extend(who);
+            }
             v.push(u64::MAX - 3);
         }
         v.push(u64::MAX);

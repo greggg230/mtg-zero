@@ -26194,7 +26194,7 @@ v6 path, `encode::LAY6`; `layout_eoe.json` unchanged), and refuses a table that 
 |---|---:|---:|
 | features (head) | 44,212 | **56,192** (`NUM_FEATURES`) |
 | head tokens (`HEAD_TOKENS` = 1 + sum count) | 170 | 170 |
-| segments | 11 | 18 (11 + 7 tail-only, appended) |
+| segments | 11 | 20 (11 + 9 tail-only, appended) |
 | permanent slot | 196 | 278 (`PERM_V7` 82) |
 | hand / list slot | 60 | 64 |
 | stack slot | 204 | 438 (`STACK_V7` 234) |
@@ -26209,9 +26209,10 @@ Segments (index: name, head slots, width; tail; gate): 0 context 1 x 256; 1 tops
 tail; 3 opponent_permanents 32 x 278, tail; 4 hand 16 x 64, tail; 5 stack 8 x 438, tail; 6 triggers 4 x 271, tail;
 7 list 64 x 64, tail; 8 graveyard_abilities 4 x 56, tail; 9 my_companion 1 x 56; 10 opponent_companion 1 x 56;
 11 opponent_triggers 0 x 271; 12 delayed 0 x 283; 13 links 0 x 182; 14 exile_offered 0 x 81 (`columns: 1`);
-15 library_known 0 x 75; 16 stack_relations 0 x 177; 17 graveyard_order 0 x 104 - each of 11-17 `tail: true`,
-`gate: true`, `offset: null`, its card code first (`id` at 0). `TAILS` (`tail_encode::TAILS`) lists the 14 tail
-segments in this order; `OPTION_POINTERS` true.
+15 library_known 0 x 75; 16 stack_relations 0 x 177; 17 graveyard_order 0 x 104; 18 face_down 0 x 110; 19
+my_revealed 0 x 53 (125.10) - each of 11-19 `tail: true`, `gate: true`, `offset: null`, its card code first (`id` at
+0; the code is 52 floats). `TAILS` (`tail_encode::TAILS`) lists the 16 tail segments in this order;
+`OPTION_POINTERS` true.
 
 ### 125.2 Head + tail: one writer per segment
 
@@ -26292,6 +26293,7 @@ the amount / 8 (squashed) and its **64 binary digits** (exact: Mana Drain's 5,00
   their graveyard the reader's filter matches, top first, with their rank and the reader's identity. The cube's and
   constructed play's one reader is Shallow Grave ("the top creature card of your graveyard"): the creature cards of
   each graveyard, in order. Every other card's order stays unencoded (graveyards are bags: D5).
+* **face_down** and **my_revealed**: 125.10.
 
 ### 125.5 Pointer overrides
 
@@ -26332,12 +26334,12 @@ before. An option about no object keeps the static table, the companion's `PLAYE
 
 ### 125.7 Results (branch `v7-varlen`, zero-core `feat/varlen` 311cf3c)
 
-**The public-state gate** (`tests/az.rs`, whole rows): **188 perturbations encoded, 3 deliberate limits, 0 gaps**. The three limits are v6's,
-by design and unchanged: two graveyard cards swap places (graveyards are bags; the positional
-readers' cards are `graveyard_order` tokens, so only the order no rule reads is left out); an
-exiled card turned face down (the owner's view: what the opponent knows of the owner's exiled
-card); an identity revealed in an earlier game (what the opponent knows of the viewer's pool).
-v6 had 135 encoded, 4 limits, 1 gap (the graveyard order).
+**The public-state gate** (`tests/az.rs`, whole rows): **192 perturbations encoded, 1 deliberate limit, 0 gaps**. The
+limit is the user's choice (D5): two graveyard cards swap places - graveyards are bags; the positional readers'
+cards are `graveyard_order` tokens, so only the order no rule reads is left out. The two other limits v6 had by
+design, an exiled card turned face down and an identity revealed in an earlier game, are encoded (125.10), with two
+new perturbations (the other player learns a face-down exiled card / a face-down permanent). v6 had 135 encoded, 4
+limits, 1 gap (the graveyard order); this section's first gate (161db5a5) 188, 3, 0.
 
 **`Game.marks`, every variant** (`public_state::MARK_PERTURBATIONS`, 36; each perturbed and
 encoded): 25 were not encoded before v7 (`V7_FIXED`): Entered (big kicker count and X),
@@ -26490,6 +26492,9 @@ proof's Delver rows, their overrides left out, alternated, medians): v5 26.7 ms,
    decision about graveyard cards is the decision's, page by page); a looked-at pile and every other
    list are whole.
 6. `HEAD_TOKENS` 170 (= 1 + sum of the head counts), as the API's change of 2026-11-11.
+7. Two more tail-only segments, `face_down` and `my_revealed` (125.10): the coordinator's decision (2026-11-12) that a
+   limit by design is acceptable only if it is a rules equivalence or the user chose it; tokens, not bags (D6), so the
+   head is unchanged.
 
 ### 125.9 Left
 
@@ -26497,10 +26502,67 @@ proof's Delver rows, their overrides left out, alternated, medians): v5 26.7 ms,
   failures; lane Y fixing), then the GPU smoke of the widened 128 x 8 network (`run_smoke_gpu.sh` in the scratch
   directory) and the training step at g = 0; the inference cost of the wide stack and trigger slots (125.7) for the
   core's performance pass.
-* Python tools that search or encode `mtg` states without rows refuse a row with a tail (R1, zero-core R12) until
-  ported to `encode_row` / the rows API: the coordinator's list (Delver Lab x-ply, tools/position_lab.py,
-  tools/delver_blunders.py - `tests/test_blunders.py::test_canary_search_of_a_rebuilt_spot` fails on it until then -,
-  root_view.py, gumbel_eval.py, belief_search.py, mull_floor.py, deck_tilt.py); `mtg_eoe`'s tools are layout v6 and
-  unaffected.
+* The analysis tools take whole rows (125.10). tools/belief_eval.py reads shards' heads into a network's forward:
+  a v7 network refuses it (R5) until it is ported too.
 * The layout stays `draft` until the project ends; no run uses it yet. A v7 run needs `--arch tokens
   --allow-draft-layout 1 --shard-sparse 1` (the `mtg` presets set none of them).
+
+### 125.10 The limits by design closed; the tools on rows (2026-11-12)
+
+**Why.** The coordinator's rule (2026-11-12): a limit by design is acceptable only if it is a true rules equivalence
+or the user chose it; the graveyard's order outside its positional readers is the user's (D5) and stays. The two
+other limits v6 carried were information a player has and the encoding left out.
+
+**An exiled card turned face down.** What it is: `Game::face_down`, a hidden zone (CR 406.3: a card exiled face down
+can be examined by no one unless an effect allows it; `Ext::ExileTopFaceDownPlayable`'s owner looks, Hands Face
+Down's hands keep their owners' knowledge). Before v7 the owner's bags showed a known face-down card like a face-up
+one, and nothing said who else knows it. It matters to the rules too: the table reads face-up exiled cards' characteristics
+- a "target card in exile" (`wants_exile`: face-up exile only), EoE's warped creature cards (`is_creature` in exile),
+the casts from exile; a face-down card has none of them. **`face_down`** (segment 18, `tail_encode::fd`): one token per
+card exiled face down (in exile order) and per face-down permanent (manifest dread), after its card code where the
+viewer knows it: the object (a reference: zone, controller or owner, place, identity where known), its owner, who
+knows it (owner, the other player, the viewer: `Obj::known`, public - who looked), and who may play an exiled one
+(`Game::exile_permission`). The public view (`Game::view_of`) now holds who knows each face-down card too (outside
+the loop hash: no behaviour moves).
+
+**An identity revealed in an earlier game.** What it is: `MatchState::earlier[p]`, the identities player p made
+public in the earlier games of a best-of-three match; both players saw them. The other player's (what the viewer
+knows of the opponent's pool) was the bag `OPP_REVEALED`; the frame's own (what the opponent knows of the viewer's
+pool - it drives what the opponent can expect and sideboard against) was in no row. **`my_revealed`** (segment 19,
+`tail_encode::mr`): one token per identity of `earlier[frame player]`, its slot the identity, written by
+`MtgAz::encode_row` in the game, sideboarding and the deck choice; a head-only `MtgAz::encode` of a row with any
+refuses (R1).
+
+**Checks.** The gate (125.7): both perturbations now change both views and both encodings, and the new ones (the other
+player learns a face-down exiled card, a face-down permanent; rare) too: 192 encoded, 1 limit, 0 gaps.
+`tests/v7_tails.rs`: `face_down_tokens_show_who_knows_each_card` (the gate's perturbations applied by name: the owner's
+token has the identity and its knowledge, the other player's none until it learns it, then both rows change),
+`my_revealed_tokens_hold_the_frames_earlier_reveals` (tokens by identity in the revealer's rows, `OPP_REVEALED` in the
+other's, R1). The engine suite: 156 binaries, 2,389 passed, 0 failed (`cards_m7d`'s
+face-down permanent test reads whole rows now: the permanent is a `face_down` token too). Digests: `DIGEST_ENCODING=0`
+**208c723daced22fe**, `v5` **dc33538c0497dbf0**, `v6` **53839c837bbaf034** (all as before: no game plays differently,
+the head is unchanged); the full v7 digest **4cc624a4e2c0b09a** (was 40958ca20584ba83: the new tokens). The fuzz again
+(the same seeds): cube 20,000 games, doomsday 20,000, delver 4,000 - every check of 125.6 passed, at most 214 tokens
+a row; `fuzz_random_matches` 200 matches (best-of-three: `my_revealed` from game 2, `determinize` keeping the
+viewer's whole row). Census (2,000 games a pool, rows with tokens, the most in a row): `face_down` cube 14.7% (13),
+delver and doomsday 0; `my_revealed` 0 in these best-of-one pools (best-of-three only). `bash tools/build_py.sh`, `python
+-m pytest -q tests`: **292 passed, 1 skipped** (the suite all green: the canary test passes on the converted tool).
+
+**The tools on rows** (758ecc91). `tools/rowkit.py`: a row of `mtg` on a v7 engine is its head, its tail tokens and the
+decider's overrides (`kind`, `row`, `simulate` with `SearchTree.simulate(rows=True)`, `kw` / `evaluate` / `aux` for
+the evaluator's `tail=` / `ov=`, `sample_kw` for a driver's samples, `train_kw` for a training forward with the
+overrides resolved as a run's window does); on an engine without variable-length rows (v5 / v6, an older zero-core
+behind a tool's --engine) every helper is the call of before. Converted: delver_blunders (its canary test passes),
+position_lab (its `evaluate` takes (head, rows) pairs and a bare head where the engine has none; `net_row`,
+`decider_eval`, `rows_kind` for the Delver Lab), root_view (searches, value rows, calibration, the finetune forward),
+gumbel_eval, belief_search, mull_floor, deck_tilt. `tests/test_rowkit.py` runs every tool's search on a Delver position
+with tail tokens and the helpers on games without them; `test_position_lab.py` the network paths. The replay recorder
+(`mtgz.az.replays`) and `tools/delverai_blunder_games.py` record games with the widened v7 network (a scratch run).
+
+**The Delver Lab** (repo delver-lab, branch `v7-rows`, not merged; its server untouched): `delverlab/netrows.py` - the
+lab checkout's `net_row` where it has one (else `encode`), the auxiliary head with the rows' tails, and the x-ply's
+observation key over the whole row (head, tail tokens, our overrides; `encode_row`) - used by the x-ply's network
+(`xply.NetOps`), its information sets (`xply_is.obs_key`), the adapter's prior / value and the review's hand reads.
+On the line's own v5 build (run-fb1d70e) and iteration 3198, the branch's x-ply answers are master's exactly (both
+modes); on this branch's v7 engine with the widened network the same lines, values within 1.2e-7. The Lab's tests on the branch: 253 passed (`test_play_engine::test_one_games_ai_never_blocks_another`, its play
+worker's 60 s answer, timed out once while this machine built the engine, and passed alone).

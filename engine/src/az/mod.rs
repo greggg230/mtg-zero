@@ -577,6 +577,16 @@ pub struct MtgAz {
 }
 
 impl MtgAz {
+    /// The seat a row of `viewer` is framed in (`encode::encode_match`'s: the game's
+    /// `encoding_seat` during a game, the viewer's own during sideboarding and the deck choice).
+    pub(crate) fn frame_seat(&self, viewer: crate::ids::PlayerId) -> crate::ids::PlayerId {
+        if self.m.sb.is_some() || self.m.choice.is_some() {
+            viewer
+        } else {
+            self.g.encoding_seat(viewer)
+        }
+    }
+
     pub fn new(spec: &MtgSpec, seed: u64) -> Result<MtgAz, String> {
         // (A sealed game: each seat's deck and how it was made, ENGINE.md 107; with a deck choice the
         // choosing seats' candidates, the game started with their first candidate until they choose.)
@@ -885,6 +895,12 @@ impl SearchGame for MtgAz {
     /// The head of `encode_row` (layout v7, ENGINE.md 125; a loud failure on a state with tail
     /// tokens: zero-core R1), or with a layout v6 buffer the `mtg_eoe` game's encoding (no tail).
     fn encode(&self, viewer: usize, out: &mut [f32]) {
+        // (R1, ENGINE.md 125: the identities the frame's player revealed in earlier games are tail
+        // tokens, `my_revealed`; a head-only encoding of a row with any would drop them.)
+        if out.len() == encode::NUM_FEATURES {
+            let n = tail_encode::my_revealed_count(&self.m, self.frame_seat(viewer as u8));
+            assert!(n == 0, "a head-only encoding of a match row with {n} my_revealed tokens (layout v7: use encode_row; zero-core R1, ENGINE.md 125)");
+        }
         if self.m.choice.is_some() {
             encode::encode_deck_choice(self, viewer as u8, out);
         } else if self.m.sb.is_some() {
@@ -912,6 +928,8 @@ impl SearchGame for MtgAz {
             self.g.encode_features_row(viewer as u8, head, tail);
             encode::encode_match(self, viewer as u8, head);
         }
+        // What the other player knows of the frame's pool: its earlier games' reveals (ENGINE.md 125.7).
+        tail_encode::write_my_revealed(&self.m, self.frame_seat(viewer as u8), tail);
     }
 
     /// The pointer overrides (`tail_encode::option_overrides`): none during the deck choice and

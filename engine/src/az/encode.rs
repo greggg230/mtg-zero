@@ -229,7 +229,7 @@ pub struct Lay {
 pub const LAY7: Lay = Lay {
     v7: true,
     features: NUM_FEATURES,
-    off: [O_CONTEXT, O_TOPS, O_MY_PERM, O_OPP_PERM, O_HAND, O_STACK, O_TRIG, O_LIST, O_GYA, O_COMP, O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0],
+    off: [O_CONTEXT, O_TOPS, O_MY_PERM, O_OPP_PERM, O_HAND, O_STACK, O_TRIG, O_LIST, O_GYA, O_COMP, O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     w: super::tail_encode::SEG_W,
     o_match: O_MATCH,
     o_globals_v5: O_GLOBALS_V5,
@@ -239,8 +239,8 @@ pub const LAY7: Lay = Lay {
 pub const LAY6: Lay = Lay {
     v7: false,
     features: v6::NUM_FEATURES,
-    off: [O_CONTEXT, O_TOPS, v6::O_MY_PERM, v6::O_OPP_PERM, v6::O_HAND, v6::O_STACK, v6::O_TRIG, v6::O_LIST, v6::O_GYA, v6::O_COMP, v6::O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0],
-    w: [CONTEXT, TOP_W, v6::PERM_W, v6::PERM_W, v6::HAND_W, v6::STACK_W, v6::TRIG_W, v6::LIST_W, GYA_W, COMP_W, COMP_W, 0, 0, 0, 0, 0, 0, 0],
+    off: [O_CONTEXT, O_TOPS, v6::O_MY_PERM, v6::O_OPP_PERM, v6::O_HAND, v6::O_STACK, v6::O_TRIG, v6::O_LIST, v6::O_GYA, v6::O_COMP, v6::O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    w: [CONTEXT, TOP_W, v6::PERM_W, v6::PERM_W, v6::HAND_W, v6::STACK_W, v6::TRIG_W, v6::LIST_W, GYA_W, COMP_W, COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     o_match: v6::O_MATCH,
     o_globals_v5: v6::O_GLOBALS_V5,
     o_globals_v6: v6::O_GLOBALS_V6,
@@ -3313,6 +3313,8 @@ pub fn layout_json(db: &'static CardDb) -> String {
         segments.push(tail_only(sg::LIBRARY_KNOWN, "library_known", CODE + te::lb::PRESENT));
         segments.push(tail_only(sg::STACK_RELATIONS, "stack_relations", CODE + te::sr::PRESENT));
         segments.push(tail_only(sg::GRAVEYARD_ORDER, "graveyard_order", CODE + te::go::PRESENT));
+        segments.push(tail_only(sg::FACE_DOWN, "face_down", CODE + te::fd::PRESENT));
+        segments.push(tail_only(sg::MY_REVEALED, "my_revealed", CODE + te::mr::PRESENT));
     }
     let mut v = json!({
         "version": if eoe { 6 } else { 7 },

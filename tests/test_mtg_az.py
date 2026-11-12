@@ -334,7 +334,7 @@ def test_a_widened_network_reads_v7_rows_within_rounding(old_version, old_featur
     eo, en = NetEvaluator(old, graphs=False), NetEvaluator(new, graphs=False)
     widths = R.layout_tails(new.config['layout'])
     gated = {i for i, s in enumerate(new.config['layout']['segments']) if s.get('gate')}
-    assert len(gated) == 7 and set(new.gates().values()) == {0.0}
+    assert len(gated) == 9 and set(new.gates().values()) == {0.0}
     E = G.engine()
     rng = np.random.default_rng(8)
     seen = {'plain': 0, 'gated': 0}
@@ -402,7 +402,7 @@ def test_the_encoding_guard_refuses_an_older_network_and_takes_a_v7_one(tmp_path
         load(p4)
     msg = str(e.value)
     assert f'features {old_features} -> 56192' in msg and f'token layout v{old_version} (11 segments' in msg
-    assert 'token layout v7 (18' in msg and 'tools/fork_run.py' in msg
+    assert 'token layout v7 (20' in msg and 'tools/fork_run.py' in msg
     R = run.Run(str(tmp_path / 'r'), run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-smoke']), {}))
     with pytest.raises(EncodingMismatch):
         R.evaluator(p4)

@@ -974,10 +974,9 @@ fn a_face_down_permanent_is_hidden_from_the_opponent_cr708_5() {
     assert!(seen_other, "the opponent's worlds deal it again");
 }
 
+/// The whole row (layout v7, ENGINE.md 125.10: a face-down permanent is a `face_down` token too).
 fn enc(g: &Game, viewer: PlayerId) -> Vec<f32> {
-    let mut f = vec![0.0; engine::az::NUM_FEATURES];
-    g.encode_features(viewer, &mut f);
-    f
+    engine::az::tail_encode::Row::of(g, viewer).flat()
 }
 
 /// "Turn it face up any time for its mana cost if it's a creature card."

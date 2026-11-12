@@ -10,8 +10,9 @@
 //! * **Tail-only segments** (`count` 0, `gate: true`: a widen adds them at gate 0, so a widened
 //!   network computes the old one's outputs exactly): the other player's waiting triggers, the
 //!   delayed and temporary triggers, the links between objects, the exile offers, the library cards
-//!   someone knows below the top three, the stack items' relations past the head's, and the order of
-//!   the graveyard cards a positional reader can pick.
+//!   someone knows below the top three, the stack items' relations past the head's, the order of
+//!   the graveyard cards a positional reader can pick, the face-down cards (who knows each), and the
+//!   identities the frame's player revealed in earlier games of a match.
 //! * **No hidden information.** An identity is written only where the viewer knows it
 //!   (`Game::knows`); positions, zones, counts and who knows are public.
 
@@ -46,8 +47,10 @@ pub mod seg {
     pub const LIBRARY_KNOWN: u16 = 15;
     pub const STACK_RELATIONS: u16 = 16;
     pub const GRAVEYARD_ORDER: u16 = 17;
+    pub const FACE_DOWN: u16 = 18;
+    pub const MY_REVEALED: u16 = 19;
     /// The number of segments.
-    pub const N: usize = 18;
+    pub const N: usize = 20;
 }
 
 /// An object reference (`ObjRef`) inside a token: what it names now, publicly (ENGINE.md 125).
@@ -256,12 +259,47 @@ pub mod go {
     pub const W: usize = READER + 32;
 }
 
+/// A face-down card (`face_down` segment, ENGINE.md 125.7): every card exiled face down
+/// (`Game::face_down`, in exile order), then every face-down permanent (`Game::face_down_ids`), after
+/// its card code where the viewer knows it: the object (a reference: zone, controller or owner,
+/// place, identity where known), its owner, who knows it (the owner, the other player, the viewer)
+/// and who may play it (an exiled one's permission, `Game::exile_permission`). Face-up and face-down
+/// exiled cards differ to the rules (a "card in exile" target, a warped creature card, a cast from
+/// exile read face-up ones), and what each player knows of a face-down card is the viewer's
+/// knowledge: the owner's bags show a known one like a face-up one, these tokens what it is.
+pub mod fd {
+    use super::rf;
+    pub const PRESENT: usize = 0;
+    pub const EXILED: usize = 1;
+    pub const PERMANENT: usize = 2;
+    pub const OBJ: usize = 3;
+    pub const OWNER_MINE: usize = OBJ + rf::W;
+    pub const OWNER_THEIRS: usize = OWNER_MINE + 1;
+    pub const OWNER_KNOWS: usize = OWNER_THEIRS + 1;
+    pub const OTHER_KNOWS: usize = OWNER_KNOWS + 1;
+    pub const VIEWER_KNOWS: usize = OTHER_KNOWS + 1;
+    pub const PLAY_ME: usize = VIEWER_KNOWS + 1;
+    pub const PLAY_OPP: usize = PLAY_ME + 1;
+    pub const W: usize = PLAY_OPP + 1;
+}
+
+/// An identity the frame's player revealed (made public) in an earlier game of the match
+/// (`my_revealed` segment, `MatchState::earlier`; ENGINE.md 125.7): what the other player knows of
+/// its pool, by identity (the card code's identity digits; slot: the identity). The other way, the
+/// other player's earlier reveals, is the bag `OPP_REVEALED`.
+pub mod mr {
+    pub const PRESENT: usize = 0;
+    pub const W: usize = PRESENT + 1;
+}
+
 pub const DELAYED_W: usize = CODE + dl::W;
 pub const LINK_W: usize = CODE + lk::W;
 pub const EXO_W: usize = CODE + xo::W;
 pub const LK_W: usize = CODE + lb::W;
 pub const SR_W: usize = CODE + sr::W;
 pub const GO_W: usize = CODE + go::W;
+pub const FD_W: usize = CODE + fd::W;
+pub const MR_W: usize = CODE + mr::W;
 
 /// Every segment's slot width in layout v7, by segment index.
 pub const SEG_W: [usize; seg::N] = [
@@ -283,10 +321,12 @@ pub const SEG_W: [usize; seg::N] = [
     LK_W,
     SR_W,
     GO_W,
+    FD_W,
+    MR_W,
 ];
 
 /// Every segment's head slots (`count`) in layout v7.
-pub const SEG_HEAD: [usize; seg::N] = [1, 2 * encode::TOPS, encode::PERMS, encode::PERMS, encode::HANDS, encode::STACKS, encode::TRIGS, encode::LIST, encode::GYAS, 1, 1, 0, 0, 0, 0, 0, 0, 0];
+pub const SEG_HEAD: [usize; seg::N] = [1, 2 * encode::TOPS, encode::PERMS, encode::PERMS, encode::HANDS, encode::STACKS, encode::TRIGS, encode::LIST, encode::GYAS, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 /// The layout's head tokens, `1 + sum count` (zero-core `SearchGame::HEAD_TOKENS`): the global
 /// token and every head slot.
@@ -310,7 +350,7 @@ const fn ts(seg: u16, name: &'static str) -> TailSeg {
 }
 
 /// The tail segments of layout v7, in layout order (zero-core `SearchGame::TAILS`).
-pub const TAILS: [TailSeg; 14] = [
+pub const TAILS: [TailSeg; 16] = [
     ts(seg::MY_PERM, "my_permanents"),
     ts(seg::OPP_PERM, "opponent_permanents"),
     ts(seg::HAND, "hand"),
@@ -325,6 +365,8 @@ pub const TAILS: [TailSeg; 14] = [
     ts(seg::LIBRARY_KNOWN, "library_known"),
     ts(seg::STACK_RELATIONS, "stack_relations"),
     ts(seg::GRAVEYARD_ORDER, "graveyard_order"),
+    ts(seg::FACE_DOWN, "face_down"),
+    ts(seg::MY_REVEALED, "my_revealed"),
 ];
 
 /// The index of a zone in a reference's one-hot (exhaustive: a new zone is a compile error here).
@@ -706,6 +748,61 @@ pub(crate) fn write_tail_segments(cx: &Cx, list: &[Option<CardIdx>], tail: &mut 
     write_library_known(cx, tail);
     write_stack_relations(cx, tail);
     write_graveyard_order(cx, tail);
+    write_face_down(cx, tail);
+}
+
+/// The `face_down` segment (`fd::*`): every card exiled face down, in exile order, then every
+/// face-down permanent, in their order (slots k). An identity only where the viewer knows it.
+fn write_face_down(cx: &Cx, tail: &mut TailBuf) {
+    let g = cx.g;
+    let cards = g.face_down.iter().map(|&c| (c, true)).chain(g.face_down_ids.iter().map(|&(c, _)| (c, false)));
+    for (k, (c, exiled)) in cards.enumerate() {
+        let x = tail.token(seg::FACE_DOWN, k as u32);
+        let o = &g.objs[c.i()];
+        let viewer_knows = g.knows(cx.knower, c);
+        if viewer_knows {
+            let def = if exiled { o.def } else { g.perm_identity(cx.knower, c) };
+            code(&mut x[..CODE], g.db, cx.ids, def);
+        }
+        let s = &mut x[CODE..];
+        s[fd::PRESENT] = 1.0;
+        s[if exiled { fd::EXILED } else { fd::PERMANENT }] = 1.0;
+        cx.write_ref(&mut s[fd::OBJ..fd::OBJ + rf::W], g.obj_ref(c));
+        s[if o.owner == cx.me { fd::OWNER_MINE } else { fd::OWNER_THEIRS }] = 1.0;
+        s[fd::OWNER_KNOWS] = (o.known >> o.owner & 1) as f32;
+        s[fd::OTHER_KNOWS] = (o.known >> crate::ids::opp(o.owner) & 1) as f32;
+        s[fd::VIEWER_KNOWS] = viewer_knows as u8 as f32;
+        if exiled {
+            s[fd::PLAY_ME] = g.exile_permission(cx.me, c).is_some() as u8 as f32;
+            s[fd::PLAY_OPP] = g.exile_permission(cx.op_, c).is_some() as u8 as f32;
+        }
+    }
+}
+
+/// The identities player `me` revealed in earlier games of match `m` (`my_revealed`, `mr::*`): one
+/// token each, its slot the identity (ENGINE.md 125.7). The number written.
+pub(crate) fn write_my_revealed(m: &super::matches::MatchState, me: PlayerId, tail: &mut TailBuf) -> usize {
+    let mut n = 0;
+    for (w, &bits) in m.earlier[me as usize].iter().enumerate() {
+        let mut b = bits;
+        while b != 0 {
+            let i = w * 64 + b.trailing_zeros() as usize;
+            let x = tail.token(seg::MY_REVEALED, i as u32);
+            x[(i >> 6) & 15] = 1.0;
+            x[16 + ((i >> 3) & 7)] = 1.0;
+            x[24 + (i & 7)] = 1.0;
+            x[CODE + mr::PRESENT] = 1.0;
+            n += 1;
+            b &= b - 1;
+        }
+    }
+    n
+}
+
+/// How many `my_revealed` tokens player `me`'s row of match `m` has (R1: a head-only encoding of a
+/// row with any refuses).
+pub(crate) fn my_revealed_count(m: &super::matches::MatchState, me: PlayerId) -> usize {
+    m.earlier[me as usize].iter().map(|w| w.count_ones() as usize).sum()
 }
 
 /// A new `links` token at the next slot `k`, of kind `kind`.

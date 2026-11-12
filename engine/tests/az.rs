@@ -450,7 +450,7 @@ fn layout_v7_widens_layout_v6_exactly() {
     assert_eq!((j7["option_pointers"].as_bool(), j7["max_row_tokens"].as_u64(), j7["draft"].as_bool()), (Some(true), Some(4096), Some(true)));
     let segs = j7["segments"].as_array().unwrap();
     let names: Vec<&str> = segs.iter().map(|s| s["name"].as_str().unwrap()).collect();
-    assert_eq!(names.len(), 18);
+    assert_eq!(names.len(), 20);
     let tails: Vec<&str> = segs.iter().filter(|s| s["tail"] == true).map(|s| s["name"].as_str().unwrap()).collect();
     let want: Vec<&str> = engine::az::tail_encode::TAILS.iter().map(|t| t.name).collect();
     assert_eq!(tails, want, "the tail segments are TAILS");
@@ -1337,8 +1337,10 @@ fn public_state_reaches_the_encoding() {
     // (W2's and W6's six, added after layout v6 was built, too: ENGINE.md 100.5.1.)
     assert!(gaps.is_empty(), "next-layout gaps: {gaps:?}");
     assert_eq!(next, 0);
-    // (Layout v7 encodes the library cards known below the top three, ENGINE.md 125.)
-    assert_eq!(by_design, 3, "the deliberate limits");
+    // (Layout v7 encodes the library cards known below the top three, the face-down cards and who
+    // knows them, the earlier games' reveals of both players, ENGINE.md 125: the one limit left is
+    // the graveyard's order no rule reads, the user's choice.)
+    assert_eq!(by_design, 1, "the deliberate limits");
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

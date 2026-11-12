@@ -1505,7 +1505,7 @@ mod census {
         }
         let mut g = C.lock().unwrap();
         let c = g.get_or_insert_with(Census::default);
-        let names = ["context", "tops", "my_permanents", "opponent_permanents", "hand", "stack", "triggers", "list", "graveyard_abilities", "my_companion", "opponent_companion", "opponent_triggers", "delayed", "links", "exile_offered", "library_known", "stack_relations", "graveyard_order"];
+        let names = ["context", "tops", "my_permanents", "opponent_permanents", "hand", "stack", "triggers", "list", "graveyard_abilities", "my_companion", "opponent_companion", "opponent_triggers", "delayed", "links", "exile_offered", "library_known", "stack_relations", "graveyard_order", "face_down", "my_revealed"];
         let share = |n: u64| if c.rows == 0 { 0.0 } else { (n as f64 / c.rows as f64 * 1e6).round() / 1e4 };
         let mut capped = serde_json::Map::new();
         let mut tail_only = serde_json::Map::new();

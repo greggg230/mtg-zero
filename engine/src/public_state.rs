@@ -22,8 +22,8 @@
 //!    changed for both players (the change is public) and that the encoding
 //!    changed for both viewers.
 //! 3. **Limits** ([`limits`]): the perturbations whose change the encoding
-//!    leaves out, each with its reason: by design (bag order, what the
-//!    opponent knows of the viewer's cards). Layout v4's 42 gaps (ENGINE.md
+//!    leaves out, each with its reason: by design, one (the graveyard's order
+//!    no rule reads: the user's choice). Layout v4's 42 gaps (ENGINE.md
 //!    58.10) are layout v5's fixes (60), v6's and v7's theirs (100.5, 124.2,
 //!    125: since v7 every object is a token, so the perturbations change any
 //!    object, and there is one perturbation per `Mark` variant,
@@ -1523,6 +1523,23 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.learn(q, c);
             Some(format!("P{q} learns P{p}'s {}", a.g.name(c)))
         }),
+        // Layout v7 (ENGINE.md 125.7): who knows a face-down card (`face_down` tokens; a card
+        // exiled face down, a face-down permanent).
+        p!(rare "the other player learns a face-down exiled card", "Obj.known", |a, r| {
+            let fd: Vec<CardIdx> = a.g.face_down.iter().copied().filter(|&c| !a.g.knows(opp(a.g.objs[c.i()].owner), c)).collect();
+            let c = pick(&fd, r)?;
+            let q = opp(a.g.objs[c.i()].owner);
+            a.g.learn(q, c);
+            Some(format!("P{q} learns {}", a.g.name(c)))
+        }),
+        p!(rare "the other player learns a face-down permanent", "Obj.known", |a, r| {
+            let fd: Vec<CardIdx> =
+                a.g.face_down_ids.iter().map(|x| x.0).filter(|&c| !a.g.knows(opp(a.g.objs[c.i()].owner), c)).collect();
+            let c = pick(&fd, r)?;
+            let q = opp(a.g.objs[c.i()].owner);
+            a.g.learn(q, c);
+            Some(format!("P{q} learns a face-down permanent"))
+        }),
         p!("a permanent is another card", "Obj.def", |a, r| {
             let ss = slots(&a.g);
             let c = pick(&ss, r)?;
@@ -1938,7 +1955,10 @@ pub fn perturbations() -> Vec<Perturbation> {
 }
 
 /// The perturbations whose public change the encoding leaves out (ENGINE.md
-/// 58.9: by design), each with its reason. Layout v5 (ENGINE.md 60) encodes
+/// 58.9: by design), each with its reason: since layout v7 (ENGINE.md 125.7)
+/// only the graveyard's order no rule reads, the user's choice (D5); the
+/// face-down exiled card and the earlier games' reveals, limits until v7, are
+/// encoded (`face_down`, `my_revealed`). Layout v5 (ENGINE.md 60) encodes
 /// the 42 gaps layout v4 had no room for (58.10), layout v6 (ENGINE.md
 /// 100.5) the gaps the Edge of Eternities port and workstream C added after
 /// v5 froze, and two facts cards read that were limits by design
@@ -1951,9 +1971,7 @@ pub fn limits() -> Vec<Limit> {
     use LimitKind::{Design, NextLayout};
     let l = |name, kind, why| Limit { name, kind, why };
     vec![
-        l("two graveyard cards swap places", Design, "graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2); no action id depends on the order: a graveyard-card choice or target is a list id whose token is its card, the graveyards in order in the list block while it is pending (ENGINE.md 65.10), and Priority's casts and plays from the graveyard are one option, GRAVEYARD + 0, then that list's choice (ENGINE.md 100.5)"),
-        l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
-        l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
+        l("two graveyard cards swap places", Design, "the user's choice (D5, ENGINE.md 125): graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2); the only rules that read the order are the table's positional readers (Shallow Grave's \"the top creature card\"), whose cards' order is the `graveyard_order` tokens (R17 checks the table); no action id depends on the order: a graveyard-card choice or target is a list id whose token is its card, the graveyards in order in the list block while it is pending (ENGINE.md 65.10), and Priority's casts and plays from the graveyard are one option, GRAVEYARD + 0, then that list's choice (ENGINE.md 100.5)"),
     ]
 }
 
@@ -2010,8 +2028,10 @@ pub const V6_FIXED: [&str; 25] = [
 /// `MARK_PERTURBATIONS`), the library cards someone knows below the top three
 /// (`library_known`), a positional graveyard reader's order (Shallow Grave:
 /// `graveyard_order`), a stack ability's source, a trigger's event, a third
-/// target.
-pub const V7_FIXED: [&str; 32] = [
+/// target; and (ENGINE.md 125.7) the two limits by design until v7 - a card
+/// exiled face down and who knows it (`face_down`, face-down permanents too),
+/// the identities the viewer revealed in earlier games (`my_revealed`).
+pub const V7_FIXED: [&str; 36] = [
     "mana in a pool is restricted to creature spells of a chosen type",
     "a permanent entered with a big kicker count and X",
     "Containment Priest's replacement waits for a copy choice",
@@ -2044,6 +2064,10 @@ pub const V7_FIXED: [&str; 32] = [
     "a trigger's event names another object",
     "a trigger's event names the other player",
     "a stack item's third target is another",
+    "an exiled card is turned face down",
+    "the other player learns a face-down exiled card",
+    "the other player learns a face-down permanent",
+    "an identity revealed in an earlier game",
 ];
 
 /// One perturbation per `Mark` variant (ENGINE.md 125, the gate's G1): the

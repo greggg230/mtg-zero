@@ -1432,6 +1432,42 @@
       "present": 52,
       "tail": true,
       "width": 104
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "face_down",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 110
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "my_revealed",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 53
     }
   ],
   "version": 7,

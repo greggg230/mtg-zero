@@ -25,13 +25,13 @@ fn the_rows_constants() {
     assert_eq!(<MtgAz as SearchGame>::MAX_ROW_TOKENS, 4096);
     assert!(<MtgAz as SearchGame>::OPTION_POINTERS);
     let tails = <MtgAz as SearchGame>::TAILS;
-    assert_eq!(tails.len(), 14);
+    assert_eq!(tails.len(), 16);
     let names: Vec<&str> = tails.iter().map(|t| t.name).collect();
     assert_eq!(
         names,
         [
             "my_permanents", "opponent_permanents", "hand", "stack", "triggers", "list", "graveyard_abilities", "opponent_triggers",
-            "delayed", "links", "exile_offered", "library_known", "stack_relations", "graveyard_order"
+            "delayed", "links", "exile_offered", "library_known", "stack_relations", "graveyard_order", "face_down", "my_revealed"
         ]
     );
     // (Layout v6's game keeps no tail: ENGINE.md 124.2.)
@@ -375,4 +375,75 @@ fn dump_v6_projection() {
     let v = serde_json::json!({"v5": p5, "v6": p6});
     std::fs::write(&out, v.to_string()).unwrap();
     println!("{} and {} indices -> {out}", p5.len(), p6.len());
+}
+
+/// The face-down cards (ENGINE.md 125.7; a limit by design until v7): a card exiled face down is a
+/// `face_down` token for both viewers, its identity only for the viewers who know it, and who knows
+/// it (the owner, the other player) is in every viewer's token. The gate's perturbations, applied by
+/// name: an exiled card turned face down (only its owner knows it), then the other player learns it.
+#[test]
+fn face_down_tokens_show_who_knows_each_card() {
+    use engine::public_state::perturbations;
+    let db = CardDb::cube();
+    let sp = MtgSpec::parse(r#"{"max_turns": 60}"#).unwrap();
+    let mut a = MtgAz::new_game(&sp, 2, 3).unwrap();
+    a.g = Scenario::new(db)
+        .library(0, &["Island"; 10])
+        .library(1, &["Island"; 10])
+        .exile(0, &["Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let bolt = ident(&a.g, db.expect_id("Lightning Bolt").unwrap());
+    let apply = |a: &mut MtgAz, name: &str| {
+        let p = perturbations().into_iter().find(|p| p.name == name).unwrap();
+        (p.apply)(a, &mut engine::rng::Rng::new(1)).unwrap_or_else(|| panic!("{name}: not applied"))
+    };
+    let fd = |a: &MtgAz, v: u8| Row::of(&a.g, v).tokens(seg::FACE_DOWN).into_iter().map(|(s, x)| (s, x.to_vec())).collect::<Vec<_>>();
+    assert!(fd(&a, 0).is_empty() && fd(&a, 1).is_empty(), "a face-up exiled card: no token");
+    apply(&mut a, "an exiled card is turned face down");
+    let (mine, theirs) = (fd(&a, 0), fd(&a, 1));
+    assert_eq!((mine.len(), theirs.len()), (1, 1));
+    let (m, t) = (&mine[0].1, &theirs[0].1);
+    assert_eq!(code_identity(&m[..CODE]), Some(bolt), "its owner knows it");
+    assert_eq!(code_identity(&t[..CODE]), None, "the other player doesn't");
+    use te::fd;
+    assert_eq!((m[CODE + fd::EXILED], m[CODE + fd::OWNER_MINE], m[CODE + fd::OWNER_KNOWS], m[CODE + fd::OTHER_KNOWS], m[CODE + fd::VIEWER_KNOWS]), (1.0, 1.0, 1.0, 0.0, 1.0));
+    assert_eq!((t[CODE + fd::OWNER_THEIRS], t[CODE + fd::OWNER_KNOWS], t[CODE + fd::OTHER_KNOWS], t[CODE + fd::VIEWER_KNOWS]), (1.0, 1.0, 0.0, 0.0));
+    let before = [Row::of(&a.g, 0).flat(), Row::of(&a.g, 1).flat()];
+    apply(&mut a, "the other player learns a face-down exiled card");
+    let (mine, theirs) = (fd(&a, 0), fd(&a, 1));
+    assert_eq!(code_identity(&theirs[0].1[..CODE]), Some(bolt), "the other player knows it now");
+    assert_eq!((mine[0].1[CODE + fd::OTHER_KNOWS], theirs[0].1[CODE + fd::VIEWER_KNOWS]), (1.0, 1.0));
+    for v in 0..2u8 {
+        assert_ne!(Row::of(&a.g, v).flat(), before[v as usize], "P{v}'s row shows the other player's knowledge");
+    }
+}
+
+/// The identities a player revealed in earlier games of a match (ENGINE.md 125.7; a limit by
+/// design until v7): `my_revealed` tokens of that player's rows (what the other player knows of its
+/// pool), the other player's bag `OPP_REVEALED`; a head-only `MtgAz::encode` of a row with any
+/// refuses (R1).
+#[test]
+fn my_revealed_tokens_hold_the_frames_earlier_reveals() {
+    use engine::az::encode::{bag, D, O_BAGS};
+    let sp = MtgSpec::parse(r#"{"max_turns": 60, "format": "bo3"}"#).unwrap();
+    let mut a = MtgAz::new_game(&sp, 2, 5).unwrap();
+    assert!(Row::of_az(&a, 0).tail.iter().all(|t| t.0 != seg::MY_REVEALED));
+    let base = [Row::of_az(&a, 0), Row::of_az(&a, 1)];
+    a.m.earlier[0][1] |= 1 << 3; // identity 67
+    a.m.earlier[0][0] |= 1 << 9; // identity 9
+    let r0 = Row::of_az(&a, 0);
+    let toks = r0.tokens(seg::MY_REVEALED);
+    assert_eq!(toks.iter().map(|t| (t.0, code_identity(&t.1[..CODE]))).collect::<Vec<_>>(), [(9, Some(9)), (67, Some(67))]);
+    assert!(toks.iter().all(|t| t.1[CODE + te::mr::PRESENT] == 1.0));
+    assert_eq!(r0.head, base[0].head, "P0's own reveals: tokens only");
+    let r1 = Row::of_az(&a, 1);
+    assert!(r1.tokens(seg::MY_REVEALED).is_empty());
+    assert_eq!(r1.head[O_BAGS + bag::OPP_REVEALED * D + 67], 0.25, "P1 sees them in OPP_REVEALED");
+    let b = a.clone();
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let mut x = vec![0.0f32; NUM_FEATURES];
+        b.encode(0, &mut x);
+    }));
+    assert!(r.is_err(), "MtgAz::encode of a row with my_revealed tokens");
 }
