@@ -25540,6 +25540,99 @@ net 80, 230 of 81). Throughput at 8 threads (threads 8, groups 2, conc 256, 10-m
 native vs 885 for the Python remote worker with torch (1.50x)**, ~390 vs ~260 eoe1 games/h; peak RAM 1.5 GB (Python
 1.06 GB).
 
+### 114.1 The fuzz loops in the engine library (zero-farm phase 1, 2026-11-12)
+
+**Why.** zero-farm's first job for friends' PCs is fuzzing (zero-farm DESIGN.md 6): the seeds of this repo's own fuzz
+loops, run by the native worker. Test executables are not shipped, so the loops move into the library that the tests
+and the worker both call - one implementation, the same games.
+
+**What.** `engine::fuzz` (`engine/src/fuzz/`):
+* `games.rs`: `engine/tests/fuzz.rs`'s fuzzer moved as it was (every pool, check, counter and report; its module docs
+  list the `FUZZ_*` settings) with `fuzz_random_games` / `fuzz_random_matches` as `random_games(first, n, hooks)` /
+  `random_matches(first, n, hooks)` (`matches_skipped()`: why a games-only pool plays no match) and the replay tests'
+  helpers public (`play`, `new_game`, `play_match`, `match_spec`, the pool predicates);
+* `draft.rs`: `engine/tests/draft.rs`'s `fuzz_random_events` as `random_events(first, n, hooks) -> EventsEnd`, with the
+  helpers the draft tests share (`spec`, `legal`, `enc`, `zr`, `finish_random`, `assert_bounded`);
+* `cards.rs`: `engine/tests/common`'s fixtures (the cube + the custom test cards, the fuzz pool, random decks);
+  `tests/common` re-exports them, so every test binary uses the same ones;
+* `mod.rs`: `env::var` (the process environment, or - once `env::use_only` is called, in a farm chunk process - the
+  job's own settings and nothing else), `Hooks` (before / passed / match_panic), `SeedOutcome` (fingerprint, result,
+  turns, decisions), `Run` (Done, Failed {seed, payload}, Stopped {at}).
+
+The move is mechanical (`engine::` -> `crate::`, `std::env::var` -> `super::env::var`, `common::` -> `super::cards::`,
+the loops' heads and per-seed tails as above; the second port, of main's Doomsday pools (124), was made by a script
+that reproduces the first port byte for byte from the old file). Behaviour is the same: a seed that panics ends the run
+there and the test wrapper panics with the same message (`seed N failed (rerun: ...)`, `match N failed (...)`,
+`event N failed (...)`), so `tools/fuzz_farm.py` parses the same lines, unchanged; only the file:line of a panic in the
+moved code changed. The draft loop's final assertion over the listed match panics is the test wrapper's.
+
+**Checks.** Old vs new, the same seeds (`FUZZ_FIRST=10000000`): (1) main 8ff7218 against the farm commit on it, 12 modes
+(games 3,000, matches 1,000, interactions games 3,000 / matches 600, drafted matches 2,000, exponential 400, draft events
+3,000, delver 2,000, eoe 2,000, sealed 1,000, hidden decklists 500, `FUZZ_CHANCE=20` 1,000): every printed line identical
+(18,856 seeds played) except the panic locations; per-seed fingerprints, results, turns and decisions (the old tests
+printing them in a scratch copy, the new loops through mtgz-worker's chunk processes): identical on 20,856 seeds;
+(2) after merging main 7025f2a (Doomsday, 124), main against the merged farm, 12 modes (games 1,500, matches 500, interactions games 1,000, drafted matches 500, draft events 1,500, delver 1,000, `dd_a` / `dd_b` / `dd_c` / `doomsday` 300 each, eoe 500, sealed 300): every printed line identical (8,000 seeds) and every seed identical through the worker (8,000). Two failures on main itself showed up, the same on both sides
+and not caused by this move (reported, not fixed here): `FUZZ_POOL=exponential` seed 10000021 (`check_bounded`: step 529,
+viewer P0's feature 3248 is 6760.5, bound 256) and `FUZZ_HIDDEN_DECKS=1` seed 10000235 (a hidden-decklist world for P1:
+the opponent's sampled deck is not the match's: one card 545 vs 544). **Gate** (engine tier, on 2591ead: `python tools/gate.py engine --no-mac --expect-digest 53839c837bbaf034 --expect-digest0
+208c723daced22fe --jobs 8`): **GATE PASSED WITH SKIPS** in 3,024 s (skipped: the Mac recheck, `--no-mac`) - the build;
+behaviour digests unchanged, full **53839c837bbaf034** and `DIGEST_ENCODING=0` **208c723daced22fe** (= `tests/data/digests.txt`,
+no re-record); `--test az` 49, `limits` 13, `hidden` 28 passed; pytest 291 passed, 1 skipped (`tests/test_worker_farm.py`
+included); the random smoke; the tree unchanged. Also `cargo test --release -p engine --test fuzz --test draft`: 4 and 23
+passed (1 ignored: `measure`).
+
+### 114.2 mtgz-worker: fuzz jobs, the self-test, the runtime pack (zero-farm phase 1, 2026-11-12)
+
+**What.** zero-core `farm` ef20741 (docs/az.md 42.1 there): fuzz jobs in supervised chunk processes, the per-machine
+self-test, ONNX Runtime only from the runtime pack. This repo's part, `worker/src/fuzz.rs` (`MtgFuzz`):
+* **Modes**: `tools/fuzz_farm.py`'s fuzz / draft modes (`games`, `matches`, `interactions-games`, `interactions-matches`,
+  `drafted-matches`, `exponential-games`, `draft-events`), whose `env` must be exactly that mode's (so the repro is the
+  farm's), with its minimum chunk (1,000 / 50 / 1,000 / 50 / 50 / 100 / 50 seeds); or any `<name>-games`,
+  `<name>-matches`, `<name>-events` with the settings it needs (e.g. `delver-games` + `FUZZ_POOL=delver`,
+  `sealed-games` + `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_DECK_CHOICE=4`).
+* **No silent settings**: each loop accepts only what it reads - games: FUZZ_POOL (any but drafted), FUZZ_BEST_SHARE
+  (sealed), FUZZ_BELIEF, FUZZ_CHANCE, FUZZ_SKIP, FUZZ_LOG, FUZZ_GROUPS (interactions); hidden decklists:
+  FUZZ_HIDDEN_DECKS=1 with the default / eoe / sealed pool, FUZZ_BEST_SHARE, FUZZ_DECK_TILT, FUZZ_DECK_CHOICE (sealed),
+  FUZZ_DEAL_SAMPLES, FUZZ_SKIP, FUZZ_LOG; matches: FUZZ_POOL (default, interactions, drafted), FUZZ_BELIEF, FUZZ_SKIP,
+  FUZZ_GROUPS; draft events: nothing. Numbers are parsed as the engine parses them. Anything else is a fatal error
+  naming why (FUZZ_FIRST & co: the job's first / count set them; POOL_EXCLUDE: a file on the desktop).
+* **Repro**: `tools/fuzz_farm.py`'s `repro_of` - `(at <sha12>) <env> FUZZ_FIRST=<seed> FUZZ_GAMES=1 FUZZ_LOG=1 cargo test
+  --release -p engine --test fuzz fuzz_random_games -- --exact --nocapture` (matches: FUZZ_MATCHES=1; events:
+  DRAFT_FUZZ_FIRST / DRAFT_FUZZ=1 --test draft) - with the commit from the build's signed manifest and the build's cargo
+  profile (`--profile fuzz` for a fuzz build: its debug assertions are part of what failed); a draft event's listed
+  match panic: + ` (its match i; spec: ...)`; a chunk's own check: + ` (the chunk: FUZZ_GAMES=n)`.
+* **Builds**: `build.rs` names the cargo profile (release / fuzz / dev); the fuzz-profile build runs fuzz jobs only
+  (`hello` kinds `["fuzz"]`), the release build self-play and fuzz.
+
+**Tests.** `tests/test_worker_farm.py` (6): a fuzz job over `aw/1` (30 seeds, `end` done, the summary file, nothing
+announced); refusals (games-only pools in a matches mode, a fuzz_farm mode with other settings, settings a loop ignores,
+bad numbers, unknown modes, test faults without the switch); the repro equals `fuzz_farm.repro_of` for every fuzz /
+draft mode of fuzz_farm.py; yield (`yielded` < 2 s, nothing plays while yielded), resume, quit (the passed seeds kept,
+the rest unfinished); with the fuzz build, injected panic / abort / stack overflow / hang at four seeds of 30 - four
+failures with their sites (`.../fuzz.rs:<line>`, `crash exit <code>` twice, `HANG games`) and `--profile fuzz` repros,
+all 30 seeds done; the self-test with a small random MTG network (its reference set from the worker's own recorded
+batches): passing, then with one prior off by 1e-3 a fatal error before any game.
+
+### 114.3 Building and publishing farm builds; pulling failures (zero-farm phase 1, 2026-11-12)
+
+* `tools/farm_build.py --profile release|fuzz [--runtime-id ID] [--publish]`: a clean tree (and the zero-core submodule
+  at its pin), `mtgz-worker` built at HEAD with that profile and `+crt-static` in `<target>/farm-build` (the executable
+  imports nothing beyond Windows: checked from its import table), the build directory (`mtgz-worker.exe` only) signed by
+  zero-farm's `farm-release sign --kind worker --game mtg --engine-commit <HEAD> --core-commit <pin> --profile <p> --aw 1
+  [--zero-onnx 1] --min-agent 0.1.3 [--requires-runtime <id>] --entry mtgz-worker.exe`, checked (the signed worker reports
+  that build_id, its kinds, its commit and profile), published with `--publish`; prints `build_id <id>`.
+* `tools/farm_build.py --runtime [--publish]`: the runtime pack - `onnxruntime.dll` 1.31.1 (CPU) and the MSVC runtime it
+  imports (msvcp140, msvcp140_1, vcruntime140, vcruntime140_1), app-local, each Microsoft-signed and at least the
+  toolset ONNX Runtime was linked with (14.44), plus `runtime.json`; loaded through a release farm build's `info
+  --runtime-dir` (every DLL from the pack) before it is signed (`--kind runtime`).
+* `tools/farm_fuzz_pull.py --campaign ID`: a campaign's failures (`GET /v1/admin/campaign/{id}/failures`) into
+  `failures/<fid>.json` (+ the first three outputs as `<fid>-<k>.log`), `tools/fuzz_farm.py`'s format and key (the site
+  and the masked first message line: the Mac farm's id for the same panic), merged into what is there; a cursor per
+  campaign so a pull takes only new failures.
+
+The runtime pack and a fuzz and a release build of this branch are published to the live coordinator (zero-farm
+`docs/phase1-worker.md` has their build ids and how to start a fuzz campaign).
+
 ## 124. Legacy Doomsday: the deck's cards
 
 **Why.** The next constructed matchup after the Delver mirror (54): MTGGoldfish's archetype "Legacy Doomsday"

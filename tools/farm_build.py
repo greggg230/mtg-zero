@@ -130,17 +130,25 @@ def sign_publish(a, d, sign_args):
     return bid
 
 
-def build_worker(a):
-    ec, cc = clean_tree()
+def cargo_build(profile):
+    """mtgz-worker built with `profile` and the static C runtime in the farm-build target dir -> the executable
+    (checked: it imports nothing beyond Windows)."""
     tdir = target_dir()
     env = dict(os.environ, CARGO_TARGET_DIR=tdir, RUSTFLAGS='-C target-feature=+crt-static')
     env.setdefault('CARGO_BUILD_JOBS', '8')
-    print(f'building mtgz-worker (profile {a.profile}, +crt-static) at {ec[:12]} (zero-core {cc[:12]}) in {tdir}', flush=True)
-    subprocess.run(['cargo', 'build', '--profile', a.profile, '-p', 'mtgz_worker'], cwd=ROOT, env=env, check=True)
-    exe = os.path.join(tdir, a.profile, 'mtgz-worker.exe')
+    print(f'building mtgz-worker (profile {profile}, +crt-static) at {git("rev-parse", "HEAD")[:12]} in {tdir}', flush=True)
+    subprocess.run(['cargo', 'build', '--profile', profile, '-p', 'mtgz_worker'], cwd=ROOT, env=env, check=True)
+    exe = os.path.join(tdir, profile, 'mtgz-worker.exe')
     bad = [d for d in pe_imports(exe) if d not in SYSTEM_DLLS and not d.startswith('api-ms-win-core-')]
     if bad:
         die(f'{exe} imports {bad}: a farm worker must import nothing beyond Windows (static CRT)')
+    return exe
+
+
+def build_worker(a):
+    ec, cc = clean_tree()
+    tdir = target_dir()
+    exe = cargo_build(a.profile)
     version = f'mtg-{ec[:7]}-{a.profile}'
     d = os.path.join(a.out or os.path.join(tdir, 'dist'), version)
     if os.path.exists(d):
@@ -221,16 +229,19 @@ def build_runtime(a):
         shutil.copy2(src, os.path.join(d, n))
     with open(os.path.join(d, 'runtime.json'), 'w', encoding='utf-8') as f:
         json.dump({'runtime': version, 'onnxruntime': ort_version, 'provider': 'cpu', 'linker': f'{lmaj}.{lmin}', 'files': desc}, f, indent=1)
-    # loaded through a worker: every DLL from the pack
-    worker = a.check_worker or os.path.join(tdir, 'release', 'mtgz-worker.exe')
-    if not os.path.exists(worker):
-        die(f'no worker to check the pack with ({worker}): build one (--profile release) or give --check-worker')
+    # loaded through a statically linked release worker (one that loaded no MSVC runtime of its own): every DLL from
+    # the pack
+    worker = a.check_worker or cargo_build('release')
     info = json.loads(subprocess.run([worker, 'info', '--runtime-dir', d], capture_output=True, text=True, check=True).stdout)
     ort = info['onnxruntime']
-    if ort.get('version') != ort_version or any(os.path.normcase(os.path.dirname(p or '')) != os.path.normcase(os.path.abspath(d))
-                                               for p in ort['modules'].values()):
+    if 'error' in ort or any(os.path.normcase(os.path.dirname(p or '')) != os.path.normcase(os.path.abspath(d)) for p in ort['modules'].values()):
         die(f'the pack did not load from itself: {ort}')
-    print(f'runtime pack {version}: ONNX Runtime {ort["version"]}, every DLL from the pack ({", ".join(ort["modules"])})')
+    print(f'runtime pack {version}: ONNX Runtime loaded ({ort["version"]}), every DLL from the pack ({", ".join(ort["modules"])})')
+    with open(os.path.join(d, 'runtime.json'), encoding='utf-8') as f:
+        rj = json.load(f)
+    rj['ort_build_info'] = ort['version']
+    with open(os.path.join(d, 'runtime.json'), 'w', encoding='utf-8') as f:
+        json.dump(rj, f, indent=1)
     bid = sign_publish(a, d, ['--kind', 'runtime', '--version', version, '--min-agent', a.min_agent])
     return bid, d
 
@@ -243,7 +254,7 @@ def main():
     ap.add_argument('--runtime-id', help='release builds: the runtime pack build_id they load ONNX Runtime from')
     ap.add_argument('--ort-dll')
     ap.add_argument('--msvc-dir')
-    ap.add_argument('--check-worker', help='--runtime: the worker that loads the pack as a check (default the release farm build)')
+    ap.add_argument('--check-worker', help='--runtime: the worker that loads the pack as a check (default: the release farm build, built if needed)')
     ap.add_argument('--min-agent', default=MIN_AGENT)
     ap.add_argument('--out', help='where the build directories go (default <target>/farm-build/dist)')
     ap.add_argument('--publish', action='store_true')
