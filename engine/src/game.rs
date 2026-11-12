@@ -490,6 +490,10 @@ pub enum EndReason {
     /// a win, a loss or a draw: self-play drops the game (`Game::aborted`;
     /// zero-core's `SearchGame::aborted`).
     Aborted,
+    /// A player conceded (CR 104.3a: it leaves the game and loses; the other
+    /// player wins, 104.2a): `Game::concede`, zero-core's resign rule in a
+    /// match with one episode per game (ENGINE.md 112).
+    Conceded,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -1412,6 +1416,12 @@ impl Game {
         if self.outcome.is_none() {
             self.outcome = Some(Outcome { winner, reason });
         }
+    }
+    /// Player `p` concedes (CR 104.3a: a player can concede the game at any
+    /// time; it leaves the game and loses it): the other player wins (104.2a),
+    /// unless the game already ended. ENGINE.md 112: zero-core's resign rule.
+    pub fn concede(&mut self, p: PlayerId) {
+        self.end_game(Some(crate::ids::opp(p)), EndReason::Conceded);
     }
     /// The game ends aborted (ENGINE.md 100.7): `why` (logged) is the number
     /// or limit the engine can't keep exact. The running task finishes with

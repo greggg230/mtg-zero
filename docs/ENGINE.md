@@ -24993,3 +24993,115 @@ work leaves: a `tools/mac_races.sh` race, `~/mtg-zero-wt/races-<sha12>` with `~/
 `~/mtg-zero-wt/run-<sha12>` and the mirror `~/mtgz-remote/<run>` (every checkpoint shipped). Cleanup when done:
 `rm -rf ~/mtgz-races/<name>`, `git -C ~/mtg-zero worktree remove --force ~/mtg-zero-wt/races-<sha12>` and `rm -rf
 ~/cargo-target/mtg-zero/races-<sha12>`.
+
+## 112. Best-of-three with one episode per game (`"game_episodes": true`; branch `bo3-game-episodes`, 2026-11-11)
+
+(110 is the Doomsday lanes', 111 the parallel `delver-bo3` lane's and `eval-v2`'s, 113 `realdecks`'.) The user's
+decision of 2026-11-11 for best-of-three on the Delver mirror: each **game** of a match is its own episode for the
+search and for training; the match stays the unit self-play plays and evaluation measures. The core's half is zero-core
+`feat/match-episodes` (its docs/az.md 42, docs/search.md 1.3 and 2.14: chained episodes); this section is the `mtg`
+mapping. Without the key every spec is what it was (the behaviour digests are unchanged, 112.5).
+
+### 112.1 Why
+
+36.6's mapping made the match one episode: the search crossed a game's end into sideboarding and the next game, and every
+row's value target was the match's result. Without draws a player's match-win chance after a game is a fixed amount plus
+a positive multiple of its chance to win that game, so playing each game to win it is match-optimal; per-game labels are
+much less noisy (game 3's luck no longer lands on game 2's rows) and keep the value head's meaning that of the
+best-of-one Delver line a best-of-three run is warm-started from (whose search settings, cq_c_scale 0.3 and value_q 0.6,
+were tuned on the per-game scale). zero-core's value target stays `(1 - value_q) z + value_q q_root`; z becomes the
+row's own game's result.
+
+### 112.2 The switch and the mapping
+
+`"game_episodes": true` in the spec (default false), best-of-three only (`"format": "bo3"`; refused with best-of-one,
+where the game is the match already). The evaluation spec keeps the key (`eval_json` and `evaldecks.eval_spec` change
+only the decks), so the yardstick, random, Elo and h2h games play chained matches too. 36.6's table, best-of-three with
+the key:
+
+| zero-core | best-of-three, `game_episodes` |
+|---|---|
+| `to_move` | None at a game's end (`MatchState::between`: the game is over, the match is not, sideboarding has not begun) and at the match's end; else 36.6's |
+| `result`, `margin` | the game's (best-of-one's: 1 / 0 / 0.5, the life difference / 20) |
+| `score`, `rounds` | game wins, the turns of all games (as 36.6) |
+| `chained` | true |
+| `next_episode(None)` (the game ended by the rules) | the match over (two wins, three games, or an aborted game): `Over(the match's result)`; else the state with sideboarding begun (36.2: the next game's chooser first, CR 103.1): the next episode's first decisions are the sideboarding before game g+1, which affects only game g+1 and takes its result |
+| `next_episode(Some(p))` (zero-core's resign rule: p resigned) | p concedes the game in progress (CR 104.3a: `Game::concede`, `EndReason::Conceded`, the other player wins), scored as any game, then as above |
+| `can_concede` | false while sideboarding (no game in progress) and during a deck choice; true in a game |
+| `determinize`, `encode`, `aux_target`, the bots | unchanged (the match block, the revealed cards and the score stay in the encoding) |
+
+The match's rules are 36.1's (who chooses, when the match ends, its result: by game wins), the decks and sideboards, the
+reveals and the match's RNG carry over in the state `next_episode` returns. zero-core counts `temp_moves` per episode, so
+every game's opening is sampled (36.12's wish: a counter per game).
+
+### 112.3 Rows and evaluation
+
+zero-core labels each game's rows with that game's outcome and hands them out with the match's one result row (its
+`result` the match's, `episodes` the games'): the match win rate is what the yardstick, random games, Elo and h2h report,
+with per-game numbers beside it (zero-core docs/az.md 42.2).
+
+### 112.4 Resignation: a concession of the game in progress
+
+zero-core's self-play resign rule (its docs/az.md 27; the Delver line plays `selfplay_resign_t` 0.02, k 3) ends a
+decided episode: with one episode per game that is a game, and the match goes on. `next_episode(Some(p))` makes p
+concede the game in progress - **CR 104.3a** ("A player can concede the game at any time. A player who concedes leaves
+the game immediately. That player loses the game."), with the other player winning (104.2a) - as `Game::concede`
+(`EndReason::Conceded`, a new reason no game without the key ever takes), then scores it as any game's end (36.1:
+the loser chooses for the next game). `can_concede` is false while sideboarding and during a deck choice (no game is
+in progress to concede: zero-core does not count those searches for the rule), so a resignation never falls between
+games. The rule's no-resign draw is per match (zero-core draws it by game id); each game reports its own `resign`.
+
+### 112.5 Tests, digests, smoke
+
+* **Engine** (`engine/tests/bo3_episodes.rs`, 5, `--release` 7.5 s):
+  `game_episodes_is_a_best_of_three_setting` (refused with best-of-one, a boolean, kept by `eval_json`; a match
+  without the key does not chain); `the_match_is_36_1s_cut_at_its_games_ends` (12 matches played twice with the same
+  random actions, one episode and one episode per game: the same decisions, legal actions and keys throughout, each
+  game's end an episode's terminal with the game's result and life margin, the next episode the sideboarding with the
+  loser first (CR 103.1), no concession while sideboarding, the match's end by 36.1 with the one-episode match's result
+  and turns); `a_concession_ends_the_game_in_progress` (CR 104.3a: `EndReason::Conceded`, the other player's win, the
+  conceding player sideboards first; a second concession ends the match 0-2; none between games);
+  `the_search_treats_a_games_end_as_terminal` (zero-core trees from 6 moves before game 1's end, 8 matches x 400
+  simulations: walks reach the game's end and no expanded node is past it - while the same walks of the one-episode
+  match do reach sideboarding); `every_row_takes_its_own_games_result` (24 self-play matches through zero-core's driver,
+  uniform evaluator: one row per match, every record's z and sc its own game's, the sideboarding rows (the match
+  block's flag) never among game 1's, the user's case found - a match lost 1-2 by game 2's winner: its game-2 rows,
+  its sideboarding before game 2 among them, z = 1, its game-1 and game-3 rows z = 0).
+* **Python** (`tests/test_game_episodes.py`, 3): the spec and the bindings (a concession through `next_episode`),
+  every sample of 12 matches through the driver from Python (`split_games`, the arrays the shard writer writes)
+  labelled by its own game with the sideboarding rows never in game 1, the evaluation and the remote hello's
+  fingerprint (`Run.eval_chained`, `remote.eval_episodes`, `remoteplay._episodes_of`: 'chained', and '' without the
+  key).
+* **Run-loop smoke** (the desktop, CPU, heavily shared with other jobs, 2026-11-11): `python -m mtgz.az.run --preset
+  mtg-smoke --spec <SPEC_BO3 + "game_episodes": true> --eval-spec <its evaluation spec> --max-steps 60000 --iters 2`:
+  iteration 1 played 16 matches = 40 games (9 drawn, 5,502 samples, 137.6 per game), iteration 2 16 matches = 45 games
+  (21 drawn, 7,440 samples); `eval_yard` / `eval_random` report the match win rate with `per_game` beside it (iter 2
+  vs random: matches 1.0/4, games 2.0/9), the Elo log both (`iter_0002 vs iter_0001: 4.0/4 (games 9.0/11)`). Its
+  shards checked row by row (a scratch script: a row's game = the match block's game number + its sideboarding flag;
+  the rows are written match by match): 12,942 rows of 32 matches and 85 games, every player's rows of a game with
+  one z, the two players' z summing to 1, the game wins the next game's rows show equal to the earlier games' z (170
+  checks), and 19 of the 32 matches carry different z in different games (impossible with the match's label).
+* **Search smoke**: `tools/search_smoke.py` gains the spec `match_games` (36.8's `match` with the key).
+* **Digests**: the `Game` changed only by an unused end reason and method, the mapping only behind the key: the
+  behaviour digests are unchanged (the gates below).
+
+### 112.6 What works with it, what refuses
+
+What the Delver runs use, with the key (zero-core docs/az.md 42 has the core's tests): the shared self-play queue and
+remote workers (the toy's contests in the shared quota; a worker whose checkout lacks chained episodes refused by its
+hello, `episodes`); remote evaluation (its result's `episodes` checked); rolling self-play, sparse batches, the shard
+writer thread, sparse shards and window, information-set merging with root-view values, value-only samples (next_q),
+the root's belief (an auxiliary head), resignation (112.4), the evaluation cache, paired Elo games, the league
+(zero-core's `test_the_delver_stack_on_a_chained_game`, `test_the_league_and_a_remote_evaluation_on_a_chained_game`
+on its toy match); replays (`zero.replay`: one replay = the whole match, `games` its games' results). **Refused**:
+branched games (`selfplay_branch`, a driver error naming the game); deferred terminals. Not tested: a co-training
+resolver with the key, lookahead seats, the local and remote linger (nothing in them reads an episode).
+
+### 112.7 For the run, and open questions
+
+* **`games` counts matches**: an iteration of 2,000 games is 2,000 matches (~2.5 games each: ~2.5x the rows of a
+  best-of-one iteration); `eval_games`, `elo_games`, the anchors' games count matches too (the user's measure).
+* **`temp_moves` per game**: zero-core counts it per episode, so each game's opening is sampled (60 = the first ~60
+  searched decisions of every game, sideboarding included) - 36.12's wish, a behaviour of the key to confirm.
+* **Human play** (the Delver site's Play tab, `zero.play` servers): a Python consumer that plays a chained game must
+  call `next_episode` at a game's end (zero.replay and zero-core's Python driver do); the Play tab does not yet.
