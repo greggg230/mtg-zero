@@ -1,4 +1,4 @@
-//! Lane B of the Legacy Doomsday deck (ENGINE.md 110.2): Misdirection,
+//! Lane B of the Legacy Doomsday deck (ENGINE.md 124.2): Misdirection,
 //! Flusterstorm, Cavern of Souls. Named after the rules actions, each citing
 //! its rule; never after a card.
 //!
@@ -111,7 +111,7 @@ impl CreatureTypes {
 /// What a payment satisfies of spending restrictions (CR 106.6; `pay::Keep`):
 /// the purposes (`SPEND_*` bits), and, paying for a creature spell, the
 /// creature types it has among those some mana is restricted to
-/// (ENGINE.md 110.2).
+/// (ENGINE.md 124.2).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Allow {
     pub bits: Spend,
@@ -140,7 +140,7 @@ impl Allow {
 
 /// Can a card make mana restricted to creature spells of a chosen type (CR
 /// 106.6; Cavern of Souls)? Layout v6 has no float for such mana floating
-/// (ENGINE.md 110.2: layout v7's block), so a network-driven game whose decks
+/// (ENGINE.md 124.2: layout v7's block), so a network-driven game whose decks
 /// hold such a card is refused on this build (`MtgSpec::parse`; the
 /// public-state gate's `CHOSEN_TYPE_MANA_GAP`); rules tests and the fuzzer,
 /// which drive no network, play it.
@@ -151,7 +151,7 @@ pub fn makes_chosen_type_mana(d: &crate::db::CardDef) -> bool {
 /// The refusal of a network-driven game with such a card (`makes_chosen_type_mana`).
 pub fn chosen_type_mana_needs_v7(name: &str) -> String {
     let owner = if name.ends_with('s') { format!("{name}'") } else { format!("{name}'s") };
-    format!("{owner} floating mana needs layout v7 (ENGINE.md 110.2)")
+    format!("{owner} floating mana needs layout v7 (ENGINE.md 124.2)")
 }
 
 /// The printing facts lane B adds (`CardDef::dd_b`).

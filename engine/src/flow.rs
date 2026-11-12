@@ -91,7 +91,7 @@ pub(crate) enum Task {
     /// 106.6; ENGINE.md 99.12.)
     ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]>, only: crate::db::Spend, page: crate::decision::Page },
     /// "As this enters, choose a creature type" (CR 614.12, 205.3m) for
-    /// `card`, its number's `step` (`Game::ask_number`; ENGINE.md 110.2).
+    /// `card`, its number's `step` (`Game::ask_number`; ENGINE.md 124.2).
     ChooseCreatureType { card: CardIdx, step: crate::decision::NumberStep },
     /// Mana abilities activated with priority (`DecisionKind::ActivateMana`;
     /// `card`: the permanent whose ability is asked next; `again`: one was

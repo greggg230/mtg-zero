@@ -55,7 +55,7 @@
 //! Prismari Charm with the cube's cards); every check of the default mode,
 //! and with 200 games or more Murktide Regent must have been cast and its
 //! leave-the-graveyard trigger resolved. Games only (best-of-one).
-//! `FUZZ_POOL=dd_b` (ENGINE.md 110.2): lane B of the Legacy Doomsday deck, constructed play's
+//! `FUZZ_POOL=dd_b` (ENGINE.md 124.2): lane B of the Legacy Doomsday deck, constructed play's
 //! table: one player the Doomsday 60 (MTGGoldfish 8027957) with its cards of other lanes swapped
 //! for lane B's and supported ones (`DD_B_DECK`: four Misdirection, Flusterstorm and Cavern of
 //! Souls, Orcish Bowmasters for a creature type random play names), against the Delver 60; seats
@@ -334,7 +334,7 @@ fn delver_mode() -> bool {
     pool_mode() == PoolMode::Delver
 }
 
-/// `FUZZ_POOL=dd_b` (ENGINE.md 110.2).
+/// `FUZZ_POOL=dd_b` (ENGINE.md 124.2).
 fn dd_b_mode() -> bool {
     pool_mode() == PoolMode::DdB
 }
@@ -1252,7 +1252,7 @@ fn play(seed: u64, checks: bool) -> Played {
     let exp = exponential_mode();
     let mut buf = Vec::new();
     let mut stack_seen: Vec<u32> = Vec::new();
-    // (`FUZZ_POOL=dd_b`: lane B's counts, ENGINE.md 110.2.)
+    // (`FUZZ_POOL=dd_b`: lane B's counts, ENGINE.md 124.2.)
     let mut dd_b_seen = Vec::new();
     let (mut turn, mut turn_steps) = (g.turn().number, 0u64);
     while !g.is_over() {

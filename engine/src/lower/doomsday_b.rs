@@ -1,4 +1,4 @@
-//! Lane B of the Legacy Doomsday deck (ENGINE.md 110.2): the effect classes
+//! Lane B of the Legacy Doomsday deck (ENGINE.md 124.2): the effect classes
 //! of Misdirection (mtg-bot's `legacy_stack`). Same rules as `effect.rs`:
 //! every field named, the rest denied; each lowers onto ops named after rules
 //! actions.

@@ -100,7 +100,7 @@ pub fn restriction(only: crate::db::Spend) -> Tag {
     // (A restriction to creature spells of the type its source chose: a
     // unit only of a payment for a creature spell of that type, `spendable`,
     // where it pays only the spell's cost, never a mana ability's within the
-    // payment: `FOR_COST`; ENGINE.md 110.2. Of a source that chose no type it
+    // payment: `FOR_COST`; ENGINE.md 124.2. Of a source that chose no type it
     // is spendable on nothing, so it never becomes a unit.)
     if only & crate::db::SPEND_CHOSEN_CREATURE_TYPE != 0 {
         assert!(crate::doomsday_b::type_of(only).is_some(), "mana restricted to the chosen creature type of a source that chose none is spendable on nothing");
@@ -458,7 +458,7 @@ pub fn cost_need(mask: ManaMask, allow: crate::db::Spend) -> Tag {
 }
 
 /// A payment's purposes `allow` as a need's tag bits: the `SPEND_*` bits
-/// 0-6. (A creature-type slot, ENGINE.md 110.2, is no tag purpose: mana
+/// 0-6. (A creature-type slot, ENGINE.md 124.2, is no tag purpose: mana
 /// restricted to one pays only the cost the payment is for, `FOR_COST`,
 /// once the payment allows it: `restriction`.)
 #[inline]

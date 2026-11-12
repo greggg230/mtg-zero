@@ -1005,7 +1005,7 @@ pub enum Ext {
     EoeW6(crate::eoe_w6::W6),
     /// Edge of Eternities W2, mana and lands (ENGINE.md 99.12).
     EoeW2(crate::eoe_w2::EoeW2),
-    /// Lane B of the Legacy Doomsday deck (ENGINE.md 110.2).
+    /// Lane B of the Legacy Doomsday deck (ENGINE.md 124.2).
     DoomsdayB(crate::doomsday_b::DoomsdayB),
 }
 

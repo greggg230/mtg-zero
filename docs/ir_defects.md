@@ -1169,7 +1169,7 @@ player may copy this spell and may choose a new target for that copy."
   `TargetPlayerMayCopyThisSpell` arm) and always offers the copy, with at most 31 such copies a turn
   (`copies.rs::MAY_COPY_CAP`, docs/shortcuts.md 26.11.7; ENGINE.md 26.11).
 
-### T. The Legacy Doomsday deck, lane B (ENGINE.md 110.2)
+### T. The Legacy Doomsday deck, lane B (ENGINE.md 124.2)
 
 220. **Untimely Malfunction** (Duskmourn; mtg-bot's roto, eoe and all pools, in no table of
      mtg-zero's: the EoE filter drops Duskmourn): "Choose one — Destroy target artifact. • Change the

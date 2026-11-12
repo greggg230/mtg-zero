@@ -1,4 +1,4 @@
-//! Lane B of the Legacy Doomsday deck (ENGINE.md 110.2) against the cards'
+//! Lane B of the Legacy Doomsday deck (ENGINE.md 124.2) against the cards'
 //! Oracle text and their official rulings (`// ruling: <hash8>`, as the
 //! cube's in `docs/rulings.md`; `data/rulings/legacy.rulings.json`). They are
 //! in the card table of constructed play (`CardDb::constructed`); these tests
@@ -1204,7 +1204,7 @@ fn cr_106_6_two_caverns_two_types() {
 }
 
 /// The chosen type is public state, in the permanent's encoding (ENGINE.md
-/// 110.2: perm status 133-141, its index + 1 in binary) for both viewers.
+/// 124.2: perm status 133-141, its index + 1 in binary) for both viewers.
 #[test]
 fn the_chosen_creature_type_is_encoded_on_the_permanent() {
     use engine::az::encode::{perm, CODE, NUM_FEATURES, O_MY_PERM, O_OPP_PERM, PERM_W};

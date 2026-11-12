@@ -145,15 +145,16 @@ fn the_constructed_spec() {
 #[test]
 fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     let (cube, con) = (CardDb::cube(), CardDb::constructed());
-    // The cube's table has no legacy card; the constructed one has both.
-    for n in ["Murktide Regent", "Prismari Charm"] {
+    // The cube's table has no legacy card; the constructed one has them all
+    // (ENGINE.md 54; 124.2: lane B's three).
+    for n in ["Murktide Regent", "Prismari Charm", "Misdirection", "Flusterstorm", "Cavern of Souls"] {
         assert!(cube.id(n).is_none(), "{n} in the cube's card table");
         assert!(con.id(n).is_some(), "{n}: {:?}", con.expect_id(n));
     }
     assert!(cube.unsupported().is_empty() && con.unsupported().is_empty());
     // Every cube card at the same id, with the same definition; its tokens
-    // and faces two ids later (after the two legacy cards), the same too.
-    let k = 2u16;
+    // and faces k ids later (after the k legacy cards), the same too.
+    let k = engine::db::load_legacy_document().cards.len() as u16;
     assert_eq!(con.num_cards(), cube.num_cards() + k as usize);
     assert_eq!(con.len(), cube.len() + k as usize, "the legacy cards make no token or face");
     let to_cube = |id: u16| if id < cube.num_cards() as u16 { id } else { id - k };
@@ -177,7 +178,8 @@ fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     for i in 0..cube.num_cards() {
         assert_eq!(ic[i], ik[i]);
     }
-    assert_eq!(identity::legacy_registry(), ["Murktide Regent", "Prismari Charm"]);
+    assert_eq!(identity::legacy_registry()[..2], ["Murktide Regent", "Prismari Charm"]);
+    assert_eq!(identity::legacy_registry().len(), k as usize);
     assert_eq!(ik[con.id("Murktide Regent").unwrap() as usize], 546);
     assert_eq!(ik[con.id("Prismari Charm").unwrap() as usize], 547);
     assert!(identity::LEGACY_BASE + identity::legacy_registry().len() <= identity::CUBE_CAP);

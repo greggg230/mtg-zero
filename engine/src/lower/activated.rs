@@ -694,7 +694,7 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
         }
         // "Add one mana of any color. Spend this mana only to cast a creature
         // spell of the chosen type, and that spell can't be countered."
-        // (Cavern of Souls; CR 106.6, ENGINE.md 110.2.)
+        // (Cavern of Souls; CR 106.6, ENGINE.md 124.2.)
         E::AddAnyColorManaForChosenCreatureType(nodes::AddAnyColorManaForChosenCreatureType {
             produces,
             spend_restriction,

@@ -903,7 +903,7 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.pool_restr.push((p, t as u8, crate::db::SPEND_LAND_ABILITY, 1));
             Some(format!("P{p}: one mana of type {t}"))
         }),
-        // ENGINE.md 110.2 (Cavern of Souls). (Rare as the one above, and
+        // ENGINE.md 124.2 (Cavern of Souls). (Rare as the one above, and
         // drawing nothing from the shared stream: one Merfolk mana with the
         // rider, of a colour: such mana is one mana of any colour.)
         p!(rare "mana in a pool is restricted to creature spells of a chosen type", "Game.pool_restr", |a, _| {
@@ -952,7 +952,7 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.marks.retain(|(o, m)| !(o.idx == c && matches!(m, crate::game::Mark::ChosenColor(_))));
             mark(&mut a.g, c, crate::game::Mark::ChosenColor(k))
         }),
-        // ENGINE.md 110.2 (Cavern of Souls).
+        // ENGINE.md 124.2 (Cavern of Souls).
         p!("a creature type was chosen as a permanent entered", "Game.marks", |a, r| {
             let c = pick(&slots(&a.g), r)?;
             let t = r.below(crate::doomsday_b::CREATURE_TYPES_CR.len() as u32) as u16;
@@ -1762,7 +1762,7 @@ pub fn limits() -> Vec<Limit> {
         l("two graveyard cards swap places", Design, "graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2); no action id depends on the order: a graveyard-card choice or target is a list id whose token is its card, the graveyards in order in the list block while it is pending (ENGINE.md 65.10), and Priority's casts and plays from the graveyard are one option, GRAVEYARD + 0, then that list's choice (ENGINE.md 100.5)"),
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
-        l(CHOSEN_TYPE_MANA_GAP, NextLayout, "layout v6 has no float for a pool's mana restricted to creature spells of a chosen type (Cavern of Souls, CR 106.6): any number of types can float at once (a Cavern that enters again chooses again, CR 400.7, 614.12; the mana stays until the step ends, 106.4), past v6's spares; layout v7's block encodes it (branch doomsday-b-v7). Until then every network-driven game (self-play, evaluation, h2h: the engine's MtgSpec) whose decks or sideboards hold such a card is refused with \"Cavern of Souls' floating mana needs layout v7 (ENGINE.md 110.2)\" (tests/az.rs, cavern_decks_are_refused_to_networks_on_layout_v6), so no network sees a position with it; rules tests and the fuzzer play it"),
+        l(CHOSEN_TYPE_MANA_GAP, NextLayout, "layout v6 has no float for a pool's mana restricted to creature spells of a chosen type (Cavern of Souls, CR 106.6): any number of types can float at once (a Cavern that enters again chooses again, CR 400.7, 614.12; the mana stays until the step ends, 106.4), past v6's spares; layout v7's block encodes it (branch doomsday-b-v7). Until then every network-driven game (self-play, evaluation, h2h: the engine's MtgSpec) whose decks or sideboards hold such a card is refused with \"Cavern of Souls' floating mana needs layout v7 (ENGINE.md 124.2)\" (tests/az.rs, cavern_decks_are_refused_to_networks_on_layout_v6), so no network sees a position with it; rules tests and the fuzzer play it"),
         l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),
     ]
 }
@@ -1806,11 +1806,11 @@ pub const V6_FIXED: [&str; 25] = [
     "a copy has an ability by its exception",
     "a player created tokens this turn",
     "the mana spent to cast a spell",
-    // ENGINE.md 110.2: lane B of the Legacy Doomsday deck's (perm 133-141).
+    // ENGINE.md 124.2: lane B of the Legacy Doomsday deck's (perm 133-141).
     "a creature type was chosen as a permanent entered",
 ];
 
-/// The one next-layout gap (ENGINE.md 110.2): a pool's mana restricted to
+/// The one next-layout gap (ENGINE.md 124.2): a pool's mana restricted to
 /// creature spells of a chosen type (Cavern of Souls) needs layout v7's block;
 /// on this layout v6 build every network-driven game whose decks hold a card
 /// that makes such mana is refused (`az::MtgSpec`, `CHOSEN_TYPE_MANA_NEEDS_V7`),

@@ -982,7 +982,7 @@ pub enum Mark {
     /// The colour (index W U B R G) chosen as it entered (CR 614.12).
     ChosenColor(u8),
     /// The creature type chosen as it entered (CR 614.12, 205.3m: the index
-    /// of `doomsday_b::CREATURE_TYPES_CR`; Cavern of Souls, ENGINE.md 110.2).
+    /// of `doomsday_b::CREATURE_TYPES_CR`; Cavern of Souls, ENGINE.md 124.2).
     ChosenCreatureType(u16),
     /// This spell can't be countered (mana spent on it said so).
     Uncounterable,

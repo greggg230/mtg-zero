@@ -35,7 +35,7 @@ pub(crate) const SPEND_ABILITIES: Spend = SPEND_ARTIFACT_ABILITY | SPEND_ELDRAZI
 #[inline]
 pub(crate) fn spendable(only: Spend, allow: crate::doomsday_b::Allow) -> bool {
     // (A creature spell of the type its source chose: the payment's spell
-    // has it; ENGINE.md 110.2.)
+    // has it; ENGINE.md 124.2.)
     if only & crate::db::SPEND_CHOSEN_CREATURE_TYPE != 0 {
         return crate::doomsday_b::type_of(only).is_some_and(|t| allow.types.contains(t));
     }
@@ -98,7 +98,7 @@ impl Game {
         if kinds & SPEND_OUTSIDE_HAND != 0 && !from_hand {
             a |= SPEND_OUTSIDE_HAND;
         }
-        // A creature spell of a chosen type (ENGINE.md 110.2).
+        // A creature spell of a chosen type (ENGINE.md 124.2).
         crate::doomsday_b::Allow { bits: a, types: self.creature_type_allow(card) }
     }
 

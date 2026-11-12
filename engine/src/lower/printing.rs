@@ -2016,7 +2016,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         dd_b: Default::default(),
     };
     // "As this enters, choose a creature type" (CR 614.12, 205.3m; ENGINE.md
-    // 110.2): a permanent's.
+    // 124.2): a permanent's.
     def.dd_b.chooses_creature_type = *enters_choosing_creature_type;
     if def.dd_b.chooses_creature_type && !def.is(types::PERMANENT) {
         l.unsupported("CardPrinting.enters_choosing_creature_type(not a permanent)");

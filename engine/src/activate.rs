@@ -1762,7 +1762,7 @@ impl Game {
             let picks = if matches!(prod, crate::db::ManaProd::ComboX { .. }) { x } else { 1 };
             for _ in 0..picks {
                 // (Its restriction and its rider go with the mana, CR 106.6.)
-                // (Of its source's chosen creature type: ENGINE.md 110.2.)
+                // (Of its source's chosen creature type: ENGINE.md 124.2.)
                 let only = ad.mana().map_or(0, |m| self.spend_of_source(src.card, m.only) | if m.uncounterable { crate::db::MANA_UNCOUNTERABLE } else { 0 });
                 self.agenda.push(Task::ManaNowPick { p, prods: prods.clone(), only, page: crate::decision::Page::FIRST });
             }
@@ -1824,7 +1824,7 @@ impl Game {
             return;
         }
         let p = o.controller;
-        // "As this enters, choose a creature type" (ENGINE.md 110.2): asked,
+        // "As this enters, choose a creature type" (ENGINE.md 124.2): asked,
         // then the rest of this.
         if self.def_of(card).dd_b.chooses_creature_type && self.chosen_creature_type(card).is_none() {
             self.agenda.push(Task::AsEnters { card, page: crate::decision::Page::FIRST });

@@ -451,7 +451,7 @@ pub enum Filter {
     MvIsSourceCounters(Counter),
     /// A spell with a single target (CR 115.9a: one target chosen as it was
     /// put on the stack, each instance counted; Misdirection's "target spell
-    /// with a single target", ENGINE.md 110.2).
+    /// with a single target", ENGINE.md 124.2).
     SingleTarget,
 }
 
@@ -1156,7 +1156,7 @@ pub struct ManaAbility {
     /// it may be spent on, any one of them ("to cast artifact spells or
     /// activate abilities of artifacts": two bits; ENGINE.md 99.12); "... a
     /// creature spell of the chosen type" (`SPEND_CHOSEN_CREATURE_TYPE`,
-    /// resolved by the source's chosen type: ENGINE.md 110.2).
+    /// resolved by the source's chosen type: ENGINE.md 124.2).
     pub only: Spend,
     /// "... and that spell can't be countered" (Delighted Halfling).
     pub uncounterable: bool,
@@ -1170,7 +1170,7 @@ pub struct ManaAbility {
 
 /// A spending restriction's purposes (CR 106.6): `SPEND_*` bits 0-6, the
 /// rider `MANA_UNCOUNTERABLE` bit 7 (on mana only), and since ENGINE.md
-/// 110.2 "a creature spell of the chosen type", `SPEND_CHOSEN_CREATURE_TYPE`
+/// 124.2 "a creature spell of the chosen type", `SPEND_CHOSEN_CREATURE_TYPE`
 /// (bit 8), with the type the mana's source chose in bits 16-24
 /// (`doomsday_b::with_type`; none on a mana ability's own `only`). What a
 /// payment satisfies is a `doomsday_b::Allow`.
@@ -1192,7 +1192,7 @@ pub const SPEND_LAND_ABILITY: Spend = 32;
 /// ... only to cast a spell from anywhere other than your hand.
 pub const SPEND_OUTSIDE_HAND: Spend = 64;
 /// ... only to cast a creature spell of the type its source chose as it
-/// entered (CR 106.6, 614.12; Cavern of Souls, ENGINE.md 110.2). On a mana
+/// entered (CR 106.6, 614.12; Cavern of Souls, ENGINE.md 124.2). On a mana
 /// ability alone; the mana it makes carries its source's type too
 /// (`Game::spend_of_source`), or none when the source chose no type (then
 /// no spell is of the chosen type: no payment allows it).
@@ -1885,7 +1885,7 @@ pub struct CardDef {
     /// The printing facts EoE workstream W6 adds (ENGINE.md 99.16).
     pub w6: crate::eoe_w6::W6Def,
     /// The printing facts lane B of the Legacy Doomsday deck adds (ENGINE.md
-    /// 110.2).
+    /// 124.2).
     pub dd_b: crate::doomsday_b::DdBDef,
     /// "Nonbasic lands are Mountains" (CR 305.7, 613.1d: Magus of the Moon;
     /// `Game::moon_on`, ENGINE.md 99.12).

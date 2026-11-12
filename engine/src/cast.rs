@@ -3390,7 +3390,7 @@ impl Game {
                         Target::Player(_) | Target::Stack(_) => false,
                     })
                 }),
-            // CR 115.9a (ENGINE.md 110.2).
+            // CR 115.9a (ENGINE.md 124.2).
             Filter::SingleTarget => self.spell_with_single_target(c),
             // (Abilities on the stack match only at top level, `filter_ok`.)
             Filter::Ability(_) => false,

@@ -1341,7 +1341,7 @@ fn public_state_reaches_the_encoding() {
     // choice (ENGINE.md 100.5): only deliberate limits are left.
     let gaps: Vec<&str> = lim.iter().filter(|l| l.kind == LimitKind::NextLayout).map(|l| l.name).collect();
     // (W2's and W6's six, added after layout v6 was built, too: ENGINE.md 100.5.1.) One gap, named
-    // and tied to a refusal (ENGINE.md 110.2, the maintainer's decision): a pool's mana of a chosen
+    // and tied to a refusal (ENGINE.md 124.2, the maintainer's decision): a pool's mana of a chosen
     // creature type (Cavern of Souls) is layout v7's; on v6 no network plays a game with a card that
     // makes it (`cavern_decks_are_refused_to_networks_on_layout_v6`).
     assert_eq!(gaps, [engine::public_state::CHOSEN_TYPE_MANA_GAP], "next-layout gaps");
@@ -1349,7 +1349,7 @@ fn public_state_reaches_the_encoding() {
     assert_eq!(by_design, 4, "the deliberate limits");
 }
 
-/// ENGINE.md 110.2: layout v6 can't encode a pool's mana restricted to creature spells of a chosen
+/// ENGINE.md 124.2: layout v6 can't encode a pool's mana restricted to creature spells of a chosen
 /// type (Cavern of Souls; the public-state gate's one next-layout gap, `CHOSEN_TYPE_MANA_GAP`), so
 /// every network-driven game - a spec the engine's `SearchGame` parses (self-play, evaluation, h2h,
 /// replays: zero-core's driver) - whose decks or sideboards hold a card that makes such mana is
@@ -1366,7 +1366,7 @@ fn cavern_decks_are_refused_to_networks_on_layout_v6() {
         }
         serde_json::json!({"max_turns": 60, "constructed": true, "decks": decks}).to_string()
     };
-    let want = "Cavern of Souls' floating mana needs layout v7 (ENGINE.md 110.2)";
+    let want = "Cavern of Souls' floating mana needs layout v7 (ENGINE.md 124.2)";
     for s in [spec(&with_cavern, &delver, None), spec(&delver, &with_cavern, None), spec(&delver, &delver, Some(&["Cavern of Souls"]))] {
         let e = MtgSpec::parse(&s).unwrap_err();
         assert!(e.contains(want), "{e}");

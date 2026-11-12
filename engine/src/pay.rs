@@ -1256,7 +1256,7 @@ impl Game {
                         })
                 };
                 // (Mana of its source's chosen creature type: per source,
-                // ENGINE.md 110.2.)
+                // ENGINE.md 124.2.)
                 let per_source =
                     matches!(m.prod, ManaProd::Linked | ManaProd::Chosen | ManaProd::ChosenN(_) | ManaProd::IfCounter { .. } | ManaProd::SameTypeCounters { .. })
                         || reuse.is_some()

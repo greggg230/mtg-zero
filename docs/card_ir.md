@@ -12,7 +12,7 @@ specified in mtg-bot's `docs/CARD_IR.md`.
 | Path | What |
 |---|---|
 | `data/cards/powerlsv.ir.json` | The PowerLSV cube (546 printings), IR v1, exported by mtg-bot `feature/legacy-delver-ir` 140eafa9 with the legacy pool (schema `181ba4b8a1e7...`, ENGINE.md 54; the cards byte for byte those of `feature/companion-ir` 62210e89, schema `7100f8436556...`: companion conditions, M8a; before it `feature/ir-fixes-mtgzero` 8ea9fcca, schema `66ba3e33fe5b...`, the IR defects of docs/ir_defects.md 1, 2, 4, 12, 13, 15-18 fixed) |
-| `data/cards/legacy.ir.json` | The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari Charm; ENGINE.md 110.2: Misdirection, Flusterstorm, Cavern of Souls; mtg-bot's pool `legacy`), the same export and schema |
+| `data/cards/legacy.ir.json` | The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari Charm; ENGINE.md 124.2: Misdirection, Flusterstorm, Cavern of Souls; mtg-bot's pool `legacy`), the same export and schema |
 | `data/cards/eoe.ir.json` | The Edge of Eternities sealed cards (ENGINE.md 99.1: mtg-bot's pool `eoe` filtered by `tools/codegen/filter_eoe_ir.py` to the set's 320 cards with IR), the same export and schema; since ENGINE.md 99.16 the export of mtg-bot `feature/eoe-ir-fixes` f4f2d663 (before it 7c02e5c9, ENGINE.md 99.11; 5362f5ed, ENGINE.md 99.9) |
 | `data/cards/powerlsv.schema.json` | The schema the three documents were encoded with |
 | `tools/codegen/gen_card_ir.py` | Schema -> Rust generator (stdlib Python) |
@@ -88,7 +88,7 @@ changes too; see mtg-bot `docs/CARD_IR.md`, "Versioning".
 
 ## Current numbers (mtg-bot `feature/doomsday-b-ir` f48104b9)
 
-ENGINE.md 110.2 (the Legacy Doomsday deck, lane B): exported with `cards export-ir --pool cube legacy
+ENGINE.md 124.2 (the Legacy Doomsday deck, lane B): exported with `cards export-ir --pool cube legacy
 eoe` from mtg-bot `feature/doomsday-b-ir` f48104b9 (on `feature/eoe-ir-fixes` f4f2d663), then
 `filter_eoe_ir.py`; schema sha256 `12935fd48060f815fc7ab8e9dc193be524971d60b9d9a7299a2f501189574358`
 (was `1cbe33073b1b...`). Three classes more in the schema: the effect
@@ -98,7 +98,7 @@ no exported card used before. `legacy.ir.json` holds 5 cards (Misdirection, Flus
 Souls added); `powerlsv.ir.json` and `eoe.ir.json` are the previous files byte for byte, `schema_sha256`
 aside (checked card by card).
 
-### Before ENGINE.md 110.2 (mtg-bot `feature/eoe-ir-fixes` f4f2d663)
+### Before ENGINE.md 124.2 (mtg-bot `feature/eoe-ir-fixes` f4f2d663)
 
 ENGINE.md 99.16 (W6): exported with `cards export-ir --pool cube legacy eoe` from mtg-bot
 `feature/eoe-ir-fixes` f4f2d663 (the third IR-fix batch, on aa323a3b), then `filter_eoe_ir.py`; schema
