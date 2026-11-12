@@ -1697,7 +1697,7 @@ fn fuzz_random_games() {
         let (lo, lg, le, sw) = (ld(&DDC_LEYLINE_OPENING), ld(&DDC_LEYLINE_GAMES), ld(&DDC_LEYLINE_EXILE_GAMES), ld(&DDC_SWAMPWALK_ATTACKS));
         println!(
             "FUZZ_POOL=dd_c: Edge of Autumn cast {ec}, cycled {ey}; Street Wraith cast {wc}, cycled {wy}, attacking a defender with a Swamp {sw}; \
-             Leyline of the Void on the battlefield as the first turn began in {lo} games, at some time in {lg}, exiling an opponent's card in {le}"
+             Leyline of the Void on the battlefield as the first turn began in {lo} games, at some time in {lg}, with a card of its controller's opponent in exile then in {le}"
         );
         if n >= 300 {
             assert!(ec > 0 && ey > 0 && wc > 0 && wy > 0 && lo > 0 && lg > 0 && le > 0 && sw > 0, "lane C's cards weren't played");
