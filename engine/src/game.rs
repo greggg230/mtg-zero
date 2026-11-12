@@ -848,7 +848,7 @@ pub struct Game {
     /// Workshop's (`ManaPool::art`): (player, type, purposes, amount), a
     /// part of that player's `ManaPool::amt` (CR 106.6; ENGINE.md 99.12).
     /// Empty but in games with such mana; emptied with the pools.
-    pub(crate) pool_restr: Vec<(PlayerId, u8, u8, u8)>,
+    pub(crate) pool_restr: Vec<(PlayerId, u8, crate::db::Spend, u8)>,
     /// The lands that entered the battlefield under each player's control
     /// during turn `.0` (kept when `CardDb::watch_lands_entered`; ENGINE.md
     /// 99.12).
@@ -981,6 +981,9 @@ pub enum Mark {
     Converge(u8),
     /// The colour (index W U B R G) chosen as it entered (CR 614.12).
     ChosenColor(u8),
+    /// The creature type chosen as it entered (CR 614.12, 205.3m: the index
+    /// of `doomsday_b::CREATURE_TYPES_CR`; Cavern of Souls, ENGINE.md 110.2).
+    ChosenCreatureType(u16),
     /// This spell can't be countered (mana spent on it said so).
     Uncounterable,
     /// It has a triggered ability an effect gave it: "when this is put into
@@ -2047,6 +2050,7 @@ impl Game {
             || self.def_of(idx).chooses_parity
             || self.def_of(idx).chooses_name
             || self.def_of(idx).w6.chooses_color
+            || self.def_of(idx).dd_b.chooses_creature_type
         {
             self.agenda.push(Task::AsEnters { card: idx, page: crate::decision::Page::FIRST });
         }

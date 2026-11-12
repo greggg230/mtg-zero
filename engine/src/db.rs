@@ -449,6 +449,10 @@ pub enum Filter {
     /// context's source (as it last existed if it left, CR 608.2h; Blast
     /// Zone, ENGINE.md 99.12).
     MvIsSourceCounters(Counter),
+    /// A spell with a single target (CR 115.9a: one target chosen as it was
+    /// put on the stack, each instance counted; Misdirection's "target spell
+    /// with a single target", ENGINE.md 110.2).
+    SingleTarget,
 }
 
 /// `Filter::Ability` kinds.
@@ -1150,8 +1154,10 @@ pub struct ManaAbility {
     /// "Spend this mana only to cast artifact spells" / "... a legendary
     /// spell" (`SPEND_*` bits; 0 = no restriction, CR 106.6): the purposes
     /// it may be spent on, any one of them ("to cast artifact spells or
-    /// activate abilities of artifacts": two bits; ENGINE.md 99.12).
-    pub only: u8,
+    /// activate abilities of artifacts": two bits; ENGINE.md 99.12); "... a
+    /// creature spell of the chosen type" (`SPEND_CHOSEN_CREATURE_TYPE`,
+    /// resolved by the source's chosen type: ENGINE.md 110.2).
+    pub only: Spend,
     /// "... and that spell can't be countered" (Delighted Halfling).
     pub uncounterable: bool,
     /// "If any of that mana is spent on a creature spell, it gains haste
@@ -1162,26 +1168,40 @@ pub struct ManaAbility {
     pub opp_life: u8,
 }
 
+/// A spending restriction's purposes (CR 106.6): `SPEND_*` bits 0-6, the
+/// rider `MANA_UNCOUNTERABLE` bit 7 (on mana only), and since ENGINE.md
+/// 110.2 "a creature spell of the chosen type", `SPEND_CHOSEN_CREATURE_TYPE`
+/// (bit 8), with the type the mana's source chose in bits 16-24
+/// (`doomsday_b::with_type`; none on a mana ability's own `only`). What a
+/// payment satisfies is a `doomsday_b::Allow`.
+pub type Spend = u32;
+
 /// `ManaAbility::only`: the mana may be spent only to cast an artifact
 /// spell.
-pub const SPEND_ARTIFACT: u8 = 1;
+pub const SPEND_ARTIFACT: Spend = 1;
 /// ... only to cast a legendary spell.
-pub const SPEND_LEGENDARY: u8 = 2;
+pub const SPEND_LEGENDARY: Spend = 2;
 /// ... only to activate abilities of artifact sources (ENGINE.md 99.12).
-pub const SPEND_ARTIFACT_ABILITY: u8 = 4;
+pub const SPEND_ARTIFACT_ABILITY: Spend = 4;
 /// ... only to cast colorless Eldrazi spells.
-pub const SPEND_ELDRAZI_SPELL: u8 = 8;
+pub const SPEND_ELDRAZI_SPELL: Spend = 8;
 /// ... only to activate abilities of colorless Eldrazi.
-pub const SPEND_ELDRAZI_ABILITY: u8 = 16;
+pub const SPEND_ELDRAZI_ABILITY: Spend = 16;
 /// ... only to activate abilities of land sources.
-pub const SPEND_LAND_ABILITY: u8 = 32;
+pub const SPEND_LAND_ABILITY: Spend = 32;
 /// ... only to cast a spell from anywhere other than your hand.
-pub const SPEND_OUTSIDE_HAND: u8 = 64;
+pub const SPEND_OUTSIDE_HAND: Spend = 64;
+/// ... only to cast a creature spell of the type its source chose as it
+/// entered (CR 106.6, 614.12; Cavern of Souls, ENGINE.md 110.2). On a mana
+/// ability alone; the mana it makes carries its source's type too
+/// (`Game::spend_of_source`), or none when the source chose no type (then
+/// no spell is of the chosen type: no payment allows it).
+pub const SPEND_CHOSEN_CREATURE_TYPE: Spend = 1 << 8;
 /// Not a purpose: the rider "and that spell can't be countered" (Delighted
 /// Halfling) on mana in a pool (`Game::pool_restr`'s `only`), which stays
 /// with the mana (CR 106.6; docs/shortcuts.md N20, ENGINE.md 100.4).
 /// `eoe_w2::spendable` ignores it.
-pub const MANA_UNCOUNTERABLE: u8 = 128;
+pub const MANA_UNCOUNTERABLE: Spend = 128;
 
 /// Sacrifice n permanents you control matching the filter (`another`: not
 /// the ability's source).
@@ -1864,6 +1884,9 @@ pub struct CardDef {
     pub w3: crate::eoe_w3::W3Def,
     /// The printing facts EoE workstream W6 adds (ENGINE.md 99.16).
     pub w6: crate::eoe_w6::W6Def,
+    /// The printing facts lane B of the Legacy Doomsday deck adds (ENGINE.md
+    /// 110.2).
+    pub dd_b: crate::doomsday_b::DdBDef,
     /// "Nonbasic lands are Mountains" (CR 305.7, 613.1d: Magus of the Moon;
     /// `Game::moon_on`, ENGINE.md 99.12).
     pub nonbasic_lands_are_mountains: bool,
@@ -2071,7 +2094,7 @@ pub struct CardDb {
     /// The spending restrictions' purposes the table's mana can have
     /// (`SPEND_*`: the union of its mana abilities' `only`, granted ones
     /// included); payments work out only these (ENGINE.md 99.12).
-    pub(crate) spend_kinds: u8,
+    pub(crate) spend_kinds: Spend,
     /// The interned "Eldrazi" subtype, if any card has it.
     pub(crate) eldrazi: Option<u16>,
     /// A card of the table says "nonbasic lands are Mountains"

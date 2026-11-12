@@ -346,7 +346,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.rebound", rebound);
         l.deny("CardPrinting.room_halves", room_halves);
         l.deny("CardPrinting.roto_statics", roto_statics);
-        l.deny("CardPrinting.enters_choosing_creature_type", enters_choosing_creature_type);
         l.deny("CardPrinting.cast_from_top_of_library_kinds", cast_from_top_of_library_kinds);
         l.deny("CardPrinting.suspend_count", suspend_count);
         l.deny("CardPrinting.suspend_cost", suspend_cost);
@@ -2014,7 +2013,14 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             chooses_color: *enters_choosing_color,
             ..Default::default()
         },
+        dd_b: Default::default(),
     };
+    // "As this enters, choose a creature type" (CR 614.12, 205.3m; ENGINE.md
+    // 110.2): a permanent's.
+    def.dd_b.chooses_creature_type = *enters_choosing_creature_type;
+    if def.dd_b.chooses_creature_type && !def.is(types::PERMANENT) {
+        l.unsupported("CardPrinting.enters_choosing_creature_type(not a permanent)");
+    }
     super::eoe_w3::printing_w3(l, &mut def, *grants_food_to_your_artifacts, *grants_food_ability_to_your_artifacts);
     super::eoe_w6::printing_w6_grants(&mut def, *grants_blue_mana_ability_to_your_artifacts);
     def.w3.seen = crate::eoe_w3::seen_of(&def);

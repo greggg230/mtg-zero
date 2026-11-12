@@ -1261,3 +1261,13 @@ c8a74bc2	a	mana	a mana-cost-based search is restricted to the exact printed mana
 1b138927	a	triggers	this permanents second ability triggers on entering the battlefield regardless of whether it escaped to get there
 87078369	a	mana	delve does not change the mana cost or mana value (Murktide Regent stays 7)
 05ce86bd	a	mana	delve pays only generic mana, at most the generic part of the total cost (five for Murktide Regent)
+f1ca52a5	a	stack	change the target: no other legal target leaves it unchanged (115.7a)
+4e80ba07	a	stack	the changed-to target becomes a target of the deflected spell: becomes-target abilities (ward) trigger
+aee352b1	a	stack	a spell targeting a spell can be changed to any other spell on the stack, one resolving before it too
+83bf218e	a	stack	change the target checks only that the spell has a single target (115.9a), not its legality
+9a4256c2	a	stack	change the target targets only the spell it changes, not its old or new target
+1f76d6f6	a	stack	the new target may be this spell itself: it is on the stack as the new target is chosen
+2ef42b09	a	stack	a spell on the stack can not be made to target itself (115.5)
+130c9dd0	a	stack	the spell is targeted as this is cast; its new target is chosen as this resolves
+919d28a6	a	mana	Cavern mana on any cost of the spell (kicker too, or a free cast's additional cost) makes it uncounterable
+dc0c0658	a	other	choose a creature type: an existing creature type of 205.3m only, no card type

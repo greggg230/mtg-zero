@@ -322,7 +322,8 @@ fn filter_reads(f: &Filter) -> Reads {
         | Filter::Saddled
         | Filter::DealtDamageThisTurn
         | Filter::CastForWarp
-        | Filter::HostOfSource => Reads::default(),
+        | Filter::HostOfSource
+        | Filter::SingleTarget => Reads::default(),
     }
 }
 

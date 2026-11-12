@@ -16,17 +16,17 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
-| fetched | 1610 | 1262 |
-| class a | 1228 | 978 |
+| fetched | 1627 | 1272 |
+| class a | 1245 | 988 |
 | class b | 200 | 151 |
 | class c | 182 | 133 |
-| a, tested (passing) | 1228 | 978 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 930 | 777 |
-| a, tested only by an earlier test (Oracle or rules) | 298 | 201 |
+| a, tested (passing) | 1245 | 988 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 934 | 777 |
+| a, tested only by an earlier test (Oracle or rules) | 311 | 211 |
 | a, deferred | 0 | 0 |
 | a, untested | 0 | 0 |
 
-Class a by area (distinct texts): mana 175/175, triggers 139/139, stack 126/126, zones 123/123, copies 96/96, other 94/94, dfc 65/65, replacement 59/59, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 176/176, triggers 139/139, stack 134/134, zones 123/123, copies 96/96, other 95/95, dfc 65/65, replacement 59/59, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -875,11 +875,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `c33f0cb3` | a | stack | each copy made by storm must be countered individually; countering the original doesn't stop the copies | `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
-| `158501c3` | a | stack | storm counts spells cast from any zone and even ones that were countered | `rulings_stack::storm_counts_spells_that_were_countered_and_every_players_spells_cr_702_40a` |
-| `500a78f9` | a | stack | storm copies go straight onto the stack uncast, and don't count toward other storm spells cast later | `cards_m7b_stack3::brain_freeze_copies_may_get_new_targets_and_are_not_cast_cr_707_10` |
-| `543beb2e` | a | stack | the triggered ability that makes storm copies can itself be countered, preventing any copies | `rulings_stack::a_countered_storm_trigger_makes_no_copies_cr_702_40a` |
-| `bf7e6c38` | a | stack | each storm copy may be given new targets independently of the others | `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
+| `c33f0cb3` | a | stack | each copy made by storm must be countered individually; countering the original doesn't stop the copies | `cards_doomsday_b::cr_707_10_countering_flusterstorm_leaves_its_copies`; `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
+| `158501c3` | a | stack | storm counts spells cast from any zone and even ones that were countered | `cards_doomsday_b::cr_702_40a_flusterstorm_storm_counts_every_spell_cast_before_it_this_turn`; `rulings_stack::storm_counts_spells_that_were_countered_and_every_players_spells_cr_702_40a` |
+| `500a78f9` | a | stack | storm copies go straight onto the stack uncast, and don't count toward other storm spells cast later | `cards_doomsday_b::cr_702_40a_flusterstorm_storm_counts_every_spell_cast_before_it_this_turn`; `cards_m7b_stack3::brain_freeze_copies_may_get_new_targets_and_are_not_cast_cr_707_10` |
+| `543beb2e` | a | stack | the triggered ability that makes storm copies can itself be countered, preventing any copies | `cards_doomsday_b::cr_702_40a_a_countered_storm_trigger_makes_no_copies`; `rulings_stack::a_countered_storm_trigger_makes_no_copies_cr_702_40a` |
+| `bf7e6c38` | a | stack | each storm copy may be given new targets independently of the others | `cards_doomsday_b::cr_702_40a_flusterstorm_storm_counts_every_spell_cast_before_it_this_turn`; `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
 
 ### Consult the Star Charts
 
@@ -2034,9 +2034,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `03d27f15` | a | dfc | daybound/nightbound transform immediately on any day/night change, any time, and its not a state-based action | `rulings_faces::it_becomes_night_after_a_turn_without_spells_and_day_after_two_cr_726_3a` |
 | `b5368c51` | a | other | it becomes night if it's currently day and the previous turn's active player cast no spells | `rulings_faces::it_becomes_night_after_a_turn_without_spells_and_day_after_two_cr_726_3a` |
 | `0a3a2fe8` | a | other | it becomes day if it's currently night and the previous turn's active player cast two or more spells | `rulings_faces::it_becomes_night_after_a_turn_without_spells_and_day_after_two_cr_726_3a` |
-| `9d7e7537` | a | dfc | during night, a daybound permanent entering without being cast enters with its nightbound face up | `rulings_faces::a_daybound_card_put_onto_the_battlefield_at_night_is_nightbound_cr_702_145e` |
+| `9d7e7537` | a | dfc | during night, a daybound permanent entering without being cast enters with its nightbound face up | `rules_faithful_e::cr_702_145b_a_daybound_card_put_onto_the_battlefield_at_night_enters_transformed`; `rulings_faces::a_daybound_card_put_onto_the_battlefield_at_night_is_nightbound_cr_702_145e` |
 | `c574f848` | c | NR | with no day/night set, daybound and nightbound appearing together sets day, transforming the nightbound one [part 3, was a/other: no cube effect puts a daybound and a nightbound permanent onto the battlefield at once while it's neither] | not reachable with the cube's cards |
-| `483aa586` | a | dfc | a daybound spell cast at night stays daybound on the stack but enters the battlefield nightbound-face-up | `rulings_faces::a_daybound_card_cast_at_night_enters_with_its_nightbound_face_up_cr_702_145d` |
+| `483aa586` | a | dfc | a daybound spell cast at night stays daybound on the stack but enters the battlefield nightbound-face-up | `rules_faithful_e::cr_702_145b_a_daybound_spell_cast_at_night_enters_transformed_without_transforming`; `rulings_faces::a_daybound_card_cast_at_night_enters_with_its_nightbound_face_up_cr_702_145d` |
 | `a73ce155` | a | dfc | daybound/nightbound only transform via their own abilities, not generic transform effects from other cards | `rules_faces::a_daybound_permanent_transforms_only_through_day_and_night_cr_702_145b` |
 
 ### Scythecat Cub
@@ -2528,7 +2528,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `1efd0607` | a | mana | a self-untapping mana ability can be activated as many times as you can pay for it, enabling unbounded mana generation | `cards_m7c_tail2::zirda_and_basalt_monolith_loop_is_cut_at_31_activations_cr732_2a` |
+| `1efd0607` | a | mana | a self-untapping mana ability can be activated as many times as you can pay for it, enabling unbounded mana generation | `cards_m7c_tail2::zirda_and_basalt_monolith_loop_goes_on_past_31_activations_cr732_2a` |
 
 ### Coalition Relic
 
@@ -3522,6 +3522,38 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `0a2cf1a9` | a | mana | delve isn't an alternative cost, so it can combine with one, and can pay the generic part of additional costs too | `cards_legacy::delve_works_with_an_alternative_cost_cr_702_66b`; `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
 | `87078369` | a | mana | delve does not change the mana cost or mana value (Murktide Regent stays 7) | `cards_legacy::delve_doesnt_change_its_mana_value_cr_702_66a` |
 | `05ce86bd` | a | mana | delve pays only generic mana, at most the generic part of the total cost (five for Murktide Regent) | `cards_legacy::delve_exiles_at_most_its_generic_mana_cr_702_66a` |
+
+### Misdirection (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `f1ca52a5` | a | stack | change the target: no other legal target leaves it unchanged (115.7a) | `cards_doomsday_b::cr_115_7a_no_other_legal_target_leaves_fatal_push_unchanged` |
+| `4e80ba07` | a | stack | the changed-to target becomes a target of the deflected spell: becomes-target abilities (ward) trigger | `cards_doomsday_b::cr_702_21a_the_new_target_becomes_a_target_misdirection_targets_only_the_spell` |
+| `aee352b1` | a | stack | a spell targeting a spell can be changed to any other spell on the stack, one resolving before it too | `cards_doomsday_b::cr_115_7a_daze_redirected_onto_another_spell` |
+| `83bf218e` | a | stack | change the target checks only that the spell has a single target (115.9a), not its legality | `cards_doomsday_b::cr_115_9a_a_spell_with_a_single_target` |
+| `9a4256c2` | a | stack | change the target targets only the spell it changes, not its old or new target | `cards_doomsday_b::cr_702_21a_the_new_target_becomes_a_target_misdirection_targets_only_the_spell` |
+| `1f76d6f6` | a | stack | the new target may be this spell itself: it is on the stack as the new target is chosen | `cards_doomsday_b::cr_115_7a_force_of_will_redirected_onto_misdirection_itself_fizzles` |
+| `2ef42b09` | a | stack | a spell on the stack can not be made to target itself (115.5) | `cards_doomsday_b::cr_115_7a_force_of_will_redirected_onto_misdirection_itself_fizzles` |
+| `130c9dd0` | a | stack | the spell is targeted as this is cast; its new target is chosen as this resolves | `cards_doomsday_b::cr_115_7a_misdirection_changes_lightning_bolts_target` |
+
+### Flusterstorm (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `c33f0cb3` | a | stack | each copy made by storm must be countered individually; countering the original doesn't stop the copies | `cards_doomsday_b::cr_707_10_countering_flusterstorm_leaves_its_copies`; `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
+| `158501c3` | a | stack | storm counts spells cast from any zone and even ones that were countered | `cards_doomsday_b::cr_702_40a_flusterstorm_storm_counts_every_spell_cast_before_it_this_turn`; `rulings_stack::storm_counts_spells_that_were_countered_and_every_players_spells_cr_702_40a` |
+| `500a78f9` | a | stack | storm copies go straight onto the stack uncast, and don't count toward other storm spells cast later | `cards_doomsday_b::cr_702_40a_flusterstorm_storm_counts_every_spell_cast_before_it_this_turn`; `cards_m7b_stack3::brain_freeze_copies_may_get_new_targets_and_are_not_cast_cr_707_10` |
+| `543beb2e` | a | stack | the triggered ability that makes storm copies can itself be countered, preventing any copies | `cards_doomsday_b::cr_702_40a_a_countered_storm_trigger_makes_no_copies`; `rulings_stack::a_countered_storm_trigger_makes_no_copies_cr_702_40a` |
+| `bf7e6c38` | a | stack | each storm copy may be given new targets independently of the others | `cards_doomsday_b::cr_702_40a_flusterstorm_storm_counts_every_spell_cast_before_it_this_turn`; `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
+
+### Cavern of Souls (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `919d28a6` | a | mana | Cavern mana on any cost of the spell (kicker too, or a free cast's additional cost) makes it uncounterable | `cards_doomsday_b::cr_106_6_cavern_mana_on_a_kicker_cost_makes_the_spell_uncounterable` |
+| `dc0c0658` | a | other | choose a creature type: an existing creature type of 205.3m only, no card type | `cards_doomsday_b::cr_614_12_cavern_chooses_one_of_the_367_creature_types_as_it_enters` |
+| `919d28a6` | a | mana | Cavern mana on any cost of the spell (kicker too, or a free cast's additional cost) makes it uncounterable | `cards_doomsday_b::cr_106_6_cavern_mana_on_a_kicker_cost_makes_the_spell_uncounterable` |
+| `dc0c0658` | a | other | choose a creature type: an existing creature type of 205.3m only, no card type | `cards_doomsday_b::cr_614_12_cavern_chooses_one_of_the_367_creature_types_as_it_enters` |
 
 ## Cards without rulings (172)
 

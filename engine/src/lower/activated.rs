@@ -603,7 +603,7 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
     use cats::Effect as E;
     let mut damage_to_you = 0u8;
     let mut sac_if_no = None;
-    let (mut only, mut uncounterable) = (0u8, false);
+    let (mut only, mut uncounterable): (crate::db::Spend, bool) = (0, false);
     let mut haste = false;
     let mut opp_life = 0u8;
     let main = match e {
@@ -690,6 +690,29 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             if uncounterable && !matches!(prod, ManaProd::One(_)) {
                 l.unsupported("AddManaToPool.makes_spell_uncounterable(several mana)");
             }
+            prod
+        }
+        // "Add one mana of any color. Spend this mana only to cast a creature
+        // spell of the chosen type, and that spell can't be countered."
+        // (Cavern of Souls; CR 106.6, ENGINE.md 110.2.)
+        E::AddAnyColorManaForChosenCreatureType(nodes::AddAnyColorManaForChosenCreatureType {
+            produces,
+            spend_restriction,
+            grants_haste_to_creature_spell,
+            makes_spell_uncounterable,
+        }) => {
+            let prod = lower_produces(l, "AddAnyColorManaForChosenCreatureType.produces", produces)?;
+            if prod != ManaProd::One(COLORS) {
+                l.unsupported("AddAnyColorManaForChosenCreatureType.produces(not one mana of any color)");
+            }
+            if spend_restriction.is_some() || *grants_haste_to_creature_spell {
+                l.unsupported("AddAnyColorManaForChosenCreatureType(another restriction or haste)");
+            }
+            if !*makes_spell_uncounterable {
+                l.unsupported("AddAnyColorManaForChosenCreatureType.makes_spell_uncounterable(false)");
+            }
+            only = crate::db::SPEND_CHOSEN_CREATURE_TYPE;
+            uncounterable = true;
             prod
         }
         // "Add X mana of any one color, where X is the number of charge

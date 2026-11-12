@@ -1,5 +1,6 @@
-"""Supported cube cards that no card test names (engine/tests, excluding the support, az, fuzz,
-perf and smoke suites). Run from the repo root: python tools/untested_cards.py"""
+"""Supported cube cards, and the legacy cards of constructed play (engine/src/az/legacy_cards.txt,
+every one supported: CardDb::constructed), that no card test names (engine/tests, excluding the
+support, az, fuzz, perf and smoke suites). Run from the repo root: python tools/untested_cards.py"""
 import glob
 import os
 import re
@@ -7,6 +8,7 @@ import re
 src = open('engine/tests/support.rs', encoding='utf-8').read()
 m = re.search(r'const SUPPORTED[^=]*=\s*&\[(.*?)\];', src, re.S)
 names = re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1))
+names += [l.strip() for l in open('engine/src/az/legacy_cards.txt', encoding='utf-8') if l.strip()]
 tests = ''
 for f in glob.glob('engine/tests/*.rs') + glob.glob('engine/tests/common/*.rs'):
     if os.path.basename(f) in ('support.rs', 'az.rs', 'fuzz.rs', 'perf.rs', 'smoke.rs'):

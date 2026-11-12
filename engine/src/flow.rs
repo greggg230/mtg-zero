@@ -89,7 +89,10 @@ pub(crate) enum Task {
     ManaNow { src: Src, step: crate::decision::NumberStep },
     /// (`only`: the mana's spending restriction, kept in the pool, CR
     /// 106.6; ENGINE.md 99.12.)
-    ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]>, only: u8, page: crate::decision::Page },
+    ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]>, only: crate::db::Spend, page: crate::decision::Page },
+    /// "As this enters, choose a creature type" (CR 614.12, 205.3m) for
+    /// `card`, its number's `step` (`Game::ask_number`; ENGINE.md 110.2).
+    ChooseCreatureType { card: CardIdx, step: crate::decision::NumberStep },
     /// Mana abilities activated with priority (`DecisionKind::ActivateMana`;
     /// `card`: the permanent whose ability is asked next; `again`: one was
     /// activated, so `PASS` ends it; ENGINE.md 100.4.3).
@@ -381,6 +384,7 @@ impl Game {
             Task::ActivateMana { p, card, again } => self.activate_mana(p, card, again),
             Task::ManaNowCosts { src, sac, x, taps } => self.mana_now_costs(src, sac, x, taps),
             Task::AsEnters { card, page } => self.as_enters(card, page),
+            Task::ChooseCreatureType { card, step } => self.choose_creature_type(card, step),
             Task::Devour { card, picked } => self.devour(card, picked),
             Task::Delve { id } => self.delve(id),
             Task::EnterByDiscard { id } => self.enter_by_discard(id),

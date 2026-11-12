@@ -96,8 +96,17 @@ pub fn low(t: Tag) -> ManaMask {
 /// The purposes a mana ability's `only` restricts its mana to, as a unit's
 /// tag bits (its rider, "that spell can't be countered", is no purpose).
 #[inline]
-pub fn restriction(only: u8) -> Tag {
-    ((only & !crate::db::MANA_UNCOUNTERABLE) as Tag) << 8
+pub fn restriction(only: crate::db::Spend) -> Tag {
+    // (A restriction to creature spells of the type its source chose: a
+    // unit only of a payment for a creature spell of that type, `spendable`,
+    // where it pays only the spell's cost, never a mana ability's within the
+    // payment: `FOR_COST`; ENGINE.md 110.2. Of a source that chose no type it
+    // is spendable on nothing, so it never becomes a unit.)
+    if only & crate::db::SPEND_CHOSEN_CREATURE_TYPE != 0 {
+        assert!(crate::doomsday_b::type_of(only).is_some(), "mana restricted to the chosen creature type of a source that chose none is spendable on nothing");
+        return (FOR_COST as Tag) << 8;
+    }
+    (allow_purposes(only) as Tag) << 8
 }
 
 /// May the unit tagged `unit` be spent on the need tagged `need` (CR 106.6:
@@ -430,22 +439,31 @@ impl ManaPool {
 /// Workshop's {C} and Chromatic Star's {1}; Sunken Citadel's mana, which
 /// pays only a land's ability), the generic pips are needs as well and the
 /// answer is an exact matching (`payable_restricted`).
-pub fn payable(cost: &ManaCost, allow: u8, chosen: &[Tag], available: &[Tag]) -> bool {
+pub fn payable(cost: &ManaCost, allow: crate::db::Spend, chosen: &[Tag], available: &[Tag]) -> bool {
     payable_iter(cost, allow, &[], chosen, available.iter().copied(), available.len())
 }
 
 /// [`payable`] with `extra` needs besides the cost (one mana each, of a
 /// type in the tag; `NOT_MADE` ones: the mana costs of mana abilities
 /// activated in the payment, with the purposes paying them is).
-pub fn payable_n(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], available: &[Tag]) -> bool {
+pub fn payable_n(cost: &ManaCost, allow: crate::db::Spend, extra: &[Tag], chosen: &[Tag], available: &[Tag]) -> bool {
     payable_iter(cost, allow, extra, chosen, available.iter().copied(), available.len())
 }
 
 /// The tag of the needs of a cost paid for purposes `allow` (its pips with
 /// `FOR_COST`, `Tag`).
 #[inline]
-pub fn cost_need(mask: ManaMask, allow: u8) -> Tag {
-    tag(mask, allow | FOR_COST)
+pub fn cost_need(mask: ManaMask, allow: crate::db::Spend) -> Tag {
+    tag(mask, allow_purposes(allow) | FOR_COST)
+}
+
+/// A payment's purposes `allow` as a need's tag bits: the `SPEND_*` bits
+/// 0-6. (A creature-type slot, ENGINE.md 110.2, is no tag purpose: mana
+/// restricted to one pays only the cost the payment is for, `FOR_COST`,
+/// once the payment allows it: `restriction`.)
+#[inline]
+pub fn allow_purposes(allow: crate::db::Spend) -> u8 {
+    (allow & 0x7F) as u8
 }
 
 /// [`payable`] over any sequence of available tags (no allocation: this
@@ -461,7 +479,7 @@ pub fn cost_need(mask: ManaMask, allow: u8) -> Tag {
 /// (docs/shortcuts.md 13.15: no such mana paid such a cost).
 fn payable_iter(
     cost: &ManaCost,
-    allow: u8,
+    allow: crate::db::Spend,
     extra: &[Tag],
     chosen: &[Tag],
     available: impl Iterator<Item = Tag> + Clone,
@@ -559,7 +577,7 @@ fn units_count(k: u64) -> u32 {
 
 /// [`payable_iter`] with the chained abilities' order given (their chain
 /// ids' ranks).
-fn payable_ordered(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], available: impl Iterator<Item = Tag> + Clone, mode: Chains) -> bool {
+fn payable_ordered(cost: &ManaCost, allow: crate::db::Spend, extra: &[Tag], chosen: &[Tag], available: impl Iterator<Item = Tag> + Clone, mode: Chains) -> bool {
     // (A restriction that keeps some unit from some need: the exact
     // matching. Otherwise every unit may pay every need it meets in type.)
     let main = cost_need(0, allow);
@@ -811,12 +829,12 @@ impl Budget {
 }
 
 /// [`payable`] within a [`Budget`] for the available units used.
-pub fn payable_within(cost: &ManaCost, allow: u8, chosen: &[Tag], available: &[Unit], budget: Budget) -> bool {
+pub fn payable_within(cost: &ManaCost, allow: crate::db::Spend, chosen: &[Tag], available: &[Unit], budget: Budget) -> bool {
     payable_within_n(cost, allow, &[], chosen, available, budget)
 }
 
 /// [`payable_within`] with `extra` needs (see [`payable_n`]).
-pub fn payable_within_n(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag], available: &[Unit], budget: Budget) -> bool {
+pub fn payable_within_n(cost: &ManaCost, allow: crate::db::Spend, extra: &[Tag], chosen: &[Tag], available: &[Unit], budget: Budget) -> bool {
     if available.iter().try_fold(budget, |b, u| if u.budgeted() { b.take(u, 1) } else { Some(b) }).is_some() {
         return payable_iter(cost, allow, extra, chosen, available.iter().map(|u| u.mask), available.len());
     }
@@ -836,7 +854,7 @@ pub fn payable_within_n(cost: &ManaCost, allow: u8, extra: &[Tag], chosen: &[Tag
     #[allow(clippy::too_many_arguments)]
     fn go(
         cost: &ManaCost,
-        allow: u8,
+        allow: crate::db::Spend,
         extra: &[Tag],
         chosen: &[Tag],
         units: &mut Vec<Tag>,
@@ -959,8 +977,8 @@ mod tests {
     /// the cost are needs then (`payable_restricted`).
     #[test]
     fn restricted_units_pay_only_their_purposes() {
-        let land = tag(1 << U, crate::db::SPEND_LAND_ABILITY);
-        let need_land = tag(TYPES | NOT_MADE, crate::db::SPEND_LAND_ABILITY);
+        let land = tag(1 << U, crate::db::SPEND_LAND_ABILITY as u8);
+        let need_land = tag(TYPES | NOT_MADE, crate::db::SPEND_LAND_ABILITY as u8);
         let need_other = tag(TYPES | NOT_MADE, 0);
         let one = ManaCost::parse("{1}").unwrap();
         assert!(payable_n(&one, 0, &[need_land], &[land], &[MR]), "the land's need, the Mountain the {{1}}");

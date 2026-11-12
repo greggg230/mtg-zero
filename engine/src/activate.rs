@@ -572,7 +572,7 @@ impl Game {
         mana: &crate::mana::ManaCost,
         classes: &[Class],
         exclude: Option<CardIdx>,
-        allow: u8,
+        allow: crate::doomsday_b::Allow,
         loyalty: i32,
         cast: bool,
         granter: Option<CardIdx>,
@@ -629,7 +629,7 @@ impl Game {
         _zero_mana_taps: bool,
         // The spending restrictions the payment meets (`Keep::allow`: an
         // ability's source, ENGINE.md 99.12).
-        allow: u8,
+        allow: crate::doomsday_b::Allow,
     ) -> bool {
         let pl = &self.players[p as usize];
         if (cost.life as i64) > pl.life {
@@ -975,7 +975,7 @@ impl Game {
             exclude,
             life: cost.life,
             reserves,
-            allow: 0,
+            allow: Default::default(),
             spell: None,
             taps: None,
             committed: Vec::new(),
@@ -1762,7 +1762,8 @@ impl Game {
             let picks = if matches!(prod, crate::db::ManaProd::ComboX { .. }) { x } else { 1 };
             for _ in 0..picks {
                 // (Its restriction and its rider go with the mana, CR 106.6.)
-                let only = ad.mana().map_or(0, |m| m.only | if m.uncounterable { crate::db::MANA_UNCOUNTERABLE } else { 0 });
+                // (Of its source's chosen creature type: ENGINE.md 110.2.)
+                let only = ad.mana().map_or(0, |m| self.spend_of_source(src.card, m.only) | if m.uncounterable { crate::db::MANA_UNCOUNTERABLE } else { 0 });
                 self.agenda.push(Task::ManaNowPick { p, prods: prods.clone(), only, page: crate::decision::Page::FIRST });
             }
         }
@@ -1788,7 +1789,7 @@ impl Game {
             .fold(0, |m, v| (0..6).filter(|&t| v[t] > 0).fold(m, |m, t| m | (1 << t)))
     }
 
-    pub(crate) fn mana_now_pick(&mut self, p: PlayerId, prods: Vec<[u8; 6]>, only: u8, page: crate::decision::Page) {
+    pub(crate) fn mana_now_pick(&mut self, p: PlayerId, prods: Vec<[u8; 6]>, only: crate::db::Spend, page: crate::decision::Page) {
         match self.answer.take() {
             Some(Choice::Number(k)) => self.add_restricted_mana(p, &prods[k as usize], only),
             Some(Choice::Item(k)) => self.add_restricted_mana(p, &prods[k as usize], only),
@@ -1823,6 +1824,13 @@ impl Game {
             return;
         }
         let p = o.controller;
+        // "As this enters, choose a creature type" (ENGINE.md 110.2): asked,
+        // then the rest of this.
+        if self.def_of(card).dd_b.chooses_creature_type && self.chosen_creature_type(card).is_none() {
+            self.agenda.push(Task::AsEnters { card, page: crate::decision::Page::FIRST });
+            self.agenda.push(Task::ChooseCreatureType { card, step: crate::decision::NumberStep::FIRST });
+            return;
+        }
         // "As this enters, choose a color" (EoE W6).
         if self.def_of(card).w6.chooses_color && self.chosen_land_color(card) == 0 {
             self.w6_choose_color_as_enters(card, p);
