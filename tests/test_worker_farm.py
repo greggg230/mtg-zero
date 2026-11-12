@@ -1,0 +1,241 @@
+"""mtgz-worker's phase-1 jobs (zero-farm; docs/ENGINE.md 114.10-114.12): fuzz jobs over `aw/1` (the engine's fuzz
+loops in supervised chunk processes), the reproduction string tools/fuzz_farm.py would write, the per-machine
+self-test (`reference`), and - with a fuzz-profile build - injected panics, aborts, stack overflows and hangs
+isolated to their seed while the job goes on. Skipped without a built worker (`cargo build --release -p
+mtgz_worker`; env MTGZ_WORKER), the self-test without onnx/onnxscript/onnxruntime, the fault tests without the
+fuzz-profile build (`cargo build --profile fuzz -p mtgz_worker`; env MTGZ_WORKER_FUZZ)."""
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+
+import numpy as np
+import pytest
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, 'tools'))
+
+
+def _exe(var, profile):
+    exe = 'mtgz-worker.exe' if os.name == 'nt' else 'mtgz-worker'
+    cands = [os.environ.get(var, '')]
+    if os.environ.get('CARGO_TARGET_DIR'):
+        cands.append(os.path.join(os.environ['CARGO_TARGET_DIR'], profile, exe))
+    cands += [os.path.join(ROOT, 'target', profile, exe), os.path.join('E:/cargo-target/mtg-zero/farm', profile, exe)]
+    return next((c for c in cands if c and os.path.exists(c)), None)
+
+
+WORKER = _exe('MTGZ_WORKER', 'release')
+FUZZ_WORKER = _exe('MTGZ_WORKER_FUZZ', 'fuzz')
+pytestmark = pytest.mark.skipif(WORKER is None, reason='mtgz-worker is not built (cargo build --release -p mtgz_worker)')
+
+
+class Serve:
+    """`mtgz-worker serve` driven as the agent drives it: JSON lines in, events out."""
+
+    def __init__(self, exe, cwd, env=None):
+        e = dict(os.environ)
+        e.update(env or {})
+        self.p = subprocess.Popen([exe, 'serve'], cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  text=True, encoding='utf-8', env=e)
+        self.events = []
+        self.err = []
+        self.t = threading.Thread(target=self._read, daemon=True)
+        self.t.start()
+        threading.Thread(target=lambda: self.err.extend(self.p.stderr), daemon=True).start()
+
+    def _read(self):
+        for ln in self.p.stdout:
+            if ln.strip():
+                self.events.append(json.loads(ln))
+
+    def send(self, v):
+        self.p.stdin.write(json.dumps(v) + '\n')
+        self.p.stdin.flush()
+
+    def wait_for(self, ev, timeout=600, n=1):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            got = [e for e in self.events if e.get('ev') == ev]
+            if len(got) >= n:
+                return got[n - 1]
+            if self.p.poll() is not None and not self.t.is_alive():
+                break
+            time.sleep(0.05)
+        raise AssertionError(f'no {ev} event: {self.events[-5:]} {"".join(self.err)[-2000:]}')
+
+    def finish(self, timeout=600):
+        self.p.wait(timeout)
+        self.t.join(10)
+        return self.p.returncode
+
+
+def fuzz_job(tmp_path, **kw):
+    j = {'op': 'job', 'lease_id': 'l_test', 'kind': 'fuzz', 'mode': 'games', 'env': {}, 'first': 10_000_000, 'count': 30,
+         'threads': 2, 'out_dir': 'out', 'model': None, 'reference': None, 'runtime_dir': None, 'chunk': 10}
+    j.update(kw)
+    return j
+
+
+def test_a_fuzz_job_over_aw1(tmp_path):
+    w = Serve(WORKER, tmp_path)
+    hello = w.wait_for('hello', 60)
+    assert hello['aw'] == 1 and hello['kinds'] == ['selfplay', 'fuzz'] and hello['game'] == 'mtg'
+    w.send(fuzz_job(tmp_path))
+    end = w.wait_for('end')
+    assert w.finish() == 0
+    assert end['reason'] == 'done' and end['unfinished'] == {'seeds': []} and end['stats']['seeds'] == 30, end
+    assert sum(e['n'] for e in w.events if e['ev'] == 'fin') == 30
+    assert not [e for e in w.events if e['ev'] in ('failure', 'error')]
+    final = json.loads((tmp_path / 'out' / 'fuzz-final.json').read_text(encoding='utf-8'))
+    assert final['final'] is True and final['done'] == 30 and final['seeds'] == [[10_000_000, 10_000_030]] and final['failures'] == []
+    # the agent builds and uploads its own summary from `end` (agent 0.1.3): the worker announces none unless asked
+    assert not [e for e in w.events if e['ev'] in ('records', 'shard')]
+
+
+def test_fuzz_jobs_refuse_what_their_loop_would_ignore(tmp_path):
+    for mode, env, why in [('delver-matches', {'FUZZ_POOL': 'delver'}, 'games only'),
+                           ('games', {'FUZZ_POOL': 'eoe'}, "fuzz_farm.py's"),
+                           ('x-events', {'FUZZ_POOL': 'eoe'}, 'reads no settings'),
+                           ('eoe-games', {'FUZZ_POOL': 'eoe', 'FUZZ_DECK_TILT': '2'}, 'would be ignored'),
+                           ('x-games', {'FUZZ_CHANCE': '0'}, 'a number >= 1'),
+                           ('nonsense', {}, '<name>-games'),
+                           ('x-games', {'ZERO_FARM_TEST_FAULT': 'panic:1'}, 'test faults')]:
+        w = Serve(WORKER, tmp_path)
+        w.wait_for('hello', 60)
+        w.send(fuzz_job(tmp_path, mode=mode, env=env))
+        e = w.wait_for('error', 60)
+        assert w.finish() == 1 and e['fatal'] is True and why in e['message'], (mode, env, e)
+
+
+def test_the_repro_is_fuzz_farms(tmp_path):
+    import fuzz_farm as FF
+    sha = '0123456789abcdef0123456789abcdef01234567'
+    for mode, m in FF.MODES.items():
+        if m['kind'] not in ('fuzz', 'draft'):
+            continue
+        args = [WORKER, 'fuzz-check', '--mode', mode, '--seed', '10450007', '--commit', sha, '--profile', 'release']
+        for k, v in m['env'].items():
+            args += ['--env', f'{k}={v}']
+        p = subprocess.run(args, capture_output=True, text=True, encoding='utf-8', timeout=120)
+        assert p.returncode == 0, p.stderr
+        got = json.loads(p.stdout)
+        want = FF.repro_of(FF.Job(mode, 10450007, 1), 10450007, sha)
+        assert got['repro'] == want, (mode, got['repro'], want)
+        assert got['min_chunk'] == m['min'], mode
+
+
+def test_yield_resume_and_quit_keep_the_seeds_that_passed(tmp_path):
+    w = Serve(WORKER, tmp_path)
+    w.wait_for('hello', 60)
+    w.send(fuzz_job(tmp_path, count=4000, chunk=1000, threads=2))
+    w.wait_for('fin', 120)
+    t0 = time.time()
+    w.send({'op': 'yield'})
+    w.wait_for('yielded', 10)
+    assert time.time() - t0 < 2.0
+    time.sleep(0.5)                                   # (a fin of seeds that passed before the suspension may follow)
+    n0 = sum(e['n'] for e in w.events if e['ev'] == 'fin')
+    time.sleep(2.0)
+    assert sum(e['n'] for e in w.events if e['ev'] == 'fin') == n0  # suspended: nothing plays
+    w.send({'op': 'resume'})
+    w.wait_for('resumed', 10)
+    w.wait_for('fin', 120, n=len([e for e in w.events if e['ev'] == 'fin']) + 1)
+    w.send({'op': 'quit'})
+    end = w.wait_for('end', 120)
+    assert w.finish() == 0 and end['reason'] == 'quit'
+    done = sum(e['n'] for e in w.events if e['ev'] == 'fin')
+    left = sum(b - a for a, b in end['unfinished']['seeds'])
+    assert 0 < done < 4000 and done + left == 4000, (done, left)
+
+
+@pytest.mark.skipif(FUZZ_WORKER is None, reason='no fuzz-profile mtgz-worker (cargo build --profile fuzz -p mtgz_worker)')
+def test_crashing_and_hanging_seeds_are_isolated_and_the_job_goes_on(tmp_path):
+    f0 = 10_000_000
+    faults = f'panic:{f0 + 3},abort:{f0 + 11},overflow:{f0 + 17},hang:{f0 + 26}'
+    w = Serve(FUZZ_WORKER, tmp_path, env={'ZERO_FARM_ALLOW_TEST_FAULTS': '1'})
+    hello = w.wait_for('hello', 60)
+    assert hello['kinds'] == ['fuzz']
+    w.send(fuzz_job(tmp_path, count=30, chunk=30, threads=2, env={'ZERO_FARM_TEST_FAULT': faults}, seed_timeout_s=5))
+    end = w.wait_for('end', 1200)
+    assert w.finish() == 0
+    fails = {e['seed']: e for e in w.events if e['ev'] == 'failure'}
+    assert sorted(fails) == [f0 + 3, f0 + 11, f0 + 17, f0 + 26], fails.keys()
+    assert end['reason'] == 'done' and end['unfinished'] == {'seeds': []} and end['stats']['seeds'] == 30
+    p = fails[f0 + 3]
+    assert p['site'].endswith('crates/worker/src/fuzz.rs:' + p['site'].rsplit(':', 1)[1]) and 'an injected panic' in p['panic']
+    assert fails[f0 + 11]['site'].startswith('crash exit ') and fails[f0 + 17]['site'].startswith('crash exit ')
+    assert fails[f0 + 26]['site'] == 'HANG games' and 'no exit after' in fails[f0 + 26]['panic']
+    for s, e in fails.items():
+        assert e['mode'] == 'games' and f'FUZZ_FIRST={s} FUZZ_GAMES=1 FUZZ_LOG=1 cargo test --profile fuzz' in e['repro'], e['repro']
+        assert e['repro'].startswith('(at ') and f'ZERO_FARM_TEST_FAULT={faults}' in e['repro']
+
+
+def _onnx_ok():
+    try:
+        import onnx  # noqa: F401
+        import onnxruntime  # noqa: F401
+        import onnxscript  # noqa: F401
+        import torch  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+@pytest.mark.skipif(not _onnx_ok(), reason='needs torch, onnx, onnxscript and onnxruntime')
+def test_the_selftest_guards_the_network(tmp_path):
+    """A small random MTG network: its reference set from real driver batches (the worker's own recording) with
+    torch's answers; through `serve` the worker answers it before playing (selftest ok, a game, the shard), and with
+    one prior of the set off by 1e-3 it reports the difference and stops with a fatal error before any game."""
+    import onnxruntime
+    import torch
+    import mtgz.az  # noqa: F401
+    from zero import games as G, net as N, onnx_export as OX, onnx_parity as OP
+    from zero import run as R
+    ns = type('A', (), {k: None for k in R.DEFAULTS})()
+    cfg = R.resolve_config(ns, {'preset': 'mtg-smoke'})
+    cfg.update(conc=4, threads=1, groups=1)
+    cp = tmp_path / 'config.json'
+    cp.write_text(json.dumps(cfg), encoding='utf-8')
+    rec = tmp_path / 'batches.npz'
+    p = subprocess.run([WORKER, 'selfplay', '--settings', str(cp), '--uniform', '--games', '2', '--threads', '1', '--out', str(tmp_path / 'u'),
+                        '--record-batches', '200', '--record-file', str(rec)], capture_output=True, text=True, encoding='utf-8', timeout=1800)
+    assert p.returncode == 0, p.stderr[-2000:]
+    torch.manual_seed(3)
+    m = N.make_net(G.info(cfg['game']), cfg['game'], arch='tokens', hidden=32, blocks=1, heads=2)
+    for q in m.parameters():
+        q.data.add_(0.2 * torch.randn_like(q))
+    info = {'checkpoint': 'test/1', 'checkpoint_sha256': '9f' * 32, 'checkpoint_iter': '1'}
+    OX.export(m, str(tmp_path / 'model.onnx'), 'packed', info)
+    ref = tmp_path / 'reference.npz'
+    meta = OX.write_reference(m, [OP.Rows.load(str(rec))], str(ref), 64, info)
+    assert meta['rows'] == 64 and OX.check_reference(str(tmp_path / 'model.onnx'), str(ref), 1)['max_abs'] < 2e-5
+    z = dict(np.load(ref))
+    z['priors'] = z['priors'].copy()
+    z['priors'][5] += 1e-3
+    with open(tmp_path / 'bad.npz', 'wb') as f:
+        np.savez(f, **z)
+    rt = os.path.join(os.path.dirname(onnxruntime.__file__), 'capi')
+    settings = json.loads(cp.read_text(encoding='utf-8'))
+    for name, reference, ok in (('good', ref, True), ('bad', tmp_path / 'bad.npz', False)):
+        d = tmp_path / name
+        d.mkdir()
+        w = Serve(WORKER, d)
+        w.wait_for('hello', 60)
+        w.send({'op': 'job', 'lease_id': 'l_' + name, 'kind': 'selfplay', 'settings': settings, 'games': 1, 'gid_base': 0, 'seed': 5,
+                'model': str(tmp_path / 'model.onnx'), 'reference': str(reference), 'threads': 1, 'out_dir': 'out', 'runtime_dir': rt})
+        st = w.wait_for('selftest', 300)
+        assert st['provider'] == 'cpu' and st['rows'] == 64 and st['ok'] is ok, st
+        if ok:
+            assert st['max_abs'] < 2e-5
+            end = w.wait_for('end', 1200)
+            assert w.finish() == 0 and end['reason'] == 'done' and end['stats']['selftest_max_abs'] == st['max_abs']
+            assert [e for e in w.events if e['ev'] == 'shard']
+            assert w.events.index(st) < w.events.index(next(e for e in w.events if e['ev'] == 'fin'))
+        else:
+            assert st['items']['priors'] > 2e-5 and abs(st['max_abs'] - 1e-3) < 1e-4
+            e = w.wait_for('error', 300)
+            assert w.finish() == 1 and e['fatal'] is True and 'selftest failed' in e['message']
+            assert not [x for x in w.events if x['ev'] in ('fin', 'shard')] and not (d / 'out').exists()

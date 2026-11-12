@@ -2,7 +2,7 @@
 name = "mtgz_worker"
 version = "0.1.0"
 edition = "2021"
-description = "mtgz-worker: MTG Zero's native self-play worker for zero-farm (zero-core's zero_worker + the engine; docs/ENGINE.md 114)"
+description = "mtgz-worker: MTG Zero's native worker for zero-farm - self-play and the engine's fuzz loops (zero-core's zero_worker + the engine; docs/ENGINE.md 114)"
 publish = false
 
 [[bin]]
@@ -16,3 +16,4 @@ engine = { path = "../engine" }
 # the process-wide allocator, as the Python module's (the Windows heap is slow and erratic for the
 # engine's small allocations: docs/ENGINE.md 17)
 mimalloc = { version = "0.1", default-features = false }
+serde_json = "1"

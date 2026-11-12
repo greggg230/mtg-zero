@@ -198,6 +198,7 @@ version = "0.1.0"
 dependencies = [
  "engine",
  "mimalloc",
+ "serde_json",
  "zero_search",
  "zero_worker",
 ]

@@ -17,6 +17,9 @@ pub mod db;
 pub mod decision;
 mod flow;
 pub mod game;
+/// The fuzz loops (games, matches, draft events) as library code: the fuzz tests and zero-farm's
+/// worker call them (docs/ENGINE.md 114.10).
+pub mod fuzz;
 pub mod hidden;
 pub mod ids;
 pub mod lower;
