@@ -24,5 +24,47 @@
   "name": "Prismari Charm",
   "oracle_id": "c3c25a2c-f71c-4cb7-9117-0bcda9248bfd",
   "rulings": []
+ },
+ {
+  "name": "Edge of Autumn",
+  "oracle_id": "42d86827-6459-42fc-86b6-6eb055604c36",
+  "rulings": [
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Edge of Autumn checks how many lands you control as it resolves. If you control five or more lands, it simply does nothing as it resolves."
+   }
+  ]
+ },
+ {
+  "name": "Street Wraith",
+  "oracle_id": "bd7867f4-4f58-49c2-9c24-a124dfdb506d",
+  "rulings": []
+ },
+ {
+  "name": "Leyline of the Void",
+  "oracle_id": "f4e32fc1-1b8d-441e-8e76-71f19f98e925",
+  "rulings": [
+   {
+    "date": "2024-09-20",
+    "source": "wotc",
+    "text": "A player's \"opening hand\" is the hand of cards the player has after all players have taken mulligans. If players have any cards in hand that allow actions to be taken with them from a player's opening hand, the starting player takes all such actions first in any order, followed by each other player in turn order. Then the first turn begins."
+   },
+   {
+    "date": "2024-09-20",
+    "source": "wotc",
+    "text": "If your opponent discards a card while you control Leyline of the Void, abilities that check whether a card is discarded (such as Hollow One, or a madness ability of the discarded card) still work, even though that card never reaches that player's graveyard. In addition, spells or abilities that check the characteristics of the discarded card can find that card in exile."
+   },
+   {
+    "date": "2024-09-20",
+    "source": "wotc",
+    "text": "Tokens can still die while Leyline of the Void is on the battlefield."
+   },
+   {
+    "date": "2024-09-20",
+    "source": "wotc",
+    "text": "While Leyline of the Void is on the battlefield, nontoken creatures your opponents control won't die. They'll be exiled instead. Abilities that would trigger when those creatures die won't trigger."
+   }
+  ]
  }
 ]

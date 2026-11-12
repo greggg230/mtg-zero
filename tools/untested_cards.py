@@ -1,5 +1,6 @@
-"""Supported cube cards that no card test names (engine/tests, excluding the support, az, fuzz,
-perf and smoke suites). Run from the repo root: python tools/untested_cards.py"""
+"""Supported cube cards, and the legacy cards of constructed play (engine/src/az/legacy_cards.txt,
+ENGINE.md 54, 110), that no card test names (engine/tests, excluding the support, az, fuzz, perf and
+smoke suites). Run from the repo root: python tools/untested_cards.py"""
 import glob
 import os
 import re
@@ -16,3 +17,7 @@ basics = {'Plains', 'Island', 'Swamp', 'Mountain', 'Forest'}
 untested = [n for n in names if n.replace('\\"', '"') not in tests and n not in basics]
 print(f'{len(names)} supported, {len(untested)} named by no card test')
 print('\n'.join(untested))
+legacy = [l.strip() for l in open('engine/src/az/legacy_cards.txt', encoding='utf-8') if l.strip()]
+untested_legacy = [n for n in legacy if n not in tests]
+print(f'{len(legacy)} legacy cards, {len(untested_legacy)} named by no card test')
+print('\n'.join(untested_legacy))

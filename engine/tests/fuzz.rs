@@ -297,6 +297,10 @@ enum PoolMode {
     Delver,
     Eoe,
     Sealed,
+    /// `FUZZ_POOL=dd_c` (ENGINE.md 110.3): the Legacy Doomsday 60 with lane C's
+    /// cards (Edge of Autumn, Street Wraith, Leyline of the Void) against the
+    /// Delver 60 and itself.
+    DoomsdayC,
 }
 
 fn pool_mode() -> PoolMode {
@@ -308,7 +312,8 @@ fn pool_mode() -> PoolMode {
         Ok("delver") => PoolMode::Delver,
         Ok("eoe") => PoolMode::Eoe,
         Ok("sealed") => PoolMode::Sealed,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"eoe\" or \"sealed\")"),
+        Ok("dd_c") => PoolMode::DoomsdayC,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"eoe\", \"sealed\" or \"dd_c\")"),
     }
 }
 
@@ -326,6 +331,10 @@ fn delver_mode() -> bool {
 
 fn eoe_mode() -> bool {
     pool_mode() == PoolMode::Eoe
+}
+
+fn ddc_mode() -> bool {
+    pool_mode() == PoolMode::DoomsdayC
 }
 
 fn sealed_mode() -> bool {
@@ -670,7 +679,7 @@ fn check_forced_chance(g: &Game, seed: u64, step: usize) {
 /// The card table of the mode's games: the cube's and the custom test cards,
 /// or constructed play's (`FUZZ_POOL=delver`).
 fn game_db() -> &'static CardDb {
-    if delver_mode() {
+    if delver_mode() || ddc_mode() {
         CardDb::constructed()
     } else if eoe_mode() || sealed_mode() {
         CardDb::eoe()
@@ -683,6 +692,128 @@ fn game_db() -> &'static CardDb {
 fn delver_deck() -> Vec<u16> {
     let d = engine::az::constructed::Decklist::izzet_delver();
     engine::az::constructed::Decklist::ids(CardDb::constructed(), &d.main).unwrap()
+}
+
+/// `FUZZ_POOL=dd_c` (ENGINE.md 110.3): the Legacy Doomsday 60 (MTGGoldfish
+/// archetype "Legacy Doomsday", deck 8027957) with the cards no branch
+/// supports yet swapped out: Doomsday x4 -> Leyline of the Void x4 (from the
+/// sideboard: on the battlefield in many openings), Misdirection x2 -> Street
+/// Wraith (4 in all), Personal Tutor x2 -> Edge of Autumn (4 in all), Flow
+/// State -> Duress, Pact of Negation -> Fatal Push (both from the sideboard),
+/// Cavern of Souls -> Forest (green for Edge of Autumn's spell, fetchable).
+const DOOMSDAY_C: &[(u8, &str)] = &[
+    (1, "Swamp"),
+    (1, "Forest"),
+    (1, "Island"),
+    (4, "Underground Sea"),
+    (1, "Undercity Sewers"),
+    (1, "Flooded Strand"),
+    (1, "Misty Rainforest"),
+    (1, "Scalding Tarn"),
+    (1, "Verdant Catacombs"),
+    (4, "Polluted Delta"),
+    (4, "Lotus Petal"),
+    (1, "Lion's Eye Diamond"),
+    (4, "Dark Ritual"),
+    (4, "Brainstorm"),
+    (4, "Ponder"),
+    (1, "Consider"),
+    (4, "Force of Will"),
+    (2, "Daze"),
+    (2, "Thoughtseize"),
+    (1, "Duress"),
+    (1, "Fatal Push"),
+    (2, "Thassa's Oracle"),
+    (2, "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar"),
+    (4, "Edge of Autumn"),
+    (4, "Street Wraith"),
+    (4, "Leyline of the Void"),
+];
+
+fn doomsday_c_deck() -> Vec<u16> {
+    let db = CardDb::constructed();
+    let d: Vec<u16> =
+        DOOMSDAY_C.iter().flat_map(|&(n, name)| std::iter::repeat_n(db.expect_id(name).unwrap_or_else(|e| panic!("{e}")), n as usize)).collect();
+    assert_eq!(d.len(), 60);
+    d
+}
+
+/// `FUZZ_POOL=dd_c`: game `seed`'s decks: Doomsday against Delver (by `seed %
+/// 3`: 0 Doomsday in seat 0, 1 in seat 1) and the Doomsday mirror (2).
+fn ddc_decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
+    match seed % 3 {
+        0 => [(doomsday_c_deck(), Vec::new()), (delver_deck(), Vec::new())],
+        1 => [(delver_deck(), Vec::new()), (doomsday_c_deck(), Vec::new())],
+        _ => [(doomsday_c_deck(), Vec::new()), (doomsday_c_deck(), Vec::new())],
+    }
+}
+
+/// `FUZZ_POOL=dd_c`: lane C's cards cast and cycled (stack items, each once),
+/// games with a Leyline of the Void on the battlefield as the first turn
+/// begins (the opening-hand action) and at any time, games with a card of a
+/// player in exile while an opponent's Leyline is on the battlefield, and
+/// declare-blockers decisions facing an attacking Street Wraith whose
+/// defender controls a Swamp.
+static DDC_EDGE_CAST: AtomicU64 = AtomicU64::new(0);
+static DDC_EDGE_CYCLED: AtomicU64 = AtomicU64::new(0);
+static DDC_WRAITH_CAST: AtomicU64 = AtomicU64::new(0);
+static DDC_WRAITH_CYCLED: AtomicU64 = AtomicU64::new(0);
+static DDC_LEYLINE_OPENING: AtomicU64 = AtomicU64::new(0);
+static DDC_LEYLINE_GAMES: AtomicU64 = AtomicU64::new(0);
+static DDC_LEYLINE_EXILE_GAMES: AtomicU64 = AtomicU64::new(0);
+static DDC_SWAMPWALK_ATTACKS: AtomicU64 = AtomicU64::new(0);
+
+/// Per game (`FUZZ_POOL=dd_c`): what `count_ddc` has counted.
+#[derive(Default)]
+struct DdcSeen {
+    opening_checked: bool,
+    leyline: bool,
+    leyline_exile: bool,
+}
+
+fn count_ddc(g: &Game, seen: &mut Vec<u32>, s: &mut DdcSeen) {
+    for it in g.stack() {
+        if seen.contains(&it.id) {
+            continue;
+        }
+        seen.push(it.id);
+        match it.kind {
+            engine::game::StackKind::Spell { card } => match g.name(card) {
+                "Edge of Autumn" => DDC_EDGE_CAST.fetch_add(1, Ordering::Relaxed),
+                "Street Wraith" => DDC_WRAITH_CAST.fetch_add(1, Ordering::Relaxed),
+                _ => 0,
+            },
+            engine::game::StackKind::Ability { source, .. } => match g.db().def(g.obj(source.idx).def).name.as_str() {
+                "Edge of Autumn" => DDC_EDGE_CYCLED.fetch_add(1, Ordering::Relaxed),
+                "Street Wraith" => DDC_WRAITH_CYCLED.fetch_add(1, Ordering::Relaxed),
+                _ => 0,
+            },
+        };
+    }
+    let leylines: Vec<u8> = g.battlefield().iter().filter(|&&c| g.name(c) == "Leyline of the Void").map(|&c| g.obj(c).controller).collect();
+    if !s.opening_checked && g.turn().number >= 1 {
+        s.opening_checked = true;
+        if !leylines.is_empty() {
+            DDC_LEYLINE_OPENING.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    if !leylines.is_empty() && !s.leyline {
+        s.leyline = true;
+        DDC_LEYLINE_GAMES.fetch_add(1, Ordering::Relaxed);
+    }
+    if !s.leyline_exile && leylines.iter().any(|&q| g.exile_zone().iter().any(|&c| g.obj(c).owner != q)) {
+        s.leyline_exile = true;
+        DDC_LEYLINE_EXILE_GAMES.fetch_add(1, Ordering::Relaxed);
+    }
+    if g.kind() == Some(DecisionKind::DeclareBlockers) {
+        let d = g.turn().active ^ 1;
+        let swamp = g.db().subtype_id("Swamp");
+        if g.battlefield().iter().any(|&c| g.obj(c).attacking && g.name(c) == "Street Wraith")
+            && g.battlefield().iter().any(|&c| g.obj(c).controller == d && swamp.is_some_and(|s| g.has_subtype(c, s)))
+        {
+            DDC_SWAMPWALK_ATTACKS.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 }
 
 /// `FUZZ_POOL=delver`: Murktide Regents that resolved, and leave-the-graveyard
@@ -1091,6 +1222,9 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     if delver_mode() {
         return [(delver_deck(), Vec::new()), (delver_deck(), Vec::new())];
     }
+    if ddc_mode() {
+        return ddc_decks(seed);
+    }
     if eoe_mode() {
         return [(eoe_deck(&mut rng), Vec::new()), (eoe_deck(&mut rng), Vec::new())];
     }
@@ -1136,6 +1270,7 @@ fn play(seed: u64, checks: bool) -> Played {
     let exp = exponential_mode();
     let mut buf = Vec::new();
     let mut stack_seen: Vec<u32> = Vec::new();
+    let mut ddc_seen = DdcSeen::default();
     let (mut turn, mut turn_steps) = (g.turn().number, 0u64);
     while !g.is_over() {
         g.legal_actions(&mut legal);
@@ -1196,6 +1331,9 @@ fn play(seed: u64, checks: bool) -> Played {
         }
         if delver_mode() && !g.stack().is_empty() {
             count_delver(&g, &mut stack_seen);
+        }
+        if ddc_mode() {
+            count_ddc(&g, &mut stack_seen, &mut ddc_seen);
         }
         assert!(steps < 100_000, "seed {seed}: game does not end
 {}", g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
@@ -1551,6 +1689,18 @@ fn fuzz_random_games() {
         println!("FUZZ_POOL=delver: Murktide Regent cast {m} times, its leave-the-graveyard triggers {t}, Prismari Charm cast {c} times");
         if n >= 200 {
             assert!(m > 0 && t > 0 && c > 0, "the legacy cards weren't played: {m} {t} {c}");
+        }
+    }
+    if ddc_mode() {
+        let ld = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let (ec, ey, wc, wy) = (ld(&DDC_EDGE_CAST), ld(&DDC_EDGE_CYCLED), ld(&DDC_WRAITH_CAST), ld(&DDC_WRAITH_CYCLED));
+        let (lo, lg, le, sw) = (ld(&DDC_LEYLINE_OPENING), ld(&DDC_LEYLINE_GAMES), ld(&DDC_LEYLINE_EXILE_GAMES), ld(&DDC_SWAMPWALK_ATTACKS));
+        println!(
+            "FUZZ_POOL=dd_c: Edge of Autumn cast {ec}, cycled {ey}; Street Wraith cast {wc}, cycled {wy}, attacking a defender with a Swamp {sw}; \
+             Leyline of the Void on the battlefield as the first turn began in {lo} games, at some time in {lg}, exiling an opponent's card in {le}"
+        );
+        if n >= 300 {
+            assert!(ec > 0 && ey > 0 && wc > 0 && wy > 0 && lo > 0 && lg > 0 && le > 0 && sw > 0, "lane C's cards weren't played");
         }
     }
 }
@@ -1922,8 +2072,8 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
 
 #[test]
 fn fuzz_random_matches() {
-    if delver_mode() {
-        println!("FUZZ_POOL=delver: games only (constructed best-of-three isn't built)");
+    if delver_mode() || ddc_mode() {
+        println!("FUZZ_POOL=delver / dd_c: games only (constructed best-of-three isn't built)");
         return;
     }
     if eoe_mode() {
@@ -1981,7 +2131,7 @@ fn fuzz_random_matches() {
 fn same_seed_and_actions_replay_matches_identically() {
     use engine::az::MtgAz;
     use zero_search::game::SearchGame;
-    if delver_mode() || eoe_mode() || sealed_mode() {
+    if delver_mode() || ddc_mode() || eoe_mode() || sealed_mode() {
         return;
     }
     for seed in 2000..2012 {

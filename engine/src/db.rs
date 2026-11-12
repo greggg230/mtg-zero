@@ -82,6 +82,16 @@ pub enum Kw {
     /// Shadow (CR 702.28): blocks and is blocked only by creatures with
     /// shadow. (Not in the encoding's keyword list either.)
     Shadow,
+    /// Landwalk of a basic land type (CR 702.14a): "plainswalk",
+    /// "islandwalk", "swampwalk", "mountainwalk", "forestwalk": can't be
+    /// blocked as long as the defending player controls a land with that
+    /// land type (702.14c; `Game::landwalk_unblockable`, ENGINE.md 110.3).
+    /// (Not in the encoding's keyword list either.)
+    Plainswalk,
+    Islandwalk,
+    Swampwalk,
+    Mountainwalk,
+    Forestwalk,
 }
 
 impl Kw {
@@ -1402,7 +1412,7 @@ impl CardDef {
             | (if self.trig_mask & (1u64 << EventKind::ExiledFromLibGy as u32) != 0 { crate::game::SEEN_EXILE_WATCH } else { 0 })
             | (if self.opp_draw_token.is_some() || self.draw_plus.is_some() { crate::game::SEEN_DRAW_REPL } else { 0 })
             | (if self.gy_triggers { crate::game::SEEN_GY_TRIGGER } else { 0 })
-            | (if self.void_exile.is_some() { crate::game::SEEN_VOID } else { 0 })
+            | (if self.void_exile.is_some() || self.opp_gy_exile { crate::game::SEEN_VOID } else { 0 })
             | (if self.named_spell_tax > 0 || self.named_ability_tax > 0 { crate::game::SEEN_NAMED_TAX } else { 0 })
             | (if self.look_top || self.play_top_life { crate::game::SEEN_TOP } else { 0 })
             | (if self.spell.as_ref().is_some_and(|ab| {
@@ -1821,6 +1831,10 @@ pub struct CardDef {
     /// instead exile it with a <counter> on it" (Dauthi Voidwalker; CR
     /// 614.1a).
     pub void_exile: Option<Counter>,
+    /// "If a card would be put into an opponent's graveyard from anywhere,
+    /// exile it instead" (Leyline of the Void; CR 614.1a;
+    /// `Game::opp_gy_exile_for`, ENGINE.md 110.3).
+    pub opp_gy_exile: bool,
     /// Reconfigure (CR 702.151): while attached to a creature, it isn't a
     /// creature (702.151b); it may equip while a creature (301.5c).
     pub reconfigure: bool,

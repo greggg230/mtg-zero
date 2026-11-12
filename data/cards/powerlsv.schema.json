@@ -77,6 +77,7 @@
   ],
   "CostAtom": [
    "ExileSelfFromGraveyardCost",
+   "PayLifeCost",
    "RemoveCountersFromSelfCost",
    "SacrificePermanentsCost",
    "TapUntappedPermanentsCost"
@@ -14363,6 +14364,23 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "PayEnergy"
+  },
+  "PayLifeCost": {
+   "category": "CostAtom",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "amount",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_keywords",
+   "qualname": "PayLifeCost"
   },
   "PayToCopyEnchantedCreatureElseToken": {
    "category": "Effect",

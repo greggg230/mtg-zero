@@ -145,15 +145,19 @@ fn the_constructed_spec() {
 #[test]
 fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     let (cube, con) = (CardDb::cube(), CardDb::constructed());
-    // The cube's table has no legacy card; the constructed one has both.
-    for n in ["Murktide Regent", "Prismari Charm"] {
+    // The cube's table has no legacy card; the constructed one has them all
+    // (the registry's: Murktide Regent, Prismari Charm, the Doomsday cards
+    // of ENGINE.md 110).
+    let legacy = identity::legacy_registry();
+    for &n in &legacy {
         assert!(cube.id(n).is_none(), "{n} in the cube's card table");
         assert!(con.id(n).is_some(), "{n}: {:?}", con.expect_id(n));
     }
     assert!(cube.unsupported().is_empty() && con.unsupported().is_empty());
     // Every cube card at the same id, with the same definition; its tokens
-    // and faces two ids later (after the two legacy cards), the same too.
-    let k = 2u16;
+    // and faces k ids later (after the k legacy cards), the same too.
+    let k = legacy.len() as u16;
+    assert_eq!(k as usize, engine::db::load_legacy_document().cards.len());
     assert_eq!(con.num_cards(), cube.num_cards() + k as usize);
     assert_eq!(con.len(), cube.len() + k as usize, "the legacy cards make no token or face");
     let to_cube = |id: u16| if id < cube.num_cards() as u16 { id } else { id - k };
@@ -177,9 +181,12 @@ fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     for i in 0..cube.num_cards() {
         assert_eq!(ic[i], ik[i]);
     }
-    assert_eq!(identity::legacy_registry(), ["Murktide Regent", "Prismari Charm"]);
-    assert_eq!(ik[con.id("Murktide Regent").unwrap() as usize], 546);
-    assert_eq!(ik[con.id("Prismari Charm").unwrap() as usize], 547);
+    // (Append-only: the first two lines stay Murktide Regent and Prismari
+    // Charm, 546 and 547.)
+    assert_eq!(legacy[..2], ["Murktide Regent", "Prismari Charm"]);
+    for (i, &n) in legacy.iter().enumerate() {
+        assert_eq!(ik[con.id(n).unwrap() as usize] as usize, identity::LEGACY_BASE + i, "{n}");
+    }
     assert!(identity::LEGACY_BASE + identity::legacy_registry().len() <= identity::CUBE_CAP);
     assert_eq!(identity::cube_names().len(), identity::LEGACY_BASE);
     // Every card of the legacy IR has a registry line (append-only: a new

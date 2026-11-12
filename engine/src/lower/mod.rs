@@ -18,6 +18,7 @@ pub mod effect_tail;
 pub mod effect_tail2;
 pub mod effect_tail3;
 pub mod effect_walkers;
+pub mod doomsday_c;
 pub mod effect_m7d;
 pub mod eoe_b;
 pub mod eoe_c;
