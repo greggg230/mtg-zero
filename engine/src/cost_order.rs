@@ -322,7 +322,8 @@ fn filter_reads(f: &Filter) -> Reads {
         | Filter::Saddled
         | Filter::DealtDamageThisTurn
         | Filter::CastForWarp
-        | Filter::HostOfSource => Reads::default(),
+        | Filter::HostOfSource
+        | Filter::SingleTarget => Reads::default(),
     }
 }
 
@@ -673,7 +674,8 @@ impl Game {
         // into an opponent's graveyard from anywhere, exile it instead with a
         // void counter", `Game::void_counter_for`) leaving: where an
         // opponent's card the payer controls goes.
-        if w.leave.iter().any(|&c| self.abilities(c).void_exile.is_some()) {
+        // (So does Leyline of the Void's "exile it instead", ENGINE.md 124.3.)
+        if w.leave.iter().any(|&c| self.abilities(c).void_exile.is_some() || self.abilities(c).opp_gy_exile) {
             out.0 |= kind::DEST;
         }
         if hand {

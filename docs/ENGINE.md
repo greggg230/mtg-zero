@@ -24994,6 +24994,262 @@ work leaves: a `tools/mac_races.sh` race, `~/mtg-zero-wt/races-<sha12>` with `~/
 `rm -rf ~/mtgz-races/<name>`, `git -C ~/mtg-zero worktree remove --force ~/mtg-zero-wt/races-<sha12>` and `rm -rf
 ~/cargo-target/mtg-zero/races-<sha12>`.
 
+## 110. Cheaper paired races: one batched driver, the pilot's simulation mix, a screening stage (branch `race-batch`, 2026-11-11)
+
+Branch `race-batch` (from main 60397f3; zero-core pin f9ca5c3 unchanged). **Why.** DESIGN.md 9.1 ("Races are an offline
+check"): the evaluator race of 108.6, run 1's iteration 78 piloting at 64 simulations on every decision, took 4.1 h for
+a clear pool on one Mac process (1,664 games, 0.11 games/s) and runs 10-12 h for a close one; on the desktop eight
+processes shared the GPU at 91% with small batches (pools 1001-1008, 10:22 to their stop at ~17:20: not one round of 5-6
+builds x 128 games ended in 7 hours, i.e. under ~0.2 games/s for the eight). The user asked for races about 10x cheaper
+by three changes, each opt-in: **without the new flags every command plays the same games and reaches the same verdicts
+as before** (the per-process path, the default evaluator, 64 simulations, one stage); the outputs gain `game_scores`
+(every candidate's score in each game) and the pilot's `search`, the logs gain progress lines (110.5), and `evalpick`
+computes every pool's candidates before the first race. Code: `mtgz/sealed/batch.py` (new), `mtgz/sealed/compare.py`,
+`tools/race_bench.py` (new), `tests/test_race_batch.py` (new). No engine, encoding or zero-core change: digests
+untouched.
+
+### 110.1 One batched driver (`--batched`)
+
+A comparison plays each candidate's block of games in a zero-core driver of its own (104.3): its seed (`driver_seed(i,
+b)`), its game ids 0, 1, ... and its queue of specs fix every game's streams, seat and opponent. `--batched` keeps those
+drivers exactly - `Comparison.driver`, factored out of `_run`, makes them for both paths; the batched ones only add
+`sparse=True` (each row's non-zeros: the same features, zero-core docs/search.md 2.2) and their own thread count (104.3:
+results do not depend on it) - and runs all of them in one process: `batch.MultiDrive` polls every driver
+(`poll_batch`), gathers every ready batch, answers them in **one network call per evaluator key** and submits each
+driver its rows. The drivers search on their own threads while the main thread evaluates, each driver's two groups in
+turn.
+
+What stays per pool is the race. `compare.RaceState` (104.4's race, factored out of `race`, which now runs it) holds a
+pool's rounds, survivors, tests, drops and stop; `batch.run_races` gives each pool its own state and starts a pool's
+next round for its survivors as soon as its previous round is decided - pools never wait for each other, and a decided
+pool's share of the batches goes to the others. An engine error in a game is handled as `play_block` handles it (the
+first failing candidate in survivor order recorded with its repro, the block played again without that game for every
+candidate: `BlockPlay`). `compare evalpick --pool-seed a,b,c --batched` computes every pool's candidates first (the
+evaluators' picks and the value pick), then races every pool at once; its output is the per-process command's (`pools`,
+`summary`) plus `batched` (wall seconds, games, network rows, calls, rows per call, evaluation seconds). `race`, `pair`,
+`yardstick` and `choice` take `--batched` too (one comparison: its candidates' drivers together). Settings:
+`--driver-threads` (each driver's search threads, default 1), `--cpus N` (the process on N logical CPUs: its affinity),
+`--progress` (110.5).
+
+### 110.2 Answers that depend on the row alone (`RowExact`), and the identity test
+
+**The problem.** 104.3's exact replay holds because a driver's batches are always the same rows. Merging batches changes
+the matrices the network multiplies, and float32 kernels round differently at other shapes. On 240 real leaf batches of
+iteration 78 (3,720 rows of pool 2026's builds), the usual evaluator (`zero.infer.NetEvaluator`: `TokenNet.forward`,
+rows sorted by token count, chunks of 64 padded to their longest) answers a batch alone and the same batch merged with
+the others up to 6e-7 apart in the priors and 9e-7 in the values. Measured causes on the desktop's CPU (torch 2.x with
+MKL 2025.3): `nn.Linear` gives a row other bits at another number of rows (on one thread as on four); on four threads
+also at another place among the same rows (a [64, 544] x [544, 128] product: 8 of 64 rows differ when the rows are
+permuted; none on one thread); attention over the same tokens padded to another length differs by ~2e-7. A search's near
+tie can turn on such bits (109.2: 3 of 48 games differed between the Mac and the desktop at ~4e-7), so with merged
+batches a game's moves would depend on what else is in flight - on how many pools race.
+
+**`batch.RowExact`** evaluates every row in a fixed shape: its tokens padded to its class T = ceil(n / 16) * 16 (n its
+tokens, the global one included), the rows of one class `rows` at a time (`--eval-rows`: default 512 on CUDA, 16 on the
+CPU; a short chunk is filled with copies of its first row, whose answers are dropped). On CUDA the chunk is
+`TokenNet.forward_static` on [rows, T] (every slot embedded) through zero-core's `TokenGraphRunner`, one CUDA graph per
+(rows, T). On the CPU (`_forward_packed`) the same trunk and heads on [rows, T], only the present slots embedded (in
+fixed pieces of 64 tokens; embedding all 170 slots of the v5 layout cost ~2x the usual forward per row), every kernel on
+one thread (`torch.set_num_threads(1)`, process-wide from the evaluator's creation, after the value picks) and the
+chunks side by side on `--eval-workers` threads (default min(8, the process's CPUs)). A row's answer is a function of
+the row alone (and of `rows`, the device and its kernels): **the same 240 batches each alone, all merged, merged in
+reverse and interleaved give identical bits** on the CPU (0 of 240 batches differ; with four kernel threads, 695 outputs
+differed) and on the GPU (0 of 160, CUDA graphs and eager). Its answers are the usual evaluator's to float rounding (max
+9e-7 in a prior, 1e-6 in a value). Root belief rows (a pilot with `eval_belief_tilt`) are refused: RowExact computes no
+auxiliary head.
+
+`--eval`: `default` (NetEvaluator; the default without `--batched`), `rowexact` (the default with `--batched`, and
+available per process), `batchwise` (`--batched` only: each driver's batch alone through NetEvaluator - today's answers
+bit for bit, without big batches). The pilot's description in the output names its evaluator. A value pick (107.2)
+always runs NetEvaluator at the process's torch threads before any race: every mode races the same candidates.
+
+**The identity test** (the desktop's CPU, 6 logical CPUs of a machine shared with other agents' builds and runs; outputs
+and logs in `E:/mtg-zero-scratch/race-batch/id3/`): `compare evalpick --pool-seed 2026,2027 --k 32 --worlds 8 --vs 3
+--pilot <eoe1 iter_0078> --sims 4 --race --games 4 --block 4 --min-games 4 --max-games 4 --cpus 6` (5 builds a pool, one
+round of 4 games and its tests). Larger forms (8 simulations, three rounds of 8) were stopped: the saturated machine
+gave them ~2% of a CPU at times (a per-process 8-simulation run of the two pools took 2.6 hours).
+
+* **A - today's per-process race (`--torch-threads 2`) against `--batched --eval batchwise`**: **40 of 40 games
+  identical** (every game's score), the same picks, candidates, round rows, verdicts and paired statistics; 989 s per
+  process, 633 s batched.
+* **B - per process against batched, both RowExact** (`--eval rowexact` per process, `--batched` for the other;
+  `--eval-rows 4 --eval-workers 2`): **40 of 40 games identical**, the same picks, rows, verdicts and statistics; 486 s
+  per process, 206 s batched.
+* **The two evaluators against each other** (A's per-process run against B's): 40 of 40 games ended the same (results
+  only: RowExact's answers are the usual ones to ~1e-6, and a near tie decides a move now and then - 109.2's 3 of 48
+  between two machines).
+
+The unit tests (110.8) check the same with a tiny network on every key of the output, two pools in one batched run.
+
+### 110.3 A cheaper pilot (`--pilot-search mix`, or a lower `--sims`)
+
+`--pilot-search mix` pilots with self-play's simulation mix: the checkpoint's run config's `sims` on a share `p_full` of
+the searched decisions, `sims_fast` on the others, `sims_minor` on the minor decisions (MTG Zero's mana payments,
+`SearchGame::minor_decision`) - eoe1: 64 on a quarter, 16 on the rest, 4 on mana payments. The split is drawn by the
+driver itself, the function self-play uses (zero-core `worker::start`: the playout cap from the game's own stream, the
+minor class from the game). The driver gives `sims_minor` to self-play seats only, so the pilot is a self-play-flagged
+seat with everything else of self-play off: `eps` 0 (the root's Dirichlet mix (1 - eps) p0 + eps x leaves every prior p0
+bit for bit), `temp_moves` 0 (every move by the run's evaluation move rule, `h2h.run_rule`: eoe1's cq), `record` false
+(and the race's drivers record nothing). Tested: such a seat without a fast budget plays the flat seat's games bit for
+bit (`test_the_mix_pilot`). `--sims 16` is the flat lower setting. The output's pilot says which: `"search": "flat"` or
+`{"kind": "mix", "sims", "sims_fast", "p_full", "sims_minor"}`. The value pick uses the flat seat whatever the race's
+search (a value choice searches nothing). What the mix saves comes mostly from the fast searches: eoe1's self-play at
+iteration 80 played 530 searched decisions a game, 11.5 of them minor, and 11.2k leaves a game (19% of them answered
+from its cache), against ~32k for 64 simulations on every decision (DESIGN.md 9.1).
+
+**`--eval-cache N`** (with RowExact only; off by default): each game's evaluation cache (zero-core docs/search.md 3.12)
+- a row the game already sent is answered from it instead of sent. Its answer is the one RowExact would compute again,
+so the games are the same bit for bit with fewer network rows (`test_the_eval_cache_with_rowexact`); with the default
+evaluator, whose answers depend on the batch, it is refused. eoe1's self-play at iteration 80 found 19% of its rows in
+its cache (`eval_cache` 8192). The value pick's seat keeps none.
+
+### 110.4 Two stages (`--screen-delta`)
+
+`RaceState` with `screen_delta` (e.g. 0.05): 104.4's pairwise tests at the looser delta first, at `--screen-alpha`
+(default alpha / 2) shared over each build's N - 1 tests, until one build is left (decided), every survivor pair
+accepted H0 at the screening delta, or `--screen-max-games`; then the final stage at `--delta` and alpha - screen alpha,
+per test / (N - 1), **on every game played** (data reused). `--screen-min-games` (default `--min-games`) lets the
+screening test earlier. **The error rates as designed**: the true best build is dropped only if one of its 2 (N - 1)
+tests (N - 1 per stage, against every other build) crosses its upper bound; each does so with probability at most its
+level when its true difference is >= 0 (Wald's bound on the GSPRT, 73; the final stage's tests see the screening's games
+and more, checked only at round ends, which lowers the probability). Union bound: P(best dropped) <= screen alpha +
+final alpha = alpha = 0.05. The per-test levels divide by N - 1 for N the race's builds in both stages (dividing the
+final level by the screening's survivors would make it data-chosen). Beta stays the final stage's: a build worse by
+delta survives a final `equivalent` with probability at most beta per pair; the screening's acceptances of H0 only end
+the screening. The output's `test` gains `screen` (its delta, alpha, bounds, where and why it ended), `final_alpha` and
+`error_rates`; drops and rounds name their stage. Without `--screen-delta` the output is the one-stage race's, key for
+key.
+
+**Measured by simulation** (`E:/mtg-zero-scratch/race-batch/mc_stages.py`: `RaceState` itself on a stand-in comparison,
+1,000 races a cell; 5 builds, rounds of 128, 256 to 1,024 games a build, alpha = beta = 0.05; each game a win or a loss,
+the builds sharing a game's outcome with probability 0.15, i.e. var(D) ~ 0.42 and var_ratio ~ 0.85, the network pilot's
+(107.2, the Mac's pool 2030: 0.68-1.00)):
+
+| true scores of the 5 builds | one stage: games, best dropped, decided | screening at 0.05: games, best dropped, decided | screening from 128 games |
+|---|---|---|---|
+| all 0.55 | 5,119, 0.0%, - | 5,116, 0.2%, - | 5,118, 0.2%, - |
+| best +3 points | 5,115, 0.0%, 0.0% | 5,083, 0.0%, 0.2% | |
+| best +6 | 4,964, 0.0%, 5.9% | 4,743, 0.0%, 13.7% | |
+| 0.62 / 0.59 / 0.55 / 0.50 / 0.45 | 4,116, 0.0%, 1.9% | 3,746 (-9%), 0.0%, 5.2% | 3,772, 0.0%, 4.1% |
+| 0.70 / 0.55 / 0.50 / 0.45 / 0.40 | 2,009, 0.0%, 100% | 1,634 (-19%), 0.0%, 100% | 1,587 (-21%), 0.0%, 100% |
+
+The best build is dropped far less often than the bound (at most 0.2% against 5%: the union bound and checks at round
+ends are conservative); the screening saves 9-21% of the games when some builds are clearly behind, nothing when all are
+close, and decides more races. On real data: the Mac's pool 2030 (decided at 384 games, 1,664 in all) would have been
+decided at 256 (1,280 games, -23%): value7 and random1, 23 and 17 points behind with var(D) 0.41 and 0.28, reach LLR
+~6.5 at 256 games at delta 0.05 (screening bound 5.02), ~4.1-4.2 at 0.03 (one-stage bound 4.33).
+
+### 110.5 Progress while a race runs
+
+Every race process writes stderr line-buffered (`sys.stderr.reconfigure`, whatever launched it) and a `# progress` line
+every `--progress` seconds (default 60; 0 = none): the batched driver's games finished, games/s, games in flight,
+drivers, network rows, rows per call, evaluation seconds and each pool's stage, survivors, games and games left in its
+round; a per-process race's line names its candidate and block, its games finished of the block, the evaluator's rows
+and the driver's seconds. Besides: `# block` after each block, `# round` after each round (a batched one names its
+pool), `# race` and `# pool` as each pool ends, `# candidates` (batched evalpick: every pool's picks before the races).
+The desktop's per-process races (pools 1001-1008, launched by `launch_hidden`) printed nothing in 7 hours: their only
+lines were per round, and no round at 64 simulations ended.
+
+### 110.6 Measurements
+
+All on the desktop while other agents' builds, fuzzers and runs saturated its 32 logical CPUs (and, until ~17:20, the
+eight desktop races and then the search sweep shared its GPU): the absolute numbers are those of a busy machine; the
+ratios between configurations run back to back are the result.
+
+**Throughput on the CPU** (`tools/race_bench.py --device cpu --cpus 6 --pools 2026,2027,2028,2029 --minutes 6 --warmup 2
+--procs 2 --a-threads 2 --a-torch-threads 1`; network rows per second after the first two minutes; games per second =
+rows/s over rows per game: 64 simulations 26.3k (measured: 1,051,582 rows for 40 games of pool 2026, 38 finished), the
+mix 13.8k (eoe1's self-play at iteration 80: 8.27M rows for 600 games, its cache's 1.55M included), 16 simulations ~8k
+(estimated: ~12 rows a searched decision x 530 decisions)):
+
+| configuration | rows/s | games/s | x (a) |
+|---|---|---|---|
+| (a) per process (2 processes x 2 driver threads + 1 torch thread), 64 simulations, the usual evaluator | 1,635 | 0.062 | 1.00 |
+| (b) batched (4 pools, 2,816 games in flight, ~1,000 rows a call), 64 simulations | 2,174 | 0.083 | 1.33 |
+| (c) batched, self-play's mix | 2,391 | 0.173 | 2.78 |
+| (d) batched, 16 simulations | 2,575 | ~0.32 | ~5.2 |
+
+On a CPU the network's arithmetic is the same however it is batched, so batching buys little: (b) is 1.33x (the per-row
+cost of RowExact's chunks and the six CPUs shared between search and inference bound it); the mix's fewer rows a game
+buy 2.1x more. With `--eval-cache` (~19% of the rows, self-play's share) and the screening (9-21% of the games, 110.4)
+the CPU race is ~3.5-4x today's. The tenfold is the GPU's: today's per-process GPU race gave the network ~64-row batches
+from eight processes (under ~0.2 games/s in all, above), while RowExact's CUDA graphs answer ~40k rows/s on a busy GPU.
+
+**The GPU** (not free: the eight races until ~17:20, then the sweep). RowExact's capacity on mid-game rows of real games
+(20,999 rows, 24.7 tokens on average, merged into one call; `E:/mtg-zero-scratch/race-batch/gpu_cap.py`), the RTX 5090
+91% busy with the eight races: **13.4k rows/s with chunks of 64 rows, 27-28k with 256, 39k with 512, 40k with 1,024**
+(CUDA graphs); eager `forward_static` 1.3k. Hence the CUDA default of 512 rows. For scale: eoe1's self-play reaches 58k
+rows/s on the same GPU (iteration 80: 384-row batches of 3,456 games in flight, 16 search threads, 18,800 games an hour
+with the mix and its cache). The full measurement (a-d on the free GPU) is 110.7's `race_bench.py` command.
+
+**The pilots' strength** (the search sweep of iteration 78, `E:/mtg-zero/s4a/sims-sweep/run/results.jsonl`: run 1's
+evaluation against the heuristic, 400 games a setting, the same deals): 16 simulations 0.233 +- 0.021, 32 0.283 +-
+0.023, 64 0.318 +- 0.023 (256 and 1,024 still running). Flat 16 costs ~8.5 points against the heuristic (2.6 se), 32
+~3.5. The cheaper pilots' cost in the race itself - whether they order a pool's builds as 64 simulations do - is not
+measured yet (the CPU runs that would compare pool 2030's 5 builds over the Mac's 128 deals under the mix and at 16
+simulations did not fit the busy machine): `python -m mtgz.sealed.compare evalpick ... --pool-seed 2030,2031 --games 128
+--batched --pilot-search mix` (and `--sims 16`) against the Mac's round-1 lines of 109.2's race gives it, build by build
+on the same deals (`E:/mtg-zero-scratch/race-batch/order/compare_orders.py`).
+
+### 110.7 A 16-pool evalpick race in the new mode
+
+Run from this branch's checkout (or main once merged), the GPU free:
+
+```
+mkdir -p E:/mtg-zero/s4a/races/batched-iter_0078
+python tools/launch_hidden.py E:/mtg-zero/s4a/races/batched-iter_0078/evalpick.log \
+  python -m mtgz.sealed.compare evalpick \
+  --evaluator E:/mtg-zero/s4a/v1_time/evaluator_linear.pt,E:/mtg-zero/s4a/v1_time/evaluator_set.pt \
+  --pool-seed 2026,2027,2028,2029,2030,2031,2032,2033,2034,2035,2036,2037,2038,2039,2040,2041 --collation arena \
+  --k 32 --worlds 8 --vs 3 --pilot E:/mtg-zero/runs/eoe1/models/iter_0078.pt --pilot-search mix --device cuda \
+  --race --games 128 --min-games 256 --max-games 1024 --delta 0.03 --screen-delta 0.05 \
+  --batched --eval-cache 8192 --json E:/mtg-zero/s4a/races/batched-iter_0078/evalpick.json
+```
+
+(Pools 2026-2033 are the Mac's 64-simulation race of 108.6 / 109.2: the same deals, so the two races compare build by
+build. `--pilot-search mix` and `--eval-cache` are each optional; without them the race is 64 simulations on every
+decision.) **Estimated wall time** (the free desktop GPU; to be replaced by the measurement): the 16 pools race ~5
+builds each; the Mac's 64-simulation pools took 1,664 games (decided at 384) to ~5,000 (to 1,024 a build), say ~3,500 a
+pool and ~56k games, ~48k with the screening (110.4). The batched driver should approach self-play's rate on this GPU
+(58k rows/s; RowExact's graphs measured 39k on a GPU already 91% busy), i.e. ~40-58k rows/s: with the mix and the cache
+(~11.2k rows a game) **3.6-5.2 games/s, about 2.5-3.7 hours** for the 16 pools; without the cache ~3-4.5 hours; at 64
+simulations on every decision (26.3k rows a game, no screening) ~1.5-2.2 games/s, 7-10 hours. Today's per-process race
+on the GPU, under ~0.2 games/s for eight processes, would need over 75 hours; the Mac's six processes (0.76 games/s),
+~20.
+
+The throughput measurement for the free GPU (110.6's configurations a-d, one command; ~50 minutes):
+
+```
+python tools/race_bench.py --pilot E:/mtg-zero/runs/eoe1/models/iter_0078.pt \
+  --evaluator E:/mtg-zero/s4a/v1_time/evaluator_linear.pt,E:/mtg-zero/s4a/v1_time/evaluator_set.pt \
+  --pools 2026,2027,2028,2029,2030,2031,2032,2033,2034,2035,2036,2037,2038,2039,2040,2041 --device cuda \
+  --minutes 10 --warmup 3 --procs 8 --out E:/mtg-zero-scratch/race-bench-gpu
+```
+
+### 110.8 Tests, gate
+
+* `tests/test_race_batch.py` (9, new): RowExact's answers depend on the row alone (a tiny token network's real leaf
+  batches alone, merged forward and in reverse, dense and sparse: the same bits; the usual evaluator's within 1e-5); a
+  batched race and a fixed comparison with the heuristic are the per-process ones (every key of the output, the rounds,
+  every game's score); two pools' comparisons with a tiny network raced at once in one batched driver are the
+  per-process comparisons game for game, with RowExact both ways and with the usual evaluator batch by batch
+  (`batchwise`), and the merged calls hold several drivers' batches; the mix pilot (the run config's split, a
+  self-play-flagged seat with eps 0, temperature 0, record false; without a fast budget the flat seat's games bit for
+  bit; a checkpoint without a run config refused); the screening stage (the alpha split and bounds in the output, a bad
+  build dropped in the screening, the final stage after it, `--screen-min-games`, the refusals, the one-stage output
+  unchanged); progress lines (per process and batched); the CLI (`race --batched` against `race --eval rowexact`;
+  `--eval batchwise` without `--batched` refused); `evalpick --pool-seed 11,12 --batched` against the per-process
+  command (picks, games, verdicts, summary; a pool named twice refused); `--eval-cache` with RowExact (the same games,
+  fewer rows; refused with the default evaluator).
+* `tests/test_sealed_compare.py` (12) unchanged and passing: the refactored `race` (`RaceState`), `play_block`
+  (`record_block`, `record_failure`) and `compare` give the outputs of before. `tests/test_evaluator.py`'s evalpick test
+  passes (every pool's candidates now before the races).
+* `python tools/gate.py python --no-mac --step-timeout 14400` on bdd219a (the code of 73b9bea and this section; run pinned to 6 logical CPUs
+  of the saturated desktop, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=2`): build, pytest 278 passed and 1 skipped, the mtg-smoke loop:
+  **GATE PASSED python bdd219aee2e2 in 2676s**. Two earlier runs failed only `tests/test_mac_remote.py::test_a_remote_eoe_evaluation_logs_its_games`
+  (untouched code): its eoe-smoke remote evaluation passed its own 600 s limit with torch's 24 default threads on 6 busy CPUs (alone, at 2
+  threads: 237 s). The commit after the gated one is this line.
+
 ## 111. S4a v2: the pairwise evaluator, scoring against a named field, recency weighting, the export (branch `eval-v2`, 2026-11-11)
 
 Branch `eval-v2` (from main 60397f3). **Why** (the user, 2026-11-11). Evaluator v1 (108) predicts "my deck against
@@ -25258,7 +25514,7 @@ elsewhere.
 |---|---|---|
 | The deck | `data/decks/sneak_show_8014220.txt`, `.json` | the pinned export verbatim (its "sideboard" line separates the 15) and the 75 with its provenance, as `izzet_delver_8016541.json` |
 | The IR | mtg-bot `feature/sneak-show-ir`; `data/cards/*.ir.json`, `powerlsv.schema.json`, `card_ir/src/generated.rs` | the six Scryfall records appended to the legacy pool; one new recognizer (Brotherhood's End); 123.2 |
-| Identities | `engine/src/az/legacy_cards.txt` | the six appended after Prismari Charm (on this branch 548-553; 563-568 at integration, after Doomsday's ten and Delver's five); no test names a number |
+| Identities | `engine/src/az/legacy_cards.txt` | the six appended after Leyline of the Void (123.10): identities 558-563 (548-553 before the merge with the Doomsday lanes); Delver's five sideboard cards follow later; no test names a number |
 | Lowering | `lower/sneak_show.rs`, `lower/filter.rs` (`RotoCardFilter`), `lower/printing.rs` (`roto_statics`, `grants_free_casts_from_hand`) | every field named, the rest denied |
 | Rules | `sneak_show.rs` (`SnS`, `SnsDef`), hooks in `cast.rs` (Omniscience's free cast, the uncounterable mark at 601.2i), `pay.rs` (the Flute's prohibition in `activation_ready`), `resolve_m7d.rs` (the Flute's tax), `activate.rs` (the plain name choice), `layers.rs` (514.2), `hidden.rs` (Show and Tell's face-down choice in `determinize`), `eoe_w2.rs` (the Magus without abilities, 123.5) | 123.3 |
 | Encoding | `az/encode.rs` (`g6::UNCOUNTERABLE_NEXT` = per-player float 8), `public_state.rs`, `testkit.rs` (the view), `az/mod.rs` (the Flute guard), `az/tokens.txt` (the Mountain's abilities' key) | 123.6 |
@@ -25391,8 +25647,9 @@ U; entries 300-329 unused).
 * **`az.rs`**: `public_state_reaches_the_encoding` with the two perturbations (gaps `[CHOSEN_NAME_GAP]`),
   `flute_decks_are_refused_to_networks_on_layout_v6` (new; the Sneak and Show 60 accepted).
   **`constructed.rs`**: the constructed table's test reads the legacy IR's size and the Mountain's definitions.
-* **`FUZZ_POOL=sneak_show`**: the deck's 60 with its two Flusterstorms swapped for two Pyroblasts (its sideboard has
-  one), against the Delver 60 in either seat, one game in three the mirror. **`FUZZ_POOL=sns`**: the six cards four
+* **`FUZZ_POOL=sneak_show`**: the deck's real 60 (since 123.10: `data/decks/sneak_show_8014220.json`'s main deck;
+  before the merge with the Doomsday lanes its two Flusterstorms were two Pyroblasts), against the Delver 60 in either
+  seat, one game in three the mirror. **`FUZZ_POOL=sns`**: the six cards four
   each with the deck's creatures, Sneak Attack, Force of Will, Brainstorm, Lotus Petal and mana (`SNS_DECK`), the same
   pairings. Constructed play's table; games only. With 200 games or more, `sns` requires each of the six seen on the stack,
   a free cast, a spell made uncounterable and a name chosen; `sneak_show` Show and Tell, Mistrise Village, a free cast and
@@ -25444,8 +25701,8 @@ Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/sneak-show`, normal release 
 ### 123.9 Limits and integration
 
 * **Flusterstorm and Consign to Memory** are other lanes' (Doomsday lane B; the Delver best-of-three sideboard lane):
-  the deck's main 60 isn't playable on this branch (`FUZZ_POOL=sneak_show` plays two Pyroblasts in their place); the
-  whole deck's fuzz runs at integration.
+  before the merge the deck's main 60 wasn't playable on this branch (`FUZZ_POOL=sneak_show` played two Pyroblasts in
+  their place); Flusterstorm came with the merge (123.10), Consign to Memory comes with the Delver lane.
 * **Constructed best-of-three** (branch delver-bo3): `determinize`'s face-down choice is a rejection over the deal of the
   game's hidden cards; a best-of-three world deals the opponent's deck first (`sample_hidden_pool`), so a world whose
   deck holds no card of the kind among the hand's hidden cards would never accept (loud: 1,000,000 tries). Bo3 needs the
@@ -25458,3 +25715,636 @@ Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/sneak-show`, normal release 
   Mountain's definitions now in the table), `lower/effect.rs` (one more `lower_effect_*` in the chain),
   `docs/rulings.md` (regenerate).
 * **Reported, not changed**: Anointed Peacekeeper's name list (123.5).
+
+## 124. Legacy Doomsday: the deck's cards
+
+**Why.** The next constructed matchup after the Delver mirror (54): MTGGoldfish's archetype "Legacy Doomsday"
+(paper, deck 8027957, fetched 2026-11-11: `E:/mtg-zero-scratch/doomsday/`, its PROVENANCE.md). Ten of its 75 cards
+were outside the cube and legacy IR; three lanes ported them in parallel, each in its own subsection: A (124.1:
+Doomsday, Pact of Negation, Personal Tutor, Flow State), B (124.2: Misdirection, Flusterstorm, Cavern of Souls) and
+C (124.3: Edge of Autumn, Street Wraith, Leyline of the Void); 124.4 merges them and adds the deck and its fuzz pool.
+(The lanes' branches numbered this section 110; 110-113 are Edge of Eternities sections.) The identities after the
+merge: `engine/src/az/legacy_cards.txt` = Murktide Regent, Prismari Charm, Doomsday, Pact of Negation, Personal
+Tutor, Flow State, Misdirection, Flusterstorm, Cavern of Souls, Edge of Autumn, Street Wraith, Leyline of the Void
+(546..557 from `LEGACY_BASE` 546; append-only, layout unchanged).
+
+### 124.1 Lane A: Doomsday, Pact of Negation, Personal Tutor, Flow State (branch `doomsday-a`, mtg-bot `feature/doomsday-a-ir`)
+
+Branch `doomsday-a` from main 60397f3; mtg-bot `feature/doomsday-a-ir` from `feature/eoe-ir-fixes` f4f2d663. The
+user's rule: fully faithful, no approximation of any kind; no layout or encoding change (none was needed: no new
+decision kind, no new public state, no spare float); new code in `engine/src/doomsday_a.rs` and
+`engine/src/lower/effect_doomsday_a.rs`, additive hooks elsewhere.
+
+**The cards.**
+
+* Doomsday {B}{B}{B}, Sorcery: "Search your library and graveyard for five cards and exile the rest. Put the chosen
+  cards on top of your library in any order. You lose half your life, rounded up."
+* Pact of Negation {0}, Instant, blue (a colour indicator): "Counter target spell. At the beginning of your next
+  upkeep, pay {3}{U}{U}. If you don't, you lose the game."
+* Personal Tutor {U}, Sorcery: "Search your library for a sorcery card, reveal it, then shuffle and put that card on
+  top."
+* Flow State {1}{U}, Sorcery: "Look at the top three cards of your library. Put one of them into your hand and the rest
+  on the bottom of your library in any order. If there is an instant card and a sorcery card in your graveyard, instead
+  put two of them into your hand and the rest on the bottom of your library in any order."
+
+**The IR** (mtg-bot `feature/doomsday-a-ir` a544a075; docs/card_ir.md, "Current numbers"). The four Scryfall records
+appended to the legacy pool (`data/legacy_delver.json`; its sheet and sidecar; the Delver cards' records left byte for
+byte). Doomsday (`DoomsdayPile { count: 5 }`: the class is the whole text, its life loss included), Flow State
+(`LookAtTopPutIntoHandMoreIfInstantAndSorcery { count: 3, take: 1, take_if: 2 }`) and Personal Tutor (`SearchLibrary`
+of a sorcery card, to the top, revealed: Mystical Tutor's shape) already parsed through mtg-bot's roto recognizers,
+which are parameterized; each was checked against the Oracle text. Pact of Negation's second line did not parse:
+`cards/parser/legacy_spells.py` adds two parameterized recognizers, tried after every other grammar: "at the
+beginning of your next upkeep, <effect>" (`ScheduleDelayedEffect { inner, step: your_upkeep }`, a new member of
+`DelayedStep`) and "pay <mana cost>. If you don't, <effect>" (`PayManaOrElse { cost, otherwise }`, a new class in
+`effects/generic/legacy_spells.py`); its IR is `Sequence [CounterTargetSpell, ScheduleDelayedEffect { inner:
+PayManaOrElse { cost: "{3}{U}{U}", otherwise: LoseTheGame }, step: your_upkeep }]`. **IR defect 200** (fixed in the
+same branch): no single-faced printing carried its Scryfall `color_indicator`, so Pact of Negation was colourless
+({0}); `build_card_record` now sets it (the roto pool's Dryad Arbor gains its green too; no cube or EoE card has one).
+`cards export-ir --pool cube legacy eoe`, `filter_eoe_ir.py`, `gen_card_ir.py`: schema `506c54f1e63e...` (was
+`1cbe33073b1b...`), 713 classes (4 more: `DoomsdayPile`, `LookAtTopPutIntoHandMoreIfInstantAndSorcery`,
+`LoseTheGame`, `PayManaOrElse`), `DelayedStep.your_upkeep`. `powerlsv.ir.json` and `eoe.ir.json` are the previous
+files byte for byte once the schema hash is replaced (checked card by card and as bytes); `legacy.ir.json` holds 6
+cards. mtg-bot: `cards roundtrip --pool cube legacy eoe` passes; `tests/test_legacy_spells.py` (new) and the legacy
+pool's tests; the Python engine's simplifications for these cards are in mtg-bot docs/SEARCH_LIMITATIONS.md ("Legacy
+pool, mtg-zero's Legacy Doomsday deck, lane A").
+
+**The rules, as built.**
+
+| Text | Rule | How |
+|---|---|---|
+| Doomsday: "search your library and graveyard for five cards" | 701.23a, 701.23d (a quantity with no stated quality: as many as possible, up to five; the rulings: five if there are five, else all) | `DdA::PileFromGraveyard { n }` then `DdA::PileFromLibrary { n }`: `t = min(5, library + graveyard)`; the graveyard's cards first (`ChooseGraveyardCard`, list ids, one per decision in increasing position, between `t - library` and `min(t, graveyard)` of them, `PASS` once the minimum is met, a pick only if enough cards stay above it), then the library's rest by definition (`SearchLibrary`, the slot of each definition in the library sorted by definition, ENGINE.md 10; non-decreasing order, so each multiset once; a definition only while a copy is left and enough cards from it on remain; no `PASS`) |
+| "and exile the rest" | 406.2, 400.7 | one instruction: the library's other cards in definition order (its order was hidden: the reveals say only which cards), then the graveyard's in their order; `LeavesGraveyard` per card (Murktide Regent, 603.10a) |
+| "Put the chosen cards on top of your library in any order" | 401.4 | the graveyard's picks join the library (a public move: everyone sees them go), the found cards wait on top in definition order, then `Op::PileTo` to the top (`PutOnTop`, one card per decision, the last chosen on top): every order |
+| "You lose half your life, rounded up" | 107.1a, 107.1b, 119.3 | `DdA::LoseHalfLifeUp`: `ceil(life / 2)` of a positive life total, none at 0 or less (a negative result is 0) |
+| Pact: "Counter target spell" | 701.6a, 608.2b | `CounterTargetSpell` -> `Op::Counter`; all targets illegal: the spell doesn't resolve (nothing else happens); a spell that can't be countered: Pact resolves and counters nothing (101.2) |
+| "At the beginning of your next upkeep, ..." | 603.7a, 603.7d, 503.1a | `Ext::Delay` with `DelayedWhen::YourNextUpkeep` (new): its controller is Pact's controller as it resolved; it triggers as an upkeep of that player begins, checked only as a step begins, so one created during their upkeep waits for the next one |
+| "pay {3}{U}{U}. If you don't, you lose the game" | 118.12a, 605.3a, 117.1d, 104.3e, 104.2a | `PayManaOrElse` -> `Op::OfferPay { You, {3}{U}{U} }` (`PASS` always, `YES` when payable; mana abilities, a Lotus Petal's too, during the payment; mana floated before it spent from the pool) then `DdA::LoseGame`: the player loses at once, the other player wins (`EndReason::Effect`, its doc widened: an effect that says a player wins or loses) |
+| Pact's colour | 202.2e, 204.1 | `color_indicator: [U]` (IR defect 200 fixed): blue for Force of Will's and Force of Negation's alternative costs; colour-changing effects still apply (Painter's Servant, 613.1e) |
+| Personal Tutor | 701.23b, 701.20a, 701.24a | the existing `Op::Search` with `SearchDest::Top`, `reveal`, `may_fail` (a stated quality: may find none, still shuffled): revealed, shuffled, put on top, known to both players |
+| Flow State | 608.2c, 701.20e | `Op::LookTop` 3 (fewer if the library has fewer), `DdA::JumpUnlessInstantAndSorceryInGraveyard`, `Op::PileTo` to the hand of 2 or of 1 (as many as there are), the rest `Op::PileTo` to the bottom (`PutOnBottom`, the order chosen) |
+
+Readings taken:
+
+* **Five cards, no fewer.** 701.23d, not 701.23b: "five cards" names no quality, so the search must find five when the
+  two zones hold five (Doomsday's first ruling), all of them when they hold fewer (its second). No `PASS` is offered
+  in the library part; the graveyard part's `PASS` only once the library can supply the rest.
+* **The decomposition reaches every pile and order exactly once.** Graveyard cards are public, so they are chosen by
+  their place; library cards are hidden, so by definition (the searcher's own worlds may deal them anew before the
+  search ends: `Frame::picked_defs`, as the existing searches for several cards). Tested exhaustively: three library and
+  three graveyard cards of six definitions give 720 outcomes (6 piles x 120 orders) over 720 decision paths; with two
+  equal library cards, 360 over 360.
+* **Library cards by definition, though Doomsday doesn't shuffle.** docs/shortcuts.md 13.5's representation (a
+  searched library offers definitions) rests there on every search shuffling. Here it holds without: two library cards
+  of one definition differ only in who knew where they were, the search turns the other player's knowledge of the
+  library into a cloud before any card moves (so no knowledge depends on which copy is kept or exiled), and the
+  searcher learns the five it keeps. Which copy the engine takes changes nothing observable.
+* **The found cards wait in definition order** before the order is chosen: where a library card was found depended on
+  the library's hidden order, which the searcher's own worlds deal anew; left there, the searcher's view (which places
+  it knows) differed between worlds with the same actions and keys (the fuzz's information-set check found it;
+  `doomsday_the_searchers_worlds_agree_on_what_it_knows` fails without the waiting order). The waiting order is never
+  observable: the searcher chooses the final one next.
+* **Who knows what after Doomsday** (ENGINE.md 10, 72): the caster knows the five exactly, in order. The opponent saw
+  the graveyard's picks go into the library and every exiled card: the search first turns what it knew of the library
+  into a cloud over it (`scramble`, as every search), each exiled card takes its identity out of that cloud
+  (`knowledge_leaves`), and the private order turns what it knew of the found cards (the graveyard's picks, a known
+  library card no copy of which was exiled) into one cloud over the five. So the opponent's `determinize` never deals a
+  graveyard-origin card, or a known library card that stayed, into the caster's hand, and never claims more: when a copy
+  of a card it knew in the library is exiled it can't tell which copy was kept, and the cloud drops it. A later draw
+  carries the cloud into the hand (with open decklists a cloud over the whole hand and library says nothing and goes).
+  No layout change was needed: clouds are the existing model.
+* **An instant card and a sorcery card** (a reading taken; the maintainer's decision, 2026-11-11): two existence checks
+  over the graveyard's cards (as mtg-bot's class reads it), so one card that is both satisfies both: CR 709.4, in a
+  graveyard a split card has its two halves' characteristics combined, so one with an instant half and a sorcery half
+  is an instant card and a sorcery card. (It differs from "two different cards" only for such a card; no card of the
+  cube, legacy or EoE tables is one.)
+* **Flow State's bottom cards** follow every look-and-bottom card (Dig Through Time, Stock Up): `put_from_pile` leaves
+  them known to the caster at their places; the opponent knows only what its cloud from the look holds. Knowledge the
+  precedent drops: none for the rules; for the network, the caster's knowledge of cards below its library's top three is
+  only in its known-card bags (72.4's deliberate limit), so a Flow State's bottom order isn't encoded.
+* **Pact's pending payment in the encoding**: a delayed triggered ability waiting is the existing per-player count
+  `g5::DELAYED` (public); which kind of delayed trigger it is isn't encoded (a Pact's payment and a Mishra's Bauble's draw
+  look alike there; the Pact is in its owner's graveyard). Reported, not changed (a spare float is the maintainer's to
+  give).
+* **Doomsday's picks so far in the encoding**: while the search goes on, the decider's input has the running op, its
+  pick count (`ctx::OP_I`) and the list (the graveyard in order with the cards still offered; the library sorted by
+  definition with the definitions still offered), not which cards it already picked (as the existing searches for
+  several cards: `Frame::picked_defs` is never encoded). The rules are exact; the network can't tell two pick histories
+  with the same count apart. Reported, not changed: marking them (delve's `list::CHOSEN`, ENGINE.md 65.3, is the
+  float that would carry it) changes what the encoding says, the maintainer's call.
+
+**Tests** (`engine/tests/cards_doomsday_a.rs`, 44 tests; every ruling of the four cards, `// ruling:`):
+Doomsday's search (five from both zones, no `PASS` in the library part; fewer than five: all; empty zones; the
+graveyard alone in increasing position; every pile and order reachable once; the reveals of the exiled cards sorted;
+life 21 -> 10, 7 -> 3, 1 -> 0 and the state-based loss); who knows what (the caster's five in every one of its worlds; a
+graveyard card never in the caster's hand in the opponent's worlds, its place unknown to it; a known library card kept
+stays among the five; a copy exiled leaves the opponent unsure; the known card exiled is public); Pact (its colour and
+mana value; Force of Will exiles it; paid at the next upkeep of its controller, not the opponent's; cast on its
+controller's turn or during their upkeep it waits for the next one; declining while able and being unable both lose;
+Lotus Petal during the payment; Dark Ritual's floated mana pays it; a second Pact countering the target first: one
+trigger; two Pacts: two payments; Abrupt Decay can't be countered, the trigger still comes; Dazed or Forced, no trigger,
+Daze paid, a trigger; Painter's Servant); Personal Tutor (sorceries only, may find none and still shuffles, revealed on
+top for both players in every world, no sorcery: `PASS` only, then the Doomsday it found is drawn); Flow State (one in
+hand and two on the bottom in either order; the bottom cards known to the caster only; two with an instant and a
+sorcery; two instants, two sorceries or one instant: one; one or two cards in the library; an empty library);
+interactions (Doomsday then Thassa's Oracle with one card: a win, with five: no win; then Brainstorm, Ponder, Consider;
+Lion's Eye Diamond in response puts the hand where Doomsday finds it; Murktide Regent's trigger for each instant or
+sorcery card leaving the graveyard, to the library or to exile). `tools/untested_cards.py` now reads the legacy registry
+too: 552 supported (6 legacy), none untested. `docs/rulings.md` regenerated (1,616 rulings, the 6 new class a, all
+tested).
+
+**`FUZZ_POOL=dd_a`** (`engine/tests/fuzz.rs`, `DD_A_DECK`): the Doomsday 60 with the other lanes' seven cards (Edge of
+Autumn, Misdirection, Street Wraith x2 each, Cavern of Souls) swapped for two more Pacts of Negation, Flow States and
+Personal Tutors and an Island (4 Doomsday, 3 Pact, 4 Personal Tutor, 3 Flow State; checked by
+`az::constructed::check`), against the Delver 60 in either seat, one game in three the Doomsday mirror; constructed
+play's card table; games only. With 200 games or more each of the four must have been seen on the stack and a Pact
+trigger put there. (A spell cast and resolved within one action, every other decision answered by `auto_single`, is
+not seen: a Pact's triggers can outnumber its casts.)
+
+**Results** (desktop, `E:/cargo-target/mtg-zero/doomsday-a`, normal release profile). Code at 021228e; the next commit adds this
+section, one test (`doomsday_the_searchers_worlds_agree_on_what_it_knows`) and `docs/rulings.md` regenerated for the
+Pyroblast test, no engine code:
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): 2,304
+  passed, 1 failed, 22 ignored; the failure, `constructed.rs`'s card-table test, counted two legacy cards: it reads the
+  legacy IR's size now and passes (7), as `cards_doomsday_a` does with its 44th test (added after the run: the
+  searcher's worlds agree on its view, failing without the reading above): 2,306 passed. `az` 48 passed (the
+  legacy registry and identities, the public-state gate: no new field).
+* **Behaviour digests unchanged**: full **53839c837bbaf034**, `DIGEST_ENCODING=0` **208c723daced22fe**,
+  `DIGEST_ENCODING=v5` **dc33538c0497dbf0** (each equal to `tests/data/digests.txt`; no `DIGEST_WRITE`).
+* **`FUZZ_POOL=dd_a FUZZ_GAMES=20000`** (the desktop, four shards of 5,000, `FUZZ_FIRST` 0/5000/10000/15000; the
+  Mac was busy with a run's evaluation and the fuzz farm): no failure; 20,000 games (wins 9,919 / 9,910, 171 drawn at
+  the turn cap, none aborted), 20.0 turns and 200.7 decisions a game, 6,650,081 options completed; seen on the stack:
+  Doomsday 4,201 times, Pact of Negation 14,279, Personal Tutor 14,633, Flow State 6,198; Pact of Negation's triggers
+  16,189. Every check of the default mode (invariants, clones, `determinize` for both viewers with the view, known
+  cards, clouds and the information-set check, every option completed, the encodings finite). (The first 300-game
+  try failed the information-set check at seed 98: the found cards' places; fixed before 021228e, the reading above.)
+* **Under the `fuzz` profile** (debug assertions: the refreshed decision equal to the asked one at every
+  `determinize`), `FUZZ_POOL=dd_a`, 1,000 games: no failure. **`FUZZ_CHANCE=10`**, 600 games: no failure (12,338
+  chance walks, 5,311 replays whose outcome the force changed). **`FUZZ_BELIEF=2`**, 600 games: no failure.
+* **`FUZZ_POOL=delver FUZZ_GAMES=4000`** (the regression check): no failure (4,000 games; seen on the stack: Murktide
+  Regent 2,031 times, its trigger 84, Prismari Charm 2,937).
+* `bash tools/build_py.sh`, `python -m pytest -q tests`: 268 passed, 1 skipped, 1 failed:
+  `test_mac_remote.py::test_a_remote_eoe_evaluation_logs_its_games` timed out (600 s, the desktop loaded with the fuzz
+  shards); alone it passes (194 s): 269 passed, 1 skipped. `python -m pytest tools/codegen` (generated.rs current): 2
+  passed.
+* mtg-bot (`feature/doomsday-a-ir` a544a075): `cards roundtrip --pool cube legacy eoe` passes; the export of a544a075
+  is the committed `data/cards` byte for byte; the full suite (`pytest -n 8 --no-cov`) has 50 failures, 48 among the
+  baseline's (a run of f4f2d663's `git archive` in a scratch directory fails 97 there, a superset of the 48), one
+  fixed since (the legacy pool's sidecar test, which pinned two cards) and one timing test that passes alone
+  (`test_v2_report_async::test_post_returns_202_before_background_fetch_completes`).
+* No docs/shortcuts.md entry; no layout, encoding, identity-scheme or zero-core change.
+
+### 124.2 Lane B: Misdirection, Flusterstorm, Cavern of Souls (branch `doomsday-b`, mtg-bot `feature/doomsday-b-ir`)
+
+**Why.** Lane B of the Legacy Doomsday deck (MTGGoldfish 8027957; the deck's other cards were
+supported already, lanes A and C took the rest of its new cards): Misdirection (2 main), Flusterstorm
+(2 side) and Cavern of Souls (1 main), each faithful to its Oracle text and its official rulings, in
+constructed play's table (`CardDb::constructed`). From main 60397f3, mtg-bot from `feature/eoe-ir-fixes`
+f4f2d663.
+
+#### The IR (mtg-bot `feature/doomsday-b-ir` f48104b9)
+
+* The three cards' Scryfall records (E:/mtg-zero-scratch/doomsday/raw/scryfall_doomsday_new.json, the
+  same printings as the roto pool's two) appended to the legacy pool (`data/legacy_delver.json`, its
+  sheet and sidecar: 5 cards).
+* Flusterstorm and Cavern of Souls already parsed (roto grammars): `CounterSpell` (`spell_filter`
+  `ObjectOr(value_predicates.HasCardType Instant, ... Sorcery)`, `unless_pays` "{1}") with `has_storm`;
+  `enters_choosing_creature_type`, `produces` {C} and the mana ability
+  `AddAnyColorManaForChosenCreatureType` (an `AddManaToPool` whose class is the sentence "Add one mana
+  of any color. Spend this mana only to cast a creature spell of the chosen type, and that spell can't
+  be countered": `produces` any 1, `makes_spell_uncounterable`; the lowering checks every field).
+* Misdirection didn't: "Change the target of target spell with a single target" had no grammar (its
+  alternative cost already parsed as Pyrokinesis', `alt_cost_exile_from_hand` a blue `CardFilter`). New:
+  `cards/parser/legacy_stack.py` (the last fallback of `_parse_effect`: "change the target of target
+  <spell phrase> with a single target", the spell phrase the counterspells' `parse_spell_phrase`) and
+  the effect `ChangeTheTargetOfTargetWithASingleTarget(kinds, spell_filter)`
+  (`effects/generic/legacy_stack.py`; card-IR data: the Python engine's spell stack items carry no
+  targets, so it raises, SEARCH_LIMITATIONS "Legacy pool" 2). The "... spell or ability with a single
+  target" shape is left unclaimed: claiming it changes Untimely Malfunction's printing in the roto, eoe
+  and all pools (its modal parses lossily today, to `DestroyTargetArtifact` alone; with the second mode
+  claimed it stops parsing) - a defect of mtg-bot's, outside mtg-zero's tables.
+* Export `cards export-ir --pool cube legacy eoe`: schema `12935fd48060f815...` (was `1cbe33073b1b...`),
+  three classes more in it (`ChangeTheTargetOfTargetWithASingleTarget`,
+  `AddAnyColorManaForChosenCreatureType`, `value_predicates.HasCardType`). `powerlsv.ir.json` and
+  `eoe.ir.json` are the previous files byte for byte but `schema_sha256` (checked card by card);
+  `legacy.ir.json` 5 cards. The roto, eoe, cube and all pools' claimed printings: the same (compared card
+  by card with f4f2d663). `cards roundtrip --pool cube legacy eoe roto` passes. `generated.rs`
+  regenerated.
+
+#### What was built (engine)
+
+| Part | Where | What |
+|---|---|---|
+| "Change the target" | `doomsday_b.rs` (`DoomsdayB::ChangeTheTarget`, `Ext::DoomsdayB`), `lower/doomsday_b.rs` | the target spell's one target changed as Misdirection resolves (a `NewTarget` decision of Misdirection's controller, the candidates paged by range, no `PASS`) |
+| "a spell with a single target" | `Filter::SingleTarget` (db.rs; cast.rs `card_matches`) | the spell's stack item has exactly one target instance |
+| "instant or sorcery spell" | `lower/filter.rs` | `value_predicates.HasCardType` lowers as `HasCardType` (the object's card types) |
+| "As this land enters, choose a creature type" | `CardDef::dd_b.chooses_creature_type`, `Task::ChooseCreatureType`, `Mark::ChosenCreatureType(u16)`, `doomsday_b::CREATURE_TYPES_CR` | one of CR 205.3m's 367 types (the CR of 2026-11-06, sorted) by `ask_number` (NUMBER 0-30, then "31 or more" and two base-32 digits: at most three decisions, every type by exactly one sequence); `ChooseMode`, the land's controller |
+| "Spend this mana only to cast a creature spell of the chosen type, and that spell can't be countered" | `db::SPEND_CHOSEN_CREATURE_TYPE`, `doomsday_b::{with_type, type_of, Allow, CreatureTypes}`, `Game::spend_of_source`, `Game::creature_type_allow` | below |
+| The chosen type, encoded | `az/encode.rs` (`perm::CHOSEN_CREATURE_TYPE`) | layout v6's permanent status 133-141 |
+| The guard | `az::MtgSpec::parse`, `doomsday_b::makes_chosen_type_mana`, `public_state::CHOSEN_TYPE_MANA_GAP` | a network-driven game with Cavern of Souls is refused on layout v6 (below) |
+
+**The restriction, uncapped.** A spending restriction is a `Spend` (u32; was u8, full: 7 purposes and
+the rider): `SPEND_*` bits 0-6, the rider `MANA_UNCOUNTERABLE` bit 7, and `SPEND_CHOSEN_CREATURE_TYPE`
+bit 8 with the chosen type in bits 16-24 (index + 1; 0: the source chose none). Cavern's ability says
+bit 8 alone; the mana it makes, as a payment's source class or floated with priority, carries its
+source's type (`spend_of_source`). What a payment satisfies is an `Allow`: the purposes and, paying for
+a creature spell, its creature types among the types some mana could have now (the permanents' chosen
+types and the pool's: `creature_type_allow`; any other type matters to no payment, and with no Cavern
+the set is empty at no cost). `eoe_w2::spendable` checks the type against the set. Mana of a type the
+spell has pays only the spell's cost (its unit tag `FOR_COST`, as a creature tapped for convoke: never
+a mana ability's cost within the payment); of another type it is no candidate. In the pool each type
+is a kind of its own (`pool_restr`), so any number of types float at once and the payment's choice of
+which mana pays (`PayPool`) sees them apart. The rider is Delighted Halfling's (`finish_payment`: a
+picked source with `uncounterable`, or rider mana of the pool spent). A Cavern that chose no type (it
+entered without its "as enters" choice: a copy effect, the test kit) makes mana spendable on nothing,
+not unrestricted mana.
+
+*Found on the way and replaced:* a first version gave each chosen type a slot bit of a game-wide table
+(23 slots); a flicker or bounce loop can make a pool hold any number of types in one step (below), so
+that table had a cap. The type now travels with the mana.
+
+#### The encoding: layout v6, and the guard (the maintainer's decisions, 2026-11-11)
+
+**The chosen type** is public state on the permanent: layout v6's spare permanent status 133-141,
+`perm::CHOSEN_CREATURE_TYPE` = its `CREATURE_TYPES_CR` index + 1 in nine binary digits (least
+significant first); exact (`cards_doomsday_b.rs::the_chosen_creature_type_is_encoded_on_the_permanent`,
+the public-state gate's "a creature type was chosen as a permanent entered", `V6_FIXED`). Status
+142-143 stay spare; the g6 per-player spares 8-31 stay spare.
+
+**Cavern's mana floating is not in layout v6.** Its type goes with it (CR 106.6), and nothing caps
+the number of types one player's pool holds at once: each time a Cavern enters it is a new object
+(400.7) and makes a new choice (614.12), and the mana stays until the step ends (106.4, 500.4) - tap
+it, return or flicker it, put it back, tap again, as often as resources allow. v6's spares (75 global
+floats outside v5's) can't hold that exactly. The exact encoding is layout v7: v6 and one appended
+global block, 2 players x 5 colours (the lowering takes the restriction only on one mana of any colour,
+with its rider) x 368 types (the 367, then "the source chose none"), 3,680 floats at 44,212, the amount
+/ 4 squashed; a v6 network widens onto it exactly (zero-core's `net.widen` maps global blocks by name).
+It is built and committed on branch `doomsday-b-v7` (on this branch; `mtgz/az/layout_v7.json`, the
+`mtg_eoe` game kept on layout v6, the widen and guard tests, `DIGEST_ENCODING=v6`), and lands later as
+part of one larger layout (the user's decision: the Doomsday cards merge on layout v6 now).
+
+**The guard.** Until then, on this layout v6 build, every network-driven game whose decks or sideboards
+hold a card that can make such mana (`doomsday_b::makes_chosen_type_mana`: a mana ability with
+`SPEND_CHOSEN_CREATURE_TYPE`) is refused where every one starts, the engine's spec (`MtgSpec::parse`,
+so zero-core's `SearchGame::parse_spec`: self-play, evaluation, h2h, replays, the search smoke): "mtg
+spec: p0's deck: Cavern of Souls' floating mana needs layout v7 (ENGINE.md 124.2)". The engine never
+encodes it (`encode_features` leaves such pool mana out of `POOL_KINDS`). Rules tests and the fuzzer,
+which drive no network, play Cavern. The public-state gate records it as its one next-layout gap,
+named (`public_state::CHOSEN_TYPE_MANA_GAP`, "mana in a pool is restricted to creature spells of a
+chosen type"; the gate asserts exactly that gap), its reason naming the refusal and the test that
+asserts it (`tests/az.rs::cavern_decks_are_refused_to_networks_on_layout_v6`: Cavern in either deck or a
+sideboard refused, the Delver mirror accepted). Removed when layout v7 lands.
+
+#### The rules
+
+| Text | Rule | How |
+|---|---|---|
+| "You may exile a blue card from your hand rather than pay this spell's mana cost" | 118.9, 601.2a, 601.2f | Pyrokinesis' alternative cost (`ChooseAltCost`, `ExileCost`): another blue card (the spell is on the stack as its costs are paid); no mana, no life |
+| "target spell with a single target" | 115.9a | one target chosen as it was put on the stack, each instance counted (the same player chosen twice by two words "target" is two), whatever its legality now; a spell (a copy too), never an ability |
+| "Change the target of" | 115.7a, 115.3, 115.5, 608.2b | as it resolves, Misdirection's controller chooses among the targets legal for that spell's requirement, from that spell's controller and source (hexproof, protection, "another"), other than its current one and never itself; Misdirection, still on the stack, is a candidate; with none, nothing changes; otherwise the change is not optional; the new target "becomes the target" (ward) |
+| "Counter target instant or sorcery spell unless its controller pays {1}" | 701.5, 118.12, 605.3a | `CounterSpell` with `OfferPay` (Daze's): the spell's controller decides on resolution, may activate mana abilities to pay; a spell that can't be countered is still asked and is not countered |
+| Storm | 702.40a, 707.10, 707.10c | the cube's storm (Brain Freeze): a cast trigger copying it once per spell cast before it this turn by any player (countered ones and ones cast from other zones too); the copies aren't cast; each copy's target may change, its own |
+| "As this land enters, choose a creature type" | 614.12, 205.3e, 205.3m | above; the choice is public (`Mark::ChosenCreatureType`, encoded) |
+| "{T}: Add {C}." | 106.1, 605.1a | an ordinary mana ability (no restriction, no rider) |
+| "{T}: Add one mana of any color. Spend this mana only to cast a creature spell of the chosen type" | 106.6, 205.3m | above; an Adventure creature cast as its Adventure is an instant spell (715.3): not of any type |
+| "... and that spell can't be countered" | 101.2, 106.6 | `Mark::Uncounterable` when the mana is spent on any cost of the spell; counterspells still target it and do nothing |
+
+Readings taken:
+
+* **The change is mandatory** when another legal target exists ("change the target", 115.7a: "each
+  target can be changed only to another legal target"; Misdirection's ruling f1ca52a5 "if there is no
+  other legal target ... this does not change the target"), unlike "you may choose new targets" (115.7d).
+* **Legal for the target spell**: its own requirement, its controller (hexproof, "target creature an
+  opponent controls") and its source (protection), the total of a requirement with a mana-value total
+  (601.2c); a divided spell keeps its division (115.7f: one target, all of it).
+* **"With a single target" counts instances as put on the stack** (115.9a), not distinct objects
+  (115.9c's "targets only" counts those): Test Twin Shock at one player twice is not a legal target.
+* **Cavern's restriction is the type its source chose as the mana was made**: a Cavern that leaves and
+  comes back is a new object with a new choice; its earlier mana keeps the earlier type.
+* **A source with no chosen type**: "the chosen type" names nothing, so no spell is of it; its mana is
+  spendable on nothing (not on anything).
+* **Kicker and other additional costs** (ruling 919d28a6): the payment of a spell is one payment, so
+  Cavern's mana spent on any of it makes the spell uncounterable. The ruling's second case (an
+  additional cost of a spell cast "without paying its mana cost") is the same rule: no card of
+  constructed play's table casts a creature spell for free with an additional mana cost, so it is not
+  tested separately.
+
+#### Tests, rulings
+
+`tests/cards_doomsday_b.rs` (28 tests; `tests/az.rs` one more, the guard): Misdirection (its alternative cost, Bolt, Thoughtseize, Force
+of Will redirected onto Misdirection itself and fizzling, Fatal Push both ways, Daze onto a spell below
+it, a single target illegal now, Test Twin Shock's two instances, ward on the new target and not on
+Misdirection, a Flusterstorm copy's target, no target without a single-target spell); Flusterstorm (pays
+and declines with a mana ability during resolution, a creature spell is no target, storm with 8 spells of
+both players including a countered one and a flashback cast, copies not cast, each copy's new target, a
+second Flusterstorm's count, the storm trigger countered by Tishana's Tidebinder, copies surviving the
+original's counter); Cavern of Souls (every one of the 367 types by its decisions, Oracle uncounterable
+against Force of Will, Counterspell and Daze, only the chosen type's creature spells, the {C} without the
+rider, floated mana's type and rider, no other spell or cost paid by it, two types in one pool, a Cavern
+with no type, Brazen Borrower and not Petty Theft, Thieving Skydiver's kicker, Flusterstorm and Force of
+Negation can't target, Force of Will can and fails; the chosen type on the permanent, encoded). Every ruling of the three cards
+tested (`// ruling:`): Misdirection's 8 (all new: triage class a), Flusterstorm's 5 (the cube's storm
+rulings), Cavern's 2 (new); `data/rulings/legacy.rulings.json` refetched (5 cards), `docs/rulings.md`
+regenerated (1,627 rulings, 1,245 class a, every one tested). `tools/untested_cards.py` reads the legacy
+registry too: 551 supported, none untested.
+
+#### Checks
+
+* **Digests** (`cargo test --release -p engine --test digest -- --ignored --nocapture`; layout v6, no
+  layout change): full **53839c837bbaf034** (every one of the 2,500 games equal to
+  `tests/data/digests.txt`), `DIGEST_ENCODING=0` **208c723daced22fe**, `DIGEST_ENCODING=v5`
+  **dc33538c0497dbf0**: each main's (60397f3), on b4360e1 and again on this commit (full and `=0` measured on it). The `Spend`
+  widening, the `Allow` payments and the rules change no game of the existing pools.
+* **Fuzz** (the desktop, 4 shards of 5,000, on b4360e1; the Mac was busy with the maintainer's races and
+  fuzz farm; the later commits change comments, the guard's message and a test):
+  `FUZZ_POOL=dd_b FUZZ_GAMES=20000`: no failure; 20,000 games (wins 9,533 / 9,772, 695 drawn at the turn
+  cap, 0 aborted), 36.4 turns and 467 decisions a game, the longest 1,232 actions, 18,218,209 options
+  completed; Misdirection cast 17,233 times (5,721 new-target decisions), Flusterstorm 10,048 (14,341
+  copies), 35,103 Caverns' types chosen, 598,359 decisions with chosen-type mana floating, 259 creature
+  spells that couldn't be countered (Orcish Bowmasters: random play names the first 31 types far more
+  often than the rest). `FUZZ_POOL=delver FUZZ_GAMES=4000`: no failure (1,924 / 1,907, 169 drawn;
+  Murktide Regent cast 2,055 times, its trigger 88, Prismari Charm 2,977).
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`): 2,291 passed, 0 failed, 22 ignored (153 test binaries; `cards_doomsday_b` 28, `az` 49, `constructed` 7).
+* **The public-state gate** (`--test az`): 157 perturbations encoded, 4 deliberate limits, the one named
+  gap ("mana in a pool is restricted to creature spells of a chosen type": 15 positions applied, the
+  encoding unchanged, as the limit says), "a creature type was chosen as a permanent entered" encoded.
+* **mtg-bot** (`feature/doomsday-b-ir` c5d2a557: f48104b9 and a renumbered comment):
+  `cards roundtrip --pool cube legacy eoe roto` passes; the legacy, card-IR and pool tests (104) pass;
+  the new modules 100% covered; the full suite (`pytest -n 6 --no-cov`) 49 failed, each failing at
+  f4f2d663 too (an archive of it run alongside) but `test_fetch_cube`'s legacy-pool check, updated.
+* **Python**: `bash tools/build_py.sh`, then `python -m pytest -q tests` 269 passed, 1 skipped; `python -m pytest -q tools/codegen` 2 passed.
+* No docs/shortcuts.md entry; no approximation. Spare floats: permanent status 133-141 taken (142-143
+  spare); the g6 per-player spares 8-31 stay spare.
+
+### 124.3 Lane C: Edge of Autumn, Street Wraith, Leyline of the Void (branch `doomsday-c`, mtg-bot `feature/doomsday-c-ir`)
+
+**Why.** Lane C of the Legacy Doomsday cards (MTGGoldfish archetype "Legacy Doomsday", paper,
+deck 8027957; `E:/mtg-zero-scratch/doomsday/`): the main deck's two cycling cards and the
+sideboard's Leyline. Branch `doomsday-c` from main 60397f3; mtg-bot
+`feature/doomsday-c-ir` from `feature/eoe-ir-fixes` f4f2d663. No layout, encoding, identity-scheme
+or zero-core change; no docs/shortcuts.md entry.
+
+* Edge of Autumn {1}{G}, Sorcery: "If you control four or fewer lands, search your library for a
+  basic land card, put it onto the battlefield tapped, then shuffle. Cycling—Sacrifice a land."
+* Street Wraith {3}{B}{B}, Creature — Wraith 3/4: "Swampwalk. Cycling—Pay 2 life."
+* Leyline of the Void {2}{B}{B}, Enchantment: "If this card is in your opening hand, you may begin
+  the game with it on the battlefield. If a card would be put into an opponent's graveyard from
+  anywhere, exile it instead."
+
+**The IR** (mtg-bot `feature/doomsday-c-ir` 870228f5). The legacy pool (`data/legacy_delver.json`, its sheet and
+sidecar) gains the three cards' Scryfall records (the deck's fetch of 2026-11-11). Street Wraith and
+Leyline of the Void already parsed (mtg-bot's roto pool claims them: `PayLifeCost(2)` as the cycling
+cost's atom, `BeginGameOnBattlefield` and `GraveyardExileInstead { opponents_only }`); Edge of Autumn
+didn't. Two parameterized recognizers:
+
+* "Cycling—<non-mana cost>." (CR 702.29a; `roto_keywords.parse_hand_keyword_line`, replacing the
+  pay-life-only one): the cost's comma-separated pieces become `ActivationCost.extra_costs` atoms
+  (the atoms mtg-bot's hand-activation path pays): "Pay N life" -> `PayLifeCost`, any other piece
+  through the composable cost-atom grammar ("Sacrifice a land" -> `SacrificePermanentsCost(IsLand)`).
+  Street Wraith's printing is unchanged.
+* "if you control <N> or fewer <permanents>, <effect>" (`effects_ext`, the unified effect grammar's
+  condition phrasebook) -> `IfCondition(ControlsAtMost(<pred>, N), <effect>)`: Edge of Autumn is
+  `IfCondition(ControlsAtMost(IsLand, 4), SearchLibraryForBasicLandTapped)`.
+
+Every pool's claimed printings (cube, roto, eoe, all) are the previous ones card for card (compared
+per card with the branch point's export); `legacy` gains the three. `cards export-ir --pool cube
+legacy eoe`, `filter_eoe_ir.py`, `gen_card_ir.py`: schema `a681cd197ad862b8...` (was
+`1cbe33073b1b...`), 710 classes, one more: `PayLifeCost` joins the `CostAtom` category (the cube and
+EoE pools never used it). `powerlsv.ir.json` (546 cards) and `eoe.ir.json` (320) are the previous
+files card for card, `schema_sha256` aside; `legacy.ir.json` holds 5 cards (sorted by name, so
+`CardDb::constructed()` gives Murktide Regent and Prismari Charm other definition ids than before;
+their identities come from the registry by name and are unchanged). `cards roundtrip --pool cube
+legacy eoe` passes. No IR defect was found (240-259 unused).
+
+**Identities.** `engine/src/az/legacy_cards.txt` gains Edge of Autumn, Street Wraith, Leyline of
+the Void (548, 549, 550 on this branch; the integrated order puts lanes A and B's cards before
+them). Tests never hard-code them.
+
+**Rules** (new code in `engine/src/doomsday_c.rs` and `engine/src/lower/doomsday_c.rs`; additive
+edits elsewhere):
+
+| Text | CR | How |
+|---|---|---|
+| "Cycling—Pay 2 life", "Cycling—Sacrifice a land" | 702.29a, 602.2b, 601.2g-h, 118.3, 119.4, 701.21 | the existing hand abilities (`CardDef::hand_abilities`, `HAND_ABILITY` ids): instant speed, the discard and the other part are costs. `CostAtom::PayLifeCost` lowers to `Cost::life` (payable only with life >= 2; paying to 0 loses at the next SBA check, 704.5a), `SacrificePermanentsCost(IsLand)` to `SacCost { Type(LAND), n: 1 }`: any land its controller controls, tapped or not, the last one too; an untapped land may first be tapped for mana and then sacrificed (the cost pick's `ACTIVATE` option, ENGINE.md 86.2) |
+| Edge of Autumn's spell | 608.2c, 701.23a-b, 701.24, 614.1c | `IfCondition` -> `JumpUnless(Cond::ControlAtMost(Type(LAND), 4))` over `Op::Search` (a basic land card, onto the battlefield tapped, may fail to find, then the shuffle): the lands are counted as it resolves; with five or more nothing happens, no search and no shuffle (ruling 3079d582) |
+| Swampwalk (and the other basic landwalks) | 702.14a-e, 509.1b, 305.7 | `Kw::Plainswalk` .. `Kw::Forestwalk` (outside the encoding's keyword list, like shadow and infect: a printed keyword comes with its identity); `Game::can_block` refuses a block when `landwalk_unblockable`: the defending player (the blocker's controller) controls a land with the walked land type (`has_subtype`, layer 4: a nonbasic land under a "nonbasic lands are Mountains" effect is a Mountain only); the attacker's own lands and the blocker's own landwalk don't matter |
+| Leyline's opening-hand action | 103.6, 103.6a | the existing `Task::Opening` (Gemstone Caverns', ENGINE.md 31): after the mulligans the starting player, then the other, may put any number of such cards from their opening hand onto the battlefield, one per `ChooseHandCard` decision (`PASS` = no more); asked of a player whose (open) decklist holds one |
+| "If a card would be put into an opponent's graveyard from anywhere, exile it instead" | 614.1a, 616.1, 616.1e-f, 614.6, 700.4, 108.2b, 707.10a, 603.10a | `CardDef::opp_gy_exile` (`lower_zone_abilities`: only `opponents_only`, no tokens, no colours; other forms refused loudly); in `Game::replaced_dest` the ninth replacement effect (index 8, `can` widened to `u16`): a card (not a token, not a copy of a spell) going to the graveyard of a player an opponent of whom controls a permanent with the ability now (`abilities`: none if it lost its abilities), or had it as it left the battlefield earlier in the same simultaneous move (`Lki::opp_gy_exile`, recorded before the move). It leads to exile, the same result as Yawgmoth's Will's or flashback's (no choice between them); with Dauthi Voidwalker's void counter or Blightsteel Colossus's library the affected object's owner (controller) chooses (`Dest::Choose`, `ChooseReplacement`, the existing results). `SEEN_VOID` covers both cards; cost ordering (ENGINE.md 100.4.9) counts a Leyline leaving as a cost as changing destinations, as it did Dauthi |
+
+Readings taken:
+
+* **Discarded is still discarded** (ruling e64b1395): `Game::discard` records the discard event for
+  the card wherever the replacement put it, so "whenever you discard" abilities trigger (Inti) and
+  "if you discarded a nonland card" reads the card in exile (Norman Osborn's connive).
+* **Exiled creatures don't die** (ruling ef9cd497, CR 700.4): the `Dies` event is recorded only
+  for the destination after the replacements; tokens are not cards and still die (ruling 4226f05f:
+  a Pest's "when this token dies"). A copy of a spell ceases to exist (707.10a); the card is exiled.
+* **The Leyline's controller's own cards** go to their own graveyard; two Leylines of one player
+  are two effects with one result (no choice); each player's Leyline exiles the other's cards.
+* **Leaving together.** A card destroyed in the same event as the Leyline (Pest Infestation
+  destroying the Leyline and the opponent's Chromatic Star) is exiled whichever of the two moves
+  first: the replacement exists as the event begins (614.1a). The same last-known reading now
+  applies to Dauthi Voidwalker: before, a Voidwalker leaving earlier in a simultaneous move was
+  read from its printed definition, so one that had lost all abilities (The Wondrous Wasp) still
+  exiled the opponent's creatures dying with it (Wrath of God); `Lki::void_exile` records its
+  abilities as they were (a fix of a divergence reachable with cube cards; tested both ways; the
+  digests are unchanged).
+* **A stolen Leyline** (untested: no card of the two decks takes control of an enchantment): its
+  controller's opponents are the owner's side; leaving the battlefield it is still there as its own
+  destination is decided, so it exiles itself, as Rest in Peace does.
+* **The opening-hand question and hidden information.** Leyline uses Gemstone Caverns' question
+  unchanged (the orchestrator's decision, 2026-11-11): it is asked whenever the player's decklist
+  holds such a card; with none in the hand its only option is `PASS`, which `auto_single` answers
+  with a public `KEY_AUTO` (section 10's treatment of every single-option decision, recorded for
+  Gemstone Caverns in 55.4). The key affects only search trees rooted before the opening actions
+  (the play-or-draw and mulligan decisions), which branch on whether the hand holds one; it doesn't
+  affect `determinize` (past keys constrain no world) or the encodings. A Leyline begun on the
+  battlefield is public from then on (54.5's open-decklist worlds exclude it). If the auto-answer
+  treatment changes, it changes engine-wide.
+
+**Tests.** `engine/tests/cards_doomsday_c.rs` (37 tests): the definitions; Street Wraith's
+cycling at instant speed on the opponent's turn, at exactly 2 life (and losing at 0), not at 1, its
+discard triggering Inti before the draw; swampwalk against a basic Swamp, Underground Sea, Undercity
+Sewers and only Islands or Volcanic Island, the attacker's Swamps, a swampwalking blocker (702.14d),
+a blocked Wraith's damage; Edge of Autumn with four lands (basic land cards only, may fail, enters
+tapped), with five (no search, the library's order unchanged), cast with five then one sacrificed
+to another Edge's cycling in response (searches), no basic land in the library; its cycling over
+every land (the tapped one too), not without a land, the last land, a land first tapped for mana,
+the fetch land a Wasteland targets; Leyline's opening action (the starting player first, two
+Leylines one decision each, then the other player; a Leyline bottomed by the London mulligan not
+offered; a deck without one never asked); the replacement on every path of the two decks: resolved
+and countered spells, Force of Will (its pitched card exiled as a cost), Thoughtseize's discard,
+Street Wraith cycled under it (and Inti), the cleanup discard, the legend rule, Lightning Bolt
+killing Sanguine Evangelist (no Bat) and a Pest token (its life), Consider's surveil, Chromatic
+Star sacrificed for mana (no draw), Lotus Petal, a fetch land, Lion's Eye Diamond and the
+discarded hand, Brainstorm's put-back (the library), Murktide Regent with nothing to delve, Titania
+not triggering on Edge's sacrifice, a replicated Lose Focus's copy, two Leylines on one side and
+one on each, Dauthi Voidwalker and Blightsteel Colossus (the owner chooses), Yawgmoth's Will (no
+choice), the simultaneous destruction in both orders, the Voidwalker without abilities. The five
+rulings (`data/rulings/legacy.rulings.json`, fetched with `tools/fetch_rulings.py`; triaged in
+`data/rulings/triage.tsv`) are tested; `docs/rulings.md` regenerated (1,615 rulings, 1,233 class a, every one tested).
+`tools/untested_cards.py` now lists the legacy cards too: 5 legacy cards, none untested.
+
+mtg-bot: `tests/test_doomsday_c_cards.py` (16: the printings, the cost and condition grammars, the
+Python engine's Edge of Autumn and its cycling), the legacy pool's pinned lists.
+
+**Checks** (the code at 718f486; the commit after it is this section):
+
+* Full engine suite (`cargo test --release -p engine -p card_ir --no-fail-fast`, the desktop,
+  shared with lanes A and B): **2,299 passed, 0 failed, 22 ignored** (`az` 48, `limits` 13,
+  `hidden` 28, `support` 8, `cards_doomsday_c` 37, `cards_legacy` 24, `constructed` 7; the
+  constructed table's test now counts the legacy registry instead of two cards).
+* Behaviour digests unchanged: full **53839c837bbaf034** (every one of the 2,500 games equal to
+  `tests/data/digests.txt`), `DIGEST_ENCODING=0` **208c723daced22fe**.
+* `FUZZ_POOL=dd_c` (`engine/tests/fuzz.rs`; the Doomsday 60 with the cards no branch supports
+  yet swapped for Leyline of the Void x4, Street Wraith and Edge of Autumn x2 more, Duress, Fatal
+  Push and a Forest; against the Delver 60 in either seat and the mirror, by seed): **20,000 games,
+  no failure** (the desktop, 8 shards of 2,500 seeds over 0..19,999, 186-191 s each; the Mac was
+  busy with the S4 races and the fuzz farm): wins 8,509 / 8,455, 3,036 drawn at the turn cap, none
+  aborted, 43.7 turns and 478.0 decisions a game, the longest game 1,052 actions, 16,120,500
+  options completed (27.7 million decisions after them); Edge of Autumn cast 1,033 times and cycled
+  51,780, Street Wraith cast 244 and cycled 22,747, 7 blocker decisions facing a swampwalker while
+  controlling a Swamp (checked: never offered it), Leyline of the Void on the battlefield as the
+  first turn began in 4,338 games and at some time in 9,326. Every check of the default mode
+  (invariants, clones, `determinize` for both viewers, the encoding, options completed in the game
+  and in the worlds). The binary's other tests with `FUZZ_POOL=dd_c` (300 games, the replays)
+  pass.
+* `FUZZ_POOL=delver FUZZ_GAMES=4000` (4 shards): no failure; wins 1,924 / 1,907, 169 drawn, 37.0
+  turns and 383.3 decisions a game, 2,390,436 options completed; Murktide Regent cast 2,031 times,
+  its trigger 84, Prismari Charm 2,937.
+* `bash tools/build_py.sh`, `python -m pytest -q tests`: 268 passed, 1 skipped, 1 failed:
+  `test_mac_remote.py::test_a_remote_eoe_evaluation_logs_its_games` hit its 600 s subprocess timeout
+  while the engine suite built beside it; alone it passes (62 s). `python -m pytest tools/codegen`
+  2 passed; `python tools/rulings_doc.py --check` passes.
+* mtg-bot (870228f5): `cards roundtrip --pool cube legacy eoe` passes; the full suite (`pytest -n 6
+  --no-cov`) 49 failed, 21,096 passed: 48 of the 49 fail at the branch point f4f2d663 too (run by
+  name in this worktree checked out there; the cross-engine parity, fingerprint and coverage-doc
+  tests of W6's list); the 49th (`test_spacecraft_phase_4_cycle_2_flip.py::
+  test_eternity_elevator_admits_at_loader_admits_helper`) passes alone and with its module (an
+  xdist ordering flake).
+* `docs/card_ir.md` ("Current numbers") is left to the merge: lanes A and B change the schema too,
+  and the integrated export replaces all three files at once.
+
+### 124.4 The lanes merged; the deck and `FUZZ_POOL=doomsday` (branch `doomsday`, mtg-bot `feature/doomsday-ir`)
+
+Branch `doomsday` from main 37fa30b (60397f3, the lanes' branch point, and S4a v2's two commits: Python and docs only;
+its `engine`, `card_ir`, `data/cards` and `third_party` trees are 60397f3's). The lanes merged in their order, each its
+own merge commit: A (`doomsday-a` d47b197: c2b5bd3), B (`doomsday-b` 4f1a30b: 726faea), C (`doomsday-c` e0c7855:
+18a263c). mtg-bot `feature/doomsday-ir` from `feature/eoe-ir-fixes` f4f2d663, the three IR branches merged likewise
+(`feature/doomsday-a-ir` a544a075: 9c379413, `-b-ir` c5d2a557: 8a77d63e, `-c-ir` 870228f5: 1af29e64). Not merged:
+`doomsday-b-v7` and its snapshot (layout v7 lands later, 124.2). Layout v6, no encoding or identity-scheme change.
+
+**mtg-bot.** Three conflicts. The legacy pool's data (`data/legacy_delver.json`, its sheet and sidecar): the union of
+the lanes' Scryfall records as each fetched them, the Delver mirror's two first, then A's, B's and C's (the sidecar
+counts 12, lane A's fetch time, the latest). The pinned card lists of `test_fetch_cube.py` and
+`test_legacy_creatures.py`: the union. And `effects._parse_effect`'s very last fallback, which lanes A and B both
+took: chained, A's `legacy_spells` ("at the beginning of your next upkeep, <effect>", "pay <cost>. If you don't,
+<effect>") then B's `legacy_stack` ("change the target of target <spell> with a single target"). Their phrases are
+disjoint, and A's recursive parse of the inner effect rejects a targeting one, so B's recognizer claims nothing inside
+A's. Lane C's two recognizers (the non-mana "Cycling—<cost>", which replaced the pay-life-only one, and the "if you
+control <N> or fewer <permanents>" condition) are in other grammars and merged without a conflict. The export shows
+that no recognizer shadows another: every pool's claimed printings are unchanged and each legacy card's IR is its
+lane's.
+
+**The export** (`cards export-ir --pool cube legacy eoe` from 1af29e64, `filter_eoe_ir.py`, `gen_card_ir.py`;
+docs/card_ir.md, "Current numbers"): schema `2b73853e6d15...`, 717 classes, exactly the union of the lanes' additions
+(A's four classes and `DelayedStep.your_upkeep`, B's three, C's `PayLifeCost` in the `CostAtom` category; the `Effect`
+category the union of A's and B's members). `powerlsv.ir.json` and `eoe.ir.json` are main's files byte for byte but
+`schema_sha256` (compared card by card and as bytes); `legacy.ir.json` holds exactly the 12 legacy cards, each card's
+IR equal to its lane's export. `cards roundtrip --pool cube legacy eoe roto` passes (546, 12, 483 and 849 cards); the
+lanes' new test files and the pool tests (`test_legacy_spells.py`, `test_legacy_stack.py`, `test_doomsday_c_cards.py`,
+`test_legacy_creatures.py`, `test_fetch_cube.py`, `test_card_ir.py`, `test_pools.py`): 139 passed. The full suite
+(`pytest -n 6 --no-cov`, 2,246 s): 18,650 passed, 48 failed, 24 skipped, 106 xfailed, 1 xpassed. The 48 are lane A's
+48 pre-existing failures (124.1); run by name at f4f2d663 (the worktree checked out there), 47 of them fail, and the
+48th (`test_spacecraft_phase_4_cycle_2_flip.py::test_eternity_elevator_admits_at_loader_admits_helper`) passes with
+its module on the merged branch: lane C's xdist ordering flake (124.3).
+
+**mtg-zero's conflicts.** All additive; no two lanes changed one rule differently, so no design decision was needed.
+
+| File | Resolution |
+|---|---|
+| `data/cards/*`, `card_ir/src/generated.rs` | the integrated export, from merge B on (so merge B alone doesn't build: its schema has lane C's `PayLifeCost`, whose lowering comes with merge C) |
+| `engine/src/az/legacy_cards.txt` | A's four, B's three and C's three after the Delver two: identities 546..557 |
+| `lower/effect.rs` | the effect catch-all chains lane A's `lower_effect_dd_a`, then lane B's `lower_effect_doomsday_b` |
+| `program.rs` (`resolve_ext.rs` merged by git) | `Ext::DdA` and `Ext::DoomsdayB` both, in every match |
+| `lib.rs` (`lower/mod.rs` merged by git) | every lane's modules |
+| `tests/constructed.rs` | one registry-derived card-table test (each lane had rewritten the legacy count): every registry line a card of constructed play's table at `LEGACY_BASE` + its line, the registry exactly the legacy IR's cards (their count and each card), the first two still 546 and 547 |
+| `tests/fuzz.rs` | `PoolMode` keeps `DdA`, `DdB` and `DoomsdayC` (pools `dd_a`, `dd_b`, `dd_c`); `constructed_mode()` covers them, `delver` and `doomsday` (lane A's `delver_mode() \|\| dd_a_mode()` tests folded into it); lane C's deck, counters and report spliced in whole; the module docs gain `dd_c`'s line (the lane wrote none there) |
+| `tools/untested_cards.py` | lane A's version: the registry joins the supported list (lane B's is the same; lane C's second listing dropped) |
+| `data/rulings/legacy.rulings.json`, `triage.tsv`, `docs/rulings.md` | the rulings the union of the lanes' files in the legacy pool's order (12 cards, 31 rulings), the triage rows of all three; `docs/rulings.md` regenerated (`tools/rulings_doc.py`): 1,638 rulings (1,282 distinct), 1,256 class a, every one tested |
+| `docs/ir_defects.md` | lane A's section T (entry 200, fixed), lane B's relettered U (entry 220); lane C found none |
+| `docs/card_ir.md` | "Current numbers" for the integrated export (the lanes' interim exports never reached main) |
+| `docs/ENGINE.md` | main's 111, then this section; the lanes' 110 / 110.1 / 110.3 renumbered 124 / 124.1 / 124.3 here, in docs/ir_defects.md and in the 34 code comments and fuzz doc lines they wrote |
+
+Files git merged without a conflict, read where two lanes touched the same code: `cost_order.rs` (B's
+`Filter::SingleTarget` reads nothing; C's Leyline beside Dauthi Voidwalker among the destination changers),
+`db.rs` (B's `Spend`, A's `DelayedWhen::YourNextUpkeep`, C's landwalk keywords, `opp_gy_exile` and its `SEEN_VOID`),
+`game.rs`, `triggers.rs` (C's `Lki` fields, A's delayed trigger), `lower/activated.rs` (B's `Spend`-typed mana
+restriction and Cavern's mana ability, C's `PayLifeCost` atom), `lower/printing.rs` (B's
+`enters_choosing_creature_type`, C's `zone_abilities` and landwalk). No identical double-add (99.6): the workspace
+builds without an error or a warning.
+
+**The deck** (`data/decks/doomsday_8027957.json`, `.txt`; `az::constructed::{LEGACY_DOOMSDAY, LEGACY_DOOMSDAY_EXPORT}`,
+`Decklist::legacy_doomsday`; `mtgz.az.decklists.LEGACY_DOOMSDAY`). The `.txt` is the export verbatim: the archetype
+page's export field (`deck_input[deck]`, read 2026-11-11, since `/deck/download/8027957` is behind a Cloudflare
+challenge), with MTGGoldfish's `sideboard` line before the 15 (`parse_export` reads it beside MTGO's blank line). The
+`.json` has the page's provenance, "Sultai Doomsday" by wonderPreaux, North American Eternal Weekend - Legacy
+Championship, 2026-10-31, 7th place (11-2-2), paper (deck source melee.gg), and the 60 + 15 by the card table's names
+(Tamiyo by her front face in the export, `export_names`, as the Delver deck). All 75 cards are supported in constructed
+play (Voice of Victory, Duress, Fatal Push and Force of Negation are cube cards): the deck has eight of the ten new
+cards, the sideboard Flusterstorm and Leyline of the Void (and Murktide Regent). Tests:
+`constructed.rs::the_doomsday_75_and_its_provenance` (the export equals the JSON; every card supported; CR 100.2a /
+100.4a over the deck and the sideboard together: Flow State's one and one pass, three more in the sideboard are five
+and refused; at most `MAX_DECK`; the legacy cards in it in the registry's order; the spec refuses the deck on layout
+v6, Cavern of Souls, 124.2: network play of this deck waits for layout v7), and
+`tests/test_delver.py::test_the_doomsday_deck_and_its_loader` (the Python loader, the engine's refusal).
+
+**`FUZZ_POOL=doomsday`** (`engine/tests/fuzz.rs`): the real Doomsday 60 against the Delver 60 in either seat and the
+Doomsday mirror (`seed % 3`), best-of-one without sideboards, constructed play's table; every check of the default
+mode. It counts the legacy cards' spells on the stack (and Thassa's Oracle), Pact of Negation's trigger, Edge of
+Autumn's and Street Wraith's cycling, Murktide Regent's trigger, Misdirection's new-target decisions, Caverns' creature
+types and uncounterable creature spells; with 200 games or more the deck's spells, Pact's trigger, both cyclings, a new
+target and a Cavern's type must have been seen (Murktide Regent and Prismari Charm on the Delver side), with 2,000 or
+more an Edge of Autumn and a Street Wraith cast too. (Every pool's counters are process-wide, so a run's figures
+include the games of the binary's replay test that finish before the report, 60 a process: the lanes' Delver counts
+differ by that, not by their games.)
+
+**Checks** (code at 7fbb1d9, the desktop unless said; the next commit adds this subsection only):
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): 2,373
+  passed, 0 failed, 22 ignored (`az` 49, `constructed` 8, `cards_doomsday_a` 44, `cards_doomsday_b` 28,
+  `cards_doomsday_c` 37, `cards_legacy` 24).
+* **Behaviour digests equal to main's**: main 37fa30b (measured there) full **53839c837bbaf034**, `DIGEST_ENCODING=0`
+  **208c723daced22fe**, `DIGEST_ENCODING=v5` **dc33538c0497dbf0** (the lanes' values at 60397f3); 7fbb1d9 the same
+  three, every game equal to `tests/data/digests.txt`.
+* **The public-state gate** (`--test az`): 157 perturbations encoded, 4 deliberate limits, exactly one gap for the next
+  layout, lane B's ("mana in a pool is restricted to creature spells of a chosen type", 15 positions applied, the
+  encoding unchanged), "a creature type was chosen as a permanent entered" encoded.
+* **Fuzz of the merged code** (no failure in any; per pool the games and what was seen):
+  * `FUZZ_POOL=doomsday`, 20,000 games (4 shards of 5,000): wins 9,725 / 9,693, 582 drawn at the turn cap, none
+    aborted, 29.5 turns and 316.3 decisions a game, 11,288,752 options completed (21.3 million decisions after them).
+    Seen on the stack: Doomsday 8,431, Pact of Negation 7,794 (its trigger 8,342), Personal Tutor 11,873, Flow State
+    3,558, Misdirection 8,839 (2,033 new-target decisions), Edge of Autumn 53 (cycled 15,611), Street Wraith 72
+    (cycled 6,506), Thassa's Oracle 3,657, Murktide Regent 2,834 (its trigger 153), Prismari Charm 4,217; 10,113
+    Caverns' types chosen; no uncounterable creature spell (random play's Cavern types are rarely the deck's Merfolk,
+    Moonfolk, Wizard or Wraith; `dd_b` covers it).
+  * `dd_a`, 5,000 games: 2,495 / 2,457, 48 drawn; Doomsday 1,131, Pact 3,693 (triggers 4,101), Personal Tutor 3,927,
+    Flow State 1,623.
+  * `dd_b`, 5,000 games: 2,410 / 2,434, 156 drawn; Misdirection 4,414 (1,449 new targets), Flusterstorm 2,556 (3,644
+    copies), 8,765 Cavern types, 60 uncounterable creature spells.
+  * `dd_c`, 5,000 games: 2,133 / 2,109, 758 drawn; Edge of Autumn cast 229 and cycled 13,314, Street Wraith cast 67 and
+    cycled 5,787, 2 blockers facing a swampwalker with a Swamp (never offered it), Leyline of the Void on the
+    battlefield as the first turn began in 1,131 games.
+  * `delver`, 4,000 games: 1,924 / 1,907, 169 drawn, 383.4 decisions a game, 2,390,436 options completed: the lanes'
+    games exactly (124.2, 124.3).
+  * The `fuzz` profile (debug assertions), `FUZZ_POOL=doomsday`, 1,000 games on the Mac (`tools/mac.sh`): no failure
+    (475 / 494, 31 drawn).
+* `bash tools/build_py.sh`, `python -m pytest -q tests`: 274 passed, 1 skipped; `python -m pytest -q tools/codegen`: 2
+  passed; `python tools/rulings_doc.py --check` passes; `python tools/untested_cards.py`: 558 supported (12 legacy),
+  none named by no card test.
+* No docs/shortcuts.md entry, no approximation; layout v6 unchanged (v7, with Cavern's floating mana, is
+  `doomsday-b-v7`'s).
+
+**Left.** A network can't play the deck until layout v7 (the spec refuses Cavern of Souls, 124.2); constructed
+best-of-three and sideboarding (54.8) remain unbuilt, so the deck's sideboard (Flusterstorm, Leyline of the Void) is
+played only by the lanes' pools `dd_b` and `dd_c`.

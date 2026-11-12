@@ -26,6 +26,204 @@
   "rulings": []
  },
  {
+  "name": "Doomsday",
+  "oracle_id": "721eb5a2-d7cf-4db0-8013-ef3f596c52a5",
+  "rulings": [
+   {
+    "date": "2018-03-16",
+    "source": "wotc",
+    "text": "If your graveyard and library combined contain fewer than five cards, all of those cards will wind up in your library."
+   },
+   {
+    "date": "2018-03-16",
+    "source": "wotc",
+    "text": "If your graveyard and library combined contain five or more cards, you must choose five cards from among them. You can't choose to find fewer than that."
+   }
+  ]
+ },
+ {
+  "name": "Pact of Negation",
+  "oracle_id": "f3e213a4-ba5a-468a-93b3-c0a34e1bd725",
+  "rulings": [
+   {
+    "date": "2013-06-07",
+    "source": "wotc",
+    "text": "Although originally printed with a characteristic-defining ability that defined its color, this card now has a color indicator. This color indicator can't be affected by text-changing effects (such as the one created by Crystal Spray), although color-changing effects can still overwrite it."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "If Pact of Negation is countered or otherwise doesn't resolve (perhaps because its target became illegal), the delayed triggered ability that threatens you with a game loss won't trigger at the beginning of your next upkeep."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "If Pact of Negation resolves with a legal target but fails to counter that spell (most likely because that spell can't be countered), the delayed triggered ability will still trigger at the beginning of your next upkeep and you will have to pay. Or else."
+   }
+  ]
+ },
+ {
+  "name": "Personal Tutor",
+  "oracle_id": "90f54959-2c9b-4b8a-84c9-d6893eb43553",
+  "rulings": [
+   {
+    "date": "2004-10-04",
+    "source": "wotc",
+    "text": "Because the “search” requires you to find a card with certain characteristics, you don’t have to find the card if you don’t want to."
+   }
+  ]
+ },
+ {
+  "name": "Flow State",
+  "oracle_id": "e7194bca-0cf4-4a86-8b84-d2f9219a08b3",
+  "rulings": []
+ },
+ {
+  "name": "Misdirection",
+  "oracle_id": "c39e5fb0-6de3-4105-ad3c-0ecb8951a1d5",
+  "rulings": [
+   {
+    "date": "2004-10-04",
+    "source": "wotc",
+    "text": "If there is no other legal target for the spell, this does not change the target."
+   },
+   {
+    "date": "2004-10-04",
+    "source": "wotc",
+    "text": "Once the spell resolves, the new target is considered to be targeted by the deflected spell. This will trigger any effects which trigger on being targeted."
+   },
+   {
+    "date": "2004-10-04",
+    "source": "wotc",
+    "text": "The target of a spell that targets another spell on the stack can be changed to any other spell on the stack, even if the new target will resolve before the spell does."
+   },
+   {
+    "date": "2004-10-04",
+    "source": "wotc",
+    "text": "This does not check if the current target is legal. It just checks if the spell has a single target."
+   },
+   {
+    "date": "2004-10-04",
+    "source": "wotc",
+    "text": "This only targets the spell being changed, not the original or new target of the spell it is affecting."
+   },
+   {
+    "date": "2004-10-04",
+    "source": "wotc",
+    "text": "You can choose to make a spell on the stack target this spell (if such a target choice would be legal had the spell been cast while this spell was on the stack). The new target for the deflected spell is not chosen until this spell resolves. This spell is still on the stack when new targets are selected for the spell."
+   },
+   {
+    "date": "2004-10-04",
+    "source": "wotc",
+    "text": "You can’t make a spell which is on the stack target itself."
+   },
+   {
+    "date": "2004-10-04",
+    "source": "wotc",
+    "text": "You choose the spell to target on announcement, but you pick the new target for that spell on resolution."
+   }
+  ]
+ },
+ {
+  "name": "Flusterstorm",
+  "oracle_id": "86bf58f2-7f25-4e10-b797-25e0e8e67769",
+  "rulings": [
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "A copy of a spell can be countered like any other spell, but it must be countered individually. Countering a spell with storm won't affect the copies."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "Spells cast from zones other than a player's hand and spells that were countered are counted by the storm ability."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "The copies are put directly onto the stack. They aren't cast and won't be counted by other spells with storm cast later in the turn."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "The triggered ability that creates the copies can itself be countered by anything that can counter a triggered ability. If it is countered, no copies will be put onto the stack."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "You may choose new targets for any of the copies. You can make different choices for each copy."
+   }
+  ]
+ },
+ {
+  "name": "Cavern of Souls",
+  "oracle_id": "89ca686a-7c72-4d8f-9290-e89635624a83",
+  "rulings": [
+   {
+    "date": "2018-12-07",
+    "source": "wotc",
+    "text": "The spell can't be countered if the mana produced by Cavern of Souls is spent to cover any cost of the spell, even an additional cost such as a kicker cost. This is true even if you use the mana to pay an additional cost while casting a spell \"without paying its mana cost.\""
+   },
+   {
+    "date": "2018-12-07",
+    "source": "wotc",
+    "text": "You must choose an existing creature type, such as Human or Warrior. Card types such as artifact can't be chosen."
+   },
+   {
+    "date": "2023-11-10",
+    "source": "wotc",
+    "text": "The spell can't be countered if the mana produced by Cavern of Souls is spent to cover any cost of the spell, even an additional cost such as a kicker cost. This is true even if you use the mana to pay an additional cost while casting a spell \"without paying its mana cost.\""
+   },
+   {
+    "date": "2023-11-10",
+    "source": "wotc",
+    "text": "You must choose an existing creature type, such as Human or Warrior. Card types such as artifact can't be chosen."
+   }
+  ]
+ },
+ {
+  "name": "Edge of Autumn",
+  "oracle_id": "42d86827-6459-42fc-86b6-6eb055604c36",
+  "rulings": [
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Edge of Autumn checks how many lands you control as it resolves. If you control five or more lands, it simply does nothing as it resolves."
+   }
+  ]
+ },
+ {
+  "name": "Street Wraith",
+  "oracle_id": "bd7867f4-4f58-49c2-9c24-a124dfdb506d",
+  "rulings": []
+ },
+ {
+  "name": "Leyline of the Void",
+  "oracle_id": "f4e32fc1-1b8d-441e-8e76-71f19f98e925",
+  "rulings": [
+   {
+    "date": "2024-09-20",
+    "source": "wotc",
+    "text": "A player's \"opening hand\" is the hand of cards the player has after all players have taken mulligans. If players have any cards in hand that allow actions to be taken with them from a player's opening hand, the starting player takes all such actions first in any order, followed by each other player in turn order. Then the first turn begins."
+   },
+   {
+    "date": "2024-09-20",
+    "source": "wotc",
+    "text": "If your opponent discards a card while you control Leyline of the Void, abilities that check whether a card is discarded (such as Hollow One, or a madness ability of the discarded card) still work, even though that card never reaches that player's graveyard. In addition, spells or abilities that check the characteristics of the discarded card can find that card in exile."
+   },
+   {
+    "date": "2024-09-20",
+    "source": "wotc",
+    "text": "Tokens can still die while Leyline of the Void is on the battlefield."
+   },
+   {
+    "date": "2024-09-20",
+    "source": "wotc",
+    "text": "While Leyline of the Void is on the battlefield, nontoken creatures your opponents control won't die. They'll be exiled instead. Abilities that would trigger when those creatures die won't trigger."
+   }
+  ]
+ },
+ {
   "name": "Show and Tell",
   "oracle_id": "b83a3ba0-249e-4c39-bbf0-cb005413f7d2",
   "rulings": [

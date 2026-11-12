@@ -1,0 +1,37 @@
+1 Swamp
+1 Flooded Strand
+2 Thoughtseize
+2 Edge of Autumn
+2 Misdirection
+4 Force of Will
+2 Personal Tutor
+4 Underground Sea
+1 Misty Rainforest
+4 Lotus Petal
+1 Scalding Tarn
+4 Ponder
+2 Thassa's Oracle
+2 Tamiyo, Inquisitive Student
+1 Consider
+1 Island
+1 Flow State
+2 Street Wraith
+1 Cavern of Souls
+4 Dark Ritual
+1 Verdant Catacombs
+1 Undercity Sewers
+4 Brainstorm
+4 Polluted Delta
+1 Lion's Eye Diamond
+4 Doomsday
+2 Daze
+1 Pact of Negation
+sideboard
+2 Fatal Push
+2 Murktide Regent
+2 Flusterstorm
+1 Flow State
+3 Force of Negation
+2 Duress
+1 Voice of Victory
+2 Leyline of the Void

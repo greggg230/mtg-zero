@@ -1426,3 +1426,43 @@ fn cr_118_12_daze_on_an_uncounterable_spell_its_payment_is_still_offered() {
     assert!(g.find_card(0, "Ponder", Zone::Graveyard).is_some() && g.find_card(1, "Daze", Zone::Graveyard).is_some());
     assert!(log(&g).contains("Ponder can't be countered"), "{}", log(&g));
 }
+
+#[test]
+fn cr_702_29a_disruptor_flute_naming_street_wraith_stops_its_cycling_in_hand() {
+    // ruling: 044069c9
+    // Cycling is an activated ability of the card in its owner's hand (CR
+    // 702.29a): named, it can't be activated there (Pithing Needle's ruling:
+    // every zone).
+    let g = scen().hand(0, &["Street Wraith"]).at(Step::Main1, 0).start();
+    let c = g.card(0, "Street Wraith", Zone::Hand);
+    assert!(g.offered().iter().any(|o| matches!(o, Choice::Ability(x, _) if *x == c)), "cycling offered: {}", opts(&g));
+    let mut g = scen().battlefield(0, &["Island", "Island"]).hand(0, &[FLUTE, "Street Wraith"]).at(Step::Main1, 0).start();
+    flute_naming(&mut g, 0, Some("Street Wraith"));
+    let c = g.card(0, "Street Wraith", Zone::Hand);
+    assert!(!g.offered().iter().any(|o| matches!(o, Choice::Ability(x, _) if *x == c)), "no cycling: {}", opts(&g));
+}
+
+#[test]
+fn cr_101_2_flusterstorm_against_a_mistrise_village_spell_counters_nothing() {
+    // "Counter target instant or sorcery spell unless its controller pays
+    // {1}" against a spell Mistrise Village made uncounterable: Flusterstorm
+    // targets it and resolves; the spell stays and resolves (CR 101.2).
+    let mut g = scen()
+        .battlefield(0, &[VILLAGE, "Island", "Island", "Island"])
+        .battlefield(1, &["Island"])
+        .hand(0, &["Ponder"])
+        .hand(1, &["Flusterstorm"])
+        .at(Step::Main1, 0)
+        .start();
+    activate_village(&mut g);
+    resolve(&mut g);
+    cast_with(&mut g, 0, "Ponder", &island_first);
+    g.pass();
+    cast_with(&mut g, 1, "Flusterstorm", &|g| match g.kind() {
+        Some(DecisionKind::Target) => g.offered().into_iter().find(|o| matches!(o, Choice::Target(engine::Target::Obj(_)) | Choice::Target(engine::Target::Stack(_)))),
+        _ => None,
+    });
+    resolve_with(&mut g, &|g| if g.has_option(Choice::Pass) && g.kind() != Some(DecisionKind::Priority) { Some(Choice::Pass) } else { None });
+    assert!(g.find_card(0, "Ponder", Zone::Graveyard).is_some() && g.find_card(1, "Flusterstorm", Zone::Graveyard).is_some());
+    assert!(log(&g).contains("Ponder can't be countered"), "{}", log(&g));
+}

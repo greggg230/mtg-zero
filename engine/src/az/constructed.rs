@@ -35,6 +35,16 @@ pub const MAX_DECK: usize = {
 pub const IZZET_DELVER: &str = include_str!("../../../data/decks/izzet_delver_8016541.json");
 /// Its MTGO export, verbatim (`/deck/download/8016541`).
 pub const IZZET_DELVER_EXPORT: &str = include_str!("../../../data/decks/izzet_delver_8016541.txt");
+/// The Legacy Doomsday deck (ENGINE.md 124.4): MTGGoldfish's archetype
+/// "Legacy Doomsday" (paper), its representative list, deck 8027957: "Sultai
+/// Doomsday" by wonderPreaux, North American Eternal Weekend - Legacy
+/// Championship, 2026-10-31, 7th place (11-2-2), paper;
+/// <https://www.mtggoldfish.com/deck/8027957>.
+pub const LEGACY_DOOMSDAY: &str = include_str!("../../../data/decks/doomsday_8027957.json");
+/// Its export, verbatim: the archetype page's export field (`deck_input[deck]`,
+/// read 2026-11-11; the page's `/deck/download/8027957` is behind a Cloudflare
+/// challenge), a `sideboard` line before the sideboard.
+pub const LEGACY_DOOMSDAY_EXPORT: &str = include_str!("../../../data/decks/doomsday_8027957.txt");
 
 /// A basic land card (CR 205.4c, 100.2a: any number in a deck).
 pub fn is_basic_land(d: &CardDef) -> bool {
@@ -140,14 +150,24 @@ impl Decklist {
         Decklist::parse(IZZET_DELVER).expect("data/decks/izzet_delver_8016541.json")
     }
 
-    /// An MTGO export ("4 Brainstorm" lines; a blank line, then the
-    /// sideboard) as (main, sideboard) with the card table's names.
+    /// The Legacy Doomsday 75 (ENGINE.md 124.4).
+    pub fn legacy_doomsday() -> Decklist {
+        Decklist::parse(LEGACY_DOOMSDAY).expect("data/decks/doomsday_8027957.json")
+    }
+
+    /// An export ("4 Brainstorm" lines; then the sideboard after a blank line,
+    /// MTGO's, or after a `sideboard` line, MTGGoldfish's export field) as
+    /// (main, sideboard) with the card table's names.
     pub fn parse_export(&self, text: &str) -> Result<(Vec<(u32, String)>, Vec<(u32, String)>), String> {
         let (mut main, mut side) = (Vec::new(), Vec::new());
         let mut in_side = false;
         for line in text.lines().map(|l| l.trim_end_matches('\r').trim()) {
             if line.is_empty() {
                 in_side = !main.is_empty();
+                continue;
+            }
+            if line.eq_ignore_ascii_case("sideboard") {
+                in_side = true;
                 continue;
             }
             let (n, name) = line.split_once(' ').ok_or_else(|| format!("export: bad line {line:?}"))?;

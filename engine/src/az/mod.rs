@@ -239,6 +239,21 @@ fn check_drafted(db: &CardDb, seats: &[Seat; 2]) -> Result<(), String> {
     Ok(())
 }
 
+/// The cards whose state layout v6 can't encode exactly: every network-driven game (self-play,
+/// evaluation, head-to-head, replays: `MtgSpec::parse`) whose decks or sideboards hold one is
+/// refused on this layout, loudly, until layout v7 (ENGINE.md 125) lands; the rules tests and the
+/// fuzzer play them. One list, each entry with its refusal: a pool's mana restricted to creature
+/// spells of a chosen type (Cavern of Souls, ENGINE.md 124.2) and a card name chosen as a permanent
+/// enters (Disruptor Flute, ENGINE.md 123). The public-state gate's next-layout gaps are theirs
+/// (`public_state::CHOSEN_TYPE_MANA_GAP`, `CHOSEN_NAME_GAP`). `Some(the refusal)`.
+pub fn needs_layout_v7(d: &crate::db::CardDef) -> Option<String> {
+    const V7_ONLY: [fn(&crate::db::CardDef) -> Option<String>; 2] = [
+        |d| crate::doomsday_b::makes_chosen_type_mana(d).then(|| crate::doomsday_b::chosen_type_mana_needs_v7(&d.name)),
+        crate::sneak_show::plain_name_needs_v7,
+    ];
+    V7_ONLY.iter().find_map(|f| f(d))
+}
+
 impl MtgSpec {
     pub fn parse(json: &str) -> Result<MtgSpec, String> {
         let mut s = MtgSpec::default();
@@ -426,8 +441,9 @@ impl MtgSpec {
         };
         for (p, (d, sb)) in lists.into_iter().enumerate() {
             constructed::check_size(db, d, sb).map_err(|e| format!("mtg spec: p{p}'s deck: {e}"))?;
-            // (ENGINE.md 123: layout v6 can't encode such a card's state.)
-            if let Some(e) = d.iter().chain(sb.iter()).find_map(|&c| crate::sneak_show::needs_layout_v7(db.def(c))) {
+            // (ENGINE.md 124.2, 123: layout v6 can't encode such a card's
+            // state: `needs_layout_v7`, one list.)
+            if let Some(e) = d.iter().chain(sb.iter()).find_map(|&c| needs_layout_v7(db.def(c))) {
                 return Err(format!("mtg spec: p{p}'s deck: {e}"));
             }
         }

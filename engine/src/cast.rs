@@ -262,7 +262,7 @@ impl Game {
 
     /// The spending restrictions casting `card` from hand satisfies
     /// (`SPEND_*`; CR 106.6; `spend_allow_from`, ENGINE.md 99.12).
-    pub(crate) fn spend_allow(&self, card: CardIdx) -> u8 {
+    pub(crate) fn spend_allow(&self, card: CardIdx) -> crate::doomsday_b::Allow {
         self.spend_allow_from(card, crate::game::CastFrom::Hand)
     }
 
@@ -380,7 +380,7 @@ impl Game {
             // Mana that can only be spent on some spells (Mishra's
             // Workshop, Delighted Halfling): with what this spell allows.
             let allow = self.spend_allow(c);
-            if allow != 0 && (cls.iter().any(|cl| cl.only & allow != 0) || self.pool_restricted(p)) {
+            if !allow.is_empty() && (cls.iter().any(|cl| cl.only != 0 && crate::eoe_w2::spendable(cl.only, allow)) || self.pool_restricted(p)) {
                 let keep = crate::pay::Keep { allow, ..Default::default() };
                 return self.can_pay_without(p, &cost, cls, &keep, Some(c));
             }
@@ -1530,7 +1530,7 @@ impl Game {
     /// the cost's discards can take with those promised already, and whose
     /// promise leaves the payment payable (`gy_left`: the graveyard's cards
     /// left to delve).
-    fn promise_options(&self, p: PlayerId, card: CardIdx, cost: &crate::mana::ManaCost, rest_cost: &crate::db::Cost, gy_left: usize, allow: u8) -> Vec<Opt> {
+    fn promise_options(&self, p: PlayerId, card: CardIdx, cost: &crate::mana::ManaCost, rest_cost: &crate::db::Cost, gy_left: usize, allow: crate::doomsday_b::Allow) -> Vec<Opt> {
         let promised = self.delve_promised(p);
         let left = (rest_cost.discard_also.as_ref().map_or(0, |d| d.0 as usize), rest_cost.discard as usize);
         if promised.len() >= left.0 + left.1 {
@@ -3406,6 +3406,8 @@ impl Game {
                         Target::Player(_) | Target::Stack(_) => false,
                     })
                 }),
+            // CR 115.9a (ENGINE.md 124.2).
+            Filter::SingleTarget => self.spell_with_single_target(c),
             // (Abilities on the stack match only at top level, `filter_ok`.)
             Filter::Ability(_) => false,
             Filter::And(a, b) => self.card_matches(a, c, ctx) && self.card_matches(b, c, ctx),

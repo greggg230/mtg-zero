@@ -59,6 +59,14 @@ pub(crate) struct Lki {
     pub old: ObjRef,
     pub def: DefId,
     pub controller: PlayerId,
+    /// It had "if a card would be put into an opponent's graveyard from
+    /// anywhere, exile it instead" as it last existed on the battlefield
+    /// (Leyline of the Void; `Game::opp_gy_exile_for`, ENGINE.md 124.3).
+    pub opp_gy_exile: bool,
+    /// Its "instead exile it with a <counter> on it" as it last existed on
+    /// the battlefield (Dauthi Voidwalker; `Game::void_counter_for`): none if
+    /// it had lost its abilities (ENGINE.md 124.3).
+    pub void_exile: Option<crate::db::Counter>,
 }
 
 /// What a triggered ability remembers of its event for resolution: "that
@@ -779,6 +787,9 @@ impl Game {
             W::YourNextMainPhase => step.is_main() && ap == d.controller,
             W::YourNextTurnEndStep => step == crate::game::Step::End && ap == d.controller && self.turn.number != d.turn,
             W::EndOfCombat => step == crate::game::Step::EndCombat,
+            // (Checked only as a step begins: one created during its
+            // controller's upkeep waits for their next one.)
+            W::YourNextUpkeep => step == crate::game::Step::Upkeep && ap == d.controller,
         };
         let (now, later): (Vec<_>, Vec<_>) = self.delayed.iter().copied().partition(|d| fires(d));
         self.delayed = later;

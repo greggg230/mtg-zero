@@ -10,7 +10,7 @@ use engine::{Choice, DecisionKind, Step, Zone};
 
 const C: u8 = 5;
 const U: u8 = 1;
-const ELDRAZI: u8 = SPEND_ELDRAZI_SPELL | SPEND_ELDRAZI_ABILITY;
+const ELDRAZI: engine::db::Spend = SPEND_ELDRAZI_SPELL | SPEND_ELDRAZI_ABILITY;
 
 /// Eldrazi Temple: "{T}: Add {C}{C}. Spend this mana only to cast colorless
 /// Eldrazi spells or activate abilities of colorless Eldrazi" (CR 106.6,

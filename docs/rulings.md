@@ -16,17 +16,17 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
-| fetched | 1628 | 1278 |
-| class a | 1246 | 994 |
+| fetched | 1656 | 1298 |
+| class a | 1274 | 1014 |
 | class b | 200 | 151 |
 | class c | 182 | 133 |
-| a, tested (passing) | 1246 | 994 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 932 | 777 |
-| a, tested only by an earlier test (Oracle or rules) | 314 | 217 |
+| a, tested (passing) | 1274 | 1014 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 936 | 777 |
+| a, tested only by an earlier test (Oracle or rules) | 338 | 237 |
 | a, deferred | 0 | 0 |
 | a, untested | 0 | 0 |
 
-Class a by area (distinct texts): mana 176/176, triggers 140/140, stack 128/128, zones 127/127, other 100/100, copies 96/96, dfc 66/66, replacement 60/60, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 177/177, triggers 140/140, stack 138/138, zones 130/130, other 103/103, copies 96/96, dfc 66/66, replacement 63/63, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -875,11 +875,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `c33f0cb3` | a | stack | each copy made by storm must be countered individually; countering the original doesn't stop the copies | `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
-| `158501c3` | a | stack | storm counts spells cast from any zone and even ones that were countered | `rulings_stack::storm_counts_spells_that_were_countered_and_every_players_spells_cr_702_40a` |
-| `500a78f9` | a | stack | storm copies go straight onto the stack uncast, and don't count toward other storm spells cast later | `cards_m7b_stack3::brain_freeze_copies_may_get_new_targets_and_are_not_cast_cr_707_10` |
-| `543beb2e` | a | stack | the triggered ability that makes storm copies can itself be countered, preventing any copies | `rulings_stack::a_countered_storm_trigger_makes_no_copies_cr_702_40a` |
-| `bf7e6c38` | a | stack | each storm copy may be given new targets independently of the others | `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
+| `c33f0cb3` | a | stack | each copy made by storm must be countered individually; countering the original doesn't stop the copies | `cards_doomsday_b::cr_707_10_countering_flusterstorm_leaves_its_copies`; `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
+| `158501c3` | a | stack | storm counts spells cast from any zone and even ones that were countered | `cards_doomsday_b::cr_702_40a_flusterstorm_storm_counts_every_spell_cast_before_it_this_turn`; `rulings_stack::storm_counts_spells_that_were_countered_and_every_players_spells_cr_702_40a` |
+| `500a78f9` | a | stack | storm copies go straight onto the stack uncast, and don't count toward other storm spells cast later | `cards_doomsday_b::cr_702_40a_flusterstorm_storm_counts_every_spell_cast_before_it_this_turn`; `cards_m7b_stack3::brain_freeze_copies_may_get_new_targets_and_are_not_cast_cr_707_10` |
+| `543beb2e` | a | stack | the triggered ability that makes storm copies can itself be countered, preventing any copies | `cards_doomsday_b::cr_702_40a_a_countered_storm_trigger_makes_no_copies`; `rulings_stack::a_countered_storm_trigger_makes_no_copies_cr_702_40a` |
+| `bf7e6c38` | a | stack | each storm copy may be given new targets independently of the others | `cards_doomsday_b::cr_702_40a_flusterstorm_storm_counts_every_spell_cast_before_it_this_turn`; `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
 
 ### Consult the Star Charts
 
@@ -3448,7 +3448,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `5ef962e6` | a | other | opening hand = post-mulligan hand; pregame hand actions happen starting-player-first, then turn order, before turn 1 | `cards_m7d::gemstone_caverns_begins_the_game_on_the_battlefield_with_a_luck_counter_cr103_6` |
+| `5ef962e6` | a | other | opening hand = post-mulligan hand; pregame hand actions happen starting-player-first, then turn order, before turn 1 | `cards_doomsday_c::cr_103_6_leylines_begin_the_game_on_the_battlefield_the_starting_player_first`; `cards_doomsday_c::cr_103_6_a_leyline_put_on_the_bottom_by_a_mulligan_is_not_in_the_opening_hand`; `cards_m7d::gemstone_caverns_begins_the_game_on_the_battlefield_with_a_luck_counter_cr103_6` |
 | `10242be0` | c | NR | extra copies of this land from pregame setup arent legend-ruled away until just before the first upkeeps priority [part 3, was a/triggers: the cube has one Gemstone Caverns per deck (singleton)] | not reachable with the cube's cards |
 
 ### Gemstone Mine
@@ -3523,6 +3523,74 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `87078369` | a | mana | delve does not change the mana cost or mana value (Murktide Regent stays 7) | `cards_legacy::delve_doesnt_change_its_mana_value_cr_702_66a` |
 | `05ce86bd` | a | mana | delve pays only generic mana, at most the generic part of the total cost (five for Murktide Regent) | `cards_legacy::delve_exiles_at_most_its_generic_mana_cr_702_66a` |
 
+### Doomsday (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `6c6f247d` | a | zones | Doomsday with fewer than five cards in library and graveyard puts all of them on top | `cards_doomsday_a::cr_701_23d_with_fewer_than_five_cards_all_of_them_go_on_top` |
+| `4c669d8c` | a | zones | Doomsday must choose five cards when library and graveyard hold five or more (CR 701.23d) | `cards_doomsday_a::cr_701_23d_doomsday_must_find_five_of_its_library_and_graveyard` |
+
+### Pact of Negation (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `0dfaac8c` | a | other | Pact of Negation is blue by its colour indicator; colour-changing effects still apply (text-changing effects: none in this engine) | `cards_doomsday_a::pact_of_negation_is_a_blue_zero_mana_instant`; `cards_doomsday_a::pact_is_a_blue_card_force_of_will_can_exile`; `cards_doomsday_a::pyroblast_counters_pact_because_it_is_blue` |
+| `4c4f55a3` | a | stack | Pact of Negation countered or not resolving (an illegal target) creates no delayed trigger | `cards_doomsday_a::pact_whose_target_is_gone_doesnt_resolve_and_makes_no_trigger`; `cards_doomsday_a::pact_countered_by_daze_makes_no_trigger_unless_daze_is_paid`; `cards_doomsday_a::pact_countered_by_force_of_will_makes_no_trigger` |
+| `3e504e2e` | a | stack | Pact of Negation resolving with a legal target that can't be countered still creates its trigger | `cards_doomsday_a::pact_that_resolves_but_cant_counter_still_makes_its_trigger` |
+
+### Personal Tutor (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `ce207f9e` | a | zones | a search for a card with a stated quality may find nothing (CR 701.23b) | `cards_doomsday_a::cr_701_23b_personal_tutor_offers_the_sorcery_cards_and_may_find_none` |
+
+### Misdirection (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `f1ca52a5` | a | stack | change the target: no other legal target leaves it unchanged (115.7a) | `cards_doomsday_b::cr_115_7a_no_other_legal_target_leaves_fatal_push_unchanged` |
+| `4e80ba07` | a | stack | the changed-to target becomes a target of the deflected spell: becomes-target abilities (ward) trigger | `cards_doomsday_b::cr_702_21a_the_new_target_becomes_a_target_misdirection_targets_only_the_spell` |
+| `aee352b1` | a | stack | a spell targeting a spell can be changed to any other spell on the stack, one resolving before it too | `cards_doomsday_b::cr_115_7a_daze_redirected_onto_another_spell` |
+| `83bf218e` | a | stack | change the target checks only that the spell has a single target (115.9a), not its legality | `cards_doomsday_b::cr_115_9a_a_spell_with_a_single_target` |
+| `9a4256c2` | a | stack | change the target targets only the spell it changes, not its old or new target | `cards_doomsday_b::cr_702_21a_the_new_target_becomes_a_target_misdirection_targets_only_the_spell` |
+| `1f76d6f6` | a | stack | the new target may be this spell itself: it is on the stack as the new target is chosen | `cards_doomsday_b::cr_115_7a_force_of_will_redirected_onto_misdirection_itself_fizzles` |
+| `2ef42b09` | a | stack | a spell on the stack can not be made to target itself (115.5) | `cards_doomsday_b::cr_115_7a_force_of_will_redirected_onto_misdirection_itself_fizzles` |
+| `130c9dd0` | a | stack | the spell is targeted as this is cast; its new target is chosen as this resolves | `cards_doomsday_b::cr_115_7a_misdirection_changes_lightning_bolts_target` |
+
+### Flusterstorm (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `c33f0cb3` | a | stack | each copy made by storm must be countered individually; countering the original doesn't stop the copies | `cards_doomsday_b::cr_707_10_countering_flusterstorm_leaves_its_copies`; `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
+| `158501c3` | a | stack | storm counts spells cast from any zone and even ones that were countered | `cards_doomsday_b::cr_702_40a_flusterstorm_storm_counts_every_spell_cast_before_it_this_turn`; `rulings_stack::storm_counts_spells_that_were_countered_and_every_players_spells_cr_702_40a` |
+| `500a78f9` | a | stack | storm copies go straight onto the stack uncast, and don't count toward other storm spells cast later | `cards_doomsday_b::cr_702_40a_flusterstorm_storm_counts_every_spell_cast_before_it_this_turn`; `cards_m7b_stack3::brain_freeze_copies_may_get_new_targets_and_are_not_cast_cr_707_10` |
+| `543beb2e` | a | stack | the triggered ability that makes storm copies can itself be countered, preventing any copies | `cards_doomsday_b::cr_702_40a_a_countered_storm_trigger_makes_no_copies`; `rulings_stack::a_countered_storm_trigger_makes_no_copies_cr_702_40a` |
+| `bf7e6c38` | a | stack | each storm copy may be given new targets independently of the others | `cards_doomsday_b::cr_702_40a_flusterstorm_storm_counts_every_spell_cast_before_it_this_turn`; `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
+
+### Cavern of Souls (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `919d28a6` | a | mana | Cavern mana on any cost of the spell (kicker too, or a free cast's additional cost) makes it uncounterable | `cards_doomsday_b::cr_106_6_cavern_mana_on_a_kicker_cost_makes_the_spell_uncounterable` |
+| `dc0c0658` | a | other | choose a creature type: an existing creature type of 205.3m only, no card type | `cards_doomsday_b::cr_614_12_cavern_chooses_one_of_the_367_creature_types_as_it_enters` |
+| `919d28a6` | a | mana | Cavern mana on any cost of the spell (kicker too, or a free cast's additional cost) makes it uncounterable | `cards_doomsday_b::cr_106_6_cavern_mana_on_a_kicker_cost_makes_the_spell_uncounterable` |
+| `dc0c0658` | a | other | choose a creature type: an existing creature type of 205.3m only, no card type | `cards_doomsday_b::cr_614_12_cavern_chooses_one_of_the_367_creature_types_as_it_enters` |
+
+### Edge of Autumn (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `3079d582` | a | other | Edge of Autumn counts the lands you control as it resolves; with five or more it does nothing (no search, no shuffle) | `cards_doomsday_c::edge_of_autumn_with_five_lands_does_nothing_and_doesnt_shuffle`; `cards_doomsday_c::edge_of_autumn_counts_lands_on_resolution_after_a_cycling_sacrifice` |
+
+### Leyline of the Void (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `5ef962e6` | a | other | opening hand = post-mulligan hand; pregame hand actions happen starting-player-first, then turn order, before turn 1 | `cards_doomsday_c::cr_103_6_leylines_begin_the_game_on_the_battlefield_the_starting_player_first`; `cards_doomsday_c::cr_103_6_a_leyline_put_on_the_bottom_by_a_mulligan_is_not_in_the_opening_hand`; `cards_m7d::gemstone_caverns_begins_the_game_on_the_battlefield_with_a_luck_counter_cr103_6` |
+| `e64b1395` | a | replacement | a card discarded under Leyline of the Void is still discarded (discard triggers, madness); its characteristics are found in exile | `cards_doomsday_c::cr_614_1a_leyline_exiles_discarded_cards_which_were_still_discarded`; `cards_doomsday_c::connive_under_leyline_reads_the_exiled_discarded_card` |
+| `4226f05f` | a | replacement | Leyline of the Void exiles cards only: tokens still die (their dies triggers trigger) | `cards_doomsday_c::cr_700_4_under_leyline_opposing_creature_cards_dont_die_but_tokens_do` |
+| `ef9cd497` | a | replacement | under Leyline of the Void the opponents' nontoken creatures are exiled instead of dying; their dies triggers don't trigger | `cards_doomsday_c::cr_700_4_under_leyline_opposing_creature_cards_dont_die_but_tokens_do` |
+
 ### Show and Tell (legacy, constructed play: ENGINE.md 54)
 
 | ruling | class | area / reason | point | test |
@@ -3551,7 +3619,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `d858e725` | a | other | activated abilities contain a colon (equip, a fetch land, Sneak Attack); an activated mana ability produces mana: the Flute stops the others, not it (CR 602.1, 605.1a) | `cards_sneak_show::cr_602_5_disruptor_flute_stops_non_mana_activated_abilities` |
-| `044069c9` | a | other | Disruptor Flute naming a card with a mana ability and another activated ability: the mana ability can still be activated (CR 602.5, 605.1a) | `cards_sneak_show::cr_602_5_disruptor_flute_stops_non_mana_activated_abilities`; `cards_sneak_show::cr_602_5_disruptor_flute_stops_fetch_lands_and_works_in_every_zone` |
+| `044069c9` | a | other | Disruptor Flute naming a card with a mana ability and another activated ability: the mana ability can still be activated (CR 602.5, 605.1a) | `cards_sneak_show::cr_602_5_disruptor_flute_stops_non_mana_activated_abilities`; `cards_sneak_show::cr_602_5_disruptor_flute_stops_fetch_lands_and_works_in_every_zone`; `cards_sneak_show::cr_605_1a_disruptor_flute_naming_mistrise_village_leaves_its_mana_ability` |
 | `20e62c09` | a | dfc | Disruptor Flute may name either name of a split, adventurer or double-faced card; the other name is unaffected (CR 709.3, 715.3, 712) | `cards_sneak_show::cr_201_3_disruptor_flute_offers_every_name_of_the_games_cards_and_their_faces`; `cards_sneak_show::cr_606_disruptor_flute_stops_loyalty_abilities_of_a_back_face`; `cards_sneak_show::cr_709_3_disruptor_flute_a_split_cards_half_and_an_adventure_by_their_names` |
 | `560a16f0` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | `cards_sneak_show::cr_601_2f_disruptor_flute_spells_with_the_name_cost_3_more_every_players`; `cards_sneak_show::cr_601_2f_disruptor_flute_naming_show_and_tell_under_omniscience_costs_3`; `rulings_mana::thalias_tax_applies_to_an_alternative_cost_cr_601_2f` |
 | `3029db62` | a | other | Disruptor Flute: any card name; a token's name only if it is also a card's (CR 201.3) | `cards_sneak_show::cr_201_3_disruptor_flute_offers_every_name_of_the_games_cards_and_their_faces` |
@@ -3566,6 +3634,6 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `53c9e610` | a | other | Magus of the Moon changes no name or supertype (CR 305.7) | `cards_sneak_show::cr_205_4_the_magus_keeps_names_and_supertypes` |
 | `24283e6f` | a | other | under the Magus nonbasic lands lose their land types and abilities and gain Mountain and {T}: Add {R} (CR 305.7) | `cards_sneak_show::cr_305_7_magus_makes_the_decks_nonbasic_lands_mountains`; `cards_sneak_show::cr_305_7_ancient_tomb_and_city_of_traitors_under_the_magus_tap_for_one_red` |
 
-## Cards without rulings (173)
+## Cards without rulings (175)
 
-Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54), Brotherhood's End (legacy, constructed play: ENGINE.md 54)
+Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54), Flow State (legacy, constructed play: ENGINE.md 54), Street Wraith (legacy, constructed play: ENGINE.md 54), Brotherhood's End (legacy, constructed play: ENGINE.md 54)

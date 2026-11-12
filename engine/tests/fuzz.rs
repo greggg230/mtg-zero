@@ -55,20 +55,45 @@
 //! Prismari Charm with the cube's cards); every check of the default mode,
 //! and with 200 games or more Murktide Regent must have been cast and its
 //! leave-the-graveyard trigger resolved. Games only (best-of-one).
-//! `FUZZ_POOL=sneak_show` (ENGINE.md 123): Legacy Sneak and Show (MTGGoldfish
-//! 8014220, `data/decks/sneak_show_8014220.json`): its main 60 with its two
-//! Flusterstorms (another lane's card, not in this branch) swapped for two
-//! Pyroblasts from its sideboard (`SNEAK_SHOW_DECK`), against the Delver 60 in
-//! either seat, one game in three the Sneak and Show mirror. `FUZZ_POOL=sns`
-//! (ENGINE.md 123): the lane's six cards four each (`SNS_DECK`: Show and
-//! Tell, Omniscience, Mistrise Village, Brotherhood's End, Disruptor Flute,
-//! Magus of the Moon) with the deck's creatures, Sneak Attack, Force of Will
-//! and mana, the same pairings. Constructed play's card table; every check of
-//! the default mode, and with 200 games or more each of the six must have
-//! been cast or activated, a spell cast without paying its mana cost, a spell
-//! made uncounterable and a name chosen (`sneak_show`: Show and Tell and
-//! Mistrise Village seen, a free cast, a spell made uncounterable). Games only
-//! (best-of-one).
+//! `FUZZ_POOL=dd_a` (ENGINE.md 124.1): Legacy Doomsday, lane A's cards: the
+//! Doomsday 60 (MTGGoldfish 8027957) with the cards of the other lanes
+//! swapped for more of lane A's (`DD_A_DECK`), against the Delver 60 in
+//! either seat, one game in three a Doomsday mirror; constructed play's card
+//! table; every check of the default mode, and with 200 games or more
+//! Doomsday, Pact of Negation, Personal Tutor and Flow State must have been
+//! cast and a Pact trigger put on the stack. Games only (best-of-one).
+//! `FUZZ_POOL=dd_b` (ENGINE.md 124.2): lane B of the Legacy Doomsday deck, constructed play's
+//! table: one player the Doomsday 60 (MTGGoldfish 8027957) with its cards of other lanes swapped
+//! for lane B's and supported ones (`DD_B_DECK`: four Misdirection, Flusterstorm and Cavern of
+//! Souls, Orcish Bowmasters for a creature type random play names), against the Delver 60; seats
+//! alternate by seed. Every check of the default mode, and
+//! with 200 games or more each of the three cards must have been played (Misdirection cast and
+//! changing a target, Flusterstorm cast and copied, a Cavern's type chosen and its mana spent on
+//! a spell that then can't be countered). Games only (best-of-one).
+//! `FUZZ_POOL=dd_c` (ENGINE.md 124.3): lane C of the Legacy Doomsday deck: the Doomsday 60 with
+//! its cards of other lanes swapped for lane C's and supported ones (`DOOMSDAY_C`: four Edge of
+//! Autumn, Street Wraith and Leyline of the Void), against the Delver 60 in either seat, one game
+//! in three the mirror; constructed play's table; every check of the default mode, and with 300
+//! games or more lane C's cards must have been cast, cycled and begun on the battlefield, a
+//! swampwalker never offered to a blocker whose player controls a Swamp. Games only.
+//! `FUZZ_POOL=doomsday` (ENGINE.md 124.4): the real Legacy Doomsday 60 (`data/decks/
+//! doomsday_8027957.json`, `Decklist::legacy_doomsday`; its main deck, no sideboard) against the
+//! Delver 60 in either seat, one game in three the Doomsday mirror; constructed play's table;
+//! every check of the default mode, and with 200 games or more the deck's legacy cards must have
+//! been played (Doomsday, Pact of Negation and its trigger, Personal Tutor, Flow State,
+//! Misdirection and a new target, a Cavern's type chosen, Edge of Autumn and Street Wraith
+//! cycled; Murktide Regent and Prismari Charm on the Delver side), with 2,000 or more Edge of
+//! Autumn and Street Wraith cast too. Games only (best-of-one).
+//! `FUZZ_POOL=sneak_show` (ENGINE.md 123): the real Legacy Sneak and Show 60 (MTGGoldfish
+//! 8014220, `data/decks/sneak_show_8014220.json`; its main deck, no sideboard) against the Delver
+//! 60 in either seat, one game in three the Sneak and Show mirror. `FUZZ_POOL=sns` (ENGINE.md
+//! 123): the lane's six cards four each (`SNS_DECK`: Show and Tell, Omniscience, Mistrise Village,
+//! Brotherhood's End, Disruptor Flute, Magus of the Moon) with the deck's creatures, Sneak
+//! Attack, Force of Will and mana, the same pairings. Constructed play's card table; every check
+//! of the default mode, and with 200 games or more (`sns`) each of the six must have been cast or
+//! activated, a spell cast without paying its mana cost, a spell made uncounterable and a name
+//! chosen (`sneak_show`: Show and Tell and Mistrise Village seen, a free cast, a spell made
+//! uncounterable). Games only (best-of-one).
 //! `FUZZ_POOL=eoe` (ENGINE.md 99): Edge of Eternities sealed, the set's own
 //! card table (`CardDb::eoe`): random 40-card decks of its supported cards
 //! (17 lands, 23 spells; games only, no matches).
@@ -309,9 +334,21 @@ enum PoolMode {
     Exponential,
     Drafted,
     Delver,
+    DdB,
     Eoe,
     Sealed,
+    DdA,
+    /// `FUZZ_POOL=dd_c` (ENGINE.md 124.3): the Legacy Doomsday 60 with lane C's
+    /// cards (Edge of Autumn, Street Wraith, Leyline of the Void) against the
+    /// Delver 60 and itself.
+    DoomsdayC,
+    /// `FUZZ_POOL=doomsday` (ENGINE.md 124.4): the real Legacy Doomsday 60
+    /// against the Delver 60 and itself.
+    Doomsday,
+    /// `FUZZ_POOL=sneak_show` (ENGINE.md 123): the real Legacy Sneak and Show
+    /// 60 against the Delver 60 and itself.
     SneakShow,
+    /// `FUZZ_POOL=sns` (ENGINE.md 123): the lane's six cards four each.
     Sns,
 }
 
@@ -322,11 +359,15 @@ fn pool_mode() -> PoolMode {
         Ok("exponential") => PoolMode::Exponential,
         Ok("drafted") => PoolMode::Drafted,
         Ok("delver") => PoolMode::Delver,
+        Ok("dd_b") => PoolMode::DdB,
         Ok("eoe") => PoolMode::Eoe,
         Ok("sealed") => PoolMode::Sealed,
+        Ok("dd_a") => PoolMode::DdA,
+        Ok("dd_c") => PoolMode::DoomsdayC,
+        Ok("doomsday") => PoolMode::Doomsday,
         Ok("sneak_show") => PoolMode::SneakShow,
         Ok("sns") => PoolMode::Sns,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"sneak_show\", \"sns\", \"eoe\" or \"sealed\")"),
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -342,13 +383,217 @@ fn delver_mode() -> bool {
     pool_mode() == PoolMode::Delver
 }
 
-fn eoe_mode() -> bool {
-    pool_mode() == PoolMode::Eoe
+/// `FUZZ_POOL=dd_a` (ENGINE.md 124.1).
+fn dd_a_mode() -> bool {
+    pool_mode() == PoolMode::DdA
+}
+
+/// `FUZZ_POOL=dd_b` (ENGINE.md 124.2).
+fn dd_b_mode() -> bool {
+    pool_mode() == PoolMode::DdB
+}
+
+/// Constructed play's table (`FUZZ_POOL=delver`, `dd_a`, `dd_b`, `dd_c`,
+/// `doomsday`, `sneak_show` or `sns`).
+fn constructed_mode() -> bool {
+    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode()
 }
 
 /// `FUZZ_POOL=sneak_show` or `sns` (ENGINE.md 123).
 fn sns_mode() -> bool {
     matches!(pool_mode(), PoolMode::SneakShow | PoolMode::Sns)
+}
+
+/// The real Sneak and Show 60 of `FUZZ_POOL=sneak_show` (ENGINE.md 123):
+/// `data/decks/sneak_show_8014220.json`'s main deck (read here:
+/// `az/constructed.rs` is the best-of-three lane's to change).
+fn sneak_show_deck() -> Vec<u16> {
+    let d = engine::az::constructed::Decklist::parse(include_str!("../../data/decks/sneak_show_8014220.json")).unwrap();
+    let deck = engine::az::constructed::Decklist::ids(CardDb::constructed(), &d.main).unwrap();
+    engine::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("the Sneak and Show 60: {e}"));
+    deck
+}
+
+/// The lane's deck of `FUZZ_POOL=sns` (ENGINE.md 123): the six cards four each.
+const SNS_DECK: &[(u32, &str)] = &[
+    (4, "Show and Tell"),
+    (4, "Omniscience"),
+    (4, "Mistrise Village"),
+    (4, "Brotherhood's End"),
+    (4, "Disruptor Flute"),
+    (4, "Magus of the Moon"),
+    (3, "Emrakul, the Aeons Torn"),
+    (2, "Griselbrand"),
+    (2, "Atraxa, Grand Unifier"),
+    (2, "Sneak Attack"),
+    (4, "Force of Will"),
+    (4, "Brainstorm"),
+    (4, "Lotus Petal"),
+    (3, "Volcanic Island"),
+    (4, "Scalding Tarn"),
+    (2, "Ancient Tomb"),
+    (2, "City of Traitors"),
+    (2, "Island"),
+    (2, "Mountain"),
+];
+
+fn sns_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = SNS_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let deck = engine::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    engine::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("SNS_DECK: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=sneak_show` / `sns`: the lane's cards seen on the stack (spells,
+/// Mistrise Village's ability; each stack item once, by its id), spells cast
+/// without paying their mana costs, spells made uncounterable, names chosen.
+static SNS_SEEN: [AtomicU64; 6] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+static SNS_FREE: AtomicU64 = AtomicU64::new(0);
+static SNS_UNCOUNTERABLE: AtomicU64 = AtomicU64::new(0);
+static SNS_NAMED: AtomicU64 = AtomicU64::new(0);
+const SNS_CARDS: [&str; 6] = ["Show and Tell", "Omniscience", "Mistrise Village", "Brotherhood's End", "Disruptor Flute", "Magus of the Moon"];
+
+fn count_sns(g: &Game, seen: &mut Vec<u32>) {
+    for it in g.stack() {
+        if seen.contains(&it.id) {
+            continue;
+        }
+        seen.push(it.id);
+        match it.kind {
+            engine::game::StackKind::Spell { card } => {
+                if let Some(k) = SNS_CARDS.iter().position(|&n| n == g.name(card)) {
+                    SNS_SEEN[k].fetch_add(1, Ordering::Relaxed);
+                }
+                if matches!(it.from, engine::game::CastFrom::Permission { free: true, .. }) {
+                    SNS_FREE.fetch_add(1, Ordering::Relaxed);
+                }
+                if g.marks_of(card).contains(&engine::game::Mark::Uncounterable) {
+                    SNS_UNCOUNTERABLE.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            engine::game::StackKind::Ability { source, .. } if g.db().def(g.obj(source.idx).def).name == "Mistrise Village" => {
+                SNS_SEEN[2].fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `FUZZ_POOL=sneak_show` / `sns`: names chosen as a Flute entered (each
+/// permanent once).
+fn count_sns_names(g: &Game, named: &mut Vec<engine::ids::ObjRef>) {
+    for &c in g.battlefield() {
+        let r = g.obj_ref(c);
+        if !named.contains(&r) && g.marks_of(c).iter().any(|m| matches!(m, engine::game::Mark::ChosenName(_))) {
+            named.push(r);
+            SNS_NAMED.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+/// The Doomsday 60 (MTGGoldfish 8027957, E:/mtg-zero-scratch/doomsday) with its cards of other
+/// lanes (Doomsday, Pact of Negation, Personal Tutor, Flow State, Edge of Autumn, Street Wraith:
+/// 12) swapped for Flusterstorm 4, Misdirection 2 more, Cavern of Souls 3 more and Orcish
+/// Bowmasters 3 (`FUZZ_POOL=dd_b`). (An Orc Archer: random play's creature-type choices are
+/// mostly the first 31 types, the first decision's own numbers, Archer among them, so a Cavern's
+/// coloured mana casts a creature spell of its type in random games.)
+const DD_B_DECK: &[(u32, &str)] = &[
+    (1, "Swamp"),
+    (1, "Flooded Strand"),
+    (2, "Thoughtseize"),
+    (4, "Misdirection"),
+    (4, "Force of Will"),
+    (4, "Underground Sea"),
+    (1, "Misty Rainforest"),
+    (4, "Lotus Petal"),
+    (1, "Scalding Tarn"),
+    (4, "Ponder"),
+    (2, "Thassa's Oracle"),
+    (2, "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar"),
+    (1, "Consider"),
+    (1, "Island"),
+    (4, "Cavern of Souls"),
+    (4, "Dark Ritual"),
+    (1, "Verdant Catacombs"),
+    (1, "Undercity Sewers"),
+    (4, "Brainstorm"),
+    (4, "Polluted Delta"),
+    (1, "Lion's Eye Diamond"),
+    (2, "Daze"),
+    (4, "Flusterstorm"),
+    (3, "Orcish Bowmasters"),
+];
+
+fn dd_b_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = DD_B_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let d = engine::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    assert_eq!(d.len(), 60);
+    d
+}
+
+/// `FUZZ_POOL=dd_b`: lane B's cards played (each stack item and permanent once).
+static DD_B_MISDIRECTIONS: AtomicU64 = AtomicU64::new(0);
+static DD_B_RETARGETS: AtomicU64 = AtomicU64::new(0);
+static DD_B_FLUSTERSTORMS: AtomicU64 = AtomicU64::new(0);
+static DD_B_COPIES: AtomicU64 = AtomicU64::new(0);
+static DD_B_CAVERN_TYPES: AtomicU64 = AtomicU64::new(0);
+static DD_B_TYPE_MANA: AtomicU64 = AtomicU64::new(0);
+static DD_B_UNCOUNTERABLE: AtomicU64 = AtomicU64::new(0);
+
+/// `FUZZ_POOL=dd_b`: count what the game shows now of lane B's cards (`seen`: stack item ids,
+/// uncounterable spells' items and permanents counted already). A Misdirection's change is its
+/// `NewTarget` decision as it resolves (on top of the stack; a storm copy's new targets are asked
+/// as its trigger resolves).
+fn count_dd_b(g: &Game, seen: &mut Vec<(u8, u32)>) {
+    use engine::game::StackKind;
+    if g.kind() == Some(engine::DecisionKind::NewTarget) {
+        if let Some(StackKind::Spell { card }) = g.stack().last().map(|s| s.kind) {
+            if g.name(card) == "Misdirection" {
+                DD_B_RETARGETS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+    for it in g.stack() {
+        let StackKind::Spell { card } = it.kind else { continue };
+        if !seen.contains(&(2, it.id)) && g.spell_cant_be_countered(card) && g.db().def(g.obj(card).def).is(engine::db::types::CREATURE) {
+            seen.push((2, it.id));
+            DD_B_UNCOUNTERABLE.fetch_add(1, Ordering::Relaxed);
+        }
+        if seen.contains(&(0, it.id)) {
+            continue;
+        }
+        seen.push((0, it.id));
+        match g.name(card) {
+            "Misdirection" => DD_B_MISDIRECTIONS.fetch_add(1, Ordering::Relaxed),
+            "Flusterstorm" if g.is_copy_obj(card) => DD_B_COPIES.fetch_add(1, Ordering::Relaxed),
+            "Flusterstorm" => DD_B_FLUSTERSTORMS.fetch_add(1, Ordering::Relaxed),
+            _ => 0,
+        };
+    }
+    for c in g.permanents_of(0).chain(g.permanents_of(1)) {
+        if g.chosen_creature_type(c).is_some() && !seen.contains(&(1, c.get())) {
+            seen.push((1, c.get()));
+            DD_B_CAVERN_TYPES.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    for p in 0..2 {
+        if g.restricted_mana(p).iter().any(|k| k.1 & engine::db::SPEND_CHOSEN_CREATURE_TYPE != 0) {
+            DD_B_TYPE_MANA.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+fn eoe_mode() -> bool {
+    pool_mode() == PoolMode::Eoe
+}
+
+fn ddc_mode() -> bool {
+    pool_mode() == PoolMode::DoomsdayC
+}
+
+/// `FUZZ_POOL=doomsday` (ENGINE.md 124.4).
+fn doomsday_mode() -> bool {
+    pool_mode() == PoolMode::Doomsday
 }
 
 fn sealed_mode() -> bool {
@@ -693,7 +938,7 @@ fn check_forced_chance(g: &Game, seed: u64, step: usize) {
 /// The card table of the mode's games: the cube's and the custom test cards,
 /// or constructed play's (`FUZZ_POOL=delver`).
 fn game_db() -> &'static CardDb {
-    if delver_mode() || sns_mode() {
+    if constructed_mode() {
         CardDb::constructed()
     } else if eoe_mode() || sealed_mode() {
         CardDb::eoe()
@@ -708,76 +953,54 @@ fn delver_deck() -> Vec<u16> {
     engine::az::constructed::Decklist::ids(CardDb::constructed(), &d.main).unwrap()
 }
 
-/// The Sneak and Show 60 of `FUZZ_POOL=sneak_show` (ENGINE.md 123): MTGGoldfish
-/// 8014220's main deck, its two Flusterstorms (Doomsday lane B's card, not in
-/// this branch) swapped for its sideboard's Pyroblast and one more.
-const SNEAK_SHOW_DECK: &[(u32, &str)] = &[
-    (3, "Ancient Tomb"),
-    (4, "Atraxa, Grand Unifier"),
-    (4, "Brainstorm"),
-    (2, "City of Traitors"),
-    (3, "Emrakul, the Aeons Torn"),
-    (2, "Pyroblast"),
+/// The Doomsday 60 of `FUZZ_POOL=dd_a` (ENGINE.md 124.1): MTGGoldfish's
+/// "Legacy Doomsday" (deck 8027957), its seven cards of the other lanes
+/// (Edge of Autumn, Misdirection, Street Wraith x2 each, Cavern of Souls)
+/// swapped for two Pacts of Negation, two Flow States, two Personal Tutors
+/// and an Island.
+const DD_A_DECK: &[(u32, &str)] = &[
+    (4, "Doomsday"),
+    (3, "Pact of Negation"),
+    (4, "Personal Tutor"),
+    (3, "Flow State"),
+    (2, "Thoughtseize"),
     (4, "Force of Will"),
-    (1, "Griselbrand"),
-    (1, "Hullbreacher"),
-    (2, "Island"),
     (4, "Lotus Petal"),
-    (1, "Mistrise Village"),
-    (2, "Misty Rainforest"),
-    (1, "Mountain"),
-    (1, "Omniscience"),
     (4, "Ponder"),
-    (1, "Prismari Charm"),
-    (4, "Scalding Tarn"),
-    (4, "Show and Tell"),
-    (1, "Simian Spirit Guide"),
-    (4, "Sneak Attack"),
-    (3, "Stock Up"),
-    (1, "Thundering Falls"),
-    (3, "Volcanic Island"),
-];
-
-/// The lane's deck of `FUZZ_POOL=sns` (ENGINE.md 123): the six cards four each.
-const SNS_DECK: &[(u32, &str)] = &[
-    (4, "Show and Tell"),
-    (4, "Omniscience"),
-    (4, "Mistrise Village"),
-    (4, "Brotherhood's End"),
-    (4, "Disruptor Flute"),
-    (4, "Magus of the Moon"),
-    (3, "Emrakul, the Aeons Torn"),
-    (2, "Griselbrand"),
-    (2, "Atraxa, Grand Unifier"),
-    (2, "Sneak Attack"),
-    (4, "Force of Will"),
+    (2, "Thassa's Oracle"),
+    (2, "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar"),
+    (1, "Consider"),
+    (4, "Dark Ritual"),
     (4, "Brainstorm"),
-    (4, "Lotus Petal"),
-    (3, "Volcanic Island"),
-    (4, "Scalding Tarn"),
-    (2, "Ancient Tomb"),
-    (2, "City of Traitors"),
+    (1, "Lion's Eye Diamond"),
+    (2, "Daze"),
+    (1, "Swamp"),
     (2, "Island"),
-    (2, "Mountain"),
+    (4, "Underground Sea"),
+    (1, "Undercity Sewers"),
+    (1, "Flooded Strand"),
+    (1, "Misty Rainforest"),
+    (1, "Scalding Tarn"),
+    (1, "Verdant Catacombs"),
+    (4, "Polluted Delta"),
 ];
 
-fn constructed_deck(list: &[(u32, &str)], what: &str) -> Vec<u16> {
-    let list: Vec<(u32, String)> = list.iter().map(|&(n, s)| (n, s.to_string())).collect();
+fn dd_a_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = DD_A_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
     let deck = engine::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
-    engine::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("{what}: {e}"));
+    engine::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("DD_A_DECK: {e}"));
     deck
 }
 
-/// `FUZZ_POOL=sneak_show` / `sns`: the lane's cards seen on the stack (spells,
-/// Mistrise Village's ability; each stack item once, by its id), spells cast
-/// without paying their mana costs, spells made uncounterable, names chosen.
-static SNS_SEEN: [AtomicU64; 6] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
-static SNS_FREE: AtomicU64 = AtomicU64::new(0);
-static SNS_UNCOUNTERABLE: AtomicU64 = AtomicU64::new(0);
-static SNS_NAMED: AtomicU64 = AtomicU64::new(0);
-const SNS_CARDS: [&str; 6] = ["Show and Tell", "Omniscience", "Mistrise Village", "Brotherhood's End", "Disruptor Flute", "Magus of the Moon"];
+/// `FUZZ_POOL=dd_a`: lane A's spells and Pact of Negation's triggers seen on
+/// the stack after an action (each stack item once, by its id; a spell cast
+/// and resolved within one action, every other decision answered by
+/// `auto_single`, isn't seen: a Pact's trigger can outnumber its casts).
+static DD_A_CASTS: [AtomicU64; 4] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+static DD_A_PACT_TRIGGERS: AtomicU64 = AtomicU64::new(0);
+const DD_A_CARDS: [&str; 4] = ["Doomsday", "Pact of Negation", "Personal Tutor", "Flow State"];
 
-fn count_sns(g: &Game, seen: &mut Vec<u32>) {
+fn count_dd_a(g: &Game, seen: &mut Vec<u32>) {
     for it in g.stack() {
         if seen.contains(&it.id) {
             continue;
@@ -785,32 +1008,240 @@ fn count_sns(g: &Game, seen: &mut Vec<u32>) {
         seen.push(it.id);
         match it.kind {
             engine::game::StackKind::Spell { card } => {
-                if let Some(k) = SNS_CARDS.iter().position(|&n| n == g.name(card)) {
-                    SNS_SEEN[k].fetch_add(1, Ordering::Relaxed);
-                }
-                if matches!(it.from, engine::game::CastFrom::Permission { free: true, .. }) {
-                    SNS_FREE.fetch_add(1, Ordering::Relaxed);
-                }
-                if g.marks_of(card).contains(&engine::game::Mark::Uncounterable) {
-                    SNS_UNCOUNTERABLE.fetch_add(1, Ordering::Relaxed);
+                if let Some(k) = DD_A_CARDS.iter().position(|&n| n == g.name(card)) {
+                    DD_A_CASTS[k].fetch_add(1, Ordering::Relaxed);
                 }
             }
-            engine::game::StackKind::Ability { source, .. } if g.db().def(g.obj(source.idx).def).name == "Mistrise Village" => {
-                SNS_SEEN[2].fetch_add(1, Ordering::Relaxed);
+            engine::game::StackKind::Ability { source, .. } if g.db().def(g.obj(source.idx).def).name == "Pact of Negation" => {
+                DD_A_PACT_TRIGGERS.fetch_add(1, Ordering::Relaxed);
             }
             _ => {}
         }
     }
 }
 
-/// `FUZZ_POOL=sneak_show` / `sns`: names chosen as a Flute entered (each
-/// permanent once).
-fn count_sns_names(g: &Game, named: &mut Vec<engine::ids::ObjRef>) {
-    for &c in g.battlefield() {
-        let r = g.obj_ref(c);
-        if !named.contains(&r) && g.marks_of(c).iter().any(|m| matches!(m, engine::game::Mark::ChosenName(_))) {
-            named.push(r);
-            SNS_NAMED.fetch_add(1, Ordering::Relaxed);
+/// `FUZZ_POOL=dd_c` (ENGINE.md 124.3): the Legacy Doomsday 60 (MTGGoldfish
+/// archetype "Legacy Doomsday", deck 8027957) with the cards no branch
+/// supports yet swapped out: Doomsday x4 -> Leyline of the Void x4 (from the
+/// sideboard: on the battlefield in many openings), Misdirection x2 -> Street
+/// Wraith (4 in all), Personal Tutor x2 -> Edge of Autumn (4 in all), Flow
+/// State -> Duress, Pact of Negation -> Fatal Push (both from the sideboard),
+/// Cavern of Souls -> Forest (green for Edge of Autumn's spell, fetchable).
+const DOOMSDAY_C: &[(u8, &str)] = &[
+    (1, "Swamp"),
+    (1, "Forest"),
+    (1, "Island"),
+    (4, "Underground Sea"),
+    (1, "Undercity Sewers"),
+    (1, "Flooded Strand"),
+    (1, "Misty Rainforest"),
+    (1, "Scalding Tarn"),
+    (1, "Verdant Catacombs"),
+    (4, "Polluted Delta"),
+    (4, "Lotus Petal"),
+    (1, "Lion's Eye Diamond"),
+    (4, "Dark Ritual"),
+    (4, "Brainstorm"),
+    (4, "Ponder"),
+    (1, "Consider"),
+    (4, "Force of Will"),
+    (2, "Daze"),
+    (2, "Thoughtseize"),
+    (1, "Duress"),
+    (1, "Fatal Push"),
+    (2, "Thassa's Oracle"),
+    (2, "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar"),
+    (4, "Edge of Autumn"),
+    (4, "Street Wraith"),
+    (4, "Leyline of the Void"),
+];
+
+fn doomsday_c_deck() -> Vec<u16> {
+    let db = CardDb::constructed();
+    let d: Vec<u16> =
+        DOOMSDAY_C.iter().flat_map(|&(n, name)| std::iter::repeat_n(db.expect_id(name).unwrap_or_else(|e| panic!("{e}")), n as usize)).collect();
+    assert_eq!(d.len(), 60);
+    d
+}
+
+/// `FUZZ_POOL=dd_c`: game `seed`'s decks: Doomsday against Delver (by `seed %
+/// 3`: 0 Doomsday in seat 0, 1 in seat 1) and the Doomsday mirror (2).
+fn ddc_decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
+    match seed % 3 {
+        0 => [(doomsday_c_deck(), Vec::new()), (delver_deck(), Vec::new())],
+        1 => [(delver_deck(), Vec::new()), (doomsday_c_deck(), Vec::new())],
+        _ => [(doomsday_c_deck(), Vec::new()), (doomsday_c_deck(), Vec::new())],
+    }
+}
+
+/// `FUZZ_POOL=dd_c`: lane C's cards cast and cycled (stack items, each once),
+/// games with a Leyline of the Void on the battlefield as the first turn
+/// begins (the opening-hand action) and at any time, games with a card of a
+/// player in exile while an opponent's Leyline is on the battlefield, and
+/// declare-blockers decisions facing an attacking swampwalker whose decider
+/// controls a Swamp (checked: the swampwalker is never offered).
+static DDC_EDGE_CAST: AtomicU64 = AtomicU64::new(0);
+static DDC_EDGE_CYCLED: AtomicU64 = AtomicU64::new(0);
+static DDC_WRAITH_CAST: AtomicU64 = AtomicU64::new(0);
+static DDC_WRAITH_CYCLED: AtomicU64 = AtomicU64::new(0);
+static DDC_LEYLINE_OPENING: AtomicU64 = AtomicU64::new(0);
+static DDC_LEYLINE_GAMES: AtomicU64 = AtomicU64::new(0);
+static DDC_LEYLINE_EXILE_GAMES: AtomicU64 = AtomicU64::new(0);
+static DDC_SWAMPWALK_ATTACKS: AtomicU64 = AtomicU64::new(0);
+
+/// Per game (`FUZZ_POOL=dd_c`): what `count_ddc` has counted.
+#[derive(Default)]
+struct DdcSeen {
+    opening_checked: bool,
+    leyline: bool,
+    leyline_exile: bool,
+}
+
+fn count_ddc(g: &Game, seen: &mut Vec<u32>, s: &mut DdcSeen) {
+    for it in g.stack() {
+        if seen.contains(&it.id) {
+            continue;
+        }
+        seen.push(it.id);
+        match it.kind {
+            engine::game::StackKind::Spell { card } => match g.name(card) {
+                "Edge of Autumn" => DDC_EDGE_CAST.fetch_add(1, Ordering::Relaxed),
+                "Street Wraith" => DDC_WRAITH_CAST.fetch_add(1, Ordering::Relaxed),
+                _ => 0,
+            },
+            engine::game::StackKind::Ability { source, .. } => match g.db().def(g.obj(source.idx).def).name.as_str() {
+                "Edge of Autumn" => DDC_EDGE_CYCLED.fetch_add(1, Ordering::Relaxed),
+                "Street Wraith" => DDC_WRAITH_CYCLED.fetch_add(1, Ordering::Relaxed),
+                _ => 0,
+            },
+        };
+    }
+    let leylines: Vec<u8> = g.battlefield().iter().filter(|&&c| g.name(c) == "Leyline of the Void").map(|&c| g.obj(c).controller).collect();
+    if !s.opening_checked && g.turn().number >= 1 {
+        s.opening_checked = true;
+        if !leylines.is_empty() {
+            DDC_LEYLINE_OPENING.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    if !leylines.is_empty() && !s.leyline {
+        s.leyline = true;
+        DDC_LEYLINE_GAMES.fetch_add(1, Ordering::Relaxed);
+    }
+    if !s.leyline_exile && leylines.iter().any(|&q| g.exile_zone().iter().any(|&c| g.obj(c).owner != q)) {
+        s.leyline_exile = true;
+        DDC_LEYLINE_EXILE_GAMES.fetch_add(1, Ordering::Relaxed);
+    }
+    // Swampwalk (CR 702.14c): a blocker of a defending player who controls a
+    // land with the land type Swamp is never offered an attacking swampwalker.
+    if g.kind() == Some(DecisionKind::DeclareBlockers) {
+        let d = g.pending_decision().unwrap().player;
+        let swamp = g.db().subtype_id("Swamp");
+        let has_swamp = swamp.is_some_and(|s| {
+            g.battlefield().iter().any(|&c| g.obj(c).controller == d && g.types_of(c) & engine::db::types::LAND != 0 && g.has_subtype(c, s))
+        });
+        for &c in g.battlefield() {
+            if has_swamp && g.obj(c).attacking && g.has_kw(c, engine::db::Kw::Swampwalk) {
+                DDC_SWAMPWALK_ATTACKS.fetch_add(1, Ordering::Relaxed);
+                assert!(!g.has_option(Choice::Card(c)), "a block of the swampwalking {} is offered to a player with a Swamp", g.name(c));
+            }
+        }
+    }
+}
+
+/// `FUZZ_POOL=doomsday` (ENGINE.md 124.4): the real Legacy Doomsday 60 (the
+/// main deck of `data/decks/doomsday_8027957.json`; best-of-one, no
+/// sideboard).
+fn doomsday_deck() -> Vec<u16> {
+    let d = engine::az::constructed::Decklist::legacy_doomsday();
+    let deck = engine::az::constructed::Decklist::ids(CardDb::constructed(), &d.main).unwrap();
+    engine::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("the Doomsday 60: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=doomsday`: game `seed`'s decks: the Doomsday 60 against the
+/// Delver 60 (by `seed % 3`: 0 Doomsday in seat 0, 1 in seat 1) and the
+/// Doomsday mirror (2).
+fn doomsday_decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
+    match seed % 3 {
+        0 => [(doomsday_deck(), Vec::new()), (delver_deck(), Vec::new())],
+        1 => [(delver_deck(), Vec::new()), (doomsday_deck(), Vec::new())],
+        _ => [(doomsday_deck(), Vec::new()), (doomsday_deck(), Vec::new())],
+    }
+}
+
+/// `FUZZ_POOL=doomsday`: the legacy cards' spells (and Thassa's Oracle) seen
+/// on the stack after an action, each stack item once by its id (a spell
+/// cast and resolved within one action, every other decision answered by
+/// `auto_single`, isn't seen); their abilities likewise (Pact of Negation's
+/// trigger, Edge of Autumn's and Street Wraith's cycling, Murktide Regent's
+/// trigger); Misdirection's new-target decisions; Caverns' creature types
+/// chosen (each permanent once); creature spells that can't be countered.
+const DOOMSDAY_SPELLS: [&str; 10] = [
+    "Doomsday",
+    "Pact of Negation",
+    "Personal Tutor",
+    "Flow State",
+    "Misdirection",
+    "Edge of Autumn",
+    "Street Wraith",
+    "Thassa's Oracle",
+    "Murktide Regent",
+    "Prismari Charm",
+];
+static DOOMSDAY_CASTS: [AtomicU64; 10] = [const { AtomicU64::new(0) }; 10];
+const DOOMSDAY_ABILITIES: [&str; 4] = ["Pact of Negation", "Edge of Autumn", "Street Wraith", "Murktide Regent"];
+static DOOMSDAY_ABILITY_COUNTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+static DOOMSDAY_RETARGETS: AtomicU64 = AtomicU64::new(0);
+static DOOMSDAY_CAVERN_TYPES: AtomicU64 = AtomicU64::new(0);
+static DOOMSDAY_UNCOUNTERABLE: AtomicU64 = AtomicU64::new(0);
+
+/// Per game (`FUZZ_POOL=doomsday`): the stack items, uncounterable creature
+/// spells' items and Caverns counted already.
+#[derive(Default)]
+struct DoomsdaySeen {
+    stack: Vec<u32>,
+    uncounterable: Vec<u32>,
+    caverns: Vec<u32>,
+}
+
+fn count_doomsday(g: &Game, s: &mut DoomsdaySeen) {
+    use engine::game::StackKind;
+    if g.kind() == Some(DecisionKind::NewTarget) {
+        if let Some(StackKind::Spell { card }) = g.stack().last().map(|it| it.kind) {
+            if g.name(card) == "Misdirection" {
+                DOOMSDAY_RETARGETS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+    for it in g.stack() {
+        if let StackKind::Spell { card } = it.kind {
+            if !s.uncounterable.contains(&it.id) && g.spell_cant_be_countered(card) && g.db().def(g.obj(card).def).is(engine::db::types::CREATURE) {
+                s.uncounterable.push(it.id);
+                DOOMSDAY_UNCOUNTERABLE.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        if s.stack.contains(&it.id) {
+            continue;
+        }
+        s.stack.push(it.id);
+        match it.kind {
+            StackKind::Spell { card } => {
+                if let Some(k) = DOOMSDAY_SPELLS.iter().position(|&n| n == g.name(card)) {
+                    DOOMSDAY_CASTS[k].fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            StackKind::Ability { source, .. } => {
+                let name = g.db().def(g.obj(source.idx).def).name.as_str();
+                if let Some(k) = DOOMSDAY_ABILITIES.iter().position(|&n| n == name) {
+                    DOOMSDAY_ABILITY_COUNTS[k].fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+    for c in g.permanents_of(0).chain(g.permanents_of(1)) {
+        if g.chosen_creature_type(c).is_some() && !s.caverns.contains(&c.get()) {
+            s.caverns.push(c.get());
+            DOOMSDAY_CAVERN_TYPES.fetch_add(1, Ordering::Relaxed);
         }
     }
 }
@@ -1221,9 +1652,28 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     if delver_mode() {
         return [(delver_deck(), Vec::new()), (delver_deck(), Vec::new())];
     }
+    if dd_a_mode() {
+        // Doomsday against Delver in either seat; one game in three the
+        // Doomsday mirror.
+        return match seed % 3 {
+            0 => [(dd_a_deck(), Vec::new()), (delver_deck(), Vec::new())],
+            1 => [(delver_deck(), Vec::new()), (dd_a_deck(), Vec::new())],
+            _ => [(dd_a_deck(), Vec::new()), (dd_a_deck(), Vec::new())],
+        };
+    }
+    if dd_b_mode() {
+        let (dd, delver) = ((dd_b_deck(), Vec::new()), (delver_deck(), Vec::new()));
+        return if seed % 2 == 0 { [dd, delver] } else { [delver, dd] };
+    }
+    if ddc_mode() {
+        return ddc_decks(seed);
+    }
+    if doomsday_mode() {
+        return doomsday_decks(seed);
+    }
     if sns_mode() {
         // Against Delver in either seat; one game in three the mirror.
-        let mine = if pool_mode() == PoolMode::Sns { constructed_deck(SNS_DECK, "SNS_DECK") } else { constructed_deck(SNEAK_SHOW_DECK, "SNEAK_SHOW_DECK") };
+        let mine = if pool_mode() == PoolMode::Sns { sns_deck() } else { sneak_show_deck() };
         return match seed % 3 {
             0 => [(mine, Vec::new()), (delver_deck(), Vec::new())],
             1 => [(delver_deck(), Vec::new()), (mine, Vec::new())],
@@ -1275,6 +1725,12 @@ fn play(seed: u64, checks: bool) -> Played {
     let exp = exponential_mode();
     let mut buf = Vec::new();
     let mut stack_seen: Vec<u32> = Vec::new();
+    // (`FUZZ_POOL=dd_b`: lane B's counts, ENGINE.md 124.2.)
+    let mut dd_b_seen = Vec::new();
+    let mut ddc_seen = DdcSeen::default();
+    // (`FUZZ_POOL=doomsday`'s counts, ENGINE.md 124.4.)
+    let mut doomsday_seen = DoomsdaySeen::default();
+    // (`FUZZ_POOL=sneak_show` / `sns`: the Flutes that chose a name, ENGINE.md 123.)
     let mut sns_named: Vec<engine::ids::ObjRef> = Vec::new();
     let (mut turn, mut turn_steps) = (g.turn().number, 0u64);
     while !g.is_over() {
@@ -1336,6 +1792,18 @@ fn play(seed: u64, checks: bool) -> Played {
         }
         if delver_mode() && !g.stack().is_empty() {
             count_delver(&g, &mut stack_seen);
+        }
+        if dd_a_mode() && !g.stack().is_empty() {
+            count_dd_a(&g, &mut stack_seen);
+        }
+        if dd_b_mode() {
+            count_dd_b(&g, &mut dd_b_seen);
+        }
+        if ddc_mode() {
+            count_ddc(&g, &mut stack_seen, &mut ddc_seen);
+        }
+        if doomsday_mode() {
+            count_doomsday(&g, &mut doomsday_seen);
         }
         if sns_mode() {
             if !g.stack().is_empty() {
@@ -1691,6 +2159,82 @@ fn fuzz_random_games() {
             println!("FUZZ_BEST_SHARE={p}: {best} of {} seats the builder's best guess", 2 * n);
         }
     }
+    if dd_b_mode() {
+        let l = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let (m, r, f, c, t, k, u) = (
+            l(&DD_B_MISDIRECTIONS),
+            l(&DD_B_RETARGETS),
+            l(&DD_B_FLUSTERSTORMS),
+            l(&DD_B_COPIES),
+            l(&DD_B_CAVERN_TYPES),
+            l(&DD_B_TYPE_MANA),
+            l(&DD_B_UNCOUNTERABLE),
+        );
+        println!(
+            "FUZZ_POOL=dd_b: Misdirection cast {m}, its new-target decisions {r}; Flusterstorm cast {f}, copies {c}; Cavern types chosen {t}, decisions with chosen-type mana floating {k}, uncounterable creature spells {u}"
+        );
+        if n >= 200 {
+            assert!(m > 0 && r > 0 && f > 0 && c > 0 && t > 0 && u > 0, "lane B's cards weren't played: {m} {r} {f} {c} {t} {u}");
+        }
+    }
+    if delver_mode() {
+        let (m, t, c) =
+            (DELVER_MURKTIDES.load(Ordering::Relaxed), DELVER_MURK_TRIGGERS.load(Ordering::Relaxed), DELVER_CHARMS.load(Ordering::Relaxed));
+        println!("FUZZ_POOL=delver: Murktide Regent cast {m} times, its leave-the-graveyard triggers {t}, Prismari Charm cast {c} times");
+        if n >= 200 {
+            assert!(m > 0 && t > 0 && c > 0, "the legacy cards weren't played: {m} {t} {c}");
+        }
+    }
+    if dd_a_mode() {
+        let casts: Vec<u64> = DD_A_CASTS.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+        let pacts = DD_A_PACT_TRIGGERS.load(Ordering::Relaxed);
+        println!(
+            "FUZZ_POOL=dd_a: seen on the stack {}; Pact of Negation's triggers {pacts}",
+            DD_A_CARDS.iter().zip(&casts).map(|(n, c)| format!("{n} {c} times")).collect::<Vec<_>>().join(", ")
+        );
+        if n >= 200 {
+            assert!(casts.iter().all(|&c| c > 0) && pacts > 0, "lane A's cards weren't played: {casts:?} {pacts}");
+        }
+    }
+    if ddc_mode() {
+        let ld = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let (ec, ey, wc, wy) = (ld(&DDC_EDGE_CAST), ld(&DDC_EDGE_CYCLED), ld(&DDC_WRAITH_CAST), ld(&DDC_WRAITH_CYCLED));
+        let (lo, lg, le, sw) = (ld(&DDC_LEYLINE_OPENING), ld(&DDC_LEYLINE_GAMES), ld(&DDC_LEYLINE_EXILE_GAMES), ld(&DDC_SWAMPWALK_ATTACKS));
+        println!(
+            "FUZZ_POOL=dd_c: Edge of Autumn cast {ec}, cycled {ey}; Street Wraith cast {wc}, cycled {wy}; blockers asked facing a swampwalker and controlling a Swamp {sw} (never offered it); \
+             Leyline of the Void on the battlefield as the first turn began in {lo} games, at some time in {lg}, with a card of its controller's opponent in exile then in {le}"
+        );
+        // (A swampwalker facing a Swamp is rare in random play, a few times in
+        // 2,000 games: not asserted; the card tests cover it.)
+        if n >= 300 {
+            assert!(ec > 0 && ey > 0 && wc > 0 && wy > 0 && lo > 0 && lg > 0 && le > 0, "lane C's cards weren't played");
+        }
+    }
+    if doomsday_mode() {
+        let casts: Vec<u64> = DOOMSDAY_CASTS.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+        let abil: Vec<u64> = DOOMSDAY_ABILITY_COUNTS.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+        let (r, t, u) =
+            (DOOMSDAY_RETARGETS.load(Ordering::Relaxed), DOOMSDAY_CAVERN_TYPES.load(Ordering::Relaxed), DOOMSDAY_UNCOUNTERABLE.load(Ordering::Relaxed));
+        println!(
+            "FUZZ_POOL=doomsday: seen on the stack {}; abilities: Pact of Negation's trigger {}, Edge of Autumn cycled {}, Street Wraith cycled {}, Murktide Regent's trigger {}; Misdirection's new-target decisions {r}; Caverns' types chosen {t}; uncounterable creature spells {u}",
+            DOOMSDAY_SPELLS.iter().zip(&casts).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", "),
+            abil[0],
+            abil[1],
+            abil[2],
+            abil[3]
+        );
+        let cast = |name: &str| casts[DOOMSDAY_SPELLS.iter().position(|&n| n == name).unwrap()];
+        if n >= 200 {
+            let main = ["Doomsday", "Pact of Negation", "Personal Tutor", "Flow State", "Misdirection", "Thassa's Oracle", "Murktide Regent", "Prismari Charm"];
+            assert!(main.iter().all(|&m| cast(m) > 0), "the decks' cards weren't played: {casts:?}");
+            assert!(abil[0] > 0 && abil[1] > 0 && abil[2] > 0 && r > 0 && t > 0, "the legacy cards' abilities weren't used: {abil:?} {r} {t}");
+        }
+        // (Edge of Autumn and Street Wraith are cycled far more often than
+        // cast: their casts are asserted over 2,000 games.)
+        if n >= 2000 {
+            assert!(cast("Edge of Autumn") > 0 && cast("Street Wraith") > 0, "Edge of Autumn or Street Wraith never cast: {casts:?}");
+        }
+    }
     if sns_mode() {
         let seen: Vec<u64> = SNS_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
         let (free, unc, named) = (SNS_FREE.load(Ordering::Relaxed), SNS_UNCOUNTERABLE.load(Ordering::Relaxed), SNS_NAMED.load(Ordering::Relaxed));
@@ -1706,14 +2250,6 @@ fn fuzz_random_games() {
         // are what is required.)
         if n >= 200 && pool_mode() == PoolMode::SneakShow {
             assert!(seen[0] > 0 && seen[2] > 0 && free > 0 && unc > 0, "the deck's lane cards weren't played: {seen:?} {free} {unc}");
-        }
-    }
-    if delver_mode() {
-        let (m, t, c) =
-            (DELVER_MURKTIDES.load(Ordering::Relaxed), DELVER_MURK_TRIGGERS.load(Ordering::Relaxed), DELVER_CHARMS.load(Ordering::Relaxed));
-        println!("FUZZ_POOL=delver: Murktide Regent cast {m} times, its leave-the-graveyard triggers {t}, Prismari Charm cast {c} times");
-        if n >= 200 {
-            assert!(m > 0 && t > 0 && c > 0, "the legacy cards weren't played: {m} {t} {c}");
         }
     }
 }
@@ -2085,12 +2621,8 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
 
 #[test]
 fn fuzz_random_matches() {
-    if delver_mode() {
-        println!("FUZZ_POOL=delver: games only (constructed best-of-three isn't built)");
-        return;
-    }
-    if sns_mode() {
-        println!("FUZZ_POOL=sneak_show / sns: games only (constructed best-of-three isn't on this branch)");
+    if constructed_mode() {
+        println!("FUZZ_POOL=delver / dd_a / dd_b / dd_c / doomsday / sneak_show / sns: games only (constructed best-of-three isn't built)");
         return;
     }
     if eoe_mode() {
@@ -2148,7 +2680,7 @@ fn fuzz_random_matches() {
 fn same_seed_and_actions_replay_matches_identically() {
     use engine::az::MtgAz;
     use zero_search::game::SearchGame;
-    if delver_mode() || sns_mode() || eoe_mode() || sealed_mode() {
+    if constructed_mode() || eoe_mode() || sealed_mode() {
         return;
     }
     for seed in 2000..2012 {

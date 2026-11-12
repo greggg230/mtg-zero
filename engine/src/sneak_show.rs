@@ -372,11 +372,11 @@ pub fn face_name(d: &crate::db::CardDef) -> &str {
     &d.name
 }
 
-/// Does a card of definition `d` make state layout v6 can't encode exactly,
-/// so that networks may not play games with it on this layout (ENGINE.md
-/// 123): a permanent's card name chosen as it enters of the plain kind
-/// (Disruptor Flute; layout v7's chosen-name column, ENGINE.md 125, encodes
-/// `Mark::ChosenName`)? `Some(the refusal)`.
-pub fn needs_layout_v7(d: &crate::db::CardDef) -> Option<String> {
+/// Does a card of definition `d` make state layout v6 can't encode exactly
+/// (ENGINE.md 123): a permanent's card name chosen as it enters of the plain
+/// kind (Disruptor Flute; layout v7's chosen-name column, ENGINE.md 125,
+/// encodes `Mark::ChosenName`)? `Some(the refusal)`; one entry of
+/// `az::needs_layout_v7`.
+pub fn plain_name_needs_v7(d: &crate::db::CardDef) -> Option<String> {
     (d.chooses_name && d.sns.plain_name).then(|| format!("{}'s chosen name needs layout v7 (ENGINE.md 123)", d.name))
 }

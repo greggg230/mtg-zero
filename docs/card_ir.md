@@ -12,7 +12,7 @@ specified in mtg-bot's `docs/CARD_IR.md`.
 | Path | What |
 |---|---|
 | `data/cards/powerlsv.ir.json` | The PowerLSV cube (546 printings), IR v1, exported by mtg-bot `feature/legacy-delver-ir` 140eafa9 with the legacy pool (schema `181ba4b8a1e7...`, ENGINE.md 54; the cards byte for byte those of `feature/companion-ir` 62210e89, schema `7100f8436556...`: companion conditions, M8a; before it `feature/ir-fixes-mtgzero` 8ea9fcca, schema `66ba3e33fe5b...`, the IR defects of docs/ir_defects.md 1, 2, 4, 12, 13, 15-18 fixed) |
-| `data/cards/legacy.ir.json` | The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari Charm; ENGINE.md 123: Show and Tell, Omniscience, Mistrise Village, Brotherhood's End, Disruptor Flute, Magus of the Moon; mtg-bot's pool `legacy`), the same export and schema |
+| `data/cards/legacy.ir.json` | The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari Charm; ENGINE.md 124, the Legacy Doomsday deck: Doomsday, Pact of Negation, Personal Tutor, Flow State, 124.1; Misdirection, Flusterstorm, Cavern of Souls, 124.2; Edge of Autumn, Street Wraith, Leyline of the Void, 124.3; ENGINE.md 123, the Legacy Sneak and Show deck: Show and Tell, Omniscience, Mistrise Village, Brotherhood's End, Disruptor Flute, Magus of the Moon; mtg-bot's pool `legacy`), the same export and schema |
 | `data/cards/eoe.ir.json` | The Edge of Eternities sealed cards (ENGINE.md 99.1: mtg-bot's pool `eoe` filtered by `tools/codegen/filter_eoe_ir.py` to the set's 320 cards with IR), the same export and schema; since ENGINE.md 99.16 the export of mtg-bot `feature/eoe-ir-fixes` f4f2d663 (before it 7c02e5c9, ENGINE.md 99.11; 5362f5ed, ENGINE.md 99.9) |
 | `data/cards/powerlsv.schema.json` | The schema the three documents were encoded with |
 | `tools/codegen/gen_card_ir.py` | Schema -> Rust generator (stdlib Python) |
@@ -86,19 +86,40 @@ When mtg-bot bumps `ir_version` (a change to the encoding rules, not to
 the card vocabulary), `support.rs`, `lib.rs` and the generator may need
 changes too; see mtg-bot `docs/CARD_IR.md`, "Versioning".
 
-## Current numbers (mtg-bot `feature/sneak-show-ir`)
+## Current numbers (mtg-bot `feature/sneak-show-ir` 60e76c0a)
 
-ENGINE.md 123 (Legacy Sneak and Show): exported with `cards export-ir --pool cube legacy eoe` from mtg-bot
-`feature/sneak-show-ir` (on `feature/eoe-ir-fixes` f4f2d663), then `filter_eoe_ir.py`; schema sha256
-`769af139588b33cd6582a9b86495ae900392ceb0520df3ce49931daabcd9691f` (was `1cbe33073b1b...`). 716 classes, seven more:
+ENGINE.md 123.10 (Legacy Sneak and Show merged with the Legacy Doomsday lanes): exported with `cards export-ir --pool
+cube legacy eoe` from mtg-bot `feature/sneak-show-ir` 60e76c0a (its 3fb5f8e1 with `feature/doomsday-ir` 1af29e64
+merged), then `filter_eoe_ir.py`; schema sha256 `245e4bc208c63834f86e8941d66ec31c2e09db7146975e3b93897bf6f1333247` (was
+`2b73853e6d15...` on main). 724 classes: exactly the union of main's 717 and the Sneak and Show branch's 716 (its seven:
 `EachPlayerMayPutFromHand`, `RotoCardFilter`, `NextSpellThisTurnCantBeCountered`, `ChooseCardNameAsEnters`,
-`SpellTax`, `ActivationProhibition` (mtg-bot's roto classes, now used by Show and Tell, Mistrise Village and
-Disruptor Flute) and `DealNDamageToEachCreatureAndPlaneswalker` (new: Brotherhood's End's first mode). The legacy
-pool gains six cards (8 now, 4,859 bytes). `powerlsv.ir.json` (546 cards, 402,200 bytes) and `eoe.ir.json` (320
-cards, 214,200 bytes) are the previous files byte for byte once the schema hash is replaced (checked card by card and
-as bytes). No IR defect (docs/ir_defects.md, section U).
+`SpellTax`, `ActivationProhibition` and the new `DealNDamageToEachCreatureAndPlaneswalker`, Brotherhood's End's first
+mode). `powerlsv.ir.json` (546 cards) and `eoe.ir.json` (320 cards) are main's files byte for byte once the schema hash
+is replaced (checked card by card and as bytes); `legacy.ir.json` holds the 18 legacy cards, each card's IR equal to
+its branch's export (main's twelve, the Sneak and Show six). No IR defect in the six (docs/ir_defects.md, section V).
 
-### Before ENGINE.md 123 (mtg-bot `feature/eoe-ir-fixes` f4f2d663)
+### Before ENGINE.md 123.10: the Sneak and Show branch alone (mtg-bot `feature/sneak-show-ir` 3fb5f8e1)
+
+Schema `769af139588b...` (on f4f2d663: 716 classes, the seven above), the legacy pool 8 cards (4,859 bytes); the
+cube's and EoE's IR byte for byte apart from the schema hash.
+
+## Current numbers (mtg-bot `feature/doomsday-ir` 1af29e64)
+
+ENGINE.md 124.4 (Legacy Doomsday, the three lanes integrated): exported with `cards export-ir --pool cube legacy eoe`
+from mtg-bot `feature/doomsday-ir` 1af29e64 (the lanes' `feature/doomsday-a-ir` a544a075, `feature/doomsday-b-ir`
+c5d2a557 and `feature/doomsday-c-ir` 870228f5 merged on `feature/eoe-ir-fixes` f4f2d663), then `filter_eoe_ir.py`;
+schema sha256 `2b73853e6d15d2a5ba6fca2781f52afe5ae89fc5fbf3e1e410605ff6b36b67a2` (was `1cbe33073b1b...`). 717 classes,
+eight more, exactly the union of the lanes' additions: lane A's `DoomsdayPile`,
+`LookAtTopPutIntoHandMoreIfInstantAndSorcery`, `LoseTheGame` and `PayManaOrElse` (new: "pay <cost>. If you don't,
+<effect>"), with the enum member `DelayedStep.your_upkeep` (124.1); lane B's `ChangeTheTargetOfTargetWithASingleTarget`
+(new: Misdirection), `AddAnyColorManaForChosenCreatureType` (Cavern of Souls) and the object predicate
+`value_predicates.HasCardType` (Flusterstorm) (124.2); lane C's `PayLifeCost`, which joins the `CostAtom` category
+(124.3). docs/ir_defects.md 200 (a single-faced card's colour indicator dropped: Pact of Negation's blue) is fixed.
+`powerlsv.ir.json` (546 cards, 402,200 bytes) and `eoe.ir.json` (320 cards, 214,200 bytes) are main's files byte for
+byte once the schema hash is replaced (checked card by card and as bytes); `legacy.ir.json` holds the 12 legacy cards
+(6,708 bytes, sorted by name), each card's IR equal to its lane's export.
+
+### Before ENGINE.md 124 (mtg-bot `feature/eoe-ir-fixes` f4f2d663)
 
 ENGINE.md 99.16 (W6): exported with `cards export-ir --pool cube legacy eoe` from mtg-bot
 `feature/eoe-ir-fixes` f4f2d663 (the third IR-fix batch, on aa323a3b), then `filter_eoe_ir.py`; schema

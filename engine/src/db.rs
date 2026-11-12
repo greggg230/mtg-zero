@@ -82,6 +82,16 @@ pub enum Kw {
     /// Shadow (CR 702.28): blocks and is blocked only by creatures with
     /// shadow. (Not in the encoding's keyword list either.)
     Shadow,
+    /// Landwalk of a basic land type (CR 702.14a): "plainswalk",
+    /// "islandwalk", "swampwalk", "mountainwalk", "forestwalk": can't be
+    /// blocked as long as the defending player controls a land with that
+    /// land type (702.14c; `Game::landwalk_unblockable`, ENGINE.md 124.3).
+    /// (Not in the encoding's keyword list either.)
+    Plainswalk,
+    Islandwalk,
+    Swampwalk,
+    Mountainwalk,
+    Forestwalk,
 }
 
 impl Kw {
@@ -449,6 +459,10 @@ pub enum Filter {
     /// context's source (as it last existed if it left, CR 608.2h; Blast
     /// Zone, ENGINE.md 99.12).
     MvIsSourceCounters(Counter),
+    /// A spell with a single target (CR 115.9a: one target chosen as it was
+    /// put on the stack, each instance counted; Misdirection's "target spell
+    /// with a single target", ENGINE.md 124.2).
+    SingleTarget,
 }
 
 /// `Filter::Ability` kinds.
@@ -703,6 +717,10 @@ pub enum DelayedWhen {
     /// At the next end of combat ("at end of combat": as the end of combat
     /// step begins, CR 511.2; EoE lane D, ENGINE.md 99.5).
     EndOfCombat,
+    /// At the beginning of its controller's next upkeep (Pact of Negation;
+    /// ENGINE.md 124.1): an upkeep of theirs that begins after it was
+    /// created (one in progress has begun already, CR 603.7a, 503.1a).
+    YourNextUpkeep,
 }
 
 impl EventKind {
@@ -1150,8 +1168,10 @@ pub struct ManaAbility {
     /// "Spend this mana only to cast artifact spells" / "... a legendary
     /// spell" (`SPEND_*` bits; 0 = no restriction, CR 106.6): the purposes
     /// it may be spent on, any one of them ("to cast artifact spells or
-    /// activate abilities of artifacts": two bits; ENGINE.md 99.12).
-    pub only: u8,
+    /// activate abilities of artifacts": two bits; ENGINE.md 99.12); "... a
+    /// creature spell of the chosen type" (`SPEND_CHOSEN_CREATURE_TYPE`,
+    /// resolved by the source's chosen type: ENGINE.md 124.2).
+    pub only: Spend,
     /// "... and that spell can't be countered" (Delighted Halfling).
     pub uncounterable: bool,
     /// "If any of that mana is spent on a creature spell, it gains haste
@@ -1162,26 +1182,40 @@ pub struct ManaAbility {
     pub opp_life: u8,
 }
 
+/// A spending restriction's purposes (CR 106.6): `SPEND_*` bits 0-6, the
+/// rider `MANA_UNCOUNTERABLE` bit 7 (on mana only), and since ENGINE.md
+/// 124.2 "a creature spell of the chosen type", `SPEND_CHOSEN_CREATURE_TYPE`
+/// (bit 8), with the type the mana's source chose in bits 16-24
+/// (`doomsday_b::with_type`; none on a mana ability's own `only`). What a
+/// payment satisfies is a `doomsday_b::Allow`.
+pub type Spend = u32;
+
 /// `ManaAbility::only`: the mana may be spent only to cast an artifact
 /// spell.
-pub const SPEND_ARTIFACT: u8 = 1;
+pub const SPEND_ARTIFACT: Spend = 1;
 /// ... only to cast a legendary spell.
-pub const SPEND_LEGENDARY: u8 = 2;
+pub const SPEND_LEGENDARY: Spend = 2;
 /// ... only to activate abilities of artifact sources (ENGINE.md 99.12).
-pub const SPEND_ARTIFACT_ABILITY: u8 = 4;
+pub const SPEND_ARTIFACT_ABILITY: Spend = 4;
 /// ... only to cast colorless Eldrazi spells.
-pub const SPEND_ELDRAZI_SPELL: u8 = 8;
+pub const SPEND_ELDRAZI_SPELL: Spend = 8;
 /// ... only to activate abilities of colorless Eldrazi.
-pub const SPEND_ELDRAZI_ABILITY: u8 = 16;
+pub const SPEND_ELDRAZI_ABILITY: Spend = 16;
 /// ... only to activate abilities of land sources.
-pub const SPEND_LAND_ABILITY: u8 = 32;
+pub const SPEND_LAND_ABILITY: Spend = 32;
 /// ... only to cast a spell from anywhere other than your hand.
-pub const SPEND_OUTSIDE_HAND: u8 = 64;
+pub const SPEND_OUTSIDE_HAND: Spend = 64;
+/// ... only to cast a creature spell of the type its source chose as it
+/// entered (CR 106.6, 614.12; Cavern of Souls, ENGINE.md 124.2). On a mana
+/// ability alone; the mana it makes carries its source's type too
+/// (`Game::spend_of_source`), or none when the source chose no type (then
+/// no spell is of the chosen type: no payment allows it).
+pub const SPEND_CHOSEN_CREATURE_TYPE: Spend = 1 << 8;
 /// Not a purpose: the rider "and that spell can't be countered" (Delighted
 /// Halfling) on mana in a pool (`Game::pool_restr`'s `only`), which stays
 /// with the mana (CR 106.6; docs/shortcuts.md N20, ENGINE.md 100.4).
 /// `eoe_w2::spendable` ignores it.
-pub const MANA_UNCOUNTERABLE: u8 = 128;
+pub const MANA_UNCOUNTERABLE: Spend = 128;
 
 /// Sacrifice n permanents you control matching the filter (`another`: not
 /// the ability's source).
@@ -1402,7 +1436,7 @@ impl CardDef {
             | (if self.trig_mask & (1u64 << EventKind::ExiledFromLibGy as u32) != 0 { crate::game::SEEN_EXILE_WATCH } else { 0 })
             | (if self.opp_draw_token.is_some() || self.draw_plus.is_some() { crate::game::SEEN_DRAW_REPL } else { 0 })
             | (if self.gy_triggers { crate::game::SEEN_GY_TRIGGER } else { 0 })
-            | (if self.void_exile.is_some() { crate::game::SEEN_VOID } else { 0 })
+            | (if self.void_exile.is_some() || self.opp_gy_exile { crate::game::SEEN_VOID } else { 0 })
             | (if self.named_spell_tax > 0 || self.named_ability_tax > 0 || self.sns.named_ban.is_some() { crate::game::SEEN_NAMED_TAX } else { 0 })
             | (if self.look_top || self.play_top_life { crate::game::SEEN_TOP } else { 0 })
             | (if self.spell.as_ref().is_some_and(|ab| {
@@ -1821,6 +1855,10 @@ pub struct CardDef {
     /// instead exile it with a <counter> on it" (Dauthi Voidwalker; CR
     /// 614.1a).
     pub void_exile: Option<Counter>,
+    /// "If a card would be put into an opponent's graveyard from anywhere,
+    /// exile it instead" (Leyline of the Void; CR 614.1a;
+    /// `Game::opp_gy_exile_for`, ENGINE.md 124.3).
+    pub opp_gy_exile: bool,
     /// Reconfigure (CR 702.151): while attached to a creature, it isn't a
     /// creature (702.151b); it may equip while a creature (301.5c).
     pub reconfigure: bool,
@@ -1864,6 +1902,9 @@ pub struct CardDef {
     pub w3: crate::eoe_w3::W3Def,
     /// The printing facts EoE workstream W6 adds (ENGINE.md 99.16).
     pub w6: crate::eoe_w6::W6Def,
+    /// The printing facts lane B of the Legacy Doomsday deck adds (ENGINE.md
+    /// 124.2).
+    pub dd_b: crate::doomsday_b::DdBDef,
     /// The printing facts of the Legacy Sneak and Show cards (ENGINE.md 123).
     pub sns: crate::sneak_show::SnsDef,
     /// "Nonbasic lands are Mountains" (CR 305.7, 613.1d: Magus of the Moon;
@@ -2073,7 +2114,7 @@ pub struct CardDb {
     /// The spending restrictions' purposes the table's mana can have
     /// (`SPEND_*`: the union of its mana abilities' `only`, granted ones
     /// included); payments work out only these (ENGINE.md 99.12).
-    pub(crate) spend_kinds: u8,
+    pub(crate) spend_kinds: Spend,
     /// The interned "Eldrazi" subtype, if any card has it.
     pub(crate) eldrazi: Option<u16>,
     /// A card of the table says "nonbasic lands are Mountains"

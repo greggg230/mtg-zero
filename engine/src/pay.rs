@@ -136,7 +136,7 @@ fn chain_id(classes: &[Class], s: &Src, k: crate::num::Count) -> u64 {
 /// in the payment) by some of them: that mana isn't spent on the spell, so a
 /// set counts only the units paying `cost`. Exact for any number of units and
 /// hybrid pips (`shows_exactly`).
-fn colour_sets(units: &[Tag], cost: &ManaCost, marked: &[Tag], fixed: u8, allow: u8) -> u32 {
+fn colour_sets(units: &[Tag], cost: &ManaCost, marked: &[Tag], fixed: u8, allow: crate::doomsday_b::Allow) -> u32 {
     // (Units alike are one choice: the marked needs take a multiset of them.)
     let mut groups: Vec<(Tag, usize)> = Vec::new();
     let mut sorted = units.to_vec();
@@ -149,7 +149,7 @@ fn colour_sets(units: &[Tag], cost: &ManaCost, marked: &[Tag], fixed: u8, allow:
     }
     let mut sets = 0u32;
     let mut take = vec![0usize; groups.len()];
-    fn rec(i: usize, left: usize, groups: &[(Tag, usize)], take: &mut Vec<usize>, cost: &ManaCost, marked: &[Tag], fixed: u8, allow: u8, sets: &mut u32) {
+    fn rec(i: usize, left: usize, groups: &[(Tag, usize)], take: &mut Vec<usize>, cost: &ManaCost, marked: &[Tag], fixed: u8, allow: crate::doomsday_b::Allow, sets: &mut u32) {
         if *sets == u32::MAX {
             return;
         }
@@ -163,7 +163,7 @@ fn colour_sets(units: &[Tag], cost: &ManaCost, marked: &[Tag], fixed: u8, allow:
                 paying.extend(std::iter::repeat_n(u, take[k]));
                 rest.extend(std::iter::repeat_n(u, n - take[k]));
             }
-            if !marked.is_empty() && !payable_n(&ManaCost::default(), allow, marked, &paying, &[]) {
+            if !marked.is_empty() && !payable_n(&ManaCost::default(), allow.bits, marked, &paying, &[]) {
                 return;
             }
             for m in 0..32u8 {
@@ -192,7 +192,7 @@ fn colour_sets(units: &[Tag], cost: &ManaCost, marked: &[Tag], fixed: u8, allow:
 /// (`payable_n`). A payment showing exactly `m` gives such a choice of slots
 /// (distinct colours, distinct units, distinct slots), and a payment of the
 /// changed cost pays the cost with exactly `m` shown.
-fn shows_exactly(m: u8, units: &[Tag], cost: &ManaCost, fixed: u8, allow: u8) -> bool {
+fn shows_exactly(m: u8, units: &[Tag], cost: &ManaCost, fixed: u8, allow: crate::doomsday_b::Allow) -> bool {
     let f = fixed & COLORS;
     if f & !m != 0 {
         return false;
@@ -211,9 +211,9 @@ fn shows_exactly(m: u8, units: &[Tag], cost: &ManaCost, fixed: u8, allow: u8) ->
         r.push(x);
     }
     let need: SVec<usize, 5> = (0..5).filter(|&t| m & (1 << t) != 0 && f & (1 << t) == 0 && cost.pips[t] == 0).collect();
-    fn cover(i: usize, need: &[usize], cost: ManaCost, allow: u8, r: &[Tag]) -> bool {
+    fn cover(i: usize, need: &[usize], cost: ManaCost, allow: crate::doomsday_b::Allow, r: &[Tag]) -> bool {
         if i == need.len() {
-            return payable_n(&cost, allow, &[], r, &[]);
+            return payable_n(&cost, allow.bits, &[], r, &[]);
         }
         let t = need[i];
         if cost.generic > 0 {
@@ -285,7 +285,7 @@ pub(crate) struct Class {
     pub sac_self: bool,
     /// Its mana's spending restriction (`ManaAbility::only`): usable only
     /// when the payment allows it (`Keep::allow`).
-    pub only: u8,
+    pub only: crate::db::Spend,
     /// The ability's own mana cost, one mana paid within the payment (CR
     /// 605.3a, 602.2b: Sunken Ruins' {U/B}): `NOT_MADE` | its types, else 0.
     /// Its mana is `MADE` (it never pays such a cost: nothing pays for
@@ -370,20 +370,20 @@ pub(crate) fn delve_source(cl: &Class) -> bool {
 /// The mana cost of a mana ability as `NOT_MADE` needs: one mana, or {n}
 /// (n needs of any type; the lowering checks), paying which is `allow`
 /// (`Game::ability_allow` of its source): (tag, how many; 0: none).
-fn need_of(cost: &ManaCost, allow: u8) -> (Tag, u8) {
+fn need_of(cost: &ManaCost, allow: crate::doomsday_b::Allow) -> (Tag, u8) {
     let pip = (0..6).find(|&t| cost.pips[t] > 0).map(|t| 1u8 << t);
     let hyb = (0..10).find(|&i| cost.hybrid[i] > 0).map(crate::mana::pair_mask);
     let generic = (cost.generic > 0).then_some(TYPES);
     // (A mana ability's printed cost, which nothing increases: the lowering's
     // bounds, {30} at most.)
     let n = if pip.or(hyb).is_some() { 1 } else { u8::try_from(cost.generic).expect("a mana ability's printed {n}: a u8") };
-    (pip.or(hyb).or(generic).map_or(0, |m| tag(m | crate::mana::NOT_MADE, allow)), n)
+    (pip.or(hyb).or(generic).map_or(0, |m| tag(m | crate::mana::NOT_MADE, crate::mana::allow_purposes(allow.bits))), n)
 }
 
 /// The purposes of the needs classes' abilities may add to a payment
 /// (`Class::need`), together.
-pub(crate) fn needs_allow(classes: &[Class]) -> u8 {
-    classes.iter().filter(|cl| cl.need != 0).fold(0, |a, cl| a | purposes(cl.need))
+pub(crate) fn needs_allow(classes: &[Class]) -> crate::db::Spend {
+    classes.iter().filter(|cl| cl.need != 0).fold(0, |a, cl| a | purposes(cl.need) as crate::db::Spend)
 }
 
 /// What the pool holds after a payment (CR 106.4, 601.2h): the amounts,
@@ -413,7 +413,7 @@ pub(crate) struct Keep {
     pub reserves: Vec<(Reserve, CardIdx)>,
     /// The spending restrictions this payment satisfies (`SPEND_*` bits:
     /// casting an artifact / legendary spell; ENGINE.md 28).
-    pub allow: u8,
+    pub allow: crate::doomsday_b::Allow,
     /// The spell being cast, if this pays for one ("that spell can't be
     /// countered").
     pub spell: Option<CardIdx>,
@@ -1260,8 +1260,12 @@ impl Game {
                             (d2, s2) == (hd, AbilitySlot::Activated(hs))
                         })
                 };
+                // (Mana of its source's chosen creature type: per source,
+                // ENGINE.md 124.2.)
                 let per_source =
-                    matches!(m.prod, ManaProd::Linked | ManaProd::Chosen | ManaProd::ChosenN(_) | ManaProd::IfCounter { .. } | ManaProd::SameTypeCounters { .. }) || reuse.is_some();
+                    matches!(m.prod, ManaProd::Linked | ManaProd::Chosen | ManaProd::ChosenN(_) | ManaProd::IfCounter { .. } | ManaProd::SameTypeCounters { .. })
+                        || reuse.is_some()
+                        || m.only & crate::db::SPEND_CHOSEN_CREATURE_TYPE != 0;
                 if let Some(cl) = out.iter_mut().find(same).filter(|_| !per_source) {
                     cl.members.push(src);
                     continue;
@@ -1292,7 +1296,7 @@ impl Game {
                 let cl = Class {
                     dmg: m.damage_to_you,
                     sac_self,
-                    only: m.only,
+                    only: self.spend_of_source(c, m.only),
                     need,
                     need_n,
                     reuse: reuse.unwrap_or(1),
@@ -1372,7 +1376,7 @@ impl Game {
                         continue;
                     }
                     let Some(yld) = self.yield_of(p, &m.prod, mana_life(ad), Some(c)) else { continue };
-                    out.push(Class { dmg: m.damage_to_you, only: m.only, ..Class::of(def, src, yld) });
+                    out.push(Class { dmg: m.damage_to_you, only: self.spend_of_source(c, m.only), ..Class::of(def, src, yld) });
                 }
             }
         }
@@ -1721,7 +1725,7 @@ impl Game {
             let more = plus.is_some_and(|x| x.card == s.card);
             (pm.used_res(classes, s.card) | if more { plus_res } else { 0 }, pm.uses(s) + (plus == Some(*s)) as crate::num::Count)
         };
-        let marked = pm.marked.iter().fold(0, |a, &m| a | purposes(m));
+        let marked = pm.marked.iter().fold(0, |a: crate::db::Spend, &m| a | purposes(m) as crate::db::Spend);
         let cap = UseCap::of(&classes[from..], pm.cost.total() as usize, pm.marked.len());
         // (A candidate of a later tap cost that a pick taps or sacrifices
         // can't pay it.)
@@ -1757,7 +1761,7 @@ impl Game {
     /// Rockets, with its purposes, when it may pay a need of the payment:
     /// `any`, the cost's purposes and those of the needs mana abilities may
     /// add, ENGINE.md 100.4.5).
-    fn add_pool(&self, p: PlayerId, any: u8, c: &mut Cands) {
+    fn add_pool(&self, p: PlayerId, any: crate::doomsday_b::Allow, c: &mut Cands) {
         let pool = &self.players[p as usize].pool;
         if pool.total() == 0 {
             return;
@@ -1796,7 +1800,7 @@ impl Game {
         // (Counted in u32: the pool's and the picks' mana of a type together
         // can pass a u8; ENGINE.md 100.4.6.)
         let of = |v: &[crate::eoe_w2::RKind], t: usize| v.iter().filter(|k| k.0 as usize == t).map(|k| k.2 as u32).sum::<u32>();
-        let made_of = |t: usize, only: u8| pm.extra_made_restr.iter().find(|k| k.0 as usize == t && k.1 == only).map_or(0, |k| k.2 as u32);
+        let made_of = |t: usize, only: crate::db::Spend| pm.extra_made_restr.iter().find(|k| k.0 as usize == t && k.1 == only).map_or(0, |k| k.2 as u32);
         let mut g: SVec<(Kind, u32), 12> = SVec::new();
         let push = |g: &mut SVec<(Kind, u32), 12>, kind: Kind, n: u32| {
             if n == 0 {
@@ -1808,7 +1812,7 @@ impl Game {
             }
         };
         for t in 0..6 {
-            let rk = |only: u8| t as Kind | 16 | (purposes(restriction(only)) as Kind) << 8;
+            let rk = |only: crate::db::Spend| t as Kind | 16 | (purposes(restriction(only)) as Kind) << 8;
             let restr = of(&kinds, t) + of(&pm.extra_restr, t);
             let made_restr = of(&pm.extra_made_restr, t);
             let plain = pool.amt[t] as u32 + pm.extra[t] as u32 - pm.extra_made[t] as u32 - (restr - made_restr);
@@ -2108,7 +2112,7 @@ impl Game {
     /// priority decision).
     pub(crate) fn plain_cands(&self, p: PlayerId, classes: &[Class]) -> Cands {
         let mut c = self.cands(p, &Keep::default(), classes, &|_| true, false, PLAIN_TOTAL, &[]);
-        self.add_pool(p, needs_allow(classes), &mut c);
+        self.add_pool(p, needs_allow(classes).into(), &mut c);
         c
     }
 
@@ -2135,7 +2139,7 @@ impl Game {
 
     /// [`can_pay`](Self::can_pay) for a payment that satisfies the spending
     /// restrictions `allow` (casting an artifact or legendary spell).
-    pub(crate) fn can_pay_for(&self, p: PlayerId, cost: &ManaCost, allow: u8) -> bool {
+    pub(crate) fn can_pay_for(&self, p: PlayerId, cost: &ManaCost, allow: crate::doomsday_b::Allow) -> bool {
         let classes = self.mana_classes(p, None);
         self.can_pay_with(p, cost, &classes, &Keep { allow, ..Default::default() })
     }
@@ -2763,7 +2767,7 @@ impl Game {
         // (The purposes a need of the payment may have: the cost's, its
         // picked abilities', those the sources still to pick may add;
         // ENGINE.md 100.4.5.)
-        let any = pm.keep.allow | pm.marked.iter().fold(0, |a, &m| a | purposes(m)) | needs_allow(&classes[(pm.min_class as usize).min(classes.len())..]);
+        let any = pm.keep.allow | pm.marked.iter().fold(0, |a: crate::db::Spend, &m| a | purposes(m) as crate::db::Spend) | needs_allow(&classes[(pm.min_class as usize).min(classes.len())..]);
         for (ci, cl) in classes.iter().enumerate().skip(pm.min_class as usize) {
             if !crate::eoe_w2::spendable(cl.only, any) {
                 continue; // its mana can't be spent on this (CR 106.6)
@@ -2956,8 +2960,8 @@ impl Game {
         // cost). Units alike in all four are the same choice (CR 106.4: the
         // pool holds amounts of mana, and two such units leave the same
         // pool). The pool's mana first (made by nothing in this payment).
-        let mut parts: Vec<((u8, u8, bool, u64), u8)> = Vec::new();
-        let mut add = |key: (u8, u8, bool, u64), n: u8| {
+        let mut parts: Vec<((u8, crate::db::Spend, bool, u64), u8)> = Vec::new();
+        let mut add = |key: (u8, crate::db::Spend, bool, u64), n: u8| {
             if n == 0 {
                 return;
             }
@@ -2979,7 +2983,7 @@ impl Game {
         }
         // The several-mana sources picked: each production with its class's
         // restriction, haste and need (its activation's chain id).
-        let any = pm.keep.allow | pm.marked.iter().fold(0, |a, &m| a | purposes(m));
+        let any = pm.keep.allow | pm.marked.iter().fold(0, |a: crate::db::Spend, &m| a | purposes(m) as crate::db::Spend);
         for (i, (src, prod)) in pm.multi.iter().enumerate() {
             let cl = classes.iter().find(|cl| cl.members.contains(src)).expect("a picked source's class");
             let id = if cl.need != 0 { chain_id(classes, src, pm.multi[..i].iter().filter(|m| m.0 == *src).count() as crate::num::Count) } else { 0 };
@@ -3033,7 +3037,7 @@ impl Game {
                     ch.push(mask_of(g.0 as usize));
                 }
             }
-            if payable_n(&pm.cost, pm.keep.allow, &pm.marked, &ch, &[]) {
+            if payable_n(&pm.cost, pm.keep.allow.bits, &pm.marked, &ch, &[]) {
                 let r = rem_of(&spent);
                 if !out.contains(&r) {
                     out.push(r);
@@ -3527,7 +3531,7 @@ pub(crate) struct Cands {
     /// It was picked: every unit is of any colour.
     converted: bool,
     /// The purposes of the cost being paid (`Keep::allow`).
-    allow: u8,
+    allow: crate::doomsday_b::Allow,
     /// The actors of the shared activations (`PoolCtx`).
     pools: PoolCtx,
     /// The candidates of a cost's several reservations (`ResCtx`).
@@ -3771,8 +3775,8 @@ fn cands(
     reserved: &dyn Fn(&Class, &Src) -> i32,
     consumes: &dyn Fn(&Class, &Src) -> bool,
     chain_of: &dyn Fn(&Src) -> u64,
-    allow: u8,
-    marked: u8,
+    allow: crate::doomsday_b::Allow,
+    marked: crate::db::Spend,
     cap: UseCap,
     taps: Option<&(crate::num::Wide, Vec<(CardIdx, crate::num::Wide)>)>,
     mut pools: PoolCtx,
@@ -4320,7 +4324,7 @@ impl Shared<'_> {
 /// among them out of the sacrifice budget; a branch with more activations of
 /// a pool than its actors left is cut.
 #[allow(clippy::too_many_arguments)]
-fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixed: &Units, alts: &[Vec<Way>], budget: Budget, crew: crate::num::Wide, pools: &PoolCtx, res: &ResCtx) -> bool {
+fn ways_payable(cost: &ManaCost, allow: crate::doomsday_b::Allow, marked: &[Tag], chosen: &[Tag], fixed: &Units, alts: &[Vec<Way>], budget: Budget, crew: crate::num::Wide, pools: &PoolCtx, res: &ResCtx) -> bool {
     /// A way that takes nothing a payment shares: its units are free.
     fn free_way(w: &Way) -> bool {
         w.life <= 0 && w.sac <= 0 && w.need == 0 && w.unpooled()
@@ -4329,7 +4333,7 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
     #[allow(clippy::too_many_arguments)]
     fn go(
         cost: &ManaCost,
-        allow: u8,
+        allow: crate::doomsday_b::Allow,
         needs: &mut SVec<Tag, 8>,
         chosen: &[Tag],
         units: &mut Units,
@@ -4341,7 +4345,7 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
     ) -> Option<bool> {
         *nodes = nodes.checked_sub(1)?;
         let Some(((ways, members), rest)) = groups.split_first() else {
-            return Some(crew <= 0 && sh.leaf(b).is_some_and(|b| payable_within_n(cost, allow, needs, chosen, units, b)));
+            return Some(crew <= 0 && sh.leaf(b).is_some_and(|b| payable_within_n(cost, allow.bits, needs, chosen, units, b)));
         };
         let none_ok = !ways.iter().any(free_way);
         each_way(cost, allow, needs, chosen, units, ways, 0, members.len(), none_ok, rest, b, crew, sh, members, 0, nodes)
@@ -4353,7 +4357,7 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
     #[allow(clippy::too_many_arguments)]
     fn each_way(
         cost: &ManaCost,
-        allow: u8,
+        allow: crate::doomsday_b::Allow,
         needs: &mut SVec<Tag, 8>,
         chosen: &[Tag],
         units: &mut Units,
@@ -4417,7 +4421,7 @@ fn ways_payable(cost: &ManaCost, allow: u8, marked: &[Tag], chosen: &[Tag], fixe
         rused: std::iter::repeat_n(0, res.groups.len()).collect(),
     };
     if alts.is_empty() {
-        return crew <= 0 && sh.leaf(budget).is_some_and(|b| payable_within_n(cost, allow, marked, chosen, fixed, b));
+        return crew <= 0 && sh.leaf(budget).is_some_and(|b| payable_within_n(cost, allow.bits, marked, chosen, fixed, b));
     }
     // Identical cards, grouped (in first-appearance order): alike but for
     // their activations' chain ids (13.15: their orders are tried alike,
@@ -4547,17 +4551,17 @@ mod tests {
         let (w, u, b, g) = (1u8 << W, 1u8 << U, 1u8 << B, 1u8 << G);
         // {W/U}{W/U} by two W/U duals: W, U or W U.
         let c = ManaCost::parse("{W/U}{W/U}").unwrap();
-        assert_eq!(colour_sets(&[two(W, U), two(W, U)], &c, &[], 0, 0), sets(&[w, u, w | u]));
+        assert_eq!(colour_sets(&[two(W, U), two(W, U)], &c, &[], 0, Default::default()), sets(&[w, u, w | u]));
         // {W/U}{1} by Plains and a U/B dual: W U or W B (the dual pays the
         // hybrid pip as U, or the generic one as U or B; never W alone).
         let c = ManaCost::parse("{W/U}{1}").unwrap();
-        assert_eq!(colour_sets(&[one(W), two(U, B)], &c, &[], 0, 0), sets(&[w | u, w | b]));
+        assert_eq!(colour_sets(&[one(W), two(U, B)], &c, &[], 0, Default::default()), sets(&[w | u, w | b]));
         // With W spent already (`fixed`), every set has it.
-        assert_eq!(colour_sets(&[two(W, U), two(W, U)], &ManaCost::parse("{W/U}{W/U}").unwrap(), &[], w, 0), sets(&[w, w | u]));
+        assert_eq!(colour_sets(&[two(W, U), two(W, U)], &ManaCost::parse("{W/U}{W/U}").unwrap(), &[], w, Default::default()), sets(&[w, w | u]));
         // {1} and a mana ability's own {U/B}: one of a U/B dual and a G/W
         // dual pays the {U/B}, the other the spell; only the spell's counts.
         let need = ((u | b) | crate::mana::NOT_MADE) as Tag;
-        assert_eq!(colour_sets(&[two(U, B), two(G, W)], &ManaCost::parse("{1}").unwrap(), &[need], 0, 0), sets(&[g, w]));
+        assert_eq!(colour_sets(&[two(U, B), two(G, W)], &ManaCost::parse("{1}").unwrap(), &[need], 0, Default::default()), sets(&[g, w]));
     }
 
     /// docs/shortcuts.md N23, CR 602.2b, 601.2g (the EoE S2 sealed fuzz, seed
@@ -4711,8 +4715,8 @@ mod tests {
             .at(crate::game::Step::Main1, 0)
             .start();
         let fl = g.card(0, "Faithless Looting", Zone::Graveyard);
-        assert!(g.can_pay_for(0, &ManaCost::parse("{2}{R}").unwrap(), crate::db::SPEND_OUTSIDE_HAND));
-        assert!(!g.can_pay_for(0, &ManaCost::parse("{2}{R}").unwrap(), 0), "not for a spell from the hand");
+        assert!(g.can_pay_for(0, &ManaCost::parse("{2}{R}").unwrap(), crate::db::SPEND_OUTSIDE_HAND.into()));
+        assert!(!g.can_pay_for(0, &ManaCost::parse("{2}{R}").unwrap(), Default::default()), "not for a spell from the hand");
         let a = g.graveyard_action(0, fl);
         let legal: Vec<u16> = g.pending_decision().unwrap().options.iter().map(|o| o.action).collect();
         assert!(legal.contains(&a), "{:?}", g.options_desc());
@@ -4772,6 +4776,6 @@ mod tests {
         let way = |m: Tag, life: i32| Way { units: std::iter::once(Unit::free(m)).collect(), life, sac: 0, need: 0, need_n: 0, acts: [NO_POOL; 2], sig: NO_POOL, rsig: NO_POOL, crew: 0 };
         let alts: Vec<Vec<Way>> = (0..21).map(|i| vec![way(1 << 5, i + 1), way(1 << 3, i + 1)]).collect();
         let cost = ManaCost::parse("{W}").unwrap();
-        ways_payable(&cost, 0, &[], &[], &Units::new(), &alts, Budget::FREE, 0, &PoolCtx::default(), &ResCtx::default());
+        ways_payable(&cost, Default::default(), &[], &[], &Units::new(), &alts, Budget::FREE, 0, &PoolCtx::default(), &ResCtx::default());
     }
 }

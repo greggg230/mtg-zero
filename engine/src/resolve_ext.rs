@@ -1693,7 +1693,9 @@ impl Game {
             Ext::EoeW4(x) => self.exec_eoe_w4(f, x),
             Ext::EoeW1(x) => self.exec_eoe_w1(f, x),
             Ext::EoeW6(x) => self.exec_eoe_w6(f, x),
+            Ext::DdA(x) => self.exec_dd_a(f, x),
             Ext::EoeW2(x) => self.exec_eoe_w2(f, x),
+            Ext::DoomsdayB(x) => self.exec_doomsday_b(f, x),
             Ext::SnS(x) => self.exec_sns(f, x),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
