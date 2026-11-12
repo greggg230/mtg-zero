@@ -25,6 +25,11 @@ const FARM_MODES: &[(&str, &str, &[(&str, &str)], u64)] = &[
 
 pub struct MtgFuzz;
 
+/// The engine's `FUZZ_POOL` values (engine::fuzz::games `pool_mode`), and those whose matches loop plays
+/// nothing (`matches_skipped`: constructed play's pools, EoE, sealed).
+const POOLS: &[&str] = &["interactions", "exponential", "drafted", "delver", "eoe", "sealed", "dd_a", "dd_b", "dd_c", "doomsday"];
+const GAMES_ONLY: &[&str] = &["delver", "eoe", "sealed", "dd_a", "dd_b", "dd_c", "doomsday"];
+
 /// The cargo profile of this build (build.rs: 'release', 'fuzz' = release + debug assertions, 'dev').
 pub const PROFILE: &str = env!("MTGZ_PROFILE");
 
@@ -47,8 +52,8 @@ fn check_env(kind: &str, env: &[(String, String)]) -> Result<(), String> {
     let pool = get("FUZZ_POOL");
     let hidden = get("FUZZ_HIDDEN_DECKS").is_some();
     if let Some(p) = pool {
-        if !["interactions", "exponential", "drafted", "delver", "eoe", "sealed"].contains(&p) {
-            return Err(format!("FUZZ_POOL={p:?}: interactions, exponential, drafted, delver, eoe or sealed (unset: the default pool)"));
+        if !POOLS.contains(&p) {
+            return Err(format!("FUZZ_POOL={p:?}: one of {POOLS:?} (unset: the default pool)"));
         }
     }
     let allowed: &[&str] = match (kind, hidden) {
@@ -70,10 +75,10 @@ fn check_env(kind: &str, env: &[(String, String)]) -> Result<(), String> {
         }
     }
     match (kind, pool, hidden) {
-        ("matches", Some(p @ ("delver" | "eoe" | "sealed")), _) => return Err(format!("FUZZ_POOL={p}: games only (the matches loop plays none)")),
+        ("matches", Some(p), _) if GAMES_ONLY.contains(&p) => return Err(format!("FUZZ_POOL={p}: games only (the matches loop plays none)")),
         ("matches", Some("exponential"), _) => return Err("FUZZ_POOL=exponential: its matches are the default mode's (use a games mode)".into()),
         ("games", Some("drafted"), _) => return Err("FUZZ_POOL=drafted: its games are the default mode's (use a matches mode)".into()),
-        ("games", Some(p @ ("interactions" | "exponential" | "delver")), true) => return Err(format!("FUZZ_HIDDEN_DECKS=1 with FUZZ_POOL={p}: hidden decklists play the default, eoe or sealed decks")),
+        ("games", Some(p), true) if !["eoe", "sealed"].contains(&p) => return Err(format!("FUZZ_HIDDEN_DECKS=1 with FUZZ_POOL={p}: hidden decklists play the default, eoe or sealed decks")),
         _ => {}
     }
     if let Some(v) = get("FUZZ_HIDDEN_DECKS") {
