@@ -222,9 +222,9 @@ fn the_constructed_spec() {
     }
     let names = delver().main_names();
     let bad = |v: serde_json::Value| MtgSpec::parse(&v.to_string()).unwrap_err();
-    // Best-of-three isn't built for constructed decks; nor random,
-    // evaluation or pool decks (limited's).
-    assert!(bad(serde_json::json!({"constructed": true, "format": "bo3", "decks": {"p0": names, "p1": names}})).contains("bo1"));
+    // Best-of-three is constructed best-of-three (ENGINE.md 120: tests/constructed_bo3.rs); never
+    // random, evaluation or pool decks (limited's).
+    MtgSpec::parse(&serde_json::json!({"constructed": true, "format": "bo3", "decks": {"p0": names, "p1": names}}).to_string()).unwrap();
     assert!(bad(serde_json::json!({"constructed": true})).contains("decklists"));
     assert!(bad(serde_json::json!({"constructed": true, "decks": "eval"})).contains("decklists"));
     // The deck rules are checked.

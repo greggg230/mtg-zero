@@ -354,6 +354,7 @@ pub fn fields() -> Vec<Field> {
         deal: Derived "hidden decklists: the K-sample deal's setting and memo (ENGINE.md 102.8), a function of the match's salt and what the viewer knows",
         choice: Hidden "the sealed deck choice before the game (ENGINE.md 107.2): each seat's candidates and choice are its own, encoded by encode_deck_choice (who decides, the number of candidates); determinize deals the other seat's",
         how: Derived "how each sealed deck was made (ENGINE.md 107): the game log's, never encoded; None in a world for the other seat",
+        constructed_bo3: Derived "a constructed best-of-three (ENGINE.md 120): the match's format setting, the same in every world",
     });
     v
 }

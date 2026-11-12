@@ -85,8 +85,13 @@ def test_the_mirror_through_the_bindings():
         E.Game('mtg', json.dumps(s), 2, 1)
     with pytest.raises(Exception):
         E.Game('mtg', '{"constructed": true}', 2, 1)
+    # best-of-three is constructed best-of-three (docs/ENGINE.md 120; tests/test_delver_bo3.py): without
+    # sideboards each pool is the 60 (CR 100.4a: up to 15), a main of 59 is refused
+    E.Game('mtg', json.dumps(dict(json.loads(A.SPEC_DELVER), format='bo3')), 2, 1)
+    s = json.loads(A.SPEC_DELVER)
+    s['decks']['p1'] = s['decks']['p1'][:59]
     with pytest.raises(Exception):
-        E.Game('mtg', json.dumps(dict(json.loads(A.SPEC_DELVER), format='bo3')), 2, 1)
+        E.Game('mtg', json.dumps(dict(s, format='bo3')), 2, 1)
 
 
 def test_the_yardstick_beats_random_in_the_mirror():

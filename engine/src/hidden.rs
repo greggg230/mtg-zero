@@ -559,10 +559,11 @@ impl Game {
             });
             k.slots.sort_unstable();
         }
-        // (With hidden decklists a cloud over the whole hand and library is
-        // kept: it is the record that cards the viewer saw are still in the
-        // deck, which a sampled deck must hold, ENGINE.md 102.1.)
-        let keep_whole = self.spec.hidden_decklists;
+        // (With hidden decklists, or in a constructed best-of-three's hidden
+        // games, a cloud over the whole hand and library is kept: it is the
+        // record that cards the viewer saw are still in the deck, which a
+        // sampled deck must hold, ENGINE.md 102.1, 120.)
+        let keep_whole = self.spec.hidden_decklists || self.spec.deck_clouds;
         self.clouds.retain(|k| !(k.defs.is_empty() || (k.hand && k.library && !keep_whole)));
         self.clouds.sort_by_key(|k| (k.viewer, k.owner, k.hand, k.library, k.slots.first().copied()));
     }

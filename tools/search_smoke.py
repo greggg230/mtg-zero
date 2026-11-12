@@ -8,10 +8,14 @@ self-play search reaches states that random play (tests/fuzz.rs) does not.
   python tools/search_smoke.py --seeds 0-15 --games 400 --threads 8 --sims 64 --preset mtg-3
   python tools/search_smoke.py --specs team_draft,team_draft_2v2 --seeds 0-1
   python tools/search_smoke.py --specs delver --preset delver-mirror   # the constructed Delver mirror
+  python tools/search_smoke.py --specs delver_bo3 --preset delver-bo3-smoke   # its best-of-three
   python tools/search_smoke.py --specs eoe,eoe_eval --preset eoe-1     # EoE sealed (game mtg_eoe)
 
 The constructed Delver mirror (docs/ENGINE.md 54): `delver` is the preset delver-mirror's spec (both
 seats the pinned 60 of data/decks/izzet_delver_8016541.json, best-of-one, constructed play's card table).
+`delver_bo3` is its best-of-three (docs/ENGINE.md 120): the preset delver-bo3-smoke's spec, both seats the main
+and the 75's supported sideboard cards, sideboarding to exactly 60, the later games' decks hidden (the search deals
+them from the constructed prior).
 
 EoE sealed (docs/ENGINE.md 101, 105): `eoe` is the preset eoe-1's spec (game `mtg_eoe`: two generated Arena pools per
 game, each built by the randomised builder, best-of-one on the EoE card table), `eoe_eval` its fixed evaluation pairs.
@@ -62,6 +66,20 @@ def _mirror(deck):
 
 
 SPECS['delver'] = _mirror('izzet_delver_8016541')
+
+
+# its best-of-three (docs/ENGINE.md 120): the preset delver-bo3-smoke's spec (the main and the 75's supported
+# sideboard cards; the full 75 is refused until its five unsupported cards are ported)
+def _mirror_bo3(deck):
+    # (mtgz/az/decklists.py loaded by its path: json only, without the package's registration)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('_decklists', os.path.join(ROOT, 'mtgz', 'az', 'decklists.py'))
+    decklists = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(decklists)
+    return json.loads(decklists.mirror_bo3_spec(deck, sideboard=decklists.DELVER_SMOKE_SIDEBOARD))
+
+
+SPECS['delver_bo3'] = _mirror_bo3('izzet_delver_8016541')
 # Edge of Eternities sealed (docs/ENGINE.md 101, 105): the game `mtg_eoe` (`mtg` on the EoE card table, its own identity
 # space), each game two generated Arena pools built by the randomised builder; `eoe_eval` its evaluation pairs
 SPECS['eoe'] = {'sealed': {'set': 'eoe', 'collation': 'arena'}, 'max_turns': 60, 'eval_decks': 64, 'eval_seed': 1}

@@ -118,9 +118,12 @@ impl Eq for Share {}
 /// card but basic lands, a sideboard of at most 15, 100.4a, the four-card
 /// limit over deck and sideboard together) with the card table of constructed
 /// play (`CardDb::constructed`: the cube's cards and the legacy ones, Murktide
-/// Regent, Prismari Charm). Best-of-one only for now (constructed
-/// sideboarding between games is not built: `"bo3"` is an error), and never
-/// random, evaluation or drafted decks (those are limited's).
+/// Regent, Prismari Charm), and never random, evaluation or drafted decks
+/// (those are limited's). With `"format": "bo3"` (ENGINE.md 120) each
+/// player's pool is exactly their 75 (`pN` the registered main of exactly 60
+/// cards, `pN_sideboard` at most 15), every deck after sideboarding exactly
+/// 60 of it; game 1 plays the mains (open), each later game's deck is hidden
+/// from the other player within the public 75 (`hidden_decks::ConstructedPrior`).
 ///
 /// Hidden decklists (ENGINE.md 102): `"hidden_decklists": true` (default false; best-of-one,
 /// not with constructed, drafted or `start`) hides each player's deck from the other entirely
@@ -326,16 +329,24 @@ impl MtgSpec {
                                     .get(key)
                                     .and_then(|v| v.as_array())
                                     .ok_or_else(|| format!("mtg spec: decks.{key} must be a list of card names"))?;
-                                a.iter()
-                                    .map(|n| {
-                                        let n = n.as_str().ok_or("mtg spec: card names are strings")?;
-                                        let id = db.expect_id(n)?;
-                                        if db.def(id).token {
-                                            return Err(format!("mtg spec: {n} is a token"));
-                                        }
-                                        Ok(id)
-                                    })
-                                    .collect()
+                                // (Every card the table does not know or support is named, not the
+                                // first only: a decklist with several fails once, loudly, ENGINE.md 120.)
+                                let mut ids = Vec::with_capacity(a.len());
+                                let mut bad: Vec<String> = Vec::new();
+                                for n in a {
+                                    let n = n.as_str().ok_or("mtg spec: card names are strings")?;
+                                    match db.expect_id(n) {
+                                        Ok(id) if db.def(id).token => return Err(format!("mtg spec: {n} is a token")),
+                                        Ok(id) => ids.push(id),
+                                        Err(e) if !bad.contains(&e) => bad.push(e),
+                                        Err(_) => {}
+                                    }
+                                }
+                                match bad.len() {
+                                    0 => Ok(ids),
+                                    1 => Err(bad.remove(0)),
+                                    k => Err(format!("mtg spec: decks.{key}: {k} cards the card table does not know or support: {}", bad.join("; "))),
+                                }
                             };
                             for key in o.keys() {
                                 if !DECKS_KEYS.contains(&key.as_str()) {
@@ -375,7 +386,8 @@ impl MtgSpec {
         if s.start.is_some() && (s.seed.is_some() || s.format != Format::Bo1) {
             return Err("mtg spec: start is for best-of-one games without a match seed".into());
         }
-        s.pools = pools.unwrap_or(s.format == Format::Bo3);
+        // (constructed best-of-three plays its decklists, ENGINE.md 120: no pools by default)
+        s.pools = pools.unwrap_or(s.format == Format::Bo3 && !s.constructed);
         if s.hidden_decklists {
             // (ENGINE.md 102: best-of-three hides decks within known pools, 36.11; constructed
             // and drafted decks need priors of their own; a lab start deals its own spot.)
@@ -411,9 +423,6 @@ impl MtgSpec {
             }
         }
         if s.constructed {
-            if s.format != Format::Bo1 {
-                return Err("mtg spec: constructed best-of-three (sideboarding to 60+ / 15) is not built yet: format must be \"bo1\"".into());
-            }
             if s.pools {
                 return Err("mtg spec: constructed decks don't come from pools".into());
             }
@@ -429,6 +438,25 @@ impl MtgSpec {
                     }
                 }
                 _ => return Err("mtg spec: constructed needs decklists (decks: {\"p0\": [...], \"p1\": [...]})".into()),
+            }
+            // Constructed best-of-three (ENGINE.md 120): the pool is the 75 and every deck after
+            // sideboarding is exactly 60 cards (the user's format restriction), so the registered
+            // main is exactly 60 too.
+            if s.format == Format::Bo3 {
+                let mains: Vec<&Vec<DefId>> = match &s.decks {
+                    DeckMode::Lists(a, b) => vec![a, b],
+                    DeckMode::ListsWithSideboards(p) => p.iter().map(|x| &x.0).collect(),
+                    _ => unreachable!("refused above"),
+                };
+                for (p, d) in mains.into_iter().enumerate() {
+                    if d.len() != constructed::BO3_DECK {
+                        return Err(format!(
+                            "mtg spec: p{p}'s constructed main has {} cards: a constructed best-of-three's decks are exactly {} (ENGINE.md 120)",
+                            d.len(),
+                            constructed::BO3_DECK
+                        ));
+                    }
+                }
             }
         }
         // The engine's deck limit for every given list (ENGINE.md 58.3; the
@@ -604,16 +632,24 @@ impl MtgAz {
             None => (spec.try_seats(seed)?, [None, None], None),
         };
         // Best-of-three: the decks are hidden within the pools (ENGINE.md
-        // 36.11); best-of-one keeps open decklists (M5a-M8a's game).
+        // 36.11); best-of-one keeps open decklists (M5a-M8a's game). A
+        // constructed best-of-three's game 1 plays the registered mains, open
+        // (its later games hide the decks: ENGINE.md 120, `MatchState::constructed`).
         let gspec = GameSpec {
             max_turns: spec.max_turns,
             mulligans: spec.mulligans,
             chooser: spec.chooser,
-            hidden_decks: spec.format == Format::Bo3 || spec.hidden_decklists,
+            hidden_decks: (spec.format == Format::Bo3 && !spec.constructed) || spec.hidden_decklists,
             hidden_decklists: spec.hidden_decklists,
             log: spec.log,
             ..GameSpec::default()
         };
+        if spec.constructed && spec.format == Format::Bo3 {
+            let mut az = MtgAz::constructed_bo3(spec.db(), gspec, &seats, seed)?;
+            az.m.deal.k = spec.deal_samples;
+            az.m.deal.ess = spec.deck_tilt_ess.0;
+            return Ok(az);
+        }
         // (The prior of each deck, ENGINE.md 102: a sealed spec's seats the sealed prior of its
         // collation, boosters and builder; any other spec the stub over its table. With the deck choice by an
         // evaluator, ENGINE.md 112, each seat's own: a choosing seat's prior chooses as the seat does.)
@@ -747,6 +783,26 @@ impl MtgAz {
         let g = Game::with_sideboards(db, gspec, [&a.deck, &b.deck], [&a.sideboard, &b.sideboard], seed)?;
         let mut m = MatchState::new(db, format, gspec, seats, seed)?;
         m.deck_priors = deck_priors;
+        let mut az = MtgAz { g, m, lab: None };
+        az.set_known_pools();
+        Ok(az)
+    }
+
+    /// A constructed best-of-three whose first game has these seats (ENGINE.md 120; `MtgAz::new`'s
+    /// and the fuzz's): each seat's deck its registered main (exactly 60) and its sideboard, the pools
+    /// their 75s (`MatchState::constructed`), each seat's deck prior a `ConstructedPrior` of its 75
+    /// (the prior of its later decks as the other player deals them). `gspec` is game 1's: open
+    /// decks (`hidden_decks` false); the later games hide them.
+    pub fn constructed_bo3(db: &'static CardDb, gspec: GameSpec, seats: &[Seat; 2], seed: u64) -> Result<MtgAz, String> {
+        if gspec.hidden_decks || gspec.hidden_decklists || gspec.deck_clouds {
+            return Err("mtg: a constructed best-of-three's game 1 plays the registered mains with open decklists (ENGINE.md 120)".into());
+        }
+        let [a, b] = seats;
+        let g = Game::with_sideboards(db, gspec, [&a.deck, &b.deck], [&a.sideboard, &b.sideboard], seed)?;
+        let mut m = MatchState::constructed(db, gspec, seats, seed)?;
+        m.deck_priors = seats.clone().map(|s| {
+            Some(std::sync::Arc::new(hidden_decks::ConstructedPrior::new(&s.deck, &s.sideboard)) as std::sync::Arc<dyn hidden_decks::DeckPrior>)
+        });
         let mut az = MtgAz { g, m, lab: None };
         az.set_known_pools();
         Ok(az)
@@ -900,7 +956,10 @@ impl SearchGame for MtgAz {
     /// game is over), and the match's RNG that seeds the later games.
     /// Best-of-three (ENGINE.md 36.11): first the opponent's unknown first
     /// picks, deck and sideboard (and between games their chosen deck),
-    /// sampled from what the viewer knows (`sample.rs`).
+    /// sampled from what the viewer knows (`sample.rs`). A constructed
+    /// best-of-three (ENGINE.md 120): from game 2 on the opponent's 60 dealt
+    /// from their public 75 by `ConstructedPrior`, between games their hidden
+    /// decks (`hidden_decks.rs`); game 1's decks are open.
     fn determinize(&mut self, viewer: usize, rng: &mut zero_search::rng::Rng) {
         let mut r = Rng::new(rng.next_u64());
         // (the deck choice before the game, ENGINE.md 107.2: the other seat's deck dealt, nothing else)
@@ -912,8 +971,9 @@ impl SearchGame for MtgAz {
         if self.m.format == Format::Bo3 && !self.m.over {
             self.sample_hidden_pool(viewer as u8, &mut r);
         }
-        // Hidden decklists (ENGINE.md 102): the opponent's whole unseen deck from its prior.
-        if self.hidden_decklists() {
+        // Hidden decklists (ENGINE.md 102): the opponent's whole unseen deck from its prior; a
+        // constructed best-of-three's hidden decks (from game 2 on, and between games: ENGINE.md 120).
+        if self.deals_hidden_decks() {
             self.sample_hidden_deck(viewer as u8, &mut r, None, None);
         }
         if self.m.sb.is_none() {

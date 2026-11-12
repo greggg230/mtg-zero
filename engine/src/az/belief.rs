@@ -103,8 +103,10 @@ impl MtgAz {
         let (hand, deck) = tilts(belief);
         // (A deck tilt where the decklists are open would deal nothing differently - every deck is
         // the real one: a setting that silently does nothing is refused, ENGINE.md 106.2.)
+        // (A constructed best-of-three hides its decks from game 2 on, ENGINE.md 120: there the tilt deals
+        // them; in game 1, whose decks are the registered mains, the deal is the open one.)
         assert!(
-            deck <= 0.0 || self.hidden_decklists(),
+            deck <= 0.0 || self.deals_hidden_decks(),
             "belief_tilts.deck {deck}: the deck tilt deals hidden decklists (ENGINE.md 106), this game's decklists are open"
         );
         if self.m.sb.is_some() || self.m.choice.is_some() || (hand <= 0.0 && deck <= 0.0) {
@@ -120,7 +122,7 @@ impl MtgAz {
         // (Hidden decklists, ENGINE.md 102: the opponent's deck first, as `determinize` - by the deck
         // prediction with the deck's tilt, ENGINE.md 106; the hand's weights then read the dealt world's
         // hidden pool, as best-of-three's do: one deal, the deck and then its hand.)
-        if self.hidden_decklists() {
+        if self.deals_hidden_decks() {
             let t = (deck > 0.0).then(|| DeckTilt { p: deck_segment(&belief.pred), tilt: deck, clip: belief.clip });
             self.sample_hidden_deck(viewer as u8, &mut r, None, t);
         }
