@@ -28568,3 +28568,70 @@ python -m mtgz.az.keep_h2h runs/<run>/models/iter_NNNN.pt --games 400 --sims 64 
 * Python: `tests/test_post_board.py` (3: a match of the presets' spec through the bindings, the halves' specs, the
   yardstick on a tiny network), `tests/test_delver_bo3.py` (the presets' `start_game`, the match starting at the
   sideboarding).
+
+### 130.7 Checks (on 3612814d: 6a6e1a42, the code of 130.1-130.6, and a fix to the fuzz's check, below)
+
+The desktop was shared with other lanes' builds (its CPU at 100% throughout); each run here had this branch's own
+target directory (E:/cargo-target/mtg-zero/bo3-postboard).
+
+* **Behaviour digests: main's, unchanged** - full **b63f643e97a30a61**, `DIGEST_ENCODING=0` **a0062bb5569e06d3** (the
+  engine gate), `DIGEST_ENCODING=v5` **d1bbf127a6c5bda0** (by hand, the same 2,000 + 500 games). Nothing re-recorded:
+  the digest games are best-of-one `Game`s, which nothing here touches.
+* **Engine gate** (`python tools/gate.py engine --no-mac --tested-sha 3612814d --expect-digest b63f643e97a30a61
+  --expect-digest0 a0062bb5569e06d3 --step-timeout 7200`): **`GATE PASSED engine 3612814d78fb in 835s`** - build, both
+  digests, `az` 52, `limits` 13, `hidden` 28, pytest 314 passed and 1 skipped, the search smoke (random, seed 0). The same
+  on 6a6e1a42 before the fuzz fix: `GATE PASSED engine 6a6e1a429f4d in 996s`.
+* **The full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, 162 binaries): **2,521 passed,
+  0 failed, 26 ignored** (129.4's 2,515 and `post_board`'s 6).
+* **`FUZZ_GAMES=20000`**, the default pool: passed (1,415 s): the 20,000 games and the 1,000 cube best-of-three matches are
+  129.4's numbers exactly (wins 9,803 / 10,075, 122 drawn, 31.8 turns, 438.2 decisions, 19,192,276 options completed;
+  2,549 games, 549 of three, 754 drawn, 860.4 decisions a match, 3,098 sideboardings, 23,803 decisions, 42,956 hidden-pool
+  worlds, first picks resampled in 26,195).
+* **`FUZZ_POOL=delver FUZZ_GAMES=20000`**: passed (896 s). The 20,000 games and the 1,000 constructed best-of-three
+  matches are 129.4's numbers exactly (2,654 games, 654 of three, 848 drawn, 833.2 decisions a match, 3,308
+  sideboardings, 26,576 decisions, 3,166 later-game decks changed, 41,526 worlds, 24,818 hidden, 24,703 another 60, 306
+  first sideboarders' choices dealt, 24,280 deck-tilted worlds; Murktide Regent cast 9,875 times, its trigger 388,
+  Prismari Charm 14,691); then **1,000 post-sideboard matches**: 1,653 games played (653 matches of three - one match in
+  four has 12-turn games and a drawn game 2 is followed by game 3 -, 581 drawn, 0 aborted), 518.1 decisions a match,
+  23,264 sideboarding decisions (549 a keeper's `PASS`), 2,645 later-game decks changed, 25,946 constructed worlds (the
+  opponent's 60 hidden in 25,270, another 60 in 24,519), 267 first sideboarders' choices dealt, 24,822 deck-tilted
+  worlds; every check of the matches. **The fix** (3612814d): the first run of this command, on 6a6e1a42, failed at
+  post-sideboard match 97 - not the engine: the fuzz's information-set check (`check_match_information_set`) played a
+  world on to its game's end, where a chained match has no decider and no legal action, and drew from the empty list;
+  the check now stops there, as at the match's end (`FUZZ_FIRST=97 FUZZ_MATCHES=1` passes).
+* **The run loop on the full preset** (`python -m mtgz.az.run --run E:/mtg-zero-scratch/bo3-postboard/smoke-full --preset
+  delver-mirror-bo3 --iters 2 --games 8 --conc 8 --sims 8 --sims-fast 2 --eval-games 4 --eval-sims 4
+  --eval-random-games 2 --elo-games 2 --ref-games 2 --min-window-samples 0 --min-steps 10 --threads 4`: the preset's
+  network, GPU and spec with fewer games), no failure: iteration 1 8 matches = 15 games (1.875 each: 9 drawn at the
+  60-turn cap by the untrained network, each followed by a game 3), 2,487 samples; iteration 2 8 matches = 12 games,
+  1,119 samples; the yardstick, random and Elo with the games beside the matches (`elo match iter_0002 vs iter_0000:
+  1.0/2 (games 2.5/4)`). **Every row of game 2 or 3 with its own game's label** (a scratch check of its two shards, not
+  checked in: rows cut into games where the match block's game number changes, the turn goes back or a sideboarding row
+  follows a game's): 3,606 rows - **none of game 1**, 2,270 of 16 games 2 (one per match), 1,336 of 11 games 3 (the
+  episode counts the run logged), 51 sideboarding rows; each game's rows one label per seat, the two summing to 1; the
+  score before every row's game its number less one (game 1's drawn win counted); 7 of the 11 matches of two games
+  labelled differently in games 2 and 3.
+* **The yardstick end to end**: `python -m mtgz.az.keep_h2h E:/mtg-zero-scratch/bo3-postboard/smoke-full/models/iter_0002.pt
+  --games 8 --sims 8 --device cuda --threads 4`: 8 matches (4 pairs) = 16 games, 0 unfinished, A 0.4375 +- 0.0625 of
+  the matches, `per_game` 8.0 / 16 (10 drawn at the cap), 753 s - a tiny network, a check that it runs.
+* **The search smoke** (`python tools/search_smoke.py --specs delver_bo3 --seeds 0 --games 200 --preset
+  delver-mirror-bo3 --timeout 7200 --stall 600`, the presets' post-sideboard spec): 0 failed of 1, 200 matches = 359
+  games, 0 unfinished, 234,164 decisions, 6.52 million simulations, 202 s.
+* **Python**: `tests/test_post_board.py` 3 passed, `tests/test_delver_bo3.py` 4 passed (and the gate's whole pytest).
+* **Not run**: the Mac steps (`--no-mac`); `delver_bo3_g1`'s search smoke (129.4's `delver_bo3`, the same spec, unchanged
+  but for the two encoding rules).
+
+### 130.8 Open points, decisions
+
+* **The match win rate counts the drawn game 1.** With `"start_game": 2` the evaluation's match result (yardstick,
+  random, Elo, h2h, `keep_h2h`'s `a_score`) is by game wins with game 1's coin flip in it: it compresses toward 1/2 and
+  is noisier; `per_game` (games 2 and 3) is the measure. Whether the run's Elo should move to the games' numbers is the
+  maintainer's call.
+* **A drawn real game 1** (MTGO) has no synthetic twin (130.2): the network never trains on that score.
+* **The mask applies to every constructed best-of-three** (130.2), the option or not: a match with game 1 played (the
+  MTGO pilot's) encodes game 2 as the synthetic start does. The cube's best-of-three keeps game 1's chooser, starter and
+  reveals.
+* **`keep_deck` is an evaluation setting**: in self-play it would train a seat whose sideboarding decisions are forced.
+  Nothing refuses it in a run spec; the presets do not set it.
+* **The run**: moving the Delver best-of-three run onto this commit changes what it trains (games 2-3 only) - a
+  maintainer's decision, with the run.
