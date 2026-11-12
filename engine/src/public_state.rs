@@ -355,6 +355,8 @@ pub fn fields() -> Vec<Field> {
         choice: Hidden "the sealed deck choice before the game (ENGINE.md 107.2): each seat's candidates and choice are its own, encoded by encode_deck_choice (who decides, the number of candidates); determinize deals the other seat's",
         how: Derived "how each sealed deck was made (ENGINE.md 107): the game log's, never encoded; None in a world for the other seat",
         constructed_bo3: Derived "a constructed best-of-three (ENGINE.md 120): the match's format setting, the same in every world",
+        game_episodes: Derived "the spec's one episode per game (ENGINE.md 121): a setting of the match, the same in every world",
+        between: Derived "one episode per game (ENGINE.md 121): a game ended, the match did not - a terminal state, never encoded for a decision",
     });
     v
 }

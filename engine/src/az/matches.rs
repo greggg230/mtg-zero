@@ -43,6 +43,12 @@
 //!   game's deck is hidden from the other player within the public 75
 //!   (`GameSpec::hidden_decks` and `deck_clouds` from game 2 on; dealt by the
 //!   constructed prior, `hidden_decks::ConstructedPrior`).
+//! * One episode per game (ENGINE.md 121, the spec's `"game_episodes"`):
+//!   a game's end ends zero-core's episode (`MatchState::between`: the game
+//!   is over, the match is not, sideboarding has not begun); the next
+//!   episode begins with the sideboarding for the next game
+//!   (`next_match_episode`), or a concession (CR 104.3a) of the game in
+//!   progress ends it first.
 
 use std::sync::Arc;
 
@@ -402,6 +408,13 @@ pub struct MatchState {
     /// (open), each later game's deck is hidden from the other player, who
     /// deals it from `deck_priors` (`hidden_decks::ConstructedPrior`).
     pub constructed_bo3: bool,
+    /// One zero-core episode per game (ENGINE.md 121; the spec's
+    /// `"game_episodes"`, best-of-three only).
+    pub game_episodes: bool,
+    /// With `game_episodes`: a game ended and the match did not, sideboarding
+    /// has not begun - the episode is over (`MtgAz::to_move` None) until
+    /// `next_match_episode` begins the next one.
+    pub between: bool,
 }
 
 /// The first game's setup of one player: deck, sideboard, first picks, and
@@ -463,6 +476,8 @@ impl MatchState {
             choice: None,
             how: [None, None],
             constructed_bo3: false,
+            game_episodes: false,
+            between: false,
         })
     }
 
@@ -666,14 +681,68 @@ impl super::MtgAz {
             m.over = true;
             return;
         }
-        // CR 103.1: the loser of the previous game chooses; after a draw,
-        // the player who made the choice in it.
-        let chooser = match o.winner {
-            Some(w) => opp(w),
-            None => t.chooser,
+        // One episode per game (ENGINE.md 121): the episode ends with the
+        // game; the next one begins with the sideboarding.
+        if m.game_episodes {
+            m.between = true;
+            return;
+        }
+        self.begin_sideboarding();
+    }
+
+    /// Sideboarding for the next game after the last one ended (ENGINE.md
+    /// 36.2). CR 103.1: the loser of the previous game chooses; after a
+    /// draw, the player who made the choice in it.
+    fn begin_sideboarding(&mut self) {
+        let m = &mut self.m;
+        let i = (m.game_no - 1) as usize;
+        let chooser = match m.results[i] {
+            r @ (1 | 2) => opp(r - 1),
+            _ => m.choosers[i],
         };
         let sb = Sideboarding::new(chooser, m.decks[chooser as usize].to_vec(), &m.pools[chooser as usize]);
         m.sb = Some(Box::new(sb));
+    }
+
+    /// zero-core's `next_episode` of a match with one episode per game
+    /// (ENGINE.md 121, zero-core docs/search.md 1.3), from the state where
+    /// an episode ended: `conceded` None - the game ended by the rules
+    /// (`between`, or the match over); Some(p) - zero-core's resign rule: p
+    /// concedes the game in progress (CR 104.3a: p leaves the game and loses
+    /// it, `Game::concede`), scored as any game's end. Then the match's
+    /// result when it is over (36.1: two wins or three games), else the
+    /// state with sideboarding for the next game begun (its decisions are
+    /// the next episode's first).
+    pub(crate) fn next_match_episode(&self, conceded: Option<PlayerId>) -> Result<zero_search::Next<Self>, String> {
+        if !self.m.game_episodes {
+            return Err("mtg: next_episode of a match without game_episodes (ENGINE.md 121)".into());
+        }
+        let mut az = self.clone();
+        match conceded {
+            None => {
+                if !(az.m.between || az.m.over) || az.g.aborted() {
+                    return Err("mtg: next_episode before the game's end (or after an aborted game: no result, ENGINE.md 100.7)".into());
+                }
+            }
+            Some(p) => {
+                let in_game = !az.m.over && !az.m.between && az.m.sb.is_none() && az.m.choice.is_none() && !az.g.is_over();
+                if !in_game || p > 1 {
+                    return Err(format!("mtg: P{p} concedes, but no game is in progress (ENGINE.md 121)"));
+                }
+                az.g.concede(p);
+                az.end_game();
+            }
+        }
+        if az.m.over {
+            let r = az.m.result();
+            let mut out = [0.0; zero_search::MAX_SEATS];
+            out[0] = r[0];
+            out[1] = r[1];
+            return Ok(zero_search::Next::Over(out));
+        }
+        az.m.between = false;
+        az.begin_sideboarding();
+        Ok(zero_search::Next::Continue(az))
     }
 
     fn sideboard_step(&mut self, a: u16, chance: &mut Vec<u64>) -> Result<(), String> {

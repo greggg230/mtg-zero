@@ -56,6 +56,8 @@ SPECS = {
     'match': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1, 'format': 'bo3'},
     # ... on the fixed evaluation pools
     'match_eval': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1, 'format': 'bo3', 'decks': 'eval'},
+    # ... each game its own episode (docs/ENGINE.md 121: zero-core chains the episodes of a match)
+    'match_games': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1, 'format': 'bo3', 'game_episodes': True},
 }
 # team draft events (M6 part 3): (players, the team_draft spec); their matches as a co-training run plays them
 # the Legacy Izzet Delver mirror (docs/ENGINE.md 54): the preset delver-mirror's spec
@@ -197,8 +199,12 @@ def one(seed, spec, games, threads, sims, conc, preset, stall):
     drive(drv, {'m': UniformEvaluator()}, on_batch=on_batch)
     res = drv.take_results()
     st = drv.stats()
-    return {'seed': seed, 'spec': spec, 'games': len(res), 'unfinished': sum(1 for r in res if not r['over']),
-            'decisions': sum(r['decisions'] for r in res), 'sims': st['sims'], 'seconds': round(time.time() - t0, 1)}
+    out = {'seed': seed, 'spec': spec, 'games': len(res), 'unfinished': sum(1 for r in res if not r['over']),
+           'decisions': sum(r['decisions'] for r in res), 'sims': st['sims'], 'seconds': round(time.time() - t0, 1)}
+    eps = [e for r in res for e in r.get('episodes') or ()]
+    if eps:
+        out['episodes'] = len(eps)                 # (a chained spec, docs/ENGINE.md 121: the matches' games)
+    return out
 
 
 def parse_seeds(s):
@@ -243,7 +249,8 @@ def run_configuration(spec, seed, a):
             bad = (seed, spec, 'events missing, unresolved or insane, or matches unfinished')
     elif code == 0 and line:
         r = json.loads(line[7:])
-        lines.append(f'ok    seed {seed} {spec}: {r["games"]} games ({r["unfinished"]} unfinished), '
+        eps = f' ({r["episodes"]} episodes: their games)' if 'episodes' in r else ''
+        lines.append(f'ok    seed {seed} {spec}: {r["games"]} games{eps} ({r["unfinished"]} unfinished), '
                       f'{r["decisions"]} decisions, {r["sims"]} sims, {r["seconds"]} s')
         if r['games'] != a.games or r['unfinished']:
             bad = (seed, spec, 'games missing or unfinished')
