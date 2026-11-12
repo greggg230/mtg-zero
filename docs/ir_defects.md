@@ -6,7 +6,7 @@ Status: 2026-10-22, engine at main 7c014ca + the M7b card tests (branch `m7b-tes
 `3073a633` (branch main). Updated 2026-10-23 for M7b part 3 (copies, branch `m7b-copies`, 410 supported): no new
 defect; entry 11 gains two classes, and the copy cards' Python-only switches are listed under "Checked and not
 defects". Updated 2026-10-23 for M7b part 3b (the stack, ward, the initiative, graveyard abilities, branch
-`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". Updated 2026-10-25 (branch `m7d-ir`, 546 supported): the IR now in use is mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`), which fixes entries 1, 2, 4, 12, 13, 15, 16, 17 and 18 (each entry's last bullet); the lowering reads the fixed forms and `lower::IR_DEFECTS` is empty: every cube card is supported. Updated 2026-11-08 (branch `eoe-irfix`, ENGINE.md 99.9): the IR now in use is mtg-bot `feature/eoe-ir-fixes` 5362f5ed (schema `675cfc50fc4e`), which fixes entries 20-23, 26, 40-42, 46, 48, 51, 60, 62-64, 81 and 82 (for 21, 41 and 62 only some of their cards; each entry's last bullet); the other Edge of Eternities entries stand. Updated 2026-11-08 (branch `eoe-e-loose`, ENGINE.md 100.6, the faithfulness audit's follow-ups): entries 190 and 191 (Python engine switches the IR carries, section R) and a note on entry 2 (the audit's N16). The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
+`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". Updated 2026-10-25 (branch `m7d-ir`, 546 supported): the IR now in use is mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`), which fixes entries 1, 2, 4, 12, 13, 15, 16, 17 and 18 (each entry's last bullet); the lowering reads the fixed forms and `lower::IR_DEFECTS` is empty: every cube card is supported. Updated 2026-11-08 (branch `eoe-irfix`, ENGINE.md 99.9): the IR now in use is mtg-bot `feature/eoe-ir-fixes` 5362f5ed (schema `675cfc50fc4e`), which fixes entries 20-23, 26, 40-42, 46, 48, 51, 60, 62-64, 81 and 82 (for 21, 41 and 62 only some of their cards; each entry's last bullet); the other Edge of Eternities entries stand. Updated 2026-11-08 (branch `eoe-e-loose`, ENGINE.md 100.6, the faithfulness audit's follow-ups): entries 190 and 191 (Python engine switches the IR carries, section R) and a note on entry 2 (the audit's N16). Updated 2026-11-11 (branch `doomsday-a`, ENGINE.md 124.1, Legacy Doomsday lane A): entry 200 (Pact of Negation's colour indicator, section T), fixed in mtg-bot `feature/doomsday-a-ir`. The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
 cards export-ir`) from the card printings its oracle-text parser builds (`src/mtg_bot/cards/parser/`)
 and the effect dataclasses (`src/mtg_bot/effects/`). This file lists where the IR says something
 other than the Oracle text, or leaves out what a consumer needs, with the parser code that produces
@@ -97,6 +97,7 @@ permission) and a consumer can go wrong with it.
 | 180 | (fixed by W1, mtg-bot feature/eoe-ir-fixes 7c02e5c9, ENGINE.md 99.11) Sothera, the Supervoid (Edge of Eternities, W4, ENGINE.md 99.14) | instructions reordered | the end-step ability as `Sequence [ReanimateOneExiledWithSourceWithCounters { counter_amount: 2 }, SacrificeSelfPreservingExileLink]`: the return first, then the sacrifice | "sacrifice Sothera, then put a creature card exiled with it onto the battlefield ...": the sacrifice first (the cards exiled with it stay linked to it, CR 607.2a) | `effects/generic/exile.py::SacrificeSelfPreservingExileLink` (its docstring: "the engine-level fix is to invert the order at composition time"), the Sothera parser line | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 190 | Palantír of Orthanc (faithfulness audit N17, ENGINE.md 100.6) | Python switch | `Scry { amount: 2 }` with `bottom_choice` left at its default `false` ("keep all on top", the Python class's first-slice shortcut) | a scry (CR 701.18a: any number on the bottom): `bottom_choice: true` | `cards/parser/artifact_effects.py::_parse_palantir_body`; `effects/generic/library_lookat.py::Scry` (the default) | supported; the field is ignored, every scry lowers as 701.18a | confirmed |
 | 191 | Chain of Smog (docs/shortcuts.md 26.11.9, ENGINE.md 100.6) | Python switch | `TargetPlayerMayCopyThisSpell` with `needs_target_with_cards_in_hand` at its default `true` (the copy offered only while a player it could target has cards in hand) | no condition ("That player may copy this spell") | `effects/generic/spell_copies.py::TargetPlayerMayCopyThisSpell` (the default) | supported; the field is ignored, the copy is always offered | confirmed |
+| 200 | Pact of Negation (Legacy Doomsday, lane A, ENGINE.md 124.1); every single-faced card with a colour indicator (the roto pool's Dryad Arbor) | colour dropped | no `color_indicator`: a colourless {0} instant | `color_indicator: [U]` (CR 204, 202.2e: blue; Force of Will and Force of Negation may exile it, Pyroblast counters it) | `cards/parser/source.py::build_card_record` (no single-faced builder read Scryfall's `color_indicator`; a back face's reached the IR as `face_colors`) | fixed (mtg-bot `feature/doomsday-a-ir`), supported | confirmed |
 
 ## Confirmed defects
 
@@ -1168,6 +1169,49 @@ player may copy this spell and may choose a new target for that copy."
 * Engine: supported. The lowering ignores the field (`engine/src/lower/effect_copies.rs`, the
   `TargetPlayerMayCopyThisSpell` arm) and always offers the copy, with at most 31 such copies a turn
   (`copies.rs::MAY_COPY_CAP`, docs/shortcuts.md 26.11.7; ENGINE.md 26.11).
+
+### T. Legacy Doomsday, lane A (ENGINE.md 124.1)
+
+**200. Pact of Negation** (and any single-faced card with a colour indicator). Oracle: "Counter
+target spell. At the beginning of your next upkeep, pay {3}{U}{U}. If you don't, you lose the
+game." Its Scryfall record has `"colors": ["U"], "color_indicator": ["U"]` (the card was printed
+with a colour-defining ability, now a colour indicator: its ruling of 2013-06-07).
+
+* IR (before the fix): the printing had no `color_indicator`, so its colours came from its mana cost
+  {0}: a colourless card. Force of Will's and Force of Negation's alternative costs ("exile a blue
+  card from your hand") couldn't exile it, Pyroblast couldn't counter it.
+* Should be: `color_indicator: ["U"]` (CR 204.1, 202.2e: the object is each colour its indicator
+  denotes). No cube or Edge of Eternities card is affected (none is a single-faced card with an
+  indicator); the roto pool's Dryad Arbor (green) was the other.
+* Source: `cards/parser/source.py::build_card_record`: the single-faced builders never read the
+  record's `color_indicator` (back faces carry theirs as `face_colors`, `cards/parser/dfc_builder.py`).
+* Fix (mtg-bot `feature/doomsday-a-ir`): `cards/parser/legacy_spells.py::with_color_indicator`,
+  called by `build_card_record`, sets it for a single-faced record that has one. The engine reads
+  `color_indicator` already (`lower/printing.rs`: its colours join the mana cost's).
+* Engine: supported; `cards_doomsday_a::pact_of_negation_is_a_blue_zero_mana_instant`,
+  `::pact_is_a_blue_card_force_of_will_can_exile`.
+
+### U. The Legacy Doomsday deck, lane B (ENGINE.md 124.2)
+
+220. **Untimely Malfunction** (Duskmourn; mtg-bot's roto, eoe and all pools, in no table of
+     mtg-zero's: the EoE filter drops Duskmourn): "Choose one — Destroy target artifact. • Change the
+     target of target spell or ability with a single target. • One or two target creatures can't
+     block this turn." The IR is `DestroyTargetArtifact` alone: the modal parses lossily to its first
+     mode (the other two modes had no grammar; the third still has none). Found while adding
+     Misdirection's "change the target of target spell with a single target"
+     (`cards/parser/legacy_stack.py`): with the second mode claimed the card stops parsing, so that
+     recognizer leaves "... spell or ability ..." unclaimed (lane B must not change another pool's
+     printings). Fix: a grammar for "one or two target creatures can't block this turn", then the
+     modal as `ModalChooseOne` of the three, the second
+     `ChangeTheTargetOfTargetWithASingleTarget(kinds=(spell, activated, triggered))`.
+
+Checked and not defects (lane B): Misdirection, Flusterstorm and Cavern of Souls match their Oracle
+text. Cavern's coloured mana ability is `AddAnyColorManaForChosenCreatureType`, a class named after
+the whole sentence ("spend this mana only to cast a creature spell of the chosen type, and that spell
+can't be countered"; its fields at their defaults: `produces` any 1, `makes_spell_uncounterable`); the
+lowering checks every field. Misdirection's alternative cost is Pyrokinesis' shape
+(`alt_cost_exile_from_hand`, a blue `CardFilter`), not `alternative_costs` as Force of Will's: both
+lower to the same alternative cost.
 
 ## Suspected defects (representational)
 

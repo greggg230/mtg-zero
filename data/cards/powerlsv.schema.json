@@ -77,6 +77,7 @@
   ],
   "CostAtom": [
    "ExileSelfFromGraveyardCost",
+   "PayLifeCost",
    "RemoveCountersFromSelfCost",
    "SacrificePermanentsCost",
    "TapUntappedPermanentsCost"
@@ -94,6 +95,7 @@
   ],
   "Effect": [
    "Adapt",
+   "AddAnyColorManaForChosenCreatureType",
    "AddChargeCounterManaOfChosenColor",
    "AddManaInAnyCombination",
    "AddManaOfColorPerCount",
@@ -131,6 +133,7 @@
    "Bounce",
    "Cascade",
    "ChangeControllerToCombatDamageSource",
+   "ChangeTheTargetOfTargetWithASingleTarget",
    "ChooseModes",
    "ChooseNameExileThenRevealUntilNamed",
    "ChooseNameRevealTopPutNamedIntoHand",
@@ -225,6 +228,7 @@
    "DiscardUpToNThenDrawThatMany",
    "DiscardYourHand",
    "DoThenReflexive",
+   "DoomsdayPile",
    "DoublePlusOneCountersOnEach",
    "DoubleTargetCreaturesPowerUEOT",
    "DrawCardPerMulticoloredPermanent",
@@ -345,6 +349,7 @@
    "LookAtTopCardsDistribute",
    "LookAtTopCardsPutIntoHand",
    "LookAtTopNRevealOrCounter",
+   "LookAtTopPutIntoHandMoreIfInstantAndSorcery",
    "LookAtTopRepeatPayLifeThenStackTop",
    "LookTopNKeepUpToOneOnTopRestBottom",
    "LookTopNMayRevealMatchingToHandRestBottomRandom",
@@ -353,6 +358,7 @@
    "LoseLife",
    "LoseLifeEqualToEventAmount",
    "LoseLifePerCounterOnSource",
+   "LoseTheGame",
    "ManifestDread",
    "ManifestDreadThenAttachSelf",
    "ManifestDreadThenPutPlusOneCountersOnIt",
@@ -397,6 +403,7 @@
    "PainForAllETBEffect",
    "PairedTargetPumpDebuffUEOT",
    "PayEnergy",
+   "PayManaOrElse",
    "PayToCopyEnchantedCreatureElseToken",
    "PeekTopMayBattlefieldIfLandElseHand",
    "PerigeeBeckonerDiesReturnTappedEffect",
@@ -701,6 +708,7 @@
    "cube_walkers.HasManaValueAtMost",
    "cube_walkers.IsColorless",
    "cube_walkers.IsPermanent",
+   "value_predicates.HasCardType",
    "value_predicates.HasManaValueAtMost",
    "value_predicates.IsPermanent"
   ],
@@ -1414,6 +1422,73 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_ub",
    "qualname": "Adapt"
+  },
+  "AddAnyColorManaForChosenCreatureType": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [
+      [
+       "any",
+       1
+      ]
+     ],
+     "name": "produces",
+     "required": false,
+     "type": {
+      "of": {
+       "items": [
+        {
+         "t": "str"
+        },
+        {
+         "t": "int"
+        }
+       ],
+       "t": "tuple"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "'SpendRestriction | None'",
+     "default": null,
+     "name": "spend_restriction",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "never"
+      },
+      "t": "opt"
+     },
+     "type_source": "observed"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "grants_haste_to_creature_spell",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": true,
+     "name": "makes_spell_uncounterable",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_mana",
+   "qualname": "AddAnyColorManaForChosenCreatureType"
   },
   "AddChargeCounterManaOfChosenColor": {
    "category": "Effect",
@@ -5935,6 +6010,46 @@
    "module": "mtg_bot.effects.generic.control",
    "qualname": "ChangeControllerToCombatDamageSource"
   },
+  "ChangeTheTargetOfTargetWithASingleTarget": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple[StackObjectKind, ...]",
+     "default": [
+      "spell"
+     ],
+     "name": "kinds",
+     "required": false,
+     "type": {
+      "of": {
+       "enum": "StackObjectKind",
+       "t": "enum"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "'ObjectPredicate | None'",
+     "default": null,
+     "name": "spell_filter",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "ObjectPredicate"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.legacy_stack",
+   "qualname": "ChangeTheTargetOfTargetWithASingleTarget"
+  },
   "ChapterReached": {
    "category": "TriggerPredicate",
    "fields": [
@@ -9300,6 +9415,24 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.pt_formulas",
    "qualname": "DomainPT"
+  },
+  "DoomsdayPile": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 5,
+     "name": "count",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_zones",
+   "qualname": "DoomsdayPile"
   },
   "DoublePlusOneCountersOnEach": {
    "category": "Effect",
@@ -12871,6 +13004,44 @@
    "module": "mtg_bot.effects.generic.library_lookat",
    "qualname": "LookAtTopNRevealOrCounter"
   },
+  "LookAtTopPutIntoHandMoreIfInstantAndSorcery": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 3,
+     "name": "count",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "take",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 2,
+     "name": "take_if",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_zones",
+   "qualname": "LookAtTopPutIntoHandMoreIfInstantAndSorcery"
+  },
   "LookAtTopRepeatPayLifeThenStackTop": {
    "category": "Effect",
    "fields": [
@@ -13068,6 +13239,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.artifact_mechanics",
    "qualname": "LoseLifePerCounterOnSource"
+  },
+  "LoseTheGame": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_walkers",
+   "qualname": "LoseTheGame"
   },
   "MVOfCostPaidObjectPlus": {
    "category": "Formula",
@@ -14363,6 +14541,52 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "PayEnergy"
+  },
+  "PayLifeCost": {
+   "category": "CostAtom",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "amount",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_keywords",
+   "qualname": "PayLifeCost"
+  },
+  "PayManaOrElse": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "str",
+     "name": "cost",
+     "required": true,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "Effect",
+     "name": "otherwise",
+     "required": true,
+     "type": {
+      "categories": [
+       "Effect"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.legacy_spells",
+   "qualname": "PayManaOrElse"
   },
   "PayToCopyEnchantedCreatureElseToken": {
    "category": "Effect",
@@ -21761,6 +21985,23 @@
    "module": "mtg_bot.effects.generic.cube_walkers",
    "qualname": "IsPermanent"
   },
+  "value_predicates.HasCardType": {
+   "category": "ObjectPredicate",
+   "fields": [
+    {
+     "annotation": "str",
+     "name": "card_type",
+     "required": true,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.value_predicates",
+   "qualname": "HasCardType"
+  },
   "value_predicates.HasManaValueAtMost": {
    "category": "ObjectPredicate",
    "fields": [
@@ -21887,6 +22128,10 @@
     {
      "name": "END",
      "value": "end"
+    },
+    {
+     "name": "YOUR_UPKEEP",
+     "value": "your_upkeep"
     }
    ],
    "module": "mtg_bot.effects.vocab",

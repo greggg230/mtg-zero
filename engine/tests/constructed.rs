@@ -1,5 +1,6 @@
 //! Constructed play (ENGINE.md 54): the pinned Izzet Delver 75 and its
-//! provenance, the deck rules of CR 100.2a / 100.4a, the `"constructed"` spec,
+//! provenance (and the Legacy Doomsday 75's, ENGINE.md 124.4), the deck rules
+//! of CR 100.2a / 100.4a, the `"constructed"` spec,
 //! the card table of constructed play kept apart from the cube's (the legacy
 //! cards' identities 546.., the cube's definitions unchanged), and the game
 //! with 60-card decks: the play-or-draw choice, the London mulligan, the turn
@@ -60,6 +61,61 @@ fn the_pinned_75_and_its_provenance() {
         d.unsupported_sideboard(db()),
         ["Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough // Tumble"]
     );
+}
+
+/// The Legacy Doomsday 75 (ENGINE.md 124.4): its provenance, the export it
+/// was read from, every card of the deck and the sideboard supported in
+/// constructed play, and the deck rules over both together (CR 100.2a,
+/// 100.4a; the engine's 64 cards).
+#[test]
+fn the_doomsday_75_and_its_provenance() {
+    let d = Decklist::legacy_doomsday();
+    assert_eq!(d.name, "Sultai Doomsday");
+    assert_eq!(
+        (d.player.as_str(), d.event.as_str(), d.date.as_str()),
+        ("wonderPreaux", "North American Eternal Weekend - Legacy Championship", "2026-10-31")
+    );
+    assert_eq!(d.source, "https://www.mtggoldfish.com/deck/8027957");
+    assert_eq!(d.main.iter().map(|e| e.0).sum::<u32>(), 60);
+    assert_eq!(d.sideboard.iter().map(|e| e.0).sum::<u32>(), 15);
+    // The JSON is the export verbatim (MTGGoldfish's export field: a
+    // `sideboard` line before the sideboard), but for Tamiyo, named by her
+    // front face there.
+    let (main, side) = d.parse_export(constructed::LEGACY_DOOMSDAY_EXPORT).unwrap();
+    assert_eq!(main, d.main);
+    assert_eq!(side, d.sideboard);
+    assert!(constructed::LEGACY_DOOMSDAY_EXPORT.lines().any(|l| l.trim_end() == "2 Tamiyo, Inquisitive Student"));
+    assert!(d.main.contains(&(2, "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar".to_string())));
+    // Every card supported, the sideboard's too; the deck rules over the deck
+    // and the sideboard together.
+    assert!(d.unsupported_sideboard(db()).is_empty());
+    let (ids, sb) = (Decklist::ids(db(), &d.main).unwrap(), Decklist::ids(db(), &d.sideboard).unwrap());
+    assert_eq!((ids.len(), sb.len()), (60, 15));
+    assert!(ids.len() <= constructed::MAX_DECK);
+    constructed::check(db(), &ids, &sb).unwrap();
+    // Flow State is one in the deck and one in the sideboard: three more in
+    // the sideboard make five over both (100.4a).
+    let flow = db().expect_id("Flow State").unwrap();
+    let mut five = sb.clone();
+    five[..3].fill(flow);
+    assert!(constructed::check(db(), &ids, &five).unwrap_err().contains("5 copies of Flow State"));
+    // The legacy cards in it: the Doomsday deck's ten (ENGINE.md 124.1-124.3)
+    // and Murktide Regent, in the registry's order.
+    let has = |list: &[(u32, String)], n: &str| list.iter().any(|e| e.1 == n);
+    let reg = identity::legacy_registry();
+    let in_main: Vec<&str> = reg.iter().copied().filter(|n| has(&d.main, n)).collect();
+    let side_only: Vec<&str> = reg.iter().copied().filter(|n| has(&d.sideboard, n) && !has(&d.main, n)).collect();
+    assert_eq!(
+        in_main,
+        ["Doomsday", "Pact of Negation", "Personal Tutor", "Flow State", "Misdirection", "Cavern of Souls", "Edge of Autumn", "Street Wraith"]
+    );
+    assert_eq!(side_only, ["Murktide Regent", "Flusterstorm", "Leyline of the Void"]);
+    // A network-driven game can't play it on layout v6: Cavern of Souls'
+    // floating mana needs layout v7 (ENGINE.md 124.2). Rules tests and the
+    // fuzzer (`FUZZ_POOL=doomsday`) play it.
+    let spec = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": d.main_names(), "p1": delver().main_names()}});
+    let e = MtgSpec::parse(&spec.to_string()).unwrap_err();
+    assert!(e.contains("p0's deck: Cavern of Souls' floating mana needs layout v7"), "{e}");
 }
 
 #[test]
@@ -145,15 +201,19 @@ fn the_constructed_spec() {
 #[test]
 fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     let (cube, con) = (CardDb::cube(), CardDb::constructed());
-    // The cube's table has no legacy card; the constructed one has both.
-    for n in ["Murktide Regent", "Prismari Charm"] {
+    // The cube's table has no legacy card; the constructed one has them all:
+    // the registry's (the Delver mirror's, ENGINE.md 54; the Doomsday deck's,
+    // 124), and exactly the legacy IR's.
+    let legacy = identity::legacy_registry();
+    for &n in &legacy {
         assert!(cube.id(n).is_none(), "{n} in the cube's card table");
         assert!(con.id(n).is_some(), "{n}: {:?}", con.expect_id(n));
     }
     assert!(cube.unsupported().is_empty() && con.unsupported().is_empty());
     // Every cube card at the same id, with the same definition; its tokens
-    // and faces two ids later (after the two legacy cards), the same too.
-    let k = 2u16;
+    // and faces k ids later (after the k legacy cards), the same too.
+    let k = legacy.len() as u16;
+    assert_eq!(k as usize, engine::db::load_legacy_document().cards.len());
     assert_eq!(con.num_cards(), cube.num_cards() + k as usize);
     assert_eq!(con.len(), cube.len() + k as usize, "the legacy cards make no token or face");
     let to_cube = |id: u16| if id < cube.num_cards() as u16 { id } else { id - k };
@@ -177,9 +237,15 @@ fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     for i in 0..cube.num_cards() {
         assert_eq!(ic[i], ik[i]);
     }
-    assert_eq!(identity::legacy_registry(), ["Murktide Regent", "Prismari Charm"]);
+    // Each legacy card at LEGACY_BASE + its registry line (append-only: the
+    // first two stay Murktide Regent and Prismari Charm, 546 and 547; the
+    // Doomsday deck's follow, ENGINE.md 124).
+    assert_eq!(legacy[..2], ["Murktide Regent", "Prismari Charm"]);
     assert_eq!(ik[con.id("Murktide Regent").unwrap() as usize], 546);
     assert_eq!(ik[con.id("Prismari Charm").unwrap() as usize], 547);
+    for (line, &n) in legacy.iter().enumerate() {
+        assert_eq!(ik[con.id(n).unwrap() as usize] as usize, identity::LEGACY_BASE + line, "{n}");
+    }
     assert!(identity::LEGACY_BASE + identity::legacy_registry().len() <= identity::CUBE_CAP);
     assert_eq!(identity::cube_names().len(), identity::LEGACY_BASE);
     // Every card of the legacy IR has a registry line (append-only: a new

@@ -20,7 +20,7 @@ pub const VIEW_VERSION: u32 = 1;
 /// consecutive states' tails and `log_n`).
 const LOG_TAIL: usize = 40;
 
-const KWS: [(Kw, &str); 17] = [
+const KWS: [(Kw, &str); 22] = [
     (Kw::Flying, "flying"),
     (Kw::Reach, "reach"),
     (Kw::FirstStrike, "first strike"),
@@ -38,6 +38,11 @@ const KWS: [(Kw, &str); 17] = [
     (Kw::Indestructible, "indestructible"),
     (Kw::Infect, "infect"),
     (Kw::Shadow, "shadow"),
+    (Kw::Plainswalk, "plainswalk"),
+    (Kw::Islandwalk, "islandwalk"),
+    (Kw::Swampwalk, "swampwalk"),
+    (Kw::Mountainwalk, "mountainwalk"),
+    (Kw::Forestwalk, "forestwalk"),
 ];
 
 const TYPES: [(u16, &str); 9] = [

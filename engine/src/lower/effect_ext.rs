@@ -1153,6 +1153,8 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let when = match step {
                 enums::DelayedStep::Upkeep => DelayedWhen::NextUpkeep,
                 enums::DelayedStep::End => DelayedWhen::NextEndStep,
+                // "At the beginning of your next upkeep" (ENGINE.md 124.1).
+                enums::DelayedStep::YourUpkeep => DelayedWhen::YourNextUpkeep,
             };
             b.op(Op::Ext(Ext::Delay { k, when, about: About::Nothing }));
         }

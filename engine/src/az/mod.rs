@@ -426,6 +426,10 @@ impl MtgSpec {
         };
         for (p, (d, sb)) in lists.into_iter().enumerate() {
             constructed::check_size(db, d, sb).map_err(|e| format!("mtg spec: p{p}'s deck: {e}"))?;
+            // (ENGINE.md 124.2: layout v6 can't encode such mana floating.)
+            if let Some(&c) = d.iter().chain(sb.iter()).find(|&&c| crate::doomsday_b::makes_chosen_type_mana(db.def(c))) {
+                return Err(format!("mtg spec: p{p}'s deck: {}", crate::doomsday_b::chosen_type_mana_needs_v7(&db.def(c).name)));
+            }
         }
         Ok(s)
     }

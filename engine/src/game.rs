@@ -483,7 +483,8 @@ pub enum EndReason {
     Sba,
     /// Engine cap (`GameSpec.max_turns`).
     TurnLimit,
-    /// An effect says a player wins (CR 104.2b; Thassa's Oracle).
+    /// An effect says a player wins (CR 104.2b; Thassa's Oracle) or loses
+    /// (104.3e; Pact of Negation's trigger, ENGINE.md 124.1).
     Effect,
     /// The game can't go on exactly: a number past the engine's exact range
     /// (64-bit stored values, ENGINE.md 100.7) or past the object limit. Not
@@ -848,7 +849,7 @@ pub struct Game {
     /// Workshop's (`ManaPool::art`): (player, type, purposes, amount), a
     /// part of that player's `ManaPool::amt` (CR 106.6; ENGINE.md 99.12).
     /// Empty but in games with such mana; emptied with the pools.
-    pub(crate) pool_restr: Vec<(PlayerId, u8, u8, u8)>,
+    pub(crate) pool_restr: Vec<(PlayerId, u8, crate::db::Spend, u8)>,
     /// The lands that entered the battlefield under each player's control
     /// during turn `.0` (kept when `CardDb::watch_lands_entered`; ENGINE.md
     /// 99.12).
@@ -981,6 +982,9 @@ pub enum Mark {
     Converge(u8),
     /// The colour (index W U B R G) chosen as it entered (CR 614.12).
     ChosenColor(u8),
+    /// The creature type chosen as it entered (CR 614.12, 205.3m: the index
+    /// of `doomsday_b::CREATURE_TYPES_CR`; Cavern of Souls, ENGINE.md 124.2).
+    ChosenCreatureType(u16),
     /// This spell can't be countered (mana spent on it said so).
     Uncounterable,
     /// It has a triggered ability an effect gave it: "when this is put into
@@ -2047,6 +2051,7 @@ impl Game {
             || self.def_of(idx).chooses_parity
             || self.def_of(idx).chooses_name
             || self.def_of(idx).w6.chooses_color
+            || self.def_of(idx).dd_b.chooses_creature_type
         {
             self.agenda.push(Task::AsEnters { card: idx, page: crate::decision::Page::FIRST });
         }
@@ -2331,6 +2336,10 @@ impl Game {
         let fd_known = self.objs[idx.i()].known;
         let old = self.obj_ref(idx);
         let old_controller = self.objs[idx.i()].controller;
+        // (Leyline of the Void's replacement as this permanent last existed,
+        // for the rest of a simultaneous move: `Lki::opp_gy_exile`.)
+        let lki_void = from == Zone::Battlefield && self.batching && self.seen & SEEN_VOID != 0;
+        let (lki_gy_exile, lki_void_exile) = if lki_void { (self.abilities(idx).opp_gy_exile, self.abilities(idx).void_exile) } else { (false, None) };
         // Replacement effects of where it goes (CR 614.1a), decided before
         // the events, in the order the affected object's controller (its
         // owner if it has none) chooses (616.1): `replaced_dest`.
@@ -2522,7 +2531,7 @@ impl Game {
         self.layers_on_move(idx, old, from, to);
         if from == Zone::Battlefield && self.batching {
             let def = self.objs[idx.i()].def;
-            self.leaving.push(crate::triggers::Lki { old, def, controller: old_controller });
+            self.leaving.push(crate::triggers::Lki { old, def, controller: old_controller, opp_gy_exile: lki_gy_exile, void_exile: lki_void_exile });
         }
         // Its copy effects end with it (CR 400.7): it has its own
         // definition again (the copied one was its last known information,
@@ -2684,8 +2693,10 @@ impl Game {
     /// instead" (Blightsteel), "exile that card instead" (Yawgmoth's Will),
     /// "exile it with a void counter instead" (Dauthi Voidwalker), "if it
     /// would die / leave the battlefield, exile it instead" (Suplex, From the
-    /// Catacombs, a finality counter), flashback's exile (702.34a) and a
-    /// permission's "exile it instead". None of them is a self-replacement
+    /// Catacombs, a finality counter), flashback's exile (702.34a), a
+    /// permission's "exile it instead" and "if a card would be put into an
+    /// opponent's graveyard from anywhere, exile it instead" (Leyline of the
+    /// Void, ENGINE.md 124.3). None of them is a self-replacement
     /// effect (616.1a). `Dest::Choose` when orders give different results.
     pub(crate) fn replaced_dest(&self, idx: CardIdx, from: Zone, to: Zone) -> Dest {
         if from == Zone::Nowhere && to != Zone::Graveyard {
@@ -2700,8 +2711,8 @@ impl Game {
         // Which effects could apply (to a graveyard destination unless
         // said), by index: 0 library, 1 Will, 2 void, 3 dies-exile,
         // 4 leaves-exile, 5 flashback, 6 the spell's exile, 7 the
-        // Adventure's exile.
-        let mut can = 0u8;
+        // Adventure's exile, 8 Leyline of the Void's exile.
+        let mut can = 0u16;
         let mut void = None;
         // CR 715.4: "instead of putting a spell that was cast as an
         // Adventure into its owner's graveyard as it resolves, its controller
@@ -2720,6 +2731,11 @@ impl Game {
             void = self.void_counter_for(owner);
             if void.is_some() {
                 can |= 4;
+            }
+            // "If a card would be put into an opponent's graveyard from
+            // anywhere, exile it instead" (CR 614.1a; ENGINE.md 124.3).
+            if self.opp_gy_exile_for(owner) {
+                can |= 256;
             }
         }
         if from == Zone::Battlefield && to != Zone::Exile {
@@ -2748,9 +2764,9 @@ impl Game {
         // States: 0 = `to`, 1 = the library, 2 = exile, 3 = exile with a
         // void counter, 4 = exile on an adventure. The results every order
         // reaches (bit per state).
-        fn walk(can: u8, gy: bool, to_exile: bool, state: u8, applied: u8, out: &mut u8) {
+        fn walk(can: u16, gy: bool, to_exile: bool, state: u8, applied: u16, out: &mut u8) {
             let mut any = false;
-            for e in 0..8u8 {
+            for e in 0..9u8 {
                 if can & (1 << e) == 0 || applied & (1 << e) != 0 {
                     continue;
                 }
@@ -2758,7 +2774,7 @@ impl Game {
                 let exiled = state >= 2 || (state == 0 && to_exile);
                 let next = match e {
                     0 if at_gy => 1,
-                    1 | 3 | 6 if at_gy => 2,
+                    1 | 3 | 6 | 8 if at_gy => 2,
                     2 if at_gy => 3,
                     7 if at_gy => 4,
                     4 | 5 if !exiled => 2,
