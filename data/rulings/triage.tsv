@@ -1261,3 +1261,9 @@ c8a74bc2	a	mana	a mana-cost-based search is restricted to the exact printed mana
 1b138927	a	triggers	this permanents second ability triggers on entering the battlefield regardless of whether it escaped to get there
 87078369	a	mana	delve does not change the mana cost or mana value (Murktide Regent stays 7)
 05ce86bd	a	mana	delve pays only generic mana, at most the generic part of the total cost (five for Murktide Regent)
+4c669d8c	a	zones	Doomsday must choose five cards when library and graveyard hold five or more (CR 701.23d)
+6c6f247d	a	zones	Doomsday with fewer than five cards in library and graveyard puts all of them on top
+ce207f9e	a	zones	a search for a card with a stated quality may find nothing (CR 701.23b)
+4c4f55a3	a	stack	Pact of Negation countered or not resolving (an illegal target) creates no delayed trigger
+3e504e2e	a	stack	Pact of Negation resolving with a legal target that can't be countered still creates its trigger
+0dfaac8c	a	other	Pact of Negation is blue by its colour indicator; colour-changing effects still apply (text-changing effects: none in this engine)

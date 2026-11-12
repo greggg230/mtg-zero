@@ -145,15 +145,20 @@ fn the_constructed_spec() {
 #[test]
 fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     let (cube, con) = (CardDb::cube(), CardDb::constructed());
-    // The cube's table has no legacy card; the constructed one has both.
-    for n in ["Murktide Regent", "Prismari Charm"] {
+    // The cube's table has no legacy card; the constructed one has all of
+    // them (the Delver mirror's, ENGINE.md 54; the Doomsday deck's, 110).
+    let legacy: Vec<String> = engine::db::load_legacy_document().cards.into_iter().map(|c| c.name).collect();
+    for n in ["Murktide Regent", "Prismari Charm", "Doomsday", "Pact of Negation", "Personal Tutor", "Flow State"] {
+        assert!(legacy.iter().any(|x| x == n), "{n} in the legacy IR");
+    }
+    for n in &legacy {
         assert!(cube.id(n).is_none(), "{n} in the cube's card table");
         assert!(con.id(n).is_some(), "{n}: {:?}", con.expect_id(n));
     }
     assert!(cube.unsupported().is_empty() && con.unsupported().is_empty());
     // Every cube card at the same id, with the same definition; its tokens
-    // and faces two ids later (after the two legacy cards), the same too.
-    let k = 2u16;
+    // and faces k ids later (after the k legacy cards), the same too.
+    let k = legacy.len() as u16;
     assert_eq!(con.num_cards(), cube.num_cards() + k as usize);
     assert_eq!(con.len(), cube.len() + k as usize, "the legacy cards make no token or face");
     let to_cube = |id: u16| if id < cube.num_cards() as u16 { id } else { id - k };
@@ -177,9 +182,17 @@ fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     for i in 0..cube.num_cards() {
         assert_eq!(ic[i], ik[i]);
     }
-    assert_eq!(identity::legacy_registry(), ["Murktide Regent", "Prismari Charm"]);
+    let reg = identity::legacy_registry();
+    assert_eq!(reg[..2], ["Murktide Regent", "Prismari Charm"]);
     assert_eq!(ik[con.id("Murktide Regent").unwrap() as usize], 546);
     assert_eq!(ik[con.id("Prismari Charm").unwrap() as usize], 547);
+    // Each legacy card at LEGACY_BASE + its registry line (ENGINE.md 110:
+    // the Doomsday deck's after the Delver mirror's).
+    for (line, n) in reg.iter().enumerate() {
+        if let Some(id) = con.id(n) {
+            assert_eq!(ik[id as usize] as usize, identity::LEGACY_BASE + line, "{n}");
+        }
+    }
     assert!(identity::LEGACY_BASE + identity::legacy_registry().len() <= identity::CUBE_CAP);
     assert_eq!(identity::cube_names().len(), identity::LEGACY_BASE);
     // Every card of the legacy IR has a registry line (append-only: a new

@@ -55,6 +55,13 @@
 //! Prismari Charm with the cube's cards); every check of the default mode,
 //! and with 200 games or more Murktide Regent must have been cast and its
 //! leave-the-graveyard trigger resolved. Games only (best-of-one).
+//! `FUZZ_POOL=dd_a` (ENGINE.md 110.1): Legacy Doomsday, lane A's cards: the
+//! Doomsday 60 (MTGGoldfish 8027957) with the cards of the other lanes
+//! swapped for more of lane A's (`DD_A_DECK`), against the Delver 60 in
+//! either seat, one game in three a Doomsday mirror; constructed play's card
+//! table; every check of the default mode, and with 200 games or more
+//! Doomsday, Pact of Negation, Personal Tutor and Flow State must have been
+//! cast and a Pact trigger put on the stack. Games only (best-of-one).
 //! `FUZZ_POOL=eoe` (ENGINE.md 99): Edge of Eternities sealed, the set's own
 //! card table (`CardDb::eoe`): random 40-card decks of its supported cards
 //! (17 lands, 23 spells; games only, no matches).
@@ -297,6 +304,7 @@ enum PoolMode {
     Delver,
     Eoe,
     Sealed,
+    DdA,
 }
 
 fn pool_mode() -> PoolMode {
@@ -308,7 +316,8 @@ fn pool_mode() -> PoolMode {
         Ok("delver") => PoolMode::Delver,
         Ok("eoe") => PoolMode::Eoe,
         Ok("sealed") => PoolMode::Sealed,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"eoe\" or \"sealed\")"),
+        Ok("dd_a") => PoolMode::DdA,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -322,6 +331,11 @@ fn exponential_mode() -> bool {
 
 fn delver_mode() -> bool {
     pool_mode() == PoolMode::Delver
+}
+
+/// `FUZZ_POOL=dd_a` (ENGINE.md 110.1).
+fn dd_a_mode() -> bool {
+    pool_mode() == PoolMode::DdA
 }
 
 fn eoe_mode() -> bool {
@@ -670,7 +684,7 @@ fn check_forced_chance(g: &Game, seed: u64, step: usize) {
 /// The card table of the mode's games: the cube's and the custom test cards,
 /// or constructed play's (`FUZZ_POOL=delver`).
 fn game_db() -> &'static CardDb {
-    if delver_mode() {
+    if delver_mode() || dd_a_mode() {
         CardDb::constructed()
     } else if eoe_mode() || sealed_mode() {
         CardDb::eoe()
@@ -683,6 +697,73 @@ fn game_db() -> &'static CardDb {
 fn delver_deck() -> Vec<u16> {
     let d = engine::az::constructed::Decklist::izzet_delver();
     engine::az::constructed::Decklist::ids(CardDb::constructed(), &d.main).unwrap()
+}
+
+/// The Doomsday 60 of `FUZZ_POOL=dd_a` (ENGINE.md 110.1): MTGGoldfish's
+/// "Legacy Doomsday" (deck 8027957), its seven cards of the other lanes
+/// (Edge of Autumn, Misdirection, Street Wraith x2 each, Cavern of Souls)
+/// swapped for two Pacts of Negation, two Flow States, two Personal Tutors
+/// and an Island.
+const DD_A_DECK: &[(u32, &str)] = &[
+    (4, "Doomsday"),
+    (3, "Pact of Negation"),
+    (4, "Personal Tutor"),
+    (3, "Flow State"),
+    (2, "Thoughtseize"),
+    (4, "Force of Will"),
+    (4, "Lotus Petal"),
+    (4, "Ponder"),
+    (2, "Thassa's Oracle"),
+    (2, "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar"),
+    (1, "Consider"),
+    (4, "Dark Ritual"),
+    (4, "Brainstorm"),
+    (1, "Lion's Eye Diamond"),
+    (2, "Daze"),
+    (1, "Swamp"),
+    (2, "Island"),
+    (4, "Underground Sea"),
+    (1, "Undercity Sewers"),
+    (1, "Flooded Strand"),
+    (1, "Misty Rainforest"),
+    (1, "Scalding Tarn"),
+    (1, "Verdant Catacombs"),
+    (4, "Polluted Delta"),
+];
+
+fn dd_a_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = DD_A_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let deck = engine::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    engine::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("DD_A_DECK: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=dd_a`: lane A's spells and Pact of Negation's triggers seen on
+/// the stack after an action (each stack item once, by its id; a spell cast
+/// and resolved within one action, every other decision answered by
+/// `auto_single`, isn't seen: a Pact's trigger can outnumber its casts).
+static DD_A_CASTS: [AtomicU64; 4] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+static DD_A_PACT_TRIGGERS: AtomicU64 = AtomicU64::new(0);
+const DD_A_CARDS: [&str; 4] = ["Doomsday", "Pact of Negation", "Personal Tutor", "Flow State"];
+
+fn count_dd_a(g: &Game, seen: &mut Vec<u32>) {
+    for it in g.stack() {
+        if seen.contains(&it.id) {
+            continue;
+        }
+        seen.push(it.id);
+        match it.kind {
+            engine::game::StackKind::Spell { card } => {
+                if let Some(k) = DD_A_CARDS.iter().position(|&n| n == g.name(card)) {
+                    DD_A_CASTS[k].fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            engine::game::StackKind::Ability { source, .. } if g.db().def(g.obj(source.idx).def).name == "Pact of Negation" => {
+                DD_A_PACT_TRIGGERS.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// `FUZZ_POOL=delver`: Murktide Regents that resolved, and leave-the-graveyard
@@ -1091,6 +1172,15 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     if delver_mode() {
         return [(delver_deck(), Vec::new()), (delver_deck(), Vec::new())];
     }
+    if dd_a_mode() {
+        // Doomsday against Delver in either seat; one game in three the
+        // Doomsday mirror.
+        return match seed % 3 {
+            0 => [(dd_a_deck(), Vec::new()), (delver_deck(), Vec::new())],
+            1 => [(delver_deck(), Vec::new()), (dd_a_deck(), Vec::new())],
+            _ => [(dd_a_deck(), Vec::new()), (dd_a_deck(), Vec::new())],
+        };
+    }
     if eoe_mode() {
         return [(eoe_deck(&mut rng), Vec::new()), (eoe_deck(&mut rng), Vec::new())];
     }
@@ -1196,6 +1286,9 @@ fn play(seed: u64, checks: bool) -> Played {
         }
         if delver_mode() && !g.stack().is_empty() {
             count_delver(&g, &mut stack_seen);
+        }
+        if dd_a_mode() && !g.stack().is_empty() {
+            count_dd_a(&g, &mut stack_seen);
         }
         assert!(steps < 100_000, "seed {seed}: game does not end
 {}", g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
@@ -1551,6 +1644,17 @@ fn fuzz_random_games() {
         println!("FUZZ_POOL=delver: Murktide Regent cast {m} times, its leave-the-graveyard triggers {t}, Prismari Charm cast {c} times");
         if n >= 200 {
             assert!(m > 0 && t > 0 && c > 0, "the legacy cards weren't played: {m} {t} {c}");
+        }
+    }
+    if dd_a_mode() {
+        let casts: Vec<u64> = DD_A_CASTS.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+        let pacts = DD_A_PACT_TRIGGERS.load(Ordering::Relaxed);
+        println!(
+            "FUZZ_POOL=dd_a: seen on the stack {}; Pact of Negation's triggers {pacts}",
+            DD_A_CARDS.iter().zip(&casts).map(|(n, c)| format!("{n} {c} times")).collect::<Vec<_>>().join(", ")
+        );
+        if n >= 200 {
+            assert!(casts.iter().all(|&c| c > 0) && pacts > 0, "lane A's cards weren't played: {casts:?} {pacts}");
         }
     }
 }
@@ -1926,6 +2030,10 @@ fn fuzz_random_matches() {
         println!("FUZZ_POOL=delver: games only (constructed best-of-three isn't built)");
         return;
     }
+    if dd_a_mode() {
+        println!("FUZZ_POOL=dd_a: games only (constructed best-of-three isn't built)");
+        return;
+    }
     if eoe_mode() {
         println!("FUZZ_POOL=eoe: games only (sealed matches come with milestone S2)");
         return;
@@ -1981,7 +2089,7 @@ fn fuzz_random_matches() {
 fn same_seed_and_actions_replay_matches_identically() {
     use engine::az::MtgAz;
     use zero_search::game::SearchGame;
-    if delver_mode() || eoe_mode() || sealed_mode() {
+    if delver_mode() || dd_a_mode() || eoe_mode() || sealed_mode() {
         return;
     }
     for seed in 2000..2012 {

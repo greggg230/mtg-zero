@@ -779,6 +779,9 @@ impl Game {
             W::YourNextMainPhase => step.is_main() && ap == d.controller,
             W::YourNextTurnEndStep => step == crate::game::Step::End && ap == d.controller && self.turn.number != d.turn,
             W::EndOfCombat => step == crate::game::Step::EndCombat,
+            // (Checked only as a step begins: one created during its
+            // controller's upkeep waits for their next one.)
+            W::YourNextUpkeep => step == crate::game::Step::Upkeep && ap == d.controller,
         };
         let (now, later): (Vec<_>, Vec<_>) = self.delayed.iter().copied().partition(|d| fires(d));
         self.delayed = later;

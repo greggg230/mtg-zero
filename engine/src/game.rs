@@ -483,7 +483,8 @@ pub enum EndReason {
     Sba,
     /// Engine cap (`GameSpec.max_turns`).
     TurnLimit,
-    /// An effect says a player wins (CR 104.2b; Thassa's Oracle).
+    /// An effect says a player wins (CR 104.2b; Thassa's Oracle) or loses
+    /// (104.3e; Pact of Negation's trigger, ENGINE.md 110.1).
     Effect,
     /// The game can't go on exactly: a number past the engine's exact range
     /// (64-bit stored values, ENGINE.md 100.7) or past the object limit. Not

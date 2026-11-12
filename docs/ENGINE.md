@@ -25237,3 +25237,178 @@ load on the first pass and passed when rerun. **`python tools/gate.py python --n
 passed and 1 skipped, the mtg-smoke loop (16 games, 0 unfinished), tracked files unchanged: GATE PASSED python
 ff5ba0847e85 in 935s.** The commit after it adds this paragraph only.
 
+## 110. Legacy Doomsday: the deck's cards
+
+**Why.** The next constructed matchup after the Delver mirror (54): MTGGoldfish's archetype "Legacy Doomsday"
+(paper, deck 8027957, fetched 2026-11-11: `E:/mtg-zero-scratch/doomsday/`, its PROVENANCE.md). Ten of its 75 cards
+were outside the cube and legacy IR; three lanes ported them in parallel (A: Doomsday, Pact of Negation, Personal
+Tutor, Flow State; B and C the other six), each appending its own subsection here. The identities after the merge:
+`engine/src/az/legacy_cards.txt` = Murktide Regent, Prismari Charm, Doomsday, Pact of Negation, Personal Tutor,
+Flow State, Misdirection, Flusterstorm, Cavern of Souls, Edge of Autumn, Street Wraith, Leyline of the Void (from
+`LEGACY_BASE` 546; append-only, layout unchanged).
+
+### 110.1 Lane A: Doomsday, Pact of Negation, Personal Tutor, Flow State (branch `doomsday-a`, mtg-bot `feature/doomsday-a-ir`)
+
+Branch `doomsday-a` from main 60397f3; mtg-bot `feature/doomsday-a-ir` from `feature/eoe-ir-fixes` f4f2d663. The
+user's rule: fully faithful, no approximation of any kind; no layout or encoding change (none was needed: no new
+decision kind, no new public state, no spare float); new code in `engine/src/doomsday_a.rs` and
+`engine/src/lower/effect_doomsday_a.rs`, additive hooks elsewhere.
+
+**The cards.**
+
+* Doomsday {B}{B}{B}, Sorcery: "Search your library and graveyard for five cards and exile the rest. Put the chosen
+  cards on top of your library in any order. You lose half your life, rounded up."
+* Pact of Negation {0}, Instant, blue (a colour indicator): "Counter target spell. At the beginning of your next
+  upkeep, pay {3}{U}{U}. If you don't, you lose the game."
+* Personal Tutor {U}, Sorcery: "Search your library for a sorcery card, reveal it, then shuffle and put that card on
+  top."
+* Flow State {1}{U}, Sorcery: "Look at the top three cards of your library. Put one of them into your hand and the rest
+  on the bottom of your library in any order. If there is an instant card and a sorcery card in your graveyard, instead
+  put two of them into your hand and the rest on the bottom of your library in any order."
+
+**The IR** (mtg-bot `feature/doomsday-a-ir` a544a075; docs/card_ir.md, "Current numbers"). The four Scryfall records
+appended to the legacy pool (`data/legacy_delver.json`; its sheet and sidecar; the Delver cards' records left byte for
+byte). Doomsday (`DoomsdayPile { count: 5 }`: the class is the whole text, its life loss included), Flow State
+(`LookAtTopPutIntoHandMoreIfInstantAndSorcery { count: 3, take: 1, take_if: 2 }`) and Personal Tutor (`SearchLibrary`
+of a sorcery card, to the top, revealed: Mystical Tutor's shape) already parsed through mtg-bot's roto recognizers,
+which are parameterized; each was checked against the Oracle text. Pact of Negation's second line did not parse:
+`cards/parser/legacy_spells.py` adds two parameterized recognizers, tried after every other grammar: "at the
+beginning of your next upkeep, <effect>" (`ScheduleDelayedEffect { inner, step: your_upkeep }`, a new member of
+`DelayedStep`) and "pay <mana cost>. If you don't, <effect>" (`PayManaOrElse { cost, otherwise }`, a new class in
+`effects/generic/legacy_spells.py`); its IR is `Sequence [CounterTargetSpell, ScheduleDelayedEffect { inner:
+PayManaOrElse { cost: "{3}{U}{U}", otherwise: LoseTheGame }, step: your_upkeep }]`. **IR defect 200** (fixed in the
+same branch): no single-faced printing carried its Scryfall `color_indicator`, so Pact of Negation was colourless
+({0}); `build_card_record` now sets it (the roto pool's Dryad Arbor gains its green too; no cube or EoE card has one).
+`cards export-ir --pool cube legacy eoe`, `filter_eoe_ir.py`, `gen_card_ir.py`: schema `506c54f1e63e...` (was
+`1cbe33073b1b...`), 713 classes (4 more: `DoomsdayPile`, `LookAtTopPutIntoHandMoreIfInstantAndSorcery`,
+`LoseTheGame`, `PayManaOrElse`), `DelayedStep.your_upkeep`. `powerlsv.ir.json` and `eoe.ir.json` are the previous
+files byte for byte once the schema hash is replaced (checked card by card and as bytes); `legacy.ir.json` holds 6
+cards. mtg-bot: `cards roundtrip --pool cube legacy eoe` passes; `tests/test_legacy_spells.py` (new) and the legacy
+pool's tests; the Python engine's simplifications for these cards are in mtg-bot docs/SEARCH_LIMITATIONS.md ("Legacy
+pool, mtg-zero's Legacy Doomsday deck, lane A").
+
+**The rules, as built.**
+
+| Text | Rule | How |
+|---|---|---|
+| Doomsday: "search your library and graveyard for five cards" | 701.23a, 701.23d (a quantity with no stated quality: as many as possible, up to five; the rulings: five if there are five, else all) | `DdA::PileFromGraveyard { n }` then `DdA::PileFromLibrary { n }`: `t = min(5, library + graveyard)`; the graveyard's cards first (`ChooseGraveyardCard`, list ids, one per decision in increasing position, between `t - library` and `min(t, graveyard)` of them, `PASS` once the minimum is met, a pick only if enough cards stay above it), then the library's rest by definition (`SearchLibrary`, the slot of each definition in the library sorted by definition, ENGINE.md 10; non-decreasing order, so each multiset once; a definition only while a copy is left and enough cards from it on remain; no `PASS`) |
+| "and exile the rest" | 406.2, 400.7 | one instruction: the library's other cards in definition order (its order was hidden: the reveals say only which cards), then the graveyard's in their order; `LeavesGraveyard` per card (Murktide Regent, 603.10a) |
+| "Put the chosen cards on top of your library in any order" | 401.4 | the graveyard's picks join the library (a public move: everyone sees them go), the found cards wait on top in definition order, then `Op::PileTo` to the top (`PutOnTop`, one card per decision, the last chosen on top): every order |
+| "You lose half your life, rounded up" | 107.1a, 107.1b, 119.3 | `DdA::LoseHalfLifeUp`: `ceil(life / 2)` of a positive life total, none at 0 or less (a negative result is 0) |
+| Pact: "Counter target spell" | 701.6a, 608.2b | `CounterTargetSpell` -> `Op::Counter`; all targets illegal: the spell doesn't resolve (nothing else happens); a spell that can't be countered: Pact resolves and counters nothing (101.2) |
+| "At the beginning of your next upkeep, ..." | 603.7a, 603.7d, 503.1a | `Ext::Delay` with `DelayedWhen::YourNextUpkeep` (new): its controller is Pact's controller as it resolved; it triggers as an upkeep of that player begins, checked only as a step begins, so one created during their upkeep waits for the next one |
+| "pay {3}{U}{U}. If you don't, you lose the game" | 118.12a, 605.3a, 117.1d, 104.3e, 104.2a | `PayManaOrElse` -> `Op::OfferPay { You, {3}{U}{U} }` (`PASS` always, `YES` when payable; mana abilities, a Lotus Petal's too, during the payment; mana floated before it spent from the pool) then `DdA::LoseGame`: the player loses at once, the other player wins (`EndReason::Effect`, its doc widened: an effect that says a player wins or loses) |
+| Pact's colour | 202.2e, 204.1 | `color_indicator: [U]` (IR defect 200 fixed): blue for Force of Will's and Force of Negation's alternative costs; colour-changing effects still apply (Painter's Servant, 613.1e) |
+| Personal Tutor | 701.23b, 701.20a, 701.24a | the existing `Op::Search` with `SearchDest::Top`, `reveal`, `may_fail` (a stated quality: may find none, still shuffled): revealed, shuffled, put on top, known to both players |
+| Flow State | 608.2c, 701.20e | `Op::LookTop` 3 (fewer if the library has fewer), `DdA::JumpUnlessInstantAndSorceryInGraveyard`, `Op::PileTo` to the hand of 2 or of 1 (as many as there are), the rest `Op::PileTo` to the bottom (`PutOnBottom`, the order chosen) |
+
+Readings taken:
+
+* **Five cards, no fewer.** 701.23d, not 701.23b: "five cards" names no quality, so the search must find five when the
+  two zones hold five (Doomsday's first ruling), all of them when they hold fewer (its second). No `PASS` is offered
+  in the library part; the graveyard part's `PASS` only once the library can supply the rest.
+* **The decomposition reaches every pile and order exactly once.** Graveyard cards are public, so they are chosen by
+  their place; library cards are hidden, so by definition (the searcher's own worlds may deal them anew before the
+  search ends: `Frame::picked_defs`, as the existing searches for several cards). Tested exhaustively: three library and
+  three graveyard cards of six definitions give 720 outcomes (6 piles x 120 orders) over 720 decision paths; with two
+  equal library cards, 360 over 360.
+* **Library cards by definition, though Doomsday doesn't shuffle.** docs/shortcuts.md 13.5's representation (a
+  searched library offers definitions) rests there on every search shuffling. Here it holds without: two library cards
+  of one definition differ only in who knew where they were, the search turns the other player's knowledge of the
+  library into a cloud before any card moves (so no knowledge depends on which copy is kept or exiled), and the
+  searcher learns the five it keeps. Which copy the engine takes changes nothing observable.
+* **The found cards wait in definition order** before the order is chosen: where a library card was found depended on
+  the library's hidden order, which the searcher's own worlds deal anew; left there, the searcher's view (which places
+  it knows) differed between worlds with the same actions and keys (the fuzz's information-set check found it;
+  `doomsday_the_searchers_worlds_agree_on_what_it_knows` fails without the waiting order). The waiting order is never
+  observable: the searcher chooses the final one next.
+* **Who knows what after Doomsday** (ENGINE.md 10, 72): the caster knows the five exactly, in order. The opponent saw
+  the graveyard's picks go into the library and every exiled card: the search first turns what it knew of the library
+  into a cloud over it (`scramble`, as every search), each exiled card takes its identity out of that cloud
+  (`knowledge_leaves`), and the private order turns what it knew of the found cards (the graveyard's picks, a known
+  library card no copy of which was exiled) into one cloud over the five. So the opponent's `determinize` never deals a
+  graveyard-origin card, or a known library card that stayed, into the caster's hand, and never claims more: when a copy
+  of a card it knew in the library is exiled it can't tell which copy was kept, and the cloud drops it. A later draw
+  carries the cloud into the hand (with open decklists a cloud over the whole hand and library says nothing and goes).
+  No layout change was needed: clouds are the existing model.
+* **An instant card and a sorcery card** (a reading taken; the maintainer's decision, 2026-11-11): two existence checks
+  over the graveyard's cards (as mtg-bot's class reads it), so one card that is both satisfies both: CR 709.4, in a
+  graveyard a split card has its two halves' characteristics combined, so one with an instant half and a sorcery half
+  is an instant card and a sorcery card. (It differs from "two different cards" only for such a card; no card of the
+  cube, legacy or EoE tables is one.)
+* **Flow State's bottom cards** follow every look-and-bottom card (Dig Through Time, Stock Up): `put_from_pile` leaves
+  them known to the caster at their places; the opponent knows only what its cloud from the look holds. Knowledge the
+  precedent drops: none for the rules; for the network, the caster's knowledge of cards below its library's top three is
+  only in its known-card bags (72.4's deliberate limit), so a Flow State's bottom order isn't encoded.
+* **Pact's pending payment in the encoding**: a delayed triggered ability waiting is the existing per-player count
+  `g5::DELAYED` (public); which kind of delayed trigger it is isn't encoded (a Pact's payment and a Mishra's Bauble's draw
+  look alike there; the Pact is in its owner's graveyard). Reported, not changed (a spare float is the maintainer's to
+  give).
+* **Doomsday's picks so far in the encoding**: while the search goes on, the decider's input has the running op, its
+  pick count (`ctx::OP_I`) and the list (the graveyard in order with the cards still offered; the library sorted by
+  definition with the definitions still offered), not which cards it already picked (as the existing searches for
+  several cards: `Frame::picked_defs` is never encoded). The rules are exact; the network can't tell two pick histories
+  with the same count apart. Reported, not changed: marking them (delve's `list::CHOSEN`, ENGINE.md 65.3, is the
+  float that would carry it) changes what the encoding says, the maintainer's call.
+
+**Tests** (`engine/tests/cards_doomsday_a.rs`, 44 tests; every ruling of the four cards, `// ruling:`):
+Doomsday's search (five from both zones, no `PASS` in the library part; fewer than five: all; empty zones; the
+graveyard alone in increasing position; every pile and order reachable once; the reveals of the exiled cards sorted;
+life 21 -> 10, 7 -> 3, 1 -> 0 and the state-based loss); who knows what (the caster's five in every one of its worlds; a
+graveyard card never in the caster's hand in the opponent's worlds, its place unknown to it; a known library card kept
+stays among the five; a copy exiled leaves the opponent unsure; the known card exiled is public); Pact (its colour and
+mana value; Force of Will exiles it; paid at the next upkeep of its controller, not the opponent's; cast on its
+controller's turn or during their upkeep it waits for the next one; declining while able and being unable both lose;
+Lotus Petal during the payment; Dark Ritual's floated mana pays it; a second Pact countering the target first: one
+trigger; two Pacts: two payments; Abrupt Decay can't be countered, the trigger still comes; Dazed or Forced, no trigger,
+Daze paid, a trigger; Painter's Servant); Personal Tutor (sorceries only, may find none and still shuffles, revealed on
+top for both players in every world, no sorcery: `PASS` only, then the Doomsday it found is drawn); Flow State (one in
+hand and two on the bottom in either order; the bottom cards known to the caster only; two with an instant and a
+sorcery; two instants, two sorceries or one instant: one; one or two cards in the library; an empty library);
+interactions (Doomsday then Thassa's Oracle with one card: a win, with five: no win; then Brainstorm, Ponder, Consider;
+Lion's Eye Diamond in response puts the hand where Doomsday finds it; Murktide Regent's trigger for each instant or
+sorcery card leaving the graveyard, to the library or to exile). `tools/untested_cards.py` now reads the legacy registry
+too: 552 supported (6 legacy), none untested. `docs/rulings.md` regenerated (1,616 rulings, the 6 new class a, all
+tested).
+
+**`FUZZ_POOL=dd_a`** (`engine/tests/fuzz.rs`, `DD_A_DECK`): the Doomsday 60 with the other lanes' seven cards (Edge of
+Autumn, Misdirection, Street Wraith x2 each, Cavern of Souls) swapped for two more Pacts of Negation, Flow States and
+Personal Tutors and an Island (4 Doomsday, 3 Pact, 4 Personal Tutor, 3 Flow State; checked by
+`az::constructed::check`), against the Delver 60 in either seat, one game in three the Doomsday mirror; constructed
+play's card table; games only. With 200 games or more each of the four must have been seen on the stack and a Pact
+trigger put there. (A spell cast and resolved within one action, every other decision answered by `auto_single`, is
+not seen: a Pact's triggers can outnumber its casts.)
+
+**Results** (desktop, `E:/cargo-target/mtg-zero/doomsday-a`, normal release profile). Code at 021228e; the next commit adds this
+section, one test (`doomsday_the_searchers_worlds_agree_on_what_it_knows`) and `docs/rulings.md` regenerated for the
+Pyroblast test, no engine code:
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): 2,304
+  passed, 1 failed, 22 ignored; the failure, `constructed.rs`'s card-table test, counted two legacy cards: it reads the
+  legacy IR's size now and passes (7), as `cards_doomsday_a` does with its 44th test (added after the run: the
+  searcher's worlds agree on its view, failing without the reading above): 2,306 passed. `az` 48 passed (the
+  legacy registry and identities, the public-state gate: no new field).
+* **Behaviour digests unchanged**: full **53839c837bbaf034**, `DIGEST_ENCODING=0` **208c723daced22fe**,
+  `DIGEST_ENCODING=v5` **dc33538c0497dbf0** (each equal to `tests/data/digests.txt`; no `DIGEST_WRITE`).
+* **`FUZZ_POOL=dd_a FUZZ_GAMES=20000`** (the desktop, four shards of 5,000, `FUZZ_FIRST` 0/5000/10000/15000; the
+  Mac was busy with a run's evaluation and the fuzz farm): no failure; 20,000 games (wins 9,919 / 9,910, 171 drawn at
+  the turn cap, none aborted), 20.0 turns and 200.7 decisions a game, 6,650,081 options completed; seen on the stack:
+  Doomsday 4,201 times, Pact of Negation 14,279, Personal Tutor 14,633, Flow State 6,198; Pact of Negation's triggers
+  16,189. Every check of the default mode (invariants, clones, `determinize` for both viewers with the view, known
+  cards, clouds and the information-set check, every option completed, the encodings finite). (The first 300-game
+  try failed the information-set check at seed 98: the found cards' places; fixed before 021228e, the reading above.)
+* **Under the `fuzz` profile** (debug assertions: the refreshed decision equal to the asked one at every
+  `determinize`), `FUZZ_POOL=dd_a`, 1,000 games: no failure. **`FUZZ_CHANCE=10`**, 600 games: no failure (12,338
+  chance walks, 5,311 replays whose outcome the force changed). **`FUZZ_BELIEF=2`**, 600 games: no failure.
+* **`FUZZ_POOL=delver FUZZ_GAMES=4000`** (the regression check): no failure (4,000 games; seen on the stack: Murktide
+  Regent 2,031 times, its trigger 84, Prismari Charm 2,937).
+* `bash tools/build_py.sh`, `python -m pytest -q tests`: 268 passed, 1 skipped, 1 failed:
+  `test_mac_remote.py::test_a_remote_eoe_evaluation_logs_its_games` timed out (600 s, the desktop loaded with the fuzz
+  shards); alone it passes (194 s): 269 passed, 1 skipped. `python -m pytest tools/codegen` (generated.rs current): 2
+  passed.
+* mtg-bot (`feature/doomsday-a-ir` a544a075): `cards roundtrip --pool cube legacy eoe` passes; the export of a544a075
+  is the committed `data/cards` byte for byte; the full suite (`pytest -n 8 --no-cov`) has 50 failures, 48 among the
+  baseline's (a run of f4f2d663's `git archive` in a scratch directory fails 97 there, a superset of the 48), one
+  fixed since (the legacy pool's sidecar test, which pinned two cards) and one timing test that passes alone
+  (`test_v2_report_async::test_post_returns_202_before_background_fetch_completes`).
+* No docs/shortcuts.md entry; no layout, encoding, identity-scheme or zero-core change.
