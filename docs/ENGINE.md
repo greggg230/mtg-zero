@@ -25654,6 +25654,11 @@ other sessions' runs and suites).
   its module.
 * No docs/shortcuts.md entry; no layout or encoding change (no new decision kind, no new public state); no zero-core
   change.
+* **`python tools/gate.py engine --no-mac --tested-sha 5c10902d --expect-digest 53839c837bbaf034 --expect-digest0
+  208c723daced22fe` on 5c10902d**: build (`mtgz._engine` imported from the checkout), the digests 208c723daced22fe and
+  53839c837bbaf034 (= expected), `--test az` 50, `limits` 13, `hidden` 28, pytest 283 passed and 1 skipped, the search
+  smoke (random, seed 0) 0 of 1 failed, tracked files unchanged: **GATE PASSED engine 5c10902d7f84 in 892s** (the Mac
+  recheck not needed: the tested sha is the gated one). The commit after it adds this paragraph only.
 
 ### 122.7 Limits and merge points
 
