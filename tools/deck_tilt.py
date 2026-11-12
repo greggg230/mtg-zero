@@ -85,12 +85,17 @@ def cmd_deals(a):
     rows = {name: {'ce': [], 'mis': [], 'distinct': []} for name, *_ in arms}
     own = {'head': [], 'reader': [], 'flat': []}
     t0 = time.time()
+    # (the rows whole: a game with variable-length rows' tails too, docs/ENGINE.md 125, tools/rowkit.py; mtg_eoe has none)
+    import rowkit
+    rk = rowkit.kind(m.config['game'])
     for pi, g in enumerate(pos[None]):
         v = g.to_move
-        x = np.asarray(g.encode(v), np.float32)[None]
+        xr, rr = rowkit.row(g, v, rk)
+        x = xr[None]
         n2 = np.full(1, 2, np.int64)
-        pred = {'head': np.asarray(ev.aux(x, n2)['deck'][0], np.float32),
-                'reader': np.asarray(ev.reader(x, n2)['deck'][0], np.float32),
+        tk = {'tail': rowkit.kw(rk, [rr])['tail']} if rk is not None and rk.widths else {}
+        pred = {'head': np.asarray(ev.aux(x, n2, **tk)['deck'][0], np.float32),
+                'reader': np.asarray(ev.reader(x, n2, **tk)['deck'][0], np.float32),
                 'flat': np.full(D, 1.0 / D, np.float32)}          # (an untrained network's: uniform over the identities)
         true = np.asarray(g.aux_target(v), np.float64)[D:2 * D]
         if true.sum() < 1:

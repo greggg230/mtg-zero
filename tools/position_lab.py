@@ -277,26 +277,55 @@ def seat_keys(model_path):
     return cfg, dict(run_rule(model_path)), float(cfg.get('c_puct', 1.0))
 
 
+_RK = []
+
+
+def rows_kind():
+    """The game's variable-length rows on the loaded engine (tools/rowkit.py; None on a layout v5 / v6 engine)."""
+    if not _RK:
+        import rowkit
+        _RK.append(rowkit.kind('mtg'))
+    return _RK[0]
+
+
+def net_row(g, p):
+    """Player p's network row at g: (head, (tail, overrides) or None) - its options' overrides when p decides
+    (against `g.legal()`: a decider's row is evaluated with `g.legal()` as its options)."""
+    import rowkit
+    return rowkit.row(g, p, rows_kind(), opts=p == g.to_move)
+
+
 def evaluate(ev, rows, acts, belief=False):
+    """`ev.evaluate` of `rows` ((head, rr) pairs, `net_row`'s / `rowkit.simulate`'s; a bare head is (head, None): the
+    callers of before, e.g. the Delver Lab's, on an engine without variable-length rows - on one with them a row
+    without its tail is refused) with options `acts` (one list per row); `belief`: and a root belief row of the
+    last row (its overrides none) -> the evaluator's outputs."""
     import numpy as np
-    rows = np.stack([np.asarray(r, np.float32) for r in rows])
-    n = len(acts)
-    off = np.zeros(n + 1 + (1 if belief else 0), np.int32)
-    off[1:n + 1] = np.cumsum([len(a) for a in acts])
+    import rowkit
+    rows = [r if isinstance(r, tuple) else (r, None) for r in rows]
+    acts = [list(a) for a in acts]
+    extra = None
     if belief:
-        off[-1] = off[n]
-        rows = np.concatenate([rows, rows[-1:]], 0)
-    extra = np.zeros(len(rows), np.uint8)
-    if belief:
+        x, rr = rows[-1]
+        rows.append((x, None if rr is None else (rr[0], (np.zeros(0, np.int32), np.zeros(0, np.int64)) if rr[1] is not None else None)))
+        acts.append([])
+        extra = np.zeros(len(rows), np.uint8)
         extra[-1] = 2
-    flat = np.concatenate([np.asarray(a, np.int32) for a in acts]) if n else np.zeros(0, np.int32)
-    return ev.evaluate(rows, np.full(len(rows), 2, np.int32), off, flat, extra if belief else None)
+    return rowkit.evaluate(ev, [r[0] for r in rows], acts, rows_kind(), [r[1] for r in rows], extra)
+
+
+def decider_eval(ev, g, d):
+    """Decider d's row at g -> ({action: prior}, value): its options as `g.legal()` lists them (the order its
+    overrides are against)."""
+    legal = [int(a) for a in g.legal()]
+    pri, val = evaluate(ev, [net_row(g, d)], [legal])[:2]
+    return dict(zip(legal, [float(p) for p in pri])), float(val[0][0])
 
 
 def belief_pred(ev, g, p):
     """The network's auxiliary prediction (aux_width floats) for player p at g (the root belief row)."""
     import numpy as np
-    out = evaluate(ev, [g.encode(p)], [list(g.legal())], belief=True)
+    out = evaluate(ev, [net_row(g, p)], [list(g.legal()) if p == g.to_move else []], belief=True)
     return np.asarray(out[3][0], np.float32)
 
 
@@ -321,19 +350,20 @@ def search(games, ev, sims, seeds, keys, c_puct, preds=None, chance_k=0, floor=N
             t.set_belief(np.asarray(preds[i], np.float32), g, float(keys['belief_tilt']), float(keys['belief_clip']),
                          float(keys['belief_mix']))
         trees.append(t)
+    import rowkit
+    rk = rows_kind()
     for _ in range(sims):
         rows, acts, owners = [], [], []
         for j, (g, t) in enumerate(zip(games, trees)):
-            r = t.simulate(g, c_puct, chance_k=ks[j], root_view=rv)
+            r = rowkit.simulate(t, g, c_puct, ks[j], rv, rk)
             if r is None:
                 continue
-            x, a = r[1], r[2]
-            vx = r[3] if rv else None
-            rows.append(x)
+            _, x, a, vx, rr, vrr = r
+            rows.append((x, rr))
             acts.append(list(a))
             owners.append((j, len(rows) - 1, None if vx is None else len(rows)))
             if vx is not None:
-                rows.append(vx)
+                rows.append((vx, vrr))
                 acts.append([])
         if not rows:
             continue
@@ -360,7 +390,7 @@ def net_view(g, spot, ev, keys, c_puct, sims=64, reps=4):
     d = spot['decider']
     opts = options(g)
     names = dict(opts)
-    pri, val, _ = evaluate(ev, [g.encode(d)], [[a for a, _ in opts]])[:3]
+    prior, value = decider_eval(ev, g, d)
     pred = belief_pred(ev, g, d)
     st = json.loads(g.export_state())
     hand = collections.Counter(c['name'] for c in st['players'][1 - d]['hand'])
@@ -370,8 +400,8 @@ def net_view(g, spot, ev, keys, c_puct, sims=64, reps=4):
     exp = {name: round(n_hand * float(p), 3) for name, p in B.counts_by_name(pred, top=40, digits=8) if n_hand * p >= 0.005}
     exp = dict(sorted(exp.items(), key=lambda kv: -kv[1])[:12])
     res = search([g] * reps, ev, sims, [1000 + r for r in range(reps)], keys, c_puct, [pred] * reps) if sims else []
-    view = {'decider': d, 'turn': st.get('turn'), 'step': st.get('step'), 'value': round(float(val[0][0]), 4),
-            'prior': {names[a]: round(float(p), 4) for (a, _), p in zip(opts, pri)},
+    view = {'decider': d, 'turn': st.get('turn'), 'step': st.get('step'), 'value': round(value, 4),
+            'prior': {names[a]: round(prior[a], 4) for a, _ in opts},
             'belief_hand': exp, 'opponent_hand': dict(hand), 'opponent_hand_size': n_hand}
     if res:
         acts = res[0]['acts']
@@ -1212,7 +1242,7 @@ def one_ply_t1(spot, ev, pred, belief, deals=200, log=print):
         for name, line in (('keep', keep), ('crack', crack)):
             best = None
             for x, _ in scripted(h.clone(), d, line):
-                v = float(evaluate(ev, [x.encode(d)], [list(x.legal())])[1][0][0])
+                v = float(evaluate(ev, [net_row(x, d)], [list(x.legal()) if d == x.to_move else []])[1][0][0])
                 best = v if best is None else max(best, v)
             vals[name] = best
         if vals['keep'] is None or vals['crack'] is None:
@@ -1421,14 +1451,14 @@ def evaluate_position(spot, ev, params, pred=None):
     d = spot['decider']
     st = json.loads(g.export_state())
     raw = [(int(o['a']), o['t']) for o in (st.get('decision') or {}).get('options', [])]
-    pri, val, _ = evaluate(ev, [g.encode(d)], [[a for a, _ in raw]])[:3]
+    prior, value = decider_eval(ev, g, d)
     if pred is None and params['keys'].get('belief_tilt'):
         pred = belief_pred(ev, g, d)
     n = len(params['seeds'])
     res = search([g] * n, ev, int(params['sims']), params['seeds'], params['keys'], params['c_puct'],
                  [pred] * n if pred is not None else None, chance_k=int(params['chance_k']), floor=[int(params['floor'])] * n)
-    return {'decider': d, 'value': float(val[0][0]),
-            'options': [{'action': a, 'label': t, 'prior': float(p)} for (a, t), p in zip(raw, pri)],
+    return {'decider': d, 'value': value,
+            'options': [{'action': a, 'label': t, 'prior': prior[a]} for a, t in raw],
             'runs': [{'seed': sd, 'visits': {str(a): int(n_) for a, n_ in zip(r['acts'], r['n'])},
                       'q': {str(a): q for a, q in zip(r['acts'], r['q'])}, 'choice': int(r['acts'][r['rule']])}
                      for sd, r in zip(params['seeds'], res)]}

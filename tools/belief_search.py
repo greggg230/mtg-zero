@@ -177,8 +177,11 @@ def cmd_deals(a):
         pos.append((gid, k, g, v, t))
         if a.max and len(pos) >= a.max:
             break
-    x = np.stack([np.asarray(g.encode(v), np.float32) for _, _, g, v, _ in pos])
-    p = np.concatenate([ev.aux(x[i:i + 256], np.full(len(x[i:i + 256]), 2))['belief'] for i in range(0, len(x), 256)])
+    # (the rows whole - their tails on a layout v7 engine: docs/ENGINE.md 125, tools/rowkit.py)
+    import rowkit
+    rk = rowkit.kind('mtg')
+    rows = [rowkit.row(g, v, rk) for _, _, g, v, _ in pos]
+    p = rowkit.aux(ev, [r[0] for r in rows], rk, [r[1] for r in rows])['belief']
     t0 = time.time()
     res = {tt: [] for tt in tilts}
     for j, (gid, k, g, v, t) in enumerate(pos):
@@ -300,7 +303,9 @@ def cmd_decisions(a):
     print(f'{len(found)} positions', flush=True)
     out = []
     for gid, k, g, v, casts, dec in found:
-        p = ev.aux(np.asarray(g.encode(v), np.float32)[None], np.full(1, 2))['belief'][0]
+        import rowkit
+        x, rr = rowkit.row(g, v, rowkit.kind('mtg'))
+        p = rowkit.aux(ev, [x], rowkit.kind('mtg'), [rr])['belief'][0]
         acts = list(g.legal())
         cast_a = casts[0]['a']
         pass_a = next((o['a'] for o in dec['options'] if o.get('t', '').startswith('Pass')), None)
@@ -336,22 +341,25 @@ def cmd_decisions(a):
 
 
 def search(trees, g, ev, sims):
-    """`sims` simulations of every tree of the same position in lockstep (one batch a step)."""
+    """`sims` simulations of every tree of the same position in lockstep (one batch a step); the leaves' rows whole
+    (tools/rowkit.py)."""
+    import rowkit
+    rk = rowkit.kind('mtg')
     for _ in range(sims):
-        rows, acts, owners = [], [], []
+        rows, acts, rrs, owners = [], [], [], []
         for j, t in enumerate(trees):
-            r = t.simulate(g, 1.0)
+            r = rowkit.simulate(t, g, 1.0, 0, False, rk)
             if r is None:
                 continue
             rows.append(r[1])
-            acts.append(np.asarray(r[2], np.int32))
+            acts.append(list(r[2]))
+            rrs.append(r[4])
             owners.append(j)
         if not rows:
             continue
         off = np.zeros(len(rows) + 1, np.int32)
         off[1:] = np.cumsum([len(x) for x in acts])
-        pri, val, mar = ev.evaluate(np.stack(rows).astype(np.float32), np.full(len(rows), 2, np.int32), off,
-                                    np.concatenate(acts))
+        pri, val, mar = rowkit.evaluate(ev, rows, acts, rk, rrs)[:3]
         for b, j in enumerate(owners):
             trees[j].expand([float(x) for x in pri[off[b]:off[b + 1]]], [float(x) for x in val[b]], [float(x) for x in mar[b]])
 

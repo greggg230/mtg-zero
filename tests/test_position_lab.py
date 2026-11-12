@@ -321,3 +321,30 @@ def test_the_canary_sees_a_bauble_look_before_the_land():
     assert r['seen'] is not None
     out = L.t1_canary([(json.dumps(s['spec']), s['seed'], moves, 'x', 1)])
     assert out['table']['clean play']['bauble_look_before_land'] == 1 and out['by_gen']['1']['looked'] == 1
+
+
+def test_the_network_paths_take_whole_rows(spot):
+    """The network's view of a spot (`evaluate_position`, `net_view`'s root belief, `search` with root-view leaves and
+    the root belief) evaluates whole rows (docs/ENGINE.md 125: on a layout v7 engine the head, the tail tokens and the
+    overrides, `tools/rowkit.py`; the head alone on a v5 / v6 engine): a token network of this build's layout with an
+    auxiliary head, priors over the decider's options, one search per seed."""
+    import numpy as np
+    import torch
+    from zero import games as G
+    from zero.infer import NetEvaluator
+    from zero.net import make_net
+    torch.manual_seed(0)
+    ev = NetEvaluator(make_net(G.info('mtg'), 'mtg', 'tokens', 16, 1, heads=2, aux=A.PACKAGE.aux_of('mtg')), 'cpu')
+    g = L.spot_game(spot)
+    rk = L.rows_kind()
+    assert rk is not None and rk.widths, 'layout v7: variable-length rows'
+    x, rr = L.net_row(g, spot['decider'])
+    assert rr is not None and len(rr[0]['t_seg']) > 0, 'a Delver mid-game row with tail tokens (graveyard_order)'
+    pred = L.belief_pred(ev, g, spot['decider'])
+    assert pred.shape == (G.info('mtg')['aux_width'],) and np.isfinite(pred).all()
+    keys = {'leaf_value_view': 'root', 'belief_tilt': 1.0, 'belief_clip': 20.0, 'belief_mix': 0.25, 'select': 'visits'}
+    params = {'keys': keys, 'c_puct': 1.0, 'sims': 8, 'chance_k': 0, 'seeds': [1, 2], 'floor': 0}
+    out = L.evaluate_position(spot, ev, params, pred=list(pred))
+    legal = {int(a) for a in g.legal()}
+    assert {o['action'] for o in out['options']} <= legal and abs(sum(o['prior'] for o in out['options']) - 1) < 1e-4
+    assert len(out['runs']) == 2

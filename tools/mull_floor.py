@@ -67,7 +67,10 @@ def hands(spec, zero, one, control, seed=0):
 
 
 def search_all(items, ev, sims, ks, reps):
-    """Every (position, k, rep) searched in lockstep (one network batch per simulation step)."""
+    """Every (position, k, rep) searched in lockstep (one network batch per simulation step); the leaves' rows whole
+    (their tails and overrides on a layout v7 engine: docs/ENGINE.md 125, tools/rowkit.py)."""
+    import rowkit
+    rk = rowkit.kind('mtg')
     trees = []
     for i, (g, _, _) in enumerate(items):
         for k in ks:
@@ -78,17 +81,15 @@ def search_all(items, ev, sims, ks, reps):
     for _ in range(sims):
         pend = []
         for j, (i, _, _, t) in enumerate(trees):
-            leaf = t.simulate(items[i][0], 1.0)
+            leaf = rowkit.simulate(t, items[i][0], 1.0, 0, False, rk)
             if leaf is not None:
                 pend.append((j, leaf))
         if not pend:
             continue
-        x = np.stack([lf[1] for _, lf in pend]).astype(np.float32)
-        acts = [np.asarray(lf[2], np.int32) for _, lf in pend]
+        acts = [list(lf[2]) for _, lf in pend]
         off = np.zeros(len(pend) + 1, np.int32)
         off[1:] = np.cumsum([len(a) for a in acts])
-        pri, val, mar = ev.evaluate(x, np.full(len(pend), 2, np.int32), off,
-                                    np.concatenate(acts) if acts else np.zeros(0, np.int32))
+        pri, val, mar = rowkit.evaluate(ev, [lf[1] for _, lf in pend], acts, rk, [lf[4] for _, lf in pend])[:3]
         for b, (j, _) in enumerate(pend):
             trees[j][3].expand([float(p) for p in pri[off[b]:off[b + 1]]], [float(v) for v in val[b]],
                                [float(m) for m in mar[b]])
@@ -161,11 +162,13 @@ def small_positions(spec, ev, n, games=48, every=6, seed=1):
                 batch.append(g)
         if not batch:
             break
-        x = np.stack([np.asarray(g.encode(g.to_move), np.float32) for g in batch])
+        import rowkit
+        rk = rowkit.kind('mtg')
+        rows = [rowkit.row(g, g.to_move, rk, opts=True) for g in batch]
         acts = [np.asarray(g.legal(), np.int32) for g in batch]
         off = np.zeros(len(batch) + 1, np.int32)
         off[1:] = np.cumsum([len(a) for a in acts])
-        pri, _, _ = ev.evaluate(x, np.full(len(batch), 2, np.int32), off, np.concatenate(acts))
+        pri, _, _ = rowkit.evaluate(ev, [r[0] for r in rows], acts, rk, [r[1] for r in rows])[:3]
         for b, g in enumerate(batch):
             m = len(acts[b])
             counts['decisions'] += 1

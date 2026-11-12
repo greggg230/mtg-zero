@@ -56,7 +56,10 @@ MODES = {'puct': None, 'gumbel': (16, 0.0, 0.3), 'gumbel-s1': (16, 0.0, 1.0), 'g
 def search_all(games, ev, sims, view, seeds, mode, noise_seed=0):
     """One Rust tree per (game, seed), `sims` simulations each in lockstep (one network batch per step,
     root-view leaves' value-only rows in the same batch); `mode` a MODES key (a Gumbel mode: a fresh
-    root's sims - 1 root walks, noise from `noise_seed` + the tree's index)."""
+    root's sims - 1 root walks, noise from `noise_seed` + the tree's index). Rows carry their tails and overrides on
+    a layout v7 engine (docs/ENGINE.md 125, tools/rowkit.py)."""
+    import rowkit
+    rk = rowkit.kind('mtg')
     trees = []
     g_cfg = MODES[mode]
     for j, (g, s) in enumerate(zip(games, seeds)):
@@ -69,25 +72,25 @@ def search_all(games, ev, sims, view, seeds, mode, noise_seed=0):
         trees.append(t)
     rv = view == 'root'
     for _ in range(sims):
-        rows, acts, owners = [], [], []
+        rows, acts, rrs, owners = [], [], [], []
         for j, (g, t) in enumerate(zip(games, trees)):
-            r = t.simulate(g, 1.0, root_view=True) if rv else t.simulate(g, 1.0)
+            r = rowkit.simulate(t, g, 1.0, 0, rv, rk)
             if r is None:
                 continue
-            x, a = r[1], r[2]
-            vx = r[3] if rv else None
+            _, x, a, vx, rr, vrr = r
             rows.append(x)
-            acts.append(np.asarray(a, np.int32))
+            acts.append(list(a))
+            rrs.append(rr)
             owners.append((j, len(rows) - 1, None if vx is None else len(rows)))
             if vx is not None:
                 rows.append(vx)
-                acts.append(np.zeros(0, np.int32))
+                acts.append([])
+                rrs.append(vrr)
         if not rows:
             continue
         off = np.zeros(len(rows) + 1, np.int32)
         off[1:] = np.cumsum([len(a) for a in acts])
-        pri, val, mar = ev.evaluate(np.stack(rows).astype(np.float32), np.full(len(rows), 2, np.int32), off,
-                                    np.concatenate(acts))
+        pri, val, mar = rowkit.evaluate(ev, rows, acts, rk, rrs)[:3]
         for j, b, vb in owners:
             v = b if vb is None else vb
             trees[j].expand([float(x) for x in pri[off[b]:off[b + 1]]], [float(x) for x in val[v]],
@@ -262,6 +265,8 @@ def cmd_selfplay(a):
         secs = time.time() - t0
         rows = drv.take_results()
         s = concat_samples([p for p in parts if p is not None and len(p['player'])])
+        import rowkit
+        rk = rowkit.kind('mtg')
         off = s['opt_off']
         n = len(off) - 1
         ent, off_fav, flip, maxp = [], [], [], []
@@ -270,7 +275,8 @@ def cmd_selfplay(a):
             lo, hi = off[r[0]], off[r[-1] + 1]
             sub = (off[r[0]:r[-1] + 2] - lo).astype(np.int32)
             pri, _, _ = ev.evaluate(np.ascontiguousarray(s['x'][r], np.float32), np.full(len(r), 2, np.int32), sub,
-                                    np.ascontiguousarray(s['opt_action'][lo:hi], np.int32))
+                                    np.ascontiguousarray(s['opt_action'][lo:hi], np.int32), None,
+                                    **rowkit.sample_kw(rk, s, r))
             for b in range(len(r)):
                 pp = pri[sub[b]:sub[b + 1]]
                 pi = s['pi'][lo + sub[b]:lo + sub[b + 1]]

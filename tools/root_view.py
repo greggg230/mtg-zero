@@ -71,7 +71,10 @@ def search_all(games, ev, sims, view, seeds, root_min=0, pairs=None):
     """One Rust tree per (game, seed), `sims` simulations each in lockstep (one network batch per
     step, the value-only rows of root-view leaves in the same batch). `view` 'mover' | 'root'.
     `pairs` (a list): for every leaf of another seat than the tree's viewer (root view only), the
-    viewer's value of it from the mover's row and from its own row: (mover-view, root-view)."""
+    viewer's value of it from the mover's row and from its own row: (mover-view, root-view). Rows carry their tails
+    and overrides on a layout v7 engine (docs/ENGINE.md 125, tools/rowkit.py)."""
+    import rowkit
+    rk = rowkit.kind('mtg')
     trees = []
     for g, s in zip(games, seeds):
         t = g.search_tree(True, int(s))
@@ -79,25 +82,25 @@ def search_all(games, ev, sims, view, seeds, root_min=0, pairs=None):
         trees.append(t)
     rv = view == 'root'
     for _ in range(sims):
-        rows, acts, owners = [], [], []
+        rows, acts, rrs, owners = [], [], [], []
         for j, (g, t) in enumerate(zip(games, trees)):
-            r = t.simulate(g, 1.0, root_view=True) if rv else t.simulate(g, 1.0)
+            r = rowkit.simulate(t, g, 1.0, 0, rv, rk)
             if r is None:
                 continue
-            p, x, a = r[0], r[1], r[2]
-            vx = r[3] if rv else None
+            p, x, a, vx, rr, vrr = r
             rows.append(x)
-            acts.append(np.asarray(a, np.int32))
+            acts.append(list(a))
+            rrs.append(rr)
             owners.append((j, len(rows) - 1, None if vx is None else len(rows), p))
             if vx is not None:
                 rows.append(vx)
-                acts.append(np.zeros(0, np.int32))
+                acts.append([])
+                rrs.append(vrr)
         if not rows:
             continue
         off = np.zeros(len(rows) + 1, np.int32)
         off[1:] = np.cumsum([len(a) for a in acts])
-        pri, val, mar = ev.evaluate(np.stack(rows).astype(np.float32), np.full(len(rows), 2, np.int32), off,
-                                    np.concatenate(acts))
+        pri, val, mar = rowkit.evaluate(ev, rows, acts, rk, rrs)[:3]
         for j, b, vb, p in owners:
             v = b if vb is None else vb
             if vb is not None and pairs is not None:
@@ -213,18 +216,19 @@ def cmd_position(a):
                 res['leaves'] = {'n': len(d), 'root_minus_mover': round(float(d.mean()), 4), 'mean_abs': round(float(np.abs(d).mean()), 4)}
             out['runs'][f'{view} {sims}'] = res
             print(f'{view} {sims}', json.dumps(res), flush=True)
-    # the pass's first leaf: the opponent's priority decision, both views
+    # the pass's first leaf: the opponent's priority decision, both views (value-only rows, whole: tools/rowkit.py)
+    import rowkit
     from zero import mcts
+    rk = rowkit.kind('mtg')
     for i, act in enumerate(g.legal()):
         h = g.clone()
         mcts.transition(h, act)
         if h.over:
             continue
         me, mover = g.to_move, h.to_move
-        _, vm, _ = ev.evaluate(np.asarray(h.encode(mover), np.float32)[None], np.full(1, 2, np.int32),
-                               np.asarray([0, 0], np.int32), np.zeros(0, np.int32))
-        _, vr, _ = ev.evaluate(np.asarray(h.encode(me), np.float32)[None], np.full(1, 2, np.int32),
-                               np.asarray([0, 0], np.int32), np.zeros(0, np.int32))
+        (xm, rm), (xr, rr_) = rowkit.row(h, mover, rk), rowkit.row(h, me, rk)
+        _, vm, _ = rowkit.evaluate(ev, [xm], [[]], rk, [rm])[:3]
+        _, vr, _ = rowkit.evaluate(ev, [xr], [[]], rk, [rr_])[:3]
         mine = (lambda v, p: float(v[0][0] if p == me else v[0][1]))
         out.setdefault('after', {})[names.get(act, act)] = {'next_decider': mover, 'mover_view': round(mine(vm, mover), 4),
                                                             'own_view': round(float(vr[0][0]), 4)}
@@ -291,13 +295,17 @@ def load_samples(paths):
 
 
 def values(ev, s, rows):
-    """The network's P(win) for each sample's own player (its row's view)."""
+    """The network's P(win) for each sample's own player (its row's view; the rows whole - their tails - on a layout
+    v7 engine, as value-only rows: tools/rowkit.py)."""
+    import rowkit
+    rk = rowkit.kind('mtg')
     out = np.zeros(len(rows))
     B = 256
     for i in range(0, len(rows), B):
         r = rows[i:i + B]
         _, v, _ = ev.evaluate(np.ascontiguousarray(s['x'][r], np.float32), np.full(len(r), 2, np.int32),
-                              np.zeros(len(r) + 1, np.int32), np.zeros(0, np.int32))
+                              np.zeros(len(r) + 1, np.int32), np.zeros(0, np.int32), None,
+                              **rowkit.sample_kw(rk, s, r, options=False))
         out[i:i + len(r)] = v[:, 0]
     return out
 
@@ -394,7 +402,9 @@ def cmd_finetune(a):
         q = torch.from_numpy(s['q'][idx].astype(np.float32))
         zt = ((1 - vq) * z + vq * q)[:, :m.seats]
         zt = zt / zt.sum(1, keepdim=True).clamp(min=1e-8)
-        plog, vlog, _ = m(x, npl)
+        # (layout v7: the rows' tails and overrides, as a run's window gives them; tools/rowkit.py)
+        import rowkit
+        plog, vlog, _ = m(x, npl, **rowkit.train_kw(m, s, idx, x.numpy()))
         logp = F.log_softmax(plog.masked_fill(~mask_t, -1e9), 1)
         lp = (-(pi_t * logp).sum(1) * dec).sum() / dec.sum().clamp(min=1)
         lv = -(zt * F.log_softmax(vlog, 1).clamp(min=-1e4)).sum(1).mean()

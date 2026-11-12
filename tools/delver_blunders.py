@@ -1309,15 +1309,18 @@ def spot_game(E, sp):
 
 def search_many(ev, games, seeds, sims, seat, chance_k=0):
     """The evaluation seat's search (the run's rule and transform, leaf view, root belief: `seat` =
-    h2h.run_rule's dict) of every game's pending decision, in lockstep batches -> [chosen action]."""
+    h2h.run_rule's dict) of every game's pending decision, in lockstep batches -> [chosen action]. Rows carry
+    their tails and overrides on a layout v7 engine (docs/ENGINE.md 125, tools/rowkit.py)."""
     import numpy as np
+    import rowkit
     from zero.protocol import ROW_BELIEF
+    rk = rowkit.kind('mtg')
     trees = [g.search_tree(True, int(sd)) for g, sd in zip(games, seeds)]
     if seat.get('belief_tilt'):
         B = len(games)
-        x = np.stack([np.asarray(g.encode(g.to_move), np.float32) for g in games])
-        pred = ev.evaluate(x, np.full(B, 2, np.int32), np.zeros(B + 1, np.int32), np.zeros(0, np.int32),
-                           np.full(B, ROW_BELIEF, np.uint8))[3]
+        heads = [rowkit.row(g, g.to_move, rk) for g in games]
+        pred = rowkit.evaluate(ev, [h[0] for h in heads], [[]] * B, rk, [h[1] for h in heads],
+                               np.full(B, ROW_BELIEF, np.uint8))[3]
         for t, g, pr in zip(trees, games, pred):
             t.set_belief(np.asarray(pr, np.float32), g, float(seat['belief_tilt']), float(seat.get('belief_clip', 20.0)),
                          float(seat.get('belief_mix', 0.0)))
@@ -1325,14 +1328,14 @@ def search_many(ev, games, seeds, sims, seat, chance_k=0):
     for _ in range(sims):
         rows, back = [], []
         for k, (t, g) in enumerate(zip(trees, games)):
-            leaf = t.simulate(g, float(seat.get('c_puct', 1.0)), int(chance_k), 0.0, root_view=root_view)
+            leaf = rowkit.simulate(t, g, float(seat.get('c_puct', 1.0)), int(chance_k), root_view, rk)
             if leaf is None:
                 continue
-            _, x, acts, vx = leaf
-            rows.append((np.asarray(x, np.float32), list(acts)))
+            _, x, acts, vx, rr, vrr = leaf
+            rows.append((np.asarray(x, np.float32), list(acts), rr))
             vi = None
             if vx is not None:
-                rows.append((np.asarray(vx, np.float32), []))
+                rows.append((np.asarray(vx, np.float32), [], vrr))
                 vi = len(rows) - 1
             back.append((k, len(rows) - (2 if vx is not None else 1), vi))
         if not rows:
@@ -1342,8 +1345,7 @@ def search_many(ev, games, seeds, sims, seat, chance_k=0):
             ch = rows[a:a + 1024]
             off = np.zeros(len(ch) + 1, np.int32)
             off[1:] = np.cumsum([len(r[1]) for r in ch])
-            acts = np.asarray([x for r in ch for x in r[1]], np.int32)
-            pri, val, mar = ev.evaluate(np.stack([r[0] for r in ch]), np.full(len(ch), 2, np.int32), off, acts)[:3]
+            pri, val, mar = rowkit.evaluate(ev, [r[0] for r in ch], [r[1] for r in ch], rk, [r[2] for r in ch])[:3]
             for i in range(len(ch)):
                 res_p.append(pri[off[i]:off[i + 1]])
                 res_v.append((val[i], mar[i]))
@@ -1533,9 +1535,11 @@ def spot_value(ckpt, g, p):
         from zero.net import load
         model, _ = load(ckpt, 'cpu', game='mtg')
         _VALUE_NETS[ckpt] = NetEvaluator(model, 'cpu')
+    import rowkit
     legal = [int(v) for v in g.legal()]
-    out = _VALUE_NETS[ckpt].evaluate(np.asarray(g.encode(p), np.float32)[None], np.asarray([2], np.int32),
-                                      np.asarray([0, len(legal)], np.int32), np.asarray(legal, np.int32))
+    rk = rowkit.kind('mtg')
+    x, rr = rowkit.row(g, p, rk, opts=p == g.to_move)
+    out = rowkit.evaluate(_VALUE_NETS[ckpt], [x], [legal if p == g.to_move else []], rk, [rr])
     return float(out[1][0][0])
 
 
