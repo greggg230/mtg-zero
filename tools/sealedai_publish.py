@@ -208,9 +208,10 @@ def real_decks_record(run, dirs=()):
         if not isinstance(r, dict) or 'a' not in r:
             return None
         p = {'iter': it, 'source': source, **{k: r[k] for k in RD_KEYS if k in r}}
-        if 'builder' in p:          # its kind only ('evaluator:<path>' names a local file)
+        if 'builder' in p:          # its kind only ('evaluator:<path>', 'export:<path>' name a local file)
             b = str(p['builder'] or 'best')
-            p['builder'] = b if b in ('best', 'value') else 'evaluator' if b.startswith('evaluator:') else 'other'
+            p['builder'] = (b if b in ('best', 'value') else 'evaluator'
+                            if b == 'run_evaluator' or b.startswith(('evaluator:', 'export:')) else 'other')
         h = r.get('heuristic')
         if isinstance(h, dict) and 'a' in h:
             p['heuristic'] = {k: h[k] for k in ('a', 'a_se', 'b', 'b_se', 'diff', 'diff_se', 'n') if k in h}

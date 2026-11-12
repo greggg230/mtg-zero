@@ -865,6 +865,8 @@ every N iterations in a CPU background job on its newest games and switches vers
 chosen deck logged with its version) between iterations (zero-core's opt-in game-package hooks, `feat/selfplay-spec-hook`);
 an evaluation of the network choosing its deck from the fixed evaluation pools against the heuristic's best guess. Preset
 `eoe-2e`, a fork of run 1's iteration 78 deepened to 128 x 8; the launch command in ENGINE.md 112.6 (not launched).
+Integrated with the win % against real decks (113) on branch `eoe-run2-int` (2026-11-12, ENGINE.md 126): run 2 measures it
+every 40th iteration with our decks chosen by the run's own evaluator version, its games kept out of the evaluator's data.
 
 ### 9.1 Deckbuilding from a pool: the plan (user, 2026-11-10)
 

@@ -25660,7 +25660,10 @@ ran the evaluation every iteration (4 games each: the CLI and the in-run path bo
 `eoe-2e` = eoe-1 + the spec's deck choice by the evaluator (K 32, explore 0.1; the file a launch flag) + `evaluator_every`
 4, `evaluator_window` 40, `evaluator_min_window` 8, `evaluator_val_iters` 2, `evaluator_kind` set, `evaluator_half_life` 40
 (v2's pick, 111.4), `evaluator_threads` 4, `deckchoice_eval_games` 64 (one game per evaluation pair: the Mac's budget,
-109.3); `eoe-2e-smoke` the same on eoe-smoke (K 8, a retrain every iteration on 2). **Run 1's search settings stay**
+109.3), and (merged with 113, 126) `real_decks_every` 40 with `real_decks_builder` `run_evaluator` (the win % against real
+decks every 40th iteration, 113.3's cadence for the Mac, our decks chosen by the evaluator the iteration's self-play used);
+`eoe-2e-smoke` the same on eoe-smoke (K 8, a retrain every iteration on 2; the real decks off, 2 pools x 2 games when a
+flag turns them on). **Run 1's search settings stay**
 (64 / 16 simulations, payments at 4, the evaluation's 32: the search sweep found iteration 78's strength against the
 heuristic saturates at 64 simulations - 16: 23.2%, 32: 28.2%, 64: 31.8%, 256: 32.5%). It starts by **forking from
 `E:/mtg-zero/s4a/deep128x8/iter_0078_x2.pt`** (run 1's iteration 78 deepened 128 x 4 -> 128 x 8, bit-identical values) as
@@ -25682,7 +25685,8 @@ python tools/launch_hidden.py E:/mtg-zero/runs/eoe2e/supervisor_console.txt pyth
   --eval-random-games 10 --elo-paired 1 --shard-sparse 1 \
   --spec '{"sealed": {"set": "eoe", "collation": "arena", "best_share": 0.5, "deck_choice": {"k": 32, "explore": 0.1, "by": "evaluator", "evaluator": "E:/mtg-zero/s4a/v2_time/evaluator_set.json", "evaluator_sha": "1e0ac330913438be9f6b329bdfbab66aad5818cee1aca079f203f9b3b295a43a"}}, "max_turns": 60, "eval_decks": 64, "eval_seed": 1}' \
   --evaluator-every 4 --evaluator-window 40 --evaluator-min-window 8 --evaluator-val-iters 2 --evaluator-kind set \
-  --evaluator-half-life 40 --evaluator-threads 4 --deckchoice-eval-games 64 --eval-remote mac --eval-every 2
+  --evaluator-half-life 40 --evaluator-threads 4 --deckchoice-eval-games 64 --eval-remote mac --eval-every 2 \
+  --real-decks-every 40 --real-decks-builder run_evaluator
 ```
 
 (`--iters 160` = 82 iterations past 78: the user's to set. `best_share` stays in the spec for the given-pool seats and the
@@ -25691,7 +25695,9 @@ first version v0078 (1e0ac3309134)`, `iter 79 self-play: decks chosen by the dec
 retrain of v0088 started (the games of iterations 79-88 ...)`, then `deck evaluator v0088 published ...` and the next
 phase's `decks chosen by ... v0088.json`; from then every fourth iteration on the run's newest games (up to 40 iterations,
 half-life 40). What to watch: self-play seconds per iteration against run 1's (112.8), `EVALUATOR RETRAIN FAILED`,
-`extras.deckchoice` against `eval_yard`, the chosen candidates in `python -m mtgz.sealed.games`.
+`extras.deckchoice` against `eval_yard`, the chosen candidates in `python -m mtgz.sealed.games`, and at iterations 80, 120
+and 160 `iter N real_decks (remote mac): {...}` (113; its builder the iteration's evaluator version, 126) - each such
+evaluation ~10 more minutes on the Mac (113.3).
 
 ### 112.7 The pairwise kind, and a named field
 
@@ -26985,3 +26991,90 @@ differ by that, not by their games.)
 **Left.** A network can't play the deck until layout v7 (the spec refuses Cavern of Souls, 124.2); constructed
 best-of-three and sideboarding (54.8) remain unbuilt, so the deck's sideboard (Flusterstorm, Leyline of the Void) is
 played only by the lanes' pools `dd_b` and `dd_c`.
+
+## 126. Run 2 integrated: the deck choice by the evaluator (112) and the win % against real decks (113) on one commit (branch `eoe-run2-int`, 2026-11-12)
+
+Branch `eoe-run2-int` (from main 3d898d7: the Doomsday lanes, race-batch, eval-v2, Sneak and Show); merged with merge
+commits: `deck-choice-eval` (426d21c, 112), then `realdecks` (281489c, 113). zero-core pin f9ca5c3 -> **25a7f50**
+(`feat/eoe-run2`, pushed): the merge of `feat/selfplay-spec-hook` ef63ee1 (112's hooks) and `feat/extra-evals` 6ed51d5
+(113's cadence and remote extras), both from f9ca5c3. **Why**: run 2 (112.6) launches from one commit that has both, the
+real-deck yardstick every 40th iteration (113.3's cadence for the Mac) with our decks built by the run's evaluator.
+Every default stays byte-identical: each new setting is off unless a preset or flag sets it.
+
+### 126.1 The zero-core merge (`feat/eoe-run2` 25a7f50)
+
+Both core branches added `GamePackage.settings` (the package's own run settings) with the same check and update in
+`apply_package`, and each wrote a `docs/az.md` section 40. One `settings` is kept for both (the constructor takes
+`settings`, `selfplay_specs`, `remote_eval_inputs` and `evals_every`); the clash message names both readings ("run settings
+of the core already (names of the core's, an auxiliary target's or a reader's)"), so both branches' tests pass unchanged;
+`selfplay_spec` / `set_spec`, `_ship_inputs`, the extras' cadence (`eval_due`) and the remote extras merged without a
+conflict. `docs/az.md` 40 holds both sections as (a) and (b) under the same subsection numbers 40.1-40.5, so every
+reference to either branch's 40.x still points at its text. A package declaring none of the four hooks behaves as at
+f9ca5c3.
+
+### 126.2 The mtg-zero conflicts
+
+* `docs/ENGINE.md`: 112 and 113 each appended after 111 (main had appended 123 and 124 there): 112 and 113 placed after
+  111, 123 and 124 after them; every line of every side kept.
+* `mtgz/az/__init__.py`: `evals` of `mtg_eoe` was `mtgz.sealed.rolling:EVALS` on one side and `mtgz.sealed.realdecks:EVALS`
+  on the other -> `{'deckchoice': 'mtgz.sealed.rolling:deckchoice_eval', 'real_decks': 'mtgz.sealed.realdecks:run_eval'}`
+  (in that order: the deck-choice evaluation, then the real decks); `settings` = 112's `ROLLING_SETTINGS` + 113's
+  `REAL_DECKS_SETTINGS` (no shared name: asserted at import); `evals_every` `{'real_decks': 'real_decks_every'}` kept.
+* `third_party/zero-core`: ef63ee1 / 6ed51d5 -> 25a7f50.
+
+### 126.3 What the merge needed beyond the conflicts
+
+* **Our builder for run 2 = the run's evaluator** (`real_decks_builder` **`run_evaluator`**, new). 113's builders were the
+  best guess, the value pick, a saved torch evaluator (`evaluator:PATH`, `evaluator.rank` on a `.pt`) or a plugged
+  `module:attr` fn(pool names, seed) - none could name "the version this iteration's self-play chose by", which is a
+  file of the run (`evaluators/v<iter>.json`, an export, not a `.pt`) known only per iteration. `run_evaluator` reads it
+  as the deck-choice evaluation does (`rolling.evaluator_of`: the iteration's `evaluators/used.jsonl` row, its sha256
+  checked; without the rolling retrain the spec's own file), with the spec's K, and picks through the engine
+  (`realdecks.export_pick`): the sealed spec's `deck_choice` `{"by": "evaluator", "evaluator": <version>, "evaluator_sha":
+  <its sha256>, "explore": 0}` on the test pool, i.e. **exactly a self-play seat's choice without its explore share** -
+  the same K candidates as `candidates` (the evaluator does not change them; tested), the engine's scorer, the best (the
+  first on a tie). No fallback: a run without a deck choice by an evaluator, or an iteration with no recorded evaluator,
+  is an error (logged as `EXTRA EVAL FAILED`). The command line resolves it from the checkpoint's run directory; the
+  output gains `evaluator` (the version's file name) and `evaluator_sha` (16 hex). `export:PATH` is the same pick with any
+  export (e.g. eval-v2's `evaluator_set.json`, run 1's comparison). The site's publisher shows its kind as `evaluator`.
+* **Remote evaluation**: `rolling.remote_eval_inputs` ships the iteration's version and `used.jsonl` to the mirror also
+  when the real decks are due at that iteration with `run_evaluator` (before: only with the deck-choice evaluation on);
+  without the rolling retrain the spec's own file is used, which a remote cannot read (not run 2's case).
+* **The real-deck games stay out of the game log** (a bug neither branch had alone). Every finished `mtg_eoe` game of a
+  run process - self-play and evaluation, and on a remote the evaluating process's - writes a line to the EoE game log
+  (107.1), and 112.4's rolling retrain trains the run's evaluator on the log's games of its window in which both seats
+  searched. The real-deck games are such games (the network on both seats) with 17lands players' decks on both seats
+  (ours or the player's, and the field's, all `given`). Measured as merged (113's `measure` with the log on, 2 pools x 2
+  games, the heuristic piloting): **8 of 8 games logged, both seats `given`, read back as phase `selfplay`** (their spec
+  line has no evaluation deck set); `evaluator.dataset` over that log raises `TypeError` (a given deck's `pool_seed` is
+  null), so in run 2 - real decks every 40th iteration, a window of up to 40 iterations - nearly every retrain would have
+  failed (`EVALUATOR RETRAIN FAILED`, the run stuck on an old version), and had the dataset read them, they would have
+  been human decks in the evaluator's training data (DESIGN.md 0; 113: "nothing reads it back ... the deck evaluator's
+  training"). `realdecks.run_eval` now plays them with the log off (`no_game_log`: the binding's `game_log_path` saved,
+  `game_log(None)`, restored on the same file afterwards; the same measurement: no file written, the path restored). Only games started meanwhile are left out: an evaluation
+  starts no other game (a run's rolling self-play driver waits between phases; a remote evaluation's process plays
+  only the evaluation). The deck-choice evaluation's games (the network against the heuristic: a bot seat) stay in the
+  log as before, and the retrain's `pilots='nn'` leaves them out of its data.
+* **Presets**: `eoe-2e` gains `real_decks_every` 40 and `real_decks_builder` `run_evaluator`; `eoe-2e-smoke`
+  `real_decks_builder` `run_evaluator` with 2 pools x 2 games (its cadence 0: a flag turns it on). 112.6's launch gains
+  `--real-decks-every 40 --real-decks-builder run_evaluator` (a fork's saved settings beat a preset).
+* **Logs**: an `mtg_eoe` run with the deck-choice evaluation off logs `iter N deckchoice: skipped` at each evaluation (112's
+  behaviour: `deckchoice_eval_games` is a game count, not a cadence `evals_every` could read); 113's test now checks that
+  the real decks write no line when off or not due, which they don't.
+
+### 126.4 Tests
+
+* `tests/test_realdecks.py` (+2): `test_the_run_evaluator_builder` - `export_pick`'s candidates are `candidates`' (the same
+  seed: the evaluator changes no build), its scores the binding's `sealed_scores`, its pick the best (the first on a
+  tie); `export:PATH` and `run_evaluator` (a run directory's `used.jsonl` row: the version's path and sha256, the spec's
+  K) give the same deck; another sha256 refused by the engine, `run_evaluator` without its evaluator, without a deck
+  choice by an evaluator or with none recorded refused; `remote_eval_inputs` ships the version when the real decks are
+  due with `run_evaluator` and only then (not due, another builder, the cadence 0, no retrain: nothing), the deck-choice
+  evaluation's shipping as before. `test_the_real_deck_games_stay_out_of_the_game_log` - the run's extra evaluation
+  with the log on: no line written, the log back on its file, the next game logged. `test_the_runs_extra_evaluation`
+  checks the real decks' own lines (the deck-choice evaluation, off there, logs `skipped`).
+* `tests/test_deck_scorer.py::test_the_presets_of_run_2e`: eoe-2e's real-deck settings (40, `run_evaluator`, 64 x 2),
+  eoe-1's defaults (0, `best`), eoe-2e-smoke's.
+* `tests/test_sealedai_publish.py`: a `run_evaluator` point published as the kind `evaluator`, no file name.
+* zero-core `feat/eoe-run2`: `test_package_hooks.py` and `test_extra_evals.py` unchanged and passing; cargo test 148 passed;
+  the full pytest **462 passed** (20 min, 2 torch threads, the desktop shared with other sessions' runs).

@@ -172,7 +172,9 @@ def test_the_runs_extra_evaluation(tmp_path):
     assert r['n'] == 4 and r['pools'] == 2 and r['sims'] == 2 and r['builder'] == 'best' and 'per_pool' not in r
     assert r['value'] == r['a'] and r['pct'] and 'seconds' in r
     log = (run / 'log.txt').read_text(encoding='utf-8')
-    assert 'iter 4 real_decks: ' in log and 'skipped' not in log
+    # (real_decks off or not due: no line of its own; the deck-choice evaluation, off here, logs its own `skipped`,
+    # docs/ENGINE.md 126)
+    assert 'iter 4 real_decks: ' in log and 'real_decks: skipped' not in log and log.count('real_decks') == 1
     p = subprocess.run([sys.executable, '-m', 'mtgz.sealed.realdecks', model_path(str(run), 4), '--pools', '2', '--games',
                         '2', '--threads', '2'], cwd=ROOT, capture_output=True, text=True, timeout=600,
                        env=dict(os.environ, PYTHONIOENCODING='utf-8'))
@@ -237,3 +239,97 @@ def test_a_failed_game_is_left_out_for_both_decks(monkeypatch):
     assert f['spec']['sealed']['p1']['order'] == 'given'           # game 5: the deck under test in seat 1
     assert sum(p['games'] for p in out['per_pool']) == 15 and out['per_pool'][1]['games'] == 3
     assert full['n'] == 16 and full['failed'] == 0
+
+
+FIXTURES = os.path.join(ROOT, 'engine', 'tests', 'data')
+
+
+def _eoe2e_cfg(path, k=8, **kw):
+    """eoe-2e-smoke's settings (docs/ENGINE.md 112.6, 126) with the evaluator file `path` and k candidates in the spec."""
+    from zero.run import DEFAULTS, PRESETS
+    cfg = dict(DEFAULTS, **PRESETS['eoe-2e-smoke'])
+    sp = json.loads(cfg['spec'])
+    sp['sealed']['deck_choice'] = dict(sp['sealed']['deck_choice'], k=k, evaluator=path)
+    cfg.update(spec=json.dumps(sp), **kw)
+    return cfg
+
+
+def test_the_run_evaluator_builder(tmp_path):
+    """'export:PATH' is the engine's deck choice by an exported evaluator among the pool's k candidates - `candidates`'
+    builds, the evaluator's best (the first on a tie), as run 2's self-play seat chooses without exploring;
+    'run_evaluator' the same with the evaluator the checkpoint's iteration chose its self-play decks by
+    (evaluators/used.jsonl, rolling.evaluator_of), shipped to a remote evaluation when the yardstick is due
+    (docs/ENGINE.md 126)."""
+    import shutil
+    from types import SimpleNamespace
+
+    from mtgz import _engine as E
+    from mtgz.sealed import rolling as RO
+    from mtgz.sealed import scorer as S
+    from mtgz.sealed import yardstick as Y
+    js = os.path.join(FIXTURES, 'scorer_set.json')
+    sha = S.sha256_file(js)
+    rd = RD.RealDecks(3, 2)
+    names = Y._expand(rd.test[0].cards)
+    j, cands, scores = RD.export_pick(names, 5, js, sha, 8)
+    assert [c['deck'] for c in cands] == [c['deck'] for c in RD.candidates(names, 5, 8)], 'the same candidates'
+    assert scores == json.loads(E.sealed_scores(js, json.dumps([c['deck'] for c in cands])))
+    assert j == max(range(8), key=lambda i: (scores[i], -i)), 'the best, the first on a tie'
+    ex = RD.builder_of('export:' + js, k=8)(names, 5)
+    assert ex['deck'] == cands[j]['deck'] and ex['how'] == f'evaluator {sha[:12]} pick {j} of 8'
+    RD.check_build(rd.test[0], ex['deck'])
+    with pytest.raises(ValueError, match="not the spec's"):
+        RD.export_pick(names, 5, js, '0' * 64, 8)
+    with pytest.raises(ValueError, match="needs the run's evaluator"):
+        RD.builder_of('run_evaluator')
+    # the run's: the version iteration 3's self-play chose by
+    run = tmp_path / 'eoe'
+    (run / 'evaluators').mkdir(parents=True)
+    v = run / 'evaluators' / 'v0002.json'
+    shutil.copyfile(js, v)
+    rows = [{'iter': it, 'version': 'v0002.json', 'sha256': sha} for it in (3, 4)]
+    (run / 'evaluators' / 'used.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
+    R = SimpleNamespace(run=str(run), cfg=_eoe2e_cfg(js, evaluator_every=1, deckchoice_eval_games=0,
+                                                     real_decks_every=2))
+    (path, got), k = RD.run_evaluator(R, 3)
+    assert (os.path.normpath(path), got, k) == (os.path.normpath(str(v)), sha, 8)
+    ours = RD.builder_of('run_evaluator', k=k, evaluator=(path, got))(names, 5)
+    assert ours['deck'] == ex['deck']
+    assert RD.run_evaluator(R, 7)[0] == (js, sha), "no row: the spec's own file (rolling.evaluator_of)"
+    with pytest.raises(ValueError, match='no deck choice by an evaluator'):
+        RD.run_evaluator(SimpleNamespace(run=str(run), cfg=dict(R.cfg, spec=json.dumps(FAST))), 3)
+    with pytest.raises(RuntimeError, match='no deck evaluator recorded'):
+        RD.run_evaluator(SimpleNamespace(run=str(tmp_path / 'none'), cfg=_eoe2e_cfg(str(tmp_path / 'gone.json'))), 3)
+    # a remote evaluation of iteration it gets the version when the yardstick builds with it and is due
+    assert R.cfg['real_decks_builder'] == 'run_evaluator'
+    assert RO.remote_eval_inputs(R, 4) == ['evaluators/used.jsonl', 'evaluators/v0002.json']
+    assert RO.remote_eval_inputs(R, 3) == [], 'not due at 3'
+    assert RO.remote_eval_inputs(SimpleNamespace(run=R.run, cfg=dict(R.cfg, real_decks_builder='best')), 4) == []
+    assert RO.remote_eval_inputs(SimpleNamespace(run=R.run, cfg=dict(R.cfg, real_decks_every=0)), 4) == []
+    assert RO.remote_eval_inputs(SimpleNamespace(run=R.run, cfg=dict(R.cfg, evaluator_every=0)), 4) == []
+    assert RO.remote_eval_inputs(SimpleNamespace(run=R.run, cfg=dict(R.cfg, real_decks_every=0,
+                                                                     deckchoice_eval_games=4)), 3) == \
+        ['evaluators/used.jsonl', 'evaluators/v0002.json'], 'the deck-choice evaluation as before'
+
+
+def test_the_real_deck_games_stay_out_of_the_game_log(tmp_path):
+    """The in-run yardstick plays its games with the EoE game log off - the run's deck evaluator trains on that log
+    (docs/ENGINE.md 112.4), and 17lands players' decks are never a training signal (DESIGN.md 0) - and turns it back
+    on the same file: a game started after it is logged (docs/ENGINE.md 126)."""
+    from mtgz.sealed import engine as SE
+    from mtgz.sealed import games as GL
+    run = tmp_path / 'eoe'
+    R, _ = _smoke_run(run, 2, eval_sims=2, threads=2, real_decks_every=2, real_decks_pools=2, real_decks_games=2)
+    log = str(run / 'games' / 'games-1.jsonl')
+    SE.game_log(log)
+    try:
+        m = {}
+        R.extra_evals(2, m)
+        assert m['extras']['real_decks']['n'] == 4
+        assert os.path.normpath(SE.E.game_log_path()) == os.path.normpath(log), 'the log is back on its file'
+        assert not os.path.exists(log), 'no real-deck game in the log'
+        RD.heuristic_player(2).play([dict(RD.base_spec(FAST), seed=3)], 1)
+    finally:
+        SE.game_log(None)
+    specs, games = GL.load(str(run))
+    assert len(games) == 1 and all(s['mode'] != 'given' for s in games[0]['seats'])

@@ -247,6 +247,11 @@ def test_the_presets_of_run_2e():
     assert {k: one[k] for k in RO.SETTINGS} == RO.SETTINGS
     smoke = run.resolve_config(run.parse(['--run', 'x', '--preset', 'eoe-2e-smoke']), {})
     assert smoke['evaluator_every'] == 1 and json.loads(smoke['spec'])['sealed']['deck_choice']['k'] == 8
+    # the win % against real decks (ENGINE.md 113, 126): every 40th iteration with our decks by the run's evaluator
+    rd = (c['real_decks_every'], c['real_decks_builder'], c['real_decks_pools'], c['real_decks_games'])
+    assert rd == (40, 'run_evaluator', 64, 2)
+    assert (one['real_decks_every'], one['real_decks_builder']) == (0, 'best'), 'off by default'
+    assert (smoke['real_decks_every'], smoke['real_decks_builder'], smoke['real_decks_pools']) == (0, 'run_evaluator', 2)
 
 
 def test_a_rolling_driver_switches_evaluators_between_phases(exported, tmp_path):

@@ -200,14 +200,19 @@ def test_the_real_deck_yardstick_in_the_progress_record(tmp_path, monkeypatch):
     with open(os.path.join(run, 'evals.jsonl'), 'w', encoding='utf-8') as f:
         f.write(json.dumps({'iter': 4, 'extras': {'real_decks': dict(point, a=0.55, builder='evaluator:E:/v1/l.pt')}}) + '\n')
         f.write(json.dumps({'iter': 5, 'extras': {'real_decks': {'error': 'boom'}}}) + '\n')
+        # (run 2's builder: the run's evaluator, docs/ENGINE.md 126 - its kind 'evaluator', no file name)
+        f.write(json.dumps({'iter': 6, 'extras': {'real_decks': dict(point, a=0.6, builder='run_evaluator',
+                                                                     evaluator='v0004.json')}}) + '\n')
     sent = []
     monkeypatch.setattr(P, 'post', lambda url, path, body, key: sent.append((path, json.loads(json.dumps(body)))) or {'ok': True})
     pub = P.Publisher(run, args(real_decks=[str(off)]), 'k', log=lambda m: None)
     p = pub.progress_pass()
     rd = p['real_decks']
-    assert [(x['iter'], x['source'], x['a']) for x in rd['points']] == [(1, 'offline', 0.42), (2, 'run', 0.5), (4, 'run', 0.55)]
+    assert [(x['iter'], x['source'], x['a']) for x in rd['points']] == [(1, 'offline', 0.42), (2, 'run', 0.5), (4, 'run', 0.55),
+                                                                         (6, 'run', 0.6)]
     assert rd['points'][0]['heuristic']['diff'] == 0.1 and 'per_pool' not in rd['points'][0]
-    assert [x['builder'] for x in rd['points']] == ['best', 'best', 'evaluator']
+    assert [x['builder'] for x in rd['points']] == ['best', 'best', 'evaluator', 'evaluator']
+    assert 'evaluator' not in rd['points'][3]
     a = rd['about']
     assert 'CC BY 4.0' in a['license'] and '17lands' in a['source'] and 'yardstick only' in a['rule']
     assert (a['test_pools'], a['field_decks_used'], a['pools_counted'], a['pools_in_data']) == (64, 128, 8932, 9765)

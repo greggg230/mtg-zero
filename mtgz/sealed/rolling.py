@@ -420,9 +420,16 @@ def evaluator_of(R, it):
 
 
 def remote_eval_inputs(R, it):
-    """zero-core's `remote_eval_inputs` hook: the evaluator file the deck-choice evaluation of `it` reads (and the
-    record naming it), when that evaluation is on and the run retrains its evaluator."""
-    if int(R.cfg.get('deckchoice_eval_games', 0) or 0) <= 0 or int(R.cfg.get('evaluator_every', 0) or 0) <= 0:
+    """zero-core's `remote_eval_inputs` hook: the evaluator file the evaluation of `it` reads (and the record naming
+    it), when the run retrains its evaluator and the deck-choice evaluation is on or the real-deck yardstick builds
+    our decks with it (`real_decks_builder` 'run_evaluator' and due at `it`: docs/ENGINE.md 126)."""
+    if int(R.cfg.get('evaluator_every', 0) or 0) <= 0:
+        return []
+    from zero import package
+    deckchoice = int(R.cfg.get('deckchoice_eval_games', 0) or 0) > 0
+    realdecks = (str(R.cfg.get('real_decks_builder') or '') == 'run_evaluator'
+                 and package.active().eval_due('real_decks', R.cfg, it))
+    if not (deckchoice or realdecks):
         return []
     rows = [r for r in _rows(os.path.join(edir(R.run), 'used.jsonl')) if r['iter'] == it]
     return ['evaluators/used.jsonl', f'evaluators/{rows[-1]["version"]}'] if rows else []

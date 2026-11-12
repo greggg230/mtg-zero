@@ -32,11 +32,14 @@ stopped (removed for both decks, their specs kept) and unfinished games.
     python -m mtgz.sealed.realdecks field [--pools 64]
 
 In a run (`mtgz.az`'s package: the extra evaluation `real_decks`, off by default): run settings `real_decks_every` (0 =
-off; else the evaluated iterations that are multiples of it), `real_decks_pools`, `real_decks_games`, `real_decks_builder`;
-logged under `extras.real_decks` in metrics.jsonl (or evals.jsonl when the evaluation is remote).
+off; else the evaluated iterations that are multiples of it), `real_decks_pools`, `real_decks_games`, `real_decks_builder`
+('run_evaluator': the evaluator the iteration chose its self-play decks by, run 2's, docs/ENGINE.md 126); logged under
+`extras.real_decks` in metrics.jsonl (or evals.jsonl when the evaluation is remote). Its games are not written to the
+run's EoE game log, which the run's deck evaluator trains on (`no_game_log`).
 """
 import argparse
 import collections
+import contextlib
 import functools
 import json
 import math
@@ -158,7 +161,24 @@ def candidates(pool_names, seed, k=32, collation='arena'):
     return R.candidates(spec, seed)[0]['candidates']
 
 
-def builder_of(spec, pilot=None, k=DEFAULTS['k'], worlds=DEFAULTS['worlds'], collation='arena'):
+RUN_EVALUATOR = 'run_evaluator'
+
+
+def export_pick(pool_names, seed, path, sha, k=32, collation='arena'):
+    """The engine's deck choice by the exported evaluator `path` (sha256 `sha`, pinned in the spec: other bytes are
+    refused) among the pool's k candidates - the choice a self-play seat of run 2 makes (docs/ENGINE.md 112.2: the
+    engine's scorer, the best candidate, the first on a tie), without its explore share: `candidates`' k candidates
+    (the same seed, the same builds: the evaluator does not change them), the evaluator's. -> (j, candidates, scores)."""
+    spec = {'sealed': {'set': 'eoe', 'collation': collation, 'p0': {'pool': list(pool_names)},
+                       'deck_choice': {'k': int(k), 'explore': 0.0, 'by': 'evaluator', 'evaluator': str(path),
+                                       'evaluator_sha': str(sha)}}, 'max_turns': 60, 'seed': int(seed)}
+    c = R.candidates(spec, seed)[0]
+    if c.get('chosen') is None or c.get('evaluator_sha') != sha:
+        raise RuntimeError(f'the engine made no evaluator choice of the pool ({c.get("chosen")}, {c.get("evaluator_sha")})')
+    return int(c['chosen']), c['candidates'], c['scores']
+
+
+def builder_of(spec, pilot=None, k=DEFAULTS['k'], worlds=DEFAULTS['worlds'], collation='arena', evaluator=None):
     """Our builder: fn(pool names, seed) -> our deck ({'deck', 'sideboard', 'colors', 'how', ...}).
 
     * 'best': the builder's best guess (docs/ENGINE.md 107.1; a function of the pool);
@@ -166,8 +186,26 @@ def builder_of(spec, pilot=None, k=DEFAULTS['k'], worlds=DEFAULTS['worlds'], col
       `compare.value_pick`, `worlds` per candidate);
     * 'evaluator:PATH': a saved deck evaluator's top pick among the k candidates (S4a, docs/ENGINE.md 108:
       `evaluator.rank`; the first best on a tie);
+    * 'export:PATH': an exported deck evaluator's pick among the k candidates through the engine (`export_pick`: run
+      2's self-play choice, docs/ENGINE.md 112.2, without exploring);
+    * 'run_evaluator': the same with the evaluator a run's iteration chose its self-play decks by - `evaluator` =
+      (path, sha256), which the caller resolves (`run_eval`, the command line: `rolling.evaluator_of`; ENGINE.md 126);
     * 'module:attr' (any other): a callable fn(pool names, seed) -> {'deck', 'sideboard', ...} - another builder plugged
-      in (e.g. a run's evaluator choice in self-play)."""
+      in."""
+    if spec == RUN_EVALUATOR or spec.startswith('export:'):
+        if spec == RUN_EVALUATOR:
+            if evaluator is None:
+                raise ValueError(f"builder {RUN_EVALUATOR!r} needs the run's evaluator (path, sha256)")
+            path, sha = evaluator
+        else:
+            from . import scorer as S
+            path = spec[len('export:'):]
+            sha = S.sha256_file(path)
+
+        def chosen(names, seed):
+            j, cands, _ = export_pick(names, seed, path, sha, k, collation)
+            return _cand(cands[j], 'ours', f'evaluator {sha[:12]} pick {j} of {k}')
+        return chosen
     if spec == 'best':
         return lambda names, seed: _cand(candidates(names, seed, 2, collation)[0], 'ours', 'best guess')
     if spec == 'value':
@@ -385,11 +423,46 @@ class _RunPilot:
         return self._ev
 
 
+def run_evaluator(run, it):
+    """The builder 'run_evaluator' of checkpoint `it` (docs/ENGINE.md 126): the evaluator file its iteration's self-play
+    chose decks by and the deck choice's k - `rolling.evaluator_of` (`evaluators/used.jsonl`, in a run or a remote
+    evaluation's mirror; the spec's own file without the rolling retrain) -> ((path, sha256), k). `run`: anything with
+    `run` (the directory) and `cfg` (its settings). No evaluator there: an error, never another builder."""
+    from . import rolling
+    dc = rolling.deck_choice_of(run.cfg['spec'])
+    if dc is None:
+        raise ValueError(f"builder {RUN_EVALUATOR!r}: the run's self-play spec has no deck choice by an evaluator "
+                         '(docs/ENGINE.md 112)')
+    ev = rolling.evaluator_of(run, it)
+    if ev is None:
+        raise RuntimeError(f'builder {RUN_EVALUATOR!r}: no deck evaluator recorded for iteration {it} in {run.run} '
+                           '(evaluators/used.jsonl)')
+    return ev, int(dc.get('k', DEFAULTS['k']))
+
+
+@contextlib.contextmanager
+def no_game_log():
+    """The EoE game log (docs/ENGINE.md 107.1) off while the real-deck games start, then back on the same file
+    (docs/ENGINE.md 126): its games are 17lands players' decks, and the log is what the run's deck evaluator trains
+    on (112.4) - a yardstick's games never become a training signal. Only games started meanwhile are left out (a
+    run's evaluation starts nothing else: its rolling self-play driver waits between phases)."""
+    path = R.E.game_log_path()
+    if path is None:
+        yield
+        return
+    R.E.game_log(None)
+    try:
+        yield
+    finally:
+        R.E.game_log(path)
+
+
 def run_eval(run, it):
     """`GamePackage.evals` entry of `mtg_eoe` (zero-core runs it on the evaluated iterations that are multiples of
     `real_decks_every`, never at 0: GamePackage.evals_every): checkpoint `it` against real players' decks with the
     run's evaluation seat at `eval_sims` on both seats, the run's evaluation spec's sealed prior, the run's driver
-    settings. Compact: no per-pool detail (the command line has it). A yardstick only (module docs)."""
+    settings. Compact: no per-pool detail (the command line has it). A yardstick only (module docs): its games are not
+    written to the run's game log (`no_game_log`)."""
     c = run.cfg
     if c['game'] != 'mtg_eoe':
         return None
@@ -400,10 +473,16 @@ def run_eval(run, it):
     evs = {'m': run.evaluator(model_path(run.run, it))}
     player = Player(seat, evs, threads=c['threads'], groups=c['groups'], max_steps=c['max_steps'],
                     sparse=bool(c.get('sparse')), conc=c['conc'], check=lambda: run.check('real decks'))
-    builder = builder_of(bname, _RunPilot(seat, evs))
+    extra, kw = {}, {}
+    if bname == RUN_EVALUATOR:
+        (path, sha), kw['k'] = run_evaluator(run, it)
+        kw['evaluator'] = (path, sha)
+        extra = {'evaluator': os.path.basename(path), 'evaluator_sha': sha[:16]}
+    builder = builder_of(bname, _RunPilot(seat, evs), **kw)
     base = base_spec(c.get('eval_spec') or package.active().eval_spec_of(c['game'], c['spec']))
-    out = measure(RealDecks(pools, games), builder, player, base, log=run.log, builder_name=bname, detail=False)
-    out['sims'] = c['eval_sims']
+    with no_game_log():
+        out = measure(RealDecks(pools, games), builder, player, base, log=run.log, builder_name=bname, detail=False)
+    out.update(extra, sims=c['eval_sims'])
     return out
 
 
@@ -458,8 +537,10 @@ def main(argv=None):
     ap.add_argument('--games', type=int, default=DEFAULTS['games'], help='games per test pool and deck (even: both seats)')
     ap.add_argument('--seed', type=int, default=DEFAULTS['seed'], help='the order of the pools (the test pools and field)')
     ap.add_argument('--builder', default=None, help="our builder: 'best' (the default; the builder's best guess), "
-                                                    "'value', 'evaluator:PATH', 'module:attr'; default: the run's "
-                                                    'real_decks_builder setting, else best')
+                                                    "'value', 'evaluator:PATH', 'export:PATH', 'run_evaluator' (the "
+                                                    "evaluator the checkpoint's iteration chose its self-play decks by), "
+                                                    "'module:attr'; default: the run's real_decks_builder setting, else "
+                                                    'best')
     ap.add_argument('--k', type=int, default=DEFAULTS['k'], help='candidates of the value / evaluator pick')
     ap.add_argument('--worlds', type=int, default=DEFAULTS['worlds'], help='the value pick\'s worlds per candidate')
     ap.add_argument('--sims', type=int, default=None, help="simulations (default: the run's eval_sims)")
@@ -492,10 +573,18 @@ def main(argv=None):
         sims = a.sims or cfg['eval_sims']
         player = net_player(ck, cfg, sims, a.device, a.threads, a.groups)
         bname = a.builder or str(cfg.get('real_decks_builder') or 'best')
-        builder = builder_of(bname, _RunPilot(player.seat, player.evaluators), a.k, a.worlds)
+        k, ev, extra = a.k, None, {}
+        if bname == RUN_EVALUATOR:
+            # (the evaluator the checkpoint's iteration chose its self-play decks by, from its run's directory)
+            from types import SimpleNamespace
+            rdir = os.path.dirname(os.path.dirname(os.path.abspath(ck)))
+            ev, k = run_evaluator(SimpleNamespace(run=rdir, cfg=cfg), _iter_of(ck))
+            extra = {'evaluator': os.path.basename(ev[0]), 'evaluator_sha': ev[1][:16]}
+        builder = builder_of(bname, _RunPilot(player.seat, player.evaluators), k, a.worlds, evaluator=ev)
         base = base_spec(cfg.get('eval_spec') or cfg.get('spec') or '{}')
         log(f'# {ck}: {rd.pools} pools x {a.games} games, builder {bname}, sims {sims}, {a.device}')
         out = measure(rd, builder, player, base, log=log, builder_name=bname)
+        out.update(extra)
         out.update(checkpoint=os.path.abspath(ck), iter=_iter_of(ck), sims=sims, pilot=player.description,
                    run_config_found=found, spec=base, setting=rd.describe())
         if a.heuristic:
