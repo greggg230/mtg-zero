@@ -84,7 +84,7 @@ fn the_doomsday_75_and_its_provenance() {
     let (main, side) = d.parse_export(constructed::LEGACY_DOOMSDAY_EXPORT).unwrap();
     assert_eq!(main, d.main);
     assert_eq!(side, d.sideboard);
-    assert!(constructed::LEGACY_DOOMSDAY_EXPORT.contains("\n2 Tamiyo, Inquisitive Student\n"));
+    assert!(constructed::LEGACY_DOOMSDAY_EXPORT.lines().any(|l| l.trim_end() == "2 Tamiyo, Inquisitive Student"));
     assert!(d.main.contains(&(2, "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar".to_string())));
     // Every card supported, the sideboard's too; the deck rules over the deck
     // and the sideboard together.
