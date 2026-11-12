@@ -870,6 +870,30 @@ an evaluation of the network choosing its deck from the fixed evaluation pools a
 Integrated with the win % against real decks (113) on branch `eoe-run2-int` (2026-11-12, ENGINE.md 126): run 2 measures it
 every 40th iteration with our decks chosen by the run's own evaluator version, its games kept out of the evaluator's data.
 
+**Status 2026-11-12: ON HOLD** (the user paused EoE indefinitely for Legacy work; everything is merged on main, nothing
+running). Where it stands:
+- **Run 1** (`runs/eoe1`, finished): 80 iterations; against the heuristic 2.5% (iterations 0-9) -> 22% (30-39) -> 26%
+  (61-80): flat in its second half. Strength saturates at 64 simulations (iteration 78: 16 sims 23.2%, 32 28.2%, 64 31.8%,
+  256 32.5%), so the network, not the search, was the limit.
+- **Deck choice** (S4a races, ENGINE.md 108-110, pilot iteration 78): the evaluator's pick beats random builds of the same
+  pool by +15.9 +- 2.9 points and the network's value pick by +8.1 +- 2.7 (8 pools, 64 simulations every decision; won 7 of
+  8); the batched race (16 pools, self-play's simulation mix) agrees: +11.9 +- 1.9 and +10.5 +- 1.8, the same picks and 7 of
+  8 winners on the shared pools. The network's own pre-game value is a poor deck judge (+8.1 / +1.8 over random).
+- **Real decks** (ENGINE.md 113; a yardstick, never a target): run 1's builder best guess against 17lands players' own
+  builds of the same pools, against real decks, is within noise at every checkpoint (+0.8 +- 5.3 at 78); run 2's first
+  measurement with the evaluator's deck: **+11.7 +- 5.5** (iteration 80).
+- **Run 2** (`runs/eoe2e`, ENGINE.md 112.6 with no random games): **paused by the user at iteration 87** (the PAUSE file
+  kept; its supervisor stopped), pinned to `mtg-zero-wt/run-02a50db` (main 02a50dbf). Self-play ~3.5-4.5 minutes an
+  iteration on the 128 x 8 network when the desktop is free; runs at below-normal priority (the user: other sessions first).
+
+**To resume** (hub todos "EoE RESUME ...", "sealedai: publish run 2", "EoE S4b"): re-pin run 2 onto current main before it
+continues - ENGINE.md 128 fixed a search bug that reaches EoE (two of the opponent's dealt worlds could merge into one node;
+layout unchanged, so no fork): measure how often it changed EoE games, a pinned worktree of main, the repin gate (digests =
+main's, the EoE search smoke, iteration 87 loads), `mac.sh --eval-checkout`, then the launch script
+`E:/mtg-zero/runs/eoe2e_launch.sh` pointed at the new worktree with PAUSE removed, the run at below-normal priority, the
+sealedai publisher restarted. Next work after run 2: S4b, the deck search for a given pool (9.1 steps 1, 3-5). Artefacts:
+`E:/mtg-zero/s4a/` (evaluators v1_time / v2_time, races, real decks, the search sweep, the 128 x 8 deepen).
+
 ### 9.1 Deckbuilding from a pool: the plan (user, 2026-11-10)
 
 **Best-of-one only.** A deck is only "best" against a field. Training uses our own decks (pure self-play),
