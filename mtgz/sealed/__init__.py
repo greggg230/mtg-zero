@@ -14,6 +14,8 @@ Pure Python (no engine module needed). With the engine module (`tools/build_py.s
 * `mtgz.sealed.yardstick`: the 17lands pools and human builds as sealed specs (ENGINE.md 101.4).
 * `mtgz.sealed.compare`: paired deck comparison and racing against a field, the S4 verify step and
   the S5 yardstick (ENGINE.md 104; `python -m mtgz.sealed.compare`).
+* `mtgz.sealed.batch`: every pool's and build's race games in one batched driver, with an evaluator
+  whose answers depend on each row alone (ENGINE.md 110; `compare ... --batched`).
 * `mtgz.sealed.evaluator`: S4a, the deck evaluator trained on a run's logged games, card ranking v0 and
   the picker (ENGINE.md 108; `python -m mtgz.sealed.evaluator`); v2's pairwise kind (P(deck A beats deck
   B), scores against any named field), recency weighting and the torch-free export with its numpy

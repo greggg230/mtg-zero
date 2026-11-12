@@ -24994,6 +24994,262 @@ work leaves: a `tools/mac_races.sh` race, `~/mtg-zero-wt/races-<sha12>` with `~/
 `rm -rf ~/mtgz-races/<name>`, `git -C ~/mtg-zero worktree remove --force ~/mtg-zero-wt/races-<sha12>` and `rm -rf
 ~/cargo-target/mtg-zero/races-<sha12>`.
 
+## 110. Cheaper paired races: one batched driver, the pilot's simulation mix, a screening stage (branch `race-batch`, 2026-11-11)
+
+Branch `race-batch` (from main 60397f3; zero-core pin f9ca5c3 unchanged). **Why.** DESIGN.md 9.1 ("Races are an offline
+check"): the evaluator race of 108.6, run 1's iteration 78 piloting at 64 simulations on every decision, took 4.1 h for
+a clear pool on one Mac process (1,664 games, 0.11 games/s) and runs 10-12 h for a close one; on the desktop eight
+processes shared the GPU at 91% with small batches (pools 1001-1008, 10:22 to their stop at ~17:20: not one round of 5-6
+builds x 128 games ended in 7 hours, i.e. under ~0.2 games/s for the eight). The user asked for races about 10x cheaper
+by three changes, each opt-in: **without the new flags every command plays the same games and reaches the same verdicts
+as before** (the per-process path, the default evaluator, 64 simulations, one stage); the outputs gain `game_scores`
+(every candidate's score in each game) and the pilot's `search`, the logs gain progress lines (110.5), and `evalpick`
+computes every pool's candidates before the first race. Code: `mtgz/sealed/batch.py` (new), `mtgz/sealed/compare.py`,
+`tools/race_bench.py` (new), `tests/test_race_batch.py` (new). No engine, encoding or zero-core change: digests
+untouched.
+
+### 110.1 One batched driver (`--batched`)
+
+A comparison plays each candidate's block of games in a zero-core driver of its own (104.3): its seed (`driver_seed(i,
+b)`), its game ids 0, 1, ... and its queue of specs fix every game's streams, seat and opponent. `--batched` keeps those
+drivers exactly - `Comparison.driver`, factored out of `_run`, makes them for both paths; the batched ones only add
+`sparse=True` (each row's non-zeros: the same features, zero-core docs/search.md 2.2) and their own thread count (104.3:
+results do not depend on it) - and runs all of them in one process: `batch.MultiDrive` polls every driver
+(`poll_batch`), gathers every ready batch, answers them in **one network call per evaluator key** and submits each
+driver its rows. The drivers search on their own threads while the main thread evaluates, each driver's two groups in
+turn.
+
+What stays per pool is the race. `compare.RaceState` (104.4's race, factored out of `race`, which now runs it) holds a
+pool's rounds, survivors, tests, drops and stop; `batch.run_races` gives each pool its own state and starts a pool's
+next round for its survivors as soon as its previous round is decided - pools never wait for each other, and a decided
+pool's share of the batches goes to the others. An engine error in a game is handled as `play_block` handles it (the
+first failing candidate in survivor order recorded with its repro, the block played again without that game for every
+candidate: `BlockPlay`). `compare evalpick --pool-seed a,b,c --batched` computes every pool's candidates first (the
+evaluators' picks and the value pick), then races every pool at once; its output is the per-process command's (`pools`,
+`summary`) plus `batched` (wall seconds, games, network rows, calls, rows per call, evaluation seconds). `race`, `pair`,
+`yardstick` and `choice` take `--batched` too (one comparison: its candidates' drivers together). Settings:
+`--driver-threads` (each driver's search threads, default 1), `--cpus N` (the process on N logical CPUs: its affinity),
+`--progress` (110.5).
+
+### 110.2 Answers that depend on the row alone (`RowExact`), and the identity test
+
+**The problem.** 104.3's exact replay holds because a driver's batches are always the same rows. Merging batches changes
+the matrices the network multiplies, and float32 kernels round differently at other shapes. On 240 real leaf batches of
+iteration 78 (3,720 rows of pool 2026's builds), the usual evaluator (`zero.infer.NetEvaluator`: `TokenNet.forward`,
+rows sorted by token count, chunks of 64 padded to their longest) answers a batch alone and the same batch merged with
+the others up to 6e-7 apart in the priors and 9e-7 in the values. Measured causes on the desktop's CPU (torch 2.x with
+MKL 2025.3): `nn.Linear` gives a row other bits at another number of rows (on one thread as on four); on four threads
+also at another place among the same rows (a [64, 544] x [544, 128] product: 8 of 64 rows differ when the rows are
+permuted; none on one thread); attention over the same tokens padded to another length differs by ~2e-7. A search's near
+tie can turn on such bits (109.2: 3 of 48 games differed between the Mac and the desktop at ~4e-7), so with merged
+batches a game's moves would depend on what else is in flight - on how many pools race.
+
+**`batch.RowExact`** evaluates every row in a fixed shape: its tokens padded to its class T = ceil(n / 16) * 16 (n its
+tokens, the global one included), the rows of one class `rows` at a time (`--eval-rows`: default 512 on CUDA, 16 on the
+CPU; a short chunk is filled with copies of its first row, whose answers are dropped). On CUDA the chunk is
+`TokenNet.forward_static` on [rows, T] (every slot embedded) through zero-core's `TokenGraphRunner`, one CUDA graph per
+(rows, T). On the CPU (`_forward_packed`) the same trunk and heads on [rows, T], only the present slots embedded (in
+fixed pieces of 64 tokens; embedding all 170 slots of the v5 layout cost ~2x the usual forward per row), every kernel on
+one thread (`torch.set_num_threads(1)`, process-wide from the evaluator's creation, after the value picks) and the
+chunks side by side on `--eval-workers` threads (default min(8, the process's CPUs)). A row's answer is a function of
+the row alone (and of `rows`, the device and its kernels): **the same 240 batches each alone, all merged, merged in
+reverse and interleaved give identical bits** on the CPU (0 of 240 batches differ; with four kernel threads, 695 outputs
+differed) and on the GPU (0 of 160, CUDA graphs and eager). Its answers are the usual evaluator's to float rounding (max
+9e-7 in a prior, 1e-6 in a value). Root belief rows (a pilot with `eval_belief_tilt`) are refused: RowExact computes no
+auxiliary head.
+
+`--eval`: `default` (NetEvaluator; the default without `--batched`), `rowexact` (the default with `--batched`, and
+available per process), `batchwise` (`--batched` only: each driver's batch alone through NetEvaluator - today's answers
+bit for bit, without big batches). The pilot's description in the output names its evaluator. A value pick (107.2)
+always runs NetEvaluator at the process's torch threads before any race: every mode races the same candidates.
+
+**The identity test** (the desktop's CPU, 6 logical CPUs of a machine shared with other agents' builds and runs; outputs
+and logs in `E:/mtg-zero-scratch/race-batch/id3/`): `compare evalpick --pool-seed 2026,2027 --k 32 --worlds 8 --vs 3
+--pilot <eoe1 iter_0078> --sims 4 --race --games 4 --block 4 --min-games 4 --max-games 4 --cpus 6` (5 builds a pool, one
+round of 4 games and its tests). Larger forms (8 simulations, three rounds of 8) were stopped: the saturated machine
+gave them ~2% of a CPU at times (a per-process 8-simulation run of the two pools took 2.6 hours).
+
+* **A - today's per-process race (`--torch-threads 2`) against `--batched --eval batchwise`**: **40 of 40 games
+  identical** (every game's score), the same picks, candidates, round rows, verdicts and paired statistics; 989 s per
+  process, 633 s batched.
+* **B - per process against batched, both RowExact** (`--eval rowexact` per process, `--batched` for the other;
+  `--eval-rows 4 --eval-workers 2`): **40 of 40 games identical**, the same picks, rows, verdicts and statistics; 486 s
+  per process, 206 s batched.
+* **The two evaluators against each other** (A's per-process run against B's): 40 of 40 games ended the same (results
+  only: RowExact's answers are the usual ones to ~1e-6, and a near tie decides a move now and then - 109.2's 3 of 48
+  between two machines).
+
+The unit tests (110.8) check the same with a tiny network on every key of the output, two pools in one batched run.
+
+### 110.3 A cheaper pilot (`--pilot-search mix`, or a lower `--sims`)
+
+`--pilot-search mix` pilots with self-play's simulation mix: the checkpoint's run config's `sims` on a share `p_full` of
+the searched decisions, `sims_fast` on the others, `sims_minor` on the minor decisions (MTG Zero's mana payments,
+`SearchGame::minor_decision`) - eoe1: 64 on a quarter, 16 on the rest, 4 on mana payments. The split is drawn by the
+driver itself, the function self-play uses (zero-core `worker::start`: the playout cap from the game's own stream, the
+minor class from the game). The driver gives `sims_minor` to self-play seats only, so the pilot is a self-play-flagged
+seat with everything else of self-play off: `eps` 0 (the root's Dirichlet mix (1 - eps) p0 + eps x leaves every prior p0
+bit for bit), `temp_moves` 0 (every move by the run's evaluation move rule, `h2h.run_rule`: eoe1's cq), `record` false
+(and the race's drivers record nothing). Tested: such a seat without a fast budget plays the flat seat's games bit for
+bit (`test_the_mix_pilot`). `--sims 16` is the flat lower setting. The output's pilot says which: `"search": "flat"` or
+`{"kind": "mix", "sims", "sims_fast", "p_full", "sims_minor"}`. The value pick uses the flat seat whatever the race's
+search (a value choice searches nothing). What the mix saves comes mostly from the fast searches: eoe1's self-play at
+iteration 80 played 530 searched decisions a game, 11.5 of them minor, and 11.2k leaves a game (19% of them answered
+from its cache), against ~32k for 64 simulations on every decision (DESIGN.md 9.1).
+
+**`--eval-cache N`** (with RowExact only; off by default): each game's evaluation cache (zero-core docs/search.md 3.12)
+- a row the game already sent is answered from it instead of sent. Its answer is the one RowExact would compute again,
+so the games are the same bit for bit with fewer network rows (`test_the_eval_cache_with_rowexact`); with the default
+evaluator, whose answers depend on the batch, it is refused. eoe1's self-play at iteration 80 found 19% of its rows in
+its cache (`eval_cache` 8192). The value pick's seat keeps none.
+
+### 110.4 Two stages (`--screen-delta`)
+
+`RaceState` with `screen_delta` (e.g. 0.05): 104.4's pairwise tests at the looser delta first, at `--screen-alpha`
+(default alpha / 2) shared over each build's N - 1 tests, until one build is left (decided), every survivor pair
+accepted H0 at the screening delta, or `--screen-max-games`; then the final stage at `--delta` and alpha - screen alpha,
+per test / (N - 1), **on every game played** (data reused). `--screen-min-games` (default `--min-games`) lets the
+screening test earlier. **The error rates as designed**: the true best build is dropped only if one of its 2 (N - 1)
+tests (N - 1 per stage, against every other build) crosses its upper bound; each does so with probability at most its
+level when its true difference is >= 0 (Wald's bound on the GSPRT, 73; the final stage's tests see the screening's games
+and more, checked only at round ends, which lowers the probability). Union bound: P(best dropped) <= screen alpha +
+final alpha = alpha = 0.05. The per-test levels divide by N - 1 for N the race's builds in both stages (dividing the
+final level by the screening's survivors would make it data-chosen). Beta stays the final stage's: a build worse by
+delta survives a final `equivalent` with probability at most beta per pair; the screening's acceptances of H0 only end
+the screening. The output's `test` gains `screen` (its delta, alpha, bounds, where and why it ended), `final_alpha` and
+`error_rates`; drops and rounds name their stage. Without `--screen-delta` the output is the one-stage race's, key for
+key.
+
+**Measured by simulation** (`E:/mtg-zero-scratch/race-batch/mc_stages.py`: `RaceState` itself on a stand-in comparison,
+1,000 races a cell; 5 builds, rounds of 128, 256 to 1,024 games a build, alpha = beta = 0.05; each game a win or a loss,
+the builds sharing a game's outcome with probability 0.15, i.e. var(D) ~ 0.42 and var_ratio ~ 0.85, the network pilot's
+(107.2, the Mac's pool 2030: 0.68-1.00)):
+
+| true scores of the 5 builds | one stage: games, best dropped, decided | screening at 0.05: games, best dropped, decided | screening from 128 games |
+|---|---|---|---|
+| all 0.55 | 5,119, 0.0%, - | 5,116, 0.2%, - | 5,118, 0.2%, - |
+| best +3 points | 5,115, 0.0%, 0.0% | 5,083, 0.0%, 0.2% | |
+| best +6 | 4,964, 0.0%, 5.9% | 4,743, 0.0%, 13.7% | |
+| 0.62 / 0.59 / 0.55 / 0.50 / 0.45 | 4,116, 0.0%, 1.9% | 3,746 (-9%), 0.0%, 5.2% | 3,772, 0.0%, 4.1% |
+| 0.70 / 0.55 / 0.50 / 0.45 / 0.40 | 2,009, 0.0%, 100% | 1,634 (-19%), 0.0%, 100% | 1,587 (-21%), 0.0%, 100% |
+
+The best build is dropped far less often than the bound (at most 0.2% against 5%: the union bound and checks at round
+ends are conservative); the screening saves 9-21% of the games when some builds are clearly behind, nothing when all are
+close, and decides more races. On real data: the Mac's pool 2030 (decided at 384 games, 1,664 in all) would have been
+decided at 256 (1,280 games, -23%): value7 and random1, 23 and 17 points behind with var(D) 0.41 and 0.28, reach LLR
+~6.5 at 256 games at delta 0.05 (screening bound 5.02), ~4.1-4.2 at 0.03 (one-stage bound 4.33).
+
+### 110.5 Progress while a race runs
+
+Every race process writes stderr line-buffered (`sys.stderr.reconfigure`, whatever launched it) and a `# progress` line
+every `--progress` seconds (default 60; 0 = none): the batched driver's games finished, games/s, games in flight,
+drivers, network rows, rows per call, evaluation seconds and each pool's stage, survivors, games and games left in its
+round; a per-process race's line names its candidate and block, its games finished of the block, the evaluator's rows
+and the driver's seconds. Besides: `# block` after each block, `# round` after each round (a batched one names its
+pool), `# race` and `# pool` as each pool ends, `# candidates` (batched evalpick: every pool's picks before the races).
+The desktop's per-process races (pools 1001-1008, launched by `launch_hidden`) printed nothing in 7 hours: their only
+lines were per round, and no round at 64 simulations ended.
+
+### 110.6 Measurements
+
+All on the desktop while other agents' builds, fuzzers and runs saturated its 32 logical CPUs (and, until ~17:20, the
+eight desktop races and then the search sweep shared its GPU): the absolute numbers are those of a busy machine; the
+ratios between configurations run back to back are the result.
+
+**Throughput on the CPU** (`tools/race_bench.py --device cpu --cpus 6 --pools 2026,2027,2028,2029 --minutes 6 --warmup 2
+--procs 2 --a-threads 2 --a-torch-threads 1`; network rows per second after the first two minutes; games per second =
+rows/s over rows per game: 64 simulations 26.3k (measured: 1,051,582 rows for 40 games of pool 2026, 38 finished), the
+mix 13.8k (eoe1's self-play at iteration 80: 8.27M rows for 600 games, its cache's 1.55M included), 16 simulations ~8k
+(estimated: ~12 rows a searched decision x 530 decisions)):
+
+| configuration | rows/s | games/s | x (a) |
+|---|---|---|---|
+| (a) per process (2 processes x 2 driver threads + 1 torch thread), 64 simulations, the usual evaluator | 1,635 | 0.062 | 1.00 |
+| (b) batched (4 pools, 2,816 games in flight, ~1,000 rows a call), 64 simulations | 2,174 | 0.083 | 1.33 |
+| (c) batched, self-play's mix | 2,391 | 0.173 | 2.78 |
+| (d) batched, 16 simulations | 2,575 | ~0.32 | ~5.2 |
+
+On a CPU the network's arithmetic is the same however it is batched, so batching buys little: (b) is 1.33x (the per-row
+cost of RowExact's chunks and the six CPUs shared between search and inference bound it); the mix's fewer rows a game
+buy 2.1x more. With `--eval-cache` (~19% of the rows, self-play's share) and the screening (9-21% of the games, 110.4)
+the CPU race is ~3.5-4x today's. The tenfold is the GPU's: today's per-process GPU race gave the network ~64-row batches
+from eight processes (under ~0.2 games/s in all, above), while RowExact's CUDA graphs answer ~40k rows/s on a busy GPU.
+
+**The GPU** (not free: the eight races until ~17:20, then the sweep). RowExact's capacity on mid-game rows of real games
+(20,999 rows, 24.7 tokens on average, merged into one call; `E:/mtg-zero-scratch/race-batch/gpu_cap.py`), the RTX 5090
+91% busy with the eight races: **13.4k rows/s with chunks of 64 rows, 27-28k with 256, 39k with 512, 40k with 1,024**
+(CUDA graphs); eager `forward_static` 1.3k. Hence the CUDA default of 512 rows. For scale: eoe1's self-play reaches 58k
+rows/s on the same GPU (iteration 80: 384-row batches of 3,456 games in flight, 16 search threads, 18,800 games an hour
+with the mix and its cache). The full measurement (a-d on the free GPU) is 110.7's `race_bench.py` command.
+
+**The pilots' strength** (the search sweep of iteration 78, `E:/mtg-zero/s4a/sims-sweep/run/results.jsonl`: run 1's
+evaluation against the heuristic, 400 games a setting, the same deals): 16 simulations 0.233 +- 0.021, 32 0.283 +-
+0.023, 64 0.318 +- 0.023 (256 and 1,024 still running). Flat 16 costs ~8.5 points against the heuristic (2.6 se), 32
+~3.5. The cheaper pilots' cost in the race itself - whether they order a pool's builds as 64 simulations do - is not
+measured yet (the CPU runs that would compare pool 2030's 5 builds over the Mac's 128 deals under the mix and at 16
+simulations did not fit the busy machine): `python -m mtgz.sealed.compare evalpick ... --pool-seed 2030,2031 --games 128
+--batched --pilot-search mix` (and `--sims 16`) against the Mac's round-1 lines of 109.2's race gives it, build by build
+on the same deals (`E:/mtg-zero-scratch/race-batch/order/compare_orders.py`).
+
+### 110.7 A 16-pool evalpick race in the new mode
+
+Run from this branch's checkout (or main once merged), the GPU free:
+
+```
+mkdir -p E:/mtg-zero/s4a/races/batched-iter_0078
+python tools/launch_hidden.py E:/mtg-zero/s4a/races/batched-iter_0078/evalpick.log \
+  python -m mtgz.sealed.compare evalpick \
+  --evaluator E:/mtg-zero/s4a/v1_time/evaluator_linear.pt,E:/mtg-zero/s4a/v1_time/evaluator_set.pt \
+  --pool-seed 2026,2027,2028,2029,2030,2031,2032,2033,2034,2035,2036,2037,2038,2039,2040,2041 --collation arena \
+  --k 32 --worlds 8 --vs 3 --pilot E:/mtg-zero/runs/eoe1/models/iter_0078.pt --pilot-search mix --device cuda \
+  --race --games 128 --min-games 256 --max-games 1024 --delta 0.03 --screen-delta 0.05 \
+  --batched --eval-cache 8192 --json E:/mtg-zero/s4a/races/batched-iter_0078/evalpick.json
+```
+
+(Pools 2026-2033 are the Mac's 64-simulation race of 108.6 / 109.2: the same deals, so the two races compare build by
+build. `--pilot-search mix` and `--eval-cache` are each optional; without them the race is 64 simulations on every
+decision.) **Estimated wall time** (the free desktop GPU; to be replaced by the measurement): the 16 pools race ~5
+builds each; the Mac's 64-simulation pools took 1,664 games (decided at 384) to ~5,000 (to 1,024 a build), say ~3,500 a
+pool and ~56k games, ~48k with the screening (110.4). The batched driver should approach self-play's rate on this GPU
+(58k rows/s; RowExact's graphs measured 39k on a GPU already 91% busy), i.e. ~40-58k rows/s: with the mix and the cache
+(~11.2k rows a game) **3.6-5.2 games/s, about 2.5-3.7 hours** for the 16 pools; without the cache ~3-4.5 hours; at 64
+simulations on every decision (26.3k rows a game, no screening) ~1.5-2.2 games/s, 7-10 hours. Today's per-process race
+on the GPU, under ~0.2 games/s for eight processes, would need over 75 hours; the Mac's six processes (0.76 games/s),
+~20.
+
+The throughput measurement for the free GPU (110.6's configurations a-d, one command; ~50 minutes):
+
+```
+python tools/race_bench.py --pilot E:/mtg-zero/runs/eoe1/models/iter_0078.pt \
+  --evaluator E:/mtg-zero/s4a/v1_time/evaluator_linear.pt,E:/mtg-zero/s4a/v1_time/evaluator_set.pt \
+  --pools 2026,2027,2028,2029,2030,2031,2032,2033,2034,2035,2036,2037,2038,2039,2040,2041 --device cuda \
+  --minutes 10 --warmup 3 --procs 8 --out E:/mtg-zero-scratch/race-bench-gpu
+```
+
+### 110.8 Tests, gate
+
+* `tests/test_race_batch.py` (9, new): RowExact's answers depend on the row alone (a tiny token network's real leaf
+  batches alone, merged forward and in reverse, dense and sparse: the same bits; the usual evaluator's within 1e-5); a
+  batched race and a fixed comparison with the heuristic are the per-process ones (every key of the output, the rounds,
+  every game's score); two pools' comparisons with a tiny network raced at once in one batched driver are the
+  per-process comparisons game for game, with RowExact both ways and with the usual evaluator batch by batch
+  (`batchwise`), and the merged calls hold several drivers' batches; the mix pilot (the run config's split, a
+  self-play-flagged seat with eps 0, temperature 0, record false; without a fast budget the flat seat's games bit for
+  bit; a checkpoint without a run config refused); the screening stage (the alpha split and bounds in the output, a bad
+  build dropped in the screening, the final stage after it, `--screen-min-games`, the refusals, the one-stage output
+  unchanged); progress lines (per process and batched); the CLI (`race --batched` against `race --eval rowexact`;
+  `--eval batchwise` without `--batched` refused); `evalpick --pool-seed 11,12 --batched` against the per-process
+  command (picks, games, verdicts, summary; a pool named twice refused); `--eval-cache` with RowExact (the same games,
+  fewer rows; refused with the default evaluator).
+* `tests/test_sealed_compare.py` (12) unchanged and passing: the refactored `race` (`RaceState`), `play_block`
+  (`record_block`, `record_failure`) and `compare` give the outputs of before. `tests/test_evaluator.py`'s evalpick test
+  passes (every pool's candidates now before the races).
+* `python tools/gate.py python --no-mac --step-timeout 14400` on bdd219a (the code of 73b9bea and this section; run pinned to 6 logical CPUs
+  of the saturated desktop, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=2`): build, pytest 278 passed and 1 skipped, the mtg-smoke loop:
+  **GATE PASSED python bdd219aee2e2 in 2676s**. Two earlier runs failed only `tests/test_mac_remote.py::test_a_remote_eoe_evaluation_logs_its_games`
+  (untouched code): its eoe-smoke remote evaluation passed its own 600 s limit with torch's 24 default threads on 6 busy CPUs (alone, at 2
+  threads: 237 s). The commit after the gated one is this line.
+
 ## 111. S4a v2: the pairwise evaluator, scoring against a named field, recency weighting, the export (branch `eval-v2`, 2026-11-11)
 
 Branch `eval-v2` (from main 60397f3). **Why** (the user, 2026-11-11). Evaluator v1 (108) predicts "my deck against
