@@ -25237,3 +25237,224 @@ load on the first pass and passed when rerun. **`python tools/gate.py python --n
 passed and 1 skipped, the mtg-smoke loop (16 games, 0 unfinished), tracked files unchanged: GATE PASSED python
 ff5ba0847e85 in 935s.** The commit after it adds this paragraph only.
 
+## 123. Legacy Sneak and Show: the deck's cards (branch `sneak-show`, mtg-bot `feature/sneak-show-ir`)
+
+**Why.** The next constructed deck after the Delver mirror (54) and Legacy Doomsday (124): MTGGoldfish's "Sneak and
+Show" by snoopy-magic (Legacy Challenge 32, 2026-10-24, 21st place, 3-3, MTGO; https://www.mtggoldfish.com/deck/8014220,
+fetched 2026-11-11 from the page's export field: `E:/mtg-zero-scratch/deck8014220/`, its PROVENANCE.md). Six of its 75
+cards were outside the cube and legacy IR and owned by no other lane: Show and Tell, Omniscience, Mistrise Village (main
+deck), Brotherhood's End, Disruptor Flute, Magus of the Moon (sideboard; the Magus had IR in `eoe.ir.json` only).
+Flusterstorm (Doomsday lane B) and Consign to Memory (the Delver best-of-three sideboard lane) come from other branches
+and are not on this one. Branch `sneak-show` from main 37fa30b; mtg-bot `feature/sneak-show-ir` from
+`feature/eoe-ir-fixes` f4f2d663. The user's rules: no approximation of any class (docs/shortcuts.md unchanged); every
+public state the cards create reaches the network's input exactly, without changing the layout (one v6 spare, cleared
+with the layout-v7 session; the one state v6 can't hold, Disruptor Flute's name, refused to networks: 123.6); best-of-one
+with the main 60. New code in `engine/src/sneak_show.rs` and `engine/src/lower/sneak_show.rs`, additive hooks
+elsewhere.
+
+### 123.1 What was built
+
+| Part | Where | What |
+|---|---|---|
+| The deck | `data/decks/sneak_show_8014220.txt`, `.json` | the pinned export verbatim (its "sideboard" line separates the 15) and the 75 with its provenance, as `izzet_delver_8016541.json` |
+| The IR | mtg-bot `feature/sneak-show-ir`; `data/cards/*.ir.json`, `powerlsv.schema.json`, `card_ir/src/generated.rs` | the six Scryfall records appended to the legacy pool; one new recognizer (Brotherhood's End); 123.2 |
+| Identities | `engine/src/az/legacy_cards.txt` | the six appended after Prismari Charm (on this branch 548-553; 563-568 at integration, after Doomsday's ten and Delver's five); no test names a number |
+| Lowering | `lower/sneak_show.rs`, `lower/filter.rs` (`RotoCardFilter`), `lower/printing.rs` (`roto_statics`, `grants_free_casts_from_hand`) | every field named, the rest denied |
+| Rules | `sneak_show.rs` (`SnS`, `SnsDef`), hooks in `cast.rs` (Omniscience's free cast, the uncounterable mark at 601.2i), `pay.rs` (the Flute's prohibition in `activation_ready`), `resolve_m7d.rs` (the Flute's tax), `activate.rs` (the plain name choice), `layers.rs` (514.2), `hidden.rs` (Show and Tell's face-down choice in `determinize`), `eoe_w2.rs` (the Magus without abilities, 123.5) | 123.3 |
+| Encoding | `az/encode.rs` (`g6::UNCOUNTERABLE_NEXT` = per-player float 8), `public_state.rs`, `testkit.rs` (the view), `az/mod.rs` (the Flute guard), `az/tokens.txt` (the Mountain's abilities' key) | 123.6 |
+| Tests | `engine/tests/cards_sneak_show.rs` (57 tests), `az.rs`, `constructed.rs`, `fuzz.rs` (`FUZZ_POOL=sneak_show`, `sns`) | 123.7 |
+| Rulings | `data/rulings/legacy.rulings.json` (refetched: the six cards' 18 rulings), `triage.tsv` (16 new texts; two were the cube's), `docs/rulings.md` | every ruling tested |
+| mtg-bot | `cards/parser/legacy_sneak.py`, `effects/generic/legacy_sneak.py`, `tests/test_legacy_sneak.py`, `docs/SEARCH_LIMITATIONS.md` | the Python engine's three simplifications written down |
+
+### 123.2 The IR
+
+Five of the six parsed through mtg-bot's roto and EoE recognizers: Show and Tell (`EachPlayerMayPutFromHand` with a
+`RotoCardFilter` of the four types), Omniscience (`grants_free_casts_from_hand`), Mistrise Village (`enters_tapped_unless`
+`ControlPermanent(HasSubtype Mountain | HasSubtype Forest)`, `produces` {U}, the activated ability "{U}, {T}:
+`NextSpellThisTurnCantBeCountered`"), Disruptor Flute (flash; `roto_statics` = `ChooseCardNameAsEnters`,
+`SpellTax { amount: 3, named }`, `ActivationProhibition { except_mana_abilities }`), Magus of the Moon
+(`nonbasic_lands_are_mountains`, the IR the EoE pool already had). Brotherhood's End did not parse: its first mode had no
+grammar. `cards/parser/legacy_sneak.py` adds one parameterized recognizer, tried after every other grammar: "deals N
+damage to each creature and each planeswalker" -> `DealNDamageToEachCreatureAndPlaneswalker { amount }` (new,
+`effects/generic/legacy_sneak.py`); the second mode is the existing `RemoveAllMatching(IsArtifact & HasManaValueAtMost 3)`.
+`cards export-ir --pool cube legacy eoe`, `filter_eoe_ir.py`, `gen_card_ir.py`: schema `769af139588b...` (was
+`1cbe33073b1b...`), 716 classes (7 more); `powerlsv.ir.json` and `eoe.ir.json` are the previous files byte for byte once
+the schema hash is replaced; `legacy.ir.json` holds 8 cards (docs/card_ir.md). No IR defect (docs/ir_defects.md section
+U; entries 300-329 unused).
+
+### 123.3 The rules, as built
+
+| Text | Rule | How |
+|---|---|---|
+| Show and Tell: "Each player may put an artifact, creature, enchantment, or land card from their hand onto the battlefield" | 101.4, 101.4a; rulings a107ed89, 881ce0a9 | `SnS::EachPlayerPutsFromHand { filter }`: as it resolves the active player chooses (`ChooseHandCard`: a card of the kind, one option per definition, or `PASS`), then the other player; then the chosen cards enter at once (one entry, `begin_entering` / `end_entering`: 603.6a, 614.12a), each under its owner's control. A hand without a card of the kind still asks (`PASS` only: the hand is hidden); an empty hand asks nothing (its size is public) |
+| the choice made face down | 101.4a; ruling a107ed89 | the frame's stage `Frame::i` (0: the active player chooses; 1: the other, the active player chose none; 2: the other, a card was chosen) is all the other player learns: it is the context block's `ctx::OP_I`. The other player's worlds (`determinize`) deal the chooser's hand again and draw the chosen card uniformly among the hand's cards (those the viewer knows too: the hand is one pool, ENGINE.md 10), keeping the deal only when that card is of the kind (`Game::hidden_pick_ok`, by rejection: exactly the plain deal conditioned on "a legal card was chosen"; also in the belief-weighted deal) |
+| choices of the entering cards | ruling 6d3f0bf4 | the other player's card is put first, so the "as this enters" tasks of the active player's card, queued last, run first; the timestamps' order is the existing 613.7m choice of the active player |
+| lands put are no land drops; the cards aren't cast | 305.1, 305.4, 601.2i | `put_onto_battlefield`: no land play counted, no cast event (Emrakul's extra turn doesn't trigger; enters triggers do, APNAP, 603.3b) |
+| Omniscience: "You may cast spells from your hand without paying their mana costs" | 118.9, 118.9a, 601.2b, 601.2f, 107.3b; rulings 6e20dab1, 3c753455, 72e98293, 3bd1fe3c | `SnsDef::free_casts_from_hand`, read by `Game::free_from_hand` (its controller's casts from the hand, `CastFrom::Hand`, origin the hand): the `ChooseAltCost` answer and route of EoE's "first spell each turn" (`NUMBER` + 31, `eoe_c::FREE_CAST`, `Mark::FreeFromHand`), offered with the mana cost and every other alternative cost (Force of Will's pitch: one of them, 118.9a); X is 0; additional costs paid (kicker, Tinker's sacrifice); increases apply on top (Thalia, the Flute: 601.2f); timing unchanged; faces cast from the hand too (an Adventure, a split half, an MDFC's back face) |
+| Mistrise Village: "This land enters tapped unless you control a Mountain or a Forest" | 614.1c, 614.12a, 305.6; ruling 16696510 | the existing `enters_tapped_unless`; one entering with it doesn't count (tested with the Magus entering by the same Show and Tell) |
+| "{U}, {T}: The next spell you cast this turn can't be countered" | 101.2, 611.2, 601.2i, 514.2 | `SnS::NextSpellUncounterable`: one more waiting instance for the ability's controller (`Player::uncounterable_next`, counted exactly); the next spell that player casts (`Game::cast_done`, from any zone) gets `Mark::Uncounterable` and uses up every instance; unused they end in the cleanup step with the other "this turn" effects (`end_this_turn_permissions`) |
+| Brotherhood's End: "Choose one -- deals 3 damage to each creature and each planeswalker" | 700.2, 120.3 | `Op::DamageAll` over `Type(CREATURE | PLANESWALKER)`: each permanent that is one or both once, its source the spell; no battle, no player |
+| "Destroy all artifacts with mana value 3 or less" | 202.3, 202.3c, 202.3e, 702.12b | the existing `Op::DestroyAll` over `Type(ARTIFACT) & ManaValueAtMost(3)`: a token 0 (Hullbreacher's Treasures), an X permanent with X 0 (Walking Ballista), indestructible survives (The Mind Stone) |
+| Disruptor Flute: "As this artifact enters, choose a card name" | 201.3, 614.12; rulings 3029db62, 20e62c09 | `SnsDef::plain_name`: `Task::AsEnters` -> `Game::choose_plain_name_as_enters`, no look at a hand; `NameCard` over `Game::nameable_defs` (paged past 63) and `PASS`; the name kept as `Mark::ChosenName` (Anointed Peacekeeper's) |
+| "Spells with the chosen name cost {3} more to cast" | 601.2f; ruling 560a16f0 | `CardDef::named_spell_tax` with `SnsDef::named_tax_everyone` (every player's spells, its controller's too) in `Game::named_tax`; a name compared by `Game::has_name` (a face's name; a split card's halves outside the stack) |
+| "Activated abilities of sources with the chosen name can't be activated unless they're mana abilities" | 602.5, 605.1a; rulings 044069c9, d858e725 | `SnsDef::named_ban`: `Game::named_ban_hits` in `activation_ready` (every zone's abilities: battlefield, hand, graveyard; loyalty abilities; granted abilities by their source; not mana abilities, not special actions, 116.2b) |
+| Magus of the Moon: "Nonbasic lands are Mountains" | 305.7, 613.1d, 614.12; rulings 24283e6f, cafea326, aa10a575, 53c9e610, cd000dac | EoE W2's `nonbasic_lands_are_mountains` (ENGINE.md 99.12), now in constructed play's table (its Mountain's definitions appended there); tested on the deck's mana: Volcanic Island, Thundering Falls (untapped, no surveil trigger), Mistrise Village (untapped, no ability), Ancient Tomb (no damage), City of Traitors (no sacrifice trigger), Scalding Tarn and Misty Rainforest (no ability), Multiversal Passage (no choice, no life), Gemstone Mine (no counters) |
+
+### 123.4 Readings taken
+
+* **The face-down choice and what the other player knows** (CR 101.4a, ruling a107ed89: "a player does not have to
+  reveal the chosen card, so long as it is clear which card was chosen"): whether the active player chose a card is
+  public, which card is not until the cards enter. The engine has no action that reveals a hand card at will, here as
+  everywhere, so the card stays face down. The other player's worlds draw which card was chosen uniformly among the
+  chooser's hand (the uniform-deal prior every `determinize` uses), conditioned on its being of the kind. With a hand the
+  other player knows entirely, the choice is one of its cards of the kind (both occur in the worlds; tested).
+* **The chooser's own knowledge** while the other player decides is the chooser's (private), not encoded: the chooser
+  has no decision before the cards enter (123.6).
+* **Who controls each card**: its owner (each player puts their own card; CR 110.2).
+* **A creature that is also a planeswalker** is dealt Brotherhood's End's 3 damage once (one object of the set "each
+  creature and each planeswalker"; CR 120.3 gives a damage event to a permanent both results). No official ruling; no
+  card of the tables makes such a permanent today.
+* **"The next spell you cast this turn"**: the next spell that becomes cast after the ability resolved (601.2i: a spell
+  cast while the ability waits on the stack isn't it), from any zone, a copy cast too (707.12); several instances wait for
+  the same spell (each says "the next spell"); the effect ends in the cleanup step (514.2: a spell cast in a cleanup
+  step's priority window after it isn't affected). A counterspell may still target it and resolve; "counter unless its
+  controller pays" still offers the payment (118.12; tested with Daze).
+* **Omniscience and miracle**: a card cast by its miracle trigger is cast with the trigger's permission, which names the
+  miracle cost: not free (as EoE's first-spell-free, `alt_allowed`).
+* **The names offered for "choose a card name"** (CR 201.3): every name of a face of a card of the game or of its
+  sideboards (a double-faced card's back face, an Adventure, a split card's halves, not "<left> // <right>"; a
+  prepare spell), and the card table's token names that are also card names ("Faerie Dragon": the table's token names were
+  checked against Scryfall's card-name catalogue on 2026-11-11; Scryfall lists tokens such as "Blood" too, which aren't
+  card names); `PASS` stands for every other name. Exactness of `PASS`: the Flute affects an object only by comparing
+  its name with a spell's or an ability source's; the objects of a game are its cards (made as it starts from the decks;
+  a sideboard card joins it only as a companion: no instruction of the engine brings another card into a game), its
+  tokens (the table's token definitions) and copies of these, whose names are their copiable values' or the copying
+  card's (`keep_name`); a face-down permanent has no name. So every name an object can have in any reachable state is
+  offered, and every name `PASS` stands for is one no object can have. With hidden decks (36.11) the other player's
+  names are those of their pool the chooser knows (their deck and sideboard) and of their cards the chooser knows.
+* **A double-faced or adventurer card's front name** is "<front>" though the card table names its definition
+  "<front> // <other>" (`sneak_show::face_name`); naming "Brazen Borrower" doesn't tax Petty Theft (ruling 20e62c09,
+  its Ondu Knotmaster).
+
+### 123.5 Fixes and findings outside the six
+
+* **The Magus without its abilities** (ruling cd000dac; CR 613.1d, 613.1f): `moon_source_before` and `moon_ts`
+  (`eoe_w2.rs`, EoE W2) left out a Magus that lost its abilities; its effect sets land types in layer 4, applied before
+  abilities are removed in layer 6, so it still applies. Fixed (no cube card has the ability: the cube's games are
+  unchanged; an EoE game with a Magus that loses its abilities now plays by the rules). Test:
+  `cr_613_1d_the_magus_without_abilities_still_makes_mountains` (Oko's +1).
+* **Anointed Peacekeeper's names** (`choose_name_as_enters`, M7d) are its cards' front definitions only: a back face
+  ("Tamiyo, Seasoned Scholar", whose loyalty abilities its tax reaches), an Adventure ("Petty Theft") or a split card's
+  half can't be named, and a double-faced card's front name is "<front> // <other>". Reported, not changed: changing it
+  changes the cube's games (the digests); the Flute's list (`nameable_defs`) is the faithful one to reuse.
+
+### 123.6 The encoding
+
+* **Mistrise Village** (cleared by the layout-v7 session, `E:/mtg-zero-scratch/sneak-show/v7_answer_from_doomsday.md`):
+  `g6` per-player float 8, `g6::UNCOUNTERABLE_NEXT` = the waiting instances / 4, squashed; checked unclaimed on every
+  branch and mtg-zero-wt worktree; v7 = v6 + additions keeps it. The spell that uses them up has `stack::UNCOUNTERABLE`
+  (`Mark::Uncounterable`). Public-state gate: "a player's next spell this turn can't be countered" (`V6_FIXED`).
+* **Disruptor Flute's name**: `Mark::ChosenName`, which v6 never encoded (Anointed Peacekeeper's gap, lane A's review G1);
+  layout v7's chosen-name column (ENGINE.md 125) will. Until then a loud guard (the coordinator's decision, mirroring
+  Doomsday lane B's Cavern of Souls): `MtgSpec::parse` refuses any spec whose decks or sideboards hold a card choosing a
+  name the plain way (`sneak_show::needs_layout_v7`) with "Disruptor Flute's chosen name needs layout v7 (ENGINE.md
+  123)": self-play, evaluation, head-to-head and replays parse through it. The gate's perturbation "a card name was
+  chosen as a permanent entered" and its NextLayout limit `CHOSEN_NAME_GAP` name the refusal and its test
+  (`az.rs flute_decks_are_refused_to_networks_on_layout_v6`). The Sneak and Show main 60 has no Flute and is accepted.
+* **Show and Tell's choice**: `ctx::OP_I` (123.3), no new float.
+* **The Mountain's abilities** (`moon_base`, a variant for Urza's Saga) are now definitions of constructed play's table;
+  their key " -/- C " is registered (`tokens.txt` line 54, identity CUBE_CAP + 53, as `eoe_tokens.txt` line 9), so they
+  aren't `UNKNOWN`.
+* Notes: E:/mtg-zero-scratch/sneak-show/encoding_needs.md.
+
+### 123.7 Tests, fuzz pools, the deck
+
+* **`engine/tests/cards_sneak_show.rs`, 57 tests** (every ruling of the six cards: `// ruling:`; the CR in each name):
+  Show and Tell (the order of the choices, the other player's input with either card chosen and with none, its worlds
+  never dealing an illegal choice and not always the real one, a known hand as one pool, declining, an empty hand, a
+  hand without a card of the kind, no land drop, no cast trigger, APNAP enters triggers, the "as enters" order, cast on
+  the other player's turn); Omniscience (only the free option without mana, both with it, Force of Will's three costs,
+  X 0, kicker and Tinker's sacrifice, Thalia, the opponent's Omniscience, lands, timing, priority after it resolves,
+  Emrakul's extra turn, an Adventure, a flashback from the graveyard); Mistrise Village (enters tapped or not, the
+  opponent's Mountain, Force of Will resolving and not countering, two activations one spell, a spell cast in response
+  not the next one, the end of the turn and the float, only its controller's spells, Daze's payment still offered, the
+  g6 float and the stack column read from the encoding); Brotherhood's End (its two modes, damage to creatures and a
+  planeswalker but no player, mana values 0-4, an X permanent, a token, indestructible); Disruptor Flute (flash, the
+  names offered with every face and "Faerie Dragon", the tax on every player's spells, Sneak Attack's and a fetch land's
+  abilities stopped, Lotus Petal's, Simian Spirit Guide's and Mistrise Village's mana abilities not, a back face's
+  loyalty abilities, a split card's half and an Adventure by their names, Show and Tell under Omniscience costing {3}, the
+  Flute gone, the guard); Magus of the Moon (the deck's lands, 123.3; the Magus without abilities; names and supertypes);
+  the deck's lines (Show and Tell into Omniscience, Sneak Attack and Emrakul to the end step's shuffle, turn-one Show and
+  Tell and Sneak Attack from Lotus Petal, City of Traitors, Ancient Tomb and Simian Spirit Guide). `docs/interactions.md`
+  has the matrix. `tools/untested_cards.py` reads the legacy registry (lane A's change): 554 supported (8 legacy), none
+  untested. `docs/rulings.md` regenerated: 1,628 rulings, every class a one tested.
+* **`az.rs`**: `public_state_reaches_the_encoding` with the two perturbations (gaps `[CHOSEN_NAME_GAP]`),
+  `flute_decks_are_refused_to_networks_on_layout_v6` (new; the Sneak and Show 60 accepted).
+  **`constructed.rs`**: the constructed table's test reads the legacy IR's size and the Mountain's definitions.
+* **`FUZZ_POOL=sneak_show`**: the deck's 60 with its two Flusterstorms swapped for two Pyroblasts (its sideboard has
+  one), against the Delver 60 in either seat, one game in three the mirror. **`FUZZ_POOL=sns`**: the six cards four
+  each with the deck's creatures, Sneak Attack, Force of Will, Brainstorm, Lotus Petal and mana (`SNS_DECK`), the same
+  pairings. Constructed play's table; games only. With 200 games or more, `sns` requires each of the six seen on the stack,
+  a free cast, a spell made uncounterable and a name chosen; `sneak_show` Show and Tell, Mistrise Village, a free cast and
+  an uncounterable spell. Flusterstorm and Consign to Memory are not on this branch: the whole deck's fuzz runs at
+  integration.
+* **The deck files**: `data/decks/sneak_show_8014220.txt` (the pinned export, verbatim) and `.json` (the 75 with
+  source, download URL, event, date, player, result, platform; no export name differs). `az/constructed.rs` is the
+  best-of-three lane's to change, so no `Decklist::sneak_show()`: the tests read the JSON.
+
+### 123.8 Results
+
+Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/sneak-show`, normal release profile.
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): **2,319
+  passed, 0 failed, 22 ignored**; `az` 49 passed (the public-state gate with its one named gap, the legacy registry, the
+  Flute's refusal); `constructed` 7; `cards_sneak_show` 56 then (57 with the Daze test added after the run, rerun alone:
+  57 passed; the turn-one test's Sneak Attack line changed after it too, rerun: passed).
+* **Behaviour digests unchanged** (`cargo test --release -p engine --test digest -- --ignored --nocapture`, no
+  `DIGEST_WRITE`): full **53839c837bbaf034** (every one of the 2,500 games equal to `tests/data/digests.txt`),
+  `DIGEST_ENCODING=0` **208c723daced22fe**, `DIGEST_ENCODING=v5` **dc33538c0497dbf0**: main's (37fa30b has no engine
+  change since 60397f3, whose digests ENGINE.md 106 and lane A recorded). The new g6 float and the Mistrise state are
+  zero in every cube game.
+* **`FUZZ_POOL=sns FUZZ_GAMES=20000`** (four shards of 5,000, `FUZZ_FIRST` 0/5000/10000/15000): no failure; 20,000
+  games (wins 9,733 / 9,809, 458 drawn at the turn cap, none aborted), ~30.2 turns and ~300.7 decisions a game,
+  11,303,521 options completed; seen on the stack: Show and Tell 9,087, Omniscience 378, Mistrise Village's ability
+  92,389, Brotherhood's End 8,721, Disruptor Flute 24,171, Magus of the Moon 7,325; spells cast without paying their mana
+  costs 5,363; spells made uncounterable 5,751; names chosen 30,673.
+* **`FUZZ_POOL=sneak_show FUZZ_GAMES=20000`** (four shards of 5,000): no failure; 20,000 games (wins 10,002 / 9,949, 49
+  drawn, none aborted), ~24.0 turns and ~238.6 decisions a game, 7,773,141 options completed; Show and Tell 8,258,
+  Omniscience cast 3 (it mostly enters by Show and Tell), Mistrise Village's ability 21,839; free casts 1,780; spells made
+  uncounterable 2,451.
+* Every check of the default mode: invariants, clones, `determinize` for both viewers (view, known cards, clouds, the
+  information-set check), every option completed in the game and in the sampled worlds, the encodings finite.
+* **Under the `fuzz` profile** (debug assertions: the refreshed decision equal to the asked one at every
+  `determinize`): `sns` 1,000 games and `sneak_show` 1,000: no failure. **`FUZZ_CHANCE=10`**, 600 games each: no failure
+  (`sns` 18,430 chance walks, 7,351 replays whose outcome the force changed; `sneak_show` 14,367 and 5,529).
+  **`FUZZ_BELIEF=2`**, 600 games each (the belief-weighted deal, with its rejection for Show and Tell): no failure
+  (9,074 and 7,005 weighted worlds).
+* **`FUZZ_POOL=delver FUZZ_GAMES=4000`** (the regression check): no failure; Murktide Regent cast 2,031 times, its
+  trigger 84, Prismari Charm 2,937: lane A's numbers to the card (the mirror plays as before).
+* `python -m pytest tools/codegen` (generated.rs current): 2 passed. `bash tools/build_py.sh`, `python -m pytest -q tests`: 273
+  passed, 1 skipped.
+* mtg-bot (`feature/sneak-show-ir` 3fb5f8e1): `cards roundtrip --pool cube legacy eoe` passes; its export is the committed
+  `data/cards`; `tests/test_legacy_sneak.py` 16 and the legacy pool's tests pass; the full suite (`pytest -n 8 --no-cov`)
+  48 failed, 21,097 passed: 47 of the 48 fail at the branch point f4f2d663 too (its `git archive`), the 48th passes alone
+  (an xdist ordering flake).
+* No docs/shortcuts.md entry; no layout change (one v6 spare used: `g6` float 8); no zero-core change.
+
+### 123.9 Limits and integration
+
+* **Flusterstorm and Consign to Memory** are other lanes' (Doomsday lane B; the Delver best-of-three sideboard lane):
+  the deck's main 60 isn't playable on this branch (`FUZZ_POOL=sneak_show` plays two Pyroblasts in their place); the
+  whole deck's fuzz runs at integration.
+* **Constructed best-of-three** (branch delver-bo3): `determinize`'s face-down choice is a rejection over the deal of the
+  game's hidden cards; a best-of-three world deals the opponent's deck first (`sample_hidden_pool`), so a world whose
+  deck holds no card of the kind among the hand's hidden cards would never accept (loud: 1,000,000 tries). Bo3 needs the
+  deck sample conditioned the same way (or the rejection around both). Not reachable here (best-of-one).
+* **Disruptor Flute in networks**: refused until layout v7 (123.6); rules tests and the fuzzer play it.
+* **Merge points**: `legacy_cards.txt` (append order: Doomsday's ten, Delver's five, these six), `tokens.txt` (the
+  " -/- C " line), the legacy pool and the schema (each lane exported its own: re-export at integration),
+  `az/mod.rs` (the Flute's guard beside Cavern's), `public_state.rs` (the gaps list: Cavern's and the Flute's),
+  `tests/az.rs` (`gaps == [CHOSEN_TYPE_MANA_GAP, CHOSEN_NAME_GAP]`, `next == 2`), `tests/constructed.rs` (the
+  Mountain's definitions now in the table), `lower/effect.rs` (one more `lower_effect_*` in the chain),
+  `docs/rulings.md` (regenerate).
+* **Reported, not changed**: Anointed Peacekeeper's name list (123.5).
