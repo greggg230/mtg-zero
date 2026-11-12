@@ -347,5 +347,88 @@
     "text": "Nonbasic lands lose any other land types and abilities they had. They gain the land type Mountain and gain the ability \"{T}: Add {R}.\""
    }
   ]
+ },
+ {
+  "name": "Consign to Memory",
+  "oracle_id": "16c39265-72d9-4c86-a961-8dd38ff9adcd",
+  "rulings": [
+   {
+    "date": "2024-06-07",
+    "source": "wotc",
+    "text": "A copy of a spell can be countered like any other spell, but it must be countered individually. Countering a spell with replicate won't affect the copies."
+   },
+   {
+    "date": "2024-06-07",
+    "source": "wotc",
+    "text": "Triggered abilities use the word \"when,\" \"whenever,\" or \"at.\" They're often written as \"[Trigger condition], [effect].\" Some keywords (such as prowess) are triggered abilities and will use \"when,\" \"whenever,\" or \"at\" in their reminder text."
+   }
+  ]
+ },
+ {
+  "name": "Hydroblast",
+  "oracle_id": "b94c0336-2ca8-4bb1-bb1f-e9babd1826ad",
+  "rulings": [
+   {
+    "date": "2004-10-04",
+    "source": "wotc",
+    "text": "The decision to counter a spell or destroy a permanent is a decision made on announcement before the target is selected. If the spell is redirected, this mode can't be changed, so only targets of the selected type are valid."
+   },
+   {
+    "date": "2016-06-08",
+    "source": "wotc",
+    "text": "Hydroblast can target any spell or permanent, not just a red one. It checks the color of the target only on resolution."
+   }
+  ]
+ },
+ {
+  "name": "Meltdown",
+  "oracle_id": "8fd85a54-f0c7-4e9f-a4b4-b9b513b98d95",
+  "rulings": []
+ },
+ {
+  "name": "Price of Progress",
+  "oracle_id": "e9da499c-fa43-4e94-8395-5c030ff39502",
+  "rulings": []
+ },
+ {
+  "name": "Rough // Tumble",
+  "oracle_id": "5e2bf834-7f92-4da5-beac-0dad817dc233",
+  "rulings": [
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "A split card's characteristics are a combination of its two halves while it is not on the stack. For example, Assault // Battery has a mana value of 5 while it is in your library. If an effect allows you to search your library for a card with mana value 4 or less, you can't find Assault // Battery."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "Each split card has two names. If an effect instructs you to choose a card name, you may choose one of those names, but not both."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "Each split card is a single card. For example, if you discard a split card, you've discarded one card, not two. If an effect counts the number of sorcery cards in your graveyard, Assault // Battery counts once, not twice."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "If an effect allows you to cast a spell with certain characteristics, consider only the characteristics of the half you're casting. For example, if an effect allows you to cast a sorcery spell with mana value 2 or less from among cards in your graveyard, you could cast Assault this way, but not Battery."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "If you copy a spell that's half of a split card, the copy copies that same half. For example, if you copy Assault, the copy is also Assault, not Battery."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "Split cards have two card faces on a single card. The characteristics of the half you didn't cast are ignored while the spell is on the stack."
+   },
+   {
+    "date": "2022-12-08",
+    "source": "wotc",
+    "text": "To cast a split card, choose one of its halves to cast. There's no way to cast both halves of this split card."
+   }
+  ]
  }
 ]

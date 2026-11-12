@@ -112,6 +112,13 @@
 //! question with a next page takes it three times in four (the table's faces and tokens are on its
 //! last pages). With 200 games or more each card must have chosen a name, and the Peacekeeper each
 //! kind of name: a card of one face, a back face, an Adventure, a split card's half, and `PASS`.
+//! `FUZZ_POOL=delver_sb` (ENGINE.md 122): the Delver 75's five sideboard cards outside the cube
+//! in the Delver 60 (`DELVER_SB_DECK`: Consign to Memory, Hydroblast, Price of Progress and Rough
+//! // Tumble three each, Meltdown two, for Daze, Ponder, Unholy Heat, Prismari Charm and three
+//! Brainstorms) against the Delver 60 in either seat, the sideboarded mirror, or the Sneak and
+//! Show 60 (colourless spells, Emrakul's cast trigger), by seed. Constructed play's card table;
+//! every check of the default mode, and with 200 games or more each of the five must have been
+//! cast and a Consign to Memory aimed at a triggered ability. Games only (best-of-one).
 //! `FUZZ_POOL=eoe` (ENGINE.md 99): Edge of Eternities sealed, the set's own
 //! card table (`CardDb::eoe`): random 40-card decks of its supported cards
 //! (17 lands, 23 spells; games only, no matches).
@@ -377,6 +384,9 @@ enum PoolMode {
     /// `FUZZ_POOL=names` (ENGINE.md 127): Anointed Peacekeeper and Disruptor
     /// Flute with the table's cards of more than one face.
     Names,
+    /// `FUZZ_POOL=delver_sb` (ENGINE.md 122): the Delver sideboard's five
+    /// cards in the Delver 60.
+    DelverSb,
 }
 
 fn pool_mode() -> PoolMode {
@@ -395,7 +405,8 @@ fn pool_mode() -> PoolMode {
         Ok("sneak_show") => PoolMode::SneakShow,
         Ok("sns") => PoolMode::Sns,
         Ok("names") => PoolMode::Names,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"names\", \"eoe\" or \"sealed\")"),
+        Ok("delver_sb") => PoolMode::DelverSb,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"names\", \"delver_sb\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -422,9 +433,9 @@ fn dd_b_mode() -> bool {
 }
 
 /// Constructed play's table (`FUZZ_POOL=delver`, `dd_a`, `dd_b`, `dd_c`,
-/// `doomsday`, `sneak_show`, `sns` or `names`).
+/// `doomsday`, `sneak_show`, `sns`, `names` or `delver_sb`).
 fn constructed_mode() -> bool {
-    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode() || names_mode()
+    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode() || names_mode() || delver_sb_mode()
 }
 
 /// `FUZZ_POOL=names` (ENGINE.md 127).
@@ -546,6 +557,70 @@ fn count_names(g: &Game, named: &mut Vec<engine::ids::ObjRef>, seen: &mut Vec<u3
             };
             if chosen.iter().any(|&(p, everyone, n)| (everyone || p != it.controller) && names.contains(&n)) {
                 NAMES_TAXED.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+/// `FUZZ_POOL=delver_sb` (ENGINE.md 122).
+fn delver_sb_mode() -> bool {
+    pool_mode() == PoolMode::DelverSb
+}
+
+/// The Delver 60 of `FUZZ_POOL=delver_sb` (ENGINE.md 122): the Delver 75's five sideboard cards
+/// outside the cube (three each, Meltdown two) in for Daze, Ponder, Unholy Heat, Prismari Charm
+/// and three Brainstorms.
+const DELVER_SB_DECK: &[(u32, &str)] = &[
+    (3, "Consign to Memory"),
+    (3, "Hydroblast"),
+    (2, "Meltdown"),
+    (3, "Price of Progress"),
+    (3, "Rough // Tumble"),
+    (1, "Brainstorm"),
+    (3, "Cori-Steel Cutter"),
+    (4, "Dragon's Rage Channeler"),
+    (2, "Flooded Strand"),
+    (4, "Force of Will"),
+    (1, "Island"),
+    (4, "Lightning Bolt"),
+    (4, "Mishra's Bauble"),
+    (2, "Misty Rainforest"),
+    (2, "Murktide Regent"),
+    (3, "Polluted Delta"),
+    (2, "Scalding Tarn"),
+    (4, "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar"),
+    (1, "Thundering Falls"),
+    (1, "Urza's Bauble"),
+    (4, "Volcanic Island"),
+    (4, "Wasteland"),
+];
+
+fn delver_sb_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = DELVER_SB_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let deck = engine::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    engine::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("DELVER_SB_DECK: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=delver_sb`: the five cards' spells seen on the stack (each stack item once, by its
+/// id; Rough // Tumble by the half cast, copies of Consign to Memory too), and Consign to Memory
+/// spells aimed at a triggered ability.
+static DELVER_SB_SEEN: [AtomicU64; 6] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+static DELVER_SB_AT_ABILITY: AtomicU64 = AtomicU64::new(0);
+const DELVER_SB_SPELLS: [&str; 6] = ["Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough", "Tumble"];
+
+fn count_delver_sb(g: &Game, seen: &mut Vec<u32>) {
+    for it in g.stack() {
+        if seen.contains(&it.id) {
+            continue;
+        }
+        seen.push(it.id);
+        if let engine::game::StackKind::Spell { card } = it.kind {
+            if let Some(k) = DELVER_SB_SPELLS.iter().position(|&n| n == g.name(card)) {
+                DELVER_SB_SEEN[k].fetch_add(1, Ordering::Relaxed);
+                if k == 0 && it.targets.iter().any(|&(_, t)| matches!(t, engine::Target::Stack(_))) {
+                    DELVER_SB_AT_ABILITY.fetch_add(1, Ordering::Relaxed);
+                }
             }
         }
     }
@@ -1835,6 +1910,16 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     if names_mode() {
         return [(names_deck(&mut rng), Vec::new()), (names_deck(&mut rng), Vec::new())];
     }
+    if delver_sb_mode() {
+        // Against Delver in either seat, the sideboarded mirror, or Sneak and Show.
+        let sb = delver_sb_deck();
+        return match seed % 4 {
+            0 => [(sb, Vec::new()), (delver_deck(), Vec::new())],
+            1 => [(delver_deck(), Vec::new()), (sb, Vec::new())],
+            2 => [(sb.clone(), Vec::new()), (sb, Vec::new())],
+            _ => [(sb, Vec::new()), (sneak_show_deck(), Vec::new())],
+        };
+    }
     if eoe_mode() {
         return [(eoe_deck(&mut rng), Vec::new()), (eoe_deck(&mut rng), Vec::new())];
     }
@@ -1972,6 +2057,9 @@ fn play(seed: u64, checks: bool) -> Played {
         }
         if names_mode() {
             count_names(&g, &mut names_named, &mut names_seen);
+        }
+        if delver_sb_mode() && !g.stack().is_empty() {
+            count_delver_sb(&g, &mut stack_seen);
         }
         assert!(steps < 100_000, "seed {seed}: game does not end
 {}", g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
@@ -2433,6 +2521,17 @@ fn fuzz_random_games() {
         // are what is required.)
         if n >= 200 && pool_mode() == PoolMode::SneakShow {
             assert!(seen[0] > 0 && seen[2] > 0 && free > 0 && unc > 0, "the deck's lane cards weren't played: {seen:?} {free} {unc}");
+        }
+    }
+    if delver_sb_mode() {
+        let seen: Vec<u64> = DELVER_SB_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+        let at = DELVER_SB_AT_ABILITY.load(Ordering::Relaxed);
+        println!(
+            "FUZZ_POOL=delver_sb: seen on the stack {}; Consign to Memory aimed at a triggered ability {at}",
+            DELVER_SB_SPELLS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
+        );
+        if n >= 200 {
+            assert!(seen[..5].iter().all(|&c| c > 0) && at > 0, "the five cards weren't played: {seen:?} {at}");
         }
     }
 }
@@ -3005,7 +3104,7 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
 fn fuzz_random_matches() {
     if constructed_mode() && !delver_mode() {
         // (constructed best-of-three is the Delver mirror's: ENGINE.md 120; the other decks have no 75 here)
-        println!("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / names: games only (constructed best-of-three is FUZZ_POOL=delver's)");
+        println!("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / names / delver_sb: games only (constructed best-of-three is FUZZ_POOL=delver's)");
         return;
     }
     if eoe_mode() {

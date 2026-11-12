@@ -1697,6 +1697,7 @@ impl Game {
             Ext::EoeW2(x) => self.exec_eoe_w2(f, x),
             Ext::DoomsdayB(x) => self.exec_doomsday_b(f, x),
             Ext::SnS(x) => self.exec_sns(f, x),
+            Ext::DelverSb(x) => self.exec_delver_sb(f, x),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

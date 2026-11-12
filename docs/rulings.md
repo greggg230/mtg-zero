@@ -16,17 +16,17 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
-| fetched | 1656 | 1298 |
-| class a | 1279 | 1018 |
+| fetched | 1667 | 1301 |
+| class a | 1290 | 1022 |
 | class b | 195 | 147 |
-| class c | 182 | 133 |
-| a, tested (passing) | 1279 | 1018 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 941 | 781 |
-| a, tested only by an earlier test (Oracle or rules) | 338 | 237 |
+| class c | 182 | 132 |
+| a, tested (passing) | 1290 | 1022 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 945 | 781 |
+| a, tested only by an earlier test (Oracle or rules) | 345 | 241 |
 | a, deferred | 0 | 0 |
 | a, untested | 0 | 0 |
 
-Class a by area (distinct texts): mana 178/178, triggers 140/140, stack 138/138, zones 130/130, other 106/106, copies 96/96, dfc 66/66, replacement 63/63, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 178/178, stack 140/140, triggers 140/140, zones 130/130, other 106/106, copies 97/97, dfc 67/67, replacement 63/63, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -1411,14 +1411,14 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `0333f482` | a | combat | a noncreature-turned-creature needs continuous control since turn start to attack or tap, not creature-status time | `rulings_combat::a_permanent_made_a_creature_attacks_and_taps_only_if_controlled_since_the_turn_began_cr_302_6` |
-| `d9bc4e52` | a | mana | off the stack, a split cards mana value is both halves combined, so low-MV searches wont find it | `rulings_mana2::x_is_zero_in_a_library_and_a_revealed_cards_mana_value_is_its_mana_cost_cr_107_3b_202_3` |
-| `b83b7a27` | c | NR | a split card has two names; choosing a card name picks only one of them [part 3, was a/other: the cube's naming cards look at cards outside the stack, where a split card has both names together] | not reachable with the cube's cards |
-| `7892efbd` | a | zones | a split card is a single card for counting purposes, like how many cards are discarded or sorceries in a graveyard | `rulings_zones2::a_split_card_is_one_card_when_discarded_cr_709_4` |
-| `7a9df48b` | c | NR | a spell-casting effect with set characteristics only sees the half of a split card being cast [part 3, was a/dfc: no cube effect casts a spell by mana value or another characteristic where Life's and Death's halves differ (cascade checks the card, then either half fits)] | not reachable with the cube's cards |
-| `ae909e09` | a | copies | a copy of one half of a split card remains that same half | `rulings_copies3::lutris_copy_of_an_alternative_cost_spell_and_of_a_split_half_cr_707_10` |
+| `d9bc4e52` | a | mana | off the stack, a split cards mana value is both halves combined, so low-MV searches wont find it | `cards_delver_sb::cr_709_3_rough_tumble_is_cast_as_one_half`; `cards_delver_sb::cr_202_3d_rough_tumble_in_hand_has_mana_value_eight`; `rulings_mana2::x_is_zero_in_a_library_and_a_revealed_cards_mana_value_is_its_mana_cost_cr_107_3b_202_3` |
+| `b83b7a27` | a | dfc | a split card has two names; choosing a card name picks only one of them [ENGINE.md 122, was c/NR: Disruptor Flute in constructed play names one half of Rough // Tumble (CR 709.4a); part 3, was a/other] | `cards_delver_sb::cr_709_4a_disruptor_flute_naming_rough_taxes_rough_only` |
+| `7892efbd` | a | zones | a split card is a single card for counting purposes, like how many cards are discarded or sorceries in a graveyard | `cards_delver_sb::cr_709_4_rough_tumble_is_one_card_for_murktide_regent`; `rulings_zones2::a_split_card_is_one_card_when_discarded_cr_709_4` |
+| `7a9df48b` | c | NR | a spell-casting effect with set characteristics only sees the half of a split card being cast [part 3, was a/dfc: no cube effect casts a spell by mana value or another characteristic where Life's and Death's halves differ (cascade checks the card, then either half fits); ENGINE.md 122: none in constructed play either, Rough // Tumble's halves (mana value 2 and 6) included: Lurrus casts permanent spells only, and cascade (Bloodbraid Challenger, 5) never hits a card of mana value 8] | not reachable with the cube's cards |
+| `ae909e09` | a | copies | a copy of one half of a split card remains that same half | `cards_delver_sb::cr_707_10_a_copy_of_rough_is_rough`; `rulings_copies3::lutris_copy_of_an_alternative_cost_spell_and_of_a_split_half_cr_707_10` |
 | `64340627` | a | copies | a land that becomes a creature keeps all its other supertypes, types, subtypes, and abilities | `cards_m7b_faces4::life_makes_your_lands_one_one_creatures_until_end_of_turn` |
-| `9fbd1525` | a | dfc | while a split card spell is on the stack, the characteristics of the half you didn't cast are ignored | `cards_m7b_faces4::life_death_is_cast_as_one_half_cr_709_3` |
-| `c622b600` | a | dfc | casting a split card means choosing and casting only one of its two halves | `cards_m7b_faces4::life_death_is_cast_as_one_half_cr_709_3` |
+| `9fbd1525` | a | dfc | while a split card spell is on the stack, the characteristics of the half you didn't cast are ignored | `cards_delver_sb::cr_709_3_rough_tumble_is_cast_as_one_half`; `cards_m7b_faces4::life_death_is_cast_as_one_half_cr_709_3` |
+| `c622b600` | a | dfc | casting a split card means choosing and casting only one of its two halves | `cards_delver_sb::cr_709_3_rough_tumble_is_cast_as_one_half`; `cards_m7b_faces4::life_death_is_cast_as_one_half_cr_709_3` |
 
 ### Toxic Deluge
 
@@ -1812,7 +1812,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `fa2aaa26` | a | stack | a counter/destroy mode is chosen at cast before targeting; redirecting the spell cant change the mode, limiting targets | `rulings_stack3::a_redirected_pyroblast_keeps_its_counter_mode_cr_700_2_115_7` |
+| `fa2aaa26` | a | stack | a counter/destroy mode is chosen at cast before targeting; redirecting the spell cant change the mode, limiting targets | `cards_delver_sb::cr_700_2a_a_redirected_hydroblast_keeps_its_mode`; `rulings_stack3::a_redirected_pyroblast_keeps_its_counter_mode_cr_700_2_115_7` |
 | `4128e050` | a | stack | this removal spell can target anything regardless of color; the color restriction is checked only at resolution | `rulings_stack::pyroblast_may_target_a_nonblue_permanent_and_does_nothing_to_it_cr_608_2b` |
 
 ### Unholy Heat
@@ -3634,6 +3634,32 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `53c9e610` | a | other | Magus of the Moon changes no name or supertype (CR 305.7) | `cards_sneak_show::cr_205_4_the_magus_keeps_names_and_supertypes` |
 | `24283e6f` | a | other | under the Magus nonbasic lands lose their land types and abilities and gain Mountain and {T}: Add {R} (CR 305.7) | `cards_sneak_show::cr_305_7_magus_makes_the_decks_nonbasic_lands_mountains`; `cards_sneak_show::cr_305_7_ancient_tomb_and_city_of_traitors_under_the_magus_tap_for_one_red` |
 
-## Cards without rulings (175)
+### Consign to Memory (legacy, constructed play: ENGINE.md 54)
 
-Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54), Flow State (legacy, constructed play: ENGINE.md 54), Street Wraith (legacy, constructed play: ENGINE.md 54), Brotherhood's End (legacy, constructed play: ENGINE.md 54)
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `5c226a47` | a | copies | a copy of a spell must be countered on its own; countering the replicated spell leaves its copies (Consign to Memory) | `cards_delver_sb::cr_707_10_countering_consign_to_memory_leaves_its_copy` |
+| `19831073` | a | stack | triggered abilities ("when", "whenever", "at"; keyword triggers such as ward and storm) are targets for "counter target triggered ability" | `cards_delver_sb::cr_115_1_consign_to_memory_targets_triggered_abilities_and_colorless_spells`; `cards_delver_sb::cr_702_21a_consign_to_memory_counters_a_ward_trigger`; `cards_delver_sb::cr_702_40a_consign_to_memory_counters_a_storm_trigger` |
+
+### Hydroblast (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `fa2aaa26` | a | stack | a counter/destroy mode is chosen at cast before targeting; redirecting the spell cant change the mode, limiting targets | `cards_delver_sb::cr_700_2a_a_redirected_hydroblast_keeps_its_mode`; `rulings_stack3::a_redirected_pyroblast_keeps_its_counter_mode_cr_700_2_115_7` |
+| `53e85191` | a | stack | Hydroblast can target any spell or permanent; the colour is checked only on resolution | `cards_delver_sb::cr_608_2b_hydroblast_targets_anything_and_checks_the_colour_on_resolution` |
+
+### Rough // Tumble (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `d9bc4e52` | a | mana | off the stack, a split cards mana value is both halves combined, so low-MV searches wont find it | `cards_delver_sb::cr_709_3_rough_tumble_is_cast_as_one_half`; `cards_delver_sb::cr_202_3d_rough_tumble_in_hand_has_mana_value_eight`; `rulings_mana2::x_is_zero_in_a_library_and_a_revealed_cards_mana_value_is_its_mana_cost_cr_107_3b_202_3` |
+| `b83b7a27` | a | dfc | a split card has two names; choosing a card name picks only one of them [ENGINE.md 122, was c/NR: Disruptor Flute in constructed play names one half of Rough // Tumble (CR 709.4a); part 3, was a/other] | `cards_delver_sb::cr_709_4a_disruptor_flute_naming_rough_taxes_rough_only` |
+| `7892efbd` | a | zones | a split card is a single card for counting purposes, like how many cards are discarded or sorceries in a graveyard | `cards_delver_sb::cr_709_4_rough_tumble_is_one_card_for_murktide_regent`; `rulings_zones2::a_split_card_is_one_card_when_discarded_cr_709_4` |
+| `7a9df48b` | c | NR | a spell-casting effect with set characteristics only sees the half of a split card being cast [part 3, was a/dfc: no cube effect casts a spell by mana value or another characteristic where Life's and Death's halves differ (cascade checks the card, then either half fits); ENGINE.md 122: none in constructed play either, Rough // Tumble's halves (mana value 2 and 6) included: Lurrus casts permanent spells only, and cascade (Bloodbraid Challenger, 5) never hits a card of mana value 8] | not reachable with the cube's cards |
+| `ae909e09` | a | copies | a copy of one half of a split card remains that same half | `cards_delver_sb::cr_707_10_a_copy_of_rough_is_rough`; `rulings_copies3::lutris_copy_of_an_alternative_cost_spell_and_of_a_split_half_cr_707_10` |
+| `9fbd1525` | a | dfc | while a split card spell is on the stack, the characteristics of the half you didn't cast are ignored | `cards_delver_sb::cr_709_3_rough_tumble_is_cast_as_one_half`; `cards_m7b_faces4::life_death_is_cast_as_one_half_cr_709_3` |
+| `c622b600` | a | dfc | casting a split card means choosing and casting only one of its two halves | `cards_delver_sb::cr_709_3_rough_tumble_is_cast_as_one_half`; `cards_m7b_faces4::life_death_is_cast_as_one_half_cr_709_3` |
+
+## Cards without rulings (177)
+
+Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54), Flow State (legacy, constructed play: ENGINE.md 54), Street Wraith (legacy, constructed play: ENGINE.md 54), Brotherhood's End (legacy, constructed play: ENGINE.md 54), Meltdown (legacy, constructed play: ENGINE.md 54), Price of Progress (legacy, constructed play: ENGINE.md 54)

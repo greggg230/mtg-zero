@@ -1016,6 +1016,55 @@ fn eoe_support_report() {
     assert!(r.blocked.iter().all(|(_, b)| !b.is_empty()));
 }
 
+/// The legacy cards of constructed play (`data/cards/legacy.ir.json`: the
+/// Delver mirror's two, ENGINE.md 54; the Legacy Doomsday deck's ten, 124;
+/// the Legacy Sneak and Show deck's six, 123; the Delver 75's five sideboard
+/// cards, 122), sorted. Every one is supported (`CardDb::constructed` fails
+/// loudly otherwise); changing the list is deliberate.
+const SUPPORTED_LEGACY: &[&str] = &[
+    "Brotherhood's End",
+    "Cavern of Souls",
+    "Consign to Memory",
+    "Disruptor Flute",
+    "Doomsday",
+    "Edge of Autumn",
+    "Flow State",
+    "Flusterstorm",
+    "Hydroblast",
+    "Leyline of the Void",
+    "Magus of the Moon",
+    "Meltdown",
+    "Misdirection",
+    "Mistrise Village",
+    "Murktide Regent",
+    "Omniscience",
+    "Pact of Negation",
+    "Personal Tutor",
+    "Price of Progress",
+    "Prismari Charm",
+    "Rough // Tumble",
+    "Show and Tell",
+    "Street Wraith",
+];
+
+/// The support report over the legacy cards alone (their own table): every
+/// card of the legacy IR supported, none blocked.
+/// `cargo test -p engine --test support legacy -- --nocapture` prints it.
+#[test]
+fn legacy_support_report() {
+    let cards = engine::db::load_legacy_document().cards;
+    let db = CardDb::from_cards(&cards);
+    let r = SupportReport::from_db(&db);
+    println!("{}", r.render(40));
+    assert_eq!(r.total(), SUPPORTED_LEGACY.len());
+    assert_eq!(r.supported, SUPPORTED_LEGACY);
+    assert!(r.blocked.is_empty(), "{:?}", r.blocked);
+    // And in constructed play's table, after the cube's 546.
+    for n in SUPPORTED_LEGACY {
+        assert!(CardDb::constructed().expect_id(n).is_ok(), "{n}");
+    }
+}
+
 /// The threat view (ENGINE.md 16): which blocking features stand between
 /// the engine and the cube's creatures and other ways to win (planeswalkers
 /// not counted), and a greedy staging order over threats only.

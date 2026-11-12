@@ -1228,6 +1228,21 @@ note: a name chosen as a permanent enters has two forms, Anointed Peacekeeper's 
 engine reads "look at an opponent's hand" into it) and the roto `ChooseCardNameAsEnters` (no look); the engine keeps
 both (`SnsDef::plain_name`).
 
+### W. The Legacy Izzet Delver 75's sideboard (ENGINE.md 122)
+
+No defect (entries 260-279 are this lane's; none used). Checked against their Oracle text and not defects: Consign
+to Memory (`CounterTargetStackObjectFiltered { kinds: [triggered, spell], spell_filter: roto_stack.IsColorless }`,
+`replicate_cost: "{1}"`), Hydroblast (Pyroblast's `ModalChooseOne` of `CounterSpell` and `RemoveTargetPermanents`,
+each `only_if: HasColor R`, the target any spell / any permanent), Meltdown (`RemoveAllMatching { IsArtifact,
+max_mana_value_from_x }`, Vicious Rivalry's shape with the spell's {X}), Price of Progress
+(`DamageEachPlayerPerControlled { per_filter: IsLand & ~IsBasic, multiplier: 2 }`). Rough // Tumble had no IR (its
+halves' "deals N damage to each creature with / without flying" had no grammar: a coverage gap, not wrong data);
+mtg-bot's `cards/parser/legacy_delver_sb.py` adds one parameterized recognizer, `DealNDamageToEachCreatureMatching {
+amount, creature_filter }` (`ObjectNot(HasKeyword flying)` for Rough, `HasKeyword flying` for Tumble), and the split
+card builds through the existing `split_faces` path (Life // Death's). Representational note: "colorless" has two
+classes of the same meaning, `cube_walkers.IsColorless` (the cube's) and `roto_stack.IsColorless` (Consign's); both
+lower to `Filter::Colorless` (CR 105.2c, the object's colour now).
+
 ## Suspected defects (representational)
 
 **7. Animate Dead.** Oracle: "... Enchanted creature gets -1/-0."
