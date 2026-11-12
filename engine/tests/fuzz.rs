@@ -10,7 +10,7 @@
 //! first seed (to rerun a failing seed alone), `FUZZ_MATCHES=n` the matches
 //! (default `FUZZ_GAMES` / 20, at least 20).
 
-use engine::fuzz::games::{self, constructed_mode, eoe_mode, match_spec, new_game, play, play_match, sealed_mode, sealed_unplayable};
+use engine::fuzz::games::{self, constructed_mode, delver_mode, eoe_mode, match_spec, new_game, play, play_match, sealed_mode, sealed_unplayable};
 use engine::fuzz::{NoHooks, Run};
 
 #[test]
@@ -59,7 +59,7 @@ fn fuzz_random_matches() {
 fn same_seed_and_actions_replay_matches_identically() {
     use engine::az::MtgAz;
     use zero_search::game::SearchGame;
-    if constructed_mode() || eoe_mode() || sealed_mode() {
+    if (constructed_mode() && !delver_mode()) || eoe_mode() || sealed_mode() {
         return;
     }
     for seed in 2000..2012 {

@@ -97,7 +97,9 @@ def test_a_fuzz_job_over_aw1(tmp_path):
 
 
 def test_fuzz_jobs_refuse_what_their_loop_would_ignore(tmp_path):
-    for mode, env, why in [('delver-matches', {'FUZZ_POOL': 'delver'}, 'games only'),
+    # (FUZZ_POOL=delver's matches are constructed best-of-three since ENGINE.md 120: a valid mode now)
+    for mode, env, why in [('delver_sb-matches', {'FUZZ_POOL': 'delver_sb'}, 'games only'),
+                           ('x-matches', {'FUZZ_DECK_TILT': '2'}, 'needs FUZZ_POOL=delver'),
                            ('games', {'FUZZ_POOL': 'eoe'}, "fuzz_farm.py's"),
                            ('x-events', {'FUZZ_POOL': 'eoe'}, 'reads no settings'),
                            ('eoe-games', {'FUZZ_POOL': 'eoe', 'FUZZ_DECK_TILT': '2'}, 'would be ignored'),
@@ -222,7 +224,7 @@ def test_the_selftest_guards_the_network(tmp_path):
     settings = json.loads(cp.read_text(encoding='utf-8'))
     import hashlib
     file_sha = hashlib.sha256((tmp_path / 'model.onnx').read_bytes()).hexdigest()
-    # the job line's sha256 is the model FILE's (zero-core docs/az.md 42.3): another one ends the job before the graph
+    # the job line's sha256 is the model FILE's (zero-core docs/az.md 44.3): another one ends the job before the graph
     # is read - no selftest, no game; the error names the job's hash, never the file's
     d = tmp_path / 'wrongsha'
     d.mkdir()

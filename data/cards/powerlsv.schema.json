@@ -161,6 +161,7 @@
    "CounterSpell",
    "CounterTargetSpell",
    "CounterTargetStackObject",
+   "CounterTargetStackObjectFiltered",
    "CounterThenDelayedManaEqualToMV",
    "CounterThenWhenItAttacksMonarch",
    "CreateAttackingTokenForEachOpponent",
@@ -188,6 +189,7 @@
    "CreateXTokensOfTargetPermanentWithHasteEndStepSac",
    "CreaturesCantBlockThisTurn",
    "CutPropulsionEffect",
+   "DamageEachPlayerPerControlled",
    "DealCombatDamageAmountToTarget",
    "DealDamage",
    "DealDamageAnyTarget",
@@ -211,6 +213,7 @@
    "DealDamageToTargetTappedCreature",
    "DealNDamageToEachCreature",
    "DealNDamageToEachCreatureAndPlaneswalker",
+   "DealNDamageToEachCreatureMatching",
    "DealPowerDamageToEachOfUpToKickedTargets",
    "DealXDamage",
    "DefendingPlayerLosesHalfLifeRoundedUp",
@@ -718,6 +721,7 @@
    "cube_walkers.HasManaValueAtMost",
    "cube_walkers.IsColorless",
    "cube_walkers.IsPermanent",
+   "roto_stack.IsColorless",
    "value_predicates.HasCardType",
    "value_predicates.HasManaValueAtMost",
    "value_predicates.IsPermanent"
@@ -7168,6 +7172,68 @@
    "module": "mtg_bot.effects.generic.cube_creatures_ub",
    "qualname": "CounterTargetStackObject"
   },
+  "CounterTargetStackObjectFiltered": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple[StackObjectKind, ...]",
+     "default": [
+      "spell",
+      "activated",
+      "triggered"
+     ],
+     "name": "kinds",
+     "required": false,
+     "type": {
+      "of": {
+       "enum": "StackObjectKind",
+       "t": "enum"
+      },
+      "t": "list"
+     },
+     "type_source": "observed"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "up_to_one",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "lose_abilities_while_source",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "'ObjectPredicate | None'",
+     "default": null,
+     "name": "spell_filter",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "ObjectPredicate"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_stack",
+   "qualname": "CounterTargetStackObjectFiltered"
+  },
   "CounterThenDelayedManaEqualToMV": {
    "category": "Effect",
    "fields": [
@@ -8013,6 +8079,46 @@
    "module": "mtg_bot.effects.bespoke",
    "qualname": "CutPropulsionEffect"
   },
+  "DamageEachPlayerPerControlled": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "ObjectPredicate",
+     "name": "per_filter",
+     "required": true,
+     "type": {
+      "categories": [
+       "ObjectPredicate"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "multiplier",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "str",
+     "default": "permanents",
+     "name": "label",
+     "required": false,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_board",
+   "qualname": "DamageEachPlayerPerControlled"
+  },
   "DealCombatDamageAmountToTarget": {
    "category": "Effect",
    "fields": [
@@ -8838,6 +8944,35 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.legacy_sneak",
    "qualname": "DealNDamageToEachCreatureAndPlaneswalker"
+  },
+  "DealNDamageToEachCreatureMatching": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "amount",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "ObjectPredicate",
+     "name": "creature_filter",
+     "required": true,
+     "type": {
+      "categories": [
+       "ObjectPredicate"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.legacy_delver_sb",
+   "qualname": "DealNDamageToEachCreatureMatching"
   },
   "DealPowerDamageToEachOfUpToKickedTargets": {
    "category": "Effect",
@@ -22280,6 +22415,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_walkers",
    "qualname": "IsPermanent"
+  },
+  "roto_stack.IsColorless": {
+   "category": "ObjectPredicate",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_stack",
+   "qualname": "IsColorless"
   },
   "value_predicates.HasCardType": {
    "category": "ObjectPredicate",

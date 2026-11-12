@@ -2555,7 +2555,9 @@ pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
     // frame's library bag.)
     let flipped = me != knower;
     let pool = &m.pools[op_ as usize];
-    let hidden = m.format == super::Format::Bo3;
+    // (A constructed best-of-three's game 1 plays the registered mains with open decklists - the game
+    // writes `OPP_HIDDEN` itself -, its later games hide the decks within the public 75s: ENGINE.md 120.)
+    let hidden = m.format == super::Format::Bo3 && (!m.constructed_bo3 || a.g.spec().hidden_decks);
     // (Hidden decklists, ENGINE.md 102: nothing of the knower's opponent's
     // pool is known; framed in their seat, the frame's opponent is the
     // knower, whose own pool it is.)

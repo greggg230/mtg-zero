@@ -1,4 +1,4 @@
-"""mtgz-worker's game records (zero-farm phase 3; docs/ENGINE.md 114.6; zero-core docs/az.md 43, search.md 2.15): on
+"""mtgz-worker's game records (zero-farm phase 3; docs/ENGINE.md 114.6; zero-core docs/az.md 45, search.md 2.17): on
 the cube, the Delver mirror, EoE sealed and EoE with a deck choice (value choices: searched, never recorded, yet real
 moves), every game the worker writes as a record replays through this build's engine module (`replay_rows`, the
 trainer's path) into the rows of the shard it writes of the same games, bit for bit (zero-core's

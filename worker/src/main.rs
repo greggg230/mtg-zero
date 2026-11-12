@@ -1,4 +1,4 @@
-//! mtgz-worker: MTG Zero's native worker (zero-farm; zero-core's `zero_worker`, docs/az.md 42
+//! mtgz-worker: MTG Zero's native worker (zero-farm; zero-core's `zero_worker`, docs/az.md 44
 //! there; docs/ENGINE.md 114 here). The games `py/src/lib.rs` registers for Python, without PyO3, and
 //! the engine's fuzz loops (`fuzz`: engine::fuzz, ENGINE.md 114.1): `mtgz-worker serve` (the
 //! agent<->worker protocol aw/1), `selfplay ...`, `eval ...`, `fuzz ...`, `fuzz-check ...`, `check-config

@@ -52,15 +52,26 @@ fn the_pinned_75_and_its_provenance() {
     let (main, side) = d.parse_export(constructed::IZZET_DELVER_EXPORT).unwrap();
     assert_eq!(main, d.main);
     assert_eq!(side, d.sideboard);
-    // Every maindeck card is supported in constructed play; the sideboard's
-    // five cards outside the cube are not (yet: ENGINE.md 54.7).
+    // Every card of the 75 is supported in constructed play (the
+    // sideboard's five outside the cube since ENGINE.md 122), and the deck
+    // rules hold over the deck and the sideboard together (CR 100.2a, 100.4a).
     let ids = Decklist::ids(db(), &d.main).unwrap();
     assert_eq!(ids.len(), 60);
     constructed::check(db(), &ids, &[]).unwrap();
-    assert_eq!(
-        d.unsupported_sideboard(db()),
-        ["Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough // Tumble"]
-    );
+    assert!(d.unsupported_sideboard(db()).is_empty());
+    let sb = Decklist::ids(db(), &d.sideboard).unwrap();
+    assert_eq!(sb.len(), 15);
+    constructed::check(db(), &ids, &sb).unwrap();
+    // The legacy cards of its sideboard, in the registry's order: the five.
+    let has = |list: &[(u32, String)], n: &str| list.iter().any(|e| e.1 == n);
+    let reg = identity::legacy_registry();
+    let side_only: Vec<&str> = reg.iter().copied().filter(|n| has(&d.sideboard, n) && !has(&d.main, n)).collect();
+    assert_eq!(side_only, ["Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough // Tumble"]);
+    // A spec with the sideboard is accepted on layout v6 (nothing in it needs
+    // layout v7).
+    let side: Vec<String> = d.sideboard.iter().flat_map(|e| std::iter::repeat_n(e.1.clone(), e.0 as usize)).collect();
+    let spec = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": d.main_names(), "p1": d.main_names(), "p0_sideboard": side.clone(), "p1_sideboard": side}});
+    assert!(MtgSpec::parse(&spec.to_string()).unwrap().constructed);
 }
 
 /// The Legacy Doomsday 75 (ENGINE.md 124.4): its provenance, the export it
@@ -120,8 +131,8 @@ fn the_doomsday_75_and_its_provenance() {
 
 /// The Legacy Sneak and Show 75 (ENGINE.md 123; MTGGoldfish 8014220): its provenance, the export
 /// verbatim (MTGGoldfish's `sideboard` line before the 15), every main-deck card supported and
-/// the main 60 a best-of-one spec networks may play; the sideboard's Consign to Memory (the Delver
-/// best-of-three lane's) is the one unsupported card, and its Disruptor Flute is refused to
+/// the main 60 a best-of-one spec networks may play; the sideboard supported too (its Consign to
+/// Memory since ENGINE.md 122), and its Disruptor Flute is refused to
 /// networks until layout v7 (`az::needs_layout_v7`). (Read from `data/decks`: `az/constructed.rs`
 /// is the best-of-three lane's to change.)
 #[test]
@@ -148,8 +159,8 @@ fn the_sneak_show_75_and_its_provenance() {
     let in_main: Vec<&str> = reg.iter().copied().filter(|n| has(&d.main, n)).collect();
     assert_eq!(in_main, ["Prismari Charm", "Flusterstorm", "Show and Tell", "Omniscience", "Mistrise Village"]);
     let side_only: Vec<&str> = reg.iter().copied().filter(|n| has(&d.sideboard, n) && !has(&d.main, n)).collect();
-    assert_eq!(side_only, ["Brotherhood's End", "Disruptor Flute", "Magus of the Moon"]);
-    assert_eq!(d.unsupported_sideboard(db()), ["Consign to Memory"]);
+    assert_eq!(side_only, ["Brotherhood's End", "Disruptor Flute", "Magus of the Moon", "Consign to Memory"]);
+    assert!(d.unsupported_sideboard(db()).is_empty());
     // A best-of-one spec with the main 60 (against itself and the Delver 60): accepted.
     for p1 in [d.main_names(), delver().main_names()] {
         let spec = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": d.main_names(), "p1": p1}});
@@ -222,9 +233,9 @@ fn the_constructed_spec() {
     }
     let names = delver().main_names();
     let bad = |v: serde_json::Value| MtgSpec::parse(&v.to_string()).unwrap_err();
-    // Best-of-three isn't built for constructed decks; nor random,
-    // evaluation or pool decks (limited's).
-    assert!(bad(serde_json::json!({"constructed": true, "format": "bo3", "decks": {"p0": names, "p1": names}})).contains("bo1"));
+    // Best-of-three is constructed best-of-three (ENGINE.md 120: tests/constructed_bo3.rs); never
+    // random, evaluation or pool decks (limited's).
+    MtgSpec::parse(&serde_json::json!({"constructed": true, "format": "bo3", "decks": {"p0": names, "p1": names}}).to_string()).unwrap();
     assert!(bad(serde_json::json!({"constructed": true})).contains("decklists"));
     assert!(bad(serde_json::json!({"constructed": true, "decks": "eval"})).contains("decklists"));
     // The deck rules are checked.
@@ -248,7 +259,8 @@ fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     let (cube, con) = (CardDb::cube(), CardDb::constructed());
     // The cube's table has no legacy card; the constructed one has them all:
     // the registry's (the Delver mirror's, ENGINE.md 54; the Doomsday deck's,
-    // 124; the Sneak and Show deck's, 123), and exactly the legacy IR's.
+    // 124; the Sneak and Show deck's, 123; the Delver sideboard's, 122), and
+    // exactly the legacy IR's.
     let legacy = identity::legacy_registry();
     for &n in &legacy {
         assert!(cube.id(n).is_none(), "{n} in the cube's card table");
@@ -256,24 +268,39 @@ fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     }
     assert!(cube.unsupported().is_empty() && con.unsupported().is_empty());
     // Every cube card at the same id, with the same definition; its tokens
-    // and faces k ids later (after the k legacy cards), the same too.
+    // and faces k ids later (after the k legacy cards), the same too; the
+    // face-down characteristics (the cube table's last definition) after the
+    // legacy cards' faces.
     let k = legacy.len() as u16;
     assert_eq!(k as usize, engine::db::load_legacy_document().cards.len());
     assert_eq!(con.num_cards(), cube.num_cards() + k as usize);
+    assert_eq!(cube.face_down_def() as usize, cube.len() - 1);
+    // The legacy cards make no token; their faces are Rough // Tumble's two
+    // halves (a split card, ENGINE.md 122), each with its card's identity,
+    // after the cube's tokens and faces.
+    let rt = con.id("Rough // Tumble").unwrap();
+    let ik_all = identity::identities(con);
+    let faces: Vec<usize> = (cube.len() - 1 + k as usize..con.face_down_def() as usize).collect();
+    let names: Vec<&str> = faces.iter().map(|&i| con.def(i as u16).name.as_str()).collect();
+    assert_eq!(names, ["Rough", "Tumble"]);
+    for &i in &faces {
+        assert!(con.is_face(i as u16) && !con.def(i as u16).token && con.def(i as u16).front == Some(rt));
+        assert_eq!(ik_all[i], ik_all[rt as usize], "a face has its card's identity");
+    }
+    assert_eq!(con.def(rt).halves, Some((faces[0] as u16, faces[1] as u16)));
     // Then, at the end, the abilities of a nonbasic land that is a Mountain
     // (Magus of the Moon's, CR 305.7: EoE W2's `moon_base` and one variant per
-    // definition with latent abilities, ENGINE.md 99.12, 123): the legacy
-    // cards make no token or face.
+    // definition with latent abilities, ENGINE.md 99.12, 123).
     let latent = (0..con.len()).filter(|&i| con.def(i as u16).latent > 0 && !con.def(i as u16).name.is_empty()).count();
-    assert_eq!(con.len(), cube.len() + k as usize + 1 + latent, "the legacy cards make no token or face; the Mountain's definitions");
+    assert_eq!(con.len(), cube.len() + k as usize + faces.len() + 1 + latent, "the legacy faces; the Mountain's definitions");
     // (the Mountain's definitions: no name, a registered key, as in the EoE table)
-    let ik_all = identity::identities(con);
-    for i in cube.len() + k as usize..con.len() {
+    for i in con.face_down_def() as usize + 1..con.len() {
         assert!(con.def(i as u16).name.is_empty() && ik_all[i] != identity::UNKNOWN, "definition {i}");
     }
-    let to_cube = |id: u16| if id < cube.num_cards() as u16 { id } else { id - k };
+    let (fd_cube, fd_con) = (cube.face_down_def(), con.face_down_def());
+    let to_cube = |id: u16| if id < cube.num_cards() as u16 { id } else if id == fd_con { fd_cube } else { id - k };
     for i in 0..cube.len() as u16 {
-        let j = if i < cube.num_cards() as u16 { i } else { i + k };
+        let j = if i < cube.num_cards() as u16 { i } else if i == fd_cube { fd_con } else { i + k };
         let a = cube.def(i);
         let mut b = con.def(j).clone();
         b.back = b.back.map(to_cube);
@@ -475,3 +502,4 @@ fn the_heuristic_plays_the_mirror() {
     // (A sanity floor: ENGINE.md 54.6 measures the score over 2,000 games.)
     assert!(random_lost >= 13, "the heuristic beat random only {random_lost}/20 in the mirror");
 }
+

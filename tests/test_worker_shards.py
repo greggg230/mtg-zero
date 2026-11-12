@@ -1,4 +1,4 @@
-"""mtgz-worker's shards (zero-farm; zero-core docs/az.md 42, docs/ENGINE.md 114) are taken by zero-core as a remote
+"""mtgz-worker's shards (zero-farm; zero-core docs/az.md 44, docs/ENGINE.md 114) are taken by zero-core as a remote
 worker's: the remote self-play arrival check (`RemotePlay._check`: game / features / actions, the non-finite
 guard) accepts every shard, and the training window loads them, sparse and dense. Skipped without a built
 worker (`cargo build --release -p mtgz_worker`; env MTGZ_WORKER names the executable)."""

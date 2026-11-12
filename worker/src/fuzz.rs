@@ -26,9 +26,10 @@ const FARM_MODES: &[(&str, &str, &[(&str, &str)], u64)] = &[
 pub struct MtgFuzz;
 
 /// The engine's `FUZZ_POOL` values (engine::fuzz::games `pool_mode`), and those whose matches loop plays
-/// nothing (`matches_skipped`: constructed play's pools, EoE, sealed).
-const POOLS: &[&str] = &["interactions", "exponential", "drafted", "delver", "eoe", "sealed", "dd_a", "dd_b", "dd_c", "doomsday", "sneak_show", "sns", "names"];
-const GAMES_ONLY: &[&str] = &["delver", "eoe", "sealed", "dd_a", "dd_b", "dd_c", "doomsday", "sneak_show", "sns", "names"];
+/// nothing (`matches_skipped`: constructed play's pools but the Delver mirror's - its matches are constructed
+/// best-of-three, ENGINE.md 120 -, EoE, sealed).
+const POOLS: &[&str] = &["interactions", "exponential", "drafted", "delver", "eoe", "sealed", "dd_a", "dd_b", "dd_c", "doomsday", "sneak_show", "sns", "names", "delver_sb"];
+const GAMES_ONLY: &[&str] = &["eoe", "sealed", "dd_a", "dd_b", "dd_c", "doomsday", "sneak_show", "sns", "names", "delver_sb"];
 /// The pools whose games the engine also plays with hidden decklists (`FUZZ_HIDDEN_DECKS=1`: the default
 /// decks and these, engine::fuzz::games docs).
 const HIDDEN_POOLS: &[&str] = &["eoe", "sealed", "names"];
@@ -61,7 +62,7 @@ fn check_env(kind: &str, env: &[(String, String)]) -> Result<(), String> {
     }
     let allowed: &[&str] = match (kind, hidden) {
         ("events", _) => &[],
-        ("matches", _) => &["FUZZ_POOL", "FUZZ_BELIEF", "FUZZ_SKIP", "FUZZ_GROUPS"],
+        ("matches", _) => &["FUZZ_POOL", "FUZZ_BELIEF", "FUZZ_SKIP", "FUZZ_GROUPS", "FUZZ_DECK_TILT"],
         ("games", false) => &["FUZZ_POOL", "FUZZ_BEST_SHARE", "FUZZ_BELIEF", "FUZZ_CHANCE", "FUZZ_SKIP", "FUZZ_LOG", "FUZZ_GROUPS"],
         ("games", true) => &["FUZZ_POOL", "FUZZ_HIDDEN_DECKS", "FUZZ_BEST_SHARE", "FUZZ_DECK_TILT", "FUZZ_DECK_CHOICE", "FUZZ_DEAL_SAMPLES", "FUZZ_SKIP", "FUZZ_LOG"],
         _ => return Err(format!("loop {kind:?}")),
@@ -94,6 +95,10 @@ fn check_env(kind: &str, env: &[(String, String)]) -> Result<(), String> {
     }
     if get("FUZZ_BEST_SHARE").is_some() && pool != Some("sealed") {
         return Err("FUZZ_BEST_SHARE: needs FUZZ_POOL=sealed".into());
+    }
+    if kind == "matches" && get("FUZZ_DECK_TILT").is_some() && pool != Some("delver") {
+        // (the constructed best-of-three's deck-tilted worlds read it; ENGINE.md 120)
+        return Err("FUZZ_DECK_TILT in a matches mode: needs FUZZ_POOL=delver (constructed best-of-three)".into());
     }
     if get("FUZZ_DECK_CHOICE").is_some() && pool != Some("sealed") {
         return Err("FUZZ_DECK_CHOICE: needs FUZZ_POOL=sealed and FUZZ_HIDDEN_DECKS=1".into());

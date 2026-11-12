@@ -1171,9 +1171,11 @@ fn the_opening_encodes_no_hidden_information() {
 /// The positions of the public-state gate: mid-game states (mixed heuristic
 /// and random play, one every ~`every` decisions, sideboarding left out) of
 /// the cube's random decks, the Delver mirror, best-of-three matches, a
-/// drafted match (a random 2v2 `team_draft` event's spec) and the cube's
-/// random decks with hidden decklists (ENGINE.md 102; last, so the others'
-/// positions are as before), `per` of each.
+/// drafted match (a random 2v2 `team_draft` event's spec), the cube's
+/// random decks with hidden decklists (ENGINE.md 102), EoE sealed (105) and
+/// the Delver mirror's constructed best-of-three in its later games, whose
+/// 60s are hidden within the public 75s (ENGINE.md 120; each kind added
+/// last, so the others' positions are as before), `per` of each.
 fn gate_positions(per: usize, seed: u64) -> Vec<(&'static str, MtgAz)> {
     use engine::az::draft::{DraftSpec, TeamDraftAz};
     let mut specs: Vec<(&'static str, MtgSpec)> = opening_specs();
@@ -1192,6 +1194,9 @@ fn gate_positions(per: usize, seed: u64) -> Vec<(&'static str, MtgAz)> {
     // Edge of Eternities sealed (hidden decklists: the sealed spec's default): the EoE table, its
     // identity space (ENGINE.md 105); last, so the other kinds' positions are as before
     specs.push(("eoe", MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "arena"}, "max_turns": 60}"#).unwrap()));
+    // the Delver mirror's constructed best-of-three (ENGINE.md 120), positions of games 2-3 only (game 1
+    // is the open "delver" kind's model); last, so the other kinds' positions are as before
+    specs.push(("constructed bo3", constructed_bo3_spec()));
     let mut out = Vec::new();
     for (name, sp) in specs {
         let mut h = Heuristic::new(seed);
@@ -1201,7 +1206,7 @@ fn gate_positions(per: usize, seed: u64) -> Vec<(&'static str, MtgAz)> {
             let mut g = MtgAz::new_game(&sp, 2, seed * 1000 + s).unwrap();
             s += 1;
             while g.to_move().is_some() && n < per {
-                if g.sideboarding().is_none() && g.g.turn().number >= 2 && rng.below(40) == 0 {
+                if g.sideboarding().is_none() && g.g.turn().number >= 2 && (name != "constructed bo3" || g.m.game_no >= 2) && rng.below(40) == 0 {
                     out.push((name, g.clone()));
                     n += 1;
                 }
@@ -2598,8 +2603,9 @@ fn belief_deals_keep_every_determinize_invariant() {
                 d.g.check_knowledge().unwrap_or_else(|e| panic!("{name}: {e}"));
                 for p in 0..2u8 {
                     assert_eq!(g.g.player(p).hand.len(), d.g.player(p).hand.len(), "{name}: hand size");
-                    // (EoE sealed is a hidden-decklist game too: its spec's default, ENGINE.md 102.6, 105)
-                    if name != "bo3" && name != "drafted" && name != "hidden decklists" && name != "eoe" {
+                    // (EoE sealed is a hidden-decklist game too: its spec's default, ENGINE.md 102.6, 105; a
+                    // constructed best-of-three's later games deal the opponent's 60, ENGINE.md 120)
+                    if name != "bo3" && name != "drafted" && name != "hidden decklists" && name != "eoe" && name != "constructed bo3" {
                         assert_eq!(cards_of(&g, p), cards_of(&d, p), "{name}: P{p}'s cards");
                     }
                 }
@@ -2725,7 +2731,8 @@ fn the_belief_weights_ignore_the_opponents_hidden_cards() {
             if bo3 {
                 w.sample_hidden_pool_for(v as u8, &mut Rng::new(9));
             }
-            if w.hidden_decklists() {
+            // (hidden decklists, and a constructed best-of-three's later games: ENGINE.md 120)
+            if w.deals_hidden_decks() {
                 w.sample_hidden_deck_for(v as u8, &mut Rng::new(9), None);
             }
             engine::az::belief::deal_weights(&w.g, v as u8, &p, 1.0, 20.0)
@@ -2927,4 +2934,124 @@ fn the_deck_tilt_ignores_the_opponents_hidden_cards() {
     }
     println!("{worlds} worlds, {differ} with another opponent deck");
     assert!(worlds >= 60 && differ > worlds / 2, "{worlds} {differ}");
+}
+
+// ---- Constructed best-of-three: the hidden 60s (ENGINE.md 120) ----
+
+/// The Delver mirror's constructed best-of-three: both seats the pinned main and the 75's supported
+/// sideboard cards (all 15 since ENGINE.md 122; 120.1 played the smoke's 68 before).
+fn constructed_bo3_spec() -> MtgSpec {
+    let d = engine::az::constructed::Decklist::izzet_delver();
+    let db = CardDb::constructed();
+    let main = d.main_names();
+    let side: Vec<String> = d.sideboard.iter().filter(|(_, n)| db.id(n).is_some()).flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect();
+    MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "format": "bo3",
+        "decks": {"p0": main, "p1": main, "p0_sideboard": side, "p1_sideboard": side}}).to_string())
+    .unwrap()
+}
+
+/// The opponent's chosen 60 never reaches the viewer (ENGINE.md 120.4): two matches identical but for
+/// one player's sideboarding after game 1 (it keeps its main in one, a random other 60 of its 75 in the
+/// other; the other player keeps) give the other player the same encoding and, when it decides, the
+/// same legal actions at every step of game 2 while the chance keys agree (zero-core's child signature,
+/// across real matches: no world sampling involved).
+#[test]
+fn constructed_bo3_a_hidden_60_never_reaches_the_other_players_encoding_or_actions() {
+    let sp = constructed_bo3_spec();
+    let (mut matches, mut steps, mut decided) = (0, 0, 0);
+    for seed in 0..scale(16) {
+        let (mut rng, mut h, mut keys) = (Rng::new(seed ^ 0x113), Heuristic::new(seed), Vec::new());
+        let mut g = MtgAz::new_game(&sp, 2, seed).unwrap();
+        while g.sideboarding().is_none() && g.to_move().is_some() {
+            let a = mixed(&g, &mut h, &mut rng);
+            g.step(a, &mut keys).unwrap();
+        }
+        if g.sideboarding().is_none() {
+            continue;
+        }
+        let o = g.sideboarding().unwrap().decider() as usize;
+        let v = 1 - o;
+        // o sideboards (keeps, or walks to another 60), then v keeps
+        let (mut keep, mut change) = (g.clone(), g.clone());
+        keep.step(act::PASS, &mut keys).unwrap();
+        while change.sideboarding().is_some_and(|s| s.decider() as usize == o) {
+            let l: Vec<u16> = legal(&change).into_iter().filter(|&x| x != act::PASS || change.sideboarding().unwrap().last.is_some()).collect();
+            let x = l[rng.below(l.len() as u32) as usize];
+            change.step(x, &mut keys).unwrap();
+        }
+        for x in [&mut keep, &mut change] {
+            x.step(act::PASS, &mut keys).unwrap();
+            assert!(x.sideboarding().is_none() && x.m.game_no == 2);
+        }
+        assert_ne!(keep.m.decks[o], change.m.decks[o], "seed {seed}: the two 60s differ");
+        assert_eq!(keep.m.decks[v], change.m.decks[v]);
+        matches += 1;
+        for step in 0..400 {
+            if keep.to_move().is_none() || change.to_move().is_none() {
+                break;
+            }
+            assert!(enc(&keep, v) == enc(&change, v), "seed {seed} step {step}: P{v}'s encoding differs with P{o}'s other 60");
+            let (lk, lc) = (legal(&keep), legal(&change));
+            if keep.to_move() != change.to_move() || lk != lc {
+                assert!(!(keep.to_move() == Some(v) && change.to_move() == Some(v)), "seed {seed} step {step}: P{v}'s options differ");
+                break;
+            }
+            decided += (keep.to_move() == Some(v)) as u32;
+            let a = lk[rng.below(lk.len() as u32) as usize];
+            let (mut kk, mut kc) = (Vec::new(), Vec::new());
+            keep.step(a, &mut kk).unwrap();
+            change.step(a, &mut kc).unwrap();
+            steps += 1;
+            if kk != kc {
+                break;
+            }
+        }
+    }
+    println!("{matches} twin matches, {steps} steps of game 2 in step, {decided} of them the other player's decisions");
+    assert!(matches >= 8 && steps > 50 && decided > 10, "{matches} {steps} {decided}");
+}
+
+/// Worlds of a constructed best-of-three's later games (ENGINE.md 120.4), for the decider and the
+/// other viewer, uniform and deck-tilted (random predictions, deck tilts 0.5 / 1 / 8): the decider's
+/// actions and each viewer's whole encoding unchanged, the dealt 60 a legal deck of the public 75,
+/// mostly another than the real one; the deck target each world's own.
+#[test]
+fn constructed_bo3_determinize_keeps_the_view_and_deals_legal_60s() {
+    let mut rng = Rng::new(113);
+    let (mut worlds, mut other) = (0, 0);
+    for (name, g) in gate_positions(scale(24) as usize, 113).into_iter().filter(|(n, _)| *n == "constructed bo3") {
+        assert!(g.m.game_no >= 2 && g.g.spec().hidden_decks && g.g.spec().deck_clouds && !g.hidden_decklists());
+        let mover = g.to_move().unwrap();
+        for viewer in [mover, 1 - mover] {
+            let o = 1 - viewer;
+            let x0 = enc(&g, viewer);
+            for k in 0..4 {
+                let mut d = g.clone();
+                if k == 0 {
+                    d.determinize(viewer, &mut zero_search::rng::Rng::new(rng.next_u64()));
+                } else {
+                    let b = zbelief_deck(&mut rng, (k == 2) as u8 as f64, [0.5, 1.0, 8.0][k - 1], 20.0);
+                    d.determinize_with(viewer, &mut zero_search::rng::Rng::new(rng.next_u64()), &b);
+                }
+                assert_eq!(d.to_move(), Some(mover), "{name}");
+                if viewer == mover {
+                    assert_eq!(legal(&g), legal(&d), "{name}: the decider's actions");
+                }
+                assert!(enc(&d, viewer) == x0, "{name}: P{viewer}'s encoding changed in a world");
+                let pool = &d.m.pools[o];
+                assert_eq!(pool.list, g.m.pools[o].list, "{name}: the 75 is public");
+                let counts = &d.m.decks[o];
+                assert_eq!(counts.iter().map(|&c| c as usize).sum::<usize>(), 60);
+                assert!(counts.iter().zip(&pool.list).all(|(&c, e)| c <= e.1), "{name}: more copies than the 75");
+                assert_eq!(cards_of(&d, viewer as u8), cards_of(&g, viewer as u8), "{name}: the viewer's own cards");
+                assert_eq!(deck_target(&d, viewer), unseen_cards(&d, viewer), "{name}: the world's deck target is its own");
+                d.g.check_invariants().unwrap();
+                d.g.check_knowledge().unwrap();
+                other += (d.m.decks[o] != g.m.decks[o]) as u32;
+                worlds += 1;
+            }
+        }
+    }
+    println!("{worlds} constructed worlds, {other} with another 60 than the real one");
+    assert!(worlds >= 150 && other * 2 > worlds, "{worlds} {other}");
 }

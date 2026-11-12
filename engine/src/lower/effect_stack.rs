@@ -20,6 +20,12 @@ fn and(a: Filter, b: Filter) -> Filter {
 /// "Target spell, activated ability, or triggered ability" from the IR's
 /// kinds.
 fn stack_object_filter(kinds: &[enums::StackObjectKind]) -> Filter {
+    stack_object_filter_with(kinds, Filter::Any)
+}
+
+/// [`stack_object_filter`] with the spells limited to those matching
+/// `spell` ("target triggered ability or colorless spell", ENGINE.md 122).
+pub(crate) fn stack_object_filter_with(kinds: &[enums::StackObjectKind], spell_filter: Filter) -> Filter {
     let mut spell = false;
     let mut ab = 0u8;
     for k in kinds {
@@ -31,7 +37,7 @@ fn stack_object_filter(kinds: &[enums::StackObjectKind]) -> Filter {
     }
     let mut v = Vec::new();
     if spell {
-        v.push(Filter::Spell(Box::new(Filter::Any)));
+        v.push(Filter::Spell(Box::new(spell_filter)));
     }
     if ab != 0 {
         v.push(Filter::Ability(ab));
