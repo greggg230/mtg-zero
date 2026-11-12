@@ -25239,8 +25239,8 @@ ff5ba0847e85 in 935s.** The commit after it adds this paragraph only.
 
 ## 112. Run 2's deck choice by the evaluator, retrained inside the run (branch `deck-choice-eval`, 2026-11-11)
 
-Branch `deck-choice-eval` (from main 60397f3; main 37fa30b, eval-v2's ENGINE.md 111, merged in); zero-core `feat/selfplay-spec-hook` **b0a3a3b** (from f9ca5c3, pushed),
-the pin f9ca5c3 -> b0a3a3b. **Why** (the user, 2026-11-11, approved): run 2 chooses each seat's deck with the learned deck
+Branch `deck-choice-eval` (from main 60397f3; main 37fa30b, eval-v2's ENGINE.md 111, merged in); zero-core `feat/selfplay-spec-hook` **ef63ee1** (from f9ca5c3, pushed),
+the pin f9ca5c3 -> ef63ee1. **Why** (the user, 2026-11-11, approved): run 2 chooses each seat's deck with the learned deck
 evaluator (108), not the network's value (107.2): in pool 2030 the evaluators' pick beat the value pick by **+23.1 points
 [16.7, 29.4]** (384 paired games, iteration 78 piloting at 64 simulations; `E:/mtg-zero/s4a/races/eoe1-iter_0078`, 108.6),
 and 108.2 shows the value is a weak, half-memorising judge out of sample. The evaluator is retrained during the run on its
@@ -25341,7 +25341,7 @@ colours and a splash at most.
 **Where it belongs.** The deck choice is the game's (the engine reads the file named in the spec); when to retrain, on
 which games, and which file the next phase's spec names are the run's - but the rolling self-play driver lives across
 iterations with one spec (zero-core `Run.roll`), and nothing in mtgz runs at an iteration boundary. So zero-core
-`feat/selfplay-spec-hook` b0a3a3b (its docs/az.md 40, search.md 2.13; **opt-in, defaults byte-identical**) gives a game
+`feat/selfplay-spec-hook` ef63ee1 (its docs/az.md 40, search.md 2.13; **opt-in, defaults byte-identical**) gives a game
 package three hooks: `settings` (its own run settings: flags, presets, config.json), `selfplay_specs` (game -> fn(run,
 it) -> the phase's spec or None; a rolling driver switches between phases with the new `Driver.set_spec` - the games it
 starts from then on, games in flight keep theirs -, a phase's driver is made with it; remote self-play refuses a changed
@@ -25404,7 +25404,9 @@ ran the evaluation every iteration (4 games each: the CLI and the in-run path bo
 `eoe-2e` = eoe-1 + the spec's deck choice by the evaluator (K 32, explore 0.1; the file a launch flag) + `evaluator_every`
 4, `evaluator_window` 40, `evaluator_min_window` 8, `evaluator_val_iters` 2, `evaluator_kind` set, `evaluator_half_life` 40
 (v2's pick, 111.4), `evaluator_threads` 4, `deckchoice_eval_games` 64 (one game per evaluation pair: the Mac's budget,
-109.3); `eoe-2e-smoke` the same on eoe-smoke (K 8, a retrain every iteration on 2). It starts by **forking from
+109.3); `eoe-2e-smoke` the same on eoe-smoke (K 8, a retrain every iteration on 2). **Run 1's search settings stay**
+(64 / 16 simulations, payments at 4, the evaluation's 32: the search sweep found iteration 78's strength against the
+heuristic saturates at 64 simulations - 16: 23.2%, 32: 28.2%, 64: 31.8%, 256: 32.5%). It starts by **forking from
 `E:/mtg-zero/s4a/deep128x8/iter_0078_x2.pt`** (run 1's iteration 78 deepened 128 x 4 -> 128 x 8, bit-identical values) as
 a continuation of run 1 at iteration 78 (`fork_run.py --net`: run 1's window, Elo and metrics to 78, a fresh optimizer with
 run 1's 100 warm-up steps): run 1's saved `lr` 1e-3, `lr_halve_every` 30 and `lr_min` 1e-4 continue its schedule -
@@ -25539,7 +25541,45 @@ the engine sources of every later commit of this branch are the same):
   with another deck; 2.91M information-set steps; ~4,760-4,790 s a chunk of 10,000).
 
 **Digests**: no digest game plays the EoE table, and every spec without `"by": "evaluator"` builds, deals and plays as before
-(107.1's pin of the builder, seats and prior samples holds): full **ae88eae20abb14ca**, `DIGEST_ENCODING=0`
-**d0da2e6030aa0d08** expected unchanged (the engine gate below checks them).
+(107.1's pin of the builder, seats and prior samples holds): **unchanged**, full **53839c837bbaf034**,
+`DIGEST_ENCODING=0` **208c723daced22fe** - main's (measured on 60397f3, this branch's base, and on this branch).
 
-@@GATES
+**Gates** (CPU, `--no-mac`, `--jobs 4`, `--target-dir E:/cargo-target/mtg-zero/deck-choice-eval`; the desktop shared with
+other agents' gates and runs, the CPU at 96-100% much of the night - gate steps run below normal priority):
+
+* **`python tools/gate.py engine --no-mac --tested-sha a1e4119 --expect-digest 53839c837bbaf034 --expect-digest0
+  208c723daced22fe`** on a1e4119: build, both digests (= expected), `az` 48, `hidden` 28, `limits` 13, pytest 283 passed
+  and 1 skipped, the search smoke (random, seed 0): **`GATE PASSED engine a1e4119e51eb in 912s`**.
+* **`python tools/gate.py python --no-mac`** on a1e4119: build, pytest 283 passed and 1 skipped, the run-loop smoke
+  (mtg-smoke, 16 games, 0 unfinished): **`GATE PASSED python a1e4119e51eb in 545s`**. (First runs of both at ~96% CPU
+  failed only on subprocess timeouts: test_loop.py 2 failed and 5 errors - 10 of 10 alone in 45 s -, test_mac_remote.py's
+  remote EoE evaluation - passes alone.) a3f6ac1 changes only the core pin (the core's Python, below); the commit after
+  it, these paragraphs.
+* **`python tools/gate.py optin-core --no-mac --baseline-root <a checkout of 60397f3, zero-core f9ca5c3> --step-timeout
+  7200`** on a3f6ac1 (zero-core ef63ee1): core tests 148, **checkpoint_compat byte identity: identical** (mtg, a random
+  network: visits and cq 2,465 samples each, the same record and result hashes on both sides), `az` 48, `hidden` 28, the
+  other games' build-only 3 of 3 (glassroad-zero, caverna-zero, kingdombuilder-zero), core build: passed; **core pytest
+  failed: 442 passed, 4 failed, 2 errors, under the night's load** - three toy runs of `test_infoset_merge.py` timed out
+  at their 300 s, `test_league.py`'s module fixture lost one toy run to an access violation (exit 0xC0000005, no output:
+  a classic run with the league, a path the hooks do not touch; the core's Rust change is safe code), and
+  `test_measure.py`'s held-out `seconds` (0.0 vs 0.01, a timing comparison; `heldout.py` untouched). **Alone, at the same
+  load: `test_league.py` + `test_infoset_merge.py` 21 of 21 (116 s); `test_select.py` + `test_package_hooks.py` +
+  `test_measure.py` 33 of 33.** A full rerun of the suite on its own at normal priority (ef63ee1, 63 minutes at ~100%
+  CPU): 446 passed, 2 failed - `test_measure.py`'s anchors on a local remote timed out, and `test_distill.py`'s fork toy
+  run exited 0xC0000005 with no output; both pass alone (27 s). The same exit hit toy runs of another branch's core with
+  no Rust change the same night (realdecks' optin-core gate on zero-core 6ed51d5): the machine, not this change. **The
+  optin-core gate is to rerun on a quiet machine** (the command above).
+* The first optin-core run (a1e4119, zero-core b0a3a3b) passed every step but the core pytest, which ran out of its hour.
+  **Run on its own, zero-core's suite then found one real failure, fixed in ef63ee1**:
+  `test_select.py::test_remote_ships_raw_offsets` - `RemoteEval._ship` read the run's `game` setting for the new inputs
+  hook even when the package registers none (a KeyError with the test's settings dict); it now returns before reading it,
+  so `_ship` reads exactly what it did before (docs/az.md 40.3).
+* The launch command of 112.6 resolves (`zero.run.parse` + `resolve_config` against run 1's `config.json`, nothing
+  started: `E:/mtg-zero-scratch/deck-choice-eval/check_launch.py`): preset eoe-2e, sims 64, `sims_fast` 16, `sims_minor`
+  4, `eval_sims` 32, lr 1e-3 halved every 30 to 1e-4 (2.5e-4 at 79), `eval_every` 2 on `mac`, the evaluator settings as
+  given, the spec's choice with its sha256.
+* Not run: the deck-choice evaluation of run 1's iteration 78 on the desktop GPU (beside the evalpick race, 64 games did
+  not finish in 8 minutes on 2 search threads: stopped). The command, for when the GPU is free:
+  `python -m mtgz.sealed.rolling deckeval E:/mtg-zero/runs/eoe1/models/iter_0078.pt --evaluator
+  E:/mtg-zero/s4a/v2_time/evaluator_set.json --games 64 --set infer_device=cuda threads=4 groups=1`, then the same with
+  `--best-guess` (the baseline): the difference is what run 2's `extras.deckchoice` starts from.
