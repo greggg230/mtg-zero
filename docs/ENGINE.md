@@ -26324,6 +26324,13 @@ only from it. The desktop tools must produce and publish those definitions. The 
   path-free, the same seats; a definition with them validates, one with every setting does not; another build's
   worker is refused.
 
+* **The engine gate on cfb8e5f6** (the merge of main's 128 + this section; pin b655e91): `python tools/gate.py engine
+  --expect-digest b63f643e97a30a61 --expect-digest0 a0062bb5569e06d3 --tested-sha cfb8e5f6 --jobs 8` -> **GATE PASSED
+  engine cfb8e5f6f548 in 836s**: build; digests = main's (128.5: full b63f643e97a30a61, `DIGEST_ENCODING=0`
+  a0062bb5569e06d3); `--test az` 50, `limits` 13, `hidden` 28; pytest 317 passed, 1 skipped; the random smoke; the
+  tree unchanged (the Mac recheck "not needed": the tested sha is the gated one). Main's 128 itself was fuzzed 20k+ on
+  393527c6 (128.7); this branch changes no engine file of its own.
+
 Nothing was sent to the live coordinator (no GET either); no build was published.
 
 **The live head-to-head with a definition** (once the rev 6 coordinator, `farm-release define` at
