@@ -24,7 +24,7 @@ with), plus `runtime.json` (each file's version, signer and sha256); loaded thro
 Prints the build_id (last line: `build_id <id>`). The release key: `--key` (default
 ~/.config/zero-farm/release.key, DPAPI: this Windows user); the admin token: the file
 ~/.config/zero-farm/admin_token (`--token-file`), read into ZEROFARM_ADMIN_TOKEN for farm-release, never
-printed. farm-release: `--farm-release` (default E:/cargo-target/zero-farm/agent/release/farm-release.exe).
+printed. farm-release: `--farm-release` (default E:/cargo-target/zero-farm/main/release/farm-release.exe).
 """
 import argparse
 import hashlib
@@ -165,7 +165,7 @@ def build_worker(a):
     bid = sign_publish(a, d, sign)
     info = json.loads(subprocess.run([os.path.join(d, 'mtgz-worker.exe'), 'info', '--ort-dll', 'none'], capture_output=True, text=True,
                                      check=True).stdout)
-    want_kinds = ['selfplay', 'fuzz'] if a.profile == 'release' else ['fuzz']
+    want_kinds = ['selfplay', 'eval', 'fuzz'] if a.profile == 'release' else ['fuzz']
     if info['build_id'] != bid or info['kinds'] != want_kinds:
         die(f'the signed worker says build {info["build_id"]}, kinds {info["kinds"]} (want {bid}, {want_kinds})')
     chk = subprocess.run([os.path.join(d, 'mtgz-worker.exe'), 'fuzz-check', '--mode', 'games'], capture_output=True, text=True)
@@ -261,7 +261,7 @@ def main():
     ap.add_argument('--url', default='https://farm.greggg230.com')
     ap.add_argument('--key', default=os.path.join(HOME, '.config', 'zero-farm', 'release.key'))
     ap.add_argument('--token-file', default=os.path.join(HOME, '.config', 'zero-farm', 'admin_token'))
-    ap.add_argument('--farm-release', default='E:/cargo-target/zero-farm/agent/release/farm-release.exe')
+    ap.add_argument('--farm-release', default='E:/cargo-target/zero-farm/main/release/farm-release.exe')
     a = ap.parse_args()
     bid, d = build_runtime(a) if a.runtime else build_worker(a)
     print(f'build directory {d}')

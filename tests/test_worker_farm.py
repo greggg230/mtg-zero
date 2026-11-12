@@ -1,6 +1,7 @@
-"""mtgz-worker's phase-1 jobs (zero-farm; docs/ENGINE.md 114.1-114.3): fuzz jobs over `aw/1` (the engine's fuzz
+"""mtgz-worker's farm jobs (zero-farm; docs/ENGINE.md 114.1-114.4): fuzz jobs over `aw/1` (the engine's fuzz
 loops in supervised chunk processes), the reproduction string tools/fuzz_farm.py would write, the per-machine
-self-test (`reference`), and - with a fuzz-profile build - injected panics, aborts, stack overflows and hangs
+self-test (`reference`), eval jobs (byte-identical to the Python evaluation, check-config --eval, the game
+package's own settings), and - with a fuzz-profile build - injected panics, aborts, stack overflows and hangs
 isolated to their seed while the job goes on. Skipped without a built worker (`cargo build --release -p
 mtgz_worker`; env MTGZ_WORKER), the self-test without onnx/onnxscript/onnxruntime, the fault tests without the
 fuzz-profile build (`cargo build --profile fuzz -p mtgz_worker`; env MTGZ_WORKER_FUZZ)."""
@@ -82,7 +83,7 @@ def fuzz_job(tmp_path, **kw):
 def test_a_fuzz_job_over_aw1(tmp_path):
     w = Serve(WORKER, tmp_path)
     hello = w.wait_for('hello', 60)
-    assert hello['aw'] == 1 and hello['kinds'] == ['selfplay', 'fuzz'] and hello['game'] == 'mtg'
+    assert hello['aw'] == 1 and hello['kinds'] == ['selfplay', 'eval', 'fuzz'] and hello['game'] == 'mtg'
     w.send(fuzz_job(tmp_path))
     end = w.wait_for('end')
     assert w.finish() == 0
@@ -239,3 +240,112 @@ def test_the_selftest_guards_the_network(tmp_path):
             e = w.wait_for('error', 300)
             assert w.finish() == 1 and e['fatal'] is True and 'selftest failed' in e['message']
             assert not [x for x in w.events if x['ev'] in ('fin', 'shard')] and not (d / 'out').exists()
+
+
+# ------------------------------------------------------------------ eval jobs (ENGINE.md 114.4)
+
+def _smoke_cfg(tmp_path, **kw):
+    import mtgz.az  # noqa: F401
+    from zero import farm_eval as FE, run as R
+    ns = type('A', (), {k: None for k in R.DEFAULTS})()
+    cfg = R.resolve_config(ns, {'preset': 'mtg-smoke'})
+    cfg.update(conc=8, threads=1, groups=1, eval_sims=4, **kw)
+    cfg = FE.resolve_eval_spec(cfg)
+    cp = tmp_path / 'settings.json'
+    cp.write_text(json.dumps(cfg), encoding='utf-8')
+    return cfg, cp
+
+
+def test_eval_check_config_and_the_package_settings(tmp_path):
+    """check-config --eval: a run's settings pass (the evaluation's read, the rest unused - the game package's own
+    settings too, which the worker lists: every one of mtgz's GamePackage.settings is known); an external bot, an
+    unset eval_spec are refused."""
+    import mtgz.az  # noqa: F401
+    from zero import package
+    cfg, cp = _smoke_cfg(tmp_path)
+    pkg = set(package.active().settings)
+    assert pkg and pkg <= set(cfg), 'the resolved settings hold the package\'s own'
+    for args in ([], ['--eval']):
+        p = subprocess.run([WORKER, 'check-config', str(cp), '--json'] + args, capture_output=True, text=True, encoding='utf-8')
+        out = json.loads(p.stdout)
+        assert p.returncode == 0 and not out['failures'], out['failures']
+        st = {r['key']: r['status'] for r in out['settings']}
+        assert all(st[k] in ('off', 'trainer') for k in pkg), {k: st[k] for k in pkg}
+    assert set(out['eval_reads']) >= {'eval_sims', 'eval_spec', 'eval_select'}
+    p = subprocess.run([WORKER, 'check-config', str(cp), '--eval', '--seats', '[{"net": 1}, {"bot": "ext:jsbot"}]'],
+                       capture_output=True, text=True, encoding='utf-8')
+    assert p.returncode != 0 and 'external bot' in p.stderr
+    bad = tmp_path / 'bad.json'
+    bad.write_text(json.dumps(dict(cfg, eval_spec='')), encoding='utf-8')
+    p = subprocess.run([WORKER, 'check-config', str(bad), '--eval'], capture_output=True, text=True, encoding='utf-8')
+    assert p.returncode == 1 and 'eval_spec is unset' in p.stdout
+
+
+@pytest.mark.skipif(not _onnx_ok(), reason='needs torch, onnx, onnxscript and onnxruntime')
+def test_an_eval_job_is_the_python_evaluation(tmp_path):
+    """An eval job over aw/1 (PROTOCOL.md 5.2) with two small random MTG networks: one self-test per network (with
+    its gen), rows of whole pairs in 'evals' files, and every row byte-identical to the Python path - Run.play_match's
+    driver (zero.farm_eval.match_driver) with zero-core's OnnxEvaluator on the same graphs (groups 1); a lease of the
+    match's second pair plays those games; a network against the heuristic bot."""
+    import hashlib
+    import onnxruntime
+    import torch
+    import mtgz.az  # noqa: F401
+    from zero import farm_eval as FE, games as G, net as N, onnx_export as OX, onnx_parity as OP
+    from zero.infer import drive
+    from zero.onnx_eval import OnnxEvaluator
+    cfg, cp = _smoke_cfg(tmp_path)
+    rec = tmp_path / 'batches.npz'
+    p = subprocess.run([WORKER, 'selfplay', '--settings', str(cp), '--uniform', '--games', '2', '--threads', '1', '--out',
+                        str(tmp_path / 'u'), '--record-batches', '100', '--record-file', str(rec)],
+                       capture_output=True, text=True, encoding='utf-8', timeout=1800)
+    assert p.returncode == 0, p.stderr[-2000:]
+    models = {}
+    for gen, seed in ((1, 3), (2, 4)):
+        torch.manual_seed(seed)
+        m = N.make_net(G.info(cfg['game']), cfg['game'], arch='tokens', hidden=32, blocks=1, heads=2)
+        for q in m.parameters():
+            q.data.add_(0.2 * torch.randn_like(q))
+        info = {'checkpoint': f'test/{gen}', 'checkpoint_sha256': f'{gen}f' * 32, 'checkpoint_iter': str(gen)}
+        path = str(tmp_path / f'{gen}.onnx')
+        OX.export(m, path, 'packed', info)
+        ref = str(tmp_path / f'{gen}.ref.npz')
+        OX.write_reference(m, [OP.Rows.load(str(rec))], ref, 48, info)
+        models[gen] = {'model': path, 'reference': ref, 'sha256': hashlib.sha256(open(path, 'rb').read()).hexdigest()}
+    rt = os.path.join(os.path.dirname(onnxruntime.__file__), 'capi')
+    seats = [{'net': 1}, {'net': 2}]
+
+    def job(name, games, gid_base, seats_):
+        d = tmp_path / name
+        d.mkdir()
+        w = Serve(WORKER, d)
+        w.wait_for('hello', 60)
+        w.send({'op': 'job', 'lease_id': 'l_' + name, 'kind': 'eval', 'settings': cfg, 'seats': seats_, 'paired': True,
+                'games': games, 'gid_base': gid_base, 'seed': 11, 'models': {str(g): x for g, x in models.items()},
+                'model': None, 'reference': None, 'threads': 1, 'infer_threads': 1, 'out_dir': 'out', 'runtime_dir': rt})
+        end = w.wait_for('end', 1800)
+        assert w.finish() == 0 and end['reason'] == 'done' and not end['unfinished']['gids'], end
+        rows = {}
+        for e in w.events:
+            if e['ev'] == 'evals':
+                text = (d / 'out' / e['path']).read_text(encoding='utf-8')
+                for ln in text.splitlines():
+                    rows[json.loads(ln)['gid']] = ln
+        return w.events, rows
+
+    ev, rows = job('all', 4, 0, seats)
+    tests = [e for e in ev if e['ev'] == 'selftest']
+    assert sorted(t['gen'] for t in tests) == [1, 2] and all(t['ok'] for t in tests)
+    assert sorted(rows) == [0, 1, 2, 3]
+    # the Python path, the same graphs (one intra-op thread on both sides)
+    evs = {k: OnnxEvaluator(models[s['net']]['model'], threads=1) for k, s in zip(('m', 'o'), seats)}
+    drv = FE.match_driver(FE.job_cfg(cfg, threads=1), seats, 4, 11, paired=True)
+    drive(drv, evs)
+    want = {r['gid']: FE.row_json(FE.row(r, seats, True)) for r in drv.take_results()}
+    assert rows == want
+    # a lease of the second pair: those games
+    _, tail = job('tail', 2, 2, seats)
+    assert tail == {g: want[g] for g in (2, 3)}
+    # a network against the heuristic bot
+    _, bot = job('bot', 2, 0, [{'net': 2}, {'bot': 'heuristic'}])
+    assert json.loads(bot[1])['seats'] == [{'bot': 'heuristic'}, {'net': 2}]
