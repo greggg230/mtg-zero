@@ -857,6 +857,17 @@ game at log loss 0.663 (deck-only kinds 0.678), and against its field judges a d
 matchup term adds nothing measurable; a half-life of 40 iterations (validation's pick) gains ~0.0005 for linear and
 pair, nothing for the set network. All opt-in; v1's evaluators score unchanged.
 
+**Run 2's deck choice by the evaluator (2026-11-11, branch `deck-choice-eval`; ENGINE.md 112):** the sealed spec's
+`"deck_choice": {..., "by": "evaluator", "evaluator": <file>}` - each seat scores its own pool's K candidates with the
+exported deck evaluator (a Rust scorer of v2's export, ENGINE.md 111.6: linear, set and pair, equal to its numpy reference) and plays the best,
+no Python in self-play, the hidden decklists' prior of a choosing seat choosing the same way; the run retrains the evaluator
+every N iterations in a CPU background job on its newest games and switches versions (immutable files named by sha256, every
+chosen deck logged with its version) between iterations (zero-core's opt-in game-package hooks, `feat/selfplay-spec-hook`);
+an evaluation of the network choosing its deck from the fixed evaluation pools against the heuristic's best guess. Preset
+`eoe-2e`, a fork of run 1's iteration 78 deepened to 128 x 8; the launch command in ENGINE.md 112.6 (not launched).
+Integrated with the win % against real decks (113) on branch `eoe-run2-int` (2026-11-12, ENGINE.md 126): run 2 measures it
+every 40th iteration with our decks chosen by the run's own evaluator version, its games kept out of the evaluator's data.
+
 ### 9.1 Deckbuilding from a pool: the plan (user, 2026-11-10)
 
 **Best-of-one only.** A deck is only "best" against a field. Training uses our own decks (pure self-play),
@@ -928,3 +939,10 @@ is the per-process race game for game), `--pilot-search mix` (or a lower `--sims
 2. our build vs the human build of the same 17lands pool, same pilot;
 3. both against a field of 17lands human decks (closest to "would this help on Arena");
 4. our card ranking's correlation with 17lands' game-in-hand win rates (a sanity check).
+
+Measures 2 and 3 are built as one paired metric, **win % against real players' decks** (user, 2026-11-11: "a
+separate metric ... It should not be a target for deck building"; ENGINE.md 113, `mtgz.sealed.realdecks`): our deck of
+a fixed set of 17lands pools and the player's own deck of each pool, in the same games against real players' decks, one
+checkpoint piloting every seat; A, B and A - B with standard errors. Computed and logged only - a run's opt-in extra
+evaluation (`real_decks_every`, off by default) and a command line for any checkpoint - never fed to training, the deck
+choice, the evaluator, model selection or best.pt.

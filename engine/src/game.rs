@@ -347,6 +347,12 @@ pub struct Player {
     pub companion_def: Option<DefId>,
     /// The companion special action was taken (once per game, 116.2g).
     pub companion_used: bool,
+    /// The "the next spell you cast this turn can't be countered" effects
+    /// waiting for this player's next spell (Mistrise Village; CR 101.2,
+    /// 611.2): each applies to the same next spell, which uses them all up as
+    /// it becomes cast (601.2i); they end in the cleanup step (514.2).
+    /// Counted exactly (past `u32::MAX` the game aborts). ENGINE.md 123.
+    pub uncounterable_next: u32,
 }
 
 /// A player's dungeon (CR 309): the dungeon card in the command zone with the
@@ -1200,6 +1206,7 @@ impl Game {
             companion: None,
             companion_def: None,
             companion_used: false,
+            uncounterable_next: 0,
         };
         Game {
             db,

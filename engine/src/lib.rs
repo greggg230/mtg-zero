@@ -53,6 +53,7 @@ pub mod doomsday_a;
 pub mod eoe_w5;
 pub mod doomsday_b;
 pub mod doomsday_c;
+pub mod sneak_show;
 mod eoe_w2;
 pub mod public_state;
 pub mod testkit;

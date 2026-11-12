@@ -118,6 +118,51 @@ fn the_doomsday_75_and_its_provenance() {
     assert!(e.contains("p0's deck: Cavern of Souls' floating mana needs layout v7"), "{e}");
 }
 
+/// The Legacy Sneak and Show 75 (ENGINE.md 123; MTGGoldfish 8014220): its provenance, the export
+/// verbatim (MTGGoldfish's `sideboard` line before the 15), every main-deck card supported and
+/// the main 60 a best-of-one spec networks may play; the sideboard's Consign to Memory (the Delver
+/// best-of-three lane's) is the one unsupported card, and its Disruptor Flute is refused to
+/// networks until layout v7 (`az::needs_layout_v7`). (Read from `data/decks`: `az/constructed.rs`
+/// is the best-of-three lane's to change.)
+#[test]
+fn the_sneak_show_75_and_its_provenance() {
+    let d = Decklist::parse(include_str!("../../data/decks/sneak_show_8014220.json")).unwrap();
+    assert_eq!(d.name, "Sneak and Show");
+    assert_eq!((d.player.as_str(), d.event.as_str(), d.date.as_str()), ("snoopy-magic", "Legacy Challenge 32", "2026-10-24"));
+    assert_eq!(d.source, "https://www.mtggoldfish.com/deck/8014220");
+    assert_eq!(d.main.iter().map(|e| e.0).sum::<u32>(), 60);
+    assert_eq!(d.sideboard.iter().map(|e| e.0).sum::<u32>(), 15);
+    // The JSON lists the export's cards (sorted by name).
+    let (mut main, mut side) = d.parse_export(include_str!("../../data/decks/sneak_show_8014220.txt")).unwrap();
+    main.sort_by(|a, b| a.1.cmp(&b.1));
+    side.sort_by(|a, b| a.1.cmp(&b.1));
+    assert_eq!(main, d.main);
+    assert_eq!(side, d.sideboard);
+    // The main 60: every card supported, a legal deck; the legacy cards in it in the registry's
+    // order (the lane's three, Prismari Charm and Flusterstorm).
+    let ids = Decklist::ids(db(), &d.main).unwrap();
+    assert_eq!(ids.len(), 60);
+    constructed::check(db(), &ids, &[]).unwrap();
+    let has = |list: &[(u32, String)], n: &str| list.iter().any(|e| e.1 == n);
+    let reg = identity::legacy_registry();
+    let in_main: Vec<&str> = reg.iter().copied().filter(|n| has(&d.main, n)).collect();
+    assert_eq!(in_main, ["Prismari Charm", "Flusterstorm", "Show and Tell", "Omniscience", "Mistrise Village"]);
+    let side_only: Vec<&str> = reg.iter().copied().filter(|n| has(&d.sideboard, n) && !has(&d.main, n)).collect();
+    assert_eq!(side_only, ["Brotherhood's End", "Disruptor Flute", "Magus of the Moon"]);
+    assert_eq!(d.unsupported_sideboard(db()), ["Consign to Memory"]);
+    // A best-of-one spec with the main 60 (against itself and the Delver 60): accepted.
+    for p1 in [d.main_names(), delver().main_names()] {
+        let spec = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": d.main_names(), "p1": p1}});
+        let s = MtgSpec::parse(&spec.to_string()).unwrap();
+        assert!(s.constructed);
+    }
+    // With its supported sideboard: refused, Disruptor Flute's name needs layout v7.
+    let sb: Vec<String> = d.sideboard.iter().filter(|e| db().id(&e.1).is_some()).flat_map(|e| std::iter::repeat_n(e.1.clone(), e.0 as usize)).collect();
+    let spec = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": d.main_names(), "p1": d.main_names(), "p0_sideboard": sb}});
+    let e = MtgSpec::parse(&spec.to_string()).unwrap_err();
+    assert!(e.contains("p0's deck: Disruptor Flute's chosen name needs layout v7"), "{e}");
+}
+
 #[test]
 fn cr_100_2a_and_100_4a_constructed_deck_rules() {
     let db = db();
@@ -203,7 +248,7 @@ fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     let (cube, con) = (CardDb::cube(), CardDb::constructed());
     // The cube's table has no legacy card; the constructed one has them all:
     // the registry's (the Delver mirror's, ENGINE.md 54; the Doomsday deck's,
-    // 124), and exactly the legacy IR's.
+    // 124; the Sneak and Show deck's, 123), and exactly the legacy IR's.
     let legacy = identity::legacy_registry();
     for &n in &legacy {
         assert!(cube.id(n).is_none(), "{n} in the cube's card table");
@@ -215,7 +260,17 @@ fn the_constructed_card_table_keeps_the_cubes_and_adds_the_legacy_cards() {
     let k = legacy.len() as u16;
     assert_eq!(k as usize, engine::db::load_legacy_document().cards.len());
     assert_eq!(con.num_cards(), cube.num_cards() + k as usize);
-    assert_eq!(con.len(), cube.len() + k as usize, "the legacy cards make no token or face");
+    // Then, at the end, the abilities of a nonbasic land that is a Mountain
+    // (Magus of the Moon's, CR 305.7: EoE W2's `moon_base` and one variant per
+    // definition with latent abilities, ENGINE.md 99.12, 123): the legacy
+    // cards make no token or face.
+    let latent = (0..con.len()).filter(|&i| con.def(i as u16).latent > 0 && !con.def(i as u16).name.is_empty()).count();
+    assert_eq!(con.len(), cube.len() + k as usize + 1 + latent, "the legacy cards make no token or face; the Mountain's definitions");
+    // (the Mountain's definitions: no name, a registered key, as in the EoE table)
+    let ik_all = identity::identities(con);
+    for i in cube.len() + k as usize..con.len() {
+        assert!(con.def(i as u16).name.is_empty() && ik_all[i] != identity::UNKNOWN, "definition {i}");
+    }
     let to_cube = |id: u16| if id < cube.num_cards() as u16 { id } else { id - k };
     for i in 0..cube.len() as u16 {
         let j = if i < cube.num_cards() as u16 { i } else { i + k };

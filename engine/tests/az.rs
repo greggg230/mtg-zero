@@ -1340,12 +1340,15 @@ fn public_state_reaches_the_encoding() {
     // order is no id's since Priority's casts from a graveyard became one option and a list
     // choice (ENGINE.md 100.5): only deliberate limits are left.
     let gaps: Vec<&str> = lim.iter().filter(|l| l.kind == LimitKind::NextLayout).map(|l| l.name).collect();
-    // (W2's and W6's six, added after layout v6 was built, too: ENGINE.md 100.5.1.) One gap, named
-    // and tied to a refusal (ENGINE.md 124.2, the maintainer's decision): a pool's mana of a chosen
-    // creature type (Cavern of Souls) is layout v7's; on v6 no network plays a game with a card that
-    // makes it (`cavern_decks_are_refused_to_networks_on_layout_v6`).
-    assert_eq!(gaps, [engine::public_state::CHOSEN_TYPE_MANA_GAP], "next-layout gaps");
-    assert_eq!(next, 1);
+    // (W2's and W6's six, added after layout v6 was built, too: ENGINE.md 100.5.1.) Two gaps, named
+    // and tied to one refusal list (`az::needs_layout_v7`, the maintainer's decisions): a pool's mana
+    // of a chosen creature type (Cavern of Souls, ENGINE.md 124.2) and the card name a permanent chose
+    // as it entered (Disruptor Flute; Anointed Peacekeeper's, older, too: ENGINE.md 123) are layout
+    // v7's; on v6 no network plays a game with a card that makes either
+    // (`cavern_decks_are_refused_to_networks_on_layout_v6`,
+    // `flute_decks_are_refused_to_networks_on_layout_v6`).
+    assert_eq!(gaps, [engine::public_state::CHOSEN_TYPE_MANA_GAP, engine::public_state::CHOSEN_NAME_GAP], "next-layout gaps");
+    assert_eq!(next, 2);
     assert_eq!(by_design, 4, "the deliberate limits");
 }
 
@@ -1376,6 +1379,45 @@ fn cavern_decks_are_refused_to_networks_on_layout_v6() {
     assert!(<MtgAz as SearchGame>::parse_spec(&spec(&delver, &delver, None)).is_ok());
     let gap = engine::public_state::limits().into_iter().find(|l| l.name == engine::public_state::CHOSEN_TYPE_MANA_GAP).expect("the gate's entry");
     assert!(gap.kind == engine::public_state::LimitKind::NextLayout && gap.why.contains(want) && gap.why.contains("cavern_decks_are_refused_to_networks_on_layout_v6"));
+}
+
+/// ENGINE.md 123: layout v6 can't encode the card name a permanent chose as it entered (Disruptor
+/// Flute; a public-state gate next-layout gap, `CHOSEN_NAME_GAP`), so every network-driven game - a
+/// spec the engine's `SearchGame` parses (self-play, evaluation, h2h, replays: zero-core's driver) -
+/// whose decks or sideboards hold a card choosing a name the plain way is refused, loudly, on this
+/// build (`az::needs_layout_v7`, the one list with Cavern of Souls); the Delver mirror and the Sneak
+/// and Show main 60 are not. The gate's entry names the refusal.
+#[test]
+fn flute_decks_are_refused_to_networks_on_layout_v6() {
+    let delver = engine::az::constructed::Decklist::izzet_delver().main_names();
+    let mut with_flute = delver.clone();
+    with_flute[0] = "Disruptor Flute".to_string();
+    let spec = |p0: &[String], p1: &[String], sb: Option<&[&str]>| {
+        let mut decks = serde_json::json!({"p0": p0, "p1": p1});
+        if let Some(sb) = sb {
+            decks["p1_sideboard"] = serde_json::json!(sb);
+        }
+        serde_json::json!({"max_turns": 60, "constructed": true, "decks": decks}).to_string()
+    };
+    let want = "Disruptor Flute's chosen name needs layout v7 (ENGINE.md 123)";
+    for s in [spec(&with_flute, &delver, None), spec(&delver, &with_flute, None), spec(&delver, &delver, Some(&["Disruptor Flute"]))] {
+        let e = MtgSpec::parse(&s).unwrap_err();
+        assert!(e.contains(want), "{e}");
+        let e = <MtgAz as SearchGame>::parse_spec(&s).err().expect("refused");
+        assert!(e.contains(want), "{e}");
+    }
+    assert!(<MtgAz as SearchGame>::parse_spec(&spec(&delver, &delver, None)).is_ok());
+    // The Sneak and Show main 60 (its Flute is a sideboard card) is accepted, against itself and
+    // the Delver 60; with its sideboard it is refused (Disruptor Flute).
+    let sns = engine::az::constructed::Decklist::parse(include_str!("../../data/decks/sneak_show_8014220.json")).unwrap();
+    let main = sns.main_names();
+    assert!(<MtgAz as SearchGame>::parse_spec(&spec(&main, &delver, None)).is_ok());
+    assert!(<MtgAz as SearchGame>::parse_spec(&spec(&main, &main, None)).is_ok());
+    let side: Vec<&str> = sns.sideboard.iter().filter(|(_, n)| engine::db::CardDb::constructed().id(n).is_some()).map(|(_, n)| n.as_str()).collect();
+    let e = <MtgAz as SearchGame>::parse_spec(&spec(&main, &main, Some(&side))).err().expect("refused");
+    assert!(e.contains(want), "{e}");
+    let gap = engine::public_state::limits().into_iter().find(|l| l.name == engine::public_state::CHOSEN_NAME_GAP).expect("the gate's entry");
+    assert!(gap.kind == engine::public_state::LimitKind::NextLayout && gap.why.contains(want) && gap.why.contains("flute_decks_are_refused_to_networks_on_layout_v6"));
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

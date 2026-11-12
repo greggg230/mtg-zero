@@ -16,17 +16,17 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
-| fetched | 1638 | 1282 |
-| class a | 1256 | 998 |
-| class b | 200 | 151 |
+| fetched | 1656 | 1298 |
+| class a | 1279 | 1018 |
+| class b | 195 | 147 |
 | class c | 182 | 133 |
-| a, tested (passing) | 1256 | 998 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 934 | 777 |
-| a, tested only by an earlier test (Oracle or rules) | 322 | 221 |
+| a, tested (passing) | 1279 | 1018 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 941 | 781 |
+| a, tested only by an earlier test (Oracle or rules) | 338 | 237 |
 | a, deferred | 0 | 0 |
 | a, untested | 0 | 0 |
 
-Class a by area (distinct texts): mana 176/176, triggers 139/139, stack 136/136, zones 126/126, other 97/97, copies 96/96, dfc 65/65, replacement 62/62, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 178/178, triggers 140/140, stack 138/138, zones 130/130, other 106/106, copies 96/96, dfc 66/66, replacement 63/63, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -162,9 +162,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `032de84a` | a | mana | a cost-increase/tax effect applies to its controller's own spells too, not just opponents' | `rulings_mana::thalias_tax_applies_to_its_controllers_own_spells_cr_601_2f` |
-| `560a16f0` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | `rulings_mana::thalias_tax_applies_to_an_alternative_cost_cr_601_2f` |
+| `560a16f0` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | `cards_sneak_show::cr_601_2f_disruptor_flute_spells_with_the_name_cost_3_more_every_players`; `cards_sneak_show::cr_601_2f_disruptor_flute_naming_show_and_tell_under_omniscience_costs_3`; `rulings_mana::thalias_tax_applies_to_an_alternative_cost_cr_601_2f` |
 | `032de84a` | a | mana | a cost-increase/tax effect applies to its controller's own spells too, not just opponents' | `rulings_mana::thalias_tax_applies_to_its_controllers_own_spells_cr_601_2f` |
-| `560a16f0` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | `rulings_mana::thalias_tax_applies_to_an_alternative_cost_cr_601_2f` |
+| `560a16f0` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | `cards_sneak_show::cr_601_2f_disruptor_flute_spells_with_the_name_cost_3_more_every_players`; `cards_sneak_show::cr_601_2f_disruptor_flute_naming_show_and_tell_under_omniscience_costs_3`; `rulings_mana::thalias_tax_applies_to_an_alternative_cost_cr_601_2f` |
 
 ### Voice of Victory
 
@@ -187,12 +187,12 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `a6040722` | b | DEF | activated (incl. keyword) abilities use a colon; a tax/hoser on activated abilities leaves triggered ones alone [part 3, was a/other: activated abilities have colons; triggered ones don't; a definition] | a definition, no behaviour of its own |
-| `252f0b38` | b | DEF | a mana ability is one that produces mana on resolution, not one costing mana to activate [part 3, was a/mana: what a mana ability is; a definition] | a definition, no behaviour of its own |
+| `a6040722` | a | other | activated (incl. keyword) abilities use a colon; a tax/hoser on activated abilities leaves triggered ones alone [part 3, was a/other: activated abilities have colons; triggered ones don't; a definition] [ENGINE.md 127, was b/DEF: Anointed Peacekeeper's tax tested on equip and on a triggered ability] | `rulings_other::anointed_peacekeepers_ability_tax_takes_equip_and_leaves_triggered_abilities_alone_cr_602_2b`; `rulings_other::anointed_peacekeeper_leaves_mana_abilities_and_a_triggers_payment_alone_cr_605_1a` |
+| `252f0b38` | a | mana | a mana ability is one that produces mana on resolution, not one costing mana to activate [part 3, was a/mana: what a mana ability is; a definition] [ENGINE.md 127, was b/DEF: Anointed Peacekeeper's tax tested on a mana ability and a non-mana one costing mana] | `rulings_other::anointed_peacekeepers_ability_tax_takes_equip_and_leaves_triggered_abilities_alone_cr_602_2b`; `rulings_other::anointed_peacekeeper_leaves_mana_abilities_and_a_triggers_payment_alone_cr_605_1a` |
 | `93ee06dd` | a | other | a naming ability that affects cards applies in every zone, not just one | `rulings_other::anointed_peacekeepers_tax_applies_to_a_named_card_cast_from_a_graveyard_cr_601_2f` |
 | `90d8b0d0` | b | MP | an ability applying to 'opponents' generally applies to all opponents, not just one you interacted with [part 3, was a/other: all opponents] | multiplayer |
-| `2a160983` | b | DEF | you may name any card, even one without an activated ability, not just ones you've seen [part 3, was a/other: the engine lets the Peacekeeper name any card definition; a definition] | a definition, no behaviour of its own |
-| `abac3051` | b | DEF | you can't name a token's name unless it duplicates an actual card's name [part 3, was a/other: tokens aren't cards to name; a definition] | a definition, no behaviour of its own |
+| `2a160983` | a | other | you may name any card, even one without an activated ability, not just ones you've seen [part 3, was a/other: the engine lets the Peacekeeper name any card definition; a definition] [ENGINE.md 127, was b/DEF: the name list tested: unseen cards and cards without activated abilities] | `rulings_other::anointed_peacekeeper_may_name_a_card_it_didnt_see_or_without_activated_abilities_cr_201_3` |
+| `abac3051` | a | other | you can't name a token's name unless it duplicates an actual card's name [part 3, was a/other: tokens aren't cards to name; a definition] [ENGINE.md 127, was b/DEF: the name list tested: token names only when card names] | `rulings_other::anointed_peacekeeper_offers_a_tokens_name_only_if_a_card_has_it_cr_201_3` |
 
 ### Archon of Emeria
 
@@ -756,7 +756,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `cards_sneak_show::cr_107_3b_omniscience_an_x_spell_has_x_0`; `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `d2f219ee` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_mana2::a_free_cast_allows_no_alternative_cost_but_needs_mandatory_additional_costs_cr_118_9a_601_2b` |
 | `751982e2` | a | zones | if an exiled card made playable by an ability isn't played, it simply remains in exile | `rulings_zones2::an_unused_permission_ends_and_the_card_stays_where_it_is_cr_611_2a` |
 | `e32a9bac` | a | copies | a count-based power/toughness-setting ability counts its own source, guaranteeing at least a 1/1 | `cards_m7d::urza_construct_token_and_a_sick_artifact_creature_pay_cr302_6` |
@@ -1475,7 +1475,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `8b359ef5` | a | zones | looking at the top of your library this way doesn't use the stack and can happen any time, even without priority | `cards_m7d::bolas_citadel_casts_from_the_top_paying_life_cr118_9` |
 | `7ee6c520` | a | mana | a permanent can be one of the permanents it sacrifices to pay for its own ability | `cards_m7d::bolas_citadel_sacrifices_ten_nonland_permanents_cr701_21` |
-| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `cards_sneak_show::cr_107_3b_omniscience_an_x_spell_has_x_0`; `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `2012f8f3` | a | stack | if the librarys top card changes mid-cast or mid-activation, you cant see the new top until thats done | `rulings_stack3::bolass_citadel_the_new_top_card_is_unseen_until_the_cast_is_done_cr_601_2` |
 | `4c7c58fa` | a | mana | casting a card rather than paying its mana cost forbids other alt costs but still needs mandatory ones | `rulings_casts::citadel_no_other_alternative_cost_but_additional_costs_cr_118_9a_601_2f` |
 | `9cf8d89b` | b | MP | Two-Headed Giant: a life-loss effect hits the opposing team for a fixed amount | multiplayer |
@@ -2338,7 +2338,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `3f63bb36` | a | zones | letting you play exiled cards doesn't change their normal timing restrictions | `rulings_zones2::cards_exiled_by_urza_golos_ugin_and_expressive_iteration_keep_their_timing_cr_601_3_307_1_305_2` |
-| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `cards_sneak_show::cr_107_3b_omniscience_an_x_spell_has_x_0`; `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `892b7ab2` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
 | `07bd45b4` | a | zones | exiled cards you don't play via this effect simply remain in exile | `cards_m7a_zones2::golos_exiles_three_to_play_free_this_turn_a_land_uses_the_land_drop` |
 
@@ -2383,7 +2383,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `cards_sneak_show::cr_107_3b_omniscience_an_x_spell_has_x_0`; `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `276611ee` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
 | `8d32d60f` | a | zones | spells cast via this granted permission still follow their normal timing restrictions | `rulings_zones2::cards_exiled_by_urza_golos_ugin_and_expressive_iteration_keep_their_timing_cr_601_3_307_1_305_2` |
 
@@ -3028,7 +3028,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `ca9bf5c4` | b | DEF | activated abilities use a colon; some keyword abilities like cycling are activated too, shown in reminder text [part 3, was a/other: activated abilities have colons; a definition] | a definition, no behaviour of its own |
 | `f21fe774` | a | combat | using an unblock ability on an already-blocked creature doesnt remove it from combat or unblock what it hit | `rulings_combat::blocks_declared_stand_unblockable_cant_block_and_menace_afterwards_cr_509_1h_506_4` |
-| `252f0b38` | b | DEF | a mana ability is one that produces mana on resolution, not one costing mana to activate [part 3, was a/mana: what a mana ability is; a definition] | a definition, no behaviour of its own |
+| `252f0b38` | a | mana | a mana ability is one that produces mana on resolution, not one costing mana to activate [part 3, was a/mana: what a mana ability is; a definition] [ENGINE.md 127, was b/DEF: Anointed Peacekeeper's tax tested on a mana ability and a non-mana one costing mana] | `rulings_other::anointed_peacekeepers_ability_tax_takes_equip_and_leaves_triggered_abilities_alone_cr_602_2b`; `rulings_other::anointed_peacekeeper_leaves_mana_abilities_and_a_triggers_payment_alone_cr_605_1a` |
 | `a2e75b69` | a | other | before shuffling your library, you may reveal one companion from outside the game if your deck meets its condition | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
 | `92589f1d` | a | mana | a generic cost reduction cant touch colored costs, and wont reduce an already one-or-zero-mana activation further | `cards_m7c_tail2::zirda_reduces_activation_costs_by_two_leaving_one_mana_cr601_2f` |
 | `b4178eed` | a | other | if multiple players reveal companions, the starting player goes first, then turn order; declining is permanent | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
@@ -3591,6 +3591,49 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `4226f05f` | a | replacement | Leyline of the Void exiles cards only: tokens still die (their dies triggers trigger) | `cards_doomsday_c::cr_700_4_under_leyline_opposing_creature_cards_dont_die_but_tokens_do` |
 | `ef9cd497` | a | replacement | under Leyline of the Void the opponents' nontoken creatures are exiled instead of dying; their dies triggers don't trigger | `cards_doomsday_c::cr_700_4_under_leyline_opposing_creature_cards_dont_die_but_tokens_do` |
 
-## Cards without rulings (174)
+### Show and Tell (legacy, constructed play: ENGINE.md 54)
 
-Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54), Flow State (legacy, constructed play: ENGINE.md 54), Street Wraith (legacy, constructed play: ENGINE.md 54)
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `6d3f0bf4` | a | zones | Show and Tell: choices the entering cards need are made after every player chose a card, the active player first (CR 101.4) | `cards_sneak_show::show_and_tell_the_active_players_enters_choices_come_first` |
+| `881ce0a9` | a | zones | Show and Tell: the cards are chosen as it resolves, not as it is cast | `cards_sneak_show::cr_101_4_show_and_tell_the_active_player_chooses_then_the_other_and_both_enter` |
+| `a107ed89` | a | zones | Show and Tell: the active player chooses first, then the other; the choice may stay face down (CR 101.4a); the cards enter at once | `cards_sneak_show::cr_101_4_show_and_tell_the_active_player_chooses_then_the_other_and_both_enter`; `cards_sneak_show::cr_101_4a_the_other_player_knows_only_whether_a_card_was_chosen`; `cards_sneak_show::cr_101_4a_the_other_players_worlds_deal_a_legal_face_down_choice`; `cards_sneak_show::cr_101_4a_a_known_hand_is_one_pool_the_choice_among_its_cards_of_the_kind`; `cards_sneak_show::cr_101_4_show_and_tell_on_the_other_players_turn_they_choose_first` |
+
+### Omniscience (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `cards_sneak_show::cr_107_3b_omniscience_an_x_spell_has_x_0`; `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
+| `6e20dab1` | a | mana | without paying its mana cost: no other alternative cost; additional costs (kicker, mandatory ones) are still paid (CR 118.9a, 601.2f) | `cards_sneak_show::cr_118_9a_omniscience_and_force_of_will_are_alternative_costs_one_at_a_time`; `cards_sneak_show::cr_601_2f_omniscience_additional_costs_are_still_paid`; `cards_sneak_show::cr_601_2f_omniscience_cost_increases_still_apply` |
+| `3bd1fe3c` | a | stack | Omniscience resolving on its controller's turn: that player gets priority first (CR 117.3b) | `cards_sneak_show::cr_117_3b_after_omniscience_resolves_its_controller_has_priority_first` |
+| `72e98293` | a | stack | Omniscience keeps each spell's timing permissions and restrictions | `cards_sneak_show::cr_601_3_omniscience_keeps_the_timing_rules` |
+
+### Mistrise Village (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `16696510` | a | zones | Mistrise Village enters untapped only with a Mountain or Forest already controlled; one entering at the same time doesn't count (CR 614.12a) | `cards_sneak_show::cr_614_1c_mistrise_village_enters_tapped_unless_you_control_a_mountain_or_a_forest`; `cards_sneak_show::cr_614_12a_mistrise_village_entering_with_the_magus_enters_tapped` |
+
+### Disruptor Flute (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `d858e725` | a | other | activated abilities contain a colon (equip, a fetch land, Sneak Attack); an activated mana ability produces mana: the Flute stops the others, not it (CR 602.1, 605.1a) | `cards_sneak_show::cr_602_5_disruptor_flute_stops_non_mana_activated_abilities` |
+| `044069c9` | a | other | Disruptor Flute naming a card with a mana ability and another activated ability: the mana ability can still be activated (CR 602.5, 605.1a) | `cards_sneak_show::cr_602_5_disruptor_flute_stops_non_mana_activated_abilities`; `cards_sneak_show::cr_602_5_disruptor_flute_stops_fetch_lands_and_works_in_every_zone`; `cards_sneak_show::cr_605_1a_disruptor_flute_naming_mistrise_village_leaves_its_mana_ability`; `cards_sneak_show::cr_702_29a_disruptor_flute_naming_street_wraith_stops_its_cycling_in_hand` |
+| `20e62c09` | a | dfc | Disruptor Flute may name either name of a split, adventurer or double-faced card; the other name is unaffected (CR 709.3, 715.3, 712) | `cards_sneak_show::cr_201_3_disruptor_flute_offers_every_name_of_the_games_cards_and_their_faces`; `cards_sneak_show::cr_606_disruptor_flute_stops_loyalty_abilities_of_a_back_face`; `cards_sneak_show::cr_709_3_disruptor_flute_a_split_cards_half_and_an_adventure_by_their_names` |
+| `560a16f0` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | `cards_sneak_show::cr_601_2f_disruptor_flute_spells_with_the_name_cost_3_more_every_players`; `cards_sneak_show::cr_601_2f_disruptor_flute_naming_show_and_tell_under_omniscience_costs_3`; `rulings_mana::thalias_tax_applies_to_an_alternative_cost_cr_601_2f` |
+| `3029db62` | a | other | Disruptor Flute: any card name; a token's name only if it is also a card's (CR 201.3) | `cards_sneak_show::cr_201_3_disruptor_flute_offers_every_name_of_the_games_cards_and_their_faces` |
+
+### Magus of the Moon (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `cd000dac` | a | other | Magus of the Moon without abilities still makes nonbasic lands Mountains (layer 4 before layer 6, CR 613.1d, 613.1f) | `cards_sneak_show::cr_613_1d_the_magus_without_abilities_still_makes_mountains` |
+| `aa10a575` | a | replacement | a nonbasic land entering under the Magus loses its enters-tapped and as-enters abilities before they apply (CR 614.12) | `cards_sneak_show::cr_614_12_thundering_falls_and_mistrise_village_enter_untapped_and_quiet_under_the_magus`; `cards_sneak_show::cr_614_12_an_as_enters_choice_and_counters_are_gone_under_the_magus` |
+| `cafea326` | a | triggers | a nonbasic land entering under the Magus loses its enters triggered ability before it triggers (CR 614.12, 603.6) | `cards_sneak_show::cr_614_12_thundering_falls_and_mistrise_village_enter_untapped_and_quiet_under_the_magus` |
+| `53c9e610` | a | other | Magus of the Moon changes no name or supertype (CR 305.7) | `cards_sneak_show::cr_205_4_the_magus_keeps_names_and_supertypes` |
+| `24283e6f` | a | other | under the Magus nonbasic lands lose their land types and abilities and gain Mountain and {T}: Add {R} (CR 305.7) | `cards_sneak_show::cr_305_7_magus_makes_the_decks_nonbasic_lands_mountains`; `cards_sneak_show::cr_305_7_ancient_tomb_and_city_of_traitors_under_the_magus_tap_for_one_red` |
+
+## Cards without rulings (175)
+
+Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54), Flow State (legacy, constructed play: ENGINE.md 54), Street Wraith (legacy, constructed play: ENGINE.md 54), Brotherhood's End (legacy, constructed play: ENGINE.md 54)

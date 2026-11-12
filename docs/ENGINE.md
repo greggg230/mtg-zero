@@ -25493,6 +25493,546 @@ load on the first pass and passed when rerun. **`python tools/gate.py python --n
 passed and 1 skipped, the mtg-smoke loop (16 games, 0 unfinished), tracked files unchanged: GATE PASSED python
 ff5ba0847e85 in 935s.** The commit after it adds this paragraph only.
 
+## 112. Run 2's deck choice by the evaluator, retrained inside the run (branch `deck-choice-eval`, 2026-11-11)
+
+Branch `deck-choice-eval` (from main 60397f3; main 37fa30b, eval-v2's ENGINE.md 111, merged in); zero-core `feat/selfplay-spec-hook` **ef63ee1** (from f9ca5c3, pushed),
+the pin f9ca5c3 -> ef63ee1. **Why** (the user, 2026-11-11, approved): run 2 chooses each seat's deck with the learned deck
+evaluator (108), not the network's value (107.2): in pool 2030 the evaluators' pick beat the value pick by **+23.1 points
+[16.7, 29.4]** (384 paired games, iteration 78 piloting at 64 simulations; `E:/mtg-zero/s4a/races/eoe1-iter_0078`, 108.6),
+and 108.2 shows the value is a weak, half-memorising judge out of sample. The evaluator is retrained during the run on its
+recent games. Everything is opt-in; every default is byte-identical.
+
+### 112.1 The engine's scorer of the evaluator's export
+
+**The format is eval-v2's** (ENGINE.md 111.6: `Evaluator.export`, `"format": "mtgz-deck-evaluator-export"` version 1, the
+specification in `mtgz/sealed/evaluator.py`'s docstring; merged here from main 37fa30b): kinds `linear`, `set` and
+`pair`; the card table in the EoE registry's order (`eoe_cards.txt`, `in_table` 0 for Paradox Haze) with the attributes
+the deck features read written out; the features' names, mean and sd; per member the kind's weights; a pair export's
+stored field. An earlier draft of this branch had a format of its own; it is gone (the coordinator, 2026-11-11). A
+version is named by the sha256 of its bytes (`Evaluator.export` writes compact JSON: one evaluator, one file).
+
+**The Rust scorer** (`engine/src/az/sealed/scorer.rs`): reads the file once per process and path while its size and
+mtime stay the same (`scorer::load`; a run's versions are immutable), computes its sha256 (FIPS 180-4, in the module: no
+new dependency; the standard's vectors tested), refuses loudly anything it cannot score - another format or version, an
+unknown kind, other feature names, a size, a flag not 0/1, a card of the table not of the EoE table or twice, a zero sd,
+no members, a pair export without a stored field, a field deck naming a card out of the table, a pair strength with a
+bias - and scores a deck exactly as `ReferenceScorer` does: counts over the table (a deck card out of it an error, never
+dropped), the 35 features (the export's formulas: the main pair a stable sort, ties to the earlier colour), scaled; then
+`linear` z = bias + wc . x + wf . f, `set` + w2 . relu(w1 [x emb / 40, f] + b1) + b2 + 0.5 (|x u|^2 - x . |u|^2) / 40,
+each P the members' mean of sigmoid(z); **`pair`** against the stored field B_1..B_N: per member s(B_j) and g_j = W e(B_j)
+computed once at load (e(x) = x U / 40 + f P), then a deck costs one strength, one embedding and N dot products: P = the
+members' mean of (1/N) sum_j sigmoid(s(A) - s(B_j) + e(A) . g_j). f64 throughout. (A named field instead of the stored
+one would be a file of its own pinned beside the evaluator: not built.)
+
+**The match** (`python -m mtgz.sealed.scorer check EXPORT [--evaluator PT]`, `tests/test_deck_scorer.py`): eval-v2's
+trained evaluators (`E:/mtg-zero/s4a/v2_time`, the half-life-40 run, 111.4), 2,000 candidate decks of generated pools -
+**set: |engine - reference| 2.2e-16, |engine - torch| 3.4e-8; linear 2.2e-16, 3.6e-8; pair (a linear strength, dim 0,
+a 256-deck field) 4.4e-16, 2.4e-8**. The engine tests' fixtures (`engine/tests/data/scorer_{linear,set,pair,pair_linear}.json`:
+random weights of every kind - a pair over a set strength with a 3-dimensional matchup term, a Bradley-Terry pair over a
+linear one, 24-deck fields -, made by `python -m mtgz.sealed.scorer fixtures`, byte-reproducible): 48 decks, at most
+8.9e-8 from torch. Speed through the binding (2,000 decks, the JSON and name lookups included): set 27.5 us a deck, linear
+10.9, pair 17.5.
+
+### 112.2 The deck choice by an evaluator (the sealed spec)
+
+`"deck_choice": {"k": 32, "explore": 0.1, "by": "evaluator", "evaluator": "<file>", "evaluator_sha": "<sha256>",
+"temperature": 0, "seats": [0, 1]}` (`sealed::DeckChoiceSpec`; `by` default `"value"`, 107.2's choice unchanged;
+`evaluator_sha` optional - a file with other bytes is refused; `temperature` default 0; `seats` default both, for either
+`by`). A built seat (a generated or given pool) in `seats`:
+
+* **its K candidates** are 107.2's (candidate 0 the best guess, 1..K-1 the randomised builder from `candidate_rng`);
+* **explore** as 107.2 (`explore_pick`: a uniform randomised candidate with probability `explore`);
+* else **the evaluator scores the K and the seat plays the best** (the first on a tie), or at a temperature t > 0 one
+  drawn with probability proportional to exp((score - best) / t) from a generator of its own (`choice_rng(seed, p)`, so
+  pools, candidates and the explore draw are the same with or without it). **No decision**: the deck is chosen when
+  `MtgAz::new` makes the game (no `ChooseDeck`, no value choice, nothing for zero-core to do: self-play has no Python
+  callback);
+* a seat not in `seats` plays the spec's seat (`SealedSpec::seat`: `best_share`'s mixed field).
+
+**No hidden information**: a seat's choice reads its own pool's candidates and the file only (tested: the other seat given
+another pool, the same choice). **Deterministic and replayable**: the decks are a function of the spec (the file and its
+sha256), the seed and the seat; `MatchState::how` records `mode` `chosen`, the `candidate`, the evaluator's sha256 and
+the deck's score; the **game log** (107.1, 107.3) writes per chosen seat `"evaluator": <sha256>` and `"score"`, and the
+spec line names the file and pins its sha256, so a line replays bit for bit from its spec line, seed and actions (tested);
+`python -m mtgz.sealed.games RUN --check` rebuilds each chosen deck and checks it is the evaluator's own choice by the
+logged sha256 (a tampered sha256 or candidate is a mismatch). `mtgz._engine.sealed_candidates` gives each candidate's
+`scores`, the `chosen` one and the `evaluator_sha`; `sealed_scores(path, decks)` and `sealed_scorer_info(path)` the
+scorer's.
+
+**The builder, faster, draw for draw** (`builder.rs`, `spells_of`, `score`): a colour's score sorted the pool's spells with
+`pools::weight` (an IR walk) inside the sort's comparator, ~10,000 calls a build; each spell's weight and mana value is
+now computed once per build and the same order sorted. Every build is the same (107.1's pin of 400 builds, 200 seats and
+150 prior samples, 5e986ac22869924f, holds; `sealed` 16 passed); a build 105 -> **26 us**, the best guess 85 -> 23 us
+(`builder_cost`, arena pools, the desktop loaded with this section's fuzz). Every sealed game and prior deal gains it.
+
+### 112.3 The prior stays coherent with the field (102, 106)
+
+107.2 left an explicit mismatch: the value choice's field is chosen decks, the opponent prior 107.1's mixture (a prior of
+value-chosen decks would need the network in the prior); the deck tilt (106) corrects toward the actual opponent. **The
+evaluator needs no network, so the prior chooses as the field does**: each seat has its own prior
+(`SealedPrior::of_seat`, named `sealed+evaluator` for a choosing seat), and a sample (102.6 steps 1-2: a pool - the
+K-sample deal's bank, 102.8 - with R placed in it) is then:
+
+* with the seat's `explore` share (one uniform draw, none at 0 or 1) **a randomised build** (102.6 step 3's: as an
+  exploring seat plays a randomised candidate);
+* else **the seat's K candidates of that pool** - its best guess and K - 1 randomised builds drawn from the deal's
+  generator - **scored by the same evaluator file**, and the best of those whose colours (pair and splash) cover R's
+  nonland colours (or a draw at the choice's temperature among them); none covering: step 3's randomised builds;
+* step 4 (R forced in, the size) as before. `best_share` is not read for a choosing seat (it chooses instead); a seat
+  that does not choose keeps 107.1's mixture; the value choice's prior is 107.1's mixture as before (its 107.2 mismatch
+  stays, documented there).
+
+**Exact, modelled.** Exact: every sample meets K1-K3 (`check_sample` at every deal), is a function of the generator and
+the request, and with nothing shown is exactly the evaluator's best of K candidates of a pool of the collation (tested
+draw for draw against the candidates rebuilt from the same generator). Modelled, as 107.1's `best_guess_covering`: given
+shown cards the chosen deck is the best *covering* candidate - the choice restricted to decks whose colours could have
+shown R - not the exact posterior of "the evaluator chose a deck holding R" (that needs rejection). The deck tilt (106)
+then weighs the K cached decks of this prior: it tilts the field's choice. Measured (`the_prior_of_a_choosing_seat_
+chooses_as_the_seat_does`, the set fixture): the choosing prior's samples score 0.986 on average against the real chosen
+decks' 0.984 (the mixed field's prior 0.825); with 8+ cards of a real chosen deck shown, 34 of 36 samples are in its
+colours and a splash at most.
+
+### 112.4 The rolling retrain (zero-core's run loop, through the game package)
+
+**Where it belongs.** The deck choice is the game's (the engine reads the file named in the spec); when to retrain, on
+which games, and which file the next phase's spec names are the run's - but the rolling self-play driver lives across
+iterations with one spec (zero-core `Run.roll`), and nothing in mtgz runs at an iteration boundary. So zero-core
+`feat/selfplay-spec-hook` ef63ee1 (its docs/az.md 40, search.md 2.13; **opt-in, defaults byte-identical**) gives a game
+package three hooks: `settings` (its own run settings: flags, presets, config.json), `selfplay_specs` (game -> fn(run,
+it) -> the phase's spec or None; a rolling driver switches between phases with the new `Driver.set_spec` - the games it
+starts from then on, games in flight keep theirs -, a phase's driver is made with it; remote self-play refuses a changed
+spec) and `remote_eval_inputs` (run files a remote evaluation needs, shipped to the mirror). A package declaring none, or
+a hook answering None, plays exactly as before. mtgz registers them for `mtg_eoe` (`mtgz/sealed/rolling.py`):
+
+* **Settings** (`rolling.SETTINGS`, all off by default): `evaluator_every` N (0 off), `evaluator_window` W (40: at
+  most the newest W iterations of the run's own games), `evaluator_min_window` M (8: the first retrain waits for M
+  iterations after the first version), `evaluator_val_iters` V (2), `evaluator_kind` (`set`; `linear` or `pair`),
+  `evaluator_pair_base` (`linear`), `evaluator_threads` (4), `evaluator_half_life` (0: none; train's recency weighting,
+  111.3), `deckchoice_eval_games` (0 off).
+* **Versions** (`selfplay_spec`, asked at every phase's start): `<run>/evaluators/v<iter>.json`, immutable, `iter` the
+  last iteration whose games trained it. The first is the spec's own file copied in when the run first plays
+  (`v<the iteration before>`). Each phase plays the newest version published before it began - a version finished during
+  a phase is used from the next (an iteration boundary) - its path and sha256 in the phase's spec. `evaluators/used.jsonl`
+  records each iteration's version, `index.jsonl` each version (sha256, window, games, the selected mix and L2,
+  validation log loss). With `evaluator_every` 0 the hook answers None: the spec's file as given.
+* **The job** (`python -m mtgz.sealed.rolling retrain RUN --iter b --from-iter lo ...`; started by the hook at iteration
+  it = b + 1 when b is a multiple of N, M iterations of the run's own games follow the first version, no version b exists
+  and no job runs; the window lo..b = the newest W iterations after the first version; CPU only,
+  `CUDA_VISIBLE_DEVICES=-1`, below-normal priority, no window, `evaluator_threads` threads; stdout in
+  `evaluators/work/v<b>/log.txt`, its pid file): (1) a snapshot of the window's game log lines (a remote evaluation's
+  file by its name, the rest by time, 109.1) and the metrics up to b; (2) `python -m mtgz.sealed.evaluator values SNAP
+  --checkpoint played --models RUN/models` (the leak-free pre-game value, 108.2: the deck choice by an evaluator has no
+  pre-game decision, so 108's start position is the game's first decision); (3) `python -m mtgz.sealed.evaluator train
+  SNAP --values ... --split time --time-from b+1 --val-iters V --kinds K --pools 0 --seed b --from-iter lo [--half-life H]
+  [--pair-base B]` (the existing CLI with eval-v2's recency options: the last V iterations validate - the distillation
+  mix, the L2, early stopping -, the rest train, weighted by recency); (4) the selected `evaluator_<kind>.pt` exported
+  (`Evaluator.export`; its informational meta's NaN metrics - the split has no test iterations - written as null, which a
+  JSON parser accepts), **checked: the engine against the export's reference (1e-9) and torch (1e-5) on 400 candidate
+  decks**, and published atomically as `v<b>.json`; `status.json`. The snapshot is deleted after success (the window is
+  reproducible from the run's log).
+* **Never blocking, loud on failure.** Self-play only reads the versions directory. The next phase reports a finished job
+  once (`deck evaluator v0088 published: ...` or **`EVALUATOR RETRAIN FAILED v0088: <error> - keeping v0084`**, also for
+  a job that died without a status), and a failed version is never retried silently or used. A job outliving its run
+  process (a restart) is found by its pid file (its command line checked: never a reused pid) and waited for, never
+  doubled; while one runs a due retrain is skipped (logged).
+* **Selection bias, by design.** Run 2's games are between chosen decks (and 10% explore builds), so each version learns
+  "P(win) against this field" - the fixed point DESIGN.md 9.1 names - from the field it chose; the explore share keeps
+  builder-random decks in every window.
+
+### 112.5 The deck-choice evaluation
+
+The run's own evaluations are run 1's, unchanged (the fixed evaluation pairs against the heuristic and random, Elo). Added:
+**`deckchoice`** (zero-core's `evals`, logged as `extras.deckchoice`; `deckchoice_eval_games` N > 0): the checkpoint's
+seat chooses its deck among the K candidates of its fixed evaluation pool by the evaluator its iteration's self-play used
+(`used.jsonl`; shipped to a remote evaluation with the version file: `remote_eval_inputs`), against the yardstick (the
+heuristic) playing its pool's best guess (`"best_share": 1`, `"seats": [p]`, explore 0); N games, the network in each seat
+half of them, seeds 7919 it + 5 and + 6. **`python -m mtgz.sealed.rolling deckeval CKPT --evaluator FILE [--best-guess]`**
+plays the same for any checkpoint (`--set key=value` overrides the run settings, e.g. `infer_device=cuda`), and
+`--best-guess` the baseline arm (the network on its best guess), so "does the deck choice help" reads as the evaluator arm
+minus the best-guess arm on the same pools and seeds. **Run 1's comparable number** is that pair of arms for its final
+network, the one run 2 starts from: `python -m mtgz.sealed.rolling deckeval E:/mtg-zero/runs/eoe1/models/iter_0078.pt
+--evaluator E:/mtg-zero/s4a/v2_time/evaluator_set.json --games 64 --set infer_device=cuda` and the same with `--best-guess`
+(GPU minutes once the races end: not run here - the desktop's GPU belonged to the race and the sweep, 112.9). The smoke
+ran the evaluation every iteration (4 games each: the CLI and the in-run path both played).
+
+### 112.6 Run 2: the preset `eoe-2e` and the launch
+
+`eoe-2e` = eoe-1 + the spec's deck choice by the evaluator (K 32, explore 0.1; the file a launch flag) + `evaluator_every`
+4, `evaluator_window` 40, `evaluator_min_window` 8, `evaluator_val_iters` 2, `evaluator_kind` set, `evaluator_half_life` 40
+(v2's pick, 111.4), `evaluator_threads` 4, `deckchoice_eval_games` 64 (one game per evaluation pair: the Mac's budget,
+109.3), and (merged with 113, 126) `real_decks_every` 40 with `real_decks_builder` `run_evaluator` (the win % against real
+decks every 40th iteration, 113.3's cadence for the Mac, our decks chosen by the evaluator the iteration's self-play used);
+`eoe-2e-smoke` the same on eoe-smoke (K 8, a retrain every iteration on 2; the real decks off, 2 pools x 2 games when a
+flag turns them on). **Run 1's search settings stay**
+(64 / 16 simulations, payments at 4, the evaluation's 32: the search sweep found iteration 78's strength against the
+heuristic saturates at 64 simulations - 16: 23.2%, 32: 28.2%, 64: 31.8%, 256: 32.5%). It starts by **forking from
+`E:/mtg-zero/s4a/deep128x8/iter_0078_x2.pt`** (run 1's iteration 78 deepened 128 x 4 -> 128 x 8, bit-identical values) as
+a continuation of run 1 at iteration 78 (`fork_run.py --net`: run 1's window, Elo and metrics to 78, a fresh optimizer with
+run 1's 100 warm-up steps): run 1's saved `lr` 1e-3, `lr_halve_every` 30 and `lr_min` 1e-4 continue its schedule -
+**2.5e-4** from iteration 79 (61-90), 1.25e-4 from 91, then the floor. A fork's saved settings beat a preset (109.3), so
+every run-2 setting goes in as a flag. **The initial evaluator is eval-v2's `set` export**
+(`E:/mtg-zero/s4a/v2_time/evaluator_set.json`, sha256 `1e0ac330913438be...`: trained on the whole of run 1 with a half-life
+of 40, the best winner's-deck ranking of 111.4's kinds, 60.2%; the set kind is also what run 2 retrains). **Not launched**
+(the user approves run 2). From a pinned worktree of the merged commit:
+
+```
+python -m mtgz.sealed.scorer check E:/mtg-zero/s4a/v2_time/evaluator_set.json --evaluator E:/mtg-zero/s4a/v2_time/evaluator_set.pt
+python tools/fork_run.py --source E:/mtg-zero/runs/eoe1 --dest E:/mtg-zero/runs/eoe2e --iter 78 \
+  --net E:/mtg-zero/s4a/deep128x8/iter_0078_x2.pt
+bash tools/mac.sh --eval-checkout
+python tools/launch_hidden.py E:/mtg-zero/runs/eoe2e/supervisor_console.txt python tools/supervise.py E:/mtg-zero/runs/eoe2e \
+  --preset eoe-2e --seed 1 --iters 160 --threads 16 --groups 3 --conc 1152 --train-static 1 --ram-budget-gb 40 \
+  --eval-random-games 10 --elo-paired 1 --shard-sparse 1 \
+  --spec '{"sealed": {"set": "eoe", "collation": "arena", "best_share": 0.5, "deck_choice": {"k": 32, "explore": 0.1, "by": "evaluator", "evaluator": "E:/mtg-zero/s4a/v2_time/evaluator_set.json", "evaluator_sha": "1e0ac330913438be9f6b329bdfbab66aad5818cee1aca079f203f9b3b295a43a"}}, "max_turns": 60, "eval_decks": 64, "eval_seed": 1}' \
+  --evaluator-every 4 --evaluator-window 40 --evaluator-min-window 8 --evaluator-val-iters 2 --evaluator-kind set \
+  --evaluator-half-life 40 --evaluator-threads 4 --deckchoice-eval-games 64 --eval-remote mac --eval-every 2 \
+  --real-decks-every 40 --real-decks-builder run_evaluator
+```
+
+(`--iters 160` = 82 iterations past 78: the user's to set. `best_share` stays in the spec for the given-pool seats and the
+evaluation set; a choosing seat does not read it.) Its log then says `iter 79 deck evaluator: the spec's ... is the run's
+first version v0078 (1e0ac3309134)`, `iter 79 self-play: decks chosen by the deck evaluator v0078.json`, at iteration 89 `the
+retrain of v0088 started (the games of iterations 79-88 ...)`, then `deck evaluator v0088 published ...` and the next
+phase's `decks chosen by ... v0088.json`; from then every fourth iteration on the run's newest games (up to 40 iterations,
+half-life 40). What to watch: self-play seconds per iteration against run 1's (112.8), `EVALUATOR RETRAIN FAILED`,
+`extras.deckchoice` against `eval_yard`, the chosen candidates in `python -m mtgz.sealed.games`, and at iterations 80, 120
+and 160 `iter N real_decks (remote mac): {...}` (113; its builder the iteration's evaluator version, 126) - each such
+evaluation ~10 more minutes on the Mac (113.3).
+
+### 112.7 The pairwise kind, and a named field
+
+The engine scores eval-v2's `pair` exports (112.1) against **their stored field** (eval-v2's default: a sample of the newest
+training decks), so `evaluator_kind pair` (with `evaluator_pair_base`) works end to end: the choice, the choosing prior
+(each candidate scored against the same field), the log, the retrain (`--kinds pair --pair-base B`; the pair entry's
+selection read from its report). 111.5 found the matchup term adds nothing yet (v2's pick is dim 0: Bradley-Terry), so
+run 2 starts with the set kind. **Not built: a named field.** Scoring against a field other than the stored one - e.g. the
+run's newest chosen decks, which is what "against the field" means once the field moves - needs that field in the
+evaluator's identity: a field file of its own (registry ids and counts, eval-v2's `field.decks` layout) named and pinned
+(sha256) in the spec beside the evaluator, read by `scorer::load` into the same precomputed table (s(B_j), g_j). The rolling
+retrain would write it with each version (the window's newest chosen decks). Nothing else changes.
+
+### 112.8 Costs
+
+Measured on the desktop while it ran eight race processes, a GPU sweep and this section's fuzz (CPU at 100%: the numbers
+are upper bounds; `cargo test --release -p engine --test deck_scorer <name> -- --ignored --nocapture`,
+`DECK_SCORER=E:/mtg-zero/s4a/v2_time/evaluator_set.json` unless named):
+
+* **A game's start** (`choice_cost`; arena, eoe-2's spec, K 32, one thread): the value choice's candidates 10.7 ms; the
+  evaluator's choice 11-17 ms (the same candidates and 64 scores: the v2 set ensemble ~14 us a deck).
+* **The prior** - the real cost. A new request (the opponent showed a new card) draws its K = 32 decks: the mixed field's
+  prior **2.1 ms**, the choosing prior **44 ms** (each sample builds and scores K = 32 candidates: 1,024 builds and scores
+  a request). Per game (`prior_cost_per_game`: 16 heuristic games of ~16 rounds, the decider dealing one world at every
+  decision as its search's first deal does): **324 ms -> 1,008 ms** with the v2 set export (821 ms with the v2 pair; v1's
+  set before the builder's speed-up of 112.2: 430 -> 2,083 ms). Run 1's games average 25.9 rounds: about **+1.1 s of one
+  core a game**, ~+660 core-seconds an iteration of 600 games, ~+40 s an iteration spread over self-play's 16 search
+  threads where self-play is CPU-bound (run 1's self-play ~120 s of its ~5-minute iteration; with the evaluation on the
+  Mac, 109.3, ~132 s an iteration in all: up to ~+30%), less where the GPU bounds it.
+* **Self-play, measured on the CPU** (`bench_net.py` in `E:/mtg-zero-scratch/deck-choice-eval/`: run 1's iteration 78
+  piloting both seats with eoe-1's self-play seat - 64 / 16 simulations, payments at 4, p_full 0.25, the deck tilt -, 8
+  games, 2 search threads, CPU inference): run 1's spec 255.7 s for 8 games (11,313 simulations a game, 21.9 rounds),
+  the evaluator's choice (v1 set) 372.2 s (16,607 simulations a game, 27.5 rounds): **2.83 vs 2.80 ms a simulation** - with
+  CPU inference the prior's cost does not show; the games themselves ran longer (8 games: noise or the chosen decks). With
+  a uniform evaluator (no inference, 12 games of ~59 rounds: random-strength searches reveal far more cards) the CPU work
+  was 4.4 -> 11.8 core-seconds a game: the upper bound. Run 2's first iterations give the GPU number (`selfplay.seconds`,
+  `games_per_h` against run 1's iterations 70-78). If it is too high, the exact speed-ups left: the pool's pair scores
+  shared by its K - 1 randomised builds (most of a build), and a candidate abandoned once its colours cannot cover the
+  shown cards (each candidate on a generator of its own) - both keep the prior's distribution.
+* **The retrain** runs beside the run: the smoke's (44 games, 2 iterations) ~38 s on 2 threads (values 17 s, train 17 s,
+  export and check 4 s). Run 2's (8 iterations at first, ~5,100 games; up to 40, ~25,000, the 128 x 8 network valuing each
+  game twice per chooser on CPU) ~3 to ~15 minutes on 4 threads every 4 iterations (~20 minutes): below-normal priority,
+  never waited for.
+* **The deck-choice evaluation**: 64 games against the heuristic at the evaluation's simulations, ~0.6 of run 1's 100-game
+  yardstick: ~+50 s of the Mac's ~217 s an evaluation (109.3: with `--eval-every 2` the Mac's ~264 s budget is just met).
+
+### 112.9 Tests, smoke, fuzz, gates
+
+**Tests.**
+* `engine/tests/deck_scorer.rs` (8 + 3 ignored): `the_scorer_scores_as_torch_does` (the four fixtures - linear, set, a pair
+  over a set strength with a matchup term, a Bradley-Terry pair over a linear one, 24-deck fields - against torch's scores
+  of 48 decks: at most 8.9e-8; the sha256 of the bytes; order-free; read once), `the_scorer_refuses_what_it_cannot_score`
+  (19 malformed exports, a missing file, a card out of the table at scoring, Paradox Haze's `in_table` 0),
+  `the_evaluator_choice_key_parses_and_refuses` (the defaults, the JSON round trip, the value choice's JSON unchanged,
+  `seats`, a pinned sha256, a temperature, 9 refusals), `the_evaluator_chooses_the_best_candidate_of_the_seats_own_pool`
+  (40 games per kind, linear, set and pair: every seat its explore pick or the evaluator's best candidate - 38-46 of 52
+  chosen seats not the best guess -, `how` with the sha256 and score, the game played with it, the same decks from the same
+  seed, no decision; no hidden information: the other seat given another pool, the same choice; `seats` [0] with
+  `best_share` 1: seat 1 the best guess, its prior the mixed field's), `the_temperature_draws_by_the_softmax_of_the_scores`
+  (40,000 draws within 4 se; a game's pick a function of the seed), `the_prior_of_a_choosing_seat_chooses_as_the_seat_does`
+  (nothing shown: exactly the best of K candidates rebuilt from the generator, 24 of 24; mean score against the real chosen
+  decks; 34 of 36 samples with 8+ shown cards in the real deck's colours and a splash at most; explore 1 = the randomised
+  prior draw for draw), `the_game_log_records_the_evaluator_and_replays` (the spec line's sha256, each chosen seat's
+  sha256 and score, each game replayed bit for bit from its spec line); ignored: `choice_cost`, `prior_cost_per_game`,
+  `builder_cost` (112.8); `the_seats_key_with_the_value_choice` (only seat 1 decides). `scorer::tests::sha256_meets_the_standards_vectors`. `engine/tests/deck_choice.rs` (the spec's
+  `DeckChoiceSpec` is no longer `Copy`: two `.clone()`s), `sealed` (107.1's builder pin holds), `game_log`: pass.
+* `tests/test_deck_scorer.py` (10): the fixtures reproducible byte for byte; the engine against the reference (1e-12) and
+  torch on random evaluators of every kind, one evaluator one file, the refusals through the binding; eval-v2's
+  evaluators (2,000 decks; skipped without E:); the candidates' scores and choice through the binding; driver games with
+  the choice, their log (`evaluator` sha256 per chosen seat, two specs' lines) and `--check` (a tampered sha256 found);
+  the versions and the retrain's schedule (the first version copied, nothing due before the window, the job's command
+  line, a dead job reported once, a published version used from the next phase, `used.jsonl`, the evaluation's evaluator
+  and remote inputs, without the retrain the spec as given, `evaluator_every` without the evaluator's choice refused); the
+  snapshot (by time, a remote evaluation's file by its name); the deck-choice evaluation's spec; the presets; an `mtg_eoe`
+  rolling driver switching evaluators between phases (`Driver.set_spec`: both versions in the log, `--check` clean).
+* zero-core: 112.4's tests (docs/az.md 40.5).
+
+**The smoke** (`python -m mtgz.az.run --run E:/mtg-zero-scratch/deck-choice-eval/smoke2 --preset eoe-2e-smoke --iters 4
+--threads 2 --groups 1 --torch-threads 1 --spec <eoe-2e-smoke's with the evaluator E:/mtg-zero/s4a/v2_time/evaluator_set.json>`,
+CPU, 17 minutes on ca06ac3's code): iteration 1 copied eval-v2's set export in as `v0000` (`1e0ac3309134`) and chose by
+it; iterations 1-3 self-played with v0000 (64 games: 113 seats chose - 51 the best guess, the rest candidates 1-7 -, 15
+explored; the chosen decks scored 0.60 +- 0.05 against the explore ones over 15 games, noise at this size); at iteration
+3's start **the retrain of v0002 started** (the games of iterations 1-2: 44 games, the half-life 40, lam 0.25 selected,
+validation log loss 0.664, 23.5 s; export check: engine - reference 2.2e-16, engine - torch 2.9e-8) and **iteration 4
+chose by v0002** (`c0369c3ae2d5`); a second retrain (v0003, iterations 2-3, 35.1 s) ran past the run's end, as one does past
+a stop. The deck-choice evaluation ran every iteration (4 games; iteration 4's by v0002). `python -m mtgz.sealed.games
+E:/mtg-zero-scratch/deck-choice-eval/smoke2 --check`: **184 of 184 games rebuilt, 0 mismatches** (every chosen deck the
+evaluator's own choice by its logged sha256). An earlier smoke on this branch's first format (`smoke1`, 4 iterations, a
+restart mid-run included) showed the same chain (v0000 -> v0002 -> chosen by v0002, 192 games, 0 mismatches); its files
+are of the retired format.
+
+**The fuzz** (`FUZZ_GAMES=20000`, release, four chunks of 5,000 / two of 10,000 run as the fuzz binary of ca06ac3's engine -
+the engine sources of every later commit of this branch are the same):
+
+* **The new mode**, `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_BEST_SHARE=0.5 FUZZ_DECK_CHOICE=32
+  FUZZ_DECK_CHOICE_BY=E:/mtg-zero/s4a/v2_time/evaluator_set.json`: **passed, every seed** (wins 9,812 / 9,617, 571 draws, none
+  aborted; **36,046 seats chose by the evaluator** - each checked to be its pool's best candidate by the scorer, with the
+  sha256 and score in `how`, its prior `sealed+evaluator` - and 3,954 explored; 541,584 hidden-decklist worlds dealt from the
+  choosing priors, 541,433 with another deck than the real one; 2.87M information-set steps in step; ~5,450-5,780 s a
+  chunk). (An earlier run of this mode on the branch's first scorer format was stopped when the format changed.)
+* **The mode of before**, `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_BEST_SHARE=0.5` (the mixed field's prior; the builder's
+  speed-up under every deal): **passed, every seed** (wins 9,705 / 9,576, 719 draws, none aborted; 559,458 worlds, 559,256
+  with another deck; 2.91M information-set steps; ~4,760-4,790 s a chunk of 10,000).
+
+**Digests**: no digest game plays the EoE table, and every spec without `"by": "evaluator"` builds, deals and plays as before
+(107.1's pin of the builder, seats and prior samples holds): **unchanged**, full **53839c837bbaf034**,
+`DIGEST_ENCODING=0` **208c723daced22fe** - main's (measured on 60397f3, this branch's base, and on this branch).
+
+**Gates** (CPU, `--no-mac`, `--jobs 4`, `--target-dir E:/cargo-target/mtg-zero/deck-choice-eval`; the desktop shared with
+other agents' gates and runs, the CPU at 96-100% much of the night - gate steps run below normal priority):
+
+* **`python tools/gate.py engine --no-mac --tested-sha a1e4119 --expect-digest 53839c837bbaf034 --expect-digest0
+  208c723daced22fe`** on a1e4119: build, both digests (= expected), `az` 48, `hidden` 28, `limits` 13, pytest 283 passed
+  and 1 skipped, the search smoke (random, seed 0): **`GATE PASSED engine a1e4119e51eb in 912s`**.
+* **`python tools/gate.py python --no-mac`** on a1e4119: build, pytest 283 passed and 1 skipped, the run-loop smoke
+  (mtg-smoke, 16 games, 0 unfinished): **`GATE PASSED python a1e4119e51eb in 545s`**. (First runs of both at ~96% CPU
+  failed only on subprocess timeouts: test_loop.py 2 failed and 5 errors - 10 of 10 alone in 45 s -, test_mac_remote.py's
+  remote EoE evaluation - passes alone.) a3f6ac1 changes only the core pin (the core's Python, below); the commit after
+  it, these paragraphs.
+* **`python tools/gate.py optin-core --no-mac --baseline-root <a checkout of 60397f3, zero-core f9ca5c3> --step-timeout
+  7200`** on a3f6ac1 (zero-core ef63ee1): core tests 148, **checkpoint_compat byte identity: identical** (mtg, a random
+  network: visits and cq 2,465 samples each, the same record and result hashes on both sides), `az` 48, `hidden` 28, the
+  other games' build-only 3 of 3 (glassroad-zero, caverna-zero, kingdombuilder-zero), core build: passed; **core pytest
+  failed: 442 passed, 4 failed, 2 errors, under the night's load** - three toy runs of `test_infoset_merge.py` timed out
+  at their 300 s, `test_league.py`'s module fixture lost one toy run to an access violation (exit 0xC0000005, no output:
+  a classic run with the league, a path the hooks do not touch; the core's Rust change is safe code), and
+  `test_measure.py`'s held-out `seconds` (0.0 vs 0.01, a timing comparison; `heldout.py` untouched). **Alone, at the same
+  load: `test_league.py` + `test_infoset_merge.py` 21 of 21 (116 s); `test_select.py` + `test_package_hooks.py` +
+  `test_measure.py` 33 of 33.** A full rerun of the suite on its own at normal priority (ef63ee1, 63 minutes at ~100%
+  CPU): 446 passed, 2 failed - `test_measure.py`'s anchors on a local remote timed out, and `test_distill.py`'s fork toy
+  run exited 0xC0000005 with no output; both pass alone (27 s). The same exit hit toy runs of another branch's core with
+  no Rust change the same night (realdecks' optin-core gate on zero-core 6ed51d5): the machine, not this change. **The
+  optin-core gate is to rerun on a quiet machine** (the command above).
+* The first optin-core run (a1e4119, zero-core b0a3a3b) passed every step but the core pytest, which ran out of its hour.
+  **Run on its own, zero-core's suite then found one real failure, fixed in ef63ee1**:
+  `test_select.py::test_remote_ships_raw_offsets` - `RemoteEval._ship` read the run's `game` setting for the new inputs
+  hook even when the package registers none (a KeyError with the test's settings dict); it now returns before reading it,
+  so `_ship` reads exactly what it did before (docs/az.md 40.3).
+* The launch command of 112.6 resolves (`zero.run.parse` + `resolve_config` against run 1's `config.json`, nothing
+  started: `E:/mtg-zero-scratch/deck-choice-eval/check_launch.py`): preset eoe-2e, sims 64, `sims_fast` 16, `sims_minor`
+  4, `eval_sims` 32, lr 1e-3 halved every 30 to 1e-4 (2.5e-4 at 79), `eval_every` 2 on `mac`, the evaluator settings as
+  given, the spec's choice with its sha256.
+* Not run: the deck-choice evaluation of run 1's iteration 78 on the desktop GPU (beside the evalpick race, 64 games did
+  not finish in 8 minutes on 2 search threads: stopped). The command, for when the GPU is free:
+  `python -m mtgz.sealed.rolling deckeval E:/mtg-zero/runs/eoe1/models/iter_0078.pt --evaluator
+  E:/mtg-zero/s4a/v2_time/evaluator_set.json --games 64 --set infer_device=cuda threads=4 groups=1`, then the same with
+  `--best-guess` (the baseline): the difference is what run 2's `extras.deckchoice` starts from.
+
+## 113. Win % against real players' decks: a yardstick of our deckbuilding (branch `realdecks`, 2026-11-11)
+
+Branch `realdecks` (from main 60397f3); zero-core `feat/extra-evals` **6ed51d5** (from f9ca5c3; its docs/az.md 40), the pin
+f9ca5c3 -> 6ed51d5. **Why** (the user, 2026-11-11): "it's useful for evaluation, and we should add that now as a separate
+metric (win % against real decks). It should not be a target for deck building." DESIGN.md 9.1's measures of success 2 and
+3 (our build against the human build of the same 17lands pool, both against a field of 17lands human decks) as one paired
+metric, computed for any checkpoint and, opt-in, inside a run. **A yardstick only (DESIGN.md 0)**: it is measured and logged
+(metrics.jsonl or evals.jsonl `extras.real_decks`, the command line's JSON, the site), and nothing reads it back - not
+self-play, the deck choice (107.2), the deck evaluator's training (108), model selection, the Elo pool or best.pt. No engine,
+encoding or search change: digests untouched.
+
+### 113.1 The definition
+
+**The data**: 17lands' public EOE Premier Sealed games (best of one; `data/sealed/eoe_17lands_sealed.json.gz`, 101.4; 17lands
+public data, CC BY 4.0, https://www.17lands.com/public_datasets): 9,765 pools, 13,787 distinct builds.
+
+**The pools that count** (`realdecks.universe`, in the order of the checks; every skip counted by reason, never a dropped
+card): a pool holding a card the engine does not support is skipped whole - **87 pools, every one for Paradox Haze** (no IR;
+in no pool's main deck: always a sideboard card); an incomplete pool (not the 78 cards of six Arena boosters, or a build's
+rows missing a launch-day card, 101.4) - **19**; a pool without a 40-card build (its player's decks are 41-60 cards: we pair
+40-card decks, 104.1) - **727** (751 builds of 41, 82 of 42, ...). **8,932 pools count.** A pool's **real deck** is its
+player's main 40-card build: the 40-card build with the most games, then the lowest build index (`main_build`; 6,247 of the
+pools have one 40-card build, 2,087 two, 598 three or more).
+
+**The test pools and the field** (`RealDecks(pools, games, seed)`): the 8,932 pools sorted by 17lands id, then ordered by
+mix(seed, salt, position) (splitmix64, `compare.mix`); the first `pools` are the test pools, every later pool gives the field
+its real deck. Game k plays field deck k, so the field is fixed by (pools, games, seed): every evaluation of one setting
+meets the same opponents in the same games, and no test pool's deck (or its player's) is ever an opponent. The field decks
+are played as built (their sideboard the rest of their pool, unused in best of one).
+
+**The games** (104's full pairing; `measure`): test pool i plays games k = i x games ... (i + 1) x games - 1. Game k has one
+seed mix(seed, salt, k), one field opponent (deck k), one seat for the deck under test (k % 2) and one chooser of play or
+draw ((k // 2) % 2) - the same for both decks of the pool:
+
+* **A, "our deck vs real decks"**: our deck of pool i, from **our builder** (a parameter, `builder_of`): `best` - the
+  builder's best guess (107.1: run 1's builder; a function of the pool), `value` - the pilot network's value pick among the
+  deck choice's 32 candidates (run 2's deck choice, 107.2), `evaluator:PATH` - a saved deck evaluator's pick among them (108;
+  `evaluator.rank`, whoever trains it: eval-v2's 111, deck-choice-eval's 112), or `module:attr` - any callable
+  fn(pool names, seed) -> deck. Checked to be a 40-card build of the pool (loudly otherwise).
+* **B, "the player's own deck vs real decks"**: the test pool's real deck, in the same games.
+* A_i and B_i laid out slot by slot (`compare.slots`, `"order": "given"`): their shared cards in the same library slots,
+  so the same opening hands and draws until they differ; each side in its own driver with the same driver seed and the same
+  queue (game id = k's place), so the pilot's streams agree too.
+* **The pilot**: one network checkpoint on every seat (the deck under test and the field), with its run's evaluation seat
+  (`zero.run.Run.nn_seat`: eval_sims, the move rule `eval_select`, eval_cache, belief settings) and its run's evaluation
+  spec's sealed prior (collation, best_share: how the search deals the opponent's hidden deck; `base_spec`), max_turns 60.
+  The network sees neither decklist (hidden decklists, 102). So A and B differ only by the deck: A - B is our deckbuilding
+  against the player's, against real decks, with this network playing.
+* **Option C** (`--heuristic`): the same games with the heuristic bot on every seat. Kept off in a run: with the best-guess
+  builder it is a constant (it depends on no checkpoint), and the heuristic's verdict is the heuristic's (104.7: "the ranking
+  is the pilot's"; it favours the builder's creature-heavy decks, 104.6) - a fixed reference, computed once below.
+
+**Reported**: A, B and D = A - B (1 a win, 0.5 a draw), each with its standard error **over the games** (`a_se`, `b_se`,
+`diff_se`: the noise of this fixed set of pools and opponents - what moves between evaluations of one setting) and **over
+the pools** (`*_se_pools`: a pool's games averaged first; the pools as a sample of 17lands pools); `diff_ci95`, `var_ratio`
+(104.3), the games ending the same / better / worse, games an engine error removed (for both decks, with their specs:
+`failed`), unfinished games, and on the command line every pool's decks and points.
+
+### 113.2 The tool, the run's evaluation
+
+* **`python -m mtgz.sealed.realdecks CKPT [CKPT ...] [--pools 64] [--games 2] [--seed 0] [--builder best] [--sims N]
+  [--device cuda] [--threads 4] [--heuristic] [--out DIR]`**: one JSON per checkpoint (`<run>-iter_NNNN.json`: the numbers,
+  the setting and field counts, the pilot, the spec, every pool); the checkpoint's run settings from its run's config.json
+  (DEFAULTS < preset < saved), never written to. `python -m mtgz.sealed.realdecks field` prints the field and the test pools.
+* **In a run**: the package's extra evaluation `real_decks` of `mtg_eoe` (`mtgz.sealed.realdecks:EVALS`), with run settings of
+  the package's own (zero-core 40: `GamePackage.settings`) - **`real_decks_every` 0 (off)**, `real_decks_pools` 64,
+  `real_decks_games` 2, `real_decks_builder` 'best' - and a cadence of its own (`GamePackage.evals_every`): it runs on the
+  evaluated iterations that are multiples of `real_decks_every` and is passed over silently otherwise (no call, no log line,
+  no metrics key). The run's evaluation seat and spec, the run's driver settings (threads, groups, sparse, conc), PAUSE
+  checked while it plays; logged as `iter N real_decks: {...}` and under `extras.real_decks` (A as `value`, B as a reference
+  line: zero's dashboard draws it in "Other yardsticks"), compact (no per-pool detail). Turned on at a restart with
+  `--real-decks-every N` (a saved setting, shipped to a remote evaluation's mirror with the rest).
+* **Remote evaluation** (109): `python -m mtgz.az.remote eval` runs `Run.evaluate`, extra evaluations included, on the mirror
+  with the mirror's config (the real-deck settings shipped in it); zero-core 6ed51d5 brings `extras` back into the run's
+  evals.jsonl (before, a remote evaluation computed extras and dropped them: zero-core 40.1). The 17lands file is committed
+  (data/sealed/), so the Mac's checkout of the run's commit has it.
+
+### 113.3 Cost and cadence
+
+**The setting: 64 test pools x 2 games** (`real_decks_pools` 64, `real_decks_games` 2): 128 paired games, 256 games, every
+seat searched at `eval_sims` (32 in eoe-1), 128 field decks. Each pool plays both seats once (k % 2); the chooser alternates
+by pool.
+
+**Work** (counted, not timed: the desktop was saturated throughout - eight S4 race processes, other agents' test suites -
+and the Mac was not to be used): run 1's iteration 78 at this setting searched **129,578 decisions** (506 a game, both
+seats; 24.0 turns a game). Run 1's own evaluation, for scale: iteration 60's 100 games against the heuristic and 10 against
+random at 32 simulations searched **17,828** (the network's seat only; `calib.py` beside the backfill replayed exactly the
+games 109.3 timed on the Mac: 32 of 100 against the heuristic, 18.32 turns, as on the Mac and run 1's GPU), plus the Elo
+matches' 40 games of a network on both seats.
+
+**Time, estimated from those counts**: the Mac evaluated the 17,828 decisions in 85 s (109.3: ~210 searched decisions a
+second at ~110 games in flight); at that rate a real-deck evaluation (128 games in flight in each of its two drivers, one
+network) is **~620 s, about 10 minutes, on the Mac** - three times its whole regular evaluation (217 s), so not every
+evaluation. On the desktop's GPU (run 1's 49 s for the same 17,828) **~6 minutes**. Measured on the desktop's CPU, 4 search
++ 2 torch threads under that load: 6,807 s for iteration 78 (an upper bound, not a rate). The heuristic's option C: 256
+games in 0.5 s.
+
+**Cadence**: off by default. Run 2 on the Mac (eval_every 2, 217 s of every ~264 s: ~47 s spare per evaluation) affords
+620 s every N iterations when 620 / (N / 2) < 47: N >= 28. **Recommended `--real-decks-every 40`** (a multiple of eval_every:
+~31 s per evaluation on average; each real-deck evaluation delays the Mac's queue by ~10 minutes and the queue catches up
+within ~26 iterations, if nothing else runs there); 30 only with the Mac otherwise idle. A run evaluating locally on the
+desktop's GPU (run 1: ~2.8 minutes an evaluation) can take every 10 (~36 s an iteration on average).
+
+**Precision at this setting** (iteration 78): se(A) = se(B) = 0.044, **se(A - B) = 0.053** over the games (0.048 over the
+pools); the pairing left 71% of the unpaired variance (var_ratio 0.71; 83 of 128 games ended alike for both decks - most
+pools' two decks share few slots: 15.5 of 40 on average, 8 of 64 pools the same colours). So one evaluation resolves
+differences of ~10 points (95%); 80% power for 5 points takes ~1,100 paired games (7.85 var(D) / delta^2, var(D) = 0.354 a
+game) - several evaluations, or the command line with more pools.
+
+### 113.4 Run 1, backfilled
+
+`python -m mtgz.sealed.realdecks E:/mtg-zero/runs/eoe1/models/iter_00NN.pt --pools 64 --games 2 --heuristic --device cpu
+--threads 4 --torch-threads 2 --out E:/mtg-zero/s4a/realdecks/` per checkpoint (the GPU busy with the S4 races and the sweep),
+run 1's final evaluation settings for every checkpoint (eval_sims 32, the cq move rule, eval_cache 8192, best_share 0.5's
+prior), our builder `best` (run 1's builder); nothing written under runs/eoe1. 0 games failed, 0 unfinished.
+
+| iteration | A: our deck | B: the players' own | A - B (se: games / pools) | 95% (games) | var_ratio | same | searched decisions | turns |
+|---:|---|---|---|---|---|---:|---:|---:|
+| 10 | 0.559 +- 0.044 | 0.488 +- 0.043 | **+0.070** +- 0.053 / 0.050 | [-0.033, +0.174] | 0.74 | 76 of 128 | 150,407 | 26.7 |
+| 78 | 0.547 +- 0.044 | 0.539 +- 0.044 | **+0.008** +- 0.053 / 0.048 | [-0.095, +0.111] | 0.71 | 83 of 128 | 129,578 | 24.0 |
+
+Iteration 10 took 9,713 s and 78 6,807 s on the loaded desktop's CPU. Iterations 20, 40 and 60 were still to come when this
+was written (40 running on the CPU; the rest the GPU's once free, the same command with `--device cuda`); each lands in
+`E:/mtg-zero/s4a/realdecks/eoe1-iter_00NN.json` and on the site's Progress page with the publisher's `--real-decks
+E:/mtg-zero/s4a/realdecks`. Read so far: the early network (iteration 10) does slightly better with our best guesses than
+with the players' builds (+7 points, not significant at 128 games); the final one plays both about equally well (+0.8) - the
+players' decks gained 5 points against the field while ours stayed (0.559 -> 0.547).
+
+**The heuristic's reading** (option C, the same games; it depends on no checkpoint): our best guess 0.656 +- 0.042, the
+players' decks 0.531 +- 0.044, **+0.125 +- 0.048** (var_ratio 0.63). The heuristic plays the builder's creature-heavy best
+guesses better than the players' builds (as in 104.6); run 1's final network finds them about even (+0.008 +- 0.053 at
+iteration 78): the deck verdict is the pilot's (104.7), and this metric follows the network as it learns.
+
+### 113.5 The site
+
+`tools/sealedai_publish.py --real-decks DIR` adds the run's real-deck points to the progress record (`real_decks`: the run's
+own `extras.real_decks` from metrics.jsonl or evals.jsonl, else the command line's files `<run>-iter_NNNN.json` in DIR; the
+builder by kind only, numbers only - no path; the source, its license and the field's counts). The sealedai site (branch
+`realdecks`, not deployed): the Progress page's section "Against real players' decks" - a tile, the two win rates by
+iteration with ±1 se, our deck minus the players' with its 95% range, the heuristic reference, the table's columns - with
+17lands' attribution (CC BY 4.0, linked) and the statement that it is a yardstick only; the Worker refuses a record without
+the license or with rates outside 0..1. Screenshots for approval (local preview, hub entry `sealedai_realdecks` :5356, run 1's progress record with the backfill): `screenshot-server/static/sealedai/realdecks-{desktop,phone}{,-tiles,-page}.png`.
+
+### 113.6 Tests, checks, gates
+
+* **`tests/test_realdecks.py` (8)**: the field and the test pools (every pool counted or skipped by a reason, the main build's
+  rule, the test pools disjoint from the field and fixed by the seed, every field deck 40 supported cards and its pool's
+  rest as sideboard, too many games for the field refused, the license); the builders (`best` = candidate 0, a plugged
+  `module:attr`, a deck that is not a 40-card build of the pool refused, `value` without a network refused); **the pairing**
+  (with the human build as "our" deck every game is the same game: D = 0 in 24 of 24, 40 shared slots; the same numbers at 1
+  and 2 driver threads; game k's opponent, seat and chooser); the statistics (over the games and over the pools, by hand);
+  the command line with a network (the run's evaluation seat, a JSON file per checkpoint, the same numbers at 1 and 2 driver
+  threads, option C); **the run's extra evaluation** (off at real_decks_every 0 and when not due - no key, no log line; on
+  at a multiple, compact, logged; the command line on the same checkpoint plays the same games: equal A, B, D); the remote
+  side (the mirror's `evaluate_mirror` with the settings in its config puts `extras.real_decks` in its result); a failed game
+  removed for both decks with its spec, the other games' seats kept. `tests/test_sealedai_publish.py` (5, 1 new): the
+  progress record's `real_decks` - the run's own extras over a file, another run's files ignored, an error skipped, the
+  builder by kind, the license, no path.
+* zero-core `tests/test_extra_evals.py` (3; its docs/az.md 40.5).
+* **The remote path end to end** (`E:/mtg-zero-scratch/realdecks/e2e.sh`): an eoe-smoke run with `--eval-remote local
+  --real-decks-every 1 --real-decks-pools 2 --real-decks-games 2`, the 'local' remote standing in for the Mac - the run's
+  RemoteEval shipping the mirror (its config.json carries the four real-deck settings), `python -m mtgz.az.remote eval`
+  with its checkout check (`mtgz remote: ... is e336d5de242b, unchanged, its engine built there`), `evaluate_mirror` on the
+  mirror, the result copied back: the run's evals.jsonl rows of iterations 0 and 1 carry `extras.real_decks` (n 4, 2 pools,
+  sims 4) beside eval_yard, and its log reads `iter 0 real_decks (remote local): {...}`. On the Mac the same commands run
+  over ssh (109.1); not run there (the Mac was fully busy with races).
+* Gates (`--no-mac`), on e336d5d, the desktop saturated by eight S4 race processes and other agents' suites throughout:
+  `python tools/gate.py python`: build, pytest **274 passed, 4 failed** - all four in `tests/test_mac_remote.py`, subprocess
+  timeouts (600 s, 300 s, "timed out; events []"), and the file passes alone (12 of 12, 166 s); the run-loop smoke not run:
+  **GATE FAILED python e336d5de242b in 3588s**. `python tools/gate.py optin-core --baseline-root <a built worktree of main
+  60397f3>`: build, the core's cargo tests (147), **checkpoint_compat byte identity (identical: 2,465 samples, visits and
+  cq)**, `az`, `hidden` (28), the other games' build-only (3 of 3), the core build: passed; the core's pytest killed at the
+  step's 3600 s timeout at 47% with two failures, `test_multi_remote.py`'s `test_selfplay_local_0_leaves_the_quota_to_the_hosts`
+  and `test_cotrain_resolver_on_two_hosts` (threaded multi-host self-play, untouched here): **GATE FAILED optin-core
+  e336d5de242b in 6242s**. Both again on f8e99e4 (the docs commit after it), one after the other, the core's pytest with
+  `--step-timeout 10800`: `python`: pytest **277 passed, 1 failed** (`tests/test_loop.py::test_supervisor_with_fake_run`, a
+  state poll with a deadline; passes alone in 1 s; test_mac_remote passed this time), the run-loop smoke not run (run by
+  hand: `python -m mtgz.az.run --run <scratch> --preset mtg-smoke --iters 1`, iterations 0 and 1, 16 games, 0 unfinished):
+  **GATE FAILED python f8e99e4f8c48 in 1991s**; `optin-core`: build, core cargo tests 147, **checkpoint_compat identical
+  again (2,465 samples, visits and cq)**, `az` 48, `hidden` 28, build-only 3 of 3, core build passed; core pytest **437
+  passed, 8 failed** in 6,150 s - all remote self-play, worker and pause-mid-phase timing tests (`test_remoteplay.py` x 3,
+  `test_infoset_merge.py` x 2, `test_belief.py`, `test_encoding_guard.py`, `test_shard_thread.py`), none near this change
+  (remote *evaluation*, package settings, an extra evaluation's cadence), the two of the first run passing this time, and all
+  nine (with the parametrised case) passing alone in 129 s: **GATE FAILED optin-core f8e99e4f8c48 in 8707s**. Every
+  failure is a different timing test per run and passes alone: the load, as 105.7 saw. A run of both tiers on a quieter
+  desktop is the maintainer's before merging.
+
 ## 114. mtgz-worker: the native self-play worker for zero-farm (branch `farm`, 2026-11-11)
 
 Branch `farm` (from main 60397f3; zero-core `farm`, docs/az.md 41-42 there). **Why.** zero-farm (friends' idle Windows PCs
@@ -25632,6 +26172,332 @@ batches): passing, then with one prior off by 1e-3 a fatal error before any game
 
 The runtime pack and a fuzz and a release build of this branch are published to the live coordinator (zero-farm
 `docs/phase1-worker.md` has their build ids and how to start a fuzz campaign).
+
+## 123. Legacy Sneak and Show: the deck's cards (branch `sneak-show`, mtg-bot `feature/sneak-show-ir`)
+
+**Why.** The next constructed deck after the Delver mirror (54) and Legacy Doomsday (124): MTGGoldfish's "Sneak and
+Show" by snoopy-magic (Legacy Challenge 32, 2026-10-24, 21st place, 3-3, MTGO; https://www.mtggoldfish.com/deck/8014220,
+fetched 2026-11-11 from the page's export field: `E:/mtg-zero-scratch/deck8014220/`, its PROVENANCE.md). Six of its 75
+cards were outside the cube and legacy IR and owned by no other lane: Show and Tell, Omniscience, Mistrise Village (main
+deck), Brotherhood's End, Disruptor Flute, Magus of the Moon (sideboard; the Magus had IR in `eoe.ir.json` only).
+Flusterstorm (Doomsday lane B) and Consign to Memory (the Delver best-of-three sideboard lane) come from other branches
+and are not on this one. Branch `sneak-show` from main 37fa30b; mtg-bot `feature/sneak-show-ir` from
+`feature/eoe-ir-fixes` f4f2d663. The user's rules: no approximation of any class (docs/shortcuts.md unchanged); every
+public state the cards create reaches the network's input exactly, without changing the layout (one v6 spare, cleared
+with the layout-v7 session; the one state v6 can't hold, Disruptor Flute's name, refused to networks: 123.6); best-of-one
+with the main 60. New code in `engine/src/sneak_show.rs` and `engine/src/lower/sneak_show.rs`, additive hooks
+elsewhere.
+
+### 123.1 What was built
+
+| Part | Where | What |
+|---|---|---|
+| The deck | `data/decks/sneak_show_8014220.txt`, `.json` | the pinned export verbatim (its "sideboard" line separates the 15) and the 75 with its provenance, as `izzet_delver_8016541.json` |
+| The IR | mtg-bot `feature/sneak-show-ir`; `data/cards/*.ir.json`, `powerlsv.schema.json`, `card_ir/src/generated.rs` | the six Scryfall records appended to the legacy pool; one new recognizer (Brotherhood's End); 123.2 |
+| Identities | `engine/src/az/legacy_cards.txt` | the six appended after Leyline of the Void (123.10): identities 558-563 (548-553 before the merge with the Doomsday lanes); Delver's five sideboard cards follow later; no test names a number |
+| Lowering | `lower/sneak_show.rs`, `lower/filter.rs` (`RotoCardFilter`), `lower/printing.rs` (`roto_statics`, `grants_free_casts_from_hand`) | every field named, the rest denied |
+| Rules | `sneak_show.rs` (`SnS`, `SnsDef`), hooks in `cast.rs` (Omniscience's free cast, the uncounterable mark at 601.2i), `pay.rs` (the Flute's prohibition in `activation_ready`), `resolve_m7d.rs` (the Flute's tax), `activate.rs` (the plain name choice), `layers.rs` (514.2), `hidden.rs` (Show and Tell's face-down choice in `determinize`), `eoe_w2.rs` (the Magus without abilities, 123.5) | 123.3 |
+| Encoding | `az/encode.rs` (`g6::UNCOUNTERABLE_NEXT` = per-player float 8), `public_state.rs`, `testkit.rs` (the view), `az/mod.rs` (the Flute guard), `az/tokens.txt` (the Mountain's abilities' key) | 123.6 |
+| Tests | `engine/tests/cards_sneak_show.rs` (57 tests), `az.rs`, `constructed.rs`, `fuzz.rs` (`FUZZ_POOL=sneak_show`, `sns`) | 123.7 |
+| Rulings | `data/rulings/legacy.rulings.json` (refetched: the six cards' 18 rulings), `triage.tsv` (16 new texts; two were the cube's), `docs/rulings.md` | every ruling tested |
+| mtg-bot | `cards/parser/legacy_sneak.py`, `effects/generic/legacy_sneak.py`, `tests/test_legacy_sneak.py`, `docs/SEARCH_LIMITATIONS.md` | the Python engine's three simplifications written down |
+
+### 123.2 The IR
+
+Five of the six parsed through mtg-bot's roto and EoE recognizers: Show and Tell (`EachPlayerMayPutFromHand` with a
+`RotoCardFilter` of the four types), Omniscience (`grants_free_casts_from_hand`), Mistrise Village (`enters_tapped_unless`
+`ControlPermanent(HasSubtype Mountain | HasSubtype Forest)`, `produces` {U}, the activated ability "{U}, {T}:
+`NextSpellThisTurnCantBeCountered`"), Disruptor Flute (flash; `roto_statics` = `ChooseCardNameAsEnters`,
+`SpellTax { amount: 3, named }`, `ActivationProhibition { except_mana_abilities }`), Magus of the Moon
+(`nonbasic_lands_are_mountains`, the IR the EoE pool already had). Brotherhood's End did not parse: its first mode had no
+grammar. `cards/parser/legacy_sneak.py` adds one parameterized recognizer, tried after every other grammar: "deals N
+damage to each creature and each planeswalker" -> `DealNDamageToEachCreatureAndPlaneswalker { amount }` (new,
+`effects/generic/legacy_sneak.py`); the second mode is the existing `RemoveAllMatching(IsArtifact & HasManaValueAtMost 3)`.
+`cards export-ir --pool cube legacy eoe`, `filter_eoe_ir.py`, `gen_card_ir.py`: schema `769af139588b...` (was
+`1cbe33073b1b...`), 716 classes (7 more); `powerlsv.ir.json` and `eoe.ir.json` are the previous files byte for byte once
+the schema hash is replaced; `legacy.ir.json` holds 8 cards (docs/card_ir.md). No IR defect (docs/ir_defects.md section
+U; entries 300-329 unused).
+
+### 123.3 The rules, as built
+
+| Text | Rule | How |
+|---|---|---|
+| Show and Tell: "Each player may put an artifact, creature, enchantment, or land card from their hand onto the battlefield" | 101.4, 101.4a; rulings a107ed89, 881ce0a9 | `SnS::EachPlayerPutsFromHand { filter }`: as it resolves the active player chooses (`ChooseHandCard`: a card of the kind, one option per definition, or `PASS`), then the other player; then the chosen cards enter at once (one entry, `begin_entering` / `end_entering`: 603.6a, 614.12a), each under its owner's control. A hand without a card of the kind still asks (`PASS` only: the hand is hidden); an empty hand asks nothing (its size is public) |
+| the choice made face down | 101.4a; ruling a107ed89 | the frame's stage `Frame::i` (0: the active player chooses; 1: the other, the active player chose none; 2: the other, a card was chosen) is all the other player learns: it is the context block's `ctx::OP_I`. The other player's worlds (`determinize`) deal the chooser's hand again and draw the chosen card uniformly among the hand's cards (those the viewer knows too: the hand is one pool, ENGINE.md 10), keeping the deal only when that card is of the kind (`Game::hidden_pick_ok`, by rejection: exactly the plain deal conditioned on "a legal card was chosen"; also in the belief-weighted deal) |
+| choices of the entering cards | ruling 6d3f0bf4 | the other player's card is put first, so the "as this enters" tasks of the active player's card, queued last, run first; the timestamps' order is the existing 613.7m choice of the active player |
+| lands put are no land drops; the cards aren't cast | 305.1, 305.4, 601.2i | `put_onto_battlefield`: no land play counted, no cast event (Emrakul's extra turn doesn't trigger; enters triggers do, APNAP, 603.3b) |
+| Omniscience: "You may cast spells from your hand without paying their mana costs" | 118.9, 118.9a, 601.2b, 601.2f, 107.3b; rulings 6e20dab1, 3c753455, 72e98293, 3bd1fe3c | `SnsDef::free_casts_from_hand`, read by `Game::free_from_hand` (its controller's casts from the hand, `CastFrom::Hand`, origin the hand): the `ChooseAltCost` answer and route of EoE's "first spell each turn" (`NUMBER` + 31, `eoe_c::FREE_CAST`, `Mark::FreeFromHand`), offered with the mana cost and every other alternative cost (Force of Will's pitch: one of them, 118.9a); X is 0; additional costs paid (kicker, Tinker's sacrifice); increases apply on top (Thalia, the Flute: 601.2f); timing unchanged; faces cast from the hand too (an Adventure, a split half, an MDFC's back face) |
+| Mistrise Village: "This land enters tapped unless you control a Mountain or a Forest" | 614.1c, 614.12a, 305.6; ruling 16696510 | the existing `enters_tapped_unless`; one entering with it doesn't count (tested with the Magus entering by the same Show and Tell) |
+| "{U}, {T}: The next spell you cast this turn can't be countered" | 101.2, 611.2, 601.2i, 514.2 | `SnS::NextSpellUncounterable`: one more waiting instance for the ability's controller (`Player::uncounterable_next`, counted exactly); the next spell that player casts (`Game::cast_done`, from any zone) gets `Mark::Uncounterable` and uses up every instance; unused they end in the cleanup step with the other "this turn" effects (`end_this_turn_permissions`) |
+| Brotherhood's End: "Choose one -- deals 3 damage to each creature and each planeswalker" | 700.2, 120.3 | `Op::DamageAll` over `Type(CREATURE | PLANESWALKER)`: each permanent that is one or both once, its source the spell; no battle, no player |
+| "Destroy all artifacts with mana value 3 or less" | 202.3, 202.3c, 202.3e, 702.12b | the existing `Op::DestroyAll` over `Type(ARTIFACT) & ManaValueAtMost(3)`: a token 0 (Hullbreacher's Treasures), an X permanent with X 0 (Walking Ballista), indestructible survives (The Mind Stone) |
+| Disruptor Flute: "As this artifact enters, choose a card name" | 201.3, 614.12; rulings 3029db62, 20e62c09 | `SnsDef::plain_name`: `Task::AsEnters` -> `Game::choose_plain_name_as_enters`, no look at a hand; `NameCard` over `Game::nameable_defs` (paged past 63) and `PASS`; the name kept as `Mark::ChosenName` (Anointed Peacekeeper's) |
+| "Spells with the chosen name cost {3} more to cast" | 601.2f; ruling 560a16f0 | `CardDef::named_spell_tax` with `SnsDef::named_tax_everyone` (every player's spells, its controller's too) in `Game::named_tax`; a name compared by `Game::has_name` (a face's name; a split card's halves outside the stack) |
+| "Activated abilities of sources with the chosen name can't be activated unless they're mana abilities" | 602.5, 605.1a; rulings 044069c9, d858e725 | `SnsDef::named_ban`: `Game::named_ban_hits` in `activation_ready` (every zone's abilities: battlefield, hand, graveyard; loyalty abilities; granted abilities by their source; not mana abilities, not special actions, 116.2b) |
+| Magus of the Moon: "Nonbasic lands are Mountains" | 305.7, 613.1d, 614.12; rulings 24283e6f, cafea326, aa10a575, 53c9e610, cd000dac | EoE W2's `nonbasic_lands_are_mountains` (ENGINE.md 99.12), now in constructed play's table (its Mountain's definitions appended there); tested on the deck's mana: Volcanic Island, Thundering Falls (untapped, no surveil trigger), Mistrise Village (untapped, no ability), Ancient Tomb (no damage), City of Traitors (no sacrifice trigger), Scalding Tarn and Misty Rainforest (no ability), Multiversal Passage (no choice, no life), Gemstone Mine (no counters) |
+
+### 123.4 Readings taken
+
+* **The face-down choice and what the other player knows** (CR 101.4a, ruling a107ed89: "a player does not have to
+  reveal the chosen card, so long as it is clear which card was chosen"): whether the active player chose a card is
+  public, which card is not until the cards enter. The engine has no action that reveals a hand card at will, here as
+  everywhere, so the card stays face down. The other player's worlds draw which card was chosen uniformly among the
+  chooser's hand (the uniform-deal prior every `determinize` uses), conditioned on its being of the kind. With a hand the
+  other player knows entirely, the choice is one of its cards of the kind (both occur in the worlds; tested).
+* **The chooser's own knowledge** while the other player decides is the chooser's (private), not encoded: the chooser
+  has no decision before the cards enter (123.6).
+* **Who controls each card**: its owner (each player puts their own card; CR 110.2).
+* **A creature that is also a planeswalker** is dealt Brotherhood's End's 3 damage once (one object of the set "each
+  creature and each planeswalker"; CR 120.3 gives a damage event to a permanent both results). No official ruling; no
+  card of the tables makes such a permanent today.
+* **"The next spell you cast this turn"**: the next spell that becomes cast after the ability resolved (601.2i: a spell
+  cast while the ability waits on the stack isn't it), from any zone, a copy cast too (707.12); several instances wait for
+  the same spell (each says "the next spell"); the effect ends in the cleanup step (514.2: a spell cast in a cleanup
+  step's priority window after it isn't affected). A counterspell may still target it and resolve; "counter unless its
+  controller pays" still offers the payment (118.12; tested with Daze).
+* **Omniscience and miracle**: a card cast by its miracle trigger is cast with the trigger's permission, which names the
+  miracle cost: not free (as EoE's first-spell-free, `alt_allowed`).
+* **The names offered for "choose a card name"** (CR 201.3): every name of a face of a card of the game or of its
+  sideboards (a double-faced card's back face, an Adventure, a split card's halves, not "<left> // <right>"; a
+  prepare spell), and the card table's token names that are also card names ("Faerie Dragon": the table's token names were
+  checked against Scryfall's card-name catalogue on 2026-11-11; Scryfall lists tokens such as "Blood" too, which aren't
+  card names); `PASS` stands for every other name. Exactness of `PASS`: the Flute affects an object only by comparing
+  its name with a spell's or an ability source's; the objects of a game are its cards (made as it starts from the decks;
+  a sideboard card joins it only as a companion: no instruction of the engine brings another card into a game), its
+  tokens (the table's token definitions) and copies of these, whose names are their copiable values' or the copying
+  card's (`keep_name`); a face-down permanent has no name. So every name an object can have in any reachable state is
+  offered, and every name `PASS` stands for is one no object can have. With hidden decks (36.11) the other player's
+  names are those of their pool the chooser knows (their deck and sideboard) and of their cards the chooser knows.
+* **A double-faced or adventurer card's front name** is "<front>" though the card table names its definition
+  "<front> // <other>" (`sneak_show::face_name`); naming "Brazen Borrower" doesn't tax Petty Theft (ruling 20e62c09,
+  its Ondu Knotmaster).
+
+### 123.5 Fixes and findings outside the six
+
+* **The Magus without its abilities** (ruling cd000dac; CR 613.1d, 613.1f): `moon_source_before` and `moon_ts`
+  (`eoe_w2.rs`, EoE W2) left out a Magus that lost its abilities; its effect sets land types in layer 4, applied before
+  abilities are removed in layer 6, so it still applies. Fixed (no cube card has the ability: the cube's games are
+  unchanged; an EoE game with a Magus that loses its abilities now plays by the rules). Test:
+  `cr_613_1d_the_magus_without_abilities_still_makes_mountains` (Oko's +1).
+* **Anointed Peacekeeper's names** (`choose_name_as_enters`, M7d) are its cards' front definitions only: a back face
+  ("Tamiyo, Seasoned Scholar", whose loyalty abilities its tax reaches), an Adventure ("Petty Theft") or a split card's
+  half can't be named, and a double-faced card's front name is "<front> // <other>". Reported, not changed: changing it
+  changes the cube's games (the digests); the Flute's list (`nameable_defs`) is the faithful one to reuse.
+
+### 123.6 The encoding
+
+* **Mistrise Village** (cleared by the layout-v7 session, `E:/mtg-zero-scratch/sneak-show/v7_answer_from_doomsday.md`):
+  `g6` per-player float 8, `g6::UNCOUNTERABLE_NEXT` = the waiting instances / 4, squashed; checked unclaimed on every
+  branch and mtg-zero-wt worktree; v7 = v6 + additions keeps it. The spell that uses them up has `stack::UNCOUNTERABLE`
+  (`Mark::Uncounterable`). Public-state gate: "a player's next spell this turn can't be countered" (`V6_FIXED`).
+* **Disruptor Flute's name**: `Mark::ChosenName`, which v6 never encoded (Anointed Peacekeeper's gap, lane A's review G1);
+  layout v7's chosen-name column (ENGINE.md 125) will. Until then a loud guard (the coordinator's decision, mirroring
+  Doomsday lane B's Cavern of Souls): `MtgSpec::parse` refuses any spec whose decks or sideboards hold a card choosing a
+  name the plain way (`sneak_show::needs_layout_v7`) with "Disruptor Flute's chosen name needs layout v7 (ENGINE.md
+  123)": self-play, evaluation, head-to-head and replays parse through it. The gate's perturbation "a card name was
+  chosen as a permanent entered" and its NextLayout limit `CHOSEN_NAME_GAP` name the refusal and its test
+  (`az.rs flute_decks_are_refused_to_networks_on_layout_v6`). The Sneak and Show main 60 has no Flute and is accepted.
+* **Show and Tell's choice**: `ctx::OP_I` (123.3), no new float.
+* **The Mountain's abilities** (`moon_base`, a variant for Urza's Saga) are now definitions of constructed play's table;
+  their key " -/- C " is registered (`tokens.txt` line 54, identity CUBE_CAP + 53, as `eoe_tokens.txt` line 9), so they
+  aren't `UNKNOWN`.
+* Notes: E:/mtg-zero-scratch/sneak-show/encoding_needs.md.
+
+### 123.7 Tests, fuzz pools, the deck
+
+* **`engine/tests/cards_sneak_show.rs`, 57 tests** (every ruling of the six cards: `// ruling:`; the CR in each name):
+  Show and Tell (the order of the choices, the other player's input with either card chosen and with none, its worlds
+  never dealing an illegal choice and not always the real one, a known hand as one pool, declining, an empty hand, a
+  hand without a card of the kind, no land drop, no cast trigger, APNAP enters triggers, the "as enters" order, cast on
+  the other player's turn); Omniscience (only the free option without mana, both with it, Force of Will's three costs,
+  X 0, kicker and Tinker's sacrifice, Thalia, the opponent's Omniscience, lands, timing, priority after it resolves,
+  Emrakul's extra turn, an Adventure, a flashback from the graveyard); Mistrise Village (enters tapped or not, the
+  opponent's Mountain, Force of Will resolving and not countering, two activations one spell, a spell cast in response
+  not the next one, the end of the turn and the float, only its controller's spells, Daze's payment still offered, the
+  g6 float and the stack column read from the encoding); Brotherhood's End (its two modes, damage to creatures and a
+  planeswalker but no player, mana values 0-4, an X permanent, a token, indestructible); Disruptor Flute (flash, the
+  names offered with every face and "Faerie Dragon", the tax on every player's spells, Sneak Attack's and a fetch land's
+  abilities stopped, Lotus Petal's, Simian Spirit Guide's and Mistrise Village's mana abilities not, a back face's
+  loyalty abilities, a split card's half and an Adventure by their names, Show and Tell under Omniscience costing {3}, the
+  Flute gone, the guard); Magus of the Moon (the deck's lands, 123.3; the Magus without abilities; names and supertypes);
+  the deck's lines (Show and Tell into Omniscience, Sneak Attack and Emrakul to the end step's shuffle, turn-one Show and
+  Tell and Sneak Attack from Lotus Petal, City of Traitors, Ancient Tomb and Simian Spirit Guide). `docs/interactions.md`
+  has the matrix. `tools/untested_cards.py` reads the legacy registry (lane A's change): 554 supported (8 legacy), none
+  untested. `docs/rulings.md` regenerated: 1,628 rulings, every class a one tested.
+* **`az.rs`**: `public_state_reaches_the_encoding` with the two perturbations (gaps `[CHOSEN_NAME_GAP]`),
+  `flute_decks_are_refused_to_networks_on_layout_v6` (new; the Sneak and Show 60 accepted).
+  **`constructed.rs`**: the constructed table's test reads the legacy IR's size and the Mountain's definitions.
+* **`FUZZ_POOL=sneak_show`**: the deck's real 60 (since 123.10: `data/decks/sneak_show_8014220.json`'s main deck;
+  before the merge with the Doomsday lanes its two Flusterstorms were two Pyroblasts), against the Delver 60 in either
+  seat, one game in three the mirror. **`FUZZ_POOL=sns`**: the six cards four
+  each with the deck's creatures, Sneak Attack, Force of Will, Brainstorm, Lotus Petal and mana (`SNS_DECK`), the same
+  pairings. Constructed play's table; games only. With 200 games or more, `sns` requires each of the six seen on the stack,
+  a free cast, a spell made uncounterable and a name chosen; `sneak_show` Show and Tell, Mistrise Village, a free cast and
+  an uncounterable spell. Flusterstorm and Consign to Memory are not on this branch: the whole deck's fuzz runs at
+  integration.
+* **The deck files**: `data/decks/sneak_show_8014220.txt` (the pinned export, verbatim) and `.json` (the 75 with
+  source, download URL, event, date, player, result, platform; no export name differs). `az/constructed.rs` is the
+  best-of-three lane's to change, so no `Decklist::sneak_show()`: the tests read the JSON.
+
+### 123.8 Results
+
+Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/sneak-show`, normal release profile.
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): **2,319
+  passed, 0 failed, 22 ignored**; `az` 49 passed (the public-state gate with its one named gap, the legacy registry, the
+  Flute's refusal); `constructed` 7; `cards_sneak_show` 56 then (57 with the Daze test added after the run, rerun alone:
+  57 passed; the turn-one test's Sneak Attack line changed after it too, rerun: passed).
+* **Behaviour digests unchanged** (`cargo test --release -p engine --test digest -- --ignored --nocapture`, no
+  `DIGEST_WRITE`): full **53839c837bbaf034** (every one of the 2,500 games equal to `tests/data/digests.txt`),
+  `DIGEST_ENCODING=0` **208c723daced22fe**, `DIGEST_ENCODING=v5` **dc33538c0497dbf0**: main's (37fa30b has no engine
+  change since 60397f3, whose digests ENGINE.md 106 and lane A recorded). The new g6 float and the Mistrise state are
+  zero in every cube game.
+* **`FUZZ_POOL=sns FUZZ_GAMES=20000`** (four shards of 5,000, `FUZZ_FIRST` 0/5000/10000/15000): no failure; 20,000
+  games (wins 9,733 / 9,809, 458 drawn at the turn cap, none aborted), ~30.2 turns and ~300.7 decisions a game,
+  11,303,521 options completed; seen on the stack: Show and Tell 9,087, Omniscience 378, Mistrise Village's ability
+  92,389, Brotherhood's End 8,721, Disruptor Flute 24,171, Magus of the Moon 7,325; spells cast without paying their mana
+  costs 5,363; spells made uncounterable 5,751; names chosen 30,673.
+* **`FUZZ_POOL=sneak_show FUZZ_GAMES=20000`** (four shards of 5,000): no failure; 20,000 games (wins 10,002 / 9,949, 49
+  drawn, none aborted), ~24.0 turns and ~238.6 decisions a game, 7,773,141 options completed; Show and Tell 8,258,
+  Omniscience cast 3 (it mostly enters by Show and Tell), Mistrise Village's ability 21,839; free casts 1,780; spells made
+  uncounterable 2,451.
+* Every check of the default mode: invariants, clones, `determinize` for both viewers (view, known cards, clouds, the
+  information-set check), every option completed in the game and in the sampled worlds, the encodings finite.
+* **Under the `fuzz` profile** (debug assertions: the refreshed decision equal to the asked one at every
+  `determinize`): `sns` 1,000 games and `sneak_show` 1,000: no failure. **`FUZZ_CHANCE=10`**, 600 games each: no failure
+  (`sns` 18,430 chance walks, 7,351 replays whose outcome the force changed; `sneak_show` 14,367 and 5,529).
+  **`FUZZ_BELIEF=2`**, 600 games each (the belief-weighted deal, with its rejection for Show and Tell): no failure
+  (9,074 and 7,005 weighted worlds).
+* **`FUZZ_POOL=delver FUZZ_GAMES=4000`** (the regression check): no failure; Murktide Regent cast 2,031 times, its
+  trigger 84, Prismari Charm 2,937: lane A's numbers to the card (the mirror plays as before).
+* `python -m pytest tools/codegen` (generated.rs current): 2 passed. `bash tools/build_py.sh`, `python -m pytest -q tests`: 273
+  passed, 1 skipped.
+* mtg-bot (`feature/sneak-show-ir` 3fb5f8e1): `cards roundtrip --pool cube legacy eoe` passes; its export is the committed
+  `data/cards`; `tests/test_legacy_sneak.py` 16 and the legacy pool's tests pass; the full suite (`pytest -n 8 --no-cov`)
+  48 failed, 21,097 passed: 47 of the 48 fail at the branch point f4f2d663 too (its `git archive`), the 48th passes alone
+  (an xdist ordering flake).
+* No docs/shortcuts.md entry; no layout change (one v6 spare used: `g6` float 8); no zero-core change.
+
+### 123.9 Limits and integration
+
+* **Flusterstorm and Consign to Memory** are other lanes' (Doomsday lane B; the Delver best-of-three sideboard lane):
+  before the merge the deck's main 60 wasn't playable on this branch (`FUZZ_POOL=sneak_show` played two Pyroblasts in
+  their place); Flusterstorm came with the merge (123.10), Consign to Memory comes with the Delver lane.
+* **Constructed best-of-three** (branch delver-bo3): `determinize`'s face-down choice is a rejection over the deal of the
+  game's hidden cards; a best-of-three world deals the opponent's deck first (`sample_hidden_pool`), so a world whose
+  deck holds no card of the kind among the hand's hidden cards would never accept (loud: 1,000,000 tries). Bo3 needs the
+  deck sample conditioned the same way (or the rejection around both). Not reachable here (best-of-one).
+* **Disruptor Flute in networks**: refused until layout v7 (123.6); rules tests and the fuzzer play it.
+* **Merge points**: `legacy_cards.txt` (append order: Doomsday's ten, Delver's five, these six), `tokens.txt` (the
+  " -/- C " line), the legacy pool and the schema (each lane exported its own: re-export at integration),
+  `az/mod.rs` (the Flute's guard beside Cavern's), `public_state.rs` (the gaps list: Cavern's and the Flute's),
+  `tests/az.rs` (`gaps == [CHOSEN_TYPE_MANA_GAP, CHOSEN_NAME_GAP]`, `next == 2`), `tests/constructed.rs` (the
+  Mountain's definitions now in the table), `lower/effect.rs` (one more `lower_effect_*` in the chain),
+  `docs/rulings.md` (regenerate).
+* **Reported, not changed**: Anointed Peacekeeper's name list (123.5).
+
+### 123.10 Merged with the Legacy Doomsday lanes (main 7025f2a; mtg-bot `feature/doomsday-ir` 1af29e64)
+
+Done as 124.4 did it. **mtg-bot**: `feature/doomsday-ir` 1af29e64 merged into `feature/sneak-show-ir` (3fb5f8e1):
+**60e76c0a** (feature/doomsday-ir itself untouched). **mtg-zero**: main 7025f2a merged into `sneak-show` (415adb4), a
+merge commit: **a6dd5a1**; the next commit adds this subsection and regenerates
+`docs/rulings.md` for the merge's two cross-lane tests' ruling marker (no code). Not fast-forwarded onto main, not pushed (the
+maintainer's).
+
+**mtg-bot's conflicts** (all additive): the legacy pool's data (`data/legacy_delver.json`, its sheet and sidecar) is the
+union, feature/doomsday-ir's twelve records byte for byte, then this branch's six (18; the sidecar's latest fetch
+time); the pinned card lists of `test_fetch_cube.py` and `test_legacy_creatures.py` the union (`LEGACY_CARDS`);
+`effects._parse_effect`'s very last fallback chains lane A's `legacy_spells`, lane B's `legacy_stack`, then
+`legacy_sneak` (their phrases are disjoint: "at the beginning of your next upkeep", "pay <cost>. If you don't", "change
+the target of target spell", "deals N damage to each creature and each planeswalker"); `docs/SEARCH_LIMITATIONS.md` keeps
+both sections. `cards roundtrip --pool cube legacy eoe roto` passes (546, 18, 483, 849 cards); the legacy pool's tests
+(the lanes' three files, `test_legacy_sneak.py`, `test_legacy_creatures.py`, `test_fetch_cube.py`, `test_card_ir.py`,
+`test_pools.py`): 155 passed.
+
+**The export** (`cards export-ir --pool cube legacy eoe` from 60e76c0a, `filter_eoe_ir.py`, `gen_card_ir.py`):
+schema `245e4bc208c6...`, 724 classes, exactly the union of main's 717 and this branch's 716; `powerlsv.ir.json` and
+`eoe.ir.json` main's byte for byte but `schema_sha256` (card by card and as bytes); `legacy.ir.json` the 18 legacy cards,
+each card's IR equal to its branch's export.
+
+**mtg-zero's conflicts**
+
+| File | Resolution |
+|---|---|
+| `data/cards/*`, `card_ir/src/generated.rs` | the merged export above |
+| `engine/src/az/legacy_cards.txt` | main's twelve, then the six after Leyline of the Void: **Show and Tell 558, Omniscience 559, Mistrise Village 560, Brotherhood's End 561, Disruptor Flute 562, Magus of the Moon 563** (Delver's five sideboard cards follow later; no test names a number) |
+| `engine/src/az/tokens.txt` | main's lines in order (unchanged there), then " -/- C " (the Mountain's abilities, 123.6): line 54 |
+| `az/mod.rs` | **one list** of the cards layout v6 can't encode: `az::needs_layout_v7` (`V7_ONLY`: Cavern of Souls' floating mana, `doomsday_b::makes_chosen_type_mana`; Disruptor Flute's name, `sneak_show::plain_name_needs_v7`), the one check in `MtgSpec::parse` |
+| `public_state.rs` | both limits (`CHOSEN_TYPE_MANA_GAP`, `CHOSEN_NAME_GAP`), `V6_FIXED` 26 (Cavern's chosen type and Mistrise Village's float) |
+| `tests/az.rs` | main's file, the gate expecting the two gaps (`next == 2`) and both refusal tests (`flute_...` also checks the Sneak and Show main 60 accepted and its sideboard refused) |
+| `tests/constructed.rs` | main's registry-derived card-table test with the Magus's Mountain definitions at the table's end; `the_sneak_show_75_and_its_provenance` (new) |
+| `tests/fuzz.rs` | main's pools, then `sneak_show` (now the deck's real 60 from `data/decks/sneak_show_8014220.json`, Flusterstorm included) and `sns` in `constructed_mode()` |
+| `lib.rs`, `program.rs`, `resolve_ext.rs`, `lower/effect.rs` | every lane's modules and `Ext` variants; the effect catch-all chains lane A, lane B, then `lower_effect_sns` |
+| `lower/printing.rs` | denies neither `roto_statics` (lowered here) nor `enters_choosing_creature_type` (lowered by lane B) |
+| `db.rs` | `SEEN_VOID` with lane C's `opp_gy_exile`, `SEEN_NAMED_TAX` with the Flute's prohibition; `CardDef::dd_b` and `CardDef::sns` both |
+| `data/rulings/legacy.rulings.json`, `triage.tsv`, `docs/rulings.md` | the union (refetched in the pool's order: main's twelve cards' 31 rulings unchanged, then the six's 18), main's triage rows then this branch's 16; `docs/rulings.md` regenerated: 1,656 rulings (1,298 distinct), 1,274 class a, every one tested |
+| `docs/ENGINE.md` | 123 then 124; identities 563-568 corrected to 558-563 (123.1) and the PROVENANCE note |
+| `docs/ir_defects.md` | main's T and U, then this branch's section relettered V |
+| `docs/card_ir.md` | "Current numbers" for the merged export |
+
+Merged by git without a conflict and read: `cast.rs`, `pay.rs`, `hidden.rs`, `game.rs` (lane B's `Spend` and the
+Mistrise hooks are apart), `resolve_m7d.rs`, `layers.rs`, `eoe_w2.rs`, `activate.rs`, `encode.rs` (lane B's perm
+133-141 for Cavern's type, this branch's g6 float 8).
+
+**The deck.** Flusterstorm is on main now: the Sneak and Show main 60 is fully supported, and `FUZZ_POOL=sneak_show`
+plays it as it is (the two Pyroblast stand-ins gone). It loads as a best-of-one spec (`constructed`, decks the main 60,
+against itself or the Delver 60): accepted (`the_sneak_show_75_and_its_provenance`, `az.rs
+flute_decks_are_refused_to_networks_on_layout_v6`). The sideboard is not ready: **Consign to Memory** is still
+unsupported (it comes with the Delver best-of-three lane), and the sideboard holds **Disruptor Flute**, so a spec with
+its sideboard, and so any best-of-three of this deck, stays refused ("Disruptor Flute's chosen name needs layout v7")
+until layout v7 (125).
+
+Two cross-lane tests added (`cards_sneak_show.rs`, 59 now): the Flute naming Street Wraith stops its cycling in the hand
+(lane C's card); Flusterstorm against a spell Mistrise Village made uncounterable counters nothing (lane B's card).
+
+**Checks on the merged commit a6dd5a1** (the engine suite, digests and pytest on the desktop; the fuzz on the Mac with
+`tools/mac.sh`, bit-identical to the desktop, ENGINE.md 44):
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): **2,434
+  passed, 0 failed, 22 ignored** (main's 2,373 and this branch's tests: `az` 50, `constructed` 9, `cards_sneak_show` 59,
+  `cards_doomsday_a` 44, `cards_doomsday_b` 28, `cards_doomsday_c` 37, `cards_legacy` 24).
+* **Behaviour digests equal to main's**: full **53839c837bbaf034** (every one of the 2,500 games equal to
+  `tests/data/digests.txt`), `DIGEST_ENCODING=0` **208c723daced22fe**, `DIGEST_ENCODING=v5` **dc33538c0497dbf0**.
+* **The public-state gate** (`--test az`): 158 perturbations encoded (Mistrise Village's g6 float 8 among them: 360
+  applied, the view and both encodings changed), 4 deliberate limits, exactly two next-layout gaps, Cavern of Souls'
+  mana (15 applied) and the chosen card name (359 applied), each tied to `az::needs_layout_v7`.
+* **Fuzz** (no failure in any):
+  * `FUZZ_POOL=sneak_show`, 20,000 games (4 shards of 5,000): wins 10,079 / 9,867, 54 drawn, none aborted, 24.0 turns
+    and 238.7 decisions a game, 7,801,865 options completed; seen on the stack Show and Tell 8,511, Omniscience 3 (it
+    enters by Show and Tell), Mistrise Village's ability 21,854; free casts 2,505; uncounterable spells 2,479.
+  * `FUZZ_POOL=doomsday`, 5,000 games: wins 2,406 / 2,457, 137 drawn, 29.6 turns, 318.4 decisions a game, 2,843,120
+    options completed (every Doomsday card seen, as 124.4).
+  * `FUZZ_POOL=sns`, 5,000 games: wins 2,442 / 2,443, 115 drawn, 2,839,330 options completed; Show and Tell 2,388,
+    Omniscience 94, Mistrise Village 22,484, Brotherhood's End 2,231, Disruptor Flute 6,144, Magus of the Moon 1,836, free
+    casts 1,360, uncounterable 1,424, names chosen 7,745: exactly the pre-merge games of these seeds (123.8's first shard).
+  * `FUZZ_POOL=delver`, 4,000 games: 1,924 / 1,907, 169 drawn, 2,390,436 options completed, Murktide Regent 2,031, its
+    trigger 84, Prismari Charm 2,937: the mirror's games exactly (124.4).
+  * The `fuzz` profile (debug assertions), `FUZZ_POOL=sneak_show`, 1,000 games: 496 / 501, 3 drawn, 632,720 options
+    completed.
+* `bash tools/build_py.sh`, `python -m pytest -q tests`: 282 passed, 1 skipped, 1 failed: `test_mac_remote.py::
+  test_a_remote_eoe_evaluation_logs_its_games` timed out (its subprocess's 600 s, the desktop loaded with other
+  sessions' checks; 124.1 met the same) and passes alone (63 s): 283 passed, 1 skipped. `python -m pytest -q
+  tools/codegen`: 2 passed. `python tools/rulings_doc.py --check`: current (regenerated once more for the two
+  cross-lane tests' ruling marker). `python tools/untested_cards.py`: 564 supported (18 legacy), **0** named by no card
+  test.
+* mtg-bot (`feature/sneak-show-ir` 60e76c0a), the full suite (`pytest -n 8 --no-cov`): 49 failed, 21,143 passed, 24
+  skipped. 47 of them fail at the merge base f4f2d663 too (124.4's list, rerun there before the merge); the other two
+  pass alone (`test_eternity_elevator_admits_at_loader_admits_helper`, lane C's known xdist ordering flake, and
+  `training_ui/test_launcher.py::test_force_kill_endpoint_os_kills_matched_spawn`, a timing test under the desktop's
+  load): no new failure.
+* **`tools/gate.py engine` was not run**: its recipe includes a search smoke (`tools/search_smoke.py --specs random
+  --seeds 0`, not skippable), which this lane's rules forbid; its other steps were run by hand above (the build, both
+  digests, `--test az`, `limits` and `hidden` within the suite, pytest), so no `gates/<sha>.json` was written. The
+  maintainer's call.
+* No docs/shortcuts.md entry; layout v6 (one spare: g6 float 8); no zero-core change.
+
+**Open.** Consign to Memory (the Delver lane) completes the sideboard; best-of-three and any network play with the
+sideboard wait for layout v7 (the Flute); `az/constructed.rs` has no `Decklist::sneak_show()` (the tests read the
+JSON) and `mtgz.az.decklists` no Python loader for it: the best-of-three lane's to add.
 
 ## 124. Legacy Doomsday: the deck's cards
 
@@ -26265,3 +27131,430 @@ differ by that, not by their games.)
 **Left.** A network can't play the deck until layout v7 (the spec refuses Cavern of Souls, 124.2); constructed
 best-of-three and sideboarding (54.8) remain unbuilt, so the deck's sideboard (Flusterstorm, Leyline of the Void) is
 played only by the lanes' pools `dd_b` and `dd_c`.
+
+## 126. Run 2 integrated: the deck choice by the evaluator (112) and the win % against real decks (113) on one commit (branch `eoe-run2-int`, 2026-11-12)
+
+Branch `eoe-run2-int` (from main 3d898d7: the Doomsday lanes, race-batch, eval-v2, Sneak and Show); merged with merge
+commits: `deck-choice-eval` (426d21c, 112), then `realdecks` (281489c, 113). zero-core pin f9ca5c3 -> **25a7f50**
+(`feat/eoe-run2`, pushed): the merge of `feat/selfplay-spec-hook` ef63ee1 (112's hooks) and `feat/extra-evals` 6ed51d5
+(113's cadence and remote extras), both from f9ca5c3. **Why**: run 2 (112.6) launches from one commit that has both, the
+real-deck yardstick every 40th iteration (113.3's cadence for the Mac) with our decks built by the run's evaluator.
+Every default stays byte-identical: each new setting is off unless a preset or flag sets it.
+
+### 126.1 The zero-core merge (`feat/eoe-run2` 25a7f50)
+
+Both core branches added `GamePackage.settings` (the package's own run settings) with the same check and update in
+`apply_package`, and each wrote a `docs/az.md` section 40. One `settings` is kept for both (the constructor takes
+`settings`, `selfplay_specs`, `remote_eval_inputs` and `evals_every`); the clash message names both readings ("run settings
+of the core already (names of the core's, an auxiliary target's or a reader's)"), so both branches' tests pass unchanged;
+`selfplay_spec` / `set_spec`, `_ship_inputs`, the extras' cadence (`eval_due`) and the remote extras merged without a
+conflict. `docs/az.md` 40 holds both sections as (a) and (b) under the same subsection numbers 40.1-40.5, so every
+reference to either branch's 40.x still points at its text. A package declaring none of the four hooks behaves as at
+f9ca5c3.
+
+### 126.2 The mtg-zero conflicts
+
+* `docs/ENGINE.md`: 112 and 113 each appended after 111 (main had appended 123 and 124 there): 112 and 113 placed after
+  111, 123 and 124 after them; every line of every side kept.
+* `mtgz/az/__init__.py`: `evals` of `mtg_eoe` was `mtgz.sealed.rolling:EVALS` on one side and `mtgz.sealed.realdecks:EVALS`
+  on the other -> `{'deckchoice': 'mtgz.sealed.rolling:deckchoice_eval', 'real_decks': 'mtgz.sealed.realdecks:run_eval'}`
+  (in that order: the deck-choice evaluation, then the real decks); `settings` = 112's `ROLLING_SETTINGS` + 113's
+  `REAL_DECKS_SETTINGS` (no shared name: asserted at import); `evals_every` `{'real_decks': 'real_decks_every'}` kept.
+* `third_party/zero-core`: ef63ee1 / 6ed51d5 -> 25a7f50.
+
+### 126.3 What the merge needed beyond the conflicts
+
+* **Our builder for run 2 = the run's evaluator** (`real_decks_builder` **`run_evaluator`**, new). 113's builders were the
+  best guess, the value pick, a saved torch evaluator (`evaluator:PATH`, `evaluator.rank` on a `.pt`) or a plugged
+  `module:attr` fn(pool names, seed) - none could name "the version this iteration's self-play chose by", which is a
+  file of the run (`evaluators/v<iter>.json`, an export, not a `.pt`) known only per iteration. `run_evaluator` reads it
+  as the deck-choice evaluation does (`rolling.evaluator_of`: the iteration's `evaluators/used.jsonl` row, its sha256
+  checked; without the rolling retrain the spec's own file), with the spec's K, and picks through the engine
+  (`realdecks.export_pick`): the sealed spec's `deck_choice` `{"by": "evaluator", "evaluator": <version>, "evaluator_sha":
+  <its sha256>, "explore": 0}` on the test pool, i.e. **exactly a self-play seat's choice without its explore share** -
+  the same K candidates as `candidates` (the evaluator does not change them; tested), the engine's scorer, the best (the
+  first on a tie). No fallback: a run without a deck choice by an evaluator, or an iteration with no recorded evaluator,
+  is an error (logged as `EXTRA EVAL FAILED`). The command line resolves it from the checkpoint's run directory; the
+  output gains `evaluator` (the version's file name) and `evaluator_sha` (16 hex). `export:PATH` is the same pick with any
+  export (e.g. eval-v2's `evaluator_set.json`, run 1's comparison). The site's publisher shows its kind as `evaluator`.
+* **Remote evaluation**: `rolling.remote_eval_inputs` ships the iteration's version and `used.jsonl` to the mirror also
+  when the real decks are due at that iteration with `run_evaluator` (before: only with the deck-choice evaluation on);
+  without the rolling retrain the spec's own file is used, which a remote cannot read (not run 2's case).
+* **The real-deck games stay out of the game log** (a bug neither branch had alone). Every finished `mtg_eoe` game of a
+  run process - self-play and evaluation, and on a remote the evaluating process's - writes a line to the EoE game log
+  (107.1), and 112.4's rolling retrain trains the run's evaluator on the log's games of its window in which both seats
+  searched. The real-deck games are such games (the network on both seats) with 17lands players' decks on both seats
+  (ours or the player's, and the field's, all `given`). Measured as merged (113's `measure` with the log on, 2 pools x 2
+  games, the heuristic piloting): **8 of 8 games logged, both seats `given`, read back as phase `selfplay`** (their spec
+  line has no evaluation deck set); `evaluator.dataset` over that log raises `TypeError` (a given deck's `pool_seed` is
+  null), so in run 2 - real decks every 40th iteration, a window of up to 40 iterations - nearly every retrain would have
+  failed (`EVALUATOR RETRAIN FAILED`, the run stuck on an old version), and had the dataset read them, they would have
+  been human decks in the evaluator's training data (DESIGN.md 0; 113: "nothing reads it back ... the deck evaluator's
+  training"). `realdecks.run_eval` now plays them with the log off (`no_game_log`: the binding's `game_log_path` saved,
+  `game_log(None)`, restored on the same file afterwards; the same measurement: no file written, the path restored). Only games started meanwhile are left out: an evaluation
+  starts no other game (a run's rolling self-play driver waits between phases; a remote evaluation's process plays
+  only the evaluation). The deck-choice evaluation's games (the network against the heuristic: a bot seat) stay in the
+  log as before, and the retrain's `pilots='nn'` leaves them out of its data.
+* **Presets**: `eoe-2e` gains `real_decks_every` 40 and `real_decks_builder` `run_evaluator`; `eoe-2e-smoke`
+  `real_decks_builder` `run_evaluator` with 2 pools x 2 games (its cadence 0: a flag turns it on). 112.6's launch gains
+  `--real-decks-every 40 --real-decks-builder run_evaluator` (a fork's saved settings beat a preset).
+* **Logs**: an `mtg_eoe` run with the deck-choice evaluation off logs `iter N deckchoice: skipped` at each evaluation (112's
+  behaviour: `deckchoice_eval_games` is a game count, not a cadence `evals_every` could read); 113's test now checks that
+  the real decks write no line when off or not due, which they don't.
+
+### 126.4 Tests
+
+* `tests/test_realdecks.py` (+2): `test_the_run_evaluator_builder` - `export_pick`'s candidates are `candidates`' (the same
+  seed: the evaluator changes no build), its scores the binding's `sealed_scores`, its pick the best (the first on a
+  tie); `export:PATH` and `run_evaluator` (a run directory's `used.jsonl` row: the version's path and sha256, the spec's
+  K) give the same deck; another sha256 refused by the engine, `run_evaluator` without its evaluator, without a deck
+  choice by an evaluator or with none recorded refused; `remote_eval_inputs` ships the version when the real decks are
+  due with `run_evaluator` and only then (not due, another builder, the cadence 0, no retrain: nothing), the deck-choice
+  evaluation's shipping as before. `test_the_real_deck_games_stay_out_of_the_game_log` - the run's extra evaluation
+  with the log on: no line written, the log back on its file, the next game logged. `test_the_runs_extra_evaluation`
+  checks the real decks' own lines (the deck-choice evaluation, off there, logs `skipped`).
+* `tests/test_deck_scorer.py::test_the_presets_of_run_2e`: eoe-2e's real-deck settings (40, `run_evaluator`, 64 x 2),
+  eoe-1's defaults (0, `best`), eoe-2e-smoke's.
+* `tests/test_sealedai_publish.py`: a `run_evaluator` point published as the kind `evaluator`, no file name.
+* zero-core `feat/eoe-run2`: `test_package_hooks.py` and `test_extra_evals.py` unchanged and passing; cargo test 148 passed;
+  the full pytest **462 passed** (20 min, 2 torch threads, the desktop shared with other sessions' runs).
+
+### 126.5 Gates, fuzz, smoke (on 32679a3, the code of this section; the commit after it adds 126.5 and 126.6 only)
+
+Run one at a time on the desktop (8 CPU threads at most; other sessions' race and runs on the GPU), `--no-mac`, target dir
+`E:/cargo-target/mtg-zero/eoe-run2-int`, `OMP_NUM_THREADS=2`. **No step failed; nothing was rerun.**
+
+* **`python tools/gate.py engine --no-mac --tested-sha 32679a3a --expect-digest 53839c837bbaf034 --expect-digest0
+  208c723daced22fe --jobs 8`**: build, `DIGEST_ENCODING=0` **208c723daced22fe** and full **53839c837bbaf034** (= main
+  3d898d7's, whose `digests.txt` is the branches' byte for byte), `az` 50, `limits` 13, `hidden` 28, pytest 304 passed and 1
+  skipped, the search smoke (random, seed 0): **`GATE PASSED engine 32679a3a70e9 in 1913s`**.
+* **The fuzz** (release, 112.9's two modes, 20,000 games each as four chunks of 5,000 seeds, the eight chunks side by side;
+  `E:/mtg-zero-scratch/eoe-run2-int/fuzz.sh`, logs in `fuzz/`):
+  * `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_BEST_SHARE=0.5 FUZZ_DECK_CHOICE=32
+    FUZZ_DECK_CHOICE_BY=E:/mtg-zero/s4a/v2_time/evaluator_set.json`: **passed, every seed** - wins 9,812 / 9,617, 571
+    draws, none aborted; 36,046 seats chose by the evaluator (each checked to be its pool's best candidate), 3,954 explored;
+    541,584 worlds dealt from the choosing priors (541,433 with another deck), 2.87M information-set steps; 3,178-3,227 s a
+    chunk.
+  * `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_BEST_SHARE=0.5`: **passed, every seed** - wins 9,705 / 9,576, 719 draws, none
+    aborted; 559,458 worlds (559,256 another deck), 2.91M steps; 1,523-1,537 s a chunk.
+  * Both are exactly 112.9's totals (wins, draws, choices, worlds, steps): main's engine changes since 60397f3 (the
+    Doomsday and Sneak and Show lanes) leave these sealed EoE games as they were.
+* **`python tools/gate.py python --no-mac --jobs 8`**: build, pytest 304 passed and 1 skipped, the run-loop smoke (mtg-smoke,
+  16 games, 0 unfinished): **`GATE PASSED python 32679a3a70e9 in 290s`**.
+* **`python tools/gate.py optin-core --no-mac --baseline-root <mtg-zero-wt/eoe-run2-base: main 3d898d7, zero-core f9ca5c3,
+  built> --jobs 8 --step-timeout 7200`**: build, core cargo tests 148, **checkpoint_compat byte identity: identical** (mtg,
+  a random network, visits and cq 2,465 samples each), `az` 50, `hidden` 28, the other games' build-only 3 of 3
+  (glassroad-zero, caverna-zero, kingdombuilder-zero), the core build, **core pytest 451 passed, 11 skipped (958 s)**:
+  **`GATE PASSED optin-core 32679a3a70e9 in 1540s`** - the tier 112.9 and 113.6 could not pass under the night's load
+  (no subprocess timeout, no access violation this time).
+
+**The smoke** (`E:/mtg-zero-scratch/eoe-run2-int/smoke.sh`, CPU, 4 minutes): `python -m mtgz.az.run --run .../smoke/run
+--preset eoe-2e-smoke --iters 4 --threads 2 --groups 1 --torch-threads 1 --spec <eoe-2e-smoke's, the evaluator eval-v2's
+set export and its sha256> --eval-remote local --real-decks-every 4 --eval-games 4 --eval-random-games 2 --elo-games 2
+--ref-games 2`, every evaluation through the 'local' remote standing in for the Mac (the run's RemoteEval, `python -m
+mtgz.az.remote eval` with its checkout check `32679a3a70e9, unchanged, its engine built there`, `evaluate_mirror` on the
+mirror, the result back). Four iterations, not three: the first retrain can start at iteration 3 at the earliest
+(`evaluator_min_window` 2 after the first version), so iteration 4 is the first to play a retrained version.
+
+* Iteration 1 copied the spec's file in as `v0000` (`1e0ac3309134`) and chose by it; iterations 1-3 played v0000; at
+  iteration 3's start **the retrain of v0002 started** (iterations 1-2, 34 games, lam 0.25, validation 0.671, 15.4 s),
+  `deck evaluator v0002 published` at iteration 4's start and **iteration 4 chose by v0002** (`3bf0b1db4f39`); v0003
+  (iterations 2-3) ran past the run's end.
+* **The deck-choice evaluation** ran at every iteration on the remote (4 games: iteration 0 the spec's file, 1-3 v0000, 4
+  v0002), and **the real decks** at iterations 0 and 4 (`real_decks_every` 4; 2 pools x 2 games, 8 games each), **our
+  decks by `run_evaluator`**: iteration 0 the spec's own file (no self-play yet: `evaluator_of`'s fallback, readable on this
+  machine), **iteration 4 v0002** (`evaluator_sha` 3bf0b1db4f39449d, A 0.625, B 0.5). Both in evals.jsonl's `extras` with
+  `host` local and in the log as `iter N real_decks (remote local)`; the mirror received `evaluators/used.jsonl`,
+  `v0000.json`, `v0002.json` (`remote_eval_inputs`).
+* `python -m mtgz.sealed.games .../smoke/run --check`: **132 of 132 games rebuilt, 0 mismatches** (64 self-play: 113 seats
+  chose, 15 explored; 68 evaluation games, the deck-choice evaluation's 20 chosen seats among them); **no logged game has a
+  given deck**: the 16 real-deck games stayed out of the log.
+
+### 126.6 Run 2's launch, open points
+
+The launch is 112.6's command as merged (from a pinned worktree of the merged commit; `bash tools/mac.sh --eval-checkout`
+first). Open: (1) not run on the Mac itself (the Mac ran a race): the 'local' remote is the same code over a subprocess
+instead of ssh. (2) A remote evaluation of an iteration no self-play recorded (a fresh run's iteration 0) cannot read the
+spec's own evaluator file on the Mac: both the deck-choice evaluation and `run_evaluator` would fail loudly there (logged,
+the run goes on); run 2 forks at 78 and first evaluates 80. (3) Run 2's real-deck numbers use the run's evaluator, not run
+1's best guess: 113.4's backfill (`best`) is not the same builder; `--builder run_evaluator` on run 2's checkpoints, or
+`export:<file>` with eval-v2's export on run 1's, compares like with like.
+
+## 127. Anointed Peacekeeper's card names: one naming function with Disruptor Flute (branch `peacekeeper-names`, 2026-11-12)
+
+Anointed Peacekeeper ("As this creature enters, look at an opponent's hand, then choose any card name. Spells your
+opponents cast with the chosen name cost {2} more to cast. Activated abilities of sources with the chosen name cost {2}
+more to activate unless they're mana abilities.") is a cube card. Before this section its name choice
+(`Game::choose_name_as_enters` in `resolve_m7d.rs`, M7d) was narrower than CR 201.3 allows:
+
+* It offered only the card definitions of the game's card objects, by their table names. A back face, an Adventure or a
+  prepare spell could not be named. A split card was offered as "Life // Death", which is not a name; Life and Death
+  could not be named on their own.
+* With hidden decks it offered the opponent's pool as the chooser knew it: the known part, plus the cards it knew in
+  the game and in clouds. An unseen first pick's name was not offered, but `PASS` stood for "a name of no card in the
+  game", and that first pick was in the game.
+* It compared names by the whole table name (`Game::name(card) == def.name`).
+
+Disruptor Flute (123) already had a face-by-face list (`Game::nameable_defs`) and comparison (`Game::has_name`). That
+list read the sideboards and, with hidden decks, the chooser's knowledge. The v7 lane's answer to section 123 (its note
+of 2026-11-12, E:/mtg-zero-scratch/sneak-show/v7_answer_chosen_names.md) asked for Peacekeeper's fix to land on
+main before v7, separately, with its digest change stated. This section is that fix. Code: 4ef5d898 (the names) and
+4f234724 (Etali's faces and the fuzz pool, 127.6-127.7); the commit after them adds this text and the fuzz pool's paging
+bias (test code only, 127.7).
+
+### 127.1 What changed
+
+* **One naming function.** `Game::choose_name_as_enters` (now in `sneak_show.rs`) is the one `Task::AsEnters` asker
+  for both cards. It handles Peacekeeper's look first (a card with `CardDef::chooses_name` without `SnsDef::plain_name`:
+  `reveal_hand`, then `Mark::LookedHand`, asked once; unchanged). Then, for both cards, it asks one `NameCard` over
+  `Game::nameable_defs()` (`LIBRARY` + k, paged past 63, ENGINE.md 100.2) and `PASS` (`NO_NAME`). The name is kept as
+  `Mark::ChosenName`. Peacekeeper's old asker is gone. `activate.rs` calls the one asker.
+* **One list, `Game::nameable_defs()`**, with no player argument (the list is the same for both players; the v7
+  lane's chosen-name column reads it: note the signature).
+  * With open decklists, it is the faces of every card object of the game, both players', in any zone (a revealed
+    companion included). Tokens, copies, emblems and rules objects are not card objects.
+  * With hidden decks (`GameSpec::hidden_decks`, or any `known_pools` set), it is the faces of every card definition
+    of the table.
+  * Both add the table's token definitions, and a double-faced token's back face, whose names are card names: a face
+    name of the table's cards, or `TOKEN_NAMES_THAT_ARE_CARD_NAMES` ("Faerie Dragon", 123.4).
+  * The faces are those of `push_faces`: a split card's halves; otherwise the card's definition (its front, named by
+    `face_name`), its back face, its Adventure and its prepare spell.
+  * One definition per name (the smallest), sorted by definition.
+  * The sideboards no longer add names (123's list read both); see 127.2.
+* **One comparison.** `named_tax` (both taxes, both cards) compares `has_name(card, face_name(chosen))`: the face up
+  (a split card's halves outside the stack, 709.4; the half cast on it, 709.3). Peacekeeper's taxes are unchanged
+  otherwise:
+  * {2} on its controller's opponents' spells;
+  * {2} on every source's activated abilities that aren't mana abilities (`act_mana_x`, `ad.mana().is_none()`).
+* **`face_name`** now strips the prepare spell from a preparation card's table name too ("Emeritus of Abundance //
+  Regrowth" is "Emeritus of Abundance", CR 722.2). Without this it offered the combined name, a name no card has
+  (found by the cube best-of-three test, 127.5).
+* **The `NameCard` label** (`describe_choice`, `az/view.rs`) names the face ("Name Brazen Borrower", not "Name Brazen
+  Borrower // Petty Theft"). The labels are not hashed by the three digests; `DIGEST_IDS=choices` hashes them, and
+  changes only where such a name is offered.
+* **Encoding: untouched.** The `NameCard` decision's `LIBRARY` slots show the list's page as before
+  (`decision_list` reads the options; one comment brought up to date). Peacekeeper's chosen name is still not encoded on
+  layout v6 (gap G1, `CHOSEN_NAME_GAP`), and no guard was added, as asked. Disruptor Flute's v7 refusal is unchanged.
+
+### 127.2 The names, per game mode
+
+CR 201.3: "choose a card name" means the name of a card. A token's name may be chosen only if it is also a card's
+(ruling abac3051). You are not limited to cards you saw, nor to cards with activated abilities (ruling 2a160983). A
+name is a face's:
+
+* a split card has two names, its halves', not "<left> // <right>" (709.4);
+* a double-faced card has its front's name, or its back face's when that face is up (712.8);
+* an adventurer card has the creature's name, or the Adventure's on the stack (715.4, 715.3);
+* a preparation card has the creature's name; its prepare spell has the prepare spell's (722).
+
+The engine needs the name only to compare it with a spell's or an activated ability's source's name, so every name no
+such object can have is one answer, `PASS`.
+
+| Mode | Decklists | Names offered |
+|---|---|---|
+| cube best-of-one (`MtgSpec` `"format": "bo1"`), team_draft's best-of-one matches, constructed best-of-one | open (54.5): both decks are public, the same in every world of either player | the faces of every card of the game (both decks; any zone; a revealed companion) |
+| cube best-of-three (hidden pools, 36.11), team_draft's best-of-three, constructed best-of-three | hidden within the pools: an unseen first pick, the deck's choice from the pool, the library | the faces of every card of the table |
+| hidden decklists (102: EoE sealed, the stub prior) | hidden: the prior's support | the faces of every card of the table |
+
+Every mode adds the table's tokens that share a card's name, and `PASS`.
+
+**Why the table with hidden decks.** The list must not depend on anything the chooser cannot see, and it must hold every
+name the opponent's cards can have. In a cube best-of-three the opponent's unseen first picks are drawn from the
+`FirstPickPrior`: the table's supported non-basic cards outside the known part of their pool, outside the viewer's own
+pool and outside the cards the viewer knows are elsewhere (a drafted match). A hidden decklist's prior support is
+within the table too (`MtgAz::from_seats` checks each deck against it). So the table holds every card either player
+can have in any world. It is public to both players. It reads neither the chooser's pool nor what the chooser saw, and
+it is the same in every world of either player's. A tighter set (the prior's support plus the known pool) would read
+the chooser's own pool, and so would differ between the opponent's worlds. The extra names a table list offers are
+legal names (CR 201.3) and act as `PASS`. The cube's table offers 566 names, 9 pages of 63.
+
+**The look.** The hand Peacekeeper looked at is the chooser's knowledge from then on (the cards are known, as before).
+It adds no name to the list: open decklists already hold every card of the game, and the table already holds every card.
+
+**Exactness of `PASS`** (123.4's proof, now for both cards, written in `nameable_defs`'s doc):
+
+1. Peacekeeper and the Flute compare the chosen name only with a spell's or an activated ability's source's.
+2. Such an object is one of:
+   * a card of the game (made as it starts, from the decks; a sideboard card joins only as a revealed companion, CR
+     103.2b, 116.2g; no instruction of the engine brings another card into a game);
+   * a token of the table's token definitions;
+   * a copy of one of these, named by its copiable values (707.2) or by the copying card (`keep_name`).
+3. A face-down permanent has no name (708.2). Emblems and rules objects (the monarch, the initiative, a dungeon) are
+   never spells and have no activated abilities.
+4. So with open decklists every name such an object can have, and a player may choose, is offered. With hidden decks
+   every such name of any game the pools can make is offered (all are the table's).
+
+A sideboard card other than a revealed companion is never an object, so its name was a `PASS` name already. Dropping
+the sideboards (the Flute's list had them) changes no effect. With hidden decks the opponent's sideboard is hidden, and
+the table covers it anyway.
+
+### 127.3 Readings taken
+
+* **Peacekeeper's taxes compare the face up**, as the Flute's do (123.4). Naming Brazen Borrower doesn't tax Petty
+  Theft, and naming Petty Theft doesn't tax the creature. Naming Death doesn't tax Life. Naming Reflection of
+  Kiki-Jiki taxes the transformed Fable's ability, and naming Fable of the Mirror-Breaker doesn't. Before this
+  section, a name chosen as a front card definition ("Brazen Borrower // Petty Theft") matched the card in hand and on
+  the battlefield; only its other faces were out of reach.
+* **A tax on a spell cast without paying its mana cost still applies** (CR 118.9d, 601.2f): unchanged, and the cause
+  of 127.6.
+* **Activated abilities of sources with the name**: keyword ones count (equip: ruling a6040722); triggered ones don't,
+  including a trigger's own payment (Mana Vault's "you may pay {4}"). A mana ability is one that adds mana as it
+  resolves, so an ability that costs mana and adds none is taxed (ruling 252f0b38). All tested (127.5).
+* **The look comes first**, once, before the name (unchanged; re-running the asker asks the same question, ENGINE.md
+  4). The second sentence taxes only the opponents' spells; the third taxes every source's abilities, the
+  controller's own too.
+
+### 127.4 Digests
+
+Before, on 02a50dbf (recorded again here, each with `DIGEST_LINES`): full **53839c837bbaf034**, `DIGEST_ENCODING=0`
+**208c723daced22fe**, `DIGEST_ENCODING=v5` **dc33538c0497dbf0**.
+
+After, 4ef5d898 (and unchanged by 4f234724): full **8d1cce220fbc3eb2**, `=0` **c3efa1c404527dab**, `v5`
+**5324310e02757cff**. `engine/tests/data/digests.txt` is re-recorded (`DIGEST_WRITE=1`); the comparison passes.
+
+**The change comes only from Peacekeeper's name choice.** Three checks:
+
+1. **Which games ask.** On 02a50dbf with a temporary counter (never committed), 52 of the 2,500 games ask a Peacekeeper
+   name question, in the game or in one of its determinized clones. Disruptor Flute is a legacy card and is in none
+   (the digests' decks are the cube's). The counter left the `=0` digest at 208c723daced22fe.
+2. **The per-game digests.** 3 games differ in the full and v5 digests (`r 186`, `r 1227`, `h 57`) and 2 in `=0` (`r
+   1227`, `h 57`; `r 186` differs only in an encoding: the same action ids, other names behind them). All are among
+   the 52. The other 49 keep their digests: their first page of names is the same (the faces the new list adds are
+   definitions after the table's cards, so they sort onto the last page), and random play took an id whose name didn't
+   move.
+3. **Forced back.** The new code was patched temporarily (never committed) to give Peacekeeper 02a50dbf's list
+   (verbatim) and comparison, the Flute keeping the new ones. That reproduces all three old digests exactly:
+   53839c837bbaf034 (the full comparison against the old file passes), 208c723daced22fe, dc33538c0497dbf0. The scripts
+   and the patch are in E:/mtg-zero-scratch/peacekeeper-names (`instrument.py`, `force_old.py`, `digests.sh`, the
+   `*_lines_*.txt` files).
+
+### 127.5 Tests
+
+* `cards_m7d.rs`:
+  * every face of every card of the game, both players', none combined, each once, the right token names, the same
+    in a world of the chooser's (`cr_201_3_peacekeeper_offers_every_face_of_every_card_of_the_game`);
+  * a back face (`cr_712_8_peacekeeper_naming_a_back_face_taxes_that_face`);
+  * an Adventure (`cr_715_4_..._taxes_the_adventure_not_the_creature`);
+  * a split card's half (`cr_709_4_..._taxes_that_half`);
+  * `PASS` (`cr_201_3_peacekeeper_naming_no_card_of_the_game_taxes_nothing`, which also checks the look's mark);
+  * Etali with a taxed face (127.6).
+* `rulings_other.rs`, every applicable Peacekeeper ruling of the Scryfall data (`data/rulings/powerlsv.rulings.json`):
+  * a6040722 and 252f0b38: equip taxed while Skullclamp's trigger is not; Mana Vault's mana ability untaxed while
+    its upkeep trigger pays {4};
+  * 2a160983: an unseen library card and a card without activated abilities are offered and named;
+  * abac3051: token names only when they are card names;
+  * 93ee06dd was already tested.
+  The four were triaged b/DEF and are now a (`data/rulings/triage.tsv`; `docs/rulings.md` regenerated, `--check`
+  clean). 90d8b0d0 (all opponents) stays b/MP.
+* `rules_m8b_hidden.rs`, `peacekeepers_names_in_a_hidden_pool_match_dont_depend_on_the_opponents_hidden_cards`: cube
+  best-of-three matches (`MtgAz::from_seats`, hidden pools, the opponent with three first picks), heuristic play to
+  Peacekeeper's question.
+  * The list is the table's (566 names, restated in the test).
+  * In 16 worlds of the chooser's, which draw other first picks and other libraries for the opponent (checked), the
+    decision is the same and offers the same list.
+  * In 16 worlds of the opponent's it offers the same list too.
+* `cards_sneak_show.rs`, `cr_201_3_disruptor_flute_and_anointed_peacekeeper_offer_one_list`: one game state, either
+  card cast; both open and hidden decks give equal lists (hidden: the table's, past one page).
+* `rules_faithful_a.rs`: the 31.7.5 paging test, with the token names now offered. Its 70 names are single-faced (sorted
+  first, not hash order).
+* `cards_m7b_faces.rs`, `etali_may_cast_an_exiled_cards_adventure_cr_715_3` (127.6).
+
+### 127.6 A finding: Etali's free casts cast the front face only (fixed, 4f234724)
+
+Etali, Primal Conqueror's "you may cast any number of spells from among the nonland cards exiled this way without
+paying their mana costs" (`exile_until_nonland_cast_free`, `faces.rs`) offered a card when any of its spell faces
+could be cast free (`can_cast_free_now`). It then always cast the front (`begin_cast`). Two results:
+
+* An Adventure, a split card's right half or a modal double-faced card's spell back face could never be cast this way.
+  Each is a spell from among those cards (CR 715.3, 709.3, 712.11b).
+* A card whose front alone was taxed beyond its caster's mana panicked in `PayMana`. The new fuzz pool found this at
+  seed 188: a Disruptor Flute had named Embereth Shieldbreaker, and Battle Display was free.
+
+It now casts through `Game::cast_free_now` (the walkers' free casts: the same permission, then
+`begin_cast_either_face`, with `ChooseFace` when both faces can be cast). The tests:
+
+* `etali_may_cast_an_exiled_cards_adventure_cr_715_3`: both faces castable, so the face is chosen and Petty Theft is
+  cast. It fails without the fix.
+* `cr_715_3_etali_casts_the_adventure_when_only_it_can_be_cast_free`: P0's Peacekeeper names Brazen Borrower, so P1's
+  Etali casts Petty Theft.
+
+The digests are unchanged. A temporary counter of Etali free casts whose card had a castable other face counted 0
+games (the `=0` digest unchanged under it). The other casts during resolutions already chose faces (`cast_free_now`,
+`cast_now`, `resolve_tail2`'s graveyard casts) or cast a card with one face (miracle).
+
+### 127.7 Checks (the engine on 4f234724, the fuzz pool with its paging bias)
+
+The engine is 4f234724's. The fuzz pool's paging bias is in the last commit's `engine/tests/fuzz.rs` and touches
+`FUZZ_POOL=names` only (`names_next_page` returns before drawing from the RNG in any other mode). Everything
+ran on the desktop, which was idle, with no other run on it; the Mac was not needed.
+
+**The engine suite.** `cargo test --release -p engine --no-fail-fast`: 154 test targets, **2,451 passed, 0 failed, 25
+ignored**. That includes `--test az` (the public-state gate: `public_state_reaches_the_encoding` and
+`the_v5_facts_encode_no_hidden_information` pass, with the gaps unchanged), `limits`, `hidden` and `rules_m8b_hidden`.
+`--test fuzz` (300 default games) passed again with the bias.
+
+**The digests.** See 127.4; `cargo test --release -p engine --test digest -- --ignored` passes against the re-recorded
+file.
+
+**Rulings.** `python tools/rulings_doc.py --check`: clean (1,656 rulings, 1,298 distinct; class a 1,279, all tested).
+
+**pytest.** After `tools/build_py.sh`: **304 passed, 1 skipped**.
+
+**Fuzz.** Sharded by seed: `FUZZ_FIRST` with 2,000 games a shard, the hidden mode 1,250.
+
+* `FUZZ_POOL=names`, 20,000 games, open decklists: every game ran to its end with every check, 35.2M options completed.
+  * Anointed Peacekeeper named:
+    * cards of one face 9,027;
+    * double-faced, adventurer or preparation cards' fronts 15,175;
+    * back faces 13,000;
+    * Adventures 1,721;
+    * split cards' halves 1,696;
+    * prepare spells 835;
+    * tokens 1,291;
+    * `PASS` 1,287.
+  * Disruptor Flute named 71,593 names of the same kinds.
+  * 11,800 spells were cast with a name chosen against them.
+* `FUZZ_POOL=names FUZZ_HIDDEN_DECKS=1` (the table's list), 5,000 games (seeds 0-4999): **4,998 passed every check**.
+  * There were 139,172 hidden-decklist worlds. The decider's actions, view and encoding in each matched the real
+    game's.
+  * Peacekeeper named every kind on the table's last pages: back faces 693, Adventures 49, split cards' halves 112,
+    prepare spells 48, tokens 6, `PASS` 53.
+  * Seeds 466 and 4248 fail the information-set check by a mechanism that does not involve the name list (127.8 (1));
+    the two shards that stopped there were rerun with `FUZZ_SKIP` and pass.
+* The default fuzz (cube decks, Peacekeeper among the random cards), 20,000 games: passed, 19.2M options completed.
+* `fuzz_random_matches`, 1,000 cube best-of-three matches (2,549 games: hidden pools, determinized worlds, 42,958 of
+  them, first picks resampled in 26,203): passed.
+* `FUZZ_POOL=drafted`, 200 team-draft matches (515 games): passed.
+
+**Not run.** `tools/gate.py engine`: its search smoke can't be skipped, and search smoke is not run in this lane (the
+coordinator gates and merges).
+
+### 127.8 Open points
+
+1. **A known card's face choice can split one search node** (pre-existing; not fixed here). At priority, a hand card is
+   named by its slot among the hand's definitions sorted, and the hidden cards' definitions are among them
+   (`hand_slots`, ENGINE.md 11). So in two worlds of the other player's, the same action id can name two different
+   cards of the hand. When both cards are known to both players (Peacekeeper's look at a hand makes this common),
+   `Choice::Faces` reveals nothing (`reveal` is a no-op for a card everyone knows) and emits no key, and `ChooseFace`
+   follows. The two worlds then have equal chance keys, decider and legal actions, which zero-core treats as one node,
+   but different views (the context's card code).
+   * The `names` pool's hidden mode found it at seeds 466 (the deciding player P1, the viewer P0; Shatterskull Smashing
+     in one world, Norman Osborn in the other) and 4248.
+   * The mechanism predates this branch (Peacekeeper's look, `hand_slots`, `Choice::Faces` are unchanged), and it
+     needs no name question.
+   * A fix makes a face choice on a card everyone knows public by a key, for example `emit_public(KEY_REVEAL, ...)`
+     when `reveal` finds the card already known to both. It changes chance keys, and so digests, in every game with
+     such a choice, so it belongs on its own branch with its own digest proof. The same may hold for any action that
+     moves a card both players know out of the hand without a key: worth a look.
+2. **The hidden-decks list is long.** It has 566 names, 9 pages of 63. A name on the last page (the table's faces and
+   tokens sort there) takes eight "next page" answers. The rules want every name reachable, and it is, but a network
+   pays for the depth.
+3. **Peacekeeper's chosen name is still not encoded on layout v6** (gap G1, `CHOSEN_NAME_GAP`). Peacekeeper games are
+   not refused, as before; Disruptor Flute games are. Layout v7's chosen-name column (125) should read
+   `Game::nameable_defs()`, which now takes no player.
+4. **123.4 superseded in part.** 123.4's last sentence ("with hidden decks the other player's names are those of their
+   pool the chooser knows ...") describes the Flute's old list; 127.2 replaces it. 123's text is left as written.
+5. **Section number.** 127 was the next free number above 126 on 2026-11-12: no branch and no worktree's ENGINE.md had
+   127 or higher; `v7-varlen` has 125, `eoe-run2-int` 126.
+6. **`DIGEST_IDS=choices`** hashes the `NameCard` labels (127.1), so its digest changes where a double-faced,
+   adventurer or preparation card's front is offered; it is not one of the recorded digests.

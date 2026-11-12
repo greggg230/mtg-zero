@@ -915,6 +915,9 @@ impl Game {
             if pl.gy_exile_turn == n {
                 pl.gy_exile_turn = 0;
             }
+            // ("The next spell you cast this turn can't be countered":
+            // ENGINE.md 123.)
+            pl.uncounterable_next = 0;
         }
         if !self.permissions.is_empty() {
             let turns = [self.players[0].turns, self.players[1].turns];

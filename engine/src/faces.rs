@@ -252,7 +252,10 @@ impl Game {
     /// costs": the exiles first (each card revealed as it moves; the nonland
     /// cards in `f.picked`), then, one at a time in any order, a card to
     /// cast (`ChooseExiled`, `PASS` = no more), each cast at once (CR
-    /// 608.2g) while the rest of the effect waits.
+    /// 608.2g) while the rest of the effect waits, with either of its spell
+    /// faces (a split card's halves, an Adventure, a modal double-faced
+    /// card's back face: CR 709.3, 715.3, 712.11b; `ChooseFace` when both
+    /// can be cast), the faces the offer found castable (ENGINE.md 127.6).
     fn exile_until_nonland_cast_free(&mut self, f: &mut Frame) -> Flow {
         let p = f.controller;
         match self.answer.take() {
@@ -261,14 +264,7 @@ impl Game {
                 let mut back = f.clone();
                 back.i = 1;
                 self.agenda.push(Task::Run(back));
-                let r = self.obj_ref(card);
-                self.permissions.push(crate::game::Permission {
-                    card: r,
-                    player: p,
-                    turn: Some(self.turn.number),
-                    kind: crate::game::PermKind::Play { free: true, cast_only: true, any_mana: false, only_if: crate::game::PlayIf::Always },
-                });
-                self.begin_cast(p, card);
+                self.cast_free_now(p, card);
                 return Flow::Suspend;
             }
             Some(Choice::Pass) => {

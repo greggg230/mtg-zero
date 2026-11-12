@@ -259,6 +259,7 @@ pub fn fields() -> Vec<Field> {
         companion: Public "the revealed companion's card (CR 103.2b)",
         companion_def: Public "the revealed companion's identity",
         companion_used: Public "the companion special action was taken (116.2g)",
+        uncounterable_next: Public "\"the next spell you cast this turn can't be countered\" effects waiting (Mistrise Village; ENGINE.md 123)",
     });
     classify!(v, Obj {
         def: Public "what a permanent or spell is (the face up); in a hidden zone hidden (leak-tested)",
@@ -1742,6 +1743,23 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.w6.tokens_turn[0] = t;
             Some("P0".to_string())
         }),
+        // ENGINE.md 123 (Mistrise Village). (No draw from the gate's random
+        // stream: the active player.)
+        p!("a player's next spell this turn can't be countered", "Player.uncounterable_next", |a, _r| {
+            let p = a.g.turn.active as usize;
+            a.g.players[p].uncounterable_next += 1;
+            Some(format!("P{p}: {}", a.g.players[p].uncounterable_next))
+        }),
+        // ENGINE.md 123 (Disruptor Flute; Anointed Peacekeeper's too): the
+        // first permanent in the encoded slots names its own card. (No draw.)
+        p!("a card name was chosen as a permanent entered", "Game.marks", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            if a.g.chosen_name(a.g.obj_ref(c)).is_some() {
+                return None;
+            }
+            let d = a.g.ident_card(c);
+            mark(&mut a.g, c, crate::game::Mark::ChosenName(d))
+        }),
     ]
 }
 
@@ -1763,6 +1781,7 @@ pub fn limits() -> Vec<Limit> {
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
         l(CHOSEN_TYPE_MANA_GAP, NextLayout, "layout v6 has no float for a pool's mana restricted to creature spells of a chosen type (Cavern of Souls, CR 106.6): any number of types can float at once (a Cavern that enters again chooses again, CR 400.7, 614.12; the mana stays until the step ends, 106.4), past v6's spares; layout v7's block encodes it (branch doomsday-b-v7). Until then every network-driven game (self-play, evaluation, h2h: the engine's MtgSpec) whose decks or sideboards hold such a card is refused with \"Cavern of Souls' floating mana needs layout v7 (ENGINE.md 124.2)\" (tests/az.rs, cavern_decks_are_refused_to_networks_on_layout_v6), so no network sees a position with it; rules tests and the fuzzer play it"),
+        l(CHOSEN_NAME_GAP, NextLayout, "layout v6 has no float for the card name chosen as a permanent entered (`Mark::ChosenName`, CR 201.3, 614.12: any card name, about 10 bits; perm floats 142-143 are the only spares outside the v5 projection); layout v7's chosen-name column encodes it (ENGINE.md 125). Anointed Peacekeeper's name in the cube was never encoded (the gap lane A's review found, G1, older than this entry); Disruptor Flute's games are refused to networks until v7: every network-driven game (self-play, evaluation, h2h: the engine's MtgSpec) whose decks or sideboards hold a card choosing a card name the plain way is refused with \"Disruptor Flute's chosen name needs layout v7 (ENGINE.md 123)\" (tests/az.rs, flute_decks_are_refused_to_networks_on_layout_v6), so no network sees a position with it; rules tests and the fuzzer play it"),
         l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),
     ]
 }
@@ -1780,7 +1799,7 @@ pub const HIDDEN_BY_DECKLISTS: [&str; 1] = ["a sideboard card fewer"];
 /// this turn, a permanent that entered this turn) and the granted triggered
 /// abilities (W3, no perturbation before). Its tests read them back and check
 /// that they hide nothing (`tests/az.rs`).
-pub const V6_FIXED: [&str; 25] = [
+pub const V6_FIXED: [&str; 26] = [
     "void holds (a nonland permanent left the battlefield this turn)",
     "more life gained this turn",
     "a creature was cast for its warp cost",
@@ -1808,14 +1827,23 @@ pub const V6_FIXED: [&str; 25] = [
     "the mana spent to cast a spell",
     // ENGINE.md 124.2: lane B of the Legacy Doomsday deck's (perm 133-141).
     "a creature type was chosen as a permanent entered",
+    // ENGINE.md 123 (Mistrise Village, g6 float 8).
+    "a player's next spell this turn can't be countered",
 ];
 
-/// The one next-layout gap (ENGINE.md 124.2): a pool's mana restricted to
-/// creature spells of a chosen type (Cavern of Souls) needs layout v7's block;
-/// on this layout v6 build every network-driven game whose decks hold a card
-/// that makes such mana is refused (`az::MtgSpec`, `CHOSEN_TYPE_MANA_NEEDS_V7`),
-/// so no network ever plays a position with it. Removed when layout v7 lands.
+/// A next-layout gap (ENGINE.md 124.2): a pool's mana restricted to creature
+/// spells of a chosen type (Cavern of Souls) needs layout v7's block; on this
+/// layout v6 build every network-driven game whose decks hold a card that
+/// makes such mana is refused (`az::needs_layout_v7`), so no network ever
+/// plays a position with it. Removed when layout v7 lands.
 pub const CHOSEN_TYPE_MANA_GAP: &str = "mana in a pool is restricted to creature spells of a chosen type";
+
+/// A next-layout gap (ENGINE.md 123): the card name a permanent chose as it
+/// entered (`Mark::ChosenName`) needs layout v7's chosen-name column; on this
+/// layout v6 build every network-driven game whose decks hold a card choosing
+/// a name the plain way (Disruptor Flute) is refused (`az::needs_layout_v7`).
+/// Removed when layout v7 lands.
+pub const CHOSEN_NAME_GAP: &str = "a card name was chosen as a permanent entered";
 
 /// The perturbations of layout v4's 42 gaps (ENGINE.md 58.10), which layout
 /// v5 encodes (ENGINE.md 60.3): its tests read them back and check that they

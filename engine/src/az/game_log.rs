@@ -33,6 +33,9 @@
 //!   `"bottom"`, `"mulligans"`, `"plays"` (a card as its index among the sorted names of the seat's
 //!   `"deck"`, else its name). The spec line is the game's whole spec as far as a game depends on it, so
 //!   `MtgSpec::parse(spec line)` + `new_game(.., seed)` + the actions replay the game exactly (tested).
+//! * **A deck chosen by an evaluator** (ENGINE.md 112): its seat's `"mode"` is `"chosen"` with its `"candidate"`, and
+//!   the seat adds `"evaluator"` (the sha256 of the evaluator file that chose it; the spec line names the file and
+//!   its sha256) and `"score"` (its score by it).
 //! * Nothing here touches a game's state: determinism and every encoding are unchanged; a write
 //!   that fails panics (a loud failure, never a silently missing record).
 use std::fs::{File, OpenOptions};
@@ -254,7 +257,7 @@ impl Record {
                     names.iter().position(|x| *x == n).map_or_else(|| json!(n), |i| json!(i))
                 };
                 let st = &t.seats[p as usize];
-                json!({
+                let mut seat = json!({
                     "mode": how.map(|h| h.mode.name()), "candidate": how.and_then(|h| h.candidate), "pool_seed": how.and_then(|h| h.pool_seed),
                     "colors": how.map(|h| builder::letters(h.colors)), "splash": how.map(|h| builder::letters(h.splash)),
                     "lands": deck.iter().filter(|&&d| db.def(d).is(types::LAND)).count(),
@@ -263,7 +266,13 @@ impl Record {
                     "mulligans": st.mulligans,
                     "plays": st.plays.iter().map(|&(tn, k, d)| json!([tn, k, card(d)])).collect::<Vec<_>>(),
                     "deck": dj,
-                })
+                });
+                // (a deck chosen by an evaluator, ENGINE.md 112: the evaluator file's sha256 and the deck's score)
+                if let Some(h) = how.and_then(|h| h.evaluator) {
+                    seat["evaluator"] = json!(super::sealed::scorer::hex(&h));
+                    seat["score"] = json!(how.and_then(|h| h.score).map(f64::from_bits));
+                }
+                seat
             })
             .collect();
         let bytes: Vec<u8> = t.actions.iter().flat_map(|a| a.to_le_bytes()).collect();

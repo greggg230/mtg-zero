@@ -384,7 +384,9 @@ impl Game {
             (K::PutInHand, Choice::Card(i)) => format!("{} into hand", nm(i)),
             (K::PutOntoBattlefield, Choice::Card(i)) => format!("{} onto the battlefield", nm(i)),
             (K::ChooseDiscard, Choice::Def(d)) => format!("They discard {}", self.db().def(d).name),
-            (K::NameCard, Choice::Def(d)) => format!("Name {}", self.db().def(d).name),
+            // (The face's name: "Brazen Borrower", not the table's "Brazen
+            // Borrower // Petty Theft", a name no card has; ENGINE.md 127.)
+            (K::NameCard, Choice::Def(d)) => format!("Name {}", crate::sneak_show::face_name(self.db().def(d))),
             (K::ChooseMode, Choice::Number(n)) => format!("Mode {}", n + 1),
             (K::ChooseMode, Choice::Pass) => "No more modes".into(),
             (K::ChooseColor, Choice::Number(n)) => COLORS.get(n as usize).map_or(format!("Colour {n}"), |s| s.to_string()),
