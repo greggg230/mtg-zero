@@ -1762,7 +1762,6 @@ pub fn limits() -> Vec<Limit> {
         l("two graveyard cards swap places", Design, "graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2); no action id depends on the order: a graveyard-card choice or target is a list id whose token is its card, the graveyards in order in the list block while it is pending (ENGINE.md 65.10), and Priority's casts and plays from the graveyard are one option, GRAVEYARD + 0, then that list's choice (ENGINE.md 100.5)"),
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
-        l(CHOSEN_TYPE_MANA_GAP, NextLayout, "layout v6 has no float for a pool's mana restricted to creature spells of a chosen type (Cavern of Souls, CR 106.6): any number of types can float at once (a Cavern that enters again chooses again, CR 400.7, 614.12; the mana stays until the step ends, 106.4), past v6's spares; layout v7's block encodes it (branch doomsday-b-v7). Until then every network-driven game (self-play, evaluation, h2h: the engine's MtgSpec) whose decks or sideboards hold such a card is refused with \"Cavern of Souls' floating mana needs layout v7 (ENGINE.md 124.2)\" (tests/az.rs, cavern_decks_are_refused_to_networks_on_layout_v6), so no network sees a position with it; rules tests and the fuzzer play it"),
         l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),
     ]
 }
@@ -1810,12 +1809,11 @@ pub const V6_FIXED: [&str; 25] = [
     "a creature type was chosen as a permanent entered",
 ];
 
-/// The one next-layout gap (ENGINE.md 124.2): a pool's mana restricted to
-/// creature spells of a chosen type (Cavern of Souls) needs layout v7's block;
-/// on this layout v6 build every network-driven game whose decks hold a card
-/// that makes such mana is refused (`az::MtgSpec`, `CHOSEN_TYPE_MANA_NEEDS_V7`),
-/// so no network ever plays a position with it. Removed when layout v7 lands.
-pub const CHOSEN_TYPE_MANA_GAP: &str = "mana in a pool is restricted to creature spells of a chosen type";
+/// The perturbations layout v7 encodes (ENGINE.md 124.2: its block of
+/// globals, the pool's mana of a chosen creature type by colour and type,
+/// exact for any number of types). Its tests read them back and check that
+/// they hide nothing (`tests/az.rs`, `tests/cards_doomsday_b.rs`).
+pub const V7_FIXED: [&str; 1] = ["mana in a pool is restricted to creature spells of a chosen type"];
 
 /// The perturbations of layout v4's 42 gaps (ENGINE.md 58.10), which layout
 /// v5 encodes (ENGINE.md 60.3): its tests read them back and check that they
@@ -1906,7 +1904,7 @@ mod tests {
         for l in limits() {
             assert!(ps.iter().any(|p| p.name == l.name), "limit {} names no perturbation", l.name);
         }
-        for n in V5_FIXED.iter().chain(V6_FIXED.iter()) {
+        for n in V5_FIXED.iter().chain(V6_FIXED.iter()).chain(V7_FIXED.iter()) {
             assert!(ps.iter().any(|p| p.name == *n), "V5_FIXED / V6_FIXED: {n} names no perturbation");
             assert!(!limits().iter().any(|l| l.name == *n), "V5_FIXED / V6_FIXED: {n} is still a limit");
         }

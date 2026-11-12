@@ -3,7 +3,7 @@ docs/search.md) + what is MTG's, registered here as the process's game package: 
 (engine/src/az, docs/ENGINE.md 21-22, 36: one game of Magic between two random 40-card decks of the
 supported PowerLSV cube cards, or with `"format": "bo3"` a best-of-three match with sideboarding
 between games, decks built from random card pools), its object layout for zero-core's token
-network (arch 'tokens': `layout_v6.json`, written by the engine's `encode::layout_json`), the game
+network (arch 'tokens': `layout_v7.json`, written by the engine's `encode::layout_json`), the game
 `team_draft` (docs/ENGINE.md 41, 43, 45, DESIGN.md 2.3: a team cube draft and deckbuilding up to
 the matches, its deferred terminal; its layout `layout_draft_v2.json`, ENGINE.md 47), the run
 presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4, mtg-4-mac; the co-training presets
@@ -49,11 +49,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 SPEC = '{"max_turns": 60, "eval_decks": 16, "eval_seed": 1}'
 EVAL_SPEC = eval_spec(SPEC)
 
-# The objects of encode layout v6 for zero-core's token network (docs/ENGINE.md 22, 35, 60, 100.5; v5 + additions
-# only, as v5 was v4 + additions: a v5 or v4 network widens onto it exactly, `python tools/fork_run.py <checkpoint>
-# <new run>`). layout_v5.json and layout_v4.json stay: the layouts of the v5 and v4 runs' checkpoints (their configs
-# carry them too).
-with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v6.json'), encoding='utf-8') as _f:
+# The objects of encode layout v7 for zero-core's token network (docs/ENGINE.md 22, 35, 60, 100.5, 124.2; v6 + one
+# block of globals appended, the pool's mana of a chosen creature type; v6 was v5 + additions, v5 was v4 + additions: a
+# v6, v5 or v4 network widens onto it exactly, `python tools/fork_run.py <checkpoint> <new run>`, and the encoding guard
+# refuses one unwidened). layout_v6.json, layout_v5.json and layout_v4.json stay: the layouts of the v6, v5 and v4 runs'
+# checkpoints (their configs carry them too). The game `mtg_eoe` keeps layout v6 (`layout_eoe.json`, below).
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v7.json'), encoding='utf-8') as _f:
     LAYOUT = json.load(_f)
 # The team draft's objects (DESIGN.md 2.3.5, docs/ENGINE.md 41, 47: layout draft_v2, the pack and pool
 # slots and 13 bags; `id_actions`: a slot scores its card's identity, the pick or adding it to the deck

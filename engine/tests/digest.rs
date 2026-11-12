@@ -29,7 +29,10 @@
 //! float of layout v5 is v4's (ENGINE.md 60.2) and no game plays
 //! differently. `DIGEST_ENCODING=v5` hashes the layout v5 part
 //! (`encode::v5_projection`): layout v5's recorded full digest while every
-//! v5 float of layout v6 is v5's (ENGINE.md 100.5).
+//! v5 float of layout v6 is v5's (ENGINE.md 100.5). `DIGEST_ENCODING=v6`
+//! hashes the layout v6 part (`encode::v6_projection`, the first 44,212
+//! floats): layout v6's recorded full digest while every v6 float of layout
+//! v7 is v6's (ENGINE.md 124.2).
 //!
 //! `DIGEST_IDS=choices` (ENGINE.md 65.11): an id-agnostic trace of the same
 //! games, to compare across a change that renames action ids and nothing
@@ -197,6 +200,13 @@ fn hash_encoding(h: &mut H, g: &Game, buf: &mut [f32]) {
             static P5: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
             Some(P5.get_or_init(engine::az::encode::v5_projection))
         }
+        // `DIGEST_ENCODING=v6`: the layout v6 part (the first 44,212 floats,
+        // ENGINE.md 124.2): layout v6's recorded full digest while every v6
+        // float of layout v7 is v6's.
+        Ok("v6") => {
+            static P6: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+            Some(P6.get_or_init(engine::az::encode::v6_projection))
+        }
         _ => None,
     };
     if let Some(p) = proj {
@@ -284,7 +294,7 @@ fn behaviour_digests() {
     if let Ok(p) = std::env::var("DIGEST_LINES") {
         std::fs::write(&p, lines.join("\n") + "\n").unwrap();
     }
-    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0" || v == "v4" || v == "v5") || by_choice() {
+    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0" || v == "v4" || v == "v5" || v == "v6") || by_choice() {
         return;
     }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/digests.txt");

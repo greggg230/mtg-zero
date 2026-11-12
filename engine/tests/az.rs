@@ -374,7 +374,7 @@ fn ident(def: engine::ids::DefId) -> usize {
 
 #[test]
 fn encoding_slots_name_the_action_slots() {
-    assert_eq!(NUM_FEATURES, 44_212);
+    assert_eq!(NUM_FEATURES, 47_892);
     let mut lists = 0;
     for g in states(scale(16), 6, 7) {
         let me = g.to_move().unwrap();
@@ -461,11 +461,12 @@ fn encoding_slots_name_the_action_slots() {
 
 #[test]
 fn layout_json_is_checked_in() {
-    // mtgz/az/layout_v6.json = encode::layout_json (MTGZ_WRITE_LAYOUT=1 rewrites it; layout_v5.json
-    // and layout_v4.json stay as they were, for the widen of v5 and v4 networks:
-    // `layout_v6_widens_layout_v5_exactly`, `layout_v5_widens_layout_v4_exactly`)
+    // mtgz/az/layout_v7.json = encode::layout_json (MTGZ_WRITE_LAYOUT=1 rewrites it; layout_v6.json,
+    // layout_v5.json and layout_v4.json stay as they were, for the widen of v6, v5 and v4 networks:
+    // `layout_v7_widens_layout_v6_exactly`, `layout_v6_widens_layout_v5_exactly`,
+    // `layout_v5_widens_layout_v4_exactly`; ENGINE.md 124.2)
     let want = encode::layout_json(CardDb::cube());
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_v6.json");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_v7.json");
     if std::env::var("MTGZ_WRITE_LAYOUT").is_ok_and(|v| v == "1") {
         std::fs::write(&path, &want).unwrap();
     }
@@ -473,8 +474,40 @@ fn layout_json_is_checked_in() {
     assert!(have == want, "{} differs from encode::layout_json (MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test az layout)", path.display());
     let v: serde_json::Value = serde_json::from_str(&want).unwrap();
     assert_eq!(v["features"], NUM_FEATURES);
-    assert_eq!(v["version"], 6);
+    assert_eq!(v["version"], 7);
     assert_eq!(v["cards"].as_array().unwrap().len(), identity::D);
+}
+
+/// Layout v7 is layout v6 with one block of globals appended (ENGINE.md 124.2: `globals_v7`, the
+/// pool's mana of a chosen creature type, 3,680 floats at 44,212): the map a widen derives from
+/// the two checked-in descriptions is `encode::v6_projection` (the identity on v6's 44,212
+/// features), every segment, bag and v6 global block the same; layout_v6.json is layout v6 as
+/// frozen (ENGINE.md 100.5.1), and layout_v7.json without the new block, its version and its
+/// feature count is layout_v6.json.
+#[test]
+fn layout_v7_widens_layout_v6_exactly() {
+    let (l6, l7) = (read_layout("layout_v6.json"), read_layout("layout_v7.json"));
+    assert_eq!((l6.features, l7.features), (encode::NUM_FEATURES_V6, NUM_FEATURES));
+    assert_eq!(l6.globals.iter().map(|g| g.0.clone().unwrap()).collect::<Vec<_>>(), ["globals", "match", "globals_v5", "globals_v6"]);
+    assert_eq!(
+        l7.globals.iter().map(|g| g.0.clone().unwrap()).collect::<Vec<_>>(),
+        ["globals", "match", "globals_v5", "globals_v6", "globals_v7"]
+    );
+    assert_eq!(widen_map(&l6, &l7), encode::v6_projection(), "the widen's map is the v6 projection");
+    let v7 = &l7.globals[4].1;
+    assert_eq!((v7[0], v7.len()), (encode::O_GLOBALS_V7, encode::GLOBALS_V7));
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az");
+    let read = |f: &str| -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(dir.join(f)).unwrap()).unwrap() };
+    let (mut j6, mut j7) = (read("layout_v6.json"), read("layout_v7.json"));
+    j7["globals"].as_array_mut().unwrap().pop();
+    for j in [&mut j6, &mut j7] {
+        j.as_object_mut().unwrap().remove("version");
+        j.as_object_mut().unwrap().remove("features");
+    }
+    assert!(j6 == j7, "layout_v7.json is layout_v6.json and one block");
+    // (and v5's widen onto v7 is v5 -> v6 -> v7)
+    let l5 = read_layout("layout_v5.json");
+    assert_eq!(widen_map(&l5, &l7), encode::v5_projection());
 }
 
 /// The features of a token layout description (`layout_v*.json`) as zero-core's `net.widen`
@@ -585,7 +618,7 @@ fn widen_map(l4: &Layout, l5: &Layout) -> Vec<usize> {
 #[test]
 fn layout_v6_widens_layout_v5_exactly() {
     let (l5, l6) = (read_layout("layout_v5.json"), read_layout("layout_v6.json"));
-    assert_eq!((l5.features, l6.features), (encode::v5::NUM_FEATURES, NUM_FEATURES));
+    assert_eq!((l5.features, l6.features), (encode::v5::NUM_FEATURES, encode::NUM_FEATURES_V6));
     assert_eq!(l5.globals.iter().map(|g| g.0.clone().unwrap()).collect::<Vec<_>>(), ["globals", "match", "globals_v5"]);
     assert_eq!(widen_map(&l5, &l6), encode::v5_projection(), "the widen's map is the v5 projection");
     // (and v4's widen onto v6 is v4 -> v5 -> v6)
@@ -1340,42 +1373,10 @@ fn public_state_reaches_the_encoding() {
     // order is no id's since Priority's casts from a graveyard became one option and a list
     // choice (ENGINE.md 100.5): only deliberate limits are left.
     let gaps: Vec<&str> = lim.iter().filter(|l| l.kind == LimitKind::NextLayout).map(|l| l.name).collect();
-    // (W2's and W6's six, added after layout v6 was built, too: ENGINE.md 100.5.1.) One gap, named
-    // and tied to a refusal (ENGINE.md 124.2, the maintainer's decision): a pool's mana of a chosen
-    // creature type (Cavern of Souls) is layout v7's; on v6 no network plays a game with a card that
-    // makes it (`cavern_decks_are_refused_to_networks_on_layout_v6`).
-    assert_eq!(gaps, [engine::public_state::CHOSEN_TYPE_MANA_GAP], "next-layout gaps");
-    assert_eq!(next, 1);
+    // (W2's and W6's six, added after layout v6 was built, too: ENGINE.md 100.5.1.)
+    assert!(gaps.is_empty(), "next-layout gaps: {gaps:?}");
+    assert_eq!(next, 0);
     assert_eq!(by_design, 4, "the deliberate limits");
-}
-
-/// ENGINE.md 124.2: layout v6 can't encode a pool's mana restricted to creature spells of a chosen
-/// type (Cavern of Souls; the public-state gate's one next-layout gap, `CHOSEN_TYPE_MANA_GAP`), so
-/// every network-driven game - a spec the engine's `SearchGame` parses (self-play, evaluation, h2h,
-/// replays: zero-core's driver) - whose decks or sideboards hold a card that makes such mana is
-/// refused, loudly, on this build; the Delver mirror is not. The gate's entry names the refusal.
-#[test]
-fn cavern_decks_are_refused_to_networks_on_layout_v6() {
-    let delver = engine::az::constructed::Decklist::izzet_delver().main_names();
-    let mut with_cavern = delver.clone();
-    with_cavern[0] = "Cavern of Souls".to_string();
-    let spec = |p0: &[String], p1: &[String], sb: Option<&[&str]>| {
-        let mut decks = serde_json::json!({"p0": p0, "p1": p1});
-        if let Some(sb) = sb {
-            decks["p1_sideboard"] = serde_json::json!(sb);
-        }
-        serde_json::json!({"max_turns": 60, "constructed": true, "decks": decks}).to_string()
-    };
-    let want = "Cavern of Souls' floating mana needs layout v7 (ENGINE.md 124.2)";
-    for s in [spec(&with_cavern, &delver, None), spec(&delver, &with_cavern, None), spec(&delver, &delver, Some(&["Cavern of Souls"]))] {
-        let e = MtgSpec::parse(&s).unwrap_err();
-        assert!(e.contains(want), "{e}");
-        let e = <MtgAz as SearchGame>::parse_spec(&s).err().expect("refused");
-        assert!(e.contains(want), "{e}");
-    }
-    assert!(<MtgAz as SearchGame>::parse_spec(&spec(&delver, &delver, None)).is_ok());
-    let gap = engine::public_state::limits().into_iter().find(|l| l.name == engine::public_state::CHOSEN_TYPE_MANA_GAP).expect("the gate's entry");
-    assert!(gap.kind == engine::public_state::LimitKind::NextLayout && gap.why.contains(want) && gap.why.contains("cavern_decks_are_refused_to_networks_on_layout_v6"));
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.
@@ -2098,13 +2099,13 @@ fn to_choice(g: &mut engine::Game, k: engine::DecisionKind) {
 #[test]
 fn the_v5_facts_encode_no_hidden_information() {
     use encode::{bag, g5, O_BAGS, O_GLOBALS_V5};
-    use engine::public_state::{perturbations, V5_FIXED, V6_FIXED};
+    use engine::public_state::{perturbations, V5_FIXED, V6_FIXED, V7_FIXED};
     use engine::testkit::Scenario;
     use engine::{Choice, DecisionKind, Step, Zone};
     let ps = perturbations();
-    // (and layout v6's, ENGINE.md 100.5)
-    let fixed: Vec<_> = ps.iter().filter(|p| V5_FIXED.contains(&p.name) || V6_FIXED.contains(&p.name)).collect();
-    assert_eq!(fixed.len(), V5_FIXED.len() + V6_FIXED.len());
+    // (and layout v6's, ENGINE.md 100.5, and v7's, 124.2)
+    let fixed: Vec<_> = ps.iter().filter(|p| V5_FIXED.contains(&p.name) || V6_FIXED.contains(&p.name) || V7_FIXED.contains(&p.name)).collect();
+    assert_eq!(fixed.len(), V5_FIXED.len() + V6_FIXED.len() + V7_FIXED.len());
     // (A stream of its own for each perturbation, as the gate's: ENGINE.md
     // 100.5.1.)
     let fnv = |name: &str| name.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));

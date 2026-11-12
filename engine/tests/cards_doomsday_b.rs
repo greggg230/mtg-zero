@@ -1222,3 +1222,82 @@ fn the_chosen_creature_type_is_encoded_on_the_permanent() {
     }
 }
 
+// ---- Layout v7: the pool's mana of a chosen creature type (ENGINE.md 124.2) ----------
+
+/// Layout v7's block (`g7::*`, after v6's 44,212 features): per player, the
+/// viewer first, the amount / 4 of the pool's mana of a chosen creature type
+/// by colour and type, exact with any number of types at once (here three
+/// types and a source that chose none in one pool, one type in the other);
+/// nothing else of the block is set, and the encoding's first 44,212 floats
+/// are the same as without the restriction's types (a pool's amounts are
+/// layout v4's, its restricted kinds of other kinds v6's).
+#[test]
+fn layout_v7_encodes_each_chosen_types_floating_mana_exactly() {
+    use engine::az::encode::{g7, squash, NUM_FEATURES, NUM_FEATURES_V6, O_GLOBALS_V7};
+    use engine::doomsday_b::with_type;
+    use engine::db::MANA_UNCOUNTERABLE;
+    let ty = |n: &str| with_type(MANA_UNCOUNTERABLE, Some(type_index(n)));
+    let g = scen()
+        .pool_restricted(0, mana::U, ty("Merfolk"), 2)
+        .pool_restricted(0, mana::U, ty("Human"), 1)
+        .pool_restricted(0, mana::G, ty("Merfolk"), 3)
+        .pool_restricted(0, mana::B, with_type(MANA_UNCOUNTERABLE, None), 1)
+        .pool_restricted(1, mana::R, ty("Wizard"), 5)
+        .at(Step::Main1, 0)
+        .start();
+    let at = |side: usize, colour: usize, t: usize| O_GLOBALS_V7 + g7::PLAYER * side + g7::TYPES * colour + t;
+    for viewer in 0..2u8 {
+        let mut x = vec![0.0; NUM_FEATURES];
+        g.encode_features(viewer, &mut x);
+        let (me, them) = if viewer == 0 { (0, 1) } else { (1, 0) };
+        let want = [
+            (at(me, mana::U, type_index("Merfolk") as usize), squash(2.0 / 4.0)),
+            (at(me, mana::U, type_index("Human") as usize), squash(1.0 / 4.0)),
+            (at(me, mana::G, type_index("Merfolk") as usize), squash(3.0 / 4.0)),
+            (at(me, mana::B, g7::NO_TYPE), squash(1.0 / 4.0)),
+            (at(them, mana::R, type_index("Wizard") as usize), squash(5.0 / 4.0)),
+        ];
+        let set: Vec<usize> = (O_GLOBALS_V7..NUM_FEATURES).filter(|&i| x[i] != 0.0).collect();
+        let mut idx: Vec<usize> = want.iter().map(|w| w.0).collect();
+        idx.sort_unstable();
+        assert_eq!(set, idx, "viewer {viewer}");
+        for (i, v) in want {
+            assert_eq!(x[i], v, "viewer {viewer}: feature {i}");
+        }
+        // The same pool with other types: only the block differs.
+        let h = scen()
+            .pool_restricted(0, mana::U, ty("Dragon"), 2)
+            .pool_restricted(0, mana::U, ty("Zombie"), 1)
+            .pool_restricted(0, mana::G, ty("Dragon"), 3)
+            .pool_restricted(0, mana::B, ty("Elf"), 1)
+            .pool_restricted(1, mana::R, ty("Goblin"), 5)
+            .at(Step::Main1, 0)
+            .start();
+        let mut y = vec![0.0; NUM_FEATURES];
+        h.encode_features(viewer, &mut y);
+        assert!(x[..NUM_FEATURES_V6] == y[..NUM_FEATURES_V6], "viewer {viewer}: v6's floats don't hold the types");
+        assert!(x[NUM_FEATURES_V6..] != y[NUM_FEATURES_V6..], "viewer {viewer}: v7's block does");
+    }
+}
+
+/// Two different types floating (Cavern of Souls played, its mana floated,
+/// a second Cavern, an Island to tap... here: two pools that differ only in
+/// which of two types each mana has) encode differently: the block is exact
+/// where a summary ("several types") would not be (ENGINE.md 124.2, the
+/// maintainer's decision).
+#[test]
+fn layout_v7_tells_two_types_floating_apart() {
+    use engine::az::encode::NUM_FEATURES;
+    use engine::doomsday_b::with_type;
+    use engine::db::MANA_UNCOUNTERABLE;
+    let ty = |n: &str| with_type(MANA_UNCOUNTERABLE, Some(type_index(n)));
+    let a = scen().pool_restricted(0, mana::U, ty("Merfolk"), 1).pool_restricted(0, mana::B, ty("Zombie"), 1).at(Step::Main1, 0).start();
+    let b = scen().pool_restricted(0, mana::U, ty("Zombie"), 1).pool_restricted(0, mana::B, ty("Merfolk"), 1).at(Step::Main1, 0).start();
+    for v in 0..2u8 {
+        let (mut x, mut y) = (vec![0.0; NUM_FEATURES], vec![0.0; NUM_FEATURES]);
+        a.encode_features(v, &mut x);
+        b.encode_features(v, &mut y);
+        assert!(x != y, "viewer {v}");
+        assert_eq!(a.view_of(v) == b.view_of(v), false, "public state: viewer {v}");
+    }
+}

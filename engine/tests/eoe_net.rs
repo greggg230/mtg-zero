@@ -138,7 +138,8 @@ fn eoe_layout_json_is_checked_in() {
     let mut v: serde_json::Value = serde_json::from_str(&want).unwrap();
     assert_eq!(v["name"], "eoe");
     assert_eq!(v["version"], 6);
-    assert_eq!(v["features"], NUM_FEATURES);
+    // (Layout v6: the `mtg` game's v7 block is the cube's and constructed play's, ENGINE.md 124.2.)
+    assert_eq!(v["features"], encode::NUM_FEATURES_V6);
     let cards = v["cards"].as_array().unwrap().clone();
     assert_eq!(cards.len(), D);
     for (k, n) in identity::eoe_registry().iter().enumerate() {
@@ -147,7 +148,9 @@ fn eoe_layout_json_is_checked_in() {
         }
     }
     assert!(cards[UNKNOWN as usize].is_null());
-    let mut cube: serde_json::Value = serde_json::from_str(&encode::layout_json(CardDb::cube())).unwrap();
+    // (Layout v6 as checked in: since ENGINE.md 124.2 the cube's own layout is v7.)
+    let v6 = std::fs::read_to_string(manifest().join("../mtgz/az/layout_v6.json")).unwrap();
+    let mut cube: serde_json::Value = serde_json::from_str(&v6).unwrap();
     assert!(cube.get("name").is_none(), "the cube's layout has no name (its checkpoints carry none)");
     for x in [&mut v, &mut cube] {
         let o = x.as_object_mut().unwrap();
@@ -186,7 +189,10 @@ fn slot_identities(layout: &serde_json::Value, x: &[f32]) -> Vec<usize> {
 #[test]
 fn mtg_eoe_is_mtg_on_the_eoe_table() {
     assert_eq!(<MtgEoeAz as SearchGame>::NAME, "mtg_eoe");
-    assert_eq!(<MtgEoeAz as SearchGame>::NUM_FEATURES, <MtgAz as SearchGame>::NUM_FEATURES);
+    // (`mtg_eoe` keeps layout v6; `mtg` is layout v7, whose appended block the EoE table's mana
+    // can't fill: ENGINE.md 124.2.)
+    assert_eq!(<MtgEoeAz as SearchGame>::NUM_FEATURES, encode::NUM_FEATURES_V6);
+    assert_eq!(<MtgAz as SearchGame>::NUM_FEATURES, NUM_FEATURES);
     assert_eq!(<MtgEoeAz as SearchGame>::NUM_ACTIONS, <MtgAz as SearchGame>::NUM_ACTIONS);
     assert_eq!(<MtgEoeAz as SearchGame>::AUX, <MtgAz as SearchGame>::AUX);
     assert_eq!(<MtgEoeAz as SearchGame>::bot_names(), <MtgAz as SearchGame>::bot_names());
@@ -217,10 +223,11 @@ fn mtg_eoe_is_mtg_on_the_eoe_table() {
             b.legal_actions(&mut lb);
             assert_eq!(la, lb);
             for v in 0..2 {
-                let (mut xa, mut xb) = (vec![0.0; NUM_FEATURES], vec![0.0; NUM_FEATURES]);
+                let (mut xa, mut xb) = (vec![0.0; NUM_FEATURES], vec![0.0; encode::NUM_FEATURES_V6]);
                 a.encode(v, &mut xa);
                 b.encode(v, &mut xb);
-                assert!(xa == xb, "seed {seed}: the encodings differ");
+                assert!(xa[..encode::NUM_FEATURES_V6] == xb[..], "seed {seed}: the encodings differ");
+                assert!(xa[encode::NUM_FEATURES_V6..].iter().all(|&f| f == 0.0), "seed {seed}: layout v7's block on the EoE table");
                 for r in 0..BAGS {
                     assert_eq!(xa[O_BAGS + r * D + UNKNOWN as usize], 0.0, "bag {r} counts UNKNOWN");
                 }

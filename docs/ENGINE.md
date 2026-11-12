@@ -25853,6 +25853,45 @@ registry too: 551 supported, none untested.
 * No docs/shortcuts.md entry; no approximation. Spare floats: permanent status 133-141 taken (142-143
   spare); the g6 per-player spares 8-31 stay spare.
 
+#### Layout v7 (branch `doomsday-b-v7`, on `doomsday-b`: a draft, to be folded into the next layout)
+
+The exact encoding of Cavern's floating mana (the maintainer's decision, 2026-11-11; the user's: it
+lands later, as part of one larger layout, and run launches refuse it until then). On this branch the
+guard above is gone (v7 encodes the mana) and:
+
+| Block | Offset | Floats | What |
+|---|---:|---:|---|
+| `globals_v7` (`g7::*`) | 44,212 (`O_GLOBALS_V7`) | 3,680 | per player, the frame's first (1,840 each): the amount / 4 (squashed) of the pool's mana that may be spent only to cast a creature spell of a chosen type, at `368 c + t`: colour c (W U B R G) and type t (`CREATURE_TYPES_CR` index; 367: its source chose none) |
+
+* Every other feature is v6's at its v6 index (`encode::v6_projection`, the identity on the first
+  44,212): layout v7 is 47,892 features (`NUM_FEATURES`; `NUM_FEATURES_V6` = 44,212).
+  `mtgz/az/layout_v7.json` (`mtgz.az.LAYOUT`); layout_v6/v5/v4.json stay for the widen.
+* **Only the `mtg` game.** `mtg_eoe` keeps layout v6: its `NUM_FEATURES` is `NUM_FEATURES_V6`;
+  `encode_features` writes v7's block only into a v7-sized buffer and refuses a v6 one for a table whose
+  mana can have a chosen type (the EoE table's can't: the block would be zero, so it is exact);
+  `layout_eoe.json` byte for byte as it was. The deck reader's declaration (`deck_reader_v6.json`) stays
+  in v6's features (the same ranges in v7).
+* **Widen.** zero-core's `net.widen` maps global blocks by name and gives new globals zero weights: a v6
+  network widens onto v7 exactly (`tests/test_mtg_az.py::test_an_older_token_network_widens_onto_layout_v7_exactly`,
+  v4, v5 and v6 networks, the new floats randomised; `tests/az.rs::layout_v7_widens_layout_v6_exactly`:
+  the widen's map is `v6_projection`, and layout_v7.json minus the block, its version and its feature
+  count is layout_v6.json). The encoding guard refuses an unwidened v6 network (44,212 -> 47,892
+  features; `test_the_encoding_guard_refuses_an_older_network_and_takes_a_v7_one`). No zero-core change.
+* **Public state.** The gap closes: "mana in a pool is restricted to creature spells of a chosen type"
+  is encoded (`public_state::V7_FIXED`), read back by hand for both viewers
+  (`cards_doomsday_b.rs::layout_v7_encodes_each_chosen_types_floating_mana_exactly`: three types and
+  "none" in one pool, one in the other, v6's floats the same with other types;
+  `layout_v7_tells_two_types_floating_apart`); the gate asserts no next-layout gap again.
+* **Digests** (measured on the branch's first version, 28f6c07 and its test fixes, whose rules are
+  `doomsday-b`'s): `DIGEST_ENCODING=v6` (new: the first 44,212 floats) **53839c837bbaf034** = main's full
+  digest, all 2,500 games `tests/data/digests.txt` line for line; `=0` 208c723daced22fe and `=v5`
+  dc33538c0497dbf0, main's; full (v7) 53839c837bbaf034 -> **fbdb70feea802b9c**, not recorded.
+  `FUZZ_POOL=dd_b FUZZ_GAMES=20000` passed there too (4 shards; 20,000 games, wins 9,533 / 9,772, 695
+  drawn; Misdirection cast 17,233 times, Flusterstorm 10,048, 35,103 Caverns' types chosen, 259
+  uncounterable creature spells), and `FUZZ_POOL=delver FUZZ_GAMES=4000`.
+* Not done here (the draft): the run-launch refusal of a draft layout, `build_py.sh` and pytest on this
+  branch.
+
 ### 124.3 Lane C: Edge of Autumn, Street Wraith, Leyline of the Void (branch `doomsday-c`, mtg-bot `feature/doomsday-c-ir`)
 
 **Why.** Lane C of the Legacy Doomsday cards (MTGGoldfish archetype "Legacy Doomsday", paper,

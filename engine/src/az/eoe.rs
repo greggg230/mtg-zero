@@ -59,7 +59,9 @@ impl SearchGame for MtgEoeAz {
     type Spec = MtgSpec;
     const NAME: &'static str = "mtg_eoe";
     const NUM_ACTIONS: usize = <MtgAz as SearchGame>::NUM_ACTIONS;
-    const NUM_FEATURES: usize = <MtgAz as SearchGame>::NUM_FEATURES;
+    // (Layout v6: the EoE table's mana can't fill layout v7's block,
+    // ENGINE.md 124.2.)
+    const NUM_FEATURES: usize = super::encode::NUM_FEATURES_V6;
     const MIN_PLAYERS: usize = <MtgAz as SearchGame>::MIN_PLAYERS;
     const MAX_PLAYERS: usize = <MtgAz as SearchGame>::MAX_PLAYERS;
     const AUX: &'static [(&'static str, usize)] = <MtgAz as SearchGame>::AUX;

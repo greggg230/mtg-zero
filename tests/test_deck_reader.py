@@ -16,7 +16,9 @@ def test_the_package_declares_the_deck_target():
 
 def test_the_declared_inputs_are_bags_and_globals_of_layout_v6():
     d = R.declaration()
-    assert d['target'] == 'deck' and d['layout'] == 6 and d['features'] == G.info('mtg')['num_features']
+    # (layout v6's features: mtg_eoe's encoding, and the first features of mtg's layout v7, ENGINE.md 124.2)
+    assert d['target'] == 'deck' and d['layout'] == 6 and d['features'] == G.info('mtg_eoe')['num_features']
+    assert d['features'] < G.info('mtg')['num_features']
     end = 0
     for o, n in d['inputs']:
         assert n > 0 and o >= end

@@ -39,14 +39,19 @@ def test_mtg_eoe_is_registered_with_its_layout_and_targets():
     E = G.engine()
     assert 'mtg_eoe' in E.game_names()
     a, b = G.info('mtg'), G.info('mtg_eoe')
-    for k in ('num_features', 'num_actions', 'min_players', 'max_players', 'bots', 'aux_layout'):
+    for k in ('num_actions', 'min_players', 'max_players', 'bots', 'aux_layout'):
         assert a[k] == b[k], k
+    # mtg_eoe keeps layout v6; mtg's layout v7 appends a block the EoE table's mana can't fill (ENGINE.md 124.2)
+    assert (a['num_features'], b['num_features']) == (47892, 44212)
     assert P.PACKAGE.aux_of('mtg_eoe') == P.PACKAGE.aux_of('mtg')
     lay = P.PACKAGE.tokens_of('mtg_eoe')
     assert lay is P.LAYOUT_EOE and lay['name'] == 'eoe' and lay['version'] == 6
     # layout v6 but its name and card names
     strip = lambda d: {k: v for k, v in d.items() if k not in ('name', 'cards')}  # noqa: E731
-    assert strip(lay) == strip(P.LAYOUT) and 'name' not in P.LAYOUT
+    import os
+    with open(os.path.join(os.path.dirname(P.__file__), 'layout_v6.json'), encoding='utf-8') as f:
+        v6 = json.load(f)
+    assert strip(lay) == strip(v6) and 'name' not in P.LAYOUT and P.LAYOUT['version'] == 7
     assert lay['cards'][:3] == ['Anticausal Vestige', 'Tezzeret, Cruel Captain', 'All-Fates Stalker']
     assert P.PACKAGE.spec_of('mtg_eoe') == SPEC and json.loads(SPEC)['sealed']['collation'] == 'arena'
     assert json.loads(P.PACKAGE.eval_spec_of('mtg_eoe', SPEC))['decks'] == 'eval'

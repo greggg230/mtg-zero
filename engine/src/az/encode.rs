@@ -1,6 +1,10 @@
 //! The network input of the `mtg` game (ENGINE.md 21.2, 22.2, 24): a fixed-width
-//! f32 vector for a viewer, with no hidden information. **Layout v6**
-//! ([`NUM_FEATURES`] = 44,212 floats; ENGINE.md 100.5, 100.5.1) is layout v5 (37,620
+//! f32 vector for a viewer, with no hidden information. **Layout v7**
+//! ([`NUM_FEATURES`] = 47,892 floats; ENGINE.md 124.2) is layout v6 with one block
+//! of globals appended (`globals_v7`, [`g7`]: the pool's mana of a chosen
+//! creature type), so a v6 network widens onto it exactly ([`v6_projection`]);
+//! the `mtg_eoe` game keeps layout v6 ([`NUM_FEATURES_V6`]). **Layout v6**
+//! ([`NUM_FEATURES_V6`] = 44,212 floats; ENGINE.md 100.5, 100.5.1) is layout v5 (37,620
 //! floats, ENGINE.md 60) with additions only, as v5 was v4's, so that a v5
 //! token network widens onto it exactly (zero-core `net.widen` with this
 //! layout; every v5 float keeps its meaning, [`v5_projection`]): four more
@@ -27,6 +31,7 @@
 //! | match | 32 | v4 (M8b, ENGINE.md 36.7; globals): the format, the game number, both players' game wins, draws, each game's result and who played first, sideboarding now and its order, deck sizes (`mtch::*`); 58.8: spells cast this turn, energy |
 //! | globals v5 | 64 | **v5** (`g5::*`; globals): per player (viewer first, 24 each) cards drawn this turn and in the draw step, noncreature spells this turn, gained life this turn, can't gain life, creatures that attacked this turn, spells cast this game, Yawgmoth's Will, graveyard exile this turn, the city's blessing, protection from everything, the pool's artifact-only and haste mana, delayed triggers waiting, exiled cards they may play, cards discarded this turn, ENGINE.md 72: which of their library's top three cards they know and which the other player knows (2 spare); the last normal turn's player, additional combat phases (14 spare, never set) |
 //! | globals v6 | 320 | **v6** (`g6::*`; globals): per player (viewer first, 128 each) an artifact entered under their control this turn, life gained this turn, their phased-out permanents and those phased out indirectly, their next turn controlled by the other player, controlled this turn; **100.5.1**: lands entered this turn, tokens created this turn (24 spare), their pool's restricted mana by type and kind (96); the game's 64: void, where the turn goes on after its combat phases; **100.5.1**: the card whose ability copies keep (27 spare) |
+//! | globals v7 | 3,680 | **v7** (`g7::*`; globals; ENGINE.md 124.2): per player (viewer first, 1,840 each) the pool's mana that may be spent only to cast a creature spell of a chosen type (Cavern of Souls), by colour (W U B R G) and type (the 367 of CR 205.3m, then "no type chosen") |
 //!
 //! **The frame** (ENGINE.md 100.5, CR 722): "me" is the viewer, except
 //! when the viewer decides a decision of the other player (it controls them
@@ -156,8 +161,18 @@ pub const O_COMP: usize = O_GYA + GYAS * GYA_W;
 pub const O_MATCH: usize = O_COMP + COMPS * COMP_W;
 pub const O_GLOBALS_V5: usize = O_MATCH + MATCH;
 pub const O_GLOBALS_V6: usize = O_GLOBALS_V5 + GLOBALS_V5;
-pub const NUM_FEATURES: usize = O_GLOBALS_V6 + GLOBALS_V6;
-const _: () = assert!(NUM_FEATURES == 44_212);
+/// Layout v6's features (ENGINE.md 100.5): the `mtg_eoe` game's encoding
+/// (`layout_eoe.json`), and the first features of layout v7 (`v6_projection`).
+pub const NUM_FEATURES_V6: usize = O_GLOBALS_V6 + GLOBALS_V6;
+/// Layout v7 (ENGINE.md 124.2): the fourth block of globals (`g7::*`), after
+/// v6's: per player (viewer first) the pool's mana that may be spent only to
+/// cast a creature spell of a chosen type, by colour and type.
+pub const GLOBALS_V7: usize = 2 * g7::PLAYER;
+pub const O_GLOBALS_V7: usize = NUM_FEATURES_V6;
+/// Layout v7's features: the `mtg` game's encoding (the cube's, constructed
+/// play's: `layout_v7.json`).
+pub const NUM_FEATURES: usize = O_GLOBALS_V7 + GLOBALS_V7;
+const _: () = assert!(NUM_FEATURES_V6 == 44_212 && NUM_FEATURES == 47_892);
 
 /// Layout v5 (ENGINE.md 60, `mtgz/az/layout_v5.json`), as far as the
 /// widening to v6 needs it: its features, its bags and the widths of the
@@ -284,6 +299,17 @@ pub fn v5_projection() -> Vec<usize> {
             (v5::O_GLOBALS_V5, O_GLOBALS_V5, 1, GLOBALS_V5, GLOBALS_V5),
         ],
     )
+}
+
+/// Where each layout v6 feature is in layout v7 (ENGINE.md 124.2): the same
+/// index (v7 appends one block of globals after v6's last feature), so the
+/// v7 encoding's first [`NUM_FEATURES_V6`] floats ARE the v6 encoding
+/// (`DIGEST_ENCODING=v6` hashes them: layout v6's recorded full digest while
+/// no game plays differently), and zero-core's `net.widen` with
+/// `layout_v7.json` maps a v6 network's input columns the same way
+/// (`layout_v7_widens_layout_v6_exactly`).
+pub fn v6_projection() -> Vec<usize> {
+    (0..NUM_FEATURES_V6).collect()
 }
 
 /// Where each layout v4 feature is in layout v6: [`v4_to_v5`] then
@@ -875,6 +901,25 @@ pub mod g6 {
 }
 const _: () = assert!(g6::PLAYER_END <= g6::PLAYER && g6::GAME_END <= GLOBALS_V6);
 
+/// Offsets inside the globals of layout v7 (ENGINE.md 124.2; the block at
+/// [`O_GLOBALS_V7`], after v6's): per player, viewer first
+/// (`g7[PLAYER * side + ..]`), their pool's mana that may be spent only to
+/// cast a creature spell of a chosen type (CR 106.6: Cavern of Souls, whose
+/// mana also says "that spell can't be countered"; the lowering takes the
+/// restriction only on one mana of any colour with that rider): the amount /
+/// 4 (squashed) of colour c (W U B R G) and type t at `TYPES * c + t`, t the
+/// `doomsday_b::CREATURE_TYPES_CR` index, `NO_TYPE` (367) for mana whose
+/// source chose no type. Exact: any number of types at once (a Cavern that
+/// leaves and enters again chooses again, CR 400.7, 614.12, and the mana
+/// stays until the step ends, 106.4).
+pub mod g7 {
+    pub const TYPES: usize = crate::doomsday_b::CREATURE_TYPES_CR.len() + 1;
+    pub const NO_TYPE: usize = TYPES - 1;
+    pub const COLOURS: usize = 5;
+    pub const PLAYER: usize = COLOURS * TYPES;
+}
+const _: () = assert!(g7::PLAYER == 1_840);
+
 /// The binary digits of a chosen creature type (`perm::CHOSEN_CREATURE_TYPE`;
 /// ENGINE.md 124.2): 367 types + none < 2^9.
 pub const TYPE_BITS: usize = 9;
@@ -1236,8 +1281,12 @@ impl Game {
     /// [`NUM_FEATURES`] floats, zeroed by the caller. Framed in
     /// [`encoding_seat`](Self::encoding_seat)'s seat ("me" below), with
     /// `viewer`'s knowledge (`knower`).
+    /// (`mtg_eoe`'s encoding is layout v6's, [`NUM_FEATURES_V6`] floats:
+    /// without v7's block, which the EoE table's mana can't fill.)
     pub fn encode_features(&self, viewer: PlayerId, out: &mut [f32]) {
-        assert_eq!(out.len(), NUM_FEATURES);
+        let v7 = out.len() == NUM_FEATURES;
+        assert!(v7 || out.len() == NUM_FEATURES_V6, "an encoding of {} floats", out.len());
+        assert!(v7 || self.db.spend_kinds & crate::db::SPEND_CHOSEN_CREATURE_TYPE == 0, "a layout v6 encoding of a table with mana of a chosen creature type");
         let ids = identity::identities(self.db);
         let knower = viewer;
         let me = self.encoding_seat(viewer);
@@ -1253,6 +1302,9 @@ impl Game {
         self.encode_globals(me, knower, &mut out[O_GLOBALS..O_GLOBALS + GLOBALS]);
         self.encode_globals_v5(me, &mut out[O_GLOBALS_V5..O_GLOBALS_V5 + GLOBALS_V5]);
         self.encode_globals_v6(me, ids, &mut out[O_GLOBALS_V6..O_GLOBALS_V6 + GLOBALS_V6]);
+        if v7 {
+            self.encode_globals_v7(me, &mut out[O_GLOBALS_V7..O_GLOBALS_V7 + GLOBALS_V7]);
+        }
         self.encode_bags(me, knower, ids, out);
         // Tops of the libraries.
         for (side, p) in [me, op_].into_iter().enumerate() {
@@ -2011,6 +2063,29 @@ impl Game {
         }
     }
 
+    /// The globals of layout v7 (ENGINE.md 124.2, `g7::*`).
+    fn encode_globals_v7(&self, me: PlayerId, g: &mut [f32]) {
+        if self.pool_restr.is_empty() {
+            return;
+        }
+        for (side, p) in [me, opp(me)].into_iter().enumerate() {
+            let o = &mut g[g7::PLAYER * side..g7::PLAYER * (side + 1)];
+            let mut n = [0u32; g7::PLAYER];
+            for &(q, ty, only, k) in &self.pool_restr {
+                if q == p && only & crate::db::SPEND_CHOSEN_CREATURE_TYPE != 0 {
+                    assert!((ty as usize) < g7::COLOURS, "mana of a chosen creature type is coloured (the lowering)");
+                    let t = crate::doomsday_b::type_of(only).map_or(g7::NO_TYPE, |t| t as usize);
+                    n[g7::TYPES * ty as usize + t] += k as u32;
+                }
+            }
+            for (x, &k) in o.iter_mut().zip(n.iter()) {
+                if k > 0 {
+                    *x = squash(k as f32 / 4.0);
+                }
+            }
+        }
+    }
+
     /// The globals of layout v6 (ENGINE.md 100.5, `g6::*`).
     fn encode_globals_v6(&self, me: PlayerId, ids: &[u16], g: &mut [f32]) {
         let t = &self.turn;
@@ -2033,9 +2108,8 @@ impl Game {
                 let mut kinds = [0u32; g6::POOL_KINDS_N];
                 for &(q, ty, only, n) in &self.pool_restr {
                     // (Mana restricted to creature spells of a chosen type,
-                    // CR 106.6, Cavern of Souls: layout v7's, not v6's; a game
-                    // whose decks hold a card that makes it is refused to
-                    // networks on this layout, `MtgSpec`: ENGINE.md 124.2.)
+                    // CR 106.6, Cavern of Souls: layout v7's block,
+                    // `encode_globals_v7`, not v6's kinds: ENGINE.md 124.2.)
                     if q == p && only & crate::db::SPEND_CHOSEN_CREATURE_TYPE == 0 {
                         kinds[16 * ty as usize + pool_kind(only)] += n as u32;
                     }
@@ -2625,7 +2699,7 @@ fn candidates(a: &super::MtgAz, me: PlayerId, op_: PlayerId, b: usize, ids: &[u1
 /// list block. The game blocks are empty (the last game is over). The
 /// other player's deck being built is not shown (a simultaneous choice).
 pub fn encode_sideboarding(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
-    assert_eq!(out.len(), NUM_FEATURES);
+    assert!(out.len() == NUM_FEATURES || out.len() == NUM_FEATURES_V6);
     encode_match(a, viewer, out);
     let sb = a.sideboarding().expect("sideboarding");
     let db = a.g.db();
@@ -2674,7 +2748,7 @@ pub fn encode_sideboarding(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) 
 /// the candidates are not shown (the choice is a value choice, valued by the decks' games, never
 /// recorded: zero-core docs/search.md 3.17).
 pub fn encode_deck_choice(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
-    assert_eq!(out.len(), NUM_FEATURES);
+    assert!(out.len() == NUM_FEATURES || out.len() == NUM_FEATURES_V6);
     encode_match(a, viewer, out);
     let c = a.deck_choice().expect("a deck choice");
     let d = &c.decision;
@@ -2713,12 +2787,14 @@ pub fn deck_reader_inputs() -> Vec<(&'static str, usize, usize)> {
 
 /// `deck_reader_inputs` as JSON (checked in as `mtgz/az/deck_reader_v6.json`, a test keeps the
 /// two equal): `{"target": "deck", "layout": 6, "inputs": [[offset, count], ...], "names": [...]}`.
+/// In layout v6's features: the same ranges in layout v7 (`mtg`, which appends one block after
+/// them, ENGINE.md 124.2) and v6 (`mtg_eoe`).
 pub fn deck_reader_json() -> String {
     let ins = deck_reader_inputs();
     let v = serde_json::json!({
         "target": "deck",
         "layout": 6,
-        "features": NUM_FEATURES,
+        "features": NUM_FEATURES_V6,
         "inputs": ins.iter().map(|&(_, o, n)| [o, n]).collect::<Vec<_>>(),
         "names": ins.iter().map(|&(name, _, _)| name).collect::<Vec<_>>(),
     });
@@ -2751,9 +2827,11 @@ pub fn layout_json(db: &'static CardDb) -> String {
             cards[i as usize] = Some(db.def(def as DefId).name.clone());
         }
     }
-    let v = json!({
-        "version": 6,
-        "features": NUM_FEATURES,
+    // (The EoE table's game, `mtg_eoe`, keeps layout v6: ENGINE.md 124.2.)
+    let eoe = identity::space_of(db) == identity::Space::Eoe;
+    let mut v = json!({
+        "version": if eoe { 6 } else { 7 },
+        "features": if eoe { NUM_FEATURES_V6 } else { NUM_FEATURES },
         "vocab": D,
         "segments": [
             {"name": "context", "offset": O_CONTEXT, "count": 1, "width": CONTEXT, "present": null,
@@ -2785,10 +2863,13 @@ pub fn layout_json(db: &'static CardDb) -> String {
                     {"name": "globals_v6", "offset": O_GLOBALS_V6, "count": GLOBALS_V6}],
         "cards": cards,
     });
+    // Layout v7 (ENGINE.md 124.2): its block of globals after v6's.
+    if !eoe {
+        v["globals"].as_array_mut().unwrap().push(json!({"name": "globals_v7", "offset": O_GLOBALS_V7, "count": GLOBALS_V7}));
+    }
     // The EoE table's identity space (ENGINE.md 105): the same layout under the name `eoe`, so
     // zero-core's guard tells an EoE network from a cube one (the cube's layout has no name).
-    let mut v = v;
-    if identity::space_of(db) == identity::Space::Eoe {
+    if eoe {
         v["name"] = json!("eoe");
     }
     serde_json::to_string_pretty(&v).unwrap() + "\n"
@@ -3183,6 +3264,17 @@ mod tests {
             assert_eq!(hit[i], !new[i], "feature {i}");
         }
         assert_eq!(new.iter().filter(|&&x| x).count(), NUM_FEATURES - v5::NUM_FEATURES);
-        assert_eq!(NUM_FEATURES - v5::NUM_FEATURES, 4 * D + 2 * PERMS * PERM_V6 + STACKS * STACK_V6 + GLOBALS_V6);
+        // (layout v7's block too: ENGINE.md 124.2)
+        assert_eq!(NUM_FEATURES - v5::NUM_FEATURES, 4 * D + 2 * PERMS * PERM_V6 + STACKS * STACK_V6 + GLOBALS_V6 + GLOBALS_V7);
+    }
+
+    /// Every layout v6 feature is the same v7 feature, and the v7 floats
+    /// nothing maps to are exactly v7's block (ENGINE.md 124.2).
+    #[test]
+    fn the_v6_projection_leaves_exactly_the_v7_block() {
+        let p = v6_projection();
+        assert_eq!(p.len(), NUM_FEATURES_V6);
+        assert!(p.iter().enumerate().all(|(i, &j)| i == j));
+        assert_eq!((O_GLOBALS_V7, GLOBALS_V7, NUM_FEATURES), (NUM_FEATURES_V6, 3_680, NUM_FEATURES_V6 + 3_680));
     }
 }
