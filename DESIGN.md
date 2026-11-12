@@ -848,9 +848,18 @@ network that played it) adds nothing over results, so evaluator v0 trains on res
 17lands' game-in-hand rates, a yardstick); the picker `python -m mtgz.sealed.compare evalpick` races the evaluators' picks
 against the value pick and random builds (dry-run on CPU; the GPU race waits for run 1's end).
 
+**S4a v2 (2026-11-11, branch `eval-v2`; ENGINE.md 111):** a pairwise kind, P(deck A beats deck B) from both decks (a
+Bradley-Terry strength plus a skew-symmetric matchup term between deck embeddings, antisymmetric by construction),
+trained on the logged pairings; it scores a deck against any named field (default: a stored sample of its newest
+training decks) at about one embedding per candidate; recency weighting (`--half-life`, `--from-iter`); a torch-free
+JSON export with a numpy reference scorer for the Rust port. On run 1's last 9 iterations: the pair model predicts a
+game at log loss 0.663 (deck-only kinds 0.678), and against its field judges a deck as well as the linear model; the
+matchup term adds nothing measurable; a half-life of 40 iterations (validation's pick) gains ~0.0005 for linear and
+pair, nothing for the set network. All opt-in; v1's evaluators score unchanged.
+
 **Run 2's deck choice by the evaluator (2026-11-11, branch `deck-choice-eval`; ENGINE.md 112):** the sealed spec's
 `"deck_choice": {..., "by": "evaluator", "evaluator": <file>}` - each seat scores its own pool's K candidates with the
-exported deck evaluator (a Rust scorer reading `mtgz.sealed.scorer`'s JSON, equal to torch within 4e-8) and plays the best,
+exported deck evaluator (a Rust scorer of v2's export, ENGINE.md 111.6: linear, set and pair, equal to its numpy reference) and plays the best,
 no Python in self-play, the hidden decklists' prior of a choosing seat choosing the same way; the run retrains the evaluator
 every N iterations in a CPU background job on its newest games and switches versions (immutable files named by sha256, every
 chosen deck logged with its version) between iterations (zero-core's opt-in game-package hooks, `feat/selfplay-spec-hook`);

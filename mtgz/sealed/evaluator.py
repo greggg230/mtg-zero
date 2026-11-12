@@ -21,12 +21,31 @@ games (`mtgz.sealed.games`), with the play network's pre-game value as a low-noi
 * **The models** (`DeckNet`, `fit`): a constant; a logistic regression on deck features (`FEATURES`: lands, curve,
   creatures, colours, splash; with or without the builder's mode); a linear card-value model (L2 logistic regression on
   card counts plus the deck features: its coefficients are card ranking v0); a set network (DeepSets over card
-  embeddings, a per-card linear term and a pairwise term, card vectors interacting by dot product). Every model sees only
-  its own deck (the deck against the field: decklists are hidden in sealed). The training target is the distillation
-  mix y = (1 - lam) result + lam value under log loss.
+  embeddings, a per-card linear term and a pairwise term, card vectors interacting by dot product). These see only
+  their own deck (the deck against the field the games had: decklists are hidden in sealed). The training target is the
+  distillation mix y = (1 - lam) result + lam value under log loss.
+* **The pairwise model** (`kind 'pair'`, `PairNet`; docs/ENGINE.md 111, opt-in: `--kinds ...,pair`): P(deck A beats
+  deck B) from both decks, trained on the logged games' actual pairings (one row per game, results only):
+  z(A, B) = s(A) - s(B) + e(A)^T W e(B), P = sigmoid(z) - a deck strength s (the linear or set model's terms without
+  the bias, `base`) and a matchup term between the decks' embeddings e(x) = x U / 40 + f(x) P (`dim` dimensions; card
+  counts x, scaled features f) through a skew-symmetric W = M - M^T, so z(B, A) = -z(A, B) exactly (computed as
+  (s(A) - s(B)) + (t(A, B) - t(B, A)), t(A, B) = e(A)^T M e(B)) and P(A beats B) + P(B beats A) = 1. `dim` 0 is
+  Bradley-Terry: the strength alone.
+* **Scoring against a field** (`Evaluator.score(decks, field=None)`): a pair evaluator scores a deck against any named
+  field (a list of decks) as the mean over the field of P(deck beats it) - the exact mean, at the cost of one embedding
+  per candidate plus N (dim + 1) multiply-adds and N sigmoids against the field's precomputed table (`FieldTable`: per
+  member and field deck j, s(B_j) and g_j = W e(B_j); z = s(A) + e(A) . g_j - s(B_j)). Its default field is a stored
+  sample of its training data's most recent self-play decks. The linear and set kinds have no opponent input: they
+  score against the field their training games had, and refuse a named field.
+* **Recency weighting** (`train(half_life=, from_iter=)`, opt-in; default off, today's fits exactly): a training game
+  of iteration i weighs 0.5 ** ((ref - i) / half_life) (ref: the newest training iteration; the iteration in progress
+  weighs 1), and `from_iter` drops the training games of iterations before it. Validation and test are untouched.
 * **The evaluator** (`Evaluator`): a trained ensemble, saved with its card table and feature scaling; `score(decks)`;
   `rank(pool, candidates)` checks the candidates are builds of the pool and scores them (the picker of
   `python -m mtgz.sealed.compare evalpick`).
+* **The export** (`Evaluator.export(path)`, `python -m mtgz.sealed.evaluator export`): a JSON file, no torch, holding
+  everything a scorer needs (EXPORT FORMAT below); `ReferenceScorer` is a pure-numpy scorer of it (the reference for a
+  port: it matches the torch model to 1e-6, tests/test_evaluator.py).
 * **Card ranking v0** (`card_values`): per card, the evaluator's change in win probability when one copy replaces a
   card of a typical deck of its colours, over the ensemble (its spread the uncertainty).
 * **The yardstick** (`seventeen_lands_rates`): 17lands' EoE Premier Sealed per-card game-in-hand win rates. **A
@@ -35,10 +54,44 @@ games (`mtgz.sealed.games`), with the play network's pre-game value as a low-noi
     python -m mtgz.sealed.evaluator values RUN --checkpoint CKPT --out VALUES.npz [--threads 4]
     python -m mtgz.sealed.evaluator values RUN --checkpoint played --models RUN/models --out VALUES.npz
     python -m mtgz.sealed.evaluator train RUN --values VALUES.npz --out DIR [--split time|hash] --judge CKPT
+        [--kinds const,feat,feat+mode,linear,set,pair] [--half-life H] [--from-iter I] [--export]
     python -m mtgz.sealed.evaluator rank --evaluator DIR/evaluator_set.pt --pool-seed 2026 [--k 32]
+    python -m mtgz.sealed.evaluator export --evaluator DIR/evaluator_pair.pt --out DIR/evaluator_pair.json
 
 CPU only by default (`--device cpu`, at most `--threads` torch threads); deterministic from its seeds. Pure self-play:
 the run's own games and networks train it.
+
+EXPORT FORMAT (`"format": "mtgz-deck-evaluator-export"`, `"version": 1`; JSON, every number a float32 value written
+exactly; arrays row-major as nested lists):
+
+* `kind`: "linear", "set" or "pair". `hyper`: the architecture ({} linear; set {d, k, hidden}; pair {base, dim} and,
+  for base "set", d, k, hidden). `meta`: how it was trained (informational).
+* `cards`: the card table in the order of `engine/src/az/eoe_cards.txt` (the EoE identities: card id c = its line,
+  0-based; C = 321 lines): `names` [C]; `in_table` [C] (1: a card of the engine's EoE table; 0: Paradox Haze, never in a
+  deck - a scorer refuses it); per card `land`, `basic`, `creature` (0/1: "Land" / "Creature" in the type line; a basic
+  land: Plains, Island, Swamp, Mountain, Forest), `mv` (mana value) [C]; `colours` [C][5] (0/1 in W U B R G order);
+  `basic_colour` [C][5] (a basic's colour). A deck is x [C]: its count of each card.
+* `features`: `names` [35] (FEATURES), `mean` [35], `std` [35]. The raw features F(x), with spell_c = 1 - land_c:
+    lands = sum x land; nonbasic_lands = sum x land (1 - basic); creatures = sum x creature spell;
+    noncreature_spells = sum x spell - creatures; mv<=1, mv2, mv3, mv4, mv5, mv6+ = sum x spell [mv bin];
+    mean_mv = sum x spell mv / max(sum x spell, 1); per[k] = sum_c x_c spell_c colours[c][k] (spells holding colour k);
+    main = the two colours of largest per (ties to the earlier colour in WUBRG), only those with per > 0;
+    colours = #{k: per[k] > 0}; splash_spells = sum x spell [the card holds a colour outside main];
+    colourless_spells = sum x spell [the card has no colour]; spells_W..G = per; basics_W..G = sum x basic_colour;
+    mono = 1 if main has exactly one colour; pair_WU, WB, WR, WG, UB, UR, UG, BR, BG, RG = 1 if main is that pair.
+  Scaled: f = (F - mean) / std.
+* `members` [M] (the ensemble; a score is the mean of the members' probabilities). Each member:
+    linear: `bias`, `wc` [C], `wf` [35]: z = bias + wc . x + wf . f.
+    set: the linear's, `emb` [C][d], `u` [C][k], `w1` [hidden][d + 35], `b1` [hidden], `w2` [hidden], `b2`:
+      h = (x emb) / 40; a = relu(w1 [h, f] + b1); z = bias + wc . x + wf . f + w2 . a + b2
+      + 0.5 (|x u|^2 - sum_c x_c |u_c|^2) / 40.
+    pair: `strength` (a linear or set member as above, `base`, without `bias`: s(x) = its z with bias 0), `U` [C][dim],
+      `P` [35][dim], `W` [dim][dim] (skew-symmetric; absent terms when dim = 0): e(x) = (x U) / 40 + f P;
+      z(A, B) = s(A) - s(B) + e(A) . (W e(B)).
+  P(win) = sigmoid(z) = 1 / (1 + exp(-z)): linear and set, P(the deck wins against the field its training games had);
+  pair, P(A beats B), and against a field of decks B_1..B_N the mean over members of (1/N) sum_j sigmoid(z(A, B_j))
+  (with g_j = W e(B_j) precomputed once: z = s(A) + e(A) . g_j - s(B_j)).
+* `field` (pair only): the default field, `decks` [N] each a list of [card id, count], and `meta`.
 """
 import argparse
 import functools
@@ -88,6 +141,19 @@ def vocab():
 @functools.lru_cache(None)
 def index():
     return {n: i for i, n in enumerate(vocab())}
+
+
+@functools.lru_cache(None)
+def registry():
+    """The EoE card registry's names in identity order (engine/src/az/eoe_cards.txt: the set's list in set order, one
+    name per line; Paradox Haze has its line and is not in the table): the export's card order."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'engine', 'src',
+                        'az', 'eoe_cards.txt')
+    with open(path, encoding='utf-8') as f:
+        names = tuple(line.rstrip('\r\n') for line in f if line.strip())
+    if not set(vocab()) <= set(names):
+        raise ValueError(f'cards of the table without a line in eoe_cards.txt: {sorted(set(vocab()) - set(names))}')
+    return names
 
 
 @functools.lru_cache(None)
@@ -435,12 +501,17 @@ def _nn():
     return torch
 
 
-def make_net(kind, V, F, d=32, k=8, hidden=64):
+def make_net(kind, V, F, d=32, k=8, hidden=64, base='linear', dim=8):
     """A deck model: 'const' (a bias), 'feat' (logistic on the deck features), 'linear' (logistic on card counts and
     the features: card values), 'set' (the linear terms, DeepSets over card embeddings - their mean over the 40 cards
     with the features through an MLP - and a pairwise term: 0.5 (|sum n_c u_c|^2 - sum n_c |u_c|^2) / 40, every pair of
-    the deck's cards interacting by the dot product of their vectors u)."""
+    the deck's cards interacting by the dot product of their vectors u); 'pair' (`PairNet`: P(A beats B) from both
+    decks; `base` its strength model, 'linear' or 'set', `dim` its matchup embedding's dimensions)."""
     torch = _nn()
+    if kind == 'pair':
+        if base not in ('linear', 'set'):
+            raise ValueError(f'pair base {base!r}: linear or set')
+        return _pair_net(make_net(base, V, F, d, k, hidden), V, F, int(dim))
 
     class DeckNet(torch.nn.Module):
         def __init__(self):
@@ -487,6 +558,62 @@ def make_net(kind, V, F, d=32, k=8, hidden=64):
     return DeckNet()
 
 
+def _pair_net(base, V, F, dim):
+    """The pairwise model (module docs): `base` a 'linear' or 'set' DeckNet giving the strength s(x) (its bias left
+    out: it would cancel in s(A) - s(B)), the matchup embedding e(x) = x U / 40 + f P in R^dim and M [dim, dim], W =
+    M - M^T. forward(XA, FA, XB, FB) = z(A, B), exactly antisymmetric: (s(A) - s(B)) + (t(A, B) - t(B, A))."""
+    torch = _nn()
+
+    class PairNet(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.kind = 'pair'
+            self.base = base
+            self.dim = dim
+            if dim:
+                self.U = torch.nn.Parameter(torch.randn(V, dim) * 0.05)
+                self.P = torch.nn.Parameter(torch.randn(F, dim) * 0.05)
+                self.M = torch.nn.Parameter(torch.randn(dim, dim) * 0.05)
+
+        def strength(self, X, Fz):
+            return self.base(X, Fz) - self.base.bias
+
+        def embed(self, X, Fz):
+            return X @ self.U / 40.0 + Fz @ self.P
+
+        def W(self):
+            return self.M - self.M.t()
+
+        def forward(self, XA, FA, XB, FB):
+            z = self.strength(XA, FA) - self.strength(XB, FB)
+            if self.dim:
+                ea, eb = self.embed(XA, FA), self.embed(XB, FB)
+                z = z + (((ea @ self.M) * eb).sum(1) - ((eb @ self.M) * ea).sum(1))
+            return z
+
+        def field(self, XF, FF):
+            """The field's table: s(B_j) [N] and g_j = W e(B_j) [N, dim]."""
+            s = self.strength(XF, FF)
+            g = self.embed(XF, FF) @ self.W().t() if self.dim else None
+            return s, g
+
+        def against(self, X, Fz, table):
+            """z(A, B_j) [n, N] of candidates against a field's table."""
+            s, g = table
+            z = self.strength(X, Fz)[:, None] - s[None, :]
+            if self.dim:
+                z = z + self.embed(X, Fz) @ g.t()
+            return z
+
+        def penalty(self, l2_cards, l2_other, l2_inter=0.0):
+            p = self.base.penalty(l2_cards, l2_other)
+            if self.dim:
+                p = p + l2_inter * ((self.U ** 2).sum() + (self.P ** 2).sum() + (self.M ** 2).sum())
+            return p
+
+    return PairNet()
+
+
 class Scaler:
     """Standardises the deck features with the training rows' mean and sd (sd floored)."""
 
@@ -499,49 +626,71 @@ class Scaler:
         return ((F - self.mean) / self.std).astype(np.float32)
 
 
-def fit(kind, X, Fz, y, *, l2_cards=1e-3, l2_other=1e-4, weights=None, val=None, seed=0, hyper=None, epochs=60,
-        batch=256, lr=3e-3, patience=6):
-    """One model fitted to targets y in [0, 1] by log loss + L2 (the mean loss per row plus the penalty). Linear kinds:
-    full-batch L-BFGS (weighted rows: a bootstrap's counts). 'set': Adam on minibatches (a bootstrap's rows drawn with
-    replacement), early stopping on `val` = (X, Fz, y) -> the trained net."""
+def fit(kind, X, Fz, y, *, l2_cards=1e-3, l2_other=1e-4, l2_inter=1e-3, weights=None, rw=None, opp=None, val=None,
+        seed=0, hyper=None, epochs=60, batch=256, lr=3e-3, patience=6):
+    """One model fitted to targets y in [0, 1] by log loss + L2 (the mean loss per row plus the penalty). Linear kinds
+    (and 'pair' on a linear base): full-batch L-BFGS (weighted rows: a bootstrap's counts). 'set' (and 'pair' on a set
+    base): Adam on minibatches (a bootstrap's rows drawn with replacement), early stopping on `val` = (X, Fz, y), for
+    'pair' (X, Fz, y, (X_opp, F_opp)). 'pair': `opp` = (X_opp, F_opp), the opponent's deck of each row (y: the row's
+    deck beat it); `l2_inter` the matchup terms' L2. `rw`: recency weights per row (None: every row 1, today's fit
+    exactly): the weighted mean loss (L-BFGS: the bootstrap's counts times rw; Adam: each minibatch's loss weighted by
+    rw over its mean on the bootstrap's rows) -> the trained net."""
     torch = _nn()
     torch.manual_seed(seed)
     V, F = X.shape[1], Fz.shape[1]
     net = make_net(kind, V, F, **(hyper or {}))
     Xt, Ft, yt = torch.from_numpy(X), torch.from_numpy(Fz), torch.from_numpy(np.asarray(y, np.float32))
+    ins = (Xt, Ft)
+    if kind == 'pair':
+        if opp is None:
+            raise ValueError("a pair model needs the opponents' decks (opp)")
+        ins = (Xt, Ft, torch.from_numpy(opp[0]), torch.from_numpy(opp[1]))
+        pen = lambda: net.penalty(l2_cards, l2_other, l2_inter)  # noqa: E731
+    else:
+        pen = lambda: net.penalty(l2_cards, l2_other)  # noqa: E731
     bce = torch.nn.functional.binary_cross_entropy_with_logits
-    if kind != 'set':
+    adam = kind == 'set' or (kind == 'pair' and net.base.kind == 'set')
+    if not adam:
+        if rw is not None:
+            weights = np.asarray(rw, np.float64) * (1.0 if weights is None else np.asarray(weights, np.float64))
         w = None if weights is None else torch.from_numpy(np.asarray(weights, np.float32))
         opt = torch.optim.LBFGS(net.parameters(), lr=1.0, max_iter=300, history_size=20, line_search_fn='strong_wolfe',
                                 tolerance_grad=1e-8, tolerance_change=1e-12)
 
         def closure():
             opt.zero_grad()
-            z = net(Xt, Ft)
+            z = net(*ins)
             loss = (bce(z, yt, weight=w, reduction='sum') / (w.sum() if w is not None else len(yt))
-                    + net.penalty(l2_cards, l2_other))
+                    + pen())
             loss.backward()
             return loss
         opt.step(closure)
         return net.eval()
     rng = np.random.default_rng(seed)
     pick = np.arange(len(yt)) if weights is None else np.repeat(np.arange(len(yt)), np.asarray(weights, np.int64))
+    rwt = None if rw is None else torch.from_numpy((np.asarray(rw, np.float64) / np.mean(np.asarray(rw)[pick]))
+                                                   .astype(np.float32))
     opt = torch.optim.Adam(net.parameters(), lr=lr)
     best, best_state, bad = math.inf, None, 0
+    if val is not None:
+        val_in = tuple(torch.from_numpy(a) for a in (val[0], val[1]) + (tuple(val[3]) if len(val) > 3 else ()))
+        val_y = torch.from_numpy(np.asarray(val[2], np.float32))
     for _ in range(epochs):
         net.train()
         order = rng.permutation(pick)
         for i in range(0, len(order), batch):
             j = torch.from_numpy(order[i:i + batch])
             opt.zero_grad()
-            loss = bce(net(Xt[j], Ft[j]), yt[j]) + net.penalty(l2_cards, l2_other)
+            if rwt is None:
+                loss = bce(net(*(t[j] for t in ins)), yt[j]) + pen()
+            else:
+                loss = (bce(net(*(t[j] for t in ins)), yt[j], reduction='none') * rwt[j]).mean() + pen()
             loss.backward()
             opt.step()
         if val is not None:
             net.eval()
             with torch.no_grad():
-                vl = float(bce(net(torch.from_numpy(val[0]), torch.from_numpy(val[1])),
-                               torch.from_numpy(np.asarray(val[2], np.float32))))
+                vl = float(bce(net(*val_in), val_y))
             if vl < best - 1e-5:
                 best, bad = vl, 0
                 best_state = {k: v.clone() for k, v in net.state_dict().items()}
@@ -563,6 +712,53 @@ def predict(nets, X, Fz, batch=8192):
             for i in range(0, len(X), batch):
                 z = net(torch.from_numpy(X[i:i + batch]), torch.from_numpy(Fz[i:i + batch]))
                 out[i:i + batch] += torch.sigmoid(z).double().numpy()
+    return out / max(1, len(nets))
+
+
+def predict_pair(nets, XA, FA, XB, FB, batch=8192):
+    """A pair ensemble's mean P(A_i beats B_i) of count rows XA, XB with scaled features FA, FB."""
+    torch = _nn()
+    out = np.zeros(len(XA), np.float64)
+    with torch.no_grad():
+        for net in nets:
+            for i in range(0, len(XA), batch):
+                s = slice(i, i + batch)
+                z = net(*(torch.from_numpy(a[s]) for a in (XA, FA, XB, FB)))
+                out[s] += torch.sigmoid(z).double().numpy()
+    return out / max(1, len(nets))
+
+
+class FieldTable:
+    """A field's precomputed summary for a pair ensemble (module docs): per member, s(B_j) [N] and g_j = W e(B_j)
+    [N, dim]; `n` the field's decks. Scoring a candidate against it costs one embedding plus N (dim + 1) multiply-adds
+    and N sigmoids per member."""
+
+    def __init__(self, nets, XF, FF):
+        torch = _nn()
+        if not len(XF):
+            raise ValueError('an empty field')
+        self.n = len(XF)
+        with torch.no_grad():
+            self.tables = [net.field(torch.from_numpy(XF), torch.from_numpy(FF)) for net in nets]
+
+    @classmethod
+    def of(cls, tables):
+        """A table of given members' (s, g) (one member's, for its own score)."""
+        t = cls.__new__(cls)
+        t.tables = list(tables)
+        t.n = len(tables[0][0])
+        return t
+
+
+def predict_field(nets, X, Fz, table, batch=2048):
+    """A pair ensemble's mean over its members and the field's decks of P(each row's deck beats the field's deck)."""
+    torch = _nn()
+    out = np.zeros(len(X), np.float64)
+    with torch.no_grad():
+        for net, tab in zip(nets, table.tables):
+            for i in range(0, len(X), batch):
+                z = net.against(torch.from_numpy(X[i:i + batch]), torch.from_numpy(Fz[i:i + batch]), tab)
+                out[i:i + batch] += torch.sigmoid(z).double().mean(1).numpy()
     return out / max(1, len(nets))
 
 
@@ -626,40 +822,94 @@ def metrics(p, ds, rows, v=None):
 FORMAT = 'mtgz-deck-evaluator'
 
 
+EXPORT_FORMAT = 'mtgz-deck-evaluator-export'
+
+
+def sparse_decks(X, names):
+    """Count rows -> [{name: count}] (the card names `names` of the columns)."""
+    return [{names[i]: int(row[i]) for i in np.nonzero(row)[0]} for row in np.asarray(X)]
+
+
 class Evaluator:
     """A trained deck evaluator: an ensemble of one model kind over the card table `vocab` and the scaled deck
-    features. `score(decks)` -> P(win against the field) per deck (the ensemble's mean)."""
+    features. `score(decks)` -> P(win against the field) per deck (the ensemble's mean). A 'pair' evaluator scores a
+    deck against any field (`score(decks, field)`; default its stored field, `field` counts [N, V] with `field_meta`)
+    and one deck against another (`matchup`)."""
 
-    def __init__(self, kind, nets, scaler, hyper=None, meta=None, names=None):
+    def __init__(self, kind, nets, scaler, hyper=None, meta=None, names=None, field=None, field_meta=None):
         self.kind, self.nets, self.scaler = kind, list(nets), scaler
         self.hyper, self.meta = dict(hyper or {}), dict(meta or {})
         self.names = tuple(names or vocab())
         if self.names != vocab():
             raise ValueError('the evaluator\'s card table is not this checkout\'s (vocab)')
+        if field is not None and kind != 'pair':
+            raise ValueError(f'a {kind} evaluator has no opponent input: no field')
+        self.field = None if field is None else np.asarray(field, np.float32)
+        self.field_meta = dict(field_meta or {})
+        self._default_table = None
 
     def features(self, X):
         return self.scaler(deck_features(X))
 
-    def score_counts(self, X):
+    def field_table(self, field=None):
+        """A pair evaluator's precomputed field (`FieldTable`): None the stored default field, a FieldTable as it is,
+        a list of decks (names or {name: count}) or count rows [N, V]. Reuse it to score many candidates."""
+        if self.kind != 'pair':
+            raise ValueError(f'a {self.kind} evaluator has no opponent input: it scores against the field its training '
+                             f'games had, never a named field (the pair kind does)')
+        if isinstance(field, FieldTable):
+            return field
+        if field is None:
+            if self.field is None:
+                raise ValueError('this pair evaluator has no stored field: name one')
+            if self._default_table is None:
+                self._default_table = FieldTable(self.nets, self.field, self.features(self.field))
+            return self._default_table
+        XF = np.asarray(field, np.float32) if isinstance(field, np.ndarray) else counts_matrix(field)
+        return FieldTable(self.nets, XF, self.features(XF))
+
+    def score_counts(self, X, field=None):
         X = np.asarray(X, np.float32)
+        if self.kind == 'pair':
+            return predict_field(self.nets, X, self.features(X), self.field_table(field))
+        if field is not None:
+            self.field_table(field)     # refuses
         return predict(self.nets, X, self.features(X))
 
-    def score(self, decks):
-        """decks: lists of names or {name: count} -> P(win against the field) [n]."""
-        return self.score_counts(counts_matrix(decks))
+    def score(self, decks, field=None):
+        """decks: lists of names or {name: count} -> P(win against the field) [n]. `field` (pair only; module docs):
+        the mean P(the deck beats each of its decks); default the stored field."""
+        return self.score_counts(counts_matrix(decks), field)
 
-    def members(self, X):
+    def matchup(self, decks_a, decks_b):
+        """P(decks_a[i] beats decks_b[i]) [n] (pair only)."""
+        if self.kind != 'pair':
+            raise ValueError(f'a {self.kind} evaluator has no opponent input: no matchup (the pair kind has)')
+        XA, XB = counts_matrix(decks_a), counts_matrix(decks_b)
+        return predict_pair(self.nets, XA, self.features(XA), XB, self.features(XB))
+
+    def members(self, X, field=None):
         """Each member's win probability [members, n] (the ensemble's spread)."""
         X = np.asarray(X, np.float32)
         Fz = self.features(X)
+        if self.kind == 'pair':
+            tab = self.field_table(field)
+            return np.stack([predict_field([n], X, Fz, FieldTable.of([t])) for n, t in zip(self.nets, tab.tables)])
+        if field is not None:
+            self.field_table(field)     # refuses
         return np.stack([predict([n], X, Fz) for n in self.nets])
 
     def save(self, path):
         torch = _nn()
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        torch.save({'format': FORMAT, 'version': 1, 'kind': self.kind, 'vocab': list(self.names),
-                    'features': list(FEATURES), 'mean': self.scaler.mean.tolist(), 'std': self.scaler.std.tolist(),
-                    'hyper': self.hyper, 'meta': self.meta, 'states': [n.state_dict() for n in self.nets]}, path)
+        d = {'format': FORMAT, 'version': 1, 'kind': self.kind, 'vocab': list(self.names),
+             'features': list(FEATURES), 'mean': self.scaler.mean.tolist(), 'std': self.scaler.std.tolist(),
+             'hyper': self.hyper, 'meta': self.meta, 'states': [n.state_dict() for n in self.nets]}
+        if self.kind == 'pair':
+            d['version'] = 2
+            d['field'] = None if self.field is None else sparse_decks(self.field, self.names)
+            d['field_meta'] = self.field_meta
+        torch.save(d, path)
 
     @classmethod
     def load(cls, path):
@@ -674,7 +924,213 @@ class Evaluator:
             n = make_net(d['kind'], len(d['vocab']), len(d['features']), **d['hyper'])
             n.load_state_dict(st)
             nets.append(n.eval())
-        return cls(d['kind'], nets, Scaler(mean=d['mean'], std=d['std']), d['hyper'], d['meta'], d['vocab'])
+        field = d.get('field')
+        return cls(d['kind'], nets, Scaler(mean=d['mean'], std=d['std']), d['hyper'], d['meta'], d['vocab'],
+                   field=None if field is None else counts_matrix(field), field_meta=d.get('field_meta'))
+
+    def export(self, path=None):
+        """The evaluator as the export format (module docs): a JSON-able dict, written to `path` if given."""
+        out = export_dict(self)
+        if path:
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            with open(path, 'w', encoding='utf-8', newline='') as fh:
+                json.dump(out, fh, separators=(',', ':'))
+        return out
+
+
+def _f32(a):
+    """A float32 array (or scalar) as nested lists of Python floats (exact: a float32 value is a double)."""
+    a = np.asarray(a, np.float32)
+    return float(a) if a.ndim == 0 else a.astype(np.float64).tolist()
+
+
+def export_dict(e):
+    """`Evaluator.export`'s dict: the card table in registry (eoe_cards.txt) order, the feature scaler, each member's
+    weights by name, the pair's default field."""
+    if e.kind not in ('linear', 'set', 'pair'):
+        raise ValueError(f'kind {e.kind!r}: the export supports linear, set and pair')
+    reg = registry()
+    n_ids = len(reg)
+    ix = index()
+    perm = np.array([ix.get(n, -1) for n in reg])        # registry id -> vocab column (-1: not in the table)
+    t = card_table()
+
+    def by_id(a):
+        """[V, ...] over vocab -> [C, ...] over the registry, zero for a card not in the table."""
+        a = np.asarray(a, np.float32)
+        out = np.zeros((n_ids,) + a.shape[1:], np.float32)
+        out[perm >= 0] = a[perm[perm >= 0]]
+        return out
+    cards = {'names': list(reg), 'in_table': [int(p >= 0) for p in perm]}
+    for k in ('land', 'basic', 'creature', 'mv'):
+        cards[k] = _f32(by_id(t[k]))
+    cards['colours'] = _f32(by_id(t['colour']))
+    cards['basic_colour'] = _f32(by_id(t['basic_colour']))
+
+    def deck_member(net, bias=True):
+        sd = {k: v.detach().cpu().numpy() for k, v in net.state_dict().items()}
+        m = {}
+        if bias:
+            m['bias'] = _f32(sd['bias'][0])
+        m['wc'] = _f32(by_id(sd['wc']))
+        m['wf'] = _f32(sd['wf'])
+        if net.kind == 'set':
+            m['emb'] = _f32(by_id(sd['emb']))
+            m['u'] = _f32(by_id(sd['u']))
+            m['w1'] = _f32(sd['mlp.0.weight'])
+            m['b1'] = _f32(sd['mlp.0.bias'])
+            m['w2'] = _f32(sd['mlp.2.weight'][0])
+            m['b2'] = _f32(sd['mlp.2.bias'][0])
+        return m
+    members = []
+    for net in e.nets:
+        if e.kind == 'pair':
+            m = {'strength': deck_member(net.base, bias=False)}
+            if net.dim:
+                m['U'] = _f32(by_id(net.U.detach().numpy()))
+                m['P'] = _f32(net.P.detach().numpy())
+                m['W'] = _f32(net.W().detach().numpy())
+            members.append(m)
+        else:
+            members.append(deck_member(net))
+    out = {'format': EXPORT_FORMAT, 'version': 1, 'kind': e.kind, 'hyper': e.hyper, 'meta': e.meta, 'cards': cards,
+           'features': {'names': list(FEATURES), 'mean': _f32(e.scaler.mean), 'std': _f32(e.scaler.std)},
+           'members': members}
+    if e.kind == 'pair':
+        rid = {n: c for c, n in enumerate(reg)}
+        out['hyper'] = dict(e.hyper, dim=int(e.nets[0].dim), base=e.nets[0].base.kind)
+        out['field'] = None if e.field is None else {
+            'decks': [[[rid[n], k] for n, k in sorted(d.items(), key=lambda x: rid[x[0]])]
+                      for d in sparse_decks(e.field, e.names)],
+            'meta': e.field_meta}
+    return out
+
+
+class ReferenceScorer:
+    """A pure-numpy scorer of an export (module docs' EXPORT FORMAT), from the JSON alone (its own card table, no
+    torch, no `deck_features`): the reference a port checks against. Float64 throughout. `score(decks, field=None)`,
+    `matchup(decks_a, decks_b)`; decks as lists of names or {name: count}."""
+
+    def __init__(self, exp):
+        if isinstance(exp, str):
+            with open(exp, encoding='utf-8') as fh:
+                exp = json.load(fh)
+        if exp.get('format') != EXPORT_FORMAT or exp.get('version') != 1:
+            raise ValueError('not a version-1 deck evaluator export')
+        self.exp, self.kind = exp, exp['kind']
+        c = exp['cards']
+        self.names = c['names']
+        self.id = {n: i for i, n in enumerate(self.names)}
+        self.in_table = np.array(c['in_table'], bool)
+        self.land, self.basic, self.creature, self.mv = (np.array(c[k], np.float64) for k in ('land', 'basic',
+                                                                                              'creature', 'mv'))
+        self.colours, self.basic_colour = np.array(c['colours'], np.float64), np.array(c['basic_colour'], np.float64)
+        f = exp['features']
+        self.mean, self.std = np.array(f['mean'], np.float64), np.array(f['std'], np.float64)
+        self.members = [self._arrays(m) for m in exp['members']]
+        fd = exp.get('field')
+        self.field = None
+        if fd:
+            self.field = np.zeros((len(fd['decks']), len(self.names)))
+            for r, d in enumerate(fd['decks']):
+                for cid, k in d:
+                    self.field[r, cid] += k
+
+    @staticmethod
+    def _arrays(m):
+        return {k: (ReferenceScorer._arrays(v) if isinstance(v, dict) else np.array(v, np.float64)) for k, v in m.items()}
+
+    def counts(self, decks):
+        X = np.zeros((len(decks), len(self.names)))
+        for r, d in enumerate(decks):
+            for n, k in (d.items() if isinstance(d, dict) else ((n, 1) for n in d)):
+                if n not in self.id or not self.in_table[self.id[n]]:
+                    raise ValueError(f'{n!r}: not a card of the export\'s table')
+                X[r, self.id[n]] += k
+        return X
+
+    def features(self, X):
+        """The scaled features f(x) (EXPORT FORMAT's definitions, one deck at a time)."""
+        out = []
+        spell = 1.0 - self.land
+        for x in X:
+            n_spells = x @ spell
+            creatures = x @ (self.creature * spell)
+            mv = self.mv
+            curve = [x @ (spell * b) for b in (mv <= 1, mv == 2, mv == 3, mv == 4, mv == 5, mv >= 6)]
+            per = (x * spell) @ self.colours
+            main = set()
+            for k in sorted(range(5), key=lambda k: (-per[k], k))[:2]:
+                if per[k] > 0:
+                    main.add(k)
+            outside = np.array([any(self.colours[c, k] and k not in main for k in range(5)) for c in range(len(x))])
+            pairs = [1.0 if main == {COLOURS.index(p[0]), COLOURS.index(p[1])} else 0.0 for p in PAIRS]
+            F = ([x @ self.land, x @ (self.land * (1 - self.basic)), creatures, n_spells - creatures] + curve
+                 + [x @ (spell * mv) / max(n_spells, 1), float((per > 0).sum()), x @ (spell * outside),
+                    x @ (spell * (self.colours.sum(1) == 0))] + list(per) + list(x @ self.basic_colour)
+                 + [1.0 if len(main) == 1 else 0.0] + pairs)
+            out.append(F)
+        return (np.array(out) - self.mean) / self.std
+
+    @staticmethod
+    def _deck_z(m, X, f, bias=True):
+        z = X @ m['wc'] + f @ m['wf']
+        if bias:
+            z = z + m['bias']
+        if 'emb' in m:
+            h = X @ m['emb'] / 40.0
+            a = np.maximum(np.concatenate([h, f], 1) @ m['w1'].T + m['b1'], 0.0)
+            z = z + a @ m['w2'] + m['b2']
+            s = X @ m['u']
+            z = z + 0.5 * ((s * s).sum(1) - X @ (m['u'] * m['u']).sum(1)) / 40.0
+        return z
+
+    def _strength_embed(self, m, X, f):
+        s = self._deck_z(m['strength'], X, f, bias=False)
+        e = X @ m['U'] / 40.0 + f @ m['P'] if 'U' in m else None
+        return s, e
+
+    @staticmethod
+    def _sigmoid(z):
+        return 1.0 / (1.0 + np.exp(-z))
+
+    def matchup(self, decks_a, decks_b):
+        if self.kind != 'pair':
+            raise ValueError('matchup: a pair export only')
+        XA, XB = self.counts(decks_a), self.counts(decks_b)
+        fa, fb = self.features(XA), self.features(XB)
+        out = np.zeros(len(XA))
+        for m in self.members:
+            sa, ea = self._strength_embed(m, XA, fa)
+            sb, eb = self._strength_embed(m, XB, fb)
+            z = sa - sb
+            if ea is not None:
+                z = z + ((ea @ m['W']) * eb).sum(1)
+            out += self._sigmoid(z)
+        return out / len(self.members)
+
+    def score(self, decks, field=None):
+        X = self.counts(decks)
+        f = self.features(X)
+        out = np.zeros(len(X))
+        if self.kind != 'pair':
+            if field is not None:
+                raise ValueError(f'a {self.kind} export has no opponent input: no field')
+            for m in self.members:
+                out += self._sigmoid(self._deck_z(m, X, f))
+            return out / len(self.members)
+        XF = self.field if field is None else self.counts(field)
+        if XF is None:
+            raise ValueError('no stored field: name one')
+        fF = self.features(XF)
+        for m in self.members:
+            sF, eF = self._strength_embed(m, XF, fF)
+            s, e = self._strength_embed(m, X, f)
+            z = s[:, None] - sF[None, :]
+            if e is not None:
+                z = z + e @ (eF @ m['W'].T).T          # g_j = W e(B_j)
+            out += self._sigmoid(z).mean(1)
+        return out / len(self.members)
 
 
 def check_build(pool_cards, deck):
@@ -847,8 +1303,119 @@ GRID = {
     'feat+mode': [{'l2_other': 1e-4}],
     'linear': [{'l2_cards': c, 'l2_other': 1e-4} for c in (1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2)],
     'set': [{'l2_cards': 1e-3, 'l2_other': o} for o in (1e-4, 1e-3)],
+    # the pairwise model (opt-in): `dim` 0 is the strength alone (Bradley-Terry), dim > 0 adds the matchup term (its
+    # L2 at 1e-2 or more holds the bilinear term at its zero saddle: the strength alone, so the grid stops below)
+    'pair': ([{'dim': 0, 'l2_cards': c, 'l2_other': 1e-4} for c in (1e-3, 3e-3, 1e-2, 3e-2)]
+             + [{'dim': m, 'l2_cards': c, 'l2_other': 1e-4, 'l2_inter': i}
+                for m in (2, 4, 8) for c in (3e-3, 1e-2) for i in (3e-4, 1e-3, 3e-3)]),
 }
+DEFAULT_KINDS = ('const', 'feat', 'feat+mode', 'linear', 'set')       # 'pair' is opt-in
+PAIR_SET_GRID = ([{'dim': 0, 'l2_cards': 1e-3, 'l2_other': o} for o in (1e-4, 1e-3)]
+                 + [{'dim': m, 'l2_cards': 1e-3, 'l2_other': 1e-4, 'l2_inter': i} for m in (4, 8) for i in (3e-4, 1e-3)])
 SET_HYPER = {'d': 32, 'k': 8, 'hidden': 64}
+
+
+def recency_weights(iters, half_life, ref):
+    """Per row 0.5 ** ((ref - iteration) / half_life) (module docs): a game `half_life` iterations older than `ref`
+    weighs half; the iteration in progress (-1) and anything at or after `ref` weigh 1."""
+    it = np.asarray(iters, np.float64)
+    age = np.where(it < 0, 0.0, np.maximum(float(ref) - it, 0.0))
+    return 0.5 ** (age / float(half_life))
+
+
+def default_field(ds, rows, size=256, iters=4, seed=0):
+    """A pair evaluator's default field: the self-play decks (both seats) of the newest `iters` iterations among `rows`
+    (the training games), at most `size` of them drawn without replacement (seeded) -> (counts [N, V], meta)."""
+    sp = rows & (ds['phase'] == 0) & (ds['iter'] >= 0)
+    its = np.unique(ds['iter'][sp])[-int(iters):]
+    cand = np.nonzero(sp & np.isin(ds['iter'], its))[0]
+    if not len(cand):
+        raise ValueError('no self-play training decks for the default field')
+    rng = np.random.default_rng(mix(seed, 0xF1E1D))
+    pick = np.sort(rng.choice(cand, min(int(size), len(cand)), replace=False))
+    return ds['X'][pick], {'iters': [int(i) for i in its], 'decks_there': int(len(cand)), 'size': int(len(pick)),
+                           'seed': int(seed)}
+
+
+def game_losses(p, ds, rows):
+    """Per game (its seat-0 row in `rows`, both rows held out together): the log loss of P(seat 0's result)."""
+    s0 = np.nonzero(rows & (ds['seat'] == 0))[0]
+    q = np.clip(np.asarray(p, np.float64)[s0], 1e-6, 1 - 1e-6)
+    y = ds['result'][s0].astype(np.float64)
+    return -(y * np.log(q) + (1 - y) * np.log(1 - q))
+
+
+def paired_diff(a, b):
+    """mean(b - a) with its standard error."""
+    d = np.asarray(b, np.float64) - np.asarray(a, np.float64)
+    return {'games': int(len(d)), 'diff': round(float(d.mean()), 5),
+            'se': round(float(d.std(ddof=1) / math.sqrt(len(d))), 5) if len(d) > 1 else None}
+
+
+def train_pair(ds, X, Fz, scaler, tr, va, te, unseen, rw=None, seed=0, ensemble=5, base='linear', grid=None,
+               epochs=60, field_size=256, field_iters=4, meta=None, log=None):
+    """The pairwise kind (module docs) on the dataset's games (seat 0's row as A, its opponent as B; results only):
+    the grid selected on the validation games, ensembles on bootstraps of the training games of the selected setting,
+    the best strength-only (dim 0) and the best with the matchup term (dim > 0); their held-out numbers (per row
+    P(the row's deck beats its opponent's)), the selected one's scores against its default field, and the matchup
+    signal (the paired per-game log-loss difference, matchup term less strength only) -> (report entry, Evaluator)."""
+    say = log or (lambda s: None)
+    grid = list(grid or (GRID['pair'] if base == 'linear' else PAIR_SET_GRID))
+    s0 = np.nonzero(ds['seat'] == 0)[0]
+    o = ds['opp'][s0]
+    gtr, gva = tr[s0], va[s0]
+    XA, FA, XB, FB, y = X[s0], Fz[s0], X[o], Fz[o], ds['result'][s0]
+    rwg = None if rw is None else np.asarray(rw)[s0][gtr]
+
+    def arch(h):
+        return dict(SET_HYPER if base == 'set' else {}, base=base, dim=int(h['dim']))
+
+    def fit1(h, weights=None, s=seed):
+        return fit('pair', XA[gtr], FA[gtr], y[gtr], opp=(XB[gtr], FB[gtr]), weights=weights, rw=rwg, seed=s,
+                   epochs=epochs, val=(XA[gva], FA[gva], y[gva], (XB[gva], FB[gva])), hyper=arch(h),
+                   **{k: x for k, x in h.items() if k != 'dim'})
+    sel = []
+    for h in grid:
+        t0 = time.time()
+        net = fit1(h)
+        pv = predict_pair([net], XA[gva], FA[gva], XB[gva], FB[gva])
+        sel.append({'hyper': h, 'val_logloss': round(logloss(pv, y[gva]), 5), 'seconds': round(time.time() - t0, 1)})
+        say(f'# pair {json.dumps(sel[-1])}')
+    best = min(sel, key=lambda s: (s['val_logloss'], s['hyper']['dim']))
+    pick = {'selected': best}
+    for tag, want in (('strength_only', lambda d: d == 0), ('interaction', lambda d: d > 0)):
+        c = [s for s in sel if want(s['hyper']['dim'])]
+        if c:
+            pick[tag] = min(c, key=lambda s: s['val_logloss'])
+    entry = {'base': base, 'grid': sel, 'recency': rw is not None}
+    ens, preds = {}, {}
+    for tag, ch in pick.items():
+        key = json.dumps(ch['hyper'], sort_keys=True)
+        if key not in ens:
+            ens[key] = [fit1(ch['hyper'], weights=_bootstrap(ds, tr & (ds['seat'] == 0), mix(seed, m, 1)), s=seed + m)
+                        for m in range(ensemble)]
+            preds[key] = predict_pair(ens[key], X, Fz, X[ds['opp']], Fz[ds['opp']])
+        p = preds[key]
+        entry[tag] = {'hyper': ch['hyper'], 'test': metrics(p, ds, te), 'val': metrics(p, ds, va)}
+        if unseen.any():
+            entry[tag]['test_unseen'] = metrics(p, ds, unseen)
+        say(f'# pair {tag} {json.dumps(ch["hyper"])} test ' + json.dumps(entry[tag]['test']))
+    if 'strength_only' in pick and 'interaction' in pick:
+        a = preds[json.dumps(pick['strength_only']['hyper'], sort_keys=True)]
+        b = preds[json.dumps(pick['interaction']['hyper'], sort_keys=True)]
+        entry['matchup_signal'] = {'test': paired_diff(game_losses(a, ds, te), game_losses(b, ds, te)),
+                                   'val': paired_diff(game_losses(a, ds, va), game_losses(b, ds, va))}
+        say('# pair matchup signal (log loss, matchup term less strength only) ' + json.dumps(entry['matchup_signal']))
+    field, fmeta = default_field(ds, tr, field_size, field_iters, seed)
+    nets = ens[json.dumps(best['hyper'], sort_keys=True)]
+    e = Evaluator('pair', nets, scaler, arch(best['hyper']),
+                  dict(meta or {}, l2={k: x for k, x in best['hyper'].items() if k != 'dim'},
+                       test=entry['selected']['test']), field=field, field_meta=fmeta)
+    pf = e.score_counts(X)
+    entry['field'] = fmeta
+    entry['selected']['test_field'] = metrics(pf, ds, te)
+    say('# pair selected against its default field, test ' + json.dumps(entry['selected']['test_field']))
+    return entry, e
 
 
 def _bootstrap(ds, rows, seed):
@@ -862,16 +1429,21 @@ def _bootstrap(ds, rows, seed):
 
 
 def train(run, values, out, how='time', seed=0, ensemble=5, judge=None, pools=200, k=16, threads=4, kinds=None,
-          lams=LAMS, split_kw=None, set_epochs=60, n_card_decks=150, log=None):
+          lams=LAMS, split_kw=None, set_epochs=60, n_card_decks=150, log=None, half_life=None, from_iter=None,
+          pair_base='linear', field_size=256, field_iters=4, export=False):
     """The whole S4a pipeline (module docs): the dataset with its pre-game values, every model kind fitted to each
     distillation mix and selected on the validation games' results, ensembles of the selected (and of the results-only)
     fits on bootstraps of the training games, their held-out numbers, the same-pool ranking against `judge` (a
     checkpoint; default the values'), card ranking v0 and the 17lands yardstick. Writes `out`/report.json,
-    `out`/cards_<kind>.json and `out`/evaluator_<kind>.pt (linear and set) -> the report."""
+    `out`/cards_<kind>.json and `out`/evaluator_<kind>.pt (linear, set and pair; `export`: also evaluator_<kind>.json,
+    the export format) -> the report. Opt-in (defaults: today's pipeline exactly): `kinds` with 'pair' (`train_pair`,
+    its strength model `pair_base`, its default field `field_size` decks of the newest `field_iters` training
+    iterations); `half_life` (recency weights on every kind's training games) and `from_iter` (training games of
+    earlier iterations dropped)."""
     import torch
     torch.set_num_threads(max(1, int(threads)))
     say = log or (lambda s: None)
-    kinds = list(kinds or GRID)
+    kinds = list(kinds or DEFAULT_KINDS)
     vals = load_values(values)
     ds = attach_values(dataset(run, how=how, **(split_kw or {})), vals)
     rep = {'run': run, 'values': values, 'values_meta': vals['meta'], 'split': how, 'split_kw': split_kw or {},
@@ -880,6 +1452,23 @@ def train(run, values, out, how='time', seed=0, ensemble=5, judge=None, pools=20
     X = ds['X']
     Fraw = deck_features(X)
     tr, va, te = ds['split'] == 0, ds['split'] == 1, ds['split'] == 2
+    extra_meta = {}
+    if from_iter is not None:
+        tr = tr & ~((ds['iter'] >= 0) & (ds['iter'] < int(from_iter)))
+        extra_meta['from_iter'] = int(from_iter)
+        rep['from_iter'] = {'from_iter': int(from_iter), 'train_games': int(tr.sum() // 2)}
+        say('# from iteration ' + json.dumps(rep['from_iter']))
+    rw = None
+    if half_life is not None:
+        ref = int(ds['iter'][tr & (ds['iter'] >= 0)].max())
+        rw = recency_weights(ds['iter'], half_life, ref).astype(np.float64)
+        w = rw[tr & (ds['seat'] == 0)]
+        extra_meta['half_life'] = float(half_life)
+        rep['recency'] = {'half_life': float(half_life), 'ref_iter': ref,
+                          'effective_train_games': round(float(w.sum() ** 2 / (w * w).sum()), 1),
+                          'train_games': int(len(w))}
+        say('# recency ' + json.dumps(rep['recency']))
+    rwt = None if rw is None else rw[tr]
     scaler = Scaler(Fraw[tr])
     Fz = scaler(Fraw)
     M = np.stack([ds['mode'] == 0, ds['mode'] == 1], 1).astype(np.float32)
@@ -908,12 +1497,21 @@ def train(run, values, out, how='time', seed=0, ensemble=5, judge=None, pools=20
     rep['models'] = {}
     evaluators = {}
     for kind in kinds:
+        if kind == 'pair':
+            entry, e = train_pair(ds, X, Fz, scaler, tr, va, te, unseen, rw=rw, seed=seed, ensemble=ensemble,
+                                  base=pair_base, epochs=set_epochs, field_size=field_size, field_iters=field_iters,
+                                  meta=dict({'run': run, 'values': values, 'split': how, 'seed': seed}, **extra_meta),
+                                  log=say)
+            e.save(os.path.join(out, 'evaluator_pair.pt'))
+            evaluators['pair'] = e
+            rep['models']['pair'] = entry
+            continue
         F_k = feats(kind)
         sel = []
         for h in GRID[kind]:
             for lam in lams:
                 t0 = time.time()
-                net = fit(model_kind(kind), X[tr], F_k[tr], ytarget(lam)[tr], seed=seed, epochs=set_epochs,
+                net = fit(model_kind(kind), X[tr], F_k[tr], ytarget(lam)[tr], seed=seed, epochs=set_epochs, rw=rwt,
                           val=(X[va], F_k[va], ytarget(lam)[va]), hyper=SET_HYPER if kind == 'set' else None, **h)
                 p = predict([net], X, F_k)
                 ll = logloss(p[va], r[va])
@@ -933,21 +1531,27 @@ def train(run, values, out, how='time', seed=0, ensemble=5, judge=None, pools=20
             for m in range(ensemble):
                 w = _bootstrap(ds, tr, mix(seed, m, 1))
                 nets.append(fit(model_kind(kind), X[tr], F_k[tr], ytarget(ch['lam'])[tr], weights=w, seed=seed + m,
-                                epochs=set_epochs,
+                                epochs=set_epochs, rw=rwt,
                                 val=(X[va], F_k[va], ytarget(ch['lam'])[va]),
                                 hyper=SET_HYPER if kind == 'set' else None, **ch['hyper']))
             p = predict(nets, X, F_k)
             entry[tag]['test'] = metrics(p, ds, te)
             if unseen.any():
                 entry[tag]['test_unseen'] = metrics(p, ds, unseen)
+            if rw is not None or from_iter is not None:
+                entry[tag]['val'] = metrics(p, ds, va)
             say(f'# {kind} {tag} lam {ch["lam"]} test ' + json.dumps(entry[tag]['test']))
             if tag == 'selected' and kind in ('linear', 'set'):
                 e = Evaluator(kind, nets, scaler, SET_HYPER if kind == 'set' else {},
-                              {'run': run, 'values': values, 'checkpoint': vals['meta']['checkpoint'], 'lam': ch['lam'],
-                               'l2': ch['hyper'], 'split': how, 'seed': seed, 'test': entry[tag]['test']})
+                              dict({'run': run, 'values': values, 'checkpoint': vals['meta']['checkpoint'],
+                                    'lam': ch['lam'], 'l2': ch['hyper'], 'split': how, 'seed': seed,
+                                    'test': entry[tag]['test']}, **extra_meta))
                 e.save(os.path.join(out, f'evaluator_{kind}.pt'))
                 evaluators[kind] = e
         rep['models'][kind] = entry
+    if export:
+        for kind, e in evaluators.items():
+            e.export(os.path.join(out, f'evaluator_{kind}.json'))
     # the Bradley-Terry extra: the same linear card model on the difference of the two decks (a matchup model)
     if 'linear' in kinds:
         s0 = np.nonzero(ds['seat'] == 0)[0]
@@ -1002,6 +1606,16 @@ def summary_table(rep):
         lines.append(f"{name:24s} {lam:>5} {t['logloss']:8.5f} {t['brier']:7.5f} {t['corr_value'] or 0:7.4f} "
                      f"{t['game_ranking']['accuracy'] or 0:9.4f}")
     for kind, e in rep['models'].items():
+        if kind == 'pair':
+            for tag in ('strength_only', 'interaction'):
+                if tag in e:
+                    row(f"pair {tag} dim {e[tag]['hyper']['dim']}", '-', e[tag]['test'])
+            row(f"pair selected dim {e['selected']['hyper']['dim']}", '-', e['selected']['test'])
+            row('pair selected vs field', '-', e['selected']['test_field'])
+            if 'matchup_signal' in e:
+                lines.append('pair matchup term less strength only, per-game log loss: '
+                             + json.dumps(e['matchup_signal']))
+            continue
         if not e['results_only'].get('same_as_selected'):
             row(kind, '0', e['results_only']['test'])
         row(kind + ('' if e['results_only'].get('same_as_selected') else ' (selected)'), str(e['selected']['lam']),
@@ -1048,17 +1662,29 @@ def main(argv=None):
     pt.add_argument('--val-iters', type=int, default=4, help='--split time: validation iterations before it')
     pt.add_argument('--seed', type=int, default=0)
     pt.add_argument('--ensemble', type=int, default=5)
-    pt.add_argument('--kinds', default=','.join(GRID), help='model kinds, comma-separated')
+    pt.add_argument('--kinds', default=','.join(DEFAULT_KINDS),
+                    help=f'model kinds, comma-separated (of {",".join(GRID)}; pair is opt-in)')
     pt.add_argument('--lams', default=','.join(str(x) for x in LAMS), help='distillation mixes to select from')
     pt.add_argument('--judge', default=None, help='the same-pool ranking\'s checkpoint (default: the values\')')
     pt.add_argument('--pools', type=int, default=200, help='held-out pools of the same-pool ranking (0: none)')
     pt.add_argument('--k', type=int, default=16, help='candidate builds per pool')
     pt.add_argument('--threads', type=int, default=4)
+    pt.add_argument('--half-life', type=float, default=None,
+                    help='recency weighting: a training game this many iterations older than the newest weighs half '
+                         '(default: off, every game 1)')
+    pt.add_argument('--from-iter', type=int, default=None, help='drop the training games of iterations before this')
+    pt.add_argument('--pair-base', default='linear', choices=['linear', 'set'], help='the pair kind\'s strength model')
+    pt.add_argument('--field-size', type=int, default=256, help='the pair evaluator\'s stored field: at most this many decks')
+    pt.add_argument('--field-iters', type=int, default=4, help='... of the newest this many training iterations')
+    pt.add_argument('--export', action='store_true', help='also write each evaluator\'s export (evaluator_<kind>.json)')
     pr = sub.add_parser('rank', help='score a generated pool\'s candidate builds')
     pr.add_argument('--evaluator', required=True)
     pr.add_argument('--pool-seed', type=int, required=True)
     pr.add_argument('--collation', default='arena', choices=['arena', 'paper'])
     pr.add_argument('--k', type=int, default=32)
+    px = sub.add_parser('export', help='write a saved evaluator as the export format (JSON, no torch)')
+    px.add_argument('--evaluator', required=True)
+    px.add_argument('--out', required=True)
     a = ap.parse_args(argv)
     log = lambda s: print(s, file=sys.stderr, flush=True)  # noqa: E731
     if a.cmd == 'values':
@@ -1068,10 +1694,17 @@ def main(argv=None):
     if a.cmd == 'train':
         rep = train(a.run, a.values, a.out, a.split, a.seed, a.ensemble, a.judge, a.pools, a.k, a.threads,
                     a.kinds.split(','), tuple(float(x) for x in a.lams.split(',')), log=log,
-                    split_kw={'time_from': a.time_from, 'val_iters': a.val_iters} if a.split == 'time' else None)
+                    split_kw={'time_from': a.time_from, 'val_iters': a.val_iters} if a.split == 'time' else None,
+                    half_life=a.half_life, from_iter=a.from_iter, pair_base=a.pair_base, field_size=a.field_size,
+                    field_iters=a.field_iters, export=a.export)
         print(summary_table(rep))
         return rep
     e = Evaluator.load(a.evaluator)
+    if a.cmd == 'export':
+        x = e.export(a.out)
+        print(json.dumps({'evaluator': a.evaluator, 'out': a.out, 'kind': x['kind'], 'members': len(x['members']),
+                          'field': len(x['field']['decks']) if x.get('field') else None}))
+        return x
     cards, cands = pool_candidates(a.pool_seed, a.k, a.collation)
     s = rank(cards, cands, e)
     out = [{'candidate': j, 'score': round(float(s[j]), 4), 'colors': c['colors'] + ('+' + c['splash'] if c['splash'] else ''),

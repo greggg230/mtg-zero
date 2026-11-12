@@ -24993,3 +24993,247 @@ work leaves: a `tools/mac_races.sh` race, `~/mtg-zero-wt/races-<sha12>` with `~/
 `~/mtg-zero-wt/run-<sha12>` and the mirror `~/mtgz-remote/<run>` (every checkpoint shipped). Cleanup when done:
 `rm -rf ~/mtgz-races/<name>`, `git -C ~/mtg-zero worktree remove --force ~/mtg-zero-wt/races-<sha12>` and `rm -rf
 ~/cargo-target/mtg-zero/races-<sha12>`.
+
+## 111. S4a v2: the pairwise evaluator, scoring against a named field, recency weighting, the export (branch `eval-v2`, 2026-11-11)
+
+Branch `eval-v2` (from main 60397f3). **Why** (the user, 2026-11-11). Evaluator v1 (108) predicts "my deck against
+whatever field the training games had": the opponent's deck is not an input, so it can judge a build only against the
+field it happened to train in. Early iterations' decks and play are weak, so the evaluator must keep upgrading as the
+loop runs (S4c), and it should judge a build against any field we name. v2 adds, all opt-in (the defaults train and
+score exactly as before, 111.7): a **pairwise model** P(deck A beats deck B) trained on the logged games' actual
+pairings; **scoring against a named field**; **recency weighting** of the training games; and a **torch-free export**
+for the Rust port of the scorer (another agent wires the evaluator into self-play through `Evaluator`'s public API),
+with a pure-numpy reference scorer. The code is in `mtgz/sealed/evaluator.py` (and its tests); no engine, binding or
+zero-core change (digests untouched). Pure self-play: run 1's own games train it; 17lands stays a yardstick (a Spearman), never an input,
+weight or selection criterion.
+
+### 111.1 The pairwise model
+
+`kind 'pair'` (`PairNet`, `make_net('pair', base=, dim=)`):
+
+    z(A, B) = s(A) - s(B) + e(A)^T W e(B),        P(A beats B) = sigmoid(z)
+    s(x)    = the base model's terms without its bias (base 'linear': wc . x + wf . f; base 'set': the set network's)
+    e(x)    = x U / 40 + f P                      (x: card counts, f: the scaled deck features; e in R^dim)
+    W       = M - M^T                             (skew-symmetric)
+
+* **Antisymmetric by construction**: a skew-symmetric W gives e(B)^T W e(A) = -e(A)^T W e(B), so z(B, A) = -z(A, B)
+  and P(A beats B) + P(B beats A) = 1. Computed as (s(A) - s(B)) + (t(A, B) - t(B, A)) with t(A, B) = e(A)^T M e(B),
+  the negation is exact in floating point too (tested bit for bit). No seat or bias term (it would break the
+  symmetry; seat 0's share in run 1 is 0.505, the play-or-draw choice being in-game).
+* **A strength and a matchup**: s is a Bradley-Terry deck strength (`dim` 0 is plain Bradley-Terry); the bilinear
+  term lets a matchup show up that no strength difference can (A beats B beats C beats A: aggro / midrange /
+  control), at deck level through the features (curve, creatures, colours: `P`) and at card level (`U`).
+* **Training**: one row per game, A = seat 0, B = seat 1, y = seat 0's result (a draw 0.5); log loss on one
+  orientation is the same as on both (antisymmetry). Results only: the pre-game value (108.2) is a deck-against-the-
+  field view of one seat, not a pairwise target. L2 on the strength (`l2_cards`, `l2_other`, as `linear`) and on U,
+  P, M (`l2_inter`). Base 'linear': full-batch L-BFGS; base 'set': Adam with early stopping (as `set`). Selection
+  on the validation games' log loss over `GRID['pair']` (dim 0 at four card L2s; dim 2, 4, 8 x card L2 3e-3, 1e-2 x
+  l2_inter 3e-4, 1e-3, 3e-3); then, as for the other kinds, an ensemble of 5 fits on bootstraps of the training
+  games. **The zero saddle**: the bilinear term is a product of three penalised factors, and at l2_inter >= 1e-2
+  every fit stays at e = 0 - the strength alone (a first grid's 1e-2 settings scored as dim 0 to the fourth decimal,
+  and a planted rock-paper-scissors term was not found); at 1e-3 it is found (tests), so the grid stops at 3e-3.
+* **Reported** (`train_pair`): the selected setting, the best strength-only (dim 0) and the best with the matchup
+  term (dim > 0), each tested as an ensemble, and the matchup signal: the paired per-game log-loss difference
+  between the last two on the held-out games, with its standard error.
+
+### 111.2 Scoring against a field
+
+`Evaluator.score(decks, field=None)`: for a pair evaluator, the mean over the field's decks B_1..B_N of P(deck beats
+B_j) - the exact mean of probabilities, averaged over the ensemble's members. `field`: a list of decks (names or
+{name: count}), count rows, or a `FieldTable`; **None, the default, is the evaluator's stored field**: a sample of its
+training data's newest self-play decks (`default_field`: both seats' decks of the newest `--field-iters` 4 training
+iterations, at most `--field-size` 256, drawn without replacement, seeded; saved with the evaluator and in the
+export). The linear and set kinds have no opponent input and refuse a named field (a `ValueError`, never a silent
+fallback); their `score(decks)` is v1's.
+
+**The cost** is one embedding per candidate plus a precomputed field summary: per member the field's table
+(`FieldTable`, built once per field: s(B_j) and g_j = W e(B_j), N x (dim + 1) numbers), then for each candidate its
+strength and embedding (what a linear or set score already computes) and z_j = s(A) + e(A) . g_j - s(B_j) for the N
+field decks: N (dim + 1) multiply-adds and N sigmoids, no field deck re-embedded. (A mean logit would cost O(dim)
+instead of O(N dim) but is not the mean probability, so it is not offered as a hidden default.)
+
+### 111.3 Recency weighting
+
+`train(half_life=H, from_iter=I)` (`--half-life`, `--from-iter`; default off: every training game weighs 1, today's
+fits bit for bit, 111.7): a training game of iteration i weighs 0.5 ** ((ref - i) / H), ref the newest training
+iteration (the iteration in progress weighs 1), on every kind - L-BFGS's weighted mean loss (the bootstrap's counts
+times the weights), Adam's minibatch loss weighted by the row's weight over the mean weight of the bootstrap's rows -
+and `from_iter` drops the training games of iterations before I. Validation and test are untouched (the newest
+iterations, `--time-from` / `--val-iters`), unweighted. The evaluation games (the 128 fixed decks, always in
+training, 108.1) weigh by their iteration like the rest. The report gives the reference iteration and the
+effective number of training games ((sum w)^2 / sum w^2).
+
+### 111.4 Held-out numbers: v1, v2's kinds, the half-life sweep
+
+Run 1's whole log (`E:/mtg-zero/s4a/eoe1-final`, 60,191 games; 51,181 kept, both seats searched), the playing
+checkpoints' values (`values_played_final.npz`), v1's split: `--time-from 72 --val-iters 4` - **test 5,400 games of
+iterations 72-80, validation 2,400 of 68-71**, train the rest (43,381 games, the evaluation games of every iteration
+included, 108.1). Every row an ensemble of 5 bootstrap fits; log loss and Brier per row (a pair row: P(the row's
+deck beats its opponent's deck); a deck-only row: P(the deck wins)); "winner" = the winner's deck scored higher (pair:
+the winner predicted), 5,382 decisive games. Validation log loss of the saved (selected) ensemble.
+
+| model | half-life | val log loss | test log loss | test Brier | winner |
+|---|---|---|---|---|---|
+| v1 linear (published, 108) | - | | 0.6792 | 0.2423 | 59.1% |
+| v1 set, results only / selected (lam 0.25) (published) | - | | 0.6777 / 0.6786 | 0.2415 / 0.2420 | 60.4% / 60.3% |
+| linear | off | 0.68133 | 0.67922 | 0.24229 | 59.1% |
+| linear | 40 | 0.68112 | 0.67887 | 0.24211 | 58.9% |
+| linear | 20 | 0.68117 | 0.67877 | 0.24206 | 59.2% |
+| linear | 10 | 0.68210 | 0.67917 | 0.24226 | 59.4% |
+| set, results only / selected (lam 0.25) | off | - / 0.68056 | 0.67771 / 0.67858 | 0.24155 / 0.24197 | 60.4% / 60.3% |
+| set (results only) | 40 | 0.67974 | 0.67871 | 0.24203 | 60.2% |
+| set, results only / selected (lam 0.25) | 20 | - / 0.68012 | 0.67860 / 0.67891 | 0.24197 / 0.24213 | 60.1% / 60.3% |
+| set (results only) | 10 | 0.68159 | 0.67929 | 0.24232 | 59.6% |
+| pair, strength only (dim 0) | off | 0.66965 | **0.66353** | 0.23482 | 59.2% |
+| pair, selected (dim 4, the matchup term) | off | 0.66930 | 0.66408 | 0.23510 | 59.6% |
+| pair, selected = strength only | 40 | 0.66940 | 0.66275 | 0.23444 | 59.3% |
+| pair, selected = strength only | 20 | 0.66979 | **0.66255** | 0.23434 | 59.4% |
+| pair, selected = strength only (card L2 3e-2) | 10 | 0.67158 | 0.66441 | 0.23519 | 58.9% |
+| pair against its default field (deck only) | off | 0.68124 | 0.67905 | 0.24221 | 59.2% |
+| pair against its default field | 40 | 0.68102 | 0.67858 | 0.24197 | 59.3% |
+| pair against its default field | 20 | 0.68117 | 0.67850 | 0.24194 | 59.5% |
+| pair against its default field | 10 | 0.68192 | 0.67945 | 0.24240 | 58.9% |
+
+(off: today's rerun of v1's recipe, `v2_time/off` and `v2_time/pair_off`; 40 and 10 trained results only, `--lams 0`,
+to save time on a loaded desktop - every run reports its results-only ensemble, so the set rows compare like with
+like; 20 with the full distillation grid. Effective training games ((sum w)^2 / sum w^2): 43,381 off, 38,885 at 40,
+30,004 at 20, 16,423 at 10; the reference iteration is 80, the evaluation games of iterations 72-80 being training
+rows.)
+
+* **The pair model predicts a game far better than any deck-only model** (0.663 against 0.678: the opponent's deck
+  is an input), and **against its default field it judges a deck as well as the linear model** (0.6786-0.6791 against
+  0.6789-0.6792, the winner's deck 59.2-59.5%): the deck-only kinds keep no edge for being trained on the field.
+* **Recency weighting helps a little at half-lives 20-40, and only there.** Paired per-game test differences against
+  no recency (negative = better; se over games): linear -0.00035 +- 0.00014 (40), -0.00045 +- 0.00026 (20), -0.00005 +-
+  0.00047 (10); the pair against its field -0.00047 +- 0.00016 (40), -0.00055 +- 0.00029 (20), +0.00039 +- 0.00047
+  (10); the pair's game prediction (strength only, report numbers) 0.66353 -> 0.66275 (40) / 0.66255 (20) / 0.66441 (10).
+  The set network gains nothing (+0.0001 to +0.0007; its early-stopped Adam fits vary more than the effect), and 10
+  is too short (16k effective games: worse for every kind). The winner's-deck ranking does not move beyond +-0.5 points.
+  Run 1's early iterations are weak but they are cheap evidence about card strength; the newest games are a little
+  more relevant, not decisively so - a stronger case is expected in run 2 and later, where the field itself moves
+  (deck choice).
+* **v2 = half-life 40**: the validation games pick 40 for each of the three kinds (the lowest validation log loss of
+  off / 40 / 20 / 10: linear 0.68112, set 0.67974, pair 0.66940); test confirms linear and pair, not set. At 40 the
+  pair's validation picks the strength alone (dim 0, card L2 1e-2).
+* **Yardsticks** (agreement with iteration 78's pre-game value over 200 held-out pools x 16 builds, 108.4; 17lands
+  Spearman, 108.5): v2 (40) linear 59.8% of pairs ordered as the value, its pick +3.0 points above the candidates'
+  mean; set 58.5%, +2.7; pair 60.0%, +2.9 (v1: linear 60.2%, +2.9; set 59.7%, +3.5); game-in-hand Spearman linear 0.154,
+  set 0.191, pair 0.158 (v1 0.155 and 0.191). Never used to train, weight or select.
+
+### 111.5 Do matchups matter?
+
+**Not measurably, at run 1's data.** The pair kind without recency (`v2_time/pair_off`), the time split's held-out
+games (5,400 games of iterations 72-80; validation 2,400 of 68-71):
+
+| pair model (5-member ensembles) | val log loss | test log loss | test Brier | winner predicted |
+|---|---|---|---|---|
+| strength only (Bradley-Terry, dim 0, card L2 1e-2) | 0.66965 | **0.66353** | 0.23482 | 59.2% |
+| with the matchup term (dim 4, l2_inter 1e-3; the validation's pick) | 0.66930 | 0.66408 | 0.23510 | 59.6% |
+
+The paired per-game difference (matchup term less strength only): test **+0.00055 +- 0.00058** log loss (worse,
+within one standard error), validation -0.00036 +- 0.0009. The grid's best matchup settings beat the strength
+alone on the validation games by ~0.0004, and none carries over; with more freedom (l2_inter 3e-4, dim 8) the
+validation loss rises to 0.671-0.672 (overfitting). A first pass with the matchup embedding from the deck features
+only (U = 0: archetype-level matchups, aggro against control) did no better (prototype, test 0.6641 against 0.6627).
+What the opponent's deck adds is its strength: knowing it takes the per-game log loss from 0.6777-0.6792 (the
+deck-only kinds) to 0.6635. With recency weighting the picture is the same (test, matchup term less strength only:
++0.00011 +- 0.00010 at half-life 40, +0.00024 +- 0.00030 at 20, +0.00007 +- 0.00076 at 10), and there the validation
+picks the strength alone; without it the validation's pick was dim 4 (by 0.0004), which tested 0.0006 worse. The
+matchup term stays available (it found a planted rock-paper-scissors term in the tests) for when the field's decks and
+the pilots grow more distinct (run 2's deck choice); every pair report carries `matchup_signal`.
+
+### 111.6 The export format and the reference scorer
+
+`Evaluator.export(path)` (`python -m mtgz.sealed.evaluator export --evaluator E.pt --out E.json`; `train --export`
+writes `evaluator_<kind>.json` beside each `.pt`): one JSON file, no torch, every number a float32 value written
+exactly, for linear, set and pair. **The authoritative spec is the module docstring's EXPORT FORMAT**
+(`mtgz/sealed/evaluator.py`); in short:
+
+* `format` "mtgz-deck-evaluator-export", `version` 1, `kind`, `hyper` (architecture), `meta` (how it was trained).
+* `cards`: the card table **in `engine/src/az/eoe_cards.txt` order** (card id = the EoE identity, its line; 321 lines):
+  `names`, `in_table` (Paradox Haze 0: not in the engine's table, refused in a deck), `land`, `basic`, `creature`,
+  `mv`, `colours` [5], `basic_colour` [5] - everything the 35 deck features need, so a port needs no card database.
+* `features`: `names` (35), `mean`, `std`; the raw features' definitions (lands, nonbasic lands, creatures, other
+  spells, the nonland curve, mean mana value, colours, splash spells, colourless spells, spells and basics per colour,
+  mono, the pair one-hot, with the main pair's tie rule) are written out formula by formula in the docstring.
+  f = (F - mean) / std.
+* `members` (the ensemble; a score is the mean of the members' probabilities): linear `bias`, `wc` [C], `wf` [35];
+  set adds `emb` [C][d], `u` [C][k], `w1`, `b1`, `w2`, `b2` (h = x emb / 40; a = relu(w1 [h, f] + b1); z = bias + wc .
+  x + wf . f + w2 . a + b2 + 0.5 (|x u|^2 - sum_c x_c |u_c|^2) / 40); pair: `strength` (a linear or set member without
+  `bias`), `U` [C][dim], `P` [35][dim], `W` [dim][dim] (skew-symmetric, exported as M - M^T), z(A, B) = s(A) - s(B) +
+  e(A) . (W e(B)).
+* `field` (pair): the default field's decks as [card id, count] lists, and its `meta`.
+
+**`ReferenceScorer`** (pure numpy, float64; it reads only the JSON: its own card table and its own implementation of
+the features, not `deck_features`) is the reference the Rust port checks against: `score(decks, field=None)`,
+`matchup(a, b)`, `features`, `counts`. Tests (`test_the_export_and_its_reference_scorer`): for linear, set (every
+weight jittered so each term counts, the MLP's zero-initialised output layer included), pair on a linear and on a set
+strength and Bradley-Terry (dim 0): the export's scores by the reference within **1e-6** of the torch model's
+(float32) on 62 decks (a mono and a {name: count} deck among them), against the stored and a named field, and the
+matchups; the reference equals the torch model run in float64 on its features within 1e-8 (the same arithmetic);
+the features within 1e-5 of `deck_features` (float32); `W` exactly skew-symmetric; the card order is
+`eoe_cards.txt`'s; the command line writes the same file. On the trained evaluators (111.8) the largest difference is
+far inside 1e-6.
+
+### 111.7 Old outputs unchanged
+
+Every new behaviour is opt-in: `--kinds` defaults to v1's five kinds (`DEFAULT_KINDS`; 'pair' must be named),
+`--half-life` / `--from-iter` default to None, `--export` to off; the report and the saved files gain keys only when an
+option is used; a linear or set `.pt` is the same dictionary (version 1), a pair `.pt` is version 2 (its field).
+
+* **v1's saved evaluators load and score identically** (`test_evaluator_v1_loads_and_scores_as_it_did`, skipped
+  without the private data): `E:/mtg-zero/s4a/v1_time/evaluator_{linear,set}.pt` score 64 fixed builder decks
+  exactly as main 60397f3 did (`tests/data/evaluator_v1_scores.json`, made at main with one torch thread: float32 sums
+  can round differently at another thread count, ~1e-8), and their exports score them within 1e-6 by the reference.
+* **The fits are the same**: at the same thread count, `fit` on run 1's dataset gives bit-identical predictions at
+  main and on this branch (feat, linear, a distillation mix: checked by hash). Rerunning v1's exact command on this
+  branch (`v2_time/defaults`: all five kinds; its report has exactly v1's keys) reproduces v1's numbers to the 4th-5th
+  decimal (linear 0.67922 against 0.67923, set 0.67771 / 0.67858 against 0.6777 / 0.6786, the features' winner 58.0%
+  against 58.05%) - and so would main's own code: the difference is the environment v1 was trained in (main reruns
+  bit-identically to itself; no thread count from 1 to 4 reproduces v1's last digits), not this branch. The
+  comparisons in 111.4 are therefore between runs made here, today, with v1's published numbers beside them.
+
+### 111.8 Speed, files, reproducing it, tests, gate
+
+**Field-scoring cost** (the desktop loaded by other work, 2 torch threads, 20,000 candidates per call, 5 members):
+linear 22-27 us a candidate, set 55-64 us, **pair against its 256-deck field 28-36 us** (dim 0; 32 us at dim 4), of which
+24 us are the deck features (numpy, the same for every kind) - against 1,465-2,240 us for 256 full pair evaluations
+per candidate (50-70x). The field's table is built once per field (a few ms; keep a `FieldTable` to score many
+candidates). One call for one deck: ~0.6 ms linear, ~0.9 ms pair. **The reference scorer on the trained v2
+evaluators** (400 held-out decks): largest difference from the torch model 3.3e-8 (linear), 2.9e-8 (set), 2.4e-8 (pair
+against its field), 3.3e-8 (pair matchups); v1's own evaluators 2.5-3.4e-8.
+
+**Files** (`E:/mtg-zero/s4a/v2_time/`): `evaluator_{linear,set,pair}.pt` and `.json` (the exports) = v2, copies of
+`hl40/`'s; `chosen.json` (which run, its command, test numbers, the pair's field and matchup signal); the runs `off/`,
+`pair_off/`, `hl40/`, `hl20/`, `hl10/` (each `report.json`, `cards_<kind>.json`, `evaluator_<kind>.pt` and `.json`, and
+its log beside it); `defaults/`, v1's exact command (all five kinds) rerun on this branch, which matches `off` and v1's
+report to the 4th-5th decimal (111.7).
+
+```
+python -m mtgz.sealed.evaluator train E:/mtg-zero/s4a/eoe1-final --values E:/mtg-zero/s4a/values_played_final.npz \
+    --out E:/mtg-zero/s4a/v2_time/hl40 --time-from 72 --val-iters 4 --judge E:/mtg-zero/runs/eoe1/models/iter_0078.pt \
+    --kinds linear,set,pair --half-life 40 --lams 0 --export --threads 2
+python -m mtgz.sealed.evaluator export --evaluator E:/mtg-zero/s4a/v2_time/evaluator_pair.pt --out pair.json
+```
+
+Using it (the public API the self-play wiring calls): `e = Evaluator.load(path)`; `e.score(decks)` (the stored field
+for a pair evaluator, the training field for linear / set), `e.score(decks, field=decks_or_table)` (pair only),
+`t = e.field_table(field)` once per field, `e.matchup(a, b)`; `rank(pool, candidates, e)` and `compare evalpick
+--evaluator .../evaluator_pair.pt` work unchanged (the stored field). Per run of the loop: retrain with `--half-life 40`
+(or `--from-iter`) on the grown log so the evaluator follows the field; the export is what the Rust scorer loads.
+
+**Tests** (`tests/test_evaluator.py`, 11; new or extended): `test_the_pair_model_scores_matchups_and_any_field`
+(exact antisymmetry, W skew-symmetric, the field score = the mean of the matchups, `FieldTable` reuse, the stored field
+by default, members, a planted rock-paper-scissors term found by dim 2 and not by the strength alone, the save / load
+round trip with its field, the linear kind refusing a field and a matchup, a set-based pair seeded and antisymmetric);
+`test_recency_weights_and_the_weighted_fit` (the weights; weights of 1 = the unweighted fit, a weight of 0 = the row
+dropped, the minibatch path); `test_the_export_and_its_reference_scorer` (111.6); `test_evaluator_v1_loads_and_scores_as_it_did`
+(111.7); the small-log pipeline with the opt-ins (pair, half-life, from-iter, field, exports, `rank` with a pair
+evaluator) and none of them in the default report.
+
+**Checks**: `python -m pytest tests -q` (2 torch threads, the desktop shared with other suites): all pass - one
+remote self-play worker test (`test_mac_remote.py::test_a_worker_plays_mtg[matches]`) hit its 300 s timeout under the
+load on the first pass and passed when rerun. **`python tools/gate.py python --no-mac` on ff5ba08: build, pytest 273
+passed and 1 skipped, the mtg-smoke loop (16 games, 0 unfinished), tracked files unchanged: GATE PASSED python
+ff5ba0847e85 in 935s.** The commit after it adds this paragraph only.
+
