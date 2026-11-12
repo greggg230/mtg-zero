@@ -27078,3 +27078,64 @@ f9ca5c3.
 * `tests/test_sealedai_publish.py`: a `run_evaluator` point published as the kind `evaluator`, no file name.
 * zero-core `feat/eoe-run2`: `test_package_hooks.py` and `test_extra_evals.py` unchanged and passing; cargo test 148 passed;
   the full pytest **462 passed** (20 min, 2 torch threads, the desktop shared with other sessions' runs).
+
+### 126.5 Gates, fuzz, smoke (on 32679a3, the code of this section; the commit after it adds 126.5 and 126.6 only)
+
+Run one at a time on the desktop (8 CPU threads at most; other sessions' race and runs on the GPU), `--no-mac`, target dir
+`E:/cargo-target/mtg-zero/eoe-run2-int`, `OMP_NUM_THREADS=2`. **No step failed; nothing was rerun.**
+
+* **`python tools/gate.py engine --no-mac --tested-sha 32679a3a --expect-digest 53839c837bbaf034 --expect-digest0
+  208c723daced22fe --jobs 8`**: build, `DIGEST_ENCODING=0` **208c723daced22fe** and full **53839c837bbaf034** (= main
+  3d898d7's, whose `digests.txt` is the branches' byte for byte), `az` 50, `limits` 13, `hidden` 28, pytest 304 passed and 1
+  skipped, the search smoke (random, seed 0): **`GATE PASSED engine 32679a3a70e9 in 1913s`**.
+* **The fuzz** (release, 112.9's two modes, 20,000 games each as four chunks of 5,000 seeds, the eight chunks side by side;
+  `E:/mtg-zero-scratch/eoe-run2-int/fuzz.sh`, logs in `fuzz/`):
+  * `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_BEST_SHARE=0.5 FUZZ_DECK_CHOICE=32
+    FUZZ_DECK_CHOICE_BY=E:/mtg-zero/s4a/v2_time/evaluator_set.json`: **passed, every seed** - wins 9,812 / 9,617, 571
+    draws, none aborted; 36,046 seats chose by the evaluator (each checked to be its pool's best candidate), 3,954 explored;
+    541,584 worlds dealt from the choosing priors (541,433 with another deck), 2.87M information-set steps; 3,178-3,227 s a
+    chunk.
+  * `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_BEST_SHARE=0.5`: **passed, every seed** - wins 9,705 / 9,576, 719 draws, none
+    aborted; 559,458 worlds (559,256 another deck), 2.91M steps; 1,523-1,537 s a chunk.
+  * Both are exactly 112.9's totals (wins, draws, choices, worlds, steps): main's engine changes since 60397f3 (the
+    Doomsday and Sneak and Show lanes) leave these sealed EoE games as they were.
+* **`python tools/gate.py python --no-mac --jobs 8`**: build, pytest 304 passed and 1 skipped, the run-loop smoke (mtg-smoke,
+  16 games, 0 unfinished): **`GATE PASSED python 32679a3a70e9 in 290s`**.
+* **`python tools/gate.py optin-core --no-mac --baseline-root <mtg-zero-wt/eoe-run2-base: main 3d898d7, zero-core f9ca5c3,
+  built> --jobs 8 --step-timeout 7200`**: build, core cargo tests 148, **checkpoint_compat byte identity: identical** (mtg,
+  a random network, visits and cq 2,465 samples each), `az` 50, `hidden` 28, the other games' build-only 3 of 3
+  (glassroad-zero, caverna-zero, kingdombuilder-zero), the core build, **core pytest 451 passed, 11 skipped (958 s)**:
+  **`GATE PASSED optin-core 32679a3a70e9 in 1540s`** - the tier 112.9 and 113.6 could not pass under the night's load
+  (no subprocess timeout, no access violation this time).
+
+**The smoke** (`E:/mtg-zero-scratch/eoe-run2-int/smoke.sh`, CPU, 4 minutes): `python -m mtgz.az.run --run .../smoke/run
+--preset eoe-2e-smoke --iters 4 --threads 2 --groups 1 --torch-threads 1 --spec <eoe-2e-smoke's, the evaluator eval-v2's
+set export and its sha256> --eval-remote local --real-decks-every 4 --eval-games 4 --eval-random-games 2 --elo-games 2
+--ref-games 2`, every evaluation through the 'local' remote standing in for the Mac (the run's RemoteEval, `python -m
+mtgz.az.remote eval` with its checkout check `32679a3a70e9, unchanged, its engine built there`, `evaluate_mirror` on the
+mirror, the result back). Four iterations, not three: the first retrain can start at iteration 3 at the earliest
+(`evaluator_min_window` 2 after the first version), so iteration 4 is the first to play a retrained version.
+
+* Iteration 1 copied the spec's file in as `v0000` (`1e0ac3309134`) and chose by it; iterations 1-3 played v0000; at
+  iteration 3's start **the retrain of v0002 started** (iterations 1-2, 34 games, lam 0.25, validation 0.671, 15.4 s),
+  `deck evaluator v0002 published` at iteration 4's start and **iteration 4 chose by v0002** (`3bf0b1db4f39`); v0003
+  (iterations 2-3) ran past the run's end.
+* **The deck-choice evaluation** ran at every iteration on the remote (4 games: iteration 0 the spec's file, 1-3 v0000, 4
+  v0002), and **the real decks** at iterations 0 and 4 (`real_decks_every` 4; 2 pools x 2 games, 8 games each), **our
+  decks by `run_evaluator`**: iteration 0 the spec's own file (no self-play yet: `evaluator_of`'s fallback, readable on this
+  machine), **iteration 4 v0002** (`evaluator_sha` 3bf0b1db4f39449d, A 0.625, B 0.5). Both in evals.jsonl's `extras` with
+  `host` local and in the log as `iter N real_decks (remote local)`; the mirror received `evaluators/used.jsonl`,
+  `v0000.json`, `v0002.json` (`remote_eval_inputs`).
+* `python -m mtgz.sealed.games .../smoke/run --check`: **132 of 132 games rebuilt, 0 mismatches** (64 self-play: 113 seats
+  chose, 15 explored; 68 evaluation games, the deck-choice evaluation's 20 chosen seats among them); **no logged game has a
+  given deck**: the 16 real-deck games stayed out of the log.
+
+### 126.6 Run 2's launch, open points
+
+The launch is 112.6's command as merged (from a pinned worktree of the merged commit; `bash tools/mac.sh --eval-checkout`
+first). Open: (1) not run on the Mac itself (the Mac ran a race): the 'local' remote is the same code over a subprocess
+instead of ssh. (2) A remote evaluation of an iteration no self-play recorded (a fresh run's iteration 0) cannot read the
+spec's own evaluator file on the Mac: both the deck-choice evaluation and `run_evaluator` would fail loudly there (logged,
+the run goes on); run 2 forks at 78 and first evaluates 80. (3) Run 2's real-deck numbers use the run's evaluator, not run
+1's best guess: 113.4's backfill (`best`) is not the same builder; `--builder run_evaluator` on run 2's checkpoints, or
+`export:<file>` with eval-v2's export on run 1's, compares like with like.
