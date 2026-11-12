@@ -10339,7 +10339,7 @@ yardsticks 4.5-6.5 min, Elo 6-10 min: **~18-25 minutes**, 40 iterations in ~12-1
 
 ### 54.8 Limits, and what best-of-three needs
 
-* **The five sideboard cards outside the cube are not supported**: Consign to Memory, Hydroblast,
+* **The five sideboard cards outside the cube are not supported** (since section 122 they are): Consign to Memory, Hydroblast,
   Meltdown, Price of Progress, Rough // Tumble (`Decklist::unsupported_sideboard`; the deck file keeps
   the full 75). mtg-bot's parser already claims four of them in its roto pool (all but Rough //
   Tumble); each needs its IR appended to the legacy pool and registry (identities 548..), its
@@ -10349,7 +10349,10 @@ yardsticks 4.5-6.5 min, Elo 6-10 min: **~18-25 minutes**, 40 iterations in ~12-1
   "destroy each artifact with mana value X or less", 30), Price of Progress (damage to each player by
   the nonbasic lands they control, counted on resolution), Rough // Tumble (a split card, 25 and 709:
   2 damage to each creature without flying, 6 to each with flying).
-* **Constructed best-of-three** (`"constructed"` with `"format": "bo3"` is refused) needs: sideboarding
+* **Constructed best-of-three: built, section 120** (branch `delver-bo3`, the user's decisions of
+  2026-11-11: each pool exactly the 75, every deck after sideboarding exactly 60, not the 60..=75
+  below; the hidden 60s dealt by `ConstructedPrior`; the deck target and its tilt). The plan as
+  written here: constructed best-of-three (`"constructed"` with `"format": "bo3"` was refused) needs: sideboarding
   bounds of constructed play in `MatchPool::new` (today a spec decklist keeps its size exactly, 42.2):
   a deck of 60..=75 cards from the 75 (at least 60, 100.2a; the sideboard the rest, at most 15, 100.4a;
   the four-card limit holds by construction since the pool is the legal 75); the pool list fits (29
@@ -26033,6 +26036,567 @@ the license or with rates outside 0..1. Screenshots for approval (local preview,
   failure is a different timing test per run and passes alone: the load, as 105.7 saw. A run of both tiers on a quieter
   desktop is the maintainer's before merging.
 
+## 120. Constructed best-of-three: the Delver mirror's sideboarding and hidden 60s (branch `delver-bo3`, 2026-11-11)
+
+Branch `delver-bo3` (from main 60397f3; zero-core pinned at f9ca5c3, unchanged). DESIGN.md 8's D3 but the five
+sideboard cards outside the cube (another lane ports them after the Doomsday lanes merge): the list 54.8 gave,
+built with the user's decisions of 2026-11-11, **deck-agnostic**: the two players may play different 75s (the
+engine and the spec name no deck; only the presets name Delver; a second deck, Sneak and Show, comes from another
+session). Layout v6, `NUM_ACTIONS` and every action id are unchanged; best-of-one
+and the cube's best-of-three (36.11) are unchanged (the digests, 120.6). (Section numbers: 110-113 are taken on other branches,
+111 on main by `eval-v2`; 121 is the `bo3-game-episodes` lane's, 122 the five sideboard cards': this one is 120.)
+
+**The user's decisions (2026-11-11).**
+
+1. `"constructed": true` with `"format": "bo3"` is legal. Each player's pool is exactly their 75 with its copies,
+   **no free basic land entries** (CR 100.4a: a constructed player sideboards with the 75 only; the Delver 75 has one
+   Island, so that entry's maximum is 1), and **every deck after sideboarding is exactly 60 cards** (the user's format
+   restriction, as limited's exactly 40 in section 42); the sideboard is the rest. Every legal 60 is reachable in
+   exactly one decision sequence (36.2's property).
+2. Both 75s are public. Game 1 is best-of-one's model (the opponent's 60 = their registered main, known). From game 2
+   on each player's chosen 60 is hidden from the opponent (its size, 60, is public), dealt by `determinize` through a
+   deck prior of "60 of a known 75" (section 102's machinery): it holds every card of theirs the viewer knows in the
+   current game and no more copies than the 75 has. Cards revealed in earlier games do not constrain the current 60
+   (they may have been sided out); they stay inputs (`OPP_REVEALED`).
+3. The opponent's deck is predicted, the prediction updating as cards are seen: the `deck` auxiliary target (102.4,
+   105) for constructed best-of-three, so the Delver network's belief head can gain a deck segment (zero-core az.md
+   37, `net.widen_aux`) and the search deals from it by the deck tilt (106). The deck reader as an input is not in
+   scope.
+4. The heuristic keeps its deck (`PASS`, 36.5).
+5. Presets `delver-mirror-bo3` (both full 75s; it refuses loudly, naming the cards, while a card of the 75 is
+   unsupported) and `delver-bo3-smoke` (the main and the 75's supported sideboard cards: 3 Pyroblast, 3 Force of
+   Negation, Karakas, Unholy Heat).
+
+### 120.1 The format
+
+| What | Where | How |
+|---|---|---|
+| the spec | `MtgSpec::parse` | constructed best-of-three needs decklists (`pN`, `pN_sideboard`); CR 100.2a / 100.4a as before (54.4: four copies over the 75, a sideboard of at most 15); **the main exactly 60** (`constructed::BO3_DECK`: a 61-card main, legal in best-of-one, is refused in best-of-three, since every deck after sideboarding is 60); no pools (the default `pools` is false for constructed), no `hidden_decklists` (best-of-one's); a 75 without a sideboard is legal (the deck can only be kept). The evaluation spec is the spec |
+| unsupported cards | the spec's lists | every card of a list the table does not know or support is named in one refusal (was: the first only), e.g. the full Delver 75: "mtg spec: decks.p0_sideboard: 5 cards the card table does not know or support: unknown card "Consign to Memory"; unknown card "Hydroblast"; unknown card "Meltdown"; unknown card "Price of Progress"; unknown card "Rough // Tumble"". A single bad card's message is as before. No silent drop, no substitution |
+| the pool | `MatchPool::constructed` | the list is every card of the 75 by definition with its copies, basic lands too, which are pool cards here (Island: one copy), with **no free entry** (limited's five basic land entries of any number, 100.4b, are not appended: `n_cards` = the list's length); `min_deck` = `max_deck` = the main's size, 60. The Delver 75: 29 entries of `LIBRARY`'s 64, at most 4 copies of `NUMBER`'s 31; a 75 past either range is refused loudly at the match (`MatchState::constructed`), never truncated (120.7) |
+| sideboarding | `Sideboarding` (36.2), unchanged | the same decisions and range rule: an entry is offered only when a 60 stays reachable with the later entries free, `PASS` only at 60. **Every legal 60 is reachable in exactly one way** (the entries it changes, in list order, with their new counts, then `PASS`): `cr_100_4a_constructed_sideboarding_reaches_every_legal_deck_exactly_once` searches every decision sequence of a small constructed pool (a card of 4 copies, one of 2, a basic land of 1 copy, a card in both main and sideboard, a sideboard single) and finds each of the 42 decks of exactly 6 once from four starts; `a_constructed_deck_is_sideboarded_to_exactly_60_cards` reaches 400 legal 60s (the constructed prior's draws, every swap count, on the 68 and on a 75 of supported cards) by their canonical paths, a 59 or 61 by none, and 800 random walks finish only at 60 (7.8 decisions a walk) |
+| the match | `MatchState::constructed`, `MtgAz::constructed_bo3` | the pools the 75s, no first picks (`priors` None), each seat's deck prior a `ConstructedPrior` of its 75, `constructed_bo3` set; game 1 plays the mains with `GameSpec::hidden_decks` false (best-of-one's game); each later game (`next_game`) with `hidden_decks` and the new `GameSpec::deck_clouds` (120.2) |
+| the result, the chooser, `KEY_GAME` | 36.1, 36.11 | unchanged (the deck and sideboard sizes in `KEY_GAME` are 60 and the sideboard's, the same every game) |
+| the heuristic | `bots::sideboard` | `PASS`: its 60 kept (`the_heuristic_keeps_its_deck_and_constructed_matches_end`) |
+| two different 75s | per seat | each seat its own pool, sideboard size and prior: `two_different_75s_play_constructed_matches` plays the Delver main with its 8 supported sideboard cards against another 75 of supported cards (60 with 8 Island and 6 Mountain, a 12-card sideboard with a seventh Mountain: basic land entries of 8 and 7 copies, no free entry), 10 matches, 574 worlds of both viewers (324 in later games), each dealing the other player's 60 from that player's 75; `FUZZ_POOL=delver` gives P1 that 75 one match in four |
+
+### 120.2 The information model and the base prior
+
+| | the opponent's deck, as the viewer knows it | `determinize` |
+|---|---|---|
+| game 1 | their registered main (open decklists, 54.5) | best-of-one's deal from the real 60: `GameSpec::hidden_decks` false, the game writes `OPP_HIDDEN` itself |
+| between games 1 and 2 | their last deck: the main; the deck they chose, if they sideboarded first: hidden; their sideboarding in progress: hidden | the chosen deck dealt from the prior with nothing shown (the same K decks as game 2's first deals); their sideboarding in progress restarted from the main |
+| games 2 and 3 | hidden within the public 75: its size (60), every card of theirs the viewer knows in this game (public zones, cards known exactly, clouds) | the 60 dealt by `ConstructedPrior` holding those cards (K1-K3 of 102.1), its unknown cards dealt to their unknown slots (`Game::redeal`), the sideboard the rest of the 75; `Game::determinize` follows |
+| between games 2 and 3 | their last deck hidden too | the last deck dealt from the prior with what the viewer knew at game 2's end (nothing dealt into the finished game), then as between games 1 and 2 |
+
+**`GameSpec::deck_clouds`** (new; needs `hidden_decks`): a cloud over a player's whole hand and library is kept
+(`Game::tidy_clouds`), as hidden decklists keep it (102.1): with open decklists it says nothing the decklist does not,
+but with the 60 hidden it is the record that a card the viewer saw is still in the deck (Delver of Secrets reveals the
+top card, Brainstorm puts back two, a fetch land shuffles), so R counts copies exactly. Unlike `hidden_decklists` it
+leaves the other player's sideboard size in the view and the encoding: it is public (75 - 60). The later games set
+`hidden_decks` too (36.11's question rules: the companion question asked of everyone, the deck questions and card names
+by `Game::known_pools`, here the opponent's 75; the match writes `OPP_HIDDEN`).
+
+**The prior** (`hidden_decks::ConstructedPrior`, a `DeckPrior` of 102.1; one per seat, of that seat's 75).
+
+* **Its base: uniform over the number of swaps, then uniform over the decks with that number.** A deck's swaps s are
+  its cards beyond the main's counts (0..=S, S the sideboard's size); each s has probability 1 / (S + 1), and the
+  decks with s swaps (count vectors) are equally likely. Which cards come in and which go out is uniform: no
+  sideboarding knowledge (DESIGN.md 0: nothing human), only the public main as the anchor.
+* **Why not uniform over the legal 60s** (the example in the decisions): the number of decks grows steeply with s, so a
+  uniform 60 is mostly a deck with most of the sideboard in. Measured on a 75 with a 15-card sideboard of supported
+  cards (the Delver main and 3 Pyroblast, 3 Force of Negation, Karakas, Unholy Heat, 2 Spell Pierce, 3 Counterspell, 2
+  Fiery Confluence; `the_constructed_prior_meets_its_contract`): 1.76 x 10^10 legal 60s, by swaps 1, 146, 5,776, ...,
+  3.97 x 10^9 at s = 12, 3.5 x 10^8 at 15; **a uniform 60 has 11.42 swaps on average, and five or fewer with probability
+  6 x 10^-4**. The search's worlds would hold decks no player builds, and the deck tilt, which only reweighs the K cached
+  decks (106.1), could not reach a deck near the main: none of the K would be one. The swap-count prior puts the same
+  mass on every number of swaps (draws of it: 3,200 untilted samples, each s 163-228 times of the expected 200).
+  **To decide (120.7)**: whether this base stands; it is a modelling choice, not a rules approximation.
+* **Conditioned exactly** on what the viewer knows: every deck holds the shown cards R (copies counted; R from
+  `sample::knowledge`, as 102's), a revealed companion stays in the sideboard and every card passes its condition (per
+  card, one per name). The posterior P(deck | K) ∝ P_base(deck) 1[deck meets K] is sampled exactly, in bounded time and
+  without rejection: a table over the 75's entries of the swaps in and out so far (`swap_table`: (S + 1)^2 states an
+  entry), s drawn by the table's weight of the decks with s swaps over the base's count of them, then each entry's count
+  backwards. R comes from the real deck, so a deck holding it always exists (no failure path). The posterior is Bayes'
+  under the base: seeing two Pyroblasts, a third Unholy Heat and Karakas (four swaps at least) makes many swaps likely
+  (a deck of s swaps holds a given sideboard card about s / 15 of the time): its decks hold ~2.4 of the 3 Counterspells.
+* **The tilt** (`DeckWant::tilt`, the K = 0 deck tilt, 102.1): a deck's probability times each card's weight per copy
+  beyond R, an exponential tilt of the exact posterior (per-layer normalised, so a 10^6 weight over 60 cards neither
+  overflows nor vanishes); a tilt of 1 is the untilted draw, draw for draw. `expected_fill` is exact (each entry's
+  marginal under the untilted posterior, by a forward and a backward table). `DeckPrior` gained `match_pool` (a
+  constructed sample's pool is the 75's list, `MatchPool::constructed`; the default, `MatchPool::new`, is every other
+  prior's, unchanged) and `check_own` (a constructed sample: the deck and sideboard exactly the 75), checked at every
+  deal with `check_sample`.
+* **The K-sample deal** (102.8) and **the deck tilt** (106) are 102's, unchanged: K = `deal_samples` (32) decks per
+  request, memoized per match; the deck tilt reweighs them by the prediction with the ESS floor.
+* **Cost** (`constructed_deal_cost`, ignored; the desktop loaded by other workstreams): a prior sample 76-114 us (the
+  table: 29 entries x 256 states); `determinize` in a later game 5.3 ms at a request's first deal (its K = 32 decks
+  drawn), then 3.5 us a deal (756 deals) - a new request comes when the viewer sees a new card of the opponent's.
+
+**What is exact and what is modelled.** Exact: K1-K3 (the size, R, the 75's copies, a companion's condition), every
+known card in place, the clouds, the viewer's own cards untouched; a world depends only on its seed and the viewer's
+information (the request: the seat, 60, R, a companion). Modelled: the distribution over the rest of the deck (the base
+prior), and between games the first sideboarder's choice dealt from the base (the cube's 36.11 assumes it kept the
+last deck; here the next game's first deals and the between-games deal are the same K decks, so the search crossing
+from sideboarding into game 2 sees one distribution).
+
+### 120.3 What was built
+
+* `game.rs`: `GameSpec::deck_clouds` (default false; refused without `hidden_decks`). `hidden.rs`: `tidy_clouds` keeps a
+  whole hand-and-library cloud with it.
+* `az/matches.rs`: `MatchPool::constructed`, `MatchState::constructed`, `MatchState::constructed_bo3`; `next_game` sets
+  `hidden_decks` and `deck_clouds` for a constructed best-of-three's later games.
+* `az/hidden_decks.rs`: `ConstructedPrior` (120.2); `DeckPrior::match_pool` and `check_own`; `Dealt::new` takes the
+  prior's pool; `sample_hidden_deck` deals a constructed best-of-three's hidden decks (games 2-3; nothing in game 1)
+  and between games `deal_constructed_between`; `MtgAz::deals_hidden_decks` (hidden decklists or a constructed
+  best-of-three), `deck_hidden(o)`; `deck_tilt_of` and `determinize_deck_tilted` follow.
+* `az/mod.rs`: the spec (120.1), `MtgAz::constructed_bo3`, `determinize` deals with `deals_hidden_decks`.
+* `az/belief.rs`: the deck tilt is allowed in a constructed best-of-three (its later games' decks are hidden; in game 1
+  the deal is the open one) and deals through `sample_hidden_deck`; an open-decklist game still refuses it (106.2).
+* `az/encode.rs`: `encode_match` writes the candidates into `OPP_HIDDEN` for a constructed best-of-three's later games
+  only (game 1's `OPP_HIDDEN` is the game's own, open); `OPP_POOL` is the whole 75 in every game.
+* `public_state.rs`: `MatchState::constructed_bo3` classified (derived: a setting).
+* Python: `decklists.mirror_bo3_spec`, `DELVER_SMOKE_SIDEBOARD`; the presets (120.5); `tools/search_smoke.py`'s spec
+  `delver_bo3`.
+
+### 120.4 Hidden information
+
+* **What the encoding shows of the opponent's deck** in the later games: their pool (`OPP_POOL`, the public 75), the
+  candidates (`OPP_HIDDEN`: the 75 less their cards the viewer knows in this game, exactly or by clouds; 36.11's), what
+  they revealed in earlier games (`OPP_REVEALED`), their deck size (60) and sideboard size, and everything the game
+  shows as before. Nothing reads their chosen 60. While sideboarding the other player's context shows `Sideboard`
+  whatever their decision, their deck being built is not encoded (36.7, 36.11), and `KEY_GAME`'s sizes are the same
+  every game.
+* **Tests.** `tests/az.rs`: the public-state gate's positions gain a kind, the Delver mirror's constructed best-of-three
+  in games 2-3 (last, so the other kinds' positions are as before; 60 positions in `public_state_reaches_the_encoding`,
+  every perturbation reaching both views and encodings there); `the_v5_facts_encode_no_hidden_information` and the
+  belief and deck-target tests run on them (two generic assumptions extended: a constructed best-of-three's later
+  games deal the opponent's cards, and the belief weights are read after the deck is dealt, as hidden decklists');
+  new: `constructed_bo3_a_hidden_60_never_reaches_the_other_players_encoding_or_actions` (two real matches identical
+  but for one player's sideboarding after game 1 - its main kept, or a random other 60 - give the other player the same
+  encoding at every step of game 2 and the same legal actions at each of its decisions while the chance keys agree:
+  16 twin matches, 104 steps in step, 51 of them the other player's decisions) and
+  `constructed_bo3_determinize_keeps_the_view_and_deals_legal_60s` (192 worlds of both viewers, uniform and deck-tilted
+  at 0.5 / 1 / 8: the decider's actions and each viewer's whole encoding unchanged, a legal 60 of the public 75, the
+  deck target each world's own; 189 with another 60 than the real one). `tests/constructed_bo3.rs` (9 and 1 ignored):
+  the spec, the pool, the exhaustive reachability, exactly 60, the prior's contract,
+  `game_1_is_open_and_the_later_games_deal_hidden_60s` (144 game-1 worlds, all the main; 144 later-game worlds, all
+  with another 60, every one holding what the viewer saw, the encoding and actions kept),
+  `between_games_the_hidden_decks_are_dealt` (the second sideboarder blind to the first's choice: two matches that differ
+  only in that choice give it the same worlds, 40 matches), the heuristic, two different 75s (above).
+
+### 120.5 The deck target, the tilt, the presets
+
+The `deck` target (`MtgAz::AUX`'s second segment, 102.4) is emitted in every game state as before: in a constructed
+best-of-three it is the opponent's unseen cards (hand, library, face-down) of their real 60, by identity - from game 2
+on what the network is to predict. The presets (`mtgz/az/__init__.py`, next to `delver-mirror`):
+
+* **`delver-mirror-bo3`** = `delver-mirror` with `SPEC_DELVER_BO3` (both seats the pinned 75: the main and its 15,
+  `"format": "bo3"`) as spec and evaluation spec, `aux_deck_w` 0.5 and `selfplay_belief_tilts` = `eval_belief_tilts` =
+  `{"deck": 1.0}` (as the EoE presets declare them; the floor the spec's default, 16 effective decks of 32), no deck
+  reader, `max_steps` 60,000 (a match is up to three games, as `mtg-4`). Today any use of it refuses at the spec,
+  naming the five unsupported cards (`test_the_full_preset_refuses_naming_the_unsupported_cards`).
+* **`delver-bo3-smoke`** = `delver-smoke` (CPU, the tiny network) with the smoke spec: the main and the 75's 8
+  supported sideboard cards, the same deck target and tilt.
+
+`belief_tilts.deck` in game 1 deals nothing differently (the decks are open): allowed, since the setting acts from game
+2 on (106.2's refusal is for a game whose decks are never hidden). Moving the Delver line onto best-of-three: its
+belief-only head widens onto [belief, deck] exactly (`net.widen_aux`, 105.3) - a maintainer's decision with the run.
+
+### 120.6 Checks
+
+* **Behaviour digests** (`cargo test --release -p engine --test digest -- --ignored`): full **53839c837bbaf034**,
+  `DIGEST_ENCODING=0` **208c723daced22fe**, the base's (100.4.11's): unchanged, every game equal to the recorded file.
+  Best-of-one is untouched by construction too: `deck_clouds` is false outside a constructed best-of-three's later
+  games, and every other prior keeps `MatchPool::new`.
+* **The cube's best-of-three unchanged**: the default fuzz's 1,000 matches give base 60397f3's numbers exactly (2,547
+  games, 547 of three, 754 drawn, 860.0 decisions per match, 23,778 sideboarding decisions, 3,025 decks changed; 42,944
+  hidden-pool worlds, first picks resampled in 26,206, decks in 42,898: `FUZZ_GAMES=20000 ... fuzz_random_matches` on a
+  detached checkout of the base), and a scratch probe hashing 120 cube best-of-three matches (91,159 decisions: every
+  legal-action list, both viewers' whole encodings, the chance keys, and every 16th decision a world of each viewer, its
+  encoding, actions, decks and fingerprint; not checked in) gives **f8b7236b8cb08eac** on the base and on this branch.
+* **The Delver mirror's best-of-one unchanged**: `FUZZ_POOL=delver FUZZ_GAMES=20000`'s 20,000 games give the base's
+  numbers exactly (20,000 games, wins 9,673 / 9,563, 764 draws, 36.8 turns, 381.6 decisions, 11,882,303 options completed: the same line on a checkout of the base; the Murktide and Prismari Charm counts differ only by the replay tests' games, which run beside the games here and not in the base's filtered run).
+* **The full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, 153 binaries) on the code
+  before the second-75 test: **2,272 passed, 0 failed, 22 ignored**; `tests/constructed_bo3.rs` with it: 9 passed, 1
+  ignored; `tests/az.rs` 50 (48 and the two new), `constructed` 7.
+* **`FUZZ_GAMES=20000`** (default): passed, 2,458 s on the loaded desktop; the 20,000 games are the base's (wins 9,804 /
+  10,074, 122 draws, 31.8 turns, 438.2 decisions, 19,192,377 options completed; 100.4.10's games) and the 1,000 matches
+  above.
+* **`FUZZ_POOL=delver FUZZ_GAMES=20000`**: passed, 1,107 s. The games as above (Murktide Regent cast 9,875 times, its
+  trigger 388, Prismari Charm 14,691); **1,000 constructed best-of-three matches**: 2,659 games (659 matches of three,
+  877 drawn games - one match in four has 12-turn games -, 0 aborted), 885.1 decisions per match; **3,318 sideboardings,
+  24,012 sideboarding decisions (7.24 per sideboarding)**, 3,138 later-game decks changed (every one a legal 60 of its
+  75); 44,086 checked worlds, the opponent's 60 hidden in 27,430 of them (27,257 with another 60 than the real one), 332
+  first sideboarders' hidden choices dealt, 26,912 deck-tilted worlds (each deck one of the K cached decks); every world
+  with the decider's actions and both viewers' whole encodings kept, the information-set check, 30 random moves on.
+* **pytest** (`bash tools/build_py.sh`, `python -m pytest tests -q`): 271 passed, 2 failed, 1 skipped, then 273 passed: one fix
+  (`test_deck_tilt.py::test_the_presets_and_seats` asserted that only EoE presets set a deck tilt: the constructed
+  best-of-three's are excepted); `test_mac_remote.py::test_a_remote_eoe_evaluation_logs_its_games` timed out (600 s) once
+  under the fuzz's load and passes alone (77 s). New: `tests/test_delver_bo3.py` (4).
+* **The run loop** (`python -m mtgz.az.run --run E:/mtg-zero-scratch/delver-bo3/smoke --preset delver-bo3-smoke`, CPU,
+  a scratch directory): 3 iterations end to end, each 16 self-play matches (0 unfinished; 1,743-1,949 decisions and
+  151-168 turns a match, ~7,100-7,800 samples), training with the deck target (`aux_deck` 2.950 / 2.933 / 2.928 nats per
+  card), the heuristic and random yardsticks and Elo, the evaluation pool `visits-b0-tdeck1` (the deck tilt at 1); no
+  failure. `--preset delver-mirror-bo3` refuses at its first driver, naming the five cards.
+* **The search smoke** (`python tools/search_smoke.py --specs delver_bo3 --seeds 0-1 --games 200 --preset
+  delver-mirror`: mtg-3's self-play seat, a uniform evaluator): 0 failed of 2, 400 matches, 765,354 decisions (1,913 a
+  match), 21.3 million simulations, 862 s.
+* **The gate** on 73da76a (`python tools/gate.py engine --no-mac --tested-sha 73da76a --expect-digest 53839c837bbaf034
+  --expect-digest0 208c723daced22fe`): the first run, on a desktop loaded by other workstreams' fuzzers and builds,
+  passed the build, both digests, `az` 50, `limits` 13 and `hidden` 28, and failed pytest on two remote-worker timeouts
+  (`test_mac_remote.py::test_a_remote_eoe_evaluation_logs_its_games` and `::test_a_worker_plays_mtg[matches]`; both
+  pass alone, 96 s): `GATE FAILED engine 73da76afd66e in 4278s`. Run again: **`GATE PASSED engine 73da76afd66e in
+  953s`** (build, both digests, `az` 50, `limits` 13, `hidden` 28, pytest 273 passed and 1 skipped, the search smoke).
+
+### 120.7 Left, uncertain, decisions
+
+* **The base prior** (120.2) is the main decision to confirm: uniform over the swap count, then uniform. A different
+  base (a decreasing swap count, or the last game's deck as the anchor in game 3) is a change of `ConstructedPrior`
+  alone; the network's deck prediction (the tilt) corrects the base within the K decks' reach.
+* **The first sideboarder's choice** is dealt from the base prior (120.2), where the cube's 36.11 keeps the last deck.
+* **Bounds that do not bite here and are refused loudly**: a 75 of more than 64 different cards (`LIBRARY`'s ids and
+  the list block's 64 slots) or more than 31 copies of one card (`NUMBER`'s range) is refused at the match; making
+  every such 75 playable needs a decomposed entry choice and a list block past 64 slots (a layout change), not built.
+* **Approved by the user (2026-11-12)**: the base prior as it is - uniform over the swap count, then uniform over the
+  decks with it (120.2); the first sideboarder's choice dealt from that same prior (120.2); the loud refusal of a 75
+  past the action ranges (above). (That day's fourth approval, temperature at the start of every game, is 121.7's.)
+* **The five sideboard cards** (54.8; their section is to be 122): the full preset refuses until they are ported; then `DELVER_SMOKE_SIDEBOARD` and
+  `test_the_constructed_bo3_spec`'s refusal check (it fails loudly once the five parse) are to be updated, and the fuzz
+  and the gate kind pick the full 75 up by themselves (they take the supported sideboard cards). Done at the
+  integration (129.2): both presets play the full 75.
+* **Not mine** (other lanes): each game of a match as its own episode and the value labels (`bo3-game-episodes`, 121; the
+  `SearchGame` result mapping is untouched here), the MTGO pilot, runs.
+* `temp_moves` in a match covers game 1's opening only (36.12): kept as `delver-mirror`'s.
+* **Where other determinize constraints meet this deal** (merge note; e.g. the Sneak and Show lane's legal-pick check
+  on a Show and Tell chooser's re-dealt hand, CR 101.4a). The hidden 60 is a step before the usual deal, the same as
+  hidden decklists' (102.1): `hidden_decks.rs` `MtgAz::sample_hidden_deck` (the request from `sample::knowledge`, a deck
+  of `DeckPrior::sample` or the K cached decks, `Game::redeal` setting the opponent's unknown slots' identities, clouds
+  kept by `Game::resample_with_clouds`), then always `Game::determinize` or `Game::determinize_weighted` (`hidden.rs`:
+  the pins, the clouds, the hand deal and any per-world acceptance there) - in `SearchGame::determinize` (`mod.rs`),
+  `MtgAz::determinize_belief` (`belief.rs`) and `determinize_deck_tilted` (`hidden_decks.rs`); nothing here deals hand
+  slots outside that path. A constraint on which cards exist (not only where they are: a face-down pick that must be a
+  creature or a land) has to reach the deck's request too (`sample::knowledge` / `DeckWant`), or a dealt 60 may hold no
+  card that passes it; with open decklists the real deck always does. Show and Tell's pick reaches the request since
+  the integration (129.3).
+
+## 121. Best-of-three with one episode per game (`"game_episodes": true`; branch `bo3-game-episodes`, 2026-11-11)
+
+(110-113 are taken or contested by other branches, 120 is the constructed best-of-three lane's; this section was 112 in
+its first commit, 2f5886a.) The user's decision of 2026-11-11 for best-of-three on the Delver mirror: each **game** of a
+match is its own episode for the search and for training; the match stays the unit self-play plays and evaluation
+measures. The core's half is zero-core `feat/match-episodes` (its docs/az.md 42, docs/search.md 1.3 and 2.14: chained
+episodes); this section is the `mtg` mapping. Without the key every spec is what it was (the behaviour digests are
+unchanged, 121.5).
+
+### 121.1 Why
+
+36.6's mapping made the match one episode: the search crossed a game's end into sideboarding and the next game, and every
+row's value target was the match's result. Without draws a player's match-win chance after a game is a fixed amount plus
+a positive multiple of its chance to win that game, so playing each game to win it is match-optimal; per-game labels are
+much less noisy (game 3's luck no longer lands on game 2's rows) and keep the value head's meaning that of the
+best-of-one Delver line a best-of-three run is warm-started from (whose search settings, cq_c_scale 0.3 and value_q 0.6,
+were tuned on the per-game scale). zero-core's value target stays `(1 - value_q) z + value_q q_root`; z becomes the
+row's own game's result.
+
+### 121.2 The switch and the mapping
+
+`"game_episodes": true` in the spec (default false), best-of-three only (`"format": "bo3"`; refused with best-of-one,
+where the game is the match already). The evaluation spec keeps the key (`eval_json` and `evaldecks.eval_spec` change
+only the decks), so the yardstick, random, Elo and h2h games play chained matches too. 36.6's table, best-of-three with
+the key:
+
+| zero-core | best-of-three, `game_episodes` |
+|---|---|
+| `to_move` | None at a game's end (`MatchState::between`: the game is over, the match is not, sideboarding has not begun) and at the match's end; else 36.6's |
+| `result`, `margin` | the game's (best-of-one's: 1 / 0 / 0.5, the life difference / 20) |
+| `score`, `rounds` | game wins, the turns of all games (as 36.6) |
+| `chained` | true |
+| `next_episode(None)` (the game ended by the rules) | the match over (two wins, three games, or an aborted game): `Over(the match's result)`; else the state with sideboarding begun (36.2: the next game's chooser first, CR 103.1): the next episode's first decisions are the sideboarding before game g+1, which affects only game g+1 and takes its result |
+| `next_episode(Some(p))` (zero-core's resign rule: p resigned) | p concedes the game in progress (CR 104.3a: `Game::concede`, `EndReason::Conceded`, the other player wins), scored as any game, then as above |
+| `can_concede` | false while sideboarding (no game in progress) and during a deck choice; true in a game |
+| `determinize`, `encode`, `aux_target`, the bots | unchanged (the match block, the revealed cards and the score stay in the encoding) |
+
+The match's rules are 36.1's (who chooses, when the match ends, its result: by game wins), the decks and sideboards, the
+reveals and the match's RNG carry over in the state `next_episode` returns. zero-core counts `temp_moves` per episode, so
+every game's opening is sampled (36.12's wish: a counter per game).
+
+### 121.3 Rows and evaluation
+
+zero-core labels each game's rows with that game's outcome and hands them out with the match's one result row (its
+`result` the match's, `episodes` the games'): the match win rate is what the yardstick, random games, Elo and h2h report,
+with per-game numbers beside it (zero-core docs/az.md 42.2).
+
+### 121.4 Resignation: a concession of the game in progress
+
+zero-core's self-play resign rule (its docs/az.md 27; the Delver line plays `selfplay_resign_t` 0.02, k 3) ends a
+decided episode: with one episode per game that is a game, and the match goes on. `next_episode(Some(p))` makes p
+concede the game in progress - **CR 104.3a** ("A player can concede the game at any time. A player who concedes leaves
+the game immediately. That player loses the game."), with the other player winning (104.2a) - as `Game::concede`
+(`EndReason::Conceded`, a new reason no game without the key ever takes), then scores it as any game's end (36.1:
+the loser chooses for the next game). `can_concede` is false while sideboarding and during a deck choice (no game is
+in progress to concede: zero-core does not count those searches for the rule), so a resignation never falls between
+games. The rule's no-resign draw is per match (zero-core draws it by game id); each game reports its own `resign`.
+
+### 121.5 Tests, digests, smoke
+
+* **Engine** (`engine/tests/bo3_episodes.rs`, 5, `--release` 7.5 s):
+  `game_episodes_is_a_best_of_three_setting` (refused with best-of-one, a boolean, kept by `eval_json`; a match
+  without the key does not chain); `the_match_is_36_1s_cut_at_its_games_ends` (12 matches played twice with the same
+  random actions, one episode and one episode per game: the same decisions, legal actions and keys throughout, each
+  game's end an episode's terminal with the game's result and life margin, the next episode the sideboarding with the
+  loser first (CR 103.1), no concession while sideboarding, the match's end by 36.1 with the one-episode match's result
+  and turns); `a_concession_ends_the_game_in_progress` (CR 104.3a: `EndReason::Conceded`, the other player's win, the
+  conceding player sideboards first; a second concession ends the match 0-2; none between games);
+  `the_search_treats_a_games_end_as_terminal` (zero-core trees from 6 moves before game 1's end, 8 matches x 400
+  simulations: walks reach the game's end and no expanded node is past it - while the same walks of the one-episode
+  match do reach sideboarding); `every_row_takes_its_own_games_result` (24 self-play matches through zero-core's driver,
+  uniform evaluator: one row per match, every record's z and sc its own game's, the sideboarding rows (the match
+  block's flag) never among game 1's, the user's case found - a match lost 1-2 by game 2's winner: its game-2 rows,
+  its sideboarding before game 2 among them, z = 1, its game-1 and game-3 rows z = 0).
+* **Python** (`tests/test_game_episodes.py`, 3): the spec and the bindings (a concession through `next_episode`),
+  every sample of 12 matches through the driver from Python (`split_games`, the arrays the shard writer writes)
+  labelled by its own game with the sideboarding rows never in game 1, the evaluation and the remote hello's
+  fingerprint (`Run.eval_chained`, `remote.eval_episodes`, `remoteplay._episodes_of`: 'chained', and '' without the
+  key).
+* **Run-loop smoke** (the desktop, CPU, heavily shared with other jobs, 2026-11-11): `python -m mtgz.az.run --preset
+  mtg-smoke --spec <SPEC_BO3 + "game_episodes": true> --eval-spec <its evaluation spec> --max-steps 60000 --iters 2`:
+  iteration 1 played 16 matches = 40 games (9 drawn, 5,502 samples, 137.6 per game), iteration 2 16 matches = 45 games
+  (21 drawn, 7,440 samples); `eval_yard` / `eval_random` report the match win rate with `per_game` beside it (iter 2
+  vs random: matches 1.0/4, games 2.0/9), the Elo log both (`iter_0002 vs iter_0001: 4.0/4 (games 9.0/11)`). Its
+  shards checked row by row (a scratch script: a row's game = the match block's game number + its sideboarding flag;
+  the rows are written match by match): 12,942 rows of 32 matches and 85 games, every player's rows of a game with
+  one z, the two players' z summing to 1, the game wins the next game's rows show equal to the earlier games' z (170
+  checks), and 19 of the 32 matches carry different z in different games (impossible with the match's label).
+* **Search smoke**: `tools/search_smoke.py` gains the spec `match_games` (36.8's `match` with the key).
+* **Digests**: the `Game` changed only by an unused end reason and method, the mapping only behind the key: the
+  behaviour digests are unchanged - encoding-free **208c723daced22fe** and full **53839c837bbaf034**, the values 60397f3
+  gives (its own worktree, `cargo test --release -p engine --test digest -- --ignored`) and this branch's gate. (The
+  first commit's message, 2f5886a, named ENGINE.md 107's ae88eae20abb14ca / d0da2e6030aa0d08: stale - main's digests
+  moved after 107 - and its first engine gate, run against them, failed on that comparison alone.)
+* **Search smoke of the key**: `python tools/search_smoke.py --specs match_games --seeds 0 --games 64 --sims 16 --conc
+  64`: 64 matches = 172 games, 0 unfinished, 187,766 decisions, 1.30 million simulations, 38 s, 0 failed.
+* **Gates on d62c6d7** (`--no-mac`, the desktop shared with other lanes' gates and a live run):
+  `python tools/gate.py engine --tested-sha d62c6d7 --expect-digest 53839c837bbaf034 --expect-digest0 208c723daced22fe`:
+  **GATE PASSED engine d62c6d7e4919 in 3897s** (build, both digests, `az` 48, `limits` 13, `hidden` 28, pytest 272
+  passed and 1 skipped, the search smoke). `python tools/gate.py optin-core --baseline-root ../bo3-game-episodes-base
+  --feature-tests az,hidden,bo3_episodes` (the baseline: 60397f3 with its pin f9ca5c3): build, the core's cargo tests
+  155 passed, **checkpoint_compat identical** (visits 2,465 samples, records 1aa4d70786522ff1; cq 8d82acdc1b4465fc;
+  results fc1673de5b24522a; vs random 7.0/16, 40d2a49742e35755 - on both checkouts), `az` 48, `hidden` 28,
+  `bo3_episodes` 5, the three other games built against the core, the core's build passed; the core's pytest hit the
+  step's 3,600 s limit (three other lanes' gates on the desktop at once): `GATE FAILED optin-core d62c6d7e4919 in 6586s - core-pytest: timed out`. The
+  same command alone on the same core (`python -m pytest tests -q -p no:cacheprovider -rfE` in third_party/zero-core,
+  97770ee): **452 passed, 11 skipped, 0 failed** in 1,976 s.
+  Not run: the 20k fuzz (the `Game` gained a method and an end reason no fuzzed game reaches; the key's own check is
+  121.5's 12-match equivalence test).
+
+### 121.6 What works with it, what refuses
+
+What the Delver runs use, with the key (zero-core docs/az.md 42 has the core's tests): the shared self-play queue and
+remote workers (the toy's contests in the shared quota; a worker whose checkout lacks chained episodes refused by its
+hello, `episodes`); remote evaluation (its result's `episodes` checked); rolling self-play, sparse batches, the shard
+writer thread, sparse shards and window, information-set merging with root-view values, value-only samples (next_q),
+the root's belief (an auxiliary head), resignation (121.4), the evaluation cache, paired Elo games, the league
+(zero-core's `test_the_delver_stack_on_a_chained_game`, `test_the_league_and_a_remote_evaluation_on_a_chained_game`
+on its toy match); replays (`zero.replay`: one replay = the whole match, `games` its games' results). **Refused**:
+branched games (`selfplay_branch`, a driver error naming the game); deferred terminals. Not tested: a co-training
+resolver with the key, lookahead seats, the local and remote linger (nothing in them reads an episode).
+
+### 121.7 For the run, and open questions
+
+* **`games` counts matches**: an iteration of 2,000 games is 2,000 matches (~2.5 games each: ~2.5x the rows of a
+  best-of-one iteration); `eval_games`, `elo_games`, the anchors' games count matches too (the user's measure).
+* **`temp_moves` per game**: zero-core counts it per episode, so each game's opening is sampled (60 = the first ~60
+  searched decisions of every game, sideboarding included) - 36.12's wish, a behaviour of the key to confirm.
+  **Approved by the user (2026-11-12)**: temperature at the start of every game, its sideboarding included.
+* **The label** (the user, 2026-11-12): each row's value target is its own game's outcome; the Delver best-of-three
+  presets turn the key on, in the spec and so in the evaluation spec (129.2).
+* **Human play** (the Delver site's Play tab, `zero.play` servers): a Python consumer that plays a chained game must
+  call `next_episode` at a game's end (zero.replay and zero-core's Python driver do); the Play tab does not yet.
+
+## 122. The Legacy Izzet Delver 75's sideboard: Consign to Memory, Hydroblast, Meltdown, Price of Progress, Rough // Tumble (branch `delver-sb-cards`, mtg-bot `feature/delver-sb-ir`)
+
+**Why.** The five cards of the Delver mirror's pinned 75 (54) that were outside the cube and unsupported (54.8):
+Consign to Memory (2), Hydroblast (2), Meltdown (1), Price of Progress (1), Rough // Tumble (1), all sideboard.
+With them every card of the Delver 75, and of the Sneak and Show 75's sideboard (Consign to Memory, 123), is
+supported in constructed play: `Decklist::unsupported_sideboard` is empty for both. Branch `delver-sb-cards` from
+main 3d898d7 (Legacy Doomsday and Sneak and Show merged); mtg-bot `feature/delver-sb-ir` from `feature/sneak-show-ir`
+60e76c0a. Card support only: best-of-three and sideboarding are branches `delver-bo3` (120) and `bo3-game-episodes`
+(121), untouched here. The user's rules: no approximation of any class (docs/shortcuts.md unchanged), no
+input-layout change (none was needed: no new decision, no new public state), the digests unchanged.
+
+* Consign to Memory {U}, Instant: "Replicate {1} (When you cast this spell, copy it for each time you paid its
+  replicate cost. You may choose new targets for the copies.) Counter target triggered ability or colorless spell."
+* Hydroblast {U}, Instant: "Choose one — Counter target spell if it's red. • Destroy target permanent if it's red."
+* Meltdown {X}{R}, Sorcery: "Destroy each artifact with mana value X or less."
+* Price of Progress {1}{R}, Instant: "Price of Progress deals damage to each player equal to twice the number of
+  nonbasic lands that player controls."
+* Rough // Tumble {1}{R} // {5}{R}, Sorcery // Sorcery (a split card): "Rough deals 2 damage to each creature
+  without flying." // "Tumble deals 6 damage to each creature with flying."
+
+(54.8's estimate said "damage to each player by the nonbasic lands they control": the Oracle text is twice that
+number; the IR has `multiplier: 2`.)
+
+### 122.1 What was built
+
+| Part | Where | What |
+|---|---|---|
+| The IR | mtg-bot `feature/delver-sb-ir`; `data/cards/*.ir.json`, `powerlsv.schema.json`, `card_ir/src/generated.rs` | the five Scryfall records appended to the legacy pool; one recognizer (Rough // Tumble's halves); 122.2 |
+| Identities | `engine/src/az/legacy_cards.txt` | after Magus of the Moon (563): **Consign to Memory 564, Hydroblast 565, Meltdown 566, Price of Progress 567, Rough // Tumble 568** (the halves Rough and Tumble are faces: their card's identity, 568); append-only, layout unchanged |
+| Lowering | `lower/delver_sb.rs` (new), `lower/filter.rs` (`roto_stack.IsColorless`), `lower/effect_stack.rs` (`stack_object_filter_with`) | every field named, the rest denied |
+| Rules | `delver_sb.rs` (new): `Ext::DelverSb(DelverSb::DamageEachPlayerByCount)` | 122.3; the other four cards lower onto existing ops |
+| Tests | `engine/tests/cards_delver_sb.rs` (36), `support.rs` (`SUPPORTED_LEGACY`, `legacy_support_report`), `constructed.rs`, `fuzz.rs` (`FUZZ_POOL=delver_sb`) | 122.5 |
+| Rulings | `data/rulings/legacy.rulings.json` (refetched: the five's 11 rulings), `triage.tsv` (3 new texts; `b83b7a27` now class a), `docs/rulings.md` | every class-a ruling tested |
+| Docs | this section; `docs/ir_defects.md` W (no defect), `docs/card_ir.md`, `docs/interactions.md`, `docs/rulings.md`; 54.8 points here | |
+
+### 122.2 The IR
+
+Four of the five parsed through mtg-bot's roto recognizers: Consign to Memory (`CounterTargetStackObjectFiltered {
+kinds: [triggered, spell], spell_filter: roto_stack.IsColorless }`, `replicate_cost: "{1}"`), Hydroblast (Pyroblast's
+`ModalChooseOne` of `CounterSpell` and `RemoveTargetPermanents`, each `only_if: HasColor R`), Meltdown
+(`RemoveAllMatching { IsArtifact, max_mana_value_from_x }`, Vicious Rivalry's shape) and Price of Progress
+(`DamageEachPlayerPerControlled { per_filter: IsLand & ~IsBasic, multiplier: 2 }`). Rough // Tumble did not: its
+halves' sentences had no grammar. mtg-bot's `cards/parser/legacy_delver_sb.py` adds one parameterized recognizer,
+the very last fallback of `effects._parse_effect` (after the Doomsday and Sneak and Show lanes'): "deals N damage
+to each creature with <qualifier>" (the target-phrase grammar's `with` tail: a keyword or a disjunction of them,
+mana value or power N or greater / less) and "... without <keyword>" (keywords only, negated) ->
+`DealNDamageToEachCreatureMatching { amount, creature_filter }` (new, `effects/generic/legacy_delver_sb.py`); the
+split card builds through the existing `split_faces` path (Life // Death's: the combined mana cost {6}{R}{R}, both
+names, a sorcery). The recognizer claims Rough // Tumble only: every other pool's claimed printings (cube, roto,
+eoe, all) are byte for byte the same with and without it (compared card by card, `PYTHONHASHSEED=0`).
+`cards export-ir --pool cube legacy eoe`, `filter_eoe_ir.py`, `gen_card_ir.py`: schema `693d23a4a259...` (was
+`245e4bc208c6...`), 728 classes, exactly four more (`CounterTargetStackObjectFiltered`,
+`DamageEachPlayerPerControlled`, `DealNDamageToEachCreatureMatching`, `roto_stack.IsColorless`; no class, field or
+enum changed); `powerlsv.ir.json` and `eoe.ir.json` are the previous files byte for byte once the schema hash is
+replaced; `legacy.ir.json` holds 23 cards, the previous 18 unchanged. No IR defect (docs/ir_defects.md W; entries
+260-279 unused).
+
+### 122.3 The rules, as built
+
+| Text | Rule | How |
+|---|---|---|
+| Consign to Memory: "Counter target triggered ability or colorless spell" | 115.1, 113.3c, 701.6a, 105.2c | `CounterTargetStackObjectFiltered` -> one target of `Or[Spell(Colorless), Ability(TRIGGERED)]` (`effect_stack::stack_object_filter_with`: `CounterTargetStackObject`'s kinds, the spells limited by the filter) and `Op::Counter` (27.2): a triggered ability is removed from the stack, a spell put into its owner's graveyard. Triggered: every ability on the stack that isn't activated (delayed, reflexive and keyword triggers: ward, storm, replicate, a cast trigger); activated abilities (a fetch land's, loyalty, cycling) are no target; mana abilities never use the stack. "Colorless": the spell's colours now (layer 5: Painter's Servant makes a Bauble red) |
+| "Replicate {1}" | 702.56a, 707.10c | the existing replicate (26.5, Lose Focus): `ChooseMode` for the times paid, a cast trigger copying the spell once per payment, each copy's targets chosen anew (`NewTarget`) among the legal ones |
+| a spell that can't be countered | 101.2 | targeted, not countered (Emrakul, the Aeons Torn); its cast trigger can be |
+| Hydroblast: "Choose one — Counter target spell if it's red. • Destroy target permanent if it's red." | 700.2a, 608.2b, 701.6a, 701.8a | Pyroblast's shape (the existing `ModalChooseOne`, `CounterSpell` and `RemoveTargetPermanents` arms): the mode chosen as it is cast, the target any spell / any permanent, the colour checked as it resolves (`JumpUnlessTarget` with `Color(R)`: colour-changing effects apply) |
+| Meltdown: "Destroy each artifact with mana value X or less" | 107.3a, 202.3e, 701.8a, 702.12b | `RemoveAllMatching` with `max_mana_value_from_x` -> `Op::DestroyAll` over `Type(ARTIFACT) & MvAtMostX` (the spell's X on the stack): both players' artifacts, its caster's too; an {X} permanent and a token have mana value 0 on the battlefield; indestructible survives; cast for free X is 0 (107.3b) |
+| Price of Progress: "deals damage to each player equal to twice the number of nonbasic lands that player controls" | 120.3a, 120.8, 205.4c, 608.2h, 104.4a | `DamageEachPlayerPerControlled` -> **`DelverSb::DamageEachPlayerByCount { filter: Type(LAND) & Not(Supertype(BASIC)), times: 2 }`** (new): each player's count taken once, as the effect is applied, before any damage, then the damage dealt in APNAP order by the spell (its source's characteristics, 120.3); a count of 0 is no damage at all (120.8); a filter naming a controller is refused (the grouping is "that player controls"). Both players at 0 at once: a draw (104.4a) |
+| Rough // Tumble, a split card | 709.3, 709.3a-b, 709.4, 202.3d | the existing split card (25: Life // Death): cast as one half (`Cast` = Rough, `CastFace` = Tumble, `Faces` + `ChooseFace` when both can be), only that half's characteristics on the stack (Rough's mana value 2, Tumble's 6), both halves' combined elsewhere (mana value 8, red, a sorcery) |
+| Rough: "deals 2 damage to each creature without flying"; Tumble: "deals 6 damage to each creature with flying" | 120.3, 702.9a, 613.1f | `DealNDamageToEachCreatureMatching` -> `Op::DamageAll` over `Type(CREATURE) & [Not] HasKeyword(Flying)`: one damage event per creature matching as it resolves (flying as the creature has it now: Dragon's Rage Channeler's delirium), none to a player |
+
+### 122.4 Readings taken
+
+* **"Triggered ability" is every ability on the stack that isn't activated** (CR 113.3b-c): the engine's stack
+  abilities are activated (a permanent's, a hand card's, a graveyard card's) or triggered (printed, granted,
+  delayed, reflexive and keyword triggers); `ability_ok` already sorts them so for Tishana's Tidebinder (27.2).
+  Static abilities and mana abilities are never on the stack.
+* **Consign to Memory's spell filter applies to spells only.** mtg-bot's class filters spells
+  (`legal_targets` skips an item with no ability that fails the filter); the lowering says it as
+  `Spell(Colorless)`, the abilities untouched. A filter with no spell kind is refused.
+* **The colour of a colourless spell is read when it is targeted and again on resolution** (601.2c, 608.2b): the
+  existing target check of every spell; a spell made coloured in between is an illegal target then. The tests
+  check the targeting (Painter's Servant's red Bauble), not a colour change in between.
+* **Price of Progress's damage is one event per player, the players in APNAP order.** CR 120.3 has the damage
+  dealt at once; the engine deals it player by player with nothing in between (no state-based action, no trigger
+  put on the stack: 704.3, 603.3), as `Op::DamageAll` does for permanents (Brotherhood's End, 123.3): the same
+  result.
+* **A copy of Meltdown keeps its X** (707.10: the copy's X is the original's) through the stack item's `x`, as
+  every X spell's copy; no test of the five's needs it.
+
+### 122.5 Tests, the fuzz pool
+
+* **`engine/tests/cards_delver_sb.rs`, 36 tests** (the CR in each name; every ruling of the five cards: `// ruling:`):
+  Consign to Memory (its definition; the targets offered: two triggered abilities and a colourless spell, not a red
+  spell, not a fetch land's ability; no target, no cast; Painter's Servant's red Bauble no target; Pact of
+  Negation's upkeep trigger countered, no payment, no loss; Emrakul's cast trigger countered, no extra turn, and
+  Emrakul itself targeted, not countered; replicated, the copy aimed at a second trigger, both countered; Daze on
+  the original, the copy still counters; ward's trigger countered, Bolt resolves; storm's trigger countered, no
+  copies); Hydroblast (its definition; a red spell countered; a blue spell and a blue creature targeted and
+  untouched, a land offered; Dragon's Rage Channeler and Cori-Steel Cutter destroyed; an Island red under Painter's
+  Servant destroyed; the counter mode kept through Misdirection: only spells offered); Meltdown (its definition,
+  mana value 1 off the stack; X = 1 over both players' artifacts; X = 0 and Walking Ballista; Kaldra Compleat
+  indestructible at X = 7; cast for free, X only 0); Price of Progress (its definition; twice each player's
+  nonbasic lands, basic lands and artifacts not counted; a fetch land cracked in response; Magus of the Moon's
+  Mountains still nonbasic; no damage to a player with basics only; both players dead at once, a draw); Rough //
+  Tumble (one half cast, the characteristics on and off the stack; Inquisition of Kozilek can't take it (mana value
+  8); Rough's and Tumble's damage; flying read now (Dragon's Rage Channeler with and without delirium); Lutri's
+  copy of Rough is Rough; Disruptor Flute naming Rough taxes Rough only, naming Tumble not Rough; Murktide Regent's
+  delve counts it once; Hydroblast counters Rough). `docs/interactions.md` has the matrix.
+* **`support.rs`**: `SUPPORTED_LEGACY` (the legacy IR's 23 cards) and `legacy_support_report`: every one supported
+  in a table of its own and in `CardDb::constructed`. **`constructed.rs`**: the Delver 75 every card supported, the
+  deck rules over the 75, a spec with the sideboards accepted on layout v6, the five in the registry's order; the
+  Sneak and Show 75's sideboard all supported (Consign to Memory last in the registry's order); the constructed
+  card table's test knows the legacy faces (Rough and Tumble, after the cube's tokens and faces and before the
+  face-down characteristics, each with its card's identity). `tools/untested_cards.py`: 569 supported (23 legacy),
+  0 named by no card test.
+* **`FUZZ_POOL=delver_sb`** (`fuzz.rs`, `DELVER_SB_DECK`): the Delver 60 with the five in (Consign to Memory,
+  Hydroblast, Price of Progress, Rough // Tumble three each, Meltdown two) for Daze, Ponder, Unholy Heat, Prismari
+  Charm and three Brainstorms, against the Delver 60 in either seat, the sideboarded mirror, or the Sneak and Show
+  60 (colourless spells: Emrakul, Lotus Petal; Emrakul's cast trigger), by `seed % 4`; constructed play's table;
+  every check of the default mode. With 200 games or more each of the five must have been cast and a Consign to
+  Memory aimed at a triggered ability.
+
+### 122.6 Results
+
+Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/delver-sb-cards`, normal release profile (the desktop shared with
+other sessions' runs and suites).
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): **2,471
+  passed, 0 failed, 22 ignored** (157 binaries: main's 2,434, `cards_delver_sb` 36, `support` 9 with
+  `legacy_support_report`; `az` 50, `constructed` 9).
+* **Behaviour digests unchanged** (`cargo test --release -p engine --test digest -- --ignored --nocapture`, no
+  `DIGEST_WRITE`): full **53839c837bbaf034**, `DIGEST_ENCODING=0` **208c723daced22fe**, main's (3d898d7); every one of
+  the 2,500 games equal to `tests/data/digests.txt`. The cube's table and games are untouched.
+* **The default fuzz, `FUZZ_GAMES=20000`** (four shards of 5,000, `FUZZ_FIRST` 0/5000/10000/15000): no failure;
+  20,000 games (wins 9,804 / 10,074, 122 drawn, none aborted), 31.8 turns and 438 decisions a game, 19,192,377
+  options completed; 1,000 matches (2,538 games, 538 of three, 742 drawn games, none aborted).
+* **`FUZZ_POOL=delver_sb FUZZ_GAMES=20000`** (four shards of 5,000): no failure; 20,000 games (wins 11,351 / 7,817,
+  832 drawn at the turn cap, none aborted), 29.5 turns and 272.5 decisions a game, 8,127,019 options completed; seen
+  on the stack Consign to Memory 9,586 times (aimed at a triggered ability 4,570), Hydroblast 23,667, Meltdown 6,007,
+  Price of Progress 14,791, Rough 5,323, Tumble 19 (six mana: random play rarely casts it; the counters are
+  process-wide, the binary's replay test's games included, 124.4). Every check of the default mode: invariants,
+  clones, `determinize` for both viewers (view, known cards, clouds, the information-set check), every option
+  completed in the game and in the sampled worlds, the encodings finite.
+* **Under the `fuzz` profile** (debug assertions), `FUZZ_POOL=delver_sb`, 1,000 games: no failure (562 / 397, 41
+  drawn).
+* **The other constructed pools play as before** (the legacy cards' definition ids moved: the IR is sorted by name):
+  `FUZZ_POOL=delver FUZZ_GAMES=4000` (four shards of 1,000): wins 1,924 / 1,907, 169 drawn, 2,390,436 options
+  completed, Murktide Regent cast 2,031 times, its trigger 84, Prismari Charm 2,937: 124.4's games exactly.
+  `FUZZ_POOL=doomsday` 5,000: 2,406 / 2,457, 137 drawn, 2,843,120 options; `FUZZ_POOL=sns` 5,000: 2,442 / 2,443, 115
+  drawn, 2,839,330 options: 123.10's exactly.
+* `python -m pytest -q tools/codegen` (generated.rs current): 2 passed. `python tools/rulings_doc.py --check`:
+  current (1,667 rulings, 1,301 distinct, 1,285 class a, every one tested). `python tools/untested_cards.py`: 569
+  supported (23 legacy), 0 named by no card test.
+* mtg-bot (`feature/delver-sb-ir` 22aa7682): `cards roundtrip --pool cube legacy eoe roto` passes (546, 23, 483, 849
+  cards); its export is the committed `data/cards` byte for byte; `tests/test_legacy_delver_sb.py` 20 (both new
+  modules 100% covered) and the legacy pool's tests (175) pass; the full suite (`pytest -n 6 --no-cov`): 48 failed,
+  21,164 passed; 47 of the 48 fail at the branch point 60e76c0a too (run there by name), the 48th
+  (`test_eternity_elevator_admits_at_loader_admits_helper`, lane C's known xdist ordering flake) passes alone and with
+  its module.
+* No docs/shortcuts.md entry; no layout or encoding change (no new decision kind, no new public state); no zero-core
+  change.
+* **`python tools/gate.py engine --no-mac --tested-sha 5c10902d --expect-digest 53839c837bbaf034 --expect-digest0
+  208c723daced22fe` on 5c10902d**: build (`mtgz._engine` imported from the checkout), the digests 208c723daced22fe and
+  53839c837bbaf034 (= expected), `--test az` 50, `limits` 13, `hidden` 28, pytest 283 passed and 1 skipped, the search
+  smoke (random, seed 0) 0 of 1 failed, tracked files unchanged: **GATE PASSED engine 5c10902d7f84 in 892s** (the Mac
+  recheck not needed: the tested sha is the gated one). The commit after it adds this paragraph only.
+
+### 122.7 Limits and merge points
+
+* **Best-of-three** is `delver-bo3`'s (120): its preset `delver-mirror-bo3` refuses until these five cards are
+  ported, and its DESIGN.md 8 row D3 names "the five sideboard cards: another lane": both are for the merge to update
+  (this branch leaves DESIGN.md alone so as not to conflict with it). Updated at the integration (129.2).
+* **Anointed Peacekeeper's names** (123.5, reported, not changed: the digests) are its cards' front definitions
+  only, so a Peacekeeper facing Rough // Tumble couldn't name "Rough" or "Tumble" (CR 709.4a). No deck of
+  constructed play holds both; Disruptor Flute's list names them (tested).
+* **Merge points**: `legacy_cards.txt` (the five after Magus of the Moon), `lower/effect.rs` (one more
+  `lower_effect_*` in the chain), `program.rs` and `resolve_ext.rs` (`Ext::DelverSb`), `lib.rs` and `lower/mod.rs`,
+  `tests/fuzz.rs` (`PoolMode::DelverSb`, `constructed_mode`, `decks`, the report; `delver-bo3` changes other hunks of
+  the file), `tests/constructed.rs` (the Delver and Sneak and Show tests' sideboards, the card table's legacy faces),
+  `tests/support.rs`, the legacy pool and the schema (re-export at integration if another lane changed it),
+  `data/rulings/*`, `docs/rulings.md` (regenerate).
+
+
 ## 123. Legacy Sneak and Show: the deck's cards (branch `sneak-show`, mtg-bot `feature/sneak-show-ir`)
 
 **Why.** The next constructed deck after the Delver mirror (54) and Legacy Doomsday (124): MTGGoldfish's "Sneak and
@@ -27031,7 +27595,7 @@ differ by that, not by their games.)
 best-of-three and sideboarding (54.8) remain unbuilt, so the deck's sideboard (Flusterstorm, Leyline of the Void) is
 played only by the lanes' pools `dd_b` and `dd_c`.
 
-## 125. Layout v7: uncapped inputs, the MTG side (branch `v7-varlen`; zero-core `feat/varlen` 311cf3c, then d9203be, then b6ba00f)
+## 125. Layout v7: uncapped inputs, the MTG side (branch `v7-varlen`; zero-core `feat/varlen` 311cf3c, then d9203be, b6ba00f, cdf1418)
 
 **Why.** MTG Zero's rule is that the engine **and the network's input** are exact in every reachable state. Layout v6
 had fixed caps (32 permanents a side, 16 hand cards, 8 stack items, 4 waiting triggers of the viewer, a 64-card list,
@@ -27486,26 +28050,34 @@ failure (311cf3c's three findings are fixed). The training step (`widen/cost.py`
 their overrides, alternated, medians of 30): iteration 3198 on v5 20.7 ms; widened, gates 0 31.4 ms (+52%), gates
 0.5 25.7 ms (+24%).
 
-### 125.12 Final: main 1d5508af and c3abdb8a merged, the layout's last facts, the digests recorded (2026-11-12)
+### 125.12 Final: main 1d5508af, c3abdb8a and 64c86cc2 merged, the layout's last facts, the digests recorded (2026-11-12)
 
-**Why.** The user approved v7 on main. This is the merge-ready state: main 1d5508af merged (Anointed Peacekeeper's
-card names through Disruptor Flute's one naming function - ENGINE.md 127 -, Etali's free casts of either face,
+**Why.** The user approved v7 on main. This is the merge-ready state: main 1d5508af merged (Anointed Peacekeeper's card
+names through Disruptor Flute's one naming function - ENGINE.md 127 -, Etali's free casts of either face,
 `FUZZ_POOL=names`), then main c3abdb8a (ENGINE.md 128: a hand card both players know keyed when it is revealed,
-canonical worlds), zero-core re-pinned to b6ba00f, the layout final, every digest checked, v7's full digest recorded.
+canonical worlds), then main 64c86cc2 (ENGINE.md 120-122 and 129: constructed best-of-three with sideboarding to exactly
+60, one episode per game, the Delver 75's five sideboard cards, Show and Tell's face-down pick reaching the hidden 60's
+prior), zero-core re-pinned to b6ba00f and then cdf1418, the layout final, every digest checked, v7's full digest
+recorded.
 
 **zero-core b6ba00f** (`feat/varlen-perf`, a fast-forward of d9203be by 7 commits; docs/az.md 43.11 and 43.12 there):
-inference of variable-length rows with the transfers beside the CUDA graphs, one upload per launch, the downloads
-after the next launch's inputs, the sparse batch and the tail tokens packed in Rust off the GIL
-(`pack_sparse_tokens` / `pack_tail_tokens`, registered in `mtgz._engine` by zero-core's `init_module`: rebuilt,
-both present), `SearchDriver.submit` releasing the GIL - bit for bit, by the core's own gates. Only `crates/py` and
-the Python side changed; the engine's `zero_search` is d9203be's, so the engine and its digests are those of the
-merge (checked: all four, below).
+inference of variable-length rows with the transfers beside the CUDA graphs, one upload per launch, the downloads after
+the next launch's inputs, the sparse batch and the tail tokens packed in Rust off the GIL (`pack_sparse_tokens` /
+`pack_tail_tokens`, registered in `mtgz._engine` by zero-core's `init_module`: rebuilt, both present),
+`SearchDriver.submit` releasing the GIL - bit for bit, by the core's own gates. Only `crates/py` and the Python side
+changed; the engine's `zero_search` is d9203be's, so the engine and its digests are those of the merge (checked: all
+four, below).
 
-**The first merge** (main 1d5508af). Two conflicts: `decision_list`'s names list (main: the list is `Game::nameable_defs`, paged; v7 keeps
-its v6 path - the page's options by id - and its whole list by absolute position, `decision_list_by_ids` with
-`Decision::range_first`) and the fuzz's match loop (main's name counters beside v7's whole rows). Peacekeeper now
-stores any face's name (`Mark::ChosenName` of `nameable_defs`' definitions): `encode::name_face` covers every one
-(125.11), and the gate's split-halves pair still sees both halves apart.
+**zero-core cdf1418** (`feat/varlen`: b6ba00f with main's pin 2aab098, `feat/match-episodes-int`, merged by lane Y):
+chained episodes (one per game of a match: `SearchGame::chained`, `next_episode`, docs/search.md there) beside
+variable-length rows - an episode's boundary carries its rows' tails and overrides exactly, and a row past the limit
+inside a chained contest ends it as aborted. The core's `zero_search` changed with it, so everything below ran on it.
+
+**The first merge** (main 1d5508af). Two conflicts: `decision_list`'s names list (main: the list is
+`Game::nameable_defs`, paged; v7 keeps its v6 path - the page's options by id - and its whole list by absolute position,
+`decision_list_by_ids` with `Decision::range_first`) and the fuzz's match loop (main's name counters beside v7's whole
+rows). Peacekeeper now stores any face's name (`Mark::ChosenName` of `nameable_defs`' definitions): `encode::name_face`
+covers every one (125.11), and the gate's split-halves pair still sees both halves apart.
 
 **The second merge** (main c3abdb8a, ENGINE.md 128): no conflict but the recorded digests. 128's three parts and v7's
 knowledge encodings:
@@ -27538,48 +28110,77 @@ knowledge encodings:
   face_down 110, my_revealed 53;
 * `mtg_eoe` stays layout v6 (`layout_eoe.json`), refusing a card table with any of `az::needs_layout_v7`'s cards.
 
-**Presets.** A game with tail tokens writes sparse shards only (zero-core R8), so every `mtg` preset sets
-`shard_sparse` 1 (`tests/test_sparse_shards.py`: on for `mtg`'s, off for every other game's); `mtg-smoke` (and
-`delver-smoke`) is a token network (32 x 1, 2 heads, ff 64): an MLP takes no tail tokens (R4) - layout v6's MLP
-presets mtg-1 and mtg-2-mlp are refused at a v7 run's start. A run of `mtg` needs no flag beyond the preset's.
+**Presets.** A game with tail tokens writes sparse shards only (zero-core R8), so every `mtg` preset sets `shard_sparse`
+1 (`tests/test_sparse_shards.py`: on for `mtg`'s, off for every other game's); `mtg-smoke` (and `delver-smoke`) is a
+token network (32 x 1, 2 heads, ff 64): an MLP takes no tail tokens (R4) - layout v6's MLP presets mtg-1 and mtg-2-mlp
+are refused at a v7 run's start. A run of `mtg` needs no flag beyond the preset's.
 
-**Digests.** Main c3abdb8a's recorded: full (layout v6) **b63f643e97a30a61**, `DIGEST_ENCODING=0`
-**a0062bb5569e06d3**, `v5` **d1bbf127a6c5bda0**. This branch: `DIGEST_ENCODING=0` **a0062bb5569e06d3**, `v5`
-**d1bbf127a6c5bda0**, `v6` (the v7 head's v6 projection, against layout v6's own encoding; 102,734 states hashed,
-none on a page v6 showed as a window) **b63f643e97a30a61** - each equal to main's. v7's full digest
-**438164c0429d7fa3** is recorded (`DIGEST_WRITE=1`, on purpose: v7 is the layout now; `engine/tests/data/digests.txt`);
-`DIGEST_ENCODING=v6` is the comparison with main's full from here on. The 213 games whose v7 digest changed with
-128 are exactly the 213 main's changed (128.5). (On the first merge, main 1d5508af: full 8d1cce220fbc3eb2, `=0`
-c3efa1c404527dab, `v5` 5324310e02757cff, each equal here too; v7's full was 33652df8dc65f2eb.)
+**The third merge** (main 64c86cc2). Conflicts: `tests/constructed.rs`' Sneak and Show doc (main: the sideboard is
+supported, Consign to Memory since 122; v7: Disruptor Flute plays on layout v7), the fuzz's match loop (main's
+sideboarding counter beside v7's whole rows) and the core's pin (cdf1418). Three more fixes: R17's classifier
+covers `Ext::DelverSb` (its one instruction counts permanents: no graveyard read; `Ext` has 199 variants); main's
+`tests/bo3_episodes.rs` builds `DriverCfg` with `max_row_tokens: None` (the game's own limit); and
+`tests/constructed_bo3.rs` compares whole rows (`Row::of_az`): a later game's rows hold `my_revealed` tokens, which
+a head-only encoding refuses (R1). v7 and best-of-three, together:
+* *Sideboarding rows.* A sideboarding decision's row is `encode_sideboarding`'s head, the frame's earlier reveals
+  (`my_revealed`) as its only tail tokens, and no pointer overrides (sideboarding keeps the static table). With one
+  episode per game (121) the episode ends with the game (`MatchState::between`) after `end_game` has added the game's
+  reveals to `earlier`, so the next episode's sideboarding and game rows hold them. New check
+  (`tests/bo3_episodes.rs::v7_rows_carry_their_tails_across_the_episodes`, the cube's best-of-three and the Delver
+  mirror's constructed one, 12 self-play matches each through zero-core's driver, its records' tails and overrides):
+  a sideboarding row's tails are `my_revealed` only and it has no overrides; within an episode a player's
+  `my_revealed` tokens are the same at every row, none in game 1, a later episode's holding the earlier's; every
+  match finished (cube 184 sideboarding rows, 12,232 game rows, 6,917 with earlier reveals; constructed 189, 10,813,
+  6,597).
+* *The hidden 60.* `ConstructedPrior` and 129.3's pick are the deal's (`determinize`), not the encoding's; the checks
+  that a world keeps the viewer's view compare whole rows: main's two `constructed_bo3_*` tests of `tests/az.rs` (the
+  other 60 never reaches the viewer's row or actions: 16 twin matches, 456 steps of game 2; worlds keep the view and
+  deal legal 60s: 192 worlds, 179 with another 60), `tests/constructed_bo3.rs`' and the fuzz's constructed matches
+  (below). The gate deals constructed best-of-three positions too (main's kind).
+* *Presets.* `delver-mirror-bo3` and `delver-bo3-smoke` are `mtg` token presets with `shard_sparse` 1 (from
+  `delver-mirror` / `delver-smoke`): nothing more to set for v7.
 
-**Checks on the merged sha** (main c3abdb8a merged, zero-core b6ba00f). The engine suite: 159 binaries, **2,477 passed,
-0 failed**, 26 ignored (128's `known_face_key` the new one; on the merge before the re-pin, whose engine sources are the
-same: the core's `crates/search` is unchanged). The gate (`tests/az.rs::public_state_reaches_the_encoding`): **193
-perturbations encoded, 1 deliberate limit (a graveyard's order, D5), 0 gaps**; a split card's halves named on 299
-positions, both views and encodings apart. The digests on the re-pinned tree: `=0` a0062bb5569e06d3, `v5`
-d1bbf127a6c5bda0, `v6` b63f643e97a30a61, the full comparison with the recorded 438164c0429d7fa3 - unchanged by the pin.
-The fuzz (every check of 125.6; `runs8/`): cube 20,000 games, doomsday 20,000, delver 4,000, `sneak_show` 5,000, `names`
-5,000 open and **20,000 with hidden decklists** (128's mode, seeds 0-19999 with 466 and 4248: 557,124 hidden-decklist
-worlds, 2,592,121 information-set steps, each comparing the viewer's whole rows), `names` with `FUZZ_BELIEF=2` 2,000
-(50,343 weighted worlds) and `FUZZ_CHANCE=50` 2,000 (21,496 chance walks), 200 cube best-of-three matches (500 games)
-and 200 drafted matches (515 games) - no failure, no aborted game, at most 276 tokens a row (0 past the limit), the v6
-projection equal to layout v6's encoding on every row v6 can represent. In the open `names` games of the first merge
-Anointed Peacekeeper named a card of one face 2,242 times, a front face 3,686, a back face 3,319, an Adventure 427, a
-split card's half 400, a prepare spell 200, a token 329 (and passed 334); Disruptor Flute 3,543 / 6,327 / 5,373 / 686 /
-635 / 313 / 505 (547): every kind `name_face` encodes. `bash tools/build_py.sh` on b6ba00f, `python -m pytest -q tests`:
-**313 passed, 1 skipped**. The tail smokes, the presets alone (no `--allow-draft-layout`, no `--shard-sparse`;
-`smokes9/`, on b6ba00f): `delver-smoke` 193 s, the Doomsday mirror on it 205 s, `mtg-smoke` (the cube) 257 s - 3
-iterations each, self-play with tails (at most 29 tokens a row, none aborted), sparse v2 shards, training on rows with
-tails (the cube's with 20-22 overrides a window), evaluation, Elo (the same on c3abdb8a before the re-pin, `smokes8/`).
-The GPU smoke once, when the GPU was idle (`smokes9/run_smoke_gpu.sh`, b6ba00f's inference path): iteration 3198 forked
-onto the final layout (`tools/fork_run.py` without `--allow-draft`: 37,620 -> 56,384 features, the 9 gated segments at
-0), the 128 x 8 network on CUDA (graphs, `--train-static 1`, the auxiliary head), 2 iterations, 108 s: tails up to 30
-tokens a row, 514 and 685 overrides in the windows, no failure, no warning; the gates' theta after it: `delayed` 0.004,
-`links` 0.0026, `library_known` 0.024, `graveyard_order` -0.0075 (pushed shut, g = 0), the others 0 (no tokens). (On
-f0e6b6c0, d9203be, the same smoke's one warning was the core's gate check, az.md 43.6: `links` "still exactly 0 after
-106 training steps" - its theta below 0, pushed shut through the straight-through `max(theta, 0)`, not a gate without a
-gradient.)
+**Digests.** Main 64c86cc2's recorded digests are c3abdb8a's (its `engine/tests/data/digests.txt` is c3abdb8a's, byte
+for byte; 129.4: behaviour unchanged). Main c3abdb8a's recorded: full (layout v6) **b63f643e97a30a61**,
+`DIGEST_ENCODING=0` **a0062bb5569e06d3**, `v5` **d1bbf127a6c5bda0**. This branch: `DIGEST_ENCODING=0`
+**a0062bb5569e06d3**, `v5` **d1bbf127a6c5bda0**, `v6` (the v7 head's v6 projection, against layout v6's own encoding;
+102,734 states hashed, none on a page v6 showed as a window) **b63f643e97a30a61** - each equal to main's. v7's full
+digest **438164c0429d7fa3** is recorded (`DIGEST_WRITE=1`, on purpose: v7 is the layout now;
+`engine/tests/data/digests.txt`); `DIGEST_ENCODING=v6` is the comparison with main's full from here on. The 213 games
+whose v7 digest changed with 128 are exactly the 213 main's changed (128.5). On the merge of 64c86cc2 and cdf1418 all
+four again: `=0` a0062bb5569e06d3, `v5` d1bbf127a6c5bda0, `v6` b63f643e97a30a61 (102,734 states), v7's full
+438164c0429d7fa3 (recorded once more with `DIGEST_WRITE=1`: the file unchanged). (On the first merge, main 1d5508af:
+full 8d1cce220fbc3eb2, `=0` c3efa1c404527dab, `v5` 5324310e02757cff, each equal here too; v7's full was
+33652df8dc65f2eb.)
 
+**Checks on the merged sha** (main 64c86cc2 merged, zero-core cdf1418). The engine suite: 162 binaries, **2,533 passed,
+0 failed**, 27 ignored. The gate (`tests/az.rs::public_state_reaches_the_encoding`, with main's constructed
+best-of-three positions): **195 perturbations encoded, 1 deliberate limit (a graveyard's order, D5), 0 gaps**; a split
+card's halves named on 359 positions, both views and encodings apart. The digests: above. The fuzz (every check of
+125.6, whole rows at every information-set step; `runs10/`): cube 20,000 games, doomsday 20,000, delver 4,000,
+`sneak_show` 5,000, `names` 5,000 with hidden decklists (139,762 worlds, 648,539 information-set steps), `delver_sb`
+5,000 (Consign to Memory 2,383 on the stack, 1,151 aimed at a triggered ability; Hydroblast 5,809, Meltdown 1,436, Price
+of Progress 3,659, Rough 1,250, Tumble 2), 200 cube best-of-three matches (500 games) and **1,000 constructed
+best-of-three Delver matches** on the full 75 (2,654 games, 654 of three, 848 drawn, 0 aborted; 3,308 sideboardings;
+41,526 constructed worlds, the opponent's 60 hidden in 24,818, 24,703 of them another 60 than the real one; 306 first
+sideboarders' choices dealt - 129.4's numbers exactly) - no failure, no aborted game, at most 270 tokens a row (0 past
+the limit), the v6 projection equal to layout v6's encoding on every row v6 can represent. `bash tools/build_py.sh` on
+cdf1418, `python -m pytest -q tests`: **320 passed, 1 skipped** (main's `tests/test_delver_bo3.py` compares whole rows -
+`encode_row`, `option_overrides` - where it compared `encode`, which refuses a row with tail tokens; main's
+`tests/test_game_episodes.py` cuts the samples with the game's tail widths, which `split_games` requires, and checks a
+sideboarding sample's tail tokens are `my_revealed` only, with no overrides). The tail smokes, the presets alone (no
+`--allow-draft-layout`, no `--shard-sparse`; `smokes10/`, on cdf1418): `delver-smoke` 387 s, the Doomsday mirror on it
+448 s, `mtg-smoke` (the cube) 308 s, and **`delver-bo3-smoke`** 905 s (the full 75, one episode per game: 16 matches an
+iteration, 6,634 / 7,137 / 5,157 samples, rows up to 39 tokens, none aborted, the deck target trained, evaluation and
+Elo with the games beside the matches) - 3 iterations each, sparse v2 shards. The GPU smoke once, when the GPU was idle
+(`smokes10/run_smoke_gpu.sh`, cdf1418's inference path): iteration 3198 forked onto the final layout
+(`tools/fork_run.py` without `--allow-draft`: 37,620 -> 56,384 features, the 9 gated segments at 0), the 128 x 8 network
+on CUDA (graphs, `--train-static 1`, the auxiliary head), 2 iterations, 189 s: tails up to 32 tokens a row, 538 and 667
+overrides in the windows, no failure. Its one warning is zero-core's gate check (az.md 43.6): `graveyard_order` "still
+exactly 0 after 156 training steps" - its theta went below 0 (-0.0012; `links` -0.007, `library_known` -0.0227), the
+gradient pushing it shut through the straight-through `max(theta, 0)`, not a gate without a gradient (`delayed` opened
+to 0.0235). (Earlier on this branch: the same checks on c3abdb8a with b6ba00f - suite 2,477 passed, pytest 313 passed,
+`names` 20,000 with hidden decklists, the CPU smokes and the GPU smoke - and on 1d5508af with d9203be.)
 ## 126. Run 2 integrated: the deck choice by the evaluator (112) and the win % against real decks (113) on one commit (branch `eoe-run2-int`, 2026-11-12)
 
 Branch `eoe-run2-int` (from main 3d898d7: the Doomsday lanes, race-batch, eval-v2, Sneak and Show); merged with merge
@@ -28283,3 +28884,172 @@ failed, 25 ignored**. That includes `--test az` (the public-state gate: `public_
    `canon_hand_knowledge` itself (128.4).
 4. **Section number.** 128 was the next free number above 127 on 2026-11-12: no branch and no worktree's ENGINE.md
    had 128 or higher.
+
+## 129. Constructed best-of-three integrated: delver-bo3 (120), bo3-game-episodes (121) and the five sideboard cards (122) on one commit (branch `delver-bo3-int`, 2026-11-12)
+
+Branch `delver-bo3-int` from main 1d5508af (127), main c3abdb8a (128) and 35181fe (DESIGN.md 9) merged in while it was built; zero-core pinned at
+`feat/match-episodes-int` 2aab098. Three lanes gated one by one, built from different bases (120 and 121 from 60397f3
+side by side, 122 from 3d898d7), meet here. (Section number: 128 is `known-face-key`'s; no branch, remote branch or
+worktree's ENGINE.md had 129 or higher on 2026-11-12.)
+
+### 129.1 The merges and the pin
+
+Merge commits, never a rebase or a squash, in this order:
+
+| merge | branch | conflicts, and how each was resolved |
+|---|---|---|
+| 3065d93 | `delver-bo3` b34d78f (120) | `docs/ENGINE.md` (main's 110-113 and 123-127 against 120): every section kept, ordered by number. `engine/tests/fuzz.rs`: main had widened the Delver-only "games only" returns of the match fuzz and the match replay test to every constructed pool (`dd_a`, `dd_b`, `dd_c`, `doomsday`, `sneak_show`, `sns`, `names`); the branch turned `FUZZ_POOL=delver`'s matches on. Now `FUZZ_POOL=delver` plays its constructed best-of-three matches and every other constructed pool stays games only. `mtgz/az/decklists.py`: the docstring keeps both texts |
+| a3ad86d | `bo3-game-episodes` 292a525 (121) | `docs/ENGINE.md`; `engine/src/az/matches.rs` (module doc, the `MatchState` fields, `MatchState::new`), `public_state.rs` (the fields' classes): both sides' additions; `az/mod.rs` (`MtgSpec::parse`): 120's default `pools` (none for constructed) and 121's refusal of `game_episodes` outside best-of-three; the gitlink: 2aab098. **One fix in the merge**: `MtgAz::new` returned early for a constructed best-of-three (120's `MtgAz::constructed_bo3`) before 121's `az.m.game_episodes = spec.game_episodes`, so the key would have been ignored, silently, on the Delver presets; the constructed path sets it too. Otherwise the two compose as built: `next_match_episode` begins the sideboarding with the same `begin_sideboarding`, and the later games come from the same `next_game` (hidden 60s, deck clouds) |
+| 45fefc2 | `delver-sb-cards` ff9493b (122) | `docs/ENGINE.md`; `docs/rulings.md`: regenerated by `tools/rulings_doc.py` from the merged inputs (127's and 122's rows; `--check` clean), not merged by hand; `engine/tests/fuzz.rs`: main's `FUZZ_POOL=names` (127) and the branch's `FUZZ_POOL=delver_sb` both kept (git had interleaved `count_names` and `count_delver_sb` on their common lines: each rebuilt whole). Main's `data/cards` and `card_ir` had not changed since 3d898d7: identical to the branch's (mtg-bot `feature/delver-sb-ir` 22aa7682's export) |
+| 7a99c09 | main c3abdb8a (128) | none. 128's `canon_hand_knowledge` in `Game::after_deal` covers every hidden deal here: `sample_hidden_deck`'s `redeal` is always followed by `Game::determinize` or `determinize_weighted` (in `SearchGame::determinize`, `determinize_deck_tilted`, `determinize_belief`); `deal_constructed_between` deals no game card (the game is over: it sets the match's decks, pools and the sideboarding in progress). **One test met 122 after the merge**: `known_face_key.rs::fuzz_seeds_466_and_4248_...` replays two recorded `FUZZ_POOL=names FUZZ_HIDDEN_DECKS=1` cases whose worlds the table's prior (`TablePrior` of `CardDb::constructed`) dealt; 122's five cards joined that table, and the prior's draws depend on its whole support (its weighted picks sum over every spell), so the worlds were no longer the recorded ones (seed 466 failed at step 3 on P1's legal actions in two worlds of P0 - P1 being P0's opponent there, a legitimate difference, not a leak). The test now deals with the table's prior less those five (`TablePrior::new_without`, a test hook): the recorded worlds come back and the test passes, its keyed-apart check included |
+| 9b970a6 | main 35181fe | none: DESIGN.md 9 alone (EoE on hold), after the gates; no code |
+
+**The zero-core pin.** `feat/match-episodes-int` = 25a7f50 (main's pin: `feat/eoe-run2`) + `feat/match-episodes` cb1308c
+(az.md 42, search.md 2.14), a merge commit 2aab098, pushed to GitHub. Conflicts only in `docs/az.md` (40 and 42 both
+appended after 39) and `docs/search.md` (2.13 and 2.14 both appended after 2.12): both kept, 25a7f50's first; 42 and 2.14
+do not collide with 25a7f50's numbering, so nothing was renumbered. (zero-core's unmerged `farm` also numbers az.md 41
+and 42 and search.md 2.14, and `feat/varlen*` 43 and 2.15: whichever of those lands second renumbers.) The code merged
+cleanly (`run.py`, `package.py`, `remote.py`: both sides' additions). After the switch, `cargo clean -p zero_search`
+(cargo once reused a stale build of the core).
+
+### 129.2 What the merge needed
+
+* **The full 75 everywhere.** The five sideboard cards are supported, so `delver-mirror-bo3` builds (its spec parses and
+  plays the pinned 75: `test_the_full_preset_builds_with_the_full_75`, which also checks that a card the table does not
+  know is still refused by name). `delver-bo3-smoke` plays **the same spec** on `delver-smoke` (CPU, the tiny network):
+  chosen over keeping the cube-only 68, so the smoke runs the five new cards too; `DELVER_SMOKE_SIDEBOARD` is gone, and
+  `tools/search_smoke.py`'s `delver_bo3` is the presets' spec. `tests/constructed_bo3.rs::the_constructed_bo3_spec`
+  now checks that the full 75 parses (60 + 15 a seat) and that a 75 with two cards the table does not know is refused,
+  both named; its 68 (`SMOKE_SIDEBOARD`) stays as those tests' smaller 75. The fuzz, `tests/az.rs`'s constructed
+  positions and the gate's kind take the supported sideboard cards: all 15 now.
+* **One episode per game on** in both presets: `"game_episodes": true` in the spec, so in the evaluation spec
+  (`eval_json` keeps it); `decklists.mirror_bo3_spec(game_episodes=True)`. The user's decision (2026-11-12): the label is
+  each game's outcome (121.7).
+* **The user's approvals of 2026-11-12** recorded where the decisions were open: 120.7 (the swap-count base prior, the
+  first sideboarder dealt from the same prior, the loud refusal of oversized 75s) and 121.7 (temperature at the start of
+  every game, sideboarding included).
+* DESIGN.md 8's D3 row and 122's pointer updated; `tests/test_delver_bo3.py` follows the presets (its match through the
+  bindings steps each game's episode with `next_episode`).
+
+### 129.3 Show and Tell's face-down pick meets the hidden 60 (CR 101.4a)
+
+**The question** (120.7's merge note): 123 deals a Show and Tell chooser's hand so that its face-down pick is legal -
+`Game::determinize` deals the hand again until a card of it drawn uniformly is an artifact, creature, enchantment or
+land card (`Game::hidden_pick_ok`, up to `HIDDEN_PICK_TRIES` = 1,000,000 deals, then a panic). With open decklists the
+real deck makes that always possible. In a constructed best-of-three's games 2-3 the chooser's 60 is dealt first, by
+`ConstructedPrior` from the deck request (`sample::knowledge` / `DeckWant`: R, the size, a companion), which knew
+nothing of the pick.
+
+**It can happen.** The chooser is the active player (Show and Tell is a sorcery; `hidden_pick`); the viewer is the
+other player, deciding its own pick. Nothing stops the chooser's 75 from holding Show and Tell (the format is
+deck-agnostic: any two 75s; the Sneak and Show list itself only fails on Disruptor Flute's layout). Whenever the
+viewer has seen all but a few of the chooser's cards of the kind and the sideboard holds as many of other kinds, the
+request's support holds 60s whose unseen cards hold none of the kind: in such a world no deal can give a legal pick,
+and the deal loop panics. Measured on the Sneak and Show 75 (Flute swapped for a second Pyroblast) with the viewer
+having seen 37 of the main's 38 cards of the kind: **386 of 20,000 decks of the plain request had none**
+(`cr_101_4a_a_face_down_pick_reaches_the_deck_request_exactly`). And where every deck holds one, the deal was still not
+the posterior of what the viewer knows: the pick is likelier from a deck with more cards of the kind, and the request
+did not weigh that (below: 5 standard errors off on a real game-2 position).
+
+**The fix: the request carries the pick.** Given the identities a world deals to the chooser's cards the viewer does
+not know (`resample_with_clouds`: each cloud's listed cards in its domain, the other - free - cards shuffled over
+every other place), the chance that a uniformly drawn hand card is of the kind is exactly (A + B L / F) / |hand|:
+A from the hand cards the viewer knows (1 each of the kind) and the clouds' listed cards (a cloud place: its listed
+cards of the kind over its room), B the hand places a free card can take (a place of no cloud 1; a cloud place its
+share of free cards), F the free cards, L those of the kind. The deck enters through L only, L = y + c0 with y the
+deck's cards of the kind beyond R and c0 = the kind among R - known + extras - clouds' cards (`Game::hidden_pick_odds`,
+`sneak_show.rs`; a card's kind is `hidden_pick_ok`'s own test on a hand card given that identity, on a copy of the
+state). So P(pick | deck) is proportional to a + b y (a = A F + B c0, b = B), and the deck's posterior is
+P(deck | R) (a + b y): `DeckWant::pick` (`PickWant`: the support's cards of the kind, a, b) carries it, and
+`ConstructedPrior` samples it **exactly, without rejection** - a second layer in its swap table (`swap_table2`: the
+decks' weights, and the same weighted by y as "one marked copy of the kind"), the swap count s by
+(a m0 + b m1)(s, s) / (decks with s swaps), then whether a copy is marked, then the counts backwards (an entry of the
+kind taking the mark with weight c - shown). The tilt (`DeckWant::tilt`) multiplies in as before (an exponential tilt
+of this posterior); `expected_fill` (the deck reader's baseline) is the marginal under it, by two-layer forward and
+backward tables; `check_sample` refuses a deck of weight 0 (no legal pick: the contract at every deal). The K-sample
+deal's key holds the pick's terms (its K decks are this posterior's); a request without a pick keys, draws and fills as
+before, draw for draw (tested). `sample_hidden_deck`, `deck_tilt_of` and `deck_weights` build the pick
+(`MtgAz::pick_want`; `pick_want_of`, a test hook). After the deck, `Game::determinize` deals the hand as 123 does: its
+deal loop now always has a deck with a legal card (acceptance at least about 1 / F a deal).
+
+* **Exact**: the deck is the posterior of the viewer's whole information under the deal's own model (the hidden 60's
+  prior, the uniform deal with clouds, the uniformly drawn pick), and then the hand given the deck as 123 deals it.
+  **A reading** (recorded, not an approximation of something else): with the hand tilt (`determinize_weighted`, 69) the
+  deck is still this posterior and the tilt acts on the hand given the deck - as every hidden-deck deal composes them
+  (120.4: the belief weights are read after the deck is dealt); the tilted hand deal has no closed form to weigh decks by.
+* **Refused loudly**: the table and sealed priors (`TablePrior`, `SealedPrior`) cannot condition a deck on a pick and
+  panic if given one (`refuse_pick`) - unreachable in a spec: hidden decklists are refused for constructed play, and the
+  cube and EoE tables hold no Show and Tell; `FUZZ_HIDDEN_DECKS=1` refuses `FUZZ_POOL=sneak_show`, `sns` and `delver_sb`
+  up front (it plays the constructed table's decks under the table's prior).
+* **Tests** (`tests/constructed_bo3.rs`): `cr_101_4a_a_face_down_pick_reaches_the_deck_request_exactly` - the case
+  above: the plain request deals 386 of 20,000 decks with no card of the kind beyond R, the request with the pick
+  none; its distribution of y equals the plain prior's reweighted by y (importance) bin by bin within 4 standard errors
+  (mean y 1.5091 by importance, 1.5031 by the request); `expected_fill` under the pick 0.9542 Emrakuls beyond R against
+  0.9523 sampled; a request without a pick draws the same decks as before.
+  `cr_101_4a_show_and_tell_in_a_later_game_deals_a_hidden_60_with_a_legal_pick` - a real game-2 position: Sneak and
+  Show (Flute swapped for a second Pyroblast) against the Delver 75 with one episode per game, P0 concedes game 1 (CR
+  104.3a), both keep, and a steered game 2 reaches P0's face-down pick at turn 8 (match 0: P0's hand 6 cards, P1 has
+  seen 5 of P0's cards); 200 worlds of P1 (the K-sample deal, the belief-tilted and the deck-tilted deals): every one
+  P1's decision as in the real game, a legal 60 of the 75 holding what P1 saw (194 with another 60 than the real one),
+  the invariants and clouds, and the card P0's choice puts onto the battlefield (P1 declining) of the kind; then with
+  fresh samples (K = 0), 20,000 worlds each: P0's 60's cards of the kind average **37.296 +- 0.015 in the posterior**
+  (P1's plain worlds just before the pick, the same knowledge, kept when a uniform card of P0's hand is of the kind:
+  12,159 kept), **37.280 +- 0.012 by the request**, and 37.209 in the plain prior's worlds (the deal before this fix: 5
+  standard errors off). A temporary probe, not kept, gave the same posterior three ways at 20,000 worlds (importance by
+  a + b y 37.274, rejection 37.274, the request 37.269; plain 37.194).
+* **Digests**: every new path runs only while a face-down pick is pending in a hidden-deck game (no digest game is
+  one), and a request without a pick is unchanged: the behaviour digests are main's (129.4).
+
+### 129.4 Checks (on 70de72a3; after it only main's 35181fe, DESIGN.md 9 alone, merged as 9b970a6, and this subsection)
+
+The desktop was shared with other lanes' work; the gates, the fuzz runs and the smokes ran side by side, each with
+its own target directory.
+
+* **Behaviour digests: main's, unchanged** - full **b63f643e97a30a61**, `DIGEST_ENCODING=0` **a0062bb5569e06d3** (the
+  engine gate), `DIGEST_ENCODING=v5` **d1bbf127a6c5bda0** (by hand, the same 2,000 + 500 games): the values 128 recorded.
+  Nothing here was re-recorded.
+* **Engine gate** (`python tools/gate.py engine --no-mac --expect-digest b63f643e97a30a61 --expect-digest0
+  a0062bb5569e06d3 --tested-sha 70de72a3 --target-dir E:/cargo-target/mtg-zero/delver-bo3-int-verify --step-timeout
+  7200`, a fresh target directory): **`GATE PASSED engine 70de72a36bf0 in 2042s`** - build, both digests, `az` 52,
+  `limits` 13, `hidden` 28, pytest 311 passed and 1 skipped, the search smoke (random, seed 0).
+* **optin-core** for the zero-core pin, twice: on the pin alone (a scratch commit 4d0118f5 = main 1d5508af with the
+  pin 2aab098, baseline main 1d5508af: **`GATE PASSED optin-core 4d0118f539fd in 2476s`** - the core's cargo tests 156,
+  `checkpoint_compat` identical (visits and cq, 2,465 samples each), `az` 50, `hidden` 28, the three other games built
+  against the core, the core's pytest 461 passed and 11 skipped); and, after main moved, on this head against main
+  c3abdb8a (`--feature-tests az,hidden,bo3_episodes,constructed_bo3`): **`GATE PASSED WITH FLAKY RETRIES optin-core 70de72a36bf0 in 2878s`** - build, the core's cargo tests 156, `checkpoint_compat` identical (2,465 samples each), `az` 52, `hidden` 28, `bo3_episodes` 5, `constructed_bo3` 11, the three other games built, the core's pytest 459 passed and 11 skipped with two of `tests/test_remoteplay.py`'s timed tests (`test_a_dying_worker_gives_its_accepted_games_back`, `test_cotrain_the_local_driver_is_never_starved`) failing under the load and passing alone on the gate's retry (its policy for that file, 91).
+* **The full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, 161 binaries; on 70de72a3's
+  code but for 129.3's probe change, whose tests were rerun after it): **2,515 passed, 0 failed, 26 ignored**.
+* **`FUZZ_GAMES=20000`**, each passed (4 tests):
+  * the default pool (1,680 s): 20,000 games (wins 9,803 / 10,075, 122 drawn, 31.8 turns, 438.2 decisions, 19,192,276
+    options completed) and 1,000 cube best-of-three matches (2,549 games, 549 of three, 754 drawn; 860.4 decisions a
+    match; 3,098 sideboardings, 23,803 decisions; 42,956 hidden-pool worlds, first picks resampled in 26,195): the
+    matches are 128's numbers exactly.
+  * `FUZZ_POOL=delver` (1,155 s): the 20,000 games are 120.6's best-of-one numbers exactly (wins 9,673 / 9,563, 764
+    drawn, 36.8 turns, 381.6 decisions, 11,882,303 options completed; Murktide Regent cast 9,875 times, its trigger 388,
+    Prismari Charm 14,691); **1,000 constructed best-of-three matches on the full 75** (one in four P1 another 75):
+    2,654 games (654 of three, 848 drawn, 0 aborted), 833.2 decisions a match, **3,308 sideboardings, 26,576
+    decisions (8.03 each), 3,166 later-game decks changed**, 41,526 constructed worlds, the opponent's 60 hidden in
+    24,818 (24,703 another 60 than the real one), 306 first sideboarders' choices dealt, 24,280 deck-tilted worlds.
+  * `FUZZ_POOL=delver_sb` (892 s): 20,000 games (wins 11,351 / 7,817, 832 drawn, 29.5 turns, 272.4 decisions, 8,127,019
+    options completed); on the stack Consign to Memory 9,490 (4,522 aimed at a triggered ability), Hydroblast 23,427,
+    Meltdown 5,935, Price of Progress 14,629, Rough 5,281, Tumble 19. (Games only: its matches are `delver`'s.)
+* **The run loop on the full preset** (`python -m mtgz.az.run --run E:/mtg-zero-scratch/delver-bo3-int/smoke-full --preset
+  delver-mirror-bo3 --iters 2 --games 8 --conc 8 --sims 8 --sims-fast 2 --eval-games 4 --eval-sims 4
+  --eval-random-games 2 --elo-games 2 --ref-games 2 --min-window-samples 0 --min-steps 10 --threads 4`: the preset's
+  network, GPU and spec - the full 75, one episode per game - with fewer games), 20 minutes, no failure: iteration 1 8
+  matches = 24 games (3.0 each; 16 drawn at the 60-turn cap, an untrained network), 3,989 samples; iteration 2 8 matches
+  = 22 games, 2,246 samples; training with the deck target; the yardstick, random and Elo with the games beside the
+  matches (`per_game`; `elo match iter_0002 vs iter_0000: 1.5/2 (games 3.5/6)`). **Per-game labels**, read back from its
+  two shards (a scratch check; rows are written match by match, a row's game the match block's game number, + 1 while
+  sideboarding): 6,235 rows (58 sideboarding) of 16 matches and 46 games - every game's rows carry one label per player,
+  the two summing to 1, and 11 of the 16 matches carry different labels in different games (impossible with the
+  match's label). **Real sideboard cards**: 4 matches recorded from its iteration-2 network (`zero.replay`, self-play,
+  8 simulations): the 75's eight sideboard-only cards (Consign to Memory, Force of Negation, Hydroblast, Karakas,
+  Meltdown, Price of Progress, Pyroblast, Rough // Tumble) never in a game 1, and in games 2-3 19 and 9 sightings - every
+  one of the five cards outside the cube among them, both seats.
+* **The search smoke** (`tools/search_smoke.py`, one seed each): `delver_bo3` (the presets' spec, `--preset
+  delver-mirror-bo3 --games 200`): 200 matches = 576 games, 0 unfinished, 376,351 decisions, 10.5 million simulations,
+  336 s; `match_games` (`--games 64 --sims 16 --conc 64`): 64 matches = 172 games, 0 unfinished, 187,711 decisions, 1.30
+  million simulations, 36 s. Both with `--timeout 7200 --stall 600` (the desktop was loaded: the defaults count a slow
+  batch as a hang).
+* **Not run**: the Mac steps (`--no-mac`).

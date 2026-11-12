@@ -1011,6 +1011,8 @@ pub enum Ext {
     DoomsdayB(crate::doomsday_b::DoomsdayB),
     /// Legacy Sneak and Show (ENGINE.md 123).
     SnS(crate::sneak_show::SnS),
+    /// The Legacy Izzet Delver 75's sideboard (ENGINE.md 122).
+    DelverSb(crate::delver_sb::DelverSb),
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -1325,6 +1327,7 @@ impl Op {
             Op::Ext(Ext::EoeW2(x)) => x.uses_event(),
             Op::Ext(Ext::DoomsdayB(x)) => x.uses_event(),
             Op::Ext(Ext::SnS(x)) => x.uses_event(),
+            Op::Ext(Ext::DelverSb(x)) => x.uses_event(),
             Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
             Op::DamagePlayer { amount, who: w } => amt(amount) || who(w),
             Op::Draw { who: w, n } | Op::GainLife { who: w, n } | Op::LoseLife { who: w, n } | Op::DiscardRandom { who: w, n } => {

@@ -54,7 +54,17 @@
 //! table of constructed play (`CardDb::constructed`: Murktide Regent and
 //! Prismari Charm with the cube's cards); every check of the default mode,
 //! and with 200 games or more Murktide Regent must have been cast and its
-//! leave-the-graveyard trigger resolved. Games only (best-of-one).
+//! leave-the-graveyard trigger resolved. Its matches (ENGINE.md 120) are constructed
+//! best-of-three: both seats the pinned main and the sideboard cards of the 75 this checkout
+//! supports (one match in four P1 another 75 of supported cards), one match in four with 12-turn
+//! games; every check of the default matches but the
+//! hidden pool's, and instead at each checkpoint, for both viewers, the constructed world
+//! (`check_constructed_world`: the 75 public and unchanged, the opponent's deck a legal 60 of it -
+//! in game 1 the registered main, from game 2 on dealt, holding every card the viewer saw this game -,
+//! the world's cards that deck, the first sideboarder's hidden choice a legal 60, the other
+//! player's sideboarding restarted), a deck-tilted world too (`FUZZ_DECK_TILT=t`'s tilt, default 1;
+//! a random prediction from its own generator: the deck one of the K cached decks), and every later
+//! game's decks legal 60s of the 75.
 //! `FUZZ_POOL=dd_a` (ENGINE.md 124.1): Legacy Doomsday, lane A's cards: the
 //! Doomsday 60 (MTGGoldfish 8027957) with the cards of the other lanes
 //! swapped for more of lane A's (`DD_A_DECK`), against the Delver 60 in
@@ -102,6 +112,13 @@
 //! question with a next page takes it three times in four (the table's faces and tokens are on its
 //! last pages). With 200 games or more each card must have chosen a name, and the Peacekeeper each
 //! kind of name: a card of one face, a back face, an Adventure, a split card's half, and `PASS`.
+//! `FUZZ_POOL=delver_sb` (ENGINE.md 122): the Delver 75's five sideboard cards outside the cube
+//! in the Delver 60 (`DELVER_SB_DECK`: Consign to Memory, Hydroblast, Price of Progress and Rough
+//! // Tumble three each, Meltdown two, for Daze, Ponder, Unholy Heat, Prismari Charm and three
+//! Brainstorms) against the Delver 60 in either seat, the sideboarded mirror, or the Sneak and
+//! Show 60 (colourless spells, Emrakul's cast trigger), by seed. Constructed play's card table;
+//! every check of the default mode, and with 200 games or more each of the five must have been
+//! cast and a Consign to Memory aimed at a triggered ability. Games only (best-of-one).
 //! `FUZZ_POOL=eoe` (ENGINE.md 99): Edge of Eternities sealed, the set's own
 //! card table (`CardDb::eoe`): random 40-card decks of its supported cards
 //! (17 lands, 23 spells; games only, no matches).
@@ -139,7 +156,8 @@
 //! p99, max), as JSON (`FUZZ_CAP_CENSUS_OUT`, default `fuzz_cap_census_<pool>.json`).
 //!
 //! `FUZZ_HIDDEN_DECKS=1` (ENGINE.md 102): the mode's games (the default decks, `FUZZ_POOL=eoe`'s or
-//! `FUZZ_POOL=sealed`'s) with hidden decklists, played through `MtgAz` (`MtgAz::from_seats`, the
+//! `FUZZ_POOL=sealed`'s; refused with `sneak_show`, `sns` and `delver_sb`, whose Show and Tell pick the
+//! table's prior cannot condition a deck on, ENGINE.md 129.3) with hidden decklists, played through `MtgAz` (`MtgAz::from_seats`, the
 //! table's `TablePrior` for both decks; with `FUZZ_POOL=sealed` the spec's `SealedPrior`, 102.6): every check of a game (the decider's encoding through `MtgAz::encode`) and at
 //! each checkpoint `MtgAz::determinize` for both viewers - the decider's actions, the viewer's
 //! view and whole encoding as in the real game, no known card dealt again, the opponent's sampled
@@ -377,6 +395,9 @@ enum PoolMode {
     /// `FUZZ_POOL=names` (ENGINE.md 127): Anointed Peacekeeper and Disruptor
     /// Flute with the table's cards of more than one face.
     Names,
+    /// `FUZZ_POOL=delver_sb` (ENGINE.md 122): the Delver sideboard's five
+    /// cards in the Delver 60.
+    DelverSb,
 }
 
 fn pool_mode() -> PoolMode {
@@ -395,7 +416,8 @@ fn pool_mode() -> PoolMode {
         Ok("sneak_show") => PoolMode::SneakShow,
         Ok("sns") => PoolMode::Sns,
         Ok("names") => PoolMode::Names,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"names\", \"eoe\" or \"sealed\")"),
+        Ok("delver_sb") => PoolMode::DelverSb,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"names\", \"delver_sb\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -422,9 +444,9 @@ fn dd_b_mode() -> bool {
 }
 
 /// Constructed play's table (`FUZZ_POOL=delver`, `dd_a`, `dd_b`, `dd_c`,
-/// `doomsday`, `sneak_show`, `sns` or `names`).
+/// `doomsday`, `sneak_show`, `sns`, `names` or `delver_sb`).
 fn constructed_mode() -> bool {
-    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode() || names_mode()
+    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode() || names_mode() || delver_sb_mode()
 }
 
 /// `FUZZ_POOL=names` (ENGINE.md 127).
@@ -546,6 +568,70 @@ fn count_names(g: &Game, named: &mut Vec<engine::ids::ObjRef>, seen: &mut Vec<u3
             };
             if chosen.iter().any(|&(p, everyone, n)| (everyone || p != it.controller) && names.contains(&n)) {
                 NAMES_TAXED.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+/// `FUZZ_POOL=delver_sb` (ENGINE.md 122).
+fn delver_sb_mode() -> bool {
+    pool_mode() == PoolMode::DelverSb
+}
+
+/// The Delver 60 of `FUZZ_POOL=delver_sb` (ENGINE.md 122): the Delver 75's five sideboard cards
+/// outside the cube (three each, Meltdown two) in for Daze, Ponder, Unholy Heat, Prismari Charm
+/// and three Brainstorms.
+const DELVER_SB_DECK: &[(u32, &str)] = &[
+    (3, "Consign to Memory"),
+    (3, "Hydroblast"),
+    (2, "Meltdown"),
+    (3, "Price of Progress"),
+    (3, "Rough // Tumble"),
+    (1, "Brainstorm"),
+    (3, "Cori-Steel Cutter"),
+    (4, "Dragon's Rage Channeler"),
+    (2, "Flooded Strand"),
+    (4, "Force of Will"),
+    (1, "Island"),
+    (4, "Lightning Bolt"),
+    (4, "Mishra's Bauble"),
+    (2, "Misty Rainforest"),
+    (2, "Murktide Regent"),
+    (3, "Polluted Delta"),
+    (2, "Scalding Tarn"),
+    (4, "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar"),
+    (1, "Thundering Falls"),
+    (1, "Urza's Bauble"),
+    (4, "Volcanic Island"),
+    (4, "Wasteland"),
+];
+
+fn delver_sb_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = DELVER_SB_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let deck = engine::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    engine::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("DELVER_SB_DECK: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=delver_sb`: the five cards' spells seen on the stack (each stack item once, by its
+/// id; Rough // Tumble by the half cast, copies of Consign to Memory too), and Consign to Memory
+/// spells aimed at a triggered ability.
+static DELVER_SB_SEEN: [AtomicU64; 6] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+static DELVER_SB_AT_ABILITY: AtomicU64 = AtomicU64::new(0);
+const DELVER_SB_SPELLS: [&str; 6] = ["Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough", "Tumble"];
+
+fn count_delver_sb(g: &Game, seen: &mut Vec<u32>) {
+    for it in g.stack() {
+        if seen.contains(&it.id) {
+            continue;
+        }
+        seen.push(it.id);
+        if let engine::game::StackKind::Spell { card } = it.kind {
+            if let Some(k) = DELVER_SB_SPELLS.iter().position(|&n| n == g.name(card)) {
+                DELVER_SB_SEEN[k].fetch_add(1, Ordering::Relaxed);
+                if k == 0 && it.targets.iter().any(|&(_, t)| matches!(t, engine::Target::Stack(_))) {
+                    DELVER_SB_AT_ABILITY.fetch_add(1, Ordering::Relaxed);
+                }
             }
         }
     }
@@ -1933,6 +2019,16 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     if names_mode() {
         return [(names_deck(&mut rng), Vec::new()), (names_deck(&mut rng), Vec::new())];
     }
+    if delver_sb_mode() {
+        // Against Delver in either seat, the sideboarded mirror, or Sneak and Show.
+        let sb = delver_sb_deck();
+        return match seed % 4 {
+            0 => [(sb, Vec::new()), (delver_deck(), Vec::new())],
+            1 => [(delver_deck(), Vec::new()), (sb, Vec::new())],
+            2 => [(sb.clone(), Vec::new()), (sb, Vec::new())],
+            _ => [(sb, Vec::new()), (sneak_show_deck(), Vec::new())],
+        };
+    }
     if eoe_mode() {
         return [(eoe_deck(&mut rng), Vec::new()), (eoe_deck(&mut rng), Vec::new())];
     }
@@ -2074,6 +2170,9 @@ fn play(seed: u64, checks: bool) -> Played {
         }
         if names_mode() {
             count_names(&g, &mut names_named, &mut names_seen);
+        }
+        if delver_sb_mode() && !g.stack().is_empty() {
+            count_delver_sb(&g, &mut stack_seen);
         }
         assert!(steps < 100_000, "seed {seed}: game does not end
 {}", g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
@@ -2542,6 +2641,17 @@ fn fuzz_random_games() {
             assert!(seen[0] > 0 && seen[2] > 0 && free > 0 && unc > 0, "the deck's lane cards weren't played: {seen:?} {free} {unc}");
         }
     }
+    if delver_sb_mode() {
+        let seen: Vec<u64> = DELVER_SB_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+        let at = DELVER_SB_AT_ABILITY.load(Ordering::Relaxed);
+        println!(
+            "FUZZ_POOL=delver_sb: seen on the stack {}; Consign to Memory aimed at a triggered ability {at}",
+            DELVER_SB_SPELLS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
+        );
+        if n >= 200 {
+            assert!(seen[..5].iter().all(|&c| c > 0) && at > 0, "the five cards weren't played: {seen:?} {at}");
+        }
+    }
 }
 
 #[test]
@@ -2573,6 +2683,9 @@ fn match_spec(seed: u64) -> engine::az::MtgSpec {
     if pool_mode() == PoolMode::Drafted {
         return drafted_spec(seed);
     }
+    if delver_mode() {
+        return delver_bo3_spec(seed);
+    }
     if interactions_mode() {
         // Combo-dense lists (cube cards), best-of-three, open decklists;
         // one match in four short.
@@ -2595,6 +2708,47 @@ fn match_spec(seed: u64) -> engine::az::MtgSpec {
     engine::az::MtgSpec::parse(json).unwrap()
 }
 
+/// `FUZZ_POOL=delver`'s matches (ENGINE.md 120): constructed best-of-three, both seats the pinned
+/// main and the sideboard cards of the 75 this checkout supports (all 15 since ENGINE.md 122);
+/// one match in four P1 plays another 75 of supported cards (`OTHER_75`: the format takes any two
+/// 75s), one in four 12-turn games (drawn games).
+fn delver_bo3_spec(seed: u64) -> engine::az::MtgSpec {
+    let d = engine::az::constructed::Decklist::izzet_delver();
+    let db = CardDb::constructed();
+    let main = d.main_names();
+    let side: Vec<String> = d.sideboard.iter().filter(|(_, n)| db.id(n).is_some()).flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect();
+    let expand = |l: &[(u32, &str)]| -> Vec<String> { l.iter().flat_map(|&(k, n)| std::iter::repeat_n(n.to_string(), k as usize)).collect() };
+    let (main1, side1) = if seed % 4 == 1 { (expand(&OTHER_75.0), expand(&OTHER_75.1)) } else { (main.clone(), side.clone()) };
+    let max_turns = if seed % 4 == 3 { 12 } else { 60 };
+    let v = serde_json::json!({"max_turns": max_turns, "constructed": true, "format": "bo3",
+        "decks": {"p0": main, "p1": main1, "p0_sideboard": side, "p1_sideboard": side1}});
+    engine::az::MtgSpec::parse(&v.to_string()).unwrap()
+}
+
+/// Another constructed 75 of supported cards (`FUZZ_POOL=delver`'s matches; `tests/constructed_bo3.rs`'s
+/// second deck): basic lands past four copies (no free basic land entry), a 12-card sideboard.
+#[allow(clippy::type_complexity)]
+const OTHER_75: ([(u32, &str); 15], [(u32, &str); 6]) = (
+    [
+        (4, "Lightning Bolt"),
+        (4, "Brainstorm"),
+        (4, "Ponder"),
+        (4, "Counterspell"),
+        (4, "Spell Pierce"),
+        (2, "Fiery Confluence"),
+        (4, "Force of Will"),
+        (4, "Dragon's Rage Channeler"),
+        (2, "Murktide Regent"),
+        (4, "Volcanic Island"),
+        (4, "Scalding Tarn"),
+        (8, "Island"),
+        (6, "Mountain"),
+        (4, "Mishra's Bauble"),
+        (2, "Unholy Heat"),
+    ],
+    [(3, "Pyroblast"), (3, "Force of Negation"), (1, "Karakas"), (2, "Unholy Heat"), (2, "Fiery Confluence"), (1, "Mountain")],
+);
+
 struct PlayedMatch {
     /// The match ended aborted (ENGINE.md 100.7).
     aborted: bool,
@@ -2604,6 +2758,8 @@ struct PlayedMatch {
     results: [u8; 3],
     games: u8,
     sideboard_decisions: u32,
+    /// Sideboardings finished (each player's `PASS` between games).
+    sideboardings: u32,
     changed_decks: u32,
 }
 
@@ -2613,6 +2769,13 @@ struct HiddenStats {
     worlds: u64,
     first_picks_changed: u64,
     decks_changed: u64,
+    /// Constructed best-of-three (ENGINE.md 120): worlds where the opponent's deck is hidden (games
+    /// 2-3, between games after game 2), those with another 60 than the real one, the first
+    /// sideboarder's hidden choices dealt, and the deck-tilted worlds.
+    hidden: u64,
+    hidden_changed: u64,
+    choices_dealt: u64,
+    tilted: u64,
 }
 
 /// A world `determinize(viewer)` sampled (`d`) from match `g`: the viewer's
@@ -2688,6 +2851,136 @@ fn check_hidden_pool(g: &engine::az::MtgAz, d: &engine::az::MtgAz, viewer: u8, s
     }
     d.g.check_invariants().unwrap_or_else(|e| panic!("match {seed} (a world of P{viewer}): {e}"));
     d.g.check_knowledge().unwrap_or_else(|e| panic!("match {seed} (a world of P{viewer}): {e}"));
+}
+
+/// Does sorted multiset `a` hold sorted multiset `b`?
+fn holds_all(a: &[u16], b: &[u16]) -> bool {
+    let mut left = a.to_vec();
+    b.iter().all(|x| match left.binary_search(x) {
+        Ok(i) => {
+            left.remove(i);
+            true
+        }
+        Err(_) => false,
+    })
+}
+
+/// A legal 60 of player `o`'s 75 in match `m` (counts per entry of its constructed pool list).
+fn check_legal_60(m: &engine::az::MatchState, o: usize, counts: &[u8], what: &dyn Fn() -> String) {
+    let pool = &m.pools[o];
+    let n: usize = counts.iter().map(|&c| c as usize).sum();
+    assert_eq!(counts.len(), pool.list.len(), "{}: counts of another list", what());
+    assert_eq!(n, 60, "{}: a deck of {n} cards", what());
+    assert!(counts.iter().zip(&pool.list).all(|(&c, e)| c <= e.1), "{}: more copies than the 75 has", what());
+}
+
+/// A world `determinize(viewer)` dealt (`d`) from a constructed best-of-three `g` (ENGINE.md 120):
+/// the viewer's pool, decks and sideboarding untouched; the opponent's 75 public and unchanged (the
+/// same list); their deck a legal 60 of it - the registered main in game 1 (open), dealt from game
+/// 2 on, holding every card the viewer has seen this game (between games: at the last game's end);
+/// in a game the world's cards that deck and the sideboard the rest of the 75, the view and every
+/// known card unchanged, the invariants and the clouds; between games the first sideboarder's hidden
+/// choice a legal 60 and the other player's sideboarding restarted from the world's last deck.
+fn check_constructed_world(g: &engine::az::MtgAz, d: &engine::az::MtgAz, viewer: u8, seed: u64, stats: &mut HiddenStats) {
+    let o = 1 - viewer;
+    let (v, ou) = (viewer as usize, o as usize);
+    let what = || format!("match {seed} game {}{}: a constructed world of P{viewer}", g.m.game_no, if g.sideboarding().is_some() { " (between games)" } else { "" });
+    assert_eq!(g.m.pools[v], d.m.pools[v], "{}: the viewer's pool", what());
+    assert_eq!(g.m.decks[v], d.m.decks[v], "{}: the viewer's deck", what());
+    assert_eq!(g.g.player(viewer).sideboard, d.g.player(viewer).sideboard, "{}: the viewer's sideboard", what());
+    assert_eq!(g.m.pools[ou].list, d.m.pools[ou].list, "{}: the opponent's 75 is public", what());
+    let pool = &d.m.pools[ou];
+    assert_eq!((pool.n_cards, pool.min_deck, pool.max_deck), (pool.list.len(), 60, 60), "{}: the constructed pool", what());
+    check_legal_60(&d.m, ou, &d.m.decks[ou], &what);
+    let deck = pool.deck(&d.m.decks[ou]);
+    let real = g.m.pools[ou].deck(&g.m.decks[ou]);
+    stats.worlds += 1;
+    if g.deck_hidden(o) {
+        stats.hidden += 1;
+        stats.hidden_changed += (deck != real) as u64;
+    } else {
+        assert_eq!(deck, real, "{}: game 1's deck is the registered main (open)", what());
+    }
+    let shown = hd_shown(g, viewer);
+    assert!(holds_all(&deck, &shown), "{}: the dealt 60 lacks a card the viewer saw this game", what());
+    if let Some(sb) = d.sideboarding() {
+        let rsb = g.sideboarding().unwrap();
+        if let Some(x) = &sb.done[ou] {
+            check_legal_60(&d.m, ou, x, &what);
+            stats.choices_dealt += 1;
+        }
+        if let Some(x) = &sb.done[v] {
+            assert_eq!(Some(x), rsb.done[v].as_ref(), "{}: the viewer's own choice", what());
+        }
+        if sb.decider() == o {
+            assert_eq!(sb.counts, d.m.decks[ou].to_vec(), "{}: the opponent's sideboarding not restarted from the world's last deck", what());
+            assert_eq!((sb.last, sb.asking), (None, None));
+        } else {
+            assert_eq!((&sb.counts, sb.last, sb.asking), (&rsb.counts, rsb.last, rsb.asking), "{}: the viewer's own sideboarding", what());
+        }
+        return;
+    }
+    assert_eq!(hd_deck(d, o), deck, "{}: the world's cards of the opponent are not the dealt 60", what());
+    assert_eq!(d.g.player(o).sideboard.as_ref(), pool.sideboard(&d.m.decks[ou]).as_slice(), "{}: the sideboard is the rest of the 75", what());
+    assert_eq!(g.g.sideboard_size(o), d.g.sideboard_size(o));
+    assert_eq!(hd_deck(d, viewer), hd_deck(g, viewer), "{}: the viewer's own cards", what());
+    assert_eq!(g.g.view_of(viewer), d.g.view_of(viewer), "{}: the view", what());
+    for (i, x) in g.g.objs().iter().enumerate() {
+        let c = engine::CardIdx::new(i as u32);
+        if g.g.knows(viewer, c) {
+            assert_eq!((x.def, g.g.ident(c)), (d.g.obj(c).def, d.g.ident(c)), "{}: a card the viewer knows was dealt again", what());
+        }
+    }
+    d.g.check_invariants().unwrap_or_else(|e| panic!("{}: {e}", what()));
+    d.g.check_knowledge().unwrap_or_else(|e| panic!("{}: {e}", what()));
+}
+
+/// `FUZZ_POOL=delver`'s matches (ENGINE.md 120): a deck-tilted world of `viewer` (`determinize_with`,
+/// the deck's tilt `FUZZ_DECK_TILT` or 1, the hand's on every other check, clip 1e6, a random prediction
+/// of both targets from its own generator: the match plays on unchanged): the decider's actions and the
+/// viewer's encoding as in the real match, every check of `check_constructed_world`, and where the deck
+/// is hidden in a game the world's deck one of the K cached decks.
+fn check_constructed_tilted(g: &engine::az::MtgAz, viewer: u8, seed: u64, step: usize, stats: &mut HiddenStats) {
+    use zero_search::game::SearchGame;
+    let t = std::env::var("FUZZ_DECK_TILT").ok().map_or(1.0, |s| s.parse::<f64>().unwrap_or_else(|_| panic!("FUZZ_DECK_TILT={s}: a tilt")));
+    let mut pr = Rng::new(seed ^ (step as u64).wrapping_mul(0x9E37_79B9) ^ (viewer as u64) << 40 ^ 0xDEC7);
+    let mut seg = || {
+        let mut p: Vec<f32> = (0..engine::az::identity::D).map(|_| ((pr.below(1000) + 1) as f32).powi(3)).collect();
+        let sum: f32 = p.iter().sum();
+        p.iter_mut().for_each(|x| *x /= sum);
+        p
+    };
+    let mut pred = seg();
+    pred.extend(seg());
+    let hand = if pr.below(2) == 0 { t } else { 0.0 };
+    let b = zero_search::game::Belief { pred, tilt: hand, clip: 1e6, tilts: vec![0.0, t] };
+    let cached = {
+        let dt = engine::az::hidden_decks::DeckTilt { p: engine::az::belief::deck_segment(&b.pred), tilt: t, clip: b.clip };
+        g.deck_tilt_of(viewer, dt)
+    };
+    let mut d = g.clone();
+    d.determinize_with(viewer as usize, &mut zero_search::rng::Rng::new(pr.next_u64()), &b);
+    let mover = g.to_move().unwrap();
+    let (mut l0, mut l1) = (Vec::new(), Vec::new());
+    g.legal_actions(&mut l0);
+    d.legal_actions(&mut l1);
+    if viewer as usize == mover {
+        assert_eq!(l0, l1, "match {seed}: a deck-tilted world changed the decider's actions");
+    } else {
+        assert_eq!(d.to_move(), Some(mover));
+    }
+    let (mut x0, mut x1) = (Vec::new(), Vec::new());
+    az_encode(g, viewer, &mut x0);
+    az_encode(&d, viewer, &mut x1);
+    if let Some(i) = (0..x0.len()).find(|&i| x0[i] != x1[i]) {
+        panic!("match {seed}: a deck-tilted world changed the encoding of P{viewer} at {i}");
+    }
+    check_constructed_world(g, &d, viewer, seed, &mut HiddenStats::default());
+    if let Some((decks, _)) = &cached {
+        let world = hd_deck(&d, 1 - viewer);
+        assert!(decks.iter().any(|x| x.deck == world), "match {seed}: the deck-tilted world's deck is not one of the K cached decks");
+        stats.tilted += 1;
+    }
 }
 
 /// Two worlds sampled for the decider, played with the same actions, give it
@@ -2770,7 +3063,7 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
     let (mut legal, mut legal2, mut keys, mut all_keys, mut actions) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut x1: Vec<f32>;
     let mut x2: Vec<f32>;
-    let (mut sideboard_decisions, mut changed_decks) = (0u32, 0u32);
+    let (mut sideboard_decisions, mut changed_decks, mut sideboardings) = (0u32, 0u32, 0u32);
     let mut decks = [g.m.decks[0].clone(), g.m.decks[1].clone()];
     let mut game_no = 1;
     while let Some(p) = g.to_move() {
@@ -2781,6 +3074,7 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
         let sb = g.sideboarding().is_some();
         sideboard_decisions += sb as u32;
         let a = legal[rng.below(legal.len() as u32) as usize];
+        sideboardings += (sb && a == engine::act::PASS) as u32;
         if checks {
             // The decider's encoding is finite and bounded (ENGINE.md 46).
             az_row_checked(&g, p, &|| format!("match {seed} step {}", actions.len()));
@@ -2809,7 +3103,12 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
                 if let Some(i) = (0..x1.len()).find(|&i| x1[i] != x2[i]) {
                     panic!("match {seed}: determinize changed the encoding of P{viewer} (mover P{p}) at {i}: {} -> {}", x1[i], x2[i]);
                 }
-                check_hidden_pool(&g, &d, viewer as u8, seed, stats);
+                if g.m.constructed_bo3 {
+                    check_constructed_world(&g, &d, viewer as u8, seed, stats);
+                    check_constructed_tilted(&g, viewer as u8, seed, actions.len(), stats);
+                } else {
+                    check_hidden_pool(&g, &d, viewer as u8, seed, stats);
+                }
                 if viewer == p && rng.below(4) == 0 {
                     check_match_information_set(&g, viewer, seed, &mut rng);
                 }
@@ -2830,7 +3129,11 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
                     if let Some(i) = (0..x1.len()).find(|&i| x1[i] != x2[i]) {
                         panic!("match {seed}: a weighted deal changed the encoding of P{viewer} at {i}");
                     }
-                    check_hidden_pool(&g, &dw, viewer as u8, seed, &mut HiddenStats::default());
+                    if g.m.constructed_bo3 {
+                        check_constructed_world(&g, &dw, viewer as u8, seed, &mut HiddenStats::default());
+                    } else {
+                        check_hidden_pool(&g, &dw, viewer as u8, seed, &mut HiddenStats::default());
+                    }
                 }
                 // The world plays on.
                 let mut kd = Vec::new();
@@ -2868,8 +3171,13 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
                 let pool = &g.m.pools[q as usize];
                 let deck = g.m.deck(q);
                 // (Every fuzzed deck has 40 cards, and a pool's deck keeps
-                // them: ENGINE.md 42.)
-                assert_eq!((pool.min_deck, pool.max_deck, deck.len()), (40, 40, 40), "match {seed}: {} cards", deck.len());
+                // them: ENGINE.md 42; a constructed best-of-three's 60, ENGINE.md 120.)
+                let size = if g.m.constructed_bo3 { 60 } else { 40 };
+                assert_eq!((pool.min_deck, pool.max_deck, deck.len()), (size, size, size), "match {seed}: {} cards", deck.len());
+                if g.m.constructed_bo3 {
+                    check_legal_60(&g.m, q as usize, &g.m.decks[q as usize], &|| format!("match {seed} game {game_no}: P{q}'s deck"));
+                    assert_eq!(g.g.sideboard_size(q), pool.list.iter().map(|e| e.1 as usize).sum::<usize>() - 60);
+                }
                 for (k, &(_, n)) in pool.list.iter().enumerate() {
                     assert!(g.m.decks[q as usize][k] <= n.max(decks[q as usize][k]));
                 }
@@ -2897,14 +3205,16 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
         results: m.results,
         games: m.game_no,
         sideboard_decisions,
+        sideboardings,
         changed_decks,
     }
 }
 
 #[test]
 fn fuzz_random_matches() {
-    if constructed_mode() {
-        println!("FUZZ_POOL=delver / dd_a / dd_b / dd_c / doomsday / sneak_show / sns: games only (constructed best-of-three isn't built)");
+    if constructed_mode() && !delver_mode() {
+        // (constructed best-of-three is the Delver mirror's: ENGINE.md 120; the other decks have no 75 here)
+        println!("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / names / delver_sb: games only (constructed best-of-three is FUZZ_POOL=delver's)");
         return;
     }
     if eoe_mode() {
@@ -2923,6 +3233,7 @@ fn fuzz_random_matches() {
     let n: u64 = std::env::var("FUZZ_MATCHES").ok().and_then(|s| s.parse().ok()).unwrap_or((games / 20).max(20));
     let first: u64 = std::env::var("FUZZ_FIRST").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
     let (mut games_played, mut draws, mut decisions, mut sb, mut changed, mut three) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let mut sideboardings = 0u64;
     let mut aborted = 0u64;
     let mut stats = HiddenStats::default();
     for seed in first..first + n {
@@ -2935,6 +3246,7 @@ fn fuzz_random_matches() {
         draws += p.results.iter().filter(|&&r| r == 3).count() as u64;
         decisions += p.actions.len() as u64;
         sb += p.sideboard_decisions as u64;
+        sideboardings += p.sideboardings as u64;
         changed += p.changed_decks as u64;
         three += (p.games == 3) as u64;
         aborted += p.aborted as u64;
@@ -2948,9 +3260,22 @@ fn fuzz_random_matches() {
         stats.first_picks_changed,
         stats.decks_changed
     );
+    println!(
+        "sideboardings {sideboardings} ({:.2} decisions per sideboarding)",
+        sb as f64 / sideboardings.max(1) as f64
+    );
     // (Over a chunk of matches; a single match's rerun, `FUZZ_MATCHES=1`,
     // passes when the match completes: ENGINE.md 51.)
     assert!(n < 20 || sb > 0 && changed > 0 && three > 0, "no sideboarding, changed deck or match of three");
+    if delver_mode() {
+        // Constructed best-of-three (ENGINE.md 120): no first picks; the later games' decks hidden.
+        println!(
+            "constructed: {} worlds, the opponent's 60 hidden in {} ({} with another 60 than the real one), {} first sideboarders' choices dealt, {} deck-tilted worlds from the K cached decks",
+            stats.worlds, stats.hidden, stats.hidden_changed, stats.choices_dealt, stats.tilted
+        );
+        assert!(n < 20 || stats.hidden_changed * 2 > stats.hidden && stats.choices_dealt > 0 && stats.tilted > 0, "the constructed 60s are rarely dealt");
+        return;
+    }
     // (Interaction lists have no first picks: open decklists.)
     assert!(
         n < 20 || interactions_mode() || stats.first_picks_changed > stats.worlds / 4 && stats.decks_changed > stats.worlds / 4,
@@ -2962,7 +3287,7 @@ fn fuzz_random_matches() {
 fn same_seed_and_actions_replay_matches_identically() {
     use engine::az::MtgAz;
     use zero_search::game::SearchGame;
-    if constructed_mode() || eoe_mode() || sealed_mode() {
+    if (constructed_mode() && !delver_mode()) || eoe_mode() || sealed_mode() {
         return;
     }
     for seed in 2000..2012 {
@@ -3173,6 +3498,12 @@ fn hd_shown(a: &engine::az::MtgAz, viewer: u8) -> Vec<u16> {
 /// each checkpoint, `check_determinize_hidden`.
 fn play_hidden(seed: u64) -> Played {
     use zero_search::game::SearchGame;
+    // (Show and Tell's face-down pick reaches a hidden deck's request, which only the constructed prior
+    // conditions on: the table's refuses it, ENGINE.md 129.3. Its decks play constructed best-of-three.)
+    assert!(
+        !(sns_mode() || delver_sb_mode()),
+        "FUZZ_HIDDEN_DECKS=1 with a pool that casts Show and Tell (sneak_show, sns, delver_sb): the table's prior cannot condition a deck on its face-down pick (ENGINE.md 129.3)"
+    );
     let [(d0, s0), (d1, s1)] = decks(seed);
     let log = std::env::var("FUZZ_LOG").is_ok();
     let gspec = GameSpec { log, hidden_decks: true, hidden_decklists: true, ..GameSpec::default() };

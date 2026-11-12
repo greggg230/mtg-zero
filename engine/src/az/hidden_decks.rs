@@ -44,6 +44,41 @@ pub struct DeckWant<'a> {
     /// beyond `shown`: each such draw is made with probability proportional to the prior's own
     /// weight times this one (sequential draws, Wallenius' urn, as ENGINE.md 69.2). None: 1.
     pub tilt: Option<&'a dyn Fn(DefId) -> f64>,
+    /// A face-down choice of a card of a kind in the opponent's hand that the viewer knows only was
+    /// made (Show and Tell's, CR 101.4a; ENGINE.md 129.3): the deck's posterior is the prior's times
+    /// the chance of that choice given the deck ([`PickWant`]). None: no such choice pending.
+    pub pick: Option<&'a PickWant>,
+}
+
+/// The face-down pick a deck request carries (ENGINE.md 129.3): the opponent chose a card of a kind from
+/// their hand face down (Show and Tell's active player, CR 101.4a), and the viewer knows only that one
+/// was chosen. A world deals the hand from the deck and keeps the deal only when a hand card drawn
+/// uniformly is of the kind (`Game::hidden_pick_ok`); given the deck that chance is proportional to
+/// `a + b y`, y the deck's copies of the kind beyond the shown cards (`Game::hidden_pick_odds`). So the
+/// deck's posterior given everything the viewer knows is P(deck | R) (a + b y): a prior that is given a
+/// pick samples that exactly, or refuses loudly; never the deck without it (a deck with a + b y = 0
+/// holds no legal pick at all, and `determinize` could never deal one).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PickWant {
+    /// The card definitions of the prior's support of the kind (sorted).
+    pub legal: Vec<DefId>,
+    /// The chance's constant part and its slope per copy of the kind beyond the shown cards (a, b >= 0,
+    /// b > 0; any common scale).
+    pub a: f64,
+    pub b: f64,
+}
+
+impl PickWant {
+    /// y: `deck`'s copies of the kind beyond `shown` (both sorted; `deck` holds `shown`).
+    pub fn beyond(&self, deck: &[DefId], shown: &[DefId]) -> usize {
+        let of_kind = |v: &[DefId]| v.iter().filter(|d| self.legal.binary_search(d).is_ok()).count();
+        of_kind(deck) - of_kind(shown)
+    }
+
+    /// The chance of the pick given `deck`, up to the common scale: a + b y.
+    pub fn weight(&self, deck: &[DefId], shown: &[DefId]) -> f64 {
+        self.a + self.b * self.beyond(deck, shown) as f64
+    }
 }
 
 /// A prior's sample: the deck (exactly `n` cards holding `shown`, sorted) and its sideboard
@@ -79,6 +114,17 @@ pub trait DeckPrior: Send + Sync {
     /// [`sample`](Self::sample) from a pool of the [`bank`](Self::bank) instead of a new one.
     fn sample_from(&self, want: &DeckWant, _pool: Option<&[DefId]>, rng: &mut Rng) -> SampledDeck {
         self.sample(want, rng)
+    }
+    /// The match's pool and deck counts of a sample (the deal's `Dealt`: the world's `pools[o]` and
+    /// `decks[o]`): a limited pool of the deck and its sideboard (`MatchPool::new`) by default; a
+    /// constructed prior's is the public 75's list (`MatchPool::constructed`, ENGINE.md 120).
+    fn match_pool(&self, db: &CardDb, deck: &[DefId], sideboard: &[DefId]) -> (MatchPool, Vec<u8>) {
+        MatchPool::new(db, deck, sideboard, &[])
+    }
+    /// The prior's own contract beyond [`check_sample`]'s (checked at every deal with it): none by
+    /// default; a constructed prior's: the deck within the 75's copies, the sideboard the rest of it.
+    fn check_own(&self, _want: &DeckWant, _s: &SampledDeck) -> Result<(), String> {
+        Ok(())
     }
 }
 
@@ -143,6 +189,18 @@ impl TablePrior {
         TablePrior { support, lands, spells }
     }
 
+    /// The prior of the table less the cards `without` (tests whose recorded worlds were dealt by the
+    /// prior of the table before those cards joined it: its draws depend on the whole support; ENGINE.md
+    /// 129.1).
+    #[doc(hidden)]
+    pub fn new_without(db: &'static CardDb, without: &[DefId]) -> TablePrior {
+        let mut p = TablePrior::new(db);
+        for v in [&mut p.support, &mut p.lands, &mut p.spells] {
+            v.retain(|d| !without.contains(d));
+        }
+        p
+    }
+
     /// The table's prior, built once per card table.
     pub fn of(db: &'static CardDb) -> Arc<TablePrior> {
         static PRIORS: OnceLock<Mutex<Vec<(usize, Arc<TablePrior>)>>> = OnceLock::new();
@@ -176,6 +234,7 @@ impl DeckPrior for TablePrior {
     }
 
     fn sample(&self, want: &DeckWant, rng: &mut Rng) -> SampledDeck {
+        refuse_pick(self.name(), want);
         let db = want.db;
         let cond = want.companion.and_then(|c| db.def(c).companion.as_ref());
         let (add_lands, add_spells) = self.counts(want);
@@ -214,6 +273,7 @@ impl DeckPrior for TablePrior {
     }
 
     fn expected_fill(&self, want: &DeckWant) -> Vec<f64> {
+        refuse_pick(self.name(), want);
         let db = want.db;
         let cond = want.companion.and_then(|c| db.def(c).companion.as_ref());
         let (add_lands, add_spells) = self.counts(want);
@@ -239,6 +299,15 @@ fn take_one(v: &mut Vec<DefId>, d: DefId) -> bool {
     }
 }
 
+/// A prior that cannot condition on a face-down pick refuses one loudly (ENGINE.md 129.3): its deck would be
+/// drawn without the pick's chance (not the posterior of what the viewer knows), and might hold no legal pick.
+fn refuse_pick(prior: &str, want: &DeckWant) {
+    assert!(
+        want.pick.is_none(),
+        "the {prior} prior cannot condition a deck on the opponent's face-down pick (Show and Tell, CR 101.4a; ENGINE.md 129.3): only the constructed prior does"
+    );
+}
+
 /// Does `s` meet `want` (the prior's contract, checked at every deal: a prior that breaks it is a
 /// bug that would deal a world outside the viewer's information)? `Err` names what is wrong.
 pub fn check_sample(prior: &dyn DeckPrior, want: &DeckWant, s: &SampledDeck) -> Result<(), String> {
@@ -260,7 +329,14 @@ pub fn check_sample(prior: &dyn DeckPrior, want: &DeckWant, s: &SampledDeck) -> 
             return Err(format!("prior {}: the deck breaks the revealed companion's condition", prior.name()));
         }
     }
-    Ok(())
+    if let Some(p) = want.pick {
+        let mut deck = s.deck.clone();
+        deck.sort_unstable();
+        if p.weight(&deck, want.shown) <= 0.0 {
+            return Err(format!("prior {}: a deck in which the opponent's face-down pick cannot be of its kind (ENGINE.md 129.3)", prior.name()));
+        }
+    }
+    prior.check_own(want, s)
 }
 
 /// The deck reader's weights (ENGINE.md 102.1), one per card identity (`identity::D`; 1 where
@@ -280,7 +356,8 @@ pub fn deck_weights(a: &MtgAz, viewer: PlayerId, p: &[f32], tilt: f64, clip: f64
     let sizes = [a.m.decks[0].iter().map(|&c| c as usize).sum(), a.m.decks[1].iter().map(|&c| c as usize).sum()];
     let kn = sample::knowledge(g, viewer, o, sizes);
     let comp = g.player(o).companion_def;
-    let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None };
+    let pick = a.pick_want(viewer, o, &kn, &*prior);
+    let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None, pick: pick.as_ref() };
     let fill = prior.expected_fill(&want);
     let mut u = vec![0.0f64; identity::D];
     for (d, &e) in fill.iter().enumerate() {
@@ -308,6 +385,80 @@ impl MtgAz {
         self.g.spec().hidden_decklists
     }
 
+    /// Does `determinize` deal the opponent's deck from a deck prior in some game of this match:
+    /// hidden decklists (ENGINE.md 102), or a constructed best-of-three, whose decks are hidden from
+    /// game 2 on (ENGINE.md 120)? (The deck tilt, ENGINE.md 106, is refused where neither holds.)
+    pub fn deals_hidden_decks(&self) -> bool {
+        self.hidden_decklists() || self.m.constructed_bo3
+    }
+
+    /// Is player `o`'s current (between games: last) deck hidden from the other player, dealt from
+    /// its deck prior: always with hidden decklists, from game 2 on in a constructed best-of-three
+    /// (game 1's is the registered main: ENGINE.md 120), never otherwise.
+    pub fn deck_hidden(&self, o: PlayerId) -> bool {
+        self.m.deck_priors[o as usize].is_some() && (!self.m.constructed_bo3 || self.m.game_no >= 2)
+    }
+
+    /// The face-down pick `viewer`'s request of `o`'s deck carries (ENGINE.md 129.3): Show and Tell's
+    /// pending face-down choice of `o`'s, which `viewer` knows only was made, with its chance given the
+    /// deck (`Game::hidden_pick_odds` over what `kn` says the viewer knows); None without one.
+    fn pick_want(&self, viewer: PlayerId, o: PlayerId, kn: &sample::Knowledge, prior: &dyn DeckPrior) -> Option<PickWant> {
+        let (legal, a, b) = self.g.hidden_pick_odds(viewer, o, &kn.slots, &kn.pinned, &kn.required, &kn.known, &kn.extras, prior.support())?;
+        Some(PickWant { legal, a, b })
+    }
+
+    /// One deck of `prior` for `want` (seat `o`): one of the K cached decks drawn uniformly (ENGINE.md
+    /// 102.8), or with K = 0 a fresh sample.
+    fn deal_one(&self, prior: &dyn DeckPrior, o: PlayerId, want: &DeckWant, rng: &mut Rng) -> Arc<Dealt> {
+        if self.m.deal.k > 0 {
+            self.m.deal.pick(prior, o, want, rng)
+        } else {
+            Arc::new(Dealt::new(prior, want, prior.sample(want, rng)))
+        }
+    }
+
+    /// Between the games of a constructed best-of-three (ENGINE.md 120), `viewer`'s world of what it
+    /// cannot see of the opponent `o`'s decks: (1) their last deck, hidden after game 2 (game 1's is the
+    /// registered main), dealt from the prior with what the viewer knew at the last game's end (its
+    /// final state; nothing is dealt into the finished game); (2) the deck they chose for the next game
+    /// if they sideboarded first, hidden from the viewer (a simultaneous choice made sequential,
+    /// ENGINE.md 36.11), dealt from the prior for a game not yet begun: no card of it shown, the same K
+    /// decks as the next game's first deals; (3) their sideboarding in progress when they decide
+    /// (another viewer than the decider), restarted from the world's last deck. The viewer's own pool,
+    /// decks and sideboarding are never touched.
+    fn deal_constructed_between(&mut self, viewer: PlayerId, prior: &dyn DeckPrior, rng: &mut Rng) {
+        let o = opp(viewer);
+        let db = self.g.db();
+        let sizes = [self.m.decks[0].iter().map(|&c| c as usize).sum(), self.m.decks[1].iter().map(|&c| c as usize).sum()];
+        if self.m.game_no >= 2 {
+            let kn = sample::knowledge(&self.g, viewer, o, sizes);
+            let comp = self.g.player(o).companion_def;
+            // (the last game is over: no face-down choice pending, ENGINE.md 129.3)
+            let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None, pick: None };
+            let d = self.deal_one(prior, o, &want, rng);
+            let mut pools = (*self.m.pools).clone();
+            pools[o as usize] = d.pool.clone();
+            self.m.pools = Arc::new(pools);
+            self.m.decks[o as usize] = d.counts.clone();
+        }
+        let done = self.m.sb.as_ref().expect("between games").done[o as usize].is_some();
+        if done {
+            let want = DeckWant { db, n: sizes[o as usize], shown: &[], companion: None, tilt: None, pick: None };
+            let d = self.deal_one(prior, o, &want, rng);
+            self.m.sb.as_mut().expect("between games").done[o as usize] = Some(d.counts.clone());
+        }
+        let last = self.m.decks[o as usize].to_vec();
+        let pool = self.m.pools[o as usize].clone();
+        let sb = self.m.sb.as_mut().expect("between games");
+        if sb.decider() == o {
+            sb.counts = last;
+            sb.start = sb.counts.clone();
+            sb.last = None;
+            sb.asking = None;
+            sb.ask(&pool);
+        }
+    }
+
     /// The hidden-decklist deal of `viewer`'s opponent (module docs; ENGINE.md 102.1): their deck
     /// sampled from the prior conditioned on what `viewer` knows, its unknown cards dealt to their
     /// cards `viewer` does not know, their sideboard and the match's pool and deck of theirs the
@@ -321,6 +472,19 @@ impl MtgAz {
     pub(crate) fn sample_hidden_deck(&mut self, viewer: PlayerId, rng: &mut Rng, tilt: Option<&dyn Fn(DefId) -> f64>, deck_tilt: Option<DeckTilt>) {
         let o = opp(viewer);
         let Some(prior) = self.m.deck_priors[o as usize].clone() else { return };
+        // A constructed best-of-three (ENGINE.md 120): between games the opponent's hidden decks are
+        // dealt (`deal_constructed_between`); in game 1 their deck is the registered main, open.
+        if self.m.constructed_bo3 {
+            if self.m.over {
+                return;
+            }
+            if self.m.sb.is_some() {
+                return self.deal_constructed_between(viewer, &*prior, rng);
+            }
+            if self.m.game_no < 2 {
+                return;
+            }
+        }
         if self.m.sb.is_some() || self.g.is_over() {
             return;
         }
@@ -335,7 +499,11 @@ impl MtgAz {
         let sizes = [self.m.decks[0].iter().map(|&c| c as usize).sum(), self.m.decks[1].iter().map(|&c| c as usize).sum()];
         let kn = sample::knowledge(&self.g, viewer, o, sizes);
         let comp = self.g.player(o).companion_def;
-        let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt };
+        // (Show and Tell's face-down choice of theirs, pending: the request carries its chance given the
+        // deck, so the deck is the posterior of everything the viewer knows and holds a legal pick;
+        // `Game::determinize` then deals the hand with one, ENGINE.md 129.3.)
+        let pick = self.pick_want(viewer, o, &kn, &*prior);
+        let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt, pick: pick.as_ref() };
         // The K-sample deal (ENGINE.md 102.8): one of the K decks the prior gave for this request
         // (memoized per game) - uniformly, or by the deck tilt (ENGINE.md 106) -, else a fresh sample
         // (K = 0, or a tilt of the prior's draws).
@@ -383,13 +551,24 @@ impl MtgAz {
     /// of draws as `determinize`. Without hidden decklists: `determinize`.
     pub fn determinize_deck_tilted(&mut self, viewer: usize, rng: &mut zero_search::rng::Rng, w: &dyn Fn(DefId) -> f64) {
         let mut r = Rng::new(rng.next_u64());
-        if self.hidden_decklists() {
+        if self.deals_hidden_decks() {
             self.sample_hidden_deck(viewer as u8, &mut r, Some(w), None);
         }
         if self.m.sb.is_none() {
             self.g.determinize(viewer as u8, &mut r);
         }
         self.m.rng = Rng::new(r.next_u64());
+    }
+
+    /// The face-down pick `viewer`'s request of its opponent's hidden deck carries in this state (ENGINE.md
+    /// 129.3; tests and analysis): None without a deck prior for them or without a pending pick.
+    #[doc(hidden)]
+    pub fn pick_want_of(&self, viewer: u8) -> Option<PickWant> {
+        let o = opp(viewer);
+        let prior = self.m.deck_priors[o as usize].clone()?;
+        let sizes = [self.m.decks[0].iter().map(|&c| c as usize).sum(), self.m.decks[1].iter().map(|&c| c as usize).sum()];
+        let kn = sample::knowledge(&self.g, viewer, o, sizes);
+        self.pick_want(viewer, o, &kn, &*prior)
     }
 
     /// The hidden-decklist deal alone, for tests (ENGINE.md 102.3): the opponent's deck sampled
@@ -409,6 +588,10 @@ impl MtgAz {
         if self.m.sb.is_some() || self.g.is_over() || self.m.deal.k == 0 || self.g.encoding_seat(viewer) != viewer {
             return None;
         }
+        // (a constructed best-of-three's game 1: the registered mains, open; ENGINE.md 120)
+        if self.m.constructed_bo3 && self.m.game_no < 2 {
+            return None;
+        }
         let db = self.g.db();
         let sizes = [self.m.decks[0].iter().map(|&c| c as usize).sum(), self.m.decks[1].iter().map(|&c| c as usize).sum()];
         let kn = sample::knowledge(&self.g, viewer, o, sizes);
@@ -416,7 +599,8 @@ impl MtgAz {
             return None;
         }
         let comp = self.g.player(o).companion_def;
-        let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None };
+        let pick = self.pick_want(viewer, o, &kn, &*prior);
+        let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None, pick: pick.as_ref() };
         let decks = self.m.deal.decks(&*prior, o, &want);
         let ess = self.m.deal.ess;
         let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &kn, &t, ess), || {
@@ -616,6 +800,7 @@ impl DeckPrior for SealedPrior {
     }
 
     fn sample_from(&self, want: &DeckWant, given: Option<&[DefId]>, rng: &mut Rng) -> SampledDeck {
+        refuse_pick(self.name(), want);
         let db = want.db;
         let basics = super::pools::basic_ids(db);
         let is_land = |d: DefId| db.def(d).is(types::LAND);
@@ -727,7 +912,8 @@ impl DeckPrior for SealedPrior {
         let mut e = vec![0.0; want.db.len()];
         let seed = want.shown.iter().fold(0x5EA1_ED_F111u64 ^ want.n as u64, |h, &d| crate::rng::split64(h ^ d as u64));
         let mut rng = Rng::new(seed);
-        let plain = DeckWant { db: want.db, n: want.n, shown: want.shown, companion: want.companion, tilt: None };
+        refuse_pick(self.name(), want);
+        let plain = DeckWant { db: want.db, n: want.n, shown: want.shown, companion: want.companion, tilt: None, pick: None };
         const K: usize = 16;
         for _ in 0..K {
             let s = self.sample(&plain, &mut rng);
@@ -740,6 +926,451 @@ impl DeckPrior for SealedPrior {
             }
         }
         e
+    }
+}
+
+// ---- The constructed prior (ENGINE.md 120): 60 of a known 75 ----
+
+/// The prior of a constructed player's deck in the later games of a best-of-three (ENGINE.md 120):
+/// a deck of exactly the registered main's size (60) out of their public 75 (CR 100.4a: main and
+/// sideboard; the copies of each card at most the 75's), as the other player samples it.
+///
+/// **The base prior: uniform over the number of swaps, then uniform over the decks with that
+/// number.** A deck's swaps s are its cards beyond the main's counts (sum over cards of
+/// max(0, deck - main) = the main's cards out), 0..=S with S the sideboard's size; each s has
+/// probability 1 / (S + 1), and the decks with s swaps (count vectors: copies per card) are equally
+/// likely. Which cards come in and go out is uniform: no sideboarding knowledge, the public main the
+/// only anchor. (Uniform over all legal 60s puts most of its mass on decks with ~12 of the 15
+/// sideboard cards in, since the count of decks grows steeply with s: ENGINE.md 120.2.)
+///
+/// **Conditioned exactly** on what the viewer knows (K1-K3): every deck holds the shown cards R
+/// (copies counted), keeps a revealed companion in the sideboard and passes its condition (per card,
+/// one per name: `sample::allowed`, `one_per_name`); the posterior P(deck | R) ∝ P_base(deck) is
+/// sampled exactly in bounded time by a table over the cards (the swaps in and out so far), then a
+/// draw of s by the posterior weights and the counts card by card backwards: no rejection loop, no
+/// failure (R comes from the real deck, so a deck holding it exists). The deck reader's tilt
+/// ([`DeckWant::tilt`]) multiplies a deck's probability by the weight of each card it holds beyond
+/// R (an exponential tilt of the exact posterior; 1: the untilted draw, draw for draw).
+pub struct ConstructedPrior {
+    /// The 75 by definition: (definition, copies), sorted.
+    list: Vec<(DefId, u8)>,
+    /// The registered main's copies per entry.
+    main: Vec<u8>,
+    /// The deck's size (the main's) and the sideboard's (S, the most swaps).
+    n: usize,
+    side: usize,
+    support: Vec<DefId>,
+    /// The base prior's number of legal decks with s swaps, s = 0..=S (count vectors).
+    by_swaps: Vec<f64>,
+}
+
+/// One entry of the constructed prior's table: the counts it may take, the main's, the shown ones
+/// (copies of R) and the tilt's weight per copy beyond them.
+struct Slot {
+    lo: u8,
+    hi: u8,
+    main: u8,
+    shown: u8,
+    w: f64,
+}
+
+impl Slot {
+    /// The swaps in and out of count `c`.
+    fn swaps(&self, c: u8) -> (usize, usize) {
+        (c.saturating_sub(self.main) as usize, self.main.saturating_sub(c) as usize)
+    }
+}
+
+/// The constructed prior's forward table over `slots`: layer k (0..=len) holds, per (swaps in i,
+/// swaps out o) both at most `s_max` (index i x (s_max + 1) + o), the weight of the entries before k
+/// taking counts with those sums (each count's weight its tilt to the power of its copies beyond the
+/// shown ones). With `normalize` each layer is divided by its largest value (the draws compare values
+/// within one layer only), so a sharp tilt over 60 cards neither overflows nor underflows to nothing.
+fn swap_table(slots: &[Slot], s_max: usize, normalize: bool) -> Vec<Vec<f64>> {
+    let w = s_max + 1;
+    let mut layers = Vec::with_capacity(slots.len() + 1);
+    let mut cur = vec![0.0f64; w * w];
+    cur[0] = 1.0;
+    layers.push(cur.clone());
+    for sl in slots {
+        let mut next = vec![0.0f64; w * w];
+        let pows: Vec<f64> = (sl.lo..=sl.hi).map(|c| sl.w.powi((c - sl.shown) as i32)).collect();
+        for i in 0..w {
+            for o in 0..w {
+                let f = cur[i * w + o];
+                if f == 0.0 {
+                    continue;
+                }
+                for (j, c) in (sl.lo..=sl.hi).enumerate() {
+                    let (a, b) = sl.swaps(c);
+                    if i + a <= s_max && o + b <= s_max {
+                        next[(i + a) * w + o + b] += f * pows[j];
+                    }
+                }
+            }
+        }
+        if normalize {
+            let mx = next.iter().copied().fold(0.0f64, f64::max);
+            if mx > 0.0 {
+                next.iter_mut().for_each(|x| *x /= mx);
+            }
+        }
+        layers.push(next.clone());
+        cur = next;
+    }
+    layers
+}
+
+/// `swap_table` with a face-down pick's chance a + b y (ENGINE.md 129.3; y a deck's copies of the kind beyond the
+/// shown ones): per layer two tables over (swaps in, swaps out), `[m0, m1]` - m0 the weight of the entries before k
+/// as `swap_table`'s, m1 the same with each assignment weighted by its copies of the kind beyond the shown ones (one
+/// such copy "marked", summed over the choices). An entry of the kind (`leg`) at count c marks one of its c - shown
+/// copies: m1' += m0 x its weight x (c - shown). The last layer's a m0 + b m1 at (s, s) is the weight of the decks with
+/// s swaps times their chance a + b y. With `normalize` both tables of a layer are divided by the layer's largest value.
+fn swap_table2(slots: &[Slot], leg: &[bool], s_max: usize, normalize: bool) -> Vec<[Vec<f64>; 2]> {
+    let w = s_max + 1;
+    let mut layers = Vec::with_capacity(slots.len() + 1);
+    let mut cur = [vec![0.0f64; w * w], vec![0.0f64; w * w]];
+    cur[0][0] = 1.0;
+    layers.push(cur.clone());
+    for (sl, &lg) in slots.iter().zip(leg) {
+        let mut next = [vec![0.0f64; w * w], vec![0.0f64; w * w]];
+        for i in 0..w {
+            for o in 0..w {
+                let (f0, f1) = (cur[0][i * w + o], cur[1][i * w + o]);
+                if f0 == 0.0 && f1 == 0.0 {
+                    continue;
+                }
+                for c in sl.lo..=sl.hi {
+                    let (a, b) = sl.swaps(c);
+                    if i + a > s_max || o + b > s_max {
+                        continue;
+                    }
+                    let p = sl.w.powi((c - sl.shown) as i32);
+                    let j = (i + a) * w + o + b;
+                    next[0][j] += f0 * p;
+                    next[1][j] += f1 * p + if lg { f0 * p * (c - sl.shown) as f64 } else { 0.0 };
+                }
+            }
+        }
+        if normalize {
+            let mx = next[0].iter().chain(&next[1]).copied().fold(0.0f64, f64::max);
+            if mx > 0.0 {
+                for t in next.iter_mut() {
+                    t.iter_mut().for_each(|x| *x /= mx);
+                }
+            }
+        }
+        layers.push(next.clone());
+        cur = next;
+    }
+    layers
+}
+
+impl ConstructedPrior {
+    /// The prior of a player whose registered main is `main` and sideboard `sideboard` (their public
+    /// 75; card definitions).
+    pub fn new(main: &[DefId], sideboard: &[DefId]) -> ConstructedPrior {
+        let (pool, counts) = MatchPool::constructed(main, sideboard);
+        let list = pool.list;
+        let support: Vec<DefId> = list.iter().map(|e| e.0).collect();
+        let side = sideboard.len();
+        let slots: Vec<Slot> = list.iter().zip(&counts).map(|(&(_, t), &m)| Slot { lo: 0, hi: t, main: m, shown: 0, w: 1.0 }).collect();
+        let last = swap_table(&slots, side, false).pop().expect("a layer");
+        let by_swaps = (0..=side).map(|s| last[s * (side + 1) + s]).collect();
+        ConstructedPrior { list, main: counts, n: main.len(), side, support, by_swaps }
+    }
+
+    /// The base prior's number of legal decks with s swaps, s = 0..=S (ENGINE.md 120.2).
+    pub fn decks_by_swaps(&self) -> &[f64] {
+        &self.by_swaps
+    }
+
+    /// The deck's swaps: its cards beyond the main's counts (0..=S).
+    pub fn swaps_of(&self, deck: &[DefId]) -> usize {
+        let mut c = vec![0u8; self.list.len()];
+        for d in deck {
+            if let Ok(k) = self.list.binary_search_by_key(d, |e| e.0) {
+                c[k] += 1;
+            }
+        }
+        c.iter().zip(&self.main).map(|(&x, &m)| x.saturating_sub(m) as usize).sum()
+    }
+
+    /// The deck and sideboard of per-entry `counts`.
+    fn deck_of(&self, counts: &[u8]) -> SampledDeck {
+        let mut deck = Vec::with_capacity(self.n);
+        let mut sideboard = Vec::with_capacity(self.side);
+        for (k, &(d, t)) in self.list.iter().enumerate() {
+            deck.extend(std::iter::repeat_n(d, counts[k] as usize));
+            sideboard.extend(std::iter::repeat_n(d, (t - counts[k]) as usize));
+        }
+        SampledDeck { deck, sideboard }
+    }
+
+    /// Which entries are of a face-down pick's kind (ENGINE.md 129.3).
+    fn of_kind(&self, p: &PickWant) -> Vec<bool> {
+        self.list.iter().map(|e| p.legal.binary_search(&e.0).is_ok()).collect()
+    }
+
+    /// `sample` with a face-down pick (ENGINE.md 129.3), exactly: P(deck) proportional to the base prior's, times
+    /// [it meets what the viewer knows], times the tilt, times the pick's chance a + b y. The s by the two tables'
+    /// a m0 + b m1 over the base prior's count of decks with s swaps; then whether a copy of the kind is marked (a m0
+    /// against b m1); then the counts backwards, an entry of the kind taking the mark with weight c - shown. No
+    /// rejection: R and the real hand's legal pick come from the real deck, so such a deck exists.
+    fn sample_picked(&self, want: &DeckWant, p: &PickWant, rng: &mut Rng) -> SampledDeck {
+        let slots = self.slots(want, true);
+        let leg = self.of_kind(p);
+        let s_max = self.side;
+        let w = s_max + 1;
+        let table = swap_table2(&slots, &leg, s_max, true);
+        let last = table.last().expect("a layer");
+        let ws: Vec<f64> = (0..=s_max)
+            .map(|s| if self.by_swaps[s] > 0.0 { (p.a * last[0][s * w + s] + p.b * last[1][s * w + s]) / self.by_swaps[s] } else { 0.0 })
+            .collect();
+        let s = pick(rng, &ws).expect("the constructed prior: no deck holds what the viewer knows and a legal face-down pick (the real deck does)");
+        let mut m = pick(rng, &[p.a * last[0][s * w + s], p.b * last[1][s * w + s]]).expect("the constructed prior's pick table: no weight at s");
+        let (mut i, mut o) = (s, s);
+        let mut counts = vec![0u8; slots.len()];
+        for k in (0..slots.len()).rev() {
+            let sl = &slots[k];
+            let prev = &table[k];
+            let (mut cand, mut cw): (Vec<(u8, usize)>, Vec<f64>) = (Vec::new(), Vec::new());
+            for c in sl.lo..=sl.hi {
+                let (a, b) = sl.swaps(c);
+                if a > i || b > o {
+                    continue;
+                }
+                let q = (i - a) * w + o - b;
+                let pw = sl.w.powi((c - sl.shown) as i32);
+                if m == 0 {
+                    cand.push((c, 0));
+                    cw.push(prev[0][q] * pw);
+                } else {
+                    cand.push((c, 1));
+                    cw.push(prev[1][q] * pw);
+                    if leg[k] {
+                        cand.push((c, 0));
+                        cw.push(prev[0][q] * pw * (c - sl.shown) as f64);
+                    }
+                }
+            }
+            let j = pick(rng, &cw).expect("the constructed prior's pick table: a dead end");
+            let (c, before) = cand[j];
+            counts[k] = c;
+            let (a, b) = sl.swaps(c);
+            i -= a;
+            o -= b;
+            m = before;
+        }
+        debug_assert_eq!((i, o, m), (0, 0, 0));
+        self.deck_of(&counts)
+    }
+
+    /// `expected_fill` with a face-down pick (ENGINE.md 129.3): each entry's marginal count under the untilted
+    /// posterior times the pick's chance a + b y, by the two-table forward and backward passes (a deck's chance
+    /// split into its copies of the kind before entry k, at k and after k), less its shown copies.
+    fn expected_fill_picked(&self, want: &DeckWant, p: &PickWant) -> Vec<f64> {
+        let slots = self.slots(want, false);
+        let leg = self.of_kind(p);
+        let s_max = self.side;
+        let w = s_max + 1;
+        let fwd = swap_table2(&slots, &leg, s_max, false);
+        let rev: Vec<Slot> = slots.iter().rev().map(|s| Slot { lo: s.lo, hi: s.hi, main: s.main, shown: s.shown, w: 1.0 }).collect();
+        let rleg: Vec<bool> = leg.iter().rev().copied().collect();
+        let bwd = swap_table2(&rev, &rleg, s_max, false);
+        let k_n = slots.len();
+        let mut e = vec![0.0; want.db.len()];
+        for k in 0..k_n {
+            let sl = &slots[k];
+            let after = &bwd[k_n - 1 - k];
+            let before = &fwd[k];
+            let (mut mass, mut mean) = (0.0f64, 0.0f64);
+            for c in sl.lo..=sl.hi {
+                let (a, b) = sl.swaps(c);
+                let yc = if leg[k] { (c - sl.shown) as f64 } else { 0.0 };
+                let mut pc = 0.0;
+                for s in 0..=s_max {
+                    if self.by_swaps[s] <= 0.0 {
+                        continue;
+                    }
+                    let mut q = 0.0;
+                    for i in 0..=s {
+                        for o in 0..=s {
+                            if i + a > s || o + b > s {
+                                continue;
+                            }
+                            let (f0, f1) = (before[0][i * w + o], before[1][i * w + o]);
+                            if f0 == 0.0 && f1 == 0.0 {
+                                continue;
+                            }
+                            let r = (s - i - a) * w + (s - o - b);
+                            let (b0, b1) = (after[0][r], after[1][r]);
+                            q += f0 * ((p.a + p.b * yc) * b0 + p.b * b1) + p.b * f1 * b0;
+                        }
+                    }
+                    pc += q / self.by_swaps[s];
+                }
+                mass += pc;
+                mean += pc * (c - sl.shown) as f64;
+            }
+            if mass > 0.0 {
+                e[self.list[k].0 as usize] += mean / mass;
+            }
+        }
+        e
+    }
+
+    /// The table's entries for `want` (with the tilt, or untilted): the shown copies as each entry's
+    /// least count, a revealed companion's copy kept in the sideboard, its condition's caps.
+    fn slots(&self, want: &DeckWant, tilted: bool) -> Vec<Slot> {
+        assert_eq!(want.n, self.n, "the constructed prior: a deck of {} cards, not the main's {}", want.n, self.n);
+        let db = want.db;
+        let cond = want.companion.and_then(|c| db.def(c).companion.as_ref());
+        let mut shown = vec![0u8; self.list.len()];
+        for &d in want.shown {
+            match self.list.binary_search_by_key(&d, |e| e.0) {
+                Ok(k) => shown[k] += 1,
+                Err(_) => panic!("the constructed prior: a shown {} outside the 75", db.def(d).name),
+            }
+        }
+        self.list
+            .iter()
+            .enumerate()
+            .map(|(k, &(d, t))| {
+                let mut hi = t;
+                if Some(d) == want.companion {
+                    hi = hi.saturating_sub(1);
+                }
+                if !sample::allowed(db, cond, d) {
+                    hi = 0;
+                }
+                if sample::one_per_name(db, cond, d) {
+                    hi = hi.min(1);
+                }
+                assert!(shown[k] <= hi, "the constructed prior: {} shown {} that the 75 (and a revealed companion) allow at most {hi}", db.def(d).name, shown[k]);
+                let w = if tilted { want.tilt.map_or(1.0, |f| f(d)) } else { 1.0 };
+                assert!(w.is_finite() && w > 0.0, "the constructed prior: a tilt of {w} on {}", db.def(d).name);
+                Slot { lo: shown[k], hi, main: self.main[k], shown: shown[k], w }
+            })
+            .collect()
+    }
+}
+
+impl DeckPrior for ConstructedPrior {
+    fn name(&self) -> &'static str {
+        "constructed"
+    }
+
+    fn support(&self) -> &[DefId] {
+        &self.support
+    }
+
+    fn sample(&self, want: &DeckWant, rng: &mut Rng) -> SampledDeck {
+        if let Some(p) = want.pick {
+            return self.sample_picked(want, p, rng);
+        }
+        let slots = self.slots(want, true);
+        let s_max = self.side;
+        let w = s_max + 1;
+        let table = swap_table(&slots, s_max, true);
+        let last = table.last().expect("a layer");
+        // s by the posterior: the table's weight of the decks with s swaps over the base prior's count
+        // of them (each s has 1 / (S + 1) before the knowledge)
+        let ws: Vec<f64> = (0..=s_max).map(|s| if self.by_swaps[s] > 0.0 { last[s * w + s] / self.by_swaps[s] } else { 0.0 }).collect();
+        let s = pick(rng, &ws).expect("the constructed prior: no deck holds what the viewer knows (the real deck does)");
+        let (mut i, mut o) = (s, s);
+        let mut counts = vec![0u8; slots.len()];
+        for k in (0..slots.len()).rev() {
+            let sl = &slots[k];
+            let prev = &table[k];
+            let cs: Vec<u8> = (sl.lo..=sl.hi).collect();
+            let cw: Vec<f64> = cs
+                .iter()
+                .map(|&c| {
+                    let (a, b) = sl.swaps(c);
+                    if a <= i && b <= o {
+                        prev[(i - a) * w + o - b] * sl.w.powi((c - sl.shown) as i32)
+                    } else {
+                        0.0
+                    }
+                })
+                .collect();
+            let j = pick(rng, &cw).expect("the constructed prior's table: a dead end");
+            counts[k] = cs[j];
+            let (a, b) = sl.swaps(cs[j]);
+            i -= a;
+            o -= b;
+        }
+        debug_assert_eq!((i, o), (0, 0));
+        self.deck_of(&counts)
+    }
+
+    /// Exact: each entry's marginal count under the untilted posterior (the forward table and a
+    /// backward one over the entries after it), less its shown copies; with a face-down pick, under the
+    /// posterior times its chance (`expected_fill_picked`, ENGINE.md 129.3).
+    fn expected_fill(&self, want: &DeckWant) -> Vec<f64> {
+        if let Some(p) = want.pick {
+            return self.expected_fill_picked(want, p);
+        }
+        let slots = self.slots(want, false);
+        let s_max = self.side;
+        let w = s_max + 1;
+        let fwd = swap_table(&slots, s_max, false);
+        let rev: Vec<Slot> = slots.iter().rev().map(|s| Slot { lo: s.lo, hi: s.hi, main: s.main, shown: s.shown, w: 1.0 }).collect();
+        let bwd = swap_table(&rev, s_max, false);
+        let k_n = slots.len();
+        let mut e = vec![0.0; want.db.len()];
+        for k in 0..k_n {
+            let sl = &slots[k];
+            // the entries after k: bwd's layer of the last k_n - 1 - k entries
+            let after = &bwd[k_n - 1 - k];
+            let before = &fwd[k];
+            let mut mass = 0.0;
+            let mut mean = 0.0;
+            for c in sl.lo..=sl.hi {
+                let (a, b) = sl.swaps(c);
+                let mut p = 0.0;
+                for s in 0..=s_max {
+                    if self.by_swaps[s] <= 0.0 {
+                        continue;
+                    }
+                    let mut q = 0.0;
+                    for i in 0..=s {
+                        for o in 0..=s {
+                            let f = before[i * w + o];
+                            if f == 0.0 || i + a > s || o + b > s {
+                                continue;
+                            }
+                            q += f * after[(s - i - a) * w + (s - o - b)];
+                        }
+                    }
+                    p += q / self.by_swaps[s];
+                }
+                mass += p;
+                mean += p * (c - sl.shown) as f64;
+            }
+            if mass > 0.0 {
+                e[self.list[k].0 as usize] += mean / mass;
+            }
+        }
+        e
+    }
+
+    fn match_pool(&self, _db: &CardDb, deck: &[DefId], sideboard: &[DefId]) -> (MatchPool, Vec<u8>) {
+        MatchPool::constructed(deck, sideboard)
+    }
+
+    /// The deck within the 75's copies and the sideboard exactly the rest of the 75.
+    fn check_own(&self, want: &DeckWant, s: &SampledDeck) -> Result<(), String> {
+        let mut all: Vec<DefId> = s.deck.iter().chain(&s.sideboard).copied().collect();
+        all.sort_unstable();
+        let mine: Vec<DefId> = self.list.iter().flat_map(|&(d, t)| std::iter::repeat_n(d, t as usize)).collect();
+        if all != mine {
+            return Err(format!("prior constructed: the deck and sideboard ({} + {} cards) are not the 75", s.deck.len(), s.sideboard.len()));
+        }
+        let _ = want;
+        Ok(())
     }
 }
 
@@ -766,7 +1397,7 @@ impl Dealt {
             side.push(c);
         }
         side.sort_unstable();
-        let (pool, counts) = MatchPool::new(want.db, &s.deck, &side, &[]);
+        let (pool, counts) = prior.match_pool(want.db, &s.deck, &side);
         Dealt { deck: s.deck, side: Arc::from(side), pool, counts: Arc::from(counts) }
     }
 }
@@ -807,11 +1438,19 @@ impl DealCache {
         DealCache { k, salt, ess: DECK_TILT_ESS, memo: Arc::new(Mutex::new(DealMemo::default())) }
     }
 
-    /// The request's key: the seat, the size, the companion and R.
+    /// The request's key: the seat, the size, the companion and R; and a face-down pick (ENGINE.md
+    /// 129.3: its kind and its chance's terms) when the request carries one.
     fn key(o: PlayerId, want: &DeckWant) -> u64 {
         let mut h = crate::rng::split64(0x0DEA_15A1_0000 ^ o as u64 ^ (want.n as u64) << 8 ^ (want.companion.map_or(0xFFFF, |c| c as u64)) << 24);
         for &d in want.shown {
             h = crate::rng::split64(h ^ d as u64);
+        }
+        if let Some(p) = want.pick {
+            h = crate::rng::split64(h ^ 0x51C7_F00D ^ p.a.to_bits());
+            h = crate::rng::split64(h ^ p.b.to_bits().rotate_left(29) ^ p.legal.len() as u64);
+            for &d in &p.legal {
+                h = crate::rng::split64(h ^ d as u64);
+            }
         }
         h
     }

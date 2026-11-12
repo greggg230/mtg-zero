@@ -8,10 +8,15 @@ self-play search reaches states that random play (tests/fuzz.rs) does not.
   python tools/search_smoke.py --seeds 0-15 --games 400 --threads 8 --sims 64 --preset mtg-3
   python tools/search_smoke.py --specs team_draft,team_draft_2v2 --seeds 0-1
   python tools/search_smoke.py --specs delver --preset delver-mirror   # the constructed Delver mirror
+  python tools/search_smoke.py --specs delver_bo3 --preset delver-bo3-smoke   # its best-of-three
   python tools/search_smoke.py --specs eoe,eoe_eval --preset eoe-1     # EoE sealed (game mtg_eoe)
 
 The constructed Delver mirror (docs/ENGINE.md 54): `delver` is the preset delver-mirror's spec (both
 seats the pinned 60 of data/decks/izzet_delver_8016541.json, best-of-one, constructed play's card table).
+`delver_bo3` is its best-of-three (docs/ENGINE.md 120): the presets delver-mirror-bo3's and delver-bo3-smoke's spec,
+both seats the full 75 (its five sideboard cards outside the cube: ENGINE.md 122), sideboarding to exactly 60, the
+later games' decks hidden (the search deals them from the constructed prior), each game its own episode (ENGINE.md 121;
+129.2).
 
 EoE sealed (docs/ENGINE.md 101, 105): `eoe` is the preset eoe-1's spec (game `mtg_eoe`: two generated Arena pools per
 game, each built by the randomised builder, best-of-one on the EoE card table), `eoe_eval` its fixed evaluation pairs.
@@ -52,6 +57,8 @@ SPECS = {
     'match': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1, 'format': 'bo3'},
     # ... on the fixed evaluation pools
     'match_eval': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1, 'format': 'bo3', 'decks': 'eval'},
+    # ... each game its own episode (docs/ENGINE.md 121: zero-core chains the episodes of a match)
+    'match_games': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1, 'format': 'bo3', 'game_episodes': True},
 }
 # team draft events (M6 part 3): (players, the team_draft spec); their matches as a co-training run plays them
 # the Legacy Izzet Delver mirror (docs/ENGINE.md 54): the preset delver-mirror's spec
@@ -62,6 +69,19 @@ def _mirror(deck):
 
 
 SPECS['delver'] = _mirror('izzet_delver_8016541')
+
+
+# its best-of-three (docs/ENGINE.md 120): the presets' spec - the full 75, one episode per game (ENGINE.md 121, 129.2)
+def _mirror_bo3(deck):
+    # (mtgz/az/decklists.py loaded by its path: json only, without the package's registration)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('_decklists', os.path.join(ROOT, 'mtgz', 'az', 'decklists.py'))
+    decklists = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(decklists)
+    return json.loads(decklists.mirror_bo3_spec(deck, game_episodes=True))
+
+
+SPECS['delver_bo3'] = _mirror_bo3('izzet_delver_8016541')
 # Edge of Eternities sealed (docs/ENGINE.md 101, 105): the game `mtg_eoe` (`mtg` on the EoE card table, its own identity
 # space), each game two generated Arena pools built by the randomised builder; `eoe_eval` its evaluation pairs
 SPECS['eoe'] = {'sealed': {'set': 'eoe', 'collation': 'arena'}, 'max_turns': 60, 'eval_decks': 64, 'eval_seed': 1}
@@ -179,8 +199,12 @@ def one(seed, spec, games, threads, sims, conc, preset, stall):
     drive(drv, {'m': UniformEvaluator()}, on_batch=on_batch)
     res = drv.take_results()
     st = drv.stats()
-    return {'seed': seed, 'spec': spec, 'games': len(res), 'unfinished': sum(1 for r in res if not r['over']),
-            'decisions': sum(r['decisions'] for r in res), 'sims': st['sims'], 'seconds': round(time.time() - t0, 1)}
+    out = {'seed': seed, 'spec': spec, 'games': len(res), 'unfinished': sum(1 for r in res if not r['over']),
+           'decisions': sum(r['decisions'] for r in res), 'sims': st['sims'], 'seconds': round(time.time() - t0, 1)}
+    eps = [e for r in res for e in r.get('episodes') or ()]
+    if eps:
+        out['episodes'] = len(eps)                 # (a chained spec, docs/ENGINE.md 121: the matches' games)
+    return out
 
 
 def parse_seeds(s):
@@ -225,7 +249,8 @@ def run_configuration(spec, seed, a):
             bad = (seed, spec, 'events missing, unresolved or insane, or matches unfinished')
     elif code == 0 and line:
         r = json.loads(line[7:])
-        lines.append(f'ok    seed {seed} {spec}: {r["games"]} games ({r["unfinished"]} unfinished), '
+        eps = f' ({r["episodes"]} episodes: their games)' if 'episodes' in r else ''
+        lines.append(f'ok    seed {seed} {spec}: {r["games"]} games{eps} ({r["unfinished"]} unfinished), '
                       f'{r["decisions"]} decisions, {r["sims"]} sims, {r["seconds"]} s')
         if r['games'] != a.games or r['unfinished']:
             bad = (seed, spec, 'games missing or unfinished')

@@ -1005,7 +1005,7 @@ fn the_table_prior_meets_its_contract() {
         let k = (case % 41) as usize;
         let mut shown: Vec<u16> = (0..k).map(|i| if case % 3 == 0 && i < 25 { forest } else { spells[rng.below(spells.len() as u32) as usize] }).collect();
         shown.sort_unstable();
-        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None };
+        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None, pick: None };
         let s = p.sample(&want, &mut rng);
         check_sample(&*p, &want, &s).unwrap();
         let lands = s.deck.iter().filter(|&&d| db.def(d).is(engine::db::types::LAND)).count();
@@ -1015,13 +1015,13 @@ fn the_table_prior_meets_its_contract() {
     // A tilt of 1 is the untilted deal, draw for draw.
     let shown = vec![forest; 3];
     let one = |_: u16| 1.0;
-    let w1 = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: Some(&one) };
-    let w0 = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None };
+    let w1 = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: Some(&one), pick: None };
+    let w0 = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None, pick: None };
     assert_eq!(p.sample(&w1, &mut Rng::new(9)), p.sample(&w0, &mut Rng::new(9)));
     // A sharp tilt: the starred spell takes most of the fill; the expected fill is the baseline.
     let star = spells[spells.len() / 2];
     let sharp = |d: u16| if d == star { 1e4 } else { 1.0 };
-    let ws = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: Some(&sharp) };
+    let ws = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: Some(&sharp), pick: None };
     let (mut tilted, mut plain) = (0usize, 0usize);
     for s in 0..200 {
         tilted += p.sample(&ws, &mut Rng::new(s)).deck.iter().filter(|&&d| d == star).count();
@@ -1035,7 +1035,7 @@ fn the_table_prior_meets_its_contract() {
     let lurrus = cube.id("Lurrus of the Dream-Den").unwrap();
     let pc = TablePrior::of(cube);
     for s in 0..100 {
-        let want = DeckWant { db: cube, n: 40, shown: &[], companion: Some(lurrus), tilt: None };
+        let want = DeckWant { db: cube, n: 40, shown: &[], companion: Some(lurrus), tilt: None, pick: None };
         let x = pc.sample(&want, &mut Rng::new(s));
         check_sample(&*pc, &want, &x).unwrap();
         assert_eq!(x.sideboard, vec![lurrus]);
@@ -1095,7 +1095,7 @@ fn the_sealed_prior_meets_its_contract() {
             }
             None => false,
         });
-        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None };
+        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None, pick: None };
         let s = prior.sample(&want, &mut rng);
         check_sample(&prior, &want, &s).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         let nonbasic = s.deck.iter().filter(|d| !basics.contains(d)).count();
@@ -1107,7 +1107,7 @@ fn the_sealed_prior_meets_its_contract() {
             covered += (cols(&s.deck).count_ones() <= 3) as u32;
         }
         let one = |_: u16| 1.0;
-        let w1 = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: Some(&one) };
+        let w1 = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: Some(&one), pick: None };
         assert_eq!(prior.sample(&w1, &mut Rng::new(seed)), prior.sample(&want, &mut Rng::new(seed)), "seed {seed}: a tilt of 1");
     }
     println!("{two} requests with 8+ shown cards of two colours, {covered} decks in those and a splash at most");
@@ -1176,7 +1176,7 @@ fn the_sealed_prior_samples_the_mixed_field() {
         let pool: Vec<u16> = s.deck.iter().copied().filter(|d| !basics.contains(d)).chain(s.sideboard.iter().copied()).collect();
         builder::best_guess(db, &pool, &settings).deck == s.deck
     };
-    let empty = DeckWant { db, n: 40, shown: &[], companion: None, tilt: None };
+    let empty = DeckWant { db, n: 40, shown: &[], companion: None, tilt: None, pick: None };
     let mut rng = Rng::new(1071);
     let n = 400u32;
     let mut best = 0u32;
@@ -1199,7 +1199,7 @@ fn the_sealed_prior_samples_the_mixed_field() {
         let k = (seed % 21) as usize;
         let mut shown: Vec<u16> = real.iter().copied().step_by(2).take(k).collect();
         shown.sort_unstable();
-        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None };
+        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None, pick: None };
         for (prior, r) in [(&half, 2 * seed), (&all, 2 * seed + 1)] {
             let s = prior.sample(&want, &mut Rng::new(r));
             check_sample(prior, &want, &s).unwrap_or_else(|e| panic!("seed {seed}: {e}"));

@@ -670,14 +670,16 @@ network code), its runs under `runs/delver1`, apart from the cube's work.
 
 * **Run 1: best-of-one, maindeck only** (the pinned 60 against itself, no sideboards; the London
   mulligan, the play-or-draw choice, a draw after 60 turns). Run 2: best-of-three with
-  sideboarding (constructed: the deck stays at least 60 cards, the sideboard at most 15; ENGINE.md
-  54.8 lists what that needs).
+  sideboarding (the user's decisions of 2026-11-11, ENGINE.md 120: each pool exactly the 75, every
+  deck after sideboarding exactly 60 of it, no free basic lands; game 1 the mains with open
+  decklists, each later game's 60 hidden within the public 75 and dealt by the search from a prior
+  conditioned on what it saw; the deck target and its tilt predict it).
 * **Cards outside the cube** come from mtg-bot's parser like the cube's (its pool `legacy`), in a
   separate IR file (`data/cards/legacy.ir.json`) and a separate card table (`CardDb::constructed`):
   nothing of the cube (its generators, pools, team draft, fuzz pool, behaviour digests) sees them.
   Their identities are appended in the cube's free range (546..767), so layout v4 is unchanged and
   a network can read both worlds. D1 ports the two maindeck cards (Murktide Regent, Prismari Charm);
-  the five sideboard cards outside the cube wait for run 2.
+  the five sideboard cards outside the cube came with D3 (ENGINE.md 122).
 * **Open decklists**: both players know both 75s (best-of-one shows only the 60s in play);
   hidden are the hands, library order and face-down cards (`determinize` deals the opponent's
   unseen cards from their 60 minus what the viewer has seen).
@@ -688,7 +690,7 @@ network code), its runs under `runs/delver1`, apart from the cube's work.
 |---|---|---|
 | D1 | The deck, the two maindeck cards (full oracle fidelity, rulings as tests), constructed best-of-one (CR 100.2a), the preset and its measurements, gates, docs | done (branch delver-d1, mtg-bot feature/legacy-delver-ir; ENGINE.md 54) |
 | D2 | The run `runs/delver1` | the user's go-ahead |
-| D3 | Best-of-three with constructed sideboarding; the five sideboard cards | |
+| D3 | Best-of-three with constructed sideboarding; the five sideboard cards | sideboarding, the hidden 60s, the deck target and tilt (branch delver-bo3, ENGINE.md 120); one episode per game, the label each game's outcome (branch bo3-game-episodes, ENGINE.md 121); the five sideboard cards (branch delver-sb-cards, ENGINE.md 122); integrated with presets `delver-mirror-bo3` and `delver-bo3-smoke` on the full 75, one episode per game (branch delver-bo3-int, ENGINE.md 129): done |
 
 ## 9. Sealed deckbuilding: Edge of Eternities first (user, 2026-11-07)
 
@@ -867,6 +869,30 @@ an evaluation of the network choosing its deck from the fixed evaluation pools a
 `eoe-2e`, a fork of run 1's iteration 78 deepened to 128 x 8; the launch command in ENGINE.md 112.6 (not launched).
 Integrated with the win % against real decks (113) on branch `eoe-run2-int` (2026-11-12, ENGINE.md 126): run 2 measures it
 every 40th iteration with our decks chosen by the run's own evaluator version, its games kept out of the evaluator's data.
+
+**Status 2026-11-12: ON HOLD** (the user paused EoE indefinitely for Legacy work; everything is merged on main, nothing
+running). Where it stands:
+- **Run 1** (`runs/eoe1`, finished): 80 iterations; against the heuristic 2.5% (iterations 0-9) -> 22% (30-39) -> 26%
+  (61-80): flat in its second half. Strength saturates at 64 simulations (iteration 78: 16 sims 23.2%, 32 28.2%, 64 31.8%,
+  256 32.5%), so the network, not the search, was the limit.
+- **Deck choice** (S4a races, ENGINE.md 108-110, pilot iteration 78): the evaluator's pick beats random builds of the same
+  pool by +15.9 +- 2.9 points and the network's value pick by +8.1 +- 2.7 (8 pools, 64 simulations every decision; won 7 of
+  8); the batched race (16 pools, self-play's simulation mix) agrees: +11.9 +- 1.9 and +10.5 +- 1.8, the same picks and 7 of
+  8 winners on the shared pools. The network's own pre-game value is a poor deck judge (+8.1 / +1.8 over random).
+- **Real decks** (ENGINE.md 113; a yardstick, never a target): run 1's builder best guess against 17lands players' own
+  builds of the same pools, against real decks, is within noise at every checkpoint (+0.8 +- 5.3 at 78); run 2's first
+  measurement with the evaluator's deck: **+11.7 +- 5.5** (iteration 80).
+- **Run 2** (`runs/eoe2e`, ENGINE.md 112.6 with no random games): **paused by the user at iteration 87** (the PAUSE file
+  kept; its supervisor stopped), pinned to `mtg-zero-wt/run-02a50db` (main 02a50dbf). Self-play ~3.5-4.5 minutes an
+  iteration on the 128 x 8 network when the desktop is free; runs at below-normal priority (the user: other sessions first).
+
+**To resume** (hub todos "EoE RESUME ...", "sealedai: publish run 2", "EoE S4b"): re-pin run 2 onto current main before it
+continues - ENGINE.md 128 fixed a search bug that reaches EoE (two of the opponent's dealt worlds could merge into one node;
+layout unchanged, so no fork): measure how often it changed EoE games, a pinned worktree of main, the repin gate (digests =
+main's, the EoE search smoke, iteration 87 loads), `mac.sh --eval-checkout`, then the launch script
+`E:/mtg-zero/runs/eoe2e_launch.sh` pointed at the new worktree with PAUSE removed, the run at below-normal priority, the
+sealedai publisher restarted. Next work after run 2: S4b, the deck search for a given pool (9.1 steps 1, 3-5). Artefacts:
+`E:/mtg-zero/s4a/` (evaluators v1_time / v2_time, races, real decks, the search sweep, the 128 x 8 deepen).
 
 ### 9.1 Deckbuilding from a pool: the plan (user, 2026-11-10)
 

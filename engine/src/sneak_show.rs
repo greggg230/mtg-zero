@@ -198,6 +198,79 @@ impl Game {
         })
     }
 
+    /// The chance that [`Game::hidden_pick_ok`] accepts a deal, as a function
+    /// of the deck a hidden-deck world deals (ENGINE.md 129.3): with a pending
+    /// face-down choice of `owner`'s that `viewer` doesn't know
+    /// (`hidden_pick`), `owner`'s cards `viewer` doesn't know (`slots`;
+    /// `pinned` kept) are dealt by `resample_with_clouds` - each cloud's
+    /// listed cards in its domain, the other cards (the free ones) shuffled
+    /// over every other place - and a card of the hand drawn uniformly must
+    /// be of the kind. Given the identities dealt, that chance is (A + B
+    /// L / F) / |hand|: A from the hand cards `viewer` knows and the clouds'
+    /// listed cards, B the hand's places a free card can take (a place of
+    /// no cloud 1, a cloud's place its share of free cards), F the free
+    /// cards and L those of the kind. The deck enters through L only: L =
+    /// y + c0, y the deck's copies of the kind beyond `required` (R) and c0
+    /// = the kind among R - `known` + `extras` - the clouds' cards (the
+    /// request's `sample::Knowledge`). So the chance is proportional to
+    /// a + b y with a = A F + B c0, b = B: `Some((the card definitions of
+    /// `support` of the kind, a, b))`, or None when no pick is pending or
+    /// the chance does not depend on the deck (b = 0). Whether a card is of
+    /// the kind is `hidden_pick_ok`'s own test, on a hand card given that
+    /// identity.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn hidden_pick_odds(
+        &self,
+        viewer: PlayerId,
+        owner: PlayerId,
+        slots: &[CardIdx],
+        pinned: &[CardIdx],
+        required: &[DefId],
+        known: &[DefId],
+        extras: &[DefId],
+        support: &[DefId],
+    ) -> Option<(Vec<DefId>, f64, f64)> {
+        let (_, _, filter) = self.hidden_pick(viewer, owner)?;
+        let hand = &self.players[owner as usize].hand;
+        let ctx = crate::cast::Ctx { controller: owner, source: None };
+        // (No hand card the deal changes - every one known, or a token kept: the chance is the same in every world.)
+        let c = *hand.iter().find(|c| slots.contains(c))?;
+        let (home, needs) = self.cloud_needs(viewer, owner, slots, pinned);
+        // Which identities are of the kind: a hidden hand card of `owner`'s given each one (a copy of the state).
+        let mut ids: Vec<DefId> = support.iter().chain(required).chain(known).chain(extras).chain(needs.iter().flatten()).copied().collect();
+        ids.sort_unstable();
+        ids.dedup();
+        let mut probe = self.clone();
+        ids.retain(|&d| {
+            probe.set_ident(c, d);
+            probe.card_matches(&filter, c, &ctx)
+        });
+        let of_kind = |v: &[DefId]| v.iter().filter(|d| ids.binary_search(d).is_ok()).count() as f64;
+        let free = slots.len() - needs.iter().map(|v| v.len()).sum::<usize>();
+        let room: Vec<usize> = (0..needs.len()).map(|k| home.iter().filter(|&&h| h == Some(k)).count()).collect();
+        let (mut a, mut b) = (0.0f64, 0.0f64);
+        for &h in hand {
+            match slots.iter().position(|&s| s == h) {
+                None => a += self.card_matches(&filter, h, &ctx) as u8 as f64,
+                Some(i) => match home[i] {
+                    None => b += 1.0,
+                    Some(k) => {
+                        a += of_kind(&needs[k]) / room[k] as f64;
+                        b += (room[k] - needs[k].len()) as f64 / room[k] as f64;
+                    }
+                },
+            }
+        }
+        if b == 0.0 || free == 0 {
+            return None;
+        }
+        let c0 = of_kind(required) - of_kind(known) + of_kind(extras) - needs.iter().map(|v| of_kind(v)).sum::<f64>();
+        assert!(c0 >= 0.0, "hidden_pick_odds: {c0} free cards of the kind beyond the deck's (ENGINE.md 129.3)");
+        let mut legal: Vec<DefId> = support.iter().copied().filter(|d| ids.binary_search(d).is_ok()).collect();
+        legal.dedup();
+        Some((legal, a * free as f64 + b * c0, b))
+    }
+
     /// `determinize`'s check of a deal of `owner`'s hidden cards for `viewer`
     /// (CR 101.4a): with a pending face-down choice of `owner`'s that
     /// `viewer` doesn't know (`hidden_pick`), a card of `owner`'s hand drawn

@@ -177,7 +177,7 @@ fn op(x: &crate::program::Op) -> Option<&Filter> {
     }
 }
 
-/// `crate::program::Ext`: every variant (197), the positional graveyard readers named.
+/// `crate::program::Ext`: every variant (199), the positional graveyard readers named.
 fn ext(x: &crate::program::Ext) -> Option<&Filter> {
     use crate::program::Ext as E;
     match x {
@@ -379,6 +379,7 @@ fn ext(x: &crate::program::Ext) -> Option<&Filter> {
         E::DdA(e) => dd_a(e),
         E::DoomsdayB(e) => doomsday_b(e),
         E::SnS(e) => sns(e),
+        E::DelverSb(e) => delver_sb(e),
     }
 }
 
@@ -544,6 +545,14 @@ fn sns(x: &crate::sneak_show::SnS) -> Option<&Filter> {
     match x {
         E::EachPlayerPutsFromHand { .. } => None,
         E::NextSpellUncounterable => None,
+    }
+}
+
+/// The Delver 75's sideboard (ENGINE.md 122): counting permanents reads no graveyard.
+fn delver_sb(x: &crate::delver_sb::DelverSb) -> Option<&Filter> {
+    use crate::delver_sb::DelverSb as E;
+    match x {
+        E::DamageEachPlayerByCount { .. } => None,
     }
 }
 

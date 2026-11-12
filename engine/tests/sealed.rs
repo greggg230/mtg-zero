@@ -527,7 +527,7 @@ fn without_best_share_the_builder_seats_and_prior_draw_as_before() {
         let k = (seed % 13) as usize;
         let mut shown: Vec<u16> = real.iter().copied().step_by(3).take(k).collect();
         shown.sort_unstable();
-        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None };
+        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None, pick: None };
         let a = prior.sample(&want, &mut Rng::new(seed));
         let b = prior.sample_from(&want, Some(&bank[(seed % 4) as usize]), &mut Rng::new(seed));
         for s in [a, b] {

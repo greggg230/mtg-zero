@@ -200,3 +200,21 @@ Constructed play's table (`CardDb::constructed`); every test in `engine/tests/ca
 | Disruptor Flute x activated abilities | Sneak Attack, a fetch land, Lotus Petal, Simian Spirit Guide, Mistrise Village, Tamiyo's back face | `cr_602_5_*`, `cr_605_1a_*`, `cr_606_*` | tested |
 | Magus of the Moon x the deck's mana | Volcanic Island, Thundering Falls, Mistrise Village, Ancient Tomb, City of Traitors, fetch lands, Multiversal Passage, Gemstone Mine | `cr_305_7_*`, `cr_614_12_*` | tested |
 | Turn-one Show and Tell | Lotus Petal, City of Traitors, Ancient Tomb | `lotus_petal_spirit_guide_and_city_of_traitors_into_a_turn_one_show_and_tell` | tested |
+
+## The Legacy Izzet Delver 75's sideboard (ENGINE.md 122)
+
+Constructed play's table (`CardDb::constructed`); every test in `engine/tests/cards_delver_sb.rs`.
+
+| Pair | Cards | Tests | Status |
+|---|---|---|---|
+| Consign to Memory x delayed triggers | Pact of Negation's upkeep payment | `cr_701_6a_consign_to_memory_counters_pact_of_negations_upkeep_trigger` | tested |
+| Consign to Memory x an uncounterable spell | Emrakul, the Aeons Torn and its cast trigger (Omniscience) | `cr_101_2_consign_to_memory_and_emrakuls_cast_trigger` | tested |
+| Consign to Memory x keyword triggers | ward (Kappa Cannoneer), storm (Flusterstorm) | `cr_702_21a_consign_to_memory_counters_a_ward_trigger`, `cr_702_40a_consign_to_memory_counters_a_storm_trigger` | tested |
+| Consign to Memory's replicate x counterspells | Daze countering the original, the copy resolving | `cr_707_10_countering_consign_to_memory_leaves_its_copy`, `cr_702_56a_consign_to_memory_replicated_counters_two_triggers` | tested |
+| Consign to Memory / Hydroblast x colour changes | Painter's Servant naming red | `cr_105_2c_a_spell_made_red_by_painters_servant_is_not_colorless`, `cr_613_1e_hydroblast_reads_painters_servants_red` | tested |
+| Hydroblast x Misdirection | the mode kept on a redirect | `cr_700_2a_a_redirected_hydroblast_keeps_its_mode` | tested |
+| Hydroblast x a split card | Rough on the stack (red) | `cr_709_3b_hydroblast_counters_rough` | tested |
+| Meltdown x X | Omniscience (X 0), Walking Ballista, Kaldra Compleat | `cr_107_3b_meltdown_cast_for_free_has_x_zero`, `cr_202_3e_meltdown_for_zero_destroys_walking_ballista_and_the_zero_artifacts`, `cr_702_12b_meltdown_leaves_an_indestructible_artifact` | tested |
+| Price of Progress x the lands | Magus of the Moon, a fetch land in response | `cr_305_7_nonbasic_lands_under_magus_of_the_moon_still_count`, `cr_608_2h_price_of_progress_counts_the_lands_as_it_resolves` | tested |
+| Rough // Tumble x flying now | Dragon's Rage Channeler's delirium | `cr_613_1f_rough_and_tumble_read_flying_as_it_is_now` | tested |
+| Rough // Tumble x copies, names, counts | Lutri, Disruptor Flute, Murktide Regent, Inquisition of Kozilek | `cr_707_10_a_copy_of_rough_is_rough`, `cr_709_4a_disruptor_flute_naming_rough_taxes_rough_only`, `cr_709_4_rough_tumble_is_one_card_for_murktide_regent`, `cr_202_3d_rough_tumble_in_hand_has_mana_value_eight` | tested |

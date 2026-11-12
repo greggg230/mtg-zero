@@ -563,9 +563,9 @@ e61f99f9	a	zones	the card found this way isn't revealed to your opponent
 3200cc0f	b	DEF	the card to put into your hand is chosen as the spell resolves [part 3, was a/zones: the card is chosen as the spell resolves, the only time the engine asks; a definition]
 0333f482	a	combat	a noncreature-turned-creature needs continuous control since turn start to attack or tap, not creature-status time
 d9bc4e52	a	mana	off the stack, a split cards mana value is both halves combined, so low-MV searches wont find it
-b83b7a27	c	NR	a split card has two names; choosing a card name picks only one of them [part 3, was a/other: the cube's naming cards look at cards outside the stack, where a split card has both names together]
+b83b7a27	a	dfc	a split card has two names; choosing a card name picks only one of them [ENGINE.md 122, was c/NR: Disruptor Flute in constructed play names one half of Rough // Tumble (CR 709.4a); part 3, was a/other]
 7892efbd	a	zones	a split card is a single card for counting purposes, like how many cards are discarded or sorceries in a graveyard
-7a9df48b	c	NR	a spell-casting effect with set characteristics only sees the half of a split card being cast [part 3, was a/dfc: no cube effect casts a spell by mana value or another characteristic where Life's and Death's halves differ (cascade checks the card, then either half fits)]
+7a9df48b	c	NR	a spell-casting effect with set characteristics only sees the half of a split card being cast [part 3, was a/dfc: no cube effect casts a spell by mana value or another characteristic where Life's and Death's halves differ (cascade checks the card, then either half fits); ENGINE.md 122: none in constructed play either, Rough // Tumble's halves (mana value 2 and 6) included: Lurrus casts permanent spells only, and cascade (Bloodbraid Challenger, 5) never hits a card of mana value 8]
 ae909e09	a	copies	a copy of one half of a split card remains that same half
 64340627	a	copies	a land that becomes a creature keeps all its other supertypes, types, subtypes, and abilities
 9fbd1525	a	dfc	while a split card spell is on the stack, the characteristics of the half you didn't cast are ignored
@@ -1297,3 +1297,6 @@ aa10a575	a	replacement	a nonbasic land entering under the Magus loses its enters
 cafea326	a	triggers	a nonbasic land entering under the Magus loses its enters triggered ability before it triggers (CR 614.12, 603.6)
 53c9e610	a	other	Magus of the Moon changes no name or supertype (CR 305.7)
 24283e6f	a	other	under the Magus nonbasic lands lose their land types and abilities and gain Mountain and {T}: Add {R} (CR 305.7)
+5c226a47	a	copies	a copy of a spell must be countered on its own; countering the replicated spell leaves its copies (Consign to Memory)
+19831073	a	stack	triggered abilities ("when", "whenever", "at"; keyword triggers such as ward and storm) are targets for "counter target triggered ability"
+53e85191	a	stack	Hydroblast can target any spell or permanent; the colour is checked only on resolution
