@@ -273,3 +273,22 @@ def test_evalpick_batched_over_pools(net, tmp_path):
     assert got['summary'] == want['summary']
     with pytest.raises(SystemExit):
         K.main(args[:4] + ['11,11'] + args[5:] + ['--batched'])
+
+
+def test_the_eval_cache_with_rowexact(builds, net):
+    """--eval-cache with RowExact: the same games bit for bit, fewer rows sent to the network (zero-core docs/search.md
+    3.12); refused with the default evaluator; the value pick's seat has no cache."""
+    p, bs = builds
+
+    def play(cache):
+        pilot = K.Pilot(net, sims=4, evaluator='rowexact', eval_cache=cache)
+        c = K.Comparison(bs[:2], K.Field(seed=8), pilot, seed=9, block=6, threads=1, max_turns=8)
+        K.compare(c, 6)
+        return _scores(c), pilot.evaluators()['net'].leaves, pilot
+    a, rows_a, _ = play(0)
+    b, rows_b, pilot = play(256)
+    assert a == b and rows_b < rows_a
+    assert pilot.seat()['eval_cache'] == 256 and 'eval_cache' not in pilot.seat('flat', cache=False)
+    assert pilot.describe()['eval_cache'] == 256
+    with pytest.raises(ValueError):
+        K.Pilot(net, eval_cache=64)

@@ -298,14 +298,20 @@ class Pilot:
     an evaluation seat otherwise - no noise, no temperature, nothing recorded, the run's move rule). The value
     pick (`value_pick`) is always the flat seat's: a value choice searches nothing. `evaluator`: 'default'
     (zero.infer.NetEvaluator) or 'rowexact' (`batch.RowExact`: each row's answer independent of its batch;
-    `rows` per chunk, CUDA `graphs` (None: on), CPU `workers`)."""
+    `rows` per chunk, CUDA `graphs` (None: on), CPU `workers`). `eval_cache` N > 0 (with 'rowexact' only): each
+    game's evaluation cache (zero-core docs/search.md 3.12) - a row the game already sent is answered from it;
+    with answers that depend on the row alone the same games bit for bit, fewer network rows."""
 
     def __init__(self, spec='heuristic', sims=64, chance_k=0, c_puct=1.0, device='cpu', key='net', search='flat',
-                 evaluator='default', rows=None, graphs=None, workers=None):
+                 evaluator='default', rows=None, graphs=None, workers=None, eval_cache=0):
         if search not in SEARCHES:
             raise ValueError(f'pilot search {search!r}: one of {SEARCHES}')
         if evaluator not in EVALS:
             raise ValueError(f'pilot evaluator {evaluator!r}: one of {EVALS}')
+        if eval_cache and evaluator != 'rowexact':
+            raise ValueError(f'eval_cache {eval_cache}: with the rowexact evaluator only (its cached answers are the '
+                             f'answers it would compute again; the default evaluator answers by the batch)')
+        self.eval_cache = int(eval_cache)
         self.spec, self.sims, self.chance_k, self.c_puct, self.device, self.key = spec, sims, chance_k, c_puct, device, key
         self.is_net = spec not in ('random', 'heuristic')
         self.search, self.evaluator, self.rows, self.graphs = search, evaluator, rows, graphs
@@ -325,16 +331,20 @@ class Pilot:
         if self.evaluator != 'default':
             out['evaluator'] = self._ev('rowexact').describe() if self._model is not None else {
                 'evaluator': self.evaluator, 'rows': self.rows, 'graphs': self.graphs}
+        if self.eval_cache:
+            out['eval_cache'] = self.eval_cache
         return out
 
-    def seat(self, search=None):
-        """The pilot's driver seat; `search` 'flat' forces the flat seat (the value pick's)."""
+    def seat(self, search=None, cache=True):
+        """The pilot's driver seat; `search` 'flat' forces the flat seat and `cache` False drops the evaluation
+        cache (the value pick's seat: today's)."""
         G = _games()
         if not self.is_net:
             return G.seat_dict(self.spec)
         from zero import h2h
+        ec = self.eval_cache if cache else 0
         if (search or self.search) == 'flat':
-            s = G.nn_seat(self.key, self.sims, self.c_puct, chance_k=self.chance_k)
+            s = G.nn_seat(self.key, self.sims, self.c_puct, chance_k=self.chance_k, eval_cache=ec)
         else:
             m = self.mix
             # self-play's split as self-play draws it (the driver's playout cap: `sims` on a share p_full,
@@ -344,7 +354,7 @@ class Pilot:
             # nothing recorded (record False; the race's drivers record nothing either)
             s = G.nn_seat(self.key, m['sims'], self.c_puct, selfplay=True, eps=0.0, temp_moves=0,
                           sims_fast=m['sims_fast'], p_full=m['p_full'], chance_k=self.chance_k,
-                          sims_minor=m['sims_minor'])
+                          sims_minor=m['sims_minor'], eval_cache=ec)
             s['record'] = False
         s.update(h2h.run_rule(self.spec))
         return s
@@ -375,8 +385,10 @@ class Pilot:
 
     def same(self, other):
         return other is None or other is self or (
-            (other.spec, other.sims, other.chance_k, other.search, other.evaluator, other.rows, other.graphs)
-            == (self.spec, self.sims, self.chance_k, self.search, self.evaluator, self.rows, self.graphs))
+            (other.spec, other.sims, other.chance_k, other.search, other.evaluator, other.rows, other.graphs,
+             other.eval_cache)
+            == (self.spec, self.sims, self.chance_k, self.search, self.evaluator, self.rows, self.graphs,
+                self.eval_cache))
 
 
 # ----------------------------------------------------------------------------- one game's spec
@@ -892,7 +904,7 @@ def value_pick(pool_names, pilot, k=32, worlds=8, seed=0, collation='arena', max
         return 0, cands
     # (the flat seat and the usual evaluator whatever the race's pilot search and evaluator: a value choice
     # searches nothing, and every pilot setting picks the same build - docs/ENGINE.md 110.3)
-    s0 = dict(pilot.seat('flat'), value_choice_worlds=int(worlds), value_choice_temp=0.0)
+    s0 = dict(pilot.seat('flat', cache=False), value_choice_worlds=int(worlds), value_choice_temp=0.0)
     drv = G.Driver('mtg_eoe', [[s0, G.seat_dict('random')]], spec=json.dumps(spec), concurrency=1, seed=int(seed),
                    max_steps=1, move_log=1, threads=1)
     from zero.infer import drive
@@ -1009,7 +1021,7 @@ def _pilot(a, prefix=''):
         cache[prefix] = None if spec is None else Pilot(
             spec, sims=a.sims, chance_k=a.chance_k, device=a.device, key=f'{prefix}net' if prefix else 'net',
             search=getattr(a, 'pilot_search', 'flat'), evaluator=_eval_kind(a), rows=getattr(a, 'eval_rows', None),
-            workers=getattr(a, 'eval_workers', None))
+            workers=getattr(a, 'eval_workers', None), eval_cache=getattr(a, 'eval_cache', 0))
     return cache[prefix]
 
 
@@ -1083,6 +1095,10 @@ def _common(p):
     p.add_argument('--eval-workers', type=int, default=None,
                    help='rowexact on the CPU: chunks evaluated side by side on this many threads (each kernel on one '
                         'thread: the answers are the same for any number; default min(8, CPUs))')
+    p.add_argument('--eval-cache', type=int, default=0,
+                   help='with --eval rowexact (the --batched default): each game an evaluation cache of this many '
+                        'answers (zero-core docs/search.md 3.12): the same games bit for bit, fewer network rows '
+                        '(default 0: none)')
     p.add_argument('--pilot-search', default='flat', choices=list(SEARCHES),
                    help="'flat' (--sims on every decision, the default) or 'mix' (self-play's simulation mix: the "
                         "pilot run's sims / sims_fast / p_full / sims_minor; ENGINE.md 110.3)")
