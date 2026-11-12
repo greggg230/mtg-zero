@@ -1536,7 +1536,8 @@ impl Game {
         if promised.len() >= left.0 + left.1 {
             return Vec::new();
         }
-        let hand = self.hand_sorted_in(p);
+        // (The order hand slots take their cards in, ENGINE.md 128.)
+        let hand = self.hand_slot_order_in(p);
         // (Per definition, from the run of the last one promised on.)
         let from = promised.last().map_or(0, |&c| {
             let d = self.objs[c.i()].def;

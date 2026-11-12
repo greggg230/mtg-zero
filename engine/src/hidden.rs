@@ -265,8 +265,9 @@ impl Game {
     }
 
     /// Does a waiting trigger, a stack item or a delayed trigger name card
-    /// `c` as its event's object (`canon_hand_knowledge`)?
-    fn named_by_an_ability(&self, c: CardIdx) -> bool {
+    /// `c` as its event's object (`canon_hand_knowledge`,
+    /// `Game::hand_slot_order_in`)?
+    pub(crate) fn named_by_an_ability(&self, c: CardIdx) -> bool {
         let names = |ev: &crate::triggers::EvCtx| [ev.obj, ev.obj2].into_iter().flatten().any(|r| r.idx == c && self.live(r));
         self.waiting.iter().any(|w| names(&w.ev)) || self.stack.iter().any(|s| names(&s.ev)) || self.delayed.iter().any(|d| names(&d.ev))
     }
@@ -372,16 +373,28 @@ impl Game {
         self.tidy_clouds();
     }
 
-    /// Reveal a card in a hidden zone to everyone (CR 701.16; 602.2a).
+    /// Reveal a card in a hidden zone to everyone (CR 701.16; 602.2a),
+    /// keyed by its identity. A card every player knew already is keyed too
+    /// when it is in a hand (ENGINE.md 128): a hand card is named by its
+    /// definition's hand slot, whose place counts the hidden cards'
+    /// definitions (ENGINE.md 11), so one action can name another known card
+    /// in another world of the other player's; the key, which tells no one
+    /// anything new, keeps those worlds apart, as a known card leaving a
+    /// hidden zone is keyed (`move_card`). A known card elsewhere (a library
+    /// card by its place, a face-down card by its object) is the same card
+    /// in every world: no key.
     pub(crate) fn reveal(&mut self, idx: CardIdx) {
         let o = &self.objs[idx.i()];
-        if self.hidden_obj(idx) && o.known != 0b11 {
-            let (owner, def) = (o.owner, self.ident(idx));
+        if !self.hidden_obj(idx) || o.known == 0b11 && o.zone != Zone::Hand {
+            return;
+        }
+        let (owner, def, all_knew) = (o.owner, self.ident(idx), o.known == 0b11);
+        if !all_knew {
             for q in 0..2 {
                 self.learn(q, idx);
             }
-            self.emit_public(KEY_REVEAL, owner, def as u64);
         }
+        self.emit_public(KEY_REVEAL, owner, def as u64);
     }
 
     /// Card `c` (definition `d`) left hidden zone `from` for a public zone;
@@ -659,8 +672,17 @@ impl Game {
         self.after_deal(viewer, rng);
     }
 
-    /// What `determinize` does after its deal: reseed, observe, refresh.
+    /// What `determinize` does after its deal: canonicalize the hands'
+    /// knowledge, reseed, observe, refresh.
     fn after_deal(&mut self, viewer: PlayerId, rng: &mut Rng) {
+        // A world is in the normal form every state at rest is in
+        // (`canon_hand_knowledge`, run after each step): the deal may have
+        // given a card below a known twin the twin's definition, and the
+        // known one must come first (a hand slot names its definition's first
+        // card, `hand_slot_order_in`: the same knowledge in every world,
+        // ENGINE.md 128). Knowledge bits move among same-definition hand
+        // cards only: what anyone knows (a multiset per hand) is unchanged.
+        self.canon_hand_knowledge();
         self.rng = Rng::new(rng.next_u64());
         self.observer = Some(viewer);
         // The loop actions the viewer decided keep their records (loop

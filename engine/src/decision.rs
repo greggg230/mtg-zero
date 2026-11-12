@@ -630,15 +630,38 @@ impl Game {
         h
     }
 
+    /// `p`'s hand in the order a hand slot takes its card (ENGINE.md 128):
+    /// canonical ([`hand_sorted_in`](Self::hand_sorted_in)), but within a
+    /// definition a card an ability names (`Game::named_by_an_ability`)
+    /// that the other player knows comes first. A definition's cards keep
+    /// their places as a run, so slot ids are those of the canonical order.
+    /// Why: twins are interchangeable, and `canon_hand_knowledge` puts the
+    /// best-known first, but a twin an ability names keeps its own
+    /// knowledge; the known one is the same card in every world the other
+    /// player deals, and a slot naming its definition must name it there too
+    /// (else one world reveals a twin the other player didn't know and
+    /// another the known one: equal keys, unequal knowledge).
+    pub(crate) fn hand_slot_order_in(&self, p: PlayerId) -> SVec<CardIdx, 16> {
+        let mut h = self.hand_sorted_in(p);
+        let twins = h.windows(2).any(|w| self.objs[w[0].i()].def == self.objs[w[1].i()].def);
+        if twins {
+            let q = crate::ids::opp(p);
+            let told = |c: CardIdx| self.objs[c.i()].known & (1 << q) != 0 && self.named_by_an_ability(c);
+            h.sort_by_key(|&c| (self.objs[c.i()].def, !told(c), c.get()));
+        }
+        h
+    }
+
     /// One (slot, card) per distinct definition in `p`'s hand: cards in a
-    /// hidden zone have no other state, so equal definitions are equivalent.
+    /// hidden zone have no other state, so equal definitions are equivalent
+    /// (the card: the definition's first in `hand_slot_order_in`).
     pub fn hand_slots(&self, p: PlayerId) -> Vec<(u16, CardIdx)> {
         self.hand_slots_in(p).to_vec()
     }
 
     /// [`hand_slots`](Self::hand_slots) in inline storage.
     pub(crate) fn hand_slots_in(&self, p: PlayerId) -> SVec<(u16, CardIdx), 16> {
-        let h = self.hand_sorted_in(p);
+        let h = self.hand_slot_order_in(p);
         let mut out = SVec::new();
         for (i, &c) in h.iter().enumerate() {
             if i > 0 && self.objs[h[i - 1].i()].def == self.objs[c.i()].def {
@@ -658,7 +681,7 @@ impl Game {
     /// [`hand_options`](Self::hand_options) without one card (an ability's
     /// source in hand); a definition keeps its canonical slot.
     pub(crate) fn hand_options_except(&self, p: PlayerId, except: Option<CardIdx>) -> Vec<Opt> {
-        let h = self.hand_sorted_in(p);
+        let h = self.hand_slot_order_in(p);
         let mut out = Vec::new();
         let mut i = 0;
         while i < h.len() {
