@@ -246,3 +246,30 @@ def test_the_presets_of_run_2e():
     assert {k: one[k] for k in RO.SETTINGS} == RO.SETTINGS
     smoke = run.resolve_config(run.parse(['--run', 'x', '--preset', 'eoe-2e-smoke']), {})
     assert smoke['evaluator_every'] == 1 and json.loads(smoke['spec'])['sealed']['deck_choice']['k'] == 8
+
+
+def test_a_rolling_driver_switches_evaluators_between_phases(exported, tmp_path):
+    """zero-core's Driver.set_spec on an mtg_eoe rolling driver (run 2's self-play, docs/ENGINE.md 112.4): the games
+    started after the switch choose by the new evaluator file, the earlier ones by the old (the game log's sha256)."""
+    a, b = exported['linear'], exported['set']
+    bot = G.seat_dict('heuristic')
+    E.game_log(str(tmp_path / 'games' / 'games-1.jsonl'))
+    try:
+        drv = G.Driver('mtg_eoe', [[bot, bot]], spec=choice_spec(a[1]), concurrency=3, seed=5, threads=2, record=False,
+                       rolling=True)
+        drv.resume(3, 0)
+        drive(drv, {})
+        first = drv.take_results()
+        drv.set_spec(choice_spec(b[1]))
+        drv.resume(6, 0)
+        drive(drv, {})
+        second = drv.take_results()
+        drv.end_phase()
+    finally:
+        E.game_log(None)
+    assert len(first) >= 3 and len(second) >= 6
+    specs, games = GL.load(str(tmp_path))
+    shas = {g['seed']: {s.get('evaluator') for s in g['seats']} - {None} for g in games}
+    assert {sha for s in shas.values() for sha in s} == {a[2], b[2]}, 'both versions chose decks'
+    assert len({json.dumps(v['sealed']['deck_choice'], sort_keys=True) for v in specs.values()}) == 2
+    assert GL.check(specs, games)['mismatch'] == []

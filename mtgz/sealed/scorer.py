@@ -295,7 +295,7 @@ def fixtures(out_dir, seed=0, n_check=48):
         e = random_evaluator(kind, seed=seed)
         out[f'scorer_{kind}.json'] = write(document(e, {'fixture': True}), os.path.join(out_dir, f'scorer_{kind}.json'))
         check[kind] = [float(x) for x in e.score(check['decks'])]
-    data = json.dumps(check, indent=0, sort_keys=True).encode('utf-8')
+    data = json.dumps(check, separators=(',', ':'), sort_keys=True).encode('utf-8')   # (one line: no newline to convert)
     with open(os.path.join(out_dir, 'scorer_check.json'), 'wb') as f:
         f.write(data)
     out['scorer_check.json'] = hashlib.sha256(data).hexdigest()
