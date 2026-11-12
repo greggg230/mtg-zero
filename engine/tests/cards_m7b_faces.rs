@@ -672,6 +672,43 @@ fn etali_may_cast_none() {
 }
 
 #[test]
+fn etali_may_cast_an_exiled_cards_adventure_cr_715_3() {
+    // "You may cast any number of spells from among the nonland cards
+    // exiled this way": an adventurer card's spells are the creature and
+    // the Adventure (CR 715.3); both can be cast free, so the face is chosen
+    // (`ChooseFace`): Petty Theft returns P1's Test Bear, and the card goes
+    // on an adventure (ENGINE.md 127.6; before it the creature was cast
+    // always).
+    let mut g = Scenario::new(db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.log = true;
+        })
+        .library(0, &["Brazen Borrower // Petty Theft", "Island"])
+        .library(1, &["Forest", "Forest"])
+        .battlefield(0, &["Mountain"; 7])
+        .battlefield(1, &["Test Bear"])
+        .hand(0, &[ETALI])
+        .start();
+    cast(&mut g, 0, ETALI);
+    let bear = bf(&g, 1, "Test Bear");
+    let faces = std::cell::Cell::new(0);
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::ChooseExiled) => g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|c| matches!(c, Choice::Card(_))),
+        Some(DecisionKind::ChooseFace) => {
+            faces.set(faces.get() + 1);
+            Some(Choice::Number(1))
+        }
+        Some(DecisionKind::Target) if g.has_option(g.tgt(bear)) => Some(g.tgt(bear)),
+        _ => None,
+    });
+    assert_eq!(faces.get(), 1, "the face chosen: {}", g.log_lines().join("\n"));
+    assert!(g.log_lines().iter().any(|l| l.contains("casts Petty Theft")), "{}", g.log_lines().join("\n"));
+    assert_eq!(g.obj(bear).zone, Zone::Hand);
+    assert_eq!(g.count_in(0, "Brazen Borrower // Petty Theft", Zone::Exile), 1, "on an adventure");
+}
+
+#[test]
 fn etali_primal_sickness_poisons_and_ten_poison_counters_lose_cr_704_5c() {
     // ruling: c160282e
     // "{9}{G/P}: Transform Etali. Activate only as a sorcery." // "Trample,

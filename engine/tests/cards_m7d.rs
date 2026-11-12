@@ -809,6 +809,46 @@ fn cr_709_4_peacekeeper_naming_a_split_cards_half_taxes_that_half() {
     }
 }
 
+/// Etali, Primal Conqueror's free casts with a face taxed: P0's Peacekeeper
+/// named Brazen Borrower, so P1's Brazen Borrower costs {2} even free (CR
+/// 118.9d, 601.2f) and P1 has no mana left; Petty Theft, its Adventure, is
+/// free: the card is offered and its Adventure cast (ENGINE.md 127.6; before
+/// it the creature was cast, which its caster couldn't pay: the names fuzz
+/// pool's seed 188).
+#[test]
+fn cr_715_3_etali_casts_the_adventure_when_only_it_can_be_cast_free() {
+    const BORROWER: &str = "Brazen Borrower // Petty Theft";
+    const ETALI: &str = "Etali, Primal Conqueror // Etali, Primal Sickness";
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains"])
+        .hand(0, &["Anointed Peacekeeper"])
+        .library(1, &["Forest", BORROWER])
+        .battlefield(1, &["Mountain"; 7])
+        .hand(1, &[ETALI])
+        .at(Step::Main1, 0)
+        .start();
+    peacekeeper_names(&mut g, Choice::Def(name_def("Brazen Borrower")));
+    quiet_until(&mut g, |g| g.turn().active == 1 && g.turn().step == Step::Main1 && at_priority(g) && g.stack().is_empty());
+    let etali = g.card(1, ETALI, Zone::Hand);
+    g.choose(Choice::Cast(etali));
+    pay(&mut g);
+    let ap = bf(&g, 0, "Anointed Peacekeeper");
+    let asked = std::cell::Cell::new(false);
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::ChooseExiled) => {
+            let bb = g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|c| matches!(c, Choice::Card(x) if g.name(*x) == BORROWER));
+            asked.set(asked.get() || bb.is_some());
+            bb.or(Some(Choice::Pass))
+        }
+        Some(DecisionKind::ChooseFace) => panic!("only the Adventure can be cast"),
+        Some(DecisionKind::Target) if g.has_option(g.tgt(ap)) => Some(g.tgt(ap)),
+        _ => None,
+    });
+    assert!(asked.get(), "the Borrower offered: {}", log(&g));
+    assert!(log(&g).contains("casts Petty Theft"), "{}", log(&g));
+    assert_eq!(g.obj(ap).zone, Zone::Hand, "Petty Theft returned the Peacekeeper");
+}
+
 /// `PASS`, the one answer for every name no spell or source of the game can
 /// have (ENGINE.md 123.4, 127): nothing is taxed (P1's Lightning Bolt for
 /// {R}), and the name kept is `NO_NAME`.

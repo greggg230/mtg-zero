@@ -94,6 +94,13 @@
 //! activated, a spell cast without paying its mana cost, a spell made uncounterable and a name
 //! chosen (`sneak_show`: Show and Tell and Mistrise Village seen, a free cast, a spell made
 //! uncounterable). Games only (best-of-one).
+//! `FUZZ_POOL=names` (ENGINE.md 127): "choose a card name" with every kind of face. Each seat a
+//! random 60 of constructed play's table: Anointed Peacekeeper and Disruptor Flute four each, eight
+//! of the table's cards with more than one face (split cards, double-faced cards, adventurer and
+//! preparation cards) three each, 28 basic lands. Every check of the default mode; with
+//! `FUZZ_HIDDEN_DECKS=1` the hidden-decklist checks too (the names are then the table's). With 200
+//! games or more each card must have chosen a name, and the Peacekeeper each kind of name: a card of
+//! one face, a back face, an Adventure, a split card's half, and `PASS`.
 //! `FUZZ_POOL=eoe` (ENGINE.md 99): Edge of Eternities sealed, the set's own
 //! card table (`CardDb::eoe`): random 40-card decks of its supported cards
 //! (17 lands, 23 spells; games only, no matches).
@@ -356,6 +363,9 @@ enum PoolMode {
     SneakShow,
     /// `FUZZ_POOL=sns` (ENGINE.md 123): the lane's six cards four each.
     Sns,
+    /// `FUZZ_POOL=names` (ENGINE.md 127): Anointed Peacekeeper and Disruptor
+    /// Flute with the table's cards of more than one face.
+    Names,
 }
 
 fn pool_mode() -> PoolMode {
@@ -373,7 +383,8 @@ fn pool_mode() -> PoolMode {
         Ok("doomsday") => PoolMode::Doomsday,
         Ok("sneak_show") => PoolMode::SneakShow,
         Ok("sns") => PoolMode::Sns,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"eoe\" or \"sealed\")"),
+        Ok("names") => PoolMode::Names,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"names\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -400,9 +411,121 @@ fn dd_b_mode() -> bool {
 }
 
 /// Constructed play's table (`FUZZ_POOL=delver`, `dd_a`, `dd_b`, `dd_c`,
-/// `doomsday`, `sneak_show` or `sns`).
+/// `doomsday`, `sneak_show`, `sns` or `names`).
 fn constructed_mode() -> bool {
-    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode()
+    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode() || names_mode()
+}
+
+/// `FUZZ_POOL=names` (ENGINE.md 127).
+fn names_mode() -> bool {
+    pool_mode() == PoolMode::Names
+}
+
+/// A deck of `FUZZ_POOL=names` (ENGINE.md 127): Anointed Peacekeeper and
+/// Disruptor Flute four each, eight random cards of the table with more than
+/// one face three each, 28 basic lands.
+fn names_deck(rng: &mut Rng) -> Vec<u16> {
+    let db = CardDb::constructed();
+    let mut multi: Vec<u16> = (0..db.num_cards() as u16)
+        .filter(|&d| {
+            let dd = db.def(d);
+            !dd.token && (dd.halves.is_some() || dd.back.is_some() || dd.adventure.is_some() || dd.prepare.is_some())
+        })
+        .collect();
+    assert!(multi.len() >= 8, "the table's cards with more than one face: {}", multi.len());
+    let mut list: Vec<(u32, String)> = vec![(4, "Anointed Peacekeeper".into()), (4, "Disruptor Flute".into())];
+    for _ in 0..8 {
+        let d = multi.swap_remove(rng.below(multi.len() as u32) as usize);
+        list.push((3, db.def(d).name.clone()));
+    }
+    list.extend([(8, "Plains"), (5, "Island"), (5, "Swamp"), (5, "Mountain"), (5, "Forest")].map(|(n, s)| (n, s.to_string())));
+    let deck = engine::az::constructed::Decklist::ids(db, &list).unwrap();
+    engine::az::constructed::check(db, &deck, &[]).unwrap_or_else(|e| panic!("a names deck: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=names`: the names chosen, per card (0 Anointed Peacekeeper, 1
+/// Disruptor Flute) and kind (`NAME_KINDS`), and the spells cast whose name
+/// was chosen by a permanent that taxes them.
+static NAMES_CHOSEN: [[AtomicU64; 8]; 2] = [const { [const { AtomicU64::new(0) }; 8] }; 2];
+static NAMES_TAXED: AtomicU64 = AtomicU64::new(0);
+const NAME_KINDS: [&str; 8] =
+    ["a card of one face", "a front face", "a back face", "an Adventure", "a split card's half", "a prepare spell", "a token", "PASS"];
+
+/// The kind of name definition `d` is (`NAME_KINDS`).
+fn name_kind(db: &CardDb, d: u16) -> usize {
+    if d == u16::MAX {
+        return 7;
+    }
+    let dd = db.def(d);
+    if dd.token {
+        return 6;
+    }
+    match dd.front {
+        Some(f) => {
+            let card = db.def(f);
+            if card.halves.is_some_and(|(l, r)| d == l || d == r) {
+                4
+            } else if card.back == Some(d) {
+                2
+            } else if card.adventure == Some(d) {
+                3
+            } else if card.prepare == Some(d) {
+                5
+            } else {
+                panic!("a name of an unknown face: {}", dd.name)
+            }
+        }
+        None if dd.back.is_some() || dd.adventure.is_some() || dd.prepare.is_some() => 1,
+        None => 0,
+    }
+}
+
+/// `FUZZ_POOL=names`: the names chosen as a Peacekeeper or a Flute entered
+/// (each permanent once), and the spells newly on the stack that a chosen
+/// name taxes (a Flute's: anyone's; a Peacekeeper's: its controller's
+/// opponents'; the name compared as the engine does, a split card's halves).
+fn count_names(g: &Game, named: &mut Vec<engine::ids::ObjRef>, seen: &mut Vec<u32>) {
+    let db = g.db();
+    let face = |d: u16| engine::sneak_show::face_name(db.def(d));
+    let mut chosen: Vec<(u8, bool, &str)> = Vec::new();
+    for &c in g.battlefield() {
+        let card = match g.name(c) {
+            "Anointed Peacekeeper" => 0,
+            "Disruptor Flute" => 1,
+            _ => continue,
+        };
+        let Some(d) = g.marks_of(c).iter().find_map(|m| match m {
+            engine::game::Mark::ChosenName(d) => Some(*d),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let r = g.obj_ref(c);
+        if !named.contains(&r) {
+            named.push(r);
+            NAMES_CHOSEN[card][name_kind(db, d)].fetch_add(1, Ordering::Relaxed);
+        }
+        if d != u16::MAX {
+            chosen.push((g.obj(c).controller, card == 1, face(d)));
+        }
+    }
+    for it in g.stack() {
+        if seen.contains(&it.id) {
+            continue;
+        }
+        seen.push(it.id);
+        if let engine::game::StackKind::Spell { card } = it.kind {
+            let dd = g.def_of(card);
+            let names: Vec<&str> = match dd.halves {
+                Some((l, r)) => vec![face(l), face(r)],
+                None => vec![engine::sneak_show::face_name(dd)],
+            };
+            if chosen.iter().any(|&(p, everyone, n)| (everyone || p != it.controller) && names.contains(&n)) {
+                NAMES_TAXED.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
 }
 
 /// `FUZZ_POOL=sneak_show` or `sns` (ENGINE.md 123).
@@ -1686,6 +1809,9 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
             _ => [(mine.clone(), Vec::new()), (mine, Vec::new())],
         };
     }
+    if names_mode() {
+        return [(names_deck(&mut rng), Vec::new()), (names_deck(&mut rng), Vec::new())];
+    }
     if eoe_mode() {
         return [(eoe_deck(&mut rng), Vec::new()), (eoe_deck(&mut rng), Vec::new())];
     }
@@ -1738,6 +1864,8 @@ fn play(seed: u64, checks: bool) -> Played {
     let mut doomsday_seen = DoomsdaySeen::default();
     // (`FUZZ_POOL=sneak_show` / `sns`: the Flutes that chose a name, ENGINE.md 123.)
     let mut sns_named: Vec<engine::ids::ObjRef> = Vec::new();
+    // (`FUZZ_POOL=names`: the namers counted and the stack items seen, ENGINE.md 127.)
+    let (mut names_named, mut names_seen): (Vec<engine::ids::ObjRef>, Vec<u32>) = (Vec::new(), Vec::new());
     let (mut turn, mut turn_steps) = (g.turn().number, 0u64);
     while !g.is_over() {
         g.legal_actions(&mut legal);
@@ -1816,6 +1944,9 @@ fn play(seed: u64, checks: bool) -> Played {
                 count_sns(&g, &mut stack_seen);
             }
             count_sns_names(&g, &mut sns_named);
+        }
+        if names_mode() {
+            count_names(&g, &mut names_named, &mut names_seen);
         }
         assert!(steps < 100_000, "seed {seed}: game does not end
 {}", g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
@@ -2245,6 +2376,21 @@ fn fuzz_random_games() {
         // cast: their casts are asserted over 2,000 games.)
         if n >= 2000 {
             assert!(cast("Edge of Autumn") > 0 && cast("Street Wraith") > 0, "Edge of Autumn or Street Wraith never cast: {casts:?}");
+        }
+    }
+    if names_mode() {
+        let chosen: Vec<Vec<u64>> = NAMES_CHOSEN.iter().map(|k| k.iter().map(|x| x.load(Ordering::Relaxed)).collect()).collect();
+        let taxed = NAMES_TAXED.load(Ordering::Relaxed);
+        for (card, c) in ["Anointed Peacekeeper", "Disruptor Flute"].iter().zip(&chosen) {
+            println!(
+                "FUZZ_POOL=names: {card} named {}",
+                NAME_KINDS.iter().zip(c).map(|(k, n)| format!("{k} {n}")).collect::<Vec<_>>().join(", ")
+            );
+        }
+        println!("FUZZ_POOL=names: spells cast with a name chosen against them: {taxed}");
+        if n >= 200 {
+            assert!([0, 2, 3, 4, 7].iter().all(|&k| chosen[0][k] > 0), "Anointed Peacekeeper's kinds of names: {chosen:?}");
+            assert!(chosen[1].iter().sum::<u64>() > 0 && taxed > 0, "Disruptor Flute's names, taxed spells: {chosen:?} {taxed}");
         }
     }
     if sns_mode() {
@@ -2919,6 +3065,7 @@ fn play_hidden(seed: u64) -> Played {
     }
     let mut crng = Rng::new(seed ^ 0xC0_4D_1E7E);
     let (mut actions, mut keys, mut buf) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut names_named, mut names_seen): (Vec<engine::ids::ObjRef>, Vec<u32>) = (Vec::new(), Vec::new());
     let mut steps = 0usize;
     let (mut turn, mut turn_steps) = (a.g.turn().number, 0u64);
     while !a.g.is_over() {
@@ -2950,6 +3097,9 @@ fn play_hidden(seed: u64) -> Played {
         a.step(act, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         a.g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}"));
         a.g.check_knowledge().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}"));
+        if names_mode() {
+            count_names(&a.g, &mut names_named, &mut names_seen);
+        }
         actions.push(act);
         steps += 1;
         if a.g.turn().number != turn {
