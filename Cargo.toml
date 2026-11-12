@@ -1,7 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["card_ir", "engine", "py"]
-# `cargo test` / `cargo build` at the root skip the PyO3 module `py` (built by tools/build_py.sh)
+members = ["card_ir", "engine", "py", "worker"]
+# `cargo test` / `cargo build` at the root skip the PyO3 module `py` (built by tools/build_py.sh) and the
+# native worker `worker` (mtgz-worker, ONNX Runtime: `cargo build --release -p mtgz_worker`, ENGINE.md 114)
 default-members = ["card_ir", "engine"]
 # the pinned zero-core (git submodule) has its own workspace: its crates are path dependencies here
 exclude = ["third_party"]

@@ -24993,3 +24993,50 @@ work leaves: a `tools/mac_races.sh` race, `~/mtg-zero-wt/races-<sha12>` with `~/
 `~/mtg-zero-wt/run-<sha12>` and the mirror `~/mtgz-remote/<run>` (every checkpoint shipped). Cleanup when done:
 `rm -rf ~/mtgz-races/<name>`, `git -C ~/mtg-zero worktree remove --force ~/mtg-zero-wt/races-<sha12>` and `rm -rf
 ~/cargo-target/mtg-zero/races-<sha12>`.
+
+## 114. mtgz-worker: the native self-play worker for zero-farm (branch `farm`, 2026-11-11)
+
+Branch `farm` (from main 60397f3; zero-core `farm`, docs/az.md 41-42 there). **Why.** zero-farm (friends' idle Windows PCs
+playing a run's games, the zero-farm repo's DESIGN.md) runs the search natively: the engine and zero-core's search with
+the network as a `zero-onnx/1` graph through ONNX Runtime on the CPU - no Python, no torch on a friend's PC. Phase 0b
+built the worker and proved it plays as the Python remote worker plays. No engine, encoding or search change.
+
+**What.**
+* `worker/` (crate `mtgz_worker`, binary `mtgz-worker`): zero-core's `zero_worker` (docs/az.md 42) + the engine + mimalloc
+  (the Python module's allocator, section 17), registering the games `py/src/lib.rs` registers (toy, mtg, team_draft,
+  mtg_eoe) without PyO3. A workspace member outside `default-members`: `cargo test` at the root and `tools/build_py.sh`
+  never build it or ONNX Runtime. Build: `cargo build --release -p mtgz_worker` (2 min 50 s on the busy desktop over an
+  engine already built); `target/release/mtgz-worker.exe` 23.7 MB; at run time it loads ONNX Runtime from
+  `--ort-dll`, env `ZERO_ORT_DYLIB` / `ORT_DYLIB_PATH`, or `onnxruntime.dll` next to it (1.31.1 tested: 19.3 MB) and
+  needs the MSVC runtime (VCRUNTIME140, VCRUNTIME140_1; ONNX Runtime also MSVCP140).
+* Commands: `serve` (zero-farm PROTOCOL.md 5, `aw/1`: hello, one job line, yield / resume / finish / quit / checkpoint /
+  ping; events fin, shard, status, yielded, resumed, end, error), `selfplay --settings <config.json> (--model <graph> |
+  --uniform) --games N ...` (the same job from flags), `check-config <config.json>` (every setting classified; exit 1
+  on an unknown or unsupported one), `driver-cfg <config.json>` (the Python remote worker's DriverCfg, as text),
+  `eval-batches` (answers to recorded batches), `info`.
+* The zero-core pin moves from f9ca5c3 to zero-core `farm` (phase 0a's exporter 508a193 / 4edb1e7, then 0b: the
+  settings parser in zero_search, `Driver::set_first_gid`, `zero_worker`, `zero.onnx_eval`, the gate tools) - not
+  pushed (the pin points at local commits; push both before merging).
+* `tests/test_worker_shards.py`: the worker's shards (sparse and dense) pass zero-core's remote arrival check
+  (`RemotePlay._check`: game / features / actions, the non-finite guard) and load into the training window
+  (skipped without a built worker).
+
+**Checks.** Behaviour digests unchanged: `cargo test --release -p engine --test digest -- --ignored` - 2,000 random + 500
+heuristic games, combined digest **53839c837bbaf034** (= `engine/tests/data/digests.txt`); `cargo test --release -p engine
+--test az`: 48 passed; pytest: 271 passed, 1 skipped (the new `test_worker_shards.py` included). Every preset and run config: zero-core's old and new seat parsers build identical
+drivers (468), and the worker's `driver-cfg` equals the Python remote worker's DriverCfg (72 cases; 6 refused as
+Python-only: the league and branched games); `check-config` accepts 62 of the 79 and refuses 17: the co-training presets
+and runs (`resolver`, 6), `toy-cotrain-smoke` (its game is not registered), the league runs (2 x 2 configs), the
+branched-game run (2), and the configs carrying settings of other branches that this core does not know
+(`selfplay_explore*`, `selfplay_temp_late*`, `selfplay_sims_light*`, `selfplay_league_fixed`, `selfplay_opp_model` -
+which Python's run would have ignored in silence).
+
+**Measured** (2026-11-11, the desktop busy with the live Delver run, CPU only; zero-farm docs/phase0b-worker.md has the
+tables). Parity gate 2 on eoe1 iter 80: (a) on eoe1's settings with groups 1 and the uniform evaluator, `mtgz-worker
+selfplay` and zero-core's remote worker wrote byte-identical shards (48 games, 14,136 rows) and sent identical first 300
+batches; (b) the worker's answers equal onnxruntime + numpy's (value / margin / aux bit-identical, priors <= 1.8e-7) and
+torch's within 1.34e-5 on 440 recorded batches; (c) 100 paired games, the graph through onnxruntime vs the checkpoint through torch, 32 sims: 0.500 +- 0.000, all 50 pairs split. `serve`: `yielded` 31 ms after `yield`, a yielded and
+resumed job writes the same shards as one left alone; a `checkpoint` mid-job switches the rows' network id (548 rows of
+net 80, 230 of 81). Throughput at 8 threads (threads 8, groups 2, conc 256, 10-minute interleaved runs): **1,324 leaves/s
+native vs 885 for the Python remote worker with torch (1.50x)**, ~390 vs ~260 eoe1 games/h; peak RAM 1.5 GB (Python
+1.06 GB).

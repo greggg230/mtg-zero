@@ -1,0 +1,18 @@
+[package]
+name = "mtgz_worker"
+version = "0.1.0"
+edition = "2021"
+description = "mtgz-worker: MTG Zero's native self-play worker for zero-farm (zero-core's zero_worker + the engine; docs/ENGINE.md 114)"
+publish = false
+
+[[bin]]
+name = "mtgz-worker"
+path = "src/main.rs"
+
+[dependencies]
+zero_worker = { path = "../third_party/zero-core/crates/worker" }
+zero_search = { path = "../third_party/zero-core/crates/search" }
+engine = { path = "../engine" }
+# the process-wide allocator, as the Python module's (the Windows heap is slow and erratic for the
+# engine's small allocations: docs/ENGINE.md 17)
+mimalloc = { version = "0.1", default-features = false }
