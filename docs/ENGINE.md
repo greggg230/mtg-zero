@@ -27139,3 +27139,282 @@ spec's own evaluator file on the Mac: both the deck-choice evaluation and `run_e
 the run goes on); run 2 forks at 78 and first evaluates 80. (3) Run 2's real-deck numbers use the run's evaluator, not run
 1's best guess: 113.4's backfill (`best`) is not the same builder; `--builder run_evaluator` on run 2's checkpoints, or
 `export:<file>` with eval-v2's export on run 1's, compares like with like.
+
+## 127. Anointed Peacekeeper's card names: one naming function with Disruptor Flute (branch `peacekeeper-names`, 2026-11-12)
+
+Anointed Peacekeeper ("As this creature enters, look at an opponent's hand, then choose any card name. Spells your
+opponents cast with the chosen name cost {2} more to cast. Activated abilities of sources with the chosen name cost {2}
+more to activate unless they're mana abilities.") is a cube card. Before this section its name choice
+(`Game::choose_name_as_enters` in `resolve_m7d.rs`, M7d) was narrower than CR 201.3 allows:
+
+* It offered only the card definitions of the game's card objects, by their table names. A back face, an Adventure or a
+  prepare spell could not be named. A split card was offered as "Life // Death", which is not a name; Life and Death
+  could not be named on their own.
+* With hidden decks it offered the opponent's pool as the chooser knew it: the known part, plus the cards it knew in
+  the game and in clouds. An unseen first pick's name was not offered, but `PASS` stood for "a name of no card in the
+  game", and that first pick was in the game.
+* It compared names by the whole table name (`Game::name(card) == def.name`).
+
+Disruptor Flute (123) already had a face-by-face list (`Game::nameable_defs`) and comparison (`Game::has_name`). That
+list read the sideboards and, with hidden decks, the chooser's knowledge. The v7 lane's answer to section 123 (its note
+of 2026-11-12, E:/mtg-zero-scratch/sneak-show/v7_answer_chosen_names.md) asked for Peacekeeper's fix to land on
+main before v7, separately, with its digest change stated. This section is that fix. Code: 4ef5d898 (the names) and
+4f234724 (Etali's faces and the fuzz pool, 127.6-127.7); the commit after them adds this text and the fuzz pool's paging
+bias (test code only, 127.7).
+
+### 127.1 What changed
+
+* **One naming function.** `Game::choose_name_as_enters` (now in `sneak_show.rs`) is the one `Task::AsEnters` asker
+  for both cards. It handles Peacekeeper's look first (a card with `CardDef::chooses_name` without `SnsDef::plain_name`:
+  `reveal_hand`, then `Mark::LookedHand`, asked once; unchanged). Then, for both cards, it asks one `NameCard` over
+  `Game::nameable_defs()` (`LIBRARY` + k, paged past 63, ENGINE.md 100.2) and `PASS` (`NO_NAME`). The name is kept as
+  `Mark::ChosenName`. Peacekeeper's old asker is gone. `activate.rs` calls the one asker.
+* **One list, `Game::nameable_defs()`**, with no player argument (the list is the same for both players; the v7
+  lane's chosen-name column reads it: note the signature).
+  * With open decklists, it is the faces of every card object of the game, both players', in any zone (a revealed
+    companion included). Tokens, copies, emblems and rules objects are not card objects.
+  * With hidden decks (`GameSpec::hidden_decks`, or any `known_pools` set), it is the faces of every card definition
+    of the table.
+  * Both add the table's token definitions, and a double-faced token's back face, whose names are card names: a face
+    name of the table's cards, or `TOKEN_NAMES_THAT_ARE_CARD_NAMES` ("Faerie Dragon", 123.4).
+  * The faces are those of `push_faces`: a split card's halves; otherwise the card's definition (its front, named by
+    `face_name`), its back face, its Adventure and its prepare spell.
+  * One definition per name (the smallest), sorted by definition.
+  * The sideboards no longer add names (123's list read both); see 127.2.
+* **One comparison.** `named_tax` (both taxes, both cards) compares `has_name(card, face_name(chosen))`: the face up
+  (a split card's halves outside the stack, 709.4; the half cast on it, 709.3). Peacekeeper's taxes are unchanged
+  otherwise:
+  * {2} on its controller's opponents' spells;
+  * {2} on every source's activated abilities that aren't mana abilities (`act_mana_x`, `ad.mana().is_none()`).
+* **`face_name`** now strips the prepare spell from a preparation card's table name too ("Emeritus of Abundance //
+  Regrowth" is "Emeritus of Abundance", CR 722.2). Without this it offered the combined name, a name no card has
+  (found by the cube best-of-three test, 127.5).
+* **The `NameCard` label** (`describe_choice`, `az/view.rs`) names the face ("Name Brazen Borrower", not "Name Brazen
+  Borrower // Petty Theft"). The labels are not hashed by the three digests; `DIGEST_IDS=choices` hashes them, and
+  changes only where such a name is offered.
+* **Encoding: untouched.** The `NameCard` decision's `LIBRARY` slots show the list's page as before
+  (`decision_list` reads the options; one comment brought up to date). Peacekeeper's chosen name is still not encoded on
+  layout v6 (gap G1, `CHOSEN_NAME_GAP`), and no guard was added, as asked. Disruptor Flute's v7 refusal is unchanged.
+
+### 127.2 The names, per game mode
+
+CR 201.3: "choose a card name" means the name of a card. A token's name may be chosen only if it is also a card's
+(ruling abac3051). You are not limited to cards you saw, nor to cards with activated abilities (ruling 2a160983). A
+name is a face's:
+
+* a split card has two names, its halves', not "<left> // <right>" (709.4);
+* a double-faced card has its front's name, or its back face's when that face is up (712.8);
+* an adventurer card has the creature's name, or the Adventure's on the stack (715.4, 715.3);
+* a preparation card has the creature's name; its prepare spell has the prepare spell's (722).
+
+The engine needs the name only to compare it with a spell's or an activated ability's source's name, so every name no
+such object can have is one answer, `PASS`.
+
+| Mode | Decklists | Names offered |
+|---|---|---|
+| cube best-of-one (`MtgSpec` `"format": "bo1"`), team_draft's best-of-one matches, constructed best-of-one | open (54.5): both decks are public, the same in every world of either player | the faces of every card of the game (both decks; any zone; a revealed companion) |
+| cube best-of-three (hidden pools, 36.11), team_draft's best-of-three, constructed best-of-three | hidden within the pools: an unseen first pick, the deck's choice from the pool, the library | the faces of every card of the table |
+| hidden decklists (102: EoE sealed, the stub prior) | hidden: the prior's support | the faces of every card of the table |
+
+Every mode adds the table's tokens that share a card's name, and `PASS`.
+
+**Why the table with hidden decks.** The list must not depend on anything the chooser cannot see, and it must hold every
+name the opponent's cards can have. In a cube best-of-three the opponent's unseen first picks are drawn from the
+`FirstPickPrior`: the table's supported non-basic cards outside the known part of their pool, outside the viewer's own
+pool and outside the cards the viewer knows are elsewhere (a drafted match). A hidden decklist's prior support is
+within the table too (`MtgAz::from_seats` checks each deck against it). So the table holds every card either player
+can have in any world. It is public to both players. It reads neither the chooser's pool nor what the chooser saw, and
+it is the same in every world of either player's. A tighter set (the prior's support plus the known pool) would read
+the chooser's own pool, and so would differ between the opponent's worlds. The extra names a table list offers are
+legal names (CR 201.3) and act as `PASS`. The cube's table offers 566 names, 9 pages of 63.
+
+**The look.** The hand Peacekeeper looked at is the chooser's knowledge from then on (the cards are known, as before).
+It adds no name to the list: open decklists already hold every card of the game, and the table already holds every card.
+
+**Exactness of `PASS`** (123.4's proof, now for both cards, written in `nameable_defs`'s doc):
+
+1. Peacekeeper and the Flute compare the chosen name only with a spell's or an activated ability's source's.
+2. Such an object is one of:
+   * a card of the game (made as it starts, from the decks; a sideboard card joins only as a revealed companion, CR
+     103.2b, 116.2g; no instruction of the engine brings another card into a game);
+   * a token of the table's token definitions;
+   * a copy of one of these, named by its copiable values (707.2) or by the copying card (`keep_name`).
+3. A face-down permanent has no name (708.2). Emblems and rules objects (the monarch, the initiative, a dungeon) are
+   never spells and have no activated abilities.
+4. So with open decklists every name such an object can have, and a player may choose, is offered. With hidden decks
+   every such name of any game the pools can make is offered (all are the table's).
+
+A sideboard card other than a revealed companion is never an object, so its name was a `PASS` name already. Dropping
+the sideboards (the Flute's list had them) changes no effect. With hidden decks the opponent's sideboard is hidden, and
+the table covers it anyway.
+
+### 127.3 Readings taken
+
+* **Peacekeeper's taxes compare the face up**, as the Flute's do (123.4). Naming Brazen Borrower doesn't tax Petty
+  Theft, and naming Petty Theft doesn't tax the creature. Naming Death doesn't tax Life. Naming Reflection of
+  Kiki-Jiki taxes the transformed Fable's ability, and naming Fable of the Mirror-Breaker doesn't. Before this
+  section, a name chosen as a front card definition ("Brazen Borrower // Petty Theft") matched the card in hand and on
+  the battlefield; only its other faces were out of reach.
+* **A tax on a spell cast without paying its mana cost still applies** (CR 118.9d, 601.2f): unchanged, and the cause
+  of 127.6.
+* **Activated abilities of sources with the name**: keyword ones count (equip: ruling a6040722); triggered ones don't,
+  including a trigger's own payment (Mana Vault's "you may pay {4}"). A mana ability is one that adds mana as it
+  resolves, so an ability that costs mana and adds none is taxed (ruling 252f0b38). All tested (127.5).
+* **The look comes first**, once, before the name (unchanged; re-running the asker asks the same question, ENGINE.md
+  4). The second sentence taxes only the opponents' spells; the third taxes every source's abilities, the
+  controller's own too.
+
+### 127.4 Digests
+
+Before, on 02a50dbf (recorded again here, each with `DIGEST_LINES`): full **53839c837bbaf034**, `DIGEST_ENCODING=0`
+**208c723daced22fe**, `DIGEST_ENCODING=v5` **dc33538c0497dbf0**.
+
+After, 4ef5d898 (and unchanged by 4f234724): full **8d1cce220fbc3eb2**, `=0` **c3efa1c404527dab**, `v5`
+**5324310e02757cff**. `engine/tests/data/digests.txt` is re-recorded (`DIGEST_WRITE=1`); the comparison passes.
+
+**The change comes only from Peacekeeper's name choice.** Three checks:
+
+1. **Which games ask.** On 02a50dbf with a temporary counter (never committed), 52 of the 2,500 games ask a Peacekeeper
+   name question, in the game or in one of its determinized clones. Disruptor Flute is a legacy card and is in none
+   (the digests' decks are the cube's). The counter left the `=0` digest at 208c723daced22fe.
+2. **The per-game digests.** 3 games differ in the full and v5 digests (`r 186`, `r 1227`, `h 57`) and 2 in `=0` (`r
+   1227`, `h 57`; `r 186` differs only in an encoding: the same action ids, other names behind them). All are among
+   the 52. The other 49 keep their digests: their first page of names is the same (the faces the new list adds are
+   definitions after the table's cards, so they sort onto the last page), and random play took an id whose name didn't
+   move.
+3. **Forced back.** The new code was patched temporarily (never committed) to give Peacekeeper 02a50dbf's list
+   (verbatim) and comparison, the Flute keeping the new ones. That reproduces all three old digests exactly:
+   53839c837bbaf034 (the full comparison against the old file passes), 208c723daced22fe, dc33538c0497dbf0. The scripts
+   and the patch are in E:/mtg-zero-scratch/peacekeeper-names (`instrument.py`, `force_old.py`, `digests.sh`, the
+   `*_lines_*.txt` files).
+
+### 127.5 Tests
+
+* `cards_m7d.rs`:
+  * every face of every card of the game, both players', none combined, each once, the right token names, the same
+    in a world of the chooser's (`cr_201_3_peacekeeper_offers_every_face_of_every_card_of_the_game`);
+  * a back face (`cr_712_8_peacekeeper_naming_a_back_face_taxes_that_face`);
+  * an Adventure (`cr_715_4_..._taxes_the_adventure_not_the_creature`);
+  * a split card's half (`cr_709_4_..._taxes_that_half`);
+  * `PASS` (`cr_201_3_peacekeeper_naming_no_card_of_the_game_taxes_nothing`, which also checks the look's mark);
+  * Etali with a taxed face (127.6).
+* `rulings_other.rs`, every applicable Peacekeeper ruling of the Scryfall data (`data/rulings/powerlsv.rulings.json`):
+  * a6040722 and 252f0b38: equip taxed while Skullclamp's trigger is not; Mana Vault's mana ability untaxed while
+    its upkeep trigger pays {4};
+  * 2a160983: an unseen library card and a card without activated abilities are offered and named;
+  * abac3051: token names only when they are card names;
+  * 93ee06dd was already tested.
+  The four were triaged b/DEF and are now a (`data/rulings/triage.tsv`; `docs/rulings.md` regenerated, `--check`
+  clean). 90d8b0d0 (all opponents) stays b/MP.
+* `rules_m8b_hidden.rs`, `peacekeepers_names_in_a_hidden_pool_match_dont_depend_on_the_opponents_hidden_cards`: cube
+  best-of-three matches (`MtgAz::from_seats`, hidden pools, the opponent with three first picks), heuristic play to
+  Peacekeeper's question.
+  * The list is the table's (566 names, restated in the test).
+  * In 16 worlds of the chooser's, which draw other first picks and other libraries for the opponent (checked), the
+    decision is the same and offers the same list.
+  * In 16 worlds of the opponent's it offers the same list too.
+* `cards_sneak_show.rs`, `cr_201_3_disruptor_flute_and_anointed_peacekeeper_offer_one_list`: one game state, either
+  card cast; both open and hidden decks give equal lists (hidden: the table's, past one page).
+* `rules_faithful_a.rs`: the 31.7.5 paging test, with the token names now offered. Its 70 names are single-faced (sorted
+  first, not hash order).
+* `cards_m7b_faces.rs`, `etali_may_cast_an_exiled_cards_adventure_cr_715_3` (127.6).
+
+### 127.6 A finding: Etali's free casts cast the front face only (fixed, 4f234724)
+
+Etali, Primal Conqueror's "you may cast any number of spells from among the nonland cards exiled this way without
+paying their mana costs" (`exile_until_nonland_cast_free`, `faces.rs`) offered a card when any of its spell faces
+could be cast free (`can_cast_free_now`). It then always cast the front (`begin_cast`). Two results:
+
+* An Adventure, a split card's right half or a modal double-faced card's spell back face could never be cast this way.
+  Each is a spell from among those cards (CR 715.3, 709.3, 712.11b).
+* A card whose front alone was taxed beyond its caster's mana panicked in `PayMana`. The new fuzz pool found this at
+  seed 188: a Disruptor Flute had named Embereth Shieldbreaker, and Battle Display was free.
+
+It now casts through `Game::cast_free_now` (the walkers' free casts: the same permission, then
+`begin_cast_either_face`, with `ChooseFace` when both faces can be cast). The tests:
+
+* `etali_may_cast_an_exiled_cards_adventure_cr_715_3`: both faces castable, so the face is chosen and Petty Theft is
+  cast. It fails without the fix.
+* `cr_715_3_etali_casts_the_adventure_when_only_it_can_be_cast_free`: P0's Peacekeeper names Brazen Borrower, so P1's
+  Etali casts Petty Theft.
+
+The digests are unchanged. A temporary counter of Etali free casts whose card had a castable other face counted 0
+games (the `=0` digest unchanged under it). The other casts during resolutions already chose faces (`cast_free_now`,
+`cast_now`, `resolve_tail2`'s graveyard casts) or cast a card with one face (miracle).
+
+### 127.7 Checks (the engine on 4f234724, the fuzz pool with its paging bias)
+
+The engine is 4f234724's. The fuzz pool's paging bias is in the last commit's `engine/tests/fuzz.rs` and touches
+`FUZZ_POOL=names` only (`names_next_page` returns before drawing from the RNG in any other mode). Everything
+ran on the desktop, which was idle, with no other run on it; the Mac was not needed.
+
+**The engine suite.** `cargo test --release -p engine --no-fail-fast`: 154 test targets, **2,451 passed, 0 failed, 25
+ignored**. That includes `--test az` (the public-state gate: `public_state_reaches_the_encoding` and
+`the_v5_facts_encode_no_hidden_information` pass, with the gaps unchanged), `limits`, `hidden` and `rules_m8b_hidden`.
+`--test fuzz` (300 default games) passed again with the bias.
+
+**The digests.** See 127.4; `cargo test --release -p engine --test digest -- --ignored` passes against the re-recorded
+file.
+
+**Rulings.** `python tools/rulings_doc.py --check`: clean (1,656 rulings, 1,298 distinct; class a 1,279, all tested).
+
+**pytest.** After `tools/build_py.sh`: **304 passed, 1 skipped**.
+
+**Fuzz.** Sharded by seed: `FUZZ_FIRST` with 2,000 games a shard, the hidden mode 1,250.
+
+* `FUZZ_POOL=names`, 20,000 games, open decklists: every game ran to its end with every check, 35.2M options completed.
+  * Anointed Peacekeeper named:
+    * cards of one face 9,027;
+    * double-faced, adventurer or preparation cards' fronts 15,175;
+    * back faces 13,000;
+    * Adventures 1,721;
+    * split cards' halves 1,696;
+    * prepare spells 835;
+    * tokens 1,291;
+    * `PASS` 1,287.
+  * Disruptor Flute named 71,593 names of the same kinds.
+  * 11,800 spells were cast with a name chosen against them.
+* `FUZZ_POOL=names FUZZ_HIDDEN_DECKS=1` (the table's list), 5,000 games (seeds 0-4999): **4,998 passed every check**.
+  * There were 139,172 hidden-decklist worlds. The decider's actions, view and encoding in each matched the real
+    game's.
+  * Peacekeeper named every kind on the table's last pages: back faces 693, Adventures 49, split cards' halves 112,
+    prepare spells 48, tokens 6, `PASS` 53.
+  * Seeds 466 and 4248 fail the information-set check by a mechanism that does not involve the name list (127.8 (1));
+    the two shards that stopped there were rerun with `FUZZ_SKIP` and pass.
+* The default fuzz (cube decks, Peacekeeper among the random cards), 20,000 games: passed, 19.2M options completed.
+* `fuzz_random_matches`, 1,000 cube best-of-three matches (2,549 games: hidden pools, determinized worlds, 42,958 of
+  them, first picks resampled in 26,203): passed.
+* `FUZZ_POOL=drafted`, 200 team-draft matches (515 games): passed.
+
+**Not run.** `tools/gate.py engine`: its search smoke can't be skipped, and search smoke is not run in this lane (the
+coordinator gates and merges).
+
+### 127.8 Open points
+
+1. **A known card's face choice can split one search node** (pre-existing; not fixed here). At priority, a hand card is
+   named by its slot among the hand's definitions sorted, and the hidden cards' definitions are among them
+   (`hand_slots`, ENGINE.md 11). So in two worlds of the other player's, the same action id can name two different
+   cards of the hand. When both cards are known to both players (Peacekeeper's look at a hand makes this common),
+   `Choice::Faces` reveals nothing (`reveal` is a no-op for a card everyone knows) and emits no key, and `ChooseFace`
+   follows. The two worlds then have equal chance keys, decider and legal actions, which zero-core treats as one node,
+   but different views (the context's card code).
+   * The `names` pool's hidden mode found it at seeds 466 (the deciding player P1, the viewer P0; Shatterskull Smashing
+     in one world, Norman Osborn in the other) and 4248.
+   * The mechanism predates this branch (Peacekeeper's look, `hand_slots`, `Choice::Faces` are unchanged), and it
+     needs no name question.
+   * A fix makes a face choice on a card everyone knows public by a key, for example `emit_public(KEY_REVEAL, ...)`
+     when `reveal` finds the card already known to both. It changes chance keys, and so digests, in every game with
+     such a choice, so it belongs on its own branch with its own digest proof. The same may hold for any action that
+     moves a card both players know out of the hand without a key: worth a look.
+2. **The hidden-decks list is long.** It has 566 names, 9 pages of 63. A name on the last page (the table's faces and
+   tokens sort there) takes eight "next page" answers. The rules want every name reachable, and it is, but a network
+   pays for the depth.
+3. **Peacekeeper's chosen name is still not encoded on layout v6** (gap G1, `CHOSEN_NAME_GAP`). Peacekeeper games are
+   not refused, as before; Disruptor Flute games are. Layout v7's chosen-name column (125) should read
+   `Game::nameable_defs()`, which now takes no player.
+4. **123.4 superseded in part.** 123.4's last sentence ("with hidden decks the other player's names are those of their
+   pool the chooser knows ...") describes the Flute's old list; 127.2 replaces it. 123's text is left as written.
+5. **Section number.** 127 was the next free number above 126 on 2026-11-12: no branch and no worktree's ENGINE.md had
+   127 or higher; `v7-varlen` has 125, `eoe-run2-int` 126.
+6. **`DIGEST_IDS=choices`** hashes the `NameCard` labels (127.1), so its digest changes where a double-faced,
+   adventurer or preparation card's front is offered; it is not one of the recorded digests.

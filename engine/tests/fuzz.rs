@@ -98,9 +98,10 @@
 //! random 60 of constructed play's table: Anointed Peacekeeper and Disruptor Flute four each, eight
 //! of the table's cards with more than one face (split cards, double-faced cards, adventurer and
 //! preparation cards) three each, 28 basic lands. Every check of the default mode; with
-//! `FUZZ_HIDDEN_DECKS=1` the hidden-decklist checks too (the names are then the table's). With 200
-//! games or more each card must have chosen a name, and the Peacekeeper each kind of name: a card of
-//! one face, a back face, an Adventure, a split card's half, and `PASS`.
+//! `FUZZ_HIDDEN_DECKS=1` the hidden-decklist checks too (the names are then the table's). A name
+//! question with a next page takes it three times in four (the table's faces and tokens are on its
+//! last pages). With 200 games or more each card must have chosen a name, and the Peacekeeper each
+//! kind of name: a card of one face, a back face, an Adventure, a split card's half, and `PASS`.
 //! `FUZZ_POOL=eoe` (ENGINE.md 99): Edge of Eternities sealed, the set's own
 //! card table (`CardDb::eoe`): random 40-card decks of its supported cards
 //! (17 lands, 23 spells; games only, no matches).
@@ -451,6 +452,18 @@ static NAMES_CHOSEN: [[AtomicU64; 8]; 2] = [const { [const { AtomicU64::new(0) }
 static NAMES_TAXED: AtomicU64 = AtomicU64::new(0);
 const NAME_KINDS: [&str; 8] =
     ["a card of one face", "a front face", "a back face", "an Adventure", "a split card's half", "a prepare spell", "a token", "PASS"];
+
+/// `FUZZ_POOL=names`: at a `NameCard` decision with a next page, its "next
+/// page" three times in four, so the last pages of a long list (hidden
+/// decks: the table's names, 9 pages and more, the faces and tokens on the
+/// last) are reached; uniform play would stay on the first.
+fn names_next_page(g: &Game, rng: &mut Rng) -> Option<u16> {
+    if !names_mode() || g.kind() != Some(DecisionKind::NameCard) {
+        return None;
+    }
+    let next = g.pending_decision()?.options.iter().find(|o| matches!(o.choice, engine::Choice::Page(_)))?.action;
+    (rng.below(4) != 0).then_some(next)
+}
 
 /// The kind of name definition `d` is (`NAME_KINDS`).
 fn name_kind(db: &CardDb, d: u16) -> usize {
@@ -1876,6 +1889,8 @@ fn play(seed: u64, checks: bool) -> Played {
         // the boards grow through the 60 turns.)
         let a = if exp && g.kind() == Some(DecisionKind::DeclareAttackers) && rng.below(4) != 0 && legal.contains(&engine::act::PASS) {
             engine::act::PASS
+        } else if let Some(next) = names_next_page(&g, &mut rng) {
+            next
         } else {
             legal[rng.below(legal.len() as u32) as usize]
         };
@@ -3077,6 +3092,8 @@ fn play_hidden(seed: u64) -> Played {
                 HD_LONG_TURNS.fetch_add(1, Ordering::Relaxed);
             }
             engine::act::PASS
+        } else if let Some(next) = names_next_page(&a.g, &mut rng) {
+            next
         } else {
             legal[rng.below(legal.len() as u32) as usize]
         };
