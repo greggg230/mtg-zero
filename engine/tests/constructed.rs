@@ -1,5 +1,6 @@
 //! Constructed play (ENGINE.md 54): the pinned Izzet Delver 75 and its
-//! provenance, the deck rules of CR 100.2a / 100.4a, the `"constructed"` spec,
+//! provenance (and the Legacy Doomsday 75's, ENGINE.md 124.4), the deck rules
+//! of CR 100.2a / 100.4a, the `"constructed"` spec,
 //! the card table of constructed play kept apart from the cube's (the legacy
 //! cards' identities 546.., the cube's definitions unchanged), and the game
 //! with 60-card decks: the play-or-draw choice, the London mulligan, the turn
@@ -60,6 +61,61 @@ fn the_pinned_75_and_its_provenance() {
         d.unsupported_sideboard(db()),
         ["Consign to Memory", "Hydroblast", "Meltdown", "Price of Progress", "Rough // Tumble"]
     );
+}
+
+/// The Legacy Doomsday 75 (ENGINE.md 124.4): its provenance, the export it
+/// was read from, every card of the deck and the sideboard supported in
+/// constructed play, and the deck rules over both together (CR 100.2a,
+/// 100.4a; the engine's 64 cards).
+#[test]
+fn the_doomsday_75_and_its_provenance() {
+    let d = Decklist::legacy_doomsday();
+    assert_eq!(d.name, "Sultai Doomsday");
+    assert_eq!(
+        (d.player.as_str(), d.event.as_str(), d.date.as_str()),
+        ("wonderPreaux", "North American Eternal Weekend - Legacy Championship", "2026-10-31")
+    );
+    assert_eq!(d.source, "https://www.mtggoldfish.com/deck/8027957");
+    assert_eq!(d.main.iter().map(|e| e.0).sum::<u32>(), 60);
+    assert_eq!(d.sideboard.iter().map(|e| e.0).sum::<u32>(), 15);
+    // The JSON is the export verbatim (MTGGoldfish's export field: a
+    // `sideboard` line before the sideboard), but for Tamiyo, named by her
+    // front face there.
+    let (main, side) = d.parse_export(constructed::LEGACY_DOOMSDAY_EXPORT).unwrap();
+    assert_eq!(main, d.main);
+    assert_eq!(side, d.sideboard);
+    assert!(constructed::LEGACY_DOOMSDAY_EXPORT.contains("\n2 Tamiyo, Inquisitive Student\n"));
+    assert!(d.main.contains(&(2, "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar".to_string())));
+    // Every card supported, the sideboard's too; the deck rules over the deck
+    // and the sideboard together.
+    assert!(d.unsupported_sideboard(db()).is_empty());
+    let (ids, sb) = (Decklist::ids(db(), &d.main).unwrap(), Decklist::ids(db(), &d.sideboard).unwrap());
+    assert_eq!((ids.len(), sb.len()), (60, 15));
+    assert!(ids.len() <= constructed::MAX_DECK);
+    constructed::check(db(), &ids, &sb).unwrap();
+    // Flow State is one in the deck and one in the sideboard: three more in
+    // the sideboard make five over both (100.4a).
+    let flow = db().expect_id("Flow State").unwrap();
+    let mut five = sb.clone();
+    five[..3].fill(flow);
+    assert!(constructed::check(db(), &ids, &five).unwrap_err().contains("5 copies of Flow State"));
+    // The legacy cards in it: the Doomsday deck's ten (ENGINE.md 124.1-124.3)
+    // and Murktide Regent, in the registry's order.
+    let has = |list: &[(u32, String)], n: &str| list.iter().any(|e| e.1 == n);
+    let reg = identity::legacy_registry();
+    let in_main: Vec<&str> = reg.iter().copied().filter(|n| has(&d.main, n)).collect();
+    let side_only: Vec<&str> = reg.iter().copied().filter(|n| has(&d.sideboard, n) && !has(&d.main, n)).collect();
+    assert_eq!(
+        in_main,
+        ["Doomsday", "Pact of Negation", "Personal Tutor", "Flow State", "Misdirection", "Cavern of Souls", "Edge of Autumn", "Street Wraith"]
+    );
+    assert_eq!(side_only, ["Murktide Regent", "Flusterstorm", "Leyline of the Void"]);
+    // A network-driven game can't play it on layout v6: Cavern of Souls'
+    // floating mana needs layout v7 (ENGINE.md 124.2). Rules tests and the
+    // fuzzer (`FUZZ_POOL=doomsday`) play it.
+    let spec = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": d.main_names(), "p1": delver().main_names()}});
+    let e = MtgSpec::parse(&spec.to_string()).unwrap_err();
+    assert!(e.contains("p0's deck: Cavern of Souls' floating mana needs layout v7"), "{e}");
 }
 
 #[test]

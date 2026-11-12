@@ -2,7 +2,8 @@
 loader (`mtgz.az.decklists`), the presets `delver-mirror` / `delver-smoke` (the spec: both seats the
 pinned 60, best-of-one, constructed; the evaluation spec is the spec), the game through the engine
 module (encode, determinize), the heuristic yardstick against random in the Rust driver, self-play
-records, and the cube's specs unchanged (the legacy cards unknown to them)."""
+records, and the cube's specs unchanged (the legacy cards unknown to them). Also the Legacy Doomsday
+deck's loader (ENGINE.md 124.4)."""
 import json
 
 import numpy as np
@@ -24,6 +25,20 @@ def test_the_pinned_deck_and_its_loader():
     assert main.count('Murktide Regent') == 2 and main.count('Prismari Charm') == 1
     with pytest.raises(ValueError):
         decklists.names([[0, 'Island']])
+
+
+def test_the_doomsday_deck_and_its_loader():
+    # ENGINE.md 124.4: the Legacy Doomsday 75; layout v6 refuses it to the engine's spec (Cavern of
+    # Souls' floating mana needs layout v7, ENGINE.md 124.2).
+    d = decklists.load(decklists.LEGACY_DOOMSDAY)
+    assert (d['player'], d['event'], d['date']) == (
+        'wonderPreaux', 'North American Eternal Weekend - Legacy Championship', '2026-10-31')
+    assert d['source'] == 'https://www.mtggoldfish.com/deck/8027957'
+    main, side = decklists.names(d['main']), decklists.names(d['sideboard'])
+    assert len(main) == 60 and len(side) == 15
+    assert main.count('Doomsday') == 4 and main.count('Cavern of Souls') == 1
+    with pytest.raises(Exception, match="Cavern of Souls' floating mana needs layout v7"):
+        G.engine().Game('mtg', decklists.mirror_spec(decklists.LEGACY_DOOMSDAY), 2, 1)
 
 
 def test_the_presets():
