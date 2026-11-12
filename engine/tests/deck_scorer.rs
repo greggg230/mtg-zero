@@ -521,3 +521,25 @@ fn builder_cost() {
     }
     println!("best guess: {:.1} us", t.elapsed().as_secs_f64() * 1e6 / 2000.0);
 }
+
+/// `"seats"` with the value choice (107.2's decision, ENGINE.md 112.2): only seat 1 chooses - the decision is seat 1's,
+/// seat 0 plays the spec's seat - and its choice starts the game.
+#[test]
+fn the_seats_key_with_the_value_choice() {
+    let s = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "paper", "deck_choice": {"k": 4, "explore": 0.0, "seats": [1]}}, "max_turns": 30}"#).unwrap();
+    let sl = s.sealed.as_deref().unwrap();
+    for seed in 0..6u64 {
+        let mut a = MtgAz::new(&s, seed).unwrap();
+        let c = a.deck_choice().expect("seat 1 chooses");
+        assert_eq!((c.decider(), c.n), (1, 1));
+        assert_eq!(a.m.how[0].unwrap().mode, Mode::Explore, "seat 0: the spec's seat (no best_share: the randomised build)");
+        assert_eq!(a.m.deck(0), sl.seat(seed, 0).unwrap().0.deck);
+        let mut l = Vec::new();
+        a.legal_actions(&mut l);
+        assert_eq!(l.len(), 4);
+        a.step(l[2], &mut Vec::new()).unwrap();
+        assert!(a.deck_choice().is_none());
+        assert_eq!(a.m.deck(1), sl.candidates(seed, 1).unwrap().unwrap().0[2].deck);
+        assert_eq!(a.m.how[1].unwrap().mode, Mode::Chosen);
+    }
+}
