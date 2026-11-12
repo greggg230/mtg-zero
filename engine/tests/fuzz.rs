@@ -55,7 +55,7 @@
 //! Prismari Charm with the cube's cards); every check of the default mode,
 //! and with 200 games or more Murktide Regent must have been cast and its
 //! leave-the-graveyard trigger resolved. Games only (best-of-one).
-//! `FUZZ_POOL=dd_a` (ENGINE.md 110.1): Legacy Doomsday, lane A's cards: the
+//! `FUZZ_POOL=dd_a` (ENGINE.md 124.1): Legacy Doomsday, lane A's cards: the
 //! Doomsday 60 (MTGGoldfish 8027957) with the cards of the other lanes
 //! swapped for more of lane A's (`DD_A_DECK`), against the Delver 60 in
 //! either seat, one game in three a Doomsday mirror; constructed play's card
@@ -328,7 +328,7 @@ enum PoolMode {
     Eoe,
     Sealed,
     DdA,
-    /// `FUZZ_POOL=dd_c` (ENGINE.md 110.3): the Legacy Doomsday 60 with lane C's
+    /// `FUZZ_POOL=dd_c` (ENGINE.md 124.3): the Legacy Doomsday 60 with lane C's
     /// cards (Edge of Autumn, Street Wraith, Leyline of the Void) against the
     /// Delver 60 and itself.
     DoomsdayC,
@@ -366,7 +366,7 @@ fn delver_mode() -> bool {
     pool_mode() == PoolMode::Delver
 }
 
-/// `FUZZ_POOL=dd_a` (ENGINE.md 110.1).
+/// `FUZZ_POOL=dd_a` (ENGINE.md 124.1).
 fn dd_a_mode() -> bool {
     pool_mode() == PoolMode::DdA
 }
@@ -844,7 +844,7 @@ fn delver_deck() -> Vec<u16> {
     engine::az::constructed::Decklist::ids(CardDb::constructed(), &d.main).unwrap()
 }
 
-/// The Doomsday 60 of `FUZZ_POOL=dd_a` (ENGINE.md 110.1): MTGGoldfish's
+/// The Doomsday 60 of `FUZZ_POOL=dd_a` (ENGINE.md 124.1): MTGGoldfish's
 /// "Legacy Doomsday" (deck 8027957), its seven cards of the other lanes
 /// (Edge of Autumn, Misdirection, Street Wraith x2 each, Cavern of Souls)
 /// swapped for two Pacts of Negation, two Flow States, two Personal Tutors
@@ -911,7 +911,7 @@ fn count_dd_a(g: &Game, seen: &mut Vec<u32>) {
     }
 }
 
-/// `FUZZ_POOL=dd_c` (ENGINE.md 110.3): the Legacy Doomsday 60 (MTGGoldfish
+/// `FUZZ_POOL=dd_c` (ENGINE.md 124.3): the Legacy Doomsday 60 (MTGGoldfish
 /// archetype "Legacy Doomsday", deck 8027957) with the cards no branch
 /// supports yet swapped out: Doomsday x4 -> Leyline of the Void x4 (from the
 /// sideboard: on the battlefield in many openings), Misdirection x2 -> Street

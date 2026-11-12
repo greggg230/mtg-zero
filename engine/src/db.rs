@@ -85,7 +85,7 @@ pub enum Kw {
     /// Landwalk of a basic land type (CR 702.14a): "plainswalk",
     /// "islandwalk", "swampwalk", "mountainwalk", "forestwalk": can't be
     /// blocked as long as the defending player controls a land with that
-    /// land type (702.14c; `Game::landwalk_unblockable`, ENGINE.md 110.3).
+    /// land type (702.14c; `Game::landwalk_unblockable`, ENGINE.md 124.3).
     /// (Not in the encoding's keyword list either.)
     Plainswalk,
     Islandwalk,
@@ -718,7 +718,7 @@ pub enum DelayedWhen {
     /// step begins, CR 511.2; EoE lane D, ENGINE.md 99.5).
     EndOfCombat,
     /// At the beginning of its controller's next upkeep (Pact of Negation;
-    /// ENGINE.md 110.1): an upkeep of theirs that begins after it was
+    /// ENGINE.md 124.1): an upkeep of theirs that begins after it was
     /// created (one in progress has begun already, CR 603.7a, 503.1a).
     YourNextUpkeep,
 }
@@ -1857,7 +1857,7 @@ pub struct CardDef {
     pub void_exile: Option<Counter>,
     /// "If a card would be put into an opponent's graveyard from anywhere,
     /// exile it instead" (Leyline of the Void; CR 614.1a;
-    /// `Game::opp_gy_exile_for`, ENGINE.md 110.3).
+    /// `Game::opp_gy_exile_for`, ENGINE.md 124.3).
     pub opp_gy_exile: bool,
     /// Reconfigure (CR 702.151): while attached to a creature, it isn't a
     /// creature (702.151b); it may equip while a creature (301.5c).

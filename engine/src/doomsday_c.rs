@@ -1,4 +1,4 @@
-//! Lane C of the Legacy Doomsday cards (ENGINE.md 110.3): landwalk (Street
+//! Lane C of the Legacy Doomsday cards (ENGINE.md 124.3): landwalk (Street
 //! Wraith's swampwalk, CR 702.14) and "if a card would be put into an
 //! opponent's graveyard from anywhere, exile it instead" (Leyline of the
 //! Void, CR 614.1a). Cycling with a non-mana cost (Street Wraith's "Pay 2

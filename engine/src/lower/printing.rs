@@ -339,7 +339,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.evoke_cost_str", evoke_cost_str);
         l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
         l.deny("CardPrinting.grants_retrace_to", grants_retrace_to);
-        // (`zone_abilities`: lowered below, ENGINE.md 110.3.)
+        // (`zone_abilities`: lowered below, ENGINE.md 124.3.)
         let _ = miracle_cost_str; // display form of `miracle_cost`
         l.deny("CardPrinting.enters_as_copy_add_triggers", enters_as_copy_add_triggers);
         l.deny("CardPrinting.enters_as_copy_max_mv_mana_spent", enters_as_copy_max_mv_mana_spent);
@@ -2594,7 +2594,7 @@ fn lower_keyword(l: &mut Lowerer, k: &cats::Keyword) -> Option<Kw> {
         K::Indestructible => Kw::Indestructible,
         K::Infect => Kw::Infect,
         K::Shadow => Kw::Shadow,
-        // Landwalk of a basic land type (CR 702.14; ENGINE.md 110.3).
+        // Landwalk of a basic land type (CR 702.14; ENGINE.md 124.3).
         K::Plainswalk => Kw::Plainswalk,
         K::Islandwalk => Kw::Islandwalk,
         K::Swampwalk => Kw::Swampwalk,

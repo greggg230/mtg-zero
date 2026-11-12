@@ -1,4 +1,4 @@
-//! Lane C of the Legacy Doomsday cards (ENGINE.md 110.3) against their Oracle
+//! Lane C of the Legacy Doomsday cards (ENGINE.md 124.3) against their Oracle
 //! text, the Comprehensive Rules and their official rulings (`// ruling:
 //! <hash8>`, `data/rulings/legacy.rulings.json`). They are in the card table
 //! of constructed play only (`CardDb::constructed`).
@@ -1219,7 +1219,7 @@ fn leyline_exiles_cleanup_discards_legend_rule_losers_and_force_of_will() {
 /// 614.1a, 613.1f): Dauthi Voidwalker destroyed by Wrath of God with the
 /// opponent's creatures exiles them with void counters; one that had lost all
 /// abilities (The Wondrous Wasp) exiles nothing (`Lki::void_exile`, ENGINE.md
-/// 110.3: before, the leaving Voidwalker's printed definition was read).
+/// 124.3: before, the leaving Voidwalker's printed definition was read).
 #[test]
 fn cr_614_1a_a_voidwalker_leaving_with_the_creatures_uses_its_abilities_as_they_were() {
     for wasp in [false, true] {

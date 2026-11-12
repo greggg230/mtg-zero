@@ -1,4 +1,4 @@
-//! Legacy Doomsday, lane A (ENGINE.md 110.1): the rules Doomsday, Pact of
+//! Legacy Doomsday, lane A (ENGINE.md 124.1): the rules Doomsday, Pact of
 //! Negation and Flow State need (Personal Tutor is Mystical Tutor's search).
 //! Named after the rules actions, each citing its rule; never after a card.
 //!

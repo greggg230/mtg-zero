@@ -484,7 +484,7 @@ pub enum EndReason {
     /// Engine cap (`GameSpec.max_turns`).
     TurnLimit,
     /// An effect says a player wins (CR 104.2b; Thassa's Oracle) or loses
-    /// (104.3e; Pact of Negation's trigger, ENGINE.md 110.1).
+    /// (104.3e; Pact of Negation's trigger, ENGINE.md 124.1).
     Effect,
     /// The game can't go on exactly: a number past the engine's exact range
     /// (64-bit stored values, ENGINE.md 100.7) or past the object limit. Not
@@ -2696,7 +2696,7 @@ impl Game {
     /// Catacombs, a finality counter), flashback's exile (702.34a), a
     /// permission's "exile it instead" and "if a card would be put into an
     /// opponent's graveyard from anywhere, exile it instead" (Leyline of the
-    /// Void, ENGINE.md 110.3). None of them is a self-replacement
+    /// Void, ENGINE.md 124.3). None of them is a self-replacement
     /// effect (616.1a). `Dest::Choose` when orders give different results.
     pub(crate) fn replaced_dest(&self, idx: CardIdx, from: Zone, to: Zone) -> Dest {
         if from == Zone::Nowhere && to != Zone::Graveyard {
@@ -2733,7 +2733,7 @@ impl Game {
                 can |= 4;
             }
             // "If a card would be put into an opponent's graveyard from
-            // anywhere, exile it instead" (CR 614.1a; ENGINE.md 110.3).
+            // anywhere, exile it instead" (CR 614.1a; ENGINE.md 124.3).
             if self.opp_gy_exile_for(owner) {
                 can |= 256;
             }

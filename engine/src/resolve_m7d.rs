@@ -277,7 +277,7 @@ impl Game {
     /// (A Voidwalker leaving in the same simultaneous move still applies:
     /// the replacement exists as the event begins, CR 614.1a; with its
     /// abilities as it last existed there, `Lki::void_exile`, so not one that
-    /// had lost them, ENGINE.md 110.3.)
+    /// had lost them, ENGINE.md 124.3.)
     pub(crate) fn void_counter_for(&self, owner: PlayerId) -> Option<crate::db::Counter> {
         let q = crate::ids::opp(owner);
         self.permanents_of(q).find_map(|c| self.abilities(c).void_exile).or_else(|| {

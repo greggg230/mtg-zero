@@ -1,4 +1,4 @@
-//! Legacy Doomsday, lane A (ENGINE.md 110.1): the lowering of Doomsday,
+//! Legacy Doomsday, lane A (ENGINE.md 124.1): the lowering of Doomsday,
 //! Pact of Negation's delayed trigger and Flow State. Same rules as
 //! `effect.rs`: every field named, the rest denied; each lowers onto ops
 //! named after rules actions. (Pact's "Counter target spell", its delayed

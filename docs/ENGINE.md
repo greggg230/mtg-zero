@@ -25237,17 +25237,19 @@ load on the first pass and passed when rerun. **`python tools/gate.py python --n
 passed and 1 skipped, the mtg-smoke loop (16 games, 0 unfinished), tracked files unchanged: GATE PASSED python
 ff5ba0847e85 in 935s.** The commit after it adds this paragraph only.
 
-## 110. Legacy Doomsday: the deck's cards
+## 124. Legacy Doomsday: the deck's cards
 
 **Why.** The next constructed matchup after the Delver mirror (54): MTGGoldfish's archetype "Legacy Doomsday"
 (paper, deck 8027957, fetched 2026-11-11: `E:/mtg-zero-scratch/doomsday/`, its PROVENANCE.md). Ten of its 75 cards
-were outside the cube and legacy IR; three lanes ported them in parallel (A: Doomsday, Pact of Negation, Personal
-Tutor, Flow State; B and C the other six), each appending its own subsection here. The identities after the merge:
-`engine/src/az/legacy_cards.txt` = Murktide Regent, Prismari Charm, Doomsday, Pact of Negation, Personal Tutor,
-Flow State, Misdirection, Flusterstorm, Cavern of Souls, Edge of Autumn, Street Wraith, Leyline of the Void (from
-`LEGACY_BASE` 546; append-only, layout unchanged).
+were outside the cube and legacy IR; three lanes ported them in parallel, each in its own subsection: A (124.1:
+Doomsday, Pact of Negation, Personal Tutor, Flow State), B (124.2: Misdirection, Flusterstorm, Cavern of Souls) and
+C (124.3: Edge of Autumn, Street Wraith, Leyline of the Void); 124.4 merges them and adds the deck and its fuzz pool.
+(The lanes' branches numbered this section 110; 110-113 are Edge of Eternities sections.) The identities after the
+merge: `engine/src/az/legacy_cards.txt` = Murktide Regent, Prismari Charm, Doomsday, Pact of Negation, Personal
+Tutor, Flow State, Misdirection, Flusterstorm, Cavern of Souls, Edge of Autumn, Street Wraith, Leyline of the Void
+(546..557 from `LEGACY_BASE` 546; append-only, layout unchanged).
 
-### 110.1 Lane A: Doomsday, Pact of Negation, Personal Tutor, Flow State (branch `doomsday-a`, mtg-bot `feature/doomsday-a-ir`)
+### 124.1 Lane A: Doomsday, Pact of Negation, Personal Tutor, Flow State (branch `doomsday-a`, mtg-bot `feature/doomsday-a-ir`)
 
 Branch `doomsday-a` from main 60397f3; mtg-bot `feature/doomsday-a-ir` from `feature/eoe-ir-fixes` f4f2d663. The
 user's rule: fully faithful, no approximation of any kind; no layout or encoding change (none was needed: no new
@@ -25595,7 +25597,7 @@ registry too: 551 supported, none untested.
 * No docs/shortcuts.md entry; no approximation. Spare floats: permanent status 133-141 taken (142-143
   spare); the g6 per-player spares 8-31 stay spare.
 
-### 110.3 Lane C: Edge of Autumn, Street Wraith, Leyline of the Void (branch `doomsday-c`, mtg-bot `feature/doomsday-c-ir`)
+### 124.3 Lane C: Edge of Autumn, Street Wraith, Leyline of the Void (branch `doomsday-c`, mtg-bot `feature/doomsday-c-ir`)
 
 **Why.** Lane C of the Legacy Doomsday cards (MTGGoldfish archetype "Legacy Doomsday", paper,
 deck 8027957; `E:/mtg-zero-scratch/doomsday/`): the main deck's two cycling cards and the

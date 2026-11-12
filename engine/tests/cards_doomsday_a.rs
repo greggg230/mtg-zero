@@ -1,4 +1,4 @@
-//! Legacy Doomsday, lane A (ENGINE.md 110.1): Doomsday, Pact of Negation,
+//! Legacy Doomsday, lane A (ENGINE.md 124.1): Doomsday, Pact of Negation,
 //! Personal Tutor and Flow State against their Oracle text, the
 //! Comprehensive Rules and their official rulings (`// ruling: <hash8>`,
 //! `data/rulings/legacy.rulings.json`), and their interactions with the

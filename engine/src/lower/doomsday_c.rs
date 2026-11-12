@@ -1,4 +1,4 @@
-//! Lane C of the Legacy Doomsday cards (ENGINE.md 110.3): Leyline of the
+//! Lane C of the Legacy Doomsday cards (ENGINE.md 124.3): Leyline of the
 //! Void's replacement effect. (Street Wraith's and Edge of Autumn's cycling
 //! costs are cost atoms, `activated.rs`; landwalk is a keyword,
 //! `printing.rs`.)

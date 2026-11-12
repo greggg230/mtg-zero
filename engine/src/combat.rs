@@ -105,7 +105,7 @@ impl Game {
         if ka.has(Kw::Shadow) != kb.has(Kw::Shadow) {
             return false;
         }
-        // CR 702.14c: landwalk (ENGINE.md 110.3).
+        // CR 702.14c: landwalk (ENGINE.md 124.3).
         if self.landwalk_unblockable(ka, b) {
             return false;
         }

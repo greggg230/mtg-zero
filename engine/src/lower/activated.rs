@@ -467,7 +467,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
                 }
             }
             // "Pay N life" as a cost atom (CR 119.4; Street Wraith's
-            // "Cycling—Pay 2 life", ENGINE.md 110.3).
+            // "Cycling—Pay 2 life", ENGINE.md 124.3).
             cats::CostAtom::PayLifeCost(nodes::PayLifeCost { amount }) => {
                 if cost.life > 0 {
                     l.unsupported("CostAtom:PayLifeCost(with another life payment)");
