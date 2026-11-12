@@ -18,6 +18,11 @@ pub const MIN_DECK: usize = 60;
 pub const MAX_COPIES: usize = 4;
 /// CR 100.4a: a constructed sideboard has at most 15 cards.
 pub const MAX_SIDEBOARD: usize = 15;
+/// A constructed best-of-three's deck size (ENGINE.md 120): the registered
+/// main and every deck after sideboarding are exactly 60 cards, the user's
+/// format restriction (2026-11-11; CR 100.2a makes 60 the minimum only, as
+/// 100.2b makes 40 limited's: ENGINE.md 42).
+pub const BO3_DECK: usize = 60;
 /// The largest deck the engine can play: every card of a deck may end up in
 /// one zone, and a hand, a searched or looked-at library list and a graveyard
 /// each have `act::HAND_N`, `LIBRARY_N` and `GRAVEYARD_N` action slots (ENGINE.md

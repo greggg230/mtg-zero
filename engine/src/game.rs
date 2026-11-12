@@ -43,6 +43,13 @@ pub struct GameSpec {
     /// kept (they record shown cards still in the deck), and the other
     /// player's sideboard size is hidden (out of `view_of` and the encoding).
     pub hidden_decklists: bool,
+    /// Clouds over a player's whole hand and library are kept (needs
+    /// `hidden_decks`): the record that cards the other player saw are still
+    /// in the deck, which a dealt deck must hold. The later games of a
+    /// constructed best-of-three (ENGINE.md 120: each player's 60 hidden
+    /// within their public 75; the sideboard's size stays public).
+    /// `hidden_decklists` keeps them too.
+    pub deck_clouds: bool,
 }
 
 impl Default for GameSpec {
@@ -58,6 +65,7 @@ impl Default for GameSpec {
             chooser: None,
             hidden_decks: false,
             hidden_decklists: false,
+            deck_clouds: false,
         }
     }
 }
@@ -1123,6 +1131,9 @@ impl Game {
         }
         if spec.hidden_decklists && !spec.hidden_decks {
             return Err("hidden_decklists needs hidden_decks (ENGINE.md 102)".into());
+        }
+        if spec.deck_clouds && !spec.hidden_decks {
+            return Err("deck_clouds needs hidden_decks (ENGINE.md 120)".into());
         }
         // (Per-object turn numbers are u16: `Obj::entered`, `pw_turn`,
         // marks; ENGINE.md 46.)

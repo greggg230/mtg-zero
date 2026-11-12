@@ -8,7 +8,8 @@ network (arch 'tokens': `layout_v6.json`, written by the engine's `encode::layou
 the matches, its deferred terminal; its layout `layout_draft_v2.json`, ENGINE.md 47), the run
 presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4, mtg-4-mac; the co-training presets
 team_draft-smoke, team_draft-gpu-smoke, team_draft-4v4, team_draft-4v4-mac; the constructed Delver
-mirror delver-mirror and delver-smoke, docs/ENGINE.md 54; Edge of Eternities sealed eoe-smoke and eoe-1, the game
+mirror delver-mirror and delver-smoke, docs/ENGINE.md 54, and its best-of-three delver-mirror-bo3 and
+delver-bo3-smoke, ENGINE.md 120; Edge of Eternities sealed eoe-smoke and eoe-1, the game
 `mtg_eoe`: `mtg` on the EoE card table in its own identity space, layout `layout_eoe.json`, docs/ENGINE.md 105), the default
 spec, the
 evaluation spec, the dashboard's title / port, the remote 'mac' (run setting eval_remote: the
@@ -196,6 +197,24 @@ SPEC_DELVER = decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)
 PRESETS['delver-mirror'] = dict(PRESETS['mtg-3'], spec=SPEC_DELVER, eval_spec=SPEC_DELVER)
 # the end-to-end check of the mirror on CPU (mtg-smoke's tiny network and sims)
 PRESETS['delver-smoke'] = dict(PRESETS['mtg-smoke'], spec=SPEC_DELVER, eval_spec=SPEC_DELVER)
+# The mirror's best-of-three (docs/ENGINE.md 120, DESIGN.md 8 D3): constructed best-of-three with sideboarding, both
+# seats the pinned 75 (each pool exactly the 75, every deck after sideboarding exactly 60 of it); game 1 plays the mains
+# with open decklists, each later game's 60 is hidden from the other player, whose search deals it from the constructed
+# prior (uniform over the number of swaps, then over the decks: ENGINE.md 120.2) conditioned on what it saw this game.
+# Self-play and evaluation play the same matches (the evaluation spec is the spec). The deck target (docs/ENGINE.md
+# 102.4: the opponent's unseen cards by identity) is trained (aux_deck_w, as the EoE presets) and the search deals the
+# opponent's hidden 60 by its prediction (the deck tilt at 1 in self-play and evaluation, ENGINE.md 106; nothing to tilt
+# in game 1); the deck reader is not on. A match is up to three games: the step cap x 3. The full preset REFUSES (the
+# engine names the cards) while a card of the 75 is unsupported - five of the sideboard's are not yet (ENGINE.md 54.8).
+_DELVER_BO3 = dict(aux_deck_w=0.5, selfplay_belief_tilts={'deck': 1.0}, eval_belief_tilts={'deck': 1.0}, max_steps=60_000)
+SPEC_DELVER_BO3 = decklists.mirror_bo3_spec(decklists.IZZET_DELVER, max_turns=60)
+PRESETS['delver-mirror-bo3'] = dict(PRESETS['delver-mirror'], spec=SPEC_DELVER_BO3, eval_spec=SPEC_DELVER_BO3, **_DELVER_BO3)
+# tests, fuzz and smokes: the main and the 75's supported sideboard cards (3 Pyroblast, 3 Force of Negation, Karakas,
+# Unholy Heat), mtg-smoke's tiny network and sims on CPU
+SPEC_DELVER_BO3_SMOKE = decklists.mirror_bo3_spec(decklists.IZZET_DELVER, sideboard=decklists.DELVER_SMOKE_SIDEBOARD,
+                                                  max_turns=60)
+PRESETS['delver-bo3-smoke'] = dict(PRESETS['delver-smoke'], spec=SPEC_DELVER_BO3_SMOKE, eval_spec=SPEC_DELVER_BO3_SMOKE,
+                                   **_DELVER_BO3)
 
 # Edge of Eternities sealed (DESIGN.md 9, docs/ENGINE.md 101, 105): the game `mtg_eoe` - `mtg` on the EoE card table,
 # whose encodings carry the EoE identity space (the set's cards in set order, then its tokens: engine/src/az/eoe_cards.txt,

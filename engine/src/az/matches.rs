@@ -34,6 +34,15 @@
 //!   chooser's worlds deal the second's: in a world the other seat has chosen).
 //!   After the last choice the game starts with the chosen decks, its seed
 //!   from the match's RNG (which `determinize` reseeds).
+//! * Constructed best-of-three (ENGINE.md 120; `MatchState::constructed`):
+//!   each player's pool is exactly their 75 (main and sideboard, CR 100.4a),
+//!   its list every card of it with its copies, basic lands included and no
+//!   free entry (`MatchPool::constructed`); every deck after sideboarding is
+//!   exactly the first deck's size, 60 (the user's format restriction). Game
+//!   1's decks are the registered mains (open, as best-of-one); each later
+//!   game's deck is hidden from the other player within the public 75
+//!   (`GameSpec::hidden_decks` and `deck_clouds` from game 2 on; dealt by the
+//!   constructed prior, `hidden_decks::ConstructedPrior`).
 
 use std::sync::Arc;
 
@@ -108,6 +117,33 @@ impl MatchPool {
         let mut fp = first_picks.to_vec();
         fp.sort_unstable();
         let pool = MatchPool { list, n_cards, first_picks: fp, min_deck: deck.len(), max_deck: deck.len() };
+        (pool, counts)
+    }
+
+    /// The pool of a constructed player (ENGINE.md 120): exactly their 75,
+    /// `deck` (the registered main) and `sideboard` (CR 100.4a: a constructed
+    /// player sideboards with these cards only). The list is every card of it
+    /// by definition with its copies - basic lands too, which are pool cards
+    /// here, with no free entry (limited's any number of basic lands, 100.4b,
+    /// does not apply) - and the deck's size is kept exactly (60: the user's
+    /// format restriction). Returns the deck's counts per entry too.
+    pub fn constructed(deck: &[DefId], sideboard: &[DefId]) -> (MatchPool, Vec<u8>) {
+        let mut cards: Vec<DefId> = deck.iter().chain(sideboard).copied().collect();
+        cards.sort_unstable();
+        let mut list: Vec<(DefId, u8)> = Vec::new();
+        for d in cards {
+            match list.last_mut() {
+                Some((x, n)) if *x == d => *n = n.saturating_add(1),
+                _ => list.push((d, 1)),
+            }
+        }
+        let mut counts = vec![0u8; list.len()];
+        for d in deck {
+            let k = list.binary_search_by_key(d, |e| e.0).expect("a deck card is in the list");
+            counts[k] = counts[k].saturating_add(1);
+        }
+        let n_cards = list.len();
+        let pool = MatchPool { list, n_cards, first_picks: Vec::new(), min_deck: deck.len(), max_deck: deck.len() };
         (pool, counts)
     }
 
@@ -358,6 +394,11 @@ pub struct MatchState {
     pub choice: Option<Box<DeckChoice>>,
     /// How each seat's deck was made, in a sealed game (ENGINE.md 107; the game log's).
     pub how: [Option<SeatHow>; 2],
+    /// A constructed best-of-three (ENGINE.md 120): the pools are the public
+    /// 75s (`MatchPool::constructed`); game 1's decks are the registered mains
+    /// (open), each later game's deck is hidden from the other player, who
+    /// deals it from `deck_priors` (`hidden_decks::ConstructedPrior`).
+    pub constructed_bo3: bool,
 }
 
 /// The first game's setup of one player: deck, sideboard, first picks, and
@@ -418,7 +459,39 @@ impl MatchState {
             deal: super::hidden_decks::DealCache::new(0, crate::rng::split64(seed ^ 0xDEA1_5A17_0000)),
             choice: None,
             how: [None, None],
+            constructed_bo3: false,
         })
+    }
+
+    /// A constructed best-of-three whose first game (already made) has these
+    /// seats (ENGINE.md 120): each pool exactly the seat's 75 (deck = the
+    /// registered main, sideboard), no first picks, decks of exactly the
+    /// main's size. The deck priors (`hidden_decks::ConstructedPrior`) are the
+    /// caller's (`MtgAz::constructed_bo3`). A 75 whose list does not fit the
+    /// sideboarding action ranges (more than 64 different cards: `LIBRARY`'s
+    /// ids; more than 31 copies of one: `NUMBER`'s) is refused loudly, never
+    /// truncated.
+    pub fn constructed(db: &CardDb, gspec: GameSpec, seats: &[Seat; 2], seed: u64) -> Result<MatchState, String> {
+        let (p0, c0) = MatchPool::constructed(&seats[0].deck, &seats[0].sideboard);
+        let (p1, c1) = MatchPool::constructed(&seats[1].deck, &seats[1].sideboard);
+        for (p, pool) in [&p0, &p1].into_iter().enumerate() {
+            if pool.list.len() > act::LIBRARY_N as usize {
+                return Err(format!(
+                    "player {p}: a 75 of {} different cards: constructed sideboarding names at most {} (the LIBRARY ids)",
+                    pool.list.len(),
+                    act::LIBRARY_N
+                ));
+            }
+            if let Some(&(d, n)) = pool.list.iter().find(|e| e.1 > MAX_COUNT) {
+                return Err(format!("player {p}: {n} copies of {} (sideboarding counts at most {MAX_COUNT})", db.def(d).name));
+            }
+        }
+        let mut m = MatchState::new(db, Format::Bo1, gspec, seats, seed)?;
+        m.format = Format::Bo3;
+        m.pools = Arc::new([p0, p1]);
+        m.decks = [Arc::from(c0), Arc::from(c1)];
+        m.constructed_bo3 = true;
+        Ok(m)
     }
 
     /// The deck of player `p` in the current (or last) game.
@@ -632,7 +705,15 @@ impl super::MtgAz {
         m.seen = [[0; 16]; 2];
         let decks = [m.deck(0), m.deck(1)];
         let sides = [m.pools[0].sideboard(&m.decks[0]), m.pools[1].sideboard(&m.decks[1])];
-        let gspec = GameSpec { chooser: Some(sb.order[0]), ..m.gspec };
+        let mut gspec = GameSpec { chooser: Some(sb.order[0]), ..m.gspec };
+        if m.constructed_bo3 {
+            // A constructed best-of-three's later games (ENGINE.md 120): each
+            // deck hidden from the other player within the public 75 (the
+            // questions asked as with hidden decks, 36.11; clouds over the
+            // whole hand and library kept: they record cards seen in the deck).
+            gspec.hidden_decks = true;
+            gspec.deck_clouds = true;
+        }
         let seed = m.rng.next_u64();
         self.g = Game::with_sideboards(self.g.db(), gspec, [&decks[0], &decks[1]], [&sides[0], &sides[1]], seed)?;
         self.set_known_pools();
