@@ -818,7 +818,7 @@ const _: () = assert!(g5::PLAYER_END <= g5::PLAYER && g5::GAME_END <= GLOBALS_V5
 /// [`O_GLOBALS_V6`], after v5's): per player, viewer first
 /// (`g6[PLAYER * side + ..]`), then the game's (`g6[GAME + ..]`).
 pub mod g6 {
-    /// Floats per player (8 used, 24 spare, then `POOL_KINDS`).
+    /// Floats per player (9 used, 23 spare, then `POOL_KINDS`).
     pub const PLAYER: usize = 128;
     /// An artifact entered the battlefield under their control this turn
     /// (`Player::artifact_entered`; Mechan Shieldmate).
@@ -843,6 +843,13 @@ pub mod g6 {
     /// Moonlit Meditation's "the first time ... each turn").
     pub const LANDS_ENTERED: usize = 6;
     pub const TOKENS_CREATED: usize = 7;
+    /// ENGINE.md 123 (Mistrise Village; the first of the 24 per-player
+    /// spares): the "the next spell you cast this turn can't be countered"
+    /// effects waiting for their next spell / 4 (`Player::uncounterable_next`,
+    /// squashed; CR 101.2: every one applies to the same next spell, so
+    /// whether one waits is what the rules read; they end in the cleanup
+    /// step, 514.2). The spell that uses them up is `stack::UNCOUNTERABLE`.
+    pub const UNCOUNTERABLE_NEXT: usize = 8;
     /// ENGINE.md 100.5.1: their pool's mana with a spending restriction
     /// other than the Workshop's (`g5::POOL_ART`; CR 106.6,
     /// `Game::pool_restr`): per type t (W U B R G C) and kind k, the amount
@@ -2003,6 +2010,8 @@ impl Game {
             // ENGINE.md 100.5.1.
             o[g6::LANDS_ENTERED] = squash(self.lands_entered_this_turn(p) as f32 / 4.0);
             o[g6::TOKENS_CREATED] = (self.w6.tokens_turn[p as usize] == t.number as u16) as u8 as f32;
+            // ENGINE.md 123.
+            o[g6::UNCOUNTERABLE_NEXT] = squash(pl.uncounterable_next as f32 / 4.0);
             if !self.pool_restr.is_empty() {
                 let mut kinds = [0u32; g6::POOL_KINDS_N];
                 for &(q, ty, only, n) in &self.pool_restr {

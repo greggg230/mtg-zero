@@ -181,6 +181,7 @@ pub(crate) fn lower_effect_walkers(l: &mut Lowerer, b: &mut Builder, e: &cats::E
             let filter = match card_filter.as_deref() {
                 None => Some(Filter::Any),
                 Some(cats::CardFilterOrCardFilterAnyOf::CardFilter(n)) => super::filter::lower_card_filter_node(l, n),
+                Some(cats::CardFilterOrCardFilterAnyOf::RotoCardFilter(n)) => super::filter::lower_roto_card_filter_node(l, n),
                 Some(cats::CardFilterOrCardFilterAnyOf::CardFilterAnyOf(nodes::CardFilterAnyOf { filters })) => {
                     let mut any = Vec::new();
                     for f in filters {

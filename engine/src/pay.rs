@@ -1078,6 +1078,11 @@ impl Game {
         if self.activation_locked_by(card, locks) {
             return false;
         }
+        // "Activated abilities of sources with the chosen name can't be
+        // activated unless they're mana abilities" (CR 602.5; ENGINE.md 123).
+        if self.seen & crate::game::SEEN_NAMED_TAX != 0 && self.named_ban_hits(card, ad) {
+            return false;
+        }
         let o = &self.objs[card.i()];
         if ad.cost.tap && (o.tapped || (self.is_creature(card) && self.is_sick(card) && !self.has_kw(card, Kw::Haste)))
         {

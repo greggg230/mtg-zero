@@ -6,6 +6,9 @@
   "ActivationCost": [
    "ActivationCost"
   ],
+  "ActivationProhibition": [
+   "ActivationProhibition"
+  ],
   "AdditionalCostOption": [
    "AdditionalCostOption"
   ],
@@ -16,7 +19,8 @@
    "BeginGameOnBattlefield"
   ],
   "CardFilter": [
-   "CardFilter"
+   "CardFilter",
+   "RotoCardFilter"
   ],
   "CardFilterAnyOf": [
    "CardFilterAnyOf"
@@ -26,6 +30,9 @@
   ],
   "CardTypeOrSubtypeFilter": [
    "CardTypeOrSubtypeFilter"
+  ],
+  "ChooseCardNameAsEnters": [
+   "ChooseCardNameAsEnters"
   ],
   "Companion": [
    "Companion"
@@ -200,6 +207,7 @@
    "DealDamageToTargetOpponent",
    "DealDamageToTargetTappedCreature",
    "DealNDamageToEachCreature",
+   "DealNDamageToEachCreatureAndPlaneswalker",
    "DealPowerDamageToEachOfUpToKickedTargets",
    "DealXDamage",
    "DefendingPlayerLosesHalfLifeRoundedUp",
@@ -255,6 +263,7 @@
    "EachPlayerDraws",
    "EachPlayerExilesHandDrawsNReturnsLater",
    "EachPlayerExilesUntilNonlandMayCastFree",
+   "EachPlayerMayPutFromHand",
    "EachPlayerPutsCardFromGraveyardOntoBattlefield",
    "EachPlayerReturnsCardsExiledWithSource",
    "EachPlayerShufflesZonesIntoLibrary",
@@ -379,6 +388,7 @@
    "MoveEachExiledWithSourceToOwnersGraveyard",
    "MoveSelfCountersToTargetCreatureYouControl",
    "MutinousMassacreEffect",
+   "NextSpellThisTurnCantBeCountered",
    "OathRevealUntilCreature",
    "OpponentGainsControlOfSource",
    "OptionalManaCostThenEffect",
@@ -728,6 +738,9 @@
   ],
   "RoomHalf": [
    "RoomHalf"
+  ],
+  "SpellTax": [
+   "SpellTax"
   ],
   "StatePredicate": [
    "AnyPlayerControlsNoCreatures",
@@ -1396,6 +1409,24 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.base",
    "qualname": "ActivationCost"
+  },
+  "ActivationProhibition": {
+   "category": "ActivationProhibition",
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "except_mana_abilities",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.roto_restrictions",
+   "qualname": "ActivationProhibition"
   },
   "Adapt": {
    "category": "Effect",
@@ -5493,7 +5524,12 @@
      "required": false,
      "type": {
       "of": {
-       "t": "never"
+       "categories": [
+        "ActivationProhibition",
+        "ChooseCardNameAsEnters",
+        "SpellTax"
+       ],
+       "t": "ref"
       },
       "t": "list"
      },
@@ -5951,6 +5987,24 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.predicates",
    "qualname": "ChapterReached"
+  },
+  "ChooseCardNameAsEnters": {
+   "category": "ChooseCardNameAsEnters",
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "nonland",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.roto_restrictions",
+   "qualname": "ChooseCardNameAsEnters"
   },
   "ChooseModes": {
    "category": "Effect",
@@ -8653,6 +8707,23 @@
    "module": "mtg_bot.effects.generic.damage",
    "qualname": "DealNDamageToEachCreature"
   },
+  "DealNDamageToEachCreatureAndPlaneswalker": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "amount",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.legacy_sneak",
+   "qualname": "DealNDamageToEachCreatureAndPlaneswalker"
+  },
   "DealPowerDamageToEachOfUpToKickedTargets": {
    "category": "Effect",
    "fields": [
@@ -9828,6 +9899,29 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.layout_face_effects",
    "qualname": "EachPlayerExilesUntilNonlandMayCastFree"
+  },
+  "EachPlayerMayPutFromHand": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "CardFilter",
+     "default": {
+      "$t": "CardFilter"
+     },
+     "name": "card_filter",
+     "required": false,
+     "type": {
+      "categories": [
+       "CardFilter"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_zones",
+   "qualname": "EachPlayerMayPutFromHand"
   },
   "EachPlayerPutsCardFromGraveyardOntoBattlefield": {
    "category": "Effect",
@@ -13711,6 +13805,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "NameStickerGate"
+  },
+  "NextSpellThisTurnCantBeCountered": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_board",
+   "qualname": "NextSpellThisTurnCantBeCountered"
   },
   "NoncreatureSpellsCastThisTurn": {
    "category": "StatePredicate",
@@ -18524,6 +18625,144 @@
    "module": "mtg_bot.cards.base",
    "qualname": "RoomHalf"
   },
+  "RotoCardFilter": {
+   "category": "CardFilter",
+   "fields": [
+    {
+     "annotation": "tuple[str, ...]",
+     "default": [],
+     "name": "any_types",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple[str, ...]",
+     "default": [],
+     "name": "excluded_types",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "'int | None'",
+     "default": null,
+     "name": "max_mv",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "int"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "'str | None'",
+     "default": null,
+     "name": "color",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "'str | None'",
+     "default": null,
+     "name": "supertype",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "'str | None'",
+     "default": null,
+     "name": "subtype",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple[str, ...]",
+     "default": [],
+     "name": "mana_costs",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple[str, ...]",
+     "default": [],
+     "name": "excluded_supertypes",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "'int | None'",
+     "default": null,
+     "name": "max_power",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "int"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "'int | None'",
+     "default": null,
+     "name": "max_toughness",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "int"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_zones",
+   "qualname": "RotoCardFilter"
+  },
   "RovingActuatorETBEffect": {
    "category": "Effect",
    "fields": [
@@ -19570,6 +19809,63 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_walkers",
    "qualname": "SpellTargetsMatching"
+  },
+  "SpellTax": {
+   "category": "SpellTax",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "amount",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "opponents_only",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "except_during_casters_turn",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "from_graveyard_or_exile",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "named",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.roto_restrictions",
+   "qualname": "SpellTax"
   },
   "SpellWasKicked": {
    "category": "Condition",

@@ -1340,10 +1340,53 @@ fn public_state_reaches_the_encoding() {
     // order is no id's since Priority's casts from a graveyard became one option and a list
     // choice (ENGINE.md 100.5): only deliberate limits are left.
     let gaps: Vec<&str> = lim.iter().filter(|l| l.kind == LimitKind::NextLayout).map(|l| l.name).collect();
-    // (W2's and W6's six, added after layout v6 was built, too: ENGINE.md 100.5.1.)
-    assert!(gaps.is_empty(), "next-layout gaps: {gaps:?}");
-    assert_eq!(next, 0);
+    // (W2's and W6's six, added after layout v6 was built, too: ENGINE.md 100.5.1.) One gap, named
+    // and tied to a refusal (ENGINE.md 123, the maintainer's decision): the card name a permanent
+    // chose as it entered (Disruptor Flute; Anointed Peacekeeper's, older, too) is layout v7's
+    // chosen-name column; on v6 no network plays a game with a card choosing a name the plain way
+    // (`flute_decks_are_refused_to_networks_on_layout_v6`).
+    assert_eq!(gaps, [engine::public_state::CHOSEN_NAME_GAP], "next-layout gaps");
+    assert_eq!(next, 1);
     assert_eq!(by_design, 4, "the deliberate limits");
+}
+
+/// ENGINE.md 123: layout v6 can't encode the card name a permanent chose as it entered (Disruptor
+/// Flute; the public-state gate's one next-layout gap, `CHOSEN_NAME_GAP`), so every network-driven
+/// game - a spec the engine's `SearchGame` parses (self-play, evaluation, h2h, replays: zero-core's
+/// driver) - whose decks or sideboards hold a card choosing a name the plain way is refused,
+/// loudly, on this build; the Delver mirror is not. The gate's entry names the refusal.
+#[test]
+fn flute_decks_are_refused_to_networks_on_layout_v6() {
+    let delver = engine::az::constructed::Decklist::izzet_delver().main_names();
+    let mut with_flute = delver.clone();
+    with_flute[0] = "Disruptor Flute".to_string();
+    let spec = |p0: &[String], p1: &[String], sb: Option<&[&str]>| {
+        let mut decks = serde_json::json!({"p0": p0, "p1": p1});
+        if let Some(sb) = sb {
+            decks["p1_sideboard"] = serde_json::json!(sb);
+        }
+        serde_json::json!({"max_turns": 60, "constructed": true, "decks": decks}).to_string()
+    };
+    let want = "Disruptor Flute's chosen name needs layout v7 (ENGINE.md 123)";
+    for s in [spec(&with_flute, &delver, None), spec(&delver, &with_flute, None), spec(&delver, &delver, Some(&["Disruptor Flute"]))] {
+        let e = MtgSpec::parse(&s).unwrap_err();
+        assert!(e.contains(want), "{e}");
+        let e = <MtgAz as SearchGame>::parse_spec(&s).err().expect("refused");
+        assert!(e.contains(want), "{e}");
+    }
+    assert!(<MtgAz as SearchGame>::parse_spec(&spec(&delver, &delver, None)).is_ok());
+    // The Sneak and Show main 60 (no Flute: a sideboard card) is accepted.
+    // (data/decks/sneak_show_8014220.json read here: az/constructed.rs is the best-of-three
+    // lane's to change.)
+    let sns = engine::az::constructed::Decklist::parse(include_str!("../../data/decks/sneak_show_8014220.json")).unwrap();
+    let mut sns = sns.main_names();
+    // (Flusterstorm, Doomsday lane B's card, is not on this branch: two Pyroblasts for now.)
+    for n in sns.iter_mut().filter(|n| n.as_str() == "Flusterstorm") {
+        *n = "Pyroblast".to_string();
+    }
+    assert!(<MtgAz as SearchGame>::parse_spec(&spec(&sns, &delver, None)).is_ok());
+    let gap = engine::public_state::limits().into_iter().find(|l| l.name == engine::public_state::CHOSEN_NAME_GAP).expect("the gate's entry");
+    assert!(gap.kind == engine::public_state::LimitKind::NextLayout && gap.why.contains(want) && gap.why.contains("flute_decks_are_refused_to_networks_on_layout_v6"));
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

@@ -16,17 +16,17 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
-| fetched | 1610 | 1262 |
-| class a | 1228 | 978 |
+| fetched | 1628 | 1278 |
+| class a | 1246 | 994 |
 | class b | 200 | 151 |
 | class c | 182 | 133 |
-| a, tested (passing) | 1228 | 978 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 930 | 777 |
-| a, tested only by an earlier test (Oracle or rules) | 298 | 201 |
+| a, tested (passing) | 1246 | 994 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 932 | 777 |
+| a, tested only by an earlier test (Oracle or rules) | 314 | 217 |
 | a, deferred | 0 | 0 |
 | a, untested | 0 | 0 |
 
-Class a by area (distinct texts): mana 175/175, triggers 139/139, stack 126/126, zones 123/123, copies 96/96, other 94/94, dfc 65/65, replacement 59/59, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 176/176, triggers 140/140, stack 128/128, zones 127/127, other 100/100, copies 96/96, dfc 66/66, replacement 60/60, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -162,9 +162,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `032de84a` | a | mana | a cost-increase/tax effect applies to its controller's own spells too, not just opponents' | `rulings_mana::thalias_tax_applies_to_its_controllers_own_spells_cr_601_2f` |
-| `560a16f0` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | `rulings_mana::thalias_tax_applies_to_an_alternative_cost_cr_601_2f` |
+| `560a16f0` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | `cards_sneak_show::cr_601_2f_disruptor_flute_spells_with_the_name_cost_3_more_every_players`; `cards_sneak_show::cr_601_2f_disruptor_flute_naming_show_and_tell_under_omniscience_costs_3`; `rulings_mana::thalias_tax_applies_to_an_alternative_cost_cr_601_2f` |
 | `032de84a` | a | mana | a cost-increase/tax effect applies to its controller's own spells too, not just opponents' | `rulings_mana::thalias_tax_applies_to_its_controllers_own_spells_cr_601_2f` |
-| `560a16f0` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | `rulings_mana::thalias_tax_applies_to_an_alternative_cost_cr_601_2f` |
+| `560a16f0` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | `cards_sneak_show::cr_601_2f_disruptor_flute_spells_with_the_name_cost_3_more_every_players`; `cards_sneak_show::cr_601_2f_disruptor_flute_naming_show_and_tell_under_omniscience_costs_3`; `rulings_mana::thalias_tax_applies_to_an_alternative_cost_cr_601_2f` |
 
 ### Voice of Victory
 
@@ -756,7 +756,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `cards_sneak_show::cr_107_3b_omniscience_an_x_spell_has_x_0`; `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `d2f219ee` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_mana2::a_free_cast_allows_no_alternative_cost_but_needs_mandatory_additional_costs_cr_118_9a_601_2b` |
 | `751982e2` | a | zones | if an exiled card made playable by an ability isn't played, it simply remains in exile | `rulings_zones2::an_unused_permission_ends_and_the_card_stays_where_it_is_cr_611_2a` |
 | `e32a9bac` | a | copies | a count-based power/toughness-setting ability counts its own source, guaranteeing at least a 1/1 | `cards_m7d::urza_construct_token_and_a_sick_artifact_creature_pay_cr302_6` |
@@ -1475,7 +1475,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `8b359ef5` | a | zones | looking at the top of your library this way doesn't use the stack and can happen any time, even without priority | `cards_m7d::bolas_citadel_casts_from_the_top_paying_life_cr118_9` |
 | `7ee6c520` | a | mana | a permanent can be one of the permanents it sacrifices to pay for its own ability | `cards_m7d::bolas_citadel_sacrifices_ten_nonland_permanents_cr701_21` |
-| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `cards_sneak_show::cr_107_3b_omniscience_an_x_spell_has_x_0`; `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `2012f8f3` | a | stack | if the librarys top card changes mid-cast or mid-activation, you cant see the new top until thats done | `rulings_stack3::bolass_citadel_the_new_top_card_is_unseen_until_the_cast_is_done_cr_601_2` |
 | `4c7c58fa` | a | mana | casting a card rather than paying its mana cost forbids other alt costs but still needs mandatory ones | `rulings_casts::citadel_no_other_alternative_cost_but_additional_costs_cr_118_9a_601_2f` |
 | `9cf8d89b` | b | MP | Two-Headed Giant: a life-loss effect hits the opposing team for a fixed amount | multiplayer |
@@ -2034,9 +2034,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `03d27f15` | a | dfc | daybound/nightbound transform immediately on any day/night change, any time, and its not a state-based action | `rulings_faces::it_becomes_night_after_a_turn_without_spells_and_day_after_two_cr_726_3a` |
 | `b5368c51` | a | other | it becomes night if it's currently day and the previous turn's active player cast no spells | `rulings_faces::it_becomes_night_after_a_turn_without_spells_and_day_after_two_cr_726_3a` |
 | `0a3a2fe8` | a | other | it becomes day if it's currently night and the previous turn's active player cast two or more spells | `rulings_faces::it_becomes_night_after_a_turn_without_spells_and_day_after_two_cr_726_3a` |
-| `9d7e7537` | a | dfc | during night, a daybound permanent entering without being cast enters with its nightbound face up | `rulings_faces::a_daybound_card_put_onto_the_battlefield_at_night_is_nightbound_cr_702_145e` |
+| `9d7e7537` | a | dfc | during night, a daybound permanent entering without being cast enters with its nightbound face up | `rules_faithful_e::cr_702_145b_a_daybound_card_put_onto_the_battlefield_at_night_enters_transformed`; `rulings_faces::a_daybound_card_put_onto_the_battlefield_at_night_is_nightbound_cr_702_145e` |
 | `c574f848` | c | NR | with no day/night set, daybound and nightbound appearing together sets day, transforming the nightbound one [part 3, was a/other: no cube effect puts a daybound and a nightbound permanent onto the battlefield at once while it's neither] | not reachable with the cube's cards |
-| `483aa586` | a | dfc | a daybound spell cast at night stays daybound on the stack but enters the battlefield nightbound-face-up | `rulings_faces::a_daybound_card_cast_at_night_enters_with_its_nightbound_face_up_cr_702_145d` |
+| `483aa586` | a | dfc | a daybound spell cast at night stays daybound on the stack but enters the battlefield nightbound-face-up | `rules_faithful_e::cr_702_145b_a_daybound_spell_cast_at_night_enters_transformed_without_transforming`; `rulings_faces::a_daybound_card_cast_at_night_enters_with_its_nightbound_face_up_cr_702_145d` |
 | `a73ce155` | a | dfc | daybound/nightbound only transform via their own abilities, not generic transform effects from other cards | `rules_faces::a_daybound_permanent_transforms_only_through_day_and_night_cr_702_145b` |
 
 ### Scythecat Cub
@@ -2338,7 +2338,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `3f63bb36` | a | zones | letting you play exiled cards doesn't change their normal timing restrictions | `rulings_zones2::cards_exiled_by_urza_golos_ugin_and_expressive_iteration_keep_their_timing_cr_601_3_307_1_305_2` |
-| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `cards_sneak_show::cr_107_3b_omniscience_an_x_spell_has_x_0`; `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `892b7ab2` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
 | `07bd45b4` | a | zones | exiled cards you don't play via this effect simply remain in exile | `cards_m7a_zones2::golos_exiles_three_to_play_free_this_turn_a_land_uses_the_land_drop` |
 
@@ -2383,7 +2383,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `cards_sneak_show::cr_107_3b_omniscience_an_x_spell_has_x_0`; `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `276611ee` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
 | `8d32d60f` | a | zones | spells cast via this granted permission still follow their normal timing restrictions | `rulings_zones2::cards_exiled_by_urza_golos_ugin_and_expressive_iteration_keep_their_timing_cr_601_3_307_1_305_2` |
 
@@ -2528,7 +2528,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `1efd0607` | a | mana | a self-untapping mana ability can be activated as many times as you can pay for it, enabling unbounded mana generation | `cards_m7c_tail2::zirda_and_basalt_monolith_loop_is_cut_at_31_activations_cr732_2a` |
+| `1efd0607` | a | mana | a self-untapping mana ability can be activated as many times as you can pay for it, enabling unbounded mana generation | `cards_m7c_tail2::zirda_and_basalt_monolith_loop_goes_on_past_31_activations_cr732_2a` |
 
 ### Coalition Relic
 
@@ -3523,6 +3523,49 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `87078369` | a | mana | delve does not change the mana cost or mana value (Murktide Regent stays 7) | `cards_legacy::delve_doesnt_change_its_mana_value_cr_702_66a` |
 | `05ce86bd` | a | mana | delve pays only generic mana, at most the generic part of the total cost (five for Murktide Regent) | `cards_legacy::delve_exiles_at_most_its_generic_mana_cr_702_66a` |
 
-## Cards without rulings (172)
+### Show and Tell (legacy, constructed play: ENGINE.md 54)
 
-Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54)
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `6d3f0bf4` | a | zones | Show and Tell: choices the entering cards need are made after every player chose a card, the active player first (CR 101.4) | `cards_sneak_show::show_and_tell_the_active_players_enters_choices_come_first` |
+| `881ce0a9` | a | zones | Show and Tell: the cards are chosen as it resolves, not as it is cast | `cards_sneak_show::cr_101_4_show_and_tell_the_active_player_chooses_then_the_other_and_both_enter` |
+| `a107ed89` | a | zones | Show and Tell: the active player chooses first, then the other; the choice may stay face down (CR 101.4a); the cards enter at once | `cards_sneak_show::cr_101_4_show_and_tell_the_active_player_chooses_then_the_other_and_both_enter`; `cards_sneak_show::cr_101_4a_the_other_player_knows_only_whether_a_card_was_chosen`; `cards_sneak_show::cr_101_4a_the_other_players_worlds_deal_a_legal_face_down_choice`; `cards_sneak_show::cr_101_4a_a_known_hand_is_one_pool_the_choice_among_its_cards_of_the_kind`; `cards_sneak_show::cr_101_4_show_and_tell_on_the_other_players_turn_they_choose_first` |
+
+### Omniscience (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `cards_sneak_show::cr_107_3b_omniscience_an_x_spell_has_x_0`; `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
+| `6e20dab1` | a | mana | without paying its mana cost: no other alternative cost; additional costs (kicker, mandatory ones) are still paid (CR 118.9a, 601.2f) | `cards_sneak_show::cr_118_9a_omniscience_and_force_of_will_are_alternative_costs_one_at_a_time`; `cards_sneak_show::cr_601_2f_omniscience_additional_costs_are_still_paid`; `cards_sneak_show::cr_601_2f_omniscience_cost_increases_still_apply` |
+| `3bd1fe3c` | a | stack | Omniscience resolving on its controller's turn: that player gets priority first (CR 117.3b) | `cards_sneak_show::cr_117_3b_after_omniscience_resolves_its_controller_has_priority_first` |
+| `72e98293` | a | stack | Omniscience keeps each spell's timing permissions and restrictions | `cards_sneak_show::cr_601_3_omniscience_keeps_the_timing_rules` |
+
+### Mistrise Village (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `16696510` | a | zones | Mistrise Village enters untapped only with a Mountain or Forest already controlled; one entering at the same time doesn't count (CR 614.12a) | `cards_sneak_show::cr_614_1c_mistrise_village_enters_tapped_unless_you_control_a_mountain_or_a_forest`; `cards_sneak_show::cr_614_12a_mistrise_village_entering_with_the_magus_enters_tapped` |
+
+### Disruptor Flute (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `d858e725` | a | other | activated abilities contain a colon (equip, a fetch land, Sneak Attack); an activated mana ability produces mana: the Flute stops the others, not it (CR 602.1, 605.1a) | `cards_sneak_show::cr_602_5_disruptor_flute_stops_non_mana_activated_abilities` |
+| `044069c9` | a | other | Disruptor Flute naming a card with a mana ability and another activated ability: the mana ability can still be activated (CR 602.5, 605.1a) | `cards_sneak_show::cr_602_5_disruptor_flute_stops_non_mana_activated_abilities`; `cards_sneak_show::cr_602_5_disruptor_flute_stops_fetch_lands_and_works_in_every_zone` |
+| `20e62c09` | a | dfc | Disruptor Flute may name either name of a split, adventurer or double-faced card; the other name is unaffected (CR 709.3, 715.3, 712) | `cards_sneak_show::cr_201_3_disruptor_flute_offers_every_name_of_the_games_cards_and_their_faces`; `cards_sneak_show::cr_606_disruptor_flute_stops_loyalty_abilities_of_a_back_face`; `cards_sneak_show::cr_709_3_disruptor_flute_a_split_cards_half_and_an_adventure_by_their_names` |
+| `560a16f0` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | `cards_sneak_show::cr_601_2f_disruptor_flute_spells_with_the_name_cost_3_more_every_players`; `cards_sneak_show::cr_601_2f_disruptor_flute_naming_show_and_tell_under_omniscience_costs_3`; `rulings_mana::thalias_tax_applies_to_an_alternative_cost_cr_601_2f` |
+| `3029db62` | a | other | Disruptor Flute: any card name; a token's name only if it is also a card's (CR 201.3) | `cards_sneak_show::cr_201_3_disruptor_flute_offers_every_name_of_the_games_cards_and_their_faces` |
+
+### Magus of the Moon (legacy, constructed play: ENGINE.md 54)
+
+| ruling | class | area / reason | point | test |
+|---|---|---|---|---|
+| `cd000dac` | a | other | Magus of the Moon without abilities still makes nonbasic lands Mountains (layer 4 before layer 6, CR 613.1d, 613.1f) | `cards_sneak_show::cr_613_1d_the_magus_without_abilities_still_makes_mountains` |
+| `aa10a575` | a | replacement | a nonbasic land entering under the Magus loses its enters-tapped and as-enters abilities before they apply (CR 614.12) | `cards_sneak_show::cr_614_12_thundering_falls_and_mistrise_village_enter_untapped_and_quiet_under_the_magus`; `cards_sneak_show::cr_614_12_an_as_enters_choice_and_counters_are_gone_under_the_magus` |
+| `cafea326` | a | triggers | a nonbasic land entering under the Magus loses its enters triggered ability before it triggers (CR 614.12, 603.6) | `cards_sneak_show::cr_614_12_thundering_falls_and_mistrise_village_enter_untapped_and_quiet_under_the_magus` |
+| `53c9e610` | a | other | Magus of the Moon changes no name or supertype (CR 305.7) | `cards_sneak_show::cr_205_4_the_magus_keeps_names_and_supertypes` |
+| `24283e6f` | a | other | under the Magus nonbasic lands lose their land types and abilities and gain Mountain and {T}: Add {R} (CR 305.7) | `cards_sneak_show::cr_305_7_magus_makes_the_decks_nonbasic_lands_mountains`; `cards_sneak_show::cr_305_7_ancient_tomb_and_city_of_traitors_under_the_magus_tap_for_one_red` |
+
+## Cards without rulings (173)
+
+Mother of Runes, Cathar Commando, Spectacular Spider-Man, Agent Bishop, Man in Black, Loran of the Third Path, Sage of the Skies, Sanguine Evangelist, Serra Paragon, Exorcise, Wrath of God, Mox Pearl, Staff of the Storyteller, The Mind Stone, Parallax Wave, The Wondrous Wasp, Ancestral Recall, Spell Pierce, Stern Scolding, Counterspell, Mana Leak, We Say Thee Nay!, Force of Negation, Boomerang Basics, Preordain, Stock Up, Upheaval, Mox Sapphire, Aether Spellbomb, Sewer-veillance Cam, Cryogen Relic, Concealing Curtains // Revealing Eye, Black Widow, Super Spy, Sunset Saboteur, Super Shredder, Dark Ritual, Entomb, Bitter Triumph, Cabal Ritual, Sheoldred's Edict, Snuff Out, Duress, Imperial Seal, Mind Twist, Chain of Smog, Exhume, Hymn to Tourach, Mox Jet, Orcish Lumberjack, Batroc the Leaper, Ravenous Robots, "Name Sticker" Goblin, Thor, God of Thunder, Lightning Bolt, Abrade, Sear, Mine Collapse, Flame Slash, Wheel of Fortune, Mox Ruby, Pyrite Spellbomb, Legion Extruder, Goblin Bombardment, Avacyn's Pilgrim, Birds of Paradise, Elvish Mystic, Haywire Mite, Llanowar Elves, Sylvan Safekeeper, Bejeweled Warg, Guerrilla Gorilla, Sylvan Caryatid, Formidable Speaker, Mole Man, Moloid Master, Surrak, Elusive Hunter, Ulvenwald Oddity // Ulvenwald Behemoth, Titania, Protector of Argoth, Force of Vigor, Malevolent Rumble, Mox Emerald, Black Lotus, Lotus Petal, Mishra's Bauble, Urza's Bauble, Zuran Orb, Chromatic Star, Currency Converter, Ghost Vacuum, Mana Vault, Retrofitter Foundry, Skateboard, Skullclamp, Sol Ring, Soul-Guide Lantern, Voltaic Key, Grim Monolith, Mind Stone, Reckoner Bankbuster, Talisman of Conviction, The Fantasticar, Kaldra Compleat, Portal to Phyrexia, Talisman of Dominance, Talisman of Creativity, No More Lies, Spider-Woman, Stunning Savior, Talisman of Progress, Baleful Strix, Psychic Frog, Talisman of Indulgence, Wolverine, Fierce Fighter, Jennifer Walters // The Sensational She-Hulk, Knight of Autumn, Okoye, Mighty and Adored, Torsten, Founder of Benalia, Cloak and Dagger, Entwined, Vindicate, Talisman of Curiosity, Relic of Sauron, Meticulous Archive, Sunken Ruins, Undercity Sewers, Blazemire Verge, Raucous Theater, Commercial District, Thornspire Verge, Horizon Canopy, Lush Portico, Bleachbone Verge, Shadowy Backstreet, Fiery Islet, Thundering Falls, Nurturing Peatland, Underground Mortuary, Elegant Parlor, Sunbaked Canyon, Hedge Maze, Waterlogged Grove, Spara's Headquarters, Raffine's Tower, Xander's Lounge, Ziatora's Proving Ground, Jetmir's Garden, Savai Triome, Ketria Triome, Indatha Triome, Raugrin Triome, Zagoth Triome, Ancient Tomb, Arid Mesa, Bloodstained Mire, Flooded Strand, Gaea's Cradle, Karakas, Mana Confluence, Marsh Flats, Misty Rainforest, Multiversal Passage, Polluted Delta, Prismatic Vista, Scalding Tarn, Strip Mine, Tolarian Academy, Verdant Catacombs, Wasteland, Windswept Heath, Wooded Foothills, Plains, Island, Swamp, Mountain, Forest, Prismari Charm (legacy, constructed play: ENGINE.md 54), Brotherhood's End (legacy, constructed play: ENGINE.md 54)

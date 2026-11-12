@@ -353,7 +353,9 @@ impl Game {
         let granted_ok = self.granted_alt_castable(p, c, cls);
         // The first spell of a turn without paying its mana cost (ENGINE.md
         // 99.4).
-        let free = self.first_spell_free(p, crate::game::CastFrom::Hand) && self.route_payable(p, c, crate::eoe_c::FREE_CAST, cls);
+        // (Or every spell from the hand: Omniscience, ENGINE.md 123.)
+        let free = (self.first_spell_free(p, crate::game::CastFrom::Hand) || self.free_from_hand(p, crate::game::CastFrom::Hand, self.objs[c.i()].zone))
+            && self.route_payable(p, c, crate::eoe_c::FREE_CAST, cls);
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
         let extras = self.spree_extras(c, p);
         // `extra`: the mana of additional costs announced (CR 601.2f: added
@@ -2499,7 +2501,13 @@ impl Game {
                     }
                 }
                 let free = crate::eoe_c::FREE_FIRST_SPELL;
-                if plain_targets && self.first_spell_free(p, from) && self.route_payable(p, card, crate::eoe_c::FREE_CAST, &classes) {
+                // (Either permission: one alternative cost, "without paying
+                // its mana cost", CR 118.9; Omniscience's, ENGINE.md 123.)
+                let origin = self.stack[pos].origin;
+                if plain_targets
+                    && (self.first_spell_free(p, from) || self.free_from_hand(p, from, origin))
+                    && self.route_payable(p, card, crate::eoe_c::FREE_CAST, &classes)
+                {
                     opts.push(Opt { action: act::NUMBER + free as u16, choice: Choice::Number(free) });
                 }
                 self.ask(Task::CastAlt { id }, p, DecisionKind::ChooseAltCost, opts);
@@ -2665,6 +2673,7 @@ impl Game {
         if forced_warp.is_none()
             && (!self.def_of(card).alt_costs.is_empty() && Self::alt_allowed(from)
                 || self.first_spell_free(p, from)
+                || self.free_from_hand(p, from, origin)
                 || from == crate::game::CastFrom::Hand && !self.granted_alts(card).is_empty())
         {
             self.agenda.push(Task::CastAlt { id }); // CR 601.2b
@@ -3036,6 +3045,13 @@ impl Game {
             self.players[p as usize].noncreature_cast = self.exact_inc(n, "noncreature spells cast this turn");
         }
         let r = self.obj_ref(card);
+        // "The next spell you cast this turn can't be countered" (CR 101.2,
+        // 601.2i: the spell becomes cast; every waiting effect is used up;
+        // ENGINE.md 123).
+        if self.players[p as usize].uncounterable_next > 0 {
+            self.players[p as usize].uncounterable_next = 0;
+            self.marks.push((r, crate::game::Mark::Uncounterable));
+        }
         // CR 722.3c: casting the copy of its prepare spell unprepares the
         // permanent.
         if !self.prepared.is_empty() {

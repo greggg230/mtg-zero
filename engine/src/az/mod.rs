@@ -426,6 +426,10 @@ impl MtgSpec {
         };
         for (p, (d, sb)) in lists.into_iter().enumerate() {
             constructed::check_size(db, d, sb).map_err(|e| format!("mtg spec: p{p}'s deck: {e}"))?;
+            // (ENGINE.md 123: layout v6 can't encode such a card's state.)
+            if let Some(e) = d.iter().chain(sb.iter()).find_map(|&c| crate::sneak_show::needs_layout_v7(db.def(c))) {
+                return Err(format!("mtg spec: p{p}'s deck: {e}"));
+            }
         }
         Ok(s)
     }

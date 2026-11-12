@@ -55,6 +55,20 @@
 //! Prismari Charm with the cube's cards); every check of the default mode,
 //! and with 200 games or more Murktide Regent must have been cast and its
 //! leave-the-graveyard trigger resolved. Games only (best-of-one).
+//! `FUZZ_POOL=sneak_show` (ENGINE.md 123): Legacy Sneak and Show (MTGGoldfish
+//! 8014220, `data/decks/sneak_show_8014220.json`): its main 60 with its two
+//! Flusterstorms (another lane's card, not in this branch) swapped for two
+//! Pyroblasts from its sideboard (`SNEAK_SHOW_DECK`), against the Delver 60 in
+//! either seat, one game in three the Sneak and Show mirror. `FUZZ_POOL=sns`
+//! (ENGINE.md 123): the lane's six cards four each (`SNS_DECK`: Show and
+//! Tell, Omniscience, Mistrise Village, Brotherhood's End, Disruptor Flute,
+//! Magus of the Moon) with the deck's creatures, Sneak Attack, Force of Will
+//! and mana, the same pairings. Constructed play's card table; every check of
+//! the default mode, and with 200 games or more each of the six must have
+//! been cast or activated, a spell cast without paying its mana cost, a spell
+//! made uncounterable and a name chosen (`sneak_show`: Show and Tell and
+//! Mistrise Village seen, a free cast, a spell made uncounterable). Games only
+//! (best-of-one).
 //! `FUZZ_POOL=eoe` (ENGINE.md 99): Edge of Eternities sealed, the set's own
 //! card table (`CardDb::eoe`): random 40-card decks of its supported cards
 //! (17 lands, 23 spells; games only, no matches).
@@ -297,6 +311,8 @@ enum PoolMode {
     Delver,
     Eoe,
     Sealed,
+    SneakShow,
+    Sns,
 }
 
 fn pool_mode() -> PoolMode {
@@ -308,7 +324,9 @@ fn pool_mode() -> PoolMode {
         Ok("delver") => PoolMode::Delver,
         Ok("eoe") => PoolMode::Eoe,
         Ok("sealed") => PoolMode::Sealed,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"eoe\" or \"sealed\")"),
+        Ok("sneak_show") => PoolMode::SneakShow,
+        Ok("sns") => PoolMode::Sns,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"sneak_show\", \"sns\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -326,6 +344,11 @@ fn delver_mode() -> bool {
 
 fn eoe_mode() -> bool {
     pool_mode() == PoolMode::Eoe
+}
+
+/// `FUZZ_POOL=sneak_show` or `sns` (ENGINE.md 123).
+fn sns_mode() -> bool {
+    matches!(pool_mode(), PoolMode::SneakShow | PoolMode::Sns)
 }
 
 fn sealed_mode() -> bool {
@@ -670,7 +693,7 @@ fn check_forced_chance(g: &Game, seed: u64, step: usize) {
 /// The card table of the mode's games: the cube's and the custom test cards,
 /// or constructed play's (`FUZZ_POOL=delver`).
 fn game_db() -> &'static CardDb {
-    if delver_mode() {
+    if delver_mode() || sns_mode() {
         CardDb::constructed()
     } else if eoe_mode() || sealed_mode() {
         CardDb::eoe()
@@ -683,6 +706,113 @@ fn game_db() -> &'static CardDb {
 fn delver_deck() -> Vec<u16> {
     let d = engine::az::constructed::Decklist::izzet_delver();
     engine::az::constructed::Decklist::ids(CardDb::constructed(), &d.main).unwrap()
+}
+
+/// The Sneak and Show 60 of `FUZZ_POOL=sneak_show` (ENGINE.md 123): MTGGoldfish
+/// 8014220's main deck, its two Flusterstorms (Doomsday lane B's card, not in
+/// this branch) swapped for its sideboard's Pyroblast and one more.
+const SNEAK_SHOW_DECK: &[(u32, &str)] = &[
+    (3, "Ancient Tomb"),
+    (4, "Atraxa, Grand Unifier"),
+    (4, "Brainstorm"),
+    (2, "City of Traitors"),
+    (3, "Emrakul, the Aeons Torn"),
+    (2, "Pyroblast"),
+    (4, "Force of Will"),
+    (1, "Griselbrand"),
+    (1, "Hullbreacher"),
+    (2, "Island"),
+    (4, "Lotus Petal"),
+    (1, "Mistrise Village"),
+    (2, "Misty Rainforest"),
+    (1, "Mountain"),
+    (1, "Omniscience"),
+    (4, "Ponder"),
+    (1, "Prismari Charm"),
+    (4, "Scalding Tarn"),
+    (4, "Show and Tell"),
+    (1, "Simian Spirit Guide"),
+    (4, "Sneak Attack"),
+    (3, "Stock Up"),
+    (1, "Thundering Falls"),
+    (3, "Volcanic Island"),
+];
+
+/// The lane's deck of `FUZZ_POOL=sns` (ENGINE.md 123): the six cards four each.
+const SNS_DECK: &[(u32, &str)] = &[
+    (4, "Show and Tell"),
+    (4, "Omniscience"),
+    (4, "Mistrise Village"),
+    (4, "Brotherhood's End"),
+    (4, "Disruptor Flute"),
+    (4, "Magus of the Moon"),
+    (3, "Emrakul, the Aeons Torn"),
+    (2, "Griselbrand"),
+    (2, "Atraxa, Grand Unifier"),
+    (2, "Sneak Attack"),
+    (4, "Force of Will"),
+    (4, "Brainstorm"),
+    (4, "Lotus Petal"),
+    (3, "Volcanic Island"),
+    (4, "Scalding Tarn"),
+    (2, "Ancient Tomb"),
+    (2, "City of Traitors"),
+    (2, "Island"),
+    (2, "Mountain"),
+];
+
+fn constructed_deck(list: &[(u32, &str)], what: &str) -> Vec<u16> {
+    let list: Vec<(u32, String)> = list.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let deck = engine::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    engine::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("{what}: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=sneak_show` / `sns`: the lane's cards seen on the stack (spells,
+/// Mistrise Village's ability; each stack item once, by its id), spells cast
+/// without paying their mana costs, spells made uncounterable, names chosen.
+static SNS_SEEN: [AtomicU64; 6] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+static SNS_FREE: AtomicU64 = AtomicU64::new(0);
+static SNS_UNCOUNTERABLE: AtomicU64 = AtomicU64::new(0);
+static SNS_NAMED: AtomicU64 = AtomicU64::new(0);
+const SNS_CARDS: [&str; 6] = ["Show and Tell", "Omniscience", "Mistrise Village", "Brotherhood's End", "Disruptor Flute", "Magus of the Moon"];
+
+fn count_sns(g: &Game, seen: &mut Vec<u32>) {
+    for it in g.stack() {
+        if seen.contains(&it.id) {
+            continue;
+        }
+        seen.push(it.id);
+        match it.kind {
+            engine::game::StackKind::Spell { card } => {
+                if let Some(k) = SNS_CARDS.iter().position(|&n| n == g.name(card)) {
+                    SNS_SEEN[k].fetch_add(1, Ordering::Relaxed);
+                }
+                if matches!(it.from, engine::game::CastFrom::Permission { free: true, .. }) {
+                    SNS_FREE.fetch_add(1, Ordering::Relaxed);
+                }
+                if g.marks_of(card).contains(&engine::game::Mark::Uncounterable) {
+                    SNS_UNCOUNTERABLE.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            engine::game::StackKind::Ability { source, .. } if g.db().def(g.obj(source.idx).def).name == "Mistrise Village" => {
+                SNS_SEEN[2].fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `FUZZ_POOL=sneak_show` / `sns`: names chosen as a Flute entered (each
+/// permanent once).
+fn count_sns_names(g: &Game, named: &mut Vec<engine::ids::ObjRef>) {
+    for &c in g.battlefield() {
+        let r = g.obj_ref(c);
+        if !named.contains(&r) && g.marks_of(c).iter().any(|m| matches!(m, engine::game::Mark::ChosenName(_))) {
+            named.push(r);
+            SNS_NAMED.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 }
 
 /// `FUZZ_POOL=delver`: Murktide Regents that resolved, and leave-the-graveyard
@@ -1091,6 +1221,15 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     if delver_mode() {
         return [(delver_deck(), Vec::new()), (delver_deck(), Vec::new())];
     }
+    if sns_mode() {
+        // Against Delver in either seat; one game in three the mirror.
+        let mine = if pool_mode() == PoolMode::Sns { constructed_deck(SNS_DECK, "SNS_DECK") } else { constructed_deck(SNEAK_SHOW_DECK, "SNEAK_SHOW_DECK") };
+        return match seed % 3 {
+            0 => [(mine, Vec::new()), (delver_deck(), Vec::new())],
+            1 => [(delver_deck(), Vec::new()), (mine, Vec::new())],
+            _ => [(mine.clone(), Vec::new()), (mine, Vec::new())],
+        };
+    }
     if eoe_mode() {
         return [(eoe_deck(&mut rng), Vec::new()), (eoe_deck(&mut rng), Vec::new())];
     }
@@ -1136,6 +1275,7 @@ fn play(seed: u64, checks: bool) -> Played {
     let exp = exponential_mode();
     let mut buf = Vec::new();
     let mut stack_seen: Vec<u32> = Vec::new();
+    let mut sns_named: Vec<engine::ids::ObjRef> = Vec::new();
     let (mut turn, mut turn_steps) = (g.turn().number, 0u64);
     while !g.is_over() {
         g.legal_actions(&mut legal);
@@ -1196,6 +1336,12 @@ fn play(seed: u64, checks: bool) -> Played {
         }
         if delver_mode() && !g.stack().is_empty() {
             count_delver(&g, &mut stack_seen);
+        }
+        if sns_mode() {
+            if !g.stack().is_empty() {
+                count_sns(&g, &mut stack_seen);
+            }
+            count_sns_names(&g, &mut sns_named);
         }
         assert!(steps < 100_000, "seed {seed}: game does not end
 {}", g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
@@ -1543,6 +1689,23 @@ fn fuzz_random_games() {
             let p: f64 = v.parse().expect("FUZZ_BEST_SHARE: a probability");
             let best = (first..first + n).map(|s| (0..2).filter(|&q| engine::az::sealed::best_seat(s, q, p)).count()).sum::<usize>();
             println!("FUZZ_BEST_SHARE={p}: {best} of {} seats the builder's best guess", 2 * n);
+        }
+    }
+    if sns_mode() {
+        let seen: Vec<u64> = SNS_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+        let (free, unc, named) = (SNS_FREE.load(Ordering::Relaxed), SNS_UNCOUNTERABLE.load(Ordering::Relaxed), SNS_NAMED.load(Ordering::Relaxed));
+        println!(
+            "FUZZ_POOL={}: seen on the stack {}; spells cast without paying their mana costs {free}, made uncounterable {unc}; names chosen {named}",
+            if pool_mode() == PoolMode::Sns { "sns" } else { "sneak_show" },
+            SNS_CARDS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
+        );
+        if n >= 200 && pool_mode() == PoolMode::Sns {
+            assert!(seen.iter().all(|&c| c > 0) && free > 0 && unc > 0 && named > 0, "the lane's cards weren't played: {seen:?} {free} {unc} {named}");
+        }
+        // (The deck's one Omniscience, ten mana, mostly enters by Show and Tell: its free casts
+        // are what is required.)
+        if n >= 200 && pool_mode() == PoolMode::SneakShow {
+            assert!(seen[0] > 0 && seen[2] > 0 && free > 0 && unc > 0, "the deck's lane cards weren't played: {seen:?} {free} {unc}");
         }
     }
     if delver_mode() {
@@ -1926,6 +2089,10 @@ fn fuzz_random_matches() {
         println!("FUZZ_POOL=delver: games only (constructed best-of-three isn't built)");
         return;
     }
+    if sns_mode() {
+        println!("FUZZ_POOL=sneak_show / sns: games only (constructed best-of-three isn't on this branch)");
+        return;
+    }
     if eoe_mode() {
         println!("FUZZ_POOL=eoe: games only (sealed matches come with milestone S2)");
         return;
@@ -1981,7 +2148,7 @@ fn fuzz_random_matches() {
 fn same_seed_and_actions_replay_matches_identically() {
     use engine::az::MtgAz;
     use zero_search::game::SearchGame;
-    if delver_mode() || eoe_mode() || sealed_mode() {
+    if delver_mode() || sns_mode() || eoe_mode() || sealed_mode() {
         return;
     }
     for seed in 2000..2012 {

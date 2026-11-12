@@ -275,8 +275,49 @@ pub(crate) fn lower_condition_or_state(l: &mut Lowerer, c: &cats::ConditionOrSta
 
 /// A `CardFilter` (characteristics of a card) -> [`Filter`].
 pub(crate) fn lower_card_filter(l: &mut Lowerer, f: &cats::CardFilter) -> Option<Filter> {
-    let cats::CardFilter::CardFilter(n) = f;
-    lower_card_filter_node(l, n)
+    match f {
+        cats::CardFilter::CardFilter(n) => lower_card_filter_node(l, n),
+        cats::CardFilter::RotoCardFilter(n) => lower_roto_card_filter_node(l, n),
+    }
+}
+
+/// A `RotoCardFilter`: a `CardFilter` with mtg-bot's roto riders ("a
+/// nonlegendary card", "with power 2 or less"). Lowered: the base fields
+/// and "non<supertype>" (Show and Tell's "an artifact, creature, enchantment,
+/// or land card" is the base `any_types`; ENGINE.md 123). The power and
+/// toughness riders are denied (no card of the tables uses them here).
+pub(crate) fn lower_roto_card_filter_node(l: &mut Lowerer, f: &nodes::RotoCardFilter) -> Option<Filter> {
+    let nodes::RotoCardFilter {
+        any_types,
+        excluded_types,
+        max_mv,
+        color,
+        supertype,
+        subtype,
+        mana_costs,
+        excluded_supertypes,
+        max_power,
+        max_toughness,
+    } = f;
+    l.deny("RotoCardFilter.max_power", max_power);
+    l.deny("RotoCardFilter.max_toughness", max_toughness);
+    let base = nodes::CardFilter {
+        any_types: any_types.clone(),
+        excluded_types: excluded_types.clone(),
+        max_mv: *max_mv,
+        color: color.clone(),
+        supertype: supertype.clone(),
+        subtype: subtype.clone(),
+        mana_costs: mana_costs.clone(),
+    };
+    let mut out = lower_card_filter_node(l, &base)?;
+    for s in excluded_supertypes {
+        match supertypes::from_name(s) {
+            Some(b) => out = Filter::And(Box::new(out), Box::new(Filter::Not(Box::new(Filter::Supertype(b))))),
+            None => l.unsupported(format!("RotoCardFilter.excluded_supertypes({s})")),
+        }
+    }
+    Some(out)
 }
 
 /// A library search's filter: a `CardFilter`, "a card of one of these
@@ -285,6 +326,7 @@ pub(crate) fn lower_card_filter(l: &mut Lowerer, f: &cats::CardFilter) -> Option
 pub(crate) fn lower_search_filter(l: &mut Lowerer, f: &cats::CardFilterOrCardFilterAnyOfOrCardTypeOrSubtypeFilter) -> Option<Filter> {
     match f {
         cats::CardFilterOrCardFilterAnyOfOrCardTypeOrSubtypeFilter::CardFilter(n) => lower_card_filter_node(l, n),
+        cats::CardFilterOrCardFilterAnyOfOrCardTypeOrSubtypeFilter::RotoCardFilter(n) => lower_roto_card_filter_node(l, n),
         cats::CardFilterOrCardFilterAnyOfOrCardTypeOrSubtypeFilter::CardFilterAnyOf(nodes::CardFilterAnyOf { filters }) => {
             let mut any = Vec::new();
             for f in filters {

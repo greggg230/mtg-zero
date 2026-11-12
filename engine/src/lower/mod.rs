@@ -29,6 +29,7 @@ pub mod eoe_w4;
 pub mod eoe_w1;
 pub mod eoe_w6;
 pub mod eoe_w5;
+pub mod sneak_show;
 pub mod eoe_w2;
 pub mod filter;
 pub mod printing;

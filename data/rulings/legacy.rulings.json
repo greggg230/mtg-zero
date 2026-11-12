@@ -24,5 +24,130 @@
   "name": "Prismari Charm",
   "oracle_id": "c3c25a2c-f71c-4cb7-9117-0bcda9248bfd",
   "rulings": []
+ },
+ {
+  "name": "Show and Tell",
+  "oracle_id": "b83a3ba0-249e-4c39-bbf0-cb005413f7d2",
+  "rulings": [
+   {
+    "date": "2004-10-04",
+    "source": "wotc",
+    "text": "If the cards being put onto the battlefield also require choices, those choices are made after all players choose their card. The active player makes choices for their card (if any), then the other players (if any) in turn order."
+   },
+   {
+    "date": "2004-10-04",
+    "source": "wotc",
+    "text": "Players choose cards during resolution, not announcement."
+   },
+   {
+    "date": "2008-04-01",
+    "source": "wotc",
+    "text": "The current player chooses first, then each other player chooses in turn order. A player does not have to reveal the chosen card, so long as it is clear *which* card was chosen. After all choices are made, the cards are put onto the battlefield simultaneously."
+   }
+  ]
+ },
+ {
+  "name": "Omniscience",
+  "oracle_id": "730e39e6-c61d-48b5-8827-bfd952bf1be7",
+  "rulings": [
+   {
+    "date": "2018-07-13",
+    "source": "wotc",
+    "text": "If a spell has {X} in its mana cost, you must choose 0 as the value of X when casting it without paying its mana cost."
+   },
+   {
+    "date": "2018-07-13",
+    "source": "wotc",
+    "text": "If you cast a spell \"without paying its mana cost,\" you can't choose to cast it for any alternative costs. You can, however, pay additional costs, such as kicker costs. If the card has any mandatory additional costs, such as that of Tormenting Voice, those must be paid to cast the spell."
+   },
+   {
+    "date": "2018-07-13",
+    "source": "wotc",
+    "text": "Once you cast Omniscience, if it's your turn, you'll have priority immediately after it resolves. You can cast another spell before any player can attempt to remove Omniscience with spells or abilities."
+   },
+   {
+    "date": "2018-07-13",
+    "source": "wotc",
+    "text": "You must follow the normal timing permissions and restrictions of each spell you cast."
+   }
+  ]
+ },
+ {
+  "name": "Mistrise Village",
+  "oracle_id": "339f5334-b65a-445a-a016-20e997e0b4bb",
+  "rulings": [
+   {
+    "date": "2025-04-04",
+    "source": "wotc",
+    "text": "You must already control a Mountain or Forest as Mistrise Village enters for it to enter untapped. If it enters at the same time as a Mountain or Forest when you control no other Mountains or Forests, it will enter tapped."
+   }
+  ]
+ },
+ {
+  "name": "Brotherhood's End",
+  "oracle_id": "fe7bf8ca-88ae-4c6d-8d71-ef170a87c0d0",
+  "rulings": []
+ },
+ {
+  "name": "Disruptor Flute",
+  "oracle_id": "d6c46906-1339-4440-8cd0-2bb9890d4975",
+  "rulings": [
+   {
+    "date": "2024-06-07",
+    "source": "wotc",
+    "text": "Activated abilities contain a colon. They're generally written \"[Cost]: [Effect].\" Some keywords are activated abilities and will have colons in their reminder text. An activated mana ability is one that produces mana as it resolves, not one that costs mana to activate."
+   },
+   {
+    "date": "2024-06-07",
+    "source": "wotc",
+    "text": "If you name a card that has both a mana ability and another activated ability, the mana ability can be activated but the other ability can't be activated."
+   },
+   {
+    "date": "2024-06-07",
+    "source": "wotc",
+    "text": "Some cards can have alternative names, such as split cards, adventurer cards, double-faced cards, and so on. You may choose one of the two names the card can have; Disruptor Flute's abilities won't affect anything with the other name. For example, if you choose Ondu Knotmaster, Throw a Line will still cost only {W}{B} to cast."
+   },
+   {
+    "date": "2024-06-07",
+    "source": "wotc",
+    "text": "To determine the total cost of a spell, start with the mana cost or alternative cost you're paying, add any cost increases, then apply any cost reductions. The mana value of the spell remains unchanged, no matter what the total cost to cast it was."
+   },
+   {
+    "date": "2024-06-07",
+    "source": "wotc",
+    "text": "You can choose the name of any card. You can't choose the name of a token unless it's also the name of a card."
+   }
+  ]
+ },
+ {
+  "name": "Magus of the Moon",
+  "oracle_id": "6800d01c-345d-4932-a2a4-8df0fb1902f2",
+  "rulings": [
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "If Magus of the Moon loses its abilities, it continues to turn nonbasic lands into Mountains. This is because effects that change subtypes are applied before considering effects that remove abilities, regardless of the order in which those effects started."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "If a nonbasic land has an ability that causes it to enter the battlefield tapped, it will lose that ability before it can apply. The same is also true of any other abilities that modify how a land enters the battlefield or apply \"as\" a land enters the battlefield, such as that of Vesuva or Cavern of Souls."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "If a nonbasic land has an ability that triggers \"when\" it enters the battlefield, it will lose that ability before it can trigger."
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Magus of the Moon doesn't affect names or supertypes. It won't turn any land into a basic land or remove the legendary supertype from a legendary land, and the lands won't be named \"Mountain.\""
+   },
+   {
+    "date": "2021-03-19",
+    "source": "wotc",
+    "text": "Nonbasic lands lose any other land types and abilities they had. They gain the land type Mountain and gain the ability \"{T}: Add {R}.\""
+   }
+  ]
  }
 ]
