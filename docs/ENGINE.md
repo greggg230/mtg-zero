@@ -25716,6 +25716,109 @@ Desktop, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/sneak-show`, normal release 
   `docs/rulings.md` (regenerate).
 * **Reported, not changed**: Anointed Peacekeeper's name list (123.5).
 
+### 123.10 Merged with the Legacy Doomsday lanes (main 7025f2a; mtg-bot `feature/doomsday-ir` 1af29e64)
+
+Done as 124.4 did it. **mtg-bot**: `feature/doomsday-ir` 1af29e64 merged into `feature/sneak-show-ir` (3fb5f8e1):
+**60e76c0a** (feature/doomsday-ir itself untouched). **mtg-zero**: main 7025f2a merged into `sneak-show` (415adb4), a
+merge commit: **a6dd5a1**; the next commit adds this subsection and regenerates
+`docs/rulings.md` for the merge's two cross-lane tests' ruling marker (no code). Not fast-forwarded onto main, not pushed (the
+maintainer's).
+
+**mtg-bot's conflicts** (all additive): the legacy pool's data (`data/legacy_delver.json`, its sheet and sidecar) is the
+union, feature/doomsday-ir's twelve records byte for byte, then this branch's six (18; the sidecar's latest fetch
+time); the pinned card lists of `test_fetch_cube.py` and `test_legacy_creatures.py` the union (`LEGACY_CARDS`);
+`effects._parse_effect`'s very last fallback chains lane A's `legacy_spells`, lane B's `legacy_stack`, then
+`legacy_sneak` (their phrases are disjoint: "at the beginning of your next upkeep", "pay <cost>. If you don't", "change
+the target of target spell", "deals N damage to each creature and each planeswalker"); `docs/SEARCH_LIMITATIONS.md` keeps
+both sections. `cards roundtrip --pool cube legacy eoe roto` passes (546, 18, 483, 849 cards); the legacy pool's tests
+(the lanes' three files, `test_legacy_sneak.py`, `test_legacy_creatures.py`, `test_fetch_cube.py`, `test_card_ir.py`,
+`test_pools.py`): 155 passed.
+
+**The export** (`cards export-ir --pool cube legacy eoe` from 60e76c0a, `filter_eoe_ir.py`, `gen_card_ir.py`):
+schema `245e4bc208c6...`, 724 classes, exactly the union of main's 717 and this branch's 716; `powerlsv.ir.json` and
+`eoe.ir.json` main's byte for byte but `schema_sha256` (card by card and as bytes); `legacy.ir.json` the 18 legacy cards,
+each card's IR equal to its branch's export.
+
+**mtg-zero's conflicts**
+
+| File | Resolution |
+|---|---|
+| `data/cards/*`, `card_ir/src/generated.rs` | the merged export above |
+| `engine/src/az/legacy_cards.txt` | main's twelve, then the six after Leyline of the Void: **Show and Tell 558, Omniscience 559, Mistrise Village 560, Brotherhood's End 561, Disruptor Flute 562, Magus of the Moon 563** (Delver's five sideboard cards follow later; no test names a number) |
+| `engine/src/az/tokens.txt` | main's lines in order (unchanged there), then " -/- C " (the Mountain's abilities, 123.6): line 54 |
+| `az/mod.rs` | **one list** of the cards layout v6 can't encode: `az::needs_layout_v7` (`V7_ONLY`: Cavern of Souls' floating mana, `doomsday_b::makes_chosen_type_mana`; Disruptor Flute's name, `sneak_show::plain_name_needs_v7`), the one check in `MtgSpec::parse` |
+| `public_state.rs` | both limits (`CHOSEN_TYPE_MANA_GAP`, `CHOSEN_NAME_GAP`), `V6_FIXED` 26 (Cavern's chosen type and Mistrise Village's float) |
+| `tests/az.rs` | main's file, the gate expecting the two gaps (`next == 2`) and both refusal tests (`flute_...` also checks the Sneak and Show main 60 accepted and its sideboard refused) |
+| `tests/constructed.rs` | main's registry-derived card-table test with the Magus's Mountain definitions at the table's end; `the_sneak_show_75_and_its_provenance` (new) |
+| `tests/fuzz.rs` | main's pools, then `sneak_show` (now the deck's real 60 from `data/decks/sneak_show_8014220.json`, Flusterstorm included) and `sns` in `constructed_mode()` |
+| `lib.rs`, `program.rs`, `resolve_ext.rs`, `lower/effect.rs` | every lane's modules and `Ext` variants; the effect catch-all chains lane A, lane B, then `lower_effect_sns` |
+| `lower/printing.rs` | denies neither `roto_statics` (lowered here) nor `enters_choosing_creature_type` (lowered by lane B) |
+| `db.rs` | `SEEN_VOID` with lane C's `opp_gy_exile`, `SEEN_NAMED_TAX` with the Flute's prohibition; `CardDef::dd_b` and `CardDef::sns` both |
+| `data/rulings/legacy.rulings.json`, `triage.tsv`, `docs/rulings.md` | the union (refetched in the pool's order: main's twelve cards' 31 rulings unchanged, then the six's 18), main's triage rows then this branch's 16; `docs/rulings.md` regenerated: 1,656 rulings (1,298 distinct), 1,274 class a, every one tested |
+| `docs/ENGINE.md` | 123 then 124; identities 563-568 corrected to 558-563 (123.1) and the PROVENANCE note |
+| `docs/ir_defects.md` | main's T and U, then this branch's section relettered V |
+| `docs/card_ir.md` | "Current numbers" for the merged export |
+
+Merged by git without a conflict and read: `cast.rs`, `pay.rs`, `hidden.rs`, `game.rs` (lane B's `Spend` and the
+Mistrise hooks are apart), `resolve_m7d.rs`, `layers.rs`, `eoe_w2.rs`, `activate.rs`, `encode.rs` (lane B's perm
+133-141 for Cavern's type, this branch's g6 float 8).
+
+**The deck.** Flusterstorm is on main now: the Sneak and Show main 60 is fully supported, and `FUZZ_POOL=sneak_show`
+plays it as it is (the two Pyroblast stand-ins gone). It loads as a best-of-one spec (`constructed`, decks the main 60,
+against itself or the Delver 60): accepted (`the_sneak_show_75_and_its_provenance`, `az.rs
+flute_decks_are_refused_to_networks_on_layout_v6`). The sideboard is not ready: **Consign to Memory** is still
+unsupported (it comes with the Delver best-of-three lane), and the sideboard holds **Disruptor Flute**, so a spec with
+its sideboard, and so any best-of-three of this deck, stays refused ("Disruptor Flute's chosen name needs layout v7")
+until layout v7 (125).
+
+Two cross-lane tests added (`cards_sneak_show.rs`, 59 now): the Flute naming Street Wraith stops its cycling in the hand
+(lane C's card); Flusterstorm against a spell Mistrise Village made uncounterable counters nothing (lane B's card).
+
+**Checks on the merged commit a6dd5a1** (the engine suite, digests and pytest on the desktop; the fuzz on the Mac with
+`tools/mac.sh`, bit-identical to the desktop, ENGINE.md 44):
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): **2,434
+  passed, 0 failed, 22 ignored** (main's 2,373 and this branch's tests: `az` 50, `constructed` 9, `cards_sneak_show` 59,
+  `cards_doomsday_a` 44, `cards_doomsday_b` 28, `cards_doomsday_c` 37, `cards_legacy` 24).
+* **Behaviour digests equal to main's**: full **53839c837bbaf034** (every one of the 2,500 games equal to
+  `tests/data/digests.txt`), `DIGEST_ENCODING=0` **208c723daced22fe**, `DIGEST_ENCODING=v5` **dc33538c0497dbf0**.
+* **The public-state gate** (`--test az`): 158 perturbations encoded (Mistrise Village's g6 float 8 among them: 360
+  applied, the view and both encodings changed), 4 deliberate limits, exactly two next-layout gaps, Cavern of Souls'
+  mana (15 applied) and the chosen card name (359 applied), each tied to `az::needs_layout_v7`.
+* **Fuzz** (no failure in any):
+  * `FUZZ_POOL=sneak_show`, 20,000 games (4 shards of 5,000): wins 10,079 / 9,867, 54 drawn, none aborted, 24.0 turns
+    and 238.7 decisions a game, 7,801,865 options completed; seen on the stack Show and Tell 8,511, Omniscience 3 (it
+    enters by Show and Tell), Mistrise Village's ability 21,854; free casts 2,505; uncounterable spells 2,479.
+  * `FUZZ_POOL=doomsday`, 5,000 games: wins 2,406 / 2,457, 137 drawn, 29.6 turns, 318.4 decisions a game, 2,843,120
+    options completed (every Doomsday card seen, as 124.4).
+  * `FUZZ_POOL=sns`, 5,000 games: wins 2,442 / 2,443, 115 drawn, 2,839,330 options completed; Show and Tell 2,388,
+    Omniscience 94, Mistrise Village 22,484, Brotherhood's End 2,231, Disruptor Flute 6,144, Magus of the Moon 1,836, free
+    casts 1,360, uncounterable 1,424, names chosen 7,745: exactly the pre-merge games of these seeds (123.8's first shard).
+  * `FUZZ_POOL=delver`, 4,000 games: 1,924 / 1,907, 169 drawn, 2,390,436 options completed, Murktide Regent 2,031, its
+    trigger 84, Prismari Charm 2,937: the mirror's games exactly (124.4).
+  * The `fuzz` profile (debug assertions), `FUZZ_POOL=sneak_show`, 1,000 games: 496 / 501, 3 drawn, 632,720 options
+    completed.
+* `bash tools/build_py.sh`, `python -m pytest -q tests`: 282 passed, 1 skipped, 1 failed: `test_mac_remote.py::
+  test_a_remote_eoe_evaluation_logs_its_games` timed out (its subprocess's 600 s, the desktop loaded with other
+  sessions' checks; 124.1 met the same) and passes alone (63 s): 283 passed, 1 skipped. `python -m pytest -q
+  tools/codegen`: 2 passed. `python tools/rulings_doc.py --check`: current (regenerated once more for the two
+  cross-lane tests' ruling marker). `python tools/untested_cards.py`: 564 supported (18 legacy), **0** named by no card
+  test.
+* mtg-bot (`feature/sneak-show-ir` 60e76c0a), the full suite (`pytest -n 8 --no-cov`): 49 failed, 21,143 passed, 24
+  skipped. 47 of them fail at the merge base f4f2d663 too (124.4's list, rerun there before the merge); the other two
+  pass alone (`test_eternity_elevator_admits_at_loader_admits_helper`, lane C's known xdist ordering flake, and
+  `training_ui/test_launcher.py::test_force_kill_endpoint_os_kills_matched_spawn`, a timing test under the desktop's
+  load): no new failure.
+* **`tools/gate.py engine` was not run**: its recipe includes a search smoke (`tools/search_smoke.py --specs random
+  --seeds 0`, not skippable), which this lane's rules forbid; its other steps were run by hand above (the build, both
+  digests, `--test az`, `limits` and `hidden` within the suite, pytest), so no `gates/<sha>.json` was written. The
+  maintainer's call.
+* No docs/shortcuts.md entry; layout v6 (one spare: g6 float 8); no zero-core change.
+
+**Open.** Consign to Memory (the Delver lane) completes the sideboard; best-of-three and any network play with the
+sideboard wait for layout v7 (the Flute); `az/constructed.rs` has no `Decklist::sneak_show()` (the tests read the
+JSON) and `mtgz.az.decklists` no Python loader for it: the best-of-three lane's to add.
+
 ## 124. Legacy Doomsday: the deck's cards
 
 **Why.** The next constructed matchup after the Delver mirror (54): MTGGoldfish's archetype "Legacy Doomsday"
