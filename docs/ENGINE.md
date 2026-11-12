@@ -26223,6 +26223,11 @@ settings and the tests.
   3.1e-6 through the pack's ONNX Runtime), the coordinator credited 8 games, `farm_h2h --resume` read them (A 0.625 +-
   0.125, 4 pairs) and the 8 rows are byte-identical to a local Python evaluation of the same 8 games in one driver;
   `--cancel` paused the run. The coordinator was stopped afterwards.
+* **The engine gate on 042b29b** (this section's commit, pin b19ba7a): `python tools/gate.py engine --expect-digest
+  8d1cce220fbc3eb2 --expect-digest0 c3efa1c404527dab --tested-sha 042b29b6 --jobs 8` -> **GATE PASSED engine 042b29b620d8
+  in 1260s**: build; digests unchanged (= main's, 127.4: full 8d1cce220fbc3eb2, `DIGEST_ENCODING=0` c3efa1c404527dab);
+  `--test az` 50, `limits` 13, `hidden` 28; pytest 314 passed, 1 skipped; the random smoke; the tree unchanged. (The
+  Mac recheck is "not needed" when the tested sha is the gated one: not run.)
 
 **Published** to farm.greggg230.com (registered; no run, batch or invite created): release worker
 **e96bf8e44b9634502e44dcc3** (`mtg-be674a2-release`: engine be674a2, core abca043, kinds `["selfplay", "eval",
