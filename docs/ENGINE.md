@@ -25745,3 +25745,127 @@ Python engine's Edge of Autumn and its cycling), the legacy pool's pinned lists.
   xdist ordering flake).
 * `docs/card_ir.md` ("Current numbers") is left to the merge: lanes A and B change the schema too,
   and the integrated export replaces all three files at once.
+
+### 124.4 The lanes merged; the deck and `FUZZ_POOL=doomsday` (branch `doomsday`, mtg-bot `feature/doomsday-ir`)
+
+Branch `doomsday` from main 37fa30b (60397f3, the lanes' branch point, and S4a v2's two commits: Python and docs only;
+its `engine`, `card_ir`, `data/cards` and `third_party` trees are 60397f3's). The lanes merged in their order, each its
+own merge commit: A (`doomsday-a` d47b197: c2b5bd3), B (`doomsday-b` 4f1a30b: 726faea), C (`doomsday-c` e0c7855:
+18a263c). mtg-bot `feature/doomsday-ir` from `feature/eoe-ir-fixes` f4f2d663, the three IR branches merged likewise
+(`feature/doomsday-a-ir` a544a075: 9c379413, `-b-ir` c5d2a557: 8a77d63e, `-c-ir` 870228f5: 1af29e64). Not merged:
+`doomsday-b-v7` and its snapshot (layout v7 lands later, 124.2). Layout v6, no encoding or identity-scheme change.
+
+**mtg-bot.** Three conflicts. The legacy pool's data (`data/legacy_delver.json`, its sheet and sidecar): the union of
+the lanes' Scryfall records as each fetched them, the Delver mirror's two first, then A's, B's and C's (the sidecar
+counts 12, lane A's fetch time, the latest). The pinned card lists of `test_fetch_cube.py` and
+`test_legacy_creatures.py`: the union. And `effects._parse_effect`'s very last fallback, which lanes A and B both
+took: chained, A's `legacy_spells` ("at the beginning of your next upkeep, <effect>", "pay <cost>. If you don't,
+<effect>") then B's `legacy_stack` ("change the target of target <spell> with a single target"). Their phrases are
+disjoint, and A's recursive parse of the inner effect rejects a targeting one, so B's recognizer claims nothing inside
+A's. Lane C's two recognizers (the non-mana "Cycling—<cost>", which replaced the pay-life-only one, and the "if you
+control <N> or fewer <permanents>" condition) are in other grammars and merged without a conflict. The export shows
+that no recognizer shadows another: every pool's claimed printings are unchanged and each legacy card's IR is its
+lane's.
+
+**The export** (`cards export-ir --pool cube legacy eoe` from 1af29e64, `filter_eoe_ir.py`, `gen_card_ir.py`;
+docs/card_ir.md, "Current numbers"): schema `2b73853e6d15...`, 717 classes, exactly the union of the lanes' additions
+(A's four classes and `DelayedStep.your_upkeep`, B's three, C's `PayLifeCost` in the `CostAtom` category; the `Effect`
+category the union of A's and B's members). `powerlsv.ir.json` and `eoe.ir.json` are main's files byte for byte but
+`schema_sha256` (compared card by card and as bytes); `legacy.ir.json` holds exactly the 12 legacy cards, each card's
+IR equal to its lane's export. `cards roundtrip --pool cube legacy eoe roto` passes (546, 12, 483 and 849 cards); the
+lanes' new test files and the pool tests (`test_legacy_spells.py`, `test_legacy_stack.py`, `test_doomsday_c_cards.py`,
+`test_legacy_creatures.py`, `test_fetch_cube.py`, `test_card_ir.py`, `test_pools.py`): 139 passed. The full suite
+(`pytest -n 6 --no-cov`, 2,246 s): 18,650 passed, 48 failed, 24 skipped, 106 xfailed, 1 xpassed. The 48 are lane A's
+48 pre-existing failures (124.1); run by name at f4f2d663 (the worktree checked out there), 47 of them fail, and the
+48th (`test_spacecraft_phase_4_cycle_2_flip.py::test_eternity_elevator_admits_at_loader_admits_helper`) passes with
+its module on the merged branch: lane C's xdist ordering flake (124.3).
+
+**mtg-zero's conflicts.** All additive; no two lanes changed one rule differently, so no design decision was needed.
+
+| File | Resolution |
+|---|---|
+| `data/cards/*`, `card_ir/src/generated.rs` | the integrated export, from merge B on (so merge B alone doesn't build: its schema has lane C's `PayLifeCost`, whose lowering comes with merge C) |
+| `engine/src/az/legacy_cards.txt` | A's four, B's three and C's three after the Delver two: identities 546..557 |
+| `lower/effect.rs` | the effect catch-all chains lane A's `lower_effect_dd_a`, then lane B's `lower_effect_doomsday_b` |
+| `program.rs` (`resolve_ext.rs` merged by git) | `Ext::DdA` and `Ext::DoomsdayB` both, in every match |
+| `lib.rs` (`lower/mod.rs` merged by git) | every lane's modules |
+| `tests/constructed.rs` | one registry-derived card-table test (each lane had rewritten the legacy count): every registry line a card of constructed play's table at `LEGACY_BASE` + its line, the registry exactly the legacy IR's cards (their count and each card), the first two still 546 and 547 |
+| `tests/fuzz.rs` | `PoolMode` keeps `DdA`, `DdB` and `DoomsdayC` (pools `dd_a`, `dd_b`, `dd_c`); `constructed_mode()` covers them, `delver` and `doomsday` (lane A's `delver_mode() \|\| dd_a_mode()` tests folded into it); lane C's deck, counters and report spliced in whole; the module docs gain `dd_c`'s line (the lane wrote none there) |
+| `tools/untested_cards.py` | lane A's version: the registry joins the supported list (lane B's is the same; lane C's second listing dropped) |
+| `data/rulings/legacy.rulings.json`, `triage.tsv`, `docs/rulings.md` | the rulings the union of the lanes' files in the legacy pool's order (12 cards, 31 rulings), the triage rows of all three; `docs/rulings.md` regenerated (`tools/rulings_doc.py`): 1,638 rulings (1,282 distinct), 1,256 class a, every one tested |
+| `docs/ir_defects.md` | lane A's section T (entry 200, fixed), lane B's relettered U (entry 220); lane C found none |
+| `docs/card_ir.md` | "Current numbers" for the integrated export (the lanes' interim exports never reached main) |
+| `docs/ENGINE.md` | main's 111, then this section; the lanes' 110 / 110.1 / 110.3 renumbered 124 / 124.1 / 124.3 here, in docs/ir_defects.md and in the 34 code comments and fuzz doc lines they wrote |
+
+Files git merged without a conflict, read where two lanes touched the same code: `cost_order.rs` (B's
+`Filter::SingleTarget` reads nothing; C's Leyline beside Dauthi Voidwalker among the destination changers),
+`db.rs` (B's `Spend`, A's `DelayedWhen::YourNextUpkeep`, C's landwalk keywords, `opp_gy_exile` and its `SEEN_VOID`),
+`game.rs`, `triggers.rs` (C's `Lki` fields, A's delayed trigger), `lower/activated.rs` (B's `Spend`-typed mana
+restriction and Cavern's mana ability, C's `PayLifeCost` atom), `lower/printing.rs` (B's
+`enters_choosing_creature_type`, C's `zone_abilities` and landwalk). No identical double-add (99.6): the workspace
+builds without an error or a warning.
+
+**The deck** (`data/decks/doomsday_8027957.json`, `.txt`; `az::constructed::{LEGACY_DOOMSDAY, LEGACY_DOOMSDAY_EXPORT}`,
+`Decklist::legacy_doomsday`; `mtgz.az.decklists.LEGACY_DOOMSDAY`). The `.txt` is the export verbatim: the archetype
+page's export field (`deck_input[deck]`, read 2026-11-11, since `/deck/download/8027957` is behind a Cloudflare
+challenge), with MTGGoldfish's `sideboard` line before the 15 (`parse_export` reads it beside MTGO's blank line). The
+`.json` has the page's provenance, "Sultai Doomsday" by wonderPreaux, North American Eternal Weekend - Legacy
+Championship, 2026-10-31, 7th place (11-2-2), paper (deck source melee.gg), and the 60 + 15 by the card table's names
+(Tamiyo by her front face in the export, `export_names`, as the Delver deck). All 75 cards are supported in constructed
+play (Voice of Victory, Duress, Fatal Push and Force of Negation are cube cards): the deck has eight of the ten new
+cards, the sideboard Flusterstorm and Leyline of the Void (and Murktide Regent). Tests:
+`constructed.rs::the_doomsday_75_and_its_provenance` (the export equals the JSON; every card supported; CR 100.2a /
+100.4a over the deck and the sideboard together: Flow State's one and one pass, three more in the sideboard are five
+and refused; at most `MAX_DECK`; the legacy cards in it in the registry's order; the spec refuses the deck on layout
+v6, Cavern of Souls, 124.2: network play of this deck waits for layout v7), and
+`tests/test_delver.py::test_the_doomsday_deck_and_its_loader` (the Python loader, the engine's refusal).
+
+**`FUZZ_POOL=doomsday`** (`engine/tests/fuzz.rs`): the real Doomsday 60 against the Delver 60 in either seat and the
+Doomsday mirror (`seed % 3`), best-of-one without sideboards, constructed play's table; every check of the default
+mode. It counts the legacy cards' spells on the stack (and Thassa's Oracle), Pact of Negation's trigger, Edge of
+Autumn's and Street Wraith's cycling, Murktide Regent's trigger, Misdirection's new-target decisions, Caverns' creature
+types and uncounterable creature spells; with 200 games or more the deck's spells, Pact's trigger, both cyclings, a new
+target and a Cavern's type must have been seen (Murktide Regent and Prismari Charm on the Delver side), with 2,000 or
+more an Edge of Autumn and a Street Wraith cast too. (Every pool's counters are process-wide, so a run's figures
+include the games of the binary's replay test that finish before the report, 60 a process: the lanes' Delver counts
+differ by that, not by their games.)
+
+**Checks** (code at 7fbb1d9, the desktop unless said; the next commit adds this subsection only):
+
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`): 2,373
+  passed, 0 failed, 22 ignored (`az` 49, `constructed` 8, `cards_doomsday_a` 44, `cards_doomsday_b` 28,
+  `cards_doomsday_c` 37, `cards_legacy` 24).
+* **Behaviour digests equal to main's**: main 37fa30b (measured there) full **53839c837bbaf034**, `DIGEST_ENCODING=0`
+  **208c723daced22fe**, `DIGEST_ENCODING=v5` **dc33538c0497dbf0** (the lanes' values at 60397f3); 7fbb1d9 the same
+  three, every game equal to `tests/data/digests.txt`.
+* **The public-state gate** (`--test az`): 157 perturbations encoded, 4 deliberate limits, exactly one gap for the next
+  layout, lane B's ("mana in a pool is restricted to creature spells of a chosen type", 15 positions applied, the
+  encoding unchanged), "a creature type was chosen as a permanent entered" encoded.
+* **Fuzz of the merged code** (no failure in any; per pool the games and what was seen):
+  * `FUZZ_POOL=doomsday`, 20,000 games (4 shards of 5,000): wins 9,725 / 9,693, 582 drawn at the turn cap, none
+    aborted, 29.5 turns and 316.3 decisions a game, 11,288,752 options completed (21.3 million decisions after them).
+    Seen on the stack: Doomsday 8,431, Pact of Negation 7,794 (its trigger 8,342), Personal Tutor 11,873, Flow State
+    3,558, Misdirection 8,839 (2,033 new-target decisions), Edge of Autumn 53 (cycled 15,611), Street Wraith 72
+    (cycled 6,506), Thassa's Oracle 3,657, Murktide Regent 2,834 (its trigger 153), Prismari Charm 4,217; 10,113
+    Caverns' types chosen; no uncounterable creature spell (random play's Cavern types are rarely the deck's Merfolk,
+    Moonfolk, Wizard or Wraith; `dd_b` covers it).
+  * `dd_a`, 5,000 games: 2,495 / 2,457, 48 drawn; Doomsday 1,131, Pact 3,693 (triggers 4,101), Personal Tutor 3,927,
+    Flow State 1,623.
+  * `dd_b`, 5,000 games: 2,410 / 2,434, 156 drawn; Misdirection 4,414 (1,449 new targets), Flusterstorm 2,556 (3,644
+    copies), 8,765 Cavern types, 60 uncounterable creature spells.
+  * `dd_c`, 5,000 games: 2,133 / 2,109, 758 drawn; Edge of Autumn cast 229 and cycled 13,314, Street Wraith cast 67 and
+    cycled 5,787, 2 blockers facing a swampwalker with a Swamp (never offered it), Leyline of the Void on the
+    battlefield as the first turn began in 1,131 games.
+  * `delver`, 4,000 games: 1,924 / 1,907, 169 drawn, 383.4 decisions a game, 2,390,436 options completed: the lanes'
+    games exactly (124.2, 124.3).
+  * The `fuzz` profile (debug assertions), `FUZZ_POOL=doomsday`, 1,000 games on the Mac (`tools/mac.sh`): no failure
+    (475 / 494, 31 drawn).
+* `bash tools/build_py.sh`, `python -m pytest -q tests`: 274 passed, 1 skipped; `python -m pytest -q tools/codegen`: 2
+  passed; `python tools/rulings_doc.py --check` passes; `python tools/untested_cards.py`: 558 supported (12 legacy),
+  none named by no card test.
+* No docs/shortcuts.md entry, no approximation; layout v6 unchanged (v7, with Cavern's floating mana, is
+  `doomsday-b-v7`'s).
+
+**Left.** A network can't play the deck until layout v7 (the spec refuses Cavern of Souls, 124.2); constructed
+best-of-three and sideboarding (54.8) remain unbuilt, so the deck's sideboard (Flusterstorm, Leyline of the Void) is
+played only by the lanes' pools `dd_b` and `dd_c`.
