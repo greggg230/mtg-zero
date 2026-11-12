@@ -146,7 +146,8 @@
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 //!
 //! `FUZZ_HIDDEN_DECKS=1` (ENGINE.md 102): the mode's games (the default decks, `FUZZ_POOL=eoe`'s or
-//! `FUZZ_POOL=sealed`'s) with hidden decklists, played through `MtgAz` (`MtgAz::from_seats`, the
+//! `FUZZ_POOL=sealed`'s; refused with `sneak_show`, `sns` and `delver_sb`, whose Show and Tell pick the
+//! table's prior cannot condition a deck on, ENGINE.md 129.3) with hidden decklists, played through `MtgAz` (`MtgAz::from_seats`, the
 //! table's `TablePrior` for both decks; with `FUZZ_POOL=sealed` the spec's `SealedPrior`, 102.6): every check of a game (the decider's encoding through `MtgAz::encode`) and at
 //! each checkpoint `MtgAz::determinize` for both viewers - the decider's actions, the viewer's
 //! view and whole encoding as in the real game, no known card dealt again, the opponent's sampled
@@ -3377,6 +3378,12 @@ fn hd_shown(a: &engine::az::MtgAz, viewer: u8) -> Vec<u16> {
 /// each checkpoint, `check_determinize_hidden`.
 fn play_hidden(seed: u64) -> Played {
     use zero_search::game::SearchGame;
+    // (Show and Tell's face-down pick reaches a hidden deck's request, which only the constructed prior
+    // conditions on: the table's refuses it, ENGINE.md 129.3. Its decks play constructed best-of-three.)
+    assert!(
+        !(sns_mode() || delver_sb_mode()),
+        "FUZZ_HIDDEN_DECKS=1 with a pool that casts Show and Tell (sneak_show, sns, delver_sb): the table's prior cannot condition a deck on its face-down pick (ENGINE.md 129.3)"
+    );
     let [(d0, s0), (d1, s1)] = decks(seed);
     let log = std::env::var("FUZZ_LOG").is_ok();
     let gspec = GameSpec { log, hidden_decks: true, hidden_decklists: true, ..GameSpec::default() };

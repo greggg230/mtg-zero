@@ -301,7 +301,7 @@ fn a_constructed_deck_is_sideboarded_to_exactly_60_cards() {
         let (pool, start) = MatchPool::constructed(&main, &side);
         let prior = ConstructedPrior::new(&main, &side);
         for _ in 0..200 {
-            let s = prior.sample(&DeckWant { db, n: 60, shown: &[], companion: None, tilt: None }, &mut rng);
+            let s = prior.sample(&DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None }, &mut rng);
             let (_, target) = MatchPool::constructed(&s.deck, &s.sideboard);
             assert_eq!(sideboard_to(&pool, &start, &target).unwrap(), target);
             paths += 1;
@@ -366,7 +366,7 @@ fn the_constructed_prior_meets_its_contract() {
     let mut rng = Rng::new(113);
     let n = 3200;
     let mut hist = [0usize; 16];
-    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None };
+    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None };
     for _ in 0..n {
         let s = prior.sample(&plain, &mut rng);
         check_sample(&prior, &plain, &s).unwrap();
@@ -381,7 +381,7 @@ fn the_constructed_prior_meets_its_contract() {
     let id = |s: &str| db.expect_id(s).unwrap();
     let mut shown = vec![id("Pyroblast"), id("Pyroblast"), id("Unholy Heat"), id("Unholy Heat"), id("Unholy Heat"), id("Daze"), id("Karakas")];
     shown.sort_unstable();
-    let want = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None };
+    let want = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None, pick: None };
     let mut at_least = 0;
     for _ in 0..600 {
         let s = prior.sample(&want, &mut rng);
@@ -392,7 +392,7 @@ fn the_constructed_prior_meets_its_contract() {
     assert_eq!(at_least, 600, "two Pyroblasts, a third Unholy Heat and Karakas are four swaps at least");
     // A tilt of 1 is the untilted draw; a sharp tilt concentrates the deck on the card.
     let one = |_d: u16| 1.0;
-    let tilted1 = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: Some(&one) };
+    let tilted1 = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: Some(&one), pick: None };
     let (mut r1, mut r2) = (Rng::new(5), Rng::new(5));
     for _ in 0..50 {
         assert_eq!(prior.sample(&want, &mut r1), prior.sample(&tilted1, &mut r2));
@@ -405,7 +405,7 @@ fn the_constructed_prior_meets_its_contract() {
     for _ in 0..200 {
         for (w, n) in [(1e6, &mut up), (1e-6, &mut down)] {
             let f = move |d: u16| if d == cs { w } else { 1.0 };
-            let tilted = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: Some(&f) };
+            let tilted = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: Some(&f), pick: None };
             let s = prior.sample(&tilted, &mut rng);
             check_sample(&prior, &tilted, &s).unwrap();
             assert!(holds(&s.deck, &shown));
@@ -640,7 +640,7 @@ fn constructed_deal_cost() {
         v
     };
     for (what, sh) in [("no shown card", &[][..]), ("three shown cards", &shown[..])] {
-        let want = DeckWant { db, n: 60, shown: sh, companion: None, tilt: None };
+        let want = DeckWant { db, n: 60, shown: sh, companion: None, tilt: None, pick: None };
         let t = std::time::Instant::now();
         let n = 4000;
         for _ in 0..n {
@@ -759,4 +759,295 @@ fn two_different_75s_play_constructed_matches() {
     }
     println!("two 75s: {games} games in 10 matches, {worlds} worlds ({later} in later games)");
     assert!(later > 20, "{later}");
+}
+
+// ---- Show and Tell's face-down pick and the hidden 60 (ENGINE.md 129.3) ----
+
+/// A Sneak and Show 75 for a constructed best-of-three on this layout: MTGGoldfish 8014220
+/// (`data/decks/sneak_show_8014220.json`) with its Disruptor Flute (refused on layout v6: its card name
+/// needs layout v7) swapped for a second Pyroblast. (main, sideboard) names.
+fn sneak_show_75() -> (Vec<String>, Vec<String>) {
+    let d = Decklist::parse(include_str!("../../data/decks/sneak_show_8014220.json")).unwrap();
+    let side: Vec<String> = d
+        .sideboard
+        .iter()
+        .flat_map(|(n, s)| std::iter::repeat_n(if s == "Disruptor Flute" { "Pyroblast".to_string() } else { s.clone() }, *n as usize))
+        .collect();
+    assert!(!side.iter().any(|s| s == "Disruptor Flute") && side.len() == 15);
+    (d.main_names(), side)
+}
+
+/// "An artifact, creature, enchantment, or land card" (Show and Tell's kind), read from the card's
+/// definition: the test's own reading of the Oracle text, beside the engine's filter.
+fn snt_kind(d: u16) -> bool {
+    use engine::db::types;
+    db().def(d).types & (types::ARTIFACT | types::CREATURE | types::ENCHANTMENT | types::LAND) != 0
+}
+
+fn ids_of(names: &[String]) -> Vec<u16> {
+    let mut v: Vec<u16> = names.iter().map(|n| db().id(n).unwrap_or_else(|| panic!("{n}"))).collect();
+    v.sort_unstable();
+    v
+}
+
+#[test]
+fn cr_101_4a_a_face_down_pick_reaches_the_deck_request_exactly() {
+    // ruling: a107ed89
+    // The request of a hidden 60 (ENGINE.md 129.3). The viewer has seen 37 of the Sneak and Show main's
+    // 38 artifact, creature, enchantment and land cards (all but one Emrakul); the sideboard holds 7 cards
+    // of other kinds. Untold, the constructed prior deals 60s whose unseen cards hold none of the kind
+    // (that Emrakul sided out for instants and sorceries): in such a world the opponent's face-down
+    // Show and Tell pick, which the viewer knows was made, can be no card at all - `determinize` could
+    // never deal one. The request carrying the pick (its chance a + b y given the deck, y the deck's cards
+    // of the kind beyond those seen; here a = 0: no hand card of the kind is known) never deals one, and
+    // deals the exact posterior: the plain prior's decks reweighed by a + b y.
+    let (main, side) = sneak_show_75();
+    let (main, side) = (ids_of(&main), ids_of(&side));
+    let prior = ConstructedPrior::new(&main, &side);
+    let emrakul = db().id("Emrakul, the Aeons Torn").unwrap();
+    let mut shown: Vec<u16> = main.iter().copied().filter(|&d| snt_kind(d)).collect();
+    shown.remove(shown.iter().position(|&d| d == emrakul).unwrap());
+    assert_eq!(shown.len(), 37);
+    let legal: Vec<u16> = {
+        let mut v: Vec<u16> = prior.support().iter().copied().filter(|&d| snt_kind(d)).collect();
+        v.dedup();
+        v
+    };
+    let beyond = |deck: &[u16]| deck.iter().filter(|&&d| snt_kind(d)).count() - shown.len();
+    let plain = DeckWant { db: db(), n: 60, shown: &shown, companion: None, tilt: None, pick: None };
+    // (a = 0, b = 1: the chance is proportional to y)
+    let pw = engine::az::hidden_decks::PickWant { legal: legal.clone(), a: 0.0, b: 1.0 };
+    let picked = DeckWant { db: db(), n: 60, shown: &shown, companion: None, tilt: None, pick: Some(&pw) };
+    const N: usize = 20_000;
+    let mut rng = Rng::new(129);
+    let (mut none, mut wsum, mut wy) = (0usize, 0.0f64, 0.0f64);
+    let mut by_y_plain = [0.0f64; 16];
+    for _ in 0..N {
+        let s = prior.sample(&plain, &mut rng);
+        check_sample(&prior, &plain, &s).unwrap();
+        let mut deck = s.deck.clone();
+        deck.sort_unstable();
+        let y = beyond(&deck);
+        none += (y == 0) as usize;
+        // the posterior by importance: each plain deck weighed by its chance y
+        wsum += y as f64;
+        wy += (y * y) as f64;
+        by_y_plain[y] += y as f64;
+    }
+    let mut by_y_picked = [0.0f64; 16];
+    let mut sy = 0.0f64;
+    for _ in 0..N {
+        let s = prior.sample(&picked, &mut rng);
+        check_sample(&prior, &picked, &s).unwrap();
+        let mut deck = s.deck.clone();
+        deck.sort_unstable();
+        let y = beyond(&deck);
+        assert!(y > 0, "a deck with no card of the kind beyond those seen: no legal face-down pick");
+        by_y_picked[y] += 1.0;
+        sy += y as f64;
+    }
+    let (m_plain_w, m_picked) = (wy / wsum, sy / N as f64);
+    println!("plain prior: {none} of {N} decks with no unseen card of the kind; posterior mean y by importance {m_plain_w:.4}, by the request {m_picked:.4}");
+    assert!(none > 20, "the plain prior deals 60s without a legal pick here: {none}");
+    // The distribution of y: the request's against the importance-weighed plain prior's.
+    for y in 1..16 {
+        let (p, q) = (by_y_plain[y] / wsum, by_y_picked[y] / N as f64);
+        let se = (p * (1.0 - p) / N as f64).sqrt() * 2.0 + 1e-4;
+        assert!((p - q).abs() < 4.0 * se, "y = {y}: importance {p:.4}, request {q:.4}");
+    }
+    // `expected_fill` under the pick: the request's own means.
+    let fill = prior.expected_fill(&picked);
+    let e_em = fill[emrakul as usize];
+    let mut m_em = 0.0;
+    let mut rng = Rng::new(130);
+    for _ in 0..N {
+        let s = prior.sample(&picked, &mut rng);
+        m_em += s.deck.iter().filter(|&&d| d == emrakul).count() as f64 / N as f64;
+    }
+    // (the fill is beyond the shown copies: two of the three Emrakuls are shown)
+    let m_em = m_em - 2.0;
+    println!("Emrakul's expected fill under the pick {e_em:.4}, sampled {m_em:.4}");
+    assert!((e_em - m_em).abs() < 0.03, "{e_em} {m_em}");
+    // A request without a pick draws as before (ENGINE.md 120.2): the same decks, draw for draw.
+    let (mut r1, mut r2) = (Rng::new(5), Rng::new(5));
+    let again = DeckWant { db: db(), n: 60, shown: &shown, companion: None, tilt: None, pick: None };
+    assert_eq!(prior.sample(&plain, &mut r1), prior.sample(&again, &mut r2));
+}
+
+/// The steering of `snt_match`: Sneak and Show (P0) plays a land, casts Show and Tell and Lotus Petal when
+/// it can and puts a card with Show and Tell; the Delver player (P1) only passes priority; every other
+/// decision at random (mulligans, payments, the play-or-draw choice, discards).
+fn snt_policy(a: &MtgAz, rng: &mut Rng) -> u16 {
+    let l = legal(a);
+    if a.sideboarding().is_some() {
+        return act::PASS;
+    }
+    let d = a.pending_decision().unwrap();
+    let find = |f: &dyn Fn(engine::Choice) -> bool| d.options.iter().find(|o| f(o.choice)).map(|o| o.action);
+    if d.kind == DecisionKind::Priority {
+        if d.player == 0 {
+            let named = |c: engine::Choice, n: &str| matches!(c, engine::Choice::Cast(x) if a.g.name(x) == n);
+            if let Some(x) = find(&|c| named(c, "Show and Tell"))
+                .or_else(|| find(&|c| matches!(c, engine::Choice::Play(_) | engine::Choice::PlayFace(_))))
+                .or_else(|| find(&|c| named(c, "Lotus Petal")))
+            {
+                return x;
+            }
+        }
+        return act::PASS;
+    }
+    if d.kind == DecisionKind::ChooseHandCard && d.player == 0 {
+        if let Some(x) = find(&|c| c != engine::Choice::Pass) {
+            return x;
+        }
+    }
+    l[rng.below(l.len() as u32) as usize]
+}
+
+/// A constructed best-of-three, Sneak and Show (`sneak_show_75`, P0) against the Delver 75 (P1), one
+/// episode per game: P0 concedes game 1 at once (CR 104.3a), both keep their mains, and in game 2 - P0's
+/// 60 hidden from P1 - `snt_policy` plays until P0 puts a card with Show and Tell. -> (the state where P0
+/// chooses its card, the state after it chose: P1 to choose), or None (no such pick in this match).
+fn snt_match(seed: u64) -> Option<(MtgAz, MtgAz)> {
+    let (sm, ss) = sneak_show_75();
+    let d = delver();
+    let dside: Vec<String> = d.sideboard.iter().flat_map(|(n, s)| std::iter::repeat_n(s.clone(), *n as usize)).collect();
+    let spec = MtgSpec::parse(
+        &serde_json::json!({"max_turns": 60, "constructed": true, "format": "bo3", "game_episodes": true,
+            "decks": {"p0": sm, "p1": d.main_names(), "p0_sideboard": ss, "p1_sideboard": dside}})
+        .to_string(),
+    )
+    .unwrap();
+    let g = MtgAz::new_game(&spec, 2, seed).unwrap();
+    let mut a = match g.next_episode(Some(0)).unwrap() {
+        zero_search::Next::Continue(a) => a,
+        zero_search::Next::Over(_) => panic!("one game conceded is no match"),
+    };
+    let mut rng = Rng::new(seed ^ 0x5A7);
+    let mut keys = Vec::new();
+    for _ in 0..20_000 {
+        if a.to_move().is_none() {
+            return None;
+        }
+        let d = a.pending_decision().unwrap();
+        let resolving_snt = a.g.stack().last().is_some_and(|it| matches!(it.kind, engine::game::StackKind::Spell { card } if a.g.name(card) == "Show and Tell"));
+        if a.m.game_no == 2 && d.kind == DecisionKind::ChooseHandCard && d.player == 0 && resolving_snt && d.options.len() > 1 {
+            let before = a.clone();
+            let x = snt_policy(&a, &mut rng);
+            a.step(x, &mut keys).unwrap();
+            let next = a.pending_decision()?;
+            if next.player != 1 || next.kind != DecisionKind::ChooseHandCard {
+                return None; // (P1's hand is empty: it is asked nothing)
+            }
+            return Some((before, a));
+        }
+        let x = snt_policy(&a, &mut rng);
+        a.step(x, &mut keys).unwrap();
+    }
+    None
+}
+
+/// P1 declines in world `w` (P1 to choose its Show and Tell card): the card P0's face-down choice put
+/// onto the battlefield.
+fn snt_put(w: &MtgAz) -> u16 {
+    let mut w = w.clone();
+    let before: Vec<engine::CardIdx> = w.g.battlefield().iter().copied().filter(|&c| w.g.obj(c).owner == 0).collect();
+    w.step(act::PASS, &mut Vec::new()).unwrap();
+    let new: Vec<engine::CardIdx> = w.g.battlefield().iter().copied().filter(|&c| w.g.obj(c).owner == 0 && !before.contains(&c)).collect();
+    assert_eq!(new.len(), 1, "P0's face-down choice entered: {new:?}");
+    w.g.ident(new[0])
+}
+
+#[test]
+fn cr_101_4a_show_and_tell_in_a_later_game_deals_a_hidden_60_with_a_legal_pick() {
+    // ruling: a107ed89
+    // ENGINE.md 129.3: in game 2 of a constructed best-of-three P0's 60 is hidden from P1. P0 resolves Show
+    // and Tell and chooses a card face down; P1, to choose, knows only that one was chosen. Every world of
+    // P1 - the K-sample deal (32), the belief- and deck-tilted deal - deals P0 a legal 60 of its 75 holding
+    // what P1 saw, the same decision for P1, and a face-down choice of the kind. With fresh samples (K = 0)
+    // the worlds' decks are the exact posterior: the same as P1's plain worlds just before the choice (the
+    // same knowledge) kept only when a card of P0's hand drawn uniformly is of the kind.
+    let (seed, (s0, s1)) = (0..40u64).find_map(|s| snt_match(s).map(|x| (s, x))).expect("a Show and Tell pick in game 2 within 40 matches");
+    assert!(s1.g.spec().hidden_decks && s1.m.game_no == 2);
+    let seen = shown(&s1, 1);
+    println!(
+        "match {seed}, game 2 turn {}: P0's hand {} cards, P1 has seen {} of P0's cards ({} of the kind)",
+        s1.g.turn().number,
+        s1.g.player(0).hand.len(),
+        seen.len(),
+        seen.iter().filter(|&&d| snt_kind(d)).count()
+    );
+    let real = legal(&s1);
+    let mut zr = zero_search::rng::Rng::new(129);
+    let (mut worlds, mut other) = (0usize, 0usize);
+    let check = |w: &MtgAz| {
+        assert_eq!(legal(w), real, "P1's decision in its world");
+        let deck = game_deck(w, 0);
+        assert_eq!(deck.len(), 60);
+        assert!(holds(&deck, &seen), "the world's 60 holds what P1 saw");
+        assert!(w.m.decks[0].iter().zip(&w.m.pools[0].list).all(|(&c, e)| c <= e.1), "a 60 of the 75");
+        w.g.check_invariants().unwrap();
+        w.g.check_knowledge().unwrap();
+        let put = snt_put(w);
+        assert!(snt_kind(put), "P0's face-down choice is {}: not an artifact, creature, enchantment or land", db().def(put).name);
+        deck
+    };
+    // the K-sample deal and the tilted deals
+    for i in 0..200u32 {
+        let mut w = s1.clone();
+        if i % 3 == 0 {
+            w.determinize(1, &mut zr);
+        } else {
+            let d = engine::az::identity::D;
+            let raw: Vec<f32> = (0..2 * d).map(|k| ((k * 7919 + i as usize) % 97 + 1) as f32).collect();
+            let (b, dk) = (raw[..d].iter().sum::<f32>(), raw[d..].iter().sum::<f32>());
+            let pred: Vec<f32> = raw.iter().enumerate().map(|(k, &x)| x / if k < d { b } else { dk }).collect();
+            let hand = if i % 3 == 1 { 1.0 } else { 0.0 };
+            let bel = zero_search::game::Belief { pred, tilt: hand, clip: 20.0, tilts: vec![0.0, 1.0] };
+            w.determinize_with(1, &mut zr, &bel);
+        }
+        other += (check(&w) != game_deck(&s1, 0)) as usize;
+        worlds += 1;
+    }
+    println!("{worlds} worlds of P1 at the face-down choice, {other} with another 60 than the real one");
+    assert!(other * 2 > worlds);
+    // Exactness with fresh samples (K = 0): P1's worlds after the choice against its plain worlds before it,
+    // each kept when a uniform card of P0's hand is of the kind. The statistic: the 60's cards of the kind.
+    let kinds = |deck: &[u16]| deck.iter().filter(|&&d| snt_kind(d)).count() as f64;
+    let (mut before, mut after) = (s0.clone(), s1.clone());
+    before.m.deal.k = 0;
+    after.m.deal.k = 0;
+    let mut tr = Rng::new(1293);
+    let (mut acc, mut plain) = (Vec::new(), Vec::new());
+    for _ in 0..20_000 {
+        let mut w = before.clone();
+        w.determinize(1, &mut zr);
+        let deck = game_deck(&w, 0);
+        plain.push(kinds(&deck));
+        let hand = &w.g.player(0).hand;
+        if snt_kind(w.g.ident(hand[tr.below(hand.len() as u32) as usize])) {
+            acc.push(kinds(&deck));
+        }
+    }
+    let fresh: Vec<f64> = (0..20_000)
+        .map(|_| {
+            let mut w = after.clone();
+            w.determinize(1, &mut zr);
+            kinds(&check(&w))
+        })
+        .collect();
+    let stat = |v: &[f64]| {
+        let n = v.len() as f64;
+        let m = v.iter().sum::<f64>() / n;
+        (m, (v.iter().map(|x| (x - m) * (x - m)).sum::<f64>() / (n - 1.0) / n).sqrt())
+    };
+    let ((ma, sa), (mf, sf), (mp, sp)) = (stat(&acc), stat(&fresh), stat(&plain));
+    println!(
+        "P0's 60's cards of the kind: the posterior by rejection {ma:.3} +- {sa:.3} ({} of {} plain worlds kept), the request {mf:.3} +- {sf:.3}, the plain prior {mp:.3}",
+        acc.len(),
+        plain.len()
+    );
+    assert!((ma - mf).abs() < 4.0 * (sa * sa + sf * sf).sqrt(), "the request's worlds are not the posterior: {ma} {mf}");
+    // ... and the plain prior's are not (the deal before ENGINE.md 129.3: the 60 untold of the pick)
+    assert!((ma - mp).abs() > 3.0 * (sa * sa + sp * sp).sqrt(), "the pick does not move the posterior here: {ma} {mp}");
 }

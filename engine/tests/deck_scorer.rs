@@ -269,7 +269,7 @@ fn the_prior_of_a_choosing_seat_chooses_as_the_seat_does() {
     assert_eq!(prior.name(), "sealed+evaluator");
     // nothing shown: the sample is the best of K candidates of its pool - the best guess and K - 1 randomised builds
     // drawn from the generator - exactly
-    let empty = DeckWant { db, n: 40, shown: &[], companion: None, tilt: None };
+    let empty = DeckWant { db, n: 40, shown: &[], companion: None, tilt: None, pick: None };
     for i in 0..24u64 {
         let pool = sl.pool_of(1000 + i, 0).unwrap().unwrap().0;
         let got = prior.sample_from(&empty, Some(&pool), &mut Rng::new(i));
@@ -304,7 +304,7 @@ fn the_prior_of_a_choosing_seat_chooses_as_the_seat_does() {
         let k = (seed % 21) as usize;
         let mut shown: Vec<u16> = real.iter().copied().step_by(2).take(k).collect();
         shown.sort_unstable();
-        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None };
+        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None, pick: None };
         let got = prior.sample(&want, &mut Rng::new(seed));
         check_sample(&prior, &want, &got).unwrap();
         // (with 8 or more cards shown, the real deck's colours are known: the sample is a deck of them and a splash at
@@ -448,7 +448,7 @@ fn choice_cost() {
         for (name, pr) in [(format!("a request's 32 deals, choosing prior ({kind})"), &prior as &dyn DeckPrior), ("a request's 32 deals, mixed field's prior".to_string(), &plain as &dyn DeckPrior)] {
             let real = MtgAz::new(&s, 1).unwrap().m.deck(0);
             let shown: Vec<u16> = real.iter().copied().step_by(3).take(6).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
-            let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None };
+            let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None, pick: None };
             let mut rng = Rng::new(3);
             out.push((name, time(&mut || pools.iter().for_each(|p| drop(pr.sample_from(&want, Some(p), &mut rng)))) / 32.0 * 32.0));
         }

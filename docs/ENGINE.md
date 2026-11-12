@@ -28304,3 +28304,72 @@ cleanly (`run.py`, `package.py`, `remote.py`: both sides' additions). After the 
   every game, sideboarding included).
 * DESIGN.md 8's D3 row and 122's pointer updated; `tests/test_delver_bo3.py` follows the presets (its match through the
   bindings steps each game's episode with `next_episode`).
+
+### 129.3 Show and Tell's face-down pick meets the hidden 60 (CR 101.4a)
+
+**The question** (120.7's merge note): 123 deals a Show and Tell chooser's hand so that its face-down pick is legal -
+`Game::determinize` deals the hand again until a card of it drawn uniformly is an artifact, creature, enchantment or
+land card (`Game::hidden_pick_ok`, up to `HIDDEN_PICK_TRIES` = 1,000,000 deals, then a panic). With open decklists the
+real deck makes that always possible. In a constructed best-of-three's games 2-3 the chooser's 60 is dealt first, by
+`ConstructedPrior` from the deck request (`sample::knowledge` / `DeckWant`: R, the size, a companion), which knew
+nothing of the pick.
+
+**It can happen.** The chooser is the active player (Show and Tell is a sorcery; `hidden_pick`); the viewer is the
+other player, deciding its own pick. Nothing stops the chooser's 75 from holding Show and Tell (the format is
+deck-agnostic: any two 75s; the Sneak and Show list itself only fails on Disruptor Flute's layout). Whenever the
+viewer has seen all but a few of the chooser's cards of the kind and the sideboard holds as many of other kinds, the
+request's support holds 60s whose unseen cards hold none of the kind: in such a world no deal can give a legal pick,
+and the deal loop panics. Measured on the Sneak and Show 75 (Flute swapped for a second Pyroblast) with the viewer
+having seen 37 of the main's 38 cards of the kind: **386 of 20,000 decks of the plain request had none**
+(`cr_101_4a_a_face_down_pick_reaches_the_deck_request_exactly`). And where every deck holds one, the deal was still not
+the posterior of what the viewer knows: the pick is likelier from a deck with more cards of the kind, and the request
+did not weigh that (below: 5 standard errors off on a real game-2 position).
+
+**The fix: the request carries the pick.** Given the identities a world deals to the chooser's cards the viewer does
+not know (`resample_with_clouds`: each cloud's listed cards in its domain, the other - free - cards shuffled over
+every other place), the chance that a uniformly drawn hand card is of the kind is exactly (A + B L / F) / |hand|:
+A from the hand cards the viewer knows (1 each of the kind) and the clouds' listed cards (a cloud place: its listed
+cards of the kind over its room), B the hand places a free card can take (a place of no cloud 1; a cloud place its
+share of free cards), F the free cards, L those of the kind. The deck enters through L only, L = y + c0 with y the
+deck's cards of the kind beyond R and c0 = the kind among R - known + extras - clouds' cards (`Game::hidden_pick_odds`,
+`sneak_show.rs`; a card's kind is `hidden_pick_ok`'s own test on a hand card given that identity, on a copy of the
+state). So P(pick | deck) is proportional to a + b y (a = A F + B c0, b = B), and the deck's posterior is
+P(deck | R) (a + b y): `DeckWant::pick` (`PickWant`: the support's cards of the kind, a, b) carries it, and
+`ConstructedPrior` samples it **exactly, without rejection** - a second layer in its swap table (`swap_table2`: the
+decks' weights, and the same weighted by y as "one marked copy of the kind"), the swap count s by
+(a m0 + b m1)(s, s) / (decks with s swaps), then whether a copy is marked, then the counts backwards (an entry of the
+kind taking the mark with weight c - shown). The tilt (`DeckWant::tilt`) multiplies in as before (an exponential tilt
+of this posterior); `expected_fill` (the deck reader's baseline) is the marginal under it, by two-layer forward and
+backward tables; `check_sample` refuses a deck of weight 0 (no legal pick: the contract at every deal). The K-sample
+deal's key holds the pick's terms (its K decks are this posterior's); a request without a pick keys, draws and fills as
+before, draw for draw (tested). `sample_hidden_deck`, `deck_tilt_of` and `deck_weights` build the pick
+(`MtgAz::pick_want`; `pick_want_of`, a test hook). After the deck, `Game::determinize` deals the hand as 123 does: its
+deal loop now always has a deck with a legal card (acceptance at least about 1 / F a deal).
+
+* **Exact**: the deck is the posterior of the viewer's whole information under the deal's own model (the hidden 60's
+  prior, the uniform deal with clouds, the uniformly drawn pick), and then the hand given the deck as 123 deals it.
+  **A reading** (recorded, not an approximation of something else): with the hand tilt (`determinize_weighted`, 69) the
+  deck is still this posterior and the tilt acts on the hand given the deck - as every hidden-deck deal composes them
+  (120.4: the belief weights are read after the deck is dealt); the tilted hand deal has no closed form to weigh decks by.
+* **Refused loudly**: the table and sealed priors (`TablePrior`, `SealedPrior`) cannot condition a deck on a pick and
+  panic if given one (`refuse_pick`) - unreachable in a spec: hidden decklists are refused for constructed play, and the
+  cube and EoE tables hold no Show and Tell; `FUZZ_HIDDEN_DECKS=1` refuses `FUZZ_POOL=sneak_show`, `sns` and `delver_sb`
+  up front (it plays the constructed table's decks under the table's prior).
+* **Tests** (`tests/constructed_bo3.rs`): `cr_101_4a_a_face_down_pick_reaches_the_deck_request_exactly` - the case
+  above: the plain request deals 386 of 20,000 decks with no card of the kind beyond R, the request with the pick
+  none; its distribution of y equals the plain prior's reweighted by y (importance) bin by bin within 4 standard errors
+  (mean y 1.5091 by importance, 1.5031 by the request); `expected_fill` under the pick 0.9542 Emrakuls beyond R against
+  0.9523 sampled; a request without a pick draws the same decks as before.
+  `cr_101_4a_show_and_tell_in_a_later_game_deals_a_hidden_60_with_a_legal_pick` - a real game-2 position: Sneak and
+  Show (Flute swapped for a second Pyroblast) against the Delver 75 with one episode per game, P0 concedes game 1 (CR
+  104.3a), both keep, and a steered game 2 reaches P0's face-down pick at turn 8 (match 0: P0's hand 6 cards, P1 has
+  seen 5 of P0's cards); 200 worlds of P1 (the K-sample deal, the belief-tilted and the deck-tilted deals): every one
+  P1's decision as in the real game, a legal 60 of the 75 holding what P1 saw (194 with another 60 than the real one),
+  the invariants and clouds, and the card P0's choice puts onto the battlefield (P1 declining) of the kind; then with
+  fresh samples (K = 0), 20,000 worlds each: P0's 60's cards of the kind average **37.296 +- 0.015 in the posterior**
+  (P1's plain worlds just before the pick, the same knowledge, kept when a uniform card of P0's hand is of the kind:
+  12,159 kept), **37.280 +- 0.012 by the request**, and 37.209 in the plain prior's worlds (the deal before this fix: 5
+  standard errors off). A temporary probe, not kept, gave the same posterior three ways at 20,000 worlds (importance by
+  a + b y 37.274, rejection 37.274, the request 37.269; plain 37.194).
+* **Digests**: every new path runs only while a face-down pick is pending in a hidden-deck game (no digest game is
+  one), and a request without a pick is unchanged: the behaviour digests are main's (129.4).
