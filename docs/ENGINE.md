@@ -25088,6 +25088,21 @@ games. The rule's no-resign draw is per match (zero-core draws it by game id); e
   gives (its own worktree, `cargo test --release -p engine --test digest -- --ignored`) and this branch's gate. (The
   first commit's message, 2f5886a, named ENGINE.md 107's ae88eae20abb14ca / d0da2e6030aa0d08: stale - main's digests
   moved after 107 - and its first engine gate, run against them, failed on that comparison alone.)
+* **Search smoke of the key**: `python tools/search_smoke.py --specs match_games --seeds 0 --games 64 --sims 16 --conc
+  64`: 64 matches = 172 games, 0 unfinished, 187,766 decisions, 1.30 million simulations, 38 s, 0 failed.
+* **Gates on d62c6d7** (`--no-mac`, the desktop shared with other lanes' gates and a live run):
+  `python tools/gate.py engine --tested-sha d62c6d7 --expect-digest 53839c837bbaf034 --expect-digest0 208c723daced22fe`:
+  **GATE PASSED engine d62c6d7e4919 in 3897s** (build, both digests, `az` 48, `limits` 13, `hidden` 28, pytest 272
+  passed and 1 skipped, the search smoke). `python tools/gate.py optin-core --baseline-root ../bo3-game-episodes-base
+  --feature-tests az,hidden,bo3_episodes` (the baseline: 60397f3 with its pin f9ca5c3): build, the core's cargo tests
+  155 passed, **checkpoint_compat identical** (visits 2,465 samples, records 1aa4d70786522ff1; cq 8d82acdc1b4465fc;
+  results fc1673de5b24522a; vs random 7.0/16, 40d2a49742e35755 - on both checkouts), `az` 48, `hidden` 28,
+  `bo3_episodes` 5, the three other games built against the core, the core's build passed; the core's pytest hit the
+  step's 3,600 s limit (three other lanes' gates on the desktop at once): `GATE FAILED optin-core d62c6d7e4919 in 6586s - core-pytest: timed out`. The
+  same command alone on the same core (`python -m pytest tests -q -p no:cacheprovider -rfE` in third_party/zero-core,
+  97770ee): **452 passed, 11 skipped, 0 failed** in 1,976 s.
+  Not run: the 20k fuzz (the `Game` gained a method and an end reason no fuzzed game reaches; the key's own check is
+  121.5's 12-match equivalence test).
 
 ### 121.6 What works with it, what refuses
 
