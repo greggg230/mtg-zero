@@ -25228,7 +25228,7 @@ python tools/race_bench.py --pilot E:/mtg-zero/runs/eoe1/models/iter_0078.pt \
 
 ### 110.8 Tests, gate
 
-* `tests/test_race_batch.py` (8, new): RowExact's answers depend on the row alone (a tiny token network's real leaf
+* `tests/test_race_batch.py` (9, new): RowExact's answers depend on the row alone (a tiny token network's real leaf
   batches alone, merged forward and in reverse, dense and sparse: the same bits; the usual evaluator's within 1e-5); a
   batched race and a fixed comparison with the heuristic are the per-process ones (every key of the output, the rounds,
   every game's score); two pools' comparisons with a tiny network raced at once in one batched driver are the
@@ -25239,8 +25239,13 @@ python tools/race_bench.py --pilot E:/mtg-zero/runs/eoe1/models/iter_0078.pt \
   build dropped in the screening, the final stage after it, `--screen-min-games`, the refusals, the one-stage output
   unchanged); progress lines (per process and batched); the CLI (`race --batched` against `race --eval rowexact`;
   `--eval batchwise` without `--batched` refused); `evalpick --pool-seed 11,12 --batched` against the per-process
-  command (picks, games, verdicts, summary; a pool named twice refused).
+  command (picks, games, verdicts, summary; a pool named twice refused); `--eval-cache` with RowExact (the same games,
+  fewer rows; refused with the default evaluator).
 * `tests/test_sealed_compare.py` (12) unchanged and passing: the refactored `race` (`RaceState`), `play_block`
   (`record_block`, `record_failure`) and `compare` give the outputs of before. `tests/test_evaluator.py`'s evalpick test
   passes (every pool's candidates now before the races).
-* Gate: see the next commit (this section is committed before its gate run).
+* `python tools/gate.py python --no-mac --step-timeout 14400` on bdd219a (the code of 73b9bea and this section; run pinned to 6 logical CPUs
+  of the saturated desktop, `OMP_NUM_THREADS=2 MKL_NUM_THREADS=2`): build, pytest 278 passed and 1 skipped, the mtg-smoke loop:
+  **GATE PASSED python bdd219aee2e2 in 2676s**. Two earlier runs failed only `tests/test_mac_remote.py::test_a_remote_eoe_evaluation_logs_its_games`
+  (untouched code): its eoe-smoke remote evaluation passed its own 600 s limit with torch's 24 default threads on 6 busy CPUs (alone, at 2
+  threads: 237 s). The commit after the gated one is this line.
