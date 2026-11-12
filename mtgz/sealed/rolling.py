@@ -503,7 +503,7 @@ def main(argv=None):
     pr.add_argument('--half-life', type=float, default=0.0)
     pd = sub.add_parser('deckeval', help='the deck-choice evaluation of any checkpoint')
     pd.add_argument('checkpoint')
-    pd.add_argument('--evaluator', required=True, help='an exported evaluator (mtgz.sealed.scorer)')
+    pd.add_argument('--evaluator', required=True, help='a deck evaluator export (mtgz.sealed.evaluator export)')
     pd.add_argument('--games', type=int, default=100)
     pd.add_argument('--sims', type=int, default=None, help='default: the checkpoint run\'s eval_sims')
     pd.add_argument('--seed', type=int, default=5)
