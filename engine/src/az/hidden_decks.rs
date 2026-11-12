@@ -458,16 +458,38 @@ impl MtgAz {
 /// holding R's colours: the best guess is a function of the pool, so this is the best guess of a pool
 /// holding R whose colours could have shown R); when no pair holds them (three colours or more: the
 /// best guess never splashes) the sample falls back to step 3's randomised builds. Step 4 as before.
+///
+/// **The deck choice by an evaluator** (ENGINE.md 112; [`SealedPrior::of_seat`] for a seat that chooses so): the
+/// sample's deck is chosen as the seat chooses - with the choice's `explore` share (one uniform draw of the
+/// generator after step 2, none at 0 or 1) a randomised build (step 3's, as an exploring seat plays a randomised
+/// candidate), else the seat's K candidates of the pool holding R (its best guess and K - 1 randomised builds,
+/// drawn from the generator) scored by the same evaluator file, the best of those whose colours (pair and splash)
+/// cover R's nonland colours (or a draw at the choice's temperature among them); none covering: step 3's
+/// randomised builds. The mixed field's `best_share` is not read for such a seat (it chooses instead). Step 4 as
+/// before. Modelled, as 107.1's best guess: the chosen deck given that its colours could have shown R is the best
+/// covering candidate (the choice restricted to R's colours), not the exact posterior of "the evaluator's choice
+/// holds R".
 pub struct SealedPrior {
     collation: super::sealed::collation::Collation,
     boosters: usize,
     settings: super::sealed::builder::Settings,
     /// The mixed field's best-guess share (ENGINE.md 107.1; 0: the randomised builder only).
     best_share: f64,
+    /// The seat's deck choice by an evaluator (ENGINE.md 112), if it chooses so.
+    choice: Option<PriorChoice>,
     /// Every card a pool of the set can hold and the basic lands (sorted).
     support: Arc<Vec<DefId>>,
     /// The set list's rarity of each definition (indexed by `DefId`; 0 none).
     rarity: Arc<Vec<u8>>,
+}
+
+/// A seat's deck choice by an evaluator as its prior makes it (ENGINE.md 112): the candidates, the explore share,
+/// the evaluator and its temperature.
+#[derive(Clone, Debug)]
+pub struct PriorChoice {
+    pub k: u8,
+    pub explore: f64,
+    pub choice: super::sealed::EvalChoice,
 }
 
 /// Step 3's builds at most (ENGINE.md 102.6).
@@ -496,7 +518,54 @@ impl SealedPrior {
                 (Arc::new(support), Arc::new(rarity))
             })
             .clone();
-        SealedPrior { collation, boosters, settings, best_share: 0.0, support, rarity }
+        SealedPrior { collation, boosters, settings, best_share: 0.0, choice: None, support, rarity }
+    }
+
+    /// The prior of a seat choosing its deck by an evaluator (ENGINE.md 112).
+    pub fn with_choice(mut self, c: PriorChoice) -> SealedPrior {
+        assert!((0.0..=1.0).contains(&c.explore) && c.k >= 2, "a deck choice of {} candidates, explore {}", c.k, c.explore);
+        self.choice = Some(c);
+        self
+    }
+
+    /// The prior of seat `p`'s deck of a sealed spec (as the other player samples it): [`of_spec`](Self::of_spec),
+    /// and for a built seat that chooses its deck by an evaluator (ENGINE.md 112) that choice.
+    pub fn of_seat(s: &super::sealed::SealedSpec, p: u8) -> SealedPrior {
+        let base = SealedPrior::of_spec(s);
+        let built = !matches!(s.seats[p as usize], super::sealed::SeatSource::Build { .. });
+        match s.deck_choice.as_ref().filter(|c| c.seats[p as usize] && built) {
+            Some(c) => match c.evaluator() {
+                Some(e) => base.with_choice(PriorChoice { k: c.k, explore: c.explore.0, choice: e.clone() }),
+                None => base,
+            },
+            None => base,
+        }
+    }
+
+    /// The deck the seat's choice by an evaluator makes of `pool` (R placed in it; `need`: R's nonland colours)
+    /// (the type's docs), or None for step 3's randomised builds (an exploring seat, or no candidate covering R).
+    fn chosen(&self, db: &CardDb, pool: &[DefId], tilt: Option<&dyn Fn(DefId) -> f64>, need: u8, rng: &mut Rng) -> Option<super::sealed::builder::Build> {
+        use super::sealed::builder;
+        let c = self.choice.as_ref()?;
+        let explore = c.explore >= 1.0 || (c.explore > 0.0 && unit(rng) < c.explore);
+        if explore {
+            return None;
+        }
+        let mut cands = Vec::with_capacity(c.k as usize);
+        cands.push(builder::best_guess_covering(db, pool, &self.settings, tilt, 0).expect("the best guess: every pool has a pair"));
+        for _ in 1..c.k {
+            cands.push(builder::build_tilted(db, pool, &self.settings, tilt, rng));
+        }
+        let covering: Vec<usize> = (0..cands.len()).filter(|&j| need & !(cands[j].colors | cands[j].splash) == 0).collect();
+        if covering.is_empty() {
+            return None;
+        }
+        let scores: Vec<f64> = covering
+            .iter()
+            .map(|&j| c.choice.scorer.score(&cands[j].deck).unwrap_or_else(|e| panic!("hidden decklists, the sealed prior's deck choice: {e}")))
+            .collect();
+        let i = super::sealed::pick_by_score(&scores, c.choice.temperature, rng);
+        Some(cands.swap_remove(covering[i]))
     }
 
     /// The prior of the mixed field with best-guess share `p` (ENGINE.md 107.1).
@@ -526,7 +595,11 @@ impl SealedPrior {
 
 impl DeckPrior for SealedPrior {
     fn name(&self) -> &'static str {
-        "sealed"
+        if self.choice.is_some() {
+            "sealed+evaluator"
+        } else {
+            "sealed"
+        }
     }
 
     fn support(&self) -> &[DefId] {
@@ -577,10 +650,15 @@ impl DeckPrior for SealedPrior {
         // 3. The build: the first of a few whose colours cover the shown cards'.
         let need = want.shown.iter().filter(|&&d| !is_land(d)).fold(0u8, |m, &d| m | db.def(d).colors) & crate::mana::COLORS;
         // (The mixed field, ENGINE.md 107.1: the best guess holding R's colours with the spec's share;
-        // one draw only when the share is strictly between 0 and 1.)
-        let p = self.best_share;
-        let best_mode = p >= 1.0 || (p > 0.0 && unit(rng) < p);
-        let guess = if best_mode { super::sealed::builder::best_guess_covering(db, &pool, &self.settings, want.tilt, need) } else { None };
+        // one draw only when the share is strictly between 0 and 1. A seat choosing by an evaluator,
+        // ENGINE.md 112: its choice instead.)
+        let guess = if self.choice.is_some() {
+            self.chosen(db, &pool, want.tilt, need, rng)
+        } else {
+            let p = self.best_share;
+            let best_mode = p >= 1.0 || (p > 0.0 && unit(rng) < p);
+            if best_mode { super::sealed::builder::best_guess_covering(db, &pool, &self.settings, want.tilt, need) } else { None }
+        };
         let b = match guess {
             Some(b) => b,
             None => {

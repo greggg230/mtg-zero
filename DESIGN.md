@@ -848,6 +848,15 @@ network that played it) adds nothing over results, so evaluator v0 trains on res
 17lands' game-in-hand rates, a yardstick); the picker `python -m mtgz.sealed.compare evalpick` races the evaluators' picks
 against the value pick and random builds (dry-run on CPU; the GPU race waits for run 1's end).
 
+**Run 2's deck choice by the evaluator (2026-11-11, branch `deck-choice-eval`; ENGINE.md 112):** the sealed spec's
+`"deck_choice": {..., "by": "evaluator", "evaluator": <file>}` - each seat scores its own pool's K candidates with the
+exported deck evaluator (a Rust scorer reading `mtgz.sealed.scorer`'s JSON, equal to torch within 4e-8) and plays the best,
+no Python in self-play, the hidden decklists' prior of a choosing seat choosing the same way; the run retrains the evaluator
+every N iterations in a CPU background job on its newest games and switches versions (immutable files named by sha256, every
+chosen deck logged with its version) between iterations (zero-core's opt-in game-package hooks, `feat/selfplay-spec-hook`);
+an evaluation of the network choosing its deck from the fixed evaluation pools against the heuristic's best guess. Preset
+`eoe-2e`, a fork of run 1's iteration 78 deepened to 128 x 8; the launch command in ENGINE.md 112.6 (not launched).
+
 ### 9.1 Deckbuilding from a pool: the plan (user, 2026-11-10)
 
 **Best-of-one only.** A deck is only "best" against a field. Training uses our own decks (pure self-play),

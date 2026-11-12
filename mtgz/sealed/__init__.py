@@ -16,4 +16,8 @@ Pure Python (no engine module needed). With the engine module (`tools/build_py.s
   the S5 yardstick (ENGINE.md 104; `python -m mtgz.sealed.compare`).
 * `mtgz.sealed.evaluator`: S4a, the deck evaluator trained on a run's logged games, card ranking v0 and
   the picker (ENGINE.md 108; `python -m mtgz.sealed.evaluator`).
+* `mtgz.sealed.scorer`: the evaluator exported for the engine's scorer (the sealed spec's deck choice by an evaluator),
+  its numpy reference and the check against torch (ENGINE.md 112; `python -m mtgz.sealed.scorer`).
+* `mtgz.sealed.rolling`: a run's evaluator versions, retrained in a background job, and the deck-choice evaluation
+  (ENGINE.md 112: zero-core's game-package hooks; `python -m mtgz.sealed.rolling`).
 """

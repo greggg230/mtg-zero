@@ -41,8 +41,18 @@
 //! ones, else it **chooses** among the K in a pre-game decision (`DecisionKind::ChooseDeck`, the
 //! match's: `MtgAz::new`, `matches.rs`), hidden from the opponent. Needs hidden decklists. Without
 //! the key nothing changes.
+//!
+//! The deck choice **by an evaluator** (ENGINE.md 112): `{"k": 32, "explore": 0.1, "by": "evaluator", "evaluator":
+//! "<path>.json", "evaluator_sha": "<sha256>", "temperature": 0}` - a choosing seat scores its own pool's K
+//! candidates with the exported deck evaluator ([`scorer`], read from the file; `evaluator_sha` optional, a file
+//! with other contents an error) and plays the best (the first on a tie), or with `temperature` t > 0 one drawn with
+//! probability proportional to exp((score - best) / t) from a generator of its own ([`choice_rng`]). No decision:
+//! the deck is chosen when the game is made, from the seat's own pool alone. `"seats": [0]` (either deck choice):
+//! only these built seats choose (or explore); the others play the spec's seat (`best_share`'s mixed field).
+//! Without `by` (or `"by": "value"`) the value choice of before.
 pub mod builder;
 pub mod collation;
+pub mod scorer;
 
 use std::sync::Arc;
 
@@ -87,13 +97,77 @@ pub struct SealedSpec {
 
 /// The sealed spec's `"deck_choice"` (ENGINE.md 107.2): K candidate builds per built seat and the
 /// share of seats that play a random one instead of choosing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeckChoiceSpec {
     /// Candidates per seat, 2..=32 (`"k"`, default 32; the choice's actions are `NUMBER` + j).
     pub k: u8,
     /// The share of built seats that play a uniformly drawn randomised candidate (1..K) without a
     /// choice (`"explore"`, default 0.1; the field's builder-random decks).
     pub explore: super::Share,
+    /// Who chooses (`"by"`; ENGINE.md 112): the network's value in a pre-game decision (107.2), or an evaluator.
+    pub by: ChoiceBy,
+    /// The built seats that choose (`"seats"`, default both): another seat plays the spec's seat.
+    pub seats: [bool; 2],
+}
+
+/// Who makes a seat's deck choice (ENGINE.md 112).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChoiceBy {
+    /// The network's value of the game started with each candidate: the pre-game decision (ENGINE.md 107.2).
+    Value,
+    /// The exported deck evaluator, when the game is made (module docs).
+    Evaluator(EvalChoice),
+}
+
+/// The deck choice by an evaluator: the scorer and the temperature.
+#[derive(Clone, Debug)]
+pub struct EvalChoice {
+    pub scorer: Arc<scorer::Scorer>,
+    /// 0: the best candidate; t > 0: one drawn with probability proportional to exp((score - best) / t).
+    pub temperature: f64,
+}
+
+// (The spec is `Eq`: an evaluator by its file and contents, the temperature by its bits.)
+impl PartialEq for EvalChoice {
+    fn eq(&self, o: &Self) -> bool {
+        self.scorer.path == o.scorer.path && self.scorer.sha256 == o.scorer.sha256 && self.temperature.to_bits() == o.temperature.to_bits()
+    }
+}
+impl Eq for EvalChoice {}
+
+impl EvalChoice {
+    /// The choice among `decks` (seat `p` of the game whose pools come from `seed`): (the candidate, every
+    /// candidate's score). Argmax (the first on a tie) at temperature 0, else a softmax draw from [`choice_rng`].
+    pub fn choose(&self, decks: &[&[DefId]], seed: u64, p: u8) -> Result<(u8, Vec<f64>), String> {
+        let scores = decks.iter().map(|d| self.scorer.score(d)).collect::<Result<Vec<f64>, String>>()?;
+        let j = pick_by_score(&scores, self.temperature, &mut choice_rng(seed, p));
+        Ok((j as u8, scores))
+    }
+}
+
+/// The best of `scores` (the first on a tie) at temperature 0 (no draw), else index i drawn with probability
+/// proportional to exp((s_i - best) / t) by `rng` (one draw).
+pub fn pick_by_score(scores: &[f64], t: f64, rng: &mut Rng) -> usize {
+    let best = scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if t <= 0.0 {
+        return scores.iter().position(|&s| s == best).expect("a candidate");
+    }
+    let w: Vec<f64> = scores.iter().map(|&s| ((s - best) / t).exp()).collect();
+    let total: f64 = w.iter().sum();
+    let mut u = (rng.next_u64() >> 11) as f64 / (1u64 << 53) as f64 * total;
+    for (i, x) in w.iter().enumerate() {
+        if u < *x {
+            return i;
+        }
+        u -= x;
+    }
+    w.len() - 1
+}
+
+/// The generator of seat `p`'s evaluator choice at a temperature (ENGINE.md 112) in the game whose pools come from
+/// `seed`: its own, so the pools, the candidates and the explore draw are the same with or without it.
+pub fn choice_rng(seed: u64, p: u8) -> Rng {
+    Rng::new(split64(seed ^ 0x0C40_05E5_0000 ^ ((p as u64) << 40)))
 }
 
 /// The largest K of a deck choice (`act::NUMBER_N`: its actions are `NUMBER` + j).
@@ -319,7 +393,7 @@ impl SealedSpec {
             o["best_share"] = json!(self.best_share.0);
         }
         if let Some(c) = &self.deck_choice {
-            o["deck_choice"] = json!({"k": c.k, "explore": c.explore.0});
+            o["deck_choice"] = c.to_json();
         }
         for (p, s) in self.seats.iter().enumerate() {
             let v = match s {
@@ -381,7 +455,7 @@ impl SealedSpec {
     /// builder's best guess, j >= 1 the randomised builder from `candidate_rng(seed, p, j)` (copies
     /// possible); None for a given deck or without a deck choice. With the pool's seed.
     pub fn candidates(&self, seed: u64, p: u8) -> Result<Option<(Vec<Build>, Option<u64>)>, String> {
-        let Some(c) = &self.deck_choice else { return Ok(None) };
+        let Some(c) = self.deck_choice.as_ref().filter(|c| c.seats[p as usize]) else { return Ok(None) };
         let Some((pool, ps)) = self.pool_of(seed, p)? else { return Ok(None) };
         let db = db();
         let mut v = Vec::with_capacity(c.k as usize);
@@ -400,10 +474,14 @@ impl SealedSpec {
 
 impl DeckChoiceSpec {
     /// The spec's `"deck_choice"` object: `k` (2..=32, default 32), `explore` (a probability, default
-    /// 0.1); an unknown key is an error.
+    /// 0.1), `by` (`"value"`, the default, or `"evaluator"` with `evaluator` a file of the exported evaluator,
+    /// `evaluator_sha` its sha256 if pinned and `temperature` >= 0, default 0), `seats` (the choosing seats, default
+    /// both); an unknown key is an error, as is a key of the evaluator's without it.
     pub fn parse(v: &Value) -> Result<DeckChoiceSpec, String> {
         let o = v.as_object().ok_or("mtg spec: sealed.deck_choice must be an object {\"k\": 32, \"explore\": 0.1}")?;
-        let mut c = DeckChoiceSpec { k: MAX_CANDIDATES, explore: super::Share(0.1) };
+        let mut c = DeckChoiceSpec { k: MAX_CANDIDATES, explore: super::Share(0.1), by: ChoiceBy::Value, seats: [true, true] };
+        let mut by = None;
+        let (mut path, mut sha, mut temperature) = (None, None, None);
         for (k, x) in o {
             match k.as_str() {
                 "k" => {
@@ -416,10 +494,69 @@ impl DeckChoiceSpec {
                     let p = x.as_f64().filter(|p| (0.0..=1.0).contains(p)).ok_or("mtg spec: sealed.deck_choice.explore must be a probability (0..=1)")?;
                     c.explore = super::Share(p);
                 }
-                other => return Err(format!("mtg spec: unknown sealed.deck_choice key {other:?} (k, explore)")),
+                "by" => by = Some(x.as_str().filter(|b| ["value", "evaluator"].contains(b)).ok_or("mtg spec: sealed.deck_choice.by must be \"value\" or \"evaluator\"")?),
+                "evaluator" => path = Some(x.as_str().filter(|p| !p.is_empty()).ok_or("mtg spec: sealed.deck_choice.evaluator must be a file's path")?),
+                "evaluator_sha" => {
+                    let h = x.as_str().and_then(scorer::parse_hex32).ok_or("mtg spec: sealed.deck_choice.evaluator_sha must be a sha256 (64 hex digits)")?;
+                    sha = Some(h);
+                }
+                "temperature" => {
+                    temperature = Some(x.as_f64().filter(|t| t.is_finite() && *t >= 0.0).ok_or("mtg spec: sealed.deck_choice.temperature must be a number >= 0")?)
+                }
+                "seats" => {
+                    let a = x.as_array().filter(|a| !a.is_empty()).ok_or("mtg spec: sealed.deck_choice.seats must be a list of seats (0, 1)")?;
+                    c.seats = [false, false];
+                    for s in a {
+                        match s.as_u64() {
+                            Some(p @ (0 | 1)) if !c.seats[p as usize] => c.seats[p as usize] = true,
+                            _ => return Err(format!("mtg spec: sealed.deck_choice.seats {x}: seats 0 and 1, each once")),
+                        }
+                    }
+                }
+                other => return Err(format!("mtg spec: unknown sealed.deck_choice key {other:?} (k, explore, by, evaluator, evaluator_sha, temperature, seats)")),
             }
         }
+        if by == Some("evaluator") {
+            let path = path.ok_or("mtg spec: sealed.deck_choice by \"evaluator\" needs \"evaluator\": the exported evaluator's file (ENGINE.md 112)")?;
+            let s = scorer::load(path, db()).map_err(|e| format!("mtg spec: sealed.deck_choice: {e}"))?;
+            if let Some(h) = sha.filter(|h| *h != s.sha256) {
+                return Err(format!("mtg spec: sealed.deck_choice: {path} has sha256 {}, not the spec's {}", s.sha_hex(), scorer::hex(&h)));
+            }
+            // every card a pool can hold, and the basics, must be in its table (a candidate is never unscorable)
+            use super::hidden_decks::DeckPrior;
+            let support = super::hidden_decks::SealedPrior::new(Collation::Arena, collation::BOOSTERS, Settings::default());
+            if let Some(&d) = support.support().iter().find(|&&d| !s.has(d)) {
+                return Err(format!("mtg spec: sealed.deck_choice: {path}: its card table lacks {} (a card of the set's pools)", db().def(d).name));
+            }
+            c.by = ChoiceBy::Evaluator(EvalChoice { scorer: s, temperature: temperature.unwrap_or(0.0) });
+        } else if path.is_some() || sha.is_some() || temperature.is_some() {
+            return Err("mtg spec: sealed.deck_choice: evaluator, evaluator_sha and temperature are the deck choice by an evaluator's (\"by\": \"evaluator\")".into());
+        }
         Ok(c)
+    }
+
+    /// The object as JSON (what `parse` reads back to an equal spec): the value choice's keys as before (`seats`
+    /// only when not both); by an evaluator its file, its sha256 and the temperature.
+    pub fn to_json(&self) -> Value {
+        let mut o = json!({"k": self.k, "explore": self.explore.0});
+        if let ChoiceBy::Evaluator(e) = &self.by {
+            o["by"] = json!("evaluator");
+            o["evaluator"] = json!(e.scorer.path);
+            o["evaluator_sha"] = json!(e.scorer.sha_hex());
+            o["temperature"] = json!(e.temperature);
+        }
+        if self.seats != [true, true] {
+            o["seats"] = json!((0..2).filter(|&p| self.seats[p]).collect::<Vec<_>>());
+        }
+        o
+    }
+
+    /// The deck choice by an evaluator, if this is one.
+    pub fn evaluator(&self) -> Option<&EvalChoice> {
+        match &self.by {
+            ChoiceBy::Evaluator(e) => Some(e),
+            ChoiceBy::Value => None,
+        }
     }
 }
 
@@ -472,20 +609,56 @@ pub fn build_names_json(pool: &[String], seed: u64, settings: &str) -> Result<St
 pub fn candidates_json(spec: &str, seed: u64) -> Result<String, String> {
     let sp = super::MtgSpec::parse(spec)?;
     let s = sp.sealed.as_deref().ok_or("sealed_candidates: not a sealed spec")?;
-    let c = s.deck_choice.ok_or("sealed_candidates: not a deck-choice spec (sealed.deck_choice)")?;
+    let c = s.deck_choice.as_ref().ok_or("sealed_candidates: not a deck-choice spec (sealed.deck_choice)")?;
     let seed = sp.sealed_seed(seed);
     let db = db();
     let mut out = Vec::new();
     for p in 0..2u8 {
         out.push(match s.candidates(seed, p)? {
             None => Value::Null,
-            Some((v, ps)) => json!({
-                "pool_seed": ps, "explore": explore_pick(seed, p, c.explore.0, c.k),
-                "candidates": v.iter().map(|b| build_json(db, b)).collect::<Vec<_>>(),
-            }),
+            Some((v, ps)) => {
+                let explore = explore_pick(seed, p, c.explore.0, c.k);
+                let mut x = json!({
+                    "pool_seed": ps, "explore": explore,
+                    "candidates": v.iter().map(|b| build_json(db, b)).collect::<Vec<_>>(),
+                });
+                // (ENGINE.md 112: the evaluator's scores of every candidate, and its choice unless the seat explores)
+                if let Some(e) = c.evaluator() {
+                    let decks: Vec<&[DefId]> = v.iter().map(|b| &b.deck[..]).collect();
+                    let (j, scores) = e.choose(&decks, seed, p)?;
+                    x["scores"] = json!(scores);
+                    x["chosen"] = if explore.is_none() { json!(j) } else { Value::Null };
+                    x["evaluator_sha"] = json!(e.scorer.sha_hex());
+                }
+                x
+            }
         });
     }
     Ok(Value::Array(out).to_string())
+}
+
+/// The scores of decks (a JSON list of lists of card names) by the exported evaluator at `path` (ENGINE.md 112;
+/// the Python binding's `sealed_scores`, the check against the torch model), as JSON.
+pub fn scores_json(path: &str, decks: &str) -> Result<String, String> {
+    let db = db();
+    let s = scorer::load(path, db)?;
+    let decks: Vec<Vec<String>> = serde_json::from_str(decks).map_err(|e| format!("sealed_scores: decks: {e}"))?;
+    let mut out = Vec::with_capacity(decks.len());
+    for d in &decks {
+        let ids = d.iter().map(|n| db.expect_id(n)).collect::<Result<Vec<DefId>, String>>()?;
+        out.push(s.score(&ids)?);
+    }
+    Ok(json!(out).to_string())
+}
+
+/// What the engine reads of the exported evaluator at `path` (the binding's `sealed_scorer_info`), as JSON.
+pub fn scorer_info_json(path: &str) -> Result<String, String> {
+    let s = scorer::load(path, db())?;
+    let model = match s.kind {
+        scorer::Kind::Linear => json!({"kind": "linear"}),
+        scorer::Kind::Set { d, k, hidden } => json!({"kind": "set", "d": d, "k": k, "hidden": hidden}),
+    };
+    Ok(json!({"path": s.path, "sha256": s.sha_hex(), "kind": model["kind"], "model": model, "members": s.members(), "cards": s.cards()}).to_string())
 }
 
 /// The seats of an `mtg` spec's game (a sealed spec) as JSON (the Python binding's

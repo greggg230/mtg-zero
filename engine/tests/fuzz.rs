@@ -73,6 +73,12 @@
 //! viewer's whole encoding as in the real game; in the decider's world the other seat chose a deck of 40 cards
 //! of its prior's support; one choice in the world starts the game, 30 random moves on), then a random choice -
 //! and the game goes on with every check of the hidden mode.
+//! `FUZZ_DECK_CHOICE_BY=<file>` (with `FUZZ_DECK_CHOICE=k`; ENGINE.md 112): the deck choice by an evaluator instead -
+//! `"by": "evaluator", "evaluator": <file>` (an exported `mtgz.sealed.scorer` file): no decision; each seat's deck is
+//! checked to be its explore pick or the evaluator's best candidate (recomputed here from the spec's candidates and the
+//! scorer), with the evaluator's sha256 and score in `how`, and the opponent's worlds are dealt from each seat's own
+//! prior, which chooses as the seat does (`SealedPrior::of_seat`, named `sealed+evaluator`). It prints the chosen and
+//! exploring seats.
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 //!
 //! `FUZZ_HIDDEN_DECKS=1` (ENGINE.md 102): the mode's games (the default decks, `FUZZ_POOL=eoe`'s or
@@ -1491,7 +1497,13 @@ fn fuzz_random_games() {
     if let Some(k) = deck_choice_fuzz().filter(|_| sealed_mode() && hidden_decks_mode()) {
         let (c, w) = (DC_CHOICES.load(Ordering::Relaxed), DC_WORLDS.load(Ordering::Relaxed));
         println!("FUZZ_DECK_CHOICE={k}: {c} deck choices played, {w} worlds checked during them");
-        if n >= 100 {
+        if let Ok(path) = std::env::var("FUZZ_DECK_CHOICE_BY") {
+            let (ch, ex) = (DC_EVAL_CHOSEN.load(Ordering::Relaxed), DC_EVAL_EXPLORE.load(Ordering::Relaxed));
+            println!("FUZZ_DECK_CHOICE_BY={path}: {ch} seats chose by the evaluator, {ex} explored");
+            if n >= 100 {
+                assert!(ch > 0 && c == 0, "FUZZ_DECK_CHOICE_BY: {ch} seats chose, {c} decisions (the evaluator's choice is none)");
+            }
+        } else if n >= 100 {
             assert!(c > 0 && w > 0, "FUZZ_DECK_CHOICE: no deck choice was played");
         }
     }
@@ -2013,6 +2025,9 @@ static HD_STEPS: AtomicU64 = AtomicU64::new(0);
 static HD_LONG_TURNS: AtomicU64 = AtomicU64::new(0);
 /// `FUZZ_DECK_CHOICE` (ENGINE.md 107.2): deck choices played, worlds checked during them.
 static DC_CHOICES: AtomicU64 = AtomicU64::new(0);
+/// `FUZZ_DECK_CHOICE_BY`: seats whose deck the evaluator chose, and exploring seats.
+static DC_EVAL_CHOSEN: AtomicU64 = AtomicU64::new(0);
+static DC_EVAL_EXPLORE: AtomicU64 = AtomicU64::new(0);
 static DC_WORLDS: AtomicU64 = AtomicU64::new(0);
 
 /// `FUZZ_DECK_CHOICE=k`: the candidates per seat (module docs), or None.
@@ -2027,10 +2042,48 @@ fn choice_spec(seed: u64, k: u8) -> &'static engine::az::MtgSpec {
         [0u64, 1].map(|s| {
             let mut v: serde_json::Value = serde_json::from_str(&format!(r#"{{"sealed": {}}}"#, sealed_spec(s).sealed.as_deref().unwrap().to_json())).unwrap();
             v["sealed"]["deck_choice"] = serde_json::json!({"k": k, "explore": 0.1});
+            // (FUZZ_DECK_CHOICE_BY, ENGINE.md 112: the deck choice by an evaluator file)
+            if let Ok(path) = std::env::var("FUZZ_DECK_CHOICE_BY") {
+                v["sealed"]["deck_choice"]["by"] = serde_json::json!("evaluator");
+                v["sealed"]["deck_choice"]["evaluator"] = serde_json::json!(path);
+            }
             engine::az::MtgSpec::parse(&v.to_string()).unwrap()
         })
     });
     &specs[(seed % 2) as usize]
+}
+
+/// `FUZZ_DECK_CHOICE_BY` (module docs): each built seat's deck is its explore pick or the evaluator's best
+/// candidate, recomputed from the spec; its prior chooses as it does. Nothing without the evaluator.
+fn check_evaluator_choice(a: &engine::az::MtgAz, spec: &engine::az::MtgSpec, seed: u64) {
+    let sl = spec.sealed.as_deref().unwrap();
+    let Some(dc) = sl.deck_choice.as_ref() else { return };
+    let Some(e) = dc.evaluator() else { return };
+    let ss = spec.sealed_seed(seed);
+    assert!(a.deck_choice().is_none(), "seed {seed}: the deck choice by an evaluator is no decision");
+    for p in 0..2u8 {
+        let (cands, _) = sl.candidates(ss, p).unwrap().expect("a built seat's candidates");
+        let how = a.m.how[p as usize].expect("how the deck was made");
+        let deck = a.m.deck(p);
+        match engine::az::sealed::explore_pick(ss, p, dc.explore.0, dc.k) {
+            Some(j) => {
+                assert_eq!((how.mode, how.candidate, how.evaluator), (engine::az::sealed::Mode::Explore, Some(j), None), "seed {seed}: P{p} explores");
+                assert_eq!(deck, cands[j as usize].deck, "seed {seed}: P{p}'s explore pick");
+                DC_EVAL_EXPLORE.fetch_add(1, Ordering::Relaxed);
+            }
+            None => {
+                let scores: Vec<f64> = cands.iter().map(|c| e.scorer.score(&c.deck).unwrap()).collect();
+                let best = scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                let j = scores.iter().position(|&x| x == best).unwrap();
+                assert_eq!((how.mode, how.candidate, how.evaluator), (engine::az::sealed::Mode::Chosen, Some(j as u8), Some(e.scorer.sha256)), "seed {seed}: P{p} chose");
+                assert_eq!(how.score.map(f64::from_bits), Some(best), "seed {seed}: P{p}'s score");
+                assert_eq!(deck, cands[j].deck, "seed {seed}: P{p}'s chosen deck");
+                DC_EVAL_CHOSEN.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let prior = a.m.deck_priors[p as usize].as_ref().expect("a prior");
+        assert_eq!(prior.name(), "sealed+evaluator", "seed {seed}: P{p}'s prior chooses as it does");
+    }
 }
 
 /// The deck choice of a `FUZZ_DECK_CHOICE` game (module docs), played until the game begins.
@@ -2161,7 +2214,8 @@ fn play_hidden(seed: u64) -> Played {
     // fresh sample of the prior at every deal.)
     a.m.deal.k = std::env::var("FUZZ_DEAL_SAMPLES").ok().map_or(32, |v| v.parse().expect("FUZZ_DEAL_SAMPLES: a number"));
     let mut rng = Rng::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 1);
-    if choice.is_some() {
+    if let Some(k) = choice {
+        check_evaluator_choice(&a, choice_spec(seed, k), seed);
         play_deck_choice(&mut a, seed, &mut rng);
     }
     let mut crng = Rng::new(seed ^ 0xC0_4D_1E7E);

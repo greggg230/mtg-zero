@@ -38,12 +38,12 @@ fn game_deck(a: &MtgAz, p: u8) -> Vec<u16> {
 #[test]
 fn the_deck_choice_key_parses_and_refuses() {
     let s = spec(8, 0.25, "");
-    let dc = s.sealed.as_deref().unwrap().deck_choice.unwrap();
+    let dc = s.sealed.as_deref().unwrap().deck_choice.clone().unwrap();
     assert_eq!((dc.k, dc.explore.0), (8, 0.25));
     let sl = s.sealed.as_deref().unwrap();
     assert_eq!(SealedSpec::parse(&sl.to_json()).unwrap(), *sl, "the JSON round trip");
     let d = MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "arena", "deck_choice": {}}}"#).unwrap();
-    let dc = d.sealed.as_deref().unwrap().deck_choice.unwrap();
+    let dc = d.sealed.as_deref().unwrap().deck_choice.clone().unwrap();
     assert_eq!((dc.k, dc.explore.0), (32, 0.1), "the defaults");
     for bad in [r#"{"k": 1}"#, r#"{"k": 33}"#, r#"{"explore": 1.5}"#, r#"{"temperature": 1}"#, "3"] {
         let e = MtgSpec::parse(&format!(r#"{{"sealed": {{"set": "eoe", "collation": "arena", "deck_choice": {bad}}}}}"#)).unwrap_err();
