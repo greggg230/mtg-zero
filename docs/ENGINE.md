@@ -26173,6 +26173,72 @@ batches): passing, then with one prior off by 1e-3 a fatal error before any game
 The runtime pack and a fuzz and a release build of this branch are published to the live coordinator (zero-farm
 `docs/phase1-worker.md` has their build ids and how to start a fuzz campaign).
 
+### 114.4 Eval jobs and farm head-to-heads (zero-farm phase 2, 2026-11-12)
+
+**What.** `mtgz-worker` plays zero-farm's eval jobs (zero-farm PROTOCOL.md 5.2, rev 5): games of an evaluation match
+between two networks (or a network and a built-in bot) at a run's settings, exactly the games `Run.play_match` plays
+(the Elo matches', the yardstick's); and `python -m mtgz.az.farm_h2h` runs a head-to-head of two checkpoints on the
+farm and prints the readout zero.h2h prints. Everything is zero-core's (`zero_worker::evaljob`, `zero.farm_eval`,
+`zero.farm_h2h`; docs/az.md 42.2 there); this repo adds the package wrapper, the worker's list of the package's own
+settings and the tests.
+
+* **The merge first**: main 1d5508a (EoE run 2 integrated, Sneak and Show, Peacekeeper's names: 112, 113, 123, 126,
+  127) into `farm` (23a3fe6); main's zero-core pin 25a7f50 merged into zero-core `farm` (95fe9b6: `DynDriver` keeps
+  `set_first_gid` and gains `set_spec`; search.md 2.13 / 2.14). Main's tests/fuzz.rs changes are ported into
+  `engine::fuzz::games` by phase 1's port script (E:/zero-farm-scratch/phase2/port: one more rule, the Sneak and Show
+  deck's `include_str!` from engine/src/fuzz/; it still reproduces the old port byte for byte, and the committed
+  games.rs is its output). The worker's fuzz settings: `FUZZ_POOL` sneak_show / sns / names (games only; names also
+  with hidden decklists), `FUZZ_DECK_CHOICE_BY` refused (a file on the desktop).
+* **Eval jobs**: `serve` takes `kind: eval` (models: one ONNX Runtime session per generation, its file's sha256 checked
+  and its reference set answered first - `selftest` with its `gen`; seats `{"net": gen}` / `{"bot": "heuristic" |
+  "random"}`; paired; gid_base / games) and writes one JSON line per game (`gid`, `pair`, `seats`, `result`, `margin`,
+  `rounds`, `over`) in files of whole pairs announced by `evals`. Its settings must pass `check-config --eval`: the 33
+  settings an evaluation reads, every other one unused; `eval_spec` set (the desktop resolves `mtgz.az.evaldecks`'
+  hook); the bots the game's. `mtgz-worker eval ...` runs one from flags; `driver-cfg --eval` prints the match's driver.
+* **The package's own settings** (`GamePackage.settings`, main's 112 / 113) are classified by the worker
+  (`PACKAGE_SETTINGS` in worker/src/main.rs): `evaluator_every` python_only (its self-play spec hook changes the
+  spec between phases), its `evaluator_*` params, `deckchoice_eval_games` and `real_decks_*` trainer. Without the
+  list a run config of main's (every saved config has them) would be refused as unknown.
+* **`python -m mtgz.az.farm_h2h --a <ckpt> --b <ckpt> --games N --build <worker build> --runtime <pack>`** (zero-core's
+  docs/az.md 42.2): settings from A's run's config.json (or `--config` / `--preset`; `--sims`), both checkpoints
+  exported with reference sets, the run `h2h-<run>-<A>v<B>`, gens 1 and 2, the batch, then progress and the readout;
+  `--resume NAME`, `--cancel NAME`.
+
+**Checks.**
+
+* The eval gate (zero-core `tools/worker_eval_gate.py`; the Python path = `Run.play_match`'s driver with zero-core's
+  `OnnxEvaluator` on the same graphs, groups 1, 4 + 4 threads): eoe1 iter 80 vs iter 70, **20 of 20** and **40 of 40**
+  paired games byte-identical (two seeds; 60 batches of each identical in every array); iter 80 vs the heuristic bot,
+  **12 of 12**; leases of 10 games (other batches) played the 20-game match's rows. Readouts: A 0.500 +- 0.105 (20
+  games), A 0.550 +- 0.050, Elo +35 (95%: -34 .. +106) (40 games).
+* `tools/driver_settings_dump.py --compare-worker --eval`: the eval driver of 82 of 82 presets and run configs (both
+  runs dirs) the same in the worker as in Python; self-play 76 agree, 6 refused as Python-only, 0 different.
+* `tests/test_worker_farm.py`: an eval job over aw/1 byte-identical to the Python evaluation (two small random MTG
+  networks), a lease of the second pair, network against the heuristic bot; check-config --eval, the package's
+  settings, the refusals. With `test_worker_shards.py`: 10 passed.
+* **End to end** (E:/zero-farm-scratch/phase2: `wrangler dev` on 5400 from zero-farm main - PROTOCOL rev 5, migration
+  0004 - with scratch state; the runtime pack c4c4bb77 copied from the live coordinator; the release build below; the
+  real agent engine 0.2.4 in a scratch harness, kinds `["eval"]`, 4 threads): `farm_h2h` put the run
+  `h2h-eoe1-80v70-e2e` (eoe1's config, 8 games, leases of 4), the agent played both leases (per-gen self-tests 2.0e-6 /
+  3.1e-6 through the pack's ONNX Runtime), the coordinator credited 8 games, `farm_h2h --resume` read them (A 0.625 +-
+  0.125, 4 pairs) and the 8 rows are byte-identical to a local Python evaluation of the same 8 games in one driver;
+  `--cancel` paused the run. The coordinator was stopped afterwards.
+
+**Published** to farm.greggg230.com (registered; no run, batch or invite created): release worker
+**e96bf8e44b9634502e44dcc3** (`mtg-be674a2-release`: engine be674a2, core abca043, kinds `["selfplay", "eval",
+"fuzz"]`, `requires_runtime` c4c4bb776d7f886f5e13474e, min_agent 0.1.3). Eval leases go to agents 0.2.3 or newer.
+The commits after be674a2 change docs and zero.farm_h2h (Python, the desktop's) only.
+
+**A first live head-to-head** (from this checkout, on the desktop):
+
+```
+python -m mtgz.az.farm_h2h --a C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0080.pt \
+    --b C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0070.pt --games 200 \
+    --build e96bf8e44b9634502e44dcc3 --runtime c4c4bb776d7f886f5e13474e
+```
+
+(reads the checkpoints and eoe1's config.json only; state in ~/.zero-farm/h2h/h2h-eoe1-80v70/.)
+
 ## 123. Legacy Sneak and Show: the deck's cards (branch `sneak-show`, mtg-bot `feature/sneak-show-ir`)
 
 **Why.** The next constructed deck after the Delver mirror (54) and Legacy Doomsday (124): MTGGoldfish's "Sneak and
