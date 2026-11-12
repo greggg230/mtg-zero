@@ -149,6 +149,10 @@ impl SearchGame for MtgEoeAz {
         self.0.active_seat()
     }
 
+    fn record_setup(&self) -> String {
+        self.0.record_setup()
+    }
+
     fn bot_names() -> &'static [&'static str] {
         <MtgAz as SearchGame>::bot_names()
     }

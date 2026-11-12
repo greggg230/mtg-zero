@@ -188,7 +188,7 @@ def _onnx_ok():
 @pytest.mark.skipif(not _onnx_ok(), reason='needs torch, onnx, onnxscript and onnxruntime')
 def test_the_selftest_guards_the_network(tmp_path):
     """A small random MTG network: its reference set from real driver batches (the worker's own recording) with
-    torch's answers; through `serve` the worker answers it before playing (selftest ok, a game, the shard), and with
+    torch's answers; through `serve` the worker answers it before playing (selftest ok, a game, its records), and with
     one prior of the set off by 1e-3 it reports the difference and stops with a fatal error before any game."""
     import onnxruntime
     import torch
@@ -233,7 +233,7 @@ def test_the_selftest_guards_the_network(tmp_path):
             'runtime_dir': rt})
     e = w.wait_for('error', 300)
     assert w.finish() == 1 and e['fatal'] is True and "not the job's" in e['message'] and file_sha not in e['message'], e
-    assert not [x for x in w.events if x['ev'] in ('selftest', 'fin', 'shard')]
+    assert not [x for x in w.events if x['ev'] in ('selftest', 'fin', 'shard', 'records')]
     for name, reference, ok in (('good', ref, True), ('bad', tmp_path / 'bad.npz', False)):
         d = tmp_path / name
         d.mkdir()
@@ -248,13 +248,13 @@ def test_the_selftest_guards_the_network(tmp_path):
             assert st['max_abs'] < 2e-5
             end = w.wait_for('end', 1200)
             assert w.finish() == 0 and end['reason'] == 'done' and end['stats']['selftest_max_abs'] == st['max_abs']
-            assert [e for e in w.events if e['ev'] == 'shard']
+            assert [e for e in w.events if e['ev'] == 'records']    # (a served self-play job's default: ENGINE.md 114.6)
             assert w.events.index(st) < w.events.index(next(e for e in w.events if e['ev'] == 'fin'))
         else:
             assert st['items']['priors'] > 2e-5 and abs(st['max_abs'] - 1e-3) < 1e-4
             e = w.wait_for('error', 300)
             assert w.finish() == 1 and e['fatal'] is True and 'selftest failed' in e['message']
-            assert not [x for x in w.events if x['ev'] in ('fin', 'shard')] and not (d / 'out').exists()
+            assert not [x for x in w.events if x['ev'] in ('fin', 'shard', 'records')] and not (d / 'out').exists()
 
 
 # ------------------------------------------------------------------ eval jobs (ENGINE.md 114.4)
