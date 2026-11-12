@@ -10349,7 +10349,10 @@ yardsticks 4.5-6.5 min, Elo 6-10 min: **~18-25 minutes**, 40 iterations in ~12-1
   "destroy each artifact with mana value X or less", 30), Price of Progress (damage to each player by
   the nonbasic lands they control, counted on resolution), Rough // Tumble (a split card, 25 and 709:
   2 damage to each creature without flying, 6 to each with flying).
-* **Constructed best-of-three** (`"constructed"` with `"format": "bo3"` is refused) needs: sideboarding
+* **Constructed best-of-three: built, section 120** (branch `delver-bo3`, the user's decisions of
+  2026-11-11: each pool exactly the 75, every deck after sideboarding exactly 60, not the 60..=75
+  below; the hidden 60s dealt by `ConstructedPrior`; the deck target and its tilt). The plan as
+  written here: constructed best-of-three (`"constructed"` with `"format": "bo3"` was refused) needs: sideboarding
   bounds of constructed play in `MatchPool::new` (today a spec decklist keeps its size exactly, 42.2):
   a deck of 60..=75 cards from the 75 (at least 60, 100.2a; the sideboard the rest, at most 15, 100.4a;
   the four-card limit holds by construction since the pool is the legal 75); the pool list fits (29
@@ -24993,3 +24996,242 @@ work leaves: a `tools/mac_races.sh` race, `~/mtg-zero-wt/races-<sha12>` with `~/
 `~/mtg-zero-wt/run-<sha12>` and the mirror `~/mtgz-remote/<run>` (every checkpoint shipped). Cleanup when done:
 `rm -rf ~/mtgz-races/<name>`, `git -C ~/mtg-zero worktree remove --force ~/mtg-zero-wt/races-<sha12>` and `rm -rf
 ~/cargo-target/mtg-zero/races-<sha12>`.
+
+## 120. Constructed best-of-three: the Delver mirror's sideboarding and hidden 60s (branch `delver-bo3`, 2026-11-11)
+
+Branch `delver-bo3` (from main 60397f3; zero-core pinned at f9ca5c3, unchanged). DESIGN.md 8's D3 but the five
+sideboard cards outside the cube (another lane ports them after the Doomsday lanes merge): the list 54.8 gave,
+built with the user's decisions of 2026-11-11, **deck-agnostic**: the two players may play different 75s (the
+engine and the spec name no deck; only the presets name Delver; a second deck, Sneak and Show, comes from another
+session). Layout v6, `NUM_ACTIONS` and every action id are unchanged; best-of-one
+and the cube's best-of-three (36.11) are unchanged (the digests, 120.6). (Section numbers: 110-113 are taken on other branches,
+111 on main by `eval-v2`; 121 is the `bo3-game-episodes` lane's, 122 the five sideboard cards': this one is 120.)
+
+**The user's decisions (2026-11-11).**
+
+1. `"constructed": true` with `"format": "bo3"` is legal. Each player's pool is exactly their 75 with its copies,
+   **no free basic land entries** (CR 100.4a: a constructed player sideboards with the 75 only; the Delver 75 has one
+   Island, so that entry's maximum is 1), and **every deck after sideboarding is exactly 60 cards** (the user's format
+   restriction, as limited's exactly 40 in section 42); the sideboard is the rest. Every legal 60 is reachable in
+   exactly one decision sequence (36.2's property).
+2. Both 75s are public. Game 1 is best-of-one's model (the opponent's 60 = their registered main, known). From game 2
+   on each player's chosen 60 is hidden from the opponent (its size, 60, is public), dealt by `determinize` through a
+   deck prior of "60 of a known 75" (section 102's machinery): it holds every card of theirs the viewer knows in the
+   current game and no more copies than the 75 has. Cards revealed in earlier games do not constrain the current 60
+   (they may have been sided out); they stay inputs (`OPP_REVEALED`).
+3. The opponent's deck is predicted, the prediction updating as cards are seen: the `deck` auxiliary target (102.4,
+   105) for constructed best-of-three, so the Delver network's belief head can gain a deck segment (zero-core az.md
+   37, `net.widen_aux`) and the search deals from it by the deck tilt (106). The deck reader as an input is not in
+   scope.
+4. The heuristic keeps its deck (`PASS`, 36.5).
+5. Presets `delver-mirror-bo3` (both full 75s; it refuses loudly, naming the cards, while a card of the 75 is
+   unsupported) and `delver-bo3-smoke` (the main and the 75's supported sideboard cards: 3 Pyroblast, 3 Force of
+   Negation, Karakas, Unholy Heat).
+
+### 120.1 The format
+
+| What | Where | How |
+|---|---|---|
+| the spec | `MtgSpec::parse` | constructed best-of-three needs decklists (`pN`, `pN_sideboard`); CR 100.2a / 100.4a as before (54.4: four copies over the 75, a sideboard of at most 15); **the main exactly 60** (`constructed::BO3_DECK`: a 61-card main, legal in best-of-one, is refused in best-of-three, since every deck after sideboarding is 60); no pools (the default `pools` is false for constructed), no `hidden_decklists` (best-of-one's); a 75 without a sideboard is legal (the deck can only be kept). The evaluation spec is the spec |
+| unsupported cards | the spec's lists | every card of a list the table does not know or support is named in one refusal (was: the first only), e.g. the full Delver 75: "mtg spec: decks.p0_sideboard: 5 cards the card table does not know or support: unknown card "Consign to Memory"; unknown card "Hydroblast"; unknown card "Meltdown"; unknown card "Price of Progress"; unknown card "Rough // Tumble"". A single bad card's message is as before. No silent drop, no substitution |
+| the pool | `MatchPool::constructed` | the list is every card of the 75 by definition with its copies, basic lands too, which are pool cards here (Island: one copy), with **no free entry** (limited's five basic land entries of any number, 100.4b, are not appended: `n_cards` = the list's length); `min_deck` = `max_deck` = the main's size, 60. The Delver 75: 29 entries of `LIBRARY`'s 64, at most 4 copies of `NUMBER`'s 31; a 75 past either range is refused loudly at the match (`MatchState::constructed`), never truncated (120.7) |
+| sideboarding | `Sideboarding` (36.2), unchanged | the same decisions and range rule: an entry is offered only when a 60 stays reachable with the later entries free, `PASS` only at 60. **Every legal 60 is reachable in exactly one way** (the entries it changes, in list order, with their new counts, then `PASS`): `cr_100_4a_constructed_sideboarding_reaches_every_legal_deck_exactly_once` searches every decision sequence of a small constructed pool (a card of 4 copies, one of 2, a basic land of 1 copy, a card in both main and sideboard, a sideboard single) and finds each of the 42 decks of exactly 6 once from four starts; `a_constructed_deck_is_sideboarded_to_exactly_60_cards` reaches 400 legal 60s (the constructed prior's draws, every swap count, on the 68 and on a 75 of supported cards) by their canonical paths, a 59 or 61 by none, and 800 random walks finish only at 60 (7.8 decisions a walk) |
+| the match | `MatchState::constructed`, `MtgAz::constructed_bo3` | the pools the 75s, no first picks (`priors` None), each seat's deck prior a `ConstructedPrior` of its 75, `constructed_bo3` set; game 1 plays the mains with `GameSpec::hidden_decks` false (best-of-one's game); each later game (`next_game`) with `hidden_decks` and the new `GameSpec::deck_clouds` (120.2) |
+| the result, the chooser, `KEY_GAME` | 36.1, 36.11 | unchanged (the deck and sideboard sizes in `KEY_GAME` are 60 and the sideboard's, the same every game) |
+| the heuristic | `bots::sideboard` | `PASS`: its 60 kept (`the_heuristic_keeps_its_deck_and_constructed_matches_end`) |
+| two different 75s | per seat | each seat its own pool, sideboard size and prior: `two_different_75s_play_constructed_matches` plays the Delver main with its 8 supported sideboard cards against another 75 of supported cards (60 with 8 Island and 6 Mountain, a 12-card sideboard with a seventh Mountain: basic land entries of 8 and 7 copies, no free entry), 10 matches, 574 worlds of both viewers (324 in later games), each dealing the other player's 60 from that player's 75; `FUZZ_POOL=delver` gives P1 that 75 one match in four |
+
+### 120.2 The information model and the base prior
+
+| | the opponent's deck, as the viewer knows it | `determinize` |
+|---|---|---|
+| game 1 | their registered main (open decklists, 54.5) | best-of-one's deal from the real 60: `GameSpec::hidden_decks` false, the game writes `OPP_HIDDEN` itself |
+| between games 1 and 2 | their last deck: the main; the deck they chose, if they sideboarded first: hidden; their sideboarding in progress: hidden | the chosen deck dealt from the prior with nothing shown (the same K decks as game 2's first deals); their sideboarding in progress restarted from the main |
+| games 2 and 3 | hidden within the public 75: its size (60), every card of theirs the viewer knows in this game (public zones, cards known exactly, clouds) | the 60 dealt by `ConstructedPrior` holding those cards (K1-K3 of 102.1), its unknown cards dealt to their unknown slots (`Game::redeal`), the sideboard the rest of the 75; `Game::determinize` follows |
+| between games 2 and 3 | their last deck hidden too | the last deck dealt from the prior with what the viewer knew at game 2's end (nothing dealt into the finished game), then as between games 1 and 2 |
+
+**`GameSpec::deck_clouds`** (new; needs `hidden_decks`): a cloud over a player's whole hand and library is kept
+(`Game::tidy_clouds`), as hidden decklists keep it (102.1): with open decklists it says nothing the decklist does not,
+but with the 60 hidden it is the record that a card the viewer saw is still in the deck (Delver of Secrets reveals the
+top card, Brainstorm puts back two, a fetch land shuffles), so R counts copies exactly. Unlike `hidden_decklists` it
+leaves the other player's sideboard size in the view and the encoding: it is public (75 - 60). The later games set
+`hidden_decks` too (36.11's question rules: the companion question asked of everyone, the deck questions and card names
+by `Game::known_pools`, here the opponent's 75; the match writes `OPP_HIDDEN`).
+
+**The prior** (`hidden_decks::ConstructedPrior`, a `DeckPrior` of 102.1; one per seat, of that seat's 75).
+
+* **Its base: uniform over the number of swaps, then uniform over the decks with that number.** A deck's swaps s are
+  its cards beyond the main's counts (0..=S, S the sideboard's size); each s has probability 1 / (S + 1), and the
+  decks with s swaps (count vectors) are equally likely. Which cards come in and which go out is uniform: no
+  sideboarding knowledge (DESIGN.md 0: nothing human), only the public main as the anchor.
+* **Why not uniform over the legal 60s** (the example in the decisions): the number of decks grows steeply with s, so a
+  uniform 60 is mostly a deck with most of the sideboard in. Measured on a 75 with a 15-card sideboard of supported
+  cards (the Delver main and 3 Pyroblast, 3 Force of Negation, Karakas, Unholy Heat, 2 Spell Pierce, 3 Counterspell, 2
+  Fiery Confluence; `the_constructed_prior_meets_its_contract`): 1.76 x 10^10 legal 60s, by swaps 1, 146, 5,776, ...,
+  3.97 x 10^9 at s = 12, 3.5 x 10^8 at 15; **a uniform 60 has 11.42 swaps on average, and five or fewer with probability
+  6 x 10^-4**. The search's worlds would hold decks no player builds, and the deck tilt, which only reweighs the K cached
+  decks (106.1), could not reach a deck near the main: none of the K would be one. The swap-count prior puts the same
+  mass on every number of swaps (draws of it: 3,200 untilted samples, each s 163-228 times of the expected 200).
+  **To decide (120.7)**: whether this base stands; it is a modelling choice, not a rules approximation.
+* **Conditioned exactly** on what the viewer knows: every deck holds the shown cards R (copies counted; R from
+  `sample::knowledge`, as 102's), a revealed companion stays in the sideboard and every card passes its condition (per
+  card, one per name). The posterior P(deck | K) ∝ P_base(deck) 1[deck meets K] is sampled exactly, in bounded time and
+  without rejection: a table over the 75's entries of the swaps in and out so far (`swap_table`: (S + 1)^2 states an
+  entry), s drawn by the table's weight of the decks with s swaps over the base's count of them, then each entry's count
+  backwards. R comes from the real deck, so a deck holding it always exists (no failure path). The posterior is Bayes'
+  under the base: seeing two Pyroblasts, a third Unholy Heat and Karakas (four swaps at least) makes many swaps likely
+  (a deck of s swaps holds a given sideboard card about s / 15 of the time): its decks hold ~2.4 of the 3 Counterspells.
+* **The tilt** (`DeckWant::tilt`, the K = 0 deck tilt, 102.1): a deck's probability times each card's weight per copy
+  beyond R, an exponential tilt of the exact posterior (per-layer normalised, so a 10^6 weight over 60 cards neither
+  overflows nor vanishes); a tilt of 1 is the untilted draw, draw for draw. `expected_fill` is exact (each entry's
+  marginal under the untilted posterior, by a forward and a backward table). `DeckPrior` gained `match_pool` (a
+  constructed sample's pool is the 75's list, `MatchPool::constructed`; the default, `MatchPool::new`, is every other
+  prior's, unchanged) and `check_own` (a constructed sample: the deck and sideboard exactly the 75), checked at every
+  deal with `check_sample`.
+* **The K-sample deal** (102.8) and **the deck tilt** (106) are 102's, unchanged: K = `deal_samples` (32) decks per
+  request, memoized per match; the deck tilt reweighs them by the prediction with the ESS floor.
+* **Cost** (`constructed_deal_cost`, ignored; the desktop loaded by other workstreams): a prior sample 76-114 us (the
+  table: 29 entries x 256 states); `determinize` in a later game 5.3 ms at a request's first deal (its K = 32 decks
+  drawn), then 3.5 us a deal (756 deals) - a new request comes when the viewer sees a new card of the opponent's.
+
+**What is exact and what is modelled.** Exact: K1-K3 (the size, R, the 75's copies, a companion's condition), every
+known card in place, the clouds, the viewer's own cards untouched; a world depends only on its seed and the viewer's
+information (the request: the seat, 60, R, a companion). Modelled: the distribution over the rest of the deck (the base
+prior), and between games the first sideboarder's choice dealt from the base (the cube's 36.11 assumes it kept the
+last deck; here the next game's first deals and the between-games deal are the same K decks, so the search crossing
+from sideboarding into game 2 sees one distribution).
+
+### 120.3 What was built
+
+* `game.rs`: `GameSpec::deck_clouds` (default false; refused without `hidden_decks`). `hidden.rs`: `tidy_clouds` keeps a
+  whole hand-and-library cloud with it.
+* `az/matches.rs`: `MatchPool::constructed`, `MatchState::constructed`, `MatchState::constructed_bo3`; `next_game` sets
+  `hidden_decks` and `deck_clouds` for a constructed best-of-three's later games.
+* `az/hidden_decks.rs`: `ConstructedPrior` (120.2); `DeckPrior::match_pool` and `check_own`; `Dealt::new` takes the
+  prior's pool; `sample_hidden_deck` deals a constructed best-of-three's hidden decks (games 2-3; nothing in game 1)
+  and between games `deal_constructed_between`; `MtgAz::deals_hidden_decks` (hidden decklists or a constructed
+  best-of-three), `deck_hidden(o)`; `deck_tilt_of` and `determinize_deck_tilted` follow.
+* `az/mod.rs`: the spec (120.1), `MtgAz::constructed_bo3`, `determinize` deals with `deals_hidden_decks`.
+* `az/belief.rs`: the deck tilt is allowed in a constructed best-of-three (its later games' decks are hidden; in game 1
+  the deal is the open one) and deals through `sample_hidden_deck`; an open-decklist game still refuses it (106.2).
+* `az/encode.rs`: `encode_match` writes the candidates into `OPP_HIDDEN` for a constructed best-of-three's later games
+  only (game 1's `OPP_HIDDEN` is the game's own, open); `OPP_POOL` is the whole 75 in every game.
+* `public_state.rs`: `MatchState::constructed_bo3` classified (derived: a setting).
+* Python: `decklists.mirror_bo3_spec`, `DELVER_SMOKE_SIDEBOARD`; the presets (120.5); `tools/search_smoke.py`'s spec
+  `delver_bo3`.
+
+### 120.4 Hidden information
+
+* **What the encoding shows of the opponent's deck** in the later games: their pool (`OPP_POOL`, the public 75), the
+  candidates (`OPP_HIDDEN`: the 75 less their cards the viewer knows in this game, exactly or by clouds; 36.11's), what
+  they revealed in earlier games (`OPP_REVEALED`), their deck size (60) and sideboard size, and everything the game
+  shows as before. Nothing reads their chosen 60. While sideboarding the other player's context shows `Sideboard`
+  whatever their decision, their deck being built is not encoded (36.7, 36.11), and `KEY_GAME`'s sizes are the same
+  every game.
+* **Tests.** `tests/az.rs`: the public-state gate's positions gain a kind, the Delver mirror's constructed best-of-three
+  in games 2-3 (last, so the other kinds' positions are as before; 60 positions in `public_state_reaches_the_encoding`,
+  every perturbation reaching both views and encodings there); `the_v5_facts_encode_no_hidden_information` and the
+  belief and deck-target tests run on them (two generic assumptions extended: a constructed best-of-three's later
+  games deal the opponent's cards, and the belief weights are read after the deck is dealt, as hidden decklists');
+  new: `constructed_bo3_a_hidden_60_never_reaches_the_other_players_encoding_or_actions` (two real matches identical
+  but for one player's sideboarding after game 1 - its main kept, or a random other 60 - give the other player the same
+  encoding at every step of game 2 and the same legal actions at each of its decisions while the chance keys agree:
+  16 twin matches, 104 steps in step, 51 of them the other player's decisions) and
+  `constructed_bo3_determinize_keeps_the_view_and_deals_legal_60s` (192 worlds of both viewers, uniform and deck-tilted
+  at 0.5 / 1 / 8: the decider's actions and each viewer's whole encoding unchanged, a legal 60 of the public 75, the
+  deck target each world's own; 189 with another 60 than the real one). `tests/constructed_bo3.rs` (9 and 1 ignored):
+  the spec, the pool, the exhaustive reachability, exactly 60, the prior's contract,
+  `game_1_is_open_and_the_later_games_deal_hidden_60s` (144 game-1 worlds, all the main; 144 later-game worlds, all
+  with another 60, every one holding what the viewer saw, the encoding and actions kept),
+  `between_games_the_hidden_decks_are_dealt` (the second sideboarder blind to the first's choice: two matches that differ
+  only in that choice give it the same worlds, 40 matches), the heuristic, two different 75s (above).
+
+### 120.5 The deck target, the tilt, the presets
+
+The `deck` target (`MtgAz::AUX`'s second segment, 102.4) is emitted in every game state as before: in a constructed
+best-of-three it is the opponent's unseen cards (hand, library, face-down) of their real 60, by identity - from game 2
+on what the network is to predict. The presets (`mtgz/az/__init__.py`, next to `delver-mirror`):
+
+* **`delver-mirror-bo3`** = `delver-mirror` with `SPEC_DELVER_BO3` (both seats the pinned 75: the main and its 15,
+  `"format": "bo3"`) as spec and evaluation spec, `aux_deck_w` 0.5 and `selfplay_belief_tilts` = `eval_belief_tilts` =
+  `{"deck": 1.0}` (as the EoE presets declare them; the floor the spec's default, 16 effective decks of 32), no deck
+  reader, `max_steps` 60,000 (a match is up to three games, as `mtg-4`). Today any use of it refuses at the spec,
+  naming the five unsupported cards (`test_the_full_preset_refuses_naming_the_unsupported_cards`).
+* **`delver-bo3-smoke`** = `delver-smoke` (CPU, the tiny network) with the smoke spec: the main and the 75's 8
+  supported sideboard cards, the same deck target and tilt.
+
+`belief_tilts.deck` in game 1 deals nothing differently (the decks are open): allowed, since the setting acts from game
+2 on (106.2's refusal is for a game whose decks are never hidden). Moving the Delver line onto best-of-three: its
+belief-only head widens onto [belief, deck] exactly (`net.widen_aux`, 105.3) - a maintainer's decision with the run.
+
+### 120.6 Checks
+
+* **Behaviour digests** (`cargo test --release -p engine --test digest -- --ignored`): full **53839c837bbaf034**,
+  `DIGEST_ENCODING=0` **208c723daced22fe**, the base's (100.4.11's): unchanged, every game equal to the recorded file.
+  Best-of-one is untouched by construction too: `deck_clouds` is false outside a constructed best-of-three's later
+  games, and every other prior keeps `MatchPool::new`.
+* **The cube's best-of-three unchanged**: the default fuzz's 1,000 matches give base 60397f3's numbers exactly (2,547
+  games, 547 of three, 754 drawn, 860.0 decisions per match, 23,778 sideboarding decisions, 3,025 decks changed; 42,944
+  hidden-pool worlds, first picks resampled in 26,206, decks in 42,898: `FUZZ_GAMES=20000 ... fuzz_random_matches` on a
+  detached checkout of the base), and a scratch probe hashing 120 cube best-of-three matches (91,159 decisions: every
+  legal-action list, both viewers' whole encodings, the chance keys, and every 16th decision a world of each viewer, its
+  encoding, actions, decks and fingerprint; not checked in) gives **f8b7236b8cb08eac** on the base and on this branch.
+* **The Delver mirror's best-of-one unchanged**: `FUZZ_POOL=delver FUZZ_GAMES=20000`'s 20,000 games give the base's
+  numbers exactly (20,000 games, wins 9,673 / 9,563, 764 draws, 36.8 turns, 381.6 decisions, 11,882,303 options completed: the same line on a checkout of the base; the Murktide and Prismari Charm counts differ only by the replay tests' games, which run beside the games here and not in the base's filtered run).
+* **The full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, 153 binaries) on the code
+  before the second-75 test: **2,272 passed, 0 failed, 22 ignored**; `tests/constructed_bo3.rs` with it: 9 passed, 1
+  ignored; `tests/az.rs` 50 (48 and the two new), `constructed` 7.
+* **`FUZZ_GAMES=20000`** (default): passed, 2,458 s on the loaded desktop; the 20,000 games are the base's (wins 9,804 /
+  10,074, 122 draws, 31.8 turns, 438.2 decisions, 19,192,377 options completed; 100.4.10's games) and the 1,000 matches
+  above.
+* **`FUZZ_POOL=delver FUZZ_GAMES=20000`**: passed, 1,107 s. The games as above (Murktide Regent cast 9,875 times, its
+  trigger 388, Prismari Charm 14,691); **1,000 constructed best-of-three matches**: 2,659 games (659 matches of three,
+  877 drawn games - one match in four has 12-turn games -, 0 aborted), 885.1 decisions per match; **3,318 sideboardings,
+  24,012 sideboarding decisions (7.24 per sideboarding)**, 3,138 later-game decks changed (every one a legal 60 of its
+  75); 44,086 checked worlds, the opponent's 60 hidden in 27,430 of them (27,257 with another 60 than the real one), 332
+  first sideboarders' hidden choices dealt, 26,912 deck-tilted worlds (each deck one of the K cached decks); every world
+  with the decider's actions and both viewers' whole encodings kept, the information-set check, 30 random moves on.
+* **pytest** (`bash tools/build_py.sh`, `python -m pytest tests -q`): 271 passed, 2 failed, 1 skipped, then 273 passed: one fix
+  (`test_deck_tilt.py::test_the_presets_and_seats` asserted that only EoE presets set a deck tilt: the constructed
+  best-of-three's are excepted); `test_mac_remote.py::test_a_remote_eoe_evaluation_logs_its_games` timed out (600 s) once
+  under the fuzz's load and passes alone (77 s). New: `tests/test_delver_bo3.py` (4).
+* **The run loop** (`python -m mtgz.az.run --run E:/mtg-zero-scratch/delver-bo3/smoke --preset delver-bo3-smoke`, CPU,
+  a scratch directory): 3 iterations end to end, each 16 self-play matches (0 unfinished; 1,743-1,949 decisions and
+  151-168 turns a match, ~7,100-7,800 samples), training with the deck target (`aux_deck` 2.950 / 2.933 / 2.928 nats per
+  card), the heuristic and random yardsticks and Elo, the evaluation pool `visits-b0-tdeck1` (the deck tilt at 1); no
+  failure. `--preset delver-mirror-bo3` refuses at its first driver, naming the five cards.
+* **The search smoke** (`python tools/search_smoke.py --specs delver_bo3 --seeds 0-1 --games 200 --preset
+  delver-mirror`: mtg-3's self-play seat, a uniform evaluator): 0 failed of 2, 400 matches, 765,354 decisions (1,913 a
+  match), 21.3 million simulations, 862 s.
+* **The gate** on 73da76a (`python tools/gate.py engine --no-mac --tested-sha 73da76a --expect-digest 53839c837bbaf034
+  --expect-digest0 208c723daced22fe`): the first run, on a desktop loaded by other workstreams' fuzzers and builds,
+  passed the build, both digests, `az` 50, `limits` 13 and `hidden` 28, and failed pytest on two remote-worker timeouts
+  (`test_mac_remote.py::test_a_remote_eoe_evaluation_logs_its_games` and `::test_a_worker_plays_mtg[matches]`; both
+  pass alone, 96 s): `GATE FAILED engine 73da76afd66e in 4278s`. Run again: **`GATE PASSED engine 73da76afd66e in
+  953s`** (build, both digests, `az` 50, `limits` 13, `hidden` 28, pytest 273 passed and 1 skipped, the search smoke).
+
+### 120.7 Left, uncertain, decisions
+
+* **The base prior** (120.2) is the main decision to confirm: uniform over the swap count, then uniform. A different
+  base (a decreasing swap count, or the last game's deck as the anchor in game 3) is a change of `ConstructedPrior`
+  alone; the network's deck prediction (the tilt) corrects the base within the K decks' reach.
+* **The first sideboarder's choice** is dealt from the base prior (120.2), where the cube's 36.11 keeps the last deck.
+* **Bounds that do not bite here and are refused loudly**: a 75 of more than 64 different cards (`LIBRARY`'s ids and
+  the list block's 64 slots) or more than 31 copies of one card (`NUMBER`'s range) is refused at the match; making
+  every such 75 playable needs a decomposed entry choice and a list block past 64 slots (a layout change), not built.
+* **The five sideboard cards** (54.8; their section is to be 122): the full preset refuses until they are ported; then `DELVER_SMOKE_SIDEBOARD` and
+  `test_the_constructed_bo3_spec`'s refusal check (it fails loudly once the five parse) are to be updated, and the fuzz
+  and the gate kind pick the full 75 up by themselves (they take the supported sideboard cards).
+* **Not mine** (other lanes): each game of a match as its own episode and the value labels (`bo3-game-episodes`, 121; the
+  `SearchGame` result mapping is untouched here), the MTGO pilot, runs.
+* `temp_moves` in a match covers game 1's opening only (36.12): kept as `delver-mirror`'s.
+* **Where other determinize constraints meet this deal** (merge note; e.g. the Sneak and Show lane's legal-pick check
+  on a Show and Tell chooser's re-dealt hand, CR 101.4a). The hidden 60 is a step before the usual deal, the same as
+  hidden decklists' (102.1): `hidden_decks.rs` `MtgAz::sample_hidden_deck` (the request from `sample::knowledge`, a deck
+  of `DeckPrior::sample` or the K cached decks, `Game::redeal` setting the opponent's unknown slots' identities, clouds
+  kept by `Game::resample_with_clouds`), then always `Game::determinize` or `Game::determinize_weighted` (`hidden.rs`:
+  the pins, the clouds, the hand deal and any per-world acceptance there) - in `SearchGame::determinize` (`mod.rs`),
+  `MtgAz::determinize_belief` (`belief.rs`) and `determinize_deck_tilted` (`hidden_decks.rs`); nothing here deals hand
+  slots outside that path. A constraint on which cards exist (not only where they are: a face-down pick that must be a
+  creature or a land) has to reach the deck's request too (`sample::knowledge` / `DeckWant`), or a dealt 60 may hold no
+  card that passes it; with open decklists the real deck always does.
