@@ -1,4 +1,4 @@
-"""Best-of-three with one episode per game (docs/ENGINE.md 112, `"game_episodes": true`; zero-core docs/az.md 42): the
+"""Best-of-three with one episode per game (docs/ENGINE.md 121, `"game_episodes": true`; zero-core docs/az.md 42): the
 `mtg` game through the bindings and zero-core's driver from Python - one row per match whose samples (the arrays the
 shard writer writes) take their own game's result, the sideboarding before game g among game g's -, the evaluation
 spec keeps the key (Run.eval_chained), the remote worker's hello fingerprint. Without the key: no row gains a key."""

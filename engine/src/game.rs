@@ -492,7 +492,7 @@ pub enum EndReason {
     Aborted,
     /// A player conceded (CR 104.3a: it leaves the game and loses; the other
     /// player wins, 104.2a): `Game::concede`, zero-core's resign rule in a
-    /// match with one episode per game (ENGINE.md 112).
+    /// match with one episode per game (ENGINE.md 121).
     Conceded,
 }
 
@@ -1419,7 +1419,7 @@ impl Game {
     }
     /// Player `p` concedes (CR 104.3a: a player can concede the game at any
     /// time; it leaves the game and loses it): the other player wins (104.2a),
-    /// unless the game already ended. ENGINE.md 112: zero-core's resign rule.
+    /// unless the game already ended. ENGINE.md 121: zero-core's resign rule.
     pub fn concede(&mut self, p: PlayerId) {
         self.end_game(Some(crate::ids::opp(p)), EndReason::Conceded);
     }

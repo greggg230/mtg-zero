@@ -52,7 +52,7 @@ SPECS = {
     'match': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1, 'format': 'bo3'},
     # ... on the fixed evaluation pools
     'match_eval': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1, 'format': 'bo3', 'decks': 'eval'},
-    # ... each game its own episode (docs/ENGINE.md 112: zero-core chains the episodes of a match)
+    # ... each game its own episode (docs/ENGINE.md 121: zero-core chains the episodes of a match)
     'match_games': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1, 'format': 'bo3', 'game_episodes': True},
 }
 # team draft events (M6 part 3): (players, the team_draft spec); their matches as a co-training run plays them
@@ -185,7 +185,7 @@ def one(seed, spec, games, threads, sims, conc, preset, stall):
            'decisions': sum(r['decisions'] for r in res), 'sims': st['sims'], 'seconds': round(time.time() - t0, 1)}
     eps = [e for r in res for e in r.get('episodes') or ()]
     if eps:
-        out['episodes'] = len(eps)                 # (a chained spec, docs/ENGINE.md 112: the matches' games)
+        out['episodes'] = len(eps)                 # (a chained spec, docs/ENGINE.md 121: the matches' games)
     return out
 
 

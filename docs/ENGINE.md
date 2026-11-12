@@ -24994,15 +24994,16 @@ work leaves: a `tools/mac_races.sh` race, `~/mtg-zero-wt/races-<sha12>` with `~/
 `rm -rf ~/mtgz-races/<name>`, `git -C ~/mtg-zero worktree remove --force ~/mtg-zero-wt/races-<sha12>` and `rm -rf
 ~/cargo-target/mtg-zero/races-<sha12>`.
 
-## 112. Best-of-three with one episode per game (`"game_episodes": true`; branch `bo3-game-episodes`, 2026-11-11)
+## 121. Best-of-three with one episode per game (`"game_episodes": true`; branch `bo3-game-episodes`, 2026-11-11)
 
-(110 is the Doomsday lanes', 111 the parallel `delver-bo3` lane's and `eval-v2`'s, 113 `realdecks`'.) The user's
-decision of 2026-11-11 for best-of-three on the Delver mirror: each **game** of a match is its own episode for the
-search and for training; the match stays the unit self-play plays and evaluation measures. The core's half is zero-core
-`feat/match-episodes` (its docs/az.md 42, docs/search.md 1.3 and 2.14: chained episodes); this section is the `mtg`
-mapping. Without the key every spec is what it was (the behaviour digests are unchanged, 112.5).
+(110-113 are taken or contested by other branches, 120 is the constructed best-of-three lane's; this section was 112 in
+its first commit, 2f5886a.) The user's decision of 2026-11-11 for best-of-three on the Delver mirror: each **game** of a
+match is its own episode for the search and for training; the match stays the unit self-play plays and evaluation
+measures. The core's half is zero-core `feat/match-episodes` (its docs/az.md 42, docs/search.md 1.3 and 2.14: chained
+episodes); this section is the `mtg` mapping. Without the key every spec is what it was (the behaviour digests are
+unchanged, 121.5).
 
-### 112.1 Why
+### 121.1 Why
 
 36.6's mapping made the match one episode: the search crossed a game's end into sideboarding and the next game, and every
 row's value target was the match's result. Without draws a player's match-win chance after a game is a fixed amount plus
@@ -25012,7 +25013,7 @@ best-of-one Delver line a best-of-three run is warm-started from (whose search s
 were tuned on the per-game scale). zero-core's value target stays `(1 - value_q) z + value_q q_root`; z becomes the
 row's own game's result.
 
-### 112.2 The switch and the mapping
+### 121.2 The switch and the mapping
 
 `"game_episodes": true` in the spec (default false), best-of-three only (`"format": "bo3"`; refused with best-of-one,
 where the game is the match already). The evaluation spec keeps the key (`eval_json` and `evaldecks.eval_spec` change
@@ -25034,13 +25035,13 @@ The match's rules are 36.1's (who chooses, when the match ends, its result: by g
 reveals and the match's RNG carry over in the state `next_episode` returns. zero-core counts `temp_moves` per episode, so
 every game's opening is sampled (36.12's wish: a counter per game).
 
-### 112.3 Rows and evaluation
+### 121.3 Rows and evaluation
 
 zero-core labels each game's rows with that game's outcome and hands them out with the match's one result row (its
 `result` the match's, `episodes` the games'): the match win rate is what the yardstick, random games, Elo and h2h report,
 with per-game numbers beside it (zero-core docs/az.md 42.2).
 
-### 112.4 Resignation: a concession of the game in progress
+### 121.4 Resignation: a concession of the game in progress
 
 zero-core's self-play resign rule (its docs/az.md 27; the Delver line plays `selfplay_resign_t` 0.02, k 3) ends a
 decided episode: with one episode per game that is a game, and the match goes on. `next_episode(Some(p))` makes p
@@ -25051,7 +25052,7 @@ the loser chooses for the next game). `can_concede` is false while sideboarding 
 in progress to concede: zero-core does not count those searches for the rule), so a resignation never falls between
 games. The rule's no-resign draw is per match (zero-core draws it by game id); each game reports its own `resign`.
 
-### 112.5 Tests, digests, smoke
+### 121.5 Tests, digests, smoke
 
 * **Engine** (`engine/tests/bo3_episodes.rs`, 5, `--release` 7.5 s):
   `game_episodes_is_a_best_of_three_setting` (refused with best-of-one, a boolean, kept by `eval_json`; a match
@@ -25083,21 +25084,24 @@ games. The rule's no-resign draw is per match (zero-core draws it by game id); e
   checks), and 19 of the 32 matches carry different z in different games (impossible with the match's label).
 * **Search smoke**: `tools/search_smoke.py` gains the spec `match_games` (36.8's `match` with the key).
 * **Digests**: the `Game` changed only by an unused end reason and method, the mapping only behind the key: the
-  behaviour digests are unchanged (the gates below).
+  behaviour digests are unchanged - encoding-free **208c723daced22fe** and full **53839c837bbaf034**, the values 60397f3
+  gives (its own worktree, `cargo test --release -p engine --test digest -- --ignored`) and this branch's gate. (The
+  first commit's message, 2f5886a, named ENGINE.md 107's ae88eae20abb14ca / d0da2e6030aa0d08: stale - main's digests
+  moved after 107 - and its first engine gate, run against them, failed on that comparison alone.)
 
-### 112.6 What works with it, what refuses
+### 121.6 What works with it, what refuses
 
 What the Delver runs use, with the key (zero-core docs/az.md 42 has the core's tests): the shared self-play queue and
 remote workers (the toy's contests in the shared quota; a worker whose checkout lacks chained episodes refused by its
 hello, `episodes`); remote evaluation (its result's `episodes` checked); rolling self-play, sparse batches, the shard
 writer thread, sparse shards and window, information-set merging with root-view values, value-only samples (next_q),
-the root's belief (an auxiliary head), resignation (112.4), the evaluation cache, paired Elo games, the league
+the root's belief (an auxiliary head), resignation (121.4), the evaluation cache, paired Elo games, the league
 (zero-core's `test_the_delver_stack_on_a_chained_game`, `test_the_league_and_a_remote_evaluation_on_a_chained_game`
 on its toy match); replays (`zero.replay`: one replay = the whole match, `games` its games' results). **Refused**:
 branched games (`selfplay_branch`, a driver error naming the game); deferred terminals. Not tested: a co-training
 resolver with the key, lookahead seats, the local and remote linger (nothing in them reads an episode).
 
-### 112.7 For the run, and open questions
+### 121.7 For the run, and open questions
 
 * **`games` counts matches**: an iteration of 2,000 games is 2,000 matches (~2.5 games each: ~2.5x the rows of a
   best-of-one iteration); `eval_games`, `elo_games`, the anchors' games count matches too (the user's measure).

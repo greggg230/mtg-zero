@@ -1,4 +1,4 @@
-//! Best-of-three with one episode per game (ENGINE.md 112, `"game_episodes": true`; zero-core docs/az.md 42): a
+//! Best-of-three with one episode per game (ENGINE.md 121, `"game_episodes": true`; zero-core docs/az.md 42): a
 //! game's end ends the episode (terminal for the search and the labels), `next_episode` continues the match by
 //! 36.1's rules (or ends it), a concession (CR 104.3a) ends the game in progress, and the driver labels every row with
 //! its own game's outcome - the sideboarding before game g among game g's rows.

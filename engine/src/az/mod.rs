@@ -129,7 +129,7 @@ impl Eq for Share {}
 /// what the viewer has seen, and no encoding shows what of their decklist they have not shown.
 /// Without it every spec is what it was.
 ///
-/// One episode per game (ENGINE.md 112): `"game_episodes": true` (best-of-three
+/// One episode per game (ENGINE.md 121): `"game_episodes": true` (best-of-three
 /// only; default false) makes each game of the match its own zero-core
 /// episode (`SearchGame::chained`): a game's end is terminal for the search
 /// and for the labels, `next_episode` continues the match. Without it every
@@ -182,7 +182,7 @@ pub struct MtgSpec {
     pub deck_tilt_ess: Share,
     /// Sealed play (ENGINE.md 101): the pools, the builder and the seats; None for every other spec.
     pub sealed: Option<sealed::Shared>,
-    /// One zero-core episode per game of a best-of-three match (ENGINE.md 112).
+    /// One zero-core episode per game of a best-of-three match (ENGINE.md 121).
     pub game_episodes: bool,
 }
 
@@ -372,7 +372,7 @@ impl MtgSpec {
         }
         s.pools = pools.unwrap_or(s.format == Format::Bo3);
         if s.game_episodes && s.format != Format::Bo3 {
-            return Err("mtg spec: game_episodes is for best-of-three (\"format\": \"bo3\"): a best-of-one episode is its game already (ENGINE.md 112)".into());
+            return Err("mtg spec: game_episodes is for best-of-three (\"format\": \"bo3\"): a best-of-one episode is its game already (ENGINE.md 121)".into());
         }
         if s.hidden_decklists {
             // (ENGINE.md 102: best-of-three hides decks within known pools, 36.11; constructed
@@ -773,7 +773,7 @@ impl SearchGame for MtgAz {
     }
 
     fn to_move(&self) -> Option<usize> {
-        // (one episode per game, ENGINE.md 112: the episode ended with the game)
+        // (one episode per game, ENGINE.md 121: the episode ended with the game)
         if self.m.between {
             return None;
         }
@@ -838,7 +838,7 @@ impl SearchGame for MtgAz {
     }
 
     /// Best-of-one, and best-of-three with one episode per game (ENGINE.md
-    /// 112): the game's; best-of-three otherwise: the match's (36.1).
+    /// 121): the game's; best-of-three otherwise: the match's (36.1).
     fn result(&self) -> [f32; MAX_SEATS] {
         let mut r = [0.0; MAX_SEATS];
         let v = match self.m.format {
@@ -859,7 +859,7 @@ impl SearchGame for MtgAz {
     }
 
     /// Best-of-one, and best-of-three with one episode per game (ENGINE.md
-    /// 112): the game's life difference / 20. Best-of-three (ENGINE.md
+    /// 121): the game's life difference / 20. Best-of-three (ENGINE.md
     /// 36.6): 0.75 x the game-win difference / 2 + 0.25 x the current (at
     /// the end: the last) game's life margin.
     fn margin(&self, seat: usize) -> f32 {
@@ -1009,19 +1009,19 @@ impl SearchGame for MtgAz {
         self.m.choice.is_some()
     }
 
-    /// One zero-core episode per game of a best-of-three match (ENGINE.md 112: the spec's `"game_episodes"`).
+    /// One zero-core episode per game of a best-of-three match (ENGINE.md 121: the spec's `"game_episodes"`).
     fn chained(&self) -> bool {
         self.m.game_episodes
     }
 
-    /// The match after the episode's game (ENGINE.md 112, `matches.rs`): its result once over, else the
+    /// The match after the episode's game (ENGINE.md 121, `matches.rs`): its result once over, else the
     /// sideboarding for the next game begun; a concession (zero-core's resign rule) first ends the game in
     /// progress (CR 104.3a).
     fn next_episode(&self, conceded: Option<usize>) -> Result<Next<Self>, String> {
         self.next_match_episode(conceded.map(|p| p as u8))
     }
 
-    /// With one episode per game (ENGINE.md 112): only in a game (not while sideboarding or choosing a deck:
+    /// With one episode per game (ENGINE.md 121): only in a game (not while sideboarding or choosing a deck:
     /// no game is in progress to concede). Every other spec: every decision (as before).
     fn can_concede(&self) -> bool {
         !self.m.game_episodes || (self.m.sb.is_none() && self.m.choice.is_none() && !self.g.is_over())

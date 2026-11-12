@@ -34,7 +34,7 @@
 //!   chooser's worlds deal the second's: in a world the other seat has chosen).
 //!   After the last choice the game starts with the chosen decks, its seed
 //!   from the match's RNG (which `determinize` reseeds).
-//! * One episode per game (ENGINE.md 112, the spec's `"game_episodes"`):
+//! * One episode per game (ENGINE.md 121, the spec's `"game_episodes"`):
 //!   a game's end ends zero-core's episode (`MatchState::between`: the game
 //!   is over, the match is not, sideboarding has not begun); the next
 //!   episode begins with the sideboarding for the next game
@@ -364,7 +364,7 @@ pub struct MatchState {
     pub choice: Option<Box<DeckChoice>>,
     /// How each seat's deck was made, in a sealed game (ENGINE.md 107; the game log's).
     pub how: [Option<SeatHow>; 2],
-    /// One zero-core episode per game (ENGINE.md 112; the spec's
+    /// One zero-core episode per game (ENGINE.md 121; the spec's
     /// `"game_episodes"`, best-of-three only).
     pub game_episodes: bool,
     /// With `game_episodes`: a game ended and the match did not, sideboarding
@@ -605,7 +605,7 @@ impl super::MtgAz {
             m.over = true;
             return;
         }
-        // One episode per game (ENGINE.md 112): the episode ends with the
+        // One episode per game (ENGINE.md 121): the episode ends with the
         // game; the next one begins with the sideboarding.
         if m.game_episodes {
             m.between = true;
@@ -629,7 +629,7 @@ impl super::MtgAz {
     }
 
     /// zero-core's `next_episode` of a match with one episode per game
-    /// (ENGINE.md 112, zero-core docs/search.md 1.3), from the state where
+    /// (ENGINE.md 121, zero-core docs/search.md 1.3), from the state where
     /// an episode ended: `conceded` None - the game ended by the rules
     /// (`between`, or the match over); Some(p) - zero-core's resign rule: p
     /// concedes the game in progress (CR 104.3a: p leaves the game and loses
@@ -639,7 +639,7 @@ impl super::MtgAz {
     /// the next episode's first).
     pub(crate) fn next_match_episode(&self, conceded: Option<PlayerId>) -> Result<zero_search::Next<Self>, String> {
         if !self.m.game_episodes {
-            return Err("mtg: next_episode of a match without game_episodes (ENGINE.md 112)".into());
+            return Err("mtg: next_episode of a match without game_episodes (ENGINE.md 121)".into());
         }
         let mut az = self.clone();
         match conceded {
@@ -651,7 +651,7 @@ impl super::MtgAz {
             Some(p) => {
                 let in_game = !az.m.over && !az.m.between && az.m.sb.is_none() && az.m.choice.is_none() && !az.g.is_over();
                 if !in_game || p > 1 {
-                    return Err(format!("mtg: P{p} concedes, but no game is in progress (ENGINE.md 112)"));
+                    return Err(format!("mtg: P{p} concedes, but no game is in progress (ENGINE.md 121)"));
                 }
                 az.g.concede(p);
                 az.end_game();
