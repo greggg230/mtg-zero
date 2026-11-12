@@ -233,13 +233,14 @@ impl Game {
         let (_, _, filter) = self.hidden_pick(viewer, owner)?;
         let hand = &self.players[owner as usize].hand;
         let ctx = crate::cast::Ctx { controller: owner, source: None };
+        // (No hand card the deal changes - every one known, or a token kept: the chance is the same in every world.)
+        let c = *hand.iter().find(|c| slots.contains(c))?;
         let (home, needs) = self.cloud_needs(viewer, owner, slots, pinned);
-        // Which identities are of the kind: a hand card of `owner`'s given each one (a copy of the state).
+        // Which identities are of the kind: a hidden hand card of `owner`'s given each one (a copy of the state).
         let mut ids: Vec<DefId> = support.iter().chain(required).chain(known).chain(extras).chain(needs.iter().flatten()).copied().collect();
         ids.sort_unstable();
         ids.dedup();
         let mut probe = self.clone();
-        let c = *hand.first().expect("a face-down choice of a card in the hand");
         ids.retain(|&d| {
             probe.set_ident(c, d);
             probe.card_matches(&filter, c, &ctx)

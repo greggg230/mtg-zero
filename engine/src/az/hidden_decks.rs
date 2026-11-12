@@ -189,6 +189,18 @@ impl TablePrior {
         TablePrior { support, lands, spells }
     }
 
+    /// The prior of the table less the cards `without` (tests whose recorded worlds were dealt by the
+    /// prior of the table before those cards joined it: its draws depend on the whole support; ENGINE.md
+    /// 129.1).
+    #[doc(hidden)]
+    pub fn new_without(db: &'static CardDb, without: &[DefId]) -> TablePrior {
+        let mut p = TablePrior::new(db);
+        for v in [&mut p.support, &mut p.lands, &mut p.spells] {
+            v.retain(|d| !without.contains(d));
+        }
+        p
+    }
+
     /// The table's prior, built once per card table.
     pub fn of(db: &'static CardDb) -> Arc<TablePrior> {
         static PRIORS: OnceLock<Mutex<Vec<(usize, Arc<TablePrior>)>>> = OnceLock::new();
