@@ -182,7 +182,7 @@ pub const O_GLOBALS_V7: usize = O_GLOBALS_V6 + GLOBALS_V6;
 /// cube's, constructed play's: `layout_v7.json`), its head; the tail tokens
 /// are `tail_encode`'s.
 pub const NUM_FEATURES: usize = O_GLOBALS_V7 + GLOBALS_V7;
-const _: () = assert!(NUM_FEATURES == 56_192 && O_MY_PERM == 24_260 && O_STACK == 43_076 && O_MATCH == 52_096 && O_GLOBALS_V7 == 52_512);
+const _: () = assert!(NUM_FEATURES == 56_384 && O_MY_PERM == 24_260 && O_STACK == 43_268 && O_MATCH == 52_288 && O_GLOBALS_V7 == 52_704);
 /// Layout v6's features (ENGINE.md 100.5): the `mtg_eoe` game's encoding
 /// (`layout_eoe.json`); every one is a feature of layout v7 (`v6_projection`).
 pub const NUM_FEATURES_V6: usize = v6::NUM_FEATURES;
@@ -838,16 +838,21 @@ pub mod perm {
     /// Swampwalk, Mountainwalk, Forestwalk: `kw_float`, an exhaustive match).
     pub const KW_V7: usize = V7 + 3;
     pub const KW_V7_N: usize = 7;
-    /// `Mark::ChosenName` (Anointed Peacekeeper): a name was chosen, it is a
-    /// name of no card in the game (`NO_NAME`, one shared value), the named
-    /// identity's 32 digits.
+    /// `Mark::ChosenName` (Anointed Peacekeeper, Disruptor Flute; ENGINE.md 123,
+    /// 125.11): a name was chosen; it is a name no object of the game can have
+    /// (`NO_NAME`, one shared value: ENGINE.md 123.4); else the face named - its
+    /// card's identity (32 digits) and which face of it (`name_face`: the card or
+    /// a token, a back face, an Adventure, a prepare spell, a split card's left or
+    /// right half, a bestowed face; 3 bits), so a split card's two halves are two
+    /// names.
     pub const CHOSEN_NAME: usize = KW_V7 + KW_V7_N;
     pub const CHOSEN_NAME_NONE: usize = CHOSEN_NAME + 1;
     pub const CHOSEN_NAME_DIGITS: usize = CHOSEN_NAME + 2;
+    pub const CHOSEN_NAME_FACE: usize = CHOSEN_NAME_DIGITS + 32;
     /// `Mark::Entered`: it entered with an additional cost paid more than 255
     /// times or an X above 63 (its enters note's `ENTER_BIG`): the times / 8
     /// and X / 8 (squashed).
-    pub const ENTERED_BIG: usize = CHOSEN_NAME_DIGITS + 32;
+    pub const ENTERED_BIG: usize = CHOSEN_NAME_FACE + 3;
     pub const ENTERED_TIMES: usize = ENTERED_BIG + 1;
     pub const ENTERED_X: usize = ENTERED_BIG + 2;
     /// `Mark::UsedTurn` of this turn (Serra Paragon's "once during each of
@@ -1080,7 +1085,7 @@ const _: () = assert!(g5::PLAYER_END <= g5::PLAYER && g5::GAME_END <= GLOBALS_V5
 /// [`O_GLOBALS_V6`], after v5's): per player, viewer first
 /// (`g6[PLAYER * side + ..]`), then the game's (`g6[GAME + ..]`).
 pub mod g6 {
-    /// Floats per player (8 used, 24 spare, then `POOL_KINDS`).
+    /// Floats per player (9 used, 23 spare, then `POOL_KINDS`).
     pub const PLAYER: usize = 128;
     /// An artifact entered the battlefield under their control this turn
     /// (`Player::artifact_entered`; Mechan Shieldmate).
@@ -1105,6 +1110,13 @@ pub mod g6 {
     /// Moonlit Meditation's "the first time ... each turn").
     pub const LANDS_ENTERED: usize = 6;
     pub const TOKENS_CREATED: usize = 7;
+    /// ENGINE.md 123 (Mistrise Village; the first of the 24 per-player
+    /// spares): the "the next spell you cast this turn can't be countered"
+    /// effects waiting for their next spell / 4 (`Player::uncounterable_next`,
+    /// squashed; CR 101.2: every one applies to the same next spell, so
+    /// whether one waits is what the rules read; they end in the cleanup
+    /// step, 514.2). The spell that uses them up is `stack::UNCOUNTERABLE`.
+    pub const UNCOUNTERABLE_NEXT: usize = 8;
     /// ENGINE.md 100.5.1: their pool's mana with a spending restriction
     /// other than the Workshop's (`g5::POOL_ART`; CR 106.6,
     /// `Game::pool_restr`): per type t (W U B R G C) and kind k, the amount
@@ -1232,6 +1244,34 @@ fn pool_kind(only: crate::db::Spend) -> usize {
     let k = k + 8 * (only & MANA_UNCOUNTERABLE != 0) as usize;
     assert!(k != 0, "a pool kind with no restriction and no rider");
     k
+}
+
+/// The face a chosen name names (`Mark::ChosenName`; ENGINE.md 125.11) -> (its card's definition, which face:
+/// 0 the card itself, a token, or a face with the card's own name - a Class level, a bestowed face, an
+/// Equipment's granted-abilities face; 1 a back face, 2 an Adventure, 3 a prepare spell, 4 a split card's
+/// left half, 5 its right half). Exhaustive over the table's face definitions (a face with another name
+/// that is none of these is a loud failure), so distinct names encode apart: a card's identity and the
+/// face kind name one face (CR 201.2, 709.4, 712, 715, 722).
+pub fn name_face(db: &CardDb, d: DefId) -> (DefId, u8) {
+    let def = db.def(d);
+    let Some(c) = def.front else { return (d, 0) };
+    let card = db.def(c);
+    let face = if card.back == Some(d) {
+        1
+    } else if card.adventure == Some(d) {
+        2
+    } else if card.prepare == Some(d) {
+        3
+    } else if card.halves.is_some_and(|h| h.0 == d) {
+        4
+    } else if card.halves.is_some_and(|h| h.1 == d) {
+        5
+    } else if def.name == card.name || def.name == crate::sneak_show::face_name(card) {
+        0
+    } else {
+        panic!("{}: a face of {} with a name of its own that is none of its back face, Adventure, prepare spell or halves (ENGINE.md 125.11)", def.name, card.name)
+    };
+    (c, face)
 }
 
 pub(crate) fn code(out: &mut [f32], db: &CardDb, ids: &[u16], def: DefId) {
@@ -1888,7 +1928,14 @@ impl Game {
                         if d == crate::game::NO_NAME {
                             st[perm::CHOSEN_NAME_NONE] = 1.0;
                         } else {
-                            digits(&mut st[perm::CHOSEN_NAME_DIGITS..perm::CHOSEN_NAME_DIGITS + 32], ids, d);
+                            // (A card outside every identity space - a test card of the rules tests and the
+                            // fuzzer - is `UNKNOWN` here as in its card code everywhere; a network's games hold
+                            // none: the registries' tests, identity.rs.)
+                            let (card, face) = name_face(self.db, d);
+                            digits(&mut st[perm::CHOSEN_NAME_DIGITS..perm::CHOSEN_NAME_DIGITS + 32], ids, card);
+                            for b in 0..3 {
+                                st[perm::CHOSEN_NAME_FACE + b] = (face >> b & 1) as f32;
+                            }
                         }
                     }
                     Mark::Entered { times, x } => {
@@ -2510,6 +2557,8 @@ impl Game {
             // ENGINE.md 100.5.1.
             o[g6::LANDS_ENTERED] = squash(self.lands_entered_this_turn(p) as f32 / 4.0);
             o[g6::TOKENS_CREATED] = (self.w6.tokens_turn[p as usize] == t.number as u16) as u8 as f32;
+            // ENGINE.md 123.
+            o[g6::UNCOUNTERABLE_NEXT] = squash(pl.uncounterable_next as f32 / 4.0);
             if !self.pool_restr.is_empty() {
                 let mut kinds = [0u32; g6::POOL_KINDS_N];
                 for &(q, ty, only, n) in &self.pool_restr {

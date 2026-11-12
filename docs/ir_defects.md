@@ -1213,6 +1213,21 @@ lowering checks every field. Misdirection's alternative cost is Pyrokinesis' sha
 (`alt_cost_exile_from_hand`, a blue `CardFilter`), not `alternative_costs` as Force of Will's: both
 lower to the same alternative cost.
 
+### V. The Legacy Sneak and Show deck (ENGINE.md 123)
+
+No defect (entries 300-329 are this lane's; none used). Checked against their Oracle text and not defects:
+Show and Tell (`EachPlayerMayPutFromHand` with a `RotoCardFilter` of the four types), Omniscience
+(`grants_free_casts_from_hand`), Mistrise Village (`enters_tapped_unless` `ControlPermanent` of a Mountain or a
+Forest, `produces` {U}, the `{U}, {T}` ability's `NextSpellThisTurnCantBeCountered`), Disruptor Flute (`roto_statics`:
+`ChooseCardNameAsEnters`, `SpellTax { amount: 3, named }` on every player's spells,
+`ActivationProhibition { except_mana_abilities }`), Magus of the Moon (`nonbasic_lands_are_mountains`, the EoE
+pool's IR). Brotherhood's End had no IR (its first mode had no grammar: a coverage gap, not wrong data); mtg-bot's
+`cards/parser/legacy_sneak.py` adds "deals N damage to each creature and each planeswalker"
+(`DealNDamageToEachCreatureAndPlaneswalker`), its second mode is the existing `RemoveAllMatching`. Representational
+note: a name chosen as a permanent enters has two forms, Anointed Peacekeeper's `chooses_card_name_as_enters` (the
+engine reads "look at an opponent's hand" into it) and the roto `ChooseCardNameAsEnters` (no look); the engine keeps
+both (`SnsDef::plain_name`).
+
 ## Suspected defects (representational)
 
 **7. Animate Dead.** Oracle: "... Enchanted creature gets -1/-0."

@@ -1034,7 +1034,7 @@
     null
   ],
   "draft": true,
-  "features": 56192,
+  "features": 56384,
   "globals": [
     {
       "count": 128,
@@ -1044,22 +1044,22 @@
     {
       "count": 32,
       "name": "match",
-      "offset": 52096
+      "offset": 52288
     },
     {
       "count": 64,
       "name": "globals_v5",
-      "offset": 52128
+      "offset": 52320
     },
     {
       "count": 320,
       "name": "globals_v6",
-      "offset": 52192
+      "offset": 52384
     },
     {
       "count": 3680,
       "name": "globals_v7",
-      "offset": 52512
+      "offset": 52704
     }
   ],
   "max_row_tokens": 4096,
@@ -1131,7 +1131,7 @@
       "offset": 24260,
       "present": 52,
       "tail": true,
-      "width": 278
+      "width": 281
     },
     {
       "actions": [
@@ -1150,10 +1150,10 @@
         ]
       },
       "name": "opponent_permanents",
-      "offset": 33156,
+      "offset": 33252,
       "present": 52,
       "tail": true,
-      "width": 278
+      "width": 281
     },
     {
       "actions": [
@@ -1176,7 +1176,7 @@
         ]
       },
       "name": "hand",
-      "offset": 42052,
+      "offset": 42244,
       "present": 52,
       "tail": true,
       "width": 64
@@ -1198,7 +1198,7 @@
         ]
       },
       "name": "stack",
-      "offset": 43076,
+      "offset": 43268,
       "present": 52,
       "tail": true,
       "width": 438
@@ -1220,7 +1220,7 @@
         ]
       },
       "name": "triggers",
-      "offset": 46580,
+      "offset": 46772,
       "present": 52,
       "tail": true,
       "width": 271
@@ -1242,7 +1242,7 @@
         ]
       },
       "name": "list",
-      "offset": 47664,
+      "offset": 47856,
       "present": 52,
       "tail": true,
       "width": 64
@@ -1264,7 +1264,7 @@
         ]
       },
       "name": "graveyard_abilities",
-      "offset": 51760,
+      "offset": 51952,
       "present": 52,
       "tail": true,
       "width": 56
@@ -1286,7 +1286,7 @@
         ]
       },
       "name": "my_companion",
-      "offset": 51984,
+      "offset": 52176,
       "present": 52,
       "width": 56
     },
@@ -1302,7 +1302,7 @@
         ]
       },
       "name": "opponent_companion",
-      "offset": 52040,
+      "offset": 52232,
       "present": 52,
       "width": 56
     },

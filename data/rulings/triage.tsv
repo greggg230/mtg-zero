@@ -1281,3 +1281,19 @@ dc0c0658	a	other	choose a creature type: an existing creature type of 205.3m onl
 e64b1395	a	replacement	a card discarded under Leyline of the Void is still discarded (discard triggers, madness); its characteristics are found in exile
 4226f05f	a	replacement	Leyline of the Void exiles cards only: tokens still die (their dies triggers trigger)
 ef9cd497	a	replacement	under Leyline of the Void the opponents' nontoken creatures are exiled instead of dying; their dies triggers don't trigger
+6d3f0bf4	a	zones	Show and Tell: choices the entering cards need are made after every player chose a card, the active player first (CR 101.4)
+881ce0a9	a	zones	Show and Tell: the cards are chosen as it resolves, not as it is cast
+a107ed89	a	zones	Show and Tell: the active player chooses first, then the other; the choice may stay face down (CR 101.4a); the cards enter at once
+6e20dab1	a	mana	without paying its mana cost: no other alternative cost; additional costs (kicker, mandatory ones) are still paid (CR 118.9a, 601.2f)
+3bd1fe3c	a	stack	Omniscience resolving on its controller's turn: that player gets priority first (CR 117.3b)
+72e98293	a	stack	Omniscience keeps each spell's timing permissions and restrictions
+16696510	a	zones	Mistrise Village enters untapped only with a Mountain or Forest already controlled; one entering at the same time doesn't count (CR 614.12a)
+d858e725	a	other	activated abilities contain a colon (equip, a fetch land, Sneak Attack); an activated mana ability produces mana: the Flute stops the others, not it (CR 602.1, 605.1a)
+044069c9	a	other	Disruptor Flute naming a card with a mana ability and another activated ability: the mana ability can still be activated (CR 602.5, 605.1a)
+20e62c09	a	dfc	Disruptor Flute may name either name of a split, adventurer or double-faced card; the other name is unaffected (CR 709.3, 715.3, 712)
+3029db62	a	other	Disruptor Flute: any card name; a token's name only if it is also a card's (CR 201.3)
+cd000dac	a	other	Magus of the Moon without abilities still makes nonbasic lands Mountains (layer 4 before layer 6, CR 613.1d, 613.1f)
+aa10a575	a	replacement	a nonbasic land entering under the Magus loses its enters-tapped and as-enters abilities before they apply (CR 614.12)
+cafea326	a	triggers	a nonbasic land entering under the Magus loses its enters triggered ability before it triggers (CR 614.12, 603.6)
+53c9e610	a	other	Magus of the Moon changes no name or supertype (CR 305.7)
+24283e6f	a	other	under the Magus nonbasic lands lose their land types and abilities and gain Mountain and {T}: Add {R} (CR 305.7)

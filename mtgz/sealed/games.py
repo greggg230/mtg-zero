@@ -174,7 +174,8 @@ def deck_counts(names):
 def check(specs, games):
     """Rebuild every game's two seats from its spec and deck seed with this checkout's builder and compare the
     decks, modes and pool seeds with the logged ones: {'checked', 'mismatch': [(file, seed, seat, what)]}. A deck-choice
-    game's seat (docs/ENGINE.md 107.2) is its logged candidate (chosen, or the explore pick) of the rebuilt candidates."""
+    game's seat (docs/ENGINE.md 107.2) is its logged candidate (chosen, or the explore pick) of the rebuilt candidates; a
+    deck chosen by an evaluator (112) is the evaluator's own choice, by the file of the logged sha256 (the spec line's)."""
     from mtgz.sealed import engine as SE
     bad = []
     for g in games:
@@ -191,6 +192,10 @@ def check(specs, games):
                 exp = cands[p]['explore']
                 if want['mode'] not in (('explore',) if exp is not None else ('chosen',)) or (exp is not None and exp != j):
                     bad.append((g['file'], g['seed'], p, 'mode'))
+                # (the deck choice by an evaluator, docs/ENGINE.md 112: the evaluator's own choice, by the same file)
+                if exp is None and 'chosen' in cands[p] and (cands[p]['chosen'] != j
+                                                              or want.get('evaluator') != cands[p]['evaluator_sha']):
+                    bad.append((g['file'], g['seed'], p, 'evaluator'))
                 if cands[p]['pool_seed'] != want['pool_seed']:
                     bad.append((g['file'], g['seed'], p, 'pool_seed'))
                 continue

@@ -240,6 +240,20 @@ fn check_drafted(db: &CardDb, seats: &[Seat; 2]) -> Result<(), String> {
     Ok(())
 }
 
+/// The cards whose state layout v6 can't encode exactly: a pool's mana restricted to creature spells
+/// of a chosen type (Cavern of Souls, ENGINE.md 124.2) and a card name chosen as a permanent enters
+/// (Disruptor Flute, ENGINE.md 123). Layout v7 (the `mtg` game, ENGINE.md 125) encodes both (the gate's
+/// `public_state::CHOSEN_TYPE_MANA_GAP` / `CHOSEN_NAME_GAP` are in `V7_FIXED`); the layout v6 game
+/// `mtg_eoe` refuses a card table holding any (`eoe::MtgEoeAz::parse_spec`). One list, each entry with
+/// its refusal. `Some(the refusal)`.
+pub fn needs_layout_v7(d: &crate::db::CardDef) -> Option<String> {
+    const V7_ONLY: [fn(&crate::db::CardDef) -> Option<String>; 2] = [
+        |d| crate::doomsday_b::makes_chosen_type_mana(d).then(|| crate::doomsday_b::chosen_type_mana_needs_v7(&d.name)),
+        crate::sneak_show::plain_name_needs_v7,
+    ];
+    V7_ONLY.iter().find_map(|f| f(d))
+}
+
 impl MtgSpec {
     pub fn parse(json: &str) -> Result<MtgSpec, String> {
         let mut s = MtgSpec::default();
@@ -427,6 +441,9 @@ impl MtgSpec {
         };
         for (p, (d, sb)) in lists.into_iter().enumerate() {
             constructed::check_size(db, d, sb).map_err(|e| format!("mtg spec: p{p}'s deck: {e}"))?;
+            // (ENGINE.md 124.2, 123: `needs_layout_v7`'s cards make state layout v6 can't encode; the
+            // `mtg` game is layout v7, which does (ENGINE.md 125), and `mtg_eoe`, layout v6, refuses a
+            // card table with any: `eoe::MtgEoeAz::parse_spec`.)
         }
         Ok(s)
     }
@@ -606,12 +623,20 @@ impl MtgAz {
             ..GameSpec::default()
         };
         // (The prior of each deck, ENGINE.md 102: a sealed spec's seats the sealed prior of its
-        // collation, boosters and builder; any other spec the stub over its table.)
+        // collation, boosters and builder; any other spec the stub over its table. With the deck choice by an
+        // evaluator, ENGINE.md 112, each seat's own: a choosing seat's prior chooses as the seat does.)
         let priors: Option<std::sync::Arc<dyn hidden_decks::DeckPrior>> = spec.hidden_decklists.then(|| match &spec.sealed {
             Some(sl) => std::sync::Arc::new(hidden_decks::SealedPrior::of_spec(sl)) as std::sync::Arc<dyn hidden_decks::DeckPrior>,
             None => hidden_decks::TablePrior::of(spec.db()) as std::sync::Arc<dyn hidden_decks::DeckPrior>,
         });
-        let mut az = MtgAz::from_seats(spec.db(), gspec, spec.format, &seats, seed, [priors.clone(), priors])?;
+        let by_evaluator = spec.sealed.as_deref().is_some_and(|sl| sl.deck_choice.as_ref().is_some_and(|c| c.evaluator().is_some()));
+        let priors = match spec.sealed.as_deref() {
+            Some(sl) if by_evaluator && spec.hidden_decklists => {
+                [0u8, 1].map(|p| Some(std::sync::Arc::new(hidden_decks::SealedPrior::of_seat(sl, p)) as std::sync::Arc<dyn hidden_decks::DeckPrior>))
+            }
+            _ => [priors.clone(), priors],
+        };
+        let mut az = MtgAz::from_seats(spec.db(), gspec, spec.format, &seats, seed, priors)?;
         az.m.deal.k = spec.deal_samples;
         az.m.deal.ess = spec.deck_tilt_ess.0;
         az.m.how = how;
@@ -632,23 +657,35 @@ impl MtgAz {
         let mut cands: [Option<std::sync::Arc<[Candidate]>>; 2] = [None, None];
         for p in 0..2u8 {
             let seat = |deck: &[DefId], sideboard: &[DefId]| Seat { deck: deck.to_vec(), sideboard: sideboard.to_vec(), first_picks: Vec::new(), elsewhere: Vec::new() };
-            match (sl.deck_choice, sl.candidates(seed, p)?) {
+            match (sl.deck_choice.as_ref(), sl.candidates(seed, p)?) {
                 (Some(dc), Some((builds, ps))) => {
                     let cs: Vec<Candidate> = builds
                         .into_iter()
                         .enumerate()
                         .map(|(j, b)| {
                             let mode = if j == 0 { sealed::Mode::Best } else { sealed::Mode::Explore };
-                            let how = SeatHow { mode, candidate: Some(j as u8), pool_seed: ps, colors: b.colors, splash: b.splash };
+                            let how = SeatHow { mode, candidate: Some(j as u8), pool_seed: ps, colors: b.colors, splash: b.splash, evaluator: None, score: None };
                             Candidate { deck: b.deck, sideboard: b.sideboard, how }
                         })
                         .collect();
                     let pick = sealed::explore_pick(seed, p, dc.explore.0, dc.k);
-                    let c = &cs[pick.unwrap_or(0) as usize];
-                    seats.push(seat(&c.deck, &c.sideboard));
-                    match pick {
-                        Some(_) => how[p as usize] = Some(SeatHow { mode: sealed::Mode::Explore, ..c.how }),
-                        None => {
+                    match (pick, dc.evaluator()) {
+                        (Some(j), _) => {
+                            let c = &cs[j as usize];
+                            seats.push(seat(&c.deck, &c.sideboard));
+                            how[p as usize] = Some(SeatHow { mode: sealed::Mode::Explore, ..c.how });
+                        }
+                        // (ENGINE.md 112: chosen by the evaluator from the seat's own candidates, no decision)
+                        (None, Some(e)) => {
+                            let decks: Vec<&[DefId]> = cs.iter().map(|c| &c.deck[..]).collect();
+                            let (j, scores) = e.choose(&decks, seed, p)?;
+                            let c = &cs[j as usize];
+                            seats.push(seat(&c.deck, &c.sideboard));
+                            let (evaluator, score) = (Some(e.scorer.sha256), Some(scores[j as usize].to_bits()));
+                            how[p as usize] = Some(SeatHow { mode: sealed::Mode::Chosen, evaluator, score, ..c.how });
+                        }
+                        (None, None) => {
+                            seats.push(seat(&cs[0].deck, &cs[0].sideboard));
                             choosers.push(p);
                             cands[p as usize] = Some(std::sync::Arc::from(cs));
                         }
@@ -657,7 +694,8 @@ impl MtgAz {
                 _ => {
                     let (s, info) = sl.seat(seed, p)?;
                     let (colors, splash) = info.build.as_ref().map_or((0, 0), |b| (b.colors, b.splash));
-                    how[p as usize] = Some(SeatHow { mode: info.mode, candidate: None, pool_seed: info.pool_seed, colors, splash });
+                    how[p as usize] =
+                        Some(SeatHow { mode: info.mode, candidate: None, pool_seed: info.pool_seed, colors, splash, evaluator: None, score: None });
                     seats.push(s);
                 }
             }
@@ -680,7 +718,7 @@ impl MtgAz {
         let dealt = matches::Candidate {
             deck: self.m.deck(o),
             sideboard: self.m.pools[o as usize].sideboard(&self.m.decks[o as usize]),
-            how: matches::SeatHow { mode: sealed::Mode::Explore, candidate: None, pool_seed: None, colors: 0, splash: 0 },
+            how: matches::SeatHow { mode: sealed::Mode::Explore, candidate: None, pool_seed: None, colors: 0, splash: 0, evaluator: None, score: None },
         };
         let c = self.m.choice.as_mut().expect("a deck choice");
         if c.decider() == viewer {

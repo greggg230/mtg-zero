@@ -386,7 +386,7 @@ fn ident(def: engine::ids::DefId) -> usize {
 /// object's identity and option flag; the encoding is bounded.
 #[test]
 fn encoding_slots_name_the_action_slots() {
-    assert_eq!(NUM_FEATURES, 56_192);
+    assert_eq!(NUM_FEATURES, 56_384);
     let (mut lists, mut checked) = (0, 0);
     for g in states(scale(16), 6, 7) {
         let me = g.to_move().unwrap();
@@ -1276,6 +1276,23 @@ fn public_state_reaches_the_encoding() {
             }
         }
     }
+    // A chosen name's face (ENGINE.md 125.11): a split card's left half and its right half are two
+    // names (CR 709.4): named by the first permanent, the two states differ in both views and both
+    // encodings.
+    let mut halves = 0;
+    for (spec, a) in &pos {
+        let (mut l, mut r) = (a.clone(), a.clone());
+        if engine::public_state::name_a_split_half(&mut l, true).is_none() || engine::public_state::name_a_split_half(&mut r, false).is_none() {
+            continue;
+        }
+        for v in 0..2u8 {
+            assert_ne!(public_view(&l, v), public_view(&r, v), "{spec}: a split card's halves, P{v}'s view");
+            assert_ne!(enc(&l, v as usize), enc(&r, v as usize), "{spec}: a split card's halves, P{v}'s encoding");
+        }
+        halves += 1;
+    }
+    assert!(halves > 0, "no position named a split card's halves");
+    println!("a split card's halves named: {halves} positions, both views and encodings apart");
     let f = fields();
     let count = |c: Class| f.iter().filter(|x| x.class == c).count();
     println!(
@@ -1341,6 +1358,47 @@ fn public_state_reaches_the_encoding() {
     // knows them, the earlier games' reveals of both players, ENGINE.md 125: the one limit left is
     // the graveyard's order no rule reads, the user's choice.)
     assert_eq!(by_design, 1, "the deliberate limits");
+}
+
+/// ENGINE.md 124.2, 123, 125: layout v6 can't encode a pool's mana restricted to creature spells of a
+/// chosen type (Cavern of Souls) or the card name a permanent chose as it entered (Disruptor Flute);
+/// layout v7 encodes both (the gate's `CHOSEN_TYPE_MANA_GAP` / `CHOSEN_NAME_GAP` are in `V7_FIXED`, no
+/// limit names them), so every network-driven game of `mtg` - a spec the engine's `SearchGame` parses
+/// (self-play, evaluation, h2h, replays: zero-core's driver) - plays decks and sideboards with them;
+/// `az::needs_layout_v7` still names each refusal, for the layout v6 game `mtg_eoe` (a card table
+/// holding any is refused there).
+#[test]
+fn cavern_and_flute_decks_play_on_layout_v7() {
+    let delver = engine::az::constructed::Decklist::izzet_delver().main_names();
+    let spec = |p0: &[String], p1: &[String], sb: Option<&[&str]>| {
+        let mut decks = serde_json::json!({"p0": p0, "p1": p1});
+        if let Some(sb) = sb {
+            decks["p1_sideboard"] = serde_json::json!(sb);
+        }
+        serde_json::json!({"max_turns": 60, "constructed": true, "decks": decks}).to_string()
+    };
+    for (card, want) in [
+        ("Cavern of Souls", "Cavern of Souls' floating mana needs layout v7 (ENGINE.md 124.2)"),
+        ("Disruptor Flute", "Disruptor Flute's chosen name needs layout v7 (ENGINE.md 123)"),
+    ] {
+        let mut with = delver.clone();
+        with[0] = card.to_string();
+        for s in [spec(&with, &delver, None), spec(&delver, &with, None), spec(&delver, &delver, Some(&[card]))] {
+            assert!(MtgSpec::parse(&s).is_ok(), "{card}");
+            assert!(<MtgAz as SearchGame>::parse_spec(&s).is_ok(), "{card}");
+        }
+        let db = engine::db::CardDb::constructed();
+        assert_eq!(engine::az::needs_layout_v7(db.def(db.expect_id(card).unwrap())).as_deref(), Some(want));
+    }
+    let lim = engine::public_state::limits();
+    for gap in [engine::public_state::CHOSEN_TYPE_MANA_GAP, engine::public_state::CHOSEN_NAME_GAP] {
+        assert!(lim.iter().all(|l| l.name != gap) && engine::public_state::V7_FIXED.contains(&gap), "{gap}");
+    }
+    // The Sneak and Show 75 against itself, its sideboard's Flute too.
+    let sns = engine::az::constructed::Decklist::parse(include_str!("../../data/decks/sneak_show_8014220.json")).unwrap();
+    let main = sns.main_names();
+    let side: Vec<&str> = sns.sideboard.iter().filter(|(_, n)| engine::db::CardDb::constructed().id(n).is_some()).map(|(_, n)| n.as_str()).collect();
+    assert!(<MtgAz as SearchGame>::parse_spec(&spec(&main, &main, Some(&side))).is_ok());
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

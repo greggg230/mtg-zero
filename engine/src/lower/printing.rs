@@ -345,7 +345,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.enters_as_copy_max_mv_mana_spent", enters_as_copy_max_mv_mana_spent);
         l.deny("CardPrinting.rebound", rebound);
         l.deny("CardPrinting.room_halves", room_halves);
-        l.deny("CardPrinting.roto_statics", roto_statics);
         l.deny("CardPrinting.cast_from_top_of_library_kinds", cast_from_top_of_library_kinds);
         l.deny("CardPrinting.suspend_count", suspend_count);
         l.deny("CardPrinting.suspend_cost", suspend_cost);
@@ -356,7 +355,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.enchanted_land_adds_chosen_color", enchanted_land_adds_chosen_color);
         l.deny("CardPrinting.additional_cost_discard_x", additional_cost_discard_x);
         l.deny("CardPrinting.optional_sacrifice_any_number", optional_sacrifice_any_number);
-        l.deny("CardPrinting.grants_free_casts_from_hand", grants_free_casts_from_hand);
         l.deny("CardPrinting.free_flash_creature_casts_max_mv", free_flash_creature_casts_max_mv);
         l.deny("CardPrinting.grants_discard_alternative_cost", grants_discard_alternative_cost);
         l.deny("CardPrinting.tapped_for_mana_triggers", tapped_for_mana_triggers);
@@ -1830,7 +1828,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             l.unsupported("CardPrinting.has_delve(with a cost that sacrifices or discards the hand: ENGINE.md 100.4.9)");
         }
     }
+    // The Legacy Sneak and Show cards (ENGINE.md 123): Omniscience's free
+    // casts from hand, Disruptor Flute's name and its two statics.
+    let (sns, sns_name, sns_tax) = super::sneak_show::printing_sns(l, roto_statics, *grants_free_casts_from_hand, ty, *chooses_card_name_as_enters);
     let mut def = CardDef {
+        sns,
         nonbasic_lands_are_mountains: *nonbasic_lands_are_mountains && ty & types::PERMANENT != 0,
         etb_counter_per_land_entered: *grants_etb_counter_per_land_entered_this_turn && ty & types::PERMANENT != 0,
         devour_land,
@@ -1840,8 +1842,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         companion,
         look_top: *grants_look_at_top_of_library,
         play_top_life: *grants_play_from_top_paying_life,
-        chooses_name: *chooses_card_name_as_enters,
-        named_spell_tax,
+        chooses_name: *chooses_card_name_as_enters || sns_name,
+        named_spell_tax: named_spell_tax.max(sns_tax),
         named_ability_tax,
         class_level: class_lv,
         levels,

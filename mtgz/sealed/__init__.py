@@ -20,4 +20,8 @@ Pure Python (no engine module needed). With the engine module (`tools/build_py.s
   the picker (ENGINE.md 108; `python -m mtgz.sealed.evaluator`); v2's pairwise kind (P(deck A beats deck
   B), scores against any named field), recency weighting and the torch-free export with its numpy
   reference scorer (ENGINE.md 111).
+* `mtgz.sealed.scorer`: the engine's scorer of that export (the sealed spec's deck choice by an evaluator) checked
+  against the numpy reference and torch (ENGINE.md 112; `python -m mtgz.sealed.scorer`).
+* `mtgz.sealed.rolling`: a run's evaluator versions, retrained in a background job, and the deck-choice evaluation
+  (ENGINE.md 112: zero-core's game-package hooks; `python -m mtgz.sealed.rolling`).
 """

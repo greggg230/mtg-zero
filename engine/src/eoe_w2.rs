@@ -284,8 +284,10 @@ pub(crate) fn basic_land_def(t: usize) -> CardDef {
 }
 
 impl Game {
-    /// A permanent says "nonbasic lands are Mountains" (CR 305.7; one that
-    /// lost its abilities doesn't).
+    /// A permanent says "nonbasic lands are Mountains" (CR 305.7). One that
+    /// lost its abilities still does: its effect sets land types, layer 4,
+    /// which applies before abilities are removed, layer 6 (CR 613.1d,
+    /// 613.1f, 613.5; Magus of the Moon's ruling cd000dac, ENGINE.md 123).
     pub(crate) fn moon_source(&self) -> bool {
         self.moon_source_before(u32::MAX)
     }
@@ -294,7 +296,7 @@ impl Game {
     /// timestamp before `since`.
     fn moon_source_before(&self, since: u32) -> bool {
         self.battlefield.iter().any(|&x| {
-            self.db.def(self.objs[x.i()].def).nonbasic_lands_are_mountains && !self.lost_abilities(x) && self.objs[x.i()].timestamp < since
+            self.db.def(self.objs[x.i()].def).nonbasic_lands_are_mountains && self.objs[x.i()].timestamp < since
         })
     }
 
@@ -327,7 +329,7 @@ impl Game {
     pub(crate) fn moon_ts(&self) -> u32 {
         self.battlefield
             .iter()
-            .filter(|&&x| self.db.def(self.objs[x.i()].def).nonbasic_lands_are_mountains && !self.lost_abilities(x))
+            .filter(|&&x| self.db.def(self.objs[x.i()].def).nonbasic_lands_are_mountains)
             .map(|&x| self.objs[x.i()].timestamp)
             .max()
             .unwrap_or(0)

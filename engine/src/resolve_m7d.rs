@@ -667,11 +667,22 @@ impl Game {
         for &c in &self.battlefield {
             let d = self.abilities(c);
             let n = if caster.is_some() { d.named_spell_tax } else { d.named_ability_tax };
-            if n == 0 || caster.is_some_and(|p| self.objs[c.i()].controller == p) {
+            // (Every player's spells: Disruptor Flute's, ENGINE.md 123.)
+            if n == 0 || caster.is_some_and(|p| self.objs[c.i()].controller == p) && !d.sns.named_tax_everyone {
                 continue;
             }
             let Some(nd) = self.chosen_name(self.obj_ref(c)) else { continue };
-            if nd != crate::game::NO_NAME && self.name(card) == self.db.def(nd).name {
+            if nd == crate::game::NO_NAME {
+                continue;
+            }
+            // (A plain name choice compares a split card's halves too, CR
+            // 709.4: ENGINE.md 123.)
+            let named = if d.sns.plain_name {
+                self.has_name(card, crate::sneak_show::face_name(self.db.def(nd)))
+            } else {
+                self.name(card) == self.db.def(nd).name
+            };
+            if named {
                 tax += n as u64;
             }
         }

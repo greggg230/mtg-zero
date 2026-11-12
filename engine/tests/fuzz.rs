@@ -84,6 +84,16 @@
 //! Misdirection and a new target, a Cavern's type chosen, Edge of Autumn and Street Wraith
 //! cycled; Murktide Regent and Prismari Charm on the Delver side), with 2,000 or more Edge of
 //! Autumn and Street Wraith cast too. Games only (best-of-one).
+//! `FUZZ_POOL=sneak_show` (ENGINE.md 123): the real Legacy Sneak and Show 60 (MTGGoldfish
+//! 8014220, `data/decks/sneak_show_8014220.json`; its main deck, no sideboard) against the Delver
+//! 60 in either seat, one game in three the Sneak and Show mirror. `FUZZ_POOL=sns` (ENGINE.md
+//! 123): the lane's six cards four each (`SNS_DECK`: Show and Tell, Omniscience, Mistrise Village,
+//! Brotherhood's End, Disruptor Flute, Magus of the Moon) with the deck's creatures, Sneak
+//! Attack, Force of Will and mana, the same pairings. Constructed play's card table; every check
+//! of the default mode, and with 200 games or more (`sns`) each of the six must have been cast or
+//! activated, a spell cast without paying its mana cost, a spell made uncounterable and a name
+//! chosen (`sneak_show`: Show and Tell and Mistrise Village seen, a free cast, a spell made
+//! uncounterable). Games only (best-of-one).
 //! `FUZZ_POOL=eoe` (ENGINE.md 99): Edge of Eternities sealed, the set's own
 //! card table (`CardDb::eoe`): random 40-card decks of its supported cards
 //! (17 lands, 23 spells; games only, no matches).
@@ -102,6 +112,12 @@
 //! viewer's whole encoding as in the real game; in the decider's world the other seat chose a deck of 40 cards
 //! of its prior's support; one choice in the world starts the game, 30 random moves on), then a random choice -
 //! and the game goes on with every check of the hidden mode.
+//! `FUZZ_DECK_CHOICE_BY=<file>` (with `FUZZ_DECK_CHOICE=k`; ENGINE.md 112): the deck choice by an evaluator instead -
+//! `"by": "evaluator", "evaluator": <file>` (an exported `mtgz.sealed.scorer` file): no decision; each seat's deck is
+//! checked to be its explore pick or the evaluator's best candidate (recomputed here from the spec's candidates and the
+//! scorer), with the evaluator's sha256 and score in `how`, and the opponent's worlds are dealt from each seat's own
+//! prior, which chooses as the seat does (`SealedPrior::of_seat`, named `sealed+evaluator`). It prints the chosen and
+//! exploring seats.
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 //!
 //! Layout v7's rows (ENGINE.md 125), at every decision of a game: the decider's whole row (head,
@@ -345,6 +361,11 @@ enum PoolMode {
     /// `FUZZ_POOL=doomsday` (ENGINE.md 124.4): the real Legacy Doomsday 60
     /// against the Delver 60 and itself.
     Doomsday,
+    /// `FUZZ_POOL=sneak_show` (ENGINE.md 123): the real Legacy Sneak and Show
+    /// 60 against the Delver 60 and itself.
+    SneakShow,
+    /// `FUZZ_POOL=sns` (ENGINE.md 123): the lane's six cards four each.
+    Sns,
 }
 
 fn pool_mode() -> PoolMode {
@@ -360,7 +381,9 @@ fn pool_mode() -> PoolMode {
         Ok("dd_a") => PoolMode::DdA,
         Ok("dd_c") => PoolMode::DoomsdayC,
         Ok("doomsday") => PoolMode::Doomsday,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"eoe\" or \"sealed\")"),
+        Ok("sneak_show") => PoolMode::SneakShow,
+        Ok("sns") => PoolMode::Sns,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -386,10 +409,102 @@ fn dd_b_mode() -> bool {
     pool_mode() == PoolMode::DdB
 }
 
-/// Constructed play's table (`FUZZ_POOL=delver`, `dd_a`, `dd_b`, `dd_c` or
-/// `doomsday`).
+/// Constructed play's table (`FUZZ_POOL=delver`, `dd_a`, `dd_b`, `dd_c`,
+/// `doomsday`, `sneak_show` or `sns`).
 fn constructed_mode() -> bool {
-    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode()
+    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode()
+}
+
+/// `FUZZ_POOL=sneak_show` or `sns` (ENGINE.md 123).
+fn sns_mode() -> bool {
+    matches!(pool_mode(), PoolMode::SneakShow | PoolMode::Sns)
+}
+
+/// The real Sneak and Show 60 of `FUZZ_POOL=sneak_show` (ENGINE.md 123):
+/// `data/decks/sneak_show_8014220.json`'s main deck (read here:
+/// `az/constructed.rs` is the best-of-three lane's to change).
+fn sneak_show_deck() -> Vec<u16> {
+    let d = engine::az::constructed::Decklist::parse(include_str!("../../data/decks/sneak_show_8014220.json")).unwrap();
+    let deck = engine::az::constructed::Decklist::ids(CardDb::constructed(), &d.main).unwrap();
+    engine::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("the Sneak and Show 60: {e}"));
+    deck
+}
+
+/// The lane's deck of `FUZZ_POOL=sns` (ENGINE.md 123): the six cards four each.
+const SNS_DECK: &[(u32, &str)] = &[
+    (4, "Show and Tell"),
+    (4, "Omniscience"),
+    (4, "Mistrise Village"),
+    (4, "Brotherhood's End"),
+    (4, "Disruptor Flute"),
+    (4, "Magus of the Moon"),
+    (3, "Emrakul, the Aeons Torn"),
+    (2, "Griselbrand"),
+    (2, "Atraxa, Grand Unifier"),
+    (2, "Sneak Attack"),
+    (4, "Force of Will"),
+    (4, "Brainstorm"),
+    (4, "Lotus Petal"),
+    (3, "Volcanic Island"),
+    (4, "Scalding Tarn"),
+    (2, "Ancient Tomb"),
+    (2, "City of Traitors"),
+    (2, "Island"),
+    (2, "Mountain"),
+];
+
+fn sns_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = SNS_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let deck = engine::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    engine::az::constructed::check(CardDb::constructed(), &deck, &[]).unwrap_or_else(|e| panic!("SNS_DECK: {e}"));
+    deck
+}
+
+/// `FUZZ_POOL=sneak_show` / `sns`: the lane's cards seen on the stack (spells,
+/// Mistrise Village's ability; each stack item once, by its id), spells cast
+/// without paying their mana costs, spells made uncounterable, names chosen.
+static SNS_SEEN: [AtomicU64; 6] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+static SNS_FREE: AtomicU64 = AtomicU64::new(0);
+static SNS_UNCOUNTERABLE: AtomicU64 = AtomicU64::new(0);
+static SNS_NAMED: AtomicU64 = AtomicU64::new(0);
+const SNS_CARDS: [&str; 6] = ["Show and Tell", "Omniscience", "Mistrise Village", "Brotherhood's End", "Disruptor Flute", "Magus of the Moon"];
+
+fn count_sns(g: &Game, seen: &mut Vec<u32>) {
+    for it in g.stack() {
+        if seen.contains(&it.id) {
+            continue;
+        }
+        seen.push(it.id);
+        match it.kind {
+            engine::game::StackKind::Spell { card } => {
+                if let Some(k) = SNS_CARDS.iter().position(|&n| n == g.name(card)) {
+                    SNS_SEEN[k].fetch_add(1, Ordering::Relaxed);
+                }
+                if matches!(it.from, engine::game::CastFrom::Permission { free: true, .. }) {
+                    SNS_FREE.fetch_add(1, Ordering::Relaxed);
+                }
+                if g.marks_of(card).contains(&engine::game::Mark::Uncounterable) {
+                    SNS_UNCOUNTERABLE.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            engine::game::StackKind::Ability { source, .. } if g.db().def(g.obj(source.idx).def).name == "Mistrise Village" => {
+                SNS_SEEN[2].fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `FUZZ_POOL=sneak_show` / `sns`: names chosen as a Flute entered (each
+/// permanent once).
+fn count_sns_names(g: &Game, named: &mut Vec<engine::ids::ObjRef>) {
+    for &c in g.battlefield() {
+        let r = g.obj_ref(c);
+        if !named.contains(&r) && g.marks_of(c).iter().any(|m| matches!(m, engine::game::Mark::ChosenName(_))) {
+            named.push(r);
+            SNS_NAMED.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 }
 
 /// The Doomsday 60 (MTGGoldfish 8027957, E:/mtg-zero-scratch/doomsday) with its cards of other
@@ -1670,6 +1785,15 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     if doomsday_mode() {
         return doomsday_decks(seed);
     }
+    if sns_mode() {
+        // Against Delver in either seat; one game in three the mirror.
+        let mine = if pool_mode() == PoolMode::Sns { sns_deck() } else { sneak_show_deck() };
+        return match seed % 3 {
+            0 => [(mine, Vec::new()), (delver_deck(), Vec::new())],
+            1 => [(delver_deck(), Vec::new()), (mine, Vec::new())],
+            _ => [(mine.clone(), Vec::new()), (mine, Vec::new())],
+        };
+    }
     if eoe_mode() {
         return [(eoe_deck(&mut rng), Vec::new()), (eoe_deck(&mut rng), Vec::new())];
     }
@@ -1719,6 +1843,8 @@ fn play(seed: u64, checks: bool) -> Played {
     let mut ddc_seen = DdcSeen::default();
     // (`FUZZ_POOL=doomsday`'s counts, ENGINE.md 124.4.)
     let mut doomsday_seen = DoomsdaySeen::default();
+    // (`FUZZ_POOL=sneak_show` / `sns`: the Flutes that chose a name, ENGINE.md 123.)
+    let mut sns_named: Vec<engine::ids::ObjRef> = Vec::new();
     let (mut turn, mut turn_steps) = (g.turn().number, 0u64);
     while !g.is_over() {
         g.legal_actions(&mut legal);
@@ -1796,6 +1922,12 @@ fn play(seed: u64, checks: bool) -> Played {
         }
         if doomsday_mode() {
             count_doomsday(&g, &mut doomsday_seen);
+        }
+        if sns_mode() {
+            if !g.stack().is_empty() {
+                count_sns(&g, &mut stack_seen);
+            }
+            count_sns_names(&g, &mut sns_named);
         }
         assert!(steps < 100_000, "seed {seed}: game does not end
 {}", g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
@@ -2096,7 +2228,13 @@ fn fuzz_random_games() {
     if let Some(k) = deck_choice_fuzz().filter(|_| sealed_mode() && hidden_decks_mode()) {
         let (c, w) = (DC_CHOICES.load(Ordering::Relaxed), DC_WORLDS.load(Ordering::Relaxed));
         println!("FUZZ_DECK_CHOICE={k}: {c} deck choices played, {w} worlds checked during them");
-        if n >= 100 {
+        if let Ok(path) = std::env::var("FUZZ_DECK_CHOICE_BY") {
+            let (ch, ex) = (DC_EVAL_CHOSEN.load(Ordering::Relaxed), DC_EVAL_EXPLORE.load(Ordering::Relaxed));
+            println!("FUZZ_DECK_CHOICE_BY={path}: {ch} seats chose by the evaluator, {ex} explored");
+            if n >= 100 {
+                assert!(ch > 0 && c == 0, "FUZZ_DECK_CHOICE_BY: {ch} seats chose, {c} decisions (the evaluator's choice is none)");
+            }
+        } else if n >= 100 {
             assert!(c > 0 && w > 0, "FUZZ_DECK_CHOICE: no deck choice was played");
         }
     }
@@ -2224,6 +2362,23 @@ fn fuzz_random_games() {
         // cast: their casts are asserted over 2,000 games.)
         if n >= 2000 {
             assert!(cast("Edge of Autumn") > 0 && cast("Street Wraith") > 0, "Edge of Autumn or Street Wraith never cast: {casts:?}");
+        }
+    }
+    if sns_mode() {
+        let seen: Vec<u64> = SNS_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+        let (free, unc, named) = (SNS_FREE.load(Ordering::Relaxed), SNS_UNCOUNTERABLE.load(Ordering::Relaxed), SNS_NAMED.load(Ordering::Relaxed));
+        println!(
+            "FUZZ_POOL={}: seen on the stack {}; spells cast without paying their mana costs {free}, made uncounterable {unc}; names chosen {named}",
+            if pool_mode() == PoolMode::Sns { "sns" } else { "sneak_show" },
+            SNS_CARDS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
+        );
+        if n >= 200 && pool_mode() == PoolMode::Sns {
+            assert!(seen.iter().all(|&c| c > 0) && free > 0 && unc > 0 && named > 0, "the lane's cards weren't played: {seen:?} {free} {unc} {named}");
+        }
+        // (The deck's one Omniscience, ten mana, mostly enters by Show and Tell: its free casts
+        // are what is required.)
+        if n >= 200 && pool_mode() == PoolMode::SneakShow {
+            assert!(seen[0] > 0 && seen[2] > 0 && free > 0 && unc > 0, "the deck's lane cards weren't played: {seen:?} {free} {unc}");
         }
     }
 }
@@ -2588,7 +2743,7 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
 #[test]
 fn fuzz_random_matches() {
     if constructed_mode() {
-        println!("FUZZ_POOL=delver / dd_a / dd_b / dd_c / doomsday: games only (constructed best-of-three isn't built)");
+        println!("FUZZ_POOL=delver / dd_a / dd_b / dd_c / doomsday / sneak_show / sns: games only (constructed best-of-three isn't built)");
         return;
     }
     if eoe_mode() {
@@ -2678,6 +2833,9 @@ static HD_STEPS: AtomicU64 = AtomicU64::new(0);
 static HD_LONG_TURNS: AtomicU64 = AtomicU64::new(0);
 /// `FUZZ_DECK_CHOICE` (ENGINE.md 107.2): deck choices played, worlds checked during them.
 static DC_CHOICES: AtomicU64 = AtomicU64::new(0);
+/// `FUZZ_DECK_CHOICE_BY`: seats whose deck the evaluator chose, and exploring seats.
+static DC_EVAL_CHOSEN: AtomicU64 = AtomicU64::new(0);
+static DC_EVAL_EXPLORE: AtomicU64 = AtomicU64::new(0);
 static DC_WORLDS: AtomicU64 = AtomicU64::new(0);
 
 /// `FUZZ_DECK_CHOICE=k`: the candidates per seat (module docs), or None.
@@ -2692,10 +2850,48 @@ fn choice_spec(seed: u64, k: u8) -> &'static engine::az::MtgSpec {
         [0u64, 1].map(|s| {
             let mut v: serde_json::Value = serde_json::from_str(&format!(r#"{{"sealed": {}}}"#, sealed_spec(s).sealed.as_deref().unwrap().to_json())).unwrap();
             v["sealed"]["deck_choice"] = serde_json::json!({"k": k, "explore": 0.1});
+            // (FUZZ_DECK_CHOICE_BY, ENGINE.md 112: the deck choice by an evaluator file)
+            if let Ok(path) = std::env::var("FUZZ_DECK_CHOICE_BY") {
+                v["sealed"]["deck_choice"]["by"] = serde_json::json!("evaluator");
+                v["sealed"]["deck_choice"]["evaluator"] = serde_json::json!(path);
+            }
             engine::az::MtgSpec::parse(&v.to_string()).unwrap()
         })
     });
     &specs[(seed % 2) as usize]
+}
+
+/// `FUZZ_DECK_CHOICE_BY` (module docs): each built seat's deck is its explore pick or the evaluator's best
+/// candidate, recomputed from the spec; its prior chooses as it does. Nothing without the evaluator.
+fn check_evaluator_choice(a: &engine::az::MtgAz, spec: &engine::az::MtgSpec, seed: u64) {
+    let sl = spec.sealed.as_deref().unwrap();
+    let Some(dc) = sl.deck_choice.as_ref() else { return };
+    let Some(e) = dc.evaluator() else { return };
+    let ss = spec.sealed_seed(seed);
+    assert!(a.deck_choice().is_none(), "seed {seed}: the deck choice by an evaluator is no decision");
+    for p in 0..2u8 {
+        let (cands, _) = sl.candidates(ss, p).unwrap().expect("a built seat's candidates");
+        let how = a.m.how[p as usize].expect("how the deck was made");
+        let deck = a.m.deck(p);
+        match engine::az::sealed::explore_pick(ss, p, dc.explore.0, dc.k) {
+            Some(j) => {
+                assert_eq!((how.mode, how.candidate, how.evaluator), (engine::az::sealed::Mode::Explore, Some(j), None), "seed {seed}: P{p} explores");
+                assert_eq!(deck, cands[j as usize].deck, "seed {seed}: P{p}'s explore pick");
+                DC_EVAL_EXPLORE.fetch_add(1, Ordering::Relaxed);
+            }
+            None => {
+                let scores: Vec<f64> = cands.iter().map(|c| e.scorer.score(&c.deck).unwrap()).collect();
+                let best = scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                let j = scores.iter().position(|&x| x == best).unwrap();
+                assert_eq!((how.mode, how.candidate, how.evaluator), (engine::az::sealed::Mode::Chosen, Some(j as u8), Some(e.scorer.sha256)), "seed {seed}: P{p} chose");
+                assert_eq!(how.score.map(f64::from_bits), Some(best), "seed {seed}: P{p}'s score");
+                assert_eq!(deck, cands[j].deck, "seed {seed}: P{p}'s chosen deck");
+                DC_EVAL_CHOSEN.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        let prior = a.m.deck_priors[p as usize].as_ref().expect("a prior");
+        assert_eq!(prior.name(), "sealed+evaluator", "seed {seed}: P{p}'s prior chooses as it does");
+    }
 }
 
 /// The deck choice of a `FUZZ_DECK_CHOICE` game (module docs), played until the game begins.
@@ -2837,7 +3033,8 @@ fn play_hidden(seed: u64) -> Played {
     // fresh sample of the prior at every deal.)
     a.m.deal.k = std::env::var("FUZZ_DEAL_SAMPLES").ok().map_or(32, |v| v.parse().expect("FUZZ_DEAL_SAMPLES: a number"));
     let mut rng = Rng::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 1);
-    if choice.is_some() {
+    if let Some(k) = choice {
+        check_evaluator_choice(&a, choice_spec(seed, k), seed);
         play_deck_choice(&mut a, seed, &mut rng);
     }
     let mut crng = Rng::new(seed ^ 0xC0_4D_1E7E);

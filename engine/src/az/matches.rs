@@ -262,6 +262,9 @@ pub struct SeatHow {
     /// The main colours and the splash (`ManaMask`; 0 for a given deck).
     pub colors: u8,
     pub splash: u8,
+    /// A deck chosen by an evaluator (ENGINE.md 112): the evaluator file's sha256 and the deck's score (f64 bits).
+    pub evaluator: Option<[u8; 32]>,
+    pub score: Option<u64>,
 }
 
 /// One candidate deck of a deck choice (ENGINE.md 107.2): the deck, the sideboard, how it was built.

@@ -180,3 +180,23 @@ earlier milestones name their tests too.
 None. Part 3 (ENGINE.md 39) tested the last two, A x P (a token copy of a daybound card at night)
 and D x O (True-Name Nemesis's chosen player after a control change). All pairs above are tested
 or not applicable.
+
+## Legacy Sneak and Show (ENGINE.md 123)
+
+Constructed play's table (`CardDb::constructed`); every test in `engine/tests/cards_sneak_show.rs`.
+
+| Pair | Cards | Tests | Status |
+|---|---|---|---|
+| Show and Tell x a big creature, the other player answering | Show and Tell, Emrakul, Griselbrand, Atraxa | `cr_101_4_show_and_tell_the_active_player_chooses_then_the_other_and_both_enter`, `cr_603_3b_show_and_tell_enters_together_and_triggers_go_on_the_stack_in_apnap_order`, `cr_603_2_a_card_put_onto_the_battlefield_is_not_cast` | tested |
+| Show and Tell x Omniscience | Show and Tell, Omniscience, Emrakul | `show_and_tell_into_omniscience_then_free_spells` | tested |
+| Show and Tell x hidden information | the face-down choice | `cr_101_4a_the_other_player_knows_only_whether_a_card_was_chosen`, `cr_101_4a_the_other_players_worlds_deal_a_legal_face_down_choice`, `cr_101_4a_a_known_hand_is_one_pool_the_choice_among_its_cards_of_the_kind` | tested |
+| Show and Tell x "as enters" | two Disruptor Flutes; Mistrise Village with the Magus | `show_and_tell_the_active_players_enters_choices_come_first`, `cr_614_12a_mistrise_village_entering_with_the_magus_enters_tapped` | tested |
+| Sneak Attack x Emrakul | haste, the end step's sacrifice, the graveyard shuffle | `sneak_attack_emrakul_haste_end_step_sacrifice_and_the_graveyard_shuffle` | tested |
+| Omniscience x Emrakul | the cast trigger's extra turn | `cr_603_2_emrakul_cast_with_omniscience_takes_an_extra_turn` | tested |
+| Omniscience x Force of Will | two alternative costs, one at a time | `cr_118_9a_omniscience_and_force_of_will_are_alternative_costs_one_at_a_time` | tested |
+| Omniscience x costs | X, kicker, Tinker's sacrifice, Thalia, the Flute | `cr_107_3b_omniscience_an_x_spell_has_x_0`, `cr_601_2f_omniscience_additional_costs_are_still_paid`, `cr_601_2f_omniscience_cost_increases_still_apply`, `cr_601_2f_disruptor_flute_naming_show_and_tell_under_omniscience_costs_3` | tested |
+| Mistrise Village x counterspells | Force of Will, Daze | `cr_101_2_mistrise_village_the_next_spell_cant_be_countered`, `cr_118_12_daze_on_an_uncounterable_spell_its_payment_is_still_offered` | tested |
+| Disruptor Flute x Show and Tell | the {3} with and without Omniscience | `cr_601_2f_disruptor_flute_spells_with_the_name_cost_3_more_every_players`, `cr_601_2f_disruptor_flute_naming_show_and_tell_under_omniscience_costs_3` | tested |
+| Disruptor Flute x activated abilities | Sneak Attack, a fetch land, Lotus Petal, Simian Spirit Guide, Mistrise Village, Tamiyo's back face | `cr_602_5_*`, `cr_605_1a_*`, `cr_606_*` | tested |
+| Magus of the Moon x the deck's mana | Volcanic Island, Thundering Falls, Mistrise Village, Ancient Tomb, City of Traitors, fetch lands, Multiversal Passage, Gemstone Mine | `cr_305_7_*`, `cr_614_12_*` | tested |
+| Turn-one Show and Tell | Lotus Petal, City of Traitors, Ancient Tomb | `lotus_petal_spirit_guide_and_city_of_traitors_into_a_turn_one_show_and_tell` | tested |

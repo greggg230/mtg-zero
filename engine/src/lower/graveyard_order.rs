@@ -378,6 +378,7 @@ fn ext(x: &crate::program::Ext) -> Option<&Filter> {
         E::EoeW2(e) => eoe_w2(e),
         E::DdA(e) => dd_a(e),
         E::DoomsdayB(e) => doomsday_b(e),
+        E::SnS(e) => sns(e),
     }
 }
 
@@ -536,6 +537,16 @@ fn dd_a(x: &crate::doomsday_a::DdA) -> Option<&Filter> {
 }
 
 /// `crate::doomsday_b::DoomsdayB`: every variant (1), the positional graveyard readers named.
+/// `crate::sneak_show::SnS`: every variant (2); none reads a graveyard's order (Show and Tell puts
+/// cards from hands).
+fn sns(x: &crate::sneak_show::SnS) -> Option<&Filter> {
+    use crate::sneak_show::SnS as E;
+    match x {
+        E::EachPlayerPutsFromHand { .. } => None,
+        E::NextSpellUncounterable => None,
+    }
+}
+
 fn doomsday_b(x: &crate::doomsday_b::DoomsdayB) -> Option<&Filter> {
     use crate::doomsday_b::DoomsdayB as E;
     match x {

@@ -37,7 +37,7 @@ fn the_rows_constants() {
     // (Layout v6's game keeps no tail: ENGINE.md 124.2.)
     assert!(<engine::az::eoe::MtgEoeAz as SearchGame>::TAILS.is_empty());
     assert_eq!(<engine::az::eoe::MtgEoeAz as SearchGame>::NUM_FEATURES, encode::NUM_FEATURES_V6);
-    assert_eq!(NUM_FEATURES, 56_192);
+    assert_eq!(NUM_FEATURES, 56_384);
 }
 
 /// R1: a head-only encoding of a state with tail tokens is a loud failure (`encode_features`,
@@ -446,4 +446,42 @@ fn my_revealed_tokens_hold_the_frames_earlier_reveals() {
         b.encode(0, &mut x);
     }));
     assert!(r.is_err(), "MtgAz::encode of a row with my_revealed tokens");
+}
+
+/// A chosen name is a face's (ENGINE.md 125.11; Disruptor Flute names the faces and halves of the
+/// game's cards, ENGINE.md 123.4): a split card's two halves encode apart - the card's identity and
+/// the face (left half 4, right half 5) - and `NO_NAME` is its own value; `encode::name_face` names
+/// every face of the table (each face definition is one of its card's faces).
+#[test]
+fn chosen_names_are_faces() {
+    use engine::az::encode::{name_face, perm};
+    let db = CardDb::cube();
+    let (l, r) = (0..db.num_cards() as engine::ids::DefId).find_map(|d| db.def(d).halves).expect("a split card in the cube");
+    let card = db.def(l).front.expect("a half's card");
+    assert_eq!((name_face(db, l), name_face(db, r), name_face(db, card)), ((card, 4), (card, 5), (card, 0)));
+    for t in [CardDb::cube(), CardDb::constructed(), CardDb::eoe()] {
+        for d in 0..t.len() as engine::ids::DefId {
+            let (c, f) = name_face(t, d);
+            assert!(f <= 5 && (f == 0) == (c == d || t.def(d).name == t.def(c).name || t.def(d).name == engine::sneak_show::face_name(t.def(c))));
+        }
+    }
+    for d in 0..db.len() as engine::ids::DefId {
+        let (c, f) = name_face(db, d);
+        assert!(f <= 5 && (f == 0) == (c == d || db.def(d).name == db.def(c).name || db.def(d).name == engine::sneak_show::face_name(db.def(c))));
+    }
+    let sp = MtgSpec::parse(r#"{"max_turns": 60}"#).unwrap();
+    let mut a = MtgAz::new_game(&sp, 2, 3).unwrap();
+    a.g = Scenario::new(db).library(0, &["Island"; 10]).library(1, &["Island"; 10]).battlefield(0, &["Island"]).at(Step::Main1, 0).start();
+    let face = |a: &MtgAz| {
+        let row = Row::of(&a.g, 0);
+        let x = row.token(seg::MY_PERM, 0).unwrap().to_vec();
+        (code_identity(&x[CODE + perm::CHOSEN_NAME_DIGITS..CODE + perm::CHOSEN_NAME_DIGITS + 32]), (0..3).map(|b| x[CODE + perm::CHOSEN_NAME_FACE + b]).collect::<Vec<_>>())
+    };
+    let (mut al, mut ar) = (a.clone(), a.clone());
+    engine::public_state::name_a_split_half(&mut al, true).unwrap();
+    engine::public_state::name_a_split_half(&mut ar, false).unwrap();
+    let want = Some(ident(&a.g, card));
+    assert_eq!(face(&al), (want, vec![0.0, 0.0, 1.0]), "the left half: face 4");
+    assert_eq!(face(&ar), (want, vec![1.0, 0.0, 1.0]), "the right half: face 5");
+    assert_ne!(Row::of(&al.g, 1).flat(), Row::of(&ar.g, 1).flat(), "the other player's row too");
 }

@@ -42,7 +42,7 @@ def test_mtg_eoe_is_registered_with_its_layout_and_targets():
     for k in ('num_actions', 'min_players', 'max_players', 'bots', 'aux_layout'):
         assert a[k] == b[k], k
     # mtg_eoe keeps layout v6; mtg's layout v7 appends a block the EoE table's mana can't fill (ENGINE.md 124.2)
-    assert (a['num_features'], b['num_features']) == (56192, 44212)
+    assert (a['num_features'], b['num_features']) == (56384, 44212)
     assert P.PACKAGE.aux_of('mtg_eoe') == P.PACKAGE.aux_of('mtg')
     lay = P.PACKAGE.tokens_of('mtg_eoe')
     assert lay is P.LAYOUT_EOE and lay['name'] == 'eoe' and lay['version'] == 6

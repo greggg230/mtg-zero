@@ -821,6 +821,11 @@ impl Game {
             v.push(pl.life_gained as u64);
             v.push(pl.artifact_entered as u64);
             v.extend([pl.gy_play_turn as u64, pl.gy_exile_turn as u64, pl.city_blessing as u64, pl.prot_until as u64]);
+            // ("The next spell you cast this turn can't be countered"
+            // effects waiting: ENGINE.md 123.)
+            if pl.uncounterable_next > 0 {
+                v.extend([u64::MAX - 70, pl.uncounterable_next as u64]);
+            }
             // The revealed companion: still outside the game or not (its
             // slot's zone once in the game is not observable: a twin in a
             // hand the viewer does not know may be the one that leaves it,
@@ -1053,5 +1058,29 @@ impl Game {
         }
         ts.clear();
         Ok(())
+    }
+}
+
+// ---- the Legacy Sneak and Show tests' views (ENGINE.md 123) ------------------
+
+impl Game {
+    /// The rare per-object facts of object `c` (`Game::marks`).
+    #[doc(hidden)]
+    pub fn marks_of(&self, c: CardIdx) -> Vec<crate::game::Mark> {
+        let r = self.obj_ref(c);
+        self.marks.iter().filter(|x| x.0 == r).map(|x| x.1).collect()
+    }
+
+    /// The extra turns to come, in order (CR 500.7).
+    #[doc(hidden)]
+    pub fn extra_turns(&self) -> &[PlayerId] {
+        &self.extra_turns
+    }
+
+    /// The pending decision asked again (after a test changed the state by
+    /// hand, `set_tapped`).
+    #[doc(hidden)]
+    pub fn refresh_decision(&mut self) {
+        self.refresh_pending();
     }
 }

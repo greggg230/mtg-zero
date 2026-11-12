@@ -39,6 +39,12 @@ pub const KEY_GAME: u64 = 7;
 /// Payload of a private key emitted while another player is the observer.
 pub const HIDDEN: u64 = 0xFFFF_FFFF;
 
+/// The deals `determinize` draws at most for a face-down choice to be a legal
+/// one (ENGINE.md 123): each succeeds with a probability of at least one in
+/// the hidden cards and the hand's size (the real deal is one), so this many
+/// failing is a broken invariant, loudly.
+const HIDDEN_PICK_TRIES: u32 = 1_000_000;
+
 /// Pack a key: kind in bits 56-63, player in 48-55, payload in 0-47.
 pub fn key(kind: u64, player: PlayerId, payload: u64) -> u64 {
     debug_assert!(payload < 1 << 48);
@@ -634,9 +640,19 @@ impl Game {
             if owner == viewer {
                 self.deal_owner(viewer, owner, payer, rng);
             } else {
-                let (slots, pinned) = self.hidden_slots_with(viewer, owner, payer);
-                let defs: Vec<DefId> = slots.iter().map(|&c| self.ident(c)).collect();
-                self.resample_weighted(viewer, owner, &slots, &pinned, defs, rng, w);
+                // (A face-down choice of a card in `owner`'s hand: the deal
+                // drawn again until the choice is a legal one, ENGINE.md 123.)
+                let mut tries = 0u32;
+                loop {
+                    let (slots, pinned) = self.hidden_slots_with(viewer, owner, payer);
+                    let defs: Vec<DefId> = slots.iter().map(|&c| self.ident(c)).collect();
+                    self.resample_weighted(viewer, owner, &slots, &pinned, defs, rng, w);
+                    if self.hidden_pick_ok(viewer, owner, rng) {
+                        break;
+                    }
+                    tries += 1;
+                    assert!(tries < HIDDEN_PICK_TRIES, "determinize: no deal of P{owner}'s hand holds a legal face-down choice (ENGINE.md 123)");
+                }
             }
         }
         self.after_deal(viewer, rng);
@@ -676,6 +692,17 @@ impl Game {
     fn deal_hidden(&mut self, viewer: PlayerId, payer: Option<PlayerId>, rng: &mut Rng) {
         for owner in 0..2u8 {
             self.deal_owner(viewer, owner, payer, rng);
+            // A face-down choice of a card in `owner`'s hand that `viewer`
+            // doesn't know (Show and Tell's, CR 101.4a): the deal is drawn
+            // again until a card of the hand drawn uniformly is a legal
+            // choice, which becomes the choice (`Game::hidden_pick_ok`,
+            // ENGINE.md 123). (Nothing is drawn without one.)
+            let mut tries = 0u32;
+            while !self.hidden_pick_ok(viewer, owner, rng) {
+                tries += 1;
+                assert!(tries < HIDDEN_PICK_TRIES, "determinize: no deal of P{owner}'s hand holds a legal face-down choice (ENGINE.md 123)");
+                self.deal_owner(viewer, owner, payer, rng);
+            }
         }
     }
 

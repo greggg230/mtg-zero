@@ -259,6 +259,7 @@ pub fn fields() -> Vec<Field> {
         companion: Public "the revealed companion's card (CR 103.2b)",
         companion_def: Public "the revealed companion's identity",
         companion_used: Public "the companion special action was taken (116.2g)",
+        uncounterable_next: Public "\"the next spell you cast this turn can't be countered\" effects waiting (Mistrise Village; ENGINE.md 123)",
     });
     classify!(v, Obj {
         def: Public "what a permanent or spell is (the face up); in a hidden zone hidden (leak-tested)",
@@ -1899,12 +1900,17 @@ pub fn perturbations() -> Vec<Perturbation> {
         }),
         p!("an identity revealed in an earlier game", "MatchState.earlier", |a, r| {
             let p = player(r) as usize;
-            let w = r.below(8) as usize;
-            let b = 1u64 << r.below(64);
-            if a.m.earlier[p][w] & b != 0 {
-                return None;
-            }
-            a.m.earlier[p][w] |= b;
+            // (A card of the player's pool not revealed yet: a reveal is of a pool's card, as the
+            // worlds' samplers keep them; ENGINE.md 36.11, 125.10.)
+            let ids = crate::az::identity::identities(a.g.db);
+            let pool = &a.m.pools[p];
+            let cand: Vec<usize> = pool.list[..pool.n_cards]
+                .iter()
+                .map(|e| ids[e.0 as usize] as usize)
+                .filter(|&i| a.m.earlier[p][i >> 6] & (1u64 << (i & 63)) == 0)
+                .collect();
+            let i = pick(&cand, r)?;
+            a.m.earlier[p][i >> 6] |= 1u64 << (i & 63);
             Some(format!("P{p}"))
         }),
         // EoE W6 (ENGINE.md 99.16): no draw from the gate's random stream.
@@ -1951,7 +1957,28 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.w6.tokens_turn[0] = t;
             Some("P0".to_string())
         }),
+        // ENGINE.md 123 (Mistrise Village). (No draw from the gate's random
+        // stream: the active player.)
+        p!("a player's next spell this turn can't be countered", "Player.uncounterable_next", |a, _r| {
+            let p = a.g.turn.active as usize;
+            a.g.players[p].uncounterable_next += 1;
+            Some(format!("P{p}: {}", a.g.players[p].uncounterable_next))
+        }),
+        // (ENGINE.md 123's "a card name was chosen as a permanent entered" - Disruptor Flute, Anointed
+        // Peacekeeper - is the `Mark` perturbation above, layout v7's: ENGINE.md 125.)
     ]
+}
+
+/// The gate's paired check of a chosen name's face (ENGINE.md 125.11): the first permanent in the
+/// encoded slots names the table's first split card's left half (`left`) or its right half - two
+/// names (CR 709.4), so the two states differ in both views and both encodings (`tests/az.rs`, the
+/// gate). None without a permanent or a split card.
+pub fn name_a_split_half(a: &mut MtgAz, left: bool) -> Option<String> {
+    let db = a.g.db;
+    let (l, r) = (0..db.num_cards() as DefId).find_map(|d| db.def(d).halves)?;
+    let c = *slots(&a.g).first()?;
+    a.g.marks.retain(|(o, m)| !(o.idx == c && matches!(m, crate::game::Mark::ChosenName(_))));
+    mark(&mut a.g, c, crate::game::Mark::ChosenName(if left { l } else { r }))
 }
 
 /// The perturbations whose public change the encoding leaves out (ENGINE.md
@@ -1988,7 +2015,7 @@ pub const HIDDEN_BY_DECKLISTS: [&str; 1] = ["a sideboard card fewer"];
 /// this turn, a permanent that entered this turn) and the granted triggered
 /// abilities (W3, no perturbation before). Its tests read them back and check
 /// that they hide nothing (`tests/az.rs`).
-pub const V6_FIXED: [&str; 25] = [
+pub const V6_FIXED: [&str; 26] = [
     "void holds (a nonland permanent left the battlefield this turn)",
     "more life gained this turn",
     "a creature was cast for its warp cost",
@@ -2016,6 +2043,8 @@ pub const V6_FIXED: [&str; 25] = [
     "the mana spent to cast a spell",
     // ENGINE.md 124.2: lane B of the Legacy Doomsday deck's (perm 133-141).
     "a creature type was chosen as a permanent entered",
+    // ENGINE.md 123 (Mistrise Village, g6 float 8).
+    "a player's next spell this turn can't be countered",
 ];
 
 /// The perturbations layout v7 encodes (ENGINE.md 124.2: its block of
@@ -2158,6 +2187,18 @@ pub fn mark_variant(m: &crate::game::Mark) -> &'static str {
     }
 }
 
+
+/// Layout v6's gap (ENGINE.md 124.2): a pool's mana restricted to creature
+/// spells of a chosen type (Cavern of Souls); layout v7 encodes it (its block,
+/// `V7_FIXED`), and the layout v6 game `mtg_eoe` refuses a card table that
+/// makes such mana (`az::needs_layout_v7`).
+pub const CHOSEN_TYPE_MANA_GAP: &str = "mana in a pool is restricted to creature spells of a chosen type";
+
+/// Layout v6's gap (ENGINE.md 123): the card name a permanent chose as it
+/// entered (`Mark::ChosenName`); layout v7 encodes it (its chosen-name floats,
+/// `V7_FIXED`), and the layout v6 game `mtg_eoe` refuses a card table holding a
+/// card that chooses a name the plain way (`az::needs_layout_v7`).
+pub const CHOSEN_NAME_GAP: &str = "a card name was chosen as a permanent entered";
 
 /// The perturbations of layout v4's 42 gaps (ENGINE.md 58.10), which layout
 /// v5 encodes (ENGINE.md 60.3): its tests read them back and check that they

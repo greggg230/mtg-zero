@@ -3,7 +3,7 @@ training progress.
 
   python tools/sealedai_publish.py E:/mtg-zero/runs/eoe1 [--loop 300] [--progress-every 60]
       [--url https://sealedai.greggg230.com] [--key-file F] [--dry-run]
-      [--credit-every 4] [--credit-window 4] [--credit-games N] [--no-credit] [--threads 4]
+      [--credit-every 4] [--credit-window 4] [--credit-games N] [--no-credit] [--threads 4] [--real-decks DIR]
 
 Each pass:
   * card statistics (`mtgz.sealed.cardstats`, docs/ENGINE.md 107.4): the run's game log (`<run>/games/*.jsonl`) read
@@ -21,7 +21,11 @@ Each pass:
   * progress: the run's metrics (tools/delverai_publish.py's iteration rows: vs the heuristic and random, Elo, losses,
     self-play) plus the auxiliary losses (deck prediction, hand read), the Elo pool's current fit per checkpoint and the
     best guess's score against the explore builds in self-play (from the game log), the run's state and settings, POSTed
-    to <url>/api/progress/upload (with --loop from its own thread every --progress-every seconds).
+    to <url>/api/progress/upload (with --loop from its own thread every --progress-every seconds);
+  * in the progress record, the win % against real players' decks (docs/ENGINE.md 113, `real_decks`: a yardstick only,
+    17lands public data, CC BY 4.0, with its attribution): the run's own evaluations (metrics.jsonl's or evals.jsonl's
+    extras.real_decks) and the command line's files of the run's checkpoints (--real-decks DIR: <run>-iter_NNNN.json of
+    `python -m mtgz.sealed.realdecks ... --out DIR`), numbers only.
 
 CPU only and below normal priority: the run trains on the GPU and its self-play is CPU-bound (CUDA_VISIBLE_DEVICES=-1
 is set before torch loads; the draw credit uses --threads torch threads, 4 by default). Nothing is written to the run's
@@ -188,8 +192,56 @@ def _metrics_by_iter(run):
     return {m['iter']: m for m in DP._jsonl(os.path.join(run, 'metrics.jsonl')) if isinstance(m.get('iter'), int)}
 
 
-def progress(run, tallies=None, title=None):
-    """The site's progress record of a run."""
+RD_KEYS = ('a', 'a_se', 'a_se_pools', 'b', 'b_se', 'b_se_pools', 'diff', 'diff_se', 'diff_se_pools', 'n', 'pools',
+           'games_per_pool', 'builder', 'sims', 'failed', 'var_ratio')
+
+
+def real_decks_record(run, dirs=()):
+    """The run's win % against real players' decks (docs/ENGINE.md 113; a yardstick only): {'about': the source, its
+    license and the setting, 'points': [{iter, source ('run': its own evaluation, 'offline': the command line's file), a,
+    a_se, b, b_se, diff, diff_se, ..., heuristic?}]} by iteration (the run's own evaluation over a file), or None without
+    any. Numbers only: no path reaches the site."""
+    from mtgz.sealed import realdecks as RD
+    pts, setting = {}, None
+
+    def point(it, r, source):
+        if not isinstance(r, dict) or 'a' not in r:
+            return None
+        p = {'iter': it, 'source': source, **{k: r[k] for k in RD_KEYS if k in r}}
+        if 'builder' in p:          # its kind only ('evaluator:<path>', 'export:<path>' name a local file)
+            b = str(p['builder'] or 'best')
+            p['builder'] = (b if b in ('best', 'value') else 'evaluator'
+                            if b == 'run_evaluator' or b.startswith(('evaluator:', 'export:')) else 'other')
+        h = r.get('heuristic')
+        if isinstance(h, dict) and 'a' in h:
+            p['heuristic'] = {k: h[k] for k in ('a', 'a_se', 'b', 'b_se', 'diff', 'diff_se', 'n') if k in h}
+        return p
+    name = os.path.basename(os.path.normpath(run))
+    for d in dirs:
+        for fn in (sorted(os.listdir(d)) if os.path.isdir(d) else []):
+            m = re.fullmatch(re.escape(name) + r'-iter_(\d+)\.json', fn)
+            r = DP._json(os.path.join(d, fn), None) if m else None
+            p = point(int(m.group(1)), r, 'offline') if m else None
+            if p:
+                pts[p['iter']] = p
+                setting = setting or r.get('setting')
+    for m in DP._jsonl(os.path.join(run, 'metrics.jsonl')) + DP._jsonl(os.path.join(run, 'evals.jsonl')):
+        it = m.get('iter')
+        p = point(it, (m.get('extras') or {}).get('real_decks'), 'run') if isinstance(it, int) else None
+        if p:
+            pts[it] = p
+    if not pts:
+        return None
+    s = setting or {}
+    u = s.get('universe') or {}
+    return {'about': {'source': RD.SOURCE, 'license': RD.LICENSE, 'rule': RD.RULE, 'test_pools': s.get('test_pools'),
+                      'games_per_pool': s.get('games_per_pool'), 'field_decks_used': s.get('field_decks_used'),
+                      'pools_counted': u.get('counted'), 'pools_in_data': u.get('pools')},
+            'points': [pts[k] for k in sorted(pts)]}
+
+
+def progress(run, tallies=None, title=None, real_decks=()):
+    """The site's progress record of a run (`real_decks`: directories of the real-deck command line's files)."""
     cfg = DP._json(os.path.join(run, 'config.json'), {}) or {}
     st = runctl.run_status(run)
     tag, pool = zelo.active_pool(run)
@@ -223,6 +275,7 @@ def progress(run, tallies=None, title=None):
         'select': tag, 'best': {k: best.get(k) for k in ('iter', 'elo', 'se')} if best else None,
         'anchor': (DP._json(os.path.join(pool, 'ratings.json'), {}) or {}).get('anchor'),
         'iters': rows,
+        'real_decks': real_decks_record(run, real_decks),
     }
 
 
@@ -297,7 +350,7 @@ class Publisher:
         return body
 
     def progress_pass(self):
-        p = progress(self.run, self.tallies, self.a.title)
+        p = progress(self.run, self.tallies, self.a.title, getattr(self.a, 'real_decks', None) or ())
         if self.a.dry_run:
             self.log(f'(dry run) progress: {len(p["iters"])} iteration rows, {len(json.dumps(p)):,} bytes, state {p["state"]}')
         else:
@@ -327,6 +380,8 @@ def main(argv=None):
     ap.add_argument('--no-17lands', action='store_true', help='no 17lands yardstick column')
     ap.add_argument('--threads', type=int, default=4, help='torch threads for the draw credit (CPU)')
     ap.add_argument('--title', default=None, help="the run's title on the site")
+    ap.add_argument('--real-decks', action='append', default=[], metavar='DIR',
+                    help="the real-deck command line's files of the run's checkpoints (mtgz.sealed.realdecks --out DIR)")
     ap.add_argument('--url', default=SITE)
     ap.add_argument('--key-file', default=None)
     ap.add_argument('--dry-run', action='store_true', help='compute everything, upload nothing')

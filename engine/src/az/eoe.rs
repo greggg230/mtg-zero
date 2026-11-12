@@ -69,11 +69,13 @@ impl SearchGame for MtgEoeAz {
     fn parse_spec(json: &str) -> Result<MtgSpec, String> {
         let s = MtgSpec::parse(json)?;
         s.check_game(Self::NAME)?;
-        // Layout v6 (this game's) has no float for a pool's mana of a chosen creature type (Cavern
-        // of Souls: layout v7's block, ENGINE.md 124.2, 125): a table that can make it is refused
-        // (the EoE table can't).
-        if s.db().spend_kinds & crate::db::SPEND_CHOSEN_CREATURE_TYPE != 0 {
-            return Err("mtg_eoe spec: its card table makes mana of a chosen creature type (Cavern of Souls), whose floating mana needs layout v7 (ENGINE.md 124.2); mtg_eoe is layout v6".into());
+        // Layout v6 (this game's) can't encode `super::needs_layout_v7`'s cards (a pool's mana of a
+        // chosen creature type: Cavern of Souls, ENGINE.md 124.2; a card name chosen as a permanent
+        // enters: Disruptor Flute, ENGINE.md 123; layout v7, the `mtg` game, does: 125): a table holding
+        // any is refused (the EoE table holds none).
+        let db = s.db();
+        if let Some(e) = (0..db.num_cards()).find_map(|d| super::needs_layout_v7(db.def(d as crate::ids::DefId))) {
+            return Err(format!("mtg_eoe spec: its card table: {e}; mtg_eoe is layout v6"));
         }
         Ok(s)
     }
