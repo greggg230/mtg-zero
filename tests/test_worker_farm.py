@@ -220,13 +220,28 @@ def test_the_selftest_guards_the_network(tmp_path):
         np.savez(f, **z)
     rt = os.path.join(os.path.dirname(onnxruntime.__file__), 'capi')
     settings = json.loads(cp.read_text(encoding='utf-8'))
+    import hashlib
+    file_sha = hashlib.sha256((tmp_path / 'model.onnx').read_bytes()).hexdigest()
+    # the job line's sha256 is the model FILE's (zero-core docs/az.md 42.3): another one ends the job before the graph
+    # is read - no selftest, no game; the error names the job's hash, never the file's
+    d = tmp_path / 'wrongsha'
+    d.mkdir()
+    w = Serve(WORKER, d)
+    w.wait_for('hello', 60)
+    w.send({'op': 'job', 'lease_id': 'l_wrongsha', 'kind': 'selfplay', 'settings': settings, 'games': 1, 'gid_base': 0, 'seed': 5,
+            'model': str(tmp_path / 'model.onnx'), 'reference': str(ref), 'sha256': '9f' * 32, 'threads': 1, 'out_dir': 'out',
+            'runtime_dir': rt})
+    e = w.wait_for('error', 300)
+    assert w.finish() == 1 and e['fatal'] is True and "not the job's" in e['message'] and file_sha not in e['message'], e
+    assert not [x for x in w.events if x['ev'] in ('selftest', 'fin', 'shard')]
     for name, reference, ok in (('good', ref, True), ('bad', tmp_path / 'bad.npz', False)):
         d = tmp_path / name
         d.mkdir()
         w = Serve(WORKER, d)
         w.wait_for('hello', 60)
         w.send({'op': 'job', 'lease_id': 'l_' + name, 'kind': 'selfplay', 'settings': settings, 'games': 1, 'gid_base': 0, 'seed': 5,
-                'model': str(tmp_path / 'model.onnx'), 'reference': str(reference), 'threads': 1, 'out_dir': 'out', 'runtime_dir': rt})
+                'model': str(tmp_path / 'model.onnx'), 'reference': str(reference), 'sha256': file_sha.upper() if ok else file_sha,
+                'threads': 1, 'out_dir': 'out', 'runtime_dir': rt})
         st = w.wait_for('selftest', 300)
         assert st['provider'] == 'cpu' and st['rows'] == 64 and st['ok'] is ok, st
         if ok:
@@ -254,6 +269,39 @@ def _smoke_cfg(tmp_path, **kw):
     cp = tmp_path / 'settings.json'
     cp.write_text(json.dumps(cfg), encoding='utf-8')
     return cfg, cp
+
+
+def test_a_farm_h2h_definition_holds_the_play_settings_only(tmp_path):
+    """zero.farm_h2h.play_settings with the real worker (ENGINE.md 114.5): a run's settings minus everything the
+    worker's own check-config --eval does not call play - EVAL_READS, no trainer-only key, nothing path-like (zero-farm
+    PROTOCOL.md 7: farm-release define refuses those in a template) -, checked again by the worker, the same seats; the
+    worker must be the build named (its manifest's id); a definition with them validates as farm-release checks it."""
+    import hashlib
+    import shutil
+    import mtgz.az  # noqa: F401
+    from zero import farm_def as FD, farm_h2h as FH, farm_eval as FE
+    cfg, _ = _smoke_cfg(tmp_path)
+    cfg = dict(cfg, resolver_init='runs/x/models/iter_0001.pt', game='mtg')        # a trainer-only path
+    d = tmp_path / 'build'
+    d.mkdir()
+    shutil.copy2(WORKER, d / 'mtgz-worker.exe')
+    raw = json.dumps({'manifest': 1, 'kind': 'worker', 'game': 'mtg', 'entry': 'mtgz-worker.exe', 'files': []}).encode()
+    (d / 'manifest.json').write_bytes(raw)
+    bid = hashlib.sha256(raw).hexdigest()[:24]
+    play = FH.play_settings(str(d / 'mtgz-worker.exe'), bid, cfg, str(tmp_path / 'st'))
+    reads = json.loads(subprocess.run([WORKER, 'check-config', str(tmp_path / 'st' / 'settings.json'), '--eval', '--json'],
+                                      capture_output=True, text=True, check=True).stdout)['eval_reads']
+    assert set(play) == set(reads) and len(play) < len(cfg) and 'resolver_init' not in play and 'spec' not in play
+    FD.check_no_paths(play, 'settings')
+    assert FE.seat_dicts(play, [{'net': 1}, {'net': 2}]) == FE.seat_dicts(cfg, [{'net': 1}, {'net': 2}])
+    ck = {'model_sha256': 'ab' * 32, 'model_size': 10, 'reference_sha256': None, 'reference_size': None}
+    FD.definition('run', 'h2h-x', 1, 'mtg', [bid], None, {'1': ck, '2': ck},
+                  {'eval': {'settings': play, 'seats': [{'net': 1}, {'net': 2}], 'paired': True}}, created=1)
+    with pytest.raises(ValueError):                                                # (what farm-release would refuse)
+        FD.definition('run', 'h2h-x', 1, 'mtg', [bid], None, {'1': ck, '2': ck},
+                      {'eval': {'settings': cfg, 'seats': [{'net': 1}, {'net': 2}], 'paired': True}}, created=1)
+    with pytest.raises(SystemExit, match='not the eval-capable worker build'):     # another build's worker
+        FH.play_settings(WORKER, bid, cfg, str(tmp_path / 'st2'))
 
 
 def test_eval_check_config_and_the_package_settings(tmp_path):

@@ -26242,7 +26242,108 @@ python -m mtgz.az.farm_h2h --a C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models
     --build e96bf8e44b9634502e44dcc3 --runtime c4c4bb776d7f886f5e13474e
 ```
 
-(reads the checkpoints and eoe1's config.json only; state in ~/.zero-farm/h2h/h2h-eoe1-80v70/.)
+(reads the checkpoints and eoe1's config.json only; state in ~/.zero-farm/h2h/h2h-eoe1-80v70/.) Superseded by 114.5:
+from zero-farm PROTOCOL rev 6 on, a head-to-head also publishes a signed definition.
+
+### 114.5 Signed definitions on the desktop: fuzz campaigns, head-to-heads; a model's sha256 is its file's (zero-farm phase 2b, 2026-11-12)
+
+**Why.** zero-farm PROTOCOL.md rev 6 section 7: every run or campaign friends' PCs work on is described by a
+definition the desktop signs with a data key the coordinator never holds (the security review's H2 / H3 / M2): its
+worker builds, runtime, checkpoints (each file's sha256 and size) and exact job templates; agents build their job lines
+only from it. The desktop tools must produce and publish those definitions. The core side is zero-core's
+`zero.farm_def` (docs/az.md 42.3 there).
+
+**What.**
+
+* **The merge first**: main 35181fe (128: a hand card both players know, canonical worlds; DESIGN.md 9) into `farm`
+  (9982d47), no conflicts; main's digests come with it (128.5: full b63f643e97a30a61, `DIGEST_ENCODING=0`
+  a0062bb5569e06d3). zero-core's main was already in its `farm`.
+* **`tools/farm_campaign.py create | update | pause | resume NAME`, `--from-existing NAME`**: a fuzz campaign's fields
+  (`--build`, `--mode`, `--env K=V ...`, `--seed-base`, `--chunk`, `--priority`, `--needs-*`; `update` puts the flags
+  over the live campaign's, read with `GET /v1/admin/campaign/NAME`); the build's **signed** worker found in the
+  farm_build dist directories (its `manifest.json` hashes to the build id, the exe is the manifest's) or `--worker`;
+  its `info` must name the build and the kind `fuzz`, then **`fuzz-check --mode M --env ...` must accept the mode and
+  env** and name the manifest's engine commit; then the campaign's **definition** (kind campaign, builds [the build],
+  the build's runtime or null, no checkpoints, `jobs.fuzz` = {mode, env} - what the PUT names), a new version signed
+  with the data key and published by `farm-release define --publish` (unless the newest kept definition already says
+  the same, is the coordinator's current one and lasts another 7 days; `--redefine`), expiring after `--expires-days`
+  (90); last `PUT /v1/admin/campaign/NAME`. `pause` / `resume` put the state only (no definition: nothing it allows
+  changes). `--from-existing NAME` signs and publishes the definition of a live campaign as it is and puts nothing.
+  `--dry-run`: every read and check, then the definition and the PUT body printed; nothing signed, published or put.
+  The admin token from `~/.config/zero-farm/admin_token`, to farm-release in its environment only.
+* **`mtgz.az.farm_h2h`** (zero-core's farm_h2h): the run, **its definition** (the worker build, the runtime, gens 1 and
+  2 with their graphs' and reference sets' sha256 and sizes, `jobs.eval` = {settings, seats, paired}, the batch's job
+  exactly), the gens, the batch. As zero-farm's `farm-release define` (agent branch, 0.2.5) requires: the settings are
+  only those the worker build's own `check-config --eval --json` calls `play` (EVAL_READS: eoe1's 33 of 167; never
+  `preset`, `spec`, `resolver_init` or a path), so **`--worker` - the build's signed executable - is required**; the
+  template has no seed, so the batch's base seed is the coordinator's from the run's name. The definition's `game` is
+  the worker build's (its manifest: "mtg"; eoe1's settings game "mtg_eoe" is not even a slug), and `--runtime` must be
+  the one the build requires (checked before the export).
+* **A model's `sha256` on a job line is the model FILE's** (zero-core `zero_worker`, 42.3): self-play and eval alike,
+  checked before ONNX Runtime reads the file; phase 0b's self-play line compared it with the graph's checkpoint hash.
+  The worker built from this commit is needed for self-play leases with definitions (the agent sends the file's hash);
+  the published e96bf8e4 already checks eval models' files.
+* **`mtgz.az.h2h` plays a run's evaluation** (zero-core 42.3, a deliberate change of the tool): each side's seat takes
+  its run's `margin_w`, `redet`, `eval_cache`, and the match is played at A's run's evaluation spec - for MTG Zero's
+  runs **their evaluation decks** (`eval_spec` / `mtgz.az.evaldecks`) instead of the package's default spec - unless
+  `--spec`. An h2h of a run's checkpoints now plays the games of its evaluation (and of a farm head-to-head at the same
+  settings); h2h numbers taken before 2026-11-12 on runs with an eval spec or an evaluation cache are not comparable
+  game for game.
+
+**Checks.**
+
+* `tests/test_farm_campaign.py` (2): against a fake coordinator that accepts a campaign only within its current
+  definition, and zero-core's farm-release stub (`third_party/zero-core/tests/farm_release_stub.py`: records its
+  arguments, checks the token came in its environment, registers the definition): create (fuzz-check, definition v1,
+  then the PUT; the argv `define <archive>/campaign/<id>/1/definition.json --key <key> --publish --url <url>`, no
+  token in it), an update of the priority (no new definition), of the env (v2), pause / resume (state only),
+  `--from-existing` (a definition, nothing put), `--dry-run` (nothing signed or put); refusals publish and put
+  nothing (a mode or env fuzz-check refuses, a build not found, create of an existing campaign, update of a missing
+  one, pause with fields). The worker is this checkout's release mtgz-worker in a build directory of its own.
+* `tests/test_worker_farm.py::test_the_selftest_guards_the_network`: a self-play job whose `sha256` is not the model
+  file's - it is the graph's checkpoint hash, which phase 0b's worker accepted - ends with a fatal error before the
+  self-test or a game, and the error names the job's hash, not the file's; the good and bad self-tests now send the
+  file's hash (upper case once).
+* **The live campaign's definition, offline** (the fields the brief gives for `delver-fuzz-4b44b07` in a fake GET
+  answer; `--from-existing --dry-run`): the signed build directory `mtg-4b44b07-fuzz` found and verified (manifest
+  hash = bab1180e0feda9b1f7bb0258, the exe's size and sha256), `fuzz-check delver-games FUZZ_POOL=delver` ok (loop
+  games, min chunk 1000), definition version 1: builds [bab1180e0feda9b1f7bb0258], runtime null, no checkpoints,
+  jobs.fuzz {"mode": "delver-games", "env": {"FUZZ_POOL": "delver"}}, expires 90 days after it is made.
+* **eoe1 80 v 70's definition, offline** (phase 2's exported graphs and eoe1's config copy; the play settings from the
+  signed e96bf8e4 worker's own `check-config --eval --json`): 1,910 bytes; game "mtg", builds
+  [e96bf8e44b9634502e44dcc3], runtime c4c4bb776d7f886f5e13474e, gens 1 / 2 (13,392,600-byte graphs, 534,098-byte
+  reference sets), `jobs.eval` = {settings (33 keys, eval_spec the evaluation decks), seats, paired}.
+* **The real `farm-release define`** (zero-farm `agent` branch d64cd5c, built to E:/cargo-target/zero-farm/public-prep;
+  the data key ~/.config/zero-farm/data.key; **sign only, nothing published**) signed both definitions above: its JSON
+  line names kind, id, version 1, key `defs/<kind>/<id>/1/definition.json`, the file's sha256 (h2h e0e8ccca7021037c...,
+  campaign 6c43eaca4e8a847b...), the `.minisig` next to the file, `published: false`. The same eoe1 definition with
+  `seed` in its eval template, or with a `resolver_init` path in its settings, is refused by it - as by
+  `zero.farm_def.validate`.
+* `tests/test_worker_farm.py::test_a_farm_h2h_definition_holds_the_play_settings_only`: the real worker in a build
+  directory of its own picks the play settings of mtg-smoke's (plus a `resolver_init` path): exactly its EVAL_READS,
+  path-free, the same seats; a definition with them validates, one with every setting does not; another build's
+  worker is refused.
+
+Nothing was sent to the live coordinator (no GET either); no build was published.
+
+**The live head-to-head with a definition** (once the rev 6 coordinator, `farm-release define` at
+E:/cargo-target/zero-farm/main/release/ - or `--farm-release <path>` - and definition-aware agents are out; from this
+checkout, the venv with onnx / onnxruntime):
+
+```
+"C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" -m mtgz.az.farm_h2h \
+    --a "C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0080.pt" \
+    --b "C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0070.pt" --games 200 \
+    --build e96bf8e44b9634502e44dcc3 --runtime c4c4bb776d7f886f5e13474e \
+    --worker E:/cargo-target/mtg-zero/farm/farm-build/dist/mtg-be674a2-release/mtgz-worker.exe
+```
+
+**Re-defining the live fuzz campaign** (its build, mode and env as they are; nothing else is put):
+
+```
+"C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07 --dry-run
+"C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07
+```
 
 ## 123. Legacy Sneak and Show: the deck's cards (branch `sneak-show`, mtg-bot `feature/sneak-show-ir`)
 
