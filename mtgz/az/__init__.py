@@ -274,6 +274,9 @@ def vast_remote(box, host=None):
                                      'env': {'ZERO_TOKEN_GRAPHS': '1'}, 'overrides': dict(VAST_SELFPLAY)})
 
 
+# the real-deck yardstick's run settings (docs/ENGINE.md 113; mtgz.sealed.realdecks.DEFAULTS' pools, games, builder)
+REAL_DECKS_SETTINGS = {'real_decks_every': 0, 'real_decks_pools': 64, 'real_decks_games': 2, 'real_decks_builder': 'best'}
+
 PACKAGE = register(GamePackage(
     'mtgz', 'MTG Zero', ROOT, engine='mtgz._engine', run_module='mtgz.az.run', game='mtg',
     # the belief target (docs/ENGINE.md 66, zero-core docs/az.md 15): the decider's opponent's hand by
@@ -292,7 +295,14 @@ PACKAGE = register(GamePackage(
     # reader_deck 1 with aux_deck_w > 0; off by default); `mtg_eoe`'s reads the EoE space's identities
     readers=deck_reader.READERS,
     # team_draft's deferred results and its other yardstick (M6 part 3, docs/ENGINE.md 45)
-    deferred={'team_draft': 'mtgz.az.drafted:GLUE'}, evals={'team_draft': 'mtgz.az.human_picks:EVALS'},
+    deferred={'team_draft': 'mtgz.az.drafted:GLUE'},
+    evals={'team_draft': 'mtgz.az.human_picks:EVALS', 'mtg_eoe': 'mtgz.sealed.realdecks:EVALS'},
+    # win % against real players' decks (docs/ENGINE.md 113, mtgz.sealed.realdecks): an EoE run's extra evaluation, a
+    # yardstick only (never a training signal, deck choice, evaluator target, model selection or best.pt), OFF by
+    # default; real_decks_every N > 0 runs it on the evaluated iterations that are multiples of N (zero-core docs/az.md
+    # 40: `evals_every`), real_decks_pools test pools of 17lands Premier Sealed x real_decks_games games each, our deck
+    # by real_decks_builder ('best' = the builder's best guess; 'value', 'evaluator:PATH', 'module:attr')
+    settings=REAL_DECKS_SETTINGS, evals_every={'real_decks': 'real_decks_every'},
     # the game log of a remote evaluation (docs/ENGINE.md 109): the evaluating process on the remote logs the games
     # it plays to the mirror (mtgz.az.mac.eval_log), and zero.remote copies the files into the run's games/
     remote_eval_files={'mtg_eoe': [REMOTE_EVAL_LOG]},
