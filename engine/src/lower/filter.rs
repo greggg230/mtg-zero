@@ -106,6 +106,16 @@ macro_rules! lower_object_predicate {
             E::IsPermanentCard(nodes::IsPermanentCard {}) => Some(Filter::Type(types::PERMANENT)),
             E::HasActivatedAbility(nodes::HasActivatedAbility {}) => Some(Filter::HasActivatedAbility),
             E::CubeWalkersIsColorless(nodes::CubeWalkersIsColorless {}) => Some(Filter::Colorless),
+            // "<Type> spell" (a counterspell's noun phrase: Flusterstorm's
+            // "instant or sorcery spell"; ENGINE.md 124.2): the object's card
+            // types as they are (CR 205.2a; a spell's are its own).
+            E::ValuePredicatesHasCardType(nodes::ValuePredicatesHasCardType { card_type }) => match types::from_name(card_type) {
+                Some(t) => Some(Filter::Type(t)),
+                None => {
+                    $l.unsupported(format!("value_predicates.HasCardType({card_type})"));
+                    None
+                }
+            },
             E::HasPrintedCardType(nodes::HasPrintedCardType { card_type }) => match types::from_name(card_type) {
                 // Printed = the card's own types (no type-changing effect
                 // touches spells or graveyard cards here).

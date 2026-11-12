@@ -1007,6 +1007,8 @@ pub enum Ext {
     EoeW2(crate::eoe_w2::EoeW2),
     /// Legacy Doomsday, lane A (ENGINE.md 110.1).
     DdA(crate::doomsday_a::DdA),
+    /// Lane B of the Legacy Doomsday deck (ENGINE.md 124.2).
+    DoomsdayB(crate::doomsday_b::DoomsdayB),
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -1319,6 +1321,7 @@ impl Op {
             Op::Ext(Ext::EoeW6(x)) => x.uses_event(),
             Op::Ext(Ext::DdA(x)) => x.uses_event(),
             Op::Ext(Ext::EoeW2(x)) => x.uses_event(),
+            Op::Ext(Ext::DoomsdayB(x)) => x.uses_event(),
             Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
             Op::DamagePlayer { amount, who: w } => amt(amount) || who(w),
             Op::Draw { who: w, n } | Op::GainLife { who: w, n } | Op::LoseLife { who: w, n } | Op::DiscardRandom { who: w, n } => {
@@ -1356,6 +1359,7 @@ impl Op {
             Op::Ext(Ext::EoeW1(x)) => x.jump_target(),
             Op::Ext(Ext::EoeW6(x)) => x.jump_target(),
             Op::Ext(Ext::DdA(x)) => x.jump_target(),
+            Op::Ext(Ext::DoomsdayB(x)) => x.jump_target(),
             _ => None,
         }
     }

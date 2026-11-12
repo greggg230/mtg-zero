@@ -62,6 +62,14 @@
 //! table; every check of the default mode, and with 200 games or more
 //! Doomsday, Pact of Negation, Personal Tutor and Flow State must have been
 //! cast and a Pact trigger put on the stack. Games only (best-of-one).
+//! `FUZZ_POOL=dd_b` (ENGINE.md 124.2): lane B of the Legacy Doomsday deck, constructed play's
+//! table: one player the Doomsday 60 (MTGGoldfish 8027957) with its cards of other lanes swapped
+//! for lane B's and supported ones (`DD_B_DECK`: four Misdirection, Flusterstorm and Cavern of
+//! Souls, Orcish Bowmasters for a creature type random play names), against the Delver 60; seats
+//! alternate by seed. Every check of the default mode, and
+//! with 200 games or more each of the three cards must have been played (Misdirection cast and
+//! changing a target, Flusterstorm cast and copied, a Cavern's type chosen and its mana spent on
+//! a spell that then can't be countered). Games only (best-of-one).
 //! `FUZZ_POOL=eoe` (ENGINE.md 99): Edge of Eternities sealed, the set's own
 //! card table (`CardDb::eoe`): random 40-card decks of its supported cards
 //! (17 lands, 23 spells; games only, no matches).
@@ -302,6 +310,7 @@ enum PoolMode {
     Exponential,
     Drafted,
     Delver,
+    DdB,
     Eoe,
     Sealed,
     DdA,
@@ -314,10 +323,11 @@ fn pool_mode() -> PoolMode {
         Ok("exponential") => PoolMode::Exponential,
         Ok("drafted") => PoolMode::Drafted,
         Ok("delver") => PoolMode::Delver,
+        Ok("dd_b") => PoolMode::DdB,
         Ok("eoe") => PoolMode::Eoe,
         Ok("sealed") => PoolMode::Sealed,
         Ok("dd_a") => PoolMode::DdA,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"eoe\" or \"sealed\")"),
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"dd_b\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -336,6 +346,108 @@ fn delver_mode() -> bool {
 /// `FUZZ_POOL=dd_a` (ENGINE.md 110.1).
 fn dd_a_mode() -> bool {
     pool_mode() == PoolMode::DdA
+}
+
+/// `FUZZ_POOL=dd_b` (ENGINE.md 124.2).
+fn dd_b_mode() -> bool {
+    pool_mode() == PoolMode::DdB
+}
+
+/// Constructed play's table (`FUZZ_POOL=delver`, `dd_a` or `dd_b`).
+fn constructed_mode() -> bool {
+    delver_mode() || dd_a_mode() || dd_b_mode()
+}
+
+/// The Doomsday 60 (MTGGoldfish 8027957, E:/mtg-zero-scratch/doomsday) with its cards of other
+/// lanes (Doomsday, Pact of Negation, Personal Tutor, Flow State, Edge of Autumn, Street Wraith:
+/// 12) swapped for Flusterstorm 4, Misdirection 2 more, Cavern of Souls 3 more and Orcish
+/// Bowmasters 3 (`FUZZ_POOL=dd_b`). (An Orc Archer: random play's creature-type choices are
+/// mostly the first 31 types, the first decision's own numbers, Archer among them, so a Cavern's
+/// coloured mana casts a creature spell of its type in random games.)
+const DD_B_DECK: &[(u32, &str)] = &[
+    (1, "Swamp"),
+    (1, "Flooded Strand"),
+    (2, "Thoughtseize"),
+    (4, "Misdirection"),
+    (4, "Force of Will"),
+    (4, "Underground Sea"),
+    (1, "Misty Rainforest"),
+    (4, "Lotus Petal"),
+    (1, "Scalding Tarn"),
+    (4, "Ponder"),
+    (2, "Thassa's Oracle"),
+    (2, "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar"),
+    (1, "Consider"),
+    (1, "Island"),
+    (4, "Cavern of Souls"),
+    (4, "Dark Ritual"),
+    (1, "Verdant Catacombs"),
+    (1, "Undercity Sewers"),
+    (4, "Brainstorm"),
+    (4, "Polluted Delta"),
+    (1, "Lion's Eye Diamond"),
+    (2, "Daze"),
+    (4, "Flusterstorm"),
+    (3, "Orcish Bowmasters"),
+];
+
+fn dd_b_deck() -> Vec<u16> {
+    let list: Vec<(u32, String)> = DD_B_DECK.iter().map(|&(n, s)| (n, s.to_string())).collect();
+    let d = engine::az::constructed::Decklist::ids(CardDb::constructed(), &list).unwrap();
+    assert_eq!(d.len(), 60);
+    d
+}
+
+/// `FUZZ_POOL=dd_b`: lane B's cards played (each stack item and permanent once).
+static DD_B_MISDIRECTIONS: AtomicU64 = AtomicU64::new(0);
+static DD_B_RETARGETS: AtomicU64 = AtomicU64::new(0);
+static DD_B_FLUSTERSTORMS: AtomicU64 = AtomicU64::new(0);
+static DD_B_COPIES: AtomicU64 = AtomicU64::new(0);
+static DD_B_CAVERN_TYPES: AtomicU64 = AtomicU64::new(0);
+static DD_B_TYPE_MANA: AtomicU64 = AtomicU64::new(0);
+static DD_B_UNCOUNTERABLE: AtomicU64 = AtomicU64::new(0);
+
+/// `FUZZ_POOL=dd_b`: count what the game shows now of lane B's cards (`seen`: stack item ids,
+/// uncounterable spells' items and permanents counted already). A Misdirection's change is its
+/// `NewTarget` decision as it resolves (on top of the stack; a storm copy's new targets are asked
+/// as its trigger resolves).
+fn count_dd_b(g: &Game, seen: &mut Vec<(u8, u32)>) {
+    use engine::game::StackKind;
+    if g.kind() == Some(engine::DecisionKind::NewTarget) {
+        if let Some(StackKind::Spell { card }) = g.stack().last().map(|s| s.kind) {
+            if g.name(card) == "Misdirection" {
+                DD_B_RETARGETS.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+    for it in g.stack() {
+        let StackKind::Spell { card } = it.kind else { continue };
+        if !seen.contains(&(2, it.id)) && g.spell_cant_be_countered(card) && g.db().def(g.obj(card).def).is(engine::db::types::CREATURE) {
+            seen.push((2, it.id));
+            DD_B_UNCOUNTERABLE.fetch_add(1, Ordering::Relaxed);
+        }
+        if seen.contains(&(0, it.id)) {
+            continue;
+        }
+        seen.push((0, it.id));
+        match g.name(card) {
+            "Misdirection" => DD_B_MISDIRECTIONS.fetch_add(1, Ordering::Relaxed),
+            "Flusterstorm" if g.is_copy_obj(card) => DD_B_COPIES.fetch_add(1, Ordering::Relaxed),
+            "Flusterstorm" => DD_B_FLUSTERSTORMS.fetch_add(1, Ordering::Relaxed),
+            _ => 0,
+        };
+    }
+    for c in g.permanents_of(0).chain(g.permanents_of(1)) {
+        if g.chosen_creature_type(c).is_some() && !seen.contains(&(1, c.get())) {
+            seen.push((1, c.get()));
+            DD_B_CAVERN_TYPES.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    for p in 0..2 {
+        if g.restricted_mana(p).iter().any(|k| k.1 & engine::db::SPEND_CHOSEN_CREATURE_TYPE != 0) {
+            DD_B_TYPE_MANA.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 }
 
 fn eoe_mode() -> bool {
@@ -684,7 +796,7 @@ fn check_forced_chance(g: &Game, seed: u64, step: usize) {
 /// The card table of the mode's games: the cube's and the custom test cards,
 /// or constructed play's (`FUZZ_POOL=delver`).
 fn game_db() -> &'static CardDb {
-    if delver_mode() || dd_a_mode() {
+    if constructed_mode() {
         CardDb::constructed()
     } else if eoe_mode() || sealed_mode() {
         CardDb::eoe()
@@ -1181,6 +1293,10 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
             _ => [(dd_a_deck(), Vec::new()), (dd_a_deck(), Vec::new())],
         };
     }
+    if dd_b_mode() {
+        let (dd, delver) = ((dd_b_deck(), Vec::new()), (delver_deck(), Vec::new()));
+        return if seed % 2 == 0 { [dd, delver] } else { [delver, dd] };
+    }
     if eoe_mode() {
         return [(eoe_deck(&mut rng), Vec::new()), (eoe_deck(&mut rng), Vec::new())];
     }
@@ -1226,6 +1342,8 @@ fn play(seed: u64, checks: bool) -> Played {
     let exp = exponential_mode();
     let mut buf = Vec::new();
     let mut stack_seen: Vec<u32> = Vec::new();
+    // (`FUZZ_POOL=dd_b`: lane B's counts, ENGINE.md 124.2.)
+    let mut dd_b_seen = Vec::new();
     let (mut turn, mut turn_steps) = (g.turn().number, 0u64);
     while !g.is_over() {
         g.legal_actions(&mut legal);
@@ -1289,6 +1407,9 @@ fn play(seed: u64, checks: bool) -> Played {
         }
         if dd_a_mode() && !g.stack().is_empty() {
             count_dd_a(&g, &mut stack_seen);
+        }
+        if dd_b_mode() {
+            count_dd_b(&g, &mut dd_b_seen);
         }
         assert!(steps < 100_000, "seed {seed}: game does not end
 {}", g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
@@ -1636,6 +1757,24 @@ fn fuzz_random_games() {
             let p: f64 = v.parse().expect("FUZZ_BEST_SHARE: a probability");
             let best = (first..first + n).map(|s| (0..2).filter(|&q| engine::az::sealed::best_seat(s, q, p)).count()).sum::<usize>();
             println!("FUZZ_BEST_SHARE={p}: {best} of {} seats the builder's best guess", 2 * n);
+        }
+    }
+    if dd_b_mode() {
+        let l = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let (m, r, f, c, t, k, u) = (
+            l(&DD_B_MISDIRECTIONS),
+            l(&DD_B_RETARGETS),
+            l(&DD_B_FLUSTERSTORMS),
+            l(&DD_B_COPIES),
+            l(&DD_B_CAVERN_TYPES),
+            l(&DD_B_TYPE_MANA),
+            l(&DD_B_UNCOUNTERABLE),
+        );
+        println!(
+            "FUZZ_POOL=dd_b: Misdirection cast {m}, its new-target decisions {r}; Flusterstorm cast {f}, copies {c}; Cavern types chosen {t}, decisions with chosen-type mana floating {k}, uncounterable creature spells {u}"
+        );
+        if n >= 200 {
+            assert!(m > 0 && r > 0 && f > 0 && c > 0 && t > 0 && u > 0, "lane B's cards weren't played: {m} {r} {f} {c} {t} {u}");
         }
     }
     if delver_mode() {
@@ -2026,12 +2165,8 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
 
 #[test]
 fn fuzz_random_matches() {
-    if delver_mode() {
-        println!("FUZZ_POOL=delver: games only (constructed best-of-three isn't built)");
-        return;
-    }
-    if dd_a_mode() {
-        println!("FUZZ_POOL=dd_a: games only (constructed best-of-three isn't built)");
+    if constructed_mode() {
+        println!("FUZZ_POOL=delver / dd_a / dd_b: games only (constructed best-of-three isn't built)");
         return;
     }
     if eoe_mode() {
@@ -2089,7 +2224,7 @@ fn fuzz_random_matches() {
 fn same_seed_and_actions_replay_matches_identically() {
     use engine::az::MtgAz;
     use zero_search::game::SearchGame;
-    if delver_mode() || dd_a_mode() || eoe_mode() || sealed_mode() {
+    if constructed_mode() || eoe_mode() || sealed_mode() {
         return;
     }
     for seed in 2000..2012 {

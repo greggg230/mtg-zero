@@ -1191,6 +1191,28 @@ with a colour-defining ability, now a colour indicator: its ruling of 2013-06-07
 * Engine: supported; `cards_doomsday_a::pact_of_negation_is_a_blue_zero_mana_instant`,
   `::pact_is_a_blue_card_force_of_will_can_exile`.
 
+### U. The Legacy Doomsday deck, lane B (ENGINE.md 124.2)
+
+220. **Untimely Malfunction** (Duskmourn; mtg-bot's roto, eoe and all pools, in no table of
+     mtg-zero's: the EoE filter drops Duskmourn): "Choose one — Destroy target artifact. • Change the
+     target of target spell or ability with a single target. • One or two target creatures can't
+     block this turn." The IR is `DestroyTargetArtifact` alone: the modal parses lossily to its first
+     mode (the other two modes had no grammar; the third still has none). Found while adding
+     Misdirection's "change the target of target spell with a single target"
+     (`cards/parser/legacy_stack.py`): with the second mode claimed the card stops parsing, so that
+     recognizer leaves "... spell or ability ..." unclaimed (lane B must not change another pool's
+     printings). Fix: a grammar for "one or two target creatures can't block this turn", then the
+     modal as `ModalChooseOne` of the three, the second
+     `ChangeTheTargetOfTargetWithASingleTarget(kinds=(spell, activated, triggered))`.
+
+Checked and not defects (lane B): Misdirection, Flusterstorm and Cavern of Souls match their Oracle
+text. Cavern's coloured mana ability is `AddAnyColorManaForChosenCreatureType`, a class named after
+the whole sentence ("spend this mana only to cast a creature spell of the chosen type, and that spell
+can't be countered"; its fields at their defaults: `produces` any 1, `makes_spell_uncounterable`); the
+lowering checks every field. Misdirection's alternative cost is Pyrokinesis' shape
+(`alt_cost_exile_from_hand`, a blue `CardFilter`), not `alternative_costs` as Force of Will's: both
+lower to the same alternative cost.
+
 ## Suspected defects (representational)
 
 **7. Animate Dead.** Oracle: "... Enchanted creature gets -1/-0."

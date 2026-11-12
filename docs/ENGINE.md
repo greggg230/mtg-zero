@@ -25412,3 +25412,185 @@ Pyroblast test, no engine code:
   fixed since (the legacy pool's sidecar test, which pinned two cards) and one timing test that passes alone
   (`test_v2_report_async::test_post_returns_202_before_background_fetch_completes`).
 * No docs/shortcuts.md entry; no layout, encoding, identity-scheme or zero-core change.
+
+### 124.2 Lane B: Misdirection, Flusterstorm, Cavern of Souls (branch `doomsday-b`, mtg-bot `feature/doomsday-b-ir`)
+
+**Why.** Lane B of the Legacy Doomsday deck (MTGGoldfish 8027957; the deck's other cards were
+supported already, lanes A and C took the rest of its new cards): Misdirection (2 main), Flusterstorm
+(2 side) and Cavern of Souls (1 main), each faithful to its Oracle text and its official rulings, in
+constructed play's table (`CardDb::constructed`). From main 60397f3, mtg-bot from `feature/eoe-ir-fixes`
+f4f2d663.
+
+#### The IR (mtg-bot `feature/doomsday-b-ir` f48104b9)
+
+* The three cards' Scryfall records (E:/mtg-zero-scratch/doomsday/raw/scryfall_doomsday_new.json, the
+  same printings as the roto pool's two) appended to the legacy pool (`data/legacy_delver.json`, its
+  sheet and sidecar: 5 cards).
+* Flusterstorm and Cavern of Souls already parsed (roto grammars): `CounterSpell` (`spell_filter`
+  `ObjectOr(value_predicates.HasCardType Instant, ... Sorcery)`, `unless_pays` "{1}") with `has_storm`;
+  `enters_choosing_creature_type`, `produces` {C} and the mana ability
+  `AddAnyColorManaForChosenCreatureType` (an `AddManaToPool` whose class is the sentence "Add one mana
+  of any color. Spend this mana only to cast a creature spell of the chosen type, and that spell can't
+  be countered": `produces` any 1, `makes_spell_uncounterable`; the lowering checks every field).
+* Misdirection didn't: "Change the target of target spell with a single target" had no grammar (its
+  alternative cost already parsed as Pyrokinesis', `alt_cost_exile_from_hand` a blue `CardFilter`). New:
+  `cards/parser/legacy_stack.py` (the last fallback of `_parse_effect`: "change the target of target
+  <spell phrase> with a single target", the spell phrase the counterspells' `parse_spell_phrase`) and
+  the effect `ChangeTheTargetOfTargetWithASingleTarget(kinds, spell_filter)`
+  (`effects/generic/legacy_stack.py`; card-IR data: the Python engine's spell stack items carry no
+  targets, so it raises, SEARCH_LIMITATIONS "Legacy pool" 2). The "... spell or ability with a single
+  target" shape is left unclaimed: claiming it changes Untimely Malfunction's printing in the roto, eoe
+  and all pools (its modal parses lossily today, to `DestroyTargetArtifact` alone; with the second mode
+  claimed it stops parsing) - a defect of mtg-bot's, outside mtg-zero's tables.
+* Export `cards export-ir --pool cube legacy eoe`: schema `12935fd48060f815...` (was `1cbe33073b1b...`),
+  three classes more in it (`ChangeTheTargetOfTargetWithASingleTarget`,
+  `AddAnyColorManaForChosenCreatureType`, `value_predicates.HasCardType`). `powerlsv.ir.json` and
+  `eoe.ir.json` are the previous files byte for byte but `schema_sha256` (checked card by card);
+  `legacy.ir.json` 5 cards. The roto, eoe, cube and all pools' claimed printings: the same (compared card
+  by card with f4f2d663). `cards roundtrip --pool cube legacy eoe roto` passes. `generated.rs`
+  regenerated.
+
+#### What was built (engine)
+
+| Part | Where | What |
+|---|---|---|
+| "Change the target" | `doomsday_b.rs` (`DoomsdayB::ChangeTheTarget`, `Ext::DoomsdayB`), `lower/doomsday_b.rs` | the target spell's one target changed as Misdirection resolves (a `NewTarget` decision of Misdirection's controller, the candidates paged by range, no `PASS`) |
+| "a spell with a single target" | `Filter::SingleTarget` (db.rs; cast.rs `card_matches`) | the spell's stack item has exactly one target instance |
+| "instant or sorcery spell" | `lower/filter.rs` | `value_predicates.HasCardType` lowers as `HasCardType` (the object's card types) |
+| "As this land enters, choose a creature type" | `CardDef::dd_b.chooses_creature_type`, `Task::ChooseCreatureType`, `Mark::ChosenCreatureType(u16)`, `doomsday_b::CREATURE_TYPES_CR` | one of CR 205.3m's 367 types (the CR of 2026-11-06, sorted) by `ask_number` (NUMBER 0-30, then "31 or more" and two base-32 digits: at most three decisions, every type by exactly one sequence); `ChooseMode`, the land's controller |
+| "Spend this mana only to cast a creature spell of the chosen type, and that spell can't be countered" | `db::SPEND_CHOSEN_CREATURE_TYPE`, `doomsday_b::{with_type, type_of, Allow, CreatureTypes}`, `Game::spend_of_source`, `Game::creature_type_allow` | below |
+| The chosen type, encoded | `az/encode.rs` (`perm::CHOSEN_CREATURE_TYPE`) | layout v6's permanent status 133-141 |
+| The guard | `az::MtgSpec::parse`, `doomsday_b::makes_chosen_type_mana`, `public_state::CHOSEN_TYPE_MANA_GAP` | a network-driven game with Cavern of Souls is refused on layout v6 (below) |
+
+**The restriction, uncapped.** A spending restriction is a `Spend` (u32; was u8, full: 7 purposes and
+the rider): `SPEND_*` bits 0-6, the rider `MANA_UNCOUNTERABLE` bit 7, and `SPEND_CHOSEN_CREATURE_TYPE`
+bit 8 with the chosen type in bits 16-24 (index + 1; 0: the source chose none). Cavern's ability says
+bit 8 alone; the mana it makes, as a payment's source class or floated with priority, carries its
+source's type (`spend_of_source`). What a payment satisfies is an `Allow`: the purposes and, paying for
+a creature spell, its creature types among the types some mana could have now (the permanents' chosen
+types and the pool's: `creature_type_allow`; any other type matters to no payment, and with no Cavern
+the set is empty at no cost). `eoe_w2::spendable` checks the type against the set. Mana of a type the
+spell has pays only the spell's cost (its unit tag `FOR_COST`, as a creature tapped for convoke: never
+a mana ability's cost within the payment); of another type it is no candidate. In the pool each type
+is a kind of its own (`pool_restr`), so any number of types float at once and the payment's choice of
+which mana pays (`PayPool`) sees them apart. The rider is Delighted Halfling's (`finish_payment`: a
+picked source with `uncounterable`, or rider mana of the pool spent). A Cavern that chose no type (it
+entered without its "as enters" choice: a copy effect, the test kit) makes mana spendable on nothing,
+not unrestricted mana.
+
+*Found on the way and replaced:* a first version gave each chosen type a slot bit of a game-wide table
+(23 slots); a flicker or bounce loop can make a pool hold any number of types in one step (below), so
+that table had a cap. The type now travels with the mana.
+
+#### The encoding: layout v6, and the guard (the maintainer's decisions, 2026-11-11)
+
+**The chosen type** is public state on the permanent: layout v6's spare permanent status 133-141,
+`perm::CHOSEN_CREATURE_TYPE` = its `CREATURE_TYPES_CR` index + 1 in nine binary digits (least
+significant first); exact (`cards_doomsday_b.rs::the_chosen_creature_type_is_encoded_on_the_permanent`,
+the public-state gate's "a creature type was chosen as a permanent entered", `V6_FIXED`). Status
+142-143 stay spare; the g6 per-player spares 8-31 stay spare.
+
+**Cavern's mana floating is not in layout v6.** Its type goes with it (CR 106.6), and nothing caps
+the number of types one player's pool holds at once: each time a Cavern enters it is a new object
+(400.7) and makes a new choice (614.12), and the mana stays until the step ends (106.4, 500.4) - tap
+it, return or flicker it, put it back, tap again, as often as resources allow. v6's spares (75 global
+floats outside v5's) can't hold that exactly. The exact encoding is layout v7: v6 and one appended
+global block, 2 players x 5 colours (the lowering takes the restriction only on one mana of any colour,
+with its rider) x 368 types (the 367, then "the source chose none"), 3,680 floats at 44,212, the amount
+/ 4 squashed; a v6 network widens onto it exactly (zero-core's `net.widen` maps global blocks by name).
+It is built and committed on branch `doomsday-b-v7` (on this branch; `mtgz/az/layout_v7.json`, the
+`mtg_eoe` game kept on layout v6, the widen and guard tests, `DIGEST_ENCODING=v6`), and lands later as
+part of one larger layout (the user's decision: the Doomsday cards merge on layout v6 now).
+
+**The guard.** Until then, on this layout v6 build, every network-driven game whose decks or sideboards
+hold a card that can make such mana (`doomsday_b::makes_chosen_type_mana`: a mana ability with
+`SPEND_CHOSEN_CREATURE_TYPE`) is refused where every one starts, the engine's spec (`MtgSpec::parse`,
+so zero-core's `SearchGame::parse_spec`: self-play, evaluation, h2h, replays, the search smoke): "mtg
+spec: p0's deck: Cavern of Souls' floating mana needs layout v7 (ENGINE.md 124.2)". The engine never
+encodes it (`encode_features` leaves such pool mana out of `POOL_KINDS`). Rules tests and the fuzzer,
+which drive no network, play Cavern. The public-state gate records it as its one next-layout gap,
+named (`public_state::CHOSEN_TYPE_MANA_GAP`, "mana in a pool is restricted to creature spells of a
+chosen type"; the gate asserts exactly that gap), its reason naming the refusal and the test that
+asserts it (`tests/az.rs::cavern_decks_are_refused_to_networks_on_layout_v6`: Cavern in either deck or a
+sideboard refused, the Delver mirror accepted). Removed when layout v7 lands.
+
+#### The rules
+
+| Text | Rule | How |
+|---|---|---|
+| "You may exile a blue card from your hand rather than pay this spell's mana cost" | 118.9, 601.2a, 601.2f | Pyrokinesis' alternative cost (`ChooseAltCost`, `ExileCost`): another blue card (the spell is on the stack as its costs are paid); no mana, no life |
+| "target spell with a single target" | 115.9a | one target chosen as it was put on the stack, each instance counted (the same player chosen twice by two words "target" is two), whatever its legality now; a spell (a copy too), never an ability |
+| "Change the target of" | 115.7a, 115.3, 115.5, 608.2b | as it resolves, Misdirection's controller chooses among the targets legal for that spell's requirement, from that spell's controller and source (hexproof, protection, "another"), other than its current one and never itself; Misdirection, still on the stack, is a candidate; with none, nothing changes; otherwise the change is not optional; the new target "becomes the target" (ward) |
+| "Counter target instant or sorcery spell unless its controller pays {1}" | 701.5, 118.12, 605.3a | `CounterSpell` with `OfferPay` (Daze's): the spell's controller decides on resolution, may activate mana abilities to pay; a spell that can't be countered is still asked and is not countered |
+| Storm | 702.40a, 707.10, 707.10c | the cube's storm (Brain Freeze): a cast trigger copying it once per spell cast before it this turn by any player (countered ones and ones cast from other zones too); the copies aren't cast; each copy's target may change, its own |
+| "As this land enters, choose a creature type" | 614.12, 205.3e, 205.3m | above; the choice is public (`Mark::ChosenCreatureType`, encoded) |
+| "{T}: Add {C}." | 106.1, 605.1a | an ordinary mana ability (no restriction, no rider) |
+| "{T}: Add one mana of any color. Spend this mana only to cast a creature spell of the chosen type" | 106.6, 205.3m | above; an Adventure creature cast as its Adventure is an instant spell (715.3): not of any type |
+| "... and that spell can't be countered" | 101.2, 106.6 | `Mark::Uncounterable` when the mana is spent on any cost of the spell; counterspells still target it and do nothing |
+
+Readings taken:
+
+* **The change is mandatory** when another legal target exists ("change the target", 115.7a: "each
+  target can be changed only to another legal target"; Misdirection's ruling f1ca52a5 "if there is no
+  other legal target ... this does not change the target"), unlike "you may choose new targets" (115.7d).
+* **Legal for the target spell**: its own requirement, its controller (hexproof, "target creature an
+  opponent controls") and its source (protection), the total of a requirement with a mana-value total
+  (601.2c); a divided spell keeps its division (115.7f: one target, all of it).
+* **"With a single target" counts instances as put on the stack** (115.9a), not distinct objects
+  (115.9c's "targets only" counts those): Test Twin Shock at one player twice is not a legal target.
+* **Cavern's restriction is the type its source chose as the mana was made**: a Cavern that leaves and
+  comes back is a new object with a new choice; its earlier mana keeps the earlier type.
+* **A source with no chosen type**: "the chosen type" names nothing, so no spell is of it; its mana is
+  spendable on nothing (not on anything).
+* **Kicker and other additional costs** (ruling 919d28a6): the payment of a spell is one payment, so
+  Cavern's mana spent on any of it makes the spell uncounterable. The ruling's second case (an
+  additional cost of a spell cast "without paying its mana cost") is the same rule: no card of
+  constructed play's table casts a creature spell for free with an additional mana cost, so it is not
+  tested separately.
+
+#### Tests, rulings
+
+`tests/cards_doomsday_b.rs` (28 tests; `tests/az.rs` one more, the guard): Misdirection (its alternative cost, Bolt, Thoughtseize, Force
+of Will redirected onto Misdirection itself and fizzling, Fatal Push both ways, Daze onto a spell below
+it, a single target illegal now, Test Twin Shock's two instances, ward on the new target and not on
+Misdirection, a Flusterstorm copy's target, no target without a single-target spell); Flusterstorm (pays
+and declines with a mana ability during resolution, a creature spell is no target, storm with 8 spells of
+both players including a countered one and a flashback cast, copies not cast, each copy's new target, a
+second Flusterstorm's count, the storm trigger countered by Tishana's Tidebinder, copies surviving the
+original's counter); Cavern of Souls (every one of the 367 types by its decisions, Oracle uncounterable
+against Force of Will, Counterspell and Daze, only the chosen type's creature spells, the {C} without the
+rider, floated mana's type and rider, no other spell or cost paid by it, two types in one pool, a Cavern
+with no type, Brazen Borrower and not Petty Theft, Thieving Skydiver's kicker, Flusterstorm and Force of
+Negation can't target, Force of Will can and fails; the chosen type on the permanent, encoded). Every ruling of the three cards
+tested (`// ruling:`): Misdirection's 8 (all new: triage class a), Flusterstorm's 5 (the cube's storm
+rulings), Cavern's 2 (new); `data/rulings/legacy.rulings.json` refetched (5 cards), `docs/rulings.md`
+regenerated (1,627 rulings, 1,245 class a, every one tested). `tools/untested_cards.py` reads the legacy
+registry too: 551 supported, none untested.
+
+#### Checks
+
+* **Digests** (`cargo test --release -p engine --test digest -- --ignored --nocapture`; layout v6, no
+  layout change): full **53839c837bbaf034** (every one of the 2,500 games equal to
+  `tests/data/digests.txt`), `DIGEST_ENCODING=0` **208c723daced22fe**, `DIGEST_ENCODING=v5`
+  **dc33538c0497dbf0**: each main's (60397f3), on b4360e1 and again on this commit (full and `=0` measured on it). The `Spend`
+  widening, the `Allow` payments and the rules change no game of the existing pools.
+* **Fuzz** (the desktop, 4 shards of 5,000, on b4360e1; the Mac was busy with the maintainer's races and
+  fuzz farm; the later commits change comments, the guard's message and a test):
+  `FUZZ_POOL=dd_b FUZZ_GAMES=20000`: no failure; 20,000 games (wins 9,533 / 9,772, 695 drawn at the turn
+  cap, 0 aborted), 36.4 turns and 467 decisions a game, the longest 1,232 actions, 18,218,209 options
+  completed; Misdirection cast 17,233 times (5,721 new-target decisions), Flusterstorm 10,048 (14,341
+  copies), 35,103 Caverns' types chosen, 598,359 decisions with chosen-type mana floating, 259 creature
+  spells that couldn't be countered (Orcish Bowmasters: random play names the first 31 types far more
+  often than the rest). `FUZZ_POOL=delver FUZZ_GAMES=4000`: no failure (1,924 / 1,907, 169 drawn;
+  Murktide Regent cast 2,055 times, its trigger 88, Prismari Charm 2,977).
+* **Engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`): 2,291 passed, 0 failed, 22 ignored (153 test binaries; `cards_doomsday_b` 28, `az` 49, `constructed` 7).
+* **The public-state gate** (`--test az`): 157 perturbations encoded, 4 deliberate limits, the one named
+  gap ("mana in a pool is restricted to creature spells of a chosen type": 15 positions applied, the
+  encoding unchanged, as the limit says), "a creature type was chosen as a permanent entered" encoded.
+* **mtg-bot** (`feature/doomsday-b-ir` c5d2a557: f48104b9 and a renumbered comment):
+  `cards roundtrip --pool cube legacy eoe roto` passes; the legacy, card-IR and pool tests (104) pass;
+  the new modules 100% covered; the full suite (`pytest -n 6 --no-cov`) 49 failed, each failing at
+  f4f2d663 too (an archive of it run alongside) but `test_fetch_cube`'s legacy-pool check, updated.
+* **Python**: `bash tools/build_py.sh`, then `python -m pytest -q tests` 269 passed, 1 skipped; `python -m pytest -q tools/codegen` 2 passed.
+* No docs/shortcuts.md entry; no approximation. Spare floats: permanent status 133-141 taken (142-143
+  spare); the g6 per-player spares 8-31 stay spare.

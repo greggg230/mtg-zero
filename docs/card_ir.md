@@ -12,7 +12,7 @@ specified in mtg-bot's `docs/CARD_IR.md`.
 | Path | What |
 |---|---|
 | `data/cards/powerlsv.ir.json` | The PowerLSV cube (546 printings), IR v1, exported by mtg-bot `feature/legacy-delver-ir` 140eafa9 with the legacy pool (schema `181ba4b8a1e7...`, ENGINE.md 54; the cards byte for byte those of `feature/companion-ir` 62210e89, schema `7100f8436556...`: companion conditions, M8a; before it `feature/ir-fixes-mtgzero` 8ea9fcca, schema `66ba3e33fe5b...`, the IR defects of docs/ir_defects.md 1, 2, 4, 12, 13, 15-18 fixed) |
-| `data/cards/legacy.ir.json` | The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari Charm; ENGINE.md 110.1: Doomsday, Pact of Negation, Personal Tutor, Flow State; mtg-bot's pool `legacy`), the same export and schema |
+| `data/cards/legacy.ir.json` | The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari Charm; ENGINE.md 124, the Legacy Doomsday deck: Doomsday, Pact of Negation, Personal Tutor, Flow State, 124.1; Misdirection, Flusterstorm, Cavern of Souls, 124.2; Edge of Autumn, Street Wraith, Leyline of the Void, 124.3; mtg-bot's pool `legacy`), the same export and schema |
 | `data/cards/eoe.ir.json` | The Edge of Eternities sealed cards (ENGINE.md 99.1: mtg-bot's pool `eoe` filtered by `tools/codegen/filter_eoe_ir.py` to the set's 320 cards with IR), the same export and schema; since ENGINE.md 99.16 the export of mtg-bot `feature/eoe-ir-fixes` f4f2d663 (before it 7c02e5c9, ENGINE.md 99.11; 5362f5ed, ENGINE.md 99.9) |
 | `data/cards/powerlsv.schema.json` | The schema the three documents were encoded with |
 | `tools/codegen/gen_card_ir.py` | Schema -> Rust generator (stdlib Python) |
@@ -86,20 +86,23 @@ When mtg-bot bumps `ir_version` (a change to the encoding rules, not to
 the card vocabulary), `support.rs`, `lib.rs` and the generator may need
 changes too; see mtg-bot `docs/CARD_IR.md`, "Versioning".
 
-## Current numbers (mtg-bot `feature/doomsday-a-ir` a544a075)
+## Current numbers (mtg-bot `feature/doomsday-ir` 1af29e64)
 
-ENGINE.md 110.1 (Legacy Doomsday, lane A): exported with `cards export-ir --pool cube legacy eoe` from mtg-bot
-`feature/doomsday-a-ir` a544a075 (on `feature/eoe-ir-fixes` f4f2d663), then `filter_eoe_ir.py`; schema sha256
-`506c54f1e63e53718129009c43624e31f7b2c6af847dc9cd5faae701a4e73807` (was `1cbe33073b1b...`). 713 classes, four more:
-`DoomsdayPile` and `LookAtTopPutIntoHandMoreIfInstantAndSorcery` (mtg-bot's roto classes, now used by Doomsday and Flow
-State), `LoseTheGame` (roto), and `PayManaOrElse` (new: "pay <cost>. If you don't, <effect>"); the enum `DelayedStep`
-gains `your_upkeep` ("at the beginning of your next upkeep"). The legacy pool gains four cards (Doomsday, Pact of
-Negation, Personal Tutor, Flow State); docs/ir_defects.md 200 (a single-faced card's colour indicator dropped: Pact of
-Negation's blue) is fixed. `powerlsv.ir.json` (546 cards, 402,200 bytes) and `eoe.ir.json` (320 cards, 214,200 bytes)
-are the previous files byte for byte once the schema hash is replaced (checked card by card and as bytes);
-`legacy.ir.json` holds 6 cards (3,489 bytes).
+ENGINE.md 124.4 (Legacy Doomsday, the three lanes integrated): exported with `cards export-ir --pool cube legacy eoe`
+from mtg-bot `feature/doomsday-ir` 1af29e64 (the lanes' `feature/doomsday-a-ir` a544a075, `feature/doomsday-b-ir`
+c5d2a557 and `feature/doomsday-c-ir` 870228f5 merged on `feature/eoe-ir-fixes` f4f2d663), then `filter_eoe_ir.py`;
+schema sha256 `2b73853e6d15d2a5ba6fca2781f52afe5ae89fc5fbf3e1e410605ff6b36b67a2` (was `1cbe33073b1b...`). 717 classes,
+eight more, exactly the union of the lanes' additions: lane A's `DoomsdayPile`,
+`LookAtTopPutIntoHandMoreIfInstantAndSorcery`, `LoseTheGame` and `PayManaOrElse` (new: "pay <cost>. If you don't,
+<effect>"), with the enum member `DelayedStep.your_upkeep` (124.1); lane B's `ChangeTheTargetOfTargetWithASingleTarget`
+(new: Misdirection), `AddAnyColorManaForChosenCreatureType` (Cavern of Souls) and the object predicate
+`value_predicates.HasCardType` (Flusterstorm) (124.2); lane C's `PayLifeCost`, which joins the `CostAtom` category
+(124.3). docs/ir_defects.md 200 (a single-faced card's colour indicator dropped: Pact of Negation's blue) is fixed.
+`powerlsv.ir.json` (546 cards, 402,200 bytes) and `eoe.ir.json` (320 cards, 214,200 bytes) are main's files byte for
+byte once the schema hash is replaced (checked card by card and as bytes); `legacy.ir.json` holds the 12 legacy cards
+(6,708 bytes, sorted by name), each card's IR equal to its lane's export.
 
-### Before ENGINE.md 110.1 (mtg-bot `feature/eoe-ir-fixes` f4f2d663)
+### Before ENGINE.md 124 (mtg-bot `feature/eoe-ir-fixes` f4f2d663)
 
 ENGINE.md 99.16 (W6): exported with `cards export-ir --pool cube legacy eoe` from mtg-bot
 `feature/eoe-ir-fixes` f4f2d663 (the third IR-fix batch, on aa323a3b), then `filter_eoe_ir.py`; schema

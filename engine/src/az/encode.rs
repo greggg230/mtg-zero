@@ -17,7 +17,7 @@
 //! | context | 256 | the pending decision: kind (64 kinds), decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay (a mana payment's; delve's picks: the spell's mana cost after the cards chosen so far, ENGINE.md 65), damage left, counters of the asking task; ENGINE.md 100.1: a page of a paged choice, a big number's digits; **ENGINE.md 100.5**: the frame flag (248: the decision is made for the other seat, CR 722) |
 //! | bags | 23 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards (a card chosen for a delve in progress is in its owner's exile bag, ENGINE.md 65), exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them); M8b: the opponent's pool as the viewer knows it, the cards the opponent revealed in earlier games of the match; **v5**: the exiled cards the viewer may play, those the opponent may play (`bag::MY_EXILE_PLAY`, `OPP_EXILE_PLAY`; a face-down one only where the viewer knows it); **v6**: the exiled cards a stack item targets or noted, the viewer's and the opponent's phased-out permanents, the viewer's hand cards the opponent knows |
 //! | tops | 2 x 3 x 54 | the top three library positions of each player: present, known to the viewer, the card code |
-//! | permanents | 2 x 32 x 196 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up; M7b part 3: a copy and the identity of what it copies, what it is attached to; part 3b: ward and its cost, lost all abilities, goaded, exiled if it would leave; 58.8: can't block, can't be blocked, other counters, cards exiled with it, protection; **v5** status 96-119: must attack, exiled if it would die, effects on its subtypes, evoked, escaped, the player chosen as it entered, monstrous, exhausted, the colour chosen as it entered, exerted, abilities resolved this turn, once-each-turn actions done (112-119 spare, never set); **v6** status 120-143: cast for its warp cost, regeneration shields, the mana spent to cast it, legendary as it is, granted triggered and activated abilities, the spells it gave an alternative cost, stack items that noted it, entered this turn; **100.5.1**: an ability its copy effect's exception kept, its control effects (until end of turn, lasting) and an Aura's control effect among them (133-143 spare) |
+//! | permanents | 2 x 32 x 196 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up; M7b part 3: a copy and the identity of what it copies, what it is attached to; part 3b: ward and its cost, lost all abilities, goaded, exiled if it would leave; 58.8: can't block, can't be blocked, other counters, cards exiled with it, protection; **v5** status 96-119: must attack, exiled if it would die, effects on its subtypes, evoked, escaped, the player chosen as it entered, monstrous, exhausted, the colour chosen as it entered, exerted, abilities resolved this turn, once-each-turn actions done (112-119 spare, never set); **v6** status 120-143: cast for its warp cost, regeneration shields, the mana spent to cast it, legendary as it is, granted triggered and activated abilities, the spells it gave an alternative cost, stack items that noted it, entered this turn; **100.5.1**: an ability its copy effect's exception kept, its control effects (until end of turn, lasting) and an Aura's control effect among them; **124.2**: the creature type chosen as it entered (133-141; 142-143 spare) |
 //! | hand | 16 x 60 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options (which face its `HAND` id casts or plays), known to the opponent |
 //! | stack | 8 x 204 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets (a player, a permanent, a stack item); a copy of a spell, times an additional cost was paid, bestowed; part 3b: targeted by another stack item, can't be countered, the ability's index, a graveyard card's ability; 58.8: X; **v5** status 32-71: the modes chosen, the alternative cost, how and from where it was cast, cards delved, a trigger's event amount, exiled as it leaves, flashback, noted permanents, divided damage, a ninjutsu attack, splices (64-71 spare, never set); **v6** status 72-151: the exiled cards it targets and noted, its first exiled target and its first noted object (by identity or slot), an alternative cost a permanent granted it; **100.5.1**: the mana spent to cast it (149-151 spare) |
 //! | triggers | 4 x 56 | `TRIGGER` slots 0..3 (the viewer's waiting triggers) |
@@ -640,8 +640,12 @@ pub mod perm {
     pub const CONTROL_EOT: usize = 130;
     pub const CONTROL_LASTING: usize = 131;
     pub const AURA_CONTROL: usize = 132;
-    /// The first spare status float of layout v6 (133..143 spare).
-    pub const V6_END: usize = 133;
+    /// ENGINE.md 124.2: the creature type chosen as it entered (CR 614.12,
+    /// 205.3m; Cavern of Souls): its `doomsday_b::CREATURE_TYPES_CR` index
+    /// + 1 in `TYPE_BITS` binary digits, least significant first (0: none).
+    pub const CHOSEN_CREATURE_TYPE: usize = 133;
+    /// The first spare status float of layout v6 (142..143 spare).
+    pub const V6_END: usize = CHOSEN_CREATURE_TYPE + super::TYPE_BITS;
 }
 const _: () = assert!(
     CODE + perm::PROTECTED + 1 == v4::PERM_W
@@ -871,6 +875,20 @@ pub mod g6 {
 }
 const _: () = assert!(g6::PLAYER_END <= g6::PLAYER && g6::GAME_END <= GLOBALS_V6);
 
+/// The binary digits of a chosen creature type (`perm::CHOSEN_CREATURE_TYPE`;
+/// ENGINE.md 124.2): 367 types + none < 2^9.
+pub const TYPE_BITS: usize = 9;
+const _: () = assert!(crate::doomsday_b::CREATURE_TYPES_CR.len() < 1 << TYPE_BITS);
+
+/// Write creature type index `t` (`None`: no type) as `TYPE_BITS` binary
+/// digits of t + 1, least significant first.
+fn type_bits(out: &mut [f32], t: Option<u16>) {
+    let v = t.map_or(0, |t| t as usize + 1);
+    for (b, x) in out[..TYPE_BITS].iter_mut().enumerate() {
+        *x = (v >> b & 1) as f32;
+    }
+}
+
 /// Offsets inside the per-player globals (`g[24 + 40 * side..]`, viewer
 /// first) added in M7b part 3b, and the room one-hots.
 pub mod glob {
@@ -950,7 +968,7 @@ fn perm_page_first(d: &crate::decision::Decision, side: usize) -> usize {
 /// other: a game holds no other), 1..7, plus 8 with the rider "that spell
 /// can't be countered" (`MANA_UNCOUNTERABLE`; 8 alone: the rider on mana of
 /// no restriction).
-fn pool_kind(only: u8) -> usize {
+fn pool_kind(only: crate::db::Spend) -> usize {
     use crate::db::{
         MANA_UNCOUNTERABLE, SPEND_ARTIFACT, SPEND_ARTIFACT_ABILITY, SPEND_ELDRAZI_ABILITY, SPEND_ELDRAZI_SPELL, SPEND_LAND_ABILITY,
         SPEND_LEGENDARY, SPEND_OUTSIDE_HAND,
@@ -1063,7 +1081,13 @@ fn task_code(t: &Task) -> usize {
         Task::CastOption { .. } => 13,
         Task::ChooseModes { .. } => 14,
         Task::ManaNowPick { .. } => 15,
-        Task::AsEnters { .. } | Task::Devour { .. } | Task::MaySkipTurn { .. } | Task::MiracleReveal { .. } | Task::Opening { .. } => 16,
+        Task::AsEnters { .. }
+        | Task::Devour { .. }
+        | Task::MaySkipTurn { .. }
+        | Task::MiracleReveal { .. }
+        | Task::Opening { .. }
+        // (A creature type chosen as it enters: ENGINE.md 124.2.)
+        | Task::ChooseCreatureType { .. } => 16,
         Task::CastPay { .. } | Task::ActPay { .. } => 17,
         Task::AttackTarget { .. } => 19,
         Task::ChooseFace { .. } => 20,
@@ -1456,6 +1480,8 @@ impl Game {
                         match m {
                             Mark::Exhausted(_) => exhausted += 1,
                             Mark::ChosenColor(k) if (k as usize) < 5 => st[perm::CHOSEN_COLOR + k as usize] = 1.0,
+                            // ENGINE.md 124.2.
+                            Mark::ChosenCreatureType(t) => type_bits(&mut st[perm::CHOSEN_CREATURE_TYPE..], Some(t)),
                             Mark::Exerted => st[perm::EXERTED] = 1.0,
                             // Layout v6 (ENGINE.md 100.5).
                             Mark::WarpCast => st[perm::WARP_CAST] = 1.0,
@@ -2006,7 +2032,11 @@ impl Game {
             if !self.pool_restr.is_empty() {
                 let mut kinds = [0u32; g6::POOL_KINDS_N];
                 for &(q, ty, only, n) in &self.pool_restr {
-                    if q == p {
+                    // (Mana restricted to creature spells of a chosen type,
+                    // CR 106.6, Cavern of Souls: layout v7's, not v6's; a game
+                    // whose decks hold a card that makes it is refused to
+                    // networks on this layout, `MtgSpec`: ENGINE.md 124.2.)
+                    if q == p && only & crate::db::SPEND_CHOSEN_CREATURE_TYPE == 0 {
                         kinds[16 * ty as usize + pool_kind(only)] += n as u32;
                     }
                 }
@@ -2394,7 +2424,7 @@ impl Game {
                     }
                 }
             }
-            Task::AsEnters { card: c, .. } => card = Some((self.objs[c.i()].def, None, None)),
+            Task::AsEnters { card: c, .. } | Task::ChooseCreatureType { card: c, .. } => card = Some((self.objs[c.i()].def, None, None)),
             // The spell whose mana's colours are chosen (ENGINE.md 100.5.1).
             Task::ColorsSpent { spell, .. } => card = Some((self.objs[spell.idx.i()].def, Some(AbilitySlot::Spell), None)),
             Task::AssignDamage { att, left, .. } => {

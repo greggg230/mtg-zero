@@ -17,30 +17,35 @@
 //! like `art`. The payment model reads both as one list of kinds
 //! (`Game::pool_kinds`).
 
-use crate::db::{types, CardDef, SPEND_ARTIFACT, SPEND_ARTIFACT_ABILITY, SPEND_ELDRAZI_ABILITY, SPEND_ELDRAZI_SPELL, SPEND_LAND_ABILITY, SPEND_OUTSIDE_HAND};
+use crate::db::{types, CardDef, Spend, SPEND_ARTIFACT, SPEND_ARTIFACT_ABILITY, SPEND_ELDRAZI_ABILITY, SPEND_ELDRAZI_SPELL, SPEND_LAND_ABILITY, SPEND_OUTSIDE_HAND};
 use crate::game::{CastFrom, Game};
 use crate::ids::{CardIdx, PlayerId};
 use crate::mana::{C, COLORS};
 use crate::svec::SVec;
 
 /// Restricted mana: (type, purposes `only`, amount).
-pub(crate) type RKind = (u8, u8, u8);
+pub(crate) type RKind = (u8, Spend, u8);
 
 /// The purposes of activating an ability (`ability_allow`).
-pub(crate) const SPEND_ABILITIES: u8 = SPEND_ARTIFACT_ABILITY | SPEND_ELDRAZI_ABILITY | SPEND_LAND_ABILITY;
+pub(crate) const SPEND_ABILITIES: Spend = SPEND_ARTIFACT_ABILITY | SPEND_ELDRAZI_ABILITY | SPEND_LAND_ABILITY;
 
 /// May mana with purposes `only` pay a cost that satisfies `allow` (CR
 /// 106.6: no restriction, or one of its purposes; a rider,
 /// `db::MANA_UNCOUNTERABLE`, is no purpose)?
 #[inline]
-pub(crate) fn spendable(only: u8, allow: u8) -> bool {
+pub(crate) fn spendable(only: Spend, allow: crate::doomsday_b::Allow) -> bool {
+    // (A creature spell of the type its source chose: the payment's spell
+    // has it; ENGINE.md 124.2.)
+    if only & crate::db::SPEND_CHOSEN_CREATURE_TYPE != 0 {
+        return crate::doomsday_b::type_of(only).is_some_and(|t| allow.types.contains(t));
+    }
     let only = only & !crate::db::MANA_UNCOUNTERABLE;
-    only == 0 || only & allow != 0
+    only == 0 || only & allow.bits != 0
 }
 
 /// The purposes the table's mana abilities can restrict mana to
 /// (`CardDb::spend_kinds`).
-pub(crate) fn spend_kinds(defs: &[CardDef]) -> u8 {
+pub(crate) fn spend_kinds(defs: &[CardDef]) -> Spend {
     defs.iter()
         .flat_map(|d| d.activated.iter().chain(d.hand_abilities.iter()))
         .filter_map(|a| a.mana())
@@ -49,7 +54,7 @@ pub(crate) fn spend_kinds(defs: &[CardDef]) -> u8 {
 
 /// `n` more of kind (`ty`, `only`) in a list of kinds (kept sorted, no
 /// empty kind).
-pub(crate) fn add_kind(v: &mut Vec<RKind>, ty: u8, only: u8, n: u8) {
+pub(crate) fn add_kind(v: &mut Vec<RKind>, ty: u8, only: Spend, n: u8) {
     if n == 0 {
         return;
     }
@@ -76,7 +81,7 @@ impl Game {
     /// spell, a colorless Eldrazi spell, a spell cast from anywhere other
     /// than its caster's hand. (The purposes no mana of the table has are
     /// left out: the payment is the same.)
-    pub(crate) fn spend_allow_from(&self, card: CardIdx, from: CastFrom) -> u8 {
+    pub(crate) fn spend_allow_from(&self, card: CardIdx, from: CastFrom) -> crate::doomsday_b::Allow {
         let mut a = 0;
         if self.is_type(card, types::ARTIFACT) {
             a |= SPEND_ARTIFACT;
@@ -93,17 +98,18 @@ impl Game {
         if kinds & SPEND_OUTSIDE_HAND != 0 && !from_hand {
             a |= SPEND_OUTSIDE_HAND;
         }
-        a
+        // A creature spell of a chosen type (ENGINE.md 124.2).
+        crate::doomsday_b::Allow { bits: a, types: self.creature_type_allow(card) }
     }
 
     /// The spending restrictions activating an ability of `card` satisfies
     /// (CR 106.6, 602.2): of an artifact, a land or a colorless Eldrazi
     /// source, as it is when the ability is activated. (Only the purposes
     /// the table's mana has: nothing for the cube.)
-    pub(crate) fn ability_allow(&self, card: CardIdx) -> u8 {
+    pub(crate) fn ability_allow(&self, card: CardIdx) -> crate::doomsday_b::Allow {
         let kinds = self.db.spend_kinds & SPEND_ABILITIES;
         if kinds == 0 {
-            return 0;
+            return crate::doomsday_b::Allow::default();
         }
         let mut a = 0;
         if kinds & SPEND_ARTIFACT_ABILITY != 0 && self.is_type(card, types::ARTIFACT) {
@@ -115,7 +121,7 @@ impl Game {
         if kinds & SPEND_ELDRAZI_ABILITY != 0 && self.colorless_eldrazi(card) {
             a |= SPEND_ELDRAZI_ABILITY;
         }
-        a
+        a.into()
     }
 
     /// The restricted parts of `p`'s pool: the Workshop's artifact-only {C}
@@ -155,7 +161,7 @@ impl Game {
     /// its spending restriction and rider (CR 106.6: they stay with the
     /// mana), in every table (docs/shortcuts.md N19, N20; ENGINE.md 100.4:
     /// before it the cube's floated Workshop and Halfling mana lost them).
-    pub(crate) fn add_restricted_mana(&mut self, p: PlayerId, mana: &[u8; 6], only: u8) {
+    pub(crate) fn add_restricted_mana(&mut self, p: PlayerId, mana: &[u8; 6], only: Spend) {
         self.add_mana(p, mana);
         if only == 0 {
             return;
@@ -172,7 +178,7 @@ impl Game {
     /// `p`'s pool's mana with a spending restriction, by kind (type,
     /// purposes `SPEND_*`, amount; the Workshop's artifact-only {C} too):
     /// for tests and tools.
-    pub fn restricted_mana(&self, p: PlayerId) -> Vec<(u8, u8, u8)> {
+    pub fn restricted_mana(&self, p: PlayerId) -> Vec<(u8, Spend, u8)> {
         self.pool_kinds(p).iter().copied().collect()
     }
 }

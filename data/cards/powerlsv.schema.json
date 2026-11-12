@@ -77,6 +77,7 @@
   ],
   "CostAtom": [
    "ExileSelfFromGraveyardCost",
+   "PayLifeCost",
    "RemoveCountersFromSelfCost",
    "SacrificePermanentsCost",
    "TapUntappedPermanentsCost"
@@ -94,6 +95,7 @@
   ],
   "Effect": [
    "Adapt",
+   "AddAnyColorManaForChosenCreatureType",
    "AddChargeCounterManaOfChosenColor",
    "AddManaInAnyCombination",
    "AddManaOfColorPerCount",
@@ -131,6 +133,7 @@
    "Bounce",
    "Cascade",
    "ChangeControllerToCombatDamageSource",
+   "ChangeTheTargetOfTargetWithASingleTarget",
    "ChooseModes",
    "ChooseNameExileThenRevealUntilNamed",
    "ChooseNameRevealTopPutNamedIntoHand",
@@ -705,6 +708,7 @@
    "cube_walkers.HasManaValueAtMost",
    "cube_walkers.IsColorless",
    "cube_walkers.IsPermanent",
+   "value_predicates.HasCardType",
    "value_predicates.HasManaValueAtMost",
    "value_predicates.IsPermanent"
   ],
@@ -1418,6 +1422,73 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_ub",
    "qualname": "Adapt"
+  },
+  "AddAnyColorManaForChosenCreatureType": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [
+      [
+       "any",
+       1
+      ]
+     ],
+     "name": "produces",
+     "required": false,
+     "type": {
+      "of": {
+       "items": [
+        {
+         "t": "str"
+        },
+        {
+         "t": "int"
+        }
+       ],
+       "t": "tuple"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "'SpendRestriction | None'",
+     "default": null,
+     "name": "spend_restriction",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "never"
+      },
+      "t": "opt"
+     },
+     "type_source": "observed"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "grants_haste_to_creature_spell",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": true,
+     "name": "makes_spell_uncounterable",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_mana",
+   "qualname": "AddAnyColorManaForChosenCreatureType"
   },
   "AddChargeCounterManaOfChosenColor": {
    "category": "Effect",
@@ -5938,6 +6009,46 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.control",
    "qualname": "ChangeControllerToCombatDamageSource"
+  },
+  "ChangeTheTargetOfTargetWithASingleTarget": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple[StackObjectKind, ...]",
+     "default": [
+      "spell"
+     ],
+     "name": "kinds",
+     "required": false,
+     "type": {
+      "of": {
+       "enum": "StackObjectKind",
+       "t": "enum"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "'ObjectPredicate | None'",
+     "default": null,
+     "name": "spell_filter",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "ObjectPredicate"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.legacy_stack",
+   "qualname": "ChangeTheTargetOfTargetWithASingleTarget"
   },
   "ChapterReached": {
    "category": "TriggerPredicate",
@@ -14431,6 +14542,23 @@
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "PayEnergy"
   },
+  "PayLifeCost": {
+   "category": "CostAtom",
+   "fields": [
+    {
+     "annotation": "int",
+     "name": "amount",
+     "required": true,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_keywords",
+   "qualname": "PayLifeCost"
+  },
   "PayManaOrElse": {
    "category": "Effect",
    "fields": [
@@ -21856,6 +21984,23 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_walkers",
    "qualname": "IsPermanent"
+  },
+  "value_predicates.HasCardType": {
+   "category": "ObjectPredicate",
+   "fields": [
+    {
+     "annotation": "str",
+     "name": "card_type",
+     "required": true,
+     "type": {
+      "t": "str"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.value_predicates",
+   "qualname": "HasCardType"
   },
   "value_predicates.HasManaValueAtMost": {
    "category": "ObjectPredicate",
