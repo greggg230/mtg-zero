@@ -25106,18 +25106,21 @@ game) - several evaluations, or the command line with more pools.
 ### 113.4 Run 1, backfilled
 
 `python -m mtgz.sealed.realdecks E:/mtg-zero/runs/eoe1/models/iter_00NN.pt --pools 64 --games 2 --heuristic --device cpu
---threads 4 --torch-threads 2 --out E:/mtg-zero/s4a/realdecks/` per checkpoint (the GPU busy with the S4 races; the driver
-script `E:/mtg-zero-scratch/realdecks/backfill.sh` takes the GPU once it is free), run 1's final evaluation settings for
-every checkpoint (eval_sims 32, the cq move rule, eval_cache 8192, best_share 0.5's prior), our builder `best` (run 1's
-builder); nothing written under runs/eoe1. 0 games failed, 0 unfinished.
+--threads 4 --torch-threads 2 --out E:/mtg-zero/s4a/realdecks/` per checkpoint (the GPU busy with the S4 races and the sweep),
+run 1's final evaluation settings for every checkpoint (eval_sims 32, the cq move rule, eval_cache 8192, best_share 0.5's
+prior), our builder `best` (run 1's builder); nothing written under runs/eoe1. 0 games failed, 0 unfinished.
 
-| iteration | A: our deck | B: the players' own | A - B (se: games / pools) | 95% (games) | var_ratio | same | searched decisions |
-|---:|---|---|---|---|---|---:|---:|
-| 78 | 0.547 +- 0.044 | 0.539 +- 0.044 | **+0.008** +- 0.053 / 0.048 | [-0.095, +0.111] | 0.71 | 83 of 128 | 129,578 |
+| iteration | A: our deck | B: the players' own | A - B (se: games / pools) | 95% (games) | var_ratio | same | searched decisions | turns |
+|---:|---|---|---|---|---|---:|---:|---:|
+| 10 | 0.559 +- 0.044 | 0.488 +- 0.043 | **+0.070** +- 0.053 / 0.050 | [-0.033, +0.174] | 0.74 | 76 of 128 | 150,407 | 26.7 |
+| 78 | 0.547 +- 0.044 | 0.539 +- 0.044 | **+0.008** +- 0.053 / 0.048 | [-0.095, +0.111] | 0.71 | 83 of 128 | 129,578 | 24.0 |
 
-Iterations 10, 20, 40 and 60: still running on the CPU when this was written (iteration 78 took 6,807 s on the loaded
-desktop); each lands in `E:/mtg-zero/s4a/realdecks/eoe1-iter_00NN.json` and on the site's Progress page with the publisher's
-`--real-decks E:/mtg-zero/s4a/realdecks`.
+Iteration 10 took 9,713 s and 78 6,807 s on the loaded desktop's CPU. Iterations 20, 40 and 60 were still to come when this
+was written (40 running on the CPU; the rest the GPU's once free, the same command with `--device cuda`); each lands in
+`E:/mtg-zero/s4a/realdecks/eoe1-iter_00NN.json` and on the site's Progress page with the publisher's `--real-decks
+E:/mtg-zero/s4a/realdecks`. Read so far: the early network (iteration 10) does slightly better with our best guesses than
+with the players' builds (+7 points, not significant at 128 games); the final one plays both about equally well (+0.8) - the
+players' decks gained 5 points against the field while ours stayed (0.559 -> 0.547).
 
 **The heuristic's reading** (option C, the same games; it depends on no checkpoint): our best guess 0.656 +- 0.042, the
 players' decks 0.531 +- 0.044, **+0.125 +- 0.048** (var_ratio 0.63). The heuristic plays the builder's creature-heavy best
@@ -25165,4 +25168,15 @@ the license or with rates outside 0..1. Screenshots for approval (local preview,
   cq)**, `az`, `hidden` (28), the other games' build-only (3 of 3), the core build: passed; the core's pytest killed at the
   step's 3600 s timeout at 47% with two failures, `test_multi_remote.py`'s `test_selfplay_local_0_leaves_the_quota_to_the_hosts`
   and `test_cotrain_resolver_on_two_hosts` (threaded multi-host self-play, untouched here): **GATE FAILED optin-core
-  e336d5de242b in 6242s**. GATES_RERUN
+  e336d5de242b in 6242s**. Both again on f8e99e4 (the docs commit after it), one after the other, the core's pytest with
+  `--step-timeout 10800`: `python`: pytest **277 passed, 1 failed** (`tests/test_loop.py::test_supervisor_with_fake_run`, a
+  state poll with a deadline; passes alone in 1 s; test_mac_remote passed this time), the run-loop smoke not run (run by
+  hand: `python -m mtgz.az.run --run <scratch> --preset mtg-smoke --iters 1`, iterations 0 and 1, 16 games, 0 unfinished):
+  **GATE FAILED python f8e99e4f8c48 in 1991s**; `optin-core`: build, core cargo tests 147, **checkpoint_compat identical
+  again (2,465 samples, visits and cq)**, `az` 48, `hidden` 28, build-only 3 of 3, core build passed; core pytest **437
+  passed, 8 failed** in 6,150 s - all remote self-play, worker and pause-mid-phase timing tests (`test_remoteplay.py` x 3,
+  `test_infoset_merge.py` x 2, `test_belief.py`, `test_encoding_guard.py`, `test_shard_thread.py`), none near this change
+  (remote *evaluation*, package settings, an extra evaluation's cadence), the two of the first run passing this time, and all
+  nine (with the parametrised case) passing alone in 129 s: **GATE FAILED optin-core f8e99e4f8c48 in 8707s**. Every
+  failure is a different timing test per run and passes alone: the load, as 105.7 saw. A run of both tiers on a quieter
+  desktop is the maintainer's before merging.
