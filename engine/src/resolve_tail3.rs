@@ -50,11 +50,11 @@ impl Game {
         let Some(pos) = self.item_index(id) else { return };
         let crate::game::StackKind::Spell { card } = self.stack[pos].kind else { return };
         let p = self.stack[pos].controller;
-        // The k-th copy of a definition in hand (canonical order) not yet
-        // spliced.
+        // The k-th copy of a definition in hand (the order hand slots take
+        // their cards in, ENGINE.md 128) not yet spliced.
         let copy_of = |g: &Game, d: crate::ids::DefId| {
             let k = g.stack[pos].spliced.iter().filter(|&&x| x == d).count();
-            g.hand_sorted_in(p).iter().copied().filter(|&c| g.objs[c.i()].def == d).nth(k)
+            g.hand_slot_order_in(p).iter().copied().filter(|&c| g.objs[c.i()].def == d).nth(k)
         };
         match self.answer.take() {
             Some(Choice::Card(c)) => {
