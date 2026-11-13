@@ -250,7 +250,7 @@ def test_the_selftest_guards_the_network(tmp_path):
             assert st['max_abs'] < 2e-5
             end = w.wait_for('end', 1200)
             assert w.finish() == 0 and end['reason'] == 'done' and end['stats']['selftest_max_abs'] == st['max_abs']
-            assert [e for e in w.events if e['ev'] == 'records']    # (a served self-play job's default: ENGINE.md 114.6)
+            assert [e for e in w.events if e['ev'] == 'records']    # (a served self-play job's default: ENGINE.md 114.7)
             assert w.events.index(st) < w.events.index(next(e for e in w.events if e['ev'] == 'fin'))
         else:
             assert st['items']['priors'] > 2e-5 and abs(st['max_abs'] - 1e-3) < 1e-4

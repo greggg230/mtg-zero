@@ -2,6 +2,7 @@
 
     python tools/farm_build.py --profile release|fuzz [--runtime-id BUILD_ID] [--publish] [--url URL]
     python tools/farm_build.py --runtime [--ort-dll PATH] [--msvc-dir DIR] [--publish] [--url URL]
+    python tools/farm_build.py --runtime --pack winml [--winml-version V | --winml-nupkg F] [--publish] [--url URL]
 
 Worker builds (`--profile`): the tree must be clean (tracked files, and the zero-core submodule at its
 pin with no changes) - a build names its exact commits. `mtgz-worker` is built at HEAD with that cargo
@@ -21,6 +22,15 @@ package's of this Python) and the MSVC runtime it imports, app-local (`--msvc-di
 with), plus `runtime.json` (each file's version, signer and sha256); loaded through a release build's
 `info --runtime-dir` (every DLL from the pack) before it is signed (`--kind runtime`).
 
+The GPU runtime pack (`--runtime --pack winml`; zero-farm PROTOCOL.md 8, DESIGN.md 8.5): Windows ML's
+redistributable files from the NuGet package Microsoft.Windows.AI.MachineLearning (`--winml-version`, default
+WINML_VERSION, fetched from nuget.org, or a local `--winml-nupkg`): its ONNX Runtime (CPU and DirectML built in;
+static C runtime), DirectML.dll and Microsoft.Windows.AI.MachineLearning.dll (the flat C API of Windows ML's
+execution-provider catalog, which on Windows 11 24H2+ brings the GPU vendors' providers: TensorRT-RTX, AMD GPU,
+OpenVINO). Every file Microsoft-signed; none imports the MSVC runtime. Windows 10 1903+ runs its CPU and
+DirectML providers. Checked through a release build (`info`: every DLL from the pack; `probe-providers --providers
+cpu` on this PC: the CPU passes its self-test) before it is signed.
+
 Prints the build_id (last line: `build_id <id>`). The release key: `--key` (default
 ~/.config/zero-farm/release.key, DPAPI: this Windows user); the admin token: the file
 ~/.config/zero-farm/admin_token (`--token-file`), read into ZEROFARM_ADMIN_TOKEN for farm-release, never
@@ -39,9 +49,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOME = os.path.expanduser('~')
 MIN_AGENT = '0.1.3'
 MSVC = ('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'msvcp140_1.dll')
+# Windows ML (zero-farm PROTOCOL.md 8): the NuGet package and its runtime files
+WINML_PACKAGE = 'microsoft.windows.ai.machinelearning'
+WINML_VERSION = '2.5.96'
+WINML_FILES = ('onnxruntime.dll', 'DirectML.dll', 'Microsoft.Windows.AI.MachineLearning.dll')
 # what a statically linked worker may import: Windows itself
 SYSTEM_DLLS = ('kernel32.dll', 'ntdll.dll', 'advapi32.dll', 'psapi.dll', 'bcryptprimitives.dll', 'user32.dll', 'ws2_32.dll',
-               'userenv.dll', 'shell32.dll', 'ole32.dll', 'bcrypt.dll', 'secur32.dll', 'crypt32.dll', 'dbghelp.dll')
+               'userenv.dll', 'shell32.dll', 'ole32.dll', 'bcrypt.dll', 'secur32.dll', 'crypt32.dll', 'dbghelp.dll',
+               'dxgi.dll')  # dxgi: the worker lists the PC's graphics adapters by LUID (zero-farm PROTOCOL.md 8)
 
 
 def die(msg):
@@ -246,12 +261,87 @@ def build_runtime(a):
     return bid, d
 
 
+def build_winml(a):
+    """The Windows ML runtime pack (module docs) -> (build_id, directory)."""
+    import io
+    import urllib.request
+    import zipfile
+    version = a.winml_version or WINML_VERSION
+    if a.winml_nupkg:
+        with open(a.winml_nupkg, 'rb') as f:
+            nupkg = f.read()
+        source = os.path.basename(a.winml_nupkg)
+    else:
+        url = f'https://api.nuget.org/v3-flatcontainer/{WINML_PACKAGE}/{version}/{WINML_PACKAGE}.{version}.nupkg'
+        print(f'fetching {url}', flush=True)
+        with urllib.request.urlopen(url, timeout=600) as r:
+            nupkg = r.read()
+        source = url
+    tdir = target_dir()
+    with zipfile.ZipFile(io.BytesIO(nupkg)) as z:
+        nuspec = next(n for n in z.namelist() if n.endswith('.nuspec'))
+        spec = z.read(nuspec).decode('utf-8', 'replace')
+        if not a.winml_nupkg and f'<version>{version}</version>' not in spec:
+            die(f'{nuspec} is not version {version}')
+        if a.winml_nupkg:
+            version = spec.split('<version>', 1)[1].split('<', 1)[0]
+        readme = z.read('README.md').decode('utf-8', 'replace') if 'README.md' in z.namelist() else ''
+        # "This package includes **ONNX Runtime 1.28.3**."
+        ort_version = readme.split('ONNX Runtime ', 1)[1].split('*', 1)[0].strip(' .') if 'includes **ONNX Runtime ' in readme else None
+        pack = f'winml-{version}-ort-{ort_version or "unknown"}'
+        d = os.path.join(a.out or os.path.join(tdir, 'dist'), pack)
+        if os.path.exists(d):
+            shutil.rmtree(d)
+        os.makedirs(d)
+        for n in WINML_FILES:
+            with open(os.path.join(d, n), 'wb') as f:
+                f.write(z.read(f'runtimes/win-x64/native/{n}'))
+    desc = {}
+    for n in WINML_FILES:
+        src = os.path.join(d, n)
+        st, subj = sig_of(src)
+        if st != 'Valid' or 'O=Microsoft Corporation' not in subj:
+            die(f'{n}: signature {st} by {subj!r}: Windows ML\'s files must be Microsoft-signed')
+        bad = [m for m in pe_imports(src) if m in MSVC]
+        if bad:
+            die(f'{n} imports {bad}: the pack carries no MSVC runtime')
+        with open(src, 'rb') as f:
+            data = f.read()
+        desc[n] = {'version': file_version(src), 'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data), 'signature': st, 'signer': subj}
+    rj = {'runtime': pack, 'onnxruntime': ort_version or desc['onnxruntime.dll']['version'], 'provider': 'cpu+dml+winml',
+          'providers': ['cpu', 'dml', 'tensorrt_rtx', 'amdgpu', 'migraphx', 'openvino'],
+          'winml': {'package': WINML_PACKAGE, 'version': version, 'source': source, 'sha256': hashlib.sha256(nupkg).hexdigest()},
+          'files': desc}
+    worker = a.check_worker or cargo_build('release')
+    info = json.loads(subprocess.run([worker, 'info', '--runtime-dir', d], capture_output=True, text=True, check=True).stdout)
+    ort = info['onnxruntime']
+    loaded = {n: p for n, p in ort.get('modules', {}).items() if p}
+    if 'error' in ort or any(os.path.normcase(os.path.dirname(loaded.get(n) or '')) != os.path.normcase(os.path.abspath(d)) for n in ('onnxruntime.dll', 'DirectML.dll')):
+        die(f'the pack did not load from itself: {ort}')
+    if 'DmlExecutionProvider' not in ort.get('available', []):
+        die(f'the pack\'s ONNX Runtime has no DirectML provider: {ort.get("available")}')
+    pr = subprocess.run([worker, 'probe-providers', '--runtime-dir', d, '--providers', 'cpu', '--reps', '0'], capture_output=True, text=True)
+    probe = json.loads(pr.stdout) if pr.returncode == 0 and pr.stdout.strip().startswith('{') else None
+    if not probe or probe.get('providers') != ['cpu']:
+        die(f'probe-providers --providers cpu through the pack: {pr.stdout[-500:]} {pr.stderr[-500:]}')
+    rj['ort_build_info'] = ort['version']
+    rj['check'] = {'available': ort.get('available'), 'cpu_selftest_max_abs': next(r['selftest']['max_abs'] for r in probe['results'] if r['provider'] == 'cpu')}
+    with open(os.path.join(d, 'runtime.json'), 'w', encoding='utf-8') as f:
+        json.dump(rj, f, indent=1)
+    print(f'runtime pack {pack}: ONNX Runtime {rj["onnxruntime"]} ({", ".join(ort.get("available", []))}), every DLL from the pack')
+    bid = sign_publish(a, d, ['--kind', 'runtime', '--version', pack, '--min-agent', a.min_agent])
+    return bid, d
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument('--profile', choices=('release', 'fuzz'))
     g.add_argument('--runtime', action='store_true', help='the runtime pack (ONNX Runtime + its MSVC runtime)')
     ap.add_argument('--runtime-id', help='release builds: the runtime pack build_id they load ONNX Runtime from')
+    ap.add_argument('--pack', choices=('cpu', 'winml'), default='cpu', help='--runtime: the CPU pack (default) or the Windows ML GPU pack')
+    ap.add_argument('--winml-version', help=f'--pack winml: the Microsoft.Windows.AI.MachineLearning version (default {WINML_VERSION})')
+    ap.add_argument('--winml-nupkg', help='--pack winml: a local .nupkg instead of nuget.org')
     ap.add_argument('--ort-dll')
     ap.add_argument('--msvc-dir')
     ap.add_argument('--check-worker', help='--runtime: the worker that loads the pack as a check (default: the release farm build, built if needed)')
@@ -263,7 +353,7 @@ def main():
     ap.add_argument('--token-file', default=os.path.join(HOME, '.config', 'zero-farm', 'admin_token'))
     ap.add_argument('--farm-release', default='E:/cargo-target/zero-farm/main/release/farm-release.exe')
     a = ap.parse_args()
-    bid, d = build_runtime(a) if a.runtime else build_worker(a)
+    bid, d = (build_winml(a) if a.pack == 'winml' else build_runtime(a)) if a.runtime else build_worker(a)
     print(f'build directory {d}')
     if a.publish:
         print(farm_release(a, 'publish', d, '--url', a.url, token=True))

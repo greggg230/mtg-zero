@@ -1054,7 +1054,7 @@ impl SearchGame for MtgAz {
     }
 
     /// Each seat's deck as the match holds it (sorted card ids; the chosen one after a deck choice): what a game
-    /// record carries and its replay compares (zero-core docs/search.md 2.17, ENGINE.md 114.6) - a sealed deck is
+    /// record carries and its replay compares (zero-core docs/search.md 2.17, ENGINE.md 114.7) - a sealed deck is
     /// built from the seed by a builder that calls the platform's libm, so a record of a deck another machine
     /// built differently is refused, never trained on.
     fn record_setup(&self) -> String {

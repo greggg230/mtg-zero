@@ -26355,7 +26355,30 @@ checkout, the venv with onnx / onnxruntime):
 "C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07
 ```
 
-### 114.6 Game records: a worker's self-play as what replays it (zero-farm phase 3, 2026-11-12)
+### 114.6 GPU inference: the Windows ML runtime pack, a zero-core pin with the session factory (zero-farm phase 4, 2026-11-12)
+
+**Why.** zero-farm PROTOCOL.md rev 7 section 8: friends' GPUs of every vendor, through one session factory in
+zero-core's worker (`zero_worker::session::create_session`: providers in the job line's order, each accepted only
+through the self-test) and runtime packs that carry the providers.
+
+**What.**
+
+* The zero-core pin moves to its `gpu` branch (1ed81c0, on `farm` b655e91): the session factory and `mtgz-worker
+  probe-providers`; the exporter's graphs that DirectML and TensorRT run with the same answers (zero-core docs/az.md
+  41.1: densify without a scatter-add, `portable()`); a checkpoint exported here is bit for bit the old export's on the
+  CPU (eoe1 iter 80: 137 of 137 pieces, 7,713 rows identical) and gate 1 passes again (eoe1 packed / mask, Delver).
+* `tools/farm_build.py --runtime --pack winml`: the GPU runtime pack - Windows ML's ONNX Runtime 1.28.3 (CPU and
+  DirectML built in), DirectML.dll and Microsoft.Windows.AI.MachineLearning.dll (the provider catalog's C API) from the
+  NuGet package Microsoft.Windows.AI.MachineLearning 2.5.96, each Microsoft-signed, checked through a release build
+  (`info`, `probe-providers --providers cpu`). A release worker build for it names it with `--runtime-id`.
+
+**Off by default.** A run uses the GPU pack only when its definition names it as its `runtime`; the CPU pack and the
+builds that require it are unchanged.
+
+**Tests and checks.** zero-farm-notes phase4-gpu.md (the per-provider gate, CPU fallback nodes and speeds, measured on
+the desktop's RTX 5090 and the Windows 10 canary's RTX 4070 Ti).
+
+### 114.7 Game records: a worker's self-play as what replays it (zero-farm phase 3, 2026-11-12)
 
 **Why.** zero-farm phase 3 (zero-farm DESIGN.md 6.1, 7): friends' PCs upload each self-play game as its record - the
 game's seed, every real move and only the search's outputs - and the trainer's pool remote replays it into the rows
@@ -26381,7 +26404,7 @@ bit for bit, every game's decks compared; a served job writes records only; a ta
 | eoe1 (iter 80's config; shard_rows 2048) | eoe1 iter 80, then a checkpoint switch to gen 81 after 8 games | 48 | 5,471 (all with auxiliary targets; nets 80: 2,032, 81: 3,439) | 39 of 39 identical in 3 files | **PASSED**; 48 games' decks compared; records 97.5 KB vs shards 1.17 MB |
 | the best-of-three stand-in (r3-deep128x8-2410's config + delver-mirror-bo3's overrides: constructed best-of-three with `"game_episodes": true`, the deck target and its tilt, value-only rows, resignation; shard_rows 4096) | r3-deep128x8-2410 iter 3198 widened onto the current layout (tools/fork_run.py), then a switch to gen 3199 after 3 matches | 12 matches (2-3 games each, 26 conceded games, every match's decks changed between games) | 2,730 (926 value-only, 2,636 with auxiliary targets; nets 3198: 1,549, 3199: 1,181) | 13 of 13 identical | **PASSED**; each game's decks compared; records 36 KB vs shards 756 KB |
 
-### 114.7 Merge of main 64c86cc2: the fuzz loops ported again, the Delver best-of-three in the worker (2026-11-12)
+### 114.8 Merge of main 64c86cc2: the fuzz loops ported again, the Delver best-of-three in the worker (2026-11-12)
 
 **What.** main 64c86cc2 (constructed best-of-three integrated: 120, 121, 122, 129; zero-core pin 2aab098, chained episodes)
 merged into `farm` (4c02f8a6); zero-core `farm` merged 2aab098 too (c14d634: traced chained contests, records with

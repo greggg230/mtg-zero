@@ -1,4 +1,4 @@
-"""zero-farm's self-play gates on a run's exact settings, in one command (docs/ENGINE.md 114.7; zero-core docs/az.md 44, 45):
+"""zero-farm's self-play gates on a run's exact settings, in one command (docs/ENGINE.md 114.8; zero-core docs/az.md 44, 45):
 
     python tools/farm_gates.py --config <run>/config.json --checkpoint <a checkpoint of the run (.pt)>
         [--worker <mtgz-worker.exe>] [--runtime-dir <runtime pack>] [--model <its zero-onnx/1 graph>]
