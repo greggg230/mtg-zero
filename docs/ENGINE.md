@@ -27685,7 +27685,9 @@ source and its event's objects).
 controller's permanents, from the top of the stack, in the frame's sorted hand, in exile or face-down exile, among the
 phased-out; none in a graveyard - unordered -, a library or the command zone); for a stale reference a **key**, its
 rank among the row's stale references in the order the encoder meets them (equal keys: the same gone object: two gone
-Memory Jars' links and delayed triggers pair exactly); the identity where the viewer knows it.
+Memory Jars' links and delayed triggers pair exactly); the identity where the viewer knows it (ENGINE.md 156: a live
+reference's card where the viewer knows it, a card of another player's hand only if a reference tells it apart; a
+stale reference's last known identity, `Game::ref_lki`, never the card's identity now).
 
 **A triggered ability's event** (`tail_encode::ev`, 167 floats): "that player" (the frame's or the other), "that
 object" and the second object (references), the event's spell or ability (its place on the stack while it is there),
@@ -28701,14 +28703,16 @@ Three parts (393527c6). All three are in the functions listed here, for the Delv
    followed by `Game::determinize`). It moves knowledge bits among a hand's same-definition cards only. What
    anyone knows, a multiset per hand, is unchanged.
 3. **The slot order** (`decision.rs` `Game::hand_slot_order_in`, new). It is the canonical order, except that
-   within a definition a twin an ability names that the other player knows comes first. The definition's cards
+   within a definition a twin an ability names that the other player knows comes first (ENGINE.md 156: the cards the
+   other player knows first, a told-apart one first among those). The definition's cards
    keep their places as a run, so the slot ids are unchanged. These use it:
    * `hand_slots_in` and `hand_options_except` (decision.rs);
    * `promise_options` (cast.rs, delve);
    * splice's k-th copy (resolve_tail3.rs);
    * the hand mana sources' class members (pay.rs);
    * the own-hand choice of `EoeC::ExileFromOwnHandPlayable` (eoe_c.rs).
-   `named_by_an_ability` (hidden.rs) is now `pub(crate)`.
+   `named_by_an_ability` (hidden.rs) is now `pub(crate)` (ENGINE.md 156 replaces it with `Game::told_apart`: every
+   reference of the public state, not only an event's object).
 
 **Exactness.**
 
@@ -29467,7 +29471,7 @@ fuzz_random_matches`).
   `Priority` checked the state-based actions (CR 704.3) and its game ended (a player lost), while the other world still
   asks `ActivateMana`: the walks' new one-world-over assert. Options: ask the one-option `ActivateMana` [`PASS`] instead
   of returning (the engine's single-option rule then answers it with a `KEY_AUTO`, ENGINE.md 10), or emit a key there.
-* **F2. A v7 object reference to a card in a hidden zone reads the slot's knowledge** (default 9676, 19991; delver 4252,
+* **F2. A v7 object reference to a card in a hidden zone reads the slot's knowledge** (fixed: ENGINE.md 156) (default 9676, 19991; delver 4252,
   8292, 12064, 13030, 14002, 15338, 15865; cross 1503, 4086, 13181, match 843, post-sideboard match 879 - in the
   decider's own walk and the other viewer's, mostly at step 0, i.e. two fresh worlds, and in the matches' checks of a
   world against the real match). `tail_encode::Cx::write_ref` writes an object reference's identity digits, and the
@@ -29484,7 +29488,7 @@ fuzz_random_matches`).
   the reference itself showed - the identity it had when it was last public, kept with the reference or as last known
   information - never the slot's current card; or have the deals keep a referenced slot's card and its knowledge where
   the viewer knows it. Either makes the encoding a function of the information set.
-* **F3. The `links` segment's picks follow the slot's knowledge too** (cross 4799, 5450, 8706: `ChooseHandCard`, Show
+* **F3. The `links` segment's picks follow the slot's knowledge too** (fixed: ENGINE.md 156) (cross 4799, 5450, 8706: `ChooseHandCard`, Show
   and Tell's pick, ENGINE.md 123 and 129.3). `write_links` shows a pick in progress (`K_PICKED`) unless the picked card
   is hidden and the knower doesn't know it, and gives its code from `seen_def`. Two worlds of one information set then
   differ by a `K_PICKED` token (present in one, absent in the other: 4799 and 8706, both in the decider's own walk) or

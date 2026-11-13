@@ -166,6 +166,7 @@ pub fn fields() -> Vec<Field> {
         lki_attached: Derived "last known information (CR 608.2h)",
         lki_damage: Derived "last known information (CR 608.2h)",
         lki_toughness: Derived "last known information (CR 608.2h)",
+        ref_lki: Derived "last known identities of gone objects (CR 400.7, 608.2h): what a stale reference shows, through the references the encoding writes (ENGINE.md 156)",
         lki_power: Derived "last known information (CR 608.2h)",
         loyalty: Public "loyalty abilities activated this turn (CR 606.3)",
         pool_restr: Public "the part of a pool's mana with a spending restriction other than the Workshop's (CR 106.6; ENGINE.md 99.12)",

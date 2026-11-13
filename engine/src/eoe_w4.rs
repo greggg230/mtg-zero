@@ -327,10 +327,7 @@ impl Game {
                         if sorted.is_empty() {
                             return Flow::Next;
                         }
-                        let c = match self.forced_hand_pick(p, &sorted) {
-                            Some(c) => c,
-                            None => sorted[self.rng.below(sorted.len() as u32) as usize],
-                        };
+                        let c = self.random_hand_card(p, &sorted);
                         self.note(|g| format!("P{p} discards {} at random to pay", g.name(c)));
                         self.discard(c);
                         Flow::Jump(*if_paid)

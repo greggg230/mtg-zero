@@ -10,7 +10,7 @@
 //! and keep everything they do have that fits these two forms.
 
 use crate::game::Game;
-use crate::ids::{CardIdx, DefId, PlayerId, Zone};
+use crate::ids::{CardIdx, DefId, ObjRef, PlayerId, Zone};
 use crate::rng::Rng;
 use crate::svec::SVec;
 
@@ -36,6 +36,11 @@ pub const KEY_DIE: u64 = 6;
 /// and number of sideboard cards (`deck0 | deck1 << 8 | side0 << 16 | side1
 /// << 24`). Emitted by the match, not by a `Game`.
 pub const KEY_GAME: u64 = 7;
+/// A hand card a reference of the public state tells apart (`Game::told_apart`,
+/// ENGINE.md 156) left the hand or was revealed where a hand slot or a random
+/// pick could have named one of its twins instead in another world: every
+/// player sees that it was that card. Public. Payload: its card index.
+pub const KEY_TOLD: u64 = 8;
 /// Payload of a private key emitted while another player is the observer.
 pub const HIDDEN: u64 = 0xFFFF_FFFF;
 
@@ -232,12 +237,14 @@ impl Game {
     /// knowledge bits are normalised so the better-known come first in
     /// canonical order (by definition, then card), making the state, and
     /// what an encoding reads per hand slot, independent of which physical
-    /// card a sampled world dealt where. But a hand card a trigger, a stack
-    /// item or a delayed trigger names (its event's object: a card revealed
-    /// for miracle is played revealed until its ability resolves, CR
-    /// 702.94b) is told apart from its twins: it keeps its bits, or a world
-    /// `determinize` deals for another player could give that slot another
-    /// identity while the ability still acts on it (ENGINE.md 71.3).
+    /// card a sampled world dealt where. But a hand card a reference of the
+    /// public state names (`told_apart`: a card revealed for miracle is
+    /// played revealed until its ability resolves, CR 702.94b; an ability's
+    /// source revealed by its activation, 602.2a, 701.20a; ENGINE.md 156) is
+    /// told apart from its twins: it keeps its bits, or a world `determinize`
+    /// deals for another player could give that slot another identity while
+    /// the ability still acts on it (ENGINE.md 71.3), and the reference would
+    /// show what one world's viewer knows of it and not another's.
     pub(crate) fn canon_hand_knowledge(&mut self) {
         for p in 0..2u8 {
             if self.players[p as usize].hand.len() < 2 {
@@ -252,7 +259,7 @@ impl Game {
                     j += 1;
                 }
                 if j - i > 1 {
-                    let twins: SVec<CardIdx, 16> = h[i..j].iter().copied().filter(|&c| !self.named_by_an_ability(c)).collect();
+                    let twins: SVec<CardIdx, 16> = h[i..j].iter().copied().filter(|&c| !self.told_apart(c)).collect();
                     let mut bits: SVec<u8, 16> = twins.iter().map(|c| self.objs[c.i()].known).collect();
                     bits.sort_unstable_by(|a, b| b.cmp(a));
                     for (k, &c) in twins.iter().enumerate() {
@@ -264,12 +271,122 @@ impl Game {
         }
     }
 
-    /// Does a waiting trigger, a stack item or a delayed trigger name card
-    /// `c` as its event's object (`canon_hand_knowledge`,
-    /// `Game::hand_slot_order_in`)?
-    pub(crate) fn named_by_an_ability(&self, c: CardIdx) -> bool {
-        let names = |ev: &crate::triggers::EvCtx| [ev.obj, ev.obj2].into_iter().flatten().any(|r| r.idx == c && self.live(r));
-        self.waiting.iter().any(|w| names(&w.ev)) || self.stack.iter().any(|s| names(&s.ev)) || self.delayed.iter().any(|d| names(&d.ev))
+    /// Every object reference the public state holds (ENGINE.md 156), the
+    /// ones layout v7's encoding writes as references or reads an identity
+    /// through: the waiting triggers' sources and event objects, each stack
+    /// item's (an ability's source, its event's objects, its targets, its
+    /// noted objects, a ninjutsu creature's planeswalker), the delayed
+    /// triggers' sources and event objects, the temporary triggers' sources
+    /// and objects, `links` (both ends) and the marks (the marked object and
+    /// the objects a mark names). Live or stale (`f` sees each as it is).
+    /// A new holder of references the encoding reads must be listed here:
+    /// `tail_encode::Cx::ref_def` refuses a live reference to a hand card
+    /// that no listed reference tells apart (`told_apart`).
+    pub(crate) fn for_each_public_ref(&self, mut f: impl FnMut(ObjRef) -> bool) -> bool {
+        let ev = |e: &crate::triggers::EvCtx, f: &mut dyn FnMut(ObjRef) -> bool| e.obj.is_some_and(&mut *f) || e.obj2.is_some_and(&mut *f);
+        for w in &self.waiting {
+            if f(w.source) || ev(&w.ev, &mut f) {
+                return true;
+            }
+        }
+        for s in &self.stack {
+            if let crate::game::StackKind::Ability { source, .. } = s.kind {
+                if f(source) {
+                    return true;
+                }
+            }
+            if ev(&s.ev, &mut f) || s.noted.iter().any(|&r| f(r)) || matches!(s.attack_as, Some(Some(pw)) if f(pw)) {
+                return true;
+            }
+            if s.targets.iter().any(|&(_, t)| matches!(t, crate::ids::Target::Obj(r) if f(r))) {
+                return true;
+            }
+        }
+        for d in &self.delayed {
+            if f(d.source) || ev(&d.ev, &mut f) {
+                return true;
+            }
+        }
+        for t in &self.temp_triggers {
+            if f(t.source) || t.obj.is_some_and(&mut f) {
+                return true;
+            }
+        }
+        for l in &self.links {
+            if f(l.source) || f(l.card) {
+                return true;
+            }
+        }
+        for &(o, m) in &self.marks {
+            let named = match m {
+                crate::game::Mark::Reanimated(x) | crate::game::Mark::ExiledToPay(x) => Some(x),
+                crate::game::Mark::Triggered { src, .. } => Some(src),
+                crate::game::Mark::AltGranted { granter, .. } => Some(granter),
+                _ => None,
+            };
+            if f(o) || named.is_some_and(&mut f) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Is hand card `c` told apart from its twins (ENGINE.md 128, 156): does
+    /// a reference of the public state (`for_each_public_ref`) name it, live?
+    /// A card an ability's activation revealed in the hand stays revealed
+    /// while the ability is on the stack (CR 602.2a, 701.20a: cycling's
+    /// source while its costs are paid, ninjutsu's card, 702.49b), a card
+    /// revealed for miracle until its ability leaves the stack (702.94b), a
+    /// card promised to a delve is revealed (ENGINE.md 100.4.9): the
+    /// reference follows that one object, so which twin it is, and what each
+    /// player knows of it, is not interchangeable with its twins'
+    /// (`canon_hand_knowledge`, `knowledge_leaves`, `Game::hand_slot_order_in`
+    /// leave it alone). A stale reference names an object that is gone (CR
+    /// 400.7): the card that is now in the hand is a new object, as
+    /// interchangeable as any.
+    pub(crate) fn told_apart(&self, c: CardIdx) -> bool {
+        let o = &self.objs[c.i()];
+        o.zone == Zone::Hand && self.for_each_public_ref(|r| r.idx == c && r.inc == o.inc)
+    }
+
+    /// Key that told-apart hand card `c` is the one a hand slot (`random`:
+    /// a random pick) names as it leaves the hand or is revealed (`KEY_TOLD`,
+    /// ENGINE.md 156). A slot names a definition's cards the other player
+    /// knows first, a told-apart one first among those (`hand_slot_order_in`),
+    /// so a known one is the same card in every world of the other player's:
+    /// no key needed. One it doesn't know may be this card in one world and
+    /// a twin in another, as may any card a random pick takes; every player
+    /// sees which it was (the reference follows it), and the key keeps those
+    /// worlds apart.
+    pub(crate) fn key_told(&mut self, c: CardIdx, random: bool) {
+        let o = &self.objs[c.i()];
+        if o.zone == Zone::Hand && (random || o.known & (1 << crate::ids::opp(o.owner)) == 0) && self.told_apart(c) {
+            let owner = o.owner;
+            self.emit_public(KEY_TOLD, owner, c.get() as u64);
+        }
+    }
+
+    /// The last known identity `viewer` has of the gone object `r` (a stale
+    /// reference; CR 400.7, 608.2h): what it was as it left its zone, if
+    /// `viewer` knew that then (`Game::ref_lki`; ENGINE.md 156).
+    pub(crate) fn lki_identity(&self, viewer: PlayerId, r: ObjRef) -> Option<DefId> {
+        self.ref_lki.iter().rev().find(|x| x.0 == r).filter(|x| x.2 >> viewer & 1 != 0).map(|x| x.1)
+    }
+
+    /// At a turn's start: the departures no reference of the public state
+    /// names any more are forgotten (`Game::ref_lki`).
+    pub(crate) fn prune_ref_lki(&mut self) {
+        if self.ref_lki.is_empty() {
+            return;
+        }
+        let mut named: Vec<ObjRef> = Vec::new();
+        self.for_each_public_ref(|r| {
+            if !self.live(r) {
+                named.push(r);
+            }
+            false
+        });
+        self.ref_lki.retain(|x| named.contains(&x.0));
     }
 
     /// The queued outcome of a coin flip by `p` (`force_chance`), if the
@@ -282,6 +399,19 @@ impl Game {
     pub(crate) fn forced_hand_pick(&self, p: PlayerId, hand: &[CardIdx]) -> Option<CardIdx> {
         let d = self.forced_def(KEY_REVEAL, p)?;
         hand.iter().copied().find(|&c| self.objs[c.i()].def == d)
+    }
+
+    /// A card of `p`'s hand at random (CR 701.9b; `hand` in canonical
+    /// order): the card the next queued reveal names if the hand holds one
+    /// (`forced_hand_pick`), else a uniform draw. A told-apart card is keyed
+    /// (`key_told`: in another world the draw may take one of its twins).
+    pub(crate) fn random_hand_card(&mut self, p: PlayerId, hand: &[CardIdx]) -> CardIdx {
+        let c = match self.forced_hand_pick(p, hand) {
+            Some(c) => c,
+            None => hand[self.rng.below(hand.len() as u32) as usize],
+        };
+        self.key_told(c, true);
+        c
     }
 
     /// Does `viewer` know the identity of this card exactly?
@@ -389,6 +519,9 @@ impl Game {
             return;
         }
         let (owner, def, all_knew) = (o.owner, self.ident(idx), o.known == 0b11);
+        // (A told-apart hand card the other player didn't know: which twin a
+        // slot named, ENGINE.md 156.)
+        self.key_told(idx, false);
         if !all_knew {
             for q in 0..2 {
                 self.learn(q, idx);
@@ -403,8 +536,11 @@ impl Game {
     /// held it loses one `d`; if it left the hand, where cards are not told
     /// apart, another card of the hand known to be a `d` may have been the
     /// one, so that exact knowledge becomes "a `d` was there" (the cloud's
-    /// entry stays, or the card is no longer known).
-    pub(crate) fn knowledge_leaves(&mut self, c: CardIdx, owner: PlayerId, from: Zone, d: DefId, known_before: u8) {
+    /// entry stays, or the card is no longer known). Unless a reference told
+    /// the leaving card apart (`told`, `Game::told_apart` before it moved:
+    /// every player saw which card it was), or the known twin is told apart
+    /// (it is still there): ENGINE.md 156.
+    pub(crate) fn knowledge_leaves(&mut self, c: CardIdx, owner: PlayerId, from: Zone, d: DefId, known_before: u8, told: bool) {
         for q in 0..2u8 {
             if q == owner || known_before & (1 << q) != 0 {
                 for k in self.clouds.iter_mut().filter(|k| k.viewer == q) {
@@ -412,13 +548,13 @@ impl Game {
                 }
                 continue;
             }
-            let twin = (from == Zone::Hand)
+            let twin = (from == Zone::Hand && !told)
                 .then(|| {
                     self.players[owner as usize]
                         .hand
                         .iter()
                         .copied()
-                        .find(|&x| self.objs[x.i()].def == d && self.objs[x.i()].known & (1 << q) != 0)
+                        .find(|&x| self.objs[x.i()].def == d && self.objs[x.i()].known & (1 << q) != 0 && !self.told_apart(x))
                 })
                 .flatten();
             for k in self.clouds.iter_mut().filter(|k| k.viewer == q) {
@@ -683,6 +819,16 @@ impl Game {
         // ENGINE.md 128). Knowledge bits move among same-definition hand
         // cards only: what anyone knows (a multiset per hand) is unchanged.
         self.canon_hand_knowledge();
+        // A gone object's identity the viewer didn't know (another player
+        // may have: its stale references show it to that player, ENGINE.md
+        // 156) is its card's in this world: the same physical card, whose
+        // identity the deal may have changed. The ones the viewer knew stay.
+        for i in 0..self.ref_lki.len() {
+            let (r, _, known) = self.ref_lki[i];
+            if known >> viewer & 1 == 0 {
+                self.ref_lki[i].1 = self.ident(r.idx);
+            }
+        }
         self.rng = Rng::new(rng.next_u64());
         self.observer = Some(viewer);
         // The loop actions the viewer decided keep their records (loop
@@ -1141,5 +1287,101 @@ impl Game {
             debug_assert!(self.keys.is_empty(), "refreshing a decision revealed something");
             self.keys.clear();
         }
+    }
+}
+
+#[cfg(test)]
+mod told_apart_tests {
+    //! ENGINE.md 156: a hand card a reference of the public state tells apart (here: a card revealed
+    //! for miracle, its trigger on the stack naming it, CR 702.94b).
+    use super::*;
+    use crate::db::CardDb;
+    use crate::decision::{Choice, DecisionKind};
+    use crate::game::Step;
+    use crate::testkit::Scenario;
+
+    const FANATIC: &str = "Metamorphosis Fanatic";
+
+    /// P0 drew Metamorphosis Fanatic, its first draw, and revealed it for miracle (its trigger on the
+    /// stack names it); another Fanatic, which P1 doesn't know, sits at a lower card index in P0's
+    /// hand (128.6's setup). The game, the twin, the revealed card.
+    fn miracle() -> (Game, CardIdx, CardIdx) {
+        let mut g = Scenario::new(CardDb::constructed())
+            .spec(|s| s.auto_single = false)
+            .hand(0, &[FANATIC])
+            .library(0, &[FANATIC, "Island", "Island"])
+            .battlefield(0, &["Swamp", "Swamp"])
+            .library(1, &["Island"; 8])
+            .turn_number(3)
+            .at(Step::Upkeep, 0)
+            .start();
+        let twin = g.card(0, FANATIC, Zone::Hand);
+        g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+        g.choose(Choice::Yes);
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Priority) && !g.stack().is_empty());
+        let drawn = g.players[0].hand.iter().copied().find(|&c| c != twin && g.objs[c.i()].def == g.objs[twin.i()].def).expect("the drawn Fanatic");
+        assert!(twin.get() < drawn.get());
+        assert!(g.told_apart(drawn) && !g.told_apart(twin), "the trigger names the revealed card");
+        assert!(g.knows(1, drawn) && !g.knows(1, twin));
+        (g, twin, drawn)
+    }
+
+    fn told_keys(g: &Game, from: usize, c: CardIdx) -> usize {
+        g.keys[from..].iter().filter(|&&k| key_kind(k) == KEY_TOLD && key_payload(k) == c.get() as u64).count()
+    }
+
+    /// A random pick (CR 701.9b) that takes the told-apart card is keyed with it (`KEY_TOLD`): in
+    /// another world of P1's the same draw may take its twin, and every player sees which it was.
+    /// One that takes the twin is not.
+    #[test]
+    fn a_random_pick_of_a_told_apart_card_is_keyed() {
+        let (g, twin, drawn) = miracle();
+        let mut took = [0, 0];
+        for s in 0..64 {
+            let mut w = g.clone();
+            w.rng = Rng::new(s);
+            let from = w.keys.len();
+            let hand = w.hand_sorted(0);
+            let c = w.random_hand_card(0, &hand);
+            assert_eq!(told_keys(&w, from, drawn), (c == drawn) as usize, "seed {s}");
+            if c == drawn {
+                took[0] += 1;
+            } else if c == twin {
+                took[1] += 1;
+            }
+        }
+        assert!(took[0] > 0 && took[1] > 0, "both cards drawn: {took:?}");
+    }
+
+    /// A slot takes a told-apart card the other player knows first, the same card in every world of
+    /// that player's: its reveal or its leaving needs no key. One the other player doesn't know is
+    /// keyed (a slot may name a twin in another world).
+    #[test]
+    fn a_told_apart_card_the_other_player_doesnt_know_is_keyed_as_a_slot_takes_it() {
+        let (g, _, drawn) = miracle();
+        let fanatic = g.objs[drawn.i()].def;
+        let first = g.hand_slot_order_in(0).iter().copied().find(|&c| g.objs[c.i()].def == fanatic);
+        assert_eq!(first, Some(drawn), "the slot takes the known told-apart card first, not the twin below it");
+        let mut w = g.clone();
+        let from = w.keys.len();
+        w.key_told(drawn, false);
+        assert_eq!(told_keys(&w, from, drawn), 0, "P1 knows it: no key");
+        w.objs[drawn.i()].known &= !(1 << 1);
+        w.key_told(drawn, false);
+        assert_eq!(told_keys(&w, from, drawn), 1, "P1 doesn't know it: keyed");
+    }
+
+    /// An unknown twin leaving the hand (CR 701.9: a discard, keyed by its identity) takes no knowledge
+    /// off the told-apart card: P1 still knows the revealed Fanatic is there (`knowledge_leaves`;
+    /// before ENGINE.md 156 the twin rule cleared P1's knowledge of it, the "a Fanatic was there" of an
+    /// untold hand). And `canon_hand_knowledge` leaves its bits alone.
+    #[test]
+    fn a_twin_leaving_takes_no_knowledge_off_a_told_apart_card() {
+        let (mut g, twin, drawn) = miracle();
+        g.canon_hand_knowledge();
+        assert!(g.knows(1, drawn) && !g.knows(1, twin), "canon leaves a told-apart card's bits");
+        g.discard(twin);
+        assert_eq!(g.objs[twin.i()].zone, Zone::Graveyard);
+        assert!(g.knows(1, drawn), "P1 still knows the revealed card");
     }
 }
