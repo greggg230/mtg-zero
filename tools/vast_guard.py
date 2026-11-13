@@ -8,8 +8,10 @@ raise the deadline by rewriting the file). At the deadline it stops our processe
 run's supervisor and run, benchmarks, comparisons: TERM, then KILL) and asks Vast.ai to
 destroy this instance with the per-instance key the platform puts into the container
 (CONTAINER_API_KEY / CONTAINER_ID), falling back to stopping it (GPU billing ends, disk
-billing continues until the desktop destroys it). Without that key it can only stop our
-processes - the desktop's watchdog destroys the instance. guard.json records what it did.
+billing continues until the desktop destroys it), and asks again (30 s, 60 s, ... up to 5 min
+apart) until one of the two succeeds. Without that key it can only stop our processes -
+`python tools/vast.py status` then flags the box (past its deadline and still listed: exit 1),
+and `destroy` ends it. guard.json records what it did.
 """
 import json
 import os
@@ -110,12 +112,25 @@ def main():
                 iid = f.read().strip()
         except OSError:
             iid = None
-    res = {'ok': False, 'error': 'no instance id'}
-    if iid:
+    if not iid:
+        st['destroy'] = {'ok': False, 'error': 'no instance id'}
+    st['attempts'] = 0
+    # until one call succeeds: a 5xx or a timeout on both calls must not leave the box billing with nothing running
+    # (docs/ENGINE.md 143); a missing key or id cannot get better, so those end it
+    while iid:
+        st['attempts'] += 1
         res = api('DELETE', f'/instances/{iid}/')
         st['destroy'] = res
-        if not res.get('ok'):
-            st['stop'] = api('PUT', f'/instances/{iid}/', {'state': 'stopped'})
+        if res.get('ok'):
+            break
+        stop = api('PUT', f'/instances/{iid}/', {'state': 'stopped'})
+        st['stop'] = stop
+        if stop.get('ok') or not os.environ.get('CONTAINER_API_KEY'):
+            break
+        _write(d, st)
+        _log(d, f'attempt {st["attempts"]}: neither destroyed nor stopped ({res.get("error") or res.get("status")}; '
+                f'{stop.get("error") or stop.get("status")}): again')
+        time.sleep(min(300, 30 * st['attempts']))
     _write(d, st)
     _log(d, f'fired: {json.dumps(st)[:800]}')
 

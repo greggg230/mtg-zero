@@ -923,14 +923,35 @@ def post_progress(run, a, key, log=print):
         replays.post(a.url.rstrip('/') + '/api/progress/upload', wire_progress(p), key)
 
 
+def upload_saved(state, state_path, a, key, log):
+    """Upload the replays a pass recorded and saved but has not uploaded yet (the state's `to_upload`: iteration ->
+    [{path: the saved file, meta: its listing extras (seat_labels against --record-vs) or None}]), each one dropped
+    from the list once the site took it: an upload that fails half way is finished by the next pass, never recorded
+    again (the generation's games posted twice: docs/ENGINE.md 143)."""
+    import gzip
+    todo = state.get('to_upload') or {}
+    for it in sorted(todo, key=int):
+        for e in list(todo[it]):
+            with gzip.open(e['path'], 'rt', encoding='utf-8') as f:
+                rep = json.load(f)
+            log(f'  uploaded {replays.upload(rep, a.url, key, meta=e["meta"])}')
+            todo[it].remove(e)
+            if not todo[it]:
+                del todo[it]
+            state['to_upload'] = todo
+            _save_state(state, state_path)
+
+
 def one_pass(run, a, key, log=print, kick=None):
     """Record the newest checkpoint's games if they aren't yet. Without a progress thread
     (`kick`, its wake-up event) the progress is posted here, before and after."""
     if kick is None:
         post_progress(run, a, key, log)
-    ck = latest_checkpoint(run, a.every)
     state_path = os.path.join(a.state_dir or run, 'delverai.json')
     state = _json(state_path, {}) or {}
+    if state.get('to_upload') and not a.dry_run:
+        upload_saved(state, state_path, a, key, log)
+    ck = latest_checkpoint(run, a.every)
     done = state.get('replayed', [])
     if ck is None or ck[0] in done or (a.min_iter is not None and ck[0] < a.min_iter):
         # (the newest recorded generation's census when it has none: e.g. recorded before this publisher started)
@@ -949,17 +970,23 @@ def one_pass(run, a, key, log=print, kick=None):
                               title=f'Generation {it}', log=log, opp=a.record_vs)
     finally:
         RECORDING.clear()
+    if len(reps) != a.games:
+        raise RuntimeError(f'iteration {it}: {len(reps)} games recorded of {a.games}: not marked recorded')
     out = os.path.join(a.state_dir or run, 'replays')
+    saved = []
     for r in reps:
         meta = {'seat_labels': seat_labels(r, path, a, it)} if a.record_vs else None
-        replays.core.save(r, out)
+        saved.append({'path': replays.core.save(r, out), 'meta': meta})
         if a.dry_run:
             log(f'  (dry run) {dict(replays.summary(r), **(meta or {}))}')
-        else:
-            log(f'  uploaded {replays.upload(r, a.url, key, meta=meta)}')
+    # recorded and saved: the generation is never recorded again; its uploads follow (the rest next pass if one fails)
     state['replayed'] = sorted(set(done) | {it})
     state['record_s'] = (state.get('record_s') or [])[-9:] + [round(time.time() - t0, 1)]
+    if not a.dry_run:
+        state.setdefault('to_upload', {})[str(it)] = saved
     _save_state(state, state_path)
+    if not a.dry_run:
+        upload_saved(state, state_path, a, key, log)
     if kick:              # the progress record lists the recorded generations
         kick.set()
     census_pass(run, a, state, state_path, log, kick)       # (its matches are up first, then what it sideboards)
@@ -1048,6 +1075,9 @@ def main(argv=None):
     while True:
         current_run(a, log)
         if not os.path.exists(os.path.join(a.run, 'config.json')):    # not launched yet (--loop)
+            if a.loop is None:
+                # (one pass: nothing to wait for - it reached time.sleep(None) before: docs/ENGINE.md 143)
+                raise SystemExit(f'{a.run}: no config.json (the run has not started)')
             if not waiting:
                 log(f'waiting for {a.run} to start')
             waiting = True

@@ -307,3 +307,83 @@ def test_the_keep_your_60_yardstick_is_read_from_its_files(tmp_path):
     assert not any('E:' in json.dumps(r) for r in rows)                     # no paths for the public site
     assert [r['iter'] for r in P.keep_yardstick(d, 'other')] == [60]
     assert P.keep_yardstick(None) == [] and P.keep_yardstick(str(tmp_path / 'none')) == []
+
+
+def _pass_run(tmp_path, monkeypatch, games=3):
+    """A run with a settled checkpoint 7, replays.record / save / upload stubbed (upload failing on demand)."""
+    import gzip
+    import types
+    run = str(tmp_path / 'run')
+    os.makedirs(os.path.join(run, 'models'))
+    _write(os.path.join(run, 'config.json'), {'preset': 'delver-mirror-bo3'})
+    ck = os.path.join(run, 'models', 'iter_0007.pt')
+    with open(ck, 'wb') as f:
+        f.write(b'x')
+    os.utime(ck, (1, 1))
+    st = types.SimpleNamespace(recorded=0, uploaded=[], fail_at=None, games=games)
+
+    def record(path, games, **kw):
+        st.recorded += 1
+        return [{'game_index': k, 'created': 1_700_000_000 + k} for k in range(st.games)]
+
+    def save(rep, out):
+        os.makedirs(out, exist_ok=True)
+        p = os.path.join(out, f'g{rep["game_index"]}.json.gz')
+        with gzip.open(p, 'wt', encoding='utf-8') as f:
+            json.dump(rep, f)
+        return p
+
+    def upload(rep, url, key, meta=None):
+        if st.fail_at is not None and len(st.uploaded) == st.fail_at:
+            raise OSError('HTTP 502')
+        st.uploaded.append(rep['game_index'])
+        return {'ok': True}
+    monkeypatch.setattr(P.replays, 'record', record)
+    monkeypatch.setattr(P.replays.core, 'save', save)
+    monkeypatch.setattr(P.replays, 'upload', upload)
+    monkeypatch.setattr(P, 'post_progress', lambda *a, **k: None)
+    a = types.SimpleNamespace(every=1, min_iter=None, games=3, sims=None, device='cpu', dry_run=False, url='http://x',
+                              state_dir=None, record_vs=None, census=0)
+    return run, a, st
+
+
+def test_an_upload_that_fails_half_way_is_finished_not_recorded_again(tmp_path, monkeypatch):
+    """I11 (docs/ENGINE.md 143): an upload that failed after some games were posted left the generation unmarked,
+    so the next pass recorded (and posted) the whole generation again."""
+    run, a, st = _pass_run(tmp_path, monkeypatch)
+    st.fail_at = 1
+    try:
+        P.one_pass(run, a, 'k', log=lambda m: None)
+        raise AssertionError('the upload should have failed')
+    except OSError:
+        pass
+    state = json.load(open(os.path.join(run, 'delverai.json')))
+    assert state['replayed'] == [7] and len(state['to_upload']['7']) == 2 and st.uploaded == [0]
+    st.fail_at = None
+    assert P.one_pass(run, a, 'k', log=lambda m: None) is False          # nothing new to record ...
+    assert st.recorded == 1 and st.uploaded == [0, 1, 2]                # ... and the rest uploaded once
+    assert 'to_upload' not in json.load(open(os.path.join(run, 'delverai.json'))) or \
+        not json.load(open(os.path.join(run, 'delverai.json')))['to_upload']
+
+
+def test_fewer_games_than_asked_are_not_marked_recorded(tmp_path, monkeypatch):
+    run, a, st = _pass_run(tmp_path, monkeypatch, games=2)
+    try:
+        P.one_pass(run, a, 'k', log=lambda m: None)
+        raise AssertionError('should refuse')
+    except RuntimeError as e:
+        assert '2 games recorded of 3' in str(e)
+    assert not os.path.exists(os.path.join(run, 'delverai.json'))
+
+
+def test_one_pass_without_a_started_run_says_so(tmp_path, monkeypatch):
+    """I11: without --loop, a run directory with no config.json reached time.sleep(None)."""
+    import psutil
+    monkeypatch.setattr(psutil, 'Process', lambda *a: type('P', (), {'nice': lambda self, v: None})())
+    run = tmp_path / 'notyet'
+    run.mkdir()
+    try:
+        P.main([str(run), '--dry-run', '--device', 'cuda'])          # (cuda: no torch thread setting in pytest)
+        raise AssertionError('should refuse')
+    except SystemExit as e:
+        assert 'no config.json' in str(e)

@@ -73,6 +73,7 @@ functions below; docs/blunders.md has a summary.
 """
 import argparse
 import collections
+import glob
 import gzip
 import hashlib
 import json
@@ -967,13 +968,18 @@ def engine_info(path):
             h = hashlib.sha256(f.read()).hexdigest()[:16]
     commit = git('rev-parse', 'HEAD')
     digest = None
-    gate = os.path.join(path, 'gates', f'{(commit or "")[:12]}.json')
-    if commit and os.path.exists(gate):
+    # the commit's gate reports: gates/<sha12>-<tier>.json (one per tier, docs/ENGINE.md 143), or the older
+    # gates/<sha12>.json; the first, by tier name, whose report has the full digest
+    reports = sorted(glob.glob(os.path.join(path, 'gates', f'{(commit or "")[:12]}-*.json'))) + \
+        [os.path.join(path, 'gates', f'{(commit or "")[:12]}.json')]
+    for gate in reports if commit else []:
         try:
             with open(gate, encoding='utf-8') as f:
                 digest = (json.load(f).get('digests') or {}).get('full')
         except (OSError, ValueError):
             digest = None
+        if digest:
+            break
     return {'checkout': path, 'commit': commit, 'branch': git('rev-parse', '--abbrev-ref', 'HEAD'),
             'dirty': bool(git('status', '--porcelain', '--untracked-files=no')), 'engine_sha256': h, 'digest': digest}
 
@@ -1888,7 +1894,7 @@ def main(argv=None):
     p.add_argument('--games-file', default=None, help='the baseline games (recorded in the file)')
     p.add_argument('--replace', action='store_true', help='overwrite the entries already there')
     p.add_argument('--digest', default=None, help="the engine's behaviour digest (its gate report's 'full'), when the "
-                                                   "checkout has no gates/<commit>.json")
+                                                   "checkout has no gates/<commit>-<tier>.json")
     p = sub.add_parser('watch', help="a sidecar: measure every evaluated checkpoint of a run as it appears")
     p.add_argument('run')
     p.add_argument('--engine', default=ROOT, help="the run's engine checkout (its pinned worktree)")

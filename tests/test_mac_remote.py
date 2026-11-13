@@ -76,6 +76,35 @@ def test_a_checkout_with_uncommitted_changes_is_refused(repo):
     assert spec_for(repo).resolve(preflight=False)['env']['MTGZ_REMOTE_COMMIT'] == git(repo, 'rev-parse', 'HEAD')
 
 
+def test_an_untracked_file_a_run_would_import_is_refused(repo):
+    """B12 (docs/ENGINE.md 143): an untracked module under mtgz/ (or tools/, tests/, data/, ...) is imported by the
+    run here and is on no remote checkout of the commit."""
+    (repo / 'mtgz').mkdir()
+    (repo / 'mtgz' / 'helper.py').write_text('x = 1\n')
+    with pytest.raises(SystemExit, match=r'untracked files.*\?\? mtgz/helper\.py'):
+        spec_for(repo).resolve(preflight=False)
+    sha = git(repo, 'rev-parse', 'HEAD')
+    assert any('?? mtgz/helper.py' in p for p in mac.problems(str(repo), sha))
+
+
+def test_a_checkout_that_moved_after_the_import_is_refused(repo, monkeypatch):
+    """B15 (docs/ENGINE.md 143): a remote resolved after the run's worktree moved to another commit (a host joining
+    later: 'vast:<box>', 'gpu:N') would self-play that commit's engine for a trainer running the imported one."""
+    assert len(mac.IMPORTED_HEAD) == 40                                # (this checkout's, read at the import)
+    sha = git(repo, 'rev-parse', 'HEAD')
+    monkeypatch.setattr(mac, 'ROOT', str(repo))
+    monkeypatch.setattr(mac, 'IMPORTED_HEAD', sha)
+    assert spec_for(repo).resolve(preflight=False)['env']['MTGZ_REMOTE_COMMIT'] == sha
+    (repo / 'a.txt').write_text('two\n')
+    git(repo, 'commit', '-q', '-am', 'two')
+    with pytest.raises(SystemExit, match=f'moved to [0-9a-f]{{12}} after this process imported its code from {sha[:12]}'):
+        spec_for(repo).resolve(preflight=False)
+    with pytest.raises(SystemExit, match='moved to'):
+        mac.LocalGpuRemote(str(repo), 1, {}).resolve()
+    monkeypatch.setattr(mac, 'ROOT', str(repo / 'elsewhere'))      # another checkout's remote: its own HEAD counts
+    assert spec_for(repo).resolve(preflight=False)['env']['MTGZ_REMOTE_COMMIT'] != sha
+
+
 def test_the_remote_side_refuses_any_other_code(repo):
     sha = git(repo, 'rev-parse', 'HEAD')
     stamp = os.path.join(str(repo), git(repo, 'rev-parse', '--git-path', mac.STAMP))

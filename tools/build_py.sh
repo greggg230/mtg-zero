@@ -10,7 +10,8 @@
 # checkout or worktree gets it initialised here at the pinned commit; a checked-out core that
 # differs from the pin is an error (ZERO_CORE_UNPINNED=1 builds it anyway: core development).
 # Target dir: $CARGO_TARGET_DIR, else on Windows E:/cargo-target/mtg-zero/<branch> (C: is
-# full), elsewhere <repo>/target.
+# full; a detached checkout: detached-<its directory's name>), elsewhere <repo>/target. A target
+# dir another checkout built in is refused (tools/target_guard.py: docs/ENGINE.md 143).
 # Windows locks a loaded .pyd: if the copy fails, the old file is renamed out of the way
 # (running processes keep using it; new ones get the new build).
 set -euo pipefail
@@ -36,4 +37,19 @@ case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*|Windows_NT) TDEF=E:/cargo-target/mtg-zero ;;   # the desktop: C: is full
   *) TDEF="" ;;                                                                     # elsewhere: <repo>/target
 esac
-exec bash "$CORE/tools/build_engine.sh" "$ROOT" mtgz mtgz_py $TDEF
+# One target dir per checkout, never shared (AGENTS.md). zero-core's build_engine.sh names the default after the
+# branch, which is `HEAD` in EVERY detached checkout (the pinned run-<sha> worktrees, the *-base ones): they all
+# built into <base>/HEAD. Here a detached checkout gets detached-<its directory's name> (docs/ENGINE.md 143).
+if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+  BR="$(git -C "$ROOT" symbolic-ref -q --short HEAD 2>/dev/null | tr '/' '_' || true)"
+  if [ -n "$TDEF" ]; then CARGO_TARGET_DIR="$TDEF/${BR:-detached-$(basename "$ROOT")}"; else CARGO_TARGET_DIR="$ROOT/target"; fi
+  export CARGO_TARGET_DIR
+fi
+# ... and a target dir another checkout built in is refused, whoever chose it (its marker .gate_checkout.json is
+# tools/gate.py's: a gate and a hand build agree on whose dir it is)
+if command -v cygpath >/dev/null 2>&1; then
+  "${PYTHON:-python}" "$ROOT/tools/target_guard.py" "$(cygpath -w "$CARGO_TARGET_DIR")" "$(cygpath -w "$ROOT")"
+else
+  "${PYTHON:-python}" "$ROOT/tools/target_guard.py" "$CARGO_TARGET_DIR" "$ROOT"
+fi
+exec bash "$CORE/tools/build_engine.sh" "$ROOT" mtgz mtgz_py

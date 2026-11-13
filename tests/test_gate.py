@@ -9,6 +9,7 @@ stubbed (gate.execute), except one tiny python probe for the environment."""
 import json
 import os
 import sys
+import time
 import types
 
 import pytest
@@ -161,16 +162,18 @@ def SMOKE(n, bad=0):
     return f'ok    seed 0 random: 400 games (0 unfinished), 159784 decisions\nsearch smoke: {bad} failed of {n} configurations, 107 s\n'
 
 
-def MAC(sha, body):
-    return f'[mac] Greggs-MacBook-Pro somebranch @ {sha[:9]}: cargo test --release --no-fail-fast\n' + body
+def MAC(sha, body, after=None):
+    return (f'[mac] Greggs-MacBook-Pro somebranch @ {sha}: cargo test --release --no-fail-fast\n' + body
+            + f'[mac] done @ {after or sha} (exit 0)\n')
 
 
 def EVAL_CHECKOUT(sha):
     wt = f'/Users/greggkeithley/mtg-zero-wt/run-{sha[:12]}'
-    return (f'[mac] Greggs-MacBook-Pro run-{sha[:12]} @ {sha[:9]}: set -euo pipefail\nbash tools/build_py.sh\n'
+    return (f'[mac] Greggs-MacBook-Pro run-{sha[:12]} @ {sha}: set -euo pipefail\nbash tools/build_py.sh\n'
             f"    Finished `release` profile [optimized + debuginfo] target(s) in 41.12s\n"
             f"mtgz._engine OK: {wt}/mtgz/_engine.so | games: ['toy', 'mtg', 'team_draft']\n"
-            f'mtgz remote: {wt} is {sha[:12]}, unchanged, its engine built there\neval checkout ready: {wt}\n')
+            f'mtgz remote: {wt} is {sha[:12]}, unchanged, its engine built there\neval checkout ready: {wt}\n'
+            f'[mac] done @ {sha} (exit 0)\n')
 
 
 H2H = ('# batch {"games": 4, "unfinished": 0}\n'
@@ -271,6 +274,7 @@ def gate(tmp_path, monkeypatch):
     monkeypatch.setattr(G, 'CORE', str(core))
     monkeypatch.setattr(G, 'GATES_DIR', str(tmp_path / 'gates'))
     monkeypatch.setattr(G, 'tracked_changes', lambda: [])
+    monkeypatch.setattr(G, 'untracked_files', lambda: [])
     baseline = tmp_path / 'merge-main'
     (baseline / 'mtgz').mkdir(parents=True)
     (baseline / 'mtgz' / '_engine.pyd').write_bytes(b'old engine')
@@ -303,13 +307,32 @@ def gate(tmp_path, monkeypatch):
     def run(*argv, capsys=None):
         rc = G.main(list(argv))
         out, err = capsys.readouterr() if capsys else ('', '')
-        rpath = os.path.join(str(tmp_path / 'gates'), f'{SHA[:12]}.json')
+        rpath = os.path.join(str(tmp_path / 'gates'), f'{SHA[:12]}-{argv[0]}.json')
         report = json.load(open(rpath, encoding='utf-8')) if os.path.exists(rpath) else None
         if report:
             os.remove(rpath)
         return rc, out, err, report
-    run.fake, run.baseline, run.other = fake, str(baseline), other
+    run.fake, run.baseline, run.other, run.tmp = fake, str(baseline), other, tmp_path
     return run
+
+
+def suite_report(gates_dir, sha, over=None):
+    """A suite tier report of `sha` as gate.py writes it (gates/<sha12>-suite.json), its logs written beside it."""
+    logs = os.path.join(gates_dir, 'logs')
+    os.makedirs(logs, exist_ok=True)
+    steps = []
+    for sid, extra in (('cargo-test-engine', {}), ('fuzz-default', {'fuzz_games': 20000})):
+        log = os.path.join(logs, f'{sha[:12]}-suite-{sid}.log')
+        with open(log, 'w', encoding='utf-8') as f:
+            f.write(f'{sid} output\n')
+        steps.append({'id': sid, 'status': 'passed', 'log': log, 'log_sha256': G.sha256_file(log), **extra})
+    r = {'tier': 'suite', 'sha': sha, 'zero_core_pin': PIN, 'passed': True, 'clean': True, 'started': '2026-11-12T10:00',
+         'final': f'GATE PASSED suite {sha[:12]}', 'steps': steps}
+    r.update(over or {})
+    path = os.path.join(gates_dir, f'{sha[:12]}-suite.json')
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(r, f)
+    return path
 
 
 def final(out):
@@ -404,18 +427,27 @@ def test_no_mac_skips_are_named_too(gate, capsys):
     rc, out, _, _ = gate('repin', '--expect-digest', D_FULL, '--spec', 'delver', '--preset', 'delver-mirror',
                          '--no-mac', capsys=capsys)
     assert rc == 0 and final(out).startswith('GATE PASSED WITH SKIPS repin') and 'mac-eval-checkout (--no-mac)' in final(out)
-    rc, out, _, _ = gate('engine', '--expect-digest', D_FULL, '--expect-digest0', D_FREE, '--no-mac', capsys=capsys)
+    eng = ('engine', '--expect-digest', D_FULL, '--expect-digest0', D_FREE, '--no-mac')
+    rc, _, err, _ = gate(*eng, capsys=capsys)
+    assert rc == 2 and 'gates/276f948e6d31-suite.json' in err.replace('\\', '/') and '--allow-skip suite-evidence' in err
+    rc, out, _, _ = gate(*eng, '--allow-skip', 'suite-evidence', capsys=capsys)
     assert rc == 0 and 'mac-recheck (--no-mac: no --tested-sha, so whether the recheck was needed was not decided)' \
-        in final(out)
+        in final(out) and 'suite-evidence (--allow-skip suite-evidence: the full engine suite and the 20k fuzz of ' \
+        '276f948e6d31 are asserted, not evidenced)' in final(out)
 
 
 def test_the_engine_tiers_mac_recheck_is_decided_by_the_tested_sha(gate, capsys):
     eng = ('engine', '--expect-digest', D_FULL, '--expect-digest0', D_FREE)
+    suite_report(str(gate.tmp / 'gates'), SHA)
+    suite_report(str(gate.tmp / 'gates'), '1234567'.ljust(40, '0'))
     rc, out, _, report = gate(*eng, '--tested-sha', SHA, capsys=capsys)        # gated directly: not needed, not a skip
     assert rc == 0 and final(out).startswith('GATE PASSED engine') and 'N/A' in out and report['clean']
     gate.fake.diff = 'engine/src/game.rs\ndocs/ENGINE.md\n'
     rc, out, _, report = gate(*eng, '--tested-sha', '1234567', capsys=capsys)  # overlapping engine/ files: the Mac runs
     assert rc == 0 and 'mac' in [k for k, _ in gate.fake.calls] and final(out).startswith('GATE PASSED engine')
+    gate.fake.set('mac', MAC(SHA, CARGO(900, 12, 0), after='9' * 40))          # switched under the command
+    rc, out, _, _ = gate(*eng, '--tested-sha', '1234567', capsys=capsys)
+    assert rc == 1 and 'mac-recheck: the Mac\'s checkout moved to 999999999999 during the command' in final(out)
     gate.fake.set('mac', CARGO(900, 12, 0))                                     # no "[mac] ... @ <sha>" line
     rc, out, _, _ = gate(*eng, '--tested-sha', '1234567', capsys=capsys)
     assert rc == 1 and 'mac-recheck: no "[mac]' in final(out)
@@ -491,7 +523,11 @@ def test_the_mac_checkers():
     check = G.make_mac_checker(SHA, G.make_cargo_checker())
     assert check(MAC(SHA, CARGO(900, 12)), 0)[0]
     assert 'no "[mac]' in check(CARGO(900), 0)[1]
-    assert 'not 276f948e6' in check(MAC('9' * 40, CARGO(900)), 0)[1]
+    assert 'was at 999999999999, not 276f948e6d31' in check(MAC('9' * 40, CARGO(900)), 0)[1]
+    # the sha the desktop sent is not enough: the Mac's own HEAD (full), and again after the command
+    assert 'no "[mac] <host>' in check(MAC(SHA, CARGO(900)).replace(SHA, SHA[:9], 1), 0)[1]
+    assert 'no "[mac] done @' in check(MAC(SHA, CARGO(900)).replace('[mac] done', 'mac done'), 0)[1]
+    assert 'moved to 999999999999' in check(MAC(SHA, CARGO(900), after='9' * 40), 0)[1]
     ev = G.make_eval_checkout_checker(SHA)
     good = EVAL_CHECKOUT(SHA)
     assert ev(good, 0)[0] and not ev(good, 1)[0]
@@ -533,7 +569,7 @@ def test_a_step_rewriting_a_tracked_file_fails_the_gate(gate, capsys, monkeypatc
     states = iter([[], [], [' M engine/tests/data/digests.txt']])
     monkeypatch.setattr(G, 'tracked_changes', lambda: next(states))
     rc, out, _, report = gate('docs', capsys=capsys)
-    assert rc == 1 and 'tree-unchanged: tracked files changed during the gate: M engine/tests/data/digests.txt' \
+    assert rc == 1 and 'tree-unchanged: the checkout changed during the gate: M engine/tests/data/digests.txt' \
         in final(out) and not report['passed']
 
 
@@ -662,8 +698,8 @@ def test_a_stale_build_fails_the_core_tier_before_the_comparison(gate, capsys):
     (('docs',), 'on success: GATE PASSED (every step on positive evidence)'),
     (('python', '--allow-skip', 'build'), 'on success: GATE PASSED WITH SKIPS - skipped: build (--allow-skip build'),
     ((*ENC, '--checkpoint', __file__), 'on success: GATE PASSED (every step'),
-    (('engine', '--expect-digest', D_FULL, '--record-digest', 'encoding-free', '--tested-sha', SHA),
-     'recorded, not compared: digest-encoding-free (--record-digest)'),
+    (('engine', '--expect-digest', D_FULL, '--record-digest', 'encoding-free', '--tested-sha', SHA, '--allow-skip',
+      'suite-evidence'), 'recorded, not compared: digest-encoding-free (--record-digest)'),
     (('search-core', '--allow-skip', 'checkpoint-compat'), 'skipped: checkpoint-compat (--allow-skip'),
     (('repin', '--expect-digest', D_FULL, '--spec', 'delver', '--preset', 'delver-mirror'), 'on success: GATE PASSED ('),
 ])
@@ -671,3 +707,234 @@ def test_dry_run_prints_the_plan_and_what_a_pass_would_say(gate, capsys, argv, o
     rc, out, _, report = gate(*argv, '--dry-run', capsys=capsys)
     assert rc == 0 and on_success in out and report is None and not gate.fake.calls
     assert 'passes on:' in out
+
+
+# ---------------------------------------------------------------------------- the Fable review's fixes (ENGINE.md 143)
+
+def test_each_tier_has_its_own_report(gate, capsys):
+    """B10: gates/<sha>.json was one file per commit whatever the tier: a later docs pass overwrote the commit's
+    engine report (passed or FAILED), and "don't re-run a full suite on a sha that already passed it" read it."""
+    gdir = gate.tmp / 'gates'
+    rc = G.main(['repin', '--expect-digest', D_FULL, '--spec', 'delver', '--preset', 'delver-mirror', '--no-mac'])
+    assert rc == 0
+    assert G.main(['docs']) == 0
+    names = sorted(p.name for p in gdir.glob('*.json'))
+    assert names == [f'{SHA[:12]}-docs.json', f'{SHA[:12]}-repin.json']
+    assert json.loads((gdir / f'{SHA[:12]}-repin.json').read_text())['tier'] == 'repin'
+    assert final(capsys.readouterr().out).endswith(f'{SHA[:12]}-docs.json')
+
+
+def test_a_step_timeout_bounds_its_grandchildren(tmp_path):
+    """B11: subprocess.run(timeout=) killed only the direct child, then read the pipe to its end - which a grandchild
+    still held (Windows): a step killed after 2 s returned when the grandchild exited, 12 s later, and the
+    orphans kept the CPU. The timeout now bounds the whole tree, and the grandchild is gone."""
+    psutil = pytest.importorskip('psutil')
+    child = tmp_path / 'child.py'
+    pidfile = tmp_path / 'grandchild.pid'
+    child.write_text('import subprocess, sys, time\n'
+                     'p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])\n'
+                     f'open({str(pidfile)!r}, "w").write(str(p.pid))\n'
+                     'print("started", flush=True)\n'
+                     'time.sleep(60)\n')
+    t0 = time.time()
+    out, rc = G.execute([sys.executable, str(child)], str(tmp_path), dict(os.environ), 8)
+    took = time.time() - t0
+    assert rc == 'timeout' and 'started' in out and 'killed after 8s timeout' in out
+    assert took < 20, took                                            # (the grandchild alone: 30 s)
+    gpid = int(pidfile.read_text())
+    deadline = time.time() + 5
+    while psutil.pid_exists(gpid) and time.time() < deadline:
+        time.sleep(0.1)
+    assert not psutil.pid_exists(gpid) or psutil.Process(gpid).status() == psutil.STATUS_ZOMBIE
+
+
+def test_a_process_holding_the_output_after_the_command_exited_is_bounded(tmp_path):
+    """... and a step whose command exited while a process it started still held its output: that one is killed at
+    the deadline (the step times out) instead of holding the gate for ever."""
+    pytest.importorskip('psutil')
+    child = tmp_path / 'child.py'
+    child.write_text('import subprocess, sys, time\n'
+                     'subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])\n'
+                     'time.sleep(1.5)\nprint("parent done", flush=True)\n')
+    t0 = time.time()
+    out, rc = G.execute([sys.executable, str(child)], str(tmp_path), dict(os.environ), 8)
+    assert rc == 'timeout' and 'parent done' in out and time.time() - t0 < 25          # (the grandchild: 60 s)
+    out, rc = G.execute([sys.executable, '-c', 'print("plain")'], str(tmp_path), dict(os.environ), 30)
+    assert (out.strip(), rc) == ('plain', 0)
+
+
+def _repo(tmp_path):
+    import subprocess
+    r = tmp_path / 'repo'
+    (r / 'tests').mkdir(parents=True)
+    (r / 'tests' / 'test_a.py').write_text('x = 1\n')
+    (r / '.gitignore').write_text('*.pyd\n/gates/\n')
+    for args in (['init', '-q'], ['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'x']):
+        subprocess.run(['git', '-C', str(r), *args], check=True, capture_output=True)
+    return r
+
+
+def test_untracked_files_where_a_step_picks_them_up_count(tmp_path):
+    """B12: the gate's "the commit, unchanged" ran `git status --untracked-files=no`: an untracked tests/test_*.py,
+    conftest.py, engine/tests/*.rs or module under mtgz/ was collected, compiled or imported by the steps and is in
+    no commit. Untracked files there now count; a stray file elsewhere (a crash dump) or an ignored one does not."""
+    r = _repo(tmp_path)
+    assert G.checkout.changes(str(r)) == []
+    (r / 'tests' / 'test_zz_probe.py').write_text('')
+    (r / 'conftest.py').write_text('')
+    (r / 'engine' / 'tests').mkdir(parents=True)
+    (r / 'engine' / 'tests' / 'zz.rs').write_text('')
+    (r / 'bash.exe.stackdump').write_text('')                           # not where a build or test looks
+    (r / 'mtgz').mkdir()
+    (r / 'mtgz' / '_engine.pyd').write_text('')                          # ignored (the build's own output)
+    (r / 'gates').mkdir()
+    (r / 'gates' / 'x.json').write_text('')
+    assert G.checkout.changes(str(r)) == ['?? conftest.py', '?? engine/tests/zz.rs', '?? tests/test_zz_probe.py']
+    (r / 'tests' / 'test_a.py').write_text('x = 2\n')
+    assert G.checkout.changes(str(r))[0] == ' M tests/test_a.py'
+
+
+def test_an_untracked_file_refuses_the_gate_and_one_made_during_it_fails_it(gate, capsys, monkeypatch):
+    monkeypatch.setattr(G, 'untracked_files', lambda: ['?? tests/test_zz_infra_probes.py'])
+    rc, _, err, _ = gate('docs', capsys=capsys)
+    assert rc == 2 and 'not exactly its commit (?? tests/test_zz_infra_probes.py)' in err and not gate.fake.calls
+    rc, out, _, report = gate('docs', '--allow-dirty', capsys=capsys)
+    assert rc == 0 and 'clean-tree (--allow-dirty: 1 uncommitted change(s)' in final(out) and not report['clean']
+    states = iter([[], [], ['?? tests/test_new.py']])
+    monkeypatch.setattr(G, 'untracked_files', lambda: next(states))
+    rc, out, _, _ = gate('docs', capsys=capsys)
+    assert rc == 1 and 'the checkout changed during the gate: ?? tests/test_new.py' in final(out)
+
+
+def test_head_moving_during_the_gate_fails_it(gate, capsys, monkeypatch):
+    same = G.git
+    monkeypatch.setattr(G, 'git', lambda args, cwd=None, check=True: 'd' * 40 if args == ['rev-parse', 'HEAD'] and
+                        cwd is None else same(args, cwd, check))
+    rc, out, _, _ = gate('docs', capsys=capsys)
+    assert rc == 1 and f'HEAD moved during the gate: {SHA[:12]} -> dddddddddddd' in final(out)
+
+
+def test_the_suite_tier_runs_the_full_suite_and_the_20k_fuzz(gate, capsys):
+    """I1: the engine tier asserted the full suite and the 20k fuzz through --tested-sha (the agent's word). The
+    suite tier runs them; its report is what the engine tier now checks."""
+    fuzz = (f'running 4 tests\n20000 games: wins [9803, 10075], draws 122, aborted 0, mean turns 31.8\n'
+            'test fuzz_random_games ... ok\n\ntest result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered '
+            'out; finished in 1415.00s\n')
+    gate.fake.set('cargo1', fuzz)
+    rc, out, _, report = gate('suite', '--fuzz-pools', 'default,delver', capsys=capsys)
+    assert rc == 0 and final(out).startswith('GATE PASSED suite') and report['clean']
+    calls = [a for k, a in gate.fake.calls]
+    assert calls[0] == ['cargo', 'test', '--release', '-p', 'engine', '--no-fail-fast']
+    assert calls[1][-3:] == ['fuzz', '--', '--nocapture'] and len(calls) == 3
+    steps = {s['id']: s for s in report['steps']}
+    assert steps['fuzz-default']['fuzz_games'] == 20000 and steps['fuzz-delver']['status'] == 'passed'
+    # its own report is the engine tier's evidence for this commit
+    path = os.path.join(str(gate.tmp / 'gates'), f'{SHA[:12]}-suite.json')
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(report, f)
+    gate.fake.over.clear()
+    rc, out, _, rep = gate('engine', '--expect-digest', D_FULL, '--expect-digest0', D_FREE, '--tested-sha', SHA,
+                           capsys=capsys)
+    assert rc == 0 and final(out).startswith('GATE PASSED engine') and rep['clean']
+    ev = {s['id']: s for s in rep['steps']}['suite-evidence']
+    assert ev['status'] == 'passed' and '2 fuzz run(s) of 20000 games' in ev['reason'] and os.path.exists(ev['log'])
+
+
+def test_the_fuzz_checker_wants_the_20k_games():
+    check = G.make_fuzz_checker(20000)
+    tail = 'test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.00s\n'
+    assert check('20000 games: wins [1, 2], draws 0\n' + tail, 0)[0]
+    assert 'not 20000' in check('300 games: wins [1, 2], draws 0\n' + tail, 0)[1]       # a caller's FUZZ_GAMES lost
+    assert '--nocapture' in check(tail, 0)[1]
+    assert 'did not pass' in check('20000 games: wins [1, 2]\n' + tail.replace('ok. 4 passed; 0', 'FAILED. 3 passed; 1'),
+                                   101)[1]
+
+
+def test_a_suite_report_must_be_real_evidence(gate, capsys):
+    gdir = str(gate.tmp / 'gates')
+    eng = ('engine', '--expect-digest', D_FULL, '--expect-digest0', D_FREE, '--tested-sha', SHA)
+    for over, says in (({'tier': 'engine'}, "its tier is 'engine'"), ({'sha': 'e' * 40}, 'it gates eeeeeeeeeeee'),
+                       ({'clean': False, 'final': 'GATE PASSED WITH SKIPS suite'}, 'did not pass cleanly'),
+                       ({'zero_core_pin': 'f' * 40}, None)):
+        suite_report(gdir, SHA, over)
+        rc, _, err, _ = gate(*eng, capsys=capsys)
+        if says:
+            assert rc == 2 and says in err and not gate.fake.calls, (over, err)
+        else:
+            assert rc == 0                      # (the fake git knows no pin of the sha: not compared here)
+    path = suite_report(gdir, SHA)
+    log = json.load(open(path))['steps'][1]['log']
+    with open(log, 'a', encoding='utf-8') as f:
+        f.write('edited\n')
+    rc, _, err, _ = gate(*eng, capsys=capsys)
+    assert rc == 2 and 'fuzz-default log' in err and 'changed since the report' in err
+    os.remove(log)
+    rc, _, err, _ = gate(*eng, capsys=capsys)
+    assert rc == 2 and 'is gone' in err
+    rc, _, err, _ = gate(*eng, '--suite-report', os.path.join(gdir, 'nope.json'), capsys=capsys)
+    assert rc == 2 and 'cannot read it' in err
+    suite_report(gdir, SHA)
+    rc, _, err, _ = gate(*eng, '--allow-skip', 'suite-evidence', capsys=capsys)
+    assert rc == 2 and 'check it or skip it, not both' in err
+
+
+def test_the_callers_fuzz_settings_never_reach_a_step(tmp_path, monkeypatch):
+    for k, v in (('FUZZ_GAMES', '10'), ('FUZZ_SKIP', '0-19999'), ('FUZZ_POOL', 'delver')):
+        monkeypatch.setenv(k, v)
+    probe = [sys.executable, '-c', 'import os; print(" ".join(k + "=" + str(os.environ.get(k)) for k in '
+             '("FUZZ_GAMES", "FUZZ_SKIP", "FUZZ_POOL")))']
+    seen = {}
+    step = G.Step('probe', probe, env={'FUZZ_GAMES': '20000'},
+                  checker=lambda out, rc: (seen.setdefault('out', out) is not None, '', {}))
+    assert G.run_step(probe_ctx(tmp_path, {}), step).passed
+    assert seen['out'].split() == ['FUZZ_GAMES=20000', 'FUZZ_SKIP=None', 'FUZZ_POOL=None']
+
+
+def test_a_detached_checkout_builds_into_its_own_target_dir(tmp_path):
+    """B7: zero-core's build_engine.sh defaults CARGO_TARGET_DIR to <base>/<branch>, and the branch of EVERY detached
+    checkout (the pinned run-<sha> worktrees, the *-base ones) is `HEAD`: they all built into <base>/HEAD. build_py.sh
+    now names a detached checkout's dir after its directory (and refuses a dir marked for another checkout)."""
+    import shutil
+    import subprocess
+    bash = shutil.which('bash')
+    if not bash:
+        pytest.skip('no bash')
+    with open(os.path.join(ROOT, 'tools', 'build_py.sh'), encoding='utf-8') as f:
+        sh = f.read().replace('\r\n', '\n')
+    block = sh[sh.index('if [ -z "${CARGO_TARGET_DIR:-}" ]; then'):]
+    block = block[:block.index('\nfi\n') + 4]
+    r = _repo(tmp_path)
+
+    def target(env_ctd=None):
+        env = {k: v for k, v in os.environ.items() if k != 'CARGO_TARGET_DIR'}
+        if env_ctd:
+            env['CARGO_TARGET_DIR'] = env_ctd
+        script = f'ROOT={str(r).replace(chr(92), "/")!r}; TDEF=E:/base\n{block}echo "$CARGO_TARGET_DIR"\n'
+        return subprocess.run([bash, '-c', script], capture_output=True, text=True, env=env, check=True).stdout.strip()
+    subprocess.run(['git', '-C', str(r), 'checkout', '-q', '-b', 'feat/x'], check=True)
+    assert target() == 'E:/base/feat_x'
+    subprocess.run(['git', '-C', str(r), 'checkout', '-q', '--detach'], check=True)
+    assert target() == 'E:/base/detached-repo'                           # not E:/base/HEAD
+    assert target('E:/mine') == 'E:/mine'                                # the caller's own choice stands
+    assert 'target_guard.py' in sh and sh.index('target_guard.py') < sh.index('exec bash "$CORE/tools/build_engine.sh"')
+
+
+def test_head_is_read_from_the_git_files(tmp_path):
+    """mtgz/checkout.read_head (B15's import-time HEAD: no git process in every process that imports the package):
+    a branch's loose ref, a packed one, a detached HEAD, a worktree - each = `git rev-parse HEAD`."""
+    import subprocess
+
+    def head(root):
+        return subprocess.run(['git', '-C', str(root), 'rev-parse', 'HEAD'], capture_output=True, text=True,
+                              check=True).stdout.strip()
+    r = _repo(tmp_path)
+    assert G.checkout.read_head(str(r)) == head(r)
+    subprocess.run(['git', '-C', str(r), 'pack-refs', '--all'], check=True)
+    assert not (r / '.git' / 'refs' / 'heads' / 'master').exists() and not (r / '.git' / 'refs' / 'heads' / 'main').exists()
+    assert G.checkout.read_head(str(r)) == head(r)
+    wt = tmp_path / 'wt'
+    subprocess.run(['git', '-C', str(r), 'worktree', 'add', '-q', '--detach', str(wt)], check=True)
+    assert G.checkout.read_head(str(wt)) == head(wt)
+    subprocess.run(['git', '-C', str(wt), 'checkout', '-q', '-b', 'feat/y'], check=True)
+    assert G.checkout.read_head(str(wt)) == head(wt)
+    assert G.checkout.read_head(str(tmp_path / 'nothing')) is None

@@ -13,11 +13,13 @@ script before anything else), so a forgotten box costs at most hourly x hours.
   python tools/vast.py destroy NAME | --all
 
   # (2) a whole run on the box (RUN = the desktop run dir, stopped; the box's copy is /root/runs/<run name>)
-  python tools/vast.py run-push NAME RUN                 # upload what the run resumes from; desktop copy PAUSEd
+  python tools/vast.py run-push NAME RUN [--include X] [--leave Y] [--clear-setting S]   # upload what the run resumes
+                                                         # from; desktop copy PAUSEd
   python tools/vast.py run-start NAME RUN [--checkout DIR] [-- extra run args]   # supervise.py on the box
   python tools/vast.py run-sync NAME RUN [--loop SEC] [--no-data]                # box outputs -> desktop mirror
   python tools/vast.py run-ctl NAME RUN stop|pause|resume|tail
-  python tools/vast.py run-home NAME RUN [--wait-min M]  # STOP on the box, full pull, desktop copy runnable again
+  python tools/vast.py run-home NAME RUN [--wait-min M]  # STOP on the box, confirmed stop, full pull, checked, desktop
+                                                         # copy runnable again
 
 Box names are short words ('vast' is the one the run setting selfplay_remote 'vast' reaches: ssh alias
 mtgz-vast, unless MTGZ_VAST_HOST names another alias). The ledger is ~/.config/vastai/mtgz_boxes.json; the ssh
@@ -28,6 +30,12 @@ While a run lives on a box, its desktop dir holds ON_VAST.json (which box, since
 changed) and a PAUSE file by 'tools/vast.py' (a desktop supervisor started by mistake waits instead of forking the
 run). run-home brings the newest state back, restores those settings, removes both and leaves STOP (relaunch on
 the desktop as usual: the supervisor moves STOP away).
+
+docs/ENGINE.md 143 (the Fable review's fixes): a file is pulled by content, never by size alone (vast_pulled.json
+holds the box's listing entry of what the desktop has; same-size files of another version are compared by sha256);
+an ssh failure is "unknown", never "the box run stopped"; run-home confirms the stop (no supervisor, no run process,
+supervisor state 'done') before its final pull and checks the optimizer state and best.pt after it; run-push refuses
+a run entry or a desktop-path setting it does not know; each box's host key is pinned at its first connection.
 """
 import argparse
 import ast
@@ -55,6 +63,18 @@ NO_WINDOW = (subprocess.CREATE_NO_WINDOW
 sys.path.insert(0, HERE)
 import vast_provider as vp  # noqa: E402
 
+
+def _load_checkout():
+    """mtgz/checkout.py by its path (standard library only; no package import, which needs torch)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('_mtgz_checkout', os.path.join(ROOT, 'mtgz', 'checkout.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+checkout = _load_checkout()
+
 LEDGER = os.path.expanduser('~/.config/vastai/mtgz_boxes.json')
 SSH_CONFIG = os.path.expanduser('~/.ssh/config')
 IMAGE = 'pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime'     # = the desktop's torch 2.11.0+cu128
@@ -69,13 +89,26 @@ GUARD_MARGIN_S = 600          # the box's own guard fires this long after the le
 FAST_CPU = r'9950X|9900X|7950X|7945HX|9955HX|7900X|9800X3D|7800X3D|9700X|7700X|1[34]900|1[34]700|285K|265K|Ultra 9|Ultra 7'
 FILTERS = dict(vp.FILTERS, gpu_name='RTX 5090', min_cores=16, min_ram_gb=60, max_dph=1.2, min_disk_gb=DISK_GB)
 ON_VAST = 'ON_VAST.json'
+PULLED = 'vast_pulled.json'   # the box's (size, mtime) of every file the desktop copy holds as the box's (sync_once)
 PAUSE_BY = 'tools/vast.py'
 # settings run-start changes for the box (no Mac from there; nothing remote) and run-home restores
 BOX_SETTINGS = {'eval_remote': '', 'selfplay_remote': '', 'selfplay_remote_procs': 0, 'selfplay_remote_linger': 0,
                 'selfplay_local_linger': 0}
 PATH_SETTINGS = ('elo_anchors', 'heldout_shards')
 APPEND = ('metrics.jsonl', 'evals.jsonl', 'log.txt', 'stdout.txt', 'supervisor.log', 'supervisor_console.txt')
-NO_PULL = ('config.json', 'STOP', 'PAUSE', 'STOP.old', ON_VAST, 'selfplay_remotes', 'supervisor_state.json')
+NO_PULL = ('config.json', 'STOP', 'PAUSE', 'STOP.old', ON_VAST, 'selfplay_remotes', 'supervisor_state.json', PULLED)
+# what run-push uploads from a run directory (the run resumes from these), and what stays on the desktop by design
+# (control files, this tool's own files, logs, the publishers' output); any other entry is refused until it is named
+# with --include (uploaded) or --leave (stays) - docs/ENGINE.md 143
+PUSH_FILES = ('run_state.json', 'metrics.jsonl', 'evals.jsonl', 'log.txt', 'stdout.txt', 'supervisor.log',
+              'supervisor_console.txt', 'progress.json')
+PUSH_DIRS = ('elo', 'data', 'models')
+DESKTOP_ONLY = ('STOP', 'STOP.old', 'PAUSE', 'supervisor_state.json', 'vast_sync.json', PULLED, 'selfplay_remotes',
+                '.remote_config.json', 'delverai.json', 'replays', 'debug')
+DESKTOP_ONLY_RE = re.compile(r'ON_VAST(_\d+)?\.json|.*\.(txt|log|tmp|vasttmp)')
+# a Windows absolute path inside a setting's value (a desktop path the box does not have)
+DESKTOP_PATH_RE = re.compile(r'(?<![A-Za-z])[A-Za-z]:[\\/]|\\\\[^\\]')
+KNOWN_HOSTS_DIR = os.path.expanduser('~/.ssh')
 
 
 def die(msg):
@@ -115,10 +148,21 @@ def _block_re(name):
     return re.compile(rf'# >>> {a} \(tools/vast\.py\) >>>\n.*?# <<< {a} <<<\n', re.S)
 
 
+def known_hosts(name):
+    """The box's own known_hosts file: its host key, pinned at the first connection (StrictHostKeyChecking
+    accept-new); a later connection that meets another key is refused. A rented box is third-party hardware."""
+    return os.path.join(KNOWN_HOSTS_DIR, f'known_hosts_{alias(name)}')
+
+
 def write_alias(name, host, port):
     a = alias(name)
+    try:
+        os.remove(known_hosts(name))                    # a new box under this name: its key is learnt afresh
+    except OSError:
+        pass
     block = (f'# >>> {a} (tools/vast.py) >>>\nHost {a}\n  HostName {host}\n  Port {port}\n  User root\n'
-             f'  IdentityFile ~/.ssh/id_ed25519\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n'
+             f'  IdentityFile ~/.ssh/id_ed25519\n  StrictHostKeyChecking accept-new\n'
+             f'  UserKnownHostsFile ~/.ssh/known_hosts_{a}\n'
              f'  LogLevel ERROR\n  ServerAliveInterval 15\n  ServerAliveCountMax 4\n  ConnectTimeout 20\n'
              f'# <<< {a} <<<\n')
     try:
@@ -142,6 +186,10 @@ def remove_alias(name):
     if t != s:
         with open(SSH_CONFIG, 'w', encoding='utf-8', newline='\n') as f:
             f.write(t)
+    try:
+        os.remove(known_hosts(name))
+    except OSError:
+        pass
 
 
 def ssh(name, cmd, input=None, check=True, timeout=600, capture=True):
@@ -170,7 +218,9 @@ def box(name):
 
 def onstart_script(deadline):
     """The instance's start script: write and start the deadline guard before anything else, so even a box
-    the desktop never reaches destroys itself at `deadline`."""
+    the desktop never reaches destroys itself at `deadline`. It runs at every start of the container: a deadline
+    file already there (`extend`'s, raised or lowered) is kept - rewriting the rent's deadline after a restart
+    fired the guard at once on a box whose deadline had been extended."""
     with open(os.path.join(HERE, 'vast_guard.py'), encoding='utf-8') as f:
         tree = ast.parse(f.read())
     for node in ast.walk(tree):                          # docstrings out: the start script's size is limited
@@ -180,7 +230,7 @@ def onstart_script(deadline):
             node.body = body[1:] or [ast.Pass()]
     b64 = base64.b64encode(zlib.compress(ast.unparse(tree).encode(), 9)).decode()
     unpack = "import zlib,base64,sys;open(sys.argv[1],'wb').write(zlib.decompress(base64.b64decode(sys.argv[2])))"
-    return (f'G={GUARD_DIR}; mkdir -p "$G"; echo {int(deadline + GUARD_MARGIN_S)} > "$G/deadline"; '
+    return (f'G={GUARD_DIR}; mkdir -p "$G"; [ -s "$G/deadline" ] || echo {int(deadline + GUARD_MARGIN_S)} > "$G/deadline"; '
             f'P=$(command -v python3 || command -v python); "$P" -c "{unpack}" "$G/vast_guard.py" {b64}; '
             f'(nohup "$P" "$G/vast_guard.py" "$G" >> "$G/guard.out" 2>&1 &)')
 
@@ -293,7 +343,10 @@ def cmd_rent(a):
         say(f'box {a.name!r} = instance {iid} up: ssh {alias(a.name)} ({r["host"]}:{r["port"]}); deadline guard '
             + ('running (self-destroys at the deadline)' if ok else f'NOT CONFIRMED: {g[:200]}'))
         if not ok:
-            say('  WARNING: without the guard only `destroy` / the ledger deadline protect against a forgotten box')
+            # (a non-zero exit: a script renting boxes must not carry on as if the box were protected)
+            die(f'box {a.name!r} (instance {iid}) is UP and BILLING, but its deadline guard is not confirmed: only '
+                f'`destroy` protects against a forgotten box now. `python tools/vast.py destroy {a.name}`, or check '
+                f'{GUARD_DIR} on it (`python tools/vast.py ssh {a.name}`) and carry on knowingly')
         return
     die(f'no offer could be rented: {tried}')
 
@@ -304,6 +357,7 @@ def cmd_status(a):
     live = {i['id']: i for i in p.list()}
     now = time.time()
     total = 0.0
+    late = []
     for name, e in sorted(led.items()):
         inst = live.pop(e['iid'], None)
         state = (inst or {}).get('status') or ('gone' if e.get('state') != 'destroyed' else 'destroyed')
@@ -314,9 +368,16 @@ def cmd_status(a):
         print(f"{name:10} iid {e['iid']:<10} {state:10} ${e['hourly']:.3f}/h  ~${spent:.2f} so far  "
               + (f"deadline in {left:.1f} h  " if e.get('state') != 'destroyed' else '')
               + f"{e.get('cpu', '')[:30]}  ssh {alias(name)}")
+        # (the box's guard fires GUARD_MARGIN_S after the ledger's deadline: past that, and 5 minutes more, it failed)
+        if e.get('state') != 'destroyed' and inst is not None and left * 3600 < -(GUARD_MARGIN_S + 300):
+            late.append(name)
+            print(f'  WARNING: {name} is PAST its deadline ({-left:.1f} h ago) and still listed (billing): its guard did '
+                  f'not destroy it - `python tools/vast.py destroy {name}`')
     for i in live.values():
         print(f"(not in the ledger) iid {i['id']} {i.get('status')} {i.get('label')} ${i.get('dph', 0):.3f}/h")
     print(f'ledger spend ~${total:.2f}; balance ${p.balance():.2f}')
+    if late:
+        sys.exit(1)                                       # (a scheduled `status` sees it as a failure)
 
 
 def cmd_extend(a):
@@ -412,13 +473,16 @@ def cmd_link(a):
         # locked a worker out (even the desktop's key) until its key was re-attached (2026-11-05)
         p.attach_ssh(e['iid'], pub)
         blocks.append(f'# >>> {alias(w)} (tools/vast.py) >>>\nHost {alias(w)}\n  HostName {r["host"]}\n  Port {r["port"]}\n'
-                      f'  User root\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n  LogLevel ERROR\n'
+                      f'  User root\n  StrictHostKeyChecking accept-new\n  UserKnownHostsFile ~/.ssh/known_hosts_{alias(w)}\n'
+                      f'  LogLevel ERROR\n'
                       f'  ServerAliveInterval 15\n  ServerAliveCountMax 4\n  ConnectTimeout 20\n# <<< {alias(w)} <<<\n')
     # the trainer's ssh config: our blocks replaced, the rest kept
     script = ('import re, os, sys\np = os.path.expanduser("~/.ssh/config")\n'
               's = open(p).read() if os.path.exists(p) else ""\n'
               'for a in sys.argv[1:]:\n'
               '    s = re.sub(r"# >>> " + re.escape(a) + r" \\(tools/vast\\.py\\) >>>\\n.*?# <<< " + re.escape(a) + r" <<<\\n", "", s, flags=re.S)\n'
+              '    kh = os.path.expanduser("~/.ssh/known_hosts_" + a)\n'
+              '    os.path.exists(kh) and os.remove(kh)\n'
               'blocks = sys.stdin.read()\nopen(p, "w").write(blocks + s)\nos.chmod(p, 0o600)\n')
     ssh(a.trainer, f'{BOX_PY} -c {shlex.quote(script)} {" ".join(alias(w) for w in a.workers)}', input=''.join(blocks))
     for w in a.workers:
@@ -486,8 +550,10 @@ def cmd_prep(a):
     co = os.path.abspath(a.checkout or ROOT)
     sha = git(co, 'rev-parse', 'HEAD')
     pin = git(co, 'rev-parse', 'HEAD:third_party/zero-core')
-    if git(co, 'status', '--porcelain', '--untracked-files=no'):
-        die(f'{co} has uncommitted changes: the box builds a commit (commit first)')
+    dirty = checkout.changes(co)
+    if dirty:
+        die(f'{co} is not exactly its commit ({"; ".join(d.strip() for d in dirty[:6])}): the box builds the commit, '
+            f'so an uncommitted change or an untracked file the desktop run would import is not there (commit first)')
     t0 = time.time()
     say(f'box {a.name!r}: bootstrap (apt, rust {RUST_TOOLCHAIN}, pip, torch check)')
     with open(os.path.join(HERE, 'vast_bootstrap.sh'), encoding='utf-8') as f:
@@ -601,6 +667,52 @@ def tar_upload(name, dest, members):
     return total
 
 
+def unknown_entries(run, include=(), leave=()):
+    """The run directory's top-level entries that run-push neither uploads nor leaves on the desktop by design (nor
+    the caller named with --include / --leave): a co-training run's resolver/, an EoE run's games/ and evaluators/,
+    an archive, ... - the box run would start without them, silently."""
+    out = []
+    for n in sorted(os.listdir(run)):
+        if (n == 'config.json' or n in PUSH_FILES or n in PUSH_DIRS or n in DESKTOP_ONLY or DESKTOP_ONLY_RE.fullmatch(n)
+                or n in include or n in leave):
+            continue
+        out.append(n + ('/' if os.path.isdir(os.path.join(run, n)) else ''))
+    return out
+
+
+def desktop_path_settings(cfg, clear=()):
+    """The settings whose value holds a desktop path (a drive letter, a UNC path; inside a spec too) that run-push
+    neither remaps (PATH_SETTINGS) nor clears (--clear-setting): the box has no such file."""
+    return sorted(k for k, v in cfg.items() if k not in PATH_SETTINGS and k not in clear
+                  and DESKTOP_PATH_RE.search(v if isinstance(v, str) else json.dumps(v)))
+
+
+def write_marker(run, m):
+    """ON_VAST.json, atomically (a sync loop reads it every pass: a half-written marker is never seen)."""
+    path = os.path.join(run, ON_VAST)
+    with open(path + '.vasttmp', 'w', encoding='utf-8') as f:
+        json.dump(m, f, indent=1)
+    os.replace(path + '.vasttmp', path)
+
+
+def load_pulled(run):
+    """{path: [size, mtime]}: the box's listing entry of each file the desktop copy holds as the box's (written by
+    run-push and every sync). A missing or unreadable manifest is empty: content hashes decide then (sync_once)."""
+    try:
+        with open(os.path.join(run, PULLED), encoding='utf-8') as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_pulled(run, d):
+    path = os.path.join(run, PULLED)
+    with open(path + '.vasttmp', 'w', encoding='utf-8') as f:
+        json.dump(d, f)
+    os.replace(path + '.vasttmp', path)
+
+
 def cmd_run_push(a):
     e = box(a.name)
     run = os.path.abspath(a.run)
@@ -611,19 +723,39 @@ def cmd_run_push(a):
         die(f'the run\'s supervisor (pid {pid}) is running: stop the run first (STOP file, wait for its clean exit)')
     with open(os.path.join(run, 'config.json'), encoding='utf-8') as f:
         cfg = json.load(f)
+    include, leave, clear = list(a.include or []), list(a.leave or []), list(a.clear_setting or [])
+    unknown = unknown_entries(run, include, leave)
+    if unknown:
+        die(f'{run} holds entries run-push does not know: {", ".join(unknown)}. Name each one: --include NAME (uploaded '
+            f'as it is: the box run needs it) or --leave NAME (stays on the desktop: the box run starts without it) - '
+            f'docs/ENGINE.md 143')
+    gone = [n for n in include if not os.path.exists(os.path.join(run, n))]
+    if gone:
+        die(f'--include {", ".join(gone)}: not in {run}')
+    for s in clear:
+        if s not in cfg:
+            die(f'--clear-setting {s}: the run has no such setting')
+    bad = desktop_path_settings(cfg, clear)
+    if bad:
+        die(f'settings holding a desktop path the box does not have: {", ".join(f"{s}={str(cfg[s])[:120]!r}" for s in bad)}. '
+            f'--clear-setting NAME pushes it as \'\' (run-home restores it); anchors and held-out shards '
+            f'({", ".join(PATH_SETTINGS)}) are uploaded and remapped')
     k = newest_iter(run)
     paths, ext = remap_paths(cfg)
     for p in ext:
         if not os.path.exists(p):
             die(f'{p} (a setting of the run) does not exist')
-    box_cfg = dict(cfg, **{s: v[1] for s, v in paths.items()}, **BOX_SETTINGS)
+    box_cfg = dict(cfg, **{s: v[1] for s, v in paths.items()}, **BOX_SETTINGS, **{s: '' for s in clear})
     members = [('config.json', json.dumps(box_cfg, indent=1).encode())]
-    for n in ('run_state.json', 'metrics.jsonl', 'evals.jsonl', 'log.txt', 'stdout.txt', 'supervisor.log',
-              'supervisor_console.txt', 'progress.json'):
+    for n in PUSH_FILES:
         if os.path.exists(os.path.join(run, n)):
             members.append((n, os.path.join(run, n)))
-    for sub in ('elo', 'data'):
-        for dp, _dn, fns in os.walk(os.path.join(run, sub)):
+    for sub in ('elo', 'data') + tuple(include):
+        full = os.path.join(run, sub)
+        if os.path.isfile(full):
+            members.append((sub, full))
+            continue
+        for dp, _dn, fns in os.walk(full):
             for fn in fns:
                 full = os.path.join(dp, fn)
                 members.append((os.path.relpath(full, run).replace('\\', '/'), full))
@@ -641,30 +773,62 @@ def cmd_run_push(a):
             members.append((f'models/{fn}', os.path.join(mdir, fn)))
     size = sum(len(s) if isinstance(s, bytes) else os.path.getsize(s) for _, s in members)
     say(f'run-push {run} (newest checkpoint {k}) -> {alias(a.name)}:{box_run_dir(run)}: {len(members)} files, '
-        f'{size / 1e9:.2f} GB (+ {len(ext)} anchor / held-out files)')
+        f'{size / 1e9:.2f} GB (+ {len(ext)} anchor / held-out files)' + (f'; left on the desktop: {", ".join(leave)}'
+                                                                          if leave else ''))
+    restore = {**{s: v[0] for s, v in paths.items()}, **{s: cfg.get(s) for s in BOX_SETTINGS},
+               **{s: cfg[s] for s in clear}}
     marker = {'box': a.name, 'iid': e['iid'], 'alias': alias(a.name), 'remote_dir': box_run_dir(run),
-              'since': time.time(), 'iter_at_push': k, 'restore': {**{s: v[0] for s, v in paths.items()},
-                                                                   **{s: cfg.get(s) for s in BOX_SETTINGS}}}
-    # the desktop copy is PAUSEd before the upload: nothing may start it while the box owns the run
-    with open(os.path.join(run, 'PAUSE'), 'w', encoding='utf-8') as f:
+              'since': time.time(), 'iter_at_push': k, 'restore': restore, 'absent': []}
+    # the desktop copy is PAUSEd before the upload: nothing may start it while the box owns the run; a failed upload
+    # puts both files back as they were (the desktop copy is still the run)
+    pause = os.path.join(run, 'PAUSE')
+    try:
+        with open(pause, 'rb') as f:
+            pause_before = f.read()
+    except OSError:
+        pause_before = None
+    with open(pause, 'w', encoding='utf-8') as f:
         json.dump({'time': time.time(), 'by': PAUSE_BY}, f)
-    with open(os.path.join(run, ON_VAST), 'w', encoding='utf-8') as f:
-        json.dump(marker, f, indent=1)
+    write_marker(run, marker)
     t0 = time.time()
-    # the desktop copy is the run now: an older copy on the box (an earlier push) could hold newer checkpoints
-    # or data the run would resume from
-    rd = box_run_dir(run)
-    assert rd.startswith(BOX_RUNS + '/') and len(rd) > len(BOX_RUNS) + 1, rd
-    ssh(a.name, f'rm -rf {shlex.quote(rd)}')
-    tar_upload(a.name, f'{BOX_RUNS}/_ext', [(os.path.basename(p), p) for p in ext])
-    tar_upload(a.name, box_run_dir(run), members)
+    try:
+        # the desktop copy is the run now: an older copy on the box (an earlier push) could hold newer checkpoints
+        # or data the run would resume from
+        rd = box_run_dir(run)
+        assert rd.startswith(BOX_RUNS + '/') and len(rd) > len(BOX_RUNS) + 1, rd
+        ssh(a.name, f'rm -rf {shlex.quote(rd)}')
+        tar_upload(a.name, f'{BOX_RUNS}/_ext', [(os.path.basename(p), p) for p in ext])
+        tar_upload(a.name, box_run_dir(run), members)
+        # the box's copy now equals the desktop's: its listing is what the desktop holds (sync_once fetches a file
+        # only when the box's size or mtime moves away from it, or a content hash says so)
+        save_pulled(run, {p: list(v) for p, v in remote_listing(a.name, rd).items()})
+    except BaseException:
+        os.remove(os.path.join(run, ON_VAST))
+        if pause_before is None:
+            os.remove(pause)
+        else:
+            with open(pause, 'wb') as f:
+                f.write(pause_before)
+        say(f'run-push failed: {ON_VAST} removed and PAUSE as it was - the desktop copy is still the run')
+        raise
     say(f'uploaded in {time.time() - t0:.0f} s; desktop copy PAUSEd + {ON_VAST}; next: run-start')
+
+
+def split_flags(args):
+    """Command-line arguments with each `--name=value` split into `--name value` (both forms reach a run)."""
+    out = []
+    for x in args:
+        if x.startswith('--') and '=' in x:
+            out += x.split('=', 1)
+        else:
+            out.append(x)
+    return out
 
 
 def run_args(run, marker):
     """The desktop supervisor's run arguments for the box: remote settings off, desktop paths remapped."""
     with open(os.path.join(run, 'supervisor_state.json'), encoding='utf-8') as f:
-        args = list(json.load(f).get('args') or [])
+        args = split_flags(json.load(f).get('args') or [])
     drop = {'--' + s.replace('_', '-') for s in BOX_SETTINGS}
     remap = {'--' + s.replace('_', '-'): s for s in PATH_SETTINGS}
     out, i = [], 0
@@ -681,6 +845,11 @@ def run_args(run, marker):
         out.append(x)
         i += 1
     return out
+
+
+def flag_settings(args):
+    """The run settings named by command-line flags (`--threads 32`, `--games=2000` -> threads, games)."""
+    return [x[2:].split('=', 1)[0].replace('-', '_') for x in args if x.startswith('--') and len(x) > 2]
 
 
 def cmd_run_start(a):
@@ -705,9 +874,20 @@ def cmd_run_start(a):
     led = load_ledger()
     led[a.name]['run'] = {'run': run, 'remote_dir': rd, 'sha': sha, 'args': args, 'started': time.time()}
     save_ledger(led)
+    # the settings the extra flags change are saved into the box's config.json and come home with it (box thread
+    # counts on the desktop): run-home restores the desktop's values (or drops a setting the desktop did not have)
+    with open(os.path.join(run, 'config.json'), encoding='utf-8') as f:
+        desk = json.load(f)
+    restore, absent = marker.setdefault('restore', {}), marker.setdefault('absent', [])
+    for s in flag_settings(a.extra or []):
+        if s in restore or s in absent:
+            continue
+        if s in desk:
+            restore[s] = desk[s]
+        else:
+            absent.append(s)
     marker.update(sha=sha, started=time.time(), args=args)
-    with open(os.path.join(run, ON_VAST), 'w', encoding='utf-8') as f:
-        json.dump(marker, f, indent=1)
+    write_marker(run, marker)
     time.sleep(45)
     print(ssh(a.name, f'tail -3 {rd}/supervisor.log; tail -c 600 {rd}/stdout.txt', check=False).stdout)
 
@@ -732,6 +912,20 @@ def remote_listing(name, rd):
     return out
 
 
+def member_path(run, name, asked):
+    """Where the box's tar member `name` goes under the desktop dir `run` - refused (OSError: the pass fails) unless
+    it is one of the relative paths `asked` for, with no absolute, drive or '..' part. A rented box is third-party
+    hardware: its tar stream must not write outside the run, or anything the desktop did not ask for."""
+    parts = name.split('/')
+    if (name not in asked or name.startswith('/') or '\\' in name or ':' in name
+            or any(x in ('', '.', '..') for x in parts)):
+        raise OSError(f'the box sent a tar member {name!r} that was not asked for or leaves the run directory')
+    dst = os.path.join(run, *parts)
+    if os.path.commonpath([os.path.abspath(dst), os.path.abspath(run)]) != os.path.abspath(run):
+        raise OSError(f'the box sent a tar member {name!r} outside the run directory')
+    return dst
+
+
 def tar_fetch(name, rd, run, paths, timeout_s=1800):
     """Fetch `paths` (relative) from the box's `rd` into `run`, each file written to a temporary name and
     renamed (readers never see half a file). The stream is read to its end: tarfile stops at the end-of-archive
@@ -746,6 +940,7 @@ def tar_fetch(name, rd, run, paths, timeout_s=1800):
     killer.daemon = True
     killer.start()
     n = 0
+    asked = set(paths)
     try:
         proc.stdin.write(('\n'.join(paths) + '\n').encode())
         proc.stdin.close()
@@ -753,7 +948,7 @@ def tar_fetch(name, rd, run, paths, timeout_s=1800):
             for m in tf:
                 if not m.isfile():
                     continue
-                dst = os.path.join(run, *m.name.split('/'))
+                dst = member_path(run, m.name, asked)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 src = tf.extractfile(m)
                 with open(dst + '.vasttmp', 'wb') as f:
@@ -776,13 +971,60 @@ def tar_fetch(name, rd, run, paths, timeout_s=1800):
     return n
 
 
+def sha256_file(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def remote_hashes(name, rd, paths):
+    """{path: sha256} of the box's files `paths` (relative to `rd`), one ssh session (paths on stdin)."""
+    if not paths:
+        return {}
+    r = ssh(name, f"cd {rd} && tr '\\n' '\\0' | xargs -0 -r sha256sum --", input='\n'.join(paths) + '\n', timeout=900)
+    out = {}
+    for line in r.stdout.splitlines():
+        h, _, p = line.partition('  ')
+        if len(h) == 64 and p:
+            out[p] = h
+    missing = [p for p in paths if p not in out]
+    if missing:
+        die(f'sha256sum on {alias(name)}:{rd} gave no hash for {", ".join(missing[:5])}')
+    return out
+
+
+def append_tail(name, rd, p, local, have, size, k=64):
+    """The bytes the box's append-only log `p` holds past the desktop's `have` -> bytes, or None when the desktop's
+    last `k` bytes are not the box's at that offset (the desktop wrote into its copy too, e.g. a supervisor started by
+    mistake logged "PAUSE file present": appending would splice two logs) or the read failed: fetch it whole then."""
+    k = min(k, have)
+    r = subprocess.run(['ssh', '-o', 'BatchMode=yes', alias(name), f'tail -c +{have - k + 1} {rd}/{p} | head -c {size - have + k}'],
+                       capture_output=True, timeout=600, creationflags=NO_WINDOW)
+    if r.returncode or len(r.stdout) != size - have + k:
+        return None
+    with open(local, 'rb') as f:
+        f.seek(have - k)
+        mine = f.read(k)
+    return r.stdout[k:] if r.stdout[:k] == mine else None
+
+
 def sync_once(name, run, rd, data=True, final=False):
     """Pull the box run's outputs into the desktop dir: new / changed files, append-only logs by their new
     bytes. Not pulled while the run lives on the box: config.json (box paths; run-home restores it), the
-    control files; without `data` (or `final`), data/ and models/opt_latest.pt."""
+    control files; without `data` (or `final`), data/ and models/opt_latest.pt.
+
+    "Changed" is decided by content, never by size alone (docs/ENGINE.md 143: the optimizer state and models/best.pt
+    are rewritten at the same size every iteration, and run-home's full pull left the desktop's stale ones): a file is
+    fetched when the desktop has none, or of another size, or when the box's (size, mtime) is not the one the
+    manifest (vast_pulled.json, seeded by run-push from the box's listing) records for what the desktop holds and
+    its sha256 differs from the desktop's. JSON files are always fetched (small, rewritten in place)."""
     remote = remote_listing(name, rd)
+    pulled = load_pulled(run)
     now = time.time()
-    fetch, appended = [], 0
+    fetch, appended, same_size = [], 0, []
     for p, (size, mtime) in remote.items():
         base = p.split('/')[-1]
         if p in NO_PULL and not (final and p in ('config.json', 'STOP')):
@@ -799,16 +1041,30 @@ def sync_once(name, run, rd, data=True, final=False):
         local = os.path.join(run, *p.split('/'))
         have = os.path.getsize(local) if os.path.exists(local) else -1
         if p in APPEND and 0 <= have < size:
-            r = subprocess.run(['ssh', '-o', 'BatchMode=yes', alias(name), f'tail -c +{have + 1} {rd}/{p} | head -c {size - have}'],
-                               capture_output=True, timeout=600, creationflags=NO_WINDOW)
-            if r.returncode == 0 and len(r.stdout) == size - have:
+            new = append_tail(name, rd, p, local, have, size)
+            if new is not None:
                 with open(local, 'ab') as f:
-                    f.write(r.stdout)
-                appended += len(r.stdout)
+                    f.write(new)
+                appended += len(new)
+                pulled[p] = [size, mtime]
                 continue
+            fetch.append(p)
+            continue
         if have != size or p.endswith('.json'):
             fetch.append(p)
+        elif pulled.get(p) != [size, mtime]:
+            same_size.append(p)                              # same size, a version the desktop may not hold
+    if same_size:
+        theirs = remote_hashes(name, rd, same_size)
+        for p in same_size:
+            if theirs[p] == sha256_file(os.path.join(run, *p.split('/'))):
+                pulled[p] = list(remote[p])                  # the same content: nothing to fetch
+            else:
+                fetch.append(p)
     got = tar_fetch(name, rd, run, fetch)
+    for p in fetch:
+        pulled[p] = list(remote[p])
+    save_pulled(run, {p: v for p, v in pulled.items() if p in remote})
     removed = 0
     if data or final:                                        # the window's pruning, mirrored
         rdirs = {p.split('/')[1] for p in remote if p.startswith('data/') and p.count('/') >= 2}
@@ -827,13 +1083,24 @@ def cmd_run_sync(a):
     run = os.path.abspath(a.run)
     m = read_marker(run, a.name)
     rd = m['remote_dir']
+    warned = False
     while True:
         t0 = time.time()
         if a.loop and homing(run):
             say(f'run-home has the run ({ON_VAST} gone or homing): sync loop ends')
             return
+        data = not a.no_data
+        # cost and data safety: the box destroys itself at its deadline with everything since the last pass on it
+        dl = (load_ledger().get(a.name) or {}).get('deadline')
+        if dl is not None and dl - time.time() < 3600:
+            if not warned:
+                say(f'WARNING: box {a.name!r} reaches its deadline in {(dl - time.time()) / 60:.0f} min (then it destroys '
+                    f'itself): `python tools/vast.py extend {a.name} --hours H`, or run-home now; pulling the data '
+                    f'window too from now on')
+                warned = True
+            data = True
         try:
-            nf, nb, nr = sync_once(a.name, run, rd, data=not a.no_data)
+            nf, nb, nr = sync_once(a.name, run, rd, data=data)
             prog = ssh(a.name, f'cat {rd}/progress.json 2>/dev/null; echo; tail -1 {rd}/supervisor.log', check=False,
                        timeout=60).stdout.strip().replace('\n', ' | ')
             say(f'sync: {nf} files + logs, {nb / 1e6:.1f} MB in {time.time() - t0:.0f} s'
@@ -848,13 +1115,21 @@ def cmd_run_sync(a):
         time.sleep(max(5.0, a.loop - (time.time() - t0)))
 
 
-def homing(run):
-    """True once run-home has taken the run (its marker says so, or is gone): a sync loop stops pulling."""
-    try:
-        with open(os.path.join(run, ON_VAST), encoding='utf-8') as f:
-            return bool(json.load(f).get('homing'))
-    except (OSError, ValueError):
-        return True
+def homing(run, tries=5):
+    """True once run-home has taken the run (its marker says so, or is gone): a sync loop stops pulling. A marker
+    that is there but cannot be read (being replaced: Windows) is read again; still unreadable, it is not a reason
+    to end the mirror (False)."""
+    path = os.path.join(run, ON_VAST)
+    for k in range(tries):
+        if not os.path.exists(path):
+            return True
+        try:
+            with open(path, encoding='utf-8') as f:
+                return bool(json.load(f).get('homing'))
+        except (OSError, ValueError):
+            if k + 1 < tries:
+                time.sleep(0.2)
+    return False
 
 
 def wait_sync_loop(run, timeout_s=300):
@@ -899,12 +1174,82 @@ def cmd_run_ctl(a):
                   check=False).stdout)
 
 
-def box_supervisor_running(name):
-    # anchored to the supervisor's own command line (python tools/supervise.py ...): an unanchored pattern also
-    # matches the `bash -c` that runs pgrep, whose command line contains it
-    r = ssh(name, "pgrep -f '^[^ ]*python[0-9.]* tools/supervise[.]py ' >/dev/null && echo yes || echo no", check=False,
-            timeout=60)
-    return r.stdout.strip() == 'yes'
+def box_run_status(name, rd):
+    """The box run, from one ssh session -> {'supervisor': its supervise.py is running, 'run': how many mtgz.az.run
+    processes run there, 'state': its supervisor_state.json's state (None: no such file, or unreadable)} - or None
+    when that cannot be told (ssh failed, or the answer is not this script's). Unknown is never "stopped": reading a
+    dropped link as a stopped run made run-home pull a live run and unpause the desktop copy (two copies training;
+    docs/ENGINE.md 143)."""
+    # the patterns are anchored to the processes' own command lines (python tools/supervise.py ..., python -m
+    # mtgz.az.run ...): an unanchored one also matches the `bash -c` that runs pgrep, whose command line holds it
+    sh = ("S=no; pgrep -f '^[^ ]*python[0-9.]* tools/supervise[.]py ' >/dev/null && S=yes; "
+          "R=$(pgrep -fc '^[^ ]*python[0-9.]* -m mtgz[.]az[.]run ' || true); "
+          f'echo "@@status $S ${{R:-0}}"; cat {rd}/supervisor_state.json 2>/dev/null || true')
+    try:
+        r = ssh(name, sh, check=False, timeout=60)
+    except subprocess.TimeoutExpired:
+        return None
+    if r.returncode:
+        return None
+    lines = r.stdout.splitlines()
+    head = [i for i, x in enumerate(lines) if x.startswith('@@status ')]
+    if len(head) != 1:
+        return None
+    parts = lines[head[0]].split()
+    if len(parts) != 3 or parts[1] not in ('yes', 'no') or not parts[2].isdigit():
+        return None
+    try:
+        state = json.loads('\n'.join(lines[head[0] + 1:]) or 'null')
+    except ValueError:
+        state = None
+    return {'supervisor': parts[1] == 'yes', 'run': int(parts[2]),
+            'state': state.get('state') if isinstance(state, dict) else None}
+
+
+def known_status(name, rd, tries, wait_s=15):
+    """box_run_status, asked up to `tries` times while it is unknown -> the status, or None."""
+    for k in range(tries):
+        st = box_run_status(name, rd)
+        if st is not None:
+            return st
+        say(f'cannot tell the box run\'s state (ssh to {alias(name)} failed: {k + 1}/{tries})')
+        if k + 1 < tries:
+            time.sleep(wait_s)
+    return None
+
+
+def verify_home(name, run, rd, allow_opt_mismatch=False):
+    """After run-home's final pull: the desktop's optimizer state and models/best.pt are the box's (sha256 on both
+    sides), the optimizer state is of the newest checkpoint, and best.pt is the checkpoint index.json names - or
+    SystemExit (the run is not declared home). -> what was checked, for the log."""
+    mdir = os.path.join(run, 'models')
+    listing = remote_listing(name, rd)
+    names = [p for p in ('models/opt_latest.pt', 'models/best.pt')
+             if p in listing and os.path.exists(os.path.join(run, *p.split('/')))]
+    theirs = remote_hashes(name, rd, names)
+    for p in names:
+        if theirs[p] != sha256_file(os.path.join(run, *p.split('/'))):
+            die(f'after the final pull the desktop\'s {p} is not the box\'s (sha256 differs): not declared home')
+    k = newest_iter(run)
+    out = [f'{p} = the box\'s' for p in names]
+    opt = os.path.join(mdir, 'opt_latest.pt')
+    if os.path.exists(opt):
+        import torch
+        it = torch.load(opt, map_location='cpu', weights_only=False).get('iter')
+        if it != k and not allow_opt_mismatch:
+            die(f'the optimizer state is of iteration {it}, the newest checkpoint is {k}: the desktop would resume with a '
+                f'fresh optimizer. Not declared home (--allow-opt-mismatch: knowingly)')
+        out.append(f'optimizer state of iteration {it}' + ('' if it == k else f' (newest checkpoint {k}: ALLOWED)'))
+    try:
+        with open(os.path.join(mdir, 'index.json'), encoding='utf-8') as f:
+            best = (json.load(f).get('best') or {}).get('file')
+    except (OSError, ValueError):
+        best = None
+    if best and os.path.exists(os.path.join(mdir, 'best.pt')) and os.path.exists(os.path.join(mdir, best)):
+        if sha256_file(os.path.join(mdir, 'best.pt')) != sha256_file(os.path.join(mdir, best)):
+            die(f'models/best.pt is not {best}, the checkpoint models/index.json names best: not declared home')
+        out.append(f'best.pt = {best}')
+    return out
 
 
 def cmd_run_home(a):
@@ -912,26 +1257,55 @@ def cmd_run_home(a):
     run = os.path.abspath(a.run)
     m = read_marker(run, a.name)
     rd = m['remote_dir']
-    m['homing'] = time.time()                              # a sync loop of the run ends at its next pass
-    with open(os.path.join(run, ON_VAST), 'w', encoding='utf-8') as f:
-        json.dump(m, f, indent=1)
-    if box_supervisor_running(a.name):
+    st = known_status(a.name, rd, a.tries)
+    if st is None:
+        die(f'cannot reach {alias(a.name)}: whether the box run has stopped is unknown, and unknown is not stopped. '
+            f'Nothing changed on the desktop (a sync loop keeps mirroring); run-home again when the box answers')
+    if st['supervisor']:
         ssh(a.name, f'echo \'{{"time": {time.time()}, "by": "{PAUSE_BY}"}}\' > {rd}/STOP')
-        say(f'STOP on the box; waiting up to {a.wait_min} min for the run to end its iteration')
+        say(f'STOP on the box; waiting up to {a.wait_min} min for the run to end its iteration (a sync loop of the run '
+            f'keeps mirroring meanwhile)')
         t0 = time.time()
-        while box_supervisor_running(a.name):
+        while True:
+            st = box_run_status(a.name, rd)
+            if st is None:
+                say('cannot tell the box run\'s state (ssh failed): waiting on (unknown is not stopped)')
+            elif not st['supervisor']:
+                break
             if time.time() - t0 > a.wait_min * 60:
-                die('the box run did not stop in time (nothing changed on the desktop; run-home again later)')
+                die(f'the box run did not stop in time: nothing changed on the desktop and a sync loop keeps mirroring; '
+                    f'the box has STOP (its run ends after its iteration) - run-home again later')
             time.sleep(15)
-    wait_sync_loop(run)
-    say('box run stopped: full pull (data window, optimizer, checkpoints, logs)')
-    t0 = time.time()
-    nf, nb, nr = sync_once(a.name, run, rd, data=True, final=True)
-    say(f'pulled {nf} files + logs, {nb / 1e9:.2f} GB in {time.time() - t0:.0f} s')
+    # the stop, positively: no supervisor, no run process, and the supervisor's own last word 'done' (a clean exit:
+    # finished or STOP) or 'refused'
+    if st['run']:
+        die(f'the box\'s supervisor is gone but {st["run"]} mtgz.az.run process(es) still run there: not pulled '
+            f'(`python tools/vast.py run-ctl {a.name} {a.run} tail`)')
+    if st['state'] not in ('done', 'refused') and not a.assume_stopped:
+        die(f'the box\'s supervisor_state.json says {st["state"]!r}, not \'done\': its run did not end cleanly (a crash, a '
+            f'kill, never started?). Look first (`python tools/vast.py run-ctl {a.name} {a.run} tail`); --assume-stopped '
+            f'pulls it as it is (no supervisor and no run process run there now)')
+    m['homing'] = time.time()                              # a sync loop of the run ends at its next pass
+    write_marker(run, m)
+    try:
+        wait_sync_loop(run)
+        say(f'box run stopped (supervisor state {st["state"]!r}): full pull (data window, optimizer, checkpoints, logs)')
+        t0 = time.time()
+        nf, nb, nr = sync_once(a.name, run, rd, data=True, final=True)
+        say(f'pulled {nf} files + logs, {nb / 1e9:.2f} GB in {time.time() - t0:.0f} s')
+        say('checked: ' + '; '.join(verify_home(a.name, run, rd, a.allow_opt_mismatch)))
+    except BaseException:
+        m.pop('homing', None)
+        write_marker(run, m)
+        say(f'run-home failed after the sync loop was told to end: {ON_VAST} no longer says homing - the run is still on '
+            f'the box (its STOP is there); restart `run-sync --loop` to keep mirroring, or run-home again')
+        raise
     cfg_path = os.path.join(run, 'config.json')
     with open(cfg_path, encoding='utf-8') as f:
         cfg = json.load(f)
     cfg.update(m['restore'])                                # the desktop's paths and remote settings
+    for s in m.get('absent') or []:                         # (settings run-start's flags added: the desktop had none)
+        cfg.pop(s, None)
     with open(cfg_path + '.vasttmp', 'w', encoding='utf-8') as f:
         json.dump(cfg, f, indent=1)
     os.replace(cfg_path + '.vasttmp', cfg_path)
@@ -952,6 +1326,8 @@ def cmd_run_home(a):
         os.remove(pause)
     elif os.path.exists(pause):
         say(f'WARNING: {pause} is not tools/vast.py\'s (someone paused the run): left in place')
+    if os.path.exists(os.path.join(run, PULLED)):
+        os.remove(os.path.join(run, PULLED))              # (the box's listing: nothing once the run is home)
     os.replace(os.path.join(run, ON_VAST), os.path.join(run, ON_VAST.replace('.json', f'_{int(time.time())}.json')))
     say(f'{run} is home at iteration {k} (STOP left in place: relaunch on the desktop as usual); the box keeps its '
         f'copy until `destroy {a.name}`')
@@ -1010,6 +1386,12 @@ def main():
     p = sub.add_parser('run-push')
     p.add_argument('name')
     p.add_argument('run')
+    p.add_argument('--include', action='append', default=[], metavar='NAME',
+                   help='upload this entry of the run directory as it is (one the push does not know); may repeat')
+    p.add_argument('--leave', action='append', default=[], metavar='NAME',
+                   help='leave this entry on the desktop (the box run starts without it); may repeat')
+    p.add_argument('--clear-setting', action='append', default=[], metavar='SETTING',
+                   help="push this setting (one holding a desktop path) as '' (run-home restores it); may repeat")
     p.set_defaults(fn=cmd_run_push)
     p = sub.add_parser('run-start')
     p.add_argument('name')
@@ -1032,6 +1414,11 @@ def main():
     p.add_argument('name')
     p.add_argument('run')
     p.add_argument('--wait-min', type=float, default=30)
+    p.add_argument('--tries', type=int, default=4, help='ssh attempts (15 s apart) before an unreachable box ends it')
+    p.add_argument('--assume-stopped', action='store_true', help="pull although the box's supervisor_state.json is not "
+                   "'done' (still only with no supervisor and no run process on the box)")
+    p.add_argument('--allow-opt-mismatch', action='store_true', help='declare the run home although its optimizer '
+                   'state is not of its newest checkpoint')
     p.set_defaults(fn=cmd_run_home)
     a = ap.parse_args()
     if a.cmd == 'destroy' and not (a.name or a.all):

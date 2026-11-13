@@ -11,11 +11,13 @@ ad-hoc shell script. It can never pass a check it did not perform:
     build's "mtgz._engine OK: <this checkout>/mtgz/..." line, cargo's "test result: ok. N passed"
     lines (N > 0, 0 failed), pytest's FINAL summary line (0 failed, 0 errors, N > 0 passed), the
     digest line over the full 2,000 + 500 games, check_checkpoint_compat's {"identical": true}
-    with samples on both sides, a Mac step's "[mac] ... @ <this sha>" line, "0 failed of N
+    with samples on both sides, a Mac step's "[mac] ... @ <this sha>" and "[mac] done @ <this sha>"
+    lines (the Mac checkout's HEAD before and after the command), "0 failed of N
     configurations" with N the configurations asked for, ... A missing marker fails loudly.
   * **No silent skips.** A tier's essential inputs are required (encoding: --expect-digest,
-    --expect-digest0, --checkpoint; engine: --expect-digest, --expect-digest0, --tested-sha;
-    search-core and optin-core: --baseline-root; repin: --expect-digest, --spec, --preset): without
+    --expect-digest0, --checkpoint; engine: --expect-digest, --expect-digest0, --tested-sha and the
+    tested sha's suite report; search-core and optin-core: --baseline-root; repin: --expect-digest,
+    --spec, --preset): without
     one, gate.py refuses before running anything (exit 2) unless the caller opts out BY NAME -
     `--allow-skip <step>`, `--record-digest <which>` (record without comparing), `--no-mac`,
     `--allow-dirty`. An opted-out step is SKIPPED / RECORDED (never PASSED) in the report, and the
@@ -23,10 +25,18 @@ ad-hoc shell script. It can never pass a check it did not perform:
     option the tier does not use is refused too (it would be ignored, and the check it names
     would not run).
   * **The commit, unchanged.** The checkout's tracked files must match HEAD (the zero-core
-    submodule at the pin) - else the gate would check uncommitted code under the commit's name -
-    and must still match it afterwards (a step that rewrites a tracked file, e.g. re-recorded
-    digests, fails the gate). A caller's DIGEST_*, PYTEST_ADDOPTS, PYTHONPATH and
-    ZERO_CORE_UNPINNED never reach a step.
+    submodule at the pin), and no untracked file may sit where a build, a test or a run picks it
+    up (mtgz/checkout.py: engine/, mtgz/, tests/, tools/, data/, ...) - else the gate would check
+    code that is in no commit under the commit's name - and both must still hold afterwards, with
+    HEAD unmoved (a step that rewrites a tracked file, e.g. re-recorded digests, fails the gate).
+    A caller's DIGEST_*, FUZZ_*, PYTEST_ADDOPTS, PYTHONPATH and ZERO_CORE_UNPINNED never reach a
+    step.
+  * **Evidence, not assertions** (ENGINE.md 143). The engine tier no longer takes the full engine
+    suite and the 20k fuzz on the agent's word (--tested-sha): the `suite` tier runs them on a
+    commit and its report gates/<sha12>-suite.json is the evidence the engine tier checks (tier,
+    sha, pin, a clean pass, the fuzz's 20,000 games, every log unchanged); without it the engine
+    tier refuses unless --allow-skip suite-evidence, named in the final line.
+  * **A timeout bounds the step** - the command and every process it started (tools/proctree.py).
   * **The core's own suite** (search-core, optin-core): zero-core's engine module built with its
     tools/build_py.sh, then its pytest as its own step ("core pytest"). If the ONLY failures are in
     tests/test_remoteplay.py (it times real threads: zero-core AGENTS.md), each failed test is
@@ -42,7 +52,9 @@ tools/search_smoke.py. `--sha` (optional) must match the checkout's HEAD or the 
     python tools/gate.py docs
     python tools/gate.py python
     python tools/gate.py encoding --expect-digest <full> --expect-digest0 <encoding-free> --checkpoint <a .pt>
+    python tools/gate.py suite [--fuzz-pools default,delver]      # the agent's half of an engine change
     python tools/gate.py engine --expect-digest <the agent's full> --expect-digest0 <...> --tested-sha <the agent's sha>
+        [--suite-report <its checkout>/gates/<sha12>-suite.json]
     python tools/gate.py search-core --baseline-root ../other-checkout
     python tools/gate.py optin-core --baseline-root ../other-checkout
     python tools/gate.py repin --expect-digest <main's recorded digest> --spec delver --preset delver-mirror
@@ -52,7 +64,8 @@ Exit status: 0 passed ("GATE PASSED ...", or "GATE PASSED WITH SKIPS / WITH FLAK
 naming every opted-out step and every flaky retry), 1 failed ("GATE FAILED ..."), 2 refused (a
 setup problem or a missing essential input; nothing ran).
 
-Writes `gates/<sha>.json` (sha, zero-core pin, tier, options, the final line, each step's status -
+Writes `gates/<sha12>-<tier>.json` - one per commit AND tier, so a docs pass never overwrites an
+engine report (ENGINE.md 143) - (sha, zero-core pin, tier, options, the final line, each step's status -
 passed / failed / skipped / recorded / not needed - with its reason, command, log path + sha256 and
 seconds, digests, test counts, skips, flaky retries, the baseline checkout, the cargo target dir)
 and one log per step under `gates/logs/`. CPU only (CUDA_VISIBLE_DEVICES=-1, never ''),
@@ -81,6 +94,21 @@ import uuid
 from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import proctree  # noqa: E402  (tools/proctree.py: a timeout that bounds the whole process tree)
+
+
+def _load_checkout():
+    """mtgz/checkout.py by its path (standard library only): `import mtgz` needs the zero-core submodule, which the
+    gate checks before anything initialises it."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('_mtgz_checkout', os.path.join(ROOT, 'mtgz', 'checkout.py'))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+checkout = _load_checkout()
 CORE = os.path.join(ROOT, 'third_party', 'zero-core')
 GATES_DIR = os.path.join(ROOT, 'gates')
 WIN = sys.platform == 'win32'
@@ -484,17 +512,26 @@ def make_metrics_checker(run_dir, want_games=None, want_iters=1):
     return checker
 
 
-MAC_LINE_RE = re.compile(r'^\[mac\] (\S+) (\S+) @ ([0-9a-f]{7,40}): ', re.M)
+MAC_LINE_RE = re.compile(r'^\[mac\] (\S+) (\S+) @ ([0-9a-f]{40}): ', re.M)
+MAC_DONE_RE = re.compile(r'^\[mac\] done @ ([0-9a-f]{40}) \(exit (\d+)\)\s*$', re.M)
 
 
 def mac_commit_problem(output, sha):
-    """None when mac.sh's "[mac] <host> <branch> @ <sha9>: <cmd>" line is there for this commit, else
-    why not: the positive evidence that a Mac step reached the Mac and ran the gated commit."""
+    """None when mac.sh's "[mac] <host> <branch> @ <sha>: <cmd>" line - the Mac checkout's own HEAD, read there
+    after the checkout - is this commit, and its "[mac] done @ <sha> (exit N)" line - HEAD read again after the
+    command - is too; else why not: the positive evidence that a Mac step reached the Mac and ran the gated commit
+    from start to end (the line used to echo the sha the desktop sent, whatever the Mac had checked out, and
+    another mac.sh on the same branch could switch the checkout under a running command: ENGINE.md 143)."""
     m = MAC_LINE_RE.search(output)
     if not m:
-        return 'no "[mac] <host> <branch> @ <sha>:" line (mac.sh never reached the Mac?)'
-    if not sha.startswith(m.group(3)):
-        return f'the Mac ran {m.group(3)}, not {sha[:9]}'
+        return 'no "[mac] <host> <branch> @ <the Mac\'s HEAD>:" line (mac.sh never reached the Mac?)'
+    if m.group(3) != sha:
+        return f'the Mac\'s checkout was at {m.group(3)[:12]}, not {sha[:12]}'
+    d = MAC_DONE_RE.findall(output)
+    if not d:
+        return 'no "[mac] done @ <the Mac\'s HEAD> (exit N)" line: the Mac\'s checkout after the command is unknown'
+    if d[-1][0] != sha:
+        return f'the Mac\'s checkout moved to {d[-1][0][:12]} during the command (not {sha[:12]})'
     return None
 
 
@@ -506,7 +543,7 @@ def make_mac_checker(sha, inner):
 
 
 def make_eval_checkout_checker(sha):
-    """repin's `mac.sh --eval-checkout`: the "[mac] ... @ <sha9>" line, the Mac's build line
+    """repin's `mac.sh --eval-checkout`: the "[mac] ... @ <sha>" / "[mac] done @ <sha>" lines, the Mac's build line
     ("mtgz._engine OK: .../run-<sha12>/mtgz/..."), `mtgz.az.remote check`'s "mtgz remote: <dir> is
     <sha12>, unchanged, its engine built there", "eval checkout ready: .../run-<sha12>", exit 0."""
     run = f'run-{sha[:12]}'
@@ -557,6 +594,8 @@ class Step:
     not_needed: str = None                     # a conditional step whose condition is false: N/A, with why
     flaky: FlakyRetry = None
     prepare: object = None                     # callable() right before the step runs (never at --dry-run)
+    verify: object = None                      # callable() -> (passed, reason, extra, log text): a check that runs
+                                               # no command (another gate run's report as evidence)
 
     def __post_init__(self):
         self.id = self.id or slug(self.name)
@@ -603,33 +642,30 @@ def child_priority():
 
 def execute(argv, cwd, env, timeout):
     """Run one command -> (its stdout + stderr as text, its exit code or 'timeout'). stdin is closed (a
-    command that reads it gets EOF instead of hanging or reading ours). Module-level so tests stub it."""
-    kw = {'creationflags': child_priority()} if WIN else {}
-    try:
-        p = subprocess.run(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace',
-                           timeout=timeout, **kw)
-        return p.stdout, p.returncode
-    except subprocess.TimeoutExpired as e:
-        out = e.stdout or ''
-        if isinstance(out, bytes):          # TimeoutExpired.output is bytes even with text=True
-            out = out.decode('utf-8', 'replace')
-        return out + f'\n[gate.py: killed after {timeout}s timeout]\n', 'timeout'
+    command that reads it gets EOF instead of hanging or reading ours). The timeout bounds the command AND
+    its descendants (tools/proctree.py: subprocess.run's killed only bash, then waited for the grandchild that
+    held the pipe - ENGINE.md 143); a descendant still holding the output after the command exited is killed at
+    the deadline. Module-level so tests stub it."""
+    out, _, rc = proctree.run(argv, cwd=cwd, env=env, timeout=timeout, creationflags=child_priority() if WIN else 0)
+    if rc == 'timeout':
+        out += f'\n[gate.py: killed after {timeout}s timeout, with every process it started]\n'
+    return out, rc
 
 
-SCRUBBED_ENV = ('PYTHONPATH', 'PYTEST_ADDOPTS', 'ZERO_CORE_UNPINNED')    # and every DIGEST_*
+SCRUBBED_ENV = ('PYTHONPATH', 'PYTEST_ADDOPTS', 'ZERO_CORE_UNPINNED')    # and every DIGEST_* and FUZZ_*
 
 
 def step_env(ctx, step):
     """The step's environment: the caller's, the gate's base (CPU only, the target dir, ...) and the
     step's own (None = unset). Never the caller's DIGEST_* (DIGEST_WRITE re-records digests.txt
-    instead of comparing; DIGEST_RANDOM / _HEURISTIC / _ENCODING / _IDS change the digest),
-    PYTEST_ADDOPTS (can deselect tests), PYTHONPATH (can import another checkout) or
-    ZERO_CORE_UNPINNED (builds a core that is not the pin): each step states what it wants."""
+    instead of comparing; DIGEST_RANDOM / _HEURISTIC / _ENCODING / _IDS change the digest), FUZZ_*
+    (FUZZ_GAMES / _FIRST / _SKIP / _POOL change what the fuzz plays), PYTEST_ADDOPTS (can deselect
+    tests), PYTHONPATH (can import another checkout) or ZERO_CORE_UNPINNED (builds a core that is not
+    the pin): each step states what it wants."""
     env = dict(os.environ)
     env.update(ctx.base_env)
     for k in list(env):
-        if k.upper().startswith('DIGEST_') or k.upper() in SCRUBBED_ENV:
+        if k.upper().startswith(('DIGEST_', 'FUZZ_')) or k.upper() in SCRUBBED_ENV:
             del env[k]
     for k, v in (step.env or {}).items():
         if v is None:
@@ -669,6 +705,13 @@ def run_step(ctx, step):
         return StepResult(step.name, step.id, step.argv, cwd, 0.0, None, None, None, 'skipped',
                           f'skipped: {step.skip_reason}', {}, mac=step.mac)
     log_path = os.path.join(ctx.logs_dir, f'{ctx.sha_short}-{ctx.tier}-{slug(step.name)}.log')
+    if step.verify:
+        t0 = time.time()
+        passed, reason, extra, text = step.verify()
+        with open(log_path, 'w', encoding='utf-8', errors='replace') as f:
+            f.write(text)
+        return StepResult(step.name, step.id, step.argv, cwd, time.time() - t0, 0, log_path, sha256_file(log_path),
+                          'passed' if passed else 'failed', reason, extra, mac=step.mac)
     env = step_env(ctx, step)
     if step.prepare:
         step.prepare()
@@ -849,13 +892,29 @@ def tracked_changes():
     return [line for line in p.stdout.splitlines() if line.strip()]
 
 
+def untracked_files():
+    """The untracked, not ignored files where a build, a test or a run picks them up (mtgz/checkout.py: under
+    engine/, mtgz/, tests/, tools/, data/, ..., the root's build / test configuration, and inside the zero-core
+    submodule) as '?? <path>' lines: an untracked tests/test_*.py or engine/tests/*.rs is collected or compiled by
+    the gate's steps and is in no commit (ENGINE.md 143)."""
+    try:
+        return [f'?? {p}' for p in checkout.untracked_code(ROOT)]
+    except subprocess.CalledProcessError as e:
+        raise GateError(f'git ls-files --others ({ROOT}): {(e.stderr or "").strip()}') from None
+
+
+def tree_state():
+    return tracked_changes() + untracked_files()
+
+
 def check_tree(args):
-    dirty = tracked_changes()
+    dirty = tree_state()
     if dirty and not args.allow_dirty:
         shown = ', '.join(line.strip() for line in dirty[:8]) + (' ...' if len(dirty) > 8 else '')
-        raise GateError(f'uncommitted changes to tracked files ({shown}): the gate would check them under the '
-                        f'commit\'s name. Commit them (a WIP commit is fine; a submodule not at the pin: `git '
-                        f'submodule update third_party/zero-core`), or --allow-dirty (named in the final line).')
+        raise GateError(f'the checkout is not exactly its commit ({shown}): the gate would check uncommitted changes '
+                        f'or untracked files under the commit\'s name. Commit them (a WIP commit is fine; a submodule '
+                        f'not at the pin: `git submodule update third_party/zero-core`), remove the untracked files, '
+                        f'or --allow-dirty (named in the final line).')
     return dirty
 
 
@@ -910,10 +969,12 @@ def python_exe():
 def mac_step(ctx, name, remote_cmd, inner, step_id, evidence):
     """A Mac part of a tier: `bash tools/mac.sh '<remote_cmd>'`, which pushes HEAD and runs it on the
     checkout's exact commit there (ENGINE.md 44: bit-identical results). Its checker wants mac.sh's
-    "[mac] ... @ <this sha>" line before `inner`'s own positive evidence."""
+    "[mac] ... @ <this sha>" and "[mac] done @ <this sha>" lines (the Mac checkout's HEAD before and after the
+    command: mac_commit_problem) before `inner`'s own positive evidence."""
     return Step(name, ['bash', 'tools/mac.sh', remote_cmd], id=step_id, mac=True,
                 checker=make_mac_checker(ctx.sha, inner),
-                evidence='mac.sh\'s "[mac] <host> <branch> @ <this sha>" line, then ' + evidence)
+                evidence='mac.sh\'s "[mac] <host> <branch> @ <this sha>" and "[mac] done @ <this sha>" lines, then '
+                         + evidence)
 
 
 def need_core():
@@ -1110,6 +1171,124 @@ def tier_encoding(ctx, args):
     return steps
 
 
+FUZZ_GAMES = 20000          # AGENTS.md / ENGINE.md 16: the 20k fuzz before an engine change merges
+FUZZ_RE = re.compile(r'^(\d+) games: wins \[', re.M)
+SUITE_STEPS = ('cargo-test-engine',)          # + one 'fuzz-<pool>' step per --fuzz-pools entry
+
+
+def make_fuzz_checker(games):
+    """The fuzz test binary's positive evidence: fuzz_random_games' "N games: wins [...]" line (printed with
+    --nocapture, after every game ended) with N = `games` exactly, then the binary's one "test result: ok. N
+    passed; 0 failed" line (its match fuzz and the rest passed too) + exit 0."""
+    def checker(output, rc):
+        ms = FUZZ_RE.findall(output)
+        if not ms:
+            return False, 'no "N games: wins [...]" line (fuzz_random_games did not finish, or ran without --nocapture)', {}
+        if len(ms) != 1:
+            return False, f'{len(ms)} "N games: wins" lines (expected exactly 1)', {}
+        n = int(ms[0])
+        if n != games:
+            return False, f'{n} games fuzzed, not {games}', {'fuzz_games': n}
+        ok, why, extra = make_cargo_checker(single=True)(output, rc)
+        extra = dict(extra, fuzz_games=n)
+        if not ok:
+            return False, f'{n} games fuzzed, but the fuzz binary did not pass: {why}', extra
+        return True, f'{n} games fuzzed; {why}', extra
+    return checker
+
+
+def tier_suite(ctx, args):
+    """The full engine suite and the 20k fuzz on THIS commit (the engine change's own half: AGENTS.md); its report
+    gates/<sha12>-suite.json is the evidence the engine tier wants for --tested-sha (ENGINE.md 143)."""
+    pools = split_list(args.fuzz_pools, 'default', '--fuzz-pools')
+    steps = [Step('cargo test (the full engine suite)', ['cargo', 'test', '--release', '-p', 'engine', '--no-fail-fast'],
+                  id='cargo-test-engine', checker=make_cargo_checker(),
+                  evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0')]
+    for pool in pools:
+        env = {'FUZZ_GAMES': str(FUZZ_GAMES)}
+        if pool != 'default':
+            env['FUZZ_POOL'] = pool
+        steps.append(Step(f'fuzz {FUZZ_GAMES} games ({"FUZZ_POOL=" + pool if pool != "default" else "the default pool"})',
+                          ['cargo', 'test', '--release', '-p', 'engine', '--test', 'fuzz', '--', '--nocapture'], env=env,
+                          id=f'fuzz-{slug(pool)}', checker=make_fuzz_checker(FUZZ_GAMES),
+                          evidence=f'"{FUZZ_GAMES} games: wins [...]", exactly one "test result: ok. N passed; 0 failed" + '
+                                   f'exit 0'))
+    return steps
+
+
+def suite_report_problems(path, sha, pin):
+    """Why the report at `path` is not the evidence that the full engine suite and the 20k fuzz passed on commit
+    `sha` with zero-core `pin` -> (problems, the report or None). The evidence: a `suite` tier report of that sha and
+    pin, passed and clean (no skip, no --allow-dirty), its engine-suite step and at least one fuzz step of
+    FUZZ_GAMES games passed, and every step's log still there with the sha256 the report recorded."""
+    try:
+        with open(path, encoding='utf-8') as f:
+            r = json.load(f)
+    except (OSError, ValueError) as e:
+        return [f'cannot read it ({type(e).__name__}: {e})'], None
+    out = []
+    if r.get('tier') != 'suite':
+        out.append(f'its tier is {r.get("tier")!r}, not \'suite\'')
+    if r.get('sha') != sha:
+        out.append(f'it gates {str(r.get("sha"))[:12]}, not {sha[:12]}')
+    if pin and r.get('zero_core_pin') != pin:
+        out.append(f'its zero-core pin is {str(r.get("zero_core_pin"))[:12]}, not {pin[:12]}')
+    if not (r.get('passed') and r.get('clean')):
+        out.append(f'it did not pass cleanly: {str(r.get("final"))[:200]}')
+    steps = {s.get('id'): s for s in r.get('steps') or []}
+    for sid in SUITE_STEPS:
+        if (steps.get(sid) or {}).get('status') != 'passed':
+            out.append(f'no passed {sid} step')
+    fuzz = [s for k, s in steps.items() if str(k).startswith('fuzz-')]
+    if not any(s.get('status') == 'passed' and s.get('fuzz_games') == FUZZ_GAMES for s in fuzz):
+        out.append(f'no passed fuzz step of {FUZZ_GAMES} games')
+    for s in steps.values():
+        log, want = s.get('log'), s.get('log_sha256')
+        if not log:
+            continue
+        if not os.path.isfile(log):
+            out.append(f'its {s.get("id")} log {log} is gone (the evidence cannot be checked)')
+        elif sha256_file(log) != want:
+            out.append(f'its {s.get("id")} log {log} changed since the report (sha256)')
+    return out, r
+
+
+def suite_evidence_step(ctx, args, sha, why):
+    """The engine tier's evidence that the full engine suite and the 20k fuzz passed on `sha` (the --tested-sha, or
+    this commit): a `suite` tier report (--suite-report, default gates/<sha12>-suite.json of this checkout). Without
+    one the tier refuses unless --allow-skip suite-evidence (SKIPPED: "asserted, not evidenced" in the final line)."""
+    sid = 'suite-evidence'
+    name = f'evidence: the full engine suite + the {FUZZ_GAMES // 1000}k fuzz passed on {sha[:12]} ({why})'
+    path = os.path.abspath(args.suite_report or report_path(sha[:12], 'suite'))
+    pin = git(['rev-parse', f'{sha}:third_party/zero-core'], check=False) or None
+    if not args.suite_report and not os.path.exists(path):
+        if opted_out(args, sid):
+            return Step(name, [], id=sid, skip_reason=f'--allow-skip {sid}: the full engine suite and the '
+                                                      f'{FUZZ_GAMES // 1000}k fuzz of {sha[:12]} are asserted, not evidenced')
+        raise GateError(f'the engine tier wants evidence that the full engine suite and the {FUZZ_GAMES // 1000}k fuzz '
+                        f'passed on {sha[:12]} ({why}): `python tools/gate.py suite` in a checkout of it writes '
+                        f'gates/{sha[:12]}-suite.json (here: {path}); --suite-report <that file> when it is another '
+                        f'checkout\'s; --allow-skip {sid} runs without it (SKIPPED, named in the final line)')
+    if opted_out(args, sid):
+        raise GateError(f'--allow-skip {sid} with a suite report ({path}): check it or skip it, not both')
+    problems, _ = suite_report_problems(path, sha, pin)
+    if problems:
+        raise GateError(f'suite report {path} is not the evidence for {sha[:12]}: ' + '; '.join(problems))
+
+    def verify():
+        p, r = suite_report_problems(path, sha, pin)
+        text = f'suite report {path}\nsha256 {sha256_file(path) if os.path.exists(path) else "-"}\n' + \
+            json.dumps(r, indent=1) + '\n'
+        if p:
+            return False, 'the suite report is no longer the evidence: ' + '; '.join(p), {}, text
+        fuzz = [s for s in r['steps'] if str(s.get('id')).startswith('fuzz-') and s.get('status') == 'passed']
+        return True, (f'{sha[:12]}: full engine suite and {len(fuzz)} fuzz run(s) of {FUZZ_GAMES} games passed '
+                      f'(report {path}, {r.get("started", "")[:19]})'), {'suite_report': path}, text
+    return Step(name, [], id=sid, verify=verify,
+                evidence=f'{path}: a clean passed suite report of {sha[:12]} (engine suite + a {FUZZ_GAMES}-game fuzz), '
+                         f'its logs unchanged')
+
+
 def tier_engine(ctx, args):
     steps = [build_step(ctx), *digest_steps(ctx, args),
              cargo_step('cargo test az', 'az'), cargo_step('cargo test limits', 'limits'),
@@ -1121,6 +1300,7 @@ def tier_engine(ctx, args):
         tested = git(['rev-parse', '--verify', '--quiet', f'{args.tested_sha}^{{commit}}'], check=False)
         if not tested:
             raise GateError(f'--tested-sha {args.tested_sha}: not a commit in this repository')
+        steps.append(suite_evidence_step(ctx, args, tested, 'the --tested-sha' if tested != ctx.sha else 'this commit'))
         if tested == ctx.sha:
             steps.append(Step(name, [], id=sid, mac=True, not_needed='--tested-sha is this commit'))
         else:
@@ -1134,6 +1314,7 @@ def tier_engine(ctx, args):
                                   not_needed=f'--tested-sha {tested[:12]} differs from this commit in {len(touched)} '
                                              f'file(s), none under engine/ or card_ir/'))
     elif args.no_mac or opted_out(args, sid):
+        steps.append(suite_evidence_step(ctx, args, ctx.sha, 'this commit: no --tested-sha'))
         why = f'--allow-skip {sid}' if opted_out(args, sid) else '--no-mac'
         steps.append(Step(name, [], id=sid, mac=True,
                           skip_reason=f'{why}: no --tested-sha, so whether the recheck was needed was not decided'))
@@ -1267,7 +1448,7 @@ def tier_repin(ctx, args):
                    ['--preset', args.preset], group='parallel-mac'),
         Step('mac.sh --eval-checkout', ['bash', 'tools/mac.sh', '--eval-checkout'], id='mac-eval-checkout', mac=True,
              group='parallel-mac', checker=make_eval_checkout_checker(ctx.sha),
-             evidence=f'"[mac] ... @ {ctx.sha[:9]}", the Mac\'s "mtgz._engine OK: .../run-{ctx.sha_short}/...", "mtgz '
+             evidence=f'"[mac] ... @ {ctx.sha_short}..." and "[mac] done @ {ctx.sha_short}...", the Mac\'s "mtgz._engine OK: .../run-{ctx.sha_short}/...", "mtgz '
                       f'remote: ... is {ctx.sha_short}, unchanged", "eval checkout ready: .../run-{ctx.sha_short}" + '
                       f'exit 0'),
     ]
@@ -1279,9 +1460,13 @@ TIERS = {
     'encoding': (tier_encoding, 'encoding-only (layout unchanged): build + DIGEST_ENCODING=0 digest == --expect-digest0 '
                  '+ full digest == --expect-digest + --test az + checkpoint-load (--checkpoint) + pytest. NO search '
                  'smoke (~7 min).'),
+    'suite': (tier_suite, 'engine rules/cards (the agent\'s half): the full engine suite + the 20k fuzz (--fuzz-pools, '
+              'default the default pool) on this commit; its report gates/<sha>-suite.json is the engine tier\'s '
+              'evidence for --tested-sha (~30 min a pool).'),
     'engine': (tier_engine, 'engine rules/cards (orchestrator half): fresh build, digests == the agent\'s report, '
-               'az/limits/hidden, pytest, 1 desktop smoke config; a Mac full-suite recheck only if the merged sha '
-               'differs from --tested-sha with overlapping engine/card_ir files (~10 min).'),
+               'az/limits/hidden, pytest, 1 desktop smoke config, the --tested-sha\'s suite report (the full suite + '
+               'the 20k fuzz, evidenced); a Mac full-suite recheck only if the merged sha differs from --tested-sha '
+               'with overlapping engine/card_ir files (~10 min).'),
     'search-core': (tier_search_core, 'search/core behaviour: build + core cargo test + pytest + check_checkpoint_compat '
                     'goldens (--baseline-root) + 4-config smoke of the pinning game + run-loop smoke + core build + '
                     'core pytest (~35 min).'),
@@ -1298,14 +1483,15 @@ TIER_OPTIONS = {
     'docs': {'files'},
     'python': {'smoke_preset', 'allow_skip'},
     'encoding': {'expect_digest', 'expect_digest0', 'record_digest', 'checkpoint', 'checkpoint_spec', 'allow_skip'},
-    'engine': {'expect_digest', 'expect_digest0', 'record_digest', 'tested_sha', 'allow_skip'},
+    'suite': {'fuzz_pools'},
+    'engine': {'expect_digest', 'expect_digest0', 'record_digest', 'tested_sha', 'suite_report', 'allow_skip'},
     'search-core': {'baseline_root', 'checkpoint_spec', 'configs', 'allow_skip'},
     'optin-core': {'baseline_root', 'checkpoint_spec', 'feature_tests', 'other_games', 'allow_skip'},
     'repin': {'expect_digest', 'spec', 'preset'},
 }
 TIER_SPECIFIC = set().union(*TIER_OPTIONS.values())
 # The steps a caller may opt out of by name (--allow-skip <id>); Mac steps also go with --no-mac.
-SKIPPABLE = {'python': ('build',), 'encoding': ('checkpoint-load',), 'engine': ('mac-recheck',),
+SKIPPABLE = {'python': ('build',), 'encoding': ('checkpoint-load',), 'engine': ('mac-recheck', 'suite-evidence'),
              'search-core': ('checkpoint-compat',), 'optin-core': ('checkpoint-compat',)}
 
 
@@ -1334,6 +1520,11 @@ def finish_plan(steps, args):
 
 # ---------------------------------------------------------------------------- report
 
+def report_path(sha_short, tier):
+    """gates/<sha12>-<tier>.json: one report per commit and tier."""
+    return os.path.join(GATES_DIR, f'{sha_short}-{tier}.json')
+
+
 def write_report(ctx, args, results, ok, not_run, started, seconds, path, line):
     sk, rec, fl = caveats(results, ctx.dirty)
     report = {
@@ -1350,7 +1541,8 @@ def write_report(ctx, args, results, ok, not_run, started, seconds, path, line):
         report['steps'].append({'id': r.id, 'name': r.name, 'status': r.status, 'passed': r.passed,
                                 'skipped': r.skipped, 'reason': r.reason, 'cmd': r.argv, 'cwd': r.cwd,
                                 'seconds': round(r.seconds, 2), 'rc': r.rc, 'log': r.log, 'log_sha256': r.log_sha256,
-                                'mac': r.mac, **({'retries': r.extra['retries']} if 'retries' in r.extra else {})})
+                                'mac': r.mac, **({'retries': r.extra['retries']} if 'retries' in r.extra else {}),
+                                **({'fuzz_games': r.extra['fuzz_games']} if 'fuzz_games' in r.extra else {})})
         if r.extra.get('digest'):
             key = 'encoding_free' if 'encoding-free' in r.id else 'full'
             report['digests'][key] = {'value': r.extra['digest'], 'status': r.status}
@@ -1384,6 +1576,11 @@ def build_parser():
     ap.add_argument('--tested-sha', default=None, help='engine tier (required): the sha the agent fuzzed/tested - '
                     'this commit\'s own when gated directly; the Mac recheck runs when a different one touched '
                     'engine/ or card_ir/')
+    ap.add_argument('--suite-report', default=None, help='engine tier: the suite tier\'s report of the --tested-sha (the '
+                    'evidence that the full engine suite and the 20k fuzz passed on it; default gates/<sha12>-suite.json '
+                    'of this checkout)')
+    ap.add_argument('--fuzz-pools', default=None, help='suite tier: comma-separated FUZZ_POOL values, one 20k fuzz each '
+                    '(default: default, the cube pool; e.g. default,delver)')
     ap.add_argument('--expect-digest', type=hex16, default=None, help='encoding/engine/repin (required): the full '
                     'combined digest the digest step must equal')
     ap.add_argument('--expect-digest0', type=hex16, default=None, help='encoding/engine (required): the '
@@ -1458,20 +1655,27 @@ def main(argv=None):
           f'{ctx.target_dir}', flush=True)
     started = iso_now()
     t0 = time.time()
-    before = tracked_changes()
+    before = tree_state()
     results, ok, not_run = run_steps(ctx, steps)
     if ok:
-        after = tracked_changes()
-        changed = sorted(set(after) - set(before))
-        tree = StepResult('tracked files unchanged by the gate', 'tree-unchanged', [], ctx.root, 0.0, None, None, None,
-                          'failed' if changed else 'passed',
-                          ('tracked files changed during the gate: ' + ', '.join(c.strip() for c in changed[:8]))
-                          if changed else 'git status unchanged', {})
+        # the checkout at the end: the same files (a step that rewrites a tracked file or leaves an untracked one where
+        # a build or test picks it up fails the gate) and the same HEAD (a commit made in the checkout during the gate
+        # would leave `git status` clean and the report naming the old sha: ENGINE.md 143)
+        changed = sorted(set(tree_state()) - set(before))
+        head = git(['rev-parse', 'HEAD'], check=False)
+        why = []
+        if changed:
+            why.append('the checkout changed during the gate: ' + ', '.join(c.strip() for c in changed[:8]))
+        if head != ctx.sha:
+            why.append(f'HEAD moved during the gate: {ctx.sha_short} -> {head[:12] or "?"}')
+        tree = StepResult('the checkout unchanged by the gate', 'tree-unchanged', [], ctx.root, 0.0, None, None, None,
+                          'failed' if why else 'passed', '; '.join(why) or 'git status and HEAD unchanged', {})
         results.append(tree)
         report_step(tree)
-        ok = not changed
+        ok = not why
     seconds = time.time() - t0
-    path = os.path.join(GATES_DIR, f'{ctx.sha_short}.json')
+    # one report per (commit, tier): a docs pass on a commit no longer overwrites its engine report (ENGINE.md 143)
+    path = report_path(ctx.sha_short, args.tier)
     line = final_line(args.tier, ctx.sha_short, ok, results, not_run, seconds, path, ctx.dirty)
     write_report(ctx, args, results, ok, not_run, started, seconds, path, line)
     print(line, flush=True)
