@@ -31,7 +31,7 @@
 
 use crate::az::matches::{Format, MatchState};
 use crate::az::MtgAz;
-use crate::db::{types, AbilitySlot, Counter, Kw, KwSet, Mod};
+use crate::db::{types, AbilitySlot, Counter, Kw, KwSet, Mod, Prot};
 use crate::game::{Dungeon, Game, Obj, Player, StackItem, StackKind, Step, Turn};
 use crate::ids::{opp, CardIdx, DefId, PlayerId, Target, Zone};
 use crate::layers::{Affected, Until};
@@ -496,15 +496,50 @@ fn characteristics(g: &Game, c: CardIdx) -> (u16, u8, (crate::num::Wide, crate::
 
 /// An until-end-of-turn effect `m` on permanent `c`.
 fn effect(g: &mut Game, c: CardIdx, m: Mod) -> Option<String> {
-    let r = g.obj_ref(c);
     let p = g.objs[c.i()].controller;
-    let what = format!("{m:?} on {}", g.name(c));
-    g.add_effect(Affected::Obj(r), m, Until::EndOfTurn, p);
+    effect_until(g, c, m, Until::EndOfTurn, p)
+}
+
+/// An effect `m` on permanent `c` lasting `until`, controlled by `controller` ("you" of "until your
+/// next turn").
+fn effect_until(g: &mut Game, c: CardIdx, m: Mod, until: Until, controller: PlayerId) -> Option<String> {
+    let r = g.obj_ref(c);
+    let what = format!("{m:?} on {} ({until:?}, P{controller}'s)", g.name(c));
+    g.add_effect(Affected::Obj(r), m, until, controller);
     Some(what)
 }
 
-/// `n` counters of kind `k` on permanent `c`, by hand (no events).
+/// "For as long as <another permanent> remains on the battlefield" (CR 611.2b; Tishana's
+/// Tidebinder): the first permanent other than `c`.
+fn while_other(g: &Game, c: CardIdx) -> Option<Until> {
+    let o = slots(g).into_iter().find(|&x| x != c)?;
+    Some(Until::WhileOnBattlefield(g.obj_ref(o)))
+}
+
+/// A creature without protection (the gate's protection family, ENGINE.md 142: every member on
+/// one candidate list) gains protection `prot` until end of turn.
+fn protection(a: &mut MtgAz, r: &mut Rng, prot: Prot) -> Option<String> {
+    let cs: Vec<CardIdx> = slot_creatures(&a.g).into_iter().filter(|&c| a.g.protection_of(c).is_empty()).collect();
+    let c = pick(&cs, r)?;
+    effect(&mut a.g, c, Mod::Protection(prot))
+}
+
+/// A counter of kind `k` on permanent `c`, by hand (no events). A +1/+1 counter on a permanent
+/// with a -1/-1 counter removes one instead, and the other way (the state-based action of CR
+/// 704.5q: a decision never sees both on one permanent; ENGINE.md 142).
 fn counter(g: &mut Game, c: CardIdx, k: Counter) -> Option<String> {
+    let other = match k {
+        Counter::P1P1 => Some(Counter::M1M1),
+        Counter::M1M1 => Some(Counter::P1P1),
+        _ => None,
+    };
+    if let Some(i) = other.and_then(|o| g.counters.iter().position(|x| x.0 == c && x.1 == o && x.2 > 0)) {
+        g.counters[i].2 -= 1;
+        if g.counters[i].2 == 0 {
+            g.counters.remove(i);
+        }
+        return Some(format!("a {k:?} counter on {} (one {:?} counter fewer, CR 704.5q)", g.name(c), other.unwrap()));
+    }
     match g.counters.iter_mut().find(|x| x.0 == c && x.1 == k) {
         Some(x) => x.2 += 1,
         None => g.counters.push((c, k, 1)),
@@ -653,11 +688,17 @@ pub fn perturbations() -> Vec<Perturbation> {
                             && ss.contains(&o.idx)
                             && !g.effects.iter().enumerate().any(|(j, e)| j != i && e.on == g.effects[i].on && e.m == g.effects[i].m)
                     }
-                    Affected::Group(_) => false,
+                    // (A group's rules effect ends whatever it applies to now: it binds the
+                    // permanents that match later too, CR 611.2c; ENGINE.md 142.)
+                    Affected::Group(_) => !g.effects.iter().enumerate().any(|(j, e)| j != i && e.on == g.effects[i].on && e.m == g.effects[i].m),
                 })
                 .collect();
             let i = pick(&live, r)?;
-            let Affected::Obj(o) = a.g.effects[i].on.clone() else { return None };
+            let Affected::Obj(o) = a.g.effects[i].on.clone() else {
+                let e = a.g.effects.remove(i);
+                a.g.effects_changed();
+                return Some(format!("{:?} on {:?}", e.m, e.on));
+            };
             let before = characteristics(&a.g, o.idx);
             let e = a.g.effects.remove(i);
             a.g.effects_changed();
@@ -744,10 +785,8 @@ pub fn perturbations() -> Vec<Perturbation> {
             effect(&mut a.g, c, Mod::Colors(to))
         }),
         p!("a creature gains protection from red", "Game.effects", |a, r| {
-            // (One without protection: the encoding's flag is a summary.)
-            let cs: Vec<CardIdx> = slot_creatures(&a.g).into_iter().filter(|&c| a.g.protection_of(c).is_empty()).collect();
-            let c = pick(&cs, r)?;
-            effect(&mut a.g, c, Mod::Protection(crate::db::Prot { colors: 1 << 3, ..Default::default() }))
+            // (One without protection: the protection family's, ENGINE.md 142.)
+            protection(a, r, Prot { colors: 1 << 3, ..Default::default() })
         }),
         p!("a +1/+1 counter on a creature", "Game.counters", |a, r| {
             let c = pick(&slot_creatures(&a.g), r)?;
@@ -1982,6 +2021,152 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.players[p].uncounterable_next += 1;
             Some(format!("P{p}: {}", a.g.players[p].uncounterable_next))
         }),
+        // ---- ENGINE.md 142: the pairwise gate's perturbations ----
+        // Families on one candidate list each (the pairwise pass draws every perturbation of a
+        // position from one stream, so the members of a family act on the same object): which
+        // protection, the sources of a creature's power and toughness (counters, effects and
+        // their durations), counter kinds. Then one perturbation per `Mod` variant the list above
+        // lacked (`MOD_PERTURBATIONS`, `mod_variant` an exhaustive match), group (rules) effects,
+        // and an effect's duration.
+        p!("a creature gains protection from white", "Game.effects", |a, r| protection(a, r, Prot { colors: 1 << 0, ..Default::default() })),
+        p!("a creature gains protection from blue", "Game.effects", |a, r| protection(a, r, Prot { colors: 1 << 1, ..Default::default() })),
+        p!("a creature gains protection from black", "Game.effects", |a, r| protection(a, r, Prot { colors: 1 << 2, ..Default::default() })),
+        p!("a creature gains protection from green", "Game.effects", |a, r| protection(a, r, Prot { colors: 1 << 4, ..Default::default() })),
+        p!("a creature gains protection from colorless", "Game.effects", |a, r| protection(a, r, Prot { colorless: true, ..Default::default() })),
+        p!("a creature gains protection from everything", "Game.effects", |a, r| protection(a, r, Prot { everything: true, ..Default::default() })),
+        p!("a creature gains protection from creatures", "Game.effects", |a, r| protection(a, r, Prot { types: types::CREATURE, ..Default::default() })),
+        p!("a creature gains protection from its controller's opponents", "Game.effects", |a, r| protection(a, r, Prot { opponents: true, ..Default::default() })),
+        p!("a creature gains protection from coloured spells", "Game.effects", |a, r| protection(a, r, Prot { colored_spells: true, ..Default::default() })),
+        p!("+1/+1 until its controller's next turn", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::Pt(1, 1), Until::YourNextTurn, p)
+        }),
+        p!("+1/+1 until the other player's next turn", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            let p = opp(a.g.objs[c.i()].controller);
+            effect_until(&mut a.g, c, Mod::Pt(1, 1), Until::YourNextTurn, p)
+        }),
+        p!("+1/+1 with no duration", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::Pt(1, 1), Until::Forever, p)
+        }),
+        p!("+1/+1 for as long as another permanent remains on the battlefield", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            let w = while_other(&a.g, c)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::Pt(1, 1), w, p)
+        }),
+        p!("a permanent loses all abilities for as long as another permanent remains on the battlefield", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slots(&a.g).into_iter().filter(|&c| !a.g.lost_abilities(c)).collect();
+            let c = pick(&cs, r)?;
+            let w = while_other(&a.g, c)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::LoseAllAbilities, w, p)
+        }),
+        p!("a permanent loses all abilities with no duration", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slots(&a.g).into_iter().filter(|&c| !a.g.lost_abilities(c)).collect();
+            let c = pick(&cs, r)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::LoseAllAbilities, Until::Forever, p)
+        }),
+        p!("a creature can't block with no duration", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slot_creatures(&a.g).into_iter().filter(|&c| !a.g.flags_of(c).cant_block).collect();
+            let c = pick(&cs, r)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::CantBlock, Until::Forever, p)
+        }),
+        p!("a land becomes a 3/3 creature with no duration", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slots(&a.g).into_iter().filter(|&c| a.g.is_type(c, types::LAND) && !a.g.is_creature(c)).collect();
+            let c = pick(&cs, r)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::Types { add: types::CREATURE, subtypes: Vec::new(), replace: false }, Until::Forever, p)?;
+            effect_until(&mut a.g, c, Mod::SetPt(3, 3), Until::Forever, p)
+        }),
+        p!("an effect's duration is another", "Game.effects", |a, r| {
+            // (An effect from the position on a permanent or a group; its duration made another
+            // one: until end of turn <-> no duration, until a player's next turn or while an object
+            // remains -> until end of turn.)
+            let g = &a.g;
+            let live: Vec<usize> = (0..g.effects.len())
+                .filter(|&i| match &g.effects[i].on {
+                    Affected::Obj(o) => g.live(*o) && g.objs[o.idx.i()].zone == Zone::Battlefield,
+                    Affected::Group(_) => true,
+                })
+                .collect();
+            let i = pick(&live, r)?;
+            let e = &mut a.g.effects[i];
+            let old = e.until;
+            e.until = if old == Until::EndOfTurn { Until::Forever } else { Until::EndOfTurn };
+            let what = format!("{:?}: {old:?} -> {:?}", e.m, e.until);
+            a.g.effects_changed();
+            Some(what)
+        }),
+        p!("another named counter", "Game.counters", |a, r| {
+            let c = pick(&slots(&a.g), r)?;
+            counter(&mut a.g, c, Counter::Named(1))
+        }),
+        p!("two named counters", "Game.counters", |a, r| {
+            let c = pick(&slots(&a.g), r)?;
+            counter(&mut a.g, c, Counter::Named(0))?;
+            counter(&mut a.g, c, Counter::Named(0))
+        }),
+        p!("a stun counter and a named counter", "Game.counters", |a, r| {
+            let c = pick(&slots(&a.g), r)?;
+            counter(&mut a.g, c, Counter::Stun)?;
+            counter(&mut a.g, c, Counter::Named(0))
+        }),
+        p!("a land gains \"sacrifice it: add {B}\"", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slots(&a.g).into_iter().filter(|&c| a.g.is_type(c, types::LAND)).collect();
+            let c = pick(&cs, r)?;
+            effect(&mut a.g, c, Mod::GainSacMana(1 << 2))
+        }),
+        p!("a creature has all creature types", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            effect(&mut a.g, c, Mod::AllCreatureTypes)
+        }),
+        p!("a land becomes a 2/2 creature and nothing else", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slots(&a.g).into_iter().filter(|&c| a.g.is_type(c, types::LAND) && !a.g.is_creature(c)).collect();
+            let c = pick(&cs, r)?;
+            effect(&mut a.g, c, Mod::BecomeTypes { types: types::CREATURE, subtypes: Vec::new() })?;
+            effect(&mut a.g, c, Mod::SetPt(2, 2))
+        }),
+        p!(rare "a permanent gains a latent ability of its card", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slots(&a.g).into_iter().filter(|&c| a.g.def_of(c).latent > 0).collect();
+            let c = pick(&cs, r)?;
+            effect(&mut a.g, c, Mod::GainLatent(0))
+        }),
+        p!("a creature's power and toughness are switched", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slot_creatures(&a.g).into_iter().filter(|&c| a.g.pt(c).0 != a.g.pt(c).1).collect();
+            let c = pick(&cs, r)?;
+            effect(&mut a.g, c, Mod::SwitchPt)
+        }),
+        p!("a player gained control of a permanent until end of turn", "Game.effects", |a, r| {
+            let c = pick(&slots(&a.g), r)?;
+            let prev = a.g.objs[c.i()].controller;
+            let to = opp(prev);
+            let turn = a.g.turn.number;
+            let o = &mut a.g.objs[c.i()];
+            o.controller = to;
+            o.control_since = turn;
+            effect_until(&mut a.g, c, Mod::ControlFrom(prev), Until::EndOfTurn, to)
+        }),
+        p!("a creature attacks the other player this combat if able", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            effect(&mut a.g, c, Mod::MustAttackPlayer)
+        }),
+        p!("creatures a player controls can't block this turn (a rules effect)", "Game.effects", |a, r| {
+            let p = player(r);
+            let f = crate::db::Filter::And(Box::new(crate::db::Filter::Type(types::CREATURE)), Box::new(crate::db::Filter::Controller(true)));
+            a.g.add_effect(Affected::Group(f), Mod::CantBlock, Until::EndOfTurn, p);
+            Some(format!("P{p}'s creatures"))
+        }),
+        p!("combat damage is prevented this turn (a rules effect)", "Game.effects", |a, r| {
+            let p = player(r);
+            a.g.add_effect(Affected::Group(crate::db::Filter::Type(types::CREATURE)), Mod::PreventCombatDamage, Until::EndOfTurn, p);
+            Some(format!("by P{p}"))
+        }),
         // (ENGINE.md 123's "a card name was chosen as a permanent entered" - Disruptor Flute, Anointed
         // Peacekeeper - is the `Mark` perturbation above, layout v7's: ENGINE.md 125.)
     ]
@@ -2209,6 +2394,342 @@ pub fn mark_variant(m: &crate::game::Mark) -> &'static str {
 }
 
 
+/// One perturbation per `Mod` variant a continuous effect from a resolved spell or ability can
+/// have (ENGINE.md 142; the Fable review's B4: four had none): the variant, the perturbation that
+/// makes it. `mod_variant` is an exhaustive match, so a new variant is a compile error until it is
+/// here or in [`STATIC_ONLY_MODS`]; `tests/az.rs` checks the table.
+pub const MOD_PERTURBATIONS: [(&str, &str); 21] = [
+    ("Types", "a permanent becomes an artifact too"),
+    ("Colors", "a permanent's colour becomes another"),
+    ("Keywords", "a creature gains flying"),
+    ("Protection", "a creature gains protection from red"),
+    ("SetPt", "base power and toughness 7/7"),
+    ("Pt", "+1/+1 until end of turn"),
+    ("CantBlock", "a creature can't block"),
+    ("CantBeBlocked", "a creature can't be blocked"),
+    ("MustAttack", "a creature attacks each combat"),
+    ("ExileIfDies", "exiled if it would die"),
+    ("GainSacMana", "a land gains \"sacrifice it: add {B}\""),
+    ("LoseAllAbilities", "a permanent loses all abilities"),
+    ("AllCreatureTypes", "a creature has all creature types"),
+    ("BecomeTypes", "a land becomes a 2/2 creature and nothing else"),
+    ("GainLatent", "a permanent gains a latent ability of its card"),
+    ("SwitchPt", "a creature's power and toughness are switched"),
+    ("Goad", "a creature is goaded"),
+    ("ExileIfLeaves", "exiled if it would leave"),
+    ("ControlFrom", "a player gained control of a permanent until end of turn"),
+    // (Darkness's "prevent all combat damage that would be dealt this turn": a group's rules
+    // effect, the only kind the lowering makes, lower/effect_eoe_d.rs.)
+    ("PreventCombatDamage", "combat damage is prevented this turn (a rules effect)"),
+    ("MustAttackPlayer", "a creature attacks the other player this combat if able"),
+];
+
+/// The `Mod` variants only a static ability has (ENGINE.md 142): the lowering builds them inside a
+/// `StaticDef` only, and `Game::add_effect` refuses them loudly (`Mod::static_only`). A static
+/// ability is its source's printed text (its identity, encoded) applied to the encoded board, so
+/// what it does is a function of the row.
+pub const STATIC_ONLY_MODS: [(&str, &str); 4] = [
+    ("PtPer", "an Equipment's or a static ability's \"+p/+t for each\" (lower/statics.rs, lower/printing.rs)"),
+    ("PtPerSourceCounter", "\"+1/+1 for each +1/+1 counter on this Equipment\" (lower/printing.rs)"),
+    ("AttackDespiteDefender", "\"can attack as though it didn't have defender\" (Mechan Shieldmate; lower/statics.rs)"),
+    ("PowerPlusGreatestMv", "Emissary Escort's \"+X/+0\" (lower/eoe_a.rs)"),
+];
+
+/// The variant's name of a `Mod` ([`MOD_PERTURBATIONS`], [`STATIC_ONLY_MODS`]): an exhaustive
+/// match.
+pub fn mod_variant(m: &Mod) -> &'static str {
+    match m {
+        Mod::Types { .. } => "Types",
+        Mod::Colors(_) => "Colors",
+        Mod::Keywords(_) => "Keywords",
+        Mod::Protection(_) => "Protection",
+        Mod::SetPt(..) => "SetPt",
+        Mod::Pt(..) => "Pt",
+        Mod::CantBlock => "CantBlock",
+        Mod::CantBeBlocked => "CantBeBlocked",
+        Mod::MustAttack => "MustAttack",
+        Mod::ExileIfDies => "ExileIfDies",
+        Mod::PtPer { .. } => "PtPer",
+        Mod::PtPerSourceCounter { .. } => "PtPerSourceCounter",
+        Mod::GainSacMana(_) => "GainSacMana",
+        Mod::LoseAllAbilities => "LoseAllAbilities",
+        Mod::AttackDespiteDefender => "AttackDespiteDefender",
+        Mod::AllCreatureTypes => "AllCreatureTypes",
+        Mod::BecomeTypes { .. } => "BecomeTypes",
+        Mod::GainLatent(_) => "GainLatent",
+        Mod::SwitchPt => "SwitchPt",
+        Mod::Goad => "Goad",
+        Mod::ExileIfLeaves => "ExileIfLeaves",
+        Mod::ControlFrom(_) => "ControlFrom",
+        Mod::PreventCombatDamage => "PreventCombatDamage",
+        Mod::MustAttackPlayer => "MustAttackPlayer",
+        Mod::PowerPlusGreatestMv { .. } => "PowerPlusGreatestMv",
+    }
+}
+
+/// A `Mod` of each variant (the tests' check that every variant is classified).
+pub fn mod_samples() -> Vec<Mod> {
+    use crate::db::Filter;
+    vec![
+        Mod::Types { add: 0, subtypes: Vec::new(), replace: false },
+        Mod::Colors(1),
+        Mod::Keywords(KwSet::default()),
+        Mod::Protection(Prot::default()),
+        Mod::SetPt(1, 1),
+        Mod::Pt(1, 1),
+        Mod::CantBlock,
+        Mod::CantBeBlocked,
+        Mod::MustAttack,
+        Mod::ExileIfDies,
+        Mod::PtPer { filter: Filter::Any, p: 1, t: 1 },
+        Mod::PtPerSourceCounter { counter: Counter::P1P1, p: 1, t: 1 },
+        Mod::GainSacMana(1),
+        Mod::LoseAllAbilities,
+        Mod::AttackDespiteDefender,
+        Mod::AllCreatureTypes,
+        Mod::BecomeTypes { types: 0, subtypes: Vec::new() },
+        Mod::GainLatent(0),
+        Mod::SwitchPt,
+        Mod::Goad,
+        Mod::ExileIfLeaves,
+        Mod::ControlFrom(0),
+        Mod::PreventCombatDamage,
+        Mod::MustAttackPlayer,
+        Mod::PowerPlusGreatestMv { types: 0 },
+    ]
+}
+
+/// The pseudo-perturbation of the pairwise pass: the position as it is (ENGINE.md 142).
+pub const BASE: &str = "(the position as it is)";
+
+/// The layouts a known gap is a gap of (`KnownGap::layouts`): layout v7 (the `mtg` game) and
+/// layout v6 (the `mtg_eoe` game, checked on the gate's EoE positions).
+pub const V7: u8 = 1;
+pub const V6: u8 = 2;
+
+/// A public-state gap the encoding has, found by the gate and waiting on a decision (ENGINE.md
+/// 142; `E:/mtg-zero-scratch/fable-fix/encoding-options.md`, the section `decision` names). The gate
+/// fails on every gap no entry covers, and on an entry that covers nothing the gate finds (a stale
+/// entry: the encoding was fixed, remove it) - this list goes to empty when the encoding is fixed.
+///
+/// An entry names perturbations two ways:
+/// * `alone`: a perturbation whose change the layout leaves out entirely (the position's row is
+///   unchanged; the single-perturbation pass accepts exactly these);
+/// * `alike`: perturbations whose changes the layout reads only through what they share (one sum,
+///   one flag, the resulting power, the present characteristics an effect gives): two of them can
+///   encode alike, and a set of them can encode like none of them.
+///
+/// [`covered`] says when two states' equal rows are such a gap.
+pub struct KnownGap {
+    pub name: &'static str,
+    pub decision: &'static str,
+    pub layouts: u8,
+    pub alone: Vec<&'static str>,
+    pub alike: Vec<&'static str>,
+}
+
+/// Do known gaps cover the equal rows (for `layout`) of two states whose views differ, the position
+/// perturbed by the perturbations `a` and by `b` (ENGINE.md 142)? The perturbations of one state and
+/// not the other are each assigned to an entry of the layout - as an `alone` perturbation (it
+/// changes no row), or to the entry's `alike` group; each entry's group must hold perturbations of
+/// both states, or two or more of one state, or one of one state while a perturbation both states
+/// share is in the entry's `alike` too (a set of alike changes can encode like a subset of itself).
+/// Returns the entries one such assignment uses (credited by the gate), or None.
+pub fn covered<'s>(gaps: &[KnownGap], layout: u8, a: &[&'s str], b: &[&'s str]) -> Option<Vec<usize>> {
+    let es: Vec<usize> = (0..gaps.len()).filter(|&i| gaps[i].layouts & layout != 0).collect();
+    let common: Vec<&str> = a.iter().copied().filter(|x| b.contains(x)).collect();
+    let diff: Vec<(&str, usize)> = a.iter().filter(|x| !b.contains(x)).map(|&x| (x, 0)).chain(b.iter().filter(|x| !a.contains(x)).map(|&x| (x, 1))).collect();
+    if diff.is_empty() {
+        return None;
+    }
+    // each differing perturbation's options: (entry, alone?)
+    let mut opts: Vec<Vec<(usize, bool)>> = Vec::new();
+    for &(x, _) in &diff {
+        let o: Vec<(usize, bool)> = es
+            .iter()
+            .flat_map(|&i| {
+                let g = &gaps[i];
+                [g.alone.iter().any(|y| *y == x).then_some((i, true)), g.alike.iter().any(|y| *y == x).then_some((i, false))]
+            })
+            .flatten()
+            .collect();
+        if o.is_empty() {
+            return None;
+        }
+        opts.push(o);
+    }
+    let mut pick = vec![0usize; diff.len()];
+    loop {
+        // the groups of this assignment: entry -> (from a, from b)
+        let mut groups: Vec<(usize, usize, usize)> = Vec::new();
+        let mut used: Vec<usize> = Vec::new();
+        for (k, &(_, side)) in diff.iter().enumerate() {
+            let (i, alone) = opts[k][pick[k]];
+            if !used.contains(&i) {
+                used.push(i);
+            }
+            if alone {
+                continue;
+            }
+            match groups.iter_mut().find(|g| g.0 == i) {
+                Some(g) => {
+                    if side == 0 {
+                        g.1 += 1
+                    } else {
+                        g.2 += 1
+                    }
+                }
+                None => groups.push((i, (side == 0) as usize, (side == 1) as usize)),
+            }
+        }
+        let ok = groups.iter().all(|&(i, na, nb)| (na > 0 && nb > 0) || na + nb >= 2 || common.iter().any(|c| gaps[i].alike.iter().any(|y| y == c)));
+        if ok {
+            return Some(used);
+        }
+        // the next assignment
+        let mut k = 0;
+        loop {
+            if k == diff.len() {
+                return None;
+            }
+            pick[k] += 1;
+            if pick[k] < opts[k].len() {
+                break;
+            }
+            pick[k] = 0;
+            k += 1;
+        }
+    }
+}
+
+/// The perturbations the pairwise pass never combines with another (ENGINE.md 142): each moves an
+/// object (a new object, CR 400.7), changes the turn, the step, the active player or the game, or
+/// ends the game, or acts on another effect, so the other perturbation's change can become inert
+/// (an effect, a mark or a link of an object that left; a "this turn" fact of another turn; the
+/// effect it added ended) while it stays in the view. Each is still compared alone with every
+/// state.
+pub const COMBO_EXCLUDED: [&str; 15] = [
+    "a permanent leaves the battlefield",
+    "a graveyard card is exiled",
+    "an exiled card is turned face down",
+    "a hand card is discarded",
+    "a library card leaves the game",
+    "a revealed companion is put into its owner's hand",
+    "a permanent is another card",
+    "the turn number + 1",
+    "another step",
+    "the other player is active",
+    "the game ends",
+    "lost",
+    "the next game of the match",
+    "an effect ends",
+    "an effect's duration is another",
+];
+
+/// The known gaps (`KnownGap`; ENGINE.md 142.2): what the pairwise gate found in layouts v7 and v6,
+/// each waiting on the user's choice among the options of `encoding-options.md`'s section.
+pub fn known_gaps() -> Vec<KnownGap> {
+    let ps = perturbations();
+    let group = ["combat damage is prevented this turn (a rules effect)", "creatures a player controls can't block this turn (a rules effect)"];
+    // every perturbation that adds a continuous effect to an object
+    let effects: Vec<&'static str> = ps.iter().filter(|p| p.field == "Game.effects" && !group.contains(&p.name)).map(|p| p.name).collect();
+    let protection: Vec<&'static str> = ps.iter().filter(|p| p.name.starts_with("a creature gains protection from ")).map(|p| p.name).collect();
+    // (A hand card promised to a delve is revealed too, so its v6 row is a learned card's: `alike`.)
+    let v7_facts: Vec<&'static str> = V7_FIXED.iter().copied().filter(|&x| x != "a hand card is promised to a delve").collect();
+    vec![
+        KnownGap {
+            name: "which protection a permanent has (perm::PROTECTED is one any-of float)",
+            decision: "encoding-options.md 2.1 (Fable review B1)",
+            layouts: V7 | V6,
+            alone: vec![],
+            alike: protection,
+        },
+        KnownGap {
+            name: "power and toughness by source: +1/+1 and -1/-1 counters and P/T effects give one P/T",
+            decision: "encoding-options.md 2.2 (Fable review B2)",
+            layouts: V7 | V6,
+            alone: vec![],
+            alike: vec![
+                "+1/+1 until end of turn",
+                "+1/+1 until its controller's next turn",
+                "+1/+1 until the other player's next turn",
+                "+1/+1 with no duration",
+                "+1/+1 for as long as another permanent remains on the battlefield",
+                "base power and toughness 7/7",
+                "a creature's power and toughness are switched",
+                "a +1/+1 counter on a creature",
+                "a -1/-1 counter on a creature",
+                "an effect ends",
+            ],
+        },
+        KnownGap {
+            name: "counter kinds: stun, keyword and named counters are one sum (perm::OTHER_COUNTERS), a keyword counter's keyword an effect's",
+            decision: "encoding-options.md 2.4 (Fable review B3)",
+            layouts: V7 | V6,
+            alone: vec![],
+            alike: vec![
+                "a stun counter",
+                "a named counter (charge, oil, ...)",
+                "another named counter",
+                "two named counters",
+                "a stun counter and a named counter",
+                "a flying counter on a creature",
+                "a creature gains flying",
+            ],
+        },
+        KnownGap {
+            name: "a granted \"sacrifice: add mana\" ability (Mod::GainSacMana, Rain of Filth) has no float",
+            decision: "encoding-options.md 2.5 (Fable review B4)",
+            layouts: V7 | V6,
+            alone: vec!["a land gains \"sacrifice it: add {B}\""],
+            alike: vec![],
+        },
+        KnownGap {
+            name: "a latent ability an effect gave (Mod::GainLatent, Urza's Saga) has no float",
+            decision: "encoding-options.md 2.5 (Fable review B4)",
+            layouts: V7 | V6,
+            alone: vec!["a permanent gains a latent ability of its card"],
+            alike: vec![],
+        },
+        KnownGap {
+            name: "must-attack effects are one count (perm::MUST_ATTACK: \"each combat\" = \"that player this combat\")",
+            decision: "encoding-options.md 2.5 (Fable review B4)",
+            layouts: V7 | V6,
+            alone: vec![],
+            alike: vec!["a creature attacks each combat", "a creature attacks the other player this combat if able"],
+        },
+        KnownGap {
+            name: "subtype effects are one count (perm::SUBTYPES: a creature type gained = all creature types)",
+            decision: "encoding-options.md 2.5 (Fable review B4)",
+            layouts: V7 | V6,
+            alone: vec![],
+            alike: vec!["a creature gains a creature type", "a creature has all creature types"],
+        },
+        KnownGap {
+            name: "group (rules) effects reach the row only through the permanents they affect now (Darkness's prevention: nowhere)",
+            decision: "encoding-options.md 2.6 (Fable review B4)",
+            layouts: V7 | V6,
+            alone: group.to_vec(),
+            alike: vec![group[1], "a creature can't block", "a creature can't block with no duration"],
+        },
+        KnownGap {
+            name: "layout v6 (mtg_eoe, the live EoE run) lacks layout v7's facts (V7_FIXED)",
+            decision: "encoding-options.md 2.8 (Fable review I3: mtg_eoe onto a layout with v7's facts)",
+            layouts: V6,
+            alone: v7_facts,
+            // (A hand card promised to a delve is revealed too: its v6 row is a learned card's.)
+            alike: vec!["a hand card is promised to a delve", "the other player learns a hand card"],
+        },
+        KnownGap {
+            name: "continuous effects: only the characteristics they give now are encoded (no effect, duration, controller or timestamp)",
+            decision: "encoding-options.md 2.3 (Fable review B2)",
+            layouts: V7 | V6,
+            alone: vec!["an effect's duration is another"],
+            alike: effects.into_iter().chain(["an effect ends"]).collect(),
+        },
+    ]
+}
+
 /// Layout v6's gap (ENGINE.md 124.2): a pool's mana restricted to creature
 /// spells of a chosen type (Cavern of Souls); layout v7 encodes it (its block,
 /// `V7_FIXED`), and the layout v6 game `mtg_eoe` refuses a card table that
@@ -2291,6 +2812,27 @@ pub fn match_view(a: &MtgAz, viewer: PlayerId) -> Vec<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ENGINE.md 142: the known-gap rule (`covered`) on hand-made pairs of states.
+    #[test]
+    fn known_gaps_cover_what_they_name_and_nothing_else() {
+        let k = known_gaps();
+        let c = |l: u8, a: &[&'static str], b: &[&'static str]| covered(&k, l, a, b).is_some();
+        let (red, black) = ("a creature gains protection from red", "a creature gains protection from black");
+        let (pump, m1) = ("+1/+1 until end of turn", "a -1/-1 counter on a creature");
+        let sac = "a land gains \"sacrifice it: add {B}\"";
+        let (group, cant) = ("creatures a player controls can't block this turn (a rules effect)", "a creature can't block");
+        assert!(c(V7, &[red], &[black]), "two protections alike");
+        assert!(!c(V7, &[], &[red]), "a protection alone is encoded");
+        assert!(c(V7, &[], &[pump, m1]), "a pump and a -1/-1 counter cancel");
+        assert!(c(V7, &[red, pump], &[black, "+1/+1 with no duration"]), "two gaps at once");
+        assert!(c(V7, &[], &[sac]) && c(V7, &[pump], &[pump, sac]), "an alone perturbation changes no row");
+        assert!(c(V7, &[group], &[group, cant]), "a creature's can't-block under a group's");
+        assert!(!c(V7, &[], &[cant]), "a can't-block alone is encoded");
+        assert!(!c(V7, &["life + 1"], &["a stun counter"]), "unrelated changes are no known gap");
+        assert!(!c(V7, &[red], &[red]), "the same perturbations: no difference to cover");
+        assert!(c(V6, &[], &["a permanent was harnessed"]) && !c(V7, &[], &["a permanent was harnessed"]), "a v7 fact: a v6 gap only");
+    }
 
     #[test]
     fn every_public_field_has_a_perturbation_and_every_perturbation_a_field() {

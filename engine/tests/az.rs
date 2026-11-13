@@ -1234,20 +1234,88 @@ fn public_view(g: &MtgAz, v: u8) -> Vec<u64> {
     x
 }
 
+/// Layout v6's encoding (the `mtg_eoe` game's, ENGINE.md 124.2: `MtgAz::encode` into a v6 buffer,
+/// no tail, no overrides) of `viewer`.
+fn v6_enc(g: &MtgAz, viewer: usize) -> Vec<f32> {
+    let mut x = vec![0.0f32; encode::NUM_FEATURES_V6];
+    g.encode(viewer, &mut x);
+    x
+}
+
+/// The gate checks layout v6 (ENGINE.md 142) on the EoE positions (the `mtg_eoe` game's table),
+/// but those with an object past one of layout v6's caps (32 permanents a side, 16 hand cards, 8
+/// stack items, 4 waiting triggers, a 64-entry list, 4 graveyard-ability cards: layout v7's tail
+/// tokens of its capped segments), which layout v6 shows as counts only (the reason for layout
+/// v7, ENGINE.md 125; the known gap "layout v6's caps").
+fn v6_checked(spec: &str, a: &MtgAz) -> Option<bool> {
+    (spec == "eoe").then(|| (0..2).all(|v| engine::az::tail_encode::Row::of_az(a, v).tail.iter().all(|t| !engine::az::tail_encode::TAILS.iter().any(|s| s.seg == t.0 && s.head > 0))))
+}
+
+/// An exact 128-bit hash (two lanes) of a row's numbers: every float by value (0.0 and -0.0
+/// alike, as the network reads them), every integer whole (`Row::flat`'s exactness, ENGINE.md
+/// 142.1). Different hashes prove different rows; equal hashes are taken for equal rows (a false
+/// collision would be reported as a gap, never hide one).
+struct RowHash(u64, u64);
+
+impl RowHash {
+    fn new() -> RowHash {
+        RowHash(0xcbf2_9ce4_8422_2325, 0x9e37_79b9_7f4a_7c15)
+    }
+    fn int(&mut self, x: u64) {
+        self.0 = (self.0 ^ x).wrapping_mul(0x100_0000_01b3);
+        self.1 = (self.1 ^ x.rotate_left(17)).wrapping_mul(0xff51_afd7_ed55_8ccd);
+    }
+    fn floats(&mut self, x: &[f32]) {
+        for &y in x {
+            self.int(if y == 0.0 { 0 } else { y.to_bits() as u64 });
+        }
+    }
+}
+
+/// A layout v7 row's hash (`RowHash`): the head, the tail tokens, the overrides.
+fn row_hash(r: &engine::az::tail_encode::Row) -> (u64, u64) {
+    let mut h = RowHash::new();
+    h.floats(&r.head);
+    h.int(u64::MAX);
+    for (sg, sl, x) in &r.tail {
+        h.int((*sg as u64) << 32 | *sl as u64);
+        h.floats(x);
+    }
+    h.int(u64::MAX - 1);
+    for &(o, t) in &r.ov {
+        h.int(o as u64);
+        h.int(t as u64);
+    }
+    (h.0, h.1)
+}
+
+/// A layout v6 encoding's hash (`RowHash`).
+fn v6_hash(x: &[f32]) -> (u64, u64) {
+    let mut h = RowHash::new();
+    h.floats(x);
+    (h.0, h.1)
+}
+
 /// The dual of the hidden-information checks (ENGINE.md 58.6): every public
 /// field of the game state is classified (`public_state::fields`, an
 /// exhaustive destructuring) and has a perturbation; each perturbation, made
-/// on positions of the six kinds of games (cube hidden decklists since ENGINE.md 102, EoE sealed since 105), changes the public view for both
+/// on positions of the gate's kinds of games, changes the public view for both
 /// players (it is public) and the encoding for both viewers (it reaches the
-/// network), but the deliberate limits (`public_state::limits`; layout v5,
-/// ENGINE.md 60, left no gap).
+/// network), but the deliberate limits (`public_state::limits`) and the known
+/// gaps (`public_state::known_gaps`, ENGINE.md 142: each waiting on a decision;
+/// the list goes to empty when the encoding is fixed). On the EoE positions
+/// layout v6's encoding (the `mtg_eoe` game's) is checked too (ENGINE.md 142).
+/// The pairwise pass, that different public states encode apart, is
+/// `public_states_encode_apart`.
 #[test]
 fn public_state_reaches_the_encoding() {
-    use engine::public_state::{fields, limits, perturbations, Class, LimitKind};
+    use engine::public_state::{fields, known_gaps, limits, perturbations, Class, LimitKind, V6, V7};
     let t0 = std::time::Instant::now();
     let pos = gate_positions(scale(60) as usize, 59);
     let ps = perturbations();
     let lim = limits();
+    let known = known_gaps();
+    let known_alone = |layout: u8, name: &str| known.iter().find(|k| k.layouts & layout != 0 && k.alone.iter().any(|y| *y == name)).map(|k| k.name);
     // Each perturbation draws from a random stream of its own, keyed by its
     // name (ENGINE.md 100.5.1: with one shared stream a new perturbation
     // shifted every later one's picks, and what the gate found depended on
@@ -1261,15 +1329,23 @@ fn public_state_reaches_the_encoding() {
         view_same: [usize; 2],
         enc_same: [usize; 2],
         example: Option<String>,
+        // layout v6 on the EoE positions (ENGINE.md 142)
+        applied6: usize,
+        enc6_same: [usize; 2],
+        example6: Option<String>,
     }
     let mut t: Vec<Tally> = ps.iter().map(|_| Tally::default()).collect();
     // With hidden decklists (ENGINE.md 102) the fields `HIDDEN_BY_DECKLISTS` names are hidden
     // from the other player: such a perturbation must change its owner's view and encoding and
     // neither of the other player's.
     let (mut hidden_ok, mut leaks) = (0, Vec::new());
+    let mut past_v6_caps = 0;
     for (spec, a) in &pos {
         let base_enc = [enc(a, 0), enc(a, 1)];
         let base_view = [public_view(a, 0), public_view(a, 1)];
+        let v6 = v6_checked(spec, a);
+        past_v6_caps += (v6 == Some(false)) as usize;
+        let base6 = (v6 == Some(true)).then(|| [v6_enc(a, 0), v6_enc(a, 1)]);
         for (k, p) in ps.iter().enumerate() {
             let mut b = a.clone();
             let Some(what) = (p.apply)(&mut b, &mut rngs[k]) else { continue };
@@ -1294,6 +1370,15 @@ fn public_state_reaches_the_encoding() {
                     t[k].example.get_or_insert_with(|| format!("{spec}: {what} (P{v}'s encoding unchanged)"));
                 }
             }
+            if let Some(b6) = &base6 {
+                t[k].applied6 += 1;
+                for v in 0..2 {
+                    if public_view(&b, v as u8) != base_view[v] && v6_enc(&b, v) == b6[v] {
+                        t[k].enc6_same[v] += 1;
+                        t[k].example6.get_or_insert_with(|| format!("{spec}: {what} (P{v}'s layout v6 encoding unchanged)"));
+                    }
+                }
+            }
         }
     }
     // A chosen name's face (ENGINE.md 125.11): a split card's left half and its right half are two
@@ -1316,8 +1401,9 @@ fn public_state_reaches_the_encoding() {
     let f = fields();
     let count = |c: Class| f.iter().filter(|x| x.class == c).count();
     println!(
-        "{} positions, {} fields ({} public, {} hidden, {} derived), {} perturbations, {:.1} s",
+        "{} positions ({} EoE positions past layout v6's caps, not checked on v6), {} fields ({} public, {} hidden, {} derived), {} perturbations, {:.1} s",
         pos.len(),
+        past_v6_caps,
         f.len(),
         count(Class::Public),
         count(Class::Hidden),
@@ -1326,11 +1412,13 @@ fn public_state_reaches_the_encoding() {
         t0.elapsed().as_secs_f64()
     );
     let mut findings = Vec::new();
-    let (mut ok, mut by_design, mut next) = (0, 0, 0);
+    let (mut ok, mut by_design, mut next, mut gaps_known) = (0, 0, 0, 0);
+    let mut seen_alone: Vec<(u8, &str)> = Vec::new();
     for (p, x) in ps.iter().zip(&t) {
         let limited = lim.iter().find(|l| l.name == p.name).map(|l| l.kind);
         let view_bad = x.view_same.iter().any(|&n| n > 0);
         let enc_bad = x.enc_same.iter().any(|&n| n > 0);
+        let known7 = known_alone(V7, p.name);
         let state = match (x.applied, view_bad, enc_bad, limited) {
             (0, _, _, None) if p.rare => "rare, not applied",
             (0, _, _, Some(_)) if p.rare => "rare limit",
@@ -1338,6 +1426,7 @@ fn public_state_reaches_the_encoding() {
             (_, true, ..) => "VIEW GAP",
             (_, false, true, Some(LimitKind::Design)) => "limit (design)",
             (_, false, true, Some(LimitKind::NextLayout)) => "gap (next layout)",
+            (_, false, true, None) if known7.is_some() => "known gap",
             (_, false, true, None) => "ENCODING GAP",
             (_, false, false, Some(_)) => "STALE LIMIT",
             _ => "ok",
@@ -1346,26 +1435,62 @@ fn public_state_reaches_the_encoding() {
             "ok" => ok += 1,
             "limit (design)" => by_design += 1,
             "gap (next layout)" | "rare limit" => next += 1,
+            "known gap" => {
+                gaps_known += 1;
+                seen_alone.push((V7, p.name));
+            }
             _ => {}
         }
         println!(
-            "{state:>18} | {:<58} | {:<26} | {:>4} applied, view same {:?}, encoding same {:?}{}",
+            "{state:>18} | {:<58} | {:<26} | {:>4} applied, view same {:?}, encoding same {:?}{}{}",
             p.name,
             p.field,
             x.applied,
             x.view_same,
             x.enc_same,
+            known7.filter(|_| state == "known gap").map(|k| format!(" | {k}")).unwrap_or_default(),
             x.example.as_deref().map(|e| format!(" | {e}")).unwrap_or_default()
         );
-        if !matches!(state, "ok" | "limit (design)" | "gap (next layout)" | "rare, not applied" | "rare limit") {
+        if !matches!(state, "ok" | "limit (design)" | "gap (next layout)" | "rare, not applied" | "rare limit" | "known gap") {
             findings.push(format!("{state}: {} ({})", p.name, p.field));
         }
+        // Layout v6 on the EoE positions: a public change (the view moved) its encoding leaves out.
+        if x.enc6_same.iter().any(|&n| n > 0) && limited != Some(LimitKind::Design) {
+            match known_alone(V6, p.name) {
+                Some(k) => {
+                    seen_alone.push((V6, p.name));
+                    println!("     v6 known gap | {:<58} | {:>4} applied, v6 encoding same {:?} | {k} | {}", p.name, x.applied6, x.enc6_same, x.example6.as_deref().unwrap_or(""));
+                }
+                None => {
+                    println!("  V6 ENCODING GAP | {:<58} | {:>4} applied, v6 encoding same {:?} | {}", p.name, x.applied6, x.enc6_same, x.example6.as_deref().unwrap_or(""));
+                    findings.push(format!("V6 ENCODING GAP: {} ({})", p.name, p.field));
+                }
+            }
+        }
     }
-    println!("{ok} perturbations encoded, {by_design} deliberate limits, {next} gaps for the next layout (ENGINE.md 58.10, 60)");
+    println!("{ok} perturbations encoded, {by_design} deliberate limits, {gaps_known} known gaps (ENGINE.md 142), {next} gaps for the next layout (ENGINE.md 58.10, 60)");
     println!("hidden decklists: {hidden_ok} perturbations of fields they hide reached only their owner");
     assert!(leaks.is_empty(), "hidden decklists: {} perturbations of hidden fields reached the other player:\n{}", leaks.len(), leaks.join("\n"));
     assert!(hidden_ok > 0, "hidden decklists: no perturbation of a field they hide applied");
     assert!(findings.is_empty(), "{} findings:\n{}", findings.len(), findings.join("\n"));
+    // A known gap's perturbation that alone left the encoding unchanged must still do so where it
+    // applied (on a layout of its entry: v7, or v6 for an entry of layout v6 only), else the entry is
+    // stale: the encoding was fixed, and the list must shrink with it (ENGINE.md 142). (Other seeds
+    // and scales: not required.)
+    if std::env::var("GATE_SEED").is_err() && scale(1) == 1 {
+        let mut stale = Vec::new();
+        for k in &known {
+            let layout = if k.layouts & V7 != 0 { V7 } else { V6 };
+            for &a in &k.alone {
+                let i = ps.iter().position(|p| p.name == a).unwrap_or_else(|| panic!("known gap {}: no perturbation {a:?}", k.name));
+                let applied = if layout == V7 { t[i].applied } else { t[i].applied6 };
+                if applied > 0 && !seen_alone.contains(&(layout, a)) {
+                    stale.push(format!("{}: {a:?} (layout v{})", k.name, if layout == V7 { 7 } else { 6 }));
+                }
+            }
+        }
+        assert!(stale.is_empty(), "known gaps the encoding no longer has (remove them):\n{}", stale.join("\n"));
+    }
     // Layout v5 (ENGINE.md 60) encodes layout v4's 42 gaps, layout v6 (ENGINE.md 100.5) the Edge
     // of Eternities port's and workstream C's (`public_state::V6_FIXED`), and the graveyard's
     // order is no id's since Priority's casts from a graveyard became one option and a list
@@ -1380,6 +1505,269 @@ fn public_state_reaches_the_encoding() {
     // constructed best-of-three's game-1 chooser and starter, which the match block leaves out so
     // that a real game 2 encodes as a post-sideboard start's.)
     assert_eq!(by_design, 2, "the deliberate limits");
+}
+
+/// The gate's pairwise pass (ENGINE.md 142; the Fable review's B5): **different public states
+/// encode apart**. The single-perturbation pass proves that each change moves the row away from
+/// the position's, which any sum, maximum or any-of float passes; here every pair of states a
+/// position yields - the position, each perturbation alone, each perturbation followed by another
+/// (a partner drawn per position), every perturbation of a position drawn from one stream so that a
+/// family's members act on the same object - is compared per viewer: two states whose views differ
+/// for a viewer must give it different rows (layout v7's whole rows; on the EoE positions layout
+/// v6's encoding too). A collision is a gap unless a known gap covers it
+/// (`public_state::known_gaps`); a known gap that covers no collision is stale. The deliberate
+/// limits' perturbations are left out (they encode like the position by design).
+#[test]
+fn public_states_encode_apart() {
+    use engine::public_state::{covered, known_gaps, limits, perturbations, BASE, COMBO_EXCLUDED, HIDDEN_BY_DECKLISTS, V6, V7};
+    use engine::az::tail_encode::Row;
+    use std::collections::BTreeMap;
+    let t0 = std::time::Instant::now();
+    let pos = gate_positions(scale(60) as usize, 59);
+    let ps = perturbations();
+    let lim: Vec<&str> = limits().iter().map(|l| l.name).collect();
+    let known = known_gaps();
+    let seed: u64 = std::env::var("GATE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(4242);
+    let live: Vec<usize> = (0..ps.len()).filter(|&k| !lim.contains(&ps[k].name)).collect();
+    let combinable: Vec<usize> = live.iter().copied().filter(|&k| !COMBO_EXCLUDED.contains(&ps[k].name)).collect();
+    // (layout, d1, d2) of each collision no known gap covers: count, example
+    let mut unknown: BTreeMap<(u8, Vec<&str>, Vec<&str>), (usize, String)> = BTreeMap::new();
+    let mut credit = vec![0usize; known.len()];
+    let mut example: Vec<Option<String>> = vec![None; known.len()];
+    let (mut states_n, mut combos_n, mut panics, mut pairs_n, mut past_caps) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let lv = |l: u8| if l == V7 { "v7" } else { "v6" };
+    for (pi, (spec, a)) in pos.iter().enumerate() {
+        let v6 = v6_checked(spec, a);
+        past_caps += (v6 == Some(false)) as usize;
+        let v6 = v6 == Some(true);
+        let stream = seed ^ (pi as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        let mut partner_rng = Rng::new(stream ^ 0x5bd1_e995);
+        // the states: (perturbations, description, views, v7 row hashes, v6 hashes)
+        struct St {
+            atoms: Vec<usize>,
+            what: String,
+            view: [Vec<u64>; 2],
+            row: [(u64, u64); 2],
+            row6: Option<[(u64, u64); 2]>,
+        }
+        let state = |b: &MtgAz, atoms: Vec<usize>, what: String| St {
+            atoms,
+            what,
+            view: [public_view(b, 0), public_view(b, 1)],
+            row: [row_hash(&Row::of_az(b, 0)), row_hash(&Row::of_az(b, 1))],
+            row6: v6.then(|| [v6_hash(&v6_enc(b, 0)), v6_hash(&v6_enc(b, 1))]),
+        };
+        let mut sts = vec![state(a, Vec::new(), BASE.to_string())];
+        // (With hidden decklists the fields `HIDDEN_BY_DECKLISTS` names reach only their owner's
+        // view and row: the single pass checks exactly that, ENGINE.md 102.)
+        let hidden = a.g.spec().hidden_decklists;
+        let mut pairs_done: Vec<(usize, usize)> = Vec::new();
+        for &k in &live {
+            if hidden && HIDDEN_BY_DECKLISTS.contains(&ps[k].name) {
+                continue;
+            }
+            let mut b = a.clone();
+            if let Some(w) = (ps[k].apply)(&mut b, &mut Rng::new(stream)) {
+                sts.push(state(&b, vec![k], w));
+            }
+            // a combination: k then a partner drawn for this position, from the same stream (each
+            // pair once; never one of `COMBO_EXCLUDED`)
+            if !combinable.contains(&k) {
+                continue;
+            }
+            let j = combinable[partner_rng.below(combinable.len() as u32) as usize];
+            if j == k || (hidden && HIDDEN_BY_DECKLISTS.contains(&ps[j].name)) || pairs_done.contains(&(k.min(j), k.max(j))) {
+                continue;
+            }
+            pairs_done.push((k.min(j), k.max(j)));
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut b = a.clone();
+                let w1 = (ps[k].apply)(&mut b, &mut Rng::new(stream))?;
+                let w2 = (ps[j].apply)(&mut b, &mut Rng::new(stream))?;
+                let mut atoms = vec![k, j];
+                atoms.sort_unstable();
+                Some(state(&b, atoms, format!("{w1}; {w2}")))
+            }));
+            match r {
+                Ok(Some(s)) => {
+                    sts.push(s);
+                    combos_n += 1;
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    panics += 1;
+                    println!("PANIC: {spec} #{pi}: \"{}\" then \"{}\"", ps[k].name, ps[j].name);
+                }
+            }
+        }
+        states_n += sts.len();
+        let name = |k: usize| ps[k].name;
+        for (layout, v) in [(V7, 0usize), (V7, 1), (V6, 0), (V6, 1)] {
+            if layout == V6 && !v6 {
+                continue;
+            }
+            let mut by_row: BTreeMap<(u64, u64), Vec<usize>> = BTreeMap::new();
+            for (i, s) in sts.iter().enumerate() {
+                let h = if layout == V7 { s.row[v] } else { s.row6.unwrap()[v] };
+                by_row.entry(h).or_default().push(i);
+            }
+            for group in by_row.values().filter(|g| g.len() > 1) {
+                for x in 0..group.len() {
+                    for y in x + 1..group.len() {
+                        let (s, u) = (&sts[group[x]], &sts[group[y]]);
+                        if s.view[v] == u.view[v] {
+                            continue;
+                        }
+                        pairs_n += 1;
+                        let an: Vec<&str> = s.atoms.iter().map(|&k| name(k)).collect();
+                        let bn: Vec<&str> = u.atoms.iter().map(|&k| name(k)).collect();
+                        match covered(&known, layout, &an, &bn) {
+                            Some(used) => {
+                                for gi in used {
+                                    credit[gi] += 1;
+                                    example[gi].get_or_insert_with(|| format!("{} {spec} #{pi}, P{v}: [{}] vs [{}]", lv(layout), s.what, u.what));
+                                }
+                            }
+                            None => {
+                                let d1: Vec<&str> = an.iter().copied().filter(|x| !bn.contains(x)).collect();
+                                let d2: Vec<&str> = bn.iter().copied().filter(|x| !an.contains(x)).collect();
+                                let (d1, d2) = if d1 <= d2 { (d1, d2) } else { (d2, d1) };
+                                let e = unknown.entry((layout, d1, d2)).or_insert((0, format!("{spec} #{pi}, P{v}: [{}] vs [{}]", s.what, u.what)));
+                                e.0 += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    println!(
+        "{} positions ({past_caps} EoE positions past layout v6's caps, not checked on v6), {states_n} states ({combos_n} combinations, {panics} panicked), {pairs_n} pairs of different views with equal rows, {:.1} s",
+        pos.len(),
+        t0.elapsed().as_secs_f64()
+    );
+    for ((k, n), e) in known.iter().zip(&credit).zip(&example) {
+        println!("known gap {:>6} pairs | {} | {} | {}", n, k.name, k.decision, e.as_deref().unwrap_or("-"));
+    }
+    for ((l, d1, d2), (n, ex)) in &unknown {
+        let side = |d: &Vec<&str>| if d.is_empty() { BASE.to_string() } else { d.join(" + ") };
+        println!("COLLISION {} x{n}: \"{}\" == \"{}\" | {ex}", lv(*l), side(d1), side(d2));
+    }
+    assert_eq!(panics, 0, "a combination of perturbations panicked");
+    assert!(unknown.is_empty(), "{} collisions no known gap covers (ENGINE.md 142)", unknown.len());
+    if std::env::var("GATE_SEED").is_err() && scale(1) == 1 {
+        let stale: Vec<&str> = known.iter().zip(&credit).filter(|(_, &n)| n == 0).map(|(k, _)| k.name).collect();
+        assert!(stale.is_empty(), "known gaps that cover no collision (the encoding was fixed: remove them): {stale:?}");
+    }
+}
+
+/// ENGINE.md 142's census for the encoding options memo (not a gate: `--ignored`): in mixed
+/// heuristic / random games of the cube, the Delver mirror and EoE sealed (`CENSUS_GAMES` a pool,
+/// default 300; every 5th decision from turn 2), how often each kind of state the gate's known gaps
+/// are about occurs: continuous effects by `Mod` variant, duration and target kind, counters by
+/// kind, protection by quality, the largest life, power, toughness and counter count; and the
+/// fraction of rows that would hold an `effects` / `counters` token, with the most in a row.
+#[test]
+#[ignore]
+fn encoding_gap_census() {
+    use std::collections::BTreeMap;
+    let games: u64 = std::env::var("CENSUS_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
+    let names = engine::az::constructed::Decklist::izzet_delver().main_names();
+    let mirror = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": names, "p1": names}}).to_string();
+    let pools: Vec<(&str, MtgSpec)> = vec![
+        ("cube", spec()),
+        ("delver", MtgSpec::parse(&mirror).unwrap()),
+        ("eoe", MtgSpec::parse(r#"{"sealed": {"set": "eoe", "collation": "arena"}, "max_turns": 60}"#).unwrap()),
+    ];
+    for (pool, sp) in pools {
+        let mut rng = Rng::new(142);
+        let mut h = Heuristic::new(142);
+        let mut keys = Vec::new();
+        let mut fx: BTreeMap<String, usize> = BTreeMap::new();
+        let mut ctr: BTreeMap<String, usize> = BTreeMap::new();
+        let mut prot: BTreeMap<String, usize> = BTreeMap::new();
+        let mut marks: BTreeMap<&str, usize> = BTreeMap::new();
+        let (mut rows, mut rows_fx, mut rows_ctr, mut most_fx, mut most_ctr) = (0usize, 0usize, 0usize, 0usize, 0usize);
+        let (mut max_life, mut max_pt, mut max_ctr) = (0i64, 0i128, 0u64);
+        for s in 0..games {
+            let mut g = MtgAz::new_game(&sp, 2, 9_000 + s).unwrap();
+            let mut n = 0u64;
+            while g.to_move().is_some() {
+                n += 1;
+                if g.sideboarding().is_none() && g.g.turn().number >= 2 && n % 5 == 0 {
+                    rows += 1;
+                    let gg = &g.g;
+                    let e = gg.effects();
+                    if !e.is_empty() {
+                        rows_fx += 1;
+                        most_fx = most_fx.max(e.len());
+                    }
+                    for x in e {
+                        let on = match x.on {
+                            engine::layers::Affected::Obj(_) => "obj",
+                            engine::layers::Affected::Group(_) => "group",
+                        };
+                        let until = match x.until {
+                            engine::layers::Until::EndOfTurn => "EndOfTurn",
+                            engine::layers::Until::Forever => "Forever",
+                            engine::layers::Until::YourNextTurn => "YourNextTurn",
+                            engine::layers::Until::WhileOnBattlefield(_) => "WhileOnBattlefield",
+                            engine::layers::Until::WhileSource => "WhileSource",
+                        };
+                        *fx.entry(format!("{:<20} {:<18} {on}", engine::public_state::mod_variant(&x.m), until)).or_default() += 1;
+                    }
+                    let mut nctr = 0;
+                    for &c in gg.battlefield() {
+                        for (k, m) in gg.counters_of(c) {
+                            let kind = match k {
+                                engine::db::Counter::Named(i) => format!("Named({i})"),
+                                k => format!("{k:?}"),
+                            };
+                            *ctr.entry(kind).or_default() += 1;
+                            max_ctr = max_ctr.max(m as u64);
+                            if !matches!(k, engine::db::Counter::Loyalty | engine::db::Counter::Lore) {
+                                nctr += 1;
+                            }
+                        }
+                        for m in gg.marks_of(c) {
+                            *marks.entry(engine::public_state::mark_variant(&m)).or_default() += 1;
+                        }
+                        let p = gg.protection_of(c);
+                        if !p.is_empty() {
+                            *prot.entry(format!("{p:?}")).or_default() += 1;
+                        }
+                        if gg.is_creature(c) {
+                            let (pw, th) = gg.pt(c);
+                            max_pt = max_pt.max(pw.abs() as i128).max(th.abs() as i128);
+                        }
+                    }
+                    if nctr > 0 {
+                        rows_ctr += 1;
+                        most_ctr = most_ctr.max(nctr);
+                    }
+                    max_life = max_life.max(gg.life(0).abs()).max(gg.life(1).abs());
+                }
+                if g.to_move().is_none() && g.m.between {
+                    break;
+                }
+                let a = mixed(&g, &mut h, &mut rng);
+                g.step(a, &mut keys).unwrap();
+            }
+        }
+        println!("== {pool}: {games} games, {rows} rows sampled; rows with effects {:.2}% (most {most_fx}), with counters (not loyalty / lore) {:.2}% (most {most_ctr}); max |life| {max_life}, |P/T| {max_pt}, counters of a kind {max_ctr}", 100.0 * rows_fx as f64 / rows as f64, 100.0 * rows_ctr as f64 / rows as f64);
+        for (k, n) in &fx {
+            println!("{pool} effect {k} {n}");
+        }
+        for (k, n) in &ctr {
+            println!("{pool} counter {k} {n}");
+        }
+        for (k, n) in &prot {
+            println!("{pool} protection {k} {n}");
+        }
+        for (k, n) in &marks {
+            println!("{pool} mark {k} {n}");
+        }
+    }
 }
 
 /// ENGINE.md 124.2, 123, 125: layout v6 can't encode a pool's mana restricted to creature spells of a

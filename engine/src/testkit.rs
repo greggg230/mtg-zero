@@ -1077,6 +1077,13 @@ impl Game {
         &self.extra_turns
     }
 
+    /// The cards exiled face down, in the order they were exiled (`Game::face_down`; ENGINE.md
+    /// 142.3's test: the order the encoding must not show).
+    #[doc(hidden)]
+    pub fn face_down_pile(&self) -> &[CardIdx] {
+        &self.face_down
+    }
+
     /// The pending decision asked again (after a test changed the state by
     /// hand, `set_tapped`).
     #[doc(hidden)]

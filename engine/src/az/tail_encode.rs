@@ -457,8 +457,38 @@ pub(crate) struct Cx<'g> {
     pub theirs: Vec<CardIdx>,
     /// The frame player's hand, sorted (the hand slots' order).
     pub hand: Vec<CardIdx>,
+    /// The cards exiled face down (`Game::face_down`) in their canonical order for the knower
+    /// (`face_down_order`): the `face_down` tokens' slots and a reference's place.
+    pub fd: Vec<CardIdx>,
     pub picks: Picks,
     stale: RefCell<Vec<ObjRef>>,
+}
+
+/// The cards exiled face down in the order the encoding shows them to `knower` (ENGINE.md 142.3):
+/// sorted by what the knower can tell of each - whose (the frame player's first), known to the
+/// knower or not (known first), its identity where known, who knows it, who may play it - and in
+/// exile order among cards alike in all of these. `Game::face_down` holds them in the order they
+/// were exiled, and several at once in the order of the zone they came from: Memory Jar exiles each
+/// hand in the hand vector's order, so a card the knower knew among the opponent's hidden cards
+/// sat at a place that told how many of them had been drawn before it (the Fable review's B7). The
+/// public view has no order for the pile (`Game::view_of`: a multiset per owner), and no rule reads
+/// one; cards alike for the knower in every field above are interchangeable in its row.
+pub(crate) fn face_down_order(g: &Game, knower: PlayerId, me: PlayerId) -> Vec<CardIdx> {
+    let mut v = g.face_down.clone();
+    let op_ = crate::ids::opp(me);
+    v.sort_by_cached_key(|&c| {
+        let o = &g.objs[c.i()];
+        let known = g.knows(knower, c);
+        (
+            (o.owner != me) as u8,
+            !known as u8,
+            if known { o.def as u32 + 1 } else { 0 },
+            o.known & 3,
+            g.exile_permission(me, c).is_some() as u8,
+            g.exile_permission(op_, c).is_some() as u8,
+        )
+    });
+    v
 }
 
 impl<'g> Cx<'g> {
@@ -476,6 +506,7 @@ impl<'g> Cx<'g> {
             mine: g.permanents_of(me).collect(),
             theirs: g.permanents_of(op_).collect(),
             hand: g.hand_sorted(me),
+            fd: face_down_order(g, knower, me),
             picks: Picks::default(),
             stale: RefCell::new(Vec::new()),
         };
@@ -578,7 +609,7 @@ impl<'g> Cx<'g> {
                 Zone::Stack => self.spell_pos(c),
                 Zone::Hand if o.owner == self.me => self.hand.iter().position(|&x| x == c),
                 Zone::Exile => g.exile.iter().position(|&x| x == c),
-                Zone::FaceDown => g.face_down.iter().position(|&x| x == c),
+                Zone::FaceDown => self.fd.iter().position(|&x| x == c),
                 Zone::PhasedOut => g.w3.phased.iter().position(|&x| x == c),
                 _ => None,
             };
@@ -751,11 +782,12 @@ pub(crate) fn write_tail_segments(cx: &Cx, list: &[Option<CardIdx>], tail: &mut 
     write_face_down(cx, tail);
 }
 
-/// The `face_down` segment (`fd::*`): every card exiled face down, in exile order, then every
-/// face-down permanent, in their order (slots k). An identity only where the viewer knows it.
+/// The `face_down` segment (`fd::*`): every card exiled face down, in their canonical order for the
+/// viewer (`face_down_order`, ENGINE.md 142.3), then every face-down permanent, in their order
+/// (slots k). An identity only where the viewer knows it.
 fn write_face_down(cx: &Cx, tail: &mut TailBuf) {
     let g = cx.g;
-    let cards = g.face_down.iter().map(|&c| (c, true)).chain(g.face_down_ids.iter().map(|&(c, _)| (c, false)));
+    let cards = cx.fd.iter().map(|&c| (c, true)).chain(g.face_down_ids.iter().map(|&(c, _)| (c, false)));
     for (k, (c, exiled)) in cards.enumerate() {
         let x = tail.token(seg::FACE_DOWN, k as u32);
         let o = &g.objs[c.i()];
@@ -820,11 +852,16 @@ fn write_links(cx: &Cx, list: &[Option<CardIdx>], tail: &mut TailBuf) {
     let ids = cx.ids;
     let mut k = 0u32;
     let side = |p: PlayerId| if p == cx.me { 0 } else { 1 };
-    // Cards exiled with an object (CR 610.3): those still exiled.
-    for l in &g.links {
-        if !(g.live(l.card) && matches!(g.objs[l.card.idx.i()].zone, Zone::Exile | Zone::FaceDown)) {
-            continue;
-        }
+    // Cards exiled with an object (CR 610.3): those still exiled; those exiled face up in link
+    // order, then the face-down ones in their canonical order (ENGINE.md 142.3: a face-down
+    // pile's link order is the order its cards were exiled in, a hand's order for Memory Jar's).
+    let mut exiled: Vec<&crate::game::Link> =
+        g.links.iter().filter(|l| g.live(l.card) && matches!(g.objs[l.card.idx.i()].zone, Zone::Exile | Zone::FaceDown)).collect();
+    exiled.sort_by_key(|l| match g.objs[l.card.idx.i()].zone {
+        Zone::FaceDown => 1 + cx.fd.iter().position(|&x| x == l.card.idx).expect("a face-down card in Game::face_down"),
+        _ => 0,
+    });
+    for l in exiled {
         let x = link_token(tail, &mut k, lk::K_EXILED_WITH);
         if let Some(d) = cx.seen_def(l.card.idx) {
             code(&mut x[..CODE], g.db, ids, d);
@@ -974,7 +1011,7 @@ fn write_exile_offered(cx: &Cx, tail: &mut TailBuf) {
         }
         let place = match ob.zone {
             Zone::Exile => g.exile.iter().position(|&x| x == card),
-            Zone::FaceDown => g.face_down.iter().position(|&x| x == card),
+            Zone::FaceDown => cx.fd.iter().position(|&x| x == card),
             _ => None,
         };
         if let Some(p) = place {
@@ -1282,20 +1319,30 @@ impl Row {
     }
 
     /// The row as one vector: the head, then each tail token's segment, slot and floats, then the
-    /// overrides (equal rows, equal vectors; tests compare rows by it).
+    /// overrides. Equal rows give equal vectors and **different rows different vectors** (tests
+    /// compare rows by it: the public-state gate, the hidden-information tests, the fuzz's
+    /// information sets): every integer is written exactly, in 16-bit pieces (an f32 holds 24
+    /// bits; ENGINE.md 142.1: the override's packed `seg << 40 | col << 32 | slot` as one f32 lost
+    /// the slot below bit 21 - slots 33, 34 and 70,000 compared equal - and a tail slot past 2^24,
+    /// a `my_revealed` identity, would have too). The floats compare by value (0.0 == -0.0: the
+    /// network reads them alike).
     pub fn flat(&self) -> Vec<f32> {
+        fn int(v: &mut Vec<f32>, x: u64, pieces: u32) {
+            for k in (0..pieces).rev() {
+                v.push((x >> (16 * k) & 0xFFFF) as f32);
+            }
+        }
         let mut v = self.head.clone();
         v.push(-1e9);
         for (sg, sl, x) in &self.tail {
             v.push(*sg as f32);
-            v.push(*sl as f32);
+            int(&mut v, *sl as u64, 2);
             v.extend_from_slice(x);
         }
         v.push(-2e9);
         for &(o, t) in &self.ov {
-            v.push(o as f32);
-            v.push(t as f32);
-            v.push((t >> 24) as f32);
+            int(&mut v, o as u64, 2);
+            int(&mut v, t as u64, 4);
         }
         v
     }

@@ -1,9 +1,18 @@
 //! The network input of the `mtg` game (ENGINE.md 21.2, 22.2, 24): a fixed-width
 //! f32 vector for a viewer, with no hidden information. **Layout v7**
-//! ([`NUM_FEATURES`] = 47,892 floats; ENGINE.md 124.2) is layout v6 with one block
-//! of globals appended (`globals_v7`, [`g7`]: the pool's mana of a chosen
-//! creature type), so a v6 network widens onto it exactly ([`v6_projection`]);
-//! the `mtg_eoe` game keeps layout v6 ([`NUM_FEATURES_V6`]). **Layout v6**
+//! (ENGINE.md 124.2, 125; `mtgz/az/layout_v7.json`) is a row: a fixed **head** of
+//! [`NUM_FEATURES`] = 56,384 floats, a variable-length **tail** of tokens and the options'
+//! pointer overrides (`tail_encode`; at most 4,096 tokens a row). The head is layout v6
+//! with additions only: one block of globals appended (`globals_v7`, [`g7`]: the pool's
+//! mana of a chosen creature type, 3,680 floats) and wider slots, the new floats at each
+//! slot's end (permanent 281 = v6's 196 + 85, `perm::V7`; hand and list 64; stack 438,
+//! `STACK_V7`; trigger 271); the tail holds the seven capped segments' objects past their
+//! head slots and nine gated tail-only segments (opponent_triggers, delayed, links,
+//! exile_offered, library_known, stack_relations, graveyard_order, face_down, my_revealed).
+//! A v6 (or v5) network widens onto it ([`v6_projection`], [`v5_projection`]); the
+//! block table below describes layouts v4-v6 and v7's globals, and the v7 offsets are
+//! [`LAY7`]'s (ENGINE.md 125.1, 125.12). The `mtg_eoe` game keeps layout v6
+//! ([`NUM_FEATURES_V6`], no tail). **Layout v6**
 //! ([`NUM_FEATURES_V6`] = 44,212 floats; ENGINE.md 100.5, 100.5.1) is layout v5 (37,620
 //! floats, ENGINE.md 60) with additions only, as v5 was v4's, so that a v5
 //! token network widens onto it exactly (zero-core `net.widen` with this
@@ -2213,7 +2222,8 @@ impl Game {
         match item.kind {
             StackKind::Spell { card } => {
                 st[stack::COPY] = self.is_copy_obj(card) as u8 as f32;
-                st[stack::TIMES] = item.times as f32 / 4.0;
+                // (Squashed: a u32 the row limit doesn't bound, ENGINE.md 142.4; exact as before below 512.)
+                st[stack::TIMES] = squash(item.times as f32 / 4.0);
                 st[stack::BESTOWED] = self.def_of(card).bestowed as u8 as f32;
                 st[stack::UNCOUNTERABLE] = self.spell_uncounterable(card) as u8 as f32;
                 st[stack::TARGETED] = stack_targets.iter().any(|t| matches!(t, Target::Obj(r) if r.idx == card && self.live(*r))) as u8 as f32;
@@ -2246,7 +2256,7 @@ impl Game {
                     Zone::Stack => {
                         tb[6] = 1.0;
                         let pos = self.stack.iter().rev().position(|x| x.kind == StackKind::Spell { card: r.idx }).unwrap_or(0);
-                        tb[7] = pos as f32 / 8.0;
+                        tb[7] = squash(pos as f32 / 8.0);
                     }
                     _ => {}
                 },
@@ -2255,7 +2265,7 @@ impl Game {
                 Target::Stack(id) => {
                     if let Some(pos) = self.stack.iter().rev().position(|x| x.id == id) {
                         tb[6] = 1.0;
-                        tb[7] = pos as f32 / 8.0;
+                        tb[7] = squash(pos as f32 / 8.0);
                     }
                 }
             }

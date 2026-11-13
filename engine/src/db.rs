@@ -249,6 +249,13 @@ pub enum Mod {
 }
 
 impl Mod {
+    /// A variant only a static ability has: the lowering builds it inside a `StaticDef` only, and
+    /// `Game::add_effect` refuses it (the public-state gate's classification,
+    /// `public_state::STATIC_ONLY_MODS`, ENGINE.md 142).
+    pub fn static_only(&self) -> bool {
+        matches!(self, Mod::PtPer { .. } | Mod::PtPerSourceCounter { .. } | Mod::AttackDespiteDefender | Mod::PowerPlusGreatestMv { .. })
+    }
+
     /// `Mod::Pt` of a card's printed numbers.
     pub fn pt(p: i32, t: i32) -> Mod {
         Mod::Pt(p as i64, t as i64)
