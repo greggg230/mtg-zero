@@ -412,6 +412,10 @@ pub fn deck_weights(a: &MtgAz, viewer: PlayerId, p: &[f32], tilt: f64, clip: f64
     let ids = identity::identities(db);
     let o = opp(viewer);
     let mut w = vec![1.0; identity::D];
+    // (a dealt seat's deck is its dealt prior's, untilted: ENGINE.md 154)
+    if a.deck_dealt(o) {
+        return w;
+    }
     let Some(prior) = a.m.deck_priors[o as usize].clone() else { return w };
     let sizes = [a.m.decks[0].iter().map(|&c| c as usize).sum(), a.m.decks[1].iter().map(|&c| c as usize).sum()];
     let kn = sample::knowledge(g, viewer, o, sizes);
@@ -457,6 +461,13 @@ impl MtgAz {
     /// (game 1's is the registered main: ENGINE.md 120), never otherwise.
     pub fn deck_hidden(&self, o: PlayerId) -> bool {
         self.m.deck_priors[o as usize].is_some() && (!self.m.constructed_bo3 || self.m.game_no >= 2)
+    }
+
+    /// Is player `o` the match's dealt seat (ENGINE.md 154, the spec's `"dealt_decks"`): its post-sideboard 60s
+    /// dealt from its 75 by its dealt prior (`deck_priors[o]`, `ConstructedPrior::dealt`), not chosen? Public: the
+    /// same in every world, encoded (`g6::DEALT`).
+    pub fn deck_dealt(&self, o: PlayerId) -> bool {
+        self.m.dealt == Some(o)
     }
 
     /// The face-down pick `viewer`'s request of `o`'s deck carries (ENGINE.md 129.3): Show and Tell's
@@ -532,6 +543,9 @@ impl MtgAz {
     pub(crate) fn sample_hidden_deck(&mut self, viewer: PlayerId, rng: &mut Rng, tilt: Option<&dyn Fn(DefId) -> f64>, deck_tilt: Option<DeckTilt>) {
         let o = opp(viewer);
         let Some(prior) = self.m.deck_priors[o as usize].clone() else { return };
+        // (ENGINE.md 154: a dealt seat's 60s are dealt by its dealt prior, `deck_priors[o]` - no policy of theirs
+        // chose them, so the deal is that prior's posterior exactly, never tilted by a prediction of a policy.)
+        let (tilt, deck_tilt) = if self.deck_dealt(o) { (None, None) } else { (tilt, deck_tilt) };
         // A constructed best-of-three (ENGINE.md 120): between games the opponent's hidden decks are
         // dealt (`deal_constructed_between`); in game 1 their deck is the registered main, open.
         if self.m.constructed_bo3 {
@@ -623,8 +637,13 @@ impl MtgAz {
         }
         if self.m.sb.is_none() {
             self.g.determinize(viewer as u8, &mut r);
+        } else {
+            // (between games no game card is dealt, but the world is the viewer's: a dealt seat's deal in it is keyed
+            // hidden for another viewer, `MtgAz::deal_dealt_deck`, ENGINE.md 154)
+            self.g.observer = Some(viewer as u8);
         }
         self.m.rng = Rng::new(r.next_u64());
+        self.reseed_dealt(&mut r);
     }
 
     /// The face-down pick `viewer`'s request of its opponent's hidden deck carries in this state (ENGINE.md
@@ -652,7 +671,8 @@ impl MtgAz {
     pub fn deck_tilt_of(&self, viewer: u8, t: DeckTilt) -> Option<(Arc<Vec<Arc<Dealt>>>, Arc<TiltedDecks>)> {
         let o = opp(viewer);
         let prior = self.m.deck_priors[o as usize].clone()?;
-        if self.m.sb.is_some() || self.g.is_over() || self.m.deal.k == 0 || self.g.encoding_seat(viewer) != viewer {
+        // (a dealt seat's deck is never tilted: ENGINE.md 154)
+        if self.m.sb.is_some() || self.g.is_over() || self.m.deal.k == 0 || self.g.encoding_seat(viewer) != viewer || self.deck_dealt(o) {
             return None;
         }
         // (a constructed best-of-three's game 1: the registered mains, open; ENGINE.md 120)
@@ -1023,6 +1043,11 @@ impl DeckPrior for SealedPrior {
 /// ([`DeckWant::tilt`]) multiplies a deck's probability by the weight of each card it holds beyond
 /// R (an exponential tilt of the exact posterior; 1: the untilted draw, draw for draw). The table
 /// depends on the request alone: the K decks of a request share one (`sample_k`, ENGINE.md 140).
+///
+/// **A dealt deck** (ENGINE.md 154, [`ConstructedPrior::dealt`]): the same prior with the swap count restricted
+/// to a range `lo..=hi` (uniform over s in it, then uniform over the decks with s swaps) - the deal of the spec's
+/// `"dealt_decks"` seat and, as that seat's `deck_priors`, the other player's worlds of it (conditioned as above,
+/// never tilted: `MtgAz::sample_hidden_deck`).
 pub struct ConstructedPrior {
     /// The 75 by definition: (definition, copies), sorted.
     list: Vec<(DefId, u8)>,
@@ -1032,8 +1057,11 @@ pub struct ConstructedPrior {
     n: usize,
     side: usize,
     support: Vec<DefId>,
-    /// The base prior's number of legal decks with s swaps, s = 0..=S (count vectors).
+    /// The base prior's number of legal decks with s swaps, s = 0..=S (count vectors): of a dealt
+    /// prior (`ConstructedPrior::dealt`, ENGINE.md 154) those of its swap range, 0 outside it.
     by_swaps: Vec<f64>,
+    /// The swap range of the base prior (inclusive): 0..=S, or a dealt deck's (`ConstructedPrior::dealt`).
+    swaps: (usize, usize),
 }
 
 /// One entry of the constructed prior's table: the counts it may take, the main's, the shown ones
@@ -1183,12 +1211,37 @@ impl ConstructedPrior {
         let slots: Vec<Slot> = list.iter().zip(&counts).map(|(&(_, t), &m)| Slot::new(0, t, m, 0, 1.0)).collect();
         let last = swap_table(&slots, side, false).pop().expect("a layer");
         let by_swaps = (0..=side).map(|s| last[s * (side + 1) + s]).collect();
-        ConstructedPrior { list, main: counts, n: main.len(), side, support, by_swaps }
+        ConstructedPrior { list, main: counts, n: main.len(), side, support, by_swaps, swaps: (0, side) }
     }
 
-    /// The base prior's number of legal decks with s swaps, s = 0..=S (ENGINE.md 120.2).
+    /// The base prior's number of legal decks with s swaps, s = 0..=S (ENGINE.md 120.2): of a dealt
+    /// prior, 0 outside its swap range (ENGINE.md 154).
     pub fn decks_by_swaps(&self) -> &[f64] {
         &self.by_swaps
+    }
+
+    /// The prior of a dealt deck (ENGINE.md 154, the spec's `"dealt_decks"`): `new`'s with the swap count
+    /// restricted to `lo..=hi` - uniform over s in `lo..=hi`, then uniform over the legal 60s with s swaps. Its
+    /// `by_swaps` holds the base prior's counts in the range and 0 outside it, so every draw of the table
+    /// (`sample`, its face-down pick, `expected_fill`) weighs each s by the posterior's weight over that count, 0
+    /// outside the range: the same exact sampler, its support the decks of `lo..=hi` swaps (no rejection). The
+    /// dealt seat's own deal (`MtgAz::deal_dealt_deck`) and the other player's worlds of it both sample this.
+    /// A range past the sideboard (`hi` > S) or empty (`lo` > `hi`) is refused loudly (the spec refuses it first).
+    pub fn dealt(main: &[DefId], sideboard: &[DefId], lo: usize, hi: usize) -> ConstructedPrior {
+        let mut p = ConstructedPrior::new(main, sideboard);
+        assert!(lo <= hi && hi <= p.side, "a dealt deck's swaps {lo}..={hi}: within 0..={} (the sideboard's size), lo <= hi", p.side);
+        for (s, x) in p.by_swaps.iter_mut().enumerate() {
+            if !(lo..=hi).contains(&s) {
+                *x = 0.0;
+            }
+        }
+        p.swaps = (lo, hi);
+        p
+    }
+
+    /// The swap range of the base prior (inclusive): 0..=S, or a dealt prior's (ENGINE.md 154).
+    pub fn swap_range(&self) -> (usize, usize) {
+        self.swaps
     }
 
     /// The deck's swaps: its cards beyond the main's counts (0..=S).
@@ -1413,7 +1466,11 @@ impl ConstructedPrior {
 
 impl DeckPrior for ConstructedPrior {
     fn name(&self) -> &'static str {
-        "constructed"
+        if self.swaps == (0, self.side) {
+            "constructed"
+        } else {
+            "constructed (dealt, ENGINE.md 154)"
+        }
     }
 
     fn support(&self) -> &[DefId] {

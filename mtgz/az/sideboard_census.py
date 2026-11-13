@@ -21,7 +21,8 @@ them, -4 Force of Will in 60%) with the mean change and its standard error. Game
 game 2) is not in it.
 
 The census is the publisher's (tools/delverai_publish.py, `--census N`: each recorded generation's), never the
-training run's: it reads the checkpoint and its run's config.json only.
+training run's: it reads the checkpoint and its run's config.json only. A run spec's dealt decks (docs/ENGINE.md 154,
+a self-play setting) are left out: every census player sideboards itself (`evaldecks.undealt`).
 """
 import argparse
 import json
@@ -32,6 +33,7 @@ import time
 
 import mtgz.az  # noqa: F401  (registers the game package)
 from mtgz.az import replays
+from mtgz.az.evaldecks import undealt
 from zero import replay as core
 from zero.infer import NetEvaluator, drive
 from zero.net import load
@@ -84,6 +86,12 @@ class _CensusDriver(PyDriver):
         slot.steps = self.max_steps                 # done: the driver finishes the slot
 
 
+def census_spec(cfg):
+    """The spec a census plays: the run's spec without dealt decks (docs/ENGINE.md 154: a self-play setting - a
+    census measures the checkpoint's own sideboarding in every start)."""
+    return undealt(cfg['spec'])
+
+
 def search_seat(cfg, sims):
     """The network seat the census searches with: the recorded matches' (`replays.record`: evaluation settings,
     the leaf values' view and root search by `replays.leaf_view` / `replays.root_search`)."""
@@ -99,7 +107,8 @@ def run_starts(ckpt, starts=STARTS, sims=None, device='cpu', seed=1, conc=None, 
     cfg = core.run_config(run)
     if not cfg.get('spec'):
         raise SystemExit(f'{ckpt}: no run config with a spec next to it ({run or "no run directory"})')
-    spec = json.loads(cfg['spec'])
+    spec_json = census_spec(cfg)
+    spec = json.loads(spec_json)
     if not (spec.get('constructed') and spec.get('format') == 'bo3' and int(spec.get('start_game') or 1) == 2):
         raise SystemExit(f'{ckpt}: a sideboard census needs a constructed best-of-three spec with "start_game": 2')
     sims = int(sims or cfg.get('sims', 64))
@@ -108,7 +117,7 @@ def run_starts(ckpt, starts=STARTS, sims=None, device='cpu', seed=1, conc=None, 
     ev = NetEvaluator(model, device)
     seat = search_seat(cfg, sims)
     t0 = time.time()
-    drv = _CensusDriver(game, starts, lambda k: [seat, seat], spec=cfg['spec'], concurrency=min(conc or starts, starts),
+    drv = _CensusDriver(game, starts, lambda k: [seat, seat], spec=spec_json, concurrency=min(conc or starts, starts),
                         seed=seed, max_steps=MAX_STEPS)
     drive(drv, {'a': ev})
     secs = time.time() - t0
@@ -208,7 +217,7 @@ def census(ckpt, starts=STARTS, sims=None, device='cpu', seed=1, conc=None, log=
     """run_starts + summarize -> the census record (with `time`: when it was made)."""
     records, info = run_starts(ckpt, starts=starts, sims=sims, device=device, seed=seed, conc=conc, log=log)
     run, _ = core.run_of(ckpt)
-    rec = summarize(records, core.run_config(run)['spec'], info)
+    rec = summarize(records, census_spec(core.run_config(run)), info)
     rec['time'] = int(time.time())
     return rec
 

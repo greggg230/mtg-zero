@@ -37,6 +37,9 @@ def half_specs(spec):
     s = json.loads(spec)
     if not (s.get('constructed') and s.get('format') == 'bo3'):
         raise ValueError('keep_h2h: a constructed best-of-three spec ("constructed": true, "format": "bo3"; docs/ENGINE.md 130)')
+    if 'dealt_decks' in s:
+        raise ValueError('keep_h2h: the spec deals decks (dealt_decks, docs/ENGINE.md 154: a self-play setting); '
+                         "the yardstick plays every seat's own sideboarding - pass the run's evaluation spec")
     if 'keep_deck' in s:
         raise ValueError('keep_h2h: the spec names keep_deck itself (the tool sets it per half)')
     return [json.dumps(dict(s, keep_deck=[1 - a_seat]), separators=(',', ':')) for a_seat in (0, 1)]

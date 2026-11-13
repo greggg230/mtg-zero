@@ -228,6 +228,15 @@ SPEC_DELVER_BO3 = decklists.mirror_bo3_spec(decklists.IZZET_DELVER, max_turns=60
 PRESETS['delver-mirror-bo3'] = dict(PRESETS['delver-mirror'], spec=SPEC_DELVER_BO3, eval_spec=SPEC_DELVER_BO3, **_DELVER_BO3)
 # the end-to-end check on CPU: the same spec (the full 75, one episode per game) with mtg-smoke's tiny network and sims
 PRESETS['delver-bo3-smoke'] = dict(PRESETS['delver-smoke'], spec=SPEC_DELVER_BO3, eval_spec=SPEC_DELVER_BO3, **_DELVER_BO3)
+# Forced deck variety (docs/ENGINE.md 154, the user's decisions of 2026-11-13; hub design note
+# delver_bo3_forced_variety_design_2026-11-13): delver-mirror-bo3 with dealt decks in self-play - in half the matches one
+# seat (each 1/2) has its 60 for games 2 and 3 dealt from its 75 (1 to 8 swaps against the main, uniform over the count,
+# then over the 60s; each game's deal independent) instead of sideboarding, public to both players, so the network plays
+# - and its value net learns the worth of - its sideboard cards. The evaluation spec is delver-mirror-bo3's (never
+# dealt), as are keep_h2h's, the census's and the recorded matches' (`evaldecks.undealt`).
+SPEC_DELVER_BO3_DEALT = decklists.mirror_bo3_spec(decklists.IZZET_DELVER, max_turns=60, game_episodes=True, start_game=2,
+                                                  dealt_decks={'p': 0.5, 'swaps': [1, 8]})
+PRESETS['delver-mirror-bo3-dealt'] = dict(PRESETS['delver-mirror-bo3'], spec=SPEC_DELVER_BO3_DEALT, eval_spec=SPEC_DELVER_BO3)
 
 # Edge of Eternities sealed (DESIGN.md 9, docs/ENGINE.md 101, 105): the game `mtg_eoe` - `mtg` on the EoE card table,
 # whose encodings carry the EoE identity space (the set's cards in set order, then its tokens: engine/src/az/eoe_cards.txt,

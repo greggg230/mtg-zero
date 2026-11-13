@@ -56,6 +56,15 @@
 //!   best-of-three (`earlier`), nor its chooser and starter encoded. A seat of
 //!   the spec's `"keep_deck"` keeps its deck at every sideboarding (an
 //!   evaluation yardstick; `MatchState::keep`).
+//! * Dealt decks (ENGINE.md 154, the spec's `"dealt_decks"`): a constructed
+//!   best-of-three's dealt seat (`MatchState::dealt`, public; `dealt_seat`
+//!   from a stream of the match's seed of its own) has its 60 for each later
+//!   game dealt at its sideboarding (`MtgAz::dealt_sideboards`: no decision of
+//!   its own; the order stays CR 103.1's - a dealt loser is dealt first and
+//!   still chooses play or draw) from its dealt prior (`deck_priors`,
+//!   `hidden_decks::ConstructedPrior::dealt`), each game's deal from its own
+//!   stream (`MatchState::dealt_seed`, reseeded in every world), keyed
+//!   `KEY_DEALT` private to it (`deal_dealt_deck`).
 
 use std::sync::Arc;
 
@@ -450,6 +459,15 @@ pub struct MatchState {
     /// its result was drawn from the match's seed (`skip_game_one`). Never
     /// encoded: a real game 2 encodes as a synthetic one.
     pub post_board: bool,
+    /// The dealt seat (ENGINE.md 154, the spec's `"dealt_decks"`; `dealt_seat`): its 60 for each later game
+    /// is dealt at its sideboarding from its dealt prior (`deck_priors`, `ConstructedPrior::dealt`), with no
+    /// sideboarding decision of its own. Public: a rule of the match, the same in every world, encoded
+    /// (`encode::g6::DEALT`). None: no seat dealt (every spec without the option).
+    pub dealt: Option<PlayerId>,
+    /// The seed of the dealt seat's deals (`dealt_deal_seed`; game g's from `split64(dealt_seed ^ g)`, each
+    /// game's deal independent): a later game's deal is chance that has not happened, so `determinize`
+    /// reseeds it in every world (`MtgAz::reseed_dealt`), as it reseeds `rng`. Unused (0) without a dealt seat.
+    pub dealt_seed: u64,
 }
 
 /// The game-1 winner of a match with seed `seed` that starts at game 2 (ENGINE.md 130): each seat
@@ -457,6 +475,23 @@ pub struct MatchState {
 /// seed, then game 3's) is a real match's of the same seed.
 pub fn game_one_winner(seed: u64) -> PlayerId {
     Rng::new(crate::rng::split64(seed ^ 0x6A3E_0001_C01F_11D5)).below(2) as PlayerId
+}
+
+/// The dealt seat of a match with seed `seed` whose spec deals with share `p` (ENGINE.md 154, the spec's
+/// `"dealt_decks"`): with probability `p` one seat, each with probability 1/2; else None. From a stream of the
+/// match's seed of its own (as `game_one_winner`'s): the match's RNG (its games' seeds) is a real match's of
+/// the same seed, so everything but the dealt seat's decks is the match of the same seed without the option.
+pub fn dealt_seat(seed: u64, p: f64) -> Option<PlayerId> {
+    let mut r = Rng::new(crate::rng::split64(seed ^ 0xDEA1_7DEC_C500_0154));
+    // (a uniform in [0, 1) from 53 bits: p 1 deals in every match)
+    let u = (r.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64);
+    (u < p).then(|| r.below(2) as PlayerId)
+}
+
+/// The seed of the dealt seat's deals in a match with seed `seed` (ENGINE.md 154; `MatchState::dealt_seed`):
+/// another stream of the match's seed of its own.
+pub fn dealt_deal_seed(seed: u64) -> u64 {
+    crate::rng::split64(seed ^ 0xDEA1_7DEC_0000_D5EE)
 }
 
 /// The first game's setup of one player: deck, sideboard, first picks, and
@@ -522,6 +557,8 @@ impl MatchState {
             between: false,
             keep: [false; 2],
             post_board: false,
+            dealt: None,
+            dealt_seed: 0,
         })
     }
 
@@ -680,15 +717,16 @@ impl super::MtgAz {
                 }
             }
             if self.g.is_over() {
-                self.end_game();
+                self.end_game(Some(chance));
             }
         }
         Ok(())
     }
 
     /// The current game ended (best-of-three): score it; end the match or
-    /// start sideboarding.
-    fn end_game(&mut self) {
+    /// start sideboarding (`chance`: the step's keys, None outside a step - a dealt seat's deal keyed there,
+    /// ENGINE.md 154).
+    fn end_game(&mut self, chance: Option<&mut Vec<u64>>) {
         let aborted = self.g.aborted();
         let m = &mut self.m;
         let o = self.g.outcome().expect("the game is over");
@@ -735,13 +773,14 @@ impl super::MtgAz {
             m.between = true;
             return;
         }
-        self.begin_sideboarding();
+        self.begin_sideboarding(chance);
     }
 
     /// Sideboarding for the next game after the last one ended (ENGINE.md
     /// 36.2). CR 103.1: the loser of the previous game chooses; after a
-    /// draw, the player who made the choice in it.
-    fn begin_sideboarding(&mut self) {
+    /// draw, the player who made the choice in it. A dealt chooser's 60 is dealt at once (ENGINE.md 154,
+    /// `dealt_sideboards`; `chance`: the step's keys, None outside a step).
+    fn begin_sideboarding(&mut self, chance: Option<&mut Vec<u64>>) {
         let m = &mut self.m;
         let i = (m.game_no - 1) as usize;
         let chooser = match m.results[i] {
@@ -750,6 +789,9 @@ impl super::MtgAz {
         };
         let sb = Sideboarding::with_keep(chooser, m.decks[chooser as usize].to_vec(), &m.pools[chooser as usize], m.keep);
         m.sb = Some(Box::new(sb));
+        if m.dealt == Some(chooser) {
+            self.dealt_sideboards(chance).expect("a dealt chooser's deal: no game starts at the first sideboarder");
+        }
     }
 
     /// The match starts at the sideboarding before game 2 (ENGINE.md 130, the spec's `"start_game":
@@ -772,12 +814,12 @@ impl super::MtgAz {
             return Err("mtg: start_game 2 skips game 1 of a constructed best-of-three not yet played (ENGINE.md 130)".into());
         }
         self.g.concede(opp(winner));
-        self.end_game();
+        self.end_game(None);
         debug_assert!(!self.m.over && self.m.results[0] == 1 + winner);
         // (one episode per game: the first episode is game 2's, its sideboarding first)
         self.m.between = false;
         if self.m.sb.is_none() {
-            self.begin_sideboarding();
+            self.begin_sideboarding(None);
         }
         self.m.post_board = true;
         Ok(())
@@ -809,7 +851,7 @@ impl super::MtgAz {
                     return Err(format!("mtg: P{p} concedes, but no game is in progress (ENGINE.md 121)"));
                 }
                 az.g.concede(p);
-                az.end_game();
+                az.end_game(None);
             }
         }
         if az.m.over {
@@ -820,7 +862,7 @@ impl super::MtgAz {
             return Ok(zero_search::Next::Over(out));
         }
         az.m.between = false;
-        az.begin_sideboarding();
+        az.begin_sideboarding(None);
         Ok(zero_search::Next::Continue(az))
     }
 
@@ -841,6 +883,10 @@ impl super::MtgAz {
         sb.start = sb.counts.clone();
         sb.last = None;
         sb.ask(&m.pools[q as usize]);
+        // (a dealt second sideboarder: its 60 dealt, the next game begins; ENGINE.md 154)
+        if m.dealt == Some(q) {
+            return self.dealt_sideboards(Some(chance));
+        }
         Ok(())
     }
 
@@ -911,6 +957,92 @@ impl super::MtgAz {
             v.sort_unstable();
             v.dedup();
             self.g.known_pools[q as usize] = Some(Arc::from(v));
+        }
+    }
+}
+
+// ---- Dealt decks (ENGINE.md 154, the spec's `"dealt_decks"`) ----
+
+/// The dealt-deck keys' payload: `DEALT_PER_KEY` counts of 5 bits (a constructed 75's copies of a card are at most
+/// `MAX_COUNT` = 31, `MatchState::constructed`), the key's index in the top 3 bits (a 75's list has at most 64
+/// entries, `act::LIBRARY_N`: 8 keys).
+const DEALT_PER_KEY: usize = 9;
+const _: () = assert!(MAX_COUNT < 32 && (act::LIBRARY_N as usize).div_ceil(DEALT_PER_KEY) <= 8 && 5 * DEALT_PER_KEY + 3 <= 48);
+
+impl super::MtgAz {
+    /// The match's dealt seat is `d` (ENGINE.md 154; `MtgAz::new` of a spec with `"dealt_decks"`, before the first
+    /// sideboarding): the seed of its deals from the match's seed (`dealt_deal_seed`), and its deck prior - as the
+    /// other player deals its 60s, and as its own deals are made - the constructed prior of its 75 (`seat`'s main
+    /// and sideboard) restricted to `swaps` (`ConstructedPrior::dealt`).
+    pub(crate) fn set_dealt(&mut self, d: PlayerId, swaps: (u8, u8), seat: &Seat, seed: u64) {
+        use super::hidden_decks::{ConstructedPrior, DeckPrior};
+        assert!(self.m.constructed_bo3, "dealt decks: a constructed best-of-three (ENGINE.md 154)");
+        let prior = ConstructedPrior::dealt(&seat.deck, &seat.sideboard, swaps.0 as usize, swaps.1 as usize);
+        self.m.deck_priors[d as usize] = Some(Arc::new(prior) as Arc<dyn DeckPrior>);
+        self.m.dealt = Some(d);
+        self.m.dealt_seed = dealt_deal_seed(seed);
+    }
+
+    /// The sideboarding's decider is the dealt seat (ENGINE.md 154): its 60 for the next game is dealt
+    /// (`deal_dealt_deck`) and is its choice; it decides nothing. First to sideboard: the other player sideboards
+    /// next, from its last deck. Second: the next game begins (`next_game`), its chooser the first. The dealt seat
+    /// is never a decider of a sideboarding decision, so no sample of zero-core's is ever recorded for it there.
+    /// `chance`: the step's keys (None outside a step: the match's start, `next_episode`).
+    pub(crate) fn dealt_sideboards(&mut self, chance: Option<&mut Vec<u64>>) -> Result<(), String> {
+        let d = self.m.sb.as_ref().expect("sideboarding").decider();
+        assert_eq!(self.m.dealt, Some(d), "P{d} sideboards by a deal, but is not the dealt seat");
+        let mut chance = chance;
+        let counts = self.deal_dealt_deck(d, chance.as_mut().map(|c| &mut **c));
+        let m = &mut self.m;
+        let sb = m.sb.as_mut().expect("sideboarding");
+        sb.done[d as usize] = Some(counts);
+        if sb.turn == 1 {
+            let c = chance.ok_or("mtg: a dealt second sideboarder outside a step: the next game's keys have nowhere to go")?;
+            return self.next_game(c);
+        }
+        sb.turn = 1;
+        let q = sb.decider();
+        sb.counts = m.decks[q as usize].to_vec();
+        sb.start = sb.counts.clone();
+        sb.last = None;
+        sb.asking = None;
+        sb.ask(&m.pools[q as usize]);
+        Ok(())
+    }
+
+    /// The dealt seat `d`'s 60 for the next game (ENGINE.md 154): a sample of its dealt prior (`deck_priors[d]`,
+    /// `ConstructedPrior::dealt`: uniform over the swap counts of the spec's range, then uniform over the 60s of its
+    /// 75 with that count; no card shown, no tilt) from the stream of that game, `split64(dealt_seed ^ game)` - each
+    /// game's deal independent of the others and of everything played. Its counts per entry of the public 75's list.
+    /// The deal is the dealt seat's private chance: keyed to `chance` (when given) as `KEY_DEALT` keys of player `d`,
+    /// the 60's counts exactly (`DEALT_PER_KEY` a key, in list order); for another observer (a world of the other
+    /// player, `MtgAz::determinize`) the same number of keys with the payload `HIDDEN`, so that player's tree never
+    /// branches on it (ENGINE.md 10), and the dealt seat's own tree does.
+    pub(crate) fn deal_dealt_deck(&mut self, d: PlayerId, chance: Option<&mut Vec<u64>>) -> Arc<[u8]> {
+        use super::hidden_decks::{Dealt, DeckWant};
+        let prior = self.m.deck_priors[d as usize].clone().expect("a dealt seat's prior");
+        let game = self.m.game_no as u64 + 1;
+        let mut r = Rng::new(crate::rng::split64(self.m.dealt_seed ^ game));
+        let n = self.m.pools[d as usize].min_deck;
+        let want = DeckWant { db: self.g.db(), n, shown: &[], companion: None, tilt: None, pick: None };
+        let dealt = Dealt::new(&*prior, &want, prior.sample(&want, &mut r));
+        assert_eq!(dealt.pool.list, self.m.pools[d as usize].list, "P{d}'s dealt 60 is not of its public 75");
+        if let Some(c) = chance {
+            let hidden = self.g.observer.is_some_and(|o| o != d);
+            for (j, part) in dealt.counts.chunks(DEALT_PER_KEY).enumerate() {
+                let payload = if hidden { HIDDEN } else { part.iter().enumerate().fold((j as u64) << 45, |x, (i, &k)| x | (k as u64) << (5 * i)) };
+                c.push(key(crate::hidden::KEY_DEALT, d, payload));
+            }
+        }
+        dealt.counts.clone()
+    }
+
+    /// `determinize`'s reseeding of the dealt seat's later deals (ENGINE.md 154): chance that has not happened, in
+    /// every world of every viewer (as the match's `rng`). One draw of `r`, after the match's `rng`'s, and none
+    /// without a dealt seat (every other spec's worlds unchanged).
+    pub(crate) fn reseed_dealt(&mut self, r: &mut Rng) {
+        if self.m.dealt.is_some() {
+            self.m.dealt_seed = r.next_u64();
         }
     }
 }

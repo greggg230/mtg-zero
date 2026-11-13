@@ -359,6 +359,8 @@ pub fn fields() -> Vec<Field> {
         between: Derived "one episode per game (ENGINE.md 121): a game ended, the match did not - a terminal state, never encoded for a decision",
         keep: Hidden "the seats that keep their decks at every sideboarding (ENGINE.md 130, an evaluation yardstick): a seat's own policy, off in the other player's worlds",
         post_board: Derived "game 1 was not played (ENGINE.md 130, start_game 2): a setting of the match, the same in every world, never encoded - a real game 2 encodes as a synthetic one",
+        dealt: Public "the dealt seat (ENGINE.md 154, dealt_decks): a rule of the match both players know, the same in every world, encoded per player (g6::DEALT)",
+        dealt_seed: Hidden "seeds the dealt seat's later deals (ENGINE.md 154): chance not yet happened, determinize reseeds it in every world",
     });
     v
 }
@@ -1912,6 +1914,16 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.m.wins[p] += 1;
             Some(format!("P{p}"))
         }),
+        p!("a player's decks in the match are dealt", "MatchState.dealt", |a, r| {
+            // (ENGINE.md 154: the match's dealt seat, which the encoding shows for both players; a match with one
+            // already: the other seat instead)
+            let p = match a.m.dealt {
+                Some(d) => opp(d),
+                None => player(r),
+            };
+            a.m.dealt = Some(p);
+            Some(format!("P{p}"))
+        }),
         p!("a drawn game", "MatchState.draws", |a, _| {
             a.m.draws += 1;
             Some(format!("{}", a.m.draws))
@@ -2284,6 +2296,7 @@ pub fn match_view(a: &MtgAz, viewer: PlayerId) -> Vec<u64> {
         v.extend(m.earlier[p].iter().copied());
     }
     v.push(m.sb.is_some() as u64);
+    v.push(m.dealt.map_or(9, |d| d as u64));
     let _ = viewer;
     v
 }

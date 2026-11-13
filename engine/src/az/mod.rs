@@ -149,6 +149,15 @@ impl Eq for Share {}
 /// option there) - an evaluation yardstick, the other seat's knowledge and worlds unchanged (its
 /// worlds deal p's sideboarding as any player's). Without the keys every spec is what it was.
 ///
+/// Dealt decks (ENGINE.md 154): `"dealt_decks": {"p": p, "swaps": [lo, hi]}` (a constructed best-of-three only,
+/// not with `keep_deck`; p in (0, 1], 0 <= lo <= hi <= each seat's sideboard size): with probability p a match has
+/// one dealt seat, each seat 1/2 (`matches::dealt_seat`, a stream of the match's seed of its own), whose 60 at each
+/// of its sideboardings is dealt from its 75 - uniform over the swap counts lo..=hi, then uniform over the 60s with
+/// that count (`ConstructedPrior::dealt`), each game's deal independent - with no sideboarding decision of its own.
+/// Public (both players know which seat is dealt: `encode::g6::DEALT`); the other player's worlds deal that seat's
+/// 60s from the same restricted prior, untilted. A self-play setting: the evaluation spec drops it (`eval_json`).
+/// Without the key every spec is what it was.
+///
 /// `"log": true` keeps each game's log (`GameSpec::log`) for the spectator view
 /// (`view.rs`, the replay recorder); it changes nothing else.
 ///
@@ -203,6 +212,44 @@ pub struct MtgSpec {
     pub start_game: u8,
     /// The seats that keep their deck at every sideboarding (ENGINE.md 130; an evaluation yardstick).
     pub keep_deck: [bool; 2],
+    /// Dealt decks (ENGINE.md 154): the share of matches with a dealt seat and the dealt 60s' swap range.
+    pub dealt_decks: Option<DealtDecks>,
+}
+
+/// The spec's `"dealt_decks"` (ENGINE.md 154): `p`, the share of matches with one dealt seat (in (0, 1]), and
+/// `swaps`, the dealt 60s' range of swaps against the registered main (inclusive; within each seat's sideboard).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DealtDecks {
+    pub p: Share,
+    pub swaps: (u8, u8),
+}
+
+impl DealtDecks {
+    /// `{"p": p, "swaps": [lo, hi]}`: p in (0, 1], 0 <= lo <= hi <= 15 (a constructed sideboard's most; the spec
+    /// checks each seat's own sideboard), no other key.
+    fn parse(x: &Value) -> Result<DealtDecks, String> {
+        let o = x.as_object().ok_or("mtg spec: dealt_decks must be {\"p\": share, \"swaps\": [lo, hi]} (ENGINE.md 154)")?;
+        if let Some(k) = o.keys().find(|k| !matches!(k.as_str(), "p" | "swaps")) {
+            return Err(format!("mtg spec: unknown dealt_decks key {k:?} (p, swaps)"));
+        }
+        let p = o
+            .get("p")
+            .and_then(|v| v.as_f64())
+            .filter(|p| *p > 0.0 && *p <= 1.0)
+            .ok_or("mtg spec: dealt_decks.p must be a number in (0, 1] (the share of matches with a dealt seat)")?;
+        let a = o
+            .get("swaps")
+            .and_then(|v| v.as_array())
+            .filter(|a| a.len() == 2)
+            .ok_or("mtg spec: dealt_decks.swaps must be [lo, hi] (the dealt 60s' swaps, inclusive)")?;
+        let most = constructed::MAX_SIDEBOARD as u64;
+        let n = |v: &Value| v.as_u64().filter(|&n| n <= most);
+        let (lo, hi) = match (n(&a[0]), n(&a[1])) {
+            (Some(lo), Some(hi)) if lo <= hi => (lo as u8, hi as u8),
+            _ => return Err(format!("mtg spec: dealt_decks.swaps {} must be [lo, hi] with 0 <= lo <= hi <= {most} (a sideboard's most)", Value::Array(a.clone()))),
+        };
+        Ok(DealtDecks { p: Share(p), swaps: (lo, hi) })
+    }
 }
 
 impl Default for MtgSpec {
@@ -228,6 +275,7 @@ impl Default for MtgSpec {
             game_episodes: false,
             start_game: 1,
             keep_deck: [false; 2],
+            dealt_decks: None,
         }
     }
 }
@@ -340,6 +388,7 @@ impl MtgSpec {
                         s.keep_deck[p] = true;
                     }
                 }
+                "dealt_decks" => s.dealt_decks = Some(DealtDecks::parse(x)?),
                 "deal_samples" => s.deal_samples = int()? as usize,
                 "deck_tilt_ess" => {
                     let e = x.as_f64().filter(|e| *e > 0.0 && *e <= 1.0).ok_or("mtg spec: deck_tilt_ess must be a number in (0, 1] (a share of the K decks)")?;
@@ -452,6 +501,14 @@ impl MtgSpec {
         if s.keep_deck.iter().any(|&k| k) && !constructed_bo3 {
             return Err("mtg spec: keep_deck is for a constructed best-of-three (\"constructed\": true, \"format\": \"bo3\"; ENGINE.md 130)".into());
         }
+        if s.dealt_decks.is_some() {
+            if !constructed_bo3 {
+                return Err("mtg spec: dealt_decks is for a constructed best-of-three (\"constructed\": true, \"format\": \"bo3\"; ENGINE.md 154): it deals 60s of a 75".into());
+            }
+            if s.keep_deck.iter().any(|&k| k) {
+                return Err("mtg spec: dealt_decks with keep_deck: keep_deck is the evaluation yardstick's, dealt decks a self-play setting (ENGINE.md 154)".into());
+            }
+        }
         if s.hidden_decklists {
             // (ENGINE.md 102: best-of-three hides decks within known pools, 36.11; constructed
             // and drafted decks need priors of their own; a lab start deals its own spot.)
@@ -519,6 +576,22 @@ impl MtgSpec {
                             d.len(),
                             constructed::BO3_DECK
                         ));
+                    }
+                }
+                // (ENGINE.md 154: a dealt 60 swaps at most the seat's whole sideboard; either seat may be dealt)
+                if let Some(dd) = &s.dealt_decks {
+                    let sides: Vec<usize> = match &s.decks {
+                        DeckMode::Lists(..) => vec![0, 0],
+                        DeckMode::ListsWithSideboards(p) => p.iter().map(|x| x.1.len()).collect(),
+                        _ => unreachable!("refused above"),
+                    };
+                    for (p, &n) in sides.iter().enumerate() {
+                        if dd.swaps.1 as usize > n {
+                            return Err(format!(
+                                "mtg spec: dealt_decks.swaps [{}, {}]: p{p}'s sideboard has {n} cards, a 60 of its 75 swaps at most {n} (ENGINE.md 154)",
+                                dd.swaps.0, dd.swaps.1
+                            ));
+                        }
                     }
                 }
             }
@@ -661,7 +734,8 @@ impl MtgSpec {
 
     /// The same spec with the fixed evaluation decks (zero-core uses one
     /// spec for self-play and evaluation; `mtgz.az.run` switches evaluation
-    /// matches to this).
+    /// matches to this) and without dealt decks (ENGINE.md 154: a self-play setting).
+    /// `mtgz.az.evaldecks.eval_spec` is the same rule.
     pub fn eval_json(json: &str) -> Result<String, String> {
         let mut v: Value = if json.trim().is_empty() { Value::Object(Default::default()) } else {
             serde_json::from_str(json).map_err(|e| format!("mtg spec: {e}"))?
@@ -670,6 +744,8 @@ impl MtgSpec {
         if o.get("decks").is_none_or(|d| d == "random") {
             o.insert("decks".into(), Value::String("eval".into()));
         }
+        // (dealt decks are a self-play setting, ENGINE.md 154: evaluation plays every seat's own sideboarding)
+        o.remove("dealt_decks");
         Ok(v.to_string())
     }
 }
@@ -724,6 +800,12 @@ impl MtgAz {
             az.m.game_episodes = spec.game_episodes;
             // (ENGINE.md 130: the seats that keep their decks; post-sideboard games only)
             az.m.keep = spec.keep_deck;
+            // (ENGINE.md 154: the match's dealt seat, before the first sideboarding - which deals it)
+            if let Some(dd) = &spec.dealt_decks {
+                if let Some(d) = matches::dealt_seat(seed, dd.p.0) {
+                    az.set_dealt(d, dd.swaps, &seats[d as usize], seed);
+                }
+            }
             if spec.start_game == 2 {
                 az.skip_game_one(matches::game_one_winner(seed))?;
             }
@@ -1073,8 +1155,14 @@ impl SearchGame for MtgAz {
         }
         if self.m.sb.is_none() {
             self.g.determinize(viewer as u8, &mut r);
+        } else {
+            // Between games no game card is dealt (the last game is over), but the world is the viewer's: a dealt
+            // seat's deal in it (ENGINE.md 154, `MtgAz::deal_dealt_deck`) is keyed hidden for another viewer.
+            self.g.observer = Some(viewer as u8);
         }
         self.m.rng = Rng::new(r.next_u64());
+        // (ENGINE.md 154: a dealt seat's later deals are chance not yet happened, in every world)
+        self.reseed_dealt(&mut r);
     }
 
     /// The head of `encode_row` (layout v7, ENGINE.md 125; a loud failure on a state with tail
@@ -1174,7 +1262,8 @@ impl SearchGame for MtgAz {
     /// decklists the deck reader's target: a multinomial whose total is public). TRUE states -
     /// training labels that zero-core records with a sample when a run's `aux_belief_w` or
     /// `aux_deck_w` is on, never inputs: `encode` shows the viewer only what it knows (ENGINE.md
-    /// 10). Empty (no target) while sideboarding, between the games of a match.
+    /// 10). Empty (no target) while sideboarding, between the games of a match; `deck` empty for a viewer whose
+    /// frame opponent's 60 was dealt (ENGINE.md 154).
     const AUX: &'static [(&'static str, usize)] = &[("belief", identity::D), ("deck", identity::D)];
 
     fn aux_target(&self, viewer: usize, out: &mut [f32]) {
@@ -1189,7 +1278,12 @@ impl SearchGame for MtgAz {
             out[ids[self.g.obj(c).def as usize] as usize] += 1.0;
         }
         // `deck` (ENGINE.md 102.4): the frame opponent's cards the decider does not know exactly,
-        // each by the card it is (a face-down permanent's card: `Game::ident`).
+        // each by the card it is (a face-down permanent's card: `Game::ident`). None for a dealt frame
+        // opponent's dealt 60 (ENGINE.md 154: a game after the first of the dealt seat): the segment stays all
+        // zero - no target (zero-core's auxtarget) - so the deck head predicts only the decks a policy chose.
+        if self.deck_dealt(1 - seat) && self.m.game_no >= 2 {
+            return;
+        }
         let deck = &mut out[identity::D..2 * identity::D];
         for c in self.g.unknown_to(viewer as u8, 1 - seat) {
             deck[ids[self.g.ident(c) as usize] as usize] += 1.0;

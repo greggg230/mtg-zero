@@ -30,7 +30,7 @@
 //! | companions | 2 x 56 | v4 (M8a): the viewer's then the opponent's revealed companion (CR 702.139): card code, revealed, its special action still available (outside the game, not taken), the special action is an option of the viewer's decision now (`act::COMPANION`, the viewer's slot), put into the hand |
 //! | match | 32 | v4 (M8b, ENGINE.md 36.7; globals): the format, the game number, both players' game wins, draws, each game's result and who played first, sideboarding now and its order, deck sizes (`mtch::*`); 58.8: spells cast this turn, energy |
 //! | globals v5 | 64 | **v5** (`g5::*`; globals): per player (viewer first, 24 each) cards drawn this turn and in the draw step, noncreature spells this turn, gained life this turn, can't gain life, creatures that attacked this turn, spells cast this game, Yawgmoth's Will, graveyard exile this turn, the city's blessing, protection from everything, the pool's artifact-only and haste mana, delayed triggers waiting, exiled cards they may play, cards discarded this turn, ENGINE.md 72: which of their library's top three cards they know and which the other player knows (2 spare); the last normal turn's player, additional combat phases (14 spare, never set) |
-//! | globals v6 | 320 | **v6** (`g6::*`; globals): per player (viewer first, 128 each) an artifact entered under their control this turn, life gained this turn, their phased-out permanents and those phased out indirectly, their next turn controlled by the other player, controlled this turn; **100.5.1**: lands entered this turn, tokens created this turn (24 spare), their pool's restricted mana by type and kind (96); the game's 64: void, where the turn goes on after its combat phases; **100.5.1**: the card whose ability copies keep (27 spare) |
+//! | globals v6 | 320 | **v6** (`g6::*`; globals): per player (viewer first, 128 each) an artifact entered under their control this turn, life gained this turn, their phased-out permanents and those phased out indirectly, their next turn controlled by the other player, controlled this turn; **100.5.1**: lands entered this turn, tokens created this turn; **123**: the next spell can't be countered; **154**: their decks in the match are dealt (float 31; 22 spare), their pool's restricted mana by type and kind (96); the game's 64: void, where the turn goes on after its combat phases; **100.5.1**: the card whose ability copies keep (27 spare) |
 //! | globals v7 | 3,680 | **v7** (`g7::*`; globals; ENGINE.md 124.2): per player (viewer first, 1,840 each) the pool's mana that may be spent only to cast a creature spell of a chosen type (Cavern of Souls), by colour (W U B R G) and type (the 367 of CR 205.3m, then "no type chosen") |
 //!
 //! **The frame** (ENGINE.md 100.5, CR 722): "me" is the viewer, except
@@ -1087,7 +1087,7 @@ const _: () = assert!(g5::PLAYER_END <= g5::PLAYER && g5::GAME_END <= GLOBALS_V5
 /// [`O_GLOBALS_V6`], after v5's): per player, viewer first
 /// (`g6[PLAYER * side + ..]`), then the game's (`g6[GAME + ..]`).
 pub mod g6 {
-    /// Floats per player (9 used, 23 spare, then `POOL_KINDS`).
+    /// Floats per player (10 used: 0-8 and `DEALT` 31; 22 spare, then `POOL_KINDS`).
     pub const PLAYER: usize = 128;
     /// An artifact entered the battlefield under their control this turn
     /// (`Player::artifact_entered`; Mechan Shieldmate).
@@ -1119,6 +1119,11 @@ pub mod g6 {
     /// whether one waits is what the rules read; they end in the cleanup
     /// step, 514.2). The spell that uses them up is `stack::UNCOUNTERABLE`.
     pub const UNCOUNTERABLE_NEXT: usize = 8;
+    /// ENGINE.md 154 (the last of the per-player spares, so the first-free floats 9.. stay
+    /// for game facts): this player's decks in this match are dealt (the spec's `"dealt_decks"`:
+    /// `MatchState::dealt`, a rule of the match both players know; written by `encode_match`, in
+    /// a game's rows and in sideboarding's). 0 in every match without the option.
+    pub const DEALT: usize = 31;
     /// ENGINE.md 100.5.1: their pool's mana with a spending restriction
     /// other than the Workshop's (`g5::POOL_ART`; CR 106.6,
     /// `Game::pool_restr`): per type t (W U B R G C) and kind k, the amount
@@ -1145,7 +1150,7 @@ pub mod g6 {
     /// The first spare game float (37 used, 27 spare).
     pub const GAME_END: usize = KEPT_FROM + 32;
 }
-const _: () = assert!(g6::PLAYER_END <= g6::PLAYER && g6::GAME_END <= GLOBALS_V6);
+const _: () = assert!(g6::PLAYER_END <= g6::PLAYER && g6::GAME_END <= GLOBALS_V6 && g6::DEALT < g6::POOL_KINDS);
 
 /// Offsets inside the globals of layout v7 (ENGINE.md 124.2; the block at
 /// [`O_GLOBALS_V7`], after v6's): per player, viewer first
@@ -3087,6 +3092,14 @@ pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
         x[mtch::STARTED + i] = (m.starters[i] == me) as u8 as f32;
         x[mtch::CHOSE + i] = (m.choosers[i] == me) as u8 as f32;
     }
+    // Dealt decks (ENGINE.md 154): which player's 60s this match deals - public, the same in every world; per
+    // player in `globals_v6` (frame seat first), in every row of the match (sideboarding's too: the other
+    // player's beliefs about the next 60 depend on it).
+    if let Some(d) = m.dealt {
+        let side = (d != me) as usize;
+        out[lay.o_globals_v6 + g6::PLAYER * side + g6::DEALT] = 1.0;
+    }
+    let x = &mut out[lay.o_match..lay.o_match + MATCH];
     let size = |c: &[u8]| c.iter().map(|&n| n as f32).sum::<f32>() / 40.0;
     x[mtch::MY_DECK] = size(&m.decks[me as usize]);
     x[mtch::OPP_DECK] = size(&m.decks[op_ as usize]);
