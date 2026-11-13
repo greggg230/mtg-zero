@@ -3,7 +3,7 @@
 
 use super::effect::lower_ability;
 use super::filter::{lower_condition, lower_pred};
-use super::printing::lower_mana_cost;
+use super::printing::lower_printed_cost;
 use super::Lowerer;
 use crate::db::{types, ActEffect, ActivatedDef, Cond, Cost, Filter, ManaAbility, ManaProd, SacCost};
 use crate::mana::{letter_index, ManaMask, COLORS};
@@ -268,7 +268,8 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         extra_costs,
         waterbend,
     }) = c;
-    let _ = mana_str; // display form of `mana`
+    // `mana_str`: the printed `mana`, checked against it below (its {C}
+    // pips read from it, `lower_printed_cost`, ENGINE.md 146.2).
     l.deny("ActivationCost.pay_energy", pay_energy);
     l.deny("ActivationCost.exile_granting_equipment", exile_granting_equipment);
     l.deny("ActivationCost.mana_reduced_by_source_power", mana_reduced_by_source_power);
@@ -289,11 +290,15 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         }
         _ => None,
     };
+    let x_pips = if x_mana.is_some() { l.act_x_times as i64 } else { 0 };
     let mut cost = Cost {
         mana: match (x_mana.as_ref(), mana) {
-            (Some(m), _) => lower_mana_cost(l, "ActivationCost.mana", m),
-            (None, Some(m)) => lower_mana_cost(l, "ActivationCost.mana", m),
-            (None, None) => Default::default(),
+            (Some(m), _) => lower_printed_cost(l, "ActivationCost.mana", m, x_pips, mana_str, false),
+            (None, Some(m)) => lower_printed_cost(l, "ActivationCost.mana", m, 0, mana_str, false),
+            (None, None) => {
+                l.deny("ActivationCost.mana_str(without mana)", mana_str);
+                Default::default()
+            }
         },
         x_times: 0,
         tap: *tap_self,

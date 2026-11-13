@@ -1734,9 +1734,12 @@ fn cr_601_2g_the_mana_leaves_the_parts_payable_in_some_order() {
 /// legendary creatures you control have indestructible"): tapping High Market
 /// could change only abilities, which "a creature" doesn't read, so the order
 /// isn't asked (it was, before characteristics were told apart by kind).
+/// (The Seriema's grant is in its 7+ striation, CR 722.2: with 7 charge
+/// counters it has it, and is a 5/5 creature itself; ENGINE.md 146.)
 #[test]
 fn cr_601_2h_an_ability_granted_to_tapped_creatures_leaves_a_creatures_sacrifice_free() {
-    let mut g = b6_scen().battlefield(0, &["High Market", "The Seriema", "Test Rebel"]).at(Step::Main1, 0).start();
+    let charge = engine::db::Counter::Named(b6_db().subtype_id("counter:charge").expect("charge counters"));
+    let mut g = b6_scen().battlefield(0, &["High Market", "The Seriema", "Test Rebel"]).counters(0, "The Seriema", charge, 7).at(Step::Main1, 0).start();
     let market = bf(&g, 0, "High Market");
     let rebel = bf(&g, 0, "Test Rebel");
     // (Its ability after "{T}: Add {C}".)
@@ -1744,7 +1747,8 @@ fn cr_601_2h_an_ability_granted_to_tapped_creatures_leaves_a_creatures_sacrifice
     g.choose(act(market, 1));
     finish(&mut g, |g| {
         assert_ne!(g.kind(), Some(DecisionKind::CostPart), "{:?}", g.options_desc());
-        None
+        // (The Seriema is a creature too: sacrifice the Rebel.)
+        g.has_option(Choice::Card(rebel)).then_some(Choice::Card(rebel))
     });
     settle(&mut g);
     assert_eq!(g.obj(rebel).zone, Zone::Graveyard, "{}", log(&g));

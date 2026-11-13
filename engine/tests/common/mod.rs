@@ -29,6 +29,31 @@ fn cost(s: &str) -> Value {
     m
 }
 
+/// The printed form (`mana_cost_str`) of a structured `ManaCost`: the IR says
+/// a cost twice and the lowering checks that the two agree (ENGINE.md 3 rule
+/// 4a, 146.2), so a custom card prints the cost it structures.
+pub fn printed_cost(m: &Value) -> String {
+    let mut s = String::new();
+    for _ in 0..m["x_pips"].as_i64().unwrap_or(0) {
+        s.push_str("{X}");
+    }
+    if let Some(g) = m["generic"].as_i64().filter(|&g| g > 0) {
+        s.push_str(&format!("{{{g}}}"));
+    }
+    for e in m["hybrid"].as_array().into_iter().flatten() {
+        s.push_str(&format!("{{{}/{}}}", e[0].as_str().unwrap(), e[1].as_str().unwrap()));
+    }
+    for c in m["phyrexian"].as_array().into_iter().flatten() {
+        s.push_str(&format!("{{{}/P}}", c.as_str().unwrap()));
+    }
+    for e in m["colored"].as_array().into_iter().flatten() {
+        for _ in 0..e[1].as_i64().unwrap() {
+            s.push_str(&format!("{{{}}}", e[0].as_str().unwrap()));
+        }
+    }
+    s
+}
+
 /// A custom creature card in IR form.
 fn creature(name: &str, mana: &str, p: i64, t: i64, kws: &[&str], legendary: bool, extra: Value) -> Value {
     let mut pr = json!({
@@ -279,7 +304,7 @@ fn spell(name: &str, kind: &str, mana_cost: Value, effect: Value, extra: Value) 
     let mut pr = json!({
         "$t": "CardPrinting",
         "name": name,
-        "mana_cost_str": "",
+        "mana_cost_str": printed_cost(&mana_cost),
         "mana_cost": mana_cost,
         "type_line": kind,
         "supertypes": [],

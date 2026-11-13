@@ -22,6 +22,10 @@ fn card(name: &str, printing: Value) -> Value {
             p[k] = v;
         }
     }
+    // (A structured cost without its printed form: print it, ENGINE.md 146.2.)
+    if p["mana_cost_str"] == json!("") {
+        p["mana_cost_str"] = json!(common::printed_cost(&p["mana_cost"]));
+    }
     json!({"name": name, "custom": true, "printing": p})
 }
 
