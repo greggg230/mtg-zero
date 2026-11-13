@@ -1,5 +1,7 @@
-//! A dealt seat's hidden 60 is the exact posterior of what the other player saw (ENGINE.md 157.3; the user's
-//! requirement for the integration of A1's posterior, ENGINE.md 140, with dealt decks, ENGINE.md 154): the dealt
+//! Dealt decks (ENGINE.md 154) with lane A1's posterior (140) and lane A2's worlds (141): the three tests the user
+//! required at the integration (ENGINE.md 157.3).
+//!
+//! (1) A dealt seat's hidden 60 is the exact posterior of what the other player saw: the dealt
 //! prior - the constructed prior with the swap count restricted to the spec's range (the user's [1, 8]: uniform over
 //! the swap counts in the range, then uniform over the 60s with that count) - times prod_i C(D_i, R_i), the chance of
 //! the seen cards R given the deck (140), and UNTILTED: no deck reader's weights (102.1), no deck tilt (106), since no
@@ -12,13 +14,23 @@
 //!   start of game 2 (nothing of it seen: the exact law is the dealt prior's own) by `determinize`, by the deck
 //!   reader's weights and by the deck tilt - all three the exact law; and later in the games, the reader's weights
 //!   and the deck tilt deal the dealt 60 draw for draw as the untilted deal.
+//!
+//! (2) A dealt seat's game-3 60 is dealt from game 3's cards only - no game-2 term, no mixture with its dealt game-2
+//! 60 (the user's decision: game 3's deal is independent of game 2's; `MtgAz::deck_dealt` is what any conditioning of
+//! game 3 on game 2, ENGINE.md 141.4's options B-D, must check first). Today nothing conditions game 3 on game 2, so
+//! this is the standing rule, checked where game 2 showed cards of the dealt 60.
+//!
+//! (3) A dealt deal keeps the world's observer: a world dealt while sideboarding (A2's 141.1) keys the dealt seat's
+//! deal hidden for the other player and plays the next game with the other player's private keys masked.
 
 use engine::az::constructed::Decklist;
 use engine::az::hidden_decks::{check_sample, ConstructedPrior, DeckPrior, DeckWant, SampledDeck};
 use engine::az::identity::D;
+use engine::az::matches::game_one_winner;
 use engine::az::{MtgAz, MtgSpec};
 use engine::db::CardDb;
 use engine::decision::act;
+use engine::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_DEALT, KEY_DRAW, KEY_LOOK};
 use engine::rng::Rng;
 use serde_json::json;
 use zero_search::game::{Belief, Next, SearchGame};
@@ -421,4 +433,269 @@ fn the_reader_weights_and_the_deck_tilt_never_move_a_dealt_60() {
     }
     println!("{compared} states compared; in the dealt seat's own worlds the weights moved the other 60 in {own_moved} of {own}");
     assert!(compared > 50 && own_moved > 0, "{compared} states compared, {own_moved} of {own} moved: the test saw too little");
+}
+
+/// The other player keeps its deck (`PASS`) until the sideboarding is over (the dealt seat decides nothing there).
+fn finish_sideboarding(g: &mut MtgAz, keys: &mut Vec<u64>, what: &str) {
+    for _ in 0..200 {
+        if g.sideboarding().is_none() {
+            return;
+        }
+        let l = legal(g);
+        let a = if l.contains(&act::PASS) { act::PASS } else { l[0] };
+        g.step(a, keys).unwrap();
+    }
+    panic!("{what}: the sideboarding did not end");
+}
+
+/// A random legal action.
+fn random_step(g: &mut MtgAz, rng: &mut Rng, keys: &mut Vec<u64>) {
+    let l = legal(g);
+    let a = l[rng.below(l.len() as u32) as usize];
+    keys.clear();
+    g.step(a, keys).unwrap();
+}
+
+/// How many cards of the other player's deck `viewer` knows in this game.
+fn known_count(a: &MtgAz, viewer: u8) -> usize {
+    let o = 1 - viewer;
+    let n0: usize = a.m.decks[0].iter().map(|&c| c as usize).sum();
+    let n1: usize = a.m.decks[1].iter().map(|&c| c as usize).sum();
+    let r = if o == 0 { 0..n0 } else { n0..n0 + n1 };
+    r.filter(|&i| a.g.knows(viewer, engine::CardIdx::new(i as u32))).count()
+}
+
+/// Tallies of the other player's worlds of a dealt 60 against the dealt prior with nothing shown.
+struct Tally {
+    defs: Vec<u16>,
+    sum: Vec<f64>,
+    sq: Vec<f64>,
+    swaps: [usize; 16],
+    n: usize,
+    same: usize,
+    same_expected: f64,
+}
+
+impl Tally {
+    fn new(defs: &[u16]) -> Tally {
+        Tally { defs: defs.to_vec(), sum: vec![0.0; defs.len()], sq: vec![0.0; defs.len()], swaps: [0; 16], n: 0, same: 0, same_expected: 0.0 }
+    }
+
+    /// One world's dealt 60 `deck`; `before`: the dealt seat's game-2 60, whose chance under the dealt prior is
+    /// `p_before`.
+    fn add(&mut self, main_s: &[u16], deck: &[u16], before: &[u16], p_before: f64) {
+        for (j, &d) in self.defs.iter().enumerate() {
+            let x = count(deck, d) as f64;
+            self.sum[j] += x;
+            self.sq[j] += x * x;
+        }
+        self.swaps[swaps_of(main_s, deck)] += 1;
+        self.n += 1;
+        self.same += (deck == before) as usize;
+        self.same_expected += p_before;
+    }
+
+    /// Every card's mean copies within 4.5 se of the dealt prior's exact fill with nothing shown, the swap counts
+    /// uniform over 1..=8 and never outside, and as many worlds dealing the game-2 60 again as its chance gives.
+    fn check(&self, label: &str, fill: &[f64], db: &CardDb) {
+        let n = self.n as f64;
+        let mut worst = 0.0f64;
+        for (j, &d) in self.defs.iter().enumerate() {
+            let m = self.sum[j] / n;
+            let se = ((self.sq[j] / n - m * m) / n).sqrt().max(1e-9);
+            let z = (m - fill[d as usize]) / se;
+            worst = f64::max(worst, z.abs());
+            assert!(z.abs() < 4.5, "{label}: {}'s mean copies {m:.4} against the dealt prior's {:.4} with nothing shown ({z:.1} se)", db.def(d).name, fill[d as usize]);
+        }
+        let h = &self.swaps;
+        assert!(h[0] == 0 && h[9..].iter().all(|&x| x == 0), "{label}: swaps outside [1, 8]: {h:?}");
+        let e = n / 8.0;
+        let x2: f64 = h[1..=8].iter().map(|&c| (c as f64 - e).powi(2) / e).sum();
+        assert!(x2 < 7.0 + 6.0 * 14f64.sqrt(), "{label}: the swap counts are not uniform over 1..=8: {h:?}");
+        let ex = self.same_expected;
+        println!(
+            "{label}: {} worlds, every card's mean within {worst:.1} se of the dealt prior's fill; swaps {:?} (chi-square {x2:.1} on 7 df); \
+             the game-2 60 dealt again {} times (its chance gives {ex:.2})",
+            self.n,
+            &h[1..=8],
+            self.same
+        );
+        assert!((self.same as f64) <= ex + 5.0 * ex.sqrt() + 3.0, "{label}: the game-2 60 dealt again {} times, its chance {ex:.2}: a mixture with game 2's deck", self.same);
+    }
+}
+
+/// (2) The Delver mirror's dealt matches (swaps [1, 8], fresh samples), game 2 played for 150 random actions (the
+/// other player sees cards of the dealt game-2 60), then conceded by game 1's winner: 1-1, a game 3. The other
+/// player's worlds of the dealt seat's game-3 60 - at the sideboarding before game 3 when the dealt seat sideboarded
+/// first (its game-3 60 dealt: `deal_constructed_between`'s choice with nothing shown), and at game 3's start (nothing
+/// of it seen this game: `sample_hidden_deck`), by `determinize` and by the deck tilt - are the dealt prior's law with
+/// nothing shown: every card's mean copies its `expected_fill`, the swaps uniform over 1..=8, the game-2 60 dealt
+/// again no more often than its own chance. Conditioning on game 2's sightings, or a mixture with the game-2 deck
+/// (141.4's B-D), would move the cards game 2 showed and deal the game-2 60 again in a share of the worlds.
+#[test]
+fn a_dealt_seats_game_3_60_is_dealt_from_game_3s_cards_only() {
+    let db = db();
+    let dl = Decklist::izzet_delver();
+    let main = Decklist::ids(db, &dl.main).unwrap();
+    let side = Decklist::ids(db, &dl.sideboard).unwrap();
+    let mut main_s = main.clone();
+    main_s.sort_unstable();
+    let prior = ConstructedPrior::dealt(&main, &side, 1, 8);
+    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None };
+    let fill = prior.expected_fill(&plain);
+    let by = prior.decks_by_swaps().to_vec();
+    let mut defs: Vec<u16> = main.iter().chain(&side).copied().collect();
+    defs.sort_unstable();
+    defs.dedup();
+    let s = spec(json!({"deal_samples": 0}));
+    let per = 1000usize;
+    let (mut between, mut start) = (Tally::new(&defs), Tally::new(&defs));
+    let (mut seeds_between, mut seeds_start, mut seen_in_game_2) = (0, 0, 0usize);
+    for seed in 0..24u64 {
+        let mut g = MtgAz::new(&s, seed).unwrap();
+        let d = g.m.dealt.unwrap();
+        let o = 1 - d;
+        let (mut rng, mut keys) = (Rng::new(seed ^ 0x6A3E), Vec::new());
+        finish_sideboarding(&mut g, &mut keys, &format!("seed {seed}, before game 2"));
+        for _ in 0..150 {
+            if g.to_move().is_none() {
+                break;
+            }
+            random_step(&mut g, &mut rng, &mut keys);
+        }
+        if g.to_move().is_none() || g.m.game_no != 2 {
+            continue; // (game 2 ended on its own: the concession below needs it in progress)
+        }
+        let deck2 = g.m.deck(d);
+        let p2 = 1.0 / (8.0 * by[swaps_of(&main_s, &deck2)]);
+        seen_in_game_2 += known_count(&g, o);
+        let w = game_one_winner(seed) as usize;
+        g = match g.next_episode(Some(w)).unwrap() {
+            Next::Continue(n) => n,
+            Next::Over(_) => panic!("seed {seed}: 1-1 after game 2"),
+        };
+        assert!(g.sideboarding().is_some(), "seed {seed}: the sideboarding before game 3");
+        let belief = Belief { pred: pred(seed), tilt: 0.0, clip: 1e6, tilts: vec![0.0, 1.0] };
+        if g.sideboarding().unwrap().done[d as usize].is_some() {
+            // the dealt seat sideboarded first: its game-3 60 is dealt; the other player's worlds deal it again
+            for k in 0..per {
+                let mut x = g.clone();
+                x.determinize(o as usize, &mut zero_search::rng::Rng::new(seed << 32 ^ k as u64));
+                let c = x.sideboarding().unwrap().done[d as usize].clone().expect("the dealt seat's game-3 60");
+                between.add(&main_s, &x.m.pools[d as usize].deck(&c), &deck2, p2);
+            }
+            seeds_between += 1;
+        }
+        finish_sideboarding(&mut g, &mut keys, &format!("seed {seed}, before game 3"));
+        assert!(g.m.game_no == 3 && g.deck_hidden(d), "seed {seed}: game 3 in progress, the dealt 60 hidden");
+        assert!(!knows_any(&g, o), "seed {seed}: the other player knows a card of the game-3 60 at its start");
+        for k in 0..per {
+            let mut x = g.clone();
+            let mut r = zero_search::rng::Rng::new(seed << 32 ^ 0x8000_0000 ^ k as u64);
+            if k % 2 == 0 {
+                x.determinize(o as usize, &mut r);
+            } else {
+                x.determinize_with(o as usize, &mut r, &belief);
+            }
+            start.add(&main_s, &x.m.deck(d), &deck2, p2);
+        }
+        seeds_start += 1;
+    }
+    println!("{seeds_start} games 3 ({seeds_between} with the dealt seat sideboarding first); the other player knew {seen_in_game_2} cards of the dealt game-2 60s when game 2 was conceded");
+    assert!(seeds_start >= 8 && seeds_between >= 2 && seen_in_game_2 > 0, "too few games 3 or nothing seen in game 2");
+    between.check("the dealt seat's game-3 choice in the other player's worlds (between games)", &fill, db);
+    start.check("the dealt seat's game-3 60 at game 3's start", &fill, db);
+}
+
+/// (3) Worlds dealt while sideboarding - before game 2 and before game 3, of both seats - walked into the next game:
+/// the dealt seat's deal in the world (`KEY_DEALT`, when it sideboards second) is keyed `HIDDEN` in the other
+/// player's worlds and in full in its own; the world's observer is carried into the game it starts (A2's 141.1), so
+/// every draw and look of the other player there is keyed `HIDDEN` (but a look at a random card of the viewer's own
+/// hand, Urza's Bauble: public by design, 141.2).
+#[test]
+fn a_dealt_deal_keeps_the_worlds_observer() {
+    let s = spec(json!({}));
+    let (mut worlds, mut dealt_hidden, mut dealt_full, mut new_games, mut private, mut hand_looks) = (0, 0, 0, 0, 0, 0);
+    for seed in 0..10u64 {
+        let mut g = MtgAz::new(&s, seed).unwrap();
+        let d = g.m.dealt.unwrap();
+        let o = 1 - d;
+        let (mut rng, mut keys) = (Rng::new(seed ^ 0x0B5E), Vec::new());
+        for root in 0..2 {
+            if root == 1 {
+                finish_sideboarding(&mut g, &mut keys, &format!("seed {seed}, before game 2"));
+                for _ in 0..80 {
+                    if g.to_move().is_none() {
+                        break;
+                    }
+                    random_step(&mut g, &mut rng, &mut keys);
+                }
+                if g.to_move().is_none() || g.m.game_no != 2 {
+                    break;
+                }
+                let w = game_one_winner(seed) as usize;
+                g = match g.next_episode(Some(w)).unwrap() {
+                    Next::Continue(n) => n,
+                    Next::Over(_) => panic!("seed {seed}: 1-1 after game 2"),
+                };
+            }
+            assert!(g.sideboarding().is_some());
+            for viewer in [o, d] {
+                for k in 0..4u64 {
+                    let mut w = g.clone();
+                    w.determinize(viewer as usize, &mut zero_search::rng::Rng::new(seed << 40 ^ (root as u64) << 32 ^ (viewer as u64) << 8 ^ k));
+                    let mut wr = Rng::new(seed ^ k << 20 ^ 0x51DE);
+                    let (mut started, mut since) = (false, 0);
+                    let mut wk = Vec::new();
+                    for _ in 0..400 {
+                        if w.to_move().is_none() {
+                            break;
+                        }
+                        let before = w.sideboarding().is_some();
+                        let l = legal(&w);
+                        let a = if before && l[0] == act::PASS && wr.below(2) == 0 { act::PASS } else { l[wr.below(l.len() as u32) as usize] };
+                        wk.clear();
+                        w.step(a, &mut wk).unwrap();
+                        let what = || format!("seed {seed} root {root}: a world of P{viewer} (P{d} dealt)");
+                        for &key in &wk {
+                            let (kind, p, x) = (key_kind(key), key_player(key), key_payload(key));
+                            if kind == KEY_DEALT {
+                                assert_eq!(p, d, "{}: a deal key of the other seat", what());
+                                if viewer == o {
+                                    assert_eq!(x, HIDDEN, "{}: the dealt seat's deal keyed in full in the other player's world", what());
+                                    dealt_hidden += 1;
+                                } else {
+                                    dealt_full += 1;
+                                }
+                            }
+                            if started && matches!(kind, KEY_DRAW | KEY_LOOK) && p != viewer {
+                                private += 1;
+                                if x != HIDDEN {
+                                    let hand_look = kind == KEY_LOOK && w.g.player(viewer).hand.iter().any(|&c| w.g.obj(c).def as u64 == x && w.g.knows(p, c));
+                                    assert!(hand_look, "{}: in the game it started P{p}'s private key (kind {kind}) carries the card ({x})", what());
+                                    hand_looks += 1;
+                                }
+                            }
+                        }
+                        if before && w.sideboarding().is_none() {
+                            started = true;
+                            new_games += 1;
+                        } else if started {
+                            since += 1;
+                            if since >= 60 {
+                                break;
+                            }
+                        }
+                    }
+                    assert!(started, "seed {seed} root {root}: the world of P{viewer} never started its next game");
+                    worlds += 1;
+                }
+            }
+        }
+    }
+    println!(
+        "{worlds} worlds dealt while sideboarding: the dealt seat's deal keyed hidden {dealt_hidden} times in the other player's, in full {dealt_full} in its own; \
+         {new_games} games started, {private} private keys of the other player there masked ({hand_looks} public hand looks)"
+    );
+    assert!(dealt_hidden > 0 && dealt_full > 0 && new_games == worlds && private > 0, "the test saw too little");
 }
