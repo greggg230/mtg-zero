@@ -1192,6 +1192,9 @@ fn gate_positions(per: usize, seed: u64) -> Vec<(&'static str, MtgAz)> {
     // the Delver mirror's constructed best-of-three (ENGINE.md 120), positions of games 2-3 only (game 1
     // is the open "delver" kind's model); last, so the other kinds' positions are as before
     specs.push(("constructed bo3", constructed_bo3_spec()));
+    // its post-sideboard games only (ENGINE.md 130: `"start_game": 2`, one episode per game), positions of games 2-3;
+    // last, so the other kinds' positions are as before
+    specs.push(("constructed bo3 post-board", post_board_spec()));
     let mut out = Vec::new();
     for (name, sp) in specs {
         let mut h = Heuristic::new(seed);
@@ -1200,7 +1203,18 @@ fn gate_positions(per: usize, seed: u64) -> Vec<(&'static str, MtgAz)> {
         while n < per {
             let mut g = MtgAz::new_game(&sp, 2, seed * 1000 + s).unwrap();
             s += 1;
-            while g.to_move().is_some() && n < per {
+            loop {
+                // (one episode per game, ENGINE.md 121: the match goes on with the next game's episode)
+                if g.to_move().is_none() && g.m.between {
+                    match g.next_episode(None).unwrap() {
+                        zero_search::game::Next::Continue(x) => g = x,
+                        zero_search::game::Next::Over(_) => break,
+                    }
+                    continue;
+                }
+                if g.to_move().is_none() || n >= per {
+                    break;
+                }
                 if g.sideboarding().is_none() && g.g.turn().number >= 2 && (name != "constructed bo3" || g.m.game_no >= 2) && rng.below(40) == 0 {
                     out.push((name, g.clone()));
                     n += 1;
@@ -1361,9 +1375,11 @@ fn public_state_reaches_the_encoding() {
     assert!(gaps.is_empty(), "next-layout gaps: {gaps:?}");
     assert_eq!(next, 0);
     // (Layout v7 encodes the library cards known below the top three, the face-down cards and who
-    // knows them, the earlier games' reveals of both players, ENGINE.md 125: the one limit left is
-    // the graveyard's order no rule reads, the user's choice.)
-    assert_eq!(by_design, 1, "the deliberate limits");
+    // knows them, the earlier games' reveals of both players, ENGINE.md 125: the limits left are
+    // the graveyard's order no rule reads, the user's choice, and, since ENGINE.md 130, a
+    // constructed best-of-three's game-1 chooser and starter, which the match block leaves out so
+    // that a real game 2 encodes as a post-sideboard start's.)
+    assert_eq!(by_design, 2, "the deliberate limits");
 }
 
 /// ENGINE.md 124.2, 123, 125: layout v6 can't encode a pool's mana restricted to creature spells of a
@@ -2590,8 +2606,9 @@ fn belief_deals_keep_every_determinize_invariant() {
                 for p in 0..2u8 {
                     assert_eq!(g.g.player(p).hand.len(), d.g.player(p).hand.len(), "{name}: hand size");
                     // (EoE sealed is a hidden-decklist game too: its spec's default, ENGINE.md 102.6, 105; a
-                    // constructed best-of-three's later games deal the opponent's 60, ENGINE.md 120)
-                    if name != "bo3" && name != "drafted" && name != "hidden decklists" && name != "eoe" && name != "constructed bo3" {
+                    // constructed best-of-three's later games deal the opponent's 60, ENGINE.md 120, its
+                    // post-sideboard games too, 130)
+                    if !["bo3", "drafted", "hidden decklists", "eoe", "constructed bo3", "constructed bo3 post-board"].contains(&name) {
                         assert_eq!(cards_of(&g, p), cards_of(&d, p), "{name}: P{p}'s cards");
                     }
                 }
@@ -2927,13 +2944,25 @@ fn the_deck_tilt_ignores_the_opponents_hidden_cards() {
 /// The Delver mirror's constructed best-of-three: both seats the pinned main and the 75's supported
 /// sideboard cards (all 15 since ENGINE.md 122; 120.1 played the smoke's 68 before).
 fn constructed_bo3_spec() -> MtgSpec {
+    MtgSpec::parse(&constructed_bo3_json().to_string()).unwrap()
+}
+
+fn constructed_bo3_json() -> serde_json::Value {
     let d = engine::az::constructed::Decklist::izzet_delver();
     let db = CardDb::constructed();
     let main = d.main_names();
     let side: Vec<String> = d.sideboard.iter().filter(|(_, n)| db.id(n).is_some()).flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect();
-    MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "format": "bo3",
-        "decks": {"p0": main, "p1": main, "p0_sideboard": side, "p1_sideboard": side}}).to_string())
-    .unwrap()
+    serde_json::json!({"max_turns": 60, "constructed": true, "format": "bo3",
+        "decks": {"p0": main, "p1": main, "p0_sideboard": side, "p1_sideboard": side}})
+}
+
+/// The Delver mirror's post-sideboard games only (ENGINE.md 130): `constructed_bo3_spec` starting at the
+/// sideboarding before game 2, one episode per game (the presets' spec).
+fn post_board_spec() -> MtgSpec {
+    let mut v = constructed_bo3_json();
+    v["start_game"] = serde_json::json!(2);
+    v["game_episodes"] = serde_json::json!(true);
+    MtgSpec::parse(&v.to_string()).unwrap()
 }
 
 /// The opponent's chosen 60 never reaches the viewer (ENGINE.md 120.4): two matches identical but for
@@ -3005,7 +3034,8 @@ fn constructed_bo3_a_hidden_60_never_reaches_the_other_players_encoding_or_actio
 fn constructed_bo3_determinize_keeps_the_view_and_deals_legal_60s() {
     let mut rng = Rng::new(113);
     let (mut worlds, mut other) = (0, 0);
-    for (name, g) in gate_positions(scale(24) as usize, 113).into_iter().filter(|(n, _)| *n == "constructed bo3") {
+    // (its post-sideboard games too, ENGINE.md 130: last, so the first kind's draws are as before)
+    for (name, g) in gate_positions(scale(24) as usize, 113).into_iter().filter(|(n, _)| n.starts_with("constructed bo3")) {
         assert!(g.m.game_no >= 2 && g.g.spec().hidden_decks && g.g.spec().deck_clouds && !g.hidden_decklists());
         let mover = g.to_move().unwrap();
         for viewer in [mover, 1 - mover] {

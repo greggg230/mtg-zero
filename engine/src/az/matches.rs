@@ -49,6 +49,13 @@
 //!   episode begins with the sideboarding for the next game
 //!   (`next_match_episode`), or a concession (CR 104.3a) of the game in
 //!   progress ends it first.
+//! * Post-sideboard games only (ENGINE.md 130, the spec's `"start_game": 2`):
+//!   a constructed best-of-three starts at the sideboarding before game 2
+//!   (`MtgAz::skip_game_one`), game 1's result drawn from the match's seed.
+//!   Game 1's reveals are not kept for the encoding in any constructed
+//!   best-of-three (`earlier`), nor its chooser and starter encoded. A seat of
+//!   the spec's `"keep_deck"` keeps its deck at every sideboarding (an
+//!   evaluation yardstick; `MatchState::keep`).
 
 use std::sync::Arc;
 
@@ -204,12 +211,21 @@ pub struct Sideboarding {
     pub done: [Option<Arc<[u8]>>; 2],
     /// The pending decision.
     pub decision: Decision,
+    /// The seats that keep their deck (`MatchState::keep`, ENGINE.md 130): `PASS` is their only
+    /// option. In another player's world the other seat's flag is off (its sideboarding is dealt as
+    /// any player's: `MtgAz::sample_hidden_deck`).
+    pub keep: [bool; 2],
 }
 
 impl Sideboarding {
     /// Sideboarding with `first` deciding first, from their deck `counts`
     /// (counts per entry of their `pool` list).
     pub fn new(first: PlayerId, counts: Vec<u8>, pool: &MatchPool) -> Sideboarding {
+        Sideboarding::with_keep(first, counts, pool, [false; 2])
+    }
+
+    /// `new`, the seats `keep` keeping their decks (ENGINE.md 130).
+    pub fn with_keep(first: PlayerId, counts: Vec<u8>, pool: &MatchPool, keep: [bool; 2]) -> Sideboarding {
         let mut sb = Sideboarding {
             order: [first, opp(first)],
             turn: 0,
@@ -219,6 +235,7 @@ impl Sideboarding {
             asking: None,
             done: [None, None],
             decision: Decision { player: first, kind: DecisionKind::Sideboard, options: Vec::new(), stage: Stage::One },
+            keep,
         };
         sb.ask(pool);
         sb
@@ -277,6 +294,13 @@ impl Sideboarding {
         let size: usize = counts.iter().map(|&c| c as usize).sum();
         if (pool.min_deck..=pool.max_deck).contains(&size) {
             options.push(Opt { action: act::PASS, choice: Choice::Pass });
+        }
+        // A seat that keeps its deck (ENGINE.md 130): `PASS` only, at its first decision (its last
+        // game's deck is legal: the first deck's size).
+        if self.keep[p as usize] {
+            assert!(self.last.is_none() && options.len() == 1, "P{p} keeps its deck: PASS at its first sideboarding decision");
+            self.decision = Decision { player: p, kind: DecisionKind::Sideboard, options, stage: Stage::One };
+            return;
         }
         let from = self.last.map_or(0, |l| l as usize + 1);
         let mut before: u32 = counts[..from].iter().map(|&c| c as u32).sum();
@@ -383,7 +407,10 @@ pub struct MatchState {
     pub turns_before: u32,
     pub over: bool,
     /// Identities (bits) each player revealed in the current (between
-    /// games: the last) game, and in the earlier games of the match.
+    /// games: the last) game, and in the earlier games of the match - in a
+    /// constructed best-of-three the earlier post-sideboard games only (ENGINE.md
+    /// 130: game 1 plays the public mains, so its reveals carry no information,
+    /// and a match started at game 2 has none).
     pub seen: [[u64; 16]; 2],
     pub earlier: [[u64; 16]; 2],
     pub sb: Option<Box<Sideboarding>>,
@@ -415,6 +442,21 @@ pub struct MatchState {
     /// has not begun - the episode is over (`MtgAz::to_move` None) until
     /// `next_match_episode` begins the next one.
     pub between: bool,
+    /// The seats that keep their deck at every sideboarding (ENGINE.md 130,
+    /// the spec's `"keep_deck"`): `PASS` is their only sideboarding option. A
+    /// seat's own policy: the other player's worlds turn it off.
+    pub keep: [bool; 2],
+    /// Game 1 was not played (ENGINE.md 130, the spec's `"start_game": 2`):
+    /// its result was drawn from the match's seed (`skip_game_one`). Never
+    /// encoded: a real game 2 encodes as a synthetic one.
+    pub post_board: bool,
+}
+
+/// The game-1 winner of a match with seed `seed` that starts at game 2 (ENGINE.md 130): each seat
+/// with probability 1/2, from a stream of the match's seed of its own - the match's RNG (game 2's
+/// seed, then game 3's) is a real match's of the same seed.
+pub fn game_one_winner(seed: u64) -> PlayerId {
+    Rng::new(crate::rng::split64(seed ^ 0x6A3E_0001_C01F_11D5)).below(2) as PlayerId
 }
 
 /// The first game's setup of one player: deck, sideboard, first picks, and
@@ -478,6 +520,8 @@ impl MatchState {
             constructed_bo3: false,
             game_episodes: false,
             between: false,
+            keep: [false; 2],
+            post_board: false,
         })
     }
 
@@ -671,10 +715,14 @@ impl super::MtgAz {
         }
         // (`seen` keeps the last game's reveals until the next game begins:
         // between games `determinize` samples the last deck, ENGINE.md
-        // 36.11.)
-        for p in 0..2 {
-            for w in 0..16 {
-                m.earlier[p][w] |= m.seen[p][w];
+        // 36.11.) A constructed best-of-three's game 1 (ENGINE.md 130): its
+        // reveals are cards of the public mains, implied by them - not kept
+        // (`OPP_REVEALED` counts the post-sideboard games' only).
+        if !(m.constructed_bo3 && i == 0) {
+            for p in 0..2 {
+                for w in 0..16 {
+                    m.earlier[p][w] |= m.seen[p][w];
+                }
             }
         }
         if m.wins.iter().any(|&w| w >= BO3_WINS) || m.game_no >= BO3_GAMES {
@@ -700,8 +748,39 @@ impl super::MtgAz {
             r @ (1 | 2) => opp(r - 1),
             _ => m.choosers[i],
         };
-        let sb = Sideboarding::new(chooser, m.decks[chooser as usize].to_vec(), &m.pools[chooser as usize]);
+        let sb = Sideboarding::with_keep(chooser, m.decks[chooser as usize].to_vec(), &m.pools[chooser as usize], m.keep);
         m.sb = Some(Box::new(sb));
+    }
+
+    /// The match starts at the sideboarding before game 2 (ENGINE.md 130, the spec's `"start_game":
+    /// 2`): game 1 is not played - `winner` won it (each seat with probability 1/2, `game_one_winner`;
+    /// never a draw) -, both decks are the registered mains, and the sideboarding begins as after any
+    /// game 1: the loser sideboards first and chooses play or draw for game 2 (CR 103.1). The game in
+    /// waiting (game 1 set up, at its play-or-draw choice) ends at once by the loser's concession (CR
+    /// 104.3a: a player may concede at any time), so the state between the games is a finished game 1's
+    /// like any match's, and `end_game` scores it: game 1's chooser is the one a real match of this
+    /// seed would have, its starter the same (no choice was made; neither is encoded in a constructed
+    /// best-of-three, `encode_match`), no reveals. The match's RNG is untouched: game 2 is a real
+    /// match's of the same seed after the same game-1 result. A constructed best-of-three at its first
+    /// game, not yet played.
+    pub fn skip_game_one(&mut self, winner: PlayerId) -> Result<(), String> {
+        let m = &self.m;
+        let fresh = m.game_no == 1 && m.results == [0; 3] && m.sb.is_none() && m.choice.is_none() && !m.over && !m.between;
+        // (the game in waiting: no hand kept yet - the play-or-draw choice and the mulligans come first)
+        let unplayed = !self.g.is_over() && (0..2).all(|p| !self.g.player(p).kept);
+        if !m.constructed_bo3 || !fresh || !unplayed || winner > 1 {
+            return Err("mtg: start_game 2 skips game 1 of a constructed best-of-three not yet played (ENGINE.md 130)".into());
+        }
+        self.g.concede(opp(winner));
+        self.end_game();
+        debug_assert!(!self.m.over && self.m.results[0] == 1 + winner);
+        // (one episode per game: the first episode is game 2's, its sideboarding first)
+        self.m.between = false;
+        if self.m.sb.is_none() {
+            self.begin_sideboarding();
+        }
+        self.m.post_board = true;
+        Ok(())
     }
 
     /// zero-core's `next_episode` of a match with one episode per game

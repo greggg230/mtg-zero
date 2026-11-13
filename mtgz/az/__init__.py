@@ -217,9 +217,14 @@ PRESETS['delver-smoke'] = dict(PRESETS['mtg-smoke'], spec=SPEC_DELVER, eval_spec
 # (the five sideboard cards outside the cube: ENGINE.md 122), so both presets play the full 75. Each game of a match is
 # its own episode, its rows labelled by that game's outcome (`"game_episodes": true` in the spec and so in the evaluation
 # spec, ENGINE.md 121; the user's decision of 2026-11-11, on in the presets since 129.2): self-play still plays matches
-# and evaluation measures the match win rate, with the games' numbers beside it.
+# and evaluation measures the match win rate, with the games' numbers beside it. Post-sideboard games only (`"start_game":
+# 2`, ENGINE.md 130; the user's decision of 2026-11-12): game 1 is not played - with both 75s public and game 1 always the
+# mains it tells nothing about the decks, and the Delver network plateaued at best-of-one play -, every match starts at
+# the sideboarding before game 2 with game 1's result drawn (each seat 1/2), so every row is a game 2's or 3's (about 1.5
+# games a match); the match win rate counts that drawn game 1, the games' numbers (`per_game`) are the measure. The
+# sideboarding yardstick: `python -m mtgz.az.keep_h2h <checkpoint>` (one side keeps its 60 at every sideboarding).
 _DELVER_BO3 = dict(aux_deck_w=0.5, selfplay_belief_tilts={'deck': 1.0}, eval_belief_tilts={'deck': 1.0}, max_steps=60_000)
-SPEC_DELVER_BO3 = decklists.mirror_bo3_spec(decklists.IZZET_DELVER, max_turns=60, game_episodes=True)
+SPEC_DELVER_BO3 = decklists.mirror_bo3_spec(decklists.IZZET_DELVER, max_turns=60, game_episodes=True, start_game=2)
 PRESETS['delver-mirror-bo3'] = dict(PRESETS['delver-mirror'], spec=SPEC_DELVER_BO3, eval_spec=SPEC_DELVER_BO3, **_DELVER_BO3)
 # the end-to-end check on CPU: the same spec (the full 75, one episode per game) with mtg-smoke's tiny network and sims
 PRESETS['delver-bo3-smoke'] = dict(PRESETS['delver-smoke'], spec=SPEC_DELVER_BO3, eval_spec=SPEC_DELVER_BO3, **_DELVER_BO3)

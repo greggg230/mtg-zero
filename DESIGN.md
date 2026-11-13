@@ -673,7 +673,11 @@ network code), its runs under `runs/delver1`, apart from the cube's work.
   sideboarding (the user's decisions of 2026-11-11, ENGINE.md 120: each pool exactly the 75, every
   deck after sideboarding exactly 60 of it, no free basic lands; game 1 the mains with open
   decklists, each later game's 60 hidden within the public 75 and dealt by the search from a prior
-  conditioned on what it saw; the deck target and its tilt predict it).
+  conditioned on what it saw; the deck target and its tilt predict it). Since 2026-11-12 (the
+  user's decision, ENGINE.md 130) only the post-sideboard games are played and trained: every match
+  starts at the sideboarding before game 2, game 1's result drawn (each seat 1/2) - with both 75s
+  public and game 1 always the mains it tells nothing about the decks, and the network had
+  plateaued at best-of-one play.
 * **Cards outside the cube** come from mtg-bot's parser like the cube's (its pool `legacy`), in a
   separate IR file (`data/cards/legacy.ir.json`) and a separate card table (`CardDb::constructed`):
   nothing of the cube (its generators, pools, team draft, fuzz pool, behaviour digests) sees them.
@@ -690,7 +694,7 @@ network code), its runs under `runs/delver1`, apart from the cube's work.
 |---|---|---|
 | D1 | The deck, the two maindeck cards (full oracle fidelity, rulings as tests), constructed best-of-one (CR 100.2a), the preset and its measurements, gates, docs | done (branch delver-d1, mtg-bot feature/legacy-delver-ir; ENGINE.md 54) |
 | D2 | The run `runs/delver1` | the user's go-ahead |
-| D3 | Best-of-three with constructed sideboarding; the five sideboard cards | sideboarding, the hidden 60s, the deck target and tilt (branch delver-bo3, ENGINE.md 120); one episode per game, the label each game's outcome (branch bo3-game-episodes, ENGINE.md 121); the five sideboard cards (branch delver-sb-cards, ENGINE.md 122); integrated with presets `delver-mirror-bo3` and `delver-bo3-smoke` on the full 75, one episode per game (branch delver-bo3-int, ENGINE.md 129): done |
+| D3 | Best-of-three with constructed sideboarding; the five sideboard cards | sideboarding, the hidden 60s, the deck target and tilt (branch delver-bo3, ENGINE.md 120); one episode per game, the label each game's outcome (branch bo3-game-episodes, ENGINE.md 121); the five sideboard cards (branch delver-sb-cards, ENGINE.md 122); integrated with presets `delver-mirror-bo3` and `delver-bo3-smoke` on the full 75, one episode per game (branch delver-bo3-int, ENGINE.md 129): done; post-sideboard games only (`"start_game": 2` in both presets) and the keep-its-deck yardstick `mtgz.az.keep_h2h` (branch bo3-postboard, ENGINE.md 130) |
 
 ## 9. Sealed deckbuilding: Edge of Eternities first (user, 2026-11-07)
 

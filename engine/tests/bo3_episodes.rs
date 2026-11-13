@@ -335,28 +335,35 @@ fn every_row_takes_its_own_games_result() {
     assert!(sb_rows > 0 && case > 0, "{sb_rows} sideboarding rows, {case} matches lost 1-2 by game 2's winner");
 }
 
-/// The Delver mirror's constructed best-of-three with one episode per game (the presets' spec, ENGINE.md 120, 121):
-/// the pinned 75 for both seats.
-fn constructed_bo3_games() -> String {
+/// The Delver mirror's constructed best-of-three with one episode per game (ENGINE.md 120, 121): the pinned 75 for
+/// both seats; `start_game` 2: post-sideboard games only (the presets' spec since ENGINE.md 130).
+fn constructed_bo3_games(start_game: u8) -> String {
     let d = engine::az::constructed::Decklist::izzet_delver();
     let db = engine::db::CardDb::constructed();
     let main = d.main_names();
     let side: Vec<String> = d.sideboard.iter().filter(|(_, n)| db.id(n).is_some()).flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect();
-    serde_json::json!({"max_turns": 60, "constructed": true, "format": "bo3", "game_episodes": true,
-        "decks": {"p0": main, "p1": main, "p0_sideboard": side, "p1_sideboard": side}})
-    .to_string()
+    let mut v = serde_json::json!({"max_turns": 60, "constructed": true, "format": "bo3", "game_episodes": true,
+        "decks": {"p0": main, "p1": main, "p0_sideboard": side, "p1_sideboard": side}});
+    if start_game > 1 {
+        v["start_game"] = serde_json::json!(start_game);
+    }
+    v.to_string()
 }
 
 /// Layout v7 (ENGINE.md 125.12): a match with one episode per game carries its rows' tails and overrides exactly
-/// across the episodes' boundaries, for the cube's best-of-three and the Delver mirror's constructed one. A
-/// sideboarding row (the next episode's first rows) holds the frame's earlier reveals (`my_revealed`) as its only
-/// tail tokens and no pointer overrides (sideboarding keeps the static table); within an episode a player's
+/// across the episodes' boundaries, for the cube's best-of-three and the Delver mirror's constructed one, from game 1
+/// and post-sideboard only (`"start_game": 2`, ENGINE.md 130: the first episode begins with the sideboarding before
+/// game 2). A sideboarding row (an episode's first rows) holds the frame's earlier reveals (`my_revealed`) as its
+/// only tail tokens and no pointer overrides (sideboarding keeps the static table); within an episode a player's
 /// `my_revealed` tokens are the same at every row (the earlier games' reveals change only between games: `end_game`),
-/// game 1's rows have none, and a later episode's hold the earlier's. No row passed the limit (the match finished).
+/// the first episode's rows have none (a constructed match keeps no game-1 reveals either, 130), and a later
+/// episode's hold the earlier's. No row passed the limit (the match finished).
 #[test]
 fn v7_rows_carry_their_tails_across_the_episodes() {
     use engine::az::tail_encode::seg;
-    for (name, json) in [("cube", BO3_GAMES.to_string()), ("constructed", constructed_bo3_games())] {
+    for (name, json, post_board) in
+        [("cube", BO3_GAMES.to_string(), false), ("constructed", constructed_bo3_games(1), false), ("post-board", constructed_bo3_games(2), true)]
+    {
         let rows = self_play(&json, 12, 47);
         let (mut sb_rows, mut revealed_rows, mut game_rows) = (0, 0, 0);
         for (r, smp) in &rows {
@@ -373,7 +380,7 @@ fn v7_rows_carry_their_tails_across_the_episodes() {
                     let rev: std::collections::BTreeSet<u32> =
                         s.tail.seg.iter().zip(&s.tail.slot).filter(|(&g, _)| g == seg::MY_REVEALED).map(|(_, &l)| l).collect();
                     if sideboarding_row(s) {
-                        assert!(k > 0, "{name} match {}: a sideboarding row in game 1", r.gid);
+                        assert!(k > 0 || post_board, "{name} match {}: a sideboarding row in game 1", r.gid);
                         assert!(s.tail.seg.iter().all(|&g| g == seg::MY_REVEALED), "{name} match {}: a sideboarding row's tails", r.gid);
                         assert!(s.ov.is_empty(), "{name} match {}: a sideboarding row's overrides", r.gid);
                         sb_rows += 1;

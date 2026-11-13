@@ -558,7 +558,8 @@ pub mod mtch {
     pub const OPP_DECK: usize = 9;
     /// Per game 0..2: 3 floats, I won, I lost, drawn (games played).
     pub const RESULTS: usize = 10;
-    /// Per game 0..2 played: I took the first turn; I chose who did.
+    /// Per game 0..2 played: I took the first turn; I chose who did (not a
+    /// constructed best-of-three's game 1: ENGINE.md 130).
     pub const STARTED: usize = 19;
     pub const CHOSE: usize = 22;
     /// The entry (k + 1) / 64 the pending `SideboardCount` is about (mine),
@@ -622,7 +623,8 @@ pub mod bag {
     /// first picks not revealed in an earlier game, ENGINE.md 36.11).
     pub const OPP_POOL: usize = 15;
     /// The identities the opponent revealed (made public) in earlier games
-    /// of the match.
+    /// of the match; in a constructed best-of-three the earlier post-sideboard
+    /// games' only (ENGINE.md 130: game 1's are cards of the public main).
     pub const OPP_REVEALED: usize = 16;
     /// Layout v5 (ENGINE.md 60): the cards in exile the viewer may play (a
     /// permission: impulse draw, Fallen Shinobi, Dauthi Voidwalker, an
@@ -3075,6 +3077,13 @@ pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
             _ => 1,
         };
         x[mtch::RESULTS + 3 * i + k] = 1.0;
+        // A constructed best-of-three's game 1 (ENGINE.md 130): who chose and who took the first turn
+        // are not encoded - with both 75s public, game 1 the mains and each game its own label they
+        // carry no information, and a match started at game 2 has none: a real game 2 encodes as a
+        // synthetic one. Its result is (the score).
+        if m.constructed_bo3 && i == 0 {
+            continue;
+        }
         x[mtch::STARTED + i] = (m.starters[i] == me) as u8 as f32;
         x[mtch::CHOSE + i] = (m.choosers[i] == me) as u8 as f32;
     }

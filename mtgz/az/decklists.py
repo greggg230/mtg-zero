@@ -54,12 +54,16 @@ def names(entries):
 # sideboard cards outside the cube are supported (docs/ENGINE.md 122) the smoke plays the full 75 too, 129.2.)
 
 
-def mirror_bo3_spec(name=IZZET_DELVER, sideboard=None, max_turns=60, mulligans=True, game_episodes=False):
+def mirror_bo3_spec(name=IZZET_DELVER, sideboard=None, max_turns=60, mulligans=True, game_episodes=False,
+                    start_game=1, keep_deck=None):
     """The `mtg` spec of a constructed best-of-three mirror (docs/ENGINE.md 120): both seats the
     decklist's main (exactly 60) and `sideboard` ([[count, name], ...]; None: the decklist's own 15),
     `"format": "bo3"` (JSON); `game_episodes`: each game its own episode, labelled by its own outcome
-    (`"game_episodes": true`, ENGINE.md 121). The engine refuses a spec holding a card it does not support,
-    naming every one (no silent drop, no substitution)."""
+    (`"game_episodes": true`, ENGINE.md 121); `start_game` 2: post-sideboard games only, each match starting
+    at the sideboarding before game 2 with game 1's result drawn (`"start_game": 2`, ENGINE.md 130; the
+    engine refuses it without `game_episodes`); `keep_deck`: the seats that keep their deck at every
+    sideboarding (`"keep_deck"`, ENGINE.md 130: the yardstick's). The engine refuses a spec holding a card it
+    does not support, naming every one (no silent drop, no substitution)."""
     d = load(name)
     main = names(d['main'])
     side = names(d['sideboard'] if sideboard is None else sideboard)
@@ -72,6 +76,10 @@ def mirror_bo3_spec(name=IZZET_DELVER, sideboard=None, max_turns=60, mulligans=T
     spec = {'max_turns': max_turns, 'mulligans': mulligans, 'constructed': True, 'format': 'bo3'}
     if game_episodes:
         spec['game_episodes'] = True
+    if start_game != 1:
+        spec['start_game'] = start_game
+    if keep_deck:
+        spec['keep_deck'] = sorted(keep_deck)
     spec['decks'] = {'p0': main, 'p1': main, 'p0_sideboard': side, 'p1_sideboard': side}
     return json.dumps(spec, separators=(',', ':'))
 

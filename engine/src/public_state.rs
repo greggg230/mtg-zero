@@ -357,6 +357,8 @@ pub fn fields() -> Vec<Field> {
         constructed_bo3: Derived "a constructed best-of-three (ENGINE.md 120): the match's format setting, the same in every world",
         game_episodes: Derived "the spec's one episode per game (ENGINE.md 121): a setting of the match, the same in every world",
         between: Derived "one episode per game (ENGINE.md 121): a game ended, the match did not - a terminal state, never encoded for a decision",
+        keep: Hidden "the seats that keep their decks at every sideboarding (ENGINE.md 130, an evaluation yardstick): a seat's own policy, off in the other player's worlds",
+        post_board: Derived "game 1 was not played (ENGINE.md 130, start_game 2): a setting of the match, the same in every world, never encoded - a real game 2 encodes as a synthetic one",
     });
     v
 }
@@ -432,6 +434,13 @@ fn stack_spells(g: &Game) -> Vec<(usize, CardIdx)> {
 
 fn player(r: &mut Rng) -> PlayerId {
     r.below(2) as PlayerId
+}
+
+/// The first game played whose chooser and starter the match block encodes: game 1, but in a
+/// constructed best-of-three game 2 (ENGINE.md 130: game 1's are not encoded); None before it.
+fn encoded_game(a: &MtgAz) -> Option<usize> {
+    let i = a.m.constructed_bo3 as usize;
+    (a.m.results[i] != 0).then_some(i)
 }
 
 /// A card moves from where it is to `to` by hand (no events, no triggers):
@@ -1878,17 +1887,23 @@ pub fn perturbations() -> Vec<Perturbation> {
             Some(format!("game {}: {}", i + 1, a.m.results[i]))
         }),
         p!(rare "another chose who played first", "MatchState.choosers", |a, _| {
-            // (Of a game played: the current game's is the game's chooser.)
-            if a.m.results[0] == 0 {
+            // (Of a game played: the current game's is the game's chooser. A constructed
+            // best-of-three's game 1's is not encoded, ENGINE.md 130: its game 2's, once played.)
+            let i = encoded_game(a)?;
+            a.m.choosers[i] = opp(a.m.choosers[i]);
+            Some(format!("game {}", i + 1))
+        }),
+        p!(rare "another played first", "MatchState.starters", |a, _| {
+            let i = encoded_game(a)?;
+            a.m.starters[i] = opp(a.m.starters[i]);
+            Some(format!("game {}", i + 1))
+        }),
+        p!(rare "a constructed best-of-three's game 1 had another chooser and starter", "MatchState.choosers", |a, _| {
+            // (ENGINE.md 130: not encoded, a limit by design)
+            if !a.m.constructed_bo3 || a.m.results[0] == 0 {
                 return None;
             }
             a.m.choosers[0] = opp(a.m.choosers[0]);
-            Some("game 1".into())
-        }),
-        p!(rare "another played first", "MatchState.starters", |a, _| {
-            if a.m.results[0] == 0 {
-                return None;
-            }
             a.m.starters[0] = opp(a.m.starters[0]);
             Some("game 1".into())
         }),
@@ -1986,9 +2001,11 @@ pub fn name_a_split_half(a: &mut MtgAz, left: bool) -> Option<String> {
 
 /// The perturbations whose public change the encoding leaves out (ENGINE.md
 /// 58.9: by design), each with its reason: since layout v7 (ENGINE.md 125.7)
-/// only the graveyard's order no rule reads, the user's choice (D5); the
-/// face-down exiled card and the earlier games' reveals, limits until v7, are
-/// encoded (`face_down`, `my_revealed`). Layout v5 (ENGINE.md 60) encodes
+/// the graveyard's order no rule reads, the user's choice (D5), and (ENGINE.md
+/// 130) a constructed best-of-three's game-1 chooser and starter, which the
+/// match block leaves out so that a real game 2 encodes as a post-sideboard
+/// start's; the face-down exiled card and the earlier games' reveals, limits
+/// until v7, are encoded (`face_down`, `my_revealed`). Layout v5 (ENGINE.md 60) encodes
 /// the 42 gaps layout v4 had no room for (58.10), layout v6 (ENGINE.md
 /// 100.5) the gaps the Edge of Eternities port and workstream C added after
 /// v5 froze, and two facts cards read that were limits by design
@@ -2002,6 +2019,7 @@ pub fn limits() -> Vec<Limit> {
     let l = |name, kind, why| Limit { name, kind, why };
     vec![
         l("two graveyard cards swap places", Design, "the user's choice (D5, ENGINE.md 125): graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2); the only rules that read the order are the table's positional readers (Shallow Grave's \"the top creature card\"), whose cards' order is the `graveyard_order` tokens (R17 checks the table); no action id depends on the order: a graveyard-card choice or target is a list id whose token is its card, the graveyards in order in the list block while it is pending (ENGINE.md 65.10), and Priority's casts and plays from the graveyard are one option, GRAVEYARD + 0, then that list's choice (ENGINE.md 100.5)"),
+        l("a constructed best-of-three's game 1 had another chooser and starter", Design, "with both 75s public, game 1 played with the registered mains and each game labelled by its own result, who chose and who played first in game 1 tells nothing about the decks or the game being played; a match that starts at game 2 (start_game 2) has none, and a real game 2 must encode as a synthetic one (ENGINE.md 130): the match block leaves them out; game 1's result is encoded (the score)"),
     ]
 }
 

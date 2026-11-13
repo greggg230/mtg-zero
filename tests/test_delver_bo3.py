@@ -28,6 +28,9 @@ def test_the_bo3_presets():
         # one episode per game (docs/ENGINE.md 121: each game's rows labelled by its own outcome), in the
         # evaluation spec too
         assert s['game_episodes'] is True and json.loads(p['eval_spec'])['game_episodes'] is True
+        # post-sideboard games only (docs/ENGINE.md 130: every match starts at the sideboarding before game 2), in the
+        # evaluation spec too; no seat keeps its deck (the yardstick's setting)
+        assert s['start_game'] == 2 and json.loads(p['eval_spec'])['start_game'] == 2 and 'keep_deck' not in s
         assert s['decks']['p0'] == s['decks']['p1'] == decklists.names(d['main'])
         assert s['decks']['p0_sideboard'] == s['decks']['p1_sideboard'] == side
         # the decks are fixed: evaluation plays the same matches
@@ -43,8 +46,11 @@ def test_the_bo3_presets():
     assert smoke['spec'] == full['spec']
     with pytest.raises(ValueError):
         decklists.mirror_bo3_spec(sideboard=[[4, 'Pyroblast']])
-    # without the key: one episode per match, as before
+    # without the key: one episode per match, as before; game 1 played, no seat keeping its deck
     assert 'game_episodes' not in json.loads(decklists.mirror_bo3_spec())
+    assert not {'start_game', 'keep_deck'} & set(json.loads(decklists.mirror_bo3_spec()))
+    k = json.loads(decklists.mirror_bo3_spec(game_episodes=True, start_game=2, keep_deck=[1]))
+    assert (k['start_game'], k['keep_deck']) == (2, [1])
 
 
 def test_the_full_preset_builds_with_the_full_75():
@@ -82,6 +88,11 @@ def test_a_constructed_match_through_the_bindings():
     rng = np.random.default_rng(3)
     spec = A.PRESETS['delver-bo3-smoke']['spec']
     g = E.Game('mtg', spec, 2, 7)
+    # post-sideboard games only (docs/ENGINE.md 130): the match starts at the sideboarding before game 2, game 1 won
+    # by one seat (drawn), its loser sideboarding first
+    m = json.loads(g.export_state())['match']
+    assert m['game'] == 1 and sorted(m['wins']) == [0, 1] and m['post_board'] is True
+    assert g.to_move == m['wins'].index(0) and g.scores() == [float(w) for w in m['wins']]
     steps, checked, later = 0, 0, 0
     pred = np.full(2048, 1.0 / 1024, dtype=np.float32)
     res = None
@@ -112,7 +123,8 @@ def test_a_constructed_match_through_the_bindings():
         g.step(int(legal[rng.integers(len(legal))]))
         steps += 1
         assert steps < 60000
-    assert abs(sum(res[:2]) - 1) < 1e-6 and checked > 10 and later >= 1
+    # (one or two episodes: games 2 and 3)
+    assert abs(sum(res[:2]) - 1) < 1e-6 and checked > 10 and later <= 1
 
 
 def test_the_yardstick_beats_random_in_bo3_matches():

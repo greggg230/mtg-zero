@@ -64,7 +64,9 @@
 //! the world's cards that deck, the first sideboarder's hidden choice a legal 60, the other
 //! player's sideboarding restarted), a deck-tilted world too (`FUZZ_DECK_TILT=t`'s tilt, default 1;
 //! a random prediction from its own generator: the deck one of the K cached decks), and every later
-//! game's decks legal 60s of the 75.
+//! game's decks legal 60s of the 75. Then as many post-sideboard matches (ENGINE.md 130: the same
+//! seeds' specs with `"start_game": 2` and one episode per game, one in three a seat keeping its deck)
+//! with the same checks, game 1's loser sideboarding first, a keeper's only option `PASS`.
 //! `FUZZ_POOL=dd_a` (ENGINE.md 124.1): Legacy Doomsday, lane A's cards: the
 //! Doomsday 60 (MTGGoldfish 8027957) with the cards of the other lanes
 //! swapped for more of lane A's (`DD_A_DECK`), against the Delver 60 in
@@ -2713,6 +2715,20 @@ fn match_spec(seed: u64) -> engine::az::MtgSpec {
 /// one match in four P1 plays another 75 of supported cards (`OTHER_75`: the format takes any two
 /// 75s), one in four 12-turn games (drawn games).
 fn delver_bo3_spec(seed: u64) -> engine::az::MtgSpec {
+    delver_bo3_spec_with(seed, serde_json::json!({}))
+}
+
+/// `FUZZ_POOL=delver`'s post-sideboard matches (ENGINE.md 130): `delver_bo3_spec`'s with `"start_game": 2` and one
+/// episode per game; one match in three a seat keeps its deck (`"keep_deck"`, the yardstick's).
+fn delver_post_spec(seed: u64) -> engine::az::MtgSpec {
+    let mut extra = serde_json::json!({"start_game": 2, "game_episodes": true});
+    if seed % 3 == 2 {
+        extra["keep_deck"] = serde_json::json!([(seed / 3) % 2]);
+    }
+    delver_bo3_spec_with(seed, extra)
+}
+
+fn delver_bo3_spec_with(seed: u64, extra: serde_json::Value) -> engine::az::MtgSpec {
     let d = engine::az::constructed::Decklist::izzet_delver();
     let db = CardDb::constructed();
     let main = d.main_names();
@@ -2720,8 +2736,11 @@ fn delver_bo3_spec(seed: u64) -> engine::az::MtgSpec {
     let expand = |l: &[(u32, &str)]| -> Vec<String> { l.iter().flat_map(|&(k, n)| std::iter::repeat_n(n.to_string(), k as usize)).collect() };
     let (main1, side1) = if seed % 4 == 1 { (expand(&OTHER_75.0), expand(&OTHER_75.1)) } else { (main.clone(), side.clone()) };
     let max_turns = if seed % 4 == 3 { 12 } else { 60 };
-    let v = serde_json::json!({"max_turns": max_turns, "constructed": true, "format": "bo3",
+    let mut v = serde_json::json!({"max_turns": max_turns, "constructed": true, "format": "bo3",
         "decks": {"p0": main, "p1": main1, "p0_sideboard": side, "p1_sideboard": side1}});
+    for (k, x) in extra.as_object().unwrap() {
+        v[k] = x.clone();
+    }
     engine::az::MtgSpec::parse(&v.to_string()).unwrap()
 }
 
@@ -2761,6 +2780,8 @@ struct PlayedMatch {
     /// Sideboardings finished (each player's `PASS` between games).
     sideboardings: u32,
     changed_decks: u32,
+    /// Sideboarding decisions of a seat that keeps its deck (`"keep_deck"`, ENGINE.md 130).
+    keeper_decisions: u32,
 }
 
 /// Counts of the hidden-pool checks (ENGINE.md 36.11).
@@ -2996,7 +3017,8 @@ fn check_match_information_set(g: &engine::az::MtgAz, viewer: usize, seed: u64, 
     let (mut la, mut lb) = (Vec::new(), Vec::new());
     let (mut xa, mut xb): (Vec<f32>, Vec<f32>);
     for step in 0..25 {
-        if a.match_over() || b.match_over() {
+        // (or a game's end with one episode per game, ENGINE.md 121: the episode is over)
+        if a.match_over() || b.match_over() || a.to_move().is_none() || b.to_move().is_none() {
             return;
         }
         a.legal_actions(&mut la);
@@ -3055,10 +3077,33 @@ fn play_match(seed: u64, checks: bool) -> PlayedMatch {
 }
 
 fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedMatch {
+    play_match_spec(seed, &match_spec(seed), checks, stats)
+}
+
+/// The state after a game's end with one episode per game (ENGINE.md 121): the next game's episode (its
+/// sideboarding first); None at the match's end.
+fn next_episode(g: &engine::az::MtgAz, seed: u64) -> Option<engine::az::MtgAz> {
+    use zero_search::game::SearchGame;
+    if !g.m.between {
+        return None;
+    }
+    match g.next_episode(None).unwrap_or_else(|e| panic!("match {seed}: {e}")) {
+        zero_search::game::Next::Continue(n) => Some(n),
+        zero_search::game::Next::Over(_) => panic!("match {seed}: between games, but next_episode ended the match"),
+    }
+}
+
+fn play_match_spec(seed: u64, sp: &engine::az::MtgSpec, checks: bool, stats: &mut HiddenStats) -> PlayedMatch {
     use engine::az::MtgAz;
     use zero_search::game::SearchGame;
-    let sp = match_spec(seed);
-    let mut g = MtgAz::new_game(&sp, 2, seed).unwrap_or_else(|e| panic!("match {seed}: {e}"));
+    let mut g = MtgAz::new_game(sp, 2, seed).unwrap_or_else(|e| panic!("match {seed}: {e}"));
+    // (A post-sideboard match, ENGINE.md 130, starts at the sideboarding before game 2: game 1 drawn, never a
+    // draw, its loser sideboarding first.)
+    if sp.start_game == 2 {
+        assert!(g.m.post_board && g.m.game_no == 1 && matches!(g.m.results[0], 1 | 2), "match {seed}: a post-sideboard start");
+        assert_eq!(g.sideboarding().map(|s| s.decider()), Some(2 - g.m.results[0]), "match {seed}: game 1's loser sideboards first");
+    }
+    let mut keeper_decisions = 0u32;
     let mut rng = Rng::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 5);
     let (mut legal, mut legal2, mut keys, mut all_keys, mut actions) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut x1: Vec<f32>;
@@ -3066,13 +3111,28 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
     let (mut sideboard_decisions, mut changed_decks, mut sideboardings) = (0u32, 0u32, 0u32);
     let mut decks = [g.m.decks[0].clone(), g.m.decks[1].clone()];
     let mut game_no = 1;
-    while let Some(p) = g.to_move() {
+    loop {
+        // (one episode per game, ENGINE.md 121: a game's end is the episode's; the match goes on)
+        let Some(p) = g.to_move() else {
+            match next_episode(&g, seed) {
+                Some(n) => {
+                    g = n;
+                    continue;
+                }
+                None => break,
+            }
+        };
         g.legal_actions(&mut legal);
         assert!(!legal.is_empty(), "match {seed}: no legal action");
         assert!(legal.windows(2).all(|w| w[0] < w[1]), "match {seed}: actions not sorted/unique");
         assert!(legal.iter().all(|&a| (a as usize) < NUM_ACTIONS));
         let sb = g.sideboarding().is_some();
         sideboard_decisions += sb as u32;
+        // a seat that keeps its deck (ENGINE.md 130): PASS, its only option
+        if sb && g.m.keep[p] {
+            assert_eq!(legal, [engine::act::PASS], "match {seed}: P{p} keeps its deck");
+            keeper_decisions += 1;
+        }
         let a = legal[rng.below(legal.len() as u32) as usize];
         sideboardings += (sb && a == engine::act::PASS) as u32;
         if checks {
@@ -3207,6 +3267,7 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
         sideboard_decisions,
         sideboardings,
         changed_decks,
+        keeper_decisions,
     }
 }
 
@@ -3274,6 +3335,7 @@ fn fuzz_random_matches() {
             stats.worlds, stats.hidden, stats.hidden_changed, stats.choices_dealt, stats.tilted
         );
         assert!(n < 20 || stats.hidden_changed * 2 > stats.hidden && stats.choices_dealt > 0 && stats.tilted > 0, "the constructed 60s are rarely dealt");
+        fuzz_post_sideboard_matches(first, n);
         return;
     }
     // (Interaction lists have no first picks: open decklists.)
@@ -3283,23 +3345,78 @@ fn fuzz_random_matches() {
     );
 }
 
-#[test]
-fn same_seed_and_actions_replay_matches_identically() {
+/// `FUZZ_POOL=delver`'s post-sideboard matches (ENGINE.md 130), the same seeds as its matches: `"start_game": 2`
+/// with one episode per game, one match in three a seat keeping its deck; every check of `play_match_spec` (the
+/// constructed worlds, the deck-tilted deals, the information sets, the later games' decks and choosers).
+fn fuzz_post_sideboard_matches(first: u64, n: u64) {
+    let (mut games, mut draws, mut decisions, mut sb, mut changed, mut three, mut aborted, mut kept) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let mut stats = HiddenStats::default();
+    for seed in first..first + n {
+        if skipped(seed) {
+            continue;
+        }
+        let sp = delver_post_spec(seed);
+        let p = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| play_match_spec(seed, &sp, true, &mut stats)))
+            .unwrap_or_else(|e| panic!("post-sideboard match {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_MATCHES=1): {e:?}"));
+        // (game 1 is not played: the games after it)
+        games += p.games as u64 - 1;
+        draws += p.results[1..].iter().filter(|&&r| r == 3).count() as u64;
+        decisions += p.actions.len() as u64;
+        sb += p.sideboard_decisions as u64;
+        changed += p.changed_decks as u64;
+        three += (p.games == 3) as u64;
+        aborted += p.aborted as u64;
+        kept += p.keeper_decisions as u64;
+    }
+    println!(
+        "{n} post-sideboard matches (start_game 2): {games} games played ({three} matches of three, {draws} drawn games, {aborted} aborted), mean decisions {:.1}, \
+         sideboarding decisions {sb} ({kept} of a seat that keeps its deck), decks changed {changed}; constructed: {} worlds, the opponent's 60 hidden in {} \
+         ({} with another 60 than the real one), {} first sideboarders' choices dealt, {} deck-tilted worlds",
+        decisions as f64 / n as f64,
+        stats.worlds,
+        stats.hidden,
+        stats.hidden_changed,
+        stats.choices_dealt,
+        stats.tilted
+    );
+    assert!(n < 20 || sb > 0 && changed > 0 && three > 0 && kept > 0 && stats.choices_dealt > 0 && stats.tilted > 0, "post-sideboard matches: no sideboarding, changed deck, match of three or keeper");
+}
+
+/// Replays match `seed` of `sp` from its actions (`next_episode` at each game's end with one episode per game):
+/// its fingerprint, results and chance keys.
+fn replay_match(seed: u64, sp: &engine::az::MtgSpec, actions: &[u16]) -> (u64, [u8; 3], Vec<u64>) {
     use engine::az::MtgAz;
     use zero_search::game::SearchGame;
+    let mut g = MtgAz::new_game(sp, 2, seed).unwrap();
+    let mut keys = Vec::new();
+    for &x in actions {
+        while g.to_move().is_none() {
+            g = next_episode(&g, seed).expect("the match goes on");
+        }
+        g.step(x, &mut keys).unwrap();
+    }
+    (g.g.fingerprint(), g.m.results, keys)
+}
+
+#[test]
+fn same_seed_and_actions_replay_matches_identically() {
     if (constructed_mode() && !delver_mode()) || eoe_mode() || sealed_mode() {
         return;
     }
     for seed in 2000..2012 {
         let a = play_match(seed, false);
-        let mut g = MtgAz::new_game(&match_spec(seed), 2, seed).unwrap();
-        let mut keys = Vec::new();
-        for &x in &a.actions {
-            g.step(x, &mut keys).unwrap();
-        }
-        assert_eq!((g.g.fingerprint(), g.m.results), (a.fingerprint, a.results), "match {seed}");
+        let (fp, results, keys) = replay_match(seed, &match_spec(seed), &a.actions);
+        assert_eq!((fp, results), (a.fingerprint, a.results), "match {seed}");
         assert_eq!(keys, a.keys, "match {seed}: chance keys differ");
         assert_eq!(play_match(seed, false).fingerprint, a.fingerprint);
+        // the post-sideboard matches too (ENGINE.md 130)
+        if delver_mode() {
+            let sp = delver_post_spec(seed);
+            let a = play_match_spec(seed, &sp, false, &mut HiddenStats::default());
+            let (fp, results, keys) = replay_match(seed, &sp, &a.actions);
+            assert_eq!((fp, results, &keys), (a.fingerprint, a.results, &a.keys), "post-sideboard match {seed}");
+            assert_eq!(play_match_spec(seed, &sp, false, &mut HiddenStats::default()).fingerprint, a.fingerprint);
+        }
     }
 }
 
