@@ -2489,8 +2489,12 @@ impl Game {
         // (Paid by single-mana sources alone: done, no sources looked at;
         // unless sources a later "exile n cards from your graveyard" needs
         // are still to be activated: a cost of no mana, Psychic Frog's,
-        // with two Lotus Petals, ENGINE.md 49.)
-        if pm.vm == Some(0) && pm.now.is_none() && pm.forced.is_empty() && pm.chosen.len() == pm.need_total() {
+        // with two Lotus Petals, ENGINE.md 49. Never with an answer waiting:
+        // the decision this payment asked (the pool covers the rest:
+        // `PASS`, or a source to pay instead) is answered below; finished
+        // here, its answer was left to the next task, the cost's choices
+        // (ENGINE.md 152.3: EoE fuzz seed 100000075).)
+        if pm.vm == Some(0) && pm.now.is_none() && pm.forced.is_empty() && pm.chosen.len() == pm.need_total() && self.answer.is_none() {
             // (The classes only for the several-mana picks' restrictions.)
             let classes = if pm.multi.is_empty() { Vec::new() } else { self.payment_classes(&pm) };
             let rem = self.pool_rems(&pm, &classes).swap_remove(0);

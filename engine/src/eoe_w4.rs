@@ -113,6 +113,15 @@ impl Game {
     /// every card of it), that library. What the controlled player merely
     /// remembers (a library card seen on an earlier turn) is not visible, and
     /// is not shared (ENGINE.md 99.14, 100.5).
+    ///
+    /// The keys tell where each card is wherever its place is seen
+    /// (ENGINE.md 152.2): the cards of hands and of the face-down exile, which
+    /// have no order, in definition order; then the face-down permanents in
+    /// the order they became face down, and the library cards (a looked-at
+    /// pile, a searched library) from the top of each library, whose places
+    /// the controller now knows. (Sorted together, two worlds whose libraries
+    /// hold the same cards in different orders had equal keys and different
+    /// views: seed 100019080 of the EoE fuzz.)
     pub(crate) fn sync_controller_view(&mut self) {
         let Some(q) = self.turn_controller else { return };
         let p = self.turn.active;
@@ -120,13 +129,21 @@ impl Game {
             return;
         }
         let mut seen: Vec<CardIdx> = self.players[p as usize].hand.clone();
-        seen.extend(self.face_down_ids.iter().map(|x| x.0).filter(|&c| self.objs[c.i()].controller == p));
         seen.extend(self.face_down.iter().copied().filter(|&c| self.objs[c.i()].owner == p && self.knows(p, c)));
+        let face_down_perms: Vec<CardIdx> = self.face_down_ids.iter().map(|x| x.0).filter(|&c| self.objs[c.i()].controller == p).collect();
+        let mut library: Vec<CardIdx> = Vec::new();
         if let Some(d) = self.pending.as_ref().filter(|d| d.player == p) {
-            seen.extend(d.options.iter().filter_map(|o| match o.choice {
-                Choice::Card(c) if self.hidden_obj(c) && self.knows(p, c) => Some(c),
-                _ => None,
-            }));
+            for o in &d.options {
+                if let Choice::Card(c) = o.choice {
+                    if self.hidden_obj(c) && self.knows(p, c) {
+                        if self.objs[c.i()].zone == Zone::Library {
+                            library.push(c);
+                        } else {
+                            seen.push(c);
+                        }
+                    }
+                }
+            }
             // (A pile they looked at, its options by definition: the cards
             // they know there.)
             if let Some(Task::Run(f)) = self.agenda.last() {
@@ -134,13 +151,29 @@ impl Game {
                     d.kind,
                     DecisionKind::PutOnTop | DecisionKind::PutOnBottom | DecisionKind::PutInGraveyard | DecisionKind::PutInHand | DecisionKind::PutOntoBattlefield
                 ) {
-                    seen.extend(f.pile.iter().copied().filter(|&c| self.hidden_obj(c) && self.knows(p, c)));
+                    for &c in &f.pile {
+                        if self.hidden_obj(c) && self.knows(p, c) {
+                            if self.objs[c.i()].zone == Zone::Library {
+                                library.push(c);
+                            } else {
+                                seen.push(c);
+                            }
+                        }
+                    }
                 }
             }
             if d.kind == DecisionKind::SearchLibrary {
-                seen.extend(self.players[p as usize].library.iter().copied());
+                library.extend(self.players[p as usize].library.iter().copied());
             }
         }
+        // (Each library's cards from its top, the libraries by owner.)
+        let depth = |g: &Game, c: CardIdx| {
+            let o = &g.objs[c.i()];
+            let lib = &g.players[o.owner as usize].library;
+            (o.owner, lib.len() - lib.iter().position(|&x| x == c).expect("a library card"))
+        };
+        library.sort_by_key(|&c| depth(self, c));
+        library.dedup();
         let mut learned: Vec<crate::ids::DefId> = Vec::new();
         for c in seen {
             if !self.knows(q, c) {
@@ -149,6 +182,12 @@ impl Game {
             }
         }
         learned.sort_unstable();
+        for c in face_down_perms.into_iter().chain(library) {
+            if !self.knows(q, c) {
+                self.learn(q, c);
+                learned.push(self.ident(c));
+            }
+        }
         for d in learned {
             self.emit_private(crate::hidden::KEY_LOOK, q, d as u64);
         }

@@ -2813,8 +2813,7 @@ impl Game {
             K::SearchLibrary | K::NameCard => self.library_sorted(p),
             K::PutOnTop | K::PutOnBottom | K::PutInGraveyard | K::PutInHand | K::PutOntoBattlefield => match self.agenda.last() {
                 Some(Task::Run(f)) => {
-                    let mut v = f.pile.clone();
-                    v.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
+                    let mut v = self.pile_sorted(&f.pile);
                     // A paged pile (more cards than the 64 list slots,
                     // ENGINE.md 100.1): the page's cards at their slots
                     // (63 a page, the last slot "next page"), as a paged
