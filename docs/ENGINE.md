@@ -30189,7 +30189,8 @@ its recorded file in `engine/tests/data/`, each printing one line `<name>: ... c
   **b36df9098a38d794**, driver **837d42c28214befe**. Time on the shared desktop: constructed 27-29 s, EoE 38-39 s, the
   driver 5 s, at once (about 40 s wall). `DIGEST_ENCODING=0`: constructed 7ace0291619aa36f, EoE 52bb9c00a23d24d3. Each
   compared again after recording: equal.
-* **Not in `tools/gate.py`.** Wiring a third digest step needs gate.py's `digest_steps` and its test's fake runner
+* **Not in `tools/gate.py`** (correction, 157.5: the integration wired it in as the `digest-formats` step of the
+  encoding, engine, repin, search-core and optin-core tiers, with the evidence below). Wiring a third digest step needs gate.py's `digest_steps` and its test's fake runner
   (`tests/test_gate.py` classifies any `--test` other than `digest` as a plain cargo test, so the encoding, engine and
   repin tier tests would fail), which lane C1 owns. What the step needs: `cargo test --release -p engine --test
   digest_formats -- --ignored --nocapture` with the caller's `DIGEST_*` scrubbed (as now); positive evidence = exactly
