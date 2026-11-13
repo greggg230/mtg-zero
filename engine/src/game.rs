@@ -2381,8 +2381,16 @@ impl Game {
         if told {
             self.key_told(idx, false);
         }
-        // (Its identity as it leaves, and whether that was hidden: `ref_lki`.)
-        let (lki_def, lki_hidden) = (self.ident(idx), self.hidden_obj(idx));
+        // (Its identity as it leaves, and whether that was hidden: `ref_lki`.
+        // A permanent's as a live reference showed it, `perm_identity`: its
+        // own card without copy effects; a face-down one's card, revealed as
+        // it leaves, CR 708.9.)
+        let lki_def = if matches!(from, Zone::Battlefield | Zone::PhasedOut) {
+            self.face_down_id(idx).unwrap_or_else(|| self.own_def(idx))
+        } else {
+            self.ident(idx)
+        };
+        let lki_hidden = self.hidden_obj(idx);
         // (Leyline of the Void's replacement as this permanent last existed,
         // for the rest of a simultaneous move: `Lki::opp_gy_exile`.)
         let lki_void = from == Zone::Battlefield && self.batching && self.seen & SEEN_VOID != 0;
