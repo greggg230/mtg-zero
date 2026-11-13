@@ -186,3 +186,26 @@ fn eoe_seed_100019080_a_controlled_search_keys_the_library_from_the_top() {
     let c = case("eoe", 100019080);
     assert_eq!(walk(&c), Some(c.path.len() - 1), "the search's keys tell the two libraries apart");
 }
+
+// ---- 152.5: a bag's count through the feature transform -------------------------
+
+/// The minimal case of 152.5's encoding bound (the exponential fuzz seeds 10000021, 2095, 2295 and
+/// 2570: `check_bounded`, an identity's count in the opponent's battlefield bag 6760.5 > 256). A bag
+/// counts every card of an identity at 0.25, and with no cap on permanents (ENGINE.md 26.11.6) the
+/// count went past the bound unsquashed. 1,100 Forests of the opponent's: 275 before, now
+/// `squash(275)`; every value of P0's row within `FEATURE_BOUND`.
+#[test]
+fn an_identitys_bag_count_stays_within_the_feature_bound() {
+    use engine::az::encode::{squash, FEATURE_BOUND};
+    let g = Scenario::new(CardDb::constructed())
+        .library(0, &["Island"; 5])
+        .library(1, &["Island"; 5])
+        .battlefield(1, &["Forest"; 1100])
+        .at(Step::Main1, 0)
+        .start();
+    let row = engine::az::tail_encode::Row::of(&g, 0);
+    let vals: Vec<f32> = row.head.iter().chain(row.tail.iter().flat_map(|t| t.2.iter())).copied().collect();
+    let max = vals.iter().fold(0f32, |m, v| m.max(v.abs()));
+    assert!(max <= FEATURE_BOUND, "the largest value {max}");
+    assert!(vals.contains(&squash(275.0)), "the Forests' count, squashed");
+}

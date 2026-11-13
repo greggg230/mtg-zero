@@ -2516,6 +2516,18 @@ impl Game {
                 bag_add(out, ids, bag::MY_HAND_KNOWN, self.objs[c.i()].def);
             }
         }
+        // A count goes through the feature transform like every other one (ENGINE.md 46): exact up to
+        // 512 cards of an identity, logarithmic past them. With no cap on permanents (26.11.6) a bag
+        // could grow without bound (ENGINE.md 152.5: exponential fuzz seeds, feature 3248 = 6760.5).
+        // (Each entry counts at most one 0.25 per object, or per stack reference for EXILE_REFS: with
+        // fewer than 512 of those together no entry passes `SQUASH_FROM`, where `squash` is the
+        // identity, so the pass is skipped.)
+        let refs: usize = self.stack.iter().map(|s| s.targets.len() + s.noted.len()).sum();
+        if self.objs.len() + refs > 4 * SQUASH_FROM as usize {
+            for v in &mut out[O_BAGS..O_BAGS + BAGS * D] {
+                *v = squash(*v);
+            }
+        }
     }
 
     /// The globals of layout v7 (ENGINE.md 124.2, `g7::*`).
