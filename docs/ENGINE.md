@@ -29295,7 +29295,7 @@ target directory (E:/cargo-target/mtg-zero/bo3-postboard).
 
 The Fable review of 2026-11-12 (slice 5, `E:\mtg-zero-scratch\fable-review-2026-11-12\infra.md`) found zero-core's run
 loop sound where it runs alone and wrong at its edges: a remote machine, an interrupted iteration, a fork, the supervisor.
-Lane C2 fixed every one of its zero-core Python items. `third_party/zero-core` e5e1bb0 -> **f974ce3** (`fix/core-infra-1112`,
+Lane C2 fixed every one of its zero-core items (and the two zero-core tool items lane C1 handed over, B7 and B14). `third_party/zero-core` e5e1bb0 -> **509e3e2** (`fix/core-infra-1112`,
 on GitHub); zero-core docs/az.md **46** has each fix (why, what, defaults), 43.14 a correction. Python only: no Rust
 change, no engine change, **digests EQUAL** (nothing the engine plays or encodes moved; not re-run).
 
@@ -29331,6 +29331,13 @@ change, no engine change, **digests EQUAL** (nothing the engine plays or encodes
   other games; the exact ratios stay in a fresh driver's phase (`rolling` 0). For MTG Zero's presets (rolling) the
   metrics rows' keys change; nothing reads them (the dashboards do not).
 * **A worker's accept it cannot fill** (I7, 46.10): given back (`unaccepted`), never cut in silence.
+* **The compat goldens hash the auxiliary targets** (B14, 46.12): `tools/selfplay_digest.py` records a game whose
+  engine computes auxiliary targets with them and hashes each row's `aux` (MTG Zero's belief and deck targets: a change
+  to what self-play records for them no longer passes `check_checkpoint_compat` as identical); a game without them keeps
+  its digest byte for byte; the compat check names the arrays it compared (its target lines, which tools/gate.py
+  parses, unchanged). MTG Zero's compat digests change (they hash `aux` now; both sides always run the new tool).
+* **A detached checkout's target dir** (B7, zero-core half, 46.13): zero-core's `build_engine.sh` names it
+  `detached-<directory>`, as lane C1's `tools/build_py.sh` does here (ENGINE.md 143).
 * **The gate shadow** (43.14's correction): it also shifts the open path's gradients, 2.6-4.0% overall (`pk.weight`
   37%) while a gate sits below it; documented, default training unchanged; an opt-in that confines it is proposed
   (46.11), not built.
@@ -29354,9 +29361,6 @@ change, no engine change, **digests EQUAL** (nothing the engine plays or encodes
 
 ### 144.3 Not here
 
-* `tools/build_engine.sh`'s shared `<base>/HEAD` target dir of detached worktrees (B7) and `tools/selfplay_digest.py`'s
-  missing auxiliary targets (B14) are zero-core tools the review lanes assigned to lane C1 (mtg-zero's tools; C1 has no
-  zero-core branch): not touched here.
 * Improvements not taken: I3 (a gap in the data window), I5 (the optimizer state with its checkpoint), I6 (a build
   identity in the remote hello), I9 (a remote evaluation retried after it finished), I10 (a pausing run's stall limit),
   O2/O3 (shard fetch channel, window row cache). B15 (`RunCommitRemote`) is mtg-zero's `mtgz/az/mac.py`.
