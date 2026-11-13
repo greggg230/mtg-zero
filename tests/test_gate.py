@@ -140,6 +140,26 @@ def DIGEST(d, games=(2000, 500)):
             'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.06s\n')
 
 
+D_FORMATS = {'constructed': '63f58560ad7b3df0', 'eoe': 'b36df9098a38d794', 'driver': '837d42c28214befe'}
+
+
+def FORMATS(digests=None, passed=3):
+    """digest_formats' output as the three tests print it (ENGINE.md 148.1), in the order they finished."""
+    d = dict(D_FORMATS, **(digests or {}))
+    return ('running 3 tests\n'
+            'driver (8 threads, 2 groups of 8 games): 20000 batches, 90491 rows, 1251 samples (the first at batch 7532), '
+            '5 results (the first at batch 12020); sims 85674, leaves 90491, cache hits 51316, view rows 10061, belief '
+            'rows 2159, busy 4.1 s (47.9 us a simulation)\n'
+            f'driver: 20000 batches, 1251 samples, 5 results in 5.2 s; combined digest {d["driver"]}\n'
+            'test driver_digest ... ok\n'
+            f'constructed: 570 games and matches in 27.9 s; combined digest {d["constructed"]}\n'
+            'test constructed_digests ... ok\n'
+            f'eoe: 160 games in 38.4 s; combined digest {d["eoe"]}\n'
+            'test eoe_digests ... ok\n\n'
+            f'test result: ok. {passed} passed; 0 failed; 0 ignored; 0 measured; {30 - passed} filtered out; '
+            'finished in 38.43s\n')
+
+
 def CARGO(*counts, failed=0):
     return ''.join(f'running {n} tests\n\ntest result: {"FAILED" if failed else "ok"}. {n} passed; {failed} failed; '
                    f'0 ignored; 0 measured; 0 filtered out; finished in 4.57s\n\n' for n in counts)
@@ -231,6 +251,8 @@ class Fake:
             return 'h2h'
         if 'pytest' in argv:
             return 'core-pytest' if self.cwd == self.core else 'pytest'
+        if '--test' in argv and 'digest_formats' in argv:
+            return 'formats'
         if '--test' in argv and 'digest' in argv:
             return 'digest0' if env.get('DIGEST_ENCODING') == '0' else 'digest'
         if '--test' in argv:
@@ -259,7 +281,7 @@ class Fake:
         if k == 'pycompile':
             return f'py_compile: {len(argv) - 3} file(s) compiled\n', 0
         return {'build': BUILD(G.ROOT), 'core-build': CORE_BUILD(self.core), 'digest0': DIGEST(D_FREE),
-                'digest': DIGEST(D_FULL), 'cargo1': CARGO(34), 'cargo': CARGO(123, 3, 0, 0), 'pytest': PYTEST_OK,
+                'digest': DIGEST(D_FULL), 'formats': FORMATS(), 'cargo1': CARGO(34), 'cargo': CARGO(123, 3, 0, 0), 'pytest': PYTEST_OK,
                 'core-pytest': '.' * 60 + '\n308 passed, 3 skipped, 1 warning in 739.67s (0:12:19)\n',
                 'h2h': H2H, 'build-only': built(GAMES, core=PIN[:7]), 'mac': MAC(SHA, CARGO(900, 12, 0)),
                 'mac-eval': EVAL_CHECKOUT(SHA)}[k], 0
@@ -659,6 +681,46 @@ def test_a_failed_retry_fails_the_step(core_step):
     assert [x['passed'] for x in r.extra['retries']] == [True, False]
 
 
+def test_the_digest_formats_checker():
+    """digest_formats (ENGINE.md 148.1, 157): exactly one line each of constructed, eoe and driver, no re-record, the
+    binary's one "test result: ok. 3 passed" line + exit 0 - the three digests named in the reason and the report."""
+    check = G.check_digest_formats
+    ok, why, extra = check(FORMATS(), 0)
+    assert ok and extra['formats'] == D_FORMATS and all(f'{n} {d}' in why for n, d in D_FORMATS.items())
+    out = FORMATS()
+    assert not check(out.replace('eoe: 160', 'eoe (encodings off): 160'), 0)[0]          # a line missing
+    ok, why, _ = check(out + f'constructed: x; combined digest {D_FORMATS["constructed"]}\n', 0)
+    assert not ok and '4 "<name>' in why                                                  # a line twice
+    ok, why, _ = check(out.replace('test result: ok. 3 passed', 'wrote E:/x/engine/tests/data/digests_eoe.txt\n'
+                                   'test result: ok. 3 passed'), 0)
+    assert not ok and 'RE-RECORDED' in why                                                # DIGEST_WRITE
+    ok, why, _ = check(FORMATS(passed=2), 0)
+    assert not ok and '2 passed, not the 3' in why
+    assert not check(out.replace('test result: ok. 3 passed; 0 failed', 'test result: FAILED. 2 passed; 1 failed'), 101)[0]
+    assert not check(out, 1)[0]
+    assert 'did it compile' in check('error[E0425]: cannot find value\n', 101)[1]
+
+
+def test_the_digest_formats_step_runs_in_the_behaviour_tiers_and_reports_its_digests(gate, capsys):
+    """The step (its DIGEST_* the caller's never: step_env) in the encoding, engine, repin, search-core and optin-core
+    tiers; the report's digests name the three; a recorded file that differs fails the gate."""
+    rc, out, _, report = gate(*ENC, '--allow-skip', 'checkpoint-load', capsys=capsys)
+    calls = [a for k, a in gate.fake.calls if k == 'formats']
+    assert rc == 0 and calls == [G.FORMATS_ARGV] and 'PASS     digest formats' in out
+    assert {k: v['value'] for k, v in report['digests'].items() if k in D_FORMATS} == D_FORMATS
+    for argv in (('engine', '--expect-digest', D_FULL, '--expect-digest0', D_FREE, '--no-mac', '--allow-skip',
+                  'suite-evidence'),
+                 ('repin', '--expect-digest', D_FULL, '--spec', 'delver', '--preset', 'delver-mirror')):
+        gate.fake.calls.clear()
+        gate(*argv, capsys=capsys)
+        assert 'formats' in [k for k, _ in gate.fake.calls], argv
+    gate.fake.calls.clear()
+    gate.fake.set('formats', FORMATS().replace('test driver_digest ... ok', 'test driver_digest ... FAILED')
+                  .replace('test result: ok. 3 passed; 0 failed', 'test result: FAILED. 2 passed; 1 failed'), 101)
+    rc, out, _, _ = gate(*ENC, '--allow-skip', 'checkpoint-load', capsys=capsys)
+    assert rc == 1 and 'digest-formats: the digest_formats tests did not pass' in final(out)
+
+
 def test_a_failure_count_that_does_not_add_up_is_not_retried():
     out = PYTEST_FAILED(REMOTEPLAY).replace('1 failed, 301 passed', '2 failed, 300 passed')
     assert G.flaky_retry_candidates(out) == (None, 'the summary counts 2 failure(s)/error(s) but the short summary '
@@ -673,15 +735,15 @@ def test_the_core_tiers_build_and_run_the_core_suite_and_name_a_flaky_retry(gate
     rc, out, _, report = gate('optin-core', '--baseline-root', gate.baseline, '--other-games', *gate.other,
                               capsys=capsys)
     kinds = [k for k, _ in gate.fake.calls]
-    assert kinds == ['build', 'cargo', 'compat', 'cargo1', 'cargo1', 'build-only', 'core-build', 'core-pytest',
-                     'core-pytest']
+    assert kinds == ['build', 'cargo', 'compat', 'formats', 'cargo1', 'cargo1', 'build-only', 'core-build',
+                     'core-pytest', 'core-pytest']
     assert rc == 0 and final(out).startswith('GATE PASSED WITH FLAKY RETRIES optin-core')
     assert report['flaky'] == [f'core-pytest: {REMOTEPLAY}'] and report['baseline']['head'] == 'c' * 40
     gate.fake.core_pytest = []
     rc, out, _, _ = gate('search-core', '--baseline-root', gate.baseline, capsys=capsys)
     assert rc == 0 and final(out).startswith('GATE PASSED search-core')
-    assert [k for k, _ in gate.fake.calls][-8:] == ['build', 'cargo', 'pytest', 'compat', 'smoke', 'run', 'core-build',
-                                                    'core-pytest']
+    assert [k for k, _ in gate.fake.calls][-9:] == ['build', 'cargo', 'pytest', 'compat', 'formats', 'smoke', 'run',
+                                                    'core-build', 'core-pytest']
 
 
 def test_a_stale_build_fails_the_core_tier_before_the_comparison(gate, capsys):
