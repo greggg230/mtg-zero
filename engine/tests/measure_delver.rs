@@ -13,6 +13,11 @@ use engine::az::{MtgAz, MtgSpec};
 use engine::rng::Rng;
 use zero_search::game::SearchGame;
 
+// The Python module's allocator (py/Cargo.toml), not the Windows heap: allocation-heavy parts measured as a run
+// sees them (ENGINE.md 145; numbers in sections before it were taken on the system heap).
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn mirror() -> MtgSpec {
     let names = Decklist::izzet_delver().main_names();
     MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": names, "p1": names}}).to_string()).unwrap()

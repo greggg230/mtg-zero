@@ -29290,3 +29290,43 @@ target directory (E:/cargo-target/mtg-zero/bo3-postboard).
   Nothing refuses it in a run spec; the presets do not set it.
 * **The run**: moving the Delver best-of-three run onto this commit changes what it trains (games 2-3 only) - a
   maintainer's decision, with the run.
+
+## 145. Performance fixes of the 2026-11-12 review: the graveyard readers without a lock, the driver benchmark, tail rows scanned at encode, the phase's time split (branch `perf/fable-1112`; zero-core `perf/fable-1112`)
+
+The 2026-11-12 Fable review's performance slice (`E:\mtg-zero-scratch\fable-review-2026-11-12\perf.md`) measured
+zero-core's driver on the live run's spec and seat with an instantaneous evaluator. This section lands its
+behaviour-preserving fixes that are not the deck posteriors' (P1 and P4 are lane A1's, section 140). Every part keeps
+behaviour: the engine digests are EQUAL to `engine/tests/data/digests.txt` and the driver hash (145.2) is EQUAL.
+
+### 145.1 The table's graveyard readers, without a process-wide lock
+
+Every v7 row's `graveyard_order` segment (125) and the public-state probe read the table's positional graveyard
+readers through `lower::graveyard_order::readers`, a cache keyed by the table's address behind a global `Mutex`: one
+lock per row encode on every search thread (8-16 of them in self-play). The readers are now found once, by the table's
+build check over its final definitions (`check_table`, which replaces `check`: the same `check_defs` over the same
+definitions in id order, the same loud failure), and kept in the table (`CardDb::gy_readers`); `readers(db)` returns
+them. No lock, no interior mutability (the table is immutable after its build; the two test tables that change a
+definition afterwards, `pay::tests`, add mana abilities, which no reader reads). Tests: `v7_tails::r17_the_graveyard_order_check`
+(the cube's and constructed tables' one reader, EoE's none, a reader by colour refused) and every v7 encoding test.
+
+### 145.2 The driver benchmark (`engine/tests/driver_bench.rs`), and benchmarks on mimalloc
+
+The review's harness, committed: `drv` runs zero-core's `Driver<MtgAz>` on the live run's spec
+(`tests/data/driver_bench_spec.json`: constructed Delver Bo3, `game_episodes`, `start_game` 2) and its self-play seat
+(64 / 16 / 4 simulations, cq target, eval cache 8192, root-view leaves, view samples 0.5, hand and deck tilts 1 with mix
+0.25, resignation), sparse batches, the auxiliary targets, rolling, against an instantaneous evaluator. With `MAXBATCH`
+it does fixed work and hashes every batch (sparse rows, options, tails, overrides, game ids), every sample (non-zero
+features, targets, options, overrides) and every result: **the driver hash**, the behaviour check for what `digest.rs`
+cannot see (the driver, the belief and deck deals, the constructed prior, the eval cache, the records); it does not
+depend on the thread count. It prints the steady window's leaves/s and thread-us per simulation and the process's peak
+working set. `padding` is the census of the token graphs' padding behind zero-core `infer_token_chunks` (az.md 43.11).
+`--ignored`; the module docs list the settings.
+
+The reference hash: `MAXBATCH=40000 CONC=48 GROUPS=2 THREADS=8` -> `f8cfeb414c6c3322` (40,000 batches, 1,121,156
+simulations, 5,719 samples, 21 results; the review's value, re-run on 267ae603 for this section).
+
+The review found the benchmarks built as tests running on the Windows heap while `mtgz._engine` runs on mimalloc
+(py/Cargo.toml): the same driver run is 92 us per simulation on the system heap against 67 with mimalloc, `decide` 489
+against 59 us. `driver_bench`, `perf` and `measure_delver` now run on mimalloc (`mimalloc` a dev-dependency of the
+engine, `#[global_allocator]` in each). Numbers in sections before this one (17 onwards) were taken on the system heap
+and overstate allocation-heavy parts.

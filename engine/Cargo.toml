@@ -11,3 +11,9 @@ serde_json.workspace = true
 # the search crate of the pinned core (git submodule third_party/zero-core, docs/pinning.md there):
 # the `SearchGame` trait the AZ layer (src/az) implements
 zero_search = { path = "../third_party/zero-core/crates/search" }
+
+[dev-dependencies]
+# The benchmarks built as tests (tests/driver_bench.rs, perf.rs, measure_delver.rs) run on the allocator of the
+# Python module (py/Cargo.toml): the Windows heap makes their allocation-heavy parts several times slower than a
+# run sees them (ENGINE.md 145).
+mimalloc = { version = "0.1", default-features = false }
