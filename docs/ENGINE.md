@@ -29410,11 +29410,29 @@ The lowering takes either form.
 
 ### 146.3 Verification
 
-VERIFICATION
+* **Engine suite** (`cargo test --release -p engine`, on e52b5dd1's tree): 2,551 passed, 0 failed, 27 ignored (162
+  test binaries). The first run failed only where the new check refused two custom test cards whose kit printed no
+  cost (Test Phyrexian Shock, Test Rummage; the helpers fixed, 146.2).
+* **`FUZZ_GAMES=20000`** (the default pool): passed, 20,000 games (wins 9,803 / 10,075, 122 draws, 0 aborted, mean
+  31.8 turns, 438.2 decisions) and 1,000 matches (2,549 games), both replay tests; 3,107 s on a shared desktop.
+* **`FUZZ_POOL=eoe FUZZ_GAMES=20000`**: passed, every seed, 20,000 games (wins 7,118 / 7,047, 5,835 draws, 0 aborted,
+  mean 45.8 turns, 654.0 decisions; was 7,112 / 7,072, 5,816 draws, 654.2 on 100.5.1's games: the six striations and
+  Warping Wail play differently), 32 controlled decisions, longest turn 264 decisions, the replay tests; 10,913 s (one
+  process, a shared desktop).
+* **Behaviour digests**: the recorded games are the cube's (random decks of the cube's supported cards and the
+  heuristic bot), which holds no station card and no `{C}` cost the lowering now reads differently (Sowing Mycospawn's
+  kicker already came from its string), so they are expected EQUAL to main's: full 438164c0429d7fa3, `DIGEST_ENCODING=0`
+  a0062bb5569e06d3. `python tools/gate.py engine --no-mac` on this branch's final commit compares them (the report
+  gives its last line). EoE play, which changes on purpose, has no recorded digest yet (lane G, ENGINE.md 148).
+* **mtg-bot**: 146.1.
 
 ### 146.4 For the orchestrator
 
 * The IR: `eoe.ir.json` comes from a local mtg-bot branch, `feature/eoe-station-ir` 68b62ed3 (one commit on
   `feature/delver-sb-ir` 22aa7682). A later re-export must start from a branch that has it (or the striation sweep
   fails, as it should).
-* No layout, encoding, zero-core or Python change. Behaviour digests: DIGESTS.
+* No layout, encoding, zero-core or Python change. Behaviour digests: expected EQUAL (146.3); EoE behaviour
+  changes on purpose (the six cards, Warping Wail), so an EoE digest recorded by another lane (G) must be recorded
+  after this branch.
+* Other lanes' files touched: the shared test helpers `engine/tests/common/mod.rs` (`printed_cost`, `spell`),
+  `eoe_w2/mod.rs`, `eoe_w6_kit/mod.rs`, `rules_faithful_c.rs`, and one test in `rules_payment_b.rs`.
