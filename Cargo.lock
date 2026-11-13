@@ -37,6 +37,7 @@ name = "engine"
 version = "0.1.0"
 dependencies = [
  "card_ir",
+ "mimalloc",
  "serde",
  "serde_json",
  "zero_search",

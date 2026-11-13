@@ -121,6 +121,23 @@
 //! Show 60 (colourless spells, Emrakul's cast trigger), by seed. Constructed play's card table;
 //! every check of the default mode, and with 200 games or more each of the five must have been
 //! cast and a Consign to Memory aimed at a triggered ability. Games only (best-of-one).
+//! `FUZZ_POOL=cross` (ENGINE.md 148): the deck pairs on main no other pool plays. Games: the real
+//! Legacy Doomsday 60 against the real Sneak and Show 60 (seats by seed), constructed play's table,
+//! every check of the default mode, and with 200 games or more Doomsday and Show and Tell must have
+//! been cast. Matches: constructed best-of-three between the real 75s (`data/decks/`: each main and
+//! the sideboard cards this checkout supports, the rest named in the output) of every pair with
+//! Doomsday or Sneak and Show - Doomsday v Sneak and Show, Doomsday v Delver, Sneak and Show v
+//! Delver, each in both seats, and the two mirrors (`CROSS_PAIRS`, by `seed % 8`), one match in four
+//! 12-turn games - then as many post-sideboard matches, every check of `FUZZ_POOL=delver`'s matches.
+//!
+//! The information-set walks (ENGINE.md 148): two worlds `determinize` deals for a viewer, played on
+//! the same random actions while their keys, next decider and legal actions agree (zero-core's child
+//! signature), must agree on what the viewer sees: in games with open decklists the view and the
+//! viewer's whole layout v7 row (head, tail tokens, pointer overrides), for both viewers; in matches
+//! and hidden-decklist games the viewer's encoding. Equal keys also mean the game (in matches: the
+//! match and the episode) is over in both worlds or in neither. Each kind of walk counts the states it
+//! compared after a common action and prints them; the games' run (200 games or more) and the
+//! matches' (20 or more) need some.
 //! `FUZZ_POOL=eoe` (ENGINE.md 99): Edge of Eternities sealed, the set's own
 //! card table (`CardDb::eoe`): random 40-card decks of its supported cards
 //! (17 lands, 23 spells; games only, no matches).
@@ -400,6 +417,9 @@ enum PoolMode {
     /// `FUZZ_POOL=delver_sb` (ENGINE.md 122): the Delver sideboard's five
     /// cards in the Delver 60.
     DelverSb,
+    /// `FUZZ_POOL=cross` (ENGINE.md 148): the deck pairs no other pool plays -
+    /// Doomsday against Sneak and Show, and best-of-three between the real 75s.
+    Cross,
 }
 
 fn pool_mode() -> PoolMode {
@@ -419,7 +439,8 @@ fn pool_mode() -> PoolMode {
         Ok("sns") => PoolMode::Sns,
         Ok("names") => PoolMode::Names,
         Ok("delver_sb") => PoolMode::DelverSb,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"names\", \"delver_sb\", \"eoe\" or \"sealed\")"),
+        Ok("cross") => PoolMode::Cross,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"names\", \"delver_sb\", \"cross\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -446,9 +467,88 @@ fn dd_b_mode() -> bool {
 }
 
 /// Constructed play's table (`FUZZ_POOL=delver`, `dd_a`, `dd_b`, `dd_c`,
-/// `doomsday`, `sneak_show`, `sns`, `names` or `delver_sb`).
+/// `doomsday`, `sneak_show`, `sns`, `names`, `delver_sb` or `cross`).
 fn constructed_mode() -> bool {
-    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode() || names_mode() || delver_sb_mode()
+    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode() || names_mode() || delver_sb_mode() || cross_mode()
+}
+
+/// `FUZZ_POOL=cross` (ENGINE.md 148).
+fn cross_mode() -> bool {
+    pool_mode() == PoolMode::Cross
+}
+
+/// Constructed best-of-three matches: `FUZZ_POOL=delver`'s (ENGINE.md 120) or `cross`'s (ENGINE.md 148).
+fn constructed_bo3_mode() -> bool {
+    delver_mode() || cross_mode()
+}
+
+/// The real 75s on main (ENGINE.md 148): the Izzet Delver, Legacy Doomsday and Sneak and Show lists.
+fn real_75(k: usize) -> engine::az::constructed::Decklist {
+    use engine::az::constructed::Decklist;
+    match k {
+        0 => Decklist::izzet_delver(),
+        1 => Decklist::legacy_doomsday(),
+        _ => Decklist::parse(include_str!("../../data/decks/sneak_show_8014220.json")).unwrap(),
+    }
+}
+
+const REAL_75_NAMES: [&str; 3] = ["Delver", "Doomsday", "Sneak and Show"];
+
+/// A 75 as a constructed best-of-three spec takes it: the main's names and the sideboard cards
+/// this checkout supports (as `FUZZ_POOL=delver`'s matches; the rest left out, named by `cross_75_report`).
+fn bo3_lists(d: &engine::az::constructed::Decklist) -> (Vec<String>, Vec<String>) {
+    let db = CardDb::constructed();
+    let side = d.sideboard.iter().filter(|(_, n)| db.id(n).is_some()).flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect();
+    (d.main_names(), side)
+}
+
+/// `FUZZ_POOL=cross`'s pairings of the real 75s for matches (`real_75`): every pair with Doomsday or
+/// Sneak and Show, both seats, and their mirrors - none is another pool's best-of-three.
+const CROSS_PAIRS: [(usize, usize); 8] = [(1, 2), (2, 1), (1, 0), (0, 1), (2, 0), (0, 2), (1, 1), (2, 2)];
+
+/// `FUZZ_POOL=cross`'s match `seed` (ENGINE.md 148): constructed best-of-three between `CROSS_PAIRS[seed % 8]`'s 75s,
+/// one match in four (by `seed / 8`) 12-turn games; `extra` merged into the spec (the post-sideboard matches').
+fn cross_bo3_spec_with(seed: u64, extra: serde_json::Value) -> engine::az::MtgSpec {
+    let (p0, p1) = CROSS_PAIRS[(seed % 8) as usize];
+    let ((m0, s0), (m1, s1)) = (bo3_lists(&real_75(p0)), bo3_lists(&real_75(p1)));
+    let max_turns = if (seed / 8) % 4 == 3 { 12 } else { 60 };
+    let mut v = serde_json::json!({"max_turns": max_turns, "constructed": true, "format": "bo3",
+        "decks": {"p0": m0, "p1": m1, "p0_sideboard": s0, "p1_sideboard": s1}});
+    for (k, x) in extra.as_object().unwrap() {
+        v[k] = x.clone();
+    }
+    engine::az::MtgSpec::parse(&v.to_string()).unwrap_or_else(|e| panic!("match {seed}: {} against {}: {e}", REAL_75_NAMES[p0], REAL_75_NAMES[p1]))
+}
+
+/// The sideboard cards of the real 75s this checkout doesn't support (left out of `cross`'s 75s).
+fn cross_75_report() -> String {
+    let db = CardDb::constructed();
+    (0..3)
+        .map(|k| {
+            let d = real_75(k);
+            let out: Vec<String> = d.sideboard.iter().filter(|(_, n)| db.id(n).is_none()).map(|(k, n)| format!("{k} {n}")).collect();
+            format!("{}: {}", REAL_75_NAMES[k], if out.is_empty() { "the whole 75".to_string() } else { format!("without {}", out.join(", ")) })
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// `FUZZ_POOL=cross`'s games: spells of both decks seen on the stack (each stack item once).
+static CROSS_SEEN: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
+const CROSS_SPELLS: [&str; 5] = ["Doomsday", "Thassa's Oracle", "Show and Tell", "Sneak Attack", "Omniscience"];
+
+fn count_cross(g: &Game, seen: &mut Vec<u32>) {
+    for it in g.stack() {
+        if seen.contains(&it.id) {
+            continue;
+        }
+        seen.push(it.id);
+        if let engine::game::StackKind::Spell { card } = it.kind {
+            if let Some(k) = CROSS_SPELLS.iter().position(|&n| n == g.name(card)) {
+                CROSS_SEEN[k].fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
 }
 
 /// `FUZZ_POOL=names` (ENGINE.md 127).
@@ -2021,6 +2121,11 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     if names_mode() {
         return [(names_deck(&mut rng), Vec::new()), (names_deck(&mut rng), Vec::new())];
     }
+    if cross_mode() {
+        // (ENGINE.md 148) The Doomsday 60 against the Sneak and Show 60, seats by seed.
+        let (dd, sns) = ((doomsday_deck(), Vec::new()), (sneak_show_deck(), Vec::new()));
+        return if seed % 2 == 0 { [dd, sns] } else { [sns, dd] };
+    }
     if delver_sb_mode() {
         // Against Delver in either seat, the sideboarded mirror, or Sneak and Show.
         let sb = delver_sb_deck();
@@ -2176,6 +2281,9 @@ fn play(seed: u64, checks: bool) -> Played {
         if delver_sb_mode() && !g.stack().is_empty() {
             count_delver_sb(&g, &mut stack_seen);
         }
+        if cross_mode() && !g.stack().is_empty() {
+            count_cross(&g, &mut stack_seen);
+        }
         assert!(steps < 100_000, "seed {seed}: game does not end
 {}", g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
 "));
@@ -2241,8 +2349,12 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
         }
         // What the search does in that world: try every option.
         check_options_complete(&d, seed, &format!("a world determinized for P{viewer} (mover P{mover})"));
+        // The information-set walk for both viewers (ENGINE.md 148: the decider's only before); the other
+        // viewer's from a generator of its own, so the game's actions are the same as before.
         if viewer == mover {
             check_information_set(g, viewer, seed, rng);
+        } else {
+            check_information_set(g, viewer, seed, &mut Rng::new(seed ^ (g.decisions() as u64).wrapping_mul(0x9E37_79B9) ^ 0x15E7_0BE5));
         }
         let mut legal = Vec::new();
         let mut keys = Vec::new();
@@ -2355,11 +2467,38 @@ fn check_options_complete(g: &Game, seed: u64, world: &str) {
     }
 }
 
+/// The open-decklist information-set walks (`check_information_set`, ENGINE.md 148): walks begun, and
+/// the states compared after at least one common action (an equal view and an equal whole row of the
+/// viewer). The games' run prints both and, with 200 games or more, needs compared states: a walk that
+/// ended at its first action every time would pass silently otherwise.
+static IS_WALKS: AtomicU64 = AtomicU64::new(0);
+static IS_STEPS: AtomicU64 = AtomicU64::new(0);
+
+/// The first difference between two layout v7 rows (head, tail tokens, pointer overrides), bit for
+/// bit; None when they are equal.
+fn row_difference(x: &engine::az::tail_encode::Row, y: &engine::az::tail_encode::Row) -> Option<String> {
+    if let Some(i) = (0..x.head.len()).find(|&i| x.head[i].to_bits() != y.head[i].to_bits()) {
+        return Some(format!("head float {i}: {} / {}", x.head[i], y.head[i]));
+    }
+    let bits = |t: &[(u16, u32, Vec<f32>)]| -> Vec<(u16, u32, Vec<u32>)> { t.iter().map(|(g, s, v)| (*g, *s, v.iter().map(|f| f.to_bits()).collect())).collect() };
+    if bits(&x.tail) != bits(&y.tail) {
+        return Some(format!("tail tokens: {} / {}", x.tail.len(), y.tail.len()));
+    }
+    if x.ov != y.ov {
+        return Some(format!("pointer overrides: {:?} / {:?}", x.ov, y.ov));
+    }
+    None
+}
+
 /// Every revealed fact is keyed: two worlds `determinize(viewer)` samples,
 /// played with the same actions, stay indistinguishable to the viewer as
 /// long as the search would keep them in one node: zero-core keys children
 /// by (chance keys, next decider, next legal actions), so equal keys, an
-/// equal next decider and equal legal actions must mean an equal view.
+/// equal next decider and equal legal actions must mean an equal view and an
+/// equal whole row of the viewer (layout v7: head, tail tokens, pointer
+/// overrides; ENGINE.md 148 - the view alone was compared before, and 128's
+/// leak showed in the encoding only). The compared states are counted
+/// (`IS_STEPS`).
 fn check_information_set(g: &Game, viewer: u8, seed: u64, rng: &mut Rng) {
     let s = rng.next_u64();
     let mut a = g.clone();
@@ -2367,7 +2506,24 @@ fn check_information_set(g: &Game, viewer: u8, seed: u64, rng: &mut Rng) {
     let mut b = g.clone();
     b.determinize(viewer, &mut Rng::new(s ^ 0x5EED));
     let (mut la, mut lb) = (Vec::new(), Vec::new());
+    IS_WALKS.fetch_add(1, Ordering::Relaxed);
     for step in 0..25 {
+        // Equal keys: the game is over in both worlds or in neither (its end is public; ENGINE.md
+        // 148 - one world over used to end the walk silently, as a differing decider).
+        assert_eq!(
+            a.is_over(),
+            b.is_over(),
+            "seed {seed} step {step}: same keys, the game over in one world of P{viewer} only ({:?} / {:?})
+{}
+----
+{}",
+            a.outcome(),
+            b.outcome(),
+            a.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("
+"),
+            b.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("
+")
+        );
         a.legal_actions(&mut la);
         b.legal_actions(&mut lb);
         if a.to_move() != b.to_move() || la != lb {
@@ -2390,7 +2546,26 @@ fn check_information_set(g: &Game, viewer: u8, seed: u64, rng: &mut Rng) {
 "), b.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("
 "));
         if a.is_over() {
+            assert_eq!(a.outcome(), b.outcome(), "seed {seed} step {step}: same keys, different outcomes");
             return;
+        }
+        let (ra, rb) = (engine::az::tail_encode::Row::of(&a, viewer), engine::az::tail_encode::Row::of(&b, viewer));
+        if let Some(d) = row_difference(&ra, &rb) {
+            panic!(
+                "seed {seed} step {step}: same keys, different rows of P{viewer} ({d}); decisions {:?} / {:?}
+{}
+----
+{}",
+                a.pending_decision(),
+                b.pending_decision(),
+                a.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("
+"),
+                b.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("
+")
+            );
+        }
+        if step > 0 {
+            IS_STEPS.fetch_add(1, Ordering::Relaxed);
         }
         let act = la[rng.below(la.len() as u32) as usize];
         let (mut ka, mut kb) = (Vec::new(), Vec::new());
@@ -2512,6 +2687,17 @@ fn fuzz_random_games() {
     );
     if n >= 200 {
         assert!(GY_LISTS.load(Ordering::Relaxed) > 0, "no graveyard-list decision in {n} games");
+    }
+    // The information-set walks compared states (ENGINE.md 148): open decklists' (`check_information_set`) or
+    // hidden decklists' (`check_hidden_information_set`).
+    let (isw, iss, hds) = (IS_WALKS.load(Ordering::Relaxed), IS_STEPS.load(Ordering::Relaxed), HD_STEPS.load(Ordering::Relaxed));
+    println!("information sets (ENGINE.md 148): {isw} open-decklist walks, {iss} states compared after a common action (the view and the viewer's whole row); {hds} hidden-decklist steps");
+    if n >= 200 {
+        if hidden_decks_mode() {
+            assert!(hds > 0, "FUZZ_HIDDEN_DECKS: no information-set walk compared a state after a common action in {n} games");
+        } else {
+            assert!(isw > 0 && iss > 0, "no information-set walk compared a state after a common action in {n} games ({isw} walks)");
+        }
     }
     if let Some(c) = chance_every() {
         let (w, s, f, x) = (
@@ -2654,6 +2840,16 @@ fn fuzz_random_games() {
             assert!(seen[..5].iter().all(|&c| c > 0) && at > 0, "the five cards weren't played: {seen:?} {at}");
         }
     }
+    if cross_mode() {
+        let seen: Vec<u64> = CROSS_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
+        println!(
+            "FUZZ_POOL=cross: Doomsday against Sneak and Show; seen on the stack {}",
+            CROSS_SPELLS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
+        );
+        if n >= 200 {
+            assert!(seen[0] > 0 && seen[2] > 0, "Doomsday or Show and Tell never cast: {seen:?}");
+        }
+    }
 }
 
 #[test]
@@ -2687,6 +2883,9 @@ fn match_spec(seed: u64) -> engine::az::MtgSpec {
     }
     if delver_mode() {
         return delver_bo3_spec(seed);
+    }
+    if cross_mode() {
+        return cross_bo3_spec_with(seed, serde_json::json!({}));
     }
     if interactions_mode() {
         // Combo-dense lists (cube cards), best-of-three, open decklists;
@@ -2724,6 +2923,10 @@ fn delver_post_spec(seed: u64) -> engine::az::MtgSpec {
     let mut extra = serde_json::json!({"start_game": 2, "game_episodes": true});
     if seed % 3 == 2 {
         extra["keep_deck"] = serde_json::json!([(seed / 3) % 2]);
+    }
+    if cross_mode() {
+        // (`FUZZ_POOL=cross`, ENGINE.md 148: its pairings of the real 75s)
+        return cross_bo3_spec_with(seed, extra);
     }
     delver_bo3_spec_with(seed, extra)
 }
@@ -3016,9 +3219,26 @@ fn check_match_information_set(g: &engine::az::MtgAz, viewer: usize, seed: u64, 
     b.determinize(viewer, &mut zero_search::rng::Rng::new(s ^ 0x5EED));
     let (mut la, mut lb) = (Vec::new(), Vec::new());
     let (mut xa, mut xb): (Vec<f32>, Vec<f32>);
+    MATCH_IS_WALKS.fetch_add(1, Ordering::Relaxed);
     for step in 0..25 {
-        // (or a game's end with one episode per game, ENGINE.md 121: the episode is over)
-        if a.match_over() || b.match_over() || a.to_move().is_none() || b.to_move().is_none() {
+        // (or a game's end with one episode per game, ENGINE.md 121: the episode is over) Equal keys: the match,
+        // and the episode, over in both worlds or in neither (ENGINE.md 148: one world over returned silently).
+        let (ea, eb) = ((a.match_over(), a.to_move().is_none()), (b.match_over(), b.to_move().is_none()));
+        if ea != eb {
+            panic!(
+                "match {seed} step {step}: same keys, (match over, episode over) {ea:?} in one world of P{viewer}, {eb:?} in the other; game {} / {}, results {:?} / {:?}
+{}
+----
+{}",
+                a.m.game_no,
+                b.m.game_no,
+                a.m.results,
+                b.m.results,
+                stack_names(&a.g),
+                stack_names(&b.g)
+            );
+        }
+        if ea.0 || ea.1 {
             return;
         }
         a.legal_actions(&mut la);
@@ -3045,6 +3265,9 @@ fn check_match_information_set(g: &engine::az::MtgAz, viewer: usize, seed: u64, 
                 stack_names(&b.g)
             );
         }
+        if step > 0 {
+            MATCH_IS_STEPS.fetch_add(1, Ordering::Relaxed);
+        }
         let act = la[rng.below(la.len() as u32) as usize];
         let (mut ka, mut kb) = (Vec::new(), Vec::new());
         a.step(act, &mut ka).unwrap();
@@ -3054,6 +3277,12 @@ fn check_match_information_set(g: &engine::az::MtgAz, viewer: usize, seed: u64, 
         }
     }
 }
+
+/// The matches' information-set walks (`check_match_information_set`, ENGINE.md 148): walks begun and the states
+/// compared after at least one common action; the matches' run prints them and, over 20 matches or more, needs
+/// compared states.
+static MATCH_IS_WALKS: AtomicU64 = AtomicU64::new(0);
+static MATCH_IS_STEPS: AtomicU64 = AtomicU64::new(0);
 
 fn stack_names(g: &Game) -> String {
     let db = g.db();
@@ -3273,9 +3502,9 @@ fn play_match_spec(seed: u64, sp: &engine::az::MtgSpec, checks: bool, stats: &mu
 
 #[test]
 fn fuzz_random_matches() {
-    if constructed_mode() && !delver_mode() {
-        // (constructed best-of-three is the Delver mirror's: ENGINE.md 120; the other decks have no 75 here)
-        println!("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / names / delver_sb: games only (constructed best-of-three is FUZZ_POOL=delver's)");
+    if constructed_mode() && !constructed_bo3_mode() {
+        // (constructed best-of-three is the Delver mirror's, ENGINE.md 120, and the real 75s' of FUZZ_POOL=cross, ENGINE.md 148)
+        println!("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / names / delver_sb: games only (constructed best-of-three is FUZZ_POOL=delver's and cross's)");
         return;
     }
     if eoe_mode() {
@@ -3328,7 +3557,15 @@ fn fuzz_random_matches() {
     // (Over a chunk of matches; a single match's rerun, `FUZZ_MATCHES=1`,
     // passes when the match completes: ENGINE.md 51.)
     assert!(n < 20 || sb > 0 && changed > 0 && three > 0, "no sideboarding, changed deck or match of three");
-    if delver_mode() {
+    // The information-set walks compared states (ENGINE.md 148).
+    let (w, s) = (MATCH_IS_WALKS.load(Ordering::Relaxed), MATCH_IS_STEPS.load(Ordering::Relaxed));
+    println!("match information sets (ENGINE.md 148): {w} walks, {s} states compared after a common action");
+    assert!(n < 20 || s > 0, "no match information-set walk compared a state after a common action ({w} walks)");
+    if cross_mode() {
+        let pairs: Vec<String> = CROSS_PAIRS.iter().map(|&(a, b)| format!("{} v {}", REAL_75_NAMES[a], REAL_75_NAMES[b])).collect();
+        println!("FUZZ_POOL=cross matches: {} by seed % 8; the 75s: {}", pairs.join(", "), cross_75_report());
+    }
+    if constructed_bo3_mode() {
         // Constructed best-of-three (ENGINE.md 120): no first picks; the later games' decks hidden.
         println!(
             "constructed: {} worlds, the opponent's 60 hidden in {} ({} with another 60 than the real one), {} first sideboarders' choices dealt, {} deck-tilted worlds from the K cached decks",
@@ -3347,7 +3584,8 @@ fn fuzz_random_matches() {
 
 /// `FUZZ_POOL=delver`'s post-sideboard matches (ENGINE.md 130), the same seeds as its matches: `"start_game": 2`
 /// with one episode per game, one match in three a seat keeping its deck; every check of `play_match_spec` (the
-/// constructed worlds, the deck-tilted deals, the information sets, the later games' decks and choosers).
+/// constructed worlds, the deck-tilted deals, the information sets, the later games' decks and choosers). With
+/// `FUZZ_POOL=cross` (ENGINE.md 148) its matches' pairings of the real 75s, the same way.
 fn fuzz_post_sideboard_matches(first: u64, n: u64) {
     let (mut games, mut draws, mut decisions, mut sb, mut changed, mut three, mut aborted, mut kept) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
     let mut stats = HiddenStats::default();
@@ -3400,7 +3638,7 @@ fn replay_match(seed: u64, sp: &engine::az::MtgSpec, actions: &[u16]) -> (u64, [
 
 #[test]
 fn same_seed_and_actions_replay_matches_identically() {
-    if (constructed_mode() && !delver_mode()) || eoe_mode() || sealed_mode() {
+    if (constructed_mode() && !constructed_bo3_mode()) || eoe_mode() || sealed_mode() {
         return;
     }
     for seed in 2000..2012 {
@@ -3410,7 +3648,7 @@ fn same_seed_and_actions_replay_matches_identically() {
         assert_eq!(keys, a.keys, "match {seed}: chance keys differ");
         assert_eq!(play_match(seed, false).fingerprint, a.fingerprint);
         // the post-sideboard matches too (ENGINE.md 130)
-        if delver_mode() {
+        if constructed_bo3_mode() {
             let sp = delver_post_spec(seed);
             let a = play_match_spec(seed, &sp, false, &mut HiddenStats::default());
             let (fp, results, keys) = replay_match(seed, &sp, &a.actions);
@@ -3618,8 +3856,8 @@ fn play_hidden(seed: u64) -> Played {
     // (Show and Tell's face-down pick reaches a hidden deck's request, which only the constructed prior
     // conditions on: the table's refuses it, ENGINE.md 129.3. Its decks play constructed best-of-three.)
     assert!(
-        !(sns_mode() || delver_sb_mode()),
-        "FUZZ_HIDDEN_DECKS=1 with a pool that casts Show and Tell (sneak_show, sns, delver_sb): the table's prior cannot condition a deck on its face-down pick (ENGINE.md 129.3)"
+        !(sns_mode() || delver_sb_mode() || cross_mode()),
+        "FUZZ_HIDDEN_DECKS=1 with a pool that casts Show and Tell (sneak_show, sns, delver_sb, cross): the table's prior cannot condition a deck on its face-down pick (ENGINE.md 129.3)"
     );
     let [(d0, s0), (d1, s1)] = decks(seed);
     let log = std::env::var("FUZZ_LOG").is_ok();
@@ -3828,6 +4066,8 @@ fn check_hidden_information_set(a: &engine::az::MtgAz, viewer: u8, seed: u64, rn
     y.determinize(viewer as usize, &mut zero_search::rng::Rng::new(s ^ 0x5EED));
     let (mut bx, mut by) = (Vec::new(), Vec::new());
     for step in 0..25 {
+        // (equal keys: the game over in both worlds or in neither, ENGINE.md 148)
+        assert_eq!(x.to_move().is_none(), y.to_move().is_none(), "seed {seed} step {step}: same keys, the game over in one world of P{viewer} only");
         let (lx, ly) = (az_legal(&x), az_legal(&y));
         if x.to_move() != y.to_move() || lx != ly {
             let v = Some(viewer as usize);
