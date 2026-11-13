@@ -229,7 +229,7 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use engine::rules_check::{MatchCheck, RulesCheck};
 
 thread_local! {
-    /// The rules checks' counts of this test (ENGINE.md 131; each test runs on a thread of its
+    /// The rules checks' counts of this test (ENGINE.md 150; each test runs on a thread of its
     /// own): each game's, match's and world's `RulesCheck` adds its own as it ends.
     static RULES: std::cell::RefCell<engine::rules_check::Stats> = std::cell::RefCell::new(Default::default());
 }
@@ -239,7 +239,7 @@ fn rules_add(s: &engine::rules_check::Stats) {
 }
 
 fn rules_report() -> String {
-    format!("rules checks (ENGINE.md 131, CR {}): {}", engine::rules_check::CR_EDITION, RULES.with(|r| *r.borrow()))
+    format!("rules checks (ENGINE.md 150, CR {}): {}", engine::rules_check::CR_EDITION, RULES.with(|r| *r.borrow()))
 }
 
 /// A game's last log lines (for a rules check's failure).
@@ -248,7 +248,7 @@ fn log_tail(g: &Game, n: usize) -> String {
 }
 
 thread_local! {
-    /// The rules checks' violations of this test (ENGINE.md 131): (rule, where and what, the
+    /// The rules checks' violations of this test (ENGINE.md 150): (rule, where and what, the
     /// game's log). A violation is recorded and its game checked no further (`RulesCheck` stops);
     /// the test plays on and fails at its end (`rules_verdict`), so one run counts every
     /// violation of its seeds.
@@ -259,7 +259,7 @@ fn rules_fail(e: engine::rules_check::Violation, what: String, log: String) {
     RULES_FAILS.with(|f| f.borrow_mut().push((e.rule, format!("{what}: {e}"), log)));
 }
 
-/// The rules checks of a step (ENGINE.md 131): a violation is recorded with `what` and the
+/// The rules checks of a step (ENGINE.md 150): a violation is recorded with `what` and the
 /// game's log.
 fn rules_step(rc: &mut RulesCheck, g: &Game, what: &dyn Fn() -> String) {
     if let Err(e) = rc.step(g) {
@@ -2178,7 +2178,7 @@ fn play(seed: u64, checks: bool) -> Played {
     // (`FUZZ_POOL=names`: the namers counted and the stack items seen, ENGINE.md 127.)
     let (mut names_named, mut names_seen): (Vec<engine::ids::ObjRef>, Vec<u32>) = (Vec::new(), Vec::new());
     let (mut turn, mut turn_steps) = (g.turn().number, 0u64);
-    // The rules checks (ENGINE.md 131), after every step.
+    // The rules checks (ENGINE.md 150), after every step.
     let mut rc = checks.then(|| RulesCheck::new(&g));
     if let Some(rc) = rc.as_mut() {
         rules_step(rc, &g, &|| format!("seed {seed} (its first state)"));
@@ -2350,7 +2350,7 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
         }
         let mut legal = Vec::new();
         let mut keys = Vec::new();
-        // (The world's own rules checks, ENGINE.md 131: its cards are the world's.)
+        // (The world's own rules checks, ENGINE.md 150: its cards are the world's.)
         let mut rc = RulesCheck::new(&d);
         rules_step(&mut rc, &d, &|| format!("seed {seed}: a world determinized for P{viewer}"));
         for _ in 0..30 {
@@ -3222,7 +3222,7 @@ fn play_match_spec(seed: u64, sp: &engine::az::MtgSpec, checks: bool, stats: &mu
     let (mut sideboard_decisions, mut changed_decks, mut sideboardings) = (0u32, 0u32, 0u32);
     let mut decks = [g.m.decks[0].clone(), g.m.decks[1].clone()];
     let mut game_no = 1;
-    // The rules checks of each game (ENGINE.md 131), after every step.
+    // The rules checks of each game (ENGINE.md 150), after every step.
     let mut mc = MatchCheck::new();
     if checks {
         rules_match_step(&mut mc, &g, &|| format!("match {seed} (its first state)"));

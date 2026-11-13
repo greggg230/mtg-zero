@@ -65,7 +65,7 @@ fn transition(g: &mut TeamDraftAz, a: u16, keys: &mut Vec<u64>) {
 fn finish_random(g: &mut TeamDraftAz, rng: &mut Rng) -> u64 {
     let mut keys = Vec::new();
     let mut n = 0;
-    // (The limited format's rules, ENGINE.md 131, at every step.)
+    // (The limited format's rules, ENGINE.md 150, at every step.)
     let mut dc = engine::rules_check::DraftCheck::new();
     dc.step(g).unwrap_or_else(|e| panic!("{e}"));
     while g.to_move().is_some() {
@@ -1107,7 +1107,7 @@ fn fuzz_random_events() {
     let mut match_panics: Vec<String> = Vec::new();
     // decks, their pool cards, card choices (DONE offered at) by minimum: the default / other
     let mut decks = [[0u64; 4]; 2];
-    // The rules checks (ENGINE.md 131): the draft's at every step, every heuristic-played match's
+    // The rules checks (ENGINE.md 150): the draft's at every step, every heuristic-played match's
     // games at every step (a violation is recorded with the match and fails the test at the end).
     let (mut draft_checks, mut rules_fails) = ((0u64, 0u64), Vec::new());
     let mut match_rules = engine::rules_check::Stats::default();
@@ -1263,7 +1263,7 @@ fn fuzz_random_events() {
         println!("MTG ENGINE PANIC in a heuristic-played match: {p}");
     }
     println!(
-        "rules checks (ENGINE.md 131): {} picks and {} finished decks of the events checked (CR 100.2b, 100.4b); heuristic-played matches: {match_rules}",
+        "rules checks (ENGINE.md 150): {} picks and {} finished decks of the events checked (CR 100.2b, 100.4b); heuristic-played matches: {match_rules}",
         draft_checks.0, draft_checks.1
     );
     for f in &rules_fails {

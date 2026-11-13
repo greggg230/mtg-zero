@@ -1,6 +1,6 @@
 # Rules-check findings
 
-Engine rules bugs found by the rule-derived invariants (`engine/src/rules_check.rs`, `docs/ENGINE.md` 131)
+Engine rules bugs found by the rule-derived invariants (`engine/src/rules_check.rs`, `docs/ENGINE.md` 150)
 and while writing them. None is fixed on branch `fuzz-invariants` (its behaviour digests equal main's): each
 has a repro test in `rules_check::tests`, `#[ignore]`d, that asserts what the Comprehensive Rules require and
 fails on the engine as it is:

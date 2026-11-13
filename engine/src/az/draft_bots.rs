@@ -179,7 +179,7 @@ pub fn play_match_heuristic(setup: &MatchSetup, max_turns: u32, format: Format, 
 }
 
 /// [`play_match_heuristic`], calling `each` with the match's first state and
-/// after every step (the draft fuzz's rules checks, ENGINE.md 131); the
+/// after every step (the draft fuzz's rules checks, ENGINE.md 150); the
 /// match is the same.
 pub fn play_match_heuristic_with(setup: &MatchSetup, max_turns: u32, format: Format, seed: u64, i: usize, each: &mut dyn FnMut(&MtgAz)) -> Result<MatchResult, String> {
     let mut az = match_game(setup, max_turns, format)?;

@@ -1,4 +1,4 @@
-//! Rules invariants (ENGINE.md 131): facts the Comprehensive Rules require
+//! Rules invariants (ENGINE.md 150): facts the Comprehensive Rules require
 //! of every reachable state, checked by the fuzz loops after every step.
 //!
 //! The fuzzer's other checks (`testkit::check_invariants`, the information
@@ -15,7 +15,7 @@
 //! Exactness (the owner's rule: no approximations). Every check holds for
 //! every state the rules allow, with every exception they make; a check
 //! whose exception could not be decided exactly from the state is not here
-//! (ENGINE.md 131.3 lists them and why). Checks that compare two states seen
+//! (ENGINE.md 150.3 lists them and why). Checks that compare two states seen
 //! one step apart apply only where the rules fix the outcome between them:
 //! when no spell or ability resolved in between or was resolving at either
 //! state (so no effect was created), a property the rules let only effects
@@ -917,7 +917,7 @@ fn new_items_stayed(p: &Snap, g: &Game) -> bool {
     new == (g.next_stack_id - p.next_stack_id) as u64
 }
 
-/// Rules invariants over a game, step by step (ENGINE.md 131). Make it at
+/// Rules invariants over a game, step by step (ENGINE.md 150). Make it at
 /// the game's start (or at any state: the conservation checks compare with
 /// that state), call [`step`](Self::step) after every `apply`.
 #[derive(Clone, Debug)]
