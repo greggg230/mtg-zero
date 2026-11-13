@@ -459,7 +459,9 @@ at once (704.5e, section 26.4).
   top N of a library, top first; another hand, in definition order); `KEY_AUTO(player,
   kind << 16 | action)` (public) when the engine answers a single-option decision itself
   (`auto_single`): no search node sees that decision, and that its decider had no
-  alternative can depend on hidden cards (no castable instant in hand). Layout: kind in bits
+  alternative can depend on hidden cards (no castable instant in hand); tree reuse follows the
+  observation, not this key: another player's pass is observed alike, forced or chosen
+  (section 149). Layout: kind in bits
   56-63, player in bits 48-55, payload in the low bits. `KEY_GAME` (public; best-of-three:
   emitted by the match as a later game begins, the decks' and sideboards' sizes, section 36.11).
   Shuffles, random orders and token creation emit nothing (they reveal nothing; the next draw is keyed).
