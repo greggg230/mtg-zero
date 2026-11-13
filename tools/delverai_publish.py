@@ -84,8 +84,17 @@ yardstick's results (`mtgz.az.keep_h2h`, ENGINE.md 130.3: a generation sideboard
 each file DIR/keep_NNNN.txt ends with its JSON line) as the record's `keep_yardstick` rows - the per-game win rate of
 the side that sideboards, its se and games, and the match score. Files of another run's checkpoints are left out.
 
-`--state-dir DIR`: the publisher's own files (delverai.json: the recorded generations; replays/: the recorded games)
-there instead of in the run's directory.
+A best-of-three run's sideboard census (`--census N`, default 200 starts; 0: none; docs/ENGINE.md 132,
+`mtgz.az.sideboard_census`): after each recorded generation's matches, N synthetic post-sideboard starts of it in
+which the network makes every sideboarding decision of both players and the play-or-draw choice, searching as the
+recorded matches do, no game played. Each player's 60 against the main, split by play / draw (and chooser / not):
+per card the distribution of its copy change. Kept in census/census_NNNN.json beside delverai.json; the record's
+`sideboard_census` is the newest one. The newest recorded generation without a census gets one at the next pass (a
+publisher started on a generation recorded before it); a census that fails is logged and not tried again for that
+generation.
+
+`--state-dir DIR`: the publisher's own files (delverai.json: the recorded generations; replays/: the recorded games;
+census/: the sideboard censuses) there instead of in the run's directory.
 """
 import argparse
 import glob
@@ -101,7 +110,7 @@ import traceback
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from mtgz.az import decklists, replays  # noqa: E402
+from mtgz.az import decklists, replays, sideboard_census  # noqa: E402
 from zero import elo as zelo, runctl  # noqa: E402
 
 SETTINGS = ('preset', 'iters', 'games', 'sims', 'sims_fast', 'p_full', 'sims_minor', 'temp_moves', 'arch', 'hidden',
@@ -297,8 +306,9 @@ def _eval_seconds(m, e):
     return None
 
 
-# This publisher's recording in progress (set by one_pass, read by the progress thread).
+# This publisher's recording and sideboard census in progress (set by one_pass, read by the progress thread).
 RECORDING = {}
+CENSUS = {}
 
 
 def _last(rows, f):
@@ -340,11 +350,14 @@ def now_record(run, cfg, prog, rows, state):
             out['evaluating'] = {'iter': last['iter'], 'since': prog.get('time'), 'host': None}
     if RECORDING:
         out['recording'] = dict(RECORDING)
+    if CENSUS:
+        out['census'] = dict(CENSUS)
     out['est'] = {
         'selfplay_s': _last(rows, lambda r: (r.get('phases') or {}).get('selfplay_s')),
         'train_s': _last(rows, lambda r: (r.get('phases') or {}).get('train_s')),
         'eval_s': _last(rows, lambda r: r.get('eval_s')),
         'record_s': (state.get('record_s') or [None])[-1],
+        'census_s': (state.get('census_s') or [None])[-1],
     }
     return out
 
@@ -725,6 +738,7 @@ def progress(run, every=1, forks=None, extra=None, state_dir=None, yardstick=Non
     lin = lineage_record(run, forks or {})
     fmt, start = match_format(cfg)
     offset = lin['segments'][-1]['offset'] if lin else 0
+    census = newest_census(state_dir or run) if fmt == 'bo3' else None
     return dict({
         'run': os.path.basename(os.path.abspath(run)), 'updated': time.time(),
         'state': st.get('state'), 'detail': st.get('detail'), 'paused_since': st.get('paused_since'),
@@ -740,7 +754,76 @@ def progress(run, every=1, forks=None, extra=None, state_dir=None, yardstick=Non
         **({'start_game': start} if fmt == 'bo3' else {}),
         **({'forked_from': forked_from(segs, forks or {})} if segs[0].get('broke_from') else {}),
         **({'keep_yardstick': keep_yardstick(yardstick, os.path.basename(os.path.abspath(run)))} if yardstick else {}),
+        **({'sideboard_census': census} if census else {}),
     }, **(extra or {}))
+
+
+CENSUS_DIR = 'census'
+# the record's census fields (no paths: the run's name, the device and the simulation count left out)
+CENSUS_KEYS = ('iter', 'starts', 'sims', 'select', 'seed', 'seconds', 'time', 'chose_play', 'play', 'draw', 'chooser',
+               'other')
+
+
+def census_path(state_dir, it):
+    return os.path.join(state_dir, CENSUS_DIR, f'census_{it:04d}.json')
+
+
+def newest_census(state_dir):
+    """The newest sideboard census in `state_dir`/census (census_NNNN.json, `mtgz.az.sideboard_census`) as the
+    record's `sideboard_census` (CENSUS_KEYS), else None."""
+    best = None
+    for f in glob.glob(os.path.join(state_dir, CENSUS_DIR, 'census_*.json')):
+        m = re.search(r'census_(\d+)\.json$', f)
+        if m and (best is None or int(m.group(1)) > best[0]):
+            best = (int(m.group(1)), f)
+    rec = _json(best[1]) if best else None
+    return {k: rec[k] for k in CENSUS_KEYS if k in rec} if isinstance(rec, dict) else None
+
+
+def census_pass(run, a, state, state_path, log=print, kick=None):
+    """A best-of-three run's sideboard census of its newest recorded generation when it has none yet (`a.census`
+    starts; docs/ENGINE.md 132) -> True when one was made. A failure is logged with its traceback and that generation
+    is not tried again (the state's `census_failed`)."""
+    if not a.census or match_format(_json(os.path.join(run, 'config.json'), {}) or {})[0] != 'bo3':
+        return False
+    done = state.get('replayed') or []
+    if not done:
+        return False
+    it = max(done)
+    out = census_path(a.state_dir or run, it)
+    ck = os.path.join(run, 'models', f'iter_{it:04d}.pt')
+    if os.path.exists(out) or it in (state.get('census_failed') or []) or not os.path.exists(ck):
+        return False
+    log(f'sideboard census of generation {it}: {a.census} starts')
+    t0 = time.time()
+    CENSUS.update(iter=it, since=t0, starts=a.census)
+    if kick:
+        kick.set()
+    try:
+        rec = sideboard_census.census(ck, starts=a.census, sims=getattr(a, 'sims', None), device=a.device, log=log)
+    except Exception:
+        log(f'sideboard census of generation {it} FAILED (not tried again):\n' + traceback.format_exc())
+        state['census_failed'] = sorted(set(state.get('census_failed') or []) | {it})
+        _save_state(state, state_path)
+        return False
+    finally:
+        CENSUS.clear()
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out + '.tmp', 'w', encoding='utf-8') as f:
+        json.dump(rec, f, separators=(',', ':'))
+    os.replace(out + '.tmp', out)
+    log(sideboard_census.describe(rec, top=4))
+    state['census_s'] = (state.get('census_s') or [])[-9:] + [round(time.time() - t0, 1)]
+    _save_state(state, state_path)
+    if kick:
+        kick.set()
+    return True
+
+
+def _save_state(state, state_path):
+    with open(state_path + '.tmp', 'w', encoding='utf-8') as f:
+        json.dump(state, f)
+    os.replace(state_path + '.tmp', state_path)
 
 
 def latest_checkpoint(run, every=1, settle_s=30):
@@ -850,6 +933,9 @@ def one_pass(run, a, key, log=print, kick=None):
     state = _json(state_path, {}) or {}
     done = state.get('replayed', [])
     if ck is None or ck[0] in done or (a.min_iter is not None and ck[0] < a.min_iter):
+        # (the newest recorded generation's census when it has none: e.g. recorded before this publisher started)
+        if census_pass(run, a, state, state_path, log, kick) and not kick:
+            post_progress(run, a, key, log)
         return False
     it, path = ck
     what = 'matches' if match_format(_json(os.path.join(run, 'config.json'), {}) or {})[0] == 'bo3' else 'games'
@@ -873,12 +959,11 @@ def one_pass(run, a, key, log=print, kick=None):
             log(f'  uploaded {replays.upload(r, a.url, key, meta=meta)}')
     state['replayed'] = sorted(set(done) | {it})
     state['record_s'] = (state.get('record_s') or [])[-9:] + [round(time.time() - t0, 1)]
-    with open(state_path + '.tmp', 'w', encoding='utf-8') as f:
-        json.dump(state, f)
-    os.replace(state_path + '.tmp', state_path)
+    _save_state(state, state_path)
     if kick:              # the progress record lists the recorded generations
         kick.set()
-    else:
+    census_pass(run, a, state, state_path, log, kick)       # (its matches are up first, then what it sideboards)
+    if not kick:
         post_progress(run, a, key, log)
     return True
 
@@ -933,7 +1018,10 @@ def main(argv=None):
     ap.add_argument('--keep-yardstick', default=None, metavar='DIR',
                     help="a best-of-three run's keep-your-60 yardstick results (DIR/keep_NNNN.txt, mtgz.az.keep_h2h)")
     ap.add_argument('--state-dir', default=None, metavar='DIR',
-                    help="this publisher's files (delverai.json, replays/) here instead of in the run's directory")
+                    help="this publisher's files (delverai.json, replays/, census/) here instead of in the run's directory")
+    ap.add_argument('--census', type=int, default=sideboard_census.STARTS, metavar='N',
+                    help=f"a best-of-three run: the sideboard census's starts for each recorded generation (default "
+                         f"{sideboard_census.STARTS}; 0: none)")
     a = ap.parse_args(argv)
     if a.record_vs and not os.path.isfile(a.record_vs):
         raise SystemExit(f'--record-vs {a.record_vs}: no such checkpoint')
