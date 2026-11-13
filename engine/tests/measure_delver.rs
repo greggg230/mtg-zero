@@ -13,8 +13,9 @@ use engine::az::{MtgAz, MtgSpec};
 use engine::rng::Rng;
 use zero_search::game::SearchGame;
 
-// The Python module's allocator (py/Cargo.toml), not the Windows heap: allocation-heavy parts measured as a run
-// sees them (ENGINE.md 145; numbers in sections before it were taken on the system heap).
+// The module's allocator (`py/src/lib.rs`): timings as `mtgz._engine` runs, not the system heap
+// (ENGINE.md 145, 148: the review measured 92 against 67 us a simulation, `decide` 489 against 59 us; numbers in
+// sections before 145 were taken on the system heap).
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

@@ -28914,7 +28914,7 @@ failed, 25 ignored**. That includes `--test az` (the public-state gate: `public_
 1. **The open-decklist information-set check compares `view_of` only.** `view_of` leaves out the agenda's cards, which
    is why only the hidden-decklist mode, which compares encodings too, found this bug. Comparing encodings in the
    open mode's `check_information_set` as well would cover the open modes the same way. That is test code; it was
-   not changed here.
+   not changed here. (Done in 148.2: the open mode compares the viewer's whole row and counts its compared states.)
 2. **Told-apart twins share one slot.** A card revealed for miracle and an unrevealed twin of it are different
    choices in the rules, but the engine offers one slot per definition. The slot now takes the revealed one
    (before, the one with the lower card index); casting or discarding the other while the trigger waits isn't
@@ -29920,6 +29920,210 @@ The lowering takes either form.
   after this branch.
 * Other lanes' files touched: the shared test helpers `engine/tests/common/mod.rs` (`printed_cost`, `spell`),
   `eoe_w2/mod.rs`, `eoe_w6_kit/mod.rs`, `rules_faithful_c.rs`, and one test in `rules_payment_b.rs`.
+
+## 148. Check gaps: digests beyond the cube table, the fuzz's information-set holes, the cross-deck pool, benchmarks on the module's allocator (branch `fix/check-gaps`, 2026-11-12)
+
+**Why.** The Fable review of `e81f8304..267ae603` (`SUMMARY.md`, "Check and metric gaps"; `hidden.md` I2, I4; `perf.md`
+bug 3 and section 4) found checks that could not see the bugs they were meant to catch: the behaviour digests (15) play
+the cube's table only, so nothing hashed constructed play, a best-of-three match, the EoE table or zero-core's driver;
+the fuzz's open-decklist information-set check compared `view_of` only and counted nothing (128.8 (1): 128's leak showed
+in the encoding only), and the matches' check returned silently when one world had ended; no pool paired Doomsday with
+Sneak and Show; and the cargo-test benchmarks ran on the Windows heap while `mtgz._engine` runs on mimalloc. Checks
+only: **no engine change**, the recorded digests (`engine/tests/data/digests.txt`) are **EQUAL**.
+
+### 148.1 Digests beyond the cube table (`engine/tests/digest_formats.rs`)
+
+`cargo test --release -p engine --test digest_formats -- --ignored --nocapture` runs three digests at once, each against
+its recorded file in `engine/tests/data/`, each printing one line `<name>: ... combined digest <16 hex>`;
+`DIGEST_WRITE=1` records instead (only when behaviour is meant to change: state old -> new, as for `digests.txt`).
+`DIGEST_ENCODING=0` leaves the encodings out of the first two and prints their combined digests only;
+`DIGEST_LINES=<dir>` writes every line there too.
+
+* **`constructed_digests`** (`digests_constructed.txt`, 570 lines): the Delver best-of-three preset's spec
+  (`delver-mirror-bo3`: post-sideboard games only, one episode per game) - 150 matches of random play, 50 of `MtgAz`'s
+  heuristic (which keeps its deck) against random play -, 50 of the same spec from game 1 (`start_game` 1: the mains,
+  then sideboarding), 50 with a seat keeping its deck (`keep_deck`, 130's yardstick), and 270 best-of-one games of the
+  real 60s (`data/decks/`: Delver, Doomsday, Sneak and Show, all nine seatings by `seed % 9`; 90 of them the heuristic
+  against random play).
+* **`eoe_digests`** (`digests_eoe.txt`, 160 lines): `mtg_eoe` games of the EoE presets' sealed spec (`eoe-1`: arena
+  pools, `best_share` 0.5, hidden decklists dealt by the sealed prior) - 100 random, 40 heuristic against random - and
+  20 of run 2's spec (`eoe-2`: the deck choice among 32 candidates, played at random).
+* Per game or match both hash, decision by decision, the decider, the pending decision (a game's kind and player, a
+  sideboarding's decider and kind, a deck choice), the legal actions, the action and the chance keys; every 10th
+  decision the decider's encoding (`mtg`: the whole layout v7 row - head, tail tokens, pointer overrides, hashed from
+  the row's parts, not `Row::flat`; `mtg_eoe`: its layout v6 floats); every 20th the decider's auxiliary targets and a
+  world `determinize` deals it (its decision, both players' hand and library identities in order, both decks, the other
+  player's encoding there, five random actions played on); every 40th a world `determinize_with` deals by a random
+  belief (the hand's tilt every other time, the deck's where decks are hidden: the constructed prior's K decks, the
+  sealed prior) with its identities and decks; each game's end, each next episode and the match's results.
+* **`driver_digest`** (`digests_driver.txt`, 21 lines: a checkpoint every 1,000 batches and the final hash): the
+  review's driver hash (`perf-patches/zz_perf.rs`) made a test. zero-core's `Driver<MtgAz>` on the preset's spec, a
+  self-play seat as the live run's but with fewer simulations (16, 8 in a fast search at `p_full` 0.25, 4 for a minor
+  decision; the completed-Q target, the evaluation cache 8192, root-view leaves with view samples 0.5, the belief tilt 1
+  with the deck's 1 and mix 0.25, resignation at 0.02), 2 groups of 8 games, an instantaneous evaluator (a peaked prior,
+  0.85 on the first option; value 0.5; uniform auxiliary predictions), 20,000 batches. Every batch's fields (rows as
+  sparse non-zeros, options, tail tokens, overrides, row kinds, games), every sample (its features as non-zero (index,
+  value) pairs - a sparse record hashes as a dense one, so zero-core's records-as-non-zeros (the review's P5) keeps it
+  -, options, policy and value targets, auxiliary targets, tail, overrides) and every result (with its episodes) are
+  hashed in the order the driver hands them out. The test needs samples and results (a hash of searches alone would miss
+  the records). The run: 20,000 batches, 90,491 rows, 85,674 simulations (51,316 evaluation-cache hits, 10,061 view
+  rows, 2,159 root belief rows), 1,251 samples (the first at batch 7,532, when the first matches end) and 5 results.
+  **The hash is the same at 2, 4 and 7 threads** (837d42c28214befe each time; the review saw the same at 5 and 8): the
+  driver hands batches, samples and results out in an order that does not depend on its threads. About 5 s.
+* **The specs** are copies of the presets' (`engine/tests/data/digest_specs.json`); `tests/test_digest_specs.py` keeps
+  them equal to `mtgz.az`'s `SPEC_DELVER_BO3`, `SPEC_EOE` and `SPEC_EOE_CHOICE` (and the presets'). A preset change that
+  alters one fails it: copy the spec and re-record that digest.
+* **Recorded at 267ae603's behaviour** (this branch changes no engine code): constructed **63f58560ad7b3df0**, EoE
+  **b36df9098a38d794**, driver **837d42c28214befe**. Time on the shared desktop: constructed 27-29 s, EoE 38-39 s, the
+  driver 5 s, at once (about 40 s wall). `DIGEST_ENCODING=0`: constructed 7ace0291619aa36f, EoE 52bb9c00a23d24d3. Each
+  compared again after recording: equal.
+* **Not in `tools/gate.py`.** Wiring a third digest step needs gate.py's `digest_steps` and its test's fake runner
+  (`tests/test_gate.py` classifies any `--test` other than `digest` as a plain cargo test, so the encoding, engine and
+  repin tier tests would fail), which lane C1 owns. What the step needs: `cargo test --release -p engine --test
+  digest_formats -- --ignored --nocapture` with the caller's `DIGEST_*` scrubbed (as now); positive evidence = exactly
+  three lines matching `^(constructed|eoe|driver): .*; combined digest ([0-9a-f]{16})\s*$`, "test result: ok. 3 passed",
+  no `^wrote .*digests_` line, exit 0. The test compares with the checkout's own recorded files, so the step needs no
+  new flag; reporting the three digests in the gate's report would let a merge note quote them.
+
+### 148.2 The fuzz's information-set walks (`engine/tests/fuzz.rs`)
+
+* **Open decklists (`check_information_set`; 128.8 (1), `hidden.md` I2).** At every state the walk compares (equal keys,
+  decider and legal actions) it now compares the viewer's whole layout v7 row (`Row::of`: head, tail tokens and pointer
+  overrides, bit for bit; `row_difference`) besides `view_of`, and the outcome when the game is over. It runs for both
+  viewers at each checkpoint (the decider's before; the other viewer's walk draws from a generator of its own, so the
+  fuzzed games' actions are unchanged). It counts its walks and the states compared after at least one common action
+  (`IS_WALKS`, `IS_STEPS`); `fuzz_random_games` prints them ("information sets (ENGINE.md 148): ...") and with 200 games
+  or more fails without compared states (with `FUZZ_HIDDEN_DECKS=1`, without hidden-decklist steps, `HD_STEPS`).
+* **One world over (`hidden.md` I4).** After equal keys the game - in a match the match and the episode - is over in
+  both worlds or in neither: the three walks assert it (the matches' returned silently when only one world had ended,
+  the games' treated a game over in one world as a differing decider). A decision with one option is keyed (`KEY_AUTO`,
+  10), so a world whose game ran on to its end through an auto-answered decision has other keys than one that stops at
+  that player's decision: equal keys with one world over is an unkeyed difference.
+* **The matches' walks are counted too** (`MATCH_IS_WALKS`, `MATCH_IS_STEPS`): `fuzz_random_matches` prints them and,
+  over 20 matches or more, fails without compared states.
+* **Failure messages** (commit 9c4c7b30 and the last commit): a walk's failure names the checkpoint's decider and the
+  walk's viewer, both worlds' pending decisions, the walk's actions as each world describes them, each stack item's
+  references (an ability's source, the event's objects: slot, incarnation, live, zone, card, known to the viewer) and,
+  for rows, the first differing head float or tail token (segment, slot, float); the matches' deck-tilted encoding check
+  names the floats, the decision and the stack references. Messages only.
+* Not here: lane A2's check that a world's private keys are masked (`hidden.md` I3), and replaying world a's keys into
+  world b (`force_chance`) so walks survive draws (I2's last suggestion: the walks still end at the first differing key,
+  usually the viewer's own draw).
+
+### 148.3 `FUZZ_POOL=cross`: the deck pairs no pool played
+
+The decks on main are the Delver, Doomsday and Sneak and Show 75s (`data/decks/`). Games of Doomsday against Delver,
+Sneak and Show against Delver and the mirrors had pools (`doomsday`, `sneak_show`, `delver_sb`); Doomsday against Sneak
+and Show had none, and no pool played best-of-three with any 75 but Delver's (and `OTHER_75`). `FUZZ_POOL=cross`:
+
+* **Games**: the real Doomsday 60 against the real Sneak and Show 60, seats by `seed % 2`, constructed play's table,
+  every check of the default mode; with 200 games or more Doomsday and Show and Tell must have been cast (it prints
+  Doomsday, Thassa's Oracle, Show and Tell, Sneak Attack and Omniscience seen on the stack).
+* **Matches**: constructed best-of-three between the real 75s (each main and the sideboard cards this checkout supports,
+  as `FUZZ_POOL=delver`'s matches; the output names the ones left out) of every pair with Doomsday or Sneak and Show:
+  Doomsday v Sneak and Show, Doomsday v Delver, Sneak and Show v Delver, each in both seats, and the two mirrors
+  (`CROSS_PAIRS`, `seed % 8`), one match in four 12-turn games; then as many post-sideboard matches (`"start_game": 2`,
+  one episode per game, one in three a seat keeping its deck). Every check of the Delver matches: the constructed worlds
+  (`check_constructed_world`), the deck-tilted deals, the information sets, the later games' decks and choosers, and the
+  hidden 60s dealt (the same thresholds).
+* `FUZZ_HIDDEN_DECKS=1` is refused with it (Show and Tell's pick, 129.3).
+
+### 148.4 Benchmarks on the module's allocator
+
+`py/src/lib.rs` makes mimalloc `mtgz._engine`'s global allocator; the cargo-test benchmarks ran on the system heap,
+which the review measured at 92 against 67 us a driver simulation and 489 against 59 us a recorded decision (`perf.md`
+bug 3). `engine/Cargo.toml` takes `mimalloc` (the module's version, already in `Cargo.lock`) as a dev-dependency, and
+`tests/perf.rs`, `tests/measure_delver.rs` and `tests/digest_formats.rs` set it as their global allocator. Other test
+binaries keep the system heap (their timings are incidental); a benchmark added later sets it the same way. Numbers in
+sections before 148 from those tests (17 onwards, 54.6) are system-heap numbers. For lane D: nothing in the module
+changes; a driver benchmark built as a test should declare the allocator as `digest_formats.rs` does.
+
+### 148.5 Checks
+
+* **Digests** (on 80dc3a65): `digests.txt` **EQUAL** - full **438164c0429d7fa3**, `DIGEST_ENCODING=0`
+  **a0062bb5569e06d3** (2,000 + 500 games, 49 and 17 s). The new ones recorded, then compared equal: constructed
+  63f58560ad7b3df0, EoE b36df9098a38d794, driver 837d42c28214befe (at 4 threads; 2 and 7 threads the same).
+* **The engine suite** (`cargo test --release -p engine --no-fail-fast`, on 80dc3a65 and again on 7aeae8c8): 161 test
+  binaries, **2,534 passed, 0 failed**, 30 ignored (the 27 before and the three new digests).
+  `tests/test_digest_specs.py` passed.
+* **The gate**: `python tools/gate.py engine --no-mac --tested-sha 7aeae8c8 --expect-digest 438164c0429d7fa3
+  --expect-digest0 a0062bb5569e06d3` on 7aeae8c8: **GATE PASSED engine 7aeae8c83cab in 2285s** (build, both digests
+  equal, `az` 52 passed, `limits` 13, `hidden` 28, pytest 324 passed and 1 skipped, the search smoke, the tree
+  unchanged; the Mac recheck not needed). The commit after it adds these lines only (the docs tier).
+* **Fuzz smokes** (400 games and 20 matches each, before committing): the default pool, `FUZZ_POOL=delver` (with its
+  post-sideboard matches) and `FUZZ_POOL=cross`: passed - the new counters' asserts on, compared states in every walk
+  kind.
+* **The 20k fuzz** (`FUZZ_GAMES=20000`, on 80dc3a65; each run then continued past its failing seeds, one seed after the
+  other, on 9c4c7b30 and this commit, whose fuzz changes are failure messages only). Every new check runs on every seed;
+  a failing seed is a finding of 148.6, every other seed passed:
+  * **default pool**: the 1,000 cube best-of-three matches passed. Games: **2122** (F1), **9676**, **19991** (F2).
+  * **`FUZZ_POOL=delver`**: the 1,000 constructed best-of-three matches and the 1,000 post-sideboard matches passed.
+    Games: **4252**, **8292**, **12064**, **13030**, **14002**, **15338**, **15865** (F2).
+  * **`FUZZ_POOL=cross`**: games **1503**, **4086**, **13181** (F2), **4799**, **5450**, **8706** (F3), **13536**,
+    **19515** (F1, as one world's game over); the Doomsday 60 and the Sneak and Show 60 played all their cards but
+    Omniscience in random play (in the last 484 games: Doomsday 105 casts, Thassa's Oracle 55, Show and Tell 159, Sneak
+    Attack 98). Matches: **843** (F2, the deck-tilted world's encoding against the real match's, a check from before
+    148) and every other of 0..999 passed; their post-sideboard matches 0..842 and 844..878 passed, **879** failed (F2,
+    `determinize`'s world against the real match: a check from before 148), 880..999 passed (run on 7aeae8c8 before the
+    gate below: 120 matches and their post-sideboard matches, 426 match walks, 1,854 compared states). All three 75s
+    are whole on main (every sideboard card supported).
+  * The counters (ENGINE.md 148's lines): the delver games 15,866..19,999 made 79,354 open-decklist walks and compared
+    231,736 states after a common action; the cross games 19,516..19,999 5,786 walks, 18,058 states; the cross matches
+    0..842 3,081 match walks, 14,550 states, and 844..999 567, 2,439. The constructed checks of the cross matches
+    0..842: 24,340 worlds, the opponent's 60 hidden in 13,918 (13,833 another 60 than the real one), 276 first
+    sideboarders' choices dealt, 13,536 deck-tilted worlds; their post-sideboard matches: 1,359 games, 15,784 worlds,
+    462 sideboarding decisions of a keeper.
+  * On main 267ae603 the same: no engine code changed. Known-failing seeds at 267ae603's behaviour (to skip while the
+    findings are open; another lane's behaviour change moves them): `FUZZ_SKIP=2122,9676,19991` (default),
+    `FUZZ_SKIP=4252,8292,12064,13030,14002,15338,15865` (delver),
+    `FUZZ_SKIP=843,879,1503,4086,4799,5450,8706,13181,13536,19515` (cross; it skips the matches 843 and 879 too).
+
+### 148.6 Findings: what the new checks fail on main (not fixed here)
+
+Each is a real difference two worlds of one information set show the viewer (zero-core would keep them in one node), or
+a world shows against the real game. None is fixed on this branch (checks only); the owners are the encoding and
+hidden-information lanes. Repro: `FUZZ_POOL=<pool> FUZZ_FIRST=<seed> FUZZ_GAMES=1 FUZZ_LOG=1 cargo test --release -p
+engine --test fuzz -- --nocapture fuzz_random_games` (a match: `FUZZ_FIRST=<seed> FUZZ_MATCHES=1 ...
+fuzz_random_matches`).
+
+* **F1. The end of `ActivateMana` is unkeyed and reads the decider's hidden hand** (default 2122, cross 13536 and 19515;
+  the walk of the player who is not deciding). After a mana ability activated through `ActivateMana` (CR 605.3a,
+  ENGINE.md 100.4.3) resolves, the next `ActivateMana { again: true }` task asks again only if `mana_float_sources`
+  finds a source - which counts the hand's mana abilities (a Spirit Guide) - and otherwise returns silently to the
+  `Priority` task under it (`activate.rs` `activate_mana`, `sources.is_empty()`: no key). Two worlds of P1 whose P0
+  hands differ on such a card: equal keys, the same decider and the same legal actions (`[PASS, 919]`), but one world
+  asks P0 `Priority` and the other `ActivateMana` - a public difference (the view's pending decision kind), and `PASS`
+  means a different thing in each (pass priority / stop activating). In cross 13536 and 19515 the world that returned to
+  `Priority` checked the state-based actions (CR 704.3) and its game ended (a player lost), while the other world still
+  asks `ActivateMana`: the walks' new one-world-over assert. Options: ask the one-option `ActivateMana` [`PASS`] instead
+  of returning (the engine's single-option rule then answers it with a `KEY_AUTO`, ENGINE.md 10), or emit a key there.
+* **F2. A v7 object reference to a card in a hidden zone reads the slot's knowledge** (default 9676, 19991; delver 4252,
+  8292, 12064, 13030, 14002, 15338, 15865; cross 1503, 4086, 13181, match 843, post-sideboard match 879 - in the
+  decider's own walk and the other viewer's, mostly at step 0, i.e. two fresh worlds, and in the matches' checks of a
+  world against the real match). `tail_encode::Cx::write_ref` writes an object reference's identity digits, and the
+  `stack_relations`, `links` and `delayed` tokens their card codes, from `seen_def(r.idx)`: the card the slot holds now,
+  if the knower knows that slot. Where the referenced object is in a hidden zone, the worlds deal that zone again, and
+  which slot carries the viewer's knowledge differs between worlds: in delver 4252 Murktide Regent's trigger's event
+  object is a Daze now in its owner's hand, the slot holds a Daze in both worlds, known to the viewer in one only; in
+  cross 1503 the source of Edge of Autumn's cycling (sacrifice a land), in hand and revealed by its activation (CR
+  602.2a), the same. Since 128 a hand card both players know is keyed and its knowledge canonical among twins, which is
+  the likely way the known slot moves (not traced further here). The viewer's encoding then depends on the deal: the
+  stack token's `SOURCE` and `EV.OBJ` digits (delver 4252, cross 1503, 4086, 13181, match 843), a `stack_relations`
+  token's code (delver 8292, 15338), the `delayed` segment's source digits (delver 12064, 13030, 14002), an
+  `opponent_triggers` token (delver 15865) and a `links` token's object A (default 9676, 19991). Options: encode what
+  the reference itself showed - the identity it had when it was last public, kept with the reference or as last known
+  information - never the slot's current card; or have the deals keep a referenced slot's card and its knowledge where
+  the viewer knows it. Either makes the encoding a function of the information set.
+* **F3. The `links` segment's picks follow the slot's knowledge too** (cross 4799, 5450, 8706: `ChooseHandCard`, Show
+  and Tell's pick, ENGINE.md 123 and 129.3). `write_links` shows a pick in progress (`K_PICKED`) unless the picked card
+  is hidden and the knower doesn't know it, and gives its code from `seen_def`. Two worlds of one information set then
+  differ by a `K_PICKED` token (present in one, absent in the other: 4799 and 8706, both in the decider's own walk) or
+  by its card code (5450). The same rule shows the *other* player's pick (`BY_OPP`) whenever the knower knows the picked
+  card (a hand card it saw), which tells a hidden choice if the pick is meant to stay face down until both have chosen
+  (129.3's "face-down pick"): worth a look with F2's fix. If the rules let the second chooser see the first one's pick,
+  the token should not depend on knowledge at all.
+
+Section number: 148 is lane G's of the Fable-fix lanes (COMMON.md's table).
 
 ## 153. Best-of-three replays, the publisher and the sideboard census on layout v7: `delverai-bo3` (131, 132) merged into main (branch `delverai-bo3-v7`, 2026-11-12)
 
