@@ -53,22 +53,32 @@ fn next(g: &MtgAz) -> Option<MtgAz> {
     }
 }
 
-/// The other player's private keys (draws and looks) in `keys`, as `viewer` sees them: (masked, with the card's
-/// identity); and the viewer's own private keys with an identity (a world masks only the other player's).
-fn private(keys: &[u64], viewer: u8) -> (usize, usize, usize) {
-    let (mut masked, mut open, mut own) = (0, 0, 0);
+/// The other player's private keys (draws and looks) in one step's `keys`, as `viewer` sees them (`after`: the game
+/// right after the step): masked, with the card's identity, and the looks at a random card of the viewer's own hand
+/// (Urza's Bauble: public by design - its owner sees which card was seen -, recognised as a card of that identity in
+/// the viewer's hand that the looker knows); and the viewer's own private keys with an identity (a world masks only
+/// the other player's).
+fn private(keys: &[u64], viewer: u8, after: &engine::Game) -> (usize, usize, usize, usize) {
+    let (mut masked, mut open, mut hand_looks, mut own) = (0, 0, 0, 0);
     for &k in keys {
         if !matches!(key_kind(k), KEY_DRAW | KEY_LOOK) {
             continue;
         }
-        match (key_player(k) == viewer, key_payload(k) == HIDDEN) {
+        let (p, d) = (key_player(k), key_payload(k));
+        match (p == viewer, d == HIDDEN) {
             (false, true) => masked += 1,
-            (false, false) => open += 1,
+            (false, false) => {
+                if key_kind(k) == KEY_LOOK && after.player(viewer).hand.iter().any(|&c| after.obj(c).def as u64 == d && after.knows(p, c)) {
+                    hand_looks += 1;
+                } else {
+                    open += 1;
+                }
+            }
             (true, false) => own += 1,
             (true, true) => panic!("the viewer's own private key masked"),
         }
     }
-    (masked, open, own)
+    (masked, open, hand_looks, own)
 }
 
 #[derive(Default, Debug)]
@@ -77,6 +87,7 @@ struct Walks {
     started: usize,
     masked: usize,
     open: usize,
+    hand_looks: usize,
     own: usize,
 }
 
@@ -101,9 +112,10 @@ fn walk(mut w: MtgAz, viewer: u8, cap: usize, rng: &mut Rng, out: &mut Walks) {
             out.started += 1;
         } else if started {
             since += 1;
-            let (m, o, n) = private(&keys, viewer);
+            let (m, o, h, n) = private(&keys, viewer, &w.g);
             out.masked += m;
             out.open += o;
+            out.hand_looks += h;
             out.own += n;
         }
     }
