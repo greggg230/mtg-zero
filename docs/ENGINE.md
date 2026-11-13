@@ -26439,6 +26439,56 @@ stand-in: 49 play, 82 trainer, 17 off, 0 unsupported, 0 unknown.
 
 **After the GPU merge** (9b95bfda: sessions from zero-core's `create_session` / `build_evaluator`, ENGINE.md 114.6): `tools/farm_gates.py` on the best-of-three stand-in passed again (gate 2: 2,317 rows, 200 batches byte-identical; gate 3: 2,730 rows, 13 of 13 arrays identical) and the eval equivalence gate (zero-core tools/worker_eval_gate.py, eoe1 80 v 70, seed 31, groups 1) 20 of 20 rows and 50 batches identical. **Release build** (`tools/farm_build.py --profile release --runtime-id c4c4bb776d7f886f5e13474e --publish` at 9b95bfda): **e8063b3cb106b01b72ab3dd3** (`mtg-9b95bfd-release`: records, the session factory). The local end to end (zero-farm-notes phase3-selfplay.md): a delver-bo3-smoke run on the CPU with `selfplay_remote pool:e2e-bo3` and two headless agents - its iteration 2 played entirely by the farm (8 matches, 3,063 rows, 0 records refused).
 
+### 114.9 Merge of main 45e65178 (the delver-bo3-pb1 run's engine), pool_min_agent, the release build for the run (2026-11-12)
+
+**What.** main 45e65178 (ENGINE.md 130: `"start_game": 2` post-sideboard games, the keep-its-deck yardstick, the fuzz
+match check per episode), the exact engine the live run `delver-bo3-pb1` trains on (its worktree `run-45e6517`, zero-core
+2aab098, already in zero-core `farm`), merged into `farm` (824858a7). tests/fuzz.rs conflicted (the farm's is the thin
+wrapper): main's file ported into `engine/src/fuzz/games.rs` by phase 1's script (it reproduces the current port of main
+64c86cc2 byte for byte) plus three rules: `PlayedMatch::keeper_decisions`; the post-sideboard matches as
+`post_sideboard_matches(first, n, hooks) -> Run` (a panic ends the run there, `Run::Failed`; `Hooks::before` asked before
+each match, so a finishing chunk stops there and a hang is timed per match; no seed passed twice), the constructed
+report's early return; `delver_post_spec` / `play_match_spec` / `replay_match` / `HiddenStats` public for the replay
+test, which the thin tests/fuzz.rs takes from main. A post-sideboard match that panics in the farm's chunk reads "match N
+failed (rerun: ...)" where the test printed "post-sideboard match N failed (rerun: ...)": the same repro, which
+`tools/fuzz_farm.py`'s RERUN pattern matches either way. One side effect of `Hooks::before` there: a failure of the
+post-sideboard pass's own chunk check is attributed to its last seed (its site is the check's line).
+
+zero-core pin -> `farm` b0930da (f8daa52a): `pool_min_agent` (default 0.2.8), sent with every PUT of the farm run
+(zero-farm PROTOCOL rev 9: its leases go only to agents at or above it; 0.2.8 is the first agent that takes a template
+naming a split or double-faced card), classified `trainer` by check-config. `tools/farm_build.py --runtime --pack winml`
+ships the NuGet package's `license.txt` and `ThirdPartyNotices.txt` unmodified, listed in runtime.json `licenses`
+(39ef0208; zero-farm README "Third-party components").
+
+**Equivalence of the moved loops** (main 45e65178's own tests/fuzz.rs + scratch-only per-seed prints vs this branch's,
+seeds from 10,000,000): delver-matches 200 (with the 200 post-sideboard matches), matches 200, drafted-matches 100,
+delver-games 500, games 1,000, delver_sb-games 1,000 - every printed report identical (cargo's test-name prefix masked),
+**3,000 seeds identical through mtgz-worker's chunk processes**, whose delver-matches chunks print the post-sideboard
+report too.
+
+**Gates.** `tools/gate.py engine --expect-digest b63f643e97a30a61 --expect-digest0 a0062bb5569e06d3 --tested-sha 39ef0208
+--jobs 8`: **GATE PASSED engine 39ef02081f10 in 879 s** (build; digests = main's; az 52, limits 13, hidden 28; pytest 330
+passed, 3 skipped; the random smoke; tree unchanged). The first run failed two `test_worker_farm.py` tests on a stale
+`target/release/mtgz-worker.exe` built before the pin's run_settings.json change (`pool_min_agent` "unknown"); the gate
+doesn't rebuild the worker: rebuilt, both passed, the whole gate rerun. `gate.py repin --expect-digest b63f643e97a30a61
+--spec delver_bo3 --preset delver-mirror-bo3 --no-mac` in the pinned worktree `mtg-zero-wt/run-39ef020-farm`: **GATE
+PASSED WITH SKIPS repin 39ef02081f10 in 631 s** (own-target build, digest, the run's spec smoke; skipped: the Mac's
+`--eval-checkout`, the Mac being busy with the run).
+
+**Release build** (`tools/farm_build.py --profile release --runtime-id c4c4bb776d7f886f5e13474e --publish` at 39ef0208):
+**abab42a6bca6468371cb5f1f** (`mtg-39ef020-release`; kinds selfplay, eval, fuzz). **Windows ML pack** with the license
+files: **887dd1d1f90e9486fb7c78dd** (`winml-2.5.96-ort-1.28.3`, 6 files; not referenced by any definition yet).
+
+**On the run's real config** (its config.json and `models/iter_0019.pt` copied out; `tools/farm_gates.py` with the signed
+release worker and the pack c4c4bb77, CPU only, Python = a venv with onnx 1.23.2 / onnxruntime 1.31.1): **gate 2 passed**
+(8 matches, 1,422 rows, 200 batches, every array byte-identical; Python side 116.8 s), **gate 3 passed** (12 matches,
+1,618 rows - 535 value-only, 1,583 with aux targets -, nets 19: 735 / 20: 883, 12 setups, 13 of 13 arrays identical;
+records 23 KB vs shards 465 KB; the worker 110.8 s on 6 threads). `check-config` of the real config: 51 play, 91
+trainer, 25 off, 0 unsupported, 0 unknown. The pool's template path (`play_settings` with the signed worker, then
+farm-release define's checks): 51 keys, the spec's " // " names pass. The run's own interpreter (the store Python) has
+no onnx / onnxruntime, which the pool needs to export each checkpoint: the hand-off (zero-farm notes,
+bo3-farm-handoff.md) starts the run's supervisor with that venv.
+
 ## 120. Constructed best-of-three: the Delver mirror's sideboarding and hidden 60s (branch `delver-bo3`, 2026-11-11)
 
 Branch `delver-bo3` (from main 60397f3; zero-core pinned at f9ca5c3, unchanged). DESIGN.md 8's D3 but the five
