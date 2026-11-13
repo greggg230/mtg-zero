@@ -29578,6 +29578,112 @@ tests updated to the new evidence), `tests/test_mac_remote.py` (+2), `tests/test
   the final line; the orchestrator's merged sha needs a `suite` run of its own (or the agent's report plus the Mac
   recheck) for a clean GATE PASSED.
 
+## 144. zero-core's run loop at its edges: the Fable review's infrastructure fixes (branch `fix/core-infra`, zero-core `fix/core-infra-1112`, 2026-11-12)
+
+(Integration note, `integrate/fable-1112`: zero-core's section is **47** there, not 46 - it was renumbered when
+`fix/core-infra-1112` was merged into zero-core `integrate/fable-1112`, because zero-core's AMD branches use 44-46. The
+references below say 47.x; this branch's commit messages say 46.x. ENGINE.md 157 has the integrated pin.)
+
+The Fable review of 2026-11-12 (slice 5, `E:\mtg-zero-scratch\fable-review-2026-11-12\infra.md`) found zero-core's run
+loop sound where it runs alone and wrong at its edges: a remote machine, an interrupted iteration, a fork, the supervisor.
+Lane C2 fixed every one of its zero-core items (and the two zero-core tool items lane C1 handed over, B7 and B14). `third_party/zero-core` e5e1bb0 -> **509e3e2** (`fix/core-infra-1112`,
+on GitHub); zero-core docs/az.md **47** has each fix (why, what, defaults), 43.14 a correction. Python only: no Rust
+change, no engine change, **digests EQUAL** (nothing the engine plays or encodes moved; not re-run).
+
+### 144.1 What changed (zero-core docs/az.md 46.x)
+
+* **A finished self-play phase is never played again** (O1, 47.1). A PAUSE or crash during training used to throw away
+  the iteration's finished self-play phase (`data/iter_N` dropped, the phase played again). The loop now writes
+  `data/iter_N/DONE.json` (the phase's metrics, seconds, every shard's bytes and rows; atomically; never when the shards
+  do not add up to the samples) when a phase ends, and a resume that finds the directory exactly as recorded trains on
+  it (`selfplay_resumed` in the row); a mismatch is logged and the phase played again. Co-training: both directories.
+  A phase cut by STOP gets none.
+* **Remote self-play waits for its shards** (B6, 47.4). The 30 s `selfplay_remote_wait` dropped accepted games' shards in
+  normal operation (tools/vast.py logged it). `end(it)` now waits for every worker's end and every announced shard with
+  no time limit while the run goes on; PAUSE ends the wait (iteration replayed); `selfplay_remote_wait` bounds it only
+  after STOP (the record says `cut`). **Default changed.**
+* **Co-training: an episode requeued more than once** (B3, 47.5). Three copies in flight aborted the run ("unknown tag")
+  or counted a match twice. Spares are counted per requeue, a never-requeued duplicate raises, a requeued tag never goes
+  back to the worker it was taken from, and a worker ignores an `enqueue` of a tag it still holds.
+* **fork_run --iter K cuts the Elo pools at K** (B4, 47.6): the source's later pairs and `logged` names no longer stand in
+  for the fork's own `iter_K+1...` (whose matches were never played); `ratings.json` refit; the copied window follows
+  the fork's settings (window, min_window_samples); an optimizer state of another iteration is skipped with a line.
+* **The end-of-run drain of remote evaluations** (B8, 47.3): no 6 h timeout whose False was dropped; no limit while the
+  run goes on, `progress.json` every poll; STOP during the wait logs the iterations not recorded and the run ends
+  aborted, never `done`. **The transport** (B9): a failed `ls` / `scp` raises instead of reading as an empty directory /
+  "no such file"; the pool files a remote evaluation must bring back are checked.
+* **A device the machine does not have refuses the run** (B13, 47.7): `train_device` / `heldout_device` / `infer_device`
+  `cuda` (or `mps`) without one is `DeviceRefused` at the start (exit 78) - never trained on the CPU in silence.
+* **The supervisor gives up on the same crash** (B19, 47.2): the run's error text (decimals masked) three times in a row
+  (`MTGZ_SUPERVISE_SAME_CRASHES`, 0 = never) ends it, state `refused`.
+* **State files** (B20, 47.8): `config.json` written atomically; `models/iter_N.json` and `DONE.json` strict.
+* **Metrics** (47.9): a rolling or shared phase reports `selfplay.minor` (a count) instead of `minor_per_game`, and
+  `selfplay.belief` without `per_decision` - their driver counters cover every game in flight, the finished games are
+  other games; the exact ratios stay in a fresh driver's phase (`rolling` 0). For MTG Zero's presets (rolling) the
+  metrics rows' keys change; nothing reads them (the dashboards do not).
+* **A worker's accept it cannot fill** (I7, 47.10): given back (`unaccepted`), never cut in silence.
+* **The compat goldens hash the auxiliary targets** (B14, 47.12): `tools/selfplay_digest.py` records a game whose
+  engine computes auxiliary targets with them and hashes each row's `aux` (MTG Zero's belief and deck targets: a change
+  to what self-play records for them no longer passes `check_checkpoint_compat` as identical); a game without them keeps
+  its digest byte for byte; the compat check names the arrays it compared (its target lines, which tools/gate.py
+  parses, unchanged). MTG Zero's compat digests change (they hash `aux` now; both sides always run the new tool).
+* **A detached checkout's target dir** (B7, zero-core half, 47.13): zero-core's `build_engine.sh` names it
+  `detached-<directory>`, as lane C1's `tools/build_py.sh` does here (ENGINE.md 143).
+* **The gate shadow** (43.14's correction): it also shifts the open path's gradients, 2.6-4.0% overall (`pk.weight`
+  37%) while a gate sits below it; documented, default training unchanged; an opt-in that confines it is proposed
+  (47.11), not built.
+
+### 144.2 Tests and checks
+
+* **zero-core** `tests/test_run_infra.py` (new, 19 tests): the twice-requeued episode (its later copies dropped after and
+  before its event completes, a never-requeued duplicate raising, `take_for_remote`'s skip, an overdue episode never
+  handed back to its worker, a worker ignoring a tag it holds), the fork's cut pools and window, the drain and STOP,
+  the transport's failure vs absent, `DeviceRefused` (unit and a `--train-device cuda` run without CUDA: exit 78), the
+  DONE marker (verified, tampered, a crash in iteration 2's training resumed without playing the phase again - rolling 0
+  and 1 -, a mismatched marker replaying it), the supervisor giving up on the third same crash, `_write_json`, a
+  rolling run's `minor`. `tests/test_remoteplay.py`: `test_slow_shards_are_waited_for` (3 s per shard,
+  `selfplay_remote_wait` 0.5: none late, every shard in its iteration) and `test_stop_bounds_the_wait_for_the_last_shards`
+  (STOP in the end wait: `cut`, the iteration short, no DONE marker, the run stops) replace `test_late_shards_are_dropped`.
+  These and the rest of test_remoteplay's co-training and shard tests: 34 passed. The review's probes for these items
+  (`delver-review/tests/test_zz_infra_probes.py`: the fork, both requeue probes, the drain, the transport) fail on this
+  branch, as they should.
+* The rest of the checks (the full zero-core pytest, this repo's build, the run-loop smoke, a crash-in-training resume on
+  `mtg-smoke`, `check_checkpoint_compat` against the pin before, the `python` gate): 144.4.
+
+### 144.3 Not here
+
+* Improvements not taken: I3 (a gap in the data window), I5 (the optimizer state with its checkpoint), I6 (a build
+  identity in the remote hello), I9 (a remote evaluation retried after it finished), I10 (a pausing run's stall limit),
+  O2/O3 (shard fetch channel, window row cache). B15 (`RunCommitRemote`) is mtg-zero's `mtgz/az/mac.py`.
+* An exact per-game `minor` / belief ratio in a rolling phase needs per-game counters in the driver's result rows (Rust,
+  `worker.rs`, which lanes D and H also change): not made.
+
+### 144.4 The checks (zero-core 509e3e2, this branch 497e85c4; the shared desktop under ~10 lanes' load, 2026-11-13)
+
+* **zero-core's full pytest** (adcdc87's code, 74 min where it takes ~10 alone): 596 passed, 5 failed - two tests that
+  read old interfaces, fixed in the branch (test_encoding_guard's `drain(timeout=)`, now bounded with `stop`;
+  test_reader's defaults test comparing data directories byte for byte, now the shards and the DONE.json markers' shard
+  maps), two timing tests that pass alone (`test_cotrain_the_local_driver_is_never_starved`: the local driver played 19
+  of 163 matches, 11.7% < 15%, under load; `test_infoset_merge::test_remote_workers_merge_and_the_quotas_stay_exact`),
+  and `test_token_graphs::test_graphs_match_eager_and_follow_new_weights`, which **fails at the pin e5e1bb0 too**
+  (CUDA graphs vs eager 3.66e-05 > 2e-05 on this GPU, beside the live run): not this change. All re-run alone: pass,
+  but that last one, identical at e5e1bb0. The new tests (`tests/test_run_infra.py`, 21) and test_remoteplay's: pass.
+* **This repo**: the build (no Rust change); `python -m mtgz.az.run --preset mtg-smoke --iters 2` into
+  `E:/mtg-zero-scratch/fable-fix/c2-mtg/smoke` - iterations 0-2, 16 games each; **a crash in iteration 2's training,
+  resumed** (an injected RuntimeError, then the same command): `iter 2: its self-play phase finished before the
+  interruption (DONE.json: 1 shards, 3078 samples, as recorded): not played again, training on it`, the phase played
+  once, the row `selfplay_resumed`, 3,078 samples trained.
+* **`check_checkpoint_compat`** (this checkout vs `fix-core-infra-base` = 267ae603 with zero-core e5e1bb0 and the same
+  Rust, its `_engine.pyd` this build's; the smoke's v7 token checkpoint `iter_0002.pt`, spec `{"max_turns": 60}`):
+  **identical**, 4,878 samples per target (visits `0463f2a17eb2f8a1`, cq `db244540e266b341`, results
+  `8885bcde237fce65`, vs random 9.0/16), arrays hashed `aux, n_players, net, opt_action, ov_opt, ov_tok, pi, player,
+  q, sc, t_seg, t_slot, t_val, x, z` (47.12: the aux targets now in). `--net random` cannot run for v7 `mtg` at either
+  pin (an MLP evaluator is refused for a game with tail segments, docs/az.md 43.8): the gate's `optin-core` /
+  `search-core` compat step needs `--checkpoint`-style use of a token network on v7.
+* **Gate**: `python tools/gate.py python --no-mac` on 497e85c4: **GATE PASSED python 497e85c4952b in 911s** (build; pytest 323 passed, 1 skipped; the run-loop smoke, 16 games, 0 unfinished). Its first run on 497e85c4 failed one test under load (`tests/test_mac_remote.py::test_a_worker_plays_mtg[matches]`: the worker's 180 s no-control-line watchdog ended its phase before three best-of-three episodes finished; the test sends no pings) - both modes pass alone (169 s), and the re-run passed. 0e139c03 (before 47.12-47.13) passed the same tier.
+* Digests EQUAL (no engine or Rust change; not re-run). No 20k fuzz (no engine change). Not run: the Mac steps
+  (`--no-mac`).
+
 ## 153. Best-of-three replays, the publisher and the sideboard census on layout v7: `delverai-bo3` (131, 132) merged into main (branch `delverai-bo3-v7`, 2026-11-12)
 
 Branch `delverai-bo3-v7` from main 267ae603 (layout v7, 125.12) with `delverai-bo3` 4ac6ebd3 (131, 132) merged in as a
