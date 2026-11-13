@@ -2399,7 +2399,8 @@ mod tests {
     }
 
     // -- engine findings (docs/rules_check_findings.md): each test asserts what
-    // the rules require and fails on the engine as it is (ignored until fixed)
+    // the rules require and failed on the engine when it was found (ignored until fixed; F1-F3 fixed by
+    // `fix/rules-f1-f5`, ENGINE.md 151, and run since the integration, ENGINE.md 157)
 
     /// F1 (fuzz, default pool seed 366): an indestructible creature dealt
     /// deathtouch damage keeps the engine's 704.5h record (`deathtouched`)
@@ -2408,7 +2409,6 @@ mod tests {
     /// damage dealt before earlier checks. CR 704.5h: only deathtouch damage
     /// "since the last time state-based actions were checked" destroys it.
     #[test]
-    #[ignore = "engine rules bug F1 (docs/rules_check_findings.md): sba_check's fast path keeps a stale deathtouch record"]
     fn f1_cr_704_5h_old_deathtouch_damage_does_not_destroy_after_indestructible_ends() {
         let v = vanilla();
         let mut g = at_priority(Scenario::new(db()).battlefield(0, &[v, "Kaldra Compleat"]));
@@ -2441,7 +2441,6 @@ mod tests {
     /// is destroyed. The engine's check reads deathtouch only with marked
     /// damage (`deathtouched && damage > 0`).
     #[test]
-    #[ignore = "engine rules bug F2 (docs/rules_check_findings.md): infect + deathtouch damage doesn't destroy"]
     fn f2_cr_704_5h_deathtouch_damage_with_infect_destroys() {
         let v = vanilla();
         let mut g = at_priority(Scenario::new(db()).battlefield(0, &[v]).battlefield(1, &["Blightsteel Colossus"]));
@@ -2466,7 +2465,6 @@ mod tests {
     /// The engine's `lethal_needed` with deathtouch ignores marked damage:
     /// the trampler must still assign it 1.
     #[test]
-    #[ignore = "engine rules bug F3 (docs/rules_check_findings.md): deathtouch trample ignores lethal damage already marked"]
     fn f3_cr_702_19b_deathtouch_trample_counts_marked_lethal_damage() {
         let tr = creature(|d| d.keywords.has(Kw::Trample) && !d.keywords.has(Kw::FirstStrike) && !d.keywords.has(Kw::DoubleStrike) && d.power.unwrap_or(0) >= 3);
         let ind = creature(|d| d.keywords.has(Kw::Indestructible));

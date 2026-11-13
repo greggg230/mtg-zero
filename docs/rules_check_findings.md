@@ -124,6 +124,9 @@ minutes each), no rules check violated; at that rate the other ~19,500 seeds wou
 
 ## STATUS (2026-11-13; branch `fuzz-invariants`, from main 267ae603; nothing pushed or merged)
 
+(Integration, `integrate/fable-1112`, ENGINE.md 157: F1-F3 are fixed by `fix/rules-f1-f5` (ENGINE.md 151); their repro
+tests here run, no longer `#[ignore]`d. F4 and F5 stay ignored until `fix/rules-f4-f5` lands.)
+
 **Done** (`docs/ENGINE.md` 150 documents all of it).
 * `engine/src/rules_check.rs` (`pub mod rules_check`, never called by the engine: zero cost in release):
   `RulesCheck` (per game: `new(&g)`, `step(&g)` after every apply, `forced_chance(&g)` before a transition that
