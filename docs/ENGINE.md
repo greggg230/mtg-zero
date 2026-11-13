@@ -29413,8 +29413,13 @@ changes; a driver benchmark built as a test should declare the allocator as `dig
 * **Digests** (on 80dc3a65): `digests.txt` **EQUAL** - full **438164c0429d7fa3**, `DIGEST_ENCODING=0`
   **a0062bb5569e06d3** (2,000 + 500 games, 49 and 17 s). The new ones recorded, then compared equal: constructed
   63f58560ad7b3df0, EoE b36df9098a38d794, driver 837d42c28214befe (at 4 threads; 2 and 7 threads the same).
-* **The engine suite** (`cargo test --release -p engine --no-fail-fast`, 80dc3a65): 161 test binaries, **2,534 passed, 0
-  failed**, 30 ignored (the 27 before and the three new digests). `tests/test_digest_specs.py` passed.
+* **The engine suite** (`cargo test --release -p engine --no-fail-fast`, on 80dc3a65 and again on 7aeae8c8): 161 test
+  binaries, **2,534 passed, 0 failed**, 30 ignored (the 27 before and the three new digests).
+  `tests/test_digest_specs.py` passed.
+* **The gate**: `python tools/gate.py engine --no-mac --tested-sha 7aeae8c8 --expect-digest 438164c0429d7fa3
+  --expect-digest0 a0062bb5569e06d3` on 7aeae8c8: **GATE PASSED engine 7aeae8c83cab in 2285s** (build, both digests
+  equal, `az` 52 passed, `limits` 13, `hidden` 28, pytest 324 passed and 1 skipped, the search smoke, the tree
+  unchanged; the Mac recheck not needed). The commit after it adds these lines only (the docs tier).
 * **Fuzz smokes** (400 games and 20 matches each, before committing): the default pool, `FUZZ_POOL=delver` (with its
   post-sideboard matches) and `FUZZ_POOL=cross`: passed - the new counters' asserts on, compared states in every walk
   kind.
@@ -29429,8 +29434,9 @@ changes; a driver benchmark built as a test should declare the allocator as `dig
     Omniscience in random play (in the last 484 games: Doomsday 105 casts, Thassa's Oracle 55, Show and Tell 159, Sneak
     Attack 98). Matches: **843** (F2, the deck-tilted world's encoding against the real match's, a check from before
     148) and every other of 0..999 passed; their post-sideboard matches 0..842 and 844..878 passed, **879** failed (F2,
-    `determinize`'s world against the real match: a check from before 148), 880..999 not run (that chunk stops at its
-    first failure). All three 75s are whole on main (every sideboard card supported).
+    `determinize`'s world against the real match: a check from before 148), 880..999 passed (run on 7aeae8c8 before the
+    gate below: 120 matches and their post-sideboard matches, 426 match walks, 1,854 compared states). All three 75s
+    are whole on main (every sideboard card supported).
   * The counters (ENGINE.md 148's lines): the delver games 15,866..19,999 made 79,354 open-decklist walks and compared
     231,736 states after a common action; the cross games 19,516..19,999 5,786 walks, 18,058 states; the cross matches
     0..842 3,081 match walks, 14,550 states, and 844..999 567, 2,439. The constructed checks of the cross matches
