@@ -65,11 +65,15 @@ fn transition(g: &mut TeamDraftAz, a: u16, keys: &mut Vec<u64>) {
 fn finish_random(g: &mut TeamDraftAz, rng: &mut Rng) -> u64 {
     let mut keys = Vec::new();
     let mut n = 0;
+    // (The limited format's rules, ENGINE.md 131, at every step.)
+    let mut dc = engine::rules_check::DraftCheck::new();
+    dc.step(g).unwrap_or_else(|e| panic!("{e}"));
     while g.to_move().is_some() {
         let l = legal(g);
         assert!(!l.is_empty());
         let a = l[rng.below(l.len() as u32) as usize];
         g.step(a, &mut keys).unwrap();
+        dc.step(g).unwrap_or_else(|e| panic!("after {n} steps: {e}"));
         n += 1;
         assert!(n < 100_000);
     }
@@ -1103,6 +1107,10 @@ fn fuzz_random_events() {
     let mut match_panics: Vec<String> = Vec::new();
     // decks, their pool cards, card choices (DONE offered at) by minimum: the default / other
     let mut decks = [[0u64; 4]; 2];
+    // The rules checks (ENGINE.md 131): the draft's at every step, every heuristic-played match's
+    // games at every step (a violation is recorded with the match and fails the test at the end).
+    let (mut draft_checks, mut rules_fails) = ((0u64, 0u64), Vec::new());
+    let mut match_rules = engine::rules_check::Stats::default();
     let t0 = std::time::Instant::now();
     for e in first.unwrap_or(0)..first.unwrap_or(0) + events {
         if first.is_some() {
@@ -1120,6 +1128,8 @@ fn fuzz_random_events() {
             let mut i = 0u64;
             let mut keys = Vec::new();
             let mut x = vec![0.0f32; NUM_FEATURES];
+            let mut dc = engine::rules_check::DraftCheck::new();
+            dc.step(&g).unwrap_or_else(|err| panic!("event {e}: {err}"));
             while let Some(d) = g.to_move() {
                 let l = legal(&g);
                 assert!(!l.is_empty() && l.windows(2).all(|w| w[0] < w[1]) && l.iter().all(|&a| (a as usize) < 1024));
@@ -1170,9 +1180,12 @@ fn fuzz_random_events() {
                 keys.clear();
                 g.step(a, &mut keys).unwrap();
                 g.check_invariants().unwrap_or_else(|err| panic!("event {e} step {i}: {err}"));
+                dc.step(&g).unwrap_or_else(|err| panic!("event {e} step {i}: {err}"));
                 i += 1;
             }
             steps += i;
+            draft_checks.0 += dc.picks;
+            draft_checks.1 += dc.decks;
             assert!(g.deferred());
             for s in 0..players as u8 {
                 let b = g.build(s).unwrap();
@@ -1188,9 +1201,22 @@ fn fuzz_random_events() {
                 let (max_turns, format) = (g.ev.max_turns, g.ev.format);
                 let mut res = Vec::new();
                 for (i, setup) in g.matches().unwrap().iter().enumerate() {
+                    let mut mc = engine::rules_check::MatchCheck::new();
+                    let mut fail: Option<String> = None;
                     let played = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        draft_bots::play_match_heuristic(setup, max_turns, format, e, i)
+                        draft_bots::play_match_heuristic_with(setup, max_turns, format, e, i, &mut |az| {
+                            if let (Err(v), None) = (mc.step(az), &fail) {
+                                fail = Some(format!("{v}
+{}", az.g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
+")));
+                            }
+                        })
                     }));
+                    match_rules.add(&mc.total());
+                    if let Some(f) = fail {
+                        rules_fails.push(format!("event {e} match {i} (seed {e}): {f}
+    spec: {}", draft_bots::match_spec(setup, max_turns, format)));
+                    }
                     match played {
                         Ok(Ok(m)) => res.push(m.result),
                         Ok(Err(err)) => panic!("event {e} match {i}: {err}"),
@@ -1236,6 +1262,13 @@ fn fuzz_random_events() {
     for p in &match_panics {
         println!("MTG ENGINE PANIC in a heuristic-played match: {p}");
     }
+    println!(
+        "rules checks (ENGINE.md 131): {} picks and {} finished decks of the events checked (CR 100.2b, 100.4b); heuristic-played matches: {match_rules}",
+        draft_checks.0, draft_checks.1
+    );
+    for f in &rules_fails {
+        println!("RULES CHECK VIOLATED in a heuristic-played match: {f}");
+    }
     for (k, what) in ["minimum 22 (the default)", "minimum 0, 40 or random"].iter().enumerate() {
         let [n, cards, choices, done] = decks[k];
         println!(
@@ -1246,6 +1279,7 @@ fn fuzz_random_events() {
         );
     }
     assert!(match_panics.is_empty(), "{} heuristic-played matches panicked in the mtg engine (above)", match_panics.len());
+    assert!(rules_fails.is_empty(), "{} heuristic-played matches violated a rules check (above)", rules_fails.len());
 }
 
 /// Every value of a draft encoding is finite and within the bound (ENGINE.md

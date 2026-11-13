@@ -175,7 +175,15 @@ pub fn play_matches_heuristic(ev: &TeamDraftAz, seed: u64) -> Result<Vec<MatchRe
 /// Match `i` of an event (`setup`) played by the heuristic bot on both sides
 /// (`play_matches_heuristic`'s; its bots seeded from `seed` and `i`).
 pub fn play_match_heuristic(setup: &MatchSetup, max_turns: u32, format: Format, seed: u64, i: usize) -> Result<MatchResult, String> {
+    play_match_heuristic_with(setup, max_turns, format, seed, i, &mut |_| {})
+}
+
+/// [`play_match_heuristic`], calling `each` with the match's first state and
+/// after every step (the draft fuzz's rules checks, ENGINE.md 131); the
+/// match is the same.
+pub fn play_match_heuristic_with(setup: &MatchSetup, max_turns: u32, format: Format, seed: u64, i: usize, each: &mut dyn FnMut(&MtgAz)) -> Result<MatchResult, String> {
     let mut az = match_game(setup, max_turns, format)?;
+    each(&az);
     let mut h = [Heuristic::new(seed ^ (2 * i as u64 + 1)), Heuristic::new(seed ^ (2 * i as u64 + 2))];
     let mut legal = Vec::new();
     let mut keys = Vec::new();
@@ -192,6 +200,7 @@ pub fn play_match_heuristic(setup: &MatchSetup, max_turns: u32, format: Format, 
         };
         keys.clear();
         az.step(a, &mut keys)?;
+        each(&az);
         steps += 1;
         if steps > 400_000 {
             return Err(format!("match {i}: no end after {steps} steps"));

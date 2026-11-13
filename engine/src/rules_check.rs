@@ -17,10 +17,10 @@
 //! whose exception could not be decided exactly from the state is not here
 //! (ENGINE.md 131.3 lists them and why). Checks that compare two states seen
 //! one step apart apply only where the rules fix the outcome between them:
-//! when nothing left the stack in between (no spell or ability resolved, so
-//! no effect was created), a property the rules let only effects change
-//! must be unchanged. That narrows *when* such a check applies, never *what*
-//! it accepts.
+//! when no spell or ability resolved in between or was resolving at either
+//! state (so no effect was created), a property the rules let only effects
+//! change must be unchanged. That narrows *when* such a check applies, never
+//! *what* it accepts.
 //!
 //! Zero cost in release: nothing in the engine calls this module; it only
 //! reads a `Game`. `RulesCheck::new` at a game's start, `RulesCheck::step`
@@ -174,6 +174,12 @@ fn cards_of(g: &Game, p: PlayerId) -> Vec<DefId> {
     v.extend(side);
     v.sort_unstable();
     v
+}
+
+/// The players' companions, whether each was put into the hand, and their
+/// sideboards (which list).
+fn companions(g: &Game) -> [(Option<CardIdx>, bool, usize); 2] {
+    [0, 1].map(|p| (g.players[p].companion, g.players[p].companion_used, std::sync::Arc::as_ptr(&g.players[p].sideboard) as *const DefId as usize))
 }
 
 /// The order of steps in a turn (CR 500.1, 501-514).
@@ -924,6 +930,9 @@ pub struct RulesCheck {
     /// Chance outcomes were forced in this game (`force_chance`): an unknown
     /// library card may be dealt another identity of its owner's library.
     forced: bool,
+    /// The slots and the companions' state when every player's cards were
+    /// last counted (`cards`: counted again only when they change).
+    counted: (usize, [(Option<CardIdx>, bool, usize); 2]),
     /// A violation was found: the game's later states may follow from it,
     /// so this game is checked no further (`step` returns `Ok`).
     stopped: bool,
@@ -944,6 +953,7 @@ impl RulesCheck {
             normal: (g.turn.number > 0).then_some(g.turn.normal),
             token_perm: Vec::new(),
             forced: !g.forced.is_empty(),
+            counted: (g.objs.len(), companions(g)),
             stopped: false,
             stats: Stats::default(),
         }
@@ -1016,6 +1026,15 @@ impl RulesCheck {
                 return fail("400.11b, 108.3", format!("card #{i} ({}) entered the game from nowhere", g.name(c)));
             }
         }
+        // Every player's cards, counted again when a slot was made, a
+        // companion or a sideboard changed, or chance was forced (with none,
+        // the checks above imply the count: the baseline's cards are
+        // unchanged and there is no new card).
+        let state = (g.objs.len(), companions(g));
+        if !self.forced && state == self.counted {
+            return Ok(());
+        }
+        self.counted = state;
         for p in 0..2u8 {
             let now = cards_of(g, p);
             if now != self.base_total[p as usize] {
@@ -1178,15 +1197,15 @@ impl RulesCheck {
             }
             // Steps follow in order (500.1); an earlier step again only for
             // a combat phase an effect added (500.8: directly after the phase
-            // it names, followed by the phase that came next there - the
-            // precombat main phase, after the beginning phase) or another
-            // cleanup step (514.3a).
+            // it names; one added or still to come at `p`, or one an effect
+            // between the two states may have added), then the phase that
+            // came next there: the precombat main phase after a combat phase
+            // added to the beginning phase. (Another cleanup step, 514.3a, is
+            // the same step again.)
             let back = step_ord(b.step) < step_ord(a.step);
             if back {
-                let effects = effects_between(p, g);
-                let added = a.extra_combats > 0 || effects;
-                let ok = (is_combat_step(b.step) || b.step == Step::Main1 && a.after_combat == Step::Main1 || b.step == Step::Main1 && effects) && added
-                    || (b.step == Step::Main1 && is_combat_step(a.step) && a.after_combat == Step::Main1);
+                let ok = is_combat_step(b.step) && (a.extra_combats > 0 || effects_between(p, g))
+                    || b.step == Step::Main1 && is_combat_step(a.step) && a.after_combat == Step::Main1;
                 if !ok {
                     return fail("500.1, 500.8", format!("turn {}: the {:?} step after the {:?} step with no phase added", b.number, b.step, a.step));
                 }
@@ -2345,6 +2364,71 @@ mod tests {
         // Every option from 0 (the blocker already has lethal damage) up.
         assert_eq!(g.pending.as_ref().map(|d| d.kind), Some(DecisionKind::AssignDamage));
         assert!(g.pending.as_ref().unwrap().choice_of(act::NUMBER).is_some(), "0 to the blocker is not offered: {:?}", g.options_desc());
+    }
+
+    /// F4 (found writing the turn checks): 508.8 skips the declare blockers
+    /// and combat damage steps only if no creature was declared as an
+    /// attacker (or put onto the battlefield attacking). The engine skips
+    /// them when no creature is attacking as the declare attackers step ends,
+    /// so an attacker declared and then removed from combat in that step (an
+    /// instant kills it) costs both players their priority in those steps.
+    #[test]
+    #[ignore = "engine rules bug F4 (docs/rules_check_findings.md): declare blockers skipped after an attacker left combat"]
+    fn f4_cr_508_8_declared_attackers_keep_the_declare_blockers_step() {
+        let v = vanilla();
+        let mut g = Scenario::new(db()).spec(|s| s.auto_single = false).battlefield(0, &[v]).at(Step::DeclareAttackers, 0).start();
+        let c = bf(&g, 0, v);
+        let attack = g.pending.as_ref().unwrap().action_of(Choice::Card(c)).unwrap();
+        let mut k = Vec::new();
+        g.apply(attack, &mut k).unwrap();
+        g.apply(act::PASS, &mut k).unwrap();
+        assert!(g.objs[c.i()].attacking);
+        assert_eq!((g.turn.step, g.pending.as_ref().map(|d| d.kind)), (Step::DeclareAttackers, Some(DecisionKind::Priority)));
+        // Removed from combat in the declare attackers step (CR 506.4).
+        g.objs[c.i()].attacking = false;
+        while g.turn.step == Step::DeclareAttackers {
+            g.apply(act::PASS, &mut k).unwrap();
+        }
+        assert_eq!(g.turn.step, Step::DeclareBlockers, "{}", g.log_lines().join("
+"));
+    }
+
+    /// F5 (found writing the damage checks): 510.4: in the second combat
+    /// damage step deal damage only the creatures that had neither first nor
+    /// double strike as the first combat damage step began, and those with
+    /// double strike. The engine reads "dealt damage in the first step"
+    /// (`struck_first`), set only when damage was assigned, so a first
+    /// striker with 0 power in the first step that is pumped before the
+    /// second deals damage then.
+    #[test]
+    #[ignore = "engine rules bug F5 (docs/rules_check_findings.md): a first striker without damage in the first step deals damage in the second"]
+    fn f5_cr_510_4_a_first_striker_never_deals_damage_in_the_second_step() {
+        let fs = creature(|d| d.keywords.has(Kw::FirstStrike) && !d.keywords.has(Kw::DoubleStrike) && d.power.unwrap_or(0) >= 1);
+        let mut g = at_priority(Scenario::new(db()).battlefield(0, &[fs]));
+        let a = bf(&g, 0, fs);
+        g.objs[a.i()].attacking = true;
+        g.objs[a.i()].tapped = true;
+        // Its power is 0 as the first-strike damage step begins.
+        let p = g.power(a) as i64;
+        g.next_ts += 1;
+        let ts = g.next_ts;
+        g.effects.push(crate::layers::Effect { ts, until: crate::layers::Until::EndOfTurn, on: crate::layers::Affected::Obj(g.obj_ref(a)), m: crate::db::Mod::Pt(-p, 0), controller: 0 });
+        assert_eq!(g.power(a), 0);
+        let life = g.players[1].life;
+        g.turn.step = Step::FirstStrikeDamage;
+        g.pending = None;
+        g.agenda.push(Task::CombatDamage { first: true, att: 0 });
+        g.advance();
+        assert_eq!(g.players[1].life, life);
+        // Pumped back before the second combat damage step.
+        g.effects.pop();
+        g.turn.step = Step::CombatDamage;
+        g.pending = None;
+        g.agenda.push(Task::CombatDamage { first: false, att: 0 });
+        g.advance();
+        assert_eq!(g.players[1].life, life, "the first striker dealt damage in the second step
+{}", g.log_lines().join("
+"));
     }
 
     // -- the team draft: 100.2b, 100.4b
