@@ -959,11 +959,11 @@ impl Game {
 
     fn cleanup_rest(&mut self) {
         // CR 514.2: damage wears off and "until end of turn" effects end,
-        // simultaneously.
+        // simultaneously. (Damage marked, not 704.5h's record of deathtouch
+        // damage dealt since the last check: the check below reads it and
+        // ends it, ENGINE.md 151.1.)
         for &c in &self.battlefield {
-            let o = &mut self.objs[c.i()];
-            o.damage = 0;
-            o.deathtouched = false;
+            self.objs[c.i()].damage = 0;
         }
         self.end_turn_effects();
         // CR 514.3a: an SBA or a trigger -> priority, then another cleanup.
@@ -971,6 +971,8 @@ impl Game {
             self.turn.cleanup_again = true;
             self.agenda.push(Task::Priority);
         } else {
+            // (The check found nothing to perform: still a check, 704.3.)
+            self.clear_deathtouch_records();
             self.agenda.push(Task::NextStep);
         }
     }

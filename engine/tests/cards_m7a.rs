@@ -187,6 +187,46 @@ fn wolverine_damage_heals_other_damage() {
     assert_eq!(g.obj(w).damage, 3);
 }
 
+/// CR 704.5h: Wolverine dealt damage by a source with deathtouch is
+/// destroyed, even when the damage dealt after it "heals" the damage already
+/// dealt: a heal removes the damage marked, not the fact that a deathtouch
+/// source dealt him damage since the last state-based check (ENGINE.md
+/// 151.1). Blocked by Test Deathtouch and Test Bear, whose 2 damage is dealt
+/// after the deathtouch damage.
+#[test]
+fn wolverine_cr_704_5h_a_heal_does_not_undo_deathtouch_damage() {
+    let mut g = scen()
+        .battlefield(0, &["Wolverine, Fierce Fighter"])
+        .battlefield(1, &["Test Deathtouch", "Test Bear"])
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let w = bf(&g, 0, "Wolverine, Fierce Fighter");
+    g.choose(Choice::Card(w));
+    g.pass(); // no more attackers
+    for _ in 0..100 {
+        if g.turn().step == Step::EndCombat {
+            break;
+        }
+        match g.kind() {
+            Some(DecisionKind::Priority) => {
+                g.pass();
+            }
+            Some(DecisionKind::DeclareBlockers) => {
+                g.choose(Choice::Card(w));
+            }
+            _ => {
+                let c = g.pending_decision().unwrap().options[0].choice;
+                g.choose(c);
+            }
+        }
+    }
+    let log = g.log_lines();
+    let dt = log.iter().position(|l| l.contains("1 damage to Wolverine")).expect("the deathtouch damage");
+    let heal = log.iter().position(|l| l.contains("2 damage to Wolverine")).expect("the Bear's damage");
+    assert!(dt < heal, "the deathtouch damage first, then the heal\n{}", log.join("\n"));
+    assert_eq!(g.obj(w).zone, Zone::Graveyard, "{}", log.join("\n"));
+}
+
 #[test]
 fn dragons_rage_channeler_cr_508_1d_attacks_each_combat_with_delirium() {
     let mut g = scen()
