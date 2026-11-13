@@ -485,8 +485,9 @@ fn attachment_now(g: &Game, c: CardIdx, aura: Option<u16>, equipment: Option<u16
     if creature || battle || !(equip || fort) {
         // 704.5p: a creature or battle attached, or a permanent that is no
         // Aura, Equipment or Fortification (301.5c: an Equipment that is a
-        // creature can't equip; reconfigure, the exception, isn't a keyword
-        // of the engine).
+        // creature can't equip, unless it has reconfigure, which makes it
+        // stop being a creature while attached, 702.151b: no attached
+        // creature either way).
         return fail("704.5p", format!("{} is attached to {} but is a creature, a battle, or no Aura, Equipment or Fortification", describe(g, c), describe(g, h.idx)));
     }
     // 704.5n, 301.5c: attached to an illegal permanent (gone, not a creature
