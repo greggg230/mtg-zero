@@ -28,7 +28,9 @@ WINML_VERSION, fetched from nuget.org, or a local `--winml-nupkg`): its ONNX Run
 static C runtime), DirectML.dll and Microsoft.Windows.AI.MachineLearning.dll (the flat C API of Windows ML's
 execution-provider catalog, which on Windows 11 24H2+ brings the GPU vendors' providers: TensorRT-RTX, AMD GPU,
 OpenVINO). Every file Microsoft-signed; none imports the MSVC runtime. Windows 10 1903+ runs its CPU and
-DirectML providers. Checked through a release build (`info`: every DLL from the pack; `probe-providers --providers
+DirectML providers. With them, unmodified, the package's own license files (WINML_LICENSE_FILES: `license.txt`, the
+Microsoft Software License Terms of the Windows ML runtime - DirectML ships in the same package -, and
+`ThirdPartyNotices.txt`; zero-farm README "Third-party components"). Checked through a release build (`info`: every DLL from the pack; `probe-providers --providers
 cpu` on this PC: the CPU passes its self-test) before it is signed.
 
 Prints the build_id (last line: `build_id <id>`). The release key: `--key` (default
@@ -53,6 +55,8 @@ MSVC = ('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'msvcp140_1.dl
 WINML_PACKAGE = 'microsoft.windows.ai.machinelearning'
 WINML_VERSION = '2.5.96'
 WINML_FILES = ('onnxruntime.dll', 'DirectML.dll', 'Microsoft.Windows.AI.MachineLearning.dll')
+# ... and its license files, shipped in the pack byte for byte (the package's root; the nuspec's <license file>)
+WINML_LICENSE_FILES = ('license.txt', 'ThirdPartyNotices.txt')
 # what a statically linked worker may import: Windows itself
 SYSTEM_DLLS = ('kernel32.dll', 'ntdll.dll', 'advapi32.dll', 'psapi.dll', 'bcryptprimitives.dll', 'user32.dll', 'ws2_32.dll',
                'userenv.dll', 'shell32.dll', 'ole32.dll', 'bcrypt.dll', 'secur32.dll', 'crypt32.dll', 'dbghelp.dll',
@@ -296,6 +300,20 @@ def build_winml(a):
         for n in WINML_FILES:
             with open(os.path.join(d, n), 'wb') as f:
                 f.write(z.read(f'runtimes/win-x64/native/{n}'))
+        if '<license type="file">license.txt</license>' not in spec:
+            die(f'{nuspec}: the package no longer names license.txt as its license (look at what it ships now)')
+        licenses = {}
+        for n in WINML_LICENSE_FILES:
+            if n not in z.namelist():
+                die(f"the package has no {n} at its root: the pack must ship Microsoft's license files")
+            data = z.read(n)
+            with open(os.path.join(d, n), 'wb') as f:
+                f.write(data)
+            licenses[n] = {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data), 'source': f'{WINML_PACKAGE}.{version}.nupkg/{n}'}
+    for n, x in licenses.items():
+        with open(os.path.join(d, n), 'rb') as f:
+            if hashlib.sha256(f.read()).hexdigest() != x['sha256']:
+                die(f"{n}: not the package's bytes")
     desc = {}
     for n in WINML_FILES:
         src = os.path.join(d, n)
@@ -311,7 +329,7 @@ def build_winml(a):
     rj = {'runtime': pack, 'onnxruntime': ort_version or desc['onnxruntime.dll']['version'], 'provider': 'cpu+dml+winml',
           'providers': ['cpu', 'dml', 'tensorrt_rtx', 'amdgpu', 'migraphx', 'openvino'],
           'winml': {'package': WINML_PACKAGE, 'version': version, 'source': source, 'sha256': hashlib.sha256(nupkg).hexdigest()},
-          'files': desc}
+          'files': desc, 'licenses': licenses}
     worker = a.check_worker or cargo_build('release')
     info = json.loads(subprocess.run([worker, 'info', '--runtime-dir', d], capture_output=True, text=True, check=True).stdout)
     ort = info['onnxruntime']
