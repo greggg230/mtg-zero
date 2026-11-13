@@ -1,6 +1,7 @@
 """Post-sideboard games only (docs/ENGINE.md 130) through the bindings: a match of the presets' spec starts at the
 sideboarding before game 2 and replays from its seed; a seat of `"keep_deck"` only passes; and the sideboarding
-yardstick `mtgz.az.keep_h2h` (side B keeps its deck, the seats alternating by halves) on a tiny network."""
+yardstick `mtgz.az.keep_h2h` (side B keeps its deck, the seats alternating by halves; its informed arm, A's worlds
+knowing B keeps, docs/ENGINE.md 141) on a tiny network."""
 import json
 
 import pytest
@@ -35,10 +36,18 @@ def test_half_specs():
     assert json.loads(a)['keep_deck'] == [1] and json.loads(b)['keep_deck'] == [0]
     for s in (a, b):
         assert json.loads(s)['start_game'] == 2
+        # the informed arm, the default (docs/ENGINE.md 141): A's worlds know B keeps
+        assert json.loads(s)['keep_known'] is True
+        G.engine().Game('mtg', s, 2, 0)
+    for s in K.half_specs(P.SPEC_DELVER_BO3, known=False):
+        assert 'keep_known' not in json.loads(s) and json.loads(s)['keep_deck'] in ([0], [1])
     with pytest.raises(ValueError, match='names keep_deck'):
         K.half_specs(a)
+    with pytest.raises(ValueError, match='names keep_known'):
+        K.half_specs(json.dumps(dict(json.loads(P.SPEC_DELVER_BO3), keep_known=True)))
     with pytest.raises(ValueError, match='constructed best-of-three'):
         K.half_specs(P.SPEC_DELVER)
+    assert json.loads(_spec(keep_deck=[0], keep_known=True))['keep_known'] is True
 
 
 def test_keep_h2h_on_a_tiny_network(tmp_path):
@@ -49,10 +58,16 @@ def test_keep_h2h_on_a_tiny_network(tmp_path):
     ck = str(tmp_path / 'models' / 'iter_0000.pt')
     (tmp_path / 'models').mkdir()
     save(m, ck, {'iter': 0})
-    out = K.keep_match(ck, games=4, sims=2, chance_k=0, threads=2, groups=1, spec=_spec(max_turns=12), max_steps=60_000)
+    out = K.keep_match(ck, games=4, sims=2, chance_k=0, threads=2, groups=1, spec=_spec(max_turns=12), max_steps=60_000,
+                       arms='both')
     assert out['keeps'] == 'b' and out['b'] == ck and out['games'] == 4 and out['unfinished'] == 0
     assert out['pairs']['n'] == 2 and 0.0 <= out['a_score'] <= 1.0
     # one or two games a match (games 2 and 3), A's games beside the matches
     assert 4 <= out['per_game']['games'] <= 8
+    # the informed arm is the measure; the uninformed one beside it on the same seeds (docs/ENGINE.md 141)
+    assert out['arm'] == 'informed' and out['uninformed']['arm'] == 'uninformed' and out['uninformed']['games'] == 4
+    assert out['per_game_gap'] == round(out['per_game']['win'] - out['uninformed']['per_game']['win'], 4)
     with pytest.raises(ValueError, match='even'):
         K.keep_match(ck, games=3)
+    with pytest.raises(ValueError, match='arms'):
+        K.keep_match(ck, games=2, arms='half')

@@ -446,6 +446,10 @@ pub struct MatchState {
     /// the spec's `"keep_deck"`): `PASS` is their only sideboarding option. A
     /// seat's own policy: the other player's worlds turn it off.
     pub keep: [bool; 2],
+    /// The other player's worlds know the `keep` seats keep (ENGINE.md 141, the spec's
+    /// `"keep_known"`: the yardstick's informed arm): a keeper's deck there is its real one, the
+    /// registered main, never dealt, and its flag stays on.
+    pub keep_known: bool,
     /// Game 1 was not played (ENGINE.md 130, the spec's `"start_game": 2`):
     /// its result was drawn from the match's seed (`skip_game_one`). Never
     /// encoded: a real game 2 encodes as a synthetic one.
@@ -521,6 +525,7 @@ impl MatchState {
             game_episodes: false,
             between: false,
             keep: [false; 2],
+            keep_known: false,
             post_board: false,
         })
     }
@@ -640,7 +645,11 @@ impl super::MtgAz {
         let decks = [m.deck(0), m.deck(1)];
         let sides = [m.pools[0].sideboard(&m.decks[0]), m.pools[1].sideboard(&m.decks[1])];
         let seed = m.rng.next_u64();
+        // (In a world the game it starts keeps the world's observer, ENGINE.md 141: the other seat's private
+        // draws and looks are keyed as hidden in the viewer's tree; the live match's game has none.)
+        let observer = self.g.observer;
         self.g = Game::with_sideboards(self.g.db(), m.gspec, [&decks[0], &decks[1]], [&sides[0], &sides[1]], seed)?;
+        self.g.observer = observer;
         self.set_known_pools();
         Ok(())
     }
@@ -866,7 +875,12 @@ impl super::MtgAz {
             gspec.deck_clouds = true;
         }
         let seed = m.rng.next_u64();
+        // A world's next game keeps the world's observer (ENGINE.md 141; `MtgAz::determinize` sets it while
+        // sideboarding too): the other player's opening hand, mulligans, draws and looks are keyed as hidden in
+        // the viewer's tree, as in the game the world was dealt in (section 10). The live match has none.
+        let observer = self.g.observer;
         self.g = Game::with_sideboards(self.g.db(), gspec, [&decks[0], &decks[1]], [&sides[0], &sides[1]], seed)?;
+        self.g.observer = observer;
         self.set_known_pools();
         // The new game shows each deck's and sideboard's size, which the
         // (hidden) sideboarding decided: a public key, so worlds of a viewer
