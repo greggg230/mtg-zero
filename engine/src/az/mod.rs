@@ -1343,4 +1343,57 @@ impl SearchGame for MtgAz {
     fn can_concede(&self) -> bool {
         !self.m.game_episodes || (self.m.sb.is_none() && self.m.choice.is_none() && !self.g.is_over())
     }
+
+    /// Observable answers (ENGINE.md 149, zero-core docs/search.md 3.18): `auto_single` answers a
+    /// single-option decision in the engine and keys it (`KEY_AUTO`, section 10), and a pass of
+    /// priority is observed by the other player alike whether it was forced or chosen. Tree reuse
+    /// then follows the real line by that observation instead of the live key alone.
+    const ANSWERS: bool = true;
+
+    /// The pending decision's kind (`1 + DecisionKind`); one of a controlled turn (CR 722, the
+    /// decider is not the decision's player: its `KEY_AUTO` names the player, not the decider)
+    /// in a class of its own; the deck choice and sideboarding in theirs.
+    fn decision_tag(&self) -> u16 {
+        if self.m.choice.is_some() {
+            return TAG_DECK_CHOICE;
+        }
+        if self.m.sb.is_some() {
+            return TAG_SIDEBOARD;
+        }
+        match self.g.pending_decision() {
+            None => 0,
+            Some(d) if self.g.decider_of(d.player) != d.player => TAG_CONTROLLED | (1 + d.kind as u16),
+            Some(d) => 1 + d.kind as u16,
+        }
+    }
+
+    /// A pass of priority (CR 117.3d) is the one answer every world observes alike: the key
+    /// `auto_single` gives it when `PASS` is the seat's only option (`flow.rs` `ask_options`).
+    fn answer_obs(seat: usize, tag: u16, a: u16) -> Option<u64> {
+        (tag == TAG_PRIORITY && a == crate::decision::act::PASS).then(|| crate::hidden::key(crate::hidden::KEY_AUTO, seat as u8, AUTO_PASS))
+    }
+
+    /// The other player's `KEY_AUTO`: its pass of priority is an `Answer`; any other single option
+    /// it was given (a choice naming a hidden card's slot, a page turn, ...) is `Opaque`: the
+    /// observation cannot place its chosen counterpart (section 149).
+    fn key_obs(key: u64, viewer: usize) -> zero_search::game::KeyObs {
+        use crate::hidden::{key_kind, key_payload, key_player, KEY_AUTO};
+        use zero_search::game::KeyObs;
+        if key_kind(key) != KEY_AUTO || key_player(key) as usize == viewer {
+            KeyObs::Plain
+        } else if key_payload(key) == AUTO_PASS {
+            KeyObs::Answer
+        } else {
+            KeyObs::Opaque
+        }
+    }
 }
+
+/// `decision_tag` classes beyond `1 + DecisionKind` (ENGINE.md 149).
+const TAG_CONTROLLED: u16 = 0x4000;
+const TAG_SIDEBOARD: u16 = 0x7FFE;
+const TAG_DECK_CHOICE: u16 = 0x7FFF;
+/// The class of a priority decision of its own player.
+const TAG_PRIORITY: u16 = 1 + crate::decision::DecisionKind::Priority as u16;
+/// `KEY_AUTO`'s payload for a forced pass of priority (`flow.rs` `ask_options`: kind << 16 | action).
+const AUTO_PASS: u64 = ((crate::decision::DecisionKind::Priority as u64) << 16) | crate::decision::act::PASS as u64;
