@@ -1236,7 +1236,7 @@ impl RulesCheck {
                 None => {
                     if let Some(n) = self.normal {
                         if b.active != opp(n) {
-                            return fail("500.7, 102.1", format!("turn {} is P{}'s but follows P{n}'s normal turn with no extra turn", b.number, b.active));
+                            return fail("500.7, 102.1", format!("turn {} is P{}'s but follows P{n}'s normal turn with no extra turn (turn {} was P{}'s, the engine's last normal turn P{})", b.number, b.active, a.number, a.active, a.normal));
                         }
                     }
                     self.normal = Some(b.active);

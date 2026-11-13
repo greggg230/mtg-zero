@@ -68,3 +68,62 @@ games (an instant on an attacker); the steps' priority windows are lost.
 that assigned no damage there (power 0) is not barred: pumped before the second step, it deals damage again.
 510.4 bars every creature that had first strike or double strike as the first combat damage step began (but
 those that have double strike).
+
+## STATUS (2026-11-12, session handoff; branch `fuzz-invariants`, from main 267ae603; nothing pushed or merged)
+
+**Done.**
+* `engine/src/rules_check.rs` (`pub mod rules_check`, never called by the engine: zero cost in release):
+  `RulesCheck` (per game: `new(&g)`, `step(&g)` after every apply; stops after its first violation),
+  `MatchCheck` (best-of-three games), `check_state` (one state), `DraftCheck` (team draft events), `Stats`.
+  Invariants: card conservation 108.1/108.3/400.11b/100.4/702.139; tokens and copies 704.5d-e, 111.8, 707.10a;
+  at priority 117.5 and 704.5a-c, f, g, h (incl. the record of deathtouch damage), i, j, k, m, n, p, q, s, t, z
+  (704.5v-y battles fail loudly: unmodelled); 502.4, 104.3; the stack 405.2, 608.1/405.5, 700.2, 107.3a, 405.4,
+  115.7; turns 500.1, 102.1, 500.7, 500.8, 103.8; combat options 508.1a, 509.1a-b, 510.1c/702.19b/702.2c;
+  declarations as made 508.1a/b/d/f, 302.6, 702.3b, 702.20b, 509.1a/b/h, 702.9b, 702.17b, 702.28b, 702.14c,
+  702.16f, 702.111b; mana 500.5; life 119.7; draft 100.2b, 100.4b. Comparing checks apply only when no spell or
+  ability resolved between the two states or was resolving at either.
+* 28 unit tests (crafted violations caught, legal look-alikes pass) + 5 ignored repro tests (F1-F5).
+* Wiring: `engine/tests/fuzz.rs` (games, determinized and weighted worlds, chance walks, matches and their
+  worlds, hidden decklists and deck-choice worlds; record-and-continue, `rules_verdict` at each test's end,
+  `FUZZ_RULES_ALLOW=<rules>`), `engine/tests/draft.rs` (every event step, worlds via `finish_random`,
+  heuristic-played matches through new `draft_bots::play_match_heuristic_with`).
+* Digests (desktop, this branch vs main built side by side): full 438164c0429d7fa3, `DIGEST_ENCODING=0`
+  a0062bb5569e06d3: both equal main's.
+* Throughput (default pool, 1,500 games, same seeds side by side): main 172.3 s, this branch 176.2 s (+2.3%);
+  200 matches 59.7 s vs 56.5 s (noise). Same game outcomes.
+
+**Fuzz runs so far (desktop, single thread, seeds from 0; violations listed are real engine bugs only).**
+default 2,000 games (F1 at seed 366 only); interactions 2,000 (clean after fixes); default matches 300 (clean);
+delver 1,000 (clean); eoe 1,000 (clean); doomsday, dd_a, dd_b, dd_c, sneak_show, sns, delver_sb 300 each
+(clean); names 300, sealed 200, `FUZZ_HIDDEN_DECKS=1` 200 (clean); draft events 100 (clean). Exponential:
+not finished. Not yet run at scale: everything (the 20k campaign).
+
+**Open issue (blocks `FUZZ_CHANCE`).** Chance walks report false positives: CR 108.1 (a forced chance outcome
+swaps an unknown library card's identity, `force_library_card`, then the card is drawn: the exemption must
+compare each slot with the previous state, skipping slots that were unknown library cards there, and the walk
+must tell the check it forced: add `RulesCheck::forced_chance()` called from `chance_step`), and CR 500.7
+(the checker's normal-turn record goes wrong in walks; debugging showed worlds created at a Time Vault
+"skip that turn" decision, `may_skip`: check `turns()`'s re-sync after a skipped check). Fix both before the
+campaign, rerun `FUZZ_CHANCE=20 FUZZ_GAMES=200`.
+
+**Left, in order.**
+1. Fix the open issue above; commit.
+2. The 20k campaign (Mac: `bash tools/mac.sh` with `CARGO_BUILD_JOBS=4` and at most 4 processes; desktop at
+   most ~6): `FUZZ_GAMES=20000` per pool (default, interactions, exponential, eoe, sealed, delver, delver_sb,
+   doomsday, dd_a, dd_b, dd_c, names, sneak_show, sns, `FUZZ_HIDDEN_DECKS=1`) split in `FUZZ_FIRST` chunks,
+   `--exact fuzz_random_games`; `FUZZ_MATCHES=2000 --exact fuzz_random_matches` for default, interactions,
+   drafted, delver (+ its post-sideboard matches); `DRAFT_FUZZ=20000` (draft test). Triage each violation:
+   invariant bug -> fix exactly; engine bug -> add here with a repro (don't fix the engine on this branch).
+   Expect F1 hits (704.5h) in pools with deathtouch and indestructible.
+3. Gates (engine tier): `python tools/gate.py engine --tested-sha <head> --expect-digest 438164c0429d7fa3
+   --expect-digest0 a0062bb5569e06d3`, `cargo test --release -p engine --test az`, the full engine suite, pytest
+   (after `bash tools/build_py.sh`).
+4. ENGINE.md section 131 (next free number; main ends at 130): the module, the invariant table with CR refs,
+   the ones left out (608.2b target legality: the engine's own targeting predicates; 601.2f-h mana paid =
+   cost and 119/120 life accounting: need payment/damage instrumentation that would check the engine's single
+   writer against itself; 510.4 who deals damage in which step: needs a hook; 704.5r/u/aa: no such abilities;
+   704.5v-y: no battles), the campaign's totals per pool, throughput, findings.
+5. Not now (the maintainer's): merge into main; the farm branch port: copy the fuzz.rs hunks into
+   `engine/src/fuzz/games.rs` / `draft.rs` with `crate::rules_check` (one `RulesCheck::new` at game start and
+   one `step` after each apply per loop; there a violation should fail the seed like a panic, the farm's
+   model), and `play_match_heuristic_with` comes with this branch.
