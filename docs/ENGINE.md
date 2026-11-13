@@ -29423,7 +29423,10 @@ only: no crate changed, **digests EQUAL** (nothing to re-record).
   of them) at the smoke's sims, without the root belief tilts, which a uniform evaluator cannot answer (no auxiliary
   head) and which the output names ("the seat without selfplay_belief_tilts"). The spec `preset` plays the preset's own
   spec and game (no re-typed copy), `--run-config <run>/config.json` + spec `run` a run's own seat and spec. The repin
-  tier is unchanged (its `--spec` may now be `preset`).
+  tier is unchanged (its `--spec` may now be `preset`). Run: `python tools/search_smoke.py --specs preset,delver_bo3
+  --preset delver-bo3-smoke --seeds 0 --games 16 --threads 2 --sims 8 --conc 16`: 0 failed of 2, each 16 matches = 31
+  games, 0 unfinished, 17,818 decisions, 61,754 sims - `preset` and the re-typed `delver_bo3` play the same spec, so the
+  same numbers; both name the dropped `selfplay_belief_tilts`.
 * **B16, `tools/sealedai_publish.py`.** Collect, then commit: the game log's offsets move only after every new line of
   every file parsed, the new games join the held list as soon as they are read, and the tallies change only after
   every game's iteration is known (counted on copies) - a failed pass lost the games it had read. Games read but never
