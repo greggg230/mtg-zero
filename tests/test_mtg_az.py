@@ -199,7 +199,9 @@ def test_layout_and_token_network_read_the_encoding():
     seen = 0
     while not g.over and seen < 40:
         legal = list(g.legal())
-        x = torch.from_numpy(np.asarray(g.encode(g.to_move)))[None]
+        # (the row's head: `encode` refuses a row with tail tokens, zero-core R1 - effects and counters are tokens since
+        # ENGINE.md 142.7)
+        x = torch.from_numpy(np.asarray(g.encode_row(g.to_move)[0], np.float32))[None]
         with torch.no_grad():
             h, n, full = m.pack(x)
         segs = {s['name']: s for s in lay['segments']}
@@ -334,7 +336,7 @@ def test_a_widened_network_reads_v7_rows_within_rounding(old_version, old_featur
     eo, en = NetEvaluator(old, graphs=False), NetEvaluator(new, graphs=False)
     widths = R.layout_tails(new.config['layout'])
     gated = {i for i, s in enumerate(new.config['layout']['segments']) if s.get('gate')}
-    assert len(gated) == 9 and set(new.gates().values()) == {0.0}
+    assert len(gated) == 12 and set(new.gates().values()) == {0.0}       # (ENGINE.md 125, 142.7: twelve tail-only segments)
     E = G.engine()
     rng = np.random.default_rng(8)
     seen = {'plain': 0, 'gated': 0}

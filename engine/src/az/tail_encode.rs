@@ -49,8 +49,12 @@ pub mod seg {
     pub const GRAVEYARD_ORDER: u16 = 17;
     pub const FACE_DOWN: u16 = 18;
     pub const MY_REVEALED: u16 = 19;
+    /// ENGINE.md 142.7: continuous effects, counters, numbers past float16's exact range.
+    pub const EFFECTS: u16 = 20;
+    pub const COUNTERS: u16 = 21;
+    pub const NUMBERS: u16 = 22;
     /// The number of segments.
-    pub const N: usize = 20;
+    pub const N: usize = 23;
 }
 
 /// An object reference (`ObjRef`) inside a token: what it names now, publicly (ENGINE.md 125).
@@ -292,6 +296,119 @@ pub mod mr {
     pub const W: usize = PRESENT + 1;
 }
 
+/// A continuous effect (`effects` segment, ENGINE.md 142.7): one token per `Game::effects` entry
+/// (a resolved spell's or ability's effect, CR 611.2), slot k its place in timestamp order (CR
+/// 613.7: the layers apply effects in that order), then one per copy effect (`Game::copies`, CR
+/// 707), after the effects. After the affected permanent's card code where the viewer sees it
+/// (zero for a group's rules effect): the affected object (a reference), or the group's filter
+/// (`group_filter`: card types, and whose - any player's, the effect's controller's, its
+/// opponents'); the `Mod` (`mod_index`, one-hot: the 21 variants an effect can have) and its
+/// parameters - power and toughness amounts (squashed, sign, 64 binary digits: exact), keywords,
+/// protection's qualities, colours, card types and `replace`, up to `SUBS` subtypes (each a stable
+/// name id's 32 digits, `name_id`), the mana a granted sacrifice ability makes, which latent
+/// ability, whose control it was; its duration (`Until`, one-hot, and the object "for as long as"
+/// names) and its controller ("you" of "until your next turn", the goader). A copy effect: the
+/// copied definition's identity, its exceptions (CR 707.9: card types, subtypes, keywords, base
+/// power and toughness, a name, colours, no mana cost, supertypes), double-faced, its duration.
+pub mod ef {
+    use super::rf;
+    pub const PRESENT: usize = 0;
+    pub const COPY: usize = 1;
+    pub const OBJ: usize = 2;
+    pub const GROUP: usize = OBJ + rf::W;
+    pub const GROUP_TYPES: usize = GROUP + 1;
+    pub const TYPE_N: usize = 9;
+    pub const GROUP_ANY: usize = GROUP_TYPES + TYPE_N;
+    pub const GROUP_YOURS: usize = GROUP_ANY + 1;
+    pub const GROUP_OPPONENTS: usize = GROUP_ANY + 2;
+    pub const MOD: usize = GROUP_ANY + 3;
+    pub const MODS: usize = 21;
+    /// A number: squashed / 8, negative, 64 binary digits of its magnitude.
+    pub const NUM_W: usize = 66;
+    pub const POWER: usize = MOD + MODS;
+    pub const PT_PRESENT: usize = POWER + NUM_W;
+    pub const TOUGHNESS: usize = PT_PRESENT + 1;
+    pub const KWS: usize = TOUGHNESS + NUM_W;
+    pub const KW_N: usize = 22;
+    pub const PROT: usize = KWS + KW_N;
+    pub const PROT_N: usize = 19;
+    pub const COLORS: usize = PROT + PROT_N;
+    pub const COLORS_SET: usize = COLORS + 6;
+    pub const TYPES: usize = COLORS_SET + 1;
+    pub const REPLACE: usize = TYPES + TYPE_N;
+    pub const SUBTYPES_N: usize = REPLACE + 1;
+    pub const SUBTYPES: usize = SUBTYPES_N + 1;
+    pub const SUBS: usize = 4;
+    pub const SAC_MASK: usize = SUBTYPES + SUBS * 32;
+    pub const LATENT: usize = SAC_MASK + 6;
+    pub const LATENT_N: usize = 8;
+    pub const CONTROL_FROM_ME: usize = LATENT + LATENT_N;
+    pub const CONTROL_FROM_OPP: usize = CONTROL_FROM_ME + 1;
+    pub const UNTIL: usize = CONTROL_FROM_OPP + 1;
+    pub const UNTIL_N: usize = 4;
+    pub const UNTIL_OBJ: usize = UNTIL + UNTIL_N;
+    pub const CONTROLLER_ME: usize = UNTIL_OBJ + rf::W;
+    pub const CONTROLLER_OPP: usize = CONTROLLER_ME + 1;
+    /// A copy effect's copied definition (32 identity digits), its exception's name (present, 32
+    /// digits), no mana cost, supertypes (8 bits), double-faced.
+    pub const COPY_DEF: usize = CONTROLLER_OPP + 1;
+    pub const EXC_NAME: usize = COPY_DEF + 32;
+    pub const EXC_NAME_DIGITS: usize = EXC_NAME + 1;
+    pub const EXC_NO_COST: usize = EXC_NAME_DIGITS + 32;
+    pub const EXC_SUPERS: usize = EXC_NO_COST + 1;
+    pub const COPY_DFC: usize = EXC_SUPERS + 8;
+    pub const W: usize = COPY_DFC + 1;
+}
+
+/// The counters of one kind on one object (`counters` segment, ENGINE.md 142.7): one token per
+/// (object, kind) of every permanent (the frame player's, then the other's, in their slots'
+/// order), every face-up exiled card (exile order) and every phased-out permanent, kinds in their
+/// order: after the object's card code, the object (a reference), the kind (+1/+1, -1/-1, stun, a
+/// keyword counter, a named counter, loyalty, lore; CR 122.1), a keyword counter's keyword, a named
+/// counter's name (a stable name id's 32 digits, `name_id`), the number (squashed / 4, 64 binary
+/// digits: exact).
+pub mod ct {
+    use super::rf;
+    pub const PRESENT: usize = 0;
+    pub const OBJ: usize = 1;
+    pub const KIND: usize = OBJ + rf::W;
+    pub const KINDS: usize = 7;
+    pub const KW: usize = KIND + KINDS;
+    pub const NAME: usize = KW + super::ef::KW_N;
+    pub const COUNT: usize = NAME + 32;
+    pub const COUNT_BITS: usize = COUNT + 1;
+    pub const W: usize = COUNT_BITS + 64;
+}
+
+/// A number the head writes squashed past float16's exact range (`numbers` segment, ENGINE.md
+/// 142.7; zero-core's shards store floats as float16): one token per such number whose magnitude
+/// is at least `BIG` - a player's life, poison, energy and experience counters (the frame player
+/// first), a permanent's power, toughness and damage (the frame player's permanents, then the
+/// other's) - with whose it is (a player, or the permanent as a reference), which number, its sign
+/// and its magnitude's 128 binary digits (power and toughness are 128-bit, ENGINE.md 100.7). Below
+/// `BIG` the head's float is exact in float16 for every one of them (life / 20 to 1,280; power,
+/// toughness, damage / 8 and the counters / 4 to the squash threshold).
+pub mod nb {
+    use super::rf;
+    pub const BIG: u128 = 512;
+    pub const PRESENT: usize = 0;
+    pub const PLAYER_ME: usize = 1;
+    pub const PLAYER_OPP: usize = 2;
+    pub const OBJ: usize = 3;
+    pub const WHICH: usize = OBJ + rf::W;
+    pub const LIFE: usize = 0;
+    pub const POISON: usize = 1;
+    pub const ENERGY: usize = 2;
+    pub const EXPERIENCE: usize = 3;
+    pub const POWER: usize = 4;
+    pub const TOUGHNESS: usize = 5;
+    pub const DAMAGE: usize = 6;
+    pub const WHICH_N: usize = 7;
+    pub const NEG: usize = WHICH + WHICH_N;
+    pub const BITS: usize = NEG + 1;
+    pub const W: usize = BITS + 128;
+}
+
 pub const DELAYED_W: usize = CODE + dl::W;
 pub const LINK_W: usize = CODE + lk::W;
 pub const EXO_W: usize = CODE + xo::W;
@@ -300,6 +417,9 @@ pub const SR_W: usize = CODE + sr::W;
 pub const GO_W: usize = CODE + go::W;
 pub const FD_W: usize = CODE + fd::W;
 pub const MR_W: usize = CODE + mr::W;
+pub const EF_W: usize = CODE + ef::W;
+pub const CT_W: usize = CODE + ct::W;
+pub const NB_W: usize = CODE + nb::W;
 
 /// Every segment's slot width in layout v7, by segment index.
 pub const SEG_W: [usize; seg::N] = [
@@ -323,10 +443,13 @@ pub const SEG_W: [usize; seg::N] = [
     GO_W,
     FD_W,
     MR_W,
+    EF_W,
+    CT_W,
+    NB_W,
 ];
 
 /// Every segment's head slots (`count`) in layout v7.
-pub const SEG_HEAD: [usize; seg::N] = [1, 2 * encode::TOPS, encode::PERMS, encode::PERMS, encode::HANDS, encode::STACKS, encode::TRIGS, encode::LIST, encode::GYAS, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+pub const SEG_HEAD: [usize; seg::N] = [1, 2 * encode::TOPS, encode::PERMS, encode::PERMS, encode::HANDS, encode::STACKS, encode::TRIGS, encode::LIST, encode::GYAS, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 /// The layout's head tokens, `1 + sum count` (zero-core `SearchGame::HEAD_TOKENS`): the global
 /// token and every head slot.
@@ -350,7 +473,7 @@ const fn ts(seg: u16, name: &'static str) -> TailSeg {
 }
 
 /// The tail segments of layout v7, in layout order (zero-core `SearchGame::TAILS`).
-pub const TAILS: [TailSeg; 16] = [
+pub const TAILS: [TailSeg; 19] = [
     ts(seg::MY_PERM, "my_permanents"),
     ts(seg::OPP_PERM, "opponent_permanents"),
     ts(seg::HAND, "hand"),
@@ -367,6 +490,9 @@ pub const TAILS: [TailSeg; 16] = [
     ts(seg::GRAVEYARD_ORDER, "graveyard_order"),
     ts(seg::FACE_DOWN, "face_down"),
     ts(seg::MY_REVEALED, "my_revealed"),
+    ts(seg::EFFECTS, "effects"),
+    ts(seg::COUNTERS, "counters"),
+    ts(seg::NUMBERS, "numbers"),
 ];
 
 /// The index of a zone in a reference's one-hot (exhaustive: a new zone is a compile error here).
@@ -780,6 +906,10 @@ pub(crate) fn write_tail_segments(cx: &Cx, list: &[Option<CardIdx>], tail: &mut 
     write_stack_relations(cx, tail);
     write_graveyard_order(cx, tail);
     write_face_down(cx, tail);
+    // ENGINE.md 142.7.
+    write_effects(cx, tail);
+    write_counters(cx, tail);
+    write_numbers(cx, tail);
 }
 
 /// The `face_down` segment (`fd::*`): every card exiled face down, in their canonical order for the
@@ -808,6 +938,325 @@ fn write_face_down(cx: &Cx, tail: &mut TailBuf) {
             s[fd::PLAY_ME] = g.exile_permission(cx.me, c).is_some() as u8 as f32;
             s[fd::PLAY_OPP] = g.exile_permission(cx.op_, c).is_some() as u8 as f32;
         }
+    }
+}
+
+/// A stable id of an interned name (a subtype or a named counter, `CardDb::subtype_name`): its
+/// FNV-1a 32-bit hash (ENGINE.md 142.7). The interned ids are each table's own; the network needs
+/// one id a name in every table. `tests/v7_tails.rs::name_ids_are_distinct` checks that no two names
+/// of the tables share one.
+pub fn name_id(name: &str) -> u32 {
+    name.bytes().fold(0x811c_9dc5u32, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193))
+}
+
+/// A number's floats (`ef::NUM_W`): squashed / 8, negative, its magnitude's 64 binary digits.
+fn num(out: &mut [f32], v: i64) {
+    out[0] = squash(v as f32 / 8.0);
+    out[1] = (v < 0) as u8 as f32;
+    bits(&mut out[2..ef::NUM_W], v.unsigned_abs());
+}
+
+/// The bits of a card-type mask (`types::*`, 9 bits).
+fn type_mask(out: &mut [f32], t: u16) {
+    for (k, x) in out[..ef::TYPE_N].iter_mut().enumerate() {
+        *x = (t >> k & 1) as f32;
+    }
+}
+
+/// A keyword's index among `encode::KWS` then `encode::KWS_V7` (`ef::KWS`, `ct::KW`).
+fn kw_index(k: crate::db::Kw) -> usize {
+    let f = encode::kw_float(k);
+    if f >= encode::perm::KW_V7 {
+        encode::KWS.len() + f - encode::perm::KW_V7
+    } else {
+        f - encode::perm::KEYWORDS
+    }
+}
+
+/// The index of an effect's `Mod` in `ef::MOD`: an exhaustive match. The four variants only
+/// static abilities have never occur in an effect (`Mod::static_only`: `Game::add_effect` refuses
+/// them).
+pub fn mod_index(m: &crate::db::Mod) -> usize {
+    use crate::db::Mod as M;
+    match m {
+        M::Types { .. } => 0,
+        M::Colors(_) => 1,
+        M::Keywords(_) => 2,
+        M::Protection(_) => 3,
+        M::SetPt(..) => 4,
+        M::Pt(..) => 5,
+        M::CantBlock => 6,
+        M::CantBeBlocked => 7,
+        M::MustAttack => 8,
+        M::ExileIfDies => 9,
+        M::GainSacMana(_) => 10,
+        M::LoseAllAbilities => 11,
+        M::AllCreatureTypes => 12,
+        M::BecomeTypes { .. } => 13,
+        M::GainLatent(_) => 14,
+        M::SwitchPt => 15,
+        M::Goad => 16,
+        M::ExileIfLeaves => 17,
+        M::ControlFrom(_) => 18,
+        M::PreventCombatDamage => 19,
+        M::MustAttackPlayer => 20,
+        M::PtPer { .. } | M::PtPerSourceCounter { .. } | M::AttackDespiteDefender | M::PowerPlusGreatestMv { .. } => {
+            unreachable!("a static ability's mod {m:?} in an effect (Game::add_effect refuses it)")
+        }
+    }
+}
+
+/// The filter of a group's rules effect as the `effects` token writes it: its card types, and
+/// whose (0 any player's, 1 the effect's controller's, 2 its controller's opponents'). The lowering
+/// makes `Type(t)` and `Type(t)` with `Controller(b)` (`Ext::ApplyRules`, ENGINE.md 142.7); any other
+/// shape fails loudly here until the token has floats for it (`tests/v7_tails.rs` checks every
+/// table's group effects).
+pub fn group_filter(f: &crate::db::Filter) -> (u16, usize) {
+    use crate::db::Filter as F;
+    let shape = match f {
+        F::Type(t) => Some((*t, 0)),
+        F::And(a, b) => match (&**a, &**b) {
+            (F::Type(t), F::Controller(y)) | (F::Controller(y), F::Type(t)) => Some((*t, if *y { 1 } else { 2 })),
+            _ => None,
+        },
+        _ => None,
+    };
+    shape.unwrap_or_else(|| panic!("a group effect's filter {f:?} has no floats in the effects token (ENGINE.md 142.7)"))
+}
+
+/// Subtypes (interned ids) into `ef::SUBTYPES_N` / `ef::SUBTYPES`: the count / 4 and each one's
+/// stable name id (`name_id`), at most `ef::SUBS` (a loud failure past it).
+fn subtypes(g: &Game, s: &mut [f32], ids: &[u16]) {
+    assert!(ids.len() <= ef::SUBS, "an effect with {} subtypes: the effects token holds {} (ENGINE.md 142.7)", ids.len(), ef::SUBS);
+    s[ef::SUBTYPES_N] = ids.len() as f32 / 4.0;
+    for (k, &t) in ids.iter().enumerate() {
+        bits(&mut s[ef::SUBTYPES + 32 * k..ef::SUBTYPES + 32 * (k + 1)], name_id(g.db.subtype_name(t)) as u64);
+    }
+}
+
+/// A duration into `ef::UNTIL` / `ef::UNTIL_OBJ`.
+fn until(cx: &Cx, s: &mut [f32], u: crate::layers::Until) {
+    use crate::layers::Until as U;
+    let k = match u {
+        U::EndOfTurn => 0,
+        U::Forever => 1,
+        U::YourNextTurn => 2,
+        U::WhileOnBattlefield(r) => {
+            cx.write_ref(&mut s[ef::UNTIL_OBJ..ef::UNTIL_OBJ + rf::W], r);
+            3
+        }
+        U::WhileSource => unreachable!("a lowered duration in an effect (Game::until_for)"),
+    };
+    s[ef::UNTIL + k] = 1.0;
+}
+
+/// The `effects` segment (`ef::*`; ENGINE.md 142.7).
+fn write_effects(cx: &Cx, tail: &mut TailBuf) {
+    use crate::db::Mod as M;
+    use crate::layers::Affected;
+    let g = cx.g;
+    let mut k = 0u32;
+    for e in &g.effects {
+        let x = tail.token(seg::EFFECTS, k);
+        k += 1;
+        match &e.on {
+            Affected::Obj(r) => {
+                if let Some(d) = cx.seen_def(r.idx) {
+                    code(&mut x[..CODE], g.db, cx.ids, d);
+                }
+                cx.write_ref(&mut x[CODE + ef::OBJ..CODE + ef::OBJ + rf::W], *r);
+            }
+            Affected::Group(f) => {
+                let (t, whose) = group_filter(f);
+                x[CODE + ef::GROUP] = 1.0;
+                type_mask(&mut x[CODE + ef::GROUP_TYPES..], t);
+                x[CODE + ef::GROUP_ANY + whose] = 1.0;
+            }
+        }
+        let s = &mut x[CODE..];
+        s[ef::PRESENT] = 1.0;
+        s[ef::MOD + mod_index(&e.m)] = 1.0;
+        match &e.m {
+            M::Types { add, subtypes: st, replace } => {
+                type_mask(&mut s[ef::TYPES..], *add);
+                s[ef::REPLACE] = *replace as u8 as f32;
+                subtypes(g, s, st);
+            }
+            M::BecomeTypes { types, subtypes: st } => {
+                type_mask(&mut s[ef::TYPES..], *types);
+                subtypes(g, s, st);
+            }
+            M::Colors(m) => {
+                bits(&mut s[ef::COLORS..ef::COLORS + 6], *m as u64);
+                s[ef::COLORS_SET] = 1.0;
+            }
+            M::Keywords(set) => {
+                for kw in encode::KWS.iter().chain(encode::KWS_V7.iter()) {
+                    s[ef::KWS + kw_index(*kw)] = set.has(*kw) as u8 as f32;
+                }
+            }
+            M::Protection(p) => {
+                let q = &mut s[ef::PROT..ef::PROT + ef::PROT_N];
+                bits(&mut q[..5], p.colors as u64);
+                q[5] = p.colorless as u8 as f32;
+                q[6] = p.everything as u8 as f32;
+                type_mask(&mut q[7..], p.types);
+                q[16] = p.opponents as u8 as f32;
+                q[17] = p.chosen_player as u8 as f32;
+                q[18] = p.colored_spells as u8 as f32;
+            }
+            M::SetPt(pw, th) | M::Pt(pw, th) => {
+                num(&mut s[ef::POWER..ef::POWER + ef::NUM_W], *pw);
+                num(&mut s[ef::TOUGHNESS..ef::TOUGHNESS + ef::NUM_W], *th);
+                s[ef::PT_PRESENT] = 1.0;
+            }
+            M::GainSacMana(m) => bits(&mut s[ef::SAC_MASK..ef::SAC_MASK + 6], *m as u64),
+            M::GainLatent(l) => {
+                assert!((*l as usize) < ef::LATENT_N, "latent ability {l} past the effects token's {} (ENGINE.md 142.7)", ef::LATENT_N);
+                s[ef::LATENT + *l as usize] = 1.0;
+            }
+            M::ControlFrom(p) => s[if *p == cx.me { ef::CONTROL_FROM_ME } else { ef::CONTROL_FROM_OPP }] = 1.0,
+            M::CantBlock
+            | M::CantBeBlocked
+            | M::MustAttack
+            | M::ExileIfDies
+            | M::LoseAllAbilities
+            | M::AllCreatureTypes
+            | M::SwitchPt
+            | M::Goad
+            | M::ExileIfLeaves
+            | M::PreventCombatDamage
+            | M::MustAttackPlayer => {}
+            M::PtPer { .. } | M::PtPerSourceCounter { .. } | M::AttackDespiteDefender | M::PowerPlusGreatestMv { .. } => {
+                unreachable!("a static ability's mod in an effect")
+            }
+        }
+        until(cx, s, e.until);
+        s[if e.controller == cx.me { ef::CONTROLLER_ME } else { ef::CONTROLLER_OPP }] = 1.0;
+    }
+    // Copy effects (CR 707, layer 1), after the effects.
+    for c in &g.copies {
+        let x = tail.token(seg::EFFECTS, k);
+        k += 1;
+        if let Some(d) = cx.seen_def(c.obj.idx) {
+            code(&mut x[..CODE], g.db, cx.ids, d);
+        }
+        cx.write_ref(&mut x[CODE + ef::OBJ..CODE + ef::OBJ + rf::W], c.obj);
+        let s = &mut x[CODE..];
+        s[ef::PRESENT] = 1.0;
+        s[ef::COPY] = 1.0;
+        digits(&mut s[ef::COPY_DEF..ef::COPY_DEF + 32], cx.ids, c.vals.def);
+        s[ef::COPY_DFC] = c.vals.dfc as u8 as f32;
+        let e = &c.vals.exc;
+        type_mask(&mut s[ef::TYPES..], e.types);
+        let st: Vec<u16> = (0..64u8).filter(|&b| e.subtypes >> b & 1 == 1).map(|b| g.db.exc_subtype_of_bit(b)).collect();
+        subtypes(g, s, &st);
+        for kw in encode::KWS.iter().chain(encode::KWS_V7.iter()) {
+            s[ef::KWS + kw_index(*kw)] = e.kws.has(*kw) as u8 as f32;
+        }
+        if let Some((pw, th)) = e.pt {
+            num(&mut s[ef::POWER..ef::POWER + ef::NUM_W], pw as i64);
+            num(&mut s[ef::TOUGHNESS..ef::TOUGHNESS + ef::NUM_W], th as i64);
+            s[ef::PT_PRESENT] = 1.0;
+        }
+        if let Some(n) = e.name {
+            s[ef::EXC_NAME] = 1.0;
+            digits(&mut s[ef::EXC_NAME_DIGITS..ef::EXC_NAME_DIGITS + 32], cx.ids, n);
+        }
+        if let Some(m) = e.colors {
+            bits(&mut s[ef::COLORS..ef::COLORS + 6], m as u64);
+            s[ef::COLORS_SET] = 1.0;
+        }
+        s[ef::EXC_NO_COST] = e.no_cost as u8 as f32;
+        bits(&mut s[ef::EXC_SUPERS..ef::EXC_SUPERS + 8], e.supers as u64);
+        until(cx, s, c.until);
+    }
+}
+
+/// The `counters` segment (`ct::*`; ENGINE.md 142.7).
+fn write_counters(cx: &Cx, tail: &mut TailBuf) {
+    use crate::db::Counter as K;
+    let g = cx.g;
+    if g.counters.is_empty() {
+        return;
+    }
+    let mut k = 0u32;
+    for &c in cx.mine.iter().chain(&cx.theirs).chain(&g.exile).chain(&g.w3.phased) {
+        for (kind, n) in g.counters_of(c) {
+            let x = tail.token(seg::COUNTERS, k);
+            k += 1;
+            if let Some(d) = cx.seen_def(c) {
+                code(&mut x[..CODE], g.db, cx.ids, d);
+            }
+            let s = &mut x[CODE..];
+            s[ct::PRESENT] = 1.0;
+            cx.write_ref(&mut s[ct::OBJ..ct::OBJ + rf::W], g.obj_ref(c));
+            let i = match kind {
+                K::P1P1 => 0,
+                K::M1M1 => 1,
+                K::Stun => 2,
+                K::Kw(kw) => {
+                    s[ct::KW + kw_index(kw)] = 1.0;
+                    3
+                }
+                K::Named(id) => {
+                    bits(&mut s[ct::NAME..ct::NAME + 32], name_id(g.db.subtype_name(id)) as u64);
+                    4
+                }
+                K::Loyalty => 5,
+                K::Lore => 6,
+            };
+            s[ct::KIND + i] = 1.0;
+            s[ct::COUNT] = squash(n as f32 / 4.0);
+            bits(&mut s[ct::COUNT_BITS..ct::COUNT_BITS + 64], n as u64);
+        }
+    }
+}
+
+/// One `numbers` token (`nb::*`) if `v` is past `nb::BIG`: a player's (`p`) or a permanent's (`c`).
+fn number(cx: &Cx, tail: &mut TailBuf, k: &mut u32, p: Option<PlayerId>, c: Option<CardIdx>, which: usize, v: i128) {
+    if v.unsigned_abs() < nb::BIG {
+        return;
+    }
+    let g = cx.g;
+    let x = tail.token(seg::NUMBERS, *k);
+    *k += 1;
+    if let Some(c) = c {
+        if let Some(d) = cx.seen_def(c) {
+            code(&mut x[..CODE], g.db, cx.ids, d);
+        }
+    }
+    let s = &mut x[CODE..];
+    s[nb::PRESENT] = 1.0;
+    if let Some(p) = p {
+        s[if p == cx.me { nb::PLAYER_ME } else { nb::PLAYER_OPP }] = 1.0;
+    }
+    if let Some(c) = c {
+        cx.write_ref(&mut s[nb::OBJ..nb::OBJ + rf::W], g.obj_ref(c));
+    }
+    s[nb::WHICH + which] = 1.0;
+    s[nb::NEG] = (v < 0) as u8 as f32;
+    let m = v.unsigned_abs();
+    bits(&mut s[nb::BITS..nb::BITS + 64], m as u64);
+    bits(&mut s[nb::BITS + 64..nb::BITS + 128], (m >> 64) as u64);
+}
+
+/// The `numbers` segment (`nb::*`; ENGINE.md 142.7).
+fn write_numbers(cx: &Cx, tail: &mut TailBuf) {
+    let g = cx.g;
+    let mut k = 0u32;
+    for p in [cx.me, cx.op_] {
+        let pl = &g.players[p as usize];
+        number(cx, tail, &mut k, Some(p), None, nb::LIFE, pl.life as i128);
+        number(cx, tail, &mut k, Some(p), None, nb::POISON, pl.poison as i128);
+        number(cx, tail, &mut k, Some(p), None, nb::ENERGY, pl.energy as i128);
+        number(cx, tail, &mut k, Some(p), None, nb::EXPERIENCE, pl.experience as i128);
+    }
+    for &c in cx.mine.iter().chain(&cx.theirs) {
+        let (pw, th) = g.pt(c);
+        number(cx, tail, &mut k, None, Some(c), nb::POWER, pw);
+        number(cx, tail, &mut k, None, Some(c), nb::TOUGHNESS, th);
+        number(cx, tail, &mut k, None, Some(c), nb::DAMAGE, g.objs[c.i()].damage as i128);
     }
 }
 

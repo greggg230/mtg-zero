@@ -2626,8 +2626,10 @@ pub const COMBO_EXCLUDED: [&str; 15] = [
     "an effect's duration is another",
 ];
 
-/// The known gaps (`KnownGap`; ENGINE.md 142.2): what the pairwise gate found in layouts v7 and v6,
-/// each waiting on the user's choice among the options of `encoding-options.md`'s section.
+/// The known gaps (`KnownGap`; ENGINE.md 142.2, 142.7): what the pairwise gate finds. Layout v7 has
+/// none since 142.7 (its `effects`, `counters` and `numbers` tokens closed the ten it found); layout
+/// v6 - the `mtg_eoe` game, which stays on it until EoE run 2 resumes, the user's call - keeps them
+/// all, each scoped to layout v6.
 pub fn known_gaps() -> Vec<KnownGap> {
     let ps = perturbations();
     let group = ["combat damage is prevented this turn (a rules effect)", "creatures a player controls can't block this turn (a rules effect)"];
@@ -2638,16 +2640,16 @@ pub fn known_gaps() -> Vec<KnownGap> {
     let v7_facts: Vec<&'static str> = V7_FIXED.iter().copied().filter(|&x| x != "a hand card is promised to a delve").collect();
     vec![
         KnownGap {
-            name: "which protection a permanent has (perm::PROTECTED is one any-of float)",
-            decision: "encoding-options.md 2.1 (Fable review B1)",
-            layouts: V7 | V6,
+            name: "layout v6 (mtg_eoe): which protection a permanent has (perm::PROTECTED is one any-of float)",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
             alone: vec![],
             alike: protection,
         },
         KnownGap {
-            name: "power and toughness by source: +1/+1 and -1/-1 counters and P/T effects give one P/T",
-            decision: "encoding-options.md 2.2 (Fable review B2)",
-            layouts: V7 | V6,
+            name: "layout v6 (mtg_eoe): power and toughness by source (+1/+1 and -1/-1 counters, P/T effects: one P/T)",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
             alone: vec![],
             alike: vec![
                 "+1/+1 until end of turn",
@@ -2663,9 +2665,9 @@ pub fn known_gaps() -> Vec<KnownGap> {
             ],
         },
         KnownGap {
-            name: "counter kinds: stun, keyword and named counters are one sum (perm::OTHER_COUNTERS), a keyword counter's keyword an effect's",
-            decision: "encoding-options.md 2.4 (Fable review B3)",
-            layouts: V7 | V6,
+            name: "layout v6 (mtg_eoe): counter kinds (stun, keyword and named counters one sum; a keyword counter's keyword an effect's)",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
             alone: vec![],
             alike: vec![
                 "a stun counter",
@@ -2678,42 +2680,35 @@ pub fn known_gaps() -> Vec<KnownGap> {
             ],
         },
         KnownGap {
-            name: "a granted \"sacrifice: add mana\" ability (Mod::GainSacMana, Rain of Filth) has no float",
-            decision: "encoding-options.md 2.5 (Fable review B4)",
-            layouts: V7 | V6,
+            name: "layout v6 (mtg_eoe): a granted \"sacrifice: add mana\" ability (Mod::GainSacMana) has no float",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
             alone: vec!["a land gains \"sacrifice it: add {B}\""],
             alike: vec![],
         },
         KnownGap {
-            name: "a latent ability an effect gave (Mod::GainLatent, Urza's Saga) has no float",
-            decision: "encoding-options.md 2.5 (Fable review B4)",
-            layouts: V7 | V6,
-            alone: vec!["a permanent gains a latent ability of its card"],
-            alike: vec![],
-        },
-        KnownGap {
-            name: "must-attack effects are one count (perm::MUST_ATTACK: \"each combat\" = \"that player this combat\")",
-            decision: "encoding-options.md 2.5 (Fable review B4)",
-            layouts: V7 | V6,
+            name: "layout v6 (mtg_eoe): must-attack effects are one count (perm::MUST_ATTACK)",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
             alone: vec![],
             alike: vec!["a creature attacks each combat", "a creature attacks the other player this combat if able"],
         },
         KnownGap {
-            name: "subtype effects are one count (perm::SUBTYPES: a creature type gained = all creature types)",
-            decision: "encoding-options.md 2.5 (Fable review B4)",
-            layouts: V7 | V6,
+            name: "layout v6 (mtg_eoe): subtype effects are one count (perm::SUBTYPES)",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
             alone: vec![],
             alike: vec!["a creature gains a creature type", "a creature has all creature types"],
         },
         KnownGap {
-            name: "group (rules) effects reach the row only through the permanents they affect now (Darkness's prevention: nowhere)",
-            decision: "encoding-options.md 2.6 (Fable review B4)",
-            layouts: V7 | V6,
+            name: "layout v6 (mtg_eoe): group (rules) effects reach the row only through the permanents they affect now",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
             alone: group.to_vec(),
             alike: vec![group[1], "a creature can't block", "a creature can't block with no duration"],
         },
         KnownGap {
-            name: "layout v6 (mtg_eoe, the live EoE run) lacks layout v7's facts (V7_FIXED)",
+            name: "layout v6 (mtg_eoe, EoE run 2) lacks layout v7's facts (V7_FIXED)",
             decision: "encoding-options.md 2.8 (Fable review I3: mtg_eoe onto a layout with v7's facts)",
             layouts: V6,
             alone: v7_facts,
@@ -2721,10 +2716,11 @@ pub fn known_gaps() -> Vec<KnownGap> {
             alike: vec!["a hand card is promised to a delve", "the other player learns a hand card"],
         },
         KnownGap {
-            name: "continuous effects: only the characteristics they give now are encoded (no effect, duration, controller or timestamp)",
-            decision: "encoding-options.md 2.3 (Fable review B2)",
-            layouts: V7 | V6,
-            alone: vec!["an effect's duration is another"],
+            name: "layout v6 (mtg_eoe): continuous effects, only the characteristics they give now (no effect, duration, controller or timestamp)",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
+            // (and a latent ability an effect gave, `Mod::GainLatent`: rare, none of the gate's EoE positions has one)
+            alone: vec!["an effect's duration is another", "a permanent gains a latent ability of its card"],
             alike: effects.into_iter().chain(["an effect ends"]).collect(),
         },
     ]
@@ -2822,16 +2818,18 @@ mod tests {
         let (pump, m1) = ("+1/+1 until end of turn", "a -1/-1 counter on a creature");
         let sac = "a land gains \"sacrifice it: add {B}\"";
         let (group, cant) = ("creatures a player controls can't block this turn (a rules effect)", "a creature can't block");
-        assert!(c(V7, &[red], &[black]), "two protections alike");
-        assert!(!c(V7, &[], &[red]), "a protection alone is encoded");
-        assert!(c(V7, &[], &[pump, m1]), "a pump and a -1/-1 counter cancel");
-        assert!(c(V7, &[red, pump], &[black, "+1/+1 with no duration"]), "two gaps at once");
-        assert!(c(V7, &[], &[sac]) && c(V7, &[pump], &[pump, sac]), "an alone perturbation changes no row");
-        assert!(c(V7, &[group], &[group, cant]), "a creature's can't-block under a group's");
-        assert!(!c(V7, &[], &[cant]), "a can't-block alone is encoded");
-        assert!(!c(V7, &["life + 1"], &["a stun counter"]), "unrelated changes are no known gap");
-        assert!(!c(V7, &[red], &[red]), "the same perturbations: no difference to cover");
+        // (Layout v7 has no known gap since ENGINE.md 142.7; layout v6, mtg_eoe's, keeps them.)
+        assert!(c(V6, &[red], &[black]) && !c(V7, &[red], &[black]), "two protections alike in v6 only");
+        assert!(!c(V6, &[], &[red]), "a protection alone is encoded");
+        assert!(c(V6, &[], &[pump, m1]), "a pump and a -1/-1 counter cancel");
+        assert!(c(V6, &[red, pump], &[black, "+1/+1 with no duration"]), "two gaps at once");
+        assert!(c(V6, &[], &[sac]) && c(V6, &[pump], &[pump, sac]), "an alone perturbation changes no row");
+        assert!(c(V6, &[group], &[group, cant]), "a creature's can't-block under a group's");
+        assert!(!c(V6, &[], &[cant]), "a can't-block alone is encoded");
+        assert!(!c(V6, &["life + 1"], &["a stun counter"]), "unrelated changes are no known gap");
+        assert!(!c(V6, &[red], &[red]), "the same perturbations: no difference to cover");
         assert!(c(V6, &[], &["a permanent was harnessed"]) && !c(V7, &[], &["a permanent was harnessed"]), "a v7 fact: a v6 gap only");
+        assert!(k.iter().all(|g| g.layouts == V6), "layout v7 has no known gap");
     }
 
     #[test]

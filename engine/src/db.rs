@@ -2630,6 +2630,12 @@ impl CardDb {
         self.exc_subtypes.iter().position(|&x| x == s).map(|k| k as u8)
     }
 
+    /// The subtype a copy exception's bit `k` names (`Except::subtypes`; the encoding's effects
+    /// tokens, ENGINE.md 142.7).
+    pub fn exc_subtype_of_bit(&self, k: u8) -> u16 {
+        self.exc_subtypes[k as usize]
+    }
+
     pub fn subtype_names(&self) -> &[String] {
         &self.subtypes
     }

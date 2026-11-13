@@ -80,8 +80,11 @@ fn quiet_until(g: &mut Game, stop: impl Fn(&Game) -> bool) {
 /// so (a fortiori) finite as float16.
 fn assert_features_bounded(g: &Game, what: &str) {
     for viewer in 0..2u8 {
-        let mut x = vec![0f32; NUM_FEATURES];
-        g.encode_features(viewer, &mut x);
+        // (the whole layout v7 row: the head, then every tail token's floats - ENGINE.md 142.7's
+        // counters and numbers tokens among them)
+        let row = engine::az::tail_encode::Row::of(g, viewer);
+        let x: Vec<f32> = row.head.iter().chain(row.tail.iter().flat_map(|t| t.2.iter())).copied().collect();
+        assert!(x.len() >= NUM_FEATURES);
         for (i, &v) in x.iter().enumerate() {
             assert!(
                 v.is_finite() && v.abs() <= BOUND,

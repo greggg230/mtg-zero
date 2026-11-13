@@ -7,8 +7,11 @@
 //! mana of a chosen creature type, 3,680 floats) and wider slots, the new floats at each
 //! slot's end (permanent 281 = v6's 196 + 85, `perm::V7`; hand and list 64; stack 438,
 //! `STACK_V7`; trigger 271); the tail holds the seven capped segments' objects past their
-//! head slots and nine gated tail-only segments (opponent_triggers, delayed, links,
-//! exile_offered, library_known, stack_relations, graveyard_order, face_down, my_revealed).
+//! head slots and twelve gated tail-only segments (opponent_triggers, delayed, links,
+//! exile_offered, library_known, stack_relations, graveyard_order, face_down, my_revealed;
+//! ENGINE.md 142.7: effects, counters, numbers - every continuous effect with its duration, every
+//! counter kind with its exact number, the numbers past float16's exact range). Its semantic
+//! revision is [`LAYOUT_V7_REVISION`] (the layout file's `revision`).
 //! A v6 (or v5) network widens onto it ([`v6_projection`], [`v5_projection`]); the
 //! block table below describes layouts v4-v6 and v7's globals, and the v7 offsets are
 //! [`LAY7`]'s (ENGINE.md 125.1, 125.12). The `mtg_eoe` game keeps layout v6
@@ -192,6 +195,9 @@ pub const O_GLOBALS_V7: usize = O_GLOBALS_V6 + GLOBALS_V6;
 /// are `tail_encode`'s.
 pub const NUM_FEATURES: usize = O_GLOBALS_V7 + GLOBALS_V7;
 const _: () = assert!(NUM_FEATURES == 56_384 && O_MY_PERM == 24_260 && O_STACK == 43_268 && O_MATCH == 52_288 && O_GLOBALS_V7 == 52_704);
+/// Layout v7's semantic revision (`layout_json`'s `revision`; ENGINE.md 142.7).
+pub const LAYOUT_V7_REVISION: u32 = 1;
+
 /// Layout v6's features (ENGINE.md 100.5): the `mtg_eoe` game's encoding
 /// (`layout_eoe.json`); every one is a feature of layout v7 (`v6_projection`).
 pub const NUM_FEATURES_V6: usize = v6::NUM_FEATURES;
@@ -238,7 +244,7 @@ pub struct Lay {
 pub const LAY7: Lay = Lay {
     v7: true,
     features: NUM_FEATURES,
-    off: [O_CONTEXT, O_TOPS, O_MY_PERM, O_OPP_PERM, O_HAND, O_STACK, O_TRIG, O_LIST, O_GYA, O_COMP, O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    off: [O_CONTEXT, O_TOPS, O_MY_PERM, O_OPP_PERM, O_HAND, O_STACK, O_TRIG, O_LIST, O_GYA, O_COMP, O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     w: super::tail_encode::SEG_W,
     o_match: O_MATCH,
     o_globals_v5: O_GLOBALS_V5,
@@ -248,8 +254,8 @@ pub const LAY7: Lay = Lay {
 pub const LAY6: Lay = Lay {
     v7: false,
     features: v6::NUM_FEATURES,
-    off: [O_CONTEXT, O_TOPS, v6::O_MY_PERM, v6::O_OPP_PERM, v6::O_HAND, v6::O_STACK, v6::O_TRIG, v6::O_LIST, v6::O_GYA, v6::O_COMP, v6::O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    w: [CONTEXT, TOP_W, v6::PERM_W, v6::PERM_W, v6::HAND_W, v6::STACK_W, v6::TRIG_W, v6::LIST_W, GYA_W, COMP_W, COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    off: [O_CONTEXT, O_TOPS, v6::O_MY_PERM, v6::O_OPP_PERM, v6::O_HAND, v6::O_STACK, v6::O_TRIG, v6::O_LIST, v6::O_GYA, v6::O_COMP, v6::O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    w: [CONTEXT, TOP_W, v6::PERM_W, v6::PERM_W, v6::HAND_W, v6::STACK_W, v6::TRIG_W, v6::LIST_W, GYA_W, COMP_W, COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     o_match: v6::O_MATCH,
     o_globals_v5: v6::O_GLOBALS_V5,
     o_globals_v6: v6::O_GLOBALS_V6,
@@ -3386,6 +3392,10 @@ pub fn layout_json(db: &'static CardDb) -> String {
         segments.push(tail_only(sg::GRAVEYARD_ORDER, "graveyard_order", CODE + te::go::PRESENT));
         segments.push(tail_only(sg::FACE_DOWN, "face_down", CODE + te::fd::PRESENT));
         segments.push(tail_only(sg::MY_REVEALED, "my_revealed", CODE + te::mr::PRESENT));
+        // ENGINE.md 142.7: continuous effects, counters, numbers past float16's exact range.
+        segments.push(tail_only(sg::EFFECTS, "effects", CODE + te::ef::PRESENT));
+        segments.push(tail_only(sg::COUNTERS, "counters", CODE + te::ct::PRESENT));
+        segments.push(tail_only(sg::NUMBERS, "numbers", CODE + te::nb::PRESENT));
     }
     let mut v = json!({
         "version": if eoe { 6 } else { 7 },
@@ -3411,6 +3421,11 @@ pub fn layout_json(db: &'static CardDb) -> String {
         v["option_pointers"] = json!(true);
         v["max_row_tokens"] = json!(te::MAX_ROW_TOKENS);
         v["draft"] = json!(false);
+        // The layout's semantic revision (ENGINE.md 142.7, the Fable review's I7): bumped whenever the
+        // meaning of a float or a token's field changes without the shape changing (a float starting
+        // to be written inside the layout), so that such a change is in the file a checkpoint is made
+        // with. Revision 1: 142.7's `effects`, `counters` and `numbers` (the shape changed too).
+        v["revision"] = json!(LAYOUT_V7_REVISION);
     }
     // The EoE table's identity space (ENGINE.md 105): the same layout under the name `eoe`, so
     // zero-core's guard tells an EoE network from a cube one (the cube's layout has no name).

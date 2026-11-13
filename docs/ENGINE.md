@@ -27624,7 +27624,7 @@ v6 path, `encode::LAY6`; `layout_eoe.json` unchanged), and refuses a table that 
 |---|---:|---:|
 | features (head) | 44,212 | **56,384** (`NUM_FEATURES`; 56,192 before 125.11) |
 | head tokens (`HEAD_TOKENS` = 1 + sum count) | 170 | 170 |
-| segments | 11 | 20 (11 + 9 tail-only, appended) |
+| segments | 11 | 20 (11 + 9 tail-only, appended; 23 since 142.7: `effects`, `counters`, `numbers`) |
 | permanent slot | 196 | 281 (`PERM_V7` 85; 278 before 125.11) |
 | hand / list slot | 60 | 64 |
 | stack slot | 204 | 438 (`STACK_V7` 234) |
@@ -28102,7 +28102,7 @@ knowledge encodings:
 * head **56,384** features (`NUM_FEATURES`), `HEAD_TOKENS` 170 (the globals' token and one a slot), `max_row_tokens`
   4,096, `option_pointers`; the globals 128 at 0, the bags 23 x 1,024 at 384, the match 32 at 52,288, `globals_v5`
   64 at 52,320, `globals_v6` 320 at 52,384, `globals_v7` 3,680 at 52,704;
-* 20 segments (count x width at offset): context 1 x 256 at 128; tops 6 x 54 at 23,936; my_permanents and
+* 20 segments (23 since 142.7, layout v7 revision 1: three more tail-only gated ones; count x width at offset): context 1 x 256 at 128; tops 6 x 54 at 23,936; my_permanents and
   opponent_permanents 32 x 281 at 24,260 and 33,252; hand 16 x 64 at 42,244; stack 8 x 438 at 43,268; triggers 4 x
   271 at 46,772; list 64 x 64 at 47,856; graveyard_abilities 4 x 56 at 51,952 (these seven with tails); my_companion
   and opponent_companion 1 x 56 at 52,176 and 52,232; and nine tail-only segments, gated: opponent_triggers 271,
@@ -29467,3 +29467,68 @@ player's cards, at most 64, 58.3), `go::RANK` by a graveyard.
 a0062bb5569e06d3 and the full digest 6deaf8cd9d5d3692 (both = expected), `--test az` 53 passed, the checkpoint loads and
 plays (8 games, 0 unfinished), pytest 323 passed, 1 skipped - **GATE PASSED encoding 79f242a7400d** in 1,493 s
 (`--no-mac`: the tier has no Mac step).
+
+### 142.7 Layout v7 revision 1: `effects`, `counters`, `numbers` (phase 3; the user's option (b), 2026-11-13)
+
+**Why.** The pairwise gate (142.2) found ten gaps in layouts v7 and v6; the options memo
+(`E:/mtg-zero-scratch/fable-fix/encoding-options.md`) gave three ways to close them, and the user chose (b): add the
+missing facts to layout v7 as gated tail-only segments before any v7 run freezes it, and keep `mtg_eoe` on layout v6
+until EoE run 2 resumes (the user's call then; its gaps stay known, scoped to v6).
+
+**What** (the `mtg` game only: `mtg_eoe`'s encoding and `layout_eoe.json` are untouched; the head is unchanged, 56,384
+features, `HEAD_TOKENS` 170, so the v6 and v5 projections and their digests are as before). Three tail-only segments
+appended to layout v7 (`tail_encode::seg::EFFECTS` 20, `COUNTERS` 21, `NUMBERS` 22; `TAILS` 16 -> 19; 23 segments),
+each `tail: true`, `gate: true`, its token's card code first:
+
+* **`effects`** (`tail_encode::ef`: the card code and 549 floats, 601 a token): one token per continuous effect of a resolved
+  spell or ability (`Game::effects`, CR 611.2), slot = its place in timestamp order (CR 613.7), then one per copy effect
+  (`Game::copies`, CR 707). The affected object (a reference) with its card code where the viewer sees it, or a group's
+  rules effect and its filter (`group_filter`: card types, and any player's / the effect controller's / its opponents'
+  - the lowering's three shapes; any other fails loudly, and `every_tables_effects_fit_the_effects_token` checks every
+  card of the three tables); the `Mod` (`mod_index`, one-hot over the 21 variants an effect can have) and its
+  parameters: power and toughness amounts (squashed, sign, 64 binary digits), keywords (22), protection's qualities
+  (19: W U B R G, colourless, everything, 9 card types, opponents, chosen player, coloured spells), colours, card types
+  and `replace`, up to 4 subtypes by stable name id (`name_id`, FNV-1a 32 of the interned name - the interned ids are
+  each table's own; `name_ids_are_distinct` checks the three tables' names), a granted sacrifice ability's mana, which
+  latent ability (8), whose control it was; its duration (end of turn / no duration / until its controller's next turn
+  / for as long as an object remains, with that object) and its controller. A copy effect: the copied definition's
+  identity, its exceptions (card types, subtypes, keywords, base power and toughness, a name, colours, no mana cost,
+  supertypes), double-faced, its duration. Effects end with their object (`layers.rs`: an object's effects go when it
+  changes zones, `layers.rs` and `copies_on_move`), so the tokens are bounded by the board. Every reference goes through
+  the shared `Cx::write_ref` and every card code through `Cx::seen_def`, as the other tail segments' (so a fix there - fix lane
+  I's, branch `fix/hidden-refs` - covers these tokens too).
+* **`counters`** (`tail_encode::ct`: 52 + 175 = 227 floats): one token per (object, counter kind) of every permanent (the
+  frame player's, then the other's, in slot order), every face-up exiled card and every phased-out permanent: the
+  object, the kind (+1/+1, -1/-1, stun, keyword, named, loyalty, lore; CR 122.1), a keyword counter's keyword, a named
+  counter's name (`name_id`), the number squashed / 4 and in 64 binary digits (exact).
+* **`numbers`** (`tail_encode::nb`: 52 + 187 = 239 floats): one token per number the head writes squashed whose magnitude is
+  at least `nb::BIG` = 512 - a player's life, poison, energy, experience; a permanent's power, toughness, damage -
+  with whose it is, which, its sign and 128 binary digits (power and toughness are 128-bit, ENGINE.md 100.7). Below
+  512 each of these is exact in float16 already (life / 20 to 1,280; / 8 and / 4 to the squash threshold), so the
+  shards' float16 storage loses nothing a network reads.
+* **The semantic revision** (the Fable review's I7): `layout_v7.json` carries `"revision": 1`
+  (`encode::LAYOUT_V7_REVISION`), to be bumped whenever a float's or a field's meaning changes without the shape
+  changing. zero-core's `tokens_layout` keeps only the keys it knows, so today the revision is in the layout file a run
+  starts from, not in its checkpoints nor compared by the encoding guard: making the guard keep, log and compare it is a
+  zero-core change (not made here). `layout_v6.json` / `layout_eoe.json` are frozen and carry none.
+
+**The gate.** Layout v7 has **no known gap**: `public_state::known_gaps` keeps its ten entries scoped to layout v6
+(`layouts: V6`, each named "layout v6 (mtg_eoe): ...", pointing at the memo's 2.8 - mtg_eoe stays on v6 until EoE run 2
+resumes). The single pass (480 positions, 24 s): **225 perturbations encoded, 2 deliberate limits, 0 known gaps** in
+layout v7 (142.2: 220 and 5; the five - an effect's duration, a granted sacrifice ability and latent ability, the two
+group effects - change the row now); on layout v6 the same five and v7's 30 facts stay known. The pairwise pass (133,602
+states, 34 s): **no collision in layout v7** (142.2: 115,378 pairs); 43,816 in layout v6, every one covered by its nine
+v6 entries (the v6 latent-ability gap joined the v6 effects entry: none of the 60 EoE positions has a latent ability).
+`effects_counters_and_numbers_tokens`, `name_ids_are_distinct` and `every_tables_effects_fit_the_effects_token`
+(`tests/v7_tails.rs`) read the tokens back (an effect's mod, parameters, duration and controller; protection from red
+against black, a next turn against no duration; Darkness's filter; a copy effect; 70,000 +1/+1 counters and a stun
+counter, exact; life 5,000 and a 70,002 power and toughness as numbers tokens, life 20 none).
+
+**The farm's `zero-onnx/2`.** Nothing here needs more than a layout-driven worker: the three segments are tail-only
+(no head slots, no static actions, no pointer columns, no `columns` key), their tokens are (segment id, slot, floats of
+the segment's width) like every other tail token, slots are small integers (a token's place in its segment), and
+`max_row_tokens` stays 4,096. What a worker must not assume: a fixed number of segments (23 now), fixed token widths
+(601, 227, 239 floats with the card code), that tail-only segments are rare in a row (effects and counters tokens are
+in a quarter to a half of the census's rows), or that a row's tokens per segment are bounded by a head count.
+
+**Checks**: 142.8.

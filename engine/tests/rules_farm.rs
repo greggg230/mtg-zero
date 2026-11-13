@@ -21,7 +21,7 @@ mod common;
 
 use common::db;
 use engine::az::matches::{Format, MatchState, Seat};
-use engine::az::{sample, MtgAz, NUM_FEATURES};
+use engine::az::{sample, MtgAz};
 use engine::db::{AbilitySlot, Counter};
 use engine::rng::Rng;
 use engine::testkit::Scenario;
@@ -55,10 +55,9 @@ fn options(g: &Game) -> Vec<Choice> {
     g.pending_decision().map(|d| d.options.iter().map(|o| o.choice).collect()).unwrap_or_default()
 }
 
+/// `viewer`'s whole layout v7 row (`Row::flat`: head, tail tokens, overrides; ENGINE.md 125, 142.7).
 fn encoding(g: &Game, viewer: PlayerId) -> Vec<f32> {
-    let mut x = vec![0.0f32; NUM_FEATURES];
-    g.encode_features(viewer, &mut x);
-    x
+    engine::az::tail_encode::Row::of(g, viewer).flat()
 }
 
 /// Answer decisions (`answer`, else the first option) until a player has

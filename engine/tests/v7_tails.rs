@@ -25,13 +25,14 @@ fn the_rows_constants() {
     assert_eq!(<MtgAz as SearchGame>::MAX_ROW_TOKENS, 4096);
     assert!(<MtgAz as SearchGame>::OPTION_POINTERS);
     let tails = <MtgAz as SearchGame>::TAILS;
-    assert_eq!(tails.len(), 16);
+    assert_eq!(tails.len(), 19);
     let names: Vec<&str> = tails.iter().map(|t| t.name).collect();
     assert_eq!(
         names,
         [
             "my_permanents", "opponent_permanents", "hand", "stack", "triggers", "list", "graveyard_abilities", "opponent_triggers",
-            "delayed", "links", "exile_offered", "library_known", "stack_relations", "graveyard_order", "face_down", "my_revealed"
+            "delayed", "links", "exile_offered", "library_known", "stack_relations", "graveyard_order", "face_down", "my_revealed",
+            "effects", "counters", "numbers"
         ]
     );
     // (Layout v6's game keeps no tail: ENGINE.md 124.2.)
@@ -372,6 +373,12 @@ fn every_mod_variant_has_a_perturbation_or_is_static_only() {
         let fixed = STATIC_ONLY_MODS.iter().any(|x| x.0 == v);
         assert!(effect.is_some() != fixed, "{v}: a perturbation or static only, not both");
         assert_eq!(m.static_only(), fixed, "{v}: Mod::static_only");
+        // (the effects token's `Mod` one-hot, ENGINE.md 142.7: one index a variant an effect can have)
+        if !fixed {
+            let i = te::mod_index(m);
+            assert!(i < te::ef::MODS, "{v}");
+            assert_eq!(samples.iter().filter(|x| !x.static_only() && te::mod_index(x) == i).count(), 1, "{v}: its own index");
+        }
         if let Some((_, name)) = effect {
             let p = ps.iter().find(|p| p.name == *name).unwrap_or_else(|| panic!("{v}: no perturbation {name:?}"));
             assert_eq!(p.field, "Game.effects", "{v}");
@@ -527,6 +534,146 @@ fn memory_jars_face_down_pile_shows_no_hand_order() {
         assert!(!ra.tokens(seg::FACE_DOWN).is_empty());
         assert_eq!(ra.flat(), rb.flat(), "P{v}'s rows: the pile's order is not shown");
     }
+}
+
+/// ENGINE.md 142.7: the `effects`, `counters` and `numbers` tokens on a hand-made board, both
+/// viewers: an effect's `Mod`, parameters, duration and controller; a group effect's filter; a copy
+/// effect; counters by kind with exact counts; a number past float16's exact range (and none below).
+#[test]
+fn effects_counters_and_numbers_tokens() {
+    use engine::db::{Counter, Mod, Prot};
+    use engine::public_state::perturbations;
+    use te::{ct, ef, nb};
+    let db = CardDb::cube();
+    let sp = MtgSpec::parse(r#"{"max_turns": 60}"#).unwrap();
+    let mut a = MtgAz::new_game(&sp, 2, 3).unwrap();
+    a.g = Scenario::new(db)
+        .library(0, &["Island"; 10])
+        .library(1, &["Island"; 10])
+        .battlefield(0, &["Mother of Runes", "Plains"])
+        .battlefield(1, &["Thraben Inspector", "Mountain"])
+        .counters(0, "Plains", Counter::Stun, 1)
+        .counters(1, "Thraben Inspector", Counter::P1P1, 70_000)
+        .life(1, 5_000)
+        .at(Step::Main1, 0)
+        .start();
+    let apply = |a: &mut MtgAz, name: &str| {
+        let p = perturbations().into_iter().find(|p| p.name == name).unwrap();
+        (p.apply)(a, &mut engine::rng::Rng::new(1)).unwrap_or_else(|| panic!("{name}: not applied"))
+    };
+    let tok = |a: &MtgAz, v: u8, sg: u16| Row::of(&a.g, v).tokens(sg).into_iter().map(|(s, x)| (s, x.to_vec())).collect::<Vec<_>>();
+    assert!(tok(&a, 0, seg::EFFECTS).is_empty(), "no effect yet");
+    // counters: the stun counter and the +1/+1 counters, kinds and exact counts, for both viewers
+    for v in 0..2u8 {
+        let cs = tok(&a, v, seg::COUNTERS);
+        assert_eq!(cs.len(), 2, "P{v}: two (object, kind) tokens");
+        let kind = |x: &[f32]| (0..ct::KINDS).find(|&k| x[CODE + ct::KIND + k] == 1.0);
+        let count = |x: &[f32]| (0..64).map(|b| (x[CODE + ct::COUNT_BITS + b] as u64) << b).sum::<u64>();
+        let mut got: Vec<(Option<usize>, u64)> = cs.iter().map(|(_, x)| (kind(x), count(x))).collect();
+        got.sort();
+        assert_eq!(got, [(Some(0), 70_000), (Some(2), 1)], "P{v}: +1/+1 x 70,000 and stun x 1");
+        // numbers: P1's life 5,000 and the Inspector's power and toughness past `BIG`; P0's life 20 none
+        let ns = tok(&a, v, seg::NUMBERS);
+        let which: Vec<usize> = ns.iter().map(|(_, x)| (0..nb::WHICH_N).find(|&k| x[CODE + nb::WHICH + k] == 1.0).unwrap()).collect();
+        assert_eq!(which, [nb::LIFE, nb::POWER, nb::TOUGHNESS], "P{v}");
+        let life = &ns[0].1;
+        assert_eq!((0..64).map(|b| (life[CODE + nb::BITS + b] as u64) << b).sum::<u64>(), 5_000);
+        assert_eq!(life[CODE + if v == 1 { nb::PLAYER_ME } else { nb::PLAYER_OPP }], 1.0, "P{v}: P1's life");
+    }
+    // effects: protection from red until end of turn, +1/+1 until the other player's next turn
+    apply(&mut a, "a creature gains protection from red");
+    apply(&mut a, "+1/+1 until the other player's next turn");
+    let es = tok(&a, 0, seg::EFFECTS);
+    assert_eq!(es.len(), 2);
+    let (prot, pump) = (&es[0].1[CODE..], &es[1].1[CODE..]);
+    assert_eq!((prot[ef::MOD + 3], prot[ef::PROT + 3], prot[ef::PROT], prot[ef::UNTIL]), (1.0, 1.0, 0.0, 1.0), "protection from red until end of turn");
+    assert_eq!((pump[ef::MOD + 5], pump[ef::PT_PRESENT], pump[ef::POWER + 2], pump[ef::UNTIL + 2]), (1.0, 1.0, 1.0, 1.0), "+1/+1 until a next turn");
+    assert_eq!(pump[ef::CONTROLLER_ME] + pump[ef::CONTROLLER_OPP], 1.0);
+    // which protection, which duration: different rows (the gaps of ENGINE.md 142.2)
+    let mut b = a.clone();
+    let e = b.g.effects_mut().iter_mut().find(|e| matches!(e.m, Mod::Protection(_))).unwrap();
+    e.m = Mod::Protection(Prot { colors: 1 << 2, ..Default::default() });
+    let mut c = a.clone();
+    c.g.effects_mut()[1].until = engine::Until::Forever;
+    for v in 0..2u8 {
+        assert_ne!(Row::of(&a.g, v).flat(), Row::of(&b.g, v).flat(), "P{v}: protection from red vs black");
+        assert_ne!(Row::of(&a.g, v).flat(), Row::of(&c.g, v).flat(), "P{v}: until a next turn vs no duration");
+    }
+    // a group effect: "combat damage is prevented this turn" (Darkness), its filter
+    apply(&mut a, "combat damage is prevented this turn (a rules effect)");
+    let g3 = &tok(&a, 1, seg::EFFECTS)[2].1[CODE..];
+    assert_eq!((g3[ef::GROUP], g3[ef::GROUP_TYPES + 1], g3[ef::GROUP_ANY], g3[ef::MOD + 19]), (1.0, 1.0, 1.0, 1.0), "creatures, any player's");
+    // a copy effect, after the effects
+    apply(&mut a, "a permanent becomes a copy of another");
+    let es = tok(&a, 0, seg::EFFECTS);
+    let cp = &es.last().unwrap().1[CODE..];
+    assert_eq!((cp[ef::COPY], cp[ef::UNTIL]), (1.0, 1.0), "a copy effect until end of turn");
+    assert!(cp[ef::COPY_DEF..ef::COPY_DEF + 32].iter().any(|&x| x == 1.0), "the copied definition's identity");
+}
+
+/// ENGINE.md 142.7: the stable name ids (`tail_encode::name_id`: subtypes and named counters by
+/// name, the same id in every table) of every interned name of the tables are distinct.
+#[test]
+fn name_ids_are_distinct() {
+    let mut all: std::collections::BTreeMap<u32, String> = std::collections::BTreeMap::new();
+    for db in [CardDb::cube(), CardDb::constructed(), CardDb::eoe()] {
+        for n in db.subtype_names() {
+            let id = te::name_id(n);
+            if let Some(o) = all.insert(id, n.clone()) {
+                assert_eq!(&o, n, "{o:?} and {n:?} share the name id {id:#x}");
+            }
+        }
+    }
+    assert!(all.len() > 100, "{} names", all.len());
+}
+
+/// ENGINE.md 142.7: every group (rules) effect a table's cards make (`Ext::ApplyRules`) has a
+/// filter the `effects` token writes (`tail_encode::group_filter`: else a loud failure), and every
+/// effect's subtypes fit the token (`ef::SUBS`); the three tables, every ability and mode.
+#[test]
+fn every_tables_effects_fit_the_effects_token() {
+    use engine::program::{Ext, Op};
+    let mut groups = 0;
+    for db in [CardDb::cube(), CardDb::constructed(), CardDb::eoe()] {
+        for d in 0..db.len() as engine::ids::DefId {
+            let def = db.def(d);
+            let mut abs: Vec<&engine::db::AbilityDef> = def.spell.iter().chain(def.triggers.iter().map(|t| &t.ability)).collect();
+            for a in def.activated.iter().chain(&def.hand_abilities).chain(&def.gy_abilities) {
+                if let engine::db::ActEffect::Stack(ab) = &a.effect {
+                    abs.push(ab);
+                }
+            }
+            let mut all = Vec::new();
+            for ab in abs {
+                all.push(ab);
+                if let Some(m) = &ab.modes {
+                    all.extend(m.list.iter());
+                }
+            }
+            for ab in all {
+                for op in &ab.program {
+                    let mods: Vec<&engine::db::Mod> = match op {
+                        Op::Ext(Ext::ApplyRules { filter, m, .. }) => {
+                            te::group_filter(filter);
+                            groups += 1;
+                            vec![m]
+                        }
+                        Op::Ext(Ext::Apply { mods, .. }) | Op::Ext(Ext::ReturnEventCardAs { mods }) => mods.iter().collect(),
+                        _ => vec![],
+                    };
+                    for m in mods {
+                        let n = match m {
+                            engine::db::Mod::Types { subtypes, .. } | engine::db::Mod::BecomeTypes { subtypes, .. } => subtypes.len(),
+                            _ => 0,
+                        };
+                        assert!(n <= te::ef::SUBS, "{}: an effect with {n} subtypes", def.name);
+                        assert!(!m.static_only(), "{}: an effect with a static ability's mod {m:?}", def.name);
+                    }
+                }
+            }
+        }
+    }
+    assert!(groups > 0, "no group effect in the tables");
 }
 
 /// The identities a player revealed in earlier games of a match (ENGINE.md 125.7; a limit by

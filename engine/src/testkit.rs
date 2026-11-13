@@ -1077,6 +1077,13 @@ impl Game {
         &self.extra_turns
     }
 
+    /// The continuous effects, to change by hand (ENGINE.md 142.7's tests: an effect's parameter or
+    /// duration made another).
+    #[doc(hidden)]
+    pub fn effects_mut(&mut self) -> &mut Vec<crate::layers::Effect> {
+        &mut self.effects
+    }
+
     /// The cards exiled face down, in the order they were exiled (`Game::face_down`; ENGINE.md
     /// 142.3's test: the order the encoding must not show).
     #[doc(hidden)]

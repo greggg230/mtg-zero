@@ -449,9 +449,13 @@ fn layout_v7_widens_layout_v6_exactly() {
     let read = |f: &str| -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(dir.join(f)).unwrap()).unwrap() };
     let j7 = read("layout_v7.json");
     assert_eq!((j7["option_pointers"].as_bool(), j7["max_row_tokens"].as_u64(), j7["draft"].as_bool()), (Some(true), Some(4096), Some(false)));
+    // (the layout's semantic revision, ENGINE.md 142.7; layout v6's file has none: it is frozen)
+    assert_eq!(j7["revision"].as_u64(), Some(encode::LAYOUT_V7_REVISION as u64));
+    assert!(read("layout_v6.json").get("revision").is_none());
     let segs = j7["segments"].as_array().unwrap();
     let names: Vec<&str> = segs.iter().map(|s| s["name"].as_str().unwrap()).collect();
-    assert_eq!(names.len(), 20);
+    assert_eq!(names.len(), 23);
+    assert_eq!(names[20..], ["effects", "counters", "numbers"], "ENGINE.md 142.7's segments, appended");
     let tails: Vec<&str> = segs.iter().filter(|s| s["tail"] == true).map(|s| s["name"].as_str().unwrap()).collect();
     let want: Vec<&str> = engine::az::tail_encode::TAILS.iter().map(|t| t.name).collect();
     assert_eq!(tails, want, "the tail segments are TAILS");

@@ -1064,6 +1064,7 @@
   ],
   "max_row_tokens": 4096,
   "option_pointers": true,
+  "revision": 1,
   "segments": [
     {
       "count": 1,
@@ -1468,6 +1469,60 @@
       "present": 52,
       "tail": true,
       "width": 53
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "effects",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 601
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "counters",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 227
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "numbers",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 239
     }
   ],
   "version": 7,
