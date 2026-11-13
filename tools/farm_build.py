@@ -620,7 +620,10 @@ def build_cuda(a):
     for n, (data, source) in files.items():
         st, subj = sig_of(os.path.join(d, n))
         maker = 'O=Microsoft Corporation' if n.startswith('onnxruntime') else 'O=NVIDIA Corporation'
-        if st != 'Valid' or maker not in subj:
+        # NVIDIA Authenticode-signs cuDNN but not the CUDA toolkit's libraries (cudart, cuBLAS, cuFFT: unsigned in its
+        # installers and wheels alike); those rest on PyPI's sha256 of the wheel and the wheel's RECORD (checked above)
+        unsigned_ok = maker == 'O=NVIDIA Corporation' and not n.startswith('cudnn') and st == 'NotSigned'
+        if not unsigned_ok and (st != 'Valid' or maker not in subj):
             die(f'{n}: signature {st} by {subj!r}: expected one by {maker[2:]}')
         desc[n] = {'version': file_version(os.path.join(d, n)), 'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data), 'signature': st,
                    'signer': subj, 'source': source}
@@ -666,14 +669,17 @@ def build_cuda(a):
     if 'CUDAExecutionProvider' not in ort.get('available', []):
         die(f'the pack\'s ONNX Runtime has no CUDA provider: {ort.get("available")}')
     env = dict(os.environ, PATH=os.path.abspath(d) + os.pathsep + os.environ.get('PATH', ''))  # cuDNN loads its parts by name
-    pr = subprocess.run([worker, 'probe-providers', '--runtime-dir', d, '--providers', 'cuda,cpu', '--reps', '2'], capture_output=True, text=True, env=env)
+    # the self-test on a real network (--check-net: a zero-onnx/1 export's model.onnx + reference.npz): the built-in probe
+    # graph fails CUDA's priors (2.4e-3, duplicate scatter slots) where real exports pass at ~1e-6 (zero-farm PROTOCOL 9.6)
+    net = ['--model', os.path.join(a.check_net, 'model.onnx'), '--reference', os.path.join(a.check_net, 'reference.npz')] if a.check_net else []
+    pr = subprocess.run([worker, 'probe-providers', '--runtime-dir', d, *net, '--providers', 'cuda,cpu', '--reps', '2'], capture_output=True, text=True, env=env)
     probe = json.loads(pr.stdout) if pr.returncode == 0 and pr.stdout.strip().startswith('{') else None
     if not probe or 'cpu' not in probe.get('providers', []):
         die(f'probe-providers through the pack: {pr.stdout[-500:]} {pr.stderr[-800:]}')
     if 'cuda' not in probe['providers'] and not a.no_gpu_check:
         die(f'the CUDA provider did not pass on this PC (--no-gpu-check to sign anyway): {pr.stderr[-1500:]}')
     rj['ort_build_info'] = ort['version']
-    rj['check'] = {'available': ort.get('available'), 'providers': probe['providers'],
+    rj['check'] = {'available': ort.get('available'), 'providers': probe['providers'], 'graph': probe.get('graph'),
                    'results': [{k: r.get(k) for k in ('provider', 'gpu', 'ok', 'why', 'rows_per_s', 'cpu_fallback_ops')} for r in probe.get('results', [])]}
     with open(os.path.join(d, 'runtime.json'), 'w', encoding='utf-8', newline='') as f:
         json.dump(rj, f, indent=1)
@@ -733,6 +739,8 @@ def main():
     ap.add_argument('--wheel-dir', help='--pack cuda: where the PyPI wheels are cached (default <target>/farm-build/wheels)')
     ap.add_argument('--zst-level', type=int, default=19, help='--pack cuda: the zstd level of the compressed copies (PROTOCOL 9.3)')
     ap.add_argument('--no-gpu-check', action='store_true', help='--pack cuda: sign even if the CUDA provider fails on this PC')
+    ap.add_argument('--check-net', help='--pack cuda: a directory with a real export (model.onnx + reference.npz) for the CUDA '
+                    'self-test (the built-in probe graph fails CUDA)')
     ap.add_argument('--winml-version', help=f'--pack winml: the Microsoft.Windows.AI.MachineLearning version (default {WINML_VERSION})')
     ap.add_argument('--winml-nupkg', help='--pack winml: a local .nupkg instead of nuget.org')
     ap.add_argument('--ort-dll')
