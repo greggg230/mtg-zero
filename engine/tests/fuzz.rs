@@ -2507,23 +2507,27 @@ fn check_information_set(g: &Game, viewer: u8, seed: u64, rng: &mut Rng) {
     b.determinize(viewer, &mut Rng::new(s ^ 0x5EED));
     let (mut la, mut lb) = (Vec::new(), Vec::new());
     IS_WALKS.fetch_add(1, Ordering::Relaxed);
+    // (A failure's message: the walk's actions as each world describes them, both worlds' stack references and logs.)
+    let mut path: Vec<String> = Vec::new();
+    let tell = |a: &Game, b: &Game, path: &[String]| {
+        let log = |x: &Game| x.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("\n");
+        format!(
+            "the checkpoint's decider P{}, the walk's viewer P{viewer}; decisions {:?} / {:?}\nthe walk's actions: {path:?}\nstack references: {} / {}\n{}\n----\n{}",
+            g.to_move().map_or(9, |p| p),
+            a.pending_decision(),
+            b.pending_decision(),
+            stack_refs(a, viewer),
+            stack_refs(b, viewer),
+            log(a),
+            log(b)
+        )
+    };
     for step in 0..25 {
         // Equal keys: the game is over in both worlds or in neither (its end is public; ENGINE.md
         // 148 - one world over used to end the walk silently, as a differing decider).
-        assert_eq!(
-            a.is_over(),
-            b.is_over(),
-            "seed {seed} step {step}: same keys, the game over in one world of P{viewer} only ({:?} / {:?})
-{}
-----
-{}",
-            a.outcome(),
-            b.outcome(),
-            a.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("
-"),
-            b.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("
-")
-        );
+        if a.is_over() != b.is_over() {
+            panic!("seed {seed} step {step}: same keys, the game over in one world only ({:?} / {:?}); {}", a.outcome(), b.outcome(), tell(&a, &b, &path));
+        }
         a.legal_actions(&mut la);
         b.legal_actions(&mut lb);
         if a.to_move() != b.to_move() || la != lb {
@@ -2539,35 +2543,31 @@ fn check_information_set(g: &Game, viewer: u8, seed: u64, rng: &mut Rng) {
             );
             return;
         }
-        assert_eq!(a.view_of(viewer), b.view_of(viewer), "seed {seed} step {step}: same keys, different views
-{}
-----
-{}", a.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("
-"), b.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("
-"));
+        let (va, vb) = (a.view_of(viewer), b.view_of(viewer));
+        if va != vb {
+            let i = (0..va.len().min(vb.len())).find(|&i| va[i] != vb[i]).unwrap_or(va.len().min(vb.len()));
+            panic!(
+                "seed {seed} step {step}: same keys, different views (first at {i} of {} / {}: {:?} / {:?}); {}",
+                va.len(),
+                vb.len(),
+                va.get(i),
+                vb.get(i),
+                tell(&a, &b, &path)
+            );
+        }
         if a.is_over() {
             assert_eq!(a.outcome(), b.outcome(), "seed {seed} step {step}: same keys, different outcomes");
             return;
         }
         let (ra, rb) = (engine::az::tail_encode::Row::of(&a, viewer), engine::az::tail_encode::Row::of(&b, viewer));
         if let Some(d) = row_difference(&ra, &rb) {
-            panic!(
-                "seed {seed} step {step}: same keys, different rows of P{viewer} ({d}); decisions {:?} / {:?}
-{}
-----
-{}",
-                a.pending_decision(),
-                b.pending_decision(),
-                a.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("
-"),
-                b.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("
-")
-            );
+            panic!("seed {seed} step {step}: same keys, different rows of P{viewer} ({d}); {}", tell(&a, &b, &path));
         }
         if step > 0 {
             IS_STEPS.fetch_add(1, Ordering::Relaxed);
         }
         let act = la[rng.below(la.len() as u32) as usize];
+        path.push(format!("{act}: {} / {}", a.describe_action(act).unwrap_or_default(), b.describe_action(act).unwrap_or_default()));
         let (mut ka, mut kb) = (Vec::new(), Vec::new());
         a.apply(act, &mut ka).unwrap();
         b.apply(act, &mut kb).unwrap();
@@ -2575,6 +2575,27 @@ fn check_information_set(g: &Game, viewer: u8, seed: u64, rng: &mut Rng) {
             return; // different outcomes, told apart by the keys
         }
     }
+}
+
+/// The stack's items with the objects they refer to (an ability's source, the event's objects): each
+/// reference's slot and incarnation, whether it is live, the slot's zone and card, and whether `viewer`
+/// knows the card (a failure's message, ENGINE.md 148).
+fn stack_refs(g: &Game, viewer: u8) -> String {
+    let r = |o: engine::ids::ObjRef| {
+        let ob = g.obj(o.idx);
+        format!("#{}.{} live {} {:?} {} known {}", o.idx.i(), o.inc, g.live(o), ob.zone, g.db().def(ob.def).name, g.knows(viewer, o.idx))
+    };
+    g.stack()
+        .iter()
+        .map(|s| {
+            let what = match s.kind {
+                engine::game::StackKind::Ability { source, .. } => format!("ability of {}", r(source)),
+                engine::game::StackKind::Spell { card } => format!("spell {}", g.name(card)),
+            };
+            format!("[{what}; event objects {} / {}]", s.ev.obj.map_or("-".to_string(), r), s.ev.obj2.map_or("-".to_string(), r))
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[test]
@@ -3197,7 +3218,14 @@ fn check_constructed_tilted(g: &engine::az::MtgAz, viewer: u8, seed: u64, step: 
     az_encode(g, viewer, &mut x0);
     az_encode(&d, viewer, &mut x1);
     if let Some(i) = (0..x0.len()).find(|&i| x0[i] != x1[i]) {
-        panic!("match {seed}: a deck-tilted world changed the encoding of P{viewer} at {i}");
+        panic!(
+            "match {seed}: a deck-tilted world changed the encoding of P{viewer} at {i} ({} / {}); decision {:?}; stack references {} / {}",
+            x0[i],
+            x1[i],
+            g.pending_decision(),
+            stack_refs(&g.g, viewer),
+            stack_refs(&d.g, viewer)
+        );
     }
     check_constructed_world(g, &d, viewer, seed, &mut HiddenStats::default());
     if let Some((decks, _)) = &cached {
