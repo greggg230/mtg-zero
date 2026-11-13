@@ -535,21 +535,32 @@ impl Game {
         }
     }
 
-    /// Lethal damage for assignment purposes (CR 510.1c-d, 702.2c): what the
-    /// blocker still needs, counting damage already assigned this step
-    /// (exact, in `Wide`; at least 0).
+    /// Lethal damage for assignment purposes (CR 510.1c-d, 702.19b, 702.2c):
+    /// what blocker `b` still needs from attacker `att` (exact, in `Wide`; at
+    /// least 0). 702.19b counts the damage already marked on it and the
+    /// damage assigned to it this step; 702.2c makes any nonzero amount
+    /// assigned by a source with deathtouch lethal. So a blocker already
+    /// assigned lethal damage, or with lethal damage marked, needs nothing,
+    /// whether `att` has deathtouch or not; otherwise a deathtouch attacker
+    /// needs 1, another the toughness left (ENGINE.md 151.3).
     pub(crate) fn lethal_needed(&self, att: CardIdx, b: CardIdx) -> crate::num::Wide {
-        let assigned: crate::num::Wide = self
-            .combat_dmg
-            .iter()
-            .filter(|&&(_, t, _)| t == Target::Obj(self.obj_ref(b)))
-            .map(|&(_, _, n)| n as crate::num::Wide)
-            .sum();
-        let have = self.objs[b.i()].damage as crate::num::Wide + assigned;
-        if self.has_kw(att, Kw::Deathtouch) {
-            return if assigned > 0 { 0 } else { 1 };
+        let to_b = Target::Obj(self.obj_ref(b));
+        let mut assigned: crate::num::Wide = 0;
+        let mut by_deathtouch = false;
+        for &(s, t, n) in &self.combat_dmg {
+            if t == to_b {
+                assigned += n as crate::num::Wide;
+                by_deathtouch |= n > 0 && self.has_kw(s, Kw::Deathtouch);
+            }
         }
-        (self.toughness(b) - have).max(0)
+        let left = (self.toughness(b) - (self.objs[b.i()].damage as crate::num::Wide + assigned)).max(0);
+        if left == 0 || by_deathtouch {
+            0
+        } else if self.has_kw(att, Kw::Deathtouch) {
+            1
+        } else {
+            left
+        }
     }
 
     /// The attacking player divides `att`'s damage among its blockers in

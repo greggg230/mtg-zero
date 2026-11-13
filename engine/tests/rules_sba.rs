@@ -3,6 +3,7 @@
 mod common;
 
 use common::db;
+use engine::db::Kw;
 use engine::game::EndReason;
 use engine::testkit::Scenario;
 use engine::{Choice, DecisionKind, Game, Step, Target, Zone};
@@ -125,6 +126,69 @@ fn cr_704_5h_deathtouch_damage_destroys() {
     assert_eq!(g.count_in(1, "Test Deathtouch", Zone::Graveyard), 1);
     assert_eq!(g.obj(dt).zone, Zone::Graveyard);
     assert_eq!(g.life(1), 17, "trample: 3 excess damage to the player");
+}
+
+/// CR 704.5h destroys a creature for damage dealt by a source with
+/// deathtouch "since the last time state-based actions were checked", and a
+/// check that performs nothing is still a check (704.3). Test Indestructible
+/// blocks Test Giant (5/5 trample, deathtouch) and is dealt 1 deathtouch
+/// damage: the check after combat damage performs nothing (indestructible).
+/// Then it loses all its abilities (The Wondrous Wasp's trigger), and the
+/// next check doesn't destroy it: a 2/2 with 1 damage marked, dealt no
+/// deathtouch damage since the last check (the rules check's F1: the record
+/// outlived a check that performed nothing; ENGINE.md 151.1).
+#[test]
+fn cr_704_5h_deathtouch_damage_before_the_last_check_does_not_destroy() {
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Island"; 5])
+        .library(1, &["Island"; 5])
+        .battlefield(0, &["Test Giant", "Island", "Island"])
+        .hand(0, &["The Wondrous Wasp"])
+        .battlefield(1, &["Test Indestructible"])
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let giant = g.card(0, "Test Giant", Zone::Battlefield);
+    let ind = g.card(1, "Test Indestructible", Zone::Battlefield);
+    g.choose(Choice::Card(giant));
+    g.pass(); // no more attackers
+    g.pass_until(|g| g.kind() == Some(DecisionKind::DeclareBlockers));
+    g.choose(Choice::Card(giant));
+    // Trample and deathtouch: 1 is lethal; 1 to the blocker, 4 to P1.
+    g.pass_until(|g| g.kind() == Some(DecisionKind::AssignDamage));
+    g.choose(Choice::Number(1));
+    while g.kind() == Some(DecisionKind::AssignDamage) {
+        let c = g.pending_decision().unwrap().options[0].choice;
+        g.choose(c);
+    }
+    assert_eq!((g.turn().step, g.kind()), (Step::CombatDamage, Some(DecisionKind::Priority)), "{}", g.log_lines().join("\n"));
+    assert_eq!((g.obj(ind).zone, g.obj(ind).damage, g.life(1)), (Zone::Battlefield, 1, 16));
+    // The Wondrous Wasp (flash): "tap up to one target creature. It loses
+    // all abilities for as long as The Wondrous Wasp remains on the
+    // battlefield."
+    let wasp = g.card(0, "The Wondrous Wasp", Zone::Hand);
+    g.choose(Choice::Cast(wasp));
+    for _ in 0..100 {
+        if g.stack().is_empty() && g.kind() == Some(DecisionKind::Priority) {
+            break;
+        }
+        match g.kind() {
+            Some(DecisionKind::Priority) => {
+                g.pass();
+            }
+            Some(DecisionKind::Target) => {
+                let t = g.tgt(ind);
+                g.choose(t);
+            }
+            _ => {
+                let c = g.pending_decision().unwrap().options[0].choice;
+                g.choose(c);
+            }
+        }
+    }
+    assert!(g.obj(ind).tapped && !g.has_kw(ind, Kw::Indestructible), "{}", g.log_lines().join("\n"));
+    assert_eq!(g.obj(ind).zone, Zone::Battlefield, "destroyed for deathtouch damage dealt before the last check\n{}", g.log_lines().join("\n"));
+    assert_eq!(g.obj(ind).damage, 1);
 }
 
 #[test]

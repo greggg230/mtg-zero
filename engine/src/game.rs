@@ -89,7 +89,8 @@ pub struct Obj {
     /// Marked damage (CR 120.3e): exact within `num::AMOUNT_MAX`, past it
     /// the game aborts (ENGINE.md 100.7).
     pub damage: u64,
-    /// Dealt damage by a deathtouch source since the last SBA check (704.5h).
+    /// Dealt damage by a deathtouch source since the last SBA check (704.5h;
+    /// every check ends it, `Game::clear_deathtouch_records`).
     pub deathtouched: bool,
     /// Turn number when its controller gained control (CR 302.6).
     pub control_since: u32,
@@ -3366,11 +3367,11 @@ impl Game {
                     } else {
                         self.exact_count(self.objs[r.idx.i()].damage as crate::num::Wide + amt as crate::num::Wide, "marked damage")
                     };
+                    // (A heal removes damage marked, not 704.5h's record of
+                    // damage dealt by a deathtouch source since the last
+                    // check, ENGINE.md 151.1.)
                     let o = &mut self.objs[r.idx.i()];
                     o.damage = marked;
-                    if heals {
-                        o.deathtouched = false;
-                    }
                     if src.deathtouch {
                         o.deathtouched = true;
                     }

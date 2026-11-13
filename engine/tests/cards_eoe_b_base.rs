@@ -180,6 +180,37 @@ fn blooming_stinger_gives_another_creature_you_control_deathtouch() {
     assert!(g.has_kw(bear, Kw::Deathtouch));
 }
 
+/// CR 704.5h, 702.90c: damage from a source with infect and deathtouch puts
+/// -1/-1 counters on a creature instead of marking damage, and the creature
+/// has still been dealt damage by a source with deathtouch: it is
+/// destroyed. Inkmoth Nexus animated ("{1}: ... a 1/1 Phyrexian Blinkmoth
+/// artifact creature with flying and infect") and given deathtouch by
+/// Blooming Stinger's enters trigger attacks; Test Reacher (1/3, reach)
+/// blocks, takes one -1/-1 counter and dies (the rules check's F2: the
+/// engine read deathtouch only with damage marked; ENGINE.md 151.2).
+#[test]
+fn cr_704_5h_702_90c_infect_damage_from_a_deathtouch_source_destroys() {
+    let mut g = scen()
+        .battlefield(0, &["Inkmoth Nexus", "Island", "Forest", "Forest"])
+        .hand(0, &["Blooming Stinger"])
+        .battlefield(1, &["Test Reacher"])
+        .at(Step::Main1, 0)
+        .start();
+    let ink = bf(&g, 0, "Inkmoth Nexus");
+    let reacher = bf(&g, 1, "Test Reacher");
+    let island = [act(bf(&g, 0, "Island"), 0)];
+    start_with(&mut g, act(ink, 1), move |g| pick(g, &island));
+    settle(&mut g);
+    assert!(g.is_creature(ink) && g.has_kw(ink, Kw::Infect) && !g.obj(ink).tapped);
+    let forests: Vec<Choice> = g.permanents_of(0).filter(|&c| g.name(c) == "Forest").map(|c| act(c, 0)).collect();
+    let prefs = [g.tgt(ink), forests[0], forests[1]];
+    cast_and_resolve(&mut g, 0, "Blooming Stinger", move |g| pick(g, &prefs));
+    assert!(g.has_kw(ink, Kw::Deathtouch), "{}", g.log_lines().join("\n"));
+    run_until(&mut g, |g| g.turn().step == Step::EndCombat, move |g| pick(g, &[Choice::Card(ink)]));
+    assert_eq!(g.obj(reacher).zone, Zone::Graveyard, "dealt damage by a deathtouch source (as -1/-1 counters)\n{}", g.log_lines().join("\n"));
+    assert_eq!(g.obj(ink).zone, Zone::Graveyard, "the Reacher's 1 damage");
+}
+
 /// Weftblade Enhancer: "When this creature enters, put a +1/+1 counter on
 /// each of up to two target creatures."
 #[test]

@@ -150,6 +150,45 @@ fn cr_702_19c_trample_assigns_excess_only_after_lethal() {
     assert_eq!(g.count_in(1, "Test Bear", Zone::Graveyard), 1);
 }
 
+/// CR 702.19b: lethal damage for trample's assignment takes into account
+/// the damage already marked on a blocker; 702.2c makes any nonzero amount
+/// from a deathtouch source lethal, it doesn't make an already lethal
+/// amount short. Test Giant (5/5 trample, deathtouch) is blocked by Test
+/// Indestructible (2/2), which took 3 damage from Lightning Bolt in the
+/// declare blockers step: it has lethal damage marked, so the Giant may
+/// assign it anything from 0 and the rest to the player (the rules check's
+/// F3: 0 wasn't offered; ENGINE.md 151.3).
+#[test]
+fn cr_702_19b_deathtouch_trampler_counts_lethal_damage_already_marked() {
+    let mut g = scen()
+        .battlefield(0, &["Test Giant", "Mountain"])
+        .hand(0, &["Lightning Bolt"])
+        .battlefield(1, &["Test Indestructible"])
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let giant = g.card(0, "Test Giant", Zone::Battlefield);
+    let ind = g.card(1, "Test Indestructible", Zone::Battlefield);
+    g.choose(Choice::Card(giant));
+    g.pass_until(|g| g.kind() == Some(DecisionKind::DeclareBlockers));
+    g.choose(Choice::Card(giant));
+    assert_eq!(g.turn().step, Step::DeclareBlockers);
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    let t = g.tgt(ind);
+    g.choose(t);
+    g.pass_until(|g| g.stack().is_empty());
+    assert_eq!((g.obj(ind).zone, g.obj(ind).damage), (Zone::Battlefield, 3));
+    g.pass_until(|g| g.kind() == Some(DecisionKind::AssignDamage));
+    assert_eq!(g.kind(), Some(DecisionKind::AssignDamage));
+    let opts = g.offered();
+    assert_eq!(opts.first(), Some(&Choice::Number(0)), "0 to a blocker with lethal damage marked: {:?}", g.options_desc());
+    assert_eq!(opts.len(), 6, "0..=5: {:?}", g.options_desc());
+    g.choose(Choice::Number(0));
+    finish_combat(&mut g);
+    assert_eq!(g.life(1), 15, "all 5 trample over");
+    assert_eq!(g.obj(ind).zone, Zone::Battlefield);
+}
+
 #[test]
 fn cr_702_4_first_strike_deals_damage_first() {
     let mut g = at_attack(&["Test Striker"], &["Test Bear"]);

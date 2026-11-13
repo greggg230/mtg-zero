@@ -47,14 +47,41 @@ impl Game {
                 continue;
             }
             let t = self.toughness(c);
-            let o = &self.objs[c.i()];
             if t <= 0 {
                 zero.push(c);
-            } else if (o.damage as crate::num::Wide >= t || (o.deathtouched && o.damage > 0)) && !self.indestructible(c) {
+            } else if self.lethal_or_deathtouch(c, t) && !self.indestructible(c) {
                 destroyed.push(c);
             }
         }
         (zero, destroyed)
+    }
+
+    /// CR 704.5g: the damage marked on creature `c` is at least its toughness
+    /// `t` (> 0); 704.5h: it has been dealt damage by a source with deathtouch
+    /// since the last time state-based actions were checked. 704.5h reads the
+    /// record alone: damage from a source with infect and deathtouch is
+    /// -1/-1 counters, not marked damage (702.90c), and still destroys
+    /// (ENGINE.md 151.2).
+    fn lethal_or_deathtouch(&self, c: CardIdx, t: crate::num::Wide) -> bool {
+        let o = &self.objs[c.i()];
+        o.damage as crate::num::Wide >= t || o.deathtouched
+    }
+
+    /// The record of deathtouch damage (`Obj::deathtouched`; 704.5h: "since
+    /// the last time state-based actions were checked") ends with every
+    /// check, whether the check performs anything or not (704.3), for every
+    /// object (a phased-out permanent's too: the checks go on while it is
+    /// out, 702.26d). Nothing else ends it but a zone change (a new object,
+    /// 400.7): not damage removal (regeneration 701.19a, the cleanup step
+    /// 514.2, Wolverine's heal), which removes the damage marked, not the
+    /// fact that the damage was dealt (ENGINE.md 151.1).
+    pub(crate) fn clear_deathtouch_records(&mut self) {
+        for &c in &self.battlefield {
+            self.objs[c.i()].deathtouched = false;
+        }
+        for &c in &self.w3.phased {
+            self.objs[c.i()].deathtouched = false;
+        }
     }
 
     /// A cheap test (no allocation) that no SBA applies: nobody lost, no
@@ -80,9 +107,8 @@ impl Game {
             }
             let ty = self.types_of(c);
             if ty & crate::db::types::CREATURE != 0 {
-                let o = &self.objs[c.i()];
                 let t = self.toughness(c);
-                if t <= 0 || ((o.damage as crate::num::Wide >= t || (o.deathtouched && o.damage > 0)) && !self.indestructible(c)) {
+                if t <= 0 || (self.lethal_or_deathtouch(c, t) && !self.indestructible(c)) {
                     return true;
                 }
             }
@@ -250,6 +276,9 @@ impl Game {
             }
         }
         if keep.is_empty() && !self.sba_possible() {
+            // (A check that performs nothing is still a check: 704.5h's
+            // record ends here too, ENGINE.md 151.1.)
+            self.clear_deathtouch_records();
             if !self.waiting.is_empty() {
                 self.agenda.push(Task::SbaCheck { keep });
                 self.agenda.push(Task::PutTriggers { page: crate::decision::Page::FIRST });
@@ -382,9 +411,87 @@ impl Game {
             let objs = &self.objs;
             self.prepared.retain(|&(s, c)| objs[s.idx.i()].inc == s.inc && objs[s.idx.i()].zone == Zone::Battlefield && objs[c.i()].zone == Zone::Exile);
         }
-        for &c in &self.battlefield {
-            self.objs[c.i()].deathtouched = false;
-        }
+        self.clear_deathtouch_records();
         !all.is_empty() || !stray.is_empty() || !pairs.is_empty() || !unattach.is_empty() || !dungeons.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::db::CardDb;
+    use crate::flow::Task;
+    use crate::game::{Mark, Step};
+    use crate::ids::{Target, Zone};
+    use crate::testkit::Scenario;
+
+    /// A cube creature with no keywords, statics or triggers (2/2).
+    fn vanilla() -> &'static str {
+        let db = CardDb::cube();
+        (0..db.num_cards())
+            .map(|i| db.def(i as crate::ids::DefId))
+            .find(|d| {
+                !d.token
+                    && d.front.is_none()
+                    && d.back.is_none()
+                    && db.id(&d.name).is_some()
+                    && d.is(crate::db::types::CREATURE)
+                    && !d.is(crate::db::types::PLANESWALKER)
+                    && d.keywords.0 == 0
+                    && d.statics.is_empty()
+                    && d.triggers.is_empty()
+                    && d.pt_cda.is_none()
+                    && d.power == Some(2)
+                    && d.toughness == Some(2)
+            })
+            .map(|d| d.name.as_str())
+            .expect("a vanilla 2/2 in the cube")
+    }
+
+    /// A player is about to receive priority: state-based actions are
+    /// checked (CR 117.5, 704.3).
+    fn check(g: &mut crate::game::Game) {
+        g.pending = None;
+        g.agenda.push(Task::Priority);
+        g.advance();
+    }
+
+    /// CR 704.5h, 701.19a: regeneration removes the damage marked on a
+    /// creature, not 704.5h's record that a source with deathtouch dealt it
+    /// damage since the last state-based check. Regenerated by a destroy
+    /// effect between the damage and the next check (one resolution can do
+    /// both), the creature is destroyed by that check; regenerated by the
+    /// check's own destruction, it survives the next one (ENGINE.md 151.1).
+    #[test]
+    fn cr_704_5h_701_19a_regeneration_keeps_the_record_of_deathtouch_damage_until_the_check() {
+        let name = vanilla();
+        for destroy_effect_first in [true, false] {
+            let mut g = Scenario::new(CardDb::cube())
+                .spec(|s| s.auto_single = false)
+                .library(0, &["Island"; 5])
+                .library(1, &["Island"; 5])
+                .battlefield(0, &[name])
+                .at(Step::Main1, 0)
+                .start();
+            let c = g.card(0, name, Zone::Battlefield);
+            let r = g.obj_ref(c);
+            g.marks.push((r, Mark::RegenShield));
+            let mut src = g.damage_source_of(c);
+            (src.deathtouch, src.infect, src.lifelink) = (true, false, false);
+            assert_eq!(g.deal_damage(src, Target::Obj(r), 1), 1);
+            assert!(g.objs[c.i()].deathtouched);
+            if destroy_effect_first {
+                g.destroy(c);
+                assert_eq!((g.objs[c.i()].zone, g.objs[c.i()].damage, g.objs[c.i()].tapped), (Zone::Battlefield, 0, true), "regenerated");
+                assert!(g.objs[c.i()].deathtouched, "the damage marked is removed, not the record");
+                check(&mut g);
+                assert_eq!(g.objs[c.i()].zone, Zone::Graveyard, "no shield left for 704.5h");
+            } else {
+                check(&mut g);
+                assert_eq!((g.objs[c.i()].zone, g.objs[c.i()].damage, g.objs[c.i()].tapped), (Zone::Battlefield, 0, true), "regenerated by the check");
+                assert!(!g.objs[c.i()].deathtouched, "the check ended the record");
+                check(&mut g);
+                assert_eq!(g.objs[c.i()].zone, Zone::Battlefield);
+            }
+        }
     }
 }

@@ -410,9 +410,11 @@ impl Game {
         let r = self.obj_ref(c);
         let Some(i) = self.marks.iter().position(|&(o, m)| o == r && m == Mark::RegenShield) else { return false };
         self.marks.remove(i);
+        // (Damage marked, not 704.5h's record of deathtouch damage dealt
+        // since the last check: regenerated outside a check, the creature
+        // is destroyed again by the next one, ENGINE.md 151.1.)
         let o = &mut self.objs[c.i()];
         o.damage = 0;
-        o.deathtouched = false;
         // CR 506.4: removed from combat.
         o.attacking = false;
         o.blocked = false;
@@ -433,9 +435,7 @@ impl Game {
         }
         for i in 0..self.w3.phased.len() {
             let c = self.w3.phased[i];
-            let o = &mut self.objs[c.i()];
-            o.damage = 0;
-            o.deathtouched = false;
+            self.objs[c.i()].damage = 0;
         }
     }
 
