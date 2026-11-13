@@ -30338,6 +30338,218 @@ fuzz_random_matches`).
 
 Section number: 148 is lane G's of the Fable-fix lanes (COMMON.md's table).
 
+## 150. Rule-derived invariants after every fuzz step (`engine/src/rules_check.rs`; branch `fuzz-invariants`, 2026-11-12)
+
+Branch `fuzz-invariants` from main 267ae603; zero-core pin unchanged. (Section number: 131-149 are the Fable-fix
+lanes' of 2026-11-12, `E:/mtg-zero-scratch/fable-fix/COMMON.md`.) No engine change: the behaviour digests are
+main's (150.6).
+
+**Why.** Every check the fuzzer ran before (`testkit::check_invariants`, the information sets, option completion,
+replay, clones, the bounded encodings) is about the engine's own consistency: a rule implemented wrongly but
+consistently passes them all. These checks are written from the Comprehensive Rules (the edition of
+`rules_check::CR_EDITION`, 2026-11-06), cited by number, and read the state only through characteristics (the
+layer system's answers: types, power and toughness, keywords, counters, control) and the engine's records of rules
+facts (damage marked, which attacker a creature blocks, the stack's objects). They never decide how a rule applies
+from the engine's own procedure (`sba_needed`, `can_block`, ...): each states the rule itself.
+
+### 150.1 The module
+
+`engine/src/rules_check.rs` (`pub mod rules_check`). Nothing in the engine calls it: it only reads a `Game`, so it
+costs nothing in release builds and play.
+
+| Item | What |
+|---|---|
+| `RulesCheck` | per game: `new(&g)` at any state (its first `step` compares with that state), `step(&g)` after every `apply`. It stops after its first violation (the game's later states may follow from it). `forced_chance(&g)` before a transition that replays forced chance outcomes (150.4) |
+| `check_state(&g)` | the one-state checks of a lone state |
+| `MatchCheck` | a best-of-three's games through `az::MtgAz` (a new `RulesCheck` at each game's first state; none while sideboarding or choosing decks) |
+| `DraftCheck` | a team draft event's steps (`az::draft::TeamDraftAz`) |
+| `Stats` | how often each kind of check ran (a check that never ran tested nothing); the fuzz prints them |
+| `Violation` | the rule's number and what was seen |
+
+**Exactness** (the owner's rule: no approximations). Every check holds for every state the rules allow, with every
+exception they make; a check whose exception can't be decided exactly from the state is left out (150.3). Checks
+that compare two states one step apart apply only where the rules fix the outcome between them: when no spell or
+ability resolved in between or was resolving at either state (so no effect was created), a property only effects
+may change must be unchanged. That narrows *when* such a check applies, never *what* it accepts.
+
+### 150.2 The invariants
+
+| Rules | Checked | When |
+|---|---|---|
+| 108.1, 108.3, 400.11b, 100.4, 400.11a, 702.139 | each card keeps its owner and stays the card it is whatever face is up (712.1, 709.1, 715.1; a face-down permanent is its card, 708.2; copy effects change copiable values, not the card, 707.2); no card enters the game from nowhere (only a revealed companion, 702.139a); each player's cards in and outside the game are the ones they started with | every step |
+| 704.5d-e, 111.8, 707.10a, 723.3c | at a state-based check no token outside the battlefield, no copy of a spell outside the stack, no copy of a card outside the stack and the battlefield (a prepared permanent's copy in exile excepted); a token that left the battlefield never moves again or comes back; a copy of a spell that left the stack never comes back | at priority / every step |
+| 117.5, 603.3 | no triggered ability waits when a player receives priority | at priority |
+| 704.5a-c | no player at 0 or less life, drawn from an empty library, or at 10 poison | at priority |
+| 704.5f, 704.5g, 702.12b | no creature with toughness 0 or less; none with lethal damage unless indestructible | at priority |
+| 704.5h, 702.2b, 702.90c | no creature dealt damage by a deathtouch source since the last check (infect's unmarked damage too) unless indestructible; and the record of such damage is clear right after a check (F1) | at priority |
+| 704.5i, 306.5b | no planeswalker with 0 loyalty | at priority |
+| 704.5j, 201.2a | the legend rule, per controller (a nameless object shares no name) | at priority |
+| 704.5k | at most one world permanent | at priority |
+| 704.5m, 303.4c-d, 702.103f; 704.5n, 301.5c, 702.16d; 704.5p | Auras attached legally (to what the enchant ability allows, not itself, not protected; reanimating Auras' records); Equipment and Fortifications to a legal permanent; no creature, battle or non-attachment attached (reconfigure, 702.151b) | at priority |
+| 704.5q | no permanent with both +1/+1 and -1/-1 counters | at priority |
+| 704.5s, 715.2d | no finished Saga without a pending chapter ability | at priority |
+| 704.5t, 309.6 | no venture marker on a bottommost room without a pending room ability | at priority |
+| 704.5z | Roles (none in the engine's cards: checked as written) | at priority |
+| 704.5v-y | a battle fails loudly: defense and protectors aren't modelled | at priority |
+| 502.4 | no priority in the untap step (nor before the first turn) | every decision |
+| 104.3, 104.2a | a player who lost ends the two-player game | every step |
+| 405.2 | objects go on top of the stack; the stack never reorders; nothing comes back | every step |
+| 608.1, 405.5 | only the top object resolves: an object below one that stayed leaves only by an effect of a resolving object | every step |
+| 405.1, 700.2, 107.3a, 405.4, 115.7 | a stack object's kind, modes and X never change; its controller and targets only by an effect | settled objects, both states |
+| 500.1, 500.8, 514.3a | steps in order; an earlier step only for an added combat phase (then the phase after it) | every step |
+| 102.1 | a turn's active player is fixed | every step |
+| 500.7 | the next turn is the most recent extra turn's player, else the player after the most recent normal turn | new turns with nothing resolved between and no "skip that turn" choice (614.10) |
+| 103.8 | the first turn is the starting player's | the first turn |
+| 500.5 | mana empties between steps (restricted mana too) | the first state of a step, nothing cast since |
+| 119.7 | a player who can't gain life never ends with more life | every step |
+| 508.1, 508.1a, 302.6, 702.3b, 702.10b | the declare-attackers decision is the active player's, and each creature it offers is that player's, offered once, and may attack (untapped, controlled since the turn began or hasty, no defender unless an effect allows) | each decision |
+| 509.1, 509.1a-b, 702.9b, 702.17b, 702.28b, 702.14c, 702.16f | the declare-blockers decision is the defending player's; each creature asked to block is that player's untapped creature that may block, and each attacker offered to it is attacking and may be blocked by it (flying and reach, shadow, landwalk, protection, "can't be blocked", blocking restrictions by subtype or filter) | each decision |
+| 510.1, 510.1a, 510.1c, 702.19b, 702.2c | the damage-assignment decision is the attacker's controller's, and it offers exactly the amounts the rules allow (lethal damage to each blocker in order first, trample's excess, deathtouch's lethal 1; amounts past 31 are paged digits, not compared) | each decision |
+| 508.1a-b, 508.1d, 508.1f, 702.20b, 302.6, 702.3b | the attackers as declared (tapped unless vigilance, may attack, attacks a legal defender, "attacks each combat if able") | the state after the declaration |
+| 509.1a-b, 509.1h, 702.9b, 702.17b, 702.28b, 702.14c, 702.16f, 702.111b | the blockers as declared | the state after the declaration |
+| 100.2b, 100.4b, DESIGN.md 2.3 | a draft pick takes one card of the pack the picker holds into its pool; a deck has at least the minimum, from the pool (and basic lands), the sideboard the rest | every event step |
+
+### 150.3 What's left out, and why
+
+* **608.2b target legality on resolution**: deciding it needs the engine's own targeting predicates (what a
+  target requirement allows, protection, hexproof, shroud, "can't be the target of"): the check would restate
+  the engine's procedure, not the rule.
+* **601.2f-h mana paid equals the cost; 119/120 life and damage accounting**: these need payment and damage
+  instrumentation inside the engine (it would check the engine's single writer against itself).
+* **510.4 who deals damage in which combat damage step**: needs a hook at the first combat damage step's start
+  (which creatures had first or double strike then); F5 is that rule's bug.
+* **704.5r, 704.5u, 704.5aa**: no card in the engine's tables has such an ability.
+* **704.5v-y**: no battle card is supported (a battle fails loudly, so the check grows when one is).
+* **In forced chance transitions** (150.4) 108.1 doesn't apply to a card that was in a library before the
+  transition, is in one now, or moved in between (that a card passed through a library inside one transition can't
+  be told from the two states).
+
+### 150.4 Forced chance outcomes and Time Vault worlds (two false positives fixed)
+
+**108.1 in chance walks.** A transition replaying forced keys (`Game::force_chance`, zero-core's `chance_k`) may
+swap the identities of two of an owner's library cards nobody knows as one is drawn or looked at
+(`Game::force_library_card`): another world of the same information, not a rules event. The old exemption read
+`Game::forced`, which the transition has cleared by the time the check runs, and exempted only cards still in the
+library, so the drawn card failed 108.1. Now the walk calls `RulesCheck::forced_chance(&w)` before each forced
+transition (one line in `fuzz.rs::chance_step`); the check records every card slot's zone and incarnation there
+and, in that step, accepts another identity for a card that was in a library, is in one now, or moved in between
+(shuffled in and drawn - Timetwister - or shuffled, its knowledge gone, and drawn - Ponder); the card it is now is
+the card it stays, and each owner's cards are counted again (a swap keeps them). `Stats::forced_identities` counts
+those cards. A step with forced outcomes the check wasn't told of panics (no silent pass). Test:
+`cr_108_1_a_forced_chance_outcome_makes_another_world` (accepted forced; 108.1 when unforced, and for a forced card
+that stayed on the battlefield).
+
+**500.7 at a "skip that turn" choice.** At Time Vault's choice the engine has already flipped `Turn::normal` to the
+turn about to begin (`begin_turn`); a check made at that state (a world dealt there) copied it, and its first step
+had no previous state to re-sync from, so after a skipped turn the next turn's player looked wrong. Now `new`
+records its state as the previous one (the first step is compared like any other) and leaves the normal-turn record
+unknown at such a choice (the turn that begins re-syncs it). Test: `cr_500_7_a_check_made_at_a_skip_that_turn_choice`.
+
+`FUZZ_CHANCE=20 FUZZ_GAMES=200` (desktop, b57f5174, single-threaded at below-normal priority): default, interactions,
+delver_sb, doomsday, dd_b, sneak_show, names and eoe (200 games each) and delver (400: at exactly 200, seeds 0-199,
+main's own coverage assertion for Murktide Regent's leave-the-graveyard trigger fails, on main 267ae603 too): 41,309
+chance walks, 475,157 steps with both worlds at one node, 18,529 replays whose outcome the force changed, 49,405 card
+identities accepted as forced, no rules check violated. The exponential pool's walks were stopped unfinished after
+6,611 s (150.7).
+
+### 150.5 The wiring
+
+* `engine/tests/fuzz.rs`: games, determinized and belief-weighted worlds, chance walks (both worlds), matches and
+  their worlds, hidden decklists and deck-choice worlds. Record and continue: a violation is recorded with the
+  seed, step and the game's last 60 log lines, that game is checked no further, the test plays on and fails at its
+  end (`rules_verdict`: each rule's count, every violation's first line, the first's log).
+  `FUZZ_RULES_ALLOW=<rules>` (as the violations name them; `*` for every rule) reports without failing.
+* `engine/tests/draft.rs`: every event step (`DraftCheck`), worlds via `finish_random`, heuristic-played matches
+  through `draft_bots::play_match_heuristic_with` (new, the old function's body with a per-step callback).
+
+### 150.6 Digests, throughput
+
+The engine is unchanged: digests (desktop, this branch and main built side by side) full **438164c0429d7fa3**,
+`DIGEST_ENCODING=0` **a0062bb5569e06d3**, both main's. Throughput (default pool, 1,500 games, the same seeds side by
+side): main 172.3 s, this branch 176.2 s (+2.3%); 200 matches 59.7 s vs 56.5 s (noise). Same game outcomes. The
+exponential pool (huge boards): seeds 0-9 took 5 s here and 6 s on main; seeds 0-99, run side by side, used 8,911 s and
+8,909 s of CPU before they were stopped unfinished: no measurable cost either way (the pool's cost is the engine's,
+150.7).
+
+Gate (engine tier, `tools/gate.py engine --tested-sha 6bf8d661 --expect-digest 438164c0429d7fa3 --expect-digest0
+a0062bb5569e06d3 --no-mac`, on 6bf8d661, the code of this section; the last commit adds documentation only): GATE
+PASSED (both digests equal, `--test az` 52, `limits` 13, `hidden` 28, pytest 323 passed, the search smoke). The
+full engine suite (`cargo test --release -p engine`) on 6bf8d661: 160 test binaries, 2,562 passed, 0 failed, 32
+ignored.
+
+### 150.7 The campaign
+
+Desktop only (the Mac and Vast served the live run), 2026-11-12 22:46 to 2026-11-13 13:13: the fuzz and draft test
+binaries of b57f5174 (6bf8d661 differs in printed labels only), run directly, at most four single-threaded processes
+at below-normal priority beside the live run `delver-bo3-pb1` and the other lanes' throttled builds (often 10-40 % of
+a core each). Chunks of 2,000 games, 250 matches or 1,000 draft events (`FUZZ_FIRST`, `DRAFT_FUZZ_FIRST`),
+`FUZZ_RULES_ALLOW=*` so each chunk played to its end and listed every violation. A chunk that a failure of another
+check stopped (the fuzz ends a test at its first failing seed, before its rules verdict prints) was rerun before and
+after that seed, so every seed but the failing ones has its verdict. Logs and tools:
+`E:/mtg-zero-scratch/fuzz-invariants/campaign/`.
+
+| Pool | Test | Checked | States checked (at priority) | Rules violations | Other failures (main's too) | Chunk time |
+|---|---|---|---|---|---|---|
+| default | games | 20,000 | 21,956,228 (9,388,855) | 704.5h x4: F1 | | 4,395 s |
+| interactions | games | 19,996 | 23,469,411 (9,662,416) | | X3 x4 | 5,176 s |
+| exponential | games | **468** (seeds 2,000-2,569) | 878,825 (372,083) | | X1 x3 | 2,353 s |
+| eoe | games | 20,000 | 32,973,551 (16,774,627) | 704.5h x1: F1 | | 14,733 s |
+| sealed | games | 20,000 | 28,800,482 (13,065,558) | 704.5h x1: F1 | | 7,959 s |
+| delver | games | 20,000 | 19,087,150 (10,104,004) | | | 3,367 s |
+| delver_sb | games | 20,000 | 13,450,859 (7,330,448) | | | 2,440 s |
+| doomsday | games | 20,000 | 15,686,558 (8,014,997) | | | 2,760 s |
+| dd_a | games | 20,000 | 9,798,597 (5,096,994) | | | 1,805 s |
+| dd_b | games | 20,000 | 23,363,608 (10,733,419) | | | 4,339 s |
+| dd_c | games | 20,000 | 23,931,156 (12,604,823) | | | 4,075 s |
+| names | games | 20,000 | 27,364,350 (11,946,143) | 704.5h x2: F1 | | 7,757 s |
+| sneak_show | games | 20,000 | 11,781,601 (6,340,064) | | | 2,191 s |
+| sns | games | 20,000 | 14,958,856 (8,173,588) | | | 3,238 s |
+| `FUZZ_HIDDEN_DECKS=1` | games | 19,979 | 22,083,886 (9,429,299) | 704.5h x4: F1 | X2 x6, X4 x2, X5 x2, X6 x11 | 7,366 s |
+| default | matches | 2,000 (5,121 games) | 4,307,971 (2,024,080) | 704.5h x3: F1 | | 1,076 s |
+| interactions | matches | 1,999 (5,132 games) | 4,864,950 (2,050,888) | | X7 x1 | 1,249 s |
+| drafted | matches | 2,000 (5,036 games) | 5,396,589 (2,481,196) | | | 1,351 s |
+| delver | matches + post-sideboard | 2,000 (5,307 games) + 2,000 (3,327 games) | 6,635,442 (3,482,809) | | | 1,794 s |
+| draft | events | 20,000 (9,872,341 actions, 5,400,000 picks) | heuristic-played matches 1,474,418 | 704.5h x2: F1 | | 987 s |
+
+In all: 280,443 games, 7,999 matches and 2,000 post-sideboard matches, 20,000 draft events, 312.3 million states
+checked (149.1 million at a priority), 22.3 process-hours of chunks that completed. **No new rules bug**: all 17
+violations, in 13 games or events, are F1's stale deathtouch record (one confirmed in its game's log;
+`docs/rules_check_findings.md` lists them). The fuzzer's other checks failed on 30 seeds, X1-X7, each reproduced on
+main 267ae603's own binary (none caused by this branch; listed with reruns in `docs/rules_check_findings.md` for their
+owners: the encoding bound, hidden-decklist worlds, the v7 tail encoding).
+
+**Exponential: a decision for the maintainer.** `FUZZ_POOL=exponential` at 20,000 games is out of reach here: some of
+its seeds (life 10^18, boards growing to the 60-turn cap) cost CPU-hours each on main exactly as on this branch
+(seeds 0-99 side by side: 8,909 s and 8,911 s of CPU, unfinished); the chunk of seeds 0-1,999 ran 12,952 s of CPU in
+8.6 hours and was stopped; 50-seed chunks afterwards covered 468 seeds in 20 minutes, two of them stopped after 20
+minutes each. Options: (a) run it on the Mac or a farm once the live run allows, in small chunks with a per-chunk time
+limit (the slow seeds then named); (b) find the slow seeds (one-seed runs with a time limit) and `FUZZ_SKIP` them, a
+gap to record; (c) cap the pool's growth for the fuzz (its life or turn cap) - a change to the pool, not to the rules
+check.
+
+### 150.8 Findings
+
+Engine rules bugs, none fixed here (each has an `#[ignore]`d repro test in `rules_check::tests` asserting what the
+rules require; `docs/rules_check_findings.md` has the details):
+
+| # | CR | Expected | Actual |
+|---|---|---|---|
+| F1 | 704.5h | destroyed only for deathtouch damage dealt since the last state-based check | `Obj::deathtouched` survives a check that performs nothing (`sba_check`'s fast path) |
+| F2 | 704.5h, 702.90c | damage from a source with infect and deathtouch destroys | read only with marked damage |
+| F3 | 702.19b, 702.2c | a deathtouch trampler needs to assign nothing to a blocker with lethal damage marked | at least 1 |
+| F4 | 508.8 | the declare blockers and damage steps are skipped only if no creature was declared as an attacker | skipped when none is attacking as the step ends |
+| F5 | 510.4 | a creature with first strike as the first damage step began deals none in the second | one that assigned none in the first (0 power) does |
+
+The campaign found **no new rules bug** (no F6): its rules-check violations are F1's (150.7). It also stopped at
+failures of the fuzzer's other checks (X1-X7: an encoding bound, hidden-decklist worlds, the v7 tail encoding), each
+reproduced on main 267ae603's own binary; `docs/rules_check_findings.md` lists them with reruns.
+
+### 150.9 Tests
+
+`cargo test --release -p engine --lib rules_check`: 28 unit tests (each a crafted violation caught and its legal
+look-alikes passing) and the ignored repros (`... rules_check::tests::f -- --include-ignored` runs them: each fails
+on the engine as it is).
+
 ## 151. Rules fixes from the rules check: deathtouch's record (F1), infect with deathtouch (F2), a deathtouch trampler and damage already marked (F3) (branch `fix/rules-f1-f5`, 2026-11-12)
 
 The rule-derived invariant checker on branch `fuzz-invariants` (`engine/src/rules_check.rs`, its
