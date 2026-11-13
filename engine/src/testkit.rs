@@ -539,6 +539,9 @@ impl Game {
         // The turn's other public parts and the extra turns to come (ENGINE.md
         // 58.6: the public-state gate's view).
         v.extend([t.normal as u64, t.extra_combats as u64, t.after_combat as u64, t.cleanup_again as u64]);
+        // (CR 508.8: an attacker declared or put onto the battlefield
+        // attacking in this declare attackers step; ENGINE.md 151.4.)
+        v.push(t.had_attackers as u64);
         v.extend(self.extra_turns.iter().map(|&p| p as u64));
         v.push(u64::MAX - 6);
         let obj = |v: &mut Vec<u64>, c: CardIdx| {
@@ -552,7 +555,7 @@ impl Game {
             let l = self.loyalty_of(c);
             v.extend([l.turn as u64, l.used as u64, l.extra as u64, o.entered as u64]);
             // Since when its controller controls it, what it blocks (by
-            // place), first-strike damage dealt, evoked, cast with flashback
+            // place), first strike as the first combat damage step began, evoked, cast with flashback
             // (public; ENGINE.md 58.6).
             v.push(o.blocking.map_or(u64::MAX, |b| self.battlefield.iter().position(|&x| x == b).unwrap_or(999) as u64));
             v.extend([o.control_since as u64, o.struck_first as u64, o.evoked as u64, o.flashback as u64]);

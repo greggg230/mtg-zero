@@ -241,6 +241,71 @@ fn cr_508_8_no_attackers_skips_blockers_and_damage() {
     assert_eq!(g.turn().step, Step::EndCombat);
 }
 
+/// CR 508.8: the declare blockers and combat damage steps are skipped only
+/// "if no creatures are declared as attackers or put onto the battlefield
+/// attacking". Test Bear is declared as an attacker and Lightning Bolted in
+/// the declare attackers step: no creature is attacking as the step ends,
+/// but both steps still happen, each with priority for both players (the
+/// rules check's F4: the engine skipped them; ENGINE.md 151.4).
+#[test]
+fn cr_508_8_an_attacker_removed_in_the_declare_attackers_step_keeps_blockers_and_damage() {
+    let mut g = scen()
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Test Bear"])
+        .battlefield(1, &["Mountain"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let bear = g.card(0, "Test Bear", Zone::Battlefield);
+    g.choose(Choice::Card(bear));
+    g.pass(); // no more attackers
+    assert!(g.obj(bear).attacking);
+    assert_eq!((g.turn().step, g.kind(), g.to_move()), (Step::DeclareAttackers, Some(DecisionKind::Priority), Some(0)));
+    g.pass(); // P0
+    let bolt = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    for _ in 0..50 {
+        if g.stack().is_empty() && g.kind() == Some(DecisionKind::Priority) {
+            break;
+        }
+        match g.kind() {
+            Some(DecisionKind::Priority) => {
+                g.pass();
+            }
+            Some(DecisionKind::Target) => {
+                let t = g.tgt(bear);
+                g.choose(t);
+            }
+            _ => {
+                let c = g.pending_decision().unwrap().options[0].choice;
+                g.choose(c);
+            }
+        }
+    }
+    assert_eq!(g.obj(bear).zone, Zone::Graveyard, "{}", g.log_lines().join("\n"));
+    assert_eq!(g.turn().step, Step::DeclareAttackers);
+    let mut priority: Vec<(Step, u8)> = Vec::new();
+    for _ in 0..50 {
+        if g.turn().step == Step::EndCombat {
+            break;
+        }
+        let d = g.pending_decision().unwrap();
+        if d.kind == DecisionKind::Priority {
+            priority.push((g.turn().step, d.player));
+            g.pass();
+        } else {
+            let c = d.options[0].choice;
+            g.choose(c);
+        }
+    }
+    for step in [Step::DeclareBlockers, Step::CombatDamage] {
+        for p in 0..2 {
+            assert!(priority.contains(&(step, p)), "P{p} has priority in {step:?}: {priority:?}");
+        }
+    }
+    assert_eq!(g.life(1), 20);
+}
+
 #[test]
 fn cr_506_4_blocked_creature_stays_blocked_after_its_blocker_leaves() {
     for (attacker, expected_life) in [("Test Bear", 20), ("Test Trampler", 16)] {

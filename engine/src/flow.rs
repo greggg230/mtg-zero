@@ -781,8 +781,12 @@ impl Game {
             Step::Main1 => Step::BeginCombat,
             Step::BeginCombat => Step::DeclareAttackers,
             Step::DeclareAttackers => {
-                // CR 508.8: no attackers -> skip blockers and damage.
-                if self.battlefield.iter().any(|&c| self.objs[c.i()].attacking) {
+                // CR 508.8: if no creature was declared as an attacker or put
+                // onto the battlefield attacking, skip blockers and damage;
+                // one that has left combat since still counts (ENGINE.md
+                // 151.4). (A creature attacking now was one or the other.)
+                let had = std::mem::take(&mut self.turn.had_attackers);
+                if had || self.battlefield.iter().any(|&c| self.objs[c.i()].attacking) {
                     Step::DeclareBlockers
                 } else {
                     Step::EndCombat

@@ -203,8 +203,9 @@ internally instead of being exposed. zero-core would auto-step it anyway; doing 
   the first draw, 103.8a), declare attackers / blockers (508.1, 509.1), combat damage (510),
   remove from combat (511.3), discard to hand size and damage wear-off (514.1-2). No player
   gets priority in untap and cleanup (514.3: unless an SBA or trigger happens, then priority
-  and another cleanup step, 514.3a). With no attackers the declare-blockers and damage steps
-  are skipped (508.8).
+  and another cleanup step, 514.3a). If no creature was declared as an attacker or put onto the
+  battlefield attacking, the declare-blockers and damage steps are skipped (508.8; one that has
+  left combat since still counts: corrected in 151.4).
 * **Priority.** `turn.priority` and `turn.passes` (consecutive passes). The `Priority` task
   first loops "check SBAs; put waiting triggers on the stack" until neither happens (117.5,
   704.3, 603.3), then asks the priority player. Options: pass, play a land (special action,
@@ -680,7 +681,8 @@ best-of-three the match's sideboarding decision is the pending one, section 36.)
   damage is dealt simultaneously (510.2);
   lifelink gains life at the same time (702.15b). First strike / double strike: 510.4 and
   702.4 / 702.7 (a creature deals damage in the second step only if it has double strike or
-  did not deal first-strike damage).
+  had neither first strike nor double strike as the first combat damage step began: corrected
+  in 151.5).
 
 ## 13. Scope and what is deliberately stubbed
 
@@ -31877,13 +31879,13 @@ reproduced on main 267ae603's own binary; `docs/rules_check_findings.md` lists t
 look-alikes passing) and the ignored repros (`... rules_check::tests::f -- --include-ignored` runs them: each fails
 on the engine as it is).
 
-## 151. Rules fixes from the rules check: deathtouch's record (F1), infect with deathtouch (F2), a deathtouch trampler and damage already marked (F3) (branch `fix/rules-f1-f5`, 2026-11-12)
+## 151. Rules fixes from the rules check: deathtouch's record (F1), infect with deathtouch (F2), a deathtouch trampler and damage already marked (F3) (branch `fix/rules-f1-f5`, 2026-11-12); 508.8 (F4) and 510.4 (F5) (stacked branch `fix/rules-f4-f5`, pending a decision)
 
 The rule-derived invariant checker on branch `fuzz-invariants` (`engine/src/rules_check.rs`, its
 `docs/rules_check_findings.md`) found five engine rules bugs, F1-F5, each with an ignored repro test there. This
 section fixes F1-F3 against the Comprehensive Rules (`MagicCompRules_20261106.txt`); F4 (CR 508.8) and F5 (CR 510.4)
-need a public fact the network must see, so they wait for the maintainer's decision (151.4; implemented and checked on
-the stacked branch `fix/rules-f4-f5`). None of the five is one of the Fable review's low-severity items (lane F,
+need a public fact the network must see, so they wait for the maintainer's decision: they are 151.4-151.5, on the
+stacked branch `fix/rules-f4-f5` (this text), whose last commit is theirs. None of the five is one of the Fable review's low-severity items (lane F,
 `fix/low-sev`: PerPermanent's 255, the loop rule's X = 0, drafted.py's silent draws, the spec validation, the belief
 deal's panic, `hand_sorted_in`). Each bug reproduced on main 267ae603 with the new regression test before the fix.
 
@@ -31950,42 +31952,73 @@ copies) reads `lethal_needed` and now assigns 0 to such a blocker. **Test**:
 Indestructible, which took 3 damage from Lightning Bolt in the declare blockers step: the assignment offers 0..=5 and 0
 puts all 5 on P1. On 267ae603 the options were 1..=5.
 
-### 151.4 F4 (CR 508.8) and F5 (CR 510.4): need a decision (not on this branch)
+### 151.4 F4: the declare blockers and combat damage steps after an attacker left combat (CR 508.8)
 
-Both bugs are real and their fixes are unambiguous as rules; what needs the maintainer is the encoding: each adds a
-public fact the network must see (no public-state gaps), with no layout change. They are implemented, tested and
-checked on the stacked branch `fix/rules-f4-f5` (on this branch's head; its own section text there):
+On the stacked branch `fix/rules-f4-f5`, pending the maintainer's decision on what the network sees (151.5's end).
+508.8: "If no creatures are declared as attackers or put onto the battlefield attacking, skip the declare blockers and
+combat damage steps." `Game::next_step` skipped them when no creature *was attacking* as the declare attackers step
+ended: an attacker declared and then destroyed or bounced in that step (an instant on it, common in real games) cost both
+players their priority in the declare blockers and combat damage steps.
 
-* **F4, 508.8**: "If no creatures are declared as attackers or put onto the battlefield attacking, skip the declare
-  blockers and combat damage steps." `next_step` skipped them when no creature *was attacking* as the declare attackers
-  step ended, so an attacker declared and then destroyed or bounced in that step cost both players their priority in
-  the two steps. The fix needs a record (`Turn::had_attackers`: a creature was declared as an attacker or put onto the
-  battlefield attacking in this declare attackers step), and the record is public state the encoding doesn't hold
-  (attacked_with counts this turn's attackers, not this combat's, and not the ones put onto the battlefield attacking).
-  The branch encodes it in a spare float of v5's game globals (`g5::COMBAT_GOES_ON`, 50: set only while no creature is
-  attacking - the one state where the record says something the attacking flags don't). Options: (a) take it - an
-  unused input becomes nonzero in those rare states (old checkpoints have untrained weights there; no layout change, no
-  feature count change); (b) a new layout version - checkpoint incompatibility for one bit; (c) leave the bug.
-* **F5, 510.4**: in the second combat damage step only "the remaining attackers and blockers that had neither first
-  strike nor double strike as the first combat damage step began, as well as the remaining attackers and blockers that
-  currently have double strike" deal damage. The engine read "dealt first-strike damage" (`Obj::struck_first`, set as
-  the damage was dealt): a first striker that assigned none in the first step (power 0, 510.1a) and was pumped before
-  the second dealt damage in it. The fix makes `struck_first` the rule's record, set as the first combat damage step
-  begins for every permanent with first strike or double strike, which changes what the existing encoded float
-  (`perm::STRUCK_FIRST`, 10) means: it was "dealt first-strike damage", it becomes "had first strike or double strike
-  as the first combat damage step began" - equal for every attacker or blocker that dealt first-strike damage,
-  different for a first striker that dealt none and for a first striker outside combat, from the first combat damage
-  step to the end of combat. Options: (a) take it - one float's meaning corrected, no layout change; (a') set the
-  record on attackers and blockers only (the float then differs from today's only where the rule's outcome does) -
-  exact only while no effect makes a permanent already on the battlefield an attacker or blocker after that step began
-  (none does today: that is a "no card does X" argument, so not taken); (b) leave the bug.
+**Fix**: `Turn::had_attackers`, set when the declaration ends with at least one attacker (`combat.rs::declare_attackers`)
+and when a creature is put onto the battlefield attacking in the declare attackers step (`Game::entered_attacking`,
+called by the four places that do it: `eoe_w4.rs` graveyard targets onto the battlefield attacking, `resolve_ext.rs`
+`CreateTokensAttacking` and `RevealUntilCreatureAttacking`, `resolve_walkers.rs` ninjutsu). `next_step` reads it (or a
+creature attacking now) as the step ends and resets it: the record lives only in the declare attackers step. It is
+public: classified in `public_state.rs` with a perturbation ("the declare blockers step follows an attacker that left
+combat"), in `view_state`, and encoded in a spare float of v5's game globals, `g5::COMBAT_GOES_ON` (50; 51..63 stay
+spare): 1 when the record is set and no creature is attacking. While one is attacking, its attacking flag already says the
+steps follow (it was declared or put onto the battlefield attacking), so the float is nonzero only in the states where
+the record adds something.
 
-### 151.5 Corrections to older sections
+**Test**: `rules_combat.rs::cr_508_8_an_attacker_removed_in_the_declare_attackers_step_keeps_blockers_and_damage` - Test
+Bear attacks, P1 Bolts it in the declare attackers step; both players then get priority in the declare blockers step and
+in the combat damage step. On 267ae603 the turn went to the end of combat. `cr_508_8_no_attackers_skips_blockers_and_damage`
+(no attacker declared: both steps skipped) passes unchanged.
+
+### 151.5 F5: a first striker in the second combat damage step (CR 510.4)
+
+In the second combat damage step only "the remaining attackers and blockers that had neither first strike nor double
+strike as the first combat damage step began, as well as the remaining attackers and blockers that currently have double
+strike" assign combat damage. The engine read "dealt combat damage in the first-strike step" (`Obj::struck_first`, set as
+each source's damage was dealt): a first striker that assigned none there (power 0, 510.1a) and was pumped before the
+second step dealt damage in it.
+
+**Fix**: `struck_first` is the rule's record. `Game::first_combat_damage_step_begins` (called as the first-strike damage
+step begins: the first call of its turn-based action, `combat_damage(true, 0)`) sets it for every permanent on the
+battlefield with first strike or double strike then - every permanent, not only attackers and blockers, because the rule reads the creature's abilities as the step
+began (a permanent that became an attacker or blocker later without changing zones is still barred); a creature that
+enters the battlefield after that (a ninjutsu creature with first strike) had neither and deals damage in the second
+step. The record ends with the combat (511.3, `remove_from_combat`, now for phased-out permanents too: before, a creature
+phased out after dealing first-strike damage came back with the record set and dealt no damage in its next combat without
+a first-strike step) or a zone change. `deals_damage_now` is unchanged (`ds || !struck_first`; 702.4c-d and 702.7c hold).
+Encoded as before (`perm::STRUCK_FIRST`, 10), with the new meaning.
+
+**Tests** (in-crate, `combat.rs::tests`; an effect stands in for the spells):
+`cr_510_4_a_first_striker_that_assigned_no_damage_deals_none_in_the_second_step` (Thalia, Guardian of Thraben at power 0
+as the first step begins, back to 2 before the second: P1 stays at 20; on 267ae603 18) and
+`cr_510_4_702_7c_first_strike_gained_after_the_first_step_began_deals_damage_in_the_second` (a vanilla 2/2 given first
+strike during the first-strike damage step deals its damage in the second, Thalia doesn't: 20 -> 18 -> 16).
+
+**What the network sees, and the decision.** F4: one spare float (v5 game globals 50) set in a rare state (the declare
+attackers step, an attacker gone). F5: permanent status float 10 changes meaning, "dealt first-strike combat damage" ->
+"had first strike or double strike as the first combat damage step began": equal for every attacker or blocker that dealt
+first-strike damage; now also 1 for a first striker that dealt none and for first strikers outside combat, from the
+first-strike damage step to the end of combat. No layout version, feature count, token object or action slot changes.
+Options (the maintainer's): (a) take both: the encoding changes above, and a run moved onto this commit sees them; (a') F5
+with the record on attackers and blockers only: float 10 then differs from today's only where the rule's outcome does,
+but it is exact only while no effect makes a permanent already on the battlefield an attacker or blocker after the first
+step began (true of every card today: a "no card does X" argument, so not the default); (b) a new layout version for F4's
+bit: checkpoint incompatibility for one bit; (c) leave either bug (F4 loses two priority windows after a removed attacker;
+F5 lets a 0-power first striker deal damage in the second step).
+
+### 151.6 Corrections to older sections
 
 * Section 12 (combat): "deathtouch makes 1 damage lethal (702.2c)" now adds that damage already marked or assigned
   counts (702.19b, 151.3).
+* Section 5 (turn structure): the 508.8 sentence (151.4). Section 12: the 510.4 sentence (151.5).
 
-### 151.6 Checks
+### 151.7 Checks
 
 On the commit of 151.1-151.3 (the desktop, the slot throttle of the Fable-fix lanes, a loaded machine):
 
@@ -32003,6 +32036,16 @@ On the commit of 151.1-151.3 (the desktop, the slot throttle of the Fable-fix la
   1,000 matches, both replay checks), 3,463 s on the loaded machine.
 * **Engine gate**: run on this commit after it (`python tools/gate.py engine --no-mac`); its result is in the lane's
   report, not here.
+
+On the stacked branch's commit (151.4-151.5 on the commit above; the same machine):
+
+* **Behaviour digests: changed on purpose** (`DIGEST_WRITE=1`): full 438164c0429d7fa3 -> **2bff3fe1635a8c1b**,
+  `DIGEST_ENCODING=0` a0062bb5569e06d3 -> **24207977ce0a8deb** - the play changes (F4's extra declare blockers and combat
+  damage steps after an attacker removed in the declare attackers step are common in random play) and the encoding's two
+  changes.
+* **Targeted** (`--lib`, `az` with the public-state gate and its new perturbation, `rules_sba`, `rules_combat`,
+  `cards_eoe_b_base`, `cards_m7a`): all passed. **The full engine suite**: **2,547 passed, 0 failed, 27 ignored**.
+* **`FUZZ_GAMES=20000`**, the default pool: passed, 4 tests, 3,034 s.
 
 ## 152. The zero-farm's fuzz failures: a pile's twins by their place, a controlled search keyed from the top, a payment's own answer (branch `fix/farm-fuzz`, 2026-11-13)
 

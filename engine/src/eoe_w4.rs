@@ -408,6 +408,7 @@ impl Game {
                     for &c in &entered {
                         if in_combat && f.controller == self.turn.active && self.is_creature(c) {
                             self.objs[c.i()].attacking = true;
+                            self.entered_attacking(c);
                             asks.push(c);
                         }
                     }

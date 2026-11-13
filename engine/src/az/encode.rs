@@ -44,7 +44,7 @@
 //! | graveyard abilities | 4 x 56 | `GY_ABILITY` slots 0..3 (part 3b): the cards in the viewer's graveyard with an ability that works there, in graveyard order, and whether it may be activated now |
 //! | companions | 2 x 56 | v4 (M8a): the viewer's then the opponent's revealed companion (CR 702.139): card code, revealed, its special action still available (outside the game, not taken), the special action is an option of the viewer's decision now (`act::COMPANION`, the viewer's slot), put into the hand |
 //! | match | 32 | v4 (M8b, ENGINE.md 36.7; globals): the format, the game number, both players' game wins, draws, each game's result and who played first, sideboarding now and its order, deck sizes (`mtch::*`); 58.8: spells cast this turn, energy |
-//! | globals v5 | 64 | **v5** (`g5::*`; globals): per player (viewer first, 24 each) cards drawn this turn and in the draw step, noncreature spells this turn, gained life this turn, can't gain life, creatures that attacked this turn, spells cast this game, Yawgmoth's Will, graveyard exile this turn, the city's blessing, protection from everything, the pool's artifact-only and haste mana, delayed triggers waiting, exiled cards they may play, cards discarded this turn, ENGINE.md 72: which of their library's top three cards they know and which the other player knows (2 spare); the last normal turn's player, additional combat phases (14 spare, never set) |
+//! | globals v5 | 64 | **v5** (`g5::*`; globals): per player (viewer first, 24 each) cards drawn this turn and in the draw step, noncreature spells this turn, gained life this turn, can't gain life, creatures that attacked this turn, spells cast this game, Yawgmoth's Will, graveyard exile this turn, the city's blessing, protection from everything, the pool's artifact-only and haste mana, delayed triggers waiting, exiled cards they may play, cards discarded this turn, ENGINE.md 72: which of their library's top three cards they know and which the other player knows (2 spare); the last normal turn's player, additional combat phases; **151.4**: the declare blockers and combat damage steps follow though no creature is attacking (13 spare, never set) |
 //! | globals v6 | 320 | **v6** (`g6::*`; globals): per player (viewer first, 128 each) an artifact entered under their control this turn, life gained this turn, their phased-out permanents and those phased out indirectly, their next turn controlled by the other player, controlled this turn; **100.5.1**: lands entered this turn, tokens created this turn; **123**: the next spell can't be countered; **154**: their decks in the match are dealt (float 31; 22 spare), their pool's restricted mana by type and kind (96); the game's 64: void, where the turn goes on after its combat phases; **100.5.1**: the card whose ability copies keep (27 spare) |
 //! | globals v7 | 3,680 | **v7** (`g7::*`; globals; ENGINE.md 124.2): per player (viewer first, 1,840 each) the pool's mana that may be spent only to cast a creature spell of a chosen type (Cavern of Souls), by colour (W U B R G) and type (the 367 of CR 205.3m, then "no type chosen") |
 //!
@@ -685,6 +685,9 @@ pub mod perm {
     pub const BLOCKING: usize = 8;
     /// (slot + 1) / 32 of the attacker it blocks.
     pub const BLOCKING_SLOT: usize = 9;
+    /// It had first strike or double strike as this combat's first combat
+    /// damage step began (CR 510.4; before ENGINE.md 151.5: it dealt
+    /// first-strike combat damage).
     pub const STRUCK_FIRST: usize = 10;
     /// The potential blocker the pending `DeclareBlockers` decision is about.
     pub const ASKED_BLOCKER: usize = 11;
@@ -1096,8 +1099,14 @@ pub mod g5 {
     pub const GAME: usize = 2 * PLAYER;
     pub const NORMAL: usize = GAME;
     pub const EXTRA_COMBATS: usize = GAME + 1;
-    /// The first spare game float (50..63 spare).
-    pub const GAME_END: usize = GAME + 2;
+    /// ENGINE.md 151.4 (a spare float of v5's): the declare blockers and
+    /// combat damage steps follow though no creature is attacking - one was
+    /// declared as an attacker or put onto the battlefield attacking in this
+    /// declare attackers step and has left combat (CR 508.8; while one is
+    /// attacking, its attacking flag says so).
+    pub const COMBAT_GOES_ON: usize = GAME + 2;
+    /// The first spare game float (51..63 spare).
+    pub const GAME_END: usize = GAME + 3;
 }
 const _: () = assert!(g5::PLAYER_END <= g5::PLAYER && g5::GAME_END <= GLOBALS_V5);
 
@@ -2678,6 +2687,7 @@ impl Game {
         }
         g[g5::NORMAL] = (t.normal == me) as u8 as f32;
         g[g5::EXTRA_COMBATS] = squash(t.extra_combats as f32 / 2.0);
+        g[g5::COMBAT_GOES_ON] = (t.had_attackers && !self.battlefield.iter().any(|&c| self.objs[c.i()].attacking)) as u8 as f32;
     }
 
     fn encode_globals(&self, me: PlayerId, knower: PlayerId, g: &mut [f32]) {
