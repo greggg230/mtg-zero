@@ -7223,7 +7223,8 @@ match (45.2), in the payload's order; the coordinator queues them tagged `<gid>/
 (ValueError): another number of rows than of matches, a row that is not a two-player match, a
 result other than 1/0, 0/1 or 0.5/0.5; the engine's `resolve` refuses it again and the event
 stays at its deferred terminal (tested). A match cut at the driver's `max_steps` arrives as a
-draw (0.5/0.5, `over` false) and counts as one. In a run the coordinator's exception reaches the
+draw (0.5/0.5, `over` false) and ~~counts as one~~ is refused, as is an aborted one (correction, 147.3: counted as a
+drawn match it decided the event in silence). In a run the coordinator's exception reaches the
 main thread and the run aborts (zero-core 11.2): a malformed result never becomes a made-up
 outcome. The engine's `draft_bots::match_spec` builds the same spec from the event (tests, the
 fuzz).
@@ -21066,7 +21067,9 @@ spots reach their positions.
   the generic part (and the pips `plus` adds, multikicker's) widened to u64, `less_generic` and the
   discounts in it, `need_of`'s count from the lowering's bounds, `PermKind::Airbent`'s copy, and
   the encoding's `ctx::COST` read as before. The pool's u8 amounts and a production's (`ManaPool`,
-  `[u8; 6]`, `PerPermanent`'s and `SameTypeCounters`' `.min(255)`) are F7's (aborted past them).
+  `[u8; 6]`, `PerPermanent`'s and `SameTypeCounters`' `.min(255)`) are F7's (aborted past them; correction,
+  147.1: `PerPermanent`'s was not - Gaea's Cradle with 256 creatures added 255 - and both now abort before any
+  decision reads them).
 
 Tests: `cr_119_4_pay_x_life_past_255` (Toxic Deluge with 400 life: X = 400, 255 before),
 `pay::tests::cr_601_2h_the_payments_amounts_pass_255` (a cost of 256 symbols isn't zero; the
@@ -21450,7 +21453,7 @@ cards drawn). Objects: `CardIdx` and `ObjRef::inc` are u32 (`add_card` aborts at
 `CardIdx` is a `NonZeroU32` holding index + 1, so `Option<CardIdx>` / `Option<ObjRef>` carry no
 tag. LKI power and loyalty bookkeeping moved to side lists (`Game::lki_power`, `Game::loyalty`),
 which keeps `Obj` at 64 bytes. Mana keeps B's u8 model: `ManaPool::add` reports overflow and
-`Game::add_mana` / `finish_payment` / `check_counter_mana` abort past 255 of a type (B4 widens the
+`Game::add_mana` / `finish_payment` / `check_counter_mana` (147.1: `check_mana_bound`, a count of permanents too) abort past 255 of a type (B4 widens the
 cost side, 100.4.7). Fixes found on the way: devour's 65,535 cap, `ExileAll`'s 8-bit per-player
 count, "enters not from a graveyard or exile" reading bit 15 wrong with `ENTER_BIG`, the cascade
 mana value as u8, the encoding's total power, `KEY_GAME`'s 255 clamp (a loud assert now). Perf on
@@ -21477,7 +21480,9 @@ transform (701.28c).
 * **The rule**: when player p takes a loop action, `Game::loop_taken` records (until the turn
   ends) the loop hash of the state as p's decider sees it, with the action (`LoopAct::Activate
   { place, slot }` / `LoopAct::MayCopy`). The action is not offered to p at a decision whose hash
-  equals a recorded one for the same action. The state is then identical to one where p took it,
+  equals a recorded one for the same action. (Correction, 147.2: the record is the action **as completed** - its
+  X, targets, modes and payment - and only a completion recorded at that hash is withheld; keyed by the ability
+  alone it withheld X = 2 after an X = 0 use.) The state is then identical to one where p took it,
   so everything reachable by taking it now was reachable then; taking it again can only repeat an
   iteration that made no progress (MTR 4.4). Manual repetition that changes anything is unlimited:
   Grim Monolith untaps as long as lands pay for it, Chain of Smog copies until both hands are
@@ -26647,7 +26652,7 @@ U; entries 300-329 unused).
 | Text | Rule | How |
 |---|---|---|
 | Show and Tell: "Each player may put an artifact, creature, enchantment, or land card from their hand onto the battlefield" | 101.4, 101.4a; rulings a107ed89, 881ce0a9 | `SnS::EachPlayerPutsFromHand { filter }`: as it resolves the active player chooses (`ChooseHandCard`: a card of the kind, one option per definition, or `PASS`), then the other player; then the chosen cards enter at once (one entry, `begin_entering` / `end_entering`: 603.6a, 614.12a), each under its owner's control. A hand without a card of the kind still asks (`PASS` only: the hand is hidden); an empty hand asks nothing (its size is public) |
-| the choice made face down | 101.4a; ruling a107ed89 | the frame's stage `Frame::i` (0: the active player chooses; 1: the other, the active player chose none; 2: the other, a card was chosen) is all the other player learns: it is the context block's `ctx::OP_I`. The other player's worlds (`determinize`) deal the chooser's hand again and draw the chosen card uniformly among the hand's cards (those the viewer knows too: the hand is one pool, ENGINE.md 10), keeping the deal only when that card is of the kind (`Game::hidden_pick_ok`, by rejection: exactly the plain deal conditioned on "a legal card was chosen"; also in the belief-weighted deal) |
+| the choice made face down | 101.4a; ruling a107ed89 | the frame's stage `Frame::i` (0: the active player chooses; 1: the other, the active player chose none; 2: the other, a card was chosen) is all the other player learns: it is the context block's `ctx::OP_I`. The other player's worlds (`determinize`) deal the chooser's hand again and draw the chosen card uniformly among the hand's cards (those the viewer knows too: the hand is one pool, ENGINE.md 10), keeping the deal only when that card is of the kind (`Game::hidden_pick_ok`, by rejection: exactly the plain deal conditioned on "a legal card was chosen"; the belief-weighted deal draws the same target exactly with the deal since 147.5, `Game::deal_weighted_pick`) |
 | choices of the entering cards | ruling 6d3f0bf4 | the other player's card is put first, so the "as this enters" tasks of the active player's card, queued last, run first; the timestamps' order is the existing 613.7m choice of the active player |
 | lands put are no land drops; the cards aren't cast | 305.1, 305.4, 601.2i | `put_onto_battlefield`: no land play counted, no cast event (Emrakul's extra turn doesn't trigger; enters triggers do, APNAP, 603.3b) |
 | Omniscience: "You may cast spells from your hand without paying their mana costs" | 118.9, 118.9a, 601.2b, 601.2f, 107.3b; rulings 6e20dab1, 3c753455, 72e98293, 3bd1fe3c | `SnsDef::free_casts_from_hand`, read by `Game::free_from_hand` (its controller's casts from the hand, `CastFrom::Hand`, origin the hand): the `ChooseAltCost` answer and route of EoE's "first spell each turn" (`NUMBER` + 31, `eoe_c::FREE_CAST`, `Mark::FreeFromHand`), offered with the mana cost and every other alternative cost (Force of Will's pitch: one of them, 118.9a); X is 0; additional costs paid (kicker, Tinker's sacrifice); increases apply on top (Thalia, the Flute: 601.2f); timing unchanged; faces cast from the hand too (an Adventure, a split half, an MDFC's back face) |
@@ -29100,7 +29105,7 @@ games before it leave the match open).
 
 | What | How |
 |---|---|
-| where | a constructed best-of-three only (`"constructed": true`, `"format": "bo3"`), refused elsewhere: the cube's game 1 is no public-decks game |
+| where | a constructed best-of-three only (`"constructed": true`, `"format": "bo3"`), refused elsewhere: the cube's game 1 is no public-decks game; and a mirror only - both seats the same main and sideboard - since 147.4: game 1's fair coin is exact for a mirror only |
 | `game_episodes` | required: without it a row's label is the match's result, which would count game 1's drawn result (a coin flip). With one episode per game (121) each row takes its own game's result |
 | `chooser` | refused with it: the spec's `chooser` is game 1's (CR 103.1), and game 1 is not played; game 2's chooser is game 1's loser |
 | the start | `MtgAz::new` builds the match as before (game 1 set up with the registered mains, at its play-or-draw choice), then `MtgAz::skip_game_one(winner)`: the game in waiting ends at once by the loser's concession (CR 104.3a: a player may concede at any time; `Game::concede`, `EndReason::Conceded`), `end_game` scores it as any game 1, and the sideboarding before game 2 begins: the loser sideboards first and then chooses play or draw for game 2 as a normal decision (`PlayDraw`, CR 103.1). The state between the games is a finished game 1's, like a real match's, so nothing reading the game while sideboarding (the heuristic, the spectator view) meets an unplayed game |
@@ -29287,6 +29292,237 @@ target directory (E:/cargo-target/mtg-zero/bo3-postboard).
   MTGO pilot's) encodes game 2 as the synthetic start does. The cube's best-of-three keeps game 1's chooser, starter and
   reveals.
 * **`keep_deck` is an evaluation setting**: in self-play it would train a seat whose sideboarding decisions are forced.
-  Nothing refuses it in a run spec; the presets do not set it.
+  ~~Nothing refuses it in a run spec~~ A run's self-play spec holding it is refused since 147.4 (the package's
+  `selfplay_specs` hook, exit 78); the presets do not set it.
 * **The run**: moving the Delver best-of-three run onto this commit changes what it trains (games 2-3 only) - a
   maintainer's decision, with the run.
+
+## 147. Low-severity fixes of the Fable review 2026-11-12 (lane F, branch `fix/low-sev`)
+
+Branch `fix/low-sev` from main 267ae603 (zero-core pin e5e1bb0, unchanged). The Fable review of `e81f8304..267ae603`
+(`E:\mtg-zero-scratch\fable-review-2026-11-12\`: `rules.md` B3, B4; `flow.md` B1-B4, I4; `hidden.md` B4, B5) - six fixes
+and two points left to the maintainer (147.7). Section number: assigned by the fix lanes' plan (COMMON.md).
+
+### 147.1 Mana "for each permanent" past the pool's 255: aborted, before any decision reads it
+
+**The bug** (rules.md B3, probe `zz_rules_d::d04`). `ManaProd::PerPermanent` read `n.min(255)`: Gaea's Cradle with 256
+creatures added 255 {G} and the game went on (also Tolarian Academy, Evendo, Uthros) - a class B saturation that
+docs/shortcuts.md 46.3 said was gone. Every other path past the pool's 255 of a type ended the game aborted (100.7).
+
+**The bound is real**: a pool keeps a `u8` per type (`ManaPool::amt`) and the payment model a production as `[u8; 6]`
+(workstream B's model, 100.4.6-100.4.7: the payment's own counts are exact, a production and the pool are not). Widening
+them is the payment model's whole `u8` surface (27 `[u8; 6]` in pay.rs alone). So: exact up to 255, aborted past it.
+
+**What aborts, and when.** Aborting only where the mana is made (as `check_counter_mana` did for counters) is not exact:
+`productions` and the payment's classes (`yield_of`) still read the count as 255, so a cost payable only with the 256th
+mana, or an X past 255 plus the other sources, was not offered - an option the rules give, gone in silence (the same held
+for `SameTypeCounters` since 100.7). Now:
+
+* `Game::check_mana_bound(p, src, prod)` (was `check_counter_mana`): a counted production - `SameTypeCounters` (the
+  counters on its source) or `PerPermanent` (the permanents its controller controls of its filter) - past 255 ends the
+  game aborted where the mana is made: a mana ability activated with priority (`activate.rs`) and a payment's picked
+  source (`finish_payment`). (`Op::AddManaChoice`, the third "add" site, only ever holds `Combo` productions: the
+  lowering's Manamorphose; never counted.)
+* `Game::mana_past_bound()`, checked first by `Game::ask_options` (every decision goes through it): a permanent with a
+  counted mana ability past 255 ends the game aborted before the decision is shown or auto-answered - no option set built
+  from an amount read as 255 ever reaches a player, whether or not the ability can be activated now (a tapped Cradle
+  too: it would untap). The check costs nothing below the bound: a count of permanents past 255 needs more than 255
+  permanents on the battlefield, counters past 255 a counter count past it (`Game::counters`, a short list); below both
+  nothing is scanned.
+
+`productions` keeps its `.min(255)` (with the comment that past it the game has ended before the amount is used).
+
+**Tests** (`tests/rules_numbers.rs`): `cr_106_4_gaeas_cradle_with_255_creatures_adds_exactly_255`;
+`cr_106_4_gaeas_cradle_past_255_creatures_ends_the_game_aborted` (256 Llanowar Elves: the game is aborted before its
+first decision, the log naming the Cradle; 255 Elves, the Cradle floated for 255 {G}, a 256th Elf cast and resolved: the
+game ends aborted at the next decision, the Cradle tapped). docs/shortcuts.md 46.3 updated.
+
+**Found, not fixed** (no reachable case in today's tables; reported): the triggered mana bonuses are added to a
+production in `u8` without a check in the payment's classes (`Game::yield_with`'s `add`, `resolve_m7d.rs` sacrifice
+groups' `v[t] += extra[t]`, `tap_bonus`, `creature_mana_bonus`): a counted production near 255 plus a "whenever you tap
+a creature for mana, add an additional {G}" would wrap in release builds. The activation path checks it (`checked_add`,
+aborted).
+
+### 147.2 The loop rule records the completed action
+
+**The bug** (rules.md B4, probe `zz_rules_d::d01`). The loop rule (100.7) recorded a loop action as
+`LoopAct::Activate { place, slot }` with the hash of the state it was taken at, and withheld the ability at any decision
+with an equal hash. After Lavaclaw Reaches' "{X}: +X/+0" with X = 0 (free, +0/+0: the state is back where it was), the
+ability was withheld - while it waited on the stack and after it resolved - although X = 2 was payable and would change
+the board. The line came back only by floating mana first.
+
+**The rule now** (`loops.rs`). A loop action is recorded **as completed**: `LoopRec { p, hash, act, path }`, `path` the
+activation's every decision until its costs are paid (CR 602.2b-i: modes, X, targets, the payment, each a `LoopStep`
+of the action ids offered - before the loop rule withheld any - and the one taken). At a state of an equal hash, p may
+not take the same completed action again; a different completion is a different action (MTR 4.4 asks a looping player
+to "choose a different action", the user's board decision of 2026-11-09; X = 2 is one, and it progresses the board).
+
+* **Recording.** `begin_activate` opens the record (`Game::open_loop`: the hash now, before anything changes, and the
+  agenda's length below the activation's tasks); `ask_options` records each decision while it is open (a decision asked
+  again - a refresh, a world's - replaces its unanswered step) and `apply` / the single-option answer record the action
+  taken (`loop_ask`, `loop_answer`); after each task `advance` closes it once the agenda is back to that length - its
+  costs paid - and the record joins `loop_taken` (`loop_progress`). A may-copy's record is complete at its YES (no path),
+  as before.
+* **Withholding.** `Game::loop_dead(p, h, act, prefix)`: is every completion that begins with `prefix` recorded at hash
+  h? Yes if a record completed right after `prefix`; no if no record went through `prefix` (a decision never visited has
+  completions no record holds); else when every option the next decision offered is. At priority an ability is withheld
+  when `loop_dead(.., [])` (every completion recorded: Basalt Monolith's untap has one); within the activation, an option
+  of the taker's decision is withheld when every completion through it is (`loop_ask`).
+* **Why it is exact.** Equal hashes give equal decisions after equal choices (the engine is deterministic, and options
+  never read what their decider doesn't know: the hash is the decider's view, 100.7), so a recorded decision's options
+  are those it offers again. A record holds the options the payment search left completable (`completing`, before the
+  loop rule), so a decision the rule leaves a live option always has a completable one; the payment search's own copies
+  (`Game::oracle`) apply no loop rule. The hash leaves out the loop's own stack objects (the board rule), so a decision
+  that reads them (a target among stack objects) may offer less than the records saw at an equal hash: if every option it
+  offers is recorded, nothing is withheld there (never an empty decision), and its record with the options as they are
+  makes the activation dead at the next equal state (`loop_dead` takes any one recorded option list all recorded). A
+  completion is a sequence of decisions: where two sequences make the same
+  activation (one payment reached in two orders, if a payment allows that), each is a completion of its own, so such a
+  loop may repeat once per sequence before it stops, never fewer times (a missed "equal" only lets a loop run longer,
+  100.7).
+* **Termination** as before: each completion is withheld after one no-progress use at a state, completions are finite,
+  and a completion that spends anything changes the state.
+* `determinize` keeps the viewer's own records and drops another decider's open activation with its records
+  (`after_deal`): its loop may repeat once more in a world, never fewer times. `public_state` classifies `loop_open`
+  (derived). The fingerprint (`testkit`) hashes it.
+
+**Tests** (`tests/rules_loops.rs`): `cr_732_2a_another_x_after_a_no_op_x_0_is_offered` (the review's d01: with two
+Mountains and the Reaches untapped, after an X = 0 use - held on the stack, or resolved - the pump stays offered, its X
+decision without 0 and with 1 and 2; X = 2 is taken, paid and resolves). Updated, because they asserted the coarse key:
+`cr_732_2a_lavaclaw_reaches_x_0_pump_is_no_progress` (every source tapped, the Reaches paying its own animation, so X = 0
+is the only completion: withheld as before), `mtr_4_4_free_activations_stacked_without_board_progress_stop` (after both
+free uses at one board the switch is withheld and the pump offered only with X >= 1; random play still ends the turn),
+`cr_732_2a_basalt_monolith_loops_once_back_at_the_same_state` (with an untapped Swamp the untap stays offered - its
+payment may take the Swamp's mana, a land tapped: progress - and paying from the pool whenever offered still ends with
+the Swamp tapped: the recorded all-pool completion is withheld; without the Swamp, withheld as before). The rest of
+`rules_loops` (Grim Monolith past 31, Fumarole's two switches, Time Vault + Voltaic Key, Chain of Smog, the determinized
+worlds) pass unchanged.
+
+### 147.3 A drafted match that didn't finish is refused, never a drawn match
+
+**The bug** (flow.md B1, probe `flow_probe_drafted.py`). `mtgz/az/drafted.py`'s `results` accepted a resolver row with
+`over` false - a match aborted (100.7: no result) or cut at the driver's `max_steps` - as the 0.5/0.5 its row carries, so
+an event resolved with a made-up drawn match (a 6-5 event with its last match aborted: a team A win), and the play
+network dropped that match's rows while the draft network trained on it. 45.3 said so for the step cap.
+
+**Now** `results` refuses (ValueError) a row whose `over` is not true, naming the match, its tag and why: "aborted: the
+game ended where the engine cannot go on exactly", "cut at the driver's max_steps", or "no \"over\" field". In a run the
+coordinator's exception reaches the main thread and the run stops (zero-core 11.2) - loud. Why not count the event: the
+honest alternatives (drop the event: a parked game resolved as aborted, which zero-core's `Driver::resolve` cannot do -
+it emits the resolved game as over; or replay the match with a derived seed: the coordinator would requeue a tag with a
+new spec) are zero-core changes, outside this lane (147.7). The rate: 0 aborted in the 20k fuzz's 20,000 games and 2,000
+best-of-three matches of both pools (130.7); a cut needs a game past `max_steps` decisions.
+
+**Tests** (`tests/test_drafted.py`): `test_an_unfinished_match_is_refused_never_a_drawn_match` (an aborted row, a cut row,
+a row without `over`: each refused with its reason; the same rows finished resolve the event); the two older tests' rows
+carry `over` (one had `over` false on a decisive result).
+
+### 147.4 The post-sideboard settings' contract: a mirror, and never a self-play `keep_deck`
+
+**`"start_game": 2` takes a mirror only** (flow.md B2, probe `zz_flow_probes::probe_start_game_2_takes_a_non_mirror_and_keep_deck_takes_any_spec`).
+130's argument is the mirror's: game 1's result is drawn as a fair coin, exact only when both seats' game-1 chance is 1/2.
+Delver against Doomsday parsed and drew the coin, training and evaluating on the wrong share of who chooses in game 2
+and of matches reaching game 3. `MtgSpec::parse` now refuses `"start_game": 2` unless both seats' mains and sideboards are
+the same multisets ("start_game 2 is for a mirror ..."); without it any two 75s play as before. The fuzz's post-sideboard
+matches (`FUZZ_POOL=delver`, 130.6) played `delver_bo3_spec`'s one match in four with `OTHER_75` in seat 1: they now play
+`OTHER_75` in both seats (`delver_bo3_spec_with(.., mirror)`); its best-of-three matches are unchanged.
+Test: `tests/post_board.rs::start_game_2_is_for_a_mirror` (Delver against Doomsday refused; the same main with a
+sideboard one card short refused; the same 75 listed in another order accepted; both with game 1 played accepted).
+
+**`"keep_deck"` is refused in self-play** (flow.md B3; 130.8 listed it open). The engine cannot tell self-play from an
+evaluation (a game is not told whether its driver records), so the guard is the package's: `mtgz.az.decklists.selfplay_spec`,
+zero-core's `selfplay_specs` hook for `mtg` (its docs/az.md 40), which zero.run calls before every self-play phase -
+local, rolling and remote alike - keeps the run's spec (None) and raises `KeepDeckRefused` (an `EncodingMismatch`: the
+run is refused, exit 78, not restarted) when the spec holds `"keep_deck"`. `mtgz.az.keep_h2h` (its drivers record
+nothing, no run) is unchanged. Test: `tests/test_post_board.py::test_a_self_play_spec_with_keep_deck_is_refused`
+(through `zero.run.Run.selfplay_spec` with the package registered: the presets' specs pass unchanged, both
+`keep_h2h` halves are refused).
+
+### 147.5 A belief-weighted world deals Show and Tell's face-down choice exactly
+
+**The bug** (hidden.md B4). `determinize_weighted` (69) met a pending face-down choice of the opponent's hand (123:
+Show and Tell's) by drawing whole weighted deals until a uniformly drawn hand card was of the kind (`hidden_pick_ok`),
+up to `HIDDEN_PICK_TRIES` = 1,000,000, then a panic. The bound in its comment ("at least one in the hidden cards and the
+hand's size") holds for the uniform deal only: with the hand's one card of the kind at the belief clip's floor and the
+rest at its ceiling R, a deal is accepted about once in 49 R^2 - a stall at the default clip 20, a panic past R ~ 150.
+
+**The target is unchanged**: each (deal, chosen card) in proportion to the weighted deal's probability times [the card
+is of the kind], the card a uniform hand place (123.4's model, the uniform deal's too). **The sampler is new**
+(`Game::deal_weighted_pick`). The target is a mixture over which hand card is chosen: a hand card the deal doesn't move
+(known or pinned) of the kind, with the plain deal (mass 1 each); or a dealt place - draw j of a Wallenius sequence (the
+free hand places from the pool, or a cloud's hand places from its cards) - with mass P(draw j is of the kind). That mass
+has no closed form (Wallenius' urn is not exchangeable: no draw order is symmetric, and size-biasing it needs sums over
+every earlier history), so a direct draw of the target is out of reach. The new sampler proposes the place by an upper
+bound M_j of its mass and corrects:
+
+* the sequence is drawn with a card of the kind first, by weight among its cards of the kind (`weighted_draws_forced`),
+  the rest as always, and that card moved to place j; the rest of the deal is drawn from its own conditional exactly as
+  `deal_weighted` draws it (the free cards shuffled, the clouds filled, ...);
+* the importance ratio of that draw against the target's is (S_K / S) prod_t S_t(first) / S_t(at j) - S the
+  sequence's pool's weight, S_K its kind's, S_t the weight left before draw t in each order; the cards' weights and
+  copies are the same factors in both orders - and it is at most S_K / (S - T_j) = M_j (T_j: the j heaviest cards'
+  weight; the product telescopes). A cloud's cards are random (its fill of free cards), so its M_j is taken over every
+  fill (its listed cards' kind weight plus the heaviest free kind cards it could take, over its lightest possible cards);
+* a place is proposed with probability M_j / (A + sum M) (A: the fixed hand cards of the kind) and accepted with
+  probability ratio / M_j; a fixed card is always accepted.
+
+So a world comes with exactly the target's probability and there is no try count. A round is accepted with probability
+(A + E[cards of the kind among the dealt places]) / (A + sum M_j): the kind's own weight cancels in both, so the review's
+case is accepted about every round, and for any weights the free sequence's part is at least (S - T_{n-1}) / (n S).
+No card of the kind possible anywhere (every M_j and A zero) contradicts 129.3's contract (every world's deck holds a
+legal pick): a loud panic at once, not a stall. Without a pending choice `deal_weighted` draws exactly as
+`resample_weighted` did (the same random stream). The uniform deal (`determinize`, `deal_hidden`) keeps its rejection
+and `HIDDEN_PICK_TRIES`: its acceptance is bounded as its comment says.
+
+**Test** (`tests/cards_sneak_show.rs::cr_101_4a_a_belief_weighted_world_deals_the_face_down_choice_exactly`): P0 chose
+Emrakul face down with five cards P1 doesn't know (hand Emrakul, Brainstorm; library Griselbrand, Ponder, Island); 4,000
+of P1's weighted worlds per weighting, played on until the cards enter: the (card put, other hand card) frequencies
+against the exact target enumerated from the urn, within 4 standard errors, P1's options the same in every world. The
+extreme weighting (the kind at 1/1000, the rest at 1000) panicked before (about one deal in a million accepted).
+
+### 147.6 `mana_float_sources` takes the card a hand slot takes
+
+hidden.md B5: 128.2 part 3 moved every hand-slot producer to `hand_slot_order_in` but one: `ActivateMana`'s hand sources
+(`mana_float_sources`, a Spirit Guide's) still took a definition's first card in `hand_sorted_in`. With a twin an
+ability names that the other player knows at a higher card index, the real game activated - revealed - the lower,
+unknown twin, and a world that dealt the lower card another identity the known one: equal keys, unequal knowledge (128's
+bug). Unreachable with today's cards (only miracle's reveal names a hand card, and no Spirit Guide has miracle); fixed.
+The other `hand_sorted_in` readers are whole-hand operations (discard the hand, canonical knowledge), no slot. Test
+(in-crate, `activate.rs`): `mana_float_sources_take_the_twin_a_hand_slot_takes` (two Simian Spirit Guides, the higher
+one known to P1 and named by a waiting trigger: the one source of the definition is that card).
+
+### 147.7 Left to the maintainer (flagged, not changed)
+
+* **The step cap is per game in a chained match** (flow.md B4). zero-core's driver counts `max_steps` per episode
+  (`worker.rs`: `slot.steps < cfg.max_steps`, reset on `Next::Continue`), and the best-of-three presets' 60,000
+  (`mtgz/az/__init__.py` `_DELVER_BO3`, "the step cap x 3"; `keep_h2h.py`'s default) was sized for a match that was one
+  episode. With `game_episodes` each game may take 60,000 steps, three times the best-of-one presets' 20,000, and a cut
+  game ends the whole match unfinished. Options: (a) 20,000 for the chained presets and `keep_h2h`, the comments fixed -
+  a preset change only (a running run keeps its stored config), a runaway game holds its slot a third as long, and a
+  real game near 20,000 steps is cut where it wasn't (none seen: the turn cap ends games far sooner); (b) keep 60,000 per
+  game and say so in the comments - no behaviour change; (c) a per-contest cap in zero-core (steps not reset between
+  episodes) - a zero-core change for every chained game.
+* **A drawn game is labelled 0.5 where a draw decides the match** (flow.md I4; `MtgAz::result`, `az/mod.rs` with one
+  episode per game). After a drawn game 2 at 1-0, game 3 drawn is worth 1 to the leader and 0 to the trailer, but each
+  game is labelled by its own result: 0.5 each. This follows the user's decision that the label is the per-game outcome;
+  the cost is that a trailer values a sure draw at 0.5 instead of 0, so it may prefer a draw to a line winning under half
+  the time - only at the drawn-game rate (the turn cap; 130.7's untrained smoke drew 9 of 15). Options: (a) keep it (the
+  decision as made); (b) label a drawn game with its match-conditional value (1 / 0 when it decides the match, 0.5
+  otherwise) - an engine change to `result()` only, but a second kind of label beside the per-game one; (c) measure
+  first: the drawn-game share per iteration of the Bo3 run, then decide.
+
+### 147.8 Checks
+
+* **Behaviour digests re-recorded** (`DIGEST_WRITE=1`): full **438164c0429d7fa3 -> a8595afe57235009**,
+  `DIGEST_ENCODING=0` **a0062bb5569e06d3 -> 7806b107de9bd368**: 21 of the 2,500 games change (20 random, 1 heuristic:
+  r 22, 109, 247, 421, 442, 468, 551, 562, 691, 703, 746, 1030, 1342, 1388, 1514, 1529, 1580, 1817, 1824, 1906; h 386) -
+  the loop rule's (147.2: completions the coarse key withheld are offered); no digest game reaches 256 permanents,
+  a weighted deal or a named Spirit Guide twin.
+* **The full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`): **2,545 passed, 0 failed, 27
+  ignored**.
+
+### 147.9 Other sections corrected in place
+
+100.7 (the loop rule's record), 100.4.6's numbers and 100.7's mana list (`PerPermanent` was not aborted), 45.3 (a cut
+drafted match), 123.3's table (the weighted deal's pick), 130.1's table and 130.8 (`start_game` mirrors, `keep_deck` in
+self-play); docs/shortcuts.md 46.3.

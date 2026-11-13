@@ -938,6 +938,7 @@ impl Game {
         self.lki_damage.hash(&mut h);
         self.spell_lki.hash(&mut h);
         self.loop_taken.hash(&mut h);
+        self.loop_open.hash(&mut h);
         self.initiative.hash(&mut h);
         self.dungeons.hash(&mut h);
         self.rules_srcs.hash(&mut h);

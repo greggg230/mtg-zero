@@ -390,3 +390,68 @@ fn cr_510_1a_combat_damage_past_i64_ends_the_game_aborted() {
     attack_unblocked(&mut g, bear);
     assert_aborted(&g, "combat damage past i64::MAX");
 }
+
+// ---- ENGINE.md 147.1: mana "for each permanent" past the pool's 255 -------------------------------------
+
+/// Gaea's Cradle ("{T}: Add {G} for each creature you control") with `n` Llanowar Elves (the constructed table,
+/// as the Fable review's probe `zz_rules_d::d04`).
+fn cradle(n: usize, hand: &[&str]) -> Game {
+    let mut bf = vec!["Gaea's Cradle"];
+    bf.extend(std::iter::repeat_n("Llanowar Elves", n));
+    Scenario::new(engine::db::CardDb::constructed())
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Island"; 10])
+        .library(1, &["Forest"; 10])
+        .battlefield(0, &bf)
+        .hand(0, hand)
+        .at(Step::Main1, 0)
+        .start()
+}
+
+/// Float the Cradle's mana with priority (CR 605.3a: `YES`, the Cradle, then no more).
+fn float_cradle(g: &mut Game) {
+    let c = bf(g, 0, "Gaea's Cradle");
+    g.choose(Choice::Yes);
+    g.choose(Choice::Card(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ActivateMana) || at_priority(g) || g.is_over());
+    if g.kind() == Some(DecisionKind::ActivateMana) {
+        g.choose(Choice::Pass);
+    }
+}
+
+/// 255 creatures: the Cradle adds exactly 255 {G} (the pool's `u8`, ENGINE.md 100.7: exact up to it).
+#[test]
+fn cr_106_4_gaeas_cradle_with_255_creatures_adds_exactly_255() {
+    let mut g = cradle(255, &[]);
+    assert!(at_priority(&g), "{:?}", g.outcome());
+    float_cradle(&mut g);
+    assert!(!g.is_over() && at_priority(&g), "{:?}\n{}", g.outcome(), g.log_lines().join("\n"));
+    assert_eq!(g.player(0).pool.amt[4], 255);
+}
+
+/// The Fable review's 2026-11-12 B3 (ENGINE.md 147.1): `ManaProd::PerPermanent` read `n.min(255)`, so the Cradle
+/// with 256 creatures added 255 {G} and the game went on (a saturation docs/shortcuts.md 46.3 said was gone). Past
+/// the pool's 255 of a type the game ends aborted, and before any decision whose options (a payment's sources, an
+/// X's range) could be built from the amount read as 255: a game that starts there has no decision at all, and one
+/// that gets there - a 256th creature resolving while the Cradle is tapped - ends at its next decision.
+#[test]
+fn cr_106_4_gaeas_cradle_past_255_creatures_ends_the_game_aborted() {
+    let g = cradle(256, &[]);
+    assert_aborted(&g, "the Cradle with 256 creatures");
+    assert!(g.log_lines().iter().any(|l| l.contains("Gaea's Cradle's mana ability would make 256 mana of one type")), "{:?}", g.log_lines().last());
+    // 255 creatures, the Cradle tapped for 255 {G}, then a 256th creature cast with one of it
+    let mut g = cradle(255, &["Llanowar Elves"]);
+    float_cradle(&mut g);
+    assert_eq!(g.player(0).pool.amt[4], 255);
+    let elf = g.card(0, "Llanowar Elves", Zone::Hand);
+    g.choose(Choice::Cast(elf));
+    pay(&mut g);
+    for _ in 0..20 {
+        if g.is_over() {
+            break;
+        }
+        g.choose(if at_priority(&g) { Choice::Pass } else { g.pending_decision().unwrap().options[0].choice });
+    }
+    assert_aborted(&g, "a 256th creature with the Cradle tapped");
+    assert_eq!(g.battlefield().iter().filter(|&&c| g.name(c) == "Llanowar Elves").count(), 256);
+}

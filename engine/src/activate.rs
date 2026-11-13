@@ -419,13 +419,14 @@ impl Game {
         // stays the permanent's place for its records.)
         let (def, aslot, granter) = self.activated_home(card, slot);
         // A loop action (a non-mana ability of a permanent on the
-        // battlefield, `loops.rs`): noted with the state it is taken at,
-        // before anything changes.
+        // battlefield, `loops.rs`): its record opened with the state it is
+        // taken at, before anything changes, and completed with its
+        // decisions once its costs are paid (ENGINE.md 147.2).
         if let (AbilitySlot::Activated(i), crate::db::ActEffect::Stack(_), Zone::Battlefield) =
             (slot, &self.db.def(def).activated_def(aslot).effect, self.objs[card.i()].zone)
         {
             let place = self.battlefield.iter().position(|&x| x == card).expect("a permanent") as u32;
-            self.note_loop(p, LoopAct::Activate { place, slot: i }, None);
+            self.open_loop(p, LoopAct::Activate { place, slot: i });
         }
         self.note(|g| format!("P{p} activates {} ({slot:?})", g.name(card)));
         if self.objs[card.i()].zone == Zone::Hand {
@@ -1700,8 +1701,9 @@ impl Game {
                 (0..6).filter(|&t| m & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect()
             }
             _ => {
-                // (F7: mana from counters past the pool's u8 aborts.)
-                self.check_counter_mana(src.card, prod);
+                // (F7, ENGINE.md 147.1: mana from counters or a count of
+                // permanents past the pool's u8 aborts.)
+                self.check_mana_bound(p, src.card, prod);
                 productions(self, p, prod, Some(src.card))
             }
         };
@@ -2037,8 +2039,11 @@ impl Game {
     /// 605.3a): for each permanent with some, in canonical order, its
     /// slots (its own abilities, those other permanents grant it, a granted
     /// "sacrifice this: add <mana>", `pay::SAC_FOR`); then each card in hand
-    /// with one (a Spirit Guide's), one per definition. Not the ones
-    /// offered at priority directly (`mana_at_priority`: Lion's Eye Diamond,
+    /// with one (a Spirit Guide's), one per definition: the definition's card
+    /// a hand slot takes (`hand_slot_order_in`, ENGINE.md 128.2 part 3,
+    /// 147.6: a twin an ability names that the other player knows first, so
+    /// the card activated is known to the other player in every world of
+    /// theirs or in none). Not the ones offered at priority directly (`mana_at_priority`: Lion's Eye Diamond,
     /// a source about to be lost, ENGINE.md 86), so each activation is one
     /// action.
     pub(crate) fn mana_float_sources(&self, p: PlayerId, classes: &[Class], sorcery_ok: bool) -> Vec<(CardIdx, Vec<AbilitySlot>)> {
@@ -2075,7 +2080,7 @@ impl Game {
         }
         if self.players[p as usize].hand.iter().any(|&c| self.hand_mana_source(c)) {
             let mut defs = Vec::new();
-            for c in self.hand_sorted_in(p) {
+            for c in self.hand_slot_order_in(p) {
                 let def = self.objs[c.i()].def;
                 if defs.contains(&def) || !self.hand_mana_source(c) {
                     continue;
@@ -2167,5 +2172,42 @@ impl Game {
                 self.ask(Task::ActivateMana { p, card: None, again }, p, DecisionKind::ActivateMana, opts);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// ENGINE.md 147.6 (the Fable review's hidden B5; 128.2 part 3): `ActivateMana`'s hand sources take the card of a
+    /// definition a hand slot takes (`hand_slot_order_in`). Two Simian Spirit Guides in P0's hand, the one of the
+    /// higher card index known to P1 and named by an ability (a waiting trigger's event, as miracle's revealed card
+    /// is): the slot names it, and activating the Guide must reveal that card - in every world P1 deals, the one it
+    /// knows - not the lower twin P1 doesn't know (`hand_sorted_in`'s card: equal keys, unequal knowledge).
+    #[test]
+    fn mana_float_sources_take_the_twin_a_hand_slot_takes() {
+        use crate::game::Step;
+        use crate::testkit::Scenario;
+        const GUIDE: &str = "Simian Spirit Guide";
+        let mut g = Scenario::new(crate::db::CardDb::constructed())
+            .spec(|s| s.auto_single = false)
+            .hand(0, &[GUIDE, GUIDE])
+            .library(0, &["Island"; 8])
+            .library(1, &["Island"; 8])
+            .at(Step::Main1, 0)
+            .start();
+        let mut twins = g.players[0].hand.clone();
+        twins.sort_by_key(|c| c.get());
+        let (low, high) = (twins[0], twins[1]);
+        assert_eq!(g.objs[low.i()].def, g.objs[high.i()].def);
+        g.objs[high.i()].known |= 1 << 1;
+        let ev = crate::triggers::EvCtx { obj: Some(g.obj_ref(high)), ..Default::default() };
+        let source_def = g.objs[high.i()].def;
+        g.waiting.push(crate::triggers::PendingTrigger { controller: 0, source: g.obj_ref(high), source_def, slot: 0, ev });
+        assert!(g.named_by_an_ability(high) && !g.named_by_an_ability(low));
+        assert_eq!(g.hand_slot_order_in(0)[0], high, "the slot's card");
+        assert_eq!(g.hand_sorted_in(0)[0], low, "the canonical order's (before: the activated one)");
+        let classes = g.mana_classes(0, None);
+        let sources = g.mana_float_sources(0, &classes, true);
+        let guides: Vec<_> = sources.iter().filter(|(c, _)| g.objs[c.i()].def == source_def).map(|(c, _)| *c).collect();
+        assert_eq!(guides, [high], "one source per definition, the slot's card");
     }
 }

@@ -2715,26 +2715,29 @@ fn match_spec(seed: u64) -> engine::az::MtgSpec {
 /// one match in four P1 plays another 75 of supported cards (`OTHER_75`: the format takes any two
 /// 75s), one in four 12-turn games (drawn games).
 fn delver_bo3_spec(seed: u64) -> engine::az::MtgSpec {
-    delver_bo3_spec_with(seed, serde_json::json!({}))
+    delver_bo3_spec_with(seed, serde_json::json!({}), false)
 }
 
 /// `FUZZ_POOL=delver`'s post-sideboard matches (ENGINE.md 130): `delver_bo3_spec`'s with `"start_game": 2` and one
-/// episode per game; one match in three a seat keeps its deck (`"keep_deck"`, the yardstick's).
+/// episode per game; one match in three a seat keeps its deck (`"keep_deck"`, the yardstick's). Mirrors only (the
+/// spec refuses `"start_game": 2` for two different 75s, ENGINE.md 147.4): `delver_bo3_spec`'s one match in four
+/// with `OTHER_75` plays it in both seats.
 fn delver_post_spec(seed: u64) -> engine::az::MtgSpec {
     let mut extra = serde_json::json!({"start_game": 2, "game_episodes": true});
     if seed % 3 == 2 {
         extra["keep_deck"] = serde_json::json!([(seed / 3) % 2]);
     }
-    delver_bo3_spec_with(seed, extra)
+    delver_bo3_spec_with(seed, extra, true)
 }
 
-fn delver_bo3_spec_with(seed: u64, extra: serde_json::Value) -> engine::az::MtgSpec {
+fn delver_bo3_spec_with(seed: u64, extra: serde_json::Value, mirror: bool) -> engine::az::MtgSpec {
     let d = engine::az::constructed::Decklist::izzet_delver();
     let db = CardDb::constructed();
     let main = d.main_names();
     let side: Vec<String> = d.sideboard.iter().filter(|(_, n)| db.id(n).is_some()).flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect();
     let expand = |l: &[(u32, &str)]| -> Vec<String> { l.iter().flat_map(|&(k, n)| std::iter::repeat_n(n.to_string(), k as usize)).collect() };
     let (main1, side1) = if seed % 4 == 1 { (expand(&OTHER_75.0), expand(&OTHER_75.1)) } else { (main.clone(), side.clone()) };
+    let (main, side) = if mirror && seed % 4 == 1 { (main1.clone(), side1.clone()) } else { (main, side) };
     let max_turns = if seed % 4 == 3 { 12 } else { 60 };
     let mut v = serde_json::json!({"max_turns": max_turns, "constructed": true, "format": "bo3",
         "decks": {"p0": main, "p1": main1, "p0_sideboard": side, "p1_sideboard": side1}});

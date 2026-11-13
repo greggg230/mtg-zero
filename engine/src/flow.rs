@@ -240,6 +240,9 @@ impl Game {
         let d = self.pending.as_ref().ok_or_else(|| "no decision is pending".to_string())?;
         let choice = d.choice_of(action).ok_or_else(|| format!("illegal action {action} for {:?}", d.kind))?;
         self.pending = None;
+        if self.loop_open.is_some() {
+            self.loop_answer(action);
+        }
         match (self.page, choice) {
             // "Next page" of a choice whose permanents page (ENGINE.md
             // 100.4.8): the asking task, on the agenda, asks that page.
@@ -261,6 +264,9 @@ impl Game {
         while self.pending.is_none() && self.outcome.is_none() {
             let t = self.agenda.pop().expect("the agenda is never empty while the game runs");
             self.run_task(t);
+            if self.loop_open.is_some() {
+                self.loop_progress();
+            }
             budget -= 1;
             assert!(budget > 0, "engine loop: {TASK_BUDGET} tasks without a decision");
         }
@@ -310,6 +316,13 @@ impl Game {
 
     /// [`ask`](Self::ask) with the options' ids as they are.
     pub(crate) fn ask_options(&mut self, task: Task, player: PlayerId, kind: DecisionKind, mut options: Vec<Opt>) {
+        // A mana ability past the pool's 255 of a type: the options may have
+        // been built from it read as 255, so none is shown or answered - the
+        // game ends aborted (ENGINE.md 147.1; `advance` clears the agenda).
+        if let Some(why) = self.mana_past_bound() {
+            self.abort(|| why);
+            return;
+        }
         assert!(!options.is_empty(), "{kind:?} with no options");
         // A graveyard card's option outside Priority: its slot in the
         // decision's graveyard list (ENGINE.md 65.10).
@@ -320,8 +333,15 @@ impl Game {
             "{kind:?}: duplicate action ids {options:?}"
         );
         debug_assert!(options.iter().all(|o| (o.action as usize) < crate::decision::NUM_ACTIONS));
+        // Within a loop action's activation: the decision recorded, and the
+        // options whose every completion its taker took here withheld
+        // (loops.rs, ENGINE.md 147.2).
+        if self.loop_open.is_some() {
+            self.loop_ask(player, &mut options);
+        }
         self.agenda.push(task);
         if options.len() == 1 && self.spec.auto_single && !self.no_auto {
+            self.loop_answer(options[0].action);
             // The decision is answered here, so no node of the search sees
             // it; that its decider had no alternative is a fact the next
             // signature would otherwise not show (it may depend on hidden
@@ -585,6 +605,7 @@ impl Game {
         self.w3.lki_loss.clear();
         self.spell_lki.clear();
         self.loop_taken.clear();
+        debug_assert!(self.loop_open.is_none(), "an activation open across turns");
         // Permissions end with their turn, or when the card moves.
         let perms = std::mem::take(&mut self.permissions);
         self.permissions = perms

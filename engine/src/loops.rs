@@ -11,16 +11,32 @@
 //! **The rule.** When player p takes a loop action, the game records
 //! (`Game::loop_taken`, for the rest of the turn) the loop hash of the state
 //! as p's decider sees it ([`Game::loop_hash`]) with the action
-//! ([`LoopAct`]). The action is not offered to p at a decision whose loop
-//! hash equals a recorded one for the same action: the state is identical
-//! to one in which p took that action, so everything reachable by taking it
-//! now was reachable then, and taking it again could only repeat an
-//! iteration that made no progress (a loop must stop when it comes back to a
-//! previous game state, MTR 4.4). Basalt Monolith thus loops once: after its
-//! untap, paid with its own mana, resolves, the game is where it was and the
-//! untap is not offered. An iteration that changes anything (a land tapped,
-//! a card discarded, life lost, an extra turn) keeps the loop going, with no
-//! limit: Grim Monolith untaps as long as lands pay for it.
+//! ([`LoopAct`]) **as completed** ([`LoopRec`]): an activation's every
+//! decision until its costs are paid - its modes, X, targets, payment, as the
+//! action ids offered and the one taken ([`LoopStep`]; `Game::loop_open`
+//! while it runs). At a state with an equal hash, p may not take the same
+//! completed action again: the state is identical to one in which p took
+//! it, so everything reachable by taking it now was reachable then, and
+//! taking it again could only repeat an iteration that made no progress (a
+//! loop must stop when it comes back to a previous game state, MTR 4.4). A
+//! different completion is a different action and stays offered (ENGINE.md
+//! 147.2: an X = 0 use of Lavaclaw Reaches' "{X}: +X/+0" no longer withholds
+//! X = 2): an option of one of the activation's decisions is withheld when
+//! every completion through it is recorded ([`Game::loop_dead`], over the
+//! records as a tree of their decisions; a decision never visited has
+//! completions no record holds), and the ability at priority when every
+//! completion is. Basalt Monolith thus loops once: after its untap, paid
+//! with its own mana, resolves, the game is where it was and the untap (its
+//! one completion) is not offered. An iteration that changes anything (a
+//! land tapped, a card discarded, life lost, an extra turn) keeps the loop
+//! going, with no limit: Grim Monolith untaps as long as lands pay for it.
+//! Equal hashes give equal decisions after equal choices (the engine is
+//! deterministic and its options never read what the decider doesn't know),
+//! so a decision's recorded options are the ones it offers again; a record
+//! holds the options before this rule withheld any, and only the options
+//! the payment search left completable (`Game::completing`), so a decision
+//! the rule leaves with a live option always has one (the payment search's
+//! own copies, `Game::oracle`, apply no loop rule).
 //!
 //! **The board** (the user's decision, 2026-11-09: tournament rules require a
 //! player who loops without progressing the board state to choose a
@@ -113,6 +129,36 @@ pub enum LoopAct {
     MayCopy,
 }
 
+/// One decision of a loop action's activation (module docs): the action ids
+/// it offered, ascending, before the loop rule withheld any, and the one
+/// taken (None while it waits for its answer).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct LoopStep {
+    pub options: Vec<u16>,
+    pub chosen: Option<u16>,
+}
+
+/// A loop action taken this turn (`Game::loop_taken`; module docs): its
+/// taker, the loop hash of the state it was taken at, the action, and the
+/// decisions of its activation until it completed (none for a may-copy: its
+/// YES is the whole action).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct LoopRec {
+    pub p: PlayerId,
+    pub hash: u64,
+    pub act: LoopAct,
+    pub path: Vec<LoopStep>,
+}
+
+/// An activation that is a loop action, in progress (`Game::loop_open`):
+/// its record so far and the agenda's length below its tasks (it completes
+/// when the agenda is back to that length: its costs paid, CR 602.2i).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct LoopOpen {
+    pub rec: LoopRec,
+    pub depth: u32,
+}
+
 /// The timestamps of a hashed state, ascending: the loop hash names each by
 /// its rank (module docs).
 pub(crate) struct Canon {
@@ -131,23 +177,139 @@ impl Canon {
 }
 
 impl Game {
-    /// Would taking loop action `act` now repeat one `p` took this turn at a
-    /// state with the same loop hash (module docs)? `hash` caches this
-    /// decision's hash, computed only if `p` has a record of `act`; `frame`:
-    /// the suspended frame of a may-copy.
+    /// Would taking loop action `act` now only repeat what `p` took this turn
+    /// at a state with the same loop hash - is every completion of it
+    /// recorded there (module docs)? `hash` caches this decision's hash,
+    /// computed only if `p` has a record of `act`; `frame`: the suspended
+    /// frame of a may-copy.
     pub(crate) fn loop_repeats(&self, p: PlayerId, act: LoopAct, frame: Option<&Frame>, hash: &OnceCell<u64>) -> bool {
-        if !self.loop_taken.iter().any(|x| x.0 == p && x.2 == act) {
+        if !self.loop_taken.iter().any(|r| r.p == p && r.act == act) {
             return false;
         }
         let h = *hash.get_or_init(|| self.loop_hash(p, frame));
-        self.loop_taken.iter().any(|&(q, k, a)| q == p && k == h && a == act)
+        self.loop_dead(p, h, act, &[])
     }
 
-    /// `p` takes loop action `act` at this state: record it (module docs).
+    /// Is every completion of loop action `act`, taken by `p` at a state of
+    /// loop hash `h`, whose decisions begin with the answers `prefix`, among
+    /// the records (module docs)? Yes when a record completed right after
+    /// `prefix`; no when no record went through `prefix` (its decision
+    /// unvisited: completions no record holds); else when every option the
+    /// next decision offered is. (Equal hashes give equal decisions, so the
+    /// records through `prefix` saw one option list there; where a decision
+    /// reads what the hash leaves out - the loop's own stack objects - they
+    /// may have seen several, and any one of them all recorded is enough:
+    /// the latest one is how the decision stands, `loop_ask`.)
+    pub(crate) fn loop_dead(&self, p: PlayerId, h: u64, act: LoopAct, prefix: &[u16]) -> bool {
+        let mut lists: Vec<&[u16]> = Vec::new();
+        for r in self.loop_taken.iter().filter(|r| r.p == p && r.hash == h && r.act == act) {
+            if r.path.len() < prefix.len() || !r.path.iter().zip(prefix).all(|(s, &a)| s.chosen == Some(a)) {
+                continue;
+            }
+            match r.path.get(prefix.len()) {
+                None => return true,
+                Some(s) if !lists.contains(&s.options.as_slice()) => lists.push(&s.options),
+                Some(_) => {}
+            }
+        }
+        let mut q = prefix.to_vec();
+        q.push(0);
+        for opts in lists {
+            let mut all = true;
+            for &o in opts {
+                *q.last_mut().expect("pushed") = o;
+                if !self.loop_dead(p, h, act, &q) {
+                    all = false;
+                    break;
+                }
+            }
+            if all {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// `p` answers YES to "may copy this spell" at this state: record it
+    /// (module docs; its YES is the whole action).
     pub(crate) fn note_loop(&mut self, p: PlayerId, act: LoopAct, frame: Option<&Frame>) {
-        let h = self.loop_hash(p, frame);
-        if !self.loop_taken.contains(&(p, h, act)) {
-            self.loop_taken.push((p, h, act));
+        let rec = LoopRec { p, hash: self.loop_hash(p, frame), act, path: Vec::new() };
+        if !self.loop_taken.contains(&rec) {
+            self.loop_taken.push(rec);
+        }
+    }
+
+    /// `p` begins activating loop action `act` (module docs): its record is
+    /// opened with the loop hash of the state now, before anything changes,
+    /// and completes when the agenda is back to its length now
+    /// (`loop_progress`).
+    pub(crate) fn open_loop(&mut self, p: PlayerId, act: LoopAct) {
+        debug_assert!(self.loop_open.is_none(), "a loop action begun inside another's activation");
+        let rec = LoopRec { p, hash: self.loop_hash(p, None), act, path: Vec::new() };
+        self.loop_open = Some(LoopOpen { rec, depth: self.agenda.len() as u32 });
+    }
+
+    /// After each task (`advance`): an open activation whose tasks are all
+    /// done is complete, and its record joins `loop_taken`.
+    pub(crate) fn loop_progress(&mut self) {
+        if self.loop_open.as_ref().is_some_and(|o| self.agenda.len() <= o.depth as usize) {
+            let rec = self.loop_open.take().expect("open").rec;
+            debug_assert!(rec.path.iter().all(|s| s.chosen.is_some()), "a completed activation with a decision unanswered");
+            if !self.loop_taken.contains(&rec) {
+                self.loop_taken.push(rec);
+            }
+        }
+    }
+
+    /// A decision of `player` asked while a loop action's activation is open
+    /// (`ask_options`; never in the payment search's copies): recorded (a
+    /// decision asked again - a refresh, a world's - replaces its unanswered
+    /// step), and for the activation's taker its options through which every
+    /// completion is recorded withheld (module docs).
+    pub(crate) fn loop_ask(&mut self, player: PlayerId, options: &mut Vec<crate::decision::Opt>) {
+        if self.oracle {
+            return;
+        }
+        let Some(open) = self.loop_open.as_mut() else { return };
+        let ids: Vec<u16> = options.iter().map(|o| o.action).collect();
+        match open.rec.path.last_mut() {
+            Some(s) if s.chosen.is_none() => s.options = ids,
+            _ => open.rec.path.push(LoopStep { options: ids, chosen: None }),
+        }
+        let (p, hash, act) = (open.rec.p, open.rec.hash, open.rec.act);
+        if player != p || !self.loop_taken.iter().any(|r| r.p == p && r.hash == hash && r.act == act) {
+            return;
+        }
+        let path = &self.loop_open.as_ref().expect("open").rec.path;
+        let mut q: Vec<u16> = path[..path.len() - 1].iter().map(|s| s.chosen.expect("answered")).collect();
+        q.push(0);
+        let live: Vec<crate::decision::Opt> = options
+            .iter()
+            .filter(|o| {
+                *q.last_mut().expect("pushed") = o.action;
+                !self.loop_dead(p, hash, act, &q)
+            })
+            .copied()
+            .collect();
+        // (Every option recorded: a decision that reads what the loop hash
+        // leaves out - the loop's own stack objects - and offers less than
+        // the records saw. Nothing is withheld here, never an empty decision;
+        // this decision's record, with the options as they are, then makes
+        // the activation's every completion recorded: it stops at the next
+        // equal state. Equal decisions after equal choices never get here.)
+        if !live.is_empty() {
+            *options = live;
+        }
+    }
+
+    /// The answer `action` to the decision just asked or pending, for an
+    /// open loop action's record (`apply`, `ask_options`' single answer).
+    pub(crate) fn loop_answer(&mut self, action: u16) {
+        if self.oracle {
+            return;
+        }
+        if let Some(s) = self.loop_open.as_mut().and_then(|o| o.rec.path.last_mut()).filter(|s| s.chosen.is_none()) {
+            s.chosen = Some(action);
         }
     }
 

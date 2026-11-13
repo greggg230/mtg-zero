@@ -41,6 +41,22 @@ def test_half_specs():
         K.half_specs(P.SPEC_DELVER)
 
 
+def test_a_self_play_spec_with_keep_deck_is_refused():
+    """docs/ENGINE.md 147.4 (the Fable review's flow B3): `"keep_deck"` is an evaluation setting (130.3) - zero.run's
+    self-play spec of every phase goes through the package's `selfplay_specs` hook for `mtg`, which keeps the run's
+    spec and refuses one holding it (exit 78: an EncodingMismatch, refused and not restarted)."""
+    from types import SimpleNamespace
+    from zero.run import EncodingMismatch, Run
+    for spec in (P.SPEC_DELVER_BO3, P.SPEC_DELVER, decklists.mirror_bo3_spec()):
+        fake = SimpleNamespace(cfg={'game': 'mtg', 'spec': spec})
+        assert Run.selfplay_spec(fake, 3) == spec                       # the run's own spec, unchanged
+    for half in K.half_specs(P.SPEC_DELVER_BO3):
+        fake = SimpleNamespace(cfg={'game': 'mtg', 'spec': half})
+        with pytest.raises(EncodingMismatch, match='keep_deck'):
+            Run.selfplay_spec(fake, 3)
+    assert decklists.selfplay_spec(SimpleNamespace(cfg={'spec': ''}), 1) is None    # the game's default spec
+
+
 def test_keep_h2h_on_a_tiny_network(tmp_path):
     import torch
     from zero.net import make_net, save

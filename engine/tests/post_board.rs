@@ -116,6 +116,37 @@ fn start_game_and_keep_deck_are_constructed_best_of_three_settings() {
     assert_eq!((e.start_game, e.keep_deck), (2, [true, false]));
 }
 
+/// ENGINE.md 147.4 (the Fable review's flow B2): `"start_game": 2` draws game 1's result as a fair coin, which is
+/// exact for a mirror only (both seats' game-1 chance 1/2 by symmetry), so two different 75s are refused - another
+/// main (Delver against Doomsday, the review's probe) or the same main with another sideboard. The same 75 listed in
+/// another order is a mirror; without `"start_game": 2` any two 75s still play.
+#[test]
+fn start_game_2_is_for_a_mirror() {
+    let (delver, doomsday) = (Decklist::izzet_delver(), Decklist::legacy_doomsday());
+    let side = |d: &Decklist| -> Vec<String> { d.sideboard.iter().flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect() };
+    let spec = |p1: Vec<String>, s1: Vec<String>, start: u8| {
+        let mut v = serde_json::json!({"max_turns": 60, "constructed": true, "format": "bo3", "game_episodes": true,
+            "decks": {"p0": delver.main_names(), "p1": p1, "p0_sideboard": side(&delver), "p1_sideboard": s1}});
+        if start == 2 {
+            v["start_game"] = serde_json::json!(2);
+        }
+        MtgSpec::parse(&v.to_string())
+    };
+    let refused = "start_game 2 is for a mirror";
+    let e = spec(doomsday.main_names(), side(&doomsday), 2).unwrap_err();
+    assert!(e.contains(refused), "{e}");
+    let mut fewer = side(&delver);
+    fewer.pop();
+    let e = spec(delver.main_names(), fewer.clone(), 2).unwrap_err();
+    assert!(e.contains(refused), "{e}");
+    let (mut main, mut sb) = (delver.main_names(), side(&delver));
+    main.reverse();
+    sb.reverse();
+    assert_eq!(spec(main, sb, 2).unwrap().start_game, 2, "the same 75 in another order");
+    assert_eq!(spec(doomsday.main_names(), side(&doomsday), 1).unwrap().start_game, 1, "game 1 played: any two 75s");
+    assert_eq!(spec(delver.main_names(), fewer, 1).unwrap().start_game, 1);
+}
+
 /// The match starts at the sideboarding before game 2: game 1's result drawn (each seat 1/2, no draw), its
 /// loser sideboarding first with the registered main, then choosing play or draw for game 2 (CR 103.1); game 3
 /// follows exactly when the game-1 loser wins game 2. Deterministic from the seed.

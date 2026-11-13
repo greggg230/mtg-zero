@@ -84,6 +84,26 @@ def mirror_bo3_spec(name=IZZET_DELVER, sideboard=None, max_turns=60, mulligans=T
     return json.dumps(spec, separators=(',', ':'))
 
 
+def selfplay_spec(run, it):
+    """zero-core's `selfplay_specs` hook for `mtg` (its docs/az.md 40; docs/ENGINE.md 147.4): the run's own spec
+    (None), refused when it holds `"keep_deck"`. A keeping seat's only sideboarding option is `PASS` (ENGINE.md
+    130.3), an evaluation setting: in self-play every row of that seat's sideboarding would train a forced decision
+    and the other seat's worlds would deal it sideboarded 60s it never plays. zero.run calls the hook before every
+    self-play phase - local, rolling and remote alike - so such a run stops at its first self-play with exit status
+    78 (refused, not restarted)."""
+    spec = run.cfg.get('spec') or ''
+    if spec and 'keep_deck' in json.loads(spec):
+        from zero.run import EncodingMismatch
+
+        class KeepDeckRefused(EncodingMismatch):
+            """A self-play spec with `keep_deck` (refused like an EncodingMismatch: exit 78, not restarted)."""
+
+        raise KeepDeckRefused(f'iteration {it}: the self-play spec holds "keep_deck" - an evaluation setting (the '
+                              f'yardstick mtgz.az.keep_h2h plays it), never self-play: the keeping seat\'s rows would '
+                              f'train forced sideboarding decisions (docs/ENGINE.md 130.3, 147.4)')
+    return None
+
+
 def mirror_spec(name=IZZET_DELVER, max_turns=60, mulligans=True):
     """The `mtg` spec of a mirror: both seats the decklist's maindeck, no sideboards, best-of-one,
     constructed (JSON)."""
