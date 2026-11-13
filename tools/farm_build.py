@@ -67,6 +67,36 @@ WINML_VERSION = '2.5.96'
 WINML_FILES = ('onnxruntime.dll', 'DirectML.dll', 'Microsoft.Windows.AI.MachineLearning.dll')
 # ... and its license files, shipped in the pack byte for byte (the package's root; the nuspec's <license file>)
 WINML_LICENSE_FILES = ('license.txt', 'ThirdPartyNotices.txt')
+# The CUDA runtime pack (zero-farm PROTOCOL.md 9, rev 11): official redistributables from PyPI, pinned. ONNX Runtime
+# 1.24.4 is the last CUDA 12 build (1.27+ need CUDA 13 = driver 580+); it is built with CUDA 12.8 and needs 12.8+.
+# (package, version, wheel tag, {member in the wheel: file in the pack}, {license member: file in the pack})
+CUDA_WHEELS = (
+    ('onnxruntime-gpu', '1.24.4', 'cp313-cp313-win_amd64',
+     {'onnxruntime/capi/onnxruntime.dll': 'onnxruntime.dll',
+      'onnxruntime/capi/onnxruntime_providers_cuda.dll': 'onnxruntime_providers_cuda.dll',
+      'onnxruntime/capi/onnxruntime_providers_shared.dll': 'onnxruntime_providers_shared.dll'},
+     {'onnxruntime/LICENSE': 'LICENSE', 'onnxruntime/ThirdPartyNotices.txt': 'ThirdPartyNotices.txt'}),
+    ('nvidia-cuda-runtime-cu12', '12.8.90', 'py3-none-win_amd64',
+     {'nvidia/cuda_runtime/bin/cudart64_12.dll': 'cudart64_12.dll'},
+     {'nvidia_cuda_runtime_cu12-12.8.90.dist-info/License.txt': 'NVIDIA_CUDA_EULA.txt'}),
+    ('nvidia-cublas-cu12', '12.8.4.1', 'py3-none-win_amd64',
+     {'nvidia/cublas/bin/cublas64_12.dll': 'cublas64_12.dll', 'nvidia/cublas/bin/cublasLt64_12.dll': 'cublasLt64_12.dll'},
+     {'nvidia_cublas_cu12-12.8.4.1.dist-info/License.txt': 'NVIDIA_CUDA_EULA.txt'}),
+    # cuFFT: a load-time import of onnxruntime_providers_cuda.dll (Windows loads it whatever the graph does)
+    ('nvidia-cufft-cu12', '11.3.3.83', 'py3-none-win_amd64',
+     {'nvidia/cufft/bin/cufft64_11.dll': 'cufft64_11.dll'},
+     {'nvidia_cufft_cu12-11.3.3.83.dist-info/License.txt': 'NVIDIA_CUDA_EULA.txt'}),
+    # cuDNN: only the three libraries our graphs load (cudnn64_9 loads the others by name, on demand: 2.3 GB -> 0.2 GB)
+    ('nvidia-cudnn-cu12', '9.28.1.4', 'py3-none-win_amd64',
+     {'nvidia/cudnn/bin/cudnn64_9.dll': 'cudnn64_9.dll', 'nvidia/cudnn/bin/cudnn_graph64_9.dll': 'cudnn_graph64_9.dll',
+      'nvidia/cudnn/bin/cudnn_ops64_9.dll': 'cudnn_ops64_9.dll'},
+     {'nvidia_cudnn_cu12-9.28.1.4.dist-info/licenses/LICENSE': 'NVIDIA_cuDNN_LICENSE.txt'}),
+)
+# The pack's hard hardware requirement (PROTOCOL.md 9.2): cuDNN 9.28's Windows minimum for CUDA 12.x (CUDA 12's own
+# minor-version minimum is 525; Blackwell cards need 570.65+, which every driver supporting them is)
+CUDA_GPU = ('nvidia', '527.41', 'cuda')
+# Agents that read a runtime manifest's `gpu` and `zst` (PROTOCOL.md 9)
+ALT_MIN_AGENT = '0.2.10'
 # the CPU pack's license files (module docs): ONNX Runtime's, from its package's root ...
 ORT_LICENSE_FILES = ('LICENSE', 'ThirdPartyNotices.txt')
 # ... and the Visual C++ runtime's: the license its redistributable shows (a payload of vc_redist.x64.exe's UX
@@ -502,13 +532,207 @@ def build_winml(a):
     return bid, d
 
 
+def pypi_wheel(name, version, tag, wheel_dir):
+    """The wheel `name`-`version`-`tag` from PyPI (its JSON API names the file, its URL and sha256), cached in
+    `wheel_dir` -> (path, {filename, url, sha256})."""
+    import urllib.request
+    with urllib.request.urlopen(f'https://pypi.org/pypi/{name}/{version}/json', timeout=60) as r:
+        info = json.load(r)
+    want = f'{name.replace("-", "_")}-{version}-{tag}.whl'
+    hit = [u for u in info['urls'] if u['filename'] == want]
+    if len(hit) != 1:
+        die(f'PyPI has no {want} for {name} {version} (files: {[u["filename"] for u in info["urls"]][:8]})')
+    u = hit[0]
+    src = {'filename': u['filename'], 'url': u['url'], 'sha256': u['digests']['sha256']}
+    os.makedirs(wheel_dir, exist_ok=True)
+    path = os.path.join(wheel_dir, want)
+    if os.path.exists(path) and file_sha256(path) == src['sha256']:
+        return path, src
+    print(f'fetching {src["url"]}', flush=True)
+    tmp = path + '.part'
+    with urllib.request.urlopen(src['url'], timeout=3600) as r, open(tmp, 'wb') as f:
+        shutil.copyfileobj(r, f, 1 << 20)
+    if file_sha256(tmp) != src['sha256']:
+        die(f'{want}: the download does not match PyPI\'s sha256')
+    os.replace(tmp, path)
+    return path, src
+
+
+def file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for b in iter(lambda: f.read(1 << 20), b''):
+            h.update(b)
+    return h.hexdigest()
+
+
+def wheel_member(z, rows, member, what):
+    """A wheel member's bytes, checked against the wheel's RECORD (its own sha256 of the file)."""
+    import base64
+    want = rows.get(member, '')
+    if not want.startswith('sha256='):
+        die(f'{what}: its RECORD has no sha256 for {member}')
+    data = z.read(member)
+    if base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b'=').decode() != want[len('sha256='):]:
+        die(f'{what}: {member} is not the bytes its RECORD names')
+    return data
+
+
+def build_cuda(a):
+    """The CUDA runtime pack (module docs, zero-farm PROTOCOL.md 9) -> (build_id, directory)."""
+    import csv
+    import io
+    import zipfile
+    tdir = target_dir()
+    wheel_dir = a.wheel_dir or os.path.join(tdir, 'wheels')
+    files, desc, licenses, wheels = {}, {}, {}, []
+    ort_version = None
+    for name, version, tag, members, lic in CUDA_WHEELS:
+        path, src = pypi_wheel(name, version, tag, wheel_dir)
+        wheels.append({'package': name, 'version': version, **src})
+        what = f'{name} {version}'
+        with zipfile.ZipFile(path) as z:
+            rec = next(n for n in z.namelist() if n.endswith('.dist-info/RECORD'))
+            rows = {r[0]: r[1] for r in csv.reader(io.TextIOWrapper(z.open(rec), encoding='utf-8')) if len(r) >= 2}
+            for member, n in members.items():
+                files[n] = (wheel_member(z, rows, member, what), f'{src["filename"]}/{member}')
+            for member, n in lic.items():
+                data = wheel_member(z, rows, member, what)
+                if n in licenses:
+                    # the CUDA wheels share one EULA: the same bytes, one file, every source named
+                    if licenses[n]['sha256'] != hashlib.sha256(data).hexdigest():
+                        die(f'{n}: {what} ships a different {member} than {licenses[n]["source"][0]}')
+                    licenses[n]['source'].append(f'{src["filename"]}/{member}')
+                    continue
+                licenses[n] = {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data), 'component': name, 'source': [f'{src["filename"]}/{member}'],
+                               'data': data}
+        if name == 'onnxruntime-gpu':
+            ort_version = version
+    pack = f'cuda-12.8-cudnn-9.28-ort-{ort_version}'
+    d = os.path.join(a.out or os.path.join(tdir, 'dist'), pack)
+    if os.path.exists(d):
+        shutil.rmtree(d)
+    os.makedirs(d)
+    for n, (data, _) in files.items():
+        with open(os.path.join(d, n), 'wb') as f:
+            f.write(data)
+    # every DLL signed by its maker; the MSVC runtime the DLLs import, app-local, from a VS redist folder
+    for n, (data, source) in files.items():
+        st, subj = sig_of(os.path.join(d, n))
+        maker = 'O=Microsoft Corporation' if n.startswith('onnxruntime') else 'O=NVIDIA Corporation'
+        if st != 'Valid' or maker not in subj:
+            die(f'{n}: signature {st} by {subj!r}: expected one by {maker[2:]}')
+        desc[n] = {'version': file_version(os.path.join(d, n)), 'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data), 'signature': st,
+                   'signer': subj, 'source': source}
+    need = sorted({m for n in files for m in pe_imports(os.path.join(d, n))} & set(MSVC))
+    if not a.msvc_dir:
+        die(f'--msvc-dir: the pack carries the MSVC runtime its DLLs import ({need}): give the VS redist folder')
+    for n in need:
+        src = os.path.join(a.msvc_dir, n)
+        st, subj = sig_of(src)
+        if st != 'Valid' or 'O=Microsoft Corporation' not in subj:
+            die(f'{src}: signature {st} by {subj!r}: the MSVC runtime must be Microsoft-signed')
+        shutil.copy2(src, os.path.join(d, n))
+        with open(src, 'rb') as f:
+            data = f.read()
+        desc[n] = {'version': file_version(src), 'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data), 'signature': st, 'signer': subj,
+                   'source': os.path.abspath(src)}
+    # the MSVC runtime must be at least the toolset the ONNX Runtime DLLs were linked with
+    for n in ('onnxruntime.dll', 'onnxruntime_providers_cuda.dll'):
+        b = files[n][0]
+        pe = struct.unpack_from('<I', b, 0x3C)[0]
+        link = [b[pe + 24 + 2], b[pe + 24 + 3]]
+        for m in need:
+            if [int(x) for x in desc[m]['version'].split('.')[:2]] < link:
+                die(f'{m} is {desc[m]["version"]}, older than the toolset {link[0]}.{link[1]} {n} was linked with')
+    for n, (data, comp, source) in msvc_licenses(a.msvc_dir, [desc[m]['version'] for m in need]).items():
+        licenses[n] = {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data), 'component': comp, 'source': [source], 'data': data}
+    taken = [n.lower() for n in [*desc, 'runtime.json', *licenses]]
+    if len(set(taken)) != len(taken):
+        die(f'two files of the pack share a name: {sorted(taken)}')
+    for n, x in licenses.items():
+        with open(os.path.join(d, n), 'wb') as f:
+            f.write(x.pop('data'))
+    vendor, min_driver, provider = CUDA_GPU
+    rj = {'runtime': pack, 'onnxruntime': ort_version, 'provider': 'cpu+cuda', 'providers': ['cpu', provider],
+          'gpu': {'vendor': vendor, 'min_driver': min_driver, 'providers': [provider]}, 'wheels': wheels, 'files': desc, 'licenses': licenses}
+    # loaded through a release worker: every DLL from the pack, the CUDA provider there; the self-test on this PC
+    worker = a.check_worker or cargo_build('release')
+    info = json.loads(subprocess.run([worker, 'info', '--runtime-dir', d], capture_output=True, text=True, check=True).stdout)
+    ort = info['onnxruntime']
+    loaded = {n: p for n, p in ort.get('modules', {}).items() if p}
+    if 'error' in ort or os.path.normcase(os.path.dirname(loaded.get('onnxruntime.dll') or '')) != os.path.normcase(os.path.abspath(d)):
+        die(f'the pack did not load from itself: {ort}')
+    if 'CUDAExecutionProvider' not in ort.get('available', []):
+        die(f'the pack\'s ONNX Runtime has no CUDA provider: {ort.get("available")}')
+    env = dict(os.environ, PATH=os.path.abspath(d) + os.pathsep + os.environ.get('PATH', ''))  # cuDNN loads its parts by name
+    pr = subprocess.run([worker, 'probe-providers', '--runtime-dir', d, '--providers', 'cuda,cpu', '--reps', '2'], capture_output=True, text=True, env=env)
+    probe = json.loads(pr.stdout) if pr.returncode == 0 and pr.stdout.strip().startswith('{') else None
+    if not probe or 'cpu' not in probe.get('providers', []):
+        die(f'probe-providers through the pack: {pr.stdout[-500:]} {pr.stderr[-800:]}')
+    if 'cuda' not in probe['providers'] and not a.no_gpu_check:
+        die(f'the CUDA provider did not pass on this PC (--no-gpu-check to sign anyway): {pr.stderr[-1500:]}')
+    rj['ort_build_info'] = ort['version']
+    rj['check'] = {'available': ort.get('available'), 'providers': probe['providers'],
+                   'results': [{k: r.get(k) for k in ('provider', 'gpu', 'ok', 'why', 'rows_per_s', 'cpu_fallback_ops')} for r in probe.get('results', [])]}
+    with open(os.path.join(d, 'runtime.json'), 'w', encoding='utf-8', newline='') as f:
+        json.dump(rj, f, indent=1)
+    print(f'runtime pack {pack}: ONNX Runtime {ort_version} ({", ".join(ort.get("available", []))}), every DLL from the pack; '
+          f'probe: {probe["providers"]}; {sum(x["size"] for x in desc.values()) / 1e6:.0f} MB of DLLs')
+    min_agent = a.min_agent if git_semver_ge(a.min_agent, ALT_MIN_AGENT) else ALT_MIN_AGENT
+    bid = sign_publish(a, d, ['--kind', 'runtime', '--version', pack, '--min-agent', min_agent, '--gpu-vendor', vendor, '--gpu-min-driver', min_driver,
+                              '--gpu-providers', provider, '--zst-level', str(a.zst_level)])
+    return bid, d
+
+
+def git_semver_ge(a, b):
+    p = lambda v: [int(x) for x in v.split('-')[0].split('+')[0].split('.')]
+    return p(a) >= p(b)
+
+
+def resign_worker(a):
+    """A signed worker build's executable signed again for another runtime pack (zero-farm PROTOCOL.md 9.1: one
+    signed worker manifest per pack): the same engine and core commits, profile, aw, zero_onnx and entry, the new
+    `requires_runtime`, `min_agent` at least the old one's -> (build_id, directory)."""
+    src = a.resign
+    print(farm_release(a, 'verify', src))
+    with open(os.path.join(src, 'manifest.json'), encoding='utf-8') as f:
+        m = json.load(f)
+    if m.get('kind') != 'worker' or not a.runtime_id:
+        die(f'--resign takes a worker build directory and --runtime-id (the other pack); {src} is a {m.get("kind")} build')
+    entry = m['entry']
+    version = f'{m["version"]}-rt{a.runtime_id[:8]}'
+    d = os.path.join(a.out or os.path.join(target_dir(), 'dist'), version)
+    if os.path.exists(d):
+        shutil.rmtree(d)
+    os.makedirs(d)
+    shutil.copy2(os.path.join(src, entry), os.path.join(d, entry))
+    if file_sha256(os.path.join(d, entry)) != next(x['sha256'] for x in m['files'] if x['path'] == entry):
+        die(f'{entry}: not the bytes {src}\'s manifest names')
+    old_min = m.get('min_agent') or MIN_AGENT
+    min_agent = a.min_agent if git_semver_ge(a.min_agent, old_min) else old_min
+    sign = ['--kind', 'worker', '--version', version, '--game', m['game'], '--engine-commit', m['engine_commit'], '--core-commit', m['core_commit'],
+            '--profile', m['profile'], '--aw', str(m['aw']), '--zero-onnx', ','.join(str(x) for x in m.get('zero_onnx') or []),
+            '--min-agent', min_agent, '--entry', entry, '--requires-runtime', a.runtime_id]
+    bid = sign_publish(a, d, sign)
+    info = json.loads(subprocess.run([os.path.join(d, entry), 'info', '--ort-dll', 'none'], capture_output=True, text=True, check=True).stdout)
+    if info['build_id'] != bid:
+        die(f'the signed worker says build {info["build_id"]}, want {bid}')
+    return bid, d
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument('--profile', choices=('release', 'fuzz'))
     g.add_argument('--runtime', action='store_true', help='the runtime pack (ONNX Runtime + its MSVC runtime)')
+    g.add_argument('--resign', metavar='BUILD_DIR', help='sign a signed worker build\'s executable again for --runtime-id (PROTOCOL 9.1)')
     ap.add_argument('--runtime-id', help='release builds: the runtime pack build_id they load ONNX Runtime from')
-    ap.add_argument('--pack', choices=('cpu', 'winml'), default='cpu', help='--runtime: the CPU pack (default) or the Windows ML GPU pack')
+    ap.add_argument('--pack', choices=('cpu', 'winml', 'cuda'), default='cpu',
+                    help='--runtime: the CPU pack (default), the Windows ML GPU pack or the CUDA pack (NVIDIA, PROTOCOL 9)')
+    ap.add_argument('--wheel-dir', help='--pack cuda: where the PyPI wheels are cached (default <target>/farm-build/wheels)')
+    ap.add_argument('--zst-level', type=int, default=19, help='--pack cuda: the zstd level of the compressed copies (PROTOCOL 9.3)')
+    ap.add_argument('--no-gpu-check', action='store_true', help='--pack cuda: sign even if the CUDA provider fails on this PC')
     ap.add_argument('--winml-version', help=f'--pack winml: the Microsoft.Windows.AI.MachineLearning version (default {WINML_VERSION})')
     ap.add_argument('--winml-nupkg', help='--pack winml: a local .nupkg instead of nuget.org')
     ap.add_argument('--ort-dll')
@@ -522,7 +746,12 @@ def main():
     ap.add_argument('--token-file', default=os.path.join(HOME, '.config', 'zero-farm', 'admin_token'))
     ap.add_argument('--farm-release', default='E:/cargo-target/zero-farm/main/release/farm-release.exe')
     a = ap.parse_args()
-    bid, d = (build_winml(a) if a.pack == 'winml' else build_runtime(a)) if a.runtime else build_worker(a)
+    if a.resign:
+        bid, d = resign_worker(a)
+    elif a.runtime:
+        bid, d = {'winml': build_winml, 'cuda': build_cuda}.get(a.pack, build_runtime)(a)
+    else:
+        bid, d = build_worker(a)
     print(f'build directory {d}')
     if a.publish:
         print(farm_release(a, 'publish', d, '--url', a.url, token=True))
