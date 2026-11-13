@@ -29290,3 +29290,121 @@ target directory (E:/cargo-target/mtg-zero/bo3-postboard).
   Nothing refuses it in a run spec; the presets do not set it.
 * **The run**: moving the Delver best-of-three run onto this commit changes what it trains (games 2-3 only) - a
   maintainer's decision, with the run.
+
+## 131. Best-of-three match replays and the delverai publisher (branch `delverai-bo3`, 2026-11-12)
+
+Branch `delverai-bo3` from main 45e65178 (the delver-bo3-pb1 run's engine and encoding) with `delverai-float` (20aee04,
+the live publishers' code: compact uploads, thinned rows, averaged anchored Elo, `rated_every`) merged. Recording and
+export only: no rule, encoding or search change.
+
+**The spectator view** (`view.rs`, read only; zero-core `export_state`): a best-of-three match's `match` adds `decks`
+(each player's deck as `[[name, copies], ...]` in the pool's order: the current or last game's; while sideboarding
+the decider's deck being built and a finished player's chosen deck), `results` (per game so far: 0 not played, 1 + p
+won, 3 drawn) and, while sideboarding, `sideboarding` {order, done}. The sideboarding options are in words (were
+their `Choice` debug text, "Def(DefId(17))"): "Keep the same deck" / "Done: play this deck" (PASS), "Bring in
+Karakas" / "Take out Island" (an entry of one copy), "Change Pyroblast (now 0 of 3)" then "3 Pyroblast (now 0)".
+
+**The recorder** (`mtgz/az/replays.py`): zero.replay already keeps a chained match in one replay (zero-core docs/az.md
+42: its `games`, the match's `result`). New: `match_index` writes the boundaries as the replay's `match` - each game's
+first sideboarding frame (`sb`) and first frame of play (`start`), who chose play or draw, each seat's swaps against
+its registered main, the result (a post-sideboard match's game 1: not played, its drawn winner) - and the listing
+record carries its summary. With a deck head (`aux_deck_w`, ENGINE.md 102.4) each network decision in a game adds
+`deck` (`deck_read`): {for, n (their cards the decider has not seen: the true target's total, which is public), cards
+(the 12 most expected), vs_main (the 60 it predicts - the cards it knows, i.e. their 60 less the true unseen ones,
+plus its guess at the rest - against the registered main, cards of their 75 only), outside (copies it puts on cards
+outside the 75)}. Sideboarding decisions carry no prediction (no hand, no deck target: `aux_target` is empty between
+games). On delver-bo3-pb1's generation 36 (one match, CPU, 245 s) the first read of game 2 was Rough // Tumble +0.91,
+Prismari Charm -0.97 - the swap both players had made.
+
+**The publisher** (`tools/delverai_publish.py`): a fork record with `scale_break` (a text) starts a new history: the run
+is its lineage's first segment, numbered from 0, its Elo never on the parent's axis, and the record says where it came
+from (`forked_from`: the parent, its generation, its global generation, the parent lineage's segments, the text)
+without the parent's rows. The record has `format` ('bo1' / 'bo3') and `start_game`; the deck its sideboard; an anchor
+path like `delver-bo3_a3198_iter0000.pt` finds the run's generation 0 (`iter_?NNNN`). `--keep-yardstick DIR` reads the
+keep-your-60 yardstick (`keep_NNNN.txt`, `mtgz.az.keep_h2h`, 130.3) into `keep_yardstick` rows (another run's files and
+results of two checkpoints left out, no paths); `--state-dir DIR` keeps delverai.json and replays/ out of the run's
+directory.
+
+**Checks.** Behaviour digests unchanged: full **b63f643e97a30a61**, `DIGEST_ENCODING=0` **a0062bb5569e06d3**,
+`DIGEST_ENCODING=v5` **d1bbf127a6c5bda0** (main's, 130.7). `cargo test --release -p engine --test view --test
+post_board --test constructed_bo3 --test bo3_episodes`: passed. pytest: `tests/test_replays_bo3.py` (4, new: the view's
+decks and words, a tiny network's matches end to end, no deck read without the head, `deck_read`'s arithmetic),
+`tests/test_delverai_publish.py` (10: two new - the scale break, the yardstick files), and the bo3 / belief / deck-tilt
+/ blunders files: 52 passed.
+
+## 132. What a best-of-three checkpoint sideboards: the sideboard census (`mtgz.az.sideboard_census`, the delverai publisher's `--census`; branch `delverai-bo3`, 2026-11-12)
+
+On `delverai-bo3` (131) for the delver-bo3-pb1 run and its v6 publisher (main has moved to layout v7: not merged).
+Python only: no rule, encoding or search change.
+
+**The user's ask (2026-11-12).** On the site's Best of 3 tab: how many copies of each sideboard card the network brings
+in and how many of each main-deck card it takes out, on the play and on the draw - each card's distribution of copy
+changes ("50% of the time +3 Pyroblast, 60% of the time -4 Force of Will"), not an average.
+
+**The census** (`mtgz/az/sideboard_census.py`; `python -m mtgz.az.sideboard_census CKPT [--starts 200] [--sims N]
+[--threads 4] [--seed 1] [--out F] [--low-priority]`). N synthetic post-sideboard starts of the checkpoint's run spec
+(130: `"start_game": 2`, game 1's winner drawn from each match's seed; the driver's seed 1 by default, so every
+generation meets the same game-1 results). In each the checkpoint makes every sideboarding decision of both players
+(game 1's loser first) and then the loser's play-or-draw choice, and the start stops at game 2's first other decision
+(the mulligans): no game is played. The search is the recorded matches' (`replays.record`): zero.replay's network seat
+with the run's evaluation move rule (`eval_select`, here `cq-n4-v50-s0.3`), no noise, the leaf values' view and root
+search by `replays.leaf_view` / `root_search` (root view: the run trains with it), the evaluation belief and deck
+tilts (`{"deck": 1.0}`), and the run's self-play simulations `sims` (64) - the recorder's default, not `eval_sims`
+(32), so that the census describes the player of the matches beside it on the page; `--sims` changes it. The driver is
+zero.play's `PyDriver` (`_CensusDriver`: it notes each sideboarding decider and the play-or-draw choice from the
+spectator view and ends the slot at game 2's first decision of play), every start searched side by side (one network
+batch carries a leaf of each).
+
+Each player's 60 (the view's `match.decks` at game 2's start) is recorded as copy changes against the registered main
+and split by **on the play / on the draw** (who starts game 2: the chooser's search decides it after both decks are
+chosen) and by **chooser / not** (game 1's loser, who sideboards first and then chooses). Each split holds one
+sideboarding of every start: n = N, its samples independent. Per split: `kept` (the share that kept the main 60) and
+`swapped` (mean cards brought in), each `[value, standard error]` (binomial; sample sd / sqrt n), and per card the
+cards it changed in the 75's order (sideboard first) as `{name, mean: [change, se], d: [[change, count], ...]}` (the
+rest of the n unchanged); `chose_play` = [starts where the chooser took the play, N]. Checked, never skipped (a
+`CensusError`): game 1's loser sideboarded first and chose, every deck is 60 cards within its seat's 75, exactly one
+player starts, every start reached game 2 within 400 steps. Game 3's sideboarding depends on game 2 and is not in it.
+
+**The publisher** (`tools/delverai_publish.py`, `--census N`, default 200; 0 none). A best-of-three run's newest
+recorded generation gets a census after its matches are uploaded (or at the next pass, when it was recorded before
+this publisher started: a publisher moved onto this commit censuses the generation recorded last), written to
+`census/census_NNNN.json` beside delverai.json (the run's directory, or `--state-dir`); the progress record's
+`sideboard_census` is the newest one (iter, starts, sims, select, seed, seconds, time, chose_play and the four splits;
+no run name or path). It searches with the publisher's `--sims` when given (the recorded matches'). `now.census`
+{iter, since, starts} while it runs and `now.est.census_s` (the last one's duration) for the site's "Right now" bars.
+A census that fails is logged with its traceback, its generation kept in the state's `census_failed` and not tried
+again. The publisher sets itself below normal priority; the census runs on its device (CPU) and torch threads.
+
+**Measured** on delver-bo3-pb1 (desktop CPU, 4 torch threads, below normal priority, beside the production publisher
+recording on 4 threads and the run's self-play): **200 starts in 24 s** for generations 36 and 64, 32 s for 72 (38,400
+simulations: 3 searched decisions a start - one sideboarding decision each, the rest single-option, then play or
+draw), **225 s for generation 0** (248,640 simulations: ~19 decisions a start, about five swaps each). The publisher's
+cadence is a recorded generation every 8th (~25 min), recording its 6 matches ~12-14 min: the census adds well under a
+minute for the trained generations, ~4 min at most. N = 200 and the publisher's 4 threads kept.
+
+**Results.** The chooser took the play in all 200 starts at every generation measured, so on the play = the chooser's
+sideboarding and on the draw = the other player's.
+
+| generation | on the play (n 200) | on the draw (n 200) |
+|---|---|---|
+| 0 (the best-of-one network) | kept 0%; 5.30 +- 0.06 swapped: +3 Force of Negation, +1 Hydroblast, +1 Karakas 100%; -1 Force of Will, Prismari Charm, Thundering Falls, Volcanic Island 100%; Wasteland -1 90% / -4 10% (those 20: also +1 Consign to Memory, Price of Progress, Rough // Tumble) | kept 0%; 4.26 +- 0.03: +3 Force of Negation 100%, +1 Hydroblast 97%, +1 Meltdown 26%, +1 Consign to Memory 3.5%; -2 Murktide Regent 100%, -1 Prismari Charm 100%, -1 Thundering Falls 92%, -1 Wasteland 30%, -1 Volcanic Island 5% |
+| 36 | +1 Rough // Tumble 99%, +1 Price of Progress 1%; -1 Prismari Charm 100% | +1 Rough // Tumble 100%; -1 Prismari Charm 100% |
+| 64 | +1 Rough // Tumble 99.5%, +1 Price of Progress 0.5%; -1 Prismari Charm 100% | the same as 36 |
+| 72 | +1 Rough // Tumble 99%, +1 Price of Progress 1%; -1 Prismari Charm 100% | the same as 36 |
+
+Generation 36's recorded matches (131) had made the same swap, and so had every seat of generation 64's six
+production matches (12 of 12). The trained network has settled on one swap for both seats; generation 0 sideboarded
+five cards and won 39% of games against itself keeping its 60 (the keep-your-60 yardstick, 130.3), generation 36 49%.
+The census is the network's evaluation-mode choice (no noise): self-play's sampled sideboarding is wider.
+
+**The site** (delverai `bo3-census`): the Best of 3 page's "What it sideboards" panel shows the newest census -
+its generation and n, kept the main 60 and cards swapped per split, then per card (brought in, then taken out) a line
+per copy change with a bar of its share and its standard error, the card's copies in the 75, on the play and on the
+draw - and says game 3's sideboarding is not in it. The Worker validates `sideboard_census` (censusProblem).
+
+**Checks.** Behaviour digests unchanged (no Rust change; run anyway on this commit's build): full
+**b63f643e97a30a61**, `DIGEST_ENCODING=0` **a0062bb5569e06d3**. pytest `tests/test_sideboard_census.py` (4, new: the
+summary's arithmetic and splits on hand-made starts, the checks that fail loudly, random players' starts through the
+driver - every kind of sideboarding, each start stopped at game 2 -, a tiny network's census end to end with the same
+census from the same seed, the publisher's census pass, record and failure handling), `tests/test_delverai_publish.py`
+(10) and `tests/test_replays_bo3.py` (4): passed.
