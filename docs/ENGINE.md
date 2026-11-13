@@ -29301,7 +29301,8 @@ target directory (E:/cargo-target/mtg-zero/bo3-postboard).
 
 Branch `fix/low-sev` from main 267ae603 (zero-core pin e5e1bb0, unchanged). The Fable review of `e81f8304..267ae603`
 (`E:\mtg-zero-scratch\fable-review-2026-11-12\`: `rules.md` B3, B4; `flow.md` B1-B4, I4; `hidden.md` B4, B5) - six fixes
-and two points left to the maintainer (147.7). Section number: assigned by the fix lanes' plan (COMMON.md).
+two points left to the maintainer (147.7), and lane G's F1 (148.6), handed to this lane after its merge (147.8). Section
+number: assigned by the fix lanes' plan (COMMON.md).
 
 ### 147.1 Mana "for each permanent" past the pool's 255: aborted, before any decision reads it
 
@@ -29511,7 +29512,28 @@ one known to P1 and named by a waiting trigger: the one source of the definition
   otherwise) - an engine change to `result()` only, but a second kind of label beside the per-game one; (c) measure
   first: the drawn-game share per iteration of the Bo3 run, then decide.
 
-### 147.8 Checks
+### 147.8 The end of `ActivateMana` is the player's decision, keyed (lane G's F1)
+
+**The bug** (ENGINE.md 148.6 F1; the open-decklist information-set walk of lane G's `fix/check-gaps`, merged here as
+dbbccefa: default pool game 2122, `FUZZ_POOL=cross` games 13536 and 19515). After a mana ability activated through
+`ActivateMana` (CR 605.3a, 100.4.3), the next `ActivateMana { again: true }` asked again only if `mana_float_sources`
+found a source - and those include the hand's (a Spirit Guide) - and otherwise returned silently to the `Priority` task
+under it. Two worlds of the other player whose decider's hands differ on such a card: equal keys, the same decider and the
+same legal actions, but `Priority` in one and `ActivateMana` in the other (a public difference, and `PASS` meant passing
+priority in one and stopping in the other); in cross 13536 and 19515 the world back at `Priority` checked the state-based
+actions (CR 704.3) and its game ended while the other's went on.
+
+**The fix** (`activate.rs` `activate_mana`). Stopping is the player's decision (every choice is an action), its one
+option `PASS`: with no source left the one-option `ActivateMana` is asked, never skipped. The engine's single-option rule
+answers it with a `KEY_AUTO` (ENGINE.md 10) - the key that says a decider had no alternative, a fact that may depend on
+its hidden cards, exactly this case - so the two worlds' keys differ; with `auto_single` off it is a decision of one
+option. Nothing else changes: the same answer (`PASS`) ends the activations and priority continues as before.
+
+**Proof**: 147.9. Regression test
+`tests/fuzz.rs::activate_mana_end_is_keyed_default_seed_2122` (the default pool's game 2122 with every check of `play`;
+default pool only, as another pool's seed 2122 is another game).
+
+### 147.9 Checks
 
 * **Behaviour digests re-recorded** (`DIGEST_WRITE=1`): full **438164c0429d7fa3 -> a8595afe57235009**,
   `DIGEST_ENCODING=0` **a0062bb5569e06d3 -> 7806b107de9bd368**: 21 of the 2,500 games change (20 random, 1 heuristic:
@@ -29521,7 +29543,7 @@ one known to P1 and named by a waiting trigger: the one source of the definition
 * **The full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`): **2,545 passed, 0 failed, 27
   ignored**.
 
-### 147.9 Other sections corrected in place
+### 147.10 Other sections corrected in place
 
 100.7 (the loop rule's record), 100.4.6's numbers and 100.7's mana list (`PerPermanent` was not aborted), 45.3 (a cut
 drafted match), 123.3's table (the weighted deal's pick), 130.1's table and 130.8 (`start_game` mirrors, `keep_deck` in
@@ -29692,7 +29714,7 @@ hidden-information lanes. Repro: `FUZZ_POOL=<pool> FUZZ_FIRST=<seed> FUZZ_GAMES=
 engine --test fuzz -- --nocapture fuzz_random_games` (a match: `FUZZ_FIRST=<seed> FUZZ_MATCHES=1 ...
 fuzz_random_matches`).
 
-* **F1. The end of `ActivateMana` is unkeyed and reads the decider's hidden hand** (default 2122, cross 13536 and 19515;
+* **F1. The end of `ActivateMana` is unkeyed and reads the decider's hidden hand** (fixed on `fix/low-sev`, 147.8) (default 2122, cross 13536 and 19515;
   the walk of the player who is not deciding). After a mana ability activated through `ActivateMana` (CR 605.3a,
   ENGINE.md 100.4.3) resolves, the next `ActivateMana { again: true }` task asks again only if `mana_float_sources`
   finds a source - which counts the hand's mana abilities (a Spirit Guide) - and otherwise returns silently to the

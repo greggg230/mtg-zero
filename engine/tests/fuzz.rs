@@ -2617,6 +2617,21 @@ fn stack_refs(g: &Game, viewer: u8) -> String {
         .join(" ")
 }
 
+/// ENGINE.md 147.8 (lane G's F1, 148.6): the default pool's game 2122 passes every check of `play`. After a mana ability
+/// activated through `ActivateMana` (CR 605.3a) the next `ActivateMana` returned silently to `Priority` when no source
+/// was left - a fact of the decider's hidden hand (a Spirit Guide) - so two worlds of the other player's showed it
+/// `Priority` and `ActivateMana` after equal keys and equal legal actions (the open-decklist information-set walk).
+/// Now the one-option `ActivateMana` (`PASS`) is asked and keyed (`KEY_AUTO`). Default pool only (another pool's seed
+/// 2122 is another game); the cross pool's games 13536 and 19515 are the same finding (147.8).
+#[test]
+fn activate_mana_end_is_keyed_default_seed_2122() {
+    if pool_mode() != PoolMode::Default || hidden_decks_mode() {
+        return;
+    }
+    let p = play(2122, true);
+    assert!(!p.actions.is_empty());
+}
+
 #[test]
 fn fuzz_random_games() {
     let n: u64 = std::env::var("FUZZ_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);

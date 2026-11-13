@@ -2114,9 +2114,24 @@ impl Game {
         let classes = self.mana_classes(p, None);
         let sources = self.mana_float_sources(p, &classes, sorcery_ok);
         if sources.is_empty() {
-            // (Only after an activation: nothing more to activate.)
+            // Only after an activation: nothing more to activate. Stopping is
+            // still the player's decision, its one option `PASS`, asked - not
+            // a silent return to priority: whether a source is left can read
+            // the player's hidden hand (a Spirit Guide), so two worlds of the
+            // other player's would show it `Priority` in one and
+            // `ActivateMana` in the other after equal keys (and the first
+            // would check state-based actions). Asked, a single option is
+            // answered with a `KEY_AUTO` (ENGINE.md 10), which keeps them
+            // apart (ENGINE.md 147.8, lane G's F1 of 148.6).
             assert!(again, "ActivateMana with no mana ability to activate");
-            self.answer = None;
+            match self.answer.take() {
+                Some(Choice::Pass) => {}
+                None => {
+                    let pass = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+                    self.ask(Task::ActivateMana { p, card: None, again }, p, DecisionKind::ActivateMana, pass);
+                }
+                Some(other) => unreachable!("ActivateMana with no source left: answer {other:?}"),
+            }
             return;
         }
         let slots_of = |c: CardIdx| sources.iter().find(|(x, _)| *x == c).map(|(_, v)| v.clone()).unwrap_or_default();
