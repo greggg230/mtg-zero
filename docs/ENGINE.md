@@ -28831,3 +28831,210 @@ its own target directory.
   million simulations, 36 s. Both with `--timeout 7200 --stall 600` (the desktop was loaded: the defaults count a slow
   batch as a hang).
 * **Not run**: the Mac steps (`--no-mac`).
+
+## 130. Post-sideboard games only: a constructed best-of-three starts at game 2's sideboarding (`"start_game": 2`), and the keep-its-deck yardstick (branch `bo3-postboard`, 2026-11-12)
+
+Branch `bo3-postboard` from main 64c86cc2 (129); zero-core pinned at `feat/match-episodes-int` 2aab098, unchanged.
+(Section number: no branch, remote branch or worktree's ENGINE.md had 130 or higher on 2026-11-12.)
+
+**The user's decision (2026-11-12).** Don't play or train game 1. The Delver network plateaued at best-of-one play, and
+in the mirror, with both 75s public and game 1 always played with the mains, nothing seen in game 1 tells anyone
+anything about the decks. Each match starts at the sideboarding before game 2.
+
+### 130.1 The option
+
+`"start_game": 2` (`MtgSpec::start_game`, default 1; 1 or 2, anything else refused: game 3 is played only when the
+games before it leave the match open).
+
+| What | How |
+|---|---|
+| where | a constructed best-of-three only (`"constructed": true`, `"format": "bo3"`), refused elsewhere: the cube's game 1 is no public-decks game |
+| `game_episodes` | required: without it a row's label is the match's result, which would count game 1's drawn result (a coin flip). With one episode per game (121) each row takes its own game's result |
+| `chooser` | refused with it: the spec's `chooser` is game 1's (CR 103.1), and game 1 is not played; game 2's chooser is game 1's loser |
+| the start | `MtgAz::new` builds the match as before (game 1 set up with the registered mains, at its play-or-draw choice), then `MtgAz::skip_game_one(winner)`: the game in waiting ends at once by the loser's concession (CR 104.3a: a player may concede at any time; `Game::concede`, `EndReason::Conceded`), `end_game` scores it as any game 1, and the sideboarding before game 2 begins: the loser sideboards first and then chooses play or draw for game 2 as a normal decision (`PlayDraw`, CR 103.1). The state between the games is a finished game 1's, like a real match's, so nothing reading the game while sideboarding (the heuristic, the spectator view) meets an unplayed game |
+| game 1's result | `matches::game_one_winner(seed)`: each seat with probability 1/2, never a draw, from a stream of the match's seed of its own (`split64(seed ^ ...)`), so the match's RNG - game 2's seed, then game 3's - is a real match's of the same seed after the same game-1 result. Over 400 seeds P0 won game 1 193 times (1/2 within 4 standard errors, tested) |
+| game 3 | as 36.1: played when game 1's loser wins game 2 (or game 2 is drawn); about 1.5 games a match |
+| determinism | a world is a function of its seed and the viewer's information; a match replays exactly from its seed and actions with `next_episode` at each game's end (tested, and the fuzz's replay test) |
+| `MatchState::post_board` | set (a setting: never encoded); the spectator view's `match.post_board` |
+
+The search, the labels and the evaluation follow 121: the first episode is game 2 with its sideboarding; zero-core's
+result row is the match's (by game wins, game 1's drawn win counted) with the games' rows beside it (`episodes`,
+`per_game`).
+
+### 130.2 A real game 2 encodes exactly as a synthetic one
+
+On MTGO game 1 is played; the network trained on synthetic starts must see the same inputs there. The match block and
+the match bags, field by field (36.7), in a constructed best-of-three (with or without the option):
+
+| Field | About game 1 | Here |
+|---|---|---|
+| `GAME`, `MY_WINS`, `OPP_WINS`, `DRAWS`, `RESULTS` (game 1: I won / lost / drawn) | the score | kept: the same after the same game-1 result |
+| `SIDEBOARDING`, `SB_FIRST`, `SB_DONE`, `MY_DECK`, `OPP_DECK`, `COUNT_ENTRY`, `LAST_ENTRY`; `OPP_POOL`; `OPP_HIDDEN` | who chooses now, the sideboarding state, the decks' sizes, the public 75 | kept: the same |
+| `STARTED[0]`, `CHOSE[0]` (I took the first turn of game 1; I chose who did) | the synthetic start would have to invent them | **masked** (never written, 0) in every constructed best-of-three encoding |
+| `STARTED[1..]`, `CHOSE[1..]` | game 2's, game 3's | kept (real in both) |
+| `OPP_REVEALED` | game 1's reveals | **the post-sideboard games' only**: `MatchState::earlier` does not take game 1's reveals in a constructed best-of-three (`end_game`); game 2's reveals count in game 3 (and its sideboarding) |
+| `rounds` (zero-core's turn count, never encoded) | game 1's turns | not equal (a synthetic game 1 has none); not an input |
+
+**Why mask rather than draw.** Who chose in game 1 could be drawn exactly (a uniform seat, as a real game 1's), but
+who took the first turn is the chooser's choice: drawing it would need a model of that policy, an approximation (and
+the chooser's choice in game 1 says nothing about the decks). Under open 75s, game 1 played with the mains and each
+game's own label, neither field carries information about the decks or the game being played, so both are left out;
+game 1's *result* is kept (it decides who chooses, the score and the match's stakes). `OPP_REVEALED`: game 1's reveals
+are cards of the public main - implied by it, no information. The game-1 floats' gap is a deliberate limit of the
+public-state gate (`public_state::limits`: "a constructed best-of-three's game 1 had another chooser and starter",
+by design); the two old chooser / starter perturbations now perturb game 2's entry in a constructed best-of-three
+(game 1's elsewhere).
+
+**A real game 1 drawn** (the turn cap, both players losing at once) has no synthetic twin: the synthetic never draws.
+Its encoding (`DRAWS` 1/3, game 1 drawn; the game-1 chooser choosing again, CR 103.1) is one the network never trains
+on - a rare MTGO case, left as it is.
+
+**Test** (`tests/post_board.rs::a_real_game_2_encodes_as_a_synthetic_one`): 40 seeds; a real match (one episode per
+game) plays game 1 (half the heuristic, half random play), then the synthetic start of the same seed with the same
+game-1 result (`skip_game_one`) plays the real match's actions in lockstep through game 2 and its game 3: at every one
+of 24,420 steps the same decider and legal actions, both viewers' encodings equal bit for bit, the same `Game`
+(fingerprint) in a game, the same chance keys; every 7th step a world of each viewer dealt with the same generator
+(7,046 worlds): the same actions, the viewer's encoding, the dealt 60s and sideboarding, the same world `Game`. Game 1
+revealed cards in all 40 matches and none reached `OPP_REVEALED`; 20 matches had a third game, whose `OPP_REVEALED` is
+exactly game 2's reveals. Where the seed's own draw gives that result (20 of 40), `MtgAz::new` with `"start_game": 2`
+is that very state. With the mask switched off the test fails (game 1's `STARTED` written).
+
+### 130.3 The yardstick: a seat that never sideboards (`"keep_deck"`, `mtgz.az.keep_h2h`)
+
+`"keep_deck": [p, ...]` (`MtgSpec::keep_deck`; a constructed best-of-three only): seat p keeps its deck at every
+sideboarding - `PASS` is its only option there, at its first sideboarding decision (its last game's deck, legal:
+60), so it plays its main all match. `MatchState::keep`, copied into each `Sideboarding` (`keep`).
+
+**What the other seat knows, and how it deals.** Whether a player keeps its deck is its own policy, not the
+opponent's information: every deal of a constructed best-of-three for viewer v (`sample_hidden_deck`: `determinize`,
+the belief and deck-tilted deals) turns the opponent's flag off in v's world, and `deal_constructed_between` asks the
+opponent's sideboarding in progress again - in v's worlds the keeper sideboards with every option, as any player, and
+its 60 in a later game is dealt by `ConstructedPrior` from what v saw, as always. The keeper's own worlds keep it
+keeping. No encoding reads the flag (the other player's sideboarding decisions are not encoded, 36.11). Test
+(`a_seat_that_keeps_its_deck_changes_nothing_the_other_seat_knows`): 24 twin matches of the same seed (16 post-board,
+8 with game 1 played), one with seat k keeping and one without where k passes at its first sideboarding decision too:
+the other seat's encoding equal at every step and its legal actions at each of its decisions; its worlds (3,680, the
+same generator) the same encodings, actions, dealt 60s and pools, and played on 12 random steps alike (721 of the
+keeper's sideboarding decisions in them with every option); the keeper's only option `PASS` (37 decisions).
+
+**The head-to-head.** zero.h2h alternates the seats in one driver with one spec, so a per-seat spec key would give
+each side the keeping seat half the time. `python -m mtgz.az.keep_h2h A [B]` (`mtgz/az/keep_h2h.py`) plays two
+drivers - A in seat 0 with `"keep_deck": [1]`, A in seat 1 with `"keep_deck": [0]` - half the matches each with one
+driver seed (game k of each half has the same seed: the same drawn game 1 and deals, the sides swapped; zero.h2h's
+`--paired` pairs), B (default A) keeping, both sides searching with their run's evaluation settings (`run_rule`),
+and prints zero.h2h's paired summary: A's match score, `per_game` (A's games won: the measure), `keeps: "b"`. The
+spec defaults to the presets' (`mtgz.az.SPEC_DELVER_BO3`):
+
+```
+python -m mtgz.az.keep_h2h runs/<run>/models/iter_NNNN.pt --games 400 --sims 64 --device cuda
+```
+
+### 130.4 Presets, specs, the search smoke
+
+* `delver-mirror-bo3` and `delver-bo3-smoke` (spec and evaluation spec): `"start_game": 2`
+  (`decklists.mirror_bo3_spec(..., game_episodes=True, start_game=2)`; `keep_deck=` names keepers). The evaluation's
+  match win rate counts the drawn game 1; `per_game` is the games' (DESIGN.md 8).
+* `tools/search_smoke.py`: `delver_bo3` is the presets' spec (post-sideboard games), `delver_bo3_g1` the same with game 1
+  played.
+
+### 130.5 What changed elsewhere
+
+* **Best-of-one, the cube's best-of-three**: nothing (every change is behind `constructed_bo3` or the new keys). The
+  behaviour digests are main's, unchanged (130.7). A scratch probe (not checked in) hashing 240 cube best-of-three
+  matches (214,761 decisions: every legal-action list, both viewers' whole encodings, the actions and keys, every 16th
+  decision a world of each viewer - its actions, decks, game and encoding) gives behaviour **5aa3e1c3ceff8466** and
+  encodings **54bdaeba9905c904** on main 64c86cc2 and on this branch.
+* **A constructed best-of-three without the option**: the two encoding rules of 130.2 only. The same probe over 240
+  Delver best-of-three matches (191,919 decisions): behaviour (no encodings) **e2e821bd78db6eeb** on both; encodings
+  with `OPP_REVEALED` and game 1's `STARTED` / `CHOSE` zeroed **8701021626c9bb25** on both; the whole encodings differ
+  (711e2ad356bf4cd8 -> adb54485566cc602), as they must.
+* Layout v6, `NUM_ACTIONS` and every action id unchanged; the public-state classification gains `MatchState::keep`
+  (hidden: a seat's policy) and `post_board` (derived: a setting).
+
+### 130.6 Tests
+
+* `engine/tests/post_board.rs` (6): the settings and their refusals (and `eval_json` keeping them); the start (400
+  seeds: game 1's result and score, the loser's concession, the loser sideboarding first with the main, no reveals,
+  the same state from the same seed, P0's game-1 wins within 4 se of 1/2; 24 matches played on: game 2 begins with the
+  loser's `PlayDraw`, game 3 exactly when game 1's loser won or drew game 2); the real-vs-synthetic identity (130.2);
+  the keeper twins (130.3); `every_row_is_a_post_sideboard_games_with_its_own_label` (12 self-play matches through
+  zero-core's driver, uniform evaluator: 6,754 rows, none of game 1, 4,088 of game 2 and 2,666 of game 3 by the match
+  block, each row's label its own game's, 187 sideboarding rows, the match results by game wins with game 1's drawn win
+  counted); a post-board match with a keeper replays from its seed and actions.
+* `engine/tests/az.rs`: the gate's positions gain a last kind, "constructed bo3 post-board" (positions of games 2-3 of
+  the presets' spec), run by every test that takes them (the public-state gate, `the_v5_facts_encode_no_hidden_information`,
+  the belief and deck-target tests, `constructed_bo3_determinize_keeps_the_view_and_deals_legal_60s`); the deliberate
+  limits are 5.
+* `engine/tests/fuzz.rs`: `FUZZ_POOL=delver` plays, after its matches, as many post-sideboard matches (the same seeds'
+  specs with `"start_game": 2` and one episode per game, one in three a seat keeping its deck) with every check of its
+  matches; the replay test replays them too. The match loop follows chained episodes (`next_episode` at a game's end).
+* Python: `tests/test_post_board.py` (3: a match of the presets' spec through the bindings, the halves' specs, the
+  yardstick on a tiny network), `tests/test_delver_bo3.py` (the presets' `start_game`, the match starting at the
+  sideboarding).
+
+### 130.7 Checks (on 3612814d: 6a6e1a42, the code of 130.1-130.6, and a fix to the fuzz's check, below)
+
+The desktop was shared with other lanes' builds (its CPU at 100% throughout); each run here had this branch's own
+target directory (E:/cargo-target/mtg-zero/bo3-postboard).
+
+* **Behaviour digests: main's, unchanged** - full **b63f643e97a30a61**, `DIGEST_ENCODING=0` **a0062bb5569e06d3** (the
+  engine gate), `DIGEST_ENCODING=v5` **d1bbf127a6c5bda0** (by hand, the same 2,000 + 500 games). Nothing re-recorded:
+  the digest games are best-of-one `Game`s, which nothing here touches.
+* **Engine gate** (`python tools/gate.py engine --no-mac --tested-sha 3612814d --expect-digest b63f643e97a30a61
+  --expect-digest0 a0062bb5569e06d3 --step-timeout 7200`): **`GATE PASSED engine 3612814d78fb in 835s`** - build, both
+  digests, `az` 52, `limits` 13, `hidden` 28, pytest 314 passed and 1 skipped, the search smoke (random, seed 0). The same
+  on 6a6e1a42 before the fuzz fix: `GATE PASSED engine 6a6e1a429f4d in 996s`.
+* **The full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`, 162 binaries): **2,521 passed,
+  0 failed, 26 ignored** (129.4's 2,515 and `post_board`'s 6).
+* **`FUZZ_GAMES=20000`**, the default pool: passed (1,415 s): the 20,000 games and the 1,000 cube best-of-three matches are
+  129.4's numbers exactly (wins 9,803 / 10,075, 122 drawn, 31.8 turns, 438.2 decisions, 19,192,276 options completed;
+  2,549 games, 549 of three, 754 drawn, 860.4 decisions a match, 3,098 sideboardings, 23,803 decisions, 42,956 hidden-pool
+  worlds, first picks resampled in 26,195).
+* **`FUZZ_POOL=delver FUZZ_GAMES=20000`**: passed (896 s). The 20,000 games and the 1,000 constructed best-of-three
+  matches are 129.4's numbers exactly (2,654 games, 654 of three, 848 drawn, 833.2 decisions a match, 3,308
+  sideboardings, 26,576 decisions, 3,166 later-game decks changed, 41,526 worlds, 24,818 hidden, 24,703 another 60, 306
+  first sideboarders' choices dealt, 24,280 deck-tilted worlds; Murktide Regent cast 9,875 times, its trigger 388,
+  Prismari Charm 14,691); then **1,000 post-sideboard matches**: 1,653 games played (653 matches of three - one match in
+  four has 12-turn games and a drawn game 2 is followed by game 3 -, 581 drawn, 0 aborted), 518.1 decisions a match,
+  23,264 sideboarding decisions (549 a keeper's `PASS`), 2,645 later-game decks changed, 25,946 constructed worlds (the
+  opponent's 60 hidden in 25,270, another 60 in 24,519), 267 first sideboarders' choices dealt, 24,822 deck-tilted
+  worlds; every check of the matches. **The fix** (3612814d): the first run of this command, on 6a6e1a42, failed at
+  post-sideboard match 97 - not the engine: the fuzz's information-set check (`check_match_information_set`) played a
+  world on to its game's end, where a chained match has no decider and no legal action, and drew from the empty list;
+  the check now stops there, as at the match's end (`FUZZ_FIRST=97 FUZZ_MATCHES=1` passes).
+* **The run loop on the full preset** (`python -m mtgz.az.run --run E:/mtg-zero-scratch/bo3-postboard/smoke-full --preset
+  delver-mirror-bo3 --iters 2 --games 8 --conc 8 --sims 8 --sims-fast 2 --eval-games 4 --eval-sims 4
+  --eval-random-games 2 --elo-games 2 --ref-games 2 --min-window-samples 0 --min-steps 10 --threads 4`: the preset's
+  network, GPU and spec with fewer games), no failure: iteration 1 8 matches = 15 games (1.875 each: 9 drawn at the
+  60-turn cap by the untrained network, each followed by a game 3), 2,487 samples; iteration 2 8 matches = 12 games,
+  1,119 samples; the yardstick, random and Elo with the games beside the matches (`elo match iter_0002 vs iter_0000:
+  1.0/2 (games 2.5/4)`). **Every row of game 2 or 3 with its own game's label** (a scratch check of its two shards, not
+  checked in: rows cut into games where the match block's game number changes, the turn goes back or a sideboarding row
+  follows a game's): 3,606 rows - **none of game 1**, 2,270 of 16 games 2 (one per match), 1,336 of 11 games 3 (the
+  episode counts the run logged), 51 sideboarding rows; each game's rows one label per seat, the two summing to 1; the
+  score before every row's game its number less one (game 1's drawn win counted); 7 of the 11 matches of two games
+  labelled differently in games 2 and 3.
+* **The yardstick end to end**: `python -m mtgz.az.keep_h2h E:/mtg-zero-scratch/bo3-postboard/smoke-full/models/iter_0002.pt
+  --games 8 --sims 8 --device cuda --threads 4`: 8 matches (4 pairs) = 16 games, 0 unfinished, A 0.4375 +- 0.0625 of
+  the matches, `per_game` 8.0 / 16 (10 drawn at the cap), 753 s - a tiny network, a check that it runs.
+* **The search smoke** (`python tools/search_smoke.py --specs delver_bo3 --seeds 0 --games 200 --preset
+  delver-mirror-bo3 --timeout 7200 --stall 600`, the presets' post-sideboard spec): 0 failed of 1, 200 matches = 359
+  games, 0 unfinished, 234,164 decisions, 6.52 million simulations, 202 s.
+* **Python**: `tests/test_post_board.py` 3 passed, `tests/test_delver_bo3.py` 4 passed (and the gate's whole pytest).
+* **Not run**: the Mac steps (`--no-mac`); `delver_bo3_g1`'s search smoke (129.4's `delver_bo3`, the same spec, unchanged
+  but for the two encoding rules).
+
+### 130.8 Open points, decisions
+
+* **The match win rate counts the drawn game 1.** With `"start_game": 2` the evaluation's match result (yardstick,
+  random, Elo, h2h, `keep_h2h`'s `a_score`) is by game wins with game 1's coin flip in it: it compresses toward 1/2 and
+  is noisier; `per_game` (games 2 and 3) is the measure. Whether the run's Elo should move to the games' numbers is the
+  maintainer's call.
+* **A drawn real game 1** (MTGO) has no synthetic twin (130.2): the network never trains on that score.
+* **The mask applies to every constructed best-of-three** (130.2), the option or not: a match with game 1 played (the
+  MTGO pilot's) encodes game 2 as the synthetic start does. The cube's best-of-three keeps game 1's chooser, starter and
+  reveals.
+* **`keep_deck` is an evaluation setting**: in self-play it would train a seat whose sideboarding decisions are forced.
+  Nothing refuses it in a run spec; the presets do not set it.
+* **The run**: moving the Delver best-of-three run onto this commit changes what it trains (games 2-3 only) - a
+  maintainer's decision, with the run.

@@ -138,6 +138,16 @@ impl Eq for Share {}
 /// and for the labels, `next_episode` continues the match. Without it every
 /// spec is what it was.
 ///
+/// Post-sideboard games only (ENGINE.md 130): `"start_game": 2` (default 1; a constructed
+/// best-of-three with `game_episodes` only, not with `chooser`) starts every match at the
+/// sideboarding before game 2, both decks the registered mains: game 1 is not played, its result
+/// drawn from the match's seed (each seat wins it with probability 1/2, never a draw), and its
+/// loser sideboards first and chooses play or draw for game 2 (CR 103.1) as in any match; game 3
+/// follows when the game-1 loser wins game 2. `"keep_deck": [p, ...]` (a constructed
+/// best-of-three only; default none): seat p keeps its deck at every sideboarding (`PASS`, its only
+/// option there) - an evaluation yardstick, the other seat's knowledge and worlds unchanged (its
+/// worlds deal p's sideboarding as any player's). Without the keys every spec is what it was.
+///
 /// `"log": true` keeps each game's log (`GameSpec::log`) for the spectator view
 /// (`view.rs`, the replay recorder); it changes nothing else.
 ///
@@ -187,6 +197,11 @@ pub struct MtgSpec {
     pub sealed: Option<sealed::Shared>,
     /// One zero-core episode per game of a best-of-three match (ENGINE.md 121).
     pub game_episodes: bool,
+    /// The first game played (ENGINE.md 130): 1, or 2 - a constructed best-of-three's matches start
+    /// at the sideboarding before game 2, game 1's result drawn from the match's seed.
+    pub start_game: u8,
+    /// The seats that keep their deck at every sideboarding (ENGINE.md 130; an evaluation yardstick).
+    pub keep_deck: [bool; 2],
 }
 
 impl Default for MtgSpec {
@@ -210,6 +225,8 @@ impl Default for MtgSpec {
             deck_tilt_ess: Share(hidden_decks::DECK_TILT_ESS),
             sealed: None,
             game_episodes: false,
+            start_game: 1,
+            keep_deck: [false; 2],
         }
     }
 }
@@ -307,6 +324,22 @@ impl MtgSpec {
                 "log" => s.log = x.as_bool().ok_or("mtg spec: log must be a boolean")?,
                 "hidden_decklists" => s.hidden_decklists = x.as_bool().ok_or("mtg spec: hidden_decklists must be a boolean")?,
                 "game_episodes" => s.game_episodes = x.as_bool().ok_or("mtg spec: game_episodes must be a boolean")?,
+                "start_game" => {
+                    s.start_game = match x.as_u64() {
+                        Some(n @ (1 | 2)) => n as u8,
+                        _ => return Err(format!("mtg spec: start_game must be 1 or 2 (game 3 is played only when games 1 and 2 leave the match open), not {x}")),
+                    }
+                }
+                "keep_deck" => {
+                    let a = x.as_array().ok_or("mtg spec: keep_deck must be a list of seats (0, 1)")?;
+                    for p in a {
+                        let p = p.as_u64().filter(|&p| p < 2).ok_or("mtg spec: keep_deck must be a list of seats (0, 1)")? as usize;
+                        if s.keep_deck[p] {
+                            return Err(format!("mtg spec: keep_deck names seat {p} twice"));
+                        }
+                        s.keep_deck[p] = true;
+                    }
+                }
                 "deal_samples" => s.deal_samples = int()? as usize,
                 "deck_tilt_ess" => {
                     let e = x.as_f64().filter(|e| *e > 0.0 && *e <= 1.0).ok_or("mtg spec: deck_tilt_ess must be a number in (0, 1] (a share of the K decks)")?;
@@ -400,6 +433,24 @@ impl MtgSpec {
         s.pools = pools.unwrap_or(s.format == Format::Bo3 && !s.constructed);
         if s.game_episodes && s.format != Format::Bo3 {
             return Err("mtg spec: game_episodes is for best-of-three (\"format\": \"bo3\"): a best-of-one episode is its game already (ENGINE.md 121)".into());
+        }
+        // Post-sideboard games only (ENGINE.md 130): game 1 is not played - with both 75s public and game 1
+        // always the mains, nothing in it tells anyone about the decks - and its result is a coin flip of the
+        // match's seed. Only with one episode per game: a match's label would count that coin flip.
+        let constructed_bo3 = s.constructed && s.format == Format::Bo3;
+        if s.start_game == 2 {
+            if !constructed_bo3 {
+                return Err("mtg spec: start_game 2 is for a constructed best-of-three (\"constructed\": true, \"format\": \"bo3\"): game 1 is skipped because both 75s are public and it plays the mains (ENGINE.md 130)".into());
+            }
+            if !s.game_episodes {
+                return Err("mtg spec: start_game 2 needs game_episodes: a match's result would count game 1's drawn result, each game's own does not (ENGINE.md 130)".into());
+            }
+            if s.chooser.is_some() {
+                return Err("mtg spec: chooser is game 1's (CR 103.1), and start_game 2 plays no game 1: game 2's chooser is game 1's loser (ENGINE.md 130)".into());
+            }
+        }
+        if s.keep_deck.iter().any(|&k| k) && !constructed_bo3 {
+            return Err("mtg spec: keep_deck is for a constructed best-of-three (\"constructed\": true, \"format\": \"bo3\"; ENGINE.md 130)".into());
         }
         if s.hidden_decklists {
             // (ENGINE.md 102: best-of-three hides decks within known pools, 36.11; constructed
@@ -663,6 +714,11 @@ impl MtgAz {
             az.m.deal.ess = spec.deck_tilt_ess.0;
             // (one episode per game, ENGINE.md 121, for a constructed best-of-three too)
             az.m.game_episodes = spec.game_episodes;
+            // (ENGINE.md 130: the seats that keep their decks; post-sideboard games only)
+            az.m.keep = spec.keep_deck;
+            if spec.start_game == 2 {
+                az.skip_game_one(matches::game_one_winner(seed))?;
+            }
             return Ok(az);
         }
         // (The prior of each deck, ENGINE.md 102: a sealed spec's seats the sealed prior of its

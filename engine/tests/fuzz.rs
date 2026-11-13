@@ -10,7 +10,7 @@
 //! first seed (to rerun a failing seed alone), `FUZZ_MATCHES=n` the matches
 //! (default `FUZZ_GAMES` / 20, at least 20).
 
-use engine::fuzz::games::{self, constructed_mode, delver_mode, eoe_mode, match_spec, new_game, play, play_match, sealed_mode, sealed_unplayable};
+use engine::fuzz::games::{self, constructed_mode, delver_mode, delver_post_spec, eoe_mode, match_spec, new_game, play, play_match, play_match_spec, replay_match, sealed_mode, sealed_unplayable, HiddenStats};
 use engine::fuzz::{NoHooks, Run};
 
 #[test]
@@ -57,20 +57,22 @@ fn fuzz_random_matches() {
 
 #[test]
 fn same_seed_and_actions_replay_matches_identically() {
-    use engine::az::MtgAz;
-    use zero_search::game::SearchGame;
     if (constructed_mode() && !delver_mode()) || eoe_mode() || sealed_mode() {
         return;
     }
     for seed in 2000..2012 {
         let a = play_match(seed, false);
-        let mut g = MtgAz::new_game(&match_spec(seed), 2, seed).unwrap();
-        let mut keys = Vec::new();
-        for &x in &a.actions {
-            g.step(x, &mut keys).unwrap();
-        }
-        assert_eq!((g.g.fingerprint(), g.m.results), (a.fingerprint, a.results), "match {seed}");
+        let (fp, results, keys) = replay_match(seed, &match_spec(seed), &a.actions);
+        assert_eq!((fp, results), (a.fingerprint, a.results), "match {seed}");
         assert_eq!(keys, a.keys, "match {seed}: chance keys differ");
         assert_eq!(play_match(seed, false).fingerprint, a.fingerprint);
+        // the post-sideboard matches too (ENGINE.md 130)
+        if delver_mode() {
+            let sp = delver_post_spec(seed);
+            let a = play_match_spec(seed, &sp, false, &mut HiddenStats::default());
+            let (fp, results, keys) = replay_match(seed, &sp, &a.actions);
+            assert_eq!((fp, results, &keys), (a.fingerprint, a.results, &a.keys), "post-sideboard match {seed}");
+            assert_eq!(play_match_spec(seed, &sp, false, &mut HiddenStats::default()).fingerprint, a.fingerprint);
+        }
     }
 }

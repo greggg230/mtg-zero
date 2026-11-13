@@ -475,6 +475,13 @@ impl MtgAz {
         // A constructed best-of-three (ENGINE.md 120): between games the opponent's hidden decks are
         // dealt (`deal_constructed_between`); in game 1 their deck is the registered main, open.
         if self.m.constructed_bo3 {
+            // (ENGINE.md 130: whether the opponent keeps its deck is its own policy, not the viewer's
+            // knowledge - in the viewer's worlds it sideboards as any player; `deal_constructed_between`
+            // asks its sideboarding in progress again.)
+            self.m.keep[o as usize] = false;
+            if let Some(sb) = self.m.sb.as_mut() {
+                sb.keep[o as usize] = false;
+            }
             if self.m.over {
                 return;
             }
