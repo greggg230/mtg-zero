@@ -147,7 +147,10 @@ impl Eq for Share {}
 /// follows when the game-1 loser wins game 2. `"keep_deck": [p, ...]` (a constructed
 /// best-of-three only; default none): seat p keeps its deck at every sideboarding (`PASS`, its only
 /// option there) - an evaluation yardstick, the other seat's knowledge and worlds unchanged (its
-/// worlds deal p's sideboarding as any player's). Without the keys every spec is what it was.
+/// worlds deal p's sideboarding as any player's). `"keep_known": true` (with `keep_deck`; default
+/// false; ENGINE.md 141): the other seat's worlds know the keepers keep - a keeper's deck there is
+/// its real one, the registered main, never dealt, and it keeps in them too (the yardstick's informed
+/// arm: its search plays against the deck the keeper plays). Without the keys every spec is what it was.
 ///
 /// Dealt decks (ENGINE.md 154): `"dealt_decks": {"p": p, "swaps": [lo, hi]}` (a constructed best-of-three only,
 /// not with `keep_deck`; p in (0, 1], 0 <= lo <= hi <= each seat's sideboard size): with probability p a match has
@@ -214,6 +217,9 @@ pub struct MtgSpec {
     pub keep_deck: [bool; 2],
     /// Dealt decks (ENGINE.md 154): the share of matches with a dealt seat and the dealt 60s' swap range.
     pub dealt_decks: Option<DealtDecks>,
+    /// The other seat's worlds know the `keep_deck` seats keep (ENGINE.md 141): a keeper's deck is its
+    /// real one there, never dealt.
+    pub keep_known: bool,
 }
 
 /// The spec's `"dealt_decks"` (ENGINE.md 154): `p`, the share of matches with one dealt seat (in (0, 1]), and
@@ -276,6 +282,7 @@ impl Default for MtgSpec {
             start_game: 1,
             keep_deck: [false; 2],
             dealt_decks: None,
+            keep_known: false,
         }
     }
 }
@@ -389,6 +396,7 @@ impl MtgSpec {
                     }
                 }
                 "dealt_decks" => s.dealt_decks = Some(DealtDecks::parse(x)?),
+                "keep_known" => s.keep_known = x.as_bool().ok_or("mtg spec: keep_known must be a boolean")?,
                 "deal_samples" => s.deal_samples = int()? as usize,
                 "deck_tilt_ess" => {
                     let e = x.as_f64().filter(|e| *e > 0.0 && *e <= 1.0).ok_or("mtg spec: deck_tilt_ess must be a number in (0, 1] (a share of the K decks)")?;
@@ -508,6 +516,9 @@ impl MtgSpec {
             if s.keep_deck.iter().any(|&k| k) {
                 return Err("mtg spec: dealt_decks with keep_deck: keep_deck is the evaluation yardstick's, dealt decks a self-play setting (ENGINE.md 154)".into());
             }
+        }
+        if s.keep_known && !s.keep_deck.iter().any(|&k| k) {
+            return Err("mtg spec: keep_known needs keep_deck: it says the other seat's worlds know the keepers keep (ENGINE.md 141)".into());
         }
         if s.hidden_decklists {
             // (ENGINE.md 102: best-of-three hides decks within known pools, 36.11; constructed
@@ -806,6 +817,8 @@ impl MtgAz {
                     az.set_dealt(d, dd.swaps, &seats[d as usize], seed);
                 }
             }
+            // (ENGINE.md 141: the other seat's worlds know the keepers keep - the yardstick's informed arm)
+            az.m.keep_known = spec.keep_known;
             if spec.start_game == 2 {
                 az.skip_game_one(matches::game_one_winner(seed))?;
             }
@@ -1142,6 +1155,9 @@ impl SearchGame for MtgAz {
         // (the deck choice before the game, ENGINE.md 107.2: the other seat's deck dealt, nothing else)
         if self.m.choice.is_some() {
             self.determinize_deck_choice(viewer as u8, &mut r);
+            // (no game card is dealt - the game in waiting is replaced -, but the world is the viewer's: the game
+            // the choice starts keeps the observer, `start_chosen_game`, ENGINE.md 141)
+            self.g.observer = Some(viewer as u8);
             self.m.rng = Rng::new(r.next_u64());
             return;
         }
@@ -1156,8 +1172,10 @@ impl SearchGame for MtgAz {
         if self.m.sb.is_none() {
             self.g.determinize(viewer as u8, &mut r);
         } else {
-            // Between games no game card is dealt (the last game is over), but the world is the viewer's: a dealt
-            // seat's deal in it (ENGINE.md 154, `MtgAz::deal_dealt_deck`) is keyed hidden for another viewer.
+            // Between games no game card is dealt (the last game is over), but the world is the viewer's: the next
+            // game keeps the observer (`next_game`), so the other player's private draws and looks in it are keyed
+            // as hidden (ENGINE.md 141; at 267ae603 they carried the cards' identities in the viewer's tree), and a
+            // dealt seat's deal in it (ENGINE.md 154, `MtgAz::deal_dealt_deck`) is keyed hidden for another viewer.
             self.g.observer = Some(viewer as u8);
         }
         self.m.rng = Rng::new(r.next_u64());

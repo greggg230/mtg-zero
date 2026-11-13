@@ -412,8 +412,9 @@ pub fn deck_weights(a: &MtgAz, viewer: PlayerId, p: &[f32], tilt: f64, clip: f64
     let ids = identity::identities(db);
     let o = opp(viewer);
     let mut w = vec![1.0; identity::D];
-    // (a dealt seat's deck is its dealt prior's, untilted: ENGINE.md 154)
-    if a.deck_dealt(o) {
+    // (a dealt seat's deck is its dealt prior's, untilted: ENGINE.md 154; a known keeper's deck is never dealt:
+    // ENGINE.md 141)
+    if a.deck_dealt(o) || a.keeps_known(o) {
         return w;
     }
     let Some(prior) = a.m.deck_priors[o as usize].clone() else { return w };
@@ -460,7 +461,15 @@ impl MtgAz {
     /// its deck prior: always with hidden decklists, from game 2 on in a constructed best-of-three
     /// (game 1's is the registered main: ENGINE.md 120), never otherwise.
     pub fn deck_hidden(&self, o: PlayerId) -> bool {
-        self.m.deck_priors[o as usize].is_some() && (!self.m.constructed_bo3 || self.m.game_no >= 2)
+        self.m.deck_priors[o as usize].is_some() && (!self.m.constructed_bo3 || self.m.game_no >= 2) && !self.keeps_known(o)
+    }
+
+    /// Does player `o` keep its deck at every sideboarding, and do the other player's worlds know it (ENGINE.md
+    /// 141, the spec's `"keep_known"`: the keep-its-deck yardstick's informed arm)? Its deck is then its real one in
+    /// them, the registered main, never dealt: the other player's prior of it knows its policy (a point mass), as
+    /// the uninformed arm's (ENGINE.md 130.3) deals it from the constructed prior as any player's.
+    pub fn keeps_known(&self, o: PlayerId) -> bool {
+        self.m.constructed_bo3 && self.m.keep_known && self.m.keep[o as usize]
     }
 
     /// Is player `o` the match's dealt seat (ENGINE.md 154, the spec's `"dealt_decks"`): its post-sideboard 60s
@@ -549,6 +558,12 @@ impl MtgAz {
         // A constructed best-of-three (ENGINE.md 120): between games the opponent's hidden decks are
         // dealt (`deal_constructed_between`); in game 1 their deck is the registered main, open.
         if self.m.constructed_bo3 {
+            // (ENGINE.md 141, the yardstick's informed arm: the viewer's worlds know the opponent keeps - its
+            // deck is its real one, the registered main (every last deck, choice and game deck of a keeper),
+            // its flag stays on, nothing of it is dealt; `Game::determinize` deals its unknown cards from it.)
+            if self.keeps_known(o) {
+                return;
+            }
             // (ENGINE.md 130: whether the opponent keeps its deck is its own policy, not the viewer's
             // knowledge - in the viewer's worlds it sideboards as any player; `deal_constructed_between`
             // asks its sideboarding in progress again.)
@@ -638,8 +653,9 @@ impl MtgAz {
         if self.m.sb.is_none() {
             self.g.determinize(viewer as u8, &mut r);
         } else {
-            // (between games no game card is dealt, but the world is the viewer's: a dealt seat's deal in it is keyed
-            // hidden for another viewer, `MtgAz::deal_dealt_deck`, ENGINE.md 154)
+            // (between games no game card is dealt, but the world is the viewer's: the next game keeps its observer,
+            // `next_game`, ENGINE.md 141, and a dealt seat's deal in it is keyed hidden for another viewer,
+            // `MtgAz::deal_dealt_deck`, ENGINE.md 154)
             self.g.observer = Some(viewer as u8);
         }
         self.m.rng = Rng::new(r.next_u64());
@@ -675,8 +691,9 @@ impl MtgAz {
         if self.m.sb.is_some() || self.g.is_over() || self.m.deal.k == 0 || self.g.encoding_seat(viewer) != viewer || self.deck_dealt(o) {
             return None;
         }
-        // (a constructed best-of-three's game 1: the registered mains, open; ENGINE.md 120)
-        if self.m.constructed_bo3 && self.m.game_no < 2 {
+        // (a constructed best-of-three's game 1: the registered mains, open; ENGINE.md 120; a known keeper's
+        // deck is never dealt, ENGINE.md 141)
+        if self.m.constructed_bo3 && (self.m.game_no < 2 || self.keeps_known(o)) {
             return None;
         }
         let db = self.g.db();

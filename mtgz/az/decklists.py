@@ -55,14 +55,15 @@ def names(entries):
 
 
 def mirror_bo3_spec(name=IZZET_DELVER, sideboard=None, max_turns=60, mulligans=True, game_episodes=False,
-                    start_game=1, keep_deck=None, dealt_decks=None):
+                    start_game=1, keep_deck=None, keep_known=False, dealt_decks=None):
     """The `mtg` spec of a constructed best-of-three mirror (docs/ENGINE.md 120): both seats the
     decklist's main (exactly 60) and `sideboard` ([[count, name], ...]; None: the decklist's own 15),
     `"format": "bo3"` (JSON); `game_episodes`: each game its own episode, labelled by its own outcome
     (`"game_episodes": true`, ENGINE.md 121); `start_game` 2: post-sideboard games only, each match starting
     at the sideboarding before game 2 with game 1's result drawn (`"start_game": 2`, ENGINE.md 130; the
     engine refuses it without `game_episodes`); `keep_deck`: the seats that keep their deck at every
-    sideboarding (`"keep_deck"`, ENGINE.md 130: the yardstick's); `dealt_decks`: {'p': share, 'swaps': [lo, hi]}
+    sideboarding (`"keep_deck"`, ENGINE.md 130: the yardstick's); `keep_known`: the other seat's worlds know they keep
+    (`"keep_known"`, ENGINE.md 141: the yardstick's informed arm); `dealt_decks`: {'p': share, 'swaps': [lo, hi]}
     (`"dealt_decks"`, ENGINE.md 154: in that share of matches one seat's 60s are dealt from its 75 - a self-play
     setting, the evaluation spec drops it). The engine refuses a spec holding a card it
     does not support, naming every one (no silent drop, no substitution)."""
@@ -82,6 +83,8 @@ def mirror_bo3_spec(name=IZZET_DELVER, sideboard=None, max_turns=60, mulligans=T
         spec['start_game'] = start_game
     if keep_deck:
         spec['keep_deck'] = sorted(keep_deck)
+    if keep_known:
+        spec['keep_known'] = True
     if dealt_decks:
         spec['dealt_decks'] = {'p': dealt_decks['p'], 'swaps': list(dealt_decks['swaps'])}
     spec['decks'] = {'p0': main, 'p1': main, 'p0_sideboard': side, 'p1_sideboard': side}

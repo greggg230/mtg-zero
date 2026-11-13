@@ -2521,7 +2521,9 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
                 break;
             }
             d.legal_actions(&mut legal);
+            keys.clear();
             d.apply(legal[rng.below(legal.len() as u32) as usize], &mut keys).unwrap();
+            PK_GAME_KEYS.fetch_add(check_private_keys_masked(&keys, viewer, &d, &|| format!("seed {seed}: a world determinized for P{viewer}")), Ordering::Relaxed);
             d.check_invariants().unwrap_or_else(|e| {
                 panic!(
                     "seed {seed} (determinized for P{viewer}): {e}\n{}",
@@ -2838,6 +2840,8 @@ fn fuzz_random_games() {
     rules_verdict("fuzz_random_games");
     println!("controlled decisions (CR 722.4, encoded in the controlled seat: ENGINE.md 100.5): {}", CONTROLLED.load(Ordering::Relaxed));
     println!("{}; seeds skipped (FUZZ_SKIP): {skips}", longest_turn_report());
+    // (ENGINE.md 141; the match fuzz's counts run in parallel with this one: read them there)
+    println!("private keys of the other player masked in the game fuzz's worlds: {}", PK_GAME_KEYS.load(Ordering::Relaxed));
     if hidden_decks_mode() {
         let (w, x, st, lt) =
             (HD_WORLDS.load(Ordering::Relaxed), HD_OTHER_DECK.load(Ordering::Relaxed), HD_STEPS.load(Ordering::Relaxed), HD_LONG_TURNS.load(Ordering::Relaxed));
@@ -3511,6 +3515,99 @@ fn check_match_information_set(g: &engine::az::MtgAz, viewer: usize, seed: u64, 
 static MATCH_IS_WALKS: AtomicU64 = AtomicU64::new(0);
 static MATCH_IS_STEPS: AtomicU64 = AtomicU64::new(0);
 
+// ---- Every world masks the other player's private keys (ENGINE.md 141; the Fable review's I3) ----
+
+/// The other player's private keys (draws and looks) checked in the worlds the fuzz walks: of the game fuzz's
+/// worlds (`check_determinize`, the hidden-decklist worlds) and of the match fuzz's (`play_match_spec`,
+/// `check_world_private_keys`); of those, the ones emitted in a game the world itself started (after the
+/// sideboarding or the deck choice it was dealt in, or past the end of the game it was dealt in: ENGINE.md
+/// 141's H2), and the worlds that started one; and the looks at a random card of the viewer's own hand (Urza's
+/// Bauble), the one look of another player that carries the card by design.
+static PK_GAME_KEYS: AtomicU64 = AtomicU64::new(0);
+static PK_MATCH_KEYS: AtomicU64 = AtomicU64::new(0);
+static PK_NEW_GAME_KEYS: AtomicU64 = AtomicU64::new(0);
+static PK_NEW_GAMES: AtomicU64 = AtomicU64::new(0);
+static PK_HAND_LOOKS: AtomicU64 = AtomicU64::new(0);
+
+/// In a world determinized for `viewer`, the keys `keys` of one step (`after`: the world's game right after it):
+/// every draw of another player (`KEY_DRAW`) carries `HIDDEN`, and so does every look (`KEY_LOOK`) of another
+/// player (`Game::emit_private` masks them for the world's observer) - a key with the card's identity would split
+/// the viewer's tree by a card it cannot see (zero-core docs/search.md 3.16) - but the one look that is public by
+/// design: another player's look at a card at random of the viewer's own hand (`Ext::LookAtRandomHandCard`, Urza's
+/// Bauble: its owner sees which card was seen), recognised as a card of that identity in the viewer's hand that the
+/// looker knows after the step. Returns how many keys of the other player it checked.
+fn check_private_keys_masked(keys: &[u64], viewer: u8, after: &Game, what: &dyn Fn() -> String) -> u64 {
+    use engine::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_DRAW, KEY_LOOK};
+    let mut n = 0;
+    for &k in keys {
+        let (kind, p, d) = (key_kind(k), key_player(k), key_payload(k));
+        if !matches!(kind, KEY_DRAW | KEY_LOOK) || p == viewer {
+            continue;
+        }
+        n += 1;
+        if d == HIDDEN {
+            continue;
+        }
+        let hand_look = kind == KEY_LOOK && after.player(viewer).hand.iter().any(|&c| after.obj(c).def as u64 == d && after.knows(p, c));
+        assert!(hand_look, "{}: P{p}'s private key (kind {kind}) carries the card's identity ({d}) in a world of P{viewer} (ENGINE.md 141)", what());
+        PK_HAND_LOOKS.fetch_add(1, Ordering::Relaxed);
+    }
+    n
+}
+
+/// A world of match `g` determinized for `viewer`, walked as the search walks it into the game the world plays
+/// next: from a deck choice or a sideboarding root, the choice or the sideboarding played to its end (`PASS` with
+/// probability 1/2 where it is legal, else a random option), then up to 60 actions of the game it starts; from a
+/// game's root up to 60 actions, and when the walk passes the game's end (a match without one episode per game)
+/// the sideboarding and 60 actions of the next game. Every step's private keys of the other player checked
+/// (`check_private_keys_masked`). Its own generator: the match's random stream is untouched.
+fn check_world_private_keys(g: &engine::az::MtgAz, viewer: usize, seed: u64, step: usize) {
+    use zero_search::game::SearchGame;
+    let mut rng = Rng::new(seed ^ (step as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (viewer as u64) << 56 ^ 0x0B5E_4FE4);
+    let mut w = g.clone();
+    w.determinize(viewer, &mut zero_search::rng::Rng::new(rng.next_u64()));
+    let between = |x: &engine::az::MtgAz| x.sideboarding().is_some() || x.deck_choice().is_some();
+    let root = if g.deck_choice().is_some() { " (the deck choice)" } else if g.sideboarding().is_some() { " (sideboarding)" } else { "" };
+    let what = || format!("match {seed} step {step} game {}{root}: a world of P{viewer}", g.m.game_no);
+    let (mut legal, mut keys) = (Vec::new(), Vec::new());
+    // (`started`: the world is in a game it started; `since`: its actions there)
+    let (mut started, mut since, mut n) = (false, 0usize, 0usize);
+    while n < 600 && (if started { since < 60 } else { between(&w) || n < 60 }) {
+        if w.to_move().is_none() {
+            break;
+        }
+        w.legal_actions(&mut legal);
+        let before = between(&w);
+        let a = if before && legal[0] == engine::act::PASS && rng.below(2) == 0 { engine::act::PASS } else { legal[rng.below(legal.len() as u32) as usize] };
+        keys.clear();
+        w.step(a, &mut keys).unwrap_or_else(|e| panic!("{}: {e}", what()));
+        if before && !between(&w) && !w.match_over() {
+            started = true;
+            PK_NEW_GAMES.fetch_add(1, Ordering::Relaxed);
+        } else if started {
+            since += 1;
+        }
+        let k = check_private_keys_masked(&keys, viewer as u8, &w.g, &|| format!("{}{}", what(), if started { " (in the game it started)" } else { "" }));
+        PK_MATCH_KEYS.fetch_add(k, Ordering::Relaxed);
+        if started {
+            PK_NEW_GAME_KEYS.fetch_add(k, Ordering::Relaxed);
+        }
+        n += 1;
+    }
+}
+
+/// The private-key check's counts (ENGINE.md 141).
+fn private_keys_report() -> String {
+    format!(
+        "private keys of the other player masked in every world: {} in the game fuzz's worlds, {} in the match fuzz's, {} of them in {} games a world started; {} looks at a card of the viewer's hand (public by design)",
+        PK_GAME_KEYS.load(Ordering::Relaxed),
+        PK_MATCH_KEYS.load(Ordering::Relaxed),
+        PK_NEW_GAME_KEYS.load(Ordering::Relaxed),
+        PK_NEW_GAMES.load(Ordering::Relaxed),
+        PK_HAND_LOOKS.load(Ordering::Relaxed)
+    )
+}
+
 fn stack_names(g: &Game) -> String {
     let db = g.db();
     let mut v: Vec<String> = g
@@ -3680,13 +3777,16 @@ fn play_match_spec(seed: u64, sp: &engine::az::MtgSpec, checks: bool, stats: &mu
                     }
                     d.legal_actions(&mut legal2);
                     let a2 = legal2[rng.below(legal2.len() as u32) as usize];
+                    kd.clear();
                     d.step(a2, &mut kd).unwrap_or_else(|e| panic!("match {seed} (determinized for P{viewer}): {e}"));
+                    PK_MATCH_KEYS.fetch_add(check_private_keys_masked(&kd, viewer as u8, &d.g, &|| format!("match {seed}: a world determinized for P{viewer}")), Ordering::Relaxed);
                     if d.sideboarding().is_none() && !d.match_over() {
                         d.g.check_invariants().unwrap_or_else(|e| panic!("match {seed} (determinized for P{viewer}): {e}"));
                     }
                     rules_match_step(&mut wc, &d, &|| format!("match {seed} (determinized for P{viewer}, played on)"));
                 }
                 rules_add(&wc.total());
+                check_world_private_keys(&g, viewer, seed, actions.len());
             }
         }
         g.step(a, &mut keys).unwrap_or_else(|e| panic!("match {seed}: {e}"));
@@ -3826,6 +3926,12 @@ fn fuzz_random_matches() {
     );
     println!("{}", rules_report());
     rules_verdict("fuzz_random_matches");
+    // (ENGINE.md 141: the worlds dealt while sideboarding play their next game with the observer)
+    println!("{}", private_keys_report());
+    assert!(
+        n < 20 || PK_NEW_GAMES.load(Ordering::Relaxed) > 0 && PK_NEW_GAME_KEYS.load(Ordering::Relaxed) > 0,
+        "the private-key check reached no game a world started (ENGINE.md 141)"
+    );
     // (Over a chunk of matches; a single match's rerun, `FUZZ_MATCHES=1`,
     // passes when the match completes: ENGINE.md 51.)
     assert!(n < 20 || sb > 0 && changed > 0 && three > 0, "no sideboarding, changed deck or match of three");
@@ -3862,6 +3968,7 @@ fn fuzz_post_sideboard_matches(first: u64, n: u64) {
     let (mut games, mut draws, mut decisions, mut sb, mut changed, mut three, mut aborted, mut kept) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
     let (mut dealt_matches, mut dealt_decks) = (0u64, 0u64);
     let mut stats = HiddenStats::default();
+    let new_games0 = PK_NEW_GAMES.load(Ordering::Relaxed);
     for seed in first..first + n {
         if skipped(seed) {
             continue;
@@ -3901,6 +4008,9 @@ fn fuzz_post_sideboard_matches(first: u64, n: u64) {
     println!("{} (with the matches before)", rules_report());
     rules_verdict("fuzz_post_sideboard_matches");
     assert!(n < 20 || sb > 0 && changed > 0 && three > 0 && kept > 0 && stats.choices_dealt > 0 && stats.tilted > 0, "post-sideboard matches: no sideboarding, changed deck, match of three or keeper");
+    // (ENGINE.md 141: every game 2 and 3 of these matches starts after a sideboarding, the worlds' too)
+    println!("{} (cumulative)", private_keys_report());
+    assert!(n < 20 || PK_NEW_GAMES.load(Ordering::Relaxed) > new_games0, "post-sideboard matches: the private-key check reached no game a world started (ENGINE.md 141)");
 }
 
 /// Replays match `seed` of `sp` from its actions (`next_episode` at each game's end with one episode per game):
@@ -4061,6 +4171,7 @@ fn play_deck_choice(a: &mut engine::az::MtgAz, seed: u64, rng: &mut Rng) {
                 }
                 DC_WORLDS.fetch_add(1, Ordering::Relaxed);
             }
+            check_world_private_keys(a, viewer as usize, seed, DC_CHOICES.load(Ordering::Relaxed) as usize);
         }
         let x = legal[rng.below(legal.len() as u32) as usize];
         a.step(x, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
@@ -4342,7 +4453,9 @@ fn check_determinize_hidden(a: &engine::az::MtgAz, seed: u64, rng: &mut Rng) {
                 break;
             }
             let l = az_legal(&d);
+            keys.clear();
             d.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap_or_else(|e| panic!("{}: {e}", what()));
+            PK_GAME_KEYS.fetch_add(check_private_keys_masked(&keys, viewer, &d.g, &what), Ordering::Relaxed);
             d.g.check_invariants().unwrap_or_else(|e| panic!("{} (played on): {e}", what()));
             rules_match_step(&mut wc, &d, &|| format!("{} (played on)", what()));
         }
