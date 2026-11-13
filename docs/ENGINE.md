@@ -29333,7 +29333,7 @@ and overstate allocation-heavy parts.
 
 ### 145.3 zero-core e5e1bb0 -> perf/fable-1112 without P5: tail rows scanned at encode (P2), the phase's time split
 
-Two zero-core commits (zero-core docs/az.md 44.1, 44.2), behaviour-preserving:
+Three zero-core commits (zero-core docs/az.md 44.1, 44.2: ea023c0, fe30d26, c275a1e), behaviour-preserving:
 
 * **P2** (zero-core `driver.rs`, `LeafBuf::encode_row`): layout v7's tails had switched this game's rows off the sparse
   path of section 89 - a sparse buffer kept an `encode_row` row dense until `seal`, so the eval cache's key hashed all
@@ -29342,7 +29342,9 @@ Two zero-core commits (zero-core docs/az.md 44.1, 44.2), behaviour-preserving:
 * **Timing metrics** (zero-core `run.py`, `infer.py`): each self-play phase writes `selfplay.timing` - the search
   threads' busy seconds and share, batch assembly, the driving thread's wait for searches and its share, the
   evaluator's share and its CUDA graphs' launch / result seconds - so a phase at 32k leaves/s (the live run) against
-  43.12's 61k can say what it waited for (the review's bug 4).
+  43.12's 61k can say what it waited for (the review's bug 4). Its test found `infer_s` counted twice for batches
+  evaluated at once in drive's pipelined loop (eager evaluators: the toy smoke's `infer_share` 1.6, this repo's
+  mtg-smoke 1.8); c275a1e counts it once. The CUDA graphs' path, this game's runs, was right.
 
 **Checks.** The driver hash is EQUAL: `f8cfeb414c6c3322` at 48 games (40,000 batches) and `23bfcec6e4a37c6e` at 256
 games in flight (`MAXBATCH=12000 CONC=256 GROUPS=2 THREADS=8`: ~1.75M simulations - the counter also counts the
@@ -29363,7 +29365,17 @@ the records still hold dense rows; P5, after this commit, changes that).
 
 ### 145.5 Checks
 
-**Without P5** (this branch's commit with zero-core fe30d26): engine digests EQUAL to `engine/tests/data/digests.txt`
-(combined `438164c0429d7fa3`); the full engine suite (`cargo test --release -p engine`: 2,534 passed, 0 failed); zero-core
-`cargo test --release` 180 passed; `FUZZ_GAMES=20000 cargo test --release -p engine --test fuzz`: 4 passed (3,740 s on
-the shared CPU); the driver hash EQUAL (145.3).
+**Without P5** (zero-core fe30d26, then c275a1e: a Python metrics fix on top, no Rust change): engine digests EQUAL to
+`engine/tests/data/digests.txt` (combined `438164c0429d7fa3`); the full engine suite (`cargo test --release -p engine`:
+2,534 passed, 0 failed); zero-core `cargo test --release` 180 passed (183 with zero_webnet's); `FUZZ_GAMES=20000 cargo
+test --release -p engine --test fuzz`: 4 passed (3,740 s on the shared CPU); the driver hash EQUAL (145.3).
+`tools/gate.py search-core --no-mac` on 2f40ede5 (fe30d26): build, zero-core cargo test (183), this repo's pytest (323
+passed, 1 skipped) PASS; `check_checkpoint_compat --net random` FAILED on the baseline side (267ae603) as on this one:
+zero-core `tools/selfplay_digest.py` builds an MLP for `--net random`, which `NetEvaluator` refuses for v7's `mtg` (a
+game with tail segments, az.md 43.8) - a gap of the tool since layout v7, not of this change. The rest of the gate's
+recipe by hand: `check_checkpoint_compat --net uniform` (the same games, samples and results digests, both target
+kinds and the match against the random bot) **identical**; the 4-config search smoke (random, eval, match, nomull) 0
+failed; the mtg-smoke run-loop smoke (iterations [0, 1], 16 games, 0 unfinished); zero-core's build and pytest: 579
+passed, 3 failed - the new timing test and the shared queue's (`infer_share` > 1: the double count above) and
+`test_select_scale` (it compares two runs' metrics without timing keys, and `timing` was not one) - all three pass on
+c275a1e.
