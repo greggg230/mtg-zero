@@ -351,7 +351,8 @@ fn a_companion_cast_beside_a_twin_looks_the_same_in_every_world() {
     // the companion, in both worlds: ENGINE.md 156's slot order.)
     go(&mut a, &mut b, "pass");
     while !(at_priority(&a) && a.pending_decision().unwrap().player == 0) {
-        go(&mut a, &mut b, if at_priority(&a) { "pass" } else { "" });
+        let what = if at_priority(&a) { "pass" } else { "" };
+        go(&mut a, &mut b, what);
     }
     go(&mut a, &mut b, "cast Lutri");
     while !(a.stack().is_empty() && at_priority(&a)) {
