@@ -26354,6 +26354,66 @@ checkout, the venv with onnx / onnxruntime):
 "C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07 --dry-run
 "C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07
 ```
+
+### 114.6 Game records: a worker's self-play as what replays it (zero-farm phase 3, 2026-11-12)
+
+**Why.** zero-farm phase 3 (zero-farm DESIGN.md 6.1, 7): friends' PCs upload each self-play game as its record - the
+game's seed, every real move and only the search's outputs - and the trainer's pool remote replays it into the rows
+(zero-core docs/search.md 2.17, docs/az.md 45). The replay is the validation, so a record must replay into exactly the
+rows the worker's shard would have held.
+
+**What.** zero-core `farm` 712ac39 / c34e7c6 (records, `replay_rows`, the pool; renumbered and merged with chained
+episodes at c14d634). Here: `MtgAz::record_setup` (`mtg_eoe` delegates) = `{"decks": [seat 0's deck, seat 1's]}`
+(`MatchState::deck`: sorted card ids, the chosen deck after a deck choice) - compared by the replay at each game's end
+(each episode of a best-of-three: its post-board decks): a sealed deck is built from the seed by a builder that calls
+the platform's libm, so a record of decks another machine built differently is refused, not trained on. A served
+self-play job writes records (`tests/test_worker_farm.py`'s self-test job follows).
+
+**Tests.** `tests/test_worker_records.py` (zero-core's `tools/worker_records_gate.py` with the uniform evaluator on
+mtg-smoke, delver-smoke, eoe-smoke and eoe-choice-smoke (value choices: searched, never recorded, real moves), value-only
+rows on: every game's records replayed through `mtgz._engine.replay_rows` == the worker's own shards of the same games,
+bit for bit, every game's decks compared; a served job writes records only; a tampered deck setup is refused): 5 passed.
+
+**Gate 3** (records -> rows bit for bit, the real networks, the desktop under load):
+
+| settings | network | games | rows | arrays | result |
+|---|---|---|---|---|---|
+| eoe1 (iter 80's config; shard_rows 2048) | eoe1 iter 80, then a checkpoint switch to gen 81 after 8 games | 48 | 5,471 (all with auxiliary targets; nets 80: 2,032, 81: 3,439) | 39 of 39 identical in 3 files | **PASSED**; 48 games' decks compared; records 97.5 KB vs shards 1.17 MB |
+| the best-of-three stand-in (r3-deep128x8-2410's config + delver-mirror-bo3's overrides: constructed best-of-three with `"game_episodes": true`, the deck target and its tilt, value-only rows, resignation; shard_rows 4096) | r3-deep128x8-2410 iter 3198 widened onto the current layout (tools/fork_run.py), then a switch to gen 3199 after 3 matches | 12 matches (2-3 games each, 26 conceded games, every match's decks changed between games) | 2,730 (926 value-only, 2,636 with auxiliary targets; nets 3198: 1,549, 3199: 1,181) | 13 of 13 identical | **PASSED**; each game's decks compared; records 36 KB vs shards 756 KB |
+
+### 114.7 Merge of main 64c86cc2: the fuzz loops ported again, the Delver best-of-three in the worker (2026-11-12)
+
+**What.** main 64c86cc2 (constructed best-of-three integrated: 120, 121, 122, 129; zero-core pin 2aab098, chained episodes)
+merged into `farm` (4c02f8a6); zero-core `farm` merged 2aab098 too (c14d634: traced chained contests, records with
+episodes, the farm's docs renumbered - its az.md 42 -> 44, the pool 45; search.md 2.14 -> 2.16, records 2.17). main's
+tests/fuzz.rs changes (FUZZ_POOL=delver's matches are constructed best-of-three, FUZZ_DECK_TILT in them; FUZZ_POOL=delver_sb)
+ported into `engine/src/fuzz/games.rs` by phase 1's script (it reproduces the merge base's committed port byte for byte, a
+doc number aside) plus two rules (`PlayedMatch::sideboardings`; the constructed report's early return is `Run::Done`).
+The worker's fuzz settings: FUZZ_POOL=delver_sb (games only), FUZZ_POOL=delver's matches (`delver-matches`) with
+FUZZ_DECK_TILT (refused in any other matches mode).
+
+**Equivalence of the moved loops** (old: main 64c86cc2's own tests/fuzz.rs from `git archive` with its pin, plus a
+scratch-only per-seed print; new: the farm's tests/fuzz.rs over the library; per seed: `mtgz-worker fuzz` through its
+chunk processes; seeds from 10,000,000):
+
+| mode (env) | seeds | printed reports | per seed through the worker |
+|---|---|---|---|
+| delver-matches (FUZZ_POOL=delver: constructed best-of-three) | 200 | identical | 200 identical |
+| delver_sb-games (FUZZ_POOL=delver_sb) | 1,000 | identical | 1,000 identical |
+| delver-games, games, matches, interactions-games, drafted-matches, eoe-games, sealed-games, sneak_show-games, names-games, dd_a-games | 500, 1,000, 200, 500, 100, 300, 200, 200, 200, 200 | identical | 3,400 identical |
+
+(cargo's `test <name> ... ` prefix and timings masked; no failure in any mode.) **4,600 seeds, 12 modes, identical.**
+
+**Gate 2 (the plumbing) on the best-of-three stand-in** (zero-core tools/worker_parity.py --model: the Python remote
+worker with OnnxEvaluator vs the native worker with the same graph, groups 1, 8 matches): 2,317 rows, the first 200
+network batches and every shard array **byte-identical**. `tools/farm_gates.py --config <path> --checkpoint <.pt>` runs
+gates 2 and 3 on a run's exact settings in one command (for the real config once the run exists). `check-config` of the
+stand-in: 49 play, 82 trainer, 17 off, 0 unsupported, 0 unknown.
+
+**Gates.** `tools/gate.py engine --expect-digest b63f643e97a30a61 --expect-digest0 a0062bb5569e06d3 --tested-sha 4c02f8a6 --jobs 8`: **GATE PASSED engine 4c02f8a61f36 in 1202 s** - build; digests = main's (full b63f643e97a30a61, `=0` a0062bb5569e06d3); az 52, limits 13, hidden 28; pytest 329 passed, 1 skipped; random smoke; tree unchanged.
+
+**Fuzz build.** `tools/farm_build.py --profile fuzz --publish`: **2d17125b94e33bc57c06a127** (`mtg-4c02f8a-fuzz`, kinds [fuzz]) on farm.greggg230.com; its modes: `delver-games` {FUZZ_POOL: delver}, `delver-matches` {FUZZ_POOL: delver} (+ optional FUZZ_DECK_TILT), `delver_sb-games` {FUZZ_POOL: delver_sb}.
+
 ## 120. Constructed best-of-three: the Delver mirror's sideboarding and hidden 60s (branch `delver-bo3`, 2026-11-11)
 
 Branch `delver-bo3` (from main 60397f3; zero-core pinned at f9ca5c3, unchanged). DESIGN.md 8's D3 but the five
