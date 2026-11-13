@@ -267,8 +267,9 @@ fn rules_step(rc: &mut RulesCheck, g: &Game, what: &dyn Fn() -> String) {
     }
 }
 
-/// The rules checks' violations by rule, and the test's verdict: it fails if any rule outside
-/// `FUZZ_RULES_ALLOW` (comma-separated rule numbers, as the violations name them) was violated.
+/// The rules checks' violations by rule (each one's first line), and the test's verdict: it fails
+/// if any rule outside `FUZZ_RULES_ALLOW` (comma-separated rule numbers, as the violations name
+/// them; `*`: every rule, so a campaign's chunk plays to its end and lists them) was violated.
 fn rules_verdict(test: &str) {
     let allow: Vec<String> = std::env::var("FUZZ_RULES_ALLOW").map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()).unwrap_or_default();
     let fails = RULES_FAILS.with(|f| std::mem::take(&mut *f.borrow_mut()));
@@ -285,9 +286,9 @@ fn rules_verdict(test: &str) {
     }
     let mut failing = Vec::new();
     for (rule, list) in &by {
-        let allowed = allow.iter().any(|a| a == rule);
+        let allowed = allow.iter().any(|a| a == rule || a == "*");
         println!("{test}: CR {rule} violated {} times{}; first: {}", list.len(), if allowed { " (allowed: FUZZ_RULES_ALLOW)" } else { "" }, list[0].1);
-        for x in list.iter().skip(1).take(4) {
+        for x in list.iter().skip(1) {
             println!("    also: {}", x.1.lines().next().unwrap_or(""));
         }
         println!("    its log:\n{}", list[0].2);
@@ -1160,6 +1161,9 @@ fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
 /// One search transition of a chance walk's world, its invariants and knowledge checked after
 /// it; a failure or an engine panic is reported with the walk (`at`, the path, the forced keys).
 fn chance_step(w: &mut Game, rc: &mut RulesCheck, act: u16, forced: Option<&[u64]>, at: &str, path: &[String]) -> Vec<u64> {
+    if forced.is_some() {
+        rc.forced_chance(w);
+    }
     let k = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| chance_transition(w, act, forced))) {
         Ok(Ok(k)) => k,
         Ok(Err(e)) => panic!("{at}: {e}\npath: {path:?}\nforced: {forced:?}"),

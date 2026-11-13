@@ -85,6 +85,9 @@ pub struct Stats {
     pub pools: u64,
     /// Token moves checked (111.8).
     pub token_moves: u64,
+    /// Cards a forced chance outcome may have dealt another identity
+    /// (`RulesCheck::forced_chance`: 108.1 not applied to them).
+    pub forced_identities: u64,
 }
 
 impl Stats {
@@ -102,6 +105,7 @@ impl Stats {
         self.blocks += o.blocks;
         self.pools += o.pools;
         self.token_moves += o.token_moves;
+        self.forced_identities += o.forced_identities;
     }
 }
 
@@ -109,7 +113,7 @@ impl std::fmt::Display for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} states, {} at priority (704/117.5), stack {} steps / {} objects compared (405.2, 608.1, 601.2), {} new turns (500.7), options: {} attack (508.1a), {} block (509.1), {} damage assignments (510.1c, 702.19b; {} in digits not compared), declarations: {} attacks (508.1), {} blocks (509.1), {} steps begun with empty pools (500.5), {} token moves (111.8)",
+            "{} states, {} at priority (704/117.5), stack {} steps / {} objects compared (405.2, 608.1, 601.2), {} new turns (500.7), options: {} attack (508.1a), {} block (509.1), {} damage assignments (510.1c, 702.19b; {} in digits not compared), declarations: {} attacks (508.1), {} blocks (509.1), {} steps begun with empty pools (500.5), {} token moves (111.8), {} identities a forced chance outcome changed (108.1 not applied)",
             self.states,
             self.priority,
             self.stack_steps,
@@ -122,7 +126,8 @@ impl std::fmt::Display for Stats {
             self.attacks,
             self.blocks,
             self.pools,
-            self.token_moves
+            self.token_moves,
+            self.forced_identities
         )
     }
 }
@@ -917,7 +922,8 @@ fn new_items_stayed(p: &Snap, g: &Game) -> bool {
 /// that state), call [`step`](Self::step) after every `apply`.
 #[derive(Clone, Debug)]
 pub struct RulesCheck {
-    /// Slots at the start, and each card slot's owner and printed card.
+    /// Slots at the start, and each card slot's owner and printed card (the
+    /// card it is now: changed only by a forced chance outcome, `cards`).
     base_len: usize,
     base_cards: Vec<Option<(PlayerId, DefId)>>,
     /// Every card each player owns, in the game or outside it.
@@ -928,9 +934,10 @@ pub struct RulesCheck {
     normal: Option<PlayerId>,
     /// Token slots seen as permanents (on the battlefield or phased out).
     token_perm: Vec<bool>,
-    /// Chance outcomes were forced in this game (`force_chance`): an unknown
-    /// library card may be dealt another identity of its owner's library.
-    forced: bool,
+    /// The next step's transition replays forced chance outcomes
+    /// ([`forced_chance`](Self::forced_chance)): each card slot's zone and
+    /// incarnation before it.
+    forced_from: Option<Vec<(Zone, u32)>>,
     /// The slots and the companions' state when every player's cards were
     /// last counted (`cards`: counted again only when they change).
     counted: (usize, [(Option<CardIdx>, bool, usize); 2]),
@@ -941,23 +948,45 @@ pub struct RulesCheck {
 }
 
 impl RulesCheck {
+    /// The check of a game from state `g` on: the first [`step`](Self::step)
+    /// compares its state with `g`.
     pub fn new(g: &Game) -> RulesCheck {
         let base_cards = (0..g.objs.len())
             .map(|i| CardIdx::new(i as u32))
             .map(|c| is_card(g, c).then(|| (g.objs[c.i()].owner, card_of(g, c))))
             .collect();
-        RulesCheck {
+        let snap = Snap::of(g);
+        // (At a "you may skip that turn" choice the engine's record of the
+        // last normal turn already names the turn about to begin, a normal
+        // one or not: unknown until that turn begins, `turns`.)
+        let normal = (g.turn.number > 0 && !snap.may_skip).then_some(g.turn.normal);
+        let mut rc = RulesCheck {
             base_len: g.objs.len(),
             base_cards,
             base_total: [cards_of(g, 0), cards_of(g, 1)],
-            prev: None,
-            normal: (g.turn.number > 0).then_some(g.turn.normal),
+            prev: Some(snap),
+            normal,
             token_perm: Vec::new(),
-            forced: !g.forced.is_empty(),
+            forced_from: None,
             counted: (g.objs.len(), companions(g)),
             stopped: false,
             stats: Stats::default(),
-        }
+        };
+        rc.mark_permanents(g);
+        rc
+    }
+
+    /// The next transition (from state `g`, the state of the previous
+    /// [`step`](Self::step) or of [`new`](Self::new)) replays forced chance
+    /// outcomes (`Game::force_chance`, zero-core's `chance_k`): a library
+    /// card drawn or looked at may be dealt the identity of another of its
+    /// owner's library cards nobody knows, swapping the two
+    /// (`Game::force_library_card`). That makes another world of the same
+    /// information, not a rules event: 108.1's identity check doesn't apply
+    /// to the cards that may have been swapped (`cards`). Call it before
+    /// that transition.
+    pub fn forced_chance(&mut self, g: &Game) {
+        self.forced_from = Some(self.base_cards.iter().enumerate().map(|(i, _)| (g.objs[i].zone, g.objs[i].inc)).collect());
     }
 
     /// Check the state reached by a step (every rule; the ones that compare
@@ -973,7 +1002,6 @@ impl RulesCheck {
     }
 
     fn step_checked(&mut self, g: &Game) -> Checked {
-        self.forced |= !g.forced.is_empty();
         check_state_stats(g, &mut self.stats)?;
         self.cards(g)?;
         let now = Snap::of(g);
@@ -1002,23 +1030,41 @@ impl RulesCheck {
     /// player's cards in the game and outside it are the ones they started
     /// with.
     fn cards(&mut self, g: &Game) -> Checked {
-        for (i, b) in self.base_cards.iter().enumerate() {
-            let Some((owner, card)) = *b else { continue };
-            let c = CardIdx::new(i as u32);
+        let forced = self.forced_from.take();
+        assert!(
+            forced.is_some() || g.forced.is_empty(),
+            "RulesCheck: chance outcomes are being forced (Game::force_chance) in a transition RulesCheck::forced_chance wasn't told of"
+        );
+        for (i, b) in self.base_cards.iter_mut().enumerate() {
+            let Some((owner, card)) = b.as_mut() else { continue };
+            let (owner, c) = (*owner, CardIdx::new(i as u32));
             if g.objs[i].owner != owner {
                 return fail("108.3", format!("card {} changed owner from P{owner} to P{}", describe(g, c), g.objs[i].owner));
             }
             if !is_card(g, c) {
-                return fail("108.1", format!("card #{i} ({}) is no longer a card", g.db.def(card).name));
+                return fail("108.1", format!("card #{i} ({}) is no longer a card", g.db.def(*card).name));
             }
             let now = card_of(g, c);
-            // (A forced chance outcome deals an unknown library card the
-            // identity of another one of its owner's library: the world is
-            // another world, the multiset below still holds.)
-            let reshuffled = self.forced && g.objs[i].zone == Zone::Library && g.objs[i].known == 0;
-            if now != card && !reshuffled {
-                return fail("108.1", format!("card #{i} was {} and is now {} ({:?}, known {:#b}, observer {:?})", g.db.def(card).name, g.db.def(now).name, g.objs[i].zone, g.objs[i].known, g.observer));
+            if now == *card {
+                continue;
             }
+            // (A forced transition, `forced_chance`, swaps the identities of
+            // two of an owner's library cards nobody knows as one is drawn
+            // or looked at: another world of the same information. A card
+            // that was in a library before the transition, is in one now,
+            // or moved in between may have been one of them: shuffled in
+            // and drawn, or shuffled, its knowledge gone, and drawn. 108.1
+            // doesn't apply to those; the card it is now is the card it
+            // stays, and the owner's cards, counted below, are the same.)
+            let swappable = forced.as_ref().is_some_and(|f| {
+                let (z, inc) = f[i];
+                z == Zone::Library || g.objs[i].zone == Zone::Library || z != g.objs[i].zone || inc != g.objs[i].inc
+            });
+            if !swappable {
+                return fail("108.1", format!("card #{i} was {} and is now {} ({:?}, known {:#b}, observer {:?})", g.db.def(*card).name, g.db.def(now).name, g.objs[i].zone, g.objs[i].known, g.observer));
+            }
+            self.stats.forced_identities += 1;
+            *card = now;
         }
         for i in self.base_len..g.objs.len() {
             let c = CardIdx::new(i as u32);
@@ -1032,7 +1078,7 @@ impl RulesCheck {
         // the checks above imply the count: the baseline's cards are
         // unchanged and there is no new card).
         let state = (g.objs.len(), companions(g));
-        if !self.forced && state == self.counted {
+        if forced.is_none() && state == self.counted {
             return Ok(());
         }
         self.counted = state;
@@ -2130,6 +2176,82 @@ mod tests {
         // ... unless an extra turn was added (500.7: the latest first).
         next(vec![1, 0], 0).unwrap();
         assert_eq!(rule(next(vec![0, 1], 0)), "500.7");
+    }
+
+    #[test]
+    fn cr_500_7_a_check_made_at_a_skip_that_turn_choice() {
+        // At Time Vault's "you may skip that turn" choice the engine already
+        // records the turn about to begin as the last normal one
+        // (`begin_turn`): a check made there (a determinized world) learns
+        // the order as that turn begins or is skipped.
+        let v = vanilla();
+        let mut g = at_priority(Scenario::new(db()).battlefield(1, &[v]));
+        let vault = bf(&g, 1, v);
+        let a = g.turn.active;
+        let b = opp(a);
+        g.turn.normal = b;
+        g.agenda.push(Task::MaySkipTurn { p: b, vault });
+        let mut rc = RulesCheck::new(&g);
+        // P_b skips that turn (614.10): the next is P_a's, then P_b's.
+        g.agenda.retain(|t| !matches!(t, Task::MaySkipTurn { .. }));
+        g.turn.normal = a;
+        g.turn.number += 1;
+        g.turn.active = a;
+        g.turn.step = Step::Upkeep;
+        rc.step(&g).unwrap();
+        g.turn.normal = b;
+        g.turn.number += 1;
+        g.turn.active = b;
+        rc.step(&g).unwrap();
+        // The order is checked from then on.
+        let mut h = g.clone();
+        h.turn.number += 1;
+        assert_eq!(rule(rc.clone().step(&h)), "500.7, 102.1");
+        h.turn.active = a;
+        h.turn.normal = a;
+        rc.step(&h).unwrap();
+    }
+
+    #[test]
+    fn cr_108_1_a_forced_chance_outcome_makes_another_world() {
+        // The transition draws the Island dealt the Mountain's identity: a
+        // forced chance outcome swaps two library cards nobody knows
+        // (`force_library_card`).
+        let v = vanilla();
+        let sc = || Scenario::new(db()).library(0, &["Island", "Mountain"]).battlefield(0, &[v]);
+        let draw_swapped = |g: &mut Game| {
+            let (i, m) = (g.card(0, "Island", Zone::Library), g.card(0, "Mountain", Zone::Library));
+            let (di, dm) = (g.objs[i.i()].def, g.objs[m.i()].def);
+            g.objs[i.i()].def = dm;
+            g.objs[m.i()].def = di;
+            g.players[0].library.retain(|&x| x != i);
+            g.objs[i.i()].zone = Zone::Hand;
+            g.objs[i.i()].inc += 1;
+            g.players[0].hand.push(i);
+        };
+        let mut g = at_priority(sc());
+        let mut rc = RulesCheck::new(&g);
+        rc.forced_chance(&g);
+        draw_swapped(&mut g);
+        rc.step(&g).unwrap();
+        assert_eq!(rc.stats.forced_identities, 2);
+        // The card it is now is the card it stays.
+        rc.step(&g).unwrap();
+        let x = g.card(0, "Mountain", Zone::Hand);
+        g.objs[x.i()].def = db().expect_id("Island").unwrap();
+        assert_eq!(rule(rc.step(&g)), "108.1");
+        // Not forced: 108.1.
+        let mut g = at_priority(sc());
+        let mut rc = RulesCheck::new(&g);
+        draw_swapped(&mut g);
+        assert_eq!(rule(rc.step(&g)), "108.1");
+        // Forced, but a card that stayed on the battlefield.
+        let mut g = at_priority(sc());
+        let mut rc = RulesCheck::new(&g);
+        rc.forced_chance(&g);
+        let c = bf(&g, 0, v);
+        g.objs[c.i()].def = db().expect_id("Island").unwrap();
+        assert_eq!(rule(rc.step(&g)), "108.1");
     }
 
     // -- combat: 508.1, 509.1, 510.1c, 702.19b
