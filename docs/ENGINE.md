@@ -467,7 +467,9 @@ at once (704.5e, section 26.4).
   root decider's. `determinize(viewer)` records `observer = viewer` in the state; from then
   on a private reveal to another player is emitted with the definition replaced by
   `HIDDEN`, so the viewer's tree does not branch on facts the viewer cannot see. Without an
-  observer (real play, tests) keys are complete.
+  observer (real play, tests) keys are complete. A match's world keeps it in every game it
+  starts (after sideboarding, the sealed deck choice, or past the end of the game it was dealt
+  in; set while sideboarding too): section 141.1.
 * **`determinize(viewer, rng)`** resamples what the viewer does not know: for each owner, the
   identities (`def`) of that owner's cards in hidden zones (the other player's hand; both
   libraries) not known exactly to the viewer are dealt again among those cards, each
@@ -26138,7 +26140,9 @@ known card in place, the clouds, the viewer's own cards untouched; a world depen
 information (the request: the seat, 60, R, a companion). Modelled: the distribution over the rest of the deck (the base
 prior), and between games the first sideboarder's choice dealt from the base (the cube's 36.11 assumes it kept the
 last deck; here the next game's first deals and the between-games deal are the same K decks, so the search crossing
-from sideboarding into game 2 sees one distribution).
+from sideboarding into game 2 sees one distribution). (141.4: as a joint model the later games' 60s are independent
+draws of the base prior, so game 3's deal ignoring game 2's reveals is the exact posterior under it; making game 2 count
+needs a model of the next deck given the last one - options there, a decision for the user.)
 
 ### 120.3 What was built
 
@@ -29162,7 +29166,10 @@ opponent's information: every deal of a constructed best-of-three for viewer v (
 the belief and deck-tilted deals) turns the opponent's flag off in v's world, and `deal_constructed_between` asks the
 opponent's sideboarding in progress again - in v's worlds the keeper sideboards with every option, as any player, and
 its 60 in a later game is dealt by `ConstructedPrior` from what v saw, as always. The keeper's own worlds keep it
-keeping. No encoding reads the flag (the other player's sideboarding decisions are not encoded, 36.11). Test
+keeping. No encoding reads the flag (the other player's sideboarding decisions are not encoded, 36.11). (**Correction,
+141.3**: as the yardstick's model of B this deals B's real deck - the main - in about 1 in 16 of A's worlds, so
+`per_game` measured sideboarding less the cost of searching against decks B does not play; the spec's `"keep_known"`
+is the informed arm, and `keep_h2h`'s default since 141.) Test
 (`a_seat_that_keeps_its_deck_changes_nothing_the_other_seat_knows`): 24 twin matches of the same seed (16 post-board,
 8 with game 1 played), one with seat k keeping and one without where k passes at its first sideboarding decision too:
 the other seat's encoding equal at every step and its legal actions at each of its decisions; its worlds (3,680, the
@@ -29174,7 +29181,9 @@ each side the keeping seat half the time. `python -m mtgz.az.keep_h2h A [B]` (`m
 drivers - A in seat 0 with `"keep_deck": [1]`, A in seat 1 with `"keep_deck": [0]` - half the matches each with one
 driver seed (game k of each half has the same seed: the same drawn game 1 and deals, the sides swapped; zero.h2h's
 `--paired` pairs), B (default A) keeping, both sides searching with their run's evaluation settings (`run_rule`),
-and prints zero.h2h's paired summary: A's match score, `per_game` (A's games won: the measure), `keeps: "b"`. The
+and prints zero.h2h's paired summary: A's match score, `per_game` (A's games won: the measure), `keeps: "b"`. Since
+141.3 the halves carry `"keep_known": true` by default (`--arms informed`: A's worlds deal B its real deck), and
+`--arms uninformed` is the arm described here (`both`: the two side by side with their per-game gap). The
 spec defaults to the presets' (`mtgz.az.SPEC_DELVER_BO3`):
 
 ```
@@ -29290,3 +29299,185 @@ target directory (E:/cargo-target/mtg-zero/bo3-postboard).
   Nothing refuses it in a run spec; the presets do not set it.
 * **The run**: moving the Delver best-of-three run onto this commit changes what it trains (games 2-3 only) - a
   maintainer's decision, with the run.
+
+## 141. Best-of-three hidden information: a world's observer in the games it starts, the private-key fuzz check, the keep-its-deck yardstick's informed arm; game 3's deal left for a decision (branch `fix/bo3-hidden`, 2026-11-12)
+
+Branch `fix/bo3-hidden` from main 267ae603 (zero-core e5e1bb0, unchanged). Lane A2 of the Fable review of
+`e81f8304..267ae603` (`E:/mtg-zero-scratch/fable-review-2026-11-12/`: hidden.md B2, B3, I1, I3; flow.md I1 and its
+game-3 note). Section number assigned by the review's orchestrator (140-149 are its lanes').
+
+### 141.1 A world keeps its observer in the games it starts (the review's H2)
+
+**What was wrong.** Section 10's observer masking: `Game::determinize(viewer)` sets `Game::observer`, and from then on
+`Game::emit_private` keys a draw or a look of another player as `HIDDEN`, so the viewer's tree never branches on a card
+it cannot see. A match replaces its `Game` when a new game begins - `next_game` after sideboarding (36.2) and
+`start_chosen_game` after the sealed deck choice (107.2) - with `Game::with_sideboards`, whose observer is None. And
+while sideboarding or choosing a deck `MtgAz::determinize` deals no game card (the last game is over; the game in
+waiting is replaced), so it never set one. A world dealt there, or a world dealt in a game that the search plays past
+the game's end (a best-of-three without one episode per game), played the next game with complete keys: the other
+player's opening hand, mulligan draws, later draws and looks keyed by identity in the viewer's tree. The review's probe:
+40 of 40 sideboarding worlds of the cube's best-of-three keyed 11 to 19 such cards in their first 60 actions, none
+masked (a mid-game world: none). It hits every game 2 and 3 of the Delver best-of-three presets, whose roots begin at a
+sideboarding decision, and it breaks information-set merging's premise (zero-core docs/search.md 3.16).
+
+**The fix.** The observer is the world's: every path that makes a world sets it on the world's current `Game`, and a
+`Game` that replaces it in that world inherits it.
+
+| where | change |
+|---|---|
+| `matches.rs` `next_game`, `start_chosen_game` | the new game takes the old one's `observer` (None in the live match: real play keeps complete keys) |
+| `mod.rs` `SearchGame::determinize` | during the deck choice and while sideboarding (no game card dealt) it sets `g.observer = viewer` |
+| `hidden_decks.rs` `determinize_deck_tilted` | the same while sideboarding |
+| `belief.rs` `determinize_belief` | unchanged: while sideboarding or choosing it calls `determinize`; in a game `Game::determinize` / `determinize_weighted` set it |
+| `eoe.rs` (`mtg_eoe`) | unchanged: it calls `MtgAz`'s |
+
+**The audit** (every construction or replacement of a `Game`): `matches.rs` 643 and 869 (above) are the only
+replacements of a match's game; `MtgAz::from_seats`, `MtgAz::constructed_bo3`, `draft_bots::match_game` and
+`skip_game_one` (a concession of the real match's game in waiting) build the live match, where no observer is right;
+`lab.rs` `from_start` clears it on purpose (a dealt world becomes the real game); `TeamDraftAz` has its own observer
+(41) and plays no match in a world (its matches are played at the deferred terminal); `Game::redeal` and the
+hidden-pool deals change a game in place. `force_chance`'s queue is a `Game`'s too and is dropped with a replaced game:
+no loss, the step that starts a game emits only the match's `KEY_GAME`, which no game consumes.
+
+**Tests** (`engine/tests/match_worlds.rs`): `a_world_dealt_while_sideboarding_masks_the_next_games_private_keys` (the
+cube's best-of-three with and without one episode per game, and the Delver post-sideboard best-of-three: worlds of
+both seats at the first sideboarding, walked into the next game: every private key of the other player masked, the
+viewer's own complete), `a_world_dealt_in_a_game_masks_the_private_keys_past_its_end` (the cube's best-of-three of
+6-turn games, worlds dealt in game 1's last turn and walked past its end), and
+`a_world_dealt_during_the_deck_choice_masks_its_games_private_keys` (sealed, a 4-candidate deck choice). On the code
+before the fix each of the three fails: the cube's sideboarding worlds (32) keyed 636 of the other player's draws and
+looks in the next game by identity and masked none, the worlds dealt in game 1's last turn (24) 717, the deck-choice
+worlds (8) 204. With it every one is masked - 636, 717 and 204 - and the Delver post-sideboard worlds (32) mask 756,
+with 4 looks of Urza's Bauble at a card of the viewer's own hand, public by design (141.2); the viewer's own keys keep
+their identities (568, 761, 151, 683).
+### 141.2 The fuzz: every world masks the other player's private keys (the review's I3)
+
+The fuzz's information-set checks (`check_information_set`, `check_match_information_set`) return as soon as two worlds'
+keys differ, so a key that says too much could never fail them: H2 passed 20,000-game runs. New, self-contained in
+`engine/tests/fuzz.rs` (the block "Every world masks the other player's private keys"):
+
+* `check_private_keys_masked(keys, viewer, after, ...)`, on each step's keys with the world's game after the step:
+  every `KEY_DRAW` of a player other than the world's viewer carries `HIDDEN`, and every `KEY_LOOK` too but the one
+  look that is public by design - another player's look at a card at random of the viewer's own hand
+  (`Ext::LookAtRandomHandCard`, Urza's Bauble, one in the Delver 60 and in the cube; resolve_ext keys it public because
+  its owner sees which card was seen), recognised as a card of that identity in the viewer's hand that the looker knows
+  (counted apart). Run on every step of every world the fuzz already walks - the game fuzz's (`check_determinize`'s 30
+  actions, the hidden-decklist worlds of `check_determinize_hidden`) and the match fuzz's (`play_match_spec`'s 30
+  actions of each world, both viewers). (Its first version checked the walks' keys at their end without the
+  exception and failed on those looks: the first full run's only 2 failures of 2,544, 141.5.)
+* `check_world_private_keys(g, viewer, seed, step)`: at each match checkpoint (both viewers) and each deck-choice
+  decision (`FUZZ_DECK_CHOICE`), a world walked as the search walks it into the game it plays next - a sideboarding or a
+  deck choice played to its end (`PASS` with probability 1/2 where legal, else a random option), past a game's end in a
+  best-of-three without one episode per game, then 60 actions of the game it started - every private key of the other
+  player masked. Its own generator: the matches' random stream is untouched.
+* Counts printed (`private_keys_report`) and a floor asserted: the match fuzz (and its post-sideboard matches) must
+  reach games a world started and keys in them.
+
+**It catches H2 on the engine before the fix** (the fix's code lines removed from 33464ee7, everything else the same: `E:/mtg-zero-scratch/fable-fix/a2-h2-toggle.py`): `FUZZ_GAMES=40 ... fuzz_random_matches` fails at match 0 ("match 0 step 403 game 1: a world of P1 (in the game it started): P0's private key (kind 1) carries the card's identity (220)") and `FUZZ_POOL=delver` at match 0 (step 385, a draw of identity 339), where 267ae603's own fuzz passes 20,000-game runs; with the fix the same commands pass (141.5).
+
+### 141.3 The keep-its-deck yardstick's informed arm (`"keep_known"`; the review's I1, flow.md I1)
+
+**What was wrong.** 130.3's yardstick (`mtgz.az.keep_h2h`: side A sideboards, side B keeps its deck) is meant to
+measure what sideboarding is worth (`per_game`). But A's worlds turn B's `keep_deck` flag off and deal B's 60 from the
+constructed prior as any sideboarding player's: with nothing shown the prior gives B's real deck (the registered main,
+which B always plays) in 1 / 16 of the worlds (the review measured 0.064; 7.5 swaps on average). A's search played
+around cards B does not have in about 15 of 16 worlds at each game's start, so `per_game` was sideboarding's worth less
+the cost of a wrong model of B (a lower bound of unknown slack).
+
+**The fix.** A spec key, `"keep_known": true` (`MtgSpec::keep_known`, with `keep_deck` only - refused without it - in a
+constructed best-of-three; `MatchState::keep_known`, a setting: public-state class Derived): the other seat's worlds
+know the keepers keep. In them a keeper's deck is its real one, never dealt (`MtgAz::keeps_known`; `sample_hidden_deck`
+returns before any deal: its last deck, its choice between games and its game deck are the registered main, its flag
+stays on - its sideboarding in progress there offers `PASS` only - and `Game::determinize` deals its unknown cards
+from the main as best-of-one does); `deck_hidden`, `deck_tilt_of` and `deck_weights` follow (no deck to tilt). That is
+the posterior under a prior that knows the keeper's policy (a point mass on the main): exact. No encoding changes - the
+setting is a model of the opponent's policy, like the deck prior itself, which no encoding shows - so A's network sees
+the same inputs in both arms and only its search's worlds differ.
+
+`mtgz.az.keep_h2h --arms informed|uninformed|both` (default `informed`, the measure): `informed` plays the halves with
+`"keep_known": true`, `uninformed` is 130.3's (B dealt from the prior in A's worlds), `both` plays both on the same
+seeds and prints the informed summary with the uninformed one under `uninformed` and `per_game_gap` (informed less
+uninformed games won: the mis-modelling cost). `half_specs(spec, known=True)`; `decklists.mirror_bo3_spec(...,
+keep_known=)`.
+
+**How it was verified.** `match_worlds.rs::a_known_keeper_is_dealt_its_main_in_the_other_seats_worlds`: twin
+post-sideboard matches of the Delver 75 (the keeper alternating seats), one with `keep_known` and one without, played
+with the same actions: 1,633 worlds of the other seat, **the keeper's real 60 in all 1,633 with `keep_known`, in 386
+without** (23.6%; of the 81 worlds that dealt the keeper's game-2 choice with nothing shown, 5: the review's 1 in 16),
+16 of them at the keeper's sideboarding (`PASS` its only option there with the key); the other seat's encoding and
+legal actions equal in both arms at every step and in every world (no input changes); the keeper's own 1,633 worlds the
+same in both arms. `keep_known_is_a_setting_of_the_keep_deck_yardstick`: the key, its refusals, the
+evaluation spec keeping it. Python (`tests/test_post_board.py`): the halves' specs carry it (and parse in the
+engine), the uninformed halves do not, and the tiny-network run plays `--arms both` (both arms' summaries, the gap).
+130.3's twin test (`a_seat_that_keeps_its_deck_changes_nothing_the_other_seat_knows`, the uninformed arm) passes
+unchanged.
+### 141.4 Game 3's hidden 60 and what game 2 showed (the review's H3): not changed, a decision for the user
+
+**The finding** (hidden.md B3, flow.md's cross-slice note): game 3's hidden 60 is dealt without what the opponent
+showed in game 2 (`hidden_decks.rs` `deal_constructed_between`: a first sideboarder's choice dealt with nothing shown;
+`sample_hidden_deck`: in a game R is the current game's `sample::knowledge` only), and "one deck gets three
+distributions": (1) the viewer sideboards first - its world deals the opponent's game-2 deck D2 from what game 2
+showed, then the opponent's game-3 deck comes from the opponent's sideboarding in the viewer's tree; (2) the viewer
+sideboards second - D3 dealt from the base prior with nothing shown; (3) in game 3 - the base prior holding what game
+3 has shown.
+
+**Why it is not a defect of the deal under the approved model, and why changing it is the user's call.** The user's
+decisions fix the model: 120's decision 2 (2026-11-11) - each later game's 60 "holds every card of theirs the viewer
+knows in the current game ... Cards revealed in earlier games do not constrain the current 60 (they may have been
+sided out); they stay inputs (`OPP_REVEALED`)" - and the approvals of 2026-11-12 (120.7): the base prior anchored on
+the registered main ("uniform over the swap count, then uniform"), with "the last game's deck as the anchor in game
+3" listed there as the alternative and not taken, and "the first sideboarder's choice dealt from that same prior". As
+a joint model that is: D2 and D3 are independent draws of the base prior. Under it, what the viewer saw in game 2 (a
+function of D2 and game 2's shuffles) says nothing about D3, so P(D3 | everything seen) = P(D3 | what game 3
+showed): exactly today's deal (with lane A1's likelihood, 140, in that conditioning). Cases (2) and (3) are one
+distribution - at a game's start the request (seat, 60, nothing shown) is the same, with the same K cached decks.
+Case (1) is not a deal: the opponent's game-3 deck there is chosen by the opponent's sideboarding decisions in the
+viewer's tree, from the dealt D2 (its own deck, which it knows), as every decision of the opponent's in the tree is.
+So "game 3 conditioned on game 2" means replacing the approved independence by a model in which D3 depends on D2 -
+which conflicts with the decisions above (COMMON.md: stop that item and report). Game 2's information reaches game 3
+today through the encoding (`OPP_REVEALED`, `my_revealed`) and the deck tilt (the network's deck prediction, which
+reads them, reweighs the K cached decks: 106).
+
+**The options** (each composes with A1's likelihood, 140, for every "deck holds what was seen"):
+
+| | model of D3 given D2 | exact sampler | cost | conflicts |
+|---|---|---|---|---|
+| A | independent (today) | yes (today's) | none | none |
+| B | the base prior re-anchored on the deck being sideboarded (game 2 from the main, game 3 from D2) | case (2) yes and cheap: D2 from its posterior given game 2, then D3 from the D2-anchored prior with nothing shown (one more table draw). Case (3): **none known** - P(D3 \| R2, R3) is proportional to L3(D3) sum over D2 of P(D2 \| R2) P_D2(D3), and P_D2's "uniform over count vectors with s swaps" divides by N_D2(s), the number of 60s with s swaps from D2, which depends on D2's whole copy structure; the sum does not factor over the 75's entries, so the swap table cannot carry it. Rejection (acceptance = the probability of game 3's evidence) has no time bound; weighing K particles (SIR) is an approximation | case (2) ~ one table draw | 120.7's main anchor; not buildable exactly as specified |
+| C | B with physical-card swaps: uniform over s, then s of D2's 60 physical cards out and s of its 15 in | yes: the transition's normaliser C(60, s) C(15, s) is the same for every D2, so it factors per entry (C(d, out) C(u, in)); one table over (D2's swaps in / out from the main, D3's swaps in / out from D2), (S + 1)^4 = 65,536 states an entry, 29 entries, ~25 count pairs each: ~5 x 10^7 multiply-adds a request (K = 32 decks drawn from it) | a table per new card seen in game 3 (estimate 0.1-0.3 s; today's 76-114 us) | 120.7's anchor and within-count uniformity (count vectors); one rule at every sideboarding would change game 2's base the same way |
+| D | a mixture: D3 = D2 with probability rho (the opponent kept its game-2 deck), else a fresh draw of the approved base | yes: the component weights are swap-table normalisers - rho Z(one deck that showed R2 in game 2 and R3 in game 3) against (1 - rho) Z(R2) Z(R3) - then a draw of the chosen component (kept: one deck seen in two games, the product of two of A1's likelihood factors per entry; fresh: today's request); case (2): the dealt D2 with probability rho, else fresh | two more table passes a request | each game's marginal stays the approved base exactly; needs rho (the user's number) and a two-factor form of A1's slot weights |
+
+In every option case (1) stays the opponent's own in-tree sideboarding. Recommendation if the user wants game 2 to
+count: D (keeps the approved prior as each game's marginal, exact, cheap) with rho chosen by the user, or C if a
+transition anchored on the last deck is preferred; B is not exactly samplable.
+### 141.5 Checks
+
+The desktop was shared with the live run `delver-bo3-pb1` and the other lanes; every heavy command ran under the lanes'
+slot throttle, with this branch's own target directory (E:/cargo-target/mtg-zero/fix-bo3-hidden).
+
+* **Behaviour digests: EQUAL** - full **438164c0429d7fa3**, `DIGEST_ENCODING=0` **a0062bb5569e06d3** (`cargo test --release -p engine
+  --test digest -- --ignored`, on 7851782c's code: the engine has not changed since), each 267ae603's recorded. Nothing re-recorded: the digest games are best-of-one `Game`s (no match,
+  no new game in a world, no keeper), which nothing here touches.
+* **The full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`) on 7851782c: 162 binaries, **2,542 passed, 2 failed, 27 ignored** - the two failures this lane's own new checks, both the Urza's Bauble hand look (141.2: `fuzz_random_games` seed 46, `match_worlds`' Delver walk); every other test passed, the twin test of 130.3, `post_board`, `constructed_bo3`, `bo3_episodes`, `az` (52), `hidden`, `deck_choice` and `draft_matches` among them. On 33464ee7 (the checks per step, the engine unchanged) the two binaries again: `match_worlds` 5 passed, `fuzz` 4 passed (300 games, 20 matches: 6,424 of the other player's private keys masked in the match fuzz's worlds, 2,227 of them in 114 games a world started, 2 Urza's Bauble looks).
+* **`FUZZ_GAMES=20000`**, the default pool, on 33464ee7: (recorded by the commit after the gated one).
+* **`FUZZ_POOL=delver FUZZ_GAMES=20000`**, on 33464ee7: (recorded by the commit after the gated one).
+* **pytest** (`bash tools/build_py.sh`, then `tests/test_post_board.py tests/test_delver_bo3.py`): 7 passed.
+* **The engine gate** (`python tools/gate.py engine --no-mac --tested-sha 33464ee7 --expect-digest 438164c0429d7fa3 --expect-digest0 a0062bb5569e06d3`), on the commit that adds this section: (recorded by the commit after it).
+* **Not run**: the Mac steps (`--no-mac`); `keep_h2h` with a real checkpoint (the GPU serves the live run; the
+  tiny-network run of both arms is in pytest).
+
+### 141.6 Open points, other lanes
+
+* **141.4's decision** (game 3 and game 2's reveals): options A-D above; nothing changes until the user picks one.
+  Lane A1 (140, branch `fix/deck-posterior` e77910ce) makes `DeckWant::shown` "the cards of this deck the viewer saw"
+  and every prior's sample the exact posterior given them (`seen_weight`): with it, today's game-3 request - the
+  cards game 3 showed of the game-3 deck - is the exact posterior under the approved independence (option A), with no
+  change in this lane's dealing path; B-D would call that API with the extra terms (D: a deck seen in two games is
+  `seen_weight` of both sets). `git merge-tree` of this branch with e77910ce: no conflict (A1 left
+  `hidden_decks.rs` 433-513 alone; this lane's edits there are the keeper's early return and the observer).
+* **Not this lane's**: the review's I5 (the K-sample deal's request key holds no game number, so game 2's and game 3's
+  first deals and a first sideboarder's choice share one set of 32 decks), the `auto_single` tree-reuse leak (lane H,
+  149: its information-set-merging remedy relies on 141.1), I2 and I4 (lane G's fuzz holes, 148; 141.2's block is
+  separate from them), B4 / B5 of hidden.md.
+* **`keep_known` in a run spec**: like `keep_deck` (130.8), an evaluation setting; nothing refuses it in self-play
+  (lane F's spec validation, 147, may).
