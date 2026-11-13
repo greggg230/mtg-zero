@@ -2143,6 +2143,11 @@ pub struct CardDb {
     /// (`EoeW2::EventObjControllerGainsSource`): the game keeps it
     /// (`Game::lki_toughness`; ENGINE.md 99.12).
     pub(crate) watch_lki_controller: bool,
+    /// The table's positional graveyard readers (R17, ENGINE.md 125), found
+    /// by the build's check over the final definitions and kept here: every
+    /// v7 row reads them (`lower::graveyard_order::readers`), which a cache
+    /// behind a process-wide lock served before (ENGINE.md 145).
+    pub(crate) gy_readers: Vec<crate::lower::graveyard_order::Reader>,
 }
 
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
@@ -2408,8 +2413,9 @@ impl CardDb {
         }
         db.w6 = crate::eoe_w6::W6Db::of(&db.defs);
         db.w6.kept = kept;
-        // R17 (ENGINE.md 125): no card reads a graveyard order the layout leaves out.
-        crate::lower::graveyard_order::check(&db);
+        // R17 (ENGINE.md 125): no card reads a graveyard order the layout leaves out; the
+        // readers it can encode are the table's (ENGINE.md 145).
+        db.gy_readers = crate::lower::graveyard_order::check_table(&db);
         db
     }
 
@@ -2568,7 +2574,9 @@ impl CardDb {
     }
 
     /// A definition to change, for the engine's unit tests that build a card
-    /// no lowering makes yet (`pay::tests`, ENGINE.md 100.4.5).
+    /// no lowering makes yet (`pay::tests`, ENGINE.md 100.4.5). (The table's
+    /// graveyard readers were found at the build: a change to a program's
+    /// positional graveyard reader would need them found again.)
     #[cfg(test)]
     pub(crate) fn def_mut(&mut self, id: DefId) -> &mut CardDef {
         &mut self.defs[id as usize]

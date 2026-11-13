@@ -10,6 +10,11 @@ use engine::{Game, GameSpec};
 use std::hint::black_box;
 use std::time::Instant;
 
+// The Python module's allocator (py/Cargo.toml), not the Windows heap: allocation-heavy parts measured as a run
+// sees them (ENGINE.md 145; numbers in sections before it were taken on the system heap).
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn decks(seed: u64) -> (Vec<u16>, Vec<u16>) {
     let db = common::db();
     let mut rng = Rng::new(seed ^ 0xDEC5);

@@ -29684,6 +29684,97 @@ change, no engine change, **digests EQUAL** (nothing the engine plays or encodes
 * Digests EQUAL (no engine or Rust change; not re-run). No 20k fuzz (no engine change). Not run: the Mac steps
   (`--no-mac`).
 
+## 145. Performance fixes of the 2026-11-12 review: the graveyard readers without a lock, the driver benchmark, tail rows scanned at encode, the phase's time split (branch `perf/fable-1112`; zero-core `perf/fable-1112`)
+
+The 2026-11-12 Fable review's performance slice (`E:\mtg-zero-scratch\fable-review-2026-11-12\perf.md`) measured
+zero-core's driver on the live run's spec and seat with an instantaneous evaluator. This section lands its
+behaviour-preserving fixes that are not the deck posteriors' (P1 and P4 are lane A1's, section 140). Every part keeps
+behaviour: the engine digests are EQUAL to `engine/tests/data/digests.txt` and the driver hash (145.2) is EQUAL.
+
+### 145.1 The table's graveyard readers, without a process-wide lock
+
+Every v7 row's `graveyard_order` segment (125) and the public-state probe read the table's positional graveyard
+readers through `lower::graveyard_order::readers`, a cache keyed by the table's address behind a global `Mutex`: one
+lock per row encode on every search thread (8-16 of them in self-play). The readers are now found once, by the table's
+build check over its final definitions (`check_table`, which replaces `check`: the same `check_defs` over the same
+definitions in id order, the same loud failure), and kept in the table (`CardDb::gy_readers`); `readers(db)` returns
+them. No lock, no interior mutability (the table is immutable after its build; the two test tables that change a
+definition afterwards, `pay::tests`, add mana abilities, which no reader reads). Tests: `v7_tails::r17_the_graveyard_order_check`
+(the cube's and constructed tables' one reader, EoE's none, a reader by colour refused) and every v7 encoding test.
+
+### 145.2 The driver benchmark (`engine/tests/driver_bench.rs`), and benchmarks on mimalloc
+
+The review's harness, committed: `drv` runs zero-core's `Driver<MtgAz>` on the live run's spec
+(`tests/data/driver_bench_spec.json`: constructed Delver Bo3, `game_episodes`, `start_game` 2) and its self-play seat
+(64 / 16 / 4 simulations, cq target, eval cache 8192, root-view leaves, view samples 0.5, hand and deck tilts 1 with mix
+0.25, resignation), sparse batches, the auxiliary targets, rolling, against an instantaneous evaluator. With `MAXBATCH`
+it does fixed work and hashes every batch (sparse rows, options, tails, overrides, game ids), every sample (non-zero
+features, targets, options, overrides) and every result: **the driver hash**, the behaviour check for what `digest.rs`
+cannot see (the driver, the belief and deck deals, the constructed prior, the eval cache, the records); it does not
+depend on the thread count. It prints the steady window's leaves/s and thread-us per simulation and the process's peak
+working set. `padding` is the census of the token graphs' padding behind zero-core `infer_token_chunks` (az.md 43.11).
+`--ignored`; the module docs list the settings.
+
+The reference hash: `MAXBATCH=40000 CONC=48 GROUPS=2 THREADS=8` -> `f8cfeb414c6c3322` (40,000 batches, 1,121,156
+simulations, 5,719 samples, 21 results; the review's value, re-run on 267ae603 for this section).
+
+The review found the benchmarks built as tests running on the Windows heap while `mtgz._engine` runs on mimalloc
+(py/Cargo.toml): the same driver run is 92 us per simulation on the system heap against 67 with mimalloc, `decide` 489
+against 59 us. `driver_bench`, `perf` and `measure_delver` now run on mimalloc (`mimalloc` a dev-dependency of the
+engine, `#[global_allocator]` in each). Numbers in sections before this one (17 onwards) were taken on the system heap
+and overstate allocation-heavy parts.
+
+### 145.3 zero-core e5e1bb0 -> perf/fable-1112 without P5: tail rows scanned at encode (P2), the phase's time split
+
+Three zero-core commits (zero-core docs/az.md 48.1, 48.2 - numbered 44.1, 44.2 on `perf/fable-1112` and in its commit
+messages, renumbered 48 in zero-core `integrate/fable-1112` because the AMD branches use 44-46: ea023c0, fe30d26,
+c275a1e), behaviour-preserving:
+
+* **P2** (zero-core `driver.rs`, `LeafBuf::encode_row`): layout v7's tails had switched this game's rows off the sparse
+  path of section 89 - a sparse buffer kept an `encode_row` row dense until `seal`, so the eval cache's key hashed all
+  56,384 floats and a cached row zeroed them again. The row's non-zeros are now taken at once (`sparse_scan` after
+  `encode_row`), as `encode_sparse`'s are. The review measured key 5.46 -> 1.15 us a row, seal / un-row 4.33 -> ~0.
+* **Timing metrics** (zero-core `run.py`, `infer.py`): each self-play phase writes `selfplay.timing` - the search
+  threads' busy seconds and share, batch assembly, the driving thread's wait for searches and its share, the
+  evaluator's share and its CUDA graphs' launch / result seconds - so a phase at 32k leaves/s (the live run) against
+  43.12's 61k can say what it waited for (the review's bug 4). Its test found `infer_s` counted twice for batches
+  evaluated at once in drive's pipelined loop (eager evaluators: the toy smoke's `infer_share` 1.6, this repo's
+  mtg-smoke 1.8); c275a1e counts it once. The CUDA graphs' path, this game's runs, was right.
+
+**Checks.** The driver hash is EQUAL: `f8cfeb414c6c3322` at 48 games (40,000 batches) and `23bfcec6e4a37c6e` at 256
+games in flight (`MAXBATCH=12000 CONC=256 GROUPS=2 THREADS=8`: ~1.75M simulations - the counter also counts the
+searches in flight when the run stops - and 15,590 records), the same in all six A/B runs below. Engine digests: 145.5.
+
+**Measured** (fixed work, `MAXBATCH=12000 CONC=256 GROUPS=2 THREADS=8`, interleaved pairs on 267ae603 and this commit,
+desktop 2026-11-13; the CPU shared with the live run and other lanes' builds and suites, so absolute numbers are ~40%
+above the review's quiet ones and only the pairs compare):
+
+| pair | 267ae603: wall, search thread us/sim | P2 + the readers fix: wall, us/sim |
+|---|---|---|
+| 1 | 21.8 s, 93.1 | 22.1 s, 88.0 |
+| 2 | 22.8 s, 97.2 | 22.9 s, 88.6 |
+| 3 | 25.2 s, 98.7 | 22.5 s, 90.0 |
+
+Mean 96.3 -> 88.9 us per simulation (-7.7%) for P2 and 145.1 together. Peak working set unchanged (5.84-5.97 GB:
+the records still hold dense rows; P5, after this commit, changes that).
+
+### 145.5 Checks
+
+**Without P5** (zero-core fe30d26, then c275a1e: a Python metrics fix on top, no Rust change): engine digests EQUAL to
+`engine/tests/data/digests.txt` (combined `438164c0429d7fa3`); the full engine suite (`cargo test --release -p engine`:
+2,534 passed, 0 failed); zero-core `cargo test --release` 180 passed (183 with zero_webnet's); `FUZZ_GAMES=20000 cargo
+test --release -p engine --test fuzz`: 4 passed (3,740 s on the shared CPU); the driver hash EQUAL (145.3).
+`tools/gate.py search-core --no-mac` on 2f40ede5 (fe30d26): build, zero-core cargo test (183), this repo's pytest (323
+passed, 1 skipped) PASS; `check_checkpoint_compat --net random` FAILED on the baseline side (267ae603) as on this one:
+zero-core `tools/selfplay_digest.py` builds an MLP for `--net random`, which `NetEvaluator` refuses for v7's `mtg` (a
+game with tail segments, az.md 43.8) - a gap of the tool since layout v7, not of this change. The rest of the gate's
+recipe by hand: `check_checkpoint_compat --net uniform` (the same games, samples and results digests, both target
+kinds and the match against the random bot) **identical**; the 4-config search smoke (random, eval, match, nomull) 0
+failed; the mtg-smoke run-loop smoke (iterations [0, 1], 16 games, 0 unfinished); zero-core's build and pytest: 579
+passed, 3 failed - the new timing test and the shared queue's (`infer_share` > 1: the double count above) and
+`test_select_scale` (it compares two runs' metrics without timing keys, and `timing` was not one) - all three pass on
+c275a1e.
+
 ## 153. Best-of-three replays, the publisher and the sideboard census on layout v7: `delverai-bo3` (131, 132) merged into main (branch `delverai-bo3-v7`, 2026-11-12)
 
 Branch `delverai-bo3-v7` from main 267ae603 (layout v7, 125.12) with `delverai-bo3` 4ac6ebd3 (131, 132) merged in as a

@@ -25,8 +25,6 @@
 //! cube's one reader; a synthetic reader by colour, which Painter's Servant changes in a graveyard,
 //! fails).
 
-use std::sync::{Mutex, OnceLock};
-
 use crate::db::{ActEffect, CardDb, CardDef, Filter};
 use crate::ids::DefId;
 
@@ -110,24 +108,17 @@ pub fn check_defs<'a>(defs: impl Iterator<Item = (DefId, &'a CardDef)>) -> Resul
     }
 }
 
-/// The table's build check (R17): a loud failure naming the cards.
-pub fn check(db: &CardDb) {
-    if let Err(e) = check_defs((0..db.len() as DefId).map(|i| (i, db.def(i)))) {
-        panic!("{e}");
-    }
+/// The table's build check (R17), over its final definitions: its positional graveyard readers,
+/// or a loud failure naming the cards.
+pub fn check_table(db: &CardDb) -> Vec<Reader> {
+    check_defs((0..db.len() as DefId).map(|i| (i, db.def(i)))).unwrap_or_else(|e| panic!("{e}"))
 }
 
-/// The positional graveyard readers of table `db` (cached per table).
-pub fn readers(db: &'static CardDb) -> &'static [Reader] {
-    static CACHE: OnceLock<Mutex<Vec<(usize, &'static [Reader])>>> = OnceLock::new();
-    let key = db as *const CardDb as usize;
-    let mut v = CACHE.get_or_init(|| Mutex::new(Vec::new())).lock().unwrap();
-    if let Some(&(_, r)) = v.iter().find(|(k, _)| *k == key) {
-        return r;
-    }
-    let r: &'static [Reader] = Box::leak(check_defs((0..db.len() as DefId).map(|i| (i, db.def(i)))).unwrap_or_else(|e| panic!("{e}")).into_boxed_slice());
-    v.push((key, r));
-    r
+/// The positional graveyard readers of table `db`: found once by its build (`check_table`) and kept
+/// in the table, so a row's encoding reads them without a lock (ENGINE.md 145; before, a cache
+/// behind a process-wide `Mutex` was locked by every v7 row of every search thread).
+pub fn readers(db: &CardDb) -> &[Reader] {
+    &db.gy_readers
 }
 
 // ---- the IR, classified (generated from the enums, then each reader named by hand) ----------
