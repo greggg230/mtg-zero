@@ -352,6 +352,33 @@ fn the_table_prior_is_the_posterior_of_the_cards_the_viewer_saw() {
     assert!((mt - held).abs() > 6.0 * st, "the test cannot tell the posterior of the sightings from the indicator's");
 }
 
+/// The table prior under a revealed Lutri (CR 702.139a; "each nonland card in your starting deck has a different
+/// name"): the spells are a uniform subset of the names, the lands independent draws - each group whole, so R plus
+/// the fill is still the posterior of the sightings (ENGINE.md 140) and the prior's guard against a group it would
+/// only partly limit stays quiet. Every sample keeps one copy per nonland name and holds the seen cards.
+#[test]
+fn the_table_prior_under_lutri_keeps_its_groups_whole() {
+    let cube = CardDb::cube();
+    let lutri = cube.id("Lutri, the Spellchaser").unwrap();
+    let p = TablePrior::of(cube);
+    let spells: Vec<u16> = p.support().iter().copied().filter(|&d| !cube.def(d).is(engine::db::types::LAND) && d != lutri).collect();
+    let mut rng = Rng::new(0x1A7);
+    for case in 0..200 {
+        let mut shown: Vec<u16> = (0..case % 9).map(|i| spells[(case * 37 + i * 101) % spells.len()]).collect();
+        shown.sort_unstable();
+        shown.dedup();
+        let want = DeckWant { db: cube, n: 40, shown: &shown, companion: Some(lutri), tilt: None, pick: None };
+        let s = p.sample(&want, &mut rng);
+        check_sample(&*p, &want, &s).unwrap();
+        let mut names: Vec<&str> = s.deck.iter().filter(|&&d| !cube.def(d).is(engine::db::types::LAND)).map(|&d| cube.def(d).name.as_str()).collect();
+        let n = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), n, "a nonland name twice under Lutri");
+        assert_eq!(s.sideboard, vec![lutri]);
+    }
+}
+
 /// The cost of a new request of the constructed prior (ENGINE.md 140; ignored: a measurement): the K = 32 decks of
 /// `DealCache::decks` (a fresh cache each time), against K separate samples (the deal before ENGINE.md 140's one table
 /// a request), for no shown card and for a game-2 position's twelve.
