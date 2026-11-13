@@ -29603,3 +29603,31 @@ held by the world) weigh nothing (an indicator); 140 weighed them as seen.
   a find does not change the deal of the hand (both the user's model as approved).
 * **For lane A2**: `DeckWant` gained `seen` (A2's literals need it: `seen: None`, or the request's sightings); a game-3
   deal conditioned on game 2 would pass game 2's sightings with game 2's R.
+
+### 140.10 The fuzz's hidden-decklist checks and a companion shuffled away (X2, X4 of the rule-invariant campaign)
+
+The rule-invariant fuzz campaign (branch `fuzz-invariants`, `docs/rules_check_findings.md`) found on 267ae603's own
+binary, with `FUZZ_HIDDEN_DECKS=1`: X2, "the viewer's own cards" changed in a world (seeds 2,679, 3,191, 3,279, 5,095,
+6,247, 7,943; "def 234 dealt as 259", "280 as 259"), and X4, "the sampled deck lacks a shown" card (3,671 Bejeweled
+Warg, 9,671 Multiversal Passage); X6, "the match's deck of the opponent", is the same check family. On this branch
+the posterior of 140 deals other worlds, the fuzz's generator (which also picks the game's random moves after a
+checkpoint's world walks) diverges, and those seeds play other games and pass; seed 331 failed X2 here instead.
+
+**The cause: the checks, not the deal.** Seed 331 (a diagnostic, not kept): every object of P0's deck that changed
+in P0's world was a library card P0 does not know, and the multiset changed by one card - Lutri, the Spellchaser
+(def 259, the campaign's "dealt as 259") in, Mana Drain out. P0's companion Lutri had been put into the hand (CR
+702.139a's special action) and shuffled into the library: its object, outside the deck's objects, is one of P0's
+hidden cards, and P0's own deal (`Game::determinize`, the library's order unknown to its owner) shuffles identities
+over all of them - so Lutri's identity went to a deck object and Mana Drain's to the companion's object. The other
+player's deal does the same by design (`extras` are dealt with the deck, 102.1): which hidden card is the companion
+is hidden, and fixing its identity to its object would show where it lies. The game's cards as a multiset (the
+deck's objects and the companion's, `sample::game_cards`) never change; the fuzz's `hd_deck` compared the deck's
+objects alone. X4 is the same from the other side: the opponent's shown card (a Warg) dealt to their companion's
+object, so the deck's objects lacked it; X6 likewise (the match's deck against the deck's objects).
+
+**The fix** (`engine/tests/fuzz.rs`): `hd_deck` is the player's game cards less one copy of the revealed companion -
+the deck as dealt, whichever object holds the companion card; every check that used it (the viewer's own cards, the
+opponent's deck against the match's, the shown cards held, the constructed world's checks) compares that.
+**Regression test**: `hidden_decklist_worlds_keep_the_deck_whatever_object_holds_the_companion` replays seed 331 and
+the campaign's X2, X4 and X6 seeds (2,679, 3,191, 3,279, 3,671, 5,095, 6,247, 6,375, 6,419, 7,943, 9,671) with every
+check of `play_hidden` (the default pool). The engine is unchanged: no digest moves.

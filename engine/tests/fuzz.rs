@@ -2402,6 +2402,24 @@ fn check_information_set(g: &Game, viewer: u8, seed: u64, rng: &mut Rng) {
     }
 }
 
+/// ENGINE.md 140.10: the hidden-decklist games whose checks compared the deck's objects alone (a companion put into
+/// the hand and shuffled away traded identities with a deck card in a world: "the viewer's own cards", "the match's
+/// deck of the opponent", "the sampled deck lacks a shown ..."), replayed with every check of `play_hidden`: seed 331
+/// (this branch's worlds), 2679, 3191, 3279, 3671, 5095, 6247, 6375, 6419, 7943 and 9671 (the rule-invariant
+/// campaign's on 267ae603). The default pool only (the seeds are its games).
+#[test]
+fn hidden_decklist_worlds_keep_the_deck_whatever_object_holds_the_companion() {
+    if pool_mode() != PoolMode::Default || sealed_mode() {
+        return;
+    }
+    for seed in [331u64, 2679, 3191, 3279, 3671, 5095, 6247, 6375, 6419, 7943, 9671] {
+        std::panic::catch_unwind(|| {
+            play_hidden(seed);
+        })
+        .unwrap_or_else(|e| panic!("hidden-decklist seed {seed} failed (rerun: FUZZ_HIDDEN_DECKS=1 FUZZ_FIRST={seed} FUZZ_GAMES=1): {e:?}"));
+    }
+}
+
 #[test]
 fn fuzz_random_games() {
     let n: u64 = std::env::var("FUZZ_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
@@ -3572,14 +3590,18 @@ fn az_legal(a: &engine::az::MtgAz) -> Vec<u16> {
     l
 }
 
-/// Player `p`'s starting deck's cards (sorted card definitions; the game's objects are the two
-/// decks first, P0's then P1's).
+/// Player `p`'s starting deck's cards (sorted card definitions): their game's cards (`sample::game_cards`: the
+/// deck's objects, the two decks first, P0's then P1's, and a revealed companion's) less one copy of the revealed
+/// companion. (A companion put into the hand and shuffled away is one of its owner's hidden cards: a deal - the
+/// owner's own `determinize`, the other player's redeal of the extras with the deck - may give its identity to a
+/// deck object and a deck card's to the companion's object: which of the hidden cards it is, is hidden (fixing it to
+/// its object would show where it lies); the deck is the multiset either way. ENGINE.md 140.10: comparing the deck's objects alone failed there.)
 fn hd_deck(a: &engine::az::MtgAz, p: u8) -> Vec<u16> {
-    let n0: usize = a.m.decks[0].iter().map(|&c| c as usize).sum();
-    let n1: usize = a.m.decks[1].iter().map(|&c| c as usize).sum();
-    let r = if p == 0 { 0..n0 } else { n0..n0 + n1 };
-    let mut v: Vec<u16> = r.map(|i| engine::az::sample::card_of(&a.g, engine::CardIdx::new(i as u32))).collect();
-    v.sort_unstable();
+    let mut v = engine::az::sample::game_cards(a, p);
+    if let Some(c) = a.g.player(p).companion_def {
+        let i = v.binary_search(&c).unwrap_or_else(|_| panic!("P{p}'s companion is not among their game's cards"));
+        v.remove(i);
+    }
     v
 }
 
