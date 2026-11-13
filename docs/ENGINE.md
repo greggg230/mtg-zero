@@ -26437,6 +26437,8 @@ stand-in: 49 play, 82 trainer, 17 off, 0 unsupported, 0 unknown.
 
 **Fuzz build.** `tools/farm_build.py --profile fuzz --publish`: **2d17125b94e33bc57c06a127** (`mtg-4c02f8a-fuzz`, kinds [fuzz]) on farm.greggg230.com; its modes: `delver-games` {FUZZ_POOL: delver}, `delver-matches` {FUZZ_POOL: delver} (+ optional FUZZ_DECK_TILT), `delver_sb-games` {FUZZ_POOL: delver_sb}.
 
+**After the GPU merge** (9b95bfda: sessions from zero-core's `create_session` / `build_evaluator`, ENGINE.md 114.6): `tools/farm_gates.py` on the best-of-three stand-in passed again (gate 2: 2,317 rows, 200 batches byte-identical; gate 3: 2,730 rows, 13 of 13 arrays identical) and the eval equivalence gate (zero-core tools/worker_eval_gate.py, eoe1 80 v 70, seed 31, groups 1) 20 of 20 rows and 50 batches identical. **Release build** (`tools/farm_build.py --profile release --runtime-id c4c4bb776d7f886f5e13474e --publish` at 9b95bfda): **e8063b3cb106b01b72ab3dd3** (`mtg-9b95bfd-release`: records, the session factory). The local end to end (zero-farm-notes phase3-selfplay.md): a delver-bo3-smoke run on the CPU with `selfplay_remote pool:e2e-bo3` and two headless agents - its iteration 2 played entirely by the farm (8 matches, 3,063 rows, 0 records refused).
+
 ## 120. Constructed best-of-three: the Delver mirror's sideboarding and hidden 60s (branch `delver-bo3`, 2026-11-11)
 
 Branch `delver-bo3` (from main 60397f3; zero-core pinned at f9ca5c3, unchanged). DESIGN.md 8's D3 but the five
