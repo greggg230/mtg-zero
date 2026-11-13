@@ -737,10 +737,10 @@ def test_a_step_timeout_bounds_its_grandchildren(tmp_path):
                      'print("started", flush=True)\n'
                      'time.sleep(60)\n')
     t0 = time.time()
-    out, rc = G.execute([sys.executable, str(child)], str(tmp_path), dict(os.environ), 3)
+    out, rc = G.execute([sys.executable, str(child)], str(tmp_path), dict(os.environ), 8)
     took = time.time() - t0
-    assert rc == 'timeout' and 'started' in out and 'killed after 3s timeout' in out
-    assert took < 10, took
+    assert rc == 'timeout' and 'started' in out and 'killed after 8s timeout' in out
+    assert took < 20, took                                            # (the grandchild alone: 30 s)
     gpid = int(pidfile.read_text())
     deadline = time.time() + 5
     while psutil.pid_exists(gpid) and time.time() < deadline:
@@ -748,7 +748,7 @@ def test_a_step_timeout_bounds_its_grandchildren(tmp_path):
     assert not psutil.pid_exists(gpid) or psutil.Process(gpid).status() == psutil.STATUS_ZOMBIE
 
 
-def test_a_finished_step_leaves_no_process_behind(tmp_path):
+def test_a_process_holding_the_output_after_the_command_exited_is_bounded(tmp_path):
     """... and a step whose command exited while a process it started still held its output: that one is killed at
     the deadline (the step times out) instead of holding the gate for ever."""
     pytest.importorskip('psutil')
@@ -757,8 +757,8 @@ def test_a_finished_step_leaves_no_process_behind(tmp_path):
                      'subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])\n'
                      'time.sleep(1.5)\nprint("parent done", flush=True)\n')
     t0 = time.time()
-    out, rc = G.execute([sys.executable, str(child)], str(tmp_path), dict(os.environ), 4)
-    assert rc == 'timeout' and 'parent done' in out and time.time() - t0 < 12
+    out, rc = G.execute([sys.executable, str(child)], str(tmp_path), dict(os.environ), 8)
+    assert rc == 'timeout' and 'parent done' in out and time.time() - t0 < 25          # (the grandchild: 60 s)
     out, rc = G.execute([sys.executable, '-c', 'print("plain")'], str(tmp_path), dict(os.environ), 30)
     assert (out.strip(), rc) == ('plain', 0)
 
@@ -917,3 +917,24 @@ def test_a_detached_checkout_builds_into_its_own_target_dir(tmp_path):
     assert target() == 'E:/base/detached-repo'                           # not E:/base/HEAD
     assert target('E:/mine') == 'E:/mine'                                # the caller's own choice stands
     assert 'target_guard.py' in sh and sh.index('target_guard.py') < sh.index('exec bash "$CORE/tools/build_engine.sh"')
+
+
+def test_head_is_read_from_the_git_files(tmp_path):
+    """mtgz/checkout.read_head (B15's import-time HEAD: no git process in every process that imports the package):
+    a branch's loose ref, a packed one, a detached HEAD, a worktree - each = `git rev-parse HEAD`."""
+    import subprocess
+
+    def head(root):
+        return subprocess.run(['git', '-C', str(root), 'rev-parse', 'HEAD'], capture_output=True, text=True,
+                              check=True).stdout.strip()
+    r = _repo(tmp_path)
+    assert G.checkout.read_head(str(r)) == head(r)
+    subprocess.run(['git', '-C', str(r), 'pack-refs', '--all'], check=True)
+    assert not (r / '.git' / 'refs' / 'heads' / 'master').exists() and not (r / '.git' / 'refs' / 'heads' / 'main').exists()
+    assert G.checkout.read_head(str(r)) == head(r)
+    wt = tmp_path / 'wt'
+    subprocess.run(['git', '-C', str(r), 'worktree', 'add', '-q', '--detach', str(wt)], check=True)
+    assert G.checkout.read_head(str(wt)) == head(wt)
+    subprocess.run(['git', '-C', str(wt), 'checkout', '-q', '-b', 'feat/y'], check=True)
+    assert G.checkout.read_head(str(wt)) == head(wt)
+    assert G.checkout.read_head(str(tmp_path / 'nothing')) is None

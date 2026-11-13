@@ -36,8 +36,7 @@ ad-hoc shell script. It can never pass a check it did not perform:
     commit and its report gates/<sha12>-suite.json is the evidence the engine tier checks (tier,
     sha, pin, a clean pass, the fuzz's 20,000 games, every log unchanged); without it the engine
     tier refuses unless --allow-skip suite-evidence, named in the final line.
-  * **A timeout bounds the step** - the command and every process it started (tools/proctree.py);
-    what is left of a step's process tree when it ends is killed.
+  * **A timeout bounds the step** - the command and every process it started (tools/proctree.py).
   * **The core's own suite** (search-core, optin-core): zero-core's engine module built with its
     tools/build_py.sh, then its pytest as its own step ("core pytest"). If the ONLY failures are in
     tests/test_remoteplay.py (it times real threads: zero-core AGENTS.md), each failed test is
@@ -645,8 +644,8 @@ def execute(argv, cwd, env, timeout):
     """Run one command -> (its stdout + stderr as text, its exit code or 'timeout'). stdin is closed (a
     command that reads it gets EOF instead of hanging or reading ours). The timeout bounds the command AND
     its descendants (tools/proctree.py: subprocess.run's killed only bash, then waited for the grandchild that
-    held the pipe - ENGINE.md 143); what is left of the tree when the step ends is killed. Module-level so
-    tests stub it."""
+    held the pipe - ENGINE.md 143); a descendant still holding the output after the command exited is killed at
+    the deadline. Module-level so tests stub it."""
     out, _, rc = proctree.run(argv, cwd=cwd, env=env, timeout=timeout, creationflags=child_priority() if WIN else 0)
     if rc == 'timeout':
         out += f'\n[gate.py: killed after {timeout}s timeout, with every process it started]\n'

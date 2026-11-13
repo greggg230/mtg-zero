@@ -295,6 +295,8 @@ def test_verify_home_wants_the_optimizer_state_of_the_newest_checkpoint(tmp_path
     (run / 'models' / 'best.pt').write_bytes(b'ckpt 100')
     (run / 'models' / 'index.json').write_text(json.dumps({'best': {'file': 'iter_0100.pt'}}))
     mine = {p: vast.sha256_file(str(run / p)) for p in ('models/opt_latest.pt', 'models/best.pt')}
+    box_files = {'models/opt_latest.pt': (1, 1.0), 'models/best.pt': (1, 1.0)}
+    monkeypatch.setattr(vast, 'remote_listing', lambda name, rd: dict(box_files))
     monkeypatch.setattr(vast, 'remote_hashes', lambda name, rd, paths: {p: mine[p] for p in paths})
     with pytest.raises(SystemExit, match='iteration 99, the newest checkpoint is 100'):
         vast.verify_home('box', str(run), '/r')
@@ -309,6 +311,13 @@ def test_verify_home_wants_the_optimizer_state_of_the_newest_checkpoint(tmp_path
     monkeypatch.setattr(vast, 'remote_hashes', lambda name, rd, paths: {p: '0' * 64 for p in paths})
     with pytest.raises(SystemExit, match="is not the box's"):
         vast.verify_home('box', str(run), '/r')
+    # a file the box does not have (no evaluation wrote a best.pt there) is not asked for
+    (run / 'models' / 'best.pt').write_bytes(b'ckpt 100')
+    del box_files['models/best.pt']
+    asked = []
+    monkeypatch.setattr(vast, 'remote_hashes', lambda name, rd, paths: asked.extend(paths) or {p: mine[p] for p in paths})
+    vast.verify_home('box', str(run), '/r')
+    assert asked == ['models/opt_latest.pt']
 
 
 def test_an_unreadable_marker_does_not_end_the_mirror(tmp_path, monkeypatch):

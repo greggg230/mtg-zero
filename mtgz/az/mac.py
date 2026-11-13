@@ -45,7 +45,8 @@ STAMP = 'mtgz-engine-commit'            # in the checkout's git dir: the commit 
 
 
 def _git(root, *args):
-    return subprocess.run(['git', '-C', root, *args], capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(['git', '-C', root, *args], capture_output=True, text=True, check=True,
+                          creationflags=checkout.NO_WINDOW).stdout.strip()
 
 
 def checkout_state(root):
@@ -56,7 +57,12 @@ def checkout_state(root):
 
 def _imported_head():
     """HEAD of this checkout when this module was imported - the commit of the code this process runs (a run
-    imports mtgz.az, and so this module, at its start). None outside a git checkout."""
+    imports mtgz.az, and so this module, at its start). Read from the git files (checkout.read_head: every process
+    that imports the package does this, and a git child of a console-less process would open a window); git itself
+    only when they cannot tell. None outside a git checkout."""
+    head = checkout.read_head(ROOT)
+    if head:
+        return head
     try:
         return _git(ROOT, 'rev-parse', 'HEAD')
     except (OSError, subprocess.CalledProcessError):

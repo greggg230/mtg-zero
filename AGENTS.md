@@ -80,13 +80,15 @@ the agent tested) are required; a step you skip on purpose (`--allow-skip <step>
 | docs, or tools not on the run path | `docs` |
 | Python run loop, settings, presets | `python` |
 | encoding only, layout unchanged | `encoding` |
-| engine rules or cards | `engine` (plus the 20k fuzz above, run by you) |
+| engine rules or cards | `suite` on your branch's commit (the full engine suite + the 20k fuzz above; its report `gates/<sha12>-suite.json` is the evidence), then `engine --tested-sha <that sha>` |
 | zero-core search or behaviour | `search-core` |
 | an opt-in zero-core feature, defaults byte-identical | `optin-core` |
 | moving a run onto an already-verified commit | `repin` |
 
-Don't re-run a full suite on a sha that already passed it. Say which tier ran in your merge
-note or PR.
+Don't re-run a full suite on a sha that already passed it: each tier writes `gates/<sha12>-<tier>.json`
+(`docs/ENGINE.md` 143). The checkout must be exactly its commit: an untracked file under `engine/`,
+`mtgz/`, `tests/`, `tools/`, `data/`, ... refuses the gate like an uncommitted change. Say which tier
+ran in your merge note or PR.
 
 ## Documenting a change
 

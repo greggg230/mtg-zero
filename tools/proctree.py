@@ -8,8 +8,9 @@ build held the gate (and the CPU) until someone killed the tree by hand. Here:
 * the output is read by threads, never by the waiting thread;
 * every descendant seen while the command runs (polled each second) is remembered with its creation time;
 * at the timeout the whole tree is killed (the descendants first, then the command), and a descendant that still
-  holds the pipe after the command exited is killed when the deadline passes;
-* descendants still alive when the command ends are killed too (a finished step leaves no orphan pool behind).
+  holds the pipe after the command exited is killed when the deadline passes (the call then reports a timeout);
+* a step that ends cleanly leaves its descendants alone, and a shared per-user server a build may start (MSVC's
+  mspdbsrv, which other checkouts' concurrent builds use too) is never killed.
 
 Used by tools/gate.py (every step) and tools/search_smoke.py (each configuration's process). Needs psutil (a
 dependency of the repo: AGENTS.md).
@@ -17,6 +18,8 @@ dependency of the repo: AGENTS.md).
 import subprocess
 import threading
 import time
+
+NEVER_KILL = ('mspdbsrv.exe', 'mspdbsrv')      # shared by every build of the user, not this step's
 
 
 def _reader(pipe, sink):
@@ -49,7 +52,7 @@ def _kill(psutil, seen, root=None):
     for pid, created in list(seen.items()):
         try:
             p = psutil.Process(pid)
-            if abs(p.create_time() - created) < 1e-3:
+            if abs(p.create_time() - created) < 1e-3 and p.name().lower() not in NEVER_KILL:
                 p.kill()
                 killed += 1
         except psutil.Error:
@@ -100,7 +103,6 @@ def run(argv, cwd=None, env=None, timeout=None, merge=True, creationflags=0, pol
                 t.join(10)
                 rc = 'timeout'
                 break
-    _kill(psutil, seen)                    # what is left of the tree (a step leaves no orphans behind)
     for t, pipe in zip(readers, (p.stdout, p.stderr)):
         # (a reader still blocked holds the pipe's lock: closing it would block this thread too - left to exit)
         if not t.is_alive():

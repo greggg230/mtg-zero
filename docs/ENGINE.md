@@ -14755,9 +14755,9 @@ manages a worktree itself, the same contract as `tools/build_py.sh` and `tools/s
 `--sha` labels the report and fails loudly if it does not match the checkout's HEAD (never silently
 gates the wrong commit).
 
-**Report** (`gates/<sha>.json`, one per sha - the normal workflow gates a given commit with
-exactly one tier, so the file name is keyed by sha alone; re-running a different tier against the
-same sha for a check, as this section's own verification did, overwrites it): sha, the zero-core
+**Report** (`gates/<sha12>-<tier>.json` since 143 - it was `gates/<sha>.json`, one per sha, and a
+later tier on the same sha overwrote the earlier one's report, a docs pass an engine report: the Fable
+review's B10; corrected in 143): sha, the zero-core
 pin, the tier, the digests seen, test counts per binary, each step's command, cwd, seconds, log
 path and its sha256, pass/fail and the reason, and the cargo target dir. Logs: `gates/logs/`.
 
@@ -17505,7 +17505,8 @@ Scanning gate.py for more found the ones in 91.6.
 | docs | - | - |
 | python | - | `--allow-skip build` (the build step is new, 91.6) |
 | encoding | `--expect-digest`, `--expect-digest0`, `--checkpoint` | `--record-digest full` / `encoding-free` (91.2), `--allow-skip checkpoint-load` |
-| engine | `--expect-digest`, `--expect-digest0`, `--tested-sha` | `--record-digest ...`; `--no-mac` or `--allow-skip mac-recheck` |
+| suite (143) | - | none |
+| engine | `--expect-digest`, `--expect-digest0`, `--tested-sha`; since 143 the tested sha's `suite` report (`--suite-report`, default `gates/<sha12>-suite.json`) | `--record-digest ...`; `--no-mac` or `--allow-skip mac-recheck`; `--allow-skip suite-evidence` (143) |
 | search-core | `--baseline-root` | `--allow-skip checkpoint-compat` |
 | optin-core | `--baseline-root` | `--allow-skip checkpoint-compat` |
 | repin | `--expect-digest`, `--spec`, `--preset` | none (`--no-mac` skips `mac-eval-checkout`) |
@@ -17965,6 +17966,10 @@ zero-core; mtg-zero had one remote, the hard-wired `'mac'`.
   stop|pause|resume|tail`, `run-home NAME RUN` (marks the run homing so a sync loop ends and waits for it, STOP on the
   box, waits for the run's iteration to end, full pull, restores the desktop's paths and remote settings, removes its
   PAUSE, leaves STOP: relaunch as usual).
+  **Corrected in 143:** "changed" was decided by size alone, so a file the box rewrote at the same size
+  (`models/opt_latest.pt`, `models/best.pt`) never came home and the desktop resumed with a fresh optimizer; an ssh
+  failure read as "the box run stopped"; homing was set before the wait. Now a file is pulled by content, run-home
+  confirms the stop before it marks the run homing, and checks the optimizer state and best.pt after the pull (143.1).
 
 **Measured** (E:/mtg-zero-scratch/vast-test/NOTES.md):
 
@@ -29290,3 +29295,164 @@ target directory (E:/cargo-target/mtg-zero/bo3-postboard).
   Nothing refuses it in a run spec; the presets do not set it.
 * **The run**: moving the Delver best-of-three run onto this commit changes what it trains (games 2-3 only) - a
   maintainer's decision, with the run.
+
+## 143. The Fable review's infrastructure findings, the mtg-zero side: run-home pulls by content and never reads an ssh failure as a stopped run, the gate wants evidence and bounds its steps, one target dir per checkout (branch `fix/infra-tools`, 2026-11-12)
+
+**Why.** The Fable review of `e81f8304..267ae603` (E:/mtg-zero-scratch/fable-review-2026-11-12/infra.md, its slice 5)
+found the run loop sound and its edges not: `tools/vast.py` decided what to pull by file size and read a dropped link
+as a stopped run, the gate's report had no tier in its name, its timeout did not bound a step on Windows, untracked
+files went unchecked, and the engine tier took the full suite and the 20k fuzz on the agent's word. This section is
+lane C1 of the fix: every finding that lives in mtg-zero (tools/, mtgz/ run-loop glue). The zero-core ones (B3, B4,
+B6, B8, B9, B13's run.py half, B14, B19, B20, I3-I7, I9, I10, O1-O3) are lane C2's (section 144). Python and shell
+only: no crate changed, **digests EQUAL** (nothing to re-record).
+
+### 143.1 `tools/vast.py` (a whole run on a rented box)
+
+* **B1, pull by content.** `sync_once` fetched a non-JSON file only when its size differed - even on run-home's final
+  pull - so `models/opt_latest.pt` (same tensors, another pickled iteration) and `models/best.pt` (another checkpoint
+  of the same size) stayed the desktop's: the desktop resumed with a fresh AdamW state and the LR warm-up, and best.pt
+  disagreed with index.json. Now `vast_pulled.json` in the desktop dir holds the box's listing entry (size, mtime) of
+  every file the desktop holds as the box's - seeded by `run-push` from the box's listing right after the upload,
+  updated by every pass - and a file is fetched when the desktop has none, or of another size, or when its box entry
+  is not the manifest's and its sha256 on the box (`sha256sum`, one ssh session for all of them) differs from the
+  desktop's. A run pushed by the older code (no manifest) is decided by the hashes alone. After the final pull,
+  `verify_home` checks that the desktop's optimizer state and best.pt are the box's (sha256 on both sides), that the
+  optimizer state is of the newest checkpoint (`torch.load(...)['iter']`; `--allow-opt-mismatch` knowingly) and that
+  best.pt is the checkpoint index.json names - else the run is not declared home.
+* **B2, unknown is never stopped.** `box_supervisor_running` answered False on any ssh error (exit 255, no output):
+  run-home then pulled a live run, restored the desktop settings and removed PAUSE - two copies training. Now
+  `box_run_status` answers from one ssh session {supervisor running, mtgz.az.run processes, the box's
+  supervisor_state.json state} or None (ssh failed, or the answer is not the script's). run-home retries an unknown
+  answer (`--tries`, default 4, 15 s apart) and then ends with nothing changed; in its wait an unknown answer waits on;
+  before the final pull the stop is confirmed positively: no supervisor, no run process, and the supervisor's own last
+  state 'done' or 'refused' (`--assume-stopped` pulls a run that ended otherwise, still only with nothing running).
+* **B5, the mirror and the guard.** run-home marked the run homing (the sync loop ends) before it waited for the box
+  run; a box that needed longer than `--wait-min` left run-home dead and the mirror gone. Now homing is set only once
+  the stop is confirmed (the sync loop keeps mirroring through the wait) and cleared again if the pull or its checks
+  fail. `tools/vast_guard.py` asks the API again (30 s, 60 s, ... up to 5 min apart) until the destroy or the stop
+  succeeds, instead of once. `rent` exits non-zero when the guard is not confirmed (it only warned). `status` exits 1
+  for a box past its ledger deadline plus the guard's margin and still listed; `run-sync` warns in the box's last hour
+  and pulls the data window then even with `--no-data` (I8).
+* **B17, run-push knows what it leaves behind.** It uploaded an allowlist and said nothing about the rest. Now a run
+  directory entry that is neither uploaded (config, run_state, the logs, progress, elo/, data/, models/) nor
+  desktop-only by design (control files, this tool's own, `*.txt` / `*.log`, delverai.json, replays/, debug/) is
+  refused until named: `--include NAME` (uploaded as it is) or `--leave NAME` (the box run starts without it). A
+  setting holding a desktop path (a drive letter or UNC path, inside a spec too) that is not one of the remapped
+  `elo_anchors` / `heldout_shards` is refused (`pool_worker` on the live run's config, for one); `--clear-setting
+  NAME` pushes it as '' and run-home restores it. The settings `run-start`'s extra flags change are recorded and
+  restored at home too (a setting the desktop did not have is dropped). `--name=value` flags are split like `--name
+  value` (they were neither dropped nor remapped).
+* **B18.** ON_VAST.json is written atomically and an unreadable one is read again, never taken as "homing" (a sync loop
+  that looked mid-rewrite ended for good). An append-only log is extended only when its last 64 bytes are the box's
+  at that offset, else fetched whole (a desktop supervisor started by mistake had spliced two logs). The instance's
+  start script keeps a deadline file already there (it rewrote the rent's deadline at every container start, and the
+  guard fired at once on an extended box). A failed run-push puts PAUSE and ON_VAST.json back as they were. A tar
+  member from the box is written only if it is one of the paths asked for, with no absolute, drive or `..` part. Each
+  box's host key is pinned at its first connection (`StrictHostKeyChecking accept-new`, `~/.ssh/known_hosts_mtgz-<box>`,
+  removed when a new box takes the name; the trainer-to-worker blocks of `link` likewise) instead of
+  `StrictHostKeyChecking no` + /dev/null.
+* **B13, the box half.** `tools/vast_bootstrap.sh` exits 6 when `torch.cuda.is_available()` is False (it printed
+  "available False" and exited 0; a run would train on the box's CPU). The run's own refusal (`train_device` cuda
+  without CUDA) is zero-core's (144).
+* **B12 for prep.** `prep` refuses an untracked file where the desktop run would import it (143.3), as well as
+  uncommitted changes: the box builds the commit.
+
+### 143.2 `tools/gate.py`
+
+* **B10.** The report is `gates/<sha12>-<tier>.json`: a docs pass no longer overwrites a commit's engine report
+  (section 70's text corrected). `tools/delver_blunders.py` reads the commit's digest from the tier-keyed reports.
+* **B11.** `execute` runs every step through `tools/proctree.py`: the output is read by threads, every descendant seen
+  while the step runs is remembered (polled each second, with its creation time against pid reuse), the timeout kills
+  the whole tree, and a descendant still holding the pipe after the command exited is killed at the deadline (the step
+  times out). A step that ends cleanly leaves its descendants alone, and MSVC's shared `mspdbsrv` is never killed
+  (other checkouts' concurrent builds use it). `subprocess.run(timeout=)`
+  killed bash only and then read the pipe a grandchild held: the review's probe asked 2 s and waited 12. The search
+  smoke runs each configuration the same way.
+* **B12.** "The commit, unchanged" covers untracked files: an untracked, not ignored file where a build, a test or a
+  run picks it up refuses the gate (or `--allow-dirty`, named in the final line) - under engine/, mtgz/, tests/,
+  tools/, card_ir/, py/, data/, third_party/, .cargo/, a root `*.py` / `*.rs` / `*.toml` / `*.cfg` / `*.ini` /
+  `*.lock`, anything untracked inside the zero-core submodule (`mtgz/checkout.py`, one rule for the gate, `prep`,
+  mac.sh and the remotes). A stray file elsewhere (the main checkout's `bash.exe.stackdump`) does not count. At the
+  end the checkout must be unchanged, untracked files included, and **HEAD must not have moved** (a commit made in the
+  checkout during the gate left `git status` clean and the report naming the old sha). The caller's `FUZZ_*` never
+  reaches a step either.
+* **I1, evidence instead of `--tested-sha` (the choice).** The engine tier ran az / limits / hidden, the digests,
+  pytest and one smoke, and took the full engine suite and the 20k fuzz on the agent's word: `--tested-sha <HEAD>` made
+  the Mac recheck "not needed" and the final line a clean GATE PASSED. Two ways out: run them in the engine tier, or
+  require real evidence. **Evidence**, because the policy splits an engine change into the agent's half (full suite +
+  20k fuzz on its branch, ~30 min a pool) and the orchestrator's (~10 min on the merged sha), and running both halves
+  in one tier would make every engine gate ~40 min and re-run a suite on a sha that already passed it (AGENTS.md). The
+  new **`suite` tier** runs the agent's half as gate steps: `cargo test --release -p engine --no-fail-fast` and, per
+  `--fuzz-pools` entry (default `default`; e.g. `default,delver`), `FUZZ_GAMES=20000 cargo test --release -p engine
+  --test fuzz -- --nocapture`, whose checker wants fuzz_random_games' "20000 games: wins [...]" line and the binary's
+  one "test result: ok" line. Its report, `gates/<sha12>-suite.json`, is what the engine tier now checks for the
+  `--tested-sha` (`--suite-report` for another checkout's; with `--no-mac` and no `--tested-sha`, this commit's): tier
+  `suite`, that sha, that sha's zero-core pin, passed and clean, the engine-suite step and a fuzz step of 20,000 games
+  passed, every step's log still there with the sha256 the report recorded. A missing or wrong report refuses the gate
+  (exit 2) unless `--allow-skip suite-evidence`, which the final line names: "skipped: suite-evidence (... the full
+  engine suite and the 20k fuzz of <sha> are asserted, not evidenced)". The Mac recheck of a merged sha is unchanged.
+* **Mac evidence (B21's gate half).** `mac_commit_problem` wants the Mac checkout's own HEAD - the full sha read there
+  after the checkout - in mac.sh's "[mac] <host> <branch> @ <sha>" line, and again in a new "[mac] done @ <sha> (exit
+  N)" line after the command; the line used to echo the sha the desktop sent, whatever the Mac had checked out.
+
+### 143.3 mac.sh, the build, the remotes, the smoke, the publishers
+
+* **B21, `tools/mac.sh`.** One command at a time per Mac checkout: a lock directory beside the checkout
+  (`<checkout>.mac-lock`, its owner's pid and what runs) is taken before the checkout and held to the command's end; a
+  second mac.sh on the same branch says what holds it and waits; a lock whose pid is gone, or one without an owner
+  for 2 minutes, is taken over (bash 3.2, macOS's own: mkdir, kill -0, traps). The "[mac]" lines carry `git rev-parse
+  HEAD` read on the Mac before and after the command, and the command's exit status passes through. `--pin` and
+  `--eval-checkout` refuse untracked code files too; a plain command warns about them. Not run against the Mac (lane
+  rule): the generated remote script ran locally in Git Bash against a scratch HOME with bare repos - two concurrent
+  runs (the second waited for the first, then ran; exit 3 passed through; the lock removed) and a stale lock of a dead
+  pid (taken over).
+* **B7, the target dir.** zero-core's `build_engine.sh` names the default target dir after the branch, which is `HEAD`
+  in every detached checkout: all the pinned `run-<sha>` and `*-base` worktrees built into `E:/cargo-target/mtg-zero/HEAD`
+  (the shared-target hazard AGENTS.md warns about, as the default). `tools/build_py.sh` now sets the default itself -
+  the branch as before, or `detached-<the checkout's directory name>` - and every build runs `tools/target_guard.py`
+  (gate.py's target guard and its `.gate_checkout.json` marker): a target dir another checkout built in is refused
+  whoever chose it. zero-core's own default (its build_py.sh, the other games) is 144's.
+* **B12 / B15, `mtgz/az/mac.py`.** A `RunCommitRemote` / `LocalGpuRemote` refuses a run checkout with untracked code
+  files (143.2's rule), and one whose HEAD moved after this process imported its code (`IMPORTED_HEAD`, read from
+  git's files when the module is imported - `mtgz.checkout.read_head`, no git process in every process that imports
+  the package -, git itself only when the files cannot tell): a host joining later (`vast:<box>`, `gpu:N`) resolved the checkout as it was then, and could
+  self-play another commit's engine for a trainer running this one. Putting the commit into the worker's hello is
+  zero-core's (I6, 144).
+* **I2, `tools/search_smoke.py`.** The seat is the run's own: `zero.run.Run.nn_seat` (every seat setting a run passes -
+  move rule, completed-Q transforms, value choice, eval_cache, resignation, root search, minor sims ...; it built eleven
+  of them) at the smoke's sims, without the root belief tilts, which a uniform evaluator cannot answer (no auxiliary
+  head) and which the output names ("the seat without selfplay_belief_tilts"). The spec `preset` plays the preset's own
+  spec and game (no re-typed copy), `--run-config <run>/config.json` + spec `run` a run's own seat and spec. The repin
+  tier is unchanged (its `--spec` may now be `preset`).
+* **B16, `tools/sealedai_publish.py`.** Collect, then commit: the game log's offsets move only after every new line of
+  every file parsed, the new games join the held list as soon as they are read, and the tallies change only after
+  every game's iteration is known (counted on copies) - a failed pass lost the games it had read. Games read but never
+  tallied because metrics.jsonl has no line with a time are an ERROR line every pass; "uploaded 0 iterations" says
+  "the card record's info only".
+* **I11, `tools/delverai_publish.py`.** A recorded generation is saved and marked first, then uploaded game by game,
+  each dropped from `delverai.json`'s `to_upload` once the site took it: an upload that fails half way is finished by
+  the next pass instead of recorded and posted again. A recording with fewer games than asked is refused (not marked).
+  One pass (no `--loop`) on a run without config.json says so (it reached `time.sleep(None)`).
+
+### 143.4 Tests
+
+Every probe of `tests/test_zz_infra_probes.py` (delver-review) for an item fixed here became a regression test
+asserting the correct behaviour: `tests/test_vast_tool.py` (+18: the same-size rewrite pulled by hash and the
+manifest, the splice check, unknown != stopped, run-home refusing an unreachable box / waiting through an unknown
+answer / refusing an unclean stop / clearing homing on a failed pull, verify_home, the unreadable marker, tar members,
+run-push's refusals and undo, `--name=value`, the kept deadline, pinned host keys, status past the deadline, the
+guard's retries, rent without a guard), `tests/test_gate.py` (+12: per-tier reports, a timeout that kills the
+grandchild, a process holding the output past the command bounded, untracked files on a scratch repo, an untracked file refusing and one
+made during the gate failing, HEAD moving, the suite tier and its report as the engine tier's evidence, the fuzz
+checker, invalid suite reports, FUZZ_* scrubbed, the detached target dir, HEAD read from git's files; the engine and Mac
+tests updated to the new evidence), `tests/test_mac_remote.py` (+2), `tests/test_sealedai_publish.py` (+2), `tests/test_delverai_publish.py`
+(+3). The probes for zero-core items (fork_run, cotrain, remote drain, transport) stay with 144.
+
+### 143.5 Not done here
+
+* zero-core items (above): lane C2, section 144.
+* O4 (one ssh session per run-sync pass), O5 (the gate's independent steps in parallel), O6 (the publishers' full
+  re-parse): optimizations, not bugs; left.
+* The engine tier still gates without the suite evidence when the caller says `--allow-skip suite-evidence` - named in
+  the final line; the orchestrator's merged sha needs a `suite` run of its own (or the agent's report plus the Mac
+  recheck) for a clean GATE PASSED.

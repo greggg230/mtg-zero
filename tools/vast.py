@@ -1223,7 +1223,9 @@ def verify_home(name, run, rd, allow_opt_mismatch=False):
     sides), the optimizer state is of the newest checkpoint, and best.pt is the checkpoint index.json names - or
     SystemExit (the run is not declared home). -> what was checked, for the log."""
     mdir = os.path.join(run, 'models')
-    names = [p for p in ('models/opt_latest.pt', 'models/best.pt') if os.path.exists(os.path.join(run, *p.split('/')))]
+    listing = remote_listing(name, rd)
+    names = [p for p in ('models/opt_latest.pt', 'models/best.pt')
+             if p in listing and os.path.exists(os.path.join(run, *p.split('/')))]
     theirs = remote_hashes(name, rd, names)
     for p in names:
         if theirs[p] != sha256_file(os.path.join(run, *p.split('/'))):

@@ -7,7 +7,11 @@ Standard library only: tools/gate.py and tools/vast.py load this file by its pat
 (`import mtgz` needs the zero-core submodule, which a gate may not have initialised yet); mtgz/az/mac.py imports it.
 """
 import os
+import re
 import subprocess
+
+# a git child of a console-less process (a run the hub started) gets no window of its own (memory: terminal popups)
+NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
 
 # untracked files that count: anything under these directories, and the root's own build / test configuration
 # (a root conftest.py, pytest.ini, Cargo.toml, ...); a stray file elsewhere (a crash dump, notes) does not
@@ -23,7 +27,50 @@ def is_code(path):
 
 
 def _git(root, *args):
-    return subprocess.run(['git', '-C', root, *args], capture_output=True, text=True, check=True).stdout
+    return subprocess.run(['git', '-C', root, *args], capture_output=True, text=True, check=True,
+                          creationflags=NO_WINDOW).stdout
+
+
+def read_head(root):
+    """The commit HEAD of the checkout `root` points at, read from git's files (no git process) - a worktree's
+    `.git` file and `commondir`, a detached HEAD, a loose or a packed ref -, or None when they cannot tell (not a
+    checkout, another ref storage): ask git then."""
+    try:
+        g = os.path.join(root, '.git')
+        if os.path.isfile(g):
+            with open(g, encoding='utf-8') as f:
+                line = f.read().strip()
+            if not line.startswith('gitdir:'):
+                return None
+            g = os.path.normpath(os.path.join(root, line[len('gitdir:'):].strip()))
+        with open(os.path.join(g, 'HEAD'), encoding='utf-8') as f:
+            head = f.read().strip()
+        if re.fullmatch(r'[0-9a-f]{40}', head):
+            return head
+        if not head.startswith('ref: '):
+            return None
+        ref = head[5:].strip()
+        bases = [g]
+        if os.path.exists(os.path.join(g, 'commondir')):
+            with open(os.path.join(g, 'commondir'), encoding='utf-8') as f:
+                bases.append(os.path.normpath(os.path.join(g, f.read().strip())))
+        for b in bases:
+            p = os.path.join(b, *ref.split('/'))
+            if os.path.isfile(p):
+                with open(p, encoding='utf-8') as f:
+                    sha = f.read().strip()
+                return sha if re.fullmatch(r'[0-9a-f]{40}', sha) else None
+        for b in bases:
+            p = os.path.join(b, 'packed-refs')
+            if os.path.isfile(p):
+                with open(p, encoding='utf-8') as f:
+                    for line in f:
+                        parts = line.split()
+                        if len(parts) == 2 and parts[1] == ref and re.fullmatch(r'[0-9a-f]{40}', parts[0]):
+                            return parts[0]
+    except OSError:
+        return None
+    return None
 
 
 def tracked_changes(root):
