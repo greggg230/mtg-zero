@@ -29408,3 +29408,119 @@ summary's arithmetic and splits on hand-made starts, the checks that fail loudly
 driver - every kind of sideboarding, each start stopped at game 2 -, a tiny network's census end to end with the same
 census from the same seed, the publisher's census pass, record and failure handling), `tests/test_delverai_publish.py`
 (10) and `tests/test_replays_bo3.py` (4): passed.
+
+## 153. Best-of-three replays, the publisher and the sideboard census on layout v7: `delverai-bo3` (131, 132) merged into main (branch `delverai-bo3-v7`, 2026-11-12)
+
+Branch `delverai-bo3-v7` from main 267ae603 (layout v7, 125.12) with `delverai-bo3` 4ac6ebd3 (131, 132) merged in as a
+merge commit, ec4ae104. Why: the Delver best-of-three run delver-bo3-pb1 trains on layout v6 (main 45e65178) and moves
+to a v7 run (delver-bo3-pb2: pb1's newest checkpoint widened by `tools/fork_run.py`) once its farm workers run v7. The
+site's publisher must then run on a v7 build that has 131's match replays and 132's census. `delverai-bo3` stays at
+4ac6ebd3, the live v6 publisher's pin. Recording and export only: no rule, encoding or search change. (Section number:
+133-152 are assigned to open lanes - 140-149 the Fable-review fix lanes, 150-152 another session's - so this is 153.
+No branch, remote branch or worktree had a section above 132 on 2026-11-12.)
+
+### 153.1 The merge
+
+**Conflicts: none in code.** `docs/ENGINE.md` merged by itself (main's 125-128 and 130.7-130.8 against 131-132): every
+section is kept, in number order. The zero-core gitlink stays main's e5e1bb0 (the branch kept its base's 2aab098).
+
+**v6 assumptions: none to change.** I read the merged files for input sizes, layout versions, feature counts and
+encoder calls:
+
+* The census (`_CensusDriver`) and the recorder (`_Recorder`) subclass zero-core's `PyDriver` / `RecordingDriver`.
+  At e5e1bb0 those build v7's whole rows themselves (zero-core docs/search.md 2.15): `mcts.leaf_row` gives the head,
+  tail and overrides of every leaf, value-only, belief and root-aux row. A row past the layout's 4,096 tokens aborts
+  its game; a row is never truncated. The hooks the two subclasses override keep their signatures there:
+  `_apply(slot, a)`, `_decide(slot, seat, tree, p)`, `_start(slot, seat, p)` and `aux_render(pred, state, seat,
+  frame)`. The root's auxiliary pass that feeds `aux_render` takes the row's tail (`zero.rows.game_row`). If a row
+  limit aborts a census start's game, that start reaches no game 2 and the census fails loudly (`CensusError`: "N of
+  M starts reached no game 2"). A recorded match aborted that way carries zero.replay's `abort_reason`.
+* The deck read (`deck_read`) slices the deck part of the true target, `aux_target[D:2D]`, with `belief.D` =
+  `identity::D` = 1024. `MtgAz::AUX` and `aux_target` are the same on v7 as on v6: v7 widened the inputs, not the
+  auxiliary targets.
+* `mtgz/az/replays.py`, `mtgz/az/sideboard_census.py` and `tools/delverai_publish.py` contain no layout version,
+  feature count or encoder call. Both entry points run the encoding guard first (`replays.check_encoding`, zero-core's
+  `check_checkpoint`). On this build pb1's v6 checkpoint is refused before anything is played (`EncodingMismatch`,
+  features 44212 -> 56384), and its v7 widening is accepted.
+* The spectator view (`view.rs`: decks, results, the sideboarding in words) reads `MatchState`, which v7 did not change.
+* The branch's tests build token networks (`make_net(..., 'tokens', ...)`), which take v7's tails. An MLP would be
+  refused (zero-core R4).
+
+### 153.2 Checks (on ec4ae104)
+
+The desktop was shared with the live run and other lanes' work. Heavy steps ran one at a time through the shared
+throttle (`E:/mtg-zero-scratch/fable-fix/slot.sh`, at most 3 heavy commands on the machine).
+
+* **Behaviour digests: main's, unchanged.** Full (layout v7) **438164c0429d7fa3** and `DIGEST_ENCODING=0`
+  **a0062bb5569e06d3**, the values 125.12 recorded. Nothing was re-recorded.
+* **Engine gate** (`python tools/gate.py engine --no-mac --tested-sha ec4ae104 --expect-digest 438164c0429d7fa3
+  --expect-digest0 a0062bb5569e06d3 --target-dir E:/cargo-target/mtg-zero/delverai-bo3-v7-gate --step-timeout 7200`):
+  **`GATE PASSED engine ec4ae1040c3a in 2648s`**. It ran build, both digests, `az` 52, `limits` 13, `hidden` 28, pytest
+  **337 passed, 1 skipped**, and the search smoke (random, seed 0). The target directory was fresh at the gate's first
+  run. That run passed the build (162 s) and both digests, and was then stopped by its own pid because RAM was tight
+  (it was not in the throttle). The full re-run reused this checkout's own build of the same commit.
+* **The spectator view's readers** (`cargo test --release -p engine --test view --test lab --test post_board --test
+  constructed_bo3 --test bo3_episodes`, the gate's target): `view` 2 (1 ignored), `lab` 13, `post_board` 6,
+  `constructed_bo3` 11 (1 ignored), `bo3_episodes` 6. All passed.
+* **The branch's tests on v7 rows** (part of the gate's pytest): `tests/test_replays_bo3.py` 4,
+  `tests/test_sideboard_census.py` 4 and `tests/test_delverai_publish.py` 10 passed. The tiny networks' matches and
+  census starts go through the v7 drivers (tails and overrides on every row).
+* **Not run**: the Mac steps (`--no-mac`). Also not run: the 20k fuzz and the full engine suite, because no rule
+  changed and the fuzz and digests do not read the spectator view (`view.rs` is read by `export_state` only; its
+  tests are listed above).
+
+### 153.3 The v7 smoke on a real v7 best-of-three network
+
+The network: pb1's generation 67 widened to layout v7 by `fork_run` (44,212 -> 56,384 features, the new segments gated
+shut; its `extra.forked_from` names pb1's iter_0067). Copies went into scratch run directories under
+`E:/mtg-zero-scratch/delverai-bo3-v7/`, each with a copy of pb1's config.json (its spec, sims, `eval_select`,
+`aux_deck_w`, tilts; no layout in it). Everything ran on the CPU. The live run's directory was only read.
+
+* **The census, v7 against v6** (`python -m mtgz.az.sideboard_census CKPT --starts 200 --threads 4 --seed 1`, the
+  publisher's settings). On v7 it ran on the widened network from this branch. On v6 it ran on pb1's iter_0067 from
+  the `delverai-bo3` worktree (4ac6ebd3). **The two records are equal in every field except the generation number
+  and the seconds**: 200 starts, 64 sims (`cq-n4-v50-s0.3`), **38,400 simulations each**, and the chooser took the play
+  in 200 of 200. On the play: +1 Rough // Tumble 99%, +1 Price of Progress 1%, -1 Prismari Charm 100%. On the draw: +1
+  Rough // Tumble 100%, -1 Prismari Charm 100%. This is 132's generation-64 result. The widened network searched
+  exactly as its source did. The rows it read are ones where the widen computes what the source did (fork_run's
+  contract, zero-core docs/az.md 43.8): pre-game rows have no tail tokens (0 in 716 sideboarding and play-or-draw
+  rows of 40 random starts), and the game-2 rows the search reaches beyond them have tail tokens only in gated
+  tail-only segments (graveyard_order, library_known, delayed, stack_relations in the first 120 random decisions of
+  those starts: 2,050 of 4,084 rows, none in a segment that gained a tail), whose gates are 0, and the new head floats
+  have zero weights. (Timing on the loaded desktop: 32 s on v6, 63 s on v7, under different loads, so
+  the two are not comparable.)
+* **The publisher, dry run** (`python tools/delverai_publish.py <run> --every 8 --games 2 --device cpu --threads 4
+  --census 50 --dry-run --state-dir <scratch> --url http://127.0.0.1:9 --forks ~/delverai/forks.json --keep-yardstick
+  ... --title ...`). `--dry-run` skips every upload. `--state-dir` keeps its writes (delverai.json, replays/, census/)
+  out of the run directory. The dead `--url` is a second guard. The run was a pb2 stand-in: the widened network as
+  iter_0000, pb1's config.json, and a hand-written MIGRATED_FROM.json (`{"migrated_from":
+  ".../delver-bo3-pb1/models/iter_0067.pt", "layout": "v6 -> v7 (exact widen)", ...}`, the shape the hand-off plans
+  for pb2). The pass:
+  * **Recorded 2 matches** in 378 s (37,778 simulations). In both, game 1 was not played (its drawn winner was seat
+    1), game 2 was played out (15 and 14 turns, both won by seat 1 on state-based actions, 2-0), the chooser
+    (seat 0) played first, and both seats swapped +1 Rough // Tumble / -1 Prismari Charm. Every network decision in a
+    game has a deck read and a hand read (385 of 387 and 221 of 223 frames; the 2 sideboarding frames have neither,
+    by design). The first reads of game 2 see the opponent's swap: Rough // Tumble +0.97 to +0.99. The sideboarding
+    options are in words. No `abort_reason`.
+  * **The census of the recorded generation**: 50 starts, the same swap (+1 Rough // Tumble 98% on the play), written
+    to the state directory's census/census_0000.json and shown in the record's `sideboard_census`.
+  * **The progress record** (read again with `progress()`): `format` bo3, `start_game` 2, `migrated_from` {pb1, 67,
+    'v6 -> v7 (exact widen)'}, and `forked_from` pb1's scale break (r3-deep128x8-2410 at 3198). The `lineage` has two
+    segments: delver-bo3-pb1 (root, generations 0-67, 68 rows) and the v7 run (`migrate`, label "layout v7",
+    offset 67: its generation n is global generation 67 + n). The upload body is 30.6 KB.
+* **Game 1's drawn winner**: the engine's draw is fair (P0 197 / P1 203 over 400 random 63-bit seeds; 193 / 207 over
+  seeds 0-399). In recorded matches it has been seat 1 every time (the hand-off's 7, these 2). That is not explained
+  by the draw, and it is left open.
+
+### 153.4 For the publisher's move to v7 (open)
+
+* The v7 publisher needs a pinned worktree at this commit or later, with its own engine build and target directory.
+  pb1's v6 checkpoints are refused on it, so pb1 as a `--side` run (or as it is now) stays on the v6 publisher's
+  worktree (`delverai-bo3` 4ac6ebd3). The two publishers run from two worktrees.
+* pb2's MIGRATED_FROM.json gives the lineage above. pb2's own generations then appear on the site at global
+  generation K + n, after pb1's rows up to K.
+* Anchors are placed by checkpoint sha256 among the run's own checkpoints (and those of same-numbering ancestors,
+  which a migration does not have). pb2's a3198, a v7 widening of pb1's generation 0, matches no pb2 checkpoint, so the
+  record lists it with `iter` None: a fixed rating with no point on the lineage axis. A converted anchor computes what
+  its source did, so the Elo scale stays pb1's (a3198 = 1000). aK, a byte copy of pb2's iter_0000, is placed at
+  generation 0 (global K).
