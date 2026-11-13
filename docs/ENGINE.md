@@ -29298,7 +29298,7 @@ target directory (E:/cargo-target/mtg-zero/bo3-postboard).
 ## 140. The hidden deck given the cards the viewer SAW, and one table a request (branch `fix/deck-posterior`, 2026-11-12)
 
 The Fable review of 2026-11-12 (`hidden.md` B1, SUMMARY tier 1 #1; `perf.md` O3, O5), lane A1. Commits: `4def6a9d`
-(the review's perf patches P1 and P4, unchanged) and the posterior fix after it.
+(the review's perf patches P1 and P4, unchanged), `bbd0a694` (the posterior fix), `201f4693` (the Lutri test).
 
 ### 140.1 The bug
 
@@ -29442,9 +29442,24 @@ the same assumption for every card of the hand. Open point 140.8.
   between games; the table and sealed priors deal as before); lane G's constructed best-of-three digests (148) will move with it, re-recorded at
   integration.
 
-### 140.7 Checks
+### 140.7 Checks (on `201f4693`: the fix `bbd0a694` and the Lutri test)
 
-Recorded on the fix's commit after it (the full engine suite, the 20k fuzz runs, the engine gate).
+The desktop was shared with the live run and about ten other lanes (the heavy steps throttled, one at a time).
+
+* **The engine gate** (`python tools/gate.py engine --no-mac`): `GATE PASSED WITH SKIPS engine 201f469368b8 in 1719s -
+  skipped: mac-recheck (--no-mac)` - build, digests encoding-free `a0062bb5569e06d3` and full `438164c0429d7fa3`
+  (both = expected), `az` 52, `limits` 13, `hidden` 28 passed, pytest 323 passed (1 skipped), the search smoke, tracked
+  files unchanged.
+* **The full engine suite** (`cargo test --release -p engine --no-fail-fast`): 161 test targets, 2,539 passed, 0
+  failed, 28 ignored (3,275 s); `deck_posterior.rs` 5 passed, 1 ignored (the cost measurement).
+* **`FUZZ_GAMES=20000`**, the default pool: passed (3,336 s): 20,000 games (wins 9,803 / 10,075, 122 draws, 0
+  aborted; 19.2M options completed), 1,000 cube best-of-three matches (2,549 games, 42,956 hidden-pool worlds).
+* **`FUZZ_POOL=delver FUZZ_GAMES=20000`**: passed (2,536 s): 20,000 games (wins 9,673 / 9,563, 764 draws, 0
+  aborted), 1,000 constructed best-of-three matches (2,645 games, 26,400 sideboarding decisions, 41,442 worlds,
+  each later game's 60 from this posterior).
+* **`FUZZ_HIDDEN_DECKS=1 FUZZ_GAMES=1000`** (the table prior; its new guard): passed (235 s): 21,738 hidden-decklist
+  worlds (21,735 with another deck than the real one), 132 companions revealed, 84,848 information-set steps.
+* The digest before the gate, on the same tree: `438164c0429d7fa3` (EQUAL).
 
 ### 140.8 Open points, decisions
 
