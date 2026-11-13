@@ -26489,6 +26489,34 @@ farm-release define's checks): 51 keys, the spec's " // " names pass. The run's 
 no onnx / onnxruntime, which the pool needs to export each checkpoint: the hand-off (zero-farm notes,
 bo3-farm-handoff.md) starts the run's supervisor with that venv.
 
+### 114.10 The CPU runtime pack's license files; the run's release build on it (2026-11-12)
+
+**What.** `tools/farm_build.py --runtime` (the CPU pack) ships its license files unmodified (77e7fa21): ONNX Runtime's
+`LICENSE` and `ThirdPartyNotices.txt` from the onnxruntime package the DLL comes from (the DLL and both files checked
+against the package's RECORD) and, with the MSVC runtime, the Visual C++ runtime's from the Visual Studio redist folder
+the DLLs come from. Visual Studio 2022 17.14 ships no license file next to the redist DLLs (`VC\Redist\MSVC\14.44.35112`
+holds the DLLs, a props file and the two `vc_redist` installers) and no VS 2022 license terms file anywhere in the
+install (the instance records only the link go.microsoft.com/fwlink/?LinkId=2179811). So `license.rtf`, the Microsoft
+Software License Terms for the "Microsoft Visual C++ 2015 - 2022 Runtime" (EULA ID Cpp_2015-2022_ENU.1033, the license
+the redistributable's installer shows), is taken byte for byte out of that folder's `vc_redist.x64.exe` (Microsoft-signed,
+version 14.44.35211.0 = the DLLs'; a payload of the Burn bundle's UX container, checked against the bundle manifest's size
+and SHA-1), and `Redist.txt` (Visual Studio 2022's "Distributable Code" file, the redist list its license terms name) from
+`<VS>\Licenses\1033`. Each is listed in runtime.json `licenses` (sha256, size, component, source). `--msvc-dir` must now
+be a VS redist folder (System32 ships no license: refused before anything is written). The load check skips modules a
+newer worker lists without loading them (`DirectML.dll: None`, which failed the old check) and requires every DLL of the
+pack to load from the pack.
+
+**Pack** (the zero-farm venv's Python and onnxruntime 1.31.1, `--msvc-dir <VS>\VC\Redist\MSVC\14.44.35112\x64\Microsoft.VC143.CRT
+--check-worker <abab42a6's signed exe> --publish`): **d531424bd1a16307d491418c** (`ort-1.31.1-cpu+msvc-14.44.35211.0`,
+10 files: c4c4bb77's five DLLs byte for byte, the four license files, runtime.json); every published file fetched back
+from the coordinator identical.
+
+**Release build** (`farm_build.py --profile release --runtime-id d531424bd1a16307d491418c --publish` at 39ef0208, in
+`farm`'s own target): **b72aa2385be5362839792668** (`mtg-39ef020-release`; kinds selfplay, eval, fuzz). Cargo had nothing
+to rebuild: its `mtgz-worker.exe` is abab42a6's byte for byte (sha256 6e16c6d7...), so 114.9's gates 2 and 3 on the run's
+real config hold for it unchanged. It and d531424b replace abab42a6 and c4c4bb77 for the run (zero-farm notes,
+bo3-farm-handoff.md). Gate: `gate.py docs --files tools/farm_build.py` on 77e7fa21 passed.
+
 ## 120. Constructed best-of-three: the Delver mirror's sideboarding and hidden 60s (branch `delver-bo3`, 2026-11-11)
 
 Branch `delver-bo3` (from main 60397f3; zero-core pinned at f9ca5c3, unchanged). DESIGN.md 8's D3 but the five
