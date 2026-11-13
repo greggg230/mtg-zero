@@ -11,14 +11,13 @@
 //! * 152.3 EoE seed 100000075, activate.rs:1176: a payment of no mana finished at once and left
 //!   the answer to its decision (a source picked instead of the pool) to the cost's choices. The
 //!   seed failed in a world of the fuzz's determinize check, which a replay of the game alone
-//!   doesn't reach: the minimal case only (the seed itself passes, `FUZZ_POOL=eoe`).
+//!   doesn't reach; its test is `pay.rs`'s unit test
+//!   `a_payment_that_is_paid_takes_the_answer_to_its_own_decision` (the seed itself passes).
 
 use engine::db::{AbilitySlot, CardDb};
 use engine::rng::Rng;
 use engine::testkit::Scenario;
 
-#[allow(dead_code)]
-mod eoe_c_util;
 use engine::{Choice, DecisionKind, Game, GameSpec, Step, Zone};
 
 /// One recorded seed: its pool's card table, decks and seed (the fuzzer's `new_game`), the
@@ -186,46 +185,4 @@ fn a_pile_pick_among_twins_takes_the_one_nearest_the_top_in_every_world() {
 fn eoe_seed_100019080_a_controlled_search_keys_the_library_from_the_top() {
     let c = case("eoe", 100019080);
     assert_eq!(walk(&c), Some(c.path.len() - 1), "the search's keys tell the two libraries apart");
-}
-
-// ---- 152.3: a payment's own answer -----------------------------------------
-
-/// The minimal case of 152.3 (EoE fuzz seed 100000075: in a world of the fuzz's check, P1 cast
-/// Consult the Star Charts for free through Weftwalking, then picked Uthros, Titanic Godcore's mana
-/// ability at the payment's decision). A spell cast without paying its mana cost still has its
-/// payment: the empty pool covers the cost of no mana (`PASS`), and a source making several mana
-/// may be activated instead (CR 601.2g). Picking Lotus Field's ability is the payment's answer.
-/// Before the fix the payment finished at once (nothing left to pay) and left the answer to the
-/// next task, the cost's choices, which took it for "a mana ability of a permanent picked to
-/// sacrifice": the fuzz profile's assertion at activate.rs:1176; a release build activated Lotus
-/// Field outside the payment, as an ability of its own.
-#[test]
-fn a_free_spells_payment_takes_its_own_answer_a_source_picked_instead() {
-    use eoe_c_util::{at_priority, log, scen};
-    let mut g = scen().battlefield(0, &["Weftwalking", "Lotus Field"]).hand(0, &["Test Giant"]).at(Step::Main1, 0).start();
-    let giant = g.card(0, "Test Giant", Zone::Hand);
-    g.choose(Choice::Cast(giant));
-    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseAltCost) || at_priority(g));
-    assert_eq!(g.kind(), Some(DecisionKind::ChooseAltCost), "{}", log(&g));
-    g.choose(Choice::Number((engine::act::NUMBER_N - 1) as u8));
-    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "the payment of no mana asks: {:?}
-{}", g.options_desc(), log(&g));
-    let lotus = g.card(0, "Lotus Field", Zone::Battlefield);
-    let src = g.offered().into_iter().find(|c| matches!(c, Choice::Ability(x, _) if *x == lotus)).unwrap_or_else(|| panic!("Lotus Field offered: {:?}", g.options_desc()));
-    assert!(g.has_option(Choice::Pass), "{:?}", g.options_desc());
-    let lines = g.log_lines().len();
-    g.choose(src);
-    // (Its colour, if asked.)
-    while g.kind() == Some(DecisionKind::ChooseMana) {
-        let c = g.pending_decision().unwrap().options[0].choice;
-        g.choose(c);
-    }
-    assert!(at_priority(&g), "{:?}
-{}", g.options_desc(), log(&g));
-    assert_eq!(g.stack().len(), 1, "the Giant is cast");
-    assert!(g.obj(lotus).tapped);
-    assert_eq!(g.player(0).pool.total(), 3, "Lotus Field's three mana float
-{}", log(&g));
-    let after = &g.log_lines()[lines..];
-    assert!(!after.iter().any(|l| l.contains("activates Lotus Field")), "no activation outside the payment: {after:?}");
 }
