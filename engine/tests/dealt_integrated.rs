@@ -199,7 +199,7 @@ fn a_dealt_60_is_the_restricted_prior_times_the_seen_cards_likelihood_exactly() 
                 .iter()
                 .map(|v| (0..list.len()).map(|k| if v[k] < r[k] { 0.0 } else { binom(v[k], r[k]) }).product::<f64>() / by[swaps(v)])
                 .collect();
-            let mass_out = full_w.iter().zip(&decks).filter(|(_, v)| !(lo..=hi).contains(&swaps(v))).map(|(w, _)| w).sum::<f64>()
+            let mass_out = full_w.iter().zip(&decks).filter(|(_, v)| !(lo..=hi).contains(&swaps(v.as_slice()))).map(|(w, _)| w).sum::<f64>()
                 / full_w.iter().sum::<f64>();
             let m = n / 4;
             let outside = (0..m).filter(|_| !(lo..=hi).contains(&swaps(&decks[index_of(&full.sample(&want, &mut rng).deck)]))).count();
@@ -296,7 +296,7 @@ fn the_other_players_worlds_deal_a_dealt_60_by_its_untilted_restricted_prior() {
     let prior = ConstructedPrior::dealt(&main, &side, 1, 8);
     let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None };
     let fill = prior.expected_fill(&plain);
-    let heavy = *side.iter().find(|d| !main.contains(d)).expect("a sideboard card not in the main");
+    let heavy = *side.iter().find(|&&x| !main.contains(&x)).expect("a sideboard card not in the main");
     let light = main[0];
     let w = move |d: u16| if d == heavy { 30.0 } else if d == light { 0.05 } else { 1.0 };
     let mut defs: Vec<u16> = main.iter().chain(&side).copied().collect();
@@ -390,7 +390,7 @@ fn the_reader_weights_and_the_deck_tilt_never_move_a_dealt_60() {
             let dl = Decklist::izzet_delver();
             let side = Decklist::ids(db(), &dl.sideboard).unwrap();
             let main = Decklist::ids(db(), &dl.main).unwrap();
-            let heavy = *side.iter().find(|x| !main.contains(x)).unwrap();
+            let heavy = *side.iter().find(|&&x| !main.contains(&x)).unwrap();
             let w = move |x: u16| if x == heavy { 30.0 } else if x == main[0] { 0.05 } else { 1.0 };
             let (mut rng, mut keys) = (Rng::new(seed ^ 0x5EE), Vec::new());
             for step in 0..1500u64 {
