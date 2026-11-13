@@ -265,7 +265,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // Which face this printing is (set by the caller for a face); the
         // printings lowered inside it (tokens, emblems) are cards.
         let face = std::mem::take(&mut l.face);
-        let _ = warp_cost_str; // display form of `warp_cost`
+        // `warp_cost_str`: the printed `warp_cost`, checked against it where
+        // that is lowered (`lower_printed_cost`); without the cost, nothing.
+        if warp_cost.is_none() {
+            l.deny("CardPrinting.warp_cost_str(without warp_cost)", warp_cost_str);
+        }
         l.deny("CardPrinting.impending_cost", impending_cost);
         l.deny("CardPrinting.impending_cost_str", impending_cost_str);
         l.deny("CardPrinting.impending_count", impending_count);
@@ -312,8 +316,16 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.wipes_all_creature_abilities", wipes_all_creature_abilities);
         l.deny("CardPrinting.sets_all_creature_pt_to_1_1", sets_all_creature_pt_to_1_1);
         l.deny("CardPrinting.must_be_blocked_if_able", must_be_blocked_if_able);
-        let _ = flashback_cost_str; // display form of `flashback_cost`
-        let _ = buyback_cost_str; // display form of `buyback_cost`
+        // `flashback_cost_str`: the printed `flashback_cost`, checked against it where
+        // that is lowered (`lower_printed_cost`); without the cost, nothing.
+        if flashback_cost.is_none() {
+            l.deny("CardPrinting.flashback_cost_str(without flashback_cost)", flashback_cost_str);
+        }
+        // `buyback_cost_str`: the printed `buyback_cost`, checked against it where
+        // that is lowered (`lower_printed_cost`); without the cost, nothing.
+        if buyback_cost.is_none() {
+            l.deny("CardPrinting.buyback_cost_str(without buyback_cost)", buyback_cost_str);
+        }
         l.deny_ne("CardPrinting.alt_cost_exile_from_hand_count", alt_cost_exile_from_hand_count, &generated::defaults::d_CardPrinting_alt_cost_exile_from_hand_count());
         let _ = alt_cost_exile_from_hand_count; // 1 (checked above)
         // Splice onto <subtype> (CR 702.47): an instant or sorcery's.
@@ -333,14 +345,26 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         };
         // Faces (`mdfc_back_face`, `transform_back_face`, `face_colors`,
         // `daybound`, `nightbound`, `adventure_face`): below.
-        let _ = escape_cost_str; // display form of `escape_cost`
-        let _ = dash_cost_str; // display form of `dash_cost`
+        // `escape_cost_str`: the printed `escape_cost`, checked against it where
+        // that is lowered (`lower_printed_cost`); without the cost, nothing.
+        if escape_cost.is_none() {
+            l.deny("CardPrinting.escape_cost_str(without escape_cost)", escape_cost_str);
+        }
+        // `dash_cost_str`: the printed `dash_cost`, checked against it where
+        // that is lowered (`lower_printed_cost`); without the cost, nothing.
+        if dash_cost.is_none() {
+            l.deny("CardPrinting.dash_cost_str(without dash_cost)", dash_cost_str);
+        }
         l.deny("CardPrinting.evoke_cost", evoke_cost);
         l.deny("CardPrinting.evoke_cost_str", evoke_cost_str);
         l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
         l.deny("CardPrinting.grants_retrace_to", grants_retrace_to);
         // (`zone_abilities`: lowered below, ENGINE.md 124.3.)
-        let _ = miracle_cost_str; // display form of `miracle_cost`
+        // `miracle_cost_str`: the printed `miracle_cost`, checked against it where
+        // that is lowered (`lower_printed_cost`); without the cost, nothing.
+        if miracle_cost.is_none() {
+            l.deny("CardPrinting.miracle_cost_str(without miracle_cost)", miracle_cost_str);
+        }
         l.deny("CardPrinting.enters_as_copy_add_triggers", enters_as_copy_add_triggers);
         l.deny("CardPrinting.enters_as_copy_max_mv_mana_spent", enters_as_copy_max_mv_mana_spent);
         l.deny("CardPrinting.rebound", rebound);
@@ -364,8 +388,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.conspiracy_rules", conspiracy_rules);
         l.deny("CardPrinting.replacement_statics", replacement_statics);
 
-    // Informational duplicates of `mana_cost` and the type fields.
-    let _ = (mana_cost_str, type_line);
+    // An informational duplicate of the type fields. (`mana_cost_str`: the
+    // printed cost, checked against `mana_cost` below.)
+    let _ = type_line;
 
     let mut ty = 0u16;
     for t in card_types {
@@ -424,10 +449,13 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         let cats::ManaCost::ManaCost(m) = &**mana_cost;
         l.int("CardPrinting.mana_cost.x_pips", m.x_pips, 0, 3) as u8
     };
+    // (Checked against `mana_cost_str`, its {C} pips read from it: CR
+    // 107.4c, docs/ir_defects.md 341, ENGINE.md 146.2. A split card's
+    // printed cost is its halves', combined, CR 709.4b.)
     let cost = {
         let cats::ManaCost::ManaCost(m) = &**mana_cost;
         let plain = cats::ManaCost::ManaCost(nodes::ManaCost { x_pips: 0, ..m.clone() });
-        lower_mana_cost(l, "CardPrinting.mana_cost", &plain)
+        lower_printed_cost(l, "CardPrinting.mana_cost", &plain, x_pips as i64, mana_cost_str, !split_faces.is_empty())
     };
 
     let is_creature = ty & types::CREATURE != 0;
@@ -768,7 +796,10 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // follow, CR 601.2c after 601.2b).
     let mut perm_kicker: Option<(ManaCost, bool)> = None;
     let kicker = match kicker_cost {
-        None => None,
+        None => {
+            l.deny("CardPrinting.kicker_cost_str(without kicker_cost)", kicker_cost_str);
+            None
+        }
         // Kicker on a permanent card (CR 702.33): an optional additional
         // cost, paid once (multikicker, 702.33c: any number of times);
         // "if it was kicked" is how it was cast (the `Enters` event's note,
@@ -778,7 +809,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             None
         }
         Some(m) => {
-            let mana = lower_mana_cost(l, "CardPrinting.kicker_cost", m);
+            let mana = lower_printed_cost(l, "CardPrinting.kicker_cost", m, 0, kicker_cost_str, false);
             match spell_effect.as_deref() {
                 Some(cats::Effect::IfConditionElse(nodes::IfConditionElse { condition, then_effect, else_effect: Some(e) }))
                     if matches!(**condition, cats::ConditionOrStatePredicate::SpellWasKicked(_)) && is_spell_card && *teamwork_power == 0 =>
@@ -870,7 +901,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     let buyback = match buyback_cost {
         None => false,
         Some(m) => {
-            let mana = lower_mana_cost(l, "CardPrinting.buyback_cost", m);
+            let mana = lower_printed_cost(l, "CardPrinting.buyback_cost", m, 0, buyback_cost_str, false);
             if !additional.is_empty() || kicker.is_some() {
                 l.unsupported("CardPrinting.buyback_cost(with other additional costs)");
             }
@@ -906,7 +937,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // Dash (CR 702.109): an alternative cost; the dashed permanent's
     // delayed "return to hand" ability.
     let dash = dash_cost.as_ref().map(|m| {
-        let mana = lower_mana_cost(l, "CardPrinting.dash_cost", m);
+        let mana = lower_printed_cost(l, "CardPrinting.dash_cost", m, 0, dash_cost_str, false);
         let mut d = crate::program::Builder::default();
         d.op(crate::program::Op::Ext(crate::program::Ext::ReturnEventObjToHand));
         let k = l.delayed_ability(d.finish());
@@ -924,7 +955,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             l.unsupported("CardPrinting.warp_cost.x_pips(not the mana cost's)");
         }
         let plain = cats::ManaCost::ManaCost(nodes::ManaCost { x_pips: 0, ..n.clone() });
-        let mana = lower_mana_cost(l, "CardPrinting.warp_cost", &plain);
+        let mana = lower_printed_cost(l, "CardPrinting.warp_cost", &plain, n.x_pips, warp_cost_str, false);
         let mut d = crate::program::Builder::default();
         d.op(crate::program::Op::Ext(crate::program::Ext::WarpExile));
         let k = l.delayed_ability(d.finish());
@@ -946,7 +977,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // Miracle (CR 702.94): "when you reveal this card this way, you may cast
     // it by paying [cost] rather than its mana cost".
     let miracle = miracle_cost.as_ref().map(|m| {
-        let mana = lower_mana_cost(l, "CardPrinting.miracle_cost", m);
+        let mana = lower_printed_cost(l, "CardPrinting.miracle_cost", m, 0, miracle_cost_str, false);
         let mut d = crate::program::Builder::default();
         d.op(crate::program::Op::Ext(crate::program::Ext::MiracleCast));
         (mana, l.delayed_ability(d.finish()))
@@ -954,11 +985,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if dash.is_some() && ty & types::CREATURE == 0 {
         l.unsupported("CardPrinting.dash_cost(not a creature)");
     }
-    let flashback = flashback_cost.as_ref().map(|m| lower_mana_cost(l, "CardPrinting.flashback_cost", m));
+    let flashback = flashback_cost.as_ref().map(|m| lower_printed_cost(l, "CardPrinting.flashback_cost", m, 0, flashback_cost_str, false));
     let escape = match (escape_cost, escape_exile_count) {
         (None, 0) => None,
         (Some(m), n) if *n > 0 => {
-            let mana = lower_mana_cost(l, "CardPrinting.escape_cost", m);
+            let mana = lower_printed_cost(l, "CardPrinting.escape_cost", m, 0, escape_cost_str, false);
             let n = l.int("CardPrinting.escape_exile_count", *n, 1, 20) as u8;
             Some((mana, Cost { exile_graveyard: n, ..Cost::default() }))
         }
@@ -2328,11 +2359,8 @@ fn lower_additional_option(l: &mut Lowerer, o: &cats::AdditionalCostOption) -> O
     Some(c)
 }
 
-/// `ManaCost` without X (hybrid pairs and Phyrexian pips included).
-/// A permanent's kicker cost -> (its mana, it is {X}). The IR's structured
-/// cost counts {C} as generic (docs/ir_defects.md 5): its `kicker_cost_str`
-/// says which pips are {C}, read when the two agree otherwise (ENGINE.md 3,
-/// rule 4a).
+/// A permanent's kicker cost -> (its mana, it is {X}); the {C} pips from
+/// `kicker_cost_str` (`lower_printed_cost`, docs/ir_defects.md 5).
 fn kicker_mana(l: &mut Lowerer, m: &cats::ManaCost, s: &str) -> Option<(ManaCost, bool)> {
     let cats::ManaCost::ManaCost(n) = m;
     if n.x_pips != 0 {
@@ -2342,22 +2370,71 @@ fn kicker_mana(l: &mut Lowerer, m: &cats::ManaCost, s: &str) -> Option<(ManaCost
         }
         return Some((ManaCost::default(), true));
     }
-    let plain = lower_mana_cost(l, "CardPrinting.kicker_cost", m);
-    let Some(text) = ManaCost::parse(s) else {
-        l.unsupported(format!("CardPrinting.kicker_cost_str({s})"));
-        return None;
-    };
-    let mut same = text;
-    same.generic = same.generic.saturating_add(same.pips[5]);
-    same.pips[5] = 0;
-    if same != plain {
-        l.unsupported("CardPrinting.kicker_cost_str(differs from kicker_cost)");
-        return None;
-    }
-    Some((text, false))
+    Some((lower_printed_cost(l, "CardPrinting.kicker_cost", m, 0, s, false), false))
 }
 
-pub(crate) fn lower_mana_cost(l: &mut Lowerer, what: &str, c: &cats::ManaCost) -> ManaCost {
+/// A printed mana cost (an IR `*_str`, Oracle's spelling): its mana without
+/// {X} (CR 107.4: `{C}` in `pips[C]`, 107.4c) and how many {X} it has
+/// (107.3). "" is a cost with no mana symbol. `split`: a split card's
+/// "{G} // {1}{B}" is its two halves' costs combined (CR 709.4b). Anything
+/// [`ManaCost::parse`] can't read is `None`.
+pub(crate) fn parse_printed_cost(s: &str, split: bool) -> Option<(ManaCost, i64)> {
+    if split {
+        if let Some((a, b)) = s.split_once(" // ") {
+            let (ca, xa) = parse_printed_cost(a, false)?;
+            let (cb, xb) = parse_printed_cost(b, false)?;
+            return Some((ca.plus(&cb), xa + xb));
+        }
+    }
+    let x = s.matches("{X}").count() as i64;
+    let rest = s.replace("{X}", "");
+    if rest.trim().is_empty() {
+        return Some((ManaCost::default(), x));
+    }
+    ManaCost::parse(&rest).map(|c| (c, x))
+}
+
+/// A structured mana cost `m` and its printed form `s`, which the IR gives
+/// both of (`mana_cost` / `mana_cost_str`, `mana` / `mana_str`, `<kind>_cost`
+/// / `<kind>_cost_str`): one value said twice, so they must agree (ENGINE.md
+/// 3, rule 4a). `x`: the {X} pips the caller took off `m` (the printed form
+/// has those and `m`'s own; `m`'s own are denied, as [`lower_mana_cost`]
+/// does). `split`: [`parse_printed_cost`].
+///
+/// {C} (CR 107.4c, 106.1b, 202.1a: paid only with colorless mana): most of
+/// mtg-bot's builders count a `{C}` as generic mana in the structured cost
+/// (`parse_mana_cost`'s default, docs/ir_defects.md 5 and 341), so the
+/// structured cost alone would let any mana pay it (Warping Wail's {1}{C}
+/// cast with two Islands). The printed form says which pips are {C}: the
+/// cost is the printed one when the two agree once its {C} pips are counted
+/// as generic, as well as when they agree outright (an IR that carries the
+/// pip, `colored: [[C, n]]`, as Mirrorpool's). Every other difference is a
+/// blocker (`<what>_str(differs from <what>)`), never a guess. Every mana
+/// cost the IR structures goes through here (casting, activation, kicker,
+/// buyback, dash, warp, miracle, flashback, escape, splice, plot, squad,
+/// offspring, bestow, emerge, reconfigure, ward, the granted warp, a
+/// pay-or-else); costs the IR gives only as strings are parsed whole
+/// ([`ManaCost::parse`], `{C}` included). ENGINE.md 146.2.
+pub(crate) fn lower_printed_cost(l: &mut Lowerer, what: &str, m: &cats::ManaCost, x: i64, s: &str, split: bool) -> ManaCost {
+    let cats::ManaCost::ManaCost(n) = m;
+    let structured = lower_mana_cost(l, what, m);
+    let Some((printed, px)) = parse_printed_cost(s, split) else {
+        l.unsupported(format!("{what}_str({s})"));
+        return structured;
+    };
+    let mut folded = printed;
+    folded.generic = folded.generic.saturating_add(folded.pips[crate::mana::C]);
+    folded.pips[crate::mana::C] = 0;
+    if px != x + n.x_pips || (printed != structured && folded != structured) {
+        l.unsupported(format!("{what}_str(differs from {what})"));
+        return structured;
+    }
+    printed
+}
+
+/// `ManaCost` without X (hybrid pairs and Phyrexian pips included). Only
+/// through [`lower_printed_cost`], which checks it against its printed form.
+fn lower_mana_cost(l: &mut Lowerer, what: &str, c: &cats::ManaCost) -> ManaCost {
     let cats::ManaCost::ManaCost(nodes::ManaCost { generic, colored, x_pips, hybrid, phyrexian }) = c;
     l.deny(&format!("{what}.x_pips"), x_pips);
     let mut out = ManaCost { generic: l.int("ManaCost.generic", *generic, 0, 30) as u64, ..ManaCost::default() };

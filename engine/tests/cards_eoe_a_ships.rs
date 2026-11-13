@@ -41,12 +41,16 @@ fn atmospheric_greenhouse_counters_on_each_creature_you_control_cr122_6() {
     assert_eq!(g.counters_on(ship, Counter::P1P1), 0);
 }
 
-/// "When this Spacecraft enters, it deals 3 damage to any target. ... {1}{R}:
-/// This Spacecraft gets +2/+0 until end of turn." The pump can be activated
-/// while it isn't a creature; it applies once it is one (CR 611.2c: locked
-/// in; 722.2b).
+/// "When this Spacecraft enters, it deals 3 damage to any target. / Station
+/// ... / 8+ | Flying / {1}{R}: This Spacecraft gets +2/+0 until end of
+/// turn." The pump is printed in the 8+ striation, below "8+ | Flying"
+/// (CR 722.2: "any abilities printed within the same text box striation as
+/// a station symbol are part of its static ability"; 722.2a): with 3
+/// charge counters it has no pump to activate; stationed to 8 it has the
+/// pump and flying and is a 1/5 (722.2b), pumped to 3/5. (Until ENGINE.md
+/// 146 the pump was always on: docs/ir_defects.md 340.)
 #[test]
-fn debris_field_crusher_deals_3_and_pumps_cr611_2c() {
+fn debris_field_crusher_deals_3_and_pumps_only_at_8_cr722_2() {
     let g = cast_ship(&["Mountain"; 5], &[], &[], "Debris Field Crusher", |g| {
         (g.kind() == Some(DecisionKind::Target)).then(|| target_player(1))
     });
@@ -57,15 +61,17 @@ fn debris_field_crusher_deals_3_and_pumps_cr611_2c() {
         .at(Step::Main1, 0)
         .start();
     let ship = bf(&g, 0, "Debris Field Crusher");
-    assert!(g.has_option(act(ship, 0)), "{{1}}{{R}}: +2/+0, not a creature");
-    g.choose(act(ship, 0));
-    pay(&mut g);
-    settle(&mut g);
+    assert!(!g.has_option(act(ship, 0)), "3 counters: no 8+ pump\n{:?}", g.options_desc());
     let giant = bf(&g, 0, "Lane A Giant");
     station(&mut g, ship, giant);
     assert_eq!(g.counters_on(ship, charge()), 8);
-    assert_eq!((g.power(ship), g.toughness(ship)), (3, 5));
+    assert_eq!((g.power(ship), g.toughness(ship)), (1, 5));
     assert!(g.has_kw(ship, Kw::Flying));
+    assert!(g.has_option(act(ship, 0)), "8 counters: {{1}}{{R}}: +2/+0\n{:?}", g.options_desc());
+    g.choose(act(ship, 0));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!((g.power(ship), g.toughness(ship)), (3, 5));
 }
 
 /// "When this Spacecraft enters, destroy target noncreature permanent. Then

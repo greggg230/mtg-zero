@@ -6,7 +6,7 @@ Status: 2026-10-22, engine at main 7c014ca + the M7b card tests (branch `m7b-tes
 `3073a633` (branch main). Updated 2026-10-23 for M7b part 3 (copies, branch `m7b-copies`, 410 supported): no new
 defect; entry 11 gains two classes, and the copy cards' Python-only switches are listed under "Checked and not
 defects". Updated 2026-10-23 for M7b part 3b (the stack, ward, the initiative, graveyard abilities, branch
-`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". Updated 2026-10-25 (branch `m7d-ir`, 546 supported): the IR now in use is mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`), which fixes entries 1, 2, 4, 12, 13, 15, 16, 17 and 18 (each entry's last bullet); the lowering reads the fixed forms and `lower::IR_DEFECTS` is empty: every cube card is supported. Updated 2026-11-08 (branch `eoe-irfix`, ENGINE.md 99.9): the IR now in use is mtg-bot `feature/eoe-ir-fixes` 5362f5ed (schema `675cfc50fc4e`), which fixes entries 20-23, 26, 40-42, 46, 48, 51, 60, 62-64, 81 and 82 (for 21, 41 and 62 only some of their cards; each entry's last bullet); the other Edge of Eternities entries stand. Updated 2026-11-08 (branch `eoe-e-loose`, ENGINE.md 100.6, the faithfulness audit's follow-ups): entries 190 and 191 (Python engine switches the IR carries, section R) and a note on entry 2 (the audit's N16). Updated 2026-11-11 (branch `doomsday-a`, ENGINE.md 124.1, Legacy Doomsday lane A): entry 200 (Pact of Negation's colour indicator, section T), fixed in mtg-bot `feature/doomsday-a-ir`. The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
+`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". Updated 2026-10-25 (branch `m7d-ir`, 546 supported): the IR now in use is mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`), which fixes entries 1, 2, 4, 12, 13, 15, 16, 17 and 18 (each entry's last bullet); the lowering reads the fixed forms and `lower::IR_DEFECTS` is empty: every cube card is supported. Updated 2026-11-08 (branch `eoe-irfix`, ENGINE.md 99.9): the IR now in use is mtg-bot `feature/eoe-ir-fixes` 5362f5ed (schema `675cfc50fc4e`), which fixes entries 20-23, 26, 40-42, 46, 48, 51, 60, 62-64, 81 and 82 (for 21, 41 and 62 only some of their cards; each entry's last bullet); the other Edge of Eternities entries stand. Updated 2026-11-08 (branch `eoe-e-loose`, ENGINE.md 100.6, the faithfulness audit's follow-ups): entries 190 and 191 (Python engine switches the IR carries, section R) and a note on entry 2 (the audit's N16). Updated 2026-11-11 (branch `doomsday-a`, ENGINE.md 124.1, Legacy Doomsday lane A): entry 200 (Pact of Negation's colour indicator, section T), fixed in mtg-bot `feature/doomsday-a-ir`. Updated 2026-11-12 (branch `fix/eoe-station`, ENGINE.md 146, the Fable review's lane E): entries 340 (station striations, fixed in mtg-bot `feature/eoe-station-ir` 68b62ed3, local) and 341 (Warping Wail's {C}, read from the printed cost by the lowering), section X. The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
 cards export-ir`) from the card printings its oracle-text parser builds (`src/mtg_bot/cards/parser/`)
 and the effect dataclasses (`src/mtg_bot/effects/`). This file lists where the IR says something
 other than the Oracle text, or leaves out what a consumer needs, with the parser code that produces
@@ -98,6 +98,8 @@ permission) and a consumer can go wrong with it.
 | 190 | Palantír of Orthanc (faithfulness audit N17, ENGINE.md 100.6) | Python switch | `Scry { amount: 2 }` with `bottom_choice` left at its default `false` ("keep all on top", the Python class's first-slice shortcut) | a scry (CR 701.18a: any number on the bottom): `bottom_choice: true` | `cards/parser/artifact_effects.py::_parse_palantir_body`; `effects/generic/library_lookat.py::Scry` (the default) | supported; the field is ignored, every scry lowers as 701.18a | confirmed |
 | 191 | Chain of Smog (docs/shortcuts.md 26.11.9, ENGINE.md 100.6) | Python switch | `TargetPlayerMayCopyThisSpell` with `needs_target_with_cards_in_hand` at its default `true` (the copy offered only while a player it could target has cards in hand) | no condition ("That player may copy this spell") | `effects/generic/spell_copies.py::TargetPlayerMayCopyThisSpell` (the default) | supported; the field is ignored, the copy is always offered | confirmed |
 | 200 | Pact of Negation (Legacy Doomsday, lane A, ENGINE.md 124.1); every single-faced card with a colour indicator (the roto pool's Dryad Arbor) | colour dropped | no `color_indicator`: a colourless {0} instant | `color_indicator: [U]` (CR 204, 202.2e: blue; Force of Will and Force of Negation may exile it, Pyroblast counters it) | `cards/parser/source.py::build_card_record` (no single-faced builder read Scryfall's `color_indicator`; a back face's reached the IR as `face_colors`) | fixed (mtg-bot `feature/doomsday-a-ir`), supported | confirmed |
+| 340 | The Seriema, Debris Field Crusher, Entropic Battlecruiser, Infinite Guideline Station, Sledge-Class Seedship, Specimen Freighter (Edge of Eternities; the Fable review, ENGINE.md 146.1) | striation dropped | the ability printed on a line below an "N+ \| ..." line with `tier_threshold: 0` (always on) | `tier_threshold: N`: it is in the N+ striation (CR 722.2), the permanent has it only with N or more charge counters | `cards/parser/spacecraft_builder.py::_build_spacecraft_printing` (the arm for a line without its own "N+ \|" prefix) | fixed (mtg-bot `feature/eoe-station-ir` 68b62ed3), supported | confirmed |
+| 341 | Warping Wail (EoE Special Guests; ENGINE.md 146.2); the same defect as entries 5 and 67 | lossy schema | `mana_cost: { generic: 2 }` for `mana_cost_str: "{1}{C}"` | `generic: 1, colored: [[C, 1]]` (CR 107.4c: payable only with colorless mana) | `cards/base.py::parse_mana_cost` (`colorless_pips=False`, the default every builder but Mirrorpool's uses) | read from `mana_cost_str` (every structured cost is now checked against its printed form, `lower_printed_cost`), supported | confirmed |
 
 ## Confirmed defects
 
@@ -1242,6 +1244,64 @@ amount, creature_filter }` (`ObjectNot(HasKeyword flying)` for Rough, `HasKeywor
 card builds through the existing `split_faces` path (Life // Death's). Representational note: "colorless" has two
 classes of the same meaning, `cube_walkers.IsColorless` (the cube's) and `roto_stack.IsColorless` (Consign's); both
 lower to `Filter::Colorless` (CR 105.2c, the object's colour now).
+
+
+### X. The Fable review's fixes, lane E: station striations and {C} (ENGINE.md 146)
+
+Entries 340-349 are this lane's.
+
+340. **Station striations** (The Seriema, Debris Field Crusher, Entropic Battlecruiser, Infinite Guideline
+     Station, Sledge-Class Seedship, Specimen Freighter). Oracle (Scryfall's lines): "7+ | Flying / Other tapped
+     legendary creatures you control have indestructible." (The Seriema); "8+ | Flying / {1}{R}: This Spacecraft gets
+     +2/+0 until end of turn." (Debris Field Crusher); "8+ | Flying, deathtouch / Whenever this Spacecraft attacks,
+     each opponent discards a card. ..." (Entropic Battlecruiser); "12+ | Flying / Whenever Infinite Guideline Station
+     attacks, ..."; "7+ | Flying / Whenever this Spacecraft attacks, you may put a creature card ..." (Sledge-Class
+     Seedship); "9+ | Flying / Whenever this Spacecraft attacks, defending player mills four cards." (Specimen
+     Freighter).
+     * IR: the second line's ability with `tier_threshold: 0`, so the permanent has it at all times (The Seriema's
+       grant whenever it is on the battlefield; the pump and the attack triggers once something else makes the
+       Spacecraft a creature, Synthesizer Labship's 2+ ability or Tezzeret's emblem).
+     * Should be: `tier_threshold: N`. CR 722.2 (2026-11-06): "Any abilities printed within the same text box
+       striation as a station symbol are part of its static ability"; 722.3: the striations demarcate "which
+       abilities ... are associated with which station symbol"; the last striation runs to the bottom of the text
+       box. Scryfall writes a striation's first ability on its "N+ |" line and each further one on a line below it;
+       the printed cards (Gatherer EOE 35, 131, 99, 219, 208, 76) show each of these abilities inside the last
+       striation, below the flying line. CR 722.4 ("any ability ... that isn't preceded by a station symbol is
+       treated normally") is about the abilities above the first station symbol.
+     * Source: `cards/parser/spacecraft_builder.py::_build_spacecraft_printing`: a line without its own "N+ |"
+       prefix went to the plain-line arm, which never set a threshold (its comment called The Seriema's grant
+       "always-on").
+     * Fix (mtg-bot `feature/eoe-station-ir` 68b62ed3, from `feature/delver-sb-ir` 22aa7682; local, not
+       pushed): the builder keeps the striation of the last "N+ |" line and stamps it on the activated, static and
+       triggered abilities of the lines below it. The re-export changes exactly these six cards (the attack
+       triggers sort after the striation's other triggers: Entropic Battlecruiser's two swap places); the cube's and
+       the legacy pool's IR and the schema are byte for byte the same. The mtg-bot tests that pinned the old reading
+       (its Python engine and parity fixtures) are listed in ENGINE.md 146.1.
+     * Engine: supported; the tiers lower through `lower_trigger_tiered`, `lower_static_tiered`,
+       `lower_activated_tiered` (ENGINE.md 99.2). `tests/cards_eoe_striations.rs`, whose sweep lists every station
+       card's abilities with the striation they are printed in and fails on a re-export that drops one.
+
+341. **Warping Wail** (EoE Special Guests). Oracle: "{1}{C} Instant. Choose one — ...".
+     * IR: `mana_cost: { generic: 2 }` beside `mana_cost_str: "{1}{C}"`: the {C} pip counted as generic, so two
+       Islands cast it (the Fable review's probe `zz_rules_c::c01`). Entry 5's defect (Sowing Mycospawn's kicker)
+       in a spell's own mana cost; entry 67 fixed it for Mirrorpool's activation costs only, by an opt-in.
+     * Should be: `generic: 1, colored: [[C, 1]]` (CR 107.4c, 106.1b, 202.1a).
+     * Source: `cards/base.py::parse_mana_cost(s, colorless_pips=False)`: `{C}` is generic unless a caller opts in
+       (only Mirrorpool's land builder does).
+     * Fix (mtg-bot, not done here): make `colorless_pips=True` the default (or drop the flag), which fixes entries
+       5 and 341 at once; the consumers to check first are mtg-bot's own payment (`actions._coin_matches_color`
+       already pays a "C" pip with colorless mana only), its Rust bridge and parity fixtures, and the card-vocab
+       fingerprints (the roto pool's Thief of Existence and Kozilek's Command change too). No mtg-zero change is
+       needed when it lands: the lowering takes the exact form as it is.
+     * Engine: the lowering checks every structured mana cost against its printed form
+       (`lower/printing.rs::lower_printed_cost`, ENGINE.md 3 rule 4a): the cost is the printed one when the two
+       agree outright or once the printed {C} pips are counted as generic; any other difference is a blocker. It
+       covers every cost the IR structures (casting, activation, kicker, buyback, dash, warp, miracle, flashback,
+       escape, splice, plot, squad, offspring, bestow, emerge, reconfigure, ward, the granted warp, a pay-or-else),
+       replacing `kicker_mana`'s own reading for entry 5. Supported; `tests/rules_colorless_pips.rs`. The three
+       pools' audit: 1,316 structured costs, all equal to their printed form but Warping Wail and Sowing Mycospawn
+       ({C} as generic), the transform back faces (entry 9: the lowering already drops the copied cost) and the two
+       split cards (the printed "{G} // {1}{B}" is the halves' costs combined, CR 709.4b).
 
 ## Suspected defects (representational)
 

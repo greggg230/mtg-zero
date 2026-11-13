@@ -29,11 +29,7 @@ pub(crate) fn except_kws(l: &mut Lowerer, kws: &[cats::Keyword], what: &str) -> 
 
 /// A cost and its display twin, which must agree (ENGINE.md 3, rule 4a).
 pub(crate) fn checked_cost(l: &mut Lowerer, what: &str, m: &cats::ManaCost, s: &str) -> ManaCost {
-    let mana = super::printing::lower_mana_cost(l, what, m);
-    if ManaCost::parse(s) != Some(mana) {
-        l.unsupported(format!("{what}_str(differs from {what})"));
-    }
-    mana
+    super::printing::lower_printed_cost(l, what, m, 0, s, false)
 }
 
 /// Two target specifications, the second "another target" (CR 115.3: its

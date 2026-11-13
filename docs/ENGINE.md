@@ -18746,10 +18746,14 @@ Sliver Overlord (the Sliver search; control that lasts past the turn), Specimen 
 non-Spacecraft creatures, station 9, the defending player's mill), Starport Security (another target;
 {2} less with a +1/+1-counter creature of yours only). Every one behaves as its Oracle text says.
 Read and kept: Specimen Freighter's "defending player mills four cards" is `EachOpponentMillsCards`,
-the same player in a two-player game (CR 506.2); a line after an "N+ |" line (The Seriema's "other
-tapped legendary creatures ...", the attack triggers of four Spacecraft, Debris Field Crusher's pump)
-is untiered in the IR, as the Oracle text writes it (CR 722.4: an ability not preceded by a station
-symbol is treated normally).
+the same player in a two-player game (CR 506.2). *Corrected by ENGINE.md 146.1:* a line after an
+"N+ |" line (The Seriema's "other tapped legendary creatures ...", the attack triggers of four
+Spacecraft, Debris Field Crusher's pump) is an ability of that striation (CR 722.2: "any abilities
+printed within the same text box striation as a station symbol are part of its static ability"; a
+striation runs to the next station symbol or the bottom of the text box), so the permanent has it
+only with N or more charge counters. The IR left those six abilities untiered (docs/ir_defects.md
+340), and this section first read that as CR 722.4, which is about the abilities above the first
+station symbol only.
 
 **Taken off, IR defects** (docs/ir_defects.md 100-101, `lower::IR_DEFECTS` under "Cross-lane pass"):
 
@@ -29774,6 +29778,148 @@ failed; the mtg-smoke run-loop smoke (iterations [0, 1], 16 games, 0 unfinished)
 passed, 3 failed - the new timing test and the shared queue's (`infer_share` > 1: the double count above) and
 `test_select_scale` (it compares two runs' metrics without timing keys, and `timing` was not one) - all three pass on
 c275a1e.
+
+## 146. Station striations and `{C}` in every cost: the Fable review's EoE rules fixes (branch `fix/eoe-station`, lane E, 2026-11-12)
+
+**Why.** The Fable review of `e81f8304..267ae603` (slice `rules.md`, B1 and B2) found two Edge of Eternities
+defects, both confirmed by its probes (`zz_rules_c::c01`-`c04`): six station cards had an ability of their last
+striation at all times, and Warping Wail's `{1}{C}` was paid as `{2}`. EoE is on hold (run 2 paused at iteration 87,
+layout v6), so nothing live changes, but EoE play does.
+
+### 146.1 Station striations (CR 722.2)
+
+**The rule.** CR 722.2 (2026-11-06): "A station symbol represents a static ability. ... Any abilities printed
+within the same text box striation as a station symbol are part of its static ability." 722.2a: "{N+}[abilities]"
+means "as long as this permanent has N or more charge counters on it, it has [abilities]". 722.3: the striations
+demarcate "which abilities and which power/toughness box are associated with which station symbol". A striation runs
+from its station symbol to the next one, the last to the bottom of the text box. 722.4 ("any ability a station card
+has that isn't preceded by a station symbol is treated normally") is about the abilities above the first station
+symbol: the enters triggers, The Eternity Elevator's "{T}: Add {C}{C}{C}", station itself.
+
+**What was wrong.** Scryfall's Oracle text writes a striation's first ability on its "N+ |" line and each further one
+on a line below it. mtg-bot's Spacecraft builder read such a line as untiered, and 99.8 kept it, citing 722.4 (now
+corrected in place). Six cards (each layout checked on Gatherer, EOE 35, 131, 99, 219, 208, 76: the ability is
+printed inside the last striation, below its flying line):
+
+| Card | Striation | Ability that was always on |
+|---|---|---|
+| The Seriema | 7+ | "Other tapped legendary creatures you control have indestructible." |
+| Debris Field Crusher | 8+ | "{1}{R}: This Spacecraft gets +2/+0 until end of turn." |
+| Entropic Battlecruiser | 8+ | "Whenever this Spacecraft attacks, each opponent discards a card. Each opponent who can't loses 3 life." |
+| Infinite Guideline Station | 12+ | "Whenever Infinite Guideline Station attacks, draw a card for each multicolored permanent you control." |
+| Sledge-Class Seedship | 7+ | "Whenever this Spacecraft attacks, you may put a creature card from your hand onto the battlefield." |
+| Specimen Freighter | 9+ | "Whenever this Spacecraft attacks, defending player mills four cards." |
+
+The Seriema's grant was wrong in ordinary play whenever it was unstationed; the pump and the attack triggers were
+reachable once something else made the Spacecraft a creature below its threshold (Synthesizer Labship's 2+ ability,
+Tezzeret's emblem).
+
+**The fix, at the parser** (docs/ir_defects.md 340). mtg-bot `feature/eoe-station-ir` 68b62ed3 (from
+`feature/delver-sb-ir` 22aa7682, the IR's current source; local, not pushed): `cards/parser/spacecraft_builder.py`
+keeps the striation of the last "N+ |" line and stamps it (`tier_threshold`) on the activated, static and triggered
+abilities of the lines below it. `cards export-ir --pool cube legacy eoe`, `filter_eoe_ir.py`: `eoe.ir.json` changes
+in exactly the six cards (the six abilities gain `tier_threshold`; Entropic Battlecruiser's two triggers swap places,
+the builder sorting tiered triggers by threshold); `powerlsv.ir.json`, `legacy.ir.json` and the schema
+(`693d23a4a259...`) are byte for byte the same, so `generated.rs` is unchanged. The engine needed nothing new: the
+tiers lower through 99.2's `lower_trigger_tiered` (a trigger only while the source has N counters, checked as the
+event happens), `lower_static_tiered` and `lower_activated_tiered` (an "activate only if").
+
+**mtg-bot's own tests.** The commit updates the three that pinned the parser's old output or its Python engine's
+always-on grant (`test_seriema`, `test_parser_spacecraft_builder`, `test_parser_spacecraft_bodies`; with
+`test_parser_spacecraft_tiers` and `test_tiered_triggers`, 69 pass). Its Rust-bridge parity fixtures still pin the
+untiered attack triggers and fail with it (`test_entropic_battlecruiser_parity`, `test_infinite_guideline_station_parity`,
+`test_sledge_class_seedship_parity`, `test_spacecraft_phase_3b_substrate_cycle_1`,
+`test_spacecraft_phase_3c_substrate_cycle_1`: the bridge's loader declines a tier-gated attack trigger); they are
+mtg-bot's port work, for its maintainer. Over the 131 mtg-bot test files that name a Spacecraft (3,640 tests), the parser change failed 41: 24 fail on 22aa7682 as well (unrelated: parity hashes, the Rust `GameObject` size, the audit-staleness counts, The Eternity Elevator's and the charge-counter mana's parity, Seedship Impact's admission), 17 were the striation's: 3 updated, the 14 parity ones above left.
+
+**Tests** (`tests/cards_eoe_striations.rs`, 8; the review's probes turned round to the Oracle text):
+`cr_722_2a_the_seriema_grants_indestructible_only_at_seven` (0, 6, 7 counters),
+`cr_722_2a_an_unstationed_seriema_doesnt_save_a_tapped_legend` (c02: Bombard kills a tapped Haliya at 0 counters, not
+at 7), `cr_722_2a_debris_field_crusher_has_its_pump_only_at_eight` (c03: 0, 7, 8), one per attack trigger
+(c04's route: Synthesizer Labship animates the Spacecraft below its threshold; it attacks with no trigger, and at the
+threshold its trigger goes on the stack), and the sweep
+`cr_722_2_every_station_cards_abilities_are_in_their_printed_striations`: all 27 station cards of the table (22
+Spacecraft, 5 Planets), each triggered, static and activated ability with the striation it is printed in, against the
+IR, so a re-export that drops a striation fails (the review's I2). Changed: `cards_eoe_a_ships.rs`'s Debris Field
+Crusher test (it asserted the pump at 3 counters: now not offered at 3, offered at 8) and `rules_payment_b.rs`'s
+High Market / The Seriema cost-order test (The Seriema now has 7 counters, so its grant applies as the test means).
+
+### 146.2 `{C}` in every structured cost (CR 107.4c)
+
+**What was wrong.** mtg-bot's `parse_mana_cost` counts `{C}` as generic mana unless a builder opts in
+(docs/ir_defects.md 5, 67; Mirrorpool's costs opted in). Warping Wail's `mana_cost` is `{generic: 2}` beside
+`mana_cost_str` "{1}{C}" (entry 341), and the lowering read the structured cost alone (`mana_cost_str` was an
+"informational duplicate"), so two Islands cast it. CR 107.4c: `{C}` is "a cost that can be paid only with one
+colorless mana"; 202.1a: paying a mana cost "requires matching the type of any colored or colorless mana symbols".
+Sowing Mycospawn's kicker had the same defect and its own reading from the string (`kicker_mana`, entry 5);
+activation costs, the main cost and every alternative or additional cost had none.
+
+**The fix: one checked lowering for every structured cost** (`lower/printing.rs::lower_printed_cost`, ENGINE.md 3 rule
+4a: the IR says the cost twice, so the two must agree). It lowers the structured cost and parses the printed one
+(`parse_printed_cost`: `{X}` counted apart, "" no mana symbol, a split card's "{G} // {1}{B}" its halves combined,
+CR 709.4b). The cost is the printed one when the two agree outright (an IR with `colored: [[C, n]]`) or once the
+printed `{C}` pips are counted as generic (the lossy default); any other difference is a blocker
+(`<what>_str(differs from <what>)`, or `<what>_str(<text>)` when unreadable), never a guess. Every place the IR
+structures a mana cost goes through it: the card's (and each face's and half's) mana cost, activated abilities (on
+the battlefield and elsewhere, `{X}` included), kicker (spell and permanent: `kicker_mana` now uses it), buyback,
+dash, warp, miracle, flashback, escape, and through `checked_cost` splice, plot, squad, offspring, bestow, emerge,
+reconfigure, ward, the attached ward and the pay-to-copy; the granted warp (`eoe_w5.rs`). A printed cost with no
+structured one is a blocker too (`<what>_str(without <what>)`). The costs the IR gives only as text (alternative
+costs, `unless_pays`, replicate, chain, landcycling, a pay-or-else, Airbend) were already parsed whole by
+`ManaCost::parse`, `{C}` included. Every such lowering is the only path: `lower_mana_cost` is private to
+`lower_printed_cost`.
+
+**The audit** (a scratch script over the three IR files, every structured `ManaCost` against its string): 1,316
+structured costs (cube 805, legacy 26, EoE 485); all equal but Warping Wail's and Sowing Mycospawn's kicker (`{C}` as
+generic), the ten transform back faces (entry 9: the face lowering already replaces the copied cost by none, with
+its empty string) and the two split cards (Life // Death, Rough // Tumble: the combined cost). No other card in the
+pools prints `{C}` in a cost (the roto pool's Thief of Existence and Kozilek's Command are in no table).
+
+**Tests** (`tests/rules_colorless_pips.rs`, 9): Warping Wail's definition ({1}{C}, mana value 2, colorless),
+`cr_107_4c_warping_wail_needs_colorless_mana` (c01: two Islands can't cast it, two Strip Mines can, Island and Strip
+Mine cast it with both lands), custom cards lowered one by one in the lossy and the exact form for the mana cost,
+an activated ability (and Mirrorpool's two real ones), flashback and buyback, warp and dash, ward and a permanent's
+kicker (and Sowing Mycospawn's real one), the blockers (a structured cost off by more than `{C}`, a colour instead of
+`{C}`, a printed cost without a structured one, an unreadable one, an activation's), and a sweep: every supported card
+of the three tables whose printed mana cost has `{C}` has as many colorless pips (Warping Wail alone today).
+The test kits' custom cards now print the cost they structure (`tests/common::printed_cost`): `common::spell` wrote
+`mana_cost_str: ""` for every custom spell, and `eoe_w2`, `eoe_w6_kit` and `rules_faithful_c` defaulted a missing one
+to "" (the check refused Test Phyrexian Shock and Test Rummage). Warping Wail's cost is seen as `{1}{C}` everywhere,
+the payment context's cost floats included (`encode::cost_floats`: one generic, one colorless pip, where it read two
+generic); the layout is unchanged.
+
+**Not changed in mtg-bot** (entry 341's fix, described there): `colorless_pips=True` as the default would fix entries
+5 and 341 at the parser; it touches mtg-bot's own engine and its parity fixtures, so it is left to the maintainer.
+The lowering takes either form.
+
+### 146.3 Verification
+
+* **Engine suite** (`cargo test --release -p engine`, on e52b5dd1's tree): 2,551 passed, 0 failed, 27 ignored (162
+  test binaries). The first run failed only where the new check refused two custom test cards whose kit printed no
+  cost (Test Phyrexian Shock, Test Rummage; the helpers fixed, 146.2).
+* **`FUZZ_GAMES=20000`** (the default pool): passed, 20,000 games (wins 9,803 / 10,075, 122 draws, 0 aborted, mean
+  31.8 turns, 438.2 decisions) and 1,000 matches (2,549 games), both replay tests; 3,107 s on a shared desktop.
+* **`FUZZ_POOL=eoe FUZZ_GAMES=20000`**: passed, every seed, 20,000 games (wins 7,118 / 7,047, 5,835 draws, 0 aborted,
+  mean 45.8 turns, 654.0 decisions; was 7,112 / 7,072, 5,816 draws, 654.2 on 100.5.1's games: the six striations and
+  Warping Wail play differently), 32 controlled decisions, longest turn 264 decisions, the replay tests; 10,913 s (one
+  process, a shared desktop).
+* **Behaviour digests**: the recorded games are the cube's (random decks of the cube's supported cards and the
+  heuristic bot), which holds no station card and no `{C}` cost the lowering now reads differently (Sowing Mycospawn's
+  kicker already came from its string), so they are expected EQUAL to main's: full 438164c0429d7fa3, `DIGEST_ENCODING=0`
+  a0062bb5569e06d3. `python tools/gate.py engine --no-mac` on this branch's final commit compares them (the report
+  gives its last line). EoE play, which changes on purpose, has no recorded digest yet (lane G, ENGINE.md 148).
+* **mtg-bot**: 146.1.
+
+### 146.4 For the orchestrator
+
+* The IR: `eoe.ir.json` comes from a local mtg-bot branch, `feature/eoe-station-ir` 68b62ed3 (one commit on
+  `feature/delver-sb-ir` 22aa7682). A later re-export must start from a branch that has it (or the striation sweep
+  fails, as it should).
+* No layout, encoding, zero-core or Python change. Behaviour digests: expected EQUAL (146.3); EoE behaviour
+  changes on purpose (the six cards, Warping Wail), so an EoE digest recorded by another lane (G) must be recorded
+  after this branch.
+* Other lanes' files touched: the shared test helpers `engine/tests/common/mod.rs` (`printed_cost`, `spell`),
+  `eoe_w2/mod.rs`, `eoe_w6_kit/mod.rs`, `rules_faithful_c.rs`, and one test in `rules_payment_b.rs`.
 
 ## 153. Best-of-three replays, the publisher and the sideboard census on layout v7: `delverai-bo3` (131, 132) merged into main (branch `delverai-bo3-v7`, 2026-11-12)
 

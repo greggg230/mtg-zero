@@ -86,7 +86,17 @@ When mtg-bot bumps `ir_version` (a change to the encoding rules, not to
 the card vocabulary), `support.rs`, `lib.rs` and the generator may need
 changes too; see mtg-bot `docs/CARD_IR.md`, "Versioning".
 
-## Current numbers (mtg-bot `feature/delver-sb-ir` 22aa7682)
+## Current numbers (mtg-bot `feature/eoe-station-ir` 68b62ed3)
+
+ENGINE.md 146.1 (station striations, the Fable review's lane E): exported with `cards export-ir --pool cube legacy
+eoe` from mtg-bot `feature/eoe-station-ir` 68b62ed3 (one commit on `feature/delver-sb-ir` 22aa7682, local), then
+`filter_eoe_ir.py`. The schema is unchanged (`693d23a4a259...`, so `generated.rs` too), and so are `powerlsv.ir.json`
+and `legacy.ir.json`, byte for byte. `eoe.ir.json` differs in six cards: an ability printed below an "N+ |" line
+gains `tier_threshold` N (The Seriema, Debris Field Crusher, Entropic Battlecruiser, Infinite Guideline Station,
+Sledge-Class Seedship, Specimen Freighter; docs/ir_defects.md 340). A re-export from 22aa7682 without that commit loses
+them: `tests/cards_eoe_striations.rs` then fails.
+
+### Before ENGINE.md 146 (mtg-bot `feature/delver-sb-ir` 22aa7682)
 
 ENGINE.md 122 (the Delver 75's five sideboard cards): exported with `cards export-ir --pool cube legacy eoe` from
 mtg-bot `feature/delver-sb-ir` 22aa7682 (from `feature/sneak-show-ir` 60e76c0a), then `filter_eoe_ir.py`; schema

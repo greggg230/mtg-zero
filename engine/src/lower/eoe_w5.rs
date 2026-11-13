@@ -21,11 +21,12 @@ pub(crate) fn hand_alt_grants(l: &mut Lowerer, grants: &[cats::HandAbilityGrant]
     let mut out = Vec::new();
     for g in grants {
         let cats::HandAbilityGrant::HandAbilityGrant(nodes::HandAbilityGrant { card_filter, granted_warp_cost, granted_warp_cost_str }) = g;
-        let _ = granted_warp_cost_str; // display form of `granted_warp_cost`
+        // (`granted_warp_cost_str`: the printed cost, checked against it below.)
         let Some(filter) = hand_card_filter(l, card_filter) else { continue };
         // What the grant gives: warp (the only ability the class carries).
         let Some(cost) = granted_warp_cost else {
             l.unsupported("HandAbilityGrant(no granted warp cost)");
+            l.deny("HandAbilityGrant.granted_warp_cost_str(without granted_warp_cost)", granted_warp_cost_str);
             continue;
         };
         // A granted cost with {X} would take the card's X (CR 107.3a); none
@@ -35,7 +36,7 @@ pub(crate) fn hand_alt_grants(l: &mut Lowerer, grants: &[cats::HandAbilityGrant]
             l.unsupported("HandAbilityGrant.granted_warp_cost.x_pips");
             continue;
         }
-        let mana = super::printing::lower_mana_cost(l, "HandAbilityGrant.granted_warp_cost", cost);
+        let mana = super::printing::lower_printed_cost(l, "HandAbilityGrant.granted_warp_cost", cost, 0, granted_warp_cost_str, false);
         let mut d = crate::program::Builder::default();
         d.op(crate::program::Op::Ext(crate::program::Ext::WarpExile));
         let k = l.delayed_ability(d.finish());
