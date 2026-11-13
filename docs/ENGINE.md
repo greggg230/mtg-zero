@@ -29459,3 +29459,11 @@ player's cards, at most 64, 58.3), `go::RANK` by a graveyard.
 * **pytest** (`bash tools/build_py.sh`, `python -m pytest -q tests`): **323 passed, 1 skipped** (= main's).
 * **The tier "encoding" gate** on this commit: 142.6.
 * **The census** (`encoding_gap_census`, 300 games a pool) and what each known gap costs to close: the options memo.
+
+### 142.6 The tier "encoding" gate on 79f242a7
+
+`python tools/gate.py encoding --no-mac --expect-digest 6deaf8cd9d5d3692 --expect-digest0 a0062bb5569e06d3 --checkpoint
+<a layout v7 cube smoke network: iteration 3 of 125.12's smokes10/cube_cpu, copied>`: build, `DIGEST_ENCODING=0`
+a0062bb5569e06d3 and the full digest 6deaf8cd9d5d3692 (both = expected), `--test az` 53 passed, the checkpoint loads and
+plays (8 games, 0 unfinished), pytest 323 passed, 1 skipped - **GATE PASSED encoding 79f242a7400d** in 1,493 s
+(`--no-mac`: the tier has no Mac step).
