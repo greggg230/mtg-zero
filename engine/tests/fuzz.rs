@@ -2481,8 +2481,24 @@ fn row_difference(x: &engine::az::tail_encode::Row, y: &engine::az::tail_encode:
         return Some(format!("head float {i}: {} / {}", x.head[i], y.head[i]));
     }
     let bits = |t: &[(u16, u32, Vec<f32>)]| -> Vec<(u16, u32, Vec<u32>)> { t.iter().map(|(g, s, v)| (*g, *s, v.iter().map(|f| f.to_bits()).collect())).collect() };
-    if bits(&x.tail) != bits(&y.tail) {
-        return Some(format!("tail tokens: {} / {}", x.tail.len(), y.tail.len()));
+    let (bx, by) = (bits(&x.tail), bits(&y.tail));
+    if bx != by {
+        // (the first token that differs: its segment and slot in each row, and its first differing float)
+        let k = (0..bx.len().min(by.len())).find(|&k| bx[k] != by[k]).unwrap_or(bx.len().min(by.len()));
+        let name = |t: Option<&(u16, u32, Vec<u32>)>| {
+            t.map_or("-".to_string(), |(g, s, _)| {
+                let seg = engine::az::tail_encode::TAILS.iter().find(|ts| ts.seg == *g).map_or("?", |ts| ts.name);
+                format!("{seg} slot {s}")
+            })
+        };
+        let f = match (bx.get(k), by.get(k)) {
+            (Some(a), Some(b)) if a.0 == b.0 && a.1 == b.1 => {
+                let j = (0..a.2.len()).find(|&j| a.2[j] != b.2[j]).unwrap_or(0);
+                format!(", float {j}: {} / {}", f32::from_bits(a.2[j]), f32::from_bits(b.2[j]))
+            }
+            _ => String::new(),
+        };
+        return Some(format!("tail tokens: {} / {}; the first differing, token {k}: {} / {}{f}", bx.len(), by.len(), name(bx.get(k)), name(by.get(k))));
     }
     if x.ov != y.ov {
         return Some(format!("pointer overrides: {:?} / {:?}", x.ov, y.ov));
