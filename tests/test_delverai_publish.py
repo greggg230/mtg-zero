@@ -234,3 +234,76 @@ def test_the_gap_rule_is_twice_the_measured_step_of_each_segment(tmp_path):
         r['iter'] += 32                                   # 80 -> 128: 48 apart
     P.add_anchored_averages(holed, lambda t: cov, gap=own)
     assert not any('elo_avg' in r for r in holed)        # 11 readings since the hole
+
+
+def _bo3_spec():
+    from mtgz.az import SPEC_DELVER_BO3
+    return SPEC_DELVER_BO3
+
+
+def test_a_best_of_three_run_starts_a_new_history_with_its_own_elo_scale(tmp_path):
+    # delver-bo3-pb1: forked from the best-of-one line's 3198, converted (its generation 0), anchored to its own 0 =
+    # 1000 (anchor path '..._a3198_iter0000.pt'); the fork record's scale_break keeps the parent's rows out
+    parent = _run(tmp_path, 'r3-deep128x8-2410')
+    run = str(tmp_path / 'delver-bo3-pb1')
+    os.makedirs(os.path.join(run, 'models'))
+    with open(os.path.join(run, 'models', 'iter_0000.pt'), 'wb') as f:
+        f.write(b'net bo3 0')
+    sha0 = hashlib.sha256(b'net bo3 0').hexdigest()
+    tag = TAG + '-tdeck1'
+    _write(os.path.join(run, 'config.json'), {'eval_every': 16, 'spec': _bo3_spec(), 'games': 1350,
+                                              'elo_anchors': 'a3198=/x/anchors/delver-bo3_a3198_iter0000.pt'})
+    _write(os.path.join(run, 'elo', tag, 'results.json'), {
+        'select': tag, 'anchors': {'anchor:a3198': {'label': 'a3198', 'file': 'a3198.pt', 'sha256': sha0, 'elo': 1000.0,
+                                                    'how': 'set (elo_anchor_elo)', 'since': 0}},
+        'pairs': {'anchor:a3198|iter_0016': [11.0, 100], 'iter_0015|iter_0016': [13.0, 24]}})
+    _write(os.path.join(run, 'metrics.jsonl'), [{'iter': 15}, {'iter': 16}], lines=True)
+    _write(os.path.join(run, 'evals.jsonl'), [{'iter': 16, 'elo': {'elo': 1066.1, 'se': 567.9, 'select': tag},
+                                               'elo_anchored': {'elo': 1360.4, 'se': 55.0, 'select': tag}}], lines=True)
+    state = {'done': [{'name': 'best of three', 'flag': '--preset delver-mirror-bo3', 'note': 'post-sideboard games',
+                       'k': 3198, 'main_before': parent, 'main_after': run, 'raw': {'a': run + '/models/iter_0000.pt'},
+                       'scale_break': 'its own Elo scale'}]}
+    _write(str(tmp_path / 'forks.json'), state)
+    forks = P.fork_registry([str(tmp_path / 'forks.json')])
+    assert forks[P._norm(run)]['scale_break'] == 'its own Elo scale'
+    segs = P.lineage(run, forks)
+    assert [(s['run'], s['kind'], s['offset']) for s in segs] == [('delver-bo3-pb1', 'root', 0)]
+    assert P.lineage_record(run, forks) is None                       # none of the parent's rows
+    ff = P.forked_from(segs, forks)
+    assert (ff['run'], ff['iter'], ff['g'], ff['label'], ff['scale_break']) == ('r3-deep128x8-2410', 3198, 3198, 'best of three', 'its own Elo scale')
+    assert [s['run'] for s in ff['parent_lineage']] == ['r3-deep128x8-2410']
+    rec = P.progress(run, forks=forks, state_dir=str(tmp_path / 'state'))
+    assert (rec['format'], rec['start_game'], rec['lineage'], rec['forked_from']['iter']) == ('bo3', 2, None, 3198)
+    # (its pool's anchor: its own generation 0, found by the '..._iter0000.pt' path of the run's elo_anchors)
+    assert P.anchor_defs(run, tag) == [{'label': 'a3198', 'iter': 0, 'g': 0, 'elo': 1000.0, 'se': None, 'how': 'set', 'since': 0}]
+    row = next(r for r in rec['iters'] if r['iter'] == 16)
+    assert row['elo_anchored'] == 1360.4 and [(m.get('anchor'), m['iter'], m['win']) for m in row['h2h']] == [(None, 15, 0.4583), ('a3198', 0, 0.89)]
+    assert rec['deck']['format'] == 'bo3' and rec['deck']['start_game'] == 2 and rec['deck']['mirror'] is True
+    assert sum(n for n, _ in rec['deck']['main']) == 60 and sum(n for n, _ in rec['deck']['sideboard']) == 15
+    assert ['Rough // Tumble' in [x for _, x in rec['deck']['sideboard']]] == [True]
+    assert 'keep_yardstick' not in rec
+    # a best-of-one run's record says so, and nothing more
+    assert P.progress(parent)['format'] == 'bo1' and 'forked_from' not in P.progress(parent) and 'start_game' not in P.progress(parent)
+
+
+def test_the_keep_your_60_yardstick_is_read_from_its_files(tmp_path):
+    d = str(tmp_path / 'yardstick')
+    os.makedirs(d)
+    ck = lambda run, k: f'E:/mtg-zero/runs/{run}/models/iter_{k:04d}.pt'
+    res = lambda a, b, win, keeps='b': {'a': a, 'b': b, 'keeps': keeps, 'games': 400, 'a_score': 0.3937, 'se': 0.0214, 'sims': 64,
+                                        'per_game': {'games': 607, 'win': win, 'se': 0.0198, 'draws': 3}}
+    files = {'keep_0000.txt': ['zero.infer: token network CUDA graphs on', json.dumps(res(ck('bo3', 0), ck('bo3', 0), 0.3929)), 'iter 0000 exit 0'],
+             'keep_0036.txt': [json.dumps(res(ck('bo3', 36), ck('bo3', 36), 0.4918))],
+             'keep_0040.txt': ['not finished yet'],                                                        # no result line
+             'keep_0050.txt': [json.dumps(res(ck('bo3', 50), ck('bo3', 48), 0.6))],                         # two checkpoints
+             'keep_0060.txt': [json.dumps(res(ck('other', 60), ck('other', 60), 0.6))],                      # another run
+             'keep_0070.txt': [json.dumps(res(ck('bo3', 70), ck('bo3', 70), 0.6, keeps='a'))]}               # A keeps
+    for name, lines in files.items():
+        with open(os.path.join(d, name), 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines) + '\n')
+    rows = P.keep_yardstick(d, 'bo3')
+    assert [(r['iter'], r['win'], r['se'], r['games'], r['score'], r['matches']) for r in rows] == [
+        (0, 0.3929, 0.0198, 607, 0.3937, 400), (36, 0.4918, 0.0198, 607, 0.3937, 400)]
+    assert not any('E:' in json.dumps(r) for r in rows)                     # no paths for the public site
+    assert [r['iter'] for r in P.keep_yardstick(d, 'other')] == [60]
+    assert P.keep_yardstick(None) == [] and P.keep_yardstick(str(tmp_path / 'none')) == []

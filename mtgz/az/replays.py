@@ -18,6 +18,19 @@ decision's frame `belief: {for, n, cards: [[name, expected count], ...]}` - the 
 its opponent's hand, the 12 likeliest cards (`mtgz.az.belief.render`, the package's `replay_aux`); its
 seat lists `aux: ["belief"]`, and the listing record (`summary`) says `belief: true`.
 
+A constructed best-of-three (docs/ENGINE.md 120, 121, 130: the Delver best-of-three run's spec, one episode per
+game) records whole matches: zero.replay keeps a chained match's episodes in one replay (its `games`: each
+game's result; its `result`: the match's), from the sideboarding before game 2 (a post-sideboard match: game 1
+is not played, its winner drawn) through game 3. The spectator view says where the match is (`match`: the
+game, the score, each player's deck, the sideboarding in progress; engine/src/az/view.rs), and `match_index`
+writes the boundaries into the replay as `match` (`games`: each game's first sideboarding frame and first
+frame of play, who chose play or draw, each player's swaps against the registered main, the result) - the
+listing record carries it too. With a deck head (run setting `aux_deck_w`, ENGINE.md 102.4) every network
+decision in a game adds `deck` (`deck_read`): the decider's prediction of its opponent's cards it has not
+seen - the most expected ones - and what it makes of their sideboarding (`vs_main`: the 60 it predicts against
+the registered main). Sideboarding decisions carry neither prediction: there is no hand and no deck target
+between games.
+
 Files: `runs/<run>/replays/<stamp>_<k>.json.gz` (format zero-replay/1). `--upload` posts each to
 `<url>/api/replays/upload` (default URL `SITE`) with the key from `--key-file`, the environment
 variable `MTGZ_DELVERAI_KEY` or `~/delverai/.upload_key` (the site's Worker secret UPLOAD_KEY).
@@ -30,7 +43,10 @@ import os
 import random
 import urllib.request
 
+import numpy as np
+
 import mtgz.az  # noqa: F401  (registers the game package)
+from mtgz.az import belief
 from zero import replay as core
 
 SITE = 'https://delverai.greggg230.com'
@@ -51,11 +67,119 @@ def spec_with_log(spec):
 _MINOR = ('"kind":"PayMana"', '"kind":"PayPool"')
 
 
+DECK_TOP = 12        # the most expected unseen cards a frame's deck read lists (the hand read's 12)
+DECK_MIN = 0.02      # vs_main leaves out a card predicted within this many copies of the main's
+
+
+def _tally(pairs):
+    """[[name, copies], ...] (or a list of names) -> {name: copies}."""
+    out = {}
+    for x in pairs or []:
+        name, n = (x, 1) if isinstance(x, str) else (x[0], x[1])
+        out[name] = out.get(name, 0) + n
+    return out
+
+
+def main_decks(spec):
+    """{seat: {name: copies}} of a constructed spec's registered mains (`decks.p0` / `decks.p1`), else {}."""
+    try:
+        s = json.loads(spec) if isinstance(spec, str) else dict(spec or {})
+    except ValueError:
+        return {}
+    d = s.get('decks') or {}
+    return {p: _tally(d[f'p{p}']) for p in (0, 1) if d.get(f'p{p}')}
+
+
+def deck_pools(spec):
+    """{seat: the card names of its 75} (`decks.pN` and `decks.pN_sideboard`) of a constructed spec, else {}."""
+    try:
+        s = json.loads(spec) if isinstance(spec, str) else dict(spec or {})
+    except ValueError:
+        return {}
+    d = s.get('decks') or {}
+    return {p: set(d[f'p{p}']) | set(d.get(f'p{p}_sideboard') or []) for p in (0, 1) if d.get(f'p{p}')}
+
+
+def swaps(deck, main):
+    """A deck against the registered main: {'in': [[name, copies]], 'out': [[name, copies]]}, most copies first."""
+    have, main = _tally(deck), main or {}
+    ins = [[n, c - main.get(n, 0)] for n, c in have.items() if c > main.get(n, 0)]
+    outs = [[n, c - have.get(n, 0)] for n, c in main.items() if c > have.get(n, 0)]
+    key = lambda x: (-x[1], x[0])  # noqa: E731
+    return {'in': sorted(ins, key=key), 'out': sorted(outs, key=key)}
+
+
+def deck_read(pred, state, seat, unseen, main, pool=None, top=DECK_TOP):
+    """A frame's `deck` (docs/ENGINE.md 102.4: the deck head predicts the decider's opponent's cards it does not
+    know exactly - hand, library, face down - as a distribution over identities, x their number, which is public):
+    {for: the opponent, n: how many of their cards the decider has not seen, cards: [[name, expected copies], ...]
+    the `top` most expected (as the hand read's), vs_main: [[name, copies], ...] the 60 it predicts less the
+    registered main `main` ({name: copies}), largest first, within DECK_MIN left out - what it thinks came in (+)
+    and went out (-); with `pool` (the names of their 75) only its cards, and `outside`: the copies it puts on
+    cards outside the 75 (none can be there)}. The predicted 60 is the opponent's cards the decider knows (their 60 in `state`'s
+    `match.decks` less the true unseen ones, `unseen`: counts by identity; what is left is what the decider has
+    seen) plus the predicted unseen ones. None when nothing is unseen."""
+    u = np.asarray(unseen, np.float64)
+    n = float(u.sum())
+    if n <= 0:
+        return None
+    p = np.clip(np.asarray(pred, np.float64), 0.0, None)
+    x = p * (n / p.sum()) if p.sum() > 0 else p
+    names = belief.names()
+    opp = 1 - int(seat)
+    decks = (state.get('match') or {}).get('decks') or [[], []]
+    est = {k: float(v) for k, v in _tally(decks[opp]).items()}
+    for i in np.nonzero(u)[0]:
+        est[names[i]] = est.get(names[i], 0.0) - float(u[i])          # known = the 60 less what is unseen
+    for i in np.nonzero(x > 1e-4)[0]:
+        nm = names[i] if names[i] is not None else f'#{i}'
+        est[nm] = est.get(nm, 0.0) + float(x[i])
+    keys = set(pool) if pool else set(est) | set(main)
+    vs = [[k, round(est.get(k, 0.0) - main.get(k, 0), 2)] for k in sorted(keys)]
+    vs = sorted((v for v in vs if abs(v[1]) >= DECK_MIN), key=lambda v: (-v[1], v[0]))
+    out = {'for': opp, 'n': int(round(n)), 'cards': belief.counts_by_name(x, top, digits=2), 'vs_main': vs}
+    if pool:
+        out['outside'] = round(sum(v for k, v in est.items() if k not in keys and v > 0), 2)
+    return out
+
+
 class _Recorder(core.RecordingDriver):
     """zero.replay's driver with self-play's budget for minor decisions: `sims_minor`
     simulations (zero-core searches them so in self-play and never records them). The Python
-    driver has no `sims_minor`; without it a payment's decisions got the full budget."""
+    driver has no `sims_minor`; without it a payment's decisions got the full budget.
+
+    A constructed best-of-three with a deck head (`deck_mains`: the registered mains, main_decks; `deck_pools`: the
+    75s' names): each
+    network decision in a game adds the deck read (`deck_read`, from the true unseen cards' count: the
+    game's `aux_target`); a sideboarding decision carries no prediction (no hand, no deck target)."""
     sims_minor = None
+    deck_mains = None
+    deck_pools = None
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self._game = None
+        base = self.aux_render
+        self.aux_render = lambda pred, state, seat, frame: self._aux(base, pred, state, seat, frame)
+
+    def _aux(self, base, pred, state, seat, frame):
+        if (state.get('decision') or {}).get('kind') == 'Sideboard':
+            return {}
+        out = base(pred, state, seat, frame)
+        if self.deck_mains is not None and 'deck' in pred and self._game is not None:
+            unseen = np.asarray(self._game.aux_target(int(seat)), np.float64)[belief.D:2 * belief.D]
+            o = 1 - int(seat)
+            r = deck_read(pred['deck'], state, seat, unseen, self.deck_mains.get(o, {}), (self.deck_pools or {}).get(o))
+            if r:
+                out = dict(out, deck=r)
+        return out
+
+    def _decide(self, slot, seat, tree, p):
+        self._game = slot.game
+        try:
+            super()._decide(slot, seat, tree, p)
+        finally:
+            self._game = None
 
     def _start(self, slot, seat, p):
         super()._start(slot, seat, p)
@@ -121,7 +245,11 @@ def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, con
         import torch
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     seed = random.randrange(1 << 30) if seed is None else seed
-    driver = type('Recorder', (_Recorder,), {'sims_minor': None if lookahead else cfg.get('sims_minor')})
+    spec = json.loads(cfg['spec'])
+    bo3 = bool(spec.get('constructed')) and spec.get('format') == 'bo3'
+    driver = type('Recorder', (_Recorder,), {'sims_minor': None if lookahead else cfg.get('sims_minor'),
+                                             'deck_mains': main_decks(spec) if bo3 and cfg.get('aux_deck_w') else None,
+                                             'deck_pools': deck_pools(spec)})
     real, core.RecordingDriver = core.RecordingDriver, driver   # core.record builds its driver by this name
     # core.record's seats read the view and the root search from the run's config (zero.replay._nn):
     # give it these
@@ -141,7 +269,85 @@ def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, con
         for s in rep['seats']:
             if s.get('kind') == 'nn':
                 s['leaf_value_view'] = view
+        m = match_index(rep)
+        if m:
+            rep['match'] = m
     return reps
+
+
+def _option_text(state, a):
+    return next((o.get('t') for o in (state.get('decision') or {}).get('options') or [] if o.get('a') == a), None)
+
+
+def match_index(rep):
+    """A best-of-three replay's games (a chained match: zero.replay keeps its episodes one after the other) -> the
+    replay's `match`: {post_board, result (the match's, per seat), wins, games: [...]} or None for a single game.
+    Each game in order: {game (1-3), played, sb (the frame of its first sideboarding decision, None for game 1),
+    start (its first frame of play), end (the state it ended in), winner (None: a draw), reason, turns, starting,
+    life, chooser and choice (who chose play or draw, and what), swaps (each seat's deck against its registered
+    main: {in, out}), reads (each seat's first deck read of the other's deck in this game: its `vs_main`)}. A
+    post-sideboard match's game 1 (docs/ENGINE.md 130) is {game: 1, played: False, winner}: its winner was drawn
+    from the match's seed. A sideboarding before game g belongs to game g (the spectator view still shows game
+    g - 1: `match.game` is the current or last game)."""
+    states, frames = rep.get('states') or [], rep.get('frames') or []
+    m0 = (states[0].get('match') or {}) if states else {}
+    if m0.get('format') != 'bo3':
+        return None
+    mains = main_decks(rep.get('spec'))
+    games, order = {}, []
+
+    def entry(g):
+        if g not in games:
+            games[g] = {'game': g, 'played': True, 'sb': None, 'start': None}
+            order.append(g)
+        return games[g]
+
+    post = bool(m0.get('post_board'))
+    if post:
+        entry(1)['played'] = False
+    for i, f in enumerate(frames):
+        st = states[f['s']]
+        sb = (st.get('decision') or {}).get('kind') == 'Sideboard'
+        g = int((st.get('match') or {}).get('game') or 1) + (1 if sb else 0)
+        e = entry(g)
+        if sb:
+            if e['sb'] is None:
+                e['sb'] = i
+            continue
+        if e['start'] is None:
+            e['start'] = i
+            decks = (st.get('match') or {}).get('decks')
+            if decks:
+                e['swaps'] = [swaps(decks[p], mains.get(p)) for p in (0, 1)]
+        if (st.get('decision') or {}).get('kind') == 'PlayDraw' and 'chooser' not in e:
+            e['chooser'], e['choice'] = f['p'], _option_text(st, f.get('a'))
+        if f.get('deck'):
+            reads = e.setdefault('reads', [None, None])
+            if reads[f['p']] is None:
+                reads[f['p']] = f['deck']['vs_main']
+    # each game's end: the last state showing it (before the next sideboarding, or the final one)
+    last = {}
+    for k, st in enumerate(states):
+        if st.get('over'):
+            last[int((st.get('match') or {}).get('game') or 1)] = k
+    for g in order:
+        e = games[g]
+        k = last.get(g)
+        if k is None:
+            continue
+        st = states[k]
+        e['end'] = k
+        e['winner'] = st.get('winner')
+        e['reason'] = st.get('reason')
+        if e['played']:
+            e['turns'] = st.get('turn')
+            e['starting'] = st.get('starting')
+            e['life'] = [pl.get('life') for pl in st.get('players') or []]
+    if post:
+        games[1] = {k: games[1][k] for k in ('game', 'played', 'winner', 'end') if k in games[1]}
+    fm = (states[rep['final']].get('match') if states and rep.get('final') is not None else None) or {}
+    return {'post_board': post, 'result': rep.get('result'), 'wins': fm.get('wins'),
+            'games': [games[g] for g in sorted(order)]}
 
 
 def save_json(rep, out_dir, name=None):
@@ -173,7 +379,16 @@ def summary(rep):
             'starting': final.get('starting', first.get('starting')),
             'mulligans': [p.get('mulligans') for p in final.get('players', [])],
             'frames': len(rep['frames']), 'over': rep['over'],
-            'belief': any('belief' in (s.get('aux') or []) for s in rep['seats'])}
+            'belief': any('belief' in (s.get('aux') or []) for s in rep['seats']),
+            **({'match': match_summary(rep['match'])} if rep.get('match') else {})}
+
+
+def match_summary(m):
+    """The listing record's part of a match (`match_index`): the score and each game's outcome and swaps, without the
+    frame positions and the deck reads."""
+    keep = ('game', 'played', 'winner', 'reason', 'turns', 'starting', 'chooser', 'choice', 'swaps')
+    return {'post_board': m.get('post_board'), 'wins': m.get('wins'),
+            'games': [{k: g[k] for k in keep if k in g} for g in m.get('games') or []]}
 
 
 def public(rep):

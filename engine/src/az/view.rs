@@ -563,9 +563,60 @@ impl MtgAz {
             v["decision"] = json!({
                 "player": sb.decider(),
                 "kind": "Sideboard",
-                "options": sb.decision.options.iter().map(|o| json!({"a": o.action, "t": format!("{:?}", o.choice)})).collect::<Vec<_>>(),
+                "options": sb.decision.options.iter().map(|o| json!({"a": o.action, "t": self.sideboard_option_text(sb, o)})).collect::<Vec<_>>(),
             });
+            v["match"]["sideboarding"] = json!({"order": sb.order, "done": [sb.done[0].is_some(), sb.done[1].is_some()]});
+        }
+        if self.m.format == super::matches::Format::Bo3 {
+            v["match"]["decks"] = json!([self.view_deck(0), self.view_deck(1)]);
+            v["match"]["results"] = json!(self.m.results[..self.m.game_no.clamp(1, 3) as usize]);
         }
         v.to_string()
+    }
+
+    /// Player `p`'s deck as the replay viewer shows it (ENGINE.md 120: a best-of-three's
+    /// sideboarding): `[[name, copies], ...]` in the pool's list order, cards it holds only -
+    /// the current (or last) game's deck; while sideboarding the deck being built by the decider and
+    /// the deck chosen by a player who is done. Read only: the spectator sees every deck.
+    fn view_deck(&self, p: u8) -> Value {
+        let pool = &self.m.pools[p as usize];
+        let counts: &[u8] = match &self.m.sb {
+            Some(sb) if sb.decider() == p => &sb.counts,
+            Some(sb) if sb.done[p as usize].is_some() => sb.done[p as usize].as_deref().unwrap_or(&[]),
+            _ => &self.m.decks[p as usize],
+        };
+        pool.list
+            .iter()
+            .zip(counts)
+            .filter(|(_, &n)| n > 0)
+            .map(|(&(d, _), &n)| json!([self.g.db.def(d).name, n]))
+            .collect()
+    }
+
+    /// A sideboarding option in words (was its `Choice` debug text, "Def(DefId(17))"): an entry of
+    /// one copy toggles ("Bring in Karakas" / "Take out Karakas"), an entry of more asks for its
+    /// count ("Change Pyroblast (now 0 of 3)", then "3 Pyroblast (now 0)"), PASS ends it.
+    fn sideboard_option_text(&self, sb: &super::matches::Sideboarding, o: &crate::decision::Opt) -> String {
+        use crate::decision::act;
+        let pool = &self.m.pools[sb.decider() as usize];
+        let name = |k: usize| pool.list.get(k).map_or("?", |e| self.g.db.def(e.0).name.as_str());
+        match o.choice {
+            Choice::Pass if sb.counts == sb.start => "Keep the same deck".to_string(),
+            Choice::Pass => "Done: play this deck".to_string(),
+            Choice::Number(x) => {
+                let k = sb.asking.map_or(usize::MAX, |k| k as usize);
+                format!("{x} {} (now {})", name(k), sb.counts.get(k).copied().unwrap_or(0))
+            }
+            Choice::Def(_) if o.action >= act::LIBRARY => {
+                let k = (o.action - act::LIBRARY) as usize;
+                let (n, copies) = (sb.counts.get(k).copied().unwrap_or(0), pool.list.get(k).map_or(0, |e| e.1));
+                if k < pool.n_cards && copies == 1 {
+                    format!("{} {}", if n == 0 { "Bring in" } else { "Take out" }, name(k))
+                } else {
+                    format!("Change {} (now {n} of {copies})", name(k))
+                }
+            }
+            c => format!("{c:?}"),
+        }
     }
 }

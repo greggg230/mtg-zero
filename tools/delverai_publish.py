@@ -64,14 +64,31 @@ the fork's directory, the run it forked from and at which iteration, its changed
 its parent's numbering (`--forks FILE`, repeatable: more such state files, e.g. an earlier round of
 experiments whose forks are still in the main line's history); a migration (MIGRATED_FROM.json: a layout widen) starts again at 0 with
 the source's checkpoint, so its rows get a global generation = the source's + its own. Each
-segment's rows are read from its own run directory, up to where its child took over. The upload key: --key-file,
+segment's rows are read from its own run directory, up to where its child took over. A fork record with
+`scale_break` (a text: why) starts a new history instead: the run is the first segment of its own lineage, numbered
+from 0 (its generation 0 is the parent's checkpoint `k`, e.g. converted to another layout), and its Elo is a scale of
+its own, never drawn on its parent's axis. The record says where it came from instead (`forked_from`: the parent run,
+its generation, its global generation in the parent's lineage, the parent lineage's segments, the break's text) and
+carries none of the parent's rows - the Delver best-of-three run, forked from r3-deep128x8-2410's 3198 and rated
+against its own generation 0 (a3198 = 1000). The upload key: --key-file,
 $MTGZ_DELVERAI_KEY or ~/delverai/.upload_key (the site's Worker secret UPLOAD_KEY).
 Recording runs on the CPU by default (`--threads` torch threads): zero.replay's Python driver
 sends batches of a few positions, which on a GPU shared with the run (and other projects) wait
 behind its kernels (measured 2026-10-28: ~70 ms a batch on the busy GPU; on 6 CPU threads two
 mtg5-network Delver games of 36 and 45 turns took 5.5 min).
+
+A best-of-three run (the spec's `"format": "bo3"`; docs/ENGINE.md 120, 121, 130): the record says `format` 'bo3' and
+`start_game` (2: post-sideboard games only), its deck carries the sideboard, and each recorded game is a whole match
+(`mtgz.az.replays`: the sideboarding, games 2 and 3, the deck reads). `--keep-yardstick DIR`: the keep-your-60
+yardstick's results (`mtgz.az.keep_h2h`, ENGINE.md 130.3: a generation sideboarding against itself keeping its main 60;
+each file DIR/keep_NNNN.txt ends with its JSON line) as the record's `keep_yardstick` rows - the per-game win rate of
+the side that sideboards, its se and games, and the match score. Files of another run's checkpoints are left out.
+
+`--state-dir DIR`: the publisher's own files (delverai.json: the recorded generations; replays/: the recorded games)
+there instead of in the run's directory.
 """
 import argparse
+import glob
 import json
 import math
 import os
@@ -90,7 +107,7 @@ from zero import elo as zelo, runctl  # noqa: E402
 SETTINGS = ('preset', 'iters', 'games', 'sims', 'sims_fast', 'p_full', 'sims_minor', 'temp_moves', 'arch', 'hidden',
             'blocks', 'heads', 'ff', 'policy_target', 'eval_games', 'eval_sims', 'eval_random_games', 'elo_games',
             'elo_sims', 'eval_every', 'yardstick', 'window', 'lr', 'seed', 'eval_select', 'eval_select_min_visits',
-            'elo_offsets', 'elo_opponents', 'elo_anchor_games', 'elo_anchor_from')
+            'elo_offsets', 'elo_opponents', 'elo_anchor_games', 'elo_anchor_from', 'elo_anchor_elo', 'aux_deck_w')
 
 
 def _json(path, default=None):
@@ -195,7 +212,8 @@ def anchor_copies(run, anchors, also=()):
     out = {}
     for name, a in anchors.items():
         cands = [int(x) for s in (a.get('label'), a.get('file')) for x in re.findall(r'\d+', str(s or ''))]
-        cands += [int(x) for x in re.findall(r'iter_(\d+)', str(paths.get(name, '')))]
+        # ('.../delver-bo3_a3198_iter0000.pt': the best-of-three run's generation 0, the best-of-one line's 3198)
+        cands += [int(x) for x in re.findall(r'iter_?(\d+)', str(paths.get(name, '')))]
         out[name] = None
         for k in dict.fromkeys(cands):
             for d in (run, *also):
@@ -345,10 +363,65 @@ def deck_of(cfg):
     same = counts == {n: c for c, n in d['main']}
     info = {k: d[k] for k in ('name', 'player', 'event', 'date', 'result', 'source', 'platform') if k in d} if same else {}
     info['main'] = [[counts[n], n] for n in main]
-    info['mirror'] = spec['decks']['p0'] == spec['decks']['p1']
+    side = spec['decks'].get('p0_sideboard') or []
+    if side:
+        info['sideboard'] = [[side.count(n), n] for n in sorted(set(side), key=side.index)]
+    info['mirror'] = all(spec['decks'].get(f'p0{k}') == spec['decks'].get(f'p1{k}') for k in ('', '_sideboard'))
     info['format'] = spec.get('format', 'bo1')
     info['max_turns'] = spec.get('max_turns')
+    if spec.get('start_game'):
+        info['start_game'] = spec['start_game']
     return info
+
+
+def match_format(cfg):
+    """The run's match format from its spec: ('bo3', start game) for a best-of-three (start 2: post-sideboard games
+    only, docs/ENGINE.md 130), else ('bo1', None)."""
+    try:
+        spec = json.loads(cfg.get('spec') or '{}')
+    except ValueError:
+        spec = {}
+    if spec.get('format') == 'bo3':
+        return 'bo3', int(spec.get('start_game') or 1)
+    return 'bo1', None
+
+
+def keep_yardstick(d, run=None):
+    """The keep-your-60 yardstick (`mtgz.az.keep_h2h`, docs/ENGINE.md 130.3): each DIR/keep_NNNN.txt's last JSON line
+    (a generation A sideboarding against B = A keeping its main 60, `keeps: 'b'`) -> rows by generation: {iter, win,
+    se, games, draws (A's games: the measure), score, score_se, matches (the match score, game 1's drawn result
+    counted), sims, time (the file's)}. A file of another run's checkpoint (`run`: the run's directory name), of two
+    different checkpoints or without a result is left out."""
+    rows = {}
+    for f in sorted(glob.glob(os.path.join(d, 'keep_*.txt'))) if d else []:
+        res = None
+        try:
+            with open(f, encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line.startswith('{'):
+                        try:
+                            x = json.loads(line)
+                        except ValueError:
+                            continue
+                        if isinstance(x, dict) and isinstance(x.get('per_game'), dict):
+                            res = x
+        except OSError:
+            continue
+        if not res or res.get('keeps') != 'b' or os.path.normcase(str(res.get('a'))) != os.path.normcase(str(res.get('b'))):
+            continue
+        ck = str(res.get('a') or '').replace('\\', '/')
+        if run and os.path.basename(os.path.dirname(os.path.dirname(ck))) != run:
+            continue
+        m = re.search(r'iter_(\d+)\.pt$', ck) or re.search(r'keep_(\d+)', os.path.basename(f))
+        if not m:
+            continue
+        pg = res['per_game']
+        rows[int(m.group(1))] = {'iter': int(m.group(1)), 'win': _r(pg.get('win')), 'se': _r(pg.get('se')),
+                                 'games': pg.get('games'), 'draws': pg.get('draws'), 'score': _r(res.get('a_score')),
+                                 'score_se': _r(res.get('se')), 'matches': res.get('games'), 'sims': res.get('sims'),
+                                 'time': round(os.path.getmtime(f))}
+    return [rows[k] for k in sorted(rows)]
 
 
 def _norm(path):
@@ -387,6 +460,8 @@ def fork_registry(paths):
         if _norm(fork) not in out and _norm(fork) != _norm(d['main_before']):
             out[_norm(fork)] = {'parent': d['main_before'], 'at': int(d['k']), 'label': _label(d.get('flag'), d.get('name')),
                                 'won': _norm(d.get('main_after') or '') == _norm(fork)}
+            if d.get('scale_break'):         # a new history: numbered from 0, an Elo scale of its own (lineage)
+                out[_norm(fork)].update(scale_break=str(d['scale_break']), name=d.get('name'), note=d.get('note'))
         after = d.get('main_after')
         m = re.search(r'iter_(\d+)\.pt$', a)
         if after and m and _norm(after) not in (_norm(fork), _norm(d['main_before'])) and _norm(after) not in out:
@@ -523,6 +598,10 @@ def lineage(run, forks, depth=0):
             return segs + [{'dir': run, 'run': name, 'label': lab, 'kind': 'migrate', 'first': 0, 'last': None,
                             'offset': segs[-1]['offset'] + k}]
     f = forks.get(_norm(run))
+    if f and f.get('scale_break'):
+        # a new history (its own numbering and Elo scale): the run is its lineage's first segment; where it came from
+        # is the record's `forked_from`
+        return [{'dir': run, 'run': name, 'label': name, 'kind': 'root', 'first': 0, 'last': None, 'offset': 0, 'broke_from': f}]
     if f and os.path.isdir(f['parent']):
         segs = _cut(lineage(f['parent'], forks, depth + 1), f['at'])
         return segs + [{'dir': run, 'run': name, 'label': f['label'], 'kind': 'fork', 'first': f['at'] + 1, 'last': None,
@@ -570,6 +649,23 @@ def lineage_record(run, forks):
             'rows': rows}
 
 
+def forked_from(segs, forks):
+    """A lineage that starts at a scale break (`lineage`'s first segment's `broke_from`) -> the record's `forked_from`:
+    {run, iter (the parent's generation the run's generation 0 is), g (that generation in the parent's lineage's
+    numbering), label, note, scale_break (why the scales are apart), parent_lineage: [{run, label, kind, from_g}] (the
+    parent's segments up to it)}, else None."""
+    b = segs[0].get('broke_from') if segs else None
+    if not b:
+        return None
+    parent = b['parent']
+    psegs = _cut(lineage(parent, forks), b['at']) if os.path.isdir(parent) else []
+    return {'run': os.path.basename(os.path.normpath(parent)), 'iter': b['at'],
+            'g': psegs[-1]['offset'] + b['at'] if psegs else b['at'], 'label': b.get('name') or b.get('label'),
+            'note': b.get('note'), 'scale_break': b['scale_break'],
+            'parent_lineage': [{'run': sg['run'], 'label': sg['label'], 'kind': sg['kind'], 'from_g': sg['offset'] + sg['first']}
+                               for sg in psegs]}
+
+
 def migrated_from(run):
     """A run continuing another's network (MIGRATED_FROM.json, e.g. a layout widen: runs/delver2
     from ab2-cqscale03's iter_0137): {run, iter, layout, time} of the source, else None."""
@@ -606,9 +702,10 @@ def on_box_status(run, st):
     return dict(base, state='stopped', detail=f'On a rented cloud GPU: no news for {synced / 60:.0f} min.')
 
 
-def progress(run, every=1, forks=None, extra=None):
+def progress(run, every=1, forks=None, extra=None, state_dir=None, yardstick=None):
     """The site's progress record of a run (`every`: which iterations get games recorded;
-    `forks`: fork_registry, for the lineage; `extra`: more fields - title, note, side, record_vs)."""
+    `forks`: fork_registry, for the lineage; `extra`: more fields - title, note, side, record_vs; `state_dir`: where
+    this publisher keeps delverai.json, default the run; `yardstick`: the keep-your-60 yardstick's directory)."""
     cfg = _json(os.path.join(run, 'config.json'), {}) or {}
     st = on_box_status(run, runctl.run_status(run))
     prog = _json(os.path.join(run, 'progress.json'))
@@ -624,8 +721,9 @@ def progress(run, every=1, forks=None, extra=None):
                       [sg['first'] for sg in segs if sg['offset'] == segs[-1]['offset']], lambda r: r['iter'])
     _warn_missing(add_anchored_averages(sorted((r for r in rows if isinstance(r.get('iter'), int)), key=lambda r: r['iter']),
                                         lambda t: anchored_cov(run, t), gap=gap_rule(own)), run)
-    state = _json(os.path.join(run, 'delverai.json'), {}) or {}
+    state = _json(os.path.join(state_dir or run, 'delverai.json'), {}) or {}
     lin = lineage_record(run, forks or {})
+    fmt, start = match_format(cfg)
     offset = lin['segments'][-1]['offset'] if lin else 0
     return dict({
         'run': os.path.basename(os.path.abspath(run)), 'updated': time.time(),
@@ -638,7 +736,10 @@ def progress(run, every=1, forks=None, extra=None):
         'anchor': {'name': ratings.get('anchor'), 'elo': ratings.get('anchor_elo')}, 'select': tag,
         'anchors': anchor_defs(run, tag, offset, also),
         'replayed': state.get('replayed', []), 'record_every': every, 'migrated_from': migrated_from(run),
-        'lineage': lin, 'rated_every': own,
+        'lineage': lin, 'rated_every': own, 'format': fmt,
+        **({'start_game': start} if fmt == 'bo3' else {}),
+        **({'forked_from': forked_from(segs, forks or {})} if segs[0].get('broke_from') else {}),
+        **({'keep_yardstick': keep_yardstick(yardstick, os.path.basename(os.path.abspath(run)))} if yardstick else {}),
     }, **(extra or {}))
 
 
@@ -731,7 +832,7 @@ def wire_progress(p):
 
 
 def post_progress(run, a, key, log=print):
-    p = progress(run, a.every, fork_registry([a.follow] + (a.forks or [])), record_extra(a))
+    p = progress(run, a.every, fork_registry([a.follow] + (a.forks or [])), record_extra(a), a.state_dir, a.keep_yardstick)
     if a.dry_run:
         log(json.dumps({k: v for k, v in p.items() if k != 'iters'})[:800])
         log(f'{len(p["iters"])} iteration rows; upload body {len(wire_progress(p)):,} bytes')
@@ -745,13 +846,14 @@ def one_pass(run, a, key, log=print, kick=None):
     if kick is None:
         post_progress(run, a, key, log)
     ck = latest_checkpoint(run, a.every)
-    state_path = os.path.join(run, 'delverai.json')
+    state_path = os.path.join(a.state_dir or run, 'delverai.json')
     state = _json(state_path, {}) or {}
     done = state.get('replayed', [])
     if ck is None or ck[0] in done or (a.min_iter is not None and ck[0] < a.min_iter):
         return False
     it, path = ck
-    log(f'recording {a.games} games of iteration {it} ({path}){f" against {a.record_vs}" if a.record_vs else ""}')
+    what = 'matches' if match_format(_json(os.path.join(run, 'config.json'), {}) or {})[0] == 'bo3' else 'games'
+    log(f'recording {a.games} {what} of iteration {it} ({path}){f" against {a.record_vs}" if a.record_vs else ""}')
     t0 = time.time()
     RECORDING.update(iter=it, since=t0, games=a.games)
     if kick:
@@ -761,7 +863,7 @@ def one_pass(run, a, key, log=print, kick=None):
                               title=f'Generation {it}', log=log, opp=a.record_vs)
     finally:
         RECORDING.clear()
-    out = os.path.join(run, 'replays')
+    out = os.path.join(a.state_dir or run, 'replays')
     for r in reps:
         meta = {'seat_labels': seat_labels(r, path, a, it)} if a.record_vs else None
         replays.core.save(r, out)
@@ -828,6 +930,10 @@ def main(argv=None):
     ap.add_argument('--record-vs', default=None, help='record the games against this checkpoint instead of itself')
     ap.add_argument('--record-vs-label', default=None, help="--record-vs's seat label (default: its file name)")
     ap.add_argument('--record-label', default=None, help="the recorded generation's seat label with --record-vs ('{iter}': its number; default 'gen {iter}')")
+    ap.add_argument('--keep-yardstick', default=None, metavar='DIR',
+                    help="a best-of-three run's keep-your-60 yardstick results (DIR/keep_NNNN.txt, mtgz.az.keep_h2h)")
+    ap.add_argument('--state-dir', default=None, metavar='DIR',
+                    help="this publisher's files (delverai.json, replays/) here instead of in the run's directory")
     a = ap.parse_args(argv)
     if a.record_vs and not os.path.isfile(a.record_vs):
         raise SystemExit(f'--record-vs {a.record_vs}: no such checkpoint')

@@ -28635,3 +28635,44 @@ target directory (E:/cargo-target/mtg-zero/bo3-postboard).
   Nothing refuses it in a run spec; the presets do not set it.
 * **The run**: moving the Delver best-of-three run onto this commit changes what it trains (games 2-3 only) - a
   maintainer's decision, with the run.
+
+## 131. Best-of-three match replays and the delverai publisher (branch `delverai-bo3`, 2026-11-12)
+
+Branch `delverai-bo3` from main 45e65178 (the delver-bo3-pb1 run's engine and encoding) with `delverai-float` (20aee04,
+the live publishers' code: compact uploads, thinned rows, averaged anchored Elo, `rated_every`) merged. Recording and
+export only: no rule, encoding or search change.
+
+**The spectator view** (`view.rs`, read only; zero-core `export_state`): a best-of-three match's `match` adds `decks`
+(each player's deck as `[[name, copies], ...]` in the pool's order: the current or last game's; while sideboarding
+the decider's deck being built and a finished player's chosen deck), `results` (per game so far: 0 not played, 1 + p
+won, 3 drawn) and, while sideboarding, `sideboarding` {order, done}. The sideboarding options are in words (were
+their `Choice` debug text, "Def(DefId(17))"): "Keep the same deck" / "Done: play this deck" (PASS), "Bring in
+Karakas" / "Take out Island" (an entry of one copy), "Change Pyroblast (now 0 of 3)" then "3 Pyroblast (now 0)".
+
+**The recorder** (`mtgz/az/replays.py`): zero.replay already keeps a chained match in one replay (zero-core docs/az.md
+42: its `games`, the match's `result`). New: `match_index` writes the boundaries as the replay's `match` - each game's
+first sideboarding frame (`sb`) and first frame of play (`start`), who chose play or draw, each seat's swaps against
+its registered main, the result (a post-sideboard match's game 1: not played, its drawn winner) - and the listing
+record carries its summary. With a deck head (`aux_deck_w`, ENGINE.md 102.4) each network decision in a game adds
+`deck` (`deck_read`): {for, n (their cards the decider has not seen: the true target's total, which is public), cards
+(the 12 most expected), vs_main (the 60 it predicts - the cards it knows, i.e. their 60 less the true unseen ones,
+plus its guess at the rest - against the registered main, cards of their 75 only), outside (copies it puts on cards
+outside the 75)}. Sideboarding decisions carry no prediction (no hand, no deck target: `aux_target` is empty between
+games). On delver-bo3-pb1's generation 36 (one match, CPU, 245 s) the first read of game 2 was Rough // Tumble +0.91,
+Prismari Charm -0.97 - the swap both players had made.
+
+**The publisher** (`tools/delverai_publish.py`): a fork record with `scale_break` (a text) starts a new history: the run
+is its lineage's first segment, numbered from 0, its Elo never on the parent's axis, and the record says where it came
+from (`forked_from`: the parent, its generation, its global generation, the parent lineage's segments, the text)
+without the parent's rows. The record has `format` ('bo1' / 'bo3') and `start_game`; the deck its sideboard; an anchor
+path like `delver-bo3_a3198_iter0000.pt` finds the run's generation 0 (`iter_?NNNN`). `--keep-yardstick DIR` reads the
+keep-your-60 yardstick (`keep_NNNN.txt`, `mtgz.az.keep_h2h`, 130.3) into `keep_yardstick` rows (another run's files and
+results of two checkpoints left out, no paths); `--state-dir DIR` keeps delverai.json and replays/ out of the run's
+directory.
+
+**Checks.** Behaviour digests unchanged: full **b63f643e97a30a61**, `DIGEST_ENCODING=0` **a0062bb5569e06d3**,
+`DIGEST_ENCODING=v5` **d1bbf127a6c5bda0** (main's, 130.7). `cargo test --release -p engine --test view --test
+post_board --test constructed_bo3 --test bo3_episodes`: passed. pytest: `tests/test_replays_bo3.py` (4, new: the view's
+decks and words, a tiny network's matches end to end, no deck read without the head, `deck_read`'s arithmetic),
+`tests/test_delverai_publish.py` (10: two new - the scale break, the yardstick files), and the bo3 / belief / deck-tilt
+/ blunders files: 52 passed.
