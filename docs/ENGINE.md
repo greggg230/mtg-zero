@@ -29330,3 +29330,40 @@ The review found the benchmarks built as tests running on the Windows heap while
 against 59 us. `driver_bench`, `perf` and `measure_delver` now run on mimalloc (`mimalloc` a dev-dependency of the
 engine, `#[global_allocator]` in each). Numbers in sections before this one (17 onwards) were taken on the system heap
 and overstate allocation-heavy parts.
+
+### 145.3 zero-core e5e1bb0 -> perf/fable-1112 without P5: tail rows scanned at encode (P2), the phase's time split
+
+Two zero-core commits (zero-core docs/az.md 44.1, 44.2), behaviour-preserving:
+
+* **P2** (zero-core `driver.rs`, `LeafBuf::encode_row`): layout v7's tails had switched this game's rows off the sparse
+  path of section 89 - a sparse buffer kept an `encode_row` row dense until `seal`, so the eval cache's key hashed all
+  56,384 floats and a cached row zeroed them again. The row's non-zeros are now taken at once (`sparse_scan` after
+  `encode_row`), as `encode_sparse`'s are. The review measured key 5.46 -> 1.15 us a row, seal / un-row 4.33 -> ~0.
+* **Timing metrics** (zero-core `run.py`, `infer.py`): each self-play phase writes `selfplay.timing` - the search
+  threads' busy seconds and share, batch assembly, the driving thread's wait for searches and its share, the
+  evaluator's share and its CUDA graphs' launch / result seconds - so a phase at 32k leaves/s (the live run) against
+  43.12's 61k can say what it waited for (the review's bug 4).
+
+**Checks.** The driver hash is EQUAL: `f8cfeb414c6c3322` at 48 games (40,000 batches) and `23bfcec6e4a37c6e` at 256
+games in flight (`MAXBATCH=12000 CONC=256 GROUPS=2 THREADS=8`: ~1.75M simulations - the counter also counts the
+searches in flight when the run stops - and 15,590 records), the same in all six A/B runs below. Engine digests: 145.5.
+
+**Measured** (fixed work, `MAXBATCH=12000 CONC=256 GROUPS=2 THREADS=8`, interleaved pairs on 267ae603 and this commit,
+desktop 2026-11-13; the CPU shared with the live run and other lanes' builds and suites, so absolute numbers are ~40%
+above the review's quiet ones and only the pairs compare):
+
+| pair | 267ae603: wall, search thread us/sim | P2 + the readers fix: wall, us/sim |
+|---|---|---|
+| 1 | 21.8 s, 93.1 | 22.1 s, 88.0 |
+| 2 | 22.8 s, 97.2 | 22.9 s, 88.6 |
+| 3 | 25.2 s, 98.7 | 22.5 s, 90.0 |
+
+Mean 96.3 -> 88.9 us per simulation (-7.7%) for P2 and 145.1 together. Peak working set unchanged (5.84-5.97 GB:
+the records still hold dense rows; P5, after this commit, changes that).
+
+### 145.5 Checks
+
+**Without P5** (this branch's commit with zero-core fe30d26): engine digests EQUAL to `engine/tests/data/digests.txt`
+(combined `438164c0429d7fa3`); the full engine suite (`cargo test --release -p engine`: 2,534 passed, 0 failed); zero-core
+`cargo test --release` 180 passed; `FUZZ_GAMES=20000 cargo test --release -p engine --test fuzz`: 4 passed (3,740 s on
+the shared CPU); the driver hash EQUAL (145.3).
