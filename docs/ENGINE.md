@@ -29295,7 +29295,7 @@ target directory (E:/cargo-target/mtg-zero/bo3-postboard).
 
 The Fable review of 2026-11-12 (slice 5, `E:\mtg-zero-scratch\fable-review-2026-11-12\infra.md`) found zero-core's run
 loop sound where it runs alone and wrong at its edges: a remote machine, an interrupted iteration, a fork, the supervisor.
-Lane C2 fixed every one of its zero-core Python items. `third_party/zero-core` e5e1bb0 -> **adcdc87** (`fix/core-infra-1112`,
+Lane C2 fixed every one of its zero-core Python items. `third_party/zero-core` e5e1bb0 -> **f974ce3** (`fix/core-infra-1112`,
 on GitHub); zero-core docs/az.md **46** has each fix (why, what, defaults), 43.14 a correction. Python only: no Rust
 change, no engine change, **digests EQUAL** (nothing the engine plays or encodes moved; not re-run).
 
