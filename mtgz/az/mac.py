@@ -10,7 +10,11 @@ the engine built there and stamped with the commit (the file `mtgz-engine-commit
 checkout's git dir). `RunCommitRemote` is the spec; it resolves when the run starts its RemoteEval
 (zero.remote.remote_spec reads it), not when the package is imported:
 
-* the run's checkout must be clean (tracked files and the zero-core submodule): else SystemExit;
+* the run's checkout must be clean (tracked files, the zero-core submodule, and no untracked file where a run or
+  a build picks it up: mtgz/checkout.py) and still at the commit this process imported its code from (HEAD read
+  when mtgz.az.mac was imported: a remote resolved later - a host joining the run - after the worktree moved to
+  another commit would self-play that commit's engine for a trainer running this one; docs/ENGINE.md 143): else
+  SystemExit;
 * `repo` is the Mac's checkout of that commit, and `env` carries the commit (MTGZ_REMOTE_COMMIT);
 * the Mac's checkout is checked over ssh (`python -m mtgz.az.remote check` there): missing, at another
   commit, changed, or its engine not built at the commit -> SystemExit, with the command that
@@ -33,6 +37,8 @@ import subprocess
 import sys
 from collections.abc import Mapping
 
+from mtgz import checkout
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ENV_COMMIT = 'MTGZ_REMOTE_COMMIT'       # the run's commit, in the remote's environment
 STAMP = 'mtgz-engine-commit'            # in the checkout's git dir: the commit its engine was built at
@@ -43,8 +49,34 @@ def _git(root, *args):
 
 
 def checkout_state(root):
-    """-> (HEAD of the checkout `root`, its changed tracked files and submodules as status lines)."""
-    return _git(root, 'rev-parse', 'HEAD'), _git(root, 'status', '--porcelain', '--untracked-files=no').splitlines()
+    """-> (HEAD of the checkout `root`, what keeps it from being exactly that commit as status lines: changed
+    tracked files and submodules, '?? <path>' for an untracked file where a run or a build picks it up)."""
+    return _git(root, 'rev-parse', 'HEAD'), checkout.changes(root)
+
+
+def _imported_head():
+    """HEAD of this checkout when this module was imported - the commit of the code this process runs (a run
+    imports mtgz.az, and so this module, at its start). None outside a git checkout."""
+    try:
+        return _git(ROOT, 'rev-parse', 'HEAD')
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+IMPORTED_HEAD = _imported_head()
+
+
+def moved_problem(root, head):
+    """Why the checkout `root`, now at `head`, cannot stand for this process's code: it is this process's own
+    checkout and HEAD moved since the import (None: it did not, or it is another checkout)."""
+    if os.path.normcase(os.path.abspath(root)) != os.path.normcase(os.path.abspath(ROOT)):
+        return None
+    if IMPORTED_HEAD is None:
+        return f'{ROOT} was not a git checkout when this process imported its code'
+    if head != IMPORTED_HEAD:
+        return (f'{ROOT} moved to {head[:12]} after this process imported its code from {IMPORTED_HEAD[:12]}: a remote '
+                f'resolved now would run {head[:12]}\'s engine for a run on {IMPORTED_HEAD[:12]}')
+    return None
 
 
 def eval_checkout(sha, home):
@@ -152,8 +184,12 @@ class RunCommitRemote(Mapping):
         head, dirty = checkout_state(self.root)
         if dirty:
             raise SystemExit(f'eval_remote / selfplay_remote: the run\'s checkout {self.root} has uncommitted '
-                             f'changes, so no remote checkout can hold its code: '
+                             f'changes or untracked files, so no remote checkout can hold its code: '
                              f'{"; ".join(d.strip() for d in dirty[:5])} (commit them, or run without the remote)')
+        moved = moved_problem(self.root, head)
+        if moved:
+            raise SystemExit(f'eval_remote / selfplay_remote: {moved} (restart the run from its checkout as it is now, '
+                             f'or put the checkout back at {IMPORTED_HEAD and IMPORTED_HEAD[:12]})')
         spec = dict(self.fixed, repo=eval_checkout(head, self.home), env=dict(self.env, **{ENV_COMMIT: head}),
                     overrides=dict(self.overrides), selfplay=dict(self.selfplay))
         if preflight:
@@ -218,7 +254,10 @@ class LocalGpuRemote(Mapping):
         head, dirty = checkout_state(self.root)
         if dirty:
             raise SystemExit(f'selfplay_remote gpu:{self.device}: the run\'s checkout {self.root} has uncommitted '
-                             f'changes: {"; ".join(d.strip() for d in dirty[:5])}')
+                             f'changes or untracked files: {"; ".join(d.strip() for d in dirty[:5])}')
+        moved = moved_problem(self.root, head)
+        if moved:
+            raise SystemExit(f'selfplay_remote gpu:{self.device}: {moved}')
         p = problems(self.root, head)
         if p:
             raise SystemExit(f'selfplay_remote gpu:{self.device}: {self.root} cannot serve as its own remote: '

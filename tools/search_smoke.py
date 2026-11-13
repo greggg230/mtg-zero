@@ -40,13 +40,15 @@ finished cleanly.
 import argparse
 import json
 import os
-import subprocess
 import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import proctree  # noqa: E402  (tools/proctree.py)
+
 SPECS = {
     # the self-play spec of the runs (new random decks every game)
     'random': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1},
@@ -97,6 +99,8 @@ DRAFT_SPECS = {
     'team_draft_2v2': (4, {'build_sims_div': 2}),
 }
 DRAFT_PRESET = 'team_draft-4v4'
+# the specs a run carries itself: `preset` = --preset's spec and game, `run` = the --run-config run's
+OWN_SPECS = ('preset', 'run')
 
 
 def one_draft(seed, spec, events, threads, conc, stall):
@@ -166,21 +170,52 @@ def one_draft(seed, spec, events, threads, conc, stall):
             'seconds': round(time.time() - t0, 1)}
 
 
-def one(seed, spec, games, threads, sims, conc, preset, stall):
+# the run's self-play seat settings a uniform evaluator cannot answer: the root belief (its tilts deal the hidden
+# cards by the network's auxiliary head, which a uniform evaluator does not have); left out, and named in the output
+UNIFORM_DROPS = ('selfplay_belief_tilt', 'selfplay_belief_tilts')
+
+
+def smoke_config(preset, run_config=None):
+    """The run settings the smoke plays: a run's config.json (--run-config) over zero-core's DEFAULTS, else the
+    preset's (`import mtgz.az` first: the package's presets)."""
+    from zero.run import DEFAULTS, PRESETS
+    if run_config:
+        with open(run_config, encoding='utf-8') as f:
+            return dict(DEFAULTS, **json.load(f))
+    return dict(DEFAULTS, **PRESETS[preset])
+
+
+def smoke_seat(c, sims):
+    """The run's own self-play seat - zero.run.Run.nn_seat, so every seat setting a run passes (the move rule, the
+    completed-Q target and transforms, the value choice, eval_cache, resignation, the root search, the minor
+    decisions' sims, ...; the smoke built only eleven of them before, docs/ENGINE.md 143) - at the smoke's `sims`
+    (sims_fast = sims // 4), without UNIFORM_DROPS -> (seat, the dropped settings that were on)."""
+    import types
+
+    from zero.run import Run
+    c = dict(c, sims=sims, sims_fast=max(1, sims // 4))
+    dropped = [k for k in UNIFORM_DROPS if c.get(k)]
+    c.update(selfplay_belief_tilt=0.0, selfplay_belief_tilts={})
+    return Run.nn_seat(types.SimpleNamespace(cfg=c), 'm', sims, selfplay=True), dropped
+
+
+def one(seed, spec, games, threads, sims, conc, preset, stall, run_config=None):
     """One configuration, in this process: -> a result dict (raises on a driver error; exits
-    with code 3 when no batch comes for `stall` seconds)."""
+    with code 3 when no batch comes for `stall` seconds). The spec `preset` / `run` is the preset's / the
+    --run-config run's own spec and game."""
     sys.path.insert(0, ROOT)
     import mtgz.az  # noqa: F401  (registers the game package)
     from zero import games as G
     from zero.infer import UniformEvaluator, drive
-    from zero.run import DEFAULTS, PRESETS
-    c = dict(DEFAULTS, **PRESETS[preset])
-    seat = G.nn_seat('m', sims, c['c_puct'], True, c['alpha'], c['eps'], c['temp_moves'], max(1, sims // 4),
-                     c['p_full'], c['chance_k'], c['margin_w'], bool(c['redet']), c.get('policy_target', 'visits'),
-                     c.get('cq_c_visit', 50.0), c.get('cq_c_scale', 1.0), sims_minor=c.get('sims_minor', 0) or None)
+    c = smoke_config(preset, run_config)
+    seat, dropped = smoke_seat(c, sims)
+    if spec in OWN_SPECS:
+        spec_obj, game = json.loads(c['spec'] or '{}'), c['game']
+    else:
+        spec_obj, game = SPECS[spec], GAMES.get(spec, 'mtg')
     # (a match is up to three games: three times the step cap)
-    steps = c['max_steps'] * (3 if SPECS[spec].get('format') == 'bo3' else 1)
-    drv = G.Driver(GAMES.get(spec, 'mtg'), [[seat, seat]] * games, spec=json.dumps(SPECS[spec]), concurrency=conc,
+    steps = c['max_steps'] * (3 if spec_obj.get('format') == 'bo3' else 1)
+    drv = G.Driver(game, [[seat, seat]] * games, spec=json.dumps(spec_obj), concurrency=conc,
                    seed=seed, threads=threads, groups=c['groups'], record=True, max_steps=steps)
     t0 = time.time()
     last = [time.time()]
@@ -204,7 +239,8 @@ def one(seed, spec, games, threads, sims, conc, preset, stall):
     res = drv.take_results()
     st = drv.stats()
     out = {'seed': seed, 'spec': spec, 'games': len(res), 'unfinished': sum(1 for r in res if not r['over']),
-           'decisions': sum(r['decisions'] for r in res), 'sims': st['sims'], 'seconds': round(time.time() - t0, 1)}
+           'decisions': sum(r['decisions'] for r in res), 'sims': st['sims'], 'seconds': round(time.time() - t0, 1),
+           'dropped': dropped}
     eps = [e for r in res for e in r.get('episodes') or ()]
     if eps:
         out['episodes'] = len(eps)                 # (a chained spec, docs/ENGINE.md 121: the matches' games)
@@ -228,16 +264,12 @@ def run_configuration(spec, seed, a):
     cmd = [sys.executable, os.path.abspath(__file__), '--one', str(seed), spec, '--games', str(a.games),
            '--events', str(a.events),
            '--threads', str(a.threads), '--sims', str(a.sims), '--conc', str(a.conc), '--preset', a.preset,
-           '--stall', str(a.stall)]
+           '--stall', str(a.stall)] + (['--run-config', a.run_config] if a.run_config else [])
     t = time.time()
-    try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=a.timeout, cwd=ROOT,
-                           env=dict(os.environ, RUST_BACKTRACE=os.environ.get('RUST_BACKTRACE', '1')))
-        out, err, code = p.stdout, p.stderr, p.returncode
-    except subprocess.TimeoutExpired as e:
-        out = e.stdout.decode(errors='replace') if isinstance(e.stdout, bytes) else (e.stdout or '')
-        err = e.stderr.decode(errors='replace') if isinstance(e.stderr, bytes) else (e.stderr or '')
-        code = 'timeout'
+    # (tools/proctree.py: the timeout bounds the configuration's process and anything it started - subprocess.run
+    # killed the direct child only, then waited for whatever still held its pipes: docs/ENGINE.md 143)
+    out, err, code = proctree.run(cmd, cwd=ROOT, env=dict(os.environ, RUST_BACKTRACE=os.environ.get('RUST_BACKTRACE', '1')),
+                                  timeout=a.timeout, merge=False)
     lines = []
     bad = None
     line = next((x for x in out.splitlines() if x.startswith('RESULT ')), None)
@@ -256,6 +288,8 @@ def run_configuration(spec, seed, a):
         eps = f' ({r["episodes"]} episodes: their games)' if 'episodes' in r else ''
         lines.append(f'ok    seed {seed} {spec}: {r["games"]} games{eps} ({r["unfinished"]} unfinished), '
                       f'{r["decisions"]} decisions, {r["sims"]} sims, {r["seconds"]} s')
+        if r.get('dropped'):
+            lines.append(f'      (the seat without {", ".join(r["dropped"])}: a uniform evaluator has no auxiliary head)')
         if r['games'] != a.games or r['unfinished']:
             bad = (seed, spec, 'games missing or unfinished')
     else:
@@ -280,7 +314,10 @@ def main():
     ap.add_argument('--threads', type=int, default=8)
     ap.add_argument('--sims', type=int, default=64)
     ap.add_argument('--conc', type=int, default=256)
-    ap.add_argument('--preset', default='mtg-3', help='the run preset whose self-play seat is used')
+    ap.add_argument('--preset', default='mtg-3', help='the run preset whose self-play seat is used (zero.run.Run.nn_seat: '
+                    'every seat setting of the preset; spec `preset` = its own spec and game)')
+    ap.add_argument('--run-config', default=None, help="a run's config.json: its self-play seat instead of --preset's "
+                    "(spec `run` = its own spec and game)")
     ap.add_argument('--timeout', type=float, default=1800, help='seconds per configuration before it counts as a hang')
     ap.add_argument('--stall', type=float, default=60, help='seconds without a batch before it counts as a hang')
     ap.add_argument('--jobs', type=int, default=1, help='run this many (seed, spec) configurations at once '
@@ -293,14 +330,16 @@ def main():
         if a.one[1] in DRAFT_SPECS:
             r = one_draft(int(a.one[0]), a.one[1], a.events, a.threads, a.conc, a.stall)
         else:
-            r = one(int(a.one[0]), a.one[1], a.games, a.threads, a.sims, a.conc, a.preset, a.stall)
+            r = one(int(a.one[0]), a.one[1], a.games, a.threads, a.sims, a.conc, a.preset, a.stall, a.run_config)
         print('RESULT ' + json.dumps(r), flush=True)
         return 0
     t0 = time.time()
     jobs = []
     for spec in a.specs.split(','):
-        if spec not in SPECS and spec not in DRAFT_SPECS:
-            sys.exit(f'unknown spec {spec!r} (have {sorted(SPECS) + sorted(DRAFT_SPECS)})')
+        if spec not in SPECS and spec not in DRAFT_SPECS and spec not in OWN_SPECS:
+            sys.exit(f'unknown spec {spec!r} (have {sorted(SPECS) + sorted(DRAFT_SPECS) + list(OWN_SPECS)})')
+        if spec == 'run' and not a.run_config:
+            sys.exit('spec `run` is the --run-config run\'s own spec: give --run-config')
         for seed in parse_seeds(a.seeds):
             jobs.append((spec, seed))
     bad = []

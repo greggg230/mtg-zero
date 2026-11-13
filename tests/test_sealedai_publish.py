@@ -218,3 +218,52 @@ def test_the_real_deck_yardstick_in_the_progress_record(tmp_path, monkeypatch):
     assert (a['test_pools'], a['field_decks_used'], a['pools_counted'], a['pools_in_data']) == (64, 128, 8932, 9765)
     bad = [s for s in strings(sent[-1][1]) if PATH_RE.search(s)]
     assert not bad, bad
+
+
+def test_a_failed_pass_loses_no_game(tmp_path, monkeypatch):
+    """B16 (docs/ENGINE.md 143): LogTail moved its file offsets before parsing, and update() built its list after
+    them - a pass that raised (a half-written record, a spec it cannot read, a game_iteration error) lost the games it
+    had read for good: the published counts were short from then on. Collect, then commit: the failed pass consumes
+    nothing, and the next one counts every game once."""
+    run, log = make_run(tmp_path)
+    t = P.CardTallies(run)
+    real = P.GL.game_iteration
+    calls = []
+
+    def flaky(g, times):
+        calls.append(1)
+        if len(calls) == 2:
+            raise ValueError('a spec it cannot read')
+        return real(g, times)
+    monkeypatch.setattr(P.GL, 'game_iteration', flaky)
+    try:
+        t.update()
+        raise AssertionError('the pass should have failed')
+    except ValueError:
+        pass
+    assert t.done == {}                                   # nothing half-counted
+    assert t.update() == {1}
+    assert t.done[1].games == 2 and len(t.pending) == 1   # every game of iteration 1, once; iteration 2's waits
+    # a line that cannot be parsed: the offsets do not move past it (the same lines are read again, loudly)
+    append(log, [], partial=LATE[40:] + '\n{not json\n')
+    pos = dict(t.tail.pos)
+    try:
+        t.update()
+        raise AssertionError('the pass should have failed')
+    except ValueError as e:
+        assert 'not JSON' in str(e)
+    assert t.tail.pos == pos and len(t.pending) == 1
+
+
+def test_games_that_can_never_be_tallied_are_said_every_pass(tmp_path, monkeypatch):
+    """... and a pass that reads games but can tally none because metrics.jsonl has no line with a time logged
+    "cards: uploaded 0 iterations" as a success."""
+    run, log = make_run(tmp_path)
+    with open(os.path.join(run, 'metrics.jsonl'), 'w', encoding='utf-8') as f:
+        f.write(json.dumps({'iter': 1}) + '\n')             # no 'time'
+    said = []
+    monkeypatch.setattr(P, 'post', lambda *a: {'ok': True})
+    pub = P.Publisher(run, args(), 'k', log=said.append)
+    pub.cards_pass()
+    assert any(m.startswith('ERROR: cards: 3 games read and held, none tallied') for m in said), said
+    assert any('uploaded 0 iterations (the card record\'s info only)' in m for m in said)

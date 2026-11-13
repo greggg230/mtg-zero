@@ -80,26 +80,35 @@ def upload_key(key_file=None):
 
 class LogTail:
     """A run's game log read incrementally: each file's complete lines, once (a last line without its newline is being
-    written: read at a later call)."""
+    written: read at a later call). Collect, then commit (docs/ENGINE.md 143): the files' offsets move only once every
+    new line of every file parsed - a line that cannot be parsed (a half-written record, a spec it cannot read) raises
+    with nothing consumed, so the next pass reads the same lines again instead of losing them."""
 
     def __init__(self, run):
         self.run, self.pos, self.lines, self.specs = run, {}, {}, {}
+        self.read = 0                                 # complete lines read by the last new_games
 
     def new_games(self):
+        """-> the game lines new since the last call (a list)."""
+        games, pos, lines, specs = [], dict(self.pos), dict(self.lines), dict(self.specs)
+        read = 0
         for f in GL.files(self.run):
-            at = self.pos.get(f, 0)
+            at = pos.get(f, 0)
             with open(f, 'rb') as fh:
                 fh.seek(at)
                 data = fh.read()
             end = data.rfind(b'\n')
             if end < 0:
                 continue
-            self.pos[f] = at + end + 1
             for line in data[:end + 1].decode('utf-8').split('\n')[:-1]:
-                self.lines[f] = self.lines.get(f, 0) + 1
-                g = GL.parse_line(line, self.specs, f, self.lines[f])
+                lines[f] = lines.get(f, 0) + 1
+                read += 1
+                g = GL.parse_line(line, specs, f, lines[f])
                 if g is not None:
-                    yield g
+                    games.append(g)
+            pos[f] = at + end + 1
+        self.pos, self.lines, self.specs, self.read = pos, lines, specs, read
+        return games
 
 
 class CardTallies:
@@ -110,22 +119,28 @@ class CardTallies:
         self.tail = LogTail(run)
         self.done = {}            # iteration -> Tally
         self.pending = []         # games of iterations not finished yet (their metrics line not written)
+        self.last = {}            # the last update's counts: lines read, games read, tallied, pending
 
     def update(self):
-        """Read the new lines, count the games whose iteration is finished. -> the iterations that changed."""
+        """Read the new lines, count the games whose iteration is finished. -> the iterations that changed. The new
+        games join `pending` as soon as they are read (never lost to a failure after the log's offsets moved), and the
+        tallies change only after every game's iteration is known and every game is counted on copies."""
+        import copy
         times = GL.iteration_times(self.run)
         new = [g for g in self.tail.new_games() if self.phase == 'all' or g['phase'] == self.phase]
         for g in new:
             g.pop('actions', None)                    # (the counts need the draws, not the replay)
-        changed, keep = set(), []
-        for g in self.pending + new:
-            it = GL.game_iteration(g, times)
-            if it is None:
-                keep.append(g)
-                continue
-            self.done.setdefault(it, CS.Tally()).add(g, self.of(g))
-            changed.add(it)
-        self.pending = keep
+        self.pending = self.pending + new
+        placed = [(g, GL.game_iteration(g, times)) for g in self.pending]
+        changed = {it for _, it in placed if it is not None}
+        tallies = {it: copy.deepcopy(self.done[it]) if it in self.done else CS.Tally() for it in changed}
+        for g, it in placed:
+            if it is not None:
+                tallies[it].add(g, self.of(g))
+        self.done.update(tallies)
+        self.pending = [g for g, it in placed if it is None]
+        self.last = {'lines': self.tail.read, 'games': len(new), 'tallied': len(placed) - len(self.pending),
+                     'pending': len(self.pending), 'times': len(times)}
         return changed
 
 
@@ -324,6 +339,15 @@ class Publisher:
     def cards_pass(self):
         """Count the new games, maybe the draw credit, then upload what changed. -> the body posted (or None)."""
         self.tallies.update()
+        n = self.tallies.last
+        if n['pending'] and not n['times']:
+            # (nothing can be tallied until the run writes a metrics line with its time: said every pass, never a
+            # quiet "uploaded 0 iterations")
+            self.log(f'ERROR: cards: {n["pending"]} games read and held, none tallied - the run\'s metrics.jsonl has no '
+                     f'line with a time, so no game has an iteration')
+        elif n['games'] and not n['tallied']:
+            self.log(f'cards: {n["games"]} new games read, none tallied yet ({n["pending"]} held for the iteration in '
+                     f'progress)')
         self.maybe_credit()
         iters = []
         for it in sorted(self.tallies.done):
@@ -343,7 +367,8 @@ class Publisher:
             # in batches (a first upload of a long run): the info with each, the iterations a few dozen at a time
             for i in range(0, max(1, len(iters)), 40):
                 post(self.a.url, '/api/cards/upload', {**body, 'iters': [b for b, _ in iters[i:i + 40]]}, self.key)
-            self.log(f'cards: uploaded {len(iters)} iterations' + (f' ({iters[0][0]["iter"]}-{iters[-1][0]["iter"]})' if iters else ''))
+            self.log(f'cards: uploaded {len(iters)} iterations' + (f' ({iters[0][0]["iter"]}-{iters[-1][0]["iter"]})' if iters
+                                                                   else ' (the card record\'s info only)'))
         for b, h in iters:
             self.sent[b['iter']] = h
         self.info_sent = ih

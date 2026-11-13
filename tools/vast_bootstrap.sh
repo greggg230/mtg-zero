@@ -2,6 +2,7 @@
 # Turn a fresh rented Linux GPU box (a PyTorch + CUDA Docker image, root) into an MTG Zero machine:
 # run over ssh by tools/vast.py prep (`bash -s`, with RUST_TOOLCHAIN set). Idempotent: a second run only
 # checks. Based on dominion-zero tools/box_bootstrap.sh. Prints @@sections: @@apt @@rust @@pip @@torch @@sysinfo
+# Exit codes: 3 apt, 4 rustup, 5 pip, 6 no working CUDA.
 # Needs: apt (build-essential, pkg-config, curl, git), rustup (minimal profile, the desktop's toolchain),
 # numpy + psutil + pytest + flask for the image's python. The image's python (pytorch/pytorch 2.11 images:
 # /usr/bin/python, PEP 668 "externally managed", no conda) takes pip's --break-system-packages (a throwaway
@@ -51,14 +52,19 @@ fi
 "$PY" -c "import numpy, psutil, pytest; print('python', '$PY', 'numpy', numpy.__version__, 'psutil', psutil.__version__, 'pytest', pytest.__version__)"
 
 echo "@@torch"
+# (a box without working CUDA is refused, exit 6: a run would train on its CPU at a fraction of the speed, billed by the
+# hour, with "device": "cpu" in its metrics as the only sign - docs/ENGINE.md 143)
 "$PY" - <<'EOF'
+import sys
 import torch
 ok = torch.cuda.is_available()
 print('torch', torch.__version__, 'cuda', torch.version.cuda, 'available', ok)
-if ok:
-    x = torch.randn(1024, 1024, device='cuda')
-    print('device', torch.cuda.get_device_name(0), 'capability', torch.cuda.get_device_capability(0),
-          'matmul ok', float((x @ x).sum().item()) == float((x @ x).sum().item()))
+if not ok:
+    print('ERROR: torch.cuda.is_available() is False on this box (no working CUDA): refused', flush=True)
+    sys.exit(6)
+x = torch.randn(1024, 1024, device='cuda')
+print('device', torch.cuda.get_device_name(0), 'capability', torch.cuda.get_device_capability(0),
+      'matmul ok', float((x @ x).sum().item()) == float((x @ x).sum().item()))
 EOF
 
 echo "@@sysinfo"
