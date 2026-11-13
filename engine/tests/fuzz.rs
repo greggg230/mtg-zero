@@ -226,6 +226,84 @@ use engine::rng::Rng;
 use engine::game::EndReason;
 use engine::{Choice, DecisionKind, Game, GameSpec, Outcome, NUM_ACTIONS};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use engine::rules_check::{MatchCheck, RulesCheck};
+
+thread_local! {
+    /// The rules checks' counts of this test (ENGINE.md 131; each test runs on a thread of its
+    /// own): each game's, match's and world's `RulesCheck` adds its own as it ends.
+    static RULES: std::cell::RefCell<engine::rules_check::Stats> = std::cell::RefCell::new(Default::default());
+}
+
+fn rules_add(s: &engine::rules_check::Stats) {
+    RULES.with(|r| r.borrow_mut().add(s));
+}
+
+fn rules_report() -> String {
+    format!("rules checks (ENGINE.md 131, CR {}): {}", engine::rules_check::CR_EDITION, RULES.with(|r| *r.borrow()))
+}
+
+/// A game's last log lines (for a rules check's failure).
+fn log_tail(g: &Game, n: usize) -> String {
+    g.log_lines().iter().rev().take(n).rev().cloned().collect::<Vec<_>>().join("\n")
+}
+
+thread_local! {
+    /// The rules checks' violations of this test (ENGINE.md 131): (rule, where and what, the
+    /// game's log). A violation is recorded and its game checked no further (`RulesCheck` stops);
+    /// the test plays on and fails at its end (`rules_verdict`), so one run counts every
+    /// violation of its seeds.
+    static RULES_FAILS: std::cell::RefCell<Vec<(&'static str, String, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn rules_fail(e: engine::rules_check::Violation, what: String, log: String) {
+    RULES_FAILS.with(|f| f.borrow_mut().push((e.rule, format!("{what}: {e}"), log)));
+}
+
+/// The rules checks of a step (ENGINE.md 131): a violation is recorded with `what` and the
+/// game's log.
+fn rules_step(rc: &mut RulesCheck, g: &Game, what: &dyn Fn() -> String) {
+    if let Err(e) = rc.step(g) {
+        rules_fail(e, what(), log_tail(g, 60));
+    }
+}
+
+/// The rules checks' violations by rule, and the test's verdict: it fails if any rule outside
+/// `FUZZ_RULES_ALLOW` (comma-separated rule numbers, as the violations name them) was violated.
+fn rules_verdict(test: &str) {
+    let allow: Vec<String> = std::env::var("FUZZ_RULES_ALLOW").map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()).unwrap_or_default();
+    let fails = RULES_FAILS.with(|f| std::mem::take(&mut *f.borrow_mut()));
+    if fails.is_empty() {
+        println!("{test}: no rules check violated");
+        return;
+    }
+    let mut by: Vec<(&'static str, Vec<&(&'static str, String, String)>)> = Vec::new();
+    for f in &fails {
+        match by.iter_mut().find(|x| x.0 == f.0) {
+            Some(x) => x.1.push(f),
+            None => by.push((f.0, vec![f])),
+        }
+    }
+    let mut failing = Vec::new();
+    for (rule, list) in &by {
+        let allowed = allow.iter().any(|a| a == rule);
+        println!("{test}: CR {rule} violated {} times{}; first: {}", list.len(), if allowed { " (allowed: FUZZ_RULES_ALLOW)" } else { "" }, list[0].1);
+        for x in list.iter().skip(1).take(4) {
+            println!("    also: {}", x.1.lines().next().unwrap_or(""));
+        }
+        println!("    its log:\n{}", list[0].2);
+        if !allowed {
+            failing.push(format!("CR {rule} x{}", list.len()));
+        }
+    }
+    assert!(failing.is_empty(), "{test}: rules checks violated: {}", failing.join(", "));
+}
+
+/// [`rules_step`] over a match's games.
+fn rules_match_step(mc: &mut MatchCheck, a: &engine::az::MtgAz, what: &dyn Fn() -> String) {
+    if let Err(e) = mc.step(a) {
+        rules_fail(e, what(), log_tail(&a.g, 60));
+    }
+}
 
 /// The interaction groups of `FUZZ_POOL=interactions` (ENGINE.md 38.5; cube
 /// cards only, so matches can use them; a misspelt name fails loudly).
@@ -1001,6 +1079,8 @@ fn check_determinize_weighted(g: &Game, seed: u64, step: usize, tilt: f64) {
             BELIEF_UNIFORM.fetch_add((unknown_hand.len() as f64 * h / pool.len() as f64 * 1000.0) as u64, Ordering::Relaxed);
         }
         let (mut legal, mut keys) = (Vec::new(), Vec::new());
+        let mut rc = RulesCheck::new(&d);
+        rules_step(&mut rc, &d, &|| what.clone());
         for _ in 0..30 {
             if d.is_over() {
                 break;
@@ -1016,7 +1096,9 @@ fn check_determinize_weighted(g: &Game, seed: u64, step: usize, tilt: f64) {
 ")),
             }
             d.check_invariants().unwrap_or_else(|e| panic!("{what}: {e}"));
+            rules_step(&mut rc, &d, &|| format!("{what}, played on"));
         }
+        rules_add(&rc.stats);
     }
 }
 
@@ -1077,7 +1159,7 @@ fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
 
 /// One search transition of a chance walk's world, its invariants and knowledge checked after
 /// it; a failure or an engine panic is reported with the walk (`at`, the path, the forced keys).
-fn chance_step(w: &mut Game, act: u16, forced: Option<&[u64]>, at: &str, path: &[String]) -> Vec<u64> {
+fn chance_step(w: &mut Game, rc: &mut RulesCheck, act: u16, forced: Option<&[u64]>, at: &str, path: &[String]) -> Vec<u64> {
     let k = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| chance_transition(w, act, forced))) {
         Ok(Ok(k)) => k,
         Ok(Err(e)) => panic!("{at}: {e}\npath: {path:?}\nforced: {forced:?}"),
@@ -1089,6 +1171,7 @@ fn chance_step(w: &mut Game, act: u16, forced: Option<&[u64]>, at: &str, path: &
     };
     w.check_invariants().unwrap_or_else(|e| panic!("{at}: {e}\npath: {path:?}\nforced: {forced:?}"));
     w.check_knowledge().unwrap_or_else(|e| panic!("{at}: {e}\npath: {path:?}\nforced: {forced:?}"));
+    rules_step(rc, w, &|| format!("{at}\npath: {path:?}\nforced: {forced:?}"));
     k
 }
 
@@ -1121,6 +1204,7 @@ fn check_forced_chance(g: &Game, seed: u64, step: usize) {
     };
     let mut free = deal(&mut rng);
     let mut replay = deal(&mut rng);
+    let (mut rcf, mut rcr) = (RulesCheck::new(&free), RulesCheck::new(&replay));
     CHANCE_WALKS.fetch_add(1, Ordering::Relaxed);
     let (mut lf, mut lr) = (Vec::new(), Vec::new());
     let mut path: Vec<String> = Vec::new();
@@ -1138,13 +1222,14 @@ fn check_forced_chance(g: &Game, seed: u64, step: usize) {
         }
         if depth > 0 && rng.below(2) == 0 {
             std::mem::swap(&mut free, &mut replay);
+            std::mem::swap(&mut rcf, &mut rcr);
         }
         let act = lf[rng.below(lf.len() as u32) as usize];
         let at = |how: &str| format!("seed {seed} step {step}: chance walk (mover P{mover}) at {depth}, {how}, action {act}");
         path.push(format!("{act} = {}", free.describe_action(act).unwrap_or_default()));
-        let kf = chance_step(&mut free, act, None, &at("the free world"), &path);
-        let unforced = chance_step(&mut replay.clone(), act, None, &at("the replaying world unforced"), &path);
-        let kr = chance_step(&mut replay, act, Some(&kf), &at("the replaying world"), &path);
+        let kf = chance_step(&mut free, &mut rcf, act, None, &at("the free world"), &path);
+        let unforced = chance_step(&mut replay.clone(), &mut rcr.clone(), act, None, &at("the replaying world unforced"), &path);
+        let kr = chance_step(&mut replay, &mut rcr, act, Some(&kf), &at("the replaying world"), &path);
         CHANCE_STEPS.fetch_add(1, Ordering::Relaxed);
         let changed = unforced != kf && kr == kf;
         if changed {
@@ -1160,6 +1245,8 @@ fn check_forced_chance(g: &Game, seed: u64, step: usize) {
         }
     }
     if !split {
+        rules_add(&rcf.stats);
+        rules_add(&rcr.stats);
         return;
     }
     // The replaying world below its own node.
@@ -1171,8 +1258,10 @@ fn check_forced_chance(g: &Game, seed: u64, step: usize) {
         let act = lr[rng.below(lr.len() as u32) as usize];
         path.push(format!("(alone) {act} = {}", replay.describe_action(act).unwrap_or_default()));
         let at = format!("seed {seed} step {step}: chance walk (mover P{mover}), the replaying world alone at {solo}, action {act}");
-        chance_step(&mut replay, act, None, &at, &path);
+        chance_step(&mut replay, &mut rcr, act, None, &at, &path);
     }
+    rules_add(&rcf.stats);
+    rules_add(&rcr.stats);
 }
 
 /// The card table of the mode's games: the cube's and the custom test cards,
@@ -2085,6 +2174,11 @@ fn play(seed: u64, checks: bool) -> Played {
     // (`FUZZ_POOL=names`: the namers counted and the stack items seen, ENGINE.md 127.)
     let (mut names_named, mut names_seen): (Vec<engine::ids::ObjRef>, Vec<u32>) = (Vec::new(), Vec::new());
     let (mut turn, mut turn_steps) = (g.turn().number, 0u64);
+    // The rules checks (ENGINE.md 131), after every step.
+    let mut rc = checks.then(|| RulesCheck::new(&g));
+    if let Some(rc) = rc.as_mut() {
+        rules_step(rc, &g, &|| format!("seed {seed} (its first state)"));
+    }
     while !g.is_over() {
         g.legal_actions(&mut legal);
         assert!(!legal.is_empty(), "seed {seed}: no legal action in a running game");
@@ -2137,6 +2231,9 @@ fn play(seed: u64, checks: bool) -> Played {
         g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}
 {}", g.log_lines().iter().rev().take(60).rev().cloned().collect::<Vec<_>>().join("
 ")));
+        if let Some(rc) = rc.as_mut() {
+            rules_step(rc, &g, &|| format!("seed {seed} step {steps} (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1 FUZZ_LOG=1)"));
+        }
         actions.push(a);
         steps += 1;
         if g.turn().number != turn {
@@ -2182,6 +2279,9 @@ fn play(seed: u64, checks: bool) -> Played {
     }
     MAX_GAME_STEPS.fetch_max(steps as u64, Ordering::Relaxed);
     record_turn(seed, turn, turn_steps);
+    if let Some(rc) = &rc {
+        rules_add(&rc.stats);
+    }
     let companions = (0..2).filter(|&p| g.player(p).companion.is_some()).count() as u32;
     let companions_used = (0..2).filter(|&p| g.player(p).companion_used).count() as u32;
     Played { actions, keys, fingerprint: g.fingerprint(), outcome: g.outcome().unwrap(), turns: g.turn().number, companions, companions_used }
@@ -2246,6 +2346,9 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
         }
         let mut legal = Vec::new();
         let mut keys = Vec::new();
+        // (The world's own rules checks, ENGINE.md 131: its cards are the world's.)
+        let mut rc = RulesCheck::new(&d);
+        rules_step(&mut rc, &d, &|| format!("seed {seed}: a world determinized for P{viewer}"));
         for _ in 0..30 {
             if d.is_over() {
                 break;
@@ -2258,7 +2361,9 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
                     d.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("\n")
                 )
             });
+            rules_step(&mut rc, &d, &|| format!("seed {seed}: a world determinized for P{viewer}, played on"));
         }
+        rules_add(&rc.stats);
     }
 }
 
@@ -2462,6 +2567,8 @@ fn fuzz_random_games() {
         assert!(MAX_POWER.load(Ordering::Relaxed) > u32::MAX as i64, "no board past u32::MAX power: {}", extremes_report());
     }
     println!("longest game: {} actions (cap 100,000)", MAX_GAME_STEPS.load(Ordering::Relaxed));
+    println!("{}", rules_report());
+    rules_verdict("fuzz_random_games");
     println!("controlled decisions (CR 722.4, encoded in the controlled seat: ENGINE.md 100.5): {}", CONTROLLED.load(Ordering::Relaxed));
     println!("{}; seeds skipped (FUZZ_SKIP): {skips}", longest_turn_report());
     if hidden_decks_mode() {
@@ -3111,6 +3218,11 @@ fn play_match_spec(seed: u64, sp: &engine::az::MtgSpec, checks: bool, stats: &mu
     let (mut sideboard_decisions, mut changed_decks, mut sideboardings) = (0u32, 0u32, 0u32);
     let mut decks = [g.m.decks[0].clone(), g.m.decks[1].clone()];
     let mut game_no = 1;
+    // The rules checks of each game (ENGINE.md 131), after every step.
+    let mut mc = MatchCheck::new();
+    if checks {
+        rules_match_step(&mut mc, &g, &|| format!("match {seed} (its first state)"));
+    }
     loop {
         // (one episode per game, ENGINE.md 121: a game's end is the episode's; the match goes on)
         let Some(p) = g.to_move() else {
@@ -3197,6 +3309,8 @@ fn play_match_spec(seed: u64, sp: &engine::az::MtgSpec, checks: bool, stats: &mu
                 }
                 // The world plays on.
                 let mut kd = Vec::new();
+                let mut wc = MatchCheck::new();
+                rules_match_step(&mut wc, &d, &|| format!("match {seed} (determinized for P{viewer})"));
                 for _ in 0..30 {
                     if d.to_move().is_none() {
                         break;
@@ -3207,7 +3321,9 @@ fn play_match_spec(seed: u64, sp: &engine::az::MtgSpec, checks: bool, stats: &mu
                     if d.sideboarding().is_none() && !d.match_over() {
                         d.g.check_invariants().unwrap_or_else(|e| panic!("match {seed} (determinized for P{viewer}): {e}"));
                     }
+                    rules_match_step(&mut wc, &d, &|| format!("match {seed} (determinized for P{viewer}, played on)"));
                 }
+                rules_add(&wc.total());
             }
         }
         g.step(a, &mut keys).unwrap_or_else(|e| panic!("match {seed}: {e}"));
@@ -3215,6 +3331,9 @@ fn play_match_spec(seed: u64, sp: &engine::az::MtgSpec, checks: bool, stats: &mu
         actions.push(a);
         if g.sideboarding().is_none() && !g.match_over() {
             g.g.check_invariants().unwrap_or_else(|e| panic!("match {seed} step {}: {e}", actions.len()));
+        }
+        if checks {
+            rules_match_step(&mut mc, &g, &|| format!("match {seed} step {} (rerun: FUZZ_FIRST={seed} FUZZ_MATCHES=1 FUZZ_LOG=1)", actions.len()));
         }
         if g.m.game_no != game_no && g.sideboarding().is_none() {
             // A later game: its decks are legal and from the pools; its
@@ -3247,6 +3366,7 @@ fn play_match_spec(seed: u64, sp: &engine::az::MtgSpec, checks: bool, stats: &mu
         }
         assert!(actions.len() < 300_000, "match {seed}: does not end");
     }
+    rules_add(&mc.total());
     let m = &g.m;
     assert!(g.match_over());
     // (An aborted game aborts the match, ENGINE.md 100.7: no result.)
@@ -3325,6 +3445,8 @@ fn fuzz_random_matches() {
         "sideboardings {sideboardings} ({:.2} decisions per sideboarding)",
         sb as f64 / sideboardings.max(1) as f64
     );
+    println!("{}", rules_report());
+    rules_verdict("fuzz_random_matches");
     // (Over a chunk of matches; a single match's rerun, `FUZZ_MATCHES=1`,
     // passes when the match completes: ENGINE.md 51.)
     assert!(n < 20 || sb > 0 && changed > 0 && three > 0, "no sideboarding, changed deck or match of three");
@@ -3379,6 +3501,8 @@ fn fuzz_post_sideboard_matches(first: u64, n: u64) {
         stats.choices_dealt,
         stats.tilted
     );
+    println!("{} (with the matches before)", rules_report());
+    rules_verdict("fuzz_post_sideboard_matches");
     assert!(n < 20 || sb > 0 && changed > 0 && three > 0 && kept > 0 && stats.choices_dealt > 0 && stats.tilted > 0, "post-sideboard matches: no sideboarding, changed deck, match of three or keeper");
 }
 
@@ -3526,13 +3650,17 @@ fn play_deck_choice(a: &mut engine::az::MtgAz, seed: u64, rng: &mut Rng) {
                     w.step(x, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
                     assert!(w.deck_choice().is_none(), "seed {seed}: the world's game begins with the decider's choice");
                     w.g.check_invariants().unwrap_or_else(|e| panic!("seed {seed}: the world's game: {e}"));
+                    let mut wc = MatchCheck::new();
+                    rules_match_step(&mut wc, &w, &|| format!("seed {seed}: a deck choice's world"));
                     for _ in 0..30 {
                         if w.to_move().is_none() {
                             break;
                         }
                         let l = az_legal(&w);
                         w.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+                        rules_match_step(&mut wc, &w, &|| format!("seed {seed}: a deck choice's world, played on"));
                     }
+                    rules_add(&wc.total());
                 }
                 DC_WORLDS.fetch_add(1, Ordering::Relaxed);
             }
@@ -3650,6 +3778,8 @@ fn play_hidden(seed: u64) -> Played {
     let (mut actions, mut keys) = (Vec::new(), Vec::new());
     let (mut names_named, mut names_seen): (Vec<engine::ids::ObjRef>, Vec<u32>) = (Vec::new(), Vec::new());
     let mut steps = 0usize;
+    let mut mc = MatchCheck::new();
+    rules_match_step(&mut mc, &a, &|| format!("seed {seed} (its first state)"));
     let (mut turn, mut turn_steps) = (a.g.turn().number, 0u64);
     while !a.g.is_over() {
         let legal = az_legal(&a);
@@ -3682,6 +3812,7 @@ fn play_hidden(seed: u64) -> Played {
         a.step(act, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         a.g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}"));
         a.g.check_knowledge().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}"));
+        rules_match_step(&mut mc, &a, &|| format!("seed {seed} step {steps} (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1 FUZZ_LOG=1)"));
         if names_mode() {
             count_names(&a.g, &mut names_named, &mut names_seen);
         }
@@ -3696,6 +3827,7 @@ fn play_hidden(seed: u64) -> Played {
     }
     MAX_GAME_STEPS.fetch_max(steps as u64, Ordering::Relaxed);
     record_turn(seed, turn, turn_steps);
+    rules_add(&mc.total());
     let g = &a.g;
     let companions = (0..2).filter(|&p| g.player(p).companion.is_some()).count() as u32;
     let companions_used = (0..2).filter(|&p| g.player(p).companion_used).count() as u32;
@@ -3806,6 +3938,8 @@ fn check_determinize_hidden(a: &engine::az::MtgAz, seed: u64, rng: &mut Rng) {
             check_hidden_information_set(a, viewer, seed, rng);
         }
         let mut keys = Vec::new();
+        let mut wc = MatchCheck::new();
+        rules_match_step(&mut wc, &d, &what);
         for _ in 0..30 {
             if d.to_move().is_none() {
                 break;
@@ -3813,7 +3947,9 @@ fn check_determinize_hidden(a: &engine::az::MtgAz, seed: u64, rng: &mut Rng) {
             let l = az_legal(&d);
             d.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap_or_else(|e| panic!("{}: {e}", what()));
             d.g.check_invariants().unwrap_or_else(|e| panic!("{} (played on): {e}", what()));
+            rules_match_step(&mut wc, &d, &|| format!("{} (played on)", what()));
         }
+        rules_add(&wc.total());
     }
 }
 

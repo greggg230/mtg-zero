@@ -35,6 +35,7 @@ mod resolve_eoe_a;
 mod resolve_eoe_d;
 mod resolve_walkers;
 mod resolve_eoe_b;
+pub mod rules_check;
 pub mod rng;
 mod sba;
 mod stack_ext;
