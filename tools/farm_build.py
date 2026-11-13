@@ -17,10 +17,20 @@ mtgz-worker.exe`, checked (the worker reads the signed manifest: its build_id an
 the runtime pack it loads ONNX Runtime from (`--runtime-id`); a fuzz build needs no runtime pack.
 
 The runtime pack (`--runtime`): ONNX Runtime's CPU library (`--ort-dll`, default the onnxruntime
-package's of this Python) and the MSVC runtime it imports, app-local (`--msvc-dir`, default
-%WINDIR%\\System32: each must be Microsoft-signed and at least the toolset ONNX Runtime was linked
-with), plus `runtime.json` (each file's version, signer and sha256); loaded through a release build's
-`info --runtime-dir` (every DLL from the pack) before it is signed (`--kind runtime`).
+package's of this Python) and the MSVC runtime it imports, app-local (`--msvc-dir`: a Visual Studio
+redist folder, below - the default %WINDIR%\\System32 ships no license and is refused; each must be
+Microsoft-signed and at least the toolset ONNX Runtime was linked with), plus `runtime.json` (each file's version, signer and sha256); loaded through a release build's
+`info --runtime-dir` (every DLL from the pack) before it is signed (`--kind runtime`). With them, unmodified
+(zero-farm README "Third-party components"; runtime.json 'licenses': each file's sha256, component and source):
+* ONNX Runtime's `LICENSE` and `ThirdPartyNotices.txt` from the onnxruntime package the DLL comes from (ORT_LICENSE_FILES:
+  the DLL and both files checked against the package's RECORD, i.e. the wheel's own bytes);
+* when the pack carries the MSVC runtime, the Visual C++ runtime's license from the Visual Studio redist folder
+  the DLLs come from (`--msvc-dir` must then be `<VS>\\VC\\Redist\\MSVC\\<v>\\x64\\Microsoft.VC143.CRT`): VS ships no
+  license file next to the DLLs, so `license.rtf` - the "Microsoft Visual C++ 2015 - 2022 Runtime" license terms -
+  is taken byte for byte out of the folder's `vc_redist.x64.exe` (Microsoft-signed, the DLLs' own version; the
+  payload checked against the bundle manifest's SHA-1), and `Redist.txt` - Visual Studio 2022's "Distributable Code"
+  file, the redist list its license terms name - from `<VS>\\Licenses\\1033` (the VS 2022 license terms themselves
+  are not a file in the install: the installer only links them).
 
 The GPU runtime pack (`--runtime --pack winml`; zero-farm PROTOCOL.md 8, DESIGN.md 8.5): Windows ML's
 redistributable files from the NuGet package Microsoft.Windows.AI.MachineLearning (`--winml-version`, default
@@ -57,6 +67,14 @@ WINML_VERSION = '2.5.96'
 WINML_FILES = ('onnxruntime.dll', 'DirectML.dll', 'Microsoft.Windows.AI.MachineLearning.dll')
 # ... and its license files, shipped in the pack byte for byte (the package's root; the nuspec's <license file>)
 WINML_LICENSE_FILES = ('license.txt', 'ThirdPartyNotices.txt')
+# the CPU pack's license files (module docs): ONNX Runtime's, from its package's root ...
+ORT_LICENSE_FILES = ('LICENSE', 'ThirdPartyNotices.txt')
+# ... and the Visual C++ runtime's: the license its redistributable shows (a payload of vc_redist.x64.exe's UX
+# container) and Visual Studio's distributable-code list
+VCREDIST_LICENSE = 'license.rtf'
+VCREDIST_LICENSE_TITLE = b'MICROSOFT VISUAL C++ 2015 - 2022 RUNTIME'
+VS_REDIST_TXT = ('Licenses', '1033', 'Redist.txt')
+VS_REDIST_TXT_TITLE = b'Distributable Code for Microsoft Visual Studio 2022'
 # what a statically linked worker may import: Windows itself
 SYSTEM_DLLS = ('kernel32.dll', 'ntdll.dll', 'advapi32.dll', 'psapi.dll', 'bcryptprimitives.dll', 'user32.dll', 'ws2_32.dll',
                'userenv.dll', 'shell32.dll', 'ole32.dll', 'bcrypt.dll', 'secur32.dll', 'crypt32.dll', 'dbghelp.dll',
@@ -207,6 +225,119 @@ def file_version(path):
     return subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', ps], capture_output=True, text=True).stdout.strip()
 
 
+def ort_licenses(ort_dll):
+    """ONNX Runtime's license files (ORT_LICENSE_FILES) from the package `ort_dll` comes from -> {name: (bytes,
+    component, source)}: the DLL and each file checked against the package's RECORD (the sha256s the wheel installed)."""
+    import base64
+    import csv
+    import glob
+    dll = os.path.abspath(ort_dll)
+    pkg = os.path.dirname(os.path.dirname(dll))
+    site, top = os.path.dirname(pkg), os.path.basename(pkg)
+    dll_rel = f'{top}/capi/onnxruntime.dll'
+    if os.path.normcase(dll) != os.path.normcase(os.path.join(site, *dll_rel.split('/'))):
+        die(f'{ort_dll}: not an onnxruntime package\'s capi/onnxruntime.dll (the pack ships the license files of the package its DLL comes from)')
+    for rec in sorted(glob.glob(os.path.join(site, '*.dist-info', 'RECORD'))):
+        with open(rec, newline='', encoding='utf-8') as f:
+            rows = {r[0]: r[1] for r in csv.reader(f) if len(r) >= 2}
+        if dll_rel in rows:
+            break
+    else:
+        die(f'{ort_dll}: no installed package lists it in its RECORD (the pack ships the license files of the package its DLL comes from)')
+    dist = os.path.basename(os.path.dirname(rec))[:-len('.dist-info')]
+
+    def package_bytes(rel):
+        want = rows.get(rel, '')
+        if not want.startswith('sha256='):
+            die(f'{dist}: its RECORD has no sha256 for {rel}')
+        with open(os.path.join(site, *rel.split('/')), 'rb') as f:
+            data = f.read()
+        if base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b'=').decode() != want[len('sha256='):]:
+            die(f'{rel}: not the bytes the {dist} package installed')
+        return data
+    package_bytes(dll_rel)
+    return {n: (package_bytes(f'{top}/{n}'), 'ONNX Runtime', f'{dist} (pip package): {top}/{n}') for n in ORT_LICENSE_FILES}
+
+
+def burn_ux_payload(exe, name):
+    """The payload `name` of a WiX Burn bundle's UX container (`exe`'s first attached container: a cabinet), byte for
+    byte: extracted with Windows' expand.exe and checked against the bundle manifest's size and SHA-1."""
+    import re
+    import tempfile
+    import xml.etree.ElementTree as ET
+    with open(exe, 'rb') as f:
+        b = f.read()
+    pe = struct.unpack_from('<I', b, 0x3C)[0]
+    nsec = struct.unpack_from('<H', b, pe + 6)[0]
+    sec0 = pe + 24 + struct.unpack_from('<H', b, pe + 20)[0]
+    for i in range(nsec):
+        sname, _, _, _, raw = struct.unpack_from('<8sIIII', b, sec0 + 40 * i)
+        if sname.rstrip(b'\0') == b'.wixburn':
+            break
+    else:
+        die(f'{exe}: not a WiX Burn bundle (no .wixburn section)')
+    # BURN_SECTION_HEADER: magic, version, bundle GUID, stub size (= where the UX container starts), original
+    # checksum, original signature offset + size, container format (1 = cabinet), container count, container sizes
+    magic = struct.unpack_from('<I', b, raw)[0]
+    stub, _, _, _, fmt, count = struct.unpack_from('<6I', b, raw + 24)
+    if magic != 0x00F14300 or fmt != 1 or count < 1:
+        die(f'{exe}: unexpected Burn section (magic {magic:#x}, format {fmt}, {count} containers)')
+    ux = struct.unpack_from('<I', b, raw + 48)[0]
+    if b[stub:stub + 4] != b'MSCF':
+        die(f'{exe}: the UX container is not a cabinet')
+    with tempfile.TemporaryDirectory() as t:
+        cab, out = os.path.join(t, 'ux.cab'), os.path.join(t, 'ux')
+        os.makedirs(out)
+        with open(cab, 'wb') as f:
+            f.write(b[stub:stub + ux])
+        expand = os.path.join(os.environ.get('WINDIR', 'C:/Windows'), 'System32', 'expand.exe')
+        subprocess.run([expand, cab, '-F:*', out], capture_output=True, check=True)
+        # the UX container's manifest ("0") names each payload's file, its name in the cabinet, size and SHA-1
+        found = [e for e in ET.parse(os.path.join(out, '0')).getroot().iter()
+                 if e.tag.rsplit('}', 1)[-1] == 'Payload' and e.get('FilePath') == name and e.get('Packaging') == 'embedded']
+        if len(found) != 1 or not re.fullmatch(r'u\d+', found[0].get('SourcePath') or ''):
+            die(f'{exe}: its UX container has no single embedded payload {name}')
+        p = found[0]
+        with open(os.path.join(out, p.get('SourcePath')), 'rb') as f:
+            data = f.read()
+    if len(data) != int(p.get('FileSize')) or hashlib.sha1(data).hexdigest() != (p.get('Hash') or '').lower():
+        die(f'{exe}: {name} does not match the bundle manifest\'s size and SHA-1')
+    return data
+
+
+def msvc_licenses(msvc_dir, versions):
+    """The Visual C++ runtime's license files (module docs) for the MSVC DLLs taken from `msvc_dir` (their file
+    `versions`) -> {name: (bytes, component, source)}."""
+    parts = os.path.normpath(os.path.abspath(msvc_dir)).split(os.sep)
+    low = [p.lower() for p in parts]
+    i = next((k for k in range(len(low) - 3) if low[k:k + 3] == ['vc', 'redist', 'msvc']), None)
+    if i is None or len(parts) < i + 5:
+        die(f'--msvc-dir {msvc_dir}: the MSVC runtime must come from a Visual Studio redist folder '
+            '(<VS>\\VC\\Redist\\MSVC\\<v>\\x64\\Microsoft.VC143.CRT): its license comes from there')
+    vs, redist = os.sep.join(parts[:i]), os.sep.join(parts[:i + 4])
+    exe = os.path.join(redist, 'vc_redist.x64.exe')
+    st, subj = sig_of(exe)
+    if st != 'Valid' or 'O=Microsoft Corporation' not in subj:
+        die(f'{exe}: signature {st} by {subj!r}: the redistributable must be Microsoft-signed')
+    v = file_version(exe)
+    if any(x != v for x in versions):
+        die(f'{exe} is {v}, the DLLs are {sorted(set(versions))}: the license must be the DLLs\' own redistributable\'s')
+    lic = burn_ux_payload(exe, VCREDIST_LICENSE)
+    if VCREDIST_LICENSE_TITLE not in lic:
+        die(f'{exe}: its {VCREDIST_LICENSE} is not the {VCREDIST_LICENSE_TITLE.decode()} license terms (look at what it ships now)')
+    with open(os.path.join(vs, *VS_REDIST_TXT), 'rb') as f:
+        txt = f.read()
+    if VS_REDIST_TXT_TITLE not in txt:
+        die(f'{os.path.join(vs, *VS_REDIST_TXT)} is not Visual Studio 2022\'s distributable-code file (look at what it ships now)')
+    vswhere = os.path.join(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)'), 'Microsoft Visual Studio', 'Installer', 'vswhere.exe')
+    q = lambda prop: subprocess.run([vswhere, '-path', vs, '-property', prop], capture_output=True, text=True).stdout.strip()
+    name = f'{q("displayName")} {q("catalog_productDisplayVersion")}'.strip() if os.path.exists(vswhere) else ''
+    name = name or 'Visual Studio'
+    rel = os.path.relpath(exe, vs).replace(os.sep, '/')
+    return {VCREDIST_LICENSE: (lic, 'Microsoft Visual C++ runtime', f'{name}: {rel} ({v}), its bundle payload {VCREDIST_LICENSE}'),
+            VS_REDIST_TXT[-1]: (txt, 'Microsoft Visual C++ runtime', f'{name}: {"/".join(VS_REDIST_TXT)}')}
+
+
 def build_runtime(a):
     ort_dll = a.ort_dll
     if not ort_dll:
@@ -240,22 +371,42 @@ def build_runtime(a):
         if v < [lmaj, lmin]:
             die(f'{files[n]} is {desc[n]["version"]}, older than the toolset {lmaj}.{lmin} ONNX Runtime was linked with')
     version = f'ort-{ort_version}-cpu+msvc-{desc[need[0]]["version"]}' if need else f'ort-{ort_version}-cpu'
+    # the license files, unmodified (module docs)
+    lic = ort_licenses(ort_dll)
+    if need:
+        lic.update(msvc_licenses(msvc_dir, [desc[n]['version'] for n in need]))
+    taken = [n.lower() for n in [*files, 'runtime.json', *lic]]
+    if len(set(taken)) != len(taken):
+        die(f'two files of the pack share a name: {sorted(taken)}')
+    licenses = {n: {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data), 'component': comp, 'source': source}
+                for n, (data, comp, source) in lic.items()}
     d = os.path.join(a.out or os.path.join(tdir, 'dist'), version)
     if os.path.exists(d):
         shutil.rmtree(d)
     os.makedirs(d)
     for n, src in files.items():
         shutil.copy2(src, os.path.join(d, n))
+    for n, (data, _, _) in lic.items():
+        with open(os.path.join(d, n), 'wb') as f:
+            f.write(data)
+    for n, x in licenses.items():
+        with open(os.path.join(d, n), 'rb') as f:
+            if hashlib.sha256(f.read()).hexdigest() != x['sha256']:
+                die(f'{n}: not its source\'s bytes')
     with open(os.path.join(d, 'runtime.json'), 'w', encoding='utf-8') as f:
-        json.dump({'runtime': version, 'onnxruntime': ort_version, 'provider': 'cpu', 'linker': f'{lmaj}.{lmin}', 'files': desc}, f, indent=1)
+        json.dump({'runtime': version, 'onnxruntime': ort_version, 'provider': 'cpu', 'linker': f'{lmaj}.{lmin}', 'files': desc,
+                   'licenses': licenses}, f, indent=1)
     # loaded through a statically linked release worker (one that loaded no MSVC runtime of its own): every DLL from
     # the pack
     worker = a.check_worker or cargo_build('release')
     info = json.loads(subprocess.run([worker, 'info', '--runtime-dir', d], capture_output=True, text=True, check=True).stdout)
     ort = info['onnxruntime']
-    if 'error' in ort or any(os.path.normcase(os.path.dirname(p or '')) != os.path.normcase(os.path.abspath(d)) for p in ort['modules'].values()):
+    # newer workers also list the modules they look for but did not load (DirectML.dll: None)
+    loaded = {n: p for n, p in ort.get('modules', {}).items() if p}
+    here = os.path.normcase(os.path.abspath(d))
+    if 'error' in ort or any(os.path.normcase(os.path.dirname(p)) != here for p in loaded.values()) or set(files) - set(loaded):
         die(f'the pack did not load from itself: {ort}')
-    print(f'runtime pack {version}: ONNX Runtime loaded ({ort["version"]}), every DLL from the pack ({", ".join(ort["modules"])})')
+    print(f'runtime pack {version}: ONNX Runtime loaded ({ort["version"]}), every DLL from the pack ({", ".join(sorted(loaded))})')
     with open(os.path.join(d, 'runtime.json'), encoding='utf-8') as f:
         rj = json.load(f)
     rj['ort_build_info'] = ort['version']
