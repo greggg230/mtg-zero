@@ -511,6 +511,8 @@ impl Game {
             if self.objs[c.i()].zone != Zone::Library {
                 continue;
             }
+            // (Seen as the search's find as it enters a public zone: ENGINE.md 140.9.)
+            self.found_by_search(c);
             if exile_free {
                 let card = self.move_card(c, Zone::Exile, Pos::Top);
                 self.permissions.push(crate::game::Permission {

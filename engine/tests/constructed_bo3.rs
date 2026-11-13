@@ -301,7 +301,7 @@ fn a_constructed_deck_is_sideboarded_to_exactly_60_cards() {
         let (pool, start) = MatchPool::constructed(&main, &side);
         let prior = ConstructedPrior::new(&main, &side);
         for _ in 0..200 {
-            let s = prior.sample(&DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None }, &mut rng);
+            let s = prior.sample(&DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None, seen: None }, &mut rng);
             let (_, target) = MatchPool::constructed(&s.deck, &s.sideboard);
             assert_eq!(sideboard_to(&pool, &start, &target).unwrap(), target);
             paths += 1;
@@ -366,7 +366,7 @@ fn the_constructed_prior_meets_its_contract() {
     let mut rng = Rng::new(113);
     let n = 3200;
     let mut hist = [0usize; 16];
-    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None };
+    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None, seen: None };
     for _ in 0..n {
         let s = prior.sample(&plain, &mut rng);
         check_sample(&prior, &plain, &s).unwrap();
@@ -381,7 +381,7 @@ fn the_constructed_prior_meets_its_contract() {
     let id = |s: &str| db.expect_id(s).unwrap();
     let mut shown = vec![id("Pyroblast"), id("Pyroblast"), id("Unholy Heat"), id("Unholy Heat"), id("Unholy Heat"), id("Daze"), id("Karakas")];
     shown.sort_unstable();
-    let want = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None, pick: None };
+    let want = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None, pick: None, seen: None };
     let mut at_least = 0;
     for _ in 0..600 {
         let s = prior.sample(&want, &mut rng);
@@ -392,7 +392,7 @@ fn the_constructed_prior_meets_its_contract() {
     assert_eq!(at_least, 600, "two Pyroblasts, a third Unholy Heat and Karakas are four swaps at least");
     // A tilt of 1 is the untilted draw; a sharp tilt concentrates the deck on the card.
     let one = |_d: u16| 1.0;
-    let tilted1 = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: Some(&one), pick: None };
+    let tilted1 = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: Some(&one), pick: None, seen: None };
     let (mut r1, mut r2) = (Rng::new(5), Rng::new(5));
     for _ in 0..50 {
         assert_eq!(prior.sample(&want, &mut r1), prior.sample(&tilted1, &mut r2));
@@ -405,7 +405,7 @@ fn the_constructed_prior_meets_its_contract() {
     for _ in 0..200 {
         for (w, n) in [(1e6, &mut up), (1e-6, &mut down)] {
             let f = move |d: u16| if d == cs { w } else { 1.0 };
-            let tilted = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: Some(&f), pick: None };
+            let tilted = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: Some(&f), pick: None, seen: None };
             let s = prior.sample(&tilted, &mut rng);
             check_sample(&prior, &tilted, &s).unwrap();
             assert!(holds(&s.deck, &shown));
@@ -640,7 +640,7 @@ fn constructed_deal_cost() {
         v
     };
     for (what, sh) in [("no shown card", &[][..]), ("three shown cards", &shown[..])] {
-        let want = DeckWant { db, n: 60, shown: sh, companion: None, tilt: None, pick: None };
+        let want = DeckWant { db, n: 60, shown: sh, companion: None, tilt: None, pick: None, seen: None };
         let t = std::time::Instant::now();
         let n = 4000;
         for _ in 0..n {
@@ -814,10 +814,10 @@ fn cr_101_4a_a_face_down_pick_reaches_the_deck_request_exactly() {
         v
     };
     let beyond = |deck: &[u16]| deck.iter().filter(|&&d| snt_kind(d)).count() - shown.len();
-    let plain = DeckWant { db: db(), n: 60, shown: &shown, companion: None, tilt: None, pick: None };
+    let plain = DeckWant { db: db(), n: 60, shown: &shown, companion: None, tilt: None, pick: None, seen: None };
     // (a = 0, b = 1: the chance is proportional to y)
     let pw = engine::az::hidden_decks::PickWant { legal: legal.clone(), a: 0.0, b: 1.0 };
-    let picked = DeckWant { db: db(), n: 60, shown: &shown, companion: None, tilt: None, pick: Some(&pw) };
+    let picked = DeckWant { db: db(), n: 60, shown: &shown, companion: None, tilt: None, pick: Some(&pw), seen: None };
     const N: usize = 20_000;
     let mut rng = Rng::new(129);
     let (mut none, mut wsum, mut wy) = (0usize, 0.0f64, 0.0f64);
@@ -870,7 +870,7 @@ fn cr_101_4a_a_face_down_pick_reaches_the_deck_request_exactly() {
     assert!((e_em - m_em).abs() < 0.03, "{e_em} {m_em}");
     // A request without a pick draws as before (ENGINE.md 120.2): the same decks, draw for draw.
     let (mut r1, mut r2) = (Rng::new(5), Rng::new(5));
-    let again = DeckWant { db: db(), n: 60, shown: &shown, companion: None, tilt: None, pick: None };
+    let again = DeckWant { db: db(), n: 60, shown: &shown, companion: None, tilt: None, pick: None, seen: None };
     assert_eq!(prior.sample(&plain, &mut r1), prior.sample(&again, &mut r2));
 }
 

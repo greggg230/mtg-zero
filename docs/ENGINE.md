@@ -29355,7 +29355,7 @@ public) and game 2's R is game 2's; game 3's use of game 2 is lane A2's (141).
 identities. It is the assumption of the uniform deal of the hand and library given the deck (the opponent's choices
 are not read). A card the viewer sees because of what it is - a fetch land's dual, a tutor's target, a card the
 opponent chose to cast - has, under the opponent's real policy, another chance given D; the determinized deal makes
-the same assumption for every card of the hand. Open point 140.8.
+the same assumption for every card of the hand. Open point 140.8; for library searches decided and done in 140.9.
 
 ### 140.3 The fix, prior by prior
 
@@ -29480,7 +29480,7 @@ The desktop was shared with the live run and about ten other lanes (the heavy st
   colour possible), exact under forcing R in by a table over the pool (about 45 x 23 states), with the colours fixed
   by the known part of the pool - and the first picks' posterior still needs the chance of R given each candidate
   set (about a million 3-subsets a request): a design for the user, not a fix.
-* **Searched cards** (140.2). A card the viewer sees because of what it is (a fetch land's dual, a tutor's target)
+* **Searched cards** (140.2) - **decided: option (b), done in 140.9.** A card the viewer sees because of what it is (a fetch land's dual, a tutor's target)
   has, under any real policy, a chance given D other than C(D_i, R_i) (the opponent takes it whenever the deck
   holds one: the indicator; a blind search among the matches: D_i over the matches). The knowledge layer records
   no provenance of a sighting. Options: (a) keep the identity-blind model for every sighting (today's, and the
@@ -29498,3 +29498,108 @@ The desktop was shared with the live run and about ten other lanes (the heavy st
 * **The live run's preset family**: the Delver best-of-three presets deal every game-2/3 world from this posterior,
   and the deck tilt's baseline (`expected_fill`, 106) moves with it. Moving `delver-bo3-pb1` onto a commit with
   this fix changes its worlds on purpose; the maintainer's decision, with the run.
+
+### 140.9 Searched cards: the owner finds what it looks for (140.8's option (b), the user's decision of 11-13)
+
+**The decision.** 140.8 asked how to weigh a card the viewer sees because of what it is. The user chose (b): record
+how each card was seen, and weigh a card found by its owner's library search by the model "the owner finds one
+whenever the deck holds one" - an indicator, not the C(D_i, R_i) of a card seen blind.
+
+**The likelihood, exactly.** The deal's model, sighting by sighting in the order they happened: a card seen blind
+when j copies of its definition were seen before is one of the D_i - j copies not yet seen, chance proportional to
+D_i - j (the denominator, the cards not yet seen, is public); a search's find when j were seen before finds one
+whenever the deck holds one more, chance [D_i > j]. So, per definition with R_i copies seen,
+
+    P(the sightings | D)  ∝  prod_i [D_i >= R_i] x prod over its blind sightings j of (D_i - j)
+
+(`Seen::weight`, `sighting_weight`). Every sighting blind gives prod_{j<R}(D - j) ∝ C(D, R), 140's. Several finds of
+one card: an indicator each, [D_i >= R_i] together. The order counts: a Volcanic Island seen blind, then a fetch land
+finding another, weighs D (D >= 2); the find first, then one seen blind, weighs D - 1 (D >= 2) - the find left the
+cards not yet seen first. So the record keeps the order: a find is placed at its search, not at the moment the
+viewer learns its identity. A random choice would be different: a library card chosen at random is a blind sighting
+(C(D_i, R_i) again; "reveal cards until" is a sequence of blind sightings, its stopping rule adds no factor), and a
+uniform pick among the matching cards would weigh D_i over the matching cards, coupling the entries - no op of the
+engine makes either (every `DecisionKind::SearchLibrary` choice is the owner's), so nothing is left to weigh that way.
+
+**What a find is** (`hidden.rs`, `Game::found`): a card its owner chose by a library search (`DecisionKind::
+SearchLibrary`: `Op::Search`'s four destinations, the sacrificed-artifact search, `SearchAnyNumber` with the basic land
+searches and EoE's search up to, Doomsday's pile), marked at its search (`found_by_search`). It stays marked while
+the other player can still tell it apart - on top of the library (a tutor's "put that card on top"), in a Doomsday
+pile (finds only, so a card seen there that the viewer did not know is a find), exiled face down - and is unmarked
+when seen (its sighting kept, ordered at the search), when it goes into a hand (hand cards are not told apart by
+anyone but their owner, ENGINE.md 10: a tutor's unrevealed find is no sighting, and a card later cast from that hand
+is seen blind), or when it is shuffled with cards that are not finds (`scramble`, `forget_order`).
+
+**The record** (`Game::sightings`, `Sighting`): every fresh sighting - `learn` and `knowledge_leaves` when no cloud of
+the viewer's could have listed the card - with its order (`Game::sight_at`) and whether it was a find. A sighting a
+cloud could have listed (the card may be one seen before: `learn` and `knowledge_leaves` drop the listed entry) is
+no new card of R and keeps nothing (140's coarse rule, open point below). Kept only with whole-deck clouds
+(`hidden_decklists`, `deck_clouds`): R never loses a card there, and a game without them (every digest game) keeps
+nothing and marks nothing.
+
+**The check.** `MtgAz::seen_of` builds each request's sightings (the deck's cards, by definition, in order) and asserts
+they are exactly what the knowledge says the viewer saw - the deck's cards it knows (a payment's pinned cards are not
+known) and its clouds' cards, less the non-deck ones (`extras`), definition by definition. A knowledge event that kept
+no sighting panics at the next deal instead of weighing a card wrong. Copies of R beyond the sightings (pinned cards,
+held by the world) weigh nothing (an indicator); 140 weighed them as seen.
+
+**The priors.**
+
+* `ConstructedPrior`: each count's weight is its definition's `Seen::weight` (`count_weight`, `Slot::with`) times
+  the tilt, in the same tables, draws and `expected_fill`s - exact, bounded, no rejection, the user's base prior
+  unchanged. The K-sample key holds the sightings.
+* `TablePrior`: a fresh fill is the posterior of blind sightings only (140.3). A definition with a find or a held
+  copy takes its fill from the exact joint law first (`corrected_fill`): fill f of definition x weighs p_x^f / f! x
+  g_x(f), g_x(f) = its sightings' weight at r + f over prod_{j<r}(r + f - j), the other candidates' m draws
+  (P^m / m!) summed out, by a table over those definitions and the fill so far, then backwards; the rest are drawn as
+  before. `expected_fill` is the same law's means (`corrected_means_with`); and a name a revealed one-per-name
+  companion's condition spent no longer gets a fill there (it did, 140.3's oversight).
+* `SealedPrior` and the cube sampler: unchanged (140.8: not the posterior of a stated prior).
+
+**API.** `DeckWant::seen: Option<&[Seen]>` (None: every copy blind, 140's), so every `DeckWant` literal names it;
+`Seen` (definition, sightings, searched bits); `sighting_weight(deck, shown, seen)` beside `seen_weight` (unchanged);
+`MtgAz::deck_request_of` (a test hook: R and its sightings).
+
+**Tests** (`deck_posterior.rs`):
+
+* `a_search_finds_what_it_looks_for_whenever_the_deck_holds_one` - the Delver 75, Volcanic Island, the truth by
+  simulation (decks of the prior, shuffled; a blind sighting turns over the next card, a search finds one among the
+  cards not turned over or found, then reshuffles; kept when every event is as given) against the request with its
+  sightings, and the identity-blind request (140's): a fetch land's find alone, truth 3.5935 +- 0.0030 Volcanics,
+  request 3.5973, identity-blind 3.7473 (37.9 se off); one seen blind then a find, 3.7611 / 3.7636 / 3.8588 (31.2 se);
+  a find then one seen blind, 3.8046 / 3.8017 / 3.8555 (15.6 se) - the two orders have different truths, both met.
+* `the_table_prior_weighs_a_search_by_finding_one` - the EoE table, Forest: a find alone, truth 1.1354 +- 0.0031,
+  request 1.1330, identity-blind 1.2573 (30.5 se); one seen blind then a find, 2.1251 / 2.1269 / 2.2382 (13.6 se);
+  `expected_fill` on the request's mean. (The corrected fill's law was also checked by a throwaway Python simulation
+  of a 6-card group: 0.7458 / 0.2229 / 0.0299 / 0.0014 by simulation, 0.7452 / 0.2235 / 0.0298 / 0.0015 by the law.)
+* `a_small_75_deals_the_exact_posterior_of_the_seen_cards` gained sightings (two Ponders: a find, then one seen
+  blind; a Bolt found; the Pyroblast held unseen): the request's law against the exact posterior deck by deck, with
+  and without tilt and pick, by `sample` and `sample_k` (chi-square 44-83 on 66 df, every deck within 2.7 se), both
+  `expected_fill`s exact (1e-9), and `sighting_weight`.
+* `the_knowledge_keeps_how_each_card_was_seen` - a constructed game with `deck_clouds`: P1 cracks Scalding Tarn and
+  finds Volcanic Island, then plays an Island from the hand: P0's sightings are the find (searched) and then the
+  Island (blind), in that order.
+* The check in `seen_of` runs at every deal of the suite and of the fuzz runs below (constructed best-of-three games
+  2-3, hidden decklists).
+
+**Digests**: EQUAL expected and checked by the gate (no digest game keeps sightings or marks finds: the record is kept only with whole-deck clouds). The behaviour that changes: every hidden deck dealt in a game with whole-deck clouds after a search's find, a payment's held card, or (the table prior) a revealed one-per-name companion's spent names in `expected_fill`.
+
+**Checks**: recorded after the commit (the full engine suite, the 20k fuzz runs, the engine gate).
+
+**Open points.**
+
+* **A sighting that may be a card seen before** (140's coarse rule, unchanged here): when the viewer sees a card a
+  cloud of its lists (a Volcanic Island seen, shuffled away, and a Volcanic seen again), the knowledge drops the
+  listed entry and R does not grow, and the sighting weighs nothing. Exactly it weighs a + b (D_i - R_i): the cloud's
+  listed card in that place (a, its share of the place) or a fresh copy (b, the place's share of free cards over the
+  free cards, as 129.3's a + b y). The clouds cannot hold the mixture that follows (the listed card still there or
+  not), so the deal of the arrangement would then not match the deck's weight. Options: (a) keep the coarse rule
+  (the knowledge layer's, documented); (b) weigh the deck by the exact factor and accept the arrangement deal's
+  coarseness; (c) mixture-capable clouds - a knowledge-layer redesign.
+* **Other choices by kind**: a pitched card (Force of Will exiles a blue card from the hand), a discard of a kind,
+  and a card chosen from looked-at cards (Impulse's top four) are chosen by what they are too; the user's decision
+  covered library searches only, so they stay blind sightings.
+* **The hand and the library**: the model finds a card whenever the deck holds one, not whenever the library does;
+  a find does not change the deal of the hand (both the user's model as approved).
+* **For lane A2**: `DeckWant` gained `seen` (A2's literals need it: `seen: None`, or the request's sightings); a game-3
+  deal conditioned on game 2 would pass game 2's sightings with game 2's R.

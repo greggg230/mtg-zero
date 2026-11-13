@@ -13,7 +13,7 @@
 //! so R plus a fresh fill is already the posterior of what was seen).
 
 use engine::az::constructed::Decklist;
-use engine::az::hidden_decks::{check_sample, seen_weight, ConstructedPrior, DealCache, DeckPrior, DeckWant, PickWant, SampledDeck, TablePrior};
+use engine::az::hidden_decks::{check_sample, seen_weight, sighting_weight, ConstructedPrior, DealCache, DeckPrior, DeckWant, PickWant, SampledDeck, Seen, TablePrior};
 use engine::db::CardDb;
 use engine::rng::Rng;
 
@@ -109,7 +109,7 @@ fn the_hidden_60_is_the_posterior_of_the_cards_the_viewer_saw() {
     let db = cdb();
     let (_, _, prior) = delver_prior();
     let id = |s: &str| db.expect_id(s).unwrap();
-    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None };
+    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None, seen: None };
     let mut draw = |n: usize, rng: &mut Rng| prior.sample_k(&plain, &[], n, rng);
     for (label, shown, card, sims) in [
         ("one Pyroblast seen (0 main, 3 side)", vec![id("Pyroblast")], id("Pyroblast"), 300_000usize),
@@ -120,7 +120,7 @@ fn the_hidden_60_is_the_posterior_of_the_cards_the_viewer_saw() {
         shown.sort_unstable();
         let mut rng = Rng::new(0x140 ^ shown.len() as u64 ^ (card as u64) << 16);
         let (truth, kept) = truth_by_looking(&mut draw, &shown, card, sims, &mut rng);
-        let want = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None, pick: None };
+        let want = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None, pick: None, seen: None };
         let n = 40_000;
         let req = request_hist(&prior, &want, card, n, &mut rng);
         assert_same_law(label, &truth, kept, &req, n);
@@ -234,7 +234,7 @@ fn a_small_75_deals_the_exact_posterior_of_the_seen_cards() {
     let n = 200_000;
     for (tilted, pick) in [(false, false), (true, false), (false, true), (true, true)] {
         let label = format!("request (tilt {tilted}, pick {pick})");
-        let want = DeckWant { db, n: 12, shown: &shown, companion: None, tilt: if tilted { Some(&tilt_of) } else { None }, pick: if pick { Some(&pw) } else { None } };
+        let want = DeckWant { db, n: 12, shown: &shown, companion: None, tilt: if tilted { Some(&tilt_of) } else { None }, pick: if pick { Some(&pw) } else { None }, seen: None };
         let p = exact(tilted, pick);
         let mut rng = Rng::new(0x5A11 ^ (tilted as u64) << 1 ^ pick as u64);
         let mut h1 = vec![0.0f64; decks.len()];
@@ -263,7 +263,7 @@ fn a_small_75_deals_the_exact_posterior_of_the_seen_cards() {
         }
     }
     // The exact posterior is the truth by looking: plain decks, shuffled, the first four kept when they are R.
-    let plain = DeckWant { db, n: 12, shown: &[], companion: None, tilt: None, pick: None };
+    let plain = DeckWant { db, n: 12, shown: &[], companion: None, tilt: None, pick: None, seen: None };
     let mut rng = Rng::new(0x100C);
     let mut hist = vec![0.0f64; decks.len()];
     let mut kept = 0usize;
@@ -289,6 +289,218 @@ fn a_small_75_deals_the_exact_posterior_of_the_seen_cards() {
         let w: f64 = (0..list.len()).map(|k| if v[k] < r[k] { 0.0 } else { binom(v[k], r[k]) }).product();
         assert!((seen_weight(&deck, &shown) - w).abs() < 1e-12);
     }
+    // ENGINE.md 140.9: how the cards were seen. The two Ponders: a search's find first, then one seen blind; the
+    // Bolt: a search's find; the Pyroblast: no sighting (a copy held unseen, as a payment's pinned card). The exact
+    // posterior: base x per card the product over its blind sightings j of (D - j) x [D >= R] (x tilt x pick).
+    let mut seen = vec![Seen { def: b, n: 2, searched: 0b01 }, Seen { def: c, n: 1, searched: 0b1 }];
+    seen.sort_by_key(|x| x.def);
+    let exact_seen = |tilted: bool, pick: bool| -> Vec<f64> {
+        let mut p: Vec<f64> = decks
+            .iter()
+            .map(|v| {
+                let mut w = 1.0 / (5.0 * by[swaps(v)]);
+                let mut y = 0usize;
+                for (k, l) in list.iter().enumerate() {
+                    if v[k] < r[k] {
+                        return 0.0;
+                    }
+                    if l.0 == b {
+                        w *= v[k] as f64 - 1.0; // the blind one, after the find
+                    } else if l.0 == a || l.0 == d || l.0 == f {
+                        w *= binom(v[k], r[k]); // (none shown: 1)
+                    }
+                    if tilted {
+                        w *= tilt_of(l.0).powi((v[k] - r[k]) as i32);
+                    }
+                    if legal.contains(&l.0) {
+                        y += (v[k] - r[k]) as usize;
+                    }
+                }
+                if pick {
+                    w *= pw.a + pw.b * y as f64;
+                }
+                w
+            })
+            .collect();
+        let z: f64 = p.iter().sum();
+        p.iter_mut().for_each(|x| *x /= z);
+        p
+    };
+    for (tilted, pick) in [(false, false), (true, false), (false, true), (true, true)] {
+        let label = format!("request with sightings (tilt {tilted}, pick {pick})");
+        let want = DeckWant { db, n: 12, shown: &shown, companion: None, tilt: if tilted { Some(&tilt_of) } else { None }, pick: if pick { Some(&pw) } else { None }, seen: Some(&seen) };
+        let p = exact_seen(tilted, pick);
+        let mut rng = Rng::new(0x5EE ^ (tilted as u64) << 1 ^ pick as u64);
+        let mut h1 = vec![0.0f64; decks.len()];
+        for _ in 0..n {
+            let s = prior.sample(&want, &mut rng);
+            check_sample(&prior, &want, &s).unwrap();
+            h1[index_of(&s.deck)] += 1.0;
+        }
+        chi2(&format!("{label} by sample"), &p, &h1, n);
+        let mut hk = vec![0.0f64; decks.len()];
+        for s in prior.sample_k(&want, &[], n, &mut rng) {
+            hk[index_of(&s.deck)] += 1.0;
+        }
+        chi2(&format!("{label} by sample_k"), &p, &hk, n);
+        if !tilted {
+            let fill = prior.expected_fill(&want);
+            for (k, l) in list.iter().enumerate() {
+                let m: f64 = decks.iter().zip(&p).map(|(v, &pi)| pi * (v[k] - r[k].min(v[k])) as f64).sum();
+                assert!((fill[l.0 as usize] - m).abs() < 1e-9, "{label}: {}'s fill {} against the exact {m}", db.def(l.0).name, fill[l.0 as usize]);
+            }
+        }
+    }
+    for v in &decks {
+        let deck = deck_of(v);
+        let kb = list.iter().position(|l| l.0 == b).unwrap();
+        let w: f64 = if (0..list.len()).any(|k| v[k] < r[k]) { 0.0 } else { v[kb] as f64 - 1.0 };
+        assert!((sighting_weight(&deck, &shown, Some(&seen)) - w).abs() < 1e-12);
+        assert_eq!(sighting_weight(&deck, &shown, None), seen_weight(&deck, &shown));
+    }
+}
+
+/// The truth of a history of sightings by simulation (ENGINE.md 140.9): decks of the prior with nothing shown
+/// (`draw`), each shuffled; the events in order - a blind sighting turns over the next card of the shuffled deck, a
+/// search finds a card of its definition among the cards not yet turned over or found (the owner finds what it looks
+/// for whenever the deck holds one; the rest then reshuffled, as a fetch does) - and the deck kept when every event
+/// is as given. Returns the kept decks' histogram of `card`'s copies and the number kept.
+fn truth_of_history(draw: &mut dyn FnMut(usize, &mut Rng) -> Vec<SampledDeck>, events: &[(u16, bool)], card: u16, sims: usize, rng: &mut Rng) -> ([f64; 9], usize) {
+    let mut hist = [0.0f64; 9];
+    let mut kept = 0usize;
+    let mut done = 0;
+    while done < sims {
+        let chunk = (sims - done).min(20_000);
+        'deck: for s in draw(chunk, rng) {
+            let mut pool = s.deck.clone();
+            rng.shuffle(&mut pool);
+            for &(d, searched) in events {
+                if searched {
+                    match pool.iter().position(|&x| x == d) {
+                        Some(i) => {
+                            pool.swap_remove(i);
+                            rng.shuffle(&mut pool);
+                        }
+                        None => continue 'deck,
+                    }
+                } else if pool.pop() != Some(d) {
+                    continue 'deck;
+                }
+            }
+            kept += 1;
+            hist[count(&s.deck, card)] += 1.0;
+        }
+        done += chunk;
+    }
+    (hist, kept)
+}
+
+/// ENGINE.md 140.9 (the user's model of a search): the owner finds a card it looks for whenever the deck holds one, so
+/// a search's find weighs a deck by [D_i > copies seen before], not by the D_i - j of a card seen blind. The Delver 75,
+/// Volcanic Island: a fetch land's find alone, a find after one Volcanic seen blind, and one seen blind after a find -
+/// the request with its sightings against the truth by simulation, and the identity-blind request (every copy seen
+/// blind, ENGINE.md 140's model before this) off by many standard errors in each.
+#[test]
+fn a_search_finds_what_it_looks_for_whenever_the_deck_holds_one() {
+    let db = cdb();
+    let (_, _, prior) = delver_prior();
+    let volc = db.expect_id("Volcanic Island").unwrap();
+    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None, seen: None };
+    let mut draw = |n: usize, rng: &mut Rng| prior.sample_k(&plain, &[], n, rng);
+    for (label, events, sims) in [
+        ("a fetch land finds a Volcanic Island", vec![(volc, true)], 60_000usize),
+        ("one seen blind, then a fetch land finds another", vec![(volc, false), (volc, true)], 700_000),
+        ("a fetch land finds one, then one is seen blind", vec![(volc, true), (volc, false)], 700_000),
+    ] {
+        let mut rng = Rng::new(0x5EA4C ^ events.len() as u64 ^ (events[0].1 as u64) << 8);
+        let (truth, kept) = truth_of_history(&mut draw, &events, volc, sims, &mut rng);
+        let shown = vec![volc; events.len()];
+        let searched = events.iter().enumerate().fold(0u64, |m, (j, e)| m | (e.1 as u64) << j);
+        let seen = [Seen { def: volc, n: events.len() as u8, searched }];
+        let want = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None, pick: None, seen: Some(&seen) };
+        let n = 40_000;
+        let req = request_hist(&prior, &want, volc, n, &mut rng);
+        assert_same_law(label, &truth, kept, &req, n);
+        let fill = prior.expected_fill(&want)[volc as usize] + shown.len() as f64;
+        let (mr, sr) = mean_se(&req, n);
+        assert!((fill - mr).abs() < 4.5 * sr, "{label}: expected_fill {fill:.4} against the request's {mr:.4} +- {sr:.4}");
+        // the identity-blind request (ENGINE.md 140 before 140.9): every copy weighed C(D, R)
+        let blind = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None, pick: None, seen: None };
+        let bh = request_hist(&prior, &blind, volc, n, &mut rng);
+        let ((mt, st), (mb, sb)) = (mean_se(&truth, kept), mean_se(&bh, n));
+        let z = (mb - mt) / (st * st + sb * sb).sqrt();
+        println!("   {label}: the identity-blind request {mb:.4} +- {sb:.4}, {z:.1} se from the truth");
+        assert!(z.abs() > 8.0, "{label}: the identity-blind request is not told from the truth ({z:.1} se)");
+    }
+}
+
+/// The table prior (ENGINE.md 140.9) given a search's find: a fill of independent draws is not the posterior of a
+/// find (it weighs a deck by [D > j], not D - j), so a found definition's fill comes from the exact joint law first.
+/// The EoE table, Forest: a find alone and a find after one seen blind, against the truth by simulation; the
+/// identity-blind request (R plus a fresh fill) off.
+#[test]
+fn the_table_prior_weighs_a_search_by_finding_one() {
+    let db = CardDb::eoe();
+    let p = TablePrior::of(db);
+    let forest = db.id("Forest").unwrap();
+    let plain = DeckWant { db, n: 40, shown: &[], companion: None, tilt: None, pick: None, seen: None };
+    let mut draw = |n: usize, rng: &mut Rng| (0..n).map(|_| p.sample(&plain, rng)).collect::<Vec<_>>();
+    for (label, events, sims) in [("a search finds a Forest", vec![(forest, true)], 60_000usize), ("one seen blind, then a search finds another", vec![(forest, false), (forest, true)], 1_200_000)] {
+        let mut rng = Rng::new(0x7AB5E ^ events.len() as u64);
+        let (truth, kept) = truth_of_history(&mut draw, &events, forest, sims, &mut rng);
+        let shown = vec![forest; events.len()];
+        let searched = events.iter().enumerate().fold(0u64, |m, (j, e)| m | (e.1 as u64) << j);
+        let seen = [Seen { def: forest, n: events.len() as u8, searched }];
+        let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None, pick: None, seen: Some(&seen) };
+        let n = 40_000;
+        let req = request_hist(&*p, &want, forest, n, &mut rng);
+        assert_same_law(&format!("table prior, {label}"), &truth, kept, &req, n);
+        let fill = p.expected_fill(&want)[forest as usize] + shown.len() as f64;
+        let (mr, sr) = mean_se(&req, n);
+        assert!((fill - mr).abs() < 4.5 * sr, "{label}: expected_fill {fill:.4} against the request's {mr:.4}");
+        let blind = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None, pick: None, seen: None };
+        let bh = request_hist(&*p, &blind, forest, n, &mut rng);
+        let ((mt, st), (mb, sb)) = (mean_se(&truth, kept), mean_se(&bh, n));
+        let z = (mb - mt) / (st * st + sb * sb).sqrt();
+        println!("   table prior, {label}: the identity-blind request {mb:.4} +- {sb:.4}, {z:.1} se from the truth");
+        assert!(z.abs() > 8.0, "{label}: the identity-blind request is not told from the truth ({z:.1} se)");
+    }
+}
+
+/// The knowledge layer keeps how each card was seen (ENGINE.md 140.9): a fetch land's find is the owner's search's,
+/// a land played from the hand is seen blind, in the order they happened; the owner's own cards are no sightings; a
+/// search into the hand that is not revealed is none either.
+#[test]
+fn the_knowledge_keeps_how_each_card_was_seen() {
+    use engine::db::AbilitySlot;
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    let db = cdb();
+    let id = |s: &str| db.expect_id(s).unwrap();
+    let mut g = Scenario::new(db)
+        .spec(|s| {
+            s.auto_single = false;
+            s.hidden_decks = true;
+            s.deck_clouds = true;
+        })
+        .battlefield(1, &["Scalding Tarn"])
+        .hand(1, &["Island"])
+        .library(1, &["Volcanic Island", "Brainstorm", "Ponder", "Daze", "Lightning Bolt", "Force of Will"])
+        .library(0, &["Island"; 10])
+        .at(Step::Main1, 1)
+        .start();
+    assert!(g.sightings().is_empty());
+    let tarn = g.card(1, "Scalding Tarn", Zone::Battlefield);
+    g.choose(Choice::Ability(tarn, AbilitySlot::Activated(0)));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::Priority) || g.stack().is_empty());
+    assert_eq!(g.kind(), Some(DecisionKind::SearchLibrary));
+    g.choose(Choice::Def(id("Volcanic Island")));
+    g.drive_until(|g| g.stack().is_empty() && g.kind() == Some(DecisionKind::Priority));
+    let island = g.card(1, "Island", Zone::Hand);
+    g.choose(Choice::Play(island));
+    let v: Vec<(u8, u8, u16, bool)> = g.sightings().iter().map(|x| (x.viewer, x.owner, x.def, x.searched)).collect();
+    assert_eq!(v, vec![(0, 1, id("Volcanic Island"), true), (0, 1, id("Island"), false)], "the find, then the land played");
+    assert!(g.sightings()[0].at < g.sightings()[1].at);
 }
 
 /// The K-sample deal (ENGINE.md 102.8) draws its K decks of a request with `sample_k` (one table a request, ENGINE.md
@@ -308,7 +520,7 @@ fn the_k_decks_of_a_request_meet_it() {
     };
     let pw = PickWant { legal, a: 0.5, b: 1.0 };
     for pick in [None, Some(&pw)] {
-        let want = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None, pick };
+        let want = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None, pick, seen: None };
         let cache = DealCache::new(32, 0x5EED);
         let decks = cache.decks(&prior, 1, &want);
         assert_eq!(decks.len(), 32);
@@ -332,12 +544,12 @@ fn the_table_prior_is_the_posterior_of_the_cards_the_viewer_saw() {
     let p = TablePrior::of(db);
     let forest = db.id("Forest").unwrap();
     let lands = p.support().iter().filter(|&&d| db.def(d).is(engine::db::types::LAND)).count();
-    let plain = DeckWant { db, n: 40, shown: &[], companion: None, tilt: None, pick: None };
+    let plain = DeckWant { db, n: 40, shown: &[], companion: None, tilt: None, pick: None, seen: None };
     let mut draw = |n: usize, rng: &mut Rng| (0..n).map(|_| p.sample(&plain, rng)).collect::<Vec<_>>();
     let shown = vec![forest];
     let mut rng = Rng::new(0x7AB1E);
     let (truth, kept) = truth_by_looking(&mut draw, &shown, forest, 600_000, &mut rng);
-    let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None, pick: None };
+    let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None, pick: None, seen: None };
     let n = 40_000;
     let req = request_hist(&*p, &want, forest, n, &mut rng);
     assert_same_law("table prior, one Forest seen", &truth, kept, &req, n);
@@ -367,7 +579,7 @@ fn the_table_prior_under_lutri_keeps_its_groups_whole() {
         let mut shown: Vec<u16> = (0..case % 9).map(|i| spells[(case * 37 + i * 101) % spells.len()]).collect();
         shown.sort_unstable();
         shown.dedup();
-        let want = DeckWant { db: cube, n: 40, shown: &shown, companion: Some(lutri), tilt: None, pick: None };
+        let want = DeckWant { db: cube, n: 40, shown: &shown, companion: Some(lutri), tilt: None, pick: None, seen: None };
         let s = p.sample(&want, &mut rng);
         check_sample(&*p, &want, &s).unwrap();
         let mut names: Vec<&str> = s.deck.iter().filter(|&&d| !cube.def(d).is(engine::db::types::LAND)).map(|&d| cube.def(d).name.as_str()).collect();
@@ -394,7 +606,7 @@ fn constructed_request_cost() {
         .collect();
     twelve.sort_unstable();
     for (what, sh) in [("no shown card", &[][..]), ("twelve shown cards", &twelve[..])] {
-        let want = DeckWant { db, n: 60, shown: sh, companion: None, tilt: None, pick: None };
+        let want = DeckWant { db, n: 60, shown: sh, companion: None, tilt: None, pick: None, seen: None };
         let reps = 300;
         let t = std::time::Instant::now();
         for i in 0..reps {

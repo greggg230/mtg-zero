@@ -52,6 +52,30 @@ pub struct DeckWant<'a> {
     /// made (Show and Tell's, CR 101.4a; ENGINE.md 129.3): the deck's posterior is the prior's times
     /// the chance of that choice given the deck ([`PickWant`]). None: no such choice pending.
     pub pick: Option<&'a PickWant>,
+    /// How the viewer saw the cards of `shown` (ENGINE.md 140.9; sorted by definition): None - every copy
+    /// seen blind, the likelihood prod_i C(D_i, R_i); Some - per definition its sightings in the order seen,
+    /// each blind or its owner's search finding it ([`Seen`], [`sighting_weight`]); copies of `shown` beyond
+    /// a definition's sightings (a payment's pinned cards, ENGINE.md 10) are held and weigh nothing.
+    pub seen: Option<&'a [Seen]>,
+}
+
+/// How the viewer saw one definition's cards of a request's `shown` (ENGINE.md 140.9): `n` sightings in the order
+/// seen (`Game::sightings`), bit j of `searched` set when the j-th was its owner's library search finding it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Seen {
+    pub def: DefId,
+    pub n: u8,
+    pub searched: u64,
+}
+
+impl Seen {
+    /// The chance of these sightings given c copies in the deck, up to a factor of the request alone (c at least
+    /// the shown copies): a blind sighting when j copies were seen before is one of the c - j unseen copies,
+    /// chance proportional to c - j; a search's find, when j were seen before, finds one whenever the deck holds
+    /// one more (the owner finds what it looks for), chance 1 given c > j. So prod over the blind j of (c - j).
+    pub fn weight(&self, c: u8) -> f64 {
+        (0..self.n).filter(|&j| self.searched >> j & 1 == 0).map(|j| (c as f64 - j as f64).max(0.0)).product()
+    }
 }
 
 /// The face-down pick a deck request carries (ENGINE.md 129.3): the opponent chose a card of a kind from
@@ -104,6 +128,71 @@ pub fn seen_weight(deck: &[DefId], shown: &[DefId]) -> f64 {
         i += r;
     }
     w
+}
+
+/// The chance of the sightings `seen` of the cards `shown` given the deck `deck` (all sorted), up to a factor of
+/// the request alone (ENGINE.md 140.9): per definition with r shown copies and D in the deck, 0 when D < r, else
+/// its [`Seen::weight`] (None: every copy blind, C(D, r) as [`seen_weight`]; a definition without sightings: 1).
+pub fn sighting_weight(deck: &[DefId], shown: &[DefId], seen: Option<&[Seen]>) -> f64 {
+    let Some(seen) = seen else { return seen_weight(deck, shown) };
+    let (mut w, mut i, mut j) = (1.0, 0, 0);
+    while i < shown.len() {
+        let d = shown[i];
+        let r = shown[i..].iter().take_while(|&&x| x == d).count();
+        while j < deck.len() && deck[j] < d {
+            j += 1;
+        }
+        let c = deck[j..].iter().take_while(|&&x| x == d).count();
+        if c < r {
+            return 0.0;
+        }
+        if let Ok(k) = seen.binary_search_by_key(&d, |x| x.def) {
+            w *= seen[k].weight(c as u8);
+        }
+        i += r;
+    }
+    w
+}
+
+/// The weight of count c (at least the `shown` copies) of one definition of a request (ENGINE.md 140, 140.9):
+/// C(c, shown) with every copy seen blind (`seen` None), else its sightings' [`Seen::weight`] (none: 1).
+fn count_weight(shown: u8, seen: Option<&[Seen]>, d: DefId, c: u8) -> f64 {
+    match seen {
+        None => binom(c as usize, shown as usize),
+        Some(v) => v.binary_search_by_key(&d, |x| x.def).map_or(1.0, |k| v[k].weight(c)),
+    }
+}
+
+/// The sightings of a request's `shown` (ENGINE.md 140.9) that a fill of independent draws (the table prior's) is
+/// not already the posterior of: a definition with a search's find or with copies held unseen, as (definition, its
+/// shown copies, g(f) for fills f = 0..=k: its likelihood at r + f over C(r + f, r)'s, the blind sightings'). None
+/// with every copy blind.
+fn table_corrections(want: &DeckWant, k: usize) -> Vec<(DefId, Vec<f64>)> {
+    let Some(seen) = want.seen else { return Vec::new() };
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < want.shown.len() {
+        let d = want.shown[i];
+        let r = want.shown[i..].iter().take_while(|&&x| x == d).count();
+        i += r;
+        let s = seen.binary_search_by_key(&d, |x| x.def).ok().map(|k| seen[k]);
+        let all_blind = s.is_some_and(|s| s.n as usize == r && s.searched == 0);
+        if all_blind {
+            continue;
+        }
+        // g(f) = w(r + f) f! / (r + f)!, w the sightings' weight (1 without sightings): prod over the blind j of
+        // (r + f - j) over prod over j < r of (r + f - j)
+        let g: Vec<f64> = (0..=k)
+            .map(|f| {
+                let c = r + f;
+                let w = s.map_or(1.0, |s| s.weight(c as u8));
+                let full: f64 = (0..r).map(|j| (c - j) as f64).product();
+                w / full
+            })
+            .collect();
+        out.push((d, g));
+    }
+    out
 }
 
 /// C(n, k) as a float (0 when k > n; exact for the small counts of a deck).
@@ -292,6 +381,7 @@ impl DeckPrior for TablePrior {
         // A name the companion allows once (Lutri) is spent by a shown card or a draw.
         let mut spent: Vec<&str> = deck.iter().filter(|&&d| sample::one_per_name(db, cond, d)).map(|&d| db.def(d).name.as_str()).collect();
         let tilt = |d: DefId| want.tilt.map_or(1.0, |t| t(d));
+        let corr = table_corrections(want, add_lands.max(add_spells));
         for (cands, k) in [(&self.lands, add_lands), (&self.spells, add_spells)] {
             if matches!(cond, Some(crate::db::DeckCond::DifferentNames { .. })) {
                 // (ENGINE.md 140: R plus the fill is the posterior of the seen cards when a group's draws are
@@ -304,6 +394,15 @@ impl DeckPrior for TablePrior {
                 );
             }
             let mut w: Vec<f64> = cands.iter().map(|&d| if sample::allowed(db, cond, d) && !spent.contains(&db.def(d).name.as_str()) { tilt(d) } else { 0.0 }).collect();
+            // (ENGINE.md 140.9: the definitions whose sightings a fresh fill is not the posterior of - a search's
+            // find, copies held unseen - take their fills from the exact joint law first; the rest are the
+            // independent draws they always were.)
+            let mut k = k;
+            for (i, f) in corrected_fill(cands, &w, k, &corr, rng) {
+                deck.extend(std::iter::repeat_n(cands[i], f));
+                k -= f;
+                w[i] = 0.0;
+            }
             for _ in 0..k {
                 // (Every candidate spent or forbidden, which no table's spells come near for
                 // a 40-card deck: a basic land keeps the deck legal and its size exact.)
@@ -332,20 +431,136 @@ impl DeckPrior for TablePrior {
         SampledDeck { deck, sideboard: want.companion.into_iter().collect() }
     }
 
+    /// Exact: per group, the untilted fill's mean count of each candidate - the corrected definitions' (ENGINE.md
+    /// 140.9) by their joint law, the rest's share of what is left; a name a revealed companion allows once and R
+    /// spent fills nothing (ENGINE.md 140).
     fn expected_fill(&self, want: &DeckWant) -> Vec<f64> {
         refuse_pick(self.name(), want);
         let db = want.db;
         let cond = want.companion.and_then(|c| db.def(c).companion.as_ref());
         let (add_lands, add_spells) = self.counts(want);
+        let spent: Vec<&str> = want.shown.iter().filter(|&&d| sample::one_per_name(db, cond, d)).map(|&d| db.def(d).name.as_str()).collect();
+        let corr = table_corrections(want, add_lands.max(add_spells));
         let mut e = vec![0.0; db.len()];
         for (cands, k) in [(&self.lands, add_lands), (&self.spells, add_spells)] {
-            let ok: Vec<DefId> = cands.iter().copied().filter(|&d| sample::allowed(db, cond, d)).collect();
-            for &d in &ok {
-                e[d as usize] += k as f64 / ok.len() as f64;
+            let w: Vec<f64> = cands.iter().map(|&d| if sample::allowed(db, cond, d) && !spent.contains(&db.def(d).name.as_str()) { 1.0 } else { 0.0 }).collect();
+            let means = corrected_means_with(cands, &w, k, &corr);
+            for (i, m) in means.into_iter().enumerate() {
+                e[cands[i] as usize] += m;
             }
         }
         e
     }
+}
+
+/// n! as a float.
+fn fact(n: usize) -> f64 {
+    (1..=n).map(|i| i as f64).product()
+}
+
+/// The corrected definitions (`table_corrections`) among a group's candidates `cands` (sorted) that can still be
+/// drawn (`w` > 0): (index, g).
+fn corrected_members<'c>(cands: &[DefId], w: &[f64], corr: &'c [(DefId, Vec<f64>)]) -> Vec<(usize, &'c [f64])> {
+    corr.iter().filter_map(|(d, g)| cands.binary_search(d).ok().filter(|&i| w[i] > 0.0).map(|i| (i, &g[..]))).collect()
+}
+
+/// The table prior's fill of `k` independent draws from `cands` by weights `w`, given the sightings
+/// (ENGINE.md 140.9): the fill f_x of each corrected definition x drawn from their exact joint law - each fill's
+/// weight p_x^f / f! g_x(f) (p = w / sum w), the remaining m = k - sum f draws of the other candidates (P^m / m!,
+/// P their share) - by a table over the members and the fills so far, then backwards. Returns (index, f) per member;
+/// the caller draws the rest independently, the members excluded. No member: nothing.
+fn corrected_fill(cands: &[DefId], w: &[f64], k: usize, corr: &[(DefId, Vec<f64>)], rng: &mut Rng) -> Vec<(usize, usize)> {
+    let members = corrected_members(cands, w, corr);
+    if members.is_empty() || k == 0 {
+        return Vec::new();
+    }
+    let total: f64 = w.iter().sum();
+    let rest: f64 = (0..cands.len()).filter(|i| !members.iter().any(|m| m.0 == *i)).map(|i| w[i]).sum::<f64>() / total;
+    let h = |i: usize, g: &[f64], f: usize| (w[i] / total).powi(f as i32) / fact(f) * g[f];
+    let rest_n = |n: usize| if n == 0 { 1.0 } else { rest.powi(n as i32) / fact(n) };
+    let m = members.len();
+    let mut t = vec![vec![0.0f64; k + 1]; m + 1];
+    t[0][0] = 1.0;
+    for (a, &(i, g)) in members.iter().enumerate() {
+        for s in 0..=k {
+            if t[a][s] == 0.0 {
+                continue;
+            }
+            for f in 0..=k - s {
+                t[a + 1][s + f] += t[a][s] * h(i, g, f);
+            }
+        }
+    }
+    let top: Vec<f64> = (0..=k).map(|s| t[m][s] * rest_n(k - s)).collect();
+    let mut s = pick(rng, &top).expect("the table prior: no fill holds the sightings (the real deck does)");
+    let mut out = Vec::with_capacity(m);
+    for a in (0..m).rev() {
+        let (i, g) = members[a];
+        let cw: Vec<f64> = (0..=s).map(|f| t[a][s - f] * h(i, g, f)).collect();
+        let f = pick(rng, &cw).expect("the table prior's fill table: a dead end");
+        out.push((i, f));
+        s -= f;
+    }
+    out
+}
+
+/// The mean fill of each candidate under `corrected_fill`'s law with weights `w` (`expected_fill`, untilted): a
+/// member's by its exact marginal, every other candidate its share of the draws left.
+fn corrected_means_with(cands: &[DefId], w: &[f64], k: usize, corr: &[(DefId, Vec<f64>)]) -> Vec<f64> {
+    let mut e = vec![0.0f64; cands.len()];
+    let total: f64 = w.iter().sum();
+    if total <= 0.0 || k == 0 {
+        return e;
+    }
+    let members = corrected_members(cands, w, corr);
+    let rest_w: f64 = (0..cands.len()).filter(|i| !members.iter().any(|m| m.0 == *i)).map(|i| w[i]).sum();
+    let rest = rest_w / total;
+    let h = |i: usize, g: &[f64], f: usize| (w[i] / total).powi(f as i32) / fact(f) * g[f];
+    let rest_n = |n: usize| if n == 0 { 1.0 } else { rest.powi(n as i32) / fact(n) };
+    // the members' fills but one, by a table over the fills so far
+    let forward = |skip: Option<usize>| -> Vec<f64> {
+        let mut t = vec![0.0f64; k + 1];
+        t[0] = 1.0;
+        for (a, &(i, g)) in members.iter().enumerate() {
+            if Some(a) == skip {
+                continue;
+            }
+            let mut n = vec![0.0f64; k + 1];
+            for s in 0..=k {
+                if t[s] == 0.0 {
+                    continue;
+                }
+                for f in 0..=k - s {
+                    n[s + f] += t[s] * h(i, g, f);
+                }
+            }
+            t = n;
+        }
+        t
+    };
+    let all = forward(None);
+    let z: f64 = (0..=k).map(|s| all[s] * rest_n(k - s)).sum();
+    let mut member_fill = 0.0;
+    for (a, &(i, g)) in members.iter().enumerate() {
+        let t = forward(Some(a));
+        let mut m = 0.0;
+        for s in 0..=k {
+            for f in 0..=k - s {
+                m += t[s] * h(i, g, f) * rest_n(k - s - f) * f as f64;
+            }
+        }
+        e[i] = m / z;
+        member_fill += e[i];
+    }
+    let left = k as f64 - member_fill;
+    if rest_w > 0.0 {
+        for i in 0..cands.len() {
+            if !members.iter().any(|m| m.0 == i) {
+                e[i] = left * w[i] / rest_w;
+            }
+        }
+    }
+    e
 }
 
 /// Remove one `d` from a sorted multiset; false if absent.
@@ -417,7 +632,8 @@ pub fn deck_weights(a: &MtgAz, viewer: PlayerId, p: &[f32], tilt: f64, clip: f64
     let kn = sample::knowledge(g, viewer, o, sizes);
     let comp = g.player(o).companion_def;
     let pick = a.pick_want(viewer, o, &kn, &*prior);
-    let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None, pick: pick.as_ref() };
+    let seen = a.seen_of(viewer, o, sizes, &kn);
+    let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None, pick: pick.as_ref(), seen: seen.as_deref() };
     let fill = prior.expected_fill(&want);
     let mut u = vec![0.0f64; identity::D];
     for (d, &e) in fill.iter().enumerate() {
@@ -467,6 +683,67 @@ impl MtgAz {
         Some(PickWant { legal, a, b })
     }
 
+    /// How `viewer` saw the cards of `o`'s current (between games: last) deck that `kn` (`sample::knowledge`'s)
+    /// says it saw (ENGINE.md 140.9): per definition, its sightings in order (`Game::sightings` of the deck's
+    /// cards), each blind or a search's find. Checked against the knowledge: each definition's sightings are
+    /// exactly its cards the viewer saw - the deck's cards it knows (pinned cards are not known) and its clouds'
+    /// listed cards less the non-deck ones (`extras`); a gap would be a knowledge event that kept no sighting, and
+    /// panics. None where sightings are not kept (no whole-deck clouds: every copy then seen blind).
+    pub(crate) fn seen_of(&self, viewer: PlayerId, o: PlayerId, sizes: [usize; 2], kn: &sample::Knowledge) -> Option<Vec<Seen>> {
+        let g = &self.g;
+        if !(g.spec().hidden_decklists || g.spec().deck_clouds) {
+            return None;
+        }
+        let db = g.db();
+        let range = if o == 0 { 0..sizes[0] } else { sizes[0]..sizes[0] + sizes[1] };
+        let mut log: Vec<(DefId, u32, bool)> =
+            g.sightings.iter().filter(|x| x.viewer == viewer && x.owner == o && range.contains(&x.obj.i())).map(|x| (x.def, x.at, x.searched)).collect();
+        log.sort_unstable();
+        let mut seen: Vec<Seen> = Vec::new();
+        for (d, _, searched) in log {
+            if seen.last().is_none_or(|x| x.def != d) {
+                seen.push(Seen { def: d, n: 0, searched: 0 });
+            }
+            let x = seen.last_mut().expect("an entry");
+            assert!(x.n < 64, "hidden decks: 64 sightings of one card");
+            x.searched |= (searched as u64) << x.n;
+            x.n += 1;
+        }
+        // what the knowledge says the viewer saw: the deck's cards it knows, its clouds' cards, less the non-deck ones
+        let mut saw: Vec<DefId> = range.clone().map(|i| crate::ids::CardIdx::new(i as u32)).filter(|&c| g.knows(viewer, c)).map(|c| sample::card_of(g, c)).collect();
+        for k in g.clouds().iter().filter(|k| k.viewer == viewer && k.owner == o) {
+            saw.extend(k.defs.iter().map(|&d| db.def(d).card_def(d)));
+        }
+        saw.sort_unstable();
+        for &x in &kn.extras {
+            take_one(&mut saw, x);
+        }
+        let mut i = 0;
+        while i < saw.len() {
+            let d = saw[i];
+            let n = saw[i..].iter().take_while(|&&x| x == d).count();
+            let kept = seen.binary_search_by_key(&d, |x| x.def).map_or(0, |k| seen[k].n as usize);
+            assert_eq!(kept, n, "hidden decks: P{viewer} saw {n} of P{o}'s {} and kept {kept} sightings of them (ENGINE.md 140.9)", db.def(d).name);
+            i += n;
+        }
+        for x in &seen {
+            assert!(saw.binary_search(&x.def).is_ok(), "hidden decks: P{viewer} kept {} sightings of P{o}'s {} it does not know of (ENGINE.md 140.9)", x.n, db.def(x.def).name);
+        }
+        Some(seen)
+    }
+
+    /// The request `viewer`'s deal of its opponent's hidden deck makes in this state (ENGINE.md 102.1, 140.9; tests
+    /// and analysis): R and how each card of it was seen (None without a deck prior for them).
+    #[doc(hidden)]
+    pub fn deck_request_of(&self, viewer: u8) -> Option<(Vec<DefId>, Option<Vec<Seen>>)> {
+        let o = opp(viewer);
+        self.m.deck_priors[o as usize].as_ref()?;
+        let sizes = [self.m.decks[0].iter().map(|&c| c as usize).sum(), self.m.decks[1].iter().map(|&c| c as usize).sum()];
+        let kn = sample::knowledge(&self.g, viewer, o, sizes);
+        let seen = self.seen_of(viewer, o, sizes, &kn);
+        Some((kn.required, seen))
+    }
+
     /// One deck of `prior` for `want` (seat `o`): one of the K cached decks drawn uniformly (ENGINE.md
     /// 102.8), or with K = 0 a fresh sample.
     fn deal_one(&self, prior: &dyn DeckPrior, o: PlayerId, want: &DeckWant, rng: &mut Rng) -> Arc<Dealt> {
@@ -494,7 +771,8 @@ impl MtgAz {
             let kn = sample::knowledge(&self.g, viewer, o, sizes);
             let comp = self.g.player(o).companion_def;
             // (the last game is over: no face-down choice pending, ENGINE.md 129.3)
-            let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None, pick: None };
+            let seen = self.seen_of(viewer, o, sizes, &kn);
+            let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None, pick: None, seen: seen.as_deref() };
             let d = self.deal_one(prior, o, &want, rng);
             let mut pools = (*self.m.pools).clone();
             pools[o as usize] = d.pool.clone();
@@ -503,7 +781,7 @@ impl MtgAz {
         }
         let done = self.m.sb.as_ref().expect("between games").done[o as usize].is_some();
         if done {
-            let want = DeckWant { db, n: sizes[o as usize], shown: &[], companion: None, tilt: None, pick: None };
+            let want = DeckWant { db, n: sizes[o as usize], shown: &[], companion: None, tilt: None, pick: None, seen: None };
             let d = self.deal_one(prior, o, &want, rng);
             self.m.sb.as_mut().expect("between games").done[o as usize] = Some(d.counts.clone());
         }
@@ -570,7 +848,8 @@ impl MtgAz {
         // deck, so the deck is the posterior of everything the viewer knows and holds a legal pick;
         // `Game::determinize` then deals the hand with one, ENGINE.md 129.3.)
         let pick = self.pick_want(viewer, o, &kn, &*prior);
-        let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt, pick: pick.as_ref() };
+        let seen = self.seen_of(viewer, o, sizes, &kn);
+        let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt, pick: pick.as_ref(), seen: seen.as_deref() };
         // The K-sample deal (ENGINE.md 102.8): one of the K decks the prior gave for this request
         // (memoized per game) - uniformly, or by the deck tilt (ENGINE.md 106) -, else a fresh sample
         // (K = 0, or a tilt of the prior's draws).
@@ -667,7 +946,8 @@ impl MtgAz {
         }
         let comp = self.g.player(o).companion_def;
         let pick = self.pick_want(viewer, o, &kn, &*prior);
-        let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None, pick: pick.as_ref() };
+        let seen = self.seen_of(viewer, o, sizes, &kn);
+        let want = DeckWant { db, n: sizes[o as usize], shown: &kn.required, companion: comp, tilt: None, pick: pick.as_ref(), seen: seen.as_deref() };
         let decks = self.m.deal.decks(&*prior, o, &want);
         let ess = self.m.deal.ess;
         let td = self.m.deal.tilted(tilt_key(DealCache::key(o, &want), &kn, &t, ess), || {
@@ -982,7 +1262,7 @@ impl DeckPrior for SealedPrior {
         let seed = want.shown.iter().fold(0x5EA1_ED_F111u64 ^ want.n as u64, |h, &d| crate::rng::split64(h ^ d as u64));
         let mut rng = Rng::new(seed);
         refuse_pick(self.name(), want);
-        let plain = DeckWant { db: want.db, n: want.n, shown: want.shown, companion: want.companion, tilt: None, pick: None };
+        let plain = DeckWant { db: want.db, n: want.n, shown: want.shown, companion: want.companion, tilt: None, pick: None, seen: want.seen };
         const K: usize = 16;
         for _ in 0..K {
             let s = self.sample(&plain, &mut rng);
@@ -1051,9 +1331,16 @@ struct Slot {
 }
 
 impl Slot {
-    /// The entry of counts `lo..=hi` (`lo` >= `shown`) with `shown` copies seen and the tilt `w` per copy beyond them.
+    /// The entry of counts `lo..=hi` (`lo` >= `shown`) with `shown` copies seen and the tilt `w` per copy beyond them,
+    /// every copy seen blind (the base prior's count of decks: none seen).
     fn new(lo: u8, hi: u8, main: u8, shown: u8, w: f64) -> Slot {
-        let pw = (lo..=hi).map(|c| binom(c as usize, shown as usize) * w.powi((c - shown) as i32)).collect();
+        Slot::with(lo, hi, main, shown, w, &|c| binom(c as usize, shown as usize))
+    }
+
+    /// The entry of counts `lo..=hi` with `shown` copies seen, the tilt `w` per copy beyond them and the sightings'
+    /// weight `seen(c)` of count c (ENGINE.md 140.9).
+    fn with(lo: u8, hi: u8, main: u8, shown: u8, w: f64, seen: &dyn Fn(u8) -> f64) -> Slot {
+        let pw = (lo..=hi).map(|c| seen(c) * w.powi((c - shown) as i32)).collect();
         Slot { lo, hi, main, shown, pw }
     }
 
@@ -1376,8 +1663,15 @@ impl ConstructedPrior {
     }
 
     /// The table's entries for `want` (with the tilt, or untilted): the shown copies as each entry's
-    /// least count, a revealed companion's copy kept in the sideboard, its condition's caps.
+    /// least count, a revealed companion's copy kept in the sideboard, its condition's caps; each count
+    /// weighed by the chance of the sightings of its shown copies (ENGINE.md 140, 140.9).
     fn slots(&self, want: &DeckWant, tilted: bool) -> Vec<Slot> {
+        if let Some(v) = want.seen {
+            for x in v {
+                let r = want.shown.iter().filter(|&&d| d == x.def).count();
+                assert!(x.n as usize <= r && x.n <= 64, "the constructed prior: {} sightings of {} for {r} shown", x.n, want.db.def(x.def).name);
+            }
+        }
         assert_eq!(want.n, self.n, "the constructed prior: a deck of {} cards, not the main's {}", want.n, self.n);
         let db = want.db;
         let cond = want.companion.and_then(|c| db.def(c).companion.as_ref());
@@ -1405,7 +1699,9 @@ impl ConstructedPrior {
                 assert!(shown[k] <= hi, "the constructed prior: {} shown {} that the 75 (and a revealed companion) allow at most {hi}", db.def(d).name, shown[k]);
                 let w = if tilted { want.tilt.map_or(1.0, |f| f(d)) } else { 1.0 };
                 assert!(w.is_finite() && w > 0.0, "the constructed prior: a tilt of {w} on {}", db.def(d).name);
-                Slot::new(shown[k], hi, self.main[k], shown[k], w)
+                // (each count weighed by the chance of how its copies were seen: ENGINE.md 140, 140.9)
+                let r = shown[k];
+                Slot::with(r, hi, self.main[k], r, w, &|c| count_weight(r, want.seen, d, c))
             })
             .collect()
     }
@@ -1579,6 +1875,14 @@ impl DealCache {
             h = crate::rng::split64(h ^ p.b.to_bits().rotate_left(29) ^ p.legal.len() as u64);
             for &d in &p.legal {
                 h = crate::rng::split64(h ^ d as u64);
+            }
+        }
+        // (how the shown cards were seen: ENGINE.md 140.9)
+        if let Some(v) = want.seen {
+            h = crate::rng::split64(h ^ 0x5EE5_1E40 ^ v.len() as u64);
+            for x in v {
+                h = crate::rng::split64(h ^ x.def as u64 ^ (x.n as u64) << 16);
+                h = crate::rng::split64(h ^ x.searched);
             }
         }
         h
