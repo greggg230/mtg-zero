@@ -29292,3 +29292,108 @@ target directory (E:/cargo-target/mtg-zero/bo3-postboard).
   Nothing refuses it in a run spec; the presets do not set it.
 * **The run**: moving the Delver best-of-three run onto this commit changes what it trains (games 2-3 only) - a
   maintainer's decision, with the run.
+
+## 149. Tree reuse after the other player's pass keeps every world of the observation (branch `fix/autopass-reuse`, zero-core `fix/autopass-reuse` 12125d0 + a1d8300, 2026-11-12)
+
+Fable review of `e81f8304..267ae603` (`E:/mtg-zero-scratch/fable-review-2026-11-12/hidden.md`, follow-up "auto_single
+and the opponent's hidden options", CONFIRMED low-medium).
+
+### 149.1 The bug
+
+`auto_single` answers a single-option decision in the engine (`flow.rs` `ask_options`) and keys it `KEY_AUTO(player,
+kind << 16 | action)`, public (section 10): whether the decider had an alternative can depend on its hidden cards, so the
+next node's signature must show it. The other player's priority with only `PASS` (no castable instant, no mana) is
+answered so; in a world of the mover where that player holds a castable Daze, Force of Will or Bolt it is asked, and the
+mover's search tree holds its node there, the mover's next decision under its `PASS` option. One observation of the
+mover ("the opponent passed") was several nodes. zero-core's reuse (docs/search.md 3: the tree survives for the seat
+that moved when it decides again, at the child of the real action, the real key and the next decision) took the live
+key's child alone - the worlds where the opponent had no alternative, a fact of its hidden hand. The review's probe: at
+live reuse-case transitions, 3.6% (cube bo1, 52,660 worlds) and 5.6% (Delver mirror, 62,480 worlds) of the mover's
+worlds would have asked the opponent instead, and none of them was in the reused subtree (more with open mana). And
+when the real opponent was asked and passed, the next decider was the opponent, so the mover's tree was dropped: whether
+the tree was reused at all depended on the opponent's hand. The network cannot read either effect (the encoding counts a
+pass alike, forced or chosen: `turn.passes`), so both act as target noise that favours walking into open mana. No rules
+error; no engine digest depends on the search.
+
+### 149.2 The fix (zero-core docs/search.md 3.18)
+
+zero-core's observable answers: a game with `SearchGame::ANSWERS` says which answers of a seat every other seat
+observes alike, forced or chosen, and the driver reuses each tree by its observation. `MtgAz` (`az/mod.rs`):
+
+* `ANSWERS = true`.
+* `decision_tag`: `1 + DecisionKind` of the pending decision - part of every search node's signature (a node is one
+  kind of decision of its decider); a controlled turn's decisions (CR 722: the decider is not the decision's player,
+  whose `KEY_AUTO` names the player) a class apart (`TAG_CONTROLLED`), the deck choice and sideboarding their own.
+* `answer_obs(seat, tag, a)`: a pass of priority (CR 117.3d; `tag` = Priority of its own player, `a` = `PASS`) is
+  observed as `KEY_AUTO(seat, Priority << 16 | PASS)` - the very key `auto_single` emits for the forced pass. Nothing
+  else: a choice naming a hidden card's slot, a page turn, a may - its action id does not say what the other player saw.
+* `key_obs(key, viewer)`: the other player's `KEY_AUTO` of a pass is an `Answer`; any other `KEY_AUTO` of the other
+  player is `Opaque` (no reuse across it: its chosen counterpart cannot be placed); everything else (the viewer's own
+  `KEY_AUTO` - its options are its own information -, reveals, draws) `Plain`.
+
+The driver (`Tree::follow` after every real move): a tree's seat moves - its line starts (the root option, the live
+transition's keys); the other player moves while the line is in flight - only a pass continues it (then that
+transition's keys); when the seat decides again the new root merges every node the line reaches: the live key's child
+(the forced pass is a plain entry of its key) and, under every node of the other player at that point whose options
+include `PASS`, the seat's next decision under it (the chosen pass), whatever that node's option list (the real one is
+hidden). The merged statistics add up (visits, values, backups, sampled outcomes, down the subtrees). A tree is reused
+in both cases now - forced and chosen pass alike - and in each with the same root, so neither which worlds survive nor
+whether the tree survives depends on the opponent's hand. More reuse than before: across any run of the other player's
+passes (its own steps passed through), until the seat decides again; still dropped across anything else it does, an
+opaque forced answer, or a live key with the other player's unmasked private keys (review I7, unchanged).
+
+### 149.3 Tests and measurements
+
+* **The measure** (`engine/tests/autopass_reuse.rs`, `AUTOPASS_GAMES=30 AUTOPASS_EVERY=1`; the default 12 games,
+  every 4th case, runs in ~10 s): 30 games per pool of heuristic play with a random move in four, at every live
+  transition where the mover (two options or more) decides again after the other player's forced pass, or where the
+  other player is asked and can pass (it passes in a clone; the game goes on with the real move): the mover's search of
+  its decision with every walk through the real move (160 walks, uniform priors, an even value), each walk's own
+  observation generated from its path (its nodes' keys, the other player's answers `answer_obs` of the options it took
+  there) - independently of the tree's matching - and the walks that observed the real line, against the walks the
+  reused root holds (`tot`), before (`advance_tagged`: the live key's child) and after (`line_start`, `line_answer`,
+  `line_advance`: the driver's `Tree::follow`). After equals the observed walks at **every** transition (asserted).
+
+  | pool | forced-pass transitions (opaque skipped) | walks that observed the line | reused before | after | transitions with chosen-pass worlds |
+  |---|---|---|---|---|---|
+  | cube bo1 | 2,585 (77) | 339,433 | 335,740 (98.9%: 1.1% left out) | 339,433 (100%) | 457 |
+  | Delver mirror bo1 | 3,063 (114) | 379,724 | 372,671 (98.1%: 1.9% left out) | 379,724 (100%) | 403 |
+
+  | pool | asked-and-passed transitions | walks that observed the line | reused before | after |
+  |---|---|---|---|---|
+  | cube bo1 | 1,630 | 72,414 | 0 (the tree was dropped) | 72,414 (100%) |
+  | Delver mirror bo1 | 1,927 | 88,368 | 0 (the tree was dropped) | 88,368 (100%) |
+
+  The walks left out are fewer than the review's worlds (3.6% / 5.6%) because a world where the opponent is asked
+  observes the pass only in the walks where its node took `PASS` (here one option of its list, uniform priors); with a
+  network that casts its instants they are the walks the search's own model of the opponent gives the pass.
+* **Search time**: the reuse costs 2.6 us per transition (line and merge; 0.5-0.6 us before), once per reuse. The search
+  smoke on the Delver mirror (`python tools/search_smoke.py --specs delver --seeds 0 --games 120 --preset delver-mirror
+  --threads 4`, uniform evaluator, the live run on the machine), alternated with the baseline checkout 267ae603: before
+  2.22 million simulations in 93.3 s and 85.1 s (42.0 / 38.3 us a simulation), after 2.28 million (other games: the
+  reuse changed them) in 93.6 s and 87.7 s (41.1 / 38.5 us): no change beyond the noise.
+* **zero-core**: `cargo test --release` 183 passed, the golden digests unchanged (games without `ANSWERS` are
+  byte-identical); the new tests of docs/search.md 3.18 (the counter game with its forced `ALLOW` keyed: the merged root
+  holds the forced and the chosen worlds' walks, the same root from a forced and from a chosen real answer, compaction,
+  refusals, the line without answers = `advance`; through the driver).
+* **Python**: `tests/test_autopass_reuse.py` (the bindings: `answers`, `decision_tag`, `key_obs` of every `KEY_AUTO`
+  of a random game; zero.play's reference tree never reused across an answer).
+* **Engine**: the full suite (161 test targets, 0 failed); `FUZZ_GAMES=20000 cargo test --release -p engine --test
+  fuzz` 4 passed (3,544 s).
+
+### 149.4 Digests and gates
+
+* **Behaviour digests EQUAL** (`engine/tests/data/digests.txt` untouched): the engine is unchanged (`MtgAz`'s hooks are
+  read only by zero-core's search and driver; the digests play no search).
+* **Search behaviour changes on purpose** for every MTG run on this commit: the search's signatures carry the decision
+  kind (it splits only worlds whose decisions of the same options differ in kind), and the reuse follows the line.
+  `check_checkpoint_compat --net uniform --spec '{"max_turns": 60}'` against 267ae603 differs by design: self-play
+  `visits` records befe1d78b429dcf8 -> 56915d5ef87b360c (5,842 -> 5,633 samples), `cq` 9fc37a252b3458ed ->
+  b6d6ab78c31962f7, results 04af2293d34ad1ae -> 669abb15bdf7d140; the match against the random bot unchanged
+  (1240bba645becbd8). (`--net random`, the gate's compat step, cannot run on layout v7 at all: an MLP network refuses
+  the game's tail segments - `NetEvaluator._check_game_tails` - on the baseline as on this branch; a gate issue, not
+  this change.)
+* Gate: `python tools/gate.py search-core --no-mac --allow-skip checkpoint-compat` on this commit (the compat step
+  above, run by hand with `--net uniform`; the result in the branch's merge note).
+* zero-core's other games (`smoke_all.sh --with-this-core --build-only`) were not built here (the orchestrator's
+  step): the trait gained defaulted items only.
