@@ -13,6 +13,11 @@ use engine::az::{MtgAz, MtgSpec};
 use engine::rng::Rng;
 use zero_search::game::SearchGame;
 
+// The module's allocator (`py/src/lib.rs`): timings as `mtgz._engine` runs, not the system heap
+// (ENGINE.md 148: the review measured 92 against 67 us a simulation, `decide` 489 against 59 us).
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn mirror() -> MtgSpec {
     let names = Decklist::izzet_delver().main_names();
     MtgSpec::parse(&serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": names, "p1": names}}).to_string()).unwrap()

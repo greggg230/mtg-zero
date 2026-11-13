@@ -5,6 +5,11 @@
 
 mod common;
 
+// The module's allocator (`py/src/lib.rs`): timings as `mtgz._engine` runs, not the system heap
+// (ENGINE.md 148: the review measured 92 against 67 us a simulation, `decide` 489 against 59 us).
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use engine::rng::Rng;
 use engine::{Game, GameSpec};
 use std::hint::black_box;

@@ -11,3 +11,9 @@ serde_json.workspace = true
 # the search crate of the pinned core (git submodule third_party/zero-core, docs/pinning.md there):
 # the `SearchGame` trait the AZ layer (src/az) implements
 zero_search = { path = "../third_party/zero-core/crates/search" }
+
+[dev-dependencies]
+# The allocator of the module (`py/Cargo.toml`, `py/src/lib.rs`) for the benchmark tests (`tests/perf.rs`,
+# `tests/measure_delver.rs`, the driver digest in `tests/digest_formats.rs`): they measure what
+# `mtgz._engine` runs, not the system heap (ENGINE.md 148).
+mimalloc = { version = "0.1", default-features = false }
