@@ -47,6 +47,7 @@ import numpy as np
 
 import mtgz.az  # noqa: F401  (registers the game package)
 from mtgz.az import belief
+from mtgz.az.evaldecks import undealt
 from zero import replay as core
 
 SITE = 'https://delverai.greggg230.com'
@@ -55,8 +56,9 @@ KEY_FILE = os.path.join(os.path.expanduser('~'), 'delverai', '.upload_key')
 
 
 def spec_with_log(spec):
-    """The spec JSON with the engine's log on (`"log": true`, engine/src/az/mod.rs)."""
-    s = json.loads(spec) if spec else {}
+    """The spec JSON with the engine's log on (`"log": true`, engine/src/az/mod.rs) and without dealt decks (a
+    self-play setting, docs/ENGINE.md 154: a recorded match plays every seat's own sideboarding)."""
+    s = json.loads(undealt(spec)) if spec else {}
     s['log'] = True
     return json.dumps(s, separators=(',', ':'))
 

@@ -129,12 +129,15 @@ impl MtgAz {
         if hand <= 0.0 {
             self.g.determinize(viewer as u8, &mut r);
             self.m.rng = crate::rng::Rng::new(r.next_u64());
+            self.reseed_dealt(&mut r);
             return None;
         }
         let w = deal_weights(&self.g, viewer as u8, belief_segment(&belief.pred), hand, belief.clip);
         let ids = identity::identities(self.g.db());
         self.g.determinize_weighted(viewer as u8, &mut r, &|d| w[ids[d as usize] as usize]);
         self.m.rng = crate::rng::Rng::new(r.next_u64());
+        // (ENGINE.md 154: as `determinize`)
+        self.reseed_dealt(&mut r);
         Some(w)
     }
 

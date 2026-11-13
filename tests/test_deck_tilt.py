@@ -28,9 +28,9 @@ def test_the_presets_and_seats():
             s = Run.nn_seat(r, 'm', 16, selfplay=selfplay)
             assert s['belief_tilt'] == 0.0 and s['belief_tilts'] == c['selfplay_belief_tilts' if selfplay else 'eval_belief_tilts']
     # every other preset: no deck tilt (the seats of before), but the constructed best-of-three's (docs/ENGINE.md
-    # 120: the tilt deals their later games' hidden 60s; tests/test_delver_bo3.py)
+    # 120: the tilt deals their later games' hidden 60s; tests/test_delver_bo3.py; its dealt-deck fork, ENGINE.md 154)
     for name, p in P.PRESETS.items():
-        if p.get('game') != 'mtg_eoe' and name not in ('delver-mirror-bo3', 'delver-bo3-smoke'):
+        if p.get('game') != 'mtg_eoe' and name not in ('delver-mirror-bo3', 'delver-bo3-smoke', 'delver-mirror-bo3-dealt'):
             assert not p.get('selfplay_belief_tilts') and not p.get('eval_belief_tilts'), name
     assert DEFAULTS['selfplay_belief_tilts'] == DEFAULTS['eval_belief_tilts'] == {}
 

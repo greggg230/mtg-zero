@@ -36,6 +36,12 @@ pub const KEY_DIE: u64 = 6;
 /// and number of sideboard cards (`deck0 | deck1 << 8 | side0 << 16 | side1
 /// << 24`). Emitted by the match, not by a `Game`.
 pub const KEY_GAME: u64 = 7;
+/// A dealt seat's 60 for the next game of a best-of-three was dealt (ENGINE.md 154, the spec's
+/// `"dealt_decks"`): private to that player (its player). Payload: the 60's copies per entry of
+/// the public 75's list, nine 5-bit counts a key in list order, the key's index in bits 45-47
+/// (`matches::deal_dealt_deck`); for another observer the same number of keys, each `HIDDEN`.
+/// Emitted by the match, not by a `Game`.
+pub const KEY_DEALT: u64 = 8;
 /// Payload of a private key emitted while another player is the observer.
 pub const HIDDEN: u64 = 0xFFFF_FFFF;
 

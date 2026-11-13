@@ -462,6 +462,8 @@ at once (704.5e, section 26.4).
   alternative can depend on hidden cards (no castable instant in hand). Layout: kind in bits
   56-63, player in bits 48-55, payload in the low bits. `KEY_GAME` (public; best-of-three:
   emitted by the match as a later game begins, the decks' and sideboards' sizes, section 36.11).
+  `KEY_DEALT(dealt seat, ...)` (private to the dealt seat; emitted by the match: the dealt 60 of the spec's
+  `"dealt_decks"`, nine 5-bit counts a key, `HIDDEN` for another observer - section 154, added 2026-11-13).
   Shuffles, random orders and token creation emit nothing (they reveal nothing; the next draw is keyed).
 * **Observer masking.** zero-core keys children by chance keys, and the search's tree is the
   root decider's. `determinize(viewer)` records `observer = viewer` in the state; from then
@@ -29524,3 +29526,125 @@ shut; its `extra.forked_from` names pb1's iter_0067). Copies went into scratch r
   record lists it with `iter` None: a fixed rating with no point on the lineage axis. A converted anchor computes what
   its source did, so the Elo scale stays pb1's (a3198 = 1000). aK, a byte copy of pb2's iter_0000, is placed at
   generation 0 (global K).
+
+## 154. Dealt decks: forced deck variety in constructed best-of-three self-play (`"dealt_decks"`; branch `feat/dealt-decks`, 2026-11-13)
+
+Branch `feat/dealt-decks` from main e076d8f3 (153; layout v7); zero-core pinned at e5e1bb0, unchanged. (Section number:
+140-149 are the Fable-review fix lanes', 150 `fuzz-invariants`', 151 `fix/rules-f1-f5`'s, 152 `fix/farm-fuzz`'s, 153
+main's; no branch, remote branch or worktree had 154 on 2026-11-13.) The design and the user's decisions: the hub note
+`delver_bo3_forced_variety_design_2026-11-13.md` (approved 2026-11-13).
+
+**Why.** The live run delver-bo3-pb1's sideboarding froze at a one-card swap (+1 Rough // Tumble, -1 Prismari Charm,
+~100% since generation 36; censuses at 512 and 2,048 simulations scatter over one-card swaps the value net rates the
+same): the value net can't tell 60s apart. Its 15 sideboard cards were never in a deck during the 3,198 best-of-one
+iterations, boarding them in at generation 0 played worse, so the policy learned to change nothing - and never playing
+them, it can't learn their worth. More search doesn't help (from a sideboarding decision the search reaches the opening
+hand at most: its score for a 60 is the value net's guess). The fix: in a share of self-play matches one player's
+post-sideboard 60 is dealt at random from its 75 instead of chosen, so the network plays - and its value net learns -
+games with varied 60s, mostly through mid-game positions that the value-Q mix carries back to the game start.
+
+**The user's decisions (2026-11-13, the design's recommended options):** swaps [1, 8]; p 0.5 (per match one dealt
+seat, each seat 1/2); public (both players know which player is dealt; encoded); game 3 dealt again, independently
+(game 2's reveals don't condition game 3's deal). Spec: `"dealt_decks": {"p": 0.5, "swaps": [1, 8]}`.
+
+### 154.1 The option
+
+`"dealt_decks": {"p": p, "swaps": [lo, hi]}` (`MtgSpec::dealt_decks`, `DealtDecks`; `az/mod.rs`). p in (0, 1]; 0 <= lo
+<= hi <= each seat's sideboard size (at most 15). Refused loudly: outside a constructed best-of-three (it deals 60s of a
+75), with `keep_deck` on any seat (the evaluation yardstick's), an unknown key, a p or range out of bounds (tests:
+`dealt_decks.rs::dealt_decks_is_a_constructed_best_of_three_self_play_setting`). Whole matches (game 1 played, one
+episode per match) take it as well as the presets' post-sideboard matches. Without the key every spec is what it was.
+
+* **Which matches** (`matches::dealt_seat`): from a stream of the match's seed of its own (as `game_one_winner`'s), with
+  probability p one dealt seat, each seat 1/2. The match's RNG (its games' seeds) is untouched: a dealt match is the
+  real match of its seed but the dealt seat's decks - the same game-1 result, sideboarding order, choosers and game
+  seeds (`a_dealt_match_is_the_real_match_of_its_seed_but_the_dealt_decks`). Deterministic per seed, so the farm's native
+  worker, local self-play and replays agree (`the_dealt_seat_comes_from_the_match_seed`: the share ~p, each seat ~1/2).
+* **The deal** (`MtgAz::deal_dealt_deck`): at each of the dealt seat's sideboardings (before game 2 and before game 3)
+  its 60 is a sample of its dealt prior, `ConstructedPrior::dealt(main, sideboard, lo, hi)` (`hidden_decks.rs`): the
+  constructed prior (120.2: uniform over the swap count, then uniform over the 60s of the 75 with that count) with the
+  swap count restricted to lo..=hi. Exact, no rejection: the prior's `by_swaps` (the base count of decks with s swaps,
+  by which every draw of the table divides the posterior weight of s) holds the base counts in the range and 0 outside
+  it, so `sample`, its face-down pick (129.3) and `expected_fill` all give each s outside the range weight 0 and are
+  otherwise the full prior's table - no posterior code changed. Each game's deal comes from its own stream,
+  `split64(dealt_seed ^ game)` (`MatchState::dealt_seed`, `matches::dealt_deal_seed`): game 3's deal is independent of
+  game 2's and of everything played (`the_dealt_seat_has_no_sideboarding_decision_and_the_order_is_cr_103_1s`: each
+  dealt 60 is exactly its game's deal of the seed). `the_dealt_prior_is_the_constructed_prior_restricted_to_the_swap_range`:
+  4,000 deals are legal 60s of the 75 (`check_sample`), swap counts uniform over 1..=8 (mean 4.5) and none outside, each
+  card's mean copies the restricted prior's exact marginal; conditioned on shown cards as the full prior.
+* **No sideboarding decision** (`MtgAz::dealt_sideboards`): the dealt seat's 60 is its choice; it decides nothing. CR
+  103.1's order stays: the previous game's loser sideboards first (a dealt loser is dealt at once, `begin_sideboarding`,
+  then the other player sideboards from its last deck) and chooses play or draw (a dealt chooser by its own decision); a
+  dealt second sideboarder is dealt when the first passes, and the next game begins (`sideboard_step` -> `next_game`).
+  The dealt seat is never the decider of a sideboarding decision, so zero-core never searches or records one for it - no
+  forced `PASS`: `self_play_records_no_sideboarding_sample_of_the_dealt_seat` runs zero-core's driver (recording, aux on)
+  and finds no sideboarding row of a dealt seat, the other seat's sideboarding rows and the dealt seat's game rows
+  recorded. Its play-or-draw choice, mulligans and every in-game decision are the network's: the samples that teach it to
+  play the sideboard cards.
+
+### 154.2 Information: public dealt-ness, a private deal
+
+* **Public.** Who is dealt (`MatchState::dealt`) is a rule of the match both players know: the same in every world
+  (`determinize` never changes it), classified Public in the public-state gate with a perturbation ("a player's decks
+  in the match are dealt", `match_view` carries it).
+* **Encoding** (no width, offset or segment change): `g6::DEALT` = `globals_v6`'s per-player float **31** (the last of
+  the per-player spares 9-31; v6 and v7), "this player's decks in this match are dealt", frame seat first, both players
+  (the viewer's own matters: the opponent's beliefs about the viewer, and so its play, depend on it). Written by
+  `encode_match`, so in a game's rows and in sideboarding's: the other player's beliefs about the dealt seat's next 60
+  depend on it at its own sideboarding, where the match is still at game 1 before game 2 - so the flag is per match, not
+  "dealt this game", which would leave the first sideboarding a public-state gap. 0 in every match without the option: existing
+  encodings and digests unchanged. Lane B check: branch `fix/encoding-gate` (142, 59acc474) claims no `globals_v6`
+  float; the options memo's (a) for its gaps would take per-player spares from 9 up, so 31 stays clear of it.
+  (`both_viewers_rows_show_the_dealt_player`.)
+* **The other player's worlds.** The dealt seat's deck prior (`deck_priors[d]`) is its dealt prior (`MtgAz::set_dealt`),
+  so every world of the other player deals its 60s from it - in a game holding every card it has shown this game
+  (`sample_hidden_deck`), between games its last game's 60 given that game's end and, when it was dealt first, its
+  next 60 with nothing shown (`deal_constructed_between`) - **never tilted**: a dealt 60 is no policy's choice, so the
+  restricted prior's posterior is exact; `sample_hidden_deck` drops the deck reader's weights (102.1) and the deck
+  prediction's tilt (106) for a dealt opponent, `deck_weights` gives 1 and `deck_tilt_of` nothing (the hand's belief
+  tilt, 69, is unchanged: the hand within the dealt 60 is dealt as any)
+  (`the_other_players_worlds_deal_the_dealt_60_from_the_restricted_prior_untilted`: worlds within the range holding the
+  shown cards, the deck-tilted world equal to the untilted one draw for draw, the next 60s' swap counts uniform - no
+  conditioning on game 2's reveals before game 3; the dealt seat's own worlds still tilt the other 60).
+* **The deal is the dealt seat's private chance** (ENGINE.md 10's conventions): keyed `KEY_DEALT` (`hidden.rs`; new
+  kind 8, emitted by the match) of the dealt seat - its 60's copies per entry of the public 75's list, nine 5-bit counts
+  a key in list order, the key's index in bits 45-47 (ceil(L / 9) keys, L the list's length: public) - in the step that
+  deals it: the other player's `PASS` when the dealt seat sideboards second, the step that ends the game in a whole
+  match when it sideboards first (at a post-sideboard match's start or `next_episode` no step is open: no key, and no
+  tree spans it). For another observer the same number of keys, each `HIDDEN`, so the other player's tree never branches
+  on the deal; the dealt seat's tree does. `determinize` now records the observer between games too (no game card is
+  dealt there; the last game's `observer` is set), and reseeds `dealt_seed` in every world of every viewer (a later
+  deal is chance that has not happened; one draw after the match RNG's, none without a dealt seat:
+  `MtgAz::reseed_dealt`) - in `determinize`, `determinize_deck_tilted` and `determinize_belief`
+  (`the_deal_is_keyed_private_to_the_dealt_seat`: the keys are the 60 exactly; two worlds of the other player give equal
+  `HIDDEN` keys while dealing different 60s; the dealt seat's worlds key their deal in full).
+* **The aux `deck` target** (`aux_target`): all zero - no target (zero-core `auxtarget.py`: a row whose segment is all
+  zero has none) - for a viewer whose frame opponent is the dealt seat in a game after the first (its 60 dealt), so the
+  deck head predicts only decks a policy chose; `belief` (the hand) unchanged (`no_deck_target_facing_a_dealt_60`).
+  Game 1 of a whole match plays the registered mains: its target stays.
+
+### 154.3 Where it never applies (Python)
+
+A self-play setting only. `mtgz.az.evaldecks.undealt(spec)` drops the key; `eval_spec` (the package's evaluation spec,
+used unless a run sets its own) and the engine's `MtgSpec::eval_json` (the same rule) drop it; the recorded matches
+(`replays.spec_with_log`), the sideboard census (`sideboard_census.census_spec`: both players sideboard in every start)
+and so the publisher never deal; `keep_h2h` refuses a dealt spec (pass the evaluation spec). The preset
+`delver-mirror-bo3-dealt` = `delver-mirror-bo3` with `"dealt_decks": {"p": 0.5, "swaps": [1, 8]}` in the self-play spec
+only (`SPEC_DELVER_BO3_DEALT`; its evaluation spec is `SPEC_DELVER_BO3`); `delver-mirror-bo3` is unchanged;
+`decklists.mirror_bo3_spec(..., dealt_decks=...)` writes the key (`tests/test_dealt_decks.py`).
+
+### 154.4 What A1's posterior and A2's game-3 conditioning must do for a dealt seat
+
+* **A1** (`fix/deck-posterior`, 140: the posterior of the seen cards, prior x prod_i C(D_i, R_i)): a dealt seat's
+  posterior is the **restricted** prior times the same likelihood. A1's `request` / `expected_fill` divide by and skip on
+  `by_swaps` exactly as before, so `ConstructedPrior::dealt`'s zeroed counts carry over with no code change; its
+  `sample_k` shares one table a request as for any prior. Nothing to add (checked by the trial merge, 154.6).
+* **A2** (`fix/bo3-hidden`, 141): H2's observer kept in a world's new games composes (this branch sets the observer
+  between games too, the same line). If the user picks an H3 option that conditions game 3 on game 2 (141.4: B, C or
+  D), the dealt seat's game-3 request must stay option A: its game-3 60 is an independent deal of the restricted prior
+  (the user's decision), so P(D3 | everything seen) = the restricted prior's posterior given game 3's cards only - no
+  game-2 term, no mixture with the dealt game-2 deck. `deck_dealt(o)` is the test for it. The deck tilt stays off for it.
+
+### 154.5 Checks
+
+(Recorded by the commits after this one: the engine tests above passed on it - `dealt_decks` 10 passed, 1 ignored.)
