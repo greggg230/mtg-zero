@@ -105,3 +105,132 @@ def test_the_anchored_elo_and_the_anchors(tmp_path):
         {'label': 'a160', 'iter': 160, 'g': 297, 'elo': 1578.2, 'se': 24.7, 'how': 'calibrated', 'since': None},
         {'label': 'x', 'iter': None, 'g': None, 'elo': 1500.0, 'se': None, 'how': None, 'since': None}]
     assert P.anchor_defs(run, 'visits') == []
+
+
+def test_an_exploiter_fork_finds_its_anchors_in_its_parent_and_labels_its_games(tmp_path):
+    import argparse
+    parent = _run(tmp_path)                                  # r3-2b-beliefsearch: models 160, 191, 192
+    fork = str(tmp_path / 'r3-2b-exploit475')
+    os.makedirs(os.path.join(fork, 'models'))
+    with open(os.path.join(fork, 'models', 'iter_0475.pt'), 'wb') as f:
+        f.write(b'net 475')                                  # the fork point: its own copy; 192 / 160 only in the parent
+    res = json.load(open(os.path.join(parent, 'elo', TAG, 'results.json')))
+    res['anchors']['anchor:a475'] = {'label': 'a475', 'file': 'a475.pt', 'sha256': hashlib.sha256(b'net 475').hexdigest(),
+                                     'elo': 1650.0, 'how': 'calibrated: 200 games', 'since': 480}
+    res['pairs'] = {'anchor:a475|iter_0480': [62.0, 100], 'anchor:a192|iter_0480': [40.0, 100]}
+    _write(os.path.join(fork, 'elo', TAG, 'results.json'), res)
+    _write(os.path.join(fork, 'config.json'), {'elo_anchors': 'a475=/x/anchors/r3-2b_iter_0475.pt'})
+    _write(os.path.join(fork, 'metrics.jsonl'), [{'iter': 480, 'elo': {'elo': 1700.0, 'se': 90.0, 'select': TAG}}], lines=True)
+    forks = {P._norm(fork): {'parent': parent, 'at': 475, 'label': 'exploiter vs 475', 'won': False}}
+    segs = P.lineage(fork, forks)
+    assert [s['run'] for s in segs] == ['r3-2b-beliefsearch', 'r3-2b-exploit475'] and P.same_numbering(segs, 1) == (parent,)
+    alone = {a['label']: a['iter'] for a in P.anchor_defs(fork, TAG)}
+    assert alone == {'a192': None, 'a160': None, 'x': None, 'a475': 475}  # without its parent: only its own 475
+    defs = {a['label']: a['iter'] for a in P.anchor_defs(fork, TAG, also=(parent,))}
+    assert defs == {'a192': 192, 'a160': 160, 'x': None, 'a475': 475}
+    rows = P.iteration_rows(fork, also=(parent,))
+    assert [(m['anchor'], m['iter'], m['points'], m['win']) for m in rows[0]['h2h']] == [('a192', 192, 60.0, 0.6), ('a475', 475, 38.0, 0.38)]
+    # the recorded games against the frozen 475: each seat's label, the record's fields
+    vs = os.path.join(fork, 'models', 'iter_0475.pt')     # the frozen 475 (the anchor a475's file)
+    a = argparse.Namespace(record_vs=vs, record_vs_label='Gen 475 (frozen)',
+                           record_label='Exploiter gen {iter}', title='Exploiter: trained only against gen 475',
+                           note='Every self-play game against a frozen 475.', side=True)
+    rep = {'seats': [{'checkpoint': 'r3-2b_iter_0475.pt'}, {'checkpoint': 'C:\\runs\\x\\models\\iter_0480.pt'.replace('\\', os.sep)}]}
+    assert P.seat_labels(rep, os.path.join('runs', 'x', 'models', 'iter_0480.pt'), a, 480) == ['Gen 475 (frozen)', 'Exploiter gen 480']
+    assert P.record_extra(a) == {'title': 'Exploiter: trained only against gen 475', 'note': 'Every self-play game against a frozen 475.',
+                                 'side': True, 'record_vs': {'label': 'Gen 475 (frozen)', 'sha': hashlib.sha256(b'net 475').hexdigest()[:12]}}
+
+
+def test_the_upload_body_is_compact_and_drops_none_fields():
+    p = {'run': 'r', 'best': None, 'iters': [{'iter': 1, 'time': 1793869394.534, 'elo': None, 'h2h': [], 'phases': {'a': None}}],
+         'lineage': {'segments': [{'run': 'r', 'last': None}], 'rows': [{'iter': 1, 'g': 7, 'elo': None, 'time': 5.6}]}}
+    body = P.wire_progress(p)
+    assert b': ' not in body and b', ' not in body
+    w = json.loads(body)
+    assert w['iters'] == [{'iter': 1, 'time': 1793869395, 'h2h': [], 'phases': {'a': None}}]   # only the rows' own None fields go
+    assert w['lineage'] == {'segments': [{'run': 'r', 'last': None}], 'rows': [{'iter': 1, 'g': 7, 'time': 6}]}
+    assert w['best'] is None and p['iters'][0]['elo'] is None                                 # the record itself unchanged
+    assert json.loads(P.wire_progress({'run': 'r', 'iters': [], 'lineage': None}))['lineage'] is None
+
+
+def test_the_averaged_anchored_elo_takes_twelve_readings_with_their_covariance(tmp_path):
+    # 14 evaluated generations (every 8), each 100 games against two fixed anchors and 24 against 8 back
+    run = str(tmp_path / 'avg')
+    gens = [8 * k for k in range(1, 15)]
+    pairs = {}
+    for k, g in enumerate(gens):
+        pairs[f'anchor:a|iter_{g:04d}'] = [50.0 - k, 100]
+        pairs[f'anchor:b|iter_{g:04d}'] = [40.0 - k, 100]
+        if k:
+            pairs[f'iter_{gens[k - 1]:04d}|iter_{g:04d}'] = [11.0, 24]
+    res = {'anchor': 'heuristic', 'anchors': {'anchor:a': {'elo': 1600.0}, 'anchor:b': {'elo': 1550.0}}, 'pairs': pairs}
+    _write(os.path.join(run, 'elo', TAG, 'results.json'), res)
+    idx, cov = P.anchored_cov(run, TAG)
+    fit = P.zelo.fit_fixed(res, {'anchor:a': 1600.0, 'anchor:b': 1550.0}, prior_sd=P.PRIOR_SD)
+    for g in gens:                                   # the covariance's diagonal is the fit's se^2
+        n = f'iter_{g:04d}'
+        assert abs(cov[idx[n], idx[n]] ** 0.5 - fit[n][1]) < 1e-6
+    rows = [{'iter': g, 'select': TAG, 'elo_anchored': round(fit[f'iter_{g:04d}'][0], 1),
+             'elo_anchored_se': round(fit[f'iter_{g:04d}'][1], 1)} for g in gens]
+    rows.insert(3, {'iter': 27, 'select': TAG, 'elo_anchored': None})       # a generation without a reading
+    assert P.add_anchored_averages(rows, lambda t: P.anchored_cov(run, t)) == 0
+    avg = [r for r in rows if 'elo_avg' in r]
+    assert [r['iter'] for r in avg] == [96, 104, 112]                       # from the 12th reading
+    win = [r for r in rows if r.get('elo_anchored') is not None][:12]
+    assert abs(avg[0]['elo_avg'] - sum(r['elo_anchored'] for r in win) / 12) < 0.051
+    ii = [idx[f'iter_{r["iter"]:04d}'] for r in win]
+    se = cov[P.np.ix_(ii, ii)].sum() ** 0.5 / 12
+    assert abs(avg[0]['elo_avg_se'] - se) < 0.051
+    naive = sum(r['elo_anchored_se'] ** 2 for r in win) ** 0.5 / 12
+    assert se > naive                                # the games between them correlate the readings
+    # a stretch of more than 12 generations starts again; so does another pool
+    bare = lambda r: {k: v for k, v in r.items() if not k.startswith('elo_avg')}
+    gap = [bare(r) for r in rows if r.get('elo_anchored') is not None]
+    for r in gap[6:]:
+        r['iter'] += 40
+    assert P.add_anchored_averages(gap, lambda t: None) == 0 and not any('elo_avg' in r for r in gap)
+    other = [dict(bare(r), select=('visits' if k == 5 else TAG)) for k, r in enumerate(win + rows[-2:])]
+    P.add_anchored_averages(other, lambda t: P.anchored_cov(run, t))
+    assert not any('elo_avg' in r for r in other)
+    # a window with a checkpoint the fit doesn't rate: no average, counted
+    lost = [bare(r) for r in win]
+    lost[0]['iter'] = 4
+    assert P.add_anchored_averages(lost, lambda t: P.anchored_cov(run, t)) == 1 and 'elo_avg' not in lost[-1]
+
+
+def test_the_gap_rule_is_twice_the_measured_step_of_each_segment(tmp_path):
+    # the main line rated every 8th generation, its fork from 40 every 16th (the 128x8 run's
+    # --eval-every 16): a reading 16 after the last one is no gap there, 48 is. Measured, not the
+    # config's eval_every (1000 on runs evaluated from outside)
+    main = str(tmp_path / 'main')
+    fork = str(tmp_path / 'fork')
+    _write(os.path.join(main, 'config.json'), {'eval_every': 1000})
+    _write(os.path.join(fork, 'config.json'), {'eval_every': 16})
+    rated = lambda g: {'iter': g, 'elo': {'elo': 1500.0, 'se': 50.0, 'select': TAG}}
+    _write(os.path.join(main, 'metrics.jsonl'), [rated(g) for g in (8, 16, 24, 32, 40)], lines=True)
+    _write(os.path.join(fork, 'metrics.jsonl'), [rated(g) for g in (8, 16, 24, 32, 40)] + [{'iter': 41}]
+           + [rated(g) for g in (88, 104, 120)], lines=True)
+    assert (P.rated_every([8, 16, 24, 40]), P.rated_every([1, 2, 6, 10]), P.rated_every([5]), P.rated_every([])) == (8, 4, None, None)
+    assert P.rated_every([0, 8, 24]) == 8                                       # a tie: the smaller
+    assert (P.max_gap(8), P.max_gap(16), P.max_gap(4), P.max_gap(None)) == (16, 32, 12, 12)   # at least 12
+    forks = {P._norm(fork): {'parent': main, 'at': 40, 'label': 'deeper', 'won': False}}
+    L = P.lineage_record(fork, forks)
+    assert [(sg['run'], sg['from_g'], sg['rated_every']) for sg in L['segments']] == [('main', 0, 8), ('fork', 41, 16)]
+    rec = P.progress(fork, forks=forks)
+    assert rec['rated_every'] == [[0, 8], [41, 16]]
+    own = P.gap_rule(rec['rated_every'])
+    assert [own(g) for g in (0, 40, 41, 100)] == [16, 16, 32, 32]
+    assert P.gap_rule([])(5) == 12
+    # readings every 16 average across the fork's steps; the old 12 never did; a 48-generation hole starts again
+    rows = [{'iter': g, 'select': TAG, 'elo_anchored': 1700.0} for g in range(48, 48 + 16 * 14, 16)]
+    cov = ({f'iter_{g:04d}': k for k, g in enumerate(range(0, 400))}, P.np.eye(400))
+    assert P.add_anchored_averages(rows, lambda t: cov, gap=own) == 0
+    assert [r['iter'] for r in rows if 'elo_avg' in r] == [224, 240, 256]
+    bare = lambda r: {k: v for k, v in r.items() if not k.startswith('elo_avg')}
+    old = [bare(r) for r in rows]
+    assert P.add_anchored_averages(old, lambda t: cov) == 0 and not any('elo_avg' in r for r in old)
+    holed = [bare(r) for r in rows]
+    for r in holed[3:]:
+        r['iter'] += 32                                   # 80 -> 128: 48 apart
+    P.add_anchored_averages(holed, lambda t: cov, gap=own)
+    assert not any('elo_avg' in r for r in holed)        # 11 readings since the hole

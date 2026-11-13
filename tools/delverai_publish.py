@@ -3,6 +3,7 @@ generation (once per new checkpoint).
 
   python tools/delverai_publish.py runs/delver1 [--loop 300] [--games 6] [--device cuda]
       [--url https://delverai.greggg230.com] [--key-file F] [--dry-run]
+      [--title T --note N --side] [--record-vs CKPT --record-vs-label L --record-label 'gen {iter}']
 
 Each pass:
   * progress: the run's metrics (metrics.jsonl with evals.jsonl merged, as zerodash), Elo
@@ -17,6 +18,13 @@ Each pass:
     self-play simulations (evaluation settings: no noise, the most visited option) and uploads
     them. Only the newest checkpoint is recorded; ones skipped while the publisher was down are
     not back-filled. The recorded iterations are kept in <run>/delverai.json.
+
+A side run (`--side`: e.g. an exploiter trained against a frozen generation beside the main line) is
+never the site's default run, whichever publisher posted last; `--title` / `--note` name and explain
+it on the site (the record's `title`, `note`, `side`). `--record-vs CKPT`: the recorded games are the
+checkpoint against CKPT instead of itself (half of them on each seat), each game's `seat_labels`
+from `--record-label` (the generation's, '{iter}' its number) and `--record-vs-label` (the record's
+`record_vs`).
 
 `--loop N`: repeat every N seconds (default: one pass), waiting for a run that has not started
 yet. `--follow STATE`: publish the run a JSON file names as its "main" (the A/B experiments'
@@ -40,6 +48,16 @@ the yardstick. `anchors`: the active pool's, in its order - {label, iter (the ru
 a copy of), g (in the lineage's numbering), elo, se, how (set / calibrated), since}. A row without
 it (before the anchors, older runs) has None: its `elo` is the pool's.
 
+Averaged anchored Elo (`elo_avg` / `elo_avg_se` in each row, the user 2026-11-05): a row with an
+anchored Elo and AVG_N - 1 more before it in the same pool (no stretch of more than max_gap
+generations between two of them: twice the usual step between the readings of the lineage segment
+the later one is in, at least AVG_GAP - the site's charts break their lines at the same stretches,
+from the record's `rated_every`) has the mean of those AVG_N readings and its standard error from
+the pool's anchored fit with its covariance (anchored_cov: the readings share games - their Elo
+matches with each other - so they are not quite independent: ~10% wider than sqrt(sum se^2) / N on
+r3-2b-float550). The lineage's rows average across forks (a fork's pool holds its parent's games);
+a run's own rows from its own first reading.
+
 Lineage (`lineage` in the progress record): the run's history since its first ancestor, for the
 site's charts from the beginning. A fork (the A/B experiments' `done` entries of --follow's file:
 the fork's directory, the run it forked from and at which iteration, its changed setting) keeps
@@ -55,12 +73,15 @@ mtg5-network Delver games of 36 and 45 turns took 5.5 min).
 """
 import argparse
 import json
+import math
 import os
 import re
 import sys
 import threading
 import time
 import traceback
+
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mtgz.az import decklists, replays  # noqa: E402
@@ -90,14 +111,18 @@ def _jsonl(path):
                 except ValueError:
                     pass                          # a line being written
     return rows
+AVG_N = 12          # the anchored readings an averaged Elo takes (the user, 2026-11-05)
+AVG_GAP = 12        # the least max_gap: a longer stretch between two readings starts a new average
+PRIOR_SD = 8.0      # zelo.fit_fixed's prior (log-odds): given to it, and anchored_cov's curvature has it too
 
 
 def _r(x, n=4):
     return round(x, n) if isinstance(x, (int, float)) else None
 
 
-def iteration_rows(run):
-    """metrics.jsonl (remote evaluations merged) -> one compact row per iteration."""
+def iteration_rows(run, also=()):
+    """metrics.jsonl (remote evaluations merged) -> one compact row per iteration. `also`: the run's
+    ancestors in its own numbering (anchor_copies)."""
     evals = {e['iter']: e for e in _jsonl(os.path.join(run, 'evals.jsonl')) if 'iter' in e}
     pools = {}                                    # select tag -> {iteration: its head-to-heads}
     out = []
@@ -109,7 +134,7 @@ def iteration_rows(run):
         # the evaluation move rule that rated it (zero-core docs/az.md 5.4: each rule its own Elo pool)
         tag = (elo or {}).get('select') or (y or {}).get('select') or 'visits'
         if tag not in pools:
-            pools[tag] = head_to_heads(run, tag)
+            pools[tag] = head_to_heads(run, tag, also)
         # 0 games against the bot or random (--eval-games 0: no yardstick) measured nothing
         ym, rm = (y if (y or {}).get('games') else None), (rnd if (rnd or {}).get('games') else None)
         sp, tr = m.get('selfplay') or {}, m.get('train') or {}
@@ -156,10 +181,12 @@ def _sha256(path):
     return h.hexdigest()
 
 
-def anchor_copies(run, anchors):
+def anchor_copies(run, anchors, also=()):
     """{anchor player: the run's iteration whose checkpoint has the anchor's sha256, else None}.
     The candidates: the numbers in the anchor's label and file name, and the iteration in its path
-    in the run's elo_anchors ('a192=.../r3-2b_iter_0192.pt' -> 192)."""
+    in the run's elo_anchors ('a192=.../r3-2b_iter_0192.pt' -> 192); their checkpoints in the run's
+    models/, else in `also`'s (ancestors in the same numbering: a fork keeps its parent's, whose
+    older checkpoints it does not copy)."""
     cfg = _json(os.path.join(run, 'config.json'), {}) or {}
     try:
         paths = {zelo.anchor_name(lb): p for lb, p in zelo.parse_anchors(cfg.get('elo_anchors', ''))}
@@ -171,23 +198,26 @@ def anchor_copies(run, anchors):
         cands += [int(x) for x in re.findall(r'iter_(\d+)', str(paths.get(name, '')))]
         out[name] = None
         for k in dict.fromkeys(cands):
-            f = os.path.join(run, 'models', f'iter_{k:04d}.pt')
-            try:
-                if a.get('sha256') and os.path.exists(f) and _sha256(f) == a['sha256']:
-                    out[name] = k
-                    break
-            except OSError:
-                pass
+            for d in (run, *also):
+                f = os.path.join(d, 'models', f'iter_{k:04d}.pt')
+                try:
+                    if a.get('sha256') and os.path.exists(f) and _sha256(f) == a['sha256']:
+                        out[name] = k
+                        break
+                except OSError:
+                    pass
+            if out[name] is not None:
+                break
     return out
 
 
-def anchor_defs(run, tag='visits', offset=0):
+def anchor_defs(run, tag='visits', offset=0, also=()):
     """The fixed anchors of the run's pool `tag`, in the pool's order: [{label, iter (the run's
     generation it is a copy of, or None), g (offset + iter: the lineage's numbering), elo, se,
     how ('set' / 'calibrated'), since}], [] without anchors."""
     res = _json(os.path.join(zelo.pool_dir(run, tag), 'results.json'), {}) or {}
     anchors = res.get('anchors') or {}
-    copies = anchor_copies(run, anchors) if anchors else {}
+    copies = anchor_copies(run, anchors, also) if anchors else {}
     out = []
     for name, a in anchors.items():
         it = copies.get(name)
@@ -197,7 +227,7 @@ def anchor_defs(run, tag='visits', offset=0):
     return out
 
 
-def head_to_heads(run, tag='visits'):
+def head_to_heads(run, tag='visits', also=()):
     """{iteration: its own games in the Elo pool `tag`}: against an earlier generation
     {back, iter} (by back) and against each fixed anchor {anchor (its label), iter (the generation
     it is a copy of, or None), elo (its fixed rating), sha} (in the pool's order), each with the
@@ -206,7 +236,7 @@ def head_to_heads(run, tag='visits'):
     res = _json(os.path.join(zelo.pool_dir(run, tag), 'results.json'), {}) or {}
     anchors = res.get('anchors') or {}
     order = {n: i for i, n in enumerate(anchors)}
-    copies = anchor_copies(run, anchors) if anchors else {}
+    copies = anchor_copies(run, anchors, also) if anchors else {}
     out = {}
     for key, v in (res.get('pairs') or {}).items():
         a, _, b = key.partition('|')
@@ -364,6 +394,115 @@ def fork_registry(paths):
     return out
 
 
+_covs = {}          # results.json path -> (its mtime, anchored_cov's answer)
+
+
+def anchored_cov(run, tag='visits'):
+    """The run's pool `tag` rated with its fixed anchors held (zelo.fit_fixed, as the run's evaluation
+    does) and that fit's covariance: ({player: index}, matrix in Elo^2) - the inverse of the
+    log-likelihood's curvature (and the prior's) at the fit, whose diagonal is the fit's se^2. None
+    for a pool without anchors. Cached until the pool's results.json changes."""
+    path = os.path.join(zelo.pool_dir(run, tag), 'results.json')
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    if path in _covs and _covs[path][0] == mtime:
+        return _covs[path][1]
+    res = _json(path, {}) or {}
+    fixed = {n: a['elo'] for n, a in (res.get('anchors') or {}).items() if a.get('elo') is not None}
+    out = None
+    if fixed and res.get('pairs'):
+        fit = zelo.fit_fixed(res, fixed, prior_sd=PRIOR_SD)
+        free = sorted(p for p in fit if p not in fixed)
+        idx = {p: i for i, p in enumerate(free)}
+        x = {p: (e - zelo.ANCHOR_ELO) / zelo.SCALE for p, (e, _, _) in fit.items()}
+        info = np.eye(len(free)) / PRIOR_SD ** 2
+        for k, (sc, n) in res['pairs'].items():
+            a, b = k.split('|')
+            ia, ib = idx.get(a), idx.get(b)
+            if n <= 0 or (ia is None and ib is None):
+                continue
+            p = 1.0 / (1.0 + math.exp(-(x[a] - x[b])))
+            w = n * p * (1 - p)
+            for i in (ia, ib):
+                if i is not None:
+                    info[i, i] += w
+            if ia is not None and ib is not None:
+                info[ia, ib] -= w
+                info[ib, ia] -= w
+        out = (idx, np.linalg.inv(info) * zelo.SCALE ** 2)
+    _covs[path] = (mtime, out)
+    return out
+
+
+def rated_every(gens):
+    """The usual step between rated generations (`gens` ascending): the most common one, the smaller
+    of a tie; None for fewer than two. Measured, not the config's eval_every: runs evaluated from
+    outside have 1000 there (no evaluation of their own)."""
+    steps = {}
+    for a, b in zip(gens, gens[1:]):
+        if b > a:
+            steps[b - a] = steps.get(b - a, 0) + 1
+    return min(steps, key=lambda d: (-steps[d], d)) if steps else None
+
+
+def rated_steps(rows, starts, gen):
+    """[[start, rated_every]] per segment: `starts` the segments' first generations (ascending), each
+    one's step measured on the rated rows (an Elo of either kind) from it to the next start."""
+    gens = sorted({gen(r) for r in rows if r.get('elo_anchored') is not None or r.get('elo') is not None})
+    ends = list(starts[1:]) + [math.inf]
+    return [[a, rated_every([g for g in gens if a <= g < b])] for a, b in zip(starts, ends)]
+
+
+def max_gap(every):
+    """The longest stretch between two readings that is still one average (and one line on the
+    site's charts: delverai public/dashboard.js gapRule): twice the segment's usual step (one missed
+    reading is not a gap), at least AVG_GAP."""
+    return max(AVG_GAP, 2 * (every or 0))
+
+
+def gap_rule(steps):
+    """rated_steps' -> generation -> max_gap there (the segment it falls in; before the first, the first)."""
+    return lambda g: max_gap(next((e for a, e in reversed(steps) if g >= a), steps[0][1] if steps else None))
+
+
+def add_anchored_averages(rows, cov_of, pool=lambda r: r.get('select') or 'visits', gen=lambda r: r['iter'],
+                          ckpt=lambda r: r['iter'], gap=lambda g: AVG_GAP):
+    """In place, `rows` in generation order: each row with an anchored Elo and AVG_N - 1 more before
+    it of the same `pool(row)` (a new pool, or more than gap(its generation) since the last reading,
+    starts again) gets `elo_avg`, the mean of those AVG_N readings, and `elo_avg_se`, its standard
+    error from cov_of(pool) (anchored_cov: the readings are correlated through the games between
+    them). `gen`: a row's generation for the gaps; `ckpt`: its checkpoint's iteration in that pool;
+    `gap`: gap_rule's. -> the rows left without one because the fit doesn't rate a checkpoint of their window."""
+    win, key, last, missing = [], None, None, 0
+    for r in rows:
+        if r.get('elo_anchored') is None:
+            continue
+        k, g = pool(r), gen(r)
+        if not win or k != key or g - last > gap(g):
+            win, key = [], k
+        win = (win + [r])[-AVG_N:]
+        last = g
+        if len(win) < AVG_N:
+            continue
+        cv = cov_of(k)
+        names = [zelo.ckpt_name(ckpt(x)) for x in win]
+        if cv is None or any(n not in cv[0] for n in names):
+            missing += 1
+            continue
+        ii = [cv[0][n] for n in names]
+        r['elo_avg'] = _r(sum(x['elo_anchored'] for x in win) / AVG_N, 1)
+        r['elo_avg_se'] = _r(math.sqrt(max(cv[1][np.ix_(ii, ii)].sum(), 0.0)) / AVG_N, 1)
+    return missing
+
+
+def _warn_missing(n, run):
+    if n:
+        print(f'delverai_publish: {n} averaged-Elo rows of {os.path.basename(os.path.abspath(run))} skipped: '
+              f'their pool fit does not rate a checkpoint of their window', file=sys.stderr, flush=True)
+
+
 def lineage(run, forks, depth=0):
     """The run's segments from its first ancestor: [{dir, run, label, kind (root / fork /
     migrate), first, last (its own iterations: None = to the end), offset (global generation =
@@ -398,6 +537,12 @@ def _cut(segs, k):
     return segs
 
 
+def same_numbering(segs, k):
+    """The directories of segment k's ancestors that number their iterations as it does (the forks
+    before it back to the last migration: same offset)."""
+    return tuple(sg['dir'] for sg in segs[:k] if sg['offset'] == segs[k]['offset'])[::-1]
+
+
 def lineage_record(run, forks):
     """The progress record's `lineage`: the segments and every row of them, each with its global
     generation `g`, its run and its own iteration `gen`. None for a run without ancestors."""
@@ -406,15 +551,23 @@ def lineage_record(run, forks):
         return None
     rows = []
     for k, sg in enumerate(segs):
-        for r in iteration_rows(sg['dir']):
+        for r in iteration_rows(sg['dir'], same_numbering(segs, k)):
             it = r.get('iter')
             if not isinstance(it, int) or it < sg['first'] or (sg['last'] is not None and it > sg['last']):
                 continue
             # the opponents' global generations too (in the run's own numbering: offset + its iteration)
             h2h = [dict(m, g=None if m.get('iter') is None else sg['offset'] + m['iter']) for m in r.get('h2h') or []]
             rows.append(dict(r, g=sg['offset'] + it, gen=it, run=sg['run'], seg=k, h2h=h2h))
+    # averaged across forks: a numbering's (same offset's) last segment's pool holds its ancestors' games
+    last_dir = {sg['offset']: sg['dir'] for sg in segs}
+    steps = rated_steps(rows, [sg['offset'] + sg['first'] for sg in segs], lambda r: r['g'])
+    _warn_missing(add_anchored_averages(
+        sorted(rows, key=lambda r: (r['g'], r['seg'])), lambda k: anchored_cov(last_dir[k[0]], k[1]),
+        pool=lambda r: (segs[r['seg']]['offset'], r.get('select') or 'visits'), gen=lambda r: r['g'],
+        ckpt=lambda r: r['gen'], gap=gap_rule(steps)), run)
     return {'segments': [{x: sg[x] for x in ('run', 'label', 'kind', 'first', 'last', 'offset')}
-                         | {'from_g': sg['offset'] + sg['first']} for sg in segs], 'rows': rows}
+                         | {'from_g': sg['offset'] + sg['first'], 'rated_every': st[1]} for sg, st in zip(segs, steps)],
+            'rows': rows}
 
 
 def migrated_from(run):
@@ -429,21 +582,52 @@ def migrated_from(run):
             'layout': m.get('layout'), 'time': m.get('time')}
 
 
-def progress(run, every=1, forks=None):
+def on_box_status(run, st):
+    """A run living on a rented GPU box (tools/vast.py on main, ENGINE.md 97): this dir is the box's mirror (a sync
+    loop pulls its checkpoints, metrics and log) and its PAUSE file only guards the desktop copy, so run_status would
+    say 'paused'. The state then comes from the mirror: stopped when the mirror is fresh (15 min) but the box's log
+    has not grown for 30 min (the box run ended); a late mirror (the sync loop slow or stuck: 2026-11-05 14:40) is
+    not a stopped run - running, with how far behind the page is, up to 3 hours without news."""
+    m = _json(os.path.join(run, 'ON_VAST.json'))
+    if not m or m.get('homing'):
+        return st
+    now = time.time()
+    synced = now - float((_json(os.path.join(run, 'vast_sync.json'), {}) or {}).get('time') or 0)
+    log = os.path.join(run, 'log.txt')
+    grew = now - os.path.getmtime(log) if os.path.exists(log) else 1e9
+    base = dict(st, paused_since=None, pause=False)
+    if synced < 900:
+        if grew < 1800:
+            return dict(base, state='running', detail='Running on a rented cloud GPU (this page follows its mirror).')
+        return dict(base, state='stopped', detail=f'On a rented cloud GPU: its log has not moved for {grew / 60:.0f} min.')
+    if synced < 3 * 3600:
+        return dict(base, state='running', detail=f'Running on a rented cloud GPU (this page is {synced / 60:.0f} min '
+                                                   f'behind its mirror).')
+    return dict(base, state='stopped', detail=f'On a rented cloud GPU: no news for {synced / 60:.0f} min.')
+
+
+def progress(run, every=1, forks=None, extra=None):
     """The site's progress record of a run (`every`: which iterations get games recorded;
-    `forks`: fork_registry, for the lineage)."""
+    `forks`: fork_registry, for the lineage; `extra`: more fields - title, note, side, record_vs)."""
     cfg = _json(os.path.join(run, 'config.json'), {}) or {}
-    st = runctl.run_status(run)
+    st = on_box_status(run, runctl.run_status(run))
     prog = _json(os.path.join(run, 'progress.json'))
     idx = _json(os.path.join(run, 'models', 'index.json'), {}) or {}
     tag, pool = zelo.active_pool(run)             # the Elo pool of the run's evaluation move rule now
     ratings = (_json(os.path.join(pool, 'ratings.json'), {}) or {})
     log = os.path.join(run, 'log.txt')
-    rows = iteration_rows(run)
+    segs = lineage(run, forks or {})
+    also = same_numbering(segs, len(segs) - 1)
+    rows = iteration_rows(run, also)
+    # the gaps in the run's own numbering: per segment numbered as it is (the record's rated_every)
+    own = rated_steps([r for r in rows if isinstance(r.get('iter'), int)],
+                      [sg['first'] for sg in segs if sg['offset'] == segs[-1]['offset']], lambda r: r['iter'])
+    _warn_missing(add_anchored_averages(sorted((r for r in rows if isinstance(r.get('iter'), int)), key=lambda r: r['iter']),
+                                        lambda t: anchored_cov(run, t), gap=gap_rule(own)), run)
     state = _json(os.path.join(run, 'delverai.json'), {}) or {}
     lin = lineage_record(run, forks or {})
     offset = lin['segments'][-1]['offset'] if lin else 0
-    return {
+    return dict({
         'run': os.path.basename(os.path.abspath(run)), 'updated': time.time(),
         'state': st.get('state'), 'detail': st.get('detail'), 'paused_since': st.get('paused_since'),
         'progress': prog, 'log_age_s': _r(time.time() - os.path.getmtime(log), 0) if os.path.exists(log) else None,
@@ -452,10 +636,10 @@ def progress(run, every=1, forks=None):
         'ratings': {k: {'elo': _r(v.get('elo'), 1), 'se': _r(v.get('se'), 1), 'games': v.get('games')}
                     for k, v in (ratings.get('ratings') or {}).items()},
         'anchor': {'name': ratings.get('anchor'), 'elo': ratings.get('anchor_elo')}, 'select': tag,
-        'anchors': anchor_defs(run, tag, offset),
+        'anchors': anchor_defs(run, tag, offset, also),
         'replayed': state.get('replayed', []), 'record_every': every, 'migrated_from': migrated_from(run),
-        'lineage': lin,
-    }
+        'lineage': lin, 'rated_every': own,
+    }, **(extra or {}))
 
 
 def latest_checkpoint(run, every=1, settle_s=30):
@@ -472,13 +656,87 @@ def latest_checkpoint(run, every=1, settle_s=30):
     return best
 
 
+def record_extra(a):
+    """The record's fields from the command line: title, note, side, record_vs."""
+    out = {}
+    if a.title:
+        out['title'] = a.title
+    if a.note:
+        out['note'] = a.note
+    if a.side:
+        out['side'] = True
+    if a.record_vs:
+        # its sha256's first 12 (as the h2h rows' anchors): the site finds its games against that anchor
+        out['record_vs'] = {'label': a.record_vs_label or os.path.splitext(os.path.basename(a.record_vs))[0],
+                            'sha': _sha256(a.record_vs)[:12]}
+    return out
+
+
+def seat_labels(rep, ckpt, a, it):
+    """A game against --record-vs: each seat's label (the generation's on the seat playing `ckpt`)."""
+    mine = os.path.basename(ckpt)
+    vs = a.record_vs_label or os.path.splitext(os.path.basename(a.record_vs))[0]
+    me = (a.record_label or 'gen {iter}').replace('{iter}', str(it))
+    return [me if os.path.basename(str(s.get('checkpoint') or '')) == mine else vs for s in rep['seats']]
+
+
+RECENT_ROWS = 400              # every row of the newest generations is posted ...
+OLD_EVERY = 4                  # ... older ones: those with a reading (Elo, h2h, yardstick) and every 4th
+READING_KEYS = ('elo', 'elo_anchored', 'elo_avg', 'h2h', 'yard_win', 'rand_win')
+
+
+def _thin(rows):
+    """The rows the site needs: every one of the newest RECENT_ROWS generations, and of the older ones those with
+    a reading plus every OLD_EVERY-th (the charts treat steps of up to 12 generations as continuous). The body
+    grew ~1.2 KiB a generation and passed the site's 1,800 KiB again at r3-2b-float550's ~2,123 (2026-11-06,
+    HTTP 413 for ~4 h): thinning keeps it bounded by the recent rows plus a quarter of the history."""
+    its = [r.get('iter') for r in rows if isinstance(r.get('iter'), int)]
+    if not its:
+        return rows
+    cut = max(its) - RECENT_ROWS
+    out, last = [], {}                             # last: per lineage segment, the kept row the dropped ones fold into
+    for r in rows:
+        keep = (not isinstance(r.get('iter'), int) or r['iter'] > cut or r['iter'] % OLD_EVERY == 0
+                or any(r.get(k) not in (None, [], {}) for k in READING_KEYS))     # (h2h is [] on a plain row)
+        seg = r.get('seg')
+        keep = keep or seg not in last              # a segment's first row: the next dropped ones fold into it
+        if keep:
+            r = dict(r)
+            out.append(r)
+            last[seg] = r
+        elif seg in last and r.get('sp_games'):
+            # the site's "Self-play games" total sums the rows' sp_games (dashboard.js): a dropped row's games go
+            # to the kept row before it, which then counts the games of its span (`sp_games_span` generations)
+            k = last[seg]
+            k['sp_games'] = (k.get('sp_games') or 0) + r['sp_games']
+            k['sp_games_span'] = k.get('sp_games_span', 1) + 1
+    return out
+
+
+def _wire_rows(rows):
+    """Iteration rows as posted: thinned (`_thin`), without their None fields (the site reads a missing field as
+    null) and the time in whole seconds."""
+    return [{k: (round(v) if k == 'time' and isinstance(v, float) else v) for k, v in r.items() if v is not None}
+            for r in _thin(rows)]
+
+
+def wire_progress(p):
+    """The progress record's upload body: compact JSON of `p` with _wire_rows' iters and lineage rows. The site
+    refuses a body over 1,800 KiB (D1 rows: at most 2,000,000 bytes); the default form passed that at
+    r3-2b-float550's 1,260 (a lineage of ~1,400 rows twice: the run's own rows are in both), this one is ~60% of it."""
+    w = dict(p, iters=_wire_rows(p.get('iters') or []))
+    if isinstance(p.get('lineage'), dict) and isinstance(p['lineage'].get('rows'), list):
+        w['lineage'] = dict(p['lineage'], rows=_wire_rows(p['lineage']['rows']))
+    return json.dumps(w, separators=(',', ':')).encode('utf-8')
+
+
 def post_progress(run, a, key, log=print):
-    p = progress(run, a.every, fork_registry([a.follow] + (a.forks or [])))
+    p = progress(run, a.every, fork_registry([a.follow] + (a.forks or [])), record_extra(a))
     if a.dry_run:
         log(json.dumps({k: v for k, v in p.items() if k != 'iters'})[:800])
-        log(f'{len(p["iters"])} iteration rows')
+        log(f'{len(p["iters"])} iteration rows; upload body {len(wire_progress(p)):,} bytes')
     else:
-        replays.post(a.url.rstrip('/') + '/api/progress/upload', json.dumps(p).encode('utf-8'), key)
+        replays.post(a.url.rstrip('/') + '/api/progress/upload', wire_progress(p), key)
 
 
 def one_pass(run, a, key, log=print, kick=None):
@@ -493,23 +751,24 @@ def one_pass(run, a, key, log=print, kick=None):
     if ck is None or ck[0] in done or (a.min_iter is not None and ck[0] < a.min_iter):
         return False
     it, path = ck
-    log(f'recording {a.games} games of iteration {it} ({path})')
+    log(f'recording {a.games} games of iteration {it} ({path}){f" against {a.record_vs}" if a.record_vs else ""}')
     t0 = time.time()
     RECORDING.update(iter=it, since=t0, games=a.games)
     if kick:
         kick.set()
     try:
         reps = replays.record(path, games=a.games, sims=a.sims, device=a.device,
-                              title=f'Generation {it}', log=log)
+                              title=f'Generation {it}', log=log, opp=a.record_vs)
     finally:
         RECORDING.clear()
     out = os.path.join(run, 'replays')
     for r in reps:
+        meta = {'seat_labels': seat_labels(r, path, a, it)} if a.record_vs else None
         replays.core.save(r, out)
         if a.dry_run:
-            log(f'  (dry run) {replays.summary(r)}')
+            log(f'  (dry run) {dict(replays.summary(r), **(meta or {}))}')
         else:
-            log(f'  uploaded {replays.upload(r, a.url, key)}')
+            log(f'  uploaded {replays.upload(r, a.url, key, meta=meta)}')
     state['replayed'] = sorted(set(done) | {it})
     state['record_s'] = (state.get('record_s') or [])[-9:] + [round(time.time() - t0, 1)]
     with open(state_path + '.tmp', 'w', encoding='utf-8') as f:
@@ -563,7 +822,15 @@ def main(argv=None):
     ap.add_argument('--url', default=replays.SITE)
     ap.add_argument('--key-file', default=None)
     ap.add_argument('--dry-run', action='store_true', help='record, but upload nothing')
+    ap.add_argument('--title', default=None, help="the run's name on the site (e.g. 'Exploiter: trained only against gen 475')")
+    ap.add_argument('--note', default=None, help='a sentence or two about the run, shown with its title')
+    ap.add_argument('--side', action='store_true', help="a side run: never the site's default run")
+    ap.add_argument('--record-vs', default=None, help='record the games against this checkpoint instead of itself')
+    ap.add_argument('--record-vs-label', default=None, help="--record-vs's seat label (default: its file name)")
+    ap.add_argument('--record-label', default=None, help="the recorded generation's seat label with --record-vs ('{iter}': its number; default 'gen {iter}')")
     a = ap.parse_args(argv)
+    if a.record_vs and not os.path.isfile(a.record_vs):
+        raise SystemExit(f'--record-vs {a.record_vs}: no such checkpoint')
     current_run(a)
     if not os.path.isdir(a.run) and a.loop is None:
         raise SystemExit(f'{a.run}: no such run directory')
