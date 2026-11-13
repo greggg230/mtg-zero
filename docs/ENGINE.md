@@ -29357,7 +29357,7 @@ change, no engine change, **digests EQUAL** (nothing the engine plays or encodes
   (`delver-review/tests/test_zz_infra_probes.py`: the fork, both requeue probes, the drain, the transport) fail on this
   branch, as they should.
 * The rest of the checks (the full zero-core pytest, this repo's build, the run-loop smoke, a crash-in-training resume on
-  `mtg-smoke`, `check_checkpoint_compat` against the pin before, the `python` gate) are in 144.4.
+  `mtg-smoke`, `check_checkpoint_compat` against the pin before, the `python` gate): 144.4.
 
 ### 144.3 Not here
 
@@ -29366,3 +29366,29 @@ change, no engine change, **digests EQUAL** (nothing the engine plays or encodes
   O2/O3 (shard fetch channel, window row cache). B15 (`RunCommitRemote`) is mtg-zero's `mtgz/az/mac.py`.
 * An exact per-game `minor` / belief ratio in a rolling phase needs per-game counters in the driver's result rows (Rust,
   `worker.rs`, which lanes D and H also change): not made.
+
+### 144.4 The checks (zero-core 509e3e2, this branch 497e85c4; the shared desktop under ~10 lanes' load, 2026-11-13)
+
+* **zero-core's full pytest** (adcdc87's code, 74 min where it takes ~10 alone): 596 passed, 5 failed - two tests that
+  read old interfaces, fixed in the branch (test_encoding_guard's `drain(timeout=)`, now bounded with `stop`;
+  test_reader's defaults test comparing data directories byte for byte, now the shards and the DONE.json markers' shard
+  maps), two timing tests that pass alone (`test_cotrain_the_local_driver_is_never_starved`: the local driver played 19
+  of 163 matches, 11.7% < 15%, under load; `test_infoset_merge::test_remote_workers_merge_and_the_quotas_stay_exact`),
+  and `test_token_graphs::test_graphs_match_eager_and_follow_new_weights`, which **fails at the pin e5e1bb0 too**
+  (CUDA graphs vs eager 3.66e-05 > 2e-05 on this GPU, beside the live run): not this change. All re-run alone: pass,
+  but that last one, identical at e5e1bb0. The new tests (`tests/test_run_infra.py`, 21) and test_remoteplay's: pass.
+* **This repo**: the build (no Rust change); `python -m mtgz.az.run --preset mtg-smoke --iters 2` into
+  `E:/mtg-zero-scratch/fable-fix/c2-mtg/smoke` - iterations 0-2, 16 games each; **a crash in iteration 2's training,
+  resumed** (an injected RuntimeError, then the same command): `iter 2: its self-play phase finished before the
+  interruption (DONE.json: 1 shards, 3078 samples, as recorded): not played again, training on it`, the phase played
+  once, the row `selfplay_resumed`, 3,078 samples trained.
+* **`check_checkpoint_compat`** (this checkout vs `fix-core-infra-base` = 267ae603 with zero-core e5e1bb0 and the same
+  Rust, its `_engine.pyd` this build's; the smoke's v7 token checkpoint `iter_0002.pt`, spec `{"max_turns": 60}`):
+  **identical**, 4,878 samples per target (visits `0463f2a17eb2f8a1`, cq `db244540e266b341`, results
+  `8885bcde237fce65`, vs random 9.0/16), arrays hashed `aux, n_players, net, opt_action, ov_opt, ov_tok, pi, player,
+  q, sc, t_seg, t_slot, t_val, x, z` (46.12: the aux targets now in). `--net random` cannot run for v7 `mtg` at either
+  pin (an MLP evaluator is refused for a game with tail segments, docs/az.md 43.8): the gate's `optin-core` /
+  `search-core` compat step needs `--checkpoint`-style use of a token network on v7.
+* **Gate**: `python tools/gate.py python --no-mac` on 497e85c4: **GATE PASSED python 497e85c4952b in 911s** (build; pytest 323 passed, 1 skipped; the run-loop smoke, 16 games, 0 unfinished). Its first run on 497e85c4 failed one test under load (`tests/test_mac_remote.py::test_a_worker_plays_mtg[matches]`: the worker's 180 s no-control-line watchdog ended its phase before three best-of-three episodes finished; the test sends no pings) - both modes pass alone (169 s), and the re-run passed. 0e139c03 (before 46.12-46.13) passed the same tier.
+* Digests EQUAL (no engine or Rust change; not re-run). No 20k fuzz (no engine change). Not run: the Mac steps
+  (`--no-mac`).
