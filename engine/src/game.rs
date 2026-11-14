@@ -669,6 +669,9 @@ pub struct Game {
     /// Cards found by their owner's library search that the other player can still tell apart (a card on top of the
     /// library, a Doomsday pile's), with their search's time (ENGINE.md 140.9).
     pub(crate) found: Vec<(CardIdx, u32)>,
+    /// The state was changed by hand (tests' perturbations, `Game::lose_sightings`): the sightings no longer
+    /// describe it, and the deals weigh every seen card blind (ENGINE.md 140.9).
+    pub(crate) sightings_lost: bool,
     /// Tokens created so far (a cheap "any token?" for the SBA check).
     pub(crate) tokens: u32,
     /// The lowest slot made as a token or a copy (`u32::MAX`: none yet).
@@ -1273,6 +1276,7 @@ impl Game {
             sightings: Vec::new(),
             sight_at: 0,
             found: Vec::new(),
+            sightings_lost: false,
             tokens: 0,
             first_token: u32::MAX,
             observer: None,

@@ -695,7 +695,7 @@ impl MtgAz {
     /// (no whole-deck clouds: every copy then seen blind).
     pub(crate) fn seen_of(&self, viewer: PlayerId, o: PlayerId, sizes: [usize; 2], kn: &sample::Knowledge) -> Option<Vec<Seen>> {
         let g = &self.g;
-        if !(g.spec().hidden_decklists || g.spec().deck_clouds) {
+        if !(g.spec().hidden_decklists || g.spec().deck_clouds) || g.sightings_lost() {
             return None;
         }
         let db = g.db();
@@ -714,7 +714,6 @@ impl MtgAz {
         }
         // what the knowledge says the viewer saw: the deck's cards it knows, its clouds' cards, less the identities of
         // `o`'s cards outside the deck that it does not know in hidden zones
-        let _ = kn;
         let mut saw: Vec<DefId> = range.clone().map(|i| crate::ids::CardIdx::new(i as u32)).filter(|&c| g.knows(viewer, c)).map(|c| sample::card_of(g, c)).collect();
         for k in g.clouds().iter().filter(|k| k.viewer == viewer && k.owner == o) {
             saw.extend(k.defs.iter().map(|&d| db.def(d).card_def(d)));
@@ -736,6 +735,12 @@ impl MtgAz {
         }
         for x in &seen {
             assert!(saw.binary_search(&x.def).is_ok(), "hidden decks: P{viewer} kept {} sightings of P{o}'s {} it does not know of (ENGINE.md 140.9)", x.n, db.def(x.def).name);
+        }
+        // (Every card of R seen blind, none held unseen: the likelihood is C(D_i, R_i), the request's None - one
+        // form of one request, the same key and draws as 140's.)
+        let blind = seen.iter().all(|x| x.searched == 0) && saw.len() == kn.required.len();
+        if blind {
+            return None;
         }
         Some(seen)
     }

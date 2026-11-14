@@ -446,6 +446,21 @@ impl Game {
         &self.sightings
     }
 
+    /// The state was changed by hand, outside the rules (tests' perturbations, `public_state`): the sightings no
+    /// longer describe what each player saw, so they are dropped and the deals weigh every seen card blind (ENGINE.md
+    /// 140, 140.9). Never called by the engine.
+    #[doc(hidden)]
+    pub fn lose_sightings(&mut self) {
+        self.sightings.clear();
+        self.found.clear();
+        self.sightings_lost = true;
+    }
+
+    /// Were the sightings lost to a change by hand (`lose_sightings`)?
+    pub(crate) fn sightings_lost(&self) -> bool {
+        self.sightings_lost
+    }
+
     /// Reveal a card in a hidden zone to everyone (CR 701.16; 602.2a),
     /// keyed by its identity. A card every player knew already is keyed too
     /// when it is in a hand (ENGINE.md 128): a hand card is named by its
