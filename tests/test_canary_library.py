@@ -169,3 +169,56 @@ def test_the_walk_never_pairs_cards_a_player_can_tell_apart():
     x, y = twins_in(tr['steps'][j]['state'], names, 'battlefield')[0]
     with pytest.raises(RR.Fail, match='the state differs'):
         RR.translate(E, sp, swapped(tr, x, y, j))
+
+
+
+def top_known(st, p):
+    """The top run of places of player p's library that p knows: [(place, mask, name)]."""
+    lib = {e[0]: e for e in st['known'][p]['library']}
+    out = []
+    while len(out) in lib and lib[len(out)][1] & (1 << p):
+        out.append(lib[len(out)])
+    return out
+
+
+def rearranged(tr, k, p, swap_names=True):
+    """The trace with player p's top two library places exchanged at step k only (ids, and the places' knowledge and
+    names when `swap_names`; else only a name changed - another multiset)."""
+    st = copy.deepcopy(tr['steps'][k]['state'])
+    kn = st['known'][p]
+    lib = {e[0]: e for e in kn['library']}
+    if swap_names:
+        kn['order'][0], kn['order'][1] = kn['order'][1], kn['order'][0]
+        lib[0][1:], lib[1][1:] = lib[1][1:], lib[0][1:]
+    else:
+        lib[0][2] = lib[1][2]
+    steps = list(tr['steps'])
+    steps[k] = dict(steps[k], state=st)
+    return dict(tr, steps=steps)
+
+
+def a_step(kinds):
+    """(spot, its trace, step k, decider) of the shortest spot with a decision of `kinds` at which its decider knows
+    its library's top two places, two cards of different definitions."""
+    for sp in sorted(L['spots'], key=lambda s: len(s['actions'])):
+        tr = RR.trace_spot(E, sp)
+        for k, st in enumerate(tr['steps']):
+            p = st['player']
+            top = top_known(st['state'], p) if st['kind'] in kinds else []
+            if len(top) >= 2 and top[0][2] != top[1][2]:
+                return sp, tr, k, p
+    raise AssertionError(f'no spot with a {kinds} decision over two known cards')
+
+
+def test_a_pile_put_back_may_hold_its_waiting_cards_elsewhere():
+    """At a pile decision (PutOnTop / PutOnBottom), the decider's not-yet-placed cards may wait in other places of the
+    pile (152.1 moved them from the card index to the place): accepted, noted, nothing else relaxed - and the same
+    rearrangement at another decision, or another multiset at the pile, is refused."""
+    sp, tr, k, p = a_step(RR.PILE)
+    r = RR.translate(E, sp, rearranged(tr, k, p))
+    assert r['actions'] == sp['actions'] and r['pile'] == [k] and r['twins'] == []
+    with pytest.raises(RR.Fail, match='the state differs'):
+        RR.translate(E, sp, rearranged(tr, k, p, swap_names=False))
+    sp, tr, k, p = a_step(('Priority',))
+    with pytest.raises(RR.Fail, match='the state differs'):
+        RR.translate(E, sp, rearranged(tr, k, p))

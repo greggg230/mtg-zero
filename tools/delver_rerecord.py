@@ -26,8 +26,12 @@ old engine's, and two cards may be paired anew only where no player can tell the
 definition and owner, at the same place of the same player's hidden zone (a library position, a hand slot),
 with the same knowledge (who knows the card: `known`). Everything else is compared under the pairing, exactly
 (docs/ENGINE.md 157: a rules change that moves one twin instead of the other - 152.1's pile pick - changes
-which object is where, not the game). A decision the old engine never asked is answered only as the old
-engine behaved:
+which object is where, not the game). One more place: while a looked-at pile is put back card by card
+(`PutOnTop`, `PutOnBottom`), the decider's not-yet-placed cards wait in transient places (by card index before
+152.1, by place after); there the decider's library may differ within the top run of places the decider knows
+(the pile), as a rearrangement of the same (definition, knowledge) cards - all else equal, no pairing changed -
+and the next step is compared as any (the final library is a function of the definitions picked, 152.1). A
+decision the old engine never asked is answered only as the old engine behaved:
 
 * Priority whose options are exactly "Pass priority" and "Activate mana abilities": pass (the old engine
   passed for the player, who had no other option);
@@ -68,6 +72,7 @@ import delver_blunders as DB  # noqa: E402  (load_engine, engine_info, spot_sig,
 TRACE_FORMAT = 'delver-canary-trace/1'
 PASS, FLOAT, POOL = 'Pass priority', 'Activate mana abilities', 'Pay the rest from the pool'
 ORDERS = ('OrderTriggers', 'ChooseReplacement', 'OrderTimestamps')
+PILE = ('PutOnTop', 'PutOnBottom')        # a looked-at pile put back card by card (docs/ENGINE.md 152.1, 157)
 OLD_INDEX_KEYS = ('k_main1',)             # spot fields that index the old path (the Bauble miner's main-1 decision)
 NODES = 200000                            # the walk's budget a spot (a loud failure, never a cut path)
 
@@ -239,10 +244,32 @@ def twin_match(P, Q, sig, names):
     return sig2 if renamed(P, sig2) == Q else None
 
 
+def pile_match(P, Q, sig, p):
+    """At player p's pile decision (PILE): whether P renamed by `sig` equals Q but for p's library within its top run
+    of places p knows in both (the pile being put back), whose cards may wait in other places - the same multiset of
+    (definition, knowledge mask) there, and the same places known. Nothing else may differ; the pairing is unchanged."""
+    R = renamed(P, sig)
+    rk, qk = R['known'][p], Q['known'][p]
+    rl, ql = {i: (m, n) for i, m, n in rk['library']}, {i: (m, n) for i, m, n in qk['library']}
+    top = 0
+    while top in rl and top in ql and rl[top][0] & (1 << p) and ql[top][0] & (1 << p):
+        top += 1
+    if top < 2 or len(rk['order']) != len(qk['order']):
+        return False
+    if sorted(rl[i] for i in range(top)) != sorted(ql[i] for i in range(top)):
+        return False
+
+    def masked(st, k):
+        return dict(st, known=[dict(x, library=[e for e in x['library'] if e[0] >= top], order=[None] * top + x['order'][top:])
+                               if j == p else x for j, x in enumerate(st['known'])])
+    return masked(R, rk) == masked(Q, qk)
+
+
 def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
     """The spot's path on engine E reaching the old trace's position -> {'actions', 'inserted' [(index, kind,
     words)], 'order_unseen' [index], 'matched' [new index of each old step], 'twins' [(new index, {this engine's
-    id: the old one's}) where the pairing of the twins' ids changed]}; raises Fail(reason)."""
+    id: the old one's}) where the pairing of the twins' ids changed], 'pile' [new index of each pile decision whose
+    not-yet-placed cards waited elsewhere]}; raises Fail(reason)."""
     steps, fin = tr['steps'], tr['final']
     names = deck_names(sp)
     nodes = [0]
@@ -252,7 +279,7 @@ def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
         if i > far['i']:
             far['i'], far['why'] = i, why
 
-    def rec(g, i, path, ins, matched, unseen, sig, twins):
+    def rec(g, i, path, ins, matched, unseen, sig, twins, piles):
         nodes[0] += 1
         if nodes[0] > budget:
             raise Fail(f'more than {budget} decisions walked (the furthest old step {far["i"]}: {far["why"]})')
@@ -269,6 +296,9 @@ def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
             P = pos_of(st)
             Q = pos_of(tgt['state'])
             sig2 = twin_match(P, Q, sig, names)
+            if sig2 is None and d.get('kind') in PILE and i < len(steps) and pile_match(P, Q, sig, d['player']):
+                sig2 = sig
+                piles = piles + [len(path)]
             if sig2 is not None:
                 if sig2 != sig:
                     twins = twins + [(len(path), {x: y for x, y in sig2.items() if sig.get(x, x) != y})]
@@ -276,7 +306,7 @@ def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
                 if i == len(steps):
                     if sp['watch'] in labels:
                         return {'actions': path, 'inserted': ins, 'order_unseen': unseen, 'matched': matched,
-                                'labels': labels, 'twins': twins}
+                                'labels': labels, 'twins': twins, 'pile': piles}
                     raise Fail(f'the position is reached, but the watched option {sp["watch"]!r} is not offered at '
                                f'the spot ({labels})')
                 else:
@@ -302,9 +332,9 @@ def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
             h = g.clone()
             h.step(int(a))
             if how == 'match':
-                r = rec(h, i + 1, path + [int(a)], ins, matched + [len(path)], unseen, sig, twins)
+                r = rec(h, i + 1, path + [int(a)], ins, matched + [len(path)], unseen, sig, twins, piles)
             else:
-                r = rec(h, i, path + [int(a)], ins + [(len(path), kind, words[a])], matched, unseen, sig, twins)
+                r = rec(h, i, path + [int(a)], ins + [(len(path), kind, words[a])], matched, unseen, sig, twins, piles)
             if r is None:
                 continue
             if how != 'order' or not check_orders:
@@ -324,7 +354,7 @@ def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
     lim = sys.getrecursionlimit()
     sys.setrecursionlimit(max(lim, 20000))
     try:
-        r = rec(g, i0, list(prefix), [], [], [], {}, [])
+        r = rec(g, i0, list(prefix), [], [], [], {}, [], [])
     finally:
         sys.setrecursionlimit(lim)
     if r is None:
@@ -352,6 +382,8 @@ def rerecorded(sp, tr, r, epoch, sig, pos):
     if r.get('twins'):
         # (where the twins' ids were paired anew: the new path's index, this engine's id -> the old engine's)
         rr['twins'] = [[j, {str(x): y for x, y in sorted(m.items())}] for j, m in r['twins']]
+    if r.get('pile'):
+        rr['pile'] = r['pile']        # (pile decisions whose not-yet-placed cards waited in other places)
     if moved:
         rr['old_indices'] = moved
     new['rerecord'] = rr
