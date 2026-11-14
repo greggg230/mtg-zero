@@ -29702,8 +29702,8 @@ the fuzz harness's post-sideboard start check, below).
 
 ### 154.6 The trial merge with A1 and A2 (scratch branch `feat/dealt-decks-trial`, never pushed)
 
-`feat/dealt-decks` merged with `fix/deck-posterior` (A1) 67c3c6ae, then with `fix/bo3-hidden` (A2) f1068c58 (the lane
-heads on 2026-11-13 evening), resolved by `E:/mtg-zero-scratch/fable-fix/dealt-trial.py` (git plumbing: the worktree
+`feat/dealt-decks` (72a6195f) merged with `fix/deck-posterior` (A1) ef0320cf, then with `fix/bo3-hidden` (A2) f1068c58
+(the lane heads on 2026-11-13 evening), resolved by `E:/mtg-zero-scratch/fable-fix/dealt-trial.py` (git plumbing: the worktree
 untouched until the build). `feat/dealt-decks` itself stays on main.
 
 * **A1: conflicts in `docs/ENGINE.md`** (sections: 131-132, 140, 153-154 in number order) **and `hidden_decks.rs`**
@@ -29712,8 +29712,9 @@ untouched until the build). `feat/dealt-decks` itself stays on main.
   `DeckWant` literals (`matches.rs::deal_dealt_deck`, three in `dealt_decks.rs`) take `seen: None` (nothing seen: the
   deal and the prior tests). The dealt prior needs nothing else: A1's `request`, `expected_fill` and `sample_k` divide
   by and skip on `by_swaps` as before (contract (a), 154.4).
-* **A2: conflicts in `docs/ENGINE.md`, `hidden_decks.rs`, `az/mod.rs`, `mtgz/az/decklists.py`, `mtgz/az/keep_h2h.py`**,
-  each resolved by keeping both sides: `deck_weights`' two early returns (a known keeper, a dealt seat); the shared
+* **A2: conflicts in `docs/ENGINE.md`, `hidden_decks.rs`, `az/mod.rs`, `engine/tests/fuzz.rs`, `mtgz/az/decklists.py`,
+  `mtgz/az/keep_h2h.py`**, each resolved by keeping both sides (`fuzz.rs`: this branch's post-sideboard final assert,
+  then A2's private-key report lines after it): `deck_weights`' two early returns (a known keeper, a dealt seat); the shared
   between-games `g.observer` line with one comment (in `determinize` and `determinize_deck_tilted`); `MtgSpec`'s
   `keep_known` and `dealt_decks` (field, default, key, validation, `MtgAz::new`); `mirror_bo3_spec(..., keep_known,
   dealt_decks)`; `half_specs` refusing a dealt spec, then A2's per-arm checks. **One addition**: A2's private-key fuzz
