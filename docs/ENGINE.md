@@ -29751,7 +29751,8 @@ throttle's slots; the live run paused from 16:15):
 * **The new tests**: `hidden_refs` 3 passed, `told_apart_tests` 3 passed; the three `hidden_refs` tests fail on
   67e2bdb6's engine (156.11). `known_face_key`, `az` (the public-state gate), `hidden`, `cards_sneak_show` and
   `rules_farm2` pass.
-* **The engine suite** (`cargo test --release -p engine --no-fail-fast`): 156.11. One test changed with the
+* **The engine suite** (`cargo test --release -p engine --no-fail-fast`): 162 binaries, 2,540 passed, 0 failed, 30
+  ignored (156.11). One test changed with the
   encoding: `cards_sneak_show::cr_101_4a_the_other_player_knows_only_whether_a_card_was_chosen` compares whole rows
   (the pick token puts a tail in the row, which the head-only encoder refuses, R1).
 * **pytest** (`tests/test_canary_library.py`, `tests/test_mac_remote.py` after `tools/build_py.sh`): 20 passed. The
@@ -29759,8 +29760,9 @@ throttle's slots; the live run paused from 16:15):
   remote evaluation, which timed out at 600 s inside the loaded gate run (a known flake under load), passes alone.
 * **Digests**: 156.7.
 * **The 20k fuzz** (`FUZZ_GAMES=20000`, lane G's checks; the three pools in parallel from one build, each on its own
-  copy of the test binary): 156.11.
-* **The gate**: 156.11.
+  copy of the test binary): passed on default (`FUZZ_SKIP=2122`), delver and cross (`FUZZ_SKIP=13536,19515`)
+  (156.11).
+* **The gate**: GATE PASSED engine ea7b9a5e6fd3 (156.11).
 
 The first version (59b7bb3a, with the first slot order) had passed the same 3x20k fuzz (default with `FUZZ_SKIP=2122`
 2,492 s, delver 2,188 s, cross with `FUZZ_SKIP=13536,19515` 1,555 s) and the suite (162 binaries, 2,540 passed, 0
@@ -29816,4 +29818,16 @@ binary), rerun on this branch's final code:
 * **`FUZZ_HIDDEN_DECKS=1`** (the cube's default pool, X5's mode; G's runs had none; on 59b7bb3a), 5,000 games: stops at
   game 2,679, "a hidden-decklist world for P0 (mover P1): the viewer's own cards" - the campaign's X2/X4/X6 family (its
   `failures.txt` lists 2,679 first, on 267ae603's binary): hidden-decklist dealing, not references; not this lane's.
-* **The final runs on d96c2af3/ea9661e7** (the 3x20k fuzz, the engine suite, the gate): the commit after the gate.
+* **The final runs** (the code of d96c2af3, the digests of ea9661e7, the docs of ea7b9a5e):
+  * **the 3x20k fuzz: passed**, the three pools in parallel from one build, each on its own copy of the test binary
+    (the games, the matches and the replay checks, each run whole). Default pool (`FUZZ_SKIP=2122`): 20,000 games and
+    1,000 cube matches in 3,821 s, 438,574 open-decklist walks with 2,418,162 states compared after a common action,
+    5,396 match walks with 37,424. `FUZZ_POOL=delver` (no skip): 2,741 s, 382,722 walks, 1,122,930 states; 5,242 match
+    walks, 24,070. `FUZZ_POOL=cross` (`FUZZ_SKIP=13536,19515`): 1,845 s, 235,482 walks, 735,718 states; 3,652 match
+    walks, 16,990.
+  * **the engine suite**: 162 test binaries, **2,540 passed, 0 failed**, 30 ignored.
+  * **the gate**: `python tools/gate.py engine --no-mac --tested-sha ea7b9a5e --expect-digest b9ad17dc0dee92e7
+    --expect-digest0 a0062bb5569e06d3` (the live run paused, 43 GB free, the 8-thread smoke): **GATE PASSED engine
+    ea7b9a5e6fd3 in 1068s** (build, both digests equal, `az` 52 passed, `limits` 13, `hidden` 28, pytest 324 passed and
+    1 skipped, the search smoke 0 of 1 failed, the tree unchanged; the Mac recheck not needed). This commit adds these
+    lines only (the docs tier).
