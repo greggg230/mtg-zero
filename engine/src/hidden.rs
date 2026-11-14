@@ -317,6 +317,16 @@ impl Game {
                 return true;
             }
         }
+        // ENGINE.md 142.7: the `effects` tokens' references - an effect's object and the object
+        // "for as long as" names, a copy effect's permanent.
+        for e in &self.effects {
+            if matches!(e.on, crate::layers::Affected::Obj(r) if f(r)) || matches!(e.until, crate::layers::Until::WhileOnBattlefield(r) if f(r)) {
+                return true;
+            }
+        }
+        if self.copies.iter().any(|c| f(c.obj)) {
+            return true;
+        }
         for &(o, m) in &self.marks {
             let named = match m {
                 crate::game::Mark::Reanimated(x) | crate::game::Mark::ExiledToPay(x) => Some(x),

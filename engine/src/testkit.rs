@@ -474,6 +474,16 @@ impl Game {
                 }
             }
         }
+        // The picks in progress (ENGINE.md 125, 142.10): every holding task's, innermost first -
+        // each object by its public place and its picker, a search's definitions to its searcher.
+        let picks = crate::az::tail_encode::agenda_picks(self, 0);
+        for (depth, p) in std::iter::once(&picks).chain(picks.outer.iter()).enumerate() {
+            v.push(u64::MAX - 90 - depth as u64);
+            v.extend(p.objs.iter().flat_map(|&(c, by_p0)| [self.view_place(c), by_p0 as u64]));
+            if p.searcher == Some(viewer) {
+                v.extend(p.defs.iter().map(|&d| d as u64));
+            }
+        }
         v
     }
 

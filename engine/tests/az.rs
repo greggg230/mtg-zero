@@ -1231,6 +1231,51 @@ fn gate_positions(per: usize, seed: u64) -> Vec<(&'static str, MtgAz)> {
     out
 }
 
+/// The gate's positions with picks in progress in two tasks of the agenda (ENGINE.md 142.10, the
+/// Fable review's X3: fuzz interactions game 5,682's state, built): Etali, Primal Conqueror's
+/// trigger keeps the cards it exiled as picks while a free cast from among them, Abhorrent Oculus,
+/// pays its additional cost (exile six cards from its caster's graveyard) - the decisions of that
+/// cost's second to sixth picks. The single pass, the pairwise pass and the hidden-information
+/// check of the fixed perturbations add them to `gate_positions`' (whose other users don't).
+fn enclosing_picks_positions() -> Vec<(&'static str, MtgAz)> {
+    use engine::az::tail_encode::{lk, seg, Row};
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Game, Step, Zone};
+    const ETALI: &str = "Etali, Primal Conqueror // Etali, Primal Sickness";
+    let mut g = Scenario::new(CardDb::cube())
+        .library(0, &["Abhorrent Oculus", "Island", "Island", "Island"])
+        .library(1, &["Lightning Bolt", "Forest", "Forest", "Forest"])
+        .graveyard(0, &["Island", "Mountain", "Forest", "Plains", "Swamp", "Lightning Bolt", "Counterspell"])
+        .battlefield(0, &["Mountain"; 7])
+        .battlefield(1, &["Forest", "Thraben Inspector"])
+        .hand(0, &[ETALI])
+        .at(Step::Main1, 0)
+        .start();
+    // (an enclosing task's picks: links tokens with a depth, in both viewers' rows)
+    let deep = |g: &Game| (0..2u8).all(|v| Row::of(g, v).tokens(seg::LINKS).iter().any(|(_, t)| t[CODE + lk::DEPTH] > 0.0));
+    let e = g.card(0, ETALI, Zone::Hand);
+    g.choose(Choice::Cast(e));
+    let mut out = Vec::new();
+    for _ in 0..1000 {
+        let Some(d) = g.pending_decision() else { break };
+        if deep(&g) {
+            let mut a = MtgAz::new_game(&spec(), 2, 142).unwrap();
+            a.g = g.clone();
+            out.push(("enclosing picks", a));
+        } else if !out.is_empty() {
+            break;
+        }
+        let c = match d.kind {
+            DecisionKind::Priority => Choice::Pass,
+            DecisionKind::ChooseExiled => d.options.iter().map(|o| o.choice).find(|&c| matches!(c, Choice::Card(x) if g.name(x) == "Abhorrent Oculus")).unwrap_or(d.options[0].choice),
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    assert!(out.len() >= 3, "Etali's free Abhorrent Oculus: {} positions with an enclosing task's picks\n{}", out.len(), g.log_lines().join("\n"));
+    out
+}
+
 fn public_view(g: &MtgAz, v: u8) -> Vec<u64> {
     let mut x = g.g.view_of(v);
     x.push(u64::MAX - 77);
@@ -1315,7 +1360,8 @@ fn v6_hash(x: &[f32]) -> (u64, u64) {
 fn public_state_reaches_the_encoding() {
     use engine::public_state::{fields, known_gaps, limits, perturbations, Class, LimitKind, V6, V7};
     let t0 = std::time::Instant::now();
-    let pos = gate_positions(scale(60) as usize, 59);
+    let mut pos = gate_positions(scale(60) as usize, 59);
+    pos.extend(enclosing_picks_positions());
     let ps = perturbations();
     let lim = limits();
     let known = known_gaps();
@@ -1527,7 +1573,8 @@ fn public_states_encode_apart() {
     use engine::az::tail_encode::Row;
     use std::collections::BTreeMap;
     let t0 = std::time::Instant::now();
-    let pos = gate_positions(scale(60) as usize, 59);
+    let mut pos = gate_positions(scale(60) as usize, 59);
+    pos.extend(enclosing_picks_positions());
     let ps = perturbations();
     let lim: Vec<&str> = limits().iter().map(|l| l.name).collect();
     let known = known_gaps();
@@ -2550,7 +2597,7 @@ fn the_v5_facts_encode_no_hidden_information() {
     // (the deck tilt, ENGINE.md 106.3: on hidden-decklist positions one more world dealt by a random deck
     // prediction at tilt 1, from a stream of its own)
     let (mut trng, mut tilted) = (Rng::new(106), 0);
-    for (spec, a) in gate_positions(scale(24) as usize, 61) {
+    for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()) {
         for (k, p) in fixed.iter().enumerate() {
             let mut b = a.clone();
             let Some(what) = (p.apply)(&mut b, &mut rngs[k]) else { continue };

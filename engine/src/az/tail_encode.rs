@@ -178,7 +178,12 @@ pub mod lk {
     pub const RANK: usize = CURRENT_TURN + 1;
     pub const BY_ME: usize = RANK + 1;
     pub const BY_OPP: usize = BY_ME + 1;
-    pub const W: usize = BY_OPP + 1;
+    /// A pick in progress (`K_PICKED`, `K_PICKED_DEF`) of an enclosing task (ENGINE.md 142.10, X3):
+    /// its depth / 8 - 0 the innermost holder's (the head's pick floats are its), k the k-th task
+    /// holding picks around it (Etali, Primal Conqueror's frame keeps the exiled cards while a cast
+    /// from among them pays a cost that picks objects).
+    pub const DEPTH: usize = BY_OPP + 1;
+    pub const W: usize = DEPTH + 1;
 }
 
 /// An exile offer (`exile_offered` segment): the `EXILE` range's item at this slot's position of
@@ -561,6 +566,9 @@ pub(crate) struct Picks {
     pub objs: Vec<(CardIdx, bool)>,
     pub defs: Vec<DefId>,
     pub searcher: Option<PlayerId>,
+    /// The enclosing tasks' picks (ENGINE.md 142.10, X3), innermost first: depth k + 1 for entry
+    /// k; `links` tokens only (`lk::DEPTH`).
+    pub outer: Vec<Picks>,
 }
 
 impl Picks {
@@ -843,55 +851,64 @@ impl<'g> Cx<'g> {
         self.write_ev(&mut st[encode::trig::EV..encode::trig::EV + ev::W], &t.ev);
     }
 
-    /// The picks in progress (`Picks`): the asking task's, or else the frames' of the agenda's
-    /// resolutions. At most one task of the agenda holds picks (else a loud failure: a state the
-    /// encoding's picks don't cover yet).
+    /// The picks in progress (`Picks`): the innermost task's of the agenda holding picks (the
+    /// asking task's, or else a resolution's frame's), and each enclosing task's in `outer`,
+    /// innermost first (ENGINE.md 142.10, X3: Etali, Primal Conqueror's frame keeps the exiled
+    /// cards while a cast from among them pays a cost that picks objects).
     fn picks_in_progress(&self) -> Picks {
-        let g = self.g;
-        let mut out = Picks::default();
-        if g.pending.is_none() {
-            return out;
-        }
-        let mut holders = 0;
-        for t in g.agenda.iter().rev() {
-            let (objs, defs, by): (&[CardIdx], &[DefId], Box<dyn Fn(usize) -> PlayerId>) = match t {
-                Task::Run(f) => {
-                    let op = g.db.ability(f.ability).program.get(f.pc as usize);
-                    let voting = matches!(op, Some(crate::program::Op::Ext(crate::program::Ext::VoteExile { .. })));
-                    let ctl = f.controller;
-                    let by: Box<dyn Fn(usize) -> PlayerId> = if voting { Box::new(move |k| if k == 0 { ctl } else { crate::ids::opp(ctl) }) } else { Box::new(move |_| ctl) };
-                    (&f.picked, &f.picked_defs, by)
-                }
-                Task::PayCosts { id, picked, .. } => {
-                    let p = g.stack.iter().find(|s| s.id == *id).map_or(g.pending.as_ref().unwrap().player, |s| s.controller);
-                    (picked, &[], Box::new(move |_| p))
-                }
-                Task::OrderTimestamps { picked, .. } => {
-                    let p = g.turn.active;
-                    (picked, &[], Box::new(move |_| p))
-                }
-                Task::Devour { card, picked } => {
-                    let p = g.objs[card.i()].controller;
-                    (picked, &[], Box::new(move |_| p))
-                }
-                _ => continue,
-            };
-            if objs.is_empty() && defs.is_empty() {
-                continue;
-            }
-            holders += 1;
-            assert!(
-                holders == 1,
-                "picks in progress in two tasks of the agenda (the second: {t:?}): the encoding's picks (ENGINE.md 125) cover one"
-            );
-            out.objs = objs.iter().enumerate().map(|(k, &c)| (c, by(k) == self.me)).collect();
-            if !defs.is_empty() {
-                out.defs = defs.to_vec();
-                out.searcher = Some(by(0));
-            }
-        }
-        out
+        agenda_picks(self.g, self.me)
     }
+}
+
+/// The picks in progress of the agenda (`Cx::picks_in_progress`), framed in seat `me` (which
+/// player picked each object: `by_me`).
+pub(crate) fn agenda_picks(g: &Game, me: PlayerId) -> Picks {
+    let mut out = Picks::default();
+    if g.pending.is_none() {
+        return out;
+    }
+    let mut holders = 0;
+    for t in g.agenda.iter().rev() {
+        let (objs, defs, by): (&[CardIdx], &[DefId], Box<dyn Fn(usize) -> PlayerId>) = match t {
+            Task::Run(f) => {
+                let op = g.db.ability(f.ability).program.get(f.pc as usize);
+                let voting = matches!(op, Some(crate::program::Op::Ext(crate::program::Ext::VoteExile { .. })));
+                let ctl = f.controller;
+                let by: Box<dyn Fn(usize) -> PlayerId> = if voting { Box::new(move |k| if k == 0 { ctl } else { crate::ids::opp(ctl) }) } else { Box::new(move |_| ctl) };
+                (&f.picked, &f.picked_defs, by)
+            }
+            Task::PayCosts { id, picked, .. } => {
+                let p = g.stack.iter().find(|s| s.id == *id).map_or(g.pending.as_ref().unwrap().player, |s| s.controller);
+                (picked, &[], Box::new(move |_| p))
+            }
+            Task::OrderTimestamps { picked, .. } => {
+                let p = g.turn.active;
+                (picked, &[], Box::new(move |_| p))
+            }
+            Task::Devour { card, picked } => {
+                let p = g.objs[card.i()].controller;
+                (picked, &[], Box::new(move |_| p))
+            }
+            _ => continue,
+        };
+        if objs.is_empty() && defs.is_empty() {
+            continue;
+        }
+        holders += 1;
+        // (The innermost holder's picks are the head's floats and their tokens; each enclosing
+        // task's are tokens with their depth: ENGINE.md 142.10, X3.)
+        let mut p = Picks { objs: objs.iter().enumerate().map(|(k, &c)| (c, by(k) == me)).collect(), ..Picks::default() };
+        if !defs.is_empty() {
+            p.defs = defs.to_vec();
+            p.searcher = Some(by(0));
+        }
+        if holders == 1 {
+            out = p;
+        } else {
+            out.outer.push(p);
+        }
+    }
+    out
 }
 
 /// The tail-only segments and the list's paged picks, written after the head (layout v7 only).
@@ -1111,7 +1128,7 @@ fn write_effects(cx: &Cx, tail: &mut TailBuf) {
         k += 1;
         match &e.on {
             Affected::Obj(r) => {
-                if let Some(d) = cx.seen_def(r.idx) {
+                if let Some(d) = cx.ref_def(*r) {
                     code(&mut x[..CODE], g.db, cx.ids, d);
                 }
                 cx.write_ref(&mut x[CODE + ef::OBJ..CODE + ef::OBJ + rf::W], *r);
@@ -1188,7 +1205,7 @@ fn write_effects(cx: &Cx, tail: &mut TailBuf) {
     for c in &g.copies {
         let x = tail.token(seg::EFFECTS, k);
         k += 1;
-        if let Some(d) = cx.seen_def(c.obj.idx) {
+        if let Some(d) = cx.ref_def(c.obj) {
             code(&mut x[..CODE], g.db, cx.ids, d);
         }
         cx.write_ref(&mut x[CODE + ef::OBJ..CODE + ef::OBJ + rf::W], c.obj);
@@ -1235,7 +1252,7 @@ fn write_counters(cx: &Cx, tail: &mut TailBuf) {
         for (kind, n) in g.counters_of(c) {
             let x = tail.token(seg::COUNTERS, k);
             k += 1;
-            if let Some(d) = cx.seen_def(c) {
+            if let Some(d) = cx.ref_def(g.obj_ref(c)) {
                 code(&mut x[..CODE], g.db, cx.ids, d);
             }
             let s = &mut x[CODE..];
@@ -1272,7 +1289,7 @@ fn number(cx: &Cx, tail: &mut TailBuf, k: &mut u32, p: Option<PlayerId>, c: Opti
     let x = tail.token(seg::NUMBERS, *k);
     *k += 1;
     if let Some(c) = c {
-        if let Some(d) = cx.seen_def(c) {
+        if let Some(d) = cx.ref_def(g.obj_ref(c)) {
             code(&mut x[..CODE], g.db, cx.ids, d);
         }
     }
@@ -1445,35 +1462,42 @@ fn write_links(cx: &Cx, list: &[Option<CardIdx>], tail: &mut TailBuf) {
     //   library card by its place, a face-down card by its object): its identity where the
     //   knower knows it; a card hidden from the knower: no token (the same in every world: that
     //   knowledge is the card's own).
-    for (rank, &(c, by_me)) in cx.picks.objs.iter().enumerate() {
-        let zone = g.objs[c.i()].zone;
-        let in_list = list.contains(&Some(c));
-        if zone == Zone::Battlefield || in_list || (zone == Zone::Hand && g.objs[c.i()].owner == cx.me) {
-            continue;
+    // (An enclosing task's picks, ENGINE.md 142.10: every one a token, `lk::DEPTH` its depth - the
+    // head's floats are the innermost holder's.)
+    let levels = std::iter::once(&cx.picks).chain(cx.picks.outer.iter()).enumerate();
+    for (depth, picks) in levels {
+        for (rank, &(c, by_me)) in picks.objs.iter().enumerate() {
+            let zone = g.objs[c.i()].zone;
+            let in_list = list.contains(&Some(c));
+            if depth == 0 && (zone == Zone::Battlefield || in_list || (zone == Zone::Hand && g.objs[c.i()].owner == cx.me)) {
+                continue;
+            }
+            let others_hand_pick = zone == Zone::Hand && !by_me && cx.knower == cx.me;
+            let d = if others_hand_pick {
+                None
+            } else if g.hidden_obj(c) && !g.knows(cx.knower, c) {
+                continue;
+            } else {
+                cx.seen_def(c)
+            };
+            let x = link_token(tail, &mut k, lk::K_PICKED);
+            if let Some(d) = d {
+                code(&mut x[..CODE], g.db, ids, d);
+            }
+            let st = &mut x[CODE..];
+            cx.write_ref_as(&mut st[lk::B..lk::B + rf::W], g.obj_ref(c), d);
+            st[lk::RANK] = (rank + 1) as f32 / 8.0;
+            st[if by_me { lk::BY_ME } else { lk::BY_OPP }] = 1.0;
+            st[lk::DEPTH] = depth as f32 / 8.0;
         }
-        let others_hand_pick = zone == Zone::Hand && !by_me && cx.knower == cx.me;
-        let d = if others_hand_pick {
-            None
-        } else if g.hidden_obj(c) && !g.knows(cx.knower, c) {
-            continue;
-        } else {
-            cx.seen_def(c)
-        };
-        let x = link_token(tail, &mut k, lk::K_PICKED);
-        if let Some(d) = d {
-            code(&mut x[..CODE], g.db, ids, d);
-        }
-        let st = &mut x[CODE..];
-        cx.write_ref_as(&mut st[lk::B..lk::B + rf::W], g.obj_ref(c), d);
-        st[lk::RANK] = (rank + 1) as f32 / 8.0;
-        st[if by_me { lk::BY_ME } else { lk::BY_OPP }] = 1.0;
-    }
-    if cx.picks.searcher == Some(cx.knower) {
-        for (rank, &d) in cx.picks.defs.iter().enumerate() {
-            let x = link_token(tail, &mut k, lk::K_PICKED_DEF);
-            code(&mut x[..CODE], g.db, ids, d);
-            x[CODE + lk::RANK] = (rank + 1) as f32 / 8.0;
-            x[CODE + lk::BY_ME] = 1.0;
+        if picks.searcher == Some(cx.knower) {
+            for (rank, &d) in picks.defs.iter().enumerate() {
+                let x = link_token(tail, &mut k, lk::K_PICKED_DEF);
+                code(&mut x[..CODE], g.db, ids, d);
+                x[CODE + lk::RANK] = (rank + 1) as f32 / 8.0;
+                x[CODE + lk::BY_ME] = 1.0;
+                x[CODE + lk::DEPTH] = depth as f32 / 8.0;
+            }
         }
     }
 }

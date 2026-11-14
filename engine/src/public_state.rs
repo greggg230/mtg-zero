@@ -91,7 +91,7 @@ pub fn fields() -> Vec<Field> {
         command: Public "emblems and dungeons in the command zone",
         stack: Derived "the container of stack items: their fields are classified under StackItem",
         turn: Derived "the turn's fields are classified under Turn",
-        agenda: Derived "the engine's continuation stack: what a player sees of it is the pending decision (the context block)",
+        agenda: Public "the engine's continuation stack: what a player sees of it is the pending decision (the context block) and its tasks' picks in progress (the innermost holder's: the head's pick floats and links tokens; an enclosing task's: links tokens with their depth, ENGINE.md 142.10)",
         pending: Derived "the pending decision, computed from the agenda: its kind and decider are the context block's, its options the decider's",
         answer: Derived "the answer being applied: always empty between apply calls",
         page: Derived "the page of the pending decision when its permanents page (ENGINE.md 100.4.8): part of the agenda's continuation; the decider's options and context floats show it",
@@ -2205,7 +2205,74 @@ pub fn perturbations() -> Vec<Perturbation> {
         }),
         // (ENGINE.md 123's "a card name was chosen as a permanent entered" - Disruptor Flute, Anointed
         // Peacekeeper - is the `Mark` perturbation above, layout v7's: ENGINE.md 125.)
+        // The picks in progress (ENGINE.md 125, 142.10, the Fable review's X3): one more pick - a card
+        // the pending decision offers, the same one (one stream) - made by the asking task, which
+        // holds picks already, or held by the task around it: which task holds a pick is public (the
+        // head's pick floats are the innermost holder's; an enclosing task's are links tokens with
+        // their depth). (An offered card keeps the asking task's state one its next decision reads:
+        // the hidden-information check recomputes it for the player who doesn't decide.)
+        p!(rare "the asking task holding picks picks one more offered card", "Game.agenda", |a, r| {
+            let ts = pick_tasks(&a.g);
+            let &(i, holds) = ts.first()?;
+            if !holds || i + 1 != a.g.agenda.len() {
+                return None;
+            }
+            let c = offered_unpicked(&a.g, r)?;
+            task_picked(&mut a.g.agenda[i]).push(c);
+            Some(format!("agenda task {i} picks {}", a.g.name(c)))
+        }),
+        p!(rare "an enclosing task holds a pick in progress", "Game.agenda", |a, r| {
+            let ts = pick_tasks(&a.g);
+            let h = ts.iter().position(|t| t.1)?;
+            let i = ts.get(h + 1)?.0;
+            let c = offered_unpicked(&a.g, r)?;
+            task_picked(&mut a.g.agenda[i]).push(c);
+            Some(format!("agenda task {i}, around task {}, picks {}", ts[h].0, a.g.name(c)))
+        }),
     ]
+}
+
+/// The agenda's tasks that can hold picks in progress (`tail_encode::agenda_picks`), innermost
+/// first: (agenda index, holds picks now).
+fn pick_tasks(g: &Game) -> Vec<(usize, bool)> {
+    use crate::flow::Task;
+    g.agenda
+        .iter()
+        .enumerate()
+        .rev()
+        .filter_map(|(i, t)| match t {
+            Task::Run(f) => Some((i, !f.picked.is_empty() || !f.picked_defs.is_empty())),
+            Task::PayCosts { picked, .. } | Task::OrderTimestamps { picked, .. } | Task::Devour { picked, .. } => Some((i, !picked.is_empty())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The objects a task of `pick_tasks` has picked so far.
+fn task_picked(t: &mut crate::flow::Task) -> &mut Vec<CardIdx> {
+    use crate::flow::Task;
+    match t {
+        Task::Run(f) => &mut f.picked,
+        Task::PayCosts { picked, .. } | Task::OrderTimestamps { picked, .. } | Task::Devour { picked, .. } => picked,
+        _ => unreachable!("not a task holding picks"),
+    }
+}
+
+/// A card the pending decision offers (`Choice::Card`) that no task has picked.
+fn offered_unpicked(g: &Game, r: &mut Rng) -> Option<CardIdx> {
+    let d = g.pending.as_ref()?;
+    let p = crate::az::tail_encode::agenda_picks(g, 0);
+    let picked: Vec<CardIdx> = p.objs.iter().chain(p.outer.iter().flat_map(|o| o.objs.iter())).map(|x| x.0).collect();
+    let mut cand: Vec<CardIdx> = d
+        .options
+        .iter()
+        .filter_map(|o| match o.choice {
+            crate::decision::Choice::Card(c) if !picked.contains(&c) => Some(c),
+            _ => None,
+        })
+        .collect();
+    cand.dedup();
+    pick(&cand, r)
 }
 
 /// The gate's paired check of a chosen name's face (ENGINE.md 125.11): the first permanent in the
@@ -2302,7 +2369,7 @@ pub const V6_FIXED: [&str; 26] = [
 /// target; and (ENGINE.md 125.7) the two limits by design until v7 - a card
 /// exiled face down and who knows it (`face_down`, face-down permanents too),
 /// the identities the viewer revealed in earlier games (`my_revealed`).
-pub const V7_FIXED: [&str; 37] = [
+pub const V7_FIXED: [&str; 39] = [
     "mana in a pool is restricted to creature spells of a chosen type",
     "a permanent entered with a big kicker count and X",
     "Containment Priest's replacement waits for a copy choice",
@@ -2341,6 +2408,9 @@ pub const V7_FIXED: [&str; 37] = [
     "an identity revealed in an earlier game",
     // ENGINE.md 142.8: the game an earlier reveal was made in (`opp_revealed` / `my_revealed`'s game bits).
     "an earlier game's reveal was in another earlier game",
+    // ENGINE.md 125's picks in progress (layout v6 has none), 142.10's enclosing task's.
+    "the asking task holding picks picks one more offered card",
+    "an enclosing task holds a pick in progress",
 ];
 
 /// One perturbation per `Mark` variant (ENGINE.md 125, the gate's G1): the
@@ -2646,7 +2716,7 @@ pub fn covered<'s>(gaps: &[KnownGap], layout: u8, a: &[&'s str], b: &[&'s str]) 
 /// (an effect, a mark or a link of an object that left; a "this turn" fact of another turn; the
 /// effect it added ended) while it stays in the view. Each is still compared alone with every
 /// state.
-pub const COMBO_EXCLUDED: [&str; 16] = [
+pub const COMBO_EXCLUDED: [&str; 18] = [
     "a permanent leaves the battlefield",
     "a graveyard card is exiled",
     "an exiled card is turned face down",
@@ -2664,6 +2734,10 @@ pub const COMBO_EXCLUDED: [&str; 16] = [
     "the next game of the match",
     "an effect ends",
     "an effect's duration is another",
+    // (ENGINE.md 142.10: the picks in progress, on the gate's positions with picks; out of the
+    // partner draw, so that every position's partners are as before.)
+    "the asking task holding picks picks one more offered card",
+    "an enclosing task holds a pick in progress",
 ];
 
 /// The known gaps (`KnownGap`; ENGINE.md 142.2, 142.7): what the pairwise gate finds. Layout v7 has

@@ -7,11 +7,13 @@
 //! mana of a chosen creature type, 3,680 floats) and wider slots, the new floats at each
 //! slot's end (permanent 281 = v6's 196 + 85, `perm::V7`; hand and list 64; stack 438,
 //! `STACK_V7`; trigger 271); the tail holds the seven capped segments' objects past their
-//! head slots and twelve gated tail-only segments (opponent_triggers, delayed, links,
+//! head slots and thirteen gated tail-only segments (opponent_triggers, delayed, links,
 //! exile_offered, library_known, stack_relations, graveyard_order, face_down, my_revealed;
 //! ENGINE.md 142.7: effects, counters, numbers - every continuous effect with its duration, every
-//! counter kind with its exact number, the numbers past float16's exact range). Its semantic
-//! revision is [`LAYOUT_V7_REVISION`] (the layout file's `revision`).
+//! counter kind with its exact number, the numbers past float16's exact range; 142.8:
+//! opp_revealed, the other player's earlier reveals by game; 142.10: links' picks of an enclosing
+//! task, with their depth). Its semantic revision is [`LAYOUT_V7_REVISION`] (the layout file's
+//! `revision`).
 //! A v6 (or v5) network widens onto it ([`v6_projection`], [`v5_projection`]); the
 //! block table below describes layouts v4-v6 and v7's globals, and the v7 offsets are
 //! [`LAY7`]'s (ENGINE.md 125.1, 125.12). The `mtg_eoe` game keeps layout v6
@@ -1546,6 +1548,12 @@ impl Game {
         let lay = Lay::of(out.len());
         if !lay.v7 {
             assert!(self.db.spend_kinds & crate::db::SPEND_CHOSEN_CREATURE_TYPE == 0, "a layout v6 encoding of a table with mana of a chosen creature type");
+            // (Layout v6 has the innermost holder's picks only: an enclosing task's are layout v7's
+            // `links` tokens, ENGINE.md 142.10.)
+            assert!(
+                super::tail_encode::agenda_picks(self, viewer).outer.is_empty(),
+                "a layout v6 encoding of a state with picks in progress in two tasks of the agenda (layout v7's links tokens have an enclosing task's: ENGINE.md 142.10)"
+            );
             self.encode_lay(viewer, out, lay, None);
             return;
         }
