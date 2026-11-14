@@ -29791,6 +29791,11 @@ reads them, reweighs the K cached decks: 106).
 In every option case (1) stays the opponent's own in-tree sideboarding. Recommendation if the user wants game 2 to
 count: D (keeps the approved prior as each game's marginal, exact, cheap) with rho chosen by the user, or C if a
 transition anchored on the last deck is preferred; B is not exactly samplable.
+**Decided** (integration note, 157.6): User decision 2026-11-13: option A - game 3's hidden 60 stays an independent deal (A1's likelihood on game 3's
+cards); option D (kept its game-2 deck with probability rho) to be revisited after pb2 runs, when rho can be
+measured from self-play (pb1's frozen one-card swap would give rho ~ 1). The dependence on game 2 is learned
+instead: game-2 reveals and game-2 play/draw are inputs of game 3's rows (lane B, 142), read by the deck head +
+tilt (157.6).
 ### 141.5 Checks
 
 The desktop was shared with the live run `delver-bo3-pb1` and the other lanes; every heavy command ran under the lanes'
@@ -29810,6 +29815,7 @@ slot throttle, with this branch's own target directory (E:/cargo-target/mtg-zero
 ### 141.6 Open points, other lanes
 
 * **141.4's decision** (game 3 and game 2's reveals): options A-D above; nothing changes until the user picks one.
+  (Decided, 157.6: option A, the dependence learned through game-2 inputs; D revisited after pb2.)
   Lane A1 (140, branch `fix/deck-posterior` e77910ce) makes `DeckWant::shown` "the cards of this deck the viewer saw"
   and every prior's sample the exact posterior given them (`seen_weight`): with it, today's game-3 request - the
   cards game 3 showed of the game-3 deck - is the exact posterior under the approved independence (option A), with no
@@ -31217,3 +31223,179 @@ only (`SPEC_DELVER_BO3_DEALT`; its evaluation spec is `SPEC_DELVER_BO3`); `delve
 ### 154.5 Checks
 
 (Recorded by the commits after this one: the engine tests above passed on it - `dealt_decks` 10 passed, 1 ignored.)
+
+## 157. The Fable-review fix campaign integrated: `integrate/fable-1112` (branch `integrate/fable-1112`, zero-core `integrate/fable-1112`, 2026-11-13)
+
+Branch `integrate/fable-1112` from main e076d8f3 (153: 267ae603 + delverai-bo3); zero-core `integrate/fable-1112` from
+the pin e5e1bb0 (`feat/varlen`). The Fable review's fix lanes (140-149, 151, 154; COMMON.md's table) meet here, merged
+in batches as they land, with merge commits only (no lane branch rebased or squashed; zero-core history never
+rewritten). The orchestrator fast-forwards main to this branch; this branch never touches main and is not pushed.
+(Section number: 157 is the integration's, assigned by the orchestrator; 155 and 156 are other lanes'.)
+
+### 157.1 Batch 1: the merges
+
+In this order (`docs/ENGINE.md` conflicted in every merge: every section kept and the sections from 129 on ordered by
+number; each lane's in-place corrections of older sections applied as merged):
+
+| merge | branch @ head | section | conflicts, and how each was resolved |
+|---|---|---|---|
+| bfe4504a | `fix/infra-tools` 4cda83ee (C1) | 143 | `tools/delverai_publish.py`, which main rewrote (state_dir, `--record-vs` seat labels, the sideboard census): C1's five I11 changes re-applied onto main's version - pending uploads finished first (before the next checkpoint is looked at), a recording with fewer games than asked refused, the generation saved and marked before its uploads, each upload dropped from `to_upload` once the site took it, one pass without config.json exits; C1's duplicate `_save_state(state_path, state)` dropped for main's `_save_state(state, state_path)`; a `to_upload` entry is `{path, meta}`, so a resumed upload keeps main's seat labels. `tests/test_delverai_publish.py`: both sides; C1's fake arguments gain `state_dir`, `record_vs`, `census` and its upload stub takes `meta` (13 passed). |
+| 9c61c0cd | `fix/core-infra` cdc9edcc (C2) | 144 | the gitlink: C2's 509e3e2 -> zero-core `integrate/fable-1112` (157.2). 144's zero-core references 46.x -> 47.x in place, with a note under its heading. |
+| 44202428 | `perf/fable-1112` 2d543e92 (D, head 1: no P5) | 145 | the gitlink kept (c275a1e is in the integrated pin). 145.3's zero-core 44.1/44.2 -> 48.1/48.2. P5 (zero-core a77cacf, mtg-zero f2bc2f57) stays out: zero-farm's worker reads the dense `Record`. |
+| e5f53600 | `fix/eoe-station` 67b0ee25 (E) | 146 | `docs/ENGINE.md` only. |
+| f9f30b0a | `fix/check-gaps` 67e2bdb6 (G) | 148 | `engine/Cargo.toml`: D and G both add the mimalloc dev-dependency - once, one comment naming 145 and 148 and every benchmark test that uses it (`Cargo.lock` merged clean: both added the same line). `engine/tests/measure_delver.rs`: both add the global allocator - once. **`engine/tests/perf.rs` merged without a conflict into two `#[global_allocator]` statics** (D's and G's at different lines; it would not have compiled): G's kept, D's dropped. |
+| 782992e8 | `fix/deck-posterior` e77910ce (A1) | 140 | `docs/ENGINE.md` only. A1's follow-up (65fdbc31, searched cards' provenance, 140.9) comes in a later batch. |
+| 1c98bc70 | `fix/rules-f1-f5` a96779a9 (rules F1-F3) | 151 | `docs/ENGINE.md` only (section 12's in-place correction kept). |
+| 66d3f317 | `feat/dealt-decks` 6514e937 (user-approved) | 154 | `engine/src/az/hidden_decks.rs`: `ConstructedPrior`'s doc comment - A1's shared-table sentence and dealt decks' paragraph both kept; the code merged clean (`dealt` builds on A1's `ConstructedPrior::new`, whose `Slot::new` carries the seen-copy weights; the zeroed `by_swaps` carry into A1's `request` / `expected_fill` as 154.4 says). `engine/tests/fuzz.rs`: both pools - G's `FUZZ_POOL=cross` and dealt decks' `delver_dealt` (the enum, `pool_mode`'s arms, the panic's list). |
+| 1f93c18d | `fuzz-invariants` 1fcf328b (another session's) | 150 | `docs/ENGINE.md` only: `engine/tests/fuzz.rs` (its rule-derived invariant hooks, `rules_report` / `rules_verdict`) merged clean beside G's and dealt decks' changes. Then (9eacdae3) its repro tests of the rules bugs F1-F3 (`rules_check.rs`, `f1_` / `f2_` / `f3_`), which `fix/rules-f1-f5` (151) fixed, drop `#[ignore]`; F4 and F5 stay ignored until `fix/rules-f4-f5`; `docs/rules_check_findings.md`'s STATUS says so. |
+| 63d53274 | `fix/bo3-hidden` f1068c58 (A2) | 141 | against dealt decks: `hidden_decks.rs` - `deck_weights` returns 1s for a dealt seat or a known keeper; `determinize_deck_tilted`'s observer line (identical on both sides) once. `az/mod.rs` - `MtgSpec` carries both `keep_known` and `dealt_decks` (field, default, parse arm, checks: `dealt_decks` refuses `keep_deck`, `keep_known` needs `keep_deck`, so `keeps_known` and `deck_dealt` never meet); `MtgAz::new` sets both; `determinize`'s observer line once. A2's observer carry-over in `next_game` / `start_chosen_game` and its deck-choice line merged clean (dealt decks lacks them). `mtgz/az/decklists.py` - `mirror_bo3_spec(keep_known=, dealt_decks=)`. `mtgz/az/keep_h2h.py` - `half_specs` refuses a dealt spec (154) and sets `keep_known` per arm (141). `engine/tests/fuzz.rs` - A2's private-key statics, check and report beside G's match-walk counters and fuzz-invariants' rules report; its per-step mask checks in `check_determinize`, `play_match_spec` and `check_determinize_hidden` merged clean. A2's in-place notes in 10, 120.2, 130.3 kept. H3 (141.4): see 157.6. |
+| b48f575d | `fix/autopass-reuse` deaf0993 (H) | 149 | the gitlink: H's a1d8300 -> zero-core `integrate/fable-1112` 77b31ab (157.2). `az/mod.rs` (MtgAz's `ANSWERS`, `decision_tag`, `answer_obs`, `key_obs`, appended to `impl SearchGame`) merged clean beside A2's and dealt decks' changes; 149's in-place note in section 10 kept. **Search behaviour changes on purpose** (149.4): the search's signatures carry the decision kind and the reuse follows the line, so `check_checkpoint_compat` differs from the baseline and G's driver digest (`digests_driver.txt`) no longer matches until the final re-record. Engine digests EQUAL. |
+
+### 157.2 The zero-core pin: `integrate/fable-1112`
+
+* 13a81f2: merge `fix/core-infra-1112` 509e3e2 (C2). Its docs/az.md section **46 -> 47**: the AMD branches
+  (`amd-export`) number 44-46. Every "az.md 46" / "46.N" the branch added (docs/az.md, run.py, cotrain.py, remote.py,
+  remoteplay.py, supervise.py, the tools and tests; 67 lines) now says 47; a note under the heading. No code change.
+* 12d5544: merge `perf/fable-1112` c275a1e (D, without P5). Its section **44 -> 48**, the same way (13 lines); the heading
+  drops "records as their non-zeros" (P5, a77cacf, not in this pin). docs/az.md conflicted (both appended): 47 then 48.
+* 5922c51: the compat tool gap (157.4), zero-core docs/az.md 47.14.
+* 77b31ab: merge `fix/autopass-reuse` a1d8300 (H: 12125d0 + a1d8300; docs/search.md 3.18, the observable answers), clean.
+
+### 157.3 Dealt decks with A1 and A2: the user's three tests (`engine/tests/dealt_integrated.rs`)
+
+The user required, once A1's posterior (140) and dealt decks (154) are both in: (1) a dealt seat's hidden 60 is the exact
+posterior = the restricted prior (swaps [1, 8]) x prod_i C(D_i, R_i), untilted (no deck reader's weights, no deck
+tilt); (2) game 3's conditioning, whatever exists, checks `deck_dealt(o)` first - a dealt seat's game 3 is dealt
+from game 3's cards only; (3) a dealt deal keeps the world's observer. (1) is three tests:
+
+* `a_dealt_60_is_the_restricted_prior_times_the_seen_cards_likelihood_exactly` - A1's 140.5 enumeration with the swap
+  range restricted. A 75 of a 10-card main (Brainstorm 4, Ponder 3, Lightning Bolt 3) and a 10-card sideboard
+  (Lightning Bolt 1, Pyroblast 3, Daze 3, Force of Will 3): 826 legal 10s, swap counts 0..=9, so the user's [1, 8] cuts
+  both ends (the main itself and the three decks of 9 swaps); also [2, 5]. For each range and two sets of seen cards
+  (Brainstorm x2 + Bolt: main cards only, where the full prior would deal the main itself; Brainstorm, Bolt and two
+  Pyroblasts: sideboard copies seen twice): `ConstructedPrior::dealt`'s request (no tilt, no pick: a dealt 60's request,
+  `MtgAz::sample_hidden_deck`) deck by deck against P(D | R) proportional to [lo <= s(D) <= hi] / #{decks of s(D)
+  swaps} x prod_i C(D_i, R_i) (chi-square, by `sample` and by `sample_k`; a deck of probability 0 never dealt);
+  `sample_k` equal to K `sample`s; `expected_fill` equal to the exact marginals (1e-9); `decks_by_swaps` the full
+  prior's counts zeroed outside the range; the exact posterior equal to **the truth by looking** (the dealt prior's
+  decks with nothing shown, shuffled, kept when their first cards are R); and the full prior's request dealing decks
+  outside the range exactly as often as the full posterior's mass there gives (none where the seen cards rule those
+  decks out), so the test tells the two priors apart.
+* `the_other_players_worlds_deal_a_dealt_60_by_its_untilted_restricted_prior` - in the game: the Delver mirror's dealt
+  matches (swaps [1, 8], `deal_samples` 0: fresh samples), at the start of game 2 where the other player has seen
+  nothing of the dealt 60 (asserted), so the exact law is the dealt prior's own with R empty. 6,000 worlds each by
+  `determinize`, by `determinize_deck_tilted` with strong reader weights (a sideboard card x30, a main card x0.05) and
+  by `determinize_with` with a peaked deck prediction (deck tilt 1): every card's mean copies within 4.5 se of the
+  dealt prior's exact `expected_fill`, the swap counts uniform over 1..=8 (chi-square) and never outside; the same
+  weights on the prior's own draws move the weighted card's mean by more than 10 se (the test would see a tilted deal).
+* `the_reader_weights_and_the_deck_tilt_never_move_a_dealt_60` - later in the games (the dealt 60 partly seen), with
+  K = 0 and with the K-sample deal: the other player's worlds by the reader's weights are the worlds by weights of 1,
+  and by the deck tilt `determinize`'s, draw for draw (decks and pools); in the dealt seat's own worlds of the other
+  player's chosen 60 the same weights do move the deal.
+
+(2) `a_dealt_seats_game_3_60_is_dealt_from_game_3s_cards_only`. Nothing conditions game 3 on game 2 today (141.4 waits
+for the user), so the test is the standing rule, where it matters: dealt matches whose game 2 showed cards of the dealt
+60 (150 random actions), conceded by game 1's winner for a game 3; the other player's worlds of the dealt seat's game-3
+60 - between games when the dealt seat sideboarded first (`deal_constructed_between`'s choice, nothing shown) and at
+game 3's start (`sample_hidden_deck`, nothing of game 3 seen), by `determinize` and by the deck tilt - are the dealt
+prior's law with nothing shown (every card's mean copies its `expected_fill`, swaps uniform over 1..=8) and deal the
+game-2 60 again no more often than its own chance. A game-2 term would move the cards game 2 showed; 141.4's mixture (D)
+would deal the game-2 60 again in a share rho of the worlds. If an H3 option is adopted, its code must keep a dealt
+seat on this rule by `deck_dealt(o)` (154.4), and this test then guards it.
+
+(3) `a_dealt_deal_keeps_the_worlds_observer`: worlds dealt while sideboarding (before game 2 and before game 3, both
+seats' worlds) walked into the next game: the dealt seat's deal in the world (`KEY_DEALT`, when it sideboards second:
+the other player's `PASS` deals it) is `HIDDEN` in the other player's worlds and in full in its own; every draw and look
+of the other player in the game the world started is `HIDDEN` (Urza's Bauble's look at a card of the viewer's hand
+excepted, public by design: 141.2). `Game::observer` is crate-private, so the test reads the observer by its effect on
+the keys, as `match_worlds.rs` does.
+
+### 157.4 The compat tool gap: a random token network for a game with tail segments (zero-core 47.14)
+
+zero-core's `tools/selfplay_digest.py --net random` built an MLP for every game, and `NetEvaluator` refuses any network
+but a token network of the game's tail segments for a game that declares them (zero-core 43.8, R4): so
+`check_checkpoint_compat --net random` - the compat step of `tools/gate.py`'s `search-core` and `optin-core` tiers
+(`--net random --game mtg`) - could not run on any layout-v7 commit, at either pin (C2 and D compared with
+`--net uniform` by hand: 144.4, 145.5). Now `--net random` for a game with tails is `net.make_net(info, game,
+arch='tokens', hidden=32, blocks=1, heads=2, ff=64)` under torch seed 0 (the evaluator `'random tokens'`), small so a
+CPU at 1 thread plays MTG's goldens in minutes (the smoke checkpoint of that size took 12-14 min a side under load,
+144.4); every other game keeps its MLP and its digests. Both sides run the tool beside the compat check, so both build
+the same network when the layouts are the same. Test: zero-core
+`tests/test_run_infra.py::test_a_random_network_for_a_game_with_tails_is_a_token_network`. The gate needs no change.
+
+### 157.5 G's digests in the gate (`tools/gate.py`)
+
+148.1's step, wired: `digest formats (constructed, EoE, driver)` (`digest-formats`) runs `cargo test --release -p engine
+--test digest_formats -- --ignored --nocapture` (the caller's `DIGEST_*` scrubbed by `step_env`, as every step's).
+Positive evidence: exactly one `^(constructed|eoe|driver): .*; combined digest ([0-9a-f]{16})\s*$` line of each name,
+no `^wrote .*digests_` line, exactly one "test result: ok. 3 passed" line + exit 0; each test compares with the
+checkout's own `tests/data/digests_<name>.txt`, so no flag (a change meant to alter play re-records them in its commit,
+as `digests.txt`). The report's `digests` name the three. In the `encoding` and `engine` tiers (inside `digest_steps`),
+`repin`, and the core tiers `search-core` and `optin-core` - there its driver digest (zero-core's `Driver<MtgAz>`:
+every batch, sample and result) is the only MTG-side check of the core's driver behaviour. `tests/test_gate.py`: the
+fake runner gives `digest_formats` a kind and a real-format output of its own; the core tiers' call lists gain it;
+`test_the_digest_formats_checker` and `test_the_digest_formats_step_runs_in_the_behaviour_tiers_and_reports_its_digests`
+(69 passed). 148.1's "Not in tools/gate.py" corrected in place.
+
+### 157.6 H3: game 3's hidden 60 and game 2 (141.4)
+
+User decision 2026-11-13: option A - game 3's hidden 60 stays an independent deal (A1's likelihood on game 3's cards);
+option D (kept its game-2 deck with probability rho) to be revisited after pb2 runs, when rho can be measured from
+self-play (pb1's frozen one-card swap would give rho ~ 1). The dependence on game 2 is learned instead: game-2 reveals
+and game-2 play/draw are inputs of game 3's rows (lane B, 142), read by the deck head + tilt. No change in
+`hidden_decks.rs`; 141.4 and 141.6 carry a one-line note. `dealt_integrated.rs`'s test (2) stays the guard: a dealt
+seat's game 3 is an independent deal of game 3's cards only (`deck_dealt(o)`), whatever conditioning comes later.
+
+### 157.7 Batch 1's checks
+
+On b48f575d with zero-core 77b31ab (one throttle slot for the chain, the desktop shared with the live run and ~10
+lanes; target dirs `E:/cargo-target/mtg-zero/integrate-fable`, `E:/cargo-target/zero-core/integrate-fable`):
+
+* zero-core `cargo test --release`: **187 passed**, 0 failed (4 binaries); its `build_py.sh` (the toy games) OK.
+  zero-core pytest: 605 tests in 37:38 under load (the GPU free: the live run paused): **602 passed, 3 failed** -
+  `test_remoteplay::test_cotrain_the_local_driver_is_never_starved` (timing under load, 144.4),
+  `test_token_graphs::test_graphs_match_eager_and_follow_new_weights` (fails at the pin e5e1bb0 too, 144.4) and
+  `test_token_graphs::test_absent_slots_are_never_read` (two eager CUDA evaluations 2.98e-8 apart at tolerance 0: no
+  NaN read, a kernel's rounding) - all three **passed alone, twice**.
+* This repo: `bash tools/build_py.sh` OK; `cargo test --release -p engine --no-run`: **every test binary compiles** (the
+  merges' one compile break, `perf.rs`'s two allocators, was caught at merge time, 157.1).
+* `--test az`: **52 passed**. `--test dealt_integrated`: **5 passed** - the exact posterior: chi-square 146-418 on
+  168-389 df by `sample`, `sample_k` and the truth by looking for both ranges and both sets of seen cards, `expected_fill`
+  exact, the full prior's decks outside [1, 8] 16,789 of 50,000 against an exact 16,727.7 (main cards seen) and 0 of 0
+  (two Pyroblasts seen); the worlds at game 2's start within 2.2 se of the exact fill under `determinize`, the reader's
+  weights (x30 / x0.05) and the deck tilt (the same weights on the prior's own draws: Consign to Memory 0.605 -> 1.957
+  copies, 500 se), swaps uniform (chi-square 5.0-9.3 on 7 df); 942 later states draw for draw untilted (the dealt
+  seat's own worlds moved by the weights in 938 of 942); game 3: 13,000 worlds between games and 24,000 at game 3's
+  start within 2.1 se of the fill with nothing shown, the game-2 60 dealt again 1 and 5 times (chance 2.73 at the
+  start), after the other player had seen 354 cards of the dealt game-2 60s; the observer: 160 worlds, the deal keyed
+  hidden 160 times in the other player's worlds and in full 160 in the dealt seat's, 3,111 private keys of the other
+  player masked in the 160 games started (4 public hand looks).
+* `--test dealt_decks` 10 passed (1 ignored: its digest), `deck_posterior` 5 (1 ignored: a measurement),
+  `match_worlds` 5, `autopass_reuse` 1; `--lib rules_check` **31 passed**, F1-F3's repro tests among them, F4 and F5
+  ignored.
+* Fuzz smoke, the default pool (`FUZZ_GAMES=200 FUZZ_MATCHES=20`): **4 passed** - every lane's checks on together
+  (148's 4,508 open-decklist walks and 110 match walks, 141's 7,344 + 6,424 private keys masked, 150's rules checks on
+  224,581 + 40,502 states, no violation).
+* **`FUZZ_POOL=delver_dealt` fails** (`FUZZ_GAMES=200 FUZZ_MATCHES=20`: `fuzz_random_matches` match 5 and
+  `same_seed_and_actions_replay_matches_identically` match 2000): `play_match_spec`'s assertion "game 1's loser
+  sideboards first" (main's, `fuzz.rs` 3669 here) does not hold in a post-sideboard match whose game-1 loser is the dealt
+  seat - dealt at once (154.1), so the first decider is the winner. A stale check of dealt decks' own pool (the same
+  line on `feat/dealt-decks` 6514e937, which this merge did not touch); for its lane. The default pool's games and
+  matches, and the dealt pool's 200 games, pass.
+* `python -m pytest tests -q`: **384 passed**, 1 skipped (10:44).
+* Not run in batch 1 (the orchestrator's end-of-campaign step): the digests and `digest_formats` (G's driver digest is
+  expected to differ since H, 149.4), the 20k fuzz, the gates.
+
+### 157.8 Open
+
+* Coming: B `fix/encoding-gate` phase 3 (with H3's game-2 inputs), F `fix/low-sev`, I `fix/hidden-refs` (156), A1's
+  follow-up, `fix/farm-fuzz` (152),
+  `fix/rules-f4-f5`.
+* Not re-recorded yet (once every behaviour lane is in): the digests (full, `DIGEST_ENCODING=0`, v6, and G's three:
+  the driver one differs since H), then the `suite`, `engine` and `search-core` tiers, pytest and the run-loop smoke.
+  The `search-core` tier's cube `match` smoke config timed out at 1,800 s under load on H's branch (626 s alone for 120
+  matches): give it a longer step timeout or run it apart with `--threads 4`, only with >= 12 GB available.
+* Lane H's memory comparison (trees now live through the opponent's passes): not measured yet. Its four `mem-{match,delver}-{new,base}.log` (10:28) each say
+  `PEAKMEM 0.01 GB, 0 s, exit 15 KILLED (memory floor)`: killed by their own guard before starting; its `m3.sh`
+  (zero-core pytest, then the comparison again at >= 12 GB) was running at 16:47. To read when they exist.
+* Known-failing fuzz seeds until F / I land: 148.5's `FUZZ_SKIP` lists (findings F1-F3 of 148.6).
