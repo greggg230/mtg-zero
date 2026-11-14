@@ -3484,8 +3484,9 @@ fn fuzz_post_sideboard_matches(first: u64, n: u64) {
         // (dealt decks refuse a keeper, ENGINE.md 154: the dealt seats instead)
         println!("post-sideboard dealt decks: {dealt_matches} of {n} matches with a dealt seat, {dealt_decks} dealt 60s checked");
         assert!(n < 20 || dealt_matches > 0 && dealt_decks > 0, "post-sideboard matches: no dealt match");
-        kept = kept.max(dealt_decks);
     }
+    // (a keeper's decisions, or with dealt decks - which refuse a keeper - the dealt 60s)
+    let kept_or_dealt = if dealt_mode() { dealt_decks } else { kept };
     println!(
         "{n} post-sideboard matches (start_game 2): {games} games played ({three} matches of three, {draws} drawn games, {aborted} aborted), mean decisions {:.1}, \
          sideboarding decisions {sb} ({kept} of a seat that keeps its deck), decks changed {changed}; constructed: {} worlds, the opponent's 60 hidden in {} \
@@ -3497,7 +3498,7 @@ fn fuzz_post_sideboard_matches(first: u64, n: u64) {
         stats.choices_dealt,
         stats.tilted
     );
-    assert!(n < 20 || sb > 0 && changed > 0 && three > 0 && kept > 0 && stats.choices_dealt > 0 && stats.tilted > 0, "post-sideboard matches: no sideboarding, changed deck, match of three or keeper");
+    assert!(n < 20 || sb > 0 && changed > 0 && three > 0 && kept_or_dealt > 0 && stats.choices_dealt > 0 && stats.tilted > 0, "post-sideboard matches: no sideboarding, changed deck, match of three or keeper");
 }
 
 /// Replays match `seed` of `sp` from its actions (`next_episode` at each game's end with one episode per game):
