@@ -31879,7 +31879,7 @@ reproduced on main 267ae603's own binary; `docs/rules_check_findings.md` lists t
 look-alikes passing) and the ignored repros (`... rules_check::tests::f -- --include-ignored` runs them: each fails
 on the engine as it is).
 
-## 151. Rules fixes from the rules check: deathtouch's record (F1), infect with deathtouch (F2), a deathtouch trampler and damage already marked (F3) (branch `fix/rules-f1-f5`, 2026-11-12); 508.8 (F4) and 510.4 (F5) (stacked branch `fix/rules-f4-f5`, pending a decision)
+## 151. Rules fixes from the rules check: deathtouch's record (F1), infect with deathtouch (F2), a deathtouch trampler and damage already marked (F3) (branch `fix/rules-f1-f5`, 2026-11-12); 508.8 (F4) and 510.4 (F5) (stacked branch `fix/rules-f4-f5`, user-approved; on the integration 151.8)
 
 The rule-derived invariant checker on branch `fuzz-invariants` (`engine/src/rules_check.rs`, its
 `docs/rules_check_findings.md`) found five engine rules bugs, F1-F5, each with an ignored repro test there. This
@@ -31954,7 +31954,7 @@ puts all 5 on P1. On 267ae603 the options were 1..=5.
 
 ### 151.4 F4: the declare blockers and combat damage steps after an attacker left combat (CR 508.8)
 
-On the stacked branch `fix/rules-f4-f5`, pending the maintainer's decision on what the network sees (151.5's end).
+On the stacked branch `fix/rules-f4-f5`, pending the maintainer's decision on what the network sees (151.5's end). (Approved by the user, game float 50 included; on the integration: 151.8.)
 508.8: "If no creatures are declared as attackers or put onto the battlefield attacking, skip the declare blockers and
 combat damage steps." `Game::next_step` skipped them when no creature *was attacking* as the declare attackers step
 ended: an attacker declared and then destroyed or bounced in that step (an instant on it, common in real games) cost both
@@ -32046,6 +32046,76 @@ On the stacked branch's commit (151.4-151.5 on the commit above; the same machin
 * **Targeted** (`--lib`, `az` with the public-state gate and its new perturbation, `rules_sba`, `rules_combat`,
   `cards_eoe_b_base`, `cards_m7a`): all passed. **The full engine suite**: **2,547 passed, 0 failed, 27 ignored**.
 * **`FUZZ_GAMES=20000`**, the default pool: passed, 4 tests, 3,034 s.
+
+### 151.8 On the integration (branch `fix/rules-f4-f5-int`, 2026-11-14)
+
+151.4-151.5 are user-approved, game float 50 (`g5::COMBAT_GOES_ON`) included; lane B's layout v7 revision 1 kept that
+float free (142.11). Branch `fix/rules-f4-f5-int` from `integrate/fable-1112` 664515dc: bd0336fa cherry-picked
+(f53669f0), then the gate and repro commit (6fca2006) and the branch's digests (11ab1ad1).
+
+**Conflicts and how each was resolved.**
+* `docs/ENGINE.md`: every section kept. 151's heading takes the stacked branch's (F4-F5 named); 131-150 and 152-157 are
+  the integration's; 151.4-151.7 merged cleanly, the stacked branch's checks paragraph stays at 151.7's end.
+* `engine/src/az/encode.rs`, the module header's globals rows only: the integration's v6 row (123's next spell can't be
+  countered, 154's dealt decks at g6 per-player float 31) with the branch's v5 row (151.4's float, 13 spare). The code
+  (`g5::COMBAT_GOES_ON` = game float 50, `GAME_END` 51) merged cleanly: nothing on the integration used float 50, and
+  g6 float 31 (`DEALT`) is untouched.
+* `engine/tests/data/digests.txt`: the integration's side kept in the cherry-pick; the branch then records its own
+  (below). The rest (`combat.rs`, `flow.rs`, `game.rs`, `public_state.rs`, `testkit.rs`, the four `entered_attacking`
+  callers, `rules_combat.rs`) merged cleanly.
+
+**The pairwise gate** (lane B's 142.2, `tests/az.rs::public_states_encode_apart`) holds 151.4's perturbation ("the
+declare blockers step follows an attacker that left combat", `Turn.had_attackers`): the pass takes every live
+perturbation, so it was in once merged. It joins `public_state::COMBO_EXCLUDED` (20 -> 21): a partner that makes a
+creature attack makes the record inert (while one is attacking, its attacking flag already says the steps follow, and
+the float reads "set and no creature attacking") while the view keeps it - a state no game reaches (in the declare
+attackers step a creature attacking was declared or put onto the battlefield attacking, so the record is set; outside
+that step it is clear) - and, added after the partner draws were set, so every position's partners stay as before
+(142.10's and 142.12's practice). It is compared alone with every state. The test now counts the states it reaches and
+fails if none, on layout v7 or on v6: **405 states, 48 of them on layout v6 too, 0 collisions**. The single pass:
+405 applied, view and encoding never the same for either player.
+
+**The repros.** `rules_check.rs`'s `f4_cr_508_8_declared_attackers_keep_the_declare_blockers_step` and
+`f5_cr_510_4_a_first_striker_never_deals_damage_in_the_second_step` run (no `#[ignore]`) and pass; none of F1-F5's repros
+is ignored now (`docs/rules_check_findings.md`'s STATUS says so).
+
+**Digests**, recorded on purpose (`DIGEST_WRITE=1`, 11ab1ad1; the integrator re-records once after the last merge).
+The old values are the integration's own code (664515dc built in a detached checkout, `rules-f4-f5-int-base`, its own
+target dir): its recorded files match neither (157.10's known red - its `digests.txt` is cef5aae0's, combined
+e5675fc9d4da7a20; lane B's gate passed with 72dba7025d8585b4 on its branch).
+
+| digest | 664515dc | this branch |
+|---|---|---|
+| full (`digests.txt`) | 34e4108ae72a864f | **3b15bf63c3fa61a6** |
+| `DIGEST_ENCODING=0` | 03507d43100f154c | **a8296f06c53674e3** |
+| constructed | 740055c2e2f6cad1 | **d3f07e17974d1c01** |
+| EoE | f42b59e6ee67be05 | **43250beec5ca93de** |
+| driver | 18afa79bae20fb06 | 18afa79bae20fb06 (EQUAL) |
+| dealt | 33b68571705f3f35 | **a7f8018823a9ed57** |
+
+The play changes (F4's declare blockers and combat damage steps after an attacker removed in the declare attackers step,
+F5's second-step damage) and the encoding's two changes (float 50, `perm::STRUCK_FIRST`'s meaning).
+
+**Checks** (the desktop, the Fable-fix slot throttle, the live run paused):
+* `cargo test --release -p engine --lib --test rules_combat --test az --test v7_tails` (the repros are lib tests:
+  `engine/src/rules_check.rs`, no `tests/rules_check.rs`): lib 87 passed (the four F4/F5 tests among them), az 53
+  passed (both public-state passes), rules_combat 13, v7_tails 21; 0 failed.
+* **The full engine suite** (`cargo test --release -p engine --no-fail-fast`): 171 binaries, **2,651 passed, 0 failed,
+  35 ignored**.
+* **`FUZZ_GAMES=20000`**: the default pool 7 passed in 2,111 s (no rules check violated; 438,858 open-decklist walks,
+  2,419,872 states; 5,399 match walks; seed 2122's test passes: lane F's fix is in); `FUZZ_POOL=delver` 7 passed in
+  1,579 s (382,834 walks, 1,123,854 states; 5,215 match walks).
+* `bash tools/build_py.sh` OK; `pytest tests/test_mtg_az.py`: 21 passed.
+* **`python tools/gate.py encoding --no-mac`** on 11ab1ad1 (`--expect-digest 3b15bf63c3fa61a6 --expect-digest0
+  a8296f06c53674e3`, lane B's forked checkpoint `laneB/fork/run/models/iter_0002.pt` with the Delver best-of-three
+  spec): every step passed (build, both digests, the formats, dealt, `--test az`, checkpoint-load 8 games) but pytest,
+  **`GATE FAILED encoding 11ab1ad14698 in 1175s - pytest: 1 failed, 0 error(s), 389 passed`**: the one failure is
+  `test_canary_library.py::test_every_spot_reaches_its_recorded_position`, 157.10's known red (its five spots, 157.9)
+  plus a sixth, `fourth_land_empty_hand:r3-2b-float550_0550_s32:160:254` ("step 261: action 548 is not legal"): F4 -
+  its game now has the declare blockers and combat damage steps after a removed attacker. A dry run of the rerecord
+  (`tools/delver_rerecord.py rerecord --old-engine .../canary-old-engine-5e767d9b --out <scratch>`, the library in the
+  tree untouched) re-records **60 of 60 spots, dropped 0**, that one 381 -> 383 steps (two more priority passes): the
+  campaign's final `RULES_EPOCH` bump and rerecord (157.10 step 3) take it.
 
 ## 152. The zero-farm's fuzz failures: a pile's twins by their place, a controlled search keyed from the top, a payment's own answer (branch `fix/farm-fuzz`, 2026-11-13)
 
