@@ -345,15 +345,6 @@ fn a_companion_cast_beside_a_twin_looks_the_same_in_every_world() {
     while !at_priority(&a) {
         go(&mut a, &mut b, "");
     }
-    // (To the beginning of combat - Lutri has flash -, so the hand's knowledge is canonical when the
-    // slot is offered: in the world with the twin below, the twin holds P1's knowledge of a Lutri and
-    // the slot names it. Offered right after the companion arrives, a slot takes the card P1 knows,
-    // the companion, in both worlds: ENGINE.md 156's slot order.)
-    go(&mut a, &mut b, "pass");
-    while !(at_priority(&a) && a.pending_decision().unwrap().player == 0) {
-        let what = if at_priority(&a) { "pass" } else { "" };
-        go(&mut a, &mut b, what);
-    }
     go(&mut a, &mut b, "cast Lutri");
     while !(a.stack().is_empty() && at_priority(&a)) {
         if at_priority(&a) {

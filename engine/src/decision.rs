@@ -715,26 +715,25 @@ impl Game {
 
     /// `p`'s hand in the order a hand slot takes its card (ENGINE.md 128,
     /// 156): canonical ([`hand_sorted_in`](Self::hand_sorted_in)), but
-    /// within a definition the cards the other player knows come first, and
-    /// among those a card a reference tells apart (`Game::told_apart`)
-    /// first. A definition's cards keep their places as a run, so slot ids
-    /// are those of the canonical order. Why: twins are interchangeable, and
-    /// `canon_hand_knowledge` puts the best-known first, but a twin a
-    /// reference tells apart keeps its own knowledge, and knowledge can
-    /// change within a step (a look, a reveal) before the step's
-    /// canonicalization; whether the hand holds a twin the other player
-    /// knows is the same in every world it deals, the known told-apart one
-    /// is the same card in every such world, and a slot naming its
-    /// definition must name a known card in all of them or in none (else one
-    /// world reveals a twin the other player didn't know and another a known
-    /// one: equal keys, unequal knowledge).
+    /// within a definition a card a reference tells apart
+    /// (`Game::told_apart`) that the other player knows comes first. A
+    /// definition's cards keep their places as a run, so slot ids are those
+    /// of the canonical order. Why: twins are interchangeable, and
+    /// `canon_hand_knowledge` puts the best-known first (it runs at the end
+    /// of every step, after the step's decision bound its options' cards and
+    /// before the answer), but a twin a reference tells apart keeps its own
+    /// knowledge; the known one is the same card in every world the other
+    /// player deals, and a slot naming its definition must name it there too
+    /// (else one world reveals a twin the other player didn't know and
+    /// another the known one: equal keys, unequal knowledge). An unknown
+    /// told-apart card a slot takes is keyed (`Game::key_told`).
     pub(crate) fn hand_slot_order_in(&self, p: PlayerId) -> SVec<CardIdx, 16> {
         let mut h = self.hand_sorted_in(p);
         let twins = h.windows(2).any(|w| self.objs[w[0].i()].def == self.objs[w[1].i()].def);
         if twins {
             let q = crate::ids::opp(p);
-            let known = |c: CardIdx| self.objs[c.i()].known & (1 << q) != 0;
-            h.sort_by_cached_key(|&c| (self.objs[c.i()].def, !known(c), !(known(c) && self.told_apart(c)), c.get()));
+            let told = |c: CardIdx| self.objs[c.i()].known & (1 << q) != 0 && self.told_apart(c);
+            h.sort_by_cached_key(|&c| (self.objs[c.i()].def, !told(c), c.get()));
         }
         h
     }
