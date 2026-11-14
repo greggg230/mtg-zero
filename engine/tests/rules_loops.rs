@@ -1,8 +1,10 @@
 //! Loops of optional actions (CR 732.2a; MTR 4.4; `engine/src/loops.rs`): a
 //! player may repeat an optional loop any number of times, and a loop action
-//! (a non-mana ability of a permanent, YES to "may copy this spell") is not
-//! offered again at a state identical to one where its player took it (as
-//! that player sees it): an iteration that made no progress ends the loop.
+//! (a non-mana ability of a permanent, YES to "may copy this spell"), as
+//! completed (its X, targets, payment: ENGINE.md 147.2), is not taken again
+//! at a state identical to one where its player took it (as that player sees
+//! it): an iteration that made no progress ends the loop, and a different
+//! completion is a different action.
 //! The engine's former caps (31 activations of a permanent's ability, 31
 //! "may copy" copies a turn) are gone.
 
@@ -100,8 +102,12 @@ fn float(g: &mut Game, src: CardIdx) {
 /// Basalt Monolith ("{T}: Add {C}{C}{C}"; "{3}: Untap this artifact"): tap
 /// it for {C}{C}{C}, untap it with that mana, and the game is where it was.
 /// Tapped again, the untap is not offered: that state is the one where it
-/// was taken, and it made no progress. (The former cap offered it 31 times.)
-/// An unused land in play changes nothing: the state is the same.
+/// was taken, its one completion (paid with that mana) made no progress.
+/// (The former cap offered it 31 times.) With an untapped land in play the
+/// state is the same, but the untap can be completed another way - its
+/// payment taking the land's mana, which taps a land (progress): it stays
+/// offered, and its payment can't repeat the recorded one (ENGINE.md 147.2;
+/// before, the whole ability was withheld).
 #[test]
 fn cr_732_2a_basalt_monolith_loops_once_back_at_the_same_state() {
     for land in [false, true] {
@@ -122,10 +128,24 @@ fn cr_732_2a_basalt_monolith_loops_once_back_at_the_same_state() {
         // Back where it started (the untap was never taken here: offered).
         assert!(g.has_option(act(m, 1)));
         float(&mut g, m);
-        assert!(!g.has_option(act(m, 1)), "the same state as the untap's: {:?}\n{}", g.options_desc(), log(&g));
-        if land {
-            assert!(!g.obj(avoid[0]).tapped);
+        if !land {
+            assert!(!g.has_option(act(m, 1)), "the same state as the untap's: {:?}\n{}", g.options_desc(), log(&g));
+            continue;
         }
+        assert!(!g.obj(avoid[0]).tapped);
+        assert!(g.has_option(act(m, 1)), "another completion (the Swamp's mana) remains: {:?}\n{}", g.options_desc(), log(&g));
+        // The recorded completion (every mana from the pool) is withheld: paying with the pool whenever offered still
+        // has to take the Swamp's mana.
+        g.choose(act(m, 1));
+        for _ in 0..50 {
+            if at_priority(&g) {
+                break;
+            }
+            let d = g.pending_decision().unwrap();
+            let c = d.options.iter().map(|o| o.choice).find(|c| !matches!(c, Choice::Ability(x, _) if avoid.contains(x))).unwrap_or(d.options[0].choice);
+            g.choose(c);
+        }
+        assert!(g.obj(avoid[0]).tapped, "the payment took the Swamp's mana\n{}", log(&g));
     }
 }
 
@@ -197,24 +217,26 @@ fn answer_x_0(g: &mut Game) {
 }
 
 /// Lavaclaw Reaches, animated ("{X}: This creature gets +X/+0 until end of
-/// turn"): with X = 0 the activation is free and its effect, +0/+0, changes
-/// nothing (CR 613.4c), so once it resolves the game is where it was and the
-/// ability is not offered again (the effect is left out of the loop hash,
-/// `loops::inert`; the fuzz's Edge of Eternities seed 1004). Holding
-/// priority, another X = 0 activation isn't offered either: the board is what
-/// it was when the first was taken (its stack object is the loop's own, MTR
-/// 4.4: no progress of the board state).
+/// turn"), every mana source tapped (the Reaches paid for its own animation):
+/// X = 0 is the ability's only completion. The activation is free and its
+/// effect, +0/+0, changes nothing (CR 613.4c), so once it resolves the game
+/// is where it was and the ability is not offered again (the effect is left
+/// out of the loop hash, `loops::inert`; the fuzz's Edge of Eternities seed
+/// 1004). Holding priority, another X = 0 activation isn't offered either:
+/// the board is what it was when the first was taken (its stack object is
+/// the loop's own, MTR 4.4: no progress of the board state).
 #[test]
 fn cr_732_2a_lavaclaw_reaches_x_0_pump_is_no_progress() {
-    let mut g = eoe_scen().battlefield(0, &["Lavaclaw Reaches", "Swamp", "Mountain", "Island"]).at(Step::Main1, 0).start();
+    let mut g = eoe_scen().battlefield(0, &["Lavaclaw Reaches", "Swamp", "Mountain"]).at(Step::Main1, 0).start();
     let l = bf(&g, 0, "Lavaclaw Reaches");
     let n = g.def_of(l).activated.len() as u8;
     assert!(!g.has_option(act(l, n - 1)), "not animated yet");
     let animate = (0..n).find(|&i| g.def_of(l).activated[i as usize].cost.mana.total() == 3).expect("{{1}}{{B}}{{R}}");
     g.choose(act(l, animate));
     let swamp = bf(&g, 0, "Swamp");
-    pay_with(&mut g, swamp, &[l]);
+    pay_with(&mut g, swamp, &[]);
     settle(&mut g);
+    assert!(g.permanents_of(0).all(|c| g.obj(c).tapped), "every source tapped\n{}", log(&g));
     assert!(g.has_option(act(l, n - 1)), "animated: {:?}
 {}", g.options_desc(), log(&g));
     g.choose(act(l, n - 1));
@@ -224,6 +246,48 @@ fn cr_732_2a_lavaclaw_reaches_x_0_pump_is_no_progress() {
     settle(&mut g);
     assert!(!g.has_option(act(l, n - 1)), "X = 0 changed nothing: {:?}
 {}", g.options_desc(), log(&g));
+}
+
+/// The Fable review's 2026-11-12 B4 (`zz_rules_d::d01`; ENGINE.md 147.2): the
+/// same ability with mana left. An X = 0 use changes nothing, but X = 1 or 2
+/// is payable and would change the board: a different completion, a
+/// different action. Holding priority and after the X = 0 use resolved, the
+/// ability stays offered, its X decision without 0 (the recorded completion);
+/// X = 2 is taken and paid. (Before, the record was keyed by the ability
+/// alone, and the X = 2 line was reachable only by floating mana first.)
+#[test]
+fn cr_732_2a_another_x_after_a_no_op_x_0_is_offered() {
+    for hold in [true, false] {
+        let mut g = eoe_scen()
+            .battlefield(0, &["Lavaclaw Reaches", "Swamp", "Mountain", "Mountain", "Mountain", "Mountain"])
+            .at(Step::Main1, 0)
+            .start();
+        let l = bf(&g, 0, "Lavaclaw Reaches");
+        let n = g.def_of(l).activated.len() as u8;
+        let animate = (0..n).find(|&i| g.def_of(l).activated[i as usize].cost.mana.total() == 3).expect("{{1}}{{B}}{{R}}");
+        g.choose(act(l, animate));
+        let swamp = bf(&g, 0, "Swamp");
+        pay_with(&mut g, swamp, &[l]);
+        settle(&mut g);
+        let base = g.pt(l).0;
+        let untapped = |g: &Game| g.permanents_of(0).filter(|&c| !g.obj(c).tapped).count();
+        assert_eq!(untapped(&g), 3, "the Reaches and two Mountains\n{}", log(&g));
+        g.choose(act(l, n - 1));
+        answer_x_0(&mut g);
+        if !hold {
+            settle(&mut g);
+            assert_eq!(g.pt(l).0, base, "+0/+0");
+        }
+        assert!(g.has_option(act(l, n - 1)), "X = 1..3 remain (hold {hold}): {:?}\n{}", g.options_desc(), log(&g));
+        g.choose(act(l, n - 1));
+        assert!(!g.has_option(Choice::Number(0)), "X = 0, the recorded completion, withheld: {:?}", g.options_desc());
+        assert!(g.has_option(Choice::Number(1)) && g.has_option(Choice::Number(2)), "{:?}", g.options_desc());
+        g.choose(Choice::Number(2));
+        pay_with(&mut g, l, &[]);
+        settle(&mut g);
+        assert_eq!(g.pt(l).0, base + 2, "X = 2 resolved\n{}", log(&g));
+        assert_eq!(untapped(&g), 1, "two sources paid X = 2\n{}", log(&g));
+    }
 }
 
 /// The same ability paid for: X = 1 taps a land, so holding priority the
@@ -294,8 +358,12 @@ fn mtr_4_4_free_activations_stacked_without_board_progress_stop() {
     assert!(g.has_option(act(l, nl - 1)), "the pump not taken yet: {:?}", g.options_desc());
     g.choose(act(l, nl - 1));
     answer_x_0(&mut g);
-    assert!(!g.has_option(act(w, nw - 1)) && !g.has_option(act(l, nl - 1)), "neither again: {:?}", g.options_desc());
-    // Random play (X always 0, so nothing is paid) ends the turn.
+    assert!(!g.has_option(act(w, nw - 1)), "the switch not again: {:?}", g.options_desc());
+    // The pump only with an X the lands pay (ENGINE.md 147.2): its X = 0 completion is recorded at this board.
+    assert!(g.has_option(act(l, nl - 1)), "the pump with X >= 1: {:?}", g.options_desc());
+    g.choose(act(l, nl - 1));
+    assert!(!g.has_option(Choice::Number(0)) && g.has_option(Choice::Number(1)), "{:?}", g.options_desc());
+    // Random play (X = 0 whenever offered, else any: each X >= 1 taps lands) ends the turn.
     let turn = g.turn().number;
     let mut rng = Rng::new(1016);
     let mut steps = 0;

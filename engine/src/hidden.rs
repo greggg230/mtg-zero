@@ -54,7 +54,10 @@ pub const HIDDEN: u64 = 0xFFFF_FFFF;
 /// The deals `determinize` draws at most for a face-down choice to be a legal
 /// one (ENGINE.md 123): each succeeds with a probability of at least one in
 /// the hidden cards and the hand's size (the real deal is one), so this many
-/// failing is a broken invariant, loudly.
+/// failing is a broken invariant, loudly. The uniform deal's only: that bound
+/// does not hold under weights, and the belief-weighted deal draws the choice
+/// with the deal, exactly and with no try count (`deal_weighted_pick`,
+/// ENGINE.md 147.5).
 const HIDDEN_PICK_TRIES: u32 = 1_000_000;
 
 /// Pack a key: kind in bits 56-63, player in 48-55, payload in 0-47.
@@ -137,6 +140,89 @@ fn weighted_draws(pool: &mut Vec<DefId>, k: usize, w: &dyn Fn(DefId) -> f64, rng
         out.push(pool.remove(pick));
     }
     out
+}
+
+/// A uniform in [0, 1) from 53 bits of `rng`.
+fn unit(rng: &mut Rng) -> f64 {
+    (rng.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
+}
+
+/// `weighted_draws` of `k` cards with draw `j` (0-based) a card of the kind
+/// (`kind`: its identities, sorted), for `deal_weighted_pick` (ENGINE.md
+/// 147.5): a card of the kind drawn first, by weight among the pool's cards
+/// of the kind; the other k - 1 by `weighted_draws` from the rest; the first
+/// moved to place j. Returned with the importance ratio of that draw against
+/// the weighted draw of the same cards conditioned on place j being of the
+/// kind: (S_K / S) prod_t S_t(first) / S_t(at j), S_t the pool's weight left
+/// before draw t in the order the cards were drawn with the card of the kind
+/// first and in the order returned; the cards' own weights and copies are the
+/// same factors in both orders (copies left fall m, m - 1, ... per identity
+/// whatever the interleaving). The ratio is at most S_K / (S - T_j), T_j the
+/// pool's j heaviest cards' weight. No card of the kind in the pool: the plain
+/// draws and ratio 0.
+fn weighted_draws_forced(pool: &mut Vec<DefId>, k: usize, j: usize, kind: &[DefId], w: &dyn Fn(DefId) -> f64, rng: &mut Rng) -> (Vec<DefId>, f64) {
+    debug_assert!(j < k && k <= pool.len());
+    let s: f64 = pool.iter().map(|&d| w(d)).sum();
+    let s_k: f64 = pool.iter().filter(|d| kind.binary_search(d).is_ok()).map(|&d| w(d)).sum();
+    if s_k <= 0.0 {
+        return (weighted_draws(pool, k, w, rng), 0.0);
+    }
+    let mut x = unit(rng) * s_k;
+    let mut pick = None;
+    for (i, &d) in pool.iter().enumerate() {
+        if kind.binary_search(&d).is_ok() {
+            pick = Some(i);
+            x -= w(d);
+            if x < 0.0 {
+                break;
+            }
+        }
+    }
+    let first = pool.remove(pick.expect("a card of the kind"));
+    let rest = weighted_draws(pool, k - 1, w, rng);
+    // The remaining weights before each draw: card of the kind first, then at place j.
+    let (mut a, mut b, mut r) = (s, s, s_k / s);
+    for t in 0..k {
+        let at = if t == 0 { first } else { rest[t - 1] };
+        let bt = match t.cmp(&j) {
+            std::cmp::Ordering::Less => rest[t],
+            std::cmp::Ordering::Equal => first,
+            std::cmp::Ordering::Greater => rest[t - 1],
+        };
+        r *= a / b;
+        a -= w(at);
+        b -= w(bt);
+    }
+    let mut out = rest;
+    out.insert(j, first);
+    (out, r)
+}
+
+/// `determinize_weighted`'s plan of one owner's hidden cards (`Game::weighted_plan`).
+struct WeightedPlan {
+    /// The slots' identities less every cloud's listed cards, sorted (the free cards).
+    pool: Vec<DefId>,
+    /// Per slot: its cloud (of the viewer's over the owner).
+    home: Vec<Option<usize>>,
+    /// Per cloud: its listed cards (`cloud_needs`).
+    needs: Vec<Vec<DefId>>,
+    in_hand: Vec<bool>,
+    /// The hand's places outside every cloud: draws from `pool`.
+    free_hand: usize,
+    clouds: Vec<PlanCloud>,
+}
+
+/// A cloud's places in a `WeightedPlan`: its slots (indices into the slots, in order) and which of them are in the hand.
+struct PlanCloud {
+    mine: Vec<usize>,
+    hand_pos: Vec<usize>,
+}
+
+/// A dealt hand place of `deal_weighted_pick`: draw `j` of the free hand places' sequence (`seq` None) or of cloud `seq`'s hand places.
+#[derive(Clone, Copy, Debug)]
+struct Force {
+    seq: Option<usize>,
+    j: usize,
 }
 
 /// Remove one `d` from a sorted multiset; false if absent.
@@ -790,29 +876,155 @@ impl Game {
     /// (libraries, face-down cards, the viewer's own unknown cards) is
     /// shuffled uniformly as `determinize` does. Weights all equal: the
     /// uniform deal's distribution (another random stream). `w` must be
-    /// finite and > 0.
+    /// finite and > 0. A pending face-down choice of the opponent's hand
+    /// (ENGINE.md 123) is dealt with it, exactly, by `deal_weighted_pick`.
     pub fn determinize_weighted(&mut self, viewer: PlayerId, rng: &mut Rng, w: &dyn Fn(DefId) -> f64) {
         let payer = self.payment_in_progress();
         for owner in 0..2u8 {
             if owner == viewer {
                 self.deal_owner(viewer, owner, payer, rng);
             } else {
-                // (A face-down choice of a card in `owner`'s hand: the deal
-                // drawn again until the choice is a legal one, ENGINE.md 123.)
-                let mut tries = 0u32;
-                loop {
-                    let (slots, pinned) = self.hidden_slots_with(viewer, owner, payer);
-                    let defs: Vec<DefId> = slots.iter().map(|&c| self.ident(c)).collect();
-                    self.resample_weighted(viewer, owner, &slots, &pinned, defs, rng, w);
-                    if self.hidden_pick_ok(viewer, owner, rng) {
-                        break;
+                let (slots, pinned) = self.hidden_slots_with(viewer, owner, payer);
+                let defs: Vec<DefId> = slots.iter().map(|&c| self.ident(c)).collect();
+                let plan = self.weighted_plan(viewer, owner, &slots, &pinned, defs);
+                match self.hidden_pick(viewer, owner) {
+                    None => {
+                        self.deal_weighted(&plan, &slots, rng, w, None);
                     }
-                    tries += 1;
-                    assert!(tries < HIDDEN_PICK_TRIES, "determinize: no deal of P{owner}'s hand holds a legal face-down choice (ENGINE.md 123)");
+                    Some((k, _, filter)) => self.deal_weighted_pick(owner, &plan, &slots, k, &filter, rng, w),
                 }
             }
         }
         self.after_deal(viewer, rng);
+    }
+
+    /// `determinize_weighted`'s deal of `owner`'s hidden cards with a
+    /// face-down choice of a card of `owner`'s hand pending (ENGINE.md 123,
+    /// 147.5; `hidden_pick`: the frame at agenda `k`, `filter` the kind).
+    /// The world is the weighted deal conditioned as the uniform deal is
+    /// (`hidden_pick_ok`): a card of the hand drawn uniformly must be of the
+    /// kind, and is the choice - each (deal, card) in proportion to the deal's
+    /// probability under the weights times [the card is of the kind]. That
+    /// was a rejection of whole deals, accepting with probability (cards of
+    /// the kind in the hand) / |hand|: about 1 / (49 R^2) when the belief puts
+    /// the hand's one card of the kind at the clip's floor and the rest at its
+    /// ceiling R, so past R ~ 150 it exhausted `HIDDEN_PICK_TRIES` and
+    /// panicked (the Fable review's 2026-11-12 hidden B4).
+    ///
+    /// Now the choice is dealt with the deal. The target is a mixture over
+    /// which hand card is chosen: one of the hand cards the deal doesn't move
+    /// (each of the kind: the plain deal, mass 1), or a dealt hand place -
+    /// draw j of a Wallenius sequence (the free hand places' from the pool, or
+    /// a cloud's hand places' from its cards) - with mass P(draw j is of the
+    /// kind). That mass has no closed form (Wallenius' urn is not
+    /// exchangeable), so the place is proposed by an upper bound M_j of it
+    /// and corrected: the sequence is drawn with its card of the kind first
+    /// (by weight among its kind, `weighted_draws_forced`), the rest as
+    /// always, the first card moved to place j; the importance ratio of that
+    /// is (S_K / S) prod_t S_t(first) / S_t(at j) <= S_K / (S - T_j) = M_j
+    /// (S, S_K: the sequence's pool's weight and its kind's; T_j: its j
+    /// heaviest; the products of the draws' remaining weights telescope),
+    /// and the proposal is accepted with probability ratio / M_j. Every other
+    /// part of the deal is drawn from its own conditional, exactly as
+    /// `deal_weighted` draws it. So a world comes with probability exactly
+    /// the target's, with no try count: a round is accepted with probability
+    /// (A + E[cards of the kind among the dealt hand places]) / (A + sum M_j)
+    /// - near 1 in the review's case (the kind's own weight cancels), and for
+    /// any weights at least (S - T_{n-1}) / (n S) of the free sequence's
+    /// part. A cloud's cards are random (its fill of free cards), so its
+    /// bound is taken over every fill. No card of the kind possible anywhere
+    /// (every M and A zero) is a broken invariant (ENGINE.md 129.3: a world's
+    /// deck always holds a legal pick): a loud panic, not a stall.
+    #[allow(clippy::too_many_arguments)]
+    fn deal_weighted_pick(
+        &mut self,
+        owner: PlayerId,
+        plan: &WeightedPlan,
+        slots: &[CardIdx],
+        k: usize,
+        filter: &crate::db::Filter,
+        rng: &mut Rng,
+        w: &dyn Fn(DefId) -> f64,
+    ) {
+        let ctx = crate::cast::Ctx { controller: owner, source: None };
+        let hand = self.players[owner as usize].hand.clone();
+        // The hand cards the deal doesn't move (known, pinned) of the kind: chosen with the plain deal.
+        let fixed: Vec<CardIdx> = hand.iter().copied().filter(|c| !slots.contains(c) && self.card_matches(filter, *c, &ctx)).collect();
+        // Which identities are of the kind: a dealt hand card given each one (a copy of the state).
+        let mut kind: Vec<DefId> = Vec::new();
+        if let Some(&probe_card) = hand.iter().find(|c| slots.contains(c)) {
+            let mut ids: Vec<DefId> = plan.pool.iter().chain(plan.needs.iter().flatten()).copied().collect();
+            ids.sort_unstable();
+            ids.dedup();
+            let mut probe = self.clone();
+            for d in ids {
+                probe.set_ident(probe_card, d);
+                if probe.card_matches(filter, probe_card, &ctx) {
+                    kind.push(d);
+                }
+            }
+        }
+        let is_kind = |d: DefId| kind.binary_search(&d).is_ok();
+        let wt = |v: &[DefId]| -> Vec<f64> { v.iter().map(|&d| w(d)).collect() };
+        // The dealt hand places, each a draw of a sequence, and their bounds M_j.
+        let mut places: Vec<(Force, f64)> = Vec::new();
+        if plan.free_hand > 0 {
+            let all = wt(&plan.pool);
+            let s: f64 = all.iter().sum();
+            let s_k: f64 = plan.pool.iter().zip(&all).filter(|(d, _)| is_kind(**d)).map(|(_, x)| x).sum();
+            let mut desc = all.clone();
+            desc.sort_by(|a, b| b.total_cmp(a));
+            for j in 0..plan.free_hand {
+                let t: f64 = desc[..j].iter().sum();
+                places.push((Force { seq: None, j }, if s_k > 0.0 { s_k / (s - t) } else { 0.0 }));
+            }
+        }
+        for (ki, c) in plan.clouds.iter().enumerate() {
+            if c.hand_pos.is_empty() {
+                continue;
+            }
+            // (Its cards: its listed ones and a fill of free cards; the bound over every fill.)
+            let fill = c.mine.len() - plan.needs[ki].len();
+            let need_w = wt(&plan.needs[ki]);
+            let mut free_kind: Vec<f64> = plan.pool.iter().filter(|&&d| is_kind(d)).map(|&d| w(d)).collect();
+            free_kind.sort_by(|a, b| b.total_cmp(a));
+            let s_k_max: f64 = plan.needs[ki].iter().zip(&need_w).filter(|(d, _)| is_kind(**d)).map(|(_, x)| x).sum::<f64>()
+                + free_kind.iter().take(fill).sum::<f64>();
+            let mut asc: Vec<f64> = need_w.iter().copied().chain(wt(&plan.pool)).collect();
+            asc.sort_by(|a, b| a.total_cmp(b));
+            for j in 0..c.hand_pos.len() {
+                let lb: f64 = asc[..c.mine.len() - j].iter().sum();
+                places.push((Force { seq: Some(ki), j }, if s_k_max > 0.0 { s_k_max / lb } else { 0.0 }));
+            }
+        }
+        let total = fixed.len() as f64 + places.iter().map(|p| p.1).sum::<f64>();
+        assert!(
+            total > 0.0,
+            "determinize: no deal of P{owner}'s hand can hold a legal face-down choice (ENGINE.md 123, 129.3: a world's deck always holds one)"
+        );
+        loop {
+            let mut x = unit(rng) * total;
+            if x < fixed.len() as f64 {
+                let c = fixed[(x as usize).min(fixed.len() - 1)];
+                self.deal_weighted(plan, slots, rng, w, None);
+                self.set_hidden_pick(k, c);
+                return;
+            }
+            x -= fixed.len() as f64;
+            let (f, m) = *places.iter().find(|p| {
+                if x < p.1 {
+                    return true;
+                }
+                x -= p.1;
+                false
+            })
+            .unwrap_or_else(|| places.iter().rev().find(|p| p.1 > 0.0).expect("a place of positive mass"));
+            let (ratio, c) = self.deal_weighted(plan, slots, rng, w, Some((f, kind.as_slice())));
+            if unit(rng) * m < ratio {
+                self.set_hidden_pick(k, c.expect("the forced place's card"));
+                return;
+            }
+        }
     }
 
     /// What `determinize` does after its deal: canonicalize the hands'
@@ -845,9 +1057,14 @@ impl Game {
         // would match only where the deal got those things right, so they
         // go: that decider's loops may repeat once more here, never fewer
         // times (`loops.rs`).
-        if !self.loop_taken.is_empty() {
+        // (An activation in progress, `loop_open`, likewise: another
+        // decider's goes - its loop may repeat once more here.)
+        if !self.loop_taken.is_empty() || self.loop_open.is_some() {
             let keep = [self.decider_of(0) == viewer, self.decider_of(1) == viewer];
-            self.loop_taken.retain(|x| keep[x.0 as usize]);
+            self.loop_taken.retain(|x| keep[x.p as usize]);
+            if self.loop_open.as_ref().is_some_and(|o| !keep[o.rec.p as usize]) {
+                self.loop_open = None;
+            }
         }
         // The viewer's own options never name a card whose identity was
         // resampled (rule: a choice of a card in a zone hidden from its
@@ -896,19 +1113,12 @@ impl Game {
         self.resample_with_clouds(viewer, owner, &slots, &pinned, defs.to_vec(), rng);
     }
 
-    /// `determinize_weighted`'s deal of `owner`'s cards `slots` (identities
-    /// `defs`): `resample_with_clouds` with the hand weighted (ENGINE.md 69.2).
-    #[allow(clippy::too_many_arguments)]
-    fn resample_weighted(
-        &mut self,
-        viewer: PlayerId,
-        owner: PlayerId,
-        slots: &[CardIdx],
-        pinned: &[CardIdx],
-        defs: Vec<DefId>,
-        rng: &mut Rng,
-        w: &dyn Fn(DefId) -> f64,
-    ) {
+    /// `determinize_weighted`'s plan of `owner`'s cards `slots` (identities
+    /// `defs`), as `resample_with_clouds` places them (ENGINE.md 69.2): each
+    /// cloud's listed cards out of the pool, the slots' clouds, the hand's
+    /// places outside every cloud (the hand is one pool: a cloud covers all of
+    /// it or none) and each cloud's places and hand places.
+    fn weighted_plan(&self, viewer: PlayerId, owner: PlayerId, slots: &[CardIdx], pinned: &[CardIdx], defs: Vec<DefId>) -> WeightedPlan {
         let mut pool = defs;
         pool.sort_unstable();
         let clouds = self.clouds.iter().any(|k| k.viewer == viewer && k.owner == owner);
@@ -919,25 +1129,64 @@ impl Game {
             }
         }
         let in_hand: Vec<bool> = slots.iter().map(|&c| self.objs[c.i()].zone == Zone::Hand).collect();
-        // The hand's slots outside every cloud (the hand is one pool: a cloud
-        // covers all of it or none): weighted draws from the pool.
         let free_hand = (0..slots.len()).filter(|&i| in_hand[i] && home[i].is_none()).count();
-        let hand_ids = weighted_draws(&mut pool, free_hand, w, rng);
+        let clouds = (0..needs.len())
+            .map(|ki| {
+                let mine: Vec<usize> = (0..slots.len()).filter(|&i| home[i] == Some(ki)).collect();
+                let hand_pos: Vec<usize> = mine.iter().enumerate().filter(|&(_, &i)| in_hand[i]).map(|(k, _)| k).collect();
+                PlanCloud { mine, hand_pos }
+            })
+            .collect();
+        WeightedPlan { pool, home, needs, in_hand, free_hand, clouds }
+    }
+
+    /// `determinize_weighted`'s deal of `slots` by `plan`: the hand's places
+    /// outside every cloud get weighted draws from the pool; the rest of the
+    /// pool shuffled; each cloud its listed cards and as many free cards as it
+    /// has places, its hand places drawn from them by the weights, the rest
+    /// uniform; the other places the rest of the pool. `force`: one hand
+    /// place's draw dealt with its card of the kind first
+    /// (`weighted_draws_forced`; `deal_weighted_pick`): its importance ratio
+    /// and the card at that place are returned (else 1 and None).
+    fn deal_weighted(
+        &mut self,
+        plan: &WeightedPlan,
+        slots: &[CardIdx],
+        rng: &mut Rng,
+        w: &dyn Fn(DefId) -> f64,
+        force: Option<(Force, &[DefId])>,
+    ) -> (f64, Option<CardIdx>) {
+        let mut ratio = 1.0;
+        let mut pool = plan.pool.clone();
+        let hand_ids = match force {
+            Some((Force { seq: None, j }, kind)) => {
+                let (v, r) = weighted_draws_forced(&mut pool, plan.free_hand, j, kind, w, rng);
+                ratio = r;
+                v
+            }
+            _ => weighted_draws(&mut pool, plan.free_hand, w, rng),
+        };
         rng.shuffle(&mut pool);
         let mut free = pool.into_iter();
-        let mut per_cloud: Vec<Vec<DefId>> = needs;
+        let mut per_cloud: Vec<Vec<DefId>> = plan.needs.clone();
         for (ki, v) in per_cloud.iter_mut().enumerate() {
-            let mine: Vec<usize> = (0..slots.len()).filter(|&i| home[i] == Some(ki)).collect();
+            let PlanCloud { mine, hand_pos } = &plan.clouds[ki];
             while v.len() < mine.len() {
                 v.push(free.next().expect("pool covers every place"));
             }
             // its hand slots (in its slot order) by the weights, the rest uniform
-            let hand_pos: Vec<usize> = mine.iter().enumerate().filter(|&(_, &i)| in_hand[i]).map(|(k, _)| k).collect();
             if hand_pos.is_empty() {
                 rng.shuffle(v);
             } else {
                 v.sort_unstable();
-                let drawn = weighted_draws(v, hand_pos.len(), w, rng);
+                let drawn = match force {
+                    Some((Force { seq: Some(fk), j }, kind)) if fk == ki => {
+                        let (d, r) = weighted_draws_forced(v, hand_pos.len(), j, kind, w, rng);
+                        ratio = r;
+                        d
+                    }
+                    _ => weighted_draws(v, hand_pos.len(), w, rng),
+                };
                 rng.shuffle(v);
                 let mut rest = std::mem::take(v).into_iter();
                 let mut d = drawn.into_iter();
@@ -946,16 +1195,40 @@ impl Game {
         }
         let mut next = vec![0usize; per_cloud.len()];
         let mut hand_next = hand_ids.into_iter();
+        let mut free_hand_k = 0usize;
+        let mut picked = None;
         for (i, &c) in slots.iter().enumerate() {
-            let d = match home[i] {
+            let d = match plan.home[i] {
                 Some(ki) => {
                     next[ki] += 1;
+                    if let Some((Force { seq: Some(fk), j }, _)) = force {
+                        if fk == ki && plan.clouds[ki].hand_pos.get(j) == Some(&(next[ki] - 1)) {
+                            picked = Some(c);
+                        }
+                    }
                     per_cloud[ki][next[ki] - 1]
                 }
-                None if in_hand[i] => hand_next.next().expect("a draw for every hand slot"),
+                None if plan.in_hand[i] => {
+                    if let Some((Force { seq: None, j }, _)) = force {
+                        if j == free_hand_k {
+                            picked = Some(c);
+                        }
+                    }
+                    free_hand_k += 1;
+                    hand_next.next().expect("a draw for every hand slot")
+                }
                 None => free.next().expect("pool covers every place"),
             };
             self.set_ident(c, d);
+        }
+        (ratio, picked)
+    }
+
+    /// Show and Tell's pending face-down choice (the frame at agenda `k`,
+    /// `hidden_pick`) is card `c` in this world.
+    fn set_hidden_pick(&mut self, k: usize, c: CardIdx) {
+        if let crate::flow::Task::Run(f) = &mut self.agenda[k] {
+            f.picked[0] = c;
         }
     }
 

@@ -390,7 +390,9 @@ PACKAGE = register(GamePackage(
     # package's run settings (evaluator_every 0 and deckchoice_eval_games 0: off), each self-play phase's spec naming
     # the run's newest evaluator version, the deck-choice evaluation (a yardstick: None when off) and its evaluator
     # file shipped to a remote evaluation; the package's run settings are both features' (every one off by default)
-    settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS), selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec'},
+    # `mtg`'s hook keeps the run's spec and refuses one with "keep_deck" (an evaluation setting, docs/ENGINE.md 147.4)
+    settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS),
+    selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec', 'mtg': 'mtgz.az.decklists:selfplay_spec'},
     remote_eval_inputs={'mtg_eoe': 'mtgz.sealed.rolling:remote_eval_inputs'},
     specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',
     env_prefix='MTGZ', presets=PRESETS, tokens={'mtg': LAYOUT, 'team_draft': LAYOUT_DRAFT, 'mtg_eoe': LAYOUT_EOE},

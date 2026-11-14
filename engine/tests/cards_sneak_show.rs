@@ -287,6 +287,89 @@ fn cr_101_4a_the_other_players_worlds_deal_a_legal_face_down_choice() {
     let _ = &mut base;
 }
 
+/// ENGINE.md 147.5 (the Fable review's hidden B4): a belief-weighted world (`determinize_weighted`) with Show and
+/// Tell's face-down choice pending deals the choice with the deal, exactly. P0 chose Emrakul face down; P1 knows
+/// none of P0's five hidden cards (hand: Emrakul, Brainstorm; library: Griselbrand, Ponder, Island), so P1's worlds
+/// draw P0's two hand cards by the weights (Wallenius' urn) and the choice among them: each (hand, choice) in
+/// proportion to the urn's probability of the hand times [the choice is an artifact, creature, enchantment or land
+/// card], the choice uniform among the hand's places (`hidden_pick_ok`'s model). With the cards of the kind at the
+/// belief clip's floor and the others at its ceiling (R = 1000) the old rejection of whole deals accepted about one
+/// deal in a million and panicked at `HIDDEN_PICK_TRIES`; now every world is dealt at once. Both weightings: the
+/// world's (put card, other hand card) frequencies against the exact target, enumerated here from the urn, within 4
+/// standard errors; P1's options the same in every world.
+#[test]
+fn cr_101_4a_a_belief_weighted_world_deals_the_face_down_choice_exactly() {
+    let mut base = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Island", "Island", "Island"])
+        .hand(0, &[SNT, EMRAKUL, "Brainstorm"])
+        .library(0, &[GRIS, "Ponder", "Island"])
+        .hand(1, &["Brainstorm"])
+        .library(1, &["Island"; 12])
+        .at(Step::Main1, 0)
+        .start();
+    cast_snt(&mut base);
+    snt_pick(&mut base, 0, Some(EMRAKUL));
+    assert_eq!(base.pending_decision().unwrap().player, 1);
+    let before: Vec<CardIdx> = base.battlefield().to_vec();
+    let pool = [EMRAKUL, "Brainstorm", GRIS, "Ponder", "Island"];
+    let kind = |n: &str| [EMRAKUL, GRIS, "Island"].contains(&n);
+    let r = 1000.0;
+    let extreme = move |n: &str| if kind(n) { 1.0 / r } else { r };
+    let moderate = |n: &str| match n {
+        EMRAKUL => 3.0,
+        GRIS => 0.5,
+        "Brainstorm" => 2.0,
+        "Ponder" => 0.25,
+        _ => 1.0,
+    };
+    let weightings: [(&str, &dyn Fn(&str) -> f64); 2] = [("extreme", &extreme), ("moderate", &moderate)];
+    for (label, wn) in weightings {
+        // The exact target: two draws of the urn, a choice at each place of the kind.
+        let mut want: std::collections::BTreeMap<(String, String), f64> = Default::default();
+        let s: f64 = pool.iter().map(|n| wn(n)).sum();
+        for a in pool {
+            for b in pool.iter().filter(|&&b| b != a) {
+                let p = wn(a) / s * wn(b) / (s - wn(a));
+                for (put, other) in [(a, *b), (*b, a)] {
+                    if kind(put) {
+                        *want.entry((put.to_string(), other.to_string())).or_default() += p;
+                    }
+                }
+            }
+        }
+        let z: f64 = want.values().sum();
+        let ids: std::collections::BTreeMap<u16, f64> = pool.iter().map(|n| (def(n), wn(n))).collect();
+        let w = |d: u16| *ids.get(&d).unwrap_or(&1.0);
+        let n = 4000;
+        let mut seen: std::collections::BTreeMap<(String, String), u32> = Default::default();
+        for s in 0..n {
+            let mut world = base.clone();
+            world.determinize_weighted(1, &mut Rng::new(s), &w);
+            assert_eq!(world.offered(), base.offered(), "{label} world {s}: P1's options");
+            let hand: Vec<String> = world.player(0).hand.iter().map(|&c| world.name(c).to_string()).collect();
+            world.pass();
+            until_priority(&mut world, &|_| None);
+            let new: Vec<CardIdx> = world.battlefield().iter().copied().filter(|&c| world.obj(c).owner == 0 && !before.contains(&c)).collect();
+            assert_eq!(new.len(), 1, "{label} world {s}: one card put
+{}", log(&world));
+            let put = world.name(new[0]).to_string();
+            assert_eq!(world.player(0).hand.len() + 1, hand.len(), "{label} world {s}: one card put\n{}", log(&world));
+            let other = world.player(0).hand.iter().map(|&c| world.name(c).to_string()).next().unwrap();
+            assert!(kind(&put), "{label} world {s}: {put} put");
+            *seen.entry((put, other)).or_default() += 1;
+        }
+        for (key, p) in &want {
+            let p = p / z;
+            let f = *seen.get(key).unwrap_or(&0) as f64 / n as f64;
+            let se = (p * (1.0 - p) / n as f64).sqrt();
+            assert!((f - p).abs() < 4.0 * se + 2e-3, "{label}: {key:?} dealt {f:.4}, exactly {p:.4} ({seen:?})");
+        }
+        assert_eq!(seen.values().sum::<u32>(), n as u32, "{label}: {seen:?}");
+        assert!(seen.keys().all(|k| want.contains_key(k)), "{label}: {seen:?}");
+    }
+}
+
 #[test]
 fn cr_101_4a_a_known_hand_is_one_pool_the_choice_among_its_cards_of_the_kind() {
     // ruling: a107ed89

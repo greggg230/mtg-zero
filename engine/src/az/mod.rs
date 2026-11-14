@@ -505,6 +505,24 @@ impl MtgSpec {
             if s.chooser.is_some() {
                 return Err("mtg spec: chooser is game 1's (CR 103.1), and start_game 2 plays no game 1: game 2's chooser is game 1's loser (ENGINE.md 130)".into());
             }
+            // (ENGINE.md 147.4: game 1's result is drawn as a fair coin, exact only when both seats' game-1 win
+            // chance is 1/2 - the mirror's, by symmetry. Two different 75s have a game-1 edge nobody knows, and the
+            // coin would train and evaluate on the wrong share of who chooses in game 2 and of matches reaching game
+            // 3. Constructed decks that are not lists are refused below.)
+            let same = |a: &[DefId], b: &[DefId]| {
+                let (mut a, mut b) = (a.to_vec(), b.to_vec());
+                a.sort_unstable();
+                b.sort_unstable();
+                a == b
+            };
+            let mirror = match &s.decks {
+                DeckMode::Lists(a, b) => Some(same(a, b)),
+                DeckMode::ListsWithSideboards([(a, sa), (b, sb)]) => Some(same(a, b) && same(sa, sb)),
+                _ => None,
+            };
+            if mirror == Some(false) {
+                return Err("mtg spec: start_game 2 is for a mirror (both seats the same main and sideboard): game 1's result is drawn as a fair coin, which only a mirror's game 1 is (ENGINE.md 130, 147.4)".into());
+            }
         }
         if s.keep_deck.iter().any(|&k| k) && !constructed_bo3 {
             return Err("mtg spec: keep_deck is for a constructed best-of-three (\"constructed\": true, \"format\": \"bo3\"; ENGINE.md 130)".into());

@@ -182,7 +182,7 @@ impl Game {
     /// A pending [`SnS::EachPlayerPutsFromHand`] whose face-down choice of a
     /// card in `owner`'s hand `viewer` doesn't know: the frame on the agenda
     /// (its index), the card and the filter.
-    fn hidden_pick(&self, viewer: PlayerId, owner: PlayerId) -> Option<(usize, CardIdx, Filter)> {
+    pub(crate) fn hidden_pick(&self, viewer: PlayerId, owner: PlayerId) -> Option<(usize, CardIdx, Filter)> {
         if viewer == owner || self.turn.active != owner {
             return None;
         }

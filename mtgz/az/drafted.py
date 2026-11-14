@@ -13,9 +13,12 @@ matches and the matches' result rows back into the event's `resolve` input.
 * `results(payload, rows)`: the matches' result rows in the payload's order (the resolver's
   rows: `result` per seat, `scores` the game wins) -> `[{"result": [a, b], "scores": [...]}, ...]`.
   A malformed result is refused (ValueError): another number of rows than of matches, a row
-  that is not a two-player match, a result other than 1/0, 0/1 or 0.5/0.5. A match cut at the
-  driver's `max_steps` arrives as a draw (0.5/0.5, `over` false) and counts as one, as zero-core
-  counts such an episode. `TeamDraftAz::resolve` checks the results again.
+  that is not a two-player match, a result other than 1/0, 0/1 or 0.5/0.5, and a match that did
+  not finish (`over` false or absent): one that **aborted** (a number past the engine's exact
+  range, docs/ENGINE.md 100.7: no result) or was **cut** at the driver's `max_steps` (`aborted`
+  false). Such a row carries a 0.5/0.5 placeholder, never an outcome: counted as a drawn match
+  it decided the event in silence (docs/ENGINE.md 147.3). The run stops with the match named;
+  `TeamDraftAz::resolve` checks the results again.
 
 Kept light (json only): the run's coordinator calls these on its threads.
 """
@@ -63,6 +66,12 @@ def results(payload, rows):
         raise ValueError(f'team_draft: {len(rows)} match results for {len(ms)} matches')
     out = []
     for k, r in enumerate(rows):
+        if r.get('over') is not True:
+            why = ('aborted: the game ended where the engine cannot go on exactly (docs/ENGINE.md 100.7)' if r.get('aborted')
+                   else "cut at the driver's max_steps" if r.get('over') is False
+                   else """no "over" field (not a driver's result row)""")
+            raise ValueError(f'team_draft: match {k} (tag {r.get("tag")!r}) did not finish - {why}: it has no result, and '
+                             f'its 0.5/0.5 placeholder would decide the event as a drawn match (docs/ENGINE.md 147.3)')
         res = [float(x) for x in r.get('result', ())]
         if len(res) != 2 or tuple(res) not in VALID:
             raise ValueError(f'team_draft: match {k}: result {r.get("result")!r} (a two-player match: 1/0, 0/1 or 0.5/0.5)')

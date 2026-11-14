@@ -773,8 +773,10 @@ pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<Ca
             let m = src.map_or(0, |c| g.chosen_land_color(c));
             (0..5).filter(|&t| m & (1 << t) != 0).map(|t| one(t, *n)).collect()
         }
-        // (At most 255 of a type, the pool's u8: past it the game aborts as
-        // the ability is activated, `Game::check_counter_mana`, F7.)
+        // (At most 255 of a type, the pool's u8. Past it the game ends
+        // aborted at the next decision (`Game::mana_past_bound`, checked by
+        // `ask_options` before any option built from this is shown) and as
+        // the mana is made (`Game::check_mana_bound`): F7, ENGINE.md 147.1.)
         ManaProd::SameTypeCounters { mask, counter } => match src.map_or(0, |c| g.counters_on(c, *counter)).min(255) as u8 {
             0 => Vec::new(),
             n => (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| one(t, n)).collect(),
@@ -801,14 +803,12 @@ pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<Ca
             go(&ts, *n, &mut [0; 6], &mut out);
             out
         }
-        ManaProd::PerPermanent { ty, filter } => {
-            let n = g.count_controlled(p, filter);
-            if n == 0 {
-                Vec::new()
-            } else {
-                vec![one(*ty as usize, n.min(255) as u8)]
-            }
-        }
+        // (Past 255, as `SameTypeCounters` above: the game ends aborted before
+        // this amount reaches a decision or the pool, ENGINE.md 147.1.)
+        ManaProd::PerPermanent { ty, filter } => match g.count_controlled(p, filter) {
+            0 => Vec::new(),
+            n => vec![one(*ty as usize, n.min(255) as u8)],
+        },
     }
 }
 
@@ -3140,7 +3140,8 @@ impl Game {
                 // (Its own ability or one another permanent grants it:
                 // `src_ability`, as the payment reads it.)
                 if let Some(m) = self.src_ability(src.card, src.slot).mana() {
-                    self.check_counter_mana(src.card, &m.prod);
+                    let controller = self.objs[src.card.i()].controller;
+                    self.check_mana_bound(controller, src.card, &m.prod);
                 }
             }
         }
@@ -3430,17 +3431,65 @@ impl Game {
         }
     }
 
-    /// F7 (ENGINE.md 100.7): a mana ability of `src` that makes mana equal to
-    /// the counters on it (`ManaProd::SameTypeCounters`) makes more than the
-    /// pool's 255 of a type (`productions` reads at most 255: workstream B's
-    /// `u8` model): the game ends aborted.
-    pub(crate) fn check_counter_mana(&mut self, src: CardIdx, prod: &ManaProd) {
-        if let ManaProd::SameTypeCounters { counter, .. } = prod {
-            let n = self.counters_on(src, *counter);
-            if n > u8::MAX as crate::num::Count {
-                self.abort(|| format!("{n} mana of one type from counters: past the pool's 255"));
+    /// The mana of one type a counted mana ability of `src`, controlled by
+    /// `p`, makes now, exactly: `ManaProd::SameTypeCounters` the counters on
+    /// it, `ManaProd::PerPermanent` the permanents `p` controls that its
+    /// filter takes. None for every other production (its amounts are the
+    /// lowering's `u8`s).
+    fn counted_mana(&self, p: PlayerId, src: CardIdx, prod: &ManaProd) -> Option<crate::num::Count> {
+        match prod {
+            ManaProd::SameTypeCounters { counter, .. } => Some(self.counters_on(src, *counter)),
+            ManaProd::PerPermanent { filter, .. } => Some(self.count_controlled(p, filter) as crate::num::Count),
+            _ => None,
+        }
+    }
+
+    /// F7 (ENGINE.md 100.7, 147.1): a mana ability of `src` (controlled by
+    /// `p`) that makes mana equal to the counters on it or to a number of
+    /// permanents makes more than 255 of a type - the bound of the pool's
+    /// `ManaPool::amt` and of a production's `[u8; 6]` (workstream B's `u8`
+    /// model): the game ends aborted, here as the mana is made (an
+    /// activation, a payment's picked source, a resolving "add").
+    pub(crate) fn check_mana_bound(&mut self, p: PlayerId, src: CardIdx, prod: &ManaProd) {
+        if let Some(n) = self.counted_mana(p, src, prod).filter(|&n| n > u8::MAX as crate::num::Count) {
+            let msg = format!("{} mana of one type from {}'s mana ability: past the pool's 255", n, self.name(src));
+            self.abort(|| msg);
+        }
+    }
+
+    /// ENGINE.md 147.1: a mana ability of a permanent that would make more
+    /// than 255 mana of one type now (a counted production,
+    /// [`counted_mana`](Self::counted_mana)), whether or not it can be
+    /// activated now. `productions` and the payment's classes read such an
+    /// amount as 255, so every decision is checked first
+    /// (`Game::ask_options`): the game ends aborted before any option set
+    /// built from it is shown or answered. A counted production past 255
+    /// needs more than 255 permanents or a count of counters past 255: below
+    /// both, nothing is scanned.
+    pub(crate) fn mana_past_bound(&self) -> Option<String> {
+        let big = u8::MAX as crate::num::Count;
+        if self.battlefield.len() <= u8::MAX as usize && !self.counters.iter().any(|x| x.2 > big) {
+            return None;
+        }
+        for &c in &self.battlefield {
+            let p = self.objs[c.i()].controller;
+            let d = self.abilities(c);
+            let granted = if self.grants_activated_now() { self.granted_activated(c) } else { Vec::new() };
+            let abilities = d
+                .activated
+                .iter()
+                .enumerate()
+                .filter(|&(i, _)| d.latent == 0 || self.has_activated(c, i))
+                .map(|(_, a)| a)
+                .chain(granted.iter().map(|g| self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot))));
+            for ad in abilities {
+                let Some(m) = ad.mana() else { continue };
+                if let Some(n) = self.counted_mana(p, c, &m.prod).filter(|&n| n > big) {
+                    return Some(format!("{}'s mana ability would make {n} mana of one type: past the pool's 255", self.name(c)));
+                }
             }
         }
+        None
     }
 }
 

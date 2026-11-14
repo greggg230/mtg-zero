@@ -47,7 +47,8 @@ def test_the_glue_maps_payloads_to_drafted_mtg_specs():
             mg = E.Game('mtg', spec, 2, 0)                                      # the engine takes the spec
             assert mg.to_move is not None and not mg.deferred
         # results: rows of the matches -> resolve's input; the event takes it
-        rows = [{'result': [1.0, 0.0] if k % 3 else [0.5, 0.5], 'scores': [2, 0], 'over': k != 1} for k in range(n)]
+        rows = [{'result': [1.0, 0.0] if k % 3 else [0.5, 0.5], 'scores': [2, 0], 'over': True, 'aborted': False}
+                for k in range(n)]
         res = drafted.results(payload, rows)
         assert json.loads(res)[0] == {'result': [0.5, 0.5], 'scores': [2.0, 0.0]}
         g.resolve(res)
@@ -57,10 +58,11 @@ def test_the_glue_maps_payloads_to_drafted_mtg_specs():
 def test_a_malformed_result_is_refused():
     g = an_event(4, 3)
     payload = g.deferred_payload()
-    good = [{'result': [0.0, 1.0], 'scores': [0, 2]}] * 4
+    good = [{'result': [0.0, 1.0], 'scores': [0, 2], 'over': True, 'aborted': False}] * 4
     assert drafted.results(payload, good)
     for bad in (good[:3], good + good[:1], [{'result': [0.3, 0.7], 'scores': [0, 0]}] + good[1:],
-                [{'result': [1.0, 0.0, 0.0], 'scores': [1, 0, 0]}] + good[1:], [{'scores': [0, 2]}] + good[1:]):
+                [{'result': [1.0, 0.0, 0.0], 'scores': [1, 0, 0], 'over': True}] + good[1:],
+                [{'scores': [0, 2], 'over': True}] + good[1:]):
         with pytest.raises(ValueError):
             drafted.results(payload, bad)
     for bad in ('{}', '{"event": {}, "matches": []}', 'not json'):
@@ -70,6 +72,27 @@ def test_a_malformed_result_is_refused():
     with pytest.raises(ValueError):
         g.resolve(json.dumps([{'result': [1, 1], 'scores': [0, 0]}] * 4))
     assert g.deferred
+
+
+def test_an_unfinished_match_is_refused_never_a_drawn_match():
+    """docs/ENGINE.md 147.3 (the Fable review's flow B1): a match that aborted (no result, ENGINE.md 100.7) or was cut
+    at the driver's max_steps arrives with `over` false and a 0.5/0.5 placeholder; `results` refuses it, naming the
+    match and the reason, instead of resolving the event with a drawn match."""
+    g = an_event(4, 3)
+    payload = g.deferred_payload()
+    won = {'result': [1.0, 0.0], 'scores': [2, 0], 'over': True, 'aborted': False, 'tag': '7/0'}
+    for k, row, why in ((2, {'aborted': True}, 'aborted'), (3, {'aborted': False}, "cut at the driver's max_steps"),
+                        (1, {'aborted': False, 'over': None}, 'no "over" field')):
+        bad = dict(won, result=[0.5, 0.5], scores=[0, 1], over=False, tag=f'7/{k}')
+        bad.update(row)
+        if bad['over'] is None:
+            del bad['over']
+        rows = [dict(won, tag=f'7/{j}') for j in range(4)]
+        rows[k] = bad
+        with pytest.raises(ValueError, match=rf"match {k} \(tag '7/{k}'\) did not finish - {why}"):
+            drafted.results(payload, rows)
+    # the same rows finished resolve the event
+    assert json.loads(drafted.results(payload, [dict(won, tag=f'7/{j}') for j in range(4)]))[2]['result'] == [1.0, 0.0]
 
 
 def test_events_park_and_resolve_through_two_drivers():

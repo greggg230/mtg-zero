@@ -640,6 +640,9 @@ const CROSS_PAIRS: [(usize, usize); 8] = [(1, 2), (2, 1), (1, 0), (0, 1), (2, 0)
 /// one match in four (by `seed / 8`) 12-turn games; `extra` merged into the spec (the post-sideboard matches').
 fn cross_bo3_spec_with(seed: u64, extra: serde_json::Value) -> engine::az::MtgSpec {
     let (p0, p1) = CROSS_PAIRS[(seed % 8) as usize];
+    // (A post-sideboard match is a mirror, ENGINE.md 147.4: `"start_game": 2` draws game 1 as a fair coin, exact for a
+    // mirror only; the pair's first 75 in both seats.)
+    let p1 = if extra.get("start_game").and_then(|x| x.as_u64()) == Some(2) { p0 } else { p1 };
     let ((m0, s0), (m1, s1)) = (bo3_lists(&real_75(p0)), bo3_lists(&real_75(p1)));
     let max_turns = if (seed / 8) % 4 == 3 { 12 } else { 60 };
     let mut v = serde_json::json!({"max_turns": max_turns, "constructed": true, "format": "bo3",
@@ -2776,6 +2779,21 @@ fn stack_refs(g: &Game, viewer: u8) -> String {
         .join(" ")
 }
 
+/// ENGINE.md 147.8 (lane G's F1, 148.6): the default pool's game 2122 passes every check of `play`. After a mana ability
+/// activated through `ActivateMana` (CR 605.3a) the next `ActivateMana` returned silently to `Priority` when no source
+/// was left - a fact of the decider's hidden hand (a Spirit Guide) - so two worlds of the other player's showed it
+/// `Priority` and `ActivateMana` after equal keys and equal legal actions (the open-decklist information-set walk).
+/// Now the one-option `ActivateMana` (`PASS`) is asked and keyed (`KEY_AUTO`). Default pool only (another pool's seed
+/// 2122 is another game); the cross pool's games 13536 and 19515 are the same finding (147.8).
+#[test]
+fn activate_mana_end_is_keyed_default_seed_2122() {
+    if pool_mode() != PoolMode::Default || hidden_decks_mode() {
+        return;
+    }
+    let p = play(2122, true);
+    assert!(!p.actions.is_empty());
+}
+
 #[test]
 fn fuzz_random_games() {
     let n: u64 = std::env::var("FUZZ_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
@@ -3117,11 +3135,13 @@ fn match_spec(seed: u64) -> engine::az::MtgSpec {
 /// one match in four P1 plays another 75 of supported cards (`OTHER_75`: the format takes any two
 /// 75s), one in four 12-turn games (drawn games).
 fn delver_bo3_spec(seed: u64) -> engine::az::MtgSpec {
-    delver_bo3_spec_with(seed, serde_json::json!({}))
+    delver_bo3_spec_with(seed, serde_json::json!({}), false)
 }
 
 /// `FUZZ_POOL=delver`'s post-sideboard matches (ENGINE.md 130): `delver_bo3_spec`'s with `"start_game": 2` and one
-/// episode per game; one match in three a seat keeps its deck (`"keep_deck"`, the yardstick's).
+/// episode per game; one match in three a seat keeps its deck (`"keep_deck"`, the yardstick's). Mirrors only (the
+/// spec refuses `"start_game": 2` for two different 75s, ENGINE.md 147.4): `delver_bo3_spec`'s one match in four
+/// with `OTHER_75` plays it in both seats.
 fn delver_post_spec(seed: u64) -> engine::az::MtgSpec {
     let mut extra = serde_json::json!({"start_game": 2, "game_episodes": true});
     // (dealt decks refuse a keeper: ENGINE.md 154)
@@ -3129,19 +3149,20 @@ fn delver_post_spec(seed: u64) -> engine::az::MtgSpec {
         extra["keep_deck"] = serde_json::json!([(seed / 3) % 2]);
     }
     if cross_mode() {
-        // (`FUZZ_POOL=cross`, ENGINE.md 148: its pairings of the real 75s)
+        // (`FUZZ_POOL=cross`, ENGINE.md 148: its pairings of the real 75s; post-sideboard, their mirrors, 147.4)
         return cross_bo3_spec_with(seed, extra);
     }
-    delver_bo3_spec_with(seed, extra)
+    delver_bo3_spec_with(seed, extra, true)
 }
 
-fn delver_bo3_spec_with(seed: u64, extra: serde_json::Value) -> engine::az::MtgSpec {
+fn delver_bo3_spec_with(seed: u64, extra: serde_json::Value, mirror: bool) -> engine::az::MtgSpec {
     let d = engine::az::constructed::Decklist::izzet_delver();
     let db = CardDb::constructed();
     let main = d.main_names();
     let side: Vec<String> = d.sideboard.iter().filter(|(_, n)| db.id(n).is_some()).flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect();
     let expand = |l: &[(u32, &str)]| -> Vec<String> { l.iter().flat_map(|&(k, n)| std::iter::repeat_n(n.to_string(), k as usize)).collect() };
     let (main1, side1) = if seed % 4 == 1 { (expand(&OTHER_75.0), expand(&OTHER_75.1)) } else { (main.clone(), side.clone()) };
+    let (main, side) = if mirror && seed % 4 == 1 { (main1.clone(), side1.clone()) } else { (main, side) };
     let max_turns = if seed % 4 == 3 { 12 } else { 60 };
     let mut v = serde_json::json!({"max_turns": max_turns, "constructed": true, "format": "bo3",
         "decks": {"p0": main, "p1": main1, "p0_sideboard": side, "p1_sideboard": side1}});

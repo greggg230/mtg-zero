@@ -916,12 +916,16 @@ pub struct Game {
     /// in exile (722.3c).
     pub(crate) prepared: Vec<(ObjRef, CardIdx)>,
     /// The loop actions taken this turn (`loops.rs`; CR 732.2a, MTR 4.4):
-    /// (player, the loop hash of the state as their decider saw it then,
-    /// the action). The action is not offered to that player again at a
-    /// state with the same hash: everything reachable by taking it there was
-    /// reachable when they took it, so taking it again could only repeat an
-    /// iteration that made no progress. Cleared as a turn begins.
-    pub(crate) loop_taken: Vec<(PlayerId, u64, crate::loops::LoopAct)>,
+    /// player, the loop hash of the state as their decider saw it then, the
+    /// action and its activation's decisions (`LoopRec`). That completed
+    /// action is not offered to that player again at a state with the same
+    /// hash: everything reachable by taking it there was reachable when they
+    /// took it, so taking it again could only repeat an iteration that made
+    /// no progress (ENGINE.md 100.7, 147.2). Cleared as a turn begins.
+    pub(crate) loop_taken: Vec<crate::loops::LoopRec>,
+    /// A loop action's activation in progress: its record so far, joining
+    /// `loop_taken` when its costs are paid (`loops.rs`, `Game::loop_progress`).
+    pub(crate) loop_open: Option<crate::loops::LoopOpen>,
     /// `SEEN_*` bits: a card of this game has the rare rule (ENGINE.md 29).
     pub(crate) seen: u16,
     // ---- M7b part 3b: the initiative and dungeons (ENGINE.md 27.4) ----
@@ -1346,6 +1350,7 @@ impl Game {
             pile_shuffles: 0,
             prepared: Vec::new(),
             loop_taken: Vec::new(),
+            loop_open: None,
             seen: 0,
             initiative: None,
             dungeons: [Dungeon::default(); 2],
