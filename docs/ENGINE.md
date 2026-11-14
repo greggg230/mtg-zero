@@ -29397,3 +29397,22 @@ opaque forced answer, or a live key with the other player's unmasked private key
   above, run by hand with `--net uniform`; the result in the branch's merge note).
 * zero-core's other games (`smoke_all.sh --with-this-core --build-only`) were not built here (the orchestrator's
   step): the trait gained defaulted items only.
+
+### 149.5 Memory and the gate's smoke on a quiet machine (2026-11-13, the live run paused)
+
+* **Peak working set** (`tools/search_smoke.py --seeds 0 --games 120 --threads 8`, the process tree's peak RSS, this
+  branch against the baseline 267ae603 back to back): the cube best-of-three `match` 13.15 GB -> 14.45 GB (+9.9%; 330,702
+  -> 342,010 decisions, 9.12 -> 9.42 million simulations, 397 -> 435 s), the Delver mirror 3.37 GB -> 3.49 GB (+3.6%;
+  79,661 -> 81,695 decisions, 89.3 -> 88.9 s). Per decision +6% (match) and +1% (Delver). Most of a process's memory is
+  the games' training rows held until each game ends (about 225 KB a recorded row), so more decisions weigh in; the
+  rest is the trees living longer (across the opponent's passes, one more tree per slot while the opponent decides). A
+  tree's arrays stay bounded as before: `reroot` compacts above 65,536 nodes (`COMPACT_AT`). If the residual matters,
+  a bound that changes no search: compact at every merging reuse (`line_advance` with more than one node found) or
+  whenever the arrays hold more than a few times the reachable subtree - compaction copies the subtree and the search
+  goes on bit for bit (zero-core `line_reuse_merges_the_forced_and_the_chosen_answer` checks it after a merge) - at
+  O(subtree) per reuse.
+* **The gate's `match` config at its size** (400 matches, `--threads 8`, the gate's 1800 s limit): 0 unfinished,
+  1,091,294 decisions, 30.1 million simulations, 1,285 s, peak 30.4 GB. The gate's failure (1,802 s) was the machine's
+  load. (The baseline's run at that size was stopped by the 6 GB free-memory guard at 567 s, 27.5 GB.)
+* **zero-core's pytest** (with this core): 580 passed, 1 failed - `test_multi_remote.py::test_the_file_adds_and_removes_hosts_of_a_live_run`
+  (a remote host took no game in two iterations: timing under load), which passed alone (95 s).
