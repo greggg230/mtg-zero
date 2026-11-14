@@ -3663,10 +3663,30 @@ fn play_match_spec(seed: u64, sp: &engine::az::MtgSpec, checks: bool, stats: &mu
         assert_eq!(g.m.dealt, None);
     }
     // (A post-sideboard match, ENGINE.md 130, starts at the sideboarding before game 2: game 1 drawn, never a
-    // draw, its loser sideboarding first.)
+    // draw, its loser sideboarding first (CR 103.1). A dealt loser (ENGINE.md 154.1) is dealt at once - its 60
+    // done, no decision of its own - so the winner is the first decider; otherwise the loser decides, nothing done.)
     if sp.start_game == 2 {
         assert!(g.m.post_board && g.m.game_no == 1 && matches!(g.m.results[0], 1 | 2), "match {seed}: a post-sideboard start");
-        assert_eq!(g.sideboarding().map(|s| s.decider()), Some(2 - g.m.results[0]), "match {seed}: game 1's loser sideboards first");
+        let loser = 2 - g.m.results[0];
+        let sb = g.sideboarding().unwrap_or_else(|| panic!("match {seed}: a post-sideboard start without its sideboarding"));
+        assert_eq!(sb.order, [loser, 1 - loser], "match {seed}: game 1's loser sideboards first");
+        if g.m.dealt == Some(loser) {
+            assert!(
+                sb.turn == 1 && sb.done[loser as usize].is_some() && sb.done[1 - loser as usize].is_none(),
+                "match {seed}: game 1's loser P{loser} is the dealt seat: dealt at once (its 60 done), the winner deciding (turn {}, done {:?})",
+                sb.turn,
+                sb.done.iter().map(|d| d.is_some()).collect::<Vec<_>>()
+            );
+            assert_eq!(sb.decider(), 1 - loser, "match {seed}: game 1's loser is dealt: the winner decides first");
+        } else {
+            assert!(
+                sb.turn == 0 && sb.done.iter().all(|d| d.is_none()),
+                "match {seed}: game 1's loser P{loser} decides first, nothing done yet (turn {}, done {:?})",
+                sb.turn,
+                sb.done.iter().map(|d| d.is_some()).collect::<Vec<_>>()
+            );
+            assert_eq!(sb.decider(), loser, "match {seed}: game 1's loser sideboards first");
+        }
     }
     let mut keeper_decisions = 0u32;
     let mut rng = Rng::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 5);

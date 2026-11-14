@@ -31376,12 +31376,16 @@ lanes; target dirs `E:/cargo-target/mtg-zero/integrate-fable`, `E:/cargo-target/
 * Fuzz smoke, the default pool (`FUZZ_GAMES=200 FUZZ_MATCHES=20`): **4 passed** - every lane's checks on together
   (148's 4,508 open-decklist walks and 110 match walks, 141's 7,344 + 6,424 private keys masked, 150's rules checks on
   224,581 + 40,502 states, no violation).
-* **`FUZZ_POOL=delver_dealt` fails** (`FUZZ_GAMES=200 FUZZ_MATCHES=20`: `fuzz_random_matches` match 5 and
+* `FUZZ_POOL=delver_dealt` failed at first (`FUZZ_GAMES=200 FUZZ_MATCHES=20`: `fuzz_random_matches` match 5 and
   `same_seed_and_actions_replay_matches_identically` match 2000): `play_match_spec`'s assertion "game 1's loser
-  sideboards first" (main's, `fuzz.rs` 3669 here) does not hold in a post-sideboard match whose game-1 loser is the dealt
-  seat - dealt at once (154.1), so the first decider is the winner. A stale check of dealt decks' own pool (the same
-  line on `feat/dealt-decks` 6514e937, which this merge did not touch); for its lane. The default pool's games and
-  matches, and the dealt pool's 200 games, pass.
+  sideboards first" (main's) read the first *decider*, which in a post-sideboard match whose game-1 loser is the dealt
+  seat is the winner - the loser is dealt at once (154.1: `begin_sideboarding` -> `dealt_sideboards`). A stale check of
+  dealt decks' own pool (the same line on `feat/dealt-decks` 6514e937), fixed here (the orchestrator's call, so the
+  dealt-decks session leaves it): the check is exact for both cases - `order` is [loser, winner] in both; a dealt loser:
+  `turn` 1, its 60 done, the winner's not, the winner deciding; otherwise `turn` 0, nothing done, the loser deciding.
+  Then `FUZZ_POOL=delver_dealt FUZZ_GAMES=400 FUZZ_MATCHES=100`: **4 passed** (72 of 100 matches and 72 of 100
+  post-sideboard matches dealt, 122 + 124 dealt 60s checked, no rules check violated; the post-sideboard line's "124 of
+  a seat that keeps its deck" is dealt decks' `kept.max(dealt_decks)`: its dealt 60s, no keeper).
 * `python -m pytest tests -q`: **384 passed**, 1 skipped (10:44).
 * Not run in batch 1 (the orchestrator's end-of-campaign step): the digests and `digest_formats` (G's driver digest is
   expected to differ since H, 149.4), the 20k fuzz, the gates.
