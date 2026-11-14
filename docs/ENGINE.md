@@ -29623,7 +29623,97 @@ turn" facts read a player's turns: a combination artifact of this run).
   0.020; `counters`' stayed exactly 0 - zero-core's warning, its gradient pushing it shut through the straight-through
   `max(theta, 0)` as `graveyard_order`'s in 125.12; `numbers` had no token), evaluation and Elo; exit 0.
 * **pytest** (`bash tools/build_py.sh`, `python -m pytest -q tests`): **323 passed, 1 skipped**.
-* **The tier gate**: 142.10.
+* **The tier gate**: 142.11.
+
+### 142.10 An enclosing task's picks (the Fable review's X3: the orchestrator's decision (a), 2026-11-13); fix lane I's reference helpers
+
+**Why.** X3 (156.9): in `FUZZ_POOL=interactions` games 5,682, 6,025, 7,790 and 12,725 two tasks of the agenda hold
+picks in progress at once - Etali, Primal Conqueror's trigger keeps the cards it exiled as picks while its controller
+casts one of them for free, and that spell's cost picks objects too (5,682: Abhorrent Oculus, "as an additional cost to
+cast this spell, exile six cards from your graveyard": a `PayCosts` task with its picks on top of Etali's frame) - and
+`Cx::picks_in_progress` failed loudly ("picks in progress in two tasks of the agenda"): a self-play game aborted. The
+decision under the no-gaps rule: **(a)**, an enclosing task's picks shown apart (not (b): `K_PICKED` tokens ranked after
+the asking task's lose which task holds them; not (c): the loud failure), in this v7 amendment.
+
+**What.**
+* `tail_encode::agenda_picks` (was `Cx::picks_in_progress`; `Cx::picks_in_progress` calls it): every agenda task
+  holding picks (a resolution's frame, `PayCosts`, `OrderTimestamps`, `Devour`), innermost first. The innermost
+  holder's picks are as before (125): the head's pick floats (`perm::PICK_RANK` .., `hand::PICKED` .., `list::PICKED`
+  ..) and `links` tokens (`K_PICKED`, `K_PICKED_DEF`) for the picks no other block holds. Each enclosing holder's picks
+  are `Picks::outer`, innermost first, and every one of them is a `links` token (a permanent, a card of the list block or
+  of the frame player's hand too: the head's floats are the innermost holder's), with a new float **`lk::DEPTH`** = the
+  holder's depth / 8 (0: the innermost holder; 1: the task around it, ...), its rank in its own task and its picker - the
+  same rules as the innermost holder's (156): the other player's pick of a card of its own hand a token with no
+  identity, a card hidden from the viewer that it doesn't know no token, a search's definitions to the searcher only.
+  The `links` token is 183 floats (182; `lk::W`); `layout_v7.json` regenerated, still revision 1 (no v7 network or
+  run had the amendment yet: the shape changed and the encoding guard sees it).
+* Layout v6 (`mtg_eoe`) has the innermost holder's picks only: `encode_features` of a v6 buffer fails loudly on a state
+  with an enclosing task's picks (no EoE card makes one; the fuzz's v6 projection check, `encode_features_v6_check`,
+  still compares the head, which is the same).
+
+**The gate.**
+* `Game.agenda` is classified public (its tasks' picks in progress; 142.2's classification had it derived: "what a player
+  sees of it is the pending decision"), and `Game::view_of` shows the picks in progress: every holder's, innermost first,
+  each object by its public place and its picker, a search's definitions to its searcher (the views were blind to picks).
+* Two rare perturbations of one family (one stream, the same card): "the asking task holding picks picks one more offered
+  card" (the asking task, the agenda's last, holds picks already: one more of the cards its decision offers - a state its
+  next decision reads consistently, as the hidden-information check recomputes it for the player who doesn't decide) and
+  "an enclosing task holds a pick in progress" (that card held by the task around the innermost holder). Both are layout
+  v7 facts (`V7_FIXED`: v6 has no picks), and in `COMBO_EXCLUDED` (so every position's partner draw is as before).
+* The positions: `enclosing_picks_positions` (`tests/az.rs`) builds 5,682's state - Etali cast with seven Mountains, its
+  trigger exiling Abhorrent Oculus and a Lightning Bolt, the free Oculus's cost picking from seven graveyard cards - and
+  gives the positions of the cost's second to sixth picks (both viewers' rows have depth tokens there) to the single
+  pass, the pairwise pass and the hidden-information check of the fixed perturbations (`gate_positions`' other users
+  don't get them).
+* Results (485 positions): the single pass **229 perturbations encoded, 2 deliberate limits, 0 known gaps** in layout v7
+  (142.8: 227) - "one more offered card" applied on 6 positions, "an enclosing task holds a pick in progress" on the 5
+  built ones, both changing both views and both viewers' rows; the pairwise pass 135,503 states, **no collision in
+  layout v7** but the framed row's 334 pairs (142.8, the memo's 2.9) - the same card held by the asking task and by the
+  task around it encode apart -, layout v6's pairs all covered by its entries; the hidden-information check of the
+  fixed perturbations 12,932 perturbed positions, 51,728 worlds compared (6,270 deck-tilted), each world's encoding the
+  same.
+
+**The regression test.** `fuzz.rs::enclosing_picks_of_etali_s_casts_are_encoded` replays interactions games 5,682,
+6,025, 7,790 and 12,725 (`POOL_OVERRIDE`, a thread-local pool over `FUZZ_POOL`) with every check, then reads every
+decision's rows: each game has `links` pick tokens with a depth (5,682: one decision, both viewers; 6,025: three;
+7,790: two; 12,725: one); before this section each of the four failed with X3's message (156.9).
+
+**The farm's `zero-onnx/2`.** As 142.7: a layout-driven worker reads it. The `links` segment's width is 183 floats now
+(the layout file's `width`), and a row's `links` tokens are not bounded by one task's picks.
+
+**Fix lane I's helpers** (merged: `fix/hidden-refs` 3ca4fb2d, merge 2dd7e8d5). The new segments' references go through
+lane I's shared helpers: every object reference through `Cx::write_ref` (`effects`: the affected object and a "for as long
+as" object; a copy effect's permanent; the `counters` and `numbers` tokens' objects), every card code of a referenced
+object through `Cx::ref_def` (a live reference: the viewer's knowledge of the object; a stale one: its last known
+information), the enclosing picks through `Cx::write_ref_as` as the innermost's. `Game::for_each_public_ref` (`hidden.rs`)
+lists the new reference holders - each continuous effect's `Affected::Obj` and `Until::WhileOnBattlefield` objects and
+each copy effect's object (the counters' and numbers' objects are the objects themselves, in public zones, not stored
+references; picks are card slots with 156's own rules, not references).
+
+### 142.11 Checks (142.10) and the tier gate
+
+On cdc2cdb6's code (142.7-142.10 with fix lane I's 156 merged), on the shared desktop (the live run paused; the slot
+throttle, eight slots):
+
+* **Digests**: cube (`digests.txt`) `DIGEST_ENCODING=0` **a0062bb5569e06d3** and `DIGEST_ENCODING=v6`
+  **b63f643e97a30a61**, both unchanged (no game plays differently; the head and the v6 path are as before); the full
+  digest **b9ad17dc0dee92e7** (fix/hidden-refs', the merge's) **-> 72dba7025d8585b4** (2,306 of 2,500 games' lines),
+  re-recorded on purpose (`DIGEST_WRITE=1`, 3e24f759). `digest_formats` (148.1): constructed `DIGEST_ENCODING=0`
+  **7ace0291619aa36f** unchanged, full **af4e796d28aeb023 -> ccbbbd3f3ab38a18** (389 of 570 lines); EoE
+  **b36df9098a38d794 EQUAL** (`=0` 52bb9c00a23d24d3: `mtg_eoe` keeps layout v6, untouched); the driver
+  **837d42c28214befe -> 82d0339cf64a2df8** (18 of 21 checkpoints, the first three equal: its batches and samples hash
+  the rows' tail tokens; the same 20,000 batches, 1,251 samples and 5 results). Each compared again after recording:
+  equal.
+* **The engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`): 165 binaries, **2,554 passed, 0
+  failed**, 31 ignored (142.9: 163 binaries and 2,547; fix lane I's and 148's tests merged, and 142.10's).
+* **The targeted tests**: `public_state_reaches_the_encoding`, `public_states_encode_apart`,
+  `the_v5_facts_encode_no_hidden_information`, `public_state_classification`, `layout_json_is_checked_in`, the
+  `public_state` unit tests, `tests/v7_tails.rs` (20 passed) and `enclosing_picks_of_etali_s_casts_are_encoded`: passed
+  (142.10's numbers).
+FUZZ-14211
+WIDEN-14211
+GATE-14211
+
 ## 148. Check gaps: digests beyond the cube table, the fuzz's information-set holes, the cross-deck pool, benchmarks on the module's allocator (branch `fix/check-gaps`, 2026-11-12)
 
 **Why.** The Fable review of `e81f8304..267ae603` (`SUMMARY.md`, "Check and metric gaps"; `hidden.md` I2, I4; `perf.md`
