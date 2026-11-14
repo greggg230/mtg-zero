@@ -1156,6 +1156,31 @@ pub enum ManaProd {
     ChosenN(u8),
 }
 
+impl ManaProd {
+    /// The most mana of one type one production makes by itself: the
+    /// lowering's own amounts (each a `u8`); a count of permanents or
+    /// counters (`PerPermanent`, `SameTypeCounters`) 0, bounded apart
+    /// (`Game::mana_past_bound`, ENGINE.md 147.11).
+    pub(crate) fn fixed_max(&self) -> u32 {
+        let max = |v: &[u8; 6]| v.iter().copied().max().unwrap_or(0) as u32;
+        match self {
+            ManaProd::Fixed(v) => max(v),
+            ManaProd::SameType { n, .. } | ManaProd::Combo { n, .. } | ManaProd::ChosenN(n) => *n as u32,
+            ManaProd::IfElse { then, els, .. } => max(then).max(max(els)),
+            ManaProd::OneOf(vs) => vs.iter().map(max).max().unwrap_or(0),
+            ManaProd::PerPermanent { .. } | ManaProd::SameTypeCounters { .. } => 0,
+            ManaProd::One(_)
+            | ManaProd::ComboX { .. }
+            | ManaProd::ColorAmong(_)
+            | ManaProd::Linked
+            | ManaProd::SacrificedLand
+            | ManaProd::Chosen
+            | ManaProd::IfCounter { .. }
+            | ManaProd::LandsCouldProduce => 1,
+        }
+    }
+}
+
 /// A mana ability's effect: the mana, plus damage its source deals to its
 /// controller (Talismans, Ancient Tomb).
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -2143,6 +2168,14 @@ pub struct CardDb {
     /// (`EoeW2::EventObjControllerGainsSource`): the game keeps it
     /// (`Game::lki_toughness`; ENGINE.md 99.12).
     pub(crate) watch_lki_controller: bool,
+    /// The most mana of one type a mana ability of the table makes by itself
+    /// (`ManaProd::fixed_max`; a count of permanents or counters aside), and
+    /// the most one permanent's "whenever you tap ... add an additional"
+    /// abilities add to one type (its land-subtype bonuses and its creature
+    /// bonus): `Game::mana_past_bound`'s bound, nothing scanned below it
+    /// (ENGINE.md 147.11). `refresh_mana_bounds` computes them.
+    pub(crate) mana_fixed_max: u32,
+    pub(crate) tap_bonus_max: u32,
 }
 
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
@@ -2356,6 +2389,7 @@ impl CardDb {
         }
         db.merged = merged;
         db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
+        db.refresh_mana_bounds();
         db.watch_toughness = db.defs.iter().any(|d| d.toughness_assigns_damage || d.toughness_stations);
         db.hand_alt_grants = db.defs.iter().any(|d| !d.casting.hand_alt_grants.is_empty());
         // (Cards W6 refuses for what else the table holds: out of the table,
@@ -2411,6 +2445,19 @@ impl CardDb {
         // R17 (ENGINE.md 125): no card reads a graveyard order the layout leaves out.
         crate::lower::graveyard_order::check(&db);
         db
+    }
+
+    /// `mana_fixed_max` and `tap_bonus_max` from the definitions (after a
+    /// change to them: `from_cards`, a test's table).
+    pub(crate) fn refresh_mana_bounds(&mut self) {
+        let abilities = |d: &CardDef| d.activated.iter().chain(d.hand_abilities.iter()).filter_map(|a| a.mana()).map(|m| m.prod.fixed_max()).max().unwrap_or(0);
+        self.mana_fixed_max = self.defs.iter().map(abilities).max().unwrap_or(0);
+        self.tap_bonus_max = self
+            .defs
+            .iter()
+            .map(|d| d.extra_mana_on_tap.len() as u32 + d.extra_mana_creature.iter().copied().max().unwrap_or(0) as u32)
+            .max()
+            .unwrap_or(0);
     }
 
     /// The definition of face-down permanents (CR 708.2a).

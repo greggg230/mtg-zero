@@ -1015,32 +1015,62 @@ impl Game {
     /// mana") when it is a creature and the ability has {T} (`tap`). It
     /// depends on the object: an actor of a shared activation adds its own
     /// (ENGINE.md 100.4.7).
+    /// (Saturating: past 255 the game has ended aborted before this is read, `Game::mana_past_bound`, `check_mana_bound`; ENGINE.md 147.11.)
     pub(crate) fn tap_bonus(&self, x: CardIdx, tap: bool, bonus: &[(u16, u8)], creature_bonus: &[u8; 6]) -> [u8; 6] {
         let mut extra = [0u8; 6];
         if !bonus.is_empty() && self.is_type(x, crate::db::types::LAND) {
             for &(sub, t) in bonus {
                 if self.has_subtype(x, sub) {
-                    extra[t as usize] += 1;
+                    extra[t as usize] = extra[t as usize].saturating_add(1);
                 }
             }
         }
         if *creature_bonus != [0; 6] && tap && self.is_creature(x) {
             for t in 0..6 {
-                extra[t] += creature_bonus[t];
+                extra[t] = extra[t].saturating_add(creature_bonus[t]);
+            }
+        }
+        extra
+    }
+
+    /// [`tap_bonus`](Self::tap_bonus) exactly (ENGINE.md 147.11): the mana
+    /// `x`'s controller's "whenever you tap a <land subtype> / a creature for
+    /// mana, add an additional" abilities add when `x` is tapped for mana by
+    /// an ability with {T} (`tap`), per type, with no bound.
+    pub(crate) fn tap_bonus_wide(&self, x: CardIdx, tap: bool) -> [u64; 6] {
+        let mut extra = [0u64; 6];
+        let land = self.is_type(x, crate::db::types::LAND);
+        let creature = tap && self.is_creature(x);
+        if !land && !creature {
+            return extra;
+        }
+        for y in self.permanents_of(self.objs[x.i()].controller) {
+            let a = self.abilities(y);
+            if land {
+                for &(sub, t) in &a.extra_mana_on_tap {
+                    if self.has_subtype(x, sub) {
+                        extra[t as usize] += 1;
+                    }
+                }
+            }
+            if creature {
+                for t in 0..6 {
+                    extra[t] += a.extra_mana_creature[t] as u64;
+                }
             }
         }
         extra
     }
 
     /// The mana `p`'s permanents add whenever `p` taps a creature for mana
-    /// (Badgermole Cub).
+    /// (Badgermole Cub). (Saturating: past 255 the game has ended aborted before this is read, `Game::mana_past_bound`, `check_mana_bound`; ENGINE.md 147.11.)
     pub(crate) fn creature_mana_bonus(&self, p: PlayerId) -> [u8; 6] {
         let mut v = [0u8; 6];
         for x in self.permanents_of(p) {
             let e = &self.abilities(x).extra_mana_creature;
             if *e != [0; 6] {
                 for t in 0..6 {
-                    v[t] += e[t];
+                    v[t] = v[t].saturating_add(e[t]);
                 }
             }
         }
@@ -1173,7 +1203,8 @@ impl Game {
             bonus.extend(a.extra_mana_on_tap.iter().copied());
             if a.extra_mana_creature != [0; 6] {
                 for t in 0..6 {
-                    creature_bonus[t] += a.extra_mana_creature[t];
+                    // (Saturating: past 255 the game has ended aborted before this is read, `Game::mana_past_bound`, `check_mana_bound`; ENGINE.md 147.11.)
+                    creature_bonus[t] = creature_bonus[t].saturating_add(a.extra_mana_creature[t]);
                 }
             }
         }
@@ -1480,10 +1511,11 @@ impl Game {
             return Some(base);
         }
         let more: Vec<Unit> = units_of(&extra).collect();
+        // (Saturating: past 255 the game has ended aborted before this is read, `Game::mana_past_bound`, `check_mana_bound`; ENGINE.md 147.11.)
         let add = |v: &[u8; 6]| {
             let mut w = *v;
             for t in 0..6 {
-                w[t] += extra[t];
+                w[t] = w[t].saturating_add(extra[t]);
             }
             w
         };
@@ -3135,10 +3167,13 @@ impl Game {
             if let AbilitySlot::Activated(_) = src.slot {
                 // (Its own ability or one another permanent grants it:
                 // `src_ability`, as the payment reads it.)
-                if let Some(m) = self.src_ability(src.card, src.slot).mana() {
+                let ad = self.src_ability(src.card, src.slot);
+                if let Some(m) = ad.mana() {
                     let controller = self.objs[src.card.i()].controller;
-                    self.check_mana_bound(controller, src.card, &m.prod);
+                    self.check_mana_bound(controller, src.card, ad.cost.tap, &m.prod);
                 }
+            } else if src.slot == POL_FOR {
+                self.check_pollinator_bound(payer);
             }
         }
         let mut spent = [0u8; 6];
@@ -3427,44 +3462,101 @@ impl Game {
         }
     }
 
-    /// The mana of one type a counted mana ability of `src`, controlled by
-    /// `p`, makes now, exactly: `ManaProd::SameTypeCounters` the counters on
-    /// it, `ManaProd::PerPermanent` the permanents `p` controls that its
-    /// filter takes. None for every other production (its amounts are the
-    /// lowering's `u8`s).
-    fn counted_mana(&self, p: PlayerId, src: CardIdx, prod: &ManaProd) -> Option<crate::num::Count> {
+    /// The most mana of one type a mana ability of `src` (controlled by `p`;
+    /// `tap`: it has {T}) makes now, exactly: its production's amount of the
+    /// type - a count of permanents (`ManaProd::PerPermanent`) or of
+    /// counters (`SameTypeCounters`) as it is, every other amount the
+    /// lowering's - plus what tapping `src` for mana adds to that type
+    /// (`tap_bonus_wide`: the "whenever you tap ... add an additional"
+    /// abilities). 0 when it makes nothing now.
+    pub(crate) fn mana_amount_max(&self, p: PlayerId, src: CardIdx, prod: &ManaProd, tap: bool) -> u64 {
+        let mut a = [0u64; 6];
+        let mut makes = false;
         match prod {
-            ManaProd::SameTypeCounters { counter, .. } => Some(self.counters_on(src, *counter)),
-            ManaProd::PerPermanent { filter, .. } => Some(self.count_controlled(p, filter) as crate::num::Count),
-            _ => None,
+            ManaProd::SameTypeCounters { mask, counter } => {
+                let n = self.counters_on(src, *counter);
+                if n > 0 {
+                    makes = true;
+                    for (t, x) in a.iter_mut().enumerate() {
+                        if mask & (1 << t) != 0 {
+                            *x = n;
+                        }
+                    }
+                }
+            }
+            ManaProd::PerPermanent { ty, filter } => {
+                let n = self.count_controlled(p, filter) as u64;
+                if n > 0 {
+                    makes = true;
+                    a[*ty as usize] = n;
+                }
+            }
+            // (One mana of a type the sacrificed land could produce.)
+            ManaProd::SacrificedLand => {
+                makes = true;
+                a = [1; 6];
+            }
+            _ => {
+                for v in productions(self, p, prod, Some(src)) {
+                    makes = true;
+                    for t in 0..6 {
+                        a[t] = a[t].max(v[t] as u64);
+                    }
+                }
+            }
         }
+        if !makes {
+            return 0;
+        }
+        let b = self.tap_bonus_wide(src, tap);
+        (0..6).map(|t| a[t] + b[t]).max().unwrap_or(0)
     }
 
-    /// F7 (ENGINE.md 100.7, 147.1): a mana ability of `src` (controlled by
-    /// `p`) that makes mana equal to the counters on it or to a number of
-    /// permanents makes more than 255 of a type - the bound of the pool's
-    /// `ManaPool::amt` and of a production's `[u8; 6]` (workstream B's `u8`
-    /// model): the game ends aborted, here as the mana is made (an
-    /// activation, a payment's picked source, a resolving "add").
-    pub(crate) fn check_mana_bound(&mut self, p: PlayerId, src: CardIdx, prod: &ManaProd) {
-        if let Some(n) = self.counted_mana(p, src, prod).filter(|&n| n > u8::MAX as crate::num::Count) {
+    /// F7 (ENGINE.md 100.7, 147.1, 147.11): a mana ability of `src`
+    /// (controlled by `p`; `tap`: it has {T}) makes more than 255 of a type -
+    /// a count of permanents or counters, or the "whenever you tap ... add an
+    /// additional" mana its tapping adds (`mana_amount_max`) - past the bound
+    /// of the pool's `ManaPool::amt` and of a production's `[u8; 6]`
+    /// (workstream B's `u8` model): the game ends aborted, here as the mana
+    /// is made (an activation, a payment's picked source).
+    pub(crate) fn check_mana_bound(&mut self, p: PlayerId, src: CardIdx, tap: bool, prod: &ManaProd) {
+        let n = self.mana_amount_max(p, src, prod, tap);
+        if n > u8::MAX as u64 {
             let msg = format!("{} mana of one type from {}'s mana ability: past the pool's 255", n, self.name(src));
             self.abort(|| msg);
         }
     }
 
-    /// ENGINE.md 147.1: a mana ability of a permanent that would make more
-    /// than 255 mana of one type now (a counted production,
-    /// [`counted_mana`](Self::counted_mana)), whether or not it can be
-    /// activated now. `productions` and the payment's classes read such an
-    /// amount as 255, so every decision is checked first
-    /// (`Game::ask_options`): the game ends aborted before any option set
-    /// built from it is shown or answered. A counted production past 255
-    /// needs more than 255 permanents or a count of counters past 255: below
-    /// both, nothing is scanned.
+    /// A Pollinator's "{T}, tap an untapped permanent you control: add one
+    /// mana" (`POL_FOR`) by a Pollinator of `p`'s: one mana and what tapping
+    /// the Pollinator adds (`tap_bonus_wide`) past 255 of a type: the game
+    /// ends aborted (ENGINE.md 147.11).
+    pub(crate) fn check_pollinator_bound(&mut self, p: PlayerId) {
+        let worst = self.permanents_of(p).map(|a| self.tap_bonus_wide(a, true).into_iter().max().unwrap_or(0)).max().unwrap_or(0);
+        if worst + 1 > u8::MAX as u64 {
+            let msg = format!("{} mana of one type from a Pollinator's tap: past the pool's 255", worst + 1);
+            self.abort(|| msg);
+        }
+    }
+
+    /// ENGINE.md 147.1, 147.11: a mana ability of a permanent that would make
+    /// more than 255 mana of one type now (`mana_amount_max`: a count of
+    /// permanents or counters, or the mana its tapping adds), or a
+    /// permanent whose tapping by a Pollinator would (one mana and its
+    /// bonus), whether or not the ability can be activated now.
+    /// `productions` and the payment's classes read such an amount as 255
+    /// (saturating), so every decision is checked first (`Game::ask_options`):
+    /// the game ends aborted before any option set built from it is shown or
+    /// answered. Nothing is scanned while no amount can pass 255: an amount
+    /// is at most the table's largest fixed one or a count (at most the
+    /// permanents or the largest count of counters), plus a bonus of at most
+    /// `CardDb::tap_bonus_max` per permanent.
     pub(crate) fn mana_past_bound(&self) -> Option<String> {
-        let big = u8::MAX as crate::num::Count;
-        if self.battlefield.len() <= u8::MAX as usize && !self.counters.iter().any(|x| x.2 > big) {
+        let big = u8::MAX as u64;
+        let bf = self.battlefield.len() as u64;
+        let counted = self.counters.iter().map(|x| x.2).max().unwrap_or(0).max(bf);
+        let fixed = (self.db.mana_fixed_max as u64).max(1);
+        if fixed.max(counted) + bf * self.db.tap_bonus_max as u64 <= big {
             return None;
         }
         for &c in &self.battlefield {
@@ -3480,9 +3572,14 @@ impl Game {
                 .chain(granted.iter().map(|g| self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot))));
             for ad in abilities {
                 let Some(m) = ad.mana() else { continue };
-                if let Some(n) = self.counted_mana(p, c, &m.prod).filter(|&n| n > big) {
+                let n = self.mana_amount_max(p, c, &m.prod, ad.cost.tap);
+                if n > big {
                     return Some(format!("{}'s mana ability would make {n} mana of one type: past the pool's 255", self.name(c)));
                 }
+            }
+            let bonus = self.tap_bonus_wide(c, true).into_iter().max().unwrap_or(0);
+            if bonus + 1 > big {
+                return Some(format!("tapping {} for mana would make {} mana of one type: past the pool's 255", self.name(c), bonus + 1));
             }
         }
         None
@@ -4828,5 +4925,147 @@ mod tests {
         let alts: Vec<Vec<Way>> = (0..21).map(|i| vec![way(1 << 5, i + 1), way(1 << 3, i + 1)]).collect();
         let cost = ManaCost::parse("{W}").unwrap();
         ways_payable(&cost, Default::default(), &[], &[], &Units::new(), &alts, Budget::FREE, 0, &PoolCtx::default(), &ResCtx::default());
+    }
+
+    /// ENGINE.md 147.11's table: the cube with Gene Pollinator, Badgermole Cub
+    /// also "whenever you tap a Forest for mana, add an additional {G}" (a
+    /// test card: the cube's Forest bonus is Nissa, a planeswalker the scenario
+    /// would lose to its zero loyalty), and Birds of Paradise also "{T},
+    /// Sacrifice a land: Add {G}" (a sacrifice group with its own tap's bonus,
+    /// `Game::sac_groups`).
+    fn bonus_db() -> &'static crate::db::CardDb {
+        static DB: std::sync::OnceLock<&'static crate::db::CardDb> = std::sync::OnceLock::new();
+        DB.get_or_init(|| {
+            use crate::db::{ActEffect, ActivatedDef, CardDb, Cost, ManaAbility, ManaProd, SacCost};
+            let mut cards = crate::db::load_cube_document().cards;
+            cards.extend(crate::db::load_eoe_document().cards.into_iter().filter(|c| c.name == "Gene Pollinator"));
+            let mut db = CardDb::from_cards(&cards);
+            let forest = db.subtype_id("Forest").expect("Forest");
+            let cub = db.expect_id("Badgermole Cub").unwrap();
+            db.def_mut(cub).extra_mana_on_tap.push((forest, crate::mana::G as u8));
+            let mana = ManaAbility { prod: ManaProd::One(1 << crate::mana::G), damage_to_you: 0, sac_if_no: None, only: 0, uncounterable: false, haste: false, opp_life: 0 };
+            let sac = SacCost { filter: Filter::Type(crate::db::types::LAND), n: 1, another: false };
+            let ad = ActivatedDef {
+                cost: Cost { tap: true, sacrifice: Some(sac), ..Cost::default() },
+                effect: ActEffect::Mana(mana),
+                sorcery: false,
+                instant_only: false,
+                exhaust: false,
+                only_if: None,
+                your_turn: false,
+                loyalty: None,
+                discounts: Vec::new(),
+                boast: false,
+                x: false,
+                special: None,
+            };
+            let birds = db.expect_id("Birds of Paradise").unwrap();
+            db.def_mut(birds).activated.push(ad);
+            db.expect_id("Gene Pollinator").expect("supported");
+            db.refresh_mana_bounds();
+            db.leak()
+        })
+    }
+
+    /// The Fable lane F follow-up (ENGINE.md 147.11): the "whenever you tap ...
+    /// add an additional" mana was summed in `u8`s (`creature_mana_bonus`,
+    /// `mana_classes`' creature bonus, `tap_bonus`, `yield_with`, the
+    /// sacrifice groups, the Pollinator's classes, the activation's
+    /// land-subtype count): 256 Badgermole Cubs wrapped the creature bonus to
+    /// 0 in release builds (and panicked with overflow checks). Now each sum
+    /// saturates, and past 255 of a type the game ends aborted before any of
+    /// them is read: before the first decision (`mana_past_bound`), and where
+    /// the mana is made (`check_mana_bound`, `check_pollinator_bound`). Every
+    /// path is driven past 255 here and checked: the exact amounts, the
+    /// saturated ones (never a wrap), and the abort with its reason. At 255 the
+    /// game goes on and the mana is exact.
+    #[test]
+    fn cr_106_4_tap_mana_bonuses_past_255_abort_and_never_wrap() {
+        use crate::db::{AbilitySlot, ManaProd};
+        use crate::game::Step;
+        use crate::mana::G;
+        use crate::testkit::Scenario;
+        let db = bonus_db();
+        let start = |cubs: usize| {
+            let mut bf = vec!["Llanowar Elves", "Birds of Paradise", "Forest", "Forest", "Gene Pollinator"];
+            bf.extend(std::iter::repeat_n("Badgermole Cub", cubs));
+            Scenario::new(db).spec(|s| {
+                s.auto_single = false;
+                s.log = true;
+            }).library(0, &["Island"; 8]).library(1, &["Island"; 8]).battlefield(0, &bf).at(Step::Main1, 0).start()
+        };
+        let card = |g: &Game, name: &str| g.card(0, name, Zone::Battlefield);
+        let logged = |g: &Game, what: &str| g.log_lines().iter().any(|l| l.contains(what));
+        // 254 Cubs: one mana and 254 more, exactly 255 - the game goes on, and Llanowar Elves makes 255 {G}.
+        let mut g = start(254);
+        assert!(!g.is_over() && g.mana_past_bound().is_none(), "{:?}", g.outcome());
+        let elves = card(&g, "Llanowar Elves");
+        assert_eq!(g.mana_amount_max(0, elves, &ManaProd::One(1 << G), true), 255);
+        g.choose(crate::decision::Choice::Yes);
+        g.choose(crate::decision::Choice::Card(elves));
+        g.drive_until(|g| g.kind() == Some(crate::decision::DecisionKind::ActivateMana) || g.is_over());
+        assert!(!g.is_over(), "{:?}", g.outcome());
+        assert_eq!(g.player(0).pool.amt[G], 255);
+        // 256 Cubs: past 255 - the game ends aborted before its first decision.
+        let g = start(256);
+        assert!(g.aborted() && g.pending_decision().is_none(), "{:?}", g.outcome());
+        assert!(g.mana_past_bound().is_some() && logged(&g, "mana of one type: past the pool's 255"), "{:?}", g.log_lines().last());
+        let (elves, birds, forest, pol) = (card(&g, "Llanowar Elves"), card(&g, "Birds of Paradise"), card(&g, "Forest"), card(&g, "Gene Pollinator"));
+        // The exact amounts.
+        assert_eq!(g.tap_bonus_wide(elves, true)[G], 256, "the creature bonus");
+        assert_eq!(g.tap_bonus_wide(forest, true)[G], 256, "the Forest bonus");
+        assert_eq!(g.tap_bonus_wide(elves, false)[G], 0, "no {{T}}, no creature bonus");
+        assert_eq!(g.mana_amount_max(0, elves, &ManaProd::One(1 << G), true), 257);
+        // The u8 sums saturate (a wrap would give 0 and 1).
+        let creature_bonus = g.creature_mana_bonus(0);
+        assert_eq!(creature_bonus[G], 255);
+        assert_eq!(g.tap_bonus(elves, true, &[], &creature_bonus)[G], 255);
+        let forest_sub = db.subtype_id("Forest").unwrap();
+        assert_eq!(g.tap_bonus(forest, true, &vec![(forest_sub, G as u8); 256], &[0; 6])[G], 255);
+        let classes = g.mana_classes(0, None);
+        let of = |c: CardIdx| classes.iter().find(|cl| cl.members.iter().any(|s| s.card == c && matches!(s.slot, AbilitySlot::Activated(_))));
+        for c in [elves, forest] {
+            match &of(c).unwrap_or_else(|| panic!("{}'s class", g.name(c))).yld {
+                Yield::Multi { prods, .. } => assert!(prods.iter().all(|v| v[G] == 255), "{}: {prods:?}", g.name(c)),
+                other => panic!("{}: {other:?}", g.name(c)),
+            }
+        }
+        let pol_classes: Vec<&Class> = classes.iter().filter(|cl| cl.members[0].slot == POL_FOR).collect();
+        assert!(!pol_classes.is_empty(), "the Pollinator's classes");
+        for cl in pol_classes {
+            match &cl.yld {
+                Yield::Multi { prods, .. } => assert!(prods.iter().all(|v| v.iter().any(|&n| n == 255)), "{prods:?}"),
+                other => panic!("the Pollinator: {other:?}"),
+            }
+        }
+        let sac_ad = g.src_ability(birds, AbilitySlot::Activated(g.abilities(birds).activated.len() as u8 - 1));
+        assert!(sac_ad.cost.sacrifice.is_some());
+        let groups = g.sac_groups(0, &[(birds, sac_ad)], &[], &creature_bonus, &mut 0);
+        assert!(!groups.is_empty() && groups.iter().all(|gr| gr.prods.iter().all(|v| v[G] == 255)), "the sacrifice group");
+        // Where the mana is made: aborted, with the reason (a copy whose game is not over yet).
+        let fresh = || {
+            let mut h = g.clone();
+            h.outcome = None;
+            h
+        };
+        let mut h = fresh();
+        h.check_mana_bound(0, elves, true, &ManaProd::One(1 << G));
+        assert!(h.aborted() && logged(&h, "257 mana of one type from Llanowar Elves's mana ability"), "{:?}", h.log_lines());
+        let mut h = fresh();
+        h.check_mana_bound(0, elves, false, &ManaProd::One(1 << G));
+        assert!(!h.is_over(), "without {{T}} one mana");
+        let mut h = fresh();
+        h.check_pollinator_bound(0);
+        assert!(h.aborted() && logged(&h, "from a Pollinator's tap"), "{:?}", h.log_lines());
+        let _ = pol;
+        // The activation itself (`activate.rs`: the land-subtype count and the creature bonus, saturating): the Forest
+        // and Llanowar Elves activated with priority end the game at once, never wrapping.
+        for (src, name) in [(forest, "Forest"), (elves, "Llanowar Elves")] {
+            let mut h = fresh();
+            h.pending = None;
+            h.begin_activate(0, src, AbilitySlot::Activated(0));
+            h.advance();
+            assert!(h.aborted() && logged(&h, &format!("257 mana of one type from {name}'s mana ability")), "{name}: {:?}", h.log_lines());
+        }
     }
 }
