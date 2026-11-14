@@ -31653,7 +31653,9 @@ which no pairing can match. At a pile decision (`PutOnTop`, `PutOnBottom`) only,
 the top run of places it knows in both (the pile), as a rearrangement of the same (definition, knowledge) cards; all
 else must be equal under the pairing, no pairing changes there, and the next step is compared as any. Exact by 152.1's
 argument: the final library is a function of the definitions picked, and nothing else moves while the pile resolves.
-(Beyond what the orchestrator named; it can be dropped, which drops those three spots.)
+(Accepted by the orchestrator, 2026-11-13: confined to `PutOnTop` / `PutOnBottom`, the same cards with the same
+knowledge, the next step compared as any, and a pile option names a definition, so an action means the same on both
+engines.)
 
 **Tests** (`tests/test_canary_library.py`): library twins exchanged from a step on, one of them later drawn and played,
 are paired anew and followed (`rerecord.twins` notes it); two library cards of different definitions and two twin
