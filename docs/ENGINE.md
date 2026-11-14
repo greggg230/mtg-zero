@@ -33359,10 +33359,12 @@ forced activation (one source) shows only as the activation it is.
 
 ### 160.4 Left open: other forced answers naming a hidden card's slot
 
-The extended walk found one more kind: **`ExileCost`** (kind 29) - an "exile a card from your hand" cost (Force of
-Will's alternative cost) that one card of the hand may pay is answered and keyed with that card's hand slot (`HAND` +
-k), and the slot's place reads the hand's other cards; the exiled card shows, the slot doesn't (4 such keys in 2,000
-default games, 160.5). zero-core's tree reuse already treats another seat's non-pass `KEY_AUTO` as `Opaque` (149: "a single
+The extended walk counts three more decision kinds whose forced answer alone keyed apart two worlds showing the viewer
+the same (keys, the 20k runs of 160.5): **`ExileCost`** (kind 29; default 26, delver 56, interactions 114) - an "exile
+a card from your hand" cost (Force of Will's alternative cost) that one card of the hand may pay is answered and keyed
+with that card's hand slot (`HAND` + k), whose place reads the hand's other cards; the exiled card shows, the slot
+doesn't; **`PayMana`** (kind 4; default 38, interactions 22) - a payment's lone option (a hand mana source's, by its
+slot, the likely case); **`ChooseHandCard`** (kind 9; default 4). None in the hidden-decklist run. zero-core's tree reuse already treats another seat's non-pass `KEY_AUTO` as `Opaque` (149: "a single
 option naming a hidden card's slot"); in the search the key splits P1's nodes by P0's hand order. Masking such payloads
 in the other player's worlds (as 160.2 does for `ActivateMana`) is the likely fix; it changes the keys of every
 slot-naming forced answer, so it is left to its own decision. The fuzz prints the count per kind (`information sets
@@ -33388,4 +33390,20 @@ the integration's re-record, 157.10), new = this branch:
 | driver (`digests_driver.txt`) | 18afa79bae20fb06 | 18afa79bae20fb06 (equal; file re-recorded) |
 | dealt (`digests_dealt.txt`) | 33b68571705f3f35 | 33b68571705f3f35 (equal; file re-recorded) |
 
-Checks: CHECKS_PENDING
+Checks (throttled, on 19474ea1; the extended check and no `FUZZ_SKIP` in every fuzz run):
+* full engine suite (`cargo test --release -p engine --no-fail-fast`): **2,650 passed, 0 failed, 37 ignored** (a first
+  run's links failed with 0xc0000142 after its parent shell was detached - an environment fault; rerun from a live
+  shell);
+* 20k fuzz, default pool: `test result: ok. 8 passed; 0 failed` (20,000 games, 0 aborted; 438,466 open-decklist walks,
+  2,414,783 states compared; 1,000 matches, 5,394 match walks);
+* 20k fuzz, `FUZZ_POOL=delver`: `test result: ok. 8 passed; 0 failed` (382,826 walks, 1,123,841 states);
+* 20k fuzz, `FUZZ_POOL=interactions`: `test result: ok. 8 passed; 0 failed` (468,580 walks, 2,674,778 states; 1 game
+  aborted by its bound);
+* 2,000 games `FUZZ_HIDDEN_DECKS=1`: `test result: ok. 8 passed; 0 failed` (174,819 hidden-decklist steps);
+* `pytest tests/test_mtg_az.py` (`MTGZ_WIDEN_CHECKPOINT` = lane B's `anchor_v6.pt`): **21 passed**;
+* `python tools/gate.py encoding --no-mac --expect-digest 98bc0f3b192e2a17 --expect-digest0 8330141b691c8592
+  --checkpoint <anchor_v6.pt forked by tools/fork_run.py: iter_0000.pt> --checkpoint-spec <the Delver best-of-three
+  spec>`: build, both digests, digest formats, dealt, `az` 54, checkpoint load (8 games) PASS; **`GATE FAILED encoding
+  19474ea1f207 in 891s - pytest: 1 failed, 0 error(s), 389 passed`**: the one failure is
+  `test_canary_library.py::test_every_spot_reaches_its_recorded_position`, the same five spots 157.9 lists (the
+  canary rerecord pending in 157.10), none new.
