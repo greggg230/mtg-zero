@@ -160,6 +160,17 @@ def FORMATS(digests=None, passed=3):
             'finished in 38.43s\n')
 
 
+D_DEALT = '8cb56319b1746be3'
+
+
+def DEALT(d=D_DEALT, n=80):
+    """dealt_decks.rs::dealt_digests' output (ENGINE.md 154), the binary's ten other tests filtered out."""
+    return ('running 1 test\n'
+            f'dealt_digests: {n} matches in 2.8 s; combined digest {d}\n'
+            'test dealt_digests ... ok\n\n'
+            'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 2.83s\n')
+
+
 def CARGO(*counts, failed=0):
     return ''.join(f'running {n} tests\n\ntest result: {"FAILED" if failed else "ok"}. {n} passed; {failed} failed; '
                    f'0 ignored; 0 measured; 0 filtered out; finished in 4.57s\n\n' for n in counts)
@@ -253,6 +264,8 @@ class Fake:
             return 'core-pytest' if self.cwd == self.core else 'pytest'
         if '--test' in argv and 'digest_formats' in argv:
             return 'formats'
+        if '--test' in argv and 'dealt_decks' in argv:
+            return 'dealt'
         if '--test' in argv and 'digest' in argv:
             return 'digest0' if env.get('DIGEST_ENCODING') == '0' else 'digest'
         if '--test' in argv:
@@ -281,7 +294,7 @@ class Fake:
         if k == 'pycompile':
             return f'py_compile: {len(argv) - 3} file(s) compiled\n', 0
         return {'build': BUILD(G.ROOT), 'core-build': CORE_BUILD(self.core), 'digest0': DIGEST(D_FREE),
-                'digest': DIGEST(D_FULL), 'formats': FORMATS(), 'cargo1': CARGO(34), 'cargo': CARGO(123, 3, 0, 0), 'pytest': PYTEST_OK,
+                'digest': DIGEST(D_FULL), 'formats': FORMATS(), 'dealt': DEALT(), 'cargo1': CARGO(34), 'cargo': CARGO(123, 3, 0, 0), 'pytest': PYTEST_OK,
                 'core-pytest': '.' * 60 + '\n308 passed, 3 skipped, 1 warning in 739.67s (0:12:19)\n',
                 'h2h': H2H, 'build-only': built(GAMES, core=PIN[:7]), 'mac': MAC(SHA, CARGO(900, 12, 0)),
                 'mac-eval': EVAL_CHECKOUT(SHA)}[k], 0
@@ -701,19 +714,34 @@ def test_the_digest_formats_checker():
     assert 'did it compile' in check('error[E0425]: cannot find value\n', 101)[1]
 
 
+def test_the_dealt_digest_checker():
+    """dealt_digests (ENGINE.md 154, 157): exactly one combined-digest line, no re-record, the binary's one "test
+    result: ok. 1 passed" line + exit 0."""
+    check = G.check_digest_dealt
+    ok, why, extra = check(DEALT(), 0)
+    assert ok and extra['formats'] == {'dealt': D_DEALT} and D_DEALT in why and '80 matches' in why
+    assert 'expected exactly one' in check(DEALT() + DEALT(), 0)[1]
+    assert 'expected exactly one' in check('error[E0425]: cannot find value\n', 101)[1]
+    ok, why, _ = check(DEALT().replace('test dealt_digests ... ok', 'wrote E:/x/engine/tests/data/digests_dealt.txt\ntest dealt_digests ... ok'), 0)
+    assert not ok and 'RE-RECORDED' in why
+    assert not check(DEALT().replace('test result: ok. 1 passed; 0 failed', 'test result: FAILED. 0 passed; 1 failed'), 101)[0]
+    assert not check(DEALT(), 1)[0]
+
+
 def test_the_digest_formats_step_runs_in_the_behaviour_tiers_and_reports_its_digests(gate, capsys):
     """The step (its DIGEST_* the caller's never: step_env) in the encoding, engine, repin, search-core and optin-core
     tiers; the report's digests name the three; a recorded file that differs fails the gate."""
     rc, out, _, report = gate(*ENC, '--allow-skip', 'checkpoint-load', capsys=capsys)
-    calls = [a for k, a in gate.fake.calls if k == 'formats']
-    assert rc == 0 and calls == [G.FORMATS_ARGV] and 'PASS     digest formats' in out
+    calls = [a for k, a in gate.fake.calls if k in ('formats', 'dealt')]
+    assert rc == 0 and calls == [G.FORMATS_ARGV, G.DEALT_ARGV] and 'PASS     digest formats' in out and 'PASS     digest dealt' in out
     assert {k: v['value'] for k, v in report['digests'].items() if k in D_FORMATS} == D_FORMATS
+    assert report['digests']['dealt'] == {'value': D_DEALT, 'status': 'passed'}
     for argv in (('engine', '--expect-digest', D_FULL, '--expect-digest0', D_FREE, '--no-mac', '--allow-skip',
                   'suite-evidence'),
                  ('repin', '--expect-digest', D_FULL, '--spec', 'delver', '--preset', 'delver-mirror')):
         gate.fake.calls.clear()
         gate(*argv, capsys=capsys)
-        assert 'formats' in [k for k, _ in gate.fake.calls], argv
+        assert {'formats', 'dealt'} <= {k for k, _ in gate.fake.calls}, argv
     gate.fake.calls.clear()
     gate.fake.set('formats', FORMATS().replace('test driver_digest ... ok', 'test driver_digest ... FAILED')
                   .replace('test result: ok. 3 passed; 0 failed', 'test result: FAILED. 2 passed; 1 failed'), 101)
@@ -735,15 +763,15 @@ def test_the_core_tiers_build_and_run_the_core_suite_and_name_a_flaky_retry(gate
     rc, out, _, report = gate('optin-core', '--baseline-root', gate.baseline, '--other-games', *gate.other,
                               capsys=capsys)
     kinds = [k for k, _ in gate.fake.calls]
-    assert kinds == ['build', 'cargo', 'compat', 'formats', 'cargo1', 'cargo1', 'build-only', 'core-build',
+    assert kinds == ['build', 'cargo', 'compat', 'formats', 'dealt', 'cargo1', 'cargo1', 'build-only', 'core-build',
                      'core-pytest', 'core-pytest']
     assert rc == 0 and final(out).startswith('GATE PASSED WITH FLAKY RETRIES optin-core')
     assert report['flaky'] == [f'core-pytest: {REMOTEPLAY}'] and report['baseline']['head'] == 'c' * 40
     gate.fake.core_pytest = []
     rc, out, _, _ = gate('search-core', '--baseline-root', gate.baseline, capsys=capsys)
     assert rc == 0 and final(out).startswith('GATE PASSED search-core')
-    assert [k for k, _ in gate.fake.calls][-9:] == ['build', 'cargo', 'pytest', 'compat', 'formats', 'smoke', 'run',
-                                                    'core-build', 'core-pytest']
+    assert [k for k, _ in gate.fake.calls][-10:] == ['build', 'cargo', 'pytest', 'compat', 'formats', 'dealt', 'smoke',
+                                                     'run', 'core-build', 'core-pytest']
 
 
 def test_a_stale_build_fails_the_core_tier_before_the_comparison(gate, capsys):

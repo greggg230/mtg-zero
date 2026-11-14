@@ -11,7 +11,7 @@ ad-hoc shell script. It can never pass a check it did not perform:
     build's "mtgz._engine OK: <this checkout>/mtgz/..." line, cargo's "test result: ok. N passed"
     lines (N > 0, 0 failed), pytest's FINAL summary line (0 failed, 0 errors, N > 0 passed), the
     digest line over the full 2,000 + 500 games, digest_formats' three lines (constructed, eoe, driver:
-    ENGINE.md 148.1, 157), check_checkpoint_compat's {"identical": true}
+    ENGINE.md 148.1, 157) and dealt_digests' line (154, 157), check_checkpoint_compat's {"identical": true}
     with samples on both sides, a Mac step's "[mac] ... @ <this sha>" and "[mac] done @ <this sha>"
     lines (the Mac checkout's HEAD before and after the command), "0 failed of N
     configurations" with N the configurations asked for, ... A missing marker fails loudly.
@@ -261,6 +261,32 @@ def check_digest_formats(output, rc):
         return False, f'{counts["passed"]} passed, not the {len(FORMATS)} digests', extra
     return True, (', '.join(f'{n} {extra["formats"][n]}' for n in FORMATS) + ' (each = the checkout\'s recorded '
                   'tests/data/digests_<name>.txt)'), extra
+
+
+DEALT_RE = re.compile(r'^dealt_digests: (\d+) matches in [\d.]+ s; combined digest ([0-9a-f]{16})\s*$', re.M)
+DEALT_ARGV = ['cargo', 'test', '--release', '-p', 'engine', '--test', 'dealt_decks', '--', '--ignored', '--nocapture',
+              'dealt_digests']
+
+
+def check_digest_dealt(output, rc):
+    """dealt_decks.rs::dealt_digests' positive evidence (ENGINE.md 154, 157): exactly one "dealt_digests: N matches in
+    ... s; combined digest <16 hex>" line (the test compares its lines with the checkout's own
+    tests/data/digests_dealt.txt and fails on a difference), no "wrote ...digests_dealt" line (DIGEST_WRITE re-records
+    instead of comparing), exactly one "test result: ok. 1 passed" line + exit 0."""
+    ms = DEALT_RE.findall(output)
+    extra = {'formats': {'dealt': ms[0][1]}} if len(ms) == 1 else {}
+    if len(ms) != 1:
+        return False, (f'{len(ms)} "dealt_digests: N matches in ... s; combined digest <16 hex>" line(s): expected exactly '
+                       f'one (did it compile/run?)'), extra
+    if re.search(r'^wrote .*digests_dealt', output, re.M):
+        return False, 'dealt_digests RE-RECORDED tests/data/digests_dealt.txt instead of comparing', extra
+    ok, why, counts = make_cargo_checker(single=True)(output, rc)
+    extra.update(counts)
+    if not ok:
+        return False, f'dealt_digests did not pass: {why}', extra
+    if counts['passed'] != 1:
+        return False, f'{counts["passed"]} passed, not the one dealt digest', extra
+    return True, f'dealt {ms[0][1]} over {ms[0][0]} matches (= the checkout\'s recorded tests/data/digests_dealt.txt)', extra
 
 
 PYTEST_WORD = r'(?:failed|passed|skipped|deselected|xfailed|xpassed|warnings?|errors?|rerun)'
@@ -1062,18 +1088,23 @@ def digest_steps(ctx, args):
                           evidence=(f'one "combined digest" line over the full {games} games == {expect}' if expect
                                     else f'one "combined digest" line over the full {games} games (recorded, NOT '
                                          f'compared)') + ', no re-record, "test result: ok. 1 passed" + exit 0'))
-    steps.append(digest_formats_step())
+    steps.extend(digest_format_steps())
     return steps
 
 
-def digest_formats_step():
-    """engine/tests/digest_formats.rs (ENGINE.md 148.1): constructed best-of-three, the legacy decks, EoE and
-    zero-core's driver, each compared with the checkout's own tests/data/digests_<name>.txt (a change meant to alter
-    play re-records them in its commit, as digests.txt). The caller's DIGEST_* never reach it (step_env)."""
-    return Step('digest formats (constructed, EoE, driver)', list(FORMATS_ARGV), id='digest-formats',
-                checker=check_digest_formats,
-                evidence='exactly one "<name>: ... combined digest <16 hex>" line each of constructed, eoe and driver, '
-                         'no "wrote ...digests_" line, exactly one "test result: ok. 3 passed" + exit 0')
+def digest_format_steps():
+    """The digests beyond the cube table's, each compared with the checkout's own recorded file (a change meant to
+    alter play re-records them in its commit, as digests.txt; the caller's DIGEST_* never reach them: step_env):
+    engine/tests/digest_formats.rs (ENGINE.md 148.1: constructed best-of-three, the legacy decks, EoE, zero-core's
+    driver) and dealt_decks.rs::dealt_digests (ENGINE.md 154: the dealt preset, pb2's self-play spec; 157)."""
+    return [Step('digest formats (constructed, EoE, driver)', list(FORMATS_ARGV), id='digest-formats',
+                 checker=check_digest_formats,
+                 evidence='exactly one "<name>: ... combined digest <16 hex>" line each of constructed, eoe and driver, '
+                          'no "wrote ...digests_" line, exactly one "test result: ok. 3 passed" + exit 0'),
+            Step('digest dealt (dealt decks: the dealt preset\'s self-play spec)', list(DEALT_ARGV), id='digest-dealt',
+                 checker=check_digest_dealt,
+                 evidence='exactly one "dealt_digests: N matches in ... s; combined digest <16 hex>" line, no '
+                          '"wrote ...digests_dealt" line, exactly one "test result: ok. 1 passed" + exit 0')]
 
 
 def core_pytest_base(ctx):
@@ -1384,7 +1415,7 @@ def tier_search_core(ctx, args):
              evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
         pytest_step('this repo: pytest'),
         compat_step(ctx, args, 'check_checkpoint_compat goldens'),
-        digest_formats_step(),          # (its driver digest: zero-core's Driver<MtgAz>, ENGINE.md 148.1)
+        *digest_format_steps(),         # (the driver digest: zero-core's Driver<MtgAz>, ENGINE.md 148.1)
         smoke_step(f'smoke: {len(configs)}-config of the pinning game ({",".join(configs)})', configs),
         run_loop_step(ctx, 'mtg-smoke', 16),
         # smoke_all for the OTHER zero-core games is zero-core-side (its own tools/smoke_all.sh
@@ -1400,7 +1431,7 @@ def tier_optin_core(ctx, args):
              Step('core tests', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test',
                   evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
              compat_step(ctx, args, 'checkpoint_compat byte identity'),
-             digest_formats_step()]         # (its driver digest: zero-core's Driver<MtgAz>, ENGINE.md 148.1)
+             *digest_format_steps()]        # (the driver digest: zero-core's Driver<MtgAz>, ENGINE.md 148.1)
     for t in feature_tests:
         steps.append(cargo_step(f'feature tests: cargo test --test {t}', t, step_id=f'feature-{t}'))
     steps.append(build_only_step(ctx, args))
@@ -1489,7 +1520,7 @@ def tier_repin(ctx, args):
              checker=make_digest_checker(args.expect_digest),
              evidence=f'one "combined digest" line over the full {DIGEST_GAMES[0]} + {DIGEST_GAMES[1]} games == '
                       f'{args.expect_digest}, "test result: ok. 1 passed" + exit 0'),
-        digest_formats_step(),
+        *digest_format_steps(),
         smoke_step(f'1-config smoke on the run\'s spec ({args.spec}, preset {args.preset})', specs,
                    ['--preset', args.preset], group='parallel-mac'),
         Step('mac.sh --eval-checkout', ['bash', 'tools/mac.sh', '--eval-checkout'], id='mac-eval-checkout', mac=True,
@@ -1504,13 +1535,13 @@ TIERS = {
     'docs': (tier_docs, 'docs / tools not on the run path: py_compile of touched tools (~0 min).'),
     'python': (tier_python, 'Python run-loop/settings: build + pytest + a tiny run-loop smoke (~3 min + the build).'),
     'encoding': (tier_encoding, 'encoding-only (layout unchanged): build + DIGEST_ENCODING=0 digest == --expect-digest0 '
-                 '+ full digest == --expect-digest + digest formats (constructed, EoE, driver) == the checkout\'s '
+                 '+ full digest == --expect-digest + digest formats (constructed, EoE, driver, dealt) == the checkout\'s '
                  'recorded files + --test az + checkpoint-load (--checkpoint) + pytest. NO search smoke (~8 min).'),
     'suite': (tier_suite, 'engine rules/cards (the agent\'s half): the full engine suite + the 20k fuzz (--fuzz-pools, '
               'default the default pool) on this commit; its report gates/<sha>-suite.json is the engine tier\'s '
               'evidence for --tested-sha (~30 min a pool).'),
     'engine': (tier_engine, 'engine rules/cards (orchestrator half): fresh build, digests == the agent\'s report, '
-               'digest formats (constructed, EoE, driver) == the checkout\'s recorded files, az/limits/hidden, pytest, 1 desktop smoke config, the --tested-sha\'s suite report (the full suite + '
+               'digest formats (constructed, EoE, driver, dealt) == the checkout\'s recorded files, az/limits/hidden, pytest, 1 desktop smoke config, the --tested-sha\'s suite report (the full suite + '
                'the 20k fuzz, evidenced); a Mac full-suite recheck only if the merged sha differs from --tested-sha '
                'with overlapping engine/card_ir files (~10 min).'),
     'search-core': (tier_search_core, 'search/core behaviour: build + core cargo test + pytest + check_checkpoint_compat '
@@ -1520,7 +1551,7 @@ TIERS = {
                    'checkpoint_compat byte identity (--baseline-root) + digest formats (its driver digest: zero-core\'s '
                    'driver) + feature tests + build-only of the other games + core build + core pytest (~26 min).'),
     'repin': (tier_repin, 're-pin onto an already-verified commit: own-target build + digest == main\'s recorded value '
-              '+ digest formats == the checkout\'s recorded files + 1-config smoke on the run\'s --spec/--preset + mac.sh --eval-checkout, in parallel (~5 min).'),
+              '+ digest formats (constructed, EoE, driver, dealt) == the checkout\'s recorded files + 1-config smoke on the run\'s --spec/--preset + mac.sh --eval-checkout, in parallel (~5 min).'),
 }
 
 # The options each tier uses: any other tier-specific option given is refused (it would be ignored, and
@@ -1592,7 +1623,7 @@ def write_report(ctx, args, results, ok, not_run, started, seconds, path, line):
         if r.extra.get('digest'):
             key = 'encoding_free' if 'encoding-free' in r.id else 'full'
             report['digests'][key] = {'value': r.extra['digest'], 'status': r.status}
-        for name, d in (r.extra.get('formats') or {}).items():          # (digest_formats: constructed, eoe, driver)
+        for name, d in (r.extra.get('formats') or {}).items():          # (constructed, eoe, driver; dealt)
             report['digests'][name] = {'value': d, 'status': r.status}
         if 'passed' in r.extra and 'failed' in r.extra:
             report['test_counts'][r.name] = {k: r.extra[k] for k in ('passed', 'failed', 'errors', 'skipped', 'binaries')
