@@ -30082,13 +30082,13 @@ fix lane I's 156 merged) and the final code **20dd7d6f** (with fix lane A1's 140
   `public_state_classification`, `layout_json_is_checked_in`, the `public_state` unit tests, `tests/v7_tails.rs` (21
   passed), `enclosing_picks_of_etali_s_casts_are_encoded`, and A1's `deck_posterior`, `hidden`, `constructed_bo3`,
   `deck_scorer`, `sealed` on the merge: passed (142.10's and 142.12's numbers).
-FUZZ-14211
+* **The 20k fuzz on 20dd7d6f's code** (55fd228f: docs and re-recorded digests after it): default pool `FUZZ_SKIP=2122` (20,000 games, 438,684 open-decklist walks, 2,418,971 states compared, 1,353 hidden-decklist steps; 1,000 matches, 5,396 match walks) **6 passed**; `FUZZ_POOL=delver` (20,000 games, 382,832 walks, 1,123,739 states; 1,000 matches + 1,000 post-sideboard matches) **6 passed**; `FUZZ_POOL=interactions FUZZ_SKIP=2031`: the matches passed, the games **failed at seed 13518** with the same pre-existing "same keys, different views" (Priority / ActivateMana for a hand card's ability, 142.13) as 2,122 and 2,031 - not this lane's; fixed in its own lane (ENGINE.md 160), whose checks run every pool without `FUZZ_SKIP`.
 * **The widen, exact, on 20dd7d6f** (`test_a_widened_network_reads_v7_rows_within_rounding`, `MTGZ_WIDEN_CHECKPOINT` =
   the copy of the live Delver line's layout v6 anchor, 142.9): onto layout v7 revision 1 with 142.10's `links` and
   142.12's `found` (the 14 tail-only segments gated at exactly 0), worst **1.67e-6** on 68 rows without a tail token
   and 294 whose only new tokens are gated (v5 -> v7: 5.96e-7); the encoding guard's tests passed.
-SMOKE-14211
-GATE-14211
+* **The fork smoke and pytest on 55fd228f**: `fork_run` of the v6 anchor onto layout v7 revision 1, then `mtgz.az.run --preset delver-bo3-smoke` 2 iterations on CPU (iter 2 vs random per_game 0.70, Elo 649 +- 242): exit 0; the widen's tests 5 passed; `pytest tests` **324 passed, 1 skipped**.
+* **`python tools/gate.py encoding --no-mac`** (`--expect-digest 72dba7025d8585b4 --expect-digest0 a0062bb5569e06d3`, the forked iter 2 checkpoint): **GATE PASSED encoding 55fd228f906a in 1284s**.
 
 ### 142.12 A search's finds the other player tells apart: the `found` segment (fix lane A1's open point; the orchestrator, 2026-11-13)
 
@@ -30148,7 +30148,7 @@ re-recorded (6cdaa759: cube EQUAL 72dba7025d8585b4 / a0062bb5569e06d3 / v6 b63f6
 **Checked on the final code 20dd7d6f**: the suite (166 binaries, 2,564 passed, 0 failed), the widen (1.67e-6), the
 targeted gate tests (231 encoded, 0 known gaps in v7 but the framed row's 2.9).
 
-**Left**: the final round's 20k fuzz (default `FUZZ_SKIP=2122`, `FUZZ_POOL=delver`, `FUZZ_POOL=interactions
+**Done since (the orchestrator, 11-13 23:50; 142.11)**: the fuzz, smoke, pytest and the encoding gate. **Was left**: the final round's 20k fuzz (default `FUZZ_SKIP=2122`, `FUZZ_POOL=delver`, `FUZZ_POOL=interactions
 FUZZ_SKIP=2031`), the fork smoke and pytest, then `python tools/gate.py encoding --no-mac` (script
 `E:/mtg-zero-scratch/fable-fix/laneB/gate3.sh`, update `--expect-digest 72dba7025d8585b4` and the checkpoint
 `E:/mtg-zero-scratch/fable-fix/laneB/fork/run/models/iter_0002.pt`), the 142.11 numbers (placeholders FUZZ-14211,
