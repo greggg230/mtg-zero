@@ -32623,3 +32623,126 @@ Every spot keeps its actions; no decision inserted. The old engine's copy for th
 E:/mtg-zero-scratch/fable-fix/int-logs/canary-old-engine-5e767d9b --report <...>` on the final tree; any spot it still
 cannot walk is listed here by name with its reason. Until then `tests/test_canary_library.py::test_every_spot_reaches_its_recorded_position`
 fails on this branch (the five spots).
+
+### 157.10 Remaining to finish (handoff checklist)
+
+State at this subsection's commit: every merge above committed on `integrate/fable-1112` (mtg-zero, never pushed - the
+orchestrator fast-forwards main); zero-core `integrate/fable-1112` @ 77b31ab pushed to the local origin
+(`C:/Users/Gregg Keithley/zero-core`) and GitHub, the gitlink on it. Known red until the steps below:
+`tests/test_canary_library.py::test_every_spot_reaches_its_recorded_position` (the five spots, 157.9) and every digest
+comparison (behaviour changed on purpose by A1, A2, E, F, H, I, farm-fuzz, rules F1-F3). Every heavy command goes
+through the throttle (COMMON.md): `S="bash E:/mtg-zero-scratch/fable-fix/slotd.sh"`. On Windows, stopping a
+background task can leave its `slotd.sh` loop alive: check `wmic process where "name='bash.exe'" get
+ProcessId,CommandLine` and `taskkill //PID <pid> //F //T` only your own.
+
+```bash
+W="C:/Users/Gregg Keithley/mtg-zero-wt/integrate-fable"
+export CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/integrate-fable
+S="bash E:/mtg-zero-scratch/fable-fix/slotd.sh"
+cd "$W"
+```
+
+**1. The last merges** (merge commits; ENGINE.md sections ordered with the resolver of 157.1: every section kept,
+from 129 on by number; each lane's in-place corrections kept).
+
+```bash
+git merge --no-ff --no-commit fix/deck-posterior        # A1's last head (exact seen-again weight, option b); check
+                                                        # DeckWant literals (dealt decks', dealt_integrated.rs') and 157.3 (1)
+git merge --no-ff --no-commit fix/encoding-gate         # lane B phase 3 (layout v7 amendment: gated effects/counters/
+                                                        # numbers, game-2 inputs for H3, 157.6); its references must go
+                                                        # through tail_encode::Cx::write_ref / ref_def and list new holders
+                                                        # in Game::for_each_public_ref (156.5)
+git merge --no-ff --no-commit fix/rules-f4-f5           # after B: the leftovers session rebases it onto this branch first
+                                                        # (then F4/F5's rules_check.rs repro tests lose #[ignore])
+```
+
+If a merge touches zero-core: merge it into `third_party/zero-core` branch `integrate/fable-1112` (renumber colliding
+docs/az.md sections as 157.2 did), run its `cargo test --release` + `bash tools/build_py.sh` + pytest
+(`CARGO_TARGET_DIR=E:/cargo-target/zero-core/integrate-fable`), `git push origin integrate/fable-1112` and
+`git -C "C:/Users/Gregg Keithley/zero-core" push origin integrate/fable-1112`, then `git add third_party/zero-core`.
+After each merge: `$S bash tools/build_py.sh`, `$S cargo test --release -p engine --test az --test dealt_integrated`,
+and a fuzz smoke (`$S env FUZZ_GAMES=200 FUZZ_MATCHES=40 cargo test --release -p engine --test fuzz -- --nocapture`,
+also with `FUZZ_POOL=delver`, `cross`, `delver_dealt`, `eoe` and `FUZZ_HIDDEN_DECKS=1`).
+
+**2. Re-record every digest** (once, on the final tree; then each plain comparison must pass; the commit message and
+157 state old -> new).
+
+```bash
+$S env DIGEST_WRITE=1     cargo test --release -p engine --test digest -- --ignored --nocapture     # tests/data/digests.txt (full)
+$S env DIGEST_ENCODING=0  cargo test --release -p engine --test digest -- --ignored --nocapture     # prints the =0 digest (no file)
+$S env DIGEST_ENCODING=v6 cargo test --release -p engine --test digest -- --ignored --nocapture     # prints the v6 projection's (no file)
+$S env DIGEST_WRITE=1     cargo test --release -p engine --test digest_formats -- --ignored --nocapture   # digests_{constructed,eoe,driver}.txt
+$S env DIGEST_ENCODING=0  cargo test --release -p engine --test digest_formats -- --ignored --nocapture   # constructed / eoe =0 (printed)
+$S env DIGEST_WRITE=1     cargo test --release -p engine --test dealt_decks -- --ignored --nocapture dealt_digests   # digests_dealt.txt
+# the comparisons (no DIGEST_*): each must pass
+$S cargo test --release -p engine --test digest -- --ignored --nocapture
+$S cargo test --release -p engine --test digest_formats -- --ignored --nocapture
+$S cargo test --release -p engine --test dealt_decks -- --ignored --nocapture dealt_digests
+git add engine/tests/data/digests*.txt
+```
+
+Old values (main e076d8f3 / the branches): full 438164c0429d7fa3, `DIGEST_ENCODING=0` a0062bb5569e06d3, v6 the value
+`DIGEST_ENCODING=v6` prints on main e076d8f3 (run it there for the old side), constructed 63f58560ad7b3df0, EoE
+b36df9098a38d794, driver 837d42c28214befe, dealt 8cb56319b1746be3 (the branches' own re-records - farm-fuzz
+e5675fc9d4da7a20, I b9ad17dc0dee92e7, F 7fab36d3268c1033 / 84b09dbaa4ccf08c - are superseded).
+
+**3. The canary library: `RULES_EPOCH` and the rerecord** (157.9: the twin-aware match and the pile rule; all 60 spots
+walked in every trial).
+
+```bash
+# tools/position_lab.py: RULES_EPOCH = <`date +%s` now>  # <date>: the Fable-review fix campaign (ENGINE.md 140-157)
+$S bash tools/build_py.sh                               # the Python module must be this tree's engine
+python tools/delver_rerecord.py rerecord --old-engine E:/mtg-zero-scratch/fable-fix/int-logs/canary-old-engine-5e767d9b \
+    --report E:/mtg-zero-scratch/fable-fix/int-logs/canary-final-report.json     # rewrites data/delver_canary_library.json
+python tools/delver_rerecord.py check                   # every spot reaches its position; the epoch matches
+python -m pytest tests/test_canary_library.py -q -p no:cacheprovider
+git add tools/position_lab.py data/delver_canary_library.json
+```
+
+The old engine copy is the library's recording engine (`eoe-b8-pay`, engine_sha256 5e767d9b1a6183c1 - `rerecord`
+checks it). A spot it still drops goes into 157.9 by name with its reason (never silently).
+
+**4. Commit, then the `suite` tier** (the agent's half: the full engine suite and a 20k fuzz per pool; ~hours: the
+eoe pool alone took 9,150 s; the tree must be exactly its commit).
+
+```bash
+git status --short                                      # must be empty
+$S python tools/gate.py suite --no-mac --fuzz-pools default,delver,cross,eoe,delver_dealt --step-timeout 14400
+```
+
+**5. The `engine` tier** with that evidence (`gates/<sha12>-suite.json` of this same commit; it also runs `digest-formats`
+and `digest-dealt`, 157.5).
+
+```bash
+$S python tools/gate.py engine --no-mac --tested-sha "$(git rev-parse HEAD)" \
+    --expect-digest <the new full> --expect-digest0 <the new =0> --step-timeout 7200
+```
+
+**6. The `search-core` tier for the zero-core pin** (77b31ab or later), against main e076d8f3 built in a checkout of its
+own:
+
+```bash
+git -C "C:/Users/Gregg Keithley/mtg-zero" worktree add --detach "C:/Users/Gregg Keithley/mtg-zero-wt/integrate-fable-base" e076d8f3
+cd "C:/Users/Gregg Keithley/mtg-zero-wt/integrate-fable-base" && git -c protocol.file.allow=always submodule update --init third_party/zero-core \
+    && CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/integrate-fable-base $S bash tools/build_py.sh
+cd "$W" && $S python tools/gate.py search-core --no-mac --baseline-root "C:/Users/Gregg Keithley/mtg-zero-wt/integrate-fable-base" --step-timeout 7200
+```
+
+Expected there: `check_checkpoint_compat` (now runnable on v7: `--net random` is a random token network, 157.4)
+**differs on purpose** - H's observable answers change search (149.4), and the engine changes behaviour - so record its
+digests old -> new; if the tier refuses on it, rerun with `--allow-skip checkpoint-compat` and report the compat run
+(`python third_party/zero-core/tools/check_checkpoint_compat.py --old <base> --new "$W" --package mtgz --net random --game mtg
+--spec '{"max_turns": 60}'`) beside it. The search smoke's cube `match` config may pass its 1,800 s on a busy machine
+(1,285 s quiet, 149.5): then run it alone with `python tools/search_smoke.py --specs match --seeds 0 --threads 8
+--timeout 3600` (only with >= 15 GB available, at most two smokes at once) and say so. The core pytest's known flakes
+(157.7) pass alone.
+
+**7. pytest and the run-loop smoke** (after `bash tools/build_py.sh`).
+
+```bash
+$S python -m pytest tests -q -p no:cacheprovider
+$S python -m mtgz.az.run --run E:/mtg-zero-scratch/fable-fix/int-logs/smoke-final --preset mtg-smoke --iters 2
+```
+
+**8. Document**: 157's checks with each gate's last line, the digests old -> new, the canary rerecord's report; then
+the orchestrator fast-forwards main to the final head (and moves the pin with it).
