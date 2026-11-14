@@ -713,24 +713,27 @@ impl Game {
         h
     }
 
-    /// `p`'s hand in the order a hand slot takes its card (ENGINE.md 128):
-    /// canonical ([`hand_sorted_in`](Self::hand_sorted_in)), but within a
-    /// definition a card an ability names (`Game::named_by_an_ability`)
-    /// that the other player knows comes first. A definition's cards keep
-    /// their places as a run, so slot ids are those of the canonical order.
-    /// Why: twins are interchangeable, and `canon_hand_knowledge` puts the
-    /// best-known first, but a twin an ability names keeps its own
+    /// `p`'s hand in the order a hand slot takes its card (ENGINE.md 128,
+    /// 156): canonical ([`hand_sorted_in`](Self::hand_sorted_in)), but
+    /// within a definition a card a reference tells apart
+    /// (`Game::told_apart`) that the other player knows comes first. A
+    /// definition's cards keep their places as a run, so slot ids are those
+    /// of the canonical order. Why: twins are interchangeable, and
+    /// `canon_hand_knowledge` puts the best-known first (it runs at the end
+    /// of every step, after the step's decision bound its options' cards and
+    /// before the answer), but a twin a reference tells apart keeps its own
     /// knowledge; the known one is the same card in every world the other
     /// player deals, and a slot naming its definition must name it there too
     /// (else one world reveals a twin the other player didn't know and
-    /// another the known one: equal keys, unequal knowledge).
+    /// another the known one: equal keys, unequal knowledge). An unknown
+    /// told-apart card a slot takes is keyed (`Game::key_told`).
     pub(crate) fn hand_slot_order_in(&self, p: PlayerId) -> SVec<CardIdx, 16> {
         let mut h = self.hand_sorted_in(p);
         let twins = h.windows(2).any(|w| self.objs[w[0].i()].def == self.objs[w[1].i()].def);
         if twins {
             let q = crate::ids::opp(p);
-            let told = |c: CardIdx| self.objs[c.i()].known & (1 << q) != 0 && self.named_by_an_ability(c);
-            h.sort_by_key(|&c| (self.objs[c.i()].def, !told(c), c.get()));
+            let told = |c: CardIdx| self.objs[c.i()].known & (1 << q) != 0 && self.told_apart(c);
+            h.sort_by_cached_key(|&c| (self.objs[c.i()].def, !told(c), c.get()));
         }
         h
     }

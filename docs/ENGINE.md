@@ -27707,7 +27707,9 @@ source and its event's objects).
 controller's permanents, from the top of the stack, in the frame's sorted hand, in exile or face-down exile, among the
 phased-out; none in a graveyard - unordered -, a library or the command zone); for a stale reference a **key**, its
 rank among the row's stale references in the order the encoder meets them (equal keys: the same gone object: two gone
-Memory Jars' links and delayed triggers pair exactly); the identity where the viewer knows it.
+Memory Jars' links and delayed triggers pair exactly); the identity where the viewer knows it (ENGINE.md 156: a live
+reference's card where the viewer knows it, a card of another player's hand only if a reference tells it apart; a
+stale reference's last known identity, `Game::ref_lki`, never the card's identity now).
 
 **A triggered ability's event** (`tail_encode::ev`, 167 floats): "that player" (the frame's or the other), "that
 object" and the second object (references), the event's spell or ability (its place on the stack while it is there),
@@ -28723,14 +28725,16 @@ Three parts (393527c6). All three are in the functions listed here, for the Delv
    followed by `Game::determinize`). It moves knowledge bits among a hand's same-definition cards only. What
    anyone knows, a multiset per hand, is unchanged.
 3. **The slot order** (`decision.rs` `Game::hand_slot_order_in`, new). It is the canonical order, except that
-   within a definition a twin an ability names that the other player knows comes first. The definition's cards
+   within a definition a twin an ability names that the other player knows comes first (ENGINE.md 156: a twin any
+   reference of the public state tells apart, `Game::told_apart`). The definition's cards
    keep their places as a run, so the slot ids are unchanged. These use it:
    * `hand_slots_in` and `hand_options_except` (decision.rs);
    * `promise_options` (cast.rs, delve);
    * splice's k-th copy (resolve_tail3.rs);
    * the hand mana sources' class members (pay.rs);
    * the own-hand choice of `EoeC::ExileFromOwnHandPlayable` (eoe_c.rs).
-   `named_by_an_ability` (hidden.rs) is now `pub(crate)`.
+   `named_by_an_ability` (hidden.rs) is now `pub(crate)` (ENGINE.md 156 replaces it with `Game::told_apart`: every
+   reference of the public state, not only an event's object).
 
 **Exactness.**
 
@@ -30514,7 +30518,7 @@ fuzz_random_matches`).
   `Priority` checked the state-based actions (CR 704.3) and its game ended (a player lost), while the other world still
   asks `ActivateMana`: the walks' new one-world-over assert. Options: ask the one-option `ActivateMana` [`PASS`] instead
   of returning (the engine's single-option rule then answers it with a `KEY_AUTO`, ENGINE.md 10), or emit a key there.
-* **F2. A v7 object reference to a card in a hidden zone reads the slot's knowledge** (default 9676, 19991; delver 4252,
+* **F2. A v7 object reference to a card in a hidden zone reads the slot's knowledge** (fixed: ENGINE.md 156) (default 9676, 19991; delver 4252,
   8292, 12064, 13030, 14002, 15338, 15865; cross 1503, 4086, 13181, match 843, post-sideboard match 879 - in the
   decider's own walk and the other viewer's, mostly at step 0, i.e. two fresh worlds, and in the matches' checks of a
   world against the real match). `tail_encode::Cx::write_ref` writes an object reference's identity digits, and the
@@ -30531,7 +30535,7 @@ fuzz_random_matches`).
   the reference itself showed - the identity it had when it was last public, kept with the reference or as last known
   information - never the slot's current card; or have the deals keep a referenced slot's card and its knowledge where
   the viewer knows it. Either makes the encoding a function of the information set.
-* **F3. The `links` segment's picks follow the slot's knowledge too** (cross 4799, 5450, 8706: `ChooseHandCard`, Show
+* **F3. The `links` segment's picks follow the slot's knowledge too** (fixed: ENGINE.md 156) (cross 4799, 5450, 8706: `ChooseHandCard`, Show
   and Tell's pick, ENGINE.md 123 and 129.3). `write_links` shows a pick in progress (`K_PICKED`) unless the picked card
   is hidden and the knower doesn't know it, and gives its code from `seen_def`. Two worlds of one information set then
   differ by a `K_PICKED` token (present in one, absent in the other: 4799 and 8706, both in the decider's own walk) or
@@ -31522,6 +31526,340 @@ untouched until the build). `feat/dealt-decks` itself stays on main.
   at initialisation scale (the options memo 1, 58.11's measurement) - the design's accepted cost of a spare float.
 * Not done (optional in the brief): a "dealt" field in the spectator view / game log. Recorded matches never deal, so
   nothing shows it.
+
+## 156. Object references to hidden cards: what the viewer knew of that object; the other player's hand picks (branch `fix/hidden-refs`, 2026-11-13)
+
+**Why.** Lane G's information-set walks (148.2) fail on main at the seeds of 148.6's **F2** and **F3**: two worlds of
+one information set of a viewer (equal keys, decider and legal actions, so one zero-core node) whose rows differ in an
+object reference's identity, or in a pick token. The row must be a function of what the viewer knows. This section
+traces both to their root, fixes them in the knowledge layer and in the encoding's one reference helper, and settles
+the rules reading of F3. Branch `fix/hidden-refs` from lane G's `fix/check-gaps` 67e2bdb6 (G's checks in it); zero-core
+e5e1bb0 unchanged. Layout unchanged (no feature count, segment or token kind moves).
+
+### 156.1 The root cause (traced)
+
+Rerun on 67e2bdb6 (the fuzz's failure messages name both worlds' stack references, 148.2). Every F2 seed is one
+mechanism with two entries; F3 is the picks.
+
+**The mechanism.** A hand is one pool to everyone but its owner (ENGINE.md 10), so which of a definition's twins a
+player knows is not information: `canon_hand_knowledge` (128) moves the knowledge bits among a hand's same-definition
+cards so that the better-known come first by card index, after every step and in every dealt world (`after_deal`). A
+world of viewer v deals v's unknown cards; where it dealt an unknown card below a known twin, the twin's bit moves onto
+it. The encoding's reference helper read the bit of the card a reference names (`seen_def(r.idx)`: "the card the slot
+holds now, if the knower knows that slot"), so the same reference showed the identity in one world and nothing in the
+other. 128 spared only the cards an ability names as its event's object (`named_by_an_ability`, live). Two kinds of
+reference escaped it:
+
+1. **A live reference to a hand card no event names.** Cross 1503 (P0's walk, step 0, head float 43,496, the stack
+   slot's `SOURCE` digits): Edge of Autumn's cycling ("sacrifice a land") is on the stack while P1 pays its costs; its
+   source `#64.3` is in P1's hand, revealed by the activation (CR 602.2a, 701.20a: revealed until the ability leaves
+   the stack). In the world that dealt one of P1's lower cards another Edge of Autumn, canon moved P0's bit onto that
+   card: "known false / known true". 148.6 lists cross 4086, 13181 and match 843 with the same stack digits.
+2. **A stale reference** (its object gone, CR 400.7). Delver 4252 (head float 43,540, the stack's `EV.OBJ` digits):
+   Tamiyo, Seasoned Scholar's -3 returned Daze from P1's graveyard to P1's hand; Murktide Regent's trigger names the
+   Daze as it was in the graveyard (`#68.3`, live false). The helper read the card's knowledge now - a new object in
+   the hand, a twin like any other - and canon moved it as in 1. Delver 12064 and 15865: Prismari Charm returned
+   Tamiyo to its owner's hand; a delayed trigger's and the other player's waiting trigger's source were the Tamiyo
+   that left (`delayed` source digits, an `opponent_triggers` token). Delver 8292 (a `stack_relations` target's code:
+   Wasteland's ability on the stack, Daze's cost returning a Volcanic Island to the hand) and default 9676 and 19991
+   (a `links` token's object A's digits) are references of the same helper. Reading the card's identity now was wrong
+   even without the twins: the reference's object no longer exists, and its card may have gone anywhere since (a
+   library each world deals again).
+
+**F3** (cross 4799, 8706: a `K_PICKED` token in one world only; 5450: its code): `write_links` showed a pick in
+progress unless the picked card was hidden from the knower and unknown to it, with its code from `seen_def`. Show and
+Tell's face-down pick is drawn again in each world of the other player (`hidden_pick_ok`), so the token appeared where
+the draw was a card the viewer knew. See 156.2 for the rules.
+
+The fix's other half, found while proving it (156.4): a told-apart card that a hand slot or a random pick takes could
+be that card in one world and a twin in another with equal keys (the reveal key names the definition), and
+`knowledge_leaves` could take a viewer's knowledge off a told-apart twin. Not seen by the fuzz (told-apart hand cards
+are nearly always known to both players, and a slot takes a known one first), fixed exactly anyway (156.3, parts 1 and
+3).
+
+**The same family as fix/farm-fuzz's pile order (152)**: both read an order or a fact among a definition's twins by card
+index, while the worlds permute which twin is which. There the pile list's order (`(def, CardIdx)`) moved a library
+position; here canon's order moved a hand card's knowledge. The mechanisms and the code are separate, and the fixes
+compose: this branch changes no pile or list order, and a library reference has no position in the reference block.
+
+### 156.2 F3's rules reading: the second chooser knows that a card was chosen, not which
+
+* CR 101.4: the active player chooses first, then the other player; then the actions happen at once.
+* CR 101.4a: "If an effect has each player choose a card in a hidden zone, such as their hand or library, those cards
+  may remain face down as they're chosen. However, each player must clearly indicate which face-down card they are
+  choosing." 101.4b: "A player knows the choices made by the previous players when making their choice, except as
+  specified in 101.4a."
+* Show and Tell's Oracle text: "Each player may put an artifact, creature, enchantment, or land card from their hand
+  onto the battlefield." Its ruling (2008-04-01, `a107ed89`): "A player does not have to reveal the chosen card, so long
+  as it is clear *which* card was chosen."
+
+So the non-active player knows that a card was chosen and which face-down card it is, but not its face. A hand is one
+pool to everyone but its owner (ENGINE.md 10): "which face-down card" carries nothing about the identity, and 123's
+model already deals the choice again in the other player's worlds, uniformly among the hand's cards of the kind
+(`hidden_pick_ok`; "it may be a card the viewer knows is there"). The encoding showed the pick's identity whenever the
+viewer knew the card the frame held, which (a) depended on the world (the pick is drawn again: present in a world whose
+draw was a known card, absent in another; cross 4799, 8706; a different code in 5450), and (b) told a face-down choice
+in the real game whenever the viewer knew the chosen card. The same holds for every other pick of a card of the other
+player's hand: a cost's picks (a discard or exile as a cost) name a hand slot, whose card depends on the hand's hidden
+cards (ENGINE.md 11), and move, keyed, only when paid (128.2's fifth way). The token itself is public (that a card was
+picked, and its rank: the stage, the context's count).
+
+### 156.3 The fix
+
+Five parts, each where it belongs: the knowledge layer (`hidden.rs`, `decision.rs`, `game.rs`) and the encoding's one
+reference helper (`tail_encode.rs`). No layout change.
+
+1. **Told apart: every reference of the public state** (`Game::for_each_public_ref`, `Game::told_apart`; hidden.rs).
+   One enumerator lists every object reference the public state holds and the encoding writes: the waiting triggers'
+   sources and event objects, each stack item's (an ability's source, its event's objects, its targets, its noted
+   objects, a ninjutsu creature's planeswalker), the delayed triggers' sources and event objects, the temporary
+   triggers' sources and objects, `links` (both ends) and the marks (the marked object, and `Reanimated`,
+   `ExiledToPay`, `Triggered`'s source, `AltGranted`'s granter). A hand card is **told apart** when one of them names
+   it live (the same incarnation). This replaces 128's `named_by_an_ability` (event objects only), and is read by:
+   * `canon_hand_knowledge`: a told-apart card keeps its knowledge bits (the world's twins don't take them);
+   * `knowledge_leaves` (a `d` leaves the hand that a player didn't know): a told-apart known twin keeps that player's
+     knowledge (it is still there: the reference says so), and a told-apart leaving card clears no twin (every player
+     saw which card left; `move_card` passes `told`, computed before the move);
+   * `hand_slot_order_in`: within a definition a told-apart card the other player knows comes first, else card
+     index (128's order with `told_apart`). (A first version put every card the other player knows first; it bought
+     nothing - a decision binds its options' cards before the step's canonicalization, which runs before the answer,
+     so the slot's card by index is the best-known one when it acts - and it permuted which twin moved: the Delver
+     canary library's spots `fourth_land_empty_hand:r3-2b-float550_0550_s32:160:254` and
+     `play:20261103-094631-97c776:None:81` reached another position, a Lightning Bolt's and a Volcanic Island's card
+     ids, traced on 67e2bdb6's engine and this one. Reverted in d96c2af3.)
+   The rules: an ability activated from a hidden zone reveals its card, which "remains revealed from the time the
+   spell or ability is announced until the time it leaves the stack" (CR 602.2a, 701.20a; ninjutsu 702.49b; miracle
+   702.94b): the reference follows that one object, not any of its twins.
+2. **A stale reference shows the object's last known identity** (`Game::ref_lki`, `Game::lki_identity`; game.rs,
+   hidden.rs). A reference whose object is gone (CR 400.7) named an object that no longer exists; the card it was is a
+   new object, which may have joined a hand's interchangeable twins or a library each world deals again, so its
+   identity now says nothing the viewer knew of the reference. `move_card_ctl` records, as an object leaves its zone,
+   its identity and who knew it then: everyone for a public departure (from a public zone; to a public zone, but a
+   face-down entry, 701.40a; revealed while a replacement choice waits, 616.1; a face-down permanent, revealed as it
+   leaves, 708.9); hidden to hidden what each player knew of it (of a hand card, the other player's knowledge only if
+   it was told apart: else which of the hand's twins left is not that player's to know). Departures nobody knew are not
+   kept, and at each turn's start the ones no reference of the public state names are dropped
+   (`prune_ref_lki`), so the list holds about one turn's departures. A world (`after_deal`) gives a departure the
+   viewer didn't know its card's identity in that world (the other player's view of it must not hold the real card,
+   and the card is the same physical card); the ones the viewer knew stay. `public_state.rs` classifies the field
+   **derived** (it is read only through references).
+3. **The told-apart card a slot or a random pick took is keyed** (`KEY_TOLD`, `Game::key_told`,
+   `Game::random_hand_card`). A slot takes a known told-apart card first, so it is the same card in every world of
+   the other player's; a told-apart card the other player doesn't know may be the slot's card in one world and a twin
+   in another, and so may any card a random pick takes (a random discard, CR 701.9b; a random exile). Every player sees
+   which it was (the reference follows it), so `move_card` (it leaves the hand) and `reveal` (it is revealed in the
+   hand) key one the other player doesn't know, and the three random hand picks (`Op::DiscardRandom`, EoE's offered
+   random discard, `resolve_m7d`'s random exile; `Game::random_hand_card`) key any; a random look
+   (`LookAtRandomHandCard`) keys one the looker doesn't know (a known one changes nothing: 74's twin rule). The key is
+   a public `KEY_TOLD` with the card index. Known told-apart cards leaving by their own costs (cycling's discard) emit
+   nothing new.
+4. **The encoding's reference helper** (`tail_encode::Cx::ref_def`, used by `Cx::write_ref` and every code a
+   reference's identity gives). A live reference: the card's identity where the viewer knows it (`seen_def`); a card in
+   another player's hand must be told apart (else a loud failure: "list its holder in Game::for_each_public_ref"). A
+   stale reference: `lki_identity`. The `links`, `stack_relations` and mark codes read it too; `seen_def` stays for the
+   zone readers (exile offers, picks).
+5. **F3: the other player's pick of a card of its own hand** (`write_links`, `K_PICKED`): a token with no identity
+   and no card code, in every world, whatever the viewer knows of that hand (156.2). Every other pick as before (the
+   knower's own, a public card, a library card by place, a face-down card by object: knowledge that is the card's own,
+   the same in every world; a hidden card the knower doesn't know: no token).
+
+### 156.4 Exactness
+
+Invariant (I), 128.2's: two worlds of viewer v in one node (equal keys, decider and legal actions) give v equal rows. A
+world agrees with the real state on everything v observes and differs only in the identities of cards hidden from v;
+both worlds then take the same actions with the same keys. What a reference writes:
+
+* **Its public facts** (present, live, zone, whose, position, the stale key): the same in both worlds as long as the
+  same object is referenced and in the same place. A reference names an object by card index, which a deal never
+  changes; an object leaves its zone by an action, and if that action took it in one world and a twin in the other,
+  either the twin is not told apart (no reference names it: nothing differs) or the slot took a known told-apart card
+  first in both worlds (`hand_slot_order_in`: whether the hand holds one the other player knows is the same in every
+  world of that player's, and it is the same card), or `KEY_TOLD` told the worlds apart (an unknown one, or a random
+  pick).
+* **A live reference's identity.** Public objects: the same. v's own hidden cards: never dealt in v's worlds. A library
+  card by its place and a face-down card by its object: their knowledge is their own (128.2), the same in every world.
+  A card in the other player's hand: told apart, so its bits are its own: a deal keeps a card v knows with its identity
+  and bits (`hidden_slots_with`), deals one v doesn't know without making it known, and canon and `knowledge_leaves`
+  never move them; after the deal its knowledge changes only by events both worlds share (a look, a reveal - keyed by
+  `KEY_TOLD` where a slot could have revealed a twin -, a scramble).
+* **A stale reference's identity** (`lki_identity`): recorded as its object left. A public departure is a public fact
+  (the identity a public object had, or the one a move to a public zone revealed, keyed). A hidden one records what
+  each player knew then: of a library or face-down card, its own knowledge; of a hand card, the other player's bit only
+  if a reference told it apart (stable, as above), else the owner's only. Departures before the deal are copied into
+  every world; after it, they happen by shared actions on equal knowledge. The viewer's entries are the real ones in
+  every world, and every other entry is its card's identity in that world (`after_deal`), which v's row never reads.
+* **Picks** (156.2): the other player's hand pick has no identity; every other pick shows knowledge that is the card's
+  own, or the knower's own choice.
+
+**No hidden information leaks.** `told_apart` reads only public references; `KEY_TOLD` fires only where every player
+sees which card it was (the card a public reference follows); a recorded identity is read only by a player who knew it
+when its object left; a world's other entries hold that world's identities, never the real ones v doesn't know; the
+other player's hand picks show nothing.
+
+**What is unchanged.** What anyone knows (a multiset per hand, the clouds) is unchanged by canon and by the order of
+`hand_slot_order_in` (the slot ids too: a definition's cards keep their places as a run). Learning, the deals, the
+hidden-pick draw and the deck posteriors are untouched.
+
+### 156.5 For the other lanes
+
+* **Lane B (layout v7's new gated segments `effects`, `counters`, `numbers`; encode.rs, tail_encode.rs,
+  public_state.rs).** A segment that writes an object reference, or a card code from one, calls
+  `tail_encode::Cx::write_ref` (`rf::*`) or `Cx::ref_def(r)` (the identity alone) - never `seen_def(r.idx)` on a
+  reference (`seen_def` is the zone readers' current-card identity). If the references come from a holder other than
+  `Game::for_each_public_ref`'s (the waiting triggers, the stack, `delayed`, `temp_triggers`, `links`, `marks`), add
+  the holder there: a live reference into another player's hand that no listed holder names fails loudly in `ref_def`
+  ("list its holder in Game::for_each_public_ref"), and a stale one keeps its last known identity only while a listed
+  holder names it (`prune_ref_lki` at each turn's start). `public_state.rs` gains one line (`ref_lki: Derived`), next
+  to `lki_toughness`. No layout change here: B's counts and segments are untouched.
+* **Lanes A1, A2 (hidden.rs).** Touched: `canon_hand_knowledge` (its filter: `told_apart` for `named_by_an_ability`,
+  which is gone), `knowledge_leaves` (a `told` argument; the twin search skips told-apart twins), `reveal` (calls
+  `key_told` first), `after_deal` (a loop after canon re-deriving the viewer's unknown `ref_lki` entries), and new
+  functions after `canon_hand_knowledge` (`for_each_public_ref`, `told_apart`, `key_told`, `lki_identity`,
+  `prune_ref_lki`) and after `forced_hand_pick` (`random_hand_card`), the constant `KEY_TOLD` (8 here; **9** on the
+  integrated tree, where dealt decks' `KEY_DEALT` took 8 first: 157). Not touched:
+  `determinize`, `determinize_weighted`, `deal_hidden`, `deal_owner`, `redeal`, `resample_with_clouds`,
+  `resample_weighted`, `hidden_slots_with`, `hidden_pick_ok`, `cloud_needs`, the posteriors. A new deal path must end
+  in `after_deal` (128.4) - now also for `ref_lki`.
+* **fix/farm-fuzz (152, `Game::pile_sorted`).** No overlap in code: no pile or list order changes here.
+* **Lane F1's `activate_mana`** (148.6 F1): not touched.
+
+### 156.6 Tests (`engine/tests/hidden_refs.rs`)
+
+* `cr_602_2a_a_revealed_sources_identity_is_the_same_in_every_world` (F2, a live reference; cross 1503's case built by
+  hand): P0 cycles Edge of Autumn and chooses the land to sacrifice; the revealed card waits in P0's hand as the
+  ability's source, and a card P1 doesn't know sits below it. 200 worlds of P1's (some deal that card as another Edge
+  of Autumn): P1's row equals the real game's in every one, and shows the source's identity.
+* `cr_400_7_a_stale_reference_shows_the_identity_its_object_had_as_it_left` (F2, a stale reference; delver 4252's case):
+  Tamiyo, Seasoned Scholar's -3 returns Daze from P1's graveyard to P1's hand; Murktide Regent's trigger names the
+  Daze as it was in the graveyard; a card P0 doesn't know sits below the returned Daze. 200 worlds of P0's: P0's row
+  equals the real game's, and the event object shows Daze.
+* `cr_101_4a_the_other_players_face_down_pick_shows_no_identity_in_any_world` (F3; cross 4799's case): P0 chooses
+  Emrakul for Show and Tell, P1 knows P0 holds an Emrakul and nothing else of P0's hand; at P1's choice the row holds
+  one pick token of the other player, with no code and no identity, and P1's row is the same in 200 worlds (each draws
+  P0's pick again).
+* In-crate (`hidden.rs` `told_apart_tests`, on 128.6's miracle setup: a revealed Metamorphosis Fanatic its trigger
+  names, an unknown twin below it): `a_random_pick_of_a_told_apart_card_is_keyed` (`KEY_TOLD` exactly when a random
+  pick takes the told-apart card), `a_told_apart_card_the_other_player_doesnt_know_is_keyed_as_a_slot_takes_it` (the
+  slot takes the known told-apart card first; no key while P1 knows it, one when it doesn't),
+  `a_twin_leaving_takes_no_knowledge_off_a_told_apart_card` (canon keeps its bits; the twin's discard leaves P1's
+  knowledge of it).
+* The fuzz is the wider check: lane G's walks (148.2) at every seed of F2 and F3, and the 20k runs (156.8).
+
+### 156.7 Digests
+
+**Behaviour: EQUAL.** Every `DIGEST_ENCODING=0` digest is 67e2bdb6's, and so is every game's line of it (`DIGEST_LINES`
+on both engines: 0 of 2,500 cube games, 0 of 570 constructed lines, 0 of 160 EoE games differ). The encoding moves, and
+is re-recorded on purpose (ea9661e7):
+
+| digest | before (67e2bdb6; 148.5) | after (d96c2af3) | lines that differ |
+|---|---|---|---|
+| cube (`digests.txt`), full | 438164c0429d7fa3 | **b9ad17dc0dee92e7** | 258 of 2,500 games |
+| cube, `DIGEST_ENCODING=0` | a0062bb5569e06d3 | a0062bb5569e06d3 | **EQUAL** (0) |
+| constructed (`digests_constructed.txt`), full | 63f58560ad7b3df0 | **af4e796d28aeb023** | 5 of 570 |
+| constructed, `DIGEST_ENCODING=0` | 7ace0291619aa36f | 7ace0291619aa36f | **EQUAL** (0) |
+| EoE (`digests_eoe.txt`), full | b36df9098a38d794 | b36df9098a38d794 | **EQUAL** |
+| EoE, `DIGEST_ENCODING=0` | 52bb9c00a23d24d3 | 52bb9c00a23d24d3 | **EQUAL** |
+| driver (`digests_driver.txt`) | 837d42c28214befe | 837d42c28214befe | **EQUAL** |
+
+Each recorded file was compared again after recording: equal. The full digests move where a reference's identity is
+now what the viewer knew of that object (a stale reference's last known identity: a returned, transformed or copied
+permanent, a card gone to a hidden zone; a told-apart hand card's own knowledge) and where the other player's hand pick
+is a token with no identity. The told-apart knowledge rules and `KEY_TOLD` change no digest game's play. (An earlier
+recording, 1a426558, had moved the behaviour digests too - cube `=0` 56d25b27c40d942f, 2 games; constructed
+2f745f8381e489ed, 4 lines; EoE 13916cfbdff6ff99, 1 game - all from the first slot order, 156.3; it is superseded.)
+
+### 156.8 Checks
+
+On d96c2af3's code (the digests of ea9661e7; nothing after it changes code), on the shared desktop (the Fable-fix
+throttle's slots; the live run paused from 16:15):
+
+* **The seeds.** Every F2 and F3 seed of 148.6 passes with lane G's checks: default 9676, 19991; delver 4252, 8292,
+  12064, 13030, 14002, 15338, 15865; cross 1503, 4086, 13181, 4799, 5450, 8706; cross matches 843 and 879 (with their
+  post-sideboard matches); and X5's and X7's (156.9). On 67e2bdb6 the nine rerun first (default 9676, 19991; delver
+  4252, 8292, 12064, 15865; cross 1503, 4799, 5450) all failed as 148.6 says.
+* **The new tests**: `hidden_refs` 3 passed, `told_apart_tests` 3 passed; the three `hidden_refs` tests fail on
+  67e2bdb6's engine (156.11). `known_face_key`, `az` (the public-state gate), `hidden`, `cards_sneak_show` and
+  `rules_farm2` pass.
+* **The engine suite** (`cargo test --release -p engine --no-fail-fast`): 162 binaries, 2,540 passed, 0 failed, 30
+  ignored (156.11). One test changed with the
+  encoding: `cards_sneak_show::cr_101_4a_the_other_player_knows_only_whether_a_card_was_chosen` compares whole rows
+  (the pick token puts a tail in the row, which the head-only encoder refuses, R1).
+* **pytest** (`tests/test_canary_library.py`, `tests/test_mac_remote.py` after `tools/build_py.sh`): 20 passed. The
+  Delver canary library's 60 spots reach their recorded positions (156.3: the first slot order moved two); the EoE
+  remote evaluation, which timed out at 600 s inside the loaded gate run (a known flake under load), passes alone.
+* **Digests**: 156.7.
+* **The 20k fuzz** (`FUZZ_GAMES=20000`, lane G's checks; the three pools in parallel from one build, each on its own
+  copy of the test binary): passed on default (`FUZZ_SKIP=2122`), delver and cross (`FUZZ_SKIP=13536,19515`)
+  (156.11).
+* **The gate**: GATE PASSED engine ea7b9a5e6fd3 (156.11).
+
+The first version (59b7bb3a, with the first slot order) had passed the same 3x20k fuzz (default with `FUZZ_SKIP=2122`
+2,492 s, delver 2,188 s, cross with `FUZZ_SKIP=13536,19515` 1,555 s) and the suite (162 binaries, 2,540 passed, 0
+failed, 30 ignored); its gate failed on the canary library (156.3) and the EoE flake, every other step passing.
+
+### 156.9 The fuzz-invariants campaign's X3, X5, X7 (2026-11-13)
+
+Three findings of another session's campaign (`fuzz-invariants` 1fcf328b, `docs/rules_check_findings.md`, on 267ae603's
+binary), rerun on this branch's final code:
+
+* **X5** (`FUZZ_HIDDEN_DECKS=1`, games 4,949, 17,779 and 10,000,106, `check_hidden_world`: the viewer's encoding in a
+  hidden-decklist world is not the real game's; 17,779's feature 43,495 is the top stack slot's `SOURCE` identity digits):
+  **fixed by this section's F2 fix**: 4,949 and 17,779 fail on 67e2bdb6's engine with the campaign's messages and pass on the fix (156.11); 10,000,106 passes on both with this branch's checks (it fails only under the fuzz-invariants branch's own), so this branch can't tell.
+* **X7** (`FUZZ_POOL=interactions`, match 1,550, `play_match`'s determinize check, a feature next to X5's): **fixed by
+  the F2 fix**: fails on 67e2bdb6's engine, passes on the fix (156.11).
+* **X3** (`FUZZ_POOL=interactions`, games 5,682, 6,025, 7,790, 12,725: "picks in progress in two tasks of the agenda",
+  `tail_encode::Cx::picks_in_progress`): **not this lane's.** The second holder is a frame of definition 138's trigger
+  in the cube table, Etali, Primal Conqueror ("exile cards from the top of each player's library until you exile a
+  nonland card. You may cast any number of spells from among the nonland cards exiled this way without paying their mana
+  costs"): its frame keeps the exiled cards as picks while its controller casts them, and a spell cast that way whose
+  costs pick objects (a sacrifice or a discard as an additional cost: `PayCosts` picks) is a second holder on top.
+  125's encoding shows one holder's picks (`Picks`: one rank sequence, the per-object pick floats) and refuses two
+  loudly. It is not about what a pick's reference shows (156's F3): showing two holders apart needs the encoding to
+  say which holder a pick belongs to, a change of what layout v7's floats mean, so it belongs to lane B's v7
+  amendment (or a user decision). Options: (a) a token kind (or a float) for an enclosing frame's picks, the per-object
+  pick floats the asking task's alone; (b) the enclosing frame's picks as more `K_PICKED` tokens ranked after the
+  asking task's (which frame is then lost: a gap); (c) leave the loud failure (a game where Etali's controller casts
+  such a spell aborts; no constructed deck plays Etali).
+
+### 156.10 Open points
+
+1. **Section number.** 154 was assigned first and turned out to be `feat/dealt-decks`'s; the orchestrator renumbered
+   this lane to 156 (2026-11-13).
+2. **Show and Tell's face-down pick of a told-apart card** (123, unchanged). 123 draws the other player's view of the
+   pick uniformly among the hand's cards of the kind. A told-apart card is one the ruling's "it is clear which card was
+   chosen" would show; while a sorcery resolves on an otherwise empty stack only a delayed or temporary trigger or a
+   mark could tell a hand card apart. Not changed here: a rules-model question for 123's owner.
+3. **Told-apart twins share one slot** (128.8 (2), unchanged): the slot takes a known told-apart card first; `KEY_TOLD`
+   makes the other cases exact, the choice between the two cards is still one action.
+4. **Layout v6's head** (`encode.rs`: a stack item's first exiled target and first noted object) reads knowledge
+   directly. Both are live references from holders `for_each_public_ref` lists, so a hand card there is told apart and
+   its knowledge stable; left as it is (lane B edits encode.rs).
+
+### 156.11 Baseline checks, per-game behaviour digests, hidden decklists; the final runs (2026-11-13)
+
+* **On 67e2bdb6's engine** (this branch's ten changed engine files checked out from 67e2bdb6, the tests kept, then
+  restored, the tree clean): the three `hidden_refs` tests **fail**; X5's 4,949 ("the viewer's feature 56468 differs
+  (1 / 0)") and 17,779 (feature 43,495, the top stack slot's `SOURCE` identity digits) and X7's match 1,550
+  ("determinize changed the encoding of P0 (mover P0) at 56472: 1 -> 0") **fail**; 10,000,106 passes. On the fix all
+  pass.
+* **Per-game behaviour digests** (`DIGEST_ENCODING=0 DIGEST_LINES=...` on both engines): 0 of 2,500 cube games, 0 of
+  570 constructed lines, 0 of 160 EoE games differ (156.7).
+* **`FUZZ_HIDDEN_DECKS=1`** (the cube's default pool, X5's mode; G's runs had none; on 59b7bb3a), 5,000 games: stops at
+  game 2,679, "a hidden-decklist world for P0 (mover P1): the viewer's own cards" - the campaign's X2/X4/X6 family (its
+  `failures.txt` lists 2,679 first, on 267ae603's binary): hidden-decklist dealing, not references; not this lane's.
+* **The final runs** (the code of d96c2af3, the digests of ea9661e7, the docs of ea7b9a5e):
+  * **the 3x20k fuzz: passed**, the three pools in parallel from one build, each on its own copy of the test binary
+    (the games, the matches and the replay checks, each run whole). Default pool (`FUZZ_SKIP=2122`): 20,000 games and
+    1,000 cube matches in 3,821 s, 438,574 open-decklist walks with 2,418,162 states compared after a common action,
+    5,396 match walks with 37,424. `FUZZ_POOL=delver` (no skip): 2,741 s, 382,722 walks, 1,122,930 states; 5,242 match
+    walks, 24,070. `FUZZ_POOL=cross` (`FUZZ_SKIP=13536,19515`): 1,845 s, 235,482 walks, 735,718 states; 3,652 match
+    walks, 16,990.
+  * **the engine suite**: 162 test binaries, **2,540 passed, 0 failed**, 30 ignored.
+  * **the gate**: `python tools/gate.py engine --no-mac --tested-sha ea7b9a5e --expect-digest b9ad17dc0dee92e7
+    --expect-digest0 a0062bb5569e06d3` (the live run paused, 43 GB free, the 8-thread smoke): **GATE PASSED engine
+    ea7b9a5e6fd3 in 1068s** (build, both digests equal, `az` 52 passed, `limits` 13, `hidden` 28, pytest 324 passed and
+    1 skipped, the search smoke 0 of 1 failed, the tree unchanged; the Mac recheck not needed). This commit adds these
+    lines only (the docs tier).
 
 ## 157. The Fable-review fix campaign integrated: `integrate/fable-1112` (branch `integrate/fable-1112`, zero-core `integrate/fable-1112`, 2026-11-13)
 

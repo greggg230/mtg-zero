@@ -1393,6 +1393,11 @@ impl Game {
                     .forced_def(crate::hidden::KEY_LOOK, p)
                     .and_then(|d| sorted.iter().copied().find(|&c| self.objs[c.i()].def == d));
                 let c = forced.unwrap_or_else(|| sorted[self.rng.below(sorted.len() as u32) as usize]);
+                // (A told-apart card the looker didn't know: in another world
+                // the draw may see one of its twins, and the looker learns it;
+                // every player sees which it was, ENGINE.md 156. A known one
+                // changes nothing: no key.)
+                self.key_told(c, false);
                 let d = self.objs[c.i()].def;
                 // Its owner knows their hand: the looker may remember it -
                 // unless the looker already knows another card of the hand

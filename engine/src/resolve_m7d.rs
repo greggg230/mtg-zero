@@ -102,7 +102,7 @@ impl Game {
         let i = self.face_down_ids.iter().position(|x| x.0 == c)?;
         let real = self.face_down_ids[i].1;
         let owner = self.objs[c.i()].owner;
-        self.knowledge_leaves(c, owner, Zone::Battlefield, real, known);
+        self.knowledge_leaves(c, owner, Zone::Battlefield, real, known, false);
         self.face_down_ids.remove(i);
         self.emit_public(crate::hidden::KEY_REVEAL, owner, real as u64);
         self.objs[c.i()].known = 0b11;
@@ -460,10 +460,7 @@ impl Game {
                         gy[k]
                     });
                     let sorted = self.hand_sorted(q);
-                    let from_hand = (!sorted.is_empty()).then(|| match self.forced_hand_pick(q, &sorted) {
-                        Some(c) => c,
-                        None => sorted[self.rng.below(sorted.len() as u32) as usize],
-                    });
+                    let from_hand = (!sorted.is_empty()).then(|| self.random_hand_card(q, &sorted));
                     exiled.extend(from_gy);
                     exiled.extend(from_hand);
                     for &c in &exiled {

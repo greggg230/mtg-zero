@@ -239,10 +239,12 @@ fn cr_101_4a_the_other_player_knows_only_whether_a_card_was_chosen() {
     };
     let (a, b, none) = (pick(Some(EMRAKUL)), pick(Some(GRIS)), pick(None));
     assert_eq!(a.offered(), b.offered());
-    let (xa, xb, xn) = (features(&a, 1), features(&b, 1), features(&none, 1));
+    // (The whole layout v7 row: the chosen card is a pick token with no identity, ENGINE.md 156.)
+    let row = |g: &Game| engine::az::tail_encode::Row::of(g, 1);
+    let (xa, xb, xn) = (row(&a), row(&b), row(&none));
     assert_eq!(xa, xb, "the other player's input doesn't depend on which card was chosen");
-    assert_eq!(xa[O_CONTEXT + ctx::OP_I], 2.0 / 8.0);
-    assert_eq!(xn[O_CONTEXT + ctx::OP_I], 1.0 / 8.0);
+    assert_eq!(xa.head[O_CONTEXT + ctx::OP_I], 2.0 / 8.0);
+    assert_eq!(xn.head[O_CONTEXT + ctx::OP_I], 1.0 / 8.0);
     assert_ne!(xa, xn, "whether a card was chosen is public");
 }
 

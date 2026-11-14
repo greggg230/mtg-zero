@@ -854,6 +854,16 @@ pub struct Game {
     /// controller as they last existed (CR 608.2h; kept when
     /// `CardDb::watch_toughness`: stationing by toughness, ENGINE.md 99.8).
     pub(crate) lki_toughness: Vec<(ObjRef, i64, PlayerId)>,
+    /// The identities of objects that left a zone, as each left it, and who
+    /// knew it then (bit p: player p): a public departure (from or to a public
+    /// zone, or a face-down permanent leaving, revealed, CR 708.9) everyone;
+    /// hidden to hidden what each player knew of it (a hand card's other
+    /// player only if a reference told it apart, `Game::told_apart`). What a
+    /// stale reference shows (`Game::lki_identity`; ENGINE.md 156: never the
+    /// card's identity now, a new object, CR 400.7). Departures nobody knew
+    /// are not kept; at each turn's start only the departures a reference of
+    /// the public state still names stay (`Game::for_each_public_ref`).
+    pub(crate) ref_lki: Vec<(ObjRef, DefId, u8)>,
     /// Last known power of the slots that left the battlefield (CR 608.2h),
     /// the latest departure of each: (slot, its `inc` on the battlefield,
     /// its power as it left; an amount, the game aborts past
@@ -1320,6 +1330,7 @@ impl Game {
             lki_attached: Vec::new(),
             lki_damage: Vec::new(),
             lki_toughness: Vec::new(),
+            ref_lki: Vec::new(),
             lki_power: Vec::new(),
             loyalty: Vec::new(),
             pool_restr: Vec::new(),
@@ -2365,6 +2376,22 @@ impl Game {
         let fd_known = self.objs[idx.i()].known;
         let old = self.obj_ref(idx);
         let old_controller = self.objs[idx.i()].controller;
+        // (A hand card a reference of the public state tells apart, ENGINE.md
+        // 156: every player sees that this card is the one leaving.)
+        let told = from == Zone::Hand && self.told_apart(idx);
+        if told {
+            self.key_told(idx, false);
+        }
+        // (Its identity as it leaves, and whether that was hidden: `ref_lki`.
+        // A permanent's as a live reference showed it, `perm_identity`: its
+        // own card without copy effects; a face-down one's card, revealed as
+        // it leaves, CR 708.9.)
+        let lki_def = if matches!(from, Zone::Battlefield | Zone::PhasedOut) {
+            self.face_down_id(idx).unwrap_or_else(|| self.own_def(idx))
+        } else {
+            self.ident(idx)
+        };
+        let lki_hidden = self.hidden_obj(idx);
         // (Leyline of the Void's replacement as this permanent last existed,
         // for the rest of a simultaneous move: `Lki::opp_gy_exile`.)
         let lki_void = from == Zone::Battlefield && self.batching && self.seen & SEEN_VOID != 0;
@@ -2501,6 +2528,21 @@ impl Game {
         let stamp = ts;
         let turn = self.turn.number;
         let known_before = if from.is_hidden() { self.objs[idx.i()].known } else { 0b11 };
+        // What a stale reference to the object leaving shows (`ref_lki`,
+        // ENGINE.md 156): everyone knew it if it was public, goes to a public
+        // zone or is revealed waiting for a replacement choice (CR 616.1), or
+        // is a face-down permanent (revealed as it leaves, CR 708.9); hidden
+        // to hidden (entering the battlefield face down too, 701.40a), what
+        // each player knew of it: of a hand card, the other
+        // player's knowledge only if a reference told it apart (else which of
+        // the hand's twins it was is not the other player's to know).
+        {
+            let public = !lki_hidden || from == Zone::Battlefield || (!to.is_hidden() && to != Zone::Nowhere && !fd_enter) || choose.is_some();
+            let known = if public { 0b11 } else if from == Zone::Hand && !told { fd_known & (1 << owner) } else { fd_known };
+            if known != 0 {
+                self.ref_lki.push((old, lki_def, known));
+            }
+        }
         // (Counted exactly: a slot's `u32::MAX`th zone change aborts the
         // game, so no `ObjRef` aliases a newer object.)
         let inc = self.exact_inc(self.objs[idx.i()].inc, "a card's zone changes");
@@ -2613,7 +2655,7 @@ impl Game {
             } else if to.is_hidden() {
                 self.knowledge_moves(idx, owner, from, to);
             } else {
-                self.knowledge_leaves(idx, owner, from, def, known_before);
+                self.knowledge_leaves(idx, owner, from, def, known_before, told);
                 // (Waiting for a replacement choice, it is revealed: every
                 // result shows it, CR 616.1.)
                 if to != Zone::Nowhere || choose.is_some() {
