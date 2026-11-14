@@ -105,9 +105,9 @@ pub struct Cloud {
 /// viewer's could have listed it, so it is one more distinct card seen (`sample::knowledge`'s R grew); else it may
 /// be a listed card seen again. Its chance given the deck under the deal's model just before it (the clouds' listed
 /// cards uniform in their domains, the free cards over the free places): b (D_def - R_def) + a up to a common scale
-/// - a the share of the place's listed copies (the copies a cloud lists in its domain x the free cards), b the
-/// place's free share (its domain's free places, or 1 outside every cloud); b = 0: a chance the deck does not
-/// change. `x`: R_def before it less the sightings that had grown R (a payment's pinned cards; ENGINE.md 140.9).
+/// - a the share of the place's listed copies (the copies a cloud lists in its domain x the free cards; with no free
+/// card, the listed copies alone: ENGINE.md 162), b the place's free share (its domain's free places, or 1 outside
+/// every cloud); b = 0: a chance the deck does not change. `x`: R_def before it less the sightings that had grown R (a payment's pinned cards; ENGINE.md 140.9).
 /// Kept only where whole-deck clouds are (`hidden_decklists`, `deck_clouds`: R never loses a card there), and only
 /// in a game no `determinize` dealt (`Game::observer`: a world's are dropped, `sightings_lost`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -678,8 +678,9 @@ impl Game {
     /// as the knowledge stands before it (`Sighting`): the deal's places (`hidden_slots`, `c` among them), each in the
     /// domain of at most one cloud, each cloud's listed copies (`cloud_needs`'s rule: a pinned card in the domain
     /// fulfils its identity, at most the domain's room), the free cards F = places - listed copies; `c`'s place in
-    /// cloud k of room m holding n listed cards, cnt of them `d`'s card: a = cnt F, b = m - n (outside every cloud a =
-    /// 0, b = 1; a pinned `c`: fixed, b = 0); `x` = R_d (the deck's cards not among the places - known or pinned -,
+    /// cloud k of room m holding n listed cards, cnt of them `d`'s card: a = cnt F, b = m - n (with F = 0 every domain
+    /// is full and the chance is cnt / m: a = cnt, b = 0, ENGINE.md 162; outside every cloud a = 0, b = 1; a pinned
+    /// `c`: fixed, b = 0); `x` = R_d (the deck's cards not among the places - known or pinned -,
     /// the listed copies, less the cards outside the deck among the places) less the grown sightings of `d`'s card
     /// so far. None where nothing is kept (`sighted`).
     fn sight_terms(&self, q: PlayerId, owner: PlayerId, c: CardIdx, zone: Zone, d: DefId) -> Option<(u64, u64, i32)> {
@@ -722,7 +723,17 @@ impl Game {
                 Some(k) => {
                     let room = home.iter().filter(|&&h| h == Some(k)).count();
                     let cnt = needs[k].iter().filter(|&&x| db.def(x).card_def(x) == def).count();
-                    ((cnt * free) as u64, (room - needs[k].len()) as u64)
+                    // The chance cnt / m + (m - n) / m x (D - R) / F, scaled by m F; with no free card (F = 0: every place
+                    // listed, so every domain full, m = n, and the deck is R) it is cnt / m, scaled by m - never 0 for a
+                    // listed card: an `a` of 0 says no listed copy stood, and a find would then ask a copy past R, which
+                    // no deck has (ENGINE.md 162).
+                    let n = needs[k].len();
+                    if free == 0 {
+                        debug_assert_eq!(room, n, "no free card, so every domain is full");
+                        (cnt as u64, 0)
+                    } else {
+                        ((cnt * free) as u64, (room - n) as u64)
+                    }
                 }
             }
         };

@@ -780,3 +780,120 @@ fn constructed_request_cost() {
         println!("{what}: a new request (32 decks, DealCache::decks) {req:.0} us; 32 separate samples {separate:.0} us");
     }
 }
+
+/// ENGINE.md 162: a find of a listed card when every place is listed. P1's only hidden card is its library's
+/// Volcanic Island: P1 looks at it, then P0 does (Mishra's Baubles: P0's a blind sighting, one more card), P1 cracks a Scalding Tarn and
+/// finds nothing (the library shuffled: P0's exact knowledge becomes a cloud over the library listing one Volcanic,
+/// room 1), then cracks another and finds the Volcanic. That sighting is a listed card seen again (no new card) by
+/// a search, with no free card (F = 0: the deck is R): its chance is cnt / m = 1, any deck holding R. The terms were
+/// a = cnt F = 0, b = 0, which `Seen::weight` read as "no listed copy stood" on a find - [D > R], 0 for every deck;
+/// the constructed prior then panicked "no deck holds what the viewer knows" (FUZZ_POOL=cross's post-sideboard match
+/// 98, a Doomsday mirror: the whole 60 known, an Underground Sea found). Now a = cnt = 1, b = 0.
+#[test]
+fn a_find_of_a_listed_card_with_every_place_listed_weighs_any_deck_holding_r() {
+    use engine::db::AbilitySlot;
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Game, Step, Target, Zone};
+    fn settle(g: &mut Game, prefer: impl Fn(&Game) -> Option<Choice>) {
+        for _ in 0..300 {
+            let Some(d) = g.pending_decision() else { return };
+            if d.kind == DecisionKind::Priority {
+                if g.stack().is_empty() {
+                    return;
+                }
+                g.pass();
+                continue;
+            }
+            let c: Choice = prefer(g).filter(|&c| g.has_option(c)).unwrap_or(d.options[0].choice);
+            g.choose(c);
+        }
+        panic!("settle: no progress");
+    }
+    let db = cdb();
+    let id = |s: &str| db.expect_id(s).unwrap();
+    let volc = id("Volcanic Island");
+    let mut g = Scenario::new(db)
+        .spec(|s| {
+            s.auto_single = false;
+            s.hidden_decks = true;
+            s.deck_clouds = true;
+        })
+        .battlefield(0, &["Mishra's Bauble"])
+        .library(0, &["Island"; 10])
+        .battlefield(1, &["Scalding Tarn", "Scalding Tarn", "Mishra's Bauble"])
+        .library(1, &["Volcanic Island"])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(g.player(1).hand.is_empty(), "P1's only hidden card is its library's");
+    // P1 looks at its own top card first (P0 passes priority to it): a look at a library card its owner doesn't know
+    // is not remembered (ENGINE.md 10)
+    g.pass();
+    assert_eq!(g.turn().priority, 1);
+    g.choose(Choice::Ability(g.card(1, "Mishra's Bauble", Zone::Battlefield), AbilitySlot::Activated(0)));
+    settle(&mut g, |_| Some(Choice::Target(Target::Player(1))));
+    assert_eq!(g.turn().priority, 0);
+    let bauble = g.card(0, "Mishra's Bauble", Zone::Battlefield);
+    g.choose(Choice::Ability(bauble, AbilitySlot::Activated(0)));
+    settle(&mut g, |_| Some(Choice::Target(Target::Player(1))));
+    let top = *g.player(1).library.last().unwrap();
+    assert!(g.knows(0, top), "P0 saw P1's Volcanic\n{}", g.log_lines().join("\n"));
+    // P1 cracks a Tarn and finds nothing (P0 passes priority to it): the library is shuffled
+    let crack = |g: &mut Game, answer: Choice| {
+        g.pass();
+        assert_eq!(g.turn().priority, 1);
+        g.choose(Choice::Ability(g.card(1, "Scalding Tarn", Zone::Battlefield), AbilitySlot::Activated(0)));
+        settle(g, |g| (g.kind() == Some(DecisionKind::SearchLibrary)).then_some(answer));
+    };
+    crack(&mut g, Choice::Pass);
+    assert_eq!(g.player(1).library.len(), 1);
+    assert!(!g.knows(0, top), "the shuffle: P0 knows a Volcanic is listed in the library, not which card\n{}", g.log_lines().join("\n"));
+    crack(&mut g, Choice::Def(volc));
+    assert!(g.player(1).library.is_empty(), "P1 found its Volcanic\n{}", g.log_lines().join("\n"));
+    let v: Vec<_> = g.sightings().iter().filter(|x| x.viewer == 0 && x.owner == 1).map(|x| (x.def, x.grows, x.searched, x.a, x.b, x.x)).collect();
+    assert_eq!(v, vec![(volc, true, false, 0, 1, 0), (volc, false, true, 1, 0, 0)], "the look (one more card, outside every cloud), then the find of the listed card with F = 0");
+    // the request's sightings (as `MtgAz::seen_of` builds them: r = the grown sightings before it + x): a deck with
+    // the one Volcanic seen weighs 1, and so does one with more
+    let mut sights = Vec::new();
+    for x in g.sightings().iter().filter(|x| x.viewer == 0 && x.owner == 1) {
+        let r = sights.iter().filter(|s: &&Sight| s.grows).count() as i32 + x.x;
+        sights.push(Sight { r, a: x.a, b: x.b, search: x.searched, grows: x.grows });
+    }
+    let seen = Seen { def: volc, sights };
+    assert_eq!((seen.weight(0), seen.weight(1), seen.weight(2)), (0.0, 1.0, 2.0), "D = 0 breaks R; the look weighs D, the find 1");
+}
+
+/// ENGINE.md 162, the request side: the Delver 75's whole main known (R = the 60: no free card) and a listed card's
+/// find among the sightings with the terms `Game::sight_terms` now gives it (a = cnt, b = 0): the constructed prior
+/// draws the main, the only deck holding R. With the old terms (a = 0) every s weighed 0 and the draw panicked.
+#[test]
+fn the_constructed_prior_draws_a_known_60_after_a_listed_card_s_find() {
+    let db = cdb();
+    let (main, _, prior) = delver_prior();
+    let id = |s: &str| db.expect_id(s).unwrap();
+    let volc = id("Volcanic Island");
+    let mut shown = main.clone();
+    shown.sort_unstable();
+    let r = count(&shown, volc) as i32;
+    // each copy seen blind as one more card, then one of them found again while listed (no new card)
+    let mut sights: Vec<Sight> = (0..r).map(|j| Sight { r: j, a: 0, b: 1, search: false, grows: true }).collect();
+    sights.push(Sight { r, a: 1, b: 0, search: true, grows: false });
+    let mut old = sights.clone();
+    old.last_mut().unwrap().a = 0;
+    let seen = [Seen { def: volc, sights }];
+    // (the old terms weigh the only deck holding R 0: the find asked a copy past R)
+    assert_eq!(sighting_weight(&shown, &shown, Some(&[Seen { def: volc, sights: old }])), 0.0);
+    assert!(sighting_weight(&shown, &shown, Some(&seen)) > 0.0);
+    let want = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None, pick: None, seen: Some(&seen) };
+    let mut rng = Rng::new(162);
+    for _ in 0..8 {
+        let mut d = prior.sample(&want, &mut rng).deck;
+        d.sort_unstable();
+        assert_eq!(d, shown, "the only deck holding R is the main");
+    }
+    let cache = DealCache::new(4, 0x162);
+    assert!(cache.decks(&prior, 1, &want).iter().all(|x| {
+        let mut d = x.deck.clone();
+        d.sort_unstable();
+        d == shown
+    }));
+}
