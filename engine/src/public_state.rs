@@ -2781,7 +2781,7 @@ pub fn covered<'s>(gaps: &[KnownGap], layout: u8, a: &[&'s str], b: &[&'s str]) 
 /// (an effect, a mark or a link of an object that left; a "this turn" fact of another turn; the
 /// effect it added ended) while it stays in the view. Each is still compared alone with every
 /// state.
-pub const COMBO_EXCLUDED: [&str; 20] = [
+pub const COMBO_EXCLUDED: [&str; 21] = [
     "a permanent leaves the battlefield",
     "a graveyard card is exiled",
     "an exiled card is turned face down",
@@ -2807,6 +2807,11 @@ pub const COMBO_EXCLUDED: [&str; 20] = [
     // position's partners are as before.)
     "the top library card is its owner's search's find",
     "a search's find is no longer told apart",
+    // (ENGINE.md 151.4: CR 508.8's record. A partner that makes a creature attack makes it inert -
+    // while one is attacking, its attacking flag says the steps follow - while the view keeps it; and
+    // added after the partner draws were set, so every position's partners are as before. Compared
+    // alone with every state: `public_states_encode_apart` checks that it reaches states.)
+    "the declare blockers step follows an attacker that left combat",
 ];
 
 /// The known gaps (`KnownGap`; ENGINE.md 142.2, 142.7): what the pairwise gate finds. Layout v7 has

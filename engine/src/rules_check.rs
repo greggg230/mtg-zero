@@ -2494,7 +2494,6 @@ mod tests {
     /// so an attacker declared and then removed from combat in that step (an
     /// instant kills it) costs both players their priority in those steps.
     #[test]
-    #[ignore = "engine rules bug F4 (docs/rules_check_findings.md): declare blockers skipped after an attacker left combat"]
     fn f4_cr_508_8_declared_attackers_keep_the_declare_blockers_step() {
         let v = vanilla();
         let mut g = Scenario::new(db()).spec(|s| s.auto_single = false).battlefield(0, &[v]).at(Step::DeclareAttackers, 0).start();
@@ -2522,7 +2521,6 @@ mod tests {
     /// striker with 0 power in the first step that is pumped before the
     /// second deals damage then.
     #[test]
-    #[ignore = "engine rules bug F5 (docs/rules_check_findings.md): a first striker without damage in the first step deals damage in the second"]
     fn f5_cr_510_4_a_first_striker_never_deals_damage_in_the_second_step() {
         let fs = creature(|d| d.keywords.has(Kw::FirstStrike) && !d.keywords.has(Kw::DoubleStrike) && d.power.unwrap_or(0) >= 1);
         let mut g = at_priority(Scenario::new(db()).battlefield(0, &[fs]));
