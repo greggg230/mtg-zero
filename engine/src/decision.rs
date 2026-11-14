@@ -782,6 +782,30 @@ impl Game {
         out
     }
 
+    /// A pile's cards (a frame's looked-at or revealed cards, `Frame::pile`) in canonical order:
+    /// by definition, then by place (ENGINE.md 152.1). A card still in a library by its depth
+    /// there (the top first), any other card by its index. A pick from a pile names a
+    /// definition and takes that definition's first card here. Twins in a library pile are not
+    /// interchangeable: whoever looked knows where each one is, and the twin taken decides where
+    /// the others are left. Their card indices are not observable either: two worlds of the
+    /// looker's opponent's deal give the same places to different indices. So the twin is
+    /// chosen by its place, which every world agrees on, never by its index.
+    pub fn pile_sorted(&self, pile: &[CardIdx]) -> Vec<CardIdx> {
+        let place = |c: CardIdx| -> (u8, u32) {
+            let o = &self.objs[c.i()];
+            if o.zone == Zone::Library {
+                let lib = &self.players[o.owner as usize].library;
+                let i = lib.iter().position(|&x| x == c).expect("a library card is in its owner's library");
+                (0, (lib.len() - 1 - i) as u32)
+            } else {
+                (1, c.get())
+            }
+        };
+        let mut v = pile.to_vec();
+        v.sort_by_cached_key(|&c| (self.objs[c.i()].def, place(c)));
+        v
+    }
+
     /// `p`'s library in canonical order: by definition, then card index.
     pub fn library_sorted(&self, p: PlayerId) -> Vec<CardIdx> {
         let mut l = self.players[p as usize].library.clone();

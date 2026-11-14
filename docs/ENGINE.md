@@ -30986,6 +30986,201 @@ On the commit of 151.1-151.3 (the desktop, the slot throttle of the Fable-fix la
 * **Engine gate**: run on this commit after it (`python tools/gate.py engine --no-mac`); its result is in the lane's
   report, not here.
 
+## 152. The zero-farm's fuzz failures: a pile's twins by their place, a controlled search keyed from the top, a payment's own answer (branch `fix/farm-fuzz`, 2026-11-13)
+
+Branch `fix/farm-fuzz` from main 267ae603 (the Fable-fix lanes' base); zero-core pin unchanged (e5e1bb0). The
+zero-farm ran fuzz campaigns on friends' PCs with the fuzz build at mtg-zero 4b44b07 (branch `farm`: the fuzz loops
+in the engine library, ENGINE.md 114.1; the `fuzz` profile, debug assertions on). `tools/farm_fuzz_pull.py` pulled
+four failures, three from `eoe-fuzz-4b44b07` and one from `delver-fuzz-4b44b07` (~954k games). The hub listed two
+older ones too (todo 2f1bff79).
+
+### 152.0 The farm's seeds play main's games
+
+Each seed's game is the same on 4b44b07 and 267ae603, action for action. A scratch step trace (not committed)
+printed every action of the Delver seed, both EoE information-set seeds, the EoE assertion seed and the two older
+seeds on both builds. They were identical. All four farm failures reproduce on 267ae603. So 4b44b07's fuzz build is
+sound: each of its failures is an engine bug main has too, its passing games are main's, and its campaign results
+can be trusted. (The farm's dedup key merged the two "same keys, different views" failures, seeds 100834725 and
+100019080, into one id, 0f368582520d. They have different causes: 152.1, 152.2.)
+
+| failure | on 267ae603 | cause | state |
+|---|---|---|---|
+| Delver 100834725, games.rs:1901 "same keys, different views" | reproduces | 152.1 a pile pick took a twin by its card index | fixed |
+| EoE 100019080, the same message | reproduces | 152.2 a controlled search's keys left the order out | fixed |
+| EoE 100000075, activate.rs:1176 | reproduces | 152.3 a payment of no mana left its answer to the next task | fixed |
+| EoE 100019937, HANG (300 s CPU) | reproduces (no end in 900 s) | 152.4 a payment search over Ragost's "sacrifice a Food" | open |
+| hidden decklists 10000235 ("545 vs 544") | passes; 10000211 (and the campaign's X6 seeds) fail the same way | 152.5 the check (a companion dealt to a deck slot) | check fixed |
+| exponential 10000021, feature 3248 = 6760.5 > 256 (also 2095, 2295, 2570) | passes in the fuzz profile, fails in release | 152.5 a bag count never squashed | fixed; the profile difference is open |
+
+### 152.1 A pile's twins, by their place (Delver seed 100834725)
+
+**The bug.** A pick from a looked-at pile (`Op::PileTo`: Ponder's "put back in any order", scry, surveil, "look
+at the top N" and its hand pick, ...) names a definition. The option is `LIBRARY` + the definition's first slot in
+the pile sorted by (definition, card index), and the card it takes is that definition's first card in that order.
+ENGINE.md 11 treats twins in a hidden zone as interchangeable ("hidden-zone cards have no other state"). In a
+library pile they are not: whoever looked knows where each card is, and which twin moves decides where the others
+are left. Card indices are not observable, so two worlds with the same cards looked at in the same places (equal
+keys: a look keys each card in the pile's order, top first) can hold the twins at swapped indices, for example
+after a shuffle. The same option then moves the top twin in one world and the third card in the other.
+
+The fuzz's walk: P1 cracks Flooded Strand (a shuffle in each world) and casts Ponder over Dragon's Rage Channeler,
+Lightning Bolt, Dragon's Rage Channeler. "Put on top: the Channeler" took #77 (the third card) in world a and #68 (the
+top card) in world b. Keys, decider and legal actions were equal, and P1's views differed in the library's known
+positions 30 and 31. The encoding's `tops` block (the top three places the viewer knows) differs the same way.
+
+**The fix.** `Game::pile_sorted` sorts a pile by (definition, place). A library card's place is its depth from the
+top; any other card's is its index (a public card has the same index in every world). Every site that sorted a pile
+by (definition, index) now uses it: `Op::PileTo`'s picks and its "the rest into a set" order (`resolve.rs`), the
+revealed pile's typed picks (`resolve_ext.rs`), manifest dread (`resolve_m7d.rs`), the opponent's pick of a revealed
+card (`resolve_walkers.rs`), "put one onto the battlefield" (`stack_ext.rs`), and the encoding's list of the
+decision's pile (`encode.rs`, `decision_list`: one line, so a list slot and its option name the same card). Option ids
+don't change: a definition's first slot doesn't depend on which twin is first.
+
+**Exact.** One option per definition still reaches every outcome. Every pile program ends with every pile card moved:
+the rest go on top or bottom in an order chosen card by card, into a graveyard or hand as a set, randomly to the
+bottom, or get shuffled. (Audited lowerings: `lower/effect.rs`, `effect_ext.rs`, `effect_tail.rs`, `effect_tail3.rs`,
+`effect_walkers.rs`, `effect_doomsday_a.rs`, `eoe_a.rs`, `eoe_c.rs`, `eoe_w2.rs`.) So the final library is a function
+of the definitions picked. Twins in a pile carry no other state: a private look scrambles the other player's
+knowledge of the whole pile, and a revealed pile is known to both. Only the transient places of the cards not yet
+moved depended on the index, and those are now the same in every world.
+
+### 152.2 A controlled search, keyed from the top (EoE seed 100019080)
+
+**The bug.** In a turn another player controls (CR 722), `sync_controller_view` gives the controller what the
+controlled player sees (722.3), keyed. While the controlled player searches their library (701.19), that is the whole
+library. The controller learned every card exactly, by position, but the keys of everything learned were emitted in
+definition order. Two worlds whose libraries held the same cards in different orders then had equal keys and
+different views. The fuzz's walk: P1 controls P0's turn and activates P0's Lander ("search for a basic land"). At
+P0's search P1 learned P0's eleven library cards, keyed sorted, and P1's view listed positions 1-10 in two orders.
+Two other cases had the same flaw: the face-down permanents the controlled player controls (learned at once and
+keyed sorted, so which permanent is which went unkeyed), and a pile they looked at before the turn became controlled.
+
+**The fix.** The keys follow the places. Cards of zones without order (the hand, the face-down exile) are keyed in
+definition order, as before. Then come the face-down permanents, in the order they became face down (`face_down_ids`,
+the same in every world). Then come the library cards (a searched library, a looked-at pile's cards, an option's
+library card), each library from its top. Equal keys now mean equal places. (Learning the contents without the order,
+as a cloud, would also be exact, since the search ends with a shuffle. Keying the order is the smaller change, and it
+keeps the controller seeing what the controlled player sees, card by card.)
+
+### 152.3 A payment's own answer (EoE seed 100000075)
+
+**The bug.** `pay_mana` finishes a payment at once when single-mana sources already pay everything ("no sources looked
+at"). It checked that before taking the answer to the decision it had asked. A payment of no mana with an empty pool
+still asks when a source making several mana exists: `PASS` (the pool covers the cost), or that source activated
+instead (CR 601.2g). After the answer, the early finish fired (nothing left to pay) and left the answer pending. The
+next task took it: `PayCosts`, the cost's choices, which read `Choice::Ability` as "a mana ability of a permanent
+picked to sacrifice", with nothing picked to sacrifice. That tripped the fuzz profile's assertion at activate.rs:1176.
+A release build went on and activated the source outside the payment, as an ability of its own. Any other answer kind
+would have reached an `unreachable!` there, or tapped a permanent picked for convoke. The fuzz's case was a world of
+its determinize check: P1 cast Consult the Star Charts for free through Weftwalking, declined the kicker, then picked
+Uthros, Titanic Godcore's "{U}, {T}: Add {U} for each artifact you control".
+
+**The fix.** The early finish requires that no answer is waiting (`pay.rs`). The answer is then handled where the
+decision's other answers are: `PASS` ends the payment, and a source is picked. **Test**: `pay.rs`'s
+`a_payment_that_is_paid_takes_the_answer_to_its_own_decision` (a payment of no mana, its virtual pool read, `PASS`
+answered: the answer is taken; fails before the fix). The seed itself is no replay test: its failure was in a world
+of the fuzz's determinize check, which a replay of the game doesn't reach. A scenario through Weftwalking with Lotus
+Field doesn't reach the decision either: for a cost of no mana and an empty pool the payment offers no such source
+and finishes. In the fuzz's world it offered Uthros's "{U}, {T}" ability, a source with a mana cost. The fuzz seed
+passes in the fuzz profile (152.6).
+
+### 152.4 Open: the hang (EoE seed 100019937)
+
+On 267ae603 the game doesn't end in 900 s (the farm's limit is 300 s of CPU). A trace (scratch instrumentation)
+placed it at step 729, inside the fuzz's determinize check, in a world for P1. P0 casts Warping Wail's third mode
+(create an Eldrazi Scion, "Sacrifice this creature: Add {C}") and both players pass. After it resolves,
+`priority_options` for P0 enters `permanent_activations` of Ragost, Deft Gastronaut and never comes back. Ragost makes
+P0's artifacts Foods and has "{1}, {T}, Sacrifice a Food: Ragost deals 3 damage to each opponent". The only search
+there that is unbounded in practice is the cost-order payment search (ENGINE.md 100.4.9: `can_activate` ->
+`cost_payable_order` -> `payable_in_some_order` -> `payment_completes`). It copies the game for every option of every
+payment decision until a copy completes. With a Food to choose among the artifacts and sources that sacrifice
+themselves for mana (the Scion; Inventors' Fair), a payment that can't complete explores the whole tree. That tree is
+bounded only by `ORACLE_NODES` = 2,000,000 copies, each a whole `Game`: minutes, then a loud panic. (Not confirmed with
+a node count.) Lane E's Warping Wail cost fix ({1}{C} was lowered as generic 2) is not the cause: the spell had
+resolved, and the search is on Ragost's ability. Not fixed here. The first step is a node count, on a scenario
+built from the world's board (Ragost, P0's artifacts, the Scion, P0's lands). Then three exact options, none of
+which moves the digests (a search's answer is unchanged, only its time):
+(a) **independence**: extend `order_free_with` to prove that no order matters for this shape: the Food candidates,
+the mana sources and the {T} source pairwise disjoint, and no part's payment changing what another reads. The
+cheap path (`cost_payable_with`) then decides. This is the smallest change, if the trace shows the order search
+was entered only because of a conservative "may change" (Ragost's type-granting static as the reader);
+(b) **memoization**: remember the states the search has visited, compared by the state itself (a canonical
+serialization, not a 64-bit hash, to stay exact). Permutations then collapse to sets: a medium change in
+`cost_order.rs`, with memory per search;
+(c) **symmetry**: offer one of a set of permanents identical in every respect the payment can read (definition,
+controller, tapped, counters, damage, attachments, marks, not referenced by any stack item or link). This needs a
+proof per reader, so it carries the most risk.
+
+### 152.5 The two older failures (todo 2f1bff79)
+
+They were found while the fuzz loops moved (114.1). The runs there were `--release` (tools/fuzz_farm.py builds release).
+
+* **Hidden decklists.** Seed 10000235 passes on 014781b (the farm commit where they were found), on 4b44b07 and on
+  267ae603, in both profiles. Seed 10000211 fails the same way: "a hidden-decklist world for P1: the match's deck of
+  the opponent", Bleachbone Verge vs Lutri, the Spellchaser. It is the first failing seed of `FUZZ_HIDDEN_DECKS=1
+  FUZZ_FIRST=10000000`. **The check was wrong.** A revealed companion put into the hand and shuffled away is a
+  non-deck card among the slots the viewer doesn't know, so a world deals its identity to any of those slots, and a
+  deck card to the companion's object (`sample::knowledge`'s `extras`; `sample::game_cards`: "a card the viewer lost
+  track of may have been dealt to any slot the viewer does not know"). The world's deck slots then hold Lutri and its
+  companion object holds the Verge. The deck as a multiset, with the companion, is right. The match mode's check already
+  compared `game_cards` with the deck plus the companion. `check_determinize_hidden` (tests/fuzz.rs) now does the same
+  for the opponent, the deck tilt's K decks, and the viewer's own cards (the same seed then failed for P0's own Lutri
+  shuffled into its library). Seed 10000211 passes. The fuzz-invariants campaign's X6 on 267ae603 ("the match's
+  deck of the opponent", "the viewer's own cards", "the sampled deck lacks a shown ...": 2679, 3191, 3671, 6375, 6419,
+  9671, 12247 run here) is the same check bug: each passes. `FUZZ_FIRST=10000000 FUZZ_GAMES=500` now stops at seed
+  10000106, "the viewer's feature 43496 differs (1 / 0)" (a world's encoding of the opponent's payment). The campaign
+  found that one on 267ae603 too (seeds 4949, 17779: features 56468, 43495), so it is not this branch's. It is a
+  v7 encoding difference between a world and the game, for the encoding lanes.
+* **Exponential: the bag counts, fixed; a profile difference, open.** Seed 10000021 passes in the fuzz profile on
+  014781b, 4b44b07 and 267ae603: 617 actions, the same on all three. In release it fails as reported (step 529, viewer
+  P0, feature 3248 = 6760.5 > 256), also on this branch before the fix below. The fuzz-invariants campaign on
+  267ae603 found the same bound broken at seeds 2095, 2295 and 2570 (its X1, the same diagnosis). Feature 3248 is bag
+  2, the opponent's battlefield, at 0.25 a card: an identity with ~27,000 permanents. **The encoding bug**: a bag
+  entry is a count, and it never went through the feature transform (ENGINE.md 46). That was safe while the board
+  had its 96-permanent cap, which 26.11.6 removed. Now `encode_bags` ends by squashing its region (`encode.rs`): exact
+  up to 512 cards of an identity, logarithmic past them, never past `FEATURE_BOUND`. That covers layouts v6 and v7,
+  which share `encode_lay`. The pass is skipped when objects plus stack references number at most 512, because no
+  entry can pass `SQUASH_FROM` then and the squash is the identity. So every encoding of a normal game is unchanged.
+  **Test**: `an_identitys_bag_count_stays_within_the_feature_bound` (1,100 of the opponent's Forests: 275 before, now
+  `squash(275)`). A seed replay is no test here: these games take CPU-hours. **Open**: why release and the fuzz
+  profile play different games at seed 10000021. The engine has no `cfg(debug_assertions)` branch that changes play
+  (`flow.rs` and `hidden.rs` check clones only), so it is likely an arithmetic difference: release wraps where the fuzz
+  profile's overflow checks would have panicked, or the reverse. A step trace in both profiles (152.0's scratch
+  patch) would find the first differing action.
+
+### 152.6 Tests, digests, fuzz
+
+* **Tests** (`engine/tests/farm_fuzz_seeds.rs`): `delver_seed_100834725_a_ponder_twin_is_taken_by_its_place` and
+  `eoe_seed_100019080_a_controlled_search_keys_the_library_from_the_top` replay the seeds' games (264 and 572 actions,
+  `data/farm_fuzz_seeds.json`, decks by card name) and walk the fuzz's two worlds;
+  `a_pile_pick_among_twins_takes_the_one_nearest_the_top_in_every_world` (152.1's minimal case: 800 of P0's worlds, a
+  fetch land's shuffle, Ponder); `an_identitys_bag_count_stays_within_the_feature_bound` (152.5). `pay.rs`:
+  `a_payment_that_is_paid_takes_the_answer_to_its_own_decision` (152.3). The two replays and 152.1's case fail on
+  267ae603.
+* **The farm's seeds in the fuzz profile** (debug assertions, as the farm runs them): EoE 100000075, EoE 100019080 and
+  Delver 100834725 pass; hidden decklists 10000211 passes; EoE 100019937 still runs past its 120 s limit (152.4).
+* **Digests** (re-recorded on purpose: four of the 2,500 games play differently, random games 880, 1051, 1612 and
+  1981): full **438164c0429d7fa3 -> e5675fc9d4da7a20**, `DIGEST_ENCODING=0` **a0062bb5569e06d3 -> b255e81fe5402cf3**.
+  The bag squash leaves them so: no digest game reaches 512 objects.
+* **Engine suite** (release, before the bag squash): 161 test binaries ok, 0 failed (2,530 s). On cef5aae0, with the
+  squash: `farm_fuzz_seeds` 4 passed, `az` 52 and `v7_tails` 14 passed, and both digests equal the recorded ones
+  (the squash moves no digest game).
+* **`FUZZ_GAMES=20000`** (release, three pools at once in one slot): delver passed (2,231 s), eoe passed (9,150 s).
+  The exponential pool was stopped. Its seeds can take CPU-hours each, and seed 2095, inside the range, is one of
+  152.5's bound failures. Single seeds instead, release, on cef5aae0: 2095 passes (75 s). 10000021 no longer fails at
+  step 529 and was still playing at its 30-minute limit.
+* **Gate** (`python tools/gate.py engine --no-mac --tested-sha cef5aae0 --expect-digest e5675fc9d4da7a20
+  --expect-digest0 b255e81fe5402cf3`): build, both digests, `az`, `limits` and `hidden` pass. Pytest fails one test:
+  `tests/test_canary_library.py::test_every_spot_reaches_its_recorded_position`. Five of the Delver canary library's
+  60 spots no longer reach their recorded positions: `daze_payable_pool:...:66:73`, `land_drop_tapout:...:178:161`,
+  `play:20261101-215939-adeb97:None:174` and `:178`, `fourth_land_empty_hand:...:233:226`. The exported state
+  compared there holds the zones with card ids. 152.1 changes which of two twins a pile pick moves, so the same
+  games end with the twins' ids in other places. (152.3 can't be ruled out without a trace.) By the library's rule
+  (ENGINE.md 100.8) a rules change bumps `RULES_EPOCH` (tools/position_lab.py) and re-records it
+  (`tools/delver_rerecord.py rerecord --old-engine <the recording checkout>`). Its state match includes ids, so
+  these five spots would be dropped, not rebuilt, unless the match learns that interchangeable twins' ids don't
+  count. This branch leaves that choice to the integration, where the other lanes' rules changes meet it too.
+
 ## 153. Best-of-three replays, the publisher and the sideboard census on layout v7: `delverai-bo3` (131, 132) merged into main (branch `delverai-bo3-v7`, 2026-11-12)
 
 Branch `delverai-bo3-v7` from main 267ae603 (layout v7, 125.12) with `delverai-bo3` 4ac6ebd3 (131, 132) merged in as a

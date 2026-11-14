@@ -300,8 +300,7 @@ impl Game {
                             0 => return Flow::Next,
                             1 => Some(f.pile[0]),
                             _ => {
-                                let mut sorted = f.pile.clone();
-                                sorted.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
+                                let sorted = self.pile_sorted(&f.pile);
                                 let mut opts = Vec::new();
                                 for (k, &c) in sorted.iter().enumerate() {
                                     if k > 0 && self.objs[sorted[k - 1].i()].def == self.objs[c.i()].def {

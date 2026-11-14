@@ -1443,8 +1443,7 @@ impl Game {
                     // still stand for a different card type (a matching).
                     let mut seen = Vec::new();
                     let mut opts = Vec::new();
-                    let mut sorted = f.pile.clone();
-                    sorted.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
+                    let sorted = self.pile_sorted(&f.pile);
                     for (k, &c) in sorted.iter().enumerate() {
                         let d = self.objs[c.i()].def;
                         if seen.contains(&d) {

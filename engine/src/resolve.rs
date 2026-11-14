@@ -977,8 +977,7 @@ impl Game {
                 }
                 if rest && set {
                     // "The rest into your graveyard": no choice, canonical order.
-                    let mut all = std::mem::take(&mut f.pile);
-                    all.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
+                    let all = self.pile_sorted(&std::mem::take(&mut f.pile));
                     if onto {
                         f.picked.extend(all);
                         return self.pile_to_battlefield(f, p, onto, reveal);
@@ -991,8 +990,7 @@ impl Game {
                     return Flow::Next;
                 }
                 let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
-                let mut sorted = f.pile.clone();
-                sorted.sort_by_key(|c| (self.objs[c.i()].def, c.get()));
+                let sorted = self.pile_sorted(&f.pile);
                 // The cards that may be picked now (a set is picked in
                 // non-decreasing definition order, so each set once).
                 let eligible: Vec<DefId> = sorted

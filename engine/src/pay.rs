@@ -2489,8 +2489,12 @@ impl Game {
         // (Paid by single-mana sources alone: done, no sources looked at;
         // unless sources a later "exile n cards from your graveyard" needs
         // are still to be activated: a cost of no mana, Psychic Frog's,
-        // with two Lotus Petals, ENGINE.md 49.)
-        if pm.vm == Some(0) && pm.now.is_none() && pm.forced.is_empty() && pm.chosen.len() == pm.need_total() {
+        // with two Lotus Petals, ENGINE.md 49. Never with an answer waiting:
+        // the decision this payment asked (the pool covers the rest:
+        // `PASS`, or a source to pay instead) is answered below; finished
+        // here, its answer was left to the next task, the cost's choices
+        // (ENGINE.md 152.3: EoE fuzz seed 100000075).)
+        if pm.vm == Some(0) && pm.now.is_none() && pm.forced.is_empty() && pm.chosen.len() == pm.need_total() && self.answer.is_none() {
             // (The classes only for the several-mana picks' restrictions.)
             let classes = if pm.multi.is_empty() { Vec::new() } else { self.payment_classes(&pm) };
             let rem = self.pool_rems(&pm, &classes).swap_remove(0);
@@ -4744,6 +4748,30 @@ mod tests {
     /// `covers` is a matching whatever the number of units (ENGINE.md 51:
     /// the search it replaced kept its used units in eight bits and never
     /// ended past eight: Gaea's Cradle's 28 {G}).
+    /// ENGINE.md 152.3 (EoE fuzz seed 100000075): a payment asked its decision (the pool covers the
+    /// rest: `PASS`, or a source to pay instead) while it had nothing left to pay. When the answer
+    /// comes back the payment takes it; it doesn't finish early and leave it to the next task (the
+    /// cost's choices took a source picked here for "a mana ability of a permanent picked to
+    /// sacrifice"). A payment of no mana, its virtual pool read (`vm`, as when it asked), `PASS`.
+    #[test]
+    fn a_payment_that_is_paid_takes_the_answer_to_its_own_decision() {
+        use crate::testkit::Scenario;
+        let mut g = Scenario::new(crate::db::CardDb::eoe())
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Island"; 5])
+            .library(1, &["Island"; 5])
+            .battlefield(0, &["Island"])
+            .at(crate::game::Step::Main1, 0)
+            .start();
+        let mut pm = PayMana::new(0, ManaCost::default());
+        pm.pooled = true;
+        pm.vm = Some(0);
+        g.pending = None;
+        g.answer = Some(Choice::Pass);
+        g.pay_mana(Box::new(pm));
+        assert_eq!(g.answer, None, "the payment took its answer");
+    }
+
     #[test]
     fn covers_matches_any_number_of_units() {
         const W: Tag = 1;
