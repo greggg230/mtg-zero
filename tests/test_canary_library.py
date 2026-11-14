@@ -86,3 +86,86 @@ def test_the_walk_refuses_another_position():
     gone = dict(sp, watch='Cast Lightning Bolt')                       # the probed decision must be the same
     with pytest.raises(RR.Fail, match='not offered at the spot'):
         RR.translate(E, gone, old)
+
+
+# ---------------------------------------------------------------- the twins' ids (docs/ENGINE.md 157)
+
+def swapped(tr, x, y, k):
+    """The trace with card ids x and y exchanged in every state from step k on: the old engine moved the other twin."""
+    m = {x: y, y: x}
+    steps = [dict(st, state=RR.renamed(st['state'], m)) if j >= k else st for j, st in enumerate(tr['steps'])]
+    return dict(tr, steps=steps, final=dict(tr['final'], state=RR.renamed(tr['final']['state'], m)))
+
+
+def where(st, i):
+    """Card id i's place in the exported state: ('library', player, position) / (zone, player) / None."""
+    for p, (pl, kn) in enumerate(zip(st['players'], st['known'])):
+        if i in kn['order']:
+            return ('library', p, kn['order'].index(i))
+        for z in ('hand', 'graveyard', 'exile', 'battlefield'):
+            if any(o['id'] == i for o in pl.get(z) or []):
+                return (z, p)
+    return None
+
+
+def twins_in(st, names, zone):
+    """Pairs of one player's twins (the same definition) both in `zone` of the state: library cards at two places
+    nobody knows, or permanents."""
+    out = []
+    for p, (pl, kn) in enumerate(zip(st['players'], st['known'])):
+        if zone == 'library':
+            known = {i for i, _, _ in kn['library']}
+            ids = [x for j, x in enumerate(kn['order']) if j not in known]
+        else:
+            ids = [o['id'] for o in pl.get(zone) or [] if o.get('owner') == p]
+        for a in range(len(ids)):
+            for b in range(a + 1, len(ids)):
+                if ids[a] < len(names) and ids[b] < len(names) and names[ids[a]] == names[ids[b]]:
+                    out.append((ids[a], ids[b]))
+    return out
+
+
+SWAP_SPOT = 'tamiyo_flip_precombat:r3-2b-float550_0550_s32:3:43'
+
+
+def test_the_walk_pairs_hidden_twins_anew_and_keeps_the_pairing():
+    """Two library twins nobody can tell apart, exchanged from a step on (and followed wherever they go next: a draw,
+    a cast): the walk reaches the position, pairing them anew where they were hidden, and the spot notes it."""
+    sp = BY_ID[SWAP_SPOT]
+    tr = RR.trace_spot(E, sp)
+    names = RR.deck_names(sp)
+    k = len(tr['steps']) // 3
+    pairs = twins_in(tr['steps'][k]['state'], names, 'library')
+    assert pairs, 'no library twins to exchange'
+    moved = [(x, y) for x, y in pairs if where(tr['final']['state'], x) != where(tr['steps'][k]['state'], x)
+             or where(tr['final']['state'], y) != where(tr['steps'][k]['state'], y)]
+    x, y = (moved or pairs)[0]
+    r = RR.translate(E, sp, swapped(tr, x, y, k))
+    assert r['actions'] == sp['actions'] and r['inserted'] == []
+    assert [m for _, m in r['twins']] == [{x: y, y: x}] and r['twins'][0][0] == k
+    new = RR.rerecorded(sp, tr, r, 1, sp['sig'], sp['pos'])
+    assert new['rerecord']['twins'] == [[k, {str(x): y, str(y): x}]]
+
+
+def test_the_walk_never_pairs_cards_a_player_can_tell_apart():
+    """No new pairing for two library cards of different definitions, nor for two permanents (public: told apart by
+    their place on the battlefield and their history) - the state differs."""
+    sp = BY_ID[SWAP_SPOT]
+    tr = RR.trace_spot(E, sp)
+    names = RR.deck_names(sp)
+    k = len(tr['steps']) // 3
+    lib = tr['steps'][k]['state']['known'][0]['order']
+    other = next(b for b in lib[1:] if names[b] != names[lib[0]])
+    with pytest.raises(RR.Fail, match='the state differs'):
+        RR.translate(E, sp, swapped(tr, lib[0], other, k))
+    # two twin permanents (the shortest spot whose game has them)
+    for sp in sorted(L['spots'], key=lambda s: len(s['actions'])):
+        tr = RR.trace_spot(E, sp)
+        names = RR.deck_names(sp)
+        j = next((j for j, st in enumerate(tr['steps']) if twins_in(st['state'], names, 'battlefield')), None)
+        if j is not None:
+            break
+    assert j is not None, 'no spot with two twin permanents'
+    x, y = twins_in(tr['steps'][j]['state'], names, 'battlefield')[0]
+    with pytest.raises(RR.Fail, match='the state differs'):
+        RR.translate(E, sp, swapped(tr, x, y, j))

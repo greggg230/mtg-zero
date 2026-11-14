@@ -20,8 +20,14 @@ library's `engine.engine_sha256`, `--any-old-engine` waives it) replays every sp
 state). Then this engine walks the same game. Each old step is matched by the same decider, the same
 decision kind, an option with the same words (the same action id first, then any other with those
 words) and the whole exported state equal (all but `decision`, `log`, `log_n`, `v`: zones in order with
-ids, tapped, counters, damage, the stack, pools, life, the libraries' order). A decision the old engine
-never asked is answered only as the old engine behaved:
+ids, tapped, counters, damage, the stack, pools, life, the libraries' order) up to the twins' ids: a card's
+id (its object index) is no player's information, so the walk carries a pairing of this engine's ids with the
+old engine's, and two cards may be paired anew only where no player can tell them apart - the same
+definition and owner, at the same place of the same player's hidden zone (a library position, a hand slot),
+with the same knowledge (who knows the card: `known`). Everything else is compared under the pairing, exactly
+(docs/ENGINE.md 157: a rules change that moves one twin instead of the other - 152.1's pile pick - changes
+which object is where, not the game). A decision the old engine never asked is answered only as the old
+engine behaved:
 
 * Priority whose options are exactly "Pass priority" and "Activate mana abilities": pass (the old engine
   passed for the player, who had no other option);
@@ -154,10 +160,91 @@ def first_diff(a, b, path=''):
     return None if a == b else f'{path}: {a!r} (new) vs {b!r} (old)'
 
 
+# --------------------------------------------------------------------------- the twins' ids (docs/ENGINE.md 157)
+def deck_names(sp):
+    """The spot's game's card id -> definition name for every deck card: a game's objects are its decks' cards in
+    the spec's list order, P0's then P1's (ids past them are tokens, public from their creation)."""
+    d = json.loads(sp['spec']).get('decks') or {}
+    return list(d.get('p0') or []) + list(d.get('p1') or [])
+
+
+def renamed(st, sig):
+    """The exported state `st` with its card ids renamed by `sig` (this engine's id -> the old engine's; an id
+    without an entry keeps its number): every card object (zones, the command zone, the stack's sources), the
+    references (`attached`, `blocking`, `attacks`, a target's `id`) and `known` (a hand card the other player knows,
+    the libraries' order). Player and stack-object numbers are not card ids and are left alone."""
+    if not sig:
+        return st
+    f = lambda x: sig.get(x, x)                                  # noqa: E731
+
+    def card(o):
+        o = dict(o)
+        for k in ('id', 'attached', 'blocking', 'attacks'):
+            if k in o:
+                o[k] = f(o[k])
+        return o
+
+    out = dict(st)
+    out['players'] = [dict(pl, **{z: [card(o) for o in pl.get(z) or []] for z in ('hand', 'graveyard', 'exile', 'battlefield')
+                                  if z in pl}) for pl in st['players']]
+    if 'command' in st:
+        out['command'] = [card(o) for o in st['command']]
+    out['stack'] = [dict(card(s), **({'targets': [card(t) if 'id' in t else t for t in s['targets']]} if 'targets' in s else {}))
+                    for s in st.get('stack') or []]
+    if 'known' in st:
+        out['known'] = [dict(k, hand=[[f(i), n] for i, n in k.get('hand') or []], order=[f(i) for i in k.get('order') or []])
+                        for k in st['known']]
+    return out
+
+
+def twin_match(P, Q, sig, names):
+    """Whether this engine's state P is the old engine's Q up to the twins' ids -> the pairing (`sig`, extended), or
+    None. P renamed by `sig` must equal Q, but for cards that `sig` may pair anew: two cards no player can tell apart
+    - at the same place of the same player's hidden zone (its library's position, its hand's slot) in P and in Q,
+    of the same definition (`names`: the decks' cards by id) and owner, with the same knowledge (a hand card: whether
+    the other player knows it; a library card: the position's `known` mask, compared with the rest). A card of a
+    public zone is never paired anew: it keeps the pairing it had when it was hidden (or its own number), so a twin
+    told apart by anything - its place on the battlefield, a reference to it, a mark - stays told apart."""
+    R = renamed(P, sig)
+    if R == Q:
+        return sig
+    if len(R.get('known') or []) != len(Q.get('known') or []) or len(R['players']) != len(Q['players']):
+        return None
+    name = lambda x: names[x] if 0 <= x < len(names) else None   # noqa: E731
+    new = {}                                                     # a renamed id of R -> the old id at its place
+    for p, (rk, qk) in enumerate(zip(R['known'], Q['known'])):
+        ro, qo = rk.get('order') or [], qk.get('order') or []
+        rh, qh = R['players'][p].get('hand') or [], Q['players'][p].get('hand') or []
+        if len(ro) != len(qo) or len(rh) != len(qh):
+            return None
+        r_seen = {i for i, _ in rk.get('hand') or []}
+        q_seen = {i for i, _ in qk.get('hand') or []}
+        pairs = [(x, y) for x, y in zip(ro, qo) if x != y]
+        pairs += [(a['id'], b['id']) for a, b in zip(rh, qh)
+                  if a['id'] != b['id'] and a.get('owner') == b.get('owner') and (a['id'] in r_seen) == (b['id'] in q_seen)]
+        for x, y in pairs:
+            if name(x) is None or name(x) != name(y) or new.get(x, y) != y:
+                return None
+            new[x] = y
+    if not new or len(set(new.values())) != len(new):
+        return None
+    # the renamed ids that are re-paired: x (now meaning old y) - the old y's own holder in R must go to x's old id
+    inv = {v: k for k, v in (sig or {}).items()}
+    sig2 = dict(sig or {})
+    for x, y in new.items():
+        orig = inv.get(x, x)                                     # this engine's id that R shows as x
+        sig2[orig] = y
+    if len(set(sig2.values())) != len(sig2):
+        return None
+    return sig2 if renamed(P, sig2) == Q else None
+
+
 def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
     """The spot's path on engine E reaching the old trace's position -> {'actions', 'inserted' [(index, kind,
-    words)], 'order_unseen' [index], 'matched' [new index of each old step]}; raises Fail(reason)."""
+    words)], 'order_unseen' [index], 'matched' [new index of each old step], 'twins' [(new index, {this engine's
+    id: the old one's}) where the pairing of the twins' ids changed]}; raises Fail(reason)."""
     steps, fin = tr['steps'], tr['final']
+    names = deck_names(sp)
     nodes = [0]
     far = {'i': -1, 'why': 'no decision reached'}
 
@@ -165,7 +252,7 @@ def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
         if i > far['i']:
             far['i'], far['why'] = i, why
 
-    def rec(g, i, path, ins, matched, unseen):
+    def rec(g, i, path, ins, matched, unseen, sig, twins):
         nodes[0] += 1
         if nodes[0] > budget:
             raise Fail(f'more than {budget} decisions walked (the furthest old step {far["i"]}: {far["why"]})')
@@ -181,11 +268,15 @@ def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
         if d.get('player') == tgt['player'] and d.get('kind') == tgt['kind']:
             P = pos_of(st)
             Q = pos_of(tgt['state'])
-            if P == Q:
+            sig2 = twin_match(P, Q, sig, names)
+            if sig2 is not None:
+                if sig2 != sig:
+                    twins = twins + [(len(path), {x: y for x, y in sig2.items() if sig.get(x, x) != y})]
+                    sig = sig2
                 if i == len(steps):
                     if sp['watch'] in labels:
                         return {'actions': path, 'inserted': ins, 'order_unseen': unseen, 'matched': matched,
-                                'labels': labels}
+                                'labels': labels, 'twins': twins}
                     raise Fail(f'the position is reached, but the watched option {sp["watch"]!r} is not offered at '
                                f'the spot ({labels})')
                 else:
@@ -194,7 +285,7 @@ def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
                     if not same:
                         note(i, f'old step {i} chose {tgt["t"]!r}, not offered ({labels})')
             else:
-                note(i, f'old step {i} ({tgt["kind"]} P{tgt["player"]}): the state differs: {first_diff(P, Q)}')
+                note(i, f'old step {i} ({tgt["kind"]} P{tgt["player"]}): the state differs: {first_diff(renamed(P, sig), Q)}')
         else:
             note(i, f'old step {i} is {tgt["kind"]} P{tgt["player"]} ({tgt.get("t")!r}); this engine asks '
                     f'{d.get("kind")} P{d.get("player")} {labels}')
@@ -211,9 +302,9 @@ def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
             h = g.clone()
             h.step(int(a))
             if how == 'match':
-                r = rec(h, i + 1, path + [int(a)], ins, matched + [len(path)], unseen)
+                r = rec(h, i + 1, path + [int(a)], ins, matched + [len(path)], unseen, sig, twins)
             else:
-                r = rec(h, i, path + [int(a)], ins + [(len(path), kind, words[a])], matched, unseen)
+                r = rec(h, i, path + [int(a)], ins + [(len(path), kind, words[a])], matched, unseen, sig, twins)
             if r is None:
                 continue
             if how != 'order' or not check_orders:
@@ -233,7 +324,7 @@ def translate(E, sp, tr, budget=NODES, prefix=(), i0=0, check_orders=True):
     lim = sys.getrecursionlimit()
     sys.setrecursionlimit(max(lim, 20000))
     try:
-        r = rec(g, i0, list(prefix), [], [], [])
+        r = rec(g, i0, list(prefix), [], [], [], {}, [])
     finally:
         sys.setrecursionlimit(lim)
     if r is None:
@@ -258,6 +349,9 @@ def rerecorded(sp, tr, r, epoch, sig, pos):
     rr = {'epoch': epoch, 'old_steps': len(tr['steps']), 'inserted': dict(by)}
     if r['order_unseen']:
         rr['order_unseen'] = r['order_unseen']
+    if r.get('twins'):
+        # (where the twins' ids were paired anew: the new path's index, this engine's id -> the old engine's)
+        rr['twins'] = [[j, {str(x): y for x, y in sorted(m.items())}] for j, m in r['twins']]
     if moved:
         rr['old_indices'] = moved
     new['rerecord'] = rr
