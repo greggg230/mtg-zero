@@ -1701,9 +1701,10 @@ impl Game {
                 (0..6).filter(|&t| m & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect()
             }
             _ => {
-                // (F7, ENGINE.md 147.1: mana from counters or a count of
-                // permanents past the pool's u8 aborts.)
-                self.check_mana_bound(p, src.card, prod);
+                // (F7, ENGINE.md 147.1, 147.11: mana from counters, a count
+                // of permanents or the "additional" mana its tapping adds
+                // past the pool's u8 aborts.)
+                self.check_mana_bound(p, src.card, ad.cost.tap, prod);
                 productions(self, p, prod, Some(src.card))
             }
         };
@@ -1719,7 +1720,9 @@ impl Game {
                 for x in self.permanents_of(p) {
                     for &(sub, t) in &self.abilities(x).extra_mana_on_tap {
                         if self.has_subtype(src.card, sub) {
-                            more[t as usize] += 1;
+                            // (Saturating: past 255 `check_mana_bound` above
+                            // has ended the game, ENGINE.md 147.11.)
+                            more[t as usize] = more[t as usize].saturating_add(1);
                         }
                     }
                 }

@@ -463,7 +463,9 @@ impl Game {
                     .filter(|&t| mask & (1 << t) != 0)
                     .map(|t| {
                         let mut v = extra;
-                        v[t] += 1;
+                        // (Saturating: past 255 the game has ended aborted before
+                        // this is read, `Game::mana_past_bound`, ENGINE.md 147.11.)
+                        v[t] = v[t].saturating_add(1);
                         v
                     })
                     .collect();

@@ -30633,6 +30633,50 @@ default pool only, as another pool's seed 2122 is another game).
 drafted match), 123.3's table (the weighted deal's pick), 130.1's table and 130.8 (`start_game` mirrors, `keep_deck` in
 self-play), 148.6 (F1 marked fixed, 147.8); docs/shortcuts.md 46.3.
 
+### 147.11 The "additional" mana of a tap: exact or aborted, never a wrap (the orchestrator's follow-up)
+
+**The bug** (147.1's "found, not fixed"). The mana "whenever you tap a <land subtype> / a creature for mana, add an
+additional" abilities add (CR 605.1b: triggered mana abilities, resolved with the ability) was summed in `u8`s: the
+creature bonus over a player's permanents (`creature_mana_bonus`, `mana_classes`' own sum), a source's bonus (`tap_bonus`:
+one per matching land-subtype ability, plus the creature bonus), and that bonus added to a production (`yield_with`, the
+sacrifice groups' `sac_groups`, the Pollinator's `pol_classes`, the activation's land-subtype count in `activate.rs`).
+256 Badgermole Cubs wrapped the creature bonus to 0 in release builds (an overflow panic with overflow checks). No
+reachable state of today's tables gets there; the class is the one the project refuses.
+
+**Now** the same treatment as 147.1:
+
+* `Game::mana_amount_max(p, src, prod, tap)`: the most mana of one type a mana ability makes now, exactly - its
+  production's amount (a count of permanents or counters as it is, every other amount the lowering's) plus what tapping
+  its source adds (`Game::tap_bonus_wide`: the bonus in `u64`, by `tap_bonus`'s own rule: the land-subtype abilities for a
+  land, the creature bonus for a creature tapped by an ability with {T}).
+* `Game::check_mana_bound(p, src, tap, prod)` (147.1's, now with the bonus) where the mana is made - the activation with
+  priority and each of a payment's picked sources (`finish_payment`) - and `Game::check_pollinator_bound(p)` for a
+  Pollinator's picked tap (one mana and the Pollinator's bonus): past 255 the game ends aborted.
+* `Game::mana_past_bound` (checked by `ask_options` before every decision) covers every mana ability's
+  `mana_amount_max` and every permanent's tap by a Pollinator. Its precheck is still O(1) in every ordinary game: an
+  amount is at most the table's largest fixed one (`CardDb::mana_fixed_max`, from `ManaProd::fixed_max`) or a count (at
+  most the permanents, or the largest count of counters), plus at most `CardDb::tap_bonus_max` per permanent
+  (`CardDb::refresh_mana_bounds`); below that bound nothing is scanned. (In the cube, with Badgermole Cub and Nissa, the
+  scan starts past about 125 permanents, or a counter count near 255 less the permanents.)
+* Every `u8` sum above saturates, with a comment: past 255 the game has ended before the value is read. The lowering
+  refuses a card printing more than 255 creature bonuses of a type (`checked_add`, unsupported) instead of wrapping.
+
+Behaviour is unchanged in every state below the bound: digests EQUAL 0df382d3's (147.9).
+
+**Test** (in-crate, `pay.rs`: `cr_106_4_tap_mana_bonuses_past_255_abort_and_never_wrap`, on a table of the cube with
+Gene Pollinator, Badgermole Cub also giving a Forest bonus and Birds of Paradise also "{T}, Sacrifice a land: Add {G}"):
+254 Cubs - Llanowar Elves makes exactly 255 {G} and the game goes on; 256 Cubs - the game is aborted before its first
+decision, the exact amounts (`tap_bonus_wide` 256, `mana_amount_max` 257), every `u8` path saturated at 255 (a wrap
+would give 0 or 1: `creature_mana_bonus`, `tap_bonus` with 256 Forest entries, the Elves' and the Forests' payment
+classes, the Pollinator's classes, the sacrifice group), and the aborts with their reasons: `check_mana_bound` (257 from
+Llanowar Elves; one without {T}), `check_pollinator_bound`, and the activations of a Forest and of the Elves with
+priority (`activate.rs`).
+
+**Checks** (on 3c8ae0cf): the test passed; `rules_numbers`, `rules_loops`, `cards_eoe_w2_lands`, `rules_payment_b`: 110
+passed; the behaviour digests **EQUAL** to 0df382d3's (full 7fab36d3268c1033, `DIGEST_ENCODING=0` 84b09dbaa4ccf08c); the
+full engine suite: **2,547 passed, 0 failed, 30 ignored** (147.9's 2,546 and this test). No 20k fuzz (the digests are
+equal: no behaviour change below the bound).
+
 ## 148. Check gaps: digests beyond the cube table, the fuzz's information-set holes, the cross-deck pool, benchmarks on the module's allocator (branch `fix/check-gaps`, 2026-11-12)
 
 **Why.** The Fable review of `e81f8304..267ae603` (`SUMMARY.md`, "Check and metric gaps"; `hidden.md` I2, I4; `perf.md`

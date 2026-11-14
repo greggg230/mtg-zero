@@ -867,7 +867,9 @@ impl Game {
                 prods = crate::pay::productions(self, p, &m.prod, Some(by));
                 for v in prods.iter_mut() {
                     for t in 0..6 {
-                        v[t] += extra[t];
+                        // (Saturating: past 255 the game has ended aborted before
+                        // this is read, `Game::mana_past_bound`, ENGINE.md 147.11.)
+                        v[t] = v[t].saturating_add(extra[t]);
                     }
                 }
                 if prods.is_empty() {

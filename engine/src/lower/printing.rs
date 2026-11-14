@@ -1308,7 +1308,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     let mut extra_mana_creature = [0u8; 6];
     for m in extra_mana_when_you_tap_creature_for_mana {
         match letter_index(m) {
-            Some(i) => extra_mana_creature[i] += 1,
+            // (A count of printed abilities: past a u8 the card is refused, never wrapped.)
+            Some(i) => match extra_mana_creature[i].checked_add(1) {
+                Some(n) => extra_mana_creature[i] = n,
+                None => l.unsupported("CardPrinting.extra_mana_when_you_tap_creature_for_mana(more than 255)"),
+            },
             None => l.unsupported(format!("CardPrinting.extra_mana_when_you_tap_creature_for_mana({m})")),
         }
     }
