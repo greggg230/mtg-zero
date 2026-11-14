@@ -29408,9 +29408,9 @@ opaque forced answer, or a live key with the other player's unmasked private key
   rest is the trees living longer (across the opponent's passes, one more tree per slot while the opponent decides). A
   tree's arrays stay bounded as before: `reroot` compacts above 65,536 nodes (`COMPACT_AT`). If the residual matters,
   a bound that changes no search: compact at every merging reuse (`line_advance` with more than one node found) or
-  whenever the arrays hold more than a few times the reachable subtree - compaction copies the subtree and the search
-  goes on bit for bit (zero-core `line_reuse_merges_the_forced_and_the_chosen_answer` checks it after a merge) - at
-  O(subtree) per reuse.
+  whenever the arrays hold more than a few times the reachable subtree - compaction only copies the reachable subtree
+  (its statistics equal: zero-core `line_reuse_merges_the_forced_and_the_chosen_answer` compares the dumps after a
+  merge) - at O(subtree) per reuse. Not done here: the residual is small next to the rows.
 * **The gate's `match` config at its size** (400 matches, `--threads 8`, the gate's 1800 s limit): 0 unfinished,
   1,091,294 decisions, 30.1 million simulations, 1,285 s, peak 30.4 GB. The gate's failure (1,802 s) was the machine's
   load. (The baseline's run at that size was stopped by the 6 GB free-memory guard at 567 s, 27.5 GB.)
