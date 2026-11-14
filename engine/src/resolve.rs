@@ -1337,7 +1337,10 @@ impl Game {
                 self.objs[c.i()].known |= 1 << p;
                 self.controller_sees(p, c); // CR 722.3 (ENGINE.md 100.5)
                 if reveal {
+                    // (Seen as the search's find, ENGINE.md 140.9; then one of the hand's cards.)
+                    self.found_by_search(c);
                     self.reveal(c);
+                    self.untrack_found(c);
                 }
                 self.shuffle_library(p);
             }
@@ -1347,15 +1350,19 @@ impl Game {
                 self.move_card(c, Zone::Library, Pos::Top);
                 self.objs[c.i()].known |= 1 << p;
                 self.controller_sees(p, c); // CR 722.3 (ENGINE.md 100.5)
+                // (On top, the find is told apart until it is seen, drawn or shuffled: ENGINE.md 140.9.)
+                self.found_by_search(c);
                 if reveal {
                     self.reveal(c);
                 }
             }
             SearchDest::Graveyard => {
+                self.found_by_search(c);
                 self.move_card(c, Zone::Graveyard, Pos::Top);
                 self.shuffle_library(p);
             }
             SearchDest::Battlefield { tapped } => {
+                self.found_by_search(c);
                 self.put_onto_battlefield(c, p);
                 if tapped {
                     self.tap(c);

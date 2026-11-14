@@ -325,6 +325,14 @@ fn pool_with(real: &MatchPool, keep: &[DefId], seen_fp: &[DefId], drawn: &[DefId
 /// companion `comp`'s condition (that card stays in the sideboard), drawn
 /// by weight: on colour (`cols`) x4, played in an earlier game x3. Counts
 /// per list entry, or `None` if impossible.
+///
+/// The seen cards (ENGINE.md 140): R forced in, the rest drawn copy by copy,
+/// is the posterior of the sightings (the prior times prod_i C(D_i, R_i))
+/// where the draws are a uniform subset of the pool's copies (the seen ones
+/// are some of them; a singleton card's C(D_i, R_i) is the indicator) and
+/// for the basic lands (independent draws over the colours). The weights
+/// and the colours read from R are this sampler's model (36.11), not the
+/// posterior of a stated prior: an open point of 140.
 #[allow(clippy::too_many_arguments)]
 fn sample_deck(
     db: &'static CardDb,

@@ -423,6 +423,7 @@ impl Game {
                     self.scramble(p, &[], false, true);
                     self.note(|g| format!("P{p} finds {}", g.name(c)));
                     if (self.def_of(c).mana_value() as i64) <= f.x {
+                        self.found_by_search(c); // ENGINE.md 140.9
                         self.put_onto_battlefield(c, p);
                         self.shuffle_library(p);
                         return Flow::Next;
@@ -434,6 +435,7 @@ impl Game {
                     // (ENGINE.md 28).
                     self.shuffle_library(p);
                     self.move_card(c, Zone::Library, Pos::Top);
+                    self.found_by_search(c); // ENGINE.md 140.9
                     self.reveal(c);
                     f.picked = vec![c];
                     f.i = 2;

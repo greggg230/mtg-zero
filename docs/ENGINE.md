@@ -22504,7 +22504,9 @@ Nothing else in the knowledge rules changes; with the switch off nothing changes
 
 1. `sample::knowledge` (36.11's, unchanged): o's cards hidden from the viewer (the slots), the pinned ones, the
    deck cards it knows (`known`), the non-deck cards it lost track of (`extras`) and R;
-2. the prior samples a whole deck D of n cards with R inside it, and its sideboard (`DeckPrior::sample`);
+2. the prior samples a whole deck D of n cards with R inside it, and its sideboard (`DeckPrior::sample`), from its
+   posterior given that the viewer saw R: the prior times prod_i C(D_i, R_i) (corrected in 140; before it the prior
+   restricted to the decks holding R);
 3. D less `known` (plus the extras) is dealt to the slots, each cloud's identities in its domain, and o's sideboard
    becomes the sampled one (`Game::redeal`, 36.11's); the match's `pools[o]` and `decks[o]` become the sampled pool
    and deck, so nothing of the real deck is left in the world;
@@ -26114,8 +26116,9 @@ by `Game::known_pools`, here the opponent's 75; the match writes `OPP_HIDDEN`).
   **To decide (120.7)**: whether this base stands; it is a modelling choice, not a rules approximation.
 * **Conditioned exactly** on what the viewer knows: every deck holds the shown cards R (copies counted; R from
   `sample::knowledge`, as 102's), a revealed companion stays in the sideboard and every card passes its condition (per
-  card, one per name). The posterior P(deck | K) ∝ P_base(deck) 1[deck meets K] is sampled exactly, in bounded time and
-  without rejection: a table over the 75's entries of the swaps in and out so far (`swap_table`: (S + 1)^2 states an
+  card, one per name). The posterior P(deck | K) ∝ P_base(deck) prod_i C(deck_i, R_i) 1[deck meets K3] is sampled exactly,
+  in bounded time and without rejection (the factor prod_i C(deck_i, R_i) is the chance of having seen R given the deck:
+  **corrected in 140**; this read P_base(deck) 1[deck meets K] until then, the prior restricted to the decks holding R): a table over the 75's entries of the swaps in and out so far (`swap_table`: (S + 1)^2 states an
   entry), s drawn by the table's weight of the decks with s swaps over the base's count of them, then each entry's count
   backwards. R comes from the real deck, so a deck holding it always exists (no failure path). The posterior is Bayes'
   under the base: seeing two Pyroblasts, a third Unholy Heat and Karakas (four swaps at least) makes many swaps likely
@@ -28994,7 +28997,8 @@ share of free cards), F the free cards, L those of the kind. The deck enters thr
 deck's cards of the kind beyond R and c0 = the kind among R - known + extras - clouds' cards (`Game::hidden_pick_odds`,
 `sneak_show.rs`; a card's kind is `hidden_pick_ok`'s own test on a hand card given that identity, on a copy of the
 state). So P(pick | deck) is proportional to a + b y (a = A F + B c0, b = B), and the deck's posterior is
-P(deck | R) (a + b y): `DeckWant::pick` (`PickWant`: the support's cards of the kind, a, b) carries it, and
+P(deck | R) (a + b y) (P(deck | R) the posterior of the cards seen, the prior times prod_i C(D_i, R_i): corrected in
+140, it was the prior restricted to the decks holding R): `DeckWant::pick` (`PickWant`: the support's cards of the kind, a, b) carries it, and
 `ConstructedPrior` samples it **exactly, without rejection** - a second layer in its swap table (`swap_table2`: the
 decks' weights, and the same weighted by y as "one marked copy of the kind"), the swap count s by
 (a m0 + b m1)(s, s) / (decks with s swaps), then whether a copy is marked, then the counts backwards (an entry of the
@@ -29294,6 +29298,365 @@ target directory (E:/cargo-target/mtg-zero/bo3-postboard).
   Nothing refuses it in a run spec; the presets do not set it.
 * **The run**: moving the Delver best-of-three run onto this commit changes what it trains (games 2-3 only) - a
   maintainer's decision, with the run.
+
+## 140. The hidden deck given the cards the viewer SAW, and one table a request (branch `fix/deck-posterior`, 2026-11-12)
+
+The Fable review of 2026-11-12 (`hidden.md` B1, SUMMARY tier 1 #1; `perf.md` O3, O5), lane A1. Commits: `4def6a9d`
+(the review's perf patches P1 and P4, unchanged), `bbd0a694` (the posterior fix), `201f4693` (the Lutri test).
+
+### 140.1 The bug
+
+Every hidden-deck deal conditioned the deck on "the deck holds R" (the cards of it the viewer has seen): P(D | R) ∝
+P(D) [D holds R] (102.1's K2, 120.2's "conditioned exactly", 129.3's P(deck | R)). R is not a lower bound the viewer
+was told; it is what the viewer saw. The deal's own model is: a deck D from the prior, shuffled uniformly; the viewer
+has seen the identities of some of its physical cards; which cards it saw did not depend on what they are (the same
+model as the uniform deal of the rest given D, and as 129.3's uniformly drawn face-down pick). Under it
+
+    P(saw R | D) = prod_i D_i! / (D_i - R_i)!  /  (n! / (n - |R|)!)  ∝  prod_i C(D_i, R_i)
+
+(n is public), so the posterior is **P(D | saw R) ∝ P(D) prod_i C(D_i, R_i)**: a seen Lightning Bolt is likelier from
+a 60 with four Bolts than from one with two. The indicator is the same factor clipped to 0 or 1. 129.3 made exactly
+this argument for Show and Tell's pick (the factor a + b y) and left it out of every ordinary sighting.
+
+Measured on 267ae603 (the behaviour of `4def6a9d`; `deck_posterior.rs` run on it), the Delver 75 against the truth
+(decks of the prior with nothing shown, shuffled, the first cards looked at, kept when they are R):
+
+| seen | copies of | truth by looking | the request on 267ae603 | its `expected_fill` + R | gap |
+|---|---|---|---|---|---|
+| one Pyroblast (0 main, 3 side) | Pyroblast | 2.5621 +- 0.0079 (7,582 kept of 300,000) | 2.2566 +- 0.0041 | 2.2615 | 34.4 se |
+| two Lightning Bolts (4 main) | Lightning Bolt | 3.8465 +- 0.0075 (2,789 of 1,000,000) | 3.6606 +- 0.0030 | 3.6655 | 23.0 se |
+| a Pyroblast and an Unholy Heat (2 main, 1 side) | Unholy Heat | 2.6756 +- 0.0070 (6,212 of 3,000,000) | 2.4460 +- 0.0034 | 2.4476 | 29.7 se |
+
+On a 75 small enough to list every legal deck (140.5) the request's law against the exact P_base(D) prod C(D_i, R_i)
+was a chi-square of 136,073 on 66 degrees of freedom (the worst deck 111.5 se off), and the same 90,000-140,000 with
+a tilt and with a face-down pick; the truth by looking against that exact posterior: 71.4 on 66 (the formula is the
+simulation's).
+
+The deal systematically over-weighted 60s boarded down to exactly what was seen and under-weighted more copies of a
+seen sideboard card; the bias compounds over the 10 to 25 cards seen in a game, and the deck tilt's baseline
+(`expected_fill`, 106) and the K = 32 cached decks inherited it.
+
+### 140.2 What "seen" is (R)
+
+R is `sample::knowledge`'s `required` (36.11, 102.1), unchanged:
+
+* every card of the opponent's current starting deck the viewer knows exactly where it is: every public card
+  (battlefield, graveyard, exile, the stack, the command zone), every hidden card it knows (revealed, looked at, seen
+  going from a public zone to a hidden one, ENGINE.md 10), and the pinned cards of a payment in progress (known for
+  that pass, ENGINE.md 10);
+* the identities of its clouds over the opponent's cards (cards it saw and lost track of; with `deck_clouds` or
+  `hidden_decklists` a cloud over the whole hand and library is kept, 102.1, 120.2, so every card seen is in R);
+* less the non-deck cards among them (`extras`: a revealed companion shuffled in).
+
+Each element is one distinct physical card of the deck: a deck object the viewer knows, or a cloud's listed identity
+over slots it does not know (never counted with a known card; a pinned card in a cloud's domain counts once,
+`Game::cloud_needs`). The likelihood needs exactly that. **Not sightings**: the public counts (hand, library,
+mulligans, cards drawn), the decisions it saw, and what it was not shown - evidence for the deck reader (102.1),
+which reads them through the tilt. In a constructed best-of-three game 1 shows nothing of the 60 (its mains are
+public) and game 2's R is game 2's; game 3's use of game 2 is lane A2's (141).
+
+**The model's assumption, recorded** (not new): which physical cards the viewer saw does not depend on their
+identities. It is the assumption of the uniform deal of the hand and library given the deck (the opponent's choices
+are not read). A card the viewer sees because of what it is - a fetch land's dual, a tutor's target, a card the
+opponent chose to cast - has, under the opponent's real policy, another chance given D; the determinized deal makes
+the same assumption for every card of the hand. Open point 140.8; for library searches decided and done in 140.9.
+
+### 140.3 The fix, prior by prior
+
+* **`ConstructedPrior`** (120.2): each table entry's count c is weighed by C(c, R_i) - `Slot::pw`, C(c, shown) times
+  the tilt per copy beyond the shown ones - in the forward table (`swap_table`), the pick's two-layer table
+  (`swap_table2`, 129.3), the backward draws, and both `expected_fill`s (the entry's own count weighed too; the
+  backward table is built from the same entries). `by_swaps` stays the base prior's unconditioned count. So a deck
+  is drawn with probability ∝ P_base(D) prod_i C(D_i, R_i) x the tilt per copy beyond R x (with a pick) a + b y,
+  exactly, in bounded time, without rejection; a deck without R still has weight 0. The base prior is the user's
+  (uniform over the swap count 0..=15, then uniform), unchanged.
+* **`seen_weight(deck, shown)`** (new, public): the likelihood prod_i C(D_i, R_i) of sorted multisets, for callers
+  that weigh decks themselves (tests; lane A2's game-3 work) - `DeckWant::shown` now means "the cards of this deck
+  the viewer saw".
+* **`TablePrior`** (102.1's stub, `FUZZ_HIDDEN_DECKS`): **no change needed, and the review's claim for it does not
+  hold.** Its deck is R's two groups of independent draws (lands to round(17 n / 40), spells to n), so a seen card is
+  one of those draws and the others are independent of it: the posterior of the sightings is R plus a fresh fill.
+  In counts: P(D) prod C(D_i, R_i) ∝ (prod 1 / D_i!) (prod D_i! / (D_i - R_i)!) = prod 1 / (D_i - R_i)!, the fill's
+  own multinomial. Under a companion that allows one copy per name (Lutri: every nonland card) a fully limited group
+  is a uniform subset of its names, exact again; a group mixing limited and unlimited names would not be (a weighted
+  urn is not closed under conditioning), and is now refused loudly. The test passes on 267ae603 too.
+* **`SealedPrior`** (102.6) and **the cube's deck sampler** (`sample::sample_deck`, 36.11): not changed - neither is
+  the posterior of a stated prior in the first place, so the C(D_i, R_i) factor has nothing exact to multiply. In
+  the cube's sampler the factor is already right where its draws allow it: a singleton card (C(D_i, R_i) is the
+  indicator `required` forces), the pool's copies when their weights are equal (forcing R in leaves a uniform subset
+  of the other copies: the posterior), the basic lands (independent draws over the deck's colours: R's plus a fresh fill, as the
+  table prior's); its other modelling (the colours read from R, weighted draws without replacement conditioned by forcing R in, the
+  first picks not weighed by the chance of the deck holding R, `PLAYED_BEFORE`) is 36.11's. The sealed prior forces R
+  into a build (102.6) and does not weigh builds by R at all. Both are open (140.8).
+
+### 140.4 One table a request (P1, adapted), the tilt key (P4)
+
+* **P1** (perf.md O3, applied unchanged in `4def6a9d`): `DeckPrior::sample_k`, the K decks of one request
+  (`DealCache::decks`), by default the K `sample_from` calls of before; the constructed prior shares what depends on
+  the request alone. **Adapted here**: `ConstructedPrior::request` builds the entries, the weighed table and the swap
+  count's weights once, `draw` draws one deck from them, `sample` is one request and one draw, `sample_k` one request
+  and K draws - now with a face-down pick too (129.3's two-layer table; P1 left a pick's request to K samples). The K decks are
+  K `sample`s deck for deck (tested). A draw reuses one weight buffer instead of two vectors per entry.
+* **P4** (perf.md O5, unchanged): `tilt_key` hashes the 1,024-float prediction in four multiply-rotate lanes.
+* **Measured** (`constructed_request_cost`, ignored; the desktop shared with the live run and other lanes, so
+  +-20%):
+
+  | a new request of the Delver 75 (K = 32, `DealCache::decks`) | no shown card | twelve shown cards |
+  |---|---:|---:|
+  | 32 separate samples (the deal before P1) | 1,274 us | 1,163 us |
+  | `4def6a9d` (P1: one table, the indicator) | 231 us | 234 us |
+  | the posterior fix (one weighed table, buffers reused) | 152 us | 185 us |
+  | 32 separate samples on the fix (for scale) | 1,158 us | 1,179 us |
+
+  The weights cost nothing measurable: the table is the same size, and the fix also stopped `swap_table` copying
+  every layer twice and a draw allocating two vectors per entry. perf.md had 1,340 -> 195 us for P1 on its machine.
+
+### 140.5 Tests (`engine/tests/deck_posterior.rs`)
+
+* `the_hidden_60_is_the_posterior_of_the_cards_the_viewer_saw` - the review's probe made a test: the Delver 75, one
+  Pyroblast, two Lightning Bolts, and a Pyroblast with an Unholy Heat seen; the request's law of the card's copies
+  (mean and every count's share) against the truth by looking, within 4.5 standard errors, and `expected_fill` on
+  the request's mean. Fails on 267ae603 (140.1).
+* `a_small_75_deals_the_exact_posterior_of_the_seen_cards` - a 75 of a 12-card main and a 4-card sideboard, every
+  legal deck listed: the request's law, deck by deck (chi-square), against the exact P_base(D) prod C(D_i, R_i), with
+  and without a tilt and a face-down pick, by `sample` and by `sample_k`; `sample_k` equal to K `sample`s; both
+  `expected_fill`s equal to the exact marginals (1e-9); the exact posterior equal to the truth by looking; and
+  `seen_weight`. Fails on 267ae603 (chi-square 136,073 on 66 df untilted; 90,000-140,000 with the tilt or the
+  pick); with the fix 58-74 on 66 df, every deck within 3.4 se.
+* `the_k_decks_of_a_request_meet_it` - the K-sample deal's decks of a request (with and without a pick) meet its
+  contract and are a function of the salt and the request.
+* `the_table_prior_is_the_posterior_of_the_cards_the_viewer_saw` - the EoE table (62 supported lands), one Forest
+  seen: the request's law against the truth by looking (1.2531 Forests against 1.2571 +- 0.0079), and the truth far
+  from the indicator's law (E[D | D >= 1] = 1.1353, 15 se): the test can tell the two apart, and the table prior is
+  the posterior of the sightings (passes on 267ae603 too: 140.3).
+* Updated: none of the earlier tests' assertions changed (the numbers they print moved as intended:
+  `cr_101_4a_a_face_down_pick_reaches_the_deck_request_exactly` - 138 of 20,000 plain decks with no unseen card of the kind (129.3: 386), posterior mean y 1.4864 by importance and 1.4916 by
+  the request, Emrakul's fill 0.9843 against 0.9829 sampled; `cr_101_4a_show_and_tell_in_a_later_game_...` - 37.428 +-
+  0.014 by rejection, 37.425 +- 0.011 by the request, 37.361 in the plain prior's worlds (129.3: 37.296 / 37.280 /
+  37.209); `the_constructed_prior_meets_its_contract` - 495 Counterspells in 200 untilted decks (120.2's "~2.4" of 3
+  per deck is now 2.475)).
+
+### 140.6 Digests
+
+* P1 + P4 (`4def6a9d`): **EQUAL**, combined `438164c0429d7fa3` (`digest.rs` plays no constructed best-of-three; the
+  review's driver hash was its check of P1).
+* The posterior fix: **EQUAL**, combined `438164c0429d7fa3` and encoding-free `a0062bb5569e06d3` (the gate, 140.7).
+  As expected: `digest.rs` plays best-of-one `Game`s with open decklists, so no digest game deals a hidden deck. The
+  behaviour this changes is every world of the constructed prior (a constructed best-of-three's games 2-3 and
+  between games; the table and sealed priors deal as before); lane G's constructed best-of-three digests (148) will move with it, re-recorded at
+  integration.
+
+### 140.7 Checks (on `201f4693`: the fix `bbd0a694` and the Lutri test)
+
+The desktop was shared with the live run and about ten other lanes (the heavy steps throttled, one at a time).
+
+* **The engine gate** (`python tools/gate.py engine --no-mac`): `GATE PASSED WITH SKIPS engine 201f469368b8 in 1719s -
+  skipped: mac-recheck (--no-mac)` - build, digests encoding-free `a0062bb5569e06d3` and full `438164c0429d7fa3`
+  (both = expected), `az` 52, `limits` 13, `hidden` 28 passed, pytest 323 passed (1 skipped), the search smoke, tracked
+  files unchanged.
+* **The full engine suite** (`cargo test --release -p engine --no-fail-fast`): 161 test targets, 2,539 passed, 0
+  failed, 28 ignored (3,275 s); `deck_posterior.rs` 5 passed, 1 ignored (the cost measurement).
+* **`FUZZ_GAMES=20000`**, the default pool: passed (3,336 s): 20,000 games (wins 9,803 / 10,075, 122 draws, 0
+  aborted; 19.2M options completed), 1,000 cube best-of-three matches (2,549 games, 42,956 hidden-pool worlds).
+* **`FUZZ_POOL=delver FUZZ_GAMES=20000`**: passed (2,536 s): 20,000 games (wins 9,673 / 9,563, 764 draws, 0
+  aborted), 1,000 constructed best-of-three matches (2,645 games, 26,400 sideboarding decisions, 41,442 worlds,
+  each later game's 60 from this posterior).
+* **`FUZZ_HIDDEN_DECKS=1 FUZZ_GAMES=1000`** (the table prior; its new guard): passed (235 s): 21,738 hidden-decklist
+  worlds (21,735 with another deck than the real one), 132 companions revealed, 84,848 information-set steps.
+* The digest before the gate, on the same tree: `438164c0429d7fa3` (EQUAL).
+
+### 140.8 Open points, decisions
+
+* **The sealed prior is not the posterior of the seen cards** (nor of anything stated: 102.6). It forces R into a
+  build by rarity and kind instead of weighing builds by R, so a build with more of a seen basic land or duplicate,
+  or in a seen card's colours through its lands, is not weighed up. Options for the user (EoE is on hold): (a) list
+  it as a standing approximation of the EoE line (no cost now); (b) a stated, tractable sealed prior (the
+  collation's slots exactly, a product-form build given the pool) sampled from P(pool, deck | saw R) by tables like
+  the constructed prior's - a redesign of 102.6 and of the deck evaluator's choice (112); (c) MCMC over (pool, build)
+  - exact only in the limit, unbounded time per deal. Rejection from the generator is out of reach (a random pool
+  holding 10-20 given cards).
+* **The cube's deck sampler is not the posterior of a stated prior either** (36.11): the deck's colours are read
+  from R, the pool cards are drawn by weight without replacement and conditioned by forcing R in (a weighted urn is
+  not closed under that), and the unseen first picks are drawn from their prior without the chance of the deck
+  holding R. The C(D_i, R_i) factor itself is already right there (singletons, uniform copies, independent basic
+  lands; `sample_deck`'s docs). Options: (a) list it as 36.11's standing model (the cube best-of-three trains no live run); (b) a
+  product-form deck prior (P(S) ∝ prod w_k over the pool's copies, basic lands over fixed colour weights with every
+  colour possible), exact under forcing R in by a table over the pool (about 45 x 23 states), with the colours fixed
+  by the known part of the pool - and the first picks' posterior still needs the chance of R given each candidate
+  set (about a million 3-subsets a request): a design for the user, not a fix.
+* **Searched cards** (140.2) - **decided: option (b), done in 140.9.** A card the viewer sees because of what it is (a fetch land's dual, a tutor's target)
+  has, under any real policy, a chance given D other than C(D_i, R_i) (the opponent takes it whenever the deck
+  holds one: the indicator; a blind search among the matches: D_i over the matches). The knowledge layer records
+  no provenance of a sighting. Options: (a) keep the identity-blind model for every sighting (today's, and the
+  uniform hand deal's for every card the opponent chose to play); (b) record "seen by a search of the owner's"
+  per card in `hidden.rs` and give such cards the search's likelihood in the tables (another factor per entry:
+  the table's form allows it) - an engine change, and the policy's model is the user's choice.
+* **The table prior's land count is fixed** (round(17 n / 40)): R holding more lands than that, or more spells than
+  the rest, has no deck of the prior's support; the stub keeps n and R (102.1: never a failure). It is the fuzz's
+  prior (`FUZZ_HIDDEN_DECKS`), no run's.
+* **For lane A2 (141)**: `DeckWant::shown` is now "the cards of this deck the viewer saw", and every prior's
+  `sample` / `sample_k` returns the posterior given them; `seen_weight` is the likelihood for any caller that weighs
+  decks itself. Game 3 conditioned on game 2 (the same deck kept, or sideboarded from it) is 141's: a deck known to be
+  the game-2 deck takes game 2's R as `shown`; a game-3 deck sideboarded from it has no closed form in this table
+  (it would need the opponent's sideboarding model).
+* **The live run's preset family**: the Delver best-of-three presets deal every game-2/3 world from this posterior,
+  and the deck tilt's baseline (`expected_fill`, 106) moves with it. Moving `delver-bo3-pb1` onto a commit with
+  this fix changes its worlds on purpose; the maintainer's decision, with the run.
+
+### 140.9 Searched cards: the owner finds what it looks for (140.8's option (b), the user's decision of 11-13)
+
+**The decision.** 140.8 asked how to weigh a card the viewer sees because of what it is. The user chose (b): record
+how each card was seen, and weigh a card found by its owner's library search by the model "the owner finds one
+whenever the deck holds one" - an indicator, not the C(D_i, R_i) of a card seen blind.
+
+**The likelihood, exactly.** The deal's model, sighting by sighting in the order they happened: a card seen blind
+when j copies of its definition were seen before is one of the D_i - j copies not yet seen, chance proportional to
+D_i - j (the denominator, the cards not yet seen, is public); a search's find when j were seen before finds one
+whenever the deck holds one more, chance [D_i > j]. So, per definition with R_i copies seen,
+
+    P(the sightings | D)  ∝  prod_i [D_i >= R_i] x prod over its blind sightings j of (D_i - j)
+
+(`Seen::weight`, `sighting_weight`). Every sighting blind gives prod_{j<R}(D - j) ∝ C(D, R), 140's. Several finds of
+one card: an indicator each, [D_i >= R_i] together. The order counts: a Volcanic Island seen blind, then a fetch land
+finding another, weighs D (D >= 2); the find first, then one seen blind, weighs D - 1 (D >= 2) - the find left the
+cards not yet seen first. So the record keeps the order: a find is placed at its search, not at the moment the
+viewer learns its identity. A random choice would be different: a library card chosen at random is a blind sighting
+(C(D_i, R_i) again; "reveal cards until" is a sequence of blind sightings, its stopping rule adds no factor), and a
+uniform pick among the matching cards would weigh D_i over the matching cards, coupling the entries - no op of the
+engine makes either (every `DecisionKind::SearchLibrary` choice is the owner's), so nothing is left to weigh that way.
+
+**What a find is** (`hidden.rs`, `Game::found`): a card its owner chose by a library search (`DecisionKind::
+SearchLibrary`: `Op::Search`'s four destinations, the sacrificed-artifact search, `SearchAnyNumber` with the basic land
+searches and EoE's search up to, Doomsday's pile), marked at its search (`found_by_search`). It stays marked while
+the other player can still tell it apart - on top of the library (a tutor's "put that card on top"), in a Doomsday
+pile (finds only, so a card seen there that the viewer did not know is a find), exiled face down - and is unmarked
+when seen (its sighting kept, ordered at the search), when it goes into a hand (hand cards are not told apart by
+anyone but their owner, ENGINE.md 10: a tutor's unrevealed find is no sighting, and a card later cast from that hand
+is seen blind), or when it is shuffled with cards that are not finds (`scramble`, `forget_order`).
+
+**The record** (`Game::sightings`, `Sighting`): every fresh sighting - `learn` and `knowledge_leaves` when no cloud of
+the viewer's could have listed the card - with its order (`Game::sight_at`) and whether it was a find. A sighting a
+cloud could have listed (the card may be one seen before: `learn` and `knowledge_leaves` drop the listed entry) is
+no new card of R and keeps nothing (140's coarse rule, open point below). Kept only with whole-deck clouds
+(`hidden_decklists`, `deck_clouds`): R never loses a card there, and a game without them (every digest game) keeps
+nothing and marks nothing.
+
+**The check.** `MtgAz::seen_of` builds each request's sightings (by definition, in order) and asserts they are exactly
+what the knowledge says the viewer saw - the deck's cards it knows (a payment's pinned cards are not known) and its
+clouds' cards, less the identities of the owner's cards outside the deck that it does not know in hidden zones (a
+companion or a token lost track of), definition by definition. The sightings are counted over all of the owner's
+cards, not the deck's objects alone: under the coarse rule a deck card seen while a lost companion's listing stood
+(the card may have been the companion) is no new card, and the companion's own later sighting is the one that adds
+it (the 2,000-game hidden-decklist fuzz found that order at seed 740, with the deck's objects alone counted). A knowledge event that kept
+no sighting panics at the next deal instead of weighing a card wrong. Copies of R beyond the sightings (pinned cards,
+held by the world) weigh nothing (an indicator); 140 weighed them as seen.
+
+**The priors.**
+
+* `ConstructedPrior`: each count's weight is its definition's `Seen::weight` (`count_weight`, `Slot::with`) times
+  the tilt, in the same tables, draws and `expected_fill`s - exact, bounded, no rejection, the user's base prior
+  unchanged. The K-sample key holds the sightings.
+* `TablePrior`: a fresh fill is the posterior of blind sightings only (140.3). A definition with a find or a held
+  copy takes its fill from the exact joint law first (`corrected_fill`): fill f of definition x weighs p_x^f / f! x
+  g_x(f), g_x(f) = its sightings' weight at r + f over prod_{j<r}(r + f - j), the other candidates' m draws
+  (P^m / m!) summed out, by a table over those definitions and the fill so far, then backwards; the rest are drawn as
+  before. `expected_fill` is the same law's means (`corrected_means_with`); and a name a revealed one-per-name
+  companion's condition spent no longer gets a fill there (it did, 140.3's oversight).
+* `SealedPrior` and the cube sampler: unchanged (140.8: not the posterior of a stated prior).
+
+**One request, one form.** When every card of R was seen blind and none is held unseen, `seen_of` returns None: the
+likelihood is then C(D_i, R_i) and the request's key and draws are 140's, draw for draw (the recorded worlds of
+`known_face_key.rs` stay valid). **A state changed by hand** (tests' perturbations, `public_state::Perturbation::run`)
+drops its sightings (`Game::lose_sightings`): they no longer describe what each player saw, and its deals weigh every
+seen card blind; the engine never calls it.
+
+**API.** `DeckWant::seen: Option<&[Seen]>` (None: every copy blind, 140's), so every `DeckWant` literal names it;
+`Seen` (definition, sightings, searched bits); `sighting_weight(deck, shown, seen)` beside `seen_weight` (unchanged);
+`MtgAz::deck_request_of` (a test hook: R and its sightings).
+
+**Tests** (`deck_posterior.rs`):
+
+* `a_search_finds_what_it_looks_for_whenever_the_deck_holds_one` - the Delver 75, Volcanic Island, the truth by
+  simulation (decks of the prior, shuffled; a blind sighting turns over the next card, a search finds one among the
+  cards not turned over or found, then reshuffles; kept when every event is as given) against the request with its
+  sightings, and the identity-blind request (140's): a fetch land's find alone, truth 3.5935 +- 0.0030 Volcanics,
+  request 3.5973, identity-blind 3.7473 (37.9 se off); one seen blind then a find, 3.7611 / 3.7636 / 3.8588 (31.2 se);
+  a find then one seen blind, 3.8046 / 3.8017 / 3.8555 (15.6 se) - the two orders have different truths, both met.
+* `the_table_prior_weighs_a_search_by_finding_one` - the EoE table, Forest: a find alone, truth 1.1354 +- 0.0031,
+  request 1.1330, identity-blind 1.2573 (30.5 se); one seen blind then a find, 2.1251 / 2.1269 / 2.2382 (13.6 se);
+  `expected_fill` on the request's mean. (The corrected fill's law was also checked by a throwaway Python simulation
+  of a 6-card group: 0.7458 / 0.2229 / 0.0299 / 0.0014 by simulation, 0.7452 / 0.2235 / 0.0298 / 0.0015 by the law.)
+* `a_small_75_deals_the_exact_posterior_of_the_seen_cards` gained sightings (two Ponders: a find, then one seen
+  blind; a Bolt found; the Pyroblast held unseen): the request's law against the exact posterior deck by deck, with
+  and without tilt and pick, by `sample` and `sample_k` (chi-square 44-83 on 66 df, every deck within 2.7 se), both
+  `expected_fill`s exact (1e-9), and `sighting_weight`.
+* `the_knowledge_keeps_how_each_card_was_seen` - a constructed game with `deck_clouds`: P1 cracks Scalding Tarn and
+  finds Volcanic Island, then plays an Island from the hand: P0's sightings are the find (searched) and then the
+  Island (blind), in that order.
+* The check in `seen_of` runs at every deal of the suite and of the fuzz runs below (constructed best-of-three games
+  2-3, hidden decklists).
+
+**Digests**: EQUAL expected and checked by the gate (no digest game keeps sightings or marks finds: the record is kept only with whole-deck clouds). The behaviour that changes: every hidden deck dealt in a game with whole-deck clouds after a search's find, a payment's held card, or (the table prior) a revealed one-per-name companion's spent names in `expected_fill`.
+
+**Checks** (on `8a008e50`, the code of 140.9-140.10; the desktop shared, the live run paused for the last of them):
+
+* The full engine suite (`--no-fail-fast`): 161 targets, 2,543 passed, 0 failed, 28 ignored (2,274 s).
+* `FUZZ_HIDDEN_DECKS=1 FUZZ_GAMES=2000` (the table prior, `seen_of`'s check at every deal): passed (485 s), 45,186
+  worlds, 267 companions revealed and 141 put into a hand; before `seen_of` counted all the owner's cards it failed at
+  seed 740 (above), which passes now.
+* `FUZZ_POOL=delver FUZZ_GAMES=20000`: passed (1,823 s): 20,000 games, 1,000 constructed best-of-three matches (2,657
+  games, 41,498 worlds, every later game's 60 dealt with its sightings).
+* `FUZZ_GAMES=20000`, the default pool: passed (3,127 s): 20,000 games, 1,000 cube best-of-three matches.
+* Behaviour digests: full `438164c0429d7fa3` (EQUAL); the engine gate on the final commit is in the lane's report.
+* Cost (`constructed_deal_cost`, `constructed_request_cost`; shared desktop): a later game's determinize 225 us at a
+  request's first deal (its 32 decks) and 4.7 us a deal after it (120.2: 5.3 ms and 3.5 us before P1 and this check);
+  a new request 191-193 us.
+
+**Open points.**
+
+* **A sighting that may be a card seen before** (140's coarse rule, unchanged here): when the viewer sees a card a
+  cloud of its lists (a Volcanic Island seen, shuffled away, and a Volcanic seen again), the knowledge drops the
+  listed entry and R does not grow, and the sighting weighs nothing. Exactly it weighs a + b (D_i - R_i): the cloud's
+  listed card in that place (a, its share of the place) or a fresh copy (b, the place's share of free cards over the
+  free cards, as 129.3's a + b y). The clouds cannot hold the mixture that follows (the listed card still there or
+  not), so the deal of the arrangement would then not match the deck's weight. Options: (a) keep the coarse rule
+  (the knowledge layer's, documented); (b) weigh the deck by the exact factor and accept the arrangement deal's
+  coarseness; (c) mixture-capable clouds - a knowledge-layer redesign.
+* **Other choices by kind**: a pitched card (Force of Will exiles a blue card from the hand), a discard of a kind,
+  and a card chosen from looked-at cards (Impulse's top four) are chosen by what they are too; the user's decision
+  covered library searches only, so they stay blind sightings.
+* **The hand and the library**: the model finds a card whenever the deck holds one, not whenever the library does;
+  a find does not change the deal of the hand (both the user's model as approved).
+* **For lane A2**: `DeckWant` gained `seen` (A2's literals need it: `seen: None`, or the request's sightings); a game-3
+  deal conditioned on game 2 would pass game 2's sightings with game 2's R.
+
+### 140.10 The fuzz's hidden-decklist checks and a companion shuffled away (X2, X4 of the rule-invariant campaign)
+
+The rule-invariant fuzz campaign (branch `fuzz-invariants`, `docs/rules_check_findings.md`) found on 267ae603's own
+binary, with `FUZZ_HIDDEN_DECKS=1`: X2, "the viewer's own cards" changed in a world (seeds 2,679, 3,191, 3,279, 5,095,
+6,247, 7,943; "def 234 dealt as 259", "280 as 259"), and X4, "the sampled deck lacks a shown" card (3,671 Bejeweled
+Warg, 9,671 Multiversal Passage); X6, "the match's deck of the opponent", is the same check family. On this branch
+the posterior of 140 deals other worlds, the fuzz's generator (which also picks the game's random moves after a
+checkpoint's world walks) diverges, and those seeds play other games and pass; seed 331 failed X2 here instead.
+
+**The cause: the checks, not the deal.** Seed 331 (a diagnostic, not kept): every object of P0's deck that changed
+in P0's world was a library card P0 does not know, and the multiset changed by one card - Lutri, the Spellchaser
+(def 259, the campaign's "dealt as 259") in, Mana Drain out. P0's companion Lutri had been put into the hand (CR
+702.139a's special action) and shuffled into the library: its object, outside the deck's objects, is one of P0's
+hidden cards, and P0's own deal (`Game::determinize`, the library's order unknown to its owner) shuffles identities
+over all of them - so Lutri's identity went to a deck object and Mana Drain's to the companion's object. The other
+player's deal does the same by design (`extras` are dealt with the deck, 102.1): which hidden card is the companion
+is hidden, and fixing its identity to its object would show where it lies. The game's cards as a multiset (the
+deck's objects and the companion's, `sample::game_cards`) never change; the fuzz's `hd_deck` compared the deck's
+objects alone. X4 is the same from the other side: the opponent's shown card (a Warg) dealt to their companion's
+object, so the deck's objects lacked it; X6 likewise (the match's deck against the deck's objects).
+
+**The fix** (`engine/tests/fuzz.rs`): `hd_deck` is the player's game cards less one copy of the revealed companion -
+the deck as dealt, whichever object holds the companion card; every check that used it (the viewer's own cards, the
+opponent's deck against the match's, the shown cards held, the constructed world's checks) compares that.
+**Regression test**: `hidden_decklist_worlds_keep_the_deck_whatever_object_holds_the_companion` replays seed 331 and
+the campaign's X2, X4 and X6 seeds (2,679, 3,191, 3,279, 3,671, 5,095, 6,247, 6,375, 6,419, 7,943, 9,671) with every
+check of `play_hidden` (the default pool). The engine is unchanged: no digest moves.
 
 ## 142. The encoding's checks made exact: row comparisons, the pairwise public-state gate, layout v6 checked, Memory Jar's pile (branch `fix/encoding-gate`, Fable fix lane B, 2026-11-12)
 

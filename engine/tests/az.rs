@@ -2600,7 +2600,7 @@ fn the_v5_facts_encode_no_hidden_information() {
     for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()) {
         for (k, p) in fixed.iter().enumerate() {
             let mut b = a.clone();
-            let Some(what) = (p.apply)(&mut b, &mut rngs[k]) else { continue };
+            let Some(what) = p.run(&mut b, &mut rngs[k]) else { continue };
             applied += 1;
             // (Worlds compared with each other: a change made by hand can
             // leave the other player's pending decision stale, and every world

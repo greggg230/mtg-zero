@@ -84,6 +84,21 @@ pub struct Cloud {
     pub defs: Vec<DefId>,
 }
 
+/// A fresh sighting (ENGINE.md 140.9): `viewer` learned that `owner`'s card `obj` is `def` (its card), a card no
+/// cloud of the viewer's could have listed - so one more distinct card of the owner's seen, one more card of
+/// `sample::knowledge`'s R. `at` orders the sightings of one game (`Game::sight_at`); a card found by its owner's
+/// library search (`searched`) is ordered at its search, when it left the cards the viewer had not seen. Kept only
+/// where whole-deck clouds are (`hidden_decklists`, `deck_clouds`: R never loses a card there).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Sighting {
+    pub viewer: PlayerId,
+    pub owner: PlayerId,
+    pub obj: CardIdx,
+    pub def: DefId,
+    pub at: u32,
+    pub searched: bool,
+}
+
 /// The rare-rule bits (`Game::seen`) of each definition of `db`, its back
 /// face's included (as `Game::add_card` sets them; not the per-player
 /// miracle bits); computed once.
@@ -503,14 +518,87 @@ impl Game {
             return;
         }
         let (owner, zone, d) = (o.owner, o.zone, self.ident(c));
+        let mut merged = false;
         for k in self.clouds.iter_mut().filter(|k| k.viewer == q) {
             if Self::in_domain_at(k, owner, c, zone) {
-                take_one(&mut k.defs, d);
+                merged |= take_one(&mut k.defs, d);
                 k.slots.retain(|&x| x != c);
             }
         }
         self.objs[c.i()].known |= 1 << q;
+        // (A listed card the viewer may be seeing again is not a new one: ENGINE.md 140.9.)
+        if !merged {
+            self.sighted(q, owner, c, d);
+        }
+        if q != owner {
+            self.untrack_found(c);
+        }
         self.tidy_clouds();
+    }
+
+    // ---- sightings (ENGINE.md 140.9) --------------------------------------
+
+    /// Are sightings kept: where whole-deck clouds are, so every card seen stays in R (ENGINE.md 102.1, 120.2).
+    fn keeps_sightings(&self) -> bool {
+        self.spec.hidden_decklists || self.spec.deck_clouds
+    }
+
+    /// `q` sees `owner`'s card `c` (identity `d`) for the first time: a sighting, ordered at its owner's search if it
+    /// was found by one and the viewer could tell it apart since (`found`), else now.
+    fn sighted(&mut self, q: PlayerId, owner: PlayerId, c: CardIdx, d: DefId) {
+        if q == owner || !self.keeps_sightings() {
+            return;
+        }
+        let def = self.db.def(d).card_def(d);
+        let (at, searched) = match self.found.iter().find(|x| x.0 == c) {
+            Some(&(_, t)) => (t, true),
+            None => {
+                let t = self.sight_at;
+                self.sight_at += 1;
+                (t, false)
+            }
+        };
+        self.sightings.push(Sighting { viewer: q, owner, obj: c, def, at, searched });
+    }
+
+    /// Card `c`, just found by its owner's library search (CR 701.19; `DecisionKind::SearchLibrary`), is a find the
+    /// other player can tell apart (ENGINE.md 140.9) until it is seen, goes into a hand, or is shuffled with cards
+    /// that are not finds: its sighting is a search's.
+    pub(crate) fn found_by_search(&mut self, c: CardIdx) {
+        if !self.keeps_sightings() {
+            return;
+        }
+        let t = self.sight_at;
+        self.sight_at += 1;
+        self.found.retain(|x| x.0 != c);
+        self.found.push((c, t));
+    }
+
+    /// Card `c` is no longer a find the other player can tell apart (ENGINE.md 140.9).
+    pub(crate) fn untrack_found(&mut self, c: CardIdx) {
+        if !self.found.is_empty() {
+            self.found.retain(|x| x.0 != c);
+        }
+    }
+
+    /// The sightings of the game, in the order kept (tests, analysis; ENGINE.md 140.9).
+    pub fn sightings(&self) -> &[Sighting] {
+        &self.sightings
+    }
+
+    /// The state was changed by hand, outside the rules (tests' perturbations, `public_state`): the sightings no
+    /// longer describe what each player saw, so they are dropped and the deals weigh every seen card blind (ENGINE.md
+    /// 140, 140.9). Never called by the engine.
+    #[doc(hidden)]
+    pub fn lose_sightings(&mut self) {
+        self.sightings.clear();
+        self.found.clear();
+        self.sightings_lost = true;
+    }
+
+    /// Were the sightings lost to a change by hand (`lose_sightings`)?
+    pub(crate) fn sightings_lost(&self) -> bool {
+        self.sightings_lost
     }
 
     /// Reveal a card in a hidden zone to everyone (CR 701.16; 602.2a),
@@ -567,13 +655,18 @@ impl Game {
                         .find(|&x| self.objs[x.i()].def == d && self.objs[x.i()].known & (1 << q) != 0 && !self.told_apart(x))
                 })
                 .flatten();
+            let mut merged = twin.is_some();
             for k in self.clouds.iter_mut().filter(|k| k.viewer == q) {
                 if Self::in_domain_at(k, owner, c, from) {
                     k.slots.retain(|&x| x != c);
                     if twin.is_none() {
-                        take_one(&mut k.defs, d);
+                        merged |= take_one(&mut k.defs, d);
                     }
                 }
+            }
+            // (A card the viewer may have seen before is not a new one: ENGINE.md 140.9.)
+            if !merged {
+                self.sighted(q, owner, c, d);
             }
             if let Some(t) = twin {
                 // The known `d` in hand becomes one of the hand's unknowns;
@@ -582,6 +675,7 @@ impl Game {
                 self.objs[t.i()].known &= !(1 << q);
             }
         }
+        self.untrack_found(c);
         self.tidy_clouds();
     }
 
@@ -590,6 +684,10 @@ impl Game {
     /// move whose rearrangement was already scrambled). A cloud whose
     /// domain held it still holds it.
     pub(crate) fn knowledge_moves(&mut self, c: CardIdx, owner: PlayerId, from: Zone, to: Zone) {
+        // (A find going into a hand is one of its cards, which nobody else tells apart: ENGINE.md 140.9.)
+        if to == Zone::Hand {
+            self.untrack_found(c);
+        }
         let mut changed = false;
         for k in self.clouds.iter_mut() {
             if !Self::in_domain_at(k, owner, c, from) {
@@ -624,7 +722,16 @@ impl Game {
                 let z = self.objs[c.i()].zone;
                 !((hand && z == Zone::Hand) || (library && z == Zone::Library))
             });
-            for c in self.domain(&k) {
+            let domain = self.domain(&k);
+            // (ENGINE.md 140.9: finds mixed with cards the viewer does not know that are not finds can no longer be
+            // told from them; among finds only - a Doomsday pile - every card the viewer may see there is one.)
+            if !self.found.is_empty() {
+                let mixed = domain.iter().any(|&c| self.objs[c.i()].known & (1 << q) == 0 && !self.found.iter().any(|x| x.0 == c));
+                if mixed {
+                    self.found.retain(|x| !domain.contains(&x.0));
+                }
+            }
+            for c in domain {
                 let d = self.ident(c);
                 let o = &mut self.objs[c.i()];
                 if o.known & (1 << q) != 0 {
@@ -643,6 +750,9 @@ impl Game {
     /// library" (a cloud over the library: the owner's own determinize
     /// keeps them there, so it stays true in every world).
     pub(crate) fn forget_order(&mut self, owner: PlayerId, cards: &[CardIdx]) {
+        for &c in cards {
+            self.untrack_found(c);
+        }
         // A cloud naming one of these slots now covers the whole library
         // (the owner's determinize may move what is there within it).
         for k in self.clouds.iter_mut().filter(|k| k.owner == owner) {

@@ -102,6 +102,10 @@ pub fn fields() -> Vec<Field> {
         next_stack_id: Derived "a counter for new stack ids",
         outcome: Public "the game's result",
         clouds: Hidden "a player's partial knowledge of hidden cards (ENGINE.md 10): the viewer's own, leak-tested",
+        sightings_lost: Derived "a test's flag: the state was changed by hand, the sightings dropped (ENGINE.md 140.9)",
+        sightings: Hidden "each player's sightings of the other's cards, in order, each blind or a search's find (ENGINE.md 140.9): the viewer's own knowledge, the same in all its worlds; read only by the hidden deck's deal",
+        sight_at: Derived "the sightings' clock (ENGINE.md 140.9)",
+        found: Derived "which hidden cards are their owner's search's finds the other player still tells apart (ENGINE.md 140.9): read only by the hidden deck's deal. A public fact (a tutor's card put on top) the encoding does not show: an open point of ENGINE.md 140.9 for the encoding, not a cache",
         tokens: Derived "a fast path: tokens created so far",
         first_token: Derived "a fast path: the first slot made as a token or a copy",
         batching: Derived "transient: a simultaneous move in progress",
@@ -375,6 +379,18 @@ pub struct Perturbation {
     pub field: &'static str,
     pub rare: bool,
     pub apply: fn(&mut MtgAz, &mut Rng) -> Option<String>,
+}
+
+impl Perturbation {
+    /// `apply` and, when it changed the state (by hand, outside the rules), drop the sightings that no longer
+    /// describe it (`Game::lose_sightings`, ENGINE.md 140.9).
+    pub fn run(&self, a: &mut MtgAz, r: &mut Rng) -> Option<String> {
+        let out = (self.apply)(a, r);
+        if out.is_some() {
+            a.g.lose_sightings();
+        }
+        out
+    }
 }
 
 /// A public change the encoding leaves out (`name`: the perturbation's), and
