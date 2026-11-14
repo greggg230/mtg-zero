@@ -31446,7 +31446,7 @@ in batches as they land, with merge commits only (no lane branch rebased or squa
 rewritten). The orchestrator fast-forwards main to this branch; this branch never touches main and is not pushed.
 (Section number: 157 is the integration's, assigned by the orchestrator; 155 and 156 are other lanes'.)
 
-### 157.1 Batch 1: the merges
+### 157.1 The merges
 
 In this order (`docs/ENGINE.md` conflicted in every merge: every section kept and the sections from 129 on ordered by
 number; each lane's in-place corrections of older sections applied as merged):
@@ -31464,6 +31464,8 @@ number; each lane's in-place corrections of older sections applied as merged):
 | 1f93c18d | `fuzz-invariants` 1fcf328b (another session's) | 150 | `docs/ENGINE.md` only: `engine/tests/fuzz.rs` (its rule-derived invariant hooks, `rules_report` / `rules_verdict`) merged clean beside G's and dealt decks' changes. Then (9eacdae3) its repro tests of the rules bugs F1-F3 (`rules_check.rs`, `f1_` / `f2_` / `f3_`), which `fix/rules-f1-f5` (151) fixed, drop `#[ignore]`; F4 and F5 stay ignored until `fix/rules-f4-f5`; `docs/rules_check_findings.md`'s STATUS says so. |
 | 63d53274 | `fix/bo3-hidden` f1068c58 (A2) | 141 | against dealt decks: `hidden_decks.rs` - `deck_weights` returns 1s for a dealt seat or a known keeper; `determinize_deck_tilted`'s observer line (identical on both sides) once. `az/mod.rs` - `MtgSpec` carries both `keep_known` and `dealt_decks` (field, default, parse arm, checks: `dealt_decks` refuses `keep_deck`, `keep_known` needs `keep_deck`, so `keeps_known` and `deck_dealt` never meet); `MtgAz::new` sets both; `determinize`'s observer line once. A2's observer carry-over in `next_game` / `start_chosen_game` and its deck-choice line merged clean (dealt decks lacks them). `mtgz/az/decklists.py` - `mirror_bo3_spec(keep_known=, dealt_decks=)`. `mtgz/az/keep_h2h.py` - `half_specs` refuses a dealt spec (154) and sets `keep_known` per arm (141). `engine/tests/fuzz.rs` - A2's private-key statics, check and report beside G's match-walk counters and fuzz-invariants' rules report; its per-step mask checks in `check_determinize`, `play_match_spec` and `check_determinize_hidden` merged clean. A2's in-place notes in 10, 120.2, 130.3 kept. H3 (141.4): see 157.6. |
 | b48f575d | `fix/autopass-reuse` deaf0993 (H) | 149 | the gitlink: H's a1d8300 -> zero-core `integrate/fable-1112` 77b31ab (157.2). `az/mod.rs` (MtgAz's `ANSWERS`, `decision_tag`, `answer_obs`, `key_obs`, appended to `impl SearchGame`) merged clean beside A2's and dealt decks' changes; 149's in-place note in section 10 kept. **Search behaviour changes on purpose** (149.4): the search's signatures carry the decision kind and the reuse follows the line, so `check_checkpoint_compat` differs from the baseline and G's driver digest (`digests_driver.txt`) no longer matches until the final re-record. Engine digests EQUAL. |
+| 083be1b3 | `fix/farm-fuzz` 5c16205a (the leftovers session's) | 152 | `docs/ENGINE.md` only; the engine (`Game::pile_sorted` and the pile sites, `encode.rs`'s `decision_list` and bag squash, `pay.rs`, `eoe_w4.rs`) and `fuzz.rs`'s `check_determinize_hidden` merged clean beside A2's and G's changes. `digests.txt`: its re-record taken as is (four games: full 438164c0429d7fa3 -> e5675fc9d4da7a20, `DIGEST_ENCODING=0` a0062bb5569e06d3 -> b255e81fe5402cf3); the integration re-records once at the end. The canary library's five spots: 157.9. |
+| 0627e7e5 | `fix/autopass-reuse` e6ee19cf (H, docs) | 149 | 149.5 (memory, the gate-size smoke) placed at the end of 149. |
 
 ### 157.2 The zero-core pin: `integrate/fable-1112`
 
@@ -31615,7 +31617,59 @@ lanes; target dirs `E:/cargo-target/mtg-zero/integrate-fable`, `E:/cargo-target/
   the driver one differs since H), then the `suite`, `engine` and `search-core` tiers, pytest and the run-loop smoke.
   The `search-core` tier's cube `match` smoke config timed out at 1,800 s under load on H's branch (626 s alone for 120
   matches): give it a longer step timeout or run it apart with `--threads 4`, only with >= 12 GB available.
-* Lane H's memory comparison (trees now live through the opponent's passes): not measured yet. Its four `mem-{match,delver}-{new,base}.log` (10:28) each say
-  `PEAKMEM 0.01 GB, 0 s, exit 15 KILLED (memory floor)`: killed by their own guard before starting; its `m3.sh`
-  (zero-core pytest, then the comparison again at >= 12 GB) was running at 16:47. To read when they exist.
+* Lane H's memory (trees now live through the opponent's passes): 149.5 - peak +9.9% on the cube best-of-three
+  `match` smoke (13.15 -> 14.45 GB), +3.6% on the Delver mirror; the gate-size `match` config 1,285 s, 0 unfinished,
+  on a quiet machine. If the integrated `search-core` gate's `match` config passes 1,800 s on a busy one, run it with
+  `--timeout 3600` and say so.
 * Known-failing fuzz seeds until F / I land: 148.5's `FUZZ_SKIP` lists (findings F1-F3 of 148.6).
+
+### 157.9 The canary library across farm-fuzz's pile-twin fix: the rerecord matches up to the twins' ids
+
+**The problem** (152.6). The Delver canary library's five spots `daze_payable_pool:r3-2b-float550_0550_s32:66:73`,
+`land_drop_tapout:r3-2b-float550_0550_s32:178:161`, `play:20261101-215939-adeb97:None:174` and `:178`,
+`fourth_land_empty_hand:r3-2b-float550_0550_s32:233:226` no longer reach their recorded positions: 152.1's pile pick
+moves the twin nearest the top, so the same games end with two twins' card ids exchanged. By 100.8 a rules change bumps
+`RULES_EPOCH` and re-records the library (`tools/delver_rerecord.py rerecord`), but the rerecord's walk compared the
+whole exported state with its card ids, so it would drop the five. The orchestrator's decision: match modulo twins no
+player can tell apart, soundly, and list by name any spot still unmatched.
+
+**The match** (`delver_rerecord.py`: `renamed`, `twin_match`, `deck_names`). A card's id (its object index) is no
+player's information (152.1). The walk carries a pairing of this engine's ids with the old engine's and compares the
+exported state renamed by it, exactly. Two cards may be paired anew only where no player can tell them apart: at the
+same place of the same player's hidden zone (a library position, a hand slot) in both states, of the same definition
+(a game's objects are its decks' cards in the spec's list order: `deck_names`; checked against 41,236 cards of the
+library's traces, the only others being tokens, public from their creation) and owner, with the same knowledge (a hand
+card: whether the other player knows it, the export's `known.hand`; a library position's `known` mask, compared with
+the rest). A public card is never paired anew: it keeps the pairing it had while hidden, so a twin told apart by its
+place, a reference to it or a mark stays told apart. This is ENGINE.md 11's and 128's interchangeability (hidden twins
+carry no state but their place and who knows them; 128's canonical worlds move knowledge only among a hand's twins),
+applied to the export.
+
+**One more case, the pile's waiting cards** (`pile_match`). Three of the five also differ in the middle of a Ponder:
+while a looked-at pile is put back card by card, its not-yet-placed cards wait in transient places, by card index on
+the old engine and by place on this one (152.1's "only the transient places of the cards not yet moved depended on the
+index"). There a known library place holds another definition (Mishra's Bauble against Scalding Tarn / Polluted Delta),
+which no pairing can match. At a pile decision (`PutOnTop`, `PutOnBottom`) only, the decider's library may differ within
+the top run of places it knows in both (the pile), as a rearrangement of the same (definition, knowledge) cards; all
+else must be equal under the pairing, no pairing changes there, and the next step is compared as any. Exact by 152.1's
+argument: the final library is a function of the definitions picked, and nothing else moves while the pile resolves.
+(Beyond what the orchestrator named; it can be dropped, which drops those three spots.)
+
+**Tests** (`tests/test_canary_library.py`): library twins exchanged from a step on, one of them later drawn and played,
+are paired anew and followed (`rerecord.twins` notes it); two library cards of different definitions and two twin
+permanents are refused; a rearranged pile is accepted at a pile decision (`rerecord.pile`) and refused with another
+multiset or at a Priority decision. The earlier walk tests pass unchanged (no spot that replayed needs either rule).
+
+**The trial** (into scratch, not the library). The recording engine (`eoe-b8-pay`, engine 5e767d9b1a6183c1 = the
+library's) traced all 60 spots; this engine (8e9d7f2f9f22056c, farm-fuzz in) walked them: **60 of 60, none dropped**,
+`check` 60 of 60 on the result. 55 need neither rule. `land_drop_tapout:...:178:161` pairs twins 15 and 16 anew at new
+step 28, `fourth_land_empty_hand:...:233:226` twins 45 and 46 at 98; `daze_payable_pool:...:66:73` relaxes its pile at
+step 24 and pairs 26 and 28 at 25, `play:20261101-215939-adeb97:None:174` and `:178` relax at 32 and pair 95 and 96 at 33.
+Every spot keeps its actions; no decision inserted. The old engine's copy for the final rerecord is kept at
+`E:/mtg-zero-scratch/fable-fix/int-logs/canary-old-engine-5e767d9b` (its `mtgz/`, zero-core Python, deck files).
+
+**Not done yet** (the end of the campaign, with the digest re-record, once every behaviour lane is in): bump
+`RULES_EPOCH` (`tools/position_lab.py`) and `python tools/delver_rerecord.py rerecord --old-engine
+E:/mtg-zero-scratch/fable-fix/int-logs/canary-old-engine-5e767d9b --report <...>` on the final tree; any spot it still
+cannot walk is listed here by name with its reason. Until then `tests/test_canary_library.py::test_every_spot_reaches_its_recorded_position`
+fails on this branch (the five spots).
