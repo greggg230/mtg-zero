@@ -458,10 +458,9 @@ fn cr_514_2_an_ending_control_effect_leaves_the_auras() {
 
 // ---- the encoding (ENGINE.md 100.5.1) ------------------------------------------
 
+/// The head of `v`'s layout v7 row (its tail - the effects tokens, ENGINE.md 142.7 - is `Row`'s).
 fn features(g: &Game, v: u8) -> Vec<f32> {
-    let mut x = vec![0.0f32; engine::az::NUM_FEATURES];
-    g.encode_features(v, &mut x);
-    x
+    engine::az::tail_encode::Row::of(g, v).head
 }
 
 /// The status floats of permanent `c` in viewer `v`'s encoding (its slot

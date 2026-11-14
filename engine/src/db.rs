@@ -249,6 +249,13 @@ pub enum Mod {
 }
 
 impl Mod {
+    /// A variant only a static ability has: the lowering builds it inside a `StaticDef` only, and
+    /// `Game::add_effect` refuses it (the public-state gate's classification,
+    /// `public_state::STATIC_ONLY_MODS`, ENGINE.md 142).
+    pub fn static_only(&self) -> bool {
+        matches!(self, Mod::PtPer { .. } | Mod::PtPerSourceCounter { .. } | Mod::AttackDespiteDefender | Mod::PowerPlusGreatestMv { .. })
+    }
+
     /// `Mod::Pt` of a card's printed numbers.
     pub fn pt(p: i32, t: i32) -> Mod {
         Mod::Pt(p as i64, t as i64)
@@ -2676,6 +2683,12 @@ impl CardDb {
     /// of the table names it (`Except::subtypes`).
     pub fn exc_subtype_bit(&self, s: u16) -> Option<u8> {
         self.exc_subtypes.iter().position(|&x| x == s).map(|k| k as u8)
+    }
+
+    /// The subtype a copy exception's bit `k` names (`Except::subtypes`; the encoding's effects
+    /// tokens, ENGINE.md 142.7).
+    pub fn exc_subtype_of_bit(&self, k: u8) -> u16 {
+        self.exc_subtypes[k as usize]
     }
 
     pub fn subtype_names(&self) -> &[String] {

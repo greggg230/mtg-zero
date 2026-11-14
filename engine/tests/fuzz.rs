@@ -509,7 +509,15 @@ enum PoolMode {
     DelverDealt,
 }
 
+thread_local! {
+    /// A test's own pool for its thread, over `FUZZ_POOL` (`enclosing_picks_of_etali_s_casts_are_encoded`).
+    static POOL_OVERRIDE: std::cell::Cell<Option<PoolMode>> = const { std::cell::Cell::new(None) };
+}
+
 fn pool_mode() -> PoolMode {
+    if let Some(m) = POOL_OVERRIDE.with(|c| c.get()) {
+        return m;
+    }
     match std::env::var("FUZZ_POOL").as_deref() {
         Err(_) | Ok("") => PoolMode::Default,
         Ok("interactions") => PoolMode::Interactions,
@@ -3089,6 +3097,42 @@ fn fuzz_random_games() {
             assert!(seen[0] > 0 && seen[2] > 0, "Doomsday or Show and Tell never cast: {seen:?}");
         }
     }
+}
+
+/// ENGINE.md 142.10 (the Fable review's X3): interactions games 5,682, 6,025, 7,790 and 12,725
+/// reach picks in progress in two tasks of the agenda - Etali, Primal Conqueror's trigger keeps the
+/// cards it exiled as picks while a free cast from among them pays a cost that picks objects (5,682:
+/// Abhorrent Oculus exiling six graveyard cards) - a loud failure of the encoding before. Each
+/// plays through with every check, and its rows have the enclosing task's picks as `links` tokens
+/// with their depth (`lk::DEPTH`); 5,682's for both viewers.
+#[test]
+fn enclosing_picks_of_etali_s_casts_are_encoded() {
+    use engine::az::encode::CODE;
+    use engine::az::tail_encode::{lk, seg, Row};
+    POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Interactions)));
+    for seed in [5682, 6025, 7790, 12725] {
+        let p = play(seed, true);
+        let mut g = new_game(seed);
+        let mut keys = Vec::new();
+        let mut deep = [0u32; 2];
+        for &x in &p.actions {
+            for v in 0..2u8 {
+                deep[v as usize] += Row::of(&g, v)
+                    .tokens(seg::LINKS)
+                    .iter()
+                    .filter(|(_, t)| (t[CODE + lk::KIND + lk::K_PICKED] == 1.0 || t[CODE + lk::KIND + lk::K_PICKED_DEF] == 1.0) && t[CODE + lk::DEPTH] > 0.0)
+                    .count() as u32;
+            }
+            g.apply(x, &mut keys).unwrap();
+        }
+        assert_eq!(g.fingerprint(), p.fingerprint, "seed {seed}: the replay");
+        println!("seed {seed}: an enclosing task's pick tokens by viewer {deep:?}");
+        assert!(deep[0] + deep[1] > 0, "seed {seed}: no enclosing task's pick token");
+        if seed == 5682 {
+            assert!(deep[0] > 0 && deep[1] > 0, "seed {seed}: {deep:?}");
+        }
+    }
+    POOL_OVERRIDE.with(|c| c.set(None));
 }
 
 #[test]

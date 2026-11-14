@@ -1064,6 +1064,7 @@
   ],
   "max_row_tokens": 4096,
   "option_pointers": true,
+  "revision": 1,
   "segments": [
     {
       "count": 1,
@@ -1358,7 +1359,7 @@
       "offset": null,
       "present": 52,
       "tail": true,
-      "width": 182
+      "width": 183
     },
     {
       "actions": [],
@@ -1467,7 +1468,97 @@
       "offset": null,
       "present": 52,
       "tail": true,
-      "width": 53
+      "width": 56
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "effects",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 601
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "counters",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 227
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "numbers",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 239
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "opp_revealed",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 56
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "found",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 118
     }
   ],
   "version": 7,

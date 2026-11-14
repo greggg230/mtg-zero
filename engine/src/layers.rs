@@ -866,6 +866,9 @@ impl Game {
     /// Add a continuous effect (CR 611.2).
     pub(crate) fn add_effect(&mut self, on: Affected, m: Mod, until: Until, controller: PlayerId) {
         debug_assert!(until != Until::WhileSource, "a lowered duration (Game::until_for)");
+        // (No effect has a static ability's mod: the encoding reads statics through their
+        // sources, ENGINE.md 142.)
+        assert!(!m.static_only(), "a continuous effect with a static ability's mod {m:?}");
         self.next_ts = self.exact_inc(self.next_ts, "timestamps");
         let ts = self.next_ts;
         self.effects.push(Effect { ts, until, on, m, controller });

@@ -1,9 +1,24 @@
 //! The network input of the `mtg` game (ENGINE.md 21.2, 22.2, 24): a fixed-width
 //! f32 vector for a viewer, with no hidden information. **Layout v7**
-//! ([`NUM_FEATURES`] = 47,892 floats; ENGINE.md 124.2) is layout v6 with one block
-//! of globals appended (`globals_v7`, [`g7`]: the pool's mana of a chosen
-//! creature type), so a v6 network widens onto it exactly ([`v6_projection`]);
-//! the `mtg_eoe` game keeps layout v6 ([`NUM_FEATURES_V6`]). **Layout v6**
+//! (ENGINE.md 124.2, 125; `mtgz/az/layout_v7.json`) is a row: a fixed **head** of
+//! [`NUM_FEATURES`] = 56,384 floats, a variable-length **tail** of tokens and the options'
+//! pointer overrides (`tail_encode`; at most 4,096 tokens a row). The head is layout v6
+//! with additions only: one block of globals appended (`globals_v7`, [`g7`]: the pool's
+//! mana of a chosen creature type, 3,680 floats) and wider slots, the new floats at each
+//! slot's end (permanent 281 = v6's 196 + 85, `perm::V7`; hand and list 64; stack 438,
+//! `STACK_V7`; trigger 271); the tail holds the seven capped segments' objects past their
+//! head slots and fourteen gated tail-only segments (opponent_triggers, delayed, links,
+//! exile_offered, library_known, stack_relations, graveyard_order, face_down, my_revealed;
+//! ENGINE.md 142.7: effects, counters, numbers - every continuous effect with its duration, every
+//! counter kind with its exact number, the numbers past float16's exact range; 142.8:
+//! opp_revealed, the other player's earlier reveals by game; 142.10: links' picks of an enclosing
+//! task, with their depth; 142.12: found, the cards a library search found that the other player
+//! still tells apart). Its semantic revision is [`LAYOUT_V7_REVISION`] (the layout file's
+//! `revision`).
+//! A v6 (or v5) network widens onto it ([`v6_projection`], [`v5_projection`]); the
+//! block table below describes layouts v4-v6 and v7's globals, and the v7 offsets are
+//! [`LAY7`]'s (ENGINE.md 125.1, 125.12). The `mtg_eoe` game keeps layout v6
+//! ([`NUM_FEATURES_V6`], no tail). **Layout v6**
 //! ([`NUM_FEATURES_V6`] = 44,212 floats; ENGINE.md 100.5, 100.5.1) is layout v5 (37,620
 //! floats, ENGINE.md 60) with additions only, as v5 was v4's, so that a v5
 //! token network widens onto it exactly (zero-core `net.widen` with this
@@ -183,6 +198,9 @@ pub const O_GLOBALS_V7: usize = O_GLOBALS_V6 + GLOBALS_V6;
 /// are `tail_encode`'s.
 pub const NUM_FEATURES: usize = O_GLOBALS_V7 + GLOBALS_V7;
 const _: () = assert!(NUM_FEATURES == 56_384 && O_MY_PERM == 24_260 && O_STACK == 43_268 && O_MATCH == 52_288 && O_GLOBALS_V7 == 52_704);
+/// Layout v7's semantic revision (`layout_json`'s `revision`; ENGINE.md 142.7).
+pub const LAYOUT_V7_REVISION: u32 = 1;
+
 /// Layout v6's features (ENGINE.md 100.5): the `mtg_eoe` game's encoding
 /// (`layout_eoe.json`); every one is a feature of layout v7 (`v6_projection`).
 pub const NUM_FEATURES_V6: usize = v6::NUM_FEATURES;
@@ -229,7 +247,7 @@ pub struct Lay {
 pub const LAY7: Lay = Lay {
     v7: true,
     features: NUM_FEATURES,
-    off: [O_CONTEXT, O_TOPS, O_MY_PERM, O_OPP_PERM, O_HAND, O_STACK, O_TRIG, O_LIST, O_GYA, O_COMP, O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    off: [O_CONTEXT, O_TOPS, O_MY_PERM, O_OPP_PERM, O_HAND, O_STACK, O_TRIG, O_LIST, O_GYA, O_COMP, O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     w: super::tail_encode::SEG_W,
     o_match: O_MATCH,
     o_globals_v5: O_GLOBALS_V5,
@@ -239,8 +257,8 @@ pub const LAY7: Lay = Lay {
 pub const LAY6: Lay = Lay {
     v7: false,
     features: v6::NUM_FEATURES,
-    off: [O_CONTEXT, O_TOPS, v6::O_MY_PERM, v6::O_OPP_PERM, v6::O_HAND, v6::O_STACK, v6::O_TRIG, v6::O_LIST, v6::O_GYA, v6::O_COMP, v6::O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    w: [CONTEXT, TOP_W, v6::PERM_W, v6::PERM_W, v6::HAND_W, v6::STACK_W, v6::TRIG_W, v6::LIST_W, GYA_W, COMP_W, COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    off: [O_CONTEXT, O_TOPS, v6::O_MY_PERM, v6::O_OPP_PERM, v6::O_HAND, v6::O_STACK, v6::O_TRIG, v6::O_LIST, v6::O_GYA, v6::O_COMP, v6::O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    w: [CONTEXT, TOP_W, v6::PERM_W, v6::PERM_W, v6::HAND_W, v6::STACK_W, v6::TRIG_W, v6::LIST_W, GYA_W, COMP_W, COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     o_match: v6::O_MATCH,
     o_globals_v5: v6::O_GLOBALS_V5,
     o_globals_v6: v6::O_GLOBALS_V6,
@@ -1536,6 +1554,12 @@ impl Game {
         let lay = Lay::of(out.len());
         if !lay.v7 {
             assert!(self.db.spend_kinds & crate::db::SPEND_CHOSEN_CREATURE_TYPE == 0, "a layout v6 encoding of a table with mana of a chosen creature type");
+            // (Layout v6 has the innermost holder's picks only: an enclosing task's are layout v7's
+            // `links` tokens, ENGINE.md 142.10.)
+            assert!(
+                super::tail_encode::agenda_picks(self, viewer).outer.is_empty(),
+                "a layout v6 encoding of a state with picks in progress in two tasks of the agenda (layout v7's links tokens have an enclosing task's: ENGINE.md 142.10)"
+            );
             self.encode_lay(viewer, out, lay, None);
             return;
         }
@@ -2218,7 +2242,8 @@ impl Game {
         match item.kind {
             StackKind::Spell { card } => {
                 st[stack::COPY] = self.is_copy_obj(card) as u8 as f32;
-                st[stack::TIMES] = item.times as f32 / 4.0;
+                // (Squashed: a u32 the row limit doesn't bound, ENGINE.md 142.4; exact as before below 512.)
+                st[stack::TIMES] = squash(item.times as f32 / 4.0);
                 st[stack::BESTOWED] = self.def_of(card).bestowed as u8 as f32;
                 st[stack::UNCOUNTERABLE] = self.spell_uncounterable(card) as u8 as f32;
                 st[stack::TARGETED] = stack_targets.iter().any(|t| matches!(t, Target::Obj(r) if r.idx == card && self.live(*r))) as u8 as f32;
@@ -2251,7 +2276,7 @@ impl Game {
                     Zone::Stack => {
                         tb[6] = 1.0;
                         let pos = self.stack.iter().rev().position(|x| x.kind == StackKind::Spell { card: r.idx }).unwrap_or(0);
-                        tb[7] = pos as f32 / 8.0;
+                        tb[7] = squash(pos as f32 / 8.0);
                     }
                     _ => {}
                 },
@@ -2260,7 +2285,7 @@ impl Game {
                 Target::Stack(id) => {
                     if let Some(pos) = self.stack.iter().rev().position(|x| x.id == id) {
                         tb[6] = 1.0;
-                        tb[7] = pos as f32 / 8.0;
+                        tb[7] = squash(pos as f32 / 8.0);
                     }
                 }
             }
@@ -3400,6 +3425,14 @@ pub fn layout_json(db: &'static CardDb) -> String {
         segments.push(tail_only(sg::GRAVEYARD_ORDER, "graveyard_order", CODE + te::go::PRESENT));
         segments.push(tail_only(sg::FACE_DOWN, "face_down", CODE + te::fd::PRESENT));
         segments.push(tail_only(sg::MY_REVEALED, "my_revealed", CODE + te::mr::PRESENT));
+        // ENGINE.md 142.7: continuous effects, counters, numbers past float16's exact range.
+        segments.push(tail_only(sg::EFFECTS, "effects", CODE + te::ef::PRESENT));
+        segments.push(tail_only(sg::COUNTERS, "counters", CODE + te::ct::PRESENT));
+        segments.push(tail_only(sg::NUMBERS, "numbers", CODE + te::nb::PRESENT));
+        // ENGINE.md 142.8: the other player's earlier reveals, by game (`my_revealed`'s token).
+        segments.push(tail_only(sg::OPP_REVEALED, "opp_revealed", CODE + te::mr::PRESENT));
+        // ENGINE.md 142.12: the cards found by a library search the other player tells apart.
+        segments.push(tail_only(sg::FOUND, "found", CODE + te::fs::PRESENT));
     }
     let mut v = json!({
         "version": if eoe { 6 } else { 7 },
@@ -3425,6 +3458,11 @@ pub fn layout_json(db: &'static CardDb) -> String {
         v["option_pointers"] = json!(true);
         v["max_row_tokens"] = json!(te::MAX_ROW_TOKENS);
         v["draft"] = json!(false);
+        // The layout's semantic revision (ENGINE.md 142.7, the Fable review's I7): bumped whenever the
+        // meaning of a float or a token's field changes without the shape changing (a float starting
+        // to be written inside the layout), so that such a change is in the file a checkpoint is made
+        // with. Revision 1: 142.7's `effects`, `counters` and `numbers` (the shape changed too).
+        v["revision"] = json!(LAYOUT_V7_REVISION);
     }
     // The EoE table's identity space (ENGINE.md 105): the same layout under the name `eoe`, so
     // zero-core's guard tells an EoE network from a cube one (the cube's layout has no name).

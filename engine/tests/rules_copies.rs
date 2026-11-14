@@ -400,17 +400,15 @@ fn copies_are_public_and_survive_determinize() {
     g.choose(Choice::Card(insp));
     resolve_with(&mut g, |_| None);
     assert!(g.is_copy(m));
-    let n = engine::az::encode::NUM_FEATURES;
     for viewer in [0u8, 1] {
-        let mut x0 = vec![0.0; n];
-        g.encode_features(viewer, &mut x0);
+        // (whole layout v7 rows: the copy effects are `effects` tokens, ENGINE.md 142.7)
+        let x0 = engine::az::tail_encode::Row::of(&g, viewer).flat();
         for seed in 0..4 {
             let mut w = g.clone();
             let mut rng = engine::rng::Rng::new(seed);
             w.determinize(viewer, &mut rng);
             assert!(w.is_copy(m) && w.copiable(m) == g.copiable(m));
-            let mut x1 = vec![0.0; n];
-            w.encode_features(viewer, &mut x1);
+            let x1 = engine::az::tail_encode::Row::of(&w, viewer).flat();
             assert!(x0 == x1, "viewer {viewer}: the encoding differs in a sampled world");
         }
     }
@@ -443,18 +441,16 @@ fn a_copy_of_a_spell_choosing_new_targets_survives_determinize_cr_707_10c() {
     }
     assert_eq!(g.kind(), Some(DecisionKind::NewTarget));
     assert_eq!(g.to_move(), Some(1));
-    let n = engine::az::encode::NUM_FEATURES;
     for viewer in [0u8, 1] {
-        let mut x0 = vec![0.0; n];
-        g.encode_features(viewer, &mut x0);
+        // (whole layout v7 rows: the copy effects are `effects` tokens, ENGINE.md 142.7)
+        let x0 = engine::az::tail_encode::Row::of(&g, viewer).flat();
         for seed in 0..4 {
             let mut w = g.clone();
             let mut rng = engine::rng::Rng::new(seed);
             w.determinize(viewer, &mut rng);
             assert_eq!(w.pending_decision(), g.pending_decision());
             assert_eq!(w.view_of(viewer), g.view_of(viewer));
-            let mut x1 = vec![0.0; n];
-            w.encode_features(viewer, &mut x1);
+            let x1 = engine::az::tail_encode::Row::of(&w, viewer).flat();
             assert!(x0 == x1, "viewer {viewer}: the encoding differs in a sampled world");
         }
     }
