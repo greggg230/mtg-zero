@@ -31639,6 +31639,14 @@ fake runner gives `digest_formats` a kind and a real-format output of its own; t
 `test_the_digest_formats_checker` and `test_the_digest_formats_step_runs_in_the_behaviour_tiers_and_reports_its_digests`
 (69 passed). 148.1's "Not in tools/gate.py" corrected in place.
 
+**The dealt digest too** (the orchestrator, 2026-11-13: the dealt preset is pb2's self-play spec, so it is gated):
+`digest dealt` (`digest-dealt`), beside `digest-formats` in the same tiers (`digest_format_steps`), runs `cargo test
+--release -p engine --test dealt_decks -- --ignored --nocapture dealt_digests`. Evidence: exactly one `dealt_digests: N
+matches in ... s; combined digest <16 hex>` line, no `wrote ...digests_dealt` line, exactly one "test result: ok. 1
+passed" + exit 0 (the test compares with the checkout's `tests/data/digests_dealt.txt`); the report's digests name it
+`dealt`. On the real output of this tree before the re-record (157.8) it fails, as it should ("0 passed, 1 failed").
+`tests/test_gate.py`: 70 passed.
+
 ### 157.6 H3: game 3's hidden 60 and game 2 (141.4)
 
 User decision 2026-11-13: option A - game 3's hidden 60 stays an independent deal (A1's likelihood on game 3's cards);
