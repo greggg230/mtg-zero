@@ -683,12 +683,16 @@ impl MtgAz {
         Some(PickWant { legal, a, b })
     }
 
-    /// How `viewer` saw the cards of `o`'s current (between games: last) deck that `kn` (`sample::knowledge`'s)
-    /// says it saw (ENGINE.md 140.9): per definition, its sightings in order (`Game::sightings` of the deck's
-    /// cards), each blind or a search's find. Checked against the knowledge: each definition's sightings are
-    /// exactly its cards the viewer saw - the deck's cards it knows (pinned cards are not known) and its clouds'
-    /// listed cards less the non-deck ones (`extras`); a gap would be a knowledge event that kept no sighting, and
-    /// panics. None where sightings are not kept (no whole-deck clouds: every copy then seen blind).
+    /// How `viewer` saw the cards of `o`'s current (between games: last) deck that the knowledge says it saw
+    /// (ENGINE.md 140.9): per definition, its sightings in order (`Game::sightings` of `o`'s cards), each blind or
+    /// a search's find. Checked against the knowledge: each definition's sightings are exactly its cards the
+    /// viewer saw - the deck's cards it knows (pinned cards are not known) and its clouds' listed cards, less the
+    /// identities of `o`'s cards outside the deck it does not know in hidden zones (a companion or a token it lost
+    /// track of: a cloud's listing may be theirs); a gap would be a knowledge event that kept no sighting, and
+    /// panics. The sightings are counted over all of `o`'s cards, not the deck's objects alone: a sighting a cloud
+    /// could have listed is no new card (140.9's coarse rule), so a deck card seen while a lost companion's listing
+    /// stood is counted by the companion's later sighting (ENGINE.md 140.10). None where sightings are not kept
+    /// (no whole-deck clouds: every copy then seen blind).
     pub(crate) fn seen_of(&self, viewer: PlayerId, o: PlayerId, sizes: [usize; 2], kn: &sample::Knowledge) -> Option<Vec<Seen>> {
         let g = &self.g;
         if !(g.spec().hidden_decklists || g.spec().deck_clouds) {
@@ -696,8 +700,7 @@ impl MtgAz {
         }
         let db = g.db();
         let range = if o == 0 { 0..sizes[0] } else { sizes[0]..sizes[0] + sizes[1] };
-        let mut log: Vec<(DefId, u32, bool)> =
-            g.sightings.iter().filter(|x| x.viewer == viewer && x.owner == o && range.contains(&x.obj.i())).map(|x| (x.def, x.at, x.searched)).collect();
+        let mut log: Vec<(DefId, u32, bool)> = g.sightings.iter().filter(|x| x.viewer == viewer && x.owner == o).map(|x| (x.def, x.at, x.searched)).collect();
         log.sort_unstable();
         let mut seen: Vec<Seen> = Vec::new();
         for (d, _, searched) in log {
@@ -709,14 +712,19 @@ impl MtgAz {
             x.searched |= (searched as u64) << x.n;
             x.n += 1;
         }
-        // what the knowledge says the viewer saw: the deck's cards it knows, its clouds' cards, less the non-deck ones
+        // what the knowledge says the viewer saw: the deck's cards it knows, its clouds' cards, less the identities of
+        // `o`'s cards outside the deck that it does not know in hidden zones
+        let _ = kn;
         let mut saw: Vec<DefId> = range.clone().map(|i| crate::ids::CardIdx::new(i as u32)).filter(|&c| g.knows(viewer, c)).map(|c| sample::card_of(g, c)).collect();
         for k in g.clouds().iter().filter(|k| k.viewer == viewer && k.owner == o) {
             saw.extend(k.defs.iter().map(|&d| db.def(d).card_def(d)));
         }
         saw.sort_unstable();
-        for &x in &kn.extras {
-            take_one(&mut saw, x);
+        for i in (0..g.objs.len()).filter(|i| !range.contains(i)) {
+            let c = crate::ids::CardIdx::new(i as u32);
+            if g.objs[i].owner == o && g.hidden_obj(c) && !g.knows(viewer, c) {
+                take_one(&mut saw, sample::card_of(g, c));
+            }
         }
         let mut i = 0;
         while i < saw.len() {

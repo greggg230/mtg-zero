@@ -29537,9 +29537,13 @@ no new card of R and keeps nothing (140's coarse rule, open point below). Kept o
 (`hidden_decklists`, `deck_clouds`): R never loses a card there, and a game without them (every digest game) keeps
 nothing and marks nothing.
 
-**The check.** `MtgAz::seen_of` builds each request's sightings (the deck's cards, by definition, in order) and asserts
-they are exactly what the knowledge says the viewer saw - the deck's cards it knows (a payment's pinned cards are not
-known) and its clouds' cards, less the non-deck ones (`extras`), definition by definition. A knowledge event that kept
+**The check.** `MtgAz::seen_of` builds each request's sightings (by definition, in order) and asserts they are exactly
+what the knowledge says the viewer saw - the deck's cards it knows (a payment's pinned cards are not known) and its
+clouds' cards, less the identities of the owner's cards outside the deck that it does not know in hidden zones (a
+companion or a token lost track of), definition by definition. The sightings are counted over all of the owner's
+cards, not the deck's objects alone: under the coarse rule a deck card seen while a lost companion's listing stood
+(the card may have been the companion) is no new card, and the companion's own later sighting is the one that adds
+it (the 2,000-game hidden-decklist fuzz found that order at seed 740, with the deck's objects alone counted). A knowledge event that kept
 no sighting panics at the next deal instead of weighing a card wrong. Copies of R beyond the sightings (pinned cards,
 held by the world) weigh nothing (an indicator); 140 weighed them as seen.
 
