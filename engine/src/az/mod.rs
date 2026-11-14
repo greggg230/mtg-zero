@@ -1378,10 +1378,19 @@ impl SearchGame for MtgAz {
         if self.m.sb.is_some() {
             return TAG_SIDEBOARD;
         }
-        match self.g.pending_decision() {
-            None => 0,
-            Some(d) if self.g.decider_of(d.player) != d.player => TAG_CONTROLLED | (1 + d.kind as u16),
-            Some(d) => 1 + d.kind as u16,
+        // (The kind as the world's observer sees it - the tree's viewer, whose
+        // worlds these are: another player's mana activations with priority
+        // are that player holding priority, ENGINE.md 160; the live game's,
+        // with no observer, as it is.)
+        let Some(d) = self.g.pending_decision() else { return 0 };
+        let kind = match self.g.observer {
+            Some(o) => self.g.kind_seen_by(o).expect("a decision"),
+            None => d.kind,
+        };
+        if self.g.decider_of(d.player) != d.player {
+            TAG_CONTROLLED | (1 + kind as u16)
+        } else {
+            1 + kind as u16
         }
     }
 

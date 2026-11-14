@@ -2610,6 +2610,82 @@ fn to_choice(g: &mut engine::Game, k: engine::DecisionKind) {
     panic!("no {k:?} decision\n{}", g.log_lines().join("\n"));
 }
 
+/// ENGINE.md 160 (the public-state gate's hidden-information side, for the decision's mode): another player's mana
+/// activations with priority (`ActivateMana`, CR 605.3a, 117.1d) are that player holding priority (117.3c) - in the
+/// row of any other viewer (the context block's kind and asking task: zero-core's root-view leaf rows encode the
+/// tree's viewer at another seat's node) and in the search's decision class of that viewer's worlds
+/// (`decision_tag`). P0 holds one hidden card, its library Simian Spirit Guides and Islands; it activates mana
+/// abilities with priority and taps a Taiga; the checkpoint is the mana's colour. Of P1's worlds after that answer,
+/// one asks P0 `ActivateMana` (a Guide dealt into the hand) and one is at `Priority` (an Island): P1's rows (whole
+/// layout v7 rows with the match block) and decision classes are equal; P0's own (its worlds) keep the mode.
+#[test]
+fn the_mana_activation_mode_encodes_no_hidden_information() {
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step};
+    const GUIDE: &str = "Simian Spirit Guide";
+    let mut g = Scenario::new(CardDb::cube())
+        .hand(0, &["Island"])
+        .battlefield(0, &["Taiga"])
+        .library(0, &[GUIDE, "Island", GUIDE, "Island", GUIDE, "Island", GUIDE, "Island"])
+        .library(1, &["Island"; 8])
+        .at(Step::Main1, 0)
+        .start();
+    g.choose(Choice::Yes);
+    let first = g.pending_decision().expect("the Taiga's colour").options[0].action;
+    let world = |observer: u8, seed: u64| {
+        let mut w = g.clone();
+        w.determinize(observer, &mut Rng::new(seed));
+        let mut k = Vec::new();
+        w.apply(first, &mut k).unwrap();
+        let mut a = MtgAz::new_game(&spec(), 2, 160).unwrap();
+        a.g = w;
+        (a, k)
+    };
+    let (mut activating, mut holding) = (None, None);
+    for s in 0..256u64 {
+        let (a, k) = world(1, s);
+        let slot = if a.g.kind() == Some(DecisionKind::ActivateMana) { &mut activating } else { &mut holding };
+        slot.get_or_insert((a, k));
+    }
+    let ((am, ka), (pr, kp)) = (activating.expect("a world asking ActivateMana"), holding.expect("a world back at Priority"));
+    assert_eq!(pr.g.kind(), Some(DecisionKind::Priority));
+    assert_eq!((am.g.to_move(), pr.g.to_move()), (Some(0), Some(0)));
+    assert_eq!(ka, kp, "P1's keys");
+    assert_eq!(am.g.view_of(1), pr.g.view_of(1), "P1's views");
+    assert_eq!(enc(&am, 1), enc(&pr, 1), "P1's rows: the mode is not encoded for the other player");
+    assert_eq!(am.decision_tag(), pr.decision_tag(), "P1's decision class");
+    assert_eq!(am.decision_tag(), 1 + DecisionKind::Priority as u16);
+    // One state seen by both: P0 really holds the Guide (pinned in P1's worlds while it activates) and is asked
+    // `ActivateMana` after the Taiga. P0's worlds keep the mode in its row and class; P1's see `Priority`.
+    let mut h = Scenario::new(CardDb::cube())
+        .hand(0, &[GUIDE])
+        .battlefield(0, &["Taiga"])
+        .library(0, &["Island"; 8])
+        .library(1, &["Island"; 8])
+        .at(Step::Main1, 0)
+        .start();
+    h.choose(Choice::Yes);
+    let taiga = h.card(0, "Taiga", engine::Zone::Battlefield);
+    h.choose(Choice::Card(taiga));
+    while h.kind() != Some(DecisionKind::ActivateMana) {
+        let c = h.pending_decision().expect("a decision").options[0].choice;
+        h.choose(c);
+    }
+    let seen = |observer: u8| {
+        let mut w = h.clone();
+        w.determinize(observer, &mut Rng::new(3));
+        let mut a = MtgAz::new_game(&spec(), 2, 160).unwrap();
+        a.g = w;
+        a
+    };
+    let (by0, by1) = (seen(0), seen(1));
+    assert_eq!(by1.g.kind(), Some(DecisionKind::ActivateMana), "the Guide is pinned in P1's world");
+    assert_eq!(by0.decision_tag(), 1 + DecisionKind::ActivateMana as u16, "P0's own class keeps the mode");
+    assert_eq!(by1.decision_tag(), 1 + DecisionKind::Priority as u16, "P1's class: P0 holds priority");
+    assert_eq!(by1.g.kind_seen_by(0), Some(DecisionKind::ActivateMana));
+    assert_eq!(by1.g.kind_seen_by(1), Some(DecisionKind::Priority));
+}
+
 /// Layout v5's facts hide nothing (ENGINE.md 60.4): on the gate's positions
 /// (the cube, the Delver mirror, best-of-three, a drafted match, hidden decklists, EoE sealed) with each of
 /// the 42 perturbations v5 encodes applied, every world `determinize` makes

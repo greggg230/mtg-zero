@@ -2125,7 +2125,10 @@ impl Game {
             // `ActivateMana` in the other after equal keys (and the first
             // would check state-based actions). Asked, a single option is
             // answered with a `KEY_AUTO` (ENGINE.md 10), which keeps them
-            // apart (ENGINE.md 147.8, lane G's F1 of 148.6).
+            // apart (ENGINE.md 147.8, lane G's F1 of 148.6) - for this player
+            // only: for the other player that end is no event at all (the
+            // player keeps priority, CR 117.3c), so its key is not emitted in
+            // that player's worlds (`ask_options`, ENGINE.md 160).
             assert!(again, "ActivateMana with no mana ability to activate");
             match self.answer.take() {
                 Some(Choice::Pass) => {}
@@ -2141,6 +2144,13 @@ impl Game {
         let run = |g: &mut Game, c: CardIdx, slot: AbilitySlot| {
             // (The next activation after this one's choices.)
             g.agenda.push(Task::ActivateMana { p, card: None, again: true });
+            // The player receives priority again after activating it (CR
+            // 117.3c), so the state-based actions and the triggered abilities
+            // waiting are handled first (117.5, 117.2a) - before the next
+            // `ActivateMana`, as before `Priority`'s decision: the same
+            // public state whether this player activates more or has
+            // nothing left to activate (ENGINE.md 160).
+            g.agenda.push(Task::SbaCheck { keep: Vec::new() });
             if slot == crate::pay::SAC_FOR {
                 // A granted "sacrifice this: add <mana>" (Rain of Filth).
                 let mask = g.sac_mana_of(c);
@@ -2193,6 +2203,26 @@ impl Game {
     }
 }
 
+impl Game {
+    /// Does `viewer` see that the pending decision is a mana activation with priority (`ActivateMana`, ENGINE.md
+    /// 160)? Only its player and the player making its decisions (CR 722.4) do. For anyone else it is that player
+    /// holding priority (CR 117.3c, 605.3a): the mode's existence and its end read the player's hidden hand (a Spirit
+    /// Guide's mana ability), and nothing in the game shows it - a mana ability activated shows once activated.
+    pub(crate) fn activating_mana_hidden_from(&self, viewer: PlayerId) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|d| d.kind == DecisionKind::ActivateMana && viewer != d.player && viewer != self.decider_of(d.player))
+    }
+
+    /// The pending decision's kind as `viewer` observes it (ENGINE.md 160): `Priority` for another player's
+    /// `ActivateMana` (`activating_mana_hidden_from`), else its kind. `view_of`, the encoding's context block and the
+    /// search's decision class (`decision_tag`, in the worlds of an observer) read it.
+    pub fn kind_seen_by(&self, viewer: PlayerId) -> Option<DecisionKind> {
+        let d = self.pending.as_ref()?;
+        Some(if self.activating_mana_hidden_from(viewer) { DecisionKind::Priority } else { d.kind })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// ENGINE.md 147.6 (the Fable review's hidden B5; 128.2 part 3): `ActivateMana`'s hand sources take the card of a
@@ -2230,22 +2260,22 @@ mod tests {
         assert_eq!(guides, [high], "one source per definition, the slot's card");
     }
 
-    /// ENGINE.md 160 (147.8; CR 605.3a, 117.1d): the end of the mana activations a player began with priority must not
-    /// tell the other player which hidden card is in the activator's hand. The fuzz's open-decklist walk (148.2) found
-    /// it as default seed 2122 and interactions 2031 / 13518 ("same keys, different views": `Priority` /
-    /// `ActivateMana`); this is the walk on a hand-made state. P0 has a Taiga and one hidden card in hand, a Street
-    /// Wraith (cycling: a hand ability that is not a mana ability); its library holds Wraiths and Simian Spirit Guides
-    /// (a mana ability in hand). P0 activates mana abilities and taps the Taiga: the checkpoint is the colour of its
-    /// mana (a decision of P0's that names no hidden card). The activation pins the hand's mana sources (`hidden_slots_with`,
-    /// none here), but a world of P1's may deal a Guide into the hand: P1's worlds hold a Guide or a Wraith there.
-    /// After the same answer both offer P0 exactly `PASS` and the hand slot's ability (one action id), but the Guide's
-    /// world asks `ActivateMana` and the Wraith's is back at `Priority` - a decision kind that reads the hidden hand. The
-    /// two must not look alike to P1 by their keys unless they look alike by their views: the Wraith's world ends its
-    /// activations with an asked one-option `ActivateMana`, answered and keyed (`KEY_AUTO`, ENGINE.md 10), so the keys
-    /// tell the worlds apart exactly where the kinds differ - the information-set rule the walk checks (equal keys,
-    /// equal views) holds. Before 147.8 the Wraith's world returned to `Priority` with no key: equal keys.
+    /// ENGINE.md 160 (147.8; CR 605.3a, 117.1d, 117.3c): the mana activations a player began with priority are, to
+    /// the other player, that player holding priority - their end reads the activator's hidden hand and shows nothing.
+    /// The fuzz's open-decklist walk (148.2) found it as default seed 2122 and interactions 2031 / 13518 ("same keys,
+    /// different views": `Priority` / `ActivateMana`); this is the walk on a hand-made state. P0 has a Taiga and one
+    /// hidden card in hand, a Street Wraith (cycling: a hand ability that is not a mana ability); its library holds
+    /// Wraiths and Simian Spirit Guides (a mana ability in hand). P0 activates mana abilities and taps the Taiga: the
+    /// checkpoint is the colour of its mana (a decision of P0's that names no hidden card). The activation pins the
+    /// hand's mana sources (`hidden_slots_with`, none here), but a world of P1's may deal a Guide into the hand. After
+    /// the same answer the Guide's world asks `ActivateMana` (the Guide left to activate) and the Wraith's ended its
+    /// activations (the one-option `ActivateMana`, answered) and is at `Priority`. To P1 the two are identical: equal
+    /// keys (the forced end's `KEY_AUTO` is not emitted in P1's worlds), equal views and rows (the kind seen is
+    /// `Priority` in both). P0's own view keeps the mode, and the live game keys the forced end (147.8). Before 160
+    /// the worlds were keyed apart by that key (and before 147.8 not at all: equal keys, different kinds).
     #[test]
-    fn cr_605_3a_the_end_of_mana_activations_is_keyed_whatever_the_hidden_hand_holds() {
+    fn cr_605_3a_the_end_of_mana_activations_is_unseen_by_the_other_player() {
+        use crate::az::tail_encode::Row;
         use crate::decision::{act, Choice, DecisionKind};
         use crate::game::{Game, Step};
         use crate::hidden::{key, KEY_AUTO};
@@ -2268,6 +2298,19 @@ mod tests {
         assert!(matches!(checkpoint, Some(DecisionKind::ChooseMana | DecisionKind::ChooseMode)), "{checkpoint:?}: {:?}", g.options_desc());
         let hand_card = |w: &Game| w.db.def(w.objs[w.players[0].hand[0].i()].def).name.clone();
         assert_eq!(g.objs[g.players[0].hand[0].i()].known, 1 << 0, "the hand card is hidden from P1");
+        let first = g.pending_decision().unwrap().options[0].action;
+        let auto_end = key(KEY_AUTO, 0, ((DecisionKind::ActivateMana as u64) << 16) | act::PASS as u64);
+        // The live game (no observer) and P0's own worlds key the forced end (147.8): P0 sees its mode.
+        for observer in [None, Some(0u8)] {
+            let mut w = g.clone();
+            if observer.is_some() {
+                w.determinize(0, &mut crate::rng::Rng::new(7));
+            }
+            let mut k = Vec::new();
+            w.apply(first, &mut k).unwrap();
+            assert!(k.contains(&auto_end), "{observer:?}: {k:?}");
+            assert_eq!(w.kind(), Some(DecisionKind::Priority));
+        }
         // P1's worlds (`determinize`, the walk's): one with the Guide in P0's hand, one with a Wraith.
         let (mut guide, mut wraith) = (None, None);
         for s in 0..256u64 {
@@ -2279,7 +2322,6 @@ mod tests {
         let (mut guide, mut wraith) = (guide.expect("a world with the Guide"), wraith.expect("a world with a Wraith"));
         assert_eq!(hand_card(&wraith), WRAITH);
         assert_eq!(guide.view_of(1), wraith.view_of(1), "one information set of P1's");
-        let first = guide.pending_decision().unwrap().options[0].action;
         let mut keys = [Vec::new(), Vec::new()];
         guide.apply(first, &mut keys[0]).unwrap();
         wraith.apply(first, &mut keys[1]).unwrap();
@@ -2288,8 +2330,7 @@ mod tests {
             g.legal_actions(&mut v);
             v
         };
-        // The same decider and the same legal actions (`PASS` and the hand slot's ability), different kinds: the kind
-        // reads whether the hidden card has a mana ability.
+        // The same decider and the same legal actions (`PASS` and the hand slot's ability); the modes differ.
         let slot = guide.ability_action(0, guide.players[0].hand[0], crate::db::AbilitySlot::Hand(0));
         assert_eq!(slot, wraith.ability_action(0, wraith.players[0].hand[0], crate::db::AbilitySlot::Hand(0)));
         assert_eq!((guide.to_move(), wraith.to_move()), (Some(0), Some(0)));
@@ -2297,16 +2338,54 @@ mod tests {
         assert_eq!(legal(&wraith), [act::PASS, slot], "{:?}", wraith.options_desc());
         assert_eq!(guide.kind(), Some(DecisionKind::ActivateMana), "the Guide's mana ability is left to activate");
         assert_eq!(wraith.kind(), Some(DecisionKind::Priority), "nothing left: the activations ended");
-        assert_ne!(guide.view_of(1), wraith.view_of(1), "the views differ (the decider's kind)");
+        // To P1: P0 holds priority in both - equal keys, views and rows.
+        assert!(!keys[1].contains(&auto_end), "the forced end is no event for P1: {:?}", keys[1]);
+        assert_eq!(keys[0], keys[1], "P1's keys");
+        assert_eq!((guide.kind_seen_by(1), wraith.kind_seen_by(1)), (Some(DecisionKind::Priority), Some(DecisionKind::Priority)));
+        assert_eq!(guide.view_of(1), wraith.view_of(1), "P1's views");
+        assert_eq!(Row::of(&guide, 1).flat(), Row::of(&wraith, 1).flat(), "P1's rows");
         assert_eq!(guide.player(0).pool, wraith.player(0).pool, "the same mana floats");
-        // So the keys must differ: the Wraith's world answered the one-option `ActivateMana` (`PASS`) and keyed it.
-        let auto_end = key(KEY_AUTO, 0, ((DecisionKind::ActivateMana as u64) << 16) | act::PASS as u64);
-        assert!(keys[1].contains(&auto_end), "the end of the activations is keyed: {:?}", keys[1]);
-        assert!(!keys[0].contains(&auto_end), "{:?}", keys[0]);
-        assert_ne!(keys[0], keys[1], "equal keys with different views: the walk's information-set failure");
-        // The Guide's world: stopping is the player's own `PASS`, back to priority with the Guide still offered.
-        guide.choose(Choice::Pass);
+        // P0's own view and row keep the mode.
+        assert_eq!(guide.kind_seen_by(0), Some(DecisionKind::ActivateMana));
+        assert_ne!(Row::of(&guide, 0).flat(), Row::of(&wraith, 0).flat());
+        // The Guide's world: stopping is P0's own `PASS` - no key, back to priority with the Guide still offered.
+        assert!(guide.choose(Choice::Pass).is_empty());
         assert_eq!(guide.kind(), Some(DecisionKind::Priority));
         assert!(guide.has_option(Choice::Yes), "{:?}", guide.options_desc());
+    }
+
+    /// ENGINE.md 160 (CR 117.3c, 117.5): a player who activates a mana ability while holding priority receives
+    /// priority again afterwards, so the state-based actions are performed before its next decision - also inside
+    /// `ActivateMana`, with more to activate. P0 at 1 life activates Mana Confluence ({T}, pay 1 life) with a Forest
+    /// left: it loses then (704.5a), not after it stops activating. (Before 160 the game went on to `ActivateMana`'s
+    /// next decision at 0 life, and the check came only with `Priority`'s.)
+    #[test]
+    fn cr_117_3c_state_based_actions_after_a_mana_ability_activated_with_priority() {
+        use crate::decision::{Choice, DecisionKind};
+        use crate::game::Step;
+        use crate::ids::Zone;
+        use crate::testkit::Scenario;
+        let mut g = Scenario::new(crate::db::CardDb::cube())
+            .battlefield(0, &["Mana Confluence", "Forest"])
+            .library(0, &["Island"; 8])
+            .library(1, &["Island"; 8])
+            .life(0, 1)
+            .at(Step::Main1, 0)
+            .start();
+        g.choose(Choice::Yes);
+        assert_eq!(g.kind(), Some(DecisionKind::ActivateMana));
+        let confluence = g.card(0, "Mana Confluence", Zone::Battlefield);
+        g.choose(Choice::Card(confluence));
+        for _ in 0..4 {
+            match g.kind() {
+                Some(DecisionKind::ChooseMana | DecisionKind::ChooseMode) => {
+                    let c = g.pending_decision().unwrap().options[0].choice;
+                    g.choose(c);
+                }
+                _ => break,
+            }
+        }
+        assert!(g.is_over(), "P0 at {} life still decides {:?}: {:?}", g.player(0).life, g.kind(), g.options_desc());
+        assert_eq!(g.result_values(), [0.0, 1.0]);
     }
 }
