@@ -31422,21 +31422,106 @@ and so the publisher never deal; `keep_h2h` refuses a dealt spec (pass the evalu
 only (`SPEC_DELVER_BO3_DEALT`; its evaluation spec is `SPEC_DELVER_BO3`); `delver-mirror-bo3` is unchanged;
 `decklists.mirror_bo3_spec(..., dealt_decks=...)` writes the key (`tests/test_dealt_decks.py`).
 
-### 154.4 What A1's posterior and A2's game-3 conditioning must do for a dealt seat
+### 154.4 The contracts for the Fable lanes' A1 (posterior) and A2 (game 3) on a dealt seat
 
-* **A1** (`fix/deck-posterior`, 140: the posterior of the seen cards, prior x prod_i C(D_i, R_i)): a dealt seat's
-  posterior is the **restricted** prior times the same likelihood. A1's `request` / `expected_fill` divide by and skip on
-  `by_swaps` exactly as before, so `ConstructedPrior::dealt`'s zeroed counts carry over with no code change; its
-  `sample_k` shares one table a request as for any prior. Nothing to add (checked by the trial merge, 154.6).
-* **A2** (`fix/bo3-hidden`, 141): H2's observer kept in a world's new games composes (this branch sets the observer
-  between games too, the same line). If the user picks an H3 option that conditions game 3 on game 2 (141.4: B, C or
-  D), the dealt seat's game-3 request must stay option A: its game-3 60 is an independent deal of the restricted prior
-  (the user's decision), so P(D3 | everything seen) = the restricted prior's posterior given game 3's cards only - no
-  game-2 term, no mixture with the dealt game-2 deck. `deck_dealt(o)` is the test for it. The deck tilt stays off for it.
+The per-seat query is `MtgAz::deck_dealt(o) -> bool` (`hidden_decks.rs`): seat `o` is the match's dealt seat
+(`MatchState::dealt == Some(o)`; public, the same in every world). Its deck prior `m.deck_priors[o]` is then the dealt
+prior, `ConstructedPrior::dealt` (`swap_range()` gives lo..=hi). Every path that deals or weighs a hidden 60 of `o`
+checks it first. The contracts, which the integration's tests on the merged tree check (not duplicated here):
+
+* **(a) A dealt seat's exact posterior** (with A1, `fix/deck-posterior`, 140: the posterior of the seen cards, prior x
+  prod_i C(D_i, R_i), and its searched-card terms, 140.9): P(D | what the viewer saw) is the **restricted** prior - uniform
+  over s in lo..=hi, then uniform over the 60s with s swaps, 0 outside the range - times the same likelihood, normalised,
+  and **untilted** (no deck-prediction tilt, 106; no deck-reader weights, 102.1): the deal is no policy's choice. A1's
+  table draws (`request`, `expected_fill`, `sample_k`) divide by `by_swaps[s]` and skip an s with `by_swaps[s] <= 0`, so
+  `ConstructedPrior::dealt`'s zeroed counts restrict every one of them with no code change; the tilt is dropped for a
+  dealt opponent before the request is made (`sample_hidden_deck`, `deck_weights`, `deck_tilt_of`).
+* **(b) Game 3** (with A2, `fix/bo3-hidden`, 141.4's H3): game 3's dealt 60 is an independent deal of the restricted
+  prior (the user's decision), so whatever H3 option the user picks for the other seats (B, C or D: game 3 conditioned
+  on game 2), every game-3 conditioning path checks `deck_dealt(o)` first and deals a dealt seat's game-3 60 from game
+  3's cards only: P(D3 | everything seen) = the restricted prior's posterior given what game 3 showed - no game-2 term,
+  no anchor on the dealt game-2 deck, no mixture with it. Between games 2 and 3 a dealt first sideboarder's next 60 is
+  dealt with nothing shown (`deal_constructed_between`, as today); its game-2 60 is dealt from game 2's end.
+* **(c) H2's observer composes with a dealt deal**: a world of the other player keeps its observer through the
+  sideboarding and into the next game it starts (A2's H2; this branch also sets `g.observer` in `determinize` between
+  games, the same line), so the dealt seat's deal in that world is keyed `HIDDEN` (`KEY_DEALT`, the same number of
+  keys whatever was dealt) and the dealt seat's draws and looks in the game it starts are masked; in the dealt seat's
+  own worlds the deal is keyed in full. `dealt_seed` is reseeded in every world (`reseed_dealt`), so no world carries the
+  real later deal.
 
 ### 154.5 Checks
 
-(Recorded by the commits after this one: the engine tests above passed on it - `dealt_decks` 10 passed, 1 ignored.)
+The desktop was shared with the live run delver-bo3-pb1 and the Fable lanes: every heavy command ran under the lanes'
+slot throttle (`slotd.sh`), one at a time, with this checkout's own target directory
+(E:/cargo-target/mtg-zero/delver-bo3-int-optin). The engine and test code checked is 6514e937 (28418cbf changes only
+the fuzz harness's post-sideboard start check, below).
+
+* **Behaviour digests, every spec without the option: EQUAL.** `digest.rs` (2,000 random + 500 heuristic best-of-one
+  games): full **438164c0429d7fa3**, `DIGEST_ENCODING=0` **a0062bb5569e06d3** - main's (125.12, 153.2). Lane G's match
+  digests (148, `fix/check-gaps` 7aeae8c8's `digest_formats.rs` and its recorded files, run here from an untracked copy
+  without its mimalloc allocator line - the allocator is not hashed - and removed after): constructed best-of-three
+  (the delver-mirror-bo3 preset's matches, whole matches from game 1, a keeper, the real 60s) **63f58560ad7b3df0**, EoE
+  **b36df9098a38d794**, zero-core's driver on the Delver best-of-three spec **837d42c28214befe** - each equal to its
+  recorded file (267ae603's behaviour): no existing match, world, row, aux target or driver record changed.
+* **The dealt digest (new)**: `dealt_decks.rs::dealt_digests` (`--ignored`), `engine/tests/data/digests_dealt.txt` -
+  80 matches (`r 0..39` random and `h 0..19` the heuristic against random, the preset's spec; `w 0..19` whole matches
+  from game 1 with p 1, swaps [0, 15]; per decision the decider, kind, actions, keys, every 10th the whole row, every
+  20th the aux targets and a world's decks, sideboarding and row): combined digest **8cb56319b1746be3** (recorded;
+  re-run equal). No old value: the spec is new.
+* **The full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`): 164 binaries, **2,549
+  passed, 0 failed, 28 ignored** - `dealt_decks` 10 (1 ignored: the digest), the public-state gate in `az` (52, its new
+  perturbation "a player's decks in the match are dealt" among them), `post_board`, `constructed_bo3`, `bo3_episodes`,
+  `hidden`, `rules_m8b_hidden`.
+* **`FUZZ_GAMES=20000`**, the default pool: passed (1000 matches, 2,549 games; 20,000 games; 42 min).
+  **`FUZZ_POOL=delver FUZZ_GAMES=20000`**: passed (20,000 Delver games; 1000 constructed matches, 24,818 worlds with
+  the opponent's 60 hidden; 1000 post-sideboard matches, 549 keeper decisions; 42 min).
+  **`FUZZ_POOL=delver_dealt FUZZ_GAMES=20000`** on 6514e937 failed the harness's post-sideboard start check (match 5, and
+  match 2000 of the replay test): it compared the first *decider* with game 1's loser, and a dealt loser decides
+  nothing (its 60 is dealt when the sideboarding begins) - the check, not the engine (28418cbf: the first sideboarder
+  is the sideboarding's `order[0]`, a dealt loser's 60 done and the other seat deciding). Its whole-match part had
+  passed before (751 of 1000 matches dealt, 1,259 dealt 60s checked, 42,230 worlds, the opponent's 60 hidden in
+  25,796). On 28418cbf the dealt variant's match tests (`fuzz_random_matches`, `same_seed_and_actions_replay_matches_identically`;
+  its games are `FUZZ_POOL=delver`'s, the option is a match setting): **both passed** - 1000 whole matches (751 with a dealt seat, 1,259 dealt 60s checked against the range, 42,230 worlds, the opponent's 60 hidden in 25,796, 15,956 deck-tilted worlds) and 1000 post-sideboard matches (751 dealt, 1,264 dealt 60s checked, 26,434 worlds, the opponent's 60 hidden in 25,918), the information-set walks over the deal's keys among them; the replay test (`same_seed_and_actions_replay_matches_identically`, the dealt matches' keys included) passed. After the run the harness's post-sideboard summary stopped printing the dealt 60s' count as "keeper decisions" (a print and the equivalent final assert only).
+* **pytest** (`bash tools/build_py.sh`, then `tests/test_dealt_decks.py test_sideboard_census.py test_replays_bo3.py
+  test_post_board.py test_delver_bo3.py test_deck_tilt.py test_delverai_publish.py`): **33 passed** - the census of a
+  run whose spec deals every match plays both players' sideboarding in every start.
+* **The engine gate**: on the commit that adds this text (its last line in the agent's report and the next commit
+  that touches this section).
+* **Not run**: the Mac steps (`--no-mac`); a run with the preset (pb2 is the v7 session's: it forks pb1 with this spec).
+
+### 154.6 The trial merge with A1 and A2 (scratch branch `feat/dealt-decks-trial`, never pushed)
+
+`feat/dealt-decks` (72a6195f) merged with `fix/deck-posterior` (A1) ef0320cf, then with `fix/bo3-hidden` (A2) f1068c58
+(the lane heads on 2026-11-13 evening), resolved by `E:/mtg-zero-scratch/fable-fix/dealt-trial.py` (git plumbing: the worktree
+untouched until the build). `feat/dealt-decks` itself stays on main.
+
+* **A1: conflicts in `docs/ENGINE.md`** (sections: 131-132, 140, 153-154 in number order) **and `hidden_decks.rs`**
+  (`ConstructedPrior`'s doc only: A1's sentence on `sample_k`, then 154's paragraph). Auto-merged: `hidden.rs`,
+  `public_state.rs`, `fuzz.rs`. **One semantic fix**: A1 (140.9) added `DeckWant::seen`; this branch's four
+  `DeckWant` literals (`matches.rs::deal_dealt_deck`, three in `dealt_decks.rs`) take `seen: None` (nothing seen: the
+  deal and the prior tests). The dealt prior needs nothing else: A1's `request`, `expected_fill` and `sample_k` divide
+  by and skip on `by_swaps` as before (contract (a), 154.4).
+* **A2: conflicts in `docs/ENGINE.md`, `hidden_decks.rs`, `az/mod.rs`, `engine/tests/fuzz.rs`, `mtgz/az/decklists.py`,
+  `mtgz/az/keep_h2h.py`**, each resolved by keeping both sides (`fuzz.rs`: this branch's post-sideboard final assert,
+  then A2's private-key report lines after it): `deck_weights`' two early returns (a known keeper, a dealt seat); the shared
+  between-games `g.observer` line with one comment (in `determinize` and `determinize_deck_tilted`); `MtgSpec`'s
+  `keep_known` and `dealt_decks` (field, default, key, validation, `MtgAz::new`); `mirror_bo3_spec(..., keep_known,
+  dealt_decks)`; `half_specs` refusing a dealt spec, then A2's per-arm checks. **One addition**: A2's private-key fuzz
+  check (`check_private_keys_masked`) covers `KEY_DEALT` too (another player's dealt-deck keys must be `HIDDEN`).
+  A2 implements no H3 path (141.4: left for the user), so contract (b) has no code to meet yet.
+* The trial's build, engine suite and 2k fuzz of the dealt variant run after this commit's gate: their results are in
+  the agent's report.
+
+### 154.7 Open points
+
+* **The run** (the v7 session's pb2): the preset's spec in self-play, the evaluation spec without the option (the
+  preset's `eval_spec`); the farm's native worker plays dealt matches with no extra code (engine-level), once it is
+  built on a commit with this. Measure as the design's section 5 says (the census each published generation, keep-60
+  with A2's informed arm, best of one vs 3198, post-board Elo against pb1's newest checkpoint).
+* `g6::DEALT`'s input column never trained in pb1 (the float was always 0): at the fork it reads the new non-zero input
+  at initialisation scale (the options memo 1, 58.11's measurement) - the design's accepted cost of a spare float.
+* Not done (optional in the brief): a "dealt" field in the spectator view / game log. Recorded matches never deal, so
+  nothing shows it.
 
 ## 157. The Fable-review fix campaign integrated: `integrate/fable-1112` (branch `integrate/fable-1112`, zero-core `integrate/fable-1112`, 2026-11-13)
 
