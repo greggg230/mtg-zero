@@ -2229,4 +2229,84 @@ mod tests {
         let guides: Vec<_> = sources.iter().filter(|(c, _)| g.objs[c.i()].def == source_def).map(|(c, _)| *c).collect();
         assert_eq!(guides, [high], "one source per definition, the slot's card");
     }
+
+    /// ENGINE.md 160 (147.8; CR 605.3a, 117.1d): the end of the mana activations a player began with priority must not
+    /// tell the other player which hidden card is in the activator's hand. The fuzz's open-decklist walk (148.2) found
+    /// it as default seed 2122 and interactions 2031 / 13518 ("same keys, different views": `Priority` /
+    /// `ActivateMana`); this is the walk on a hand-made state. P0 has a Taiga and one hidden card in hand, a Street
+    /// Wraith (cycling: a hand ability that is not a mana ability); its library holds Wraiths and Simian Spirit Guides
+    /// (a mana ability in hand). P0 activates mana abilities and taps the Taiga: the checkpoint is the colour of its
+    /// mana (a decision of P0's that names no hidden card). The activation pins the hand's mana sources (`hidden_slots_with`,
+    /// none here), but a world of P1's may deal a Guide into the hand: P1's worlds hold a Guide or a Wraith there.
+    /// After the same answer both offer P0 exactly `PASS` and the hand slot's ability (one action id), but the Guide's
+    /// world asks `ActivateMana` and the Wraith's is back at `Priority` - a decision kind that reads the hidden hand. The
+    /// two must not look alike to P1 by their keys unless they look alike by their views: the Wraith's world ends its
+    /// activations with an asked one-option `ActivateMana`, answered and keyed (`KEY_AUTO`, ENGINE.md 10), so the keys
+    /// tell the worlds apart exactly where the kinds differ - the information-set rule the walk checks (equal keys,
+    /// equal views) holds. Before 147.8 the Wraith's world returned to `Priority` with no key: equal keys.
+    #[test]
+    fn cr_605_3a_the_end_of_mana_activations_is_keyed_whatever_the_hidden_hand_holds() {
+        use crate::decision::{act, Choice, DecisionKind};
+        use crate::game::{Game, Step};
+        use crate::hidden::{key, KEY_AUTO};
+        use crate::testkit::Scenario;
+        const GUIDE: &str = "Simian Spirit Guide";
+        const WRAITH: &str = "Street Wraith";
+        let mut g = Scenario::new(crate::db::CardDb::constructed())
+            .hand(0, &[WRAITH])
+            .battlefield(0, &["Taiga"])
+            .library(0, &[GUIDE, WRAITH, GUIDE, WRAITH, GUIDE, WRAITH, GUIDE, WRAITH])
+            .library(1, &["Island"; 8])
+            .at(Step::Main1, 0)
+            .start();
+        // Activate mana abilities (CR 605.3a): the Taiga's, then its colour - the checkpoint.
+        // (The Taiga the one source: its `ActivateMana` is answered and keyed, ENGINE.md 10.)
+        assert_eq!(g.kind(), Some(DecisionKind::Priority));
+        g.choose(Choice::Yes);
+        assert_eq!(g.to_move(), Some(0));
+        let checkpoint = g.kind();
+        assert!(matches!(checkpoint, Some(DecisionKind::ChooseMana | DecisionKind::ChooseMode)), "{checkpoint:?}: {:?}", g.options_desc());
+        let hand_card = |w: &Game| w.db.def(w.objs[w.players[0].hand[0].i()].def).name.clone();
+        assert_eq!(g.objs[g.players[0].hand[0].i()].known, 1 << 0, "the hand card is hidden from P1");
+        // P1's worlds (`determinize`, the walk's): one with the Guide in P0's hand, one with a Wraith.
+        let (mut guide, mut wraith) = (None, None);
+        for s in 0..256u64 {
+            let mut w = g.clone();
+            w.determinize(1, &mut crate::rng::Rng::new(s));
+            let slot = if hand_card(&w) == GUIDE { &mut guide } else { &mut wraith };
+            slot.get_or_insert(w);
+        }
+        let (mut guide, mut wraith) = (guide.expect("a world with the Guide"), wraith.expect("a world with a Wraith"));
+        assert_eq!(hand_card(&wraith), WRAITH);
+        assert_eq!(guide.view_of(1), wraith.view_of(1), "one information set of P1's");
+        let first = guide.pending_decision().unwrap().options[0].action;
+        let mut keys = [Vec::new(), Vec::new()];
+        guide.apply(first, &mut keys[0]).unwrap();
+        wraith.apply(first, &mut keys[1]).unwrap();
+        let legal = |g: &Game| {
+            let mut v = Vec::new();
+            g.legal_actions(&mut v);
+            v
+        };
+        // The same decider and the same legal actions (`PASS` and the hand slot's ability), different kinds: the kind
+        // reads whether the hidden card has a mana ability.
+        let slot = guide.ability_action(0, guide.players[0].hand[0], crate::db::AbilitySlot::Hand(0));
+        assert_eq!(slot, wraith.ability_action(0, wraith.players[0].hand[0], crate::db::AbilitySlot::Hand(0)));
+        assert_eq!((guide.to_move(), wraith.to_move()), (Some(0), Some(0)));
+        assert_eq!(legal(&guide), [act::PASS, slot], "{:?}", guide.options_desc());
+        assert_eq!(legal(&wraith), [act::PASS, slot], "{:?}", wraith.options_desc());
+        assert_eq!(guide.kind(), Some(DecisionKind::ActivateMana), "the Guide's mana ability is left to activate");
+        assert_eq!(wraith.kind(), Some(DecisionKind::Priority), "nothing left: the activations ended");
+        assert_ne!(guide.view_of(1), wraith.view_of(1), "the views differ (the decider's kind)");
+        assert_eq!(guide.player(0).pool, wraith.player(0).pool, "the same mana floats");
+        // So the keys must differ: the Wraith's world answered the one-option `ActivateMana` (`PASS`) and keyed it.
+        let auto_end = key(KEY_AUTO, 0, ((DecisionKind::ActivateMana as u64) << 16) | act::PASS as u64);
+        assert!(keys[1].contains(&auto_end), "the end of the activations is keyed: {:?}", keys[1]);
+        assert!(!keys[0].contains(&auto_end), "{:?}", keys[0]);
+        assert_ne!(keys[0], keys[1], "equal keys with different views: the walk's information-set failure");
+        // The Guide's world: stopping is the player's own `PASS`, back to priority with the Guide still offered.
+        guide.choose(Choice::Pass);
+        assert_eq!(guide.kind(), Some(DecisionKind::Priority));
+        assert!(guide.has_option(Choice::Yes), "{:?}", guide.options_desc());
+    }
 }

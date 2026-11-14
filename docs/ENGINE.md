@@ -32746,3 +32746,79 @@ $S python -m mtgz.az.run --run E:/mtg-zero-scratch/fable-fix/int-logs/smoke-fina
 
 **8. Document**: 157's checks with each gate's last line, the digests old -> new, the canary rerecord's report; then
 the orchestrator fast-forwards main to the final head (and moves the pin with it).
+
+## 160. The decision kind after mana activations: the walk's "same keys, different views" is 147.8's finding, fixed on the integration (branch `fix/decision-kind-leak`, 2026-11-13)
+
+**The report.** Lane B's 20k fuzz runs on `fix/encoding-gate` (and on its base, `fix/hidden-refs` 3ca4fb2d) failed the
+open-decklist information-set walk (148.2, `check_information_set` in `engine/tests/fuzz.rs`): default pool seed 2122,
+`FUZZ_POOL=interactions` seeds 2031 and 13518, each "same keys, different views" with P0's decision `Priority` in one of
+P1's worlds and `ActivateMana` in the other, both offering `PASS` and the same hand-slot ability id (Street Wraith-like
+in one, a Spirit Guide's mana ability in the other), after a `ChooseMana` (2122: a Tropical Island under Currency
+Converter's ability; 13518: under Karakas's) or a `ChooseMode` (2031) inside `ActivateMana`. It was handed to this lane
+as a bug blocking the integration (`E:\mtg-zero-scratch\fable-fix\laneB\p4_fuzz.log`, `p4_fuzz_inter.log`,
+`p5_fuzz_inter.log`).
+
+**Root cause** (the code as it was before 147.8, 123d80b9). Mana abilities activated with priority (CR 605.3a, 117.1d;
+100.4.3) run as a mode: `Priority`'s "activate mana abilities" (`flow.rs` `Choice::Yes`) pushes `Task::ActivateMana`,
+and after each activation `activate_mana` (`engine/src/activate.rs:2115`) asks again with `PASS` among the options. Its
+sources (`mana_float_sources`) include the hand's mana abilities (a Spirit Guide's). With none left (`activate.rs:2119`,
+`if sources.is_empty()`) it returned silently to the `Priority` task under it. The activation pins the payer's mana
+sources in hand (`hidden.rs:1426`, `hidden_slots_with`), but only the real hand's: a world of the other player's may deal
+a Guide into the hand. So in P1's worlds, after the same answer and with equal keys, P0 was back at `Priority` where its
+hidden card had no mana ability and still in `ActivateMana` where it had one - the decision KIND read P0's hidden hand,
+while the legal actions (`PASS`, the slot's ability id) were equal.
+
+**What it reached (before 147.8).**
+* `view_of` (`testkit.rs:467`: the pending decision's player and kind, for every viewer) - what the walk compares.
+* **The network**: `encode_context` writes the decision kind's one-hot for any viewer (`az/encode.rs:2913`), so
+  `Row::of(viewer)` of the non-decider carries the decider's kind. zero-core encodes the tree viewer's row at another
+  seat's leaf when `leaf_value_view` is `root` (docs/search.md 3.6; `driver/worker.rs` 665/734: "a value-only row of the
+  tree's viewer"), which delver-bo3-pb1 uses for self-play and evaluation. So P1's root-view leaf values at such a P0
+  leaf had an input that read P0's hidden hand (a mana source in hand or not) in worlds P1 could not tell apart by keys.
+  (pb1 has `infoset_merge` 0; with 3.16's merging the observation row would split the worlds the same way.)
+* **The search**: `decision_tag` (`az/mod.rs:1374`, `1 + DecisionKind`) is part of a node's signature (zero-core
+  `tree.rs` `node_matches`), so the two worlds went to different P0 nodes under equal keys - a split by P0's hidden hand
+  like a split by its legal actions, which the search makes anyway; tree reuse follows another seat's answers only by
+  `answer_obs`, which observes `Priority`'s `PASS` alone, so it never followed the `ActivateMana` side.
+* Every commit without 147.8 has it: `main` (267ae603, e076d8f3) and the branches cut from it, and every run's pinned
+  worktree (`mtg-zero-wt/run-*`: none contains 123d80b9), pb1's among them.
+
+**The fix is 147.8** (lane F, `fix/low-sev` 123d80b9, merged into `integrate/fable-1112` before 288136d7): with no source
+left, the one-option `ActivateMana` (`PASS`) is asked, never skipped; the single-option rule (`flow.rs:343`) answers it
+with a `KEY_AUTO` (kind `ActivateMana`, action `PASS`; ENGINE.md 10), so the world back at `Priority` has one more key
+and the walk's worlds with different kinds never have equal keys. No new engine change was needed on the integration.
+
+**Proof.**
+* On 288136d7 (this branch's base, unchanged code) default seed 2122 and interactions seeds 2031 and 13518 pass the
+  walk (`FUZZ_FIRST=<s> FUZZ_GAMES=1`, `ok`).
+* A/B on the failing commit: 3ca4fb2d alone fails 2122 and 2031 exactly as reported (lane B's `s2122i.log`,
+  `s2031i.log`); 3ca4fb2d with only 123d80b9's `activate.rs` hunk applied passes 2122, 2031 and 13518 - the same games
+  (36 walks / 188 states for 2122, 16 / 55 for 2031, as on 288136d7), so 147.8 alone is the difference
+  (`E:\mtg-zero-scratch\fable-fix\dkind\ab_*.log`).
+* The hand-made scenario fails without 147.8 (the hunk reverted: "the end of the activations is keyed: []", equal keys)
+  and passes with it.
+
+**Tests** (regressions; no engine code changed):
+* `engine/src/activate.rs` `cr_605_3a_the_end_of_mana_activations_is_keyed_whatever_the_hidden_hand_holds`: P0 holds a
+  hidden Street Wraith, its library Wraiths and Simian Spirit Guides, a Taiga on the battlefield; P0 activates mana
+  abilities and taps the Taiga (the checkpoint: its colour). P1's worlds (`determinize`, the walk's) hold a Guide or a
+  Wraith in P0's hand: after the same answer both offer exactly `PASS` and the slot's ability, kinds `ActivateMana` /
+  `Priority`, different views - and the keys differ by exactly the Wraith world's `KEY_AUTO` (`ActivateMana`, `PASS`);
+  the Guide's world then ends with its own `PASS`, back at priority with the Guide offered.
+* `engine/tests/fuzz.rs` `activate_mana_end_is_keyed_interactions_seeds`: interactions games 2031 and 13518 with every
+  check of `play` (interactions pool only), beside 147.8's `activate_mana_end_is_keyed_default_seed_2122`.
+
+**Left as it is (a design point, not changed here).** 147.8 separates the worlds by a key rather than making them
+identical. The keyed auto-answer is public in the engine's model (ENGINE.md 10: every single-option decision is keyed,
+because its single option may depend on hidden cards), while under the rules P1 cannot see that P0 has no Spirit Guide
+left; and the `ActivateMana` mode itself is the engine's sequencing, not a game state (CR 605.3b: P0 simply keeps
+priority). Making the worlds identical for P1 would mean hiding the mode from the non-decider - another player's
+`ActivateMana` shown as `Priority` in `view_of`, the row's kind one-hot and `decision_tag`, and its forced end observed
+alike with a chosen one (as 149's `answer_obs` does for a pass of priority) - an encoding and search-core change; or
+dropping the mode (mana abilities offered at priority directly), an action-space and play change. Both are the user's
+decision and apply to the model of keyed auto-answers generally, so neither is done here.
+
+**Digests**: EQUAL (tests and docs only; the behaviour digests were not re-recorded - the integration re-records once,
+157.10).
+
+### 160.1 Checks

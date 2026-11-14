@@ -2794,6 +2794,22 @@ fn activate_mana_end_is_keyed_default_seed_2122() {
     assert!(!p.actions.is_empty());
 }
 
+/// ENGINE.md 160: the same finding in the interactions pool (`FUZZ_POOL=interactions`), games 2031 (after a
+/// `ChooseMode` of P0's: which mana ability of a permanent, inside `ActivateMana`) and 13518 (after a `ChooseMana`,
+/// Karakas's ability on the stack) - the walk's decisions `Priority` / `ActivateMana`, the hand slot's ability the same
+/// action id in both worlds. Reported on branches without 147.8 (`fix/hidden-refs` 3ca4fb2d, `fix/encoding-gate`);
+/// they pass with 147.8's keyed end. Interactions pool only (another pool's seeds are other games).
+#[test]
+fn activate_mana_end_is_keyed_interactions_seeds() {
+    if pool_mode() != PoolMode::Interactions || hidden_decks_mode() {
+        return;
+    }
+    for seed in [2031u64, 13518] {
+        let p = play(seed, true);
+        assert!(!p.actions.is_empty(), "seed {seed}");
+    }
+}
+
 /// ENGINE.md 140.10: the hidden-decklist games whose checks compared the deck's objects alone (a companion put into
 /// the hand and shuffled away traded identities with a deck card in a world: "the viewer's own cards", "the match's
 /// deck of the opponent", "the sampled deck lacks a shown ..."), replayed with every check of `play_hidden`: seed 331
