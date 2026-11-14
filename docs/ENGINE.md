@@ -32561,9 +32561,14 @@ lanes; target dirs `E:/cargo-target/mtg-zero/integrate-fable`, `E:/cargo-target/
   F). The farm's recorded game (572 actions, 152.6) no longer replays under lane F's loop rule (147.2): at its step 436
   P0 had used Lavaclaw Reaches' "{X}: +X/+0" with X = 0 at an equal state, so the completion X = 0 is withheld and the
   X decision, X = 0 alone, is answered by the engine - one decision fewer; dropping that recorded action, the game
-  diverges at step 444 (the recording casts a hand card, action 37, that is no longer offered). The test needs a game
-  that reaches 152.2's controlled search under the merged rules (a scenario test, or a seed re-derived), farm-fuzz's
-  author's call - not a replay translation (the games differ).
+  diverges at step 444 (the recording casts a hand card, action 37, that is no longer offered). **Replaced** (the
+  orchestrator's call): `cards_eoe_w4.rs::cr_722_3_a_controlled_search_keys_the_searched_library_by_place` builds
+  152.2's situation - P0 takes P1's turn (The Dominion Bracelet), casts P1's Kav Landseeker and activates its Lander;
+  at P1's search (decided by P0) P0's keys of P1's library are the library from the top, and 48 worlds of P0's (P1's
+  library dealt anew at the Lander's resolution, then the same passes) have equal keys only with the same cards in
+  the same places, then the same view. With 152.2's `eoe_w4.rs` change reverted it fails (the keys in definition
+  order; with that assertion off, "equal keys, other views"); with it, it passes. The seed's replay test and its
+  data entry are removed (nothing left to replay); `farm_fuzz_seeds` 3 passed, `cards_eoe_w4` 26.
 * (Done, 6c0e0dea: `seen: None` in dealt decks' and `dealt_integrated.rs`'s `DeckWant` literals.)
 
 ### 157.9 The canary library across farm-fuzz's pile-twin fix: the rerecord matches up to the twins' ids
