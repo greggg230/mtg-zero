@@ -99,7 +99,11 @@ pub struct Obj {
     pub blocked: bool,
     /// The attacker this creature blocks.
     pub blocking: Option<CardIdx>,
-    /// Dealt combat damage in the first-strike damage step (CR 510.4).
+    /// Had first strike or double strike as this combat's first combat
+    /// damage step began (CR 510.4: in the second step it assigns combat
+    /// damage only if it has double strike); set for every permanent on the
+    /// battlefield then, ended with the combat (511.3) or a zone change
+    /// (ENGINE.md 151.5).
     pub struck_first: bool,
     /// Bit p: player p knows the card's identity (hidden zones; ENGINE.md 10).
     pub known: u8,
@@ -490,6 +494,11 @@ pub struct Turn {
     pub after_combat: Step,
     /// The player who chose who takes the first turn (CR 103.1).
     pub chooser: PlayerId,
+    /// A creature was declared as an attacker or put onto the battlefield
+    /// attacking in this declare attackers step (CR 508.8: if none was, the
+    /// declare blockers and combat damage steps are skipped, even when the
+    /// creature has left combat since); ends with the step (ENGINE.md 151.4).
+    pub had_attackers: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -1276,6 +1285,7 @@ impl Game {
                 extra_combats: 0,
                 after_combat: Step::Main2,
                 chooser: 0,
+                had_attackers: false,
             },
             agenda: Vec::new(),
             pending: None,

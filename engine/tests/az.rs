@@ -1619,6 +1619,11 @@ fn public_states_encode_apart() {
     let seed: u64 = std::env::var("GATE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(4242);
     let live: Vec<usize> = (0..ps.len()).filter(|&k| !lim.contains(&ps[k].name)).collect();
     let combinable: Vec<usize> = live.iter().copied().filter(|&k| !COMBO_EXCLUDED.contains(&ps[k].name)).collect();
+    // ENGINE.md 151.4: CR 508.8's record (`Turn::had_attackers`, game float `g5::COMBAT_GOES_ON`)
+    // is compared with every state: the states it reaches, on layout v7 and on v6 (never vacuous).
+    let goes_on = ps.iter().position(|p| p.name == "the declare blockers step follows an attacker that left combat").expect("151.4's perturbation");
+    assert!(live.contains(&goes_on) && !combinable.contains(&goes_on));
+    let (mut goes_on_n, mut goes_on_v6) = (0usize, 0usize);
     // (layout, d1, d2) of each collision no known gap covers: count, example
     let mut unknown: BTreeMap<(u8, Vec<&str>, Vec<&str>), (usize, String)> = BTreeMap::new();
     let mut credit = vec![0usize; known.len()];
@@ -1657,6 +1662,10 @@ fn public_states_encode_apart() {
             }
             let mut b = a.clone();
             if let Some(w) = (ps[k].apply)(&mut b, &mut Rng::new(stream)) {
+                if k == goes_on {
+                    goes_on_n += 1;
+                    goes_on_v6 += v6 as usize;
+                }
                 sts.push(state(&b, vec![k], w));
             }
             // a combination: k then a partner drawn for this position, from the same stream (each
@@ -1742,7 +1751,9 @@ fn public_states_encode_apart() {
         let side = |d: &Vec<&str>| if d.is_empty() { BASE.to_string() } else { d.join(" + ") };
         println!("COLLISION {} x{n}: \"{}\" == \"{}\" | {ex}", lv(*l), side(d1), side(d2));
     }
+    println!("151.4's record (COMBAT_GOES_ON): {goes_on_n} states ({goes_on_v6} on layout v6 too), each compared with every state");
     assert_eq!(panics, 0, "a combination of perturbations panicked");
+    assert!(goes_on_n > 0 && goes_on_v6 > 0, "151.4's record reached no state (v7 {goes_on_n}, v6 {goes_on_v6})");
     assert!(unknown.is_empty(), "{} collisions no known gap covers (ENGINE.md 142)", unknown.len());
     if std::env::var("GATE_SEED").is_err() && scale(1) == 1 {
         let stale: Vec<&str> = known.iter().zip(&credit).filter(|(_, &n)| n == 0).map(|(k, _)| k.name).collect();

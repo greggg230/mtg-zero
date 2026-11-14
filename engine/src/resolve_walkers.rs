@@ -279,6 +279,7 @@ impl Game {
                     };
                     if in_combat && dest_ok && self.is_creature(c) {
                         self.objs[c.i()].attacking = true;
+                        self.entered_attacking(c);
                         self.objs[c.i()].attacks = f.attack_as.flatten();
                         self.note(|g| format!("{} enters attacking", g.name(c)));
                     }

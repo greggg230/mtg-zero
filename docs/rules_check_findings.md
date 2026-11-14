@@ -125,14 +125,16 @@ minutes each), no rules check violated; at that rate the other ~19,500 seeds wou
 ## STATUS (2026-11-13; branch `fuzz-invariants`, from main 267ae603; nothing pushed or merged)
 
 (Integration, `integrate/fable-1112`, ENGINE.md 157: F1-F3 are fixed by `fix/rules-f1-f5` (ENGINE.md 151); their repro
-tests here run, no longer `#[ignore]`d. F4 and F5 stay ignored until `fix/rules-f4-f5` lands.)
+tests here run, no longer `#[ignore]`d. F4 and F5 are fixed by `fix/rules-f4-f5` (ENGINE.md 151.4-151.5), brought onto
+the integration as `fix/rules-f4-f5-int` (151.8): their repro tests run too; none of the five is ignored now.)
 
 **Done** (`docs/ENGINE.md` 150 documents all of it).
 * `engine/src/rules_check.rs` (`pub mod rules_check`, never called by the engine: zero cost in release):
   `RulesCheck` (per game: `new(&g)`, `step(&g)` after every apply, `forced_chance(&g)` before a transition that
   replays forced chance outcomes; stops after its first violation), `MatchCheck`, `check_state`, `DraftCheck`,
   `Stats`. The invariants and what is left out: ENGINE.md 150.2-150.3.
-* 28 unit tests (crafted violations caught, legal look-alikes pass) + 5 ignored repro tests (F1-F5).
+* 28 unit tests (crafted violations caught, legal look-alikes pass) + 5 repro tests (F1-F5; ignored on this branch,
+  running since their fixes: F1-F3 ENGINE.md 151.1-151.3, F4-F5 151.4-151.5).
 * Wiring: `engine/tests/fuzz.rs`, `engine/tests/draft.rs` (ENGINE.md 150.5).
 * The chance-walk false positives (108.1 forced outcomes, 500.7 at a Time Vault choice) fixed in b57f5174
   (ENGINE.md 150.4); `FUZZ_CHANCE=20` clean over nine pools.

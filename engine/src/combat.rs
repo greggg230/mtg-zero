@@ -182,6 +182,9 @@ impl Game {
                     let r = self.obj_ref(c);
                     self.players[ap as usize].attacked_with.push(r);
                 }
+                if !attackers.is_empty() {
+                    self.turn.had_attackers = true; // CR 508.8
+                }
                 // CR 508.1m: abilities that trigger on attacking.
                 for &c in &attackers {
                     let r = self.obj_ref(c);
@@ -347,8 +350,25 @@ impl Game {
         })
     }
 
-    /// Does `c` deal combat damage in this damage step (CR 510.4, 702.4b,
-    /// 702.7b)?
+    /// CR 510.4: as the first combat damage step begins, note which
+    /// permanents have first strike or double strike then (`struck_first`):
+    /// in the second step only those that had neither, and those that have
+    /// double strike, assign combat damage - a first striker that assigned
+    /// none in the first step (power 0, 510.1a) included. Every permanent,
+    /// not only the attackers and blockers: the rule reads the creature's
+    /// abilities as the step began (ENGINE.md 151.5).
+    pub(crate) fn first_combat_damage_step_begins(&mut self) {
+        for i in 0..self.battlefield.len() {
+            let c = self.battlefield[i];
+            let f = self.has_kw(c, Kw::FirstStrike) || self.has_kw(c, Kw::DoubleStrike);
+            self.objs[c.i()].struck_first = f;
+        }
+    }
+
+    /// Does `c` deal combat damage in this damage step (CR 510.4, 702.4b-d,
+    /// 702.7b-c)? In the first step: it has first strike or double strike;
+    /// in the second: it has double strike, or had neither as the first step
+    /// began (no first step: it had neither).
     fn deals_damage_now(&self, c: crate::ids::CardIdx, first: bool) -> bool {
         let fs = self.has_kw(c, Kw::FirstStrike);
         let ds = self.has_kw(c, Kw::DoubleStrike);
@@ -363,6 +383,12 @@ impl Game {
     /// (decisions where the attacking player divides damage), then the
     /// blockers', then all damage at once.
     pub(crate) fn combat_damage(&mut self, first: bool, att: u32) {
+        if first && att == 0 {
+            // CR 510.4: as the first combat damage step begins (its
+            // turn-based action's first call), who may deal damage in the
+            // second step is decided.
+            self.first_combat_damage_step_begins();
+        }
         let attackers = self.attackers();
         for (k, &a) in attackers.iter().enumerate().skip(att as usize) {
             if !self.deals_damage_now(a, first) {
@@ -427,10 +453,7 @@ impl Game {
         // "is dealt damage" event per recipient: Screaming Nemesis blocked by
         // two creatures triggers once, for the total; ruling 66fc62ef).
         let mut by_recipient: Vec<(crate::ids::ObjRef, crate::num::Wide)> = Vec::new();
-        for ((&(s, t, n), src), r) in list.iter().zip(sources).zip(refs) {
-            if first {
-                self.objs[s.i()].struck_first = true;
-            }
+        for ((&(_, t, n), src), r) in list.iter().zip(sources).zip(refs) {
             // (A creature or planeswalker recipient, as the damage is dealt.)
             let to_creature = matches!(t, Target::Obj(o) if self.live(o) && self.is_creature(o.idx));
             let to_walker =
@@ -616,7 +639,19 @@ impl Game {
             }
         }
     }
-    /// CR 511.3: remove all creatures from combat.
+    /// Creature `c` was put onto the battlefield attacking (CR 508.4): in
+    /// the declare attackers step it keeps the declare blockers and combat
+    /// damage steps in the turn (508.8), even if it leaves combat before the
+    /// step ends (ENGINE.md 151.4).
+    pub(crate) fn entered_attacking(&mut self, c: CardIdx) {
+        debug_assert!(self.objs[c.i()].attacking);
+        if self.turn.step == crate::game::Step::DeclareAttackers {
+            self.turn.had_attackers = true;
+        }
+    }
+
+    /// CR 511.3: remove all creatures from combat. (510.4's record ends with
+    /// the combat: a phased-out permanent's too, ENGINE.md 151.5.)
     pub(crate) fn remove_from_combat(&mut self) {
         for &c in &self.battlefield {
             let o = &mut self.objs[c.i()];
@@ -626,5 +661,109 @@ impl Game {
             o.struck_first = false;
             o.attacks = None;
         }
+        for &c in &self.w3.phased {
+            self.objs[c.i()].struck_first = false;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::db::{CardDb, Kw, Mod};
+    use crate::decision::{Choice, DecisionKind};
+    use crate::game::Step;
+    use crate::ids::Zone;
+    use crate::layers::{Affected, Effect, Until};
+    use crate::testkit::Scenario;
+
+    /// A cube creature with no keywords, statics or triggers (2/2).
+    fn vanilla() -> &'static str {
+        let db = CardDb::cube();
+        (0..db.num_cards())
+            .map(|i| db.def(i as crate::ids::DefId))
+            .find(|d| {
+                !d.token
+                    && d.front.is_none()
+                    && d.back.is_none()
+                    && db.id(&d.name).is_some()
+                    && d.is(crate::db::types::CREATURE)
+                    && !d.is(crate::db::types::PLANESWALKER)
+                    && d.keywords.0 == 0
+                    && d.statics.is_empty()
+                    && d.triggers.is_empty()
+                    && d.pt_cda.is_none()
+                    && d.power == Some(2)
+                    && d.toughness == Some(2)
+            })
+            .map(|d| d.name.as_str())
+            .expect("a vanilla 2/2 in the cube")
+    }
+
+    /// CR 510.4: in the second combat damage step deal damage only "the
+    /// remaining attackers and blockers that had neither first strike nor
+    /// double strike as the first combat damage step began, as well as the
+    /// remaining attackers and blockers that currently have double strike".
+    /// Thalia, Guardian of Thraben (2/1, first strike) attacks with its power
+    /// at 0 as the first-strike damage step begins (an effect stands in for a
+    /// -2/-0 spell), so it assigns no damage there (510.1a); pumped back
+    /// before the second step, it still deals none (the rules check's F5: the
+    /// engine read "dealt first-strike damage"; ENGINE.md 151.5).
+    #[test]
+    fn cr_510_4_a_first_striker_that_assigned_no_damage_deals_none_in_the_second_step() {
+        let name = "Thalia, Guardian of Thraben";
+        let mut g = Scenario::new(CardDb::cube())
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Island"; 5])
+            .library(1, &["Island"; 5])
+            .battlefield(0, &[name])
+            .at(Step::DeclareAttackers, 0)
+            .start();
+        let a = g.card(0, name, Zone::Battlefield);
+        assert!(g.has_kw(a, Kw::FirstStrike) && !g.has_kw(a, Kw::DoubleStrike) && g.power(a) == 2);
+        g.choose(Choice::Card(a));
+        g.pass(); // no more attackers
+        g.pass_until(|g| g.turn().step == Step::DeclareBlockers && g.kind() == Some(DecisionKind::Priority));
+        // -2/-0 until end of turn.
+        g.next_ts += 1;
+        let ts = g.next_ts;
+        let on = Affected::Obj(g.obj_ref(a));
+        g.effects.push(Effect { ts, until: Until::EndOfTurn, on, m: Mod::Pt(-2, 0), controller: 1 });
+        assert_eq!(g.power(a), 0);
+        g.pass_until(|g| g.turn().step == Step::FirstStrikeDamage && g.kind() == Some(DecisionKind::Priority));
+        assert_eq!(g.life(1), 20, "power 0: no damage assigned (510.1a)");
+        // The effect ends before the second combat damage step.
+        g.effects.retain(|e| e.ts != ts);
+        assert_eq!(g.power(a), 2);
+        g.pass_until(|g| g.turn().step == Step::EndCombat);
+        assert_eq!(g.life(1), 20, "had first strike as the first combat damage step began\n{}", g.log_lines().join("\n"));
+    }
+
+    /// CR 510.4, 702.7c: a creature that gains first strike after the first
+    /// combat damage step began had neither first strike nor double strike
+    /// then, so it deals its damage in the second step; the first striker
+    /// that dealt damage in the first step doesn't deal it again.
+    #[test]
+    fn cr_510_4_702_7c_first_strike_gained_after_the_first_step_began_deals_damage_in_the_second() {
+        let mut g = Scenario::new(CardDb::cube())
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Island"; 5])
+            .library(1, &["Island"; 5])
+            .battlefield(0, &["Thalia, Guardian of Thraben", vanilla()])
+            .at(Step::DeclareAttackers, 0)
+            .start();
+        let fs = g.card(0, "Thalia, Guardian of Thraben", Zone::Battlefield);
+        let bear = g.card(0, vanilla(), Zone::Battlefield);
+        g.choose(Choice::Card(fs));
+        g.choose(Choice::Card(bear));
+        g.pass(); // no more attackers
+        g.pass_until(|g| g.turn().step == Step::FirstStrikeDamage && g.kind() == Some(DecisionKind::Priority));
+        assert_eq!(g.life(1), 18, "only the first striker in the first step");
+        // The Bears gain first strike after the first step began.
+        g.next_ts += 1;
+        let ts = g.next_ts;
+        let on = Affected::Obj(g.obj_ref(bear));
+        g.effects.push(Effect { ts, until: Until::EndOfTurn, on, m: Mod::Keywords(crate::db::KwSet(1 << Kw::FirstStrike as u32)), controller: 0 });
+        g.pass_until(|g| g.turn().step == Step::EndCombat);
+        assert_eq!(g.life(1), 16, "the Bears in the second step, not Thalia\n{}", g.log_lines().join("\n"));
     }
 }

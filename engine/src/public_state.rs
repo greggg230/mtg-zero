@@ -281,7 +281,7 @@ pub fn fields() -> Vec<Field> {
         attacking: Public "CR 506.4",
         blocked: Public "CR 509.1h",
         blocking: Public "the attacker it blocks",
-        struck_first: Public "dealt first-strike combat damage (510.4)",
+        struck_first: Public "had first strike or double strike as this combat's first combat damage step began (CR 510.4; ENGINE.md 151.5)",
         known: Public "which players know a hidden card: who knows is public (a look, a reveal, a put-back, a shuffle are seen; ENGINE.md 72), what it is is not (leak-tested, ENGINE.md 10)",
         attached: Public "what it is attached to (CR 301.5, 303.4)",
         evoked: Public "it entered evoked (CR 702.74a)",
@@ -305,6 +305,7 @@ pub fn fields() -> Vec<Field> {
         extra_combats: Public "additional combat phases to follow (CR 500.8)",
         after_combat: Public "where the turn goes on after combat phases added to another phase (CR 500.8)",
         chooser: Public "who chose who plays first (CR 103.1)",
+        had_attackers: Public "a creature was declared as an attacker or put onto the battlefield attacking in this declare attackers step (CR 508.8; ENGINE.md 151.4)",
     });
     classify!(v, StackItem {
         id: Derived "an internal name (the stack's order is its slots)",
@@ -1343,6 +1344,15 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.turn.normal = opp(a.g.turn.normal);
             Some(format!("P{}", a.g.turn.normal))
         }),
+        // (While a creature is attacking, the record adds nothing: it was
+        // declared or put onto the battlefield attacking.)
+        p!("the declare blockers step follows an attacker that left combat", "Turn.had_attackers", |a, _| {
+            if a.g.battlefield.iter().any(|&c| a.g.objs[c.i()].attacking) {
+                return None;
+            }
+            a.g.turn.had_attackers = !a.g.turn.had_attackers;
+            Some(format!("{}", a.g.turn.had_attackers))
+        }),
         p!("an additional combat phase follows", "Turn.extra_combats", |a, _| {
             a.g.turn.extra_combats += 1;
             Some(format!("{}", a.g.turn.extra_combats))
@@ -1697,7 +1707,7 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.objs[c.i()].blocking = Some(x);
             Some(format!("{} blocks {}", a.g.name(c), a.g.name(x)))
         }),
-        p!("a creature dealt first-strike damage", "Obj.struck_first", |a, r| {
+        p!("a creature had first strike as the first combat damage step began", "Obj.struck_first", |a, r| {
             let c = pick(&slot_creatures(&a.g), r)?;
             flip(&mut a.g.objs[c.i()].struck_first).map(|s| format!("{}: {s}", a.g.name(c)))
         }),
@@ -2771,7 +2781,7 @@ pub fn covered<'s>(gaps: &[KnownGap], layout: u8, a: &[&'s str], b: &[&'s str]) 
 /// (an effect, a mark or a link of an object that left; a "this turn" fact of another turn; the
 /// effect it added ended) while it stays in the view. Each is still compared alone with every
 /// state.
-pub const COMBO_EXCLUDED: [&str; 20] = [
+pub const COMBO_EXCLUDED: [&str; 21] = [
     "a permanent leaves the battlefield",
     "a graveyard card is exiled",
     "an exiled card is turned face down",
@@ -2797,6 +2807,11 @@ pub const COMBO_EXCLUDED: [&str; 20] = [
     // position's partners are as before.)
     "the top library card is its owner's search's find",
     "a search's find is no longer told apart",
+    // (ENGINE.md 151.4: CR 508.8's record. A partner that makes a creature attack makes it inert -
+    // while one is attacking, its attacking flag says the steps follow - while the view keeps it; and
+    // added after the partner draws were set, so every position's partners are as before. Compared
+    // alone with every state: `public_states_encode_apart` checks that it reaches states.)
+    "the declare blockers step follows an attacker that left combat",
 ];
 
 /// The known gaps (`KnownGap`; ENGINE.md 142.2, 142.7): what the pairwise gate finds. Layout v7 has

@@ -759,6 +759,7 @@ impl Game {
                 for &c in &made {
                     if in_combat && f.controller == self.turn.active && self.objs[c.i()].zone == Zone::Battlefield {
                         self.objs[c.i()].attacking = true;
+                        self.entered_attacking(c);
                     }
                 }
                 // CR 508.4: their controller chooses what each attacks (asked
@@ -1570,6 +1571,7 @@ impl Game {
                         );
                         if in_combat && p == self.turn.active && self.is_creature(c) {
                             self.objs[c.i()].attacking = true;
+                            self.entered_attacking(c);
                             // CR 508.4: its controller chooses what it attacks.
                             self.agenda.push(Task::AttackTarget { card: c });
                         }
