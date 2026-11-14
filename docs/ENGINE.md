@@ -33472,7 +33472,8 @@ forced activation (one source) shows only as the activation it is.
   player's forced answers (`KEY_AUTO`) and the worlds show the viewer the same (`view_of`), the key told apart worlds
   the viewer cannot tell apart. If one of those keys is an `ActivateMana`'s (its kind in the payload, or `HIDDEN`), the
   walk fails ("keyed apart only by the other player's forced answers, one of its mana activations with priority among
-  them"). Other such keys are counted by decision kind and printed (see 160.4). Verified: with the key suppression
+  them"). Other such keys are counted by decision kind and printed (see 160.4; since 161.2 every kind fails, with the
+  legal actions in the condition too). Verified: with the key suppression
   disabled, default seed 2122 (the forced end) and seed 12 (a lone Spirit Guide's activation keyed by its hand slot)
   fail it. The matches' walk (`check_match_information_set`) also compares the worlds' decision classes
   (`decision_tag`).
@@ -33498,6 +33499,9 @@ forced activation (one source) shows only as the activation it is.
   13518 (the same games).
 
 ### 160.4 Left open: other forced answers naming a hidden card's slot
+
+**Closed by 161** (2026-11-14): another player's forced answer naming a hidden card's place is keyed with the place
+masked in the observer's worlds (`Game::forced_answer_seen`), and the walk fails every such split.
 
 The extended walk counts three more decision kinds whose forced answer alone keyed apart two worlds showing the viewer
 the same (keys, the 20k runs of 160.5): **`ExileCost`** (kind 29; default 26, delver 56, interactions 114) - an "exile
@@ -33547,3 +33551,156 @@ Checks (throttled, on 19474ea1; the extended check and no `FUZZ_SKIP` in every f
   19474ea1f207 in 891s - pytest: 1 failed, 0 error(s), 389 passed`**: the one failure is
   `test_canary_library.py::test_every_spot_reaches_its_recorded_position`, the same five spots 157.9 lists (the
   canary rerecord pending in 157.10), none new.
+
+## 161. Another player's forced answers keyed as the observer sees them: a hidden card's place masked (branch `fix/forced-answer-keys`, 2026-11-14)
+
+**The report.** 160's extended open-decklist walk (160.2, `check_information_set` in `engine/tests/fuzz.rs`) counted,
+without failing, three more decision kinds whose forced answer alone keyed apart two worlds of P1's that showed P1 the
+same (160.4; 20k runs): `ExileCost` (default 26, delver 56, interactions 114), `PayMana` (default 38, interactions
+22), `ChooseHandCard` (default 4). A 3,000-game default run (296a45b8's engine, the walk printing each case) shows what
+they are: the same forced answer at two different hidden places. Seeds 318 and 692: Force of Will's "exile a blue card
+from your hand" with one other blue card, the one option, keyed `ExileCost << 16 | HAND + k` with k 2 / 4 and 2 / 3 in
+the two worlds (the same card exiled, the same reveal); seeds 2456 and 2704: a payment's lone source, a Simian Spirit
+Guide's ability by its hand slot, `HAND_ABILITY` + 2 / + 1 and + 4 / + 3. A hand slot's index counts the hand's cards
+sorted before it (`hand_slot_order_in`), so it reads the other hidden cards: the search's signature (the keys) split
+P1's nodes by P0's hidden hand - the leak the user's standing rule refuses, and the principle of their decision on 160
+(the other player doesn't see what the rules hide from it) covers it.
+
+**What the other player may observe (the rules).** A hand is a hidden zone, a library too (CR 400.2): a card's place
+there is nothing anyone but its owner sees. A cost's payment is seen as it happens (CR 601.2h, 118.9; an exiled card is
+face up, 406.3; a discarded card goes to the public graveyard, 701.9a; a Spirit Guide's activation exiles it from the
+hand), so the card that moves, once public, is seen. Which slot held it is not, and neither is whether the player had
+another card to choose: a forced answer and a chosen one are the same action to the other player.
+
+### 161.1 The design: the forced answer as the observer sees it
+
+`flow.rs` `ask_options` keys a forced answer (`auto_single`: one option, answered by the engine; `KEY_AUTO`, payload
+`kind << 16 | action`, ENGINE.md 10). In the worlds of an observer who is neither the decision's player nor its decider
+(`Game::observer`, set by `determinize` for the tree's viewer; CR 722.4: a controller sees the controlled player's
+hand), the payload is now `Game::forced_answer_seen(kind, action)` - 160's `ActivateMana` rule generalized to every
+kind:
+
+* **`ActivateMana`** (160, unchanged): its end has no key (no event: the player keeps priority, as after a chosen
+  `PASS`), a lone source's activation is keyed `HIDDEN` (the mode's kind and a hand source's slot masked).
+* **An action naming a card by a place the observer doesn't see** (`Game::names_unseen_place`): the kind with the
+  action masked, `kind << 16 | MASKED_ACTION` (`hidden.rs`; 0xFFFF, no action id is that large - `NUM_ACTIONS` = 1024,
+  checked at compile time). The places: the decider's hand slots (`HAND`) and its hand cards' abilities
+  (`HAND_ABILITY`), in every kind; the `LIBRARY` ids of the decisions whose list is a hidden one's - a library sorted
+  by definition (`SearchLibrary`, `NameCard`), a looked-at or revealed pile sorted by definition (`PutOnTop`,
+  `PutOnBottom`, `PutInGraveyard`, `PutInHand`, `PutOntoBattlefield`; a revealed pile is masked too, which loses
+  nothing: equal keys before it mean an equal revealed pile, so the same forced answer), the sideboard
+  (`RevealCompanion`, `Sideboard`). The card itself, once it goes public (exiled, discarded, revealed), reaches the
+  observer by its move's own keys (`KEY_REVEAL`; `KEY_TOLD` for a told-apart twin, 156.3) and the public state, as
+  before.
+* **Any other answer**: as it is. Its action names a public object or value - a pass of priority (`AUTO_PASS`, which
+  zero-core's tree reuse also reads as the chosen pass, 149), a permanent, a stack object, a waiting trigger, a
+  graveyard list's slot (65.10), another player's revealed hand's slot (`ChooseDiscard`: the observer's own hand), an
+  exile index, a number, a player. Masking those would merge worlds the observer tells apart: no node of its tree shows
+  a forced answer, so two worlds whose forced answers differ publicly must stay keyed apart.
+
+**Why the masked answer keeps a key** (a chosen answer has none): a chosen answer is an edge of the player's node in the
+observer's tree, a forced one has no node. That structural difference stays whatever the key is (160.4's last
+paragraph: only answering no single option in the engine removes it), and a key saying only "an answer of this kind"
+adds nothing to it - the kind is public (the cost being paid, the pile being put away). Keeping it keeps a world's keys
+one for one with the live game's (zero-core's forced outcomes consume queued keys in order, `force_chance`). 160's
+lone-source activation (`HIDDEN`) is the same choice.
+
+**What a key can't fix (unchanged, as 160.4's last paragraph).** The per-decision tree holds each decision of the
+other player as a node signed by its legal actions, which may read that player's hidden hand (a Spirit Guide offered
+as a payment's source, a castable card's slot), and a forced answer has no node where a chosen one has. Removing that
+is a search-structure question (answering no single option in the engine, or signing the other player's nodes by what
+the observer sees), not a key's.
+
+**What doesn't change.** The live game (no observer) and the decider's own worlds keep the slot (P0's own tree splits by
+P0's own hand, which P0 sees). zero-core's `key_obs` (149) already reads another seat's non-pass `KEY_AUTO` as `Opaque`,
+whatever its payload. No layout, encoding or zero-core change (keys are no network input).
+
+**Every kind audited** (the actions a forced answer can carry; every forced answer is `ask_options`' - `ask`,
+`ask_ranges`' pages and forced digits go through it; the match's sideboarding and deck choice don't, and emit no
+`KEY_AUTO`):
+
+| kind | a forced answer's action | as the other player sees it |
+|---|---|---|
+| `Priority` | `PASS` (always offered) | as it is (`AUTO_PASS`) |
+| `ActivateMana` | `PASS`; a source | no key; `HIDDEN` (160) |
+| `MulliganBottom`, `ChooseHandCard`, `Discard`, `DiscardCost`, `ExileCost` | `HAND` + slot | **masked** |
+| `PayMana` | a permanent's mana ability (`ACTIVATE`, `MY_PERM`); a hand card's (`HAND_ABILITY`) | as it is; **masked** |
+| `SearchLibrary`, `PutOnTop`, `PutOnBottom`, `PutInGraveyard`, `PutInHand`, `PutOntoBattlefield` | `LIBRARY` + a slot of a library or pile sorted by definition | **masked** |
+| `NameCard`, `RevealCompanion` | `LIBRARY` + a slot of a library / sideboard list | **masked** (never forced today: `PASS` is always offered) |
+| `Target`, `NewTarget`, `AttackTarget` | a permanent, a stack object, a player, a graveyard list's slot | as it is |
+| `Sacrifice`, `BounceCost`, `LegendRule`, `ChoosePermanent`, `DeclareAttackers`, `DeclareBlockers` | a permanent (or its mana ability first) | as it is |
+| `OrderTriggers` | a waiting trigger | as it is |
+| `ChooseGraveyardCard`, `ChooseDiscard`, `ChooseExiled` | a graveyard list's slot; the observer's revealed hand's; an exile index | as it is |
+| `Mulligan`, `YesNo`, `PlayDraw` | `PASS` / `YES` / a player | as it is |
+| `AssignDamage`, `DivideDamage`, `PayPhyrexian`, `ChooseMana`, `ChooseCost`, `ChooseAltCost`, `ChooseMode`, `ChooseColor`, `ChooseFace`, `ChooseRoom`, `ChooseReplacement`, `ChooseRoute`, `PayPool`, `ChooseColorsSpent`, `CostPart` | a number (shown by the answer's result, or announced) | as it is |
+| `Sideboard`, `SideboardCount`, `ChooseDeck` | the match's decisions, never `ask_options`' | no `KEY_AUTO` (`Sideboard`'s `LIBRARY` listed as masked should one be) |
+
+### 161.2 The walk's check fails on every kind
+
+The open-decklist walk's forced-answer check (160.2) is `forced_answer_split` now: two worlds whose keys of one step
+differ only by the other player's `KEY_AUTO`s while the rest of zero-core's child signature is equal and they show the
+viewer the same (neither over, the same next decider and the same legal actions, equal views) fail the walk, whatever
+the kind; 160's counter (`IS_FORCED_UNSEEN`) and its print are gone. The legal actions are new in the condition (160's
+had the decider and the views): the first 20k default run of this branch failed seed 9273 on a forced-vs-chosen pair
+whose next legal actions differ - a payment's one source, a land (`ACTIVATE` 548, public), forced in one world while
+the other world offers P1 that land and a Spirit Guide in hand (548, `HAND_ABILITY` 917); after the forced land the
+first world asks the next source (`PASS`, 552). Those worlds are split by P1's options themselves, which read P1's hidden
+hand - the walk's own rule allows it ("another player's options may depend on its hidden cards ... the search keeps
+such worlds in different nodes") - so no key can merge them, and the forced land's key is public. 160's count of
+`PayMana` included such pairs. The matches'
+walk (`check_match_information_set`) and the hidden-decklist walk (`check_hidden_information_set`) run the same check
+within one game (both returned silently on any key difference before). Verified with the masking disabled
+(`names_unseen_place` read as false): `forced_answers_naming_a_hidden_place_are_masked_default_seeds` fails at seed 318
+step 1 ("keyed apart only by the other player's forced answers (["0 kind 29 action 38", ...] / ["0 kind 29 action
+40", ...])"), and the hand-made test below at its masked-key assertion (slots 37 / 38).
+
+### 161.3 Tests
+
+* `activate.rs` `cr_118_9_a_forced_exile_cost_shows_the_other_player_the_card_not_its_slot`: P1 casts Lightning Bolt at
+  P0, who holds a Force of Will P1 knows and three cards P1 doesn't, no land (only the alternative cost, one target).
+  The live game and P0's own worlds key the forced exile with its hand slot. Among P1's worlds (`determinize`), two
+  with exactly one other blue card - the same card at different hand slots - give equal keys (the masked
+  `ExileCost << 16 | MASKED_ACTION` in both), the exiled card's `KEY_REVEAL`, equal views and layout v7 rows; a world
+  with two blue definitions asks P0 `ExileCost` (its answer, chosen, has no key; the exile is revealed).
+* `activate.rs` `forced_answers_seen_by_the_other_player`: `forced_answer_seen` by kind and action (the table above:
+  `ActivateMana`; hand slots and abilities and hidden lists' `LIBRARY` ids masked; graveyard lists, revealed hands,
+  permanents, stack objects, numbers as they are).
+* `tests/fuzz.rs` `forced_answers_naming_a_hidden_place_are_masked_default_seeds` (318, 692, 2456, 2704) with every
+  check of `play`; 160's tests unchanged and passing (`cr_605_3a_...`, `activate_mana_end_is_keyed_*`).
+
+### 161.4 Digests and checks
+
+Digests (behaviour changes: the keys in another player's worlds - every determinized clone the digests play, and the
+search's worlds; the live game's keys are unchanged), re-recorded with `DIGEST_WRITE=1` on this branch - old = 296a45b8's
+code (computed in a checkout of it; its recorded files predate the integration's final re-record, 157.10), new = this
+branch:
+
+| digest | old (296a45b8) | new |
+|---|---|---|
+| full (`digests.txt`) | d0ef64a36be0e4b1 | 8f71ccb0d89031a6 |
+| `DIGEST_ENCODING=0` | e6ac9307fcaf64c6 | 41e27319acdae5b5 |
+| constructed (`digests_constructed.txt`) | 6445f30de51a466c | e1177d609d6c1aee |
+| EoE (`digests_eoe.txt`) | 2efe956d589840ce | 2efe956d589840ce (equal; file re-recorded) |
+| driver (`digests_driver.txt`) | 6f7b863096e47dcd | 6f7b863096e47dcd (equal; file re-recorded) |
+| dealt (`digests_dealt.txt`) | e802d9df793c9993 | e802d9df793c9993 (equal; file re-recorded) |
+
+Checks (throttled; the failing forced-answer check in every walk and no `FUZZ_SKIP` in every fuzz run; the engine at
+5775dfc1, this section's commit adds docs and the re-recorded digest files only):
+* full engine suite (`cargo test --release -p engine --no-fail-fast`): **2,660 passed, 0 failed, 35 ignored**;
+* 20k fuzz, default pool: `test result: ok. 9 passed; 0 failed` (20,000 games, 0 aborted; 438,582 open-decklist walks,
+  2,416,070 states compared; 1,000 matches, 5,394 match walks, 37,357 states). The first 20k run (without the legal
+  actions in the condition) failed seed 9273 (161.2);
+* 20k fuzz, `FUZZ_POOL=delver`: `test result: ok. 9 passed; 0 failed` (382,870 walks, 1,124,200 states; 5,235 match
+  walks);
+* 20k fuzz, `FUZZ_POOL=interactions`: `test result: ok. 9 passed; 0 failed` (468,658 walks, 2,675,736 states; 1 game
+  aborted by its bound; 6,217 match walks);
+* 20k fuzz, `FUZZ_POOL=cross`: `test result: FAILED. 8 passed; 1 failed` - the 20,000 games pass (235,262 walks, 734,938
+  states); `fuzz_random_matches` fails at post-sideboard match 98: `hidden_decks.rs:1734` "the constructed prior: no
+  deck holds what the viewer knows (the real deck does)" - **the same on 296a45b8** (`FUZZ_POOL=cross FUZZ_FIRST=98
+  FUZZ_MATCHES=1`, a checkout of it), not this change's (the deck posteriors' draw, 140 / 147.5). The matches after it,
+  `FUZZ_FIRST=99 FUZZ_MATCHES=901`: `test result: ok. 1 passed` (901 matches, 3,281 match walks, 15,394 states);
+* 2,000 games `FUZZ_HIDDEN_DECKS=1`: `test result: ok. 9 passed; 0 failed` (173,368 hidden-decklist steps);
+* `pytest tests/test_mtg_az.py` (`MTGZ_WIDEN_CHECKPOINT` = lane B's `anchor_v6.pt`): **21 passed**;
+* `python tools/gate.py encoding --no-mac --expect-digest 8f71ccb0d89031a6 --expect-digest0 41e27319acdae5b5
+  --checkpoint <lane 160's forked iter_0000.pt> --checkpoint-spec <the Delver best-of-three spec>`: on the commit with
+  this section (its result follows in the next commit).
