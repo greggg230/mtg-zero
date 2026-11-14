@@ -29402,9 +29402,19 @@ payment decision until a copy completes. With a Food to choose among the artifac
 themselves for mana (the Scion; Inventors' Fair), a payment that can't complete explores the whole tree. That tree is
 bounded only by `ORACLE_NODES` = 2,000,000 copies, each a whole `Game`: minutes, then a loud panic. (Not confirmed with
 a node count.) Lane E's Warping Wail cost fix ({1}{C} was lowered as generic 2) is not the cause: the spell had
-resolved, and the search is on Ragost's ability. Exact remedies: memoize the payment states the search has visited
-(keyed by the state itself, not a hash, to stay exact), or prune equivalent options (Foods alike in every respect).
-Either is a change to the payment search, and this branch doesn't make it.
+resolved, and the search is on Ragost's ability. Not fixed here. The first step is a node count, on a scenario
+built from the world's board (Ragost, P0's artifacts, the Scion, P0's lands). Then three exact options, none of
+which moves the digests (a search's answer is unchanged, only its time):
+(a) **independence**: extend `order_free_with` to prove that no order matters for this shape: the Food candidates,
+the mana sources and the {T} source pairwise disjoint, and no part's payment changing what another reads. The
+cheap path (`cost_payable_with`) then decides. This is the smallest change, if the trace shows the order search
+was entered only because of a conservative "may change" (Ragost's type-granting static as the reader);
+(b) **memoization**: remember the states the search has visited, compared by the state itself (a canonical
+serialization, not a 64-bit hash, to stay exact). Permutations then collapse to sets: a medium change in
+`cost_order.rs`, with memory per search;
+(c) **symmetry**: offer one of a set of permanents identical in every respect the payment can read (definition,
+controller, tapped, counters, damage, attachments, marks, not referenced by any stack item or link). This needs a
+proof per reader, so it carries the most risk.
 
 ### 152.5 The two older failures (todo 2f1bff79)
 
@@ -29457,7 +29467,21 @@ They were found while the fuzz loops moved (114.1). The runs there were `--relea
 * **Digests** (re-recorded on purpose: four of the 2,500 games play differently, random games 880, 1051, 1612 and
   1981): full **438164c0429d7fa3 -> e5675fc9d4da7a20**, `DIGEST_ENCODING=0` **a0062bb5569e06d3 -> b255e81fe5402cf3**.
   The bag squash leaves them so: no digest game reaches 512 objects.
-* **Engine suite** (release, before the bag squash): 161 test binaries ok, 0 failed (2,530 s).
-* **`FUZZ_GAMES=20000`** (release, three pools at once in one slot): delver passed (2,231 s), eoe in the report. The
-  exponential pool was stopped. Its seeds can take CPU-hours each, and seed 2095, inside the range, is one of 152.5's
-  bound failures. It was checked by single seeds instead (the report).
+* **Engine suite** (release, before the bag squash): 161 test binaries ok, 0 failed (2,530 s). On cef5aae0, with the
+  squash: `farm_fuzz_seeds` 4 passed, `az` 52 and `v7_tails` 14 passed, and both digests equal the recorded ones
+  (the squash moves no digest game).
+* **`FUZZ_GAMES=20000`** (release, three pools at once in one slot): delver passed (2,231 s), eoe passed (9,150 s).
+  The exponential pool was stopped. Its seeds can take CPU-hours each, and seed 2095, inside the range, is one of
+  152.5's bound failures. Single seeds instead, release, on cef5aae0: 2095 passes (75 s). 10000021 no longer fails at
+  step 529 and was still playing at its 30-minute limit.
+* **Gate** (`python tools/gate.py engine --no-mac --tested-sha cef5aae0 --expect-digest e5675fc9d4da7a20
+  --expect-digest0 b255e81fe5402cf3`): build, both digests, `az`, `limits` and `hidden` pass. Pytest fails one test:
+  `tests/test_canary_library.py::test_every_spot_reaches_its_recorded_position`. Five of the Delver canary library's
+  60 spots no longer reach their recorded positions: `daze_payable_pool:...:66:73`, `land_drop_tapout:...:178:161`,
+  `play:20261101-215939-adeb97:None:174` and `:178`, `fourth_land_empty_hand:...:233:226`. The exported state
+  compared there holds the zones with card ids. 152.1 changes which of two twins a pile pick moves, so the same
+  games end with the twins' ids in other places. (152.3 can't be ruled out without a trace.) By the library's rule
+  (ENGINE.md 100.8) a rules change bumps `RULES_EPOCH` (tools/position_lab.py) and re-records it
+  (`tools/delver_rerecord.py rerecord --old-engine <the recording checkout>`). Its state match includes ids, so
+  these five spots would be dropped, not rebuilt, unless the match learns that interchangeable twins' ids don't
+  count. This branch leaves that choice to the integration, where the other lanes' rules changes meet it too.
