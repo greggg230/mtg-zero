@@ -725,6 +725,97 @@ fn cr_722_4_the_controller_makes_the_controlled_players_decisions() {
     assert_eq!(g.to_move(), Some(1));
 }
 
+/// ENGINE.md 152.2 (the farm's EoE fuzz seed 100019080; this scenario replaced its game's replay at the
+/// integration, 157): in a turn P0 controls (CR 722.1) P1's library search (701.19) shows P0 what P1 sees (722.3) -
+/// the whole library, each card where it is. The keys of what P0 learns follow the places, P1's library from the top
+/// (`Game::sync_controller_view`): two worlds of P0's whose libraries hold the same cards in other orders are told
+/// apart by them, and worlds with equal keys (a twin for a twin) show P0 the same view. Before 152.2 they came in
+/// definition order: equal keys in every world, different views.
+#[test]
+fn cr_722_3_a_controlled_search_keys_the_searched_library_by_place() {
+    use engine::hidden::{key_kind, key_payload, key_player, KEY_LOOK};
+    // P1's library: the W4 Elf it draws, then Forest, W4 Bear, Forest (twins), Mountain.
+    let mut g = engine::testkit::Scenario::new(db())
+        .spec(|s| {
+            s.auto_single = false;
+            s.log = true;
+        })
+        .library(0, &["Island"; 6])
+        .library(1, &["W4 Elf", "Forest", "W4 Bear", "Forest", "Mountain"])
+        .battlefield(0, &["The Dominion Bracelet", "W4 Wurm"])
+        .battlefield(0, &["Island"; 9])
+        .battlefield(1, &["Mountain"; 6])
+        .hand(1, &["Kav Landseeker"])
+        .at(Step::Main1, 0)
+        .start();
+    let br = bf(&g, 0, "The Dominion Bracelet");
+    let wurm = bf(&g, 0, "W4 Wurm");
+    let tw = g.tgt(wurm);
+    activate(&mut g, br, 0, &[tw]);
+    settle(&mut g);
+    g.choose(act(wurm, 0));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(player(1));
+    pay(&mut g);
+    settle(&mut g);
+    quiet_until(&mut g, |g| g.turn().active == 1 && g.turn().step == Step::Main1 && at_priority(g));
+    assert_eq!((g.turn_controller(), g.to_move()), (Some(0), Some(0)), "P0 controls P1's turn");
+    // P0 casts P1's Kav Landseeker (its Lander) and activates the Lander: its search waits on the stack.
+    cast(&mut g, 1, "Kav Landseeker", &[]);
+    settle(&mut g);
+    let lander = g.permanents_of(1).find(|&c| g.name(c) == "Lander").expect("a Lander token");
+    g.choose(act(lander, 0));
+    pay(&mut g);
+    assert!(at_priority(&g) && !g.stack().is_empty(), "the search on the stack\n{}", log(&g));
+    assert_eq!(g.player(1).library.len(), 4);
+    assert!(g.player(1).library.iter().all(|&c| !g.knows(0, c)), "P0 doesn't know P1's library yet");
+    // The passes until P1's search is asked (decided by P0): their keys.
+    let to_search = |g: &mut Game| -> Vec<u64> {
+        let mut keys = Vec::new();
+        for _ in 0..8 {
+            if g.kind() == Some(DecisionKind::SearchLibrary) {
+                return keys;
+            }
+            assert!(at_priority(g), "{:?}\n{}", g.options_desc(), log(g));
+            g.apply(engine::decision::act::PASS, &mut keys).unwrap();
+        }
+        panic!("no search\n{}", log(g));
+    };
+    let lib_of = |g: &Game| -> Vec<u16> { g.player(1).library.iter().rev().map(|&c| g.obj(c).def).collect() };
+    // The real game: P0 learns P1's library, keyed card by card from the top.
+    let mut real = g.clone();
+    let keys = to_search(&mut real);
+    let looks: Vec<u64> = keys.iter().filter(|&&k| key_kind(k) == KEY_LOOK && key_player(k) == 0).map(|&k| key_payload(k)).collect();
+    assert_eq!(looks, lib_of(&real).iter().map(|&d| d as u64).collect::<Vec<_>>(), "P0's keys of P1's library: from its top (ENGINE.md 152.2)");
+    assert!(real.player(1).library.iter().all(|&c| real.knows(0, c)), "P0 sees P1's library (CR 722.3)");
+    // P0's worlds at the Lander's resolution: P1's library dealt anew (its order hidden from P0), then the same passes.
+    let mut worlds: Vec<(Vec<u64>, Vec<u64>, Vec<u16>)> = Vec::new();
+    for s in 0..48u64 {
+        let mut w = g.clone();
+        w.determinize(0, &mut engine::rng::Rng::new(s ^ 0x722));
+        let k = to_search(&mut w);
+        worlds.push((k, w.view_of(0), lib_of(&w)));
+    }
+    let (mut equal, mut apart) = (0, 0);
+    for i in 0..worlds.len() {
+        for j in i + 1..worlds.len() {
+            let ((ki, vi, li), (kj, vj, lj)) = (&worlds[i], &worlds[j]);
+            if ki == kj {
+                assert_eq!(vi, vj, "worlds {i} and {j}: equal keys, other views of P1's library ({li:?} / {lj:?})");
+                assert_eq!(li, lj, "equal keys: the same cards in the same places");
+                equal += 1;
+            } else {
+                let (mut a, mut b) = (li.clone(), lj.clone());
+                a.sort_unstable();
+                b.sort_unstable();
+                assert_eq!(a, b, "the same cards");
+                apart += 1;
+            }
+        }
+    }
+    assert!(equal > 0 && apart > 0, "{equal} pairs of equal keys, {apart} told apart: the test saw too little");
+}
+
 /// Hidden information in a controlled turn: `determinize` for the decider
 /// (P0) keeps its view and its actions (P1's hand is known to it, CR 722.3,
 /// so never resampled); for P1 too. P1's library stays hidden from P0.

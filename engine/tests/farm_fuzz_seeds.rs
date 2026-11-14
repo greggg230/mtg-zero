@@ -7,7 +7,10 @@
 //! * 152.1 Delver seed 100834725, same keys, different views: a pick from a looked-at pile took,
 //!   among twins, the card with the lower index; worlds deal the indices to different places.
 //! * 152.2 EoE seed 100019080, same keys, different views: in a controlled turn the controller
-//!   learned the searched library card by card, keyed in definition order (its order unkeyed).
+//!   learned the searched library card by card, keyed in definition order (its order unkeyed). Its
+//!   game no longer exists under the merged rules (the loop rule, ENGINE.md 147.2, changes it at
+//!   its step 436), so the seed's replay was replaced at the integration (ENGINE.md 157) by the
+//!   scenario `cards_eoe_w4.rs::cr_722_3_a_controlled_search_keys_the_searched_library_by_place`.
 //! * 152.3 EoE seed 100000075, activate.rs:1176: a payment of no mana finished at once and left
 //!   the answer to its decision (a source picked instead of the pool) to the cost's choices. The
 //!   seed failed in a world of the fuzz's determinize check, which a replay of the game alone
@@ -172,19 +175,6 @@ fn a_pile_pick_among_twins_takes_the_one_nearest_the_top_in_every_world() {
             }
         }
     }
-}
-
-// ---- 152.2: a controlled search, keyed from the top ------------------------
-
-/// EoE fuzz seed 100019080 (step 6 of an information-set walk of P1's, which controls P0's turn,
-/// CR 722): P0's Lander searched P0's library, and P1, seeing what P0 sees (722.3), learned every
-/// card of it where it is, keyed in definition order: two worlds whose libraries held the same
-/// eleven cards in different orders had equal keys and different views. Now the keys list the
-/// library from the top: these two worlds are told apart by the search's keys.
-#[test]
-fn eoe_seed_100019080_a_controlled_search_keys_the_library_from_the_top() {
-    let c = case("eoe", 100019080);
-    assert_eq!(walk(&c), Some(c.path.len() - 1), "the search's keys tell the two libraries apart");
 }
 
 // ---- 152.5: a bag's count through the feature transform -------------------------
