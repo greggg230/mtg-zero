@@ -29698,7 +29698,9 @@ be the first: `learn` and `knowledge_leaves` drop the listed entry) - but the si
 model as the knowledge stood (each cloud's listed cards uniform over its domain's places, the free cards - the deck less
 R, F of them - uniform over the free places, `resample_with_clouds`), the chance that the seen place holds `d`'s card is
 cnt / m (one of its cloud's cnt listed copies, the domain of m places holding n listed cards) + (m - n) / m x (D_d -
-R_d) / F (a free card), proportional to b (D_d - R_d) + a with a = cnt F, b = m - n; outside every cloud a = 0, b = 1
+R_d) / F (a free card), proportional to b (D_d - R_d) + a with a = cnt F, b = m - n (with no free card, F = 0, every
+domain is full and the chance is cnt / m: a = cnt, b = 0 - corrected by 162; a = cnt F = 0 there made a find ask a
+copy past R); outside every cloud a = 0, b = 1
 (the blind sighting's D_d - R_d); a cloud whose places are all listed gives b = 0, a chance the deck does not change; a
 pinned place is fixed (b = 0). `sight_terms` takes these from the knowledge just before the sighting (the deal's places,
 `cloud_needs`'s rule for each cloud's listed copies) with R_d then; a request's sightings (`Sight`) carry r = R_d before

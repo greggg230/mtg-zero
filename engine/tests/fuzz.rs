@@ -2897,6 +2897,26 @@ fn hidden_decklist_worlds_keep_the_deck_whatever_object_holds_the_companion() {
     }
 }
 
+/// ENGINE.md 162: `FUZZ_POOL=cross`'s post-sideboard match 98 (a Doomsday mirror, P0 keeping its deck) passes every
+/// check of `play_match_spec`. In game 2 P1 knew P0's whole 60 (R = the deck: no free card) and saw P0 find a listed
+/// Underground Sea by a search; the sighting's terms were a = cnt F = 0, b = 0 - "no listed copy stood" - so the find
+/// asked a fifth Sea and the constructed prior panicked "no deck holds what the viewer knows". Now a = cnt. Run in
+/// every pool (its own pool for its thread, over `FUZZ_POOL`), not with hidden decklists.
+#[test]
+fn a_listed_card_s_find_with_the_deck_known_cross_post_sideboard_match_98() {
+    if hidden_decks_mode() {
+        return;
+    }
+    POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Cross)));
+    let r = std::panic::catch_unwind(|| {
+        let mut stats = HiddenStats::default();
+        play_match_spec(98, &delver_post_spec(98), true, &mut stats)
+    });
+    POOL_OVERRIDE.with(|c| c.set(None));
+    let p = r.unwrap_or_else(|e| panic!("cross post-sideboard match 98 failed (rerun: FUZZ_POOL=cross FUZZ_GAMES=0 FUZZ_FIRST=98 FUZZ_MATCHES=1): {e:?}"));
+    assert!(p.games >= 2, "game 2 was played");
+}
+
 #[test]
 fn fuzz_random_games() {
     let n: u64 = std::env::var("FUZZ_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
