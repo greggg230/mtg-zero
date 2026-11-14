@@ -29590,4 +29590,33 @@ turn" facts read a player's turns: a combination artifact of this run).
 
 ### 142.9 Checks (142.7, 142.8)
 
-CHECKS-1429
+* **Digests** (`engine/tests/data/digests.txt`): `DIGEST_ENCODING=0` **a0062bb5569e06d3** (unchanged: no game plays
+  differently), `DIGEST_ENCODING=v6` **b63f643e97a30a61** (unchanged: the head and the v6 path are untouched), the full v7
+  digest **6deaf8cd9d5d3692 -> 24e35743857532be**, re-recorded on purpose with `DIGEST_WRITE=1` (2,237 of the 2,500 games:
+  their hashed rows hold effects, counters or numbers tokens; 142.8's tokens are in none - the digest's games are
+  best-of-one).
+* **The engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`): 163 binaries, **2,547 passed, 0
+  failed**, 28 ignored. Twelve tests of six binaries had read a head-only encoding (`encode_features` of a v7 buffer)
+  of states that now have tail tokens - copy effects, counters, big numbers, effects - and were refused by R1; they read
+  rows now (`Row::of`: the head, or the whole row where they compare worlds): `cards_eoe_w6`, `rules_copies`, `rules_farm`,
+  `rules_numbers`, `rules_stack`, `rules_ward`.
+* **The fuzz**: `FUZZ_GAMES=20000` (the default pool): 20,000 games (wins 9,803 / 10,075, 122 drawn, 0 aborted) and 1,000
+  best-of-three matches, 18,884,592 options' pointers checked, the v6 projection equal on 11,397,720 rows (11 on pages v6
+  showed as a window), at most **281** tokens a row (142.5: 246), none past the limit; `FUZZ_POOL=delver
+  FUZZ_GAMES=20000`: 20,000 games (9,673 / 9,563, 764 drawn, 0 aborted), 13,243,909 pointers, the v6 projection equal on
+  10,529,420 rows, at most 213 tokens.
+* **The widen, exact** (`tests/test_mtg_az.py::test_a_widened_network_reads_v7_rows_within_rounding` with
+  `MTGZ_WIDEN_CHECKPOINT` = a copy of `runs/anchors/delver-bo3_a3198_iter0000.pt`, the live Delver line's layout v6 anchor,
+  128 x 8, read only): widened onto layout v7 revision 1 (the 13 tail-only segments gated at exactly 0), on real
+  Delver-mirror rows its priors, value and margin are the v6 network's on the rows' v6 encodings within **1.67e-6** (68
+  rows without a tail token, 294 whose only new tokens are gated; the bound is 1e-5, float32 rounding of the wider slots).
+* **The fork smoke** (`E:/mtg-zero-scratch/fable-fix/laneB/fork/`): `python tools/fork_run.py` of that anchor (44,212 ->
+  56,384 features "across a token layout change", `effects`, `counters`, `numbers`, `opp_revealed` among the new segments,
+  each gate 0), then `python -m mtgz.az.run --preset delver-bo3-smoke` with the anchor's network (128 x 8, heads 4, ff 256,
+  the belief and deck heads) on the CPU, 2 iterations, 44 min: self-play 16 matches an iteration (3,204 and 6,045
+  samples, rows up to 56 tokens, none past the limit), training on the rows (101 and 189 steps; tail tokens 47,197 and
+  134,314; `effects`' gate opened to 0.017 then 0.018, `opp_revealed`'s to 0.009 then 0.010, `my_revealed` 0.018 /
+  0.020; `counters`' stayed exactly 0 - zero-core's warning, its gradient pushing it shut through the straight-through
+  `max(theta, 0)` as `graveyard_order`'s in 125.12; `numbers` had no token), evaluation and Elo; exit 0.
+* **pytest** (`bash tools/build_py.sh`, `python -m pytest -q tests`): **323 passed, 1 skipped**.
+* **The tier gate**: 142.10.
