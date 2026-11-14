@@ -33702,5 +33702,8 @@ Checks (throttled; the failing forced-answer check in every walk and no `FUZZ_SK
 * 2,000 games `FUZZ_HIDDEN_DECKS=1`: `test result: ok. 9 passed; 0 failed` (173,368 hidden-decklist steps);
 * `pytest tests/test_mtg_az.py` (`MTGZ_WIDEN_CHECKPOINT` = lane B's `anchor_v6.pt`): **21 passed**;
 * `python tools/gate.py encoding --no-mac --expect-digest 8f71ccb0d89031a6 --expect-digest0 41e27319acdae5b5
-  --checkpoint <lane 160's forked iter_0000.pt> --checkpoint-spec <the Delver best-of-three spec>`: on the commit with
-  this section (its result follows in the next commit).
+  --checkpoint <lane 160's forked iter_0000.pt> --checkpoint-spec <the Delver best-of-three spec>` on 8d8a2759 (this
+  section's first commit): build, both digests (= expected), digest formats and dealt (= the recorded files), `az` 54,
+  checkpoint load (8 games, 0 unfinished) PASS; **`GATE FAILED encoding 8d8a2759dfda in 903s - pytest: 1 failed, 0
+  error(s), 389 passed`**: the one failure is `test_canary_library.py::test_every_spot_reaches_its_recorded_position`
+  (the canary re-record pending in 157.10, as 160.5's), none new.
