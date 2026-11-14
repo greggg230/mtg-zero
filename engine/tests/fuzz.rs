@@ -3528,6 +3528,8 @@ static PK_MATCH_KEYS: AtomicU64 = AtomicU64::new(0);
 static PK_NEW_GAME_KEYS: AtomicU64 = AtomicU64::new(0);
 static PK_NEW_GAMES: AtomicU64 = AtomicU64::new(0);
 static PK_HAND_LOOKS: AtomicU64 = AtomicU64::new(0);
+/// The dealt seat's deal keys (`KEY_DEALT`, ENGINE.md 154.2) checked `HIDDEN` in the other player's worlds.
+static PK_DEALT_KEYS: AtomicU64 = AtomicU64::new(0);
 
 /// In a world determinized for `viewer`, the keys `keys` of one step (`after`: the world's game right after it):
 /// every draw of another player (`KEY_DRAW`) carries `HIDDEN`, and so does every look (`KEY_LOOK`) of another
@@ -3535,16 +3537,23 @@ static PK_HAND_LOOKS: AtomicU64 = AtomicU64::new(0);
 /// the viewer's tree by a card it cannot see (zero-core docs/search.md 3.16) - but the one look that is public by
 /// design: another player's look at a card at random of the viewer's own hand (`Ext::LookAtRandomHandCard`, Urza's
 /// Bauble: its owner sees which card was seen), recognised as a card of that identity in the viewer's hand that the
-/// looker knows after the step. Returns how many keys of the other player it checked.
+/// looker knows after the step. A dealt seat's deal (`KEY_DEALT`, ENGINE.md 154.2: its 60's counts, the dealt seat's
+/// private chance) carries `HIDDEN` for every other observer, with no exception. Returns how many keys of the other
+/// player it checked.
 fn check_private_keys_masked(keys: &[u64], viewer: u8, after: &Game, what: &dyn Fn() -> String) -> u64 {
-    use engine::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_DRAW, KEY_LOOK};
+    use engine::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_DEALT, KEY_DRAW, KEY_LOOK};
     let mut n = 0;
     for &k in keys {
         let (kind, p, d) = (key_kind(k), key_player(k), key_payload(k));
-        if !matches!(kind, KEY_DRAW | KEY_LOOK) || p == viewer {
+        if !matches!(kind, KEY_DRAW | KEY_LOOK | KEY_DEALT) || p == viewer {
             continue;
         }
         n += 1;
+        if kind == KEY_DEALT {
+            assert_eq!(d, HIDDEN, "{}: P{p}'s deal (KEY_DEALT) carries its 60's counts in a world of P{viewer} (ENGINE.md 154.2)", what());
+            PK_DEALT_KEYS.fetch_add(1, Ordering::Relaxed);
+            continue;
+        }
         if d == HIDDEN {
             continue;
         }
@@ -3599,12 +3608,13 @@ fn check_world_private_keys(g: &engine::az::MtgAz, viewer: usize, seed: u64, ste
 /// The private-key check's counts (ENGINE.md 141).
 fn private_keys_report() -> String {
     format!(
-        "private keys of the other player masked in every world: {} in the game fuzz's worlds, {} in the match fuzz's, {} of them in {} games a world started; {} looks at a card of the viewer's hand (public by design)",
+        "private keys of the other player masked in every world: {} in the game fuzz's worlds, {} in the match fuzz's, {} of them in {} games a world started; {} looks at a card of the viewer's hand (public by design); {} deal keys of a dealt seat (ENGINE.md 154)",
         PK_GAME_KEYS.load(Ordering::Relaxed),
         PK_MATCH_KEYS.load(Ordering::Relaxed),
         PK_NEW_GAME_KEYS.load(Ordering::Relaxed),
         PK_NEW_GAMES.load(Ordering::Relaxed),
-        PK_HAND_LOOKS.load(Ordering::Relaxed)
+        PK_HAND_LOOKS.load(Ordering::Relaxed),
+        PK_DEALT_KEYS.load(Ordering::Relaxed)
     )
 }
 

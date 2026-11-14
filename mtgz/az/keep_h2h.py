@@ -46,11 +46,11 @@ def half_specs(spec, known=True):
     arm): A's worlds know B keeps (`"keep_known": true`, docs/ENGINE.md 141). Refused unless a constructed best-of-three
     spec without its own `keep_deck` or `keep_known` and without `dealt_decks` (a self-play setting, docs/ENGINE.md 154)."""
     s = json.loads(spec)
-    if not (s.get('constructed') and s.get('format') == 'bo3'):
-        raise ValueError('keep_h2h: a constructed best-of-three spec ("constructed": true, "format": "bo3"; docs/ENGINE.md 130)')
     if 'dealt_decks' in s:
         raise ValueError('keep_h2h: the spec deals decks (dealt_decks, docs/ENGINE.md 154: a self-play setting); '
                          "the yardstick plays every seat's own sideboarding - pass the run's evaluation spec")
+    if not (s.get('constructed') and s.get('format') == 'bo3'):
+        raise ValueError('keep_h2h: a constructed best-of-three spec ("constructed": true, "format": "bo3"; docs/ENGINE.md 130)')
     for k in ('keep_deck', 'keep_known'):
         if k in s:
             raise ValueError(f'keep_h2h: the spec names {k} itself (the tool sets it per half and arm)')
