@@ -2354,6 +2354,178 @@ mod tests {
         assert!(guide.has_option(Choice::Yes), "{:?}", guide.options_desc());
     }
 
+    /// ENGINE.md 161 (CR 118.9, 601.2h): Force of Will's alternative cost "exile a blue card from your hand" with one
+    /// other blue card in hand is answered by the engine (a single option, `auto_single`) and keyed (`KEY_AUTO`), its
+    /// action that card's hand slot (`HAND` + k), whose index reads the hand's other cards. P1 casts Lightning Bolt at
+    /// P0, who holds a Force of Will P1 knows and three cards P1 doesn't, no land (only the alternative cost, one
+    /// target: Force of Will's casting asks nothing more until the exile). In P1's worlds (`determinize`), a hand with
+    /// one Brainstorm among cards whose definitions sort around it differently gives the same exile at different
+    /// slots: before 161 the keys told those worlds apart while P1's views were equal (160.4's walk count). Now P1's
+    /// worlds key the answer with the slot masked (`MASKED_ACTION`), the exiled Brainstorm reaches P1 by its move's
+    /// reveal (`KEY_REVEAL`), and the views stay equal; a world with two blue cards asks P0 (a chosen answer: no key).
+    /// The live game and P0's own worlds keep the slot.
+    #[test]
+    fn cr_118_9_a_forced_exile_cost_shows_the_other_player_the_card_not_its_slot() {
+        use crate::decision::{act, Choice, DecisionKind};
+        use crate::game::{Game, Step};
+        use crate::hidden::{key, key_kind, key_payload, KEY_AUTO, KEY_REVEAL, MASKED_ACTION};
+        use crate::ids::{Target, Zone};
+        use crate::testkit::Scenario;
+        const FOW: &str = "Force of Will";
+        const BLUE: [&str; 2] = ["Brainstorm", "Ponder"];
+        let mut g = Scenario::new(crate::db::CardDb::constructed())
+            .hand_known(0, &[FOW])
+            .hand(0, &["Ponder", "Island", "Wasteland"])
+            .library(0, &["Ponder", "Brainstorm", "Island", "Swamp", "Mountain", "Wasteland", "Volcanic Island", "Lightning Bolt", "Island", "Swamp", "Mountain", "Wasteland"])
+            .battlefield(1, &["Mountain"])
+            .hand(1, &["Lightning Bolt"])
+            .library(1, &["Island"; 8])
+            .at(Step::Main1, 1)
+            .start();
+        let bolt = g.card(1, "Lightning Bolt", Zone::Hand);
+        g.choose(Choice::Cast(bolt));
+        for _ in 0..20 {
+            if g.to_move() == Some(0) && g.kind() == Some(DecisionKind::Priority) {
+                break;
+            }
+            match g.kind() {
+                Some(DecisionKind::Target) => {
+                    g.choose(Choice::Target(Target::Player(0)));
+                }
+                Some(DecisionKind::Priority) => {
+                    g.pass();
+                }
+                _ => {
+                    let c = g.pending_decision().unwrap().options[0].choice;
+                    g.choose(c);
+                }
+            }
+        }
+        assert_eq!((g.to_move(), g.kind()), (Some(0), Some(DecisionKind::Priority)), "{:?}", g.options_desc());
+        let fow = g.card(0, FOW, Zone::Hand);
+        let legal = |w: &Game| {
+            let mut v = Vec::new();
+            w.legal_actions(&mut v);
+            v
+        };
+        let cast = g.pending_decision().unwrap().options.iter().find(|o| o.choice == Choice::Cast(fow)).expect("Force of Will castable").action;
+        let exile_auto = |k: &[u64]| -> Vec<u64> {
+            k.iter().copied().filter(|&x| key_kind(x) == KEY_AUTO && key_payload(x) >> 16 == DecisionKind::ExileCost as u64).map(key_payload).collect()
+        };
+        // (Distinct blue definitions: the hand's twins are one option, ENGINE.md 11.)
+        let blues = |w: &Game| {
+            let mut d: Vec<_> = w.players[0].hand.iter().filter(|&&c| c != fow && BLUE.contains(&w.db.def(w.objs[c.i()].def).name.as_str())).map(|&c| w.objs[c.i()].def).collect();
+            d.dedup();
+            d.sort_unstable();
+            d.dedup();
+            d.len()
+        };
+        let exiled = |w: &Game| w.exile.iter().filter(|&&c| w.objs[c.i()].owner == 0).map(|&c| w.db.def(w.objs[c.i()].def).name.clone()).collect::<Vec<_>>();
+        // The live game and P0's own worlds: the forced exile is keyed with its hand slot.
+        for observer in [None, Some(0u8)] {
+            let mut w = g.clone();
+            if observer.is_some() {
+                w.determinize(0, &mut crate::rng::Rng::new(3));
+            }
+            let mut k = Vec::new();
+            w.apply(cast, &mut k).unwrap();
+            let a = exile_auto(&k);
+            assert_eq!(a.len(), 1, "{observer:?}: {k:?}");
+            assert!((act::HAND as u64..(act::HAND + act::HAND_N) as u64).contains(&(a[0] & 0xFFFF)), "{observer:?}: the slot {a:?}");
+        }
+        // P1's worlds: (one blue card's exiled name, its slot as the live game would key it) -> the world; two blue cards.
+        let mut single: Vec<(String, u64, Game)> = Vec::new();
+        let mut double = None;
+        for s in 0..2048u64 {
+            let mut w = g.clone();
+            w.determinize(1, &mut crate::rng::Rng::new(s));
+            // (Two blue definitions: P0's own decision follows, whatever its hand's slots.)
+            if blues(&w) >= 2 {
+                double.get_or_insert(w);
+                continue;
+            }
+            if legal(&w) != legal(&g) {
+                continue;
+            }
+            match blues(&w) {
+                1 => {
+                    let mut u = w.clone();
+                    u.observer = None;
+                    let mut k = Vec::new();
+                    u.apply(cast, &mut k).unwrap();
+                    let slot = exile_auto(&k)[0] & 0xFFFF;
+                    let name = exiled(&u).concat();
+                    if !single.iter().any(|(n, sl, _)| *n == name && *sl == slot) {
+                        single.push((name, slot, w));
+                    }
+                }
+                _ => {}
+            }
+        }
+        // (A hand of one blue definition, twins included: one option.)
+        let (i, j) = (0..single.len())
+            .flat_map(|i| (0..single.len()).map(move |j| (i, j)))
+            .find(|&(i, j)| single[i].0 == single[j].0 && single[i].1 < single[j].1)
+            .expect("two worlds exiling the same card from different slots");
+        let (name, mut a, mut b) = (single[i].0.clone(), single[i].2.clone(), single[j].2.clone());
+        assert_eq!(a.view_of(1), b.view_of(1), "one information set of P1's");
+        let (mut ka, mut kb) = (Vec::new(), Vec::new());
+        a.apply(cast, &mut ka).unwrap();
+        b.apply(cast, &mut kb).unwrap();
+        let masked = key(KEY_AUTO, 0, ((DecisionKind::ExileCost as u64) << 16) | MASKED_ACTION);
+        assert!(ka.contains(&masked) && kb.contains(&masked), "the slot masked in P1's worlds: {ka:?} / {kb:?}");
+        assert_eq!(ka, kb, "P1's keys: the same exile from slots {} / {}", single[i].1, single[j].1);
+        let def = a.objs[a.exile.iter().copied().find(|&c| a.objs[c.i()].owner == 0).unwrap().i()].def as u64;
+        assert!(ka.contains(&key(KEY_REVEAL, 0, def)), "the exiled {name} reaches P1 by its move's reveal: {ka:?}");
+        assert_eq!(exiled(&a), exiled(&b));
+        assert_eq!((a.to_move(), a.kind()), (b.to_move(), b.kind()));
+        assert_eq!(a.view_of(1), b.view_of(1), "P1's views");
+        assert_eq!(crate::az::tail_encode::Row::of(&a, 1).flat(), crate::az::tail_encode::Row::of(&b, 1).flat(), "P1's rows");
+        // Two blue cards: P0 chooses which (a decision of its own; its answer, chosen, has no key).
+        let mut c = double.expect("a world with two blue cards");
+        let mut kc = Vec::new();
+        let cast_c = c.pending_decision().unwrap().options.iter().find(|o| o.choice == Choice::Cast(fow)).expect("Force of Will castable").action;
+        c.apply(cast_c, &mut kc).unwrap();
+        assert!(exile_auto(&kc).is_empty(), "{kc:?}");
+        assert_eq!((c.to_move(), c.kind()), (Some(0), Some(DecisionKind::ExileCost)), "{:?}", c.options_desc());
+        assert!(c.pending_decision().unwrap().options.len() >= 2);
+        let first = c.pending_decision().unwrap().options[0].action;
+        kc.clear();
+        c.apply(first, &mut kc).unwrap();
+        assert!(exile_auto(&kc).is_empty(), "{kc:?}");
+        assert!(kc.iter().any(|&x| key_kind(x) == KEY_REVEAL), "the chosen exile is revealed: {kc:?}");
+    }
+
+    /// ENGINE.md 161: the forced answers' keys in another player's worlds, by kind and action
+    /// (`Game::forced_answer_seen`): `ActivateMana`'s end none and its activation `HIDDEN` (160); a hand slot, a hand
+    /// card's ability and a hidden list's `LIBRARY` id masked; public answers as they are.
+    #[test]
+    fn forced_answers_seen_by_the_other_player() {
+        use crate::decision::{act, DecisionKind as K};
+        use crate::hidden::{HIDDEN, MASKED_ACTION};
+        let seen = crate::game::Game::forced_answer_seen;
+        let p = |k: K, a: u64| Some(((k as u64) << 16) | a);
+        assert_eq!(seen(K::ActivateMana, act::PASS), None);
+        assert_eq!(seen(K::ActivateMana, act::HAND_ABILITY + 2), Some(HIDDEN));
+        assert_eq!(seen(K::ActivateMana, act::MY_PERM), Some(HIDDEN));
+        assert_eq!(seen(K::Priority, act::PASS), p(K::Priority, act::PASS as u64));
+        for k in [K::ExileCost, K::DiscardCost, K::ChooseHandCard, K::Discard, K::MulliganBottom, K::PayMana] {
+            assert_eq!(seen(k, act::HAND + 3), p(k, MASKED_ACTION), "{k:?}");
+            assert_eq!(seen(k, act::HAND + act::HAND_N - 1), p(k, MASKED_ACTION), "{k:?}");
+        }
+        assert_eq!(seen(K::PayMana, act::HAND_ABILITY + 1), p(K::PayMana, MASKED_ACTION));
+        assert_eq!(seen(K::PayMana, act::ACTIVATE + 5), p(K::PayMana, (act::ACTIVATE + 5) as u64));
+        for k in [K::SearchLibrary, K::PutOnTop, K::PutOnBottom, K::PutInGraveyard, K::PutInHand, K::PutOntoBattlefield, K::NameCard] {
+            assert_eq!(seen(k, act::LIBRARY + 4), p(k, MASKED_ACTION), "{k:?}");
+        }
+        for k in [K::ChooseGraveyardCard, K::Target, K::ChooseDiscard] {
+            assert_eq!(seen(k, act::LIBRARY + 4), p(k, (act::LIBRARY + 4) as u64), "{k:?}");
+        }
+        for (k, a) in [(K::Sacrifice, act::MY_PERM + 1), (K::Target, act::OPP_PERM), (K::Target, act::STACK), (K::YesNo, act::PASS), (K::ChooseMana, act::NUMBER + 3)] {
+            assert_eq!(seen(k, a), p(k, a as u64), "{k:?}");
+        }
+    }
+
     /// ENGINE.md 160 (CR 117.3c, 117.5): a player who activates a mana ability while holding priority receives
     /// priority again afterwards, so the state-based actions are performed before its next decision - also inside
     /// `ActivateMana`, with more to activate. P0 at 1 life activates Mana Confluence ({T}, pay 1 life) with a Forest

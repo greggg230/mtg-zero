@@ -50,6 +50,11 @@ pub const KEY_DEALT: u64 = 8;
 pub const KEY_TOLD: u64 = 9;
 /// Payload of a private key emitted while another player is the observer.
 pub const HIDDEN: u64 = 0xFFFF_FFFF;
+/// The action part of another player's forced answer (`KEY_AUTO`, payload `kind << 16 | action`) that names a card
+/// by a place the observer doesn't see (a hand slot, a library or pile slot), in that observer's worlds (ENGINE.md
+/// 161, `Game::forced_answer_seen`): no action id is this large (`decision::NUM_ACTIONS`).
+pub const MASKED_ACTION: u64 = 0xFFFF;
+const _: () = assert!(MASKED_ACTION as usize >= crate::decision::NUM_ACTIONS);
 
 /// The deals `determinize` draws at most for a face-down choice to be a legal
 /// one (ENGINE.md 123): each succeeds with a probability of at least one in

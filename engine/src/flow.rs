@@ -347,25 +347,81 @@ impl Game {
             // signature would otherwise not show (it may depend on hidden
             // cards: no castable spell in hand), so it is keyed (ENGINE.md
             // 10).
-            let payload = ((kind as u64) << 16) | options[0].action as u64;
-            // Mana activations with priority (`ActivateMana`) in the worlds of
-            // a player who doesn't see that mode (ENGINE.md 160): their end
-            // (the one option `PASS`, ENGINE.md 147.8) is no event there - the
-            // player keeps priority (CR 117.3c), as after a `PASS` chosen
-            // among more options, which has no key; a lone source's
-            // activation is keyed without its action (the mode's kind, and a
-            // hand source's slot, which reads the hand's other cards): the
-            // activation itself shows what it does.
-            let unseen = kind == DecisionKind::ActivateMana && self.observer.is_some_and(|o| o != player && o != self.decider_of(player));
-            if !unseen {
+            // In the worlds of an observer who is neither the player nor its
+            // decider, the key is the answer as that observer sees it
+            // (ENGINE.md 160, 161): `forced_answer_seen`.
+            let payload = match self.observer {
+                Some(o) if o != player && o != self.decider_of(player) => Self::forced_answer_seen(kind, options[0].action),
+                _ => Some(((kind as u64) << 16) | options[0].action as u64),
+            };
+            if let Some(payload) = payload {
                 self.emit_public(crate::hidden::KEY_AUTO, player, payload);
-            } else if options[0].action != act::PASS {
-                self.emit_public(crate::hidden::KEY_AUTO, player, crate::hidden::HIDDEN);
             }
             self.answer = Some(options[0].choice);
             return;
         }
         self.pending = Some(Decision { player, kind, options, stage: crate::decision::Stage::One });
+    }
+
+    /// The `KEY_AUTO` payload of another player's forced answer (a decision
+    /// with one option, `auto_single`) in the worlds of an observer who
+    /// doesn't make that player's decisions (ENGINE.md 160, 161); `None`: no
+    /// key. The observer sees what the answer makes public, never whether
+    /// the player had a choice, nor which hidden card's slot held the card
+    /// it took:
+    /// * a mana activation with priority (`ActivateMana`, a mode the
+    ///   observer doesn't see, 160): its end is no event (the player keeps
+    ///   priority, CR 117.3c, as after a chosen `PASS`, which has no key),
+    ///   and a lone source's activation is `HIDDEN` - the mode's kind and a
+    ///   hand source's slot masked; the activation shows what it does;
+    /// * an action naming a card the observer doesn't see by its place
+    ///   (`names_unseen_place`: a hand slot, a hand card's ability, a slot
+    ///   of a library, a pile looked at or a sideboard): the kind with the
+    ///   action masked (`MASKED_ACTION`). The place reads the other hidden
+    ///   cards (a hand slot's index counts the cards sorted before it); the
+    ///   card itself, once it goes public (exiled, discarded, revealed),
+    ///   reaches the observer by the move's own keys (`KEY_REVEAL`,
+    ///   `KEY_TOLD`). A chosen answer naming such a place is an edge of the
+    ///   player's node, never a key;
+    /// * any other answer (a pass of priority, a permanent, a stack object,
+    ///   a number, a player): public, keyed as it is - no node of the
+    ///   observer's tree shows it, and two worlds whose forced answers
+    ///   differ there must stay keyed apart.
+    pub(crate) fn forced_answer_seen(kind: DecisionKind, action: u16) -> Option<u64> {
+        if kind == DecisionKind::ActivateMana {
+            return (action != act::PASS).then_some(crate::hidden::HIDDEN);
+        }
+        let action = if Self::names_unseen_place(kind, action) { crate::hidden::MASKED_ACTION } else { action as u64 };
+        Some(((kind as u64) << 16) | action)
+    }
+
+    /// Whether `action` of a `kind` decision names a card by a place another
+    /// player doesn't see (ENGINE.md 161): the decider's hand slots and hand
+    /// cards' abilities, and the `LIBRARY` ids of the decisions whose list is
+    /// a hidden one's - a library sorted by definition (a search, naming a
+    /// card), a looked-at or revealed pile sorted by definition (masked even
+    /// when revealed: equal keys there mean an equal pile, so the same forced
+    /// answer), the sideboard. The other `LIBRARY` ids are public lists: a
+    /// graveyard list's (65.10) and another player's revealed hand
+    /// (`ChooseDiscard`).
+    pub(crate) fn names_unseen_place(kind: DecisionKind, action: u16) -> bool {
+        use DecisionKind as K;
+        let within = |base: u16, n: u16| (base..base + n).contains(&action);
+        within(act::HAND, act::HAND_N)
+            || within(act::HAND_ABILITY, act::HAND_N)
+            || within(act::LIBRARY, act::LIBRARY_N)
+                && matches!(
+                    kind,
+                    K::SearchLibrary
+                        | K::PutOnTop
+                        | K::PutOnBottom
+                        | K::PutInGraveyard
+                        | K::PutInHand
+                        | K::PutOntoBattlefield
+                        | K::NameCard
+                        | K::RevealCompanion
+                        | K::Sideboard
+                )
     }
 
     pub(crate) fn run_task(&mut self, t: Task) {

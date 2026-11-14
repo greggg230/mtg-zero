@@ -2646,9 +2646,45 @@ fn check_options_complete(g: &Game, seed: u64, world: &str) {
 /// ended at its first action every time would pass silently otherwise.
 static IS_WALKS: AtomicU64 = AtomicU64::new(0);
 static IS_STEPS: AtomicU64 = AtomicU64::new(0);
-/// ENGINE.md 160: the other player's forced answers (`KEY_AUTO`) that alone told apart two worlds showing the walk's
-/// viewer the same, by the answered decision's kind (`DecisionKind as usize`; the last slot: any beyond).
-static IS_FORCED_UNSEEN: [AtomicU64; 64] = [const { AtomicU64::new(0) }; 64];
+/// ENGINE.md 160, 161: two worlds of `viewer`'s whose keys of one step differ only by the other player's forced answers
+/// (`KEY_AUTO`: that player had one option, which may read its hidden cards) while everything else zero-core's child
+/// signature reads is equal and the viewer sees them the same (neither over, the same next decider and legal actions,
+/// equal views): a key alone told apart worlds the viewer cannot tell apart - the search would split its nodes by the
+/// other player's hidden cards. A forced answer that shows (a pass of priority, a permanent chosen) leaves the views
+/// different. 160 failed this for `ActivateMana`'s keys and counted the other kinds (default 20k: `ExileCost` 26,
+/// `PayMana` 38, `ChooseHandCard` 4; a hand slot or a hand card's ability by its slot); 161 masks such places in the
+/// observer's worlds (`Game::forced_answer_seen`) and fails every kind. Next legal actions that differ split the worlds
+/// whatever the keys (another player's options may read its hidden cards, as the walk's own check allows): e.g. default
+/// seed 9273, a payment's one source, a land, forced in one world while the other offers that land and a Spirit Guide
+/// in hand - no key can merge those (161.2). The description, when so.
+fn forced_answer_split(ka: &[u64], kb: &[u64], a: &Game, b: &Game, viewer: u8) -> Option<String> {
+    use engine::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_AUTO};
+    let other_auto = |k: u64| key_kind(k) == KEY_AUTO && key_player(k) != viewer;
+    let strip = |k: &[u64]| k.iter().copied().filter(|&x| !other_auto(x)).collect::<Vec<_>>();
+    let legal = |g: &Game| {
+        let mut v = Vec::new();
+        g.legal_actions(&mut v);
+        v
+    };
+    if ka == kb || strip(ka) != strip(kb) || a.is_over() || b.is_over() || a.to_move() != b.to_move() || legal(a) != legal(b) || a.view_of(viewer) != b.view_of(viewer) {
+        return None;
+    }
+    let desc = |k: &[u64]| {
+        k.iter()
+            .copied()
+            .filter(|&x| other_auto(x))
+            .map(|x| match key_payload(x) {
+                HIDDEN => "HIDDEN".to_string(),
+                p => format!("{} kind {} action {}", key_player(x), p >> 16, p & 0xFFFF),
+            })
+            .collect::<Vec<_>>()
+    };
+    Some(format!(
+        "keyed apart only by the other player's forced answers ({:?} / {:?}), with nothing the viewer P{viewer} sees between the worlds",
+        desc(ka),
+        desc(kb)
+    ))
+}
 
 /// The first difference between two layout v7 rows (head, tail tokens, pointer overrides), bit for
 /// bit; None when they are equal.
@@ -2765,32 +2801,10 @@ fn check_information_set(g: &Game, viewer: u8, seed: u64, rng: &mut Rng) {
         b.apply(act, &mut kb).unwrap();
         if ka != kb {
             // Keys that tell the worlds apart only by the other player's answers the game made itself (`KEY_AUTO`:
-            // that player had a single option, which may read its hidden cards) should mark something the viewer
-            // sees: the worlds' views. A forced answer that shows (a pass of priority, a "may" declined: the
-            // decision it answered was public) leaves the views different. ENGINE.md 160: one of the other
-            // player's mana activations with priority (`ActivateMana`, a mode the viewer doesn't see) never may -
-            // its end (147.8's key) and a lone hand source's slot told apart worlds showing the viewer the same,
-            // the player holding priority - so that fails. Other forced answers naming a hidden card's slot do the
-            // same (a lone card an "exile a card from your hand" cost may take, by its hand slot): counted by
-            // decision kind and printed, not failed (ENGINE.md 160, their own decision).
-            use engine::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_AUTO};
-            let other_auto = |k: u64| key_kind(k) == KEY_AUTO && key_player(k) != viewer;
-            let strip = |k: &[u64]| k.iter().copied().filter(|&x| !other_auto(x)).collect::<Vec<_>>();
-            if strip(&ka) == strip(&kb) && !a.is_over() && !b.is_over() && a.to_move() == b.to_move() && a.view_of(viewer) == b.view_of(viewer) {
-                let differ: Vec<u64> = ka.iter().chain(kb.iter()).copied().filter(|&x| other_auto(x) && !(ka.contains(&x) && kb.contains(&x))).collect();
-                let mode = |k: u64| key_payload(k) == HIDDEN || key_payload(k) >> 16 == engine::DecisionKind::ActivateMana as u64;
-                if differ.iter().any(|&k| mode(k)) {
-                    panic!(
-                        "seed {seed} step {step}: keyed apart only by the other player's forced answers ({:?} / {:?}), one of its mana activations with priority among them, with nothing the viewer sees between the worlds; {}",
-                        ka.iter().copied().filter(|&x| other_auto(x)).collect::<Vec<_>>(),
-                        kb.iter().copied().filter(|&x| other_auto(x)).collect::<Vec<_>>(),
-                        tell(&a, &b, &path)
-                    );
-                }
-                for k in differ {
-                    let kind = (key_payload(k) >> 16) as usize;
-                    IS_FORCED_UNSEEN[kind.min(IS_FORCED_UNSEEN.len() - 1)].fetch_add(1, Ordering::Relaxed);
-                }
+            // that player had a single option, which may read its hidden cards) must mark something the viewer sees
+            // (ENGINE.md 160, 161): no forced answer may split worlds the viewer sees the same.
+            if let Some(why) = forced_answer_split(&ka, &kb, &a, &b, viewer) {
+                panic!("seed {seed} step {step}: {why}; {}", tell(&a, &b, &path));
             }
             return; // different outcomes, told apart by the keys
         }
@@ -2844,6 +2858,22 @@ fn activate_mana_end_is_keyed_interactions_seeds() {
         return;
     }
     for seed in [2031u64, 13518] {
+        let p = play(seed, true);
+        assert!(!p.actions.is_empty(), "seed {seed}");
+    }
+}
+
+/// ENGINE.md 161: default-pool games whose open-decklist walk found two worlds of P1's keyed apart only by P0's forced
+/// answer naming a hidden card by its place, with equal views (160.4's count, on 296a45b8): 318 and 692 (`ExileCost`, a
+/// lone blue card for Force of Will's exile at hand slots 2 / 4 and 2 / 3), 2456 and 2704 (`PayMana`, a lone Spirit
+/// Guide's ability by its hand slot, `HAND_ABILITY` + 1 / 2 and + 3 / 4). They pass every check of `play`, the walk's
+/// failing forced-answer check included, with the place masked in P1's worlds (`Game::forced_answer_seen`).
+#[test]
+fn forced_answers_naming_a_hidden_place_are_masked_default_seeds() {
+    if pool_mode() != PoolMode::Default || hidden_decks_mode() {
+        return;
+    }
+    for seed in [318u64, 692, 2456, 2704] {
         let p = play(seed, true);
         assert!(!p.actions.is_empty(), "seed {seed}");
     }
@@ -2986,15 +3016,6 @@ fn fuzz_random_games() {
     // hidden decklists' (`check_hidden_information_set`).
     let (isw, iss, hds) = (IS_WALKS.load(Ordering::Relaxed), IS_STEPS.load(Ordering::Relaxed), HD_STEPS.load(Ordering::Relaxed));
     println!("information sets (ENGINE.md 148): {isw} open-decklist walks, {iss} states compared after a common action (the view and the viewer's whole row); {hds} hidden-decklist steps");
-    let forced: Vec<String> = IS_FORCED_UNSEEN
-        .iter()
-        .enumerate()
-        .filter_map(|(k, n)| {
-            let n = n.load(Ordering::Relaxed);
-            (n > 0).then(|| format!("kind {k} x{n}"))
-        })
-        .collect();
-    println!("information sets (ENGINE.md 160): keys apart only by the other player's forced answers with equal views (not ActivateMana, counted): {}", if forced.is_empty() { "none".to_string() } else { forced.join(", ") });
     if n >= 200 {
         if hidden_decks_mode() {
             assert!(hds > 0, "FUZZ_HIDDEN_DECKS: no information-set walk compared a state after a common action in {n} games");
@@ -3646,6 +3667,13 @@ fn check_match_information_set(g: &engine::az::MtgAz, viewer: usize, seed: u64, 
         a.step(act, &mut ka).unwrap();
         b.step(act, &mut kb).unwrap();
         if ka != kb {
+            // (Within one game, ENGINE.md 161: no forced answer of the other player splits worlds the viewer sees the
+            // same.)
+            if a.sideboarding().is_none() && b.sideboarding().is_none() && a.m.game_no == b.m.game_no {
+                if let Some(why) = forced_answer_split(&ka, &kb, &a.g, &b.g, viewer as u8) {
+                    panic!("match {seed} step {step}: {why}; decisions {:?} / {:?}\n{}\n----\n{}", a.pending_decision(), b.pending_decision(), stack_names(&a.g), stack_names(&b.g));
+                }
+            }
             return;
         }
     }
@@ -4676,6 +4704,12 @@ fn check_hidden_information_set(a: &engine::az::MtgAz, viewer: u8, seed: u64, rn
         y.step(act, &mut ky).unwrap();
         HD_STEPS.fetch_add(1, Ordering::Relaxed);
         if kx != ky {
+            // (ENGINE.md 161: no forced answer of the other player splits worlds the viewer sees the same.)
+            if x.sideboarding().is_none() && y.sideboarding().is_none() && x.m.game_no == y.m.game_no {
+                if let Some(why) = forced_answer_split(&kx, &ky, &x.g, &y.g, viewer) {
+                    panic!("hidden-decklist seed {seed} step {step}: {why}; decisions {:?} / {:?}", x.pending_decision(), y.pending_decision());
+                }
+            }
             return;
         }
     }
