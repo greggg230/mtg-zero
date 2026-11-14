@@ -348,7 +348,20 @@ impl Game {
             // cards: no castable spell in hand), so it is keyed (ENGINE.md
             // 10).
             let payload = ((kind as u64) << 16) | options[0].action as u64;
-            self.emit_public(crate::hidden::KEY_AUTO, player, payload);
+            // Mana activations with priority (`ActivateMana`) in the worlds of
+            // a player who doesn't see that mode (ENGINE.md 160): their end
+            // (the one option `PASS`, ENGINE.md 147.8) is no event there - the
+            // player keeps priority (CR 117.3c), as after a `PASS` chosen
+            // among more options, which has no key; a lone source's
+            // activation is keyed without its action (the mode's kind, and a
+            // hand source's slot, which reads the hand's other cards): the
+            // activation itself shows what it does.
+            let unseen = kind == DecisionKind::ActivateMana && self.observer.is_some_and(|o| o != player && o != self.decider_of(player));
+            if !unseen {
+                self.emit_public(crate::hidden::KEY_AUTO, player, payload);
+            } else if options[0].action != act::PASS {
+                self.emit_public(crate::hidden::KEY_AUTO, player, crate::hidden::HIDDEN);
+            }
             self.answer = Some(options[0].choice);
             return;
         }

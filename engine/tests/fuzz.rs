@@ -2646,6 +2646,9 @@ fn check_options_complete(g: &Game, seed: u64, world: &str) {
 /// ended at its first action every time would pass silently otherwise.
 static IS_WALKS: AtomicU64 = AtomicU64::new(0);
 static IS_STEPS: AtomicU64 = AtomicU64::new(0);
+/// ENGINE.md 160: the other player's forced answers (`KEY_AUTO`) that alone told apart two worlds showing the walk's
+/// viewer the same, by the answered decision's kind (`DecisionKind as usize`; the last slot: any beyond).
+static IS_FORCED_UNSEEN: [AtomicU64; 64] = [const { AtomicU64::new(0) }; 64];
 
 /// The first difference between two layout v7 rows (head, tail tokens, pointer overrides), bit for
 /// bit; None when they are equal.
@@ -2761,6 +2764,34 @@ fn check_information_set(g: &Game, viewer: u8, seed: u64, rng: &mut Rng) {
         a.apply(act, &mut ka).unwrap();
         b.apply(act, &mut kb).unwrap();
         if ka != kb {
+            // Keys that tell the worlds apart only by the other player's answers the game made itself (`KEY_AUTO`:
+            // that player had a single option, which may read its hidden cards) should mark something the viewer
+            // sees: the worlds' views. A forced answer that shows (a pass of priority, a "may" declined: the
+            // decision it answered was public) leaves the views different. ENGINE.md 160: one of the other
+            // player's mana activations with priority (`ActivateMana`, a mode the viewer doesn't see) never may -
+            // its end (147.8's key) and a lone hand source's slot told apart worlds showing the viewer the same,
+            // the player holding priority - so that fails. Other forced answers naming a hidden card's slot do the
+            // same (a lone card an "exile a card from your hand" cost may take, by its hand slot): counted by
+            // decision kind and printed, not failed (ENGINE.md 160, their own decision).
+            use engine::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_AUTO};
+            let other_auto = |k: u64| key_kind(k) == KEY_AUTO && key_player(k) != viewer;
+            let strip = |k: &[u64]| k.iter().copied().filter(|&x| !other_auto(x)).collect::<Vec<_>>();
+            if strip(&ka) == strip(&kb) && !a.is_over() && !b.is_over() && a.to_move() == b.to_move() && a.view_of(viewer) == b.view_of(viewer) {
+                let differ: Vec<u64> = ka.iter().chain(kb.iter()).copied().filter(|&x| other_auto(x) && !(ka.contains(&x) && kb.contains(&x))).collect();
+                let mode = |k: u64| key_payload(k) == HIDDEN || key_payload(k) >> 16 == engine::DecisionKind::ActivateMana as u64;
+                if differ.iter().any(|&k| mode(k)) {
+                    panic!(
+                        "seed {seed} step {step}: keyed apart only by the other player's forced answers ({:?} / {:?}), one of its mana activations with priority among them, with nothing the viewer sees between the worlds; {}",
+                        ka.iter().copied().filter(|&x| other_auto(x)).collect::<Vec<_>>(),
+                        kb.iter().copied().filter(|&x| other_auto(x)).collect::<Vec<_>>(),
+                        tell(&a, &b, &path)
+                    );
+                }
+                for k in differ {
+                    let kind = (key_payload(k) >> 16) as usize;
+                    IS_FORCED_UNSEEN[kind.min(IS_FORCED_UNSEEN.len() - 1)].fetch_add(1, Ordering::Relaxed);
+                }
+            }
             return; // different outcomes, told apart by the keys
         }
     }
@@ -2800,6 +2831,22 @@ fn activate_mana_end_is_keyed_default_seed_2122() {
     }
     let p = play(2122, true);
     assert!(!p.actions.is_empty());
+}
+
+/// ENGINE.md 160: the same finding in the interactions pool (`FUZZ_POOL=interactions`), games 2031 (after a
+/// `ChooseMode` of P0's: which mana ability of a permanent, inside `ActivateMana`) and 13518 (after a `ChooseMana`,
+/// Karakas's ability on the stack) - the walk's decisions `Priority` / `ActivateMana`, the hand slot's ability the same
+/// action id in both worlds. Reported on branches without 147.8 (`fix/hidden-refs` 3ca4fb2d, `fix/encoding-gate`);
+/// they pass with 147.8's keyed end. Interactions pool only (another pool's seeds are other games).
+#[test]
+fn activate_mana_end_is_keyed_interactions_seeds() {
+    if pool_mode() != PoolMode::Interactions || hidden_decks_mode() {
+        return;
+    }
+    for seed in [2031u64, 13518] {
+        let p = play(seed, true);
+        assert!(!p.actions.is_empty(), "seed {seed}");
+    }
 }
 
 /// ENGINE.md 140.10: the hidden-decklist games whose checks compared the deck's objects alone (a companion put into
@@ -2939,6 +2986,15 @@ fn fuzz_random_games() {
     // hidden decklists' (`check_hidden_information_set`).
     let (isw, iss, hds) = (IS_WALKS.load(Ordering::Relaxed), IS_STEPS.load(Ordering::Relaxed), HD_STEPS.load(Ordering::Relaxed));
     println!("information sets (ENGINE.md 148): {isw} open-decklist walks, {iss} states compared after a common action (the view and the viewer's whole row); {hds} hidden-decklist steps");
+    let forced: Vec<String> = IS_FORCED_UNSEEN
+        .iter()
+        .enumerate()
+        .filter_map(|(k, n)| {
+            let n = n.load(Ordering::Relaxed);
+            (n > 0).then(|| format!("kind {k} x{n}"))
+        })
+        .collect();
+    println!("information sets (ENGINE.md 160): keys apart only by the other player's forced answers with equal views (not ActivateMana, counted): {}", if forced.is_empty() { "none".to_string() } else { forced.join(", ") });
     if n >= 200 {
         if hidden_decks_mode() {
             assert!(hds > 0, "FUZZ_HIDDEN_DECKS: no information-set walk compared a state after a common action in {n} games");
@@ -3579,6 +3635,9 @@ fn check_match_information_set(g: &engine::az::MtgAz, viewer: usize, seed: u64, 
                 stack_names(&b.g)
             );
         }
+        // The search's decision class of the node (zero-core's signature with `ANSWERS`): the viewer's worlds see
+        // the other player's mana activations with priority as that player holding priority (ENGINE.md 160).
+        assert_eq!(a.decision_tag(), b.decision_tag(), "match {seed} step {step}: same keys, different decision classes for P{viewer}; decisions {:?} / {:?}", a.pending_decision(), b.pending_decision());
         if step > 0 {
             MATCH_IS_STEPS.fetch_add(1, Ordering::Relaxed);
         }

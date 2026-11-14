@@ -33390,3 +33390,160 @@ $S python -m mtgz.az.run --run E:/mtg-zero-scratch/fable-fix/int-logs/smoke-fina
 
 **8. Document**: 157's checks with each gate's last line, the digests old -> new, the canary rerecord's report; then
 the orchestrator fast-forwards main to the final head (and moves the pin with it).
+
+## 160. Another player's mana activations with priority are that player holding priority: the `ActivateMana` mode hidden from the other player (branch `fix/decision-kind-leak`, 2026-11-13)
+
+**The report.** Lane B's 20k fuzz runs on `fix/encoding-gate` (and on its base, `fix/hidden-refs` 3ca4fb2d) failed the
+open-decklist information-set walk (148.2, `check_information_set` in `engine/tests/fuzz.rs`): default pool seed 2122,
+`FUZZ_POOL=interactions` seeds 2031 and 13518, each "same keys, different views" with P0's decision `Priority` in one of
+P1's worlds and `ActivateMana` in the other, both offering `PASS` and the same hand-slot ability id (a Street
+Wraith-like card in one, a Spirit Guide's mana ability in the other), after a `ChooseMana` (2122: a Tropical Island
+under Currency Converter's ability; 13518: under Karakas's) or a `ChooseMode` (2031) inside `ActivateMana`
+(`E:\mtg-zero-scratch\fable-fix\laneB\p4_fuzz.log`, `p4_fuzz_inter.log`, `p5_fuzz_inter.log`).
+
+**Root cause** (the code before 147.8, 123d80b9). Mana abilities activated with priority (CR 605.3a, 117.1d; 100.4.3)
+run as a mode: `Priority`'s "activate mana abilities" (`flow.rs` `Choice::Yes`) pushes `Task::ActivateMana`, and after
+each activation `activate_mana` (`activate.rs`) asks again with `PASS` among the options. Its sources
+(`mana_float_sources`) include the hand's mana abilities (a Spirit Guide's). With none left it returned silently to the
+`Priority` task under it. The activation pins the payer's mana sources in hand (`hidden.rs` `hidden_slots_with`), but
+only the real hand's: a world of the other player's may deal a Guide into the hand. So in P1's worlds, after the same
+answer and with equal keys, P0 was back at `Priority` where its hidden card had no mana ability and still in
+`ActivateMana` where it had one - the decision KIND read P0's hidden hand, while the legal actions were equal.
+
+**What it reached.** `view_of` (the pending decision's player and kind, for every viewer); **the network**:
+`encode_context` wrote the decision kind's one-hot and the asking task's code for any viewer, and zero-core encodes the
+tree viewer's row at another seat's leaf when `leaf_value_view` is `root` (docs/search.md 3.6; `driver/worker.rs`: "a
+value-only row of the tree's viewer"), which delver-bo3-pb1 uses for self-play and evaluation - so P1's root-view leaf
+values had an input reading P0's hidden hand; **the search**: `decision_tag` (`1 + DecisionKind`) is part of a node's
+signature (zero-core `tree.rs` `node_matches`), so P1's tree split P0's nodes by the mode. Every commit without 147.8
+has the walk failure - `main` and the branches cut from it, and every run's pinned worktree (`mtg-zero-wt/run-*`: none
+contains 123d80b9), pb1's among them; every commit before this section has the encoding and the decision class.
+
+**147.8** (lane F, merged into `integrate/fable-1112`) keyed the forced end (the one-option `ActivateMana` asked and
+answered with a `KEY_AUTO`): the walk's worlds were then keyed apart, never equal-keyed with different kinds. The
+worlds stayed different for P1 - by a key telling it that P0 had no mana source left in hand.
+
+### 160.1 The decision (the user, 2026-11-13)
+
+Option 1 of this section's first version: **hide the mode from the other player**, before pb2, in this integration -
+not option 2 (mana abilities offered at priority directly: an action-space change). To every viewer but the decider,
+the decider's `ActivateMana` is indistinguishable from `Priority`: its view, its row (any viewer's: root-view leaves),
+the search's decision class in its tree, and every key it observes. The decider's own view and keys keep the mode.
+
+**What the other player may observe (the rules).** A mana ability is activated while the player holds priority (CR
+605.3a, 117.1d) and doesn't use the stack (605.3b); the player receives priority again afterwards (117.3c). The other
+player sees each activation (its cost paid, the mana made: a public action), never the option to activate one or the
+decision to stop: between two activations, and after the last, the activator simply holds priority. So
+`ActivateMana` - the engine's sequencing of those actions - is, to anyone else, `Priority`; its end is no event; and a
+forced activation (one source) shows only as the activation it is.
+
+### 160.2 The design
+
+* **The kind seen** (`activate.rs` `Game::activating_mana_hidden_from`, `Game::kind_seen_by`): a pending `ActivateMana`
+  is `Priority` for every viewer but its player and the player making that player's decisions (CR 722.4: a controller
+  sees the controlled player's hand). It is read by:
+  * `view_of` (`testkit.rs`): the pending decision's kind as the viewer sees it;
+  * the encoding (`encode.rs` `encode_context`): for a knower that doesn't see the mode, the kind's one-hot and the
+    asking task's code are `Priority`'s (`PriorityAsk`; neither has a card behind it). The row of the decider keeps
+    them. The layout doesn't change;
+  * the search's decision class (`az/mod.rs` `decision_tag`): in a world with an observer (`Game::observer`, set by
+    `determinize` for the tree's viewer), the kind that observer sees. P1's tree therefore holds P0's `ActivateMana`
+    and `Priority` nodes with equal keys and options as one node (P0's own tree, whose worlds keep P0's hand, may split
+    them: P0 knows its mode). The live game (no observer) keeps the kind, so tree reuse (`follow`) reads the real move's
+    class: another seat's `PASS` out of `ActivateMana` has no `answer_obs` and ends the line (no reuse across it), as
+    before. A `PASS` of a hidden `ActivateMana` node of P1's tree reads as a pass of priority to `answer_obs` in a line
+    walk (`line_nodes`), but that edge leads to P0 again, never to the viewer's decision, so it adds no node to a new
+    root. No zero-core change.
+* **The keys** (`flow.rs` `ask_options`, the single-option rule): in the worlds of an observer who doesn't see the mode,
+  the forced end of `ActivateMana` (its one option `PASS`, 147.8) emits no key - it is no event there, exactly like a
+  `PASS` chosen among several (which never had one) - and a forced activation of a lone source is keyed with the
+  payload `HIDDEN` instead of `ActivateMana << 16 | action` (the mode's kind; a hand source's action names its hand
+  slot, whose place reads the hand's other cards; the activation itself shows what it does: the source tapped or the
+  card exiled and revealed, the mana). The live game and the decider's own worlds keep 147.8's key and the payload.
+* **The state-based actions and triggers after each activation** (`activate.rs` `activate_mana`'s `run`): the player
+  receives priority after activating a mana ability (CR 117.3c), so the state-based actions are performed and the
+  waiting triggered abilities put on the stack first (117.5, 117.2a) - a `SbaCheck` before the next `ActivateMana`, as
+  before `Priority`'s decision. Before, inside `ActivateMana` they waited for its `PASS`: a world whose activations had
+  ended (back at `Priority`) checked them while a world still activating didn't, so the two could differ publicly
+  (147.8's cross 13536 and 19515: one game over) - and the rules were not followed (P0 at 1 life paying Mana
+  Confluence's life went on activating). With the check after each activation the two worlds' public states are equal,
+  and the second check `Priority` makes performs nothing.
+* **The walk's check, extended** (`fuzz.rs` `check_information_set`): when two worlds' keys differ only by the other
+  player's forced answers (`KEY_AUTO`) and the worlds show the viewer the same (`view_of`), the key told apart worlds
+  the viewer cannot tell apart. If one of those keys is an `ActivateMana`'s (its kind in the payload, or `HIDDEN`), the
+  walk fails ("keyed apart only by the other player's forced answers, one of its mana activations with priority among
+  them"). Other such keys are counted by decision kind and printed (see 160.4). Verified: with the key suppression
+  disabled, default seed 2122 (the forced end) and seed 12 (a lone Spirit Guide's activation keyed by its hand slot)
+  fail it. The matches' walk (`check_match_information_set`) also compares the worlds' decision classes
+  (`decision_tag`).
+
+### 160.3 Tests
+
+* `activate.rs` `cr_605_3a_the_end_of_mana_activations_is_unseen_by_the_other_player`: P0 holds a hidden Street
+  Wraith, its library Wraiths and Simian Spirit Guides, a Taiga on the battlefield; P0 activates mana abilities and taps
+  the Taiga (the checkpoint: its colour). P1's worlds hold a Guide or a Wraith in P0's hand: after the same answer one
+  asks `ActivateMana` and the other is at `Priority`, the same options - and to P1 equal keys (the forced end unkeyed
+  in P1's worlds), views and layout v7 rows; P0's own view and row keep the mode; the live game and P0's own worlds key
+  the end (147.8); the Guide's world's own `PASS` has no key.
+* `activate.rs` `cr_117_3c_state_based_actions_after_a_mana_ability_activated_with_priority`: P0 at 1 life activates
+  Mana Confluence with a Forest left: it loses then (704.5a), not after it stops activating.
+* `tests/az.rs` `the_mana_activation_mode_encodes_no_hidden_information` (the public-state gate's hidden-information
+  side for the mode): P1's worlds asking `ActivateMana` and at `Priority` give equal keys, views, whole rows (with the
+  match block) and decision classes (`Priority`'s); one state with P0 really holding the Guide: P0's world's class is
+  `ActivateMana`'s, P1's world's `Priority`'s.
+* `tests/fuzz.rs` `activate_mana_end_is_keyed_default_seed_2122` (147.8's) and
+  `activate_mana_end_is_keyed_interactions_seeds` (2031, 13518), with every check of `play`, the extended one included.
+* Before the merge of 664515dc (this branch's first commit 236c85ef, on 288136d7): the three seeds pass with 147.8;
+  A/B on 3ca4fb2d - alone it fails 2122 and 2031, with only 123d80b9's `activate.rs` hunk it passes 2122, 2031 and
+  13518 (the same games).
+
+### 160.4 Left open: other forced answers naming a hidden card's slot
+
+The extended walk counts three more decision kinds whose forced answer alone keyed apart two worlds showing the viewer
+the same (keys, the 20k runs of 160.5): **`ExileCost`** (kind 29; default 26, delver 56, interactions 114) - an "exile
+a card from your hand" cost (Force of Will's alternative cost) that one card of the hand may pay is answered and keyed
+with that card's hand slot (`HAND` + k), whose place reads the hand's other cards; the exiled card shows, the slot
+doesn't; **`PayMana`** (kind 4; default 38, interactions 22) - a payment's lone option (a hand mana source's, by its
+slot, the likely case); **`ChooseHandCard`** (kind 9; default 4). None in the hidden-decklist run. zero-core's tree reuse already treats another seat's non-pass `KEY_AUTO` as `Opaque` (149: "a single
+option naming a hidden card's slot"); in the search the key splits P1's nodes by P0's hand order. Masking such payloads
+in the other player's worlds (as 160.2 does for `ActivateMana`) is the likely fix; it changes the keys of every
+slot-naming forced answer, so it is left to its own decision. The fuzz prints the count per kind (`information sets
+(ENGINE.md 160): ...`).
+
+**One structural difference stays** (the tree, not a key or a view): a forced end is answered inside a transition,
+while a `PASS` chosen out of `ActivateMana` is P0's own move - in P1's tree a P0 node and edge more on that path, with
+the same keys and views. A per-decision tree holds each decision of the other player as a node; only dropping the mode
+(option 2) removes it.
+
+### 160.5 Digests and checks
+
+Digests (behaviour changes: 160.2's state-based check after each activation; the keys of the live game are 147.8's),
+re-recorded with `DIGEST_WRITE=1` on this branch - old = 664515dc's code (computed there; its recorded files predate
+the integration's re-record, 157.10), new = this branch:
+
+| digest | old (664515dc) | new |
+|---|---|---|
+| full (`digests.txt`) | 34e4108ae72a864f | 98bc0f3b192e2a17 |
+| `DIGEST_ENCODING=0` | 03507d43100f154c | 8330141b691c8592 |
+| constructed (`digests_constructed.txt`) | 740055c2e2f6cad1 | 86e4e044fc4e35bb |
+| EoE (`digests_eoe.txt`) | f42b59e6ee67be05 | 02a266cbedb85931 |
+| driver (`digests_driver.txt`) | 18afa79bae20fb06 | 18afa79bae20fb06 (equal; file re-recorded) |
+| dealt (`digests_dealt.txt`) | 33b68571705f3f35 | 33b68571705f3f35 (equal; file re-recorded) |
+
+Checks (throttled, on 19474ea1; the extended check and no `FUZZ_SKIP` in every fuzz run):
+* full engine suite (`cargo test --release -p engine --no-fail-fast`): **2,650 passed, 0 failed, 37 ignored** (a first
+  run's links failed with 0xc0000142 after its parent shell was detached - an environment fault; rerun from a live
+  shell);
+* 20k fuzz, default pool: `test result: ok. 8 passed; 0 failed` (20,000 games, 0 aborted; 438,466 open-decklist walks,
+  2,414,783 states compared; 1,000 matches, 5,394 match walks);
+* 20k fuzz, `FUZZ_POOL=delver`: `test result: ok. 8 passed; 0 failed` (382,826 walks, 1,123,841 states);
+* 20k fuzz, `FUZZ_POOL=interactions`: `test result: ok. 8 passed; 0 failed` (468,580 walks, 2,674,778 states; 1 game
+  aborted by its bound);
+* 2,000 games `FUZZ_HIDDEN_DECKS=1`: `test result: ok. 8 passed; 0 failed` (174,819 hidden-decklist steps);
+* `pytest tests/test_mtg_az.py` (`MTGZ_WIDEN_CHECKPOINT` = lane B's `anchor_v6.pt`): **21 passed**;
+* `python tools/gate.py encoding --no-mac --expect-digest 98bc0f3b192e2a17 --expect-digest0 8330141b691c8592
+  --checkpoint <anchor_v6.pt forked by tools/fork_run.py: iter_0000.pt> --checkpoint-spec <the Delver best-of-three
+  spec>`: build, both digests, digest formats, dealt, `az` 54, checkpoint load (8 games) PASS; **`GATE FAILED encoding
+  19474ea1f207 in 891s - pytest: 1 failed, 0 error(s), 389 passed`**: the one failure is
+  `test_canary_library.py::test_every_spot_reaches_its_recorded_position`, the same five spots 157.9 lists (the
+  canary rerecord pending in 157.10), none new.

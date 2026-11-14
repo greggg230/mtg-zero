@@ -2945,7 +2945,12 @@ impl Game {
     fn encode_context(&self, me: PlayerId, knower: PlayerId, ids: &[u16], x: &mut [f32]) {
         let Some(d) = &self.pending else { return };
         assert!((d.kind as usize) < ctx::KINDS, "decision kind {:?} beyond the context block", d.kind);
-        x[ctx::KIND + d.kind as usize] = 1.0;
+        // Another player's mana activations with priority are that player
+        // holding priority for the knower (ENGINE.md 160): its kind and asking
+        // task are `Priority`'s (no card behind either).
+        let hidden_mode = self.activating_mana_hidden_from(knower);
+        let kind = if hidden_mode { crate::decision::DecisionKind::Priority } else { d.kind };
+        x[ctx::KIND + kind as usize] = 1.0;
         // (Who makes it, CR 722.4: a controlled player's decision is its
         // controller's, framed in the controlled seat, ENGINE.md 100.5.)
         let mine = self.decider_of(d.player) == knower;
@@ -2967,7 +2972,7 @@ impl Game {
             }
         }
         let Some(task) = self.agenda.last() else { return };
-        let t = task_code(task);
+        let t = if hidden_mode { task_code(&Task::PriorityAsk { page: crate::decision::Page::FIRST }) } else { task_code(task) };
         assert!(t < ctx::TASKS);
         x[ctx::TASK + t] = 1.0;
         // The card behind the decision: the resolving or paid-for ability,

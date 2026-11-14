@@ -464,7 +464,9 @@ impl Game {
         let mut v: Vec<u64> = Vec::with_capacity(256);
         self.view_state(viewer, None, &mut v);
         if let Some(d) = &self.pending {
-            v.extend([d.player as u64, d.kind as u64]);
+            // (Its kind as the viewer observes it: another player's mana
+            // activations are that player holding priority, ENGINE.md 160.)
+            v.extend([d.player as u64, self.kind_seen_by(viewer).expect("a decision") as u64]);
             if d.player == viewer {
                 v.extend(d.options.iter().map(|o| o.action as u64));
                 // (A page or a digit: the decider's, as the encoding's
