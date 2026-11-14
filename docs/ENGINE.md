@@ -29622,7 +29622,10 @@ classes, the Pollinator's classes, the sacrifice group), and the aborts with the
 Llanowar Elves; one without {T}), `check_pollinator_bound`, and the activations of a Forest and of the Elves with
 priority (`activate.rs`).
 
-**Checks**: RESULTS_147_11
+**Checks** (on 3c8ae0cf): the test passed; `rules_numbers`, `rules_loops`, `cards_eoe_w2_lands`, `rules_payment_b`: 110
+passed; the behaviour digests **EQUAL** to 0df382d3's (full 7fab36d3268c1033, `DIGEST_ENCODING=0` 84b09dbaa4ccf08c); the
+full engine suite: **2,547 passed, 0 failed, 30 ignored** (147.9's 2,546 and this test). No 20k fuzz (the digests are
+equal: no behaviour change below the bound).
 
 ## 148. Check gaps: digests beyond the cube table, the fuzz's information-set holes, the cross-deck pool, benchmarks on the module's allocator (branch `fix/check-gaps`, 2026-11-12)
 
