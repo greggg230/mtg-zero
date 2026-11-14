@@ -13,7 +13,7 @@
 //! so R plus a fresh fill is already the posterior of what was seen).
 
 use engine::az::constructed::Decklist;
-use engine::az::hidden_decks::{check_sample, seen_weight, sighting_weight, ConstructedPrior, DealCache, DeckPrior, DeckWant, PickWant, SampledDeck, Seen, TablePrior};
+use engine::az::hidden_decks::{check_sample, seen_weight, sighting_weight, ConstructedPrior, DealCache, DeckPrior, DeckWant, PickWant, SampledDeck, Seen, Sight, TablePrior};
 use engine::db::CardDb;
 use engine::rng::Rng;
 
@@ -292,7 +292,7 @@ fn a_small_75_deals_the_exact_posterior_of_the_seen_cards() {
     // ENGINE.md 140.9: how the cards were seen. The two Ponders: a search's find first, then one seen blind; the
     // Bolt: a search's find; the Pyroblast: no sighting (a copy held unseen, as a payment's pinned card). The exact
     // posterior: base x per card the product over its blind sightings j of (D - j) x [D >= R] (x tilt x pick).
-    let mut seen = vec![Seen { def: b, n: 2, searched: 0b01 }, Seen { def: c, n: 1, searched: 0b1 }];
+    let mut seen = vec![Seen::of_order(b, &[true, false]), Seen::of_order(c, &[true])];
     seen.sort_by_key(|x| x.def);
     let exact_seen = |tilted: bool, pick: bool| -> Vec<f64> {
         let mut p: Vec<f64> = decks
@@ -415,8 +415,7 @@ fn a_search_finds_what_it_looks_for_whenever_the_deck_holds_one() {
         let mut rng = Rng::new(0x5EA4C ^ events.len() as u64 ^ (events[0].1 as u64) << 8);
         let (truth, kept) = truth_of_history(&mut draw, &events, volc, sims, &mut rng);
         let shown = vec![volc; events.len()];
-        let searched = events.iter().enumerate().fold(0u64, |m, (j, e)| m | (e.1 as u64) << j);
-        let seen = [Seen { def: volc, n: events.len() as u8, searched }];
+        let seen = [Seen::of_order(volc, &events.iter().map(|e| e.1).collect::<Vec<_>>())];
         let want = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None, pick: None, seen: Some(&seen) };
         let n = 40_000;
         let req = request_hist(&prior, &want, volc, n, &mut rng);
@@ -434,6 +433,164 @@ fn a_search_finds_what_it_looks_for_whenever_the_deck_holds_one() {
     }
 }
 
+/// ENGINE.md 140.9, a card seen again that may be one already seen (the user's option (b)): the opponent's library
+/// top seen (a Volcanic Island), the library shuffled (the viewer's knowledge: a Volcanic is somewhere in it), the top
+/// seen again - a Volcanic. The knowledge counts one card (the second may be the first), and the second sighting's
+/// chance given D copies is 1/53 (the listed card on top) + 52/53 x (D - 1)/59 (a free card, of the 59 the viewer does
+/// not place) - proportional to 52 (D - 1) + 59. The truth by simulation (decks of the prior, shuffled, a hand of seven
+/// and a library of 53, the top looked at, the library shuffled, its top looked at, kept when both are Volcanics)
+/// against the request weighing it so, and against the coarse rule (the second sighting weighs nothing).
+#[test]
+fn a_card_seen_again_weighs_the_deck_by_the_mixture() {
+    let db = cdb();
+    let (_, _, prior) = delver_prior();
+    let volc = db.expect_id("Volcanic Island").unwrap();
+    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None, seen: None };
+    let mut rng = Rng::new(0x5EEA);
+    let (mut truth, mut kept) = ([0.0f64; 9], 0usize);
+    for _ in 0..80 {
+        for s in prior.sample_k(&plain, &[], 30_000, &mut rng) {
+            let mut lib: Vec<u16> = s.deck.clone();
+            rng.shuffle(&mut lib);
+            let mut lib = lib.split_off(7); // the hand: the first seven
+            if lib[0] != volc {
+                continue;
+            }
+            rng.shuffle(&mut lib);
+            if lib[0] != volc {
+                continue;
+            }
+            kept += 1;
+            truth[count(&s.deck, volc)] += 1.0;
+        }
+    }
+    let shown = [volc];
+    // the places: 7 in the hand (no cloud), 53 in the library (a cloud listing the Volcanic): F = 59 free cards; the
+    // top in the cloud's domain of room 53 holding 1 listed card: a = 1 x 59, b = 53 - 1
+    let seen = [Seen { def: volc, sights: vec![Sight { r: 0, a: 0, b: 1, search: false, grows: true }, Sight { r: 1, a: 59, b: 52, search: false, grows: false }] }];
+    let want = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None, pick: None, seen: Some(&seen) };
+    let n = 40_000;
+    let req = request_hist(&prior, &want, volc, n, &mut rng);
+    assert_same_law("a Volcanic seen, shuffled away, a Volcanic seen again", &truth, kept, &req, n);
+    let fill = prior.expected_fill(&want)[volc as usize] + 1.0;
+    let (mr, sr) = mean_se(&req, n);
+    assert!((fill - mr).abs() < 4.5 * sr, "expected_fill {fill:.4} against the request's {mr:.4} +- {sr:.4}");
+    // the coarse rule (ENGINE.md 140.9 before the user's option (b)): the second sighting weighs nothing
+    let coarse = [Seen::of_order(volc, &[false])];
+    let cw = DeckWant { db, n: 60, shown: &shown, companion: None, tilt: None, pick: None, seen: Some(&coarse) };
+    let ch = request_hist(&prior, &cw, volc, n, &mut rng);
+    let ((mt, st), (mc, sc)) = (mean_se(&truth, kept), mean_se(&ch, n));
+    let z = (mc - mt) / (st * st + sc * sc).sqrt();
+    println!("   the coarse rule: {mc:.4} +- {sc:.4}, {z:.1} se from the truth");
+    assert!(z.abs() > 6.0, "the coarse rule is not told from the truth ({z:.1} se)");
+    // the table prior weighs it the same way (the EoE table, a Forest seen, shuffled away, a Forest seen again)
+    let edb = CardDb::eoe();
+    let tp = TablePrior::of(edb);
+    let forest = edb.id("Forest").unwrap();
+    let tplain = DeckWant { db: edb, n: 40, shown: &[], companion: None, tilt: None, pick: None, seen: None };
+    let (mut ttruth, mut tkept) = ([0.0f64; 9], 0usize);
+    for _ in 0..2_000_000 {
+        let s = tp.sample(&tplain, &mut rng);
+        let mut lib = s.deck.clone();
+        rng.shuffle(&mut lib);
+        let mut lib = lib.split_off(7);
+        if lib[0] != forest {
+            continue;
+        }
+        rng.shuffle(&mut lib);
+        if lib[0] != forest {
+            continue;
+        }
+        tkept += 1;
+        ttruth[count(&s.deck, forest)] += 1.0;
+    }
+    // 40 cards: 7 in the hand, 33 in the library: F = 39; room 33, one listed: a = 39, b = 32
+    let tseen = [Seen { def: forest, sights: vec![Sight { r: 0, a: 0, b: 1, search: false, grows: true }, Sight { r: 1, a: 39, b: 32, search: false, grows: false }] }];
+    let tshown = [forest];
+    let tw = DeckWant { db: edb, n: 40, shown: &tshown, companion: None, tilt: None, pick: None, seen: Some(&tseen) };
+    let treq = request_hist(&*tp, &tw, forest, n, &mut rng);
+    assert_same_law("table prior: a Forest seen, shuffled away, a Forest seen again", &ttruth, tkept, &treq, n);
+    let tfill = tp.expected_fill(&tw)[forest as usize] + 1.0;
+    let (tmr, tsr) = mean_se(&treq, n);
+    assert!((tfill - tmr).abs() < 4.5 * tsr, "table expected_fill {tfill:.4} against the request's {tmr:.4}");
+}
+
+/// The knowledge layer keeps a card seen again with its terms (ENGINE.md 140.9): P0's Mishra's Bauble looks at P1's
+/// top card (a Volcanic Island: one more card, outside every cloud), P1's Scalding Tarn finds an Island and shuffles
+/// (P0's Volcanic now somewhere in the library), P0's second Bauble looks at the top again (a Volcanic: it may be the
+/// one seen). (A look at a library card its owner doesn't know is not remembered, ENGINE.md 10: P1's own Baubles look
+/// first.) The second's terms: P1's places for P0 are the hand's seven and the library's two, the library a cloud of
+/// room 2 listing one Volcanic, so F = 8, a = 1 x 8, b = 2 - 1; R had one Volcanic.
+#[test]
+fn the_knowledge_weighs_a_card_seen_again() {
+    use engine::db::AbilitySlot;
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Game, Step, Target, Zone};
+    fn settle(g: &mut Game, prefer: impl Fn(&Game) -> Option<Choice>) {
+        for _ in 0..300 {
+            let Some(d) = g.pending_decision() else { return };
+            if d.kind == DecisionKind::Priority {
+                if g.stack().is_empty() {
+                    return;
+                }
+                g.pass();
+                continue;
+            }
+            let c: Choice = prefer(g).filter(|&c| g.has_option(c)).unwrap_or(d.options[0].choice);
+            g.choose(c);
+        }
+        panic!("settle: no progress");
+    }
+    let db = cdb();
+    let id = |s: &str| db.expect_id(s).unwrap();
+    let mut g = Scenario::new(db)
+        .spec(|s| {
+            s.auto_single = false;
+            s.hidden_decks = true;
+            s.deck_clouds = true;
+        })
+        .battlefield(0, &["Mishra's Bauble", "Mishra's Bauble"])
+        .library(0, &["Island"; 10])
+        .battlefield(1, &["Scalding Tarn", "Mishra's Bauble", "Mishra's Bauble"])
+        .hand(1, &["Brainstorm", "Ponder", "Daze", "Lightning Bolt", "Force of Will", "Wasteland", "Unholy Heat"])
+        .library(1, &["Volcanic Island", "Island", "Volcanic Island"])
+        .at(Step::Main1, 0)
+        .start();
+    // P1 looks at its own top card (P0 passes priority to it), then P0 does
+    let own_look = |g: &mut Game| {
+        g.pass();
+        assert_eq!(g.turn().priority, 1);
+        g.choose(Choice::Ability(g.card(1, "Mishra's Bauble", Zone::Battlefield), AbilitySlot::Activated(0)));
+        settle(g, |_| Some(Choice::Target(Target::Player(1))));
+        assert_eq!(g.turn().priority, 0);
+    };
+    own_look(&mut g);
+    let b1 = g.card(0, "Mishra's Bauble", Zone::Battlefield);
+    g.choose(Choice::Ability(b1, AbilitySlot::Activated(0)));
+    settle(&mut g, |_| Some(Choice::Target(Target::Player(1))));
+    let top = *g.player(1).library.last().unwrap();
+    assert!(g.knows(0, top) && g.obj(top).def == id("Volcanic Island"), "P0 saw P1's top Volcanic
+{}", g.log_lines().join("
+"));
+    // P1 cracks the Tarn for the Island (P0 passes priority to it)
+    g.pass();
+    assert_eq!(g.turn().priority, 1);
+    g.choose(Choice::Ability(g.card(1, "Scalding Tarn", Zone::Battlefield), AbilitySlot::Activated(0)));
+    settle(&mut g, |_| Some(Choice::Def(id("Island"))));
+    assert_eq!(g.player(1).library.len(), 2);
+    assert_eq!(g.turn().priority, 0);
+    own_look(&mut g);
+    let b2 = g.card(0, "Mishra's Bauble", Zone::Battlefield);
+    g.choose(Choice::Ability(b2, AbilitySlot::Activated(0)));
+    settle(&mut g, |_| Some(Choice::Target(Target::Player(1))));
+    let v: Vec<_> = g.sightings().iter().filter(|x| x.viewer == 0 && x.owner == 1).map(|x| (x.def, x.grows, x.searched, x.a, x.b, x.x)).collect();
+    let volc = id("Volcanic Island");
+    assert_eq!(v.first(), Some(&(volc, true, false, 0, 1, 0)), "the first look: one more card, outside every cloud
+{v:?}");
+    assert_eq!(v.last(), Some(&(volc, false, false, 8, 1, 0)), "the second look: a listed card seen again, a = 8, b = 1
+{v:?}");
+}
+
 /// The table prior (ENGINE.md 140.9) given a search's find: a fill of independent draws is not the posterior of a
 /// find (it weighs a deck by [D > j], not D - j), so a found definition's fill comes from the exact joint law first.
 /// The EoE table, Forest: a find alone and a find after one seen blind, against the truth by simulation; the
@@ -449,8 +606,7 @@ fn the_table_prior_weighs_a_search_by_finding_one() {
         let mut rng = Rng::new(0x7AB5E ^ events.len() as u64);
         let (truth, kept) = truth_of_history(&mut draw, &events, forest, sims, &mut rng);
         let shown = vec![forest; events.len()];
-        let searched = events.iter().enumerate().fold(0u64, |m, (j, e)| m | (e.1 as u64) << j);
-        let seen = [Seen { def: forest, n: events.len() as u8, searched }];
+        let seen = [Seen::of_order(forest, &events.iter().map(|e| e.1).collect::<Vec<_>>())];
         let want = DeckWant { db, n: 40, shown: &shown, companion: None, tilt: None, pick: None, seen: Some(&seen) };
         let n = 40_000;
         let req = request_hist(&*p, &want, forest, n, &mut rng);

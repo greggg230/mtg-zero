@@ -29682,12 +29682,43 @@ when seen (its sighting kept, ordered at the search), when it goes into a hand (
 anyone but their owner, ENGINE.md 10: a tutor's unrevealed find is no sighting, and a card later cast from that hand
 is seen blind), or when it is shuffled with cards that are not finds (`scramble`, `forget_order`).
 
-**The record** (`Game::sightings`, `Sighting`): every fresh sighting - `learn` and `knowledge_leaves` when no cloud of
-the viewer's could have listed the card - with its order (`Game::sight_at`) and whether it was a find. A sighting a
-cloud could have listed (the card may be one seen before: `learn` and `knowledge_leaves` drop the listed entry) is
-no new card of R and keeps nothing (140's coarse rule, open point below). Kept only with whole-deck clouds
-(`hidden_decklists`, `deck_clouds`): R never loses a card there, and a game without them (every digest game) keeps
-nothing and marks nothing.
+**The record** (`Game::sightings`, `Sighting`): every sighting of a card hidden from the viewer (`learn`,
+`knowledge_leaves`) with its order (`Game::sight_at`), whether it was a find, whether it grew R (no cloud of the
+viewer's could have listed it), and its chance given the deck under the deal's model just before it (`sight_terms`,
+below). Kept only with whole-deck clouds (`hidden_decklists`, `deck_clouds`): R never loses a card there, and a game
+without them (every digest game) keeps nothing and marks nothing; and only in the real game - in a world `determinize`
+dealt (`Game::observer`) nothing is kept and the world's sightings are lost (`sightings_lost`), so a deal from a world
+weighs every seen card blind.
+
+**A card seen again** (the user's option (b), 11-13). When the viewer sees a card a cloud of its lists (a Volcanic
+Island seen on top, the library shuffled, a Volcanic seen on top again), the knowledge counts one card (the second may
+be the first: `learn` and `knowledge_leaves` drop the listed entry) - but the sighting is evidence. Under the deal's
+model as the knowledge stood (each cloud's listed cards uniform over its domain's places, the free cards - the deck less
+R, F of them - uniform over the free places, `resample_with_clouds`), the chance that the seen place holds `d`'s card is
+cnt / m (one of its cloud's cnt listed copies, the domain of m places holding n listed cards) + (m - n) / m x (D_d -
+R_d) / F (a free card), proportional to b (D_d - R_d) + a with a = cnt F, b = m - n; outside every cloud a = 0, b = 1
+(the blind sighting's D_d - R_d); a cloud whose places are all listed gives b = 0, a chance the deck does not change; a
+pinned place is fixed (b = 0). `sight_terms` takes these from the knowledge just before the sighting (the deal's places,
+`cloud_needs`'s rule for each cloud's listed copies) with R_d then; a request's sightings (`Sight`) carry r = R_d before
+each (the grown sightings before it in order, a find at its search, plus what else the knowledge held then: a payment's
+pinned cards), and `Seen::weight` multiplies b (c - r) + a for a blind one (0 when c < r: the copies fixed then are
+cards of the deck), [c > r] for a find (1 when a listed copy stood: one was there to find). Both priors weigh it
+exactly - the constructed prior's tables, the table prior's corrected fill (any definition whose sightings are not r
+plain blind ones). Test: `a_card_seen_again_weighs_the_deck_by_the_mixture` (the Delver 75's Volcanic and the EoE
+table's Forest, seen, shuffled away, seen again, against the truth by simulation; the coarse rule off by many standard
+errors: the Delver 75's truth 3.8192 +- 0.0047 Volcanics, the request 3.8259, the coarse rule 3.7471, 13.1 se off);
+`the_knowledge_weighs_a_card_seen_again` (two Mishra's Bauble looks around a Scalding Tarn's shuffle - P1's own
+Baubles look first, since a look at a card its owner doesn't know is not remembered, ENGINE.md 10: the second
+sighting recorded with a = 8, b = 1, R one Volcanic).
+
+**A known, named limitation: the arrangement after a card seen again.** The deck is weighed exactly by the mixture,
+but the knowledge stays coarse afterwards: the listed entry is dropped and the seen card is known, while exactly the
+posterior is a mixture - with chance a / (b (D - R) + a) it was the listed card (no other copy known in the domain),
+else a free card and the listed card is still in the domain. The clouds hold sets, not mixtures, so `determinize` deals
+the hidden cards given the deck as if the listed card had been the one seen: a listed card that may still be in the
+domain is not kept there. (The deck's weight and the arrangement's deal are each the deal's model; only their joint
+after such a sighting is not the exact joint.) A hub todo tracks the mixture-capable knowledge layer that would make it
+exact (option (c)).
 
 **The check.** `MtgAz::seen_of` builds each request's sightings (by definition, in order) and asserts they are exactly
 what the knowledge says the viewer saw - the deck's cards it knows (a payment's pinned cards are not known) and its
@@ -29762,17 +29793,13 @@ seen card blind; the engine never calls it.
 
 **Open points.**
 
-* **A sighting that may be a card seen before** (140's coarse rule, unchanged here): when the viewer sees a card a
-  cloud of its lists (a Volcanic Island seen, shuffled away, and a Volcanic seen again), the knowledge drops the
-  listed entry and R does not grow, and the sighting weighs nothing. Exactly it weighs a + b (D_i - R_i): the cloud's
-  listed card in that place (a, its share of the place) or a fresh copy (b, the place's share of free cards over the
-  free cards, as 129.3's a + b y). The clouds cannot hold the mixture that follows (the listed card still there or
-  not), so the deal of the arrangement would then not match the deck's weight. Options: (a) keep the coarse rule
-  (the knowledge layer's, documented); (b) weigh the deck by the exact factor and accept the arrangement deal's
-  coarseness; (c) mixture-capable clouds - a knowledge-layer redesign.
-* **Other choices by kind**: a pitched card (Force of Will exiles a blue card from the hand), a discard of a kind,
-  and a card chosen from looked-at cards (Impulse's top four) are chosen by what they are too; the user's decision
-  covered library searches only, so they stay blind sightings.
+* **A sighting that may be a card seen before** - decided (b), 11-13: the deck weighed by the exact mixture (above,
+  "A card seen again"); the arrangement after it is the named limitation above; (c), mixture-capable clouds, is a hub
+  todo.
+* **Other choices by kind** - decided 11-13: a pitched card (Force of Will exiles a blue card from the hand), a discard
+  of a kind, and a card chosen from looked-at cards (Impulse's top four) stay random sightings (blind: the weight of a
+  card seen among the cards it was chosen from as if chosen uniformly), by the user's decision; only library searches
+  weigh as finds.
 * **The hand and the library**: the model finds a card whenever the deck holds one, not whenever the library does;
   a find does not change the deal of the hand (both the user's model as approved).
 * **For lane A2**: `DeckWant` gained `seen` (A2's literals need it: `seen: None`, or the request's sightings); a game-3

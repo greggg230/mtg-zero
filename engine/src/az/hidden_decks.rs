@@ -59,22 +59,67 @@ pub struct DeckWant<'a> {
     pub seen: Option<&'a [Seen]>,
 }
 
-/// How the viewer saw one definition's cards of a request's `shown` (ENGINE.md 140.9): `n` sightings in the order
-/// seen (`Game::sightings`), bit j of `searched` set when the j-th was its owner's library search finding it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// How the viewer saw one definition's cards of a request's `shown` (ENGINE.md 140.9): its sightings in the order
+/// seen (`Game::sightings`), each with its chance given the deck's copies.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Seen {
     pub def: DefId,
-    pub n: u8,
-    pub searched: u64,
+    pub sights: Vec<Sight>,
+}
+
+/// One sighting of a definition's card (ENGINE.md 140.9; `hidden::Sighting`): `r` copies of it fixed for the viewer
+/// before it (R then); a blind sighting's chance is b (c - r) + a for c copies in the deck (a: a listed copy seen
+/// again, b: a free copy; b = 0 a chance the deck does not change); a search's find (`search`) finds one whenever the
+/// deck holds one: chance 1 when a listed copy stood (a > 0), else [c > r]; `grows`: one more distinct card seen. Any
+/// sighting needs c >= r (the copies fixed then are cards of the deck).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Sight {
+    pub r: i32,
+    pub a: u64,
+    pub b: u64,
+    pub search: bool,
+    pub grows: bool,
 }
 
 impl Seen {
-    /// The chance of these sightings given c copies in the deck, up to a factor of the request alone (c at least
-    /// the shown copies): a blind sighting when j copies were seen before is one of the c - j unseen copies,
-    /// chance proportional to c - j; a search's find, when j were seen before, finds one whenever the deck holds
-    /// one more (the owner finds what it looks for), chance 1 given c > j. So prod over the blind j of (c - j).
+    /// Fresh sightings only (each one more card, none a listed card seen again), in order, `searched[j]` the j-th's a
+    /// search's find: the j-th with j copies seen before it (tests, analysis).
+    pub fn of_order(def: DefId, searched: &[bool]) -> Seen {
+        let sights = searched.iter().enumerate().map(|(j, &search)| Sight { r: j as i32, a: 0, b: 1, search, grows: true }).collect();
+        Seen { def, sights }
+    }
+
+    /// The sightings that grew R (distinct cards seen).
+    pub fn grown(&self) -> usize {
+        self.sights.iter().filter(|x| x.grows).count()
+    }
+
+    /// The chance of these sightings given c copies in the deck, up to a factor of the request alone: the product of
+    /// each sighting's (`Sight`): a blind one b (c - r) + a, a find [c > r] (1 when a listed copy stood), 0 when c < r.
+    /// Fresh blind sightings only: prod over j of (c - j), C(c, n)'s shape (ENGINE.md 140).
     pub fn weight(&self, c: u8) -> f64 {
-        (0..self.n).filter(|&j| self.searched >> j & 1 == 0).map(|j| (c as f64 - j as f64).max(0.0)).product()
+        let c = c as i64;
+        let mut w = 1.0;
+        for x in &self.sights {
+            let r = x.r as i64;
+            if c < r {
+                return 0.0;
+            }
+            if x.search {
+                if x.a == 0 && c <= r {
+                    return 0.0;
+                }
+            } else if x.b > 0 {
+                w *= x.b as f64 * (c - r) as f64 + x.a as f64;
+            }
+        }
+        w
+    }
+
+    /// Is this the weight of `r` copies seen blind, each one more card (the likelihood C(c, r) up to a factor): no
+    /// find, no listed card seen again, the j-th seen when j were?
+    fn plain(&self, r: usize) -> bool {
+        self.sights.len() == r && self.sights.iter().enumerate().all(|(j, x)| !x.search && x.grows && x.a == 0 && x.b > 0 && x.r == j as i32)
     }
 }
 
@@ -175,9 +220,8 @@ fn table_corrections(want: &DeckWant, k: usize) -> Vec<(DefId, Vec<f64>)> {
         let d = want.shown[i];
         let r = want.shown[i..].iter().take_while(|&&x| x == d).count();
         i += r;
-        let s = seen.binary_search_by_key(&d, |x| x.def).ok().map(|k| seen[k]);
-        let all_blind = s.is_some_and(|s| s.n as usize == r && s.searched == 0);
-        if all_blind {
+        let s = seen.binary_search_by_key(&d, |x| x.def).ok().map(|k| &seen[k]);
+        if s.is_some_and(|s| s.plain(r)) {
             continue;
         }
         // g(f) = w(r + f) f! / (r + f)!, w the sightings' weight (1 without sightings): prod over the blind j of
@@ -720,17 +764,18 @@ impl MtgAz {
         }
         let db = g.db();
         let range = if o == 0 { 0..sizes[0] } else { sizes[0]..sizes[0] + sizes[1] };
-        let mut log: Vec<(DefId, u32, bool)> = g.sightings.iter().filter(|x| x.viewer == viewer && x.owner == o).map(|x| (x.def, x.at, x.searched)).collect();
-        log.sort_unstable();
+        let mut log: Vec<&crate::hidden::Sighting> = g.sightings.iter().filter(|x| x.viewer == viewer && x.owner == o).collect();
+        log.sort_by_key(|x| (x.def, x.at));
         let mut seen: Vec<Seen> = Vec::new();
-        for (d, _, searched) in log {
-            if seen.last().is_none_or(|x| x.def != d) {
-                seen.push(Seen { def: d, n: 0, searched: 0 });
+        for x in log {
+            if seen.last().is_none_or(|s| s.def != x.def) {
+                seen.push(Seen { def: x.def, sights: Vec::new() });
             }
-            let x = seen.last_mut().expect("an entry");
-            assert!(x.n < 64, "hidden decks: 64 sightings of one card");
-            x.searched |= (searched as u64) << x.n;
-            x.n += 1;
+            let s = seen.last_mut().expect("an entry");
+            // (R's copies before it: the grown sightings before it in order - a find at its search - and the
+            // excess the knowledge held then, pinned cards)
+            let r = s.grown() as i32 + x.x;
+            s.sights.push(Sight { r, a: x.a, b: x.b, search: x.searched, grows: x.grows });
         }
         // what the knowledge says the viewer saw: the deck's cards it knows, its clouds' cards, less the identities of
         // `o`'s cards outside the deck that it does not know in hidden zones
@@ -749,16 +794,20 @@ impl MtgAz {
         while i < saw.len() {
             let d = saw[i];
             let n = saw[i..].iter().take_while(|&&x| x == d).count();
-            let kept = seen.binary_search_by_key(&d, |x| x.def).map_or(0, |k| seen[k].n as usize);
+            let kept = seen.binary_search_by_key(&d, |x| x.def).map_or(0, |k| seen[k].grown());
             assert_eq!(kept, n, "hidden decks: P{viewer} saw {n} of P{o}'s {} and kept {kept} sightings of them (ENGINE.md 140.9)", db.def(d).name);
             i += n;
         }
-        for x in &seen {
-            assert!(saw.binary_search(&x.def).is_ok(), "hidden decks: P{viewer} kept {} sightings of P{o}'s {} it does not know of (ENGINE.md 140.9)", x.n, db.def(x.def).name);
+        for x in seen.iter().filter(|x| x.grown() > 0) {
+            assert!(saw.binary_search(&x.def).is_ok(), "hidden decks: P{viewer} kept {} sightings of P{o}'s {} it does not know of (ENGINE.md 140.9)", x.grown(), db.def(x.def).name);
         }
-        // (Every card of R seen blind, none held unseen: the likelihood is C(D_i, R_i), the request's None - one
-        // form of one request, the same key and draws as 140's.)
-        let blind = seen.iter().all(|x| x.searched == 0) && saw.len() == kn.required.len();
+        // (Every card of R seen blind, each one more card, none held unseen: the likelihood is C(D_i, R_i), the
+        // request's None - one form of one request, the same key and draws as 140's.)
+        let blind = saw.len() == kn.required.len()
+            && seen.iter().all(|x| {
+                let r = saw.iter().filter(|&&d| d == x.def).count();
+                x.plain(r)
+            });
         if blind {
             return None;
         }
@@ -1752,7 +1801,7 @@ impl ConstructedPrior {
         if let Some(v) = want.seen {
             for x in v {
                 let r = want.shown.iter().filter(|&&d| d == x.def).count();
-                assert!(x.n as usize <= r && x.n <= 64, "the constructed prior: {} sightings of {} for {r} shown", x.n, want.db.def(x.def).name);
+                assert!(x.grown() <= r, "the constructed prior: {} sightings of {} for {r} shown", x.grown(), want.db.def(x.def).name);
             }
         }
         assert_eq!(want.n, self.n, "the constructed prior: a deck of {} cards, not the main's {}", want.n, self.n);
@@ -1968,8 +2017,11 @@ impl DealCache {
         if let Some(v) = want.seen {
             h = crate::rng::split64(h ^ 0x5EE5_1E40 ^ v.len() as u64);
             for x in v {
-                h = crate::rng::split64(h ^ x.def as u64 ^ (x.n as u64) << 16);
-                h = crate::rng::split64(h ^ x.searched);
+                h = crate::rng::split64(h ^ x.def as u64 ^ (x.sights.len() as u64) << 16);
+                for y in &x.sights {
+                    h = crate::rng::split64(h ^ (y.r as u32 as u64) ^ (y.search as u64) << 32 ^ (y.grows as u64) << 33);
+                    h = crate::rng::split64(h ^ y.a ^ y.b.rotate_left(31));
+                }
             }
         }
         h

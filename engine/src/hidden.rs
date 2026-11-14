@@ -94,11 +94,17 @@ pub struct Cloud {
     pub defs: Vec<DefId>,
 }
 
-/// A fresh sighting (ENGINE.md 140.9): `viewer` learned that `owner`'s card `obj` is `def` (its card), a card no
-/// cloud of the viewer's could have listed - so one more distinct card of the owner's seen, one more card of
-/// `sample::knowledge`'s R. `at` orders the sightings of one game (`Game::sight_at`); a card found by its owner's
-/// library search (`searched`) is ordered at its search, when it left the cards the viewer had not seen. Kept only
-/// where whole-deck clouds are (`hidden_decklists`, `deck_clouds`: R never loses a card there).
+/// A sighting (ENGINE.md 140.9): `viewer` learned that `owner`'s card `obj`, hidden from it, is `def` (its card).
+/// `at` orders the sightings of one game (`Game::sight_at`); a card found by its owner's library search
+/// (`searched`) is ordered at its search, when it left the cards the viewer had not seen. `grows`: no cloud of the
+/// viewer's could have listed it, so it is one more distinct card seen (`sample::knowledge`'s R grew); else it may
+/// be a listed card seen again. Its chance given the deck under the deal's model just before it (the clouds' listed
+/// cards uniform in their domains, the free cards over the free places): b (D_def - R_def) + a up to a common scale
+/// - a the share of the place's listed copies (the copies a cloud lists in its domain x the free cards), b the
+/// place's free share (its domain's free places, or 1 outside every cloud); b = 0: a chance the deck does not
+/// change. `x`: R_def before it less the sightings that had grown R (a payment's pinned cards; ENGINE.md 140.9).
+/// Kept only where whole-deck clouds are (`hidden_decklists`, `deck_clouds`: R never loses a card there), and only
+/// in a game no `determinize` dealt (`Game::observer`: a world's are dropped, `sightings_lost`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Sighting {
     pub viewer: PlayerId,
@@ -107,6 +113,10 @@ pub struct Sighting {
     pub def: DefId,
     pub at: u32,
     pub searched: bool,
+    pub grows: bool,
+    pub a: u64,
+    pub b: u64,
+    pub x: i32,
 }
 
 /// The rare-rule bits (`Game::seen`) of each definition of `db`, its back
@@ -611,6 +621,7 @@ impl Game {
             return;
         }
         let (owner, zone, d) = (o.owner, o.zone, self.ident(c));
+        let terms = self.sight_terms(q, owner, c, zone, d);
         let mut merged = false;
         for k in self.clouds.iter_mut().filter(|k| k.viewer == q) {
             if Self::in_domain_at(k, owner, c, zone) {
@@ -619,10 +630,8 @@ impl Game {
             }
         }
         self.objs[c.i()].known |= 1 << q;
-        // (A listed card the viewer may be seeing again is not a new one: ENGINE.md 140.9.)
-        if !merged {
-            self.sighted(q, owner, c, d);
-        }
+        // (A listed card the viewer may be seeing again is not a new one, and its chance is the mixture: 140.9.)
+        self.sighted(q, owner, c, d, !merged, terms);
         if q != owner {
             self.untrack_found(c);
         }
@@ -636,14 +645,20 @@ impl Game {
         self.spec.hidden_decklists || self.spec.deck_clouds
     }
 
-    /// `q` sees `owner`'s card `c` (identity `d`) for the first time: a sighting, ordered at its owner's search if it
-    /// was found by one and the viewer could tell it apart since (`found`), else now.
-    fn sighted(&mut self, q: PlayerId, owner: PlayerId, c: CardIdx, d: DefId) {
+    /// `q` sees `owner`'s card `c` (identity `d`), hidden from it: a sighting, ordered at its owner's search if it was
+    /// found by one and the viewer could tell it apart since (`found`), else now; `grows` and `terms`
+    /// (`sight_terms`, taken before the knowledge changed) as `Sighting` says. In a world (`observer`) nothing is
+    /// kept and the world's sightings are lost (a deal from it weighs every seen card blind).
+    fn sighted(&mut self, q: PlayerId, owner: PlayerId, c: CardIdx, d: DefId, grows: bool, terms: Option<(u64, u64, i32)>) {
         if q == owner || !self.keeps_sightings() {
             return;
         }
+        let Some((a, b, x)) = terms else {
+            self.sightings_lost = true;
+            return;
+        };
         let def = self.db.def(d).card_def(d);
-        let (at, searched) = match self.found.iter().find(|x| x.0 == c) {
+        let (at, searched) = match self.found.iter().find(|f| f.0 == c) {
             Some(&(_, t)) => (t, true),
             None => {
                 let t = self.sight_at;
@@ -651,14 +666,83 @@ impl Game {
                 (t, false)
             }
         };
-        self.sightings.push(Sighting { viewer: q, owner, obj: c, def, at, searched });
+        self.sightings.push(Sighting { viewer: q, owner, obj: c, def, at, searched, grows, a, b, x });
+    }
+
+    /// The terms of `q`'s sighting of `owner`'s card `c` (identity `d`, in hidden zone `zone`) under the deal's model
+    /// as the knowledge stands before it (`Sighting`): the deal's places (`hidden_slots`, `c` among them), each in the
+    /// domain of at most one cloud, each cloud's listed copies (`cloud_needs`'s rule: a pinned card in the domain
+    /// fulfils its identity, at most the domain's room), the free cards F = places - listed copies; `c`'s place in
+    /// cloud k of room m holding n listed cards, cnt of them `d`'s card: a = cnt F, b = m - n (outside every cloud a =
+    /// 0, b = 1; a pinned `c`: fixed, b = 0); `x` = R_d (the deck's cards not among the places - known or pinned -,
+    /// the listed copies, less the cards outside the deck among the places) less the grown sightings of `d`'s card
+    /// so far. None where nothing is kept (`sighted`).
+    fn sight_terms(&self, q: PlayerId, owner: PlayerId, c: CardIdx, zone: Zone, d: DefId) -> Option<(u64, u64, i32)> {
+        if q == owner || !self.keeps_sightings() || self.observer.is_some() {
+            return None;
+        }
+        let db = self.db;
+        let def = db.def(d).card_def(d);
+        let card = |x: CardIdx| {
+            let e = self.face_down_id(x).unwrap_or_else(|| self.own_def(x));
+            db.def(e).card_def(e)
+        };
+        let (slots0, pinned) = self.hidden_slots(q, owner);
+        let mut slots: Vec<CardIdx> = slots0.to_vec();
+        let fixed = pinned.contains(&c);
+        if !fixed && !slots.contains(&c) {
+            slots.push(c);
+        }
+        let zone_of = |x: CardIdx| if x == c { zone } else { self.objs[x.i()].zone };
+        let clouds: Vec<&Cloud> = self.clouds.iter().filter(|k| k.viewer == q && k.owner == owner).collect();
+        let home: Vec<Option<usize>> = slots.iter().map(|&x| clouds.iter().position(|k| Self::in_domain_at(k, owner, x, zone_of(x)))).collect();
+        let mut needs: Vec<Vec<DefId>> = Vec::with_capacity(clouds.len());
+        for (ki, k) in clouds.iter().enumerate() {
+            let mut need = k.defs.clone();
+            for &p in &pinned {
+                if Self::in_domain_at(k, owner, p, self.objs[p.i()].zone) {
+                    take_one(&mut need, self.objs[p.i()].def);
+                }
+            }
+            need.truncate(home.iter().filter(|&&h| h == Some(ki)).count());
+            needs.push(need);
+        }
+        let free = slots.len() - needs.iter().map(|n| n.len()).sum::<usize>();
+        let (a, b) = if fixed {
+            (1, 0)
+        } else {
+            let i = slots.iter().position(|&x| x == c).expect("the seen card is one of the deal's places");
+            match home[i] {
+                None => (0, 1),
+                Some(k) => {
+                    let room = home.iter().filter(|&&h| h == Some(k)).count();
+                    let cnt = needs[k].iter().filter(|&&x| db.def(x).card_def(x) == def).count();
+                    ((cnt * free) as u64, (room - needs[k].len()) as u64)
+                }
+            }
+        };
+        let deck = |x: CardIdx| x.get() < self.first_token && self.players[owner as usize].companion != Some(x);
+        let mut r: i32 = needs.iter().flatten().filter(|&&x| db.def(x).card_def(x) == def).count() as i32;
+        for i in 0..self.objs.len() {
+            let x = CardIdx::new(i as u32);
+            if self.objs[i].owner != owner || card(x) != def {
+                continue;
+            }
+            match (deck(x), slots.contains(&x)) {
+                (true, false) => r += 1,
+                (false, true) => r -= 1,
+                _ => {}
+            }
+        }
+        let grown = self.sightings.iter().filter(|s| s.viewer == q && s.owner == owner && s.def == def && s.grows).count() as i32;
+        Some((a, b, r - grown))
     }
 
     /// Card `c`, just found by its owner's library search (CR 701.19; `DecisionKind::SearchLibrary`), is a find the
     /// other player can tell apart (ENGINE.md 140.9) until it is seen, goes into a hand, or is shuffled with cards
     /// that are not finds: its sighting is a search's.
     pub(crate) fn found_by_search(&mut self, c: CardIdx) {
-        if !self.keeps_sightings() {
+        if !self.keeps_sightings() || self.observer.is_some() {
             return;
         }
         let t = self.sight_at;
@@ -749,6 +833,7 @@ impl Game {
                         .find(|&x| self.objs[x.i()].def == d && self.objs[x.i()].known & (1 << q) != 0 && !self.told_apart(x))
                 })
                 .flatten();
+            let terms = self.sight_terms(q, owner, c, from, d);
             let mut merged = twin.is_some();
             for k in self.clouds.iter_mut().filter(|k| k.viewer == q) {
                 if Self::in_domain_at(k, owner, c, from) {
@@ -758,10 +843,8 @@ impl Game {
                     }
                 }
             }
-            // (A card the viewer may have seen before is not a new one: ENGINE.md 140.9.)
-            if !merged {
-                self.sighted(q, owner, c, d);
-            }
+            // (A card the viewer may have seen before is not a new one, and its chance is the mixture: 140.9.)
+            self.sighted(q, owner, c, d, !merged, terms);
             if let Some(t) = twin {
                 // The known `d` in hand becomes one of the hand's unknowns;
                 // a cloud over the hand keeps "a `d` is there" if it lists
