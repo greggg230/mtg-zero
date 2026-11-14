@@ -31551,6 +31551,7 @@ number; each lane's in-place corrections of older sections applied as merged):
 | b48f575d | `fix/autopass-reuse` deaf0993 (H) | 149 | the gitlink: H's a1d8300 -> zero-core `integrate/fable-1112` 77b31ab (157.2). `az/mod.rs` (MtgAz's `ANSWERS`, `decision_tag`, `answer_obs`, `key_obs`, appended to `impl SearchGame`) merged clean beside A2's and dealt decks' changes; 149's in-place note in section 10 kept. **Search behaviour changes on purpose** (149.4): the search's signatures carry the decision kind and the reuse follows the line, so `check_checkpoint_compat` differs from the baseline and G's driver digest (`digests_driver.txt`) no longer matches until the final re-record. Engine digests EQUAL. |
 | 083be1b3 | `fix/farm-fuzz` 5c16205a (the leftovers session's) | 152 | `docs/ENGINE.md` only; the engine (`Game::pile_sorted` and the pile sites, `encode.rs`'s `decision_list` and bag squash, `pay.rs`, `eoe_w4.rs`) and `fuzz.rs`'s `check_determinize_hidden` merged clean beside A2's and G's changes. `digests.txt`: its re-record taken as is (four games: full 438164c0429d7fa3 -> e5675fc9d4da7a20, `DIGEST_ENCODING=0` a0062bb5569e06d3 -> b255e81fe5402cf3); the integration re-records once at the end. The canary library's five spots: 157.9. |
 | 0627e7e5 | `fix/autopass-reuse` e6ee19cf (H, docs) | 149 | 149.5 (memory, the gate-size smoke) placed at the end of 149. |
+| f8e40bfd | `feat/dealt-decks` 18b662a8 (final: 154.4-154.7, `digests_dealt.txt`) | 154 | `engine/tests/fuzz.rs`: its own fix of the post-sideboard assert (28418cbf) against this branch's (8ca09d5f) - one kept, the exact one (order, turn, done and decider in both cases); its `kept_or_dealt` (no more `kept.max(dealt_decks)`) in the assertion beside fuzz-invariants' and A2's report lines. `docs/ENGINE.md`: 154.5's placeholder replaced by 154.5-154.7. Then (6a1740d5) A2's `check_private_keys_masked` covers `KEY_DEALT` (kind 8): a dealt seat's deal key in another player's world must be `HIDDEN` (154.2), no exception - `FUZZ_POOL=delver_dealt FUZZ_GAMES=200 FUZZ_MATCHES=60`: 4 passed, 716 deal keys checked; `keep_h2h.half_specs` refuses a dealt spec first. |
 
 ### 157.2 The zero-core pin: `integrate/fable-1112`
 
@@ -31698,8 +31699,10 @@ lanes; target dirs `E:/cargo-target/mtg-zero/integrate-fable`, `E:/cargo-target/
 * Coming: B `fix/encoding-gate` phase 3 (with H3's game-2 inputs), F `fix/low-sev`, I `fix/hidden-refs` (156), A1's
   follow-up, `fix/farm-fuzz` (152),
   `fix/rules-f4-f5`.
-* Not re-recorded yet (once every behaviour lane is in): the digests (full, `DIGEST_ENCODING=0`, v6, and G's three:
-  the driver one differs since H), then the `suite`, `engine` and `search-core` tiers, pytest and the run-loop smoke.
+* Not re-recorded yet (once every behaviour lane is in): the digests (full, `DIGEST_ENCODING=0`, v6, G's three - the
+  driver one differs since H - and dealt decks' `digests_dealt.txt`, `dealt_decks.rs::dealt_digests`: all 80 of its
+  matches differ on this tree, which it hashes rows and determinize worlds of, moved by A1's posterior, A2's worlds and
+  152.1's pile order; recorded 8cb56319b1746be3 on its branch, b5693986d6e0c7b1 here on 6a1740d5), then the `suite`, `engine` and `search-core` tiers, pytest and the run-loop smoke.
   The `search-core` tier's cube `match` smoke config timed out at 1,800 s under load on H's branch (626 s alone for 120
   matches): give it a longer step timeout or run it apart with `--threads 4`, only with >= 12 GB available.
 * Lane H's memory (trees now live through the opponent's passes): 149.5 - peak +9.9% on the cube best-of-three
@@ -31707,6 +31710,8 @@ lanes; target dirs `E:/cargo-target/mtg-zero/integrate-fable`, `E:/cargo-target/
   on a quiet machine. If the integrated `search-core` gate's `match` config passes 1,800 s on a busy one, run it with
   `--timeout 3600` and say so.
 * Known-failing fuzz seeds until F / I land: 148.5's `FUZZ_SKIP` lists (findings F1-F3 of 148.6).
+* When A1's follow-up lands (`DeckWant` gains `seen`): `seen: None` in dealt decks' four literals
+  (`matches.rs::deal_dealt_deck`, three in `dealt_decks.rs`) and in `dealt_integrated.rs`'s.
 
 ### 157.9 The canary library across farm-fuzz's pile-twin fix: the rerecord matches up to the twins' ids
 
