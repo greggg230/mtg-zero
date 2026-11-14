@@ -29503,14 +29503,9 @@ one known to P1 and named by a waiting trigger: the one source of the definition
   real game near 20,000 steps is cut where it wasn't (none seen: the turn cap ends games far sooner); (b) keep 60,000 per
   game and say so in the comments - no behaviour change; (c) a per-contest cap in zero-core (steps not reset between
   episodes) - a zero-core change for every chained game.
-* **A drawn game is labelled 0.5 where a draw decides the match** (flow.md I4; `MtgAz::result`, `az/mod.rs` with one
-  episode per game). After a drawn game 2 at 1-0, game 3 drawn is worth 1 to the leader and 0 to the trailer, but each
-  game is labelled by its own result: 0.5 each. This follows the user's decision that the label is the per-game outcome;
-  the cost is that a trailer values a sure draw at 0.5 instead of 0, so it may prefer a draw to a line winning under half
-  the time - only at the drawn-game rate (the turn cap; 130.7's untrained smoke drew 9 of 15). Options: (a) keep it (the
-  decision as made); (b) label a drawn game with its match-conditional value (1 / 0 when it decides the match, 0.5
-  otherwise) - an engine change to `result()` only, but a second kind of label beside the per-game one; (c) measure
-  first: the drawn-game share per iteration of the Bo3 run, then decide.
+* **A drawn game labelled 0.5 where a draw decides the match** (flow.md I4): goes away with best-of-three played to
+  two wins (a drawn game counts for no one), the hub todo "Bo3 played to two wins" (the user, 2026-11-13: draws are
+  exceptionally rare; until then the engine keeps "two wins or three games").
 
 ### 147.8 The end of `ActivateMana` is the player's decision, keyed (lane G's F1)
 
@@ -29529,7 +29524,12 @@ answers it with a `KEY_AUTO` (ENGINE.md 10) - the key that says a decider had no
 its hidden cards, exactly this case - so the two worlds' keys differ; with `auto_single` off it is a decision of one
 option. Nothing else changes: the same answer (`PASS`) ends the activations and priority continues as before.
 
-**Proof**: 147.9. Regression test
+**Proof** (on 123d80b9, `E:\mtg-zero-scratch\fable-fix\laneF\f1_*.log`): with dbbccefa's `activate.rs` (the merge,
+before the fix) the three games fail lane G's walks exactly as 148.6 says - default 2122 "same keys, different views ...
+decisions Priority / ActivateMana", cross 13536 and 19515 "same keys, the game over in one world only" - and with the
+fix all three pass. Play is unchanged (an auto-answered decision consumes no choice: the default pool's 1,000 cube
+matches are the same numbers before and after, 147.9); every game that ends its activations with no source left now
+has one more key, so the behaviour digests move (147.9). Regression test
 `tests/fuzz.rs::activate_mana_end_is_keyed_default_seed_2122` (the default pool's game 2122 with every check of `play`;
 default pool only, as another pool's seed 2122 is another game).
 
@@ -29541,13 +29541,47 @@ default pool only, as another pool's seed 2122 is another game).
   the loop rule's (147.2: completions the coarse key withheld are offered); no digest game reaches 256 permanents,
   a weighted deal or a named Spirit Guide twin.
 * **The full engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`): **2,545 passed, 0 failed, 27
-  ignored**.
+  ignored** on f035b6dc (147.1-147.6).
+* **The 20k fuzz on f035b6dc** (default pool, `FUZZ_GAMES=20000`): passed, 3,311 s on the loaded desktop - 20,000 games
+  (wins 9,800 / 10,078, 122 drawn, 0 aborted, 31.8 turns, 438.3 decisions, 19,197,117 options completed) and the 1,000
+  cube best-of-three matches (2,551 games, 551 of three, 754 drawn, 861.1 decisions a match, 3,102 sideboardings, 42,984
+  hidden-pool worlds), both replay tests. (`FUZZ_POOL=delver` there was stopped for lane G's merge after its matches
+  had passed.)
+* **After the merge of lane G's `fix/check-gaps` (dbbccefa) and 147.8 (123d80b9)**: the digests moved again, by 147.8's
+  `KEY_AUTO` (the digest hashes every transition's keys): full **a8595afe57235009 -> 7fab36d3268c1033**,
+  `DIGEST_ENCODING=0` **7806b107de9bd368 -> 84b09dbaa4ccf08c** (2,499 of 2,500 games; re-recorded in 0df382d3).
+* **On 0df382d3** (the code of this section complete):
+  * the full engine suite: **2,546 passed, 0 failed, 30 ignored** (lane G's three `digest_formats` and 147.8's
+    regression test added);
+  * **`FUZZ_GAMES=20000`, the default pool**: the 1,000 cube best-of-three matches passed (the same numbers as on
+    f035b6dc: 147.8 changes no play), both replay tests and 147.8's regression test passed; the games stopped at seed
+    9676, lane G's F2 (148.6: "same keys, different rows ... links slot 0", the v7 object references of hidden cards -
+    another lane's finding); the games before it passed, and the games after it, 9,677..19,999 with FUZZ_SKIP=19991 (148.6's other default F2 seed): passed (10,323
+    games: wins 5,013 / 5,249, 60 drawn, 0 aborted, 438.8 decisions) - every default seed but lane G's two F2 seeds passes;
+  * **`FUZZ_POOL=delver FUZZ_GAMES=20000`**: the 1,000 constructed best-of-three matches (2,654 games, 654 of three, 848
+    drawn, 833.2 decisions a match) and the 1,000 post-sideboard matches (1,645 games, 645 of three, 594 drawn, 0
+    aborted, 555.2 decisions a match, 23,110 sideboarding decisions of which 544 a keeper's, 27,938 constructed worlds)
+    passed; the games stopped at seed 4252, F2 again (148.6's list); after it, 4,253..19,999 with
+    FUZZ_SKIP=8292,12064,13030,14002,15338,15865 (148.6's other delver F2 seeds): passed (15,747 games: wins 7,613 / 7,544, 584 drawn, 0 aborted, 381.2 decisions) - no seed
+    failed outside lane G's list;
+  * `FUZZ_POOL=cross` (1,000 games, 50 matches, 50 post-sideboard matches - mirrors now, 147.4): passed;
+    `FUZZ_POOL=sns FUZZ_BELIEF=2` (400 games: the weighted deal with Show and Tell's pick, 147.5; 6,039 weighted worlds):
+    passed; `FUZZ_POOL=eoe` (2,000 games: Lavaclaw Reaches, Wandering Fumarole and the loop rule, 147.2; 547 drawn, 0
+    aborted, the longest turn 158 decisions): passed;
+  * `bash tools/build_py.sh`, then pytest: **326 passed, 1 skipped**;
+  * **the engine gate**: `python tools/gate.py engine --no-mac --tested-sha 0df382d3 --expect-digest 7fab36d3268c1033
+    --expect-digest0 84b09dbaa4ccf08c`: **GATE PASSED engine 0df382d3ebb7 in 1501s** (build, both digests equal, `az` 52,
+    `limits` 13, `hidden` 28, pytest 326 passed and 1 skipped, the search smoke, the tree unchanged; the Mac recheck not
+    needed). The commit after it changes this file only.
+* **Not run**: the Mac (`--no-mac`); `digest_formats` (lane G's constructed / EoE / driver digests: --ignored, recorded at
+  267ae603's behaviour; 147.8's key and 147.2's loop rule (EoE's Lavaclaw Reaches) likely move them - not run here, the
+  orchestrator re-records at integration).
 
 ### 147.10 Other sections corrected in place
 
 100.7 (the loop rule's record), 100.4.6's numbers and 100.7's mana list (`PerPermanent` was not aborted), 45.3 (a cut
 drafted match), 123.3's table (the weighted deal's pick), 130.1's table and 130.8 (`start_game` mirrors, `keep_deck` in
-self-play); docs/shortcuts.md 46.3.
+self-play), 148.6 (F1 marked fixed, 147.8); docs/shortcuts.md 46.3.
 
 ## 148. Check gaps: digests beyond the cube table, the fuzz's information-set holes, the cross-deck pool, benchmarks on the module's allocator (branch `fix/check-gaps`, 2026-11-12)
 
