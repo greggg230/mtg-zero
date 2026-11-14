@@ -33393,6 +33393,41 @@ $S python -m mtgz.az.run --run E:/mtg-zero-scratch/fable-fix/int-logs/smoke-fina
 **8. Document**: 157's checks with each gate's last line, the digests old -> new, the canary rerecord's report; then
 the orchestrator fast-forwards main to the final head (and moves the pin with it).
 
+### 157.11 After the handoff (2026-11-14): the last merges, the digests, the canary
+
+Merged after 157.10's commit (each lane's section documents it): lane B phase 3 (664515dc, 142), A1's last commit
+77e9b438 (dfa6ff02; `dealt_integrated.rs`'s find case moved to A1's new `Seen` in d66163e1), rules F4-F5 rebased by
+`fix/rules-f4-f5-int` 2c856270 (93941c95, 151.8), `fix/decision-kind-leak` 597076e5 (296a45b8, 160: the other
+player's `ActivateMana` shown as `Priority` - the user's decision of 2026-11-13), `fix/forced-answer-keys` f012e301
+(aae5ac04, 161), `fix/cross-prior` a46d946e (2d17c659: a listed card found by a search with no free copy weighs
+a = cnt, not cnt F = 0 - the cross pool's post-sideboard match 98 kept no deck; its test in deck_posterior.rs and
+fuzz.rs). After each merge: the build, the targeted tests, the fuzz smoke (200 games, 40 matches) of the default,
+`delver`, `cross`, `delver_dealt`, `eoe`, `interactions` pools and `FUZZ_HIDDEN_DECKS=1`, pytest `test_mtg_az` +
+`test_game_episodes`: passed.
+
+**The digests on 2d17c659's tree** (old = main e076d8f3 / the branches' recorded values). Re-recorded once with
+`DIGEST_WRITE=1`; the files equal what `fix/forced-answer-keys` (161) recorded (the cross fix changes no digest):
+
+| digest | old | new |
+|---|---|---|
+| full (`digests.txt`) | 438164c0429d7fa3 | **8f71ccb0d89031a6** |
+| `DIGEST_ENCODING=0` | a0062bb5569e06d3 | **41e27319acdae5b5** |
+| v6 projection | b63f643e97a30a61 | **557b9d56bd293297** |
+| constructed | 63f58560ad7b3df0 | **e1177d609d6c1aee** (`=0`: bf5cdce373e0c979) |
+| EoE | b36df9098a38d794 | **2efe956d589840ce** (`=0`: 06241533e391a2b3) |
+| driver | 837d42c28214befe | **6f7b863096e47dcd** |
+| dealt | 8cb56319b1746be3 | **e802d9df793c9993** |
+
+Each plain comparison passed.
+
+**The canary library**: `RULES_EPOCH` 1794687704 (`tools/position_lab.py`); `delver_rerecord.py rerecord` from the
+recording engine copy (5e767d9b): **60 of 60 spots re-recorded, 0 dropped**; one spot gained decisions,
+`fourth_land_empty_hand:r3-2b-float550_0550_s32:160:254` 381 -> 383 steps (two priority passes after an attacker
+left combat, F4, CR 508.8); `check`: 60 of 60 reach their position. Report
+`E:/mtg-zero-scratch/fable-fix/int-logs/canary-final-report.json`. `tests/test_canary_library.py`'s walk test named
+four spots whose earlier re-record (157.9) inserted decisions; on this tree they need none, so it now runs over
+every spot with an insertion (`INSERTED`), and a test fails when there is none.
+
 ## 160. Another player's mana activations with priority are that player holding priority: the `ActivateMana` mode hidden from the other player (branch `fix/decision-kind-leak`, 2026-11-13)
 
 **The report.** Lane B's 20k fuzz runs on `fix/encoding-gate` (and on its base, `fix/hidden-refs` 3ca4fb2d) failed the

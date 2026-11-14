@@ -43,12 +43,17 @@ def old_engine_trace(sp):
     return dict(tr, steps=[s for j, s in enumerate(tr['steps']) if j not in ins]), ins
 
 
-@pytest.mark.parametrize('sid', [
-    'tamiyo_flip_precombat:r3-2b-float550_0550_s32:28:192',   # priority passes and a covering payment
-    'chump_block:r3-2b-float550_0550_s32:87:94',              # three trigger orders, each told by the next state
-    'burn_no_kill:r3-2b-float550_0550_s32:74:192',            # an order no recorded state shows
-    'bauble_trick_missed:r3-2b-float550_0550_s32:1966:56',    # an old-path index (k_main1) mapped
-])
+# the spots whose last re-record inserted decisions the old engine never asked (ENGINE.md 157.9; on the Fable
+# campaign's final tree only F4's fourth_land_empty_hand:...:160:254, two priority passes, CR 508.8 - the four spots
+# this list named before, priority passes / trigger orders / an unseen order / an old-path index, need none now)
+INSERTED = [sid for sid, sp in BY_ID.items() if any((sp.get('rerecord') or {}).get('inserted', {}).values())]
+
+
+def test_some_spot_had_decisions_inserted():
+    assert INSERTED, 'no spot of the library had a decision inserted: the walk below tests nothing'
+
+
+@pytest.mark.parametrize('sid', INSERTED)
 def test_the_walk_answers_the_new_questions_as_the_old_engine_did(sid):
     sp = BY_ID[sid]
     old, ins = old_engine_trace(sp)
