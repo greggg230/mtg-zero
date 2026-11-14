@@ -28703,8 +28703,8 @@ Three parts (393527c6). All three are in the functions listed here, for the Delv
    followed by `Game::determinize`). It moves knowledge bits among a hand's same-definition cards only. What
    anyone knows, a multiset per hand, is unchanged.
 3. **The slot order** (`decision.rs` `Game::hand_slot_order_in`, new). It is the canonical order, except that
-   within a definition a twin an ability names that the other player knows comes first (ENGINE.md 156: the cards the
-   other player knows first, a told-apart one first among those). The definition's cards
+   within a definition a twin an ability names that the other player knows comes first (ENGINE.md 156: a twin any
+   reference of the public state tells apart, `Game::told_apart`). The definition's cards
    keep their places as a run, so the slot ids are unchanged. These use it:
    * `hand_slots_in` and `hand_options_except` (decision.rs);
    * `promise_options` (cast.rs, delve);
@@ -29592,10 +29592,13 @@ reference helper (`tail_encode.rs`). No layout change.
    * `knowledge_leaves` (a `d` leaves the hand that a player didn't know): a told-apart known twin keeps that player's
      knowledge (it is still there: the reference says so), and a told-apart leaving card clears no twin (every player
      saw which card left; `move_card` passes `told`, computed before the move);
-   * `hand_slot_order_in`: within a definition the cards the other player knows come first, and among those a
-     told-apart one (128 put only a told-apart known card first, by card index otherwise; a twin the other player
-     knows below an unknown told-apart one, or one whose knowledge changed within the step before canonicalization,
-     could leave the slot naming an unknown card in one world and a known one in another).
+   * `hand_slot_order_in`: within a definition a told-apart card the other player knows comes first, else card
+     index (128's order with `told_apart`). (A first version put every card the other player knows first; it bought
+     nothing - a decision binds its options' cards before the step's canonicalization, which runs before the answer,
+     so the slot's card by index is the best-known one when it acts - and it permuted which twin moved: the Delver
+     canary library's spots `fourth_land_empty_hand:r3-2b-float550_0550_s32:160:254` and
+     `play:20261103-094631-97c776:None:81` reached another position, a Lightning Bolt's and a Volcanic Island's card
+     ids, traced on 67e2bdb6's engine and this one. Reverted in d96c2af3.)
    The rules: an ability activated from a hidden zone reveals its card, which "remains revealed from the time the
    spell or ability is announced until the time it leaves the stack" (CR 602.2a, 701.20a; ninjutsu 702.49b; miracle
    702.94b): the reference follows that one object, not any of its twins.
@@ -29715,52 +29718,53 @@ hidden-pick draw and the deck posteriors are untouched.
 
 ### 156.7 Digests
 
-Re-recorded on purpose (the encoding of a reference changes, and the knowledge layer changes play where a told-apart
-card meets a twin). Before, on 67e2bdb6 (148.5: 267ae603's behaviour) -> after, on this branch:
+**Behaviour: EQUAL.** Every `DIGEST_ENCODING=0` digest is 67e2bdb6's, and so is every game's line of it (`DIGEST_LINES`
+on both engines: 0 of 2,500 cube games, 0 of 570 constructed lines, 0 of 160 EoE games differ). The encoding moves, and
+is re-recorded on purpose (ea9661e7):
 
-| digest | before | after | lines that differ |
+| digest | before (67e2bdb6; 148.5) | after (d96c2af3) | lines that differ |
 |---|---|---|---|
-| cube (`digests.txt`), full | 438164c0429d7fa3 | **d5c5562e348622d2** | 260 of 2,500 games |
-| cube, `DIGEST_ENCODING=0` | a0062bb5569e06d3 | **56d25b27c40d942f** | 156.11 |
-| constructed (`digests_constructed.txt`), full | 63f58560ad7b3df0 | **adf0b96fde66ef82** | 9 of 570 |
-| constructed, `DIGEST_ENCODING=0` | 7ace0291619aa36f | **2f745f8381e489ed** | 156.11 |
-| EoE (`digests_eoe.txt`), full | b36df9098a38d794 | **60db53e59151db8c** | 1 of 160 |
-| EoE, `DIGEST_ENCODING=0` | 52bb9c00a23d24d3 | **13916cfbdff6ff99** | 156.11 |
+| cube (`digests.txt`), full | 438164c0429d7fa3 | **b9ad17dc0dee92e7** | 258 of 2,500 games |
+| cube, `DIGEST_ENCODING=0` | a0062bb5569e06d3 | a0062bb5569e06d3 | **EQUAL** (0) |
+| constructed (`digests_constructed.txt`), full | 63f58560ad7b3df0 | **af4e796d28aeb023** | 5 of 570 |
+| constructed, `DIGEST_ENCODING=0` | 7ace0291619aa36f | 7ace0291619aa36f | **EQUAL** (0) |
+| EoE (`digests_eoe.txt`), full | b36df9098a38d794 | b36df9098a38d794 | **EQUAL** |
+| EoE, `DIGEST_ENCODING=0` | 52bb9c00a23d24d3 | 52bb9c00a23d24d3 | **EQUAL** |
 | driver (`digests_driver.txt`) | 837d42c28214befe | 837d42c28214befe | **EQUAL** |
 
-Each recorded file was compared again after recording: equal. Why `DIGEST_ENCODING=0` moves (the digest hashes each
-game's decisions, keys and the identities of determinized clones): a told-apart card keeps its knowledge where canon
-used to move it, so a world deals the hand's other cards from another set; a twin leaving no longer clears the
-knowledge of a told-apart card; a slot takes a known card first; `KEY_TOLD` adds a key in the rare cases of 156.3.
-The full digests move besides wherever a stale reference's identity is now its last known one (a returned, a
-transformed or a copied permanent, a card gone to a hidden zone) or a pick token has no identity.
+Each recorded file was compared again after recording: equal. The full digests move where a reference's identity is
+now what the viewer knew of that object (a stale reference's last known identity: a returned, transformed or copied
+permanent, a card gone to a hidden zone; a told-apart hand card's own knowledge) and where the other player's hand pick
+is a token with no identity. The told-apart knowledge rules and `KEY_TOLD` change no digest game's play. (An earlier
+recording, 1a426558, had moved the behaviour digests too - cube `=0` 56d25b27c40d942f, 2 games; constructed
+2f745f8381e489ed, 4 lines; EoE 13916cfbdff6ff99, 1 game - all from the first slot order, 156.3; it is superseded.)
 
 ### 156.8 Checks
 
-On the code of 80410dde (the digests of 1a426558; nothing after it changes code), on the shared desktop beside the live
-run (slot 3 of the Fable-fix throttle, `CARGO_BUILD_JOBS=6`):
+On d96c2af3's code (the digests of ea9661e7; nothing after it changes code), on the shared desktop (the Fable-fix
+throttle's slots; the live run paused from 16:15):
 
 * **The seeds.** Every F2 and F3 seed of 148.6 passes with lane G's checks: default 9676, 19991; delver 4252, 8292,
   12064, 13030, 14002, 15338, 15865; cross 1503, 4086, 13181, 4799, 5450, 8706; cross matches 843 and 879 (with their
-  post-sideboard matches). On 67e2bdb6 the nine rerun (default 9676, 19991; delver 4252, 8292, 12064, 15865; cross
-  1503, 4799, 5450) all failed as 148.6 says.
-* **The new tests**: `hidden_refs` 3 passed, `told_apart_tests` 3 passed.
-* **The engine suite** (`cargo test --release -p engine --no-fail-fast`): 162 test binaries, **2,540 passed, 0
-  failed**, 30 ignored (148.5's 2,534 and 161, plus `hidden_refs` and the three in-crate tests). Two tests changed with
-  the encoding and the slot order (0ce89849, 80410dde): `cards_sneak_show::cr_101_4a_the_other_player_knows_only_whether_a_card_was_chosen`
-  compares whole rows (the pick token puts a tail in the row, which the head-only encoder refuses, R1), and
-  `rules_farm2::a_companion_cast_beside_a_twin_looks_the_same_in_every_world` offers its slot after the hand is
-  canonical (right after the companion arrives the slot now takes the card the opponent knows in both worlds, so the
-  test's case - a different slot leaving in each world - needs the later offer; its check, equal views, holds either
-  way).
+  post-sideboard matches); and X5's and X7's (156.9). On 67e2bdb6 the nine rerun first (default 9676, 19991; delver
+  4252, 8292, 12064, 15865; cross 1503, 4799, 5450) all failed as 148.6 says.
+* **The new tests**: `hidden_refs` 3 passed, `told_apart_tests` 3 passed; the three `hidden_refs` tests fail on
+  67e2bdb6's engine (156.11). `known_face_key`, `az` (the public-state gate), `hidden`, `cards_sneak_show` and
+  `rules_farm2` pass.
+* **The engine suite** (`cargo test --release -p engine --no-fail-fast`): 156.11. One test changed with the
+  encoding: `cards_sneak_show::cr_101_4a_the_other_player_knows_only_whether_a_card_was_chosen` compares whole rows
+  (the pick token puts a tail in the row, which the head-only encoder refuses, R1).
+* **pytest** (`tests/test_canary_library.py`, `tests/test_mac_remote.py` after `tools/build_py.sh`): 20 passed. The
+  Delver canary library's 60 spots reach their recorded positions (156.3: the first slot order moved two); the EoE
+  remote evaluation, which timed out at 600 s inside the loaded gate run (a known flake under load), passes alone.
 * **Digests**: 156.7.
-* **The 20k fuzz** (`FUZZ_GAMES=20000`, lane G's checks): **passed** on all three pools, each run whole (the
-  test binary's 4 tests: the games, the matches and the replay checks). Default pool: 20,000 games and the 1,000 cube
-  best-of-three matches, `FUZZ_SKIP=2122` (F1), 2,492 s. `FUZZ_POOL=delver`: 20,000 games, the 1,000 constructed
-  matches and their post-sideboard matches, no skip, 2,188 s. `FUZZ_POOL=cross`: 20,000 games, the 1,000 matches and
-  their post-sideboard matches, `FUZZ_SKIP=13536,19515` (F1), 1,555 s. Every F2 and F3 seed is inside these runs.
-* **`FUZZ_HIDDEN_DECKS=1`** (X5's mode; G's runs had none): 156.11 (the commit after the gate).
+* **The 20k fuzz** (`FUZZ_GAMES=20000`, lane G's checks; the three pools in parallel from one build, each on its own
+  copy of the test binary): 156.11.
 * **The gate**: 156.11.
+
+The first version (59b7bb3a, with the first slot order) had passed the same 3x20k fuzz (default with `FUZZ_SKIP=2122`
+2,492 s, delver 2,188 s, cross with `FUZZ_SKIP=13536,19515` 1,555 s) and the suite (162 binaries, 2,540 passed, 0
+failed, 30 ignored); its gate failed on the canary library (156.3) and the EoE flake, every other step passing.
 
 ### 156.9 The fuzz-invariants campaign's X3, X5, X7 (2026-11-13)
 
@@ -29769,9 +29773,9 @@ binary), rerun on this branch's final code:
 
 * **X5** (`FUZZ_HIDDEN_DECKS=1`, games 4,949, 17,779 and 10,000,106, `check_hidden_world`: the viewer's encoding in a
   hidden-decklist world is not the real game's; 17,779's feature 43,495 is the top stack slot's `SOURCE` identity digits):
-  **fixed by this section's F2 fix** - all three pass.
+  **fixed by this section's F2 fix**: 4,949 and 17,779 fail on 67e2bdb6's engine with the campaign's messages and pass on the fix (156.11); 10,000,106 passes on both with this branch's checks (it fails only under the fuzz-invariants branch's own), so this branch can't tell.
 * **X7** (`FUZZ_POOL=interactions`, match 1,550, `play_match`'s determinize check, a feature next to X5's): **fixed by
-  the F2 fix** - passes.
+  the F2 fix**: fails on 67e2bdb6's engine, passes on the fix (156.11).
 * **X3** (`FUZZ_POOL=interactions`, games 5,682, 6,025, 7,790, 12,725: "picks in progress in two tasks of the agenda",
   `tail_encode::Cx::picks_in_progress`): **not this lane's.** The second holder is a frame of definition 138's trigger
   in the cube table, Etali, Primal Conqueror ("exile cards from the top of each player's library until you exile a
@@ -29799,3 +29803,17 @@ binary), rerun on this branch's final code:
 4. **Layout v6's head** (`encode.rs`: a stack item's first exiled target and first noted object) reads knowledge
    directly. Both are live references from holders `for_each_public_ref` lists, so a hand card there is told apart and
    its knowledge stable; left as it is (lane B edits encode.rs).
+
+### 156.11 Baseline checks, per-game behaviour digests, hidden decklists; the final runs (2026-11-13)
+
+* **On 67e2bdb6's engine** (this branch's ten changed engine files checked out from 67e2bdb6, the tests kept, then
+  restored, the tree clean): the three `hidden_refs` tests **fail**; X5's 4,949 ("the viewer's feature 56468 differs
+  (1 / 0)") and 17,779 (feature 43,495, the top stack slot's `SOURCE` identity digits) and X7's match 1,550
+  ("determinize changed the encoding of P0 (mover P0) at 56472: 1 -> 0") **fail**; 10,000,106 passes. On the fix all
+  pass.
+* **Per-game behaviour digests** (`DIGEST_ENCODING=0 DIGEST_LINES=...` on both engines): 0 of 2,500 cube games, 0 of
+  570 constructed lines, 0 of 160 EoE games differ (156.7).
+* **`FUZZ_HIDDEN_DECKS=1`** (the cube's default pool, X5's mode; G's runs had none; on 59b7bb3a), 5,000 games: stops at
+  game 2,679, "a hidden-decklist world for P0 (mover P1): the viewer's own cards" - the campaign's X2/X4/X6 family (its
+  `failures.txt` lists 2,679 first, on 267ae603's binary): hidden-decklist dealing, not references; not this lane's.
+* **The final runs on d96c2af3/ea9661e7** (the 3x20k fuzz, the engine suite, the gate): the commit after the gate.
