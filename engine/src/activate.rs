@@ -2217,7 +2217,8 @@ mod tests {
         let ev = crate::triggers::EvCtx { obj: Some(g.obj_ref(high)), ..Default::default() };
         let source_def = g.objs[high.i()].def;
         g.waiting.push(crate::triggers::PendingTrigger { controller: 0, source: g.obj_ref(high), source_def, slot: 0, ev });
-        assert!(g.named_by_an_ability(high) && !g.named_by_an_ability(low));
+        // (lane I's `told_apart` replaced `named_by_an_ability`: a waiting trigger's event is a public reference, ENGINE.md 156)
+        assert!(g.told_apart(high) && !g.told_apart(low));
         assert_eq!(g.hand_slot_order_in(0)[0], high, "the slot's card");
         assert_eq!(g.hand_sorted_in(0)[0], low, "the canonical order's (before: the activated one)");
         let classes = g.mana_classes(0, None);

@@ -205,8 +205,11 @@ fn dealt_decks_is_a_constructed_best_of_three_self_play_setting() {
     let side: Vec<String> = d.sideboard.iter().flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect();
     let short: Vec<String> = side[..12].to_vec();
     let decks = json!({"p0": d.main_names(), "p1": d.main_names(), "p0_sideboard": side, "p1_sideboard": short});
-    assert!(spec_of(with(dd(0.5, 1, 12), json!({"decks": decks}))).dealt_decks.is_some());
-    let e = err(with(dd(0.5, 1, 13), json!({"decks": decks})));
+    // (two sideboards of different sizes are no mirror: a whole match, since `"start_game": 2` is for mirrors only,
+    // ENGINE.md 147.4 - the integration, 157)
+    let whole = json!({"decks": decks, "start_game": null, "game_episodes": null});
+    assert!(spec_of(with(dd(0.5, 1, 12), whole.clone())).dealt_decks.is_some());
+    let e = err(with(dd(0.5, 1, 13), whole));
     assert!(e.contains("p1's sideboard has 12 cards"), "{e}");
     // refused outside a constructed best-of-three, and with keep_deck (the yardstick's)
     let bo1 = with(dd(0.5, 1, 8), json!({"constructed": true, "decks": {"p0": d.main_names(), "p1": d.main_names()}}));
