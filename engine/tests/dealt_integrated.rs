@@ -24,7 +24,7 @@
 //! deal hidden for the other player and plays the next game with the other player's private keys masked.
 
 use engine::az::constructed::Decklist;
-use engine::az::hidden_decks::{check_sample, ConstructedPrior, DeckPrior, DeckWant, SampledDeck};
+use engine::az::hidden_decks::{check_sample, ConstructedPrior, DeckPrior, DeckWant, SampledDeck, Seen};
 use engine::az::identity::D;
 use engine::az::matches::game_one_winner;
 use engine::az::{MtgAz, MtgSpec};
@@ -116,7 +116,21 @@ fn a_dealt_60_is_the_restricted_prior_times_the_seen_cards_likelihood_exactly() 
         v.sort_unstable();
         v
     };
-    let seen_sets = [sorted(vec![a, a, c]), sorted(vec![a, c, e, e])];
+    // The seen cards: blind sightings only (140's C(D_i, R_i)), and - A1's sightings with provenance (ENGINE.md
+    // 140.9) - a Pyroblast found by a search then one seen blind (D - 1, D >= 2), a Brainstorm found (D >= 1) and a
+    // Lightning Bolt seen blind (D): per definition the product over its blind sightings j of (D - j), x [D >= R].
+    let mut finds = vec![Seen { def: e, n: 2, searched: 0b01 }, Seen { def: a, n: 1, searched: 0b1 }, Seen { def: c, n: 1, searched: 0 }];
+    finds.sort_by_key(|x| x.def);
+    let seen_sets: [(Vec<u16>, Option<Vec<Seen>>); 3] =
+        [(sorted(vec![a, a, c]), None), (sorted(vec![a, c, e, e]), None), (sorted(vec![a, c, e, e]), Some(finds))];
+    // a definition's weight at count x given its R copies shown: C(x, R) for blind sightings only; with sightings, the
+    // product over its blind sightings j of (x - j) (a find: 1), a shown definition without a sighting held (1)
+    let weigh = |seen: &Option<Vec<Seen>>, def: u16, x: u8, rk: u8| -> f64 {
+        match seen {
+            None => binom(x, rk),
+            Some(ss) => ss.iter().find(|q| q.def == def).map_or(1.0, |q| (0..q.n).filter(|&j| q.searched >> j & 1 == 0).map(|j| x as f64 - j as f64).product()),
+        }
+    };
     let n = 200_000;
     let mut told_apart = 0usize;
     for (lo, hi) in [(1usize, 8usize), (2, 5)] {
@@ -124,7 +138,7 @@ fn a_dealt_60_is_the_restricted_prior_times_the_seen_cards_likelihood_exactly() 
         assert_eq!(prior.swap_range(), (lo, hi));
         let want_by: Vec<f64> = (0..=10).map(|s| if (lo..=hi).contains(&s) { by[s] } else { 0.0 }).collect();
         assert_eq!(&want_by[..], prior.decks_by_swaps(), "[{lo}, {hi}]: the dealt prior's counts by swaps");
-        for shown in &seen_sets {
+        for (shown, seen) in &seen_sets {
             let r: Vec<u8> = list.iter().map(|l| count(shown, l.0) as u8).collect();
             // the exact posterior: the restricted prior (1 / (#s in range x #decks of s swaps)) x prod C(D_i, R_i)
             let mut p: Vec<f64> = decks
@@ -139,16 +153,16 @@ fn a_dealt_60_is_the_restricted_prior_times_the_seen_cards_likelihood_exactly() 
                         if v[k] < r[k] {
                             return 0.0;
                         }
-                        w *= binom(v[k], r[k]);
+                        w *= weigh(seen, list[k].0, v[k], r[k]);
                     }
                     w
                 })
                 .collect();
             let z: f64 = p.iter().sum();
             p.iter_mut().for_each(|x| *x /= z);
-            let label = format!("dealt [{lo}, {hi}], seen {shown:?}");
+            let label = format!("dealt [{lo}, {hi}], seen {shown:?}{}", if seen.is_some() { " with finds" } else { "" });
             // a dealt 60's request: untilted, no face-down pick (MtgAz::sample_hidden_deck, ENGINE.md 154.2)
-            let want = DeckWant { db, n: 10, shown, companion: None, tilt: None, pick: None, seen: None };
+            let want = DeckWant { db, n: 10, shown, companion: None, tilt: None, pick: None, seen: seen.as_deref() };
             let mut rng = Rng::new(0xDEA1 ^ (lo as u64) << 8 ^ shown.len() as u64);
             let mut h1 = vec![0.0f64; decks.len()];
             for _ in 0..n {
@@ -177,16 +191,28 @@ fn a_dealt_60_is_the_restricted_prior_times_the_seen_cards_likelihood_exactly() 
             let k = shown.len();
             let mut hist = vec![0.0f64; decks.len()];
             let mut kept = 0usize;
+            // (with finds: the events in order - the Pyroblast's search finds one when the deck holds one, then a card
+            // seen blind among those not yet seen is a Pyroblast, the Brainstorm's search, a card seen blind is a Bolt)
+            let events: [(u16, bool); 4] = [(e, true), (e, false), (a, true), (c, false)];
             for _ in 0..40 {
                 for s in prior.sample_k(&plain, &[], 50_000, &mut rng) {
                     let mut v = s.deck;
-                    for i in 0..k {
-                        let j = i + rng.below((v.len() - i) as u32) as usize;
-                        v.swap(i, j);
-                    }
-                    let mut seen = v[..k].to_vec();
-                    seen.sort_unstable();
-                    if seen == *shown {
+                    let ok = if seen.is_none() {
+                        for i in 0..k {
+                            let j = i + rng.below((v.len() - i) as u32) as usize;
+                            v.swap(i, j);
+                        }
+                        let mut got = v[..k].to_vec();
+                        got.sort_unstable();
+                        got == *shown
+                    } else {
+                        let mut unseen = v.clone();
+                        events.iter().all(|&(x, found)| {
+                            let at = if found { unseen.iter().position(|&y| y == x) } else { Some(rng.below(unseen.len() as u32) as usize).filter(|&i| unseen[i] == x) };
+                            at.map(|i| unseen.swap_remove(i)).is_some()
+                        })
+                    };
+                    if ok {
                         kept += 1;
                         hist[index_of(&v)] += 1.0;
                     }
@@ -197,7 +223,7 @@ fn a_dealt_60_is_the_restricted_prior_times_the_seen_cards_likelihood_exactly() 
             // request's decks there (none where that mass is 0: the seen cards may already rule those decks out)
             let full_w: Vec<f64> = decks
                 .iter()
-                .map(|v| (0..list.len()).map(|k| if v[k] < r[k] { 0.0 } else { binom(v[k], r[k]) }).product::<f64>() / by[swaps(v)])
+                .map(|v| (0..list.len()).map(|k| if v[k] < r[k] { 0.0 } else { weigh(seen, list[k].0, v[k], r[k]) }).product::<f64>() / by[swaps(v)])
                 .collect();
             let mass_out = full_w.iter().zip(&decks).filter(|(_, v)| !(lo..=hi).contains(&swaps(v.as_slice()))).map(|(w, _)| w).sum::<f64>()
                 / full_w.iter().sum::<f64>();
@@ -210,7 +236,7 @@ fn a_dealt_60_is_the_restricted_prior_times_the_seen_cards_likelihood_exactly() 
         }
     }
     // the user's range with main cards seen: the full prior would deal the main itself (s = 0)
-    assert!(told_apart >= 2, "the full and the dealt priors' requests were told apart in {told_apart} cases: too few");
+    assert!(told_apart >= 3, "the full and the dealt priors' requests were told apart in {told_apart} cases: too few");
 }
 
 // ---- in the game: the Delver mirror's dealt matches ----
