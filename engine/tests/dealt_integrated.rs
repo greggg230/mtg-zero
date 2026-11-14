@@ -119,7 +119,7 @@ fn a_dealt_60_is_the_restricted_prior_times_the_seen_cards_likelihood_exactly() 
     // The seen cards: blind sightings only (140's C(D_i, R_i)), and - A1's sightings with provenance (ENGINE.md
     // 140.9) - a Pyroblast found by a search then one seen blind (D - 1, D >= 2), a Brainstorm found (D >= 1) and a
     // Lightning Bolt seen blind (D): per definition the product over its blind sightings j of (D - j), x [D >= R].
-    let mut finds = vec![Seen { def: e, n: 2, searched: 0b01 }, Seen { def: a, n: 1, searched: 0b1 }, Seen { def: c, n: 1, searched: 0 }];
+    let mut finds = vec![Seen::of_order(e, &[true, false]), Seen::of_order(a, &[true]), Seen::of_order(c, &[false])];
     finds.sort_by_key(|x| x.def);
     let seen_sets: [(Vec<u16>, Option<Vec<Seen>>); 3] =
         [(sorted(vec![a, a, c]), None), (sorted(vec![a, c, e, e]), None), (sorted(vec![a, c, e, e]), Some(finds))];
@@ -128,7 +128,7 @@ fn a_dealt_60_is_the_restricted_prior_times_the_seen_cards_likelihood_exactly() 
     let weigh = |seen: &Option<Vec<Seen>>, def: u16, x: u8, rk: u8| -> f64 {
         match seen {
             None => binom(x, rk),
-            Some(ss) => ss.iter().find(|q| q.def == def).map_or(1.0, |q| (0..q.n).filter(|&j| q.searched >> j & 1 == 0).map(|j| x as f64 - j as f64).product()),
+            Some(ss) => ss.iter().find(|q| q.def == def).map_or(1.0, |q| q.sights.iter().filter(|s| !s.search).map(|s| x as f64 - s.r as f64).product()),
         }
     };
     let n = 200_000;
