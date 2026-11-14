@@ -31386,6 +31386,8 @@ lanes; target dirs `E:/cargo-target/mtg-zero/integrate-fable`, `E:/cargo-target/
   Then `FUZZ_POOL=delver_dealt FUZZ_GAMES=400 FUZZ_MATCHES=100`: **4 passed** (72 of 100 matches and 72 of 100
   post-sideboard matches dealt, 122 + 124 dealt 60s checked, no rules check violated; the post-sideboard line's "124 of
   a seat that keeps its deck" is dealt decks' `kept.max(dealt_decks)`: its dealt 60s, no keeper).
+  The non-dealt branch, keepers included: `FUZZ_POOL=delver FUZZ_GAMES=200 FUZZ_MATCHES=60` **4 passed** (60 post-sideboard
+  matches, 32 keeper decisions).
 * `python -m pytest tests -q`: **384 passed**, 1 skipped (10:44).
 * Not run in batch 1 (the orchestrator's end-of-campaign step): the digests and `digest_formats` (G's driver digest is
   expected to differ since H, 149.4), the 20k fuzz, the gates.
