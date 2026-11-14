@@ -25,14 +25,14 @@ fn the_rows_constants() {
     assert_eq!(<MtgAz as SearchGame>::MAX_ROW_TOKENS, 4096);
     assert!(<MtgAz as SearchGame>::OPTION_POINTERS);
     let tails = <MtgAz as SearchGame>::TAILS;
-    assert_eq!(tails.len(), 20);
+    assert_eq!(tails.len(), 21);
     let names: Vec<&str> = tails.iter().map(|t| t.name).collect();
     assert_eq!(
         names,
         [
             "my_permanents", "opponent_permanents", "hand", "stack", "triggers", "list", "graveyard_abilities", "opponent_triggers",
             "delayed", "links", "exile_offered", "library_known", "stack_relations", "graveyard_order", "face_down", "my_revealed",
-            "effects", "counters", "numbers", "opp_revealed"
+            "effects", "counters", "numbers", "opp_revealed", "found"
         ]
     );
     // (Layout v6's game keeps no tail: ENGINE.md 124.2.)
@@ -762,3 +762,51 @@ fn chosen_names_are_faces() {
     assert_eq!(face(&ar), (want, vec![1.0, 0.0, 1.0]), "the right half: face 5");
     assert_ne!(Row::of(&al.g, 1).flat(), Row::of(&ar.g, 1).flat(), "the other player's row too");
 }
+
+/// ENGINE.md 142.12: Vampiric Tutor's card, put on top of the library unrevealed, is a find the other
+/// player tells apart (`Game::found`, ENGINE.md 140.9; kept with whole-deck clouds): a `found` token in
+/// both players' rows - the card's identity in its owner's row (it knows the card), none in the
+/// other's -, its depth (the top), its owner; drawn, it is a hand card and no find.
+#[test]
+fn a_tutors_card_on_top_is_a_found_token() {
+    use te::{fs, rf};
+    let db = CardDb::cube();
+    let mut g = Scenario::new(db)
+        .spec(|s| {
+            s.auto_single = false;
+            s.deck_clouds = true;
+        })
+        .library(0, &["Forest", "Island", "Plains", "Island", "Swamp"])
+        .library(1, &["Island"; 8])
+        .battlefield(0, &["Swamp"])
+        .hand(0, &["Vampiric Tutor"])
+        .at(Step::Main1, 0)
+        .start();
+    let found = |g: &Game, v: u8| Row::of(g, v).tokens(seg::FOUND).into_iter().map(|(s, x)| (s, x.to_vec())).collect::<Vec<_>>();
+    assert!(found(&g, 0).is_empty() && found(&g, 1).is_empty());
+    let vt = g.card(0, "Vampiric Tutor", Zone::Hand);
+    g.choose(Choice::Cast(vt));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::SearchLibrary));
+    assert_eq!(g.kind(), Some(DecisionKind::SearchLibrary));
+    let plains = db.expect_id("Plains").unwrap();
+    g.choose(Choice::Def(plains));
+    g.drive_until(|g| g.stack().is_empty() && g.kind() == Some(DecisionKind::Priority));
+    let top = *g.player(0).library.last().unwrap();
+    assert_eq!(g.name(top), "Plains");
+    for v in 0..2u8 {
+        let t = found(&g, v);
+        assert_eq!(t.len(), 1, "P{v}: one find");
+        let (slot, x) = &t[0];
+        assert_eq!(*slot, 0);
+        assert_eq!(code_identity(&x[..CODE]), (v == 0).then(|| ident(&g, plains)), "P{v}: the identity in its owner's row only");
+        let s = &x[CODE..];
+        assert_eq!((s[fs::PRESENT], s[fs::OBJ + rf::PRESENT], s[fs::DEPTH]), (1.0, 1.0, 1.0 / 64.0), "P{v}: the top of the library");
+        assert_eq!(s[fs::OBJ + if v == 0 { rf::MINE } else { rf::THEIRS }], 1.0, "P{v}: P0's card");
+    }
+    // P0's next draw: a hand card, no find
+    let t0 = g.turn().number;
+    g.drive_until(|g| g.turn().number == t0 + 2 && g.turn().step == Step::Main1);
+    assert_eq!(g.obj(top).zone, Zone::Hand, "{}", g.log_lines().join("\n"));
+    assert!(found(&g, 0).is_empty() && found(&g, 1).is_empty());
+}
+

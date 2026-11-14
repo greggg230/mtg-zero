@@ -55,8 +55,11 @@ pub mod seg {
     pub const NUMBERS: u16 = 22;
     /// ENGINE.md 142.8: the other player's earlier reveals, by game (`mr::*`, as `MY_REVEALED`'s).
     pub const OPP_REVEALED: u16 = 23;
+    /// ENGINE.md 142.12: the cards found by their owner's library search that the other player still
+    /// tells apart (`Game::found`, ENGINE.md 140.9).
+    pub const FOUND: u16 = 24;
     /// The number of segments.
-    pub const N: usize = 24;
+    pub const N: usize = 25;
 }
 
 /// An object reference (`ObjRef`) inside a token: what it names now, publicly (ENGINE.md 125).
@@ -307,6 +310,23 @@ pub mod mr {
     pub const W: usize = GAME + 3;
 }
 
+/// A card found by its owner's library search that the other player still tells apart (`found`
+/// segment, ENGINE.md 142.12; `Game::found`, ENGINE.md 140.9: a tutor's card put on top of the
+/// library, a Doomsday pile's cards, a find exiled face down - until it is seen, goes into a hand or
+/// is shuffled with cards that are not finds), slot k its place in the order of the searches. After
+/// the card code where the viewer knows the card (`Cx::ref_def`: its owner, who found it; the other
+/// player knows it only once it is no find): the object (`rf::*`, `Cx::write_ref`: its zone, its
+/// owner, a face-down card's place) and, in a library, its depth from the top + 1 / 64 and in 16
+/// binary digits.
+pub mod fs {
+    use super::rf;
+    pub const PRESENT: usize = 0;
+    pub const OBJ: usize = 1;
+    pub const DEPTH: usize = OBJ + rf::W;
+    pub const DEPTH_BITS: usize = DEPTH + 1;
+    pub const W: usize = DEPTH_BITS + 16;
+}
+
 /// A continuous effect (`effects` segment, ENGINE.md 142.7): one token per `Game::effects` entry
 /// (a resolved spell's or ability's effect, CR 611.2), slot k its place in timestamp order (CR
 /// 613.7: the layers apply effects in that order), then one per copy effect (`Game::copies`, CR
@@ -431,6 +451,7 @@ pub const MR_W: usize = CODE + mr::W;
 pub const EF_W: usize = CODE + ef::W;
 pub const CT_W: usize = CODE + ct::W;
 pub const NB_W: usize = CODE + nb::W;
+pub const FS_W: usize = CODE + fs::W;
 
 /// Every segment's slot width in layout v7, by segment index.
 pub const SEG_W: [usize; seg::N] = [
@@ -458,10 +479,11 @@ pub const SEG_W: [usize; seg::N] = [
     CT_W,
     NB_W,
     MR_W,
+    FS_W,
 ];
 
 /// Every segment's head slots (`count`) in layout v7.
-pub const SEG_HEAD: [usize; seg::N] = [1, 2 * encode::TOPS, encode::PERMS, encode::PERMS, encode::HANDS, encode::STACKS, encode::TRIGS, encode::LIST, encode::GYAS, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+pub const SEG_HEAD: [usize; seg::N] = [1, 2 * encode::TOPS, encode::PERMS, encode::PERMS, encode::HANDS, encode::STACKS, encode::TRIGS, encode::LIST, encode::GYAS, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 /// The layout's head tokens, `1 + sum count` (zero-core `SearchGame::HEAD_TOKENS`): the global
 /// token and every head slot.
@@ -485,7 +507,7 @@ const fn ts(seg: u16, name: &'static str) -> TailSeg {
 }
 
 /// The tail segments of layout v7, in layout order (zero-core `SearchGame::TAILS`).
-pub const TAILS: [TailSeg; 20] = [
+pub const TAILS: [TailSeg; 21] = [
     ts(seg::MY_PERM, "my_permanents"),
     ts(seg::OPP_PERM, "opponent_permanents"),
     ts(seg::HAND, "hand"),
@@ -506,6 +528,7 @@ pub const TAILS: [TailSeg; 20] = [
     ts(seg::COUNTERS, "counters"),
     ts(seg::NUMBERS, "numbers"),
     ts(seg::OPP_REVEALED, "opp_revealed"),
+    ts(seg::FOUND, "found"),
 ];
 
 /// The index of a zone in a reference's one-hot (exhaustive: a new zone is a compile error here).
@@ -977,6 +1000,7 @@ pub(crate) fn write_tail_segments(cx: &Cx, list: &[Option<CardIdx>], tail: &mut 
     write_effects(cx, tail);
     write_counters(cx, tail);
     write_numbers(cx, tail);
+    write_found(cx, tail);
 }
 
 /// The `face_down` segment (`fd::*`): every card exiled face down, in their canonical order for the
@@ -1498,6 +1522,30 @@ fn write_links(cx: &Cx, list: &[Option<CardIdx>], tail: &mut TailBuf) {
                 x[CODE + lk::BY_ME] = 1.0;
                 x[CODE + lk::DEPTH] = depth as f32 / 8.0;
             }
+        }
+    }
+}
+
+/// The `found` segment (`fs::*`, ENGINE.md 142.12): `Game::found` in the order of the searches.
+/// (A find is a card in a library or exiled face down - it leaves `Game::found` as it goes into a
+/// hand -, so its reference never names a hand card: no holder for `Game::for_each_public_ref`.)
+fn write_found(cx: &Cx, tail: &mut TailBuf) {
+    let g = cx.g;
+    for (k, &(c, _)) in g.found.iter().enumerate() {
+        let r = g.obj_ref(c);
+        let x = tail.token(seg::FOUND, k as u32);
+        if let Some(d) = cx.ref_def(r) {
+            code(&mut x[..CODE], g.db, cx.ids, d);
+        }
+        let s = &mut x[CODE..];
+        s[fs::PRESENT] = 1.0;
+        cx.write_ref(&mut s[fs::OBJ..fs::OBJ + rf::W], r);
+        let o = &g.objs[c.i()];
+        if o.zone == Zone::Library {
+            let lib = &g.players[o.owner as usize].library;
+            let depth = lib.iter().rev().position(|&x| x == c).expect("a library card in its owner's library");
+            s[fs::DEPTH] = (depth + 1) as f32 / 64.0;
+            bits(&mut s[fs::DEPTH_BITS..fs::DEPTH_BITS + 16], depth as u64);
         }
     }
 }

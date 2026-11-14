@@ -454,8 +454,8 @@ fn layout_v7_widens_layout_v6_exactly() {
     assert!(read("layout_v6.json").get("revision").is_none());
     let segs = j7["segments"].as_array().unwrap();
     let names: Vec<&str> = segs.iter().map(|s| s["name"].as_str().unwrap()).collect();
-    assert_eq!(names.len(), 24);
-    assert_eq!(names[20..], ["effects", "counters", "numbers", "opp_revealed"], "ENGINE.md 142.7's and 142.8's segments, appended");
+    assert_eq!(names.len(), 25);
+    assert_eq!(names[20..], ["effects", "counters", "numbers", "opp_revealed", "found"], "ENGINE.md 142.7's, 142.8's and 142.12's segments, appended");
     let tails: Vec<&str> = segs.iter().filter(|s| s["tail"] == true).map(|s| s["name"].as_str().unwrap()).collect();
     let want: Vec<&str> = engine::az::tail_encode::TAILS.iter().map(|t| t.name).collect();
     assert_eq!(tails, want, "the tail segments are TAILS");
@@ -1276,6 +1276,42 @@ fn enclosing_picks_positions() -> Vec<(&'static str, MtgAz)> {
     out
 }
 
+/// The gate's positions with a search's finds the other player tells apart (ENGINE.md 142.12;
+/// `Game::found`, ENGINE.md 140.9, kept with whole-deck clouds): two Vampiric Tutors put a Plains,
+/// then a Forest on top of their caster's library unrevealed - the positions after each (the second's
+/// shuffle makes the Plains no find). Added where `enclosing_picks_positions` are.
+fn found_positions() -> Vec<(&'static str, MtgAz)> {
+    use engine::az::tail_encode::{seg, Row};
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    let db = CardDb::cube();
+    let mut g = Scenario::new(db)
+        .spec(|s| {
+            s.auto_single = false;
+            s.deck_clouds = true;
+        })
+        .library(0, &["Forest", "Island", "Plains", "Island", "Swamp", "Island"])
+        .library(1, &["Island"; 8])
+        .battlefield(0, &["Swamp", "Swamp"])
+        .battlefield(1, &["Island", "Thraben Inspector"])
+        .hand(0, &["Vampiric Tutor", "Vampiric Tutor"])
+        .at(Step::Main1, 0)
+        .start();
+    let mut out = Vec::new();
+    for name in ["Plains", "Forest"] {
+        let vt = g.card(0, "Vampiric Tutor", Zone::Hand);
+        g.choose(Choice::Cast(vt));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::SearchLibrary));
+        g.choose(Choice::Def(db.expect_id(name).unwrap()));
+        g.drive_until(|g| g.stack().is_empty() && g.kind() == Some(DecisionKind::Priority));
+        let mut a = MtgAz::new_game(&spec(), 2, 142).unwrap();
+        a.g = g.clone();
+        out.push(("found", a));
+    }
+    assert_eq!(Row::of(&g, 1).tokens(seg::FOUND).len(), 1, "the second find (the first shuffled away)\n{}", g.log_lines().join("\n"));
+    out
+}
+
 fn public_view(g: &MtgAz, v: u8) -> Vec<u64> {
     let mut x = g.g.view_of(v);
     x.push(u64::MAX - 77);
@@ -1362,6 +1398,7 @@ fn public_state_reaches_the_encoding() {
     let t0 = std::time::Instant::now();
     let mut pos = gate_positions(scale(60) as usize, 59);
     pos.extend(enclosing_picks_positions());
+    pos.extend(found_positions());
     let ps = perturbations();
     let lim = limits();
     let known = known_gaps();
@@ -1575,6 +1612,7 @@ fn public_states_encode_apart() {
     let t0 = std::time::Instant::now();
     let mut pos = gate_positions(scale(60) as usize, 59);
     pos.extend(enclosing_picks_positions());
+    pos.extend(found_positions());
     let ps = perturbations();
     let lim: Vec<&str> = limits().iter().map(|l| l.name).collect();
     let known = known_gaps();
@@ -2597,7 +2635,7 @@ fn the_v5_facts_encode_no_hidden_information() {
     // (the deck tilt, ENGINE.md 106.3: on hidden-decklist positions one more world dealt by a random deck
     // prediction at tilt 1, from a stream of its own)
     let (mut trng, mut tilted) = (Rng::new(106), 0);
-    for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()) {
+    for (spec, a) in gate_positions(scale(24) as usize, 61).into_iter().chain(enclosing_picks_positions()).chain(found_positions()) {
         for (k, p) in fixed.iter().enumerate() {
             let mut b = a.clone();
             let Some(what) = p.run(&mut b, &mut rngs[k]) else { continue };

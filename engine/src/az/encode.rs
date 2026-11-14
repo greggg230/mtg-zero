@@ -7,12 +7,13 @@
 //! mana of a chosen creature type, 3,680 floats) and wider slots, the new floats at each
 //! slot's end (permanent 281 = v6's 196 + 85, `perm::V7`; hand and list 64; stack 438,
 //! `STACK_V7`; trigger 271); the tail holds the seven capped segments' objects past their
-//! head slots and thirteen gated tail-only segments (opponent_triggers, delayed, links,
+//! head slots and fourteen gated tail-only segments (opponent_triggers, delayed, links,
 //! exile_offered, library_known, stack_relations, graveyard_order, face_down, my_revealed;
 //! ENGINE.md 142.7: effects, counters, numbers - every continuous effect with its duration, every
 //! counter kind with its exact number, the numbers past float16's exact range; 142.8:
 //! opp_revealed, the other player's earlier reveals by game; 142.10: links' picks of an enclosing
-//! task, with their depth). Its semantic revision is [`LAYOUT_V7_REVISION`] (the layout file's
+//! task, with their depth; 142.12: found, the cards a library search found that the other player
+//! still tells apart). Its semantic revision is [`LAYOUT_V7_REVISION`] (the layout file's
 //! `revision`).
 //! A v6 (or v5) network widens onto it ([`v6_projection`], [`v5_projection`]); the
 //! block table below describes layouts v4-v6 and v7's globals, and the v7 offsets are
@@ -246,7 +247,7 @@ pub struct Lay {
 pub const LAY7: Lay = Lay {
     v7: true,
     features: NUM_FEATURES,
-    off: [O_CONTEXT, O_TOPS, O_MY_PERM, O_OPP_PERM, O_HAND, O_STACK, O_TRIG, O_LIST, O_GYA, O_COMP, O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    off: [O_CONTEXT, O_TOPS, O_MY_PERM, O_OPP_PERM, O_HAND, O_STACK, O_TRIG, O_LIST, O_GYA, O_COMP, O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     w: super::tail_encode::SEG_W,
     o_match: O_MATCH,
     o_globals_v5: O_GLOBALS_V5,
@@ -256,8 +257,8 @@ pub const LAY7: Lay = Lay {
 pub const LAY6: Lay = Lay {
     v7: false,
     features: v6::NUM_FEATURES,
-    off: [O_CONTEXT, O_TOPS, v6::O_MY_PERM, v6::O_OPP_PERM, v6::O_HAND, v6::O_STACK, v6::O_TRIG, v6::O_LIST, v6::O_GYA, v6::O_COMP, v6::O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    w: [CONTEXT, TOP_W, v6::PERM_W, v6::PERM_W, v6::HAND_W, v6::STACK_W, v6::TRIG_W, v6::LIST_W, GYA_W, COMP_W, COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    off: [O_CONTEXT, O_TOPS, v6::O_MY_PERM, v6::O_OPP_PERM, v6::O_HAND, v6::O_STACK, v6::O_TRIG, v6::O_LIST, v6::O_GYA, v6::O_COMP, v6::O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    w: [CONTEXT, TOP_W, v6::PERM_W, v6::PERM_W, v6::HAND_W, v6::STACK_W, v6::TRIG_W, v6::LIST_W, GYA_W, COMP_W, COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     o_match: v6::O_MATCH,
     o_globals_v5: v6::O_GLOBALS_V5,
     o_globals_v6: v6::O_GLOBALS_V6,
@@ -3406,6 +3407,8 @@ pub fn layout_json(db: &'static CardDb) -> String {
         segments.push(tail_only(sg::NUMBERS, "numbers", CODE + te::nb::PRESENT));
         // ENGINE.md 142.8: the other player's earlier reveals, by game (`my_revealed`'s token).
         segments.push(tail_only(sg::OPP_REVEALED, "opp_revealed", CODE + te::mr::PRESENT));
+        // ENGINE.md 142.12: the cards found by a library search the other player tells apart.
+        segments.push(tail_only(sg::FOUND, "found", CODE + te::fs::PRESENT));
     }
     let mut v = json!({
         "version": if eoe { 6 } else { 7 },

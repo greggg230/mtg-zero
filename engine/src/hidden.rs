@@ -588,11 +588,12 @@ impl Game {
 
     /// The state was changed by hand, outside the rules (tests' perturbations, `public_state`): the sightings no
     /// longer describe what each player saw, so they are dropped and the deals weigh every seen card blind (ENGINE.md
-    /// 140, 140.9). Never called by the engine.
+    /// 140, 140.9). Never called by the engine. The finds (`found`) stay: which cards the other player tells apart
+    /// as a search's finds is public, layout v7's `found` tokens (ENGINE.md 142.12), and a deal without sightings
+    /// reads none of it.
     #[doc(hidden)]
     pub fn lose_sightings(&mut self) {
         self.sightings.clear();
-        self.found.clear();
         self.sightings_lost = true;
     }
 

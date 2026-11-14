@@ -105,7 +105,7 @@ pub fn fields() -> Vec<Field> {
         sightings_lost: Derived "a test's flag: the state was changed by hand, the sightings dropped (ENGINE.md 140.9)",
         sightings: Hidden "each player's sightings of the other's cards, in order, each blind or a search's find (ENGINE.md 140.9): the viewer's own knowledge, the same in all its worlds; read only by the hidden deck's deal",
         sight_at: Derived "the sightings' clock (ENGINE.md 140.9)",
-        found: Derived "which hidden cards are their owner's search's finds the other player still tells apart (ENGINE.md 140.9): read only by the hidden deck's deal. A public fact (a tutor's card put on top) the encoding does not show: an open point of ENGINE.md 140.9 for the encoding, not a cache",
+        found: Public "which hidden cards are their owner's search's finds the other player still tells apart, in the order of the searches (ENGINE.md 140.9; a tutor's card put on top, a Doomsday pile): layout v7's found tokens (ENGINE.md 142.12)",
         tokens: Derived "a fast path: tokens created so far",
         first_token: Derived "a fast path: the first slot made as a token or a copy",
         batching: Derived "transient: a simultaneous move in progress",
@@ -2221,6 +2221,28 @@ pub fn perturbations() -> Vec<Perturbation> {
         }),
         // (ENGINE.md 123's "a card name was chosen as a permanent entered" - Disruptor Flute, Anointed
         // Peacekeeper - is the `Mark` perturbation above, layout v7's: ENGINE.md 125.)
+        // The cards found by their owner's library search that the other player tells apart (ENGINE.md 140.9,
+        // 142.12): a tutor's card put on top of the library.
+        p!("the top library card is its owner's search's find", "Game.found", |a, r| {
+            let p = player(r);
+            let &c = a.g.players[p as usize].library.last()?;
+            // (a find the other player has seen is one no longer: `Game::learn`)
+            if a.g.found.iter().any(|x| x.0 == c) || a.g.knows(opp(p), c) {
+                return None;
+            }
+            let t = a.g.sight_at;
+            a.g.sight_at += 1;
+            a.g.found.push((c, t));
+            Some(format!("P{p}'s top library card"))
+        }),
+        p!(rare "a search's find is no longer told apart", "Game.found", |a, r| {
+            let k = r.below(a.g.found.len().max(1) as u32) as usize;
+            if k >= a.g.found.len() {
+                return None;
+            }
+            let (c, _) = a.g.found.remove(k);
+            Some(format!("P{}'s find {k}", a.g.objs[c.i()].owner))
+        }),
         // The picks in progress (ENGINE.md 125, 142.10, the Fable review's X3): one more pick - a card
         // the pending decision offers, the same one (one stream) - made by the asking task, which
         // holds picks already, or held by the task around it: which task holds a pick is public (the
@@ -2385,7 +2407,7 @@ pub const V6_FIXED: [&str; 26] = [
 /// target; and (ENGINE.md 125.7) the two limits by design until v7 - a card
 /// exiled face down and who knows it (`face_down`, face-down permanents too),
 /// the identities the viewer revealed in earlier games (`my_revealed`).
-pub const V7_FIXED: [&str; 39] = [
+pub const V7_FIXED: [&str; 41] = [
     "mana in a pool is restricted to creature spells of a chosen type",
     "a permanent entered with a big kicker count and X",
     "Containment Priest's replacement waits for a copy choice",
@@ -2427,6 +2449,9 @@ pub const V7_FIXED: [&str; 39] = [
     // ENGINE.md 125's picks in progress (layout v6 has none), 142.10's enclosing task's.
     "the asking task holding picks picks one more offered card",
     "an enclosing task holds a pick in progress",
+    // ENGINE.md 142.12: the finds the other player tells apart (`found`).
+    "the top library card is its owner's search's find",
+    "a search's find is no longer told apart",
 ];
 
 /// One perturbation per `Mark` variant (ENGINE.md 125, the gate's G1): the
@@ -2732,7 +2757,7 @@ pub fn covered<'s>(gaps: &[KnownGap], layout: u8, a: &[&'s str], b: &[&'s str]) 
 /// (an effect, a mark or a link of an object that left; a "this turn" fact of another turn; the
 /// effect it added ended) while it stays in the view. Each is still compared alone with every
 /// state.
-pub const COMBO_EXCLUDED: [&str; 18] = [
+pub const COMBO_EXCLUDED: [&str; 20] = [
     "a permanent leaves the battlefield",
     "a graveyard card is exiled",
     "an exiled card is turned face down",
@@ -2754,6 +2779,10 @@ pub const COMBO_EXCLUDED: [&str; 18] = [
     // partner draw, so that every position's partners are as before.)
     "the asking task holding picks picks one more offered card",
     "an enclosing task holds a pick in progress",
+    // (ENGINE.md 142.12: the finds, added after the partner draws were set - kept out so that every
+    // position's partners are as before.)
+    "the top library card is its owner's search's find",
+    "a search's find is no longer told apart",
 ];
 
 /// The known gaps (`KnownGap`; ENGINE.md 142.2, 142.7): what the pairwise gate finds. Layout v7 has
