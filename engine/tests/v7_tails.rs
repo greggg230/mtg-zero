@@ -25,14 +25,14 @@ fn the_rows_constants() {
     assert_eq!(<MtgAz as SearchGame>::MAX_ROW_TOKENS, 4096);
     assert!(<MtgAz as SearchGame>::OPTION_POINTERS);
     let tails = <MtgAz as SearchGame>::TAILS;
-    assert_eq!(tails.len(), 19);
+    assert_eq!(tails.len(), 20);
     let names: Vec<&str> = tails.iter().map(|t| t.name).collect();
     assert_eq!(
         names,
         [
             "my_permanents", "opponent_permanents", "hand", "stack", "triggers", "list", "graveyard_abilities", "opponent_triggers",
             "delayed", "links", "exile_offered", "library_known", "stack_relations", "graveyard_order", "face_down", "my_revealed",
-            "effects", "counters", "numbers"
+            "effects", "counters", "numbers", "opp_revealed"
         ]
     );
     // (Layout v6's game keeps no tail: ENGINE.md 124.2.)
@@ -697,6 +697,26 @@ fn my_revealed_tokens_hold_the_frames_earlier_reveals() {
     let r1 = Row::of_az(&a, 1);
     assert!(r1.tokens(seg::MY_REVEALED).is_empty());
     assert_eq!(r1.head[O_BAGS + bag::OPP_REVEALED * D + 67], 0.25, "P1 sees them in OPP_REVEALED");
+    // ENGINE.md 142.8: and as `opp_revealed` tokens, the same token as P0's own; P0's row has no
+    // `opp_revealed` (P1 revealed nothing)
+    let ot: Vec<(u32, Option<usize>)> = r1.tokens(seg::OPP_REVEALED).iter().map(|t| (t.0, code_identity(&t.1[..CODE]))).collect();
+    assert_eq!(ot, [(9, Some(9)), (67, Some(67))]);
+    assert!(r0.tokens(seg::OPP_REVEALED).is_empty());
+    // the games the reveals were made in (the user's decision of 2026-11-13: how a player boarded game 2
+    // is an input for game 3): identity 67 in game 2, 9 in game 1 - and the same reveals made in the
+    // other games are another row for both players
+    a.m.earlier_by_game[0][1][1] |= 1 << 3;
+    a.m.earlier_by_game[0][0][0] |= 1 << 9;
+    let game = |r: &Row, sg: u16, slot: u32| -> Vec<f32> { r.token(sg, slot).unwrap()[CODE + te::mr::GAME..CODE + te::mr::GAME + 3].to_vec() };
+    let (r0, r1) = (Row::of_az(&a, 0), Row::of_az(&a, 1));
+    assert_eq!((game(&r0, seg::MY_REVEALED, 67), game(&r1, seg::OPP_REVEALED, 67)), (vec![0.0, 1.0, 0.0], vec![0.0, 1.0, 0.0]));
+    assert_eq!((game(&r0, seg::MY_REVEALED, 9), game(&r1, seg::OPP_REVEALED, 9)), (vec![1.0, 0.0, 0.0], vec![1.0, 0.0, 0.0]));
+    let mut c = a.clone();
+    c.m.earlier_by_game[0][1][1] &= !(1 << 3);
+    c.m.earlier_by_game[0][0][1] |= 1 << 3;
+    for v in 0..2 {
+        assert_ne!(Row::of_az(&a, v).flat(), Row::of_az(&c, v).flat(), "P{v}: a reveal of game 2 vs one of game 1");
+    }
     let b = a.clone();
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
         let mut x = vec![0.0f32; NUM_FEATURES];

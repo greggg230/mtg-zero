@@ -29477,7 +29477,7 @@ until EoE run 2 resumes (the user's call then; its gaps stay known, scoped to v6
 
 **What** (the `mtg` game only: `mtg_eoe`'s encoding and `layout_eoe.json` are untouched; the head is unchanged, 56,384
 features, `HEAD_TOKENS` 170, so the v6 and v5 projections and their digests are as before). Three tail-only segments
-appended to layout v7 (`tail_encode::seg::EFFECTS` 20, `COUNTERS` 21, `NUMBERS` 22; `TAILS` 16 -> 19; 23 segments),
+appended to layout v7 (`tail_encode::seg::EFFECTS` 20, `COUNTERS` 21, `NUMBERS` 22; `TAILS` 16 -> 19, 23 segments; with 142.8's `opp_revealed` 20 and 24),
 each `tail: true`, `gate: true`, its token's card code first:
 
 * **`effects`** (`tail_encode::ef`: the card code and 549 floats, 601 a token): one token per continuous effect of a resolved
@@ -29512,7 +29512,7 @@ each `tail: true`, `gate: true`, its token's card code first:
   starts from, not in its checkpoints nor compared by the encoding guard: making the guard keep, log and compare it is a
   zero-core change (not made here). `layout_v6.json` / `layout_eoe.json` are frozen and carry none.
 
-**The gate.** Layout v7 has **no known gap**: `public_state::known_gaps` keeps its ten entries scoped to layout v6
+**The gate.** Layout v7 has **no known gap** of the ten (one new one, found while 142.8 ran: 142.8's last paragraph): `public_state::known_gaps` keeps its ten entries scoped to layout v6
 (`layouts: V6`, each named "layout v6 (mtg_eoe): ...", pointing at the memo's 2.8 - mtg_eoe stays on v6 until EoE run 2
 resumes). The single pass (480 positions, 24 s): **225 perturbations encoded, 2 deliberate limits, 0 known gaps** in
 layout v7 (142.2: 220 and 5; the five - an effect's duration, a granted sacrifice ability and latent ability, the two
@@ -29527,8 +29527,67 @@ counter, exact; life 5,000 and a 70,002 power and toughness as numbers tokens, l
 **The farm's `zero-onnx/2`.** Nothing here needs more than a layout-driven worker: the three segments are tail-only
 (no head slots, no static actions, no pointer columns, no `columns` key), their tokens are (segment id, slot, floats of
 the segment's width) like every other tail token, slots are small integers (a token's place in its segment), and
-`max_row_tokens` stays 4,096. What a worker must not assume: a fixed number of segments (23 now), fixed token widths
+`max_row_tokens` stays 4,096. What a worker must not assume: a fixed number of segments (24 now), fixed token widths
 (601, 227, 239 floats with the card code), that tail-only segments are rare in a row (effects and counters tokens are
 in a quarter to a half of the census's rows), or that a row's tokens per segment are bounded by a head count.
 
-**Checks**: 142.8.
+**Checks**: 142.9 (with 142.8's).
+
+### 142.8 Game 2's reveals and play / draw as inputs for game 3 (the user's decision of 2026-11-13)
+
+**The decision.** "It really shouldn't be independent, but we shouldn't just assume it will be the same. How they boarded
+game 2 should be an input for g3." The base deal prior stays the approved independent one (ENGINE.md 120.2: uniform over
+the swap count, then uniform); the dependence of the opponent's game-3 60 on its game 2 is to be **learned** by the deck
+head (ENGINE.md 102.4) through the row's inputs and applied to the worlds by the deck tilt (ENGINE.md 106), so nothing
+assumes the same 60.
+
+**What the row had** (checked): in a constructed best-of-three game 3 (and the sideboarding before it) `OPP_REVEALED` and
+v7's `my_revealed` hold `MatchState::earlier`, the post-sideboard games' reveals (ENGINE.md 130): game 2's only - game 3's
+own reveals are never merged into them (`earlier` grows at `end_game`; during a game the current game's reveals are the
+game's knowledge: known hand cards, clouds, public zones). Who played first in game 2 and its result are in the match block
+(`mtch::STARTED`, `mtch::CHOSE`, `mtch::RESULTS`, by game; game 1's chooser and starter left out in a constructed match,
+ENGINE.md 130), deck sizes are fixed (60). Merged were the reveals of two earlier games (a cube best-of-three's game 3:
+games 1 and 2 in one set), and the opponent's earlier reveals had no token (a bag count only).
+
+**What.**
+* `MatchState::earlier_by_game` (player x game): each finished game's reveals that `earlier` keeps (a constructed match's
+  game 1: none, as `earlier`), `earlier` their union; public (`public_state` classifies it, `match_view` shows it).
+* The `my_revealed` token (the frame player's earlier reveals) gains `mr::GAME`, three bits: the games each identity was
+  revealed in; a new tail-only gated segment **`opp_revealed`** (segment 23; the same token, `mr::*`, 56 floats) holds the
+  other player's earlier reveals with their games (the head's `OPP_REVEALED` bag keeps counting them). Both are written in
+  the game, the sideboarding and the deck choice (`MtgAz::encode_row`); R1's count covers both. A real game 2 still
+  encodes as a synthetic one (a constructed game 1 records nothing).
+* The gate: "an earlier game's reveal was in another earlier game" (`MatchState.earlier_by_game`; rare: needs two kept
+  earlier games, a cube best-of-three's game 3) and "an identity revealed in an earlier game" now records its game;
+  game 2's play / draw is "another played first" (`encoded_game`: a constructed match's game 2). Both are encoded in v7;
+  the first is a layout v6 gap (`V7_FIXED`; best-of-one EoE never reaches it).
+
+**The deck head and the tilt where they matter.**
+* *Game 3*: the `deck` target is the opponent's actual game-3 60's cards the decider does not know (`MtgAz::aux_target`:
+  `unknown_to`), and the tilt deals game 3's worlds (`determinize_belief`: `deals_hidden_decks()` from game 2 on, the K
+  cached decks drawn by the deck prediction). The head reads the whole row, so it can learn P(game-3 60 | game-2
+  sightings, game 2's play / draw, game 3 so far), and the tilt applies it. Nothing missing.
+* *The sideboarding before game 3*: **not covered**, and not fixed here. (1) No target: `aux_target` writes nothing while
+  sideboarding (the first sideboarder decides before the other's game-3 deck exists; the second could be labelled with
+  the first's chosen 60, which is hidden from it and exists; the first's rows only with the other's eventual game-3 60,
+  which needs zero-core to fill a sample's target at the next episode's start - a core change). (2) No tilt:
+  `determinize_belief` returns to plain `determinize` while sideboarding, so the first sideboarder's hidden choice is
+  dealt from the uniform prior (the user's decision of 120.2 / 129.3); tilting that deal by the head would change an
+  approved behaviour - the user's call. Reported to the orchestrator.
+
+**The gate on 142.7 + 142.8** (480 positions): the single pass **227 perturbations encoded, 2 deliberate limits, 0 known
+gaps** in layout v7 ("an earlier game's reveal was in another earlier game" applied on 4 cube best-of-three game-3
+positions, "another played first" on 97, both encoded); the pairwise pass 133,883 states, 43,714 pairs of different
+views with equal rows, all covered: layout v6's entries, and **one new gap in layout v7 and v6 alike**, found by the
+pairwise pass's random combinations (334 pairs): a framed row (CR 722: the viewer controls the other player's turn,
+ENGINE.md 100.5) shows the viewer's knowledge in the controlled player's seat, and nothing says which of the **viewer's
+own** hand cards the controlled player knows (`MY_HAND_KNOWN` is the frame's hand there; known bits are public). It
+predates layouts v6 and v7. It is a known gap with its own perturbation ("the controlled player learns a hand card of its
+controller", so every run meets it) and the options memo's 2.9: a tail-only gated `frame_known` segment written only in a
+framed row (one token per such card), a decision for the user - changing `MY_HAND_KNOWN`'s meaning in a framed row would
+change layout v6's encoding (EoE has turn control). `COMBO_EXCLUDED` also holds "a turn begun" now ("until their next
+turn" facts read a player's turns: a combination artifact of this run).
+
+### 142.9 Checks (142.7, 142.8)
+
+CHECKS-1429

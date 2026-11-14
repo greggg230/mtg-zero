@@ -43,6 +43,7 @@ def _seg(name):
 
 
 MY_REVEALED = _seg('my_revealed')
+OPP_REVEALED = _seg('opp_revealed')       # (docs/ENGINE.md 142.8: the other player's earlier reveals, by game)
 
 
 def test_the_spec_and_the_bindings():
@@ -93,7 +94,7 @@ def test_every_sample_takes_its_own_games_result():
             # only, and it has no pointer overrides)
             for i in np.flatnonzero(sb) + a:
                 segs = np.asarray(s['t_seg'])[s['t_off'][i]:s['t_off'][i + 1]]
-                assert (segs == MY_REVEALED).all() and s['ov_off'][i] == s['ov_off'][i + 1], (r['gid'], k)
+                assert np.isin(segs, [MY_REVEALED, OPP_REVEALED]).all() and s['ov_off'][i] == s['ov_off'][i + 1], (r['gid'], k)
             a = b
     assert n_sb > 0
     # without the key: rows of before (the whole match one episode, no `episodes`)

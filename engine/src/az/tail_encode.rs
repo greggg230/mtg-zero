@@ -53,8 +53,10 @@ pub mod seg {
     pub const EFFECTS: u16 = 20;
     pub const COUNTERS: u16 = 21;
     pub const NUMBERS: u16 = 22;
+    /// ENGINE.md 142.8: the other player's earlier reveals, by game (`mr::*`, as `MY_REVEALED`'s).
+    pub const OPP_REVEALED: u16 = 23;
     /// The number of segments.
-    pub const N: usize = 23;
+    pub const N: usize = 24;
 }
 
 /// An object reference (`ObjRef`) inside a token: what it names now, publicly (ENGINE.md 125).
@@ -289,11 +291,15 @@ pub mod fd {
 
 /// An identity the frame's player revealed (made public) in an earlier game of the match
 /// (`my_revealed` segment, `MatchState::earlier`; ENGINE.md 125.7): what the other player knows of
-/// its pool, by identity (the card code's identity digits; slot: the identity). The other way, the
-/// other player's earlier reveals, is the bag `OPP_REVEALED`.
+/// its pool, by identity (the card code's identity digits; slot: the identity); and, the same token,
+/// an identity the other player revealed (`opp_revealed` segment, ENGINE.md 142.8; the bag
+/// `OPP_REVEALED` counts them too). `GAME`: in which earlier games (`MatchState::earlier_by_game`,
+/// games 1-3: the user's decision of 2026-11-13, how a player boarded game 2 is an input for game
+/// 3, so game 2's reveals are told apart from game 1's).
 pub mod mr {
     pub const PRESENT: usize = 0;
-    pub const W: usize = PRESENT + 1;
+    pub const GAME: usize = 1;
+    pub const W: usize = GAME + 3;
 }
 
 /// A continuous effect (`effects` segment, ENGINE.md 142.7): one token per `Game::effects` entry
@@ -446,10 +452,11 @@ pub const SEG_W: [usize; seg::N] = [
     EF_W,
     CT_W,
     NB_W,
+    MR_W,
 ];
 
 /// Every segment's head slots (`count`) in layout v7.
-pub const SEG_HEAD: [usize; seg::N] = [1, 2 * encode::TOPS, encode::PERMS, encode::PERMS, encode::HANDS, encode::STACKS, encode::TRIGS, encode::LIST, encode::GYAS, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+pub const SEG_HEAD: [usize; seg::N] = [1, 2 * encode::TOPS, encode::PERMS, encode::PERMS, encode::HANDS, encode::STACKS, encode::TRIGS, encode::LIST, encode::GYAS, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 /// The layout's head tokens, `1 + sum count` (zero-core `SearchGame::HEAD_TOKENS`): the global
 /// token and every head slot.
@@ -473,7 +480,7 @@ const fn ts(seg: u16, name: &'static str) -> TailSeg {
 }
 
 /// The tail segments of layout v7, in layout order (zero-core `SearchGame::TAILS`).
-pub const TAILS: [TailSeg; 19] = [
+pub const TAILS: [TailSeg; 20] = [
     ts(seg::MY_PERM, "my_permanents"),
     ts(seg::OPP_PERM, "opponent_permanents"),
     ts(seg::HAND, "hand"),
@@ -493,6 +500,7 @@ pub const TAILS: [TailSeg; 19] = [
     ts(seg::EFFECTS, "effects"),
     ts(seg::COUNTERS, "counters"),
     ts(seg::NUMBERS, "numbers"),
+    ts(seg::OPP_REVEALED, "opp_revealed"),
 ];
 
 /// The index of a zone in a reference's one-hot (exhaustive: a new zone is a compile error here).
@@ -1263,16 +1271,25 @@ fn write_numbers(cx: &Cx, tail: &mut TailBuf) {
 /// The identities player `me` revealed in earlier games of match `m` (`my_revealed`, `mr::*`): one
 /// token each, its slot the identity (ENGINE.md 125.7). The number written.
 pub(crate) fn write_my_revealed(m: &super::matches::MatchState, me: PlayerId, tail: &mut TailBuf) -> usize {
+    write_revealed(m, me, seg::MY_REVEALED, tail) + write_revealed(m, crate::ids::opp(me), seg::OPP_REVEALED, tail)
+}
+
+/// Player `p`'s earlier reveals as tokens of segment `sg` (`mr::*`): one an identity, its slot the
+/// identity, with the games it was revealed in (ENGINE.md 142.8). The number written.
+fn write_revealed(m: &super::matches::MatchState, p: PlayerId, sg: u16, tail: &mut TailBuf) -> usize {
     let mut n = 0;
-    for (w, &bits) in m.earlier[me as usize].iter().enumerate() {
+    for (w, &bits) in m.earlier[p as usize].iter().enumerate() {
         let mut b = bits;
         while b != 0 {
             let i = w * 64 + b.trailing_zeros() as usize;
-            let x = tail.token(seg::MY_REVEALED, i as u32);
+            let x = tail.token(sg, i as u32);
             x[(i >> 6) & 15] = 1.0;
             x[16 + ((i >> 3) & 7)] = 1.0;
             x[24 + (i & 7)] = 1.0;
             x[CODE + mr::PRESENT] = 1.0;
+            for g in 0..3 {
+                x[CODE + mr::GAME + g] = (m.earlier_by_game[p as usize][g][w] >> (i & 63) & 1) as f32;
+            }
             n += 1;
             b &= b - 1;
         }
@@ -1280,10 +1297,12 @@ pub(crate) fn write_my_revealed(m: &super::matches::MatchState, me: PlayerId, ta
     n
 }
 
-/// How many `my_revealed` tokens player `me`'s row of match `m` has (R1: a head-only encoding of a
-/// row with any refuses).
+/// How many `my_revealed` and `opp_revealed` tokens the frame player `me`'s row of match `m` has:
+/// both players' earlier reveals, its own and the other's (R1: a head-only encoding of a row with any
+/// refuses).
 pub(crate) fn my_revealed_count(m: &super::matches::MatchState, me: PlayerId) -> usize {
-    m.earlier[me as usize].iter().map(|w| w.count_ones() as usize).sum()
+    let n = |p: PlayerId| m.earlier[p as usize].iter().map(|w| w.count_ones() as usize).sum::<usize>();
+    n(me) + n(crate::ids::opp(me))
 }
 
 /// A new `links` token at the next slot `k`, of kind `kind`.

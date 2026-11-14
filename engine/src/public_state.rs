@@ -347,6 +347,7 @@ pub fn fields() -> Vec<Field> {
         over: Derived "the match is over: a terminal state, never encoded for a decision",
         seen: Derived "identities revealed in the current game: become `earlier` between games",
         earlier: Public "identities the players revealed in earlier games",
+        earlier_by_game: Public "the same by game (ENGINE.md 142.8: game 2's reveals apart from game 1's, the my_revealed / opp_revealed tokens' game bits)",
         sb: Derived "sideboarding between games: encoded by encode_sideboarding, not a game position",
         rng: Hidden "seeds the later games: determinize reseeds it",
         priors: Hidden "the prior of each player's unknown first picks (ENGINE.md 36.11)",
@@ -1955,6 +1956,21 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.m.draws += 1;
             Some(format!("{}", a.m.draws))
         }),
+        // ENGINE.md 142.8 (the user's decision of 2026-11-13: how a player boarded game 2 is an input
+        // for game 3): an earlier reveal made in another earlier game - a reveal of game 2 one of game
+        // 1 (a cube best-of-three's game 3; a constructed one keeps game 2's only, ENGINE.md 130).
+        p!(rare "an earlier game's reveal was in another earlier game", "MatchState.earlier_by_game", |a, r| {
+            let p = player(r) as usize;
+            let kept: Vec<usize> = (0..3).filter(|&g| a.m.results[g] != 0 && !(a.m.constructed_bo3 && g == 0)).collect();
+            let bg = a.m.earlier_by_game[p];
+            let from: Vec<(usize, usize)> =
+                kept.iter().flat_map(|&g| (0..16 * 64).filter(move |&i| bg[g][i >> 6] & (1u64 << (i & 63)) != 0).map(move |i| (g, i))).collect();
+            let (g, i) = pick(&from, r)?;
+            let to = *kept.iter().find(|&&h| h != g && bg[h][i >> 6] & (1u64 << (i & 63)) == 0)?;
+            a.m.earlier_by_game[p][g][i >> 6] &= !(1u64 << (i & 63));
+            a.m.earlier_by_game[p][to][i >> 6] |= 1u64 << (i & 63);
+            Some(format!("P{p}: game {} -> game {}", g + 1, to + 1))
+        }),
         p!("an identity revealed in an earlier game", "MatchState.earlier", |a, r| {
             let p = player(r) as usize;
             // (A card of the player's pool not revealed yet: a reveal is of a pool's card, as the
@@ -1968,6 +1984,9 @@ pub fn perturbations() -> Vec<Perturbation> {
                 .collect();
             let i = pick(&cand, r)?;
             a.m.earlier[p][i >> 6] |= 1u64 << (i & 63);
+            // (in the last game `earlier` keeps, or the current game's predecessor: ENGINE.md 142.8)
+            let g = (0..3).rev().find(|&g| a.m.results[g] != 0 && !(a.m.constructed_bo3 && g == 0)).unwrap_or(0);
+            a.m.earlier_by_game[p][g][i >> 6] |= 1u64 << (i & 63);
             Some(format!("P{p}"))
         }),
         // EoE W6 (ENGINE.md 99.16): no draw from the gate's random stream.
@@ -2167,6 +2186,22 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.add_effect(Affected::Group(crate::db::Filter::Type(types::CREATURE)), Mod::PreventCombatDamage, Until::EndOfTurn, p);
             Some(format!("by P{p}"))
         }),
+        // ENGINE.md 142.8's run found a framed row's gap (`known_gaps`): the controlled player's
+        // knowledge of its controller's hand. (Its own perturbation, so the gate meets it on every run:
+        // the turn controlled as "the active player is controlled this turn" does, then the controlled
+        // player learns a hand card of its controller.)
+        p!("the controlled player learns a hand card of its controller", "Obj.known", |a, r| {
+            if a.g.turn_controller.is_some() {
+                return None;
+            }
+            let (p, q) = (a.g.turn.active, opp(a.g.turn.active));
+            a.g.turn_controller = Some(q);
+            a.g.sync_controller_view();
+            let hs: Vec<CardIdx> = a.g.hand_sorted(q).into_iter().filter(|&c| !a.g.knows(p, c)).collect();
+            let c = pick(&hs, r)?;
+            a.g.learn(p, c);
+            Some(format!("P{q} controls P{p}'s turn; P{p} learns P{q}'s {}", a.g.name(c)))
+        }),
         // (ENGINE.md 123's "a card name was chosen as a permanent entered" - Disruptor Flute, Anointed
         // Peacekeeper - is the `Mark` perturbation above, layout v7's: ENGINE.md 125.)
     ]
@@ -2266,7 +2301,7 @@ pub const V6_FIXED: [&str; 26] = [
 /// target; and (ENGINE.md 125.7) the two limits by design until v7 - a card
 /// exiled face down and who knows it (`face_down`, face-down permanents too),
 /// the identities the viewer revealed in earlier games (`my_revealed`).
-pub const V7_FIXED: [&str; 36] = [
+pub const V7_FIXED: [&str; 37] = [
     "mana in a pool is restricted to creature spells of a chosen type",
     "a permanent entered with a big kicker count and X",
     "Containment Priest's replacement waits for a copy choice",
@@ -2303,6 +2338,8 @@ pub const V7_FIXED: [&str; 36] = [
     "the other player learns a face-down exiled card",
     "the other player learns a face-down permanent",
     "an identity revealed in an earlier game",
+    // ENGINE.md 142.8: the game an earlier reveal was made in (`opp_revealed` / `my_revealed`'s game bits).
+    "an earlier game's reveal was in another earlier game",
 ];
 
 /// One perturbation per `Mark` variant (ENGINE.md 125, the gate's G1): the
@@ -2608,7 +2645,7 @@ pub fn covered<'s>(gaps: &[KnownGap], layout: u8, a: &[&'s str], b: &[&'s str]) 
 /// (an effect, a mark or a link of an object that left; a "this turn" fact of another turn; the
 /// effect it added ended) while it stays in the view. Each is still compared alone with every
 /// state.
-pub const COMBO_EXCLUDED: [&str; 15] = [
+pub const COMBO_EXCLUDED: [&str; 16] = [
     "a permanent leaves the battlefield",
     "a graveyard card is exiled",
     "an exiled card is turned face down",
@@ -2619,6 +2656,8 @@ pub const COMBO_EXCLUDED: [&str; 15] = [
     "the turn number + 1",
     "another step",
     "the other player is active",
+    // (a player's turns begun: "until their next turn" facts read it, ENGINE.md 142.8's run)
+    "a turn begun",
     "the game ends",
     "lost",
     "the next game of the match",
@@ -2706,6 +2745,19 @@ pub fn known_gaps() -> Vec<KnownGap> {
             layouts: V6,
             alone: group.to_vec(),
             alike: vec![group[1], "a creature can't block", "a creature can't block with no duration"],
+        },
+        // Found by the pairwise gate on 2026-11-13 (ENGINE.md 142.8's run), in layouts v7 and v6 alike (it
+        // predates both: ENGINE.md 100.5's frame): a decision for the user.
+        KnownGap {
+            name: "a framed row (CR 722: the viewer controls the other player's turn) lacks which of the viewer's own hand cards the controlled player knows",
+            decision: "encoding-options.md 2.9 (new, 2026-11-13)",
+            layouts: V7 | V6,
+            alone: vec![],
+            alike: vec![
+                "the other player learns a hand card",
+                "the active player is controlled this turn",
+                "the controlled player learns a hand card of its controller",
+            ],
         },
         KnownGap {
             name: "layout v6 (mtg_eoe, EoE run 2) lacks layout v7's facts (V7_FIXED)",
@@ -2799,6 +2851,10 @@ pub fn match_view(a: &MtgAz, viewer: PlayerId) -> Vec<u64> {
     v.extend(m.starters.iter().map(|&x| x as u64));
     for p in 0..2 {
         v.extend(m.earlier[p].iter().copied());
+        // (by game: ENGINE.md 142.8)
+        for g in 0..3 {
+            v.extend(m.earlier_by_game[p][g].iter().copied());
+        }
     }
     v.push(m.sb.is_some() as u64);
     let _ = viewer;
@@ -2829,7 +2885,8 @@ mod tests {
         assert!(!c(V6, &["life + 1"], &["a stun counter"]), "unrelated changes are no known gap");
         assert!(!c(V6, &[red], &[red]), "the same perturbations: no difference to cover");
         assert!(c(V6, &[], &["a permanent was harnessed"]) && !c(V7, &[], &["a permanent was harnessed"]), "a v7 fact: a v6 gap only");
-        assert!(k.iter().all(|g| g.layouts == V6), "layout v7 has no known gap");
+        // (layout v7's one known gap: the framed row's, found 2026-11-13, a decision of its own)
+        assert!(k.iter().filter(|g| g.layouts & V7 != 0).count() == 1, "layout v7's known gaps");
     }
 
     #[test]

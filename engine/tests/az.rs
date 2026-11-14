@@ -454,8 +454,8 @@ fn layout_v7_widens_layout_v6_exactly() {
     assert!(read("layout_v6.json").get("revision").is_none());
     let segs = j7["segments"].as_array().unwrap();
     let names: Vec<&str> = segs.iter().map(|s| s["name"].as_str().unwrap()).collect();
-    assert_eq!(names.len(), 23);
-    assert_eq!(names[20..], ["effects", "counters", "numbers"], "ENGINE.md 142.7's segments, appended");
+    assert_eq!(names.len(), 24);
+    assert_eq!(names[20..], ["effects", "counters", "numbers", "opp_revealed"], "ENGINE.md 142.7's and 142.8's segments, appended");
     let tails: Vec<&str> = segs.iter().filter(|s| s["tail"] == true).map(|s| s["name"].as_str().unwrap()).collect();
     let want: Vec<&str> = engine::az::tail_encode::TAILS.iter().map(|t| t.name).collect();
     assert_eq!(tails, want, "the tail segments are TAILS");

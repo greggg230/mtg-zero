@@ -413,6 +413,10 @@ pub struct MatchState {
     /// and a match started at game 2 has none).
     pub seen: [[u64; 16]; 2],
     pub earlier: [[u64; 16]; 2],
+    /// `earlier` by game (ENGINE.md 142.8, the user's decision of 2026-11-13: how a player boarded
+    /// game 2 is an input for game 3): the identities each player revealed in each finished game
+    /// that `earlier` keeps (a constructed best-of-three's game 1: none), `earlier` their union.
+    pub earlier_by_game: [[[u64; 16]; 3]; 2],
     pub sb: Option<Box<Sideboarding>>,
     /// Seeds the later games (reseeded by `determinize`).
     pub rng: Rng,
@@ -510,6 +514,7 @@ impl MatchState {
             over: false,
             seen: [[0; 16]; 2],
             earlier: [[0; 16]; 2],
+            earlier_by_game: [[[0; 16]; 3]; 2],
             sb: None,
             rng: Rng::new(seed ^ 0x3A7C_4B0B_D1CE_5EED),
             priors,
@@ -722,6 +727,7 @@ impl super::MtgAz {
             for p in 0..2 {
                 for w in 0..16 {
                     m.earlier[p][w] |= m.seen[p][w];
+                    m.earlier_by_game[p][i][w] = m.seen[p][w];
                 }
             }
         }

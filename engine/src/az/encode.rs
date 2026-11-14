@@ -244,7 +244,7 @@ pub struct Lay {
 pub const LAY7: Lay = Lay {
     v7: true,
     features: NUM_FEATURES,
-    off: [O_CONTEXT, O_TOPS, O_MY_PERM, O_OPP_PERM, O_HAND, O_STACK, O_TRIG, O_LIST, O_GYA, O_COMP, O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    off: [O_CONTEXT, O_TOPS, O_MY_PERM, O_OPP_PERM, O_HAND, O_STACK, O_TRIG, O_LIST, O_GYA, O_COMP, O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     w: super::tail_encode::SEG_W,
     o_match: O_MATCH,
     o_globals_v5: O_GLOBALS_V5,
@@ -254,8 +254,8 @@ pub const LAY7: Lay = Lay {
 pub const LAY6: Lay = Lay {
     v7: false,
     features: v6::NUM_FEATURES,
-    off: [O_CONTEXT, O_TOPS, v6::O_MY_PERM, v6::O_OPP_PERM, v6::O_HAND, v6::O_STACK, v6::O_TRIG, v6::O_LIST, v6::O_GYA, v6::O_COMP, v6::O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    w: [CONTEXT, TOP_W, v6::PERM_W, v6::PERM_W, v6::HAND_W, v6::STACK_W, v6::TRIG_W, v6::LIST_W, GYA_W, COMP_W, COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    off: [O_CONTEXT, O_TOPS, v6::O_MY_PERM, v6::O_OPP_PERM, v6::O_HAND, v6::O_STACK, v6::O_TRIG, v6::O_LIST, v6::O_GYA, v6::O_COMP, v6::O_COMP + COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    w: [CONTEXT, TOP_W, v6::PERM_W, v6::PERM_W, v6::HAND_W, v6::STACK_W, v6::TRIG_W, v6::LIST_W, GYA_W, COMP_W, COMP_W, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     o_match: v6::O_MATCH,
     o_globals_v5: v6::O_GLOBALS_V5,
     o_globals_v6: v6::O_GLOBALS_V6,
@@ -3396,6 +3396,8 @@ pub fn layout_json(db: &'static CardDb) -> String {
         segments.push(tail_only(sg::EFFECTS, "effects", CODE + te::ef::PRESENT));
         segments.push(tail_only(sg::COUNTERS, "counters", CODE + te::ct::PRESENT));
         segments.push(tail_only(sg::NUMBERS, "numbers", CODE + te::nb::PRESENT));
+        // ENGINE.md 142.8: the other player's earlier reveals, by game (`my_revealed`'s token).
+        segments.push(tail_only(sg::OPP_REVEALED, "opp_revealed", CODE + te::mr::PRESENT));
     }
     let mut v = json!({
         "version": if eoe { 6 } else { 7 },

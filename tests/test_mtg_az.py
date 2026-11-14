@@ -336,7 +336,7 @@ def test_a_widened_network_reads_v7_rows_within_rounding(old_version, old_featur
     eo, en = NetEvaluator(old, graphs=False), NetEvaluator(new, graphs=False)
     widths = R.layout_tails(new.config['layout'])
     gated = {i for i, s in enumerate(new.config['layout']['segments']) if s.get('gate')}
-    assert len(gated) == 12 and set(new.gates().values()) == {0.0}       # (ENGINE.md 125, 142.7: twelve tail-only segments)
+    assert len(gated) == 13 and set(new.gates().values()) == {0.0}       # (ENGINE.md 125, 142.7, 142.8: thirteen tail-only segments)
     E = G.engine()
     rng = np.random.default_rng(8)
     seen = {'plain': 0, 'gated': 0}

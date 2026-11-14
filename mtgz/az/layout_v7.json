@@ -1468,7 +1468,7 @@
       "offset": null,
       "present": 52,
       "tail": true,
-      "width": 53
+      "width": 56
     },
     {
       "actions": [],
@@ -1523,6 +1523,24 @@
       "present": 52,
       "tail": true,
       "width": 239
+    },
+    {
+      "actions": [],
+      "count": 0,
+      "gate": true,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "opp_revealed",
+      "offset": null,
+      "present": 52,
+      "tail": true,
+      "width": 56
     }
   ],
   "version": 7,
