@@ -29560,6 +29560,12 @@ held by the world) weigh nothing (an indicator); 140 weighed them as seen.
   companion's condition spent no longer gets a fill there (it did, 140.3's oversight).
 * `SealedPrior` and the cube sampler: unchanged (140.8: not the posterior of a stated prior).
 
+**One request, one form.** When every card of R was seen blind and none is held unseen, `seen_of` returns None: the
+likelihood is then C(D_i, R_i) and the request's key and draws are 140's, draw for draw (the recorded worlds of
+`known_face_key.rs` stay valid). **A state changed by hand** (tests' perturbations, `public_state::Perturbation::run`)
+drops its sightings (`Game::lose_sightings`): they no longer describe what each player saw, and its deals weigh every
+seen card blind; the engine never calls it.
+
 **API.** `DeckWant::seen: Option<&[Seen]>` (None: every copy blind, 140's), so every `DeckWant` literal names it;
 `Seen` (definition, sightings, searched bits); `sighting_weight(deck, shown, seen)` beside `seen_weight` (unchanged);
 `MtgAz::deck_request_of` (a test hook: R and its sightings).
@@ -29588,7 +29594,19 @@ held by the world) weigh nothing (an indicator); 140 weighed them as seen.
 
 **Digests**: EQUAL expected and checked by the gate (no digest game keeps sightings or marks finds: the record is kept only with whole-deck clouds). The behaviour that changes: every hidden deck dealt in a game with whole-deck clouds after a search's find, a payment's held card, or (the table prior) a revealed one-per-name companion's spent names in `expected_fill`.
 
-**Checks**: recorded after the commit (the full engine suite, the 20k fuzz runs, the engine gate).
+**Checks** (on `8a008e50`, the code of 140.9-140.10; the desktop shared, the live run paused for the last of them):
+
+* The full engine suite (`--no-fail-fast`): 161 targets, 2,543 passed, 0 failed, 28 ignored (2,274 s).
+* `FUZZ_HIDDEN_DECKS=1 FUZZ_GAMES=2000` (the table prior, `seen_of`'s check at every deal): passed (485 s), 45,186
+  worlds, 267 companions revealed and 141 put into a hand; before `seen_of` counted all the owner's cards it failed at
+  seed 740 (above), which passes now.
+* `FUZZ_POOL=delver FUZZ_GAMES=20000`: passed (1,823 s): 20,000 games, 1,000 constructed best-of-three matches (2,657
+  games, 41,498 worlds, every later game's 60 dealt with its sightings).
+* `FUZZ_GAMES=20000`, the default pool: passed (3,127 s): 20,000 games, 1,000 cube best-of-three matches.
+* Behaviour digests: full `438164c0429d7fa3` (EQUAL); the engine gate on the final commit is in the lane's report.
+* Cost (`constructed_deal_cost`, `constructed_request_cost`; shared desktop): a later game's determinize 225 us at a
+  request's first deal (its 32 decks) and 4.7 us a deal after it (120.2: 5.3 ms and 3.5 us before P1 and this check);
+  a new request 191-193 us.
 
 **Open points.**
 
