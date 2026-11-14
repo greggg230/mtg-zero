@@ -15,6 +15,9 @@ The build directory holds `mtgz-worker.exe` only; it is signed with the release 
 mtgz-worker.exe`, checked (the worker reads the signed manifest: its build_id and profile), and with
 `--publish` uploaded and registered (`farm-release publish`). A release build plays networks: give
 the runtime pack it loads ONNX Runtime from (`--runtime-id`); a fuzz build needs no runtime pack.
+`ZERO_PROBE_VARIANTS` (zero-core crates/worker/build.rs: the probe's graph variants, which may hold real networks, embed
+into the worker) is refused for every build except `--diagnostic` (a release worker for canary test runs, version
+`mtg-<sha>-release-diag`), which requires it.
 
 The runtime pack (`--runtime`): ONNX Runtime's CPU library (`--ort-dll`, default the onnxruntime
 package's of this Python) and the MSVC runtime it imports, app-local (`--msvc-dir`: a Visual Studio
@@ -182,11 +185,26 @@ def cargo_build(profile):
     return exe
 
 
+def check_variants_env(a):
+    """zero-core's crates/worker/build.rs embeds ZERO_PROBE_VARIANTS (the probe's graph variants, which may hold real
+    networks) into every worker built while it is set: a normal build with it set - a stray shell variable - would ship
+    them in a public release. Only --diagnostic (a release worker for canary test runs) builds with it, and only with it."""
+    v = os.environ.get('ZERO_PROBE_VARIANTS')
+    if a.diagnostic:
+        if a.runtime or a.profile != 'release':
+            die('--diagnostic is for a release worker build (--profile release)')
+        if not v or not os.path.isfile(v):
+            die(f'--diagnostic needs ZERO_PROBE_VARIANTS = an existing variants archive (got {v!r})')
+    elif v:
+        die(f'ZERO_PROBE_VARIANTS is set ({v}): zero-core would embed those probe variants (possibly real networks) in this '
+            'build. Unset it for a normal build, or pass --diagnostic for a canary-only diagnostic worker.')
+
+
 def build_worker(a):
     ec, cc = clean_tree()
     tdir = target_dir()
     exe = cargo_build(a.profile)
-    version = f'mtg-{ec[:7]}-{a.profile}'
+    version = f'mtg-{ec[:7]}-{a.profile}' + ('-diag' if a.diagnostic else '')
     d = os.path.join(a.out or os.path.join(tdir, 'dist'), version)
     if os.path.exists(d):
         shutil.rmtree(d)
@@ -521,7 +539,11 @@ def main():
     ap.add_argument('--key', default=os.path.join(HOME, '.config', 'zero-farm', 'release.key'))
     ap.add_argument('--token-file', default=os.path.join(HOME, '.config', 'zero-farm', 'admin_token'))
     ap.add_argument('--farm-release', default='E:/cargo-target/zero-farm/main/release/farm-release.exe')
+    ap.add_argument('--diagnostic', action='store_true',
+                    help='a diagnostic release worker: ZERO_PROBE_VARIANTS names the probe variants zero-core embeds '
+                         '(they may hold real networks); its version gets a -diag suffix; for canary test runs only')
     a = ap.parse_args()
+    check_variants_env(a)
     bid, d = (build_winml(a) if a.pack == 'winml' else build_runtime(a)) if a.runtime else build_worker(a)
     print(f'build directory {d}')
     if a.publish:
