@@ -58,9 +58,9 @@ fn options(g: &Game) -> Vec<Choice> {
 
 /// The status floats of permanent `c` in `viewer`'s encoding.
 fn perm_status(g: &Game, viewer: PlayerId, c: CardIdx) -> Vec<f32> {
-    use engine::az::encode::{self, CODE, NUM_FEATURES, PERM_W};
-    let mut x = vec![0.0; NUM_FEATURES];
-    g.encode_features(viewer, &mut x);
+    use engine::az::encode::{self, CODE, PERM_W};
+    // (the head of the layout v7 row: its tail, ENGINE.md 142.7's effects tokens among it, is `Row`'s)
+    let x = engine::az::tail_encode::Row::of(g, viewer).head;
     let ctl = g.obj(c).controller;
     let s = g.permanents_of(ctl).position(|x| x == c).unwrap();
     let o = if ctl == viewer { encode::O_MY_PERM } else { encode::O_OPP_PERM } + s * PERM_W + CODE;

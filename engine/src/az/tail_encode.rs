@@ -49,8 +49,17 @@ pub mod seg {
     pub const GRAVEYARD_ORDER: u16 = 17;
     pub const FACE_DOWN: u16 = 18;
     pub const MY_REVEALED: u16 = 19;
+    /// ENGINE.md 142.7: continuous effects, counters, numbers past float16's exact range.
+    pub const EFFECTS: u16 = 20;
+    pub const COUNTERS: u16 = 21;
+    pub const NUMBERS: u16 = 22;
+    /// ENGINE.md 142.8: the other player's earlier reveals, by game (`mr::*`, as `MY_REVEALED`'s).
+    pub const OPP_REVEALED: u16 = 23;
+    /// ENGINE.md 142.12: the cards found by their owner's library search that the other player still
+    /// tells apart (`Game::found`, ENGINE.md 140.9).
+    pub const FOUND: u16 = 24;
     /// The number of segments.
-    pub const N: usize = 20;
+    pub const N: usize = 25;
 }
 
 /// An object reference (`ObjRef`) inside a token: what it names now, publicly (ENGINE.md 125).
@@ -172,7 +181,12 @@ pub mod lk {
     pub const RANK: usize = CURRENT_TURN + 1;
     pub const BY_ME: usize = RANK + 1;
     pub const BY_OPP: usize = BY_ME + 1;
-    pub const W: usize = BY_OPP + 1;
+    /// A pick in progress (`K_PICKED`, `K_PICKED_DEF`) of an enclosing task (ENGINE.md 142.10, X3):
+    /// its depth / 8 - 0 the innermost holder's (the head's pick floats are its), k the k-th task
+    /// holding picks around it (Etali, Primal Conqueror's frame keeps the exiled cards while a cast
+    /// from among them pays a cost that picks objects).
+    pub const DEPTH: usize = BY_OPP + 1;
+    pub const W: usize = DEPTH + 1;
 }
 
 /// An exile offer (`exile_offered` segment): the `EXILE` range's item at this slot's position of
@@ -285,11 +299,145 @@ pub mod fd {
 
 /// An identity the frame's player revealed (made public) in an earlier game of the match
 /// (`my_revealed` segment, `MatchState::earlier`; ENGINE.md 125.7): what the other player knows of
-/// its pool, by identity (the card code's identity digits; slot: the identity). The other way, the
-/// other player's earlier reveals, is the bag `OPP_REVEALED`.
+/// its pool, by identity (the card code's identity digits; slot: the identity); and, the same token,
+/// an identity the other player revealed (`opp_revealed` segment, ENGINE.md 142.8; the bag
+/// `OPP_REVEALED` counts them too). `GAME`: in which earlier games (`MatchState::earlier_by_game`,
+/// games 1-3: the user's decision of 2026-11-13, how a player boarded game 2 is an input for game
+/// 3, so game 2's reveals are told apart from game 1's).
 pub mod mr {
     pub const PRESENT: usize = 0;
-    pub const W: usize = PRESENT + 1;
+    pub const GAME: usize = 1;
+    pub const W: usize = GAME + 3;
+}
+
+/// A card found by its owner's library search that the other player still tells apart (`found`
+/// segment, ENGINE.md 142.12; `Game::found`, ENGINE.md 140.9: a tutor's card put on top of the
+/// library, a Doomsday pile's cards, a find exiled face down - until it is seen, goes into a hand or
+/// is shuffled with cards that are not finds), slot k its place in the order of the searches. After
+/// the card code where the viewer knows the card (`Cx::ref_def`: its owner, who found it; the other
+/// player knows it only once it is no find): the object (`rf::*`, `Cx::write_ref`: its zone, its
+/// owner, a face-down card's place) and, in a library, its depth from the top + 1 / 64 and in 16
+/// binary digits.
+pub mod fs {
+    use super::rf;
+    pub const PRESENT: usize = 0;
+    pub const OBJ: usize = 1;
+    pub const DEPTH: usize = OBJ + rf::W;
+    pub const DEPTH_BITS: usize = DEPTH + 1;
+    pub const W: usize = DEPTH_BITS + 16;
+}
+
+/// A continuous effect (`effects` segment, ENGINE.md 142.7): one token per `Game::effects` entry
+/// (a resolved spell's or ability's effect, CR 611.2), slot k its place in timestamp order (CR
+/// 613.7: the layers apply effects in that order), then one per copy effect (`Game::copies`, CR
+/// 707), after the effects. After the affected permanent's card code where the viewer sees it
+/// (zero for a group's rules effect): the affected object (a reference), or the group's filter
+/// (`group_filter`: card types, and whose - any player's, the effect's controller's, its
+/// opponents'); the `Mod` (`mod_index`, one-hot: the 21 variants an effect can have) and its
+/// parameters - power and toughness amounts (squashed, sign, 64 binary digits: exact), keywords,
+/// protection's qualities, colours, card types and `replace`, up to `SUBS` subtypes (each a stable
+/// name id's 32 digits, `name_id`), the mana a granted sacrifice ability makes, which latent
+/// ability, whose control it was; its duration (`Until`, one-hot, and the object "for as long as"
+/// names) and its controller ("you" of "until your next turn", the goader). A copy effect: the
+/// copied definition's identity, its exceptions (CR 707.9: card types, subtypes, keywords, base
+/// power and toughness, a name, colours, no mana cost, supertypes), double-faced, its duration.
+pub mod ef {
+    use super::rf;
+    pub const PRESENT: usize = 0;
+    pub const COPY: usize = 1;
+    pub const OBJ: usize = 2;
+    pub const GROUP: usize = OBJ + rf::W;
+    pub const GROUP_TYPES: usize = GROUP + 1;
+    pub const TYPE_N: usize = 9;
+    pub const GROUP_ANY: usize = GROUP_TYPES + TYPE_N;
+    pub const GROUP_YOURS: usize = GROUP_ANY + 1;
+    pub const GROUP_OPPONENTS: usize = GROUP_ANY + 2;
+    pub const MOD: usize = GROUP_ANY + 3;
+    pub const MODS: usize = 21;
+    /// A number: squashed / 8, negative, 64 binary digits of its magnitude.
+    pub const NUM_W: usize = 66;
+    pub const POWER: usize = MOD + MODS;
+    pub const PT_PRESENT: usize = POWER + NUM_W;
+    pub const TOUGHNESS: usize = PT_PRESENT + 1;
+    pub const KWS: usize = TOUGHNESS + NUM_W;
+    pub const KW_N: usize = 22;
+    pub const PROT: usize = KWS + KW_N;
+    pub const PROT_N: usize = 19;
+    pub const COLORS: usize = PROT + PROT_N;
+    pub const COLORS_SET: usize = COLORS + 6;
+    pub const TYPES: usize = COLORS_SET + 1;
+    pub const REPLACE: usize = TYPES + TYPE_N;
+    pub const SUBTYPES_N: usize = REPLACE + 1;
+    pub const SUBTYPES: usize = SUBTYPES_N + 1;
+    pub const SUBS: usize = 4;
+    pub const SAC_MASK: usize = SUBTYPES + SUBS * 32;
+    pub const LATENT: usize = SAC_MASK + 6;
+    pub const LATENT_N: usize = 8;
+    pub const CONTROL_FROM_ME: usize = LATENT + LATENT_N;
+    pub const CONTROL_FROM_OPP: usize = CONTROL_FROM_ME + 1;
+    pub const UNTIL: usize = CONTROL_FROM_OPP + 1;
+    pub const UNTIL_N: usize = 4;
+    pub const UNTIL_OBJ: usize = UNTIL + UNTIL_N;
+    pub const CONTROLLER_ME: usize = UNTIL_OBJ + rf::W;
+    pub const CONTROLLER_OPP: usize = CONTROLLER_ME + 1;
+    /// A copy effect's copied definition (32 identity digits), its exception's name (present, 32
+    /// digits), no mana cost, supertypes (8 bits), double-faced.
+    pub const COPY_DEF: usize = CONTROLLER_OPP + 1;
+    pub const EXC_NAME: usize = COPY_DEF + 32;
+    pub const EXC_NAME_DIGITS: usize = EXC_NAME + 1;
+    pub const EXC_NO_COST: usize = EXC_NAME_DIGITS + 32;
+    pub const EXC_SUPERS: usize = EXC_NO_COST + 1;
+    pub const COPY_DFC: usize = EXC_SUPERS + 8;
+    pub const W: usize = COPY_DFC + 1;
+}
+
+/// The counters of one kind on one object (`counters` segment, ENGINE.md 142.7): one token per
+/// (object, kind) of every permanent (the frame player's, then the other's, in their slots'
+/// order), every face-up exiled card (exile order) and every phased-out permanent, kinds in their
+/// order: after the object's card code, the object (a reference), the kind (+1/+1, -1/-1, stun, a
+/// keyword counter, a named counter, loyalty, lore; CR 122.1), a keyword counter's keyword, a named
+/// counter's name (a stable name id's 32 digits, `name_id`), the number (squashed / 4, 64 binary
+/// digits: exact).
+pub mod ct {
+    use super::rf;
+    pub const PRESENT: usize = 0;
+    pub const OBJ: usize = 1;
+    pub const KIND: usize = OBJ + rf::W;
+    pub const KINDS: usize = 7;
+    pub const KW: usize = KIND + KINDS;
+    pub const NAME: usize = KW + super::ef::KW_N;
+    pub const COUNT: usize = NAME + 32;
+    pub const COUNT_BITS: usize = COUNT + 1;
+    pub const W: usize = COUNT_BITS + 64;
+}
+
+/// A number the head writes squashed past float16's exact range (`numbers` segment, ENGINE.md
+/// 142.7; zero-core's shards store floats as float16): one token per such number whose magnitude
+/// is at least `BIG` - a player's life, poison, energy and experience counters (the frame player
+/// first), a permanent's power, toughness and damage (the frame player's permanents, then the
+/// other's) - with whose it is (a player, or the permanent as a reference), which number, its sign
+/// and its magnitude's 128 binary digits (power and toughness are 128-bit, ENGINE.md 100.7). Below
+/// `BIG` the head's float is exact in float16 for every one of them (life / 20 to 1,280; power,
+/// toughness, damage / 8 and the counters / 4 to the squash threshold).
+pub mod nb {
+    use super::rf;
+    pub const BIG: u128 = 512;
+    pub const PRESENT: usize = 0;
+    pub const PLAYER_ME: usize = 1;
+    pub const PLAYER_OPP: usize = 2;
+    pub const OBJ: usize = 3;
+    pub const WHICH: usize = OBJ + rf::W;
+    pub const LIFE: usize = 0;
+    pub const POISON: usize = 1;
+    pub const ENERGY: usize = 2;
+    pub const EXPERIENCE: usize = 3;
+    pub const POWER: usize = 4;
+    pub const TOUGHNESS: usize = 5;
+    pub const DAMAGE: usize = 6;
+    pub const WHICH_N: usize = 7;
+    pub const NEG: usize = WHICH + WHICH_N;
+    pub const BITS: usize = NEG + 1;
+    pub const W: usize = BITS + 128;
 }
 
 pub const DELAYED_W: usize = CODE + dl::W;
@@ -300,6 +448,10 @@ pub const SR_W: usize = CODE + sr::W;
 pub const GO_W: usize = CODE + go::W;
 pub const FD_W: usize = CODE + fd::W;
 pub const MR_W: usize = CODE + mr::W;
+pub const EF_W: usize = CODE + ef::W;
+pub const CT_W: usize = CODE + ct::W;
+pub const NB_W: usize = CODE + nb::W;
+pub const FS_W: usize = CODE + fs::W;
 
 /// Every segment's slot width in layout v7, by segment index.
 pub const SEG_W: [usize; seg::N] = [
@@ -323,10 +475,15 @@ pub const SEG_W: [usize; seg::N] = [
     GO_W,
     FD_W,
     MR_W,
+    EF_W,
+    CT_W,
+    NB_W,
+    MR_W,
+    FS_W,
 ];
 
 /// Every segment's head slots (`count`) in layout v7.
-pub const SEG_HEAD: [usize; seg::N] = [1, 2 * encode::TOPS, encode::PERMS, encode::PERMS, encode::HANDS, encode::STACKS, encode::TRIGS, encode::LIST, encode::GYAS, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+pub const SEG_HEAD: [usize; seg::N] = [1, 2 * encode::TOPS, encode::PERMS, encode::PERMS, encode::HANDS, encode::STACKS, encode::TRIGS, encode::LIST, encode::GYAS, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 /// The layout's head tokens, `1 + sum count` (zero-core `SearchGame::HEAD_TOKENS`): the global
 /// token and every head slot.
@@ -350,7 +507,7 @@ const fn ts(seg: u16, name: &'static str) -> TailSeg {
 }
 
 /// The tail segments of layout v7, in layout order (zero-core `SearchGame::TAILS`).
-pub const TAILS: [TailSeg; 16] = [
+pub const TAILS: [TailSeg; 21] = [
     ts(seg::MY_PERM, "my_permanents"),
     ts(seg::OPP_PERM, "opponent_permanents"),
     ts(seg::HAND, "hand"),
@@ -367,6 +524,11 @@ pub const TAILS: [TailSeg; 16] = [
     ts(seg::GRAVEYARD_ORDER, "graveyard_order"),
     ts(seg::FACE_DOWN, "face_down"),
     ts(seg::MY_REVEALED, "my_revealed"),
+    ts(seg::EFFECTS, "effects"),
+    ts(seg::COUNTERS, "counters"),
+    ts(seg::NUMBERS, "numbers"),
+    ts(seg::OPP_REVEALED, "opp_revealed"),
+    ts(seg::FOUND, "found"),
 ];
 
 /// The index of a zone in a reference's one-hot (exhaustive: a new zone is a compile error here).
@@ -427,6 +589,9 @@ pub(crate) struct Picks {
     pub objs: Vec<(CardIdx, bool)>,
     pub defs: Vec<DefId>,
     pub searcher: Option<PlayerId>,
+    /// The enclosing tasks' picks (ENGINE.md 142.10, X3), innermost first: depth k + 1 for entry
+    /// k; `links` tokens only (`lk::DEPTH`).
+    pub outer: Vec<Picks>,
 }
 
 impl Picks {
@@ -457,8 +622,38 @@ pub(crate) struct Cx<'g> {
     pub theirs: Vec<CardIdx>,
     /// The frame player's hand, sorted (the hand slots' order).
     pub hand: Vec<CardIdx>,
+    /// The cards exiled face down (`Game::face_down`) in their canonical order for the knower
+    /// (`face_down_order`): the `face_down` tokens' slots and a reference's place.
+    pub fd: Vec<CardIdx>,
     pub picks: Picks,
     stale: RefCell<Vec<ObjRef>>,
+}
+
+/// The cards exiled face down in the order the encoding shows them to `knower` (ENGINE.md 142.3):
+/// sorted by what the knower can tell of each - whose (the frame player's first), known to the
+/// knower or not (known first), its identity where known, who knows it, who may play it - and in
+/// exile order among cards alike in all of these. `Game::face_down` holds them in the order they
+/// were exiled, and several at once in the order of the zone they came from: Memory Jar exiles each
+/// hand in the hand vector's order, so a card the knower knew among the opponent's hidden cards
+/// sat at a place that told how many of them had been drawn before it (the Fable review's B7). The
+/// public view has no order for the pile (`Game::view_of`: a multiset per owner), and no rule reads
+/// one; cards alike for the knower in every field above are interchangeable in its row.
+pub(crate) fn face_down_order(g: &Game, knower: PlayerId, me: PlayerId) -> Vec<CardIdx> {
+    let mut v = g.face_down.clone();
+    let op_ = crate::ids::opp(me);
+    v.sort_by_cached_key(|&c| {
+        let o = &g.objs[c.i()];
+        let known = g.knows(knower, c);
+        (
+            (o.owner != me) as u8,
+            !known as u8,
+            if known { o.def as u32 + 1 } else { 0 },
+            o.known & 3,
+            g.exile_permission(me, c).is_some() as u8,
+            g.exile_permission(op_, c).is_some() as u8,
+        )
+    });
+    v
 }
 
 impl<'g> Cx<'g> {
@@ -476,6 +671,7 @@ impl<'g> Cx<'g> {
             mine: g.permanents_of(me).collect(),
             theirs: g.permanents_of(op_).collect(),
             hand: g.hand_sorted(me),
+            fd: face_down_order(g, knower, me),
             picks: Picks::default(),
             stale: RefCell::new(Vec::new()),
         };
@@ -620,7 +816,7 @@ impl<'g> Cx<'g> {
                 Zone::Stack => self.spell_pos(c),
                 Zone::Hand if o.owner == self.me => self.hand.iter().position(|&x| x == c),
                 Zone::Exile => g.exile.iter().position(|&x| x == c),
-                Zone::FaceDown => g.face_down.iter().position(|&x| x == c),
+                Zone::FaceDown => self.fd.iter().position(|&x| x == c),
                 Zone::PhasedOut => g.w3.phased.iter().position(|&x| x == c),
                 _ => None,
             };
@@ -678,55 +874,64 @@ impl<'g> Cx<'g> {
         self.write_ev(&mut st[encode::trig::EV..encode::trig::EV + ev::W], &t.ev);
     }
 
-    /// The picks in progress (`Picks`): the asking task's, or else the frames' of the agenda's
-    /// resolutions. At most one task of the agenda holds picks (else a loud failure: a state the
-    /// encoding's picks don't cover yet).
+    /// The picks in progress (`Picks`): the innermost task's of the agenda holding picks (the
+    /// asking task's, or else a resolution's frame's), and each enclosing task's in `outer`,
+    /// innermost first (ENGINE.md 142.10, X3: Etali, Primal Conqueror's frame keeps the exiled
+    /// cards while a cast from among them pays a cost that picks objects).
     fn picks_in_progress(&self) -> Picks {
-        let g = self.g;
-        let mut out = Picks::default();
-        if g.pending.is_none() {
-            return out;
-        }
-        let mut holders = 0;
-        for t in g.agenda.iter().rev() {
-            let (objs, defs, by): (&[CardIdx], &[DefId], Box<dyn Fn(usize) -> PlayerId>) = match t {
-                Task::Run(f) => {
-                    let op = g.db.ability(f.ability).program.get(f.pc as usize);
-                    let voting = matches!(op, Some(crate::program::Op::Ext(crate::program::Ext::VoteExile { .. })));
-                    let ctl = f.controller;
-                    let by: Box<dyn Fn(usize) -> PlayerId> = if voting { Box::new(move |k| if k == 0 { ctl } else { crate::ids::opp(ctl) }) } else { Box::new(move |_| ctl) };
-                    (&f.picked, &f.picked_defs, by)
-                }
-                Task::PayCosts { id, picked, .. } => {
-                    let p = g.stack.iter().find(|s| s.id == *id).map_or(g.pending.as_ref().unwrap().player, |s| s.controller);
-                    (picked, &[], Box::new(move |_| p))
-                }
-                Task::OrderTimestamps { picked, .. } => {
-                    let p = g.turn.active;
-                    (picked, &[], Box::new(move |_| p))
-                }
-                Task::Devour { card, picked } => {
-                    let p = g.objs[card.i()].controller;
-                    (picked, &[], Box::new(move |_| p))
-                }
-                _ => continue,
-            };
-            if objs.is_empty() && defs.is_empty() {
-                continue;
-            }
-            holders += 1;
-            assert!(
-                holders == 1,
-                "picks in progress in two tasks of the agenda (the second: {t:?}): the encoding's picks (ENGINE.md 125) cover one"
-            );
-            out.objs = objs.iter().enumerate().map(|(k, &c)| (c, by(k) == self.me)).collect();
-            if !defs.is_empty() {
-                out.defs = defs.to_vec();
-                out.searcher = Some(by(0));
-            }
-        }
-        out
+        agenda_picks(self.g, self.me)
     }
+}
+
+/// The picks in progress of the agenda (`Cx::picks_in_progress`), framed in seat `me` (which
+/// player picked each object: `by_me`).
+pub(crate) fn agenda_picks(g: &Game, me: PlayerId) -> Picks {
+    let mut out = Picks::default();
+    if g.pending.is_none() {
+        return out;
+    }
+    let mut holders = 0;
+    for t in g.agenda.iter().rev() {
+        let (objs, defs, by): (&[CardIdx], &[DefId], Box<dyn Fn(usize) -> PlayerId>) = match t {
+            Task::Run(f) => {
+                let op = g.db.ability(f.ability).program.get(f.pc as usize);
+                let voting = matches!(op, Some(crate::program::Op::Ext(crate::program::Ext::VoteExile { .. })));
+                let ctl = f.controller;
+                let by: Box<dyn Fn(usize) -> PlayerId> = if voting { Box::new(move |k| if k == 0 { ctl } else { crate::ids::opp(ctl) }) } else { Box::new(move |_| ctl) };
+                (&f.picked, &f.picked_defs, by)
+            }
+            Task::PayCosts { id, picked, .. } => {
+                let p = g.stack.iter().find(|s| s.id == *id).map_or(g.pending.as_ref().unwrap().player, |s| s.controller);
+                (picked, &[], Box::new(move |_| p))
+            }
+            Task::OrderTimestamps { picked, .. } => {
+                let p = g.turn.active;
+                (picked, &[], Box::new(move |_| p))
+            }
+            Task::Devour { card, picked } => {
+                let p = g.objs[card.i()].controller;
+                (picked, &[], Box::new(move |_| p))
+            }
+            _ => continue,
+        };
+        if objs.is_empty() && defs.is_empty() {
+            continue;
+        }
+        holders += 1;
+        // (The innermost holder's picks are the head's floats and their tokens; each enclosing
+        // task's are tokens with their depth: ENGINE.md 142.10, X3.)
+        let mut p = Picks { objs: objs.iter().enumerate().map(|(k, &c)| (c, by(k) == me)).collect(), ..Picks::default() };
+        if !defs.is_empty() {
+            p.defs = defs.to_vec();
+            p.searcher = Some(by(0));
+        }
+        if holders == 1 {
+            out = p;
+        } else {
+            out.outer.push(p);
+        }
+    }
+    out
 }
 
 /// The tail-only segments and the list's paged picks, written after the head (layout v7 only).
@@ -791,13 +996,19 @@ pub(crate) fn write_tail_segments(cx: &Cx, list: &[Option<CardIdx>], tail: &mut 
     write_stack_relations(cx, tail);
     write_graveyard_order(cx, tail);
     write_face_down(cx, tail);
+    // ENGINE.md 142.7.
+    write_effects(cx, tail);
+    write_counters(cx, tail);
+    write_numbers(cx, tail);
+    write_found(cx, tail);
 }
 
-/// The `face_down` segment (`fd::*`): every card exiled face down, in exile order, then every
-/// face-down permanent, in their order (slots k). An identity only where the viewer knows it.
+/// The `face_down` segment (`fd::*`): every card exiled face down, in their canonical order for the
+/// viewer (`face_down_order`, ENGINE.md 142.3), then every face-down permanent, in their order
+/// (slots k). An identity only where the viewer knows it.
 fn write_face_down(cx: &Cx, tail: &mut TailBuf) {
     let g = cx.g;
-    let cards = g.face_down.iter().map(|&c| (c, true)).chain(g.face_down_ids.iter().map(|&(c, _)| (c, false)));
+    let cards = cx.fd.iter().map(|&c| (c, true)).chain(g.face_down_ids.iter().map(|&(c, _)| (c, false)));
     for (k, (c, exiled)) in cards.enumerate() {
         let x = tail.token(seg::FACE_DOWN, k as u32);
         let o = &g.objs[c.i()];
@@ -821,19 +1032,347 @@ fn write_face_down(cx: &Cx, tail: &mut TailBuf) {
     }
 }
 
+/// A stable id of an interned name (a subtype or a named counter, `CardDb::subtype_name`): its
+/// FNV-1a 32-bit hash (ENGINE.md 142.7). The interned ids are each table's own; the network needs
+/// one id a name in every table. `tests/v7_tails.rs::name_ids_are_distinct` checks that no two names
+/// of the tables share one.
+pub fn name_id(name: &str) -> u32 {
+    name.bytes().fold(0x811c_9dc5u32, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193))
+}
+
+/// A number's floats (`ef::NUM_W`): squashed / 8, negative, its magnitude's 64 binary digits.
+fn num(out: &mut [f32], v: i64) {
+    out[0] = squash(v as f32 / 8.0);
+    out[1] = (v < 0) as u8 as f32;
+    bits(&mut out[2..ef::NUM_W], v.unsigned_abs());
+}
+
+/// The bits of a card-type mask (`types::*`, 9 bits).
+fn type_mask(out: &mut [f32], t: u16) {
+    for (k, x) in out[..ef::TYPE_N].iter_mut().enumerate() {
+        *x = (t >> k & 1) as f32;
+    }
+}
+
+/// A keyword's index among `encode::KWS` then `encode::KWS_V7` (`ef::KWS`, `ct::KW`).
+fn kw_index(k: crate::db::Kw) -> usize {
+    let f = encode::kw_float(k);
+    if f >= encode::perm::KW_V7 {
+        encode::KWS.len() + f - encode::perm::KW_V7
+    } else {
+        f - encode::perm::KEYWORDS
+    }
+}
+
+/// The index of an effect's `Mod` in `ef::MOD`: an exhaustive match. The four variants only
+/// static abilities have never occur in an effect (`Mod::static_only`: `Game::add_effect` refuses
+/// them).
+pub fn mod_index(m: &crate::db::Mod) -> usize {
+    use crate::db::Mod as M;
+    match m {
+        M::Types { .. } => 0,
+        M::Colors(_) => 1,
+        M::Keywords(_) => 2,
+        M::Protection(_) => 3,
+        M::SetPt(..) => 4,
+        M::Pt(..) => 5,
+        M::CantBlock => 6,
+        M::CantBeBlocked => 7,
+        M::MustAttack => 8,
+        M::ExileIfDies => 9,
+        M::GainSacMana(_) => 10,
+        M::LoseAllAbilities => 11,
+        M::AllCreatureTypes => 12,
+        M::BecomeTypes { .. } => 13,
+        M::GainLatent(_) => 14,
+        M::SwitchPt => 15,
+        M::Goad => 16,
+        M::ExileIfLeaves => 17,
+        M::ControlFrom(_) => 18,
+        M::PreventCombatDamage => 19,
+        M::MustAttackPlayer => 20,
+        M::PtPer { .. } | M::PtPerSourceCounter { .. } | M::AttackDespiteDefender | M::PowerPlusGreatestMv { .. } => {
+            unreachable!("a static ability's mod {m:?} in an effect (Game::add_effect refuses it)")
+        }
+    }
+}
+
+/// The filter of a group's rules effect as the `effects` token writes it: its card types, and
+/// whose (0 any player's, 1 the effect's controller's, 2 its controller's opponents'). The lowering
+/// makes `Type(t)` and `Type(t)` with `Controller(b)` (`Ext::ApplyRules`, ENGINE.md 142.7); any other
+/// shape fails loudly here until the token has floats for it (`tests/v7_tails.rs` checks every
+/// table's group effects).
+pub fn group_filter(f: &crate::db::Filter) -> (u16, usize) {
+    use crate::db::Filter as F;
+    let shape = match f {
+        F::Type(t) => Some((*t, 0)),
+        F::And(a, b) => match (&**a, &**b) {
+            (F::Type(t), F::Controller(y)) | (F::Controller(y), F::Type(t)) => Some((*t, if *y { 1 } else { 2 })),
+            _ => None,
+        },
+        _ => None,
+    };
+    shape.unwrap_or_else(|| panic!("a group effect's filter {f:?} has no floats in the effects token (ENGINE.md 142.7)"))
+}
+
+/// Subtypes (interned ids) into `ef::SUBTYPES_N` / `ef::SUBTYPES`: the count / 4 and each one's
+/// stable name id (`name_id`), at most `ef::SUBS` (a loud failure past it).
+fn subtypes(g: &Game, s: &mut [f32], ids: &[u16]) {
+    assert!(ids.len() <= ef::SUBS, "an effect with {} subtypes: the effects token holds {} (ENGINE.md 142.7)", ids.len(), ef::SUBS);
+    s[ef::SUBTYPES_N] = ids.len() as f32 / 4.0;
+    for (k, &t) in ids.iter().enumerate() {
+        bits(&mut s[ef::SUBTYPES + 32 * k..ef::SUBTYPES + 32 * (k + 1)], name_id(g.db.subtype_name(t)) as u64);
+    }
+}
+
+/// A duration into `ef::UNTIL` / `ef::UNTIL_OBJ`.
+fn until(cx: &Cx, s: &mut [f32], u: crate::layers::Until) {
+    use crate::layers::Until as U;
+    let k = match u {
+        U::EndOfTurn => 0,
+        U::Forever => 1,
+        U::YourNextTurn => 2,
+        U::WhileOnBattlefield(r) => {
+            cx.write_ref(&mut s[ef::UNTIL_OBJ..ef::UNTIL_OBJ + rf::W], r);
+            3
+        }
+        U::WhileSource => unreachable!("a lowered duration in an effect (Game::until_for)"),
+    };
+    s[ef::UNTIL + k] = 1.0;
+}
+
+/// The `effects` segment (`ef::*`; ENGINE.md 142.7).
+fn write_effects(cx: &Cx, tail: &mut TailBuf) {
+    use crate::db::Mod as M;
+    use crate::layers::Affected;
+    let g = cx.g;
+    let mut k = 0u32;
+    for e in &g.effects {
+        let x = tail.token(seg::EFFECTS, k);
+        k += 1;
+        match &e.on {
+            Affected::Obj(r) => {
+                if let Some(d) = cx.ref_def(*r) {
+                    code(&mut x[..CODE], g.db, cx.ids, d);
+                }
+                cx.write_ref(&mut x[CODE + ef::OBJ..CODE + ef::OBJ + rf::W], *r);
+            }
+            Affected::Group(f) => {
+                let (t, whose) = group_filter(f);
+                x[CODE + ef::GROUP] = 1.0;
+                type_mask(&mut x[CODE + ef::GROUP_TYPES..], t);
+                x[CODE + ef::GROUP_ANY + whose] = 1.0;
+            }
+        }
+        let s = &mut x[CODE..];
+        s[ef::PRESENT] = 1.0;
+        s[ef::MOD + mod_index(&e.m)] = 1.0;
+        match &e.m {
+            M::Types { add, subtypes: st, replace } => {
+                type_mask(&mut s[ef::TYPES..], *add);
+                s[ef::REPLACE] = *replace as u8 as f32;
+                subtypes(g, s, st);
+            }
+            M::BecomeTypes { types, subtypes: st } => {
+                type_mask(&mut s[ef::TYPES..], *types);
+                subtypes(g, s, st);
+            }
+            M::Colors(m) => {
+                bits(&mut s[ef::COLORS..ef::COLORS + 6], *m as u64);
+                s[ef::COLORS_SET] = 1.0;
+            }
+            M::Keywords(set) => {
+                for kw in encode::KWS.iter().chain(encode::KWS_V7.iter()) {
+                    s[ef::KWS + kw_index(*kw)] = set.has(*kw) as u8 as f32;
+                }
+            }
+            M::Protection(p) => {
+                let q = &mut s[ef::PROT..ef::PROT + ef::PROT_N];
+                bits(&mut q[..5], p.colors as u64);
+                q[5] = p.colorless as u8 as f32;
+                q[6] = p.everything as u8 as f32;
+                type_mask(&mut q[7..], p.types);
+                q[16] = p.opponents as u8 as f32;
+                q[17] = p.chosen_player as u8 as f32;
+                q[18] = p.colored_spells as u8 as f32;
+            }
+            M::SetPt(pw, th) | M::Pt(pw, th) => {
+                num(&mut s[ef::POWER..ef::POWER + ef::NUM_W], *pw);
+                num(&mut s[ef::TOUGHNESS..ef::TOUGHNESS + ef::NUM_W], *th);
+                s[ef::PT_PRESENT] = 1.0;
+            }
+            M::GainSacMana(m) => bits(&mut s[ef::SAC_MASK..ef::SAC_MASK + 6], *m as u64),
+            M::GainLatent(l) => {
+                assert!((*l as usize) < ef::LATENT_N, "latent ability {l} past the effects token's {} (ENGINE.md 142.7)", ef::LATENT_N);
+                s[ef::LATENT + *l as usize] = 1.0;
+            }
+            M::ControlFrom(p) => s[if *p == cx.me { ef::CONTROL_FROM_ME } else { ef::CONTROL_FROM_OPP }] = 1.0,
+            M::CantBlock
+            | M::CantBeBlocked
+            | M::MustAttack
+            | M::ExileIfDies
+            | M::LoseAllAbilities
+            | M::AllCreatureTypes
+            | M::SwitchPt
+            | M::Goad
+            | M::ExileIfLeaves
+            | M::PreventCombatDamage
+            | M::MustAttackPlayer => {}
+            M::PtPer { .. } | M::PtPerSourceCounter { .. } | M::AttackDespiteDefender | M::PowerPlusGreatestMv { .. } => {
+                unreachable!("a static ability's mod in an effect")
+            }
+        }
+        until(cx, s, e.until);
+        s[if e.controller == cx.me { ef::CONTROLLER_ME } else { ef::CONTROLLER_OPP }] = 1.0;
+    }
+    // Copy effects (CR 707, layer 1), after the effects.
+    for c in &g.copies {
+        let x = tail.token(seg::EFFECTS, k);
+        k += 1;
+        if let Some(d) = cx.ref_def(c.obj) {
+            code(&mut x[..CODE], g.db, cx.ids, d);
+        }
+        cx.write_ref(&mut x[CODE + ef::OBJ..CODE + ef::OBJ + rf::W], c.obj);
+        let s = &mut x[CODE..];
+        s[ef::PRESENT] = 1.0;
+        s[ef::COPY] = 1.0;
+        digits(&mut s[ef::COPY_DEF..ef::COPY_DEF + 32], cx.ids, c.vals.def);
+        s[ef::COPY_DFC] = c.vals.dfc as u8 as f32;
+        let e = &c.vals.exc;
+        type_mask(&mut s[ef::TYPES..], e.types);
+        let st: Vec<u16> = (0..64u8).filter(|&b| e.subtypes >> b & 1 == 1).map(|b| g.db.exc_subtype_of_bit(b)).collect();
+        subtypes(g, s, &st);
+        for kw in encode::KWS.iter().chain(encode::KWS_V7.iter()) {
+            s[ef::KWS + kw_index(*kw)] = e.kws.has(*kw) as u8 as f32;
+        }
+        if let Some((pw, th)) = e.pt {
+            num(&mut s[ef::POWER..ef::POWER + ef::NUM_W], pw as i64);
+            num(&mut s[ef::TOUGHNESS..ef::TOUGHNESS + ef::NUM_W], th as i64);
+            s[ef::PT_PRESENT] = 1.0;
+        }
+        if let Some(n) = e.name {
+            s[ef::EXC_NAME] = 1.0;
+            digits(&mut s[ef::EXC_NAME_DIGITS..ef::EXC_NAME_DIGITS + 32], cx.ids, n);
+        }
+        if let Some(m) = e.colors {
+            bits(&mut s[ef::COLORS..ef::COLORS + 6], m as u64);
+            s[ef::COLORS_SET] = 1.0;
+        }
+        s[ef::EXC_NO_COST] = e.no_cost as u8 as f32;
+        bits(&mut s[ef::EXC_SUPERS..ef::EXC_SUPERS + 8], e.supers as u64);
+        until(cx, s, c.until);
+    }
+}
+
+/// The `counters` segment (`ct::*`; ENGINE.md 142.7).
+fn write_counters(cx: &Cx, tail: &mut TailBuf) {
+    use crate::db::Counter as K;
+    let g = cx.g;
+    if g.counters.is_empty() {
+        return;
+    }
+    let mut k = 0u32;
+    for &c in cx.mine.iter().chain(&cx.theirs).chain(&g.exile).chain(&g.w3.phased) {
+        for (kind, n) in g.counters_of(c) {
+            let x = tail.token(seg::COUNTERS, k);
+            k += 1;
+            if let Some(d) = cx.ref_def(g.obj_ref(c)) {
+                code(&mut x[..CODE], g.db, cx.ids, d);
+            }
+            let s = &mut x[CODE..];
+            s[ct::PRESENT] = 1.0;
+            cx.write_ref(&mut s[ct::OBJ..ct::OBJ + rf::W], g.obj_ref(c));
+            let i = match kind {
+                K::P1P1 => 0,
+                K::M1M1 => 1,
+                K::Stun => 2,
+                K::Kw(kw) => {
+                    s[ct::KW + kw_index(kw)] = 1.0;
+                    3
+                }
+                K::Named(id) => {
+                    bits(&mut s[ct::NAME..ct::NAME + 32], name_id(g.db.subtype_name(id)) as u64);
+                    4
+                }
+                K::Loyalty => 5,
+                K::Lore => 6,
+            };
+            s[ct::KIND + i] = 1.0;
+            s[ct::COUNT] = squash(n as f32 / 4.0);
+            bits(&mut s[ct::COUNT_BITS..ct::COUNT_BITS + 64], n as u64);
+        }
+    }
+}
+
+/// One `numbers` token (`nb::*`) if `v` is past `nb::BIG`: a player's (`p`) or a permanent's (`c`).
+fn number(cx: &Cx, tail: &mut TailBuf, k: &mut u32, p: Option<PlayerId>, c: Option<CardIdx>, which: usize, v: i128) {
+    if v.unsigned_abs() < nb::BIG {
+        return;
+    }
+    let g = cx.g;
+    let x = tail.token(seg::NUMBERS, *k);
+    *k += 1;
+    if let Some(c) = c {
+        if let Some(d) = cx.ref_def(g.obj_ref(c)) {
+            code(&mut x[..CODE], g.db, cx.ids, d);
+        }
+    }
+    let s = &mut x[CODE..];
+    s[nb::PRESENT] = 1.0;
+    if let Some(p) = p {
+        s[if p == cx.me { nb::PLAYER_ME } else { nb::PLAYER_OPP }] = 1.0;
+    }
+    if let Some(c) = c {
+        cx.write_ref(&mut s[nb::OBJ..nb::OBJ + rf::W], g.obj_ref(c));
+    }
+    s[nb::WHICH + which] = 1.0;
+    s[nb::NEG] = (v < 0) as u8 as f32;
+    let m = v.unsigned_abs();
+    bits(&mut s[nb::BITS..nb::BITS + 64], m as u64);
+    bits(&mut s[nb::BITS + 64..nb::BITS + 128], (m >> 64) as u64);
+}
+
+/// The `numbers` segment (`nb::*`; ENGINE.md 142.7).
+fn write_numbers(cx: &Cx, tail: &mut TailBuf) {
+    let g = cx.g;
+    let mut k = 0u32;
+    for p in [cx.me, cx.op_] {
+        let pl = &g.players[p as usize];
+        number(cx, tail, &mut k, Some(p), None, nb::LIFE, pl.life as i128);
+        number(cx, tail, &mut k, Some(p), None, nb::POISON, pl.poison as i128);
+        number(cx, tail, &mut k, Some(p), None, nb::ENERGY, pl.energy as i128);
+        number(cx, tail, &mut k, Some(p), None, nb::EXPERIENCE, pl.experience as i128);
+    }
+    for &c in cx.mine.iter().chain(&cx.theirs) {
+        let (pw, th) = g.pt(c);
+        number(cx, tail, &mut k, None, Some(c), nb::POWER, pw);
+        number(cx, tail, &mut k, None, Some(c), nb::TOUGHNESS, th);
+        number(cx, tail, &mut k, None, Some(c), nb::DAMAGE, g.objs[c.i()].damage as i128);
+    }
+}
+
 /// The identities player `me` revealed in earlier games of match `m` (`my_revealed`, `mr::*`): one
 /// token each, its slot the identity (ENGINE.md 125.7). The number written.
 pub(crate) fn write_my_revealed(m: &super::matches::MatchState, me: PlayerId, tail: &mut TailBuf) -> usize {
+    write_revealed(m, me, seg::MY_REVEALED, tail) + write_revealed(m, crate::ids::opp(me), seg::OPP_REVEALED, tail)
+}
+
+/// Player `p`'s earlier reveals as tokens of segment `sg` (`mr::*`): one an identity, its slot the
+/// identity, with the games it was revealed in (ENGINE.md 142.8). The number written.
+fn write_revealed(m: &super::matches::MatchState, p: PlayerId, sg: u16, tail: &mut TailBuf) -> usize {
     let mut n = 0;
-    for (w, &bits) in m.earlier[me as usize].iter().enumerate() {
+    for (w, &bits) in m.earlier[p as usize].iter().enumerate() {
         let mut b = bits;
         while b != 0 {
             let i = w * 64 + b.trailing_zeros() as usize;
-            let x = tail.token(seg::MY_REVEALED, i as u32);
+            let x = tail.token(sg, i as u32);
             x[(i >> 6) & 15] = 1.0;
             x[16 + ((i >> 3) & 7)] = 1.0;
             x[24 + (i & 7)] = 1.0;
             x[CODE + mr::PRESENT] = 1.0;
+            for g in 0..3 {
+                x[CODE + mr::GAME + g] = (m.earlier_by_game[p as usize][g][w] >> (i & 63) & 1) as f32;
+            }
             n += 1;
             b &= b - 1;
         }
@@ -841,10 +1380,12 @@ pub(crate) fn write_my_revealed(m: &super::matches::MatchState, me: PlayerId, ta
     n
 }
 
-/// How many `my_revealed` tokens player `me`'s row of match `m` has (R1: a head-only encoding of a
-/// row with any refuses).
+/// How many `my_revealed` and `opp_revealed` tokens the frame player `me`'s row of match `m` has:
+/// both players' earlier reveals, its own and the other's (R1: a head-only encoding of a row with any
+/// refuses).
 pub(crate) fn my_revealed_count(m: &super::matches::MatchState, me: PlayerId) -> usize {
-    m.earlier[me as usize].iter().map(|w| w.count_ones() as usize).sum()
+    let n = |p: PlayerId| m.earlier[p as usize].iter().map(|w| w.count_ones() as usize).sum::<usize>();
+    n(me) + n(crate::ids::opp(me))
 }
 
 /// A new `links` token at the next slot `k`, of kind `kind`.
@@ -862,11 +1403,16 @@ fn write_links(cx: &Cx, list: &[Option<CardIdx>], tail: &mut TailBuf) {
     let ids = cx.ids;
     let mut k = 0u32;
     let side = |p: PlayerId| if p == cx.me { 0 } else { 1 };
-    // Cards exiled with an object (CR 610.3): those still exiled.
-    for l in &g.links {
-        if !(g.live(l.card) && matches!(g.objs[l.card.idx.i()].zone, Zone::Exile | Zone::FaceDown)) {
-            continue;
-        }
+    // Cards exiled with an object (CR 610.3): those still exiled; those exiled face up in link
+    // order, then the face-down ones in their canonical order (ENGINE.md 142.3: a face-down
+    // pile's link order is the order its cards were exiled in, a hand's order for Memory Jar's).
+    let mut exiled: Vec<&crate::game::Link> =
+        g.links.iter().filter(|l| g.live(l.card) && matches!(g.objs[l.card.idx.i()].zone, Zone::Exile | Zone::FaceDown)).collect();
+    exiled.sort_by_key(|l| match g.objs[l.card.idx.i()].zone {
+        Zone::FaceDown => 1 + cx.fd.iter().position(|&x| x == l.card.idx).expect("a face-down card in Game::face_down"),
+        _ => 0,
+    });
+    for l in exiled {
         let x = link_token(tail, &mut k, lk::K_EXILED_WITH);
         if let Some(d) = cx.ref_def(l.card) {
             code(&mut x[..CODE], g.db, ids, d);
@@ -940,35 +1486,66 @@ fn write_links(cx: &Cx, list: &[Option<CardIdx>], tail: &mut TailBuf) {
     //   library card by its place, a face-down card by its object): its identity where the
     //   knower knows it; a card hidden from the knower: no token (the same in every world: that
     //   knowledge is the card's own).
-    for (rank, &(c, by_me)) in cx.picks.objs.iter().enumerate() {
-        let zone = g.objs[c.i()].zone;
-        let in_list = list.contains(&Some(c));
-        if zone == Zone::Battlefield || in_list || (zone == Zone::Hand && g.objs[c.i()].owner == cx.me) {
-            continue;
+    // (An enclosing task's picks, ENGINE.md 142.10: every one a token, `lk::DEPTH` its depth - the
+    // head's floats are the innermost holder's.)
+    let levels = std::iter::once(&cx.picks).chain(cx.picks.outer.iter()).enumerate();
+    for (depth, picks) in levels {
+        for (rank, &(c, by_me)) in picks.objs.iter().enumerate() {
+            let zone = g.objs[c.i()].zone;
+            let in_list = list.contains(&Some(c));
+            if depth == 0 && (zone == Zone::Battlefield || in_list || (zone == Zone::Hand && g.objs[c.i()].owner == cx.me)) {
+                continue;
+            }
+            let others_hand_pick = zone == Zone::Hand && !by_me && cx.knower == cx.me;
+            let d = if others_hand_pick {
+                None
+            } else if g.hidden_obj(c) && !g.knows(cx.knower, c) {
+                continue;
+            } else {
+                cx.seen_def(c)
+            };
+            let x = link_token(tail, &mut k, lk::K_PICKED);
+            if let Some(d) = d {
+                code(&mut x[..CODE], g.db, ids, d);
+            }
+            let st = &mut x[CODE..];
+            cx.write_ref_as(&mut st[lk::B..lk::B + rf::W], g.obj_ref(c), d);
+            st[lk::RANK] = (rank + 1) as f32 / 8.0;
+            st[if by_me { lk::BY_ME } else { lk::BY_OPP }] = 1.0;
+            st[lk::DEPTH] = depth as f32 / 8.0;
         }
-        let others_hand_pick = zone == Zone::Hand && !by_me && cx.knower == cx.me;
-        let d = if others_hand_pick {
-            None
-        } else if g.hidden_obj(c) && !g.knows(cx.knower, c) {
-            continue;
-        } else {
-            cx.seen_def(c)
-        };
-        let x = link_token(tail, &mut k, lk::K_PICKED);
-        if let Some(d) = d {
-            code(&mut x[..CODE], g.db, ids, d);
+        if picks.searcher == Some(cx.knower) {
+            for (rank, &d) in picks.defs.iter().enumerate() {
+                let x = link_token(tail, &mut k, lk::K_PICKED_DEF);
+                code(&mut x[..CODE], g.db, ids, d);
+                x[CODE + lk::RANK] = (rank + 1) as f32 / 8.0;
+                x[CODE + lk::BY_ME] = 1.0;
+                x[CODE + lk::DEPTH] = depth as f32 / 8.0;
+            }
         }
-        let st = &mut x[CODE..];
-        cx.write_ref_as(&mut st[lk::B..lk::B + rf::W], g.obj_ref(c), d);
-        st[lk::RANK] = (rank + 1) as f32 / 8.0;
-        st[if by_me { lk::BY_ME } else { lk::BY_OPP }] = 1.0;
     }
-    if cx.picks.searcher == Some(cx.knower) {
-        for (rank, &d) in cx.picks.defs.iter().enumerate() {
-            let x = link_token(tail, &mut k, lk::K_PICKED_DEF);
-            code(&mut x[..CODE], g.db, ids, d);
-            x[CODE + lk::RANK] = (rank + 1) as f32 / 8.0;
-            x[CODE + lk::BY_ME] = 1.0;
+}
+
+/// The `found` segment (`fs::*`, ENGINE.md 142.12): `Game::found` in the order of the searches.
+/// (A find is a card in a library or exiled face down - it leaves `Game::found` as it goes into a
+/// hand -, so its reference never names a hand card: no holder for `Game::for_each_public_ref`.)
+fn write_found(cx: &Cx, tail: &mut TailBuf) {
+    let g = cx.g;
+    for (k, &(c, _)) in g.found.iter().enumerate() {
+        let r = g.obj_ref(c);
+        let x = tail.token(seg::FOUND, k as u32);
+        if let Some(d) = cx.ref_def(r) {
+            code(&mut x[..CODE], g.db, cx.ids, d);
+        }
+        let s = &mut x[CODE..];
+        s[fs::PRESENT] = 1.0;
+        cx.write_ref(&mut s[fs::OBJ..fs::OBJ + rf::W], r);
+        let o = &g.objs[c.i()];
+        if o.zone == Zone::Library {
+            let lib = &g.players[o.owner as usize].library;
+            let depth = lib.iter().rev().position(|&x| x == c).expect("a library card in its owner's library");
+            s[fs::DEPTH] = (depth + 1) as f32 / 64.0;
+            bits(&mut s[fs::DEPTH_BITS..fs::DEPTH_BITS + 16], depth as u64);
         }
     }
 }
@@ -1031,7 +1608,7 @@ fn write_exile_offered(cx: &Cx, tail: &mut TailBuf) {
         }
         let place = match ob.zone {
             Zone::Exile => g.exile.iter().position(|&x| x == card),
-            Zone::FaceDown => g.face_down.iter().position(|&x| x == card),
+            Zone::FaceDown => cx.fd.iter().position(|&x| x == card),
             _ => None,
         };
         if let Some(p) = place {
@@ -1339,20 +1916,30 @@ impl Row {
     }
 
     /// The row as one vector: the head, then each tail token's segment, slot and floats, then the
-    /// overrides (equal rows, equal vectors; tests compare rows by it).
+    /// overrides. Equal rows give equal vectors and **different rows different vectors** (tests
+    /// compare rows by it: the public-state gate, the hidden-information tests, the fuzz's
+    /// information sets): every integer is written exactly, in 16-bit pieces (an f32 holds 24
+    /// bits; ENGINE.md 142.1: the override's packed `seg << 40 | col << 32 | slot` as one f32 lost
+    /// the slot below bit 21 - slots 33, 34 and 70,000 compared equal - and a tail slot past 2^24,
+    /// a `my_revealed` identity, would have too). The floats compare by value (0.0 == -0.0: the
+    /// network reads them alike).
     pub fn flat(&self) -> Vec<f32> {
+        fn int(v: &mut Vec<f32>, x: u64, pieces: u32) {
+            for k in (0..pieces).rev() {
+                v.push((x >> (16 * k) & 0xFFFF) as f32);
+            }
+        }
         let mut v = self.head.clone();
         v.push(-1e9);
         for (sg, sl, x) in &self.tail {
             v.push(*sg as f32);
-            v.push(*sl as f32);
+            int(&mut v, *sl as u64, 2);
             v.extend_from_slice(x);
         }
         v.push(-2e9);
         for &(o, t) in &self.ov {
-            v.push(o as f32);
-            v.push(t as f32);
-            v.push((t >> 24) as f32);
+            int(&mut v, o as u64, 2);
+            int(&mut v, t as u64, 4);
         }
         v
     }

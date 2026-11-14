@@ -25,19 +25,45 @@ fn the_rows_constants() {
     assert_eq!(<MtgAz as SearchGame>::MAX_ROW_TOKENS, 4096);
     assert!(<MtgAz as SearchGame>::OPTION_POINTERS);
     let tails = <MtgAz as SearchGame>::TAILS;
-    assert_eq!(tails.len(), 16);
+    assert_eq!(tails.len(), 21);
     let names: Vec<&str> = tails.iter().map(|t| t.name).collect();
     assert_eq!(
         names,
         [
             "my_permanents", "opponent_permanents", "hand", "stack", "triggers", "list", "graveyard_abilities", "opponent_triggers",
-            "delayed", "links", "exile_offered", "library_known", "stack_relations", "graveyard_order", "face_down", "my_revealed"
+            "delayed", "links", "exile_offered", "library_known", "stack_relations", "graveyard_order", "face_down", "my_revealed",
+            "effects", "counters", "numbers", "opp_revealed", "found"
         ]
     );
     // (Layout v6's game keeps no tail: ENGINE.md 124.2.)
     assert!(<engine::az::eoe::MtgEoeAz as SearchGame>::TAILS.is_empty());
     assert_eq!(<engine::az::eoe::MtgEoeAz as SearchGame>::NUM_FEATURES, encode::NUM_FEATURES_V6);
     assert_eq!(NUM_FEATURES, 56_384);
+}
+
+/// ENGINE.md 142.1: `Row::flat` (what the gate, the hidden-information tests and the fuzz compare
+/// rows by) is exact: rows whose overrides point at different slots of one segment and column, or
+/// whose tail tokens sit at slots past 2^24, give different vectors (the Fable review's probe A:
+/// slots 33, 34 and 70,000 compared equal).
+#[test]
+fn flat_rows_are_exact() {
+    use zero_search::tail::pack_tok;
+    let row = |tail: Vec<(u16, u32, Vec<f32>)>, ov: Vec<(u32, i64)>| Row { head: vec![0.0; 8], tail, ov };
+    let ovs = [pack_tok(2, 0, 33), pack_tok(2, 0, 34), pack_tok(2, 0, 70_000), pack_tok(2, 1, 33), pack_tok(3, 0, 33), -1];
+    for (i, &a) in ovs.iter().enumerate() {
+        for (j, &b) in ovs.iter().enumerate() {
+            let (x, y) = (row(vec![], vec![(0, a)]), row(vec![], vec![(0, b)]));
+            assert_eq!(x.flat() == y.flat(), i == j, "overrides {a} and {b}");
+            assert_eq!(x.flat() == y.flat(), x == y);
+        }
+    }
+    // the option index too
+    assert_ne!(row(vec![], vec![(1 << 24, -1)]).flat(), row(vec![], vec![((1 << 24) + 1, -1)]).flat());
+    // tail slots past 2^24 (a `my_revealed` token's slot is an identity)
+    let t = |sl: u32| row(vec![(seg::MY_REVEALED, sl, vec![1.0; 53])], vec![]);
+    assert_ne!(t(1 << 24).flat(), t((1 << 24) + 1).flat());
+    assert_ne!(t(5).flat(), t(6).flat());
+    assert_eq!(t(7).flat(), t(7).flat());
 }
 
 /// R1: a head-only encoding of a state with tail tokens is a loud failure (`encode_features`,
@@ -326,6 +352,46 @@ fn every_mark_variant_has_a_perturbation() {
     assert!(MARK_PERTURBATIONS.iter().any(|x| x.0 == engine::public_state::mark_variant(&m)));
 }
 
+/// ENGINE.md 142 (the Fable review's B4): every `Mod` variant a continuous effect can have has a
+/// perturbation of the public-state gate (`MOD_PERTURBATIONS`), and the others are static only
+/// (`STATIC_ONLY_MODS`, `Mod::static_only`: `Game::add_effect` refuses them); `mod_variant` is an
+/// exhaustive match, `mod_samples` one `Mod` of each variant. The known gaps name perturbations
+/// that exist.
+#[test]
+fn every_mod_variant_has_a_perturbation_or_is_static_only() {
+    use engine::public_state::{known_gaps, mod_samples, mod_variant, perturbations, MOD_PERTURBATIONS, STATIC_ONLY_MODS};
+    let ps = perturbations();
+    let samples = mod_samples();
+    let mut names: Vec<&str> = samples.iter().map(mod_variant).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), samples.len(), "one sample a variant");
+    assert_eq!(names.len(), MOD_PERTURBATIONS.len() + STATIC_ONLY_MODS.len(), "every variant classified once");
+    for m in &samples {
+        let v = mod_variant(m);
+        let effect = MOD_PERTURBATIONS.iter().find(|x| x.0 == v);
+        let fixed = STATIC_ONLY_MODS.iter().any(|x| x.0 == v);
+        assert!(effect.is_some() != fixed, "{v}: a perturbation or static only, not both");
+        assert_eq!(m.static_only(), fixed, "{v}: Mod::static_only");
+        // (the effects token's `Mod` one-hot, ENGINE.md 142.7: one index a variant an effect can have)
+        if !fixed {
+            let i = te::mod_index(m);
+            assert!(i < te::ef::MODS, "{v}");
+            assert_eq!(samples.iter().filter(|x| !x.static_only() && te::mod_index(x) == i).count(), 1, "{v}: its own index");
+        }
+        if let Some((_, name)) = effect {
+            let p = ps.iter().find(|p| p.name == *name).unwrap_or_else(|| panic!("{v}: no perturbation {name:?}"));
+            assert_eq!(p.field, "Game.effects", "{v}");
+        }
+    }
+    for k in known_gaps() {
+        for a in k.alone.iter().chain(&k.alike) {
+            assert!(*a == engine::public_state::BASE || ps.iter().any(|p| p.name == *a), "known gap {}: no perturbation {a:?}", k.name);
+        }
+        assert!(!k.decision.is_empty() && k.layouts != 0, "{}", k.name);
+    }
+}
+
 /// The layout v6 game `mtg_eoe` keeps layout v6 byte for byte (ENGINE.md 124.2): its layout is
 /// layout_eoe.json, version 6, without a variable-length key.
 #[test]
@@ -419,6 +485,197 @@ fn face_down_tokens_show_who_knows_each_card() {
     }
 }
 
+/// ENGINE.md 142.3 (the Fable review's B7): Memory Jar exiles each hand face down in the hand
+/// vector's order (`Game::face_down`). A hand has no order, so two games whose only difference is
+/// the place of the one card P0 knows among P1's hidden cards are one information state for P0:
+/// its rows are equal (the `face_down` tokens, their references and the `links` tokens are in the
+/// canonical order `tail_encode::face_down_order`, not the pile's). P1 (who knows its whole
+/// former hand) sees equal rows too.
+#[test]
+fn memory_jars_face_down_pile_shows_no_hand_order() {
+    let db = CardDb::cube();
+    let play = |known_first: bool| {
+        let s = Scenario::new(db)
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Island"; 12])
+            .library(1, &["Island"; 12])
+            .battlefield(0, &["Memory Jar"])
+            .hand(0, &["Lightning Bolt"]);
+        let s = if known_first {
+            s.hand_known(1, &["Ponder"]).hand(1, &["Counterspell", "Brainstorm"])
+        } else {
+            s.hand(1, &["Counterspell", "Brainstorm"]).hand_known(1, &["Ponder"])
+        };
+        let mut g = s.at(Step::Main1, 0).start();
+        let jar = g.card(0, "Memory Jar", Zone::Battlefield);
+        g.choose(Choice::Ability(jar, engine::db::AbilitySlot::Activated(0)));
+        for _ in 0..200 {
+            if g.stack().is_empty() && g.kind() == Some(DecisionKind::Priority) {
+                break;
+            }
+            if g.kind() == Some(DecisionKind::Priority) {
+                g.pass();
+            } else {
+                let c = g.pending_decision().unwrap().options[0].choice;
+                g.choose(c);
+            }
+        }
+        assert!(g.stack().is_empty(), "the Jar's ability resolved");
+        let ponder = g.card(1, "Ponder", Zone::FaceDown);
+        assert!(g.knows(0, ponder) && g.knows(1, ponder));
+        let order: Vec<&str> = g.face_down_pile().iter().filter(|&&c| g.obj(c).owner == 1).map(|&c| g.name(c)).collect();
+        (g, order)
+    };
+    let ((a, oa), (b, ob)) = (play(true), play(false));
+    assert_ne!(oa, ob, "the piles are in different orders");
+    for v in 0..2u8 {
+        assert_eq!(a.view_of(v), b.view_of(v), "one information state for P{v}");
+        let (ra, rb) = (Row::of(&a, v), Row::of(&b, v));
+        assert!(!ra.tokens(seg::FACE_DOWN).is_empty());
+        assert_eq!(ra.flat(), rb.flat(), "P{v}'s rows: the pile's order is not shown");
+    }
+}
+
+/// ENGINE.md 142.7: the `effects`, `counters` and `numbers` tokens on a hand-made board, both
+/// viewers: an effect's `Mod`, parameters, duration and controller; a group effect's filter; a copy
+/// effect; counters by kind with exact counts; a number past float16's exact range (and none below).
+#[test]
+fn effects_counters_and_numbers_tokens() {
+    use engine::db::{Counter, Mod, Prot};
+    use engine::public_state::perturbations;
+    use te::{ct, ef, nb};
+    let db = CardDb::cube();
+    let sp = MtgSpec::parse(r#"{"max_turns": 60}"#).unwrap();
+    let mut a = MtgAz::new_game(&sp, 2, 3).unwrap();
+    a.g = Scenario::new(db)
+        .library(0, &["Island"; 10])
+        .library(1, &["Island"; 10])
+        .battlefield(0, &["Mother of Runes", "Plains"])
+        .battlefield(1, &["Thraben Inspector", "Mountain"])
+        .counters(0, "Plains", Counter::Stun, 1)
+        .counters(1, "Thraben Inspector", Counter::P1P1, 70_000)
+        .life(1, 5_000)
+        .at(Step::Main1, 0)
+        .start();
+    let apply = |a: &mut MtgAz, name: &str| {
+        let p = perturbations().into_iter().find(|p| p.name == name).unwrap();
+        (p.apply)(a, &mut engine::rng::Rng::new(1)).unwrap_or_else(|| panic!("{name}: not applied"))
+    };
+    let tok = |a: &MtgAz, v: u8, sg: u16| Row::of(&a.g, v).tokens(sg).into_iter().map(|(s, x)| (s, x.to_vec())).collect::<Vec<_>>();
+    assert!(tok(&a, 0, seg::EFFECTS).is_empty(), "no effect yet");
+    // counters: the stun counter and the +1/+1 counters, kinds and exact counts, for both viewers
+    for v in 0..2u8 {
+        let cs = tok(&a, v, seg::COUNTERS);
+        assert_eq!(cs.len(), 2, "P{v}: two (object, kind) tokens");
+        let kind = |x: &[f32]| (0..ct::KINDS).find(|&k| x[CODE + ct::KIND + k] == 1.0);
+        let count = |x: &[f32]| (0..64).map(|b| (x[CODE + ct::COUNT_BITS + b] as u64) << b).sum::<u64>();
+        let mut got: Vec<(Option<usize>, u64)> = cs.iter().map(|(_, x)| (kind(x), count(x))).collect();
+        got.sort();
+        assert_eq!(got, [(Some(0), 70_000), (Some(2), 1)], "P{v}: +1/+1 x 70,000 and stun x 1");
+        // numbers: P1's life 5,000 and the Inspector's power and toughness past `BIG`; P0's life 20 none
+        let ns = tok(&a, v, seg::NUMBERS);
+        let which: Vec<usize> = ns.iter().map(|(_, x)| (0..nb::WHICH_N).find(|&k| x[CODE + nb::WHICH + k] == 1.0).unwrap()).collect();
+        assert_eq!(which, [nb::LIFE, nb::POWER, nb::TOUGHNESS], "P{v}");
+        let life = &ns[0].1;
+        assert_eq!((0..64).map(|b| (life[CODE + nb::BITS + b] as u64) << b).sum::<u64>(), 5_000);
+        assert_eq!(life[CODE + if v == 1 { nb::PLAYER_ME } else { nb::PLAYER_OPP }], 1.0, "P{v}: P1's life");
+    }
+    // effects: protection from red until end of turn, +1/+1 until the other player's next turn
+    apply(&mut a, "a creature gains protection from red");
+    apply(&mut a, "+1/+1 until the other player's next turn");
+    let es = tok(&a, 0, seg::EFFECTS);
+    assert_eq!(es.len(), 2);
+    let (prot, pump) = (&es[0].1[CODE..], &es[1].1[CODE..]);
+    assert_eq!((prot[ef::MOD + 3], prot[ef::PROT + 3], prot[ef::PROT], prot[ef::UNTIL]), (1.0, 1.0, 0.0, 1.0), "protection from red until end of turn");
+    assert_eq!((pump[ef::MOD + 5], pump[ef::PT_PRESENT], pump[ef::POWER + 2], pump[ef::UNTIL + 2]), (1.0, 1.0, 1.0, 1.0), "+1/+1 until a next turn");
+    assert_eq!(pump[ef::CONTROLLER_ME] + pump[ef::CONTROLLER_OPP], 1.0);
+    // which protection, which duration: different rows (the gaps of ENGINE.md 142.2)
+    let mut b = a.clone();
+    let e = b.g.effects_mut().iter_mut().find(|e| matches!(e.m, Mod::Protection(_))).unwrap();
+    e.m = Mod::Protection(Prot { colors: 1 << 2, ..Default::default() });
+    let mut c = a.clone();
+    c.g.effects_mut()[1].until = engine::Until::Forever;
+    for v in 0..2u8 {
+        assert_ne!(Row::of(&a.g, v).flat(), Row::of(&b.g, v).flat(), "P{v}: protection from red vs black");
+        assert_ne!(Row::of(&a.g, v).flat(), Row::of(&c.g, v).flat(), "P{v}: until a next turn vs no duration");
+    }
+    // a group effect: "combat damage is prevented this turn" (Darkness), its filter
+    apply(&mut a, "combat damage is prevented this turn (a rules effect)");
+    let g3 = &tok(&a, 1, seg::EFFECTS)[2].1[CODE..];
+    assert_eq!((g3[ef::GROUP], g3[ef::GROUP_TYPES + 1], g3[ef::GROUP_ANY], g3[ef::MOD + 19]), (1.0, 1.0, 1.0, 1.0), "creatures, any player's");
+    // a copy effect, after the effects
+    apply(&mut a, "a permanent becomes a copy of another");
+    let es = tok(&a, 0, seg::EFFECTS);
+    let cp = &es.last().unwrap().1[CODE..];
+    assert_eq!((cp[ef::COPY], cp[ef::UNTIL]), (1.0, 1.0), "a copy effect until end of turn");
+    assert!(cp[ef::COPY_DEF..ef::COPY_DEF + 32].iter().any(|&x| x == 1.0), "the copied definition's identity");
+}
+
+/// ENGINE.md 142.7: the stable name ids (`tail_encode::name_id`: subtypes and named counters by
+/// name, the same id in every table) of every interned name of the tables are distinct.
+#[test]
+fn name_ids_are_distinct() {
+    let mut all: std::collections::BTreeMap<u32, String> = std::collections::BTreeMap::new();
+    for db in [CardDb::cube(), CardDb::constructed(), CardDb::eoe()] {
+        for n in db.subtype_names() {
+            let id = te::name_id(n);
+            if let Some(o) = all.insert(id, n.clone()) {
+                assert_eq!(&o, n, "{o:?} and {n:?} share the name id {id:#x}");
+            }
+        }
+    }
+    assert!(all.len() > 100, "{} names", all.len());
+}
+
+/// ENGINE.md 142.7: every group (rules) effect a table's cards make (`Ext::ApplyRules`) has a
+/// filter the `effects` token writes (`tail_encode::group_filter`: else a loud failure), and every
+/// effect's subtypes fit the token (`ef::SUBS`); the three tables, every ability and mode.
+#[test]
+fn every_tables_effects_fit_the_effects_token() {
+    use engine::program::{Ext, Op};
+    let mut groups = 0;
+    for db in [CardDb::cube(), CardDb::constructed(), CardDb::eoe()] {
+        for d in 0..db.len() as engine::ids::DefId {
+            let def = db.def(d);
+            let mut abs: Vec<&engine::db::AbilityDef> = def.spell.iter().chain(def.triggers.iter().map(|t| &t.ability)).collect();
+            for a in def.activated.iter().chain(&def.hand_abilities).chain(&def.gy_abilities) {
+                if let engine::db::ActEffect::Stack(ab) = &a.effect {
+                    abs.push(ab);
+                }
+            }
+            let mut all = Vec::new();
+            for ab in abs {
+                all.push(ab);
+                if let Some(m) = &ab.modes {
+                    all.extend(m.list.iter());
+                }
+            }
+            for ab in all {
+                for op in &ab.program {
+                    let mods: Vec<&engine::db::Mod> = match op {
+                        Op::Ext(Ext::ApplyRules { filter, m, .. }) => {
+                            te::group_filter(filter);
+                            groups += 1;
+                            vec![m]
+                        }
+                        Op::Ext(Ext::Apply { mods, .. }) | Op::Ext(Ext::ReturnEventCardAs { mods }) => mods.iter().collect(),
+                        _ => vec![],
+                    };
+                    for m in mods {
+                        let n = match m {
+                            engine::db::Mod::Types { subtypes, .. } | engine::db::Mod::BecomeTypes { subtypes, .. } => subtypes.len(),
+                            _ => 0,
+                        };
+                        assert!(n <= te::ef::SUBS, "{}: an effect with {n} subtypes", def.name);
+                        assert!(!m.static_only(), "{}: an effect with a static ability's mod {m:?}", def.name);
+                    }
+                }
+            }
+        }
+    }
+    assert!(groups > 0, "no group effect in the tables");
+}
+
 /// The identities a player revealed in earlier games of a match (ENGINE.md 125.7; a limit by
 /// design until v7): `my_revealed` tokens of that player's rows (what the other player knows of its
 /// pool), the other player's bag `OPP_REVEALED`; a head-only `MtgAz::encode` of a row with any
@@ -440,6 +697,26 @@ fn my_revealed_tokens_hold_the_frames_earlier_reveals() {
     let r1 = Row::of_az(&a, 1);
     assert!(r1.tokens(seg::MY_REVEALED).is_empty());
     assert_eq!(r1.head[O_BAGS + bag::OPP_REVEALED * D + 67], 0.25, "P1 sees them in OPP_REVEALED");
+    // ENGINE.md 142.8: and as `opp_revealed` tokens, the same token as P0's own; P0's row has no
+    // `opp_revealed` (P1 revealed nothing)
+    let ot: Vec<(u32, Option<usize>)> = r1.tokens(seg::OPP_REVEALED).iter().map(|t| (t.0, code_identity(&t.1[..CODE]))).collect();
+    assert_eq!(ot, [(9, Some(9)), (67, Some(67))]);
+    assert!(r0.tokens(seg::OPP_REVEALED).is_empty());
+    // the games the reveals were made in (the user's decision of 2026-11-13: how a player boarded game 2
+    // is an input for game 3): identity 67 in game 2, 9 in game 1 - and the same reveals made in the
+    // other games are another row for both players
+    a.m.earlier_by_game[0][1][1] |= 1 << 3;
+    a.m.earlier_by_game[0][0][0] |= 1 << 9;
+    let game = |r: &Row, sg: u16, slot: u32| -> Vec<f32> { r.token(sg, slot).unwrap()[CODE + te::mr::GAME..CODE + te::mr::GAME + 3].to_vec() };
+    let (r0, r1) = (Row::of_az(&a, 0), Row::of_az(&a, 1));
+    assert_eq!((game(&r0, seg::MY_REVEALED, 67), game(&r1, seg::OPP_REVEALED, 67)), (vec![0.0, 1.0, 0.0], vec![0.0, 1.0, 0.0]));
+    assert_eq!((game(&r0, seg::MY_REVEALED, 9), game(&r1, seg::OPP_REVEALED, 9)), (vec![1.0, 0.0, 0.0], vec![1.0, 0.0, 0.0]));
+    let mut c = a.clone();
+    c.m.earlier_by_game[0][1][1] &= !(1 << 3);
+    c.m.earlier_by_game[0][0][1] |= 1 << 3;
+    for v in 0..2 {
+        assert_ne!(Row::of_az(&a, v).flat(), Row::of_az(&c, v).flat(), "P{v}: a reveal of game 2 vs one of game 1");
+    }
     let b = a.clone();
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
         let mut x = vec![0.0f32; NUM_FEATURES];
@@ -485,3 +762,51 @@ fn chosen_names_are_faces() {
     assert_eq!(face(&ar), (want, vec![1.0, 0.0, 1.0]), "the right half: face 5");
     assert_ne!(Row::of(&al.g, 1).flat(), Row::of(&ar.g, 1).flat(), "the other player's row too");
 }
+
+/// ENGINE.md 142.12: Vampiric Tutor's card, put on top of the library unrevealed, is a find the other
+/// player tells apart (`Game::found`, ENGINE.md 140.9; kept with whole-deck clouds): a `found` token in
+/// both players' rows - the card's identity in its owner's row (it knows the card), none in the
+/// other's -, its depth (the top), its owner; drawn, it is a hand card and no find.
+#[test]
+fn a_tutors_card_on_top_is_a_found_token() {
+    use te::{fs, rf};
+    let db = CardDb::cube();
+    let mut g = Scenario::new(db)
+        .spec(|s| {
+            s.auto_single = false;
+            s.deck_clouds = true;
+        })
+        .library(0, &["Forest", "Island", "Plains", "Island", "Swamp"])
+        .library(1, &["Island"; 8])
+        .battlefield(0, &["Swamp"])
+        .hand(0, &["Vampiric Tutor"])
+        .at(Step::Main1, 0)
+        .start();
+    let found = |g: &Game, v: u8| Row::of(g, v).tokens(seg::FOUND).into_iter().map(|(s, x)| (s, x.to_vec())).collect::<Vec<_>>();
+    assert!(found(&g, 0).is_empty() && found(&g, 1).is_empty());
+    let vt = g.card(0, "Vampiric Tutor", Zone::Hand);
+    g.choose(Choice::Cast(vt));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::SearchLibrary));
+    assert_eq!(g.kind(), Some(DecisionKind::SearchLibrary));
+    let plains = db.expect_id("Plains").unwrap();
+    g.choose(Choice::Def(plains));
+    g.drive_until(|g| g.stack().is_empty() && g.kind() == Some(DecisionKind::Priority));
+    let top = *g.player(0).library.last().unwrap();
+    assert_eq!(g.name(top), "Plains");
+    for v in 0..2u8 {
+        let t = found(&g, v);
+        assert_eq!(t.len(), 1, "P{v}: one find");
+        let (slot, x) = &t[0];
+        assert_eq!(*slot, 0);
+        assert_eq!(code_identity(&x[..CODE]), (v == 0).then(|| ident(&g, plains)), "P{v}: the identity in its owner's row only");
+        let s = &x[CODE..];
+        assert_eq!((s[fs::PRESENT], s[fs::OBJ + rf::PRESENT], s[fs::DEPTH]), (1.0, 1.0, 1.0 / 64.0), "P{v}: the top of the library");
+        assert_eq!(s[fs::OBJ + if v == 0 { rf::MINE } else { rf::THEIRS }], 1.0, "P{v}: P0's card");
+    }
+    // P0's next draw: a hand card, no find
+    let t0 = g.turn().number;
+    g.drive_until(|g| g.turn().number == t0 + 2 && g.turn().step == Step::Main1);
+    assert_eq!(g.obj(top).zone, Zone::Hand, "{}", g.log_lines().join("\n"));
+    assert!(found(&g, 0).is_empty() && found(&g, 1).is_empty());
+}
+

@@ -474,6 +474,24 @@ impl Game {
                 }
             }
         }
+        // The picks in progress (ENGINE.md 125, 142.10): every holding task's, innermost first -
+        // each object by its public place and its picker, a search's definitions to its searcher.
+        let picks = crate::az::tail_encode::agenda_picks(self, 0);
+        for (depth, p) in std::iter::once(&picks).chain(picks.outer.iter()).enumerate() {
+            v.push(u64::MAX - 90 - depth as u64);
+            v.extend(p.objs.iter().flat_map(|&(c, by_p0)| [self.view_place(c), by_p0 as u64]));
+            if p.searcher == Some(viewer) {
+                v.extend(p.defs.iter().map(|&d| d as u64));
+            }
+        }
+        // The cards found by their owner's library search that the other player tells apart (ENGINE.md 140.9,
+        // 142.12), in the order of the searches: each one's owner, zone and depth in a library.
+        v.push(u64::MAX - 95);
+        for &(c, _) in &self.found {
+            let o = &self.objs[c.i()];
+            let depth = self.players[o.owner as usize].library.iter().rev().position(|&x| x == c).map_or(u64::MAX, |d| d as u64);
+            v.extend([o.owner as u64, h64(&o.zone), depth]);
+        }
         v
     }
 
@@ -1076,6 +1094,20 @@ impl Game {
     #[doc(hidden)]
     pub fn extra_turns(&self) -> &[PlayerId] {
         &self.extra_turns
+    }
+
+    /// The continuous effects, to change by hand (ENGINE.md 142.7's tests: an effect's parameter or
+    /// duration made another).
+    #[doc(hidden)]
+    pub fn effects_mut(&mut self) -> &mut Vec<crate::layers::Effect> {
+        &mut self.effects
+    }
+
+    /// The cards exiled face down, in the order they were exiled (`Game::face_down`; ENGINE.md
+    /// 142.3's test: the order the encoding must not show).
+    #[doc(hidden)]
+    pub fn face_down_pile(&self) -> &[CardIdx] {
+        &self.face_down
     }
 
     /// The pending decision asked again (after a test changed the state by

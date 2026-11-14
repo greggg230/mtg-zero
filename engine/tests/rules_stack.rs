@@ -499,8 +499,8 @@ fn a_targeted_ability_and_the_lost_abilities_are_in_the_encoding() {
     }
     assert_eq!(g.stack().len(), 2, "the ping and Tidebinder's trigger");
     for viewer in [0u8, 1] {
-        let mut x = vec![0.0; NUM_FEATURES];
-        g.encode_features(viewer, &mut x);
+        let x = engine::az::tail_encode::Row::of(&g, viewer).head;
+        assert_eq!(x.len(), NUM_FEATURES);
         let slot = |s: usize| &x[encode::O_STACK + s * STACK_W + CODE..encode::O_STACK + (s + 1) * STACK_W];
         assert_eq!(slot(0)[stack::TARGETED], 0.0);
         assert_eq!((slot(0)[8 + 6], slot(0)[8 + 7]), (1.0, 1.0 / 8.0), "its target: stack slot 1");
@@ -509,8 +509,7 @@ fn a_targeted_ability_and_the_lost_abilities_are_in_the_encoding() {
         assert_eq!(slot(1)[stack::GRAVEYARD], 0.0);
     }
     resolve_with(&mut g, stack_target);
-    let mut x = vec![0.0; NUM_FEATURES];
-    g.encode_features(1, &mut x);
+    let x = engine::az::tail_encode::Row::of(&g, 1).head;
     let o = encode::O_OPP_PERM + g.permanents_of(0).position(|c| c == wb).unwrap() * PERM_W + CODE;
     assert_eq!(x[o + perm::LOST_ABILITIES], 1.0);
 }

@@ -31,7 +31,7 @@
 
 use crate::az::matches::{Format, MatchState};
 use crate::az::MtgAz;
-use crate::db::{types, AbilitySlot, Counter, Kw, KwSet, Mod};
+use crate::db::{types, AbilitySlot, Counter, Kw, KwSet, Mod, Prot};
 use crate::game::{Dungeon, Game, Obj, Player, StackItem, StackKind, Step, Turn};
 use crate::ids::{opp, CardIdx, DefId, PlayerId, Target, Zone};
 use crate::layers::{Affected, Until};
@@ -91,7 +91,7 @@ pub fn fields() -> Vec<Field> {
         command: Public "emblems and dungeons in the command zone",
         stack: Derived "the container of stack items: their fields are classified under StackItem",
         turn: Derived "the turn's fields are classified under Turn",
-        agenda: Derived "the engine's continuation stack: what a player sees of it is the pending decision (the context block)",
+        agenda: Public "the engine's continuation stack: what a player sees of it is the pending decision (the context block) and its tasks' picks in progress (the innermost holder's: the head's pick floats and links tokens; an enclosing task's: links tokens with their depth, ENGINE.md 142.10)",
         pending: Derived "the pending decision, computed from the agenda: its kind and decider are the context block's, its options the decider's",
         answer: Derived "the answer being applied: always empty between apply calls",
         page: Derived "the page of the pending decision when its permanents page (ENGINE.md 100.4.8): part of the agenda's continuation; the decider's options and context floats show it",
@@ -105,7 +105,7 @@ pub fn fields() -> Vec<Field> {
         sightings_lost: Derived "a test's flag: the state was changed by hand, the sightings dropped (ENGINE.md 140.9)",
         sightings: Hidden "each player's sightings of the other's cards, in order, each blind or a search's find (ENGINE.md 140.9): the viewer's own knowledge, the same in all its worlds; read only by the hidden deck's deal",
         sight_at: Derived "the sightings' clock (ENGINE.md 140.9)",
-        found: Derived "which hidden cards are their owner's search's finds the other player still tells apart (ENGINE.md 140.9): read only by the hidden deck's deal. A public fact (a tutor's card put on top) the encoding does not show: an open point of ENGINE.md 140.9 for the encoding, not a cache",
+        found: Public "which hidden cards are their owner's search's finds the other player still tells apart, in the order of the searches (ENGINE.md 140.9; a tutor's card put on top, a Doomsday pile): layout v7's found tokens (ENGINE.md 142.12)",
         tokens: Derived "a fast path: tokens created so far",
         first_token: Derived "a fast path: the first slot made as a token or a copy",
         batching: Derived "transient: a simultaneous move in progress",
@@ -353,6 +353,7 @@ pub fn fields() -> Vec<Field> {
         over: Derived "the match is over: a terminal state, never encoded for a decision",
         seen: Derived "identities revealed in the current game: become `earlier` between games",
         earlier: Public "identities the players revealed in earlier games",
+        earlier_by_game: Public "the same by game (ENGINE.md 142.8: game 2's reveals apart from game 1's, the my_revealed / opp_revealed tokens' game bits)",
         sb: Derived "sideboarding between games: encoded by encode_sideboarding, not a game position",
         rng: Hidden "seeds the later games: determinize reseeds it",
         priors: Hidden "the prior of each player's unknown first picks (ENGINE.md 36.11)",
@@ -517,15 +518,50 @@ fn characteristics(g: &Game, c: CardIdx) -> (u16, u8, (crate::num::Wide, crate::
 
 /// An until-end-of-turn effect `m` on permanent `c`.
 fn effect(g: &mut Game, c: CardIdx, m: Mod) -> Option<String> {
-    let r = g.obj_ref(c);
     let p = g.objs[c.i()].controller;
-    let what = format!("{m:?} on {}", g.name(c));
-    g.add_effect(Affected::Obj(r), m, Until::EndOfTurn, p);
+    effect_until(g, c, m, Until::EndOfTurn, p)
+}
+
+/// An effect `m` on permanent `c` lasting `until`, controlled by `controller` ("you" of "until your
+/// next turn").
+fn effect_until(g: &mut Game, c: CardIdx, m: Mod, until: Until, controller: PlayerId) -> Option<String> {
+    let r = g.obj_ref(c);
+    let what = format!("{m:?} on {} ({until:?}, P{controller}'s)", g.name(c));
+    g.add_effect(Affected::Obj(r), m, until, controller);
     Some(what)
 }
 
-/// `n` counters of kind `k` on permanent `c`, by hand (no events).
+/// "For as long as <another permanent> remains on the battlefield" (CR 611.2b; Tishana's
+/// Tidebinder): the first permanent other than `c`.
+fn while_other(g: &Game, c: CardIdx) -> Option<Until> {
+    let o = slots(g).into_iter().find(|&x| x != c)?;
+    Some(Until::WhileOnBattlefield(g.obj_ref(o)))
+}
+
+/// A creature without protection (the gate's protection family, ENGINE.md 142: every member on
+/// one candidate list) gains protection `prot` until end of turn.
+fn protection(a: &mut MtgAz, r: &mut Rng, prot: Prot) -> Option<String> {
+    let cs: Vec<CardIdx> = slot_creatures(&a.g).into_iter().filter(|&c| a.g.protection_of(c).is_empty()).collect();
+    let c = pick(&cs, r)?;
+    effect(&mut a.g, c, Mod::Protection(prot))
+}
+
+/// A counter of kind `k` on permanent `c`, by hand (no events). A +1/+1 counter on a permanent
+/// with a -1/-1 counter removes one instead, and the other way (the state-based action of CR
+/// 704.5q: a decision never sees both on one permanent; ENGINE.md 142).
 fn counter(g: &mut Game, c: CardIdx, k: Counter) -> Option<String> {
+    let other = match k {
+        Counter::P1P1 => Some(Counter::M1M1),
+        Counter::M1M1 => Some(Counter::P1P1),
+        _ => None,
+    };
+    if let Some(i) = other.and_then(|o| g.counters.iter().position(|x| x.0 == c && x.1 == o && x.2 > 0)) {
+        g.counters[i].2 -= 1;
+        if g.counters[i].2 == 0 {
+            g.counters.remove(i);
+        }
+        return Some(format!("a {k:?} counter on {} (one {:?} counter fewer, CR 704.5q)", g.name(c), other.unwrap()));
+    }
     match g.counters.iter_mut().find(|x| x.0 == c && x.1 == k) {
         Some(x) => x.2 += 1,
         None => g.counters.push((c, k, 1)),
@@ -674,11 +710,17 @@ pub fn perturbations() -> Vec<Perturbation> {
                             && ss.contains(&o.idx)
                             && !g.effects.iter().enumerate().any(|(j, e)| j != i && e.on == g.effects[i].on && e.m == g.effects[i].m)
                     }
-                    Affected::Group(_) => false,
+                    // (A group's rules effect ends whatever it applies to now: it binds the
+                    // permanents that match later too, CR 611.2c; ENGINE.md 142.)
+                    Affected::Group(_) => !g.effects.iter().enumerate().any(|(j, e)| j != i && e.on == g.effects[i].on && e.m == g.effects[i].m),
                 })
                 .collect();
             let i = pick(&live, r)?;
-            let Affected::Obj(o) = a.g.effects[i].on.clone() else { return None };
+            let Affected::Obj(o) = a.g.effects[i].on.clone() else {
+                let e = a.g.effects.remove(i);
+                a.g.effects_changed();
+                return Some(format!("{:?} on {:?}", e.m, e.on));
+            };
             let before = characteristics(&a.g, o.idx);
             let e = a.g.effects.remove(i);
             a.g.effects_changed();
@@ -765,10 +807,8 @@ pub fn perturbations() -> Vec<Perturbation> {
             effect(&mut a.g, c, Mod::Colors(to))
         }),
         p!("a creature gains protection from red", "Game.effects", |a, r| {
-            // (One without protection: the encoding's flag is a summary.)
-            let cs: Vec<CardIdx> = slot_creatures(&a.g).into_iter().filter(|&c| a.g.protection_of(c).is_empty()).collect();
-            let c = pick(&cs, r)?;
-            effect(&mut a.g, c, Mod::Protection(crate::db::Prot { colors: 1 << 3, ..Default::default() }))
+            // (One without protection: the protection family's, ENGINE.md 142.)
+            protection(a, r, Prot { colors: 1 << 3, ..Default::default() })
         }),
         p!("a +1/+1 counter on a creature", "Game.counters", |a, r| {
             let c = pick(&slot_creatures(&a.g), r)?;
@@ -1947,6 +1987,21 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.m.draws += 1;
             Some(format!("{}", a.m.draws))
         }),
+        // ENGINE.md 142.8 (the user's decision of 2026-11-13: how a player boarded game 2 is an input
+        // for game 3): an earlier reveal made in another earlier game - a reveal of game 2 one of game
+        // 1 (a cube best-of-three's game 3; a constructed one keeps game 2's only, ENGINE.md 130).
+        p!(rare "an earlier game's reveal was in another earlier game", "MatchState.earlier_by_game", |a, r| {
+            let p = player(r) as usize;
+            let kept: Vec<usize> = (0..3).filter(|&g| a.m.results[g] != 0 && !(a.m.constructed_bo3 && g == 0)).collect();
+            let bg = a.m.earlier_by_game[p];
+            let from: Vec<(usize, usize)> =
+                kept.iter().flat_map(|&g| (0..16 * 64).filter(move |&i| bg[g][i >> 6] & (1u64 << (i & 63)) != 0).map(move |i| (g, i))).collect();
+            let (g, i) = pick(&from, r)?;
+            let to = *kept.iter().find(|&&h| h != g && bg[h][i >> 6] & (1u64 << (i & 63)) == 0)?;
+            a.m.earlier_by_game[p][g][i >> 6] &= !(1u64 << (i & 63));
+            a.m.earlier_by_game[p][to][i >> 6] |= 1u64 << (i & 63);
+            Some(format!("P{p}: game {} -> game {}", g + 1, to + 1))
+        }),
         p!("an identity revealed in an earlier game", "MatchState.earlier", |a, r| {
             let p = player(r) as usize;
             // (A card of the player's pool not revealed yet: a reveal is of a pool's card, as the
@@ -1960,6 +2015,9 @@ pub fn perturbations() -> Vec<Perturbation> {
                 .collect();
             let i = pick(&cand, r)?;
             a.m.earlier[p][i >> 6] |= 1u64 << (i & 63);
+            // (in the last game `earlier` keeps, or the current game's predecessor: ENGINE.md 142.8)
+            let g = (0..3).rev().find(|&g| a.m.results[g] != 0 && !(a.m.constructed_bo3 && g == 0)).unwrap_or(0);
+            a.m.earlier_by_game[p][g][i >> 6] |= 1u64 << (i & 63);
             Some(format!("P{p}"))
         }),
         // EoE W6 (ENGINE.md 99.16): no draw from the gate's random stream.
@@ -2013,9 +2071,260 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.players[p].uncounterable_next += 1;
             Some(format!("P{p}: {}", a.g.players[p].uncounterable_next))
         }),
+        // ---- ENGINE.md 142: the pairwise gate's perturbations ----
+        // Families on one candidate list each (the pairwise pass draws every perturbation of a
+        // position from one stream, so the members of a family act on the same object): which
+        // protection, the sources of a creature's power and toughness (counters, effects and
+        // their durations), counter kinds. Then one perturbation per `Mod` variant the list above
+        // lacked (`MOD_PERTURBATIONS`, `mod_variant` an exhaustive match), group (rules) effects,
+        // and an effect's duration.
+        p!("a creature gains protection from white", "Game.effects", |a, r| protection(a, r, Prot { colors: 1 << 0, ..Default::default() })),
+        p!("a creature gains protection from blue", "Game.effects", |a, r| protection(a, r, Prot { colors: 1 << 1, ..Default::default() })),
+        p!("a creature gains protection from black", "Game.effects", |a, r| protection(a, r, Prot { colors: 1 << 2, ..Default::default() })),
+        p!("a creature gains protection from green", "Game.effects", |a, r| protection(a, r, Prot { colors: 1 << 4, ..Default::default() })),
+        p!("a creature gains protection from colorless", "Game.effects", |a, r| protection(a, r, Prot { colorless: true, ..Default::default() })),
+        p!("a creature gains protection from everything", "Game.effects", |a, r| protection(a, r, Prot { everything: true, ..Default::default() })),
+        p!("a creature gains protection from creatures", "Game.effects", |a, r| protection(a, r, Prot { types: types::CREATURE, ..Default::default() })),
+        p!("a creature gains protection from its controller's opponents", "Game.effects", |a, r| protection(a, r, Prot { opponents: true, ..Default::default() })),
+        p!("a creature gains protection from coloured spells", "Game.effects", |a, r| protection(a, r, Prot { colored_spells: true, ..Default::default() })),
+        p!("+1/+1 until its controller's next turn", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::Pt(1, 1), Until::YourNextTurn, p)
+        }),
+        p!("+1/+1 until the other player's next turn", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            let p = opp(a.g.objs[c.i()].controller);
+            effect_until(&mut a.g, c, Mod::Pt(1, 1), Until::YourNextTurn, p)
+        }),
+        p!("+1/+1 with no duration", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::Pt(1, 1), Until::Forever, p)
+        }),
+        p!("+1/+1 for as long as another permanent remains on the battlefield", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            let w = while_other(&a.g, c)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::Pt(1, 1), w, p)
+        }),
+        p!("a permanent loses all abilities for as long as another permanent remains on the battlefield", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slots(&a.g).into_iter().filter(|&c| !a.g.lost_abilities(c)).collect();
+            let c = pick(&cs, r)?;
+            let w = while_other(&a.g, c)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::LoseAllAbilities, w, p)
+        }),
+        p!("a permanent loses all abilities with no duration", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slots(&a.g).into_iter().filter(|&c| !a.g.lost_abilities(c)).collect();
+            let c = pick(&cs, r)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::LoseAllAbilities, Until::Forever, p)
+        }),
+        p!("a creature can't block with no duration", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slot_creatures(&a.g).into_iter().filter(|&c| !a.g.flags_of(c).cant_block).collect();
+            let c = pick(&cs, r)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::CantBlock, Until::Forever, p)
+        }),
+        p!("a land becomes a 3/3 creature with no duration", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slots(&a.g).into_iter().filter(|&c| a.g.is_type(c, types::LAND) && !a.g.is_creature(c)).collect();
+            let c = pick(&cs, r)?;
+            let p = a.g.objs[c.i()].controller;
+            effect_until(&mut a.g, c, Mod::Types { add: types::CREATURE, subtypes: Vec::new(), replace: false }, Until::Forever, p)?;
+            effect_until(&mut a.g, c, Mod::SetPt(3, 3), Until::Forever, p)
+        }),
+        p!("an effect's duration is another", "Game.effects", |a, r| {
+            // (An effect from the position on a permanent or a group; its duration made another
+            // one: until end of turn <-> no duration, until a player's next turn or while an object
+            // remains -> until end of turn.)
+            let g = &a.g;
+            let live: Vec<usize> = (0..g.effects.len())
+                .filter(|&i| match &g.effects[i].on {
+                    Affected::Obj(o) => g.live(*o) && g.objs[o.idx.i()].zone == Zone::Battlefield,
+                    Affected::Group(_) => true,
+                })
+                .collect();
+            let i = pick(&live, r)?;
+            let e = &mut a.g.effects[i];
+            let old = e.until;
+            e.until = if old == Until::EndOfTurn { Until::Forever } else { Until::EndOfTurn };
+            let what = format!("{:?}: {old:?} -> {:?}", e.m, e.until);
+            a.g.effects_changed();
+            Some(what)
+        }),
+        p!("another named counter", "Game.counters", |a, r| {
+            let c = pick(&slots(&a.g), r)?;
+            counter(&mut a.g, c, Counter::Named(1))
+        }),
+        p!("two named counters", "Game.counters", |a, r| {
+            let c = pick(&slots(&a.g), r)?;
+            counter(&mut a.g, c, Counter::Named(0))?;
+            counter(&mut a.g, c, Counter::Named(0))
+        }),
+        p!("a stun counter and a named counter", "Game.counters", |a, r| {
+            let c = pick(&slots(&a.g), r)?;
+            counter(&mut a.g, c, Counter::Stun)?;
+            counter(&mut a.g, c, Counter::Named(0))
+        }),
+        p!("a land gains \"sacrifice it: add {B}\"", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slots(&a.g).into_iter().filter(|&c| a.g.is_type(c, types::LAND)).collect();
+            let c = pick(&cs, r)?;
+            effect(&mut a.g, c, Mod::GainSacMana(1 << 2))
+        }),
+        p!("a creature has all creature types", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            effect(&mut a.g, c, Mod::AllCreatureTypes)
+        }),
+        p!("a land becomes a 2/2 creature and nothing else", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slots(&a.g).into_iter().filter(|&c| a.g.is_type(c, types::LAND) && !a.g.is_creature(c)).collect();
+            let c = pick(&cs, r)?;
+            effect(&mut a.g, c, Mod::BecomeTypes { types: types::CREATURE, subtypes: Vec::new() })?;
+            effect(&mut a.g, c, Mod::SetPt(2, 2))
+        }),
+        p!(rare "a permanent gains a latent ability of its card", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slots(&a.g).into_iter().filter(|&c| a.g.def_of(c).latent > 0).collect();
+            let c = pick(&cs, r)?;
+            effect(&mut a.g, c, Mod::GainLatent(0))
+        }),
+        p!("a creature's power and toughness are switched", "Game.effects", |a, r| {
+            let cs: Vec<CardIdx> = slot_creatures(&a.g).into_iter().filter(|&c| a.g.pt(c).0 != a.g.pt(c).1).collect();
+            let c = pick(&cs, r)?;
+            effect(&mut a.g, c, Mod::SwitchPt)
+        }),
+        p!("a player gained control of a permanent until end of turn", "Game.effects", |a, r| {
+            let c = pick(&slots(&a.g), r)?;
+            let prev = a.g.objs[c.i()].controller;
+            let to = opp(prev);
+            let turn = a.g.turn.number;
+            let o = &mut a.g.objs[c.i()];
+            o.controller = to;
+            o.control_since = turn;
+            effect_until(&mut a.g, c, Mod::ControlFrom(prev), Until::EndOfTurn, to)
+        }),
+        p!("a creature attacks the other player this combat if able", "Game.effects", |a, r| {
+            let c = pick(&slot_creatures(&a.g), r)?;
+            effect(&mut a.g, c, Mod::MustAttackPlayer)
+        }),
+        p!("creatures a player controls can't block this turn (a rules effect)", "Game.effects", |a, r| {
+            let p = player(r);
+            let f = crate::db::Filter::And(Box::new(crate::db::Filter::Type(types::CREATURE)), Box::new(crate::db::Filter::Controller(true)));
+            a.g.add_effect(Affected::Group(f), Mod::CantBlock, Until::EndOfTurn, p);
+            Some(format!("P{p}'s creatures"))
+        }),
+        p!("combat damage is prevented this turn (a rules effect)", "Game.effects", |a, r| {
+            let p = player(r);
+            a.g.add_effect(Affected::Group(crate::db::Filter::Type(types::CREATURE)), Mod::PreventCombatDamage, Until::EndOfTurn, p);
+            Some(format!("by P{p}"))
+        }),
+        // ENGINE.md 142.8's run found a framed row's gap (`known_gaps`): the controlled player's
+        // knowledge of its controller's hand. (Its own perturbation, so the gate meets it on every run:
+        // the turn controlled as "the active player is controlled this turn" does, then the controlled
+        // player learns a hand card of its controller.)
+        p!("the controlled player learns a hand card of its controller", "Obj.known", |a, r| {
+            if a.g.turn_controller.is_some() {
+                return None;
+            }
+            let (p, q) = (a.g.turn.active, opp(a.g.turn.active));
+            a.g.turn_controller = Some(q);
+            a.g.sync_controller_view();
+            let hs: Vec<CardIdx> = a.g.hand_sorted(q).into_iter().filter(|&c| !a.g.knows(p, c)).collect();
+            let c = pick(&hs, r)?;
+            a.g.learn(p, c);
+            Some(format!("P{q} controls P{p}'s turn; P{p} learns P{q}'s {}", a.g.name(c)))
+        }),
         // (ENGINE.md 123's "a card name was chosen as a permanent entered" - Disruptor Flute, Anointed
         // Peacekeeper - is the `Mark` perturbation above, layout v7's: ENGINE.md 125.)
+        // The cards found by their owner's library search that the other player tells apart (ENGINE.md 140.9,
+        // 142.12): a tutor's card put on top of the library.
+        p!("the top library card is its owner's search's find", "Game.found", |a, r| {
+            let p = player(r);
+            let &c = a.g.players[p as usize].library.last()?;
+            // (a find the other player has seen is one no longer: `Game::learn`)
+            if a.g.found.iter().any(|x| x.0 == c) || a.g.knows(opp(p), c) {
+                return None;
+            }
+            let t = a.g.sight_at;
+            a.g.sight_at += 1;
+            a.g.found.push((c, t));
+            Some(format!("P{p}'s top library card"))
+        }),
+        p!(rare "a search's find is no longer told apart", "Game.found", |a, r| {
+            let k = r.below(a.g.found.len().max(1) as u32) as usize;
+            if k >= a.g.found.len() {
+                return None;
+            }
+            let (c, _) = a.g.found.remove(k);
+            Some(format!("P{}'s find {k}", a.g.objs[c.i()].owner))
+        }),
+        // The picks in progress (ENGINE.md 125, 142.10, the Fable review's X3): one more pick - a card
+        // the pending decision offers, the same one (one stream) - made by the asking task, which
+        // holds picks already, or held by the task around it: which task holds a pick is public (the
+        // head's pick floats are the innermost holder's; an enclosing task's are links tokens with
+        // their depth). (An offered card keeps the asking task's state one its next decision reads:
+        // the hidden-information check recomputes it for the player who doesn't decide.)
+        p!(rare "the asking task holding picks picks one more offered card", "Game.agenda", |a, r| {
+            let ts = pick_tasks(&a.g);
+            let &(i, holds) = ts.first()?;
+            if !holds || i + 1 != a.g.agenda.len() {
+                return None;
+            }
+            let c = offered_unpicked(&a.g, r)?;
+            task_picked(&mut a.g.agenda[i]).push(c);
+            Some(format!("agenda task {i} picks {}", a.g.name(c)))
+        }),
+        p!(rare "an enclosing task holds a pick in progress", "Game.agenda", |a, r| {
+            let ts = pick_tasks(&a.g);
+            let h = ts.iter().position(|t| t.1)?;
+            let i = ts.get(h + 1)?.0;
+            let c = offered_unpicked(&a.g, r)?;
+            task_picked(&mut a.g.agenda[i]).push(c);
+            Some(format!("agenda task {i}, around task {}, picks {}", ts[h].0, a.g.name(c)))
+        }),
     ]
+}
+
+/// The agenda's tasks that can hold picks in progress (`tail_encode::agenda_picks`), innermost
+/// first: (agenda index, holds picks now).
+fn pick_tasks(g: &Game) -> Vec<(usize, bool)> {
+    use crate::flow::Task;
+    g.agenda
+        .iter()
+        .enumerate()
+        .rev()
+        .filter_map(|(i, t)| match t {
+            Task::Run(f) => Some((i, !f.picked.is_empty() || !f.picked_defs.is_empty())),
+            Task::PayCosts { picked, .. } | Task::OrderTimestamps { picked, .. } | Task::Devour { picked, .. } => Some((i, !picked.is_empty())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The objects a task of `pick_tasks` has picked so far.
+fn task_picked(t: &mut crate::flow::Task) -> &mut Vec<CardIdx> {
+    use crate::flow::Task;
+    match t {
+        Task::Run(f) => &mut f.picked,
+        Task::PayCosts { picked, .. } | Task::OrderTimestamps { picked, .. } | Task::Devour { picked, .. } => picked,
+        _ => unreachable!("not a task holding picks"),
+    }
+}
+
+/// A card the pending decision offers (`Choice::Card`) that no task has picked.
+fn offered_unpicked(g: &Game, r: &mut Rng) -> Option<CardIdx> {
+    let d = g.pending.as_ref()?;
+    let p = crate::az::tail_encode::agenda_picks(g, 0);
+    let picked: Vec<CardIdx> = p.objs.iter().chain(p.outer.iter().flat_map(|o| o.objs.iter())).map(|x| x.0).collect();
+    let mut cand: Vec<CardIdx> = d
+        .options
+        .iter()
+        .filter_map(|o| match o.choice {
+            crate::decision::Choice::Card(c) if !picked.contains(&c) => Some(c),
+            _ => None,
+        })
+        .collect();
+    cand.dedup();
+    pick(&cand, r)
 }
 
 /// The gate's paired check of a chosen name's face (ENGINE.md 125.11): the first permanent in the
@@ -2112,7 +2421,7 @@ pub const V6_FIXED: [&str; 26] = [
 /// target; and (ENGINE.md 125.7) the two limits by design until v7 - a card
 /// exiled face down and who knows it (`face_down`, face-down permanents too),
 /// the identities the viewer revealed in earlier games (`my_revealed`).
-pub const V7_FIXED: [&str; 36] = [
+pub const V7_FIXED: [&str; 41] = [
     "mana in a pool is restricted to creature spells of a chosen type",
     "a permanent entered with a big kicker count and X",
     "Containment Priest's replacement waits for a copy choice",
@@ -2149,6 +2458,14 @@ pub const V7_FIXED: [&str; 36] = [
     "the other player learns a face-down exiled card",
     "the other player learns a face-down permanent",
     "an identity revealed in an earlier game",
+    // ENGINE.md 142.8: the game an earlier reveal was made in (`opp_revealed` / `my_revealed`'s game bits).
+    "an earlier game's reveal was in another earlier game",
+    // ENGINE.md 125's picks in progress (layout v6 has none), 142.10's enclosing task's.
+    "the asking task holding picks picks one more offered card",
+    "an enclosing task holds a pick in progress",
+    // ENGINE.md 142.12: the finds the other player tells apart (`found`).
+    "the top library card is its owner's search's find",
+    "a search's find is no longer told apart",
 ];
 
 /// One perturbation per `Mark` variant (ENGINE.md 125, the gate's G1): the
@@ -2240,6 +2557,361 @@ pub fn mark_variant(m: &crate::game::Mark) -> &'static str {
 }
 
 
+/// One perturbation per `Mod` variant a continuous effect from a resolved spell or ability can
+/// have (ENGINE.md 142; the Fable review's B4: four had none): the variant, the perturbation that
+/// makes it. `mod_variant` is an exhaustive match, so a new variant is a compile error until it is
+/// here or in [`STATIC_ONLY_MODS`]; `tests/az.rs` checks the table.
+pub const MOD_PERTURBATIONS: [(&str, &str); 21] = [
+    ("Types", "a permanent becomes an artifact too"),
+    ("Colors", "a permanent's colour becomes another"),
+    ("Keywords", "a creature gains flying"),
+    ("Protection", "a creature gains protection from red"),
+    ("SetPt", "base power and toughness 7/7"),
+    ("Pt", "+1/+1 until end of turn"),
+    ("CantBlock", "a creature can't block"),
+    ("CantBeBlocked", "a creature can't be blocked"),
+    ("MustAttack", "a creature attacks each combat"),
+    ("ExileIfDies", "exiled if it would die"),
+    ("GainSacMana", "a land gains \"sacrifice it: add {B}\""),
+    ("LoseAllAbilities", "a permanent loses all abilities"),
+    ("AllCreatureTypes", "a creature has all creature types"),
+    ("BecomeTypes", "a land becomes a 2/2 creature and nothing else"),
+    ("GainLatent", "a permanent gains a latent ability of its card"),
+    ("SwitchPt", "a creature's power and toughness are switched"),
+    ("Goad", "a creature is goaded"),
+    ("ExileIfLeaves", "exiled if it would leave"),
+    ("ControlFrom", "a player gained control of a permanent until end of turn"),
+    // (Darkness's "prevent all combat damage that would be dealt this turn": a group's rules
+    // effect, the only kind the lowering makes, lower/effect_eoe_d.rs.)
+    ("PreventCombatDamage", "combat damage is prevented this turn (a rules effect)"),
+    ("MustAttackPlayer", "a creature attacks the other player this combat if able"),
+];
+
+/// The `Mod` variants only a static ability has (ENGINE.md 142): the lowering builds them inside a
+/// `StaticDef` only, and `Game::add_effect` refuses them loudly (`Mod::static_only`). A static
+/// ability is its source's printed text (its identity, encoded) applied to the encoded board, so
+/// what it does is a function of the row.
+pub const STATIC_ONLY_MODS: [(&str, &str); 4] = [
+    ("PtPer", "an Equipment's or a static ability's \"+p/+t for each\" (lower/statics.rs, lower/printing.rs)"),
+    ("PtPerSourceCounter", "\"+1/+1 for each +1/+1 counter on this Equipment\" (lower/printing.rs)"),
+    ("AttackDespiteDefender", "\"can attack as though it didn't have defender\" (Mechan Shieldmate; lower/statics.rs)"),
+    ("PowerPlusGreatestMv", "Emissary Escort's \"+X/+0\" (lower/eoe_a.rs)"),
+];
+
+/// The variant's name of a `Mod` ([`MOD_PERTURBATIONS`], [`STATIC_ONLY_MODS`]): an exhaustive
+/// match.
+pub fn mod_variant(m: &Mod) -> &'static str {
+    match m {
+        Mod::Types { .. } => "Types",
+        Mod::Colors(_) => "Colors",
+        Mod::Keywords(_) => "Keywords",
+        Mod::Protection(_) => "Protection",
+        Mod::SetPt(..) => "SetPt",
+        Mod::Pt(..) => "Pt",
+        Mod::CantBlock => "CantBlock",
+        Mod::CantBeBlocked => "CantBeBlocked",
+        Mod::MustAttack => "MustAttack",
+        Mod::ExileIfDies => "ExileIfDies",
+        Mod::PtPer { .. } => "PtPer",
+        Mod::PtPerSourceCounter { .. } => "PtPerSourceCounter",
+        Mod::GainSacMana(_) => "GainSacMana",
+        Mod::LoseAllAbilities => "LoseAllAbilities",
+        Mod::AttackDespiteDefender => "AttackDespiteDefender",
+        Mod::AllCreatureTypes => "AllCreatureTypes",
+        Mod::BecomeTypes { .. } => "BecomeTypes",
+        Mod::GainLatent(_) => "GainLatent",
+        Mod::SwitchPt => "SwitchPt",
+        Mod::Goad => "Goad",
+        Mod::ExileIfLeaves => "ExileIfLeaves",
+        Mod::ControlFrom(_) => "ControlFrom",
+        Mod::PreventCombatDamage => "PreventCombatDamage",
+        Mod::MustAttackPlayer => "MustAttackPlayer",
+        Mod::PowerPlusGreatestMv { .. } => "PowerPlusGreatestMv",
+    }
+}
+
+/// A `Mod` of each variant (the tests' check that every variant is classified).
+pub fn mod_samples() -> Vec<Mod> {
+    use crate::db::Filter;
+    vec![
+        Mod::Types { add: 0, subtypes: Vec::new(), replace: false },
+        Mod::Colors(1),
+        Mod::Keywords(KwSet::default()),
+        Mod::Protection(Prot::default()),
+        Mod::SetPt(1, 1),
+        Mod::Pt(1, 1),
+        Mod::CantBlock,
+        Mod::CantBeBlocked,
+        Mod::MustAttack,
+        Mod::ExileIfDies,
+        Mod::PtPer { filter: Filter::Any, p: 1, t: 1 },
+        Mod::PtPerSourceCounter { counter: Counter::P1P1, p: 1, t: 1 },
+        Mod::GainSacMana(1),
+        Mod::LoseAllAbilities,
+        Mod::AttackDespiteDefender,
+        Mod::AllCreatureTypes,
+        Mod::BecomeTypes { types: 0, subtypes: Vec::new() },
+        Mod::GainLatent(0),
+        Mod::SwitchPt,
+        Mod::Goad,
+        Mod::ExileIfLeaves,
+        Mod::ControlFrom(0),
+        Mod::PreventCombatDamage,
+        Mod::MustAttackPlayer,
+        Mod::PowerPlusGreatestMv { types: 0 },
+    ]
+}
+
+/// The pseudo-perturbation of the pairwise pass: the position as it is (ENGINE.md 142).
+pub const BASE: &str = "(the position as it is)";
+
+/// The layouts a known gap is a gap of (`KnownGap::layouts`): layout v7 (the `mtg` game) and
+/// layout v6 (the `mtg_eoe` game, checked on the gate's EoE positions).
+pub const V7: u8 = 1;
+pub const V6: u8 = 2;
+
+/// A public-state gap the encoding has, found by the gate and waiting on a decision (ENGINE.md
+/// 142; `E:/mtg-zero-scratch/fable-fix/encoding-options.md`, the section `decision` names). The gate
+/// fails on every gap no entry covers, and on an entry that covers nothing the gate finds (a stale
+/// entry: the encoding was fixed, remove it) - this list goes to empty when the encoding is fixed.
+///
+/// An entry names perturbations two ways:
+/// * `alone`: a perturbation whose change the layout leaves out entirely (the position's row is
+///   unchanged; the single-perturbation pass accepts exactly these);
+/// * `alike`: perturbations whose changes the layout reads only through what they share (one sum,
+///   one flag, the resulting power, the present characteristics an effect gives): two of them can
+///   encode alike, and a set of them can encode like none of them.
+///
+/// [`covered`] says when two states' equal rows are such a gap.
+pub struct KnownGap {
+    pub name: &'static str,
+    pub decision: &'static str,
+    pub layouts: u8,
+    pub alone: Vec<&'static str>,
+    pub alike: Vec<&'static str>,
+}
+
+/// Do known gaps cover the equal rows (for `layout`) of two states whose views differ, the position
+/// perturbed by the perturbations `a` and by `b` (ENGINE.md 142)? The perturbations of one state and
+/// not the other are each assigned to an entry of the layout - as an `alone` perturbation (it
+/// changes no row), or to the entry's `alike` group; each entry's group must hold perturbations of
+/// both states, or two or more of one state, or one of one state while a perturbation both states
+/// share is in the entry's `alike` too (a set of alike changes can encode like a subset of itself).
+/// Returns the entries one such assignment uses (credited by the gate), or None.
+pub fn covered<'s>(gaps: &[KnownGap], layout: u8, a: &[&'s str], b: &[&'s str]) -> Option<Vec<usize>> {
+    let es: Vec<usize> = (0..gaps.len()).filter(|&i| gaps[i].layouts & layout != 0).collect();
+    let common: Vec<&str> = a.iter().copied().filter(|x| b.contains(x)).collect();
+    let diff: Vec<(&str, usize)> = a.iter().filter(|x| !b.contains(x)).map(|&x| (x, 0)).chain(b.iter().filter(|x| !a.contains(x)).map(|&x| (x, 1))).collect();
+    if diff.is_empty() {
+        return None;
+    }
+    // each differing perturbation's options: (entry, alone?)
+    let mut opts: Vec<Vec<(usize, bool)>> = Vec::new();
+    for &(x, _) in &diff {
+        let o: Vec<(usize, bool)> = es
+            .iter()
+            .flat_map(|&i| {
+                let g = &gaps[i];
+                [g.alone.iter().any(|y| *y == x).then_some((i, true)), g.alike.iter().any(|y| *y == x).then_some((i, false))]
+            })
+            .flatten()
+            .collect();
+        if o.is_empty() {
+            return None;
+        }
+        opts.push(o);
+    }
+    let mut pick = vec![0usize; diff.len()];
+    loop {
+        // the groups of this assignment: entry -> (from a, from b)
+        let mut groups: Vec<(usize, usize, usize)> = Vec::new();
+        let mut used: Vec<usize> = Vec::new();
+        for (k, &(_, side)) in diff.iter().enumerate() {
+            let (i, alone) = opts[k][pick[k]];
+            if !used.contains(&i) {
+                used.push(i);
+            }
+            if alone {
+                continue;
+            }
+            match groups.iter_mut().find(|g| g.0 == i) {
+                Some(g) => {
+                    if side == 0 {
+                        g.1 += 1
+                    } else {
+                        g.2 += 1
+                    }
+                }
+                None => groups.push((i, (side == 0) as usize, (side == 1) as usize)),
+            }
+        }
+        let ok = groups.iter().all(|&(i, na, nb)| (na > 0 && nb > 0) || na + nb >= 2 || common.iter().any(|c| gaps[i].alike.iter().any(|y| y == c)));
+        if ok {
+            return Some(used);
+        }
+        // the next assignment
+        let mut k = 0;
+        loop {
+            if k == diff.len() {
+                return None;
+            }
+            pick[k] += 1;
+            if pick[k] < opts[k].len() {
+                break;
+            }
+            pick[k] = 0;
+            k += 1;
+        }
+    }
+}
+
+/// The perturbations the pairwise pass never combines with another (ENGINE.md 142): each moves an
+/// object (a new object, CR 400.7), changes the turn, the step, the active player or the game, or
+/// ends the game, or acts on another effect, so the other perturbation's change can become inert
+/// (an effect, a mark or a link of an object that left; a "this turn" fact of another turn; the
+/// effect it added ended) while it stays in the view. Each is still compared alone with every
+/// state.
+pub const COMBO_EXCLUDED: [&str; 20] = [
+    "a permanent leaves the battlefield",
+    "a graveyard card is exiled",
+    "an exiled card is turned face down",
+    "a hand card is discarded",
+    "a library card leaves the game",
+    "a revealed companion is put into its owner's hand",
+    "a permanent is another card",
+    "the turn number + 1",
+    "another step",
+    "the other player is active",
+    // (a player's turns begun: "until their next turn" facts read it, ENGINE.md 142.8's run)
+    "a turn begun",
+    "the game ends",
+    "lost",
+    "the next game of the match",
+    "an effect ends",
+    "an effect's duration is another",
+    // (ENGINE.md 142.10: the picks in progress, on the gate's positions with picks; out of the
+    // partner draw, so that every position's partners are as before.)
+    "the asking task holding picks picks one more offered card",
+    "an enclosing task holds a pick in progress",
+    // (ENGINE.md 142.12: the finds, added after the partner draws were set - kept out so that every
+    // position's partners are as before.)
+    "the top library card is its owner's search's find",
+    "a search's find is no longer told apart",
+];
+
+/// The known gaps (`KnownGap`; ENGINE.md 142.2, 142.7): what the pairwise gate finds. Layout v7 has
+/// none since 142.7 (its `effects`, `counters` and `numbers` tokens closed the ten it found); layout
+/// v6 - the `mtg_eoe` game, which stays on it until EoE run 2 resumes, the user's call - keeps them
+/// all, each scoped to layout v6.
+pub fn known_gaps() -> Vec<KnownGap> {
+    let ps = perturbations();
+    let group = ["combat damage is prevented this turn (a rules effect)", "creatures a player controls can't block this turn (a rules effect)"];
+    // every perturbation that adds a continuous effect to an object
+    let effects: Vec<&'static str> = ps.iter().filter(|p| p.field == "Game.effects" && !group.contains(&p.name)).map(|p| p.name).collect();
+    let protection: Vec<&'static str> = ps.iter().filter(|p| p.name.starts_with("a creature gains protection from ")).map(|p| p.name).collect();
+    // (A hand card promised to a delve is revealed too, so its v6 row is a learned card's: `alike`.)
+    let v7_facts: Vec<&'static str> = V7_FIXED.iter().copied().filter(|&x| x != "a hand card is promised to a delve").collect();
+    vec![
+        KnownGap {
+            name: "layout v6 (mtg_eoe): which protection a permanent has (perm::PROTECTED is one any-of float)",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
+            alone: vec![],
+            alike: protection,
+        },
+        KnownGap {
+            name: "layout v6 (mtg_eoe): power and toughness by source (+1/+1 and -1/-1 counters, P/T effects: one P/T)",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
+            alone: vec![],
+            alike: vec![
+                "+1/+1 until end of turn",
+                "+1/+1 until its controller's next turn",
+                "+1/+1 until the other player's next turn",
+                "+1/+1 with no duration",
+                "+1/+1 for as long as another permanent remains on the battlefield",
+                "base power and toughness 7/7",
+                "a creature's power and toughness are switched",
+                "a +1/+1 counter on a creature",
+                "a -1/-1 counter on a creature",
+                "an effect ends",
+            ],
+        },
+        KnownGap {
+            name: "layout v6 (mtg_eoe): counter kinds (stun, keyword and named counters one sum; a keyword counter's keyword an effect's)",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
+            alone: vec![],
+            alike: vec![
+                "a stun counter",
+                "a named counter (charge, oil, ...)",
+                "another named counter",
+                "two named counters",
+                "a stun counter and a named counter",
+                "a flying counter on a creature",
+                "a creature gains flying",
+            ],
+        },
+        KnownGap {
+            name: "layout v6 (mtg_eoe): a granted \"sacrifice: add mana\" ability (Mod::GainSacMana) has no float",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
+            alone: vec!["a land gains \"sacrifice it: add {B}\""],
+            alike: vec![],
+        },
+        KnownGap {
+            name: "layout v6 (mtg_eoe): must-attack effects are one count (perm::MUST_ATTACK)",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
+            alone: vec![],
+            alike: vec!["a creature attacks each combat", "a creature attacks the other player this combat if able"],
+        },
+        KnownGap {
+            name: "layout v6 (mtg_eoe): subtype effects are one count (perm::SUBTYPES)",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
+            alone: vec![],
+            alike: vec!["a creature gains a creature type", "a creature has all creature types"],
+        },
+        KnownGap {
+            name: "layout v6 (mtg_eoe): group (rules) effects reach the row only through the permanents they affect now",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
+            alone: group.to_vec(),
+            alike: vec![group[1], "a creature can't block", "a creature can't block with no duration"],
+        },
+        // Found by the pairwise gate on 2026-11-13 (ENGINE.md 142.8's run), in layouts v7 and v6 alike (it
+        // predates both: ENGINE.md 100.5's frame): a decision for the user.
+        KnownGap {
+            name: "a framed row (CR 722: the viewer controls the other player's turn) lacks which of the viewer's own hand cards the controlled player knows",
+            decision: "encoding-options.md 2.9 (new, 2026-11-13)",
+            layouts: V7 | V6,
+            alone: vec![],
+            alike: vec![
+                "the other player learns a hand card",
+                "the active player is controlled this turn",
+                "the controlled player learns a hand card of its controller",
+            ],
+        },
+        KnownGap {
+            name: "layout v6 (mtg_eoe, EoE run 2) lacks layout v7's facts (V7_FIXED)",
+            decision: "encoding-options.md 2.8 (Fable review I3: mtg_eoe onto a layout with v7's facts)",
+            layouts: V6,
+            alone: v7_facts,
+            // (A hand card promised to a delve is revealed too: its v6 row is a learned card's.)
+            alike: vec!["a hand card is promised to a delve", "the other player learns a hand card"],
+        },
+        KnownGap {
+            name: "layout v6 (mtg_eoe): continuous effects, only the characteristics they give now (no effect, duration, controller or timestamp)",
+            decision: "encoding-options.md 2.8: mtg_eoe stays on layout v6 until EoE run 2 resumes (the user's call); layout v7 encodes it since ENGINE.md 142.7",
+            layouts: V6,
+            // (and a latent ability an effect gave, `Mod::GainLatent`: rare, none of the gate's EoE positions has one)
+            alone: vec!["an effect's duration is another", "a permanent gains a latent ability of its card"],
+            alike: effects.into_iter().chain(["an effect ends"]).collect(),
+        },
+    ]
+}
+
 /// Layout v6's gap (ENGINE.md 124.2): a pool's mana restricted to creature
 /// spells of a chosen type (Cavern of Souls); layout v7 encodes it (its block,
 /// `V7_FIXED`), and the layout v6 game `mtg_eoe` refuses a card table that
@@ -2313,6 +2985,10 @@ pub fn match_view(a: &MtgAz, viewer: PlayerId) -> Vec<u64> {
     v.extend(m.starters.iter().map(|&x| x as u64));
     for p in 0..2 {
         v.extend(m.earlier[p].iter().copied());
+        // (by game: ENGINE.md 142.8)
+        for g in 0..3 {
+            v.extend(m.earlier_by_game[p][g].iter().copied());
+        }
     }
     v.push(m.sb.is_some() as u64);
     v.push(m.dealt.map_or(9, |d| d as u64));
@@ -2323,6 +2999,30 @@ pub fn match_view(a: &MtgAz, viewer: PlayerId) -> Vec<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ENGINE.md 142: the known-gap rule (`covered`) on hand-made pairs of states.
+    #[test]
+    fn known_gaps_cover_what_they_name_and_nothing_else() {
+        let k = known_gaps();
+        let c = |l: u8, a: &[&'static str], b: &[&'static str]| covered(&k, l, a, b).is_some();
+        let (red, black) = ("a creature gains protection from red", "a creature gains protection from black");
+        let (pump, m1) = ("+1/+1 until end of turn", "a -1/-1 counter on a creature");
+        let sac = "a land gains \"sacrifice it: add {B}\"";
+        let (group, cant) = ("creatures a player controls can't block this turn (a rules effect)", "a creature can't block");
+        // (Layout v7 has no known gap since ENGINE.md 142.7; layout v6, mtg_eoe's, keeps them.)
+        assert!(c(V6, &[red], &[black]) && !c(V7, &[red], &[black]), "two protections alike in v6 only");
+        assert!(!c(V6, &[], &[red]), "a protection alone is encoded");
+        assert!(c(V6, &[], &[pump, m1]), "a pump and a -1/-1 counter cancel");
+        assert!(c(V6, &[red, pump], &[black, "+1/+1 with no duration"]), "two gaps at once");
+        assert!(c(V6, &[], &[sac]) && c(V6, &[pump], &[pump, sac]), "an alone perturbation changes no row");
+        assert!(c(V6, &[group], &[group, cant]), "a creature's can't-block under a group's");
+        assert!(!c(V6, &[], &[cant]), "a can't-block alone is encoded");
+        assert!(!c(V6, &["life + 1"], &["a stun counter"]), "unrelated changes are no known gap");
+        assert!(!c(V6, &[red], &[red]), "the same perturbations: no difference to cover");
+        assert!(c(V6, &[], &["a permanent was harnessed"]) && !c(V7, &[], &["a permanent was harnessed"]), "a v7 fact: a v6 gap only");
+        // (layout v7's one known gap: the framed row's, found 2026-11-13, a decision of its own)
+        assert!(k.iter().filter(|g| g.layouts & V7 != 0).count() == 1, "layout v7's known gaps");
+    }
 
     #[test]
     fn every_public_field_has_a_perturbation_and_every_perturbation_a_field() {

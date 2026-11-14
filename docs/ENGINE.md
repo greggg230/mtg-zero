@@ -27651,7 +27651,7 @@ v6 path, `encode::LAY6`; `layout_eoe.json` unchanged), and refuses a table that 
 |---|---:|---:|
 | features (head) | 44,212 | **56,384** (`NUM_FEATURES`; 56,192 before 125.11) |
 | head tokens (`HEAD_TOKENS` = 1 + sum count) | 170 | 170 |
-| segments | 11 | 20 (11 + 9 tail-only, appended) |
+| segments | 11 | 20 (11 + 9 tail-only, appended; 23 since 142.7: `effects`, `counters`, `numbers`) |
 | permanent slot | 196 | 281 (`PERM_V7` 85; 278 before 125.11) |
 | hand / list slot | 60 | 64 |
 | stack slot | 204 | 438 (`STACK_V7` 234) |
@@ -27793,7 +27793,7 @@ before. An option about no object keeps the static table, the companion's `PLAYE
 
 ### 125.7 Results (branch `v7-varlen`, zero-core `feat/varlen` 311cf3c)
 
-**The public-state gate** (`tests/az.rs`, whole rows): **192 perturbations encoded, 1 deliberate limit, 0 gaps**. The
+**The public-state gate** (`tests/az.rs`, whole rows): **192 perturbations encoded, 1 deliberate limit, 0 gaps** (each perturbation against the position only: ENGINE.md 142.2's pairwise gate finds ten known gaps, protection's colour, counters, durations, ...). The
 limit is the user's choice (D5): two graveyard cards swap places - graveyards are bags; the positional readers'
 cards are `graveyard_order` tokens, so only the order no rule reads is left out. The two other limits v6 had by
 design, an exiled card turned face down and an identity revealed in an earlier game, are encoded (125.10), with two
@@ -28131,7 +28131,7 @@ knowledge encodings:
 * head **56,384** features (`NUM_FEATURES`), `HEAD_TOKENS` 170 (the globals' token and one a slot), `max_row_tokens`
   4,096, `option_pointers`; the globals 128 at 0, the bags 23 x 1,024 at 384, the match 32 at 52,288, `globals_v5`
   64 at 52,320, `globals_v6` 320 at 52,384, `globals_v7` 3,680 at 52,704;
-* 20 segments (count x width at offset): context 1 x 256 at 128; tops 6 x 54 at 23,936; my_permanents and
+* 20 segments (23 since 142.7, layout v7 revision 1: three more tail-only gated ones; count x width at offset): context 1 x 256 at 128; tops 6 x 54 at 23,936; my_permanents and
   opponent_permanents 32 x 281 at 24,260 and 33,252; hand 16 x 64 at 42,244; stack 8 x 438 at 43,268; triggers 4 x
   271 at 46,772; list 64 x 64 at 47,856; graveyard_abilities 4 x 56 at 51,952 (these seven with tails); my_companion
   and opponent_companion 1 x 56 at 52,176 and 52,232; and nine tail-only segments, gated: opponent_triggers 271,
@@ -28202,7 +28202,7 @@ constructed best-of-three only. (On the first merge, main 1d5508af: full 8d1cce2
 
 **Checks on the merged sha** (main 45e65178 merged, zero-core cdf1418). The engine suite: 163 binaries, **2,539 passed,
 0 failed**, 27 ignored (main's `post_board` the new one). The gate: **195 perturbations encoded, 2 deliberate limits (a
-graveyard's order, D5; a constructed best-of-three's game-1 chooser and starter, 130), 0 gaps**; a split card's halves
+graveyard's order, D5; a constructed best-of-three's game-1 chooser and starter, 130), 0 gaps** (single perturbations only; 142.2: ten known gaps); a split card's halves
 named on 419 positions. The digests: above. The fuzz (whole rows at every information-set step; `runs11/`): the default
 pool 20,000 games and 200 cube best-of-three matches (500 games), delver 4,000 games, **400 constructed best-of-three
 Delver matches (1,057 games) and 400 post-sideboard ones** (`"start_game": 2`, one seat in three keeping its deck: 658
@@ -29998,6 +29998,510 @@ slot throttle, with this branch's own target directory (E:/cargo-target/mtg-zero
   `next_game` / `start_chosen_game` here do, and the deck-choice branch of `determinize` sets it - so both are
   needed. A dealt seat stays on its own path: nothing here changes the game-3 deal (141.4), and `keep_known` needs
   `keep_deck`, which 154's spec refuses with `dealt_decks`, so `keeps_known` and `deck_dealt` never meet.
+
+## 142. The encoding's checks made exact: row comparisons, the pairwise public-state gate, layout v6 checked, Memory Jar's pile (branch `fix/encoding-gate`, Fable fix lane B, 2026-11-12)
+
+**Why.** The Fable review of `e81f8304..267ae603` (`E:/mtg-zero-scratch/fable-review-2026-11-12/encoding.md`) found the
+encoding's checks weaker than they read: `Row::flat`, which nearly every row comparison uses, dropped an override's
+slot (B6); the public-state gate proved only that each public change moves the row, which no sum, maximum or any-of
+float can fail (B5), and it skipped four `Mod` kinds, every group effect and every duration (B4) and checked EoE
+positions as layout v7 rows while EoE run 2 plays layout v6; Memory Jar's face-down pile showed the opponent's hand
+order (B7); the encoder's header described an interim layout (B9). This section fixes the checks and the leak with the
+layout unchanged (tier "encoding"), and lists the gaps the pairwise gate finds as **known gaps**, each waiting on the
+user's choice among the options of `E:/mtg-zero-scratch/fable-fix/encoding-options.md` (no gap is accepted: the gate
+fails on any other and on a stale one).
+
+### 142.1 Row comparisons are exact (`Row::flat`)
+
+**Why.** Every test that compares v7 rows - the public-state gate, the hidden-information tests (`hidden.rs`,
+`known_face_key.rs`, `constructed_bo3.rs`, `post_board.rs`, ...), the fuzz's information-set checks (`fuzz.rs`
+`check_encoding`, the hidden-decklist and constructed worlds, `az_encode`, `az_row_checked`) and `v7_tails.rs` -
+compares `tail_encode::Row::flat()`. It wrote an override's packed `seg << 40 | col << 32 | slot` as `t as f32` and
+`(t >> 24) as f32`: an f32 keeps 24 bits, so the slot's bits below 21 were lost, and rows whose overrides pointed at
+slot 33, 34 or 70,000 of one segment and column compared equal (the Fable review's B6, probe A). A tail token's slot
+(`sl as f32`) and the option index lost bits the same way past 2^24 (a `my_revealed` token's slot is an identity).
+
+**What.** `flat` writes every integer in 16-bit pieces (a tail slot and an option index two, an override four); the
+floats compare by value as before (0.0 = -0.0: the network reads them alike). Equal rows give equal vectors and
+different rows different vectors, so every comparison above is now exact. No digest moves (the digests hash the i64).
+
+**Test.** `tests/v7_tails.rs::flat_rows_are_exact` (overrides at slots 33 / 34 / 70,000, columns 0 / 1, segments 2 / 3,
+the generic logit -1: `flat` equal exactly when the rows are; an option index past 2^24; a tail slot past 2^24).
+**What the exact comparison exposed:** nothing - with every comparison exact, the engine suite (163 binaries, 2,544
+passed), the 20k fuzz and the gate pass: no hidden-information test or information-set check had been passing only
+through the lost bits.
+
+### 142.2 The public-state gate, pairwise; one perturbation per `Mod`; layout v6 checked; the known gaps
+
+**Why** (the Fable review's B4, B5). The gate (58.6, 125.6) proved that each public change moves the row away from the
+position's. Any float that is a sum, a maximum or an any-of passes that, so the gate reported "195 encoded, 0 gaps"
+while three probes found different public states with equal rows (protection's colour, a +1/+1 counter against an
+until-end-of-turn pump, counter kinds). It had no perturbation for four `Mod` variants or for an effect's duration,
+skipped every group effect, and checked the EoE positions as layout v7 rows while the `mtg_eoe` game (EoE run 2) is
+layout v6.
+
+**What.** (A correction to 125.7 and 125.12: their "0 gaps" were single perturbations against the position; the notes there say so now.)
+* **The pairwise pass** (`tests/az.rs::public_states_encode_apart`): on the gate's 480 positions, every state a position
+  yields - the position, each perturbation alone, each perturbation followed by a partner drawn per position (each pair
+  once) - with every perturbation of a position drawn from one stream, so that the members of a family (on one
+  candidate list) act on the same object. Per viewer, two states whose views differ must give different rows: layout
+  v7's whole rows, and on the EoE positions layout v6's encoding (`MtgAz::encode` into a v6 buffer, the `mtg_eoe`
+  game's) too. Rows are compared by an exact 128-bit hash (different hashes prove different rows; a false collision
+  would be reported, never hidden), views exactly. The deliberate limits' perturbations are left out (they encode like
+  the position by design), and so are the fields hidden decklists hide on such positions (the single pass checks
+  them). `public_state::COMBO_EXCLUDED` (15) are never combined: each moves an object (a new object, CR 400.7),
+  changes the turn, step, active player or game, ends the game, or acts on another effect, so the partner's change
+  could become inert while the view keeps it (the first run's artifacts: an effect on a creature then put into the
+  graveyard, a "this turn" mark of the turn before); each is still compared alone with every state.
+* **New perturbations** (`public_state::perturbations`, 204 -> 234): protection from each colour, colourless,
+  everything, creatures, its controller's opponents, coloured spells (one candidate list); +1/+1 until its
+  controller's / the other player's next turn, with no duration, for as long as another permanent remains; "loses all
+  abilities" for as long as another permanent remains and with no duration; "can't block" and a land animated with no
+  duration; an effect's duration made another; another named counter, two named counters, a stun and a named counter;
+  one perturbation for each `Mod` variant the list lacked (`GainSacMana`, `AllCreatureTypes`, `BecomeTypes`,
+  `GainLatent`, `SwitchPt`, `ControlFrom`, `MustAttackPlayer`) and two group (rules) effects ("creatures a player
+  controls can't block this turn", "combat damage is prevented this turn": the lowering's `Ext::ApplyRules` shapes).
+  "An effect ends" now ends group effects too. A +1/+1 counter on a creature with a -1/-1 counter removes one instead
+  (and the other way: CR 704.5q; a decision never sees both).
+* **One perturbation per `Mod`** (`public_state::MOD_PERTURBATIONS`, 21; `mod_variant`, an exhaustive match, as
+  `mark_variant` for `Mark`): the four variants only static abilities have (`PtPer`, `PtPerSourceCounter`,
+  `AttackDespiteDefender`, `PowerPlusGreatestMv`: built inside a `StaticDef` only) are `STATIC_ONLY_MODS`, and
+  `Game::add_effect` refuses them loudly (`Mod::static_only`; never fires: the fuzz). `tests/v7_tails.rs::
+  every_mod_variant_has_a_perturbation_or_is_static_only`.
+* **Layout v6 checked** (both passes): the EoE positions' layout v6 encoding, but a position with an object past one of
+  v6's caps (none of the 60).
+* **The known gaps** (`public_state::known_gaps`, `KnownGap`, `covered`): each gap the gate finds, named, with the
+  decision it waits on (the options memo `E:/mtg-zero-scratch/fable-fix/encoding-options.md`). An entry lists
+  perturbations whose change the layout leaves out entirely (`alone`: the single pass accepts exactly these) and
+  perturbations the layout reads only through what they share (`alike`); a collision is covered when its differing
+  perturbations split into entries this way (`covered`; unit test
+  `known_gaps_cover_what_they_name_and_nothing_else`). The gate fails on any collision no entry covers, on an `alone`
+  perturbation that changed the row where it applied, and on an entry that covered nothing: **the list goes to empty
+  when the encoding is fixed.**
+
+**Results** (the gate's default seeds; `tests/az.rs`):
+* *The single pass* (`public_state_reaches_the_encoding`, 480 positions, 9.0 s): **220 perturbations encoded, 2
+  deliberate limits, 5 known gaps** (an effect's duration made another, 70 of 70 positions; "sacrifice: add {B}"
+  granted, 479 of 479; a latent ability granted, 7 of 7; Darkness's prevention, 480 of 480; a player's creatures can't
+  block, 165 of 480), 7 rare perturbations not applied. Layout v6 on the 60 EoE positions: the same five, and **30
+  perturbations layout v7 encodes** (`V7_FIXED`: 25 marks, a face-down card's knowers, a stack ability's source, a
+  trigger's event object and player, a library card known below the top three, an earlier game's reveal); none of the
+  60 positions is past v6's caps.
+* *The pairwise pass* (`public_states_encode_apart`, 25.8 s): 133,602 states (53,159 combinations, none panicked),
+  **115,378 pairs of different views with equal rows, every one covered by the ten known gaps**:
+
+| known gap | pairs | example (cube position 0, P0's row unless noted) |
+|---|---:|---|
+| which protection a permanent has (`perm::PROTECTED` any-of) | 46,239 | protection from red = from white on Tersa Lightshatter |
+| power and toughness by source (+1/+1, -1/-1 counters, P/T effects) | 15,818 | +1/+1 until end of turn = a +1/+1 counter |
+| counter kinds (one sum; a keyword counter's keyword = an effect's) | 4,785 | a stun counter = a named counter on a Plains |
+| a granted "sacrifice: add mana" (`GainSacMana`) | 8,144 | Rain of Filth's ability on an Island = the position |
+| a latent ability an effect gave (`GainLatent`) | 148 | Urza's Saga's (position 14) |
+| must-attack kinds (`perm::MUST_ATTACK` one count) | 1,057 | attacks each combat = attacks that player this combat |
+| subtype effects (`perm::SUBTYPES` one count) | 1,027 | gains a creature type = has all creature types |
+| group (rules) effects | 11,641 | P1's creatures can't block this turn = the position |
+| layout v6 lacks v7's facts (v6 only) | 34,706 | EoE position 300: odd or even chosen = the position |
+| continuous effects: only their present result (no duration, controller, timestamp) | 5,611 | "loses all abilities" until end of turn = for as long as another permanent remains |
+
+  The first run, before the known gaps and `COMBO_EXCLUDED`, reported 5,683 distinct colliding pairs of perturbation
+  sets; besides the ten gaps they were combination artifacts (an effect, mark, link or permission of an object a
+  partner then moved; a "this turn" fact after "the turn number + 1"; a pair applied in both orders, whose effects'
+  timestamps differ; a hidden decklist's sideboard card, invisible to the other player by design) - no other gap.
+* The options for each gap, with feature counts, checkpoint and farm consequences and costs:
+  `E:/mtg-zero-scratch/fable-fix/encoding-options.md` (phase 2 of lane B; no encoding change for them here).
+
+### 142.3 Memory Jar's face-down pile in a canonical order
+
+**Why.** `Ext::HandsFaceDownLinked` (Memory Jar) moves each hand to `Game::face_down` in the hand vector's order, and
+layout v7 wrote the face-down cards in that order: one `face_down` token per card at its place in the pile, the same
+place in every reference to it (`rf::POS`) and in the `links` tokens (pushed in hand order). A hand has no order: the
+place of a card the viewer knows among the opponent's hidden cards told how many of those had been drawn before it and
+not played since - hidden information (the Fable review's B7). `determinize` keeps object positions, so the "same row in
+every world" tests could not see it.
+
+**What** (encoding only; the layout and the engine unchanged). `tail_encode::face_down_order(g, knower, me)`: the cards
+exiled face down sorted by what the knower can tell of each - whose (the frame player's first), known to the knower or
+not (known first), its identity where known, who knows it, who may play it - stably (exile order among cards alike in
+all of these, which are interchangeable in the knower's row). `Cx::fd` holds it; the `face_down` tokens' slots, a
+face-down card's `rf::POS` and an `exile_offered` token's `xo::POS` are its places, and the `links` tokens of cards
+exiled with an object are written face-up ones first (in link order), then the face-down ones in that order. The public
+view (`Game::view_of`) already had no order for the pile (a multiset per owner), and no rule reads one. Face-down
+permanents keep the battlefield's order (public).
+
+**Test.** `tests/v7_tails.rs::memory_jars_face_down_pile_shows_no_hand_order`: P1's hand [Ponder (both know it),
+Counterspell, Brainstorm] and [Counterspell, Brainstorm, Ponder], Memory Jar activated: the piles' orders differ, both
+players' views are equal, and their rows are equal. On 267ae603 (a scratch probe in a baseline checkout, the same
+games) both players' views are equal and both players' rows differ, in their `face_down` tokens: B7 confirmed.
+
+### 142.4 The encoder's header; two unbounded values squashed
+
+`encode.rs`'s module header still described 124.2's interim layout v7 ("47,892 floats", v6 plus one block of globals).
+It now describes the final v7: the row (head 56,384 floats, tail, overrides, 4,096 tokens), the head as v6 plus the
+`globals_v7` block and wider slots (permanent 281, hand and list 64, stack 438, trigger 271), the sixteen tail
+segments, the widening, and points at `LAY7` and 125.1 / 125.12 for the v7 offsets (the block table describes v4-v6
+and v7's globals).
+
+The header promises every feature within `FEATURE_BOUND` (256; the fuzz's `check_bounded`). Two values the row limit
+doesn't bound below it were written unsquashed (the review's B9): a spell's times an additional cost was paid
+(`stack::TIMES`, a u32 / 4) and a stack target's place (`tb[7]`, / 8: a stack of up to ~3,900 items). Both are
+squashed now - identical below 512 times and 1,024 places, so no digest moves. The other values B9 names are bounded:
+`rf::POS` and the stack and trigger places by the row limit ((4,096 + 1) / 32 = 128), `lb::DEPTH` by a library (a
+player's cards, at most 64, 58.3), `go::RANK` by a graveyard.
+
+### 142.5 Checks
+
+* **Digests** (`engine/tests/data/digests.txt`): `DIGEST_ENCODING=0` **a0062bb5569e06d3** (= main's: no game plays
+  differently), `DIGEST_ENCODING=v6` **b63f643e97a30a61** (= main's: the v7 head's v6 projection, 102,734 states, none
+  on a page; the squashes of 142.4 change nothing below their thresholds), the full v7 digest **438164c0429d7fa3 ->
+  6deaf8cd9d5d3692**, re-recorded with `DIGEST_WRITE=1`: 56 of the 2,500 games differ, the games whose hashed rows hold
+  face-down cards in another order than they were exiled (142.3; the other encoding changes cannot reach a digest
+  game).
+* **The engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`): 163 binaries, **2,544 passed, 0
+  failed**, 28 ignored (main's 2,539 and 27, plus `flat_rows_are_exact`, `memory_jars_face_down_pile_shows_no_hand_order`,
+  `every_mod_variant_has_a_perturbation_or_is_static_only`, `public_states_encode_apart`, the unit test
+  `known_gaps_cover_what_they_name_and_nothing_else`; the ignored census `encoding_gap_census`).
+* **The fuzz** (`FUZZ_GAMES=20000`, the default pool): 20,000 games (wins 9,803 / 10,075, 122 drawn, 0 aborted;
+  19,192,276 options completed) and 1,000 cube best-of-three matches (2,549 games), every check of 125.6 with the exact
+  row comparisons: 18,884,592 options' pointers checked, the v6 projection equal on 11,397,720 rows (11 on pages v6 showed
+  as a window), at most 246 tokens a row, none past the limit; `Game::add_effect`'s new refusal never fired.
+* **pytest** (`bash tools/build_py.sh`, `python -m pytest -q tests`): **323 passed, 1 skipped** (= main's).
+* **The tier "encoding" gate** on this commit: 142.6.
+* **The census** (`encoding_gap_census`, 300 games a pool) and what each known gap costs to close: the options memo.
+
+### 142.6 The tier "encoding" gate on 79f242a7
+
+`python tools/gate.py encoding --no-mac --expect-digest 6deaf8cd9d5d3692 --expect-digest0 a0062bb5569e06d3 --checkpoint
+<a layout v7 cube smoke network: iteration 3 of 125.12's smokes10/cube_cpu, copied>`: build, `DIGEST_ENCODING=0`
+a0062bb5569e06d3 and the full digest 6deaf8cd9d5d3692 (both = expected), `--test az` 53 passed, the checkpoint loads and
+plays (8 games, 0 unfinished), pytest 323 passed, 1 skipped - **GATE PASSED encoding 79f242a7400d** in 1,493 s
+(`--no-mac`: the tier has no Mac step).
+
+### 142.7 Layout v7 revision 1: `effects`, `counters`, `numbers` (phase 3; the user's option (b), 2026-11-13)
+
+**Why.** The pairwise gate (142.2) found ten gaps in layouts v7 and v6; the options memo
+(`E:/mtg-zero-scratch/fable-fix/encoding-options.md`) gave three ways to close them, and the user chose (b): add the
+missing facts to layout v7 as gated tail-only segments before any v7 run freezes it, and keep `mtg_eoe` on layout v6
+until EoE run 2 resumes (the user's call then; its gaps stay known, scoped to v6).
+
+**What** (the `mtg` game only: `mtg_eoe`'s encoding and `layout_eoe.json` are untouched; the head is unchanged, 56,384
+features, `HEAD_TOKENS` 170, so the v6 and v5 projections and their digests are as before). Three tail-only segments
+appended to layout v7 (`tail_encode::seg::EFFECTS` 20, `COUNTERS` 21, `NUMBERS` 22; `TAILS` 16 -> 19, 23 segments; with 142.8's `opp_revealed` 20 and 24),
+each `tail: true`, `gate: true`, its token's card code first:
+
+* **`effects`** (`tail_encode::ef`: the card code and 549 floats, 601 a token): one token per continuous effect of a resolved
+  spell or ability (`Game::effects`, CR 611.2), slot = its place in timestamp order (CR 613.7), then one per copy effect
+  (`Game::copies`, CR 707). The affected object (a reference) with its card code where the viewer sees it, or a group's
+  rules effect and its filter (`group_filter`: card types, and any player's / the effect controller's / its opponents'
+  - the lowering's three shapes; any other fails loudly, and `every_tables_effects_fit_the_effects_token` checks every
+  card of the three tables); the `Mod` (`mod_index`, one-hot over the 21 variants an effect can have) and its
+  parameters: power and toughness amounts (squashed, sign, 64 binary digits), keywords (22), protection's qualities
+  (19: W U B R G, colourless, everything, 9 card types, opponents, chosen player, coloured spells), colours, card types
+  and `replace`, up to 4 subtypes by stable name id (`name_id`, FNV-1a 32 of the interned name - the interned ids are
+  each table's own; `name_ids_are_distinct` checks the three tables' names), a granted sacrifice ability's mana, which
+  latent ability (8), whose control it was; its duration (end of turn / no duration / until its controller's next turn
+  / for as long as an object remains, with that object) and its controller. A copy effect: the copied definition's
+  identity, its exceptions (card types, subtypes, keywords, base power and toughness, a name, colours, no mana cost,
+  supertypes), double-faced, its duration. Effects end with their object (`layers.rs`: an object's effects go when it
+  changes zones, `layers.rs` and `copies_on_move`), so the tokens are bounded by the board. Every reference goes through
+  the shared `Cx::write_ref` and every card code through `Cx::seen_def`, as the other tail segments' (so a fix there - fix lane
+  I's, branch `fix/hidden-refs` - covers these tokens too).
+* **`counters`** (`tail_encode::ct`: 52 + 175 = 227 floats): one token per (object, counter kind) of every permanent (the
+  frame player's, then the other's, in slot order), every face-up exiled card and every phased-out permanent: the
+  object, the kind (+1/+1, -1/-1, stun, keyword, named, loyalty, lore; CR 122.1), a keyword counter's keyword, a named
+  counter's name (`name_id`), the number squashed / 4 and in 64 binary digits (exact).
+* **`numbers`** (`tail_encode::nb`: 52 + 187 = 239 floats): one token per number the head writes squashed whose magnitude is
+  at least `nb::BIG` = 512 - a player's life, poison, energy, experience; a permanent's power, toughness, damage -
+  with whose it is, which, its sign and 128 binary digits (power and toughness are 128-bit, ENGINE.md 100.7). Below
+  512 each of these is exact in float16 already (life / 20 to 1,280; / 8 and / 4 to the squash threshold), so the
+  shards' float16 storage loses nothing a network reads.
+* **The semantic revision** (the Fable review's I7): `layout_v7.json` carries `"revision": 1`
+  (`encode::LAYOUT_V7_REVISION`), to be bumped whenever a float's or a field's meaning changes without the shape
+  changing. zero-core's `tokens_layout` keeps only the keys it knows, so today the revision is in the layout file a run
+  starts from, not in its checkpoints nor compared by the encoding guard: making the guard keep, log and compare it is a
+  zero-core change (not made here). `layout_v6.json` / `layout_eoe.json` are frozen and carry none.
+
+**The gate.** Layout v7 has **no known gap** of the ten (one new one, found while 142.8 ran: 142.8's last paragraph): `public_state::known_gaps` keeps its ten entries scoped to layout v6
+(`layouts: V6`, each named "layout v6 (mtg_eoe): ...", pointing at the memo's 2.8 - mtg_eoe stays on v6 until EoE run 2
+resumes). The single pass (480 positions, 24 s): **225 perturbations encoded, 2 deliberate limits, 0 known gaps** in
+layout v7 (142.2: 220 and 5; the five - an effect's duration, a granted sacrifice ability and latent ability, the two
+group effects - change the row now); on layout v6 the same five and v7's 30 facts stay known. The pairwise pass (133,602
+states, 34 s): **no collision in layout v7** (142.2: 115,378 pairs); 43,816 in layout v6, every one covered by its nine
+v6 entries (the v6 latent-ability gap joined the v6 effects entry: none of the 60 EoE positions has a latent ability).
+`effects_counters_and_numbers_tokens`, `name_ids_are_distinct` and `every_tables_effects_fit_the_effects_token`
+(`tests/v7_tails.rs`) read the tokens back (an effect's mod, parameters, duration and controller; protection from red
+against black, a next turn against no duration; Darkness's filter; a copy effect; 70,000 +1/+1 counters and a stun
+counter, exact; life 5,000 and a 70,002 power and toughness as numbers tokens, life 20 none).
+
+**The farm's `zero-onnx/2`.** Nothing here needs more than a layout-driven worker: the three segments are tail-only
+(no head slots, no static actions, no pointer columns, no `columns` key), their tokens are (segment id, slot, floats of
+the segment's width) like every other tail token, slots are small integers (a token's place in its segment), and
+`max_row_tokens` stays 4,096. What a worker must not assume: a fixed number of segments (24 now), fixed token widths
+(601, 227, 239 floats with the card code), that tail-only segments are rare in a row (effects and counters tokens are
+in a quarter to a half of the census's rows), or that a row's tokens per segment are bounded by a head count.
+
+**Checks**: 142.9 (with 142.8's).
+
+### 142.8 Game 2's reveals and play / draw as inputs for game 3 (the user's decision of 2026-11-13)
+
+**The decision.** "It really shouldn't be independent, but we shouldn't just assume it will be the same. How they boarded
+game 2 should be an input for g3." The base deal prior stays the approved independent one (ENGINE.md 120.2: uniform over
+the swap count, then uniform); the dependence of the opponent's game-3 60 on its game 2 is to be **learned** by the deck
+head (ENGINE.md 102.4) through the row's inputs and applied to the worlds by the deck tilt (ENGINE.md 106), so nothing
+assumes the same 60.
+
+**What the row had** (checked): in a constructed best-of-three game 3 (and the sideboarding before it) `OPP_REVEALED` and
+v7's `my_revealed` hold `MatchState::earlier`, the post-sideboard games' reveals (ENGINE.md 130): game 2's only - game 3's
+own reveals are never merged into them (`earlier` grows at `end_game`; during a game the current game's reveals are the
+game's knowledge: known hand cards, clouds, public zones). Who played first in game 2 and its result are in the match block
+(`mtch::STARTED`, `mtch::CHOSE`, `mtch::RESULTS`, by game; game 1's chooser and starter left out in a constructed match,
+ENGINE.md 130), deck sizes are fixed (60). Merged were the reveals of two earlier games (a cube best-of-three's game 3:
+games 1 and 2 in one set), and the opponent's earlier reveals had no token (a bag count only).
+
+**What.**
+* `MatchState::earlier_by_game` (player x game): each finished game's reveals that `earlier` keeps (a constructed match's
+  game 1: none, as `earlier`), `earlier` their union; public (`public_state` classifies it, `match_view` shows it).
+* The `my_revealed` token (the frame player's earlier reveals) gains `mr::GAME`, three bits: the games each identity was
+  revealed in; a new tail-only gated segment **`opp_revealed`** (segment 23; the same token, `mr::*`, 56 floats) holds the
+  other player's earlier reveals with their games (the head's `OPP_REVEALED` bag keeps counting them). Both are written in
+  the game, the sideboarding and the deck choice (`MtgAz::encode_row`); R1's count covers both. A real game 2 still
+  encodes as a synthetic one (a constructed game 1 records nothing).
+* The gate: "an earlier game's reveal was in another earlier game" (`MatchState.earlier_by_game`; rare: needs two kept
+  earlier games, a cube best-of-three's game 3) and "an identity revealed in an earlier game" now records its game;
+  game 2's play / draw is "another played first" (`encoded_game`: a constructed match's game 2). Both are encoded in v7;
+  the first is a layout v6 gap (`V7_FIXED`; best-of-one EoE never reaches it).
+
+**The deck head and the tilt where they matter.**
+* *Game 3*: the `deck` target is the opponent's actual game-3 60's cards the decider does not know (`MtgAz::aux_target`:
+  `unknown_to`), and the tilt deals game 3's worlds (`determinize_belief`: `deals_hidden_decks()` from game 2 on, the K
+  cached decks drawn by the deck prediction). The head reads the whole row, so it can learn P(game-3 60 | game-2
+  sightings, game 2's play / draw, game 3 so far), and the tilt applies it. Nothing missing.
+* *The sideboarding before game 3*: **not covered**, and not fixed here. (1) No target: `aux_target` writes nothing while
+  sideboarding (the first sideboarder decides before the other's game-3 deck exists; the second could be labelled with
+  the first's chosen 60, which is hidden from it and exists; the first's rows only with the other's eventual game-3 60,
+  which needs zero-core to fill a sample's target at the next episode's start - a core change). (2) No tilt:
+  `determinize_belief` returns to plain `determinize` while sideboarding, so the first sideboarder's hidden choice is
+  dealt from the uniform prior (the user's decision of 120.2 / 129.3); tilting that deal by the head would change an
+  approved behaviour - the user's call. Reported to the orchestrator.
+
+**The gate on 142.7 + 142.8** (480 positions): the single pass **227 perturbations encoded, 2 deliberate limits, 0 known
+gaps** in layout v7 ("an earlier game's reveal was in another earlier game" applied on 4 cube best-of-three game-3
+positions, "another played first" on 97, both encoded); the pairwise pass 133,883 states, 43,714 pairs of different
+views with equal rows, all covered: layout v6's entries, and **one new gap in layout v7 and v6 alike**, found by the
+pairwise pass's random combinations (334 pairs): a framed row (CR 722: the viewer controls the other player's turn,
+ENGINE.md 100.5) shows the viewer's knowledge in the controlled player's seat, and nothing says which of the **viewer's
+own** hand cards the controlled player knows (`MY_HAND_KNOWN` is the frame's hand there; known bits are public). It
+predates layouts v6 and v7. It is a known gap with its own perturbation ("the controlled player learns a hand card of its
+controller", so every run meets it) and the options memo's 2.9: a tail-only gated `frame_known` segment written only in a
+framed row (one token per such card), a decision for the user - changing `MY_HAND_KNOWN`'s meaning in a framed row would
+change layout v6's encoding (EoE has turn control). `COMBO_EXCLUDED` also holds "a turn begun" now ("until their next
+turn" facts read a player's turns: a combination artifact of this run).
+
+### 142.9 Checks (142.7, 142.8)
+
+* **Digests** (`engine/tests/data/digests.txt`): `DIGEST_ENCODING=0` **a0062bb5569e06d3** (unchanged: no game plays
+  differently), `DIGEST_ENCODING=v6` **b63f643e97a30a61** (unchanged: the head and the v6 path are untouched), the full v7
+  digest **6deaf8cd9d5d3692 -> 24e35743857532be**, re-recorded on purpose with `DIGEST_WRITE=1` (2,237 of the 2,500 games:
+  their hashed rows hold effects, counters or numbers tokens; 142.8's tokens are in none - the digest's games are
+  best-of-one).
+* **The engine suite** (`cargo test --release -p engine -p card_ir --no-fail-fast`): 163 binaries, **2,547 passed, 0
+  failed**, 28 ignored. Twelve tests of six binaries had read a head-only encoding (`encode_features` of a v7 buffer)
+  of states that now have tail tokens - copy effects, counters, big numbers, effects - and were refused by R1; they read
+  rows now (`Row::of`: the head, or the whole row where they compare worlds): `cards_eoe_w6`, `rules_copies`, `rules_farm`,
+  `rules_numbers`, `rules_stack`, `rules_ward`.
+* **The fuzz**: `FUZZ_GAMES=20000` (the default pool): 20,000 games (wins 9,803 / 10,075, 122 drawn, 0 aborted) and 1,000
+  best-of-three matches, 18,884,592 options' pointers checked, the v6 projection equal on 11,397,720 rows (11 on pages v6
+  showed as a window), at most **281** tokens a row (142.5: 246), none past the limit; `FUZZ_POOL=delver
+  FUZZ_GAMES=20000`: 20,000 games (9,673 / 9,563, 764 drawn, 0 aborted), 13,243,909 pointers, the v6 projection equal on
+  10,529,420 rows, at most 213 tokens.
+* **The widen, exact** (`tests/test_mtg_az.py::test_a_widened_network_reads_v7_rows_within_rounding` with
+  `MTGZ_WIDEN_CHECKPOINT` = a copy of `runs/anchors/delver-bo3_a3198_iter0000.pt`, the live Delver line's layout v6 anchor,
+  128 x 8, read only): widened onto layout v7 revision 1 (the 13 tail-only segments gated at exactly 0), on real
+  Delver-mirror rows its priors, value and margin are the v6 network's on the rows' v6 encodings within **1.67e-6** (68
+  rows without a tail token, 294 whose only new tokens are gated; the bound is 1e-5, float32 rounding of the wider slots).
+* **The fork smoke** (`E:/mtg-zero-scratch/fable-fix/laneB/fork/`): `python tools/fork_run.py` of that anchor (44,212 ->
+  56,384 features "across a token layout change", `effects`, `counters`, `numbers`, `opp_revealed` among the new segments,
+  each gate 0), then `python -m mtgz.az.run --preset delver-bo3-smoke` with the anchor's network (128 x 8, heads 4, ff 256,
+  the belief and deck heads) on the CPU, 2 iterations, 44 min: self-play 16 matches an iteration (3,204 and 6,045
+  samples, rows up to 56 tokens, none past the limit), training on the rows (101 and 189 steps; tail tokens 47,197 and
+  134,314; `effects`' gate opened to 0.017 then 0.018, `opp_revealed`'s to 0.009 then 0.010, `my_revealed` 0.018 /
+  0.020; `counters`' stayed exactly 0 - zero-core's warning, its gradient pushing it shut through the straight-through
+  `max(theta, 0)` as `graveyard_order`'s in 125.12; `numbers` had no token), evaluation and Elo; exit 0.
+* **pytest** (`bash tools/build_py.sh`, `python -m pytest -q tests`): **323 passed, 1 skipped**.
+* **The tier gate**: 142.11.
+
+### 142.10 An enclosing task's picks (the Fable review's X3: the orchestrator's decision (a), 2026-11-13); fix lane I's reference helpers
+
+**Why.** X3 (156.9): in `FUZZ_POOL=interactions` games 5,682, 6,025, 7,790 and 12,725 two tasks of the agenda hold
+picks in progress at once - Etali, Primal Conqueror's trigger keeps the cards it exiled as picks while its controller
+casts one of them for free, and that spell's cost picks objects too (5,682: Abhorrent Oculus, "as an additional cost to
+cast this spell, exile six cards from your graveyard": a `PayCosts` task with its picks on top of Etali's frame) - and
+`Cx::picks_in_progress` failed loudly ("picks in progress in two tasks of the agenda"): a self-play game aborted. The
+decision under the no-gaps rule: **(a)**, an enclosing task's picks shown apart (not (b): `K_PICKED` tokens ranked after
+the asking task's lose which task holds them; not (c): the loud failure), in this v7 amendment.
+
+**What.**
+* `tail_encode::agenda_picks` (was `Cx::picks_in_progress`; `Cx::picks_in_progress` calls it): every agenda task
+  holding picks (a resolution's frame, `PayCosts`, `OrderTimestamps`, `Devour`), innermost first. The innermost
+  holder's picks are as before (125): the head's pick floats (`perm::PICK_RANK` .., `hand::PICKED` .., `list::PICKED`
+  ..) and `links` tokens (`K_PICKED`, `K_PICKED_DEF`) for the picks no other block holds. Each enclosing holder's picks
+  are `Picks::outer`, innermost first, and every one of them is a `links` token (a permanent, a card of the list block or
+  of the frame player's hand too: the head's floats are the innermost holder's), with a new float **`lk::DEPTH`** = the
+  holder's depth / 8 (0: the innermost holder; 1: the task around it, ...), its rank in its own task and its picker - the
+  same rules as the innermost holder's (156): the other player's pick of a card of its own hand a token with no
+  identity, a card hidden from the viewer that it doesn't know no token, a search's definitions to the searcher only.
+  The `links` token is 183 floats (182; `lk::W`); `layout_v7.json` regenerated, still revision 1 (no v7 network or
+  run had the amendment yet: the shape changed and the encoding guard sees it).
+* Layout v6 (`mtg_eoe`) has the innermost holder's picks only: `encode_features` of a v6 buffer fails loudly on a state
+  with an enclosing task's picks (no EoE card makes one; the fuzz's v6 projection check, `encode_features_v6_check`,
+  still compares the head, which is the same).
+
+**The gate.**
+* `Game.agenda` is classified public (its tasks' picks in progress; 142.2's classification had it derived: "what a player
+  sees of it is the pending decision"), and `Game::view_of` shows the picks in progress: every holder's, innermost first,
+  each object by its public place and its picker, a search's definitions to its searcher (the views were blind to picks).
+* Two rare perturbations of one family (one stream, the same card): "the asking task holding picks picks one more offered
+  card" (the asking task, the agenda's last, holds picks already: one more of the cards its decision offers - a state its
+  next decision reads consistently, as the hidden-information check recomputes it for the player who doesn't decide) and
+  "an enclosing task holds a pick in progress" (that card held by the task around the innermost holder). Both are layout
+  v7 facts (`V7_FIXED`: v6 has no picks), and in `COMBO_EXCLUDED` (so every position's partner draw is as before).
+* The positions: `enclosing_picks_positions` (`tests/az.rs`) builds 5,682's state - Etali cast with seven Mountains, its
+  trigger exiling Abhorrent Oculus and a Lightning Bolt, the free Oculus's cost picking from seven graveyard cards - and
+  gives the positions of the cost's second to sixth picks (both viewers' rows have depth tokens there) to the single
+  pass, the pairwise pass and the hidden-information check of the fixed perturbations (`gate_positions`' other users
+  don't get them).
+* Results (485 positions): the single pass **229 perturbations encoded, 2 deliberate limits, 0 known gaps** in layout v7
+  (142.8: 227) - "one more offered card" applied on 6 positions, "an enclosing task holds a pick in progress" on the 5
+  built ones, both changing both views and both viewers' rows; the pairwise pass 135,503 states, **no collision in
+  layout v7** but the framed row's 334 pairs (142.8, the memo's 2.9) - the same card held by the asking task and by the
+  task around it encode apart -, layout v6's pairs all covered by its entries; the hidden-information check of the
+  fixed perturbations 12,932 perturbed positions, 51,728 worlds compared (6,270 deck-tilted), each world's encoding the
+  same.
+
+**The regression test.** `fuzz.rs::enclosing_picks_of_etali_s_casts_are_encoded` replays interactions games 5,682,
+6,025, 7,790 and 12,725 (`POOL_OVERRIDE`, a thread-local pool over `FUZZ_POOL`) with every check, then reads every
+decision's rows: each game has `links` pick tokens with a depth (5,682: one decision, both viewers; 6,025: three;
+7,790: two; 12,725: one); before this section each of the four failed with X3's message (156.9).
+
+**The farm's `zero-onnx/2`.** As 142.7: a layout-driven worker reads it. The `links` segment's width is 183 floats now
+(the layout file's `width`), and a row's `links` tokens are not bounded by one task's picks.
+
+**Fix lane I's helpers** (merged: `fix/hidden-refs` 3ca4fb2d, merge 2dd7e8d5). The new segments' references go through
+lane I's shared helpers: every object reference through `Cx::write_ref` (`effects`: the affected object and a "for as long
+as" object; a copy effect's permanent; the `counters` and `numbers` tokens' objects), every card code of a referenced
+object through `Cx::ref_def` (a live reference: the viewer's knowledge of the object; a stale one: its last known
+information), the enclosing picks through `Cx::write_ref_as` as the innermost's. `Game::for_each_public_ref` (`hidden.rs`)
+lists the new reference holders - each continuous effect's `Affected::Obj` and `Until::WhileOnBattlefield` objects and
+each copy effect's object (the counters' and numbers' objects are the objects themselves, in public zones, not stored
+references; picks are card slots with 156's own rules, not references).
+
+### 142.11 Checks (142.10, 142.12) and the tier gate
+
+Two rounds, on the shared desktop (the live run paused; the slot throttle, eight slots): **cdc2cdb6** (142.7-142.10 with
+fix lane I's 156 merged) and the final code **20dd7d6f** (with fix lane A1's 140 merged, 41ea97fa, and 142.12).
+
+* **Digests on cdc2cdb6**: cube (`digests.txt`) `DIGEST_ENCODING=0` **a0062bb5569e06d3** and `DIGEST_ENCODING=v6`
+  **b63f643e97a30a61**, both unchanged (no game plays differently; the head and the v6 path are as before); the full
+  digest **b9ad17dc0dee92e7** (fix/hidden-refs', the merge's) **-> 72dba7025d8585b4** (2,306 of 2,500 games' lines),
+  re-recorded on purpose (`DIGEST_WRITE=1`, 3e24f759). `digest_formats` (148.1): constructed `DIGEST_ENCODING=0`
+  7ace0291619aa36f unchanged, full af4e796d28aeb023 -> ccbbbd3f3ab38a18 (389 of 570 lines); EoE b36df9098a38d794
+  EQUAL (`=0` 52bb9c00a23d24d3: `mtg_eoe` keeps layout v6, untouched); the driver 837d42c28214befe -> 82d0339cf64a2df8
+  (18 of 21 checkpoints, the first three equal: its batches and samples hash the rows' tail tokens; the same 20,000
+  batches, 1,251 samples and 5 results).
+* **Digests on 20dd7d6f** (6cdaa759): cube **EQUAL** - `=0` a0062bb5569e06d3, v6 b63f643e97a30a61, full
+  **72dba7025d8585b4** (fix lane A1's sightings and finds are kept only with whole-deck clouds; no cube digest game has
+  them). `digest_formats`: the behaviour moves with A1's merge - constructed `=0` **7ace0291619aa36f ->
+  c474e06fc70b4848**, EoE `=0` **52bb9c00a23d24d3 -> c0062906c0af9cc6** (140.9's deals after a find or a held card;
+  A1's branch, on 267ae603, had no `digest_formats` to record; this lane's changes play nothing: the found tokens are
+  rows only, `lose_sightings` and `view_of` are tests'); full constructed **ccbbbd3f3ab38a18 -> 8090f9ed31528c1a** (300
+  of 570 lines), EoE **b36df9098a38d794 -> 5b238b9d92bdbbe6** (75 of 160), the driver **82d0339cf64a2df8 ->
+  66c652322ffc1fd3** (21 of 21). Each compared again after recording: equal.
+* **The engine suite on cdc2cdb6** (`cargo test --release -p engine -p card_ir --no-fail-fast`): 165 binaries, 2,554
+  passed, 0 failed, 31 ignored (142.9: 163 binaries and 2,547; fix lane I's and 148's tests merged, and 142.10's).
+* **The engine suite on 20dd7d6f**: 166 binaries, **2,564 passed, 0 failed**, 32 ignored (A1's tests merged, and
+  142.12's).
+* **The targeted tests** on each: the gate's passes, `the_v5_facts_encode_no_hidden_information`,
+  `public_state_classification`, `layout_json_is_checked_in`, the `public_state` unit tests, `tests/v7_tails.rs` (21
+  passed), `enclosing_picks_of_etali_s_casts_are_encoded`, and A1's `deck_posterior`, `hidden`, `constructed_bo3`,
+  `deck_scorer`, `sealed` on the merge: passed (142.10's and 142.12's numbers).
+* **The 20k fuzz on 20dd7d6f's code** (55fd228f: docs and re-recorded digests after it): default pool `FUZZ_SKIP=2122` (20,000 games, 438,684 open-decklist walks, 2,418,971 states compared, 1,353 hidden-decklist steps; 1,000 matches, 5,396 match walks) **6 passed**; `FUZZ_POOL=delver` (20,000 games, 382,832 walks, 1,123,739 states; 1,000 matches + 1,000 post-sideboard matches) **6 passed**; `FUZZ_POOL=interactions FUZZ_SKIP=2031`: the matches passed, the games **failed at seed 13518** with the same pre-existing "same keys, different views" (Priority / ActivateMana for a hand card's ability, 142.13) as 2,122 and 2,031 - not this lane's; fixed in its own lane (ENGINE.md 160), whose checks run every pool without `FUZZ_SKIP`.
+* **The widen, exact, on 20dd7d6f** (`test_a_widened_network_reads_v7_rows_within_rounding`, `MTGZ_WIDEN_CHECKPOINT` =
+  the copy of the live Delver line's layout v6 anchor, 142.9): onto layout v7 revision 1 with 142.10's `links` and
+  142.12's `found` (the 14 tail-only segments gated at exactly 0), worst **1.67e-6** on 68 rows without a tail token
+  and 294 whose only new tokens are gated (v5 -> v7: 5.96e-7); the encoding guard's tests passed.
+* **The fork smoke and pytest on 55fd228f**: `fork_run` of the v6 anchor onto layout v7 revision 1, then `mtgz.az.run --preset delver-bo3-smoke` 2 iterations on CPU (iter 2 vs random per_game 0.70, Elo 649 +- 242): exit 0; the widen's tests 5 passed; `pytest tests` **324 passed, 1 skipped**.
+* **`python tools/gate.py encoding --no-mac`** (`--expect-digest 72dba7025d8585b4 --expect-digest0 a0062bb5569e06d3`, the forked iter 2 checkpoint): **GATE PASSED encoding 55fd228f906a in 1284s**.
+
+### 142.12 A search's finds the other player tells apart: the `found` segment (fix lane A1's open point; the orchestrator, 2026-11-13)
+
+**Why.** Fix lane A1 (`fix/deck-posterior` a4ec7f04, ENGINE.md 140.9) records the cards a player found by its own
+library search that the other player can still tell apart (`Game::found`: a tutor's card put on top of the library
+unrevealed - Vampiric Tutor -, a Doomsday pile's cards, a find exiled face down; unmarked when the other player sees it,
+when it goes into a hand, or when it is shuffled with cards that are not finds), for the hidden deck's likelihood. That a
+card is such a find is public - the other player knows the top card is the card searched for - and the encoding did not
+show it: A1 classified `found` derived and flagged it open. Merged here (merge 41ea97fa: conflicts in `fuzz.rs`, both
+sides' additions kept, and ENGINE.md, 140 before 142).
+
+**What.** A tail-only gated segment **`found`** (`tail_encode::seg::FOUND` 24; 25 segments; `TAILS` 21; the token
+`fs::*`, the card code and 66 floats, 118): one token per entry of `Game::found`, slot k its place in the order of the
+searches (public: each find is marked at its search). After the card code where the viewer knows the card
+(`Cx::ref_def` - its owner, who found it; the other player knows it only once it is no longer a find, `Game::learn`
+unmarks it): the object (`Cx::write_ref`: its zone, its owner's side, a face-down card's place) and, in a library, its
+depth from the top + 1 / 64 and in 16 binary digits. A find never names a hand card (it leaves `found` as it goes
+into a hand: `knowledge_moves`), so `Game::for_each_public_ref` gains no holder. Kept only in games with whole-deck
+clouds (`hidden_decklists`, `deck_clouds`: A1's rule), so no digest game of the cube table has a token.
+`layout_v7.json` regenerated (still revision 1). Layout v6 (`mtg_eoe`, whose sealed games keep finds) has no such
+fact: a layout v6 gap, listed with layout v7's other facts (`V7_FIXED`; the memo's 2.8).
+
+**A1's code, two changes.** `found` is classified public; `Game::lose_sightings` (a change by hand: a perturbation's
+`run`) drops the sightings but keeps the finds - they are public state now, the rows show them, and a deal without
+sightings reads none of it (`seen_of` returns None once the sightings are lost). `Game::view_of` shows the finds (each
+one's owner, zone and depth in a library, in order).
+
+**The gate.** Two perturbations (`Game.found`): "the top library card is its owner's search's find" (a player's top
+card the other player does not know; every position) and "a search's find is no longer told apart" (rare: a position
+with a find). Both in `V7_FIXED` and `COMBO_EXCLUDED` (the partner draws as before). The gate's positions add `found_positions` (`tests/az.rs`: two Vampiric Tutors with whole-deck clouds, the positions
+after each - the second's shuffle makes the first find no find) where 142.10's are. Results (487 positions): the single
+pass **231 perturbations encoded, 2 deliberate limits, 0 known gaps** in layout v7 - "the top library card is its
+owner's search's find" applied on 479 positions, "a search's find is no longer told apart" on the 2 built ones, both
+changing both views and both rows; on the 60 EoE positions the first is a layout v6 gap (`V7_FIXED`'s entry); the
+pairwise pass 136,509 states, **no new collision** (layout v7: the framed row's 334 pairs only; layout v6's all covered
+by its entries); the hidden-information check of the fixed perturbations 13,257 perturbed positions, 53,028 worlds.
+
+**Tests.** `a_tutors_card_on_top_is_a_found_token` (`tests/v7_tails.rs`): Vampiric Tutor with whole-deck clouds puts a
+Plains on top: one `found` token in both rows - the Plains' identity in its owner's, none in the other's -, at depth 1,
+the owner's side; drawn into the hand, no token.
+
+**Checks**: 142.11.
+
+### 142.13 Phase 3 status (handoff note, 2026-11-13 ~22:50)
+
+**Done, committed on `fix/encoding-gate`** (head after this note): 142.7 `effects`, `counters`, `numbers` segments; 142.8
+game 2's reveals / play-draw as game-3 inputs (`earlier_by_game`, `opp_revealed`, `my_revealed` game bits); 142.10 X3
+(Etali's enclosing-frame picks, option (a): `agenda_picks`, `lk::DEPTH`, the regression test over interactions games
+5,682 / 6,025 / 7,790 / 12,725, the gate's two picks perturbations and positions); 142.12 the `found` segment (a
+tutored card on top / a Doomsday pile: A1's `Game::found`, public); fix lane I's helpers (`Cx::ref_def`,
+`Cx::write_ref`, `Game::for_each_public_ref` lists effects' and copies' objects) and fix/hidden-refs merged
+(2dd7e8d5), fix/deck-posterior merged (41ea97fa); layout_v7.json regenerated (25 segments, revision 1); digests
+re-recorded (6cdaa759: cube EQUAL 72dba7025d8585b4 / a0062bb5569e06d3 / v6 b63f643e97a30a61; formats constructed
+8090f9ed31528c1a, EoE 5b238b9d92bdbbe6, driver 66c652322ffc1fd3). Kept free: g6 per-player float 31 (`DEALT`) and g5
+`COMBAT_GOES_ON` (game float 50). `mtg_eoe` stays on layout v6, its gaps known and scoped to v6 (the memo's 2.8).
+
+**Checked on the final code 20dd7d6f**: the suite (166 binaries, 2,564 passed, 0 failed), the widen (1.67e-6), the
+targeted gate tests (231 encoded, 0 known gaps in v7 but the framed row's 2.9).
+
+**Done since (the orchestrator, 11-13 23:50; 142.11)**: the fuzz, smoke, pytest and the encoding gate. **Was left**: the final round's 20k fuzz (default `FUZZ_SKIP=2122`, `FUZZ_POOL=delver`, `FUZZ_POOL=interactions
+FUZZ_SKIP=2031`), the fork smoke and pytest, then `python tools/gate.py encoding --no-mac` (script
+`E:/mtg-zero-scratch/fable-fix/laneB/gate3.sh`, update `--expect-digest 72dba7025d8585b4` and the checkpoint
+`E:/mtg-zero-scratch/fable-fix/laneB/fork/run/models/iter_0002.pt`), the 142.11 numbers (placeholders FUZZ-14211,
+SMOKE-14211, GATE-14211), and the final report. **Running jobs** (slot throttle, started 22:40 by
+`E:/mtg-zero-scratch/fable-fix/laneB/p5.sh`; progress `E:/mtg-zero-scratch/fable-fix/laneB/p5.progress`): `p5_fuzz.log`,
+`p5_fuzz_delver.log`, `p5_fuzz_inter.log`, `p5_smoke.log` then `p5_pytest.log` (all in `E:/mtg-zero-scratch/fable-fix/laneB/`).
+
+**Found while checking** (not this lane's, reported): default-pool game 2,122 and interactions game 2,031 fail
+`check_information_set` ("same keys, different views": the other player's pending decision is `Priority` in one world
+and `ActivateMana` in the other, the legal actions equal - the decision kind depends on whether the hidden hand card
+in slot 0 has a mana ability) on fix/hidden-refs' head 3ca4fb2d as on this branch: pre-existing, an engine
+hidden-information question for another lane.
 
 ## 143. The Fable review's infrastructure findings, the mtg-zero side: run-home pulls by content and never reads an ssh failure as a stopped run, the gate wants evidence and bounds its steps, one target dir per checkout (branch `fix/infra-tools`, 2026-11-12)
 

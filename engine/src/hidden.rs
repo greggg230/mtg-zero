@@ -425,6 +425,16 @@ impl Game {
                 return true;
             }
         }
+        // ENGINE.md 142.7: the `effects` tokens' references - an effect's object and the object
+        // "for as long as" names, a copy effect's permanent.
+        for e in &self.effects {
+            if matches!(e.on, crate::layers::Affected::Obj(r) if f(r)) || matches!(e.until, crate::layers::Until::WhileOnBattlefield(r) if f(r)) {
+                return true;
+            }
+        }
+        if self.copies.iter().any(|c| f(c.obj)) {
+            return true;
+        }
         for &(o, m) in &self.marks {
             let named = match m {
                 crate::game::Mark::Reanimated(x) | crate::game::Mark::ExiledToPay(x) => Some(x),
@@ -671,11 +681,12 @@ impl Game {
 
     /// The state was changed by hand, outside the rules (tests' perturbations, `public_state`): the sightings no
     /// longer describe what each player saw, so they are dropped and the deals weigh every seen card blind (ENGINE.md
-    /// 140, 140.9). Never called by the engine.
+    /// 140, 140.9). Never called by the engine. The finds (`found`) stay: which cards the other player tells apart
+    /// as a search's finds is public, layout v7's `found` tokens (ENGINE.md 142.12), and a deal without sightings
+    /// reads none of it.
     #[doc(hidden)]
     pub fn lose_sightings(&mut self) {
         self.sightings.clear();
-        self.found.clear();
         self.sightings_lost = true;
     }
 

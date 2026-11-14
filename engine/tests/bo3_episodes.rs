@@ -381,7 +381,8 @@ fn v7_rows_carry_their_tails_across_the_episodes() {
                         s.tail.seg.iter().zip(&s.tail.slot).filter(|(&g, _)| g == seg::MY_REVEALED).map(|(_, &l)| l).collect();
                     if sideboarding_row(s) {
                         assert!(k > 0 || post_board, "{name} match {}: a sideboarding row in game 1", r.gid);
-                        assert!(s.tail.seg.iter().all(|&g| g == seg::MY_REVEALED), "{name} match {}: a sideboarding row's tails", r.gid);
+                        // (the earlier reveals, the frame's and, since ENGINE.md 142.8, the other player's)
+                        assert!(s.tail.seg.iter().all(|&g| g == seg::MY_REVEALED || g == seg::OPP_REVEALED), "{name} match {}: a sideboarding row's tails", r.gid);
                         assert!(s.ov.is_empty(), "{name} match {}: a sideboarding row's overrides", r.gid);
                         sb_rows += 1;
                     } else {
