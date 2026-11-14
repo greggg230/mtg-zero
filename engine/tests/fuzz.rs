@@ -3538,8 +3538,9 @@ static PK_DEALT_KEYS: AtomicU64 = AtomicU64::new(0);
 /// design: another player's look at a card at random of the viewer's own hand (`Ext::LookAtRandomHandCard`, Urza's
 /// Bauble: its owner sees which card was seen), recognised as a card of that identity in the viewer's hand that the
 /// looker knows after the step. A dealt seat's deal (`KEY_DEALT`, ENGINE.md 154.2: its 60's counts, the dealt seat's
-/// private chance) carries `HIDDEN` for every other observer, with no exception. Returns how many keys of the other
-/// player it checked.
+/// private chance) carries `HIDDEN` for every other observer, with no exception. A told-apart card's key (`KEY_TOLD`,
+/// ENGINE.md 156: its card index, which every player sees) is public: not a private key, not checked here. Returns how
+/// many keys of the other player it checked.
 fn check_private_keys_masked(keys: &[u64], viewer: u8, after: &Game, what: &dyn Fn() -> String) -> u64 {
     use engine::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_DEALT, KEY_DRAW, KEY_LOOK};
     let mut n = 0;
