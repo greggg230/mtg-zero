@@ -2794,6 +2794,24 @@ fn activate_mana_end_is_keyed_default_seed_2122() {
     assert!(!p.actions.is_empty());
 }
 
+/// ENGINE.md 140.10: the hidden-decklist games whose checks compared the deck's objects alone (a companion put into
+/// the hand and shuffled away traded identities with a deck card in a world: "the viewer's own cards", "the match's
+/// deck of the opponent", "the sampled deck lacks a shown ..."), replayed with every check of `play_hidden`: seed 331
+/// (this branch's worlds), 2679, 3191, 3279, 3671, 5095, 6247, 6375, 6419, 7943 and 9671 (the rule-invariant
+/// campaign's on 267ae603). The default pool only (the seeds are its games).
+#[test]
+fn hidden_decklist_worlds_keep_the_deck_whatever_object_holds_the_companion() {
+    if pool_mode() != PoolMode::Default || sealed_mode() {
+        return;
+    }
+    for seed in [331u64, 2679, 3191, 3279, 3671, 5095, 6247, 6375, 6419, 7943, 9671] {
+        std::panic::catch_unwind(|| {
+            play_hidden(seed);
+        })
+        .unwrap_or_else(|e| panic!("hidden-decklist seed {seed} failed (rerun: FUZZ_HIDDEN_DECKS=1 FUZZ_FIRST={seed} FUZZ_GAMES=1): {e:?}"));
+    }
+}
+
 #[test]
 fn fuzz_random_games() {
     let n: u64 = std::env::var("FUZZ_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
@@ -4261,14 +4279,18 @@ fn az_legal(a: &engine::az::MtgAz) -> Vec<u16> {
     l
 }
 
-/// Player `p`'s starting deck's cards (sorted card definitions; the game's objects are the two
-/// decks first, P0's then P1's).
+/// Player `p`'s starting deck's cards (sorted card definitions): their game's cards (`sample::game_cards`: the
+/// deck's objects, the two decks first, P0's then P1's, and a revealed companion's) less one copy of the revealed
+/// companion. (A companion put into the hand and shuffled away is one of its owner's hidden cards: a deal - the
+/// owner's own `determinize`, the other player's redeal of the extras with the deck - may give its identity to a
+/// deck object and a deck card's to the companion's object: which of the hidden cards it is, is hidden (fixing it to
+/// its object would show where it lies); the deck is the multiset either way. ENGINE.md 140.10: comparing the deck's objects alone failed there.)
 fn hd_deck(a: &engine::az::MtgAz, p: u8) -> Vec<u16> {
-    let n0: usize = a.m.decks[0].iter().map(|&c| c as usize).sum();
-    let n1: usize = a.m.decks[1].iter().map(|&c| c as usize).sum();
-    let r = if p == 0 { 0..n0 } else { n0..n0 + n1 };
-    let mut v: Vec<u16> = r.map(|i| engine::az::sample::card_of(&a.g, engine::CardIdx::new(i as u32))).collect();
-    v.sort_unstable();
+    let mut v = engine::az::sample::game_cards(a, p);
+    if let Some(c) = a.g.player(p).companion_def {
+        let i = v.binary_search(&c).unwrap_or_else(|_| panic!("P{p}'s companion is not among their game's cards"));
+        v.remove(i);
+    }
     v
 }
 
@@ -4411,6 +4433,7 @@ fn check_determinize_hidden(a: &engine::az::MtgAz, seed: u64, rng: &mut Rng) {
     for viewer in [mover, 1 - mover] {
         let o = 1 - viewer;
         let shown = hd_shown(a, viewer);
+        let (real, mine) = (hd_deck(a, o), hd_deck(a, viewer));
         let mut d = a.clone();
         let s = rng.next_u64();
         // (FUZZ_DECK_TILT: the deck-tilted deal, ENGINE.md 106; the prediction from its own generator)
@@ -4437,8 +4460,7 @@ fn check_determinize_hidden(a: &engine::az::MtgAz, seed: u64, rng: &mut Rng) {
         }
         let what = || format!("seed {seed}: a hidden-decklist world for P{viewer} (mover P{mover}){}", if tilted.is_some() { ", deck-tilted" } else { "" });
         if let Some((decks, td)) = &cached {
-            // (The dealt deck: the match's record of it; its cards in the game are checked below.)
-            let world = d.m.deck(o);
+            let world = hd_deck(&d, o);
             let q: f64 = decks.iter().zip(&td.probs).filter(|(x, _)| x.deck == world).map(|(_, q)| q).sum();
             assert!(decks.iter().any(|x| x.deck == world), "{}: the world's deck is not one of the K cached decks", what());
             DT_WORLDS.fetch_add(1, Ordering::Relaxed);
@@ -4477,23 +4499,11 @@ fn check_determinize_hidden(a: &engine::az::MtgAz, seed: u64, rng: &mut Rng) {
         }
         d.g.check_invariants().unwrap_or_else(|e| panic!("{}: {e}", what()));
         d.g.check_knowledge().unwrap_or_else(|e| panic!("{}: {e}", what()));
-        // The opponent's cards in the world: their deck's and a revealed companion's, wherever they
-        // are (`sample::game_cards`). A card the viewer lost track of (a companion put into the hand
-        // and shuffled away: a non-deck card among the slots it doesn't know) may be dealt to any of
-        // those slots, and a deck card to the companion's (ENGINE.md 152.5), so the world's deck is
-        // its cards less the companion's identity, not the cards in the deck's own slots.
-        let world = d.m.deck(o);
-        let with_companion = |m: &engine::az::MtgAz, mut v: Vec<u16>| {
-            if let Some(c) = m.g.player(o).companion_def {
-                v.push(m.g.db().def(c).card_def(c));
-                v.sort_unstable();
-            }
-            v
-        };
-        let world_cards = engine::az::sample::game_cards(&d, o);
-        assert_eq!(world_cards.len(), engine::az::sample::game_cards(a, o).len(), "{}: the deck's size", what());
-        assert_eq!(with_companion(&d, world.clone()), world_cards, "{}: the match's deck of the opponent (and companion) is the world's cards", what());
-        let mut left = world_cards.clone();
+        // (The deck as dealt, whichever object holds a shuffled-away companion: `hd_deck`, ENGINE.md 140.10 - the
+        // one form of farm-fuzz's 152.5 fix and A1's, A1's kept at the integration, 157.)
+        let world = hd_deck(&d, o);
+        assert_eq!(world.len(), real.len(), "{}: the deck's size", what());
+        let mut left = world.clone();
         for x in &shown {
             match left.binary_search(x) {
                 Ok(i) => {
@@ -4502,14 +4512,13 @@ fn check_determinize_hidden(a: &engine::az::MtgAz, seed: u64, rng: &mut Rng) {
                 Err(_) => panic!("{}: the sampled deck lacks a shown {}", what(), a.g.db().def(*x).name),
             }
         }
-        // (The viewer's own cards likewise: its companion shuffled into its library is one of its
-        // own unknown library slots, which its worlds deal among themselves.)
-        assert_eq!(engine::az::sample::game_cards(&d, viewer), engine::az::sample::game_cards(a, viewer), "{}: the viewer's own cards", what());
+        assert_eq!(d.m.deck(o), world, "{}: the match's deck of the opponent", what());
+        assert_eq!(hd_deck(&d, viewer), mine, "{}: the viewer's own cards", what());
         for v in [0u8, 1] {
             b1 = az_row_checked(&d, v as usize, &what);
         }
         HD_WORLDS.fetch_add(1, Ordering::Relaxed);
-        HD_OTHER_DECK.fetch_add((world != a.m.deck(o)) as u64, Ordering::Relaxed);
+        HD_OTHER_DECK.fetch_add((world != real) as u64, Ordering::Relaxed);
         check_options_complete(&d.g, seed, &what());
         if viewer == mover {
             check_hidden_information_set(a, viewer, seed, rng);

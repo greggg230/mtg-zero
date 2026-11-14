@@ -148,7 +148,7 @@ fn a_dealt_60_is_the_restricted_prior_times_the_seen_cards_likelihood_exactly() 
             p.iter_mut().for_each(|x| *x /= z);
             let label = format!("dealt [{lo}, {hi}], seen {shown:?}");
             // a dealt 60's request: untilted, no face-down pick (MtgAz::sample_hidden_deck, ENGINE.md 154.2)
-            let want = DeckWant { db, n: 10, shown, companion: None, tilt: None, pick: None };
+            let want = DeckWant { db, n: 10, shown, companion: None, tilt: None, pick: None, seen: None };
             let mut rng = Rng::new(0xDEA1 ^ (lo as u64) << 8 ^ shown.len() as u64);
             let mut h1 = vec![0.0f64; decks.len()];
             for _ in 0..n {
@@ -173,7 +173,7 @@ fn a_dealt_60_is_the_restricted_prior_times_the_seen_cards_likelihood_exactly() 
             }
             // the truth by looking: the dealt prior's decks with nothing shown, shuffled, kept when their first cards
             // are exactly R - the exact posterior is the posterior of the sightings
-            let plain = DeckWant { db, n: 10, shown: &[], companion: None, tilt: None, pick: None };
+            let plain = DeckWant { db, n: 10, shown: &[], companion: None, tilt: None, pick: None, seen: None };
             let k = shown.len();
             let mut hist = vec![0.0f64; decks.len()];
             let mut kept = 0usize;
@@ -294,7 +294,7 @@ fn the_other_players_worlds_deal_a_dealt_60_by_its_untilted_restricted_prior() {
     let mut main_s = main.clone();
     main_s.sort_unstable();
     let prior = ConstructedPrior::dealt(&main, &side, 1, 8);
-    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None };
+    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None, seen: None };
     let fill = prior.expected_fill(&plain);
     let heavy = *side.iter().find(|&&x| !main.contains(&x)).expect("a sideboard card not in the main");
     let light = main[0];
@@ -365,7 +365,7 @@ fn the_other_players_worlds_deal_a_dealt_60_by_its_untilted_restricted_prior() {
         assert!(x2 < 7.0 + 6.0 * 14f64.sqrt(), "{}: the swap counts are not uniform over 1..=8: {h:?}", names[mode]);
     }
     // the test's power: the reader's weights on the prior's own draws (what a tilted deal would give)
-    let tw = DeckWant { db, n: 60, shown: &[], companion: None, tilt: Some(&w), pick: None };
+    let tw = DeckWant { db, n: 60, shown: &[], companion: None, tilt: Some(&w), pick: None, seen: None };
     let mut rng = Rng::new(0x71);
     let tilted: Vec<f64> = (0..total).map(|_| count(&prior.sample(&tw, &mut rng).deck, heavy) as f64).collect();
     let m = tilted.iter().sum::<f64>() / total as f64;
@@ -541,7 +541,7 @@ fn a_dealt_seats_game_3_60_is_dealt_from_game_3s_cards_only() {
     let mut main_s = main.clone();
     main_s.sort_unstable();
     let prior = ConstructedPrior::dealt(&main, &side, 1, 8);
-    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None };
+    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None, seen: None };
     let fill = prior.expected_fill(&plain);
     let by = prior.decks_by_swaps().to_vec();
     let mut defs: Vec<u16> = main.iter().chain(&side).copied().collect();

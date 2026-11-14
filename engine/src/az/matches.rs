@@ -1038,7 +1038,7 @@ impl super::MtgAz {
         let game = self.m.game_no as u64 + 1;
         let mut r = Rng::new(crate::rng::split64(self.m.dealt_seed ^ game));
         let n = self.m.pools[d as usize].min_deck;
-        let want = DeckWant { db: self.g.db(), n, shown: &[], companion: None, tilt: None, pick: None };
+        let want = DeckWant { db: self.g.db(), n, shown: &[], companion: None, tilt: None, pick: None, seen: None };
         let dealt = Dealt::new(&*prior, &want, prior.sample(&want, &mut r));
         assert_eq!(dealt.pool.list, self.m.pools[d as usize].list, "P{d}'s dealt 60 is not of its public 75");
         if let Some(c) = chance {

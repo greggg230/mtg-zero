@@ -170,7 +170,7 @@ fn holds(deck: &[u16], cards: &[u16]) -> bool {
 fn the_deal(seed: u64, game: u8, lo: usize, hi: usize) -> Vec<u16> {
     let (main, side) = delver_ids();
     let prior = ConstructedPrior::dealt(&main, &side, lo, hi);
-    let want = DeckWant { db: db(), n: 60, shown: &[], companion: None, tilt: None, pick: None };
+    let want = DeckWant { db: db(), n: 60, shown: &[], companion: None, tilt: None, pick: None, seen: None };
     prior.sample(&want, &mut Rng::new(split64(dealt_deal_seed(seed) ^ game as u64))).deck
 }
 
@@ -242,7 +242,7 @@ fn the_dealt_prior_is_the_constructed_prior_restricted_to_the_swap_range() {
         let want = if (lo..=hi).contains(&s) { full.decks_by_swaps()[s] } else { 0.0 };
         assert_eq!(prior.decks_by_swaps()[s], want, "swaps {s}");
     }
-    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None };
+    let plain = DeckWant { db, n: 60, shown: &[], companion: None, tilt: None, pick: None, seen: None };
     let n = scale(4000) as usize;
     let mut hist = vec![0usize; side.len() + 1];
     let mut mean = vec![0.0f64; db.len()];
@@ -288,7 +288,7 @@ fn the_dealt_prior_is_the_constructed_prior_restricted_to_the_swap_range() {
     // two Pyroblasts and a Daze shown are two swaps in at least
     let id = |s: &str| db.expect_id(s).unwrap();
     let r = sorted(vec![id("Pyroblast"), id("Pyroblast"), id("Daze")]);
-    let want = DeckWant { db, n: 60, shown: &r, companion: None, tilt: None, pick: None };
+    let want = DeckWant { db, n: 60, shown: &r, companion: None, tilt: None, pick: None, seen: None };
     let mut hist2 = vec![0usize; side.len() + 1];
     for _ in 0..600 {
         let s = prior.sample(&want, &mut rng);

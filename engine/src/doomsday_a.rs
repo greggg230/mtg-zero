@@ -267,6 +267,13 @@ impl Game {
         for &c in &pile {
             self.learn(p, c);
         }
+        // (The library's finds: the other player tells the pile's cards from the rest of the library, so a card it
+        // sees there that it did not know is a find, ENGINE.md 140.9.)
+        for &c in &pile {
+            if lib_found.contains(&c) {
+                self.found_by_search(c);
+            }
+        }
         self.scramble(p, &pile, false, false);
         let found: Vec<DefId> = pile.iter().map(|&c| self.objs[c.i()].def).collect();
         self.note(|_| format!("P{p} finds {} card(s) and exiles the rest", found.len()));
