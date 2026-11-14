@@ -3185,7 +3185,14 @@ fn play_match_spec(seed: u64, sp: &engine::az::MtgSpec, checks: bool, stats: &mu
     // draw, its loser sideboarding first.)
     if sp.start_game == 2 {
         assert!(g.m.post_board && g.m.game_no == 1 && matches!(g.m.results[0], 1 | 2), "match {seed}: a post-sideboard start");
-        assert_eq!(g.sideboarding().map(|s| s.decider()), Some(2 - g.m.results[0]), "match {seed}: game 1's loser sideboards first");
+        // (a dealt loser, ENGINE.md 154, is dealt at once: its 60 done, the other seat deciding)
+        let loser = 2 - g.m.results[0];
+        assert_eq!(g.sideboarding().map(|s| s.order[0]), Some(loser), "match {seed}: game 1's loser sideboards first");
+        if g.m.dealt == Some(loser) {
+            assert!(g.sideboarding().is_some_and(|s| s.done[loser as usize].is_some() && s.decider() == 1 - loser), "match {seed}: a dealt loser is dealt first");
+        } else {
+            assert_eq!(g.sideboarding().map(|s| s.decider()), Some(loser), "match {seed}: game 1's loser decides first");
+        }
     }
     let mut keeper_decisions = 0u32;
     let mut rng = Rng::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 5);
