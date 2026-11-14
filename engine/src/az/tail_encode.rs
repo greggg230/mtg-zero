@@ -713,7 +713,9 @@ impl<'g> Cx<'g> {
         }
     }
 
-    /// The identity the viewer sees of card `c` where it is now, if any.
+    /// The identity the viewer sees of card `c` where it is now, if any: the
+    /// zone readers' (a card of the list, an exile offer, a pick). A reference
+    /// reads [`ref_def`](Self::ref_def).
     pub fn seen_def(&self, c: CardIdx) -> Option<DefId> {
         let g = self.g;
         match g.objs[c.i()].zone {
@@ -723,8 +725,48 @@ impl<'g> Cx<'g> {
         }
     }
 
-    /// An object reference (`rf::*`).
+    /// The identity the viewer sees of the object reference `r` names
+    /// (ENGINE.md 156): every segment that writes a reference's identity or
+    /// card code reads it here (`write_ref` does), so the row is a function
+    /// of what the viewer knows.
+    ///
+    /// * **A live reference** (the same object, CR 400.7): as
+    ///   [`seen_def`](Self::seen_def) sees the card where it is. A card in
+    ///   another player's hand must be one a reference of the public state
+    ///   tells apart (`Game::told_apart`, which lists the holders in
+    ///   `Game::for_each_public_ref`): its knowledge is then its own, the
+    ///   same in every world of the viewer's (a hand's twins are otherwise
+    ///   interchangeable: `canon_hand_knowledge` moves their knowledge).
+    ///   Refused loudly otherwise: a new holder of references must be listed
+    ///   there.
+    /// * **A stale reference** (the object is gone): its last known identity
+    ///   (`Game::lki_identity`), recorded as it left its zone, where the
+    ///   viewer knew it then. Never the card's identity now: that is a new
+    ///   object, which may have joined a hand's interchangeable twins or a
+    ///   library dealt again in each world.
+    pub fn ref_def(&self, r: ObjRef) -> Option<DefId> {
+        let g = self.g;
+        if !g.live(r) {
+            return g.lki_identity(self.knower, r);
+        }
+        let o = &g.objs[r.idx.i()];
+        assert!(
+            !(o.zone == Zone::Hand && o.owner != self.knower && g.decider_of(o.owner) != self.knower) || g.told_apart(r.idx),
+            "a reference to a card in P{}'s hand that no reference of the public state tells apart (ENGINE.md 156: list its holder in Game::for_each_public_ref)",
+            o.owner
+        );
+        self.seen_def(r.idx)
+    }
+
+    /// An object reference (`rf::*`), its identity [`ref_def`](Self::ref_def)'s.
     pub fn write_ref(&self, out: &mut [f32], r: ObjRef) {
+        let d = self.ref_def(r);
+        self.write_ref_as(out, r, d);
+    }
+
+    /// An object reference (`rf::*`) with identity `d` (`write_ref`; a pick in
+    /// progress whose card is hidden from the viewer: none).
+    fn write_ref_as(&self, out: &mut [f32], r: ObjRef, d: Option<DefId>) {
         let g = self.g;
         let c = r.idx;
         let o = &g.objs[c.i()];
@@ -754,7 +796,7 @@ impl<'g> Cx<'g> {
             out[side_of(o.owner)] = 1.0;
             out[rf::STALE_KEY] = (self.stale_key(r) + 1) as f32 / 32.0;
         }
-        if let Some(d) = self.seen_def(c) {
+        if let Some(d) = d {
             digits(&mut out[rf::DIGITS..rf::DIGITS + 32], self.ids, d);
         }
     }
@@ -1331,7 +1373,7 @@ fn write_links(cx: &Cx, list: &[Option<CardIdx>], tail: &mut TailBuf) {
     });
     for l in exiled {
         let x = link_token(tail, &mut k, lk::K_EXILED_WITH);
-        if let Some(d) = cx.seen_def(l.card.idx) {
+        if let Some(d) = cx.ref_def(l.card) {
             code(&mut x[..CODE], g.db, ids, d);
         }
         let st = &mut x[CODE..];
@@ -1363,7 +1405,7 @@ fn write_links(cx: &Cx, list: &[Option<CardIdx>], tail: &mut TailBuf) {
         match (def, b) {
             (Some(d), _) => code(&mut x[..CODE], g.db, ids, d),
             (None, Some(r)) => {
-                if let Some(d) = cx.seen_def(r.idx) {
+                if let Some(d) = cx.ref_def(r) {
                     code(&mut x[..CODE], g.db, ids, d);
                 }
             }
@@ -1392,22 +1434,37 @@ fn write_links(cx: &Cx, list: &[Option<CardIdx>], tail: &mut TailBuf) {
         }
     }
     // Picks in progress the other blocks don't hold: not a permanent, not in the list block, not
-    // in the frame player's hand; hidden from the knower: nothing (its own picks are seen).
+    // in the frame player's hand (ENGINE.md 125, 156).
+    // * The other player's pick of a card of its own hand: a token, with no identity, whatever the
+    //   knower knows of that hand. That player names a hand slot, whose card depends on the hand's
+    //   hidden cards (ENGINE.md 11, 128.2's fifth way: a cost's picks move, keyed, when paid), and
+    //   Show and Tell's pick stays face down (CR 101.4a, its ruling: it is clear which card was
+    //   chosen, not what it is; 101.4b; the knower's worlds draw it again, `hidden_pick_ok`).
+    //   That a card was picked, and its rank, is public.
+    // * Any other pick (the knower's own - its choices are seen -, a card in a public zone, a
+    //   library card by its place, a face-down card by its object): its identity where the
+    //   knower knows it; a card hidden from the knower: no token (the same in every world: that
+    //   knowledge is the card's own).
     for (rank, &(c, by_me)) in cx.picks.objs.iter().enumerate() {
         let zone = g.objs[c.i()].zone;
         let in_list = list.contains(&Some(c));
         if zone == Zone::Battlefield || in_list || (zone == Zone::Hand && g.objs[c.i()].owner == cx.me) {
             continue;
         }
-        if g.hidden_obj(c) && !g.knows(cx.knower, c) {
+        let others_hand_pick = zone == Zone::Hand && !by_me && cx.knower == cx.me;
+        let d = if others_hand_pick {
+            None
+        } else if g.hidden_obj(c) && !g.knows(cx.knower, c) {
             continue;
-        }
+        } else {
+            cx.seen_def(c)
+        };
         let x = link_token(tail, &mut k, lk::K_PICKED);
-        if let Some(d) = cx.seen_def(c) {
+        if let Some(d) = d {
             code(&mut x[..CODE], g.db, ids, d);
         }
         let st = &mut x[CODE..];
-        cx.write_ref(&mut st[lk::B..lk::B + rf::W], g.obj_ref(c));
+        cx.write_ref_as(&mut st[lk::B..lk::B + rf::W], g.obj_ref(c), d);
         st[lk::RANK] = (rank + 1) as f32 / 8.0;
         st[if by_me { lk::BY_ME } else { lk::BY_OPP }] = 1.0;
     }
@@ -1559,7 +1616,7 @@ fn write_stack_relations(cx: &Cx, tail: &mut TailBuf) {
                     x[CODE + if p == cx.me { sr::PLAYER_ME } else { sr::PLAYER_OPP }] = 1.0;
                 }
                 Target::Obj(r) => {
-                    if let Some(d) = cx.seen_def(r.idx) {
+                    if let Some(d) = cx.ref_def(r) {
                         code(&mut x[..CODE], g.db, cx.ids, d);
                     }
                     cx.write_ref(&mut x[CODE + sr::OBJ..CODE + sr::OBJ + rf::W], r);
@@ -1577,7 +1634,7 @@ fn write_stack_relations(cx: &Cx, tail: &mut TailBuf) {
                 continue;
             }
             let x = sr_token(tail, &mut k, sr::K_NOTED, pos, j);
-            if let Some(d) = cx.seen_def(r.idx) {
+            if let Some(d) = cx.ref_def(r) {
                 code(&mut x[..CODE], g.db, cx.ids, d);
             }
             cx.write_ref(&mut x[CODE + sr::OBJ..CODE + sr::OBJ + rf::W], r);
@@ -1588,7 +1645,7 @@ fn write_stack_relations(cx: &Cx, tail: &mut TailBuf) {
         }
         if let Some(Some(pw)) = item.attack_as {
             let x = sr_token(tail, &mut k, sr::K_ATTACK_AS, pos, 0);
-            if let Some(d) = cx.seen_def(pw.idx) {
+            if let Some(d) = cx.ref_def(pw) {
                 code(&mut x[..CODE], g.db, cx.ids, d);
             }
             cx.write_ref(&mut x[CODE + sr::OBJ..CODE + sr::OBJ + rf::W], pw);

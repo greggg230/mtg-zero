@@ -51,7 +51,9 @@ Python 3.13 (not 3.14) with `torch numpy psutil flask pytest`. Use Git Bash on W
   behaviour (a refactor, a speed-up) must leave it unchanged. A change meant to alter play
   re-records it on purpose (`DIGEST_WRITE=1`), and the commit message and the ENGINE.md section
   state the old -> new hash. `DIGEST_ENCODING=0` leaves the encodings out, for encoding-only
-  changes.
+  changes. Those games are the cube's best-of-one: `--test digest_formats` (same flags) hashes
+  constructed best-of-three, the legacy decks, EoE and zero-core's driver against
+  `engine/tests/data/digests_{constructed,eoe,driver}.txt`, with the same rules (`docs/ENGINE.md` 148).
 * **The encoding (what the network sees).** A layout change (feature counts, token objects,
   action slots) makes existing checkpoints incompatible. zero-core's encoding guard refuses to
   resume them (exit 78). New layouts are additive versions (v4 -> v5 only added things, so a

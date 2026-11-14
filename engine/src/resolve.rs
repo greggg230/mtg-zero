@@ -730,10 +730,7 @@ impl Game {
                         // The hand's canonical order makes the pick independent
                         // of insertion order; the reveal key names the card.
                         let sorted = self.hand_sorted(p);
-                        let c = match self.forced_hand_pick(p, &sorted) {
-                            Some(c) => c,
-                            None => sorted[self.rng.below(sorted.len() as u32) as usize],
-                        };
+                        let c = self.random_hand_card(p, &sorted);
                         self.discard(c);
                     }
                 }
