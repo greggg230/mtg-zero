@@ -145,10 +145,11 @@ def checkout(k, sha):
     return path, full
 
 
-def acquire(sha, label, wait, slots, holder=None):
+def acquire(sha, label, wait, slots, holder=None, only=None):
+    """A free slot (`only`: that slot alone) checked out at `sha`, its lease held -> its description."""
     t0 = time.time()
     while True:
-        for k in range(1, slots + 1):
+        for k in ([only] if only else range(1, slots + 1)):
             if try_lease(k, label, sha, holder):
                 try:
                     path, full = checkout(k, sha)
@@ -162,7 +163,9 @@ def acquire(sha, label, wait, slots, holder=None):
 
 
 def slot_k(name):
-    name = os.path.basename(os.path.normpath(name))
+    name = os.path.basename(os.path.normpath(str(name)))
+    if name.isdigit():
+        return int(name)
     if not name.startswith('warm-') or not name[5:].isdigit():
         raise SystemExit(f'not a warm slot: {name}')
     return int(name[5:])
@@ -177,6 +180,7 @@ def main(argv=None):
         s.add_argument('--sha', required=True)
         s.add_argument('--for', dest='label', default='')
         s.add_argument('--wait', type=float, default=3600.0)
+        s.add_argument('--slot', default=None, help='this slot only (warm-K or K), e.g. for a cold-vs-warm measurement')
         if name == 'run':
             s.add_argument('command', nargs=argparse.REMAINDER)
     s = sub.add_parser('release')
@@ -216,12 +220,12 @@ def main(argv=None):
         # (the lease names the caller's parent - the shell that will use the worktree and release it - not this
         # short-lived process)
         holder = {'pid': os.getppid(), 'started': proc_started(os.getppid())}
-        print(json.dumps(acquire(a.sha, a.label, a.wait, slots, holder)))
+        print(json.dumps(acquire(a.sha, a.label, a.wait, slots, holder, a.slot and slot_k(a.slot))))
         return 0
     cmd = a.command[1:] if a.command[:1] == ['--'] else a.command
     if not cmd:
         raise SystemExit('run: no command (after --)')
-    lease = acquire(a.sha, a.label or ' '.join(cmd)[:80], a.wait, slots)
+    lease = acquire(a.sha, a.label or ' '.join(cmd)[:80], a.wait, slots, only=a.slot and slot_k(a.slot))
     print(f'[warm_pool] {lease["slot"]} at {lease["sha"][:12]}: {lease["path"]} (target {lease["target_dir"]})', flush=True)
     try:
         env = dict(os.environ, CARGO_TARGET_DIR=lease['target_dir'])
