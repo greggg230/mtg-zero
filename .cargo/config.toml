@@ -1,0 +1,4 @@
+# The bundled lld linker on Windows (docs/ENGINE.md 165): links (each test binary, the Python module, the worker)
+# several times faster than MSVC link.exe; the same objects, so the same programs. Other targets are untouched.
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"

@@ -12,6 +12,7 @@ export CARGO_TARGET_DIR="$PWD/target"      # one target dir per checkout, never 
 export RUSTFLAGS="-C link-arg=-undefined -C link-arg=dynamic_lookup"   # macOS only (no build.rs adds them)
 bash tools/build_py.sh                     # rebuild mtgz/_engine after ANY Rust change: Python uses the copied .pyd/.so
 cargo test --release -p engine --test az   # quick engine check (the full suite: drop --test az)
+cargo test --release -p engine --test rules_suite rules_combat::   # one test file of a suite (docs/ENGINE.md 165)
 python -m pytest tests -q                  # ~2 min
 python -m mtgz.az.run --run runs/smoke1 --preset mtg-smoke     # ~45 s end-to-end loop
 ```
@@ -44,8 +45,14 @@ Python 3.13 (not 3.14) with `torch numpy psutil flask pytest`. Use Git Bash on W
   behaviour that names the CR rule it checks (`fn cr_704_5j_the_legend_rule_for_planeswalkers`
   style). Check the card against its Oracle text. For official rulings, see
   `docs/rulings.md` (`// ruling: <hash8>` in the test). Add newly supported cards to
-  `engine/tests/support.rs::SUPPORTED`. Before merging, run
-  `FUZZ_GAMES=20000 cargo test --release -p engine --test fuzz`.
+  `engine/tests/support.rs::SUPPORTED`. Before merging, the `suite` gate runs the full engine suite and a sharded
+  2,000-game fuzz per pool (`python tools/fuzz_shards.py --pool <pool> --games 2000`, hidden decklists included); the
+  20k depth runs continuously on the farm, not in the gate (the user's decision, `docs/ENGINE.md` 165).
+* **Test files.** `engine/tests/` builds into a few binaries (`docs/ENGINE.md` 165): the named ones (`az`, `digest`,
+  `digest_formats`, `dealt_decks`, `fuzz`, `draft`, `hidden`, `limits`, `support` and the benchmarks) and four suites
+  whose modules are the other files (`cards_suite`, `rules_suite`, `rulings_suite`, `misc_suite`). A new test file is a
+  `#[path = "x.rs"] mod x;` line in its suite (or a `[[test]]` in `engine/Cargo.toml` when it needs its own process:
+  a global allocator, process-wide state). Run one file with its module as the filter: `--test cards_suite cards_m7a::`.
 * **Behaviour digests.** `cargo test --release -p engine --test digest -- --ignored --nocapture`
   hashes 2,500 fixed games against `engine/tests/data/digests.txt`. A change meant to keep
   behaviour (a refactor, a speed-up) must leave it unchanged. A change meant to alter play
@@ -82,7 +89,7 @@ the agent tested) are required; a step you skip on purpose (`--allow-skip <step>
 | docs, or tools not on the run path | `docs` |
 | Python run loop, settings, presets | `python` |
 | encoding only, layout unchanged | `encoding` |
-| engine rules or cards | `suite` on your branch's commit (the full engine suite + the 20k fuzz above; its report `gates/<sha12>-suite.json` is the evidence), then `engine --tested-sha <that sha>` |
+| engine rules or cards | `suite` on your branch's commit (the full engine suite + the sharded 2k fuzz per pool above; its report `gates/<sha12>-suite.json` is the evidence), then `engine --tested-sha <that sha>` |
 | zero-core search or behaviour | `search-core` |
 | an opt-in zero-core feature, defaults byte-identical | `optin-core` |
 | moving a run onto an already-verified commit | `repin` |
@@ -96,6 +103,12 @@ skipped. A change that breaks it is fixed in the worker or the engine, never by 
 behaviour change moves the worker with it (the worker is this repo's `worker/` crate on the same engine). Before a farm
 run attaches the farm or moves to a new commit, `tools/farm_gates.py` runs the full gates 2 and 3 on that run's real
 config and checkpoint (`docs/ENGINE.md` 114.8, 155).
+
+**Gate in a warm worktree** (`docs/ENGINE.md` 165), not a new one: `python tools/warm_pool.py run --sha <sha> -- python
+tools/gate.py <tier>` checks the commit out into one of a few fixed worktrees with their own fixed target dirs, so cargo
+rebuilds only what changed, and the Python module and the release worker come from the artifact cache
+(`tools/zcache.py`) when the commit changed no Rust input. gate.py runs a tier's independent steps at once, each heavy
+one through the machine's throttle (`tools/slotd.sh`): run gate.py itself unthrottled. Never edit in a warm worktree.
 
 Don't re-run a full suite on a sha that already passed it: each tier writes `gates/<sha12>-<tier>.json`
 (`docs/ENGINE.md` 143). The checkout must be exactly its commit: an untracked file under `engine/`,

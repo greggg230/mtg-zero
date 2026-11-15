@@ -42,6 +42,39 @@ pub mod env {
     }
 }
 
+/// A chunk's end-of-run counters by name (docs/ENGINE.md 165): what its checks over the whole chunk read
+/// ([`games::check_games`], [`games::check_matches`], [`games::check_post`]), printed as its `FUZZ_TOTALS` line. A sharded
+/// run sums its shards' ([`Totals::add`]: a `max_` counter takes the max) and checks the total, so a small shard neither
+/// dodges a check that needs 200 games nor passes one alone.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Totals(pub std::collections::BTreeMap<String, u64>);
+
+impl Totals {
+    pub fn set(&mut self, k: &str, v: u64) {
+        self.0.insert(k.to_string(), v);
+    }
+    /// Counter `k` (0 when absent).
+    pub fn get(&self, k: &str) -> u64 {
+        self.0.get(k).copied().unwrap_or(0)
+    }
+    /// `other`'s counters added: summed, a `max_` one the larger.
+    pub fn add(&mut self, other: &Totals) {
+        for (k, &v) in &other.0 {
+            let e = self.0.entry(k.clone()).or_insert(0);
+            *e = if k.starts_with("max_") { (*e).max(v) } else { *e + v };
+        }
+    }
+    /// From a JSON object of non-negative integers.
+    pub fn from_json(v: &serde_json::Value) -> Result<Totals, String> {
+        let m = v.as_object().ok_or("totals: not a JSON object")?;
+        let mut t = Totals::default();
+        for (k, x) in m {
+            t.set(k, x.as_u64().ok_or_else(|| format!("totals: {k} = {x} is not a count"))?);
+        }
+        Ok(t)
+    }
+}
+
 /// One seed's outcome (a game, a match or a draft event that passed every check).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeedOutcome {

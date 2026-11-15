@@ -228,6 +228,17 @@ def PYTEST_FAILED(*ids, passed=301, errors=()):
 
 
 WORKER_BUILT = '   Compiling mtgz_worker v0.1.0\n    Finished `release` profile [optimized] target(s) in 61.20s\n'
+
+
+def FUZZ_SHARDS(pool, games, hidden=False, passed=True, matches_skipped=None):
+    """tools/fuzz_shards.py's last two lines (ENGINE.md 165)."""
+    checked = [f'games over {games}'] + ([] if hidden or matches_skipped else [f'matches over {max(20, games // 20)}'])
+    s = {'pool': pool, 'hidden': hidden, 'first': 0, 'games': games, 'matches': 0 if hidden else max(20, games // 20),
+         'shards': 8, 'passed': passed, 'seconds': 301.0, 'slowest_shard_s': 280.0, 'checked': checked, 'rest_passed': 8,
+         'post': None, 'matches_skipped': matches_skipped, 'logs': 'gates/tmp/fz', 'problems': [] if passed else ['x']}
+    line = (f'fuzz shards: PASSED - {pool}: {games} games, ...; merged checks: {", ".join(checked)}; 8 other fuzz tests'
+            if passed else f'fuzz shards: FAILED - {pool}: games[0,250): exit 101: seed 17 failed (rerun: FUZZ_FIRST=17 ...)')
+    return line + '\n' + json.dumps({'fuzz_shards': s}) + '\n'
 FARM_SUMMARY = {'preset': 'delver-mirror-bo3-dealt', 'games': 6, 'passed': True,
                 'gate2': {'passed': True, 'result': {'games': 6, 'rows': 1210, 'batches_compared': 150, 'identical': True}},
                 'gate3': {'passed': True, 'result': {'games': 6, 'rows': 1190, 'setups': 6, 'identical': True}}}
@@ -257,6 +268,12 @@ class Fake:
             return 'pycompile'
         if 'mac.sh' in cmd:
             return 'mac-eval' if '--eval-checkout' in argv else 'mac'
+        if 'zcache.py' in cmd:                           # (the artifact cache's fetch-or-build: ENGINE.md 165)
+            return 'core-build' if 'core-pyd' in argv else 'worker-build'
+        if 'fuzz_shards.py' in cmd:
+            return 'fuzz-shards'
+        if '--no-run' in argv:
+            return 'test-build'
         if 'build_py.sh' in cmd:
             return 'core-build' if 'third_party' in cmd or self.cwd == self.core else 'build'
         if 'smoke_all.sh' in cmd:
@@ -313,6 +330,10 @@ class Fake:
             return WORKER_BUILT, 0
         if k == 'farm-compat':
             return FARM_COMPAT_OK, 0
+        if k == 'test-build':
+            return '    Finished `release` profile [optimized + debuginfo] target(s) in 1.20s\n', 0
+        if k == 'fuzz-shards':
+            return FUZZ_SHARDS(argv[argv.index('--pool') + 1], int(argv[argv.index('--games') + 1]), '--hidden' in argv), 0
         return {'build': BUILD(G.ROOT), 'core-build': CORE_BUILD(self.core), 'digest0': DIGEST(D_FREE),
                 'digest': DIGEST(D_FULL), 'formats': FORMATS(), 'dealt': DEALT(), 'cargo1': CARGO(34), 'cargo': CARGO(123, 3, 0, 0), 'pytest': PYTEST_OK,
                 'core-pytest': '.' * 60 + '\n308 passed, 3 skipped, 1 warning in 739.67s (0:12:19)\n',
@@ -488,7 +509,7 @@ def test_no_mac_skips_are_named_too(gate, capsys):
     assert rc == 2 and 'gates/276f948e6d31-suite.json' in err.replace('\\', '/') and '--allow-skip suite-evidence' in err
     rc, out, _, _ = gate(*eng, '--allow-skip', 'suite-evidence', capsys=capsys)
     assert rc == 0 and 'mac-recheck (--no-mac: no --tested-sha, so whether the recheck was needed was not decided)' \
-        in final(out) and 'suite-evidence (--allow-skip suite-evidence: the full engine suite and the 20k fuzz of ' \
+        in final(out) and 'suite-evidence (--allow-skip suite-evidence: the full engine suite and the 2k fuzz of ' \
         '276f948e6d31 are asserted, not evidenced)' in final(out)
 
 
@@ -784,15 +805,19 @@ def test_the_core_tiers_build_and_run_the_core_suite_and_name_a_flaky_retry(gate
     rc, out, _, report = gate('optin-core', '--baseline-root', gate.baseline, '--other-games', *gate.other,
                               capsys=capsys)
     kinds = [k for k, _ in gate.fake.calls]
-    assert kinds == ['build', 'worker-build', 'cargo', 'compat', 'formats', 'dealt', 'farm-compat', 'cargo1', 'cargo1',
-                     'build-only', 'core-build', 'core-pytest', 'core-pytest']
+    # the builds in order, then every check at once (ENGINE.md 165); the flaky retry right after its pytest
+    assert kinds[:4] == ['build', 'worker-build', 'core-build', 'test-build']
+    assert sorted(kinds[4:]) == sorted(['cargo', 'compat', 'formats', 'dealt', 'farm-compat', 'cargo1', 'cargo1',
+                                        'build-only', 'core-pytest', 'core-pytest'])
     assert rc == 0 and final(out).startswith('GATE PASSED WITH FLAKY RETRIES optin-core')
     assert report['flaky'] == [f'core-pytest: {REMOTEPLAY}'] and report['baseline']['head'] == 'c' * 40
     gate.fake.core_pytest = []
     rc, out, _, _ = gate('search-core', '--baseline-root', gate.baseline, capsys=capsys)
     assert rc == 0 and final(out).startswith('GATE PASSED search-core')
-    assert [k for k, _ in gate.fake.calls][-12:] == ['build', 'worker-build', 'cargo', 'pytest', 'farm-compat', 'compat',
-                                                     'formats', 'dealt', 'smoke', 'run', 'core-build', 'core-pytest']
+    kinds = [k for k, _ in gate.fake.calls][-13:]
+    assert kinds[:4] == ['build', 'worker-build', 'core-build', 'test-build']
+    assert sorted(kinds[4:]) == sorted(['cargo', 'pytest', 'farm-compat', 'compat', 'formats', 'dealt', 'smoke', 'run',
+                                        'core-pytest'])
 
 
 def test_a_stale_build_fails_the_core_tier_before_the_comparison(gate, capsys):
@@ -800,7 +825,8 @@ def test_a_stale_build_fails_the_core_tier_before_the_comparison(gate, capsys):
     rc, out, _, report = gate('optin-core', '--baseline-root', gate.baseline, '--other-games', *gate.other,
                               capsys=capsys)
     assert rc == 1 and [k for k, _ in gate.fake.calls] == ['build']
-    assert 'build: no "mtgz._engine OK' in final(out) and 'not run: worker-build, core-cargo-test, checkpoint-compat' in final(out)
+    assert 'build: no "mtgz._engine OK' in final(out) and \
+        'not run: worker-build, core-build, test-build, core-cargo-test, checkpoint-compat' in final(out)
 
 
 # ---------------------------------------------------------------------------- dry runs
@@ -925,20 +951,21 @@ def test_head_moving_during_the_gate_fails_it(gate, capsys, monkeypatch):
     assert rc == 1 and f'HEAD moved during the gate: {SHA[:12]} -> dddddddddddd' in final(out)
 
 
-def test_the_suite_tier_runs_the_full_suite_and_the_20k_fuzz(gate, capsys):
-    """I1: the engine tier asserted the full suite and the 20k fuzz through --tested-sha (the agent's word). The
-    suite tier runs them; its report is what the engine tier now checks."""
-    fuzz = (f'running 4 tests\n20000 games: wins [9803, 10075], draws 122, aborted 0, mean turns 31.8\n'
-            'test fuzz_random_games ... ok\n\ntest result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered '
-            'out; finished in 1415.00s\n')
-    gate.fake.set('cargo1', fuzz)
-    rc, out, _, report = gate('suite', '--fuzz-pools', 'default,delver', capsys=capsys)
+def test_the_suite_tier_runs_the_full_suite_and_the_sharded_fuzz(gate, capsys):
+    """I1: the engine tier asserted the full suite and the fuzz through --tested-sha (the agent's word). The suite tier
+    runs them; its report is what the engine tier now checks. ENGINE.md 165 (the user's D1): the test binaries built
+    once, then the suite and a sharded 2,000-game fuzz per pool (tools/fuzz_shards.py) at once."""
+    rc, out, _, report = gate('suite', '--fuzz-pools', 'default,delver,default+hidden', capsys=capsys)
     assert rc == 0 and final(out).startswith('GATE PASSED suite') and report['clean']
     calls = [a for k, a in gate.fake.calls]
-    assert calls[0] == ['cargo', 'test', '--release', '-p', 'engine', '--no-fail-fast']
-    assert calls[1][-3:] == ['fuzz', '--', '--nocapture'] and len(calls) == 3
+    assert calls[0] == ['cargo', 'test', '--release', '-p', 'engine', '--no-run']
+    assert ['cargo', 'test', '--release', '-p', 'engine', '--no-fail-fast'] in calls and len(calls) == 5
+    fz = [a for k, a in gate.fake.calls if k == 'fuzz-shards']
+    assert sorted((a[a.index('--pool') + 1], a[a.index('--games') + 1], '--hidden' in a) for a in fz) == \
+        [('default', '2000', False), ('default', '2000', True), ('delver', '2000', False)]
     steps = {s['id']: s for s in report['steps']}
-    assert steps['fuzz-default']['fuzz_games'] == 20000 and steps['fuzz-delver']['status'] == 'passed'
+    assert steps['fuzz-default']['fuzz_games'] == 2000 and steps['fuzz-delver']['status'] == 'passed'
+    assert steps['fuzz-default-hidden']['status'] == 'passed'
     # its own report is the engine tier's evidence for this commit
     path = os.path.join(str(gate.tmp / 'gates'), f'{SHA[:12]}-suite.json')
     with open(path, 'w', encoding='utf-8') as f:
@@ -948,7 +975,81 @@ def test_the_suite_tier_runs_the_full_suite_and_the_20k_fuzz(gate, capsys):
                            capsys=capsys)
     assert rc == 0 and final(out).startswith('GATE PASSED engine') and rep['clean']
     ev = {s['id']: s for s in rep['steps']}['suite-evidence']
-    assert ev['status'] == 'passed' and '2 fuzz run(s) of 20000 games' in ev['reason'] and os.path.exists(ev['log'])
+    assert ev['status'] == 'passed' and '3 fuzz run(s) of 2000 games' in ev['reason'] and os.path.exists(ev['log'])
+    rc, out, _, _ = gate('suite', '--dry-run', capsys=capsys)
+    assert rc == 0 and '(parallel)' in out and 'fuzz_shards.py' in out
+
+
+def test_the_fuzz_shards_checker_wants_positive_evidence():
+    check = G.make_fuzz_shards_checker(2000, 'default', False)
+    ok, why, extra = check(FUZZ_SHARDS('default', 2000), 0)
+    assert ok and extra['fuzz_games'] == 2000 and extra['fuzz_shards']['shards'] == 8
+    assert 'not 2000 of default' in check(FUZZ_SHARDS('default', 300), 0)[1]
+    assert 'not 2000 of default' in check(FUZZ_SHARDS('delver', 2000), 0)[1]
+    assert 'not 2000 of default' in check(FUZZ_SHARDS('default', 2000, hidden=True), 0)[1]
+    assert 'FAILED' in check(FUZZ_SHARDS('default', 2000, passed=False), 1)[1]
+    assert 'expected exactly 1' in check(FUZZ_SHARDS('default', 2000).splitlines()[0] + '\n', 0)[1]
+    no_matches = FUZZ_SHARDS('default', 2000).replace(', "matches over 100"', '')
+    assert 'covered' in check(no_matches, 0)[1]                      # the matches' merged checks never ran
+    assert G.make_fuzz_shards_checker(2000, 'eoe', False)(FUZZ_SHARDS('eoe', 2000, matches_skipped='games only'), 0)[0]
+    assert G.make_fuzz_shards_checker(2000, 'default', True)(FUZZ_SHARDS('default', 2000, hidden=True), 0)[0]
+    assert 'exit 1' in check(FUZZ_SHARDS('default', 2000), 1)[1]
+
+
+def test_an_old_20k_suite_report_is_still_evidence(gate, capsys):
+    """A suite report of the 20k gate before ENGINE.md 165 has more fuzz games than the gate asks for: it counts."""
+    suite_report(str(gate.tmp / 'gates'), SHA)
+    rc, out, _, rep = gate('engine', '--expect-digest', D_FULL, '--expect-digest0', D_FREE, '--tested-sha', SHA,
+                           capsys=capsys)
+    assert rc == 0 and '1 fuzz run(s) of 20000 games' in {s['id']: s for s in rep['steps']}['suite-evidence']['reason']
+
+
+def test_the_python_tier_shards_pytest_beside_the_smoke(gate, capsys, monkeypatch):
+    """ENGINE.md 165: pytest as --pytest-shards steps over disjoint test files, each its own process and basetemp, every
+    tests/test_*.py in exactly one, run at once with the run-loop smoke after the (cached) builds."""
+    files = G.pytest_files()
+    parts = G.pytest_partition(files, 4, {})
+    assert sorted(f for p in parts for f in p) == files and len(parts) == 4
+    heavy = max(files, key=lambda f: os.path.getsize(os.path.join(ROOT, f)))
+    parts2 = G.pytest_partition(files, 4, {heavy: 10_000.0})
+    assert [heavy] in parts2                                   # its measured weight gets it a shard of its own
+    rc, out, _, _ = gate('python', '--pytest-shards', '3', capsys=capsys)
+    assert rc == 0
+    ctx_ns = types.SimpleNamespace(pytest_shards=3, sha_short=SHA[:12])
+    steps = G.pytest_step(ctx=ctx_ns, group='g')
+    assert len(steps) == 3 and all(s.heavy and s.group == 'g' for s in steps)
+    seen = [a for s in steps for a in s.argv if a.startswith('tests/')]
+    assert sorted(seen) == files
+    assert len({next(a for a in s.argv if a.startswith('--basetemp=')) for s in steps}) == 3
+
+
+def test_a_heavy_step_runs_through_the_throttle(tmp_path):
+    """ENGINE.md 165: with a throttle (tools/slotd.sh), a heavy step's command is run by it - and its output, exit code
+    and checker are the command's; a light step runs as it is."""
+    slot = tmp_path / 'slotd.sh'
+    slot.write_text('echo "[slot] $MTGZ_SLOT_WAIT_MAX"\nexec "$@"\n', encoding='utf-8')
+    ctx = probe_ctx(tmp_path, {})
+    ctx.throttle = str(slot)
+    seen = {}
+    probe = [sys.executable, '-c', 'print("hello")']
+    step = G.Step('probe', probe, heavy=True, checker=lambda out, rc: (seen.setdefault('out', out) is not None, '', {}))
+    assert G.run_step(ctx, step).passed
+    assert '[slot] 60' in seen['out'] and 'hello' in seen['out']
+    seen.clear()
+    assert G.run_step(ctx, G.Step('probe', probe, checker=lambda out, rc: (seen.setdefault('out', out) is not None, '', {}))).passed
+    assert '[slot]' not in seen['out'] and 'hello' in seen['out']
+
+
+def test_the_worker_build_takes_the_cached_worker_by_its_line(tmp_path):
+    exe = str(tmp_path / G.WORKER_EXE)
+    open(exe, 'wb').write(b'w')
+    digest = G.sha256_file(exe)
+    check = G.make_worker_build_checker(exe)
+    hit = f'artifact cache: hit worker 0123456789abcdef -> {exe} (sha256 {digest[:16]}, built from 72e5a0df6485 in x)\n'
+    ok, why, extra = check(hit, 0)
+    assert ok and extra['worker_cache'] == 'hit 0123456789abcdef' and 'artifact cache' in why
+    assert 'but' in check(hit.replace(digest[:16], 'f' * 16), 0)[1]       # the file is not the one the cache placed
+    assert check(WORKER_BUILT, 0)[2]['worker_cache'] == 'built'
 
 
 def test_the_fuzz_checker_wants_the_20k_games():
@@ -1027,7 +1128,9 @@ def test_a_detached_checkout_builds_into_its_own_target_dir(tmp_path):
     subprocess.run(['git', '-C', str(r), 'checkout', '-q', '--detach'], check=True)
     assert target() == 'E:/base/detached-repo'                           # not E:/base/HEAD
     assert target('E:/mine') == 'E:/mine'                                # the caller's own choice stands
-    assert 'target_guard.py' in sh and sh.index('target_guard.py') < sh.index('exec bash "$CORE/tools/build_engine.sh"')
+    assert 'target_guard.py' in sh and sh.index('target_guard.py') < sh.index('bash "$CORE/tools/build_engine.sh"')
+    # (the artifact cache is asked after the guard, and a hit never reaches build_engine.sh: ENGINE.md 165)
+    assert sh.index('target_guard.py') < sh.index('zcache.py" fetch pyd') < sh.index('bash "$CORE/tools/build_engine.sh"')
 
 
 def test_head_is_read_from_the_git_files(tmp_path):
@@ -1091,7 +1194,8 @@ def test_the_docs_tier_builds_no_worker_and_the_python_tier_builds_it_for_pytest
     gate.fake.calls.clear()
     rc, _, _, _ = gate('python', capsys=capsys)
     kinds = [k for k, _ in gate.fake.calls]
-    assert rc == 0 and kinds[:3] == ['build', 'worker-build', 'pytest'] and 'farm-compat' not in kinds
+    # (pytest and the run-loop smoke run at once after the builds: ENGINE.md 165)
+    assert rc == 0 and kinds[:2] == ['build', 'worker-build'] and sorted(kinds[2:]) == ['pytest', 'run']
 
 
 def test_a_worker_that_breaks_farm_compat_fails_the_gate(gate, capsys):
