@@ -35,7 +35,7 @@ ad-hoc shell script. It can never pass a check it did not perform:
   * **Evidence, not assertions** (ENGINE.md 143). The engine tier no longer takes the full engine
     suite and the fuzz on the agent's word (--tested-sha): the `suite` tier runs them on a
     commit and its report gates/<sha12>-suite.json is the evidence the engine tier checks (tier,
-    sha, pin, a clean pass, a fuzz step of at least FUZZ_GAMES games - 2,000 a pool since ENGINE.md 165 -, every log unchanged); without it the engine
+    sha, pin, a clean pass, a fuzz step of at least FUZZ_GAMES games - 2,000 a pool since ENGINE.md 167 -, every log unchanged); without it the engine
     tier refuses unless --allow-skip suite-evidence, named in the final line.
   * **A timeout bounds the step** - the command and every process it started (tools/proctree.py).
   * **The core's own suite** (search-core, optin-core): zero-core's engine module built with its
@@ -587,7 +587,7 @@ CACHE_HIT_RE = re.compile(r'^artifact cache: hit (\S+) ([0-9a-f]{16}) -> (.+?) \
 
 def make_worker_build_checker(exe):
     """The release worker (`tools/zcache.py worker`: fetched from the artifact cache by this commit's Rust input hash,
-    else `cargo build --release -p mtgz_worker` and stored - ENGINE.md 165): cargo's "Finished `release` profile" line or
+    else `cargo build --release -p mtgz_worker` and stored - ENGINE.md 167): cargo's "Finished `release` profile" line or
     the cache's "artifact cache: hit worker <key> -> <exe> (sha256 ...)" line naming `exe` with the sha256 it has, the
     executable at `exe` + exit 0 (its sha256 recorded, and whether it was built or fetched)."""
     def checker(output, rc):
@@ -623,7 +623,7 @@ FUZZ_SHARDS_RE = re.compile(r'^fuzz shards: (PASSED|FAILED) - (.*)$', re.M)
 
 
 def make_fuzz_shards_checker(games, pool, hidden):
-    """tools/fuzz_shards.py's positive evidence (ENGINE.md 165): exactly one "fuzz shards: PASSED - ..." line and its
+    """tools/fuzz_shards.py's positive evidence (ENGINE.md 167): exactly one "fuzz shards: PASSED - ..." line and its
     JSON summary {"fuzz_shards": {"passed": true, ...}} for this pool with exactly `games` games, the merged end-of-run
     checks run ("checked" names the games, and the matches unless the pool plays none), + exit 0."""
     def checker(output, rc):
@@ -757,7 +757,7 @@ class Step:
     verify: object = None                      # callable() -> (passed, reason, extra, log text): a check that runs
                                                # no command (another gate run's report as evidence)
     heavy: bool = False                        # takes a slot of the machine's throttle (tools/slotd.sh) when there is
-                                               # one: the steps of a parallel group queue for slots (ENGINE.md 165)
+                                               # one: the steps of a parallel group queue for slots (ENGINE.md 167)
 
     def __post_init__(self):
         self.id = self.id or slug(self.name)
@@ -882,7 +882,7 @@ def run_step(ctx, step):
     throttle = getattr(ctx, 'throttle', None)
     if step.heavy and throttle:
         # (a heavy step waits for a slot of the machine's throttle, at most its timeout - tools/slotd.sh gives up then -,
-        # and then has its own timeout: ENGINE.md 165)
+        # and then has its own timeout: ENGINE.md 167)
         argv = ['bash', throttle, *step.argv]
         env = dict(env, MTGZ_SLOT_WAIT_MAX=str(int(ctx.step_timeout)))
         timeout = 2 * ctx.step_timeout + 60
@@ -1132,7 +1132,7 @@ class Ctx:
         self.no_mac = args.no_mac
         self.dirty = []
         self.baseline = None
-        # the machine's heavy-command throttle (ENGINE.md 165): a heavy step takes one of its slots
+        # the machine's heavy-command throttle (ENGINE.md 167): a heavy step takes one of its slots
         self.throttle = None if args.no_throttle else throttle_path()
         self.pytest_shards = max(1, args.pytest_shards)
 
@@ -1176,7 +1176,7 @@ def opted_out(args, step_id):
 
 def build_step(ctx, name='build'):
     # (tools/build_py.sh takes the module from the artifact cache when this commit's Rust inputs were built before:
-    # ENGINE.md 165)
+    # ENGINE.md 167)
     pkg = os.path.join(ROOT, 'mtgz')
     return Step(name, ['bash', 'tools/build_py.sh'], id='build', checker=make_build_checker('mtgz._engine', pkg),
                 heavy=True,
@@ -1265,7 +1265,7 @@ def record_durations(xml_path):
 
 def pytest_step(name='pytest', step_id='pytest', ctx=None, group=None):
     """This repo's pytest, as one step, or with ctx.pytest_shards > 1 as that many steps over disjoint sets of test files
-    (`pytest-k-of-n`, each its own process and --basetemp; every tests/test_*.py in exactly one; ENGINE.md 165) that a
+    (`pytest-k-of-n`, each its own process and --basetemp; every tests/test_*.py in exactly one; ENGINE.md 167) that a
     parallel group runs at once. Each shard passes on its own final summary line."""
     n = getattr(ctx, 'pytest_shards', 1) if ctx is not None else 1
     evidence = 'pytest\'s final summary line: 0 failed, 0 errors, N > 0 passed + exit 0'
@@ -1297,7 +1297,7 @@ def cargo_step(name, test, step_id=None, group=None):
 
 def test_build_step(tests):
     """The engine test binaries `tests` (cargo --test targets) built before the steps that run them, so a parallel
-    group's cargo steps only run (ENGINE.md 165)."""
+    group's cargo steps only run (ENGINE.md 167)."""
     argv = ['cargo', 'test', '--release', '-p', 'engine', '--no-run']
     for t in tests:
         argv += ['--test', t]
@@ -1314,7 +1314,7 @@ def worker_build_step(ctx):
     pytest (its worker tests run it: they find it through CARGO_TARGET_DIR / MTGZ_WORKER, so they never test a stale
     build - ENGINE.md 114.9's first engine gate did) and the farm-compat step (ENGINE.md 155)."""
     exe = worker_path(ctx)
-    # (tools/zcache.py: the artifact cache by this commit's Rust input hash, else cargo build + stored; ENGINE.md 165)
+    # (tools/zcache.py: the artifact cache by this commit's Rust input hash, else cargo build + stored; ENGINE.md 167)
     return Step("worker build (release mtgz-worker, the farm's executable)",
                 [python_exe(), 'tools/zcache.py', 'worker', '--root', ROOT, '--target-dir', ctx.target_dir],
                 id='worker-build', checker=make_worker_build_checker(exe), heavy=True,
@@ -1397,7 +1397,7 @@ def core_steps(ctx):
                 '-W', 'ignore::pytest.PytestWarning', f'--basetemp={tmp}']
     zero_pkg = os.path.join(CORE, 'python', 'zero')
     # (the core build: tools/zcache.py core-pyd - the artifact cache by the pinned commit, else the core's own
-    # tools/build_py.sh, stored; ENGINE.md 165)
+    # tools/build_py.sh, stored; ENGINE.md 167)
     return [
         Step('core build (zero._engine)', [python_exe(), 'tools/zcache.py', 'core-pyd', '--root', ROOT], id='core-build',
              checker=make_build_checker('zero._engine', zero_pkg), heavy=True,
@@ -1493,13 +1493,13 @@ def tier_python(ctx, args):
         build = build_step(ctx)
     # (pytest runs the worker tests: the worker built from this commit, never another checkout's - ENGINE.md 155); the
     # builds come from the artifact cache when no Rust input changed, and pytest's shards and the smoke run at once
-    # (ENGINE.md 165)
+    # (ENGINE.md 167)
     return [build, worker_build_step(ctx), *in_parallel(pytest_step(ctx=ctx), run_loop_step(ctx, preset, games))]
 
 
 def in_parallel(*steps):
     """`steps` (Steps or lists of them) as one parallel group: run_steps runs them at once, each heavy one through the
-    machine's throttle; the gate goes on when all ended, and stops after the group if any failed (ENGINE.md 165)."""
+    machine's throttle; the gate goes on when all ended, and stops after the group if any failed (ENGINE.md 167)."""
     flat = []
     for s in steps:
         flat.extend(s if isinstance(s, list) else [s])
@@ -1532,7 +1532,7 @@ def tier_encoding(ctx, args):
     return steps
 
 
-# The gate's fuzz before an engine change merges (the user's decision D1, 2026-11-15; ENGINE.md 165): ~2,000 games per
+# The gate's fuzz before an engine change merges (the user's decision D1, 2026-11-15; ENGINE.md 167): ~2,000 games per
 # pool, sharded across cores (tools/fuzz_shards.py), the hidden-information checks included; the 20k depth runs on the
 # farm continuously, on main and each live run's build, not in the gate.
 FUZZ_GAMES = 2000
@@ -1585,7 +1585,7 @@ def tier_suite(ctx, args):
                           evidence=f'exactly one "fuzz shards: PASSED - ..." line and its JSON summary: {FUZZ_GAMES} games of '
                                    f'{spec} over disjoint seed ranges, every range ran, the merged end-of-run checks passed '
                                    f'+ exit 0'))
-    # the test binaries first (one cargo build), then the suite and every pool's shards at once (ENGINE.md 165)
+    # the test binaries first (one cargo build), then the suite and every pool's shards at once (ENGINE.md 167)
     return [test_build_step([]), *in_parallel(*steps)]
 
 
@@ -1613,7 +1613,7 @@ def suite_report_problems(path, sha, pin):
         if (steps.get(sid) or {}).get('status') != 'passed':
             out.append(f'no passed {sid} step')
     fuzz = [s for k, s in steps.items() if str(k).startswith('fuzz-')]
-    # (a report of the 20k gate before ENGINE.md 165 is evidence too: more games than the gate asks for now)
+    # (a report of the 20k gate before ENGINE.md 167 is evidence too: more games than the gate asks for now)
     if not any(s.get('status') == 'passed' and (s.get('fuzz_games') or 0) >= FUZZ_GAMES for s in fuzz):
         out.append(f'no passed fuzz step of {FUZZ_GAMES} games')
     for s in steps.values():
@@ -1670,7 +1670,7 @@ def tier_engine(ctx, args):
               cargo_step('cargo test hidden', 'hidden'), *pytest_step(ctx=ctx),
               smoke_step('smoke: 1 desktop config (random, seed 0)', ['random']), farm_compat_step(ctx)]
     # the builds (the artifact cache's when no Rust input changed), the test binaries, then every check at once, each
-    # heavy one through the machine's throttle (ENGINE.md 165)
+    # heavy one through the machine's throttle (ENGINE.md 167)
     steps = [build_step(ctx), worker_build_step(ctx),
              test_build_step(['digest', 'digest_formats', 'dealt_decks', 'az', 'limits', 'hidden']), *in_parallel(*checks)]
     sid = 'mac-recheck'
@@ -1720,7 +1720,7 @@ def tier_search_core(ctx, args):
         worker_build_step(ctx),
         core_build,
         test_build_step(['digest_formats', 'dealt_decks']),
-        # every check at once, each heavy one through the machine's throttle (ENGINE.md 165)
+        # every check at once, each heavy one through the machine's throttle (ENGINE.md 167)
         *in_parallel(
             Step('zero-core cargo test', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test', heavy=True,
                  evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
@@ -1748,7 +1748,7 @@ def tier_optin_core(ctx, args):
         checks.append(cargo_step(f'feature tests: cargo test --test {t}', t, step_id=f'feature-{t}'))
     checks.append(build_only_step(ctx, args))
     checks.append(core_pytest)
-    # the builds, then every check at once (ENGINE.md 165)
+    # the builds, then every check at once (ENGINE.md 167)
     return [build_step(ctx), worker_build_step(ctx), core_build,
             test_build_step(['digest_formats', 'dealt_decks', *feature_tests]), *in_parallel(*checks)]
 

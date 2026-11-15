@@ -101,7 +101,7 @@ fn a_listed_card_s_find_with_the_deck_known_cross_post_sideboard_match_98() {
     assert!(p.games >= 2, "game 2 was played");
 }
 
-/// ENGINE.md 165: a sharded fuzz's end-of-run checks. `tools/fuzz_shards.py` runs `fuzz_random_games` /
+/// ENGINE.md 167: a sharded fuzz's end-of-run checks. `tools/fuzz_shards.py` runs `fuzz_random_games` /
 /// `fuzz_random_matches` over disjoint seed ranges with `FUZZ_SHARD=1` (each shard prints its `FUZZ_TOTALS` and leaves
 /// the checks over the whole run to this test), sums the shards' counters and runs this test with
 /// `FUZZ_TOTALS_FILE=<the merged totals>`: the same checks as one run of all the seeds, on the totals. Without the

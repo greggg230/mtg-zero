@@ -4,12 +4,6 @@ version = "0.1.0"
 edition.workspace = true
 description = "MTG Zero rules engine (docs/ENGINE.md) and its AlphaZero layer (the zero-core game `mtg`)"
 
-# The integration tests (docs/ENGINE.md 165): a few binaries instead of one per file - every one links the whole
-# engine, ~169 links a build before. The named ones stay their own binaries (`--test az`, `--test fuzz`, ... in the
-# gate, the tools and the docs; the benchmarks and digest_formats each set the process's global allocator); the rest
-# are modules of four suites (`--test cards_suite cards_m7a::` runs one file's tests).
-autotests = false
-
 [dependencies]
 card_ir = { path = "../card_ir" }
 serde.workspace = true
@@ -24,67 +18,3 @@ zero_search = { path = "../third_party/zero-core/crates/search" }
 # what `mtgz._engine` runs, not the Windows heap, which makes allocation-heavy parts several times slower (ENGINE.md
 # 145, 148).
 mimalloc = { version = "0.1", default-features = false }
-
-[[test]]
-name = "az"
-path = "tests/az.rs"
-
-[[test]]
-name = "dealt_decks"
-path = "tests/dealt_decks.rs"
-
-[[test]]
-name = "digest"
-path = "tests/digest.rs"
-
-[[test]]
-name = "digest_formats"
-path = "tests/digest_formats.rs"
-
-[[test]]
-name = "draft"
-path = "tests/draft.rs"
-
-[[test]]
-name = "driver_bench"
-path = "tests/driver_bench.rs"
-
-[[test]]
-name = "fuzz"
-path = "tests/fuzz.rs"
-
-[[test]]
-name = "hidden"
-path = "tests/hidden.rs"
-
-[[test]]
-name = "limits"
-path = "tests/limits.rs"
-
-[[test]]
-name = "measure_delver"
-path = "tests/measure_delver.rs"
-
-[[test]]
-name = "perf"
-path = "tests/perf.rs"
-
-[[test]]
-name = "support"
-path = "tests/support.rs"
-
-[[test]]
-name = "cards_suite"
-path = "tests/cards_suite.rs"
-
-[[test]]
-name = "misc_suite"
-path = "tests/misc_suite.rs"
-
-[[test]]
-name = "rules_suite"
-path = "tests/rules_suite.rs"
-
-[[test]]
-name = "rulings_suite"
-path = "tests/rulings_suite.rs"

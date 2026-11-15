@@ -3049,12 +3049,12 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             CROSS_SPELLS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
         );
     }
-    // the end-of-run checks over the chunk's counters (ENGINE.md 165: a shard's are left to the merged totals)
+    // the end-of-run checks over the chunk's counters (ENGINE.md 167: a shard's are left to the merged totals)
     end_of_run("games", first, n, &games_totals(companions_used as u64), check_games);
     Run::Done
 }
 
-/// A chunk's end (ENGINE.md 165): its counters as one `FUZZ_TOTALS {"kind", "first", "n", "totals"}` line (what
+/// A chunk's end (ENGINE.md 167): its counters as one `FUZZ_TOTALS {"kind", "first", "n", "totals"}` line (what
 /// `tools/fuzz_shards.py` sums over shards), then its end-of-run checks over `n` seeds - unless `FUZZ_SHARD=1` (one
 /// shard of a sharded run: a small shard must not dodge a check that needs 200 games, nor pass one alone; the merged
 /// totals are checked over the whole run's seeds by [`check_merged`]).
@@ -3067,7 +3067,7 @@ fn end_of_run(kind: &str, first: u64, n: u64, t: &Totals, check: fn(u64, &Totals
     }
 }
 
-/// The merged totals of a sharded run (ENGINE.md 165; `tools/fuzz_shards.py`'s JSON: `{"games" | "matches" | "post":
+/// The merged totals of a sharded run (ENGINE.md 167; `tools/fuzz_shards.py`'s JSON: `{"games" | "matches" | "post":
 /// {"n": seeds, "totals": {...}}}`, each kind its shards' counters summed, `max_` ones their max) through the same
 /// end-of-run checks as one run of those seeds (a failure panics with the check's message) -> one line per kind checked.
 pub fn check_merged(text: &str) -> Result<Vec<String>, String> {
@@ -3268,7 +3268,7 @@ pub fn check_games(n: u64, t: &Totals) {
     }
 }
 
-/// The matches' end-of-run checks over `n` matches' counters `t` (ENGINE.md 165; each needs 20 matches).
+/// The matches' end-of-run checks over `n` matches' counters `t` (ENGINE.md 167; each needs 20 matches).
 pub fn check_matches(n: u64, t: &Totals) {
     if n < 20 {
         return;
@@ -3292,7 +3292,7 @@ pub fn check_matches(n: u64, t: &Totals) {
     }
 }
 
-/// The post-sideboard matches' end-of-run checks over `n` matches' counters `t` (ENGINE.md 165; 20 matches).
+/// The post-sideboard matches' end-of-run checks over `n` matches' counters `t` (ENGINE.md 167; 20 matches).
 pub fn check_post(n: u64, t: &Totals) {
     if n < 20 {
         return;
@@ -4163,7 +4163,7 @@ pub fn matches_skipped() -> Option<&'static str> {
 pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     if let Some(why) = matches_skipped() {
         println!("{why}");
-        // (a sharded run's positive evidence that this pool plays no matches: ENGINE.md 165)
+        // (a sharded run's positive evidence that this pool plays no matches: ENGINE.md 167)
         println!("FUZZ_TOTALS {}", serde_json::json!({"kind": "matches", "first": first, "n": n, "skipped": why}));
         return Run::Done;
     }
@@ -4231,7 +4231,7 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         );
     }
     // the end-of-run checks over the chunk's counters (over a chunk of matches; a single match's rerun, `FUZZ_MATCHES=1`,
-    // passes when the match completes: ENGINE.md 51; a shard's are left to the merged totals: ENGINE.md 165)
+    // passes when the match completes: ENGINE.md 51; a shard's are left to the merged totals: ENGINE.md 167)
     let mut t = Totals::default();
     for (k, v) in [
         ("dealt_matches", dealt_matches),

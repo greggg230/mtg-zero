@@ -1,4 +1,4 @@
-"""The engine fuzz of one pool, sharded across cores (docs/ENGINE.md 165): the same games, seeds and checks as one
+"""The engine fuzz of one pool, sharded across cores (docs/ENGINE.md 167): the same games, seeds and checks as one
 `cargo test --release -p engine --test fuzz` run of them, in a fraction of the time.
 
     python tools/fuzz_shards.py --pool default --games 2000 --shards 8

@@ -231,7 +231,7 @@ WORKER_BUILT = '   Compiling mtgz_worker v0.1.0\n    Finished `release` profile 
 
 
 def FUZZ_SHARDS(pool, games, hidden=False, passed=True, matches_skipped=None):
-    """tools/fuzz_shards.py's last two lines (ENGINE.md 165)."""
+    """tools/fuzz_shards.py's last two lines (ENGINE.md 167)."""
     checked = [f'games over {games}'] + ([] if hidden or matches_skipped else [f'matches over {max(20, games // 20)}'])
     s = {'pool': pool, 'hidden': hidden, 'first': 0, 'games': games, 'matches': 0 if hidden else max(20, games // 20),
          'shards': 8, 'passed': passed, 'seconds': 301.0, 'slowest_shard_s': 280.0, 'checked': checked, 'rest_passed': 8,
@@ -268,7 +268,7 @@ class Fake:
             return 'pycompile'
         if 'mac.sh' in cmd:
             return 'mac-eval' if '--eval-checkout' in argv else 'mac'
-        if 'zcache.py' in cmd:                           # (the artifact cache's fetch-or-build: ENGINE.md 165)
+        if 'zcache.py' in cmd:                           # (the artifact cache's fetch-or-build: ENGINE.md 167)
             return 'core-build' if 'core-pyd' in argv else 'worker-build'
         if 'fuzz_shards.py' in cmd:
             return 'fuzz-shards'
@@ -805,7 +805,7 @@ def test_the_core_tiers_build_and_run_the_core_suite_and_name_a_flaky_retry(gate
     rc, out, _, report = gate('optin-core', '--baseline-root', gate.baseline, '--other-games', *gate.other,
                               capsys=capsys)
     kinds = [k for k, _ in gate.fake.calls]
-    # the builds in order, then every check at once (ENGINE.md 165); the flaky retry right after its pytest
+    # the builds in order, then every check at once (ENGINE.md 167); the flaky retry right after its pytest
     assert kinds[:4] == ['build', 'worker-build', 'core-build', 'test-build']
     assert sorted(kinds[4:]) == sorted(['cargo', 'compat', 'formats', 'dealt', 'farm-compat', 'cargo1', 'cargo1',
                                         'build-only', 'core-pytest', 'core-pytest'])
@@ -953,7 +953,7 @@ def test_head_moving_during_the_gate_fails_it(gate, capsys, monkeypatch):
 
 def test_the_suite_tier_runs_the_full_suite_and_the_sharded_fuzz(gate, capsys):
     """I1: the engine tier asserted the full suite and the fuzz through --tested-sha (the agent's word). The suite tier
-    runs them; its report is what the engine tier now checks. ENGINE.md 165 (the user's D1): the test binaries built
+    runs them; its report is what the engine tier now checks. ENGINE.md 167 (the user's D1): the test binaries built
     once, then the suite and a sharded 2,000-game fuzz per pool (tools/fuzz_shards.py) at once."""
     rc, out, _, report = gate('suite', '--fuzz-pools', 'default,delver,default+hidden', capsys=capsys)
     assert rc == 0 and final(out).startswith('GATE PASSED suite') and report['clean']
@@ -997,7 +997,7 @@ def test_the_fuzz_shards_checker_wants_positive_evidence():
 
 
 def test_an_old_20k_suite_report_is_still_evidence(gate, capsys):
-    """A suite report of the 20k gate before ENGINE.md 165 has more fuzz games than the gate asks for: it counts."""
+    """A suite report of the 20k gate before ENGINE.md 167 has more fuzz games than the gate asks for: it counts."""
     suite_report(str(gate.tmp / 'gates'), SHA)
     rc, out, _, rep = gate('engine', '--expect-digest', D_FULL, '--expect-digest0', D_FREE, '--tested-sha', SHA,
                            capsys=capsys)
@@ -1005,7 +1005,7 @@ def test_an_old_20k_suite_report_is_still_evidence(gate, capsys):
 
 
 def test_the_python_tier_shards_pytest_beside_the_smoke(gate, capsys, monkeypatch):
-    """ENGINE.md 165: pytest as --pytest-shards steps over disjoint test files, each its own process and basetemp, every
+    """ENGINE.md 167: pytest as --pytest-shards steps over disjoint test files, each its own process and basetemp, every
     tests/test_*.py in exactly one, run at once with the run-loop smoke after the (cached) builds."""
     files = G.pytest_files()
     parts = G.pytest_partition(files, 4, {})
@@ -1024,7 +1024,7 @@ def test_the_python_tier_shards_pytest_beside_the_smoke(gate, capsys, monkeypatc
 
 
 def test_a_heavy_step_runs_through_the_throttle(tmp_path):
-    """ENGINE.md 165: with a throttle (tools/slotd.sh), a heavy step's command is run by it - and its output, exit code
+    """ENGINE.md 167: with a throttle (tools/slotd.sh), a heavy step's command is run by it - and its output, exit code
     and checker are the command's; a light step runs as it is."""
     slot = tmp_path / 'slotd.sh'
     slot.write_text('echo "[slot] $MTGZ_SLOT_WAIT_MAX"\nexec "$@"\n', encoding='utf-8')
@@ -1129,7 +1129,7 @@ def test_a_detached_checkout_builds_into_its_own_target_dir(tmp_path):
     assert target() == 'E:/base/detached-repo'                           # not E:/base/HEAD
     assert target('E:/mine') == 'E:/mine'                                # the caller's own choice stands
     assert 'target_guard.py' in sh and sh.index('target_guard.py') < sh.index('bash "$CORE/tools/build_engine.sh"')
-    # (the artifact cache is asked after the guard, and a hit never reaches build_engine.sh: ENGINE.md 165)
+    # (the artifact cache is asked after the guard, and a hit never reaches build_engine.sh: ENGINE.md 167)
     assert sh.index('target_guard.py') < sh.index('zcache.py" fetch pyd') < sh.index('bash "$CORE/tools/build_engine.sh"')
 
 
@@ -1194,7 +1194,7 @@ def test_the_docs_tier_builds_no_worker_and_the_python_tier_builds_it_for_pytest
     gate.fake.calls.clear()
     rc, _, _, _ = gate('python', capsys=capsys)
     kinds = [k for k, _ in gate.fake.calls]
-    # (pytest and the run-loop smoke run at once after the builds: ENGINE.md 165)
+    # (pytest and the run-loop smoke run at once after the builds: ENGINE.md 167)
     assert rc == 0 and kinds[:2] == ['build', 'worker-build'] and sorted(kinds[2:]) == ['pytest', 'run']
 
 

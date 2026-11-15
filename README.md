@@ -176,9 +176,9 @@ architecture. After that, search it for the card, rule or setting you care about
 ## Testing
 
 ```bash
-cargo test --release -p engine -p card_ir      # the engine's tests (use --release: what the gates run); a few binaries: 12 named + 4 suites (docs/ENGINE.md 165)
+cargo test --release -p engine -p card_ir      # the engine's tests (use --release: what the gates run); ~15 min the first time, mostly compiling 100+ test binaries
 cargo test --release -p engine --test fuzz     # random games: panics, invariants, replay determinism
-python tools/fuzz_shards.py --pool default --games 2000        # the gate's fuzz: sharded over cores (docs/ENGINE.md 165)
+python tools/fuzz_shards.py --pool default --games 2000        # the gate's fuzz: sharded over cores (docs/ENGINE.md 167)
 python -m pytest tests -q                      # Python side
 python tools/search_smoke.py                   # zero-core's search drives real games with a uniform evaluator
 python tools/gate.py --help                    # the tiered gates: which checks a change needs

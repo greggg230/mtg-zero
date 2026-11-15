@@ -1,4 +1,4 @@
-"""The warm worktree pool (docs/ENGINE.md 165): a few fixed worktrees, each with its own fixed cargo target dir, that a
+"""The warm worktree pool (docs/ENGINE.md 167): a few fixed worktrees, each with its own fixed cargo target dir, that a
 gate, a lane check or a run build checks a commit out into - instead of a new worktree (and a cold 30-minute build) per
 job. The same path and the same target dir every time, so cargo rebuilds only what the commit changed, and the
 one-target-dir-per-checkout rule (AGENTS.md Pitfalls: cargo's dep-info paths are workspace-relative) holds: a warm

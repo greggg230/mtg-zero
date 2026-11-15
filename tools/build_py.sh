@@ -14,7 +14,7 @@
 # dir another checkout built in is refused (tools/target_guard.py: docs/ENGINE.md 143).
 # Windows locks a loaded .pyd: if the copy fails, the old file is renamed out of the way
 # (running processes keep using it; new ones get the new build).
-# The artifact cache (tools/zcache.py, docs/ENGINE.md 165): a commit whose Rust inputs were built before (any checkout,
+# The artifact cache (tools/zcache.py, docs/ENGINE.md 167): a commit whose Rust inputs were built before (any checkout,
 # the same hash of engine/, card_ir/, py/, worker/, data/, Cargo.*, the zero-core pin, the toolchain and the Python)
 # takes that build instead of cargo's, checked by its sha256; a fresh build is stored for the next one. Off with
 # MTGZ_ARTIFACT_CACHE=0; never with ZERO_CORE_UNPINNED=1 or uncommitted Rust inputs (they build as before).

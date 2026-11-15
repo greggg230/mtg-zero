@@ -1,4 +1,4 @@
-"""tools/zcache.py and tools/warm_pool.py (docs/ENGINE.md 165). The cache: the key changes with every Rust input and
+"""tools/zcache.py and tools/warm_pool.py (docs/ENGINE.md 167). The cache: the key changes with every Rust input and
 with nothing else, a checkout with uncommitted Rust inputs has no key, entries are immutable and served only to their
 own key (a tampered file is refused), and eviction is least recently used. The pool: a lease is exclusive, a dead
 holder's (or a reused pid's) lease is taken over. A throwaway git repo stands in for a checkout; nothing is built."""

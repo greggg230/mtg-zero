@@ -42,7 +42,7 @@ pub mod env {
     }
 }
 
-/// A chunk's end-of-run counters by name (docs/ENGINE.md 165): what its checks over the whole chunk read
+/// A chunk's end-of-run counters by name (docs/ENGINE.md 167): what its checks over the whole chunk read
 /// ([`games::check_games`], [`games::check_matches`], [`games::check_post`]), printed as its `FUZZ_TOTALS` line. A sharded
 /// run sums its shards' ([`Totals::add`]: a `max_` counter takes the max) and checks the total, so a small shard neither
 /// dodges a check that needs 200 games nor passes one alone.

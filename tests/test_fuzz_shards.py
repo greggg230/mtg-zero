@@ -1,4 +1,4 @@
-"""tools/fuzz_shards.py (docs/ENGINE.md 165): the sharded fuzz's ranges tile the run's seeds, a shard is positive
+"""tools/fuzz_shards.py (docs/ENGINE.md 167): the sharded fuzz's ranges tile the run's seeds, a shard is positive
 evidence only with its own range's FUZZ_TOTALS and one passed test, and the merge refuses a gap, an overlap, a count
 that does not add up or a skip some shards did not see. Nothing is built here: shard outputs are canned. The engine
 side (the merged totals through the same end-of-run checks) is engine/tests/fuzz.rs::fuzz_shard_totals, run by the
