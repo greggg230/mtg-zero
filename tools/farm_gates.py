@@ -31,8 +31,7 @@ PACK = 'E:/zero-farm-scratch/phase2/pack/c4c4bb776d7f886f5e13474e'      # the ru
 
 def worker_default():
     t = os.environ.get('CARGO_TARGET_DIR') or os.path.join(ROOT, 'target')
-    for p in (os.environ.get('MTGZ_WORKER', ''), os.path.join(t, 'release', 'mtgz-worker.exe'),
-              'E:/cargo-target/mtg-zero/farm/release/mtgz-worker.exe'):
+    for p in (os.environ.get('MTGZ_WORKER', ''), os.path.join(t, 'release', 'mtgz-worker.exe')):     # (this checkout's)
         if p and os.path.exists(p):
             return p
     return None

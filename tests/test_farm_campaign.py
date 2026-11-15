@@ -29,7 +29,7 @@ def _worker():
     cands = [os.environ.get('MTGZ_WORKER', '')]
     if os.environ.get('CARGO_TARGET_DIR'):
         cands.append(os.path.join(os.environ['CARGO_TARGET_DIR'], 'release', exe))
-    cands += [os.path.join(ROOT, 'target', 'release', exe), os.path.join('E:/cargo-target/mtg-zero/farm', 'release', exe)]
+    cands += [os.path.join(ROOT, 'target', 'release', exe)]     # (this checkout's build only: ENGINE.md 155)
     return next((c for c in cands if c and os.path.exists(c)), None)
 
 

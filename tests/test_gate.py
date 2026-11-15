@@ -1082,11 +1082,16 @@ def test_every_engine_encoding_and_search_tier_builds_the_worker_and_checks_farm
     assert steps['worker-build']['worker'] == gate.fake.worker and len(steps['worker-build']['worker_sha256']) == 64
 
 
-def test_the_docs_and_python_tiers_do_not_build_the_worker(gate, capsys):
-    for argv in (('docs',), ('python',)):
-        gate.fake.calls.clear()
-        gate(*argv, capsys=capsys)
-        assert not {'worker-build', 'farm-compat'} & {k for k, _ in gate.fake.calls}, argv
+def test_the_docs_tier_builds_no_worker_and_the_python_tier_builds_it_for_pytest(gate, capsys):
+    """docs: nothing built. python: the release worker built before pytest (its worker tests run it; before, they fell
+    back to another checkout's stale build), no farm-compat step."""
+    gate.fake.calls.clear()
+    gate('docs', capsys=capsys)
+    assert not {'worker-build', 'farm-compat'} & {k for k, _ in gate.fake.calls}
+    gate.fake.calls.clear()
+    rc, _, _, _ = gate('python', capsys=capsys)
+    kinds = [k for k, _ in gate.fake.calls]
+    assert rc == 0 and kinds[:3] == ['build', 'worker-build', 'pytest'] and 'farm-compat' not in kinds
 
 
 def test_a_worker_that_breaks_farm_compat_fails_the_gate(gate, capsys):

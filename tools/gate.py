@@ -1298,7 +1298,8 @@ def tier_python(ctx, args):
                                                           'mtgz/_engine, not one built from this commit')
     else:
         build = build_step(ctx)
-    return [build, pytest_step(), run_loop_step(ctx, preset, games)]
+    # (pytest runs the worker tests: the worker built from this commit, never another checkout's - ENGINE.md 155)
+    return [build, worker_build_step(ctx), pytest_step(), run_loop_step(ctx, preset, games)]
 
 
 def tier_encoding(ctx, args):
@@ -1616,7 +1617,8 @@ def tier_repin(ctx, args):
 
 TIERS = {
     'docs': (tier_docs, 'docs / tools not on the run path: py_compile of touched tools (~0 min).'),
-    'python': (tier_python, 'Python run-loop/settings: build + pytest + a tiny run-loop smoke (~3 min + the build).'),
+    'python': (tier_python, 'Python run-loop/settings: build + the release worker (its pytest tests) + pytest + a tiny '
+               'run-loop smoke (~3 min + the builds).'),
     'encoding': (tier_encoding, 'encoding-only (layout unchanged): build + DIGEST_ENCODING=0 digest == --expect-digest0 '
                  '+ full digest == --expect-digest + digest formats (constructed, EoE, driver, dealt) == the checkout\'s '
                  'recorded files + --test az + checkpoint-load (--checkpoint) + pytest + farm compat (the release worker built, '

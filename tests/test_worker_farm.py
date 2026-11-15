@@ -24,7 +24,8 @@ def _exe(var, profile):
     cands = [os.environ.get(var, '')]
     if os.environ.get('CARGO_TARGET_DIR'):
         cands.append(os.path.join(os.environ['CARGO_TARGET_DIR'], profile, exe))
-    cands += [os.path.join(ROOT, 'target', profile, exe), os.path.join('E:/cargo-target/mtg-zero/farm', profile, exe)]
+    # (this checkout's build only: another checkout's worker is another commit's - ENGINE.md 155)
+    cands += [os.path.join(ROOT, 'target', profile, exe)]
     return next((c for c in cands if c and os.path.exists(c)), None)
 
 
