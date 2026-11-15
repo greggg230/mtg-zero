@@ -44,6 +44,13 @@ ad-hoc shell script. It can never pass a check it did not perform:
     rerun alone once; the step passes only if every one passes alone, recorded as "flaky, passed
     on retry" in the report and the final line. Any other failure fails the step.
 
+  * **Farm compatibility is required** (AGENTS.md; ENGINE.md 155): the engine, encoding, search-core, optin-core
+    and repin tiers build the release `mtgz-worker` (zero-farm's executable) from the commit into the gate's target
+    dir before pytest (whose worker tests then run that build, never a stale one: MTGZ_WORKER) and run
+    tools/farm_compat.py with it: gate 2 (the worker's self-play vs zero-core's Python remote worker) and gate 3 (its
+    records replayed by the trainer's path), byte-identical, on the Delver best-of-three dealt preset. Its positive
+    evidence: exactly one "farm compat: PASSED - ..." line and its JSON summary "passed": true. Not skippable.
+
 Run from WITHIN the checkout to gate (a pinned worktree the caller creates first, e.g. `git
 worktree add --detach ../mtg-zero-wt/run-<sha> <sha>`, exactly as the old scripts did) - this tool
 never creates or manages a worktree itself, the same contract as tools/build_py.sh and
@@ -570,6 +577,47 @@ def make_metrics_checker(run_dir, want_games=None, want_iters=1):
     return checker
 
 
+WORKER_EXE = 'mtgz-worker.exe' if WIN else 'mtgz-worker'
+FARM_COMPAT_RE = re.compile(r'^farm compat: (PASSED|FAILED) - (.*)$', re.M)
+CARGO_FINISHED_RE = re.compile(r'^\s*Finished `release` profile', re.M)
+
+
+def make_worker_build_checker(exe):
+    """The release worker's build (`cargo build --release -p mtgz_worker`): cargo's "Finished `release` profile" line,
+    the executable at `exe` + exit 0 (its sha256 recorded)."""
+    def checker(output, rc):
+        if rc != 0:
+            return False, f'exit {rc}', {}
+        if not CARGO_FINISHED_RE.search(output):
+            return False, 'no "Finished `release` profile" line', {}
+        if not os.path.isfile(exe):
+            return False, f'no {exe} after the build', {}
+        return True, f'{exe} built', {'worker': exe, 'worker_sha256': sha256_file(exe)}
+    return checker
+
+
+def check_farm_compat(output, rc):
+    """tools/farm_compat.py's positive evidence (ENGINE.md 155): exactly one "farm compat: PASSED - ..." line (both
+    gates identical with rows > 0, every game's decks compared: the tool's own checks), its JSON summary with
+    "passed": true + exit 0."""
+    ms = FARM_COMPAT_RE.findall(output)
+    if len(ms) != 1:
+        return False, f'{len(ms)} "farm compat:" lines (expected exactly 1)', {}
+    verdict, text = ms[0]
+    summary = next(iter(json_lines(output, 'gate2', 'gate3', 'passed')), None)
+    extra = {'farm_compat': {k: (summary or {}).get(k) for k in ('preset', 'games')}}
+    if summary:
+        for g in ('gate2', 'gate3'):
+            r = (summary.get(g) or {}).get('result') or {}
+            extra['farm_compat'][g] = {k: r.get(k) for k in ('games', 'rows', 'batches_compared', 'setups', 'identical')
+                                       if k in r}
+    if verdict != 'PASSED' or not (summary and summary.get('passed')):
+        return False, f'farm compat {verdict}: {text[:250]}', extra
+    if rc != 0:
+        return False, f'"farm compat: PASSED" but exit {rc}', extra
+    return True, text[:250], extra
+
+
 MAC_LINE_RE = re.compile(r'^\[mac\] (\S+) (\S+) @ ([0-9a-f]{40}): ', re.M)
 MAC_DONE_RE = re.compile(r'^\[mac\] done @ ([0-9a-f]{40}) \(exit (\d+)\)\s*$', re.M)
 
@@ -1014,6 +1062,8 @@ class Ctx:
             'CARGO_BUILD_JOBS': str(self.jobs),
             'PYTHONIOENCODING': 'utf-8',
             'RUST_BACKTRACE': '1',
+            # (the worker tests and tools/farm_compat.py run the worker the gate builds: worker_build_step)
+            'MTGZ_WORKER': os.path.join(self.target_dir, 'release', WORKER_EXE),
         }
         self.no_mac = args.no_mac
         self.dirty = []
@@ -1063,6 +1113,34 @@ def cargo_step(name, test, step_id=None):
     return Step(name, ['cargo', 'test', '--release', '-p', 'engine', '--test', test], id=step_id or f'cargo-test-{test}',
                 checker=make_cargo_checker(single=True),
                 evidence='exactly one "test result: ok. N passed; 0 failed" line, N > 0 + exit 0')
+
+
+def worker_path(ctx):
+    return os.path.join(ctx.target_dir, 'release', WORKER_EXE)
+
+
+def worker_build_step(ctx):
+    """The release `mtgz-worker` (zero-farm's executable) built from this commit into the gate's target dir, before
+    pytest (its worker tests run it: they find it through CARGO_TARGET_DIR / MTGZ_WORKER, so they never test a stale
+    build - ENGINE.md 114.9's first engine gate did) and the farm-compat step (ENGINE.md 155)."""
+    exe = worker_path(ctx)
+    return Step("worker build (release mtgz-worker, the farm's executable)",
+                ['cargo', 'build', '--release', '-p', 'mtgz_worker'], id='worker-build',
+                checker=make_worker_build_checker(exe),
+                evidence=f'"Finished `release` profile", {exe} there + exit 0')
+
+
+def farm_compat_step(ctx):
+    """Farm compatibility is required (AGENTS.md, ENGINE.md 155): tools/farm_compat.py with the worker this gate built -
+    gate 2 (the worker's self-play vs zero-core's Python remote worker, byte-identical shards and batches) and gate 3
+    (its records replayed by the trainer's path == its shards) on the Delver best-of-three dealt preset, uniform
+    evaluator, a few matches. The full farm gates on a run's real network are tools/farm_gates.py (ENGINE.md 114.8)."""
+    out = lazy_run_dir(ctx, 'farm-compat')
+    return Step('farm compat (worker vs Python self-play; records -> trainer rows)',
+                [python_exe(), 'tools/farm_compat.py', '--worker', worker_path(ctx), '--out', out], id='farm-compat',
+                checker=check_farm_compat, cleanup=lambda: shutil.rmtree(out, ignore_errors=True),
+                evidence='exactly one "farm compat: PASSED - ..." line (gate 2 and gate 3 identical, rows > 0, every '
+                         "game's decks compared), its JSON summary \"passed\": true + exit 0")
 
 
 def digest_steps(ctx, args):
@@ -1240,7 +1318,8 @@ def tier_encoding(ctx, args):
         raise GateError(f'the encoding tier loads a run\'s checkpoint on the new encoding: it needs --checkpoint <a .pt> '
                         f'(--checkpoint-spec for its spec); --allow-skip {sid} runs without it (SKIPPED, named in the '
                         f'final line)')
-    steps = [build_step(ctx), *digest_steps(ctx, args), cargo_step('cargo test az', 'az'), load, pytest_step()]
+    steps = [build_step(ctx), worker_build_step(ctx), *digest_steps(ctx, args), cargo_step('cargo test az', 'az'), load,
+             pytest_step(), farm_compat_step(ctx)]
     # NO search smoke (the uniform evaluator cannot see an encoding change).
     return steps
 
@@ -1364,10 +1443,10 @@ def suite_evidence_step(ctx, args, sha, why):
 
 
 def tier_engine(ctx, args):
-    steps = [build_step(ctx), *digest_steps(ctx, args),
+    steps = [build_step(ctx), worker_build_step(ctx), *digest_steps(ctx, args),
              cargo_step('cargo test az', 'az'), cargo_step('cargo test limits', 'limits'),
              cargo_step('cargo test hidden', 'hidden'), pytest_step(),
-             smoke_step('smoke: 1 desktop config (random, seed 0)', ['random'])]
+             smoke_step('smoke: 1 desktop config (random, seed 0)', ['random']), farm_compat_step(ctx)]
     sid = 'mac-recheck'
     name = 'full suite again on the Mac (merged sha differs, overlapping files)'
     if args.tested_sha:
@@ -1411,9 +1490,11 @@ def tier_search_core(ctx, args):
     configs = split_list(args.configs, 'random,eval,match,nomull', '--configs')
     return [
         build_step(ctx),
+        worker_build_step(ctx),
         Step('zero-core cargo test', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test',
              evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
         pytest_step('this repo: pytest'),
+        farm_compat_step(ctx),
         compat_step(ctx, args, 'check_checkpoint_compat goldens'),
         *digest_format_steps(),         # (the driver digest: zero-core's Driver<MtgAz>, ENGINE.md 148.1)
         smoke_step(f'smoke: {len(configs)}-config of the pinning game ({",".join(configs)})', configs),
@@ -1427,11 +1508,11 @@ def tier_search_core(ctx, args):
 def tier_optin_core(ctx, args):
     need_core()
     feature_tests = split_list(args.feature_tests, 'az,hidden', '--feature-tests')
-    steps = [build_step(ctx),
+    steps = [build_step(ctx), worker_build_step(ctx),
              Step('core tests', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test',
                   evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
              compat_step(ctx, args, 'checkpoint_compat byte identity'),
-             *digest_format_steps()]        # (the driver digest: zero-core's Driver<MtgAz>, ENGINE.md 148.1)
+             *digest_format_steps(), farm_compat_step(ctx)]        # (the driver digest: zero-core's Driver<MtgAz>, ENGINE.md 148.1)
     for t in feature_tests:
         steps.append(cargo_step(f'feature tests: cargo test --test {t}', t, step_id=f'feature-{t}'))
     steps.append(build_only_step(ctx, args))
@@ -1521,6 +1602,8 @@ def tier_repin(ctx, args):
              evidence=f'one "combined digest" line over the full {DIGEST_GAMES[0]} + {DIGEST_GAMES[1]} games == '
                       f'{args.expect_digest}, "test result: ok. 1 passed" + exit 0'),
         *digest_format_steps(),
+        worker_build_step(ctx),
+        farm_compat_step(ctx),
         smoke_step(f'1-config smoke on the run\'s spec ({args.spec}, preset {args.preset})', specs,
                    ['--preset', args.preset], group='parallel-mac'),
         Step('mac.sh --eval-checkout', ['bash', 'tools/mac.sh', '--eval-checkout'], id='mac-eval-checkout', mac=True,
@@ -1536,22 +1619,26 @@ TIERS = {
     'python': (tier_python, 'Python run-loop/settings: build + pytest + a tiny run-loop smoke (~3 min + the build).'),
     'encoding': (tier_encoding, 'encoding-only (layout unchanged): build + DIGEST_ENCODING=0 digest == --expect-digest0 '
                  '+ full digest == --expect-digest + digest formats (constructed, EoE, driver, dealt) == the checkout\'s '
-                 'recorded files + --test az + checkpoint-load (--checkpoint) + pytest. NO search smoke (~8 min).'),
+                 'recorded files + --test az + checkpoint-load (--checkpoint) + pytest + farm compat (the release worker built, '
+                 'tools/farm_compat.py). NO search smoke (~11 min).'),
     'suite': (tier_suite, 'engine rules/cards (the agent\'s half): the full engine suite + the 20k fuzz (--fuzz-pools, '
               'default the default pool) on this commit; its report gates/<sha>-suite.json is the engine tier\'s '
               'evidence for --tested-sha (~30 min a pool).'),
     'engine': (tier_engine, 'engine rules/cards (orchestrator half): fresh build, digests == the agent\'s report, '
                'digest formats (constructed, EoE, driver, dealt) == the checkout\'s recorded files, az/limits/hidden, pytest, 1 desktop smoke config, the --tested-sha\'s suite report (the full suite + '
                'the 20k fuzz, evidenced); a Mac full-suite recheck only if the merged sha differs from --tested-sha '
-               'with overlapping engine/card_ir files (~10 min).'),
+               'with overlapping engine/card_ir files; the release worker built + farm compat (tools/farm_compat.py) (~13 min).'),
     'search-core': (tier_search_core, 'search/core behaviour: build + core cargo test + pytest + check_checkpoint_compat '
                     'goldens (--baseline-root) + digest formats (its driver digest: zero-core\'s driver) + 4-config '
-                    'smoke of the pinning game + run-loop smoke + core build + core pytest (~36 min).'),
+                    'smoke of the pinning game + run-loop smoke + core build + core pytest + the release worker built + farm compat '
+                    '(~39 min).'),
     'optin-core': (tier_optin_core, 'opt-in core feature with byte-identical defaults: build + core tests + '
                    'checkpoint_compat byte identity (--baseline-root) + digest formats (its driver digest: zero-core\'s '
-                   'driver) + feature tests + build-only of the other games + core build + core pytest (~26 min).'),
+                   'driver) + feature tests + build-only of the other games + core build + core pytest + the release worker built + '
+                   'farm compat (~29 min).'),
     'repin': (tier_repin, 're-pin onto an already-verified commit: own-target build + digest == main\'s recorded value '
-              '+ digest formats (constructed, EoE, driver, dealt) == the checkout\'s recorded files + 1-config smoke on the run\'s --spec/--preset + mac.sh --eval-checkout, in parallel (~5 min).'),
+              '+ digest formats (constructed, EoE, driver, dealt) == the checkout\'s recorded files + the release worker built + farm compat + 1-config smoke on the run\'s --spec/--preset + mac.sh '
+              '--eval-checkout, in parallel (~8 min).'),
 }
 
 # The options each tier uses: any other tier-specific option given is refused (it would be ignored, and
@@ -1619,7 +1706,8 @@ def write_report(ctx, args, results, ok, not_run, started, seconds, path, line):
                                 'skipped': r.skipped, 'reason': r.reason, 'cmd': r.argv, 'cwd': r.cwd,
                                 'seconds': round(r.seconds, 2), 'rc': r.rc, 'log': r.log, 'log_sha256': r.log_sha256,
                                 'mac': r.mac, **({'retries': r.extra['retries']} if 'retries' in r.extra else {}),
-                                **({'fuzz_games': r.extra['fuzz_games']} if 'fuzz_games' in r.extra else {})})
+                                **({'fuzz_games': r.extra['fuzz_games']} if 'fuzz_games' in r.extra else {}),
+                                **{k: r.extra[k] for k in ('farm_compat', 'worker', 'worker_sha256') if k in r.extra}})
         if r.extra.get('digest'):
             key = 'encoding_free' if 'encoding-free' in r.id else 'full'
             report['digests'][key] = {'value': r.extra['digest'], 'status': r.status}

@@ -87,6 +87,16 @@ the agent tested) are required; a step you skip on purpose (`--allow-skip <step>
 | an opt-in zero-core feature, defaults byte-identical | `optin-core` |
 | moving a run onto an already-verified commit | `repin` |
 
+**Farm compatibility is required** (the user, 2026-11-14: every build is farm-compatible by default). Friends' PCs
+run the release `mtgz-worker` (zero-farm), and it must play and encode exactly as the Python run does. The engine,
+encoding, search-core, optin-core and repin tiers build the release worker from your commit and run
+`tools/farm_compat.py` (step `farm-compat`: the worker's self-play vs zero-core's Python remote worker, and its game
+records replayed by the trainer's path, both byte-identical, on the Delver best-of-three dealt preset). It cannot be
+skipped. A change that breaks it is fixed in the worker or the engine, never by loosening the check; a deliberate
+behaviour change moves the worker with it (the worker is this repo's `worker/` crate on the same engine). Before a farm
+run attaches the farm or moves to a new commit, `tools/farm_gates.py` runs the full gates 2 and 3 on that run's real
+config and checkpoint (`docs/ENGINE.md` 114.8, 155).
+
 Don't re-run a full suite on a sha that already passed it: each tier writes `gates/<sha12>-<tier>.json`
 (`docs/ENGINE.md` 143). The checkout must be exactly its commit: an untracked file under `engine/`,
 `mtgz/`, `tests/`, `tools/`, `data/`, ... refuses the gate like an uncommitted change. Say which tier

@@ -227,6 +227,15 @@ def PYTEST_FAILED(*ids, passed=301, errors=()):
     return '\n'.join(lines + [', '.join(counts) + ' in 881.28s (0:14:41)']) + '\n'
 
 
+WORKER_BUILT = '   Compiling mtgz_worker v0.1.0\n    Finished `release` profile [optimized] target(s) in 61.20s\n'
+FARM_SUMMARY = {'preset': 'delver-mirror-bo3-dealt', 'games': 6, 'passed': True,
+                'gate2': {'passed': True, 'result': {'games': 6, 'rows': 1210, 'batches_compared': 150, 'identical': True}},
+                'gate3': {'passed': True, 'result': {'games': 6, 'rows': 1190, 'setups': 6, 'identical': True}}}
+FARM_COMPAT_OK = (json.dumps(FARM_SUMMARY) + '\nfarm compat: PASSED - delver-mirror-bo3-dealt: gate 2 (worker vs the Python '
+                  'remote worker) identical: 6 games, 1210 rows, 150 batches; gate 3 (records -> trainer rows) identical: '
+                  '6 games, 1190 rows, 6 decks compared (gates/tmp/x)\n')
+
+
 # ---------------------------------------------------------------------------- the fake gate
 
 class Fake:
@@ -252,6 +261,10 @@ class Fake:
             return 'core-build' if 'third_party' in cmd or self.cwd == self.core else 'build'
         if 'smoke_all.sh' in cmd:
             return 'build-only'
+        if 'mtgz_worker' in argv:
+            return 'worker-build'
+        if 'farm_compat.py' in cmd:
+            return 'farm-compat'
         if 'check_checkpoint_compat.py' in cmd:
             return 'compat'
         if 'search_smoke.py' in cmd:
@@ -293,6 +306,13 @@ class Fake:
             return COMPAT(argv[argv.index('--old') + 1], argv[argv.index('--new') + 1]), 0
         if k == 'pycompile':
             return f'py_compile: {len(argv) - 3} file(s) compiled\n', 0
+        if k == 'worker-build':                           # cargo writes the executable
+            os.makedirs(os.path.dirname(self.worker), exist_ok=True)
+            with open(self.worker, 'wb') as f:
+                f.write(b'worker')
+            return WORKER_BUILT, 0
+        if k == 'farm-compat':
+            return FARM_COMPAT_OK, 0
         return {'build': BUILD(G.ROOT), 'core-build': CORE_BUILD(self.core), 'digest0': DIGEST(D_FREE),
                 'digest': DIGEST(D_FULL), 'formats': FORMATS(), 'dealt': DEALT(), 'cargo1': CARGO(34), 'cargo': CARGO(123, 3, 0, 0), 'pytest': PYTEST_OK,
                 'core-pytest': '.' * 60 + '\n308 passed, 3 skipped, 1 warning in 739.67s (0:12:19)\n',
@@ -333,6 +353,7 @@ def gate(tmp_path, monkeypatch):
                                      no_mac=args.no_mac, dirty=[], baseline=None)
     monkeypatch.setattr(G, 'Ctx', fake_ctx)
     fake = Fake(str(core))
+    fake.worker = str(tmp_path / 'target' / 'release' / G.WORKER_EXE)
     fake.diff = 'docs/ENGINE.md\n'
     monkeypatch.setattr(G, 'execute', fake)
     other = [str(tmp_path / g) for g in GAMES]
@@ -763,15 +784,15 @@ def test_the_core_tiers_build_and_run_the_core_suite_and_name_a_flaky_retry(gate
     rc, out, _, report = gate('optin-core', '--baseline-root', gate.baseline, '--other-games', *gate.other,
                               capsys=capsys)
     kinds = [k for k, _ in gate.fake.calls]
-    assert kinds == ['build', 'cargo', 'compat', 'formats', 'dealt', 'cargo1', 'cargo1', 'build-only', 'core-build',
-                     'core-pytest', 'core-pytest']
+    assert kinds == ['build', 'worker-build', 'cargo', 'compat', 'formats', 'dealt', 'farm-compat', 'cargo1', 'cargo1',
+                     'build-only', 'core-build', 'core-pytest', 'core-pytest']
     assert rc == 0 and final(out).startswith('GATE PASSED WITH FLAKY RETRIES optin-core')
     assert report['flaky'] == [f'core-pytest: {REMOTEPLAY}'] and report['baseline']['head'] == 'c' * 40
     gate.fake.core_pytest = []
     rc, out, _, _ = gate('search-core', '--baseline-root', gate.baseline, capsys=capsys)
     assert rc == 0 and final(out).startswith('GATE PASSED search-core')
-    assert [k for k, _ in gate.fake.calls][-10:] == ['build', 'cargo', 'pytest', 'compat', 'formats', 'dealt', 'smoke',
-                                                     'run', 'core-build', 'core-pytest']
+    assert [k for k, _ in gate.fake.calls][-12:] == ['build', 'worker-build', 'cargo', 'pytest', 'farm-compat', 'compat',
+                                                     'formats', 'dealt', 'smoke', 'run', 'core-build', 'core-pytest']
 
 
 def test_a_stale_build_fails_the_core_tier_before_the_comparison(gate, capsys):
@@ -779,7 +800,7 @@ def test_a_stale_build_fails_the_core_tier_before_the_comparison(gate, capsys):
     rc, out, _, report = gate('optin-core', '--baseline-root', gate.baseline, '--other-games', *gate.other,
                               capsys=capsys)
     assert rc == 1 and [k for k, _ in gate.fake.calls] == ['build']
-    assert 'build: no "mtgz._engine OK' in final(out) and 'not run: core-cargo-test, checkpoint-compat' in final(out)
+    assert 'build: no "mtgz._engine OK' in final(out) and 'not run: worker-build, core-cargo-test, checkpoint-compat' in final(out)
 
 
 # ---------------------------------------------------------------------------- dry runs
@@ -1028,3 +1049,80 @@ def test_head_is_read_from_the_git_files(tmp_path):
     subprocess.run(['git', '-C', str(wt), 'checkout', '-q', '-b', 'feat/y'], check=True)
     assert G.checkout.read_head(str(wt)) == head(wt)
     assert G.checkout.read_head(str(tmp_path / 'nothing')) is None
+
+
+# ---------------------------------------------------------------------------- farm compatibility (ENGINE.md 155)
+
+FARM_TIERS = ((*ENC, '--allow-skip', 'checkpoint-load'),
+              ('engine', '--expect-digest', D_FULL, '--expect-digest0', D_FREE, '--no-mac', '--allow-skip', 'suite-evidence'),
+              ('search-core', '--allow-skip', 'checkpoint-compat'),
+              ('optin-core', '--allow-skip', 'checkpoint-compat'),
+              ('repin', '--expect-digest', D_FULL, '--spec', 'delver', '--preset', 'delver-mirror', '--no-mac'))
+
+
+@pytest.mark.parametrize('argv', FARM_TIERS)
+def test_every_engine_encoding_and_search_tier_builds_the_worker_and_checks_farm_compat(gate, capsys, argv):
+    """"All builds need to be compatible with farm" (the user, 2026-11-14): the release worker is built from the commit
+    and tools/farm_compat.py runs with it in each tier that covers engine, encoding or search changes; the worker is
+    built before pytest (whose worker tests run it) and the step passes on the tool's own line."""
+    gate.fake.calls.clear()
+    if argv[0] == 'optin-core':
+        argv = (*argv, '--other-games', *gate.other)
+    rc, out, _, report = gate(*argv, capsys=capsys)
+    kinds = [k for k, _ in gate.fake.calls]
+    assert rc == 0 and kinds.count('worker-build') == 1 and kinds.count('farm-compat') == 1, (argv, kinds)
+    if 'pytest' in kinds:
+        assert kinds.index('worker-build') < kinds.index('pytest')
+    assert kinds.index('worker-build') < kinds.index('farm-compat')
+    fc = next(a for k, a in gate.fake.calls if k == 'farm-compat')
+    assert fc[fc.index('--worker') + 1] == gate.fake.worker
+    steps = {x['id']: x for x in report['steps']}
+    assert steps['farm-compat']['status'] == 'passed' and steps['worker-build']['status'] == 'passed'
+    assert steps['farm-compat']['farm_compat']['gate3']['setups'] == 6
+    assert steps['worker-build']['worker'] == gate.fake.worker and len(steps['worker-build']['worker_sha256']) == 64
+
+
+def test_the_docs_and_python_tiers_do_not_build_the_worker(gate, capsys):
+    for argv in (('docs',), ('python',)):
+        gate.fake.calls.clear()
+        gate(*argv, capsys=capsys)
+        assert not {'worker-build', 'farm-compat'} & {k for k, _ in gate.fake.calls}, argv
+
+
+def test_a_worker_that_breaks_farm_compat_fails_the_gate(gate, capsys):
+    bad = dict(FARM_SUMMARY, passed=False)
+    gate.fake.set('farm-compat', json.dumps(bad) + '\nfarm compat: FAILED - delver-mirror-bo3-dealt: gate 2 (worker vs the '
+                  'Python remote worker) DIFFERENT or failed: 6 games, 1210 rows, 150 batches; gate 3 ...\n', 1)
+    rc, out, _, report = gate(*FARM_TIERS[1], capsys=capsys)
+    assert rc == 1 and final(out).startswith('GATE FAILED engine') and 'farm-compat: farm compat FAILED' in final(out)
+    assert {x['id']: x['status'] for x in report['steps']}['farm-compat'] == 'failed'
+
+
+def test_a_failed_worker_build_fails_before_pytest(gate, capsys):
+    gate.fake.set('worker-build', 'error[E0425]: cannot find value `x` in this scope\n', 101)
+    rc, out, _, _ = gate(*FARM_TIERS[1], capsys=capsys)
+    kinds = [k for k, _ in gate.fake.calls]
+    assert rc == 1 and kinds == ['build', 'worker-build'] and 'worker-build: exit 101' in final(out)
+
+
+def test_the_farm_compat_checker_wants_positive_evidence():
+    ok, why, extra = G.check_farm_compat(FARM_COMPAT_OK, 0)
+    assert ok and why.startswith('delver-mirror-bo3-dealt: gate 2') and extra['farm_compat']['gate2']['rows'] == 1210
+    assert G.check_farm_compat('', 0)[:2] == (False, '0 "farm compat:" lines (expected exactly 1)')
+    assert not G.check_farm_compat(FARM_COMPAT_OK + FARM_COMPAT_OK.splitlines()[-1] + '\n', 0)[0]
+    assert G.check_farm_compat(FARM_COMPAT_OK, 1)[1] == '"farm compat: PASSED" but exit 1'
+    lying = FARM_COMPAT_OK.replace('"games": 6, "passed": true', '"games": 6, "passed": false')
+    assert lying != FARM_COMPAT_OK and not G.check_farm_compat(lying, 0)[0]
+    no_json = FARM_COMPAT_OK.splitlines()[-1] + '\n'
+    assert not G.check_farm_compat(no_json, 0)[0], 'the line without its JSON summary is not evidence'
+
+
+def test_the_worker_build_checker(tmp_path):
+    exe = str(tmp_path / G.WORKER_EXE)
+    check = G.make_worker_build_checker(exe)
+    assert check(WORKER_BUILT, 0)[:2] == (False, f'no {exe} after the build')
+    open(exe, 'wb').write(b'w')
+    ok, _, extra = check(WORKER_BUILT, 0)
+    assert ok and extra['worker_sha256'] == G.sha256_file(exe)
+    assert check('   Compiling mtgz_worker\n', 0)[:2] == (False, 'no "Finished `release` profile" line')
+    assert check(WORKER_BUILT, 101)[:2] == (False, 'exit 101')
