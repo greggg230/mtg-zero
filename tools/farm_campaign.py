@@ -6,6 +6,7 @@ Analysis campaigns:
     python tools/farm_campaign.py submit NAME --a CKPT [--b CKPT] --games N --build ID [--worker EXE] [--sims 64]
            [--bo1 | --spec JSON] [--tilts JSON] [--seed 0] [--unpaired] [--share 0.25] [--priority 0.5]
            [--games-per-lease auto|N] [--deadline-h 3] [--spot 0.05] [--ort-dll DLL] [--min-agent V] [--wait]
+    python tools/farm_campaign.py submit NAME --a CKPT --samples [--set KEY=JSON ...] --games N --build ID ...
     python tools/farm_campaign.py status NAME
     python tools/farm_campaign.py collect NAME [--no-local] [--threads 4] [--wrap CMD ...] [--no-describe]
            [--allow-failed] [--poll 60] [--once]
@@ -13,7 +14,9 @@ Analysis campaigns:
   zero.h2h.match plays them (mtgz.az.farm_campaign.match_settings: A's run's evaluation settings, `--sims`, the spec,
   the root belief tilts; the seats checked equal to the local match's): `--bo1` = the yardsticks' best-of-one (A's
   run's eval spec without its best-of-three keys, its tilts without 'deck': mtgz.az.yardsticks), else `--spec` (default
-  A's run's evaluation spec) and `--tilts` (default the run's). The build: a signed release worker that knows
+  A's run's evaluation spec) and `--tilts` (default the run's). `--samples`: a play job with search samples - A against
+  itself with its run's self-play seat on its self-play settings, `--set` over them (e.g. --set 'selfplay_resign_t=0'
+  --set 'spec="{...dealt_decks...}"'), unpaired. The build: a signed release worker that knows
   eval_trace, found as for fuzz campaigns (or `--worker`); its runtime pack from its manifest. Prints the state
   directory; `--wait` then collects.
   status: coverage (done farm / local, failed with reasons, missing), the farm's progress, machines.
@@ -326,6 +329,9 @@ def analysis_main(argv, client=None):
     ap.add_argument('--tilts', help="root belief tilts JSON ({} = none; default the run's)")
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--unpaired', action='store_true')
+    ap.add_argument('--samples', action='store_true', help='a play job with search samples: A against itself with its '
+                    "run's self-play seat (noise, temperature, playout cap), unpaired; --set overrides its settings")
+    ap.add_argument('--set', action='append', default=[], metavar='KEY=JSON', help='--samples: a self-play setting')
     ap.add_argument('--share', type=float, default=C.DEFAULT_SHARE)
     ap.add_argument('--priority', type=float, default=0.5)
     ap.add_argument('--games-per-lease', default='auto')
@@ -364,7 +370,17 @@ def analysis_main(argv, client=None):
                         man = json.load(f)
                 else:
                     exe, man = find_worker(a.build, a.dist)
-                if a.bo1:
+                if a.samples:
+                    if a.b or a.bo1:
+                        ap.error('--samples: self-play of --a only (no --b, no --bo1)')
+                    over = {}
+                    for kv in a.set:
+                        k, sep, v = kv.partition('=')
+                        if not sep:
+                            ap.error(f'--set {kv!r}: KEY=JSON')
+                        over[k] = json.loads(v)
+                    settings = C.selfplay_settings(a.a, over)
+                elif a.bo1:
                     from mtgz.az import yardsticks as Y
                     rd = os.path.dirname(os.path.dirname(os.path.abspath(a.a)))
                     cfg = Y.cfg_of(rd)
@@ -374,13 +390,14 @@ def analysis_main(argv, client=None):
                     from zero import h2h
                     spec = a.spec or h2h.run_eval_spec(a.a, C.GAME)
                     tilts = json.loads(a.tilts) if a.tilts is not None else None
-                settings, _ = C.match_settings(a.a, a.sims, spec, tilts=tilts, ckpt_b=a.b)
+                if not a.samples:
+                    settings, _ = C.match_settings(a.a, a.sims, spec, tilts=tilts, ckpt_b=a.b)
                 seats = [{'net': 1}, {'net': 2}] if a.b else [{'net': 1}, {'net': 1}]
                 gpl = a.games_per_lease if a.games_per_lease == 'auto' else int(a.games_per_lease)
                 C.submit(a.name, a.a, a.games, settings, seats, a.seed, a.build, exe, man.get('requires_runtime'),
-                         b=a.b, paired=not a.unpaired, share=a.share, priority=a.priority, games_per_lease=gpl,
+                         b=a.b, paired=not (a.unpaired or a.samples), share=a.share, samples=a.samples, priority=a.priority, games_per_lease=gpl,
                          deadline_s=a.deadline_h * 3600, spot=a.spot, ort_dll=a.ort_dll, min_agent=a.min_agent,
-                         meta={'cmd': 'submit', 'sims': a.sims, 'bo1': a.bo1}, client=cl, root=a.state_root, opts=opts)
+                         meta={'cmd': 'submit', 'sims': a.sims, 'bo1': a.bo1, 'set': a.set}, client=cl, root=a.state_root, opts=opts)
             print(d)
             if not a.wait:
                 return 0
