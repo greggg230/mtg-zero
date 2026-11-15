@@ -33,9 +33,9 @@ ad-hoc shell script. It can never pass a check it did not perform:
     A caller's DIGEST_*, FUZZ_*, PYTEST_ADDOPTS, PYTHONPATH and ZERO_CORE_UNPINNED never reach a
     step.
   * **Evidence, not assertions** (ENGINE.md 143). The engine tier no longer takes the full engine
-    suite and the 20k fuzz on the agent's word (--tested-sha): the `suite` tier runs them on a
+    suite and the fuzz on the agent's word (--tested-sha): the `suite` tier runs them on a
     commit and its report gates/<sha12>-suite.json is the evidence the engine tier checks (tier,
-    sha, pin, a clean pass, the fuzz's 20,000 games, every log unchanged); without it the engine
+    sha, pin, a clean pass, a fuzz step of at least FUZZ_GAMES games - 2,000 a pool since ENGINE.md 165 -, every log unchanged); without it the engine
     tier refuses unless --allow-skip suite-evidence, named in the final line.
   * **A timeout bounds the step** - the command and every process it started (tools/proctree.py).
   * **The core's own suite** (search-core, optin-core): zero-core's engine module built with its
@@ -1554,7 +1554,7 @@ def make_fuzz_checker(games):
 
 
 def tier_suite(ctx, args):
-    """The full engine suite and the 20k fuzz on THIS commit (the engine change's own half: AGENTS.md); its report
+    """The full engine suite and the sharded fuzz (FUZZ_GAMES a pool) on THIS commit (the engine change's own half: AGENTS.md); its report
     gates/<sha12>-suite.json is the evidence the engine tier wants for --tested-sha (ENGINE.md 143)."""
     pools = split_list(args.fuzz_pools, FUZZ_POOLS, '--fuzz-pools')
     shards = max(1, args.fuzz_shards or 8)
@@ -1581,7 +1581,7 @@ def tier_suite(ctx, args):
 
 
 def suite_report_problems(path, sha, pin):
-    """Why the report at `path` is not the evidence that the full engine suite and the 20k fuzz passed on commit
+    """Why the report at `path` is not the evidence that the full engine suite and the fuzz passed on commit
     `sha` with zero-core `pin` -> (problems, the report or None). The evidence: a `suite` tier report of that sha and
     pin, passed and clean (no skip, no --allow-dirty), its engine-suite step and at least one fuzz step of
     FUZZ_GAMES games passed, and every step's log still there with the sha256 the report recorded."""
@@ -1619,7 +1619,7 @@ def suite_report_problems(path, sha, pin):
 
 
 def suite_evidence_step(ctx, args, sha, why):
-    """The engine tier's evidence that the full engine suite and the 20k fuzz passed on `sha` (the --tested-sha, or
+    """The engine tier's evidence that the full engine suite and the fuzz passed on `sha` (the --tested-sha, or
     this commit): a `suite` tier report (--suite-report, default gates/<sha12>-suite.json of this checkout). Without
     one the tier refuses unless --allow-skip suite-evidence (SKIPPED: "asserted, not evidenced" in the final line)."""
     sid = 'suite-evidence'
@@ -1852,7 +1852,7 @@ TIERS = {
               'report gates/<sha>-suite.json is the engine tier\'s evidence for --tested-sha.'),
     'engine': (tier_engine, 'engine rules/cards (orchestrator half): fresh build, digests == the agent\'s report, '
                'digest formats (constructed, EoE, driver, dealt) == the checkout\'s recorded files, az/limits/hidden, pytest, 1 desktop smoke config, the --tested-sha\'s suite report (the full suite + '
-               'the 20k fuzz, evidenced); a Mac full-suite recheck only if the merged sha differs from --tested-sha '
+               'the sharded fuzz, evidenced); a Mac full-suite recheck only if the merged sha differs from --tested-sha '
                'with overlapping engine/card_ir files; the release worker built + farm compat (tools/farm_compat.py) (~13 min).'),
     'search-core': (tier_search_core, 'search/core behaviour: build + core cargo test + pytest + check_checkpoint_compat '
                     'goldens (--baseline-root) + digest formats (its driver digest: zero-core\'s driver) + 4-config '
@@ -1970,7 +1970,7 @@ def build_parser():
                     'this commit\'s own when gated directly; the Mac recheck runs when a different one touched '
                     'engine/ or card_ir/')
     ap.add_argument('--suite-report', default=None, help='engine tier: the suite tier\'s report of the --tested-sha (the '
-                    'evidence that the full engine suite and the 20k fuzz passed on it; default gates/<sha12>-suite.json '
+                    'evidence that the full engine suite and the fuzz passed on it; default gates/<sha12>-suite.json '
                     'of this checkout)')
     ap.add_argument('--fuzz-pools', default=None, help='suite tier: comma-separated FUZZ_POOL values, a sharded '
                     f'{FUZZ_GAMES}-game fuzz each, <pool>+hidden for hidden decklists (default: {FUZZ_POOLS})')
