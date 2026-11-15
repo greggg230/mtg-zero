@@ -34651,3 +34651,189 @@ wrong types, odd game counts, a device other than cuda/cpu and a setting that me
 `python tools/gate.py python --no-mac` on 099b2f9b (via slotd.sh, pb2 live): build PASS (307.7 s), pytest PASS (420
 passed, 1 skipped; 808.7 s), run-loop smoke (mtg-smoke) PASS (16 games, 0 unfinished), the checkout unchanged - **GATE
 PASSED python 099b2f9b3d2d in 1227s** (report gates/099b2f9b3d2d-python.json; the Mac steps skipped by --no-mac).
+
+## 165. Farm analysis campaigns: play jobs with traces on friends' PCs, checked and replayed here (branch `feat/farm-campaigns`, zero-core `feat/farm-campaigns`, zero-farm `feat/campaigns`, 2026-11-15)
+
+Branch `feat/farm-campaigns` from main 72e5a0df; zero-core pin bf229a5 -> `feat/farm-campaigns` 3608e38 (zero-core
+docs/az.md 50); zero-farm `feat/campaigns` (coordinator PROTOCOL rev 13, section 5.3; DESIGN 6 item 4). Why: the user,
+2026-11-15 ("work on it in a background agent"; standing rule: every build farm-compatible by default): work of the form
+"play N matches with checkpoint X under spec S over seeds [a, b) and return each game's moves" - the yardsticks'
+best-of-one, the sideboard census, play analyses - ran on the desktop beside the live run (pb2) and cost it CPU and GPU.
+It now runs on friends' PCs; the desktop replays the traces with the same engine and computes what it needs. The
+architecture review of the same day (hub `fable_review_iteration_and_farm_2026-11-15.md` 3.1) makes this the general
+job model (`play` jobs with options `trace` and `samples`, `fuzz` the other kind); the names, the result schema and the
+share follow it so self-play and evaluation can move onto it without another protocol revision. No rule, encoding,
+search or training change; digests untouched; agents unchanged. (Section number: every branch's and worktree's
+headings stopped at 164 on 2026-11-15.)
+
+### 165.1 The play job
+
+A campaign is one play job on a farm run of its own, `cmp-<name>`:
+
+| field | what |
+|---|---|
+| build | a signed release `mtgz-worker` that knows the zero-core setting `eval_trace` (any build of this branch or later) and its runtime pack |
+| networks | gen 1 = A, gen 2 = B (none for self-play), exported for the farm exactly as a run's generation (zero.farm_h2h.export with the reference set from a short self-play of the network, the fix of zero-core bf229a5), cached by checkpoint sha256 and spec under `~/.zero-farm/campaigns/_exports/` |
+| settings | a run's play settings (the keys the worker build calls `play`, `check-config`); for a match `match_settings` below |
+| seats | `[{"net": 1}, {"net": 2}]` (paired: games 2k and 2k + 1 share the deal, seats swapped) or `[{"net": 1}, {"net": 1}]` |
+| seed | the job's base seed (the run's job `seed`, which the coordinator puts on every lease): game g's seed is `game_seed(seed, g, paired)`, the seed a local zero.h2h match of that seed gives game g |
+| games | ids `[0, N)`; `games_per_lease` (`auto`: ~7.5 minutes of a machine) |
+| share | the job's share of the farm's run leases while a live run's farm self-play also wants machines (default 0.25; PROTOCOL rev 13) |
+| deadline | seconds after which the games the farm has not delivered are played here (default 3 h) |
+| options | `trace` (always: every game's moves come back), `samples` (the search's policy targets and values too: self-play seats with noise, temperature and playout cap) |
+
+Wire form (no agent change: agents forward a template's `settings` as they are):
+
+* **without samples** - an eval batch (PROTOCOL 5.2) whose settings carry `eval_trace: 1`: the worker traces its driver
+  (zero-core docs/search.md 2.17; tracing changes no game) and each result row gains `digest` (SHA-256 of the game
+  record's sorted-key compact JSON, 16 hex) and `rec` (the record: seed, every real move, over / aborted, result and
+  margins as f32 bits, rounds, the decks). Evaluation seats: `Run.nn_seat(key, eval_sims)`.
+* **with samples** - the farm self-play of the campaign's run (`quota` N, `slack` 0, its one checkpoint current; the
+  collector posts `accept` = the games it took), its records files (PROTOCOL rev 8).
+
+One result schema either way: `games.jsonl`, one row per game in gid order - `gid`, `pair`, `seats` (this game's
+order), `result` (per seat), `margin`, `rounds`, `over`, `digest`, `rec`, `by` {machine, lease}.
+
+**`match_settings(a, sims, spec, tilts, b)`** gives the eval job of `zero.h2h.match(a, b, sims, spec, seat_a = seat_b =
+A's run's rule with root belief tilts `tilts`, paired)` - the yardsticks' best of one: A's run's settings resolved, then
+`eval_sims`, `c_puct` 1 and `chance_k` 2 (zero.h2h's defaults), `max_steps` 5000, `eval_spec`, the tilts, `sparse` 0
+(h2h's dense batches), `eval_trace` 1; then checked: the farm's two seat dicts (`zero.farm_eval.seat_dicts`, Run.nn_seat)
+equal h2h's (`games.nn_seat(key, sims, 1.0, chance_k=2, **run_seat_keys(side))` + the rule) key for key, else
+CampaignError naming the difference. An eval job has ONE seat setting for both sides, so a match whose sides differ
+(pb2's anchor a3198: a file outside a run, so zero.h2h gives that side no `eval_cache` while pb2's side has 8192) is
+refused: the farm cannot play it exactly.
+
+### 165.2 Trust
+
+Each traced row's digest is checked against its own record as it is taken (a mismatch refuses the campaign: the state
+records why and every later call raises). Then `spot` (default 5%) of the games - a random choice seeded by the run name,
+the same whenever it is made, at least one game - are replayed here through the engine from seed + moves
+(`zero.farm_eval.replay_trace`: the record's seed must be the campaign's game seed; every move legal; the result,
+margins, rounds and setup the record's; the replayed result, rounds and `over` the row's; no samples for an eval game,
+with samples every sample's decider, kind and policy length): any mismatch refuses the whole campaign. A set of games has
+one digest, `games_digest` (SHA-256 over `gid:digest` lines in gid order): the same games give the same digest wherever
+and however they were cut into leases; the result lists it for the campaign and per lease.
+
+What it proves and what not: the moves are legal and the results theirs - it catches bad RAM, a broken build or a
+corrupted transfer, the realistic threat with invited friends' honest-but-fallible PCs. It does not prove the network
+chose the moves (that would need searching again); a duplicate-lease audit (the review's 3.6) is the later answer.
+
+### 165.3 Coverage, the deadline, the local fallback
+
+Positive coverage: every id of `[0, N)` is in exactly one of done (farm, or local) and failed (with its reason), or
+missing; `status` and the result list the ranges. `collect` pulls (sha256 of each file, credited ids only: `ids`,
+`dup_ids`, `also` as zero.farm_h2h reads them, the first copy of a game wins, every chunk acked) until every game is in
+or the deadline passes; then pauses the campaign's farm run (its leases cancelled at their next beat) and plays the
+missing ids here with the campaign's own worker executable on its own graphs (`mtgz-worker eval` / `selfplay --output
+records`, below normal priority, in pieces of 64 games - 16 with samples - whole pairs; `--wrap` a command prefix such
+as the slot throttle): the same games the farm would have played. A piece that fails marks its games failed with the
+worker's error; failed games refuse the campaign unless `allow_failed`. With `local=False` games missing past the
+deadline refuse it, naming the ranges. So a campaign never stalls on the farm and never ends with a silent hole.
+
+### 165.4 Priority beside the live run (PROTOCOL rev 13)
+
+A run's `selfplay` or `eval` may carry `share` (0 < x <= 1). Such a job goes first within its tier only while its own
+active leases + 1 are at most x times (all runs' active self-play and eval leases + 1); otherwise after every other run
+job. The coordinator takes the first candidate that grants, so a campaign still gets every machine the live run has
+nothing for (its generation's quota filled, the run paused) - it never idles a PC - and at the default 0.25 it takes at
+most 1 machine in 4 while pb2's farm self-play wants them (tested: 8 machines asking -> live, live, live, campaign, live,
+live, live, campaign). Without `share` nothing changes (evaluation still goes before self-play). The pool still holds no
+share of a generation's quota (DESIGN 7.3): whatever the farm does not play, the desktop does, so a campaign can never
+slow pb2's self-play below what it is without the farm. **Until rev 13 is deployed** the production coordinator ignores
+`share` and serves eval batches first: a campaign then takes every farm PC for its duration (165.8).
+
+### 165.5 The desktop side
+
+* `mtgz.az.farm_campaign` (library): `match_settings`, `selfplay_settings(ckpt, overrides)`, `submit(name, a, games,
+  settings, seats, seed, build_id, worker, runtime, b=, paired=, share=, deadline_s=, spot=, samples=, ...)` -> the
+  state directory, `resume`, `status`, `collect` -> the result {games, coverage, digest, lease_digests, spot, machines,
+  readout (zero.h2h's summary for A vs B), job, records}, `games(d)` (the traced rows), `describe(row, spec)` and
+  `write_records` / `read_records` (each game replayed into its moves: who decided, the decision's kind, the option in
+  words from the engine's spectator view - targets included -, per game of a match; 0.07 s a Delver game), `run_pool(cfg)`.
+* `tools/farm_campaign.py submit|status|collect` (the fuzz campaigns' tool; `--bo1` = the yardsticks' best of one).
+* State `~/.zero-farm/campaigns/<run>/`: state.json, results/, local/, rows.jsonl, games.jsonl, records.jsonl.gz. Every
+  step idempotent; `collect` resumes. The admin token, data key and farm-release as zero.farm_def's (never printed).
+  Exports need onnx / onnxscript (the zero-farm venv's Python on the desktop).
+
+### 165.6 The yardsticks' best of one on the farm
+
+New yardsticks options: `bo1_backend` 'local' (zero.h2h.match here, as before), 'farm' (`measure_bo1_farm`: a play job of
+the run's pool worker build - `pool_build`, `pool_worker`, `pool_runtime`, `pool_min_agent` - with `match_settings` of
+the local match, paired, `bo1_seed`; collected with the spot check and the local fallback; the row has the local row's
+fields plus `backend` 'farm' and `farm` {run, digest, spot, machines, local, seconds}), or null = auto: 'farm' for an
+opponent whose match the farm plays exactly (the run has a pool and `match_settings` accepts both sides), else 'local' -
+decided per opponent from the settings before anything is played (memoized), never as a fallback after a failure.
+`bo1_farm_share` (0.25), `bo1_farm_wait_s` (null: 3/4 of timeout_s). A farm best of one runs in its own watcher lane
+'farm' (it waits on the farm and uses no local GPU), so the GPU lane goes on with the local opponents. On pb2 today: gen0
+-> farm, a3198 -> local (its eval_cache, above). The standalone watcher on pb2 (mtg-zero-wt/yardsticks-pb2, older code)
+is unchanged; the companion takes this at the run's next restart onto a commit with it (and a worker build with
+`eval_trace`).
+
+### 165.7 The sideboard play analysis as a campaign
+
+The sideboard-card play analysis (hub `sideboard_play_analysis/sb_play.py`, another session) plays a checkpoint against
+itself with its run's SELF-PLAY seat (noise, temperature, the playout cap; resignation off) on the self-play spec with
+`dealt_decks` overridden. As a campaign that is a play job with samples:
+`selfplay_settings(ckpt, {'spec': <its spec with dealt_decks {"p": 1.0, "swaps": [1, 8]}>, 'selfplay_resign_t': 0})`
+(`--argmax`: also `eps` 0, `temp_moves` 0), `submit(..., seats=[{'net': 1}, {'net': 1}], paired=False, samples=True)`,
+then `describe` per game (or `games(d)`'s records into its own scan: the records replay with `Game(spec, seed)` + the
+moves, which is what its scan does). Its seeds differ from its local runs' (statistically the same games).
+
+### 165.8 Tests, gates, measured
+
+**Tests.** zero-core: zero_worker `traced_rows_are_the_rows_plus_their_records` and every zero_worker test; pytest
+`test_farm_trace.py` (4), `test_worker_settings.py`, `test_farm_h2h.py`, `test_farm_def.py`, `test_farm_pool.py`.
+mtg-zero: `tests/test_farm_play.py` (6: `match_settings` gives zero.h2h's seats for both sides and refuses an opponent
+with another `eval_cache`; the yardsticks' backend per opponent and its lanes; real Delver records from a traced driver
+collected from a fake coordinator - credited ids only, the first copy wins, acks, coverage, the spot check replaying
+every game, `describe` wording every move, the games' digest independent of leases, the readout; a tampered move refused
+by its digest and, re-hashed, by the replay; coverage of failed and missing ranges and whole-pair local pieces; the
+samples option's records read as rows, accepted, replayed with their samples, its run body), `test_yardsticks.py`,
+`test_farm_campaign.py`, `test_worker_farm.py` unchanged. zero-farm: coordinator `test/share.test.ts` (6) and the full
+suite; agent code unchanged.
+
+**Gates.** listed in 165.10 (added after gating this commit).
+
+**End to end on the farm** (2026-11-15, production coordinator rev 12, worker build 74f2279f96327576b2a46bbb = this
+branch's e776e984, runtime d531424b, `min_agent` 0.2.11): campaign `cmp-e2e-pb2-96v0-40` - pb2@96 vs pb2@0, the
+yardsticks' best of one (`--bo1`, 64 simulations, seed 0, paired), 40 games, share 0.25 - played by desktop-g72aptg
+(10 games) and squirrel_basement (30) in 5 leases, 1,908 s from the batch to the last game; every row's digest checked,
+the 5% spot check (games 9 and 11, one per machine) and then all 40 replayed here from seed + moves: all equal. Games'
+digest 6692e970083aa484; A 0.55 +- 0.062 over 40 games. Records: 40 games described move by move in 1 s.
+
+**Determinism across machines.** A traced game is bit-identical wherever the worker plays it: games 0-3 of the
+e2e campaign (desktop-g72aptg, i7-7700K) have the digests of the same games played on the desktop (i9-13900K) by the
+same worker in the local test; and all 40 games the e2e campaign shares with the 400-game campaign below (game ids
+0-39, played there by other machine pairs, e.g. squirrel_basement's Ryzen 7 5800X against desktop-g72aptg) have equal
+digests. ONNX Runtime's CPU provider and the engine give the same games on every CPU seen so far, so a farm campaign's
+numbers are a pure function of (build, graphs, settings, seed, ids).
+
+**The best-of-one equality** (the task's check: a farm-backed h2h of pb2@96 vs pb2@0 over the yardsticks' seeds against
+the yardsticks' local result, 0.500 over 400 games, pentanomial [38, 0, 124, 0, 38], in runs/delver-bo3-pb2/
+yardsticks.jsonl): not exactly - and it cannot be, because the local result is not reproducible itself. Played
+on the farm (campaign `cmp-eq-pb2-96v0-400`: the same checkpoints, spec, seats - checked dict for dict -, seed 0,
+paired, 400 games; desktop-g72aptg 164 games, squirrel_basement 154, and 82 by the local fallback once the farm went
+quiet after ~3.5 h, `collect --deadline-now`, 8 threads, 51 min): **A 0.490 +- 0.020, pentanomial [33, 0, 138, 0, 29]**,
+games' digest 4c33d172139f1e6f; the spot check (20 games, 6 + 6 farm + 8 local) and then all 400 replayed here: all equal.
+The yardsticks' recorded local result is 0.500, [38, 0, 124, 0, 38]. Re-running exactly the yardsticks' local match
+(`zero.h2h.match` as `measure_bo1` calls it, torch on the 5090, ZERO_TOKEN_GRAPHS=1 as the watcher sets it; 1,223 s) gave
+**0.4775, [41, 0, 127, 0, 32]**: the torch path's games depend on how its concurrent games fall into GPU batches
+(timing), so the same match moves by about a standard error from run to run (0.500 vs 0.4775 here). Against that rerun
+the farm's games have the same result in 369 of 400. The farm's numbers, on the other hand, are exact: the same games
+digest-for-digest on every machine and in every campaign (above), the local fallback's included. So `bo1_backend farm`
+gives the same numbers as the local backend only where "local" means the same worker on the same graphs (the
+fallback); against the torch path it gives a result within the torch path's own run-to-run spread, and from then on
+the same result every time. A run that switches backends starts a new series in its yardstick chart (the row says
+`backend`); to compare generations, keep one backend for the run. (Making the local backend the worker too would make
+both backends one series, at ~40 CPU-minutes per 64 games here: the owner's call.)
+
+### 165.9 What needs the owner's go-ahead
+
+* **Deploying the coordinator (rev 13)**: `feat/campaigns` f06885f + 572385e (docs). Backward compatible: without `share`
+  nothing changes, so pb2's farm self-play (its run carries no share) keeps its leases as before; no migration. Check
+  pb2's lease flow before and after (`GET /v1/admin/run/delver-bo3-pb2` selfplay_state). Until it is deployed a campaign
+  takes every farm PC (eval first): during the two test campaigns (~4 h in all, 1-3 active PCs) pb2's farm self-play got no farm games (the
+  desktop played them; DESIGN 7.3).
+* **Merging** zero-core `feat/farm-campaigns` and mtg-zero `feat/farm-campaigns` (zero-farm `feat/campaigns`): a run moves
+  onto it at a restart with a worker build of it (74f2279f is one; registered, used by the two campaigns only).
+* No agent release is needed; nothing reached friends but the two campaigns' leases.
