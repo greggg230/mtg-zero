@@ -191,15 +191,17 @@ def _onnx_ok():
 def test_the_selftest_guards_the_network(tmp_path):
     """A small random MTG network: its reference set from real driver batches (the worker's own recording) with
     torch's answers; through `serve` the worker answers it before playing (selftest ok, a game, its records), and with
-    one prior of the set off by 1e-3 it reports the difference and stops with a fatal error before any game."""
+    one prior of the set off by 1e-3 it reports the difference and stops with a fatal error before any game. On
+    EoE sealed (game mtg_eoe: layout v6, zero-onnx/1 graphs): the MTG table is layout v7, whose zero-onnx/2 reference set must hold pointer overrides, which short uniform games never reach (none in ~40k rows; pb2's real batches ~2 per 1,000) - zero-onnx/2's self-test and parity are zero-core's (test_onnx2, zero_worker job_tail) and tools/farm_gates.py's on a run's real batches (ENGINE.md 155)."""
     import onnxruntime
     import torch
     import mtgz.az  # noqa: F401
     from zero import games as G, net as N, onnx_export as OX, onnx_parity as OP
     from zero import run as R
     ns = type('A', (), {k: None for k in R.DEFAULTS})()
-    cfg = R.resolve_config(ns, {'preset': 'mtg-smoke'})
-    cfg.update(conc=4, threads=1, groups=1)
+    cfg = R.resolve_config(ns, {'preset': 'eoe-smoke'})
+    # (no root belief: the uniform recording and this network have no auxiliary head)
+    cfg.update(conc=4, threads=1, groups=1, selfplay_belief_tilt=0.0, selfplay_belief_tilts={}, eval_belief_tilt=0.0, eval_belief_tilts={})
     cp = tmp_path / 'config.json'
     cp.write_text(json.dumps(cfg), encoding='utf-8')
     rec = tmp_path / 'batches.npz'
@@ -261,11 +263,11 @@ def test_the_selftest_guards_the_network(tmp_path):
 
 # ------------------------------------------------------------------ eval jobs (ENGINE.md 114.4)
 
-def _smoke_cfg(tmp_path, **kw):
+def _smoke_cfg(tmp_path, preset='mtg-smoke', **kw):
     import mtgz.az  # noqa: F401
     from zero import farm_eval as FE, run as R
     ns = type('A', (), {k: None for k in R.DEFAULTS})()
-    cfg = R.resolve_config(ns, {'preset': 'mtg-smoke'})
+    cfg = R.resolve_config(ns, {'preset': preset})
     cfg.update(conc=8, threads=1, groups=1, eval_sims=4, **kw)
     cfg = FE.resolve_eval_spec(cfg)
     cp = tmp_path / 'settings.json'
@@ -336,7 +338,7 @@ def test_an_eval_job_is_the_python_evaluation(tmp_path):
     """An eval job over aw/1 (PROTOCOL.md 5.2) with two small random MTG networks: one self-test per network (with
     its gen), rows of whole pairs in 'evals' files, and every row byte-identical to the Python path - Run.play_match's
     driver (zero.farm_eval.match_driver) with zero-core's OnnxEvaluator on the same graphs (groups 1); a lease of the
-    match's second pair plays those games; a network against the heuristic bot."""
+    match's second pair plays those games; a network against the heuristic bot. On EoE sealed (game mtg_eoe: layout v6, zero-onnx/1 graphs): the MTG table is layout v7, whose zero-onnx/2 reference set must hold pointer overrides, which short uniform games never reach (none in ~40k rows; pb2's real batches ~2 per 1,000) - zero-onnx/2's self-test and parity are zero-core's (test_onnx2, zero_worker job_tail) and tools/farm_gates.py's on a run's real batches (ENGINE.md 155)."""
     import hashlib
     import onnxruntime
     import torch
@@ -344,7 +346,7 @@ def test_an_eval_job_is_the_python_evaluation(tmp_path):
     from zero import farm_eval as FE, games as G, net as N, onnx_export as OX, onnx_parity as OP
     from zero.infer import drive
     from zero.onnx_eval import OnnxEvaluator
-    cfg, cp = _smoke_cfg(tmp_path)
+    cfg, cp = _smoke_cfg(tmp_path, 'eoe-smoke', selfplay_belief_tilt=0.0, selfplay_belief_tilts={}, eval_belief_tilt=0.0, eval_belief_tilts={})    # (no root belief: no auxiliary head)
     rec = tmp_path / 'batches.npz'
     p = subprocess.run([WORKER, 'selfplay', '--settings', str(cp), '--uniform', '--games', '2', '--threads', '1', '--out',
                         str(tmp_path / 'u'), '--record-batches', '100', '--record-file', str(rec)],

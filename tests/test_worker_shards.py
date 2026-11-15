@@ -33,9 +33,13 @@ pytestmark = pytest.mark.skipif(WORKER is None, reason='mtgz-worker is not built
 
 
 def settings(sparse):
+    # (EoE sealed - game mtg_eoe, layout v6 - plays both shard formats; the MTG table's layout v7 rows with tail tokens
+    # are sparse only (zero-core docs/az.md 43.1, R8) and its worker shards are byte-identical to the Python remote
+    # worker's in tools/farm_compat.py's gate 2, every gate's farm-compat step: ENGINE.md 155)
     ns = type('A', (), {k: None for k in R.DEFAULTS})()
-    cfg = R.resolve_config(ns, {'preset': 'mtg-smoke'})
-    cfg.update(shard_sparse=int(sparse), shard_rows=400, aux_belief_w=0.25, conc=4, threads=2)
+    cfg = R.resolve_config(ns, {'preset': 'eoe-smoke'})
+    cfg.update(shard_sparse=int(sparse), shard_rows=400, aux_belief_w=0.25, conc=4, threads=2, selfplay_belief_tilt=0.0,
+               selfplay_belief_tilts={})        # (the uniform evaluator has no auxiliary head: no root belief)
     return cfg
 
 
