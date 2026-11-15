@@ -98,11 +98,21 @@ behaviour change moves the worker with it (the worker is this repo's `worker/` c
 run attaches the farm or moves to a new commit, `tools/farm_gates.py` runs the full gates 2 and 3 on that run's real
 config and checkpoint (`docs/ENGINE.md` 114.8, 155).
 
+**Beside a live run the gate works off the desktop** (`docs/ENGINE.md` 166). When a supervisor is live on this machine
+(pb2 and friends), `gate.py` sends its pure-CPU steps (cargo tests, digests, the engine suite, the fuzz, pytest, the
+run-loop and search smokes; not zero-core's own tests, whose goldens are the desktop's) to the MacBook through `tools/mac.sh` (`nice`, at most two at once there)
+and runs the desktop's own heavy steps (builds, the Windows worker, farm compat, private-data tests) each holding a slot
+of `tools/slotd.sh`. Same checkers and evidence; the plan's `placement:` line says where each step ran. `--no-mac`
+keeps everything here (throttled); `--offload local|mac` and `--throttle on|off` override the automatic choice. Any
+other heavy command you run by hand beside a live run goes through the throttle too:
+`bash tools/slotd.sh cargo test --release -p engine --test az` (state and settings in `E:/mtg-zero-state`;
+`bash tools/slotd.sh --status`).
+
 **Gate in a warm worktree** (`docs/ENGINE.md` 167), not a new one: `python tools/warm_pool.py run --sha <sha> -- python
 tools/gate.py <tier>` checks the commit out into one of a few fixed worktrees with their own fixed target dirs, so cargo
 rebuilds only what changed, and the Python module and the release worker come from the artifact cache
-(`tools/zcache.py`) when the commit changed no Rust input. gate.py runs a tier's independent steps at once, each heavy
-one through the machine's throttle (`tools/slotd.sh`): run gate.py itself unthrottled. Never edit in a warm worktree.
+(`tools/zcache.py`) when the commit changed no Rust input. gate.py runs a tier's independent steps at once, each where
+the placement above puts it. Never edit in a warm worktree.
 
 Don't re-run a full suite on a sha that already passed it: each tier writes `gates/<sha12>-<tier>.json`
 (`docs/ENGINE.md` 143). The checkout must be exactly its commit: an untracked file under `engine/`,
@@ -136,6 +146,10 @@ ran in your merge note or PR.
 * **Live runs.** Never start, resume, edit or delete anything under someone's `runs/` unless
   asked. Runs train from their own pinned worktrees (`git worktree add --detach ...`), never
   from a checkout being edited, and a live run's workers import the code of that checkout.
+* **Process-churning tests beside a live run.** Tests that start real supervisors or spawn processes in a loop carry
+  `@pytest.mark.live_run_hazard` and are skipped while any supervisor is live on the machine (zero-core
+  `docs/az.md` 51; a test storm killed a live run on 2026-11-14). Mark any new one. A gate names the fenced tests in
+  its final line (a skip); on the Mac they run. `ZERO_ALLOW_LIVE_RUN_HAZARD=1` only on a machine with no one's run.
 * **Maintainer-only paths.** `E:/...` defaults, the `mac` and `vast` remotes and `*-mac` presets,
   `tools/mac.sh`, `tools/vast*.py` (rented boxes on the maintainer's Vast.ai account: they cost
   money), `tools/data/*` (hard-coded paths), and `tools/delverai_publish.py` all

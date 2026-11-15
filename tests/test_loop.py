@@ -97,6 +97,7 @@ sys.exit(3 if len(k) == 0 else 0)
 '''
 
 
+@pytest.mark.live_run_hazard
 def test_supervisor_with_fake_run(tmp_path):
     run = tmp_path / 'sup'
     run.mkdir()
@@ -119,6 +120,7 @@ def test_supervisor_with_fake_run(tmp_path):
     assert 'crash #1' in log and 'run paused' in log and 'clean exit' in log
 
 
+@pytest.mark.live_run_hazard
 def test_kill_run_finds_nothing_and_pause_tool(tmp_path):
     run = tmp_path / 'k'
     run.mkdir()

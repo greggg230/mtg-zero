@@ -310,6 +310,30 @@ class Fake:
             return self.core_pytest.pop(0)
         if k in self.over:
             return self.over[k]
+        if k == 'mac' and 'tools/slotd.sh' in argv[-1]:           # an offloaded step (ENGINE.md 166): its Mac output
+            inner = argv[-1]
+            if '--no-run' in inner:                                   # (the test binaries built there: ENGINE.md 167)
+                return MAC(SHA, '    Finished `release` profile [optimized + debuginfo] target(s) in 1.20s\n'), 0
+            if 'fuzz_shards.py' in inner:
+                pool = inner.split('--pool ')[1].split()[0]
+                games = int(inner.split('--games ')[1].split()[0])
+                return MAC(SHA, FUZZ_SHARDS(pool, games, '--hidden' in inner)), 0
+            if 'mtgz.az.run' in inner:
+                rows = [json.dumps({'iter': i, 'selfplay': {'games': 16, 'unfinished': 0}}) for i in range(2)]
+                return MAC(SHA, 'iter 1 done\n' + ''.join(G.METRICS_PREFIX + r + '\n' for r in rows)), 0
+            if 'pytest' in inner:
+                return MAC(SHA, PYTEST_OK), 0
+            if 'search_smoke.py' in inner:
+                return MAC(SHA, SMOKE(len(inner.split('--specs ')[1].split()[0].split(',')))), 0
+            if 'digest_formats' in inner:
+                return MAC(SHA, FORMATS()), 0
+            if 'dealt_decks' in inner:
+                return MAC(SHA, DEALT()), 0
+            if '--test digest' in inner:
+                return MAC(SHA, DIGEST(D_FREE if 'DIGEST_ENCODING=0' in inner else D_FULL)), 0
+            if '--test fuzz' in inner:
+                return MAC(SHA, FUZZ_OUT), 0
+            return MAC(SHA, CARGO(34) if '--test' in inner else CARGO(123, 3, 0, 0)), 0
         if k == 'run':                                    # the run-loop smoke writes its metrics
             run = argv[argv.index('--run') + 1]
             os.makedirs(run, exist_ok=True)
@@ -371,9 +395,14 @@ def gate(tmp_path, monkeypatch):
         return types.SimpleNamespace(tier=args.tier, root=G.ROOT, jobs=2, step_timeout=60, sha=SHA, sha_short=SHA[:12],
                                      core_pin=PIN, core_head=PIN, target_dir=str(tmp_path / 'target'),
                                      logs_dir=str(tmp_path / 'gates' / 'logs'), base_env={'CUDA_VISIBLE_DEVICES': '-1'},
-                                     no_mac=args.no_mac, dirty=[], baseline=None)
+                                     no_mac=args.no_mac, dirty=[], baseline=None, slot_wait=args.slot_wait,
+                                     throttle=False, placement=None)
     monkeypatch.setattr(G, 'Ctx', fake_ctx)
     fake = Fake(str(core))
+    # placement (ENGINE.md 166): no live run and no Mac unless a test says so (never this machine's real state)
+    fake.live, fake.mac = [], (False, 'the Mac: stubbed off')
+    monkeypatch.setattr(G, 'live_runs', lambda: list(fake.live))
+    monkeypatch.setattr(G, 'mac_probe', lambda *a, **k: fake.mac)
     fake.worker = str(tmp_path / 'target' / 'release' / G.WORKER_EXE)
     fake.diff = 'docs/ENGINE.md\n'
     monkeypatch.setattr(G, 'execute', fake)
@@ -690,7 +719,7 @@ def core_step(tmp_path, monkeypatch):
                                 step_timeout=60, base_env={'CUDA_VISIBLE_DEVICES': '-1'})
     build, step = G.core_steps(ctx)
     assert build.id == 'core-build' and step.id == 'core-pytest' and step.cwd == str(core)
-    assert step.argv[3:5] == ['tests', '-q'] and '-rfE' in step.argv
+    assert step.argv[3:5] == ['tests', '-q'] and '-rfEs' in step.argv
     calls = []
 
     def script(*answers):
@@ -1016,28 +1045,20 @@ def test_the_python_tier_shards_pytest_beside_the_smoke(gate, capsys, monkeypatc
     rc, out, _, _ = gate('python', '--pytest-shards', '3', capsys=capsys)
     assert rc == 0
     ctx_ns = types.SimpleNamespace(pytest_shards=3, sha_short=SHA[:12])
-    steps = G.pytest_step(ctx=ctx_ns, group='g')
-    assert len(steps) == 3 and all(s.heavy and s.group == 'g' for s in steps)
+    steps = G.pytest_step(ctx=ctx_ns)
+    assert len(steps) == 3 and all(s.heavy for s in steps)
     seen = [a for s in steps for a in s.argv if a.startswith('tests/')]
     assert sorted(seen) == files
     assert len({next(a for a in s.argv if a.startswith('--basetemp=')) for s in steps}) == 3
-
-
-def test_a_heavy_step_runs_through_the_throttle(tmp_path):
-    """ENGINE.md 167: with a throttle (tools/slotd.sh), a heavy step's command is run by it - and its output, exit code
-    and checker are the command's; a light step runs as it is."""
-    slot = tmp_path / 'slotd.sh'
-    slot.write_text('echo "[slot] $MTGZ_SLOT_WAIT_MAX"\nexec "$@"\n', encoding='utf-8')
-    ctx = probe_ctx(tmp_path, {})
-    ctx.throttle = str(slot)
-    seen = {}
-    probe = [sys.executable, '-c', 'print("hello")']
-    step = G.Step('probe', probe, heavy=True, checker=lambda out, rc: (seen.setdefault('out', out) is not None, '', {}))
-    assert G.run_step(ctx, step).passed
-    assert '[slot] 60' in seen['out'] and 'hello' in seen['out']
-    seen.clear()
-    assert G.run_step(ctx, G.Step('probe', probe, checker=lambda out, rc: (seen.setdefault('out', out) is not None, '', {}))).passed
-    assert '[slot]' not in seen['out'] and 'hello' in seen['out']
+    # beside a live run (ENGINE.md 166): each shard's Mac command runs its files but the desktop-only ones, and one
+    # desktop part (beside the first shard with a Mac command) runs those - together every test once
+    macs = [s.mac_cmd(None)[0][2] for s in steps if s.mac_cmd]
+    desk = [s.desktop_part for s in steps if s.desktop_part]
+    assert len(desk) == 1 and desk[0].argv[3:3 + len(G.PYTEST_DESKTOP_ONLY)] == list(G.PYTEST_DESKTOP_ONLY)
+    desk_files = {a for a in G.PYTEST_DESKTOP_ONLY if '::' not in a}
+    on_mac = [t for m in macs for t in m.split() if t.startswith('tests/')]
+    assert sorted(on_mac) == sorted(f for f in files if f not in desk_files)
+    assert all(m.startswith('bash tools/build_py.sh && ') for m in macs)
 
 
 def test_the_worker_build_takes_the_cached_worker_by_its_line(tmp_path):
@@ -1235,3 +1256,113 @@ def test_the_worker_build_checker(tmp_path):
     assert ok and extra['worker_sha256'] == G.sha256_file(exe)
     assert check('   Compiling mtgz_worker\n', 0)[:2] == (False, 'no "Finished `release` profile" line')
     assert check(WORKER_BUILT, 101)[:2] == (False, 'exit 101')
+
+
+FUZZ_OUT = ('running 4 tests\n20000 games: wins [9803, 10075], draws 122, aborted 0, mean turns 31.8\n'
+            'test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.10s\n')
+
+# ---------------------------------------------------------------------------- placement (ENGINE.md 166)
+
+LIVE = [{'pid': 4242, 'run': 'E:/mtg-zero/runs/delver-bo3-pb2'}]
+
+
+def kinds(fake):
+    return [(k, ' '.join(a)) for k, a in fake.calls]
+
+
+def test_without_a_live_run_nothing_moves_and_nothing_waits_for_a_slot(gate, capsys):
+    rc, out, _, report = gate('python', capsys=capsys)
+    assert rc == 0 and final(out).startswith('GATE PASSED python')
+    assert not any('slotd.sh' in c or 'mac.sh' in c for _, c in kinds(gate.fake))
+    assert report['placement']['offload'] == 'desktop' and report['placement']['throttle'] is False
+    assert {s['placement'] for s in report['steps'] if s['id'] != 'tree-unchanged'} == {'desktop'}
+
+
+def test_beside_a_live_run_the_heavy_steps_go_to_the_mac_and_the_rest_waits_for_a_slot(gate, capsys):
+    gate.fake.live, gate.fake.mac = LIVE, (True, 'the Mac: load 6, 40 GB available')
+    rc, out, _, report = gate('python', capsys=capsys)
+    assert rc == 0 and final(out).startswith('GATE PASSED python'), out
+    calls = kinds(gate.fake)
+    by = {k: [c for kk, c in calls if kk == k] for k in ('build', 'worker-build', 'pytest', 'mac')}
+    assert all(c.startswith('bash tools/slotd.sh ') for c in by['build'] + by['worker-build'] + by['pytest'])
+    mac = by['mac']
+    assert len(mac) == 2 and all('nice -n 10' in c and 'tools/slotd.sh' in c and '-u PYTEST_ADDOPTS' in c for c in mac)
+    pytest_mac = next(c for c in mac if 'pytest' in c)
+    assert 'bash tools/build_py.sh && python -m pytest tests' in pytest_mac
+    for a in G.PYTEST_DESKTOP_ONLY:                   # the Mac leaves out exactly what the desktop part runs
+        assert (f'--deselect={a}' if '::' in a else f'--ignore={a}') in pytest_mac
+        assert a in by['pytest'][0]
+    steps = {s['id']: s for s in report['steps']}
+    assert steps['pytest']['placement'] == 'mac' and steps['pytest']['mac']
+    assert steps['run-loop-smoke']['placement'] == 'mac' and steps['run-loop-smoke']['reason'] == '16 games, 0 unfinished'
+    assert steps['pytest-desktop']['placement'] == G.THROTTLED and steps['build']['placement'] == G.THROTTLED
+    assert report['placement']['live_runs'] == LIVE and 'placement: 2 step(s) on the Mac' in out
+
+
+def test_no_mac_keeps_everything_on_the_desktop_but_throttled(gate, capsys):
+    gate.fake.live, gate.fake.mac = LIVE, (True, 'the Mac: load 6')
+    rc, out, _, report = gate('python', '--no-mac', capsys=capsys)
+    assert rc == 0 and not any('mac.sh' in c for _, c in kinds(gate.fake))
+    assert all(s['placement'] == G.THROTTLED for s in report['steps'] if s['id'] != 'tree-unchanged')
+    assert '--no-mac: nothing on the Mac' in report['placement']['summary']
+    assert all(c.startswith('bash tools/slotd.sh ') for k, c in kinds(gate.fake))
+
+
+def test_an_unreachable_mac_leaves_the_steps_on_the_desktop_throttled(gate, capsys):
+    gate.fake.live, gate.fake.mac = LIVE, (False, 'the Mac (x) did not answer: TimeoutExpired')
+    rc, out, _, report = gate('python', capsys=capsys)
+    assert rc == 0 and not any('mac.sh' in c for _, c in kinds(gate.fake))
+    assert 'did not answer' in report['placement']['summary']
+    rc, out, err, report = gate('python', '--offload', 'mac', capsys=capsys)
+    assert rc == 2 and '--offload mac: the Mac (x) did not answer' in err
+
+
+def test_a_mac_step_that_never_reached_the_mac_runs_on_the_desktop(gate, capsys):
+    gate.fake.live, gate.fake.mac = LIVE, (True, 'the Mac: up')
+    gate.fake.set('mac', 'ssh: connect to host 100.95.248.116 port 22: Connection timed out\n', 255)
+    rc, out, _, report = gate('python', capsys=capsys)
+    assert rc == 0, out
+    steps = {s['id']: s for s in report['steps']}
+    assert steps['pytest']['placement'] == G.THROTTLED and steps['run-loop-smoke']['placement'] == G.THROTTLED
+    log = open(steps['pytest']['log'], encoding='utf-8').read()
+    assert 'the Mac was not reached' in log and 'Connection timed out' in log
+
+
+def test_tests_the_live_run_fence_skipped_make_it_a_pass_with_skips(gate, capsys):
+    gate.fake.set('pytest', '..s.\n=========================== short test summary info ===========================\n'
+                  'SKIPPED [2] tests/test_loop.py:100: live-run fence: 1 live run(s) on this machine (E:/r); the test '
+                  'starts supervisors\n69 passed, 2 skipped in 10.00s\n')
+    rc, out, _, report = gate('python', capsys=capsys)
+    assert rc == 0 and final(out).startswith('GATE PASSED WITH SKIPS python'), final(out)
+    assert 'pytest: 2 live-run-hazard test(s) (fenced' in final(out)
+    assert {s['id']: s for s in report['steps']}['pytest']['fenced'] == 2
+
+
+def test_the_suite_on_the_mac_carries_its_fuzz_settings_and_nothing_of_the_callers(gate, capsys, monkeypatch):
+    monkeypatch.setenv('FUZZ_SKIP', '5')
+    gate.fake.live, gate.fake.mac = LIVE, (True, 'the Mac: up')
+    rc, out, _, report = gate('suite', '--fuzz-pools', 'default,delver', capsys=capsys)
+    assert rc == 0, out
+    mac = [c for k, c in kinds(gate.fake) if k == 'mac']
+    assert len(mac) == 4 and all('FUZZ_SKIP' not in c.split('unset')[-1].split('bash tools/slotd.sh')[0] for c in mac)
+    # (the sharded fuzz on the Mac's checkout, ENGINE.md 167: its pool and games on the command line, the shards' own
+    # FUZZ_* set by tools/fuzz_shards.py, the caller's never)
+    fuzz = [c for c in mac if 'fuzz_shards.py' in c]
+    assert len(fuzz) == 2 and all('--games 2000' in c for c in fuzz) and any('--pool delver' in c for c in fuzz)
+    assert all(s['placement'] == 'mac' for s in report['steps'] if s['id'] != 'tree-unchanged')
+    assert report['passed'] and report['clean']        # (the engine tier's suite evidence wants exactly that)
+
+
+def test_remote_command_scrubs_and_keeps_the_step_env():
+    cmd = G.remote_command(['cargo', 'test', '--release'], {'DIGEST_ENCODING': '0', 'X': None},
+                           os.path.join(G.ROOT, 'third_party', 'zero-core'))
+    assert 'unset "$v"' in cmd and '-u PYTHONPATH' in cmd and '-u X' in cmd and 'DIGEST_ENCODING=0' in cmd
+    assert "cd third_party/zero-core && cargo test --release" in cmd and cmd.count('bash tools/slotd.sh nice -n 10') == 1
+    assert G.remote_command(['bash', '-c', 'a && b']).endswith("bash -c 'a && b'")
+
+
+def test_mac_never_reached_and_fenced_counts():
+    assert G.mac_never_reached(MAC(SHA, 'x\n')) is None
+    assert 'no "[mac]' in G.mac_never_reached('ssh: no route\n')
+    assert G.fenced_tests('SKIPPED [3] a.py:1: live-run fence: x\nSKIPPED [1] b.py:2: other\n'
+                          'SKIPPED [1] c.py:3: live-run fence: y\n') == 4
