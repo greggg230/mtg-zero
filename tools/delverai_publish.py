@@ -95,6 +95,20 @@ generation.
 
 `--state-dir DIR`: the publisher's own files (delverai.json: the recorded generations; replays/: the recorded games;
 census/: the sideboard censuses) there instead of in the run's directory.
+
+The run's own publisher (`--supervised`, docs/ENGINE.md 163): the run's supervisor (tools/supervise.py) starts this
+publisher with the run from the run setting `publish` (mtgz.az.publish: on in the delver-mirror* presets) and it
+ends with the run. Its end watch (a thread, every --end-poll seconds) reads the supervisor's terminal state
+(zero.runctl.supervisor_end): the run FINISHED (its last iteration) - the pass under way ends, then a final pass
+(uploads still pending, the last checkpoint recorded if --every makes it due, without waiting for its file to
+settle, its census) and the record posted with the state 'finished', exit 0; STOPPED (a STOP file, the supervisor
+ended or was killed: its process gone, or another supervisor's now), REFUSED or GAVE UP (the same crash again and
+again) - the record posted with the state 'stopped' and the reason, exit 0 at once (a recording under way is
+dropped: the generation is not marked recorded). A paused run keeps its publisher (the state 'paused'). Without
+--supervised nothing changes: the publisher runs until it is killed.
+
+Every record carries `started`: the run's start (its directory's creation time; None where the file system does not
+keep one) - the site's default run is the newest main (non-side) run by it (delverai worker defaultRun).
 """
 import argparse
 import glob
@@ -715,6 +729,20 @@ def on_box_status(run, st):
     return dict(base, state='stopped', detail=f'On a rented cloud GPU: no news for {synced / 60:.0f} min.')
 
 
+def run_started(run):
+    """When the run started: its directory's creation time (st_birthtime; on Windows st_ctime is that too), whole
+    seconds - a fork (tools/fork_run.py) makes a new directory, a resumed run keeps it. None where the file system
+    keeps no creation time (Linux without st_birthtime)."""
+    try:
+        st = os.stat(run)
+    except OSError:
+        return None
+    t = getattr(st, 'st_birthtime', None)
+    if t is None and os.name == 'nt':
+        t = st.st_ctime
+    return int(t) if t else None
+
+
 def progress(run, every=1, forks=None, extra=None, state_dir=None, yardstick=None):
     """The site's progress record of a run (`every`: which iterations get games recorded;
     `forks`: fork_registry, for the lineage; `extra`: more fields - title, note, side, record_vs; `state_dir`: where
@@ -749,6 +777,7 @@ def progress(run, every=1, forks=None, extra=None, state_dir=None, yardstick=Non
                     for k, v in (ratings.get('ratings') or {}).items()},
         'anchor': {'name': ratings.get('anchor'), 'elo': ratings.get('anchor_elo')}, 'select': tag,
         'anchors': anchor_defs(run, tag, offset, also),
+        'started': run_started(run),
         'replayed': state.get('replayed', []), 'record_every': every, 'migrated_from': migrated_from(run),
         'lineage': lin, 'rated_every': own, 'format': fmt,
         **({'start_game': start} if fmt == 'bo3' else {}),
@@ -840,9 +869,16 @@ def latest_checkpoint(run, every=1, settle_s=30):
     return best
 
 
+END = {}                       # the run's end, once the end watch saw it (--supervised): {state, detail, paused_since}
+END_DETAIL = {'stopped': 'Stopped (a STOP file, or its supervisor ended).',
+              'refused': "Refused its checkpoint: a network of another encoding than this build's (see the log).",
+              'gave_up': 'Stopped: the same crash again and again (see the log).'}
+
+
 def record_extra(a):
-    """The record's fields from the command line: title, note, side, record_vs."""
-    out = {}
+    """The record's fields from the command line: title, note, side, record_vs; and the run's end (END) once it
+    ended."""
+    out = dict(END)
     if a.title:
         out['title'] = a.title
     if a.note:
@@ -942,16 +978,17 @@ def upload_saved(state, state_path, a, key, log):
             _save_state(state, state_path)
 
 
-def one_pass(run, a, key, log=print, kick=None):
+def one_pass(run, a, key, log=print, kick=None, settle_s=30):
     """Record the newest checkpoint's games if they aren't yet. Without a progress thread
-    (`kick`, its wake-up event) the progress is posted here, before and after."""
+    (`kick`, its wake-up event) the progress is posted here, before and after. `settle_s`: how long the checkpoint's
+    file must be unchanged (0 in the final pass: the run has exited)."""
     if kick is None:
         post_progress(run, a, key, log)
     state_path = os.path.join(a.state_dir or run, 'delverai.json')
     state = _json(state_path, {}) or {}
     if state.get('to_upload') and not a.dry_run:
         upload_saved(state, state_path, a, key, log)
-    ck = latest_checkpoint(run, a.every)
+    ck = latest_checkpoint(run, a.every, settle_s)
     done = state.get('replayed', [])
     if ck is None or ck[0] in done or (a.min_iter is not None and ck[0] < a.min_iter):
         # (the newest recorded generation's census when it has none: e.g. recorded before this publisher started)
@@ -1020,6 +1057,56 @@ def progress_loop(a, key, log, kick):
             log(f'progress post failed: {e!r}')
 
 
+def end_watch(a, key, log, finish, poll=5.0, exit=os._exit):
+    """--supervised: wait for the run's end (zero.runctl.supervisor_end). Finished: `finish` set (the main loop's
+    final pass). Stopped / refused / gave up: the record posted with the state 'stopped' and the reason, then the
+    process ends (`exit(0)`: at once, a recording under way included)."""
+    while True:
+        try:
+            e = runctl.supervisor_end()
+        except Exception as ex:            # noqa: BLE001 - a state file being written: next poll
+            log(f'end watch: {ex!r}')
+            e = None
+        if e == 'finished':
+            log('the run finished: the final pass follows the pass under way')
+            finish.set()
+            return
+        if e:
+            END.update(state='stopped', detail=END_DETAIL.get(e, END_DETAIL['stopped']), paused_since=None)
+            log(f'the run ended ({e}): posting it stopped, then exiting')
+            try:
+                post_progress(a.run, a, key, log)
+            except Exception as ex:        # noqa: BLE001
+                log(f'last progress post failed: {ex!r}')
+            exit(0)
+            return
+        time.sleep(poll)
+
+
+def final_pass(a, key, log, kick=None):
+    """The run finished (--supervised): uploads still pending, the last checkpoint's games if --every makes it due
+    (no settling wait: the run has exited), its census, then the record posted as 'finished' -> exit status (1 when
+    the pass failed; the record is posted either way)."""
+    run = a.run
+    cfg = _json(os.path.join(run, 'config.json'), {}) or {}
+    ck = latest_checkpoint(run, 1, 0)
+    END.update(state='finished', paused_since=None,
+               detail=f'Finished: reached its last iteration ({ck[0] if ck else cfg.get("iters")}).')
+    code = 0
+    try:
+        one_pass(run, a, key, log, kick, settle_s=0)
+    except Exception:                      # noqa: BLE001 - said, and the record still posted as finished
+        log('final pass failed:\n' + traceback.format_exc())
+        code = 1
+    try:
+        post_progress(run, a, key, log)
+    except Exception as ex:                # noqa: BLE001
+        log(f'last progress post failed: {ex!r}')
+        code = 1
+    log(f'final pass done: the run is finished, publisher exiting ({code})')
+    return code
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('run')
@@ -1049,6 +1136,9 @@ def main(argv=None):
     ap.add_argument('--census', type=int, default=sideboard_census.STARTS, metavar='N',
                     help=f"a best-of-three run: the sideboard census's starts for each recorded generation (default "
                          f"{sideboard_census.STARTS}; 0: none)")
+    ap.add_argument('--supervised', action='store_true',
+                    help="started by the run's supervisor (docs/ENGINE.md 163): end with the run (module docstring)")
+    ap.add_argument('--end-poll', type=float, default=5.0, help='--supervised: seconds between looks at the run\'s end')
     a = ap.parse_args(argv)
     if a.record_vs and not os.path.isfile(a.record_vs):
         raise SystemExit(f'--record-vs {a.record_vs}: no such checkpoint')
@@ -1071,8 +1161,22 @@ def main(argv=None):
         kick = threading.Event()
         threading.Thread(target=progress_loop, args=(a, key, log, kick), daemon=True).start()
         kick.set()
+    finish = None
+    if a.supervised:
+        finish = threading.Event()
+        log(f'supervised: publishing {a.run} until the run ends (supervisor pid '
+            f'{os.environ.get(runctl.COMPANION_ENV[0])})')
+        threading.Thread(target=end_watch, args=(a, key, log, finish, a.end_poll), daemon=True).start()
+
+    def nap(s):
+        if finish is not None:
+            finish.wait(s)
+        else:
+            time.sleep(s)
     waiting = False
     while True:
+        if finish is not None and finish.is_set():
+            return final_pass(a, key, log, kick)
         current_run(a, log)
         if not os.path.exists(os.path.join(a.run, 'config.json')):    # not launched yet (--loop)
             if a.loop is None:
@@ -1081,7 +1185,7 @@ def main(argv=None):
             if not waiting:
                 log(f'waiting for {a.run} to start')
             waiting = True
-            time.sleep(a.loop)
+            nap(a.loop)
             continue
         waiting = False
         try:
@@ -1092,8 +1196,8 @@ def main(argv=None):
             log('pass failed:\n' + traceback.format_exc())
         if a.loop is None:
             break
-        time.sleep(a.loop)
+        nap(a.loop)
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

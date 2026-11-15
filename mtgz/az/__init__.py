@@ -40,6 +40,7 @@ from zero.package import GamePackage, register
 from . import deck_reader, decklists
 from .evaldecks import eval_spec
 from .mac import LocalGpuRemote, RunCommitRemote
+from .publish import DELVER_PUBLISH
 from ..sealed.games import REMOTE_EVAL_LOG
 from ..sealed.rolling import SETTINGS as ROLLING_SETTINGS
 
@@ -203,7 +204,9 @@ PRESETS['team_draft-smoke'] = dict(
 # 64 / 16 simulations, mana payments at 4, completed-Q targets, 600 games an iteration (ENGINE.md 54.6
 # for the measured cost and the configuration recommended while td1 holds the GPU).
 SPEC_DELVER = decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)
-PRESETS['delver-mirror'] = dict(PRESETS['mtg-3'], spec=SPEC_DELVER, eval_spec=SPEC_DELVER)
+# The run's own delverai publisher (docs/ENGINE.md 163, mtgz.az.publish): on in every delver-mirror* preset (the
+# supervisor starts it with the run and it ends with the run); the smoke presets leave it off.
+PRESETS['delver-mirror'] = dict(PRESETS['mtg-3'], spec=SPEC_DELVER, eval_spec=SPEC_DELVER, publish=dict(DELVER_PUBLISH))
 # the end-to-end check of the mirror on CPU (mtg-smoke's tiny network and sims)
 PRESETS['delver-smoke'] = dict(PRESETS['mtg-smoke'], spec=SPEC_DELVER, eval_spec=SPEC_DELVER)
 # The mirror's best-of-three (docs/ENGINE.md 120, DESIGN.md 8 D3): constructed best-of-three with sideboarding, both
@@ -391,7 +394,11 @@ PACKAGE = register(GamePackage(
     # the run's newest evaluator version, the deck-choice evaluation (a yardstick: None when off) and its evaluator
     # file shipped to a remote evaluation; the package's run settings are both features' (every one off by default)
     # `mtg`'s hook keeps the run's spec and refuses one with "keep_deck" (an evaluation setting, docs/ENGINE.md 147.4)
-    settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS),
+    # the run's own delverai publisher (docs/ENGINE.md 163): the run setting `publish` (a dict of the publisher's
+    # options, {} = off; on in the delver-mirror* presets), the supervisor's companion process made of it, and a
+    # fork's (a side run, its fork record for the lineage)
+    settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, publish={}),
+    companion='mtgz.az.publish:companion', on_fork='mtgz.az.publish:on_fork',
     selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec', 'mtg': 'mtgz.az.decklists:selfplay_spec'},
     remote_eval_inputs={'mtg_eoe': 'mtgz.sealed.rolling:remote_eval_inputs'},
     specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',
