@@ -763,8 +763,8 @@ def yardsticks_record(run):
     settings} or None when the run's setting is off. No local path and no error text (it may hold one)."""
     try:
         st = YS.status(run)
-    except (OSError, ValueError) as e:
-        print(f'yardsticks: not in the record ({e!r})', flush=True)
+    except Exception as e:                 # noqa: BLE001 - said; never a reason to drop the progress post
+        print(f'yardsticks: not in the record this time ({e!r})', flush=True)
         return None
     if st is None:
         return None
