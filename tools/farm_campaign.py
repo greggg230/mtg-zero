@@ -1,4 +1,28 @@
-"""zero-farm fuzz campaigns with signed definitions (docs/ENGINE.md 114.5; zero-farm PROTOCOL.md 4, 5.1, 7).
+"""zero-farm campaigns: fuzz campaigns with signed definitions (docs/ENGINE.md 114.5; zero-farm PROTOCOL.md 4, 5.1, 7)
+and analysis campaigns - games played on the farm with every move traced (ENGINE.md 165; PROTOCOL.md 5.3; the library
+mtgz.az.farm_campaign).
+
+Analysis campaigns:
+    python tools/farm_campaign.py submit NAME --a CKPT [--b CKPT] --games N --build ID [--worker EXE] [--sims 64]
+           [--bo1 | --spec JSON] [--tilts JSON] [--seed 0] [--unpaired] [--share 0.25] [--priority 0.5]
+           [--games-per-lease auto|N] [--deadline-h 3] [--spot 0.05] [--ort-dll DLL] [--min-agent V] [--wait]
+    python tools/farm_campaign.py status NAME
+    python tools/farm_campaign.py collect NAME [--no-local] [--threads 4] [--wrap CMD ...] [--no-describe]
+           [--allow-failed] [--poll 60] [--once]
+  submit: A against B (paired games 2k, 2k + 1 share their deal, seats swapped) or A against itself (no --b), as
+  zero.h2h.match plays them (mtgz.az.farm_campaign.match_settings: A's run's evaluation settings, `--sims`, the spec,
+  the root belief tilts; the seats checked equal to the local match's): `--bo1` = the yardsticks' best-of-one (A's
+  run's eval spec without its best-of-three keys, its tilts without 'deck': mtgz.az.yardsticks), else `--spec` (default
+  A's run's evaluation spec) and `--tilts` (default the run's). The build: a signed release worker that knows
+  eval_trace, found as for fuzz campaigns (or `--worker`); its runtime pack from its manifest. Prints the state
+  directory; `--wait` then collects.
+  status: coverage (done farm / local, failed with reasons, missing), the farm's progress, machines.
+  collect: pull until done or the deadline, play what is missing here (the same worker; `--wrap`: a command prefix
+  such as the slot throttle), check digests, replay the spot check, write games.jsonl and records.jsonl.gz; prints the
+  result JSON (the games' digest, coverage, spot check, the head-to-head readout). `--once`: one pull (exit 3 while
+  games are out before the deadline).
+
+Fuzz campaigns:
 
     python tools/farm_campaign.py create NAME --build ID --mode M [--env K=V ...] --seed-base N [--chunk N|auto]
            [--priority P] [--needs-threads N --needs-ram-mb N] [--paused]
@@ -272,7 +296,112 @@ def chunk_of(v):
     return n
 
 
+# ---------------------------------------------------------------- analysis campaigns (ENGINE.md 165)
+
+def find_worker(build_id, dists=None):
+    """A signed build's executable and manifest: under the farm_build dist directories, else E:/zero-farm-builds/<id>/
+    (the desktop's copies of registered builds)."""
+    bd, man = build_dir_of(build_id, dist_dirs(dists))
+    if bd is None and os.path.exists(os.path.join('E:/zero-farm-builds', build_id, 'manifest.json')):
+        bd, man = build_dir_of(build_id, ['E:/zero-farm-builds'])
+    if bd is None:
+        die(f'build {build_id}: no signed build directory found (give --worker or --dist)')
+    return os.path.join(bd, man.get('entry') or 'mtgz-worker.exe'), man
+
+
+def analysis_main(argv, client=None):
+    from mtgz.az import farm_campaign as C
+    ap = argparse.ArgumentParser(prog='farm_campaign.py ' + argv[0], description='analysis campaigns (ENGINE.md 165)')
+    ap.add_argument('action', choices=('submit', 'status', 'collect'))
+    ap.add_argument('name')
+    ap.add_argument('--a')
+    ap.add_argument('--b')
+    ap.add_argument('--games', type=int)
+    ap.add_argument('--build')
+    ap.add_argument('--worker')
+    ap.add_argument('--dist', action='append')
+    ap.add_argument('--sims', type=int, default=64)
+    ap.add_argument('--bo1', action='store_true', help="the yardsticks' best-of-one spec and tilts of A's run")
+    ap.add_argument('--spec')
+    ap.add_argument('--tilts', help="root belief tilts JSON ({} = none; default the run's)")
+    ap.add_argument('--seed', type=int, default=0)
+    ap.add_argument('--unpaired', action='store_true')
+    ap.add_argument('--share', type=float, default=C.DEFAULT_SHARE)
+    ap.add_argument('--priority', type=float, default=0.5)
+    ap.add_argument('--games-per-lease', default='auto')
+    ap.add_argument('--deadline-h', type=float, default=C.DEFAULT_DEADLINE_S / 3600)
+    ap.add_argument('--spot', type=float, default=C.DEFAULT_SPOT)
+    ap.add_argument('--ort-dll')
+    ap.add_argument('--min-agent')
+    ap.add_argument('--wait', action='store_true')
+    ap.add_argument('--no-local', action='store_true')
+    ap.add_argument('--threads', type=int, default=4)
+    ap.add_argument('--wrap', nargs='+')
+    ap.add_argument('--no-describe', action='store_true')
+    ap.add_argument('--allow-failed', action='store_true')
+    ap.add_argument('--poll', type=float, default=60)
+    ap.add_argument('--once', action='store_true')
+    ap.add_argument('--url', default=os.environ.get('FARM_URL', FD.URL))
+    ap.add_argument('--token-file', default=os.path.join(HOME, '.config', 'zero-farm', 'admin_token'))
+    ap.add_argument('--key', default=FD.data_key_path())
+    ap.add_argument('--farm-release', default=FD.farm_release_path())
+    ap.add_argument('--state-root')
+    a = ap.parse_args(argv)
+    cl = client or FD.Client(a.url, token=read_token(a.token_file))
+    run = C.slug(a.name)
+    d = C.state_dir(run, a.state_root)
+    opts = {'url': a.url, 'key': a.key, 'farm_release': a.farm_release}
+    try:
+        if a.action == 'submit':
+            if os.path.exists(os.path.join(d, 'state.json')):
+                C.resume(d, client=cl, opts=opts)
+            else:
+                if not (a.a and a.games and a.build):
+                    ap.error('submit: --a, --games and --build')
+                if a.worker:
+                    exe = a.worker
+                    with open(os.path.join(os.path.dirname(exe), 'manifest.json'), encoding='utf-8') as f:
+                        man = json.load(f)
+                else:
+                    exe, man = find_worker(a.build, a.dist)
+                if a.bo1:
+                    from mtgz.az import yardsticks as Y
+                    rd = os.path.dirname(os.path.dirname(os.path.abspath(a.a)))
+                    cfg = Y.cfg_of(rd)
+                    spec = Y.bo1_spec(cfg, Y.of_run(rd, cfg) or Y.normalize(Y.DELVER_YARDSTICKS))
+                    tilts = Y.bo1_seat(a.a).get('belief_tilts') or {}
+                else:
+                    from zero import h2h
+                    spec = a.spec or h2h.run_eval_spec(a.a, C.GAME)
+                    tilts = json.loads(a.tilts) if a.tilts is not None else None
+                settings, _ = C.match_settings(a.a, a.sims, spec, tilts=tilts, ckpt_b=a.b)
+                seats = [{'net': 1}, {'net': 2}] if a.b else [{'net': 1}, {'net': 1}]
+                gpl = a.games_per_lease if a.games_per_lease == 'auto' else int(a.games_per_lease)
+                C.submit(a.name, a.a, a.games, settings, seats, a.seed, a.build, exe, man.get('requires_runtime'),
+                         b=a.b, paired=not a.unpaired, share=a.share, priority=a.priority, games_per_lease=gpl,
+                         deadline_s=a.deadline_h * 3600, spot=a.spot, ort_dll=a.ort_dll, min_agent=a.min_agent,
+                         meta={'cmd': 'submit', 'sims': a.sims, 'bo1': a.bo1}, client=cl, root=a.state_root, opts=opts)
+            print(d)
+            if not a.wait:
+                return 0
+        if a.action == 'status':
+            print(json.dumps(C.status(d, client=cl, opts=opts), indent=1))
+            return 0
+        res = C.collect(d, client=cl, poll=a.poll, local=not a.no_local, threads=a.threads, wrap=a.wrap,
+                        describe_games=not a.no_describe, allow_failed=a.allow_failed, wait=not a.once, opts=opts)
+        if res is None:
+            print(json.dumps(C.status(d, client=cl, opts=opts)['coverage']))
+            return 3
+        print(json.dumps(res))
+        return 0
+    except C.CampaignError as e:
+        die(str(e))
+
+
 def main(argv=None, client=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] in ('submit', 'status', 'collect'):
+        return analysis_main(argv, client)
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('action', nargs='?', choices=('create', 'update', 'pause', 'resume'))
     ap.add_argument('name', nargs='?')
