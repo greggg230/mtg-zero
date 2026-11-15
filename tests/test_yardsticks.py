@@ -226,6 +226,7 @@ def _watcher(run, tmp_path, flag, logs):
         sys.executable, str(fake), it['kind'], str(it['iter']), it.get('opp') or '-', str(flag)])
 
 
+@pytest.mark.live_run_hazard
 def test_the_watcher_measures_everything_in_order_and_retries_a_failure(tmp_path, monkeypatch):
     run, cfg = _run(tmp_path, iters=range(0, 33),
                     ys={'bo1_games': 4, 'blunders': True, 'retry_s': 3600, 'retry_max_s': 7200})
@@ -309,6 +310,7 @@ def test_the_companion_is_the_publisher_the_yardsticks_or_both(tmp_path, monkeyp
         A.PACKAGE.companion_of('E:/r', dict(pub, yardsticks={'bo1_games': 3}))
 
 
+@pytest.mark.live_run_hazard
 def test_the_keeper_restarts_a_child_3_times_then_gives_up_and_ends_with_the_run(tmp_path, capsys):
     run = tmp_path / 'run'
     run.mkdir()
@@ -333,6 +335,7 @@ def test_the_keeper_restarts_a_child_3_times_then_gives_up_and_ends_with_the_run
     assert (run / 'bad.txt').read_text().count('bad child') == 4
 
 
+@pytest.mark.live_run_hazard
 def test_the_keeper_starts_no_child_again_once_the_run_ended(tmp_path, capsys):
     run = tmp_path / 'run'
     run.mkdir()
