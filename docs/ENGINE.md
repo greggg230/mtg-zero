@@ -34244,3 +34244,141 @@ Checks (throttled; the failing forced-answer check in every walk and no `FUZZ_SK
   checkpoint load (8 games, 0 unfinished) PASS; **`GATE FAILED encoding 8d8a2759dfda in 903s - pytest: 1 failed, 0
   error(s), 389 passed`**: the one failure is `test_canary_library.py::test_every_spot_reaches_its_recorded_position`
   (the canary re-record pending in 157.10, as 160.5's), none new.
+
+## 163. The run owns its delverai publisher: the run setting `publish`, started by the supervisor, ended with the run (branch `feat/run-publisher`, zero-core `feat/run-companion`, 2026-11-14)
+
+Branch `feat/run-publisher` from main f49df0c4; zero-core `feat/run-companion` from the pin 77b31ab (its docs/az.md 49).
+Why: the user asked on 2026-11-14 "How do we make it so the publisher is set up by default, and doesn't stay open
+past the end of a run?". Until now `tools/delverai_publish.py` was started by hand per run, from a pinned checkout
+whose engine had to read the run's layout, and ran until someone killed it; the new run delver-bo3-pb2 had none at
+all until the user asked why it was not on the site, and the site's default run (the newest non-side poster) made
+the old main line's publisher need a hand demotion to `--side`. Publishing and tooling only: no rule, encoding,
+search or training change; digests untouched. (Section number: 162 is lane `fix/cross-prior`'s; no branch, remote
+branch or worktree had 162 or above on 2026-11-14.)
+
+### 163.1 The design as built
+
+* **The setting.** `publish` (mtgz.az.publish, a package setting of MTG Zero: `GamePackage.settings`) is a dict of the
+  publisher's options - `title`, `note`, `side`, `every`, `games`, `census`, `device`, `threads`, `keep_yardstick`,
+  `forks` (a path or a list, `~` expanded), `loop`, `progress_every`, `sims`, `min_iter`, `state_dir`, `url`,
+  `key_file`, `dry_run` - or `{}` / null = off; unknown options and wrong types are refused (`normalize`). The
+  `delver-mirror` preset sets `DELVER_PUBLISH` = `{side: false, every: 8, games: 6, census: 200, device: cpu,
+  threads: 4, forks: [~/delverai/forks.json]}` (the main line's options since 11-12), so `delver-mirror-bo3` and
+  `delver-mirror-bo3-dealt` have it; the smoke presets (`delver-smoke`, `delver-bo3-smoke`) and every other preset
+  leave it off. `--publish '<json>'` replaces it, `--no-publish` is `--publish {}` (`python -m mtgz.az.run` rewrites
+  it); both are saved in config.json like any flag. A run that saved no `publish` (every run started before this) takes
+  its preset's at its next start - pb2 included (its preset is `delver-mirror-bo3-dealt`): the default values have no
+  title, so pb2's restart passes one (163.4).
+* **The supervisor starts it** (zero-core `GamePackage.companion`, docs/az.md 49): at every start of the run, once the
+  run has written its config.json, `tools/supervise.py` asks `mtgz.az.publish.companion(run, cfg)` - None when off,
+  else `python tools/delverai_publish.py <run, absolute> --loop 300 --supervised` + the options as the publisher's
+  flags, from the run's OWN checkout (the supervisor's `pkg.root`: the same engine and layout as the checkpoints, the
+  build the recording needs) - and keeps ONE publisher per run: hidden (`CREATE_NO_WINDOW`), below normal priority,
+  stdin closed, console appended to `<run>/publisher_console.txt`, its pid in supervisor_state.json (`companion`). A
+  crash restart, a pause or a resume of the run keeps it; a changed command (other `publish` options at a restart)
+  restarts it; `publish` off stops it; one that exits while the run goes on is started again, at most 3 times an hour.
+  A new supervisor stops a publisher an abruptly killed one left; `tools/kill_run.py` leaves the publisher out of its
+  tree kill (it notices and posts 'stopped' itself).
+* **It ends with the run.** The supervisor's terminal state now says how the run ended (`ended`: finished / stopped /
+  refused / gave_up); the publisher's end watch (`--supervised`, a thread every `--end-poll` 5 s,
+  `zero.runctl.supervisor_end`) reads it:
+  * **finished** (the run exited 0 without a STOP file: its last iteration): the pass under way completes, then a
+    final pass - uploads still pending, the last checkpoint's games when `every` makes it due (no 30 s settling wait:
+    the run has exited), its census - and the record posted with state `finished` and detail "Finished: reached its
+    last iteration (N)."; exit 0 (1 if the final pass failed; the record is posted either way). The supervisor waits up
+    to `MTGZ_SUPERVISE_COMPANION_WAIT` (3600 s) for it, then kills it.
+  * **stopped** (STOP, STOP while paused, the supervisor interrupted), **refused**, **gave up**, or the supervisor
+    **gone** (its pid + creation time no longer alive, killed without a terminal state) or replaced: the record posted
+    with state `stopped` and the reason, exit 0 at once - a recording under way is dropped (its generation is not
+    marked recorded). The supervisor waits up to `MTGZ_SUPERVISE_COMPANION_STOP_WAIT` (120 s).
+  * **paused** (`tools/pause_run.py`): the publisher stays up and keeps posting the state 'paused' with its
+    paused_since (run_status), as before.
+* **Never a silent no-op, and never the run's end (a deliberate exception).** A publisher that cannot start - a bad
+  `publish` dict, no upload key (`key_file`, `$MTGZ_DELVERAI_KEY` or `~/delverai/.upload_key`, checked before the
+  start unless `dry_run`), a command that fails, one that keeps exiting - is said loudly: `COMPANION NOT STARTED
+  (publisher): ...` in supervisor.log and on the supervisor's stderr, `companion_error` in supervisor_state.json. The run
+  goes on: publishing is not worth stopping training for. This is the one place where a failure degrades instead of
+  refusing.
+* **Forks** (`tools/fork_run.py --source A --dest B`, zero-core's `on_fork` hook): the fork of a publishing run publishes
+  as a SIDE run titled "B: a fork of A at K" (the source's options otherwise; a source that saved no `publish` uses its
+  preset's), unless `--set publish=...` chose; its fork record - the A/B state files' `done` shape: name B, flag = the
+  `--set` overrides, k, main_before = main_after = A (not adopted), raw.a = B/models/iter_K.pt - is appended to the first
+  of its `forks` files (`~/delverai/forks.json` by default; atomically, never twice for one fork), so its charts continue
+  from A's lineage. Making a fork the new main line is one flag at its start: `--publish '{..., "side": false}'`. A
+  layout widen (`fork_run.py <src.pt> <new run>`) keeps writing MIGRATED_FROM.json, which the lineage already follows. A
+  fork made another way (the A/B drivers keep their own state files) needs a record by hand as before.
+* **`started`.** Every progress record now carries `started` (the run directory's creation time, whole seconds;
+  `run_started`): a fork is a new directory, a resume keeps it.
+
+### 163.2 The site (delverai branch `newest-main-default`, NOT deployed)
+
+The worker's default run is the newest MAIN (non-side) run by `started`, whatever older main runs still publish; runs
+without `started` (publishers before this) rank oldest and then by their last post, as before; a side run is the
+default only when alone. A finished or stopped run keeps its record with its final state and stays the default until a
+newer main run posts. `/api/runs` lists `started`; uploads validate it. The site shows `finished` as "Finished" (the
+pill and the Status tile; "Training is finished." in Right now), and the Best of 3 tab without a run shows the default
+run when it is a best-of-three one. Tests: worker (the 11-14 case - pb1 posting after pb2 keeps pb2 the default -, final
+states kept, a newer main taking over, validation) and now.js; 68 passed. Before/after screenshots (deviceScaleFactor 2,
+local `wrangler dev` with copies of the live pb1/pb2 records, pb1 posting last as an undemoted main):
+`C:/Users/Gregg Keithley/shots/delverai-run-owned-publisher/` - `1-before-*` (master: pb1 on the front page),
+`2-after-*` (pb2), `3-after-pb2-finished-*` (the Finished state). Awaiting the user's approval; the site works with
+either publisher meanwhile.
+
+### 163.3 Tests and checks
+
+* **This repo**, `tests/test_run_publisher.py` (15): the presets (on in delver-mirror*, off in the smokes and the rest),
+  `--publish` / `--no-publish` over the preset and what is saved (zero.run's resolve_config; a run that saved none
+  takes its preset's), bad settings refused, the companion command from this checkout (every option as its flag),
+  no upload key -> refused, a fork's side run and fork record (read back by `fork_registry` as a fork at K; never
+  twice; `--set publish=` kept; a source without a saved setting takes its preset's), the exit paths with the real
+  `runctl.supervisor_end` - paused keeps the publisher and then finished starts the final pass, stopped / refused /
+  gave up post 'stopped' and exit, the supervisor gone posts 'stopped' and exits -, the final pass recording a
+  checkpoint written a moment ago (no settling wait) and posting 'finished' (also when the pass fails: exit 1), the
+  record's `started`; and the real supervisor (MTGZ_SUPERVISE_CMD: a fake run that crashes once, then finishes)
+  starting the real publisher (dry run) from the `publish` setting ONCE across the crash, which ends 'finished' and
+  exits 0. `tests/test_delverai_publish.py`: 13 passed, unchanged.
+* **zero-core** `feat/run-companion`: its docs/az.md 49 (`tests/test_companion.py`, 11; the run-control tests,
+  85 passed).
+* **The run-loop smoke** (E:/mtg-zero-scratch/run-publisher/smoke): `python tools/supervise.py <smoke> --preset
+  delver-bo3-smoke --iters 2 --publish '{"dry_run": true, "every": 1, "games": 1, "census": 0, "loop": 10,
+  "progress_every": 30, "title": "smoke"}'`. supervisor.log: `companion publisher started: pid 18684` 5 s after the
+  run started (when its config.json was written), the run `exited with code 0` at 19:16:16 - `clean exit (finished);
+  supervisor done` - and `companion publisher ended with code 0` 3 s later. The publisher's console: `supervised:
+  publishing ...`, one match recorded of each of iterations 0, 1 and 2 while the run went on, then `the run finished`,
+  the record with `"state": "finished", "detail": "Finished: reached its last iteration (2)."` and `final pass done:
+  the run is finished, publisher exiting (0)` (nothing left to record: iteration 2's checkpoint had settled during the
+  Elo matches; the unit test covers a final pass that records it). No publisher process left.
+* The live publishers (pb2's 171132, pb1's 175936 and the side runs') were not touched.
+
+* **Gate** on 7c3ba8d7 (this section's code commit): `python tools/gate.py python --no-mac` - build PASS (118.6 s),
+  pytest PASS (403 passed, 1 skipped), run-loop smoke (mtg-smoke) PASS (16 games, 0 unfinished), checkout unchanged:
+  **`GATE PASSED python 7c3ba8d7a8df in 1386s`**. This line is a docs-only commit after it.
+
+### 163.4 Turning it on for pb2 at its next restart
+
+pb2 (`E:/mtg-zero/runs/delver-bo3-pb2`) runs from `mtg-zero-wt/run-f49df0c` (main f49df0c4) with a hand-started
+publisher from `mtg-zero-wt/delverai-pb2-pub`. This branch changes no Rust in either repo, so f49df0c4's `_engine.pyd`
+is this branch's build.
+
+1. A pinned checkout of this branch's commit (or of main once merged): `git worktree add --detach
+   "C:/Users/Gregg Keithley/mtg-zero-wt/run-<sha12>" <sha>`, `git -c protocol.file.allow=always submodule update --init
+   third_party/zero-core`, copy `mtg-zero-wt/run-f49df0c/mtgz/_engine.pyd` into it (or `bash tools/build_py.sh` with its
+   own CARGO_TARGET_DIR), then `python tools/gate.py repin --no-mac ...` per AGENTS.md if wanted.
+2. pb2 uses the Mac (`--eval-remote mac --selfplay-remote mac`): the run checks the Mac holds a checkout of the run's
+   commit, so from the new checkout `bash tools/mac.sh --eval-checkout` before the restart.
+3. Pause pb2 between steps: `python tools/pause_run.py E:/mtg-zero/runs/delver-bo3-pb2 --wait`; then
+   `python tools/kill_run.py E:/mtg-zero/runs/delver-bo3-pb2` (ends the old supervisor; the run is already paused).
+4. Kill the hand-started pb2 publisher BY PID (pid 171132 on 2026-11-14 19:20; its console E:/mtg-zero-scratch/delverai-bo3/publisher_pb2_console.txt;
+   never by a command-line match, which also hits the killing python). It kept its state in the run dir
+   (`delverai.json`, `replays/`), which the new one continues.
+5. Remove the PAUSE file (`python tools/pause_run.py <run> --resume`) and start the supervisor from the NEW checkout,
+   hidden, with the same arguments as now (supervisor_state.json `args`) plus
+   `--publish '{"title": "Best of three: dealt decks (run 2)", "every": 8, "games": 6, "census": 200, "device": "cpu",
+   "threads": 4, "forks": ["~/delverai/forks.json"]}'`
+   (`python tools/launch_hidden.py <log> python tools/supervise.py E:/mtg-zero/runs/delver-bo3-pb2 <args...> --publish
+   ...`; redirect, never pipe, launch_hidden's output).
+6. Check: supervisor.log has `companion publisher started: pid N`, `<run>/publisher_console.txt` has `supervised:
+   publishing ...`, and the site's record carries `started`. pb2 keeps its sideboard census
+   (`census` 200: the publisher's default it already runs with).
+7. After the user approves the screenshots: deploy delverai `newest-main-default` (`npm run deploy`). Until then the old
+   worker's rule (newest non-side poster) still makes pb2 the default, as pb1's publisher is `--side`.

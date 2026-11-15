@@ -6,13 +6,17 @@ settings and state are shared).
 Run as a command it first turns on the EoE sealed game log (docs/ENGINE.md 107.1): every finished
 `mtg_eoe` game this process plays - self-play and evaluation - appends its decks, their builder's
 mode and the result to `<run>/games/games-<pid>.jsonl` (`mtgz.sealed.games` reads them). Only sealed
-games write, so other runs make no file; `MTGZ_GAME_LOG=0` turns it off."""
+games write, so other runs make no file; `MTGZ_GAME_LOG=0` turns it off.
+
+`--no-publish` is `--publish {}`: the run's delverai publisher off (docs/ENGINE.md 163, mtgz.az.publish)."""
 import sys
 
 import mtgz.az  # noqa: F401  (registers the game package)
 from zero import run as _core
 
 if __name__ == '__main__':
+    from mtgz.az.publish import no_publish
+    sys.argv[1:] = no_publish(sys.argv[1:])
     from mtgz.sealed.games import log_path
     _path = log_path(sys.argv[1:])
     if _path:
