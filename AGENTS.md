@@ -12,6 +12,7 @@ export CARGO_TARGET_DIR="$PWD/target"      # one target dir per checkout, never 
 export RUSTFLAGS="-C link-arg=-undefined -C link-arg=dynamic_lookup"   # macOS only (no build.rs adds them)
 bash tools/build_py.sh                     # rebuild mtgz/_engine after ANY Rust change: Python uses the copied .pyd/.so
 cargo test --release -p engine --test az   # quick engine check (the full suite: drop --test az)
+cargo test --release -p engine --test rules_suite rules_combat::   # one test file of a suite (docs/ENGINE.md 167.9)
 python -m pytest tests -q                  # ~2 min
 python -m mtgz.az.run --run runs/smoke1 --preset mtg-smoke     # ~45 s end-to-end loop
 ```
@@ -47,6 +48,12 @@ Python 3.13 (not 3.14) with `torch numpy psutil flask pytest`. Use Git Bash on W
   `engine/tests/support.rs::SUPPORTED`. Before merging, the `suite` gate runs the full engine suite and a sharded
   2,000-game fuzz per pool (`python tools/fuzz_shards.py --pool <pool> --games 2000`, hidden decklists included); the
   20k depth runs continuously on the farm, not in the gate (the user's decision, `docs/ENGINE.md` 167).
+* **Test files.** `engine/tests/` builds into a few binaries (`docs/ENGINE.md` 167.9): the named ones (`az`, `digest`,
+  `digest_formats`, `dealt_decks`, `fuzz`, `draft`, `hidden`, `limits`, `support` and the benchmarks) and four suites
+  whose modules are the other files (`cards_suite`, `rules_suite`, `rulings_suite`, `misc_suite`). A new test file is a
+  `#[path = "x.rs"] mod x;` line in its suite (or a `[[test]]` in `engine/Cargo.toml` when it needs its own process:
+  a global allocator, process-wide state); tests/test_engine_test_layout.py fails on a file in neither. Run one file
+  with its module as the filter: `--test cards_suite cards_m7a::`.
 * **Behaviour digests.** `cargo test --release -p engine --test digest -- --ignored --nocapture`
   hashes 2,500 fixed games against `engine/tests/data/digests.txt`. A change meant to keep
   behaviour (a refactor, a speed-up) must leave it unchanged. A change meant to alter play

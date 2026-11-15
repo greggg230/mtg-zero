@@ -78,32 +78,57 @@ fn fit_of(land: bool, c: u8, cols: u8) -> f64 {
     }
 }
 
+/// A value computed once per card database (docs/ENGINE.md 167.9): the first database's in a `OnceLock` (the hot path:
+/// a run's process has one), any other's in a short list behind a lock - a test binary of several test files holds
+/// the cube and the cube plus the test cards (`engine::fuzz::cards::db`). Each value is computed from its database
+/// alone, so which database comes first changes nothing (before: "one card database per process", asserted).
+struct PerDb<T: 'static> {
+    first: std::sync::OnceLock<(usize, &'static T)>,
+    more: std::sync::Mutex<Vec<(usize, &'static T)>>,
+}
+
+impl<T: 'static> PerDb<T> {
+    const fn new() -> PerDb<T> {
+        PerDb { first: std::sync::OnceLock::new(), more: std::sync::Mutex::new(Vec::new()) }
+    }
+
+    fn get(&self, db: &'static CardDb, make: impl Fn() -> T) -> &'static T {
+        let k = db as *const CardDb as usize;
+        let &(fk, v) = self.first.get_or_init(|| (k, Box::leak(Box::new(make()))));
+        if fk == k {
+            return v;
+        }
+        let mut more = self.more.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(&(_, v)) = more.iter().find(|(x, _)| *x == k) {
+            return v;
+        }
+        let v: &'static T = Box::leak(Box::new(make()));
+        more.push((k, v));
+        v
+    }
+}
+
 /// The five basic lands of `db` (W U B R G), looked up once.
 fn basics_of(db: &'static CardDb) -> [DefId; 5] {
-    static B: std::sync::OnceLock<(usize, [DefId; 5])> = std::sync::OnceLock::new();
-    let b = B.get_or_init(|| (db as *const CardDb as usize, pools::basic_ids(db)));
-    assert_eq!(b.0, db as *const CardDb as usize, "one card database per process");
-    b.1
+    static B: PerDb<[DefId; 5]> = PerDb::new();
+    *B.get(db, || pools::basic_ids(db))
 }
 
 /// Per card definition of the cube: (the generator's weight, is a land,
 /// its colours for `fit`), computed once (`pools::weight` and
 /// `decks::land_colors` read the card's abilities).
 fn facts(db: &'static CardDb) -> &'static [(f64, bool, u8)] {
-    static FACTS: std::sync::OnceLock<(usize, Vec<(f64, bool, u8)>)> = std::sync::OnceLock::new();
-    let f = FACTS.get_or_init(|| {
-        let v = (0..db.len())
+    static FACTS: PerDb<Vec<(f64, bool, u8)>> = PerDb::new();
+    FACTS.get(db, || {
+        (0..db.len())
             .map(|i| {
                 let d = db.def(i as DefId);
                 let land = d.is(types::LAND);
                 let c = if land { decks::land_colors(db, d) & COLORS } else { d.colors };
                 (pools::weight(d), land, c)
             })
-            .collect();
-        (db as *const CardDb as usize, v)
-    });
-    assert_eq!(f.0, db as *const CardDb as usize, "one card database per process");
-    &f.1
+            .collect()
+    })
 }
 
 impl FirstPickPrior {
