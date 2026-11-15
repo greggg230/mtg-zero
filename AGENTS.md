@@ -99,7 +99,7 @@ config and checkpoint (`docs/ENGINE.md` 114.8, 155).
 
 **Beside a live run the gate works off the desktop** (`docs/ENGINE.md` 166). When a supervisor is live on this machine
 (pb2 and friends), `gate.py` sends its pure-CPU steps (cargo tests, digests, the engine suite, the fuzz, pytest, the
-run-loop and search smokes, zero-core's tests) to the MacBook through `tools/mac.sh` (`nice`, at most two at once there)
+run-loop and search smokes; not zero-core's own tests, whose goldens are the desktop's) to the MacBook through `tools/mac.sh` (`nice`, at most two at once there)
 and runs the desktop's own heavy steps (builds, the Windows worker, farm compat, private-data tests) each holding a slot
 of `tools/slotd.sh`. Same checkers and evidence; the plan's `placement:` line says where each step ran. `--no-mac`
 keeps everything here (throttled); `--offload local|mac` and `--throttle on|off` override the automatic choice. Any

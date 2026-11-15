@@ -53,7 +53,7 @@ ad-hoc shell script. It can never pass a check it did not perform:
 
   * **Off the desktop beside a live run** (ENGINE.md 166): with a run live on this machine (zero.runctl.live_supervisors)
     the steps with a Mac command - cargo tests, digests, the engine suite, the fuzz, pytest, the run-loop smoke, the
-    search smoke, zero-core's cargo tests and pytest - run on the Mac (tools/mac.sh: this commit's checkout, `nice`, a
+    search smoke (not zero-core's own tests: its search goldens are x86's) - run on the Mac (tools/mac.sh: this commit's checkout, `nice`, a
     Mac-side tools/slotd.sh slot) when it answers with memory to spare, else on the desktop; the desktop's own heavy
     steps (builds, the Windows worker, farm compat, checkpoint checks, what needs private data: PYTEST_DESKTOP_ONLY as
     pytest's desktop part, beside the Mac's) each hold a tools/slotd.sh slot. Same checkers, same evidence (the Mac's
@@ -1161,7 +1161,9 @@ def opted_out(args, step_id):
 # Beside a live run the gate keeps its heavy work off the desktop: the steps with a Mac command run on the Mac
 # (tools/mac.sh, this commit's checkout there, `nice`, a Mac-side slot of tools/slotd.sh), the desktop's own heavy
 # steps (its builds, the Windows worker, farm compat, what needs private data) take a desktop slot of tools/slotd.sh.
-# A step's evidence is the same wherever it ran (the Mac's engine is bit-identical: ENGINE.md 44.2, 166.2).
+# A step's evidence is the same wherever it ran (the Mac's engine is bit-identical: ENGINE.md 44.2, 166.2). zero-core's
+# own cargo tests and pytest stay on the desktop: its search goldens hash differently on the Mac (14 driver tests
+# failed there at be9ebfa: platform floating point in the search), so they are valid only here (ENGINE.md 166.2).
 
 THROTTLED = 'desktop, throttled'
 MAC_HOST = os.environ.get('MTGZ_MAC', 'greggkeithley@100.95.248.116')      # mac.sh's default
@@ -1479,15 +1481,6 @@ def core_pytest_base(ctx):
     return os.path.join(GATES_DIR, 'tmp', f'pytest-{name}')
 
 
-def mac_core_pytest(target):
-    """zero-core's pytest on the Mac (ENGINE.md 166): its engine module built there first, a fresh --basetemp under the
-    Mac's temp dir, removed after."""
-    py = shlex.join(['python', '-m', 'pytest', target, '-q', '-p', 'no:cacheprovider', '-rfEs', '-W',
-                     'ignore::pytest.PytestWarning'])
-    return (['bash', '-c', f'cd third_party/zero-core && bash tools/build_py.sh && T="$(mktemp -d)" && '
-                           f'{{ {py} --basetemp="$T/p"; rc=$?; rm -rf "$T"; exit $rc; }}'], None, None)
-
-
 def core_steps(ctx):
     """zero-core's own suite as its own steps (ENGINE.md 91): its engine module (python/zero/_engine, the
     toy games its tests import) built by its own tools/build_py.sh, then `python -m pytest tests -q` from
@@ -1504,7 +1497,6 @@ def core_steps(ctx):
              checker=make_build_checker('zero._engine', zero_pkg),
              evidence=f'"zero._engine OK: {zero_pkg}{os.sep}_engine.* | games: [...]" + exit 0'),
         Step('core pytest', argv('tests', base), cwd=CORE, id='core-pytest', checker=check_pytest, heavy=True,
-             mac_cmd=lambda ctx: mac_core_pytest('tests'), mac_flaky=lambda nid, k: mac_core_pytest(nid),
              flaky=FlakyRetry(FLAKY_FILE, lambda nid, k: argv(nid, f'{base}-retry{k}')),
              prepare=lambda: os.makedirs(os.path.dirname(base), exist_ok=True),
              cleanup=lambda: [shutil.rmtree(p, ignore_errors=True) for p in glob.glob(base + '*')],
@@ -1798,7 +1790,7 @@ def tier_search_core(ctx, args):
     return [
         build_step(ctx),
         worker_build_step(ctx),
-        Step('zero-core cargo test', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test', mac_cmd=True,
+        Step('zero-core cargo test', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test', heavy=True,
              evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
         pytest_step('this repo: pytest'),
         farm_compat_step(ctx),
@@ -1816,7 +1808,7 @@ def tier_optin_core(ctx, args):
     need_core()
     feature_tests = split_list(args.feature_tests, 'az,hidden', '--feature-tests')
     steps = [build_step(ctx), worker_build_step(ctx),
-             Step('core tests', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test', mac_cmd=True,
+             Step('core tests', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test', heavy=True,
                   evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
              compat_step(ctx, args, 'checkpoint_compat byte identity'),
              *digest_format_steps(), farm_compat_step(ctx)]        # (the driver digest: zero-core's Driver<MtgAz>, ENGINE.md 148.1)

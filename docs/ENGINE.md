@@ -34691,13 +34691,16 @@ scripts do).
   answers over ssh with at least 8 GB available, the steps with a Mac command run there through `tools/mac.sh` (this
   commit's checkout, `nice -n 10`, a Mac-side slot of the checkout's own `tools/slotd.sh`, CARGO_BUILD_JOBS 6): the
   `cargo test --test <t>` steps, the digests (full, encoding-free, formats, dealt), the full engine suite, the fuzz
-  steps (their FUZZ_* in the command), pytest, the run-loop smoke, the search smoke, zero-core's cargo test and
-  pytest (its flaky retries there too). The Mac command carries the gate's environment rules (the caller's DIGEST_*,
+  steps (their FUZZ_* in the command), pytest, the run-loop smoke, the search smoke. Not zero-core's own cargo test
+  and pytest: its search crate's goldens hash differently on the Mac (the first optin-core gate on 8dabe696 failed 14
+  `driver::tests` there - `belief_off_is_the_search_of_before`, `visits_records_unchanged`, ...: equal record
+  counts, other hashes; platform floating point in the search, never seen before because zero-core's tests never ran on
+  the Mac), so they stay on the desktop, throttled, where their goldens were recorded. The Mac command carries the gate's environment rules (the caller's DIGEST_*,
   FUZZ_*, PYTEST_ADDOPTS, PYTHONPATH, ZERO_CORE_UNPINNED dropped; CPU only); a Python step builds the engine module
   there first. The checker is the step's own behind mac.sh's "[mac] ... @ <this sha>" lines; a step whose output shows
   it never reached the Mac (no such line) runs on the desktop instead, the log keeping both.
 * **The desktop's own heavy steps** (the engine build, the Windows release worker, farm compat, checkpoint compat and
-  load, the other games' builds, zero-core's build, and pytest's desktop part) each hold a desktop slot of
+  load, the other games' builds, zero-core's build, cargo test and pytest, and pytest's desktop part) each hold a desktop slot of
   `tools/slotd.sh` while a run is live (their timeout grows by `--slot-wait`, 7200 s).
 * **pytest's desktop part** (`PYTEST_DESKTOP_ONLY`, run beside the Mac's pytest, the two together exactly the
   desktop's tests): the worker tests (they run the Windows worker this gate built), the deck scorer's fixtures (hashed
@@ -34727,7 +34730,7 @@ orphan sweep and same-crash give-up, `test_loop.py`'s supervisor / stall watchdo
 refused-run supervisor. The fence is Windows-only by default (the pid-reuse hazard of 11-14 is Windows's; the Mac
 hosts a 34-day St. Pete Zero supervisor and is where these tests run). The gate counts the fenced tests in pytest's
 `-rs` lines and names them in the final line as skips (GATE PASSED WITH SKIPS ... live-run-hazard test(s)), since
-they ran nowhere; on the Mac they ran. `ZERO_ALLOW_LIVE_RUN_HAZARD=1` runs them anyway.
+they ran nowhere; this repo's marked tests run in the Mac's pytest, zero-core's (its pytest stays on the desktop, 166.2) are fenced while a run is live. `ZERO_ALLOW_LIVE_RUN_HAZARD=1` runs them anyway.
 
 The kill_orphans pid-reuse fix (zero-core 76c548f, in the pin bf229a5 and so in this branch's) was verified, not redone:
 `supervise.kill_orphans(pid, since)` kills only children created after the launch; both call sites pass the launch
@@ -34783,7 +34786,11 @@ desktop can run three gates at once with pb2 at 4.6-5.0 min when nothing uses th
   desktop-only supervisor test (166.6).
 * `python tools/gate.py python --no-mac` on 49fa8328: **GATE PASSED WITH SKIPS python 49fa8328b2eb in 1704s - skipped:
   pytest: 6 live-run-hazard test(s) (fenced: a live run on this machine)** (448 passed, 10 skipped).
-* The head's gates (python, optin-core for the zero-core pin) are in the merge note.
+* On 8dabe696: `python tools/gate.py python` (auto, warm builds): **GATE PASSED WITH SKIPS python 8dabe6962d75 in
+  426s - skipped: pytest-desktop: 1 live-run-hazard test(s) (fenced ...)** (the Mac's pytest 409 passed, 1 skipped: the
+  fenced supervisor tests ran there; 363 s). `optin-core` (auto): **GATE FAILED** - zero-core's cargo test on the Mac,
+  14 golden-hash failures (166.2), which moved zero-core's tests back to the desktop. The head's gates are in the merge
+  note.
 * `tests/test_gate.py`: 89 passed (8 new: no live run = nothing moves; beside a live run the Mac and the slots, with
   pytest's split exactly PYTEST_DESKTOP_ONLY; --no-mac; an unreachable Mac; a Mac step that never reached the Mac
   runs here; fenced tests = a pass with skips; the suite's FUZZ_* reach the Mac and the caller's do not; the remote
