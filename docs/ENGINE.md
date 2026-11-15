@@ -34651,3 +34651,154 @@ wrong types, odd game counts, a device other than cuda/cpu and a setting that me
 `python tools/gate.py python --no-mac` on 099b2f9b (via slotd.sh, pb2 live): build PASS (307.7 s), pytest PASS (420
 passed, 1 skipped; 808.7 s), run-loop smoke (mtg-smoke) PASS (16 games, 0 unfinished), the checkout unchanged - **GATE
 PASSED python 099b2f9b3d2d in 1227s** (report gates/099b2f9b3d2d-python.json; the Mac steps skipped by --no-mac).
+
+## 166. Side work off the desktop beside a live run: `tools/slotd.sh`, the gate's Mac placement, the live-run fence (migration phase 0, branch `mig/phase0`, zero-core `mig/phase0`, 2026-11-15)
+
+Phase 0 ("stop the bleeding") of the 2026-11-15 migration plan (`hub/data/mtg_bot/fable_review_iteration_and_farm_2026-11-15.md`
+section 4, S7, S8): side work must stop slowing the live run (delver-bo3-pb2) without waiting for the scheduler of
+phase 4. Three pieces, no engine, encoding or run change (digests unchanged; nothing of pb2 was touched).
+
+### 166.1 `tools/slotd.sh`: the heavy-command throttle in the repo
+
+The throttle that carried the Fable-fix campaign (`E:/mtg-zero-scratch/fable-fix/slotd.sh`, 11-13) moved into the repo.
+`bash tools/slotd.sh <command>` waits for one of a machine-wide set of slots and runs the command holding it;
+`--status` lists the slots, their holders, the settings and the memory headroom. State lives outside every checkout:
+`E:/mtg-zero-state` on the desktop (`~/.mtgz-state` elsewhere; `MTGZ_SLOTS_HOME` overrides): `slots.conf`, re-read on
+every look, `key=value` (a bare number is the old file's `slots`):
+
+| key | default | desktop (11-15) | Mac | meaning |
+|---|---:|---:|---:|---|
+| slots | 3 | 4 | 2 | slots |
+| free | 3 | 3 | 2 | slots taken without the memory check |
+| min_commit_gb, min_avail_gb | 14, 6 | 14, 6 | -, 6 | a slot above `free` needs this commit headroom (Windows) and available RAM |
+| floor_avail_gb | 2 | 1 | 4 | no slot at all below this available RAM (new: pb2 leaves the desktop 1-5 GB) |
+| jobs | 10 | 10 | 6 | CARGO_BUILD_JOBS when the caller set none |
+
+New beside the old script: the RAM floor, `MTGZ_SLOT_WAIT_MAX` (give up after N seconds, exit 75: the gate sets it so
+a step's timeout covers its wait), the Mac's memory (vm_stat) and Linux's, `--status`. The old
+`E:/mtg-zero-scratch/fable-fix/slot.sh` and `slotd.sh` are shims now (forwarding to the main checkout's
+`tools/slotd.sh`, before the merge this branch's worktree's; the originals kept as `*.pre-shim`); a slot held through
+the old scripts' slot dirs counts as held until its holder ends (one was, during the switch: farm-campaigns' local
+head-to-head). Remove the shims when nothing references the old path (the finished campaign's COMMON.md and lane
+scripts do).
+
+### 166.2 The gate's placement: the Mac for pure-CPU steps, a desktop slot for the rest
+
+`tools/gate.py` decides where each step runs (`place`, after the plan; the plan and the report say where: a
+`placement:` line, `placement` per step and for the run):
+
+* **When a run is live here** (any supervisor on this machine: `zero.runctl.live_supervisors`, 166.3) and the Mac
+  answers over ssh with at least 8 GB available, the steps with a Mac command run there through `tools/mac.sh` (this
+  commit's checkout, `nice -n 10`, a Mac-side slot of the checkout's own `tools/slotd.sh`, CARGO_BUILD_JOBS 6): the
+  `cargo test --test <t>` steps, the digests (full, encoding-free, formats, dealt), the full engine suite, the fuzz
+  steps (their FUZZ_* in the command), pytest, the run-loop smoke, the search smoke, zero-core's cargo test and
+  pytest (its flaky retries there too). The Mac command carries the gate's environment rules (the caller's DIGEST_*,
+  FUZZ_*, PYTEST_ADDOPTS, PYTHONPATH, ZERO_CORE_UNPINNED dropped; CPU only); a Python step builds the engine module
+  there first. The checker is the step's own behind mac.sh's "[mac] ... @ <this sha>" lines; a step whose output shows
+  it never reached the Mac (no such line) runs on the desktop instead, the log keeping both.
+* **The desktop's own heavy steps** (the engine build, the Windows release worker, farm compat, checkpoint compat and
+  load, the other games' builds, zero-core's build, and pytest's desktop part) each hold a desktop slot of
+  `tools/slotd.sh` while a run is live (their timeout grows by `--slot-wait`, 7200 s).
+* **pytest's desktop part** (`PYTEST_DESKTOP_ONLY`, run beside the Mac's pytest, the two together exactly the
+  desktop's tests): the worker tests (they run the Windows worker this gate built), the deck scorer's fixtures (hashed
+  bit for bit: `test_the_engines_fixtures_are_reproducible` fails on the Mac, platform floating point) and the tests
+  that need private data on E: (deck scorer v2, held-out drafts, evaluator v1, position-lab replays), the sealedai
+  dry run (psutil's process access fails on macOS) and `test_run_publisher`'s supervisor test (it fails on macOS:
+  the companion was started 8 times; 166.6).
+* `--offload auto|mac|local` (auto: as above; mac: the Mac or refuse; local: never), `--throttle auto|on|off`,
+  `--no-mac` (nothing on the Mac, as before: the steps stay here, throttled while a run is live). Without a live run
+  nothing changes.
+
+**The Mac's results are the desktop's.** At 72e5a0df on the Mac (nice 15, beside pb2's evaluation and self-play): all
+seven digests equal main's recorded values (full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5, driver
+6f7b863096e47dcd, constructed e1177d609d6c1aee, eoe 2efe956d589840ce, dealt e802d9df793c9993; 2.5 min in all, as 44.2's
+bit-identity says); pytest 424 passed, 22 skipped, 3 failed of the desktop's 449 tests (445 passed, 4 skipped): the
+skips are the worker and private-data tests, the 3 failures the platform-bound ones above - all now the desktop part.
+The 20k fuzz and the engine suite are the engine's only (44.2). Not moved: anything that loads a network on the
+Mac's torch (not bit-identical, 44.4); digests and suites are network-free.
+
+### 166.3 The live-run fence (zero-core docs/az.md 51)
+
+The tests that start real supervisors or churn processes carry `@pytest.mark.live_run_hazard` and are skipped while a
+supervisor is live on the machine (both repos' conftests call `zero.runctl.fence_items`). Marked here:
+`test_loop.py`'s supervisor and kill_run tests, `test_run_publisher.py`'s supervisor test, `test_yardsticks.py`'s
+watcher and keeper tests (they start child processes); in zero-core `test_companion.py` (9), `test_run_infra.py`'s
+orphan sweep and same-crash give-up, `test_loop.py`'s supervisor / stall watchdog / kill_run, `test_encoding_guard.py`'s
+refused-run supervisor. The fence is Windows-only by default (the pid-reuse hazard of 11-14 is Windows's; the Mac
+hosts a 34-day St. Pete Zero supervisor and is where these tests run). The gate counts the fenced tests in pytest's
+`-rs` lines and names them in the final line as skips (GATE PASSED WITH SKIPS ... live-run-hazard test(s)), since
+they ran nowhere; on the Mac they ran. `ZERO_ALLOW_LIVE_RUN_HAZARD=1` runs them anyway.
+
+The kill_orphans pid-reuse fix (zero-core 76c548f, in the pin bf229a5 and so in this branch's) was verified, not redone:
+`supervise.kill_orphans(pid, since)` kills only children created after the launch; both call sites pass the launch
+time; `test_the_orphan_sweep_spares_processes_older_than_the_launch` covers it.
+
+### 166.4 Measured: what slows pb2
+
+pb2's iteration times are read from its `log.txt` (the `iter N train` lines) and `metrics.jsonl` (self-play seconds,
+local games per hour, the Mac's games); gate windows from every `gates/*.json` since pb2 started. Nothing of pb2 was
+touched. What the numbers say: **the gates themselves were never the big cost**; GPU side jobs on the desktop and
+the Mac's evaluation are.
+
+| window | side work on the desktop | pb2 min/iteration |
+|---|---|---:|
+| 11-14 18:14-19:09 (iters 2-13) | none (no farm yet) | 4.2-4.9 |
+| 11-14 19:18-20:58 (iters 15-32) | **three gates at once on the desktop** (suite with the 20k fuzz, search-core, python), pb1 paused | **4.6-5.0** |
+| 11-14 21:00-01:07 (iters 33-56) | the farm attach (farm gates, exports), relaunches, engine/search-core gates | 8.7-12.2 |
+| 11-15 01:07-03:49 (iters 57-80, quiet) | the farm attached, the publisher companion | 5.8-6.6 |
+| 11-15 01:22-01:40 (iters 60-63) | a python gate on the desktop | 6.3-6.6 |
+| after every evaluation (iters 81-84, 97-100, 113-118, 129-130) | the yardstick watcher's best-of-one on the desktop GPU (2 x ~1,300 s per evaluated checkpoint) + pb2's evaluation on the Mac | 8.2-16.8 |
+| 11-15 08:58-10:22 (iters 119-128) | other sessions' CUDA head-to-heads and self-play probes (sb_play, local_h2h_rows) | 8.7-10.1 |
+
+* **The Mac's evaluation starves the Mac's self-play.** In the two iterations after each evaluated checkpoint the Mac
+  plays 60-95 of pb2's games instead of 330-500 (iters 65-66, 81-82, 97-98, 113, 129), the desktop plays the
+  rest: +2-4 min each. This is pb2's own design (eval_remote mac + 3 Mac self-play procs), not side work.
+* **The yardstick best-of-one on the desktop GPU** costs 3-4 iterations of +3-8 min every 16 iterations (~40 min of GPU
+  per evaluated checkpoint): the largest side cost. Its move off the desktop is phase 4 (166.6).
+* The baseline itself moved from ~4.7 to ~6.2 min when the farm attached (11-14 21:39; the farm pool's exports and
+  the run-owned publisher's CPU): not side work either.
+
+**This branch's gates beside pb2** (11-15, both python tier; the desktop also carried other sessions' work: the
+yardsticks' best-of-one of gen 128 until 11:12, phase-1 build timings from 11:01, CUDA probes; so pb2's times are
+not a clean A/B):
+
+| gate | placement | gate time | pytest | run-loop smoke | pb2 during it |
+|---|---|---:|---:|---:|---|
+| b812b730, auto (11:01-11:16) | builds throttled here (cold: 215 + 227 s), pytest + smoke on the Mac, the desktop part here | 908 s | 408 s (Mac) + 72 s (desktop part, beside it) | 58 s (Mac) | iters 131-132: 12.8, 12.1 min; the Mac played 487 and 447 games (above its usual 330-400: the offload took nothing visible from it) |
+| 49fa8328, --no-mac (11:20-11:48) | all here, throttled (warm builds) | 1,704 s | 1,463 s | 234 s | iters 133-134: 11.4, 13.9 min; the Mac 390, 533 |
+
+The offloaded gate took half the time of the desktop one while its builds were cold, put no measurable dent in the
+Mac's share of pb2's games (nice 10, at most 2 slots there), and left the desktop only its builds. pb2's iteration
+times in both windows were set by the other side work (yardsticks, other sessions' CUDA jobs and builds), which this
+phase does not move: "pb2 back near 4.5-6 min with a gate running" needs those off the desktop too (yardsticks: phase
+4; ad-hoc CUDA analyses beside a live run: a rule for the sessions, or the scheduler). The 11-14 evening shows the
+desktop can run three gates at once with pb2 at 4.6-5.0 min when nothing uses the GPU and RAM is free (pb1 paused).
+
+### 166.5 Gates
+
+* `python tools/gate.py python` (auto: pb2 live, the Mac answered) on b812b730: **GATE PASSED WITH SKIPS python
+  b812b730d238 in 908s - skipped: pytest: 5 live-run-hazard test(s) (fenced: a live run on this machine),
+  pytest-desktop: 1 live-run-hazard test(s) (fenced ...)** - the 5 on the Mac were fenced by the Mac's St. Pete
+  supervisor, which made the fence Windows-only by default (zero-core be9ebfa, pin in 49fa8328); the one left is the
+  desktop-only supervisor test (166.6).
+* `python tools/gate.py python --no-mac` on 49fa8328: **GATE PASSED WITH SKIPS python 49fa8328b2eb in 1704s - skipped:
+  pytest: 6 live-run-hazard test(s) (fenced: a live run on this machine)** (448 passed, 10 skipped).
+* The head's gates (python, optin-core for the zero-core pin) are in the merge note.
+* `tests/test_gate.py`: 89 passed (8 new: no live run = nothing moves; beside a live run the Mac and the slots, with
+  pytest's split exactly PYTEST_DESKTOP_ONLY; --no-mac; an unreachable Mac; a Mac step that never reached the Mac
+  runs here; fenced tests = a pass with skips; the suite's FUZZ_* reach the Mac and the caller's do not; the remote
+  command's scrubbing). zero-core `tests/test_live_fence.py`: 12 passed.
+
+### 166.6 Not done here (later phases)
+
+* **Yardsticks on the Mac**: not a small change (ship the checkpoint and the anchor, a Mac checkout of the watcher's
+  commit, CPU vs CUDA results in one series) and the standalone watcher (pid 15644) is pb2's, not to be touched. The
+  farm-campaigns branch already adds `bo1_backend farm|local` to the yardsticks (its ENGINE.md 165): phase 4.
+* **Gate fuzz on the farm**: a branch's commit has no signed worker, so the zero-farm fuzz campaigns cannot fuzz it;
+  the farm keeps fuzzing main and pb2's pinned build (tools/fuzz_farm.py on the Mac, zero-farm fuzz jobs). Sharded
+  gate fuzz with spot checks is phase 1 (sharding) and phase 4 (farm).
+* **The scheduler's slot rule** replaces `tools/slotd.sh` in phase 4 (3.7).
+* `test_run_publisher.py::test_the_supervisor_starts_one_publisher_per_run_and_it_ends_finished` fails on macOS
+  (the companion started 8 times instead of once): a real macOS difference in the companion's keeper or the test,
+  not investigated; until fixed it runs on the desktop only and is fenced while a run is live.
+* A Job Object for run trees (S8's first point) and supervisor-alive checks in `tools/watch_run.sh`: not in this phase.

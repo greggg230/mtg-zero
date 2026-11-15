@@ -1328,6 +1328,9 @@ def place(ctx, args, steps):
                    else 'no live run here: the desktop runs everything')
     if throttle is None:
         throttle = bool(heavy) and bool(is_live())
+        if live and not any('live supervisor' in w for w in why):
+            why.append(f'{len(live)} live supervisor(s) here ({", ".join(sorted({x["run"] for x in live}))[:160]}): '
+                       f'the heavy steps throttled')
     mac_ok, mac_what = False, ''
     if want_mac and candidates:
         mac_ok, mac_what = mac_probe()
