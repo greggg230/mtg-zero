@@ -34689,9 +34689,14 @@ learns the matchup from game results with a model of its own, EoE run 2's pairwi
   seats' deals of a game come from independent streams: seat 1's is salted when both are dealt
   (`DEALT_SEAT1_SALT`; with one 75 both, one stream would deal both seats the same 60). One dealt seat keeps 154's
   stream exactly.
-* **Hidden information: every property of 154 holds per seat.** Public: `dealt_both` is classified Public with a
-  perturbation of its own ("both players' decks in the match are dealt"; 154's perturbation turns a both-dealt match
-  into one dealt seat), encoded by the per-player `g6::DEALT` floats (both 1). Private: each deal keyed `KEY_DEALT` of
+* **Hidden information: every property of 154 holds per seat.** Public: both dealt floats are set (`g6::DEALT` per
+  player); `dealt_both` is classified Derived (a setting of the match from its spec and seed, the same in every world,
+  as `post_board`), its floats checked by 154's perturbation, which turns a both-dealt match into one dealt seat. (A
+  perturbation of its own was tried first: adding one to the combinable list redraws every position's partner in the
+  pairwise pass, 142, and the redrawn sample met three collisions on layout v6 - `mtg_eoe` only - no known gap covers:
+  "a permanent gained a triggered ability" against "(the position as it is)", "combat damage is prevented this turn",
+  "a permanent loses all abilities", each with `LoseAllAbilities` and a later `Granted` ability on one permanent; a
+  pre-existing v6 gap the old sample never drew, left for the EoE layout's owner, 168.6.) Private: each deal keyed `KEY_DEALT` of
   its seat, `HIDDEN` for the other observer - a world of viewer v keys v's own deal in full and the other's hidden
   (`both_dealt_matches_deal_two_independent_60s_and_key_them_privately`). The other player's worlds deal each dealt
   seat's 60 from its restricted prior, untilted (154.2); the aux `deck` target is empty against a dealt 60, so with
@@ -34900,5 +34905,9 @@ own target directory (E:/cargo-target/mtg-zero/pb3-varied; zero-core's E:/cargo-
   run's): `tools/mac.sh --eval-checkout` on the run's commit before the launch (the checklist's step 3).
 * **farm_gates on the table**: run `tools/farm_gates.py` once more after the first table version with
   `--set spec=<that phase's spec>` (the real network and ONNX through teacher decisions).
+* **A layout v6 (`mtg_eoe`) gap found by the pairwise pass** (168.1): a permanent that lost all abilities and later gained
+  a triggered ability encodes as one without it (three collisions at GATE_SEED 4242 with a redrawn sample). Layout v7
+  (`mtg`) is not affected; `mtg_eoe` stays on v6 until EoE run 2 resumes (encoding-options.md 2.8): a known-gap entry or
+  the v6 fix is that work's.
 * **Not done**: a site panel for the matchup model (needs the user's screenshot approval); the gate's farm-compat step
   still runs the default preset only (run the pb3 preset by hand: the checklist's step 0).

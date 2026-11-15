@@ -369,7 +369,7 @@ pub fn fields() -> Vec<Field> {
         keep_known: Derived "the yardstick's informed arm (ENGINE.md 141): a setting of the match, the same in every world, never encoded - the other seat's worlds deal a keeper its real deck (a prior that knows its policy)",
         post_board: Derived "game 1 was not played (ENGINE.md 130, start_game 2): a setting of the match, the same in every world, never encoded - a real game 2 encodes as a synthetic one",
         dealt: Public "the dealt seat (ENGINE.md 154, dealt_decks): a rule of the match both players know, the same in every world, encoded per player (g6::DEALT)",
-        dealt_both: Public "both seats are dealt (ENGINE.md 168.1, dealt_decks per_seat): a rule of the match both players know, the same in every world, encoded per player (g6::DEALT)",
+        dealt_both: Derived "both seats are dealt (ENGINE.md 168.1, dealt_decks per_seat): a setting of the match from its spec and seed, the same in every world; it reaches the encoding through the per-player g6::DEALT floats, which the dealt seat's perturbation checks (and that perturbation turns a both-dealt match into one dealt seat)",
         table: Hidden "the seats that sideboard by the choice table (ENGINE.md 168.3): a seat's own policy, as keep; never encoded, the other player's worlds deal its 60 from the constructed prior",
         glog: Derived "the live match's game log record (ENGINE.md 168.2): never read by the rules, the encodings or the search; a clone carries none",
         dealt_seed: Hidden "seeds the dealt seat's later deals (ENGINE.md 154): chance not yet happened, determinize reseeds it in every world",
@@ -2001,16 +2001,6 @@ pub fn perturbations() -> Vec<Perturbation> {
             };
             a.m.dealt = Some(p);
             Some(format!("P{p}"))
-        }),
-        p!("both players' decks in the match are dealt", "MatchState.dealt_both", |a, _| {
-            // (ENGINE.md 168.1: the encoding shows both dealt floats; a match with both already: neither)
-            if a.m.dealt_both {
-                a.m.dealt_both = false;
-                return Some("neither".into());
-            }
-            a.m.dealt = None;
-            a.m.dealt_both = true;
-            Some("both".into())
         }),
         p!("a drawn game", "MatchState.draws", |a, _| {
             a.m.draws += 1;
