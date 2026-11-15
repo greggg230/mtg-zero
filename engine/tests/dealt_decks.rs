@@ -177,7 +177,7 @@ fn the_deal(seed: u64, game: u8, lo: usize, hi: usize) -> Vec<u16> {
 #[test]
 fn dealt_decks_is_a_constructed_best_of_three_self_play_setting() {
     let s = spec_of(dd(0.5, 1, 8));
-    assert_eq!(s.dealt_decks, Some(DealtDecks { p: Share(0.5), swaps: (1, 8) }));
+    assert_eq!(s.dealt_decks, Some(DealtDecks { p: Share(0.5), swaps: (1, 8), per_seat: false }));
     assert_eq!(spec_of(json!({})).dealt_decks, None);
     assert_eq!(spec_of(dd(1.0, 0, 15)).dealt_decks.unwrap().swaps, (0, 15));
     assert_eq!(spec_of(dd(0.25, 3, 3)).dealt_decks.unwrap().swaps, (3, 3));

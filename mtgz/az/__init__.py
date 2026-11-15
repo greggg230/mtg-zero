@@ -44,6 +44,7 @@ from .publish import DELVER_PUBLISH
 from .yardsticks import DELVER_YARDSTICKS
 from ..sealed.games import REMOTE_EVAL_LOG
 from ..sealed.rolling import SETTINGS as ROLLING_SETTINGS
+from .matchup import SETTINGS as MATCHUP_SETTINGS
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -245,6 +246,22 @@ PRESETS['delver-bo3-smoke'] = dict(PRESETS['delver-smoke'], spec=SPEC_DELVER_BO3
 SPEC_DELVER_BO3_DEALT = decklists.mirror_bo3_spec(decklists.IZZET_DELVER, max_turns=60, game_episodes=True, start_game=2,
                                                   dealt_decks={'p': 0.5, 'swaps': [1, 8]})
 PRESETS['delver-mirror-bo3-dealt'] = dict(PRESETS['delver-mirror-bo3'], spec=SPEC_DELVER_BO3_DEALT, eval_spec=SPEC_DELVER_BO3)
+# Wide 60 variety and the in-run matchup model (docs/ENGINE.md 168; the run pb3, user-approved 2026-11-15): each seat's
+# 60 is dealt on its own with probability 0.85 (swaps uniform over 0..15, then uniform: the constructed prior's base,
+# so a dealt 60 is distributed as the opponent prior), the rest sideboard - by search until the matchup model's first
+# version, then by its choice table (teacher decisions: the table's 60 played and recorded as the policy target). The
+# model (mtgz.az.matchup) is retrained in the background every 4 iterations on the run's logged games (the newest 32
+# iterations, the newest 2 validating, half-life 16). The evaluation spec is delver-mirror-bo3's (no deal, no table).
+SPEC_DELVER_BO3_VARIED = decklists.mirror_bo3_spec(decklists.IZZET_DELVER, max_turns=60, game_episodes=True, start_game=2,
+                                                   dealt_decks={'p': 0.85, 'swaps': [0, 15], 'per_seat': True})
+_MATCHUP = dict(matchup_every=4, matchup_window=32, matchup_min_window=4, matchup_val_iters=2, matchup_half_life=16.0,
+                matchup_threads=4, matchup_worlds=8000)
+PRESETS['delver-mirror-bo3-varied'] = dict(PRESETS['delver-mirror-bo3'], spec=SPEC_DELVER_BO3_VARIED,
+                                           eval_spec=SPEC_DELVER_BO3, **_MATCHUP)
+# its CPU smoke: delver-bo3-smoke's network and sims, a retrain every iteration from the second
+PRESETS['delver-bo3-varied-smoke'] = dict(PRESETS['delver-bo3-smoke'], spec=SPEC_DELVER_BO3_VARIED,
+                                          eval_spec=SPEC_DELVER_BO3, **dict(_MATCHUP, matchup_every=1, matchup_min_window=2,
+                                                                            matchup_val_iters=1, matchup_worlds=1000))
 
 # Edge of Eternities sealed (DESIGN.md 9, docs/ENGINE.md 101, 105): the game `mtg_eoe` - `mtg` on the EoE card table,
 # whose encodings carry the EoE identity space (the set's cards in set order, then its tokens: engine/src/az/eoe_cards.txt,
@@ -361,6 +378,7 @@ def vast_remote(box, host=None):
 # the real-deck yardstick's run settings (docs/ENGINE.md 113; mtgz.sealed.realdecks.DEFAULTS' pools, games, builder)
 REAL_DECKS_SETTINGS = {'real_decks_every': 0, 'real_decks_pools': 64, 'real_decks_games': 2, 'real_decks_builder': 'best'}
 assert not set(REAL_DECKS_SETTINGS) & set(ROLLING_SETTINGS), 'two features of the package declare one setting'
+assert not set(MATCHUP_SETTINGS) & (set(ROLLING_SETTINGS) | set(REAL_DECKS_SETTINGS)), 'two features declare one setting'
 
 PACKAGE = register(GamePackage(
     'mtgz', 'MTG Zero', ROOT, engine='mtgz._engine', run_module='mtgz.az.run', game='mtg',
@@ -404,7 +422,9 @@ PACKAGE = register(GamePackage(
     # fork's (a side run, its fork record for the lineage)
     # and the run's standing yardsticks (docs/ENGINE.md 164: the run setting `yardsticks`, {} = off; on in the
     # delver-mirror* presets), measured by a second companion process: mtgz.az.companions composes the two
-    settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, publish={}, yardsticks={}),
+    # the matchup model of a constructed best-of-three mirror and sideboarding by its choice table (docs/ENGINE.md 168,
+    # mtgz.az.matchup: matchup_every 0 = off), through `mtg`'s selfplay_specs hook
+    settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, **MATCHUP_SETTINGS, publish={}, yardsticks={}),
     companion='mtgz.az.companions:companion', on_fork='mtgz.az.publish:on_fork',
     selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec', 'mtg': 'mtgz.az.decklists:selfplay_spec'},
     remote_eval_inputs={'mtg_eoe': 'mtgz.sealed.rolling:remote_eval_inputs'},

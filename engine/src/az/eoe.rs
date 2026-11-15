@@ -183,4 +183,8 @@ impl SearchGame for MtgEoeAz {
     fn value_choice(&self) -> bool {
         self.0.value_choice()
     }
+
+    fn teacher_policy(&self, legal: &[u16], out: &mut Vec<f32>) -> bool {
+        self.0.teacher_policy(legal, out)
+    }
 }

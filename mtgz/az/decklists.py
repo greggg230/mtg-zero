@@ -87,6 +87,8 @@ def mirror_bo3_spec(name=IZZET_DELVER, sideboard=None, max_turns=60, mulligans=T
         spec['keep_known'] = True
     if dealt_decks:
         spec['dealt_decks'] = {'p': dealt_decks['p'], 'swaps': list(dealt_decks['swaps'])}
+        if dealt_decks.get('per_seat'):
+            spec['dealt_decks']['per_seat'] = True     # (each seat dealt on its own, ENGINE.md 168.1)
     spec['decks'] = {'p0': main, 'p1': main, 'p0_sideboard': side, 'p1_sideboard': side}
     return json.dumps(spec, separators=(',', ':'))
 
@@ -108,7 +110,9 @@ def selfplay_spec(run, it):
         raise KeepDeckRefused(f'iteration {it}: the self-play spec holds "keep_deck" - an evaluation setting (the '
                               f'yardstick mtgz.az.keep_h2h plays it), never self-play: the keeping seat\'s rows would '
                               f'train forced sideboarding decisions (docs/ENGINE.md 130.3, 147.4)')
-    return None
+    # the matchup model's choice table (docs/ENGINE.md 168.3; matchup_every 0: None, the run's spec)
+    from .matchup import selfplay_spec as matchup_spec
+    return matchup_spec(run, it)
 
 
 def mirror_spec(name=IZZET_DELVER, max_turns=60, mulligans=True):
