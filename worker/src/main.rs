@@ -20,7 +20,7 @@ static GAMES: &[zero_worker::GameEntry] = &[
 ];
 
 /// The game package's own run settings (`mtgz.az`'s `GamePackage.settings`: `mtgz.sealed.rolling.SETTINGS` and
-/// `REAL_DECKS_SETTINGS`, ENGINE.md 112 / 113) and how a worker treats them (check-config; tests/test_worker_farm.py
+/// `REAL_DECKS_SETTINGS`, ENGINE.md 112 / 113; `publish`, ENGINE.md 163) and how a worker treats them (check-config; tests/test_worker_farm.py
 /// checks the list against the package's).
 static PACKAGE_SETTINGS: zero_worker::classify::PackageSettings = &[
     ("evaluator_every", "python_only", "the deck evaluator retrained inside the run: the selfplay_specs hook (mtgz.sealed.rolling, Python) changes the self-play spec between phases; remote self-play refuses it too"),
@@ -36,6 +36,7 @@ static PACKAGE_SETTINGS: zero_worker::classify::PackageSettings = &[
     ("real_decks_pools", "trainer", "the extra evaluation against real decks"),
     ("real_decks_games", "trainer", "the extra evaluation against real decks"),
     ("real_decks_builder", "trainer", "the extra evaluation against real decks"),
+    ("publish", "trainer", "the run-owned delverai publisher: a companion process of the run's supervisor on the desktop (ENGINE.md 163)"),
 ];
 
 static WORKER: zero_worker::Worker = zero_worker::Worker {
