@@ -243,7 +243,8 @@ def export_gen(ckpt, gen, game, spec, run, log, cache=None):
     t0 = time.time()
     m, _ = load_checkpoint(ckpt, game)
     rows = FH.record_rows(m, game, G.spec_json(spec))
-    info = FH.export(ckpt, gen, d, game, [rows], f'{run}/{gen}', checkpoint_iter=gen)
+    # (the graph's checkpoint label names the checkpoint, not a campaign: one export serves every campaign)
+    info = FH.export(ckpt, gen, d, game, [rows], f'ckpt-{sha[:12]}', checkpoint_iter=gen)
     info = {k: info[k] for k in ('model', 'sha256', 'model_size', 'reference', 'reference_sha256', 'reference_size',
                                  'checkpoint', 'checkpoint_sha256')}
     info['export_s'] = round(time.time() - t0, 1)
@@ -572,14 +573,16 @@ def status(d, client=None, opts=None):
 # ------------------------------------------------------------------------------------------------ the local fallback
 def runtime_dll(st):
     """The ONNX Runtime the local worker loads: `ort_dll`, else the runtime pack's next to the build
-    (<builds>/<runtime>/onnxruntime.dll: E:/zero-farm-builds/<id>/ on the maintainer's desktop)."""
+    (<builds>/<runtime>/onnxruntime.dll), else the desktop's copy of the registered pack (E:/zero-farm-builds/<id>/)."""
     if st.get('ort_dll'):
         return st['ort_dll']
-    base = os.path.dirname(os.path.dirname(st['worker']))
-    p = os.path.join(base, st['runtime'] or '', 'onnxruntime.dll')
-    if st['runtime'] and os.path.exists(p):
-        return p
-    raise CampaignError(f'no ONNX Runtime for the local worker: give ort_dll (looked at {p})')
+    looked = []
+    for base in (os.path.dirname(os.path.dirname(st['worker'])), 'E:/zero-farm-builds'):
+        p = os.path.join(base, st['runtime'] or '', 'onnxruntime.dll')
+        looked.append(p)
+        if st['runtime'] and os.path.exists(p):
+            return p
+    raise CampaignError(f'no ONNX Runtime for the local worker: give ort_dll (looked at {looked})')
 
 
 def local_cmd(st, lo, hi, out, threads):
