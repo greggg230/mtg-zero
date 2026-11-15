@@ -26062,6 +26062,487 @@ the license or with rates outside 0..1. Screenshots for approval (local preview,
   failure is a different timing test per run and passes alone: the load, as 105.7 saw. A run of both tiers on a quieter
   desktop is the maintainer's before merging.
 
+## 114. mtgz-worker: the native self-play worker for zero-farm (branch `farm`, 2026-11-11)
+
+Branch `farm` (from main 60397f3; zero-core `farm`, docs/az.md 41-42 there). **Why.** zero-farm (friends' idle Windows PCs
+playing a run's games, the zero-farm repo's DESIGN.md) runs the search natively: the engine and zero-core's search with
+the network as a `zero-onnx/1` graph through ONNX Runtime on the CPU - no Python, no torch on a friend's PC. Phase 0b
+built the worker and proved it plays as the Python remote worker plays. No engine, encoding or search change.
+
+**What.**
+* `worker/` (crate `mtgz_worker`, binary `mtgz-worker`): zero-core's `zero_worker` (docs/az.md 44) + the engine + mimalloc
+  (the Python module's allocator, section 17), registering the games `py/src/lib.rs` registers (toy, mtg, team_draft,
+  mtg_eoe) without PyO3. A workspace member outside `default-members`: `cargo test` at the root and `tools/build_py.sh`
+  never build it or ONNX Runtime. Build: `cargo build --release -p mtgz_worker` (2 min 50 s on the busy desktop over an
+  engine already built); `target/release/mtgz-worker.exe` 23.7 MB; at run time it loads ONNX Runtime from
+  `--ort-dll`, env `ZERO_ORT_DYLIB` / `ORT_DYLIB_PATH`, or `onnxruntime.dll` next to it (1.31.1 tested: 19.3 MB) and
+  needs the MSVC runtime (VCRUNTIME140, VCRUNTIME140_1; ONNX Runtime also MSVCP140).
+* Commands: `serve` (zero-farm PROTOCOL.md 5, `aw/1`: hello, one job line, yield / resume / finish / quit / checkpoint /
+  ping; events fin, shard, status, yielded, resumed, end, error), `selfplay --settings <config.json> (--model <graph> |
+  --uniform) --games N ...` (the same job from flags), `check-config <config.json>` (every setting classified; exit 1
+  on an unknown or unsupported one), `driver-cfg <config.json>` (the Python remote worker's DriverCfg, as text),
+  `eval-batches` (answers to recorded batches), `info`.
+* The zero-core pin moves from f9ca5c3 to zero-core `farm` (phase 0a's exporter 508a193 / 4edb1e7, then 0b: the
+  settings parser in zero_search, `Driver::set_first_gid`, `zero_worker`, `zero.onnx_eval`, the gate tools) - not
+  pushed (the pin points at local commits; push both before merging).
+* `tests/test_worker_shards.py`: the worker's shards (sparse and dense) pass zero-core's remote arrival check
+  (`RemotePlay._check`: game / features / actions, the non-finite guard) and load into the training window
+  (skipped without a built worker).
+
+**Checks.** Behaviour digests unchanged: `cargo test --release -p engine --test digest -- --ignored` - 2,000 random + 500
+heuristic games, combined digest **53839c837bbaf034** (= `engine/tests/data/digests.txt`); `cargo test --release -p engine
+--test az`: 48 passed; pytest: 271 passed, 1 skipped (the new `test_worker_shards.py` included). Every preset and run config: zero-core's old and new seat parsers build identical
+drivers (468), and the worker's `driver-cfg` equals the Python remote worker's DriverCfg (72 cases; 6 refused as
+Python-only: the league and branched games); `check-config` accepts 62 of the 79 and refuses 17: the co-training presets
+and runs (`resolver`, 6), `toy-cotrain-smoke` (its game is not registered), the league runs (2 x 2 configs), the
+branched-game run (2), and the configs carrying settings of other branches that this core does not know
+(`selfplay_explore*`, `selfplay_temp_late*`, `selfplay_sims_light*`, `selfplay_league_fixed`, `selfplay_opp_model` -
+which Python's run would have ignored in silence).
+
+**Measured** (2026-11-11, the desktop busy with the live Delver run, CPU only; zero-farm docs/phase0b-worker.md has the
+tables). Parity gate 2 on eoe1 iter 80: (a) on eoe1's settings with groups 1 and the uniform evaluator, `mtgz-worker
+selfplay` and zero-core's remote worker wrote byte-identical shards (48 games, 14,136 rows) and sent identical first 300
+batches; (b) the worker's answers equal onnxruntime + numpy's (value / margin / aux bit-identical, priors <= 1.8e-7) and
+torch's within 1.34e-5 on 440 recorded batches; (c) 100 paired games, the graph through onnxruntime vs the checkpoint through torch, 32 sims: 0.500 +- 0.000, all 50 pairs split. `serve`: `yielded` 31 ms after `yield`, a yielded and
+resumed job writes the same shards as one left alone; a `checkpoint` mid-job switches the rows' network id (548 rows of
+net 80, 230 of 81). Throughput at 8 threads (threads 8, groups 2, conc 256, 10-minute interleaved runs): **1,324 leaves/s
+native vs 885 for the Python remote worker with torch (1.50x)**, ~390 vs ~260 eoe1 games/h; peak RAM 1.5 GB (Python
+1.06 GB).
+
+### 114.1 The fuzz loops in the engine library (zero-farm phase 1, 2026-11-12)
+
+**Why.** zero-farm's first job for friends' PCs is fuzzing (zero-farm DESIGN.md 6): the seeds of this repo's own fuzz
+loops, run by the native worker. Test executables are not shipped, so the loops move into the library that the tests
+and the worker both call - one implementation, the same games.
+
+**What.** `engine::fuzz` (`engine/src/fuzz/`):
+* `games.rs`: `engine/tests/fuzz.rs`'s fuzzer moved as it was (every pool, check, counter and report; its module docs
+  list the `FUZZ_*` settings) with `fuzz_random_games` / `fuzz_random_matches` as `random_games(first, n, hooks)` /
+  `random_matches(first, n, hooks)` (`matches_skipped()`: why a games-only pool plays no match) and the replay tests'
+  helpers public (`play`, `new_game`, `play_match`, `match_spec`, the pool predicates);
+* `draft.rs`: `engine/tests/draft.rs`'s `fuzz_random_events` as `random_events(first, n, hooks) -> EventsEnd`, with the
+  helpers the draft tests share (`spec`, `legal`, `enc`, `zr`, `finish_random`, `assert_bounded`);
+* `cards.rs`: `engine/tests/common`'s fixtures (the cube + the custom test cards, the fuzz pool, random decks);
+  `tests/common` re-exports them, so every test binary uses the same ones;
+* `mod.rs`: `env::var` (the process environment, or - once `env::use_only` is called, in a farm chunk process - the
+  job's own settings and nothing else), `Hooks` (before / passed / match_panic), `SeedOutcome` (fingerprint, result,
+  turns, decisions), `Run` (Done, Failed {seed, payload}, Stopped {at}).
+
+The move is mechanical (`engine::` -> `crate::`, `std::env::var` -> `super::env::var`, `common::` -> `super::cards::`,
+the loops' heads and per-seed tails as above; the second port, of main's Doomsday pools (124), was made by a script
+that reproduces the first port byte for byte from the old file). Behaviour is the same: a seed that panics ends the run
+there and the test wrapper panics with the same message (`seed N failed (rerun: ...)`, `match N failed (...)`,
+`event N failed (...)`), so `tools/fuzz_farm.py` parses the same lines, unchanged; only the file:line of a panic in the
+moved code changed. The draft loop's final assertion over the listed match panics is the test wrapper's.
+
+**Checks.** Old vs new, the same seeds (`FUZZ_FIRST=10000000`): (1) main 8ff7218 against the farm commit on it, 12 modes
+(games 3,000, matches 1,000, interactions games 3,000 / matches 600, drafted matches 2,000, exponential 400, draft events
+3,000, delver 2,000, eoe 2,000, sealed 1,000, hidden decklists 500, `FUZZ_CHANCE=20` 1,000): every printed line identical
+(18,856 seeds played) except the panic locations; per-seed fingerprints, results, turns and decisions (the old tests
+printing them in a scratch copy, the new loops through mtgz-worker's chunk processes): identical on 20,856 seeds;
+(2) after merging main 7025f2a (Doomsday, 124), main against the merged farm, 12 modes (games 1,500, matches 500, interactions games 1,000, drafted matches 500, draft events 1,500, delver 1,000, `dd_a` / `dd_b` / `dd_c` / `doomsday` 300 each, eoe 500, sealed 300): every printed line identical (8,000 seeds) and every seed identical through the worker (8,000). Two failures on main itself showed up, the same on both sides
+and not caused by this move (reported, not fixed here): `FUZZ_POOL=exponential` seed 10000021 (`check_bounded`: step 529,
+viewer P0's feature 3248 is 6760.5, bound 256) and `FUZZ_HIDDEN_DECKS=1` seed 10000235 (a hidden-decklist world for P1:
+the opponent's sampled deck is not the match's: one card 545 vs 544). **Gate** (engine tier, on 2591ead: `python tools/gate.py engine --no-mac --expect-digest 53839c837bbaf034 --expect-digest0
+208c723daced22fe --jobs 8`): **GATE PASSED WITH SKIPS** in 3,024 s (skipped: the Mac recheck, `--no-mac`) - the build;
+behaviour digests unchanged, full **53839c837bbaf034** and `DIGEST_ENCODING=0` **208c723daced22fe** (= `tests/data/digests.txt`,
+no re-record); `--test az` 49, `limits` 13, `hidden` 28 passed; pytest 291 passed, 1 skipped (`tests/test_worker_farm.py`
+included); the random smoke; the tree unchanged. Also `cargo test --release -p engine --test fuzz --test draft`: 4 and 23
+passed (1 ignored: `measure`).
+
+### 114.2 mtgz-worker: fuzz jobs, the self-test, the runtime pack (zero-farm phase 1, 2026-11-12)
+
+**What.** zero-core `farm` ef20741 (docs/az.md 44.1 there): fuzz jobs in supervised chunk processes, the per-machine
+self-test, ONNX Runtime only from the runtime pack. This repo's part, `worker/src/fuzz.rs` (`MtgFuzz`):
+* **Modes**: `tools/fuzz_farm.py`'s fuzz / draft modes (`games`, `matches`, `interactions-games`, `interactions-matches`,
+  `drafted-matches`, `exponential-games`, `draft-events`), whose `env` must be exactly that mode's (so the repro is the
+  farm's), with its minimum chunk (1,000 / 50 / 1,000 / 50 / 50 / 100 / 50 seeds); or any `<name>-games`,
+  `<name>-matches`, `<name>-events` with the settings it needs (e.g. `delver-games` + `FUZZ_POOL=delver`,
+  `sealed-games` + `FUZZ_POOL=sealed FUZZ_HIDDEN_DECKS=1 FUZZ_DECK_CHOICE=4`).
+* **No silent settings**: each loop accepts only what it reads - games: FUZZ_POOL (any but drafted), FUZZ_BEST_SHARE
+  (sealed), FUZZ_BELIEF, FUZZ_CHANCE, FUZZ_SKIP, FUZZ_LOG, FUZZ_GROUPS (interactions); hidden decklists:
+  FUZZ_HIDDEN_DECKS=1 with the default / eoe / sealed pool, FUZZ_BEST_SHARE, FUZZ_DECK_TILT, FUZZ_DECK_CHOICE (sealed),
+  FUZZ_DEAL_SAMPLES, FUZZ_SKIP, FUZZ_LOG; matches: FUZZ_POOL (default, interactions, drafted), FUZZ_BELIEF, FUZZ_SKIP,
+  FUZZ_GROUPS; draft events: nothing. Numbers are parsed as the engine parses them. Anything else is a fatal error
+  naming why (FUZZ_FIRST & co: the job's first / count set them; POOL_EXCLUDE: a file on the desktop).
+* **Repro**: `tools/fuzz_farm.py`'s `repro_of` - `(at <sha12>) <env> FUZZ_FIRST=<seed> FUZZ_GAMES=1 FUZZ_LOG=1 cargo test
+  --release -p engine --test fuzz fuzz_random_games -- --exact --nocapture` (matches: FUZZ_MATCHES=1; events:
+  DRAFT_FUZZ_FIRST / DRAFT_FUZZ=1 --test draft) - with the commit from the build's signed manifest and the build's cargo
+  profile (`--profile fuzz` for a fuzz build: its debug assertions are part of what failed); a draft event's listed
+  match panic: + ` (its match i; spec: ...)`; a chunk's own check: + ` (the chunk: FUZZ_GAMES=n)`.
+* **Builds**: `build.rs` names the cargo profile (release / fuzz / dev); the fuzz-profile build runs fuzz jobs only
+  (`hello` kinds `["fuzz"]`), the release build self-play and fuzz.
+
+**Tests.** `tests/test_worker_farm.py` (6): a fuzz job over `aw/1` (30 seeds, `end` done, the summary file, nothing
+announced); refusals (games-only pools in a matches mode, a fuzz_farm mode with other settings, settings a loop ignores,
+bad numbers, unknown modes, test faults without the switch); the repro equals `fuzz_farm.repro_of` for every fuzz /
+draft mode of fuzz_farm.py; yield (`yielded` < 2 s, nothing plays while yielded), resume, quit (the passed seeds kept,
+the rest unfinished); with the fuzz build, injected panic / abort / stack overflow / hang at four seeds of 30 - four
+failures with their sites (`.../fuzz.rs:<line>`, `crash exit <code>` twice, `HANG games`) and `--profile fuzz` repros,
+all 30 seeds done; the self-test with a small random MTG network (its reference set from the worker's own recorded
+batches): passing, then with one prior off by 1e-3 a fatal error before any game.
+
+### 114.3 Building and publishing farm builds; pulling failures (zero-farm phase 1, 2026-11-12)
+
+* `tools/farm_build.py --profile release|fuzz [--runtime-id ID] [--publish]`: a clean tree (and the zero-core submodule
+  at its pin), `mtgz-worker` built at HEAD with that profile and `+crt-static` in `<target>/farm-build` (the executable
+  imports nothing beyond Windows: checked from its import table), the build directory (`mtgz-worker.exe` only) signed by
+  zero-farm's `farm-release sign --kind worker --game mtg --engine-commit <HEAD> --core-commit <pin> --profile <p> --aw 1
+  [--zero-onnx 1] --min-agent 0.1.3 [--requires-runtime <id>] --entry mtgz-worker.exe`, checked (the signed worker reports
+  that build_id, its kinds, its commit and profile), published with `--publish`; prints `build_id <id>`.
+* `tools/farm_build.py --runtime [--publish]`: the runtime pack - `onnxruntime.dll` 1.31.1 (CPU) and the MSVC runtime it
+  imports (msvcp140, msvcp140_1, vcruntime140, vcruntime140_1), app-local, each Microsoft-signed and at least the
+  toolset ONNX Runtime was linked with (14.44), plus `runtime.json`; loaded through a release farm build's `info
+  --runtime-dir` (every DLL from the pack) before it is signed (`--kind runtime`).
+* `tools/farm_fuzz_pull.py --campaign ID`: a campaign's failures (`GET /v1/admin/campaign/{id}/failures`) into
+  `failures/<fid>.json` (+ the first three outputs as `<fid>-<k>.log`), `tools/fuzz_farm.py`'s format and key (the site
+  and the masked first message line: the Mac farm's id for the same panic), merged into what is there; a cursor per
+  campaign so a pull takes only new failures.
+
+The runtime pack and a fuzz and a release build of this branch are published to the live coordinator (zero-farm
+`docs/phase1-worker.md` has their build ids and how to start a fuzz campaign).
+
+### 114.4 Eval jobs and farm head-to-heads (zero-farm phase 2, 2026-11-12)
+
+**What.** `mtgz-worker` plays zero-farm's eval jobs (zero-farm PROTOCOL.md 5.2, rev 5): games of an evaluation match
+between two networks (or a network and a built-in bot) at a run's settings, exactly the games `Run.play_match` plays
+(the Elo matches', the yardstick's); and `python -m mtgz.az.farm_h2h` runs a head-to-head of two checkpoints on the
+farm and prints the readout zero.h2h prints. Everything is zero-core's (`zero_worker::evaljob`, `zero.farm_eval`,
+`zero.farm_h2h`; docs/az.md 44.2 there); this repo adds the package wrapper, the worker's list of the package's own
+settings and the tests.
+
+* **The merge first**: main 1d5508a (EoE run 2 integrated, Sneak and Show, Peacekeeper's names: 112, 113, 123, 126,
+  127) into `farm` (23a3fe6); main's zero-core pin 25a7f50 merged into zero-core `farm` (95fe9b6: `DynDriver` keeps
+  `set_first_gid` and gains `set_spec`; search.md 2.13 / 2.14). Main's tests/fuzz.rs changes are ported into
+  `engine::fuzz::games` by phase 1's port script (E:/zero-farm-scratch/phase2/port: one more rule, the Sneak and Show
+  deck's `include_str!` from engine/src/fuzz/; it still reproduces the old port byte for byte, and the committed
+  games.rs is its output). The worker's fuzz settings: `FUZZ_POOL` sneak_show / sns / names (games only; names also
+  with hidden decklists), `FUZZ_DECK_CHOICE_BY` refused (a file on the desktop).
+* **Eval jobs**: `serve` takes `kind: eval` (models: one ONNX Runtime session per generation, its file's sha256 checked
+  and its reference set answered first - `selftest` with its `gen`; seats `{"net": gen}` / `{"bot": "heuristic" |
+  "random"}`; paired; gid_base / games) and writes one JSON line per game (`gid`, `pair`, `seats`, `result`, `margin`,
+  `rounds`, `over`) in files of whole pairs announced by `evals`. Its settings must pass `check-config --eval`: the 33
+  settings an evaluation reads, every other one unused; `eval_spec` set (the desktop resolves `mtgz.az.evaldecks`'
+  hook); the bots the game's. `mtgz-worker eval ...` runs one from flags; `driver-cfg --eval` prints the match's driver.
+* **The package's own settings** (`GamePackage.settings`, main's 112 / 113) are classified by the worker
+  (`PACKAGE_SETTINGS` in worker/src/main.rs): `evaluator_every` python_only (its self-play spec hook changes the
+  spec between phases), its `evaluator_*` params, `deckchoice_eval_games` and `real_decks_*` trainer. Without the
+  list a run config of main's (every saved config has them) would be refused as unknown.
+* **`python -m mtgz.az.farm_h2h --a <ckpt> --b <ckpt> --games N --build <worker build> --runtime <pack>`** (zero-core's
+  docs/az.md 44.2): settings from A's run's config.json (or `--config` / `--preset`; `--sims`), both checkpoints
+  exported with reference sets, the run `h2h-<run>-<A>v<B>`, gens 1 and 2, the batch, then progress and the readout;
+  `--resume NAME`, `--cancel NAME`.
+
+**Checks.**
+
+* The eval gate (zero-core `tools/worker_eval_gate.py`; the Python path = `Run.play_match`'s driver with zero-core's
+  `OnnxEvaluator` on the same graphs, groups 1, 4 + 4 threads): eoe1 iter 80 vs iter 70, **20 of 20** and **40 of 40**
+  paired games byte-identical (two seeds; 60 batches of each identical in every array); iter 80 vs the heuristic bot,
+  **12 of 12**; leases of 10 games (other batches) played the 20-game match's rows. Readouts: A 0.500 +- 0.105 (20
+  games), A 0.550 +- 0.050, Elo +35 (95%: -34 .. +106) (40 games).
+* `tools/driver_settings_dump.py --compare-worker --eval`: the eval driver of 82 of 82 presets and run configs (both
+  runs dirs) the same in the worker as in Python; self-play 76 agree, 6 refused as Python-only, 0 different.
+* `tests/test_worker_farm.py`: an eval job over aw/1 byte-identical to the Python evaluation (two small random MTG
+  networks), a lease of the second pair, network against the heuristic bot; check-config --eval, the package's
+  settings, the refusals. With `test_worker_shards.py`: 10 passed.
+* **End to end** (E:/zero-farm-scratch/phase2: `wrangler dev` on 5400 from zero-farm main - PROTOCOL rev 5, migration
+  0004 - with scratch state; the runtime pack c4c4bb77 copied from the live coordinator; the release build below; the
+  real agent engine 0.2.4 in a scratch harness, kinds `["eval"]`, 4 threads): `farm_h2h` put the run
+  `h2h-eoe1-80v70-e2e` (eoe1's config, 8 games, leases of 4), the agent played both leases (per-gen self-tests 2.0e-6 /
+  3.1e-6 through the pack's ONNX Runtime), the coordinator credited 8 games, `farm_h2h --resume` read them (A 0.625 +-
+  0.125, 4 pairs) and the 8 rows are byte-identical to a local Python evaluation of the same 8 games in one driver;
+  `--cancel` paused the run. The coordinator was stopped afterwards.
+* **The engine gate on 042b29b** (this section's commit, pin b19ba7a): `python tools/gate.py engine --expect-digest
+  8d1cce220fbc3eb2 --expect-digest0 c3efa1c404527dab --tested-sha 042b29b6 --jobs 8` -> **GATE PASSED engine 042b29b620d8
+  in 1260s**: build; digests unchanged (= main's, 127.4: full 8d1cce220fbc3eb2, `DIGEST_ENCODING=0` c3efa1c404527dab);
+  `--test az` 50, `limits` 13, `hidden` 28; pytest 314 passed, 1 skipped; the random smoke; the tree unchanged. (The
+  Mac recheck is "not needed" when the tested sha is the gated one: not run.)
+
+**Published** to farm.greggg230.com (registered; no run, batch or invite created): release worker
+**e96bf8e44b9634502e44dcc3** (`mtg-be674a2-release`: engine be674a2, core abca043, kinds `["selfplay", "eval",
+"fuzz"]`, `requires_runtime` c4c4bb776d7f886f5e13474e, min_agent 0.1.3). Eval leases go to agents 0.2.3 or newer.
+The commits after be674a2 change docs and zero.farm_h2h (Python, the desktop's) only.
+
+**A first live head-to-head** (from this checkout, on the desktop):
+
+```
+python -m mtgz.az.farm_h2h --a C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0080.pt \
+    --b C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0070.pt --games 200 \
+    --build e96bf8e44b9634502e44dcc3 --runtime c4c4bb776d7f886f5e13474e
+```
+
+(reads the checkpoints and eoe1's config.json only; state in ~/.zero-farm/h2h/h2h-eoe1-80v70/.) Superseded by 114.5:
+from zero-farm PROTOCOL rev 6 on, a head-to-head also publishes a signed definition.
+
+### 114.5 Signed definitions on the desktop: fuzz campaigns, head-to-heads; a model's sha256 is its file's (zero-farm phase 2b, 2026-11-12)
+
+**Why.** zero-farm PROTOCOL.md rev 6 section 7: every run or campaign friends' PCs work on is described by a
+definition the desktop signs with a data key the coordinator never holds (the security review's H2 / H3 / M2): its
+worker builds, runtime, checkpoints (each file's sha256 and size) and exact job templates; agents build their job lines
+only from it. The desktop tools must produce and publish those definitions. The core side is zero-core's
+`zero.farm_def` (docs/az.md 44.3 there).
+
+**What.**
+
+* **The merge first**: main 35181fe (128: a hand card both players know, canonical worlds; DESIGN.md 9) into `farm`
+  (9982d47), no conflicts; main's digests come with it (128.5: full b63f643e97a30a61, `DIGEST_ENCODING=0`
+  a0062bb5569e06d3). zero-core's main was already in its `farm`.
+* **`tools/farm_campaign.py create | update | pause | resume NAME`, `--from-existing NAME`**: a fuzz campaign's fields
+  (`--build`, `--mode`, `--env K=V ...`, `--seed-base`, `--chunk`, `--priority`, `--needs-*`; `update` puts the flags
+  over the live campaign's, read with `GET /v1/admin/campaign/NAME`); the build's **signed** worker found in the
+  farm_build dist directories (its `manifest.json` hashes to the build id, the exe is the manifest's) or `--worker`;
+  its `info` must name the build and the kind `fuzz`, then **`fuzz-check --mode M --env ...` must accept the mode and
+  env** and name the manifest's engine commit; then the campaign's **definition** (kind campaign, builds [the build],
+  the build's runtime or null, no checkpoints, `jobs.fuzz` = {mode, env} - what the PUT names), a new version signed
+  with the data key and published by `farm-release define --publish` (unless the newest kept definition already says
+  the same, is the coordinator's current one and lasts another 7 days; `--redefine`), expiring after `--expires-days`
+  (90); last `PUT /v1/admin/campaign/NAME`. `pause` / `resume` put the state only (no definition: nothing it allows
+  changes). `--from-existing NAME` signs and publishes the definition of a live campaign as it is and puts nothing.
+  `--dry-run`: every read and check, then the definition and the PUT body printed; nothing signed, published or put.
+  The admin token from `~/.config/zero-farm/admin_token`, to farm-release in its environment only.
+* **`mtgz.az.farm_h2h`** (zero-core's farm_h2h): the run, **its definition** (the worker build, the runtime, gens 1 and
+  2 with their graphs' and reference sets' sha256 and sizes, `jobs.eval` = {settings, seats, paired}, the batch's job
+  exactly), the gens, the batch. As zero-farm's `farm-release define` (agent branch, 0.2.5) requires: the settings are
+  only those the worker build's own `check-config --eval --json` calls `play` (EVAL_READS: eoe1's 33 of 167; never
+  `preset`, `spec`, `resolver_init` or a path), so **`--worker` - the build's signed executable - is required**; the
+  template has no seed, so the batch's base seed is the coordinator's from the run's name. The definition's `game` is
+  the worker build's (its manifest: "mtg"; eoe1's settings game "mtg_eoe" is not even a slug), and `--runtime` must be
+  the one the build requires (checked before the export).
+* **A model's `sha256` on a job line is the model FILE's** (zero-core `zero_worker`, 42.3): self-play and eval alike,
+  checked before ONNX Runtime reads the file; phase 0b's self-play line compared it with the graph's checkpoint hash.
+  The worker built from this commit is needed for self-play leases with definitions (the agent sends the file's hash);
+  the published e96bf8e4 already checks eval models' files.
+* **`mtgz.az.h2h` plays a run's evaluation** (zero-core 42.3, a deliberate change of the tool): each side's seat takes
+  its run's `margin_w`, `redet`, `eval_cache`, and the match is played at A's run's evaluation spec - for MTG Zero's
+  runs **their evaluation decks** (`eval_spec` / `mtgz.az.evaldecks`) instead of the package's default spec - unless
+  `--spec`. An h2h of a run's checkpoints now plays the games of its evaluation (and of a farm head-to-head at the same
+  settings); h2h numbers taken before 2026-11-12 on runs with an eval spec or an evaluation cache are not comparable
+  game for game.
+
+**Checks.**
+
+* `tests/test_farm_campaign.py` (2): against a fake coordinator that accepts a campaign only within its current
+  definition, and zero-core's farm-release stub (`third_party/zero-core/tests/farm_release_stub.py`: records its
+  arguments, checks the token came in its environment, registers the definition): create (fuzz-check, definition v1,
+  then the PUT; the argv `define <archive>/campaign/<id>/1/definition.json --key <key> --publish --url <url>`, no
+  token in it), an update of the priority (no new definition), of the env (v2), pause / resume (state only),
+  `--from-existing` (a definition, nothing put), `--dry-run` (nothing signed or put); refusals publish and put
+  nothing (a mode or env fuzz-check refuses, a build not found, create of an existing campaign, update of a missing
+  one, pause with fields). The worker is this checkout's release mtgz-worker in a build directory of its own.
+* `tests/test_worker_farm.py::test_the_selftest_guards_the_network`: a self-play job whose `sha256` is not the model
+  file's - it is the graph's checkpoint hash, which phase 0b's worker accepted - ends with a fatal error before the
+  self-test or a game, and the error names the job's hash, not the file's; the good and bad self-tests now send the
+  file's hash (upper case once).
+* **The live campaign's definition, offline** (the fields the brief gives for `delver-fuzz-4b44b07` in a fake GET
+  answer; `--from-existing --dry-run`): the signed build directory `mtg-4b44b07-fuzz` found and verified (manifest
+  hash = bab1180e0feda9b1f7bb0258, the exe's size and sha256), `fuzz-check delver-games FUZZ_POOL=delver` ok (loop
+  games, min chunk 1000), definition version 1: builds [bab1180e0feda9b1f7bb0258], runtime null, no checkpoints,
+  jobs.fuzz {"mode": "delver-games", "env": {"FUZZ_POOL": "delver"}}, expires 90 days after it is made.
+* **eoe1 80 v 70's definition, offline** (phase 2's exported graphs and eoe1's config copy; the play settings from the
+  signed e96bf8e4 worker's own `check-config --eval --json`): 1,910 bytes; game "mtg", builds
+  [e96bf8e44b9634502e44dcc3], runtime c4c4bb776d7f886f5e13474e, gens 1 / 2 (13,392,600-byte graphs, 534,098-byte
+  reference sets), `jobs.eval` = {settings (33 keys, eval_spec the evaluation decks), seats, paired}.
+* **The real `farm-release define`** (zero-farm `agent` branch d64cd5c, built to E:/cargo-target/zero-farm/public-prep;
+  the data key ~/.config/zero-farm/data.key; **sign only, nothing published**) signed both definitions above: its JSON
+  line names kind, id, version 1, key `defs/<kind>/<id>/1/definition.json`, the file's sha256 (h2h e0e8ccca7021037c...,
+  campaign 6c43eaca4e8a847b...), the `.minisig` next to the file, `published: false`. The same eoe1 definition with
+  `seed` in its eval template, or with a `resolver_init` path in its settings, is refused by it - as by
+  `zero.farm_def.validate`.
+* `tests/test_worker_farm.py::test_a_farm_h2h_definition_holds_the_play_settings_only`: the real worker in a build
+  directory of its own picks the play settings of mtg-smoke's (plus a `resolver_init` path): exactly its EVAL_READS,
+  path-free, the same seats; a definition with them validates, one with every setting does not; another build's
+  worker is refused.
+
+* **The engine gate on cfb8e5f6** (the merge of main's 128 + this section; pin b655e91): `python tools/gate.py engine
+  --expect-digest b63f643e97a30a61 --expect-digest0 a0062bb5569e06d3 --tested-sha cfb8e5f6 --jobs 8` -> **GATE PASSED
+  engine cfb8e5f6f548 in 836s**: build; digests = main's (128.5: full b63f643e97a30a61, `DIGEST_ENCODING=0`
+  a0062bb5569e06d3); `--test az` 50, `limits` 13, `hidden` 28; pytest 317 passed, 1 skipped; the random smoke; the
+  tree unchanged (the Mac recheck "not needed": the tested sha is the gated one). Main's 128 itself was fuzzed 20k+ on
+  393527c6 (128.7); this branch changes no engine file of its own.
+
+Nothing was sent to the live coordinator (no GET either); no build was published.
+
+**The live head-to-head with a definition** (once the rev 6 coordinator, `farm-release define` at
+E:/cargo-target/zero-farm/main/release/ - or `--farm-release <path>` - and definition-aware agents are out; from this
+checkout, the venv with onnx / onnxruntime):
+
+```
+"C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" -m mtgz.az.farm_h2h \
+    --a "C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0080.pt" \
+    --b "C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0070.pt" --games 200 \
+    --build e96bf8e44b9634502e44dcc3 --runtime c4c4bb776d7f886f5e13474e \
+    --worker E:/cargo-target/mtg-zero/farm/farm-build/dist/mtg-be674a2-release/mtgz-worker.exe
+```
+
+**Re-defining the live fuzz campaign** (its build, mode and env as they are; nothing else is put):
+
+```
+"C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07 --dry-run
+"C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07
+```
+
+### 114.6 GPU inference: the Windows ML runtime pack, a zero-core pin with the session factory (zero-farm phase 4, 2026-11-12)
+
+**Why.** zero-farm PROTOCOL.md rev 7 section 8: friends' GPUs of every vendor, through one session factory in
+zero-core's worker (`zero_worker::session::create_session`: providers in the job line's order, each accepted only
+through the self-test) and runtime packs that carry the providers.
+
+**What.**
+
+* The zero-core pin moves to its `gpu` branch (1ed81c0, on `farm` b655e91): the session factory and `mtgz-worker
+  probe-providers`; the exporter's graphs that DirectML and TensorRT run with the same answers (zero-core docs/az.md
+  41.1: densify without a scatter-add, `portable()`); a checkpoint exported here is bit for bit the old export's on the
+  CPU (eoe1 iter 80: 137 of 137 pieces, 7,713 rows identical) and gate 1 passes again (eoe1 packed / mask, Delver).
+* `tools/farm_build.py --runtime --pack winml`: the GPU runtime pack - Windows ML's ONNX Runtime 1.28.3 (CPU and
+  DirectML built in), DirectML.dll and Microsoft.Windows.AI.MachineLearning.dll (the provider catalog's C API) from the
+  NuGet package Microsoft.Windows.AI.MachineLearning 2.5.96, each Microsoft-signed, checked through a release build
+  (`info`, `probe-providers --providers cpu`). A release worker build for it names it with `--runtime-id`.
+
+**Off by default.** A run uses the GPU pack only when its definition names it as its `runtime`; the CPU pack and the
+builds that require it are unchanged.
+
+**Tests and checks.** zero-farm-notes phase4-gpu.md (the per-provider gate, CPU fallback nodes and speeds, measured on
+the desktop's RTX 5090 and the Windows 10 canary's RTX 4070 Ti).
+
+### 114.7 Game records: a worker's self-play as what replays it (zero-farm phase 3, 2026-11-12)
+
+**Why.** zero-farm phase 3 (zero-farm DESIGN.md 6.1, 7): friends' PCs upload each self-play game as its record - the
+game's seed, every real move and only the search's outputs - and the trainer's pool remote replays it into the rows
+(zero-core docs/search.md 2.17, docs/az.md 45). The replay is the validation, so a record must replay into exactly the
+rows the worker's shard would have held.
+
+**What.** zero-core `farm` 712ac39 / c34e7c6 (records, `replay_rows`, the pool; renumbered and merged with chained
+episodes at c14d634). Here: `MtgAz::record_setup` (`mtg_eoe` delegates) = `{"decks": [seat 0's deck, seat 1's]}`
+(`MatchState::deck`: sorted card ids, the chosen deck after a deck choice) - compared by the replay at each game's end
+(each episode of a best-of-three: its post-board decks): a sealed deck is built from the seed by a builder that calls
+the platform's libm, so a record of decks another machine built differently is refused, not trained on. A served
+self-play job writes records (`tests/test_worker_farm.py`'s self-test job follows).
+
+**Tests.** `tests/test_worker_records.py` (zero-core's `tools/worker_records_gate.py` with the uniform evaluator on
+mtg-smoke, delver-smoke, eoe-smoke and eoe-choice-smoke (value choices: searched, never recorded, real moves), value-only
+rows on: every game's records replayed through `mtgz._engine.replay_rows` == the worker's own shards of the same games,
+bit for bit, every game's decks compared; a served job writes records only; a tampered deck setup is refused): 5 passed.
+
+**Gate 3** (records -> rows bit for bit, the real networks, the desktop under load):
+
+| settings | network | games | rows | arrays | result |
+|---|---|---|---|---|---|
+| eoe1 (iter 80's config; shard_rows 2048) | eoe1 iter 80, then a checkpoint switch to gen 81 after 8 games | 48 | 5,471 (all with auxiliary targets; nets 80: 2,032, 81: 3,439) | 39 of 39 identical in 3 files | **PASSED**; 48 games' decks compared; records 97.5 KB vs shards 1.17 MB |
+| the best-of-three stand-in (r3-deep128x8-2410's config + delver-mirror-bo3's overrides: constructed best-of-three with `"game_episodes": true`, the deck target and its tilt, value-only rows, resignation; shard_rows 4096) | r3-deep128x8-2410 iter 3198 widened onto the current layout (tools/fork_run.py), then a switch to gen 3199 after 3 matches | 12 matches (2-3 games each, 26 conceded games, every match's decks changed between games) | 2,730 (926 value-only, 2,636 with auxiliary targets; nets 3198: 1,549, 3199: 1,181) | 13 of 13 identical | **PASSED**; each game's decks compared; records 36 KB vs shards 756 KB |
+
+### 114.8 Merge of main 64c86cc2: the fuzz loops ported again, the Delver best-of-three in the worker (2026-11-12)
+
+**What.** main 64c86cc2 (constructed best-of-three integrated: 120, 121, 122, 129; zero-core pin 2aab098, chained episodes)
+merged into `farm` (4c02f8a6); zero-core `farm` merged 2aab098 too (c14d634: traced chained contests, records with
+episodes, the farm's docs renumbered - its az.md 42 -> 44, the pool 45; search.md 2.14 -> 2.16, records 2.17). main's
+tests/fuzz.rs changes (FUZZ_POOL=delver's matches are constructed best-of-three, FUZZ_DECK_TILT in them; FUZZ_POOL=delver_sb)
+ported into `engine/src/fuzz/games.rs` by phase 1's script (it reproduces the merge base's committed port byte for byte, a
+doc number aside) plus two rules (`PlayedMatch::sideboardings`; the constructed report's early return is `Run::Done`).
+The worker's fuzz settings: FUZZ_POOL=delver_sb (games only), FUZZ_POOL=delver's matches (`delver-matches`) with
+FUZZ_DECK_TILT (refused in any other matches mode).
+
+**Equivalence of the moved loops** (old: main 64c86cc2's own tests/fuzz.rs from `git archive` with its pin, plus a
+scratch-only per-seed print; new: the farm's tests/fuzz.rs over the library; per seed: `mtgz-worker fuzz` through its
+chunk processes; seeds from 10,000,000):
+
+| mode (env) | seeds | printed reports | per seed through the worker |
+|---|---|---|---|
+| delver-matches (FUZZ_POOL=delver: constructed best-of-three) | 200 | identical | 200 identical |
+| delver_sb-games (FUZZ_POOL=delver_sb) | 1,000 | identical | 1,000 identical |
+| delver-games, games, matches, interactions-games, drafted-matches, eoe-games, sealed-games, sneak_show-games, names-games, dd_a-games | 500, 1,000, 200, 500, 100, 300, 200, 200, 200, 200 | identical | 3,400 identical |
+
+(cargo's `test <name> ... ` prefix and timings masked; no failure in any mode.) **4,600 seeds, 12 modes, identical.**
+
+**Gate 2 (the plumbing) on the best-of-three stand-in** (zero-core tools/worker_parity.py --model: the Python remote
+worker with OnnxEvaluator vs the native worker with the same graph, groups 1, 8 matches): 2,317 rows, the first 200
+network batches and every shard array **byte-identical**. `tools/farm_gates.py --config <path> --checkpoint <.pt>` runs
+gates 2 and 3 on a run's exact settings in one command (for the real config once the run exists). `check-config` of the
+stand-in: 49 play, 82 trainer, 17 off, 0 unsupported, 0 unknown.
+
+**Gates.** `tools/gate.py engine --expect-digest b63f643e97a30a61 --expect-digest0 a0062bb5569e06d3 --tested-sha 4c02f8a6 --jobs 8`: **GATE PASSED engine 4c02f8a61f36 in 1202 s** - build; digests = main's (full b63f643e97a30a61, `=0` a0062bb5569e06d3); az 52, limits 13, hidden 28; pytest 329 passed, 1 skipped; random smoke; tree unchanged.
+
+**Fuzz build.** `tools/farm_build.py --profile fuzz --publish`: **2d17125b94e33bc57c06a127** (`mtg-4c02f8a-fuzz`, kinds [fuzz]) on farm.greggg230.com; its modes: `delver-games` {FUZZ_POOL: delver}, `delver-matches` {FUZZ_POOL: delver} (+ optional FUZZ_DECK_TILT), `delver_sb-games` {FUZZ_POOL: delver_sb}.
+
+**After the GPU merge** (9b95bfda: sessions from zero-core's `create_session` / `build_evaluator`, ENGINE.md 114.6): `tools/farm_gates.py` on the best-of-three stand-in passed again (gate 2: 2,317 rows, 200 batches byte-identical; gate 3: 2,730 rows, 13 of 13 arrays identical) and the eval equivalence gate (zero-core tools/worker_eval_gate.py, eoe1 80 v 70, seed 31, groups 1) 20 of 20 rows and 50 batches identical. **Release build** (`tools/farm_build.py --profile release --runtime-id c4c4bb776d7f886f5e13474e --publish` at 9b95bfda): **e8063b3cb106b01b72ab3dd3** (`mtg-9b95bfd-release`: records, the session factory). The local end to end (zero-farm-notes phase3-selfplay.md): a delver-bo3-smoke run on the CPU with `selfplay_remote pool:e2e-bo3` and two headless agents - its iteration 2 played entirely by the farm (8 matches, 3,063 rows, 0 records refused).
+
+### 114.9 Merge of main 45e65178 (the delver-bo3-pb1 run's engine), pool_min_agent, the release build for the run (2026-11-12)
+
+**What.** main 45e65178 (ENGINE.md 130: `"start_game": 2` post-sideboard games, the keep-its-deck yardstick, the fuzz
+match check per episode), the exact engine the live run `delver-bo3-pb1` trains on (its worktree `run-45e6517`, zero-core
+2aab098, already in zero-core `farm`), merged into `farm` (824858a7). tests/fuzz.rs conflicted (the farm's is the thin
+wrapper): main's file ported into `engine/src/fuzz/games.rs` by phase 1's script (it reproduces the current port of main
+64c86cc2 byte for byte) plus three rules: `PlayedMatch::keeper_decisions`; the post-sideboard matches as
+`post_sideboard_matches(first, n, hooks) -> Run` (a panic ends the run there, `Run::Failed`; `Hooks::before` asked before
+each match, so a finishing chunk stops there and a hang is timed per match; no seed passed twice), the constructed
+report's early return; `delver_post_spec` / `play_match_spec` / `replay_match` / `HiddenStats` public for the replay
+test, which the thin tests/fuzz.rs takes from main. A post-sideboard match that panics in the farm's chunk reads "match N
+failed (rerun: ...)" where the test printed "post-sideboard match N failed (rerun: ...)": the same repro, which
+`tools/fuzz_farm.py`'s RERUN pattern matches either way. One side effect of `Hooks::before` there: a failure of the
+post-sideboard pass's own chunk check is attributed to its last seed (its site is the check's line).
+
+zero-core pin -> `farm` b0930da (f8daa52a): `pool_min_agent` (default 0.2.8), sent with every PUT of the farm run
+(zero-farm PROTOCOL rev 9: its leases go only to agents at or above it; 0.2.8 is the first agent that takes a template
+naming a split or double-faced card), classified `trainer` by check-config. `tools/farm_build.py --runtime --pack winml`
+ships the NuGet package's `license.txt` and `ThirdPartyNotices.txt` unmodified, listed in runtime.json `licenses`
+(39ef0208; zero-farm README "Third-party components").
+
+**Equivalence of the moved loops** (main 45e65178's own tests/fuzz.rs + scratch-only per-seed prints vs this branch's,
+seeds from 10,000,000): delver-matches 200 (with the 200 post-sideboard matches), matches 200, drafted-matches 100,
+delver-games 500, games 1,000, delver_sb-games 1,000 - every printed report identical (cargo's test-name prefix masked),
+**3,000 seeds identical through mtgz-worker's chunk processes**, whose delver-matches chunks print the post-sideboard
+report too.
+
+**Gates.** `tools/gate.py engine --expect-digest b63f643e97a30a61 --expect-digest0 a0062bb5569e06d3 --tested-sha 39ef0208
+--jobs 8`: **GATE PASSED engine 39ef02081f10 in 879 s** (build; digests = main's; az 52, limits 13, hidden 28; pytest 330
+passed, 3 skipped; the random smoke; tree unchanged). The first run failed two `test_worker_farm.py` tests on a stale
+`target/release/mtgz-worker.exe` built before the pin's run_settings.json change (`pool_min_agent` "unknown"); the gate
+doesn't rebuild the worker: rebuilt, both passed, the whole gate rerun. `gate.py repin --expect-digest b63f643e97a30a61
+--spec delver_bo3 --preset delver-mirror-bo3 --no-mac` in the pinned worktree `mtg-zero-wt/run-39ef020-farm`: **GATE
+PASSED WITH SKIPS repin 39ef02081f10 in 631 s** (own-target build, digest, the run's spec smoke; skipped: the Mac's
+`--eval-checkout`, the Mac being busy with the run).
+
+**Release build** (`tools/farm_build.py --profile release --runtime-id c4c4bb776d7f886f5e13474e --publish` at 39ef0208):
+**abab42a6bca6468371cb5f1f** (`mtg-39ef020-release`; kinds selfplay, eval, fuzz). **Windows ML pack** with the license
+files: **887dd1d1f90e9486fb7c78dd** (`winml-2.5.96-ort-1.28.3`, 6 files; not referenced by any definition yet).
+
+**On the run's real config** (its config.json and `models/iter_0019.pt` copied out; `tools/farm_gates.py` with the signed
+release worker and the pack c4c4bb77, CPU only, Python = a venv with onnx 1.23.2 / onnxruntime 1.31.1): **gate 2 passed**
+(8 matches, 1,422 rows, 200 batches, every array byte-identical; Python side 116.8 s), **gate 3 passed** (12 matches,
+1,618 rows - 535 value-only, 1,583 with aux targets -, nets 19: 735 / 20: 883, 12 setups, 13 of 13 arrays identical;
+records 23 KB vs shards 465 KB; the worker 110.8 s on 6 threads). `check-config` of the real config: 51 play, 91
+trainer, 25 off, 0 unsupported, 0 unknown. The pool's template path (`play_settings` with the signed worker, then
+farm-release define's checks): 51 keys, the spec's " // " names pass. The run's own interpreter (the store Python) has
+no onnx / onnxruntime, which the pool needs to export each checkpoint: the hand-off (zero-farm notes,
+bo3-farm-handoff.md) starts the run's supervisor with that venv.
+
+### 114.10 The CPU runtime pack's license files; the run's release build on it (2026-11-12)
+
+**What.** `tools/farm_build.py --runtime` (the CPU pack) ships its license files unmodified (77e7fa21): ONNX Runtime's
+`LICENSE` and `ThirdPartyNotices.txt` from the onnxruntime package the DLL comes from (the DLL and both files checked
+against the package's RECORD) and, with the MSVC runtime, the Visual C++ runtime's from the Visual Studio redist folder
+the DLLs come from. Visual Studio 2022 17.14 ships no license file next to the redist DLLs (`VC\Redist\MSVC\14.44.35112`
+holds the DLLs, a props file and the two `vc_redist` installers) and no VS 2022 license terms file anywhere in the
+install (the instance records only the link go.microsoft.com/fwlink/?LinkId=2179811). So `license.rtf`, the Microsoft
+Software License Terms for the "Microsoft Visual C++ 2015 - 2022 Runtime" (EULA ID Cpp_2015-2022_ENU.1033, the license
+the redistributable's installer shows), is taken byte for byte out of that folder's `vc_redist.x64.exe` (Microsoft-signed,
+version 14.44.35211.0 = the DLLs'; a payload of the Burn bundle's UX container, checked against the bundle manifest's size
+and SHA-1), and `Redist.txt` (Visual Studio 2022's "Distributable Code" file, the redist list its license terms name) from
+`<VS>\Licenses\1033`. Each is listed in runtime.json `licenses` (sha256, size, component, source). `--msvc-dir` must now
+be a VS redist folder (System32 ships no license: refused before anything is written). The load check skips modules a
+newer worker lists without loading them (`DirectML.dll: None`, which failed the old check) and requires every DLL of the
+pack to load from the pack.
+
+**Pack** (the zero-farm venv's Python and onnxruntime 1.31.1, `--msvc-dir <VS>\VC\Redist\MSVC\14.44.35112\x64\Microsoft.VC143.CRT
+--check-worker <abab42a6's signed exe> --publish`): **d531424bd1a16307d491418c** (`ort-1.31.1-cpu+msvc-14.44.35211.0`,
+10 files: c4c4bb77's five DLLs byte for byte, the four license files, runtime.json); every published file fetched back
+from the coordinator identical.
+
+**Release build** (`farm_build.py --profile release --runtime-id d531424bd1a16307d491418c --publish` at 39ef0208, in
+`farm`'s own target): **b72aa2385be5362839792668** (`mtg-39ef020-release`; kinds selfplay, eval, fuzz). Cargo had nothing
+to rebuild: its `mtgz-worker.exe` is abab42a6's byte for byte (sha256 6e16c6d7...), so 114.9's gates 2 and 3 on the run's
+real config hold for it unchanged. It and d531424b replace abab42a6 and c4c4bb77 for the run (zero-farm notes,
+bo3-farm-handoff.md). Gate: `gate.py docs --files tools/farm_build.py` on 77e7fa21 passed.
+
 ## 120. Constructed best-of-three: the Delver mirror's sideboarding and hidden 60s (branch `delver-bo3`, 2026-11-11)
 
 Branch `delver-bo3` (from main 60397f3; zero-core pinned at f9ca5c3, unchanged). DESIGN.md 8's D3 but the five
