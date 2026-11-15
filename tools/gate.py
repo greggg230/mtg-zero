@@ -1184,7 +1184,16 @@ def build_step(ctx, name='build'):
                          f'this checkout) + exit 0')
 
 
-PYTEST_DURATIONS = 'pytest_durations.json'      # gates/: each test file's seconds, from the shards' junit files
+PYTEST_DURATIONS = 'pytest_durations.json'      # each test file's seconds, from the shards' junit files
+
+
+def durations_dir():
+    """Where the pytest durations live: the machine's state dir shared by every checkout (tools/slotd.sh's:
+    $MTGZ_SLOTS_HOME, E:/mtg-zero-state, ~/.mtgz-state - a warm worktree's gates/ is its own), else gates/."""
+    for d in (os.environ.get('MTGZ_SLOTS_HOME'), 'E:/mtg-zero-state' if WIN else None, os.path.expanduser('~/.mtgz-state')):
+        if d and os.path.isdir(d):
+            return d
+    return GATES_DIR
 
 
 def pytest_files():
@@ -1193,7 +1202,7 @@ def pytest_files():
 
 def pytest_partition(files, n, weights):
     """`files` into `n` shards of about equal time (longest first, each to the lightest shard): `weights` = seconds per
-    file from earlier runs (gates/pytest_durations.json), a file without one weighed by its size (1 s per 2 kB)."""
+    file from earlier runs (durations_dir()'s pytest_durations.json), a file without one weighed by its size (1 s per 2 kB)."""
     def w(f):
         if f in weights:
             return float(weights[f])
@@ -1211,14 +1220,14 @@ def pytest_partition(files, n, weights):
 
 def read_durations():
     try:
-        with open(os.path.join(GATES_DIR, PYTEST_DURATIONS), encoding='utf-8') as f:
+        with open(os.path.join(durations_dir(), PYTEST_DURATIONS), encoding='utf-8') as f:
             return json.load(f)
     except (OSError, ValueError):
         return {}
 
 
 def record_durations(xml_path):
-    """A shard's junit file -> each test file's total seconds into gates/pytest_durations.json (under a lock file: the
+    """A shard's junit file -> each test file's total seconds into durations_dir()'s pytest_durations.json (under a lock file: the
     shards finish at about the same time). Best effort: a missing or unreadable file changes nothing."""
     import xml.etree.ElementTree as ET
     try:
@@ -1231,7 +1240,7 @@ def record_durations(xml_path):
         if not f.startswith('tests/'):
             f = 'tests/' + f.split('tests/')[-1]
         per[f] = per.get(f, 0.0) + float(tc.get('time') or 0)
-    lock = os.path.join(GATES_DIR, PYTEST_DURATIONS + '.lock')
+    lock = os.path.join(durations_dir(), PYTEST_DURATIONS + '.lock')
     for _ in range(100):
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -1243,7 +1252,7 @@ def record_durations(xml_path):
     try:
         d = read_durations()
         d.update({k: round(v, 2) for k, v in per.items()})
-        with open(os.path.join(GATES_DIR, PYTEST_DURATIONS), 'w', encoding='utf-8') as f:
+        with open(os.path.join(durations_dir(), PYTEST_DURATIONS), 'w', encoding='utf-8') as f:
             json.dump(d, f, indent=1, sort_keys=True)
     finally:
         os.close(fd)
