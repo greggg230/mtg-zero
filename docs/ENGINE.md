@@ -33869,7 +33869,9 @@ either publisher meanwhile.
   Elo matches; the unit test covers a final pass that records it). No publisher process left.
 * The live publishers (pb2's 171132, pb1's 175936 and the side runs') were not touched.
 
-GATE_PLACEHOLDER
+* **Gate** on 7c3ba8d7 (this section's code commit): `python tools/gate.py python --no-mac` - build PASS (118.6 s),
+  pytest PASS (403 passed, 1 skipped), run-loop smoke (mtg-smoke) PASS (16 games, 0 unfinished), checkout unchanged:
+  **`GATE PASSED python 7c3ba8d7a8df in 1386s`**. This line is a docs-only commit after it.
 
 ### 163.4 Turning it on for pb2 at its next restart
 
