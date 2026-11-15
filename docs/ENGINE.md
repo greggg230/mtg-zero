@@ -33428,6 +33428,25 @@ left combat, F4, CR 508.8); `check`: 60 of 60 reach their position. Report
 four spots whose earlier re-record (157.9) inserted decisions; on this tree they need none, so it now runs over
 every spot with an insertion (`INSERTED`), and a test fails when there is none.
 
+### 157.12 The final gates on ed652d1c (2026-11-14)
+
+* `python tools/gate.py suite --no-mac --fuzz-pools default --step-timeout 14400`: **GATE PASSED suite ed652d1ca761
+  in 3346s** (the full engine suite and the default pool's 20k fuzz). Beside it, the same tree's 20k fuzz of every
+  other pool with no `FUZZ_SKIP`, each `test result: ok. 10 passed; 0 failed`: `delver` (2,133 s), `cross` (1,520 s),
+  `delver_dealt` (2,135 s), `interactions` (2,904 s), `eoe` as 8 shards of 2,500 games and 125 matches
+  (`FUZZ_FIRST` 0, 2500, ..., 17500; 976-1,424 s each: the 20k games of the serial run in a sixth of its time),
+  and `FUZZ_HIDDEN_DECKS=1` 2,000 games (504 s). Logs `E:/mtg-zero-scratch/fable-fix/int-logs/gates/`.
+* `python tools/gate.py engine --no-mac --tested-sha ed652d1c... --expect-digest 8f71ccb0d89031a6 --expect-digest0
+  41e27319acdae5b5`: **GATE PASSED engine ed652d1ca761 in 1198s**.
+* `python tools/gate.py search-core --no-mac --baseline-root <main e076d8f3 built>`: build, zero-core's tests (187),
+  pytest 388 passed / 1 skipped, then `check_checkpoint_compat` **NOT identical, on purpose** (149.4: H's observable
+  answers in the search's signatures; 160/161: the other player's kinds and keys; every engine behaviour change):
+  new targets.cq records cf64d3d82df46da8..., results d80d6da88de3c08f... (3,472 samples, 24 games). Rerun with
+  `--allow-skip checkpoint-compat` (no baseline): digest formats and dealt equal the recorded files, the 4-config
+  search smoke (random, eval, match, nomull) 0/4 failed, run-loop smoke 16 games, core build, core pytest 569 passed /
+  33 skipped: **GATE PASSED WITH SKIPS search-core ed652d1ca761 in 3648s** (skipped: checkpoint-compat, as above).
+* `python -m mtgz.az.run --preset mtg-smoke --iters 2`: exit 0.
+
 ## 160. Another player's mana activations with priority are that player holding priority: the `ActivateMana` mode hidden from the other player (branch `fix/decision-kind-leak`, 2026-11-13)
 
 **The report.** Lane B's 20k fuzz runs on `fix/encoding-gate` (and on its base, `fix/hidden-refs` 3ca4fb2d) failed the
