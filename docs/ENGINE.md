@@ -33145,6 +33145,124 @@ untouched until the build). `feat/dealt-decks` itself stays on main.
 * Not done (optional in the brief): a "dealt" field in the spectator view / game log. Recorded matches never deal, so
   nothing shows it.
 
+## 155. Farm compatible by default: the zero-farm worker merged with main f49df0c4 (`farm-int`), the farm-compat gate step, delver-bo3-pb2 on the farm (2026-11-14)
+
+**Why.** The user (2026-11-14): "All builds need to be compatible with farm as a default going forward", and farm
+self-play for delver-bo3-pb2 as soon as possible. Until now the farm code lived on side branches (mtg-zero `farm`
+0f678ca4, zero-core `farm`), merged into a run's commit by hand for each farm run (114.9 for pb1), and nothing on main
+checked that the release worker still played as the Python run does. `farm-int` makes the farm part of the mainline:
+it fast-forwards main from f49df0c4, and its zero-core branch `farm-int` is the pin.
+
+**What.**
+
+* **zero-core `farm-int`** (from `integrate/fable-1112` 77b31ab): merge of `farm` ef97142 (zero-onnx/1 and /2, the
+  native worker, records and `replay_rows`, the pool, the session factory, GPU-safe exports, the DirectML refusal for
+  zero-onnx/2; the dense Record kept, no P5) as 8792be4. Two conflicts: driver/worker.rs `apply` - one
+  `transition_each` call carries both the observable answers' stepped-seat mask and decision tag (search.md 3.18) and
+  the farm's trace of the real moves (2.17); docs/az.md - the farm's 44-46 before the integration's 47-48, both rows of
+  the settings table. Then the supervisor (az.md 47.2): 8fdc0bd - under a Windows venv's launcher (the zero-farm venv
+  runs farm-attached runs so, pb1 since 11-12) the run's pid is the launcher's child, so the same-crash stop never fired
+  and a crashed run's pool workers were not swept (`launched_state`); 76c548f - `kill_orphans(pid, since)` kills only
+  processes created after the run's launch: Windows reuses pids and keeps a dead parent's pid, and on 2026-11-14 this
+  session's supervisor tests (~1,000 short supervised processes under the venv bug) most likely gave a test child the
+  dead pid of pb2's supervisor's parent (`launch_hidden.py`), and its exit swept pb2's supervisor and run (restarted
+  19:23 by the orchestrator); 12f2d94 merges `feat/run-companion` bd680e8 (az.md 49, the run's companion process;
+  its own kills go through its Popen or pid + creation time); 7d627f1 - the companion is synced through
+  `launched_state` too (under the venv it never started); bf229a5 - `reference_rows` takes a batch with an override, one
+  with a belief row and one with a tail token first (az.md 46.9): the pool's gen-40 export of pb2 was refused for a
+  reference set without a belief row (the override and tail batches filled it).
+* **mtg-zero `farm-int`** (from main f49df0c4): merge of `farm` 0f678ca4 (856614b5), `farm-diag-guard` 4fba7065
+  (3a410e71) and `feat/run-publisher` 496ff41f (10c1ce50: the run owns its delverai publisher, section 163; conflict
+  the gitlink only). Conflicts: tests/fuzz.rs, tests/common/mod.rs, tests/draft.rs (the farm's thin wrappers kept) and the
+  gitlink. Main's fuzz changes since 45e65178 (rules checks 150, information-set walks 148, FUZZ_POOL=cross and
+  delver_dealt, A2's private-key check, the cap census, dealt decks) ported into `engine/src/fuzz/games.rs` by the
+  farm's port script (phase 3b's plus three rules: PlayedMatch's fields made pub generically, the matches loop's dealt
+  counters, the post-sideboard run's new end; the nested cap-census module reads `crate::fuzz::env`); main's six new
+  tests beside the loops moved to the thin tests/fuzz.rs with the items they use made pub; `printed_cost` (146.2) into
+  `engine/src/fuzz/cards.rs` (3-way, clean); the draft fuzz's rules checks into `engine/src/fuzz/draft.rs` (a
+  violation fails the run after the report). worker/src/fuzz.rs knows the pools cross / delver_dealt and
+  FUZZ_RULES_ALLOW. `tools/farm_build.py` signs the network file versions the worker reports (zero_onnx [1, 2]).
+  The worker classifies the package setting `publish` (163) trainer (705b85bb: check-config refused it as unknown, so a
+  publishing run's pool could not define its template). Worker tests: the self-test, eval-job and shard-arrival tests
+  moved to EoE sealed (63dc6ebf: a zero-onnx/2 reference set must hold pointer overrides, which short uniform games
+  never reach - none in ~40k rows -, and v7 rows with tails are sparse-only); they and tools/farm_gates.py find only
+  this checkout's worker (909d8da5: they fell back to an old farm branch build and tested it).
+* **The farm-compat gate step** (49716d52): `tools/farm_compat.py` - the Delver best-of-three dealt preset (pb2's
+  self-play spec: dealt decks, chained episodes, v7 tails and overrides) with the farm runs' row shaping (sparse rows
+  and shards, value-only samples 0.5, resignation k 3 / t 0.02), groups 1, 6 matches, sims 24 / 8, the uniform
+  evaluator: **gate 2** (zero-core worker_parity.py: the release worker's self-play vs zero-core's Python remote worker
+  from the same seed; shards, their format meta and the first 150 network batches byte-identical) and **gate 3**
+  (worker_records_gate.py --uniform: the worker's records replayed by `replay_rows` == its shards, every game's decks
+  compared). ~20 s. In 6 matches at p 0.5, four have a dealt seat (`az::matches::dealt_seat` of each record's seed).
+  `gate.py`: `worker-build` (cargo build --release -p mtgz_worker into the gate's target, before pytest; MTGZ_WORKER in
+  every step's env, so the worker tests never run a stale build - 114.9's first engine gate did) and `farm-compat`
+  (positive evidence: one "farm compat: PASSED" line and its JSON summary) in the engine, encoding, search-core,
+  optin-core and repin tiers; not skippable; the python tier builds the worker for its pytest (no farm-compat); the report records the worker's sha256 and both gates' counts. What the
+  full check (tools/farm_gates.py, 114.8) adds: the run's own network on both sides through ONNX Runtime (the export,
+  the runtime pack, the root belief through the auxiliary head), the run's simulation counts, a network switch inside a
+  lease, more games. AGENTS.md: "Farm compatibility is required".
+
+**Gates.** zero-core farm-int (8792be4, CPU): cargo test workspace 200+3+29+5+6+4 and zero_worker passed; focused
+pytest (farm, onnx, onnx2, worker settings, remoteplay, multi-remote, run infra, tails, chained, bindings, resign) 204 of
+205 (the one failure: the supervisor test under the zero-farm venv, fixed in 8fdc0bd); test_run_infra + test_companion
+36 passed with the store Python and the venv on 7d627f1; the full core pytest on 7d627f1 (CPU, beside pb2; bf229a5's onnx_export change landed during it): 650 passed, 33
+skipped, 1 failed - test_shard_thread::test_rolling_run_quotas_exact, load timing, passes alone (5.6 s) as on 11-13.
+mtg-zero (`python tools/gate.py ...`, CPU, beside the live pb2):
+* `suite --fuzz-pools default,delver_dealt` on 49716d52: **GATE PASSED suite 49716d52bb1b in 5993s** (full engine suite
+  2663 passed; 20k fuzz default pool and FUZZ_POOL=delver_dealt).
+* `python` on 909d8da5: **GATE PASSED python 909d8da546ad in 1328s** (worker built, pytest 430 passed / 2 skipped,
+  run-loop smoke 16 games).
+* `repin --expect-digest 8f71ccb0d89031a6 --spec delver_bo3 --preset delver-mirror-bo3-dealt` in the run worktree
+  run-705b85b-farm: **GATE PASSED repin 705b85bb13e9 in 1886s** (digest = main's, formats + dealt = recorded, worker
+  build, farm compat, the run's spec smoke, the Mac's --eval-checkout run-705b85bb13e9).
+* `search-core --baseline-root <main f49df0c4>` on 705b85bb: build, worker build, core cargo test 203, pytest 431 / 1
+  skipped, farm compat, **check_checkpoint_compat identical** (visits 3272, cq 3272 samples), digest formats and dealt =
+  recorded; the 4-config smoke failed only by `match` reaching the 1,800 s hang limit under the machine's load (main's
+  own gate: 817 s; the other configs ran ~2x slower here). Rerun alone: **ok seed 0 match: 400 games, 1085865
+  decisions, 29946336 sims** - main's exact counts - in 1,682 s.
+* `engine --expect-digest 8f71ccb0d89031a6 --expect-digest0 41e27319acdae5b5 --tested-sha 49716d52` on 909d8da5:
+  build, worker build, **digests EQUAL** (full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5; formats constructed
+  e1177d609d6c1aee, eoe 2efe956d589840ce, driver 6f7b863096e47dcd; dealt e802d9df793c9993), az 54, limits 13, hidden
+  28; pytest 429 / 1 failed: `test_mac_remote::test_a_worker_plays_mtg[matches]` timed out under load - main f49df0c4
+  fails it identically under the same load (10:04), and the python gate passed it on this tree. Not yet re-run cleanly on the final head: its remaining steps (the 1-config
+  smoke, farm compat, the suite evidence) passed in the other tiers on the same code.
+* farm compat on its own: PASSED (gate 2: 6 matches, 2,484 rows, 150 batches identical; gate 3: 6 matches, 2,556 rows,
+  6 decks), in every tier above that runs it.
+
+**The release build and the farm run.** Release worker **1d2436ba8b3bb91ca781f009** (`mtg-705b85b-release`, engine 705b85bb, core 7d627f1, zero_onnx [1, 2],
+requires the CPU runtime pack d531424bd1a16307d491418c, min_agent 0.1.3; published; a run-scoped worker build - no agent
+release: agents 0.2.11, stable on every online farm PC, run it). Earlier builds of this work, superseded and unused:
+2dca62410d02042798b4ff2a (5896ff03), 5a2f450a78536778e3ea652f (63dc6ebf). `tools/farm_gates.py` on pb2's real config
+(config.json + `publish`, checkpoint iter 25) with the signed worker and pack: **FARM GATES PASSED** - gate 2: 8 matches,
+1,247 rows, 200 batches byte-identical (the run's zero-onnx/2 graph on both sides); gate 3: 12 matches, 1,634 rows
+(541 value-only, 1,601 with aux targets), network switch 25 -> 26, 12 setups, 20 of 20 arrays identical, records 23 KB
+vs shards 720 KB. check-config of pb2's config: 51 play, 0 unsupported, 0 unknown.
+
+Farm run `delver-bo3-pb2` registered paused beforehand (no self-play, no definition), min_agent 0.2.11, priority 1;
+pb1's stays paused. **Relaunch 2026-11-14 21:39** (E:/mtg-zero-scratch/delver-bo3-launch/launch_pb2_farm.py): pb2
+paused at the start of iteration 37's self-play (pause_run.py --wait, exit 75), its supervisor ended by STOP, the
+hand-started publisher stopped by its pid, the supervisor started from run-705b85b-farm with the zero-farm venv,
+`--selfplay-remote mac,pool:delver-bo3-pb2` + pool flags (6 matches per lease, max_stale 1) + `--publish`, resumed:
+`companion publisher started`, `farm run delver-bo3-pb2 created`, gen 36 exported / definition v1 / registered, leases
+from three farm PCs; iteration 38: local 973 + Mac 335 + pool 42 = 1,350 matches, 0 refused, 0 stale; iteration 39:
+pool 48. Gen 40's export was refused ("no belief row", above; gen 41 passed by chance), so iterations 41-42 had no new
+farm generation. **Second relaunch 22:42** (orchestrator go) onto mtg-zero-wt/run-ed93cb1-farm (ed93cb1f: the pin ->
+bf229a5; the same _engine.pyd and worker build, no Rust change; Mac checkout run-ed93cb1fd0e5): pause at iteration 43's
+start, STOP (the companion publisher ended itself, 'stopped'), the same launch, resume: `companion publisher started`,
+gen 42 exported in 126 s / definition v6 / registered; iteration 43: local 1,044 + Mac 264 + pool 42 = 1,350, 0
+refused, 0 stale. The export of pb2's gen 41 checkpoint with the fix, by hand first: 81,793 recorded rows for 1 override
+(1,375 belief rows), 75 s. Rollback (not needed): launch_pb2.py from run-f49df0c with config.pre-farm.json restored.
+
+**Costs seen.** A zero-onnx/2 export takes 160-370 s per generation on the desktop's CPU (`record_rows` self-plays
+until its rows hold a pointer override, about 2 per 1,000 real rows; zero-onnx/1 took ~20 s) and competes with the
+run's host threads: local self-play ran at ~2.1-2.5 games/s in the first farm iterations against ~5 before, while this
+session's gates also loaded the machine - to measure once the gates are done. If the export keeps lagging an
+iteration, options: record_rows over the run's own last-iteration batches (no extra self-play), or `--pool-max-stale 2`
+(the owner's call).
+
+**Digests.** Unchanged: full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5, the formats and dealt files main's
+(the farm code changes no behaviour).
+
 ## 156. Object references to hidden cards: what the viewer knew of that object; the other player's hand picks (branch `fix/hidden-refs`, 2026-11-13)
 
 **Why.** Lane G's information-set walks (148.2) fail on main at the seeds of 148.6's **F2** and **F3**: two worlds of
