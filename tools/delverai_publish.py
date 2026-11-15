@@ -107,6 +107,14 @@ again) - the record posted with the state 'stopped' and the reason, exit 0 at on
 dropped: the generation is not marked recorded). A paused run keeps its publisher (the state 'paused'). Without
 --supervised nothing changes: the publisher runs until it is killed.
 
+The run's standing yardsticks (docs/ENGINE.md 164, mtgz.az.yardsticks; the run setting `yardsticks`): the record's
+`yardsticks` - the best-of-one head-to-heads of every evaluated generation against the fixed opponents ({iter, opp,
+score, se, elo_diff, elo_se, games, pentanomial}), the canary library's passed / total per generation, the evaluated
+generations (`expected`) and those `missing` a result or `failed` (still being retried; no error text: it may hold local
+paths), from <run>/yardsticks.jsonl (the run's companion writes it, `tools/run_yardsticks.py`). With blunders on, the
+run's blunder-check record `blunders.<run>` (tools/delverai_blunders.py's, the Progress tab's "Blunder checks passed"
+chart) is posted again whenever the run's canary cache changed.
+
 Every record carries `started`: the run's start (its directory's creation time; None where the file system does not
 keep one) - the site's default run is the newest main (non-side) run by it (delverai worker defaultRun).
 """
@@ -124,7 +132,8 @@ import traceback
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from mtgz.az import decklists, replays, sideboard_census  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from mtgz.az import decklists, replays, sideboard_census, yardsticks as YS  # noqa: E402
 from zero import elo as zelo, runctl  # noqa: E402
 
 SETTINGS = ('preset', 'iters', 'games', 'sims', 'sims_fast', 'p_full', 'sims_minor', 'temp_moves', 'arch', 'hidden',
@@ -743,6 +752,61 @@ def run_started(run):
     return int(t) if t else None
 
 
+# the yardsticks' row fields the site gets (docs/ENGINE.md 164)
+YS_BO1 = ('iter', 'opp', 'score', 'se', 'elo_diff', 'elo_se', 'games', 'pentanomial', 'sims', 'time')
+YS_BLUNDERS = ('iter', 'passed', 'total', 'share', 'kinds', 'time')
+
+
+def yardsticks_record(run):
+    """The run's standing yardsticks for the site (docs/ENGINE.md 164) -> {opponents [{name, label}], bo1 [rows],
+    blunders [rows], expected [iterations], missing [{kind, iter, opp?}], failed [{kind, iter, opp?, attempts}],
+    settings} or None when the run's setting is off. No local path and no error text (it may hold one)."""
+    try:
+        st = YS.status(run)
+    except (OSError, ValueError) as e:
+        print(f'yardsticks: not in the record ({e!r})', flush=True)
+        return None
+    if st is None:
+        return None
+    return {'opponents': st['opponents'], 'settings': st['settings'],
+            'bo1': [{k: r.get(k) for k in YS_BO1 if r.get(k) is not None} for r in st['bo1']],
+            'blunders': [{k: r.get(k) for k in YS_BLUNDERS if r.get(k) is not None} for r in st['blunders']],
+            'expected': st['expected'], 'missing': st['missing'],
+            'failed': [{k: f[k] for k in ('kind', 'iter', 'opp', 'attempts') if k in f} for f in st['failed']]}
+
+
+def post_blunders(run, a, key, state, log=print):
+    """With the run's yardsticks measuring the canary library: its record `blunders.<run>` (delverai_blunders.record,
+    the site's blunder chart) posted when the run's cache changed since the last post (`state`: this process's) ->
+    whether posted."""
+    ys = YS.of_run(run)
+    if not ys or not ys['blunders']:
+        return False
+    import delverai_blunders as DB
+    path = DB.cache_path(run)
+    if not os.path.exists(path) or state.get('blunders_mtime') == os.path.getmtime(path):
+        return False
+    mtime = os.path.getmtime(path)
+    L = DB.B.load_library(YS.library_path(ys))
+    if not L or not DB.scored_spots(L):
+        return False
+    rec = DB.record(os.path.basename(os.path.abspath(run)), L, DB.load_cache(run, DB.setup_key(ys['blunders_sims'],
+                                                                                              DB.SELECT)),
+                    ys['blunders_sims'], DB.SELECT)
+    if not rec['iters']:
+        return False
+    if a.dry_run:
+        log(f'(dry run) {rec["run"]}: {len(rec["iters"])} generations')
+    else:
+        DB.upload(rec, a.url, key)
+        log(f'{rec["run"]}: posted {len(rec["iters"])} generations')
+    state['blunders_mtime'] = mtime
+    return True
+
+
+BLUNDERS_POSTED = {}
+
+
 def progress(run, every=1, forks=None, extra=None, state_dir=None, yardstick=None):
     """The site's progress record of a run (`every`: which iterations get games recorded;
     `forks`: fork_registry, for the lineage; `extra`: more fields - title, note, side, record_vs; `state_dir`: where
@@ -784,6 +848,7 @@ def progress(run, every=1, forks=None, extra=None, state_dir=None, yardstick=Non
         **({'forked_from': forked_from(segs, forks or {})} if segs[0].get('broke_from') else {}),
         **({'keep_yardstick': keep_yardstick(yardstick, os.path.basename(os.path.abspath(run)))} if yardstick else {}),
         **({'sideboard_census': census} if census else {}),
+        **({'yardsticks': ys} if (ys := yardsticks_record(run)) else {}),
     }, **(extra or {}))
 
 
@@ -957,6 +1022,10 @@ def post_progress(run, a, key, log=print):
         log(f'{len(p["iters"])} iteration rows; upload body {len(wire_progress(p)):,} bytes')
     else:
         replays.post(a.url.rstrip('/') + '/api/progress/upload', wire_progress(p), key)
+    try:
+        post_blunders(run, a, key, BLUNDERS_POSTED, log)
+    except Exception as e:                 # noqa: BLE001 - said; the next post tries again
+        log(f'blunders record post failed: {e!r}')
 
 
 def upload_saved(state, state_path, a, key, log):
