@@ -44,7 +44,8 @@ TEST_RESULT_RE = re.compile(r'^test result: (ok|FAILED)\. (\d+) passed; (\d+) fa
 TOTALS_RE = re.compile(r'^FUZZ_TOTALS (\{.*\})\s*$', re.M)
 CHECKED_RE = re.compile(r'^fuzz totals: (\w+) checked over (\d+) seeds', re.M)
 SEED_FAIL_RE = re.compile(r"(?:seed|match) (\d+) failed \(rerun: ([^)]*)\)")
-GAMES_RE = re.compile(r'^(\d+) games: wins \[', re.M)
+# (one test thread: the harness's "test fuzz_random_games ... " precedes the test's first line)
+GAMES_RE = re.compile(r'^(?:test \S+ \.\.\. )?(\d+) games: wins \[', re.M)
 # the settings a shard's process takes from the caller's environment: none of the fuzz's own (each shard states its
 # own), so a stray FUZZ_SKIP or FUZZ_GAMES in the caller's shell never changes what a shard plays
 SCRUB = ('FUZZ_', 'DIGEST_')

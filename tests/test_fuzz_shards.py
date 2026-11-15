@@ -17,7 +17,8 @@ OK = 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out
 def shard(kind, first, n, totals=None, extra=''):
     j = F.Job(f'{kind}[{first},{first + n})', [], {}, 'log')
     t = {'kind': kind, 'first': first, 'n': n, 'totals': totals or {'is_walks': 3, 'max_power': first}}
-    lines = [f'{n} games: wins [1, 1], draws 0'] if kind == 'games' else [f'{n} matches: ...']
+    # (one test thread: the harness's "test <name> ... " precedes the first line, as a real shard prints it)
+    lines = [f'test fuzz_random_games ... {n} games: wins [1, 1], draws 0'] if kind == 'games' else [f'{n} matches: ...']
     j.out = '\n'.join(lines + [f'FUZZ_TOTALS {json.dumps(t)}', 'FUZZ_SHARD=1: the end-of-run checks ...', extra]) + '\n' + OK
     j.rc = 0
     return j, t
