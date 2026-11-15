@@ -1036,12 +1036,24 @@ def test_an_old_20k_suite_report_is_still_evidence(gate, capsys):
 def test_the_python_tier_shards_pytest_beside_the_smoke(gate, capsys, monkeypatch):
     """ENGINE.md 167: pytest as --pytest-shards steps over disjoint test files, each its own process and basetemp, every
     tests/test_*.py in exactly one, run at once with the run-loop smoke after the (cached) builds."""
+    monkeypatch.setattr(G, 'read_durations', lambda: {})       # (not this machine's measured seconds)
     files = G.pytest_files()
     parts = G.pytest_partition(files, 4, {})
-    assert sorted(f for p in parts for f in p) == files and len(parts) == 4
+    assert sorted(f for p, d in parts for f in p) == files and len(parts) == 4 and G.pytest_coverage(files, parts) is None
     heavy = max(files, key=lambda f: os.path.getsize(os.path.join(ROOT, f)))
     parts2 = G.pytest_partition(files, 4, {heavy: 10_000.0})
-    assert [heavy] in parts2                                   # its measured weight gets it a shard of its own
+    assert ([heavy], []) in parts2                             # its measured weight gets it a shard of its own
+    # a file longer than a shard's share, its tests measured: split by its tests, every test once, a test added since
+    # (unmeasured) in the part that runs the file
+    w = {heavy: 900.0, **{f'{heavy}::t{i}': 100.0 for i in range(9)}}
+    parts3 = G.pytest_partition(files, 4, w)
+    assert G.pytest_coverage(files, parts3) is None
+    base = next((p, d) for p, d in parts3 if heavy in p)
+    named = [e for p, _ in parts3 for e in p if e.startswith(heavy + '::')]
+    assert sorted(base[1]) == sorted(named) and 6 <= len(named) <= 7          # (three or four parts, ~225 s each)
+    assert G.pytest_coverage(files, [(p, []) for p, _ in parts3])        # (the named tests would run twice)
+    assert G.junit_node(types.SimpleNamespace(get={'classname': 'tests.test_x.TestA', 'name': 'test_y[1]'}.get)) == \
+        ('tests/test_x.py::TestA::test_y[1]', 'tests/test_x.py')
     rc, out, _, _ = gate('python', '--pytest-shards', '3', capsys=capsys)
     assert rc == 0
     ctx_ns = types.SimpleNamespace(pytest_shards=3, sha_short=SHA[:12])

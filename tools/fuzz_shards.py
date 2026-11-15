@@ -252,7 +252,8 @@ def main(argv=None):
     matches = a.matches if a.matches is not None else max(20, a.games // 20)
     if a.hidden:
         matches = 0                     # (hidden decklists are a games mode: the matches loop does not read it)
-    out = a.out or tempfile.mkdtemp(prefix=f'fuzz-shards-{a.pool}-')
+    # (absolute: the test processes run in engine/, the caller may name a path relative to the checkout)
+    out = os.path.abspath(a.out or tempfile.mkdtemp(prefix=f'fuzz-shards-{a.pool}-'))
     os.makedirs(out, exist_ok=True)
     pool_env = {} if a.pool == 'default' else {'FUZZ_POOL': a.pool}
     if a.hidden:

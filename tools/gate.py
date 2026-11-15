@@ -1454,9 +1454,12 @@ def pytest_files():
 
 
 def pytest_partition(files, n, weights):
-    """`files` into `n` shards of about equal time (longest first, each to the lightest shard): `weights` = seconds per
-    file from earlier runs (durations_dir()'s pytest_durations.json), a file without one weighed by its size (1 s per
-    2 kB)."""
+    """`files` into `n` shards of about equal time -> [(entries, deselected)]: `entries` the pytest arguments (files, or
+    node ids of a split file), `deselected` node ids passed as --deselect. `weights` = seconds from earlier runs
+    (durations_dir()'s pytest_durations.json: per file, and per test as "<file>::<test id>"); a file without one is
+    weighed by its size (1 s per 2 kB). A file longer than a shard's share with measured tests is split by its tests:
+    its first part runs the file with the other parts' tests deselected (so a test added since, unmeasured, runs there),
+    the others name their tests. Then longest first, each unit to the lightest shard."""
     def w(f):
         if f in weights:
             return float(weights[f])
@@ -1464,12 +1467,47 @@ def pytest_partition(files, n, weights):
             return os.path.getsize(os.path.join(ROOT, f)) / 2000.0
         except OSError:
             return 1.0
-    bins = [[0.0, []] for _ in range(n)]
-    for f in sorted(files, key=lambda f: (-w(f), f)):
+    target = sum(w(f) for f in files) / max(1, n)
+    units = []                                  # (seconds, entries, deselected)
+    for f in files:
+        tests = {k: float(v) for k, v in weights.items() if k.startswith(f + '::')}
+        k = min(len(tests), int(-(-w(f) // target)) if target > 0 else 1)
+        if k < 2:
+            units.append((w(f), [f], []))
+            continue
+        parts = [[0.0, []] for _ in range(k)]
+        for t in sorted(tests, key=lambda t: (-tests[t], t)):
+            p = min(parts, key=lambda p: p[0])
+            p[0] += tests[t]
+            p[1].append(t)
+        rest = [t for p in parts[1:] for t in p[1]]
+        units.append((parts[0][0] + max(0.0, w(f) - sum(tests.values())), [f], sorted(rest)))
+        units += [(p[0], sorted(p[1]), []) for p in parts[1:] if p[1]]
+    bins = [[0.0, [], []] for _ in range(n)]
+    for sec, entries, desel in sorted(units, key=lambda u: (-u[0], u[1])):
         b = min(bins, key=lambda b: b[0])
-        b[0] += w(f)
-        b[1].append(f)
-    return [sorted(b[1]) for b in bins if b[1]]
+        b[0] += sec
+        b[1] += entries
+        b[2] += desel
+    return [(b[1], b[2]) for b in bins if b[1]]
+
+
+def pytest_coverage(files, shards):
+    """None when `shards` (pytest_partition's) run every test of `files` exactly once, else why not: every file is the
+    entry of exactly one shard, and each node id named elsewhere is a test of a file deselected in that file's shard."""
+    whole = [e for entries, _ in shards for e in entries if '::' not in e]
+    if sorted(whole) != sorted(files):
+        return f'files as entries: {sorted(set(files) ^ set(whole)) or "a file twice"}'
+    owner = {e: k for k, (entries, _) in enumerate(shards) for e in entries if '::' not in e}
+    named = [e for entries, _ in shards for e in entries if '::' in e]
+    desel = {d: k for k, (_, ds) in enumerate(shards) for d in ds}
+    if len(named) != len(set(named)) or sorted(named) != sorted(desel):
+        return 'a split file\'s named tests and its deselected ones differ'
+    for t in named:
+        f = t.split('::')[0]
+        if f not in owner or desel[t] != owner[f]:
+            return f'{t}: not deselected in the shard that runs {f}'
+    return None
 
 
 def read_durations():
@@ -1480,20 +1518,31 @@ def read_durations():
         return {}
 
 
+def junit_node(tc):
+    """A junit testcase's pytest node id ("tests/test_x.py::Class::test[param]") and its file, from its classname
+    ("tests.test_x" or "tests.test_x.Class") and name."""
+    parts = (tc.get('classname') or '').split('.')
+    k = next((i for i in range(len(parts)) if parts[i].startswith('test_')), len(parts) - 1)
+    f = '/'.join(parts[:k + 1]) + '.py'
+    if not f.startswith('tests/'):
+        f = 'tests/' + f.split('tests/')[-1]
+    return '::'.join([f, *parts[k + 1:], tc.get('name') or '']), f
+
+
 def record_durations(xml_path):
-    """A shard's junit file -> each test file's total seconds into durations_dir()'s pytest_durations.json (under a
-    lock file: the shards finish at about the same time). Best effort: a missing or unreadable file changes nothing."""
+    """A shard's junit file -> each test file's and each test's seconds into durations_dir()'s pytest_durations.json
+    (under a lock file: the shards finish at about the same time). Best effort: a missing or unreadable file changes
+    nothing. A split file's parts each add their tests; the file's own total is written by the part that ran it whole
+    or, for a split file, summed from its tests' latest seconds."""
     import xml.etree.ElementTree as ET
     try:
         root = ET.parse(xml_path).getroot()
     except (OSError, ET.ParseError):
         return
-    per = {}
+    tests = {}
     for tc in root.iter('testcase'):
-        f = (tc.get('file') or (tc.get('classname') or '').replace('.', '/') + '.py').replace('\\', '/')
-        if not f.startswith('tests/'):
-            f = 'tests/' + f.split('tests/')[-1]
-        per[f] = per.get(f, 0.0) + float(tc.get('time') or 0)
+        node, _ = junit_node(tc)
+        tests[node] = tests.get(node, 0.0) + float(tc.get('time') or 0)
     lock = os.path.join(durations_dir(), PYTEST_DURATIONS + '.lock')
     for _ in range(100):
         try:
@@ -1505,9 +1554,11 @@ def record_durations(xml_path):
         return
     try:
         d = read_durations()
-        d.update({k: round(v, 2) for k, v in per.items()})
-        with open(os.path.join(durations_dir(), PYTEST_DURATIONS), 'w', encoding='utf-8') as f:
-            json.dump(d, f, indent=1, sort_keys=True)
+        d.update({k: round(v, 2) for k, v in tests.items()})
+        for f in {n.split('::')[0] for n in tests}:
+            d[f] = round(sum(v for k, v in d.items() if k.startswith(f + '::')), 2)
+        with open(os.path.join(durations_dir(), PYTEST_DURATIONS), 'w', encoding='utf-8') as fh:
+            json.dump(d, fh, indent=1, sort_keys=True)
     finally:
         os.close(fd)
         os.remove(lock)
@@ -1520,10 +1571,10 @@ def record_durations(xml_path):
 def pytest_step(name='pytest', step_id='pytest', ctx=None):
     """This repo's pytest -> its steps. On the Mac (ENGINE.md 166) without PYTEST_DESKTOP_ONLY, which run on the desktop
     beside it (step `pytest-desktop`): together exactly the desktop's tests. With ctx.pytest_shards > 1 (ENGINE.md 167)
-    the files are split into that many shards (`pytest-K-of-N`, every tests/test_*.py in exactly one, balanced by each
-    file's measured seconds), each its own process and --basetemp, run at once by a parallel group: on the desktop each
-    shard runs its files, on the Mac each runs its files but the desktop-only ones, and the desktop part beside the
-    first shard runs those."""
+    the tests are split into that many shards (`pytest-K-of-N`: pytest_partition, every test exactly once -
+    pytest_coverage, checked when the plan is made), each its own process and --basetemp, run at once by a parallel
+    group: on the desktop each shard runs its part, on the Mac each runs its part but the desktop-only tests, and the
+    desktop part beside the first shard runs those."""
     ev = "pytest's final summary line: 0 failed, 0 errors, N > 0 passed + exit 0"
     files = [a for a in PYTEST_DESKTOP_ONLY if '::' not in a]
     ids = [a for a in PYTEST_DESKTOP_ONLY if '::' in a]
@@ -1537,19 +1588,22 @@ def pytest_step(name='pytest', step_id='pytest', ctx=None):
         return [Step(name, [python_exe(), '-m', 'pytest', 'tests', *PYTEST_ARGS], id=step_id, checker=check_pytest,
                      heavy=True, mac_cmd=lambda ctx: mac_built(mac), desktop_part=desk, evidence=ev)]
     allf = pytest_files()
-    parts = pytest_partition(allf, n, read_durations())
-    if sorted(f for p in parts for f in p) != allf:
-        raise GateError('internal: the pytest shards do not cover every test file exactly once')
+    shards = pytest_partition(allf, n, read_durations())
+    why = pytest_coverage(allf, shards)
+    if why:
+        raise GateError(f'internal: the pytest shards do not run every test exactly once ({why})')
     steps, first = [], True
-    for k, part in enumerate(parts, 1):
-        tag = f'{k}-of-{len(parts)}'
+    for k, (entries, desel) in enumerate(shards, 1):
+        tag = f'{k}-of-{len(shards)}'
         base = os.path.join(GATES_DIR, 'tmp', f'pytest-{ctx.sha_short}-{tag}-{uuid.uuid4().hex[:8]}')
         xml = base + '.xml'
-        on_mac = [f for f in part if f not in files]
-        mac_ids = [i for i in ids if i.split('::')[0] in on_mac]
-        mac = shlex.join(['python', '-m', 'pytest', *on_mac, *PYTEST_ARGS, *[f'--deselect={i}' for i in mac_ids]])
-        s = Step(f'{name} {tag} ({len(part)} files)',
-                 [python_exe(), '-m', 'pytest', *part, *PYTEST_ARGS, f'--basetemp={base}', f'--junitxml={xml}'],
+        on_mac = [e for e in entries if e.split('::')[0] not in files and e not in ids]
+        mac_desel = [d for d in desel + ids if d.split('::')[0] in on_mac]
+        mac = shlex.join(['python', '-m', 'pytest', *on_mac, *PYTEST_ARGS, *[f'--deselect={d}' for d in mac_desel]])
+        nfiles = len({e.split('::')[0] for e in entries})
+        s = Step(f'{name} {tag} ({nfiles} files)',
+                 [python_exe(), '-m', 'pytest', *entries, *PYTEST_ARGS, *[f'--deselect={d}' for d in desel],
+                  f'--basetemp={base}', f'--junitxml={xml}'],
                  id=f'{step_id}-{tag}', checker=check_pytest, heavy=True,
                  mac_cmd=(lambda ctx, mac=mac: mac_built(mac)) if on_mac else None,
                  cleanup=lambda base=base, xml=xml: (record_durations(xml), shutil.rmtree(base, ignore_errors=True)),
