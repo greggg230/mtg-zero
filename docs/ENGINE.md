@@ -34046,3 +34046,9 @@ wrong types, odd game counts, a device other than cuda/cpu and a setting that me
   checkout of this branch (or its merge) with pb2's engine (`_engine.pyd` of run-f49df0c: no Rust change since
   f49df0c4), hidden and below normal priority; it writes yardsticks.jsonl and the canary cache, and hands over to the
   companion by itself at the restart. Not started by this branch's agent.
+
+### 164.9 The gate
+
+`python tools/gate.py python --no-mac` on 099b2f9b (via slotd.sh, pb2 live): build PASS (307.7 s), pytest PASS (420
+passed, 1 skipped; 808.7 s), run-loop smoke (mtg-smoke) PASS (16 games, 0 unfinished), the checkout unchanged - **GATE
+PASSED python 099b2f9b3d2d in 1227s** (report gates/099b2f9b3d2d-python.json; the Mac steps skipped by --no-mac).
