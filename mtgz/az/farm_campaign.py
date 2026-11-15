@@ -1,8 +1,17 @@
-"""Farm analysis campaigns (docs/ENGINE.md 165; zero-farm PROTOCOL.md 5.3; zero-core docs/az.md 50): "play N games
-with checkpoint X (against Y) under spec S over game ids [0, N) and give me every game's moves" played by friends'
-PCs (zero-farm), replayed and checked here, so the desktop spends no CPU on it beside the live run.
+"""Farm analysis campaigns: `play` jobs (docs/ENGINE.md 165; zero-farm PROTOCOL.md 5.3; zero-core docs/az.md 50) -
+"play N games with checkpoint X (against Y) under spec S over game ids [0, N) and give me every game's moves", played
+by friends' PCs (zero-farm), replayed and checked here, so the desktop spends no CPU on it beside the live run.
 
-A campaign is a farm run of its own (`cmp-<name>`, no self-play) holding one eval batch:
+One job model (the 2026-11-15 architecture review, hub fable_review_iteration_and_farm_2026-11-15.md 3.1): a `play`
+job = {build, networks by sha256, the play settings, seats, base seed, ids [0, N)} -> one traced game record + digest
+per id, positive coverage, a spot replay. Options: `trace` (always on here: the moves come back) and `samples` (the
+search's policy targets and values too: self-play seats with their noise, temperature and playout cap - what a
+training game is). On the wire today (PROTOCOL rev 13) a play job without samples is an eval batch with `eval_trace`
+(evaluation seats: Run.nn_seat(key, eval_sims)); one with samples is the farm's self-play (records, the pool's format)
+of a run of its own. Results have one schema either way (`games.jsonl`: gid, seats, result, rounds, over, digest, rec,
+by), so the run's evaluation, the yardsticks, the census and analyses can move onto it without a new revision.
+
+A campaign is a farm run of its own (`cmp-<name>`) holding one such job:
 
   * build      a signed release `mtgz-worker` that knows `eval_trace` (its executable: `worker`; its runtime pack)
   * networks   gen 1 = A, gen 2 = B (absent for a self-play campaign: both seats gen 1), exported for the farm as a
@@ -13,7 +22,7 @@ A campaign is a farm run of its own (`cmp-<name>`, no self-play) holding one eva
                digest; `match_settings` builds them so the seats are zero.h2h's (`h2h.match`: the yardsticks'),
                checked dict for dict
   * seats      [{"net": 1}, {"net": 2}] (A vs B; paired: games 2k, 2k + 1 share the deal, seats swapped) or
-               [{"net": 1}, {"net": 1}] (self-play of A)
+               [{"net": 1}, {"net": 1}] (self-play of A; with `samples` the only form, unpaired)
   * seed       the batch's base seed (the run's job `seed`: game g's seed is game_seed(seed, g, paired), the seed a
                local zero.h2h match of the same games uses)
   * games      ids [0, games); `games_per_lease` ('auto' = ~7.5 min of a machine)
@@ -171,6 +180,19 @@ def match_settings(ckpt_a, sims, spec, tilts=None, ckpt_b=None, chance_k=2, c_pu
     return cfg, rule
 
 
+def selfplay_settings(ckpt, overrides=None):
+    """A play job with samples: the self-play settings of `ckpt`'s run (resolved as the run resolves them) with
+    `overrides` over them (e.g. a spec with other dealt decks, resignation off: selfplay_resign_t 0, the most visited
+    move: eps 0 and temp_moves 0) - the farm's self-play seat is Run.nn_seat('m', sims, selfplay=True) of these."""
+    from zero import h2h
+    cfg = dict(h2h.run_settings(ckpt))
+    if not cfg:
+        raise CampaignError(f'{ckpt}: no run config next to it (runs/<run>/config.json)')
+    cfg.update(overrides or {})
+    cfg['game'] = GAME
+    return cfg
+
+
 # ------------------------------------------------------------------------------------------------ the worker
 def worker_info(worker):
     from zero import farm_h2h as FH
@@ -180,12 +202,15 @@ def worker_info(worker):
     return info
 
 
-def job_settings(worker, build_id, cfg, d, log):
+def job_settings(worker, build_id, cfg, d, log, samples=False):
     """The template's settings: the keys the worker build calls `play` for an eval job (zero.farm_h2h.play_settings:
-    the seats checked the same as the full settings'); `eval_trace` must be among them (a build before it refuses or
-    drops it: CampaignError)."""
-    from zero import farm_h2h as FH
+    the seats checked the same as the full settings'; `eval_trace` must be among them - a build before it refuses or
+    drops it: CampaignError) or, with `samples`, for its self-play job (zero.farm_pool.play_settings: the driver checked
+    the same as the full settings')."""
+    from zero import farm_h2h as FH, farm_pool as FP
     try:
+        if samples:
+            return FP.play_settings(worker, build_id, cfg, d, log)
         play = FH.play_settings(worker, build_id, cfg, d, log)
     except SystemExit as e:
         raise CampaignError(str(e)) from None
@@ -229,8 +254,15 @@ def export_gen(ckpt, gen, game, spec, run, log, cache=None):
 
 
 # ------------------------------------------------------------------------------------------------ the farm's side
+def samples_job(st):
+    return bool((st.get('job') or {}).get('samples'))
+
+
 def eval_template(st):
-    """The definition's eval template - also the batch's job without its seed (PROTOCOL.md 7)."""
+    """The definition's template - also the job without its seed (PROTOCOL.md 7): eval {settings, seats, paired};
+    with samples (self-play) {settings}."""
+    if samples_job(st):
+        return {'settings': st['settings']}
     return {'settings': st['settings'], 'seats': st['seats'], 'paired': st['paired']}
 
 
@@ -239,7 +271,15 @@ def run_body(st, eval_on=True, state=None):
     if st.get('min_agent'):
         b['min_agent'] = st['min_agent']
     b.update(selfplay=None, eval=None, state=state or st.get('run_state', 'active'))
-    if eval_on:
+    if eval_on and samples_job(st):
+        # (the ids [0, games): the quota with no slack - the coordinator never issues more than accepted + in flight
+        # allows, so ids stay below `games`; checkpoints never change, so max_stale is moot)
+        sp = {'quota': st['games'], 'slack': 0, 'max_stale': 1000, 'games_per_lease': st['games_per_lease'],
+              'gpu': 'any', 'needs': st.get('needs'), 'job': dict(eval_template(st), seed=int(st['seed']))}
+        if st.get('share') is not None:
+            sp['share'] = st['share']
+        b['selfplay'] = sp
+    elif eval_on:
         job = dict(eval_template(st), seed=int(st['seed']))
         ev = {'batch': st['batch'], 'games': st['games'], 'checkpoints': sorted(int(g) for g in st['gens']),
               'games_per_lease': st['games_per_lease'], 'gpu': 'any', 'needs': st.get('needs'), 'job': job}
@@ -253,7 +293,8 @@ def definition_fields(st):
     cks = {g: {'model_sha256': x['sha256'], 'model_size': x['model_size'], 'reference_sha256': x['reference_sha256'],
                'reference_size': x['reference_size']} for g, x in sorted(st['gens'].items())}
     return {'game': st['build_game'], 'builds': [st['build_id']], 'runtime': st['runtime'], 'checkpoints': cks,
-            'jobs': {'selfplay': None, 'eval': eval_template(st), 'fuzz': None}}
+            'jobs': {'selfplay': eval_template(st), 'eval': None, 'fuzz': None} if samples_job(st) else
+                    {'selfplay': None, 'eval': eval_template(st), 'fuzz': None}}
 
 
 def setup_farm(cl, d, st, log, opts):
@@ -300,13 +341,13 @@ def setup_farm(cl, d, st, log, opts):
 
 def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=None, paired=True, share=DEFAULT_SHARE,
            priority=0.5, games_per_lease='auto', deadline_s=DEFAULT_DEADLINE_S, spot=DEFAULT_SPOT, ort_dll=None,
-           min_agent=None, needs=None, meta=None, client=None, root=None, log=log_stderr, opts=None):
+           min_agent=None, needs=None, meta=None, client=None, root=None, log=log_stderr, opts=None, samples=False):
     """A new campaign (or the existing one of that name, resumed where it stopped) -> its state directory. `settings`:
     a run's evaluation settings (match_settings); `seats` [{"net": 1}, {"net": 2}] (A vs B, `b` given) or
     [{"net": 1}, {"net": 1}] (self-play of A); `seed`: the batch's base seed; `worker`: the build's executable
     (`ort_dll`: an ONNX Runtime the local fallback loads; default the runtime pack next to the build); `meta`: the
-    caller's notes (kept in the state)."""
-    from zero import farm_def as FD
+    caller's notes (kept in the state). `samples`: a play job with the search's samples (self-play seats of
+    `settings` = selfplay_settings; seats [{"net": 1}, {"net": 1}], unpaired)."""
     run = slug(name)
     d = state_dir(run, root)
     opts = opts or {}
@@ -318,6 +359,8 @@ def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=N
             raise CampaignError(f'seats {seats}: [{{"net": 1}}, {{"net": 2}}] or [{{"net": 1}}, {{"net": 1}}]')
         if (b is None) != (seats[1] == {'net': 1}):
             raise CampaignError('a second network b goes with seats [{"net": 1}, {"net": 2}], none with self-play')
+        if samples and (b is not None or paired):
+            raise CampaignError('a play job with samples is self-play of one network, unpaired')
         if games < 1 or (paired and games % 2):
             raise CampaignError(f'games {games}: >= 1 (and even when paired)')
         if not (share is None or 0 < float(share) <= 1):
@@ -332,10 +375,10 @@ def submit(name, a, games, settings, seats, seed, build_id, worker, runtime, b=N
               'priority': float(priority), 'build_id': build_id, 'runtime': runtime, 'worker': os.path.abspath(worker),
               'ort_dll': ort_dll, 'min_agent': min_agent, 'needs': needs, 'deadline_s': float(deadline_s),
               'spot': float(spot), 'created': time.time(), 'meta': meta or {}, 'have': [], 'failed': {},
-              'machines': {}, 'leases': {}, 'cursor': 0}
+              'machines': {}, 'leases': {}, 'cursor': 0, 'job': {'kind': 'play', 'trace': True, 'samples': bool(samples)}}
         os.makedirs(d, exist_ok=True)
-        st['settings'] = job_settings(worker, build_id, settings, d, log)
-        st['spec'] = st['settings']['eval_spec']
+        st['settings'] = job_settings(worker, build_id, settings, d, log, samples)
+        st['spec'] = st['settings']['spec' if samples else 'eval_spec']
         save_state(d, st)
     return _setup(d, st, client, opts, log)
 
@@ -360,7 +403,7 @@ def _setup(d, st, client, opts, log):
 
 # ------------------------------------------------------------------------------------------------ results
 def _result_file(cl, d, key, sha=None):
-    p = os.path.join(d, 'results', hashlib.sha256(key.encode()).hexdigest()[:24] + '.jsonl')
+    p = os.path.join(d, 'results', hashlib.sha256(key.encode()).hexdigest()[:24] + '.dat')
     if os.path.exists(p):
         with open(p, 'rb') as f:
             body = f.read()
@@ -373,7 +416,7 @@ def _result_file(cl, d, key, sha=None):
         os.replace(tmp, p)
     if sha and hashlib.sha256(body).hexdigest() != sha:
         raise CampaignError(f'result {key}: sha256 mismatch')
-    return body.decode('utf-8')
+    return body if body[:2] == bytes([0x1f, 0x8b]) else body.decode('utf-8')
 
 
 def _append_rows(d, rows):
@@ -400,7 +443,10 @@ def pull(cl, d, st, log=log_stderr):
         ans = cl.call('GET', f'/v1/admin/run/{st["run"]}/results?after={st.get("cursor", 0)}&limit=500')
         res = ans.get('results') or []
         for r in res:
-            if r.get('kind') != 'eval' or r.get('batch') not in (None, st['batch']):
+            if samples_job(st):
+                if r.get('kind') != 'selfplay':
+                    continue
+            elif r.get('kind') != 'eval' or r.get('batch') not in (None, st['batch']):
                 continue
             dup = ids_of(r.get('dup_ids'))
             parts = [(_result_file(cl, d, r['key'], r.get('sha256')), ids_of(r.get('ids')))]
@@ -408,7 +454,7 @@ def pull(cl, d, st, log=log_stderr):
                 parts.append((_result_file(cl, d, x['key']), ids_of(x.get('ids'))))
             new = []
             for text, ids in parts:
-                for row in FE.read_rows(text):
+                for row in (records_rows(st, text) if samples_job(st) else FE.read_rows(text)):
                     g = int(row['gid'])
                     if g in dup or g in have or g not in ids:
                         continue
@@ -432,10 +478,43 @@ def pull(cl, d, st, log=log_stderr):
         if res:
             st['cursor'] = ans.get('cursor', st.get('cursor', 0))
             save_state(d, st)
+            if samples_job(st):
+                # (the self-play quota: accepted + in flight; the total, PROTOCOL.md 4 - before the ack)
+                cl.call('POST', f'/v1/admin/run/{st["run"]}/accept', body={'gen': 1, 'games': len(have)})
             cl.call('POST', f'/v1/admin/run/{st["run"]}/ack', body={'cursor': st['cursor']})
         if len(res) < 500:
             save_state(d, st)
             return taken
+
+
+def records_rows(st, body):
+    """A play job's records file with samples (the farm's self-play records, gzip'd JSON lines: a header, then one
+    game record per line; PROTOCOL.md rev 8) -> rows in the campaign's schema (gid, seats, result, rounds, over,
+    digest, rec; `aux` from the header, which the replay needs)."""
+    from zero import farm_eval as FE
+    if isinstance(body, str):
+        text = body
+    else:
+        try:
+            text = gzip.decompress(body).decode('utf-8')
+        except OSError:
+            text = body.decode('utf-8')
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return []
+    head = json.loads(lines[0])
+    if head.get('records') != 1:
+        raise CampaignError(f'a records file without its header (records 1): {lines[0][:200]}')
+    if head.get('spec') not in (None, st['spec']):
+        raise CampaignError(f'a records file of another spec: {str(head.get("spec"))[:200]}')
+    out = []
+    for ln in lines[1:]:
+        rec = json.loads(ln)
+        res = [_f32(b) for b in rec.get('result') or []]
+        out.append({'gid': int(rec['gid']), 'pair': None, 'seats': st['seats'], 'result': res,
+                    'rounds': int(rec.get('rounds', 0)), 'over': bool(rec.get('over')), 'aux': bool(head.get('aux')),
+                    'digest': FE.trace_digest(rec), 'rec': rec})
+    return out
 
 
 def rows_of(d):
@@ -504,6 +583,12 @@ def runtime_dll(st):
 
 
 def local_cmd(st, lo, hi, out, threads):
+    if samples_job(st):
+        x = st['gens']['1']
+        return [st['worker'], 'selfplay', '--settings', os.path.join(out, 'settings.json'), '--model', x['model'],
+                '--reference', x['reference'], '--sha256', x['sha256'], '--net', '1', '--games', str(hi - lo),
+                '--gid-base', str(lo), '--seed', str(st['seed']), '--threads', str(threads), '--out', out,
+                '--prefix', f'l{lo}', '--ort-dll', runtime_dll(st), '--output', 'records']
     cmd = [st['worker'], 'eval', '--settings', os.path.join(out, 'settings.json'), '--seats', json.dumps(st['seats']),
            '--games', str(hi - lo), '--gid-base', str(lo), '--seed', str(st['seed']), '--threads', str(threads),
            '--out', out, '--prefix', f'l{lo}', '--ort-dll', runtime_dll(st), '--lease', f'local-{lo}',
@@ -536,7 +621,7 @@ def play_local(d, st, gids, threads=4, wrap=None, log=log_stderr):
     from zero import farm_eval as FE
     os.makedirs(os.path.join(d, 'local'), exist_ok=True)
     have = set(st.get('have', []))
-    for lo, hi in local_ranges(gids, st['paired']):
+    for lo, hi in local_ranges(gids, st['paired'], 16 if samples_job(st) else 64):
         out = os.path.join(d, 'local', f'{lo}-{hi}')
         os.makedirs(out, exist_ok=True)
         with open(os.path.join(out, 'settings.json'), 'w', encoding='utf-8') as f:
@@ -563,20 +648,21 @@ def play_local(d, st, gids, threads=4, wrap=None, log=log_stderr):
             err = (errs[-1] if errs else f'exit {p.returncode}') + (f' ({tail.strip()})' if tail.strip() else '')
         new = []
         for e in evs:
-            if e.get('ev') != 'evals':
+            if e.get('ev') not in ('evals', 'records'):
                 continue
-            with open(os.path.join(out, e['path']), encoding='utf-8') as f:
-                for row in FE.read_rows(f.read()):
-                    g = int(row['gid'])
-                    if g in have or not (lo <= g < hi):
-                        continue
-                    try:
-                        FE.check_digest(row)
-                    except FE.TraceMismatch as x:
-                        _refuse(d, st, f'the local worker: {x}')
-                    row['by'] = {'machine': 'local', 'lease': f'local-{lo}'}
-                    have.add(g)
-                    new.append(row)
+            with open(os.path.join(out, e['path']), 'rb') as f:
+                body = f.read()
+            for row in (records_rows(st, body) if e['ev'] == 'records' else FE.read_rows(body.decode('utf-8'))):
+                g = int(row['gid'])
+                if g in have or not (lo <= g < hi):
+                    continue
+                try:
+                    FE.check_digest(row)
+                except FE.TraceMismatch as x:
+                    _refuse(d, st, f'the local worker: {x}')
+                row['by'] = {'machine': 'local', 'lease': f'local-{lo}'}
+                have.add(g)
+                new.append(row)
         _append_rows(d, new)
         st['have'] = sorted(have)
         st.setdefault('local_ranges', []).extend(ranges_of([r['gid'] for r in new]))
@@ -614,7 +700,8 @@ def spot_check(d, st, frac=None, engine=None, log=log_stderr):
     for g in pick:
         r = rows[g]
         try:
-            FE.replay_trace(r, GAME, st['spec'], engine, st['seed'], st['paired'])
+            FE.replay_trace(r, GAME, st['spec'], engine, st['seed'], st['paired'], samples=samples_job(st),
+                            aux=bool(r.get('aux')))
         except FE.TraceMismatch as e:
             _refuse(d, st, f'spot check: machine {r.get("by", {}).get("machine")}: {e}')
         m = r.get('by', {}).get('machine', '?')
@@ -698,7 +785,7 @@ def readout(d, st):
     from zero import farm_eval as FE
     if st['seats'][1] != {'net': 2}:
         return None
-    rows = [{k: v for k, v in r.items() if k not in ('rec', 'by', 'digest')} for r in rows_of(d).values()]
+    rows = [{k: v for k, v in r.items() if k not in ('rec', 'by', 'digest', 'aux')} for r in rows_of(d).values()]
     return FE.summary(rows, st['paired'], {'net': 1}) if rows else None
 
 
@@ -774,6 +861,7 @@ def collect(d, client=None, poll=60, local=True, threads=4, wrap=None, describe_
     res = {'run': st['run'], 'games': len(rows), 'coverage': cov, 'digest': FE.games_digest(list(rows.values())),
            'lease_digests': {k: FE.games_digest(v) for k, v in sorted(leases.items())}, 'spot': spot,
            'machines': st.get('machines'), 'seed': st['seed'], 'paired': st['paired'], 'build_id': st['build_id'],
+           'job': st.get('job') or {'kind': 'play', 'trace': True, 'samples': False},
            'gens': {g: {'checkpoint': x['checkpoint'], 'sha256': x['sha256']} for g, x in st['gens'].items()},
            'seconds': round(time.time() - (st.get('submitted') or st['created']), 1), 'readout': readout(d, st)}
     if describe_games:
