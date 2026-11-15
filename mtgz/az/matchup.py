@@ -3,7 +3,7 @@
 
 **What it predicts.** P(seat A wins a game) from the two 60s the game is played with - each as its copies minus the
 registered main's for every entry of the (shared) 75 -, who is on the play, game 2 or 3, the match score and whether
-each seat was dealt (docs/ENGINE.md 154, 168.1). The model is EoE run 2's pairwise evaluator (docs/ENGINE.md 111.1,
+each seat was dealt (docs/ENGINE.md 154, 167.1). The model is EoE run 2's pairwise evaluator (docs/ENGINE.md 111.1,
 `mtgz.sealed.evaluator.PairNet`) on these inputs:
 
     z(A, B) = w . (dA - dB) + (dA U) W (dB U)^T + c_pd pd + c_g3 pd g3 + c_lead lead + c_dealt (dealt_A - dealt_B)
@@ -17,7 +17,7 @@ construction: z(B, A) = -z(A, B) with the context mirrored, so P(A beats B) + P(
 60 before the game barely better than play / draw: hub note value_pregame_check/report.md).
 
 **Its data.** Every finished self-play game of the run's own processes (the best-of-three game log, docs/ENGINE.md
-168.2: `<run>/games/games-<pid>.jsonl`, one line a game with both 60s, the starter, the score, the dealt flags and the
+167.2: `<run>/games/games-<pid>.jsonl`, one line a game with both 60s, the starter, the score, the dealt flags and the
 result). Dealt seats (p 0.85 per seat in pb3) give the unconfounded signal: their 60s are drawn at random. Remote
 self-play (the Mac, the farm) does not log: their games are not in the data (a share of the games, the same spec).
 
@@ -29,7 +29,7 @@ the model's dimension and L2 against the play / draw baseline; recency half-life
 selected setting as an ensemble of 5 bootstrap fits on the whole window, computes the **choice table** and publishes
 `<run>/matchup/v<b>.json` atomically (`index.jsonl` per version: the held-out numbers; `used.jsonl` per iteration).
 
-**The choice table** (docs/ENGINE.md 168.3). At a sideboarding decision the decider's belief about the other seat's next
+**The choice table** (docs/ENGINE.md 167.3). At a sideboarding decision the decider's belief about the other seat's next
 60 is the same in every state of one context - the other seat's 60 for the next game is dealt independently of what was
 played (a dealt seat: its restricted constructed prior; a seat that chooses: the constructed prior, with game 3
 independent of game 2 by the user's decision H3 = A) and nothing of the next game is seen. So the best 60 is a function
@@ -173,7 +173,7 @@ def the_75(specs, games):
         raise ValueError(f'the games play {len(lists)} lists / {len(mains)} mains: one mirror 75 only')
     sp = specs[keys[0]]
     if sp['lists'][0] != sp['lists'][1] or sp['mains'][0] != sp['mains'][1]:
-        raise ValueError('not a mirror: the matchup model reads one 75 for both seats (docs/ENGINE.md 168)')
+        raise ValueError('not a mirror: the matchup model reads one 75 for both seats (docs/ENGINE.md 167)')
     return sp['lists'][0], sp['mains'][0]
 
 
@@ -539,7 +539,7 @@ def selfplay_spec(R, it):
         return None
     sp = json.loads(c['spec'])
     if not (sp.get('constructed') and sp.get('format') == 'bo3' and sp.get('dealt_decks')):
-        raise ValueError('matchup_every needs a constructed best-of-three self-play spec with dealt decks (docs/ENGINE.md 168)')
+        raise ValueError('matchup_every needs a constructed best-of-three self-play spec with dealt decks (docs/ENGINE.md 167)')
     if 'sideboard_table' in sp:
         raise ValueError('matchup_every: the run\'s spec has a sideboard_table of its own (the retrain writes it)')
     run = R.run
@@ -690,7 +690,7 @@ def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log
         dd = json.loads(cfg['spec']).get('dealt_decks') or {}
         sw = tuple(dd.get('swaps') or (0, sum(copies) - sum(main)))
         # (a model that does not beat play / draw on the held-out games has shown no matchup knowledge: its version
-        # publishes no table, and the chosen-60 seats sideboard by search until one does - docs/ENGINE.md 168.4)
+        # publishes no table, and the chosen-60 seats sideboard by search until one does - docs/ENGINE.md 167.4)
         if rep['gain_nats'] > 0:
             table, detail = choice_table(members, names, copies, main, sw, name, worlds=worlds, seed=b, log=log)
             check_table(cfg['spec'], table)

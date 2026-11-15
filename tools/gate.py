@@ -51,6 +51,16 @@ ad-hoc shell script. It can never pass a check it did not perform:
     records replayed by the trainer's path), byte-identical, on the Delver best-of-three dealt preset. Its positive
     evidence: exactly one "farm compat: PASSED - ..." line and its JSON summary "passed": true. Not skippable.
 
+  * **Off the desktop beside a live run** (ENGINE.md 166): with a run live on this machine (zero.runctl.live_supervisors)
+    the steps with a Mac command - cargo tests, digests, the engine suite, the fuzz, pytest, the run-loop smoke, the
+    search smoke (not zero-core's own tests: its search goldens are x86's) - run on the Mac (tools/mac.sh: this commit's checkout, `nice`, a
+    Mac-side tools/slotd.sh slot) when it answers with memory to spare, else on the desktop; the desktop's own heavy
+    steps (builds, the Windows worker, farm compat, checkpoint checks, what needs private data: PYTEST_DESKTOP_ONLY as
+    pytest's desktop part, beside the Mac's) each hold a tools/slotd.sh slot. Same checkers, same evidence (the Mac's
+    engine is bit-identical: ENGINE.md 44.2, 166.2); a Mac step that never reached the Mac runs on the desktop.
+    --offload auto|mac|local, --throttle auto|on|off, --no-mac (nothing on the Mac). Tests the live-run fence skipped
+    (zero-core docs/az.md 51) are named in the final line as skips.
+
 Run from WITHIN the checkout to gate (a pinned worktree the caller creates first, e.g. `git
 worktree add --detach ../mtg-zero-wt/run-<sha> <sha>`, exactly as the old scripts did) - this tool
 never creates or manages a worktree itself, the same contract as tools/build_py.sh and
@@ -93,6 +103,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -551,18 +562,28 @@ def make_build_only_checker(names, core_pin):
     return checker
 
 
+METRICS_PREFIX = '[metrics] '          # a run-loop smoke on the Mac prints its metrics.jsonl with this prefix
+
+
 def make_metrics_checker(run_dir, want_games=None, want_iters=1):
     """A run-loop smoke's real positive evidence: metrics.jsonl itself (not log text) - every
     iteration present, the last one's self-play counts present, no unfinished games, more than 0
-    games (exactly `want_games` for a known preset)."""
+    games (exactly `want_games` for a known preset). `run_dir` None: the file's lines as the Mac printed them after
+    the run, each prefixed METRICS_PREFIX (run_loop_step's Mac command; ENGINE.md 166)."""
     def checker(output, rc):
         if rc != 0:
             return False, f'exit {rc}', {}
-        mfile = os.path.join(run_dir, 'metrics.jsonl')
-        if not os.path.exists(mfile):
-            return False, 'no metrics.jsonl written', {}
-        with open(mfile, encoding='utf-8') as f:
-            rows = [json.loads(line) for line in f if line.strip()]
+        if run_dir is None:
+            lines = [ln[len(METRICS_PREFIX):] for ln in output.splitlines() if ln.startswith(METRICS_PREFIX)]
+            if not lines:
+                return False, f'no "{METRICS_PREFIX}..." lines (the Mac printed no metrics.jsonl)', {}
+            rows = [json.loads(line) for line in lines if line.strip()]
+        else:
+            mfile = os.path.join(run_dir, 'metrics.jsonl')
+            if not os.path.exists(mfile):
+                return False, 'no metrics.jsonl written', {}
+            with open(mfile, encoding='utf-8') as f:
+                rows = [json.loads(line) for line in f if line.strip()]
         iters = [r.get('iter') for r in rows]
         if iters != list(range(want_iters + 1)):
             return False, f'iterations {iters} != {list(range(want_iters + 1))}', {}
@@ -702,6 +723,17 @@ class Step:
     prepare: object = None                     # callable() right before the step runs (never at --dry-run)
     verify: object = None                      # callable() -> (passed, reason, extra, log text): a check that runs
                                                # no command (another gate run's report as evidence)
+    # placement (ENGINE.md 166): a heavy step takes a slot of tools/slotd.sh when the gate throttles; a step with
+    # `mac_cmd` (a shell command for the Mac checkout of this commit) runs there through tools/mac.sh when the gate
+    # offloads, `mac_checker` (default: `checker`) reading its output, `desktop_part` (a Step) running on the desktop
+    # beside it for what only the desktop can check (the Windows worker, private data, platform-bound hashes)
+    heavy: bool = False
+    mac_cmd: object = None                     # True: the same argv / env / cwd; callable(ctx) -> (argv, env, cwd)
+    mac_checker: object = None
+    desktop_part: object = None
+    mac_flaky: object = None                   # callable(node id, k) -> (argv, env, cwd): a flaky retry on the Mac
+    placement: str = 'desktop'                 # desktop | desktop, throttled | mac | desktop (the Mac unreachable)
+    local: object = None                       # an offloaded step's desktop version (the fallback)
 
     def __post_init__(self):
         self.id = self.id or slug(self.name)
@@ -721,6 +753,7 @@ class StepResult:
     reason: str
     extra: dict
     mac: bool = False
+    placement: str = 'desktop'
 
     @property
     def passed(self):
@@ -790,7 +823,7 @@ def retry_flaky(ctx, step, env, out, reason, extra, log_parts):
     retries = []
     for k, nid in enumerate(ids, 1):
         argv = step.flaky.argv(nid, k)
-        rout, rrc = execute(argv, step.cwd or ctx.root, env, ctx.step_timeout)
+        rout, rrc = execute(argv, step.cwd or ctx.root, env, step_timeout(ctx, step))
         log_parts.append(f'\n\n$ {show(argv)}\n[gate.py: flaky retry {k}/{len(ids)}: {nid} alone]\n\n{rout}')
         rok, rreason, _ = check_pytest(rout, rrc) if rrc != 'timeout' else (False, 'timed out', {})
         retries.append({'test': nid, 'passed': rok, 'reason': rreason})
@@ -802,14 +835,19 @@ def retry_flaky(ctx, step, env, out, reason, extra, log_parts):
     return True, f'{reason} in the full run; flaky, passed on retry alone: {", ".join(ids)}', extra
 
 
+def step_timeout(ctx, step):
+    """A throttled step's timeout also covers its wait for a slot (tools/slotd.sh gives up after ctx.slot_wait)."""
+    return ctx.step_timeout + (ctx.slot_wait + 60 if step.placement == THROTTLED else 0)
+
+
 def run_step(ctx, step):
     cwd = step.cwd or ctx.root
     if step.not_needed:
         return StepResult(step.name, step.id, step.argv, cwd, 0.0, None, None, None, 'not needed',
-                          f'not needed: {step.not_needed}', {}, mac=step.mac)
+                          f'not needed: {step.not_needed}', {}, mac=step.mac, placement=step.placement)
     if step.skip_reason:
         return StepResult(step.name, step.id, step.argv, cwd, 0.0, None, None, None, 'skipped',
-                          f'skipped: {step.skip_reason}', {}, mac=step.mac)
+                          f'skipped: {step.skip_reason}', {}, mac=step.mac, placement=step.placement)
     log_path = os.path.join(ctx.logs_dir, f'{ctx.sha_short}-{ctx.tier}-{slug(step.name)}.log')
     if step.verify:
         t0 = time.time()
@@ -817,19 +855,34 @@ def run_step(ctx, step):
         with open(log_path, 'w', encoding='utf-8', errors='replace') as f:
             f.write(text)
         return StepResult(step.name, step.id, step.argv, cwd, time.time() - t0, 0, log_path, sha256_file(log_path),
-                          'passed' if passed else 'failed', reason, extra, mac=step.mac)
+                          'passed' if passed else 'failed', reason, extra, mac=step.mac, placement=step.placement)
     env = step_env(ctx, step)
     if step.prepare:
         step.prepare()
     t0 = time.time()
-    out, rc = execute(step.argv, cwd, env, ctx.step_timeout)
-    log_parts = [f'$ {show(step.argv)}\ncwd: {cwd}\nenv overrides: {step.env or {}}\n\n', out]
+    out, rc = execute(step.argv, cwd, env, step_timeout(ctx, step))
+    log_parts = [f'$ {show(step.argv)}\ncwd: {cwd}\nenv overrides: {step.env or {}}\nplacement: {step.placement}\n\n',
+                 out]
+    if step.placement == 'mac' and step.local is not None and mac_never_reached(out):
+        # the Mac went away between the plan and this step: the desktop runs it (throttled), the log keeps both
+        local = step.local
+        log_parts.append(f'\n\n[gate.py: the Mac was not reached ({mac_never_reached(out)}): running the step on the '
+                         f'desktop instead]\n\n$ {show(local.argv)}\n\n')
+        step = local
+        env = step_env(ctx, step)
+        out, rc = execute(step.argv, cwd, env, step_timeout(ctx, step))
+        log_parts.append(out)
     if rc == 'timeout':
-        passed, reason, extra = False, f'timed out after {ctx.step_timeout}s', {}
+        passed, reason, extra = False, f'timed out after {step_timeout(ctx, step)}s', {}
     else:
         passed, reason, extra = step.checker(out, rc)
         if not passed and step.flaky:
             passed, reason, extra = retry_flaky(ctx, step, env, out, reason, extra, log_parts)
+        if passed:
+            fenced = fenced_tests(out)
+            if fenced:
+                extra = dict(extra, fenced=fenced)
+                reason = f'{reason}; {fenced} live-run-hazard test(s) fenced off (a live run on this machine)'
     seconds = time.time() - t0
     with open(log_path, 'w', encoding='utf-8', errors='replace') as f:
         f.write(''.join(log_parts))
@@ -842,7 +895,7 @@ def run_step(ctx, step):
             pass
     status = ('recorded' if step.record_only else 'passed') if passed else 'failed'
     return StepResult(step.name, step.id, step.argv, cwd, seconds, rc, log_path, sha256_file(log_path), status,
-                      reason, extra, mac=step.mac)
+                      reason, extra, mac=step.mac, placement=step.placement)
 
 
 def batches(steps):
@@ -884,7 +937,7 @@ TAGS = {'passed': 'PASS', 'failed': 'FAIL', 'skipped': 'SKIP', 'recorded': 'RECO
 
 
 def report_step(r):
-    mac = ' [mac]' if r.mac else ''
+    mac = ' [mac]' if r.mac else (' [throttled]' if r.placement == THROTTLED else '')
     print(f'{TAGS[r.status]:8s}{mac} {r.name} ({r.seconds:.1f}s): {r.reason}', flush=True)
 
 
@@ -897,6 +950,9 @@ def caveats(results, dirty):
         skipped.insert(0, f'clean-tree (--allow-dirty: {len(dirty)} uncommitted change(s) gated, not the commit)')
     recorded = [f'{r.id} = {r.extra.get("digest")} (--record-digest)' for r in results if r.status == 'recorded']
     flaky = [f'{r.id}: {", ".join(r.extra["flaky"])}' for r in results if r.extra.get('flaky')]
+    # tests the live-run fence skipped ran nowhere (a pass on the Mac runs them there: ENGINE.md 166.3)
+    skipped += [f'{r.id}: {r.extra["fenced"]} live-run-hazard test(s) (fenced: a live run on this machine)'
+                for r in results if r.extra.get('fenced') and r.status != 'skipped']
     return skipped, recorded, flaky
 
 
@@ -937,11 +993,14 @@ def final_line(tier, sha_short, ok, results, not_run, seconds, path, dirty=()):
 def print_plan(ctx, steps):
     print(f'plan for tier {ctx.tier!r} (sha {ctx.sha_short}, zero-core pin {(ctx.core_pin or "none")[:12]}, '
           f'target dir {ctx.target_dir}):')
+    if ctx.placement:
+        print(f'  placement: {ctx.placement["summary"]}')
     for batch, _ in batches(steps):
         prefix = '  (parallel) ' if len(batch) > 1 else '  '
         pad = ' ' * len(prefix)
         for s in batch:
-            mac = ' [mac, via tools/mac.sh]' if s.mac else ''
+            mac = ' [mac, via tools/mac.sh]' if s.mac else (' [throttled: tools/slotd.sh]' if s.placement == THROTTLED
+                                                            else '')
             if s.not_needed:
                 print(f'{prefix}- [{s.id}] {s.name}{mac}: NOT NEEDED ({s.not_needed})')
             elif s.skip_reason:
@@ -1068,6 +1127,9 @@ class Ctx:
         self.no_mac = args.no_mac
         self.dirty = []
         self.baseline = None
+        self.slot_wait = args.slot_wait
+        self.throttle = False
+        self.placement = None
 
 
 def python_exe():
@@ -1095,23 +1157,247 @@ def opted_out(args, step_id):
     return step_id in (args.allow_skip or [])
 
 
+# ---------------------------------------------------------------------------- placement (ENGINE.md 166)
+# Beside a live run the gate keeps its heavy work off the desktop: the steps with a Mac command run on the Mac
+# (tools/mac.sh, this commit's checkout there, `nice`, a Mac-side slot of tools/slotd.sh), the desktop's own heavy
+# steps (its builds, the Windows worker, farm compat, what needs private data) take a desktop slot of tools/slotd.sh.
+# A step's evidence is the same wherever it ran (the Mac's engine is bit-identical: ENGINE.md 44.2, 166.2). zero-core's
+# own cargo tests and pytest stay on the desktop: its search goldens hash differently on the Mac (14 driver tests
+# failed there at be9ebfa: platform floating point in the search), so they are valid only here (ENGINE.md 166.2).
+
+THROTTLED = 'desktop, throttled'
+MAC_HOST = os.environ.get('MTGZ_MAC', 'greggkeithley@100.95.248.116')      # mac.sh's default
+MAC_NICE = 10                       # below a live run's own Mac work (its evaluation and self-play run at 0)
+MAC_JOBS = 6                        # CARGO_BUILD_JOBS on the Mac (mac.sh's own 12 is for an idle Mac)
+MAC_MIN_FREE_GB = 8                 # the Mac's available memory below this: the desktop runs the steps (throttled)
+# the tests the Mac cannot check like the desktop, as pytest arguments (files or node ids), run on the desktop beside
+# the Mac's pytest (ENGINE.md 166.2: the Mac ran the rest of 72e5a0df's suite with the desktop's outcomes)
+PYTEST_DESKTOP_ONLY = (
+    'tests/test_worker_farm.py', 'tests/test_worker_records.py', 'tests/test_worker_shards.py',
+    'tests/test_farm_campaign.py',          # the Windows release worker this gate built (MTGZ_WORKER)
+    'tests/test_deck_scorer.py',            # fixtures hashed bit for bit (platform floating point) + private data on E:
+    'tests/test_position_lab.py',           # main-line replays on E:
+    'tests/test_drafted.py::test_human_pick_agreement_on_a_few_drafts',     # private data on E:
+    'tests/test_evaluator.py::test_the_export_and_its_reference_scorer',    # private data on E:
+    'tests/test_sealedai_publish.py::test_dry_run_command_line',            # psutil's process access on macOS
+    # a supervisor test that fails on macOS (the companion started 8 times: ENGINE.md 166.6), so it runs on the
+    # desktop - fenced while a run is live here, and then named in the final line as a skip
+    'tests/test_run_publisher.py::test_the_supervisor_starts_one_publisher_per_run_and_it_ends_finished',
+)
+
+
+def live_runs():
+    """The live supervisors on this machine (zero.runctl.live_supervisors: any game's run) -> [{pid, run}].
+    Module-level: tests stub it."""
+    need_core()
+    core_py = os.path.join(CORE, 'python')
+    if core_py not in sys.path:
+        sys.path.insert(0, core_py)
+    from zero import runctl
+    return [{'pid': s['pid'], 'run': s['run']} for s in runctl.live_supervisors()]
+
+
+MAC_PROBE = ('sysctl -n vm.loadavg; vm_stat | awk \'/page size of/{ps=$8} /Pages (free|inactive|speculative)/'
+             '{gsub("[.]","",$NF); n+=$NF} END{printf "%.1f\\n", n*ps/1073741824}\'')
+
+
+def mac_probe(host=MAC_HOST, timeout=20):
+    """-> (ok, what): the Mac answers over ssh, with its load and available memory; not ok when it does not answer
+    or has less than MAC_MIN_FREE_GB available (the desktop then runs the steps, throttled). Module-level: tests
+    stub it."""
+    try:
+        p = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', f'ConnectTimeout={min(timeout, 10)}', host, MAC_PROBE],
+                           capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, f'the Mac ({host}) did not answer: {type(e).__name__}'
+    lines = [x.strip() for x in p.stdout.splitlines() if x.strip()]
+    if p.returncode != 0 or len(lines) < 2:
+        return False, f'the Mac ({host}) did not answer (ssh exit {p.returncode}: {p.stderr.strip()[-200:]})'
+    load, free = lines[0].strip('{} '), lines[-1]
+    try:
+        free_gb = float(free)
+    except ValueError:
+        return False, f'the Mac ({host}) answered without its memory ({free!r})'
+    if free_gb < MAC_MIN_FREE_GB:
+        return False, f'the Mac has {free_gb:.1f} GB available (< {MAC_MIN_FREE_GB}), load {load}'
+    return True, f'the Mac {host}: load {load}, {free_gb:.1f} GB available'
+
+
+def mac_never_reached(output):
+    """Why an offloaded step's output says mac.sh never ran the command on the Mac (None: it did) - the desktop then
+    runs the step itself (Step.local)."""
+    if MAC_LINE_RE.search(output):
+        return None
+    tail = [x for x in output.strip().splitlines() if x.strip()][-1:] or ['(no output)']
+    return f'no "[mac] ... @ <sha>:" line; {tail[0][:200]}'
+
+
+FENCED_RE = re.compile(r'^SKIPPED \[(\d+)\] .*live-run fence:', re.M)
+
+
+def fenced_tests(output):
+    """How many tests pytest's -rs lines say the live-run fence skipped (zero.runctl.live_run_fence_reason)."""
+    return sum(int(n) for n in FENCED_RE.findall(output))
+
+
+# every DIGEST_* / FUZZ_* the Mac's login environment might carry is dropped first (step_env's rule)
+MAC_SCRUB = 'for v in $(env | sed -n -e "s/^\\(DIGEST_[A-Za-z0-9_]*\\)=.*/\\1/p" -e "s/^\\(FUZZ_[A-Za-z0-9_]*\\)=.*/\\1/p"); ' \
+            'do unset "$v"; done; '
+
+
+def remote_command(argv, env=None, cwd=None):
+    """The shell command the Mac runs for a step's `argv` / `env` (None = unset) / `cwd`, in the Mac checkout of this
+    commit (mac.sh): the gate's environment rules (the caller's DIGEST_*, FUZZ_*, PYTEST_ADDOPTS, PYTHONPATH,
+    ZERO_CORE_UNPINNED never reach it; CPU only), then a Mac-side slot (the checkout's own tools/slotd.sh, state
+    ~/.mtgz-state) and `nice`, the checkout's `cwd`-relative directory."""
+    argv = list(argv)
+    sets = {'CUDA_VISIBLE_DEVICES': '-1', 'PYTHONIOENCODING': 'utf-8', 'RUST_BACKTRACE': '1',
+            'CARGO_BUILD_JOBS': str(MAC_JOBS)}
+    unset = list(SCRUBBED_ENV)
+    for k, v in (env or {}).items():
+        if v is None:
+            unset.append(k)
+        else:
+            sets[k] = v
+    if argv and argv[0] == python_exe():
+        argv[0] = 'python'
+    inner = argv[2] if len(argv) == 3 and argv[:2] == ['bash', '-c'] else shlex.join(argv)
+    rel = os.path.relpath(cwd, ROOT).replace(os.sep, '/') if cwd else '.'
+    if rel != '.':
+        inner = f'cd {shlex.quote(rel)} && {inner}'
+    envs = ' '.join([f'-u {k}' for k in unset] + [f'{k}={shlex.quote(v)}' for k, v in sets.items()])
+    return f'{MAC_SCRUB}env {envs} bash tools/slotd.sh nice -n {MAC_NICE} bash -c {shlex.quote(inner)}'
+
+
+def offload(ctx, step):
+    """The Mac version of an offloadable step: its `mac_cmd` (a string, or a callable(ctx) -> (argv, env, cwd)
+    that remote_command wraps) through tools/mac.sh, the checker behind mac.sh's "[mac] ... @ <this sha>" lines,
+    the desktop version kept as the fallback (Step.local)."""
+    local = throttled(ctx, step) if ctx.throttle else dataclasses.replace(step, placement='desktop')
+    cmd = step.mac_cmd
+    if cmd is True:
+        cmd = remote_command(step.argv, step.env, step.cwd)
+    elif callable(cmd):
+        cmd = remote_command(*cmd(ctx))
+    mac = dataclasses.replace(
+        step, argv=['bash', 'tools/mac.sh', cmd], env=None, cwd=None, mac=True, placement='mac', local=local,
+        checker=make_mac_checker(ctx.sha, step.mac_checker or step.checker),
+        evidence='mac.sh\'s "[mac] <host> <branch> @ <this sha>" and "[mac] done @ <this sha>" lines, then ' +
+                 step.evidence)
+    if step.flaky:
+        inner = step.mac_flaky or (lambda nid, k: (step.flaky.argv(nid, k), step.env, step.cwd))
+        mac.flaky = FlakyRetry(step.flaky.file, lambda nid, k: ['bash', 'tools/mac.sh', remote_command(*inner(nid, k))])
+    return mac
+
+
+def throttled(ctx, s):
+    """`s` holding a desktop slot of tools/slotd.sh (its timeout grows by the slot wait: step_timeout)."""
+    s = dataclasses.replace(s, placement=THROTTLED)
+    if s.argv[:2] != ['bash', 'tools/slotd.sh']:
+        s.argv = ['bash', os.path.join(ROOT, 'tools', 'slotd.sh'), *s.argv] if s.cwd else ['bash', 'tools/slotd.sh',
+                                                                                           *s.argv]
+    s.env = dict(s.env or {}, MTGZ_SLOT_WAIT_MAX=str(int(ctx.slot_wait)))
+    if s.flaky:
+        inner, wrap = s.flaky.argv, s.argv[:2]
+        s.flaky = FlakyRetry(s.flaky.file, lambda nid, k: [*wrap, *inner(nid, k)])
+    return s
+
+
+def place(ctx, args, steps):
+    """Decide where each step runs (ENGINE.md 166) -> the steps to run. --offload auto (the default): the steps with
+    a Mac command go to the Mac when a run is live on this machine, the Mac answers with memory to spare and --no-mac
+    is not given, else they stay on the desktop; --throttle auto: the desktop's heavy steps take a tools/slotd.sh slot
+    while a run is live."""
+    live = None
+
+    def is_live():
+        nonlocal live
+        if live is None:
+            live = live_runs()
+        return live
+    throttle = {'on': True, 'off': False}.get(args.throttle)
+    want_mac = {'mac': True, 'local': False}.get(args.offload)
+    why = []
+    if args.no_mac and want_mac is not False:
+        want_mac = False
+        why.append('--no-mac: nothing on the Mac')
+    active = [s for s in steps if not s.skip_reason and not s.not_needed]
+    candidates = [s for s in active if s.mac_cmd]
+    heavy = [s for s in active if s.heavy or s.mac_cmd]
+    if want_mac is None and candidates:
+        want_mac = bool(is_live())
+        why.append(f'{len(live)} live supervisor(s) here ({", ".join(sorted({x["run"] for x in live}))[:160]})' if live
+                   else 'no live run here: the desktop runs everything')
+    if throttle is None:
+        throttle = bool(heavy) and bool(is_live())
+        if live and not any('live supervisor' in w for w in why):
+            why.append(f'{len(live)} live supervisor(s) here ({", ".join(sorted({x["run"] for x in live}))[:160]}): '
+                       f'the heavy steps throttled')
+    mac_ok, mac_what = False, ''
+    if want_mac and candidates:
+        mac_ok, mac_what = mac_probe()
+        if not mac_ok and args.offload == 'mac':
+            raise GateError(f'--offload mac: {mac_what}')
+        why.append(mac_what + ('' if mac_ok else ': the desktop runs those steps'))
+    ctx.throttle = throttle
+    out = []
+    for s in steps:
+        if s.mac_cmd and mac_ok and not s.skip_reason and not s.not_needed:
+            m = offload(ctx, s)
+            out.append(m)
+            if s.desktop_part is not None:          # (beside the Mac step: a group runs concurrently)
+                d = throttled(ctx, s.desktop_part) if throttle else s.desktop_part
+                m.group = d.group = m.group or f'beside-{m.id}'
+                out.append(d)
+        elif (s.heavy or s.mac_cmd) and throttle and not s.skip_reason and not s.not_needed:
+            out.append(throttled(ctx, s))
+        else:
+            out.append(s)
+    n_mac = sum(1 for s in out if s.placement == 'mac')
+    n_thr = sum(1 for s in out if s.placement == THROTTLED)
+    summary = (f'{n_mac} step(s) on the Mac, {n_thr} on the desktop throttled (tools/slotd.sh), '
+               f'{len(out) - n_mac - n_thr} on the desktop' + (f' - {"; ".join(why)}' if why else ''))
+    ctx.placement = {'offload': 'mac' if n_mac else 'desktop', 'throttle': throttle, 'live_runs': live or [],
+                     'mac': mac_what, 'summary': summary, 'slot_wait': ctx.slot_wait}
+    return out
+
+
 # ---------------------------------------------------------------------------- shared steps
 
 def build_step(ctx, name='build'):
     pkg = os.path.join(ROOT, 'mtgz')
-    return Step(name, ['bash', 'tools/build_py.sh'], id='build', checker=make_build_checker('mtgz._engine', pkg),
+    return Step(name, ['bash', 'tools/build_py.sh'], id='build', checker=make_build_checker('mtgz._engine', pkg), heavy=True,
                 evidence=f'"mtgz._engine OK: {pkg}{os.sep}_engine.* | games: [...]" (the fresh module, imported from '
                          f'this checkout) + exit 0')
 
 
+def mac_built(shell):
+    """A Mac command that needs this checkout's engine module there: tools/build_py.sh first (incremental after the
+    gate's first Mac step), then `shell`."""
+    return (['bash', '-c', f'bash tools/build_py.sh && {shell}'], None, None)
+
+
+PYTEST_ARGS = ['-q', '-p', 'no:cacheprovider', '-rs']      # (-rs: the skip reasons, the live-run fence's among them)
+
+
 def pytest_step(name='pytest', step_id='pytest'):
-    return Step(name, [python_exe(), '-m', 'pytest', 'tests', '-q', '-p', 'no:cacheprovider'], id=step_id,
-                checker=check_pytest, evidence='pytest\'s final summary line: 0 failed, 0 errors, N > 0 passed + exit 0')
+    """This repo's pytest. On the Mac (ENGINE.md 166) without PYTEST_DESKTOP_ONLY, which run on the desktop beside it
+    (step `pytest-desktop`): together exactly the desktop's tests."""
+    ev = "pytest's final summary line: 0 failed, 0 errors, N > 0 passed + exit 0"
+    files = [a for a in PYTEST_DESKTOP_ONLY if '::' not in a]
+    ids = [a for a in PYTEST_DESKTOP_ONLY if '::' in a]
+    mac = shlex.join(['python', '-m', 'pytest', 'tests', *PYTEST_ARGS, *[f'--ignore={f}' for f in files],
+                      *[f'--deselect={i}' for i in ids]])
+    desk = Step(f'{name} (desktop part: the Windows worker, private data, platform-bound checks)',
+                [python_exe(), '-m', 'pytest', *PYTEST_DESKTOP_ONLY, *PYTEST_ARGS], id=f'{step_id}-desktop',
+                checker=check_pytest, heavy=True, evidence=ev)
+    return Step(name, [python_exe(), '-m', 'pytest', 'tests', *PYTEST_ARGS], id=step_id, checker=check_pytest,
+                heavy=True, mac_cmd=lambda ctx: mac_built(mac), desktop_part=desk, evidence=ev)
 
 
 def cargo_step(name, test, step_id=None):
     return Step(name, ['cargo', 'test', '--release', '-p', 'engine', '--test', test], id=step_id or f'cargo-test-{test}',
-                checker=make_cargo_checker(single=True),
+                checker=make_cargo_checker(single=True), mac_cmd=True,
                 evidence='exactly one "test result: ok. N passed; 0 failed" line, N > 0 + exit 0')
 
 
@@ -1126,7 +1412,7 @@ def worker_build_step(ctx):
     exe = worker_path(ctx)
     return Step("worker build (release mtgz-worker, the farm's executable)",
                 ['cargo', 'build', '--release', '-p', 'mtgz_worker'], id='worker-build',
-                checker=make_worker_build_checker(exe),
+                checker=make_worker_build_checker(exe), heavy=True,
                 evidence=f'"Finished `release` profile", {exe} there + exit 0')
 
 
@@ -1138,7 +1424,7 @@ def farm_compat_step(ctx):
     out = lazy_run_dir(ctx, 'farm-compat')
     return Step('farm compat (worker vs Python self-play; records -> trainer rows)',
                 [python_exe(), 'tools/farm_compat.py', '--worker', worker_path(ctx), '--out', out], id='farm-compat',
-                checker=check_farm_compat, cleanup=lambda: shutil.rmtree(out, ignore_errors=True),
+                checker=check_farm_compat, cleanup=lambda: shutil.rmtree(out, ignore_errors=True), heavy=True,
                 evidence='exactly one "farm compat: PASSED - ..." line (gate 2 and gate 3 identical, rows > 0, every '
                          "game's decks compared), its JSON summary \"passed\": true + exit 0")
 
@@ -1161,7 +1447,7 @@ def digest_steps(ctx, args):
                             f'it must equal); --record-digest {which} records it without comparing (RECORDED, never '
                             f'PASSED, and named in the final line)')
         games = f'{DIGEST_GAMES[0]} + {DIGEST_GAMES[1]}'
-        steps.append(Step(name, list(DIGEST_ARGV), env=env, id=f'digest-{which}', record_only=not expect,
+        steps.append(Step(name, list(DIGEST_ARGV), env=env, id=f'digest-{which}', record_only=not expect, mac_cmd=True,
                           checker=make_digest_checker(expect, record_only=not expect),
                           evidence=(f'one "combined digest" line over the full {games} games == {expect}' if expect
                                     else f'one "combined digest" line over the full {games} games (recorded, NOT '
@@ -1175,11 +1461,12 @@ def digest_format_steps():
     alter play re-records them in its commit, as digests.txt; the caller's DIGEST_* never reach them: step_env):
     engine/tests/digest_formats.rs (ENGINE.md 148.1: constructed best-of-three, the legacy decks, EoE, zero-core's
     driver) and dealt_decks.rs::dealt_digests (ENGINE.md 154: the dealt preset, pb2's self-play spec; 157)."""
-    return [Step('digest formats (constructed, EoE, driver)', list(FORMATS_ARGV), id='digest-formats',
+    return [Step('digest formats (constructed, EoE, driver)', list(FORMATS_ARGV), id='digest-formats', mac_cmd=True,
                  checker=check_digest_formats,
                  evidence='exactly one "<name>: ... combined digest <16 hex>" line each of constructed, eoe and driver, '
                           'no "wrote ...digests_" line, exactly one "test result: ok. 3 passed" + exit 0'),
             Step('digest dealt (dealt decks: the dealt preset\'s self-play spec)', list(DEALT_ARGV), id='digest-dealt',
+                 mac_cmd=True,
                  checker=check_digest_dealt,
                  evidence='exactly one "dealt_digests: N matches in ... s; combined digest <16 hex>" line, no '
                           '"wrote ...digests_dealt" line, exactly one "test result: ok. 1 passed" + exit 0')]
@@ -1202,14 +1489,14 @@ def core_steps(ctx):
     base = core_pytest_base(ctx)
 
     def argv(target, tmp):
-        return [python_exe(), '-m', 'pytest', target, '-q', '-p', 'no:cacheprovider', '-rfE',
+        return [python_exe(), '-m', 'pytest', target, '-q', '-p', 'no:cacheprovider', '-rfEs',
                 '-W', 'ignore::pytest.PytestWarning', f'--basetemp={tmp}']
     zero_pkg = os.path.join(CORE, 'python', 'zero')
     return [
-        Step('core build (zero._engine)', ['bash', 'tools/build_py.sh'], cwd=CORE, id='core-build',
+        Step('core build (zero._engine)', ['bash', 'tools/build_py.sh'], cwd=CORE, id='core-build', heavy=True,
              checker=make_build_checker('zero._engine', zero_pkg),
              evidence=f'"zero._engine OK: {zero_pkg}{os.sep}_engine.* | games: [...]" + exit 0'),
-        Step('core pytest', argv('tests', base), cwd=CORE, id='core-pytest', checker=check_pytest,
+        Step('core pytest', argv('tests', base), cwd=CORE, id='core-pytest', checker=check_pytest, heavy=True,
              flaky=FlakyRetry(FLAKY_FILE, lambda nid, k: argv(nid, f'{base}-retry{k}')),
              prepare=lambda: os.makedirs(os.path.dirname(base), exist_ok=True),
              cleanup=lambda: [shutil.rmtree(p, ignore_errors=True) for p in glob.glob(base + '*')],
@@ -1253,7 +1540,7 @@ def compat_step(ctx, args, name):
     base = check_baseline(ctx, args.baseline_root)
     return Step(name, [python_exe(), os.path.join(CORE, 'tools', 'check_checkpoint_compat.py'), '--old', base,
                        '--new', ROOT, '--package', 'mtgz', '--net', 'random', '--game', 'mtg', '--spec',
-                       args.checkpoint_spec or '{"max_turns": 60}'], id=sid,
+                       args.checkpoint_spec or '{"max_turns": 60}'], id=sid, heavy=True,
                 checker=make_compat_checker(base, ROOT),
                 evidence='{"identical": true, "differences": []}, the old side = the baseline\'s and the new side = '
                          'this checkout\'s mtgz/_engine, samples > 0 on both + exit 0')
@@ -1262,8 +1549,18 @@ def compat_step(ctx, args, name):
 def smoke_step(name, specs, extra_args=(), group=None):
     n = len(specs)              # one seed (0) per spec
     return Step(name, [python_exe(), 'tools/search_smoke.py', '--specs', ','.join(specs), '--seeds', '0',
-                       *extra_args], id='search-smoke', checker=make_search_smoke_checker(n), group=group,
+                       *extra_args], id='search-smoke', checker=make_search_smoke_checker(n), group=group, heavy=True,
+                mac_cmd=lambda ctx: mac_built(shlex.join(['python', 'tools/search_smoke.py', '--specs', ','.join(specs),
+                                                          '--seeds', '0', *extra_args])),
                 evidence=f'"search smoke: 0 failed of {n} configurations" + exit 0')
+
+
+def mac_run_loop(ctx, preset):
+    """The run-loop smoke on the Mac (ENGINE.md 166): a throwaway run under the Mac checkout's gates/tmp, its
+    metrics.jsonl printed line by line with METRICS_PREFIX (the checker reads those), the run removed after."""
+    rel = f'gates/tmp/gate-{ctx.tier}-smoke-{ctx.sha_short}-{uuid.uuid4().hex[:8]}'
+    run = shlex.join(['python', '-m', 'mtgz.az.run', '--run', rel, '--preset', preset, '--iters', '1'])
+    return mac_built(f'{{ {run}; rc=$?; sed "s/^/{METRICS_PREFIX}/" {rel}/metrics.jsonl; rm -rf {rel}; exit $rc; }}')
 
 
 def run_loop_step(ctx, preset, games):
@@ -1271,7 +1568,8 @@ def run_loop_step(ctx, preset, games):
     return Step(f'run-loop smoke ({preset})',
                 [python_exe(), '-m', 'mtgz.az.run', '--run', run_dir, '--preset', preset, '--iters', '1'],
                 id='run-loop-smoke', checker=make_metrics_checker(run_dir, want_games=games, want_iters=1),
-                cleanup=lambda: shutil.rmtree(run_dir, ignore_errors=True),
+                cleanup=lambda: shutil.rmtree(run_dir, ignore_errors=True), heavy=True,
+                mac_cmd=lambda ctx: mac_run_loop(ctx, preset), mac_checker=make_metrics_checker(None, games, 1),
                 evidence=f'its metrics.jsonl: iterations [0, 1], {games or "> 0"} games, 0 unfinished + exit 0')
 
 
@@ -1310,7 +1608,7 @@ def tier_encoding(ctx, args):
         load = Step('checkpoint-load (mtgz.az.h2h)',
                     [python_exe(), '-m', 'mtgz.az.h2h', args.checkpoint, args.checkpoint, '--games', '8', '--sims', '16',
                      '--spec', args.checkpoint_spec or '{"max_turns": 60}', '--device', 'cpu', '--threads', '4',
-                     '--select', 'visits'], id=sid, checker=make_h2h_checker(8),
+                     '--select', 'visits'], id=sid, checker=make_h2h_checker(8), heavy=True,
                     evidence='h2h\'s result line: 8 games, 0 unfinished + exit 0')
     elif opted_out(args, sid):
         load = Step('checkpoint-load (mtgz.az.h2h)', [], id=sid,
@@ -1356,7 +1654,7 @@ def tier_suite(ctx, args):
     gates/<sha12>-suite.json is the evidence the engine tier wants for --tested-sha (ENGINE.md 143)."""
     pools = split_list(args.fuzz_pools, 'default', '--fuzz-pools')
     steps = [Step('cargo test (the full engine suite)', ['cargo', 'test', '--release', '-p', 'engine', '--no-fail-fast'],
-                  id='cargo-test-engine', checker=make_cargo_checker(),
+                  id='cargo-test-engine', checker=make_cargo_checker(), mac_cmd=True,
                   evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0')]
     for pool in pools:
         env = {'FUZZ_GAMES': str(FUZZ_GAMES)}
@@ -1364,7 +1662,7 @@ def tier_suite(ctx, args):
             env['FUZZ_POOL'] = pool
         steps.append(Step(f'fuzz {FUZZ_GAMES} games ({"FUZZ_POOL=" + pool if pool != "default" else "the default pool"})',
                           ['cargo', 'test', '--release', '-p', 'engine', '--test', 'fuzz', '--', '--nocapture'], env=env,
-                          id=f'fuzz-{slug(pool)}', checker=make_fuzz_checker(FUZZ_GAMES),
+                          id=f'fuzz-{slug(pool)}', checker=make_fuzz_checker(FUZZ_GAMES), mac_cmd=True,
                           evidence=f'"{FUZZ_GAMES} games: wins [...]", exactly one "test result: ok. N passed; 0 failed" + '
                                    f'exit 0'))
     return steps
@@ -1492,7 +1790,7 @@ def tier_search_core(ctx, args):
     return [
         build_step(ctx),
         worker_build_step(ctx),
-        Step('zero-core cargo test', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test',
+        Step('zero-core cargo test', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test', heavy=True,
              evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
         pytest_step('this repo: pytest'),
         farm_compat_step(ctx),
@@ -1510,7 +1808,7 @@ def tier_optin_core(ctx, args):
     need_core()
     feature_tests = split_list(args.feature_tests, 'az,hidden', '--feature-tests')
     steps = [build_step(ctx), worker_build_step(ctx),
-             Step('core tests', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test',
+             Step('core tests', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test', heavy=True,
                   evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
              compat_step(ctx, args, 'checkpoint_compat byte identity'),
              *digest_format_steps(), farm_compat_step(ctx)]        # (the driver digest: zero-core's Driver<MtgAz>, ENGINE.md 148.1)
@@ -1577,7 +1875,7 @@ def build_only_step(ctx, args):
     smoke_dir = (f'E:/zero-smoke/{smoke_target}' if WIN else os.path.join(GATES_DIR, 'tmp', smoke_target))
     return Step(f'build-only: the other games ({", ".join(names)})',
                 ['bash', os.path.join(CORE, 'tools', 'smoke_all.sh'), '--with-this-core', '--build-only', *games],
-                cwd=CORE, id='build-only', env={'SKIP_CORE': '1', 'SMOKE_TARGET': smoke_target, 'SMOKE_DIR': smoke_dir,
+                cwd=CORE, id='build-only', heavy=True, env={'SKIP_CORE': '1', 'SMOKE_TARGET': smoke_target, 'SMOKE_DIR': smoke_dir,
                                                  'CARGO_TARGET_DIR': None},
                 checker=make_build_only_checker(names, ctx.core_pin),
                 evidence=f'an "ok <game>: build" line + "with zero-core {ctx.core_pin[:12]}" for each of {len(names)} '
@@ -1598,7 +1896,7 @@ def tier_repin(ctx, args):
     # this gate passes, documented in --help and ENGINE.md 70, not a scripted check.
     return [
         build_step(ctx, 'build (this checkout\'s own target)'),
-        Step('digest equals main\'s recorded value', list(DIGEST_ARGV), id='digest-full',
+        Step('digest equals main\'s recorded value', list(DIGEST_ARGV), id='digest-full', mac_cmd=True,
              checker=make_digest_checker(args.expect_digest),
              evidence=f'one "combined digest" line over the full {DIGEST_GAMES[0]} + {DIGEST_GAMES[1]} games == '
                       f'{args.expect_digest}, "test result: ok. 1 passed" + exit 0'),
@@ -1700,6 +1998,7 @@ def write_report(ctx, args, results, ok, not_run, started, seconds, path, line):
         'skipped': sk, 'recorded': rec, 'flaky': fl, 'not_run': [s.id for s in not_run],
         'tree': {'uncommitted': ctx.dirty, 'allow_dirty': bool(args.allow_dirty)},
         'baseline': ctx.baseline,
+        'placement': ctx.placement,
         'options': {k: v for k, v in sorted(vars(args).items()) if v not in (None, [], False) and k != 'dry_run'},
         'digests': {}, 'test_counts': {}, 'steps': [],
     }
@@ -1707,7 +2006,9 @@ def write_report(ctx, args, results, ok, not_run, started, seconds, path, line):
         report['steps'].append({'id': r.id, 'name': r.name, 'status': r.status, 'passed': r.passed,
                                 'skipped': r.skipped, 'reason': r.reason, 'cmd': r.argv, 'cwd': r.cwd,
                                 'seconds': round(r.seconds, 2), 'rc': r.rc, 'log': r.log, 'log_sha256': r.log_sha256,
-                                'mac': r.mac, **({'retries': r.extra['retries']} if 'retries' in r.extra else {}),
+                                'mac': r.mac, 'placement': r.placement,
+                                **({'retries': r.extra['retries']} if 'retries' in r.extra else {}),
+                                **({'fenced': r.extra['fenced']} if r.extra.get('fenced') else {}),
                                 **({'fuzz_games': r.extra['fuzz_games']} if 'fuzz_games' in r.extra else {}),
                                 **{k: r.extra[k] for k in ('farm_compat', 'worker', 'worker_sha256') if k in r.extra}})
         if r.extra.get('digest'):
@@ -1790,7 +2091,15 @@ def build_parser():
     ap.add_argument('--step-timeout', type=float, default=3600.0, help='seconds before a single step is killed as '
                     'hung (default 3600)')
     ap.add_argument('--no-mac', action='store_true', help='skip Mac steps (SKIPPED, not failed, and named in the '
-                    'final line); also stands in for the engine tier\'s --tested-sha')
+                    'final line); also stands in for the engine tier\'s --tested-sha; nothing is offloaded to the Mac')
+    ap.add_argument('--offload', choices=('auto', 'mac', 'local'), default='auto', help='where the steps with a Mac '
+                    'command run (ENGINE.md 166): auto (default) = on the Mac (tools/mac.sh, nice, a Mac-side slot) when a '
+                    'run is live on this machine and the Mac answers, else here; mac = on the Mac or refuse; local = here')
+    ap.add_argument('--throttle', choices=('auto', 'on', 'off'), default='auto', help='the desktop\'s heavy steps '
+                    'each hold a tools/slotd.sh slot (RAM / commit aware): auto (default) = while a run is live on this '
+                    'machine')
+    ap.add_argument('--slot-wait', type=float, default=7200.0, help='seconds a throttled step may wait for its slot '
+                    '(on top of --step-timeout; default 7200)')
     ap.add_argument('--dry-run', action='store_true', help='print the plan, or the refusal; run nothing, write '
                     'nothing')
     return ap
@@ -1804,6 +2113,7 @@ def main(argv=None):
         ctx.dirty = check_tree(args)
         steps = TIERS[args.tier][0](ctx, args)
         finish_plan(steps, args)
+        steps = place(ctx, args, steps)
     except GateError as e:
         print(f'gate.py: {e}', file=sys.stderr)
         return 2
@@ -1822,6 +2132,7 @@ def main(argv=None):
     os.makedirs(os.path.join(GATES_DIR, 'tmp'), exist_ok=True)
     print(f'gate.py {args.tier}: sha {ctx.sha_short}, core pin {(ctx.core_pin or "none")[:12]}, target '
           f'{ctx.target_dir}', flush=True)
+    print(f'placement: {ctx.placement["summary"]}', flush=True)
     started = iso_now()
     t0 = time.time()
     before = tree_state()

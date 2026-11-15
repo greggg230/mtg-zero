@@ -338,7 +338,7 @@ class Watcher:
                 return 0
             self.log(f"watching {self.run}: {json.dumps(ys)}" + ('' if not ys['bo1_games'] else
                      f"; best-of-one opponents {[o['name'] for o in Y.opponents(self.run, cfg, ys)]}"))
-            lanes = (['gpu' if ys['bo1_device'] == 'cuda' else 'cpu_bo1'] if ys['bo1_games'] else []) +                 (['cpu'] if ys['blunders'] else [])
+            lanes = Y.bo1_lanes(self.run, cfg, ys) + (['cpu'] if ys['blunders'] else [])
             ew = None
             if not self.once:
                 ew = threading.Thread(target=self.end_watch, daemon=True)

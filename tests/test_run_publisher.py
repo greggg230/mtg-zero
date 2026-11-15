@@ -259,6 +259,7 @@ runctl.write_state(run, "run", state="done")
 '''
 
 
+@pytest.mark.live_run_hazard
 def test_the_supervisor_starts_one_publisher_per_run_and_it_ends_finished(tmp_path):
     run = tmp_path / 'run'
     run.mkdir()

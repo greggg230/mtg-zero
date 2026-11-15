@@ -1,11 +1,11 @@
-//! Sideboarding by a choice table (ENGINE.md 168.3, the spec's `"sideboard_table"`): a constructed best-of-three
+//! Sideboarding by a choice table (ENGINE.md 167.3, the spec's `"sideboard_table"`): a constructed best-of-three
 //! seat whose 75 is the table's list sideboards, when it is not dealt, to the table's 60 for its context - a
 //! **teacher decision** (zero-core `SearchGame::teacher_policy`, its docs/search.md 3.19): the canonical path's
 //! next action (ENGINE.md 36.2 / 120.1: the entries the 60 changes, in list order, each with its new count, then
 //! `PASS` - every legal 60 is reached in exactly one way), played without a search and recorded as the decision's
 //! policy target, so the network's prior learns the table's choices.
 //!
-//! **Why a table is exact here** (ENGINE.md 168.3): the matchup model (`mtgz.az.matchup`) scores a 60 against the
+//! **Why a table is exact here** (ENGINE.md 167.3): the matchup model (`mtgz.az.matchup`) scores a 60 against the
 //! decider's belief about the other seat's next 60, and at a sideboarding decision that belief is the same in every
 //! state of one context - the other seat's 60 for the next game is dealt independently of everything played
 //! (a dealt seat, 154: its restricted prior; a seat that chooses: the constructed prior, 120.2, with game 3
@@ -60,7 +60,7 @@ fn fnv(h: &mut u64, x: u64) {
 impl SideboardTable {
     /// The spec's `"sideboard_table"` (module docs); card names looked up in `db`.
     pub fn parse(x: &Value, db: &CardDb) -> Result<SideboardTable, String> {
-        let err = |m: String| format!("mtg spec: sideboard_table: {m} (ENGINE.md 168.3)");
+        let err = |m: String| format!("mtg spec: sideboard_table: {m} (ENGINE.md 167.3)");
         let o = x.as_object().ok_or_else(|| err("must be {\"version\", \"list\", \"choices\"}".into()))?;
         if let Some(k) = o.keys().find(|k| !matches!(k.as_str(), "version" | "list" | "choices")) {
             return Err(err(format!("unknown key {k:?} (version, list, choices)")));
@@ -143,7 +143,7 @@ impl SideboardTable {
     /// follows the table from its first decision).
     pub fn next_action(pool: &MatchPool, counts: &[u8], from: usize, asking: Option<u8>, target: &[u8]) -> u16 {
         use crate::act;
-        assert_eq!(&counts[..from], &target[..from], "the sideboarding left the table's path (ENGINE.md 168.3)");
+        assert_eq!(&counts[..from], &target[..from], "the sideboarding left the table's path (ENGINE.md 167.3)");
         if let Some(k) = asking {
             return act::NUMBER + target[k as usize] as u16;
         }

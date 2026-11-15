@@ -1,4 +1,4 @@
-"""The in-run matchup model and its choice table (docs/ENGINE.md 168, mtgz.az.matchup): the constructed prior's exact
+"""The in-run matchup model and its choice table (docs/ENGINE.md 167, mtgz.az.matchup): the constructed prior's exact
 sampler, the pairwise model's antisymmetry and fit, the exact strength optimum, the choice table's 24 contexts, the game
 log reader, and the self-play hook's versions (one answer per iteration, a retrain launched when due)."""
 import itertools

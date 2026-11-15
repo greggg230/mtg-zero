@@ -79,10 +79,10 @@
 //! decides at a sideboarding, each later game's dealt 60 has swaps in the range against its registered main,
 //! every world keeps the dealt seat and deals its 60 within the range (the information-set walks cover the
 //! deal's keys: hidden for the other player, its encodings equal across worlds that dealt different 60s).
-//! `FUZZ_POOL=delver_dealt2` (ENGINE.md 168.4): `delver_dealt` with each seat dealt independently (`"per_seat"`:
+//! `FUZZ_POOL=delver_dealt2` (ENGINE.md 167.4): `delver_dealt` with each seat dealt independently (`"per_seat"`:
 //! by seed p 0.85 with swaps [0, 15] - the pb3 preset's, [0, 12] against `OTHER_75`'s 12-card sideboard -, p 1 with
 //! [0, 12], p 0.5 with [2, 6]), so a match has none, one or two dealt seats, and in every other match a choice table
-//! (`"sideboard_table"`, ENGINE.md 168.3: random legal 60s of the Delver 75 for its 24 contexts) whose seats - the
+//! (`"sideboard_table"`, ENGINE.md 167.3: random legal 60s of the Delver 75 for its 24 contexts) whose seats - the
 //! Delver 75's, not dealt - always play the table's action at their sideboarding decisions (as zero-core's driver
 //! does) and reach exactly the table's 60 of their context.
 //! `FUZZ_POOL=dd_a` (ENGINE.md 124.1): Legacy Doomsday, lane A's cards: the
@@ -518,7 +518,7 @@ pub enum PoolMode {
     Cross,
     /// `FUZZ_POOL=delver_dealt` (ENGINE.md 154): `delver` with dealt decks.
     DelverDealt,
-    /// `FUZZ_POOL=delver_dealt2` (ENGINE.md 168.4): each seat dealt independently, and choice tables.
+    /// `FUZZ_POOL=delver_dealt2` (ENGINE.md 167.4): each seat dealt independently, and choice tables.
     DelverDealtPerSeat,
 }
 
@@ -562,22 +562,22 @@ fn exponential_mode() -> bool {
     pool_mode() == PoolMode::Exponential
 }
 
-/// `FUZZ_POOL=delver`, or `delver_dealt` / `delver_dealt2` (its matches with dealt decks, ENGINE.md 154, 168.4).
+/// `FUZZ_POOL=delver`, or `delver_dealt` / `delver_dealt2` (its matches with dealt decks, ENGINE.md 154, 167.4).
 pub fn delver_mode() -> bool {
     matches!(pool_mode(), PoolMode::Delver | PoolMode::DelverDealt | PoolMode::DelverDealtPerSeat)
 }
 
-/// `FUZZ_POOL=delver_dealt` or `delver_dealt2` (ENGINE.md 154, 168.4).
+/// `FUZZ_POOL=delver_dealt` or `delver_dealt2` (ENGINE.md 154, 167.4).
 fn dealt_mode() -> bool {
     matches!(pool_mode(), PoolMode::DelverDealt | PoolMode::DelverDealtPerSeat)
 }
 
-/// `FUZZ_POOL=delver_dealt2` (ENGINE.md 168.4).
+/// `FUZZ_POOL=delver_dealt2` (ENGINE.md 167.4).
 fn per_seat_mode() -> bool {
     pool_mode() == PoolMode::DelverDealtPerSeat
 }
 
-/// `FUZZ_POOL=delver_dealt2`'s choice table of match `seed` (ENGINE.md 168.4): the Delver 75 (`main`, `side`: names)
+/// `FUZZ_POOL=delver_dealt2`'s choice table of match `seed` (ENGINE.md 167.4): the Delver 75 (`main`, `side`: names)
 /// as its list, each of the 24 contexts a random legal 60 - the main with 0..=15 random one-for-one swaps.
 fn fuzz_table(seed: u64, main: &[String], side: &[String]) -> serde_json::Value {
     let mut names: Vec<String> = Vec::new();
@@ -627,7 +627,7 @@ fn fuzz_table(seed: u64, main: &[String], side: &[String]) -> serde_json::Value 
 /// preset's range), p 1 with [0, 12] (P1's other 75 has 12 sideboard cards), p 0.5 with [3, 3].
 fn dealt_of(seed: u64) -> serde_json::Value {
     if per_seat_mode() {
-        // (ENGINE.md 168.4: each seat independently; [0, 12] where a seat plays OTHER_75's 12-card sideboard)
+        // (ENGINE.md 167.4: each seat independently; [0, 12] where a seat plays OTHER_75's 12-card sideboard)
         let most = if seed % 4 == 1 { 12 } else { 15 };
         return match (seed / 4) % 3 {
             0 => serde_json::json!({"p": 0.85, "swaps": [0, most], "per_seat": true}),
@@ -3270,7 +3270,7 @@ fn delver_bo3_spec_with(seed: u64, extra: serde_json::Value, mirror: bool) -> cr
         v["dealt_decks"] = dealt_of(seed);
     }
     if per_seat_mode() && seed % 2 == 0 {
-        // (ENGINE.md 168.4: a choice table of the Delver 75 - OTHER_75's seats are not its seats)
+        // (ENGINE.md 167.4: a choice table of the Delver 75 - OTHER_75's seats are not its seats)
         let d = crate::az::constructed::Decklist::izzet_delver();
         let side: Vec<String> = d.sideboard.iter().filter(|(_, n)| db.id(n).is_some()).flat_map(|(k, n)| std::iter::repeat_n(n.clone(), *k as usize)).collect();
         v["sideboard_table"] = fuzz_table(seed, &d.main_names(), &side);
@@ -3323,7 +3323,7 @@ pub struct PlayedMatch {
     /// Dealt decks (ENGINE.md 154): the match had a dealt seat; its dealt 60s checked (one a later game).
     pub dealt: bool,
     pub dealt_decks: u32,
-    /// Choice table decisions played (ENGINE.md 168.3, `FUZZ_POOL=delver_dealt2`).
+    /// Choice table decisions played (ENGINE.md 167.3, `FUZZ_POOL=delver_dealt2`).
     pub table_decisions: u32,
 }
 
@@ -3810,7 +3810,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
     let mut dealt_decks = 0u32;
     if let Some(dd) = sp.dealt_decks {
         if dd.per_seat {
-            // (ENGINE.md 168.1)
+            // (ENGINE.md 167.1)
             let ds = crate::az::matches::dealt_seats(seed, dd.p.0);
             assert_eq!([g.m.is_dealt(0), g.m.is_dealt(1)], ds, "match {seed}: the dealt seats are the seed's");
             assert_eq!(g.m.dealt_both, ds[0] && ds[1]);
@@ -3820,7 +3820,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
     } else {
         assert!(!g.m.any_dealt());
     }
-    // (ENGINE.md 168.3: the choice table's seats are those whose 75 is its list)
+    // (ENGINE.md 167.3: the choice table's seats are those whose 75 is its list)
     for p in 0..2 {
         let fits = sp.sideboard_table.as_ref().is_some_and(|t| t.fits(&g.m.pools[p]));
         assert_eq!(g.m.table[p].is_some(), fits, "match {seed}: P{p}'s choice table");
@@ -3829,7 +3829,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
     // draw, its loser sideboarding first (CR 103.1). A dealt loser (ENGINE.md 154.1) is dealt at once - its 60
     // done, no decision of its own - so the winner is the first decider; otherwise the loser decides, nothing done.)
     if sp.start_game == 2 && g.m.dealt_both {
-        // (both seats dealt, ENGINE.md 168.1: nobody decides - game 2 has begun with both deals)
+        // (both seats dealt, ENGINE.md 167.1: nobody decides - game 2 has begun with both deals)
         assert!(g.m.post_board && g.m.game_no == 2 && g.sideboarding().is_none() && matches!(g.m.results[0], 1 | 2), "match {seed}: both dealt: game 2 at once");
     } else if sp.start_game == 2 {
         assert!(g.m.post_board && g.m.game_no == 1 && matches!(g.m.results[0], 1 | 2), "match {seed}: a post-sideboard start");
@@ -3862,7 +3862,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
     let (mut sideboard_decisions, mut changed_decks, mut sideboardings) = (0u32, 0u32, 0u32);
     let mut decks = [g.m.decks[0].clone(), g.m.decks[1].clone()];
     let mut game_no = 1;
-    // (ENGINE.md 168.3: a choice table seat's target of the sideboarding in progress, checked when the game begins)
+    // (ENGINE.md 167.3: a choice table seat's target of the sideboarding in progress, checked when the game begins)
     let mut table_target: [Option<std::sync::Arc<[u8]>>; 2] = [None, None];
     let mut table_decisions = 0u32;
     // The rules checks of each game (ENGINE.md 150), after every step.
@@ -3889,7 +3889,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
         sideboard_decisions += sb as u32;
         // the dealt seat never decides at a sideboarding (ENGINE.md 154)
         assert!(!(sb && g.m.is_dealt(p as u8)), "match {seed}: the dealt seat P{p} decides at a sideboarding");
-        // a choice table's seat (ENGINE.md 168.3): the table's action, legal, at every decision of its sideboarding (and
+        // a choice table's seat (ENGINE.md 167.3): the table's action, legal, at every decision of its sideboarding (and
         // nowhere else); it plays it, as zero-core's driver does
         let taught = g.table_action();
         assert_eq!(taught.is_some(), sb && g.m.table[p].is_some(), "match {seed}: P{p}'s table action");
@@ -4025,7 +4025,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
                 for (k, &(_, n)) in pool.list.iter().enumerate() {
                     assert!(g.m.decks[q as usize][k] <= n.max(decks[q as usize][k]));
                 }
-                // a choice table's 60 (ENGINE.md 168.3): exactly its context's
+                // a choice table's 60 (ENGINE.md 167.3): exactly its context's
                 if let Some(t) = table_target[q as usize].take() {
                     assert_eq!(&g.m.decks[q as usize][..], &t[..], "match {seed} game {game_no}: P{q} followed the table to another 60");
                 }
@@ -4130,7 +4130,7 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         println!("dealt decks (ENGINE.md 154): {dealt_matches} of {n} matches with a dealt seat, {dealt_decks} dealt 60s checked");
         assert!(n < 20 || dealt_matches > 0 && dealt_decks > 0, "no dealt match");
         if per_seat_mode() {
-            println!("choice tables (ENGINE.md 168.3): {table_decisions} table decisions played, each table 60 reached");
+            println!("choice tables (ENGINE.md 167.3): {table_decisions} table decisions played, each table 60 reached");
             assert!(n < 20 || table_decisions > 0, "no choice table decision");
         }
     }
@@ -4224,7 +4224,7 @@ fn post_sideboard_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         println!("post-sideboard dealt decks: {dealt_matches} of {n} matches with a dealt seat, {dealt_decks} dealt 60s checked");
         assert!(n < 20 || dealt_matches > 0 && dealt_decks > 0, "post-sideboard matches: no dealt match");
         if per_seat_mode() {
-            println!("post-sideboard choice tables (ENGINE.md 168.3): {table_decisions} table decisions played, each table 60 reached");
+            println!("post-sideboard choice tables (ENGINE.md 167.3): {table_decisions} table decisions played, each table 60 reached");
             assert!(n < 20 || table_decisions > 0, "post-sideboard matches: no choice table decision");
         }
     }

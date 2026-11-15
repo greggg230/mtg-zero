@@ -38,10 +38,10 @@
 //!   its sha256) and `"score"` (its score by it).
 //! * Nothing here touches a game's state: determinism and every encoding are unchanged; a write
 //!   that fails panics (a loud failure, never a silently missing record).
-//! * **Constructed best-of-three games** (ENGINE.md 168.2, the matchup model's data): with the sink set, every
+//! * **Constructed best-of-three games** (ENGINE.md 167.2, the matchup model's data): with the sink set, every
 //!   finished game of a real constructed best-of-three match (`MtgAz` on the `mtg` game) writes a line
 //!   `{"v": 1, "kind": "bo3", "spec", "seed", "game", "starter", "chooser", "wins" (before the game), "dealt",
-//!   "mode" (per seat: "main" game 1, "dealt", "table" - the choice table's 60, ENGINE.md 168.3 - or "chosen" by
+//!   "mode" (per seat: "main" game 1, "dealt", "table" - the choice table's 60, ENGINE.md 167.3 - or "chosen" by
 //!   the seat's own sideboarding), "decks" (copies per entry of the seat's 75, the spec line's list order),
 //!   "result" ([r0, r1], null aborted), "aborted", "turns", "post_board", "time"}` after a spec line
 //!   `{"v": 1, "kind": "bo3-spec", "spec", "lists" ([[card, copies], ...] per seat, the 75 in list order),
@@ -140,7 +140,7 @@ pub struct Before {
     bottom: Option<(u8, DefId)>,
 }
 
-/// The live game's best-of-three record (module docs, ENGINE.md 168.2). Clones carry none: only the game zero-core
+/// The live game's best-of-three record (module docs, ENGINE.md 167.2). Clones carry none: only the game zero-core
 /// made with `new_game` (and the next episodes it carries the record into) writes.
 pub struct LiveLog(Option<Arc<Bo3Log>>);
 

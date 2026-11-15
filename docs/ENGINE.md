@@ -34652,11 +34652,374 @@ wrong types, odd game counts, a device other than cuda/cpu and a setting that me
 passed, 1 skipped; 808.7 s), run-loop smoke (mtg-smoke) PASS (16 games, 0 unfinished), the checkout unchanged - **GATE
 PASSED python 099b2f9b3d2d in 1227s** (report gates/099b2f9b3d2d-python.json; the Mac steps skipped by --no-mac).
 
-## 168. pb3: wide 60 variety (dealt decks per seat), the in-run matchup model and sideboarding by its choice table (branch `feat/pb3-varied`, zero-core `feat/pb3-teacher`, 2026-11-15)
+## 165. Farm analysis campaigns: play jobs with traces on friends' PCs, checked and replayed here (branch `feat/farm-campaigns`, zero-core `feat/farm-campaigns`, zero-farm `feat/campaigns`, 2026-11-15)
 
-Branch `feat/pb3-varied` from main 72e5a0df; zero-core `feat/pb3-teacher` from the pin bf229a5. (Section number: 160-164
-are main's, 165 is claimed twice - `feat/farm-campaigns`' farm campaigns and `mig/phase1`'s sharded fuzz -, 166 is
-`mig/phase0`'s; this one leaves 167 for whichever of the two 165s moves.) The run it prepares: **pb3**, approved by the
+Branch `feat/farm-campaigns` from main 72e5a0df; zero-core pin bf229a5 -> `feat/farm-campaigns` 3608e38 (zero-core
+docs/az.md 50); zero-farm `feat/campaigns` (coordinator PROTOCOL rev 13, section 5.3; DESIGN 6 item 4). Why: the user,
+2026-11-15 ("work on it in a background agent"; standing rule: every build farm-compatible by default): work of the form
+"play N matches with checkpoint X under spec S over seeds [a, b) and return each game's moves" - the yardsticks'
+best-of-one, the sideboard census, play analyses - ran on the desktop beside the live run (pb2) and cost it CPU and GPU.
+It now runs on friends' PCs; the desktop replays the traces with the same engine and computes what it needs. The
+architecture review of the same day (hub `fable_review_iteration_and_farm_2026-11-15.md` 3.1) makes this the general
+job model (`play` jobs with options `trace` and `samples`, `fuzz` the other kind); the names, the result schema and the
+share follow it so self-play and evaluation can move onto it without another protocol revision. No rule, encoding,
+search or training change; digests untouched; agents unchanged. (Section number: every branch's and worktree's
+headings stopped at 164 on 2026-11-15.)
+
+### 165.1 The play job
+
+A campaign is one play job on a farm run of its own, `cmp-<name>`:
+
+| field | what |
+|---|---|
+| build | a signed release `mtgz-worker` that knows the zero-core setting `eval_trace` (any build of this branch or later) and its runtime pack |
+| networks | gen 1 = A, gen 2 = B (none for self-play), exported for the farm exactly as a run's generation (zero.farm_h2h.export with the reference set from a short self-play of the network, the fix of zero-core bf229a5), cached by checkpoint sha256 and spec under `~/.zero-farm/campaigns/_exports/` |
+| settings | a run's play settings (the keys the worker build calls `play`, `check-config`); for a match `match_settings` below |
+| seats | `[{"net": 1}, {"net": 2}]` (paired: games 2k and 2k + 1 share the deal, seats swapped) or `[{"net": 1}, {"net": 1}]` |
+| seed | the job's base seed (the run's job `seed`, which the coordinator puts on every lease): game g's seed is `game_seed(seed, g, paired)`, the seed a local zero.h2h match of that seed gives game g |
+| games | ids `[0, N)`; `games_per_lease` (`auto`: ~7.5 minutes of a machine) |
+| share | the job's share of the farm's run leases while a live run's farm self-play also wants machines (default 0.25; PROTOCOL rev 13) |
+| deadline | seconds after which the games the farm has not delivered are played here (default 3 h) |
+| options | `trace` (always: every game's moves come back), `samples` (the search's policy targets and values too: self-play seats with noise, temperature and playout cap) |
+
+Wire form (no agent change: agents forward a template's `settings` as they are):
+
+* **without samples** - an eval batch (PROTOCOL 5.2) whose settings carry `eval_trace: 1`: the worker traces its driver
+  (zero-core docs/search.md 2.17; tracing changes no game) and each result row gains `digest` (SHA-256 of the game
+  record's sorted-key compact JSON, 16 hex) and `rec` (the record: seed, every real move, over / aborted, result and
+  margins as f32 bits, rounds, the decks). Evaluation seats: `Run.nn_seat(key, eval_sims)`.
+* **with samples** - the farm self-play of the campaign's run (`quota` N, `slack` 0, its one checkpoint current; the
+  collector posts `accept` = the games it took), its records files (PROTOCOL rev 8).
+
+One result schema either way: `games.jsonl`, one row per game in gid order - `gid`, `pair`, `seats` (this game's
+order), `result` (per seat), `margin`, `rounds`, `over`, `digest`, `rec`, `by` {machine, lease}.
+
+**`match_settings(a, sims, spec, tilts, b)`** gives the eval job of `zero.h2h.match(a, b, sims, spec, seat_a = seat_b =
+A's run's rule with root belief tilts `tilts`, paired)` - the yardsticks' best of one: A's run's settings resolved, then
+`eval_sims`, `c_puct` 1 and `chance_k` 2 (zero.h2h's defaults), `max_steps` 5000, `eval_spec`, the tilts, `sparse` 0
+(h2h's dense batches), `eval_trace` 1; then checked: the farm's two seat dicts (`zero.farm_eval.seat_dicts`, Run.nn_seat)
+equal h2h's (`games.nn_seat(key, sims, 1.0, chance_k=2, **run_seat_keys(side))` + the rule) key for key, else
+CampaignError naming the difference. An eval job has ONE seat setting for both sides, so a match whose sides differ
+(pb2's anchor a3198: a file outside a run, so zero.h2h gives that side no `eval_cache` while pb2's side has 8192) is
+refused: the farm cannot play it exactly.
+
+### 165.2 Trust
+
+Each traced row's digest is checked against its own record as it is taken (a mismatch refuses the campaign: the state
+records why and every later call raises). Then `spot` (default 5%) of the games - a random choice seeded by the run name,
+the same whenever it is made, at least one game - are replayed here through the engine from seed + moves
+(`zero.farm_eval.replay_trace`: the record's seed must be the campaign's game seed; every move legal; the result,
+margins, rounds and setup the record's; the replayed result, rounds and `over` the row's; no samples for an eval game,
+with samples every sample's decider, kind and policy length): any mismatch refuses the whole campaign. A set of games has
+one digest, `games_digest` (SHA-256 over `gid:digest` lines in gid order): the same games give the same digest wherever
+and however they were cut into leases; the result lists it for the campaign and per lease.
+
+What it proves and what not: the moves are legal and the results theirs - it catches bad RAM, a broken build or a
+corrupted transfer, the realistic threat with invited friends' honest-but-fallible PCs. It does not prove the network
+chose the moves (that would need searching again); a duplicate-lease audit (the review's 3.6) is the later answer.
+
+### 165.3 Coverage, the deadline, the local fallback
+
+Positive coverage: every id of `[0, N)` is in exactly one of done (farm, or local) and failed (with its reason), or
+missing; `status` and the result list the ranges. `collect` pulls (sha256 of each file, credited ids only: `ids`,
+`dup_ids`, `also` as zero.farm_h2h reads them, the first copy of a game wins, every chunk acked) until every game is in
+or the deadline passes; then pauses the campaign's farm run (its leases cancelled at their next beat) and plays the
+missing ids here with the campaign's own worker executable on its own graphs (`mtgz-worker eval` / `selfplay --output
+records`, below normal priority, in pieces of 64 games - 16 with samples - whole pairs; `--wrap` a command prefix such
+as the slot throttle): the same games the farm would have played. A piece that fails marks its games failed with the
+worker's error; failed games refuse the campaign unless `allow_failed`. With `local=False` games missing past the
+deadline refuse it, naming the ranges. So a campaign never stalls on the farm and never ends with a silent hole.
+
+### 165.4 Priority beside the live run (PROTOCOL rev 13)
+
+A run's `selfplay` or `eval` may carry `share` (0 < x <= 1). Such a job goes first within its tier only while its own
+active leases + 1 are at most x times (all runs' active self-play and eval leases + 1); otherwise after every other run
+job. The coordinator takes the first candidate that grants, so a campaign still gets every machine the live run has
+nothing for (its generation's quota filled, the run paused) - it never idles a PC - and at the default 0.25 it takes at
+most 1 machine in 4 while pb2's farm self-play wants them (tested: 8 machines asking -> live, live, live, campaign, live,
+live, live, campaign). Without `share` nothing changes (evaluation still goes before self-play). The pool still holds no
+share of a generation's quota (DESIGN 7.3): whatever the farm does not play, the desktop does, so a campaign can never
+slow pb2's self-play below what it is without the farm. **Until rev 13 is deployed** the production coordinator ignores
+`share` and serves eval batches first: a campaign then takes every farm PC for its duration (165.8).
+
+### 165.5 The desktop side
+
+* `mtgz.az.farm_campaign` (library): `match_settings`, `selfplay_settings(ckpt, overrides)`, `submit(name, a, games,
+  settings, seats, seed, build_id, worker, runtime, b=, paired=, share=, deadline_s=, spot=, samples=, ...)` -> the
+  state directory, `resume`, `status`, `collect` -> the result {games, coverage, digest, lease_digests, spot, machines,
+  readout (zero.h2h's summary for A vs B), job, records}, `games(d)` (the traced rows), `describe(row, spec)` and
+  `write_records` / `read_records` (each game replayed into its moves: who decided, the decision's kind, the option in
+  words from the engine's spectator view - targets included -, per game of a match; 0.07 s a Delver game), `run_pool(cfg)`.
+* `tools/farm_campaign.py submit|status|collect` (the fuzz campaigns' tool; `--bo1` = the yardsticks' best of one).
+* State `~/.zero-farm/campaigns/<run>/`: state.json, results/, local/, rows.jsonl, games.jsonl, records.jsonl.gz. Every
+  step idempotent; `collect` resumes. The admin token, data key and farm-release as zero.farm_def's (never printed).
+  Exports need onnx / onnxscript (the zero-farm venv's Python on the desktop).
+
+### 165.6 The yardsticks' best of one on the farm
+
+New yardsticks options: `bo1_backend` 'local' (zero.h2h.match here, as before), 'farm' (`measure_bo1_farm`: a play job of
+the run's pool worker build - `pool_build`, `pool_worker`, `pool_runtime`, `pool_min_agent` - with `match_settings` of
+the local match, paired, `bo1_seed`; collected with the spot check and the local fallback; the row has the local row's
+fields plus `backend` 'farm' and `farm` {run, digest, spot, machines, local, seconds}), or null = auto: 'farm' for an
+opponent whose match the farm plays exactly (the run has a pool and `match_settings` accepts both sides), else 'local' -
+decided per opponent from the settings before anything is played (memoized), never as a fallback after a failure.
+`bo1_farm_share` (0.25), `bo1_farm_wait_s` (null: 3/4 of timeout_s). A farm best of one runs in its own watcher lane
+'farm' (it waits on the farm and uses no local GPU), so the GPU lane goes on with the local opponents. On pb2 today: gen0
+-> farm, a3198 -> local (its eval_cache, above). The standalone watcher on pb2 (mtg-zero-wt/yardsticks-pb2, older code)
+is unchanged; the companion takes this at the run's next restart onto a commit with it (and a worker build with
+`eval_trace`).
+
+### 165.7 The sideboard play analysis as a campaign
+
+The sideboard-card play analysis (hub `sideboard_play_analysis/sb_play.py`, another session) plays a checkpoint against
+itself with its run's SELF-PLAY seat (noise, temperature, the playout cap; resignation off) on the self-play spec with
+`dealt_decks` overridden. As a campaign that is a play job with samples:
+`selfplay_settings(ckpt, {'spec': <its spec with dealt_decks {"p": 1.0, "swaps": [1, 8]}>, 'selfplay_resign_t': 0})`
+(`--argmax`: also `eps` 0, `temp_moves` 0), `submit(..., seats=[{'net': 1}, {'net': 1}], paired=False, samples=True)`,
+then `describe` per game (or `games(d)`'s records into its own scan: the records replay with `Game(spec, seed)` + the
+moves, which is what its scan does). Its seeds differ from its local runs' (statistically the same games).
+
+### 165.8 Tests, gates, measured
+
+**Tests.** zero-core: zero_worker `traced_rows_are_the_rows_plus_their_records` and every zero_worker test; pytest
+`test_farm_trace.py` (4), `test_worker_settings.py`, `test_farm_h2h.py`, `test_farm_def.py`, `test_farm_pool.py`.
+mtg-zero: `tests/test_farm_play.py` (6: `match_settings` gives zero.h2h's seats for both sides and refuses an opponent
+with another `eval_cache`; the yardsticks' backend per opponent and its lanes; real Delver records from a traced driver
+collected from a fake coordinator - credited ids only, the first copy wins, acks, coverage, the spot check replaying
+every game, `describe` wording every move, the games' digest independent of leases, the readout; a tampered move refused
+by its digest and, re-hashed, by the replay; coverage of failed and missing ranges and whole-pair local pieces; the
+samples option's records read as rows, accepted, replayed with their samples, its run body), `test_yardsticks.py`,
+`test_farm_campaign.py`, `test_worker_farm.py` unchanged. zero-farm: coordinator `test/share.test.ts` (6) and the full
+suite; agent code unchanged.
+
+**Gates.** listed in 165.10 (added after gating this commit).
+
+**End to end on the farm** (2026-11-15, production coordinator rev 12, worker build 74f2279f96327576b2a46bbb = this
+branch's e776e984, runtime d531424b, `min_agent` 0.2.11): campaign `cmp-e2e-pb2-96v0-40` - pb2@96 vs pb2@0, the
+yardsticks' best of one (`--bo1`, 64 simulations, seed 0, paired), 40 games, share 0.25 - played by desktop-g72aptg
+(10 games) and squirrel_basement (30) in 5 leases, 1,908 s from the batch to the last game; every row's digest checked,
+the 5% spot check (games 9 and 11, one per machine) and then all 40 replayed here from seed + moves: all equal. Games'
+digest 6692e970083aa484; A 0.55 +- 0.062 over 40 games. Records: 40 games described move by move in 1 s.
+
+**Determinism across machines.** A traced game is bit-identical wherever the worker plays it: games 0-3 of the
+e2e campaign (desktop-g72aptg, i7-7700K) have the digests of the same games played on the desktop (i9-13900K) by the
+same worker in the local test; and all 40 games the e2e campaign shares with the 400-game campaign below (game ids
+0-39, played there by other machine pairs, e.g. squirrel_basement's Ryzen 7 5800X against desktop-g72aptg) have equal
+digests. ONNX Runtime's CPU provider and the engine give the same games on every CPU seen so far, so a farm campaign's
+numbers are a pure function of (build, graphs, settings, seed, ids).
+
+**The best-of-one equality** (the task's check: a farm-backed h2h of pb2@96 vs pb2@0 over the yardsticks' seeds against
+the yardsticks' local result, 0.500 over 400 games, pentanomial [38, 0, 124, 0, 38], in runs/delver-bo3-pb2/
+yardsticks.jsonl): not exactly - and it cannot be, because the local result is not reproducible itself. Played
+on the farm (campaign `cmp-eq-pb2-96v0-400`: the same checkpoints, spec, seats - checked dict for dict -, seed 0,
+paired, 400 games; desktop-g72aptg 164 games, squirrel_basement 154, and 82 by the local fallback once the farm went
+quiet after ~3.5 h, `collect --deadline-now`, 8 threads, 51 min): **A 0.490 +- 0.020, pentanomial [33, 0, 138, 0, 29]**,
+games' digest 4c33d172139f1e6f; the spot check (20 games, 6 + 6 farm + 8 local) and then all 400 replayed here: all equal.
+The yardsticks' recorded local result is 0.500, [38, 0, 124, 0, 38]. Re-running exactly the yardsticks' local match
+(`zero.h2h.match` as `measure_bo1` calls it, torch on the 5090, ZERO_TOKEN_GRAPHS=1 as the watcher sets it; 1,223 s) gave
+**0.4775, [41, 0, 127, 0, 32]**: the torch path's games depend on how its concurrent games fall into GPU batches
+(timing), so the same match moves by about a standard error from run to run (0.500 vs 0.4775 here). Against that rerun
+the farm's games have the same result in 369 of 400. The farm's numbers, on the other hand, are exact: the same games
+digest-for-digest on every machine and in every campaign (above), the local fallback's included. So `bo1_backend farm`
+gives the same numbers as the local backend only where "local" means the same worker on the same graphs (the
+fallback); against the torch path it gives a result within the torch path's own run-to-run spread, and from then on
+the same result every time. A run that switches backends starts a new series in its yardstick chart (the row says
+`backend`); to compare generations, keep one backend for the run. (Making the local backend the worker too would make
+both backends one series, at ~40 CPU-minutes per 64 games here: the owner's call.)
+
+### 165.9 What needs the owner's go-ahead
+
+* **Deploying the coordinator (rev 13)**: `feat/campaigns` f06885f + 572385e (docs). Backward compatible: without `share`
+  nothing changes, so pb2's farm self-play (its run carries no share) keeps its leases as before; no migration. Check
+  pb2's lease flow before and after (`GET /v1/admin/run/delver-bo3-pb2` selfplay_state). Until it is deployed a campaign
+  takes every farm PC (eval first): during the two test campaigns (~4 h in all, 1-3 active PCs) pb2's farm self-play got no farm games (the
+  desktop played them; DESIGN 7.3).
+* **Merging** zero-core `feat/farm-campaigns` and mtg-zero `feat/farm-campaigns` (zero-farm `feat/campaigns`): a run moves
+  onto it at a restart with a worker build of it (74f2279f is one; registered, used by the two campaigns only).
+* No agent release is needed; nothing reached friends but the two campaigns' leases.
+
+### 165.10 Gates
+
+On ded4c4c9 (zero-core pin 3608e38), via the slot throttle, the desktop GPU hidden (CUDA_VISIBLE_DEVICES=-1), pb2 live:
+`python tools/gate.py python --no-mac` - build PASS, worker build PASS, pytest PASS (451 passed, 4 skipped; 1,108 s),
+run-loop smoke PASS (16 games, 0 unfinished), the checkout unchanged - **GATE PASSED python ded4c4c9fd37 in 1285s**.
+`python tools/gate.py repin --spec delver --preset delver-mirror-bo3-dealt --expect-digest 8f71ccb0d89031a6 --no-mac`
+(the farm-compat evidence for the pin move; the zero-core change is opt-in and leaves every default byte-identical) -
+digest 8f71ccb0d89031a6 = main's, constructed e1177d609d6c1aee / eoe 2efe956d589840ce / driver 6f7b863096e47dcd /
+dealt e802d9df793c9993 = the recorded files, worker build PASS, **farm compat PASS** (gate 2 and gate 3 identical: 6
+games, 2,484 rows, 150 batches), 1-config smoke PASS - **GATE PASSED WITH SKIPS repin ded4c4c9fd37 in 548s - skipped:
+mac-eval-checkout (--no-mac)**. Not run here: the optin-core tier, whose zero-core pytest step includes the supervisor
+tests (tests/test_run_infra.py's process churn), which must not run on the desktop beside a live run
+(feedback_supervisor_pid_reuse_kill); run it on a quiet machine or at the merge. zero-core: every zero_worker test and
+the farm pytest files above. zero-farm: coordinator `npm test` 22 files, 189 tests PASS; `tsc --noEmit` clean
+(`npm run check`'s `wrangler types --check` reports worker-configuration.d.ts out of date, as on main); agent code is
+unchanged - its tests pass except the ones Windows Defender blocks here (os error 225 on the tests' copied executables:
+install, launcher_update, selfupdate_e2e, update, release, swap_rollback), unrelated to this change.
+
+## 166. Side work off the desktop beside a live run: `tools/slotd.sh`, the gate's Mac placement, the live-run fence (migration phase 0, branch `mig/phase0`, zero-core `mig/phase0`, 2026-11-15)
+
+Phase 0 ("stop the bleeding") of the 2026-11-15 migration plan (`hub/data/mtg_bot/fable_review_iteration_and_farm_2026-11-15.md`
+section 4, S7, S8): side work must stop slowing the live run (delver-bo3-pb2) without waiting for the scheduler of
+phase 4. Three pieces, no engine, encoding or run change (digests unchanged; nothing of pb2 was touched).
+
+### 166.1 `tools/slotd.sh`: the heavy-command throttle in the repo
+
+The throttle that carried the Fable-fix campaign (`E:/mtg-zero-scratch/fable-fix/slotd.sh`, 11-13) moved into the repo.
+`bash tools/slotd.sh <command>` waits for one of a machine-wide set of slots and runs the command holding it;
+`--status` lists the slots, their holders, the settings and the memory headroom. State lives outside every checkout:
+`E:/mtg-zero-state` on the desktop (`~/.mtgz-state` elsewhere; `MTGZ_SLOTS_HOME` overrides): `slots.conf`, re-read on
+every look, `key=value` (a bare number is the old file's `slots`):
+
+| key | default | desktop (11-15) | Mac | meaning |
+|---|---:|---:|---:|---|
+| slots | 3 | 4 | 2 | slots |
+| free | 3 | 3 | 2 | slots taken without the memory check |
+| min_commit_gb, min_avail_gb | 14, 6 | 14, 6 | -, 6 | a slot above `free` needs this commit headroom (Windows) and available RAM |
+| floor_avail_gb | 2 | 1 | 4 | no slot at all below this available RAM (new: pb2 leaves the desktop 1-5 GB) |
+| jobs | 10 | 10 | 6 | CARGO_BUILD_JOBS when the caller set none |
+
+New beside the old script: the RAM floor, `MTGZ_SLOT_WAIT_MAX` (give up after N seconds, exit 75: the gate sets it so
+a step's timeout covers its wait), the Mac's memory (vm_stat) and Linux's, `--status`. The old
+`E:/mtg-zero-scratch/fable-fix/slot.sh` and `slotd.sh` are shims now (forwarding to the main checkout's
+`tools/slotd.sh`, before the merge this branch's worktree's; the originals kept as `*.pre-shim`); a slot held through
+the old scripts' slot dirs counts as held until its holder ends (one was, during the switch: farm-campaigns' local
+head-to-head). Remove the shims when nothing references the old path (the finished campaign's COMMON.md and lane
+scripts do).
+
+### 166.2 The gate's placement: the Mac for pure-CPU steps, a desktop slot for the rest
+
+`tools/gate.py` decides where each step runs (`place`, after the plan; the plan and the report say where: a
+`placement:` line, `placement` per step and for the run):
+
+* **When a run is live here** (any supervisor on this machine: `zero.runctl.live_supervisors`, 166.3) and the Mac
+  answers over ssh with at least 8 GB available, the steps with a Mac command run there through `tools/mac.sh` (this
+  commit's checkout, `nice -n 10`, a Mac-side slot of the checkout's own `tools/slotd.sh`, CARGO_BUILD_JOBS 6): the
+  `cargo test --test <t>` steps, the digests (full, encoding-free, formats, dealt), the full engine suite, the fuzz
+  steps (their FUZZ_* in the command), pytest, the run-loop smoke, the search smoke. Not zero-core's own cargo test
+  and pytest: its search crate's goldens hash differently on the Mac (the first optin-core gate on 8dabe696 failed 14
+  `driver::tests` there - `belief_off_is_the_search_of_before`, `visits_records_unchanged`, ...: equal record
+  counts, other hashes; platform floating point in the search, never seen before because zero-core's tests never ran on
+  the Mac), so they stay on the desktop, throttled, where their goldens were recorded. The Mac command carries the gate's environment rules (the caller's DIGEST_*,
+  FUZZ_*, PYTEST_ADDOPTS, PYTHONPATH, ZERO_CORE_UNPINNED dropped; CPU only); a Python step builds the engine module
+  there first. The checker is the step's own behind mac.sh's "[mac] ... @ <this sha>" lines; a step whose output shows
+  it never reached the Mac (no such line) runs on the desktop instead, the log keeping both.
+* **The desktop's own heavy steps** (the engine build, the Windows release worker, farm compat, checkpoint compat and
+  load, the other games' builds, zero-core's build, cargo test and pytest, and pytest's desktop part) each hold a desktop slot of
+  `tools/slotd.sh` while a run is live (their timeout grows by `--slot-wait`, 7200 s).
+* **pytest's desktop part** (`PYTEST_DESKTOP_ONLY`, run beside the Mac's pytest, the two together exactly the
+  desktop's tests): the worker tests (they run the Windows worker this gate built), the deck scorer's fixtures (hashed
+  bit for bit: `test_the_engines_fixtures_are_reproducible` fails on the Mac, platform floating point) and the tests
+  that need private data on E: (deck scorer v2, held-out drafts, evaluator v1, position-lab replays), the sealedai
+  dry run (psutil's process access fails on macOS) and `test_run_publisher`'s supervisor test (it fails on macOS:
+  the companion was started 8 times; 166.6).
+* `--offload auto|mac|local` (auto: as above; mac: the Mac or refuse; local: never), `--throttle auto|on|off`,
+  `--no-mac` (nothing on the Mac, as before: the steps stay here, throttled while a run is live). Without a live run
+  nothing changes.
+
+**The Mac's results are the desktop's.** At 72e5a0df on the Mac (nice 15, beside pb2's evaluation and self-play): all
+seven digests equal main's recorded values (full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5, driver
+6f7b863096e47dcd, constructed e1177d609d6c1aee, eoe 2efe956d589840ce, dealt e802d9df793c9993; 2.5 min in all, as 44.2's
+bit-identity says); pytest 424 passed, 22 skipped, 3 failed of the desktop's 449 tests (445 passed, 4 skipped): the
+skips are the worker and private-data tests, the 3 failures the platform-bound ones above - all now the desktop part.
+The 20k fuzz and the engine suite are the engine's only (44.2). Not moved: anything that loads a network on the
+Mac's torch (not bit-identical, 44.4); digests and suites are network-free.
+
+### 166.3 The live-run fence (zero-core docs/az.md 51)
+
+The tests that start real supervisors or churn processes carry `@pytest.mark.live_run_hazard` and are skipped while a
+supervisor is live on the machine (both repos' conftests call `zero.runctl.fence_items`). Marked here:
+`test_loop.py`'s supervisor and kill_run tests, `test_run_publisher.py`'s supervisor test, `test_yardsticks.py`'s
+watcher and keeper tests (they start child processes); in zero-core `test_companion.py` (9), `test_run_infra.py`'s
+orphan sweep and same-crash give-up, `test_loop.py`'s supervisor / stall watchdog / kill_run, `test_encoding_guard.py`'s
+refused-run supervisor. The fence is Windows-only by default (the pid-reuse hazard of 11-14 is Windows's; the Mac
+hosts a 34-day St. Pete Zero supervisor and is where these tests run). The gate counts the fenced tests in pytest's
+`-rs` lines and names them in the final line as skips (GATE PASSED WITH SKIPS ... live-run-hazard test(s)), since
+they ran nowhere; this repo's marked tests run in the Mac's pytest, zero-core's (its pytest stays on the desktop, 166.2) are fenced while a run is live. `ZERO_ALLOW_LIVE_RUN_HAZARD=1` runs them anyway.
+
+The kill_orphans pid-reuse fix (zero-core 76c548f, in the pin bf229a5 and so in this branch's) was verified, not redone:
+`supervise.kill_orphans(pid, since)` kills only children created after the launch; both call sites pass the launch
+time; `test_the_orphan_sweep_spares_processes_older_than_the_launch` covers it.
+
+### 166.4 Measured: what slows pb2
+
+pb2's iteration times are read from its `log.txt` (the `iter N train` lines) and `metrics.jsonl` (self-play seconds,
+local games per hour, the Mac's games); gate windows from every `gates/*.json` since pb2 started. Nothing of pb2 was
+touched. What the numbers say: **the gates themselves were never the big cost**; GPU side jobs on the desktop and
+the Mac's evaluation are.
+
+| window | side work on the desktop | pb2 min/iteration |
+|---|---|---:|
+| 11-14 18:14-19:09 (iters 2-13) | none (no farm yet) | 4.2-4.9 |
+| 11-14 19:18-20:58 (iters 15-32) | **three gates at once on the desktop** (suite with the 20k fuzz, search-core, python), pb1 paused | **4.6-5.0** |
+| 11-14 21:00-01:07 (iters 33-56) | the farm attach (farm gates, exports), relaunches, engine/search-core gates | 8.7-12.2 |
+| 11-15 01:07-03:49 (iters 57-80, quiet) | the farm attached, the publisher companion | 5.8-6.6 |
+| 11-15 01:22-01:40 (iters 60-63) | a python gate on the desktop | 6.3-6.6 |
+| after every evaluation (iters 81-84, 97-100, 113-118, 129-130) | the yardstick watcher's best-of-one on the desktop GPU (2 x ~1,300 s per evaluated checkpoint) + pb2's evaluation on the Mac | 8.2-16.8 |
+| 11-15 08:58-10:22 (iters 119-128) | other sessions' CUDA head-to-heads and self-play probes (sb_play, local_h2h_rows) | 8.7-10.1 |
+
+* **The Mac's evaluation starves the Mac's self-play.** In the two iterations after each evaluated checkpoint the Mac
+  plays 60-95 of pb2's games instead of 330-500 (iters 65-66, 81-82, 97-98, 113, 129), the desktop plays the
+  rest: +2-4 min each. This is pb2's own design (eval_remote mac + 3 Mac self-play procs), not side work.
+* **The yardstick best-of-one on the desktop GPU** costs 3-4 iterations of +3-8 min every 16 iterations (~40 min of GPU
+  per evaluated checkpoint): the largest side cost. Its move off the desktop is phase 4 (166.6).
+* The baseline itself moved from ~4.7 to ~6.2 min when the farm attached (11-14 21:39; the farm pool's exports and
+  the run-owned publisher's CPU): not side work either.
+
+**This branch's gates beside pb2** (11-15, both python tier; the desktop also carried other sessions' work: the
+yardsticks' best-of-one of gen 128 until 11:12, phase-1 build timings from 11:01, CUDA probes; so pb2's times are
+not a clean A/B):
+
+| gate | placement | gate time | pytest | run-loop smoke | pb2 during it |
+|---|---|---:|---:|---:|---|
+| b812b730, auto (11:01-11:16) | builds throttled here (cold: 215 + 227 s), pytest + smoke on the Mac, the desktop part here | 908 s | 408 s (Mac) + 72 s (desktop part, beside it) | 58 s (Mac) | iters 131-132: 12.8, 12.1 min; the Mac played 487 and 447 games (above its usual 330-400: the offload took nothing visible from it) |
+| 49fa8328, --no-mac (11:20-11:48) | all here, throttled (warm builds) | 1,704 s | 1,463 s | 234 s | iters 133-134: 11.4, 13.9 min; the Mac 390, 533 |
+
+The offloaded gate took half the time of the desktop one while its builds were cold, put no measurable dent in the
+Mac's share of pb2's games (nice 10, at most 2 slots there), and left the desktop only its builds. pb2's iteration
+times in both windows were set by the other side work (yardsticks, other sessions' CUDA jobs and builds), which this
+phase does not move: "pb2 back near 4.5-6 min with a gate running" needs those off the desktop too (yardsticks: phase
+4; ad-hoc CUDA analyses beside a live run: a rule for the sessions, or the scheduler). The 11-14 evening shows the
+desktop can run three gates at once with pb2 at 4.6-5.0 min when nothing uses the GPU and RAM is free (pb1 paused).
+
+### 166.5 Gates
+
+* `python tools/gate.py python` (auto: pb2 live, the Mac answered) on b812b730: **GATE PASSED WITH SKIPS python
+  b812b730d238 in 908s - skipped: pytest: 5 live-run-hazard test(s) (fenced: a live run on this machine),
+  pytest-desktop: 1 live-run-hazard test(s) (fenced ...)** - the 5 on the Mac were fenced by the Mac's St. Pete
+  supervisor, which made the fence Windows-only by default (zero-core be9ebfa, pin in 49fa8328); the one left is the
+  desktop-only supervisor test (166.6).
+* `python tools/gate.py python --no-mac` on 49fa8328: **GATE PASSED WITH SKIPS python 49fa8328b2eb in 1704s - skipped:
+  pytest: 6 live-run-hazard test(s) (fenced: a live run on this machine)** (448 passed, 10 skipped).
+* On 8dabe696: `python tools/gate.py python` (auto, warm builds): **GATE PASSED WITH SKIPS python 8dabe6962d75 in
+  426s - skipped: pytest-desktop: 1 live-run-hazard test(s) (fenced ...)** (the Mac's pytest 409 passed, 1 skipped: the
+  fenced supervisor tests ran there; 363 s). `optin-core` (auto): **GATE FAILED** - zero-core's cargo test on the Mac,
+  14 golden-hash failures (166.2), which moved zero-core's tests back to the desktop. The head's gates are in the merge
+  note.
+* `tests/test_gate.py`: 89 passed (8 new: no live run = nothing moves; beside a live run the Mac and the slots, with
+  pytest's split exactly PYTEST_DESKTOP_ONLY; --no-mac; an unreachable Mac; a Mac step that never reached the Mac
+  runs here; fenced tests = a pass with skips; the suite's FUZZ_* reach the Mac and the caller's do not; the remote
+  command's scrubbing). zero-core `tests/test_live_fence.py`: 12 passed.
+
+### 166.6 Not done here (later phases)
+
+* **Yardsticks on the Mac**: not a small change (ship the checkpoint and the anchor, a Mac checkout of the watcher's
+  commit, CPU vs CUDA results in one series) and the standalone watcher (pid 15644) is pb2's, not to be touched. The
+  farm-campaigns branch already adds `bo1_backend farm|local` to the yardsticks (its ENGINE.md 165): phase 4.
+* **Gate fuzz on the farm**: a branch's commit has no signed worker, so the zero-farm fuzz campaigns cannot fuzz it;
+  the farm keeps fuzzing main and pb2's pinned build (tools/fuzz_farm.py on the Mac, zero-farm fuzz jobs). Sharded
+  gate fuzz with spot checks is phase 1 (sharding) and phase 4 (farm).
+* **The scheduler's slot rule** replaces `tools/slotd.sh` in phase 4 (3.7).
+* `test_run_publisher.py::test_the_supervisor_starts_one_publisher_per_run_and_it_ends_finished` fails on macOS
+  (the companion started 8 times instead of once): a real macOS difference in the companion's keeper or the test,
+  not investigated; until fixed it runs on the desktop only and is fenced while a run is live.
+* A Job Object for run trees (S8's first point) and supervisor-alive checks in `tools/watch_run.sh`: not in this phase.
+
+## 167. pb3: wide 60 variety (dealt decks per seat), the in-run matchup model and sideboarding by its choice table (branch `feat/pb3-varied`, zero-core `feat/pb3-teacher`, 2026-11-15)
+
+Branch `feat/pb3-varied` from main 72e5a0df, main 90731110 merged in (165 farm campaigns, 166 migration phase 0);
+zero-core `feat/pb3-teacher` from the pin bf229a5, the new pin's mainline-1115 d29b134 merged in. (Section number: the
+next free after 166 on main, the coordinator's call; written as 168 before the merge. `mig/phase1`'s uncommitted work
+still cites "ENGINE.md 165" for its sharded fuzz, which main's 165 now holds.) The run it prepares: **pb3**, approved by the
 user 2026-11-15. Not launched here (`E:/mtg-zero-scratch/delver-bo3-launch/launch_pb3.py` and its checklist).
 
 **Why** (the hub notes `value_pregame_check/report.md` and `sideboard_play_analysis_2026-11-15.md`; the user: "what we
@@ -34669,7 +35032,7 @@ speed but misses their reactive uses: it needs more games with the cards. So pb3
 learns the matchup from game results with a model of its own, EoE run 2's pairwise evaluator (111, 112) adapted, and
 (3) sideboards by that model, with the choice recorded as the policy target so the network's prior learns it.
 
-### 168.1 Dealt decks per seat (`"dealt_decks": {..., "per_seat": true}`)
+### 167.1 Dealt decks per seat (`"dealt_decks": {..., "per_seat": true}`)
 
 * **The option.** `DealtDecks::per_seat` (default false: 154's one dealt seat, byte-identical). With it each seat is
   dealt on its own with probability p (`matches::dealt_seats`: two uniforms from a stream of the match's seed of its
@@ -34696,13 +35059,13 @@ learns the matchup from game results with a model of its own, EoE run 2's pairwi
   pairwise pass, 142, and the redrawn sample met three collisions on layout v6 - `mtg_eoe` only - no known gap covers:
   "a permanent gained a triggered ability" against "(the position as it is)", "combat damage is prevented this turn",
   "a permanent loses all abilities", each with `LoseAllAbilities` and a later `Granted` ability on one permanent; a
-  pre-existing v6 gap the old sample never drew, left for the EoE layout's owner, 168.6.) Private: each deal keyed `KEY_DEALT` of
+  pre-existing v6 gap the old sample never drew, left for the EoE layout's owner, 167.6.) Private: each deal keyed `KEY_DEALT` of
   its seat, `HIDDEN` for the other observer - a world of viewer v keys v's own deal in full and the other's hidden
   (`both_dealt_matches_deal_two_independent_60s_and_key_them_privately`). The other player's worlds deal each dealt
   seat's 60 from its restricted prior, untilted (154.2); the aux `deck` target is empty against a dealt 60, so with
   both dealt neither seat's deck head trains in that match (by design: the head learns chosen 60s only).
 
-### 168.2 The best-of-three game log (the matchup model's data)
+### 167.2 The best-of-three game log (the matchup model's data)
 
 `az/game_log.rs` (107.1's process-wide sink, set by `mtgz.az.run` for every run it starts) now also writes every
 finished game of a live constructed best-of-three match on the `mtg` game: a line `{"v": 1, "kind": "bo3", "spec",
@@ -34716,7 +35079,7 @@ encodings or the search (Derived in the public-state gate); off without the sink
 worker, remote workers). Not in the log: remote self-play's games (the Mac's, the farm's - played elsewhere; replays
 on the trainer run on copies). Their share is the data the model misses; local games are the same spec.
 
-### 168.3 Sideboarding by the matchup model: the choice table and teacher decisions
+### 167.3 Sideboarding by the matchup model: the choice table and teacher decisions
 
 **The model** (`mtgz/az/matchup.py`; 111.1's `PairNet` on count deltas):
 
@@ -34796,7 +35159,7 @@ constructed prior). The table changes between iterations, so the spec does: zero
 game package's phase spec (zero-core docs/az.md 52: the Mac's workers through the `phase` message, the farm pool through
 each gen's definition template; records of a known spec accepted and replayed with it).
 
-### 168.4 The rolling retrain, the hook, the settings
+### 167.4 The rolling retrain, the hook, the settings
 
 `mtgz.az.matchup` (EoE's `mtgz.sealed.rolling` design, 112.4): run settings `matchup_every` (0 off), `matchup_window`
 32, `matchup_min_window` 4, `matchup_val_iters` 2, `matchup_half_life` 16, `matchup_threads` 4, `matchup_worlds` 8000
@@ -34821,7 +35184,7 @@ and the publisher's network census (132, on the evaluation spec). (4) `keep_h2h`
 against its main. (5) The standing best-of-one and blunder yardsticks (164), unchanged. No new site panel (a panel needs
 the user's screenshot approval).
 
-### 168.5 Checks
+### 167.5 Checks
 
 The desktop was shared with the live run pb2 (its GPU paused for a while by the user: everything here ran on the CPU)
 and the migration / farm-campaign sessions: every heavy command through the slot throttle (`slotd.sh`), this checkout's
@@ -34878,7 +35241,7 @@ own target directory (E:/cargo-target/mtg-zero/pb3-varied; zero-core's E:/cargo-
   the smaller dimension: a matchup term at its zero saddle tied the strength alone to 1e-10 and had been picked).
 * **The gates**: in the commit after this text (their last lines).
 
-### 168.6 Left, decisions for the user
+### 167.6 Left, decisions for the user
 
 * **The table only with a held-out gain** (a guard of this branch, `retrain`): a version whose model does not beat
   play / draw on its validation iterations publishes no table, and the chosen-60 seats sideboard by search until one
@@ -34894,7 +35257,7 @@ own target directory (E:/cargo-target/mtg-zero/pb3-varied; zero-core's E:/cargo-
   model's exact argmax); (b) a version must also beat its predecessor's held-out loss; (c) a larger
   `matchup_min_window` before the first table (8: ~13,000 logged games). Only 15% of seat-matches choose, so a wrong
   table costs little self-play, but its targets teach the prior.
-* **The belief for a chosen opponent** (168.3): the constructed prior, not the table seat's actual (deterministic)
+* **The belief for a chosen opponent** (167.3): the constructed prior, not the table seat's actual (deterministic)
   choice and not the deck tilt; the exact alternatives are an equilibrium over a shortlist, or the deck tilt through a
   belief row before each teacher decision (the route for game 2's reveals to reach game 3's choice under H3 = A).
 * **Remote games are not in the matchup data** (the Mac's three processes, the farm): the model trains on the
@@ -34905,7 +35268,7 @@ own target directory (E:/cargo-target/mtg-zero/pb3-varied; zero-core's E:/cargo-
   run's): `tools/mac.sh --eval-checkout` on the run's commit before the launch (the checklist's step 3).
 * **farm_gates on the table**: run `tools/farm_gates.py` once more after the first table version with
   `--set spec=<that phase's spec>` (the real network and ONNX through teacher decisions).
-* **A layout v6 (`mtg_eoe`) gap found by the pairwise pass** (168.1): a permanent that lost all abilities and later gained
+* **A layout v6 (`mtg_eoe`) gap found by the pairwise pass** (167.1): a permanent that lost all abilities and later gained
   a triggered ability encodes as one without it (three collisions at GATE_SEED 4242 with a redrawn sample). Layout v7
   (`mtg`) is not affected; `mtg_eoe` stays on v6 until EoE run 2 resumes (encoding-options.md 2.8): a known-gap entry or
   the v6 fix is that work's.

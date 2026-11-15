@@ -20,6 +20,15 @@ the smokes):
   bo1_opponents    the opponents, in order: 'anchors' (each of the run's elo_anchors: e.g. pb2's a3198), 'iter0'
                    (the run's own generation 0), or 'LABEL=PATH' (a checkpoint of the run's layout)
   bo1_device       'cuda' (the GPU's share is a 64-row batch at a time, below normal CPU priority) or 'cpu'
+  bo1_backend      where the best-of-one games are played (docs/ENGINE.md 165): 'local' (zero.h2h.match here, on
+                   bo1_device), 'farm' (a farm play job of the run's pool worker build: mtgz.az.farm_campaign - the same
+                   seats, spec and seeds; its games traced, 5% replayed here, the games the farm has not delivered by
+                   bo1_farm_wait_s played here by the same worker), or null = auto: 'farm' for an opponent whose match
+                   the farm can play exactly (the run has a farm pool - `pool:<farm run>` in selfplay_remote with
+                   pool_build and pool_worker - and both sides' seats are one eval job's: `match_settings` accepts
+                   them), else 'local' (decided per opponent before anything is played, never as a fallback)
+  bo1_farm_share   the farm job's share of the farm's run leases beside the run's own farm self-play (0.25)
+  bo1_farm_wait_s  seconds before the farm's missing games are played here (null: 3/4 of timeout_s)
   bo1_threads, bo1_groups   the match's search threads and driver groups (4, 2: zero.h2h's defaults)
   bo1_spec         the best-of-one spec JSON (default: derived from the run's eval_spec, see above)
   bo1_seed         the deals' seed (0, as the by-hand yardsticks of 11-12 to 11-14)
@@ -69,7 +78,8 @@ ROWS = 'yardsticks.jsonl'
 DIR = 'yardsticks'
 
 DEFAULTS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter0'], 'bo1_device': 'cuda',
-            'bo1_threads': 4, 'bo1_groups': 2, 'bo1_spec': None, 'bo1_seed': 0, 'blunders': True,
+            'bo1_threads': 4, 'bo1_groups': 2, 'bo1_spec': None, 'bo1_seed': 0, 'bo1_backend': None,
+            'bo1_farm_share': 0.25, 'bo1_farm_wait_s': None, 'blunders': True,
             'blunders_sims': 1024, 'library': None, 'from': 0, 'settle': 60, 'retry_s': 300, 'retry_max_s': 7200,
             'timeout_s': 7200, 'poll': 60}
 # the Delver presets' (the user, 2026-11-14: "our evaluations should test bo1 ability at all to look for regressions",
@@ -78,7 +88,8 @@ DELVER_YARDSTICKS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchor
 
 _NUM = (int, float)
 KEYS = {'bo1_games': int, 'bo1_sims': int, 'bo1_opponents': list, 'bo1_device': str, 'bo1_threads': int,
-        'bo1_groups': int, 'bo1_spec': str, 'bo1_seed': int, 'blunders': bool, 'blunders_sims': int, 'library': str,
+        'bo1_groups': int, 'bo1_spec': str, 'bo1_seed': int, 'bo1_backend': str, 'bo1_farm_share': _NUM,
+        'bo1_farm_wait_s': _NUM, 'blunders': bool, 'blunders_sims': int, 'library': str,
         'from': int, 'settle': _NUM, 'retry_s': _NUM, 'retry_max_s': _NUM, 'timeout_s': _NUM, 'poll': _NUM}
 # best-of-three keys of a spec (docs/ENGINE.md 120, 121, 130, 154): dropped for the run's game 1
 BO3_KEYS = ('format', 'game_episodes', 'start_game', 'dealt_decks')
@@ -114,6 +125,12 @@ def normalize(ys):
             raise ValueError(f'yardsticks: {k} {out[k]} must be >= 1')
     if out['bo1_games'] < 0 or out['bo1_games'] % 2:
         raise ValueError(f"yardsticks: bo1_games {out['bo1_games']}: an even number >= 0 (paired games; 0 = none)")
+    if out['bo1_backend'] not in (None, 'farm', 'local'):
+        raise ValueError(f"yardsticks: bo1_backend {out['bo1_backend']!r}: 'farm', 'local' or null (auto)")
+    if not 0 < out['bo1_farm_share'] <= 1:
+        raise ValueError(f"yardsticks: bo1_farm_share {out['bo1_farm_share']}: in (0, 1]")
+    if out['bo1_farm_wait_s'] is not None and out['bo1_farm_wait_s'] <= 0:
+        raise ValueError('yardsticks: bo1_farm_wait_s must be > 0 (or null)')
     if out['bo1_device'] not in ('cuda', 'cpu'):
         raise ValueError(f"yardsticks: bo1_device {out['bo1_device']!r}: 'cuda' or 'cpu'")
     if not all(isinstance(x, str) and x for x in out['bo1_opponents']):
@@ -358,7 +375,7 @@ def wanted(run, cfg, ys, lib=None, now=None, settle=None):
         for o in opps:
             if it == 0 and (o['name'] == 'gen0' or same_file(o['path'], model_path(run, 0))):
                 continue                        # (generation 0 against itself, or a copy of it, measures nothing)
-            out.append({'lane': 'gpu' if ys['bo1_device'] == 'cuda' else 'cpu_bo1', 'kind': 'bo1', 'iter': it,
+            out.append({'lane': bo1_lane(run, cfg, ys, o), 'kind': 'bo1', 'iter': it,
                         'opp': o['name']})
         if ys['blunders']:                      # (no library: measured all the same - it fails loudly, retried)
             out.append({'lane': 'cpu', 'kind': 'blunders', 'iter': it, 'library': lib})
@@ -432,8 +449,54 @@ def bo1_seat(ckpt):
     return h2h.with_belief(seat, tilts=tilts)
 
 
+_BACKEND = {}
+
+
+def bo1_backend(run, cfg, ys, o):
+    """Where the best-of-one against opponent `o` is played: `bo1_backend` when set, else 'farm' when the run has a
+    farm pool and the farm can play the match exactly (mtgz.az.farm_campaign.match_settings accepts both sides' seats:
+    an eval job has one seat setting for both), else 'local' (memoized per run and opponent: settings only, no
+    network is loaded)."""
+    if ys.get('bo1_backend'):
+        return ys['bo1_backend']
+    from . import farm_campaign as C
+    if C.run_pool(cfg) is None:
+        return 'local'
+    k = (os.path.normcase(os.path.abspath(run)), o['name'], o['path'], ys['bo1_sims'])
+    if k not in _BACKEND:
+        try:
+            ck = model_path(run, 0)
+            tilts = bo1_tilts(cfg)
+            C.match_settings(ck, ys['bo1_sims'], bo1_spec(cfg, ys), tilts=tilts, ckpt_b=o['path'])
+            _BACKEND[k] = 'farm'
+        except (C.CampaignError, ValueError, OSError):
+            _BACKEND[k] = 'local'
+    return _BACKEND[k]
+
+
+def bo1_lane(run, cfg, ys, o):
+    """The watcher lane of a best-of-one: 'farm' (it waits on the farm, no local GPU or CPU), else the device's."""
+    if bo1_backend(run, cfg, ys, o) == 'farm':
+        return 'farm'
+    return 'gpu' if ys['bo1_device'] == 'cuda' else 'cpu_bo1'
+
+
+def bo1_lanes(run, cfg, ys):
+    """Every lane the best-of-ones of the setting use (the watcher starts one thread per lane)."""
+    if not ys['bo1_games']:
+        return []
+    return sorted({bo1_lane(run, cfg, ys, o) for o in opponents(run, cfg, ys)})
+
+
+def bo1_tilts(cfg):
+    """The best-of-one seats' per-target belief tilts: the run's evaluation tilts without 'deck' (bo1_seat)."""
+    from zero.mcts import belief_tilts
+    return {k: v for k, v in (belief_tilts(cfg, 'eval') or {}).items() if k != 'deck'}
+
+
 def measure_bo1(run, it, opp, cfg=None, ys=None):
-    """One best-of-one head-to-head: the run's checkpoint `it` against the opponent named `opp` -> the result row."""
+    """One best-of-one head-to-head: the run's checkpoint `it` against the opponent named `opp` -> the result row
+    (played where bo1_backend says: here, or a farm play job with the same numbers)."""
     from zero import h2h
     cfg = cfg if cfg is not None else cfg_of(run)
     ys = ys if ys is not None else of_run(run, cfg)
@@ -444,6 +507,8 @@ def measure_bo1(run, it, opp, cfg=None, ys=None):
     for p in (ck, o['path']):
         if not os.path.exists(p):
             raise FileNotFoundError(p)
+    if bo1_backend(run, cfg, ys, o) == 'farm':
+        return measure_bo1_farm(run, it, o, cfg, ys)
     spec = bo1_spec(cfg, ys)
     seat = bo1_seat(ck)
     t0 = time.time()
@@ -459,6 +524,43 @@ def measure_bo1(run, it, opp, cfg=None, ys=None):
             'pentanomial': pairs.get('pentanomial'), 'sims': ys['bo1_sims'], 'select': out.get('select_a'),
             'spec_sha': hashlib.sha256(spec.encode()).hexdigest()[:12], 'seed': ys['bo1_seed'],
             'seconds': round(time.time() - t0, 1), 'time': round(time.time())}
+
+
+def measure_bo1_farm(run, it, o, cfg, ys, client=None, opts=None, log=None):
+    """The best-of-one as a farm play job (docs/ENGINE.md 165): the run's pool worker build, the seats, spec and seed
+    of `measure_bo1`'s local match (checked dict for dict), paired, traced; collected with the spot check and the
+    local fallback (the same worker on this machine for what the farm has not delivered by bo1_farm_wait_s) -> the
+    local row's fields plus 'backend' 'farm' and 'farm' {run, digest, spot, machines, local, seconds}."""
+    from zero import h2h
+    from . import farm_campaign as C
+    pool = C.run_pool(cfg)
+    if pool is None:
+        raise RuntimeError('bo1_backend farm: the run has no farm pool (pool:<farm run> with pool_build, pool_worker)')
+    ck = model_path(run, it)
+    spec = bo1_spec(cfg, ys)
+    settings, rule = C.match_settings(ck, ys['bo1_sims'], spec, tilts=bo1_tilts(cfg), ckpt_b=o['path'])
+    name = f"{os.path.basename(os.path.normpath(run))}-y{int(it)}-{o['name']}-{sha12(ck)[:6]}{sha12(o['path'])[:6]}"
+    wait = ys['bo1_farm_wait_s'] or 0.75 * float(ys['timeout_s'])
+    t0 = time.time()
+    kw = {'log': log} if log else {}
+    d = C.submit(name, ck, ys['bo1_games'], settings, [{'net': 1}, {'net': 2}], ys['bo1_seed'], pool['build_id'],
+                 pool['worker'], pool['runtime'], b=o['path'], paired=True, share=ys['bo1_farm_share'],
+                 deadline_s=wait, min_agent=pool['min_agent'], meta={'yardstick': 'bo1', 'run': run, 'iter': int(it),
+                                                                      'opp': o['name']}, client=client, opts=opts, **kw)
+    res = C.collect(d, client=client, threads=ys['bo1_threads'], describe_games=False, opts=opts, **kw)
+    out = res['readout']
+    if out is None or out.get('games') != ys['bo1_games']:
+        raise RuntimeError(f"best-of-one {it} vs {o['name']} (farm): {out and out.get('games')} games of {ys['bo1_games']}")
+    pairs = out.get('pairs') or {}
+    return {'kind': 'bo1', 'iter': int(it), 'opp': o['name'], 'opp_label': o['label'], 'opp_sha': sha12(o['path']),
+            'score': out['a_score'], 'se': out['se'], 'elo_diff': out.get('elo_diff'), 'elo_se': out.get('elo_se'),
+            'games': out['games'], 'unfinished': out.get('unfinished', 0), 'pairs': pairs,
+            'pentanomial': pairs.get('pentanomial'), 'sims': ys['bo1_sims'],
+            'select': h2h._tag(C.match_seat(ck, ys['bo1_sims'], rule)),
+            'spec_sha': hashlib.sha256(spec.encode()).hexdigest()[:12], 'seed': ys['bo1_seed'],
+            'seconds': round(time.time() - t0, 1), 'time': round(time.time()), 'backend': 'farm',
+            'farm': {'run': res['run'], 'digest': res['digest'], 'spot': {k: res['spot'][k] for k in ('checked', 'ok', 'of')},
+                     'machines': res['machines'], 'local': res['coverage']['local'], 'seconds': res['seconds']}}
 
 
 def measure_blunders(run, it, cfg=None, ys=None, log=print):
