@@ -1036,6 +1036,7 @@ def test_an_old_20k_suite_report_is_still_evidence(gate, capsys):
 def test_the_python_tier_shards_pytest_beside_the_smoke(gate, capsys, monkeypatch):
     """ENGINE.md 167: pytest as --pytest-shards steps over disjoint test files, each its own process and basetemp, every
     tests/test_*.py in exactly one, run at once with the run-loop smoke after the (cached) builds."""
+    monkeypatch.setattr(G, 'read_durations', lambda: {})       # (not this machine's measured seconds)
     files = G.pytest_files()
     parts = G.pytest_partition(files, 4, {})
     assert sorted(f for p, d in parts for f in p) == files and len(parts) == 4 and G.pytest_coverage(files, parts) is None
