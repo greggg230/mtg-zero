@@ -118,9 +118,11 @@ def try_lease(k, label, sha, holder=None):
     return False
 
 
-def release(k):
+def release(k, path=None):
+    """Remove slot k's lease (`path`: its file, as acquire named it - no git call, so a release in a dying process
+    still works)."""
     try:
-        os.remove(lease_path(k))
+        os.remove(path or lease_path(k))
     except FileNotFoundError:
         pass
 
@@ -156,7 +158,8 @@ def acquire(sha, label, wait, slots, holder=None, only=None):
                 except Exception:
                     release(k)
                     raise
-                return {'slot': f'warm-{k}', 'k': k, 'path': path, 'target_dir': target_of(k), 'sha': full}
+                return {'slot': f'warm-{k}', 'k': k, 'path': path, 'target_dir': target_of(k), 'sha': full,
+                        'lease': lease_path(k)}
         if time.time() - t0 > wait:
             raise TimeoutError(f'no free warm worktree in {wait:.0f}s ({slots} slots; `python tools/warm_pool.py status`)')
         time.sleep(5)
@@ -231,7 +234,7 @@ def main(argv=None):
         env = dict(os.environ, CARGO_TARGET_DIR=lease['target_dir'])
         return subprocess.run(cmd, cwd=lease['path'], env=env).returncode
     finally:
-        release(lease['k'])
+        release(lease['k'], lease['lease'])
 
 
 if __name__ == '__main__':
