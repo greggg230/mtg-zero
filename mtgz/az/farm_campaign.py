@@ -803,12 +803,13 @@ def stop_farm(cl, st, log):
 
 
 def collect(d, client=None, poll=60, local=True, threads=4, wrap=None, describe_games=True, allow_failed=False,
-            wait=True, log=log_stderr, engine=None, opts=None):
+            wait=True, log=log_stderr, engine=None, opts=None, deadline_s=None):
     """Pull until every game is in or the deadline passes; then the missing games locally (`local`; else
     CampaignError naming them); the farm run paused; every row's digest checked, the spot check, coverage (failed games
     refuse unless `allow_failed`); games.jsonl, the games' digest, the readout and (with `describe_games`) the per-game
     records -> the result dict (also in state['result']). `wait` False: one pull, then return None if games are still
-    out and the deadline has not passed."""
+    out and the deadline has not passed. `deadline_s`: a new deadline (seconds after the submit; kept in the state):
+    0 = now, e.g. to stop waiting on a farm whose machines went quiet."""
     from zero import farm_def as FD
     from zero import farm_eval as FE
     st = load_state(d)
@@ -817,6 +818,9 @@ def collect(d, client=None, poll=60, local=True, threads=4, wrap=None, describe_
     if st.get('result') and os.path.exists(os.path.join(d, 'games.jsonl')):
         return st['result']
     cl = client or FD.Client((opts or {}).get('url', FD.URL))
+    if deadline_s is not None:
+        st['deadline_s'] = float(deadline_s) if deadline_s > 0 else time.time() - (st.get('submitted') or st['created'])
+        save_state(d, st)
     deadline = (st.get('submitted') or st['created']) + st['deadline_s']
     last = None
     while True:

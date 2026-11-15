@@ -347,6 +347,7 @@ def analysis_main(argv, client=None):
     ap.add_argument('--allow-failed', action='store_true')
     ap.add_argument('--poll', type=float, default=60)
     ap.add_argument('--once', action='store_true')
+    ap.add_argument('--deadline-now', action='store_true', help='collect: the deadline is now (play what is missing here)')
     ap.add_argument('--url', default=os.environ.get('FARM_URL', FD.URL))
     ap.add_argument('--token-file', default=os.path.join(HOME, '.config', 'zero-farm', 'admin_token'))
     ap.add_argument('--key', default=FD.data_key_path())
@@ -405,7 +406,8 @@ def analysis_main(argv, client=None):
             print(json.dumps(C.status(d, client=cl, opts=opts), indent=1))
             return 0
         res = C.collect(d, client=cl, poll=a.poll, local=not a.no_local, threads=a.threads, wrap=a.wrap,
-                        describe_games=not a.no_describe, allow_failed=a.allow_failed, wait=not a.once, opts=opts)
+                        describe_games=not a.no_describe, allow_failed=a.allow_failed, wait=not a.once, opts=opts,
+                        deadline_s=0 if a.deadline_now else None)
         if res is None:
             print(json.dumps(C.status(d, client=cl, opts=opts)['coverage']))
             return 3
