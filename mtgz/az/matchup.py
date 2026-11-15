@@ -546,7 +546,8 @@ def selfplay_spec(R, it):
     used = [r for r in _rows(os.path.join(mdir(run), 'used.jsonl')) if r['iter'] == it]
     if used:
         v = used[-1]['version']
-        return None if v is None else with_table(c['spec'], _load(os.path.join(mdir(run), v))['table'])
+        t = None if v is None else _load(os.path.join(mdir(run), v)).get('table')
+        return None if t is None else with_table(c['spec'], t)
     start = os.path.join(mdir(run), 'start.json')
     if not os.path.exists(start):
         os.makedirs(mdir(run), exist_ok=True)
@@ -560,10 +561,14 @@ def selfplay_spec(R, it):
         _append(os.path.join(mdir(run), 'used.jsonl'), {'iter': it, 'version': None, 'time': time.time()})
         return None
     name = os.path.basename(vs[-1][1])
-    _append(os.path.join(mdir(run), 'used.jsonl'), {'iter': it, 'version': name, 'time': time.time()})
+    table = _load(vs[-1][1]).get('table')
+    _append(os.path.join(mdir(run), 'used.jsonl'), {'iter': it, 'version': name, 'table': table is not None,
+                                                    'time': time.time()})
     if prev != name:
-        R.log(f'iter {it} self-play: the chosen-60 seats sideboard by the matchup model\'s choice table {name}')
-    return with_table(c['spec'], _load(vs[-1][1])['table'])
+        R.log(f'iter {it} self-play: the chosen-60 seats sideboard by the matchup model\'s choice table {name}' if table
+              is not None else f'iter {it} self-play: the matchup model {name} has no table (it did not beat play / draw '
+              f'on its held-out games): the chosen-60 seats sideboard by search')
+    return None if table is None else with_table(c['spec'], table)
 
 
 def _load(path):
@@ -619,7 +624,7 @@ def poll(R):
         if s.get('ok'):
             R.log(f'matchup model {name} published: {s.get("games")} games of iterations {s.get("window")}, held-out '
                   f'log loss {s.get("val_logloss"):.5f} vs play / draw {s.get("val_logloss_pd"):.5f} '
-                  f'(gain {s.get("gain_nats"):+.5f} nats), {s.get("seconds")} s')
+                  f'(gain {s.get("gain_nats"):+.5f} nats){"" if s.get("table", True) else ": no table"}, {s.get("seconds")} s')
         else:
             keep = versions(R.run)
             kept = os.path.basename(keep[-1][1]) if keep else 'no table (the seats sideboard by search)'
@@ -684,8 +689,14 @@ def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log
         members, rep = select_and_fit(games, main, val_iters, half_life, threads, seed=b, log=log)
         dd = json.loads(cfg['spec']).get('dealt_decks') or {}
         sw = tuple(dd.get('swaps') or (0, sum(copies) - sum(main)))
-        table, detail = choice_table(members, names, copies, main, sw, name, worlds=worlds, seed=b, log=log)
-        check_table(cfg['spec'], table)
+        # (a model that does not beat play / draw on the held-out games has shown no matchup knowledge: its version
+        # publishes no table, and the chosen-60 seats sideboard by search until one does - docs/ENGINE.md 168.4)
+        if rep['gain_nats'] > 0:
+            table, detail = choice_table(members, names, copies, main, sw, name, worlds=worlds, seed=b, log=log)
+            check_table(cfg['spec'], table)
+        else:
+            table, detail = None, []
+            log(f'# held-out gain {rep["gain_nats"]:+.5f} nats <= 0: no table in {name}')
         out = {'format': FORMAT, 'version': name, 'iter': b, 'window': [lo, b], 'list': lst, 'main': main,
                'members': members, 'report': rep, 'table': table, 'table_detail': detail, 'worlds': worlds,
                'dealt_swaps': list(sw), 'time': time.time()}
@@ -697,12 +708,14 @@ def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log
         shutil.copyfile(staged, tmp)
         os.replace(tmp, dst)
         status.update(ok=True, val_logloss=rep['val_logloss'], val_logloss_pd=rep['val_logloss_pd'],
-                      gain_nats=rep['gain_nats'], selected=rep['selected'], seconds=round(time.time() - t0, 1))
+                      gain_nats=rep['gain_nats'], selected=rep['selected'], table=table is not None,
+                      seconds=round(time.time() - t0, 1))
         _append(os.path.join(mdir(run), 'index.jsonl'), {
             'version': name, 'iter': b, 'window': [lo, b], 'games': rep['games'], 'val_games': rep['val_games'],
             'selected': rep['selected'], 'val_logloss': rep['val_logloss'], 'val_logloss_pd': rep['val_logloss_pd'],
             'gain_nats': rep['gain_nats'], 'val_logloss_dealt': rep['val_logloss_dealt'],
             'val_logloss_pd_dealt': rep['val_logloss_pd_dealt'], 'per_copy': dict(zip(names, rep['per_copy'])),
+            'table': table is not None,
             'table_changes': [{'context': x['context'], 'in': x['in'], 'out': x['out']} for x in detail], 'time': time.time()})
     except Exception as e:                         # noqa: BLE001 (recorded, then raised: the run logs it loudly)
         status.update(ok=False, error=f'{type(e).__name__}: {e}', traceback=traceback.format_exc()[-3000:],

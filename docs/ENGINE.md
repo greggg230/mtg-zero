@@ -34651,3 +34651,254 @@ wrong types, odd game counts, a device other than cuda/cpu and a setting that me
 `python tools/gate.py python --no-mac` on 099b2f9b (via slotd.sh, pb2 live): build PASS (307.7 s), pytest PASS (420
 passed, 1 skipped; 808.7 s), run-loop smoke (mtg-smoke) PASS (16 games, 0 unfinished), the checkout unchanged - **GATE
 PASSED python 099b2f9b3d2d in 1227s** (report gates/099b2f9b3d2d-python.json; the Mac steps skipped by --no-mac).
+
+## 168. pb3: wide 60 variety (dealt decks per seat), the in-run matchup model and sideboarding by its choice table (branch `feat/pb3-varied`, zero-core `feat/pb3-teacher`, 2026-11-15)
+
+Branch `feat/pb3-varied` from main 72e5a0df; zero-core `feat/pb3-teacher` from the pin bf229a5. (Section number: 160-164
+are main's, 165 is claimed twice - `feat/farm-campaigns`' farm campaigns and `mig/phase1`'s sharded fuzz -, 166 is
+`mig/phase0`'s; this one leaves 167 for whichever of the two 165s moves.) The run it prepares: **pb3**, approved by the
+user 2026-11-15. Not launched here (`E:/mtg-zero-scratch/delver-bo3-launch/launch_pb3.py` and its checklist).
+
+**Why** (the hub notes `value_pregame_check/report.md` and `sideboard_play_analysis_2026-11-15.md`; the user: "what we
+ultimately need is the NN to learn to play a wide variety of possible sideboard variants, similar to the sealed
+experiment we do, and then it will simultaneously get better at playing the cards and we'll train the matchup predictor
+model"). In pb2 (154's dealt decks at p 0.5, swaps 1-8) the value head judges a 60 before the game barely better than
+play / draw (+0.005 nats a game), reacts 3-6x too weakly to deck changes, and the sideboarding prior inherited from pb1
+(0.93 on +Rough // Tumble -Prismari Charm) decides: 130 generations did not move it. The net plays the blasts at sorcery
+speed but misses their reactive uses: it needs more games with the cards. So pb3 (1) deals far more varied 60s, (2)
+learns the matchup from game results with a model of its own, EoE run 2's pairwise evaluator (111, 112) adapted, and
+(3) sideboards by that model, with the choice recorded as the policy target so the network's prior learns it.
+
+### 168.1 Dealt decks per seat (`"dealt_decks": {..., "per_seat": true}`)
+
+* **The option.** `DealtDecks::per_seat` (default false: 154's one dealt seat, byte-identical). With it each seat is
+  dealt on its own with probability p (`matches::dealt_seats`: two uniforms from a stream of the match's seed of its
+  own, salt ...0168, so the match's RNG is a real match's), so a match has no, one or two dealt seats. One dealt seat
+  is `MatchState::dealt` as before; two set `MatchState::dealt_both` (and `dealt` None). Every reader goes through
+  `MatchState::is_dealt(p)` / `any_dealt()` (`deck_dealt`, the sideboarding, the encoding, the reseed, the fuzz).
+* **pb3's setting** `{"p": 0.85, "swaps": [0, 15], "per_seat": true}`: swaps uniform over 0..15, then uniform over the
+  60s with that count - the constructed prior's base itself (120.2; the user's decision of 2026-11-12), so a dealt 60
+  is distributed exactly as the other player's worlds deal an undealt 60 (`ConstructedPrior::dealt` with [0, S] holds
+  the full base counts: `by_swaps` restricts nothing). P(both dealt) 0.7225, one 0.255, none 0.0225: chosen 60s in
+  15% of seat-matches, so sideboarding is still practised.
+* **Both dealt.** Nobody decides at the sideboarding: the first sideboarder's deal, then the second's
+  (`dealt_sideboards` recurses when the second is dealt too), then the next game. At a post-sideboard match's start
+  and zero-core's next episode no step is open: the next game's keys (`KEY_GAME`, the deals' `KEY_DEALT`) go nowhere
+  there - no tree spans a match's start or an episode boundary (154.2's rule); inside a step (a whole match's game 1 ->
+  2) they are the step's. `skip_game_one` no longer begins a sideboarding when game 2 has begun already. The two
+  seats' deals of a game come from independent streams: seat 1's is salted when both are dealt
+  (`DEALT_SEAT1_SALT`; with one 75 both, one stream would deal both seats the same 60). One dealt seat keeps 154's
+  stream exactly.
+* **Hidden information: every property of 154 holds per seat.** Public: `dealt_both` is classified Public with a
+  perturbation of its own ("both players' decks in the match are dealt"; 154's perturbation turns a both-dealt match
+  into one dealt seat), encoded by the per-player `g6::DEALT` floats (both 1). Private: each deal keyed `KEY_DEALT` of
+  its seat, `HIDDEN` for the other observer - a world of viewer v keys v's own deal in full and the other's hidden
+  (`both_dealt_matches_deal_two_independent_60s_and_key_them_privately`). The other player's worlds deal each dealt
+  seat's 60 from its restricted prior, untilted (154.2); the aux `deck` target is empty against a dealt 60, so with
+  both dealt neither seat's deck head trains in that match (by design: the head learns chosen 60s only).
+
+### 168.2 The best-of-three game log (the matchup model's data)
+
+`az/game_log.rs` (107.1's process-wide sink, set by `mtgz.az.run` for every run it starts) now also writes every
+finished game of a live constructed best-of-three match on the `mtg` game: a line `{"v": 1, "kind": "bo3", "spec",
+"seed", "game", "starter", "chooser", "wins" (before the game), "dealt", "mode" ("main" game 1, "dealt", "table",
+"chosen"), "decks" (copies per entry of the 75, the spec line's list order), "result", "aborted", "turns", "post_board",
+"time"}` after a spec line (`"kind": "bo3-spec"`: the two 75s, the mains, `dealt_decks`, the table's version,
+`start_game`, `max_turns`). The record is `MatchState::glog` (`game_log::LiveLog`): `new_game` makes it, a clone carries
+none (`LiveLog::clone` is empty: a search's world, a replay's copy, a branch), zero-core's next episode carries it on
+(`next_match_episode`), and `end_game` writes the line before the match scores the game. Never read by the rules, the
+encodings or the search (Derived in the public-state gate); off without the sink (the fuzz, the digests, the farm's
+worker, remote workers). Not in the log: remote self-play's games (the Mac's, the farm's - played elsewhere; replays
+on the trainer run on copies). Their share is the data the model misses; local games are the same spec.
+
+### 168.3 Sideboarding by the matchup model: the choice table and teacher decisions
+
+**The model** (`mtgz/az/matchup.py`; 111.1's `PairNet` on count deltas):
+
+    z(A, B) = w . (dA - dB) + (dA U) W (dB U)^T + c_pd pd + c_g3 pd g3 + c_lead lead + c_dealt (dealt_A - dealt_B),  W = M - M^T
+
+dA, dB: each 60's copies minus the registered main's per entry of the (shared) 75; pd +1 when A starts; g3 game 3;
+lead sign(A's wins - B's) before the game; the dealt flags. Antisymmetric by construction (z(B, A) = -z(A, B) with the
+context mirrored: tested), one row a game. Fit: full-batch L-BFGS of the recency-weighted log loss + L2, the dimension
+(0 or 2) and L2s chosen on the window's newest iterations (time split), then the chosen setting refit as a 5-member
+bootstrap ensemble on the whole window. Results only - never the network's value. A mirror only (one 75 both seats;
+anything else refused loudly): two different 75s need a model per pairing.
+
+**Why a table, and why it is exact.** At a sideboarding decision the decider's belief about the other seat's next 60 is
+the same in every state of one context: that 60 is dealt independently of everything played (a dealt seat: its
+restricted prior, 154; a seat that chooses: the constructed prior, 120.2 - its game 3 independent of game 2 by the
+user's decision H3 = A, 141.4) and nothing of the next game has been seen. So the model's best 60 is a function of the
+public context alone: the next game (2, 3), whether the decider sideboards first (CR 103.1: it then chooses play or
+draw), its lead (-1, 0, 1), whether the other seat is dealt - 24 contexts. The trainer computes them and the spec
+carries them: `"sideboard_table": {"version", "list", "choices": [[game, first, lead, opp_dealt, copies], x24]}`
+(`az/sbtable.rs`, `MtgSpec::sideboard_table`; refused loudly: not a constructed best-of-three, with `keep_deck`, a
+context missing or twice, a 60 of another size, copies past the 75's, an unknown card or key). No scorer in the engine
+(EoE's Rust scorer scores candidates per game because a sealed pool differs every game; here the candidates and the
+belief are the same for every game of a context).
+
+**The choice** (`choice_table`): F(A) = the ensemble's mean over the belief's worlds B of sigmoid(z(A, B)) - the first
+sideboarder takes the better of play and draw, the second the worse (the chooser's choice, judged by the decider's own
+model) - over A's legal 60s. The worlds: N (`matchup_worlds`, 8000) drawn exactly from the constructed prior
+(`sample_prior`: a table of the count vectors by swaps in and out, big-integer draws; tested against brute force on a
+small 75), restricted to the dealt range for a dealt opponent. Two starts - the main, and the exact optimum of the
+strength term (the 60 highest-w copies: `strength_optimum`, tested against brute force) - each climbed by exhaustive
+one-card swaps until none improves; the better end wins.
+
+**What is exact and what is not** (the user's rule: no approximations; stated, with the exact option and its cost):
+* The belief is the model of the deal the search's worlds use (the constructed prior, untilted). For a dealt opponent
+  that is exact. For an opponent that chooses, it is the same modelling choice as the search's base prior (120.2,
+  approved 2026-11-12): the true distribution of a table seat's 60 is a point mass on its own context's choice, and
+  best-responding to it is an equilibrium problem (the user's note of 2026-11-13: a game-theory solver over a
+  shortlist is a possible later add-on). Option, not built: tilt the worlds by the network's deck head as the search
+  does (zero-core would send the sideboarding row's belief through the network before the teacher answers: one row a
+  sideboarding); with H3 = A this is also the only route by which game 2's reveals reach the game-3 choice (the brief
+  asked for game 3 to add game 2's reveals: under H3 = A the deal model says they carry nothing; the deck tilt is how
+  the search uses them).
+* F's expectation over ~10^10 opponent 60s is estimated from N worlds (an unbiased Monte Carlo estimate; exact
+  enumeration is infeasible). With dim 0 (strength only) F increases with w . dA, so the strength optimum is the exact
+  argmax whatever the worlds; with a matchup term the argmax carries the estimate's noise (cost of more: linear in N).
+* The climb is a local search (one-card moves from two starts), exact for dim 0 (the start is the optimum), a local
+  optimum otherwise. Exact alternative: two-card neighbourhoods (~175k candidates x N worlds a step: minutes per
+  context), or a branch-and-bound over the swap table.
+
+**Teacher decisions: how the choice gets policy targets** (the design point; zero-core docs/search.md 3.19). The
+options:
+1. *No decision* (EoE run 2's evaluator choice, 112.2): the engine plays the model's 60 at the sideboarding; the
+   network sees no row, its prior keeps pb1's inherited swap, and every network sideboarding outside self-play
+   (evaluation, keep_h2h, the census, the MTGO pilot) keeps it. Closest to EoE, but teaches nothing.
+2. *Teacher decisions* (chosen): the sideboarding decisions stay decisions; a seat of the table plays the canonical
+   path's next action toward its context's 60 (36.2 / 120.1: the changed entries in list order, each with its new
+   count, then PASS - every legal 60 reached exactly once) without a search, and zero-core records each step with the
+   one-hot policy target (temperature 0, EoE's default) and no root value (q = the game's outcome). The prior learns
+   the model's choice and unlearns the inherited swap by its own cross-entropy; the value target is the game's outcome
+   as for every row of the episode. Closest to EoE's proven setup (the evaluator decides; no search over the deck)
+   plus the targets.
+3. *The model's value at the search's leaves* (the search's sideboarding visits as targets): needs a static-value hook,
+   and at 64 simulations the search mostly follows the prior (the report: 1,024 simulations spent 2.6% of visits on the
+   value head's favourite) - it would take many iterations to move.
+4. *The model as the prior at sideboarding nodes*: visits ~ prior ~ the model's choice plus the value head's noise:
+   option 2 with noise.
+**The search's interaction** (option 2): none at a teacher decision (the driver never searches it); a tree that
+reaches the other seat's sideboarding (it is hidden: the other player's worlds deal it) expands it with the network's
+priors as before; every game decision is searched as before. Evaluation seats follow the table too when a spec has
+one - the evaluation spec has none (`eval_json` drops it, as it drops dealt decks), so evaluation, keep_h2h, the census
+and the publisher measure the network's own sideboarding: whether its prior learned the table.
+
+Where it acts: `MtgAz::table_action` / `SearchGame::teacher_policy` (one-hot over the legal actions; a dealt seat never
+decides; a seat whose 75 is not the table's list has none, `SideboardTable::fits`); `MatchState::table` (Hidden in the
+public-state gate: a seat's own policy, as `keep`; never encoded; the other player's worlds deal its 60 from the
+constructed prior). The table changes between iterations, so the spec does: zero-core's remote self-play now follows the
+game package's phase spec (zero-core docs/az.md 52: the Mac's workers through the `phase` message, the farm pool through
+each gen's definition template; records of a known spec accepted and replayed with it).
+
+### 168.4 The rolling retrain, the hook, the settings
+
+`mtgz.az.matchup` (EoE's `mtgz.sealed.rolling` design, 112.4): run settings `matchup_every` (0 off), `matchup_window`
+32, `matchup_min_window` 4, `matchup_val_iters` 2, `matchup_half_life` 16, `matchup_threads` 4, `matchup_worlds` 8000
+(the farm worker classifies them trainer-only: `worker/src/main.rs`). `mtg`'s `selfplay_specs` hook
+(`decklists.selfplay_spec`, which still refuses `keep_deck`, then `matchup.selfplay_spec`): the first answer for an
+iteration is kept (`matchup/used.jsonl`), so the local driver, the Mac's workers and the farm's definition of that
+iteration play one spec; the run's spec until the first version; the newest version published before the iteration
+asked, with its table. The job (`python -m mtgz.az.matchup retrain RUN --iter b --from-iter lo ...`, CPU, below-normal
+priority, `MTGZ_GAME_LOG=0`) reads the window's logged self-play games, fits, computes the table, checks it through the
+engine's parser (`mtgz._engine.mtg_spec_check`) - only when the model beats play / draw on its held-out games, else the
+version has no table and the chosen-60 seats sideboard by search - and publishes `matchup/v<b>.json` atomically (`index.jsonl`: the
+held-out numbers, the per-copy strengths, the table's changes); failures are logged loudly at the next phase (MATCHUP
+RETRAIN FAILED) and the run keeps the version it has. Presets: `delver-mirror-bo3-varied` (pb3: delver-mirror-bo3 with
+the per-seat deal and the matchup settings; evaluation spec SPEC_DELVER_BO3) and `delver-bo3-varied-smoke` (CPU; a
+retrain every iteration from the second).
+
+**Yardsticks for pb3.** (1) The model's held-out log loss against play / draw only (the bar: the value head's +0.005
+nats) - every version's `index.jsonl` row, `python -m mtgz.az.matchup report RUN`; the same on games with a dealt seat.
+(2) Its per-copy table (w per card, ensemble mean +- sd) - in each version and `fit`. (3) The census of what the
+chosen-60 seats board - `python -m mtgz.az.matchup census RUN` (the game log: table seats and searched seats, per game)
+and the publisher's network census (132, on the evaluation spec). (4) `keep_h2h` (130) - the network's sideboarding
+against its main. (5) The standing best-of-one and blunder yardsticks (164), unchanged. No new site panel (a panel needs
+the user's screenshot approval).
+
+### 168.5 Checks
+
+The desktop was shared with the live run pb2 (its GPU paused for a while by the user: everything here ran on the CPU)
+and the migration / farm-campaign sessions: every heavy command through the slot throttle (`slotd.sh`), this checkout's
+own target directory (E:/cargo-target/mtg-zero/pb3-varied; zero-core's E:/cargo-target/zero-core/pb3-teacher*).
+
+* **Digests, every existing spec: EQUAL** (875644b7): `digest.rs` full **8f71ccb0d89031a6**, `DIGEST_ENCODING=0`
+  **41e27319acdae5b5** (main's, 155); `digest_formats.rs` driver **6f7b863096e47dcd**, constructed **e1177d609d6c1aee**, EoE
+  **2efe956d589840ce**; `dealt_decks.rs::dealt_digests` **e802d9df793c9993** - each equal to its recorded file. **New**:
+  `dealt_per_seat.rs::dealt_per_seat_digests` (40 post-sideboard matches of pb3's self-play spec with a choice table, 20
+  whole matches at p 0.5; per decision the decider, kind, actions, keys, rows, worlds; a table seat plays the table)
+  `engine/tests/data/digests_dealt_per_seat.txt`, combined **26c9751332e70c73** (recorded, re-run equal).
+* **Engine tests** (new): `dealt_per_seat.rs` 7 (+ the digest): the spec and its refusals; the per-seat draw (20,000
+  seeds: each outcome within 5 se of p^2, p(1-p), (1-p)^2); both-dealt matches (game 2 at once, nobody decides, two
+  legal 60s within the range, different in >= 95% of games, game 3 dealt again; in whole matches the step that ends
+  game 1 keys both deals in full live and, in a world of each viewer, the other seat's `HIDDEN` and its own in full);
+  the swap count uniform over 0..15 (3,200 deals); both dealt floats in the rows; a table seat's teacher policy one-hot
+  and legal at every decision of its sideboarding, nowhere else, and the next game's 60 exactly its context's (post-
+  sideboard and whole matches); zero-core's driver records every table seat's sideboarding row with a one-hot target
+  and q = z, counts `teacher_decisions`, none without a table. `bo3_game_log.rs` 1 (its own binary): 12 driver matches
+  with per-seat deals and a table - one line per played game (the matches' episodes), worlds and clones none, each
+  table seat's 60 its context's. `dealt_decks.rs` 11 (its `DealtDecks` literal gains `per_seat: false`).
+* **zero-core** (feat/pb3-teacher 59cfa78, pushed): `teacher_decisions_play_and_record_the_games_policy_without_a_search`;
+  `test_farm_pool.py` + `test_package_hooks.py` 13 passed (the pool follows the phase spec, a remote worker takes it,
+  the old refusal test turned into the following one).
+* **Fuzz** `FUZZ_POOL=delver_dealt2 FUZZ_GAMES=2000` (875644b7): 10 passed - 100 whole matches (88 with a dealt seat, 255
+  dealt 60s checked against the range; **609 table decisions, every table 60 reached**) and 100 post-sideboard matches (88
+  dealt, 269 dealt 60s; 490 table decisions), 4,102 + 3,040 worlds (the opponent's 60 hidden in 2,526 + 3,004), the
+  private-key check (2,412 dealt-deck keys of a dealt seat masked for the other player), the information-set walks, the
+  replay tests, no rules check violated. The 20k runs: the suite gate below.
+* **pytest**: `tests/test_matchup.py` 9 (the prior table and sampler against brute force on a small 75, uniform over the
+  swap count and within it, big-integer draws; antisymmetry; the fit recovers planted strengths and beats play / draw;
+  the exact strength optimum against brute force; the table's 24 legal contexts and the climb; the game log reader; the
+  hook's versions, one answer per iteration, a retrain launched when due, a version without a table; the presets),
+  `test_dealt_decks.py`, `test_delver_bo3.py`: 18 passed; `test_worker_farm.py::test_eval_check_config_and_the_package_settings`
+  passed with this commit's worker.
+* **Farm compatibility** (the release `mtgz-worker` of 875644b7, `tools/farm_compat.py`): the default preset (dealt,
+  the gate's) **PASSED** (6 games, 2,484 rows, 150 batches identical; records -> rows 2,556 identical); the pb3 preset
+  **PASSED** (6 games, 2,966 rows; 2,895 rows); the pb3 preset with a choice table in its spec (the smoke's v0002:
+  teacher decisions in the worker) **PASSED** (8 games, 3,896 rows; 3,660 rows). `mtgz-worker check-config` on pb3's
+  settings with a table: 0 failures, `spec` play, every `matchup_*` trainer.
+* **The smoke** (`python -m mtgz.az.run --run E:/mtg-zero-scratch/pb3/smoke --preset delver-bo3-varied-smoke --iters 5
+  --games 32 --conc 32 --infer-device cpu --train-device cpu`, CUDA hidden, 18 minutes): 5 iterations, 32 matches each
+  (48-59 games), 0 unfinished. **Dealt variety**: 471 of the 528 logged self-play seats dealt (89%: p 0.85 per seat),
+  the rest chosen. **The retrain**: iteration 3 started v0002 (iterations 1-2, 107 games, 22 s: held-out 0.6289 vs play /
+  draw 0.6989), iteration 4 v0003 (157 games, 32 s: 0.7178 vs 0.6998 - worse than play / draw: under the guard added
+  after the smoke it publishes no table) and iteration 5 v0004 (205 games: 0.6639 vs 0.6890), each published atomically,
+  `used.jsonl` one answer per iteration. **Sideboarding by the model**: iteration 4 "the chosen-60 seats sideboard by the
+  matchup model's choice table v0002.json", iteration 5 by v0003; the game log's **33 table seats each played exactly
+  their context's 60** (checked line by line against the version's table); `python -m mtgz.az.matchup census` lists
+  them. (At this size the tables are noise: 50 games an iteration.)
+* **Real games** (`fit` on the sideboard-play analysis's 978 games of pb2@96, converted by
+  `E:/mtg-zero-scratch/pb3/sbplay_to_log.py`): held-out (the last third) 0.6693 vs play / draw 0.6960, **+0.027 nats a
+  game**, dim 0 at L2 0.1 selected (the grid widened to 0.1-1.0 after the first fit chose its edge, 0.03; near-ties go to
+  the smaller dimension: a matchup term at its zero saddle tied the strength alone to 1e-10 and had been picked).
+* **The gates**: in the commit after this text (their last lines).
+
+### 168.6 Left, decisions for the user
+
+* **The table only with a held-out gain** (a guard of this branch, `retrain`): a version whose model does not beat
+  play / draw on its validation iterations publishes no table, and the chosen-60 seats sideboard by search until one
+  does (the smoke's v0003: 157 games, -0.018 nats: no table would have been published under the guard). The threshold
+  is 0 nats; a stricter one (e.g. the value head's +0.005, or a standard error) is the user's call.
+* **The table follows the ranking of w, not its size.** With dim 0 the choice is the 60 highest-w copies however small
+  the differences: a model with a positive held-out gain but noisy per-copy estimates (the first versions: ~6,000
+  games) swaps many cards. On 978 real games of pb2@96 (the sideboard-play analysis's, one dealt seat a match, swaps
+  1-8; `E:/mtg-zero-scratch/pb3/sbfit`) the model gains +0.027 nats a game over play / draw on the held-out third
+  (dim 0, L2 0.1 selected; the value head's pre-game gain was +0.005), and its table brings in 3 Pyroblast, Rough //
+  Tumble, Meltdown and the third Unholy Heat for 4 Tamiyo and 2 Force of Will - a per-copy estimate of Tamiyo of -0.10
+  +- 0.02 (bootstrap sd) at that size, which more data should settle. Options for the user: (a) as built (the
+  model's exact argmax); (b) a version must also beat its predecessor's held-out loss; (c) a larger
+  `matchup_min_window` before the first table (8: ~13,000 logged games). Only 15% of seat-matches choose, so a wrong
+  table costs little self-play, but its targets teach the prior.
+* **The belief for a chosen opponent** (168.3): the constructed prior, not the table seat's actual (deterministic)
+  choice and not the deck tilt; the exact alternatives are an equilibrium over a shortlist, or the deck tilt through a
+  belief row before each teacher decision (the route for game 2's reveals to reach game 3's choice under H3 = A).
+* **Remote games are not in the matchup data** (the Mac's three processes, the farm): the model trains on the
+  desktop's games only. Logging them needs the remote workers to write the game log and ship it (as 109's remote
+  evaluation files) or the farm's records to carry the decks (they do: the trainer's replay could log them - but a
+  replayed record is a copy, refused by `LiveLog` on purpose so no game is logged twice).
+* **Stale remote checkouts**: a Mac worker on a commit before zero-core docs/az.md 52 ignores the phase spec (plays the
+  run's): `tools/mac.sh --eval-checkout` on the run's commit before the launch (the checklist's step 3).
+* **farm_gates on the table**: run `tools/farm_gates.py` once more after the first table version with
+  `--set spec=<that phase's spec>` (the real network and ONNX through teacher decisions).
+* **Not done**: a site panel for the matchup model (needs the user's screenshot approval); the gate's farm-compat step
+  still runs the default preset only (run the pb3 preset by hand: the checklist's step 0).

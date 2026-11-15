@@ -211,6 +211,11 @@ def test_the_hook_answers_once_per_iteration_and_launches_when_due(tmp_path, mon
     assert any('choice table v0002.json' in x for x in R.lines)
     used = MU._rows(os.path.join(MU.mdir(run), 'used.jsonl'))
     assert [(u['iter'], u['version']) for u in used] == [(1, None), (2, None), (3, None), (4, 'v0002.json')]
+    # a version without a table (its model did not beat play / draw): the run's spec, the seats sideboard by search
+    with open(os.path.join(MU.mdir(run), 'v0004.json'), 'w', encoding='utf-8') as f:
+        json.dump({'format': MU.FORMAT, 'table': None}, f)
+    assert MU.selfplay_spec(R, 6) is None and MU.selfplay_spec(R, 6) is None
+    assert any('has no table' in x for x in R.lines)
     # a spec without dealt decks, or with a table of its own, is refused
     bad = FakeRun(run, matchup_every=2)
     bad.cfg['spec'] = json.dumps({'constructed': True, 'format': 'bo3'})
