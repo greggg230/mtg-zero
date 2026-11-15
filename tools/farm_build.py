@@ -11,7 +11,7 @@ runtime linked statically (`+crt-static`: the executable imports nothing beyond 
 in its own target dir (`<target>/farm-build`, so these flags never touch the checkout's normal builds).
 The build directory holds `mtgz-worker.exe` only; it is signed with the release key by zero-farm's
 `farm-release sign --kind worker --game mtg --engine-commit <HEAD> --core-commit <pin> --profile <p>
---aw 1 --zero-onnx 1 (release; none for fuzz) --min-agent 0.1.3 [--requires-runtime <id>] --entry
+--aw 1 --zero-onnx <the worker's own info: 1,2> (release; none for fuzz) --min-agent 0.1.3 [--requires-runtime <id>] --entry
 mtgz-worker.exe`, checked (the worker reads the signed manifest: its build_id and profile), and with
 `--publish` uploaded and registered (`farm-release publish`). A release build plays networks: give
 the runtime pack it loads ONNX Runtime from (`--runtime-id`); a fuzz build needs no runtime pack.
@@ -210,8 +210,11 @@ def build_worker(a):
         shutil.rmtree(d)
     os.makedirs(d)
     shutil.copy2(exe, os.path.join(d, 'mtgz-worker.exe'))
+    # (the network file versions the worker loads, as it reports them - zero-onnx/1 and /2 since layout v7's tails,
+    # zero-core docs/az.md 46 - signed into its manifest; a fuzz build plays no network)
+    zo = json.loads(subprocess.run([exe, 'info', '--ort-dll', 'none'], capture_output=True, text=True, check=True).stdout)['zero_onnx']
     sign = ['--kind', 'worker', '--version', version, '--game', 'mtg', '--engine-commit', ec, '--core-commit', cc,
-            '--profile', a.profile, '--aw', '1', '--zero-onnx', '1' if a.profile == 'release' else '',
+            '--profile', a.profile, '--aw', '1', '--zero-onnx', ','.join(map(str, zo)) if a.profile == 'release' else '',
             '--min-agent', a.min_agent, '--entry', 'mtgz-worker.exe']
     if a.profile == 'release':
         if not a.runtime_id:
@@ -221,8 +224,9 @@ def build_worker(a):
     info = json.loads(subprocess.run([os.path.join(d, 'mtgz-worker.exe'), 'info', '--ort-dll', 'none'], capture_output=True, text=True,
                                      check=True).stdout)
     want_kinds = ['selfplay', 'eval', 'fuzz'] if a.profile == 'release' else ['fuzz']
-    if info['build_id'] != bid or info['kinds'] != want_kinds:
-        die(f'the signed worker says build {info["build_id"]}, kinds {info["kinds"]} (want {bid}, {want_kinds})')
+    if info['build_id'] != bid or info['kinds'] != want_kinds or info.get('zero_onnx') != zo:
+        die(f'the signed worker says build {info["build_id"]}, kinds {info["kinds"]}, zero_onnx {info.get("zero_onnx")} '
+            f'(want {bid}, {want_kinds}, {zo})')
     chk = subprocess.run([os.path.join(d, 'mtgz-worker.exe'), 'fuzz-check', '--mode', 'games'], capture_output=True, text=True)
     if chk.returncode or json.loads(chk.stdout)['commit'] != ec or json.loads(chk.stdout)['profile'] != a.profile:
         die(f'fuzz-check of the signed worker: {chk.stdout} {chk.stderr}')
