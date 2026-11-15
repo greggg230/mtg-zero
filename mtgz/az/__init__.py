@@ -41,6 +41,7 @@ from . import deck_reader, decklists
 from .evaldecks import eval_spec
 from .mac import LocalGpuRemote, RunCommitRemote
 from .publish import DELVER_PUBLISH
+from .yardsticks import DELVER_YARDSTICKS
 from ..sealed.games import REMOTE_EVAL_LOG
 from ..sealed.rolling import SETTINGS as ROLLING_SETTINGS
 
@@ -206,7 +207,11 @@ PRESETS['team_draft-smoke'] = dict(
 SPEC_DELVER = decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)
 # The run's own delverai publisher (docs/ENGINE.md 163, mtgz.az.publish): on in every delver-mirror* preset (the
 # supervisor starts it with the run and it ends with the run); the smoke presets leave it off.
-PRESETS['delver-mirror'] = dict(PRESETS['mtg-3'], spec=SPEC_DELVER, eval_spec=SPEC_DELVER, publish=dict(DELVER_PUBLISH))
+# The run's standing yardsticks (docs/ENGINE.md 164, mtgz.az.yardsticks): every evaluated checkpoint's paired best-of-one
+# head-to-heads against the run's anchors and its generation 0, and the canary library - on in every delver-mirror*
+# preset (the run's companion beside the publisher measures them), off in the smokes.
+PRESETS['delver-mirror'] = dict(PRESETS['mtg-3'], spec=SPEC_DELVER, eval_spec=SPEC_DELVER, publish=dict(DELVER_PUBLISH),
+                                yardsticks=dict(DELVER_YARDSTICKS))
 # the end-to-end check of the mirror on CPU (mtg-smoke's tiny network and sims)
 PRESETS['delver-smoke'] = dict(PRESETS['mtg-smoke'], spec=SPEC_DELVER, eval_spec=SPEC_DELVER)
 # The mirror's best-of-three (docs/ENGINE.md 120, DESIGN.md 8 D3): constructed best-of-three with sideboarding, both
@@ -397,8 +402,10 @@ PACKAGE = register(GamePackage(
     # the run's own delverai publisher (docs/ENGINE.md 163): the run setting `publish` (a dict of the publisher's
     # options, {} = off; on in the delver-mirror* presets), the supervisor's companion process made of it, and a
     # fork's (a side run, its fork record for the lineage)
-    settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, publish={}),
-    companion='mtgz.az.publish:companion', on_fork='mtgz.az.publish:on_fork',
+    # and the run's standing yardsticks (docs/ENGINE.md 164: the run setting `yardsticks`, {} = off; on in the
+    # delver-mirror* presets), measured by a second companion process: mtgz.az.companions composes the two
+    settings=dict(ROLLING_SETTINGS, **REAL_DECKS_SETTINGS, publish={}, yardsticks={}),
+    companion='mtgz.az.companions:companion', on_fork='mtgz.az.publish:on_fork',
     selfplay_specs={'mtg_eoe': 'mtgz.sealed.rolling:selfplay_spec', 'mtg': 'mtgz.az.decklists:selfplay_spec'},
     remote_eval_inputs={'mtg_eoe': 'mtgz.sealed.rolling:remote_eval_inputs'},
     specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT, 'mtg_eoe': SPEC_EOE}, dashboard_port=5340, hub_id='mtg_zero',

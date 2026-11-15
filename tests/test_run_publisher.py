@@ -45,7 +45,9 @@ def test_flags_override_the_preset_and_are_what_is_saved():
     over = _cfg(['--preset', 'delver-mirror-bo3', '--publish', '{"title": "Run 2", "every": 4}'])
     assert over['publish'] == {'title': 'Run 2', 'every': 4}
     off = _cfg(['--preset', 'delver-mirror-bo3', '--no-publish'])
-    assert off['publish'] == {} and A.PACKAGE.companion_of('/r', off) is None
+    # (the preset's yardsticks are still on: their watcher alone, docs/ENGINE.md 164)
+    assert off['publish'] == {} and A.PACKAGE.companion_of('/r', off)['name'] == 'yardsticks'
+    assert A.PACKAGE.companion_of('/r', dict(off, yardsticks={})) is None
     # saved: config.json holds it, so the next start without a flag keeps it (off stays off, a dict stays)
     assert _cfg([], {'preset': 'delver-mirror-bo3', 'publish': {}})['publish'] == {}
     assert _cfg([], {'preset': 'delver-mirror-bo3', 'publish': {'title': 'Run 2'}})['publish'] == {'title': 'Run 2'}

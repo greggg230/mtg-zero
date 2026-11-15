@@ -37,6 +37,7 @@ static PACKAGE_SETTINGS: zero_worker::classify::PackageSettings = &[
     ("real_decks_games", "trainer", "the extra evaluation against real decks"),
     ("real_decks_builder", "trainer", "the extra evaluation against real decks"),
     ("publish", "trainer", "the run-owned delverai publisher: a companion process of the run's supervisor on the desktop (ENGINE.md 163)"),
+    ("yardsticks", "trainer", "the standing yardsticks (best-of-one h2h, blunder library): a companion of the run's supervisor on the desktop (ENGINE.md 164)"),
 ];
 
 static WORKER: zero_worker::Worker = zero_worker::Worker {

@@ -34500,3 +34500,154 @@ is this branch's build.
    (`census` 200: the publisher's default it already runs with).
 7. After the user approves the screenshots: deploy delverai `newest-main-default` (`npm run deploy`). Until then the old
    worker's rule (newest non-side poster) still makes pb2 the default, as pb1's publisher is `--side`.
+
+## 164. The run's standing yardsticks: best of one against fixed opponents and the blunder library on every evaluated checkpoint (branch `feat/eval-yardsticks`, 2026-11-14)
+
+Branch `feat/eval-yardsticks` from `feat/run-publisher` 496ff41f (163; zero-core pin bd680e8 unchanged: no zero-core
+change). Why: the user asked on 2026-11-14 "our evaluations should test bo1 ability at all to look for regressions",
+and earlier that day for the canary blunder tracker on every evaluation. delver-bo3-pb2's evaluation plays only
+post-sideboard best-of-three matches (eval_spec SPEC_DELVER_BO3, `start_game` 2): its game-1 (best-of-one, main decks)
+skill and the blunder library were measured only by hand (`yardstick/pb2_bo1.sh`, `tools/delverai_blunders.py`).
+Measuring and tooling only: no rule, encoding, search or training change; digests untouched. (Section number: the
+headings of every branch and worktree on 2026-11-14 stop at 163; 162 is lane `fix/cross-prior`'s.)
+
+### 164.1 What is measured
+
+* **bo1** - for every evaluated checkpoint (models/iter_N.pt, N % eval_every == 0), a paired best-of-one head-to-head
+  (`zero.h2h.match(..., paired=True)`: games 2k and 2k + 1 share their deal, seats swapped) against each fixed
+  opponent: default the run's `elo_anchors` (pb2: a3198 = runs/anchors/delver-bo3_a3198_v7r1.pt, layout v7) and the
+  run's own generation 0. The spec is the run's game 1: `bo1_spec`, else its eval_spec with the best-of-three keys
+  (`format`, `game_episodes`, `start_game`, `dealt_decks`) and the sideboards dropped - for every Delver preset exactly
+  SPEC_DELVER (tested). Both sides search with the run's evaluation move rule and root belief (`zero.h2h.run_rule` of
+  the run's checkpoint, given to BOTH seats: an anchor file has no run config of its own, so `run_rule` of it would be
+  the default rule) minus the deck tilt (refused on open decklists, engine belief.rs: it deals nothing differently
+  there) - the by-hand yardsticks' `--a-belief-tilts {} --b-belief-tilts {}`, tag `cq-n4-v50-s0.3-rv-b1m0.25` on pb2.
+  400 games (200 pairs), 64 simulations, seed 0 every generation (the same deals: comparable across generations),
+  chance_k 2, c_puct 1 (zero.h2h's defaults, as by hand). Generation 0 against itself, or against an anchor that is a
+  copy of it (sha256: pb1's a3198 IS its iter_0000), is not played.
+* **blunders** - the canary library (`tools/delverai_blunders.py`: the user-kept spots of
+  data/delver_canary_library.json, 53 on 2026-11-14) on the checkpoint at the Play tab's setup (1024 simulations, the
+  most-visited move, 8 searches a spot, passed = right in 5 of 8), on the CPU, through delverai_blunders' per-run cache
+  (runs/<run>/blunders/library_scores.json under its lock: a checkpoint is never searched twice on a spot, and the
+  site's blunder record `blunders.<run>` is the same numbers). A changed library (spots kept or dropped) makes every
+  checkpoint pending again, the cache searching only the new spots.
+
+### 164.2 The setting
+
+`yardsticks` (mtgz.az.yardsticks; a package setting like 163's `publish`): a dict, `{}` / null = off - `bo1_games`
+(400; 0 = no head-to-heads; even), `bo1_sims` (64), `bo1_opponents` (['anchors', 'iter0']; or 'LABEL=PATH'),
+`bo1_device` ('cuda' | 'cpu'), `bo1_threads` / `bo1_groups` (4 / 2), `bo1_spec`, `bo1_seed` (0), `blunders` (true),
+`blunders_sims` (1024), `library`, `from` (0), `settle` (60 s), `retry_s` / `retry_max_s` (300 / 7200), `timeout_s`
+(7200), `poll` (60). The `delver-mirror` preset sets DELVER_YARDSTICKS = {bo1_games 400, bo1_sims 64, bo1_opponents
+[anchors, iter0], blunders true}, so `delver-mirror-bo3` and `delver-mirror-bo3-dealt` have it; the smokes leave it
+off. `--yardsticks '<json>'` replaces it, `--no-yardsticks` = `--yardsticks {}`; both are saved in config.json. A run
+that saved none takes its preset's at its next start - pb2 included (no flag needed at its restart). Unknown options,
+wrong types, odd game counts, a device other than cuda/cpu and a setting that measures nothing are refused.
+
+### 164.3 Results, order, retries, missing
+
+* `<run>/yardsticks.jsonl`, one JSON line per measurement, append-only, written by the one watcher of the run (lock
+  `<run>/yardsticks/lock.json`: pid + process creation time, so a reused pid is no owner):
+  `{"kind": "bo1", iter, opp, opp_label, opp_sha, score, se, elo_diff, elo_se, games, unfinished, pairs, pentanomial,
+  sims, select, spec_sha, seed, seconds, time}` and `{"kind": "blunders", iter, passed, total, share, kinds {kind:
+  [passed, n]}, library, spots, stale, sims, repeats, select, seconds, time}`.
+* **Catch-up in order, skipping none.** Two lanes, each in order of iteration (bo1 in opponent order): the
+  head-to-heads (the GPU lane; a 'cpu' bo1_device makes it a CPU lane of its own) and the canary library (the CPU
+  lane), so the blunders never wait behind the slower head-to-heads. Each lane measures its oldest wanted measurement
+  that has no result; each measurement is a child process (`tools/run_yardsticks.py one ...`, console
+  `<run>/yardsticks/work/<key>.log`) at below normal priority (CREATE_NO_WINDOW | BELOW_NORMAL; nice 10 elsewhere).
+  A checkpoint is measured once its file is `settle` s old.
+* **Never a silent no-op.** A failure (a non-zero exit, no result line, `timeout_s`) is said loudly on the watcher's
+  console (`YARDSTICK FAILED: ... - tried again in N s`, with the child's last lines), written as a failure row
+  (`error`, `attempt`, `retry_at`) and tried again after retry_s doubling to retry_max_s - the lane goes on with the
+  next checkpoint meanwhile, the failed one is taken again (oldest first) once its wait is over, forever. A missing
+  library is measured all the same (it fails loudly, retried). `status()` (and `run_yardsticks.py status RUN`) lists
+  every evaluated checkpoint without a result as MISSING and every failing one as FAILING; the site shows both (164.5).
+
+### 164.4 Where it runs: the run's companion beside the publisher, or by hand
+
+* zero-core's companion hook keeps ONE companion per run (docs/az.md 49). The package's hook is now
+  `mtgz.az.companions:companion`, which composes 163's publisher and the yardsticks' watcher: one of them on -> its own
+  spec unchanged (a run with only the publisher has exactly 163's command); both -> `python -m mtgz.az.companions
+  --child publisher publisher_console.txt '<cmd>' --child yardsticks yardsticks_console.txt '<cmd>'` (console
+  companions_console.txt), a keeper that starts each child from the run's checkout with the supervisor's environment
+  (each child reads the run's end itself, `runctl.supervisor_end`), starts a child that exits while the run goes on
+  again (at most 3 times an hour, then `CHILD GIVEN UP` loudly, the other goes on), starts none once the run has ended,
+  and exits when no child is left. The supervisor's stop is zero-core's kill_tree: the keeper and its children. One of
+  the two refusing (the publisher without an upload key) -> the other alone, said on stderr; both -> the supervisor's
+  `COMPANION NOT STARTED`. No zero-core change (a list of companions in the core would be the general form - not needed
+  for two).
+* The watcher: `python tools/run_yardsticks.py watch RUN --supervised` (the companion) - the run finished: everything
+  still due is measured (the last checkpoint without the settling wait), then exit; stopped / refused / gave up / the
+  supervisor gone: the measurement under way is killed and the watcher exits (the next watcher measures it). Another
+  watcher holding the lock: it waits.
+* **By hand** (a run without the companion code, e.g. pb2 until its restart): `python tools/run_yardsticks.py watch
+  RUN` from a checkout with the run's engine and layout (the same code; `--yardsticks '<json>'` for a run that has no
+  setting or another one). It runs until `<run>/yardsticks/STOP`, or the run's own companion takes over (its
+  supervisor alive with a companion command naming run_yardsticks.py: the measurement under way is finished, then it
+  exits and the companion takes the lock), or the run finished and nothing is due. A second hand watcher is refused.
+  `--once`: what is due now, then exit.
+
+### 164.5 Publisher and site
+
+* `tools/delverai_publish.py` adds the record's `yardsticks` (`yardsticks_record`: opponents [{name, label}], settings,
+  the bo1 rows {iter, opp, score, se, elo_diff, elo_se, games, pentanomial, sims, time}, the blunder rows {iter, passed,
+  total, share, kinds, time}, `expected` (the evaluated iterations), `missing` [{kind, iter, opp?}], `failed` [{kind,
+  iter, opp?, attempts}] - no error text, it may hold local paths) to every progress post, and posts the run's
+  `blunders.<run>` record (delverai_blunders.record) whenever the run's canary cache changed, so a best-of-one run's
+  existing "Blunder checks passed" chart (with its lineage) follows too.
+* delverai branch `yardsticks` 72ce38a (from `newest-main-default` a5baa45): on a best-of-three run's page the tiles
+  "Best of one vs 3198" (newest score, se, Elo) and "Blunder checks" (passed / total) and the charts "Best of one (game 1)
+  against fixed opponents" (a line per opponent with its +-1 se band, 50% reference) and "Blunder checks passed"; a line
+  breaks over an evaluated generation without a result and the caption names those not measured yet and those failing.
+  The worker validates the block. NOT deployed: screenshots for the user's approval in
+  `C:/Users/Gregg Keithley/shots/delverai-yardsticks/` (deviceScaleFactor 2; before = a5baa45, after = 72ce38a; pb1's
+  page with a block built by this branch's code from pb1's REAL by-hand results and canary cache, pb2's with none yet).
+
+### 164.6 Cost per evaluation (pb2: eval_every 16, ~5 min an iteration -> one evaluated checkpoint every ~80 min)
+
+* bo1, 400 games at 64 simulations on cuda: 464 s with the GPU otherwise idle (pb1@262, 11-14 07:17); **2,450 s**
+  (41 min) for pb2@16 vs gen 0 by hand on 11-14 20:58 with pb2 live AND three farm-int gate jobs and this branch's
+  smoke on the machine - the search is CPU-bound (4 driver threads below pb2's self-play), the GPU share is small
+  (batches of <= 64 rows). Two opponents: ~16-80 min per evaluated checkpoint depending on the CPU load, i.e. the GPU
+  lane keeps up with an 80-min cadence except under heavy extra load; if it falls behind it shows as missing
+  generations and catches up in order (lighter: `bo1_opponents ['anchors']`, or `bo1_games 200`).
+* blunders, 53 spots x 8 searches at 1024 simulations on the CPU (torch threads min(8, cpus)): ~4.5 min a checkpoint
+  (delverai_blunders, 11-02); in parallel with the bo1 lane.
+* Each child loads its networks (~30-40 s per bo1 measurement of start-up in the smoke).
+
+### 164.7 Tests and checks
+
+* `tests/test_yardsticks.py` (17): the presets (on in delver-mirror*, off in the smokes), flags and saved settings
+  (pb2's preset default), refusals, the bo1 spec == SPEC_DELVER for every Delver preset, the opponents (anchors, gen 0,
+  LABEL=PATH, distinct names), the seat (the run's rule, no deck tilt), catch-up order in two lanes (gen 0 vs itself and
+  vs a copy of itself skipped, `from`, settle), a failure retried after its wait while the lane goes on, status's
+  failed / missing, a changed library re-pending every checkpoint (and no library still wanted), a torn last line, the
+  watcher end to end with fake measurements (every measurement failing once: 8 failure rows, loud; an hour later all
+  measured in order; a third pass measures nothing), one watcher per run (a live owner refuses, a dead or reused pid
+  does not), the companion hook (publisher / yardsticks / both / a refusing publisher), the keeper (a child restarted 3
+  times then given up, the other kept, the end with the run; no restart after the end), the publisher's record (no
+  paths, no error text; absent when off) and the blunder record posted once per cache change.
+  `tests/test_run_publisher.py`: the `--no-publish` preset case now has the yardsticks' watcher alone. No supervisor is
+  started by the new tests (the 11-14 PID-reuse kill of pb2: feedback_supervisor_pid_reuse_kill).
+* Smoke on a scratch run (E:/mtg-zero-scratch/eval-yardsticks/smoke-run: pb2's config with `{bo1_games 4, bo1_sims 8,
+  blunders_sims 32, settle 0}`, copies of pb2's iter_0000 / 0001 / 0016): `watch --once` measured bo1 0 vs a3198, 16 vs
+  a3198, 16 vs gen0 (seat tag `cq-n4-v50-s0.3-rv-b1m0.25`, = the by-hand runs') and blunders 0 (31 / 53) and 16 (32 /
+  53) in order in two lanes, skipped iter 1 (not evaluated) and gen 0 vs itself, 3 min of work; `status` shows them.
+
+### 164.8 Turning it on for pb2
+
+* At pb2's planned restart (onto the integrated main that carries 163 and this branch): nothing to add - pb2's
+  config.json has no `yardsticks`, so it takes its preset's (DELVER_YARDSTICKS) and the supervisor starts the keeper
+  with the publisher and the watcher. The watcher catches up from generation 0 in order. The publisher must be the
+  run's own (163) for the site's block; a hand-started publisher of an older checkout sends none.
+* Before that (fallback): `python tools/run_yardsticks.py watch E:/mtg-zero/runs/delver-bo3-pb2` from a pinned
+  checkout of this branch (or its merge) with pb2's engine (`_engine.pyd` of run-f49df0c: no Rust change since
+  f49df0c4), hidden and below normal priority; it writes yardsticks.jsonl and the canary cache, and hands over to the
+  companion by itself at the restart. Not started by this branch's agent.
+
+### 164.9 The gate
+
+`python tools/gate.py python --no-mac` on 099b2f9b (via slotd.sh, pb2 live): build PASS (307.7 s), pytest PASS (420
+passed, 1 skipped; 808.7 s), run-loop smoke (mtg-smoke) PASS (16 games, 0 unfinished), the checkout unchanged - **GATE
+PASSED python 099b2f9b3d2d in 1227s** (report gates/099b2f9b3d2d-python.json; the Mac steps skipped by --no-mac).
