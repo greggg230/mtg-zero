@@ -19,7 +19,8 @@ def shard(kind, first, n, totals=None, extra=''):
     t = {'kind': kind, 'first': first, 'n': n, 'totals': totals or {'is_walks': 3, 'max_power': first}}
     # (one test thread: the harness's "test <name> ... " precedes the first line, as a real shard prints it)
     lines = [f'test fuzz_random_games ... {n} games: wins [1, 1], draws 0'] if kind == 'games' else [f'{n} matches: ...']
-    j.out = '\n'.join(lines + [f'FUZZ_TOTALS {json.dumps(t)}', 'FUZZ_SHARD=1: the end-of-run checks ...', extra]) + '\n' + OK
+    j.out = F.lines_of('\n'.join(lines + [f'FUZZ_TOTALS {json.dumps(t)}', 'FUZZ_SHARD=1: the end-of-run checks ...', extra])
+                       + '\n' + OK)
     j.rc = 0
     return j, t
 
@@ -65,6 +66,13 @@ def test_the_merge_sums_and_checks_coverage():
     assert any('disagree on a skip' in p for p in probs)
     bad = [dict(parts[0], totals={'x': -1})]
     assert any('not a count' in p for p in F.merge('games', bad, 0, 250)[1])
+
+
+def test_the_harness_prefix_comes_off():
+    out = ('running 1 test\ntest fuzz_shard_totals ... fuzz totals: games checked over 2000 seeds\n'
+           'fuzz totals: matches checked over 100 seeds\nok\n')
+    assert F.CHECKED_RE.findall(F.lines_of(out)) == [('games', '2000'), ('matches', '100')]
+    assert F.TEST_RESULT_RE.findall(F.lines_of(OK)) == [('ok', '1', '0')]       # (the result line untouched)
 
 
 def test_a_shards_settings_are_its_own(monkeypatch):

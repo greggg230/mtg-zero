@@ -44,8 +44,14 @@ TEST_RESULT_RE = re.compile(r'^test result: (ok|FAILED)\. (\d+) passed; (\d+) fa
 TOTALS_RE = re.compile(r'^FUZZ_TOTALS (\{.*\})\s*$', re.M)
 CHECKED_RE = re.compile(r'^fuzz totals: (\w+) checked over (\d+) seeds', re.M)
 SEED_FAIL_RE = re.compile(r"(?:seed|match) (\d+) failed \(rerun: ([^)]*)\)")
-# (one test thread: the harness's "test fuzz_random_games ... " precedes the test's first line)
-GAMES_RE = re.compile(r'^(?:test \S+ \.\.\. )?(\d+) games: wins \[', re.M)
+GAMES_RE = re.compile(r'^(\d+) games: wins \[', re.M)
+# one test thread with --nocapture: the harness's "test <name> ... " precedes the test's first printed line
+HARNESS_RE = re.compile(r'^test \S+ \.\.\. (?=\S)', re.M)
+
+
+def lines_of(out):
+    """A test process's output with the harness's "test <name> ... " prefix taken off the line it shares."""
+    return HARNESS_RE.sub('', out)
 # the settings a shard's process takes from the caller's environment: none of the fuzz's own (each shard states its
 # own), so a stray FUZZ_SKIP or FUZZ_GAMES in the caller's shell never changes what a shard plays
 SCRUB = ('FUZZ_', 'DIGEST_')
@@ -144,7 +150,7 @@ def run_jobs(jobs, parallel, timeout, stop_on_fail):
                     p = subprocess.run(j.argv, cwd=ENGINE_DIR, env=j.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                        stdin=subprocess.DEVNULL, text=True, encoding='utf-8', errors='replace',
                                        timeout=timeout, creationflags=creationflags())
-                    j.out, j.rc = p.stdout, p.returncode
+                    j.out, j.rc = lines_of(p.stdout), p.returncode
                 except subprocess.TimeoutExpired as e:
                     j.out = (e.stdout or '') if isinstance(e.stdout, str) else (e.stdout or b'').decode('utf-8', 'replace')
                     j.rc = 'timeout'
