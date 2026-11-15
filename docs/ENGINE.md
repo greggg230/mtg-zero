@@ -34837,3 +34837,21 @@ both backends one series, at ~40 CPU-minutes per 64 games here: the owner's call
 * **Merging** zero-core `feat/farm-campaigns` and mtg-zero `feat/farm-campaigns` (zero-farm `feat/campaigns`): a run moves
   onto it at a restart with a worker build of it (74f2279f is one; registered, used by the two campaigns only).
 * No agent release is needed; nothing reached friends but the two campaigns' leases.
+
+### 165.10 Gates
+
+On ded4c4c9 (zero-core pin 3608e38), via the slot throttle, the desktop GPU hidden (CUDA_VISIBLE_DEVICES=-1), pb2 live:
+`python tools/gate.py python --no-mac` - build PASS, worker build PASS, pytest PASS (451 passed, 4 skipped; 1,108 s),
+run-loop smoke PASS (16 games, 0 unfinished), the checkout unchanged - **GATE PASSED python ded4c4c9fd37 in 1285s**.
+`python tools/gate.py repin --spec delver --preset delver-mirror-bo3-dealt --expect-digest 8f71ccb0d89031a6 --no-mac`
+(the farm-compat evidence for the pin move; the zero-core change is opt-in and leaves every default byte-identical) -
+digest 8f71ccb0d89031a6 = main's, constructed e1177d609d6c1aee / eoe 2efe956d589840ce / driver 6f7b863096e47dcd /
+dealt e802d9df793c9993 = the recorded files, worker build PASS, **farm compat PASS** (gate 2 and gate 3 identical: 6
+games, 2,484 rows, 150 batches), 1-config smoke PASS - **GATE PASSED WITH SKIPS repin ded4c4c9fd37 in 548s - skipped:
+mac-eval-checkout (--no-mac)**. Not run here: the optin-core tier, whose zero-core pytest step includes the supervisor
+tests (tests/test_run_infra.py's process churn), which must not run on the desktop beside a live run
+(feedback_supervisor_pid_reuse_kill); run it on a quiet machine or at the merge. zero-core: every zero_worker test and
+the farm pytest files above. zero-farm: coordinator `npm test` 22 files, 189 tests PASS; `tsc --noEmit` clean
+(`npm run check`'s `wrangler types --check` reports worker-configuration.d.ts out of date, as on main); agent code is
+unchanged - its tests pass except the ones Windows Defender blocks here (os error 225 on the tests' copied executables:
+install, launcher_update, selfupdate_e2e, update, release, swap_rollback), unrelated to this change.
