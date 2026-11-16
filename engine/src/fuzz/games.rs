@@ -3870,6 +3870,13 @@ static PK_DEALT_KEYS: AtomicU64 = AtomicU64::new(0);
 /// ENGINE.md 156: its card index, which every player sees) is public: not a private key, not checked here. Returns how
 /// many keys of the other player it checked.
 fn check_private_keys_masked(keys: &[u64], viewer: u8, after: &Game, what: &dyn Fn() -> String) -> u64 {
+    check_private_keys_masked_since(keys, viewer, after, &[], what)
+}
+
+/// `check_private_keys_masked`, with `before_known`: the identities of the viewer's hand before the step - a step that
+/// ends a game and begins the next (both seats dealt, ENGINE.md 168.1: the sideboarding has no decision) leaves `after`
+/// a new game, where the card of a look of the game that ended at the viewer's hand (public by design) is no longer.
+fn check_private_keys_masked_since(keys: &[u64], viewer: u8, after: &Game, before_known: &[u64], what: &dyn Fn() -> String) -> u64 {
     use crate::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_DEALT, KEY_DRAW, KEY_LOOK};
     let mut n = 0;
     for &k in keys {
@@ -3886,7 +3893,8 @@ fn check_private_keys_masked(keys: &[u64], viewer: u8, after: &Game, what: &dyn 
         if d == HIDDEN {
             continue;
         }
-        let hand_look = kind == KEY_LOOK && after.player(viewer).hand.iter().any(|&c| after.obj(c).def as u64 == d && after.knows(p, c));
+        let hand_look = kind == KEY_LOOK
+            && (after.player(viewer).hand.iter().any(|&c| after.obj(c).def as u64 == d && after.knows(p, c)) || before_known.contains(&d));
         assert!(hand_look, "{}: P{p}'s private key (kind {kind}) carries the card's identity ({d}) in a world of P{viewer} (ENGINE.md 141)", what());
         PK_HAND_LOOKS.fetch_add(1, Ordering::Relaxed);
     }
@@ -3918,14 +3926,19 @@ fn check_world_private_keys(g: &crate::az::MtgAz, viewer: usize, seed: u64, step
         let before = between(&w);
         let a = if before && legal[0] == crate::act::PASS && rng.below(2) == 0 { crate::act::PASS } else { legal[rng.below(legal.len() as u32) as usize] };
         keys.clear();
+        // (the viewer's hand before the step: the step may end the game and begin the next, 168.1 - a look of that step
+        // at a card of this hand is checked against it)
+        let known: Vec<u64> = if between(&w) { Vec::new() } else { w.g.player(viewer as u8).hand.iter().map(|&c| w.g.obj(c).def as u64).collect() };
+        let g0 = w.m.game_no;
         w.step(a, &mut keys).unwrap_or_else(|e| panic!("{}: {e}", what()));
-        if before && !between(&w) && !w.match_over() {
+        // (a new game: after a sideboarding, or - both seats dealt, ENGINE.md 168.1 - from the last game's end in one step)
+        if (before && !between(&w) || !started && w.m.game_no != g0) && !w.match_over() {
             started = true;
             PK_NEW_GAMES.fetch_add(1, Ordering::Relaxed);
         } else if started {
             since += 1;
         }
-        let k = check_private_keys_masked(&keys, viewer as u8, &w.g, &|| format!("{}{}", what(), if started { " (in the game it started)" } else { "" }));
+        let k = check_private_keys_masked_since(&keys, viewer as u8, &w.g, &known, &|| format!("{}{}", what(), if started { " (in the game it started)" } else { "" }));
         PK_MATCH_KEYS.fetch_add(k, Ordering::Relaxed);
         if started {
             PK_NEW_GAME_KEYS.fetch_add(k, Ordering::Relaxed);
