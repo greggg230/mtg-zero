@@ -37291,4 +37291,6 @@ missing waits (missing, never measured without it).
 
 ### 177.8 The gate after the merge
 
-POSTMERGE
+`python tools/gate.py python` on 3b6acdbc (main 35c48ef3 merged, pair_spec): privacy, build, the worker build, pytest
+(205 + 98 + 110 + 132 passed, 44 on the desktop; `tests/test_cells_yardstick.py` 18 among them), the run-loop smoke
+(16 games) - **GATE PASSED WITH SKIPS python 3b6acdbc320a in 579s** (the live-run fence only: 8 tests beside pb3).
