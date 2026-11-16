@@ -59,6 +59,10 @@ def test_mode_quotas_and_the_most_behind_mode():
     alias, _ = S.most_behind(modes, Q, t, 0, done, {'hg': 2_500})   # in flight counts
     assert alias in ('dd2g', 'dd2m', 'g', 'hg')
     assert S.most_behind(modes, Q, t, 0, done, {'hg': 2_500})[1] == 0
+    # equals: the first listed; the boosted mode is kept unless another is clearly further behind
+    assert S.most_behind(modes, Q, t, 0, {})[0] == 'dd2g'
+    assert S.most_behind(modes, Q, t, 0, {}, current='g')[0] == 'g'
+    assert S.most_behind(modes, Q, t, 0, {'g': 3_750}, current='g')[0] == 'dd2g'        # g on pace, the rest 12 h behind
 
 
 def test_the_farm_share_levels_and_no_flapping():

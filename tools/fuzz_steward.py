@@ -170,14 +170,15 @@ def mode_quotas(modes, quota):
     return {m['alias']: quota * m['w'] / tot for m in modes}
 
 
-def most_behind(modes, quota, t, build_start, done_by_mode, flight_by_mode=None):
-    """The alias of the mode furthest behind its own pace (in hours of its quota), and that deficit."""
-    best, worst = None, -math.inf
-    for alias, q in mode_quotas(modes, quota).items():
-        h = deficit_hours(q, t, build_start, done_by_mode.get(alias, 0), (flight_by_mode or {}).get(alias, 0))
-        if h > worst:
-            best, worst = alias, h
-    return best, worst
+def most_behind(modes, quota, t, build_start, done_by_mode, flight_by_mode=None, current=None, margin_h=0.5):
+    """The alias of the mode furthest behind its own pace (in hours of its quota), and that deficit. `current` (the
+    mode boosted now) is kept unless another is more than `margin_h` further behind (no flapping between equals)."""
+    hs = {alias: deficit_hours(q, t, build_start, done_by_mode.get(alias, 0), (flight_by_mode or {}).get(alias, 0))
+          for alias, q in mode_quotas(modes, quota).items()}
+    best = max(hs, key=lambda a: (hs[a], -list(hs).index(a)))
+    if current in hs and hs[current] >= hs[best] - margin_h:
+        best = current
+    return best, hs[best]
 
 
 def farm_share(h, current, cfg):
@@ -1032,7 +1033,8 @@ class Steward:
                     fl[j['alias']] = fl.get(j['alias'], 0) + j['count']
             done, inflight = sum(done_by.values()), sum(fl.values())
             h = deficit_hours(q, now, cur['built_at'], done, inflight)
-            alias, ah = most_behind(cur['modes'], q, now, cur['built_at'], done_by, fl)
+            boosted = next((a_ for a_, x in (cur.get('shares') or {}).items() if x is not None), None)
+            alias, ah = most_behind(cur['modes'], q, now, cur['built_at'], done_by, fl, current=boosted)
             # the farm: one campaign boosted (the most-behind mode's), the rest the backfill
             want = farm_share(h, max((x for x in (cur.get('shares') or {}).values() if x is not None), default=None),
                               self.cfg)
