@@ -35306,3 +35306,55 @@ pb2: nothing of the live run was touched (its files, processes, the Mac's run ch
   the cache (seconds, no cold build in the new pinned worktree); an engine change builds ~3x faster.
 * Gates take far less of the desktop beside it: the fuzz work per suite tier fell from ~78 min single-threaded to ~3.5
   min of shard time, and every heavy step queues for a slot of the throttle instead of piling up.
+
+## 169. Public cleanup: no farm computer details or machine-specific settings in the repos, the privacy check, licenses (branch `chore/public-cleanup`, zero-core `chore/public-cleanup`, zero-farm `chore/public-cleanup`, 2026-11-15)
+
+**Why.** mtg-zero, zero-core and zero-farm are public (Certum's open-source signing needs them public), and the publish
+audit of 2026-11-15 found a friend's farm PC (its name and CPU) in 165.8, the Mac's ssh target in code, tests and
+fixtures, home paths with the maintainer's name, and no license files in mtg-zero and zero-core. The user's rule: no
+farm computer details in the repos at all; the maintainer's own addresses and paths go to untracked local config.
+History is not rewritten (pins, run worktrees and checkpoint provenance name these commits); this is a fix at HEAD.
+
+**What.**
+* **Farm details out.** 165.8 now says "two farm PCs" (no names, CPU models or per-machine game counts); 114.6's test-PC
+  GPU and the hub links (166, 167) are gone. zero-core: a farm PC's GPU no longer named (az.md 44.5, the worker's
+  provider list). zero-farm: the same in PROTOCOL / DESIGN / the agent's profile and the coordinator's routing.
+* **The machine's own settings** live in the untracked `~/.config/zero/local.env` (`$ZERO_LOCAL_CONFIG`; template
+  `tools/local.env.example`; an environment variable of the same name wins). Readers: zero-core's `zero.local_config`
+  (Python) and `tools/local_env.sh` (bash, parsed, never sourced); mtg-zero's `tools/local_config.py` and
+  `tools/local_env.sh` are copies for tools that run before the submodule exists (`tests/test_privacy.py` keeps them
+  equal to the pinned core's). Keys: `ZERO_BIG_DISK` (the desktop's `E:`; replaces every hard-coded `E:/` default:
+  build_py.sh, gate.py's target, smoke and durations dirs, slotd.sh's state, zcache's cache root, warm_pool's targets,
+  farm_build / farm_campaign / farm_gates, human_picks, tools/data, position_lab, the private-data tests; zero-core's
+  build_py.sh, smoke_all.sh and farm_def), `MTGZ_MAC` / `MTGZ_MAC_HOME` (the `mac` remote in `mtgz/az/__init__.py`,
+  tools/mac.sh, mac_races.sh, fuzz_farm_status.sh, gate.py's Mac placement). Unset, each tool falls back to a generic
+  default: `<repo>/target`, `~/.mtgz-state`, `~/.cache/...`, the ssh alias `mac` for the remote, and no Mac at all for
+  mac.sh (it refuses) and the gate (it runs everything here). On the desktop, whose file sets `ZERO_BIG_DISK=E:` and the
+  Mac's target, every path and host is what it was (checked: gate.py's target, smoke and durations dirs, slotd.sh's
+  state dir, zcache's root, warm_pool's targets, the `mac` remote's spec, farm_def's farm-release). zerodash reads
+  `~/.config/zero/projects.json` (`$ZERODASH_CONFIG`; template `dashboard/projects.example.json`).
+* **Paths in committed files**: docs write `C:/Users/<user>`, `/Users/<user>` and `<mac>`; the canary library's and the
+  blunder baseline's provenance paths are `~/...`; `tools/delver_blunders.py` records paths through
+  `local_config.portable_path` (home as `~`). Tests use `user@mac`, `192.0.2.x` (TEST-NET) and `/Users/user`. zero-core's
+  dashboard fixtures (copies of real run files) are anonymized the same way; the run data in them is unchanged.
+* **The privacy check** (`tools/privacy_check.py`, the same file in zero-core; zero-farm's `tools/privacy-check.mjs` has
+  the same rules): every tracked file against a committed generic set (Tailscale CGNAT addresses and MagicDNS names,
+  farm machine ids `m_` + 26 base32, home paths naming a user, default Windows / macOS PC host names, `user@<IP>`) and
+  the machine's untracked patterns (`~/.config/zero/privacy_patterns.txt`, `$ZERO_PRIVACY_PATTERNS`: the real names of
+  hosts, farm PCs and accounts; never committed). `privacy-check: allow` on a line, or `privacy-check: allow-file` in a
+  file's first 5 lines, spares synthetic data from the generic rules only (zero-farm's redactor). `gate.py` runs it
+  first in every tier (step `privacy`, in-process, ~10 s; a finding fails the gate before any step runs);
+  `tests/test_privacy.py` runs it in pytest (zero-core: `tests/test_privacy.py`; zero-farm: first in `npm test`).
+* **Licenses**: `LICENSE` (MIT, "the mtg-zero authors", as `Cargo.toml` declares); zero-core `LICENSE` (MIT) and
+  `license = "MIT"` in every crate. README: the repos are public (no access needed), "Data sources and credits"
+  (17lands CC BY 4.0, CubeCobra, Scryfall), and the Wizards of the Coast Fan Content Policy notice (unofficial, not
+  approved/endorsed by Wizards; the MIT license covers the code, not WotC material).
+* AGENTS.md (here and zero-core) and zero-farm's README: the "Private details" rule.
+
+**Tests.** `tests/test_privacy.py` (the checkout passes, the copies equal the pinned core's), `test_gate.py`
+(`test_a_privacy_finding_fails_the_gate_before_any_step`, `test_the_privacy_check_runs_the_checkouts_tool`; the
+fixture stubs `privacy_scan`), `test_mac_remote.py` (`test_the_macs_address_is_the_machines_own_setting`: no config ->
+`mac`, `/Users/user`; the file and the environment set it). zero-core `tests/test_privacy.py` (each generic rule fires,
+placeholders pass, local patterns, markers, the local.env readers in Python and bash agree), `dashboard/tests`
+(the example config loads, the default config is outside the repo). No engine, encoding or run-loop change: digests
+unchanged.
