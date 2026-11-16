@@ -36264,4 +36264,30 @@ value-dependent rewrite; fingerprint invalidation; refusals on mismatched tensor
 `export_cached` on toy_tail checkpoints, ZERO_INFLIGHT given back); the existing `test_onnx.py`, `test_onnx2.py`,
 `test_farm_pool.py`, `test_farm_h2h.py` pass unchanged.
 
-**Gates.** 171.1 (after the gated commit).
+**Gates.** 171.1.
+
+### 171.1 Gates (b1ee4917, zero-core pin 79a76eb)
+
+Tiers: `optin-core` (a zero-core change whose run, search and self-play defaults are byte-identical: checkpoint_compat
+identity, the driver digest, farm compat) and `python` (the run loop, pytest), each in a warm worktree beside the live
+runs.
+
+* `optin-core --baseline-root <a checkout of main 9bccfd94, built>`: **GATE PASSED WITH SKIPS optin-core b1ee4917595f
+  in 2049s** (skipped: the live-run fence only: 17 core tests). Build, worker build, core build, core tests (204),
+  checkpoint_compat byte identity (3,272 samples), digest formats (constructed e1177d609d6c1aee, EoE 2efe956d589840ce,
+  driver 6f7b863096e47dcd), digest dealt e802d9df793c9993, farm compat (6 games, gate 2 and gate 3 identical), az (54),
+  hidden (28), build-only of the other three games, core pytest (695 passed).
+* `python --offload mac`: **GATE PASSED WITH SKIPS python b1ee4917595f in 494s** (skipped: the live-run fence only).
+* Before it, on the way: the first optin-core runs (3ab3d3f3, f196b083) failed core pytest on
+  `test_shard_thread::test_rolling_run_quotas_exact` (97 games for 96): the ZERO_INFLIGHT leak of 171 above, fixed in
+  zero-core 79a76eb. Two optin-core runs of b1ee4917 failed zero-core's Rust `driver::tests::
+  queued_setups_fill_every_free_slot_when_the_queue_is_long` (the first full batches' sizes [1, 8] / [8, 1] for [8, 8])
+  while the machine was loaded (no Rust changed here; it passed on 3ab3d3f3, f196b083 and the third b1ee4917 run): a
+  timing-sensitive test, noted, not changed. A `python` run with its pytest shards on the desktop failed
+  `test_mac_remote::test_the_macs_selfplay_settings` (MTGZ_MAC_HOME read as `C:/Program Files/Git/Users/...`):
+  `tools/slotd.sh` sources `tools/local_env.sh`, which exports the machine's MTGZ_MAC_HOME, and Git Bash converts the
+  POSIX path when it starts the Windows Python. Main's checkout fails it the same way through slotd and passes it without
+  (pre-existing; the test passes wherever the shard runs on the Mac); hence `--offload mac` above.
+* Also on the new pin: the engine digest in the re-pin worktree 8f71ccb0d89031a6 (= main's); `tools/farm_gates.py` with
+  pb3's worker build 99a7986f on pb3's config and phase spec (3ab3d3f3; the later commits change no farm or engine
+  code): PASSED.
