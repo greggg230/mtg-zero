@@ -431,7 +431,7 @@ fn every_exhaust_ability_has_a_float() {
 /// `encode::v6_projection` as JSON (`{"v5": [...], "v6": [...]}`: each layout v5 / v6 feature's v7
 /// index) at `$V6_PROJECTION_OUT`, which the proof compares with zero-core's `token_feature_map` of
 /// the layouts before it reads a row's older encoding through it.
-/// `cargo test --release -p engine --test v7_tails -- --ignored dump_v6_projection`.
+/// `cargo test --release -p engine --test misc_suite v7_tails::dump_v6_projection -- --ignored`.
 #[test]
 #[ignore]
 fn dump_v6_projection() {

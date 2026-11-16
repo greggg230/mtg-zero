@@ -78,7 +78,7 @@ fn eoe_registries_and_identities() {
         std::fs::write(&path, text).unwrap();
         panic!("appended {} token keys to {}: rebuild and rerun", missing.len(), path.display());
     }
-    assert!(missing.is_empty(), "unregistered EoE tokens (MTGZ_WRITE_TOKENS=1 cargo test -p engine --test eoe_net eoe_registries): {missing:?}");
+    assert!(missing.is_empty(), "unregistered EoE tokens (MTGZ_WRITE_TOKENS=1 cargo test -p engine --test misc_suite eoe_net::eoe_registries): {missing:?}");
     let mut tseen = std::collections::HashSet::new();
     for k in &treg {
         assert!(tseen.insert(*k), "{k} twice in az/eoe_tokens.txt");
@@ -134,7 +134,7 @@ fn eoe_layout_json_is_checked_in() {
         std::fs::write(&path, &want).unwrap();
     }
     let have = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
-    assert!(have == want, "{} differs from encode::layout_json (MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test eoe_net layout)", path.display());
+    assert!(have == want, "{} differs from encode::layout_json (MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test misc_suite eoe_net::eoe_layout)", path.display());
     let mut v: serde_json::Value = serde_json::from_str(&want).unwrap();
     assert_eq!(v["name"], "eoe");
     assert_eq!(v["version"], 6);

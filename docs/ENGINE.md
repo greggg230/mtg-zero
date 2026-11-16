@@ -35663,6 +35663,40 @@ with it every one of them needs a line in a suite. `mig/phase1-tests` (e512e720 
   times (1391 / 450 / 397 / 187 passed).
 * Merge it after the branches that add test files, adding their files to a suite (`misc_suite` for pb3's two); then its
   suite tier on the result.
+* **Merged into main** (main merged into the branch at ebf322d5: pb3 168, the public cleanup 169, the card IR 170, the
+  MTGO build 95.11). The engine test files main added since the branch point: `dealt_per_seat.rs` and `build.rs` (95,
+  the described-position round trip: no allocator, no process-wide state) are modules of `misc_suite`; `bo3_game_log.rs`
+  is a `[[test]]` of its own - it sets the game log's sink (`az::game_log::set`, a process-wide static), and its file
+  says so. The same holds for three files the branch had put in `misc_suite`: `game_log.rs` ("its own binary: the log
+  is a process-wide sink"), `deck_choice.rs` and `deck_scorer.rs` (each one test sets the sink): in one process their
+  sink windows overlap each other's and every other live EoE / best-of-three game of the suite (`sealed`, `eoe_net`,
+  `bo3_episodes`, ...), so a line lands in the wrong file or a test's `set(None)` ends another's log - the three
+  stable runs above were the scheduler's luck. They are `[[test]]`s again: 20 targets, 16 named (`az`,
+  `bo3_game_log`, `dealt_decks`, `deck_choice`, `deck_scorer`, `digest`, `digest_formats`, `draft`, `driver_bench`,
+  `fuzz`, `game_log`, `hidden`, `limits`, `measure_delver`, `perf`, `support`) + 4 suites (cards 71, rules 35, rulings
+  24, misc 26: 172 files). The test files' own run instructions that named a binary now gone say the suite and the
+  module (`--test misc_suite dealt_per_seat:: -- --ignored --nocapture` records / checks the dealt-per-seat digests,
+  `--test misc_suite build::` the round trip; `bots`, `draft_deferred`, `eoe_net`, `sealed`, `v7_tails`, `view`); no
+  gate step, tool or farm repro string ran one of the moved files by name (the gate's `--test` steps are `az`,
+  `digest`, `digest_formats`, `dealt_decks`, `fuzz`, `draft`, `hidden`, `limits`, all named).
+* **Measured on the merge** (the desktop beside the live pb1 / pb3 runs, ~2 GB of RAM free, each build through
+  `tools/slotd.sh` with CARGO_BUILD_JOBS 10 in a fresh target dir of its own): a cold `cargo test --release -p engine
+  --no-run` takes **717.8 s on main ebf322d5** (173 test executables) and **234.4 s on the merge 96afc516** (21: the
+  20 targets + the lib's unit tests), 3.1x. `dealt_per_seat::dealt_per_seat_digests` (ignored, not a gate step) in
+  `misc_suite`: combined **26c9751332e70c73**, the recorded value.
+* **The gates on 96afc516** (gate.py placing its pure-CPU steps on the Mac beside the live runs, the desktop's heavy
+  steps in `tools/slotd.sh` slots; `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"` for main's Git Bash
+  conversion, 170.7):
+  - `suite`: **GATE PASSED suite 96afc5162b5f in 405s** (the full engine suite 2,678 passed in 22 binaries - main's
+    2,678 in 174 -; the sharded 2k fuzz of default, default+hidden and delver_dealt);
+  - `engine --tested-sha 96afc5162b5f --expect-digest 8f71ccb0d89031a6 --expect-digest0 41e27319acdae5b5`: **GATE PASSED
+    WITH SKIPS engine 96afc5162b5f in 926s** - skipped: one live-run-hazard test fenced (a live run on this machine).
+    Digests EQUAL (full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5; constructed e1177d609d6c1aee, EoE
+    2efe956d589840ce, driver 6f7b863096e47dcd, dealt e802d9df793c9993 = the recorded files), az 54, limits 13, hidden
+    28, pytest 465 passed in four Mac shards + 44 on the desktop, the smoke config, farm compat PASS (gate 2 identical:
+    6 games, 2,484 rows, 150 batches; gate 3 identical: 2,556 rows);
+  - `python`: **GATE PASSED WITH SKIPS python 96afc5162b5f in 851s** - skipped: two live-run-hazard tests fenced (pytest
+    524 passed in four shards + the desktop part, the run-loop smoke 16 games).
 
 ### 167.10 Deferred, and what it gives pb2
 

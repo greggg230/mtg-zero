@@ -12,6 +12,7 @@ export CARGO_TARGET_DIR="$PWD/target"      # one target dir per checkout, never 
 export RUSTFLAGS="-C link-arg=-undefined -C link-arg=dynamic_lookup"   # macOS only (no build.rs adds them)
 bash tools/build_py.sh                     # rebuild mtgz/_engine after ANY Rust change: Python uses the copied .pyd/.so
 cargo test --release -p engine --test az   # quick engine check (the full suite: drop --test az)
+cargo test --release -p engine --test rules_suite rules_combat::   # one test file of a suite (docs/ENGINE.md 167.9)
 python -m pytest tests -q                  # ~2 min
 python -m mtgz.az.run --run runs/smoke1 --preset mtg-smoke     # ~45 s end-to-end loop
 ```
@@ -75,6 +76,13 @@ zero-core's (the test keeps the copies equal to the pinned core's).
   `python tools/card_ir.py check` (run by `tests/ir/test_pipeline.py`) proves they match
   (`docs/card_ir.md`). A changed IR or `generated.rs` is an engine change (engine tier). The gates run
   `tests/ir` only when a commit touches the pipeline (`ir/`, `card_ir/`, `data/cards/`, ...; `docs/ENGINE.md` 170.7).
+* **Test files.** `engine/tests/` builds into a few binaries (`docs/ENGINE.md` 167.9): the named ones (`az`, `digest`,
+  `digest_formats`, `dealt_decks`, `fuzz`, `draft`, `hidden`, `limits`, `support`, the benchmarks and the game log's
+  tests `bo3_game_log`, `deck_choice`, `deck_scorer`, `game_log`: its sink is process-wide) and four suites
+  whose modules are the other files (`cards_suite`, `rules_suite`, `rulings_suite`, `misc_suite`). A new test file is a
+  `#[path = "x.rs"] mod x;` line in its suite (or a `[[test]]` in `engine/Cargo.toml` when it needs its own process:
+  a global allocator, process-wide state); tests/test_engine_test_layout.py fails on a file in neither. Run one file
+  with its module as the filter: `--test cards_suite cards_m7a::`.
 * **Behaviour digests.** `cargo test --release -p engine --test digest -- --ignored --nocapture`
   hashes 2,500 fixed games against `engine/tests/data/digests.txt`. A change meant to keep
   behaviour (a refactor, a speed-up) must leave it unchanged. A change meant to alter play

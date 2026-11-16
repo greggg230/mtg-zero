@@ -583,7 +583,7 @@ fn digest_match(sp: &MtgSpec, seed: u64) -> u64 {
     h.0
 }
 
-/// `cargo test --release -p engine --test dealt_per_seat -- --ignored --nocapture`: 40 post-sideboard matches of the pb3
+/// `cargo test --release -p engine --test misc_suite dealt_per_seat:: -- --ignored --nocapture`: 40 post-sideboard matches of the pb3
 /// preset's self-play spec (per seat p 0.85, swaps [0, 15]) with a choice table and 20 whole matches (game 1 played, p
 /// 0.5) hashed against `tests/data/digests_dealt_per_seat.txt`; `DIGEST_WRITE=1` records it.
 #[test]
