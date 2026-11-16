@@ -18304,6 +18304,20 @@ test deck 72,036 sampled, 46,667 built, **46,667 exact (100%)**, `then` 21,017 o
 in a debug build (`BUILD_GAMES=16`): 6 passed (the debug-only invariants hold). `tests/test_build.py` 7 passed through
 the rebuilt PyO3 module. No rules change: the digests are main's.
 
+**The gates, on d07f8f0a** (the branch with main b309fa08 merged; gate.py placing its pure-CPU steps on the Mac beside
+the live runs here, the desktop's heavy steps in `tools/slotd.sh` slots):
+
+* `suite`: **GATE PASSED suite d07f8f0a5883 in 789s** (the full engine suite 2,678 passed in 174 binaries; the sharded
+  2k fuzz of default, default+hidden and delver_dealt);
+* `engine --tested-sha d07f8f0a5883 --expect-digest 8f71ccb0d89031a6 --expect-digest0 41e27319acdae5b5`: **GATE PASSED
+  WITH SKIPS engine d07f8f0a5883 in 788s** - skipped: one live-run-hazard test fenced (a live run on this machine).
+  Digests EQUAL (full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5; constructed e1177d609d6c1aee, EoE
+  2efe956d589840ce, driver 6f7b863096e47dcd, dealt e802d9df793c9993 = the recorded files), az 54, limits 13, hidden 28,
+  pytest 455 passed in four Mac shards + 44 on the desktop, the smoke config, farm compat PASS (gate 2 identical: 6
+  games, 2,484 rows, 150 batches; gate 3 identical: 2,556 rows).
+
+This line is a docs-only commit after the gated one.
+
 ## 97. Rented GPU boxes (Vast.ai): `tools/vast.py` and the remote `'vast'` (branch `vast`, 2026-11-05)
 
 **Why.** The user asked what it takes to distribute work to a rented Vast.ai GPU, then wanted "the flexibility of
