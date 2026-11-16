@@ -4945,27 +4945,7 @@ fn check_determinize_hidden(a: &crate::az::MtgAz, seed: u64, rng: &mut Rng) {
             }
             let l = az_legal(&d);
             keys.clear();
-            let dbg_hand: Vec<(u32, u32, u8)> = d.g.player(viewer).hand.iter().map(|&c| (c.i() as u32, d.g.obj(c).def as u32, d.g.obj(c).known)).collect();
-            let dbg_log = d.g.log_lines().len();
-            let dbg_kind = format!("{:?} {:?}", d.g.kind(), d.g.options_desc());
             d.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap_or_else(|e| panic!("{}: {e}", what()));
-            {
-                use crate::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_LOOK};
-                if let Some(&bad) = keys.iter().find(|&&k| key_kind(k) == KEY_LOOK && key_player(k) != viewer && key_payload(k) != HIDDEN) {
-                    eprintln!("DBG {}: observer {:?}, over {}, before {dbg_kind}", what(), d.g.observer, d.g.is_over());
-                    eprintln!("DBG keys {:?}", keys.iter().map(|&k| (key_kind(k), key_player(k), key_payload(k))).collect::<Vec<_>>());
-                    eprintln!("DBG hand before {:?}", dbg_hand.iter().map(|&(i, df, kn)| (i, df, d.g.db().def(df as _).name.to_string(), kn)).collect::<Vec<_>>());
-                    eprintln!("DBG hand after {:?}", d.g.player(viewer).hand.iter().map(|&c| (c.i(), d.g.obj(c).def, d.g.db().def(d.g.obj(c).def).name.to_string(), d.g.obj(c).known, d.g.knows(1 - viewer, c))).collect::<Vec<_>>());
-                    for (i, ob) in d.g.objs().iter().enumerate() {
-                        if ob.def as u64 == key_payload(bad) {
-                            eprintln!("DBG obj {i} def {} {} zone {:?} owner {} known {}", ob.def, d.g.db().def(ob.def).name, ob.zone, ob.owner, ob.known);
-                        }
-                    }
-                    for line in &d.g.log_lines()[dbg_log.saturating_sub(20).min(d.g.log_lines().len())..] {
-                        eprintln!("DBG log {line}");
-                    }
-                }
-            }
             PK_GAME_KEYS.fetch_add(check_private_keys_masked(&keys, viewer, &d.g, &what), Ordering::Relaxed);
             d.g.check_invariants().unwrap_or_else(|e| panic!("{} (played on): {e}", what()));
             rules_match_step(&mut wc, &d, &|| format!("{} (played on)", what()));
