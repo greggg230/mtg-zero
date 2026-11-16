@@ -304,10 +304,19 @@ def git(*args, cwd=ROOT, check=True):
     return p.stdout.strip()
 
 
+_ENGINE_HASH = {}
+
+
 def engine_hash(commit, cwd=ROOT):
-    """The tree ids of every Rust input at `commit` (and the zero-core gitlink), hashed: equal hashes = the same build."""
+    """The tree ids of every Rust input at `commit` (and the zero-core gitlink), hashed: equal hashes = the same build.
+    A full commit id's hash never changes: kept for the process."""
+    if commit in _ENGINE_HASH:
+        return _ENGINE_HASH[commit]
     out = git('ls-tree', commit, '--', *RUST_INPUTS, cwd=cwd)
-    return hashlib.sha256(out.encode()).hexdigest()[:16]
+    h = hashlib.sha256(out.encode()).hexdigest()[:16]
+    if re.fullmatch(r'[0-9a-f]{40}', commit):
+        _ENGINE_HASH[commit] = h
+    return h
 
 
 def pid_alive(pid, started=None):
@@ -957,10 +966,10 @@ class Steward:
                         shutil.rmtree(os.path.join(self.dir, 'jobs', jid), ignore_errors=True)
                     self.last_check = 0              # the next tick decides whether another chunk follows
                 # keep the last 20 finished jobs per source
-                fin = sorted((k for k, v in cur['local'][source].items() if not v.get('running')),
-                             key=lambda k: cur['local'][source][k].get('ended') or 0)
+                jobs = (cur.get('local') or {}).get(source) or {}
+                fin = sorted((k for k, v in jobs.items() if not v.get('running')), key=lambda k: jobs[k].get('ended') or 0)
                 for k in fin[:-20]:
-                    cur['local'][source].pop(k, None)
+                    jobs.pop(k, None)
 
     def stop_local(self, key, why, sources=('mac', 'desktop')):
         cur = self.state['targets'].get(key) or {}
@@ -1136,8 +1145,12 @@ class Steward:
                         self.stop_local(key, 'STOP')
                     os.replace(stop, stop + '.old')
                     break
-                self.poll_builds(now)
-                self.poll_local(now)
+                try:
+                    self.poll_builds(now)
+                    self.poll_local(now)
+                except Exception as e:                   # noqa: BLE001 - logged; the steward goes on
+                    import traceback
+                    self.log(f'tick failed: {e}\n{traceback.format_exc()[-2000:]}')
                 if now - self.last_check >= self.cfg['check_s'] or self.a.once:
                     self.last_check = now
                     try:
@@ -1239,7 +1252,14 @@ def main(argv=None):
         print(json.dumps({'id': a.id, 'confirmed': ok, 'note': note}))
         return 0
     signal.signal(signal.SIGTERM, lambda *_: open(os.path.join(s.dir, 'STOP'), 'w').close())
-    s.run()
+    try:
+        s.run()
+    except SystemExit:
+        raise
+    except BaseException as e:                           # (pythonw has no console: the reason goes to the log)
+        import traceback
+        s.log(f'the steward ended on an error: {e}\n{traceback.format_exc()[-3000:]}')
+        raise
     return 0
 
 
