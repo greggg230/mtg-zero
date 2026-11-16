@@ -789,22 +789,17 @@ def cell_id(x, y):
 
 
 def _cell_spec(x, y, chooser, ys):
-    """The spec of p0 = X's main against p1 = Y's main, `chooser` choosing play or draw (JSON). A private stand-in
-    for decklists.pair_spec (branch feat/metagame-spec): REPLACE IT WITH pair_spec AT THAT MERGE (the same keys as
-    decklists.mirror_spec: max_turns, mulligans, constructed, decks; plus chooser). The extension point for
-    best-of-three cells: cells_format 'bo3' would build the pair's bo3 spec here (sideboards, game_episodes) - the
-    statistics take one result per game id, a match's as well as a game's."""
+    """The spec of p0 = X against p1 = Y with `chooser` choosing play or draw (JSON): decklists.pair_spec (docs/ENGINE.md
+    176: exactly the metagame spec's games of that pairing) with the spec's `chooser` set (CR 103.1: the side that
+    chooses, the unit's two halves). Best-of-three cells (the extension point): pair_spec(fmt='bo3') builds the pair's
+    match; there the chooser is game 1's only and each later game's is the previous game's loser (ENGINE.md 35), and
+    the statistics take one result per game id, a match's as well as a game's - not turned on yet (cells_format)."""
     if ys['cells_format'] != 'bo1':
         raise NotImplementedError(f"cells_format {ys['cells_format']!r}: best-of-three cells are not built yet")
     from . import decklists as D
-    mains = []
-    for name in (x, y):
-        main = D.names(D.load(name)['main'])
-        if len(main) < 60:
-            raise ValueError(f'decklist {name}: {len(main)} maindeck cards (constructed: at least 60)')
-        mains.append(main)
-    return json.dumps({'max_turns': int(ys['cells_max_turns']), 'mulligans': True, 'constructed': True,
-                       'chooser': int(chooser), 'decks': {'p0': mains[0], 'p1': mains[1]}}, separators=(',', ':'))
+    spec = json.loads(D.pair_spec(x, y, fmt='bo1', max_turns=int(ys['cells_max_turns'])))
+    spec['chooser'] = int(chooser)
+    return json.dumps(spec, separators=(',', ':'))
 
 
 def pair_seed(ys, pair):

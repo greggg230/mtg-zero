@@ -37116,3 +37116,179 @@ delver_dealt`): pass `--fuzz-pools ...,meta`.
   steward's modes when the metagame run starts.
 * **The launch flags of the real run** (network size - the Delver line's runs are 128 x 8 -, evaluation cadence,
   remotes, resignation) are the launch's; the preset keeps `delver-mirror`'s.
+
+## 177. The metagame cells yardstick: every (my deck, opponent's deck) cell of the 3-deck run against a frozen reference on common random numbers, a reference ladder, and gen over gen (branch `feat/cells-yardstick`, 2026-11-16)
+
+Branch `feat/cells-yardstick` from main a4fd5701, main 35c48ef3 (176, the metagame spec) merged in (zero-core pin
+2c67426c unchanged: no zero-core change; no Rust change of its own: digests untouched). Section number: 176 is
+`feat/metagame-spec`'s; the headings of every other branch on 2026-11-16 stop at 175.
+
+**Why.** The planned 3-deck Legacy metagame run trains ONE network on all 9 ordered cells of Izzet Delver
+(`izzet_delver_8016541`), Legacy Doomsday (`doomsday_8027957`) and Sneak and Show (`sneak_show_8014220`). The
+matchups are lopsided and both sides of a self-play game improve at once, so self-play win rates per cell are the
+metagame's matchup table, not a progress measure. Wanted: each cell's progress, every evaluated generation, with
+honest standard errors.
+
+### 177.1 The measurement (agreed with the user)
+
+* **A cell (X vs Y)**, checkpoint C, frozen reference R: C pilots X against R piloting Y; the baseline is R piloting X
+  against R piloting Y **on the same seeds** (the same shuffles, the same chooser: common random numbers). The cell's
+  Elo gain is `400 log10( (pC/(1-pC)) / (pR/(1-pR)) )`, pC and pR the X side's two mean scores.
+* **The unit is a seed played from both sides of the play/draw choice.** Play or draw is a decision (CR 103.1, the
+  chooser's `Task::PlayDraw`), so the yardstick cannot force "X on the play" without taking an action from a player;
+  each seed is played once with X's side as the chooser and once with Y's side as the chooser (the spec's `chooser`
+  0 / 1) - the bo1 yardstick's pentanomial pair, with the chooser swapped instead of the seats. Each cell keeps both
+  halves (`chose` / `other_chose`: the scores when the measured side chose and when the other side did).
+* **The games.** An unordered deck pair {X, Y} is two specs (`decklists.pair_spec(X, Y)`, 176: exactly the metagame
+  spec's games of that pairing, with the spec's `chooser` 0 and 1),
+  each a `zero.h2h.match` of A against B, unpaired, A in seat gid % 2 (h2h's convention and a farm eval job's,
+  `farm_eval.seats_of`), with the pair's own seed (`pair_seed`: sha256 of cells_seed and the two names; the same every
+  generation). Game g of the chooser-0 match and game g of the chooser-1 match have the same game seed
+  (`record::game_seed(seed, g, false)`; with a fixed chooser no die is rolled, so the streams line up) and form one
+  unit; even g are cell X|Y (A pilots p0's X), odd g cell Y|X. One pair's two matches measure two cells, half the games
+  each: `cells_games` games per cell is `cells_games / 2` units. A mirror {X, X}: every game is cell X|X
+  (`cells_games / 2` games per chooser spec). The baseline: the same two matches with R in both seats.
+* **Mirror cells are the ordinary paired head-to-head.** R against R in a mirror with the chooser swapped between the
+  halves of a unit is symmetric: the baseline is 0.5 exactly in expectation, so no baseline games are played and the
+  cell's numbers are zero.h2h's paired summary's (tested equal to `h2h.pair_stats` through the logistic Elo).
+* **How far "the same seeds" goes.** Shuffles and the other random streams come from the game seed, so C's game and
+  R's game of a unit start identical and stay coupled until their decisions diverge (a reshuffle after different lines
+  decorrelates the rest). That costs variance reduction, never bias.
+
+### 177.2 The standard errors (why they are right under the pairing)
+
+The four games of a unit (C or R as the X pilot, X's side choosing or not) share the unit's random numbers and are
+correlated; different units are independent (disjoint game seeds). So every se is taken over units, never games:
+
+* **Delta method** (`se`): with u_i, v_i the unit means of C's and R's two games, pa, pb their means and w = 1/(p(1-p)),
+  `elo = K (logit pa - logit pb)` (K = 400 / ln 10) and `Var(elo) = K^2 Var_i(wa u_i - wb v_i) / n` - the gradient
+  (wa, -wb) through the 2x2 sample covariance of (u, v), the covariance included. C and R on one seed are positively
+  correlated, so the cross term shrinks the se: what the common random numbers buy. `se_unpaired` drops the cross term
+  (as if the baseline were independent games), reported to show the gain; `corr` is the units' correlation.
+* **Bootstrap** (`boot_se`, `boot_95`; `cells_boot` 1000 resamples, seeded by the cell): whole units resampled with
+  replacement, the estimate recomputed - a non-parametric check where the logit is steep.
+* **Extremes**: a mean score of 0 or 1 is clamped half a game inside (`clamped`): a finite estimate, a weak se.
+* **Checked on synthetic results with known answers** (`tests/test_cells_yardstick.py`): identical C and R games give
+  gain 0 with se 0 (`se_unpaired` ~22); a 6-unit example equals numpy's gradient-covariance-gradient; over 400
+  replications of 200 coupled units with a known gain the estimates centre on the truth, the mean delta se is within 12%
+  of the estimates' spread, the unpaired se overstates it by more than 30%, and the bootstrap se agrees with the delta se.
+* **Summaries.** Per-deck pilot Elo = the mean of the deck's 3 cells as the measured side's deck; overall = the mean of
+  the 9. The cells are independent (disjoint seeds), so a mean of k cells has se `sqrt(sum se^2) / k`; a mean needs all
+  of its cells (`missing` names absent ones, no partial means). **Anchored** (zero-core's anchored-Elo slot, `{elo,
+  se}` as `zero.elo.row`): the reference's chained Elo + overall, se in quadrature.
+* **Noise** (the user's numbers, the same formula): ~400 games a cell gives about +-17 Elo at 50% and +-25 at 85/15
+  without the pairing's reduction; the 9-cell overall about a third of a cell's.
+
+### 177.3 Reference ladder, promotion, gen over gen
+
+* **The ladder** (`cells_refs`, then `<run>/yardsticks/cells_ladder.json`; oldest first): the first reference is
+  `'iter0'` (the run's generation 0) or `'LABEL=PATH'`, anchored at `cells_base_elo` (1000, zero.elo's anchor). A
+  checkpoint is measured against the newest reference whose `since` it reached (`ref_for`); a checkpoint that is the
+  reference itself (sha256) measures nothing.
+* **Promotion is flagged, never done.** A cell whose `vs_ref` - the logistic of its gain, the measured side's expected
+  score against R in the cell's own terms (0.5 = no gain) - passes `cells_promote` (0.80, ~240 Elo) is starred, and
+  `run_yardsticks.py cells` prints `SUGGESTED: a new reference ... cells-freeze RUN --iter N` for the newest
+  checkpoint's measurement against its own reference.
+* **Freezing is an explicit command**: `python tools/run_yardsticks.py cells-freeze RUN --iter N [--label L] [--to
+  PATH]` needs N's complete measurement against its current reference (the chain link), copies models/iter_N.pt
+  (default `<run>/yardsticks/cells_refs/<label>.pt`, sha256 checked) and appends `{label, path, since N, iter, sha,
+  from_ref, gain, gain_se, elo, elo_se}` to the ladder file. Nothing else writes it (the watcher only reads it).
+  Checkpoints from N on are measured against the new reference; earlier ones keep theirs.
+* **Chaining**: a reference's Elo is its frozen `elo` (se in quadrature down the chain), or - a `cells_refs` entry
+  without one - the previous reference's plus the overall gain of a complete measurement of a checkpoint with its
+  sha256; else unchained (no anchored numbers against it).
+* **Gen over gen** (`cells_gen_games`): C against the previously evaluated checkpoint P in all 9 cells, the same
+  design with R := P (P-vs-P baselines cached the same way). P changes every generation, so its 6 non-mirror baselines
+  are played each time (15 x games a checkpoint instead of 9 x): a smaller `cells_gen_games` is the cheap setting. The
+  rows keep every game's result (`results`), so gen over gen could also be derived from two checkpoints' measurements
+  against one reference on the same seeds (not built).
+
+### 177.4 The baseline cache
+
+A non-mirror pair's R-vs-R games are cached as `<cells_cache>/<key>.json` (default `<run>/yardsticks/cells_base`),
+key = sha256 of {the reference's sha256 and its own seat keys (`h2h.run_seat_keys`), the pair, the two specs' sha256,
+the seed, the games, cells_sims, the seat (the run's move rule, `bo1_seat`: deck tilt left out), chance_k, c_puct, the
+engine module's sha256}: once per reference, settings and engine build, whoever needs it first (the cells and gen kinds
+share it when R is the same network). A baseline is its own measurement (kind `cells_base`: a row with its per-cell
+scores; done when the cache file exists), wanted before the cells it gates in the same lane; a cell whose baseline is
+missing waits (missing, never measured without it).
+
+### 177.5 The setting, the watcher, the backends, the commands
+
+* `yardsticks` options (off by default: `cells_games` 0 and `cells_gen_games` 0 change nothing for existing runs):
+  `cells_games`, `cells_gen_games` (even), `cells_decks` (default the three), `cells_refs`, `cells_sims` /
+  `cells_device` (null: bo1's), `cells_backend` ('local' | 'farm' | null = auto as bo1_backend, per reference),
+  `cells_seed` (0), `cells_format` ('bo1'), `cells_max_turns` (60), `cells_promote` (0.80), `cells_base_elo` (1000),
+  `cells_cache`, `cells_boot` (1000). Odd games, no reference, a label `iter_*`, 'bo3' and the like are refused. E.g.
+  the metagame run: `--yardsticks '{"bo1_games": 0, "blunders": false, "cells_games": 400, "cells_refs": ["iter0"],
+  "cells_gen_games": 200}'`.
+* **The watcher** (164) wants, per evaluated checkpoint after its bo1 items, each pair's baseline (once) and then its
+  cells, for the cells kind and the gen kind, in the bo1 lanes (`gpu` / `cpu_bo1` by `cells_device`, or `farm`); each
+  is a child `run_yardsticks.py one RUN --kind cells|cells_gen --iter N --ref L --pair X,Y` (or `--kind cells_base
+  --ref L --pair X,Y --games G`) with 164's retries, failure rows and timeouts (a farm item: 175.6's no-progress
+  timeout). One item is one pair (2 x cells_games games; a mirror cells_games): ~800 games at 400 a cell, within the
+  GPU lane's 7200 s at 164.6's ~1,300 s per 400 games. `status` lists the cells' missing and failing items in their own
+  lists (`cells.missing`, `cells.failed`: the site's block knows bo1 and blunders only) beside `cells.report`.
+* **The farm backend** (`play_pair_farm`): each chooser match is a farm play job of the run's pool worker build
+  (`farm_campaign.submit`, unpaired, seats [net 1, net 2]; a baseline [net 1, net 1] with R as net 1), its settings
+  `match_settings` of the run's checkpoint against R (both seats the local match's, checked dict for dict), the
+  campaign named after the measurement (a retry resumes it), collected with the spot replay and the local fallback;
+  A's results read at seat gid % 2 (`a_seat_of` checked). Tested against a faked campaign API: no farm job submitted.
+* **Commands**: `run_yardsticks.py cells RUN [--json]` - the ladder, then per measured checkpoint a 3 x 3 table of gain
+  +- se (rows the measured side's deck, columns the opponent's) with per-deck and overall numbers, the anchored Elo and
+  starred promotions; gen over gen the same. `cells-freeze` (above). Standalone: `cells-match CKPT --ref PATH [--games
+  G --sims S --device cpu|cuda --decks a,b,c --cache DIR --out rows.jsonl --json]` (local games, baselines cached in DIR).
+* **Results** in `<run>/yardsticks.jsonl` (164's style): `{"kind": "cells" | "cells_gen", iter, ref, ref_sha, sha,
+  pair, cells {"X|Y": {units, games, score, base, elo, se, se_unpaired, boot_se, boot_95, vs_ref, clamped, chose,
+  other_chose, pentanomial, corr}}, games, unfinished, base, results {"0", "1": '0' / 'h' / '1' per game id}, sims,
+  select, seed, spec_sha, backend, (farm), seconds, time}` and `{"kind": "cells_base", ref, ref_sha, pair, base, games,
+  scores, unfinished, sims, select, backend, cached, seconds, time}`; failure rows as 164's, with ref / pair / base.
+
+### 177.6 Tests, smoke, gate
+
+* `tests/test_cells_yardstick.py` (18, ~3 s, no process started): the statistics on synthetic results (177.2), the
+  cells from the two chooser matches (seat gid % 2, the unit pairing), the pair specs (both mains, the chooser, the
+  pair's seed; the engine's driver accepts every cell spec of the three decks), the summaries (per-deck, overall,
+  anchored, se in quadrature, no partial means, promotion), the baseline cache (played once per key; the key moves
+  with sims, seat, seed, games and the reference's network; a cell refuses without its baseline; a mirror plays none),
+  standalone (9 rows, the baselines cached the second time), the watcher's order on a fake run (each baseline once,
+  before its first cell; a failing baseline holds back only its own pair's cells; generation 0 = the reference
+  measures nothing), the ladder (the report suggests, never writes; `freeze_ref` refuses an incomplete link and a
+  duplicate, copies with the sha checked, moves later checkpoints to the new reference, chains 1000 -> 1300 -> 1350
+  with se in quadrature; an unfrozen ladder entry chains through a measurement of its sha), gen over gen (prev, its
+  own baselines), the child's command line / console key / result line, the farm backend with a faked campaign API
+  (two unpaired jobs per pair, seats [net 1, net 2] or the baseline's [net 1, net 1], the pair's seed, A read at seat
+  gid % 2; auto 'farm' only with a pool), and the setting's refusals. `tests/test_yardsticks.py` and
+  `tests/test_farm_play.py` unchanged and passing (21 + 4 fenced).
+* **Smoke** on CPU, a scratch run (`E:/mtg-zero-scratch/meta3-cells/smoke`, never runs/): the `delver-smoke` preset
+  trained 4 iterations (4.6 min). (a) Standalone `cells-match iter_0003 --ref iter_0000 --games 4 --sims 4 --device
+  cpu`: all 6 pairs of the three decks and the 3 baselines played (every cell spec, Doomsday and Sneak and Show
+  included, ran under the smoke network), the 3 x 3 table printed (a tiny network at 4 simulations: numbers
+  meaningless, se 0 to 230 Elo at 2 units a cell). (b) The watcher: `watch --once` with `{cells_games 2,
+  cells_gen_games 2, cells_refs [iter0], cells_sims 4, cells_device cpu, from 3}` measured, in order, 3 baselines + 6
+  cells against gen0 and 3 baselines + 6 gen-over-gen cells against iteration 2 - 18 child processes, 0 failures, 18
+  min (989 s of measurement); `cells` printed both tables and the ladder (anchored 1042.4) and starred a promotion in
+  the gen table (one unit a cell: clamped, se 0 - a smoke, not a measurement); `cells-freeze --iter 3` wrote the
+  ladder file (g3 at 1042.4, frozen) and iteration 3, the new reference itself, then measures nothing.
+* (c) After the merge of main 35c48ef3 (the engine rebuilt from b04e524a's artifact): standalone again with
+  `pair_spec` specs, `--games 2 --sims 2`: all 6 pairs and 3 baselines played, the table printed.
+* **Gate** (`python tools/gate.py python` in a warm worktree beside pb3; the Mac's share and the desktop's throttled):
+  on a4d8950f (before the merge) **GATE PASSED WITH SKIPS python a4d8950f7165 in 363s** (the live-run fence only; a
+  first attempt failed in tests/test_mac_remote.py when its Mac push raced and the step fell back to the desktop,
+  where Git Bash rewrote MTGZ_MAC_HOME - rerun with `MSYS2_ENV_CONV_EXCL` as 175.5). After the merge: see 177.8.
+
+### 177.7 The metagame spec's merge, and what is left
+
+* Done at the merge of 35c48ef3: `_cell_spec` is `decklists.pair_spec` plus `chooser` (first built with a private
+  stand-in of the same keys, a4d8950f; decklists.py and the presets untouched here). Results come from the driver's
+  result rows (`h2h.match` rows / the farm job's traced rows), not the game log, so a best-of-one game ended by a
+  resignation (which writes no game-log line, 176) counts like any other.
+* Best-of-three cells: `cells_format` 'bo3' is refused; `_cell_spec` is the extension point (`pair_spec(fmt='bo3')`:
+  the chooser is game 1's only, later games' the previous game's loser); the statistics take one result per game id,
+  a match's as well as a game's.
+* The dashboard's / site's 3 x 3 table: `status()['cells']['report']` holds it; no publisher or site change here.
+* Turning it on: the metagame run's preset `yardsticks` (the setting above), run from the run's own checkout.
+
+### 177.8 The gate after the merge
+
+POSTMERGE

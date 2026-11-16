@@ -133,6 +133,9 @@ def test_the_pair_specs_put_both_mains_and_the_chooser_and_the_seeds_are_the_pai
     from mtgz.az import decklists as DL
     assert sp[0]['decks'] == {'p0': DL.names(DL.load(D)['main']), 'p1': DL.names(DL.load(N)['main'])}
     assert (sp[0]['chooser'], sp[1]['chooser'], sp[0]['constructed'], sp[0]['max_turns']) == (0, 1, True, 60)
+    # decklists.pair_spec's pairing (docs/ENGINE.md 176: the metagame spec's games of that cell) plus the chooser
+    assert {k: v for k, v in sp[1].items() if k != 'chooser'} == json.loads(DL.pair_spec(D, N))
+    assert tuple(Y.CELL_DECKS) == DL.META3
     assert [j['games'] for j in Y.pair_jobs((S, S), 8, ys)] == [4, 4]      # (a mirror: every game its cell's)
     assert Y.cell_pairs(ys) == [(D, D), (D, S), (D, N), (S, S), (S, N), (N, N)]
     with pytest.raises(NotImplementedError):
