@@ -1,11 +1,14 @@
 # Card IR in mtg-zero (`card_ir` crate)
 
-The Rust rules engine reads cards as data: mtg-bot's oracle parser
-exports every parsed card of a pool as the **card IR** (JSON), and the
-`card_ir` crate deserializes it into typed Rust values. No per-card or
-per-class bridge: the Rust types are generated from the schema mtg-bot
-exports alongside the IR (DESIGN.md section 3.2). The format itself is
-specified in mtg-bot's `docs/CARD_IR.md`.
+The Rust rules engine reads cards as data: the oracle-text parser
+(`ir/mtgz_ir`, the card-IR pipeline) exports every parsed card of a pool as
+the **card IR** (JSON), and the `card_ir` crate deserializes it into typed
+Rust values. No per-card or per-class bridge: the Rust types are generated
+from the schema the export writes alongside the IR (DESIGN.md section 3.2).
+The format is specified in `docs/card_ir_format.md`. The pipeline lived in
+the mtg-bot project until ENGINE.md 169 moved it here (from mtg-bot
+`feature/eoe-station-ir` 68b62ed3, every file reproduced byte for byte);
+the "mtg-bot" commits below are where earlier exports came from.
 
 ## What is checked in
 
@@ -15,7 +18,13 @@ specified in mtg-bot's `docs/CARD_IR.md`.
 | `data/cards/legacy.ir.json` | The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari Charm; ENGINE.md 124, the Legacy Doomsday deck: Doomsday, Pact of Negation, Personal Tutor, Flow State, 124.1; Misdirection, Flusterstorm, Cavern of Souls, 124.2; Edge of Autumn, Street Wraith, Leyline of the Void, 124.3; ENGINE.md 123, the Legacy Sneak and Show deck: Show and Tell, Omniscience, Mistrise Village, Brotherhood's End, Disruptor Flute, Magus of the Moon; ENGINE.md 122, the Delver 75's sideboard: Consign to Memory, Hydroblast, Meltdown, Price of Progress, Rough // Tumble; mtg-bot's pool `legacy`), the same export and schema |
 | `data/cards/eoe.ir.json` | The Edge of Eternities sealed cards (ENGINE.md 99.1: mtg-bot's pool `eoe` filtered by `tools/codegen/filter_eoe_ir.py` to the set's 320 cards with IR), the same export and schema; since ENGINE.md 99.16 the export of mtg-bot `feature/eoe-ir-fixes` f4f2d663 (before it 7c02e5c9, ENGINE.md 99.11; 5362f5ed, ENGINE.md 99.9) |
 | `data/cards/powerlsv.schema.json` | The schema the three documents were encoded with |
+| `ir/mtgz_ir/` | The pipeline: the oracle-text parser (`cards/parser/`), the card model it builds (`cards/`, `effects/`), the IR encoder and schema (`cards/ir.py`), the export (`export.py`); stdlib Python 3.11+ (ENGINE.md 169) |
+| `ir/data/` | Its inputs: the pools' Scryfall card records (JSON; no images), the name lists and sidecars `tools/ir_fetch_cards.py` writes |
+| `tools/card_ir.py` | `export` (regenerate the five files), `check` (a regeneration equals them byte for byte), `roundtrip` |
+| `tools/ir_fetch_cards.py` | Fetches a pool's Scryfall records (CubeCobra list or a name list) into `ir/data` |
+| `tests/ir/` | The pipeline's tests (the parser's, the IR's, `test_pipeline.py`: the byte-for-byte check) |
 | `tools/codegen/gen_card_ir.py` | Schema -> Rust generator (stdlib Python) |
+| `tools/codegen/filter_eoe_ir.py` | Keeps the EoE set's cards in `eoe.ir.json` (the export runs it) |
 | `card_ir/src/generated.rs` | Generated types (do not edit) |
 | `card_ir/src/support.rs` | Hand-written `Count` (int or `"inf"`) and `Never` |
 | `card_ir/src/lib.rs` | `Document` / `Card` and `load_document` |
@@ -57,36 +66,41 @@ names the card.
 
 ## Refreshing when the parser changes
 
-Any parser or card-primitive change in mtg-bot can change the schema
-(new classes, fields, enum members). Refresh all three files together:
+Any parser or card-primitive change in `ir/mtgz_ir` (or a new card record
+in `ir/data`) can change the IR and the schema (new classes, fields, enum
+members). Regenerate all five files together, from the repo root:
 
 ```bash
-# 1. In the mtg-bot checkout (a worktree: PYTHONPATH=src, shared venv):
-PYTHONPATH=src ../../mtg-bot/.venv-py313/Scripts/python.exe -m mtg_bot cards roundtrip --pool cube legacy eoe
-# (three pools, one schema: powerlsv.ir.json, legacy.ir.json, eoe.ir.json, powerlsv.schema.json;
-# ENGINE.md 54, 99.1)
-PYTHONPATH=src ../../mtg-bot/.venv-py313/Scripts/python.exe -m mtg_bot cards export-ir \
-    --pool cube legacy eoe --out "C:/Users/Gregg Keithley/mtg-zero/data/cards"
-
-# 2. In mtg-zero:
-python tools/codegen/filter_eoe_ir.py --mtg-bot-data <mtg-bot>/data --ir data/cards/eoe.ir.json
-python tools/codegen/gen_card_ir.py --schema data/cards/powerlsv.schema.json \
-    --out card_ir/src/generated.rs
-CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/<branch> cargo test -p card_ir -- --nocapture
-python -m pytest tools/codegen   # generated.rs is current (--check)
+python tools/card_ir.py roundtrip   # every printing of cube, legacy, eoe decodes back unchanged
+python tools/card_ir.py export      # data/cards/*.ir.json, powerlsv.schema.json, card_ir/src/generated.rs
+python tools/card_ir.py check       # they are what a regeneration gives (tests/ir/test_pipeline.py runs it)
+python -m pytest tests/ir -q        # the parser's and the IR's tests
+CARGO_TARGET_DIR=<this checkout's target> cargo test -p card_ir -- --nocapture
 ```
 
-`export-ir` prints the schema hash; the regenerated `generated.rs`
-carries the same hash in `SCHEMA_SHA256`. The codegen is deterministic,
-so an unchanged schema leaves `generated.rs` byte-identical. Commit the
-IR, the schema and `generated.rs` in one commit, noting the mtg-bot
-commit they came from.
+A new card outside the pools: append its Scryfall record with
+`tools/ir_fetch_cards.py` (e.g. add it to `ir/data/legacy_delver.sheet.json`
+and rerun the legacy command in the script's docstring), teach the parser
+its text (`ir/mtgz_ir/cards/parser/AGENTS.md`: parameterized recognizers),
+add a parser test under `tests/ir/`, then export.
 
-When mtg-bot bumps `ir_version` (a change to the encoding rules, not to
-the card vocabulary), `support.rs`, `lib.rs` and the generator may need
-changes too; see mtg-bot `docs/CARD_IR.md`, "Versioning".
+`export` prints the schema hash; the regenerated `generated.rs` carries
+the same hash in `SCHEMA_SHA256`. The codegen is deterministic, so an
+unchanged schema leaves `generated.rs` byte-identical. Commit the parser
+change, the IR, the schema and `generated.rs` in one commit; `check`
+fails (and with it the python gate's pytest) when they disagree. A
+changed IR or `generated.rs` is an engine change: the engine tier, with
+its digests (AGENTS.md).
 
-## Current numbers (mtg-bot `feature/eoe-station-ir` 68b62ed3)
+A change to the encoding rules (not to the card vocabulary) bumps
+`ir_version`; `support.rs`, `lib.rs` and the generator may need changes
+too (`docs/card_ir_format.md`, "Versioning").
+
+## Current numbers (in this repo since ENGINE.md 169; before it mtg-bot `feature/eoe-station-ir` 68b62ed3)
+
+ENGINE.md 169 moved the pipeline in: `python tools/card_ir.py check` regenerates the five files from `ir/` and
+`ir/data` and finds them identical, byte for byte, to these (schema `693d23a4a259...`).
+
 
 ENGINE.md 146.1 (station striations, the Fable review's lane E): exported with `cards export-ir --pool cube legacy
 eoe` from mtg-bot `feature/eoe-station-ir` 68b62ed3 (one commit on `feature/delver-sb-ir` 22aa7682, local), then

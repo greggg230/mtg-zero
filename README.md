@@ -125,10 +125,10 @@ py/ ── binding crate ──▶ mtgz._engine ──▶ mtgz.az.* (= zero-core
 ```
 
 * **Cards are data.** The card IR (`data/cards/powerlsv.ir.json`, plus `legacy.ir.json` for the
-  Delver cards outside the cube) is exported by the oracle-text parser of the separate
-  **mtg-bot** project and checked in. You don't need mtg-bot to build, test or train; you need
-  it only to change card data. An IR field the engine doesn't implement is a hard error, never
-  silently ignored.
+  constructed cards outside the cube and `eoe.ir.json` for Edge of Eternities) is exported by
+  the oracle-text parser in `ir/` (`python tools/card_ir.py export`; `docs/card_ir.md`) and
+  checked in, so building, testing and training need no Python parser run. An IR field the
+  engine doesn't implement is a hard error, never silently ignored.
 * **Hidden information** works by determinization: `determinize(viewer)` resamples everything
   the viewer can't see, consistent with what it has seen. Shuffles, draws and random discards
   are chance events with keys (`docs/ENGINE.md` section 10).

@@ -46,6 +46,12 @@ Python 3.13 (not 3.14) with `torch numpy psutil flask pytest`. Use Git Bash on W
   `docs/rulings.md` (`// ruling: <hash8>` in the test). Add newly supported cards to
   `engine/tests/support.rs::SUPPORTED`. Before merging, run
   `FUZZ_GAMES=20000 cargo test --release -p engine --test fuzz`.
+* **Card data (the IR).** Cards come from the oracle-text parser in `ir/mtgz_ir` (moved from
+  mtg-bot, `docs/ENGINE.md` 169). A card the parser reads wrong is fixed at the parser, with a
+  test in `tests/ir/`, never patched in the JSON; then `python tools/card_ir.py export`
+  regenerates `data/cards/*.ir.json`, the schema and `card_ir/src/generated.rs` together, and
+  `python tools/card_ir.py check` (run by `tests/ir/test_pipeline.py`) proves they match
+  (`docs/card_ir.md`). A changed IR or `generated.rs` is an engine change (engine tier).
 * **Behaviour digests.** `cargo test --release -p engine --test digest -- --ignored --nocapture`
   hashes 2,500 fixed games against `engine/tests/data/digests.txt`. A change meant to keep
   behaviour (a refactor, a speed-up) must leave it unchanged. A change meant to alter play
@@ -118,7 +124,7 @@ ran in your merge note or PR.
   with why, what, tests, digests and measurements. Append a new section, or a numbered subsection to
   the feature's own section. Numbers can be taken by open branches, so check them first.
 * Rules shortcuts you introduce or remove go in `docs/shortcuts.md`. IR problems you find
-  (wrong data from the parser) go in `docs/ir_defects.md`. Never work around them silently.
+  (wrong data from the parser in `ir/`) go in `docs/ir_defects.md`. Never work around them silently.
 * Milestone status lives in `DESIGN.md` §7 (§8 for the Delver mirror).
 * Commit messages say what changed, which sections document it, and the digests. An agent's
   commit ends with its own `Co-Authored-By:` trailer. Branches are named after the work

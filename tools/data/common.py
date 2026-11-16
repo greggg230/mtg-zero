@@ -26,9 +26,8 @@ SPLITS_DIR = E_ROOT / "splits"
 
 POWERLSV_CUBE_ID = "786d3a10-43bd-438e-acf4-bb150b881254"
 
-MTG_BOT_CUBE_JSON = Path(
-    r"C:\Users\Gregg Keithley\Documents\Claude\Projects\mtg-bot\data\cube_power_lsv.json"
-)
+# The PowerLSV cube's Scryfall dump: the card-IR pipeline's input (docs/ENGINE.md 169; mtg-bot's data/ before).
+MTG_BOT_CUBE_JSON = Path(__file__).resolve().parents[2] / "ir" / "data" / "cube_power_lsv.json"
 
 
 def ensure_dirs() -> None:

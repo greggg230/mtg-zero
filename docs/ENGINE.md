@@ -157,8 +157,9 @@ order must be deterministic); no threads, callbacks or interior mutability.
 * Two card tables (section 54): `CardDb::cube()` (the cube IR, compiled in: every cube game,
   generator, pool, draft, fuzz pool and digest) and `CardDb::constructed()` (the cube's cards, the
   same definitions at the same ids, then `data/cards/legacy.ir.json`'s, then their tokens and faces;
-  only games with `"constructed": true` use it). Both IR files carry one schema (mtg-bot `cards
-  export-ir --pool cube legacy`), so one `card_ir` crate reads both.
+  only games with `"constructed": true` use it). Both IR files carry one schema (the export of the
+  pools together: `tools/card_ir.py export`, section 169; mtg-bot's `cards export-ir` before), so
+  one `card_ir` crate reads both.
 * Token definitions (CR 111) are lowered from `CreateToken.token_printing` like any printing
   (the "Token" supertype sets `CardDef.token`), interned by equality and stored after the
   cards' (`CardDb::token_def(i)`); `Op::CreateToken` names one by index. They are not in the
@@ -1420,6 +1421,14 @@ M7c commit kept all 2,500 digests; the check caught one wrong fast path on the w
 
 ## 16. Porting a card (the recipe for M4b onwards)
 
+0. The card's IR comes from the oracle-text parser in `ir/mtgz_ir` (section 169; `docs/card_ir.md`).
+   A card outside the pools: its Scryfall record into `ir/data` (`tools/ir_fetch_cards.py`, a
+   name-list pool such as `legacy_delver.sheet.json`). Text the parser doesn't read, or reads
+   against the Oracle text: fix the parser (a parameterized recognizer,
+   `ir/mtgz_ir/cards/parser/AGENTS.md`) with a test in `tests/ir/`, list a defect in
+   `docs/ir_defects.md`; never edit the JSON. Then `python tools/card_ir.py export` rewrites
+   `data/cards/*.ir.json`, the schema and `card_ir/src/generated.rs` in one go, and
+   `python tools/card_ir.py check` proves the committed files are its output.
 1. `cargo test -p engine --test support -- --nocapture` lists blocked cards, the features
    that block most cards on their own, and a greedy staging order (the feature completing
    the most cards next). `SUPPORT_DUMP=path` also writes every blocked card with all its

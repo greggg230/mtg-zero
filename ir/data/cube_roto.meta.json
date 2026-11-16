@@ -1,0 +1,51 @@
+{
+  "source": "name_list",
+  "name_list_path": "data/cube_roto.sheet.json",
+  "cube_name": "Retireddevil's Vintage Roto 1.1",
+  "list_entry_count": 864,
+  "scryfall_card_count": 860,
+  "custom_cards_without_scryfall": [
+    {
+      "name": "Meddling Wizard",
+      "custom_text": "(Custom conspiracy. Starts the game face up in the command zone.) / At the beginning of each game, after mulligans, your opponent reveals their hand to you."
+    },
+    {
+      "name": "Quanitity Over Quality",
+      "custom_text": "(Custom conspiracy. Starts the game face up in the command zone.) / When you draft this, you immediately also make your next pick and your 38th (final) pick. Your minimum deck size is increased by 5 (e.g. a 45-card deck)."
+    },
+    {
+      "name": "I've Made a Huge Mistake",
+      "custom_text": "(Custom conspiracy. Starts the game face up in the command zone.) / When you draft this, return one of your previous picks to the pool (anyone may draft it later) and immediately draft a new card in its place. At the end of the draft, you get 3 additional picks."
+    },
+    {
+      "name": "ANOTHER HEAD?!",
+      "custom_text": "(Custom conspiracy. Starts the game face up in the command zone.) / You get an extra copy of the next card you draft (you may play both copies)."
+    }
+  ],
+  "fetched_at": "2026-10-02T20:58:43.343401+00:00",
+  "pool_card_count": 866,
+  "includes_basic_lands": [
+    "Plains",
+    "Island",
+    "Swamp",
+    "Mountain",
+    "Forest",
+    "Wastes"
+  ],
+  "cubecobra_comparison": {
+    "cube_id": "43fd5f2a-942e-40c3-a563-bf3a7ce0cc22",
+    "cube_name": "Retireddevil's Vintage Roto 1.1",
+    "cube_card_count": 859,
+    "cube_last_updated": "2026-09-28T18:41:14.200000+00:00",
+    "only_in_list": [
+      "Smokestack"
+    ],
+    "only_in_cube": [],
+    "cube_printed_name_differs": [
+      [
+        "Ademi of the Silkchutes",
+        "Spectacular Spider-Man"
+      ]
+    ]
+  }
+}

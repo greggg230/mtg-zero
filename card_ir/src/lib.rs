@@ -1,10 +1,12 @@
-//! Typed loader for the mtg-bot **card IR** (see `docs/card_ir.md`).
+//! Typed loader for the **card IR** (see `docs/card_ir.md`).
 //!
-//! mtg-bot's oracle parser exports every parsed card as JSON (`$t` class
-//! tags, sparse fields). The types in [`generated`] are produced from the
-//! exported schema by `tools/codegen/gen_card_ir.py`; this module adds the
-//! document wrapper and a loader that checks the format, IR version and
-//! schema hash.
+//! The oracle-text parser (`ir/mtgz_ir`, `tools/card_ir.py export`) exports
+//! every parsed card as JSON (`$t` class tags, sparse fields). The types in
+//! [`generated`] are produced from the exported schema by
+//! `tools/codegen/gen_card_ir.py`; this module adds the document wrapper and
+//! a loader that checks the format, IR version and schema hash. (The format
+//! names `mtg-bot-card-ir*` and the schema's `mtg_bot.*` module labels are
+//! the IR's first exporter's, kept: docs/card_ir_format.md.)
 
 pub mod generated;
 pub mod support;

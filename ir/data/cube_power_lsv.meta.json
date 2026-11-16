@@ -1,0 +1,15 @@
+{
+  "cube_id": "PowerLSV",
+  "cube_name": "PowerLSV",
+  "cube_card_count": 541,
+  "cube_last_updated": "2026-09-09T00:48:05.609000+00:00",
+  "fetched_at": "2026-09-27T17:11:09.417438+00:00",
+  "pool_card_count": 546,
+  "includes_basic_lands": [
+    "Plains",
+    "Island",
+    "Swamp",
+    "Mountain",
+    "Forest"
+  ]
+}
