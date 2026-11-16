@@ -259,7 +259,7 @@ use crate::rng::Rng;
 use crate::game::EndReason;
 use crate::{Choice, DecisionKind, Game, GameSpec, Outcome, NUM_ACTIONS};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use super::{Hooks, Run, SeedOutcome};
+use super::{Hooks, Run, SeedOutcome, Totals};
 use crate::rules_check::{MatchCheck, RulesCheck};
 
 thread_local! {
@@ -2968,12 +2968,6 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     if let Some(c) = census::report(&super::env::var("FUZZ_POOL").unwrap_or_else(|_| "cube".into()), n) {
         println!("FUZZ_CAP_CENSUS:\n{c}");
     }
-    if n >= 200 && pool_mode() == PoolMode::Default {
-        assert!(companions_used > 0, "no companion special action in {n} games");
-    }
-    if n >= 100 && exponential_mode() {
-        assert!(MAX_POWER.load(Ordering::Relaxed) > u32::MAX as i64, "no board past u32::MAX power: {}", extremes_report());
-    }
     println!("longest game: {} actions (cap 100,000)", MAX_GAME_STEPS.load(Ordering::Relaxed));
     println!("{}", rules_report());
     rules_verdict("fuzz_random_games");
@@ -2985,9 +2979,6 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         let (w, x, st, lt) =
             (HD_WORLDS.load(Ordering::Relaxed), HD_OTHER_DECK.load(Ordering::Relaxed), HD_STEPS.load(Ordering::Relaxed), HD_LONG_TURNS.load(Ordering::Relaxed));
         println!("FUZZ_HIDDEN_DECKS: {w} hidden-decklist worlds, {x} with another deck than the real one; {st} information-set steps in step; {lt} turns past {HD_LONG_TURN} decisions");
-        if n >= 200 {
-            assert!(w > 0 && x * 10 > w * 9, "FUZZ_HIDDEN_DECKS: {x} of {w} worlds with another deck");
-        }
     }
     if let Some(k) = deck_choice_fuzz().filter(|_| sealed_mode() && hidden_decks_mode()) {
         let (c, w) = (DC_CHOICES.load(Ordering::Relaxed), DC_WORLDS.load(Ordering::Relaxed));
@@ -2995,20 +2986,12 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         if let Ok(path) = super::env::var("FUZZ_DECK_CHOICE_BY") {
             let (ch, ex) = (DC_EVAL_CHOSEN.load(Ordering::Relaxed), DC_EVAL_EXPLORE.load(Ordering::Relaxed));
             println!("FUZZ_DECK_CHOICE_BY={path}: {ch} seats chose by the evaluator, {ex} explored");
-            if n >= 100 {
-                assert!(ch > 0 && c == 0, "FUZZ_DECK_CHOICE_BY: {ch} seats chose, {c} decisions (the evaluator's choice is none)");
-            }
-        } else if n >= 100 {
-            assert!(c > 0 && w > 0, "FUZZ_DECK_CHOICE: no deck choice was played");
         }
     }
     if let Some(t) = deck_tilt_fuzz() {
         let (w, r) = (DT_WORLDS.load(Ordering::Relaxed), DT_RATIO.load(Ordering::Relaxed));
         let mean = r as f64 / 1e6 / w.max(1) as f64;
         println!("FUZZ_DECK_TILT={t}: {w} deck-tilted worlds from the K cached decks; K x the dealt deck's probability {mean:.3} on average (uniform 1)");
-        if w >= 100 {
-            assert!(mean > 1.5, "FUZZ_DECK_TILT: the deck tilt does not concentrate the deal ({mean:.3})");
-        }
     }
     if let Some(t) = belief_tilt() {
         let (w, d, u) = (BELIEF_WORLDS.load(Ordering::Relaxed), BELIEF_DEALT.load(Ordering::Relaxed), BELIEF_UNIFORM.load(Ordering::Relaxed));
@@ -3017,9 +3000,6 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             d as f64 / 1000.0 / w.max(1) as f64,
             u as f64 / 1000.0 / w.max(1) as f64
         );
-        if w >= 100 {
-            assert!(d > 2 * u, "FUZZ_BELIEF: the weighted deal does not concentrate ({d} vs uniform {u})");
-        }
     }
     println!(
         "graveyard lists (ENGINE.md 65.10): {} decisions checked, longest {} (cards offered from both graveyards: at most {}; the limit 64)",
@@ -3027,20 +3007,10 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         GY_LIST_MAX.load(Ordering::Relaxed),
         GY_LIST_BOTH_MAX.load(Ordering::Relaxed)
     );
-    if n >= 200 {
-        assert!(GY_LISTS.load(Ordering::Relaxed) > 0, "no graveyard-list decision in {n} games");
-    }
     // The information-set walks compared states (ENGINE.md 148): open decklists' (`check_information_set`) or
     // hidden decklists' (`check_hidden_information_set`).
     let (isw, iss, hds) = (IS_WALKS.load(Ordering::Relaxed), IS_STEPS.load(Ordering::Relaxed), HD_STEPS.load(Ordering::Relaxed));
     println!("information sets (ENGINE.md 148): {isw} open-decklist walks, {iss} states compared after a common action (the view and the viewer's whole row); {hds} hidden-decklist steps");
-    if n >= 200 {
-        if hidden_decks_mode() {
-            assert!(hds > 0, "FUZZ_HIDDEN_DECKS: no information-set walk compared a state after a common action in {n} games");
-        } else {
-            assert!(isw > 0 && iss > 0, "no information-set walk compared a state after a common action in {n} games ({isw} walks)");
-        }
-    }
     if let Some(c) = chance_every() {
         let (w, s, f, x) = (
             CHANCE_WALKS.load(Ordering::Relaxed),
@@ -3049,9 +3019,6 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             CHANCE_SPLIT.load(Ordering::Relaxed),
         );
         println!("FUZZ_CHANCE={c}: {w} chance walks, {s} steps at one node, {f} replays whose outcome the force changed, {x} walks split by the keys");
-        if n >= 100 {
-            assert!(f > 0, "FUZZ_CHANCE: no replay took a forced outcome ({w} walks, {s} steps)");
-        }
     }
     if sealed_mode() {
         let total: u64 = unplayable.values().sum();
@@ -3077,17 +3044,11 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         println!(
             "FUZZ_POOL=dd_b: Misdirection cast {m}, its new-target decisions {r}; Flusterstorm cast {f}, copies {c}; Cavern types chosen {t}, decisions with chosen-type mana floating {k}, uncounterable creature spells {u}"
         );
-        if n >= 200 {
-            assert!(m > 0 && r > 0 && f > 0 && c > 0 && t > 0 && u > 0, "lane B's cards weren't played: {m} {r} {f} {c} {t} {u}");
-        }
     }
     if delver_mode() {
         let (m, t, c) =
             (DELVER_MURKTIDES.load(Ordering::Relaxed), DELVER_MURK_TRIGGERS.load(Ordering::Relaxed), DELVER_CHARMS.load(Ordering::Relaxed));
         println!("FUZZ_POOL=delver: Murktide Regent cast {m} times, its leave-the-graveyard triggers {t}, Prismari Charm cast {c} times");
-        if n >= 200 {
-            assert!(m > 0 && t > 0 && c > 0, "the legacy cards weren't played: {m} {t} {c}");
-        }
     }
     if dd_a_mode() {
         let casts: Vec<u64> = DD_A_CASTS.iter().map(|x| x.load(Ordering::Relaxed)).collect();
@@ -3096,9 +3057,6 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             "FUZZ_POOL=dd_a: seen on the stack {}; Pact of Negation's triggers {pacts}",
             DD_A_CARDS.iter().zip(&casts).map(|(n, c)| format!("{n} {c} times")).collect::<Vec<_>>().join(", ")
         );
-        if n >= 200 {
-            assert!(casts.iter().all(|&c| c > 0) && pacts > 0, "lane A's cards weren't played: {casts:?} {pacts}");
-        }
     }
     if ddc_mode() {
         let ld = |a: &AtomicU64| a.load(Ordering::Relaxed);
@@ -3110,9 +3068,6 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         );
         // (A swampwalker facing a Swamp is rare in random play, a few times in
         // 2,000 games: not asserted; the card tests cover it.)
-        if n >= 300 {
-            assert!(ec > 0 && ey > 0 && wc > 0 && wy > 0 && lo > 0 && lg > 0 && le > 0, "lane C's cards weren't played");
-        }
     }
     if doomsday_mode() {
         let casts: Vec<u64> = DOOMSDAY_CASTS.iter().map(|x| x.load(Ordering::Relaxed)).collect();
@@ -3127,17 +3082,6 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             abil[2],
             abil[3]
         );
-        let cast = |name: &str| casts[DOOMSDAY_SPELLS.iter().position(|&n| n == name).unwrap()];
-        if n >= 200 {
-            let main = ["Doomsday", "Pact of Negation", "Personal Tutor", "Flow State", "Misdirection", "Thassa's Oracle", "Murktide Regent", "Prismari Charm"];
-            assert!(main.iter().all(|&m| cast(m) > 0), "the decks' cards weren't played: {casts:?}");
-            assert!(abil[0] > 0 && abil[1] > 0 && abil[2] > 0 && r > 0 && t > 0, "the legacy cards' abilities weren't used: {abil:?} {r} {t}");
-        }
-        // (Edge of Autumn and Street Wraith are cycled far more often than
-        // cast: their casts are asserted over 2,000 games.)
-        if n >= 2000 {
-            assert!(cast("Edge of Autumn") > 0 && cast("Street Wraith") > 0, "Edge of Autumn or Street Wraith never cast: {casts:?}");
-        }
     }
     if names_mode() {
         let chosen: Vec<Vec<u64>> = NAMES_CHOSEN.iter().map(|k| k.iter().map(|x| x.load(Ordering::Relaxed)).collect()).collect();
@@ -3149,10 +3093,6 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             );
         }
         println!("FUZZ_POOL=names: spells cast with a name chosen against them: {taxed}");
-        if n >= 200 {
-            assert!([0, 2, 3, 4, 7].iter().all(|&k| chosen[0][k] > 0), "Anointed Peacekeeper's kinds of names: {chosen:?}");
-            assert!(chosen[1].iter().sum::<u64>() > 0 && taxed > 0, "Disruptor Flute's names, taxed spells: {chosen:?} {taxed}");
-        }
     }
     if sns_mode() {
         let seen: Vec<u64> = SNS_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
@@ -3162,14 +3102,6 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             if pool_mode() == PoolMode::Sns { "sns" } else { "sneak_show" },
             SNS_CARDS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
         );
-        if n >= 200 && pool_mode() == PoolMode::Sns {
-            assert!(seen.iter().all(|&c| c > 0) && free > 0 && unc > 0 && named > 0, "the lane's cards weren't played: {seen:?} {free} {unc} {named}");
-        }
-        // (The deck's one Omniscience, ten mana, mostly enters by Show and Tell: its free casts
-        // are what is required.)
-        if n >= 200 && pool_mode() == PoolMode::SneakShow {
-            assert!(seen[0] > 0 && seen[2] > 0 && free > 0 && unc > 0, "the deck's lane cards weren't played: {seen:?} {free} {unc}");
-        }
     }
     if delver_sb_mode() {
         let seen: Vec<u64> = DELVER_SB_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
@@ -3178,9 +3110,6 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             "FUZZ_POOL=delver_sb: seen on the stack {}; Consign to Memory aimed at a triggered ability {at}",
             DELVER_SB_SPELLS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
         );
-        if n >= 200 {
-            assert!(seen[..5].iter().all(|&c| c > 0) && at > 0, "the five cards weren't played: {seen:?} {at}");
-        }
     }
     if cross_mode() {
         let seen: Vec<u64> = CROSS_SEEN.iter().map(|x| x.load(Ordering::Relaxed)).collect();
@@ -3188,11 +3117,270 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             "FUZZ_POOL=cross: Doomsday against Sneak and Show; seen on the stack {}",
             CROSS_SPELLS.iter().zip(&seen).map(|(n, c)| format!("{n} {c}")).collect::<Vec<_>>().join(", ")
         );
-        if n >= 200 {
-            assert!(seen[0] > 0 && seen[2] > 0, "Doomsday or Show and Tell never cast: {seen:?}");
+    }
+    // the end-of-run checks over the chunk's counters (ENGINE.md 167: a shard's are left to the merged totals)
+    end_of_run("games", first, n, &games_totals(companions_used as u64), check_games);
+    Run::Done
+}
+
+/// A chunk's end (ENGINE.md 167): its counters as one `FUZZ_TOTALS {"kind", "first", "n", "totals"}` line (what
+/// `tools/fuzz_shards.py` sums over shards), then its end-of-run checks over `n` seeds - unless `FUZZ_SHARD=1` (one
+/// shard of a sharded run: a small shard must not dodge a check that needs 200 games, nor pass one alone; the merged
+/// totals are checked over the whole run's seeds by [`check_merged`]).
+fn end_of_run(kind: &str, first: u64, n: u64, t: &Totals, check: fn(u64, &Totals)) {
+    println!("FUZZ_TOTALS {}", serde_json::json!({"kind": kind, "first": first, "n": n, "totals": t.0}));
+    if super::env::var("FUZZ_SHARD").is_ok_and(|v| v == "1") {
+        println!("FUZZ_SHARD=1: the end-of-run checks of these {kind} are the merged totals' (tools/fuzz_shards.py)");
+    } else {
+        check(n, t);
+    }
+}
+
+/// The merged totals of a sharded run (ENGINE.md 167; `tools/fuzz_shards.py`'s JSON: `{"games" | "matches" | "post":
+/// {"n": seeds, "totals": {...}}}`, each kind its shards' counters summed, `max_` ones their max) through the same
+/// end-of-run checks as one run of those seeds (a failure panics with the check's message) -> one line per kind checked.
+pub fn check_merged(text: &str) -> Result<Vec<String>, String> {
+    let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("merged totals: {e}"))?;
+    let mut out = Vec::new();
+    for (kind, check) in [("games", check_games as fn(u64, &Totals)), ("matches", check_matches), ("post", check_post)] {
+        let Some(k) = v.get(kind) else { continue };
+        let n = k["n"].as_u64().ok_or_else(|| format!("merged totals: {kind} without n"))?;
+        let t = Totals::from_json(&k["totals"]).map_err(|e| format!("merged totals: {kind}: {e}"))?;
+        check(n, &t);
+        out.push(format!("fuzz totals: {kind} checked over {n} seeds ({} counters, merged shards)", t.0.len()));
+    }
+    if out.is_empty() {
+        return Err("merged totals: no games, matches or post kind".into());
+    }
+    Ok(out)
+}
+
+/// The counters the games' end-of-run checks read ([`check_games`]): this process's (one chunk of games).
+fn games_totals(companions_used: u64) -> Totals {
+    let l = |a: &AtomicU64| a.load(Ordering::Relaxed);
+    let mut t = Totals::default();
+    for (k, v) in [
+        ("companions_used", companions_used),
+        ("max_power", MAX_POWER.load(Ordering::Relaxed).max(0) as u64),
+        ("hd_worlds", l(&HD_WORLDS)),
+        ("hd_other_deck", l(&HD_OTHER_DECK)),
+        ("hd_steps", l(&HD_STEPS)),
+        ("dc_choices", l(&DC_CHOICES)),
+        ("dc_worlds", l(&DC_WORLDS)),
+        ("dc_eval_chosen", l(&DC_EVAL_CHOSEN)),
+        ("dt_worlds", l(&DT_WORLDS)),
+        ("dt_ratio", l(&DT_RATIO)),
+        ("belief_worlds", l(&BELIEF_WORLDS)),
+        ("belief_dealt", l(&BELIEF_DEALT)),
+        ("belief_uniform", l(&BELIEF_UNIFORM)),
+        ("gy_lists", l(&GY_LISTS)),
+        ("is_walks", l(&IS_WALKS)),
+        ("is_steps", l(&IS_STEPS)),
+        ("chance_walks", l(&CHANCE_WALKS)),
+        ("chance_steps", l(&CHANCE_STEPS)),
+        ("chance_forced", l(&CHANCE_FORCED)),
+        ("dd_b_misdirections", l(&DD_B_MISDIRECTIONS)),
+        ("dd_b_retargets", l(&DD_B_RETARGETS)),
+        ("dd_b_flusterstorms", l(&DD_B_FLUSTERSTORMS)),
+        ("dd_b_copies", l(&DD_B_COPIES)),
+        ("dd_b_cavern_types", l(&DD_B_CAVERN_TYPES)),
+        ("dd_b_uncounterable", l(&DD_B_UNCOUNTERABLE)),
+        ("delver_murktides", l(&DELVER_MURKTIDES)),
+        ("delver_murk_triggers", l(&DELVER_MURK_TRIGGERS)),
+        ("delver_charms", l(&DELVER_CHARMS)),
+        ("dd_a_pacts", l(&DD_A_PACT_TRIGGERS)),
+        ("ddc_edge_cast", l(&DDC_EDGE_CAST)),
+        ("ddc_edge_cycled", l(&DDC_EDGE_CYCLED)),
+        ("ddc_wraith_cast", l(&DDC_WRAITH_CAST)),
+        ("ddc_wraith_cycled", l(&DDC_WRAITH_CYCLED)),
+        ("ddc_leyline_opening", l(&DDC_LEYLINE_OPENING)),
+        ("ddc_leyline_games", l(&DDC_LEYLINE_GAMES)),
+        ("ddc_leyline_exile_games", l(&DDC_LEYLINE_EXILE_GAMES)),
+        ("doomsday_retargets", l(&DOOMSDAY_RETARGETS)),
+        ("doomsday_cavern_types", l(&DOOMSDAY_CAVERN_TYPES)),
+        ("names_taxed", l(&NAMES_TAXED)),
+        ("sns_free", l(&SNS_FREE)),
+        ("sns_uncounterable", l(&SNS_UNCOUNTERABLE)),
+        ("sns_named", l(&SNS_NAMED)),
+        ("delver_sb_at_ability", l(&DELVER_SB_AT_ABILITY)),
+    ] {
+        t.set(k, v);
+    }
+    let arrays: [(&str, &[AtomicU64]); 6] =
+        [("dd_a_cast", &DD_A_CASTS), ("doomsday_cast", &DOOMSDAY_CASTS), ("doomsday_ability", &DOOMSDAY_ABILITY_COUNTS), ("sns_seen", &SNS_SEEN), ("delver_sb_seen", &DELVER_SB_SEEN), ("cross_seen", &CROSS_SEEN)];
+    for (name, a) in arrays {
+        for (i, x) in a.iter().enumerate() {
+            t.set(&format!("{name}_{i}"), l(x));
         }
     }
-    Run::Done
+    for (q, row) in NAMES_CHOSEN.iter().enumerate() {
+        for (k, x) in row.iter().enumerate() {
+            t.set(&format!("names_chosen_{q}_{k}"), l(x));
+        }
+    }
+    t
+}
+
+/// `t`'s array counter `name_0, name_1, ...` (`len` of them).
+fn totals_vec(t: &Totals, name: &str, len: usize) -> Vec<u64> {
+    (0..len).map(|i| t.get(&format!("{name}_{i}"))).collect()
+}
+
+/// The games' end-of-run checks over `n` seeds' counters `t` (one chunk's, or a sharded run's merged totals: ENGINE.md
+/// 165): what the mode must have exercised, each over its own least number of games (200 for most).
+pub fn check_games(n: u64, t: &Totals) {
+    let g = |k: &str| t.get(k);
+    if n >= 200 && pool_mode() == PoolMode::Default {
+        assert!(g("companions_used") > 0, "no companion special action in {n} games");
+    }
+    if n >= 100 && exponential_mode() {
+        assert!(g("max_power") > u32::MAX as u64, "no board past u32::MAX power: the most {}", g("max_power"));
+    }
+    if hidden_decks_mode() && n >= 200 {
+        let (w, x) = (g("hd_worlds"), g("hd_other_deck"));
+        assert!(w > 0 && x * 10 > w * 9, "FUZZ_HIDDEN_DECKS: {x} of {w} worlds with another deck");
+    }
+    if deck_choice_fuzz().filter(|_| sealed_mode() && hidden_decks_mode()).is_some() && n >= 100 {
+        let (c, w, ch) = (g("dc_choices"), g("dc_worlds"), g("dc_eval_chosen"));
+        if super::env::var("FUZZ_DECK_CHOICE_BY").is_ok() {
+            assert!(ch > 0 && c == 0, "FUZZ_DECK_CHOICE_BY: {ch} seats chose, {c} decisions (the evaluator's choice is none)");
+        } else {
+            assert!(c > 0 && w > 0, "FUZZ_DECK_CHOICE: no deck choice was played");
+        }
+    }
+    if deck_tilt_fuzz().is_some() {
+        let w = g("dt_worlds");
+        let mean = g("dt_ratio") as f64 / 1e6 / w.max(1) as f64;
+        if w >= 100 {
+            assert!(mean > 1.5, "FUZZ_DECK_TILT: the deck tilt does not concentrate the deal ({mean:.3})");
+        }
+    }
+    if belief_tilt().is_some() {
+        let (w, d, u) = (g("belief_worlds"), g("belief_dealt"), g("belief_uniform"));
+        if w >= 100 {
+            assert!(d > 2 * u, "FUZZ_BELIEF: the weighted deal does not concentrate ({d} vs uniform {u})");
+        }
+    }
+    if n >= 200 {
+        assert!(g("gy_lists") > 0, "no graveyard-list decision in {n} games");
+        let (isw, iss, hds) = (g("is_walks"), g("is_steps"), g("hd_steps"));
+        if hidden_decks_mode() {
+            assert!(hds > 0, "FUZZ_HIDDEN_DECKS: no information-set walk compared a state after a common action in {n} games");
+        } else {
+            assert!(isw > 0 && iss > 0, "no information-set walk compared a state after a common action in {n} games ({isw} walks)");
+        }
+    }
+    if chance_every().is_some() && n >= 100 {
+        let (w, s, f) = (g("chance_walks"), g("chance_steps"), g("chance_forced"));
+        assert!(f > 0, "FUZZ_CHANCE: no replay took a forced outcome ({w} walks, {s} steps)");
+    }
+    if dd_b_mode() && n >= 200 {
+        let (m, r, f, c, ty, u) = (g("dd_b_misdirections"), g("dd_b_retargets"), g("dd_b_flusterstorms"), g("dd_b_copies"), g("dd_b_cavern_types"), g("dd_b_uncounterable"));
+        assert!(m > 0 && r > 0 && f > 0 && c > 0 && ty > 0 && u > 0, "lane B's cards weren't played: {m} {r} {f} {c} {ty} {u}");
+    }
+    if delver_mode() && n >= 200 {
+        let (m, tr, c) = (g("delver_murktides"), g("delver_murk_triggers"), g("delver_charms"));
+        assert!(m > 0 && tr > 0 && c > 0, "the legacy cards weren't played: {m} {tr} {c}");
+    }
+    if dd_a_mode() && n >= 200 {
+        let casts = totals_vec(t, "dd_a_cast", DD_A_CASTS.len());
+        let pacts = g("dd_a_pacts");
+        assert!(casts.iter().all(|&c| c > 0) && pacts > 0, "lane A's cards weren't played: {casts:?} {pacts}");
+    }
+    if ddc_mode() && n >= 300 {
+        let (ec, ey, wc, wy) = (g("ddc_edge_cast"), g("ddc_edge_cycled"), g("ddc_wraith_cast"), g("ddc_wraith_cycled"));
+        let (lo, lg, le) = (g("ddc_leyline_opening"), g("ddc_leyline_games"), g("ddc_leyline_exile_games"));
+        assert!(ec > 0 && ey > 0 && wc > 0 && wy > 0 && lo > 0 && lg > 0 && le > 0, "lane C's cards weren't played");
+    }
+    if doomsday_mode() {
+        let casts = totals_vec(t, "doomsday_cast", DOOMSDAY_CASTS.len());
+        let abil = totals_vec(t, "doomsday_ability", DOOMSDAY_ABILITY_COUNTS.len());
+        let (r, ty) = (g("doomsday_retargets"), g("doomsday_cavern_types"));
+        let cast = |name: &str| casts[DOOMSDAY_SPELLS.iter().position(|&n| n == name).unwrap()];
+        if n >= 200 {
+            let main = ["Doomsday", "Pact of Negation", "Personal Tutor", "Flow State", "Misdirection", "Thassa's Oracle", "Murktide Regent", "Prismari Charm"];
+            assert!(main.iter().all(|&m| cast(m) > 0), "the decks' cards weren't played: {casts:?}");
+            assert!(abil[0] > 0 && abil[1] > 0 && abil[2] > 0 && r > 0 && ty > 0, "the legacy cards' abilities weren't used: {abil:?} {r} {ty}");
+        }
+        // (Edge of Autumn and Street Wraith are cycled far more often than
+        // cast: their casts are asserted over 2,000 games.)
+        if n >= 2000 {
+            assert!(cast("Edge of Autumn") > 0 && cast("Street Wraith") > 0, "Edge of Autumn or Street Wraith never cast: {casts:?}");
+        }
+    }
+    if names_mode() && n >= 200 {
+        let chosen: Vec<Vec<u64>> = (0..NAMES_CHOSEN.len()).map(|q| totals_vec(t, &format!("names_chosen_{q}"), NAMES_CHOSEN[q].len())).collect();
+        let taxed = g("names_taxed");
+        assert!([0, 2, 3, 4, 7].iter().all(|&k| chosen[0][k] > 0), "Anointed Peacekeeper's kinds of names: {chosen:?}");
+        assert!(chosen[1].iter().sum::<u64>() > 0 && taxed > 0, "Disruptor Flute's names, taxed spells: {chosen:?} {taxed}");
+    }
+    if sns_mode() && n >= 200 {
+        let seen = totals_vec(t, "sns_seen", SNS_SEEN.len());
+        let (free, unc, named) = (g("sns_free"), g("sns_uncounterable"), g("sns_named"));
+        if pool_mode() == PoolMode::Sns {
+            assert!(seen.iter().all(|&c| c > 0) && free > 0 && unc > 0 && named > 0, "the lane's cards weren't played: {seen:?} {free} {unc} {named}");
+        }
+        // (The deck's one Omniscience, ten mana, mostly enters by Show and Tell: its free casts
+        // are what is required.)
+        if pool_mode() == PoolMode::SneakShow {
+            assert!(seen[0] > 0 && seen[2] > 0 && free > 0 && unc > 0, "the deck's lane cards weren't played: {seen:?} {free} {unc}");
+        }
+    }
+    if delver_sb_mode() && n >= 200 {
+        let seen = totals_vec(t, "delver_sb_seen", DELVER_SB_SEEN.len());
+        let at = g("delver_sb_at_ability");
+        assert!(seen[..5].iter().all(|&c| c > 0) && at > 0, "the five cards weren't played: {seen:?} {at}");
+    }
+    if cross_mode() && n >= 200 {
+        let seen = totals_vec(t, "cross_seen", CROSS_SEEN.len());
+        assert!(seen[0] > 0 && seen[2] > 0, "Doomsday or Show and Tell never cast: {seen:?}");
+    }
+}
+
+/// The matches' end-of-run checks over `n` matches' counters `t` (ENGINE.md 167; each needs 20 matches).
+pub fn check_matches(n: u64, t: &Totals) {
+    if n < 20 {
+        return;
+    }
+    let g = |k: &str| t.get(k);
+    if dealt_mode() {
+        assert!(g("dealt_matches") > 0 && g("dealt_decks") > 0, "no dealt match");
+    }
+    if per_seat_mode() {
+        assert!(g("table_decisions") > 0, "no choice table decision (ENGINE.md 168.3)");
+    }
+    assert!(g("pk_new_games") > 0 && g("pk_new_game_keys") > 0, "the private-key check reached no game a world started (ENGINE.md 141)");
+    assert!(g("sb") > 0 && g("changed") > 0 && g("three") > 0, "no sideboarding, changed deck or match of three");
+    let (w, s) = (g("match_is_walks"), g("match_is_steps"));
+    assert!(s > 0, "no match information-set walk compared a state after a common action ({w} walks)");
+    if constructed_bo3_mode() {
+        assert!(g("hidden_changed") * 2 > g("hidden") && g("choices_dealt") > 0 && g("tilted") > 0, "the constructed 60s are rarely dealt");
+    } else {
+        // (Interaction lists have no first picks: open decklists.)
+        assert!(
+            interactions_mode() || g("first_picks_changed") > g("worlds") / 4 && g("decks_changed") > g("worlds") / 4,
+            "the hidden pool is rarely resampled"
+        );
+    }
+}
+
+/// The post-sideboard matches' end-of-run checks over `n` matches' counters `t` (ENGINE.md 167; 20 matches).
+pub fn check_post(n: u64, t: &Totals) {
+    if n < 20 {
+        return;
+    }
+    let g = |k: &str| t.get(k);
+    if dealt_mode() {
+        assert!(g("dealt_matches") > 0 && g("dealt_decks") > 0, "post-sideboard matches: no dealt match");
+    }
+    if per_seat_mode() {
+        assert!(g("table_decisions") > 0, "post-sideboard matches: no choice table decision (ENGINE.md 168.3)");
+    }
+    assert!(
+        g("sb") > 0 && g("changed") > 0 && g("three") > 0 && g("kept_or_dealt") > 0 && g("choices_dealt") > 0 && g("tilted") > 0,
+        "post-sideboard matches: no sideboarding, changed deck, match of three or keeper"
+    );
+    assert!(g("pk_new_games") > 0, "post-sideboard matches: the private-key check reached no game a world started (ENGINE.md 141)");
 }
 
 /// The spec of fuzzed match `seed`: random pools (bo3's default), the
@@ -4094,6 +4282,8 @@ pub fn matches_skipped() -> Option<&'static str> {
 pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     if let Some(why) = matches_skipped() {
         println!("{why}");
+        // (a sharded run's positive evidence that this pool plays no matches: ENGINE.md 167)
+        println!("FUZZ_TOTALS {}", serde_json::json!({"kind": "matches", "first": first, "n": n, "skipped": why}));
         return Run::Done;
     }
     let (mut games_played, mut draws, mut decisions, mut sb, mut changed, mut three) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
@@ -4128,10 +4318,8 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     }
     if dealt_mode() {
         println!("dealt decks (ENGINE.md 154): {dealt_matches} of {n} matches with a dealt seat, {dealt_decks} dealt 60s checked");
-        assert!(n < 20 || dealt_matches > 0 && dealt_decks > 0, "no dealt match");
         if per_seat_mode() {
             println!("choice tables (ENGINE.md 168.3): {table_decisions} table decisions played, each table 60 reached");
-            assert!(n < 20 || table_decisions > 0, "no choice table decision");
         }
     }
     println!(
@@ -4151,17 +4339,9 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     rules_verdict("fuzz_random_matches");
     // (ENGINE.md 141: the worlds dealt while sideboarding play their next game with the observer)
     println!("{}", private_keys_report());
-    assert!(
-        n < 20 || PK_NEW_GAMES.load(Ordering::Relaxed) > 0 && PK_NEW_GAME_KEYS.load(Ordering::Relaxed) > 0,
-        "the private-key check reached no game a world started (ENGINE.md 141)"
-    );
-    // (Over a chunk of matches; a single match's rerun, `FUZZ_MATCHES=1`,
-    // passes when the match completes: ENGINE.md 51.)
-    assert!(n < 20 || sb > 0 && changed > 0 && three > 0, "no sideboarding, changed deck or match of three");
     // The information-set walks compared states (ENGINE.md 148).
     let (w, s) = (MATCH_IS_WALKS.load(Ordering::Relaxed), MATCH_IS_STEPS.load(Ordering::Relaxed));
     println!("match information sets (ENGINE.md 148): {w} walks, {s} states compared after a common action");
-    assert!(n < 20 || s > 0, "no match information-set walk compared a state after a common action ({w} walks)");
     if cross_mode() {
         let pairs: Vec<String> = CROSS_PAIRS.iter().map(|&(a, b)| format!("{} v {}", REAL_75_NAMES[a], REAL_75_NAMES[b])).collect();
         println!("FUZZ_POOL=cross matches: {} by seed % 8; the 75s: {}", pairs.join(", "), cross_75_report());
@@ -4172,14 +4352,35 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             "constructed: {} worlds, the opponent's 60 hidden in {} ({} with another 60 than the real one), {} first sideboarders' choices dealt, {} deck-tilted worlds from the K cached decks",
             stats.worlds, stats.hidden, stats.hidden_changed, stats.choices_dealt, stats.tilted
         );
-        assert!(n < 20 || stats.hidden_changed * 2 > stats.hidden && stats.choices_dealt > 0 && stats.tilted > 0, "the constructed 60s are rarely dealt");
+    }
+    // the end-of-run checks over the chunk's counters (over a chunk of matches; a single match's rerun, `FUZZ_MATCHES=1`,
+    // passes when the match completes: ENGINE.md 51; a shard's are left to the merged totals: ENGINE.md 167)
+    let mut t = Totals::default();
+    for (k, v) in [
+        ("dealt_matches", dealt_matches),
+        ("dealt_decks", dealt_decks),
+        ("table_decisions", table_decisions),
+        ("pk_new_games", PK_NEW_GAMES.load(Ordering::Relaxed)),
+        ("pk_new_game_keys", PK_NEW_GAME_KEYS.load(Ordering::Relaxed)),
+        ("sb", sb),
+        ("changed", changed),
+        ("three", three),
+        ("match_is_walks", w),
+        ("match_is_steps", s),
+        ("worlds", stats.worlds),
+        ("first_picks_changed", stats.first_picks_changed),
+        ("decks_changed", stats.decks_changed),
+        ("hidden", stats.hidden),
+        ("hidden_changed", stats.hidden_changed),
+        ("choices_dealt", stats.choices_dealt),
+        ("tilted", stats.tilted),
+    ] {
+        t.set(k, v);
+    }
+    end_of_run("matches", first, n, &t, check_matches);
+    if constructed_bo3_mode() {
         return post_sideboard_matches(first, n, hooks);
     }
-    // (Interaction lists have no first picks: open decklists.)
-    assert!(
-        n < 20 || interactions_mode() || stats.first_picks_changed > stats.worlds / 4 && stats.decks_changed > stats.worlds / 4,
-        "the hidden pool is rarely resampled"
-    );
     Run::Done
 }
 
@@ -4222,10 +4423,8 @@ fn post_sideboard_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     if dealt_mode() {
         // (dealt decks refuse a keeper, ENGINE.md 154: the dealt seats instead)
         println!("post-sideboard dealt decks: {dealt_matches} of {n} matches with a dealt seat, {dealt_decks} dealt 60s checked");
-        assert!(n < 20 || dealt_matches > 0 && dealt_decks > 0, "post-sideboard matches: no dealt match");
         if per_seat_mode() {
             println!("post-sideboard choice tables (ENGINE.md 168.3): {table_decisions} table decisions played, each table 60 reached");
-            assert!(n < 20 || table_decisions > 0, "post-sideboard matches: no choice table decision");
         }
     }
     // (a keeper's decisions, or with dealt decks - which refuse a keeper - the dealt 60s)
@@ -4243,10 +4442,24 @@ fn post_sideboard_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     );
     println!("{} (with the matches before)", rules_report());
     rules_verdict("fuzz_post_sideboard_matches");
-    assert!(n < 20 || sb > 0 && changed > 0 && three > 0 && kept_or_dealt > 0 && stats.choices_dealt > 0 && stats.tilted > 0, "post-sideboard matches: no sideboarding, changed deck, match of three or keeper");
     // (ENGINE.md 141: every game 2 and 3 of these matches starts after a sideboarding, the worlds' too)
     println!("{} (cumulative)", private_keys_report());
-    assert!(n < 20 || PK_NEW_GAMES.load(Ordering::Relaxed) > new_games0, "post-sideboard matches: the private-key check reached no game a world started (ENGINE.md 141)");
+    let mut t = Totals::default();
+    for (k, v) in [
+        ("dealt_matches", dealt_matches),
+        ("dealt_decks", dealt_decks),
+        ("table_decisions", table_decisions),
+        ("sb", sb),
+        ("changed", changed),
+        ("three", three),
+        ("kept_or_dealt", kept_or_dealt),
+        ("choices_dealt", stats.choices_dealt),
+        ("tilted", stats.tilted),
+        ("pk_new_games", PK_NEW_GAMES.load(Ordering::Relaxed) - new_games0),
+    ] {
+        t.set(k, v);
+    }
+    end_of_run("post", first, n, &t, check_post);
     Run::Done
 }
 

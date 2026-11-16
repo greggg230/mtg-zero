@@ -101,6 +101,22 @@ fn a_listed_card_s_find_with_the_deck_known_cross_post_sideboard_match_98() {
     assert!(p.games >= 2, "game 2 was played");
 }
 
+/// ENGINE.md 167: a sharded fuzz's end-of-run checks. `tools/fuzz_shards.py` runs `fuzz_random_games` /
+/// `fuzz_random_matches` over disjoint seed ranges with `FUZZ_SHARD=1` (each shard prints its `FUZZ_TOTALS` and leaves
+/// the checks over the whole run to this test), sums the shards' counters and runs this test with
+/// `FUZZ_TOTALS_FILE=<the merged totals>`: the same checks as one run of all the seeds, on the totals. Without the
+/// variable it checks nothing (the gate wants its "fuzz totals: ... checked" lines as positive evidence).
+#[test]
+fn fuzz_shard_totals() {
+    let Ok(path) = std::env::var("FUZZ_TOTALS_FILE") else {
+        return;
+    };
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("FUZZ_TOTALS_FILE={path}: {e}"));
+    for line in games::check_merged(&text).unwrap_or_else(|e| panic!("FUZZ_TOTALS_FILE={path}: {e}")) {
+        println!("{line}");
+    }
+}
+
 #[test]
 fn fuzz_random_games() {
     let n: u64 = std::env::var("FUZZ_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
