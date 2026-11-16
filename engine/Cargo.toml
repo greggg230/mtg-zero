@@ -98,6 +98,11 @@ path = "tests/cards_suite.rs"
 name = "misc_suite"
 path = "tests/misc_suite.rs"
 
+# (its own process: it arms the MTGZ_TEST_PANIC test fault in the process's environment, ENGINE.md 172)
+[[test]]
+name = "selfplay_panic"
+path = "tests/selfplay_panic.rs"
+
 [[test]]
 name = "rules_suite"
 path = "tests/rules_suite.rs"

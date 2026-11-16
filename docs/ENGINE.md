@@ -36304,3 +36304,109 @@ adds a NOT NEEDED step `pytest-ir` that says why; one or more, or no main to com
 that runs pytest (python, encoding, engine, search-core and the rest share `pytest_step`). The docs tier runs no pytest.
 `tests/test_gate.py::test_the_card_ir_tests_run_only_when_the_commit_touches_the_pipeline` checks both ways, a commit on
 main and no main. By hand: `python -m pytest tests/ir -q` (or `python tools/card_ir.py check` alone, ~5 s).
+
+## 172. Self-play panic containment for every executor: one failure queue with a replay command, the farm worker's and the Mac's failures, `selfplay.panics`, a test fault on real games (branch `feat/selfplay-panic-queue`, zero-core `feat/panic-queue`, 2026-11-16)
+
+Branch `feat/selfplay-panic-queue` from main ebf322d5 (main f76ab8af merged in); zero-core pin 002731c ->
+`feat/panic-queue` 76e7d39 (zero-core docs/search.md 2.19). Why: the user's decision D1 (2026-11-15, 167.3) moved the
+20k fuzz depth to continuous farm fuzz (171), with "a rare bug costs a game, not the run" as its prerequisite. 167.6
+made a panicking game cost one game on every executor, but only this machine's driver kept what replays it: the Mac's
+remote worker printed it into its log, the farm worker logged it on the farm PC (unreachable). Now every dropped game,
+wherever it was played, is one line of `<run>/game_failures.jsonl` that names where it panicked and replays with one
+command, and 171's fuzz steward takes those lines into the same failure queue (and alert) as the fuzz's. No rule,
+encoding or search change: the digests are EQUAL (172.5). Section number: 171 is the fuzz steward's (`feat/fuzz-steward`).
+
+### 172.1 What was already there (167.6) and what was checked
+
+* **Unwinding.** No profile in this repo or zero-core sets `panic = "abort"`: a panic unwinds in the Python module, the
+  tests and the `+crt-static` farm worker (the static CRT does not change MSVC unwinding). `[profile.release]` now says
+  `panic = "unwind"` (the default: the same code) so no one turns it off; `[profile.fuzz]` inherits it. The native
+  worker test below drops a game inside a release `mtgz-worker`: catch_unwind works there.
+* **Shared state after a dropped game** (zero-core's driver, read again): a game's step runs inside `run_chunk`'s
+  per-game `catch_unwind`; the leaves a game queues for the next batch are the rows it adds to its chunk's buffers in
+  that step, and on a panic every buffer is rolled back to its length before the step (`LeafBuf::snap` / `rollback`),
+  the results, samples and parked games it emitted in the step are truncated, and `drop_game` clears the slot's
+  pending leaf, lookahead, trees, records and evaluation cache. Answers to the game's earlier leaves were consumed at
+  the step's start (`slot.pending.take()`), and the other games of the chunk compute their row offsets after the
+  rollback, so nothing of the dropped game reaches a batch, a later game in its slot or the shard writer. No gap found;
+  the tests below check it on real MTG games (every other game's samples bit for bit).
+
+### 172.2 One record for every executor (zero-core docs/search.md 2.19)
+
+* The driver's `GameFailure` gains `site` (the panic's `file:line:col`, noted by a chained panic hook), `phase`
+  (`move`: inside a real move, `search`: anywhere else in the game's step) and `panic_move` (the chosen action that
+  panicked).
+* **This machine's driver** ('local'): `Run.failure_metrics` as before.
+* **The Mac's remote worker** ('mac', the remote's name): each failure goes to the run as a `failure` event with the
+  Mac checkout's commit and engine module hash (still printed in its log too).
+* **The farm worker** ('pool'): a dropped game's failure rides in the next records file's header (`"failures"`, a key
+  older readers ignore: no agent or coordinator change); the desktop's pool collector reads it
+  (`zero.farm_pool.header_failures`) with the worker's build_id. A failure after a job's last finished game stays in the
+  worker's log (a records file needs a game). Never a machine id or name in the record.
+* **The file.** `<run>/game_failures.jsonl`, one JSON object a line (`zero.game_failure.record`; 171's steward reads
+  these names): `t`, `iter`, `source` (`local` | `mac` | `pool`), `game`, `game_id`, `driver_seed`, `game_seed`,
+  `players`, `spec` (JSON text), `moves` (the real moves before the panic as a trace record's steps: actions, episode
+  boundaries `{"next": seat|null}`), `phase`, `panic_move`, `tag`, `start`, `branch`, `message`, `site` (the hook's note,
+  else the message's "panicked at", else `unknown`), `engine_commit` (the run checkout's HEAD; the Mac's own; a farm
+  worker plays the run's pinned commit by construction, 155), `build` (the engine module's sha256[:24]; the farm
+  worker's build_id), `repro`.
+* **`repro`** = `python -m mtgz.az.game_failure replay "<the file's absolute path>" --line N`, run from an mtg-zero
+  checkout at `engine_commit` with its module built (the run's own pinned worktree): exit **101** and the panic's text
+  when it panics again (reproduced), **0** when nothing panicked (not reproduced: a search panic may depend on the
+  search's own worlds or tree), **2** when the line cannot be replayed (an archive start or a branch game, an illegal
+  move). The replay (`zero_search::record::replay_failure`): the game from spec + players + game seed, its moves, a
+  `move` panic's action and the single-option steps after it, then 64 random rollouts from that state (every second
+  one determinized from the decider's view, each step building the decider's row and option overrides as a search leaf
+  does: the encodings run too). `python -m mtgz.az.game_failure list <file>` lists a run's failures.
+* **The metric** `selfplay.panics` every iteration (0 included): the aborted rows among the iteration's results (this
+  machine's and the Mac's), or this machine's and the Mac's records if more, plus the pool's records. `game_failures`
+  and the storm limit (more than 5% of an iteration's games, at least 3: a broken build fails the run) are 167.6's.
+* The dedup key for the queue: `zero.game_failure.failure_key(site, message)` = tools/fuzz_farm.py's (the site and the
+  first message line's first 120 characters, digits masked).
+
+### 172.3 The test fault `MTGZ_TEST_PANIC=<game seed>:<turn>`
+
+`MtgAz::new_game` reads it for each game it starts (`matches::test_panic_of`); a game whose seed it names gets
+`MatchState::test_panic` and panics at its first step from that turn on (`MtgAz::match_step`; a real move or a step
+inside a search simulation of it, whichever comes first) with the message `injected test panic [test fault
+MTGZ_TEST_PANIC=<seed>:<turn>]: ...`. Unset - every real run - or naming another seed: None, nothing else read on the
+step path but one `Option` check; the field is classified `Derived` in the public-state table (never read by the rules,
+the encodings or the search). The replay arms a test fault named in the message (`[test fault NAME=VALUE]`, NAME ending
+in `_TEST_PANIC`), so a test's repro reproduces without the fault in its environment.
+
+### 172.4 Tests
+
+* `engine/tests/selfplay_panic.rs` (its own binary: it sets the process environment): zero-core's `Driver<MtgAz>` on
+  the digests' Delver best-of-three spec (constructed, one episode per game, game 2 on: contests cross episode
+  boundaries), 8 games, 2 groups, 2 threads, an evaluator that is a function of each row: unarmed, no failure; armed for
+  game 5's seed at turn 3, `game_panics` 1, game 5's row aborted with reason "panic" and no samples, every other game's
+  row and samples (hashed bit for bit) the unarmed run's, one failure with its ids and seeds and its site in
+  `engine/src/az/matches.rs`; `replay_failure` of it panics again with the fault armed, and plays its moves and
+  rollouts without a panic unarmed.
+* `tests/test_selfplay_panic.py`: the in-process driver through the Python binding (what the run and the Mac's remote
+  worker drive), traced: one game dropped, every other game's record the unarmed run's byte for byte; the run's
+  `failure_metrics` writes the line (`source` local, `game_id`, `game_seed`, `site`, a 40-hex `engine_commit`, `build`)
+  with `selfplay.panics` 1, and the line's `repro`, run as written from this checkout without the fault in its
+  environment, exits 101 printing the panic; a game that never panicked replays "not reproduced". The native worker
+  (`mtgz-worker serve`, a self-play job writing records, the fault armed in its environment): the dropped game in no
+  records file, its failure in a header's `failures` with the worker's build_id and the engine site,
+  `header_failures` reads it, every other game's record the unarmed job's byte for byte, the worker's log names the
+  failure, and the record the pool collector writes reproduces the panic.
+* zero-core: `a_panicking_game_is_dropped_and_the_run_goes_on` (+ the site, the phase, the replay panics again);
+  `tests/test_game_failures.py` (8: the record and its repro lines, the Mac's and the pool's failures with their sources
+  and builds, `panics`, the dedup key, the remote worker's `failure` event reaching the run); `cargo test --release`
+  201 + 3 passed; pytest test_farm_pool / test_farm_trace / test_worker_settings / test_privacy passed.
+* Not covered by a test: a real Mac remote session with the fault armed (the event's transport is tested on both ends
+  without a process: such a test starts worker processes, which the live-run fence keeps off the desktop).
+
+### 172.5 Checks and gates
+
+(Filled in after gating.)
+
+### 172.6 pb3
+
+Nothing of the live run was touched. pb3 (b309fa08, zero-core 002731c) already drops a panicking game on every executor
+(167.6); this section reaches it at its next restart, staged in its launch script's docstring ("NEXT RESTART: panic
+containment"): a re-pin to the merged main, a new signed release worker (the farm worker's build changes: the records
+header), its CUDA alternate re-signed, the farm gates and the CUDA self-test on pb3's real config, the Mac eval
+checkout.
