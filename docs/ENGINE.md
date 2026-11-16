@@ -36420,3 +36420,32 @@ At each UTC day's end `daily.log` gets one line: per build, seeds by source (far
 the queue's size. `--status-file` (the hub's `fuzz_steward_status.json`) holds today's numbers per target (done, in
 flight, quota, pace, hours behind, the boosted mode, the farm share, the local sources, by source), the farm's seeds
 over the last hour and day, the measured local rates and the queue's newest 20 entries.
+
+### 171.7 Measured, the first finding, gates (2026-11-16)
+
+Throughput (seeds an hour; a seed = one game, or one best-of-three match for `-matches`):
+
+| source | games | hidden-games | delver_dealt2-games | delver_dealt2-matches |
+|---|---|---|---|---|
+| a farm PC (16 threads, the first lease of `fz-delver-bo3-pb3-b309fa0-g`: 5,326 seeds in its ~7.5-minute slot, then the rest back to the pool) | ~42,000 per PC | - | - | - |
+| the Mac, per process (4 processes for 120 s each, `nice 19`, beside pb3's remote self-play: load ~19) | 10,800 | 9,600 | 16,200 | 6,500 |
+| the desktop, per process (idle priority beside pb3, ~1 GB RAM available) | - | - | ~9,600 (40 seeds in 15 s with start-up) | ~2,300 (200 matches in 155 s, 2 processes) |
+
+So a build's 50,000 seeds a day are ~1.2 hours of one farm PC, or ~1 hour of the Mac at the steward's 6 processes:
+comfortably reachable for main plus one or two live runs while the farm has PCs online, with the Mac as an ample
+fallback; the desktop is rarely needed. At share 0.25 beside pb3 the farm's 3 online PCs give fuzz ~0.75 of a PC.
+
+**The first finding** (the Mac's first run, before any campaign had reported): `delver_dealt2-matches` fails
+`engine/src/fuzz/games.rs:3898` in ~2.5% of matches - "a world determinized for P1: P0's private key (kind 3) carries
+the card's identity (N) in a world of P1 (ENGINE.md 141)" - on pb3's build (b309fa08) and on main's (f76ab8af), the
+same seeds failing on the Mac and the desktop (seeds 52, 95, 135, 163 of 0-199; repro `(at b309fa08) FUZZ_POOL=
+delver_dealt2 FUZZ_FIRST=52 FUZZ_MATCHES=1 cargo test --profile fuzz -p engine --test fuzz fuzz_random_matches --
+--exact --nocapture`). The release worker passes the same seeds: the check samples determinized worlds 1 in 4 under
+the `fuzz` profile and 1 in 40 in release (`checkpoint_every`), which is why 168.5's release-profile 20k (1,000
+matches) passed. Queue entry c8af53b37bd8: replayed and confirmed, the owner told. Not fixed here (an engine lane; a
+pb3 re-pin decision).
+
+**Gates.** `python tools/warm_pool.py run --sha 954143b4 -- python tools/gate.py python`: **GATE PASSED WITH SKIPS
+python 954143b4198a in 705s** (the live-run fence only: 7 live-run-hazard tests). zero-farm: `npm test` 23 files, 196
+tests; `tsc` clean; privacy check clean. Main fast-forwarded to 954143b4 (origin + mac); the logon task runs the
+steward from main's checkout.
