@@ -168,12 +168,16 @@ fn fuzz_random_games() {
 /// cards it exiled as picks while a free cast from among them pays a cost that picks objects (5,682:
 /// Abhorrent Oculus exiling six graveyard cards) - a loud failure of the encoding before. Each
 /// plays through with every check, and its rows have the enclosing task's picks as `links` tokens
-/// with their depth (`lk::DEPTH`); 5,682's for both viewers.
+/// with their depth (`lk::DEPTH`); 5,682's for both viewers. The seeds are release-profile games: the checkpoint's
+/// denominator (40) is drawn from the game's random stream, so under the `fuzz` profile (4) they would be other games
+/// without Etali - the test pins 40 (`CHECKPOINT_EVERY_OVERRIDE`, ENGINE.md 173.2).
 #[test]
 fn enclosing_picks_of_etali_s_casts_are_encoded() {
     use engine::az::encode::CODE;
     use engine::az::tail_encode::{lk, seg, Row};
+    use engine::fuzz::games::CHECKPOINT_EVERY_OVERRIDE;
     POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::Interactions)));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(40)));
     for seed in [5682, 6025, 7790, 12725] {
         let p = play(seed, true);
         let mut g = new_game(seed);
@@ -197,6 +201,7 @@ fn enclosing_picks_of_etali_s_casts_are_encoded() {
         }
     }
     POOL_OVERRIDE.with(|c| c.set(None));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
 }
 
 #[test]
