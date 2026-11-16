@@ -36680,3 +36680,14 @@ records header carries the failures, 172.6): **pb3's BUILD changes at that resta
 section** - the fast export needs no worker change of its own (174 above: the zero-onnx contract and reference.npz are
 unchanged, and pb3's current worker 99a7986f passed the farm gates on this branch's pin with a swapped graph). The new
 worker build is 172.6's (one release build, one CUDA re-sign, the farm gates and the CUDA self-test), done once for both.
+
+Gates of the merge 7034e8df (zero-core 2c67426), in warm worktrees beside the live runs:
+
+* `optin-core --baseline-root <main 5af07560, built>`: **GATE PASSED WITH SKIPS optin-core 7034e8dfd963 in 2095s**
+  (skipped: the live-run fence only: 17 core tests). Core tests 204; checkpoint_compat byte identity (3,272 samples);
+  digest formats constructed e1177d609d6c1aee, EoE 2efe956d589840ce, driver 6f7b863096e47dcd; dealt e802d9df793c9993;
+  farm compat identical; az 54, hidden 28; the other three games build; core pytest 699 passed.
+* `python`: **GATE PASSED WITH SKIPS python 7034e8dfd963 in 915s** (the live-run fence only), run with
+  `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` in the gate's environment: with the Mac loaded the gate falls back to the desktop
+  for its Mac pytest shards, and there `test_mac_remote::test_the_macs_selfplay_settings` fails without it (174.1's
+  `tools/local_env.sh` / Git Bash path conversion; main's checkout the same; one run of this merge failed so).
