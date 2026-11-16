@@ -38,6 +38,19 @@
 //!   its sha256) and `"score"` (its score by it).
 //! * Nothing here touches a game's state: determinism and every encoding are unchanged; a write
 //!   that fails panics (a loud failure, never a silently missing record).
+//! * **Constructed best-of-three games** (ENGINE.md 168.2, the matchup model's data): with the sink set, every
+//!   finished game of a real constructed best-of-three match (`MtgAz` on the `mtg` game) writes a line
+//!   `{"v": 1, "kind": "bo3", "spec", "seed", "game", "starter", "chooser", "wins" (before the game), "dealt",
+//!   "mode" (per seat: "main" game 1, "dealt", "table" - the choice table's 60, ENGINE.md 168.3 - or "chosen" by
+//!   the seat's own sideboarding), "decks" (copies per entry of the seat's 75, the spec line's list order),
+//!   "result" ([r0, r1], null aborted), "aborted", "turns", "post_board", "time"}` after a spec line
+//!   `{"v": 1, "kind": "bo3-spec", "spec", "lists" ([[card, copies], ...] per seat, the 75 in list order),
+//!   "mains" (the registered mains' copies), "dealt_decks", "table" (the choice table's version or null),
+//!   "start_game", "max_turns"}`. The record (`Bo3Log`) is made by `MtgAz`'s `new_game` and carried by the live
+//!   game only (`LiveLog`: a clone - a search's world, a replay's copy, a branch - carries none; zero-core's next
+//!   episode of a chained match carries it on, `next_match_episode`); the line is written where the game ends
+//!   (`MatchState::end_game`, before the match scores it). Remote self-play workers and the farm's games (played
+//!   elsewhere, replayed here on copies) write none.
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -125,6 +138,130 @@ pub struct Before {
     /// The action's mulligan answer: (seat, true = a mulligan taken) or a card put on the bottom.
     mulligan: Option<u8>,
     bottom: Option<(u8, DefId)>,
+}
+
+/// The live game's best-of-three record (module docs, ENGINE.md 168.2). Clones carry none: only the game zero-core
+/// made with `new_game` (and the next episodes it carries the record into) writes.
+pub struct LiveLog(Option<Arc<Bo3Log>>);
+
+impl Clone for LiveLog {
+    /// A clone is never the live game (module docs).
+    fn clone(&self) -> Self {
+        LiveLog(None)
+    }
+}
+
+impl Default for LiveLog {
+    fn default() -> Self {
+        LiveLog(None)
+    }
+}
+
+impl LiveLog {
+    /// The same record for the live game's successor (a chained match's next episode, ENGINE.md 121).
+    pub fn carry(&self) -> LiveLog {
+        LiveLog(self.0.clone())
+    }
+
+    pub fn get(&self) -> Option<&Bo3Log> {
+        self.0.as_deref()
+    }
+}
+
+/// A constructed best-of-three match's record (module docs).
+pub struct Bo3Log {
+    spec_key: u64,
+    spec: Value,
+    seed: u64,
+}
+
+impl Bo3Log {
+    /// The record of a constructed best-of-three match with spec `spec` and seed `seed`, when the log is on; else
+    /// none (and none for any other spec or a position-lab start).
+    pub fn start(spec: &MtgSpec, seed: u64) -> LiveLog {
+        if !ON.load(Ordering::Relaxed) || spec.start.is_some() || !spec.constructed || spec.format != super::matches::Format::Bo3 {
+            return LiveLog(None);
+        }
+        let Ok(seats) = spec.try_seats(seed) else { return LiveLog(None) };
+        let db = spec.db();
+        let mut lists = Vec::new();
+        let mut mains = Vec::new();
+        for s in &seats {
+            let (pool, counts) = super::matches::MatchPool::constructed(&s.deck, &s.sideboard);
+            lists.push(pool.list.iter().map(|&(d, n)| json!([db.def(d).name, n])).collect::<Vec<_>>());
+            mains.push(counts);
+        }
+        let dealt = spec.dealt_decks.map(|d| json!({"p": d.p.0, "swaps": [d.swaps.0, d.swaps.1], "per_seat": d.per_seat}));
+        let spec_json = json!({
+            "kind": "bo3-spec", "lists": lists, "mains": mains, "dealt_decks": dealt,
+            "table": spec.sideboard_table.as_ref().map(|t| t.version.clone()), "start_game": spec.start_game,
+            "max_turns": spec.max_turns,
+        });
+        let spec_key = spec_json.to_string().bytes().fold(0x6A3E_B030u64, |h, b| crate::rng::split64(h ^ b as u64));
+        LiveLog(Some(Arc::new(Bo3Log { spec_key, spec: spec_json, seed })))
+    }
+
+    /// The live match `a`'s current game is over (`end_game`, before the match scores it): write its line.
+    pub fn game_end(&self, a: &MtgAz) {
+        let m = &a.m;
+        let g = &a.g;
+        let aborted = g.aborted();
+        let game = m.game_no;
+        let t = g.turn();
+        let mode = |p: u8| {
+            if game == 1 {
+                "main"
+            } else if m.is_dealt(p) {
+                "dealt"
+            } else if m.table[p as usize].is_some() {
+                "table"
+            } else {
+                "chosen"
+            }
+        };
+        let result = if aborted {
+            Value::Null
+        } else {
+            match g.outcome().and_then(|o| o.winner) {
+                Some(w) => json!([(w == 0) as u8 as f64, (w == 1) as u8 as f64]),
+                None => json!([0.5, 0.5]),
+            }
+        };
+        let time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
+        let line = json!({
+            "v": 1, "kind": "bo3", "spec": format!("{:016x}", self.spec_key), "seed": self.seed, "game": game,
+            "starter": t.starting, "chooser": t.chooser, "wins": [m.wins[0], m.wins[1]],
+            "dealt": [m.is_dealt(0), m.is_dealt(1)], "mode": [mode(0), mode(1)],
+            "decks": [m.decks[0].to_vec(), m.decks[1].to_vec()], "result": result, "aborted": aborted,
+            "turns": t.number, "post_board": m.post_board, "time": (time * 1000.0).round() / 1000.0,
+        });
+        write_line(self.spec_key, &self.spec, &line);
+    }
+}
+
+/// Append `line` to the sink (and the spec line `spec` first, once per file and spec key).
+fn write_line(spec_key: u64, spec: &Value, line: &Value) {
+    let mut g = SINK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(sink) = g.as_mut() else { return };
+    let mut out = String::new();
+    if !sink.specs.contains(&spec_key) {
+        let mut sp = spec.clone();
+        sp["v"] = json!(1);
+        sp["spec"] = json!(format!("{spec_key:016x}"));
+        out.push_str(&sp.to_string());
+        out.push('\n');
+    }
+    out.push_str(&line.to_string());
+    out.push('\n');
+    if sink.file.is_none() {
+        let f = OpenOptions::new().create(true).append(true).open(&sink.path);
+        sink.file = Some(f.unwrap_or_else(|e| panic!("game log: {}: {e}", sink.path.display())));
+    }
+    let f = sink.file.as_mut().expect("opened");
+    f.write_all(out.as_bytes()).and_then(|_| f.flush()).unwrap_or_else(|e| panic!("game log: {}: {e}", sink.path.display()));
+    if !sink.specs.contains(&spec_key) {
+        sink.specs.push(spec_key);
+    }
 }
 
 /// Standard base64 (RFC 4648, with padding) of `b`.

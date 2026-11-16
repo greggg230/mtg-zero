@@ -3146,9 +3146,12 @@ pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
     // Dealt decks (ENGINE.md 154): which player's 60s this match deals - public, the same in every world; per
     // player in `globals_v6` (frame seat first), in every row of the match (sideboarding's too: the other
     // player's beliefs about the next 60 depend on it).
-    if let Some(d) = m.dealt {
-        let side = (d != me) as usize;
-        out[lay.o_globals_v6 + g6::PLAYER * side + g6::DEALT] = 1.0;
+    // (ENGINE.md 168.1: both seats may be dealt)
+    for d in 0..2u8 {
+        if m.is_dealt(d) {
+            let side = (d != me) as usize;
+            out[lay.o_globals_v6 + g6::PLAYER * side + g6::DEALT] = 1.0;
+        }
     }
     let x = &mut out[lay.o_match..lay.o_match + MATCH];
     let size = |c: &[u8]| c.iter().map(|&n| n as f32).sum::<f32>() / 40.0;
