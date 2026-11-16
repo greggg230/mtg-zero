@@ -36628,7 +36628,8 @@ private to the other player in those steps was `HIDDEN`. 173.4's 20k fuzz-profil
   printed in the private-key report.
 * `CHECKPOINT_EVERY_OVERRIDE` (thread-local, None by default: the profile's rate): `checkpoint_every`'s denominator is
   drawn from the match's own random stream, so a seed found under the `fuzz` profile is the same match only at 4 - the
-  regression test replays the queue's seeds at 4 in any profile.
+  regression test replays the queue's seeds at 4 in any profile, and the Etali test of 142.10 pins 40 (its seeds
+  are release-profile games; under the `fuzz` profile it failed on main too, 173.4).
 
 Engine code outside the fuzz module, the encodings, the search and every run's play are unchanged: digests EQUAL
 (173.4), no RULES_EPOCH bump, no canary, no farm worker change for self-play (the worker's fuzz jobs carry the
@@ -36661,7 +36662,31 @@ until then its b309fa08 fuzz build keeps reporting c8af53b37bd8 (a known false p
 
 ### 173.4 Checks and gates
 
-(FILLED BELOW)
+The desktop beside the live runs pb1 (paused) and pb3: every cargo, fuzz and pytest step on the Mac (`tools/mac.sh`,
+`nice`), the gates through `warm_pool.py` and `slotd.sh`.
+
+* **The queue's nine seeds**, fuzz profile, on the fix (adc5b64d): each `FUZZ_POOL=delver_dealt2 FUZZ_FIRST=<seed>
+  FUZZ_MATCHES=1 ... fuzz_random_matches` passes; each checks 1 or 2 looks in a step that began the next game. On main
+  5af07560 each fails with the queue's message.
+* **The regression test** in release: fails on the fix with the play-on call reverted (match 52, the queue's message),
+  passes with it (9 matches, ~4 s).
+* **A fresh 20,000-match `delver_dealt2` fuzz under the `fuzz` profile** (`tools/fuzz_shards.py --pool delver_dealt2
+  --games 2000 --matches 20000 --first 7300000 --shards 20 --jobs 4` with the fuzz-profile test binary of adc5b64d, the
+  Mac, 5,692 s): **all 40 shards passed** - 20,000 whole matches (~90% with a dealt seat; a 1,000-match shard ~2,600
+  games) and 20,000 post-sideboard matches, 2,000 games, the merged end-of-run checks (`fuzz totals: games / matches /
+  post checked`). The private-key check in the match fuzz's worlds: **144,270,407** of the other player's private
+  keys masked, 26,377,564 of them in 1,147,164 games a world started; 649,483 looks at the viewer's hand (public by
+  design), **1,827 of them in a step that began the next game** (each a failure of the old check), **0 failures**.
+  The run's only problem was the fuzz binary's other tests: `enclosing_picks_of_etali_s_casts_are_encoded` fails
+  under the `fuzz` profile, on main 5af07560 too (seed 5682 is another game at the profile's denominator, no Etali):
+  the test now pins 40 (`CHECKPOINT_EVERY_OVERRIDE`, its seeds are release games). With it the fuzz binary's other
+  tests pass in both profiles and the default, `delver_dealt2` and `interactions` pools (9 of 9 each).
+* **Digests EQUAL** (the engine gate below): full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5, constructed
+  e1177d609d6c1aee, eoe 2efe956d589840ce, driver 6f7b863096e47dcd, dealt e802d9df793c9993; farm compat identical
+  (gate 2: 6 games, 2,484 rows, 150 batches; gate 3: 6 games).
+* **GATE PASSED suite adc5b64d394e in 415s** (2,680 passed in 23 binaries; the sharded 2k fuzz of default,
+  default+hidden, delver_dealt, delver_dealt2). **GATE PASSED WITH SKIPS engine adc5b64d394e in 958s**
+  (`--tested-sha adc5b64d`; the live-run fence only: 1 test).
 
 ## 174. The farm pool's per-generation export by weight swap: ~150 s -> ~2 s (branch `feat/fast-farm-export`, zero-core `feat/fast-farm-export`, 2026-11-15)
 
