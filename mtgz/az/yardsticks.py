@@ -42,6 +42,29 @@ the smokes):
                    one (lane 'farm'): one this long without progress, its console unchanged (docs/ENGINE.md 175.6)
   poll             seconds between looks for new checkpoints (60)
 
+The metagame cells (docs/ENGINE.md 177; off unless cells_games or cells_gen_games > 0): every ordered (my deck,
+opponent's deck) cell of `cells_decks`, the checkpoint piloting my deck against a frozen reference piloting the
+other, against the reference piloting both on the same seeds (common random numbers) - see the section "the cells":
+
+  cells_games      games per cell against the current reference (even; 0 = off): cells_games / 2 seeds, each played
+                   with my side choosing play or draw and with the other side choosing (CR 103.1: spec `chooser`)
+  cells_gen_games  games per cell of the gen-over-gen kind: the checkpoint against the previously evaluated one (0)
+  cells_decks      the decks (data/decks names; default the three of the metagame: Izzet Delver, Doomsday, Sneak and
+                   Show)
+  cells_refs       the reference ladder's start: 'LABEL=PATH', 'iter0' or {"label", "path", "since"?, "elo"?,
+                   "elo_se"?}; later references are frozen by `run_yardsticks.py cells-freeze` (an explicit command:
+                   <run>/yardsticks/cells_ladder.json), never automatically
+  cells_sims, cells_device   (null: bo1_sims, bo1_device)
+  cells_backend    'local', 'farm' or null = auto (as bo1_backend, per reference)
+  cells_seed       the seeds' base (0: the same deals every generation)
+  cells_format     'bo1' (the mains; 'bo3' cells: the extension point `_cell_spec`)
+  cells_max_turns  the cell specs' max_turns (60, as decklists.mirror_spec)
+  cells_promote    a cell whose expected score against the reference (the logistic of its Elo gain) passes this
+                   flags a new reference in the report (0.80)
+  cells_base_elo   the first reference's anchored Elo (1000, zero.elo's anchor)
+  cells_cache      the reference-vs-reference baselines' cache directory (default <run>/yardsticks/cells_base)
+  cells_boot       bootstrap resamples of each cell's paired seeds (1000; 0 = the delta method only)
+
 Results: one JSON line each in <run>/yardsticks.jsonl (append-only; the watcher is the only writer, under the lock
 <run>/yardsticks/lock.json):
 
@@ -50,6 +73,11 @@ Results: one JSON line each in <run>/yardsticks.jsonl (append-only; the watcher 
    "select", "spec_sha", "seed", "seconds", "time"}
   {"kind": "blunders", "iter", "passed", "total", "share", "kinds" {kind: [passed, n]}, "library", "spots", "stale",
    "sims", "repeats", "select", "seconds", "time"}
+  {"kind": "cells" | "cells_gen", "iter", "ref", "ref_sha", "sha", "pair" [deck, deck], "cells" {"X|Y": the cell's
+   statistics (cell_stats)}, "games", "unfinished", "base", "results" {"0", "1": the checkpoint's result per game id
+   of each chooser spec, '0' / 'h' / '1'}, "sims", "select", "seed", "spec_sha", "backend", "seconds", "time"}
+  {"kind": "cells_base", "ref", "ref_sha", "pair", "base" (its cache key), "games", "score", "sims", "select",
+   "seconds", "time"} - the reference-vs-reference games themselves are in its cache file
   a failure: {"kind", "iter", ("opp"), "error" (its last lines), "attempt", "retry_at", "time"} - said loudly on the
    watcher's console, tried again (in order: the oldest pending measurement first, a failed one once its wait is
    over), never dropped; status() lists it as failed until a result lands, and an evaluated checkpoint without a
@@ -68,8 +96,11 @@ Light at import (no torch, no numpy): the supervisor imports it through the comp
 """
 import hashlib
 import json
+import math
 import os
+import random
 import re
+import shutil
 import sys
 import time
 
@@ -82,7 +113,11 @@ DEFAULTS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter
             'bo1_threads': 4, 'bo1_groups': 2, 'bo1_spec': None, 'bo1_seed': 0, 'bo1_backend': None,
             'bo1_farm_share': 0.25, 'bo1_farm_wait_s': None, 'blunders': True,
             'blunders_sims': 1024, 'library': None, 'from': 0, 'settle': 60, 'retry_s': 300, 'retry_max_s': 7200,
-            'timeout_s': 7200, 'poll': 60}
+            'timeout_s': 7200, 'poll': 60,
+            # the metagame cells (docs/ENGINE.md 177)
+            'cells_games': 0, 'cells_gen_games': 0, 'cells_decks': None, 'cells_refs': [], 'cells_sims': None,
+            'cells_seed': 0, 'cells_device': None, 'cells_backend': None, 'cells_format': 'bo1', 'cells_max_turns': 60,
+            'cells_promote': 0.80, 'cells_base_elo': 1000.0, 'cells_cache': None, 'cells_boot': 1000}
 # the Delver presets' (the user, 2026-11-14: "our evaluations should test bo1 ability at all to look for regressions",
 # and the blunder tracker on every evaluation)
 DELVER_YARDSTICKS = {'bo1_games': 400, 'bo1_sims': 64, 'bo1_opponents': ['anchors', 'iter0'], 'blunders': True}
@@ -91,7 +126,15 @@ _NUM = (int, float)
 KEYS = {'bo1_games': int, 'bo1_sims': int, 'bo1_opponents': list, 'bo1_device': str, 'bo1_threads': int,
         'bo1_groups': int, 'bo1_spec': str, 'bo1_seed': int, 'bo1_backend': str, 'bo1_farm_share': _NUM,
         'bo1_farm_wait_s': _NUM, 'blunders': bool, 'blunders_sims': int, 'library': str,
-        'from': int, 'settle': _NUM, 'retry_s': _NUM, 'retry_max_s': _NUM, 'timeout_s': _NUM, 'poll': _NUM}
+        'from': int, 'settle': _NUM, 'retry_s': _NUM, 'retry_max_s': _NUM, 'timeout_s': _NUM, 'poll': _NUM,
+        'cells_games': int, 'cells_gen_games': int, 'cells_decks': list, 'cells_refs': list, 'cells_sims': int,
+        'cells_seed': int, 'cells_device': str, 'cells_backend': str, 'cells_format': str, 'cells_max_turns': int,
+        'cells_promote': _NUM, 'cells_base_elo': _NUM, 'cells_cache': str, 'cells_boot': int}
+# The metagame of the 3-deck run (docs/ENGINE.md 177): Izzet Delver, Legacy Doomsday, Sneak and Show (data/decks)
+CELL_DECKS = ['izzet_delver_8016541', 'doomsday_8027957', 'sneak_show_8014220']
+CELLS_FORMATS = ('bo1',)                  # ('bo3' cells: the extension point, _cell_spec)
+CELL_KINDS = ('cells', 'cells_gen', 'cells_base')
+KINDS = ('bo1', 'blunders') + CELL_KINDS
 # best-of-three keys of a spec (docs/ENGINE.md 120, 121, 130, 154): dropped for the run's game 1
 BO3_KEYS = ('format', 'game_episodes', 'start_game', 'dealt_decks')
 PASS, REPEATS = 5, 8                      # delverai_blunders' rule (a spot passes when right in 5 of 8 searches)
@@ -141,14 +184,48 @@ def normalize(ys):
             raise ValueError(f"yardsticks: bo1 opponent {x!r}: 'anchors', 'iter0' or 'LABEL=PATH'")
     if out['bo1_games'] and not out['bo1_opponents']:
         raise ValueError('yardsticks: bo1_games without bo1_opponents')
-    if not out['bo1_games'] and not out['blunders']:
-        raise ValueError('yardsticks: neither bo1_games nor blunders: nothing to measure ({} turns it off)')
+    if not out['bo1_games'] and not out['blunders'] and not out['cells_games'] and not out['cells_gen_games']:
+        raise ValueError('yardsticks: neither bo1_games, blunders nor cells: nothing to measure ({} turns it off)')
+    _normalize_cells(out)
     for k in ('retry_s', 'retry_max_s', 'timeout_s', 'poll'):
         if out[k] <= 0:
             raise ValueError(f'yardsticks: {k} {out[k]} must be > 0')
     if out['settle'] < 0 or out['from'] < 0:
         raise ValueError('yardsticks: settle and from must be >= 0')
     return out
+
+
+def _normalize_cells(out):
+    """The cells' options checked and resolved in place (cells_sims / cells_device: bo1's when null; cells_decks: the
+    metagame's three when null)."""
+    for k in ('cells_games', 'cells_gen_games'):
+        if out[k] < 0 or out[k] % 2:
+            raise ValueError(f'yardsticks: {k} {out[k]}: an even number >= 0 (seeds played from both sides; 0 = none)')
+    out['cells_decks'] = list(out['cells_decks'] or CELL_DECKS)
+    ds = out['cells_decks']
+    if not ds or not all(isinstance(x, str) and re.fullmatch(r'[A-Za-z0-9_.-]+', x) for x in ds) or len(set(ds)) != len(ds):
+        raise ValueError(f'yardsticks: cells_decks {ds!r}: distinct data/decks names')
+    if out['cells_sims'] is None:
+        out['cells_sims'] = out['bo1_sims']
+    if out['cells_device'] is None:
+        out['cells_device'] = out['bo1_device']
+    if out['cells_sims'] < 1:
+        raise ValueError(f"yardsticks: cells_sims {out['cells_sims']} must be >= 1")
+    if out['cells_device'] not in ('cuda', 'cpu'):
+        raise ValueError(f"yardsticks: cells_device {out['cells_device']!r}: 'cuda' or 'cpu'")
+    if out['cells_backend'] not in (None, 'farm', 'local'):
+        raise ValueError(f"yardsticks: cells_backend {out['cells_backend']!r}: 'farm', 'local' or null (auto)")
+    if out['cells_format'] not in CELLS_FORMATS:
+        raise ValueError(f"yardsticks: cells_format {out['cells_format']!r}: {list(CELLS_FORMATS)} (best-of-three cells "
+                         f"are not built yet: docs/ENGINE.md 177)")
+    if not 0.5 < out['cells_promote'] < 1:
+        raise ValueError(f"yardsticks: cells_promote {out['cells_promote']}: in (0.5, 1)")
+    if out['cells_boot'] < 0 or out['cells_max_turns'] < 1:
+        raise ValueError('yardsticks: cells_boot >= 0 and cells_max_turns >= 1')
+    for r in out['cells_refs']:
+        _ref_entry(r)                           # (ValueError for a bad one)
+    if out['cells_games'] and not out['cells_refs']:
+        raise ValueError("yardsticks: cells_games without cells_refs (the first reference: 'iter0' or 'LABEL=PATH')")
 
 
 def cfg_of(run):
@@ -323,7 +400,8 @@ def read_rows(run):
                     r = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(r, dict) and r.get('kind') in ('bo1', 'blunders') and isinstance(r.get('iter'), int):
+                if isinstance(r, dict) and r.get('kind') in KINDS and (
+                        isinstance(r.get('iter'), int) or (r.get('kind') == 'cells_base' and r.get('base'))):
                     out.append(r)
     except OSError:
         pass
@@ -339,10 +417,15 @@ def append_row(run, row):
 
 
 def key_of(row_or_item, lib=None):
-    """A measurement's key: ('bo1', iter, opponent) or ('blunders', iter, library id)."""
+    """A measurement's key: ('bo1', iter, opponent), ('blunders', iter, library id), ('cells' | 'cells_gen', iter,
+    reference, pair) or ('cells_base', its cache key)."""
     r = row_or_item
     if r['kind'] == 'bo1':
         return ('bo1', r['iter'], r['opp'])
+    if r['kind'] in ('cells', 'cells_gen'):
+        return (r['kind'], r['iter'], r['ref'], tuple(r['pair']))
+    if r['kind'] == 'cells_base':
+        return ('cells_base', r['base'])
     return ('blunders', r['iter'], r.get('library', lib))
 
 
@@ -371,6 +454,7 @@ def wanted(run, cfg, ys, lib=None, now=None, settle=None):
     kept spots - its measurements are wanted all the same and fail loudly until there is one)."""
     its = evaluated(run, cfg, ys, now, settle)
     opps = opponents(run, cfg, ys) if ys['bo1_games'] else []
+    cw = CellsWant(run, cfg, ys, now) if (ys['cells_games'] or ys['cells_gen_games']) else None
     out = []
     for it in its:
         for o in opps:
@@ -378,6 +462,8 @@ def wanted(run, cfg, ys, lib=None, now=None, settle=None):
                 continue                        # (generation 0 against itself, or a copy of it, measures nothing)
             out.append({'lane': bo1_lane(run, cfg, ys, o), 'kind': 'bo1', 'iter': it,
                         'opp': o['name']})
+        if cw is not None:                      # (the cells: each pair's baseline first, once)
+            out += cw.items(it)
         if ys['blunders']:                      # (no library: measured all the same - it fails loudly, retried)
             out.append({'lane': 'cpu', 'kind': 'blunders', 'iter': it, 'library': lib})
     return out
@@ -392,8 +478,10 @@ def pending(run, cfg, ys, lane, rows=None, lib=None, now=None, settle=None):
         if item['lane'] != lane:
             continue
         k = key_of(item, lib)
-        if k in res:
+        if k in res or item_done(run, ys, item):
             continue
+        if not item_ready(run, ys, item):
+            continue                            # (a cell waiting for its baseline, which comes first in the lane)
         f = fails.get(k)
         if f and now < f[-1].get('retry_at', 0):
             continue
@@ -417,22 +505,27 @@ def status(run, cfg=None, ys=None, lib=None, rows=None, now=None):
             lib = None
     rows = read_rows(run) if rows is None else rows
     res, fails = tally(rows)
-    miss, failed = [], []
+    miss, failed, cmiss, cfailed = [], [], [], []
     for item in wanted(run, cfg, ys, lib, now, settle=0):
         k = key_of(item, lib)
-        if k in res:
+        if k in res or item_done(run, ys, item):
             continue
-        x = {kk: item[kk] for kk in ('kind', 'iter', 'opp') if kk in item}
+        cell = item['kind'] in CELL_KINDS          # (the cells' own lists: the site's block knows bo1 and blunders)
+        x = {kk: item[kk] for kk in ('kind', 'iter', 'opp') + (('ref', 'pair', 'base') if cell else ()) if kk in item}
         f = fails.get(k)
         if f:
-            failed.append(dict(x, attempts=len(f), error=str(f[-1].get('error'))[-400:], retry_at=f[-1].get('retry_at')))
+            (cfailed if cell else failed).append(dict(x, attempts=len(f), error=str(f[-1].get('error'))[-400:],
+                                                      retry_at=f[-1].get('retry_at')))
         else:
-            miss.append(x)
+            (cmiss if cell else miss).append(x)
     try:
         opps = [{'name': o['name'], 'label': o['label']} for o in opponents(run, cfg, ys)] if ys['bo1_games'] else []
     except ValueError:
         opps = []
-    return {'expected': evaluated(run, cfg, ys, now, settle=0),
+    cells = None
+    if ys['cells_games'] or ys['cells_gen_games']:
+        cells = {'report': cells_report(run, cfg, ys, rows), 'missing': cmiss, 'failed': cfailed}
+    return {'expected': evaluated(run, cfg, ys, now, settle=0), 'cells': cells,
             'bo1': sorted((r for r in res.values() if r['kind'] == 'bo1'), key=lambda r: (r['iter'], r['opp'])),
             'blunders': sorted((r for r in res.values() if r['kind'] == 'blunders' and r.get('library') == lib),
                                key=lambda r: r['iter']),
@@ -586,6 +679,775 @@ def measure_blunders(run, it, cfg=None, ys=None, log=print):
             'spots': rec['library']['spots'], 'stale': len((c.get('stale') or {}).get(str(it), [])),
             'sims': ys['blunders_sims'], 'repeats': DB.REPEATS, 'select': DB.SELECT,
             'seconds': round(time.time() - t0, 1), 'time': round(time.time())}
+
+
+# ------------------------------------------------------------------------------------------------ the cells
+# The metagame cells (docs/ENGINE.md 177): the 3-deck run's network pilots every deck against every deck, so its
+# progress is measured per ordered cell (my deck X, the opponent's deck Y). For a cell, checkpoint C pilots X against a
+# frozen reference R piloting Y, and the baseline is R piloting X against R piloting Y on the SAME seeds (common
+# random numbers: the same shuffles, the same chooser): the cell's Elo gain is 400 log10 of the odds ratio of the two
+# scores. One unit is one seed played twice, once with X's side choosing play or draw (CR 103.1, the spec's
+# `chooser`) and once with Y's side choosing - the bo1 yardstick's pentanomial pair, with the side that chooses
+# swapped instead of the seats. The four games of a unit (C or R as X, X's side choosing or not) share the unit's
+# random numbers and are correlated; units are independent. So every standard error is taken over units: the delta
+# method on the units' (C, R) score pairs (their covariance included: the CRN's gain) and a bootstrap over units.
+#
+# The games: an unordered deck pair {X, Y} is two specs (p0 = X, p1 = Y; chooser 0 and chooser 1), each a zero.h2h
+# match of A against B with A in seat gid % 2 (its convention; a farm eval job's too), unpaired, the pair's own seed.
+# Even game ids are cell X|Y (A pilots X), odd ones cell Y|X; game g of the chooser-0 spec and game g of the chooser-1
+# spec are one unit (the same seed: game_seed(seed, g)). A mirror {X, X}: every game is cell X|X, and the baseline is
+# 0.5 exactly (R against R with the sides swapped by the chooser is symmetric), so it is the ordinary paired
+# head-to-head and plays no baseline games. The baseline of a non-mirror pair (R against R, the same two specs and
+# seeds) is cached by (reference, specs, seed, games, sims, seats, engine build): computed once.
+
+def _ref_entry(r):
+    """A cells_refs entry -> {'label', 'path' (None: generation 0 of the run), 'since', ...}; ValueError for a bad one."""
+    if isinstance(r, str):
+        if r == 'iter0':
+            return {'label': 'gen0', 'path': None, 'since': 0}
+        lb, sep, p = r.partition('=')
+        if not sep or not p.strip():
+            raise ValueError(f"yardsticks: cells_refs entry {r!r}: 'iter0', 'LABEL=PATH' or an object")
+        e = {'label': lb.strip(), 'path': p.strip(), 'since': 0}
+    elif isinstance(r, dict):
+        bad = sorted(set(r) - {'label', 'path', 'since', 'elo', 'elo_se', 'iter', 'sha', 'from_ref', 'gain', 'gain_se',
+                               'time'})
+        if bad or not isinstance(r.get('label'), str) or not isinstance(r.get('path'), str):
+            raise ValueError(f'yardsticks: cells_refs entry {r!r}: {{"label", "path", "since"?, "elo"?, "elo_se"?}}')
+        e = dict(r, since=int(r.get('since') or 0))
+    else:
+        raise ValueError(f'yardsticks: cells_refs entry {r!r}: a string or an object')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+', e['label']) or e['label'].startswith('iter_'):
+        raise ValueError(f"yardsticks: cells reference label {e['label']!r}: [A-Za-z0-9_.-], not iter_* (the "
+                         f"gen-over-gen kind's)")
+    return e
+
+
+def ladder_path(run):
+    """The references frozen by `run_yardsticks.py cells-freeze` (the only writer: an explicit command)."""
+    return os.path.join(run, DIR, 'cells_ladder.json')
+
+
+def read_ladder(run):
+    try:
+        with open(ladder_path(run), encoding='utf-8') as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        return []
+    return [_ref_entry(r) for r in d.get('refs') or []]
+
+
+def cell_refs(run, cfg, ys):
+    """The reference ladder, oldest first: the setting's cells_refs, then the frozen ones (cells_ladder.json) ->
+    [{'label', 'path', 'since', ...}]. A checkpoint is measured against the newest reference whose `since` it reached
+    (ref_for). ValueError: a label twice, or `since` going backwards."""
+    out = []
+    for r in list(ys['cells_refs']) + (read_ladder(run) if run else []):
+        e = _ref_entry(r) if not isinstance(r, dict) or 'since' not in r else dict(r)
+        if e['path'] is None:
+            e['path'] = model_path(run, 0)
+        out.append(e)
+    seen = set()
+    for i, e in enumerate(out):
+        if e['label'] in seen:
+            raise ValueError(f"yardsticks: two cells references labelled {e['label']!r}")
+        seen.add(e['label'])
+        if i and e['since'] < out[i - 1]['since']:
+            raise ValueError(f"yardsticks: cells reference {e['label']!r} since {e['since']} < the one before it")
+    return out
+
+
+def ref_for(refs, it):
+    """The reference checkpoint `it` is measured against: the newest whose `since` <= it (None: none yet)."""
+    cur = None
+    for r in refs:
+        if r['since'] <= it:
+            cur = r
+    return cur
+
+
+def ref_path(run, cfg, ys, label):
+    """A reference label's checkpoint: 'iter_NNNN' (the gen-over-gen kind's) or a ladder reference."""
+    m = re.fullmatch(r'iter_(\d+)', label)
+    if m:
+        return model_path(run, int(m.group(1)))
+    for r in cell_refs(run, cfg, ys):
+        if r['label'] == label:
+            return r['path']
+    raise ValueError(f'yardsticks: no cells reference {label!r} in this run\'s ladder')
+
+
+def cell_pairs(ys):
+    """The unordered deck pairs, in cells_decks order: (X, X) and (X, Y) for X before Y."""
+    d = ys['cells_decks']
+    return [(d[i], d[j]) for i in range(len(d)) for j in range(i, len(d))]
+
+
+def cell_id(x, y):
+    """Cell 'X|Y': X piloted by the measured side, against Y."""
+    return f'{x}|{y}'
+
+
+def _cell_spec(x, y, chooser, ys):
+    """The spec of p0 = X's main against p1 = Y's main, `chooser` choosing play or draw (JSON). A private stand-in
+    for decklists.pair_spec (branch feat/metagame-spec): REPLACE IT WITH pair_spec AT THAT MERGE (the same keys as
+    decklists.mirror_spec: max_turns, mulligans, constructed, decks; plus chooser). The extension point for
+    best-of-three cells: cells_format 'bo3' would build the pair's bo3 spec here (sideboards, game_episodes) - the
+    statistics take one result per game id, a match's as well as a game's."""
+    if ys['cells_format'] != 'bo1':
+        raise NotImplementedError(f"cells_format {ys['cells_format']!r}: best-of-three cells are not built yet")
+    from . import decklists as D
+    mains = []
+    for name in (x, y):
+        main = D.names(D.load(name)['main'])
+        if len(main) < 60:
+            raise ValueError(f'decklist {name}: {len(main)} maindeck cards (constructed: at least 60)')
+        mains.append(main)
+    return json.dumps({'max_turns': int(ys['cells_max_turns']), 'mulligans': True, 'constructed': True,
+                       'chooser': int(chooser), 'decks': {'p0': mains[0], 'p1': mains[1]}}, separators=(',', ':'))
+
+
+def pair_seed(ys, pair):
+    """A deck pair's seed (cells_seed and the pair's names: each pair its own deals, the same every generation)."""
+    h = hashlib.sha256(f"cells|{ys['cells_seed']}|{pair[0]}|{pair[1]}".encode()).digest()
+    return int.from_bytes(h[:4], 'little')
+
+
+def pair_jobs(pair, games, ys):
+    """The pair's two matches -> [{'chooser', 'spec', 'games', 'seed'}]: `games` per cell (a mirror: games / 2 a
+    spec, every game its cell's; else `games` a spec, half of them each cell's)."""
+    n = games // 2 if pair[0] == pair[1] else games
+    return [{'chooser': c, 'spec': _cell_spec(pair[0], pair[1], c, ys), 'games': n, 'seed': pair_seed(ys, pair)}
+            for c in (0, 1)]
+
+
+def engine_sha():
+    """The engine build's sha256 (12 hex) - the module `import mtgz._engine` loads - or None."""
+    import importlib.machinery
+    for suf in importlib.machinery.EXTENSION_SUFFIXES:
+        p = os.path.join(ROOT, 'mtgz', '_engine' + suf)
+        if os.path.exists(p):
+            return sha12(p)
+    return None
+
+
+_SEAT = {}
+
+
+def cells_seat(run):
+    """Both sides' seat in every cell match (bo1_seat: the run's evaluation rule without the deck tilt), memoized by
+    the run's config file."""
+    p = os.path.join(run, 'config.json')
+    try:
+        k = (os.path.normcase(os.path.abspath(run)), os.path.getmtime(p))
+    except OSError:
+        k = (os.path.normcase(os.path.abspath(run)), None)
+    if k not in _SEAT:
+        _SEAT[k] = bo1_seat(model_path(run, 0))
+    return dict(_SEAT[k])
+
+
+_SEATKEYS = {}
+
+
+def _seat_keys(ref):
+    from zero import h2h
+    k = os.path.normcase(os.path.abspath(ref))
+    if k not in _SEATKEYS:
+        _SEATKEYS[k] = h2h.run_seat_keys(ref)
+    return _SEATKEYS[k]
+
+
+def base_key(ref, pair, games, ys, seat):
+    """The cache key of a pair's reference-vs-reference baseline -> (16 hex, the dict it hashes): the reference's
+    network and its own seat keys, the two specs, the seed, the games, sims, the seat (move rule) and the engine
+    build. OSError when the reference file is missing."""
+    d = {'v': 1, 'ref': sha12(ref), 'ref_seat': _seat_keys(ref), 'pair': list(pair), 'seed': pair_seed(ys, pair),
+         'specs': [hashlib.sha256(j['spec'].encode()).hexdigest()[:12] for j in pair_jobs(pair, games, ys)],
+         'games': games, 'sims': ys['cells_sims'], 'seat': seat, 'chance_k': 2, 'c_puct': 1.0, 'engine': engine_sha()}
+    return hashlib.sha256(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest()[:16], d
+
+
+def cache_dir(run, ys):
+    return ys['cells_cache'] or os.path.join(run, DIR, 'cells_base')
+
+
+def base_file(cdir, key):
+    return os.path.join(cdir, f'{key}.json')
+
+
+def load_base(cdir, key):
+    try:
+        with open(base_file(cdir, key), encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def item_done(run, ys, item):
+    """A baseline is done when its cache file exists (whoever computed it); every other measurement by its row."""
+    return item['kind'] == 'cells_base' and bool(item.get('base')) and os.path.exists(
+        base_file(cache_dir(run, ys), item['base']))
+
+
+def item_ready(run, ys, item):
+    """A non-mirror cell measurement waits for its pair's baseline (wanted before it, in the same lane)."""
+    if item['kind'] not in ('cells', 'cells_gen') or not item.get('base'):
+        return True
+    return os.path.exists(base_file(cache_dir(run, ys), item['base']))
+
+
+_CBACKEND = {}
+
+
+def cells_backend(run, cfg, ys, ref):
+    """Where a reference's cells are played: cells_backend, else (auto, as bo1_backend) 'farm' when the run has a
+    farm pool and one eval job seats both sides exactly (match_settings), else 'local'."""
+    if ys.get('cells_backend'):
+        return ys['cells_backend']
+    from . import farm_campaign as C
+    if C.run_pool(cfg) is None:
+        return 'local'
+    pair = next((p for p in cell_pairs(ys) if p[0] != p[1]), cell_pairs(ys)[0])
+    k = (os.path.normcase(os.path.abspath(run)), ref, ys['cells_sims'], tuple(ys['cells_decks']))
+    if k not in _CBACKEND:
+        try:
+            C.match_settings(model_path(run, 0), ys['cells_sims'], _cell_spec(pair[0], pair[1], 0, ys),
+                             tilts=bo1_tilts(cfg), ckpt_b=ref)
+            _CBACKEND[k] = 'farm'
+        except (C.CampaignError, ValueError, OSError):
+            _CBACKEND[k] = 'local'
+    return _CBACKEND[k]
+
+
+def cells_lane(run, cfg, ys, ref):
+    if cells_backend(run, cfg, ys, ref) == 'farm':
+        return 'farm'
+    return 'gpu' if ys['cells_device'] == 'cuda' else 'cpu_bo1'
+
+
+def lanes(run, cfg, ys):
+    """Every lane of the setting (the watcher's threads): the best-of-ones', the cells' and the canary library's."""
+    out = set(bo1_lanes(run, cfg, ys))
+    if ys['cells_games']:
+        out |= {cells_lane(run, cfg, ys, r['path']) for r in cell_refs(run, cfg, ys)}
+    if ys['cells_gen_games']:
+        out.add(cells_lane(run, cfg, ys, model_path(run, 0)))
+    if ys['blunders']:
+        out.add('cpu')
+    return sorted(out)
+
+
+class CellsWant:
+    """The cells measurements of each evaluated checkpoint (wanted): per deck pair, its baseline (once per cache key,
+    before the first measurement that needs it) and the checkpoint's measurement; against the current reference
+    ('cells') and against the previously evaluated checkpoint ('cells_gen')."""
+
+    def __init__(self, run, cfg, ys, now=None):
+        self.run, self.cfg, self.ys = run, cfg, ys
+        self.refs = cell_refs(run, cfg, ys) if ys['cells_games'] else []
+        self.all = evaluated(run, cfg, dict(ys, **{'from': 0}), now, settle=0) if ys['cells_gen_games'] else []
+        self.seen = set()
+        self._seat = None
+
+    def seat(self):
+        if self._seat is None:
+            self._seat = cells_seat(self.run)
+        return self._seat
+
+    def _pairs(self, kind, it, label, path, games):
+        out = []
+        lane = cells_lane(self.run, self.cfg, self.ys, path)
+        for pair in cell_pairs(self.ys):
+            key = None
+            if pair[0] != pair[1]:
+                try:
+                    key = base_key(path, pair, games, self.ys, self.seat())[0]
+                except OSError:                 # (no reference file: the measurement fails loudly, retried)
+                    key = None
+                if key and key not in self.seen:
+                    self.seen.add(key)
+                    out.append({'lane': lane, 'kind': 'cells_base', 'ref': label, 'pair': list(pair), 'games': games,
+                                'base': key})
+            out.append({'lane': lane, 'kind': kind, 'iter': it, 'ref': label, 'pair': list(pair), 'base': key})
+        return out
+
+    def items(self, it):
+        out = []
+        ck = model_path(self.run, it)
+        if self.ys['cells_games']:
+            r = ref_for(self.refs, it)
+            if r is not None and not same_file(ck, r['path']):      # (the reference itself measures nothing)
+                out += self._pairs('cells', it, r['label'], r['path'], self.ys['cells_games'])
+        if self.ys['cells_gen_games']:
+            prev = max((x for x in self.all if x < it), default=None)
+            if prev is not None and not same_file(ck, model_path(self.run, prev)):
+                out += self._pairs('cells_gen', it, f'iter_{prev:04d}', model_path(self.run, prev),
+                                   self.ys['cells_gen_games'])
+        return out
+
+
+# ---------------------------------------------------------------- the statistics
+ELO_K = 400.0 / math.log(10.0)          # Elo points per unit of log-odds
+_CODE = {0.0: '0', 0.5: 'h', 1.0: '1'}
+_DECODE = {'0': 0.0, 'h': 0.5, '1': 1.0}
+
+
+def res_code(xs):
+    """A match's results of side A per game id -> '0' / 'h' / '1' per game (a list of floats if any is another
+    value)."""
+    xs = [float(x) for x in xs]
+    if all(x in _CODE for x in xs):
+        return ''.join(_CODE[x] for x in xs)
+    return [round(x, 6) for x in xs]
+
+
+def res_decode(s):
+    return [_DECODE[c] for c in s] if isinstance(s, str) else [float(x) for x in s]
+
+
+def cell_units(pair, res):
+    """The pair's two matches' results of A (res {0: [per game id], 1: [...]}: chooser seat 0, chooser seat 1) ->
+    {cell id: [(A's side chose, the other side chose) per unit]} - A in seat gid % 2 piloting that seat's deck."""
+    r = (list(res[0]), list(res[1]))
+    if len(r[0]) != len(r[1]):
+        raise ValueError(f'cells: the two chooser matches have {len(r[0])} and {len(r[1])} games')
+    out = {}
+    for g in range(len(r[0])):
+        seat = g % 2
+        cid = cell_id(pair[seat], pair[1 - seat])
+        out.setdefault(cid, []).append((r[seat][g], r[1 - seat][g]))
+    return out
+
+
+def logit(p):
+    return math.log(p / (1.0 - p))
+
+
+def expected_score(elo):
+    return 1.0 / (1.0 + 10.0 ** (-float(elo) / 400.0))
+
+
+def _mean(xs):
+    return sum(xs) / len(xs)
+
+
+def _var(xs):
+    n = len(xs)
+    if n < 2:
+        return 0.0
+    m = _mean(xs)
+    return sum((x - m) ** 2 for x in xs) / (n - 1)
+
+
+def cell_stats(a, b=None, boot=1000, seed=0):
+    """One cell's statistics. `a`: the measured side's units [(its side chose, the other chose)], `b`: the
+    baseline's units on the same seeds, in the same order (None: a mirror, whose baseline is 0.5 exactly).
+
+    elo = 400 log10( pa/(1-pa) / (pb/(1-pb)) ) with pa, pb the two mean scores (clamped to half a game from 0 and 1:
+    `clamped`). se, the delta method over the n paired units: with u_i, v_i the units' mean scores and
+    w = 1/(p(1-p)), the estimate's variance is Var(wa u_i - wb v_i) / n, the covariance of u and v included (the
+    same seeds: positively correlated, which is the point); se_unpaired leaves it out (as if the baseline were
+    independent games) to show what the pairing saves. boot_se / boot_95: `boot` resamples of whole units (seeded),
+    the same estimate. vs_ref: the logistic of elo - the measured side's expected score against the baseline's
+    pilot in the cell's terms (0.5 = no gain), which the ladder's promotion threshold reads."""
+    n = len(a)
+    if n == 0:
+        raise ValueError('cells: a cell with no units')
+    if b is not None and len(b) != n:
+        raise ValueError(f'cells: {n} units against a baseline of {len(b)}')
+    games = 2 * n
+    eps = 0.5 / games
+    clamp = lambda p: min(max(p, eps), 1.0 - eps)  # noqa: E731
+    u = [(x + y) / 2 for x, y in a]
+    v = [(x + y) / 2 for x, y in b] if b is not None else None
+    pa = _mean(u)
+    pb = _mean(v) if v is not None else 0.5
+    ca, cb = clamp(pa), clamp(pb)
+    elo = ELO_K * (logit(ca) - logit(cb))
+    wa, wb = 1.0 / (ca * (1 - ca)), 1.0 / (cb * (1 - cb))
+    d = [wa * ui - (wb * vi if v is not None else 0.0) for ui, vi in zip(u, v or [0.0] * n)]
+    se = ELO_K * math.sqrt(_var(d) / n)
+    se_unp = ELO_K * math.sqrt((wa * wa * _var(u) + (wb * wb * _var(v) if v is not None else 0.0)) / n)
+    out = {'units': n, 'games': games, 'score': round(pa, 4), 'base': round(pb, 4), 'elo': round(elo, 1),
+           'se': round(se, 1), 'se_unpaired': round(se_unp, 1), 'vs_ref': round(expected_score(elo), 4),
+           'clamped': pa != ca or pb != cb,
+           'chose': {'score': round(_mean([x for x, _ in a]), 4), 'base': round(_mean([x for x, _ in b]), 4)
+                     if b is not None else None},
+           'other_chose': {'score': round(_mean([y for _, y in a]), 4), 'base': round(_mean([y for _, y in b]), 4)
+                           if b is not None else None},
+           'pentanomial': [sum(1 for x, y in a if int(round(2 * (x + y))) == k) for k in range(5)],
+           'corr': None}
+    if v is not None and _var(u) > 0 and _var(v) > 0:
+        mu, mv = _mean(u), _mean(v)
+        cov = sum((x - mu) * (y - mv) for x, y in zip(u, v)) / (n - 1)
+        out['corr'] = round(cov / math.sqrt(_var(u) * _var(v)), 4)
+    if boot and n > 1:
+        rng = random.Random(seed)
+        es = []
+        for _ in range(int(boot)):
+            idx = [rng.randrange(n) for _ in range(n)]
+            qa = clamp(sum(u[i] for i in idx) / n)
+            qb = clamp(sum(v[i] for i in idx) / n) if v is not None else 0.5
+            es.append(ELO_K * (logit(qa) - logit(qb)))
+        es.sort()
+        out['boot_se'] = round(math.sqrt(_var(es)), 1)
+        out['boot_95'] = [round(es[int(0.025 * (len(es) - 1))], 1), round(es[int(0.975 * (len(es) - 1))], 1)]
+    return out
+
+
+def _cell_seed(cid):
+    return int.from_bytes(hashlib.sha256(cid.encode()).digest()[:4], 'little')
+
+
+def summarize(cells, decks, base=None, promote=0.80):
+    """The 9 (N x N) cells of one checkpoint against one reference -> per-deck pilot Elo (the mean of the deck's
+    cells as the measured side's deck), the overall Elo (the mean of every cell), and with `base` (the reference's
+    anchored (elo, se)) the anchored Elo: base + overall. The cells are independent (disjoint seeds), so a mean of k
+    cells has se sqrt(sum se^2) / k; an anchored se adds the reference's in quadrature. A mean needs every one of its
+    cells (no partial means: `missing` names the absent ones). `promote`: the cells whose vs_ref passes the threshold
+    (a new reference is suggested)."""
+    ids = [cell_id(x, y) for x in decks for y in decks]
+    out = {'cells': {c: {k: cells[c][k] for k in ('elo', 'se', 'boot_se', 'score', 'base', 'vs_ref', 'games',
+                                                   'clamped') if k in cells[c]} for c in ids if c in cells},
+           'missing': [c for c in ids if c not in cells], 'decks': {}, 'overall': None, 'anchored': None}
+
+    def mean(cs, nd=1):
+        return {'elo': round(_mean([cells[c]['elo'] for c in cs]), nd),
+                'se': round(math.sqrt(sum(cells[c]['se'] ** 2 for c in cs)) / len(cs), nd)}
+    for x in decks:
+        cs = [cell_id(x, y) for y in decks]
+        if all(c in cells for c in cs):
+            out['decks'][x] = mean(cs)
+    out['complete'] = not out['missing']
+    if out['complete']:
+        out['overall'] = mean(ids)
+        if base is not None and base[0] is not None:
+            raw = mean(ids, 9)
+            out['anchored'] = {'elo': round(base[0] + raw['elo'], 1),
+                               'se': round(math.sqrt((base[1] or 0.0) ** 2 + raw['se'] ** 2), 1)}
+    out['promote'] = [c for c in ids if c in cells and cells[c]['vs_ref'] > promote]
+    return out
+
+
+# ---------------------------------------------------------------- the games
+def play_pair_local(a, b, pair, games, ys, seat, log=print):
+    """The pair's two matches A (`a`) against B (`b`; the same file for a baseline) by zero.h2h.match (unpaired: A in
+    seat gid % 2), both sides at `seat` -> {'results': {'0': [A's result per game id], '1': ...}, 'unfinished',
+    'select'}."""
+    from zero import h2h
+    out = {'results': {}, 'unfinished': 0, 'select': None}
+    for j in pair_jobs(pair, games, ys):
+        t0 = time.time()
+        m = h2h.match(a, b, j['games'], ys['cells_sims'], seed=j['seed'], threads=ys['bo1_threads'],
+                      groups=ys['bo1_groups'], device=ys['cells_device'], spec=j['spec'], seat_a=dict(seat),
+                      seat_b=dict(seat), paired=False, rows=True)
+        rows = m['rows']
+        if [r['gid'] for r in rows] != list(range(j['games'])):
+            raise RuntimeError(f"cells {pair} chooser {j['chooser']}: {len(rows)} games of {j['games']}")
+        out['results'][str(j['chooser'])] = [float(r['result'][r['gid'] % 2]) for r in rows]
+        out['unfinished'] += int(m.get('unfinished', 0))
+        out['select'] = m.get('select_a')
+        log(f"cells {pair[0]} / {pair[1]} chooser seat {j['chooser']}: {j['games']} games, A {m['a_score']:.4f}, "
+            f"{time.time() - t0:.0f} s")
+    return out
+
+
+def play_pair_farm(run, cfg, rule_ck, a, b, pair, games, ys, name, log=None, client=None, opts=None):
+    """The pair's two matches as farm play jobs (docs/ENGINE.md 165; mtgz.az.farm_campaign): the run's pool worker
+    build, the seats of play_pair_local checked dict for dict (match_settings of `rule_ck`, the run's checkpoint whose
+    rule both sides play, against the reference), unpaired, each its own campaign `name`-c<chooser> (a retry resumes
+    it), its games traced, spot-replayed here, the missing ones played here after bo1_farm_wait_s. A baseline (`a` is
+    `b`): self seats [net 1, net 1] of the reference. -> play_pair_local's dict + 'farm' {chooser: digest, spot,
+    local}."""
+    from zero import farm_eval as FE, h2h
+    from . import farm_campaign as C
+    pool = C.run_pool(cfg)
+    if pool is None:
+        raise RuntimeError('cells_backend farm: the run has no farm pool (pool:<farm run> with pool_build, pool_worker)')
+    same = os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+    ref = b
+    wait = ys['bo1_farm_wait_s'] or 0.75 * float(ys['timeout_s'])
+    kw = {'log': log} if log else {}
+    out = {'results': {}, 'unfinished': 0, 'select': None, 'farm': {}}
+    for j in pair_jobs(pair, games, ys):
+        settings, rule = C.match_settings(rule_ck, ys['cells_sims'], j['spec'], tilts=bo1_tilts(cfg), ckpt_b=ref)
+        seats = [{'net': 1}, {'net': 1}] if same else [{'net': 1}, {'net': 2}]
+        d = C.submit(f"{name}-c{j['chooser']}", a, j['games'], settings, seats, j['seed'], pool['build_id'],
+                     pool['worker'], pool['runtime'], b=None if same else b, paired=False, share=ys['bo1_farm_share'],
+                     deadline_s=wait, min_agent=pool['min_agent'],
+                     meta={'yardstick': 'cells', 'run': run, 'pair': list(pair), 'chooser': j['chooser']},
+                     client=client, opts=opts, **kw)
+        res = C.collect(d, client=client, threads=ys['bo1_threads'], describe_games=False, opts=opts, **kw)
+        rows = sorted(C.games(d), key=lambda r: r['gid'])
+        FE.a_seat_of(rows, {'net': 1})
+        if [r['gid'] for r in rows] != list(range(j['games'])):
+            raise RuntimeError(f"cells {pair} chooser {j['chooser']} (farm): {len(rows)} games of {j['games']}")
+        out['results'][str(j['chooser'])] = [float(r['result'][r['gid'] % 2]) for r in rows]
+        out['unfinished'] += sum(1 for r in rows if not r.get('over'))
+        out['select'] = h2h._tag(C.match_seat(rule_ck, ys['cells_sims'], rule))
+        out['farm'][str(j['chooser'])] = {'run': res['run'], 'digest': res['digest'],
+                                          'spot': {k: res['spot'][k] for k in ('checked', 'ok', 'of')},
+                                          'local': res['coverage']['local'], 'seconds': res['seconds']}
+    return out
+
+
+def _play(backend, a, b, pair, games, ys, seat, farm, log):
+    if backend == 'farm':
+        return play_pair_farm(farm['run'], farm['cfg'], farm['rule_ck'], a, b, pair, games, ys, farm['name'],
+                              log=farm.get('log'), client=farm.get('client'), opts=farm.get('opts'))
+    return play_pair_local(a, b, pair, games, ys, seat, log=log)
+
+
+def _spec_sha(pair, games, ys):
+    return hashlib.sha256('\n'.join(j['spec'] for j in pair_jobs(pair, games, ys)).encode()).hexdigest()[:12]
+
+
+def measure_base_core(ref, label, pair, games, ys, seat, cdir, backend='local', farm=None, log=print):
+    """A pair's baseline (the reference against itself, the two specs and seeds), from the cache or played and
+    cached -> its 'cells_base' row."""
+    if pair[0] == pair[1]:
+        raise ValueError(f'cells: a mirror ({pair[0]}) has no baseline games (0.5 exactly)')
+    key, kd = base_key(ref, pair, games, ys, seat)
+    data = load_base(cdir, key)
+    t0 = time.time()
+    cached = data is not None
+    if data is None:
+        p = _play(backend, ref, ref, pair, games, ys, seat, farm, log)
+        data = dict(kd, key=key, results={c: res_code(r) for c, r in p['results'].items()},
+                    unfinished=p['unfinished'], select=p['select'], backend=backend,
+                    seconds=round(time.time() - t0, 1), time=round(time.time()))
+        os.makedirs(cdir, exist_ok=True)
+        tmp = base_file(cdir, key) + f'.{os.getpid()}.tmp'
+        with open(tmp, 'w', encoding='utf-8', newline='') as f:
+            json.dump(data, f, separators=(',', ':'))
+        os.replace(tmp, base_file(cdir, key))
+    units = cell_units(pair, {int(c): res_decode(r) for c, r in data['results'].items()})
+    return {'kind': 'cells_base', 'ref': label, 'ref_sha': sha12(ref), 'pair': list(pair), 'base': key,
+            'games': games, 'scores': {c: round(_mean([(x + y) / 2 for x, y in us]), 4) for c, us in units.items()},
+            'unfinished': data.get('unfinished', 0), 'sims': ys['cells_sims'], 'select': data.get('select'),
+            'backend': data.get('backend'), 'cached': cached, 'seconds': round(time.time() - t0, 1),
+            'time': round(time.time())}
+
+
+def measure_cells_core(kind, ck, it, ref, label, pair, games, ys, seat, cdir, backend='local', farm=None, log=print):
+    """Checkpoint `ck` against reference `ref` in the pair's cells (its baseline from the cache; none for a mirror)
+    -> the 'cells' / 'cells_gen' row."""
+    for p in (ck, ref):
+        if not os.path.exists(p):
+            raise FileNotFoundError(p)
+    key, bunits = None, None
+    if pair[0] != pair[1]:
+        key, _ = base_key(ref, pair, games, ys, seat)
+        data = load_base(cdir, key)
+        if data is None:
+            raise RuntimeError(f'cells {pair}: no baseline {key} in {cdir} (measured first: kind cells_base)')
+        bunits = cell_units(pair, {int(c): res_decode(r) for c, r in data['results'].items()})
+    t0 = time.time()
+    p = _play(backend, ck, ref, pair, games, ys, seat, farm, log)
+    units = cell_units(pair, {int(c): r for c, r in p['results'].items()})
+    cells = {c: cell_stats(us, bunits[c] if bunits is not None else None, boot=ys['cells_boot'], seed=_cell_seed(c))
+             for c, us in units.items()}
+    row = {'kind': kind, 'iter': it, 'ref': label, 'ref_sha': sha12(ref), 'sha': sha12(ck), 'pair': list(pair),
+           'cells': cells, 'games': sum(len(r) for r in p['results'].values()), 'unfinished': p['unfinished'],
+           'base': key, 'results': {c: res_code(r) for c, r in p['results'].items()}, 'sims': ys['cells_sims'],
+           'select': p['select'], 'seed': pair_seed(ys, pair), 'spec_sha': _spec_sha(pair, games, ys),
+           'backend': backend, 'seconds': round(time.time() - t0, 1), 'time': round(time.time())}
+    if p.get('farm'):
+        row['farm'] = p['farm']
+    return row
+
+
+def _farm(run, cfg, rule_ck, kind, it, ref, pair, games, ys):
+    h = hashlib.sha256(json.dumps([kind, it, sha12(ref), list(pair), games, ys['cells_seed'], ys['cells_sims']]).encode())
+    return {'run': run, 'cfg': cfg, 'rule_ck': rule_ck,
+            'name': f"{os.path.basename(os.path.normpath(run))[:24]}-{kind.replace('_', '')}-{h.hexdigest()[:10]}"}
+
+
+def measure_cells(run, it, label, pair, cfg=None, ys=None, kind='cells', log=print):
+    """A run's checkpoint `it` in one deck pair's cells against reference `label` (a ladder reference, or 'iter_NNNN'
+    for the gen-over-gen kind) -> the row."""
+    cfg = cfg if cfg is not None else cfg_of(run)
+    ys = ys if ys is not None else of_run(run, cfg)
+    pair = tuple(pair)
+    games = ys['cells_games'] if kind == 'cells' else ys['cells_gen_games']
+    ref = ref_path(run, cfg, ys, label)
+    backend = cells_backend(run, cfg, ys, ref)
+    ck = model_path(run, it)
+    return measure_cells_core(kind, ck, int(it), ref, label, pair, games, ys, cells_seat(run), cache_dir(run, ys),
+                              backend, _farm(run, cfg, ck, kind, it, ref, pair, games, ys), log)
+
+
+def measure_cells_base(run, label, pair, games, cfg=None, ys=None, log=print):
+    cfg = cfg if cfg is not None else cfg_of(run)
+    ys = ys if ys is not None else of_run(run, cfg)
+    pair = tuple(pair)
+    ref = ref_path(run, cfg, ys, label)
+    if not os.path.exists(ref):
+        raise FileNotFoundError(ref)
+    backend = cells_backend(run, cfg, ys, ref)
+    return measure_base_core(ref, label, pair, int(games), ys, cells_seat(run), cache_dir(run, ys), backend,
+                             _farm(run, cfg, model_path(run, 0), 'cells_base', None, ref, pair, games, ys), log)
+
+
+def measure_cells_standalone(ck, ref, ys, cdir, label='ref', seat=None, rows_out=None, log=print, kind='cells'):
+    """Every pair's cells of checkpoint `ck` against `ref` outside a run's watcher (local games; the baselines from
+    / into `cdir`): `seat` (default: bo1_seat of `ck` - its run's rule) -> (rows, summary). Each row is also appended
+    to `rows_out` (a JSONL file) as it lands."""
+    seat = dict(seat) if seat is not None else bo1_seat(ck)
+    rows, cells = [], {}
+    games = ys['cells_games'] or ys['cells_gen_games']
+    for pair in cell_pairs(ys):
+        todo = []
+        if pair[0] != pair[1]:
+            todo.append(lambda pair=pair: measure_base_core(ref, label, pair, games, ys, seat, cdir, log=log))
+        todo.append(lambda pair=pair: measure_cells_core(kind, ck, None, ref, label, pair, games, ys, seat, cdir,
+                                                         log=log))
+        for f in todo:
+            r = f()
+            rows.append(r)
+            if rows_out:
+                append_jsonl(rows_out, r)
+            if r['kind'] != 'cells_base':
+                cells.update(r['cells'])
+    return rows, summarize(cells, ys['cells_decks'], promote=ys['cells_promote'])
+
+
+def append_jsonl(path, row):
+    with open(path, 'a', encoding='utf-8', newline='') as f:
+        f.write(json.dumps(row, separators=(',', ':')) + '\n')
+
+
+# ---------------------------------------------------------------- the report and the ladder
+def _groups(rows, kind):
+    """{(iter, ref): {'cells': {cell id: stats}, 'sha', 'ref_sha'}} of the newest result rows of `kind`."""
+    res, _ = tally(rows)
+    out = {}
+    for k, r in sorted(res.items(), key=lambda kv: kv[1].get('time', 0)):
+        if r['kind'] != kind:
+            continue
+        g = out.setdefault((r['iter'], r['ref']), {'cells': {}, 'sha': r.get('sha'), 'ref_sha': r.get('ref_sha')})
+        g['cells'].update(r['cells'])
+    return out
+
+
+def ladder(run, cfg, ys, rows=None):
+    """The references with their chained anchored Elo, oldest first -> [{'label', 'path', 'since', 'sha', 'elo',
+    'se', 'how'}]: the first at cells_base_elo (se 0); a later one at its entry's frozen `elo` / `elo_se` (written by
+    cells-freeze), else the one before's + its own checkpoint's overall gain against that one (a complete 'cells'
+    measurement of a checkpoint with its sha), se in quadrature; else unchained (elo None)."""
+    refs = cell_refs(run, cfg, ys)
+    groups = _groups(read_rows(run) if rows is None else rows, 'cells')
+    out = []
+    for i, r in enumerate(refs):
+        try:
+            sha = sha12(r['path'])
+        except OSError:
+            sha = None
+        e = dict(r, sha=sha, elo=None, se=None, how='unchained')
+        if i == 0:
+            e.update(elo=float(ys['cells_base_elo']), se=0.0, how='base (cells_base_elo)')
+        elif r.get('elo') is not None:
+            e.update(elo=float(r['elo']), se=float(r.get('elo_se') or 0.0), how='frozen')
+        elif out[-1]['elo'] is not None and sha:
+            for (it, lb), g in groups.items():
+                if lb == out[-1]['label'] and g['sha'] == sha:
+                    s = summarize(g['cells'], ys['cells_decks'])
+                    if s['complete']:
+                        e.update(elo=out[-1]['elo'] + s['overall']['elo'],
+                                 se=math.sqrt(out[-1]['se'] ** 2 + s['overall']['se'] ** 2),
+                                 how=f"iteration {it} against {lb}")
+                        break
+        out.append(e)
+    return out
+
+
+def cells_report(run, cfg, ys, rows=None):
+    """The cells' state -> {'refs': ladder, 'cells': [{iter, ref, sha, summary (summarize, anchored through the
+    ladder)}], 'gen': [{iter, prev, summary}], 'promote': the newest complete measurement's flagged cells and its
+    checkpoint (a new reference suggested: `run_yardsticks.py cells-freeze`)}."""
+    rows = read_rows(run) if rows is None else rows
+    try:
+        lad = ladder(run, cfg, ys, rows) if ys['cells_games'] else []
+    except ValueError as e:
+        lad = [{'error': str(e)}]
+    elo = {r['label']: (r.get('elo'), r.get('se')) for r in lad if 'label' in r}
+    out = {'refs': [{k: r.get(k) for k in ('label', 'since', 'sha', 'elo', 'se', 'how', 'error') if k in r} for r in lad],
+           'cells': [], 'gen': [], 'promote': None}
+    order = {r['label']: i for i, r in enumerate(lad) if 'label' in r}
+    try:
+        refs = cell_refs(run, cfg, ys) if ys['cells_games'] else []
+    except ValueError:
+        refs = []
+    for (it, lb), g in sorted(_groups(rows, 'cells').items(), key=lambda kv: (kv[0][0], order.get(kv[0][1], -1))):
+        s = summarize(g['cells'], ys['cells_decks'], base=elo.get(lb), promote=ys['cells_promote'])
+        out['cells'].append({'iter': it, 'ref': lb, 'sha': g['sha'], 'summary': s})
+        cur = ref_for(refs, it)
+        if s['complete'] and cur is not None and cur['label'] == lb:     # (the newest against its own reference)
+            out['promote'] = {'iter': it, 'ref': lb, 'cells': s['promote']} if s['promote'] else None
+    for (it, lb), g in sorted(_groups(rows, 'cells_gen').items()):
+        out['gen'].append({'iter': it, 'prev': int(lb[5:]), 'sha': g['sha'],
+                           'summary': summarize(g['cells'], ys['cells_decks'], promote=ys['cells_promote'])})
+    return out
+
+
+def freeze_ref(run, it, label=None, to=None, cfg=None, ys=None, rows=None):
+    """Freeze checkpoint `it` as the next reference (the explicit command `run_yardsticks.py cells-freeze`; nothing
+    else writes the ladder): its complete measurement against its current reference is required (the chain link);
+    the checkpoint is copied to `to` (default <run>/yardsticks/cells_refs/<label>.pt) and appended to
+    <run>/yardsticks/cells_ladder.json with since = it, its chained elo / elo_se and the link's gain -> the entry.
+    Checkpoints from `it` on are then measured against it."""
+    cfg = cfg if cfg is not None else cfg_of(run)
+    ys = ys if ys is not None else of_run(run, cfg)
+    if ys is None or not ys['cells_games']:
+        raise ValueError('cells-freeze: the run measures no cells (cells_games 0)')
+    it = int(it)
+    refs = cell_refs(run, cfg, ys)
+    cur = ref_for(refs, it)
+    if cur is None:
+        raise ValueError(f'cells-freeze: no reference for iteration {it}')
+    if refs[-1]['since'] > it:
+        raise ValueError(f"cells-freeze: the newest reference {refs[-1]['label']} starts at {refs[-1]['since']} > {it}")
+    label = label or f'g{it}'
+    _ref_entry({'label': label, 'path': 'x'})
+    if any(r['label'] == label for r in refs):
+        raise ValueError(f'cells-freeze: a reference labelled {label!r} exists')
+    rows = read_rows(run) if rows is None else rows
+    g = _groups(rows, 'cells').get((it, cur['label']))
+    s = summarize(g['cells'], ys['cells_decks']) if g else None
+    if not s or not s['complete']:
+        raise ValueError(f"cells-freeze: iteration {it} has no complete measurement against {cur['label']} "
+                         f"(missing: {s['missing'] if s else 'all'}) - the chain link")
+    src = model_path(run, it)
+    if g['sha'] != sha12(src):
+        raise ValueError(f'cells-freeze: {src} is not the network measured (sha {g["sha"]})')
+    lad = {r['label']: r for r in ladder(run, cfg, ys, rows)}
+    base = lad[cur['label']]
+    if base['elo'] is None:
+        raise ValueError(f"cells-freeze: the reference {cur['label']} is not chained")
+    dst = to or os.path.join(run, DIR, 'cells_refs', f'{label}.pt')
+    if os.path.exists(dst):
+        raise ValueError(f'cells-freeze: {dst} exists')
+    os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
+    shutil.copy2(src, dst)
+    if sha12(dst) != g['sha']:
+        raise RuntimeError(f'cells-freeze: the copy {dst} differs from {src}')
+    e = {'label': label, 'path': os.path.abspath(dst), 'since': it, 'iter': it, 'sha': g['sha'],
+         'from_ref': cur['label'], 'gain': s['overall']['elo'], 'gain_se': s['overall']['se'],
+         'elo': round(base['elo'] + s['overall']['elo'], 1),
+         'elo_se': round(math.sqrt(base['se'] ** 2 + s['overall']['se'] ** 2), 1), 'time': round(time.time())}
+    try:
+        with open(ladder_path(run), encoding='utf-8') as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        d = {'refs': []}
+    d['refs'].append(e)
+    os.makedirs(os.path.dirname(ladder_path(run)), exist_ok=True)
+    tmp = ladder_path(run) + '.tmp'
+    with open(tmp, 'w', encoding='utf-8', newline='') as f:
+        json.dump(d, f, indent=1)
+    os.replace(tmp, ladder_path(run))
+    return e
 
 
 # ------------------------------------------------------------------------------------------------ the companion

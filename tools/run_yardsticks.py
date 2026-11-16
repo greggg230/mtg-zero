@@ -5,6 +5,12 @@ opponents and the canary library, on every evaluated checkpoint, once each, in o
   python tools/run_yardsticks.py status RUN [--json]
   python tools/run_yardsticks.py one RUN --kind bo1|blunders --iter N [--opp LABEL]     (one measurement; the
                                                                                         watcher's child process)
+  python tools/run_yardsticks.py one RUN --kind cells|cells_gen --iter N --ref LABEL --pair X,Y
+  python tools/run_yardsticks.py one RUN --kind cells_base --ref LABEL --pair X,Y --games G
+  python tools/run_yardsticks.py cells RUN [--json]          (the metagame cells' report: docs/ENGINE.md 177)
+  python tools/run_yardsticks.py cells-freeze RUN --iter N [--label L] [--to PATH]    (the next reference)
+  python tools/run_yardsticks.py cells-match CKPT --ref PATH [--games G] [--sims S] [--decks a,b,c] [--cache DIR]
+                                 [--out FILE.jsonl] [--device cpu|cuda] [--json]      (standalone, local games)
 
 `watch`: follows the run (RUN: its directory) and measures what its setting `yardsticks` asks for (config.json's,
 else its preset's; `--yardsticks` replaces it for a hand start) in two lanes - the head-to-heads (the GPU) and the
@@ -28,6 +34,7 @@ watcher per run (<run>/yardsticks/lock.json: pid and process creation time).
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -156,11 +163,52 @@ def last_json(path):
                         d = json.loads(line)
                     except ValueError:
                         continue
-                    if isinstance(d, dict) and d.get('kind') in ('bo1', 'blunders') and 'iter' in d:
+                    if isinstance(d, dict) and d.get('kind') in Y.KINDS and ('iter' in d or 'base' in d):
                         out = d
     except OSError:
         pass
     return out
+
+
+def same_measurement(row, item):
+    """Whether a child's result line is the measurement asked for (bo1 / blunders: kind, iteration, opponent - the
+    library is the child's own reading; the cells: their whole key)."""
+    if item['kind'] in Y.CELL_KINDS:
+        return row.get('kind') == item['kind'] and Y.key_of(row) == Y.key_of(item)
+    return (row.get('kind'), row.get('iter'), row.get('opp')) == (item['kind'], item['iter'], item.get('opp'))
+
+
+def _deck(name):
+    return re.sub(r'[^A-Za-z0-9]+', '', name.split('_')[0])[:12] or 'deck'
+
+
+def item_key(item):
+    """A measurement's console name and its words in the log -> (key, what)."""
+    k = item['kind']
+    if k in Y.CELL_KINDS:
+        pair = '-'.join(_deck(x) for x in item['pair'])
+        ref = re.sub(r'[^A-Za-z0-9_.-]+', '_', item['ref'])
+        if k == 'cells_base':
+            return (f"cells_base_{ref}_{pair}_{item['base'] or 'noref'}",
+                    f"cells baseline of {item['ref']} in {' / '.join(item['pair'])}")
+        return (f"{k}_{item['iter']:04d}_{ref}_{pair}",
+                f"{'cells' if k == 'cells' else 'gen-over-gen cells'} of iteration {item['iter']} vs {item['ref']} in "
+                f"{' / '.join(item['pair'])}")
+    key = f"{k}_{item['iter']:04d}" + (f"_{item['opp']}" if item.get('opp') else '')
+    return key, f"{k} of iteration {item['iter']}" + (f" vs {item['opp']}" if item.get('opp') else '')
+
+
+def result_line(row):
+    k = row['kind']
+    if k == 'bo1':
+        return f"{row['score']:.4f} +- {row['se']:.4f} (Elo {row.get('elo_diff')}), {row['seconds']:.0f} s"
+    if k == 'blunders':
+        return f"{row['passed']} / {row['total']} passed, {row['seconds']:.0f} s"
+    if k == 'cells_base':
+        return (f"baseline {row['base']} " + ', '.join(f'{c} {s:.3f}' for c, s in sorted(row['scores'].items()))
+                + f" ({'cached' if row.get('cached') else 'played'}), {row['seconds']:.0f} s")
+    return ', '.join(f"{c} {s['elo']:+.0f} +- {s['se']:.0f}" for c, s in sorted(row['cells'].items())) + \
+        f", {row['seconds']:.0f} s"
 
 
 class Watcher:
@@ -199,15 +247,21 @@ class Watcher:
         return lib
 
     def one_cmd(self, item):
-        cmd = [self.python, os.path.abspath(__file__), 'one', self.run, '--kind', item['kind'], '--iter',
-               str(item['iter'])] + (['--opp', item['opp']] if item.get('opp') else [])
+        cmd = [self.python, os.path.abspath(__file__), 'one', self.run, '--kind', item['kind']]
+        if item.get('iter') is not None:
+            cmd += ['--iter', str(item['iter'])]
+        cmd += ['--opp', item['opp']] if item.get('opp') else []
+        if item['kind'] in Y.CELL_KINDS:
+            cmd += ['--ref', item['ref'], '--pair', ','.join(item['pair'])]
+            if item['kind'] == 'cells_base':
+                cmd += ['--games', str(item['games'])]
         if self.override is not None:
             cmd += ['--yardsticks', json.dumps(self.override)]
         return cmd
 
     def measure(self, item, ys):
         """One measurement as a child process -> its row (a result or a failure), appended to the results."""
-        key = f"{item['kind']}_{item['iter']:04d}" + (f"_{item['opp']}" if item.get('opp') else '')
+        key, what = item_key(item)
         work = os.path.join(self.run, Y.DIR, 'work')
         os.makedirs(work, exist_ok=True)
         out = os.path.join(work, key + '.log')
@@ -219,7 +273,6 @@ class Watcher:
             kw['preexec_fn'] = lambda: os.nice(10)
         env = dict(os.environ, PYTHONIOENCODING='utf-8')
         env.setdefault('ZERO_TOKEN_GRAPHS', '1')
-        what = f"{item['kind']} of iteration {item['iter']}" + (f" vs {item['opp']}" if item.get('opp') else '')
         self.log(f'measuring {what} (attempt {item["attempt"]}; console {os.path.relpath(out, self.run)})')
         t0 = time.time()
         with open(out, 'w', encoding='utf-8') as f:
@@ -250,19 +303,20 @@ class Watcher:
             finally:
                 self.procs.pop(item['lane'], None)
         row = last_json(out) if code == 0 else None
-        if row is not None and (row.get('kind'), row.get('iter'), row.get('opp')) == (item['kind'], item['iter'],
-                                                                                      item.get('opp')):
+        if row is not None and row.get('error') is None and same_measurement(row, item):
             with self.write:
                 Y.append_row(self.run, row)
-            self.log(f"{what}: " + (f"{row['score']:.4f} +- {row['se']:.4f} (Elo {row.get('elo_diff')}), "
-                                    f"{row['seconds']:.0f} s" if row['kind'] == 'bo1' else
-                                    f"{row['passed']} / {row['total']} passed, {row['seconds']:.0f} s"))
+            self.log(f"{what}: {result_line(row)}")
             return row
         err = err or (f'exit {code}' if code else 'exit 0 without a result line') + ': ' + tail(out)
         wait = Y.backoff(ys, item['attempt'])
-        row = {'kind': item['kind'], 'iter': item['iter'], **({'opp': item['opp']} if item.get('opp') else {}),
-               **({'library': item.get('library')} if item['kind'] == 'blunders' else {}), 'error': err[-2000:],
-               'attempt': item['attempt'], 'retry_at': round(time.time() + wait), 'time': round(time.time())}
+        row = {'kind': item['kind'], **({'iter': item['iter']} if 'iter' in item else {}),
+               **({'opp': item['opp']} if item.get('opp') else {}),
+               **({'library': item.get('library')} if item['kind'] == 'blunders' else {}),
+               **({k: item[k] for k in ('ref', 'pair', 'base', 'games') if k in item}
+                  if item['kind'] in Y.CELL_KINDS else {}),
+               'error': err[-2000:], 'attempt': item['attempt'], 'retry_at': round(time.time() + wait),
+               'time': round(time.time())}
         with self.write:
             Y.append_row(self.run, row)
         self.log(f'YARDSTICK FAILED: {what} (attempt {item["attempt"]}): {err[-600:]} - tried again in {wait:.0f} s; '
@@ -359,7 +413,7 @@ class Watcher:
                 return 0
             self.log(f"watching {self.run}: {json.dumps(ys)}" + ('' if not ys['bo1_games'] else
                      f"; best-of-one opponents {[o['name'] for o in Y.opponents(self.run, cfg, ys)]}"))
-            lanes = Y.bo1_lanes(self.run, cfg, ys) + (['cpu'] if ys['blunders'] else [])
+            lanes = Y.lanes(self.run, cfg, ys)
             ew = None
             if not self.once:
                 ew = threading.Thread(target=self.end_watch, daemon=True)
@@ -380,6 +434,10 @@ class Watcher:
 
 
 # ------------------------------------------------------------------------------------------------ the commands
+def _ys_of(a, run, cfg):
+    return Y.normalize(json.loads(a.yardsticks)) if a.yardsticks else Y.of_run(run, cfg)
+
+
 def cmd_one(a):
     try:
         import psutil
@@ -388,10 +446,24 @@ def cmd_one(a):
         pass
     run = os.path.abspath(a.run)
     cfg = Y.cfg_of(run)
-    ys = Y.normalize(json.loads(a.yardsticks)) if a.yardsticks else Y.of_run(run, cfg)
+    ys = _ys_of(a, run, cfg)
     if ys is None:
         raise SystemExit('the run\'s yardsticks setting is off')
-    if a.kind == 'bo1':
+    if a.kind in Y.CELL_KINDS:
+        if not a.ref or not a.pair or len(a.pair.split(',')) != 2:
+            raise SystemExit(f'one --kind {a.kind} needs --ref and --pair X,Y')
+        pair = tuple(a.pair.split(','))
+        if a.kind == 'cells_base':
+            if not a.games:
+                raise SystemExit('one --kind cells_base needs --games')
+            row = Y.measure_cells_base(run, a.ref, pair, a.games, cfg, ys)
+        else:
+            if a.iter is None:
+                raise SystemExit(f'one --kind {a.kind} needs --iter')
+            row = Y.measure_cells(run, a.iter, a.ref, pair, cfg, ys, kind=a.kind)
+    elif a.iter is None:
+        raise SystemExit(f'one --kind {a.kind} needs --iter')
+    elif a.kind == 'bo1':
         if not a.opp:
             raise SystemExit('one --kind bo1 needs --opp')
         row = Y.measure_bo1(run, a.iter, a.opp, cfg, ys)
@@ -404,7 +476,7 @@ def cmd_one(a):
 def cmd_status(a):
     run = os.path.abspath(a.run)
     cfg = Y.cfg_of(run)
-    ys = Y.normalize(json.loads(a.yardsticks)) if a.yardsticks else Y.of_run(run, cfg)
+    ys = _ys_of(a, run, cfg)
     st = Y.status(run, cfg, ys)
     if st is None:
         print('yardsticks: off for this run')
@@ -424,6 +496,106 @@ def cmd_status(a):
         print(f"  FAILING {f['kind']} {f['iter']}" + (f" vs {f['opp']}" if f.get('opp') else '')
               + f" ({f['attempts']} attempts, next at {time.strftime('%H:%M', time.localtime(f['retry_at'] or 0))}): "
               f"{f['error'][-200:]}")
+    if st.get('cells'):
+        c = st['cells']
+        print(f"  cells: {len(c['report']['cells'])} measured against a reference, {len(c['report']['gen'])} "
+              f"gen-over-gen (run_yardsticks.py cells RUN)")
+        for m in c['missing']:
+            print(f"  MISSING {m['kind']} {m.get('iter', '')} vs {m['ref']} in {' / '.join(m['pair'])}")
+        for f in c['failed']:
+            print(f"  FAILING {f['kind']} {f.get('iter', '')} vs {f['ref']} in {' / '.join(f['pair'])} "
+                  f"({f['attempts']} attempts): {f['error'][-200:]}")
+    return 0
+
+
+def _short(name):
+    return name.split('_')[0][:8]
+
+
+def print_summary(s, decks, title):
+    """The N x N table of one summary: rows the measured side's deck, columns the opponent's; Elo gain +- se."""
+    print(title)
+    w = 16
+    print('  ' + 'pilot / opp'.ljust(12) + ''.join(_short(y).rjust(w) for y in decks) + 'deck'.rjust(w))
+    for x in decks:
+        line = '  ' + _short(x).ljust(12)
+        for y in decks:
+            c = s['cells'].get(f'{x}|{y}')
+            mark = '*' if c and f'{x}|{y}' in s['promote'] else ' '
+            line += (f"{c['elo']:+.0f} +-{c['se']:.0f}{mark}" if c else '-').rjust(w)
+        d = s['decks'].get(x)
+        line += (f"{d['elo']:+.0f} +-{d['se']:.0f}" if d else '-').rjust(w)
+        print(line)
+    if s['overall']:
+        print(f"  overall {s['overall']['elo']:+.1f} +- {s['overall']['se']:.1f}" +
+              (f";  anchored {s['anchored']['elo']:.1f} +- {s['anchored']['se']:.1f}" if s.get('anchored') else ''))
+    else:
+        print(f"  incomplete: missing {', '.join(s['missing'])}")
+    if s['promote']:
+        print(f"  * vs_ref above the threshold in {', '.join(s['promote'])}: a new reference is suggested")
+
+
+def cmd_cells(a):
+    run = os.path.abspath(a.run)
+    cfg = Y.cfg_of(run)
+    ys = _ys_of(a, run, cfg)
+    if ys is None or not (ys['cells_games'] or ys['cells_gen_games']):
+        print('yardsticks: no cells for this run')
+        return 0
+    rep = Y.cells_report(run, cfg, ys)
+    if a.json:
+        print(json.dumps(rep, indent=1))
+        return 0
+    print('reference ladder:')
+    for r in rep['refs']:
+        print(f"  {r.get('label')}: since {r.get('since')}, sha {r.get('sha')}, Elo "
+              + (f"{r['elo']:.1f} +- {r['se']:.1f} ({r['how']})" if r.get('elo') is not None else
+                 f"unchained {r.get('error', '')}"))
+    for g in rep['cells']:
+        print_summary(g['summary'], ys['cells_decks'], f"iteration {g['iter']} against {g['ref']}:")
+    for g in rep['gen']:
+        print_summary(g['summary'], ys['cells_decks'], f"iteration {g['iter']} against iteration {g['prev']} "
+                      f"(gen over gen):")
+    if rep['promote']:
+        p = rep['promote']
+        print(f"SUGGESTED: a new reference - iteration {p['iter']} scores above {ys['cells_promote']} against "
+              f"{p['ref']} in {', '.join(p['cells'])}:  python tools/run_yardsticks.py cells-freeze {a.run} "
+              f"--iter {p['iter']}")
+    return 0
+
+
+def cmd_freeze(a):
+    run = os.path.abspath(a.run)
+    cfg = Y.cfg_of(run)
+    ys = _ys_of(a, run, cfg)
+    try:
+        e = Y.freeze_ref(run, a.iter, a.label, a.to, cfg, ys)
+    except ValueError as ex:
+        raise SystemExit(str(ex))
+    print(json.dumps(e, indent=1))
+    print(f"frozen: {e['label']} (iteration {e['iter']}), Elo {e['elo']} +- {e['elo_se']}; checkpoints from "
+          f"{e['since']} on are measured against it ({Y.ladder_path(run)})")
+    return 0
+
+
+def cmd_match(a):
+    """Standalone: a checkpoint's cells against a reference (local games), outside any run's watcher."""
+    ov = {'bo1_games': 0, 'blunders': False, 'cells_games': a.games, 'cells_refs': ['ref=' + a.ref]}
+    ov.update(json.loads(a.yardsticks) if a.yardsticks else {})
+    for k, v in (('cells_sims', a.sims), ('cells_device', a.device), ('cells_seed', a.seed)):
+        if v is not None:
+            ov[k] = v
+    if a.decks:
+        ov['cells_decks'] = a.decks.split(',')
+    ys = Y.normalize(ov)
+    cdir = a.cache or os.path.join(os.path.dirname(os.path.abspath(a.out or a.ckpt)), 'cells_base')
+    rows, s = Y.measure_cells_standalone(os.path.abspath(a.ckpt), os.path.abspath(a.ref), ys, cdir,
+                                         label=a.ref_label, rows_out=a.out,
+                                         log=lambda m: print('# ' + m, file=sys.stderr, flush=True))
+    if a.json:
+        print(json.dumps({'summary': s, 'rows': rows}, indent=1))
+    else:
+        print_summary(s, ys['cells_decks'], f'{a.ckpt} against {a.ref}:')
     return 0
 
 
@@ -442,15 +614,47 @@ def main(argv=None):
     s.add_argument('--yardsticks', default=None)
     o = sub.add_parser('one')
     o.add_argument('run')
-    o.add_argument('--kind', choices=['bo1', 'blunders'], required=True)
-    o.add_argument('--iter', type=int, required=True)
+    o.add_argument('--kind', choices=list(Y.KINDS), required=True)
+    o.add_argument('--iter', type=int, default=None)
     o.add_argument('--opp', default=None)
+    o.add_argument('--ref', default=None)
+    o.add_argument('--pair', default=None)
+    o.add_argument('--games', type=int, default=None)
     o.add_argument('--yardsticks', default=None)
+    c = sub.add_parser('cells', help='the metagame cells\' report (docs/ENGINE.md 177)')
+    c.add_argument('run')
+    c.add_argument('--json', action='store_true')
+    c.add_argument('--yardsticks', default=None)
+    f = sub.add_parser('cells-freeze', help='freeze a checkpoint as the next cells reference (explicit; never automatic)')
+    f.add_argument('run')
+    f.add_argument('--iter', type=int, required=True)
+    f.add_argument('--label', default=None)
+    f.add_argument('--to', default=None, help='where the copy goes (default <run>/yardsticks/cells_refs/<label>.pt)')
+    f.add_argument('--yardsticks', default=None)
+    m = sub.add_parser('cells-match', help='standalone: a checkpoint\'s cells against a reference, local games')
+    m.add_argument('ckpt')
+    m.add_argument('--ref', required=True)
+    m.add_argument('--ref-label', default='ref')
+    m.add_argument('--games', type=int, default=400, help='games per cell (even)')
+    m.add_argument('--sims', type=int, default=None)
+    m.add_argument('--seed', type=int, default=None)
+    m.add_argument('--device', choices=['cpu', 'cuda'], default=None)
+    m.add_argument('--decks', default=None, help='comma-separated data/decks names (default the metagame\'s three)')
+    m.add_argument('--cache', default=None, help='the baselines\' cache directory (default <out or ckpt dir>/cells_base)')
+    m.add_argument('--out', default=None, help='append every row to this JSONL file')
+    m.add_argument('--json', action='store_true')
+    m.add_argument('--yardsticks', default=None, help='more cells_* options as JSON')
     a = ap.parse_args(argv)
     if a.cmd == 'one':
         return cmd_one(a)
     if a.cmd == 'status':
         return cmd_status(a)
+    if a.cmd == 'cells':
+        return cmd_cells(a)
+    if a.cmd == 'cells-freeze':
+        return cmd_freeze(a)
+    if a.cmd == 'cells-match':
+        return cmd_match(a)
     if not os.path.exists(os.path.join(a.run, 'config.json')):
         ap.error(f'{a.run}: no config.json (not a run directory)')
     return Watcher(a.run, a.supervised, a.once, json.loads(a.yardsticks) if a.yardsticks else None,
