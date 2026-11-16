@@ -36811,3 +36811,45 @@ Gates of the merge 7034e8df (zero-core 2c67426), in warm worktrees beside the li
   `MSYS2_ENV_CONV_EXCL=MTGZ_MAC_HOME` in the gate's environment: with the Mac loaded the gate falls back to the desktop
   for its Mac pytest shards, and there `test_mac_remote::test_the_macs_selfplay_settings` fails without it (174.1's
   `tools/local_env.sh` / Git Bash path conversion; main's checkout the same; one run of this merge failed so).
+
+## 178. Rolling self-play leases: the farm worker's rolling jobs and the pool's per-row staleness (branch `feat/rolling-farm`, zero-core `feat/rolling-farm`, 2026-11-16)
+
+(Section number: 175-177 are main's.)
+
+**Why.** On the farm a classic self-play lease starts all its games at once and replaces none: its batch drains as
+games end, and it lasts as long as its slowest game, so GPU leases kept about a third of their full-batch rate and
+38-43% of what the GPU PCs played was thrown away as stale (pb3, iterations 83-131, 2026-11-16; zero-core docs/az.md
+54.1; the per-PC data is in the maintainer's notes). zero-farm PROTOCOL rev 15 (section 10) adds rolling leases: N games
+in flight, a new game started whenever one ends, ids released as the worker asks, each new generation switched to in
+place, finished games uploaded in small chunks, and rows judged stale one by one by the network that searched them.
+
+**What.** The zero-core pin moves from 2c67426 (`feat/fast-farm-export`, pb3's pin) to 347eb6c (`feat/rolling-farm`,
+branched from it: 46f7625 the worker, c2a2980 the pool, 878f728 docs/az.md 54, 347eb6c a quit guard); nothing else in this repo changes - the worker binary (`worker/`) is zero_worker's. zero-core docs/az.md 54
+has the design; in short:
+
+* **The worker** announces `"features": ["rolling"]` in `hello` and `info`. A job line with `"rolling": true` (and
+  `flush_s`, default 120 s) keeps `conc` games in flight while ids are left, then idles (status and ping as always) until
+  `{"op": "extend", "games": total}` raises its games or `finish` / `quit` ends it; it sends `low` once per games value
+  when fewer than `conc` ids are left to start; a records file is also written `flush_s` after the first game in it
+  finished; a `checkpoint` builds the new network's session and self-test on a thread of its own while the games go on
+  with the old one, then switches in place (each row keeps `net`). A failed self-test stays fatal. `end` is `finish` or
+  `quit` with the released ids not finished as `unfinished`.
+* **The pool** (the trainer's side): run setting `pool_rolling` ('' = off) is the farm run's `selfplay.rolling` (a JSON
+  object of `inflight`, `gpu_inflight`, `block`, `max_s`, `flush_s`, or `auto`). Set, the first publish checks the worker
+  build announces `rolling` (refused loudly otherwise), every self-play PUT carries it, and a held game loses only its
+  rows of a network older than i - 1 - `pool_max_stale` (the game is dropped only when none is left).
+
+**Defaults byte-identical.** A job line without `rolling` runs exactly the loop of before (the same games, rows, files
+and events; `extend` answered with the non-fatal "unknown op" error of before; the classic checkpoint path unchanged);
+`pool_rolling` '' sends every PUT body of before and judges staleness per game as before. The only change a classic job
+sees is `hello` / `info` gaining the `features` key. pb3's config sets no `pool_rolling`: on this pin it plays and trains
+as on 2c67426, and its farm leases stay classic until the coordinator (migration 0011), agents 0.2.13 and `pool_rolling`
+are all in place.
+
+**Tests.** zero-core: zero_worker's suites (`tests/rolling.rs`, 7: extend / low / idle / finish, a rolling job's games
+== the classic job's games of the same ids byte for byte, quit, flush_s while idle, a classic job unchanged, two
+checkpoint switches while the games go on; `proto.rs` unit tests: the job line, `extend` reaching a rolling job only,
+`features`) and the pool's pytest (`test_farm_pool.py`: the setting, the worker check, the PUT bodies, per-row staleness,
+`keep_rows` on tails / overrides / sparse rows), the full core pytest, `tools/smoke_all.sh --with-this-core
+--build-only`. Here: the `optin-core` gate (its farm-compat step: the release worker vs zero-core's Python worker,
+byte-identical, on classic jobs).
