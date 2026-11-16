@@ -311,6 +311,12 @@ def method_of(final, prev, recent=()):
         return f'draw_{reason}'
     loser = 1 - w
     if reason == 'Effect':
+        # the last of the two triggers in the log (a trigger put and resolved in one step never shows on a stack)
+        for ln in reversed(list(recent)):
+            if f'trigger of {ORACLE} goes on the stack' in ln:
+                return 'oracle'
+            if f'trigger of {PACT} goes on the stack' in ln:
+                return 'pact'
         for e in reversed((prev or {}).get('stack') or []):
             if e.get('name') == ORACLE and e.get('controller') == w:
                 return 'oracle'
