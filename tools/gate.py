@@ -33,9 +33,9 @@ ad-hoc shell script. It can never pass a check it did not perform:
     A caller's DIGEST_*, FUZZ_*, PYTEST_ADDOPTS, PYTHONPATH and ZERO_CORE_UNPINNED never reach a
     step.
   * **Evidence, not assertions** (ENGINE.md 143). The engine tier no longer takes the full engine
-    suite and the 20k fuzz on the agent's word (--tested-sha): the `suite` tier runs them on a
+    suite and the fuzz on the agent's word (--tested-sha): the `suite` tier runs them on a
     commit and its report gates/<sha12>-suite.json is the evidence the engine tier checks (tier,
-    sha, pin, a clean pass, the fuzz's 20,000 games, every log unchanged); without it the engine
+    sha, pin, a clean pass, a fuzz step of at least FUZZ_GAMES games - 2,000 a pool since ENGINE.md 167 -, every log unchanged); without it the engine
     tier refuses unless --allow-skip suite-evidence, named in the final line.
   * **A timeout bounds the step** - the command and every process it started (tools/proctree.py).
   * **The core's own suite** (search-core, optin-core): zero-core's engine module built with its
@@ -607,17 +607,71 @@ FARM_COMPAT_RE = re.compile(r'^farm compat: (PASSED|FAILED) - (.*)$', re.M)
 CARGO_FINISHED_RE = re.compile(r'^\s*Finished `release` profile', re.M)
 
 
+CACHE_HIT_RE = re.compile(r'^artifact cache: hit (\S+) ([0-9a-f]{16}) -> (.+?) \(sha256 ([0-9a-f]{16})', re.M)
+
+
 def make_worker_build_checker(exe):
-    """The release worker's build (`cargo build --release -p mtgz_worker`): cargo's "Finished `release` profile" line,
-    the executable at `exe` + exit 0 (its sha256 recorded)."""
+    """The release worker (`tools/zcache.py worker`: fetched from the artifact cache by this commit's Rust input hash,
+    else `cargo build --release -p mtgz_worker` and stored - ENGINE.md 167): cargo's "Finished `release` profile" line or
+    the cache's "artifact cache: hit worker <key> -> <exe> (sha256 ...)" line naming `exe` with the sha256 it has, the
+    executable at `exe` + exit 0 (its sha256 recorded, and whether it was built or fetched)."""
     def checker(output, rc):
         if rc != 0:
             return False, f'exit {rc}', {}
-        if not CARGO_FINISHED_RE.search(output):
+        hit = [m for m in CACHE_HIT_RE.findall(output) if m[0] == 'worker']
+        if not hit and not CARGO_FINISHED_RE.search(output):
             return False, 'no "Finished `release` profile" line', {}
         if not os.path.isfile(exe):
             return False, f'no {exe} after the build', {}
-        return True, f'{exe} built', {'worker': exe, 'worker_sha256': sha256_file(exe)}
+        digest = sha256_file(exe)
+        if hit:
+            _, key, dest, want = hit[-1]
+            if norm(dest) != norm(exe) or not digest.startswith(want):
+                return False, f'the cache placed {dest} (sha256 {want}), but {exe} has sha256 {digest[:16]}', {}
+            return True, f'{exe} from the artifact cache (key {key})', {'worker': exe, 'worker_sha256': digest,
+                                                                        'worker_cache': f'hit {key}'}
+        return True, f'{exe} built', {'worker': exe, 'worker_sha256': digest, 'worker_cache': 'built'}
+    return checker
+
+
+def check_test_build(output, rc):
+    """The test binaries' build (`cargo test --release -p engine --no-run --test ...`): cargo's "Finished `release`
+    profile" line + exit 0 (the steps after it run them without building)."""
+    if rc != 0:
+        return False, f'exit {rc}: ' + last_line(output), {}
+    if not CARGO_FINISHED_RE.search(output):
+        return False, 'no "Finished `release` profile" line', {}
+    return True, 'test binaries built', {}
+
+
+FUZZ_SHARDS_RE = re.compile(r'^fuzz shards: (PASSED|FAILED) - (.*)$', re.M)
+
+
+def make_fuzz_shards_checker(games, pool, hidden):
+    """tools/fuzz_shards.py's positive evidence (ENGINE.md 167): exactly one "fuzz shards: PASSED - ..." line and its
+    JSON summary {"fuzz_shards": {"passed": true, ...}} for this pool with exactly `games` games, the merged end-of-run
+    checks run ("checked" names the games, and the matches unless the pool plays none), + exit 0."""
+    def checker(output, rc):
+        ms = FUZZ_SHARDS_RE.findall(output)
+        summ = [s['fuzz_shards'] for s in json_lines(output, 'fuzz_shards') if isinstance(s.get('fuzz_shards'), dict)]
+        if len(ms) != 1 or len(summ) != 1:
+            return False, f'{len(ms)} "fuzz shards:" line(s), {len(summ)} summary line(s) (expected exactly 1 each)', {}
+        verdict, text = ms[0]
+        s = summ[0]
+        extra = {'fuzz_games': s.get('games'), 'fuzz_shards': {k: s.get(k) for k in (
+            'pool', 'hidden', 'games', 'matches', 'post', 'shards', 'checked', 'rest_passed', 'seconds', 'slowest_shard_s',
+            'matches_skipped', 'logs')}}
+        if verdict != 'PASSED' or not s.get('passed'):
+            return False, f'fuzz shards {verdict}: {text[:250]}', extra
+        if s.get('games') != games or s.get('pool') != pool or bool(s.get('hidden')) != hidden:
+            return False, (f'the shards fuzzed {s.get("games")} games of {s.get("pool")}{" (hidden)" if s.get("hidden") else ""}, '
+                           f'not {games} of {pool}{" (hidden)" if hidden else ""}'), extra
+        kinds = {c.split()[0] for c in s.get('checked') or []}
+        if 'games' not in kinds or (not hidden and not s.get('matches_skipped') and 'matches' not in kinds):
+            return False, f'the merged checks covered {sorted(kinds)}', extra
+        if rc != 0:
+            return False, f'"fuzz shards: PASSED" but exit {rc}', extra
+        return True, text[:250], extra
     return checker
 
 
@@ -1164,6 +1218,7 @@ class Ctx:
         self.slot_wait = args.slot_wait
         self.throttle = False
         self.placement = None
+        self.pytest_shards = max(1, args.pytest_shards)          # (ENGINE.md 167)
 
 
 def python_exe():
@@ -1402,6 +1457,8 @@ def place(ctx, args, steps):
 # ---------------------------------------------------------------------------- shared steps
 
 def build_step(ctx, name='build'):
+    # (tools/build_py.sh takes the module from the artifact cache when this commit's Rust inputs were built before:
+    # ENGINE.md 167)
     pkg = os.path.join(ROOT, 'mtgz')
     return Step(name, ['bash', 'tools/build_py.sh'], id='build', checker=make_build_checker('mtgz._engine', pkg), heavy=True,
                 evidence=f'"mtgz._engine OK: {pkg}{os.sep}_engine.* | games: [...]" (the fresh module, imported from '
@@ -1417,19 +1474,206 @@ def mac_built(shell):
 PYTEST_ARGS = ['-q', '-p', 'no:cacheprovider', '-rs']      # (-rs: the skip reasons, the live-run fence's among them)
 
 
-def pytest_step(name='pytest', step_id='pytest'):
-    """This repo's pytest. On the Mac (ENGINE.md 166) without PYTEST_DESKTOP_ONLY, which run on the desktop beside it
-    (step `pytest-desktop`): together exactly the desktop's tests."""
+PYTEST_DURATIONS = 'pytest_durations.json'      # each test file's seconds, from the shards' junit files
+
+
+def durations_dir():
+    """Where the pytest durations live: the machine's state dir shared by every checkout (tools/slotd.sh's:
+    $MTGZ_SLOTS_HOME, $ZERO_BIG_DISK/mtg-zero-state on Windows, ~/.mtgz-state - a warm worktree's gates/ is its own),
+    else gates/."""
+    for d in (os.environ.get('MTGZ_SLOTS_HOME'), f'{BIG_DISK}/mtg-zero-state' if BIG_DISK else None,
+              os.path.expanduser('~/.mtgz-state')):
+        if d and os.path.isdir(d):
+            return d
+    return GATES_DIR
+
+
+def pytest_files():
+    return sorted(os.path.relpath(p, ROOT).replace('\\', '/') for p in glob.glob(os.path.join(ROOT, 'tests', 'test_*.py')))
+
+
+def pytest_partition(files, n, weights):
+    """`files` into `n` shards of about equal time -> [(entries, deselected)]: `entries` the pytest arguments (files, or
+    node ids of a split file), `deselected` node ids passed as --deselect. `weights` = seconds from earlier runs
+    (durations_dir()'s pytest_durations.json: per file, and per test as "<file>::<test id>"); a file without one is
+    weighed by its size (1 s per 2 kB). A file longer than a shard's share with measured tests is split by its tests:
+    its first part runs the file with the other parts' tests deselected (so a test added since, unmeasured, runs there),
+    the others name their tests. Then longest first, each unit to the lightest shard."""
+    def w(f):
+        if f in weights:
+            return float(weights[f])
+        try:
+            return os.path.getsize(os.path.join(ROOT, f)) / 2000.0
+        except OSError:
+            return 1.0
+    target = sum(w(f) for f in files) / max(1, n)
+    units = []                                  # (seconds, entries, deselected)
+    for f in files:
+        tests = {k: float(v) for k, v in weights.items() if k.startswith(f + '::')}
+        k = min(len(tests), int(-(-w(f) // target)) if target > 0 else 1)
+        if k < 2:
+            units.append((w(f), [f], []))
+            continue
+        parts = [[0.0, []] for _ in range(k)]
+        for t in sorted(tests, key=lambda t: (-tests[t], t)):
+            p = min(parts, key=lambda p: p[0])
+            p[0] += tests[t]
+            p[1].append(t)
+        rest = [t for p in parts[1:] for t in p[1]]
+        units.append((parts[0][0] + max(0.0, w(f) - sum(tests.values())), [f], sorted(rest)))
+        units += [(p[0], sorted(p[1]), []) for p in parts[1:] if p[1]]
+    bins = [[0.0, [], []] for _ in range(n)]
+    for sec, entries, desel in sorted(units, key=lambda u: (-u[0], u[1])):
+        b = min(bins, key=lambda b: b[0])
+        b[0] += sec
+        b[1] += entries
+        b[2] += desel
+    return [(b[1], b[2]) for b in bins if b[1]]
+
+
+def pytest_coverage(files, shards):
+    """None when `shards` (pytest_partition's) run every test of `files` exactly once, else why not: every file is the
+    entry of exactly one shard, and each node id named elsewhere is a test of a file deselected in that file's shard."""
+    whole = [e for entries, _ in shards for e in entries if '::' not in e]
+    if sorted(whole) != sorted(files):
+        return f'files as entries: {sorted(set(files) ^ set(whole)) or "a file twice"}'
+    owner = {e: k for k, (entries, _) in enumerate(shards) for e in entries if '::' not in e}
+    named = [e for entries, _ in shards for e in entries if '::' in e]
+    desel = {d: k for k, (_, ds) in enumerate(shards) for d in ds}
+    if len(named) != len(set(named)) or sorted(named) != sorted(desel):
+        return 'a split file\'s named tests and its deselected ones differ'
+    for t in named:
+        f = t.split('::')[0]
+        if f not in owner or desel[t] != owner[f]:
+            return f'{t}: not deselected in the shard that runs {f}'
+    return None
+
+
+def read_durations():
+    try:
+        with open(os.path.join(durations_dir(), PYTEST_DURATIONS), encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def junit_node(tc):
+    """A junit testcase's pytest node id ("tests/test_x.py::Class::test[param]") and its file, from its classname
+    ("tests.test_x" or "tests.test_x.Class") and name."""
+    parts = (tc.get('classname') or '').split('.')
+    k = next((i for i in range(len(parts)) if parts[i].startswith('test_')), len(parts) - 1)
+    f = '/'.join(parts[:k + 1]) + '.py'
+    if not f.startswith('tests/'):
+        f = 'tests/' + f.split('tests/')[-1]
+    return '::'.join([f, *parts[k + 1:], tc.get('name') or '']), f
+
+
+def record_durations(xml_path):
+    """A shard's junit file -> each test file's and each test's seconds into durations_dir()'s pytest_durations.json
+    (under a lock file: the shards finish at about the same time). Best effort: a missing or unreadable file changes
+    nothing. A split file's parts each add their tests; the file's own total is written by the part that ran it whole
+    or, for a split file, summed from its tests' latest seconds."""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.parse(xml_path).getroot()
+    except (OSError, ET.ParseError):
+        return
+    tests = {}
+    for tc in root.iter('testcase'):
+        node, _ = junit_node(tc)
+        tests[node] = tests.get(node, 0.0) + float(tc.get('time') or 0)
+    lock = os.path.join(durations_dir(), PYTEST_DURATIONS + '.lock')
+    for _ in range(100):
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError:
+            time.sleep(0.1)
+    else:
+        return
+    try:
+        d = read_durations()
+        d.update({k: round(v, 2) for k, v in tests.items()})
+        for f in {n.split('::')[0] for n in tests}:
+            d[f] = round(sum(v for k, v in d.items() if k.startswith(f + '::')), 2)
+        with open(os.path.join(durations_dir(), PYTEST_DURATIONS), 'w', encoding='utf-8') as fh:
+            json.dump(d, fh, indent=1, sort_keys=True)
+    finally:
+        os.close(fd)
+        os.remove(lock)
+    try:
+        os.remove(xml_path)
+    except OSError:
+        pass
+
+
+def pytest_step(name='pytest', step_id='pytest', ctx=None):
+    """This repo's pytest -> its steps. On the Mac (ENGINE.md 166) without PYTEST_DESKTOP_ONLY, which run on the desktop
+    beside it (step `pytest-desktop`): together exactly the desktop's tests. With ctx.pytest_shards > 1 (ENGINE.md 167)
+    the tests are split into that many shards (`pytest-K-of-N`: pytest_partition, every test exactly once -
+    pytest_coverage, checked when the plan is made), each its own process and --basetemp, run at once by a parallel
+    group: on the desktop each shard runs its part, on the Mac each runs its part but the desktop-only tests, and the
+    desktop part beside the first shard runs those."""
     ev = "pytest's final summary line: 0 failed, 0 errors, N > 0 passed + exit 0"
     files = [a for a in PYTEST_DESKTOP_ONLY if '::' not in a]
     ids = [a for a in PYTEST_DESKTOP_ONLY if '::' in a]
-    mac = shlex.join(['python', '-m', 'pytest', 'tests', *PYTEST_ARGS, *[f'--ignore={f}' for f in files],
-                      *[f'--deselect={i}' for i in ids]])
     desk = Step(f'{name} (desktop part: the Windows worker, private data, platform-bound checks)',
                 [python_exe(), '-m', 'pytest', *PYTEST_DESKTOP_ONLY, *PYTEST_ARGS], id=f'{step_id}-desktop',
                 checker=check_pytest, heavy=True, evidence=ev)
-    return Step(name, [python_exe(), '-m', 'pytest', 'tests', *PYTEST_ARGS], id=step_id, checker=check_pytest,
-                heavy=True, mac_cmd=lambda ctx: mac_built(mac), desktop_part=desk, evidence=ev)
+    n = getattr(ctx, 'pytest_shards', 1) if ctx is not None else 1
+    if n <= 1:
+        mac = shlex.join(['python', '-m', 'pytest', 'tests', *PYTEST_ARGS, *[f'--ignore={f}' for f in files],
+                          *[f'--deselect={i}' for i in ids]])
+        return [Step(name, [python_exe(), '-m', 'pytest', 'tests', *PYTEST_ARGS], id=step_id, checker=check_pytest,
+                     heavy=True, mac_cmd=lambda ctx: mac_built(mac), desktop_part=desk, evidence=ev)]
+    allf = pytest_files()
+    shards = pytest_partition(allf, n, read_durations())
+    why = pytest_coverage(allf, shards)
+    if why:
+        raise GateError(f'internal: the pytest shards do not run every test exactly once ({why})')
+    steps, first = [], True
+    for k, (entries, desel) in enumerate(shards, 1):
+        tag = f'{k}-of-{len(shards)}'
+        base = os.path.join(GATES_DIR, 'tmp', f'pytest-{ctx.sha_short}-{tag}-{uuid.uuid4().hex[:8]}')
+        xml = base + '.xml'
+        on_mac = [e for e in entries if e.split('::')[0] not in files and e not in ids]
+        mac_desel = [d for d in desel + ids if d.split('::')[0] in on_mac]
+        mac = shlex.join(['python', '-m', 'pytest', *on_mac, *PYTEST_ARGS, *[f'--deselect={d}' for d in mac_desel]])
+        nfiles = len({e.split('::')[0] for e in entries})
+        s = Step(f'{name} {tag} ({nfiles} files)',
+                 [python_exe(), '-m', 'pytest', *entries, *PYTEST_ARGS, *[f'--deselect={d}' for d in desel],
+                  f'--basetemp={base}', f'--junitxml={xml}'],
+                 id=f'{step_id}-{tag}', checker=check_pytest, heavy=True,
+                 mac_cmd=(lambda ctx, mac=mac: mac_built(mac)) if on_mac else None,
+                 cleanup=lambda base=base, xml=xml: (record_durations(xml), shutil.rmtree(base, ignore_errors=True)),
+                 evidence=ev)
+        if on_mac and first:
+            s.desktop_part, first = desk, False
+        steps.append(s)
+    return steps
+
+
+def in_parallel(*steps):
+    """`steps` (Steps or lists of them) as one parallel group (ENGINE.md 167): run_steps runs them at once - each where
+    `place` put it, a heavy desktop one through the machine's throttle when the gate throttles; the gate goes on when
+    all ended, and stops after the group if any failed."""
+    flat = []
+    for s in steps:
+        flat.extend(s if isinstance(s, list) else [s])
+    for s in flat:
+        s.group = 'parallel'
+    return flat
+
+
+def test_build_step(tests):
+    """The engine test binaries `tests` (cargo --test targets; none: all) built before the steps that run them, so a
+    parallel group's cargo steps only run (ENGINE.md 167); on the Mac too when the gate offloads (its steps then find
+    them built there)."""
+    argv = ['cargo', 'test', '--release', '-p', 'engine', '--no-run']
+    for t in tests:
+        argv += ['--test', t]
+    return Step(f'build the test binaries ({", ".join(tests) if tests else "all"})', argv, id='test-build',
+                checker=check_test_build, heavy=True, mac_cmd=True, evidence='"Finished `release` profile" + exit 0')
 
 
 def cargo_step(name, test, step_id=None):
@@ -1447,10 +1691,11 @@ def worker_build_step(ctx):
     pytest (its worker tests run it: they find it through CARGO_TARGET_DIR / MTGZ_WORKER, so they never test a stale
     build - ENGINE.md 114.9's first engine gate did) and the farm-compat step (ENGINE.md 155)."""
     exe = worker_path(ctx)
+    # (tools/zcache.py: the artifact cache by this commit's Rust input hash, else cargo build + stored; ENGINE.md 167)
     return Step("worker build (release mtgz-worker, the farm's executable)",
-                ['cargo', 'build', '--release', '-p', 'mtgz_worker'], id='worker-build',
-                checker=make_worker_build_checker(exe), heavy=True,
-                evidence=f'"Finished `release` profile", {exe} there + exit 0')
+                [python_exe(), 'tools/zcache.py', 'worker', '--root', ROOT, '--target-dir', ctx.target_dir],
+                id='worker-build', checker=make_worker_build_checker(exe), heavy=True,
+                evidence=f'"Finished `release` profile" or "artifact cache: hit worker ... -> {exe}", {exe} there + exit 0')
 
 
 def farm_compat_step(ctx):
@@ -1531,7 +1776,10 @@ def core_steps(ctx):
                 '-W', 'ignore::pytest.PytestWarning', f'--basetemp={tmp}']
     zero_pkg = os.path.join(CORE, 'python', 'zero')
     return [
-        Step('core build (zero._engine)', ['bash', 'tools/build_py.sh'], cwd=CORE, id='core-build', heavy=True,
+        # (tools/zcache.py core-pyd: the artifact cache by the pinned commit, else the core's own tools/build_py.sh,
+        # stored; ENGINE.md 167)
+        Step('core build (zero._engine)', [python_exe(), 'tools/zcache.py', 'core-pyd', '--root', ROOT], id='core-build',
+             heavy=True,
              checker=make_build_checker('zero._engine', zero_pkg),
              evidence=f'"zero._engine OK: {zero_pkg}{os.sep}_engine.* | games: [...]" + exit 0'),
         Step('core pytest', argv('tests', base), cwd=CORE, id='core-pytest', checker=check_pytest, heavy=True,
@@ -1634,8 +1882,10 @@ def tier_python(ctx, args):
                                                           'mtgz/_engine, not one built from this commit')
     else:
         build = build_step(ctx)
-    # (pytest runs the worker tests: the worker built from this commit, never another checkout's - ENGINE.md 155)
-    return [build, worker_build_step(ctx), pytest_step(), run_loop_step(ctx, preset, games)]
+    # (pytest runs the worker tests: the worker built from this commit, never another checkout's - ENGINE.md 155); the
+    # builds come from the artifact cache when no Rust input changed, and pytest's shards and the smoke run at once
+    # (ENGINE.md 167)
+    return [build, worker_build_step(ctx), *in_parallel(pytest_step(ctx=ctx), run_loop_step(ctx, preset, games))]
 
 
 def tier_encoding(ctx, args):
@@ -1655,13 +1905,18 @@ def tier_encoding(ctx, args):
         raise GateError(f'the encoding tier loads a run\'s checkpoint on the new encoding: it needs --checkpoint <a .pt> '
                         f'(--checkpoint-spec for its spec); --allow-skip {sid} runs without it (SKIPPED, named in the '
                         f'final line)')
-    steps = [build_step(ctx), worker_build_step(ctx), *digest_steps(ctx, args), cargo_step('cargo test az', 'az'), load,
-             pytest_step(), farm_compat_step(ctx)]
+    steps = [build_step(ctx), worker_build_step(ctx), test_build_step(['digest', 'digest_formats', 'dealt_decks', 'az']),
+             *in_parallel(*digest_steps(ctx, args), cargo_step('cargo test az', 'az'), load, pytest_step(ctx=ctx),
+                          farm_compat_step(ctx))]
     # NO search smoke (the uniform evaluator cannot see an encoding change).
     return steps
 
 
-FUZZ_GAMES = 20000          # AGENTS.md / ENGINE.md 16: the 20k fuzz before an engine change merges
+# The gate's fuzz before an engine change merges (the user's decision D1, 2026-11-15; ENGINE.md 167): ~2,000 games per
+# pool, sharded across cores (tools/fuzz_shards.py), the hidden-information checks included; the 20k depth runs on the
+# farm continuously, on main and each live run's build, not in the gate.
+FUZZ_GAMES = 2000
+FUZZ_POOLS = 'default,default+hidden,delver_dealt'    # the suite tier's default --fuzz-pools (+hidden: FUZZ_HIDDEN_DECKS=1)
 FUZZ_RE = re.compile(r'^(\d+) games: wins \[', re.M)
 SUITE_STEPS = ('cargo-test-engine',)          # + one 'fuzz-<pool>' step per --fuzz-pools entry
 
@@ -1688,26 +1943,36 @@ def make_fuzz_checker(games):
 
 
 def tier_suite(ctx, args):
-    """The full engine suite and the 20k fuzz on THIS commit (the engine change's own half: AGENTS.md); its report
-    gates/<sha12>-suite.json is the evidence the engine tier wants for --tested-sha (ENGINE.md 143)."""
-    pools = split_list(args.fuzz_pools, 'default', '--fuzz-pools')
+    """The full engine suite and the sharded fuzz (FUZZ_GAMES a pool: tools/fuzz_shards.py, ENGINE.md 167) on THIS
+    commit (the engine change's own half: AGENTS.md); its report gates/<sha12>-suite.json is the evidence the engine
+    tier wants for --tested-sha (ENGINE.md 143). The test binaries first, then the suite and every pool's shards at
+    once (on the Mac beside a live run: ENGINE.md 166)."""
+    pools = split_list(args.fuzz_pools, FUZZ_POOLS, '--fuzz-pools')
+    shards = max(1, args.fuzz_shards or 8)
     steps = [Step('cargo test (the full engine suite)', ['cargo', 'test', '--release', '-p', 'engine', '--no-fail-fast'],
                   id='cargo-test-engine', checker=make_cargo_checker(), mac_cmd=True,
                   evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0')]
-    for pool in pools:
-        env = {'FUZZ_GAMES': str(FUZZ_GAMES)}
-        if pool != 'default':
-            env['FUZZ_POOL'] = pool
-        steps.append(Step(f'fuzz {FUZZ_GAMES} games ({"FUZZ_POOL=" + pool if pool != "default" else "the default pool"})',
-                          ['cargo', 'test', '--release', '-p', 'engine', '--test', 'fuzz', '--', '--nocapture'], env=env,
-                          id=f'fuzz-{slug(pool)}', checker=make_fuzz_checker(FUZZ_GAMES), mac_cmd=True,
-                          evidence=f'"{FUZZ_GAMES} games: wins [...]", exactly one "test result: ok. N passed; 0 failed" + '
-                                   f'exit 0'))
-    return steps
+    for spec in pools:
+        pool, _, mod = spec.partition('+')
+        if mod not in ('', 'hidden'):
+            raise GateError(f'--fuzz-pools {spec}: <pool> or <pool>+hidden (FUZZ_HIDDEN_DECKS=1)')
+        hidden = mod == 'hidden'
+        # (relative to the checkout: the same path on the Mac's checkout when the step runs there)
+        out = f'gates/tmp/fuzz-{ctx.sha_short}-{slug(spec)}-{uuid.uuid4().hex[:8]}'
+        argv = [python_exe(), 'tools/fuzz_shards.py', '--pool', pool, '--games', str(FUZZ_GAMES), '--shards', str(shards),
+                '--out', out] + (['--hidden'] if hidden else [])
+        what = ('the default pool' if pool == 'default' else f'FUZZ_POOL={pool}') + (', hidden decklists' if hidden else '')
+        steps.append(Step(f'fuzz {FUZZ_GAMES} games ({what}), {shards} shards', argv, id=f'fuzz-{slug(spec)}',
+                          checker=make_fuzz_shards_checker(FUZZ_GAMES, pool, hidden), mac_cmd=True,
+                          cleanup=lambda out=out: shutil.rmtree(os.path.join(ROOT, out), ignore_errors=True),
+                          evidence=f'exactly one "fuzz shards: PASSED - ..." line and its JSON summary: {FUZZ_GAMES} games of '
+                                   f'{spec} over disjoint seed ranges, every range ran, the merged end-of-run checks passed '
+                                   f'+ exit 0'))
+    return [test_build_step([]), *in_parallel(*steps)]
 
 
 def suite_report_problems(path, sha, pin):
-    """Why the report at `path` is not the evidence that the full engine suite and the 20k fuzz passed on commit
+    """Why the report at `path` is not the evidence that the full engine suite and the fuzz passed on commit
     `sha` with zero-core `pin` -> (problems, the report or None). The evidence: a `suite` tier report of that sha and
     pin, passed and clean (no skip, no --allow-dirty), its engine-suite step and at least one fuzz step of
     FUZZ_GAMES games passed, and every step's log still there with the sha256 the report recorded."""
@@ -1730,7 +1995,8 @@ def suite_report_problems(path, sha, pin):
         if (steps.get(sid) or {}).get('status') != 'passed':
             out.append(f'no passed {sid} step')
     fuzz = [s for k, s in steps.items() if str(k).startswith('fuzz-')]
-    if not any(s.get('status') == 'passed' and s.get('fuzz_games') == FUZZ_GAMES for s in fuzz):
+    # (a report of the 20k gate before ENGINE.md 167 is evidence too: more games than the gate asks for now)
+    if not any(s.get('status') == 'passed' and (s.get('fuzz_games') or 0) >= FUZZ_GAMES for s in fuzz):
         out.append(f'no passed fuzz step of {FUZZ_GAMES} games')
     for s in steps.values():
         log, want = s.get('log'), s.get('log_sha256')
@@ -1744,7 +2010,7 @@ def suite_report_problems(path, sha, pin):
 
 
 def suite_evidence_step(ctx, args, sha, why):
-    """The engine tier's evidence that the full engine suite and the 20k fuzz passed on `sha` (the --tested-sha, or
+    """The engine tier's evidence that the full engine suite and the fuzz passed on `sha` (the --tested-sha, or
     this commit): a `suite` tier report (--suite-report, default gates/<sha12>-suite.json of this checkout). Without
     one the tier refuses unless --allow-skip suite-evidence (SKIPPED: "asserted, not evidenced" in the final line)."""
     sid = 'suite-evidence'
@@ -1772,18 +2038,23 @@ def suite_evidence_step(ctx, args, sha, why):
         if p:
             return False, 'the suite report is no longer the evidence: ' + '; '.join(p), {}, text
         fuzz = [s for s in r['steps'] if str(s.get('id')).startswith('fuzz-') and s.get('status') == 'passed']
-        return True, (f'{sha[:12]}: full engine suite and {len(fuzz)} fuzz run(s) of {FUZZ_GAMES} games passed '
-                      f'(report {path}, {r.get("started", "")[:19]})'), {'suite_report': path}, text
+        games = sorted({s.get('fuzz_games') for s in fuzz if s.get('fuzz_games')})
+        return True, (f'{sha[:12]}: full engine suite and {len(fuzz)} fuzz run(s) of '
+                      f'{"/".join(map(str, games)) or FUZZ_GAMES} games passed (report {path}, {r.get("started", "")[:19]})'), \
+            {'suite_report': path}, text
     return Step(name, [], id=sid, verify=verify,
                 evidence=f'{path}: a clean passed suite report of {sha[:12]} (engine suite + a {FUZZ_GAMES}-game fuzz), '
                          f'its logs unchanged')
 
 
 def tier_engine(ctx, args):
-    steps = [build_step(ctx), worker_build_step(ctx), *digest_steps(ctx, args),
-             cargo_step('cargo test az', 'az'), cargo_step('cargo test limits', 'limits'),
-             cargo_step('cargo test hidden', 'hidden'), pytest_step(),
-             smoke_step('smoke: 1 desktop config (random, seed 0)', ['random']), farm_compat_step(ctx)]
+    checks = [*digest_steps(ctx, args), cargo_step('cargo test az', 'az'), cargo_step('cargo test limits', 'limits'),
+              cargo_step('cargo test hidden', 'hidden'), *pytest_step(ctx=ctx),
+              smoke_step('smoke: 1 desktop config (random, seed 0)', ['random']), farm_compat_step(ctx)]
+    # the builds (the artifact cache's when no Rust input changed), the test binaries, then every check at once, each
+    # where `place` puts it (ENGINE.md 166, 167)
+    steps = [build_step(ctx), worker_build_step(ctx),
+             test_build_step(['digest', 'digest_formats', 'dealt_decks', 'az', 'limits', 'hidden']), *in_parallel(*checks)]
     sid = 'mac-recheck'
     name = 'full suite again on the Mac (merged sha differs, overlapping files)'
     if args.tested_sha:
@@ -1825,36 +2096,43 @@ def split_list(value, default, flag):
 def tier_search_core(ctx, args):
     need_core()
     configs = split_list(args.configs, 'random,eval,match,nomull', '--configs')
+    core_build, core_pytest = core_steps(ctx)
     return [
         build_step(ctx),
         worker_build_step(ctx),
-        Step('zero-core cargo test', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test', heavy=True,
-             evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
-        pytest_step('this repo: pytest'),
-        farm_compat_step(ctx),
-        compat_step(ctx, args, 'check_checkpoint_compat goldens'),
-        *digest_format_steps(),         # (the driver digest: zero-core's Driver<MtgAz>, ENGINE.md 148.1)
-        smoke_step(f'smoke: {len(configs)}-config of the pinning game ({",".join(configs)})', configs),
-        run_loop_step(ctx, 'mtg-smoke', 16),
-        # smoke_all for the OTHER zero-core games is zero-core-side (its own tools/smoke_all.sh
-        # --build-only), run by the orchestrator against the moving core commit - not this repo's gate.
-        *core_steps(ctx),
+        core_build,
+        test_build_step(['digest_formats', 'dealt_decks']),
+        # every check at once, each where `place` puts it (ENGINE.md 166, 167)
+        *in_parallel(
+            Step('zero-core cargo test', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test', heavy=True,
+                 evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
+            pytest_step('this repo: pytest', ctx=ctx),
+            farm_compat_step(ctx),
+            compat_step(ctx, args, 'check_checkpoint_compat goldens'),
+            *digest_format_steps(),         # (the driver digest: zero-core's Driver<MtgAz>, ENGINE.md 148.1)
+            smoke_step(f'smoke: {len(configs)}-config of the pinning game ({",".join(configs)})', configs),
+            run_loop_step(ctx, 'mtg-smoke', 16),
+            # smoke_all for the OTHER zero-core games is zero-core-side (its own tools/smoke_all.sh
+            # --build-only), run by the orchestrator against the moving core commit - not this repo's gate.
+            core_pytest),
     ]
 
 
 def tier_optin_core(ctx, args):
     need_core()
     feature_tests = split_list(args.feature_tests, 'az,hidden', '--feature-tests')
-    steps = [build_step(ctx), worker_build_step(ctx),
-             Step('core tests', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test', heavy=True,
-                  evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
-             compat_step(ctx, args, 'checkpoint_compat byte identity'),
-             *digest_format_steps(), farm_compat_step(ctx)]        # (the driver digest: zero-core's Driver<MtgAz>, ENGINE.md 148.1)
+    core_build, core_pytest = core_steps(ctx)
+    checks = [Step('core tests', ['cargo', 'test', '--release'], cwd=CORE, id='core-cargo-test', heavy=True,
+                   evidence='"test result:" lines all ok, 0 failed, N > 0 passed + exit 0'),
+              compat_step(ctx, args, 'checkpoint_compat byte identity'),
+              *digest_format_steps(), farm_compat_step(ctx)]        # (the driver digest: zero-core's Driver<MtgAz>, ENGINE.md 148.1)
     for t in feature_tests:
-        steps.append(cargo_step(f'feature tests: cargo test --test {t}', t, step_id=f'feature-{t}'))
-    steps.append(build_only_step(ctx, args))
-    steps.extend(core_steps(ctx))
-    return steps
+        checks.append(cargo_step(f'feature tests: cargo test --test {t}', t, step_id=f'feature-{t}'))
+    checks.append(build_only_step(ctx, args))
+    checks.append(core_pytest)
+    # the builds, then every check at once (ENGINE.md 167)
+    return [build_step(ctx), worker_build_step(ctx), core_build,
+            test_build_step(['digest_formats', 'dealt_decks', *feature_tests]), *in_parallel(*checks)]
 
 
 OTHER_GAMES = ('glassroad-zero', 'caverna-zero', 'kingdombuilder-zero')
@@ -1954,18 +2232,19 @@ def tier_repin(ctx, args):
 TIERS = {
     'docs': (tier_docs, 'docs / tools not on the run path: py_compile of touched tools (~0 min). Every tier first '
              'runs tools/privacy_check.py on the tracked files (step privacy, in-process).'),
-    'python': (tier_python, 'Python run-loop/settings: build + the release worker (its pytest tests) + pytest + a tiny '
-               'run-loop smoke (~3 min + the builds).'),
+    'python': (tier_python, 'Python run-loop/settings: build + the release worker (its pytest tests; both from the '
+               'artifact cache when no Rust input changed) + pytest in --pytest-shards shards beside a tiny run-loop smoke '
+               '(~5 min).'),
     'encoding': (tier_encoding, 'encoding-only (layout unchanged): build + DIGEST_ENCODING=0 digest == --expect-digest0 '
                  '+ full digest == --expect-digest + digest formats (constructed, EoE, driver, dealt) == the checkout\'s '
                  'recorded files + --test az + checkpoint-load (--checkpoint) + pytest + farm compat (the release worker built, '
                  'tools/farm_compat.py). NO search smoke (~11 min).'),
-    'suite': (tier_suite, 'engine rules/cards (the agent\'s half): the full engine suite + the 20k fuzz (--fuzz-pools, '
-              'default the default pool) on this commit; its report gates/<sha>-suite.json is the engine tier\'s '
-              'evidence for --tested-sha (~30 min a pool).'),
+    'suite': (tier_suite, 'engine rules/cards (the agent\'s half): the full engine suite + a sharded 2,000-game fuzz per '
+              f'pool (--fuzz-pools, default {FUZZ_POOLS}; tools/fuzz_shards.py, --fuzz-shards) at once on this commit; its '
+              'report gates/<sha>-suite.json is the engine tier\'s evidence for --tested-sha.'),
     'engine': (tier_engine, 'engine rules/cards (orchestrator half): fresh build, digests == the agent\'s report, '
                'digest formats (constructed, EoE, driver, dealt) == the checkout\'s recorded files, az/limits/hidden, pytest, 1 desktop smoke config, the --tested-sha\'s suite report (the full suite + '
-               'the 20k fuzz, evidenced); a Mac full-suite recheck only if the merged sha differs from --tested-sha '
+               'the sharded fuzz, evidenced); a Mac full-suite recheck only if the merged sha differs from --tested-sha '
                'with overlapping engine/card_ir files; the release worker built + farm compat (tools/farm_compat.py) (~13 min).'),
     'search-core': (tier_search_core, 'search/core behaviour: build + core cargo test + pytest + check_checkpoint_compat '
                     'goldens (--baseline-root) + digest formats (its driver digest: zero-core\'s driver) + 4-config '
@@ -1986,7 +2265,7 @@ TIER_OPTIONS = {
     'docs': {'files'},
     'python': {'smoke_preset', 'allow_skip'},
     'encoding': {'expect_digest', 'expect_digest0', 'record_digest', 'checkpoint', 'checkpoint_spec', 'allow_skip'},
-    'suite': {'fuzz_pools'},
+    'suite': {'fuzz_pools', 'fuzz_shards'},
     'engine': {'expect_digest', 'expect_digest0', 'record_digest', 'tested_sha', 'suite_report', 'allow_skip'},
     'search-core': {'baseline_root', 'checkpoint_spec', 'configs', 'allow_skip'},
     'optin-core': {'baseline_root', 'checkpoint_spec', 'feature_tests', 'other_games', 'allow_skip'},
@@ -2086,10 +2365,13 @@ def build_parser():
                     'this commit\'s own when gated directly; the Mac recheck runs when a different one touched '
                     'engine/ or card_ir/')
     ap.add_argument('--suite-report', default=None, help='engine tier: the suite tier\'s report of the --tested-sha (the '
-                    'evidence that the full engine suite and the 20k fuzz passed on it; default gates/<sha12>-suite.json '
+                    'evidence that the full engine suite and the fuzz passed on it; default gates/<sha12>-suite.json '
                     'of this checkout)')
-    ap.add_argument('--fuzz-pools', default=None, help='suite tier: comma-separated FUZZ_POOL values, one 20k fuzz each '
-                    '(default: default, the cube pool; e.g. default,delver)')
+    ap.add_argument('--fuzz-pools', default=None, help='suite tier: comma-separated FUZZ_POOL values, a sharded '
+                    f'{FUZZ_GAMES}-game fuzz each, <pool>+hidden for hidden decklists (default: {FUZZ_POOLS})')
+    ap.add_argument('--fuzz-shards', type=int, default=None, help='suite tier: shards per fuzz loop (default 8)')
+    ap.add_argument('--pytest-shards', type=int, default=4, help='pytest as this many parallel steps over disjoint test '
+                    'files (default 4; 1: one step)')
     ap.add_argument('--expect-digest', type=hex16, default=None, help='encoding/engine/repin (required): the full '
                     'combined digest the digest step must equal')
     ap.add_argument('--expect-digest0', type=hex16, default=None, help='encoding/engine (required): the '
