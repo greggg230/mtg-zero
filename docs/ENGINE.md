@@ -36454,7 +36454,7 @@ steward from main's checkout.
 ## 172. Self-play panic containment for every executor: one failure queue with a replay command, the farm worker's and the Mac's failures, `selfplay.panics`, a test fault on real games (branch `feat/selfplay-panic-queue`, zero-core `feat/panic-queue`, 2026-11-16)
 
 Branch `feat/selfplay-panic-queue` from main ebf322d5 (main f76ab8af merged in); zero-core pin 002731c ->
-`feat/panic-queue` 76e7d39 (zero-core docs/search.md 2.19). Why: the user's decision D1 (2026-11-15, 167.3) moved the
+`feat/panic-queue` 8ae31f8 (zero-core docs/search.md 2.19). Why: the user's decision D1 (2026-11-15, 167.3) moved the
 20k fuzz depth to continuous farm fuzz (171), with "a rare bug costs a game, not the run" as its prerequisite. 167.6
 made a panicking game cost one game on every executor, but only this machine's driver kept what replays it: the Mac's
 remote worker printed it into its log, the farm worker logged it on the farm PC (unreachable). Now every dropped game,
@@ -36547,7 +36547,23 @@ in `_TEST_PANIC`), so a test's repro reproduces without the fault in its environ
 
 ### 172.5 Checks and gates
 
-(Filled in after gating.)
+* Digests EQUAL: full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5, constructed e1177d609d6c1aee, eoe
+  2efe956d589840ce, driver 6f7b863096e47dcd (zero-core's driver with the new code), dealt e802d9df793c9993 = the recorded
+  files; zero-core `check_checkpoint_compat` byte-identical against main f76ab8af (visits and cq, 3,272 samples each);
+  farm compat identical (gate 2: 6 games, 2,484 rows, 150 batches; gate 3: 6 games).
+* **GATE PASSED suite 00d9db1d234b in 472s** (2,679 passed in 23 binaries; the sharded 2k fuzz of default,
+  default+hidden, delver_dealt). **GATE PASSED WITH SKIPS engine 00d9db1d234b in 831s** (`--tested-sha 00d9db1d`; the
+  live-run fence only). After merging main 8ec00432 (171, tools and docs): **GATE PASSED WITH SKIPS python f7f29f376d9f
+  in 1215s** and, on the final pin, **GATE PASSED WITH SKIPS python 739b3825c014 in 1009s** (the live-run fence only).
+* **GATE PASSED WITH SKIPS optin-core 739b3825c014 in 2354s** (`--baseline-root` = main f76ab8af; core pytest 694
+  passed, 50 skipped, the live-run fence's 17; feature tests az 54, hidden 28; the three other games build against this
+  core). Two earlier optin-core runs (00d9db1d, f7f29f37) failed only on the core pytest's
+  `test_shard_thread::test_rolling_run_quotas_exact` (97 games for 96), as other branches' cores did the same day: not
+  load but test order - `zero.farm_h2h.record_rows` set `ZERO_INFLIGHT=1` for its recording and never restored it, so
+  after `test_farm_h2h.py` every later run process inherited it (reproduced: the two files together fail, the test alone
+  passes). Fixed at the source in zero-core 8ae31f8 (search.md 2.19), which is the pin above.
+* Not run in a gate: the native worker test of `tests/test_selfplay_panic.py` needs the Windows worker of this checkout
+  (it skips on the Mac, where the gate placed its shard); it passed here by hand on the branch's build.
 
 ### 172.6 pb3
 
