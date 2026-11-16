@@ -35593,6 +35593,8 @@ own target directory (one per checkout, zero-core's its own).
   here (main's script): the gates above ran with `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`; the fix is
   that exclusion exported by `tools/local_env.sh` itself.
 
+* **The merge into main (2026-11-15):** main f19151ef (the card IR, 170) merged in as 78432207 (one conflict: both sides put `test_check_scope_reads_cargo_dep_info` on the desktop-only list); GATE PASSED WITH SKIPS python 2d81747c02a9 in 299s (the live-run fence only), run with `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"` for main's Git Bash conversion of `MTGZ_MAC_HOME` (the fix belongs in zero-core's and mtg-zero's `tools/local_env.sh` together: test_privacy keeps the copies identical).
+
 ### 168.6 Left, decisions for the user
 
 * **The guards against the first versions' noise - proposed by the coordinator, APPROVED BY THE USER 2026-11-15 ("Merge pb3")** (settings
