@@ -6,7 +6,7 @@
 
 #![allow(dead_code)]
 
-use crate::common::db;
+use super::common::db;
 use engine::testkit::Scenario;
 use engine::{CardIdx, Choice, DecisionKind, Game, PlayerId, Target, Zone};
 
