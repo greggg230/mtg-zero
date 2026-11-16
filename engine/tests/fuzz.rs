@@ -101,6 +101,42 @@ fn a_listed_card_s_find_with_the_deck_known_cross_post_sideboard_match_98() {
     assert!(p.games >= 2, "game 2 was played");
 }
 
+/// ENGINE.md 173: the fuzz steward's queue entry c8af53b37bd8. `FUZZ_POOL=delver_dealt2` matches (both seats dealt,
+/// 168.1) in which one step resolves another player's Urza's Bauble look at a card of the viewer's hand (keyed public by
+/// design, 141.2) and then ends the game, so the next game begins in the same step (no sideboarding decision): the
+/// match fuzz's world that plays on checked that look against the new game's hand and failed "P0's private key (kind
+/// 3) carries the card's identity". The engine keyed nothing private: the card was the viewer's own, and the look was
+/// the game that ended's. The check now reads the hand the look saw. The seeds were found under the `fuzz` profile
+/// (determinize checks 1 in 4); the denominator is drawn from the match's random stream, so they are replayed at 4 in
+/// every profile (`CHECKPOINT_EVERY_OVERRIDE`). Each must reach such a look (positive evidence).
+#[test]
+fn a_look_at_the_viewers_hand_in_a_step_that_begins_the_next_game() {
+    use engine::fuzz::games::{CHECKPOINT_EVERY_OVERRIDE, PK_ENDED_GAME_HAND_LOOKS};
+    use std::sync::atomic::Ordering::Relaxed;
+    if hidden_decks_mode() {
+        return;
+    }
+    POOL_OVERRIDE.with(|c| c.set(Some(PoolMode::DelverDealtPerSeat)));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(Some(4)));
+    let r = std::panic::catch_unwind(|| {
+        let mut short = Vec::new();
+        for seed in [52u64, 95, 135, 163, 3_900_000_015, 3_900_000_026, 3_900_000_079, 3_900_000_151, 3_900_000_197] {
+            let looks0 = PK_ENDED_GAME_HAND_LOOKS.load(Relaxed);
+            let mut stats = HiddenStats::default();
+            let p = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| play_match_spec(seed, &match_spec(seed), true, &mut stats)))
+                .unwrap_or_else(|e| panic!("delver_dealt2 match {seed} failed (rerun: FUZZ_POOL=delver_dealt2 FUZZ_FIRST={seed} FUZZ_MATCHES=1, fuzz profile): {e:?}"));
+            assert!(p.games >= 2, "match {seed}: a next game was played");
+            if PK_ENDED_GAME_HAND_LOOKS.load(Relaxed) == looks0 {
+                short.push(seed);
+            }
+        }
+        assert!(short.is_empty(), "matches {short:?} checked no look at the viewer's hand in a step that began the next game");
+    });
+    POOL_OVERRIDE.with(|c| c.set(None));
+    CHECKPOINT_EVERY_OVERRIDE.with(|c| c.set(None));
+    r.unwrap_or_else(|e| std::panic::resume_unwind(e));
+}
+
 /// ENGINE.md 167: a sharded fuzz's end-of-run checks. `tools/fuzz_shards.py` runs `fuzz_random_games` /
 /// `fuzz_random_matches` over disjoint seed ranges with `FUZZ_SHARD=1` (each shard prints its `FUZZ_TOTALS` and leaves
 /// the checks over the whole run to this test), sums the shards' counters and runs this test with

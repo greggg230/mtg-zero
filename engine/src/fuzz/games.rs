@@ -1217,7 +1217,18 @@ fn eoe_deck(rng: &mut Rng) -> Vec<u16> {
 /// checking while the farm fuzzes, so the sampled determinize check runs far more often there
 /// instead of at the release rate every other build (including plain `cargo test --release`) gets.
 fn checkpoint_every() -> u32 {
+    if let Some(k) = CHECKPOINT_EVERY_OVERRIDE.with(|c| c.get()) {
+        return k;
+    }
     if cfg!(debug_assertions) { 4 } else { 40 }
+}
+
+thread_local! {
+    /// `checkpoint_every`'s value on this thread instead of the profile's (None: the profile's). For tests that replay
+    /// a seed found under the `fuzz` profile in another profile: the denominator is drawn from the match's own random
+    /// stream, so a seed is the same match only at the same denominator (`a_look_at_the_viewers_hand_in_a_step_that_
+    /// begins_the_next_game`, ENGINE.md 173).
+    pub static CHECKPOINT_EVERY_OVERRIDE: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
 }
 
 /// `FUZZ_BELIEF=t`: the tilt of the belief-weighted deal's checks (ENGINE.md 69); unset: none.
@@ -3856,6 +3867,9 @@ static PK_MATCH_KEYS: AtomicU64 = AtomicU64::new(0);
 static PK_NEW_GAME_KEYS: AtomicU64 = AtomicU64::new(0);
 static PK_NEW_GAMES: AtomicU64 = AtomicU64::new(0);
 static PK_HAND_LOOKS: AtomicU64 = AtomicU64::new(0);
+/// Of `PK_HAND_LOOKS`, the looks in a step that ended the game and began the next (both seats dealt, ENGINE.md 168.1,
+/// 173): checked against the viewer's hand before the step, the hand the look saw.
+pub static PK_ENDED_GAME_HAND_LOOKS: AtomicU64 = AtomicU64::new(0);
 /// The dealt seat's deal keys (`KEY_DEALT`, ENGINE.md 154.2) checked `HIDDEN` in the other player's worlds.
 static PK_DEALT_KEYS: AtomicU64 = AtomicU64::new(0);
 
@@ -3873,13 +3887,18 @@ fn check_private_keys_masked(keys: &[u64], viewer: u8, after: &Game, what: &dyn 
     check_private_keys_masked_since(keys, viewer, after, &[], what)
 }
 
-/// `check_private_keys_masked`, with `before_known`: the identities of the viewer's hand before the step - a step that
-/// ends a game and begins the next (both seats dealt, ENGINE.md 168.1: the sideboarding has no decision) leaves `after`
-/// a new game, where the card of a look of the game that ended at the viewer's hand (public by design) is no longer.
+/// `check_private_keys_masked`, with `before_known`: the identities of the viewer's hand before the step
+/// (`viewer_hand_ids`). A step that ends a game and begins the next (both seats dealt, ENGINE.md 168.1: the
+/// sideboarding has no decision) leaves `after` a new game; its keys up to the new game's `KEY_GAME` are the game that
+/// ended, where a look at the viewer's hand (public by design) saw a card of `before_known`, which the new game's hand
+/// no longer holds (ENGINE.md 173). Keys after the new game's `KEY_GAME`, and every key of a step that begins no game,
+/// are checked against `after`'s hand as `check_private_keys_masked` does.
 fn check_private_keys_masked_since(keys: &[u64], viewer: u8, after: &Game, before_known: &[u64], what: &dyn Fn() -> String) -> u64 {
-    use crate::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_DEALT, KEY_DRAW, KEY_LOOK};
+    use crate::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_DEALT, KEY_DRAW, KEY_GAME, KEY_LOOK};
+    // (the step's keys before this index are of the game it ended; none when it began no game)
+    let new_game_at = keys.iter().rposition(|&k| key_kind(k) == KEY_GAME).unwrap_or(0);
     let mut n = 0;
-    for &k in keys {
+    for (i, &k) in keys.iter().enumerate() {
         let (kind, p, d) = (key_kind(k), key_player(k), key_payload(k));
         if !matches!(kind, KEY_DRAW | KEY_LOOK | KEY_DEALT) || p == viewer {
             continue;
@@ -3893,12 +3912,29 @@ fn check_private_keys_masked_since(keys: &[u64], viewer: u8, after: &Game, befor
         if d == HIDDEN {
             continue;
         }
+        let ended_game = i < new_game_at;
         let hand_look = kind == KEY_LOOK
-            && (after.player(viewer).hand.iter().any(|&c| after.obj(c).def as u64 == d && after.knows(p, c)) || before_known.contains(&d));
+            && if ended_game {
+                before_known.contains(&d)
+            } else {
+                after.player(viewer).hand.iter().any(|&c| after.obj(c).def as u64 == d && after.knows(p, c))
+            };
         assert!(hand_look, "{}: P{p}'s private key (kind {kind}) carries the card's identity ({d}) in a world of P{viewer} (ENGINE.md 141)", what());
         PK_HAND_LOOKS.fetch_add(1, Ordering::Relaxed);
+        if ended_game {
+            PK_ENDED_GAME_HAND_LOOKS.fetch_add(1, Ordering::Relaxed);
+        }
     }
     n
+}
+
+/// The identities of `viewer`'s hand in match state `w` (none between games: no game card is in play), for
+/// `check_private_keys_masked_since`'s `before_known`, read before a step.
+fn viewer_hand_ids(w: &crate::az::MtgAz, viewer: u8) -> Vec<u64> {
+    if w.sideboarding().is_some() || w.deck_choice().is_some() {
+        return Vec::new();
+    }
+    w.g.player(viewer).hand.iter().map(|&c| w.g.obj(c).def as u64).collect()
 }
 
 /// A world of match `g` determinized for `viewer`, walked as the search walks it into the game the world plays
@@ -3927,8 +3963,8 @@ fn check_world_private_keys(g: &crate::az::MtgAz, viewer: usize, seed: u64, step
         let a = if before && legal[0] == crate::act::PASS && rng.below(2) == 0 { crate::act::PASS } else { legal[rng.below(legal.len() as u32) as usize] };
         keys.clear();
         // (the viewer's hand before the step: the step may end the game and begin the next, 168.1 - a look of that step
-        // at a card of this hand is checked against it)
-        let known: Vec<u64> = if between(&w) { Vec::new() } else { w.g.player(viewer as u8).hand.iter().map(|&c| w.g.obj(c).def as u64).collect() };
+        // at a card of this hand is checked against it, ENGINE.md 173)
+        let known = viewer_hand_ids(&w, viewer as u8);
         let g0 = w.m.game_no;
         w.step(a, &mut keys).unwrap_or_else(|e| panic!("{}: {e}", what()));
         // (a new game: after a sideboarding, or - both seats dealt, ENGINE.md 168.1 - from the last game's end in one step)
@@ -3950,12 +3986,13 @@ fn check_world_private_keys(g: &crate::az::MtgAz, viewer: usize, seed: u64, step
 /// The private-key check's counts (ENGINE.md 141).
 fn private_keys_report() -> String {
     format!(
-        "private keys of the other player masked in every world: {} in the game fuzz's worlds, {} in the match fuzz's, {} of them in {} games a world started; {} looks at a card of the viewer's hand (public by design); {} deal keys of a dealt seat (ENGINE.md 154)",
+        "private keys of the other player masked in every world: {} in the game fuzz's worlds, {} in the match fuzz's, {} of them in {} games a world started; {} looks at a card of the viewer's hand (public by design), {} of them in a step that began the next game (ENGINE.md 173); {} deal keys of a dealt seat (ENGINE.md 154)",
         PK_GAME_KEYS.load(Ordering::Relaxed),
         PK_MATCH_KEYS.load(Ordering::Relaxed),
         PK_NEW_GAME_KEYS.load(Ordering::Relaxed),
         PK_NEW_GAMES.load(Ordering::Relaxed),
         PK_HAND_LOOKS.load(Ordering::Relaxed),
+        PK_ENDED_GAME_HAND_LOOKS.load(Ordering::Relaxed),
         PK_DEALT_KEYS.load(Ordering::Relaxed)
     )
 }
@@ -4181,8 +4218,14 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
                     d.legal_actions(&mut legal2);
                     let a2 = legal2[rng.below(legal2.len() as u32) as usize];
                     kd.clear();
+                    // (the viewer's hand before the step: the step may end the game and begin the next - both seats
+                    // dealt, ENGINE.md 168.1 - and a look of that step at a card of this hand is checked against it, 173)
+                    let known = viewer_hand_ids(&d, viewer as u8);
                     d.step(a2, &mut kd).unwrap_or_else(|e| panic!("match {seed} (determinized for P{viewer}): {e}"));
-                    PK_MATCH_KEYS.fetch_add(check_private_keys_masked(&kd, viewer as u8, &d.g, &|| format!("match {seed}: a world determinized for P{viewer}")), Ordering::Relaxed);
+                    PK_MATCH_KEYS.fetch_add(
+                        check_private_keys_masked_since(&kd, viewer as u8, &d.g, &known, &|| format!("match {seed}: a world determinized for P{viewer}")),
+                        Ordering::Relaxed,
+                    );
                     if d.sideboarding().is_none() && !d.match_over() {
                         d.g.check_invariants().unwrap_or_else(|e| panic!("match {seed} (determinized for P{viewer}): {e}"));
                     }
