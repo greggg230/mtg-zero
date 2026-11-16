@@ -1270,6 +1270,8 @@ PYTEST_DESKTOP_ONLY = (
     'tests/test_drafted.py::test_human_pick_agreement_on_a_few_drafts',     # private data on E:
     'tests/test_evaluator.py::test_the_export_and_its_reference_scorer',    # private data on E:
     'tests/test_sealedai_publish.py::test_dry_run_command_line',            # psutil's process access on macOS
+    # cargo dep-info written with Windows paths (backslashes, C:\...): fails on macOS (ENGINE.md 170.6)
+    'tests/test_artifact_cache.py::test_check_scope_reads_cargo_dep_info',
     # a supervisor test that fails on macOS (the companion started 8 times: ENGINE.md 166.6), so it runs on the
     # desktop - fenced while a run is live here, and then named in the final line as a skip
     'tests/test_run_publisher.py::test_the_supervisor_starts_one_publisher_per_run_and_it_ends_finished',
