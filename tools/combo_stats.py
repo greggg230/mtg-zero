@@ -182,7 +182,8 @@ def library_top(st, p):
 
 
 def stack_entries(st):
-    return {e['id']: e for e in st.get('stack') or []}
+    """The stack's objects by their stack id (`stack`; `id` is the source card's, shared by its triggers)."""
+    return {e['stack']: e for e in st.get('stack') or []}
 
 
 class Reader:
@@ -191,7 +192,8 @@ class Reader:
     def __init__(self, decks):
         self.decks = decks
         self.spells = []                  # tracked casts: {card, p, turn, outcome, by}
-        self.live = {}                    # stack id -> index into spells (tracked spells on the stack)
+        self.live = {}                    # stack id -> index into spells (tracked spells on the stack; still there
+        #                                   at the end of a game: outcome None)
         self.doomsday = []
         self.show = []
         self.sneak = []                   # activations {p, turn}
@@ -220,7 +222,7 @@ class Reader:
         # a Doomsday resolving: its choices (the decisions while it is the top of the stack)
         top = (before.get('stack') or [None])[-1] if before.get('stack') else None
         if top and top.get('name') == DOOMSDAY and not top.get('ability') and kind in CHOICE_KINDS:
-            self.choices[top['id']].append(text)
+            self.choices[top['stack']].append(text)
         # a Show and Tell about to resolve: the battlefields before (its first choice, or the state it leaves)
         for i, e in sb.items():
             if e.get('name') == SHOW and not e.get('ability') and kind == 'Priority':
@@ -531,6 +533,11 @@ def summarize(rs):
                 'score_when_not_resolved': sum(r['result'][p] for r in rs if r not in games_res) / max(1, n - len(games_res)),
                 'after_resolve': {f'{a}:{b}': c for (a, b), c in after.items()},
                 'oracle_wins': len(oracle_win),
+                'oracle_cast_after': sum(1 for r, x in res if any(s['card'] == ORACLE and s['p'] == p and
+                                                                     s['turn'] >= x['turn'] for s in r['spells'])),
+                'oracle_win_after': sum(1 for r, x in res if r['winner'] == p and r['method'] == 'oracle'),
+                'turns_to_end': sum(r['turn'] - x['turn'] for r, x in res) / max(1, len(res)),
+                'cast_turn': sum(s['turn'] for s in casts) / max(1, len(casts)),
                 'oracle_casts': sum(1 for r in rs for s in r['spells'] if s['card'] == ORACLE and s['p'] == p),
                 'oracle_resolved': sum(1 for r in rs for s in r['spells'] if s['card'] == ORACLE and s['p'] == p
                                        and s['outcome'] == 'resolved'),
@@ -591,7 +598,7 @@ def table(s):
          f'p1 {s["win_turn"]["p1"]:.1f}',
          f'* mulligans per game p0 {s["mulligans"][0]:.2f} (any {s["mull_any"][0]:.2f}), p1 {s["mulligans"][1]:.2f} '
          f'(any {s["mull_any"][1]:.2f})',
-         f'* per game: {s["decisions"]:.0f} searched decisions, moves p0 {s["moves"][0]:.0f} / p1 {s["moves"][1]:.0f}, '
+         f'* per game: {s["decisions"]:.0f} decisions (the driver count), moves p0 {s["moves"][0]:.0f} / p1 {s["moves"][1]:.0f}, '
          f'{s["steps"]:.0f} engine steps; {s["wall_s"]:.1f} s wall a game in its batch, {s["cpu_s"]:.1f} CPU-s a game',
          f'* tracked casts: ' + ', '.join(f'{k} {v}' for k, v in s['spells'].items())]
     if s['countered_by']:
@@ -603,7 +610,9 @@ def table(s):
               f'{x["oracle_in_hand"]}); life after {x["life_after"]:.1f}; pile sizes {dict(x["pile_size"])}',
               f'  * score when it resolved {x["score_when_resolved"]:.3f} (n {x["games_resolved"]}), otherwise '
               f'{x["score_when_not_resolved"]:.3f}; after a resolution: {x["after_resolve"]}',
-              f'  * Thassa\'s Oracle: cast {x["oracle_casts"]}, resolved {x["oracle_resolved"]}, **Oracle wins {x["oracle_wins"]}**',
+              f'  * Thassa\'s Oracle: cast {x["oracle_casts"]}, resolved {x["oracle_resolved"]}, **Oracle wins {x["oracle_wins"]}**; '
+              f'after a resolved Doomsday: Oracle cast in {x["oracle_cast_after"]}, Oracle win in {x["oracle_win_after"]}; '
+              f'mean game turn of the cast {x["cast_turn"]:.1f}, game turns from the resolution to the end {x["turns_to_end"]:.1f}',
               f'  * pile cards (games with the card in the pile): {x["pile_cards"]}']
         for pile, c in x['top_piles'][:5]:
             L.append(f'  * pile x{c}: {" / ".join(pile)}')
