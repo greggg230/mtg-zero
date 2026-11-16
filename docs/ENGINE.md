@@ -35430,8 +35430,8 @@ bytes: a rerun records new sha256s for the same records) and `tools/data/common.
 personal absolute path).
 
 `tools/gate.py`'s `pytest_files` (the files the python tier's pytest shards split, section 167) lists `tests/ir/test_*.py`
-beside `tests/test_*.py`, so the gate runs the pipeline's tests too (`tests/test_gate.py` checks it; that test's weight
-assertions keep to the top-level files they were scaled to).
+beside `tests/test_*.py` when a commit touches the pipeline (170.7; `tests/test_gate.py` checks it, and that test's
+weight assertions keep to the top-level files they were scaled to).
 
 ### 170.3 The tests
 
@@ -35450,7 +35450,7 @@ striations). Two adaptations besides: `test_card_ir`'s schema test expects the k
 that read the dumps by path read `ir/data`; `test_fetch_cube` loads `tools/ir_fetch_cards.py`.
 
 `python -m pytest tests/ir`: 2,688 passed, 0 failed, in 515 s on the loaded desktop (one process; most tests parse a
-pool, 1-2 s each). In the gate they spread over the pytest shards.
+pool, 1-2 s each). In a gate they spread over the pytest shards, when they run at all (170.7).
 
 New: `tests/ir/test_pipeline.py` (3): the regeneration is byte for byte the checked-in files; the check names a file
 that differs (and exits 1); the schema's module labels (`mtgz_ir.effects.base` -> `mtg_bot.effects.base`, a module
@@ -35476,7 +35476,8 @@ outside the package as it is).
   of the three pools decodes back equal.
 * No IR file, schema, `generated.rs` or engine source changes, so the engine plays exactly as on main: behaviour
   digests EQUAL by construction (`engine/tests/data/digests.txt` untouched; main's combined digest 8f71ccb0d89031a6).
-  DIGEST_LINE
+  Measured anyway, on this branch's merge with main 1779035a (69c5f4d3): `cargo test --release -p engine --test digest
+  -- --ignored --nocapture`: 2,000 random + 500 heuristic games, combined digest **8f71ccb0d89031a6**, EQUAL.
 
 ### 170.5 What still uses mtg-bot
 
@@ -35488,3 +35489,15 @@ orchestrator's report, not here (machine-specific).
 ### 170.6 Gates
 
 GATES
+
+### 170.7 The gate runs the pipeline's tests only when a commit touches the pipeline
+
+The 2,688 tests cost about 8-9 minutes of CPU per python gate, and almost no commit touches the parser. `gate.py`'s
+`ir_tests_needed(sha)` (the orchestrator's request, 2026-11-15) diffs the gated commit against its merge base with
+`main` (else `origin/main`; a commit already on main against its first parent) and looks for a file under
+`IR_TEST_PATHS`: `ir/`, `card_ir/`, `tests/ir/`, `data/cards/`, `tools/card_ir.py`, `tools/ir_fetch_cards.py`,
+`tools/codegen/`. None: `pytest_step` leaves `tests/ir` out (the shards' file list, or `--ignore=tests/ir` unsharded) and
+adds a NOT NEEDED step `pytest-ir` that says why; one or more, or no main to compare with: the tests run, in every tier
+that runs pytest (python, encoding, engine, search-core and the rest share `pytest_step`). The docs tier runs no pytest.
+`tests/test_gate.py::test_the_card_ir_tests_run_only_when_the_commit_touches_the_pipeline` checks both ways, a commit on
+main and no main. By hand: `python -m pytest tests/ir -q` (or `python tools/card_ir.py check` alone, ~5 s).

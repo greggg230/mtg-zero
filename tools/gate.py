@@ -1488,11 +1488,43 @@ def durations_dir():
     return GATES_DIR
 
 
-def pytest_files():
-    """Every test file `pytest tests` collects: tests/test_*.py and the card-IR pipeline's tests/ir/test_*.py
-    (ENGINE.md 170)."""
-    found = glob.glob(os.path.join(ROOT, 'tests', 'test_*.py')) + glob.glob(os.path.join(ROOT, 'tests', 'ir', 'test_*.py'))
+def pytest_files(include_ir=True):
+    """Every test file `pytest tests` collects: tests/test_*.py and, with `include_ir`, the card-IR pipeline's
+    tests/ir/test_*.py (ENGINE.md 170)."""
+    found = glob.glob(os.path.join(ROOT, 'tests', 'test_*.py'))
+    if include_ir:
+        found += glob.glob(os.path.join(ROOT, 'tests', 'ir', 'test_*.py'))
     return sorted(os.path.relpath(p, ROOT).replace('\\', '/') for p in found)
+
+
+# The files the card-IR pipeline's tests (tests/ir: ~2,700 parser and IR tests, ~8 min of CPU) check (ENGINE.md 170.7):
+# a gate runs them only when its commit changes one of these since main.
+IR_TEST_PATHS = ('ir/', 'card_ir/', 'tests/ir/', 'data/cards/', 'tools/card_ir.py', 'tools/ir_fetch_cards.py',
+                 'tools/codegen/')
+
+
+def ir_tests_needed(sha):
+    """-> (needed, why): whether `sha` changes a file of IR_TEST_PATHS since main (the merge base with `main`, else
+    `origin/main`; a commit already on main: its own change, against its first parent). No main to compare with, or
+    git failing: needed (never a silent skip of tests that might matter)."""
+    base = ''
+    for ref in ('main', 'origin/main'):
+        if git(['rev-parse', '--verify', '--quiet', f'{ref}^{{commit}}'], check=False):
+            base = git(['merge-base', sha, ref], check=False)
+            if base:
+                break
+    if not base:
+        return True, 'no main branch to compare with'
+    if base == git(['rev-parse', sha], check=False):
+        base = git(['rev-parse', '--verify', '--quiet', f'{sha}^1'], check=False)
+        if not base:
+            return True, 'a root commit'
+    changed = git(['diff', '--name-only', base, sha], check=False).splitlines()
+    hits = [f for f in changed if f.startswith(IR_TEST_PATHS)]
+    if hits:
+        return True, f'{len(hits)} file(s) of the card-IR pipeline changed since {base[:12]} (e.g. {hits[0]})'
+    return False, (f'no file under {", ".join(IR_TEST_PATHS)} changed since {base[:12]} ({len(changed)} file(s) '
+                   f'changed elsewhere)')
 
 
 def pytest_partition(files, n, weights):
@@ -1624,12 +1656,18 @@ def pytest_step(name='pytest', step_id='pytest', ctx=None):
                 [python_exe(), '-m', 'pytest', *PYTEST_DESKTOP_ONLY, *PYTEST_ARGS], id=f'{step_id}-desktop',
                 checker=check_pytest, heavy=True, evidence=ev)
     n = getattr(ctx, 'pytest_shards', 1) if ctx is not None else 1
+    # the card-IR pipeline's tests only when the commit touches the pipeline (ENGINE.md 170.7)
+    ir_needed, ir_why = ir_tests_needed(ctx.sha) if getattr(ctx, 'sha', None) else (True, 'no commit to compare')
+    no_ir = [] if ir_needed else ['--ignore=tests/ir']
+    ir_note = [] if ir_needed else [Step(f'{name}: the card-IR pipeline\'s tests (tests/ir)', [], id=f'{step_id}-ir',
+                                         not_needed=ir_why)]
     if n <= 1:
-        mac = shlex.join(['python', '-m', 'pytest', 'tests', *PYTEST_ARGS, *[f'--ignore={f}' for f in files],
+        mac = shlex.join(['python', '-m', 'pytest', 'tests', *no_ir, *PYTEST_ARGS, *[f'--ignore={f}' for f in files],
                           *[f'--deselect={i}' for i in ids]])
-        return [Step(name, [python_exe(), '-m', 'pytest', 'tests', *PYTEST_ARGS], id=step_id, checker=check_pytest,
-                     heavy=True, mac_cmd=lambda ctx: mac_built(mac), desktop_part=desk, evidence=ev)]
-    allf = pytest_files()
+        return [Step(name, [python_exe(), '-m', 'pytest', 'tests', *no_ir, *PYTEST_ARGS], id=step_id,
+                     checker=check_pytest, heavy=True, mac_cmd=lambda ctx: mac_built(mac), desktop_part=desk,
+                     evidence=ev), *ir_note]
+    allf = pytest_files(include_ir=ir_needed)
     shards = pytest_partition(allf, n, read_durations())
     why = pytest_coverage(allf, shards)
     if why:
@@ -1653,7 +1691,7 @@ def pytest_step(name='pytest', step_id='pytest', ctx=None):
         if on_mac and first:
             s.desktop_part, first = desk, False
         steps.append(s)
-    return steps
+    return steps + ir_note
 
 
 def in_parallel(*steps):

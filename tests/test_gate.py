@@ -1059,6 +1059,46 @@ def test_an_old_20k_suite_report_is_still_evidence(gate, capsys):
     assert rc == 0 and '1 fuzz run(s) of 20000 games' in {s['id']: s for s in rep['steps']}['suite-evidence']['reason']
 
 
+def test_the_card_ir_tests_run_only_when_the_commit_touches_the_pipeline(monkeypatch):
+    """ENGINE.md 170.7: tests/ir (~8 min of CPU) runs only when the gated commit changes a file of IR_TEST_PATHS
+    since main; with no main to compare with, it runs."""
+    def fake_git(changed, has_main=True, on_main=False):
+        def git(args, cwd=None, check=True):
+            if args[:2] == ['rev-parse', '--verify']:
+                return 'f' * 40 if has_main or not args[3].startswith(('main', 'origin/main')) else ''
+            if args[0] == 'merge-base':
+                return 'b' * 40
+            if args[0] == 'rev-parse':
+                return 'b' * 40 if on_main else 'c' * 40
+            if args[:2] == ['diff', '--name-only']:
+                return chr(10).join(changed)
+            raise AssertionError(args)
+        return git
+    for changed, want in ((['tools/gate.py', 'docs/ENGINE.md'], False), (['ir/mtgz_ir/cards/ir.py'], True),
+                          (['card_ir/src/lib.rs'], True), (['tests/ir/test_pools.py'], True),
+                          (['data/cards/eoe.ir.json'], True), (['tools/codegen/gen_card_ir.py'], True)):
+        monkeypatch.setattr(G, 'git', fake_git(changed))
+        assert G.ir_tests_needed('c' * 40)[0] is want, changed
+    monkeypatch.setattr(G, 'git', fake_git(['README.md'], on_main=True))      # a commit on main: its own change
+    assert G.ir_tests_needed('c' * 40)[0] is False
+    monkeypatch.setattr(G, 'git', fake_git(['README.md'], has_main=False))
+    assert G.ir_tests_needed('c' * 40) == (True, 'no main branch to compare with')
+    # the plan: not needed -> tests/ir left out of the shards (or ignored), with a NOT NEEDED step saying why
+    monkeypatch.setattr(G, 'git', fake_git(['README.md']))
+    monkeypatch.setattr(G, 'read_durations', lambda: {})
+    ctx_ns = types.SimpleNamespace(pytest_shards=3, sha='c' * 40, sha_short='c' * 12)
+    steps = G.pytest_step(ctx=ctx_ns)
+    seen = [a for s in steps for a in s.argv if a.startswith('tests/')]
+    assert sorted(seen) == G.pytest_files(include_ir=False) and not any(a.startswith('tests/ir/') for a in seen)
+    assert [s.id for s in steps if s.not_needed] == ['pytest-ir']
+    one = G.pytest_step(ctx=types.SimpleNamespace(pytest_shards=1, sha='c' * 40, sha_short='c' * 12))
+    assert '--ignore=tests/ir' in one[0].argv and one[1].not_needed
+    monkeypatch.setattr(G, 'git', fake_git(['ir/data/legacy_delver.json']))
+    steps = G.pytest_step(ctx=ctx_ns)
+    assert sorted(a for s in steps for a in s.argv if a.startswith('tests/')) == G.pytest_files()
+    assert not any(s.not_needed for s in steps)
+
+
 def test_the_python_tier_shards_pytest_beside_the_smoke(gate, capsys, monkeypatch):
     """ENGINE.md 167: pytest as --pytest-shards steps over disjoint test files, each its own process and basetemp, every
     tests/test_*.py in exactly one, run at once with the run-loop smoke after the (cached) builds."""

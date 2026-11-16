@@ -73,7 +73,8 @@ zero-core's (the test keeps the copies equal to the pinned core's).
   test in `tests/ir/`, never patched in the JSON; then `python tools/card_ir.py export`
   regenerates `data/cards/*.ir.json`, the schema and `card_ir/src/generated.rs` together, and
   `python tools/card_ir.py check` (run by `tests/ir/test_pipeline.py`) proves they match
-  (`docs/card_ir.md`). A changed IR or `generated.rs` is an engine change (engine tier).
+  (`docs/card_ir.md`). A changed IR or `generated.rs` is an engine change (engine tier). The gates run
+  `tests/ir` only when a commit touches the pipeline (`ir/`, `card_ir/`, `data/cards/`, ...; `docs/ENGINE.md` 170.7).
 * **Behaviour digests.** `cargo test --release -p engine --test digest -- --ignored --nocapture`
   hashes 2,500 fixed games against `engine/tests/data/digests.txt`. A change meant to keep
   behaviour (a refactor, a speed-up) must leave it unchanged. A change meant to alter play
