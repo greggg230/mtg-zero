@@ -35488,7 +35488,19 @@ orchestrator's report, not here (machine-specific).
 
 ### 170.6 Gates
 
-GATES
+* **python** on 29a9e1a2 (this branch with main 1779035a merged; it touches the pipeline, so `tests/ir` ran, 170.7):
+  `GATE PASSED WITH SKIPS python 29a9e1a2d389 in 621s - skipped: pytest-desktop: 1 live-run-hazard test(s) (fenced: a
+  live run on this machine)`. The privacy check (924 files, 0 findings), the module and the worker (from the artifact
+  cache), the four pytest shards on the Mac (1,049 + 532 + 596 + 950 passed, `tests/ir` among them), the desktop part
+  (44 passed) and the run-loop smoke (16 games).
+* Earlier runs of the tier failed only off this branch's change: when a shard's Mac push or fetch lost a race with the
+  other shards' (`cannot lock ref`), the shard fell back to the desktop, where `test_mac_remote.py::test_the_macs_selfplay_settings`
+  sees `MTGZ_MAC_HOME` rewritten by Git Bash's path conversion (a Mac-only test) or a worker test times out on the
+  loaded desktop; and on the Mac `test_artifact_cache.py::test_check_scope_reads_cargo_dep_info` (Windows-style
+  dep-info paths, ENGINE.md 167) fails, so it is now in `PYTEST_DESKTOP_ONLY`. Both races are main's, for the gate's
+  owner.
+* No engine tier: no IR file, schema, `generated.rs` or engine source changed (170.4); `card_ir`'s changes are its
+  description and a doc comment. The behaviour digest measured anyway: 8f71ccb0d89031a6, EQUAL.
 
 ### 170.7 The gate runs the pipeline's tests only when a commit touches the pipeline
 
