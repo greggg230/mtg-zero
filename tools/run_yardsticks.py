@@ -121,6 +121,21 @@ def kill_tree(p):
     p.wait()
 
 
+def overdue(item, t0, last, timeout_s, now=None):
+    """Why the measurement under way (started at `t0`; its console last grew at `last`) is killed now, or None. On
+    the GPU or CPU lane: `timeout_s` after it started. A farm best of one (lane 'farm', docs/ENGINE.md 165.6, 175.6):
+    `timeout_s` without progress - its console unchanged that long (the campaign says every pull that brought games and
+    every 64-game piece of its local fallback) - so one that is delivering games is never killed part way: a kill lost
+    the local piece under way and the next attempt played it again, and with the farm's wait taking 3/4 of the budget
+    the fallback's first attempt had ~30 min for hours of games (pb3's best of one against gen0, 2026-11-16)."""
+    now = time.time() if now is None else now
+    if item.get('lane') != 'farm':
+        return f'timed out after {timeout_s:.0f} s' if now - t0 > timeout_s else None
+    if now - max(t0, last) > timeout_s:
+        return f'no progress for {timeout_s:.0f} s (its console unchanged; {now - t0:.0f} s in all)'
+    return None
+
+
 def tail(path, n=15):
     try:
         with open(path, encoding='utf-8', errors='replace') as f:
@@ -162,6 +177,7 @@ class Watcher:
         self.stop = threading.Event()          # kill the measurement under way and end
         self.write = threading.Lock()
         self.procs = {}
+        self.tick = 5.0                        # seconds between looks at the measurement under way (tests: less)
 
     # the run's setting, read at every look (a restart may change it)
     def settings(self):
@@ -211,10 +227,11 @@ class Watcher:
                                  **kw)
             self.procs[item['lane']] = p
             err = None
+            seen = [0, t0]                     # the console's size and when it last grew
             try:
                 while True:
                     try:
-                        code = p.wait(timeout=5)
+                        code = p.wait(timeout=self.tick)
                         break
                     except subprocess.TimeoutExpired:
                         pass
@@ -222,9 +239,13 @@ class Watcher:
                         kill_tree(p)
                         self.log(f'{what}: stopped with the watcher (measured again by the next one)')
                         return None
-                    if time.time() - t0 > ys['timeout_s']:
+                    size = os.fstat(f.fileno()).st_size     # (the handle's: a directory entry's lags on Windows)
+                    if size != seen[0]:
+                        seen[:] = [size, time.time()]
+                    late = overdue(item, t0, seen[1], ys['timeout_s'])
+                    if late:
                         kill_tree(p)
-                        code, err = None, f"timed out after {ys['timeout_s']:.0f} s"
+                        code, err = None, late
                         break
             finally:
                 self.procs.pop(item['lane'], None)

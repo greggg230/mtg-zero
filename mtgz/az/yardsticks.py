@@ -38,7 +38,8 @@ the smokes):
   from             no checkpoint before this iteration (0)
   settle           seconds a checkpoint's file must be unchanged before it is measured (60)
   retry_s, retry_max_s   a failed measurement is tried again after retry_s, doubling up to retry_max_s (300, 7200)
-  timeout_s        a measurement running longer than this is killed and counts as failed (7200)
+  timeout_s        a measurement running longer than this is killed and counts as failed (7200); a farm best of
+                   one (lane 'farm'): one this long without progress, its console unchanged (docs/ENGINE.md 175.6)
   poll             seconds between looks for new checkpoints (60)
 
 Results: one JSON line each in <run>/yardsticks.jsonl (append-only; the watcher is the only writer, under the lock

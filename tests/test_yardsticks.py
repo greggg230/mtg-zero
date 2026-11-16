@@ -226,6 +226,66 @@ def _watcher(run, tmp_path, flag, logs):
         sys.executable, str(fake), it['kind'], str(it['iter']), it.get('opp') or '-', str(flag)])
 
 
+def test_a_farm_best_of_one_times_out_on_no_progress_the_others_on_their_age():
+    """docs/ENGINE.md 175.6: the GPU and CPU lanes' measurements are killed timeout_s after they started; a farm best of
+    one only after timeout_s without progress (its console unchanged): pb3's best of one against gen0 was killed at
+    7200 s four times while its local fallback delivered a 64-game piece every ~35 min, each kill losing the piece
+    under way."""
+    import run_yardsticks as RY
+    t0 = 1000.0
+    gpu, farm = {'lane': 'gpu'}, {'lane': 'farm'}
+    assert RY.overdue(gpu, t0, t0, 7200, now=t0 + 7199) is None
+    assert RY.overdue(gpu, t0, t0 + 7000, 7200, now=t0 + 7201) == 'timed out after 7200 s'     # progress or not
+    assert RY.overdue({'lane': 'cpu'}, t0, t0, 7200, now=t0 + 7201) == 'timed out after 7200 s'
+    assert RY.overdue(farm, t0, t0 + 7000, 7200, now=t0 + 14000) is None                         # still delivering
+    assert RY.overdue(farm, t0, t0, 7200, now=t0 + 7199) is None
+    late = RY.overdue(farm, t0, t0 + 7000, 7200, now=t0 + 14201)
+    assert late.startswith('no progress for 7200 s') and '14201 s in all' in late
+
+
+SLOW_ONE = '''import json, sys, time
+lines, gap, silent = int(sys.argv[1]), float(sys.argv[2]), float(sys.argv[3])
+for i in range(lines):
+    print(f"# local: piece {i} done", file=sys.stderr, flush=True)
+    time.sleep(gap)
+time.sleep(silent)
+print(json.dumps({"kind": "bo1", "iter": 16, "opp": "gen0", "score": 0.6, "se": 0.02, "elo_diff": 70.0,
+                  "elo_se": 15.0, "games": 4, "pentanomial": [0, 0, 2, 0, 0], "seconds": 1.0, "time": 1}), flush=True)
+'''
+
+
+@pytest.mark.live_run_hazard
+def test_the_watcher_keeps_a_farm_best_of_one_that_delivers_and_kills_one_that_stalls(tmp_path):
+    """docs/ENGINE.md 175.6, end to end with a fake measurement: a farm-lane child saying progress every 0.3 s for
+    2.4 s finishes under timeout_s 1.2 (the GPU lane's same child is killed at 1.2 s); a farm-lane child silent for
+    longer than timeout_s is killed, the failure row saying so."""
+    import run_yardsticks as RY
+    run, _ = _run(tmp_path, iters=[0, 16])
+    fake = tmp_path / 'slow_one.py'
+    fake.write_text(SLOW_ONE)
+    ys = {'timeout_s': 1.2, 'retry_s': 60, 'retry_max_s': 600}
+
+    def watcher(lines, gap, silent):
+        logs = []
+        w = RY.Watcher(run, once=True, log=logs.append, poll=0.05, child_cmd=lambda it: [
+            sys.executable, str(fake), str(lines), str(gap), str(silent)])
+        w.tick = 0.1
+        return w, logs
+
+    item = {'kind': 'bo1', 'iter': 16, 'opp': 'gen0', 'attempt': 1}
+    w, logs = watcher(8, 0.3, 0.0)
+    row = w.measure(dict(item, lane='farm'), ys)
+    assert row.get('error') is None and row['score'] == 0.6, logs
+    w, logs = watcher(8, 0.3, 0.0)
+    row = w.measure(dict(item, lane='gpu'), ys)
+    assert row['error'].startswith('timed out after 1 s'), row
+    w, logs = watcher(1, 0.0, 3.0)
+    row = w.measure(dict(item, lane='farm'), ys)
+    assert row['error'].startswith('no progress for 1 s'), row
+    assert any('YARDSTICK FAILED' in m and 'no progress' in m for m in logs)
+    assert [bool(r.get('error')) for r in Y.read_rows(run)] == [False, True, True]
+
+
 @pytest.mark.live_run_hazard
 def test_the_watcher_measures_everything_in_order_and_retries_a_failure(tmp_path, monkeypatch):
     run, cfg = _run(tmp_path, iters=range(0, 33),
