@@ -38,6 +38,27 @@ Python 3.13 (not 3.14) with `torch numpy psutil flask pytest`. Use Git Bash on W
   randomness comes only from the seeded RNG or chance keys. A game replays exactly from its
   seed and actions.
 
+## Private details: never in the repo
+
+This repo is public (MIT), and so are zero-core and zero-farm. **No farm computer details, ever** (the user,
+2026-11-15), and nothing else tied to a person's machines, in code, tests, fixtures, data, docs (ENGINE.md sections
+included), logs pasted into docs or commit messages: no friends' PC names or handles, no farm machine ids (`m_...`),
+no CPU/GPU models tied to a particular PC, no per-machine game counts, no host names (the desktop's, the Mac's, the
+test PC's), no IP or Tailscale addresses or MagicDNS names, no ssh targets, no home paths with a user name
+(`C:/Users/<name>`, `/Users/<name>`). Write "a farm PC", "PC A", "the Mac", `C:/Users/<user>/...` or `~/...`;
+machine-specific notes go in the maintainer's private notes. A machine's own settings live in the untracked
+`~/.config/zero/local.env` (zero-core's `zero.local_config`, `tools/local_config.py`, `tools/local_env.sh`; template
+`tools/local.env.example`): `ZERO_BIG_DISK` (the desktop's `E:`: build dirs, the slot state, scratch), `MTGZ_MAC` /
+`MTGZ_MAC_HOME` (the Mac: `tools/mac.sh`, the `mac` remote). Paths recorded into committed files (a checkpoint's
+provenance) go through `local_config.portable_path` (home as `~`).
+
+`python tools/privacy_check.py` scans every tracked file: a committed generic set (tailnet IPs and names, farm machine
+ids, home paths with a user name, default PC host names, `user@<IP>`) plus the machine's own untracked patterns in
+`~/.config/zero/privacy_patterns.txt` (the real names; never committed). `gate.py` runs it first in every tier (step
+`privacy`; a finding fails the gate before anything runs), and `tests/test_privacy.py` runs it in pytest. Fix the
+file, never the pattern. Test data uses placeholders (`user@mac`, `192.0.2.x`, `/Users/user`). The check is a copy of
+zero-core's (the test keeps the copies equal to the pinned core's).
+
 ## Before you change things
 
 * **Engine rules or cards.** Follow `docs/ENGINE.md` §16 (porting a card). Add a test per
@@ -104,7 +125,8 @@ and runs the desktop's own heavy steps (builds, the Windows worker, farm compat,
 of `tools/slotd.sh`. Same checkers and evidence; the plan's `placement:` line says where each step ran. `--no-mac`
 keeps everything here (throttled); `--offload local|mac` and `--throttle on|off` override the automatic choice. Any
 other heavy command you run by hand beside a live run goes through the throttle too:
-`bash tools/slotd.sh cargo test --release -p engine --test az` (state and settings in `E:/mtg-zero-state`;
+`bash tools/slotd.sh cargo test --release -p engine --test az` (state and settings in `$ZERO_BIG_DISK/mtg-zero-state`,
+the desktop's `E:/mtg-zero-state`;
 `bash tools/slotd.sh --status`).
 
 Don't re-run a full suite on a sha that already passed it: each tier writes `gates/<sha12>-<tier>.json`
@@ -143,11 +165,10 @@ ran in your merge note or PR.
   `@pytest.mark.live_run_hazard` and are skipped while any supervisor is live on the machine (zero-core
   `docs/az.md` 51; a test storm killed a live run on 2026-11-14). Mark any new one. A gate names the fenced tests in
   its final line (a skip); on the Mac they run. `ZERO_ALLOW_LIVE_RUN_HAZARD=1` only on a machine with no one's run.
-* **Maintainer-only paths.** `E:/...` defaults, the `mac` and `vast` remotes and `*-mac` presets,
-  `tools/mac.sh`, `tools/vast*.py` (rented boxes on the maintainer's Vast.ai account: they cost
-  money), `tools/data/*` (hard-coded paths), and `tools/delverai_publish.py` all
-  belong to the maintainer's machines. Leave the remote settings empty. Tests that need
-  private data skip without it.
+* **Maintainer-only paths.** `E:/...` paths (the maintainer's `ZERO_BIG_DISK`), the `mac` and `vast` remotes and
+  `*-mac` presets, `tools/mac.sh`, `tools/vast*.py` (rented boxes on the maintainer's Vast.ai account: they cost
+  money), `tools/data/*` (the data pipeline) and `tools/delverai_publish.py` all belong to the maintainer's
+  machines. Leave the remote settings empty. Tests that need private data skip without it.
 * **Windows.** Bash scripts only (Git Bash). When a Python script rewrites a file, open it
   with `newline=''`, or text mode turns LF files into CRLF (whole-file diffs). Heredocs can
   lose a level of backslashes, so put scripts that contain backslashes in a file first.

@@ -65,7 +65,7 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MAIN_RUNS = r'C:/Users/Gregg Keithley/mtg-zero/runs'
+MAIN_RUNS = os.path.expanduser('~/mtg-zero/runs')
 FETCH = {'Flooded Strand', 'Misty Rainforest', 'Scalding Tarn', 'Polluted Delta'}
 ISLANDS = {'Volcanic Island', 'Island', 'Thundering Falls'}            # Daze returns an Island (by type)
 LANDS = ISLANDS | FETCH | {'Wasteland'}

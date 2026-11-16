@@ -28,7 +28,7 @@ Coding agents (Claude Code, Codex, ...): also read [`AGENTS.md`](AGENTS.md).
 
 | | Version we use | Notes |
 |---|---|---|
-| Access | | Read access to **both** `greggg230/mtg-zero` and `greggg230/zero-core`. The submodule clones zero-core from GitHub. |
+| Access | | None: `greggg230/mtg-zero` and `greggg230/zero-core` are public. The submodule clones zero-core from GitHub. |
 | Git + **Bash** | | The build scripts are bash. On Windows, use **Git Bash**. |
 | Rust | stable, 1.95 | [rustup.rs](https://rustup.rs). Windows needs the MSVC Build Tools, macOS needs the Xcode command line tools, Linux needs a C compiler. |
 | Python | **3.13** | PyO3 0.23 builds for up to 3.13, so **3.14 won't work**. `python` must be the interpreter you'll run with. To build for another one, set `PYTHON=/path/to/python` for `build_py.sh`. |
@@ -46,7 +46,7 @@ python -m venv ~/.venvs/zero                 # one venv works for every zero rep
 source ~/.venvs/zero/bin/activate            # Git Bash on Windows: source ~/.venvs/zero/Scripts/activate
 pip install torch numpy psutil flask pytest
 
-# Windows only: the scripts default to the maintainer's E: drive. Pick a target dir.
+# Windows only: without ZERO_BIG_DISK in ~/.config/zero/local.env the builds use <repo>/target; pick one explicitly.
 export CARGO_TARGET_DIR="$PWD/target"
 # macOS only: the Python extension must resolve Python's symbols at load time
 export RUSTFLAGS="-C link-arg=-undefined -C link-arg=dynamic_lookup"
@@ -192,12 +192,38 @@ in a debug build, compare it with `--release` and report it. The `fuzz` build pr
 
 The docs often mention the maintainer's machines. None of it is required:
 
-* `E:/...` paths: the default Windows build dir (set `CARGO_TARGET_DIR`), and the human-pick data
-  behind the draft yardstick (`MTGZ_HUMAN_PICKS`; its test skips without it). The scripts in
-  `tools/data/` (the CubeCobra / 17lands pipeline) have hard-coded paths.
+* `E:/...` paths: the maintainer's big scratch disk (build dirs, run data, the human-pick data behind the draft
+  yardstick, `MTGZ_HUMAN_PICKS`; its test skips without it). A machine's own settings (that disk as
+  `ZERO_BIG_DISK`, the Mac's ssh target as `MTGZ_MAC`) live in the untracked `~/.config/zero/local.env`
+  (template: [`tools/local.env.example`](tools/local.env.example)); nothing machine-specific is committed
+  (AGENTS.md "Private details"). Unset, every tool uses a generic default (`<repo>/target`, no Mac).
 * The MacBook remote: the `*-mac` presets, `tools/mac.sh`, run settings `eval_remote` /
   `selfplay_remote` = `mac`. Leave those empty and everything runs on your machine.
 * The hub, Tailscale, port numbers, `zerodash`, and `tools/delverai_publish.py` (the publisher
   for delverai.greggg230.com, which needs an upload key).
 * Run names like `delver1`, `td1`, `r3-2b-beliefsearch` refer to the maintainer's `runs/`, which
   isn't in git.
+
+## Data sources and credits
+
+* **17lands** ([17lands.com/public_datasets](https://www.17lands.com/public_datasets)), licensed
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/): the EoE sealed yardstick pools and booster
+  statistics (`data/sealed/eoe_17lands_sealed.json.gz`, `data/sealed/eoe_17lands_draft_packs.json.gz`) and the
+  17lands columns of `data/powerlsv_card_values.json` are derived from 17lands' public datasets (changed:
+  aggregated and filtered; `docs/sealed_data.md`, `docs/data_m1.md`). Data courtesy of 17lands.
+* **CubeCobra** ([cubecobra.com](https://cubecobra.com), its public data export): the CubeCobra statistics in
+  `data/powerlsv_card_values.json` and the held-out human drafts behind the draft yardstick (never committed)
+  are derived from CubeCobra's public export (`docs/data_m1.md`, `tools/data/`).
+* **Scryfall** ([scryfall.com](https://scryfall.com)): card data and the official rulings (`data/cards/`,
+  `data/rulings/`) were fetched through Scryfall's API. No card images are stored or linked.
+* Human data is a yardstick only: none of it is a training target (`DESIGN.md` 0).
+
+## License and Fan Content notice
+
+The code is MIT-licensed ([`LICENSE`](LICENSE)). The license covers this repository's code and its own data, not
+the Magic: The Gathering card names, card text, rulings or other Wizards of the Coast material it refers to.
+
+MTG Zero is unofficial Fan Content permitted under the
+[Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy). Not approved/endorsed by Wizards.
+Portions of the materials used are property of Wizards of the Coast. Magic: The Gathering is (c) Wizards of the
+Coast LLC.

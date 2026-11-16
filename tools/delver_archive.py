@@ -4,7 +4,7 @@ refused, loudly, with its reason.
 
     python tools/delver_archive.py --out archive.json [--report archive_report.json]
         [--library data/delver_canary_library.json ...] [--library-ref blunders ...]
-        [--play C:/Users/Gregg Keithley/delver-lab/data/play] [--reports .../delver-lab/data/reports]
+        [--play ~/delver-lab/data/play] [--reports .../delver-lab/data/reports]
         [--turns 3-8] [--run-config <run>/config.json | --preset delver-mirror] [--deal actual]
         [--canary all | none | half-a | half-b]
 
@@ -49,7 +49,7 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import delver_blunders as DB  # noqa: E402  (load_engine, spot_sig, the canary library)
 
 FORMAT = 'zero-archive/1'
-DELVER_LAB = 'C:/Users/Gregg Keithley/delver-lab/data'
+DELVER_LAB = os.path.expanduser('~/delver-lab/data')         # the (private) Delver Lab checkout's data
 LIBRARY_REL = 'data/delver_canary_library.json'
 
 

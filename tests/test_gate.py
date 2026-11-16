@@ -194,13 +194,13 @@ def SMOKE(n, bad=0):
 
 
 def MAC(sha, body, after=None):
-    return (f'[mac] Greggs-MacBook-Pro somebranch @ {sha}: cargo test --release --no-fail-fast\n' + body
+    return (f'[mac] mac-host somebranch @ {sha}: cargo test --release --no-fail-fast\n' + body
             + f'[mac] done @ {after or sha} (exit 0)\n')
 
 
 def EVAL_CHECKOUT(sha):
-    wt = f'/Users/greggkeithley/mtg-zero-wt/run-{sha[:12]}'
-    return (f'[mac] Greggs-MacBook-Pro run-{sha[:12]} @ {sha}: set -euo pipefail\nbash tools/build_py.sh\n'
+    wt = f'/Users/user/mtg-zero-wt/run-{sha[:12]}'
+    return (f'[mac] mac-host run-{sha[:12]} @ {sha}: set -euo pipefail\nbash tools/build_py.sh\n'
             f"    Finished `release` profile [optimized + debuginfo] target(s) in 41.12s\n"
             f"mtgz._engine OK: {wt}/mtgz/_engine.so | games: ['toy', 'mtg', 'team_draft']\n"
             f'mtgz remote: {wt} is {sha[:12]}, unchanged, its engine built there\neval checkout ready: {wt}\n'
@@ -376,6 +376,9 @@ def gate(tmp_path, monkeypatch):
     fake.live, fake.mac = [], (False, 'the Mac: stubbed off')
     monkeypatch.setattr(G, 'live_runs', lambda: list(fake.live))
     monkeypatch.setattr(G, 'mac_probe', lambda *a, **k: fake.mac)
+    # the privacy check (tools/privacy_check.py) passes unless a test says otherwise (its own test runs the real one)
+    fake.privacy = (True, 'privacy check: 1 file(s), 0 finding(s) (stubbed)')
+    monkeypatch.setattr(G, 'privacy_scan', lambda root: fake.privacy)
     fake.worker = str(tmp_path / 'target' / 'release' / G.WORKER_EXE)
     fake.diff = 'docs/ENGINE.md\n'
     monkeypatch.setattr(G, 'execute', fake)
@@ -488,7 +491,30 @@ def test_a_clean_pass_says_only_gate_passed(gate, capsys):
     rc, out, _, report = gate('docs', capsys=capsys)
     assert rc == 0 and final(out).startswith('GATE PASSED docs 276f948e6d31 in ') and 'SKIPS' not in final(out)
     assert report['clean'] and report['final'] == final(out) and report['skipped'] == []
-    assert [s['status'] for s in report['steps']] == ['passed', 'passed']        # py-compile, tree-unchanged
+    assert [s['status'] for s in report['steps']] == ['passed', 'passed', 'passed']   # privacy, py-compile, tree-unchanged
+    assert report['steps'][0]['id'] == 'privacy'
+
+
+def test_a_privacy_finding_fails_the_gate_before_any_step(gate, capsys):
+    """AGENTS.md "Private details": tools/privacy_check.py runs first in every tier; a finding fails the gate and no
+    step runs."""
+    gate.fake.privacy = (False, 'exit 1: docs/x.md:3: [tailscale-ip] ... (fix the file)')
+    rc, out, _, report = gate('python', capsys=capsys)
+    assert rc == 1 and final(out).startswith('GATE FAILED python ') and 'privacy: exit 1: docs/x.md:3' in final(out)
+    assert 'not run: build, worker-build, pytest, run-loop-smoke' in final(out)
+    assert gate.fake.calls == [] and [s['id'] for s in report['steps']] == ['privacy']
+
+
+def test_the_privacy_check_runs_the_checkouts_tool(tmp_path):
+    """privacy_scan reads tools/privacy_check.py's last line: 0 findings passes, anything else fails with the findings."""
+    tools = tmp_path / 'tools'
+    tools.mkdir()
+    (tools / 'privacy_check.py').write_text("print('privacy check: 3 file(s), 0 finding(s) (x)')\n")
+    assert G.privacy_scan(str(tmp_path)) == (True, 'privacy check: 3 file(s), 0 finding(s)')
+    (tools / 'privacy_check.py').write_text("import sys; print('a.md:1: [r] y'); print('privacy check: 3 file(s), "
+                                            "1 finding(s) (x)'); sys.exit(1)\n")
+    ok, why = G.privacy_scan(str(tmp_path))
+    assert not ok and why.startswith('exit 1: a.md:1: [r] y | privacy check: 3 file(s), 1 finding(s)')
 
 
 def test_an_allowed_skip_is_named_in_the_final_line(gate, capsys):
@@ -1173,7 +1199,7 @@ def test_without_a_live_run_nothing_moves_and_nothing_waits_for_a_slot(gate, cap
     assert rc == 0 and final(out).startswith('GATE PASSED python')
     assert not any('slotd.sh' in c or 'mac.sh' in c for _, c in kinds(gate.fake))
     assert report['placement']['offload'] == 'desktop' and report['placement']['throttle'] is False
-    assert {s['placement'] for s in report['steps'] if s['id'] != 'tree-unchanged'} == {'desktop'}
+    assert {s['placement'] for s in report['steps'] if s['id'] not in ('tree-unchanged', 'privacy')} == {'desktop'}
 
 
 def test_beside_a_live_run_the_heavy_steps_go_to_the_mac_and_the_rest_waits_for_a_slot(gate, capsys):
@@ -1201,7 +1227,7 @@ def test_no_mac_keeps_everything_on_the_desktop_but_throttled(gate, capsys):
     gate.fake.live, gate.fake.mac = LIVE, (True, 'the Mac: load 6')
     rc, out, _, report = gate('python', '--no-mac', capsys=capsys)
     assert rc == 0 and not any('mac.sh' in c for _, c in kinds(gate.fake))
-    assert all(s['placement'] == G.THROTTLED for s in report['steps'] if s['id'] != 'tree-unchanged')
+    assert all(s['placement'] == G.THROTTLED for s in report['steps'] if s['id'] not in ('tree-unchanged', 'privacy'))
     assert '--no-mac: nothing on the Mac' in report['placement']['summary']
     assert all(c.startswith('bash tools/slotd.sh ') for k, c in kinds(gate.fake))
 
@@ -1217,7 +1243,7 @@ def test_an_unreachable_mac_leaves_the_steps_on_the_desktop_throttled(gate, caps
 
 def test_a_mac_step_that_never_reached_the_mac_runs_on_the_desktop(gate, capsys):
     gate.fake.live, gate.fake.mac = LIVE, (True, 'the Mac: up')
-    gate.fake.set('mac', 'ssh: connect to host 100.95.248.116 port 22: Connection timed out\n', 255)
+    gate.fake.set('mac', 'ssh: connect to host 192.0.2.10 port 22: Connection timed out\n', 255)
     rc, out, _, report = gate('python', capsys=capsys)
     assert rc == 0, out
     steps = {s['id']: s for s in report['steps']}
@@ -1245,7 +1271,7 @@ def test_the_suite_on_the_mac_carries_its_fuzz_settings_and_nothing_of_the_calle
     assert len(mac) == 3 and all('FUZZ_SKIP' not in c.split('unset')[-1].split('bash tools/slotd.sh')[0] for c in mac)
     fuzz = [c for c in mac if '--test fuzz' in c]
     assert all('FUZZ_GAMES=20000' in c for c in fuzz) and any('FUZZ_POOL=delver' in c for c in fuzz)
-    assert all(s['placement'] == 'mac' for s in report['steps'] if s['id'] != 'tree-unchanged')
+    assert all(s['placement'] == 'mac' for s in report['steps'] if s['id'] not in ('tree-unchanged', 'privacy'))
     assert report['passed'] and report['clean']        # (the engine tier's suite evidence wants exactly that)
 
 

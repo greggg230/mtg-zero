@@ -37,9 +37,9 @@ def repo(tmp_path):
 
 
 def spec_for(root):
-    return mac.RunCommitRemote(str(root), host='u@mac', home='/Users/u', python='/venv/bin/python',
-                               workdir='/Users/u/mtgz-remote', env={'X': '1'}, overrides={'threads': 12},
-                               selfplay={'workdir': '/Users/u/mtgz-selfplay', 'procs': 2})
+    return mac.RunCommitRemote(str(root), host='user@mac', home='/Users/user', python='/venv/bin/python',
+                               workdir='/Users/user/mtgz-remote', env={'X': '1'}, overrides={'threads': 12},
+                               selfplay={'workdir': '/Users/user/mtgz-selfplay', 'procs': 2})
 
 
 def test_the_package_registers_the_mac_lazily():
@@ -54,11 +54,11 @@ def test_the_spec_is_the_checkouts_commit(repo, monkeypatch):
     monkeypatch.setattr(r, 'preflight', lambda spec, head: None)
     monkeypatch.setitem(package.active().remotes, 'mac', r)
     s = remote.remote_spec('mac')       # what RemoteEval does when the run starts
-    assert s['repo'] == f'/Users/u/mtg-zero-wt/run-{sha[:12]}'
+    assert s['repo'] == f'/Users/user/mtg-zero-wt/run-{sha[:12]}'
     assert s['env'] == {'X': '1', 'MTGZ_REMOTE_COMMIT': sha}
-    assert (s['host'], s['python'], s['workdir'], s['overrides']) == ('u@mac', '/venv/bin/python',
-                                                                      '/Users/u/mtgz-remote', {'threads': 12})
-    assert s['selfplay'] == {'workdir': '/Users/u/mtgz-selfplay', 'procs': 2}
+    assert (s['host'], s['python'], s['workdir'], s['overrides']) == ('user@mac', '/venv/bin/python',
+                                                                      '/Users/user/mtgz-remote', {'threads': 12})
+    assert s['selfplay'] == {'workdir': '/Users/user/mtgz-selfplay', 'procs': 2}
     assert remote.remote_spec('mac', 'selfplay_remote')['repo'] == s['repo']    # remote self-play's: the same
     # a new commit: a new spec (a run started at another commit evaluates on another checkout)
     (repo / 'a.txt').write_text('two\n')
@@ -230,12 +230,30 @@ def test_a_remote_eoe_evaluation_logs_its_games(tmp_path):
 
 # ---------------------------------------------------------------- remote self-play (ENGINE.md 52)
 
+def test_the_macs_address_is_the_machines_own_setting(tmp_path):
+    """The Mac's ssh target and home come from the untracked local config (never the repo: AGENTS.md); without one,
+    the ssh alias `mac`; MTGZ_MAC / MTGZ_MAC_HOME in the file or the environment set them."""
+    def ask(env_file=None, **env):
+        e = {k: v for k, v in os.environ.items() if k not in ('MTGZ_MAC', 'MTGZ_MAC_HOME')}
+        e.update(ZERO_LOCAL_CONFIG=str(env_file or tmp_path / 'absent.env'), **env)
+        code = 'import mtgz.az as A; print(A.MAC_HOST, A.MAC_HOME)'
+        return subprocess.run([sys.executable, '-c', code], cwd=ROOT, env=e, capture_output=True, text=True,
+                              check=True).stdout.split()
+    assert ask() == ['mac', '/Users/user']
+    f = tmp_path / 'local.env'
+    f.write_text('MTGZ_MAC=someone@mac-host\n', encoding='utf-8')
+    assert ask(f) == ['someone@mac-host', '/Users/someone']
+    assert ask(f, MTGZ_MAC_HOME='/opt/mac-home') == ['someone@mac-host', '/opt/mac-home']
+
+
 def test_the_macs_selfplay_settings():
     """The Mac self-plays in ~/mtgz-selfplay with 50.3's best settings, 2 processes, at nice 5, and backs
     off for the other games' evaluations (its own remote's ~/mtgz-remote/.eval.lock always)."""
     sp = package.active().remotes['mac'].selfplay
-    assert sp['workdir'] == '/Users/greggkeithley/mtgz-selfplay' and sp['procs'] == 2 and sp['nice'] == 5
-    assert sp['locks'] == ['/Users/greggkeithley/kbz-remote/.eval.lock', '/Users/greggkeithley/domz-remote/.eval.lock']
+    home = mtgz.az.MAC_HOME             # the machine's own setting (MTGZ_MAC_HOME, zero.local_config)
+    assert home.startswith('/Users/')
+    assert sp['workdir'] == f'{home}/mtgz-selfplay' and sp['procs'] == 2 and sp['nice'] == 5
+    assert sp['locks'] == [f'{home}/kbz-remote/.eval.lock', f'{home}/domz-remote/.eval.lock']
     o = sp['overrides']
     assert (o['infer_device'], o['conc'], o['threads'], o['groups'], o['infer_workers'], o['torch_threads']) == \
         ('cpu', 768, 12, 4, 4, 3)

@@ -66,7 +66,7 @@ PYTHONPATH=src ../../mtg-bot/.venv-py313/Scripts/python.exe -m mtg_bot cards rou
 # (three pools, one schema: powerlsv.ir.json, legacy.ir.json, eoe.ir.json, powerlsv.schema.json;
 # ENGINE.md 54, 99.1)
 PYTHONPATH=src ../../mtg-bot/.venv-py313/Scripts/python.exe -m mtg_bot cards export-ir \
-    --pool cube legacy eoe --out "C:/Users/Gregg Keithley/mtg-zero/data/cards"
+    --pool cube legacy eoe --out "C:/Users/<user>/mtg-zero/data/cards"
 
 # 2. In mtg-zero:
 python tools/codegen/filter_eoe_ir.py --mtg-bot-data <mtg-bot>/data --ir data/cards/eoe.ir.json

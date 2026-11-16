@@ -1,21 +1,26 @@
 """Shared paths and small helpers for the M1 draft-data pipeline.
 
-All scripts in tools/data/ are meant to be run with the project venv:
-    C:\\Users\\Gregg Keithley\\mtg-zero\\.venv\\Scripts\\python.exe tools\\data\\<script>.py
+All scripts in tools/data/ are meant to be run with the project venv, from the repo root:
+    .venv/Scripts/python.exe tools/data/<script>.py
 
-Large data lives on E: (never committed). Small, committed outputs live
-under mtg-zero/data/.
+Large data lives on the machine's big disk (ZERO_BIG_DISK in ~/.config/zero/local.env, the
+desktop's E:; never committed). Small, committed outputs live under mtg-zero/data/.
 """
 from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
-REPO_ROOT = Path(r"C:\Users\Gregg Keithley\mtg-zero")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "tools"))
+import local_config  # noqa: E402  (the machine's own settings, ~/.config/zero/local.env)
+
+BIG_DISK = local_config.get("ZERO_BIG_DISK") or str(Path.home())
 COMMITTED_DATA = REPO_ROOT / "data"
 
-E_ROOT = Path(r"E:\mtg-zero\data")
+E_ROOT = Path(BIG_DISK + "/") / "mtg-zero" / "data"
 RAW = E_ROOT / "raw"
 RAW_17LANDS = RAW / "17lands"
 RAW_CUBECOBRA = RAW / "cubecobra"
@@ -26,9 +31,10 @@ SPLITS_DIR = E_ROOT / "splits"
 
 POWERLSV_CUBE_ID = "786d3a10-43bd-438e-acf4-bb150b881254"
 
+# the old mtg-bot checkout's cube list: $MTGZ_MTG_BOT (its checkout), else ~/Documents/Claude/Projects/mtg-bot
 MTG_BOT_CUBE_JSON = Path(
-    r"C:\Users\Gregg Keithley\Documents\Claude\Projects\mtg-bot\data\cube_power_lsv.json"
-)
+    local_config.get("MTGZ_MTG_BOT") or (Path.home() / "Documents" / "Claude" / "Projects" / "mtg-bot")
+) / "data" / "cube_power_lsv.json"
 
 
 def ensure_dirs() -> None:
@@ -47,14 +53,14 @@ def dump_json(obj, path: Path, indent: int = 2) -> None:
         json.dump(obj, f, indent=indent, ensure_ascii=False)
 
 
-def free_gb(drive: str = "E:\\") -> float:
+def free_gb(drive: str = BIG_DISK + "/") -> float:
     import shutil
 
     usage = shutil.disk_usage(drive)
     return usage.free / (1024 ** 3)
 
 
-def check_disk_or_die(min_gb: float = 50.0, drive: str = "E:\\") -> None:
+def check_disk_or_die(min_gb: float = 50.0, drive: str = BIG_DISK + "/") -> None:
     g = free_gb(drive)
     if g < min_gb:
         raise SystemExit(

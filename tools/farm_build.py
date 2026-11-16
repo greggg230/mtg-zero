@@ -49,7 +49,8 @@ cpu` on this PC: the CPU passes its self-test) before it is signed.
 Prints the build_id (last line: `build_id <id>`). The release key: `--key` (default
 ~/.config/zero-farm/release.key, DPAPI: this Windows user); the admin token: the file
 ~/.config/zero-farm/admin_token (`--token-file`), read into ZEROFARM_ADMIN_TOKEN for farm-release, never
-printed. farm-release: `--farm-release` (default E:/cargo-target/zero-farm/main/release/farm-release.exe).
+printed. farm-release: `--farm-release` (default $ZERO_BIG_DISK/cargo-target/zero-farm/main/release/farm-release.exe
+on a machine that names a big disk in ~/.config/zero/local.env, else farm-release on PATH).
 """
 import argparse
 import hashlib
@@ -59,6 +60,9 @@ import shutil
 import struct
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import local_config  # noqa: E402  (the machine's own settings: ~/.config/zero/local.env, ZERO_BIG_DISK)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOME = os.path.expanduser('~')
@@ -137,11 +141,16 @@ def pe_imports(path):
     return out
 
 
+FARM_RELEASE = local_config.big_disk_path('cargo-target/zero-farm/main/release/farm-release.exe',
+                                         default='farm-release')
+
+
 def target_dir():
     t = os.environ.get('CARGO_TARGET_DIR')
     if not t:
         branch = git('rev-parse', '--abbrev-ref', 'HEAD')
-        t = f'E:/cargo-target/mtg-zero/{branch}' if os.name == 'nt' else os.path.join(ROOT, 'target')
+        big = local_config.big_disk_path('cargo-target', 'mtg-zero', branch) if os.name == 'nt' else None
+        t = big or os.path.join(ROOT, 'target')
     return os.path.join(t, 'farm-build')
 
 
@@ -542,7 +551,7 @@ def main():
     ap.add_argument('--url', default='https://farm.greggg230.com')
     ap.add_argument('--key', default=os.path.join(HOME, '.config', 'zero-farm', 'release.key'))
     ap.add_argument('--token-file', default=os.path.join(HOME, '.config', 'zero-farm', 'admin_token'))
-    ap.add_argument('--farm-release', default='E:/cargo-target/zero-farm/main/release/farm-release.exe')
+    ap.add_argument('--farm-release', default=FARM_RELEASE)
     ap.add_argument('--diagnostic', action='store_true',
                     help='a diagnostic release worker: ZERO_PROBE_VARIANTS names the probe variants zero-core embeds '
                          '(they may hold real networks); its version gets a -diag suffix; for canary test runs only')

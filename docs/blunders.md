@@ -230,10 +230,10 @@ while it plays; `--games 500` halves it). One command beside a run, from this ch
 own engine checkout:
 
 ```
-cd "C:/Users/Gregg Keithley/mtg-zero-wt/blunders"
-python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/<run>/blunders_console.txt" \
-    python tools/delver_blunders.py watch "C:/Users/Gregg Keithley/mtg-zero/runs/<run>" \
-    --engine "C:/Users/Gregg Keithley/mtg-zero-wt/<the run's pinned worktree>" < /dev/null > /dev/null
+cd "C:/Users/<user>/mtg-zero-wt/blunders"
+python tools/launch_hidden.py "C:/Users/<user>/mtg-zero/runs/<run>/blunders_console.txt" \
+    python tools/delver_blunders.py watch "C:/Users/<user>/mtg-zero/runs/<run>" \
+    --engine "C:/Users/<user>/mtg-zero-wt/<the run's pinned worktree>" < /dev/null > /dev/null
 ```
 
 (stop: `touch runs/<run>/blunders/STOP`; the console file has a line a measurement with its flags.)
@@ -250,11 +250,11 @@ From this checkout (its tools), with the fork's engine checkout (its built `mtgz
 checkout works, the tool's own code is pure Python), below-normal priority, the GPU with CUDA graphs:
 
 ```
-cd "C:/Users/Gregg Keithley/mtg-zero-wt/blunders"
-F="C:/Users/Gregg Keithley/mtg-zero/runs/<fork>/models"
-ENG="C:/Users/Gregg Keithley/mtg-zero-wt/<the fork's pinned run worktree>"
+cd "C:/Users/<user>/mtg-zero-wt/blunders"
+F="C:/Users/<user>/mtg-zero/runs/<fork>/models"
+ENG="C:/Users/<user>/mtg-zero-wt/<the fork's pinned run worktree>"
 # the start checkpoint on the fork's engine (its own control), then the fork's checkpoints:
-python tools/delver_blunders.py run "C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch/models/iter_0550.pt" \
+python tools/delver_blunders.py run "C:/Users/<user>/mtg-zero/runs/r3-2b-beliefsearch/models/iter_0550.pt" \
     "$F/iter_0560.pt" "$F/iter_0570.pt" --engine "$ENG" --out E:/mtg-zero-scratch/blunders/<fork> --games 2000
 # side by side with today's baselines (old engine), differences against the start checkpoint:
 python tools/delver_blunders.py report E:/mtg-zero-scratch/blunders/base/r3-2b-beliefsearch_0550_s32.scan.json \
@@ -398,8 +398,8 @@ each with that answer and the reason:
   in the file: generation 424, the Play tab's network.
 
 ```
-cd "C:/Users/Gregg Keithley/mtg-zero-wt/blunders"
-ENG="C:/Users/Gregg Keithley/mtg-zero-wt/run-1d67542"
+cd "C:/Users/<user>/mtg-zero-wt/blunders"
+ENG="C:/Users/<user>/mtg-zero-wt/run-1d67542"
 # mined spots (`spots` output) + Play spots, each Play spot with its reason:
 python tools/delver_blunders.py spots GAMES.games.json.gz --engine "$ENG" --out spots.json \
     --play "<delver-lab>/data/play/<game>/game.json:<k>"

@@ -33,8 +33,11 @@
 # build's mean paired difference against the random builds over pools), then DONE (or FAILED: a job's exit != 0).
 # A comparison replays exactly from its seeds, block and pilot whatever the threads and processes (ENGINE.md 104.3).
 set -euo pipefail
-HOST="${MTGZ_MAC:-greggkeithley@100.95.248.116}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/tools/local_env.sh"            # MTGZ_MAC, ZERO_BIG_DISK
+HOST="${MTGZ_MAC:-}"
+[ -n "$HOST" ] || { echo "$(basename "$0"): no Mac configured: set MTGZ_MAC=user@host in ~/.config/zero/local.env (tools/local.env.example)" >&2; exit 2; }
+S4A="${MTGZ_S4A:-${ZERO_BIG_DISK:-$HOME}/mtg-zero/s4a}"
 cd "$ROOT"
 usage() { sed -n 2,23p "$0"; exit 2; }
 [ $# -ge 2 ] || usage
@@ -43,7 +46,7 @@ ssh_mac() { ssh -o BatchMode=yes -o ConnectTimeout=20 "$HOST" "$@"; }
 
 if [ "$CMD" != launch ]; then
   NAME="$1"; shift
-  OUT="E:/mtg-zero/s4a/races/$NAME"
+  OUT="$S4A/races/$NAME"
   while [ $# -gt 0 ]; do case "$1" in --out) OUT="$2"; shift 2 ;; *) usage ;; esac; done
   D="mtgz-races/$NAME"
   ssh_mac "test -d $D" || { echo "mac_races: no race $NAME on the Mac (~/$D)" >&2; exit 1; }
@@ -73,7 +76,7 @@ fi
 
 # ---------------------------------------------------------------------------------------------------------------- launch
 CKPT="$1"; shift
-NAME=""; EVALS="E:/mtg-zero/s4a/v0_time"
+NAME=""; EVALS="$S4A/v0_time"
 EP_POOLS="2026,2027,2028,2029,2030,2031,2032,2033"
 EP_ARGS="--collation arena --k 32 --worlds 8 --vs 3 --race --games 128 --min-games 256 --max-games 1024 --delta 0.03"
 CH_POOLS="1001,1002,1003,1004"
