@@ -280,6 +280,23 @@ def write_json(p, obj):
     os.replace(tmp, p)
 
 
+def bash_exe():
+    """Git Bash on Windows (the repo's scripts are Git Bash scripts; a bare `bash` from a console-less process can be
+    WSL's, which reads a CRLF checkout's scripts as broken), `bash` elsewhere. MTGZ_BASH overrides."""
+    v = local_config.get('MTGZ_BASH')
+    if v:
+        return v
+    if WIN:
+        import shutil
+        g = shutil.which('git')
+        if g:
+            base = os.path.dirname(os.path.dirname(os.path.realpath(g)))
+            for c in (os.path.join(base, 'bin', 'bash.exe'), os.path.join(os.path.dirname(base), 'bin', 'bash.exe')):
+                if os.path.exists(c):
+                    return c
+    return 'bash'
+
+
 def git(*args, cwd=ROOT, check=True):
     p = subprocess.run(['git', *args], cwd=cwd, capture_output=True, text=True, creationflags=NO_WINDOW)
     if check and p.returncode:
@@ -534,7 +551,7 @@ class Steward:
                         'third_party/zero-core'], cwd=wt, creationflags=NO_WINDOW, capture_output=True)
         logp = os.path.join(self.dir, 'builds', f'{key}-{t["commit"][:9]}.log')
         jid = f'build:{key}'
-        self.spawn(jid, ['bash', 'tools/slotd.sh', self.py(), 'tools/farm_build.py', '--profile', 'fuzz', '--publish'],
+        self.spawn(jid, [bash_exe(), 'tools/slotd.sh', self.py(), 'tools/farm_build.py', '--profile', 'fuzz', '--publish'],
                    wt, logp, env={'CARGO_TARGET_DIR': self.target_dir_of(key)})
         cur.update(building={'commit': t['commit'], 'engine_hash': h, 'log': logp, 'since': now, 'modes': t['modes'],
                              'kind': t['kind'], 'run_dir': t.get('run_dir'), 'run_wt': t.get('run_wt')})
@@ -870,7 +887,7 @@ class Steward:
         if source == 'desktop':
             work = os.path.join(self.dir, 'jobs', jid)
             stop = os.path.join(self.dir, 'jobs', f'{jid}.STOP')
-            argv = ['bash', 'tools/slotd.sh', self.py(), os.path.join(HERE, 'fuzz_local.py'), '--worker', cur['exe'],
+            argv = [bash_exe(), 'tools/slotd.sh', self.py(), os.path.join(HERE, 'fuzz_local.py'), '--worker', cur['exe'],
                     '--mode', m['mode'], *envs, '--first', str(first), '--count', str(count), '--threads', str(threads),
                     '--max-s', str(self.cfg['chunk_s'] * 2), '--stop-file', stop, '--work', work, '--idle']
             self.spawn(jid, argv, ROOT, logp, env={'MTGZ_SLOT_WAIT_MAX': '900'})
@@ -894,7 +911,7 @@ class Steward:
             if not os.path.isdir(wt) or git('rev-parse', 'HEAD', cwd=wt) != cur['commit']:
                 self.log(f'{key}: mac job not started: {wt} is not at {cur["commit"][:9]}')
                 return
-            self.spawn(jid, ['bash', 'tools/mac.sh', mac_cmd], wt, logp)
+            self.spawn(jid, [bash_exe(), 'tools/mac.sh', mac_cmd], wt, logp)
         cur['local'][source][jid] = {'running': True, 'alias': alias, 'first': first, 'count': count, 'threads': threads,
                                      'started': now, 'log': logp}
         self.log(f'{key}: {source} job {jid}: {m["mode"]} seeds [{first}, {first + count}) x{threads} threads')
