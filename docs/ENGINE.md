@@ -36206,7 +36206,7 @@ gen 17: load 0.1 s, `record_rows` 58.3 s - the reference positions' self-play, ~
 92.8 s - the dynamo trace ~13 s and onnxscript's optimizer ~50 s of it). The farm's leases stay on the old gen until the
 new one is registered, and the architecture never changes between gens: only the weights do.
 
-**What.** The zero-core pin moves from 002731c (`feat/pb3-teacher`) to cba6dbd (`feat/fast-farm-export`, branched from
+**What.** The zero-core pin moves from 002731c (`feat/pb3-teacher`) to 92642ff (`feat/fast-farm-export`: cba6dbd and a test fix, branched from
 002731c; Python only: no Rust input, no engine, worker, encoding, search or self-play change). zero-core docs/az.md 53
 has the design; in short:
 
