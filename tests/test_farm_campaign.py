@@ -105,7 +105,7 @@ def test_create_update_pause_and_from_existing(tmp_path, monkeypatch, capsys):
     assert rc == 0 and 'fuzz-check delver-games ok' in err
     body = fake.campaigns['delver-test']
     assert body == {'build_id': bid, 'mode': 'delver-games', 'env': {'FUZZ_POOL': 'delver'}, 'seed_base': 20000000,
-                    'chunk': 'auto', 'priority': 0.3, 'state': 'active', 'needs': None}
+                    'chunk': 'auto', 'priority': 0.3, 'state': 'active', 'needs': None, 'share': None}
     calls = STUB.calls(stub['log'])
     assert len(calls) == 1 and calls[0]['token_ok'] and not any(TOKEN in x for x in calls[0]['argv'])
     assert calls[0]['argv'][:2] == ['define', os.path.join(str(tmp_path / 'defs'), 'campaign', 'delver-test', '1', 'definition.json')]
@@ -119,6 +119,16 @@ def test_create_update_pause_and_from_existing(tmp_path, monkeypatch, capsys):
     # update the priority only: the definition still says this - not re-signed
     rc, out, err = _run(['update', 'delver-test', '--priority', '0.5', *common], fake, capsys)
     assert fake.campaigns['delver-test']['priority'] == 0.5 and len(STUB.calls(stub['log'])) == 1 and 'not re-signed' in err
+    # the share (zero-farm PROTOCOL 5.4): put, kept by a later update, removed by --share none; never re-signed
+    _run(['update', 'delver-test', '--share', '0.5', *common], fake, capsys)
+    assert fake.campaigns['delver-test']['share'] == 0.5 and len(STUB.calls(stub['log'])) == 1
+    _run(['update', 'delver-test', '--priority', '0.4', *common], fake, capsys)
+    assert fake.campaigns['delver-test']['share'] == 0.5
+    _run(['update', 'delver-test', '--share', 'none', *common], fake, capsys)
+    assert fake.campaigns['delver-test']['share'] is None and len(STUB.calls(stub['log'])) == 1
+    with pytest.raises(SystemExit):
+        _run(['update', 'delver-test', '--share', '1.5', *common], fake, capsys)
+    capsys.readouterr()
     # update the env: a new version, then the PUT
     _run(['update', 'delver-test', '--env', 'FUZZ_POOL=delver', 'FUZZ_CHANCE=50', *common], fake, capsys)
     assert fake.campaigns['delver-test']['env'] == {'FUZZ_POOL': 'delver', 'FUZZ_CHANCE': '50'}
@@ -130,7 +140,8 @@ def test_create_update_pause_and_from_existing(tmp_path, monkeypatch, capsys):
     assert fake.campaigns['delver-test']['state'] == 'active'
     # --from-existing: a live campaign (made before definitions) gets its definition; nothing is put
     fake.campaigns['delver-fuzz-live'] = {'build_id': bid, 'mode': 'delver-games', 'env': {'FUZZ_POOL': 'delver'},
-                                          'seed_base': 10000000, 'chunk': 'auto', 'priority': 0.2, 'state': 'active', 'needs': None}
+                                          'seed_base': 10000000, 'chunk': 'auto', 'priority': 0.2, 'state': 'active', 'needs': None,
+                                          'share': None}
     n_put = sum(1 for c in fake.calls if c[0] == 'PUT')
     rc, out, err = _run(['--from-existing', 'delver-fuzz-live', *common], fake, capsys)
     res = json.loads(out.strip().splitlines()[-1])
