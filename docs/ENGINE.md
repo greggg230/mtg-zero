@@ -35998,8 +35998,79 @@ own target directory (one per checkout, zero-core's its own).
   a triggered ability encodes as one without it (three collisions at GATE_SEED 4242 with a redrawn sample). Layout v7
   (`mtg`) is not affected; `mtg_eoe` stays on v6 until EoE run 2 resumes (encoding-options.md 2.8): a known-gap entry or
   the v6 fix is that work's.
-* **Not done**: a site panel for the matchup model (needs the user's screenshot approval); the gate's farm-compat step
+* **Not done**: a site panel for the matchup model (needs the user's screenshot approval; built in 168.7, awaiting it); the gate's farm-compat step
   still runs the default preset only (run the pb3 preset by hand: the checklist's step 0).
+
+### 168.7 Does the network learn the table? The agreement metric, the site's matchup record (branch `feat/matchup-agreement`, 2026-11-15)
+
+**Why.** Teacher decisions (168.3) record the table's 60 as the policy target at a chosen seat's sideboarding, so the
+network's PRIOR should learn the table's choice - the measure of whether option 2 works. Nothing measured it: the
+census (132) runs on the evaluation spec with a search, and `keep_h2h` measures results, not the prior.
+
+**The probe set** (`tools/matchup_agreement.py probe RUN --out PROBE`, made once and saved: every checkpoint is
+measured on the same positions). Sideboarding decisions of seats that choose their 60 in the run's own logged
+self-play matches (168.2), rebuilt exactly from the match's seed on the run's spec without a table (the table is
+never encoded and draws nothing from the match's RNG). Game 2: the match's start (`start_game` 2); a seat that
+sideboards second sees the first seat driven to the 60 the log says it played. Game 3: the logged game-2
+sideboarding as above, then game 2 played out by a fixed policy - the run's first checkpoint's prior, sampled with
+the probe's seed (the log has no moves) - kept when the match reaches a game 3; a second sideboarder there sees the
+first keep its 60. Each position is stored as its action list from the match's start (`-1`: the next episode), so a
+rebuild is the same game anywhere; `check_counts` checks every rebuilt position's options against its stored deck.
+Stratified by the table's context (game, first, lead, other seat dealt): `--per-context` (75) of each reachable
+context by a seeded shuffle. pb3's: 602 positions (75 in each of the 8 reachable contexts, 2 from drawn-game contexts),
+3 minutes to make.
+
+**The measures** (`measure` / `watch`; forward passes only, CPU, below-normal priority). A sideboarding is a sequence
+of decisions (36.2), so the prior over 60s is the product of the priors along the canonical path (the teacher's path,
+`sbtable::next_action`, mirrored in Python and checked against the engine's legal answers at every step). Per
+position: `prior` on a table's 60 for its context; `top1`, the network's highest-prior 60 is the table's - found
+EXACTLY by a best-first search over the sideboarding tree (path priors only shrink, so the first complete 60 off the
+queue is the mode; tested against brute force), a search past `--budget` (400) evaluations reported `unresolved` and
+left out, never guessed; `keep` (PASS at the first decision: the last game's 60; in game 2 the main), `main`, and
+`rough` (pb1's habit, the main +Rough // Tumble -Prismari Charm). Against the newest table at the measurement, the
+table live for the checkpoint's own iteration (`used.jsonl`: iteration N's self-play, which checkpoint N trained on)
+and the first table. One row per checkpoint in `<run>/matchup/agreement.jsonl` (overall and per context, each
+context's favourite 60 and its share, the versions, the probe's id); when a new table publishes after the newest
+checkpoint was measured, the watcher measures that checkpoint again against it (a second row: readers take each
+checkpoint's newest). ~9,000 evaluations and 6-13 s a checkpoint on 4 CPU threads.
+
+**pb3, backfilled iter 0 (pb2@166) to 17** (probe dbb5ac497f79; prior on the live table's 60, else the first's):
+
+| iter | table | game 2: prior / top-1 / +Rough -Charm | game 3: prior / top-1 / keep |
+|---|---|---|---|
+| 0-9 | (v0008) | 0.000 / 0.00 / 0.91-0.96 | 0.000 / 0.00 / 0.00 |
+| 10 | v0008 | 0.229 / 0.00 / 0.714 | 0.063 / 0.02 / 0.08 |
+| 11 | v0008 | 0.689 / 1.00 / 0.282 | 0.287 / 0.31 / 0.43 |
+| 13 | v0008 | 0.952 / 1.00 / 0.041 | 0.306 / 0.31 / 0.53 |
+| 14 | v0012 | 0.008 / 0.00 / 0.017 | 0.112 / 0.11 / 0.67 |
+| 16 | v0012 | 0.613 / 0.50 / 0.000 | 0.113 / 0.11 / 0.98 |
+| 17 | v0012 | 0.429 / 0.00 / 0.000 | 0.113 / 0.11 / 0.96 |
+
+Game 2: the inherited habit (0.94 on +Rough // Tumble -Prismari Charm, pb2's 0.93) is gone four generations after the
+first teacher targets, v0008's 60 (+2 Hydroblast -2 Unholy Heat) took 0.95 by iter 13; v0012 (+3 Pyroblast +1
+Hydroblast -4 Force of Will) moved the target and the prior follows it more slowly (a four-card change: eight
+decisions on its path). Game 3: the network learned to keep its game-2 60 (in self-play a table seat's game-2 60 is
+its game-3 choice already, so the teacher's game-3 path is mostly PASS); the probe's game-3 seats start from logged
+game-2 60s of every origin (searched before iteration 10, older tables), so its game-3 agreement is the share whose
+game-2 60 already was the table's.
+
+**The site's record** (`tools/delverai_matchup.py RUN [--upload]`; `watch --upload` uploads after each new row or
+input change): delverai record `matchup.<run>` (kind 'matchup'): the versions' held-out gains, the agreement rows
+(against the live table, the first before it), the newest checkpoint's per-context numbers against the newest table,
+the newest table's reachable contexts as in / out lists, and **self-play matches per hour**: one point per iteration
+end, each iteration's matches (`selfplay.games` the desktop's, `remote.games` on top: the farm pools' games summed,
+the Mac the rest; zero-core run.py's `queue.games` = local + remote) spread over its run time, a point the trailing
+hour of run time's matches per hour of run time; stops (the supervisor log's run exits to the next start) and run
+time missing between iterations > 60 s are gaps, never drops. No farm machine names or ids (the site's worker refuses
+`m_...` ids in the record). Site panel: delverai branch `matchup-panel` (needs the user's screenshot approval).
+
+**Checks.** `tests/test_matchup_agreement.py` 9: the canonical path reaches every legal 60 of a small 75 exactly once
+(no path a prefix of another); the best-first mode equals brute force on six made-up trees, the path prior the same
+product, a search past its budget unresolved; end to end on the engine with a tiny untrained network (a real game
+log of random post-sideboard matches, a table version, the probe made twice identically, every position rebuilt and
+its options checked, rows for two checkpoints against the newest / live / first tables, keep = main in game 2, one
+position's table prior against the engine stepped by hand, nothing measured twice, the record); matches per hour on
+made-up metrics and a supervisor log (prorated windows, the stop merged with the missing run time, no machine id).
 
 ## 169. Public cleanup: no farm computer details or machine-specific settings in the repos, the privacy check, licenses (branch `chore/public-cleanup`, zero-core `chore/public-cleanup`, zero-farm `chore/public-cleanup`, 2026-11-15)
 
