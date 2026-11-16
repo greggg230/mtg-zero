@@ -36687,6 +36687,11 @@ The desktop beside the live runs pb1 (paused) and pb3: every cargo, fuzz and pyt
 * **GATE PASSED suite adc5b64d394e in 415s** (2,680 passed in 23 binaries; the sharded 2k fuzz of default,
   default+hidden, delver_dealt, delver_dealt2). **GATE PASSED WITH SKIPS engine adc5b64d394e in 958s**
   (`--tested-sha adc5b64d`; the live-run fence only: 1 test).
+* After merging main aa2fd61b (174: fast farm export, zero-core pin 2c67426) and the Etali test's pin, on c9767872:
+  **GATE PASSED suite c976787217c3 in 905s** (2,680 passed in 23 binaries; the same four sharded 2k fuzz runs) and
+  **GATE PASSED WITH SKIPS engine c976787217c3 in 854s** (`--tested-sha c9767872`; every digest above EQUAL, `az` 54,
+  `limits` 13, `hidden` 28, pytest 480 passed + 46 on the desktop, the 1-config search smoke, farm compat identical; the
+  live-run fence only: 1 test). The commit after it records these lines (docs only).
 
 ## 174. The farm pool's per-generation export by weight swap: ~150 s -> ~2 s (branch `feat/fast-farm-export`, zero-core `feat/fast-farm-export`, 2026-11-15)
 
