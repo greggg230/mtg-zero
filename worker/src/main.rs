@@ -45,6 +45,9 @@ static PACKAGE_SETTINGS: zero_worker::classify::PackageSettings = &[
     ("matchup_half_life", "trainer", "the matchup retrain's recency weighting"),
     ("matchup_threads", "trainer", "the matchup retrain's threads"),
     ("matchup_worlds", "trainer", "the matchup choice table's belief worlds"),
+    ("matchup_table_min_gain", "trainer", "the matchup model's held-out gain a table needs"),
+    ("matchup_swap_z", "trainer", "the matchup table's swap evidence (standard errors)"),
+    ("matchup_members", "trainer", "the matchup model's bootstrap members"),
 ];
 
 static WORKER: zero_worker::Worker = zero_worker::Worker {

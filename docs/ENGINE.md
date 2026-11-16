@@ -35400,9 +35400,14 @@ belief are the same for every game of a context).
 sideboarder takes the better of play and draw, the second the worse (the chooser's choice, judged by the decider's own
 model) - over A's legal 60s. The worlds: N (`matchup_worlds`, 8000) drawn exactly from the constructed prior
 (`sample_prior`: a table of the count vectors by swaps in and out, big-integer draws; tested against brute force on a
-small 75), restricted to the dealt range for a dealt opponent. Two starts - the main, and the exact optimum of the
-strength term (the 60 highest-w copies: `strength_optimum`, tested against brute force) - each climbed by exhaustive
-one-card swaps until none improves; the better end wins.
+small 75), restricted to the dealt range for a dealt opponent. **The 60 moves from the main only on evidence**
+(`confident_climb`): one card at a time, by the exhaustive one-card swap with the largest mean gain in F over the
+published ensemble's bootstrap members (`matchup_members`, 20) among the swaps whose mean gain exceeds `matchup_swap_z`
+(2) of the members' standard deviations - the members are bootstrap fits of the window, so their spread is the
+estimate's sampling spread -, until none passes: a shrinkage toward the main, so a swap happens only when its estimated
+gain is clearly positive (`matchup_swap_z` 0 is the plain climb by the mean). The strength term's exact argmax (the 60
+highest-w copies: `strength_optimum`, tested against brute force) is reported beside each context (`argmax_in`). The
+guards' defaults are the coordinator's proposal, **pending the user's approval** (168.6).
 
 **What is exact and what is not** (the user's rule: no approximations; stated, with the exact option and its cost):
 * The belief is the model of the deal the search's worlds use (the constructed prior, untilted). For a dealt opponent
@@ -35417,9 +35422,12 @@ one-card swaps until none improves; the better end wins.
 * F's expectation over ~10^10 opponent 60s is estimated from N worlds (an unbiased Monte Carlo estimate; exact
   enumeration is infeasible). With dim 0 (strength only) F increases with w . dA, so the strength optimum is the exact
   argmax whatever the worlds; with a matchup term the argmax carries the estimate's noise (cost of more: linear in N).
-* The climb is a local search (one-card moves from two starts), exact for dim 0 (the start is the optimum), a local
-  optimum otherwise. Exact alternative: two-card neighbourhoods (~175k candidates x N worlds a step: minutes per
-  context), or a branch-and-bound over the swap table.
+* The climb is a local search (one-card moves from the main, each past the evidence bar): its end is a local optimum of
+  the guarded objective, not the model's argmax (the guard's purpose). Exact alternatives: two-card neighbourhoods
+  (~175k candidates x N worlds a step: minutes per context), or a branch-and-bound over the swap table. The bootstrap
+  spread of an L2-penalised fit understates the estimate's uncertainty somewhat (the penalty shrinks each fit alike):
+  the bar is therefore a little permissive; a larger `matchup_swap_z` or a Bayesian posterior over w are the stricter
+  options.
 
 **Teacher decisions: how the choice gets policy targets** (the design point; zero-core docs/search.md 3.19). The
 options:
@@ -35454,15 +35462,17 @@ each gen's definition template; records of a known spec accepted and replayed wi
 ### 168.4 The rolling retrain, the hook, the settings
 
 `mtgz.az.matchup` (EoE's `mtgz.sealed.rolling` design, 112.4): run settings `matchup_every` (0 off), `matchup_window`
-32, `matchup_min_window` 4, `matchup_val_iters` 2, `matchup_half_life` 16, `matchup_threads` 4, `matchup_worlds` 8000
-(the farm worker classifies them trainer-only: `worker/src/main.rs`). `mtg`'s `selfplay_specs` hook
+32, `matchup_min_window` 8, `matchup_val_iters` 2, `matchup_half_life` 16, `matchup_threads` 4, `matchup_worlds` 8000,
+`matchup_table_min_gain` 0.005, `matchup_swap_z` 2, `matchup_members` 20 (the last three and the min window of 8 are the
+proposed guards, pending the user's approval: 168.6; the farm worker classifies every one trainer-only:
+`worker/src/main.rs`). `mtg`'s `selfplay_specs` hook
 (`decklists.selfplay_spec`, which still refuses `keep_deck`, then `matchup.selfplay_spec`): the first answer for an
 iteration is kept (`matchup/used.jsonl`), so the local driver, the Mac's workers and the farm's definition of that
 iteration play one spec; the run's spec until the first version; the newest version published before the iteration
 asked, with its table. The job (`python -m mtgz.az.matchup retrain RUN --iter b --from-iter lo ...`, CPU, below-normal
 priority, `MTGZ_GAME_LOG=0`) reads the window's logged self-play games, fits, computes the table, checks it through the
-engine's parser (`mtgz._engine.mtg_spec_check`) - only when the model beats play / draw on its held-out games, else the
-version has no table and the chosen-60 seats sideboard by search - and publishes `matchup/v<b>.json` atomically (`index.jsonl`: the
+engine's parser (`mtgz._engine.mtg_spec_check`) - only when the model beats play / draw on its held-out games by
+`matchup_table_min_gain` nats, else the version has no table and the chosen-60 seats sideboard by search - and publishes `matchup/v<b>.json` atomically (`index.jsonl`: the
 held-out numbers, the per-copy strengths, the table's changes); failures are logged loudly at the next phase (MATCHUP
 RETRAIN FAILED) and the run keeps the version it has. Presets: `delver-mirror-bo3-varied` (pb3: delver-mirror-bo3 with
 the per-seat deal and the matchup settings; evaluation spec SPEC_DELVER_BO3) and `delver-bo3-varied-smoke` (CPU; a
@@ -35564,20 +35574,20 @@ own target directory (one per checkout, zero-core's its own).
 
 ### 168.6 Left, decisions for the user
 
-* **The table only with a held-out gain** (a guard of this branch, `retrain`): a version whose model does not beat
-  play / draw on its validation iterations publishes no table, and the chosen-60 seats sideboard by search until one
-  does (the smoke's v0003: 157 games, -0.018 nats: no table would have been published under the guard). The threshold
-  is 0 nats; a stricter one (e.g. the value head's +0.005, or a standard error) is the user's call.
-* **The table follows the ranking of w, not its size.** With dim 0 the choice is the 60 highest-w copies however small
-  the differences: a model with a positive held-out gain but noisy per-copy estimates (the first versions: ~6,000
-  games) swaps many cards. On 978 real games of pb2@96 (the sideboard-play analysis's, one dealt seat a match, swaps
-  1-8; the converted log) the model gains +0.027 nats a game over play / draw on the held-out third
-  (dim 0, L2 0.1 selected; the value head's pre-game gain was +0.005), and its table brings in 3 Pyroblast, Rough //
-  Tumble, Meltdown and the third Unholy Heat for 4 Tamiyo and 2 Force of Will - a per-copy estimate of Tamiyo of -0.10
-  +- 0.02 (bootstrap sd) at that size, which more data should settle. Options for the user: (a) as built (the
-  model's exact argmax); (b) a version must also beat its predecessor's held-out loss; (c) a larger
-  `matchup_min_window` before the first table (8: ~13,000 logged games). Only 15% of seat-matches choose, so a wrong
-  table costs little self-play, but its targets teach the prior.
+* **The guards against the first versions' noise - proposed by the coordinator, PENDING THE USER'S APPROVAL** (settings
+  with these defaults in `delver-mirror-bo3-varied`; set them to the old behaviour with `matchup_table_min_gain` 0,
+  `matchup_swap_z` 0, `matchup_min_window` 4): (1) a version publishes a table only when its model beats play / draw on
+  its held-out games by **0.005 nats** a game (the value head's pre-game margin; the smoke's v0003, -0.018 nats, would
+  publish none); (2) **`matchup_min_window` 8** (~13,000 logged games before the first table); (3) **shrinkage toward the
+  main**: a swap only when its bootstrap gain exceeds **2 standard errors** (20 members). Why: with dim 0 the unguarded
+  choice is the 60 highest-w copies however small the differences. On 978 real games of pb2@96 (the sideboard-play
+  analysis's, one dealt seat a match, swaps 1-8) the model gains +0.027 nats a game over play / draw on the held-out
+  third (dim 0, L2 0.1 selected; the value head's pre-game gain was +0.005): unguarded its table brings in 3 Pyroblast,
+  Rough // Tumble, Meltdown and the third Unholy Heat for 4 Tamiyo and 2 Force of Will; with the 2-se bar it keeps 4
+  swaps (+3 Pyroblast +1 Rough // Tumble -4 Tamiyo, each swap's gain 0.025-0.031 against an se of 0.008-0.011) in every
+  context - a per-copy estimate of Tamiyo of -0.10 at that size, which more data should settle (the min window of 8
+  waits for ~13x the data). Other options: a version must also beat its predecessor's held-out loss; a stricter z. Only
+  15% of seat-matches choose, so a wrong table costs little self-play, but its targets teach the prior.
 * **The belief for a chosen opponent** (168.3): the constructed prior, not the table seat's actual (deterministic)
   choice and not the deck tilt; the exact alternatives are an equilibrium over a shortlist, or the deck tilt through a
   belief row before each teacher decision (the route for game 2's reveals to reach game 3's choice under H3 = A).

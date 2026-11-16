@@ -115,18 +115,26 @@ def test_the_strength_optimum_is_exact():
 def test_the_choice_table_has_24_legal_contexts_and_follows_the_model():
     names = [f'c{i}' for i in range(len(COPIES))]
     m = {'w': [0.0, 0.0, 0.0, 2.0, 0.0], 'c': [0.3, 0.0, 0.0, 0.0], 'U': [], 'M': [], 'dim': 0}
-    table, detail = MU.choice_table([m], names, COPIES, MAIN, (0, 4), 'v0001', worlds=300, seed=1, log=lambda s: None)
+    m2 = dict(m, w=[0.0, 0.01, 0.0, 2.01, 0.0])
+    table, detail = MU.choice_table([m, m2], names, COPIES, MAIN, (0, 4), 'v0001', worlds=300, seed=1, log=lambda s: None)
     assert table['version'] == 'v0001' and len(table['choices']) == 24
     assert [tuple(c[:4]) for c in table['choices']] == MU.contexts()
     for c in table['choices']:
         deck = c[4]
         assert sum(deck) == sum(MAIN) and all(0 <= a <= b for a, b in zip(deck, COPIES))
         assert deck[3] == 3, 'every copy of the strong sideboard card in'
-    # a matchup term: the climb improves on both starts, never below them
-    m2 = member(len(COPIES), 2, seed=4)
-    t2, d2 = MU.choice_table([m2], names, COPIES, MAIN, (0, 4), 'v0002', worlds=300, seed=2, log=lambda s: None)
+    assert all(s['gain'] > 2 * s['se'] for d in detail for s in d['swaps'])
+    # members that disagree (a noisy estimate: the swaps' gains within 2 se): the main stays, every context; z 0 climbs
+    noisy = [dict(m, w=[0.0, 0.0, 0.0, x, 0.0]) for x in (2.0, -2.0, 0.5, -0.5)]
+    t3, d3 = MU.choice_table(noisy, names, COPIES, MAIN, (0, 4), 'v0003', worlds=300, seed=3, log=lambda s: None)
+    assert all(c[4] == MAIN for c in t3['choices']) and all(not d['swaps'] for d in d3)
+    t4, d4 = MU.choice_table(noisy, names, COPIES, MAIN, (0, 4), 'v0004', worlds=300, seed=3, log=lambda s: None, z=0.0)
+    assert any(c[4] != MAIN for c in t4['choices'])
+    # a matchup term: every swap's gain past 2 se, F never below the main's
+    mm = [member(len(COPIES), 2, seed=4), member(len(COPIES), 2, seed=4)]
+    t2, d2 = MU.choice_table(mm, names, COPIES, MAIN, (0, 4), 'v0002', worlds=300, seed=2, log=lambda s: None)
     for d in d2:
-        assert d['F'] >= max(c['F'] for c in d['climbs']) - 1e-12 >= d['F_main'] - 1e-12
+        assert d['F'] >= d['F_main'] - 1e-12
 
 
 def write_log(run, games, spec_extra=None):
@@ -233,5 +241,6 @@ def test_the_presets():
     ev = json.loads(cfg['eval_spec'])
     assert 'dealt_decks' not in ev
     assert cfg['matchup_every'] == 4 and cfg['matchup_window'] == 32 and cfg['matchup_half_life'] == 16.0
+    assert (cfg['matchup_min_window'], cfg['matchup_table_min_gain'], cfg['matchup_swap_z'], cfg['matchup_members']) == (8, 0.005, 2.0, 20)
     smoke = R.resolve_config(ns, {'preset': 'delver-bo3-varied-smoke'})
     assert smoke['matchup_every'] == 1 and json.loads(smoke['spec'])['dealt_decks']['per_seat'] is True

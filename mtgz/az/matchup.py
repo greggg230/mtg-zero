@@ -37,10 +37,13 @@ of the public context: the next game (2, 3), whether the decider sideboards firs
 score is the better side's; second, the worse side's - the chooser's choice), its lead (-1, 0, 1) and whether the
 other seat is dealt. For each of the 24 contexts the job maximises F(A) = the ensemble's mean over the belief's worlds
 of sigmoid(z(A, B)) over A's legal 60s: N worlds (`matchup_worlds`) drawn exactly from the constructed prior
-(uniform over the swap count in the range, then uniform over the 60s with that count: `sample_prior`); starts at the
-main and at the exact optimum of the strength term (the 60 highest-w copies), climbed by exhaustive one-card swaps
-until none improves. With dim 0 (strength only) F is increasing in w . dA, so the strength optimum is the exact
-optimum whatever the worlds. The table goes into the self-play spec (`"sideboard_table"`); every seat of the 75 that
+(uniform over the swap count in the range, then uniform over the 60s with that count: `sample_prior`). The 60 moves
+from the main one card at a time, only by swaps whose gain is clearly positive: the mean over the published ensemble's
+bootstrap members (`matchup_members`) exceeds `matchup_swap_z` of their standard deviations - the members' spread is
+the estimate's sampling spread -, the largest mean gain first, until none passes (`confident_climb`: the shrinkage
+toward the main; `matchup_swap_z` 0 is the plain climb by the mean). A version publishes a table only when its model
+beats play / draw on its held-out games by `matchup_table_min_gain` nats. (These guards and their defaults are
+proposed, pending the user's approval: docs/ENGINE.md 168.6.) The table goes into the self-play spec (`"sideboard_table"`); every seat of the 75 that
 is not dealt sideboards to its context's 60 by teacher decisions, recorded as policy targets (zero-core docs/search.md
 3.19): the network's prior learns the table's choice.
 
@@ -74,11 +77,17 @@ SETTINGS = {
     'matchup_half_life': 16.0,    # > 0: recency weighting (iterations); 0: none
     'matchup_threads': 4,         # the job's CPU threads
     'matchup_worlds': 8000,       # the belief's worlds per context when the table is computed
+    # the guards (docs/ENGINE.md 168.3; proposed defaults, pending the user's approval):
+    'matchup_table_min_gain': 0.005,  # a version publishes a table only when its held-out gain over play / draw (nats a
+                                      # game) is at least this (the value head's pre-game margin)
+    'matchup_swap_z': 2.0,        # the table moves from the main one card at a time, only by swaps whose bootstrap gain
+                                  # exceeds this many standard errors (0: the model's plain argmax climb)
+    'matchup_members': 20,        # the published ensemble's bootstrap fits (the swaps' standard errors come from them)
 }
 DIMS = (0, 2)
 L2_W = (1e-3, 3e-3, 1e-2, 3e-2, 0.1, 0.3, 1.0)   # (strong L2 shrinks every copy's w to 0: the main's 60)
 L2_INTER = (1e-3, 3e-3)
-MEMBERS = 5
+MEMBERS = 5                       # (the selection's held-out ensemble; the published one: matchup_members)
 VERSION_RE = re.compile(r'^v(\d{4,})\.json$')
 _JOBS = {}
 
@@ -274,7 +283,7 @@ def weights(it, ref, half_life):
     return 0.5 ** ((ref - it) / half_life)
 
 
-def select_and_fit(games, main, val_iters=2, half_life=16.0, threads=4, seed=0, log=print):
+def select_and_fit(games, main, val_iters=2, half_life=16.0, threads=4, seed=0, log=print, members_n=MEMBERS):
     """The grid on the time split (the newest `val_iters` iterations validate), then the selected setting refit as an
     ensemble of MEMBERS bootstrap fits on the whole window -> (members, report)."""
     import numpy as np
@@ -315,7 +324,7 @@ def select_and_fit(games, main, val_iters=2, half_life=16.0, threads=4, seed=0, 
     # the published ensemble: the selected setting on the whole window
     members = []
     wall = weights(it, ref, half_life)
-    for k in range(MEMBERS):
+    for k in range(members_n):
         b = rng.choice(len(y), size=len(y), replace=True)
         members.append(fit(dA[b], dB[b], ctx[b], y[b], wall[b], best['dim'], best['l2_w'], best['l2_inter'],
                            seed=seed + 101 + k, threads=threads))
@@ -421,19 +430,24 @@ class Objective:
             self.parts.append((m, sB, gB, ctx))
         self.np = np
 
-    def __call__(self, dA):
-        """F of candidates dA (k x E) -> (k,)."""
+    def per_member(self, dA):
+        """Each member's F of candidates dA (k x E) -> (members, k): the member's mean over the worlds, its better
+        side when the decider sideboards first, its worse second."""
         np = self.np
-        sides = []
-        for pd in (1.0, -1.0):
-            acc = 0.0
-            for m, sB, gB, ctx in self.parts:
+        out = []
+        for m, sB, gB, ctx in self.parts:
+            sides = []
+            for pd in (1.0, -1.0):
                 z = (dA @ m['w'])[:, None] - sB[None, :] + ctx[pd]
                 if gB is not None:
                     z = z + (dA @ m['U']) @ gB.T
-                acc = acc + (1.0 / (1.0 + np.exp(-z))).mean(axis=1)
-            sides.append(acc / len(self.parts))
-        return np.maximum(sides[0], sides[1]) if self.first else np.minimum(sides[0], sides[1])
+                sides.append((1.0 / (1.0 + np.exp(-z))).mean(axis=1))
+            out.append(np.maximum(sides[0], sides[1]) if self.first else np.minimum(sides[0], sides[1]))
+        return np.asarray(out)
+
+    def __call__(self, dA):
+        """F of candidates dA (k x E) -> (k,): the members' mean."""
+        return self.per_member(dA).mean(axis=0)
 
 
 def strength_optimum(members, copies, main):
@@ -452,42 +466,45 @@ def strength_optimum(members, copies, main):
     return c
 
 
-def best_60(F, starts, copies, main):
-    """The best 60 of the climbs from each start under F (module docs) -> (counts, F, detail)."""
+def confident_climb(F, copies, main, z=2.0):
+    """From the main, one-card swaps (a copy of an entry out, a copy of another in) whose gain in F is clearly positive:
+    the members' mean gain over the current 60 exceeds z times its standard error - the members' sd, the members being
+    bootstrap fits of the window, so their spread is the estimate's sampling spread -, the swap with the largest mean
+    gain first, until none passes (z 0: a plain climb by the mean). The model's shrinkage toward the main: a card
+    leaves it only on evidence. -> (counts, F, the swaps [(out, in, mean gain, se)])."""
     import numpy as np
     m = np.asarray(main, dtype=np.float64)
     cop = np.asarray(copies)
-    detail = []
-    best = None
-    for s in starts:
-        c = np.asarray(s, dtype=np.int64)
-        f = float(F((c - m)[None, :])[0])
-        moves = 0
-        while True:
-            outs = np.flatnonzero(c > 0)
-            ins = np.flatnonzero(c < cop)
-            nb = []
-            for o in outs:
-                for i in ins:
-                    if o != i:
-                        x = c.copy()
-                        x[o] -= 1
-                        x[i] += 1
-                        nb.append(x)
-            nb = np.asarray(nb)
-            fs = F(nb - m)
-            j = int(np.argmax(fs))
-            if fs[j] <= f + 1e-12:
-                break
-            c, f = nb[j], float(fs[j])
-            moves += 1
-        detail.append({'start': [int(x) for x in s], 'moves': moves, 'F': f})
-        if best is None or f > best[1] + 1e-12:
-            best = (c, f)
-    return [int(x) for x in best[0]], best[1], detail
+    c = np.asarray(main, dtype=np.int64)
+    cur = F.per_member((c - m)[None, :])[:, 0]
+    swaps = []
+    while True:
+        outs = np.flatnonzero(c > 0)
+        ins = np.flatnonzero(c < cop)
+        pairs, nb = [], []
+        for o in outs:
+            for i in ins:
+                if o != i:
+                    x = c.copy()
+                    x[o] -= 1
+                    x[i] += 1
+                    nb.append(x)
+                    pairs.append((int(o), int(i)))
+        nb = np.asarray(nb)
+        g = F.per_member(nb - m) - cur[:, None]                  # (members, candidates)
+        mean = g.mean(axis=0)
+        se = g.std(axis=0, ddof=1) if g.shape[0] > 1 else np.zeros_like(mean)
+        ok = mean - z * se > 0 if z > 0 else mean > 1e-12
+        if not ok.any():
+            break
+        j = int(np.flatnonzero(ok)[np.argmax(mean[ok])])
+        c = nb[j]
+        cur = cur + g[:, j]
+        swaps.append((pairs[j][0], pairs[j][1], float(mean[j]), float(se[j])))
+    return [int(x) for x in c], float(cur.mean()), swaps
 
 
-def choice_table(members, names, copies, main, dealt_swaps, version, worlds=8000, seed=0, log=print):
+def choice_table(members, names, copies, main, dealt_swaps, version, worlds=8000, seed=0, log=print, z=2.0):
     """The 24 contexts' best 60s (module docs) -> (the spec's "sideboard_table", per-context detail)."""
     import numpy as np
     rng = np.random.default_rng(seed)
@@ -495,14 +512,16 @@ def choice_table(members, names, copies, main, dealt_swaps, version, worlds=8000
     m = np.asarray(main, dtype=np.float64)
     beliefs = {0: sample_prior(copies, main, 0, S, worlds, rng) - m,
                1: sample_prior(copies, main, dealt_swaps[0], dealt_swaps[1], worlds, rng) - m}
-    strong = strength_optimum(members, copies, main)
     choices, detail = [], []
+    strong = strength_optimum(members, copies, main)        # (the strength term's exact argmax, unguarded: reported)
     for (g, f, l, o) in contexts():
         F = Objective(members, beliefs[o].astype(np.float64), g, f, l, o)
-        c, fv, d = best_60(F, [list(main), strong], copies, main)
+        c, fv, sw = confident_climb(F, copies, main, z)
         choices.append([g, f, l, o, c])
         detail.append({'context': [g, f, l, o], 'deck': c, 'F': fv, 'F_main': float(F((np.asarray(main) - m)[None, :])[0]),
-                       'climbs': d, 'in': {names[i]: c[i] - main[i] for i in range(len(c)) if c[i] > main[i]},
+                       'swaps': [{'out': names[a], 'in': names[b], 'gain': gm, 'se': gs} for a, b, gm, gs in sw],
+                       'z': z, 'argmax_in': {names[i]: strong[i] - main[i] for i in range(len(c)) if strong[i] > main[i]},
+                       'in': {names[i]: c[i] - main[i] for i in range(len(c)) if c[i] > main[i]},
                        'out': {names[i]: main[i] - c[i] for i in range(len(c)) if c[i] < main[i]}})
         log(f'# context game {g} first {f} lead {l} opp_dealt {o}: F {fv:.4f} (main {detail[-1]["F_main"]:.4f}) '
             f'in {detail[-1]["in"]} out {detail[-1]["out"]}')
@@ -567,7 +586,7 @@ def selfplay_spec(R, it):
     if prev != name:
         R.log(f'iter {it} self-play: the chosen-60 seats sideboard by the matchup model\'s choice table {name}' if table
               is not None else f'iter {it} self-play: the matchup model {name} has no table (it did not beat play / draw '
-              f'on its held-out games): the chosen-60 seats sideboard by search')
+              f'on its held-out games by matchup_table_min_gain): the chosen-60 seats sideboard by search')
     return None if table is None else with_table(c['spec'], table)
 
 
@@ -654,7 +673,9 @@ def launch_if_due(R, it):
     th = int(c.get('matchup_threads', 4))
     cmd = [sys.executable, '-m', 'mtgz.az.matchup', 'retrain', R.run, '--iter', str(b), '--from-iter', str(lo),
            '--val-iters', str(V), '--half-life', str(float(c.get('matchup_half_life', 0.0) or 0.0)),
-           '--threads', str(th), '--worlds', str(int(c.get('matchup_worlds', 8000)))]
+           '--threads', str(th), '--worlds', str(int(c.get('matchup_worlds', 8000))),
+           '--min-gain', str(float(c.get('matchup_table_min_gain', 0.005))), '--swap-z', str(float(c.get('matchup_swap_z', 2.0))),
+           '--members', str(int(c.get('matchup_members', 20)))]
     from mtgz.sealed.rolling import background_flags, job_env
     log = open(os.path.join(d, 'log.txt'), 'w', encoding='utf-8')
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -668,7 +689,8 @@ def launch_if_due(R, it):
 
 # ----------------------------------------------------------------------------- the retrain job
 
-def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log=print):
+def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log=print, min_gain=0.005, z=2.0,
+            members_n=20):
     """The job (module docs): the run's logged self-play games of iterations lo..b -> status (status.json; a failure
     raises after writing it)."""
     t0 = time.time()
@@ -686,19 +708,21 @@ def retrain(run, b, lo, val_iters=2, half_life=16.0, threads=4, worlds=8000, log
         lst, main = the_75(specs, games)
         names = [x[0] for x in lst]
         copies = [int(x[1]) for x in lst]
-        members, rep = select_and_fit(games, main, val_iters, half_life, threads, seed=b, log=log)
+        members, rep = select_and_fit(games, main, val_iters, half_life, threads, seed=b, log=log, members_n=members_n)
         dd = json.loads(cfg['spec']).get('dealt_decks') or {}
         sw = tuple(dd.get('swaps') or (0, sum(copies) - sum(main)))
-        # (a model that does not beat play / draw on the held-out games has shown no matchup knowledge: its version
-        # publishes no table, and the chosen-60 seats sideboard by search until one does - docs/ENGINE.md 168.4)
-        if rep['gain_nats'] > 0:
-            table, detail = choice_table(members, names, copies, main, sw, name, worlds=worlds, seed=b, log=log)
+        # (a model that does not beat play / draw on the held-out games by `min_gain` nats has not shown matchup
+        # knowledge: its version publishes no table, and the chosen-60 seats sideboard by search until one does -
+        # docs/ENGINE.md 168.4)
+        if rep['gain_nats'] >= min_gain:
+            table, detail = choice_table(members, names, copies, main, sw, name, worlds=worlds, seed=b, log=log, z=z)
             check_table(cfg['spec'], table)
         else:
             table, detail = None, []
-            log(f'# held-out gain {rep["gain_nats"]:+.5f} nats <= 0: no table in {name}')
+            log(f'# held-out gain {rep["gain_nats"]:+.5f} nats < {min_gain}: no table in {name}')
         out = {'format': FORMAT, 'version': name, 'iter': b, 'window': [lo, b], 'list': lst, 'main': main,
                'members': members, 'report': rep, 'table': table, 'table_detail': detail, 'worlds': worlds,
+               'min_gain': min_gain, 'swap_z': z,
                'dealt_swaps': list(sw), 'time': time.time()}
         staged = os.path.join(d, f'{name}.json')
         with open(staged, 'w', encoding='utf-8') as f:
@@ -781,6 +805,9 @@ def main(argv=None):
     r.add_argument('--half-life', type=float, default=16.0)
     r.add_argument('--threads', type=int, default=4)
     r.add_argument('--worlds', type=int, default=8000)
+    r.add_argument('--min-gain', type=float, default=0.005)
+    r.add_argument('--swap-z', type=float, default=2.0)
+    r.add_argument('--members', type=int, default=20)
     f = sub.add_parser('fit')
     f.add_argument('run')
     f.add_argument('--iters', default=None, help='LO-HI')
@@ -789,6 +816,8 @@ def main(argv=None):
     f.add_argument('--threads', type=int, default=4)
     f.add_argument('--table', action='store_true', help='also compute the choice table')
     f.add_argument('--worlds', type=int, default=4000)
+    f.add_argument('--swap-z', type=float, default=2.0)
+    f.add_argument('--members', type=int, default=20)
     f.add_argument('--out', default=None)
     p = sub.add_parser('report')
     p.add_argument('run')
@@ -800,14 +829,15 @@ def main(argv=None):
     if a.cmd == 'retrain':
         def log(m):
             print(m, flush=True)
-        s = retrain(a.run, a.iter, a.from_iter, a.val_iters, a.half_life, a.threads, a.worlds, log=log)
+        s = retrain(a.run, a.iter, a.from_iter, a.val_iters, a.half_life, a.threads, a.worlds, log=log, min_gain=a.min_gain,
+                    z=a.swap_z, members_n=a.members)
         print(json.dumps({k: s[k] for k in ('version', 'games', 'val_logloss', 'val_logloss_pd', 'gain_nats', 'seconds')}))
     elif a.cmd == 'fit':
         lo, hi = rng(a.iters)
         games, specs = load_games(a.run, lo, hi)
         lst, main_ = the_75(specs, games)
         names = [x[0] for x in lst]
-        members, rep = select_and_fit(games, main_, a.val_iters, a.half_life, a.threads)
+        members, rep = select_and_fit(games, main_, a.val_iters, a.half_life, a.threads, members_n=a.members)
         print(f'{rep["games"]} games ({rep["train_games"]} train, {rep["val_games"]} validation of iterations '
               f'{rep["val_iterations"]}); selected {rep["selected"]}')
         print(f'held-out log loss {rep["val_logloss"]:.5f} vs play / draw only {rep["val_logloss_pd"]:.5f}: gain '
@@ -818,7 +848,7 @@ def main(argv=None):
         if a.table:
             S = sum(int(x[1]) for x in lst) - sum(main_)
             out['table'], out['table_detail'] = choice_table(members, names, [int(x[1]) for x in lst], main_, (0, S),
-                                                             'fit', worlds=a.worlds)
+                                                             'fit', worlds=a.worlds, z=a.swap_z)
         if a.out:
             os.makedirs(a.out, exist_ok=True)
             with open(os.path.join(a.out, 'matchup_fit.json'), 'w', encoding='utf-8') as fh:

@@ -255,14 +255,17 @@ PRESETS['delver-mirror-bo3-dealt'] = dict(PRESETS['delver-mirror-bo3'], spec=SPE
 # iterations, the newest 2 validating, half-life 16). The evaluation spec is delver-mirror-bo3's (no deal, no table).
 SPEC_DELVER_BO3_VARIED = decklists.mirror_bo3_spec(decklists.IZZET_DELVER, max_turns=60, game_episodes=True, start_game=2,
                                                    dealt_decks={'p': 0.85, 'swaps': [0, 15], 'per_seat': True})
-_MATCHUP = dict(matchup_every=4, matchup_window=32, matchup_min_window=4, matchup_val_iters=2, matchup_half_life=16.0,
-                matchup_threads=4, matchup_worlds=8000)
+# (min_window 8, the table's 0.005-nat gain threshold, swaps only past 2 standard errors and 20 bootstrap members: the
+# guards proposed for the first versions' noise, pending the user's approval, docs/ENGINE.md 168.6)
+_MATCHUP = dict(matchup_every=4, matchup_window=32, matchup_min_window=8, matchup_val_iters=2, matchup_half_life=16.0,
+                matchup_threads=4, matchup_worlds=8000, matchup_table_min_gain=0.005, matchup_swap_z=2.0, matchup_members=20)
 PRESETS['delver-mirror-bo3-varied'] = dict(PRESETS['delver-mirror-bo3'], spec=SPEC_DELVER_BO3_VARIED,
                                            eval_spec=SPEC_DELVER_BO3, **_MATCHUP)
 # its CPU smoke: delver-bo3-smoke's network and sims, a retrain every iteration from the second
 PRESETS['delver-bo3-varied-smoke'] = dict(PRESETS['delver-bo3-smoke'], spec=SPEC_DELVER_BO3_VARIED,
                                           eval_spec=SPEC_DELVER_BO3, **dict(_MATCHUP, matchup_every=1, matchup_min_window=2,
-                                                                            matchup_val_iters=1, matchup_worlds=1000))
+                                                                            matchup_val_iters=1, matchup_worlds=1000,
+                                                                            matchup_members=5))
 
 # Edge of Eternities sealed (DESIGN.md 9, docs/ENGINE.md 101, 105): the game `mtg_eoe` - `mtg` on the EoE card table,
 # whose encodings carry the EoE identity space (the set's cards in set order, then its tokens: engine/src/az/eoe_cards.txt,
