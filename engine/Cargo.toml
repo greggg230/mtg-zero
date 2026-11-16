@@ -79,6 +79,10 @@ name = "limits"
 path = "tests/limits.rs"
 
 [[test]]
+name = "metagame_log"
+path = "tests/metagame_log.rs"
+
+[[test]]
 name = "measure_delver"
 path = "tests/measure_delver.rs"
 

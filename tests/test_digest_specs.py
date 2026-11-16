@@ -17,4 +17,6 @@ def test_the_digest_specs_are_the_presets_specs():
     assert specs['delver_bo3'] == json.loads(A.PRESETS['delver-mirror-bo3']['spec'])
     assert specs['eoe'] == json.loads(A.SPEC_EOE) == json.loads(A.PRESETS['eoe-1']['spec'])
     assert specs['eoe_choice'] == json.loads(A.SPEC_EOE_CHOICE) == json.loads(A.PRESETS['eoe-2']['spec'])
-    assert set(specs) == {'_doc', 'delver_bo3', 'eoe', 'eoe_choice'}
+    # (the three-deck Legacy metagame, docs/ENGINE.md 176: metagame_digests)
+    assert specs['meta3'] == json.loads(A.SPEC_META3) == json.loads(A.PRESETS['legacy-meta3']['spec'])
+    assert set(specs) == {'_doc', 'delver_bo3', 'eoe', 'eoe_choice', 'meta3'}

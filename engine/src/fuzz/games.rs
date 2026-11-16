@@ -147,6 +147,20 @@
 //! Doomsday or Sneak and Show - Doomsday v Sneak and Show, Doomsday v Delver, Sneak and Show v
 //! Delver, each in both seats, and the two mirrors (`CROSS_PAIRS`, by `seed % 8`), one match in four
 //! 12-turn games - then as many post-sideboard matches, every check of `FUZZ_POOL=delver`'s matches.
+//! `FUZZ_POOL=meta` (ENGINE.md 176): the metagame spec of the three real 75s (Delver, Doomsday, Sneak and Show; a
+//! `"metagame"` spec, uniform over the 9 ordered pairings), each game's pairing the engine's draw from its seed. Games:
+//! the best-of-one metagame's game of the seed (the pairing's mains) with every check of the default mode; matches:
+//! its constructed best-of-three (the 75s; odd seeds one episode per game, one match in four 12-turn games) with every
+//! check of `FUZZ_POOL=delver`'s matches, then post-sideboard matches of the mirrors-only metagame (`"weights"` on the
+//! diagonal, `"start_game": 2`; no keeper: the metagame refuses `keep_deck`). Before each game and match its pairing
+//! check (`meta_lockstep`): the metagame spec's game and the game of its pairing's fixed spec (`Metagame::pair_json`)
+//! played in lockstep from the seed by random actions - the same seats, decider, legal actions and chance keys at
+//! every step, both viewers' whole layout v7 rows (every third step), and every eighth step both viewers' worlds
+//! (`determinize`: the same pools, decks, hand and library identities, the viewer's row; in a best-of-one game the
+//! world's cards of the opponent are exactly its pairing's main), the record (`record_setup`: the fixed game's decks
+//! and the pairing) and the result: everything that depends on a deck is this game's pairing's. The worlds of the
+//! matches' checks keep the pairing (`check_constructed_world`). With 200 games (90 matches, 20 post-sideboard
+//! matches) or more every cell (the post-sideboard matches: every mirror) must have been played.
 //!
 //! The information-set walks (ENGINE.md 148): two worlds `determinize` deals for a viewer, played on
 //! the same random actions while their keys, next decider and legal actions agree (zero-core's child
@@ -520,6 +534,8 @@ pub enum PoolMode {
     DelverDealt,
     /// `FUZZ_POOL=delver_dealt2` (ENGINE.md 168.4): each seat dealt independently, and choice tables.
     DelverDealtPerSeat,
+    /// `FUZZ_POOL=meta` (ENGINE.md 176): the metagame spec of the three real 75s.
+    Meta,
 }
 
 thread_local! {
@@ -550,7 +566,8 @@ pub fn pool_mode() -> PoolMode {
         Ok("cross") => PoolMode::Cross,
         Ok("delver_dealt") => PoolMode::DelverDealt,
         Ok("delver_dealt2") => PoolMode::DelverDealtPerSeat,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"names\", \"delver_sb\", \"cross\", \"eoe\" or \"sealed\")"),
+        Ok("meta") => PoolMode::Meta,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\", \"delver_dealt\", \"delver_dealt2\", \"dd_a\", \"dd_b\", \"dd_c\", \"doomsday\", \"sneak_show\", \"sns\", \"names\", \"delver_sb\", \"cross\", \"meta\", \"eoe\" or \"sealed\")"),
     }
 }
 
@@ -679,9 +696,185 @@ fn dd_b_mode() -> bool {
 }
 
 /// Constructed play's table (`FUZZ_POOL=delver`, `dd_a`, `dd_b`, `dd_c`,
-/// `doomsday`, `sneak_show`, `sns`, `names`, `delver_sb` or `cross`).
+/// `doomsday`, `sneak_show`, `sns`, `names`, `delver_sb`, `cross` or `meta`).
 pub fn constructed_mode() -> bool {
-    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode() || names_mode() || delver_sb_mode() || cross_mode()
+    delver_mode() || dd_a_mode() || dd_b_mode() || ddc_mode() || doomsday_mode() || sns_mode() || names_mode() || delver_sb_mode() || cross_mode() || meta_mode()
+}
+
+/// `FUZZ_POOL=meta` (ENGINE.md 176).
+pub fn meta_mode() -> bool {
+    pool_mode() == PoolMode::Meta
+}
+
+/// `FUZZ_POOL=meta`'s metagame spec (JSON): the three real 75s (`real_75`, named by their files) - best-of-one their
+/// mains, best-of-three (`bo3`) the 75s -, uniform, or with `mirrors` only the three mirrors (the post-sideboard
+/// matches'); `extra` merged in.
+fn meta_json(bo3: bool, mirrors: bool, extra: serde_json::Value) -> String {
+    const FILES: [&str; 3] = ["izzet_delver_8016541", "doomsday_8027957", "sneak_show_8014220"];
+    let decks: Vec<serde_json::Value> = (0..3)
+        .map(|k| {
+            let (m, s) = bo3_lists(&real_75(k));
+            let mut e = serde_json::json!({"name": FILES[k], "main": m});
+            if bo3 {
+                e["sideboard"] = serde_json::json!(s);
+            }
+            e
+        })
+        .collect();
+    let mut mg = serde_json::json!({"decks": decks});
+    if mirrors {
+        mg["weights"] = serde_json::json!([[1, 0, 0], [0, 1, 0], [0, 0, 1]]);
+    }
+    let mut v = serde_json::json!({"max_turns": 60, "constructed": true, "metagame": mg});
+    if bo3 {
+        v["format"] = serde_json::json!("bo3");
+    }
+    for (k, x) in extra.as_object().unwrap() {
+        v[k] = x.clone();
+    }
+    v.to_string()
+}
+
+/// `FUZZ_POOL=meta`'s match `seed` (JSON): the best-of-three metagame, odd seeds one episode per game, one match in four
+/// (by `seed / 2`) 12-turn games; `post`: the mirrors' post-sideboard matches (`"start_game": 2`).
+fn meta_match_json(seed: u64, post: bool) -> String {
+    let mut extra = serde_json::json!({});
+    if post {
+        extra = serde_json::json!({"start_game": 2, "game_episodes": true});
+    } else if seed % 2 == 1 {
+        extra["game_episodes"] = serde_json::json!(true);
+    }
+    if (seed / 2) % 4 == 3 {
+        extra["max_turns"] = serde_json::json!(12);
+    }
+    meta_json(true, post, extra)
+}
+
+/// A metagame game's (match's) pairing check (module docs, ENGINE.md 176): the game of `meta` (a metagame spec) with
+/// seed `seed` and the game of its pairing's fixed spec played in lockstep by random actions from the seed. Its
+/// pairing (p0's deck, p1's deck), the steps compared and the worlds compared.
+fn meta_lockstep(meta: &str, seed: u64) -> ([u8; 2], u64, u64) {
+    use crate::az::metagame::Metagame;
+    use crate::az::tail_encode::Row;
+    use crate::az::{MtgAz, MtgSpec};
+    use zero_search::game::{Next, SearchGame};
+    let ms = MtgSpec::parse(meta).unwrap_or_else(|e| panic!("seed {seed}: the metagame spec: {e}"));
+    let mut a = MtgAz::new_game(&ms, 2, seed).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+    let pairing = a.m.pairing.clone().unwrap_or_else(|| panic!("seed {seed}: a metagame game without its pairing"));
+    assert_eq!(Some(&pairing), ms.pairing(seed).as_ref(), "seed {seed}: the game's pairing is the seed's");
+    let fixed = Metagame::pair_json(meta, pairing.decks).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+    let fs = MtgSpec::parse(&fixed).unwrap_or_else(|e| panic!("seed {seed}: the pairing's fixed spec: {e}"));
+    assert_eq!(ms.pools(seed), fs.pools(seed), "seed {seed}: the seats are the pairing's lists");
+    let mut b = MtgAz::new_game(&fs, 2, seed).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+    assert_eq!(b.m.pairing, None, "seed {seed}: a fixed spec's game has no pairing");
+    assert_eq!(a.m.pools, b.m.pools, "seed {seed}: the match's pools are the pairing's 75s");
+    let (ra, rb): (serde_json::Value, serde_json::Value) = (serde_json::from_str(&a.record_setup()).unwrap(), serde_json::from_str(&b.record_setup()).unwrap());
+    assert_eq!((&ra["decks"], &ra["pairing"]), (&rb["decks"], &pairing.json()), "seed {seed}: the record");
+    let bo1 = a.m.format == crate::az::Format::Bo1;
+    let mains: Vec<Vec<u16>> = ms
+        .pools(seed)
+        .into_iter()
+        .map(|(mut d, _)| {
+            d.sort_unstable();
+            d
+        })
+        .collect();
+    let mut rng = Rng::new(seed ^ 0x3E7A_0176_F022);
+    let (mut la, mut lb, mut ka, mut kb) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut step, mut worlds) = (0u64, 0u64);
+    let what = |step: u64| format!("seed {seed} ({} against {}) step {step}", pairing.names[0], pairing.names[1]);
+    loop {
+        if step % 3 == 0 {
+            for v in 0..2 {
+                assert!(Row::of_az(&a, v) == Row::of_az(&b, v), "{}: P{v}'s row differs from the pairing's fixed game", what(step));
+            }
+        }
+        let Some(p) = a.to_move() else {
+            assert_eq!(b.to_move(), None, "{}: one game over", what(step));
+            assert_eq!(a.result(), b.result(), "{}: the result", what(step));
+            if !a.chained() {
+                break;
+            }
+            match (a.next_episode(None).unwrap(), b.next_episode(None).unwrap()) {
+                (Next::Continue(x), Next::Continue(y)) => {
+                    assert_eq!(x.m.pairing, a.m.pairing, "{}: the next episode keeps the pairing", what(step));
+                    a = x;
+                    b = y;
+                    continue;
+                }
+                (Next::Over(x), Next::Over(y)) => {
+                    assert_eq!(x, y, "{}: the match's result", what(step));
+                    break;
+                }
+                _ => panic!("{}: one match over, the other not", what(step)),
+            }
+        };
+        assert_eq!(b.to_move(), Some(p), "{}: the decider", what(step));
+        if step % 8 == 5 {
+            for viewer in 0..2usize {
+                let (mut da, mut db) = (a.clone(), b.clone());
+                let k = rng.next_u64();
+                da.determinize(viewer, &mut zero_search::rng::Rng::new(k));
+                db.determinize(viewer, &mut zero_search::rng::Rng::new(k));
+                let w = || format!("{}: P{viewer}'s world", what(step));
+                assert_eq!(da.m.pairing, a.m.pairing, "{}: the pairing", w());
+                assert_eq!((&da.m.pools, &da.m.decks), (&db.m.pools, &db.m.decks), "{}: the pools and decks", w());
+                for q in 0..2u8 {
+                    let ids = |g: &Game| -> Vec<u16> {
+                        let pl = g.player(q);
+                        pl.hand.iter().chain(&pl.library).map(|&c| g.obj(c).def).collect()
+                    };
+                    assert_eq!(ids(&da.g), ids(&db.g), "{}: P{q}'s hand and library", w());
+                }
+                if bo1 && da.m.sb.is_none() {
+                    let o = 1 - viewer;
+                    assert_eq!(hd_deck(&da, o as u8), mains[o], "{}: the opponent's cards are its pairing's main", w());
+                }
+                assert!(Row::of_az(&da, viewer) == Row::of_az(&db, viewer), "{}: the viewer's row", w());
+                worlds += 1;
+            }
+        }
+        a.legal_actions(&mut la);
+        b.legal_actions(&mut lb);
+        assert_eq!(la, lb, "{}: the legal actions", what(step));
+        let act = la[rng.below(la.len() as u32) as usize];
+        ka.clear();
+        kb.clear();
+        a.step(act, &mut ka).unwrap_or_else(|e| panic!("{}: {e}", what(step)));
+        b.step(act, &mut kb).unwrap_or_else(|e| panic!("{}: {e}", what(step)));
+        assert_eq!(ka, kb, "{}: the chance keys", what(step));
+        step += 1;
+        assert!(step < 300_000, "{}: the game does not end", what(step));
+    }
+    (pairing.decks, step, worlds)
+}
+
+/// `FUZZ_POOL=meta`'s per-cell counts of a run (`meta_g_0..8` games, `meta_m_` matches, `meta_p_` post-sideboard
+/// matches) and the lockstep's steps and worlds, as `Totals` keys.
+fn meta_totals(t: &mut Totals, kind: &str, cells: &[u64; 9], steps: u64, worlds: u64) {
+    for (i, &c) in cells.iter().enumerate() {
+        t.set(&format!("meta_{kind}_{i}"), c);
+    }
+    t.set(&format!("meta_{kind}_steps"), steps);
+    t.set(&format!("meta_{kind}_worlds"), worlds);
+}
+
+/// `FUZZ_POOL=meta`'s end-of-run check of one kind (`least` seeds or more): every cell of positive weight played (the
+/// mirrors only: `mirrors`), steps and worlds compared.
+fn meta_check(t: &Totals, kind: &str, n: u64, least: u64, mirrors: bool) {
+    if !meta_mode() || n < least {
+        return;
+    }
+    let cells: Vec<u64> = (0..9).map(|i| t.get(&format!("meta_{kind}_{i}"))).collect();
+    for (i, &c) in cells.iter().enumerate() {
+        let mirror = i / 3 == i % 3;
+        if mirrors && !mirror {
+            assert_eq!(c, 0, "FUZZ_POOL=meta {kind}: the mirrors-only metagame played cell {i}");
+        } else {
+            assert!(c > 0, "FUZZ_POOL=meta {kind}: cell {i} (p0 {}, p1 {}) never played in {n} seeds: {cells:?}", i / 3, i % 3);
+        }
+    }
+    assert!(t.get(&format!("meta_{kind}_steps")) > 0 && t.get(&format!("meta_{kind}_worlds")) > 0, "FUZZ_POOL=meta {kind}: no lockstep step or world compared");
 }
 
 /// `FUZZ_POOL=cross` (ENGINE.md 148).
@@ -689,9 +882,10 @@ fn cross_mode() -> bool {
     pool_mode() == PoolMode::Cross
 }
 
-/// Constructed best-of-three matches: `FUZZ_POOL=delver`'s (ENGINE.md 120) or `cross`'s (ENGINE.md 148).
+/// Constructed best-of-three matches: `FUZZ_POOL=delver`'s (ENGINE.md 120), `cross`'s (ENGINE.md 148) or `meta`'s
+/// (ENGINE.md 176).
 pub fn constructed_bo3_mode() -> bool {
-    delver_mode() || cross_mode()
+    delver_mode() || cross_mode() || meta_mode()
 }
 
 /// The real 75s on main (ENGINE.md 148): the Izzet Delver, Legacy Doomsday and Sneak and Show lists.
@@ -2362,6 +2556,11 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     if names_mode() {
         return [(names_deck(&mut rng), Vec::new()), (names_deck(&mut rng), Vec::new())];
     }
+    if meta_mode() {
+        // (ENGINE.md 176) The best-of-one metagame's game of this seed: its pairing's mains.
+        let sp = crate::az::MtgSpec::parse(&meta_json(false, false, serde_json::json!({}))).unwrap();
+        return sp.pools(seed);
+    }
     if cross_mode() {
         // (ENGINE.md 148) The Doomsday 60 against the Sneak and Show 60, seats by seed.
         let (dd, sns) = ((doomsday_deck(), Vec::new()), (sneak_show_deck(), Vec::new()));
@@ -2934,6 +3133,7 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     let (mut companions, mut companions_used) = (0u32, 0u32);
     let mut skips = 0u64;
     let mut unplayable: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+    let (mut meta_cells, mut meta_steps, mut meta_worlds) = ([0u64; 9], 0u64, 0u64);
     for seed in first..first + n {
         if !hooks.before(seed) {
             return Run::Stopped { at: seed };
@@ -2950,8 +3150,19 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             hooks.passed(seed, &SeedOutcome::not_played("unplayable (a card this checkout doesn't support)"));
             continue;
         }
-        let p = match std::panic::catch_unwind(|| if hidden_decks_mode() { play_hidden(seed) } else { play(seed, true) }) {
-            Ok(p) => p,
+        // (`FUZZ_POOL=meta`, ENGINE.md 176: the game's pairing check first)
+        let p = match std::panic::catch_unwind(|| {
+            let m = meta_mode().then(|| meta_lockstep(&meta_json(false, false, serde_json::json!({})), seed));
+            (if hidden_decks_mode() { play_hidden(seed) } else { play(seed, true) }, m)
+        }) {
+            Ok((p, m)) => {
+                if let Some(([i, j], st, w)) = m {
+                    meta_cells[(i * 3 + j) as usize] += 1;
+                    meta_steps += st;
+                    meta_worlds += w;
+                }
+                p
+            }
             Err(payload) => return Run::Failed { seed, payload },
         };
         // (An aborted game, ENGINE.md 100.7: a legitimate end, with no
@@ -3136,7 +3347,12 @@ pub fn random_games(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
         );
     }
     // the end-of-run checks over the chunk's counters (ENGINE.md 167: a shard's are left to the merged totals)
-    end_of_run("games", first, n, &games_totals(companions_used as u64), check_games);
+    if meta_mode() {
+        println!("FUZZ_POOL=meta (ENGINE.md 176): games per cell (p0 x p1) {meta_cells:?}; lockstep with the pairings' fixed games: {meta_steps} steps, {meta_worlds} worlds");
+    }
+    let mut t = games_totals(companions_used as u64);
+    meta_totals(&mut t, "g", &meta_cells, meta_steps, meta_worlds);
+    end_of_run("games", first, n, &t, check_games);
     Run::Done
 }
 
@@ -3246,6 +3462,7 @@ fn totals_vec(t: &Totals, name: &str, len: usize) -> Vec<u64> {
 /// The games' end-of-run checks over `n` seeds' counters `t` (one chunk's, or a sharded run's merged totals: ENGINE.md
 /// 165): what the mode must have exercised, each over its own least number of games (200 for most).
 pub fn check_games(n: u64, t: &Totals) {
+    meta_check(t, "g", n, 200, false);
     let g = |k: &str| t.get(k);
     if n >= 200 && pool_mode() == PoolMode::Default {
         assert!(g("companions_used") > 0, "no companion special action in {n} games");
@@ -3356,6 +3573,7 @@ pub fn check_games(n: u64, t: &Totals) {
 
 /// The matches' end-of-run checks over `n` matches' counters `t` (ENGINE.md 167; each needs 20 matches).
 pub fn check_matches(n: u64, t: &Totals) {
+    meta_check(t, "m", n, 90, false);
     if n < 20 {
         return;
     }
@@ -3393,8 +3611,10 @@ pub fn check_post(n: u64, t: &Totals) {
     if per_seat_mode() {
         assert!(g("table_decisions") > 0, "post-sideboard matches: no choice table decision (ENGINE.md 168.3)");
     }
+    meta_check(t, "p", n, 20, true);
+    // (`FUZZ_POOL=meta` has no keeper: the metagame refuses keep_deck, ENGINE.md 176)
     assert!(
-        g("sb") > 0 && g("changed") > 0 && g("three") > 0 && g("kept_or_dealt") > 0 && g("choices_dealt") > 0 && g("tilted") > 0,
+        g("sb") > 0 && g("changed") > 0 && g("three") > 0 && (meta_mode() || g("kept_or_dealt") > 0) && g("choices_dealt") > 0 && g("tilted") > 0,
         "post-sideboard matches: no sideboarding, changed deck, match of three or keeper"
     );
     assert!(g("pk_new_games") > 0, "post-sideboard matches: the private-key check reached no game a world started (ENGINE.md 141)");
@@ -3412,6 +3632,10 @@ pub fn match_spec(seed: u64) -> crate::az::MtgSpec {
     }
     if cross_mode() {
         return cross_bo3_spec_with(seed, serde_json::json!({}));
+    }
+    if meta_mode() {
+        // (ENGINE.md 176: the best-of-three metagame; each match's pairing the engine's draw from its seed)
+        return crate::az::MtgSpec::parse(&meta_match_json(seed, false)).unwrap();
     }
     if interactions_mode() {
         // Combo-dense lists (cube cards), best-of-three, open decklists;
@@ -3448,6 +3672,10 @@ fn delver_bo3_spec(seed: u64) -> crate::az::MtgSpec {
 /// spec refuses `"start_game": 2` for two different 75s, ENGINE.md 147.4): `delver_bo3_spec`'s one match in four
 /// with `OTHER_75` plays it in both seats.
 pub fn delver_post_spec(seed: u64) -> crate::az::MtgSpec {
+    if meta_mode() {
+        // (ENGINE.md 176: the mirrors-only metagame, post-sideboard; no keeper - the metagame refuses keep_deck)
+        return crate::az::MtgSpec::parse(&meta_match_json(seed, true)).unwrap();
+    }
     let mut extra = serde_json::json!({"start_game": 2, "game_episodes": true});
     // (dealt decks refuse a keeper: ENGINE.md 154)
     if seed % 3 == 2 && !dealt_mode() {
@@ -3658,6 +3886,8 @@ fn check_constructed_world(g: &crate::az::MtgAz, d: &crate::az::MtgAz, viewer: u
     assert_eq!(g.m.decks[v], d.m.decks[v], "{}: the viewer's deck", what());
     assert_eq!(g.g.player(viewer).sideboard, d.g.player(viewer).sideboard, "{}: the viewer's sideboard", what());
     assert_eq!(g.m.pools[ou].list, d.m.pools[ou].list, "{}: the opponent's 75 is public", what());
+    // (ENGINE.md 176: a metagame match's pairing is public, the same in every world; None in every other match)
+    assert_eq!(g.m.pairing, d.m.pairing, "{}: a world changed the metagame pairing", what());
     let pool = &d.m.pools[ou];
     assert_eq!((pool.n_cards, pool.min_deck, pool.max_deck), (pool.list.len(), 60, 60), "{}: the constructed pool", what());
     check_legal_60(&d.m, ou, &d.m.decks[ou], &what);
@@ -4070,6 +4300,8 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
     use crate::az::MtgAz;
     use zero_search::game::SearchGame;
     let mut g = MtgAz::new_game(sp, 2, seed).unwrap_or_else(|e| panic!("match {seed}: {e}"));
+    // (ENGINE.md 176: a metagame match's pairing is its seed's; None for every other spec)
+    assert_eq!(g.m.pairing, sp.pairing(seed), "match {seed}: the metagame pairing");
     DEALT_SPEC.with(|s| *s.borrow_mut() = sp.dealt_decks.map(|_| sp.clone()));
     let mut dealt_decks = 0u32;
     if let Some(dd) = sp.dealt_decks {
@@ -4344,7 +4576,7 @@ pub fn play_match_spec(seed: u64, sp: &crate::az::MtgSpec, checks: bool, stats: 
 /// `random_matches` prints it; None: they are.
 pub fn matches_skipped() -> Option<&'static str> {
     if constructed_mode() && !constructed_bo3_mode() {
-        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / names / delver_sb: games only (constructed best-of-three is FUZZ_POOL=delver's and cross's)");
+        return Some("FUZZ_POOL=dd_a / dd_b / dd_c / doomsday / sneak_show / sns / names / delver_sb: games only (constructed best-of-three is FUZZ_POOL=delver's, cross's and meta's)");
     }
     if eoe_mode() {
         return Some("FUZZ_POOL=eoe: games only (sealed matches come with milestone S2)");
@@ -4373,6 +4605,7 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     let mut aborted = 0u64;
     let (mut dealt_matches, mut dealt_decks, mut table_decisions) = (0u64, 0u64, 0u64);
     let mut stats = HiddenStats::default();
+    let (mut meta_cells, mut meta_steps, mut meta_worlds) = ([0u64; 9], 0u64, 0u64);
     for seed in first..first + n {
         if !hooks.before(seed) {
             return Run::Stopped { at: seed };
@@ -4381,8 +4614,19 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             hooks.passed(seed, &SeedOutcome::not_played("skipped (FUZZ_SKIP)"));
             continue;
         }
-        let p = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| play_match_stats(seed, true, &mut stats))) {
-            Ok(p) => p,
+        // (`FUZZ_POOL=meta`, ENGINE.md 176: the match's pairing check first)
+        let p = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let m = meta_mode().then(|| meta_lockstep(&meta_match_json(seed, false), seed));
+            (play_match_stats(seed, true, &mut stats), m)
+        })) {
+            Ok((p, m)) => {
+                if let Some(([i, j], st, w)) = m {
+                    meta_cells[(i * 3 + j) as usize] += 1;
+                    meta_steps += st;
+                    meta_worlds += w;
+                }
+                p
+            }
             Err(payload) => return Run::Failed { seed, payload },
         };
         games_played += p.games as u64;
@@ -4459,6 +4703,10 @@ pub fn random_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     ] {
         t.set(k, v);
     }
+    if meta_mode() {
+        println!("FUZZ_POOL=meta (ENGINE.md 176): matches per cell (p0 x p1) {meta_cells:?}; lockstep with the pairings' fixed matches: {meta_steps} steps, {meta_worlds} worlds");
+    }
+    meta_totals(&mut t, "m", &meta_cells, meta_steps, meta_worlds);
     end_of_run("matches", first, n, &t, check_matches);
     if constructed_bo3_mode() {
         return post_sideboard_matches(first, n, hooks);
@@ -4476,6 +4724,7 @@ fn post_sideboard_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     let (mut games, mut draws, mut decisions, mut sb, mut changed, mut three, mut aborted, mut kept) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
     let (mut dealt_matches, mut dealt_decks, mut table_decisions) = (0u64, 0u64, 0u64);
     let mut stats = HiddenStats::default();
+    let (mut meta_cells, mut meta_steps, mut meta_worlds) = ([0u64; 9], 0u64, 0u64);
     let new_games0 = PK_NEW_GAMES.load(Ordering::Relaxed);
     for seed in first..first + n {
         if !hooks.before(seed) {
@@ -4485,8 +4734,19 @@ fn post_sideboard_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
             continue;
         }
         let sp = delver_post_spec(seed);
-        let p = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| play_match_spec(seed, &sp, true, &mut stats))) {
-            Ok(p) => p,
+        // (`FUZZ_POOL=meta`, ENGINE.md 176: the match's pairing check first)
+        let p = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let m = meta_mode().then(|| meta_lockstep(&meta_match_json(seed, true), seed));
+            (play_match_spec(seed, &sp, true, &mut stats), m)
+        })) {
+            Ok((p, m)) => {
+                if let Some(([i, j], st, w)) = m {
+                    meta_cells[(i * 3 + j) as usize] += 1;
+                    meta_steps += st;
+                    meta_worlds += w;
+                }
+                p
+            }
             Err(payload) => return Run::Failed { seed, payload },
         };
         // (game 1 is not played: the games after it)
@@ -4541,6 +4801,10 @@ fn post_sideboard_matches(first: u64, n: u64, hooks: &mut dyn Hooks) -> Run {
     ] {
         t.set(k, v);
     }
+    if meta_mode() {
+        println!("FUZZ_POOL=meta (ENGINE.md 176): post-sideboard matches per cell (the mirrors) {meta_cells:?}; lockstep: {meta_steps} steps, {meta_worlds} worlds");
+    }
+    meta_totals(&mut t, "p", &meta_cells, meta_steps, meta_worlds);
     end_of_run("post", first, n, &t, check_post);
     Run::Done
 }
@@ -4767,6 +5031,8 @@ pub fn play_hidden(seed: u64) -> Played {
     use zero_search::game::SearchGame;
     // (Show and Tell's face-down pick reaches a hidden deck's request, which only the constructed prior
     // conditions on: the table's refuses it, ENGINE.md 129.3. Its decks play constructed best-of-three.)
+    // (`FUZZ_POOL=meta`: the metagame refuses hidden decklists, ENGINE.md 176)
+    assert!(!meta_mode(), "FUZZ_HIDDEN_DECKS=1 with FUZZ_POOL=meta: the metagame's 75s are open decklists (the spec refuses hidden_decklists, ENGINE.md 176)");
     assert!(
         !(sns_mode() || delver_sb_mode() || cross_mode()),
         "FUZZ_HIDDEN_DECKS=1 with a pool that casts Show and Tell (sneak_show, sns, delver_sb, cross): the table's prior cannot condition a deck on its face-down pick (ENGINE.md 129.3)"

@@ -82,22 +82,40 @@ def _tally(pairs):
     return out
 
 
-def main_decks(spec):
-    """{seat: {name: copies}} of a constructed spec's registered mains (`decks.p0` / `decks.p1`), else {}."""
+def _metagame_seats(s, state):
+    """A metagame spec's (docs/ENGINE.md 176) deck entries of the game `state` (a spectator state: its
+    `match.pairing`, the index of each seat's 75), [p0's, p1's]. A metagame's decks are each game's: without the game's
+    pairing there are none (a loud error, never another game's decks)."""
+    p = ((state or {}).get('match') or {}).get('pairing')
+    if not p:
+        raise ValueError('a metagame spec (docs/ENGINE.md 176): each game plays its own pairing of the 75s - the decks '
+                         'need the game\'s state (its match.pairing)')
+    ds = s['metagame']['decks']
+    return [ds[i] for i in p['decks']]
+
+
+def main_decks(spec, state=None):
+    """{seat: {name: copies}} of a constructed spec's registered mains (`decks.p0` / `decks.p1`; a metagame's, docs/
+    ENGINE.md 176: the mains of the pairing of the game `state`), else {}."""
     try:
         s = json.loads(spec) if isinstance(spec, str) else dict(spec or {})
     except ValueError:
         return {}
+    if 'metagame' in s:
+        return {p: _tally(d['main']) for p, d in enumerate(_metagame_seats(s, state))}
     d = s.get('decks') or {}
     return {p: _tally(d[f'p{p}']) for p in (0, 1) if d.get(f'p{p}')}
 
 
-def deck_pools(spec):
-    """{seat: the card names of its 75} (`decks.pN` and `decks.pN_sideboard`) of a constructed spec, else {}."""
+def deck_pools(spec, state=None):
+    """{seat: the card names of its 75} (`decks.pN` and `decks.pN_sideboard`; a metagame's: the 75s of the pairing of
+    the game `state`, docs/ENGINE.md 176) of a constructed spec, else {}."""
     try:
         s = json.loads(spec) if isinstance(spec, str) else dict(spec or {})
     except ValueError:
         return {}
+    if 'metagame' in s:
+        return {p: set(d['main']) | set(d.get('sideboard') or []) for p, d in enumerate(_metagame_seats(s, state))}
     d = s.get('decks') or {}
     return {p: set(d[f'p{p}']) | set(d.get(f'p{p}_sideboard') or []) for p in (0, 1) if d.get(f'p{p}')}
 
@@ -157,6 +175,8 @@ class _Recorder(core.RecordingDriver):
     sims_minor = None
     deck_mains = None
     deck_pools = None
+    # a metagame's spec (docs/ENGINE.md 176): the mains and 75s are each game's pairing's, read per state
+    deck_meta = None
 
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
@@ -168,10 +188,13 @@ class _Recorder(core.RecordingDriver):
         if (state.get('decision') or {}).get('kind') == 'Sideboard':
             return {}
         out = base(pred, state, seat, frame)
-        if self.deck_mains is not None and 'deck' in pred and self._game is not None:
+        mains, pools = self.deck_mains, self.deck_pools
+        if self.deck_meta is not None:
+            mains, pools = main_decks(self.deck_meta, state), deck_pools(self.deck_meta, state)
+        if mains is not None and 'deck' in pred and self._game is not None:
             unseen = np.asarray(self._game.aux_target(int(seat)), np.float64)[belief.D:2 * belief.D]
             o = 1 - int(seat)
-            r = deck_read(pred['deck'], state, seat, unseen, self.deck_mains.get(o, {}), (self.deck_pools or {}).get(o))
+            r = deck_read(pred['deck'], state, seat, unseen, mains.get(o, {}), (pools or {}).get(o))
             if r:
                 out = dict(out, deck=r)
         return out
@@ -249,9 +272,12 @@ def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, con
     seed = random.randrange(1 << 30) if seed is None else seed
     spec = json.loads(cfg['spec'])
     bo3 = bool(spec.get('constructed')) and spec.get('format') == 'bo3'
+    meta = 'metagame' in spec       # (docs/ENGINE.md 176: each game's decks are its pairing's, read per state)
+    reads = bo3 and bool(cfg.get('aux_deck_w'))
     driver = type('Recorder', (_Recorder,), {'sims_minor': None if lookahead else cfg.get('sims_minor'),
-                                             'deck_mains': main_decks(spec) if bo3 and cfg.get('aux_deck_w') else None,
-                                             'deck_pools': deck_pools(spec)})
+                                             'deck_mains': main_decks(spec) if reads and not meta else None,
+                                             'deck_pools': None if meta else deck_pools(spec),
+                                             'deck_meta': spec if reads and meta else None})
     real, core.RecordingDriver = core.RecordingDriver, driver   # core.record builds its driver by this name
     # core.record's seats read the view and the root search from the run's config (zero.replay._nn):
     # give it these
@@ -295,7 +321,7 @@ def match_index(rep):
     m0 = (states[0].get('match') or {}) if states else {}
     if m0.get('format') != 'bo3':
         return None
-    mains = main_decks(rep.get('spec'))
+    mains = main_decks(rep.get('spec'), states[0] if states else None)
     games, order = {}, []
 
     def entry(g):

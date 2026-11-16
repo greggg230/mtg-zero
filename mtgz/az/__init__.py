@@ -9,7 +9,8 @@ the matches, its deferred terminal; its layout `layout_draft_v2.json`, ENGINE.md
 presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4, mtg-4-mac; the co-training presets
 team_draft-smoke, team_draft-gpu-smoke, team_draft-4v4, team_draft-4v4-mac; the constructed Delver
 mirror delver-mirror and delver-smoke, docs/ENGINE.md 54, and its best-of-three delver-mirror-bo3 and
-delver-bo3-smoke, ENGINE.md 120; Edge of Eternities sealed eoe-smoke and eoe-1, the game
+delver-bo3-smoke, ENGINE.md 120; the three-deck Legacy metagame legacy-meta3 and legacy-meta3-smoke, ENGINE.md
+176; Edge of Eternities sealed eoe-smoke and eoe-1, the game
 `mtg_eoe`: `mtg` on the EoE card table in its own identity space, layout `layout_eoe.json`, docs/ENGINE.md 105), the default
 spec, the
 evaluation spec, the dashboard's title / port, the remote 'mac' (run setting eval_remote: the
@@ -266,6 +267,27 @@ PRESETS['delver-bo3-varied-smoke'] = dict(PRESETS['delver-bo3-smoke'], spec=SPEC
                                           eval_spec=SPEC_DELVER_BO3, **dict(_MATCHUP, matchup_every=1, matchup_min_window=2,
                                                                             matchup_val_iters=1, matchup_worlds=1000,
                                                                             matchup_members=5))
+
+# The three-deck Legacy metagame (docs/ENGINE.md 176): ONE network learns all 9 ordered (my deck, opponent's deck) cells
+# of Izzet Delver, Legacy Doomsday and Sneak and Show, mirrors included. One spec plays every pairing: each game's
+# (p0's deck, p1's deck) is drawn by the engine from the game's seed, uniform over the 9 cells (`"metagame"`,
+# decklists.metagame_spec), so every machine - this desktop, the Mac, the farm's release worker, the replays and the
+# trainer's replay path - plays the same pairing for a seed. The first phase is best-of-one with open decklists: the
+# three mains (no sideboards, as the Delver mirror's best-of-one spec). Every evaluation (the heuristic yardstick playing
+# the same pairing, random, zero-core's Elo between iterations) plays the same spec - each evaluation game a pairing of
+# its seed -, so the evaluation spec is the spec; the per-cell yardstick is its own lane's (mtgz.az.yardsticks is not
+# touched here). Every game's pairing is in the run's game log (<run>/games/: "kind": "bo1" lines with "pairing") and
+# in each game record (`record_setup`'s "pairing").
+# The training settings are the Delver line's best-of-one preset, `delver-mirror` (mtg-3's: the 128 x 4 token network,
+# 64 / 16 simulations, mana payments at 4, completed-Q targets, 600 games an iteration, GPU inference and training) -
+# the settings the Delver mirror's best-of-one runs started from, on the same three decks' table - WITHOUT its two
+# Delver-only companions: the delverai publisher (`publish`: it publishes the Delver mirror's site) and the standing
+# yardsticks (`yardsticks`: the Delver mirror's anchors and canary library). A launch adds its own flags as the Delver
+# runs did (network size, evaluation cadence, remotes).
+SPEC_META3 = decklists.metagame_spec(decklists.META3, fmt='bo1', max_turns=60)
+PRESETS['legacy-meta3'] = dict(PRESETS['delver-mirror'], spec=SPEC_META3, eval_spec=SPEC_META3, publish={}, yardsticks={})
+# the end-to-end check on CPU: the same spec with mtg-smoke's tiny network and sims (as delver-smoke)
+PRESETS['legacy-meta3-smoke'] = dict(PRESETS['mtg-smoke'], spec=SPEC_META3, eval_spec=SPEC_META3)
 
 # Edge of Eternities sealed (DESIGN.md 9, docs/ENGINE.md 101, 105): the game `mtg_eoe` - `mtg` on the EoE card table,
 # whose encodings carry the EoE identity space (the set's cards in set order, then its tokens: engine/src/az/eoe_cards.txt,

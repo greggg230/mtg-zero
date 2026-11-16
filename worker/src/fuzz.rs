@@ -28,7 +28,7 @@ pub struct MtgFuzz;
 /// The engine's `FUZZ_POOL` values (engine::fuzz::games `pool_mode`), and those whose matches loop plays
 /// nothing (`matches_skipped`: constructed play's pools but the Delver mirror's - its matches are constructed
 /// best-of-three, ENGINE.md 120 -, EoE, sealed).
-const POOLS: &[&str] = &["interactions", "exponential", "drafted", "delver", "eoe", "sealed", "dd_a", "dd_b", "dd_c", "doomsday", "sneak_show", "sns", "names", "delver_sb", "cross", "delver_dealt", "delver_dealt2"];
+const POOLS: &[&str] = &["interactions", "exponential", "drafted", "delver", "eoe", "sealed", "dd_a", "dd_b", "dd_c", "doomsday", "sneak_show", "sns", "names", "delver_sb", "cross", "delver_dealt", "delver_dealt2", "meta"];
 const GAMES_ONLY: &[&str] = &["eoe", "sealed", "dd_a", "dd_b", "dd_c", "doomsday", "sneak_show", "sns", "names", "delver_sb"];
 /// The pools whose games the engine also plays with hidden decklists (`FUZZ_HIDDEN_DECKS=1`: the default
 /// decks and these, engine::fuzz::games docs).
@@ -96,9 +96,9 @@ fn check_env(kind: &str, env: &[(String, String)]) -> Result<(), String> {
     if get("FUZZ_BEST_SHARE").is_some() && pool != Some("sealed") {
         return Err("FUZZ_BEST_SHARE: needs FUZZ_POOL=sealed".into());
     }
-    if kind == "matches" && get("FUZZ_DECK_TILT").is_some() && !matches!(pool, Some("delver" | "delver_dealt" | "delver_dealt2" | "cross")) {
+    if kind == "matches" && get("FUZZ_DECK_TILT").is_some() && !matches!(pool, Some("delver" | "delver_dealt" | "delver_dealt2" | "cross" | "meta")) {
         // (the constructed best-of-three's deck-tilted worlds read it; ENGINE.md 120, 148, 154)
-        return Err("FUZZ_DECK_TILT in a matches mode: needs FUZZ_POOL=delver, delver_dealt, delver_dealt2 or cross (constructed best-of-three)".into());
+        return Err("FUZZ_DECK_TILT in a matches mode: needs FUZZ_POOL=delver, delver_dealt, delver_dealt2, cross or meta (constructed best-of-three)".into());
     }
     if get("FUZZ_DECK_CHOICE").is_some() && pool != Some("sealed") {
         return Err("FUZZ_DECK_CHOICE: needs FUZZ_POOL=sealed and FUZZ_HIDDEN_DECKS=1".into());

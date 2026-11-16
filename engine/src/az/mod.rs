@@ -35,6 +35,7 @@ pub mod hidden_decks;
 pub mod identity;
 pub mod lab;
 pub mod matches;
+pub mod metagame;
 pub mod pools;
 pub mod sample;
 pub mod sbtable;
@@ -71,6 +72,9 @@ pub enum DeckMode {
     /// 36.11) and the cards it knows are elsewhere (its team saw them in the
     /// draft: they narrow its prior of the opponent's unseen first picks).
     Drafted(Box<[Seat; 2]>),
+    /// A metagame (ENGINE.md 176, `metagame.rs`): each game's (match's) ordered pair of the spec's named 75s, drawn
+    /// from its seed.
+    Metagame(std::sync::Arc<metagame::Metagame>),
 }
 
 /// A share in (0, 1] of a spec (`MtgSpec::deck_tilt_ess`), compared by its bits (the spec is `Eq`).
@@ -172,6 +176,15 @@ impl Eq for Share {}
 /// seat is dealt - as a teacher decision (zero-core `SearchGame::teacher_policy`): the canonical path's next action,
 /// played without a search and recorded as the policy target. The table names all 24 contexts. A self-play setting:
 /// the evaluation spec drops it.
+///
+/// A metagame (ENGINE.md 176, `metagame.rs`): `"metagame": {"decks": [{"name", "main", "sideboard"}, ...], "weights":
+/// [[...], ...]}` (with `"constructed": true`, instead of `decks`) plays, in each game (a best-of-three: each match), the
+/// ordered pair (p0's 75, p1's 75) drawn from that game's seed - uniform over the n x n pairs, or by the optional integer
+/// weights (row p0's deck, column p1's) - exactly the game of the same seed whose `decks` are that pair's lists. Best-of-one
+/// or constructed best-of-three; refused with `decks`, `seed`, `start`, `build`, `sealed`, `pools`, `hidden_decklists`,
+/// `dealt_decks`, `sideboard_table`, `keep_deck`, `keep_known`, and `start_game` 2 unless every pair of positive weight is a
+/// mirror. `MatchState::pairing` names the game's pair (the game log, `record_setup`, the spectator view). Without the key
+/// every spec is what it was.
 ///
 /// `"log": true` keeps each game's log (`GameSpec::log`) for the spectator view
 /// (`view.rs`, the replay recorder); it changes nothing else.
@@ -393,6 +406,27 @@ impl MtgSpec {
         }
         let db = s.db();
         let mut pools = None;
+        let mut meta = None;
+        // A metagame (ENGINE.md 176): its decks are each game's pairing of its 75s; the settings built for one pair of
+        // decklists (or for the cube's) are refused, never silently ignored - before any of them is read.
+        if obj.contains_key("metagame") {
+            const REFUSED: [(&str, &str); 11] = [
+                ("decks", "the metagame's decks are each game's pairing of its 75s"),
+                ("seed", "one match seed would play one pairing in every game"),
+                ("start", "a lab start replays one game's decks"),
+                ("build", "a described position names its decklists"),
+                ("sealed", "sealed pools are not constructed 75s"),
+                ("pools", "constructed decks don't come from pools"),
+                ("hidden_decklists", "the 75s are open decklists (no prior for a hidden constructed deck, ENGINE.md 102)"),
+                ("dealt_decks", "dealt decks are built for one pair of 75s (ENGINE.md 154)"),
+                ("sideboard_table", "a choice table is one 75's (ENGINE.md 168.3)"),
+                ("keep_deck", "keep_deck is the one-pair yardstick's (ENGINE.md 130)"),
+                ("keep_known", "keep_known is the one-pair yardstick's (ENGINE.md 141)"),
+            ];
+            if let Some((k, why)) = REFUSED.iter().find(|(k, _)| obj.contains_key(*k)) {
+                return Err(format!("mtg spec: metagame with {k:?}: not supported - {why} (ENGINE.md 176)"));
+            }
+        }
         for (k, x) in obj {
             let int = || x.as_u64().ok_or_else(|| format!("mtg spec: {k} must be a non-negative integer"));
             match k.as_str() {
@@ -411,6 +445,13 @@ impl MtgSpec {
                 "eval_seed" => s.eval_seed = int()?,
                 "seed" => s.seed = Some(int()?),
                 "constructed" => {}
+                "metagame" => {
+                    // (ENGINE.md 176: the names are constructed play's table's)
+                    if !s.constructed {
+                        return Err("mtg spec: metagame plays constructed 75s: it needs \"constructed\": true (ENGINE.md 176)".into());
+                    }
+                    meta = Some(metagame::Metagame::parse(x, db)?);
+                }
                 "log" => s.log = x.as_bool().ok_or("mtg spec: log must be a boolean")?,
                 "hidden_decklists" => s.hidden_decklists = x.as_bool().ok_or("mtg spec: hidden_decklists must be a boolean")?,
                 "game_episodes" => s.game_episodes = x.as_bool().ok_or("mtg spec: game_episodes must be a boolean")?,
@@ -524,6 +565,11 @@ impl MtgSpec {
         if s.start.is_some() && (s.seed.is_some() || s.format != Format::Bo1) {
             return Err("mtg spec: start is for best-of-one games without a match seed".into());
         }
+        // A metagame (ENGINE.md 176): its decks are each game's pairing of its 75s (the settings it refuses were refused
+        // before the keys were read).
+        if let Some(mg) = meta {
+            s.decks = DeckMode::Metagame(std::sync::Arc::new(mg));
+        }
         // (constructed best-of-three plays its decklists, ENGINE.md 120: no pools by default)
         s.pools = pools.unwrap_or(s.format == Format::Bo3 && !s.constructed);
         if s.game_episodes && s.format != Format::Bo3 {
@@ -556,6 +602,19 @@ impl MtgSpec {
             let mirror = match &s.decks {
                 DeckMode::Lists(a, b) => Some(same(a, b)),
                 DeckMode::ListsWithSideboards([(a, sa), (b, sb)]) => Some(same(a, b) && same(sa, sb)),
+                // (ENGINE.md 176: every pair a game can play)
+                DeckMode::Metagame(m) => {
+                    if let Some([i, j]) = m.played().find(|&[i, j]| {
+                        let (a, b) = (&m.decks[i as usize], &m.decks[j as usize]);
+                        !(same(&a.main, &b.main) && same(&a.sideboard, &b.sideboard))
+                    }) {
+                        return Err(format!(
+                            "mtg spec: start_game 2 is for mirrors, and the metagame plays {} against {} (weight > 0): game 1's result is drawn as a fair coin, which only a mirror's game 1 is (ENGINE.md 130, 147.4, 176)",
+                            m.decks[i as usize].name, m.decks[j as usize].name
+                        ));
+                    }
+                    Some(true)
+                }
                 _ => None,
             };
             if mirror == Some(false) {
@@ -633,7 +692,20 @@ impl MtgSpec {
                         constructed::check(db, d, sb).map_err(|e| format!("mtg spec: p{i}'s constructed deck: {e}"))?;
                     }
                 }
-                _ => return Err("mtg spec: constructed needs decklists (decks: {\"p0\": [...], \"p1\": [...]})".into()),
+                DeckMode::Metagame(m) => {
+                    for d in &m.decks {
+                        constructed::check(db, &d.main, &d.sideboard).map_err(|e| format!("mtg spec: metagame deck {:?}: {e}", d.name))?;
+                        if s.format == Format::Bo3 && d.main.len() != constructed::BO3_DECK {
+                            return Err(format!(
+                                "mtg spec: metagame deck {:?}'s main has {} cards: a constructed best-of-three's decks are exactly {} (ENGINE.md 120)",
+                                d.name,
+                                d.main.len(),
+                                constructed::BO3_DECK
+                            ));
+                        }
+                    }
+                }
+                _ => return Err("mtg spec: constructed needs decklists (decks: {\"p0\": [...], \"p1\": [...]}) or a metagame (ENGINE.md 176)".into()),
             }
             // Constructed best-of-three (ENGINE.md 120): the pool is the 75 and every deck after
             // sideboarding is exactly 60 cards (the user's format restriction), so the registered
@@ -642,6 +714,8 @@ impl MtgSpec {
                 let mains: Vec<&Vec<DefId>> = match &s.decks {
                     DeckMode::Lists(a, b) => vec![a, b],
                     DeckMode::ListsWithSideboards(p) => p.iter().map(|x| &x.0).collect(),
+                    // (checked above, by name)
+                    DeckMode::Metagame(_) => Vec::new(),
                     _ => unreachable!("refused above"),
                 };
                 for (p, d) in mains.into_iter().enumerate() {
@@ -679,6 +753,11 @@ impl MtgSpec {
             DeckMode::Drafted(seats) => seats.iter().map(|x| (&x.deck[..], &x.sideboard[..])).collect(),
             _ => Vec::new(),
         };
+        if let DeckMode::Metagame(m) = &s.decks {
+            for d in &m.decks {
+                constructed::check_size(db, &d.main, &d.sideboard).map_err(|e| format!("mtg spec: metagame deck {:?}: {e}", d.name))?;
+            }
+        }
         for (p, (d, sb)) in lists.into_iter().enumerate() {
             constructed::check_size(db, d, sb).map_err(|e| format!("mtg spec: p{p}'s deck: {e}"))?;
             // (ENGINE.md 124.2, 123: `needs_layout_v7`'s cards make state layout v6 can't encode; the
@@ -744,6 +823,14 @@ impl MtgSpec {
                 sealed::eval_game_seed(self.eval_seed, i)
             }
             _ => seed,
+        }
+    }
+
+    /// A metagame's pairing of the game (match) with seed `seed` (ENGINE.md 176); None for every other spec.
+    pub fn pairing(&self, seed: u64) -> Option<metagame::Pairing> {
+        match &self.decks {
+            DeckMode::Metagame(m) => Some(m.named(m.pairing(seed))),
+            _ => None,
         }
     }
 
@@ -813,6 +900,8 @@ impl MtgSpec {
             DeckMode::Lists(a, b) => [(a.clone(), Vec::new()), (b.clone(), Vec::new())],
             DeckMode::ListsWithSideboards(p) => p.clone(),
             DeckMode::Drafted(_) => unreachable!("returned above"),
+            // (ENGINE.md 176: the pairing of this game's seed)
+            DeckMode::Metagame(m) => m.seats(m.pairing(seed)),
         };
         p.map(seat)
     }
@@ -826,7 +915,8 @@ impl MtgSpec {
             serde_json::from_str(json).map_err(|e| format!("mtg spec: {e}"))?
         };
         let o = v.as_object_mut().ok_or("mtg spec: not a JSON object")?;
-        if o.get("decks").is_none_or(|d| d == "random") {
+        // (a metagame, ENGINE.md 176, has no `decks`: its 75s are fixed, evaluation plays them as self-play does)
+        if o.get("decks").is_none_or(|d| d == "random") && !o.contains_key("metagame") {
             o.insert("decks".into(), Value::String("eval".into()));
         }
         // (dealt decks are a self-play setting, ENGINE.md 154: evaluation plays every seat's own sideboarding; so is
@@ -898,6 +988,8 @@ impl MtgAz {
         };
         if spec.constructed && spec.format == Format::Bo3 {
             let mut az = MtgAz::constructed_bo3(spec.db(), gspec, &seats, seed)?;
+            // (ENGINE.md 176: a metagame match's pairing, the match's for its every game)
+            az.m.pairing = spec.pairing(seed);
             az.m.deal.k = spec.deal_samples;
             az.m.deal.ess = spec.deck_tilt_ess.0;
             // (one episode per game, ENGINE.md 121, for a constructed best-of-three too)
@@ -944,6 +1036,7 @@ impl MtgAz {
             _ => [priors.clone(), priors],
         };
         let mut az = MtgAz::from_seats(spec.db(), gspec, spec.format, &seats, seed, priors)?;
+        az.m.pairing = spec.pairing(seed);
         az.m.deal.k = spec.deal_samples;
         az.m.deal.ess = spec.deck_tilt_ess.0;
         az.m.how = how;
@@ -1383,7 +1476,11 @@ impl SearchGame for MtgAz {
     /// built differently is refused, never trained on.
     fn record_setup(&self) -> String {
         let decks: Vec<Vec<DefId>> = (0..2).map(|p| self.m.deck(p as crate::ids::PlayerId)).collect();
-        serde_json::json!({"decks": decks}).to_string()
+        // (a metagame's pairing, ENGINE.md 176: the record says which cell the game was; no key for any other spec)
+        match &self.m.pairing {
+            Some(p) => serde_json::json!({"decks": decks, "pairing": p.json()}).to_string(),
+            None => serde_json::json!({"decks": decks}).to_string(),
+        }
     }
 
     fn bot_names() -> &'static [&'static str] {
