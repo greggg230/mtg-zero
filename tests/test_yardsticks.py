@@ -358,7 +358,7 @@ def test_the_publisher_sends_the_yardsticks_without_paths_or_errors(tmp_path, mo
     Y.append_row(run, {'kind': 'bo1', 'iter': 0, 'opp': 'a3198', 'opp_label': '3198', 'opp_sha': 'abc', 'score': 0.75,
                        'se': 0.0184, 'elo_diff': 188.5, 'elo_se': 16.9, 'games': 400, 'pentanomial': [2, 0, 97, 0, 101],
                        'sims': 64, 'select': 'cq', 'seconds': 464.3, 'time': 5})
-    Y.append_row(run, {'kind': 'bo1', 'iter': 16, 'opp': 'a3198', 'error': 'C:/Users/x/file.pt: boom', 'attempt': 1,
+    Y.append_row(run, {'kind': 'bo1', 'iter': 16, 'opp': 'a3198', 'error': 'C:/Users/user/file.pt: boom', 'attempt': 1,
                        'retry_at': time.time() + 300, 'time': 6})
     Y.append_row(run, {'kind': 'blunders', 'iter': 0, 'library': L, 'passed': 27, 'total': 39, 'share': 0.7,
                        'kinds': {'k': [27, 39]}, 'seconds': 270.0, 'time': 7})

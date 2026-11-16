@@ -4,7 +4,7 @@
 //! other activated abilities in the situations its policy names, and its
 //! strength against the policy before activated abilities (`HeuristicV1`)
 //! and random. The long measurements are `#[ignore]`d:
-//! `cargo test --release -p engine --test bots -- --ignored --nocapture`
+//! `cargo test --release -p engine --test misc_suite bots:: -- --ignored --nocapture`
 //! (`BOTS_GAMES=n` sets the number of deck pairs). The Edge of Eternities
 //! yardsticks (ENGINE.md 103): `eoe_yardsticks`, `eoe_mechanics`,
 //! `eoe_inventory`, `eoe_trace` (`BOTS_DECKS` cube, eoe or eoe2c).

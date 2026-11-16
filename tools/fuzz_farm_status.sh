@@ -9,9 +9,12 @@
 #   bash tools/fuzz_farm_status.sh --json     # the raw status.json
 #   bash tools/fuzz_farm_status.sh --noise    # + the noise study's summary.md
 #   bash tools/fuzz_farm_status.sh --fetch-noise [DIR]   # copy the study's summary and progress to DIR
-#                                                         # (default E:/mtg-zero-scratch/noise)
+#                                                         # (default $ZERO_BIG_DISK/mtg-zero-scratch/noise)
+# The Mac: MTGZ_MAC, the machine's own setting (~/.config/zero/local.env).
 set -euo pipefail
-HOST="${MTGZ_MAC:-greggkeithley@100.95.248.116}"
+. "$(dirname "${BASH_SOURCE[0]}")/local_env.sh"
+HOST="${MTGZ_MAC:-}"
+[ -n "$HOST" ] || { echo "$(basename "$0"): no Mac configured: set MTGZ_MAC=user@host in ~/.config/zero/local.env (tools/local.env.example)" >&2; exit 2; }
 MARK="$HOME/.mtgz-fuzzfarm-lastcheck"
 PY='$HOME/.venvs/dominion-zero/bin/python'
 since="$(cat "$MARK" 2>/dev/null || echo 0)"
@@ -19,7 +22,7 @@ case "${1:-}" in
   --all) since=0 ;;
   --json) ssh -o BatchMode=yes "$HOST" "$PY ~/mtgz-fuzzfarm/bin/fuzz_farm.py status --json"; exit ;;
   --fetch-noise)
-    dir="${2:-E:/mtg-zero-scratch/noise}"
+    dir="${2:-${ZERO_BIG_DISK:-$HOME}/mtg-zero-scratch/noise}"
     mkdir -p "$dir"
     scp -q "$HOST:mtgz-noise/summary.md" "$HOST:mtgz-noise/summary.json" "$dir/"
     scp -q "$HOST:mtgz-noise/progress_*.json" "$HOST:mtgz-noise/log.txt" "$dir/" 2>/dev/null || true

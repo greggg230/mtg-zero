@@ -41,9 +41,10 @@ One engine module registers two games:
 | `mtg` | one match of Magic between two decks (best-of-1 first, best-of-3 later) |
 | `team_draft` | a team-draft event: draft, deckbuilding, then the matches (played by the `mtg` agent) |
 
-The Python engine in `Documents/Claude/Projects/mtg-bot` stays the source of card data (its
+The Python engine of the separate mtg-bot project was the source of card data (its
 oracle-text parser) and a reference for differential tests. Nothing is imported from it at run
-time: cards cross over as a data file (section 3.2).
+time: cards cross over as a data file (section 3.2). Since ENGINE.md 170 the parser and its IR
+export live in this repo (`ir/`, `tools/card_ir.py`); mtg-bot is no longer needed for card data.
 
 ## 2. Team Draft Zero
 
@@ -695,6 +696,7 @@ network code), its runs under `runs/delver1`, apart from the cube's work.
 | D1 | The deck, the two maindeck cards (full oracle fidelity, rulings as tests), constructed best-of-one (CR 100.2a), the preset and its measurements, gates, docs | done (branch delver-d1, mtg-bot feature/legacy-delver-ir; ENGINE.md 54) |
 | D2 | The run `runs/delver1` | the user's go-ahead |
 | D3 | Best-of-three with constructed sideboarding; the five sideboard cards | sideboarding, the hidden 60s, the deck target and tilt (branch delver-bo3, ENGINE.md 120); one episode per game, the label each game's outcome (branch bo3-game-episodes, ENGINE.md 121); the five sideboard cards (branch delver-sb-cards, ENGINE.md 122); integrated with presets `delver-mirror-bo3` and `delver-bo3-smoke` on the full 75, one episode per game (branch delver-bo3-int, ENGINE.md 129): done; post-sideboard games only (`"start_game": 2` in both presets) and the keep-its-deck yardstick `mtgz.az.keep_h2h` (branch bo3-postboard, ENGINE.md 130); a world's observer in the games it starts, the yardstick's informed arm (`keep_known`, its default) and the private-key fuzz check (branch fix/bo3-hidden, ENGINE.md 141; game 3's use of game 2's reveals awaits a decision, 141.4) |
+| D4 | Real MTGO games: the engine builds the position the MTGO adapter describes (spec `build`, `describe`, `mtgz.az.build`) | engine side built (branch mtgo-build, ported to layout v7 on mtgo-build-main; ENGINE.md 95); the adapter next |
 
 ## 9. Sealed deckbuilding: Edge of Eternities first (user, 2026-11-07)
 

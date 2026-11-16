@@ -38,6 +38,16 @@ static PACKAGE_SETTINGS: zero_worker::classify::PackageSettings = &[
     ("real_decks_builder", "trainer", "the extra evaluation against real decks"),
     ("publish", "trainer", "the run-owned delverai publisher: a companion process of the run's supervisor on the desktop (ENGINE.md 163)"),
     ("yardsticks", "trainer", "the standing yardsticks (best-of-one h2h, blunder library): a companion of the run's supervisor on the desktop (ENGINE.md 164)"),
+    ("matchup_every", "trainer", "the matchup model retrained inside the run (ENGINE.md 168): a background job on the desktop; its choice table reaches self-play through the spec, which remote self-play follows per iteration (zero-core docs/az.md 52)"),
+    ("matchup_window", "trainer", "the matchup retrain's window"),
+    ("matchup_min_window", "trainer", "the matchup retrain's first window"),
+    ("matchup_val_iters", "trainer", "the matchup retrain's validation iterations"),
+    ("matchup_half_life", "trainer", "the matchup retrain's recency weighting"),
+    ("matchup_threads", "trainer", "the matchup retrain's threads"),
+    ("matchup_worlds", "trainer", "the matchup choice table's belief worlds"),
+    ("matchup_table_min_gain", "trainer", "the matchup model's held-out gain a table needs"),
+    ("matchup_swap_z", "trainer", "the matchup table's swap evidence (standard errors)"),
+    ("matchup_members", "trainer", "the matchup model's bootstrap members"),
 ];
 
 static WORKER: zero_worker::Worker = zero_worker::Worker {

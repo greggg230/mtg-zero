@@ -1,5 +1,5 @@
 //! One test binary for the other engine test files (AZ layer, decks, drafts, interactions, views, ...) (docs/ENGINE.md 167.9): each file a module of it, so the engine is linked once
-//! for all 27 instead of once per file. Run one file's tests with its module name as the filter:
+//! for all 26 instead of once per file. Run one file's tests with its module name as the filter:
 //! `cargo test --release -p engine --test misc_suite autopass_reuse::` (was `--test autopass_reuse`).
 //! A file keeps its own `mod common;` / kit modules: `#[path]` loads it like a crate root, so its modules
 //! resolve beside it as before.
@@ -10,18 +10,18 @@ mod autopass_reuse;
 mod bo3_episodes;
 #[path = "bots.rs"]
 mod bots;
+#[path = "build.rs"]
+mod build;
 #[path = "constructed.rs"]
 mod constructed;
 #[path = "constructed_bo3.rs"]
 mod constructed_bo3;
 #[path = "dealt_integrated.rs"]
 mod dealt_integrated;
-#[path = "deck_choice.rs"]
-mod deck_choice;
+#[path = "dealt_per_seat.rs"]
+mod dealt_per_seat;
 #[path = "deck_posterior.rs"]
 mod deck_posterior;
-#[path = "deck_scorer.rs"]
-mod deck_scorer;
 #[path = "draft_deferred.rs"]
 mod draft_deferred;
 #[path = "draft_matches.rs"]
@@ -30,8 +30,6 @@ mod draft_matches;
 mod eoe_net;
 #[path = "farm_fuzz_seeds.rs"]
 mod farm_fuzz_seeds;
-#[path = "game_log.rs"]
-mod game_log;
 #[path = "hidden_refs.rs"]
 mod hidden_refs;
 #[path = "interactions_copies.rs"]

@@ -1,0 +1,25 @@
+[
+  {
+    "object": "card",
+    "id": "custom-roto-meddling-wizard",
+    "name": "Meddling Wizard",
+    "lang": "en",
+    "layout": "normal",
+    "mana_cost": "",
+    "cmc": 0.0,
+    "type_line": "Conspiracy",
+    "oracle_text": "(Start the game with this conspiracy face up in the command zone.)\nAt the beginning of each game, after mulligans, your opponent reveals their hand to you.",
+    "colors": [],
+    "color_identity": [],
+    "keywords": [],
+    "set": "custom",
+    "set_name": "Retireddevil's Vintage Roto 1.1 (custom cards)",
+    "rarity": "special",
+    "custom_card": true,
+    "custom_source": {
+      "authority_list": "data/cube_roto.sheet.json",
+      "sheet_row": 724,
+      "custom_text": "(Custom conspiracy. Starts the game face up in the command zone.) / At the beginning of each game, after mulligans, your opponent reveals their hand to you."
+    }
+  }
+]

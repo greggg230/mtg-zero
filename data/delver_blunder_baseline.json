@@ -2,7 +2,7 @@
  "format": "delver-blunder-baseline/1",
  "what": "Delver mirror blunder rates of the fixed baseline checkpoint (tools/delver_blunders.py)",
  "checkpoint": "r3-2b-beliefsearch_0424_s32",
- "ckpt": "C:\\Users\\Gregg Keithley\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0424.pt",
+ "ckpt": "~\\mtg-zero\\runs\\r3-2b-beliefsearch\\models\\iter_0424.pt",
  "ckpt_sha256": "1e62d00fffbdae88",
  "games": {
   "n": 2000,

@@ -39,6 +39,27 @@ Python 3.13 (not 3.14) with `torch numpy psutil flask pytest`. Use Git Bash on W
   randomness comes only from the seeded RNG or chance keys. A game replays exactly from its
   seed and actions.
 
+## Private details: never in the repo
+
+This repo is public (MIT), and so are zero-core and zero-farm. **No farm computer details, ever** (the user,
+2026-11-15), and nothing else tied to a person's machines, in code, tests, fixtures, data, docs (ENGINE.md sections
+included), logs pasted into docs or commit messages: no friends' PC names or handles, no farm machine ids (`m_...`),
+no CPU/GPU models tied to a particular PC, no per-machine game counts, no host names (the desktop's, the Mac's, the
+test PC's), no IP or Tailscale addresses or MagicDNS names, no ssh targets, no home paths with a user name
+(`C:/Users/<name>`, `/Users/<name>`). Write "a farm PC", "PC A", "the Mac", `C:/Users/<user>/...` or `~/...`;
+machine-specific notes go in the maintainer's private notes. A machine's own settings live in the untracked
+`~/.config/zero/local.env` (zero-core's `zero.local_config`, `tools/local_config.py`, `tools/local_env.sh`; template
+`tools/local.env.example`): `ZERO_BIG_DISK` (the desktop's `E:`: build dirs, the slot state, scratch), `MTGZ_MAC` /
+`MTGZ_MAC_HOME` (the Mac: `tools/mac.sh`, the `mac` remote). Paths recorded into committed files (a checkpoint's
+provenance) go through `local_config.portable_path` (home as `~`).
+
+`python tools/privacy_check.py` scans every tracked file: a committed generic set (tailnet IPs and names, farm machine
+ids, home paths with a user name, default PC host names, `user@<IP>`) plus the machine's own untracked patterns in
+`~/.config/zero/privacy_patterns.txt` (the real names; never committed). `gate.py` runs it first in every tier (step
+`privacy`; a finding fails the gate before anything runs), and `tests/test_privacy.py` runs it in pytest. Fix the
+file, never the pattern. Test data uses placeholders (`user@mac`, `192.0.2.x`, `/Users/user`). The check is a copy of
+zero-core's (the test keeps the copies equal to the pinned core's).
+
 ## Before you change things
 
 * **Engine rules or cards.** Follow `docs/ENGINE.md` §16 (porting a card). Add a test per
@@ -48,8 +69,16 @@ Python 3.13 (not 3.14) with `torch numpy psutil flask pytest`. Use Git Bash on W
   `engine/tests/support.rs::SUPPORTED`. Before merging, the `suite` gate runs the full engine suite and a sharded
   2,000-game fuzz per pool (`python tools/fuzz_shards.py --pool <pool> --games 2000`, hidden decklists included); the
   20k depth runs continuously on the farm, not in the gate (the user's decision, `docs/ENGINE.md` 167).
+* **Card data (the IR).** Cards come from the oracle-text parser in `ir/mtgz_ir` (moved from
+  mtg-bot, `docs/ENGINE.md` 170). A card the parser reads wrong is fixed at the parser, with a
+  test in `tests/ir/`, never patched in the JSON; then `python tools/card_ir.py export`
+  regenerates `data/cards/*.ir.json`, the schema and `card_ir/src/generated.rs` together, and
+  `python tools/card_ir.py check` (run by `tests/ir/test_pipeline.py`) proves they match
+  (`docs/card_ir.md`). A changed IR or `generated.rs` is an engine change (engine tier). The gates run
+  `tests/ir` only when a commit touches the pipeline (`ir/`, `card_ir/`, `data/cards/`, ...; `docs/ENGINE.md` 170.7).
 * **Test files.** `engine/tests/` builds into a few binaries (`docs/ENGINE.md` 167.9): the named ones (`az`, `digest`,
-  `digest_formats`, `dealt_decks`, `fuzz`, `draft`, `hidden`, `limits`, `support` and the benchmarks) and four suites
+  `digest_formats`, `dealt_decks`, `fuzz`, `draft`, `hidden`, `limits`, `support`, the benchmarks and the game log's
+  tests `bo3_game_log`, `deck_choice`, `deck_scorer`, `game_log`: its sink is process-wide) and four suites
   whose modules are the other files (`cards_suite`, `rules_suite`, `rulings_suite`, `misc_suite`). A new test file is a
   `#[path = "x.rs"] mod x;` line in its suite (or a `[[test]]` in `engine/Cargo.toml` when it needs its own process:
   a global allocator, process-wide state); tests/test_engine_test_layout.py fails on a file in neither. Run one file
@@ -112,7 +141,8 @@ and runs the desktop's own heavy steps (builds, the Windows worker, farm compat,
 of `tools/slotd.sh`. Same checkers and evidence; the plan's `placement:` line says where each step ran. `--no-mac`
 keeps everything here (throttled); `--offload local|mac` and `--throttle on|off` override the automatic choice. Any
 other heavy command you run by hand beside a live run goes through the throttle too:
-`bash tools/slotd.sh cargo test --release -p engine --test az` (state and settings in `E:/mtg-zero-state`;
+`bash tools/slotd.sh cargo test --release -p engine --test az` (state and settings in `$ZERO_BIG_DISK/mtg-zero-state`,
+the desktop's `E:/mtg-zero-state`;
 `bash tools/slotd.sh --status`).
 
 **Gate in a warm worktree** (`docs/ENGINE.md` 167), not a new one: `python tools/warm_pool.py run --sha <sha> -- python
@@ -132,7 +162,7 @@ ran in your merge note or PR.
   with why, what, tests, digests and measurements. Append a new section, or a numbered subsection to
   the feature's own section. Numbers can be taken by open branches, so check them first.
 * Rules shortcuts you introduce or remove go in `docs/shortcuts.md`. IR problems you find
-  (wrong data from the parser) go in `docs/ir_defects.md`. Never work around them silently.
+  (wrong data from the parser in `ir/`) go in `docs/ir_defects.md`. Never work around them silently.
 * Milestone status lives in `DESIGN.md` §7 (§8 for the Delver mirror).
 * Commit messages say what changed, which sections document it, and the digests. An agent's
   commit ends with its own `Co-Authored-By:` trailer. Branches are named after the work
@@ -157,11 +187,10 @@ ran in your merge note or PR.
   `@pytest.mark.live_run_hazard` and are skipped while any supervisor is live on the machine (zero-core
   `docs/az.md` 51; a test storm killed a live run on 2026-11-14). Mark any new one. A gate names the fenced tests in
   its final line (a skip); on the Mac they run. `ZERO_ALLOW_LIVE_RUN_HAZARD=1` only on a machine with no one's run.
-* **Maintainer-only paths.** `E:/...` defaults, the `mac` and `vast` remotes and `*-mac` presets,
-  `tools/mac.sh`, `tools/vast*.py` (rented boxes on the maintainer's Vast.ai account: they cost
-  money), `tools/data/*` (hard-coded paths), and `tools/delverai_publish.py` all
-  belong to the maintainer's machines. Leave the remote settings empty. Tests that need
-  private data skip without it.
+* **Maintainer-only paths.** `E:/...` paths (the maintainer's `ZERO_BIG_DISK`), the `mac` and `vast` remotes and
+  `*-mac` presets, `tools/mac.sh`, `tools/vast*.py` (rented boxes on the maintainer's Vast.ai account: they cost
+  money), `tools/data/*` (the data pipeline) and `tools/delverai_publish.py` all belong to the maintainer's
+  machines. Leave the remote settings empty. Tests that need private data skip without it.
 * **Windows.** Bash scripts only (Git Bash). When a Python script rewrites a file, open it
   with `newline=''`, or text mode turns LF files into CRLF (whole-file diffs). Heredocs can
   lose a level of backslashes, so put scripts that contain backslashes in a file first.

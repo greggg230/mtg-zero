@@ -7,7 +7,7 @@ rates, a held-out pick split, and baseline yardsticks. See
 ## Setup
 
 ```
-cd C:\Users\Gregg Keithley\mtg-zero
+cd C:\Users\<user>\mtg-zero
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install pandas pyarrow numpy requests scipy
 ```

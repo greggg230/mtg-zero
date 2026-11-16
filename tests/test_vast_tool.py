@@ -36,7 +36,7 @@ def test_remap_paths_lists_the_files_to_upload():
 
 def test_ssh_alias_blocks_are_replaced_and_removed_without_touching_the_rest(tmp_path, monkeypatch):
     cfg = tmp_path / 'config'
-    cfg.write_text('Host mac\n  HostName 100.95.248.116\n')
+    cfg.write_text('Host mac\n  HostName 192.0.2.10\n')
     monkeypatch.setattr(vast, 'SSH_CONFIG', str(cfg))
     monkeypatch.delenv('MTGZ_VAST_HOST', raising=False)
     vast.write_alias('vast', '1.2.3.4', 1111)
@@ -44,10 +44,10 @@ def test_ssh_alias_blocks_are_replaced_and_removed_without_touching_the_rest(tmp
     vast.write_alias('vast', '9.9.9.9', 3333)              # a new box under the same name replaces the block
     s = cfg.read_text()
     assert s.count('Host mtgz-vast\n') == 1 and 'HostName 9.9.9.9\n  Port 3333' in s and '1.2.3.4' not in s
-    assert 'Host mtgz-arm1\n' in s and s.endswith('Host mac\n  HostName 100.95.248.116\n')
+    assert 'Host mtgz-arm1\n' in s and s.endswith('Host mac\n  HostName 192.0.2.10\n')
     vast.remove_alias('vast')
     vast.remove_alias('arm1')
-    assert cfg.read_text() == 'Host mac\n  HostName 100.95.248.116\n'
+    assert cfg.read_text() == 'Host mac\n  HostName 192.0.2.10\n'
 
 
 def test_a_sync_loop_stops_once_run_home_marks_the_run(tmp_path):

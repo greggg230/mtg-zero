@@ -1,0 +1,12 @@
+{
+  "source": "name_list",
+  "name_list_path": "data/legacy_delver.sheet.json",
+  "cube_name": "Legacy Izzet Delver (mtg-zero)",
+  "list_entry_count": 23,
+  "scryfall_card_count": 23,
+  "custom_cards_without_scryfall": [],
+  "fetched_at": "2026-11-12T10:57:31.357218+00:00",
+  "pool_card_count": 23,
+  "includes_basic_lands": [],
+  "cubecobra_comparison": null
+}

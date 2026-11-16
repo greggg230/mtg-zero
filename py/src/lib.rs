@@ -31,6 +31,7 @@ fn _engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(eoe_lookup, m)?)?;
     m.add_function(wrap_pyfunction!(game_log, m)?)?;
     m.add_function(wrap_pyfunction!(game_log_path, m)?)?;
+    m.add_function(wrap_pyfunction!(mtg_spec_check, m)?)?;
     Ok(())
 }
 
@@ -94,6 +95,13 @@ fn eoe_lookup(names: Vec<String>) -> String {
 #[pyo3(signature = (path=None))]
 fn game_log(path: Option<&str>) -> PyResult<()> {
     engine::az::game_log::set(path).map_err(verr)
+}
+
+/// Parse an `mtg` spec as the game does (`MtgSpec::parse`): a ValueError with the engine's refusal, else None (the
+/// matchup model's job checks its choice table with it before publishing, docs/ENGINE.md 168.3).
+#[pyfunction]
+fn mtg_spec_check(spec: &str) -> PyResult<()> {
+    engine::az::MtgSpec::parse(spec).map(|_| ()).map_err(verr)
 }
 
 /// The game log's file, or None while it is off.

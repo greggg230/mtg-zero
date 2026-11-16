@@ -2,7 +2,7 @@
 name = "card_ir"
 version = "0.1.0"
 edition.workspace = true
-description = "Typed loader for the mtg-bot card IR (generated from its schema)"
+description = "Typed loader for the card IR (types generated from the IR schema by tools/codegen/gen_card_ir.py)"
 
 [dependencies]
 serde.workspace = true

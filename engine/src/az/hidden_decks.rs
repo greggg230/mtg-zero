@@ -736,7 +736,7 @@ impl MtgAz {
     /// dealt from its 75 by its dealt prior (`deck_priors[o]`, `ConstructedPrior::dealt`), not chosen? Public: the
     /// same in every world, encoded (`g6::DEALT`).
     pub fn deck_dealt(&self, o: PlayerId) -> bool {
-        self.m.dealt == Some(o)
+        self.m.is_dealt(o)
     }
 
     /// The face-down pick `viewer`'s request of `o`'s deck carries (ENGINE.md 129.3): Show and Tell's

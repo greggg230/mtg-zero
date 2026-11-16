@@ -157,8 +157,9 @@ order must be deterministic); no threads, callbacks or interior mutability.
 * Two card tables (section 54): `CardDb::cube()` (the cube IR, compiled in: every cube game,
   generator, pool, draft, fuzz pool and digest) and `CardDb::constructed()` (the cube's cards, the
   same definitions at the same ids, then `data/cards/legacy.ir.json`'s, then their tokens and faces;
-  only games with `"constructed": true` use it). Both IR files carry one schema (mtg-bot `cards
-  export-ir --pool cube legacy`), so one `card_ir` crate reads both.
+  only games with `"constructed": true` use it). Both IR files carry one schema (the export of the
+  pools together: `tools/card_ir.py export`, section 170; mtg-bot's `cards export-ir` before), so
+  one `card_ir` crate reads both.
 * Token definitions (CR 111) are lowered from `CreateToken.token_printing` like any printing
   (the "Token" supertype sets `CardDef.token`), interned by equality and stored after the
   cards' (`CardDb::token_def(i)`); `Op::CreateToken` names one by index. They are not in the
@@ -1420,6 +1421,14 @@ M7c commit kept all 2,500 digests; the check caught one wrong fast path on the w
 
 ## 16. Porting a card (the recipe for M4b onwards)
 
+0. The card's IR comes from the oracle-text parser in `ir/mtgz_ir` (section 170; `docs/card_ir.md`).
+   A card outside the pools: its Scryfall record into `ir/data` (`tools/ir_fetch_cards.py`, a
+   name-list pool such as `legacy_delver.sheet.json`). Text the parser doesn't read, or reads
+   against the Oracle text: fix the parser (a parameterized recognizer,
+   `ir/mtgz_ir/cards/parser/AGENTS.md`) with a test in `tests/ir/`, list a defect in
+   `docs/ir_defects.md`; never edit the JSON. Then `python tools/card_ir.py export` rewrites
+   `data/cards/*.ir.json`, the schema and `card_ir/src/generated.rs` in one go, and
+   `python tools/card_ir.py check` proves the committed files are its output.
 1. `cargo test -p engine --test support -- --nocapture` lists blocked cards, the features
    that block most cards on their own, and a greedy staging order (the feature completing
    the most cards next). `SUPPORT_DUMP=path` also writes every blocked card with all its
@@ -6942,7 +6951,7 @@ records, results).
 ## 44. The Mac: offload and remote evaluation
 
 Branch `m6-mac` (from eeb6291; Python, tools and docs only: the engine is eeb6291's). The MacBook
-(Apple M4 Max: 12 performance and 4 efficiency cores, 64 GB, no CUDA; `greggkeithley@100.95.248.116`
+(Apple M4 Max: 12 performance and 4 efficiency cores, 64 GB, no CUDA; `<mac>`
 on the tailnet, key auth) is a second machine for MTG Zero in two ways: CPU-only work (cargo tests,
 fuzz runs, search smokes, pytest) through `tools/mac.sh`, and a run's evaluations (the yardstick and
 random matches, the Elo matches) through zero-core's `eval_remote`, while the desktop keeps
@@ -7112,8 +7121,8 @@ engine is eeb6291's, so its search-smoke gate holds), at an iteration boundary:
    evaluated: `eval_every` 2) self-plays; the run exits after its training and the supervisor with it.
 4. `rm runs/mtg5/STOP`, and from the new worktree: `python tools/launch_hidden.py
    <run>/supervisor_console.txt python tools/supervise.py <run> --preset mtg-4 --seed 1 --eval-every 2
-   --eval-remote mac` (`<run>` = `C:/Users/Gregg Keithley/mtg-zero/runs/mtg5`). The log says `evaluations on the
-   remote 'mac' (greggkeithley@100.95.248.116)`; the first evaluated iteration creates
+   --eval-remote mac` (`<run>` = `C:/Users/<user>/mtg-zero/runs/mtg5`). The log says `evaluations on the
+   remote 'mac' (<mac>)`; the first evaluated iteration creates
    `~/mtgz-remote/mtg5` and logs `iter N vs heuristic (remote mac, ...s)` and `iter N elo ... (remote
    mac)`; `runs/mtg5/evals.jsonl` holds the results. `--eval-remote ''` turns it off (from then the
    run evaluates here again; `elo/` is the Mac's last).
@@ -8224,8 +8233,8 @@ python -m mtgz.az.run --run E:/mtg-zero-scratch/cotrain-remote/td_mac --preset t
   --resolver-cfg '<team_draft-smoke resolver_cfg + "eval_remote": "mac">'
 ```
 
-The log: `[resolver] evaluations on the remote 'mac' (greggkeithley@100.95.248.116, mirror
-/Users/greggkeithley/mtgz-remote/td_mac.resolver)`; the preflight passed. Iterations 0-3, 3 min 2 s,
+The log: `[resolver] evaluations on the remote 'mac' (<mac>, mirror
+/Users/<user>/mtgz-remote/td_mac.resolver)`; the preflight passed. Iterations 0-3, 3 min 2 s,
 `done`:
 
 | | where | iteration 0 | 1 | 2 | 3 |
@@ -8267,7 +8276,7 @@ As for mtg5 (44.5), from the run's pinned worktree at a commit with this branch'
 3. `python tools/launch_hidden.py <run>/supervisor_console.txt python tools/supervise.py <run>
    --preset team_draft-4v4 --resolver-init <the mtg5 checkpoint>`: the preset's `resolver_cfg` has
    `eval_remote` 'mac'. The log says `[resolver] evaluations on the remote 'mac' (..., mirror
-   /Users/greggkeithley/mtgz-remote/<run>.resolver)`; each evaluated iteration of the play network
+   /Users/<user>/mtgz-remote/<run>.resolver)`; each evaluated iteration of the play network
    logs `[resolver] iter N vs heuristic (remote mac, ...s)` and `[resolver] iter N elo ... (remote
    mac)`; `<run>/resolver/evals.jsonl` holds the results.
 4. Off (or on, for a run started without it), at a restart: `--resolver-cfg` with the whole dict (a
@@ -8315,7 +8324,7 @@ Rust is unchanged):
   decisions, parked records at most 11.55 and 16.52 MB.
 * **Refusals at start** in the co-training path (48.2): an uncommitted change in the run's checkout;
   a commit without its Mac checkout (this section's docs commit 049564a, which has no `--eval-checkout`): stopped at start, "eval_remote:
-  greggkeithley@100.95.248.116:/Users/greggkeithley/mtg-zero-wt/run-049564aa0bfa is not the run's
+  <mac>:/Users/<user>/mtg-zero-wt/run-049564aa0bfa is not the run's
   code (049564aa0bfa): zsh:cd:1: no such file or directory: ..." and "prepare it: in <checkout>: bash
   tools/mac.sh --eval-checkout".
 * **zero-core** (`feat/cotrain-remote` af44741): `cargo test --release` 44 passed (unchanged Rust);
@@ -9575,7 +9584,7 @@ network's matches are the bottleneck).
 ### 52.3 End to end with the Mac (`mtg-smoke`, `team_draft-smoke`)
 
 From this worktree (clean, committed), `bash tools/mac.sh --eval-checkout` (~40 s:
-`~/mtg-zero-wt/run-<sha12>`), the mirrors in a test workdir (`ZERO_SELFPLAY_WORKDIR=/Users/greggkeithley/mtgz-selfplay-test`,
+`~/mtg-zero-wt/run-<sha12>`), the mirrors in a test workdir (`ZERO_SELFPLAY_WORKDIR=/Users/<user>/mtgz-selfplay-test`,
 with `MSYS2_ENV_CONV_EXCL=ZERO_SELFPLAY_WORKDIR`: Git Bash rewrites a POSIX path in the environment of a
 Windows process, which the first attempt showed - its worker could not find its mirror, and ssh had
 created `~/C:/Program Files/Git/...` on the Mac, removed; such a workdir is now refused at start),
@@ -9740,15 +9749,15 @@ commit has none of it), so the switch is a re-pin, as for 48.3:
 4. `rm runs/td1/STOP`, and from the new worktree:
 
    ```
-   python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/td1/supervisor_console.txt" \
-     python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/td1" --preset team_draft-4v4 \
+   python tools/launch_hidden.py "C:/Users/<user>/mtg-zero/runs/td1/supervisor_console.txt" \
+     python tools/supervise.py "C:/Users/<user>/mtg-zero/runs/td1" --preset team_draft-4v4 \
      --resolver-cfg '{"preset": "mtg-4", "eval_every": 2, "eval_remote": "mac", "selfplay_remote": "mac"}'
    ```
 
    (`--resolver-cfg` replaces the saved dict: the whole of td1's, plus `selfplay_remote`.) The log
-   says `[resolver] episodes also on the remote 'mac' (greggkeithley@100.95.248.116, 2 worker(s),
-   mirror /Users/greggkeithley/mtgz-selfplay/td1.resolver)`, within seconds `[resolver] remote
-   self-play mac: worker 0 up (pid ... on Greggs-MacBook-Pro.local, ...)`, and after each self-play
+   says `[resolver] episodes also on the remote 'mac' (<mac>, 2 worker(s),
+   mirror /Users/<user>/mtgz-selfplay/td1.resolver)`, within seconds `[resolver] remote
+   self-play mac: worker 0 up (pid ... on <mac-hostname>.local, ...)`, and after each self-play
    phase `[resolver] iter N remote self-play: 2 worker(s), ... games, ... samples in ... shards
    (... MB), ... leaves/s ...; matches ... back, ... assigned, ... outstanding, ...`; the primary's
    `cotrain` row gets `episodes_remote`, the resolver's metrics `selfplay.remote`; progress.json
@@ -9986,13 +9995,13 @@ the CPU for part of the time):
 tools/mac.sh --eval-checkout`, the mirrors in a test workdir beside td1's):
 
 ```
-MSYS2_ENV_CONV_EXCL=ZERO_EVAL_WORKDIR ZERO_EVAL_WORKDIR=/Users/greggkeithley/mtgz-evalstall-test \
+MSYS2_ENV_CONV_EXCL=ZERO_EVAL_WORKDIR ZERO_EVAL_WORKDIR=/Users/<user>/mtgz-evalstall-test \
   python -m mtgz.az.run --run E:/mtg-zero-scratch/eval-stall/td_mac --preset team_draft-smoke --iters 3 \
   --games 8 --draft-eval-net-remote mac
 ```
 
-The log: `eval_yard_net on the remote 'mac' (greggkeithley@100.95.248.116, mirror
-/Users/greggkeithley/mtgz-evalstall-test/td_mac)`; iterations 0 and 2 (`draft_eval_net_every` 2)
+The log: `eval_yard_net on the remote 'mac' (<mac>, mirror
+/Users/<user>/mtgz-evalstall-test/td_mac)`; iterations 0 and 2 (`draft_eval_net_every` 2)
 wrote their metrics rows without `eval_yard_net` and went on; `iter 0 vs consensus (episodes by the
 resolver net; remote mac, 12s): {'win': 0.625, ...}` and `iter 2 ... (remote mac, 11s): {'win':
 0.75, ...}` (8.0 and 7.9 s of play there, the rest shipping and ssh); `evals.jsonl` holds both rows
@@ -10030,17 +10039,17 @@ iteration 8's. Turning it on, when td1 is to resume, is a re-pin as for 48.3 and
    exits 75 at once and the supervisor waits for PAUSE to go):
 
    ```
-   python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/td1/supervisor_console.txt" \
-     python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/td1" --preset team_draft-4v4 \
-     --resolver-init "C:/Users/Gregg Keithley/mtg-zero/runs/mtg5/models/iter_0014.pt" \
+   python tools/launch_hidden.py "C:/Users/<user>/mtg-zero/runs/td1/supervisor_console.txt" \
+     python tools/supervise.py "C:/Users/<user>/mtg-zero/runs/td1" --preset team_draft-4v4 \
+     --resolver-init "C:/Users/<user>/mtg-zero/runs/mtg5/models/iter_0014.pt" \
      --resolver-cfg '{"preset": "mtg-4", "eval_every": 2, "eval_remote": "mac", "selfplay_remote": "mac", "selfplay_remote_procs": 3}' \
      --draft-eval-net-every 8 --draft-eval-net-remote mac
    ```
 
    (`--draft-eval-net-remote` is a top-level setting, saved in config.json; the other flags are
    today's, also saved.) Then `python tools/pause_run.py runs/td1 --resume` when the user resumes
-   td1. The log says `eval_yard_net on the remote 'mac' (greggkeithley@100.95.248.116, mirror
-   /Users/greggkeithley/mtgz-remote/td1)`; at iteration 8 the draft network's metrics row is written
+   td1. The log says `eval_yard_net on the remote 'mac' (<mac>, mirror
+   /Users/<user>/mtgz-remote/td1)`; at iteration 8 the draft network's metrics row is written
    without `eval_yard_net` and the iteration goes on to 9 at once; when the Mac is done, `iter 8 vs
    consensus (episodes by the resolver net; remote mac, Ns): {...}` and a row in
    `runs/td1/evals.jsonl` (the dashboard merges it). Iterations 0 and 4 keep their results (nothing is
@@ -10936,9 +10945,9 @@ From this worktree (committed, clean), after `bash tools/mac.sh --eval-checkout`
 batch-bound as in a real run (`auto`):
 
 ```
-cd "C:/Users/Gregg Keithley/mtg-zero-wt/shared-queue"
+cd "C:/Users/<user>/mtg-zero-wt/shared-queue"
 bash tools/build_py.sh && bash tools/mac.sh --eval-checkout
-export MSYS2_ENV_CONV_EXCL=ZERO_SELFPLAY_WORKDIR ZERO_SELFPLAY_WORKDIR=/Users/greggkeithley/mtgz-selfplay-test
+export MSYS2_ENV_CONV_EXCL=ZERO_SELFPLAY_WORKDIR ZERO_SELFPLAY_WORKDIR=/Users/<user>/mtgz-selfplay-test
 # co-training: the resolver's matches shared with the Mac (the mode delver1 does not exercise)
 RCFG=$(python -c "import json, mtgz.az as a; print(json.dumps(dict(a.PRESETS['team_draft-smoke']['resolver_cfg'], selfplay_remote='mac', infer_device='cuda')))")
 python -m mtgz.az.run --run E:/mtg-zero-scratch/shared-queue2/td_mac --preset team_draft-smoke --iters 3 --games 8 \
@@ -10955,7 +10964,7 @@ episodes also on the remote 'mac' (...); batch-bound (local): its slots while it
 2 iterations`, `[resolver] iter N shared queue:` (exact event quotas, the caps: the desktop's at
 most its 16 slots by the batch rule, the Mac's its share), `[resolver] iter N remote self-play:`
 (`requeued` 0 + 0 + 0 without a back-off, no `late`, `duplicates_dropped` 0), and `metrics.jsonl`'s
-`selfplay.queue` in `td_mac/resolver/`. Afterwards: `ssh greggkeithley@100.95.248.116 'rm -rf
+`selfplay.queue` in `td_mac/resolver/`. Afterwards: `ssh <mac> 'rm -rf
 ~/mtgz-selfplay-test'`.
 
 ### 56.10 Re-pinning delver1 onto this branch (at an iteration boundary)
@@ -11138,8 +11147,8 @@ worktree of the merged commit, `bash tools/build_py.sh` there, `bash tools/mac.s
 runs/delver1/STOP` during an iteration, then from the new worktree:
 
 ```
-python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/delver1/supervisor_console.txt" \
-  python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/delver1" --preset delver-mirror --seed 1 \
+python tools/launch_hidden.py "C:/Users/<user>/mtg-zero/runs/delver1/supervisor_console.txt" \
+  python tools/supervise.py "C:/Users/<user>/mtg-zero/runs/delver1" --preset delver-mirror --seed 1 \
   --games 800 --conc 192 --eval-every 8 --ram-budget-gb 20 --iters 400 \
   --selfplay-remote mac --eval-remote mac --selfplay-remote-linger 1 \
   --eval-select cq --eval-select-min-visits 4 --eval-random-games 0 --elo-offsets 1,2,4,8 --elo-games 25
@@ -11633,8 +11642,8 @@ and are refused, 57.1), `touch runs/ab2-cqscale03/STOP` during an iteration, the
 worktree the run's current command plus one flag:
 
 ```
-python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03/supervisor_console.txt" \
-  python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03" --preset delver-mirror --seed 1 \
+python tools/launch_hidden.py "C:/Users/<user>/mtg-zero/runs/ab2-cqscale03/supervisor_console.txt" \
+  python tools/supervise.py "C:/Users/<user>/mtg-zero/runs/ab2-cqscale03" --preset delver-mirror --seed 1 \
   --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --ram-budget-gb 20 --selfplay-remote-linger 1 \
   --eval-select cq --eval-select-min-visits 4 --eval-random-games 0 --elo-offsets 1,2,4,8 --elo-games 25 \
   --window-cache 1 --train-prefetch 2 --iters 400 --eval-every 8 \
@@ -11904,20 +11913,20 @@ checkpoint, `ab2v5` the new run's name):
 
 ```
 # 1. the pinned worktree of the merged commit, built; the Mac's checkout of it (evaluation, self-play)
-git -C "C:/Users/Gregg Keithley/mtg-zero" worktree add "C:/Users/Gregg Keithley/mtg-zero-wt/run-<sha7>" <sha7>
-cd "C:/Users/Gregg Keithley/mtg-zero-wt/run-<sha7>"
+git -C "C:/Users/<user>/mtg-zero" worktree add "C:/Users/<user>/mtg-zero-wt/run-<sha7>" <sha7>
+cd "C:/Users/<user>/mtg-zero-wt/run-<sha7>"
 bash tools/build_py.sh
 bash tools/mac.sh --eval-checkout
 # 2. stop the main line at an iteration boundary (it exits after the iteration in progress)
-touch "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03/STOP"
+touch "C:/Users/<user>/mtg-zero/runs/ab2-cqscale03/STOP"
 # 3. its newest checkpoint widened into a new run; the main line's settings (cq_c_scale 0.3 and the
 #    rest: a flag overrides, the preset fills only what the run has not saved)
-python tools/fork_run.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03/models/iter_<K>.pt" \
-  "C:/Users/Gregg Keithley/mtg-zero/runs/ab2v5"
-cp "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03/config.json" "C:/Users/Gregg Keithley/mtg-zero/runs/ab2v5/config.json"
+python tools/fork_run.py "C:/Users/<user>/mtg-zero/runs/ab2-cqscale03/models/iter_<K>.pt" \
+  "C:/Users/<user>/mtg-zero/runs/ab2v5"
+cp "C:/Users/<user>/mtg-zero/runs/ab2-cqscale03/config.json" "C:/Users/<user>/mtg-zero/runs/ab2v5/config.json"
 # 4. the main line's command (59.3) on the new run, plus the iteration-tied settings at the main line's values
-python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2v5/supervisor_console.txt" \
-  python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2v5" --preset delver-mirror --seed 1 \
+python tools/launch_hidden.py "C:/Users/<user>/mtg-zero/runs/ab2v5/supervisor_console.txt" \
+  python tools/supervise.py "C:/Users/<user>/mtg-zero/runs/ab2v5" --preset delver-mirror --seed 1 \
   --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --ram-budget-gb 20 --selfplay-remote-linger 1 \
   --eval-select cq --eval-select-min-visits 4 --eval-random-games 0 --elo-offsets 1,2,4,8 --elo-games 25 \
   --window-cache 1 --train-prefetch 2 --iters 400 --eval-every 8 \
@@ -12328,24 +12337,24 @@ arms run on the main line's own pinned build (round 3's `worktree`), which loads
 any checkpoint (nothing on the run path changed).
 
 ```
-AB="C:/Users/Gregg Keithley/mtg-zero/runs/ab-r3"
+AB="C:/Users/<user>/mtg-zero/runs/ab-r3"
 MAIN="$(python -c "import json; print(json.load(open(r'$AB/state.json'))['main'].replace(chr(92), '/'))")"
 K=$(python -c "import glob, os; print(max(int(os.path.basename(p)[5:9]) for p in glob.glob(r'$MAIN/models/iter_*.pt')))")
 KK=$(printf %04d $K); K10=$(printf %04d $((K + 10)))
 OUT=E:/mtg-zero-scratch/distill-gpu/k$K; mkdir -p $OUT
-FORK="C:/Users/Gregg Keithley/mtg-zero/runs/r3-big192x6"
+FORK="C:/Users/<user>/mtg-zero/runs/r3-big192x6"
 SPEC="$(python -c "import json; print(json.load(open(r'$MAIN/config.json'))['spec'])")"
 VIEW="$(python -c "import json; print(json.load(open(r'$MAIN/config.json')).get('selfplay_leaf_value_view') or 'mover')")"
 H2H=(--sims 32 --spec "$SPEC" --device cuda --threads 8 --seed 7 --select cq --select-min-visits 4 --a-cq-c-scale 0.3
      --b-cq-c-scale 0.3 --a-leaf-value-view $VIEW --b-leaf-value-view $VIEW)
-cd "C:/Users/Gregg Keithley/mtg-zero-wt/run-<sha of that main>"     # bash tools/build_py.sh done there
+cd "C:/Users/<user>/mtg-zero-wt/run-<sha of that main>"     # bash tools/build_py.sh done there
 ```
 
 **0. The Mac's real cost** (optional, ~3 minutes, the Mac idle; this checkout pushed): the Mac's
 inference shape (8 workers x 3 threads at batches of 192) on real rows of the main line, the three sizes:
 
 ```
-scp "$(ls "$MAIN/data/iter_$KK"/m00-*_000.npz | head -1)" greggkeithley@100.95.248.116:/tmp/delver_rows.npz
+scp "$(ls "$MAIN/data/iter_$KK"/m00-*_000.npz | head -1)" <mac>:/tmp/delver_rows.npz
 bash tools/mac.sh 'bash tools/build_py.sh && for n in "128 4 4 256" "192 6 6 384" "256 6 8 512"; do set -- $n; python -m mtgz.az.bench infer --game mtg --arch tokens --hidden $1 --blocks $2 --heads $3 --ff $4 --shard /tmp/delver_rows.npz --batches 192 --workers 8 --torch-threads 3 --seconds 10; done'
 ```
 
@@ -15562,7 +15571,7 @@ another checkout, and an older one could not play the anchors); then, from that 
 launch's flags plus the new ones; `--elo-games 24`: paired games need an even count):
 
 ```
-MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch/supervisor_console.txt" python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch" --preset delver-mirror --seed 1 --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --selfplay-remote-linger 1 --eval-select cq --eval-select-min-visits 4 --eval-select-c-scale 0.3 --eval-random-games 0 --elo-offsets 1,2,4,8 --window-cache 1 --train-prefetch 2 --iters 400 --eval-every 8 --eval-leaf-value-view root --eval-games 0 --elo-games 24 --elo-paired 1 --elo-anchors "a192=C:/Users/Gregg Keithley/mtg-zero/runs/anchors/r3-2b_iter_0192.pt,a160=C:/Users/Gregg Keithley/mtg-zero/runs/anchors/r3-2b_iter_0160.pt" --elo-anchor-games 100 --elo-anchor-elo 1613 --elo-anchor-calib-games 200 --elo-anchor-from 128 --heldout-shards "C:/Users/Gregg Keithley/mtg-zero/runs/heldout/r3-2b_iter0191_8192.npz"
+MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py "C:/Users/<user>/mtg-zero/runs/r3-2b-beliefsearch/supervisor_console.txt" python tools/supervise.py "C:/Users/<user>/mtg-zero/runs/r3-2b-beliefsearch" --preset delver-mirror --seed 1 --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --selfplay-remote-linger 1 --eval-select cq --eval-select-min-visits 4 --eval-select-c-scale 0.3 --eval-random-games 0 --elo-offsets 1,2,4,8 --window-cache 1 --train-prefetch 2 --iters 400 --eval-every 8 --eval-leaf-value-view root --eval-games 0 --elo-games 24 --elo-paired 1 --elo-anchors "a192=C:/Users/<user>/mtg-zero/runs/anchors/r3-2b_iter_0192.pt,a160=C:/Users/<user>/mtg-zero/runs/anchors/r3-2b_iter_0160.pt" --elo-anchor-games 100 --elo-anchor-elo 1613 --elo-anchor-calib-games 200 --elo-anchor-from 128 --heldout-shards "C:/Users/<user>/mtg-zero/runs/heldout/r3-2b_iter0191_8192.npz"
 ```
 
 * `--eval-games 0`: no heuristic games (the pool keeps its old ones: the ordinary `elo` stays linked);
@@ -16042,7 +16051,7 @@ python tools/position_lab.py show   --report R.json
   from the spot, the per-deal results; pooled over spots (equal weight: the mean of the spots' mean
   differences, its se stratified by spot).
 * **The API** (the CLI's own functions, `import position_lab as L`; the lab UI at
-  `C:/Users/Gregg Keithley/delver-lab` builds on it): `build_position` (a replay + frame, a site id, a
+  `C:/Users/<user>/delver-lab` builds on it): `build_position` (a replay + frame, a site id, a
   record, a scenario or an opening seed), `save_scenario` / `load_scenario`, `search_params` +
   `evaluate_position` (prior, value, searches with explicit settings - sims, chance_k, c_puct, the root
   belief, the leaf view, a root floor, the rule, seeds -; results keyed by action id, the label a display
@@ -16415,6 +16424,10 @@ or build it by actions); (5) checks: `Game::check_invariants` and `check_knowled
 tests on a built state, and a fuzz of built positions played to the end. About a day, mostly (2)-(3) and
 their tests; the risk is states no game could reach (inconsistent per-turn counters), which the checks
 reduce but do not rule out.
+
+**Built** (2026-11-05, branch mtgo-build): ENGINE.md 95 - a top-level `build` block rather than `start.build` (a
+described position needs no source game), the stack pushed as engine stack items rather than replayed by actions,
+`describe` as its inverse, the round trip as its test.
 
 ### 76.12 Risks, limits, open questions
 
@@ -17425,7 +17438,7 @@ own checkout: from `<checkout>/third_party/zero-core` that is `<checkout>/third_
 (worktree or main checkout alike). It found none, ran the core's cargo test, build and ~12-16 min pytest,
 and printed GREEN. (The `--other-games` help even said the default "finds none from a pinning checkout's
 third_party/zero-core".) Before 40f5655 (2026-10-30) a given `--other-games` was also split on spaces, so
-`C:/Users/Gregg Keithley/...` became path fragments smoke_all skipped silently (one `skip` line each) -
+`C:/Users/<user>/...` became path fragments smoke_all skipped silently (one `skip` line each) -
 GREEN again.
 
 **Consequence** (every `gates/logs/*optin-core-build-only*` log on the desktop: 18, the last run per commit,
@@ -17470,7 +17483,7 @@ and a build against another core, and passes three ok lines; the default games f
 checkout and a missing one refused; the step's argv / env; a `None` env value unsets. zero-core's
 `tests/test_smoke_all.py` 5 passed. The old smoke_all (aa10733) from this worktree's submodule,
 `SKIP_CORE=1 ... --with-this-core --build-only`: an empty summary and GREEN, exit 0; the new one (7d3dbd8)
-finds `C:/Users/Gregg Keithley/{glassroad,caverna,kingdombuilder}-zero` from there (`--dry-run`), and
+finds `C:/Users/<user>/{glassroad,caverna,kingdombuilder}-zero` from there (`--dry-run`), and
 exits 1 without GREEN when they are hidden (`SMOKE_GAMES_ROOT` pointing nowhere). The step itself through
 gate.py's own `build_only_step` / `run_step` / checker (E:/mtg-zero-scratch/gate-fix/gate_step_driver.py,
 the submodule at 7d3dbd8): **PASS in 159 s** - Glass Road 41 s, Caverna 43 s, Kingdom Builder 66 s against
@@ -17936,6 +17949,374 @@ x `shard_sparse` in all four combinations, and both branches' shard tests pass o
 E:/mtg-zero-scratch/sparse-shards/merge_check.py). Before turning `shard_sparse` on with the Mac: the repin gate's Mac
 step on this commit, so the Mac's workers write sparse shards too (an older Mac checkout writes dense ones, accepted).
 The pin 3f830c5 exists only in the local zero-core repo (not pushed).
+
+## 95. Building a described position: the engine as the MTGO adapter's board (`build`, `describe`, `mtgz.az.build`; 2026-11-05)
+
+Branch `mtgo-build` (from main 9397d67; sections 93-94 are the open shard branches'). 76.11's assessment, built.
+
+**Why.** To play real Magic Online games with the trained Delver network, MTGO is the source of truth: at each
+decision our seat faces, a Python adapter describes the position as MTGO shows it to our seat, and the engine builds
+it, so the existing search runs on it (`legal()`, `encode(viewer)`, `export_state()`, `search_tree`,
+`zero.parity.search_rs` - the Play tab's path). The lab's `start` block (76) starts from a game seed and actions; this
+starts from a description, and its inverse, `describe`, turns any engine position into one (the round-trip test,
+and the schema's executable documentation).
+
+### 95.1 What it is (`engine/src/az/build.rs`, `mtgz/az/build.py`)
+
+* **`"build": {...}`** in the `mtg` spec (`MtgSpec::build`; `new_game` -> `MtgAz::from_build`): every game starts at
+  the described position. Best-of-one decklists only (`decks.p0` / `p1`, `"constructed": true` for 60-card lists; not
+  with `start` or a match `seed`). `MtgSpec::parse` makes a trial build, so a bad description is an error when the
+  spec is parsed, never at a first game.
+* **A built game** is a `Game` made from nothing (`Game::empty`): every card of both decklists created once in the
+  place the description gives it (95.3), the stack's items pushed as engine stack items (not replayed: their
+  targets, modes, cost choices and events as described; what their costs paid - tapped lands, a pitched card, a
+  returned Island, delved cards - is in the described zones), the turn and the decision's agenda set, `advance` to the decision
+  (never answered internally, even with one option), checked (no state-based action pending, the decision the one
+  described, `check_invariants` including `check_knowledge`), wrapped with the spec's match state; then `then` (95.2)
+  and the deal: `determinize` for the viewer from the deal seed (`deal_seed`, else the driver's game seed; its own
+  salted stream), the determinization observer cleared (the dealt world is a real game, as the lab's, 76.1), checked
+  again.
+* **`describe(viewer)`** (`MtgAz::describe`, `build::describe`): the description of an engine position from one
+  seat's view - everything it sees and knows, nothing it does not. An exhaustive destructuring of `Game`, `Player`,
+  `Obj`, `Turn` and `StackItem` (a new field is a compile error there): each field is described, derived, or refused
+  by name when set (95.7). **`"describe": true`** makes `export_state` carry `describe`: both seats' descriptions
+  (`{"error": ...}` where the schema does not reach).
+* **Python** (`mtgz/az/build.py`): `build_game(description, seed, spec=None, p1_deck=None)` -> an engine `Game` (the
+  Delver mirror's spec unless given; player 1's list replaced by `p1_deck`); `describe_from_engine(game, viewer)` (a
+  game whose spec has `describe`; `build_game`'s have it); `viewer_view(state, viewer, decides)` (export_state as one
+  seat may see it); `round_trip(game, viewer)`; `EXAMPLE` (below).
+* Without the keys every spec and game is what it was (the test `without_build_nothing_changes`: the same states,
+  options and moves for 300 random moves; `describe` adds the field and nothing else).
+
+### 95.2 The schema (`mtg-build/1`)
+
+The example (`mtgz.az.build.EXAMPLE`, the test `the_documented_example_builds`): the opponent (P1) cast Lightning
+Bolt at our Dragon's Rage Channeler; we (P0) hold priority with Daze and Force of Will.
+
+```json
+{"viewer": 0, "turn": 5, "active": 1, "step": "main1", "priority": 0, "passes": 0, "starting": 1,
+ "decision": "priority",
+ "players": [
+   {"life": 18, "hand": ["Daze", "Force of Will", "Brainstorm", {"name": "Lightning Bolt", "known_to_opponent": true}],
+    "library_size": 51, "library_known": [{"pos": 0, "name": "Ponder", "known_by": [0]}],
+    "graveyard": ["Mishra's Bauble", "Ponder"], "spells_game": 2},
+   {"life": 19, "hand_size": 4, "hand": ["Wasteland"], "library_size": 51,
+    "library_known": [{"pos": 0, "known_by": [1]}, {"pos": 1, "known_by": [1]}],
+    "graveyard": ["Brainstorm"], "lands_played": 1, "spells_cast": 1, "noncreature_cast": 1, "spells_game": 3}],
+ "battlefield": [
+   {"name": "Volcanic Island", "owner": 1, "tapped": true, "entered": 1},
+   {"name": "Island", "owner": 0, "entered": 2},
+   {"name": "Polluted Delta", "owner": 1, "entered": 3},
+   {"name": "Dragon's Rage Channeler", "owner": 0, "entered": 2, "control_since": 2},
+   {"name": "Volcanic Island", "owner": 0, "entered": 4},
+   {"name": "Volcanic Island", "owner": 1, "tapped": true, "entered": 5, "control_since": 5}],
+ "exile": [],
+ "stack": [{"spell": "Lightning Bolt", "controller": 1, "targets": [{"req": 0, "obj": "b3"}]}]}
+```
+
+Every key is checked (a misspelt one is an error); the defaults are a fresh object's. **Required**: `viewer`, `turn`,
+`active`, `starting`, `step`, both `players` with `library_size` (and the opponent's `hand_size`), every permanent's and
+exile card's `owner`, every stack item's `controller`.
+
+| Key (top level) | Meaning |
+|---|---|
+| `viewer` | the seat whose view it is (0, 1) |
+| `deal_seed` | the deal's seed (default: the game seed) |
+| `turn`, `active`, `starting`, `chooser` | the turn number (0 = the setup), its player (the starting player's turns are the odd ones: extra turns are not built), who took the first turn, who chose (default `starting`) |
+| `step` | `setup`, `untap`, `upkeep`, `draw`, `main1`, `begin_combat`, `declare_attackers`, `declare_blockers`, `first_strike_damage`, `combat_damage`, `end_combat`, `main2`, `end`, `cleanup` |
+| `priority`, `passes` | who has priority (default `active`); consecutive passes, 0 or 1 (default: 1 when the priority holder is not the active player with an empty stack, or not the top item's controller) |
+| `decision` | `"priority"` (default), or `{"kind": "declare_attackers", "next": 0}`, `"attack_target"` (`next`, `attackers`: the creatures whose target is chosen, the deciding one last), `"declare_blockers"` (`next`: the potential blocker's index), `"cleanup_discard"`, `"play_draw"` (`player`), `"mulligan"` (`player`), `"mulligan_bottom"` (`bottoms`: [[player, cards left], ...], the deciding one first) |
+| `players` | [P0, P1] (below) |
+| `battlefield` | permanents in timestamp order (the order they came under their controller's control; it is the layers' order and the order of each player's permanent action slots) |
+| `exile` | face-up exiled cards in exile order: `name`, `owner`, `counters`, `since` (the turn it was exiled) |
+| `stack` | bottom first (MTGO lists the top first) |
+| `emblems` | `name` (the engine's emblem: "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar emblem"), `controller` |
+| `effects` | continuous effects from resolved spells and abilities: `on` (a reference), `until` (`end_of_turn` default, `your_next_turn`, `forever`, `{"while_on_battlefield": ref}`), `controller`, `ts`, and one of `pt` [p, t], `set_pt`, `keywords` [names], `types` {add, subtypes, replace}, `become_types` {types, subtypes}, `colors` ("WU"), `cant_block`, `cant_be_blocked`, `must_attack`, `exile_if_dies`, `exile_if_leaves`, `must_attack_player`, `goad`, `lose_all_abilities` |
+| `delayed` | delayed triggers (a Bauble's draw): `when` (`next_upkeep`, `next_end_step`, `next_cleanup`, `your_next_main_phase`), `controller`, `source`, `card`, `index`, `ev` |
+| `temp_triggers` | triggers a player has for a while (Tamiyo's +2): `controller`, `source`, `card`, `index`, `this_turn`, `obj` |
+| `marks` | `{"on": ref, "exiled_to_pay": ref}`: a card Murktide Regent's delve exiled (its counters as it enters) |
+| `discarded`, `resolved`, `done_once`, `activations` | this turn's lists: cards discarded (refs); abilities' resolutions per object (`on`, `count`); once-each-turn actions (`on`, `trigger`); activations per permanent and ability (`on`, `ability`, `count`: the engine's cap, 31) |
+| `clouds` | the viewer's partial knowledge of the opponent's cards (ENGINE.md 10): `owner`, `hand`, `library`, `positions` (library positions from the top), `cards` |
+| `then` | actions taken from the built decision on, before the deal: option labels (`export_state`'s words) or action ids |
+| `void`, `had_attackers` | (95.10, 95.11) a nonland permanent left the battlefield or a spell was warped this turn; a creature was declared as an attacker or put onto the battlefield attacking in this declare attackers step (CR 508.8; default: the step is the declare attackers step and a creature is attacking - given only when one left combat since) |
+
+| Key (a player) | Meaning |
+|---|---|
+| `life` | (default 20) |
+| `hand` | the viewer's: every card; the opponent's: the cards the viewer knows (revealed, Urza's Bauble, returned from play). A name or `{"name", "known_to_opponent", "ref"}` (`known_to_opponent`: on the viewer's own cards the opponent knows) |
+| `hand_size` | the hand's size (required for the opponent) |
+| `library_size`, `library_known` | the size; the positions somebody knows: `{"pos": from the top, "known_by": [players], "name"}` - the name exactly when the viewer knows it (our Bauble look at our top: `{"pos": 0, "name": "X", "known_by": [0]}`; their Brainstorm's put-back: `{"pos": 0, "known_by": [1]}, {"pos": 1, "known_by": [1]}`) |
+| `graveyard` | bottom first |
+| `pool` | mana in the pool, letters `WUBRGC` ("UR") |
+| `lands_played`, `drawn`, `draw_step_draws`, `spells_cast`, `noncreature_cast`, `spells_game`, `gained_life`, `lost_life`, `left_battlefield`, `attacked_with` | this turn's (and this game's spells) counts and flags the rules and the encoding read (Cori-Steel Cutter's flurry and prowess read `spells_cast`, Tamiyo's flip `drawn`) |
+| `energy`, `mulligans` | counters (Galvanic Discharge's energy); mulligans taken |
+| `kept`, `mulligan_declared` | the setup's (`turn` 0) mulligan state |
+| `turns` | turns begun (derived from the turn number and the starting player unless given) |
+
+| Key (a permanent) | Meaning |
+|---|---|
+| `name`, `token` | the card's name (a back face's name: the card transformed - "Tamiyo, Seasoned Scholar"; a double-faced or split card's front-face name finds the card); `token: true`: a token's name ("Clue", "Monk") |
+| `owner`, `controller` | (`controller` default `owner`) |
+| `tapped`, `damage`, `counters` | `counters` by kind: `+1/+1`, `-1/-1`, `loyalty`, `stun`, `lore`, a keyword's, a named counter's |
+| `entered`, `control_since`, `sick` | the turn it entered and the turn its controller got it (summoning sickness, CR 302.6: `control_since` >= its controller's last turn); default 0 (long ago); `sick: true` sets both to this turn |
+| `attached_to` | what this Equipment or Aura is attached to (a reference) |
+| `attacking`, `attacks`, `blocked`, `blocking`, `struck_first` | combat: `attacks` a planeswalker (a reference; default the player), `blocking` the attacker (a reference) |
+| `loyalty_turn`, `loyalty_used` | the turn of its last loyalty activations and how many (CR 606.3) |
+| `flips`, `ts`, `ref` | times transformed (CR 701.27f); the timestamp (with effects; else the list's order); an alias for references |
+
+| Key (a stack item) | Meaning |
+|---|---|
+| `controller` | required |
+| `spell` (+ `owner`, `origin`) | the spell's card name (its owner if not the controller; the zone it was cast from, default `hand`) |
+| `ability` + `source` | `{"card": the definition's name, "kind": "activated"/"trigger"/"hand"/"graveyard", "index": k}` (95.8's table) and its source (a reference; a sacrificed source: a stale reference to the card where it is now) |
+| `targets` | `[{"req": target requirement, "player": p}` or `"obj": ref` or `"item": stack ref}]`, in the order chosen |
+| `modes`, `x`, `alt`, `cost_option`, `from`, `delved`, `division`, `times`, `spliced`, `attack_as`, `noted` | as the engine has them: the modes chosen (0-based), X, the alternative cost (`alt: 1` = Force of Will's / Daze's), the additional cost, how it was cast (`hand`, `flashback`, ...), cards delved, divided damage, ... |
+| `ev` | a trigger's event: `player`, `obj`, `obj2` (references), `amount`, `item` (a stack ref, or `"gone"`) |
+
+**References** name objects by place: `b<i>` the i-th entry of `battlefield`, `g<p>.<i>` player p's graveyard card i
+(bottom first), `x<i>` exile card i, `s<i>` stack item i (bottom first; as an object, its spell's card), `e<i>` emblem
+i, `h<p>.<i>` card i of player p's `hand` list; or any entry's `"ref"` alias (an MTGO object id). An earlier object of
+a card (CR 400.7: a fetchland's ability whose source was sacrificed, an effect on a creature that died) is `{"ref":
+"g0.3", "stale": true}`; a token that ceased to exist is `{"gone": "Clue", "owner": 0}`. On a layout v7 engine (95.11)
+a stale reference or a gone token may also carry what it shows (`Game::ref_lki`, ENGINE.md 156): `known_by`, the
+players who knew the object as it left (default both: a departure from or to a public zone), and `was`, its identity
+then where the viewer knew it (default the card's identity now; a transformed permanent that died: its back face).
+
+**`then`** reaches a decision inside a cast or a resolution, which is not built directly: the opponent's Daze
+resolving and asking us to pay {1} is "we have priority, Daze on top, `passes` 1" plus `"then": ["Pass priority"]`
+(the test `test_then_reaches_a_decision_inside_a_resolution`). A label must name exactly one option (two "Tap Volcanic
+Island for mana": give the action id). A resolution that reveals cards to us (Brainstorm's draws, a surveil's look)
+needs them named in `library_known` (`known_by` [us]), or the engine deals them at random.
+
+### 95.3 The deck partition and the deal
+
+Best-of-one decklists are open: each player's 60 are placed exactly once. Every card the description names (hands,
+graveyards, exile, non-token permanents, spells, the viewer's known library positions, its clouds' cards) is taken
+out of its owner's list - one more than the list has is an error ("P0's deck has no Lightning Bolt left to place");
+the rest fill the unknown slots (the opponent's unknown hand cards, both libraries' unknown positions), and their
+numbers must be equal ("P0's deck does not fit the description: 50 of its cards are not named anywhere but the
+description leaves 48 unknown slots"). Never fixed silently. The viewer's clouds' cards go into their domains first.
+Then `determinize` for the viewer deals every slot the viewer does not know (the opponent's unknown hand cards, both
+libraries' unknown positions, uniformly within the clouds) - so the description, which holds none of it, decides the
+encoding, and the deal seed decides only the world. The deal is uniform (the belief deal of 69 is the search's own:
+`search_tree` with the root belief re-deals per simulation).
+
+### 95.4 The round trip (`engine/tests/build.rs`, the acceptance test)
+
+Games of the Delver mirror and of Delver against the MTGO test deck (95.6), half uniformly random moves, half the
+heuristic bot's, 4,000 moves at most; at a sampled share of the multi-option decisions: describe from the decider's
+view (a quarter of them also from the other seat's), build (a new game seed), and require (a) the same legal action
+ids when the viewer decides (the labels are in (c)), (b) the same encoding **bitwise** (`f32::to_bits`), (c) the same
+viewer-visible `export_state` (`viewer_view`: ids replaced by places, the log dropped, the opponent's hand as its size
+and the known cards, libraries as their known positions with names where the viewer knows them, the decision's options
+only for the decider), (d) `check_invariants` and `check_knowledge`, (e) the built game describes back to the same
+description, (f) the same `Game::view_of(viewer)` (the hidden-information tests' vector: every public field and the
+viewer's knowledge). A not-built decision (inside a cast or a resolution) reached from the last built position with no
+chance key on the way (nothing hidden revealed, nothing random) is built from that position's description plus
+`then` = the action ids since, and must match (a)-(c).
+
+At `BUILD_GAMES=400 BUILD_SAMPLE=30` (33 s; the committed default is 40 games at 25%, 2 s):
+
+| | positions sampled | at a decision the schema builds | exact (a)-(f) | `then` trips exact |
+|---|---:|---:|---:|---:|
+| the Delver mirror | 34,614 | 27,817 | **27,817 (100%)** | 1,122 of 1,122 |
+| Delver vs the MTGO test deck | 26,408 | 21,831 | **21,831 (100%)** | 724 of 724 |
+
+No description was refused for an unsupported state. The decisions not built (inside casts and resolutions; mirror):
+PayMana 1,193, Target 1,222, PutInGraveyard 952, SearchLibrary 720, YesNo 583, ChooseHandCard 451, OrderTriggers 448,
+PutOnTop 438, ChooseGraveyardCard 345, BounceCost 137, ExileCost 88, ChooseAltCost 69, ChooseMode 57, LegendRule 44,
+ChooseMana 27, AssignDamage 23. Covered by the exact round trips (mirror): 5,556 with a stack (1,977 with two or
+more items, 2,915 with an ability, 1,965 a trigger, 529 an alternative cost - Force of Will, Daze -, 140 delve), 6,887
+in combat steps (3,134 attacking, 353 blocking), 6,464 with Tamiyo flipped and 2,765 with her emblem, 11,379 with
+tokens, 11,088 with Cori-Steel Cutter attached, 10,227 with counters, 3,442 with effects (prowess), 3,949 with
+Tamiyo's +2 trigger, 521 with a Bauble's delayed draw, 705 with Murktide's exiled-card marks, 2,162 with a stale
+reference and 59 a gone token, 11,885 with a known library card (Baubles, Brainstorm), 3,322 with a known card in the
+opponent's hand, 3,524 with our cards the opponent knows, 311 with clouds, 1,038 at the setup's mulligans.
+
+Found and fixed on the way (each a class of the first runs): the setup's `Turn::normal` (0 until the first turn
+begins), effects' and permanents' timestamps (described as they are: `view_of` reads effect timestamps), the turn
+every move sets on an exiled card (`since`), the turn cap (turn `max_turns` is still played), forced attackers'
+stacked attack-target choices.
+
+### 95.5 The leak test
+
+`other_deal_seeds_give_the_same_encoding` (Rust): at 150 sampled priority decisions of random mirror games, the
+description built with four deal seeds gives the same encoding (bitwise), `view_of`, legal actions and description for
+the viewer, the same deal seed the same world (`fingerprint`), and in at least 90% of the positions the opponent's
+hand or the viewer's library order differs between the deals. In Python (`test_other_seeds_give_the_same_encoding`):
+the example built with eight seeds - one encoding, the opponent's three unknown cards dealt differently, the known
+Wasteland always there; a `deal_seed` in the description wins over the game seed.
+
+### 95.6 The MTGO test deck
+
+4 Duress, 4 Galvanic Discharge, 2 Cut Down, 1 Abrade, 1 Figure of Destiny, 1 Aether Spellbomb, 1 Expedition Map, 2
+Talisman of Creativity, 22 Mountain, 22 Swamp: every card is in the engine's pool and supported (`support.rs`); played
+as player 1's list against Delver (`spec_json(p1_deck=...)`, `decks.p1`). Its round trips (95.4) cover energy (8,169
+positions), Figure of Destiny's effects, Duress's reveals and Expedition Map's search.
+
+### 95.7 Derived, dropped, unsupported
+
+* **Derived** by the builder: each player's last turn and turns begun (no extra turns), the last normal turn's player,
+  `cleanup_again` (a cleanup step's priority), the fast-path counts (`n_static`, `n_self_types`, tokens, the first
+  token slot), the next timestamp and stack id, a stack ability's `flips` (its source's), the agenda of the decision;
+  every slot's incarnation is 1 (0 names "an earlier object": a stale reference).
+* **Dropped** (not described; no rule or encoding at these decks' decisions reads them - the round trip compares
+  `view_of` and the encoding): last known information of objects that left the battlefield this turn (`lki_counters`,
+  `lki_copy`, `lki_damage`, `spell_lki`, `Obj::lki_power`), the knowledge bits of cards in public zones (both),
+  vestigial per-object fields of graveyard and stack cards, `delve_floor`, the opponent's clouds over the viewer's
+  cards (its exact knowledge, `known_by`, is kept: the opponent's encodings inside our search see a little less than
+  the real opponent knows), several stale references to one card (one earlier incarnation), the game's RNG (the deal
+  seeds it), the decision count.
+* **Unsupported** (`describe` refuses by name; the builder has no key): face-down cards, copies (copy effects, copies of
+  spells), cards exiled with a permanent (links), permissions to play from exile, extra turns and combats, the monarch,
+  the initiative, day and night, dungeons, companions and sideboards, best-of-three, poison, experience and the rare
+  player flags (can't gain life, sorceries with flash, graveyard play / exile, the city's blessing, protection),
+  restricted pool mana, triggers waiting to be put on the stack (never at a decision), marks other than Murktide's
+  exiled cards, effects on groups and the rare modifications (protection, P/T per permanent or counter, sacrifice for
+  mana, latent abilities), a spell cast with flashback / evoked / escaped, Mox Diamond's discarded land.
+* **Decisions** built: priority (any step, any stack), declare attackers / attack target / declare blockers, the
+  cleanup discard, play-or-draw, mulligan and the mulligan's bottom. Every other decision is inside a cast or a
+  resolution: `then`.
+
+### 95.8 For the MTGO adapter
+
+* **Card names** are the engine's (`data/decks/*.json`'s names): "Tamiyo, Inquisitive Student // Tamiyo, Seasoned
+  Scholar" or its front face's name; the back face's name on the battlefield is the transformed card. Tokens with
+  `"token": true`.
+* **Required fields** (95.2); the rest defaults to a fresh object (untapped, no counters, long under its controller's
+  control). Give `control_since` (the turn number it came under its controller's control) for every creature that
+  came this turn or on its controller's last turn: summoning sickness reads it.
+* **The battlefield's order** is the order permanents came under control (timestamps), not MTGO's layout: the action
+  ids of permanents (`MY_PERM` slots) follow it. `export_state` lists each player's permanents in that order; its ids
+  name the built game's objects (map them back through the description's order or `ref` aliases).
+* **The stack bottom first**; the opponent's spell at our creature is `{"spell": ..., "controller": 1, "targets": [{"req":
+  0, "obj": "b3"}]}`; Force of Will / Daze for their alternative cost `"alt": 1` (the pitched card in `exile`, the
+  returned Island in its owner's hand - known to both); Murktide on the stack: `"delved": n` and a `marks` entry per
+  instant or sorcery its delve exiled. Abilities by the definition's ability index (`card` the definition's name;
+  every row seen on the stack in the round trips' games, 2 x 120 random games of the probe):
+
+  | What | `ability` / where | `source`, `ev` |
+  |---|---|---|
+  | a fetchland's search (Flooded Strand, Misty Rainforest, Polluted Delta, Scalding Tarn); Expedition Map's | activated 0 | stale: the card in its owner's graveyard |
+  | Mishra's / Urza's Bauble's look | activated 0 | stale (graveyard) |
+  | their draw: a `delayed` entry until the next upkeep, then on the stack | `delayed`: `next_upkeep`, `index` 0; the stack: trigger 0 | stale (graveyard) |
+  | Wasteland's destroy (0 is its mana ability) | activated 1 | stale (graveyard) |
+  | Clue's draw | activated 0 (card "Clue") | `{"gone": "Clue", "owner": p}` |
+  | Cori-Steel Cutter's flurry / equip | trigger 0 / activated 0 | ev of a cast trigger (below) / live |
+  | Dragon's Rage Channeler's surveil; a Monk's prowess (its pump: an effect `pt` [1, 1]) | trigger 0 | ev of a cast trigger |
+  | Murktide Regent's +1/+1 counter | trigger 0 | ev: `player`, `obj` the card that left the graveyard (stale, in exile) |
+  | Tamiyo (front): investigate as she attacks / her flip at the third draw | trigger 0 (ev `obj` Tamiyo) / trigger 1 (ev `player`) | live |
+  | Tamiyo, Seasoned Scholar's +2, -3, -7 (card "Tamiyo, Seasoned Scholar") | activated 0, 1, 2 | live |
+  | the +2's "until your next turn": a `temp_triggers` entry, then on the stack | `temp_triggers` card "Tamiyo, Seasoned Scholar", `index` 0; the stack: trigger 0 | ev `obj`: the attacker |
+  | Thundering Falls's surveil | trigger 0 | ev `obj`: the land |
+  | Figure of Destiny's three abilities | activated 0, 1, 2 | their results: effects `set_pt` + `types` (`forever`), `keywords` for the 8/8's |
+
+  A cast trigger's `ev` is `player` (the caster), `obj` (the spell: its `s<i>`) and `amount`, the spells cast before it
+  this turn by both players (storm's count, omitted when 0).
+* **Hidden information**: our hand in full; the opponent's as `hand_size` plus the cards we know; libraries as sizes
+  plus known positions (`known_by` both ways: what the opponent knows is public, ENGINE.md 72); MTGO's shuffles end
+  all library knowledge - the adapter must track looks, put-backs and shuffles itself.
+* **Decisions inside a resolution**: the priority before it plus `then` (95.2), naming in `library_known` what the
+  resolution will show us. **The mulligan** follows the engine's London mulligan (a taker draws seven and bottoms
+  them at once, then everyone declares again: `mulligan_bottom`, then `mulligan`).
+* **A refused build** is the adapter's bookkeeping or an unsupported state: the error names it; never patch the
+  description to make it fit.
+
+### 95.9 Checks
+
+* `engine/tests/build.rs` 6 (the two round trips, the leak test, the example, the partition and description checks, a
+  spec without the keys), in release and once in a debug build (16 games: the debug-only invariants, e.g.
+  "determinize changed the viewer's decision", hold); `az` 41, `lab` 13, `constructed` 7, `hidden` 16 unchanged.
+* `tests/test_build.py` 7 (through the PyO3 module: the round trips at random decisions of both deck pairs, the
+  example, other seeds the same encoding, the checks, a search on a built game, `then`); with `test_mtg_az.py` 15,
+  `test_delver.py` 5, `test_position_lab.py` 15: 42 passed (22 s).
+* Digests: **f6543eb2b1b8752f** (`cargo test --release -p engine --test digest -- --ignored`: 2,000 random + 500
+  heuristic games, unchanged = main's; the digest games use `Game` directly; no rules change).
+* Tier: an opt-in `mtg` spec key with byte-identical defaults (the lab's tier, 76.10: `optin-core`, no core change);
+  the gate itself (`python tools/gate.py optin-core --baseline-root <a checkout of 9397d67>`) is the merge's: it was
+  not run on this branch (it needs a baseline worktree; the tests above are the tier's feature tests).
+
+### 95.10 On a layout v6 engine (branch `mtgo-build-v6`, 2026-11-15)
+
+The three commits cherry-picked onto 39ef0208 (main 45e65178 + the farm code: the engine of the Delver best-of-three
+run, layout v6), so the MTGO adapter and game reviews can build positions for a v6 network. What the 465 commits in
+between changed, and how `build.rs` follows:
+
+* **New state, described:** `void` (the description's top level; `Game::void_turn` = the turn when true: a nonland
+  permanent left the battlefield or a spell was warped this turn, ENGINE.md 99.4 - v6 encodes it, `g6::VOID`), a
+  player's `artifact_entered` (Mishra's Bauble, Cori-Steel Cutter) and `life_gained` (an amount), a delayed trigger's
+  `turn` (only when it is not the current turn; read by "your next turn's end step"). Loyalty activations moved out of
+  `Obj` (`Game::loyalty_of`): a permanent's `loyalty_turn` / `loyalty_used` keep their names.
+* **Refused unless empty / default:** a paged decision, a simultaneous move or entry in progress (`releasing`, `held`,
+  `entries`), a player controlling another's turn, restricted mana, the lands entered this turn (only kept for
+  Bioengineered Future), phased-out permanents, extra loyalty activations, "the next spell can't be countered"
+  effects, a turn whose combat goes on to another phase than the postcombat main phase (`after_combat`).
+* **Derived or transient, not described:** the payment search's flags, the leave-event fields, `ts_group`, the last
+  known information lists, `moon_game`, EoE W6's state, and `loop_taken` (CR 732.2a's records: a built game starts
+  with none; they prune an action only at a view identical to one where it was taken this turn).
+* **Gone:** the activation counts (the activation cap went with F7's loops, `0a58c14a`): `activations` is still
+  accepted and read by nothing; `group_ts`, `miracle_check`, `may_copies`, `targeting`.
+* Numeric widths follow the engine (amounts `i64` / `u64`, counts `u32`); `Zone::PhasedOut`, `CastFrom::LibraryTopMana`
+  and the three new delayed moments have names; `Task::PriorityAsk` carries its page (built and described on the first).
+
+Checks on this branch: `engine/tests/build.rs` 6 passed (the round trips compare the v6 encoding bitwise), and
+`tests/test_build.py` 7 passed through the PyO3 module. Not run: the digests and the gate (no rules change; an opt-in
+spec key). Not merged into main.
+
+### 95.11 On main's layout v7 engine (branch `mtgo-build-main`, 2026-11-15)
+
+The `mtgo-build-v6` branch (95.10) merged into main f19151ef (main had moved 234 commits past 39ef0208: layout v7
+revision 1 and `tail_encode.rs`, the Fable fixes, the rules check), then main b309fa08 (pb3, 168) merged in. The
+conflicts were additive: `MtgSpec`'s fields and defaults (`dealt_decks` and `keep_known` beside `build` and
+`describe`), DESIGN.md 8's rows D3 and D4, and `new_game` (a build before 168.2's best-of-three game log, which a
+best-of-one build never has). What main's
+engine added to the state, and how `build.rs` follows (`public_state.rs`'s classification of each field):
+
+* **`Turn::had_attackers`** (Public, CR 508.8, ENGINE.md 151.4; view_of and layout v7's `COMBAT_GOES_ON` read it):
+  described as the top-level `had_attackers` only when it differs from what the attacking creatures show (in the
+  declare attackers step, a creature is attacking: the builder's default) - true with no creature attacking, an
+  attacker that left combat since. Refused (a build error) outside the declare attackers step.
+* **`Game::ref_lki`** (Derived, but written by the encoding: a stale reference's identity, `Cx::ref_def` ->
+  `Game::lki_identity`, ENGINE.md 156): each stale reference and gone token in a description carries its entry -
+  `known_by` (default both; `[]`: nobody knew it, no entry) and `was` (default the card's identity now; only where the
+  viewer knew it - an identity the viewer did not know is the card's, as `determinize` makes it). The builder adds one
+  entry per stale object and refuses two references to one stale object that say different things. Without it the
+  round trip fails: with the entries left out, 9% of the mirror's built positions differed (199 encodings, 80
+  descriptions in 3,161) - the head-only comparison of 95.4 could not see it (95.11's test change below).
+* **Refused unless empty:** `Game::sightings` (Hidden: the viewer's sightings for the hidden deck's deal) and
+  `Game::found` (Public: layout v7's `found` tokens, ENGINE.md 142.12) - both kept only where whole-deck clouds are
+  (hidden decklists, `deck_clouds`), which a build never has (open decklists, 95.3); `Game::loop_open` (a loop action's
+  activation in progress: never at a decision the schema builds).
+* **Derived, not described:** `sight_at` (the sightings' clock), `sightings_lost` (a test's flag).
+* No new `Player`, `Obj` or `StackItem` field (the exhaustive destructurings compiled unchanged).
+
+**The round trip's encoding is the whole layout v7 row.** On main `MtgAz::encode` is the row's head only and refuses a
+state with tail tokens (zero-core R1, ENGINE.md 125), so `engine/tests/build.rs` now compares `Row::of_az(...).flat()`
+(the head, the sealed tail tokens with their segments and slots, the options' pointer overrides) bitwise, lengths
+included (`first_diff`); the leak test and the example's alias check likewise. In Python `mtgz.az.build.row_bits`
+(`mtgz.az.games.row`'s float64 row as bits) replaces `encode` in `round_trip` and `tests/test_build.py`; the search
+test's evaluator takes the rows' `tail` / `ov` keywords (`zero.parity.search_rs` passes them for layout v7 games).
+
+Checks (release, `CARGO_TARGET_DIR` of its own): `engine/tests/build.rs` 6 passed (5 s); at `BUILD_GAMES=400
+BUILD_SAMPLE=30`: the Delver mirror 54,011 positions sampled, 41,047 at a decision the schema builds, **41,047 exact
+(100%)**, `then` trips 6,678 of 6,678 exact (3,330 with a stale reference, 129 with a gone token); Delver vs the MTGO
+test deck 72,036 sampled, 46,667 built, **46,667 exact (100%)**, `then` 21,017 of 21,017 (2,643 stale, 74 gone). Once
+in a debug build (`BUILD_GAMES=16`): 6 passed (the debug-only invariants hold). `tests/test_build.py` 7 passed through
+the rebuilt PyO3 module. No rules change: the digests are main's.
+
+**The gates, on d07f8f0a** (the branch with main b309fa08 merged; gate.py placing its pure-CPU steps on the Mac beside
+the live runs here, the desktop's heavy steps in `tools/slotd.sh` slots):
+
+* `suite`: **GATE PASSED suite d07f8f0a5883 in 789s** (the full engine suite 2,678 passed in 174 binaries; the sharded
+  2k fuzz of default, default+hidden and delver_dealt);
+* `engine --tested-sha d07f8f0a5883 --expect-digest 8f71ccb0d89031a6 --expect-digest0 41e27319acdae5b5`: **GATE PASSED
+  WITH SKIPS engine d07f8f0a5883 in 788s** - skipped: one live-run-hazard test fenced (a live run on this machine).
+  Digests EQUAL (full 8f71ccb0d89031a6, encoding-free 41e27319acdae5b5; constructed e1177d609d6c1aee, EoE
+  2efe956d589840ce, driver 6f7b863096e47dcd, dealt e802d9df793c9993 = the recorded files), az 54, limits 13, hidden 28,
+  pytest 455 passed in four Mac shards + 44 on the desktop, the smoke config, farm compat PASS (gate 2 identical: 6
+  games, 2,484 rows, 150 batches; gate 3 identical: 2,556 rows).
+
+This line is a docs-only commit after the gated one.
 
 ## 97. Rented GPU boxes (Vast.ai): `tools/vast.py` and the remote `'vast'` (branch `vast`, 2026-11-05)
 
@@ -24916,7 +25297,7 @@ zero-core's co-training refusal concerns `resolver` runs only (an EoE run is a s
 mirror-relative paths formatted with `iter`, a `*` in the last component matching any characters, refused at
 registration if absolute or leaving the mirror; `RemoteEval._fetch_files`; best.pt; a mirror without `models/index.json`
 after an evaluation is an error (Run.elo_update always writes it). No run setting, nothing in self-play, search or local
-evaluation. The branch is pushed to the desktop's `C:/Users/Gregg Keithley/zero-core` (where worktrees initialise the
+evaluation. The branch is pushed to the desktop's `C:/Users/<user>/zero-core` (where worktrees initialise the
 submodule from) and to the Mac's mirror by mac.sh, **not to GitHub** (to do before merging: a pin must exist there).
 
 ### 109.2 The S4 races on the Mac
@@ -24998,7 +25379,7 @@ python tools/launch_hidden.py <run2>/supervisor_console.txt python tools/supervi
   --eval-remote mac --eval-every 2
 ```
 
-Its log then says `evaluations on the remote 'mac' (greggkeithley@100.95.248.116)`; each evaluated iteration logs `iter
+Its log then says `evaluations on the remote 'mac' (<mac>)`; each evaluated iteration logs `iter
 N vs heuristic (remote mac, ...s)` and `iter N elo ... (remote mac)`, and adds a row to `evals.jsonl` and
 `games/eval-iter_NNNN-<pid>.jsonl` to the game log. `--eval-remote ''` at a restart brings the evaluation back.
 
@@ -26266,8 +26647,8 @@ The commits after be674a2 change docs and zero.farm_h2h (Python, the desktop's) 
 **A first live head-to-head** (from this checkout, on the desktop):
 
 ```
-python -m mtgz.az.farm_h2h --a C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0080.pt \
-    --b C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0070.pt --games 200 \
+python -m mtgz.az.farm_h2h --a C:/Users/<user>/mtg-zero/runs/eoe1/models/iter_0080.pt \
+    --b C:/Users/<user>/mtg-zero/runs/eoe1/models/iter_0070.pt --games 200 \
     --build e96bf8e44b9634502e44dcc3 --runtime c4c4bb776d7f886f5e13474e
 ```
 
@@ -26367,9 +26748,9 @@ E:/cargo-target/zero-farm/main/release/ - or `--farm-release <path>` - and defin
 checkout, the venv with onnx / onnxruntime):
 
 ```
-"C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" -m mtgz.az.farm_h2h \
-    --a "C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0080.pt" \
-    --b "C:/Users/Gregg Keithley/mtg-zero/runs/eoe1/models/iter_0070.pt" --games 200 \
+"C:/Users/<user>/zero-farm/.venv/Scripts/python.exe" -m mtgz.az.farm_h2h \
+    --a "C:/Users/<user>/mtg-zero/runs/eoe1/models/iter_0080.pt" \
+    --b "C:/Users/<user>/mtg-zero/runs/eoe1/models/iter_0070.pt" --games 200 \
     --build e96bf8e44b9634502e44dcc3 --runtime c4c4bb776d7f886f5e13474e \
     --worker E:/cargo-target/mtg-zero/farm/farm-build/dist/mtg-be674a2-release/mtgz-worker.exe
 ```
@@ -26377,8 +26758,8 @@ checkout, the venv with onnx / onnxruntime):
 **Re-defining the live fuzz campaign** (its build, mode and env as they are; nothing else is put):
 
 ```
-"C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07 --dry-run
-"C:/Users/Gregg Keithley/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07
+"C:/Users/<user>/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07 --dry-run
+"C:/Users/<user>/zero-farm/.venv/Scripts/python.exe" tools/farm_campaign.py --from-existing delver-fuzz-4b44b07
 ```
 
 ### 114.6 GPU inference: the Windows ML runtime pack, a zero-core pin with the session factory (zero-farm phase 4, 2026-11-12)
@@ -26402,7 +26783,7 @@ through the self-test) and runtime packs that carry the providers.
 builds that require it are unchanged.
 
 **Tests and checks.** zero-farm-notes phase4-gpu.md (the per-provider gate, CPU fallback nodes and speeds, measured on
-the desktop's RTX 5090 and the Windows 10 canary's RTX 4070 Ti).
+the desktop's RTX 5090 and a Windows 10 test PC's NVIDIA GPU).
 
 ### 114.7 Game records: a worker's self-play as what replays it (zero-farm phase 3, 2026-11-12)
 
@@ -33873,7 +34254,7 @@ fails on this branch (the five spots).
 
 State at this subsection's commit: every merge above committed on `integrate/fable-1112` (mtg-zero, never pushed - the
 orchestrator fast-forwards main); zero-core `integrate/fable-1112` @ 77b31ab pushed to the local origin
-(`C:/Users/Gregg Keithley/zero-core`) and GitHub, the gitlink on it. Known red until the steps below:
+(`C:/Users/<user>/zero-core`) and GitHub, the gitlink on it. Known red until the steps below:
 `tests/test_canary_library.py::test_every_spot_reaches_its_recorded_position` (the five spots, 157.9) and every digest
 comparison (behaviour changed on purpose by A1, A2, E, F, H, I, farm-fuzz, rules F1-F3). Every heavy command goes
 through the throttle (COMMON.md): `S="bash E:/mtg-zero-scratch/fable-fix/slotd.sh"`. On Windows, stopping a
@@ -33881,7 +34262,7 @@ background task can leave its `slotd.sh` loop alive: check `wmic process where "
 ProcessId,CommandLine` and `taskkill //PID <pid> //F //T` only your own.
 
 ```bash
-W="C:/Users/Gregg Keithley/mtg-zero-wt/integrate-fable"
+W="C:/Users/<user>/mtg-zero-wt/integrate-fable"
 export CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/integrate-fable
 S="bash E:/mtg-zero-scratch/fable-fix/slotd.sh"
 cd "$W"
@@ -33904,7 +34285,7 @@ git merge --no-ff --no-commit fix/rules-f4-f5           # after B: the leftovers
 If a merge touches zero-core: merge it into `third_party/zero-core` branch `integrate/fable-1112` (renumber colliding
 docs/az.md sections as 157.2 did), run its `cargo test --release` + `bash tools/build_py.sh` + pytest
 (`CARGO_TARGET_DIR=E:/cargo-target/zero-core/integrate-fable`), `git push origin integrate/fable-1112` and
-`git -C "C:/Users/Gregg Keithley/zero-core" push origin integrate/fable-1112`, then `git add third_party/zero-core`.
+`git -C "C:/Users/<user>/zero-core" push origin integrate/fable-1112`, then `git add third_party/zero-core`.
 After each merge: `$S bash tools/build_py.sh`, `$S cargo test --release -p engine --test az --test dealt_integrated`,
 and a fuzz smoke (`$S env FUZZ_GAMES=200 FUZZ_MATCHES=40 cargo test --release -p engine --test fuzz -- --nocapture`,
 also with `FUZZ_POOL=delver`, `cross`, `delver_dealt`, `eoe` and `FUZZ_HIDDEN_DECKS=1`).
@@ -33967,10 +34348,10 @@ $S python tools/gate.py engine --no-mac --tested-sha "$(git rev-parse HEAD)" \
 own:
 
 ```bash
-git -C "C:/Users/Gregg Keithley/mtg-zero" worktree add --detach "C:/Users/Gregg Keithley/mtg-zero-wt/integrate-fable-base" e076d8f3
-cd "C:/Users/Gregg Keithley/mtg-zero-wt/integrate-fable-base" && git -c protocol.file.allow=always submodule update --init third_party/zero-core \
+git -C "C:/Users/<user>/mtg-zero" worktree add --detach "C:/Users/<user>/mtg-zero-wt/integrate-fable-base" e076d8f3
+cd "C:/Users/<user>/mtg-zero-wt/integrate-fable-base" && git -c protocol.file.allow=always submodule update --init third_party/zero-core \
     && CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/integrate-fable-base $S bash tools/build_py.sh
-cd "$W" && $S python tools/gate.py search-core --no-mac --baseline-root "C:/Users/Gregg Keithley/mtg-zero-wt/integrate-fable-base" --step-timeout 7200
+cd "$W" && $S python tools/gate.py search-core --no-mac --baseline-root "C:/Users/<user>/mtg-zero-wt/integrate-fable-base" --step-timeout 7200
 ```
 
 Expected there: `check_checkpoint_compat` (now runnable on v7: `--net random` is a random token network, 157.4)
@@ -34438,7 +34819,7 @@ pill and the Status tile; "Training is finished." in Right now), and the Best of
 run when it is a best-of-three one. Tests: worker (the 11-14 case - pb1 posting after pb2 keeps pb2 the default -, final
 states kept, a newer main taking over, validation) and now.js; 68 passed. Before/after screenshots (deviceScaleFactor 2,
 local `wrangler dev` with copies of the live pb1/pb2 records, pb1 posting last as an undemoted main):
-`C:/Users/Gregg Keithley/shots/delverai-run-owned-publisher/` - `1-before-*` (master: pb1 on the front page),
+`C:/Users/<user>/shots/delverai-run-owned-publisher/` - `1-before-*` (master: pb1 on the front page),
 `2-after-*` (pb2), `3-after-pb2-finished-*` (the Finished state). Awaiting the user's approval; the site works with
 either publisher meanwhile.
 
@@ -34479,7 +34860,7 @@ publisher from `mtg-zero-wt/delverai-pb2-pub`. This branch changes no Rust in ei
 is this branch's build.
 
 1. A pinned checkout of this branch's commit (or of main once merged): `git worktree add --detach
-   "C:/Users/Gregg Keithley/mtg-zero-wt/run-<sha12>" <sha>`, `git -c protocol.file.allow=always submodule update --init
+   "C:/Users/<user>/mtg-zero-wt/run-<sha12>" <sha>`, `git -c protocol.file.allow=always submodule update --init
    third_party/zero-core`, copy `mtg-zero-wt/run-f49df0c/mtgz/_engine.pyd` into it (or `bash tools/build_py.sh` with its
    own CARGO_TARGET_DIR), then `python tools/gate.py repin --no-mac ...` per AGENTS.md if wanted.
 2. pb2 uses the Mac (`--eval-remote mac --selfplay-remote mac`): the run checks the Mac holds a checkout of the run's
@@ -34601,7 +34982,7 @@ wrong types, odd game counts, a device other than cuda/cpu and a setting that me
   against fixed opponents" (a line per opponent with its +-1 se band, 50% reference) and "Blunder checks passed"; a line
   breaks over an evaluated generation without a result and the caption names those not measured yet and those failing.
   The worker validates the block. NOT deployed: screenshots for the user's approval in
-  `C:/Users/Gregg Keithley/shots/delverai-yardsticks/` (deviceScaleFactor 2; before = a5baa45, after = 72ce38a; pb1's
+  `C:/Users/<user>/shots/delverai-yardsticks/` (deviceScaleFactor 2; before = a5baa45, after = 72ce38a; pb1's
   page with a block built by this branch's code from pb1's REAL by-hand results and canary cache, pb2's with none yet).
 
 ### 164.6 Cost per evaluation (pb2: eval_every 16, ~5 min an iteration -> one evaluated checkpoint every ~80 min)
@@ -34796,15 +35177,15 @@ suite; agent code unchanged.
 
 **End to end on the farm** (2026-11-15, production coordinator rev 12, worker build 74f2279f96327576b2a46bbb = this
 branch's e776e984, runtime d531424b, `min_agent` 0.2.11): campaign `cmp-e2e-pb2-96v0-40` - pb2@96 vs pb2@0, the
-yardsticks' best of one (`--bo1`, 64 simulations, seed 0, paired), 40 games, share 0.25 - played by desktop-g72aptg
-(10 games) and squirrel_basement (30) in 5 leases, 1,908 s from the batch to the last game; every row's digest checked,
+yardsticks' best of one (`--bo1`, 64 simulations, seed 0, paired), 40 games, share 0.25 - played by
+two farm PCs in 5 leases, 1,908 s from the batch to the last game; every row's digest checked,
 the 5% spot check (games 9 and 11, one per machine) and then all 40 replayed here from seed + moves: all equal. Games'
 digest 6692e970083aa484; A 0.55 +- 0.062 over 40 games. Records: 40 games described move by move in 1 s.
 
 **Determinism across machines.** A traced game is bit-identical wherever the worker plays it: games 0-3 of the
-e2e campaign (desktop-g72aptg, i7-7700K) have the digests of the same games played on the desktop (i9-13900K) by the
+e2e campaign (played on a farm PC with an older CPU) have the digests of the same games played on the desktop by the
 same worker in the local test; and all 40 games the e2e campaign shares with the 400-game campaign below (game ids
-0-39, played there by other machine pairs, e.g. squirrel_basement's Ryzen 7 5800X against desktop-g72aptg) have equal
+0-39, played there by other pairs of farm PCs, with Intel and AMD CPUs) have equal
 digests. ONNX Runtime's CPU provider and the engine give the same games on every CPU seen so far, so a farm campaign's
 numbers are a pure function of (build, graphs, settings, seed, ids).
 
@@ -34812,7 +35193,7 @@ numbers are a pure function of (build, graphs, settings, seed, ids).
 the yardsticks' local result, 0.500 over 400 games, pentanomial [38, 0, 124, 0, 38], in runs/delver-bo3-pb2/
 yardsticks.jsonl): not exactly - and it cannot be, because the local result is not reproducible itself. Played
 on the farm (campaign `cmp-eq-pb2-96v0-400`: the same checkpoints, spec, seats - checked dict for dict -, seed 0,
-paired, 400 games; desktop-g72aptg 164 games, squirrel_basement 154, and 82 by the local fallback once the farm went
+paired, 400 games; 318 games by two farm PCs and 82 by the local fallback once the farm went
 quiet after ~3.5 h, `collect --deadline-now`, 8 threads, 51 min): **A 0.490 +- 0.020, pentanomial [33, 0, 138, 0, 29]**,
 games' digest 4c33d172139f1e6f; the spot check (20 games, 6 + 6 farm + 8 local) and then all 400 replayed here: all equal.
 The yardsticks' recorded local result is 0.500, [38, 0, 124, 0, 38]. Re-running exactly the yardsticks' local match
@@ -34858,8 +35239,7 @@ install, launcher_update, selfupdate_e2e, update, release, swap_rollback), unrel
 
 ## 166. Side work off the desktop beside a live run: `tools/slotd.sh`, the gate's Mac placement, the live-run fence (migration phase 0, branch `mig/phase0`, zero-core `mig/phase0`, 2026-11-15)
 
-Phase 0 ("stop the bleeding") of the 2026-11-15 migration plan (`hub/data/mtg_bot/fable_review_iteration_and_farm_2026-11-15.md`
-section 4, S7, S8): side work must stop slowing the live run (delver-bo3-pb2) without waiting for the scheduler of
+Phase 0 ("stop the bleeding") of the 2026-11-15 migration plan (the maintainer's notes, section 4, S7, S8): side work must stop slowing the live run (delver-bo3-pb2) without waiting for the scheduler of
 phase 4. Three pieces, no engine, encoding or run change (digests unchanged; nothing of pb2 was touched).
 
 ### 166.1 `tools/slotd.sh`: the heavy-command throttle in the repo
@@ -35019,8 +35399,8 @@ desktop can run three gates at once with pb2 at 4.6-5.0 min when nothing uses th
 Branch `mig/phase1` from main 72e5a0df, main 90731110 (165 farm campaigns, 166 phase 0) merged in; zero-core pin ->
 `mig/phase1-panic` cd47511 (from bf229a5: the driver's panic containment, zero-core docs/search.md 2.18, merged with
 the pin of main, mainline-1115 d29b134). Why: Fable's review of 2026-11-15
-(hub/data/mtg_bot/fable_review_iteration_and_farm_2026-11-15.md, sections 1 and 2: S1, S2) and the gate speed-up plan
-of 11-14 (gate_speedup_plan_2026-11-14.md, phase 1): a change paid a cold build in every new worktree (14 min for the
+(the maintainer's notes, sections 1 and 2: S1, S2) and the gate speed-up plan
+of 11-14 (the maintainer's notes, phase 1): a change paid a cold build in every new worktree (14 min for the
 engine's test binaries on today's desktop beside the live runs), a 6 h suite tier (20k fuzz per pool, single-threaded,
 pools in series), ~169 test binaries each linking the whole engine, and gate steps one after another; the user approved
 the migration on 2026-11-15 with decision D1 (the gate fuzzes ~2,000 games per affected pool with the
@@ -35283,6 +35663,22 @@ with it every one of them needs a line in a suite. `mig/phase1-tests` (e512e720 
   times (1391 / 450 / 397 / 187 passed).
 * Merge it after the branches that add test files, adding their files to a suite (`misc_suite` for pb3's two); then its
   suite tier on the result.
+* **Merged into main** (main merged into the branch at ebf322d5: pb3 168, the public cleanup 169, the card IR 170, the
+  MTGO build 95.11). The engine test files main added since the branch point: `dealt_per_seat.rs` and `build.rs` (95,
+  the described-position round trip: no allocator, no process-wide state) are modules of `misc_suite`; `bo3_game_log.rs`
+  is a `[[test]]` of its own - it sets the game log's sink (`az::game_log::set`, a process-wide static), and its file
+  says so. The same holds for three files the branch had put in `misc_suite`: `game_log.rs` ("its own binary: the log
+  is a process-wide sink"), `deck_choice.rs` and `deck_scorer.rs` (each one test sets the sink): in one process their
+  sink windows overlap each other's and every other live EoE / best-of-three game of the suite (`sealed`, `eoe_net`,
+  `bo3_episodes`, ...), so a line lands in the wrong file or a test's `set(None)` ends another's log - the three
+  stable runs above were the scheduler's luck. They are `[[test]]`s again: 20 targets, 16 named (`az`,
+  `bo3_game_log`, `dealt_decks`, `deck_choice`, `deck_scorer`, `digest`, `digest_formats`, `draft`, `driver_bench`,
+  `fuzz`, `game_log`, `hidden`, `limits`, `measure_delver`, `perf`, `support`) + 4 suites (cards 71, rules 35, rulings
+  24, misc 26: 172 files). The test files' own run instructions that named a binary now gone say the suite and the
+  module (`--test misc_suite dealt_per_seat:: -- --ignored --nocapture` records / checks the dealt-per-seat digests,
+  `--test misc_suite build::` the round trip; `bots`, `draft_deferred`, `eoe_net`, `sealed`, `v7_tails`, `view`); no
+  gate step, tool or farm repro string ran one of the moved files by name (the gate's `--test` steps are `az`,
+  `digest`, `digest_formats`, `dealt_decks`, `fuzz`, `draft`, `hidden`, `limits`, all named).
 
 ### 167.10 Deferred, and what it gives pb2
 
@@ -35307,3 +35703,586 @@ pb2: nothing of the live run was touched (its files, processes, the Mac's run ch
   the cache (seconds, no cold build in the new pinned worktree); an engine change builds ~3x faster.
 * Gates take far less of the desktop beside it: the fuzz work per suite tier fell from ~78 min single-threaded to ~3.5
   min of shard time, and every heavy step queues for a slot of the throttle instead of piling up.
+
+## 168. pb3: wide 60 variety (dealt decks per seat), the in-run matchup model and sideboarding by its choice table (branch `feat/pb3-varied`, zero-core `feat/pb3-teacher`, 2026-11-15)
+
+Branch `feat/pb3-varied` from main 72e5a0df, then main 90731110 (165 farm campaigns, 166 migration phase 0) and main
+acc00acd (167 migration phase 1) merged in; zero-core `feat/pb3-teacher` from the pin bf229a5, then mainline-1115
+d29b134 and mig/phase1-panic cd47511 merged in. (Section number: the next free after main's 167.) The run it prepares: **pb3**, approved by the
+user 2026-11-15. Not launched here (the maintainer's launch script `launch_pb3.py` and its checklist, beside pb2's).
+
+**Why** (the hub notes `value_pregame_check/report.md` and `sideboard_play_analysis_2026-11-15.md`; the user: "what we
+ultimately need is the NN to learn to play a wide variety of possible sideboard variants, similar to the sealed
+experiment we do, and then it will simultaneously get better at playing the cards and we'll train the matchup predictor
+model"). In pb2 (154's dealt decks at p 0.5, swaps 1-8) the value head judges a 60 before the game barely better than
+play / draw (+0.005 nats a game), reacts 3-6x too weakly to deck changes, and the sideboarding prior inherited from pb1
+(0.93 on +Rough // Tumble -Prismari Charm) decides: 130 generations did not move it. The net plays the blasts at sorcery
+speed but misses their reactive uses: it needs more games with the cards. So pb3 (1) deals far more varied 60s, (2)
+learns the matchup from game results with a model of its own, EoE run 2's pairwise evaluator (111, 112) adapted, and
+(3) sideboards by that model, with the choice recorded as the policy target so the network's prior learns it.
+
+### 168.1 Dealt decks per seat (`"dealt_decks": {..., "per_seat": true}`)
+
+* **The option.** `DealtDecks::per_seat` (default false: 154's one dealt seat, byte-identical). With it each seat is
+  dealt on its own with probability p (`matches::dealt_seats`: two uniforms from a stream of the match's seed of its
+  own, salt ...0168, so the match's RNG is a real match's), so a match has no, one or two dealt seats. One dealt seat
+  is `MatchState::dealt` as before; two set `MatchState::dealt_both` (and `dealt` None). Every reader goes through
+  `MatchState::is_dealt(p)` / `any_dealt()` (`deck_dealt`, the sideboarding, the encoding, the reseed, the fuzz).
+* **pb3's setting** `{"p": 0.85, "swaps": [0, 15], "per_seat": true}`: swaps uniform over 0..15, then uniform over the
+  60s with that count - the constructed prior's base itself (120.2; the user's decision of 2026-11-12), so a dealt 60
+  is distributed exactly as the other player's worlds deal an undealt 60 (`ConstructedPrior::dealt` with [0, S] holds
+  the full base counts: `by_swaps` restricts nothing). P(both dealt) 0.7225, one 0.255, none 0.0225: chosen 60s in
+  15% of seat-matches, so sideboarding is still practised.
+* **Both dealt.** Nobody decides at the sideboarding: the first sideboarder's deal, then the second's
+  (`dealt_sideboards` recurses when the second is dealt too), then the next game. At a post-sideboard match's start
+  and zero-core's next episode no step is open: the next game's keys (`KEY_GAME`, the deals' `KEY_DEALT`) go nowhere
+  there - no tree spans a match's start or an episode boundary (154.2's rule); inside a step (a whole match's game 1 ->
+  2) they are the step's. `skip_game_one` no longer begins a sideboarding when game 2 has begun already. The two
+  seats' deals of a game come from independent streams: seat 1's is salted when both are dealt
+  (`DEALT_SEAT1_SALT`; with one 75 both, one stream would deal both seats the same 60). One dealt seat keeps 154's
+  stream exactly.
+* **Hidden information: every property of 154 holds per seat.** Public: both dealt floats are set (`g6::DEALT` per
+  player); `dealt_both` is classified Derived (a setting of the match from its spec and seed, the same in every world,
+  as `post_board`), its floats checked by 154's perturbation, which turns a both-dealt match into one dealt seat. (A
+  perturbation of its own was tried first: adding one to the combinable list redraws every position's partner in the
+  pairwise pass, 142, and the redrawn sample met three collisions on layout v6 - `mtg_eoe` only - no known gap covers:
+  "a permanent gained a triggered ability" against "(the position as it is)", "combat damage is prevented this turn",
+  "a permanent loses all abilities", each with `LoseAllAbilities` and a later `Granted` ability on one permanent; a
+  pre-existing v6 gap the old sample never drew, left for the EoE layout's owner, 168.6.) Private: each deal keyed `KEY_DEALT` of
+  its seat, `HIDDEN` for the other observer - a world of viewer v keys v's own deal in full and the other's hidden
+  (`both_dealt_matches_deal_two_independent_60s_and_key_them_privately`). The other player's worlds deal each dealt
+  seat's 60 from its restricted prior, untilted (154.2); the aux `deck` target is empty against a dealt 60, so with
+  both dealt neither seat's deck head trains in that match (by design: the head learns chosen 60s only).
+
+### 168.2 The best-of-three game log (the matchup model's data)
+
+`az/game_log.rs` (107.1's process-wide sink, set by `mtgz.az.run` for every run it starts) now also writes every
+finished game of a live constructed best-of-three match on the `mtg` game: a line `{"v": 1, "kind": "bo3", "spec",
+"seed", "game", "starter", "chooser", "wins" (before the game), "dealt", "mode" ("main" game 1, "dealt", "table",
+"chosen"), "decks" (copies per entry of the 75, the spec line's list order), "result", "aborted", "turns", "post_board",
+"time"}` after a spec line (`"kind": "bo3-spec"`: the two 75s, the mains, `dealt_decks`, the table's version,
+`start_game`, `max_turns`). The record is `MatchState::glog` (`game_log::LiveLog`): `new_game` makes it, a clone carries
+none (`LiveLog::clone` is empty: a search's world, a replay's copy, a branch), zero-core's next episode carries it on
+(`next_match_episode`), and `end_game` writes the line before the match scores the game. Never read by the rules, the
+encodings or the search (Derived in the public-state gate); off without the sink (the fuzz, the digests, the farm's
+worker, remote workers). Not in the log: remote self-play's games (the Mac's, the farm's - played elsewhere; replays
+on the trainer run on copies). Their share is the data the model misses; local games are the same spec.
+
+### 168.3 Sideboarding by the matchup model: the choice table and teacher decisions
+
+**The model** (`mtgz/az/matchup.py`; 111.1's `PairNet` on count deltas):
+
+    z(A, B) = w . (dA - dB) + (dA U) W (dB U)^T + c_pd pd + c_g3 pd g3 + c_lead lead + c_dealt (dealt_A - dealt_B),  W = M - M^T
+
+dA, dB: each 60's copies minus the registered main's per entry of the (shared) 75; pd +1 when A starts; g3 game 3;
+lead sign(A's wins - B's) before the game; the dealt flags. Antisymmetric by construction (z(B, A) = -z(A, B) with the
+context mirrored: tested), one row a game. Fit: full-batch L-BFGS of the recency-weighted log loss + L2, the dimension
+(0 or 2) and L2s chosen on the window's newest iterations (time split), then the chosen setting refit as a 5-member
+bootstrap ensemble on the whole window. Results only - never the network's value. A mirror only (one 75 both seats;
+anything else refused loudly): two different 75s need a model per pairing.
+
+**Why a table, and why it is exact.** At a sideboarding decision the decider's belief about the other seat's next 60 is
+the same in every state of one context: that 60 is dealt independently of everything played (a dealt seat: its
+restricted prior, 154; a seat that chooses: the constructed prior, 120.2 - its game 3 independent of game 2 by the
+user's decision H3 = A, 141.4) and nothing of the next game has been seen. So the model's best 60 is a function of the
+public context alone: the next game (2, 3), whether the decider sideboards first (CR 103.1: it then chooses play or
+draw), its lead (-1, 0, 1), whether the other seat is dealt - 24 contexts. The trainer computes them and the spec
+carries them: `"sideboard_table": {"version", "list", "choices": [[game, first, lead, opp_dealt, copies], x24]}`
+(`az/sbtable.rs`, `MtgSpec::sideboard_table`; refused loudly: not a constructed best-of-three, with `keep_deck`, a
+context missing or twice, a 60 of another size, copies past the 75's, an unknown card or key). No scorer in the engine
+(EoE's Rust scorer scores candidates per game because a sealed pool differs every game; here the candidates and the
+belief are the same for every game of a context).
+
+**The choice** (`choice_table`): F(A) = the ensemble's mean over the belief's worlds B of sigmoid(z(A, B)) - the first
+sideboarder takes the better of play and draw, the second the worse (the chooser's choice, judged by the decider's own
+model) - over A's legal 60s. The worlds: N (`matchup_worlds`, 8000) drawn exactly from the constructed prior
+(`sample_prior`: a table of the count vectors by swaps in and out, big-integer draws; tested against brute force on a
+small 75), restricted to the dealt range for a dealt opponent. **The 60 moves from the main only on evidence**
+(`confident_climb`): one card at a time, by the exhaustive one-card swap with the largest mean gain in F over the
+published ensemble's bootstrap members (`matchup_members`, 20) among the swaps whose mean gain exceeds `matchup_swap_z`
+(2) of the members' standard deviations - the members are bootstrap fits of the window, so their spread is the
+estimate's sampling spread -, until none passes: a shrinkage toward the main, so a swap happens only when its estimated
+gain is clearly positive (`matchup_swap_z` 0 is the plain climb by the mean). The strength term's exact argmax (the 60
+highest-w copies: `strength_optimum`, tested against brute force) is reported beside each context (`argmax_in`). The
+guards' defaults were the coordinator's proposal, **approved by the user 2026-11-15** (168.6).
+
+**What is exact and what is not** (the user's rule: no approximations; stated, with the exact option and its cost):
+* The belief is the model of the deal the search's worlds use (the constructed prior, untilted). For a dealt opponent
+  that is exact. For an opponent that chooses, it is the same modelling choice as the search's base prior (120.2,
+  approved 2026-11-12): the true distribution of a table seat's 60 is a point mass on its own context's choice, and
+  best-responding to it is an equilibrium problem (the user's note of 2026-11-13: a game-theory solver over a
+  shortlist is a possible later add-on). Option, not built: tilt the worlds by the network's deck head as the search
+  does (zero-core would send the sideboarding row's belief through the network before the teacher answers: one row a
+  sideboarding); with H3 = A this is also the only route by which game 2's reveals reach the game-3 choice (the brief
+  asked for game 3 to add game 2's reveals: under H3 = A the deal model says they carry nothing; the deck tilt is how
+  the search uses them).
+* F's expectation over ~10^10 opponent 60s is estimated from N worlds (an unbiased Monte Carlo estimate; exact
+  enumeration is infeasible). With dim 0 (strength only) F increases with w . dA, so the strength optimum is the exact
+  argmax whatever the worlds; with a matchup term the argmax carries the estimate's noise (cost of more: linear in N).
+* The climb is a local search (one-card moves from the main, each past the evidence bar): its end is a local optimum of
+  the guarded objective, not the model's argmax (the guard's purpose). Exact alternatives: two-card neighbourhoods
+  (~175k candidates x N worlds a step: minutes per context), or a branch-and-bound over the swap table. The bootstrap
+  spread of an L2-penalised fit understates the estimate's uncertainty somewhat (the penalty shrinks each fit alike):
+  the bar is therefore a little permissive; a larger `matchup_swap_z` or a Bayesian posterior over w are the stricter
+  options.
+
+**Teacher decisions: how the choice gets policy targets** (the design point; zero-core docs/search.md 3.19). The
+options:
+1. *No decision* (EoE run 2's evaluator choice, 112.2): the engine plays the model's 60 at the sideboarding; the
+   network sees no row, its prior keeps pb1's inherited swap, and every network sideboarding outside self-play
+   (evaluation, keep_h2h, the census, the MTGO pilot) keeps it. Closest to EoE, but teaches nothing.
+2. *Teacher decisions* (chosen): the sideboarding decisions stay decisions; a seat of the table plays the canonical
+   path's next action toward its context's 60 (36.2 / 120.1: the changed entries in list order, each with its new
+   count, then PASS - every legal 60 reached exactly once) without a search, and zero-core records each step with the
+   one-hot policy target (temperature 0, EoE's default) and no root value (q = the game's outcome). The prior learns
+   the model's choice and unlearns the inherited swap by its own cross-entropy; the value target is the game's outcome
+   as for every row of the episode. Closest to EoE's proven setup (the evaluator decides; no search over the deck)
+   plus the targets.
+3. *The model's value at the search's leaves* (the search's sideboarding visits as targets): needs a static-value hook,
+   and at 64 simulations the search mostly follows the prior (the report: 1,024 simulations spent 2.6% of visits on the
+   value head's favourite) - it would take many iterations to move.
+4. *The model as the prior at sideboarding nodes*: visits ~ prior ~ the model's choice plus the value head's noise:
+   option 2 with noise.
+**The search's interaction** (option 2): none at a teacher decision (the driver never searches it); a tree that
+reaches the other seat's sideboarding (it is hidden: the other player's worlds deal it) expands it with the network's
+priors as before; every game decision is searched as before. Evaluation seats follow the table too when a spec has
+one - the evaluation spec has none (`eval_json` drops it, as it drops dealt decks), so evaluation, keep_h2h, the census
+and the publisher measure the network's own sideboarding: whether its prior learned the table.
+
+Where it acts: `MtgAz::table_action` / `SearchGame::teacher_policy` (one-hot over the legal actions; a dealt seat never
+decides; a seat whose 75 is not the table's list has none, `SideboardTable::fits`); `MatchState::table` (Hidden in the
+public-state gate: a seat's own policy, as `keep`; never encoded; the other player's worlds deal its 60 from the
+constructed prior). The table changes between iterations, so the spec does: zero-core's remote self-play now follows the
+game package's phase spec (zero-core docs/az.md 52: the Mac's workers through the `phase` message, the farm pool through
+each gen's definition template; records of a known spec accepted and replayed with it).
+
+### 168.4 The rolling retrain, the hook, the settings
+
+`mtgz.az.matchup` (EoE's `mtgz.sealed.rolling` design, 112.4): run settings `matchup_every` (0 off), `matchup_window`
+32, `matchup_min_window` 8, `matchup_val_iters` 2, `matchup_half_life` 16, `matchup_threads` 4, `matchup_worlds` 8000,
+`matchup_table_min_gain` 0.005, `matchup_swap_z` 2, `matchup_members` 20 (the last three and the min window of 8 are the
+guards (user-approved 2026-11-15: 168.6); the farm worker classifies every one trainer-only:
+`worker/src/main.rs`). `mtg`'s `selfplay_specs` hook
+(`decklists.selfplay_spec`, which still refuses `keep_deck`, then `matchup.selfplay_spec`): the first answer for an
+iteration is kept (`matchup/used.jsonl`), so the local driver, the Mac's workers and the farm's definition of that
+iteration play one spec; the run's spec until the first version; the newest version published before the iteration
+asked, with its table. The job (`python -m mtgz.az.matchup retrain RUN --iter b --from-iter lo ...`, CPU, below-normal
+priority, `MTGZ_GAME_LOG=0`) reads the window's logged self-play games, fits, computes the table, checks it through the
+engine's parser (`mtgz._engine.mtg_spec_check`) - only when the model beats play / draw on its held-out games by
+`matchup_table_min_gain` nats, else the version has no table and the chosen-60 seats sideboard by search - and publishes `matchup/v<b>.json` atomically (`index.jsonl`: the
+held-out numbers, the per-copy strengths, the table's changes); failures are logged loudly at the next phase (MATCHUP
+RETRAIN FAILED) and the run keeps the version it has. Presets: `delver-mirror-bo3-varied` (pb3: delver-mirror-bo3 with
+the per-seat deal and the matchup settings; evaluation spec SPEC_DELVER_BO3) and `delver-bo3-varied-smoke` (CPU; a
+retrain every iteration from the second).
+
+**Yardsticks for pb3.** (1) The model's held-out log loss against play / draw only (the bar: the value head's +0.005
+nats) - every version's `index.jsonl` row, `python -m mtgz.az.matchup report RUN`; the same on games with a dealt seat.
+(2) Its per-copy table (w per card, ensemble mean +- sd) - in each version and `fit`. (3) The census of what the
+chosen-60 seats board - `python -m mtgz.az.matchup census RUN` (the game log: table seats and searched seats, per game)
+and the publisher's network census (132, on the evaluation spec). (4) `keep_h2h` (130) - the network's sideboarding
+against its main. (5) The standing best-of-one and blunder yardsticks (164), unchanged in kind: best of one (mains only)
+against the 3198 anchor named explicitly (`bo1_opponents` ["a3198=<file>", "iter0"]: 'anchors' would now name pb3's
+post-sideboard anchor below), iter0 = pb2's checkpoint pb3 forks from.
+
+**Post-sideboard Elo anchors** (the coordinator's design input, 2026-11-15). A census of the a3198 anchor
+(60 starts at 32 simulations, the maintainer's probe) shows its untrained
+sideboarding makes four harmful swaps every game (on the play +3 Force of Negation, +1 Karakas, -3 lands, -1 Prismari
+Charm; on the draw +3 Force of Negation, -2 Murktide Regent 93% of the time): pb1's and pb2's anchored Elo against it
+measures mostly the anchor's self-sabotage. pb3 anchors its post-sideboard ratings to **pb2's checkpoint it forks from**
+(`elo_anchors` pb2fork=<that file> at `elo_anchor_elo` 1000: a new scale, "pb2's last = 1000"), whose sideboarding is
+one mild swap (+Rough // Tumble -Prismari Charm, ~neutral by the outcomes); a3198 stays the best-of-one yardstick only.
+Not built (zero-core): an anchor that keeps its main 60 (a3198 with `keep_deck` / `keep_known` on its own seat) needs a
+per-anchor evaluation spec whose `keep_deck` follows the seat the anchor plays in each game (paired games swap seats) -
+zero-core's anchor matches play one spec for both seats today; the cost is a per-label spec in `elo_anchors` and the
+match drivers' seat-aware spec (a zero-core optin change). A user's choice whether to add it as a second anchor. No new site panel (a panel needs
+the user's screenshot approval).
+
+### 168.5 Checks
+
+The desktop was shared with the live run pb2 (its GPU paused for a while by the user: everything here ran on the CPU)
+and the migration / farm-campaign sessions: every heavy command through the slot throttle (`slotd.sh`), this checkout's
+own target directory (one per checkout, zero-core's its own).
+
+* **Digests, every existing spec: EQUAL** (875644b7): `digest.rs` full **8f71ccb0d89031a6**, `DIGEST_ENCODING=0`
+  **41e27319acdae5b5** (main's, 155); `digest_formats.rs` driver **6f7b863096e47dcd**, constructed **e1177d609d6c1aee**, EoE
+  **2efe956d589840ce**; `dealt_decks.rs::dealt_digests` **e802d9df793c9993** - each equal to its recorded file. **New**:
+  `dealt_per_seat.rs::dealt_per_seat_digests` (40 post-sideboard matches of pb3's self-play spec with a choice table, 20
+  whole matches at p 0.5; per decision the decider, kind, actions, keys, rows, worlds; a table seat plays the table)
+  `engine/tests/data/digests_dealt_per_seat.txt`, combined **26c9751332e70c73** (recorded, re-run equal).
+* **Engine tests** (new): `dealt_per_seat.rs` 7 (+ the digest): the spec and its refusals; the per-seat draw (20,000
+  seeds: each outcome within 5 se of p^2, p(1-p), (1-p)^2); both-dealt matches (game 2 at once, nobody decides, two
+  legal 60s within the range, different in >= 95% of games, game 3 dealt again; in whole matches the step that ends
+  game 1 keys both deals in full live and, in a world of each viewer, the other seat's `HIDDEN` and its own in full);
+  the swap count uniform over 0..15 (3,200 deals); both dealt floats in the rows; a table seat's teacher policy one-hot
+  and legal at every decision of its sideboarding, nowhere else, and the next game's 60 exactly its context's (post-
+  sideboard and whole matches); zero-core's driver records every table seat's sideboarding row with a one-hot target
+  and q = z, counts `teacher_decisions`, none without a table. `bo3_game_log.rs` 1 (its own binary): 12 driver matches
+  with per-seat deals and a table - one line per played game (the matches' episodes), worlds and clones none, each
+  table seat's 60 its context's. `dealt_decks.rs` 11 (its `DealtDecks` literal gains `per_seat: false`).
+* **zero-core** (feat/pb3-teacher 59cfa78, pushed): `teacher_decisions_play_and_record_the_games_policy_without_a_search`;
+  `test_farm_pool.py` + `test_package_hooks.py` 13 passed (the pool follows the phase spec, a remote worker takes it,
+  the old refusal test turned into the following one).
+* **Fuzz** `FUZZ_POOL=delver_dealt2 FUZZ_GAMES=2000` (875644b7): 10 passed - 100 whole matches (88 with a dealt seat, 255
+  dealt 60s checked against the range; **609 table decisions, every table 60 reached**) and 100 post-sideboard matches (88
+  dealt, 269 dealt 60s; 490 table decisions), 4,102 + 3,040 worlds (the opponent's 60 hidden in 2,526 + 3,004), the
+  private-key check (2,412 dealt-deck keys of a dealt seat masked for the other player), the information-set walks, the
+  replay tests, no rules check violated. The 20k runs: the suite gate below.
+* **pytest**: `tests/test_matchup.py` 9 (the prior table and sampler against brute force on a small 75, uniform over the
+  swap count and within it, big-integer draws; antisymmetry; the fit recovers planted strengths and beats play / draw;
+  the exact strength optimum against brute force; the table's 24 legal contexts and the climb; the game log reader; the
+  hook's versions, one answer per iteration, a retrain launched when due, a version without a table; the presets),
+  `test_dealt_decks.py`, `test_delver_bo3.py`: 18 passed; `test_worker_farm.py::test_eval_check_config_and_the_package_settings`
+  passed with this commit's worker.
+* **Farm compatibility** (the release `mtgz-worker` of 875644b7, `tools/farm_compat.py`): the default preset (dealt,
+  the gate's) **PASSED** (6 games, 2,484 rows, 150 batches identical; records -> rows 2,556 identical); the pb3 preset
+  **PASSED** (6 games, 2,966 rows; 2,895 rows); the pb3 preset with a choice table in its spec (the smoke's v0002:
+  teacher decisions in the worker) **PASSED** (8 games, 3,896 rows; 3,660 rows). `mtgz-worker check-config` on pb3's
+  settings with a table: 0 failures, `spec` play, every `matchup_*` trainer.
+* **The smoke** (`python -m mtgz.az.run --run <scratch>/smoke --preset delver-bo3-varied-smoke --iters 5
+  --games 32 --conc 32 --infer-device cpu --train-device cpu`, CUDA hidden, 18 minutes): 5 iterations, 32 matches each
+  (48-59 games), 0 unfinished. **Dealt variety**: 471 of the 528 logged self-play seats dealt (89%: p 0.85 per seat),
+  the rest chosen. **The retrain**: iteration 3 started v0002 (iterations 1-2, 107 games, 22 s: held-out 0.6289 vs play /
+  draw 0.6989), iteration 4 v0003 (157 games, 32 s: 0.7178 vs 0.6998 - worse than play / draw: under the guard added
+  after the smoke it publishes no table) and iteration 5 v0004 (205 games: 0.6639 vs 0.6890), each published atomically,
+  `used.jsonl` one answer per iteration. **Sideboarding by the model**: iteration 4 "the chosen-60 seats sideboard by the
+  matchup model's choice table v0002.json", iteration 5 by v0003; the game log's **33 table seats each played exactly
+  their context's 60** (checked line by line against the version's table); `python -m mtgz.az.matchup census` lists
+  them. (At this size the tables are noise: 50 games an iteration.)
+* **Real games** (`fit` on the sideboard-play analysis's 978 games of pb2@96, converted by
+  a scratch converter): held-out (the last third) 0.6693 vs play / draw 0.6960, **+0.027 nats a
+  game**, dim 0 at L2 0.1 selected (the grid widened to 0.1-1.0 after the first fit chose its edge, 0.03; near-ties go to
+  the smaller dimension: a matchup term at its zero saddle tied the strength alone to 1e-10 and had been picked).
+* **The 20k fuzz of the new pool, on the final merge b34402a0** (`python tools/fuzz_shards.py --pool delver_dealt2 --games
+  20000 --jobs 3`, throttled): **fuzz shards: PASSED** - 20,000 games, 1,000 whole matches + 1,000 post-sideboard matches
+  in 16 shards, the merged end-of-run checks (the choice-table and dealt counts among them), 8 other fuzz tests, 1,175 s.
+  An earlier 20k run (the Mac, on 2258c9b0) failed match 446: a world's walk across a step that ended game 1 and began
+  game 2 at once (both seats dealt) checked a game-1 look at the viewer's own hand card against game 2's hand - the
+  check, not the engine; fixed in the walk (75fe39b0: the hand before the step, and that new game counted as one the
+  world started) and rerun above.
+* **The gates, on 91db9c01** (main 1779035a merged; zero-core pin feat/pb3-teacher 002731c; gate.py placing its steps
+  beside the live pb2 - the Mac for the pure-CPU ones, `tools/slotd.sh` slots here):
+  - `suite` (the sharded 2k fuzz of default, default+hidden, delver_dealt and delver_dealt2, the full engine suite):
+    **GATE PASSED suite 91db9c015ce1 in 256s**;
+  - `engine --tested-sha 91db9c01 --expect-digest 8f71ccb0d89031a6 --expect-digest0 41e27319acdae5b5`: **GATE PASSED WITH
+    SKIPS engine 91db9c015ce1 in 456s** - skipped: one live-run-hazard test fenced (a live run on this machine);
+  - `python`: **GATE PASSED WITH SKIPS python 91db9c015ce1 in 251s** - the same fenced test;
+  - `optin-core --baseline-root <a checkout of main 1779035a>`: **GATE PASSED WITH SKIPS optin-core 91db9c015ce1 in
+    1156s** - checkpoint_compat byte identity identical across both checkouts (visits 3,272 samples, cq 3,272), the
+    digest formats and the dealt digest equal, az 54, hidden 28, the other games' build-only 3 of 3, core pytest 653
+    passed and 53 skipped with 17 live-run-hazard tests fenced;
+  - farm compatibility with the gate's worker of 91db9c01: the gate's step on the default dealt preset passed, and by
+    hand the pb3 preset **PASSED** (6 games, 2,966 rows; records 2,895 rows) and the pb3 preset with a choice table
+    **PASSED** (8 games, 3,896 rows; records 3,660 rows).
+  Two of main's own problems met on the way: (1) `tests/test_artifact_cache.py::test_check_scope_reads_cargo_dep_info`
+  writes Windows dep-info paths and fails on the Mac - this branch adds it to `PYTEST_DESKTOP_ONLY` (91db9c01); (2)
+  `tools/slotd.sh` sources `tools/local_env.sh`, whose exported `MTGZ_MAC_HOME=/Users/...` Git Bash converts into a
+  Windows path (`C:/Program Files/Git/Users/...`) for every Windows program the throttle starts, so
+  `tests/test_mac_remote.py::test_the_macs_selfplay_settings` fails whenever its shard runs on the desktop. Not fixed
+  here (main's script): the gates above ran with `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"`; the fix is
+  that exclusion exported by `tools/local_env.sh` itself.
+
+* **The merge into main (2026-11-15):** main f19151ef (the card IR, 170) merged in as 78432207 (one conflict: both sides put `test_check_scope_reads_cargo_dep_info` on the desktop-only list); GATE PASSED WITH SKIPS python 2d81747c02a9 in 299s (the live-run fence only), run with `MSYS2_ENV_CONV_EXCL="MTGZ_MAC_HOME;MTGZ_MAC;ZERO_BIG_DISK"` for main's Git Bash conversion of `MTGZ_MAC_HOME` (the fix belongs in zero-core's and mtg-zero's `tools/local_env.sh` together: test_privacy keeps the copies identical).
+
+### 168.6 Left, decisions for the user
+
+* **The guards against the first versions' noise - proposed by the coordinator, APPROVED BY THE USER 2026-11-15 ("Merge pb3")** (settings
+  with these defaults in `delver-mirror-bo3-varied`; set them to the old behaviour with `matchup_table_min_gain` 0,
+  `matchup_swap_z` 0, `matchup_min_window` 4): (1) a version publishes a table only when its model beats play / draw on
+  its held-out games by **0.005 nats** a game (the value head's pre-game margin; the smoke's v0003, -0.018 nats, would
+  publish none); (2) **`matchup_min_window` 8** (~13,000 logged games before the first table); (3) **shrinkage toward the
+  main**: a swap only when its bootstrap gain exceeds **2 standard errors** (20 members). Why: with dim 0 the unguarded
+  choice is the 60 highest-w copies however small the differences. On 978 real games of pb2@96 (the sideboard-play
+  analysis's, one dealt seat a match, swaps 1-8) the model gains +0.027 nats a game over play / draw on the held-out
+  third (dim 0, L2 0.1 selected; the value head's pre-game gain was +0.005): unguarded its table brings in 3 Pyroblast,
+  Rough // Tumble, Meltdown and the third Unholy Heat for 4 Tamiyo and 2 Force of Will; with the 2-se bar it keeps 4
+  swaps (+3 Pyroblast +1 Rough // Tumble -4 Tamiyo, each swap's gain 0.025-0.031 against an se of 0.008-0.011) in every
+  context - a per-copy estimate of Tamiyo of -0.10 at that size, which more data should settle (the min window of 8
+  waits for ~13x the data). Other options: a version must also beat its predecessor's held-out loss; a stricter z. Only
+  15% of seat-matches choose, so a wrong table costs little self-play, but its targets teach the prior.
+* **The belief for a chosen opponent** (168.3): the constructed prior, not the table seat's actual (deterministic)
+  choice and not the deck tilt; the exact alternatives are an equilibrium over a shortlist, or the deck tilt through a
+  belief row before each teacher decision (the route for game 2's reveals to reach game 3's choice under H3 = A).
+* **Remote games are not in the matchup data** (the Mac's three processes, the farm): the model trains on the
+  desktop's games only. Logging them needs the remote workers to write the game log and ship it (as 109's remote
+  evaluation files) or the farm's records to carry the decks (they do: the trainer's replay could log them - but a
+  replayed record is a copy, refused by `LiveLog` on purpose so no game is logged twice).
+* **Stale remote checkouts**: a Mac worker on a commit before zero-core docs/az.md 52 ignores the phase spec (plays the
+  run's): `tools/mac.sh --eval-checkout` on the run's commit before the launch (the checklist's step 3).
+* **farm_gates on the table**: run `tools/farm_gates.py` once more after the first table version with
+  `--set spec=<that phase's spec>` (the real network and ONNX through teacher decisions).
+* **A layout v6 (`mtg_eoe`) gap found by the pairwise pass** (168.1): a permanent that lost all abilities and later gained
+  a triggered ability encodes as one without it (three collisions at GATE_SEED 4242 with a redrawn sample). Layout v7
+  (`mtg`) is not affected; `mtg_eoe` stays on v6 until EoE run 2 resumes (encoding-options.md 2.8): a known-gap entry or
+  the v6 fix is that work's.
+* **Not done**: a site panel for the matchup model (needs the user's screenshot approval; built in 168.7, awaiting it); the gate's farm-compat step
+  still runs the default preset only (run the pb3 preset by hand: the checklist's step 0).
+
+### 168.7 Does the network learn the table? The agreement metric, the site's matchup record (branch `feat/matchup-agreement`, 2026-11-15)
+
+**Why.** Teacher decisions (168.3) record the table's 60 as the policy target at a chosen seat's sideboarding, so the
+network's PRIOR should learn the table's choice - the measure of whether option 2 works. Nothing measured it: the
+census (132) runs on the evaluation spec with a search, and `keep_h2h` measures results, not the prior.
+
+**The probe set** (`tools/matchup_agreement.py probe RUN --out PROBE`, made once and saved: every checkpoint is
+measured on the same positions). Sideboarding decisions of seats that choose their 60 in the run's own logged
+self-play matches (168.2), rebuilt exactly from the match's seed on the run's spec without a table (the table is
+never encoded and draws nothing from the match's RNG). Game 2: the match's start (`start_game` 2); a seat that
+sideboards second sees the first seat driven to the 60 the log says it played. Game 3: the logged game-2
+sideboarding as above, then game 2 played out by a fixed policy - the run's first checkpoint's prior, sampled with
+the probe's seed (the log has no moves) - kept when the match reaches a game 3; a second sideboarder there sees the
+first keep its 60. Each position is stored as its action list from the match's start (`-1`: the next episode), so a
+rebuild is the same game anywhere; `check_counts` checks every rebuilt position's options against its stored deck.
+Stratified by the table's context (game, first, lead, other seat dealt): `--per-context` (75) of each reachable
+context by a seeded shuffle. pb3's: 602 positions (75 in each of the 8 reachable contexts, 2 from drawn-game contexts),
+3 minutes to make.
+
+**The measures** (`measure` / `watch`; forward passes only, CPU, below-normal priority). A sideboarding is a sequence
+of decisions (36.2), so the prior over 60s is the product of the priors along the canonical path (the teacher's path,
+`sbtable::next_action`, mirrored in Python and checked against the engine's legal answers at every step). Per
+position: `prior` on a table's 60 for its context; `top1`, the network's highest-prior 60 is the table's - found
+EXACTLY by a best-first search over the sideboarding tree (path priors only shrink, so the first complete 60 off the
+queue is the mode; tested against brute force), a search past `--budget` (400) evaluations reported `unresolved` and
+left out, never guessed; `keep` (PASS at the first decision: the last game's 60; in game 2 the main), `main`, and
+`rough` (pb1's habit, the main +Rough // Tumble -Prismari Charm). Against the newest table at the measurement, the
+table live for the checkpoint's own iteration (`used.jsonl`: iteration N's self-play, which checkpoint N trained on)
+and the first table. One row per checkpoint in `<run>/matchup/agreement.jsonl` (overall and per context, each
+context's favourite 60 and its share, the versions, the probe's id); when a new table publishes after the newest
+checkpoint was measured, the watcher measures that checkpoint again against it (a second row: readers take each
+checkpoint's newest). ~9,000 evaluations and 6-13 s a checkpoint on 4 CPU threads.
+
+**pb3, backfilled iter 0 (pb2@166) to 17** (probe dbb5ac497f79; prior on the live table's 60, else the first's):
+
+| iter | table | game 2: prior / top-1 / +Rough -Charm | game 3: prior / top-1 / keep |
+|---|---|---|---|
+| 0-9 | (v0008) | 0.000 / 0.00 / 0.91-0.96 | 0.000 / 0.00 / 0.00 |
+| 10 | v0008 | 0.229 / 0.00 / 0.714 | 0.063 / 0.02 / 0.08 |
+| 11 | v0008 | 0.689 / 1.00 / 0.282 | 0.287 / 0.31 / 0.43 |
+| 13 | v0008 | 0.952 / 1.00 / 0.041 | 0.306 / 0.31 / 0.53 |
+| 14 | v0012 | 0.008 / 0.00 / 0.017 | 0.112 / 0.11 / 0.67 |
+| 16 | v0012 | 0.613 / 0.50 / 0.000 | 0.113 / 0.11 / 0.98 |
+| 17 | v0012 | 0.429 / 0.00 / 0.000 | 0.113 / 0.11 / 0.96 |
+
+Game 2: the inherited habit (0.94 on +Rough // Tumble -Prismari Charm, pb2's 0.93) is gone four generations after the
+first teacher targets, v0008's 60 (+2 Hydroblast -2 Unholy Heat) took 0.95 by iter 13; v0012 (+3 Pyroblast +1
+Hydroblast -4 Force of Will) moved the target and the prior follows it more slowly (a four-card change: eight
+decisions on its path). Game 3: the network learned to keep its game-2 60 (in self-play a table seat's game-2 60 is
+its game-3 choice already, so the teacher's game-3 path is mostly PASS); the probe's game-3 seats start from logged
+game-2 60s of every origin (searched before iteration 10, older tables), so its game-3 agreement is the share whose
+game-2 60 already was the table's.
+
+**The site's record** (`tools/delverai_matchup.py RUN [--upload]`; `watch --upload` uploads after each new row or
+input change): delverai record `matchup.<run>` (kind 'matchup'): the versions' held-out gains, the agreement rows
+(against the live table, the first before it), the newest checkpoint's per-context numbers against the newest table,
+the newest table's reachable contexts as in / out lists, and **self-play matches per hour**: one point per iteration
+end, each iteration's matches (`selfplay.games` the desktop's, `remote.games` on top: the farm pools' games summed,
+the Mac the rest; zero-core run.py's `queue.games` = local + remote) spread over its run time, a point the trailing
+hour of run time's matches per hour of run time; stops (the supervisor log's run exits to the next start) and run
+time missing between iterations > 60 s are gaps, never drops. No farm machine names or ids (the site's worker refuses
+`m_...` ids in the record). Site panel: delverai branch `matchup-panel` (needs the user's screenshot approval).
+
+**Checks.** `tests/test_matchup_agreement.py` 9: the canonical path reaches every legal 60 of a small 75 exactly once
+(no path a prefix of another); the best-first mode equals brute force on six made-up trees, the path prior the same
+product, a search past its budget unresolved; end to end on the engine with a tiny untrained network (a real game
+log of random post-sideboard matches, a table version, the probe made twice identically, every position rebuilt and
+its options checked, rows for two checkpoints against the newest / live / first tables, keep = main in game 2, one
+position's table prior against the engine stepped by hand, nothing measured twice, the record); matches per hour on
+made-up metrics and a supervisor log (prorated windows, the stop merged with the missing run time, no machine id).
+**GATE PASSED WITH SKIPS python d5f307a5a73a in 552s** (the live-run fence only: 5 live-run-hazard tests fenced, pb1 / pb3 live), in a warm worktree (`tools/warm_pool.py run`).
+
+## 169. Public cleanup: no farm computer details or machine-specific settings in the repos, the privacy check, licenses (branch `chore/public-cleanup`, zero-core `chore/public-cleanup`, zero-farm `chore/public-cleanup`, 2026-11-15)
+
+**Why.** mtg-zero, zero-core and zero-farm are public (Certum's open-source signing needs them public), and the publish
+audit of 2026-11-15 found a friend's farm PC (its name and CPU) in 165.8, the Mac's ssh target in code, tests and
+fixtures, home paths with the maintainer's name, and no license files in mtg-zero and zero-core. The user's rule: no
+farm computer details in the repos at all; the maintainer's own addresses and paths go to untracked local config.
+History is not rewritten (pins, run worktrees and checkpoint provenance name these commits); this is a fix at HEAD.
+
+**What.**
+* **Farm details out.** 165.8 now says "two farm PCs" (no names, CPU models or per-machine game counts); 114.6's test-PC
+  GPU and the hub links (166, 167) are gone. zero-core: a farm PC's GPU no longer named (az.md 44.5, the worker's
+  provider list). zero-farm: the same in PROTOCOL / DESIGN / the agent's profile and the coordinator's routing.
+* **The machine's own settings** live in the untracked `~/.config/zero/local.env` (`$ZERO_LOCAL_CONFIG`; template
+  `tools/local.env.example`; an environment variable of the same name wins). Readers: zero-core's `zero.local_config`
+  (Python) and `tools/local_env.sh` (bash, parsed, never sourced); mtg-zero's `tools/local_config.py` and
+  `tools/local_env.sh` are copies for tools that run before the submodule exists (`tests/test_privacy.py` keeps them
+  equal to the pinned core's). Keys: `ZERO_BIG_DISK` (the desktop's `E:`; replaces every hard-coded `E:/` default:
+  build_py.sh, gate.py's target, smoke and durations dirs, slotd.sh's state, zcache's cache root, warm_pool's targets,
+  farm_build / farm_campaign / farm_gates, human_picks, tools/data, position_lab, the private-data tests; zero-core's
+  build_py.sh, smoke_all.sh and farm_def), `MTGZ_MAC` / `MTGZ_MAC_HOME` (the `mac` remote in `mtgz/az/__init__.py`,
+  tools/mac.sh, mac_races.sh, fuzz_farm_status.sh, gate.py's Mac placement). Unset, each tool falls back to a generic
+  default: `<repo>/target`, `~/.mtgz-state`, `~/.cache/...`, the ssh alias `mac` for the remote, and no Mac at all for
+  mac.sh (it refuses) and the gate (it runs everything here). On the desktop, whose file sets `ZERO_BIG_DISK=E:` and the
+  Mac's target, every path and host is what it was (checked: gate.py's target, smoke and durations dirs, slotd.sh's
+  state dir, zcache's root, warm_pool's targets, the `mac` remote's spec, farm_def's farm-release). zerodash reads
+  `~/.config/zero/projects.json` (`$ZERODASH_CONFIG`; template `dashboard/projects.example.json`).
+* **Paths in committed files**: docs write `C:/Users/<user>`, `/Users/<user>` and `<mac>`; the canary library's and the
+  blunder baseline's provenance paths are `~/...`; `tools/delver_blunders.py` records paths through
+  `local_config.portable_path` (home as `~`). Tests use `user@mac`, `192.0.2.x` (TEST-NET) and `/Users/user`. zero-core's
+  dashboard fixtures (copies of real run files) are anonymized the same way; the run data in them is unchanged.
+* **The privacy check** (`tools/privacy_check.py`, the same file in zero-core; zero-farm's `tools/privacy-check.mjs` has
+  the same rules): every tracked file against a committed generic set (Tailscale CGNAT addresses and MagicDNS names,
+  farm machine ids `m_` + 26 base32, home paths naming a user, default Windows / macOS PC host names, `user@<IP>`) and
+  the machine's untracked patterns (`~/.config/zero/privacy_patterns.txt`, `$ZERO_PRIVACY_PATTERNS`: the real names of
+  hosts, farm PCs and accounts; never committed). `privacy-check: allow` on a line, or `privacy-check: allow-file` in a
+  file's first 5 lines, spares synthetic data from the generic rules only (zero-farm's redactor). `gate.py` runs it
+  first in every tier (step `privacy`, in-process, ~10 s; a finding fails the gate before any step runs);
+  `tests/test_privacy.py` runs it in pytest (zero-core: `tests/test_privacy.py`; zero-farm: first in `npm test`).
+* **Licenses**: `LICENSE` (MIT, "the mtg-zero authors", as `Cargo.toml` declares); zero-core `LICENSE` (MIT) and
+  `license = "MIT"` in every crate. README: the repos are public (no access needed), "Data sources and credits"
+  (17lands CC BY 4.0, CubeCobra, Scryfall), and the Wizards of the Coast Fan Content Policy notice (unofficial, not
+  approved/endorsed by Wizards; the MIT license covers the code, not WotC material).
+* AGENTS.md (here and zero-core) and zero-farm's README: the "Private details" rule.
+
+**Tests.** `tests/test_privacy.py` (the checkout passes, the copies equal the pinned core's), `test_gate.py`
+(`test_a_privacy_finding_fails_the_gate_before_any_step`, `test_the_privacy_check_runs_the_checkouts_tool`; the
+fixture stubs `privacy_scan`), `test_mac_remote.py` (`test_the_macs_address_is_the_machines_own_setting`: no config ->
+`mac`, `/Users/user`; the file and the environment set it). zero-core `tests/test_privacy.py` (each generic rule fires,
+placeholders pass, local patterns, markers, the local.env readers in Python and bash agree), `dashboard/tests`
+(the example config loads, the default config is outside the repo). No engine, encoding or run-loop change: digests
+unchanged.
+
+## 170. The card-IR pipeline in this repo: the oracle-text parser and its IR export moved from mtg-bot (`ir/`, `tools/card_ir.py`; branch `feat/ir-in-repo`, 2026-11-15)
+
+**Why.** mtg-zero reads every card as data (section 3), but the data came from another project: mtg-bot's oracle-text
+parser turned Scryfall's Oracle text into `CardPrinting` trees and its `cards export-ir` wrote the card IR and its
+schema, from which `tools/codegen/gen_card_ir.py` generated `card_ir/src/generated.rs`. Every card port since M3 ran
+through an mtg-bot branch (sections 32, 54, 99.9-99.16, 122-124, 146.1). mtg-bot's Python engine and training are
+retired; the parser was the one live part. With it here, all active code is in this repo and mtg-bot can be archived
+(the user's decision, 2026-11-15).
+
+**Source.** mtg-bot `feature/eoe-station-ir` 68b62ed3 (its newest IR commit: the station striations, 146.1; on
+`feature/delver-sb-ir` 22aa7682, the Delver sideboard, 122, which carries Sneak and Show and Doomsday, 123-124). The
+files were copied from a `git archive` of that commit: none of mtg-bot's history is imported (no subtree, filter-repo or
+merge), because that history holds an unrelated leaked credential. mtg-bot itself is unchanged.
+
+### 170.1 What moved where
+
+| Here | From mtg-bot | What |
+|---|---|---|
+| `ir/mtgz_ir/cards/` (incl. `parser/`), `ir/mtgz_ir/effects/` | `src/mtg_bot/cards/`, `src/mtg_bot/effects/` | the parser, the card model (printings, effects, predicates, conditions, costs), the IR encoder and schema (`cards/ir.py`): all 164 modules, because the IR tags of classes whose names repeat are qualified from a scan of both packages, so the scan must see the same modules |
+| `ir/mtgz_ir/*.py` (14) | `src/mtg_bot/{__init__,actions,alt_casting,conspiracies,engine,evoke,game,keyword_rules,keyword_vocab,legal,opening_hand,roto_board_statics,roto_restrictions,turn}.py` | the modules the export imports: the effect classes are the Python engine's, so their module-level imports reach part of it |
+| `ir/mtgz_ir/export.py` | `src/mtg_bot/cli/cards.py` | `export_ir`, `roundtrip` |
+| `ir/mtgz_ir/cards/parser/AGENTS.md` | `src/mtg_bot/cards/parser/CLAUDE.md` | the parser's rules (parameterized recognizers over literal lines) |
+| `ir/data/` (13 files, 12.5 MB) | `data/` | the inputs: the Scryfall card records of the pools (`cube_power_lsv.json`, `legacy_delver.json`, the four EoE-era dumps, `cube_roto.json` and `cube_roto_custom.json`, which the parser reads to tell EoE-only printings apart), the name lists and sidecars; mtg-bot's blobs byte for byte (LF), kept so on every checkout by `.gitattributes` (`-text`). Card data only: the records carry Scryfall's `image_uris` strings, which nothing reads; no image is fetched or stored |
+| `tools/ir_fetch_cards.py` | `scripts/fetch_cube.py` | fetches a pool's Scryfall records (a CubeCobra list or a name list); card JSON only |
+| `tests/ir/` (138 test files, 7 helpers) | `tests/` | the parser's and the IR's tests (170.3) |
+| `docs/card_ir_format.md` | `docs/CARD_IR.md` | the IR format |
+| `tools/card_ir.py` | new | `export`, `check`, `roundtrip` (170.2) |
+
+The package is renamed `mtg_bot` -> `mtgz_ir` (every `mtg_bot` word in the copied Python; `pools.DATA_DIR` points at
+`ir/data`). Nothing else in the code changed but one thing: the schema names each class's and enum's module, and those
+names are hashed into `schema_sha256` (every IR document carries it, `card_ir::SCHEMA_SHA256` embeds it) and written
+into `generated.rs`'s doc comments. So `ir.schema_module` writes this package's modules as `mtg_bot.<module path>`
+(`SCHEMA_MODULE_PACKAGE`), and the format names stay `mtg-bot-card-ir` / `mtg-bot-card-ir-schema`. Dropping either is a
+deliberate re-export: a new schema hash, all IR files and `generated.rs` rewritten, the engine tier.
+
+**Not moved** (they test or run the retired Python engine, not the parser): mtg-bot's `agents`, `combat`, `layouts`,
+`player_protections`, `creature_statics_wg`, `parity`, `search`, `training`, its CLI dispatcher and UI. Some effect
+classes' runtime methods import those lazily; the export never calls them, and calling one raises `ImportError`. The
+runtime half of the effect classes is inert here: the engine is `engine/` (Rust), which lowers the IR.
+
+The dependency is stdlib only (Python 3.11+): no numpy, torch or network at export time.
+
+### 170.2 `tools/card_ir.py`
+
+* `export`: the three pools with one schema (`export_ir(["cube", "legacy", "eoe"])`), then the EoE filter
+  (`filter_eoe_ir.filter_text`: the EoE set's cards, 483 -> 320), then `gen_card_ir.generate` on the schema; it checks
+  the generated hash equals the export's and writes `data/cards/{powerlsv,legacy,eoe}.ir.json`,
+  `powerlsv.schema.json` and `card_ir/src/generated.rs` (an unchanged file is left alone).
+* `check`: the same into a temporary directory, compared byte for byte with the checked-in files (a checkout whose
+  git turns LF into CRLF is read back as LF; the generated files are LF); it prints each file's sha256 and exits 1
+  naming any file that differs. `tests/ir/test_pipeline.py` runs it, so the python gate fails when the IR, the schema,
+  `generated.rs` and the parser disagree.
+* `roundtrip`: every printing of the three pools decodes back to an equal object, and re-encoding is a fixpoint.
+
+`filter_eoe_ir.py` takes `--data` (default `ir/data`) instead of `--mtg-bot-data`, and `gen_card_ir.py` gains
+`generate(schema_text)`; both CLIs work as before. The tools that read mtg-bot's dumps read `ir/data` now:
+`tools/fetch_rulings.py` (its default cube), `tools/sealed_eoe_set.py` (the EoE dumps; its output, not rerun, still
+labels them `mtg-bot data/...` with the sha256s of mtg-bot's Windows checkout, CRLF, where `ir/data` keeps the LF
+bytes: a rerun records new sha256s for the same records) and `tools/data/common.py` (`MTG_BOT_CUBE_JSON`, which was a
+personal absolute path).
+
+`tools/gate.py`'s `pytest_files` (the files the python tier's pytest shards split, section 167) lists `tests/ir/test_*.py`
+beside `tests/test_*.py` when a commit touches the pipeline (170.7; `tests/test_gate.py` checks it, and that test's
+weight assertions keep to the top-level files they were scaled to).
+
+### 170.3 The tests
+
+mtg-bot's tests of the parser and the IR, renamed like the package (`from tests._helpers` -> `from _helpers`), with
+`tests/ir/conftest.py` putting `ir/` on the path and selecting the parser source as mtg-bot's conftest did. Taken: all
+`test_parser_*`, `test_card_ir`, `test_cards_cli`, `test_legacy_*`, `test_pools`, `test_keyword_vocab`,
+`test_effects_vocab`, `test_precise_grammar`, `test_fetch_cube`, `test_eoe_ir_fixes`, `test_deck_conditions`,
+`test_unclaimed_lines`, `test_pool_coverage`, `test_review_render`. Left in mtg-bot, because they play cards in the
+Python engine (its `agents` / `combat`, not carried): the files `test_doomsday_c_cards`, `test_eoe_fidelity`,
+`test_eoe_fidelity_w6`, `test_parser_dsk_must_be_blocked`, `test_parser_dsk_you_attack`, `test_parser_land_lines`,
+`test_parser_oracle_ir_fixes`, `test_seriema`, `test_tiered_triggers`, and inside the taken files the 85 tests that
+play or run mtg-bot scripts not moved (each file names them in a comment at its top), and `test_cards_cli`'s test of
+mtg-bot's CLI dispatcher. mtg-zero's own engine tests cover those cards' play (e.g. `cards_eoe_striations.rs` for the
+striations). Two adaptations besides: `test_card_ir`'s schema test expects the kept `mtg_bot.` module label, and
+`test_precise_grammar` inlines the one helper it used (the helper module builds Python-engine games). The parser tests
+that read the dumps by path read `ir/data`; `test_fetch_cube` loads `tools/ir_fetch_cards.py`.
+
+`python -m pytest tests/ir`: 2,688 passed, 0 failed, in 515 s on the loaded desktop (one process; most tests parse a
+pool, 1-2 s each). In a gate they spread over the pytest shards, when they run at all (170.7).
+
+New: `tests/ir/test_pipeline.py` (3): the regeneration is byte for byte the checked-in files; the check names a file
+that differs (and exits 1); the schema's module labels (`mtgz_ir.effects.base` -> `mtg_bot.effects.base`, a module
+outside the package as it is).
+
+### 170.4 The proof of a faithful move
+
+* **mtg-bot itself first**: its own export at 68b62ed3 (`cards export-ir --pool cube legacy eoe`, then
+  `filter_eoe_ir.py`, then `gen_card_ir.py`), run from a `git archive` of that commit, gives main's five files byte for
+  byte (compared with the blobs of main 90731110). So 68b62ed3 is exactly the source of what main holds.
+* **The moved pipeline**: `python tools/card_ir.py check` on this branch (and after merging main acc00acd):
+
+  | File | Bytes | sha256 (first 16) | vs main's blob |
+  |---|---|---|---|
+  | `data/cards/powerlsv.ir.json` | 402,200 | `c82df91db1c891a1` | identical |
+  | `data/cards/legacy.ir.json` | 12,757 | `810f8a03a880ccb2` | identical |
+  | `data/cards/eoe.ir.json` | 214,315 | `41bb14156112f5e4` | identical |
+  | `data/cards/powerlsv.schema.json` | 491,490 | `1d76cf44abdfc40c` | identical |
+  | `card_ir/src/generated.rs` | 575,713 | `b91024cf4329c58e` | identical |
+
+  Schema `693d23a4a259b9dc8e5bc0a9dcca52af0cadcfc5152301e8f407bc6116673489`, 728 classes; `eoe` 483 -> 320 cards
+  (Paradox Haze still without IR). `export` rewrites none of them ("unchanged" five times). `roundtrip`: every printing
+  of the three pools decodes back equal.
+* No IR file, schema, `generated.rs` or engine source changes, so the engine plays exactly as on main: behaviour
+  digests EQUAL by construction (`engine/tests/data/digests.txt` untouched; main's combined digest 8f71ccb0d89031a6).
+  Measured anyway, on this branch's merge with main 1779035a (69c5f4d3): `cargo test --release -p engine --test digest
+  -- --ignored --nocapture`: 2,000 random + 500 heuristic games, combined digest **8f71ccb0d89031a6**, EQUAL.
+
+### 170.5 What still uses mtg-bot
+
+Nothing in this repo runs or imports it any more (its name stays in history notes, docs, comments citing old mtg-bot
+commits and the IR's format names). Outside this repo only the maintainer's own launchers for mtg-bot's retired
+services (its coordinator, worker and UIs) point into it; no other project imports `mtg_bot`. The list is in the
+orchestrator's report, not here (machine-specific).
+
+### 170.6 Gates
+
+* **python** on 29a9e1a2 (this branch with main 1779035a merged; it touches the pipeline, so `tests/ir` ran, 170.7):
+  `GATE PASSED WITH SKIPS python 29a9e1a2d389 in 621s - skipped: pytest-desktop: 1 live-run-hazard test(s) (fenced: a
+  live run on this machine)`. The privacy check (924 files, 0 findings), the module and the worker (from the artifact
+  cache), the four pytest shards on the Mac (1,049 + 532 + 596 + 950 passed, `tests/ir` among them), the desktop part
+  (44 passed) and the run-loop smoke (16 games).
+* Earlier runs of the tier failed only off this branch's change: when a shard's Mac push or fetch lost a race with the
+  other shards' (`cannot lock ref`), the shard fell back to the desktop, where `test_mac_remote.py::test_the_macs_selfplay_settings`
+  sees `MTGZ_MAC_HOME` rewritten by Git Bash's path conversion (a Mac-only test) or a worker test times out on the
+  loaded desktop; and on the Mac `test_artifact_cache.py::test_check_scope_reads_cargo_dep_info` (Windows-style
+  dep-info paths, ENGINE.md 167) fails, so it is now in `PYTEST_DESKTOP_ONLY`. Both races are main's, for the gate's
+  owner.
+* No engine tier: no IR file, schema, `generated.rs` or engine source changed (170.4); `card_ir`'s changes are its
+  description and a doc comment. The behaviour digest measured anyway: 8f71ccb0d89031a6, EQUAL.
+
+### 170.7 The gate runs the pipeline's tests only when a commit touches the pipeline
+
+The 2,688 tests cost about 8-9 minutes of CPU per python gate, and almost no commit touches the parser. `gate.py`'s
+`ir_tests_needed(sha)` (the orchestrator's request, 2026-11-15) diffs the gated commit against its merge base with
+`main` (else `origin/main`; a commit already on main against its first parent) and looks for a file under
+`IR_TEST_PATHS`: `ir/`, `card_ir/`, `tests/ir/`, `data/cards/`, `tools/card_ir.py`, `tools/ir_fetch_cards.py`,
+`tools/codegen/`. None: `pytest_step` leaves `tests/ir` out (the shards' file list, or `--ignore=tests/ir` unsharded) and
+adds a NOT NEEDED step `pytest-ir` that says why; one or more, or no main to compare with: the tests run, in every tier
+that runs pytest (python, encoding, engine, search-core and the rest share `pytest_step`). The docs tier runs no pytest.
+`tests/test_gate.py::test_the_card_ir_tests_run_only_when_the_commit_touches_the_pipeline` checks both ways, a commit on
+main and no main. By hand: `python -m pytest tests/ir -q` (or `python tools/card_ir.py check` alone, ~5 s).

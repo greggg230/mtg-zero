@@ -5,7 +5,7 @@ need.
 Read-only against the mtg-bot repo. Run from the mtg-bot repo root:
 
     PYTHONPATH=src .venv-py313/Scripts/python.exe \
-        "C:/Users/Gregg Keithley/mtg-zero/docs/research/scripts/walk_cube_ir.py"
+        "<mtg-zero>/docs/research/scripts/walk_cube_ir.py"
 
 Writes ``card_ir_inventory.json`` next to this script's parent dir
 (``docs/research/``).

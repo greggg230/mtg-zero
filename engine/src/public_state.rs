@@ -369,6 +369,9 @@ pub fn fields() -> Vec<Field> {
         keep_known: Derived "the yardstick's informed arm (ENGINE.md 141): a setting of the match, the same in every world, never encoded - the other seat's worlds deal a keeper its real deck (a prior that knows its policy)",
         post_board: Derived "game 1 was not played (ENGINE.md 130, start_game 2): a setting of the match, the same in every world, never encoded - a real game 2 encodes as a synthetic one",
         dealt: Public "the dealt seat (ENGINE.md 154, dealt_decks): a rule of the match both players know, the same in every world, encoded per player (g6::DEALT)",
+        dealt_both: Derived "both seats are dealt (ENGINE.md 168.1, dealt_decks per_seat): a setting of the match from its spec and seed, the same in every world; it reaches the encoding through the per-player g6::DEALT floats, which the dealt seat's perturbation checks (and that perturbation turns a both-dealt match into one dealt seat)",
+        table: Hidden "the seats that sideboard by the choice table (ENGINE.md 168.3): a seat's own policy, as keep; never encoded, the other player's worlds deal its 60 from the constructed prior",
+        glog: Derived "the live match's game log record (ENGINE.md 168.2): never read by the rules, the encodings or the search; a clone carries none",
         dealt_seed: Hidden "seeds the dealt seat's later deals (ENGINE.md 154): chance not yet happened, determinize reseeds it in every world",
     });
     v
@@ -1986,6 +1989,12 @@ pub fn perturbations() -> Vec<Perturbation> {
         p!("a player's decks in the match are dealt", "MatchState.dealt", |a, r| {
             // (ENGINE.md 154: the match's dealt seat, which the encoding shows for both players; a match with one
             // already: the other seat instead)
+            // (both dealt, ENGINE.md 168.1: one of them only)
+            if a.m.dealt_both {
+                a.m.dealt_both = false;
+                a.m.dealt = Some(player(r));
+                return Some(format!("P{} only", player(r)));
+            }
             let p = match a.m.dealt {
                 Some(d) => opp(d),
                 None => player(r),
@@ -3007,6 +3016,10 @@ pub fn match_view(a: &MtgAz, viewer: PlayerId) -> Vec<u64> {
     }
     v.push(m.sb.is_some() as u64);
     v.push(m.dealt.map_or(9, |d| d as u64));
+    // (ENGINE.md 168.1: both seats dealt)
+    if m.dealt_both {
+        v.push(0xD2);
+    }
     let _ = viewer;
     v
 }
