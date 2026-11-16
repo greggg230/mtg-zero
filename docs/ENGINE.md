@@ -35296,7 +35296,7 @@ Deferred:
 * The farm side of D1: continuous 20k fuzz on main and the live runs' builds with a failure queue and an alert (phase 4);
   the farm worker's dropped-game records go to its log only, not uploaded yet; a traced eval row of a dropped game has no
   record, and farm_campaign's collector should treat it as a failed id (it plays it locally then).
-* The python tier is under 6 min of work (cache builds ~20 s + the slowest balanced shard ~4.5 min loaded) but its wall
+* The python tier is under 6 min of work (5.1 min on 416c0a2a: cache builds 7 s + the slowest shard 296 s) but its wall
   time beside two live runs is the throttle's: phase 0's Mac placement or a quieter desktop.
 
 pb2: nothing of the live run was touched (its files, processes, the Mac's run checkouts, the farm run). What it gains:
